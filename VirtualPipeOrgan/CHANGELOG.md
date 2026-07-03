@@ -7,7 +7,20 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Toegevoegd
+
+- 🎼 **Echte release-samples** (GrandOrgue + Hauptwerk): bij het loslaten van een toets klinkt nu de opgenomen ruimteakoestiek van de sampleset in plaats van een synthetische fade van 42 ms
+- 🎚️ **ODF-inschaling**: Gain/AmplitudeLevel/PitchTuning/PitchCorrection uit de sampleset worden nu toegepast (registerbalans en stemming zoals de maker bedoelde) — als aparte laag naast je eigen intonatie
+- 🪗 **Hauptwerk-sets openbaar via de bestandskiezer** (`.Organ_Hauptwerk_xml`), inclusief zwelkasten, tremulant-samplelaag en release-samples; versleutelde sets geven een duidelijke melding
+- 🔔 **Percussive-registers** (klok/glockenspiel) spelen one-shot en klinken uit bij note-off, zoals GrandOrgue
+
 ### Opgelost
+
+- 🐛 **REF-pijpverwijzingen** resolven nu manual-relatief — herstelt stille toetsen (o.a. de 12 laagste van Bureå's Salicional 8')
+- 🎹 **Zwelkast-detectie** is structureel (windchest→enclosure) i.p.v. naam-match — zwelkasten verschijnen nu ook als de windchest-naam afwijkt
+- 🌊 **ODF-tremulantparameters** (snelheid/diepte) worden als default overgenomen
+- 🎵 MIDI-velocity beïnvloedt het volume niet meer (orgelpijpen klinken altijd vol)
+- 🔁 De eerste seconden van een noot gebruiken nu de echte looppunten i.p.v. een noodloop over de attack
 
 - 🔊 **ASIO**: uitgestelde ASIO-wissel bij een opgeslagen ASIO-voorkeur (start op WASAPI, automatische wissel ±10 s na de app-start) — voorkomt dat ASIO4ALL stil blijft na een koude start
 - 🔊 **ASIO→ASIO-wissel** sluit nu eerst de oude stream voordat de nieuwe wordt geopend (ASIO-drivers zijn single-client)
