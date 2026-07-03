@@ -507,6 +507,28 @@ body {
   color: var(--gold-border);
 }
 
+/* Hersteld: deze regels gingen verloren bij het verwijderen van de sidebar-CSS
+   (Console.svelte gebruikt ze in de audio-instellingen). */
+.audio-select-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 0.4rem;
+}
+
+.audio-select-row select,
+.audio-select-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+.audio-select-label {
+  flex: 0 0 auto;
+  min-width: 110px;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
 /* Volume/Reverb sliders */
 .slider-control {
   margin-bottom: 1.25rem;
@@ -1692,6 +1714,17 @@ input[type="range"]::-webkit-slider-thumb:hover {
   border-radius: 4px;
   background: var(--bg-secondary);
   color: var(--text-primary);
+}
+
+/* Hersteld: gingen verloren bij het verwijderen van de sidebar-CSS. */
+.ble-midi-section {
+  margin-top: 0.8rem;
+  padding-top: 0.8rem;
+  border-top: var(--border-subtle);
+}
+
+.shutdown-btn {
+  color: var(--error);
 }
 
 /* BLE MIDI activity indicator */

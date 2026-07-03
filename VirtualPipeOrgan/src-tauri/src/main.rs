@@ -124,24 +124,12 @@ fn main() {
                     let st = state.clone();
                     std::thread::spawn(move || {
                         std::thread::sleep(std::time::Duration::from_secs(10));
-                        // Lees de prefs vers: de gebruiker kan intussen handmatig
-                        // gewisseld hebben — dan geldt diens laatste keuze.
-                        let prefs = state::load_audio_prefs(&st.app_data_dir);
-                        let still_asio = prefs.host.as_deref()
-                            .map(|h| h.eq_ignore_ascii_case("asio"))
-                            .unwrap_or(false);
-                        let already_asio = st.audio_player.read().as_ref()
-                            .map(|p| p.current_host.read().eq_ignore_ascii_case("asio"))
-                            .unwrap_or(false);
-                        if !still_asio || already_asio {
-                            return;
-                        }
-                        info!("Uitgestelde ASIO-wissel wordt uitgevoerd (opgeslagen voorkeur)");
-                        match st.switch_audio_output(audio::AudioOutputConfig {
-                            host_name: prefs.host.clone(),
-                            device_name: prefs.device.clone(),
-                            buffer_frames: prefs.buffer_frames,
-                        }) {
+                        // apply_deferred_asio_pref herleest de prefs en checkt de
+                        // actieve host BINNEN de load/switch-gate: een handmatige
+                        // keuze van de gebruiker wordt nooit teruggedraaid en de
+                        // wissel interleaved niet met een lopende orgel-load.
+                        info!("Uitgestelde ASIO-wissel: opgeslagen voorkeur wordt gecontroleerd/toegepast");
+                        match st.apply_deferred_asio_pref() {
                             Ok(Some(id)) => {
                                 let res = if id.to_lowercase().ends_with(".organ") {
                                     commands::do_load_organ(&st, &id)

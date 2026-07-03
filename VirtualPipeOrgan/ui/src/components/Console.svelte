@@ -516,10 +516,14 @@
   }
 
   async function setCrescendoStage(stage) {
-    crescendoStage = stage;
     try {
       const targetStops = await invoke('set_crescendo_stage', { stage });
-      if (targetStops && targetStops.length > 0) {
+      // De backend geeft null terug voor "niet toepassen" en een (mogelijk lege)
+      // array voor "toepassen" — een lege stap moet registers ook kunnen
+      // leegtrekken, dus alleen op array-zijn checken, niet op lengte.
+      if (Array.isArray(targetStops)) {
+        // Stappenteller alleen bijwerken als de stap echt is toegepast.
+        crescendoStage = stage;
         // De backend zet hier alleen de trap-teller en geeft de doelregisters
         // terug; App.svelte past ze toe (on:crescendoChange → set_drawn_stops).
         dispatch('crescendoChange', targetStops);

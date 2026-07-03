@@ -49,6 +49,9 @@ pub enum AudioCommand {
     AllNotesOff,
     /// Set master volume in dB
     SetMasterGain(f32),
+    /// Multiplicatieve expressie-factor 0.0..1.0 (MIDI-volumepedaal CC7/CC11) —
+    /// schaalt op de master-gain zonder de slider-instelling te overschrijven.
+    SetMasterExpression(f32),
     /// Set reverb mix (0.0-1.0)
     SetReverbMix(f32),
     /// Load samples (fully preloaded - legacy)
@@ -682,6 +685,8 @@ fn run_audio_thread(
     let trem_active: Arc<RwLock<std::collections::HashSet<u32>>> = Arc::new(RwLock::new(std::collections::HashSet::new()));
     let voices: Arc<RwLock<Vec<PlayingVoice>>> = Arc::new(RwLock::new(Vec::new()));
     let master_gain: Arc<RwLock<f32>> = Arc::new(RwLock::new(0.5));
+    // Expressie-factor van het MIDI-volumepedaal (multiplicatief op master_gain).
+    let master_expression: Arc<RwLock<f32>> = Arc::new(RwLock::new(1.0));
     // Per-division gain for swell boxes (max 32 divisions, default 1.0 = fully open)
     let division_gains: Arc<RwLock<Vec<f32>>> = Arc::new(RwLock::new(vec![1.0; 32]));
     // Per-division swell config: (min_db, filter_cutoff_closed_hz)
@@ -771,6 +776,7 @@ fn run_audio_thread(
     let trem_active_clone = trem_active.clone();
     let voices_clone = voices.clone();
     let master_gain_clone = master_gain.clone();
+    let master_expression_clone = master_expression.clone();
     let division_gains_clone = division_gains.clone();
     let trem_lfos_clone = trem_lfos.clone();
     let stops_with_trem_clone = stops_with_trem_samples.clone();
@@ -888,6 +894,9 @@ fn run_audio_thread(
                     }
                     AudioCommand::SetMasterGain(db) => {
                         *master_gain_clone.write() = 10.0_f32.powf(db / 20.0);
+                    }
+                    AudioCommand::SetMasterExpression(factor) => {
+                        *master_expression_clone.write() = factor.clamp(0.0, 1.0);
                     }
                     AudioCommand::SetReverbMix(mix) => {
                         *reverb_mix_clone.write() = mix;
@@ -1163,7 +1172,7 @@ fn run_audio_thread(
             };
 
             // Generate audio
-            let gain = *master_gain_clone.read();
+            let gain = *master_gain_clone.read() * *master_expression_clone.read();
             let div_gains = division_gains_clone.read().clone();
             let div_pans = division_pans_clone.read().clone();
             let out_chans_lock = output_channels_clone.read().clone();
@@ -1547,7 +1556,7 @@ fn run_audio_thread(
         } else if delta > 0 && !was_flowing {
             info!("Audio-watchdog: callbacks (weer) op gang ({} in dit venster)", delta);
             was_flowing = true;
-        } else if ticks == 60 {
+        } else if ticks == 60 && delta > 0 {
             info!("Audio-watchdog: audio stroomt stabiel ({} callbacks in 3-6s)", delta);
         }
     }

@@ -17,7 +17,7 @@
   let selectedDivision = '';
   let selectedStop = null;       // StopDto-achtig object
   let selectedPipeMidi = null;   // gekozen MIDI noot binnen stop
-  let voicings = {};             // key "stop_id-pipe_num" -> {volume_db, pitch_cents}
+  let voicings = {};             // key "stop_id-midiNoot" (absolute MIDI-noot) -> {volume_db, pitch_cents}
   let liveVolume = 0;
   let livePitch = 0;
   let saveTimer = null;
@@ -49,10 +49,10 @@
   async function loadVoicings() {
     try {
       const list = await invoke('get_pipe_voicings');
-      // De backend levert pipe_num als 0-based offset t.o.v. first_midi_note van
-      // de stop (zo wordt het ook opgeslagen via set_pipe_voicing). De UI keyt op
-      // absolute MIDI-noot — reken hier om, anders zijn opgeslagen voicings na
-      // herladen onzichtbaar in dit paneel.
+      // De backend levert pipe_num als 1-based offset t.o.v. first_midi_note van
+      // de stop, conform de NoteOn-route in de audio-engine (pipe_num =
+      // note - first_midi_note + 1). De UI keyt op absolute MIDI-noot — reken
+      // hier om, anders zijn opgeslagen voicings na herladen onzichtbaar.
       const firstNoteByStop = {};
       for (const d of (organ?.divisions ?? [])) {
         for (const s of (d.stops ?? [])) {
@@ -65,7 +65,10 @@
       for (const [stop_id, pipe_num, volume_db, pitch_cents] of list) {
         const first = firstNoteByStop[stop_id];
         if (first == null) continue; // stop onbekend in dit orgel
-        voicings[`${stop_id}-${first + pipe_num}`] = { volume_db, pitch_cents };
+        // pipe_num 0 stamt uit de oude 0-based opslag en bestaat 1-based niet;
+        // sla die over. Let op: oude voicings kunnen één pijp verschoven zijn.
+        if (pipe_num === 0) continue;
+        voicings[`${stop_id}-${first + pipe_num - 1}`] = { volume_db, pitch_cents };
       }
       voicings = voicings;
     } catch (e) {
@@ -83,7 +86,8 @@
   function applyLive() {
     if (!selectedStop || selectedPipeMidi == null) return;
     const stop_id = selectedStop.internal_stop_id;
-    const pipe_num = selectedPipeMidi - selectedStop.first_midi_note;
+    // 1-based, conform de NoteOn-route in de engine.
+    const pipe_num = selectedPipeMidi - selectedStop.first_midi_note + 1;
 
     const key = `${stop_id}-${selectedPipeMidi}`;
     if (liveVolume === 0 && livePitch === 0) {
@@ -111,7 +115,8 @@
 
   async function resetCurrentPipe() {
     if (!selectedStop || selectedPipeMidi == null) return;
-    const pipe_num = selectedPipeMidi - selectedStop.first_midi_note;
+    // 1-based, conform de NoteOn-route in de engine.
+    const pipe_num = selectedPipeMidi - selectedStop.first_midi_note + 1;
     liveVolume = 0;
     livePitch = 0;
     delete voicings[`${selectedStop.internal_stop_id}-${selectedPipeMidi}`];

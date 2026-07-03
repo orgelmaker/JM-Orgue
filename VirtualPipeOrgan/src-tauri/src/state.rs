@@ -192,6 +192,11 @@ pub struct AppState {
     pub crescendo_active_stops: Arc<RwLock<Vec<String>>>,
     /// MIDI recording state
     pub midi_recording: Arc<RwLock<Option<MidiRecording>>>,
+    /// Serialiseert orgel-loads en audio-wissels onderling: een wissel midden in
+    /// een load gooit anders net-geregistreerde preload-buffers weg (nieuwe lege
+    /// audio-thread) en mist de reload omdat current_organ_id nog niet gezet is;
+    /// twee interleavende wissels kunnen elkaars player/prefs overschrijven.
+    pub load_switch_gate: Arc<parking_lot::Mutex<()>>,
     /// Per-pipe voicing overrides: (stop_id, pipe_num) -> (volume_db, pitch_cents)
     pub pipe_voicings: Arc<RwLock<std::collections::HashMap<(u32, u32), (f32, f32)>>>,
     /// Per-divisie output-kanalen: lijst fysieke kanaalindices (leeg = standaard voorste paar 0/1).
@@ -253,6 +258,9 @@ pub struct MidiRecording {
     /// false zodra de gebruiker op stop drukt: capture stopt, maar de events
     /// blijven beschikbaar voor opslaan/afspelen tot clear of een nieuwe opname.
     pub active: bool,
+    /// Duur op het moment van stoppen — bevriest de `seconds`-status zodat die
+    /// na de stop niet eeuwig doorloopt (None zolang de opname actief is).
+    pub stopped_elapsed: Option<f64>,
 }
 
 impl AppState {
@@ -421,6 +429,7 @@ impl AppState {
             crescendo_binding,
             crescendo_active_stops,
             midi_recording,
+            load_switch_gate: Arc::new(parking_lot::Mutex::new(())),
             pipe_voicings: Arc::new(RwLock::new(std::collections::HashMap::new())),
             division_output_channels: Arc::new(RwLock::new(vec![Vec::new(); 32])),
             division_ccis_enabled: Arc::new(RwLock::new(vec![false; 32])),
@@ -914,12 +923,13 @@ impl AppState {
         midi_recording: &Arc<RwLock<Option<MidiRecording>>>,
         msg: &MidiMessage,
     ) {
-        // Snelle uitgang als er geen opname loopt of hij gestopt is:
-        // alleen een read-lock, geen werk/allocatie.
-        let elapsed_us = match midi_recording.read().as_ref() {
-            Some(rec) if rec.active => rec.start_time.elapsed().as_micros() as u64,
-            _ => return,
-        };
+        // Snelle uitgang als er geen actieve opname loopt: alleen een read-lock,
+        // geen werk/allocatie. Het timestamp wordt pas ONDER de write-lock
+        // bepaald zodat het altijd hoort bij de opname die het event ontvangt
+        // (start/stop kan tussen de read- en write-lock wisselen).
+        if !matches!(midi_recording.read().as_ref(), Some(rec) if rec.active) {
+            return;
+        }
         let bytes = msg.to_bytes();
         let status = match bytes.first() {
             Some(&s) => s,
@@ -932,9 +942,11 @@ impl AppState {
         let data1 = bytes.get(1).copied().unwrap_or(0);
         let data2 = bytes.get(2).copied().unwrap_or(0);
         let channel = status & 0x0F;
-        // Her-check onder de write-lock: de opname kan inmiddels gestopt zijn.
+        // Her-check onder de write-lock: de opname kan inmiddels gestopt of
+        // vervangen zijn; elapsed hoort bij de opname die we hier vasthouden.
         if let Some(rec) = midi_recording.write().as_mut() {
             if rec.active {
+                let elapsed_us = rec.start_time.elapsed().as_micros() as u64;
                 rec.events.push((elapsed_us, status, data1, data2, channel));
             }
         }
@@ -1640,18 +1652,20 @@ impl AppState {
                 }
                 drop(bindings);
 
-                // Fallback: CC#7/CC#11 → master gain (only if not handled by swell)
+                // Fallback: CC#7/CC#11 → expressie-factor (only if not handled by swell).
+                // Bewust NIET SetMasterGain: dat zou de master-volume-slider (en de
+                // per-orgel-opslag daarvan) overschrijven. De expressie schaalt
+                // multiplicatief op de slider: CC 127 = ×1.0 (sliderwaarde),
+                // CC 1 ≈ -40 dB, CC 0 = stil.
                 if !handled && (controller == 7 || controller == 11) {
                     if let Some(ref player) = *audio_player.read() {
-                        // SetMasterGain verwacht dB (zoals set_master_volume), geen
-                        // lineaire factor: map CC 127→0 dB, lineair omlaag naar
-                        // -40 dB, en CC 0 → effectief stil (-80 dB).
-                        let db = if value == 0 {
-                            -80.0
+                        let factor = if value == 0 {
+                            0.0
                         } else {
-                            -40.0 * (1.0 - value as f32 / 127.0)
+                            let db = -40.0 * (1.0 - value as f32 / 127.0);
+                            10.0_f32.powf(db / 20.0)
                         };
-                        let _ = player.send_command(AudioCommand::SetMasterGain(db));
+                        let _ = player.send_command(AudioCommand::SetMasterExpression(factor));
                     }
                 }
             }
@@ -1720,6 +1734,36 @@ impl AppState {
     /// post-load path. `current_organ_id` is returned so the caller knows whether
     /// a reload is needed.
     pub fn switch_audio_output(&self, cfg: AudioOutputConfig) -> Result<Option<String>, String> {
+        // Serialiseer t.o.v. orgel-loads en andere wissels (zie load_switch_gate).
+        let _gate = self.load_switch_gate.lock();
+        self.switch_audio_output_inner(cfg)
+    }
+
+    /// Voer de opgeslagen ASIO-voorkeur uitgesteld uit (aangeroepen door main.rs,
+    /// ~10s na de start — een kóúde ASIO-start levert op ASIO4ALL een stille
+    /// stream op). Herleest de prefs en checkt de actieve host BINNEN de gate,
+    /// zodat een tussentijdse handmatige keuze van de gebruiker nooit wordt
+    /// teruggedraaid en de wissel niet met een lopende orgel-load interleaved.
+    pub fn apply_deferred_asio_pref(&self) -> Result<Option<String>, String> {
+        let _gate = self.load_switch_gate.lock();
+        let prefs = load_audio_prefs(&self.app_data_dir);
+        let still_asio = prefs.host.as_deref()
+            .map(|h| h.eq_ignore_ascii_case("asio"))
+            .unwrap_or(false);
+        let already_asio = self.audio_player.read().as_ref()
+            .map(|p| p.current_host.read().eq_ignore_ascii_case("asio"))
+            .unwrap_or(false);
+        if !still_asio || already_asio {
+            return Ok(None);
+        }
+        self.switch_audio_output_inner(AudioOutputConfig {
+            host_name: prefs.host.clone(),
+            device_name: prefs.device.clone(),
+            buffer_frames: prefs.buffer_frames,
+        })
+    }
+
+    fn switch_audio_output_inner(&self, cfg: AudioOutputConfig) -> Result<Option<String>, String> {
         // ASIO-drivers zijn single-client: zolang de oude player de driver vast-
         // houdt, ziet een tweede open geen apparaat ("No audio output device
         // found"). Bij een ASIO→ASIO-wissel (bv. andere buffergrootte) moet de
@@ -1735,11 +1779,25 @@ impl AppState {
         if new_is_asio && old_is_asio {
             let old = { self.audio_player.write().take() };
             drop(old);
-            let new_player = AudioPlayer::new(cfg.clone()).or_else(|e| {
-                tracing::warn!("ASIO→ASIO-wissel faalde ({}); terugvallen op default host", e);
-                AudioPlayer::new_default()
-            })?;
-            *self.audio_player.write() = Some(new_player);
+            let built = AudioPlayer::new(cfg.clone())
+                .or_else(|e| {
+                    tracing::warn!("ASIO→ASIO-wissel faalde ({}); terugvallen op default host", e);
+                    AudioPlayer::new_default()
+                })
+                .or_else(|e| {
+                    // De driver kan het apparaat met vertraging vrijgeven; één
+                    // nieuwe poging na 500 ms dicht dat venster.
+                    tracing::warn!("Fallback faalde ook ({}); nieuwe poging na 500 ms", e);
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                    AudioPlayer::new(cfg.clone()).or_else(|_| AudioPlayer::new_default())
+                });
+            match built {
+                Ok(p) => *self.audio_player.write() = Some(p),
+                // audio_player is nu leeg tot een volgende wissel slaagt — meld
+                // dat expliciet i.p.v. stil geluidloos te blijven.
+                Err(e) => return Err(format!(
+                    "Audio-wissel mislukt en geen fallback beschikbaar; geluid is uit tot een nieuwe wissel slaagt: {}", e)),
+            }
         } else {
             // 1) Build the new player BEFORE tearing down the old one, so a failure
             //    (e.g. ASIO device busy) leaves the existing audio intact. Voor
@@ -2055,6 +2113,8 @@ mod recording_tests {
         Arc::new(RwLock::new(Some(MidiRecording {
             events: Vec::new(),
             start_time: std::time::Instant::now(),
+            active: true,
+            stopped_elapsed: None,
         })))
     }
 

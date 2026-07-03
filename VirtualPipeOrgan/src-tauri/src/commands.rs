@@ -506,6 +506,10 @@ pub fn load_organ(state: State<AppState>, path: String) -> Result<OrganInfoDto, 
 /// Herbruikbare load-organ logic die zowel vanuit Tauri commands als vanuit de test API
 /// kan worden aangeroepen. Neemt een `&AppState` (niet `State<AppState>`).
 pub fn do_load_organ(state: &AppState, path: &str) -> Result<OrganInfoDto, String> {
+    // Serialiseer t.o.v. audio-wissels en andere loads (zie load_switch_gate):
+    // een wissel midden in een load zou de net-geregistreerde preload-buffers
+    // weggooien en het herladen missen (current_organ_id nog niet gezet).
+    let _gate = state.load_switch_gate.lock();
     info!("Loading organ from: {}", path);
 
     let odf_path = Path::new(path);
@@ -1095,13 +1099,16 @@ pub fn set_crescendo_config(state: State<AppState>, stages: Vec<Vec<String>>, en
 
 /// Set crescendo stage (0 = off, 1..N = active stage)
 #[tauri::command]
-pub fn set_crescendo_stage(state: State<AppState>, stage: u8) -> Result<Vec<String>, String> {
+pub fn set_crescendo_stage(state: State<AppState>, stage: u8) -> Result<Option<Vec<String>>, String> {
+    // None = niet toepassen (crescendo uit / niet geconfigureerd);
+    // Some(lijst) = toepassen, óók als de lijst leeg is — een lege stap of
+    // stap 0 moet de registers juist wegtrekken.
     if !*state.crescendo_enabled.read() {
-        return Ok(Vec::new());
+        return Ok(None);
     }
     let stages = state.crescendo_stages.read();
     if stages.is_empty() {
-        return Ok(Vec::new());
+        return Ok(None);
     }
     let clamped = (stage as usize).min(stages.len());
     *state.crescendo_stage.write() = clamped as u8;
@@ -1113,7 +1120,7 @@ pub fn set_crescendo_stage(state: State<AppState>, stage: u8) -> Result<Vec<Stri
         stages[clamped - 1].clone()
     };
 
-    Ok(target_stops)
+    Ok(Some(target_stops))
 }
 
 /// Get current crescendo config
@@ -1183,6 +1190,7 @@ pub fn start_midi_recording(state: State<AppState>) {
         events: Vec::new(),
         start_time: std::time::Instant::now(),
         active: true,
+        stopped_elapsed: None,
     });
     info!("MIDI recording started");
 }
@@ -1203,7 +1211,8 @@ pub fn midi_recording_status(state: State<AppState>) -> MidiRecordingStatus {
         Some(r) => MidiRecordingStatus {
             recording: r.active,
             event_count: r.events.len(),
-            seconds: r.start_time.elapsed().as_secs_f64(),
+            // Na stop: bevroren duur i.p.v. eeuwig doorlopende wandkloktijd.
+            seconds: r.stopped_elapsed.unwrap_or_else(|| r.start_time.elapsed().as_secs_f64()),
         },
         None => MidiRecordingStatus { recording: false, event_count: 0, seconds: 0.0 },
     }
@@ -1218,7 +1227,10 @@ pub fn stop_midi_recording(state: State<AppState>) -> usize {
     let mut rec = state.midi_recording.write();
     let count = match rec.as_mut() {
         Some(r) => {
-            r.active = false;
+            if r.active {
+                r.active = false;
+                r.stopped_elapsed = Some(r.start_time.elapsed().as_secs_f64());
+            }
             r.events.len()
         }
         None => 0,
@@ -2677,6 +2689,8 @@ pub fn load_samples_from_directory(state: State<AppState>, directory: String) ->
 
 /// Herbruikbare directory-scan + load voor zowel Tauri commands als test API.
 pub fn do_load_samples_from_directory(state: &AppState, directory: &str) -> Result<OrganInfoDto, String> {
+    // Serialiseer t.o.v. audio-wissels en andere loads (zie load_switch_gate).
+    let _gate = state.load_switch_gate.lock();
     use std::collections::HashMap;
     use std::sync::Arc;
     use rayon::prelude::*;

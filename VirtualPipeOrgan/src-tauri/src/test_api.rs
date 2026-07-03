@@ -483,6 +483,7 @@ fn handle_midi_record_start(state: &AppState) -> Value {
         events: Vec::new(),
         start_time: std::time::Instant::now(),
         active: true,
+        stopped_elapsed: None,
     });
     json!({ "ok": true })
 }
@@ -493,7 +494,8 @@ fn handle_midi_record_status(state: &AppState) -> Value {
         Some(r) => json!({
             "recording": r.active,
             "event_count": r.events.len(),
-            "seconds": r.start_time.elapsed().as_secs_f64(),
+            // Na stop: bevroren duur i.p.v. eeuwig doorlopende wandkloktijd.
+            "seconds": r.stopped_elapsed.unwrap_or_else(|| r.start_time.elapsed().as_secs_f64()),
         }),
         None => json!({ "recording": false, "event_count": 0, "seconds": 0.0 }),
     }
@@ -505,7 +507,10 @@ fn handle_midi_record_stop(state: &AppState) -> Value {
     let mut rec = state.midi_recording.write();
     let count = match rec.as_mut() {
         Some(r) => {
-            r.active = false;
+            if r.active {
+                r.active = false;
+                r.stopped_elapsed = Some(r.start_time.elapsed().as_secs_f64());
+            }
             r.events.len()
         }
         None => 0,
