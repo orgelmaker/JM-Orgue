@@ -5,10 +5,13 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.5.0] - 2026-07-03
 
 ### Toegevoegd
 
+- 🖱️ **Registerknoppen verslepen**: herorden registers direct op het orgelscherm met de muis (klikken blijft trekken; ▲▼ en de sorteerlijst blijven bestaan)
+- ↕️ **Verticale indeling vult nu echt kolommen**: van boven naar beneden, kolom vol → volgende kolom; horizontaal blijft rijen vullen
+- 🦶 **Pedaalregisters** krijgen geen onterecht "(Bas)"-label meer (bereik-heuristiek geldt alleen voor manualen)
 - 🎼 **Echte release-samples** (GrandOrgue + Hauptwerk): bij het loslaten van een toets klinkt nu de opgenomen ruimteakoestiek van de sampleset in plaats van een synthetische fade van 42 ms
 - 🎚️ **ODF-inschaling**: Gain/AmplitudeLevel/PitchTuning/PitchCorrection uit de sampleset worden nu toegepast (registerbalans en stemming zoals de maker bedoelde) — als aparte laag naast je eigen intonatie
 - 🪗 **Hauptwerk-sets openbaar via de bestandskiezer** (`.Organ_Hauptwerk_xml`), inclusief zwelkasten, tremulant-samplelaag en release-samples; versleutelde sets geven een duidelijke melding

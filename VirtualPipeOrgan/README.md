@@ -2,7 +2,7 @@
 
 > Een gratis, open-source virtueel pijporgel — door en voor organisten.
 
-[![Versie](https://img.shields.io/badge/versie-0.4.0-blue.svg)]()
+[![Versie](https://img.shields.io/badge/versie-0.5.0-blue.svg)]()
 [![Status](https://img.shields.io/badge/status-pre--release-orange.svg)]()
 [![Platform](https://img.shields.io/badge/platform-Windows-brightgreen.svg)]()
 [![Licentie](https://img.shields.io/badge/licentie-Open-green.svg)]()
