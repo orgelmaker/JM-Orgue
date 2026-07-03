@@ -17,9 +17,14 @@
 //! becomes a [`StopDef`] with its own `first_midi_note` and a per-key pipe list
 //! (absolute sample paths; missing keys become [`PipeDef::Empty`]).
 //!
-//! Only the primary attack sample of each pipe's first layer is used. Release
-//! samples and multiple velocity/mic layers are ignored for now (the engine does
-//! its own release envelope) — see the README/handover for the roadmap.
+//! Per pijp gebruiken we de attack-sample van de hoofdlaag (PipeLayerNumber 1).
+//! Daarnaast worden nu ook meegenomen:
+//! - release-samples van de hoofdlaag (`Pipe_SoundEngine01_ReleaseSample`,
+//!   incl. toetsduur-varianten via `ReleaseSelCriteria_LatestKeyReleaseTimeMs`);
+//! - de tremulant-laag (PipeLayerNumber 2, "tremmed" opnamen zoals in
+//!   Saint-Jean-de-Luz) → [`PipeExtra::tremulant_sample`];
+//! - zwelkasten (`Enclosure`/`EnclosurePipe`) → per kast een [`WindchestDef`]
+//!   met `enclosure_ids`, en `windchest_group` op de omkaste stops.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -27,12 +32,17 @@ use std::path::{Path, PathBuf};
 use tracing::{info, warn};
 
 use crate::grandorgue::{
-    CouplerDef, ManualDef, OdfError, OrganDefinition, OrganInfo, PipeDef, StopDef,
+    CouplerDef, EnclosureDef, ManualDef, OdfError, OrganDefinition, OrganInfo, PipeDef,
+    PipeExtra, ReleaseDef, StopDef, WindchestDef,
 };
 
 /// Load a Hauptwerk organ definition and translate it to an [`OrganDefinition`].
 pub fn load_hauptwerk(odf_path: &Path) -> Result<OrganDefinition, OdfError> {
-    let xml = std::fs::read_to_string(odf_path)?;
+    // Lees als bytes zodat we versleutelde/gecomprimeerde (binaire) sets — de
+    // gangbare vorm bij commerciële Hauptwerk-distributie — met een duidelijke
+    // melding kunnen weigeren i.p.v. een cryptische UTF-8/parse-fout.
+    let bytes = std::fs::read(odf_path)?;
+    let xml = ensure_readable_xml(bytes)?;
 
     // Resolve the package root: the ancestor directory that contains
     // `OrganInstallationPackages` (the ODF may live in `OrganDefinitions/` or at
@@ -42,19 +52,54 @@ pub fn load_hauptwerk(odf_path: &Path) -> Result<OrganDefinition, OdfError> {
     })?;
     let pkg_dirs = scan_package_dirs(&root);
 
+    build_definition(&xml, root, &pkg_dirs)
+}
+
+/// Foutmelding voor binaire/versleutelde Hauptwerk-bestanden.
+const ENCRYPTED_MSG: &str =
+    "Deze Hauptwerk-set is versleuteld/niet-leesbaar; alleen onversleutelde sets worden ondersteund";
+
+/// Controleer dat de gelezen bytes leesbare Hauptwerk-XML zijn. Commerciële
+/// sets zijn vaak versleuteld/gecomprimeerd (binair); die weigeren we netjes.
+fn ensure_readable_xml(bytes: Vec<u8>) -> Result<String, OdfError> {
+    let unreadable = || OdfError::ParseError { line: 0, message: ENCRYPTED_MSG.into() };
+    // Binair (geen geldige UTF-8) → versleuteld/niet-leesbaar.
+    let text = String::from_utf8(bytes).map_err(|_| unreadable())?;
+    // Geldige sets beginnen (na eventuele BOM/witruimte) met een XML-tag en
+    // hebben het <Hauptwerk ...>-rootelement vroeg in het bestand.
+    let head: String = text.chars().take(4096).collect();
+    let trimmed = head.trim_start_matches('\u{feff}').trim_start();
+    if !trimmed.starts_with('<') || !head.contains("<Hauptwerk") {
+        return Err(unreadable());
+    }
+    Ok(text)
+}
+
+/// Vertaal de (leesbare) Hauptwerk-XML naar een [`OrganDefinition`]. Apart van
+/// [`load_hauptwerk`] zodat tests dit met een mini-XML-string en een nep-
+/// packagemap kunnen aanroepen zonder bestanden op schijf.
+fn build_definition(
+    xml: &str,
+    root: PathBuf,
+    pkg_dirs: &HashMap<u32, PathBuf>,
+) -> Result<OrganDefinition, OdfError> {
     // --- Parse the object lists we need ---
-    let general = extract_objects(&xml, "_General");
-    let divisions = extract_objects(&xml, "Division");
-    let stops = extract_objects(&xml, "Stop");
-    let stopranks = extract_objects(&xml, "StopRank");
-    let pipes = extract_objects(&xml, "Pipe_SoundEngine01");
-    let layers = extract_objects(&xml, "Pipe_SoundEngine01_Layer");
-    let attack_samples = extract_objects(&xml, "Pipe_SoundEngine01_AttackSample");
-    let samples = extract_objects(&xml, "Sample");
+    let general = extract_objects(xml, "_General");
+    let divisions = extract_objects(xml, "Division");
+    let stops = extract_objects(xml, "Stop");
+    let stopranks = extract_objects(xml, "StopRank");
+    let pipes = extract_objects(xml, "Pipe_SoundEngine01");
+    let layers = extract_objects(xml, "Pipe_SoundEngine01_Layer");
+    let attack_samples = extract_objects(xml, "Pipe_SoundEngine01_AttackSample");
+    let release_samples = extract_objects(xml, "Pipe_SoundEngine01_ReleaseSample");
+    let samples = extract_objects(xml, "Sample");
+    let enclosures_xml = extract_objects(xml, "Enclosure");
+    let enclosure_pipes = extract_objects(xml, "EnclosurePipe");
 
     info!(
-        "Hauptwerk parse: {} divisions, {} stops, {} stopranks, {} pipes, {} samples",
-        divisions.len(), stops.len(), stopranks.len(), pipes.len(), samples.len()
+        "Hauptwerk parse: {} divisions, {} stops, {} stopranks, {} pipes, {} samples, {} releases, {} enclosures",
+        divisions.len(), stops.len(), stopranks.len(), pipes.len(), samples.len(),
+        release_samples.len(), enclosures_xml.len()
     );
 
     // --- Build lookup indices ---
@@ -80,18 +125,39 @@ pub fn load_hauptwerk(odf_path: &Path) -> Result<OrganDefinition, OdfError> {
             rank_harmonic.entry(rid).or_insert(h);
         }
     }
-    // pipe_id -> layer_id (first layer)
-    let mut layer_of_pipe: HashMap<u32, u32> = HashMap::new();
+    // pipe_id -> lagen [(PipeLayerNumber, LayerID)], gesorteerd op laagnummer.
+    // Laag 1 is de droge hoofdlaag; laag 2+ is in de praktijk (o.a. Saint-Jean-
+    // de-Luz) een tweede opnamelaag mét tremulant ("tremmed", AT0/RT0-mappen).
+    let mut layers_of_pipe: HashMap<u32, Vec<(u32, u32)>> = HashMap::new();
     for l in &layers {
         if let (Some(pid), Some(lid)) = (l.get_u32("PipeID"), l.get_u32("LayerID")) {
-            layer_of_pipe.entry(pid).or_insert(lid);
+            let num = l.get_u32("PipeLayerNumber").unwrap_or(1);
+            layers_of_pipe.entry(pid).or_default().push((num, lid));
         }
+    }
+    for v in layers_of_pipe.values_mut() {
+        // Stabiele sort: bij gelijk laagnummer blijft documentvolgorde staan.
+        v.sort_by_key(|(num, _)| *num);
     }
     // layer_id -> sample_id (first attack sample)
     let mut sample_of_layer: HashMap<u32, u32> = HashMap::new();
     for a in &attack_samples {
         if let (Some(lid), Some(sid)) = (a.get_u32("LayerID"), a.get_u32("SampleID")) {
             sample_of_layer.entry(lid).or_insert(sid);
+        }
+    }
+    // layer_id -> release-samples [(sample_id, max_toetsduur_ms)].
+    // `ReleaseSelCriteria_LatestKeyReleaseTimeMs` is de langste toetsduur
+    // waarvoor deze release geldt (SJDL: R1=~360ms, R2=~575ms, R0=99999);
+    // 99999 is Hauptwerks "geen limiet" → None (de default/langste release,
+    // zelfde conventie als GrandOrgue MaxKeyPressTime=-1).
+    let mut releases_by_layer: HashMap<u32, Vec<(u32, Option<i32>)>> = HashMap::new();
+    for r in &release_samples {
+        if let (Some(lid), Some(sid)) = (r.get_u32("LayerID"), r.get_u32("SampleID")) {
+            let max_ms = r
+                .get_i32("ReleaseSelCriteria_LatestKeyReleaseTimeMs")
+                .filter(|v| (0..99999).contains(v));
+            releases_by_layer.entry(lid).or_default().push((sid, max_ms));
         }
     }
     // sample_id -> (installation_package_id, relative filename)
@@ -104,14 +170,63 @@ pub fn load_hauptwerk(odf_path: &Path) -> Result<OrganDefinition, OdfError> {
             sample_file.insert(sid, (pkg, fname.clone()));
         }
     }
+    // pipe_id -> enclosure_id (zwelkast waar de pijp in staat; eerste wint).
+    let mut enclosure_of_pipe: HashMap<u32, u32> = HashMap::new();
+    for ep in &enclosure_pipes {
+        if let (Some(pid), Some(eid)) = (ep.get_u32("PipeID"), ep.get_u32("EnclosureID")) {
+            enclosure_of_pipe.entry(pid).or_insert(eid);
+        }
+    }
 
-    // Resolve a pipe to an absolute sample path via the full chain.
-    let resolve_pipe_path = |pipe_id: u32| -> Option<PathBuf> {
-        let layer_id = *layer_of_pipe.get(&pipe_id)?;
-        let sample_id = *sample_of_layer.get(&layer_id)?;
+    // Resolve een sample-id naar een absoluut pad via de packagemap.
+    let resolve_sample = |sample_id: u32| -> Option<PathBuf> {
         let (pkg, fname) = sample_file.get(&sample_id)?;
         let dir = pkg_dirs.get(pkg)?;
         Some(dir.join(fname.replace('\\', "/")))
+    };
+
+    // Resolve een pijp naar het hoofdsample-pad plus de extra's: release-samples
+    // van de hoofdlaag en (indien aanwezig) de tremulant-laag.
+    let resolve_pipe = |pipe_id: u32| -> Option<(PathBuf, PipeExtra)> {
+        let lyrs = layers_of_pipe.get(&pipe_id)?;
+        let (main_num, main_layer) = *lyrs.first()?;
+        let sample_id = *sample_of_layer.get(&main_layer)?;
+        let path = resolve_sample(sample_id)?;
+
+        let mut extra = PipeExtra::default();
+        // Release-samples van de hoofdlaag. Sommige sets (Ledziny) laten de
+        // release naar hetzelfde bestand als de attack wijzen (release zit in
+        // dezelfde wav); zo'n "release" slaan we over — de engine valt dan
+        // terug op zijn eigen release-envelope.
+        if let Some(rels) = releases_by_layer.get(&main_layer) {
+            for (sid, max_ms) in rels {
+                if let Some(rpath) = resolve_sample(*sid) {
+                    if rpath != path {
+                        extra.releases.push(ReleaseDef {
+                            path: rpath,
+                            max_key_press_time_ms: *max_ms,
+                            // Hauptwerk's LoadSampleRange-posities hebben eigen
+                            // typecodes met onduidelijke semantiek; cue/end
+                            // laten we aan de WAV-markers over.
+                            cue_point: None,
+                            release_end: None,
+                        });
+                    }
+                }
+            }
+            // Korte toetsduren eerst, de default (None = langste) als laatste.
+            extra
+                .releases
+                .sort_by_key(|r| r.max_key_press_time_ms.map(i64::from).unwrap_or(i64::MAX));
+        }
+        // Tremulant-laag: attack-sample van de eerstvolgende hogere laag.
+        // De hoofdlaag blijft het droge sample!
+        if let Some((_, trem_layer)) = lyrs.iter().find(|(num, _)| *num > main_num) {
+            extra.tremulant_sample = sample_of_layer
+                .get(trem_layer)
+                .and_then(|sid| resolve_sample(*sid));
+        }
+        Some((path, extra))
     };
 
     // stop_id -> its stopranks
@@ -131,8 +246,9 @@ pub fn load_hauptwerk(odf_path: &Path) -> Result<OrganDefinition, OdfError> {
         };
         let name = clean_stop_name(st.get("Name").map(|s| s.as_str()).unwrap_or(""));
 
-        // Collect (division_note -> sample path) across all stopranks of this stop.
-        let mut by_note: HashMap<u32, PathBuf> = HashMap::new();
+        // Collect (division_note -> pipe + sample path + extra's) across all
+        // stopranks of this stop.
+        let mut by_note: HashMap<u32, (u32, PathBuf, PipeExtra)> = HashMap::new();
         let mut harmonic = 0u32;
         for sr in stopranks_by_stop.get(&stop_id).into_iter().flatten() {
             let rank_id = match sr.get_u32("RankID") {
@@ -155,8 +271,12 @@ pub fn load_hauptwerk(odf_path: &Path) -> Result<OrganDefinition, OdfError> {
                 let div_note = first_div + k;
                 let rank_note = (div_note as i64 + inc as i64) as u32;
                 if let Some(pid) = rank_pipes.get(&rank_note) {
-                    if let Some(path) = resolve_pipe_path(*pid) {
-                        by_note.entry(div_note).or_insert(path);
+                    // Eerste rank die een noot levert wint (zelfde gedrag als
+                    // het eerdere or_insert); resolve alleen bij een lege slot.
+                    if !by_note.contains_key(&div_note) {
+                        if let Some((path, extra)) = resolve_pipe(*pid) {
+                            by_note.insert(div_note, (*pid, path, extra));
+                        }
                     }
                 }
             }
@@ -167,18 +287,32 @@ pub fn load_hauptwerk(odf_path: &Path) -> Result<OrganDefinition, OdfError> {
             continue;
         }
 
+        // Zwelkast: zit de meerderheid van de pijpen van deze stop in één
+        // enclosure, dan hoort de stop bij die kast (windchest_group =
+        // EnclosureID). Stops zonder kast houden windchest_group 0.
+        let windchest_group = {
+            let total = by_note.len();
+            let mut counts: HashMap<u32, usize> = HashMap::new();
+            for (pid, _, _) in by_note.values() {
+                if let Some(eid) = enclosure_of_pipe.get(pid) {
+                    *counts.entry(*eid).or_default() += 1;
+                }
+            }
+            counts
+                .into_iter()
+                .find(|(_, n)| *n * 2 > total)
+                .map(|(eid, _)| eid)
+                .unwrap_or(0)
+        };
+
         // Dense, keyboard-aligned pipe list from the stop's lowest to highest note;
         // gaps within the compass become Empty so key→pipe alignment is preserved.
         let min_note = *by_note.keys().min().unwrap();
         let max_note = *by_note.keys().max().unwrap();
         let mut pipe_list: Vec<PipeDef> = Vec::with_capacity((max_note - min_note + 1) as usize);
         for note in min_note..=max_note {
-            match by_note.get(&note) {
-                Some(path) => pipe_list.push(PipeDef::Sample {
-                    path: path.clone(),
-                    amplitude_level: None,
-                    pitch_correction: None,
-                }),
+            match by_note.remove(&note) {
+                Some((_, path, extra)) => pipe_list.push(PipeDef::Sample { path, extra }),
                 None => pipe_list.push(PipeDef::Empty),
             }
         }
@@ -188,10 +322,11 @@ pub fn load_hauptwerk(odf_path: &Path) -> Result<OrganDefinition, OdfError> {
             id: stop_id,
             name,
             harmonic_number: if harmonic > 0 { harmonic } else { 8 },
-            pitch_correction: 0,
+            pitch_correction: 0.0,
+            gain_db: 0.0,
             number_of_pipes: pipe_list.len() as u32,
             first_accessible_pipe_logical_key: 1,
-            windchest_group: 1,
+            windchest_group,
             amplitude_level: 100.0,
             percussive: false,
             accepts_retuning: true,
@@ -297,6 +432,47 @@ pub fn load_hauptwerk(odf_path: &Path) -> Result<OrganDefinition, OdfError> {
         info!("Hauptwerk: {} couplers from KeyAction routing", coupler_defs.len());
     }
 
+    // --- Zwelkasten (Enclosures) ---
+    // Downstream werkt de zwelkast-detectie op: stop.windchest_group verwijst
+    // naar een WindchestDef met niet-lege enclosure_ids. Per Enclosure maken we
+    // dus één windchest (nummer = EnclosureID, uniek) met die enclosure erin.
+    let mut enclosure_defs: Vec<EnclosureDef> = Vec::new();
+    let mut windchest_defs: Vec<WindchestDef> = Vec::new();
+    for e in &enclosures_xml {
+        let eid = match e.get_u32("EnclosureID") {
+            Some(v) => v,
+            None => continue,
+        };
+        // "Enclosure Grand Orgue" → "Grand Orgue": zonder het generieke prefix
+        // matcht de naam ook op de divisienaam (naam-gebaseerde detectie).
+        let raw = e.get("Name").map(|s| s.as_str()).unwrap_or("").trim();
+        let name = raw
+            .get(..10)
+            .filter(|p| p.eq_ignore_ascii_case("enclosure "))
+            .map(|_| raw[10..].trim())
+            .unwrap_or(raw)
+            .to_string();
+        enclosure_defs.push(EnclosureDef {
+            number: eid,
+            name: name.clone(),
+            amp_minimum_level: 0.0,
+            midi_input_number: 0,
+        });
+        windchest_defs.push(WindchestDef {
+            number: eid,
+            comment: name,
+            enclosure_ids: vec![eid],
+            tremulant_ids: Vec::new(),
+        });
+    }
+    if !enclosure_defs.is_empty() {
+        info!(
+            "Hauptwerk: {} zwelkast(en): {:?}",
+            enclosure_defs.len(),
+            enclosure_defs.iter().map(|e| e.name.as_str()).collect::<Vec<_>>()
+        );
+    }
+
     // --- Organ info from _General ---
     let g = general.first();
     let getg = |k: &str| g.and_then(|m| m.get(k)).cloned().unwrap_or_default();
@@ -309,10 +485,12 @@ pub fn load_hauptwerk(odf_path: &Path) -> Result<OrganDefinition, OdfError> {
         recording_details: clean(&getg("Control_OrganDefinitionSupplierName")),
         number_of_manuals: manuals.iter().filter(|m| m.number > 0).count() as u32,
         has_pedals: manuals.iter().any(|m| m.number == 0),
-        number_of_enclosures: 0,
+        number_of_enclosures: enclosure_defs.len() as u32,
         number_of_tremulants: 0,
         number_of_windchest_groups: divisions.len() as u32,
         amplitude_level: 100.0,
+        // Hauptwerk kent geen orgel-brede Gain; neutraal (0 dB).
+        gain_db: 0.0,
     };
 
     let stop_defs: Vec<StopDef> = stop_entries.into_iter().map(|(_, s)| s).collect();
@@ -327,15 +505,30 @@ pub fn load_hauptwerk(odf_path: &Path) -> Result<OrganDefinition, OdfError> {
         organ,
         manuals,
         stops: stop_defs,
-        windchests: Vec::new(),
-        enclosures: Vec::new(),
+        windchests: windchest_defs,
+        enclosures: enclosure_defs,
         tremulants: Vec::new(),
         couplers: coupler_defs,
     })
 }
 
-/// Quick check: does this path look like a Hauptwerk organ definition?
+/// Snelle check: is dit pad een Hauptwerk-orgeldefinitie?
+///
+/// Primair op bestandsextensie (case-insensitief `*.organ_hauptwerk_xml`);
+/// GrandOrgue-bestanden (`.organ`) worden nooit als Hauptwerk gerouteerd, ook
+/// niet in een map met "hauptwerk" in de naam (bv. "X.CompPkg.Hauptwerk").
+/// Voor overige paden (mappen e.d.) blijft de oude substring-check als vangnet.
 pub fn is_hauptwerk_path(path: &Path) -> bool {
+    let file = path
+        .file_name()
+        .map(|f| f.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+    if file.ends_with(".organ_hauptwerk_xml") {
+        return true;
+    }
+    if file.ends_with(".organ") {
+        return false;
+    }
     path.to_string_lossy().to_lowercase().contains("hauptwerk")
 }
 
@@ -624,6 +817,148 @@ mod tests {
         assert_eq!(first_number("noidea"), None);
     }
 
+    #[test]
+    fn test_is_hauptwerk_path_extensie() {
+        // Detectie op extensie, case-insensitief.
+        assert!(is_hauptwerk_path(Path::new(
+            "C:/sets/OrganDefinitions/Ledziny st Clement.Organ_Hauptwerk_xml"
+        )));
+        assert!(is_hauptwerk_path(Path::new("/x/y/foo.ORGAN_HAUPTWERK_XML")));
+        assert!(is_hauptwerk_path(Path::new("kaal.organ_hauptwerk_xml")));
+        // Extensie werkt ook zonder "hauptwerk" ergens anders in het pad.
+        assert!(is_hauptwerk_path(Path::new("C:/orgels/set1/Demo.Organ_Hauptwerk_xml")));
+        // GrandOrgue-bestand blijft GrandOrgue, óók in een "Hauptwerk"-map.
+        assert!(!is_hauptwerk_path(Path::new(
+            "C:/sets/Demo.CompPkg.Hauptwerk/demo.organ"
+        )));
+        assert!(!is_hauptwerk_path(Path::new("C:/sets/demo.organ")));
+        // Vangnet (oud gedrag): mapdetectie op pad-substring.
+        assert!(is_hauptwerk_path(Path::new("C:/sets/MijnSet.CompPkg.Hauptwerk")));
+        assert!(!is_hauptwerk_path(Path::new("C:/sets/GewoonEenMap")));
+    }
+
+    #[test]
+    fn test_versleutelde_set_geweigerd() {
+        // Binaire rommel (geen geldige UTF-8), zoals versleutelde/gecomprimeerde
+        // commerciële Hauptwerk-sets.
+        let p = std::env::temp_dir().join("vpo_test_encrypted.Organ_Hauptwerk_xml");
+        std::fs::write(&p, [0x1fu8, 0x8b, 0x08, 0xff, 0xfe, 0x00, 0x99, 0xc0, 0x12]).unwrap();
+        let err = load_hauptwerk(&p).unwrap_err();
+        let _ = std::fs::remove_file(&p);
+        assert!(
+            err.to_string().contains("versleuteld"),
+            "onverwachte fout: {err}"
+        );
+
+        // Wél leesbare tekst, maar geen Hauptwerk-XML → zelfde duidelijke fout.
+        let p2 = std::env::temp_dir().join("vpo_test_geen_xml.Organ_Hauptwerk_xml");
+        std::fs::write(&p2, "dit is geen xml maar platte tekst").unwrap();
+        let err2 = load_hauptwerk(&p2).unwrap_err();
+        let _ = std::fs::remove_file(&p2);
+        assert!(
+            err2.to_string().contains("versleuteld"),
+            "onverwachte fout: {err2}"
+        );
+
+        // Geldige XML-kop passeert de leesbaarheidscheck.
+        assert!(ensure_readable_xml(
+            b"<Hauptwerk FileFormat=\"Organ\"><ObjectList></ObjectList></Hauptwerk>".to_vec()
+        )
+        .is_ok());
+    }
+
+    /// Mini-Hauptwerk-XML met twee stops: "Bourdon 8" (2 pijpen, in zwelkast 7,
+    /// met R0/R1-releases en een tremulant-laag) en "Montre 8" (1 pijp, niet
+    /// omkast, release wijst naar hetzelfde bestand als de attack → geskipt).
+    fn mini_xml() -> String {
+        r#"<Hauptwerk FileFormat="Organ" FileFormatVersion="4.0">
+<ObjectList ObjectType="_General"><_General><Identification_Name>Testorgel</Identification_Name></_General></ObjectList>
+<ObjectList ObjectType="Division"><Division><DivisionID>1</DivisionID><Name>Grand Orgue</Name></Division></ObjectList>
+<ObjectList ObjectType="Stop"><Stop><StopID>1</StopID><Name>Bourdon 8</Name><DivisionID>1</DivisionID></Stop><Stop><StopID>2</StopID><Name>Montre 8</Name><DivisionID>1</DivisionID></Stop></ObjectList>
+<ObjectList ObjectType="StopRank"><StopRank><StopID>1</StopID><RankID>1</RankID><MIDINoteNumOfFirstMappedDivisionInputNode>36</MIDINoteNumOfFirstMappedDivisionInputNode><NumberOfMappedDivisionInputNodes>2</NumberOfMappedDivisionInputNodes><MIDINoteNumIncrementFromDivisionToRank>0</MIDINoteNumIncrementFromDivisionToRank></StopRank><StopRank><StopID>2</StopID><RankID>2</RankID><MIDINoteNumOfFirstMappedDivisionInputNode>36</MIDINoteNumOfFirstMappedDivisionInputNode><NumberOfMappedDivisionInputNodes>1</NumberOfMappedDivisionInputNodes><MIDINoteNumIncrementFromDivisionToRank>0</MIDINoteNumIncrementFromDivisionToRank></StopRank></ObjectList>
+<ObjectList ObjectType="Pipe_SoundEngine01"><Pipe_SoundEngine01><PipeID>11</PipeID><RankID>1</RankID><NormalMIDINoteNumber>36</NormalMIDINoteNumber></Pipe_SoundEngine01><Pipe_SoundEngine01><PipeID>12</PipeID><RankID>1</RankID><NormalMIDINoteNumber>37</NormalMIDINoteNumber></Pipe_SoundEngine01><Pipe_SoundEngine01><PipeID>21</PipeID><RankID>2</RankID><NormalMIDINoteNumber>36</NormalMIDINoteNumber></Pipe_SoundEngine01></ObjectList>
+<ObjectList ObjectType="Pipe_SoundEngine01_Layer"><Pipe_SoundEngine01_Layer><LayerID>111</LayerID><PipeID>11</PipeID><PipeLayerNumber>1</PipeLayerNumber></Pipe_SoundEngine01_Layer><Pipe_SoundEngine01_Layer><LayerID>511</LayerID><PipeID>11</PipeID><PipeLayerNumber>2</PipeLayerNumber></Pipe_SoundEngine01_Layer><Pipe_SoundEngine01_Layer><LayerID>112</LayerID><PipeID>12</PipeID><PipeLayerNumber>1</PipeLayerNumber></Pipe_SoundEngine01_Layer><Pipe_SoundEngine01_Layer><LayerID>121</LayerID><PipeID>21</PipeID><PipeLayerNumber>1</PipeLayerNumber></Pipe_SoundEngine01_Layer></ObjectList>
+<ObjectList ObjectType="Pipe_SoundEngine01_AttackSample"><Pipe_SoundEngine01_AttackSample><UniqueID>1</UniqueID><LayerID>111</LayerID><SampleID>1</SampleID></Pipe_SoundEngine01_AttackSample><Pipe_SoundEngine01_AttackSample><UniqueID>2</UniqueID><LayerID>511</LayerID><SampleID>2</SampleID></Pipe_SoundEngine01_AttackSample><Pipe_SoundEngine01_AttackSample><UniqueID>3</UniqueID><LayerID>112</LayerID><SampleID>3</SampleID></Pipe_SoundEngine01_AttackSample><Pipe_SoundEngine01_AttackSample><UniqueID>4</UniqueID><LayerID>121</LayerID><SampleID>4</SampleID></Pipe_SoundEngine01_AttackSample></ObjectList>
+<ObjectList ObjectType="Pipe_SoundEngine01_ReleaseSample"><Pipe_SoundEngine01_ReleaseSample><UniqueID>10</UniqueID><LayerID>111</LayerID><SampleID>5</SampleID><ReleaseSelCriteria_LatestKeyReleaseTimeMs>99999</ReleaseSelCriteria_LatestKeyReleaseTimeMs></Pipe_SoundEngine01_ReleaseSample><Pipe_SoundEngine01_ReleaseSample><UniqueID>11</UniqueID><LayerID>111</LayerID><SampleID>6</SampleID><ReleaseSelCriteria_LatestKeyReleaseTimeMs>750</ReleaseSelCriteria_LatestKeyReleaseTimeMs></Pipe_SoundEngine01_ReleaseSample><Pipe_SoundEngine01_ReleaseSample><UniqueID>12</UniqueID><LayerID>121</LayerID><SampleID>4</SampleID><ReleaseSelCriteria_LatestKeyReleaseTimeMs>99999</ReleaseSelCriteria_LatestKeyReleaseTimeMs></Pipe_SoundEngine01_ReleaseSample></ObjectList>
+<ObjectList ObjectType="Sample"><Sample><SampleID>1</SampleID><InstallationPackageID>1</InstallationPackageID><SampleFilename>Bourdon/A0/036-c.wav</SampleFilename></Sample><Sample><SampleID>2</SampleID><InstallationPackageID>1</InstallationPackageID><SampleFilename>Bourdon/AT0/036-c.wav</SampleFilename></Sample><Sample><SampleID>3</SampleID><InstallationPackageID>1</InstallationPackageID><SampleFilename>Bourdon/A0/037-c#.wav</SampleFilename></Sample><Sample><SampleID>4</SampleID><InstallationPackageID>1</InstallationPackageID><SampleFilename>Montre/036-c.wav</SampleFilename></Sample><Sample><SampleID>5</SampleID><InstallationPackageID>1</InstallationPackageID><SampleFilename>Bourdon/R0/036-c.wav</SampleFilename></Sample><Sample><SampleID>6</SampleID><InstallationPackageID>1</InstallationPackageID><SampleFilename>Bourdon/R1/036-c.wav</SampleFilename></Sample></ObjectList>
+<ObjectList ObjectType="Enclosure"><Enclosure><EnclosureID>7</EnclosureID><Name>Enclosure Grand Orgue</Name></Enclosure></ObjectList>
+<ObjectList ObjectType="EnclosurePipe"><EnclosurePipe><PipeID>11</PipeID><EnclosureID>7</EnclosureID></EnclosurePipe><EnclosurePipe><PipeID>12</PipeID><EnclosureID>7</EnclosureID></EnclosurePipe></ObjectList>
+</Hauptwerk>"#.to_string()
+    }
+
+    fn mini_definition() -> OrganDefinition {
+        let mut pkg_dirs = HashMap::new();
+        pkg_dirs.insert(1u32, PathBuf::from("/pkg"));
+        build_definition(&mini_xml(), PathBuf::from("/root"), &pkg_dirs).expect("build")
+    }
+
+    #[test]
+    fn test_release_extractie_en_tremulant_laag() {
+        let def = mini_definition();
+        let bourdon = def.stops.iter().find(|s| s.name == "Bourdon 8").unwrap();
+        let montre = def.stops.iter().find(|s| s.name == "Montre 8").unwrap();
+
+        // Bourdon-pijp 36: R1 (750 ms) vóór R0 (default = None), met geresolvede
+        // paden via de packagemap.
+        let PipeDef::Sample { path, extra } = &bourdon.pipes[0] else {
+            panic!("pijp 36 hoort een sample te zijn");
+        };
+        assert!(path.ends_with("Bourdon/A0/036-c.wav"), "hoofdlaag blijft droog: {path:?}");
+        assert_eq!(extra.releases.len(), 2);
+        assert_eq!(extra.releases[0].max_key_press_time_ms, Some(750));
+        assert!(extra.releases[0].path.ends_with("Bourdon/R1/036-c.wav"));
+        assert_eq!(extra.releases[1].max_key_press_time_ms, None); // 99999 → default
+        assert!(extra.releases[1].path.ends_with("Bourdon/R0/036-c.wav"));
+        // Tremulant-laag (PipeLayerNumber 2) → tremulant_sample, hoofdlaag droog.
+        assert!(extra
+            .tremulant_sample
+            .as_ref()
+            .unwrap()
+            .ends_with("Bourdon/AT0/036-c.wav"));
+
+        // Bourdon-pijp 37 heeft geen releases en geen tremulant-laag.
+        let PipeDef::Sample { extra: e37, .. } = &bourdon.pipes[1] else {
+            panic!("pijp 37 hoort een sample te zijn");
+        };
+        assert!(e37.releases.is_empty());
+        assert!(e37.tremulant_sample.is_none());
+
+        // Montre: release wijst naar hetzelfde bestand als de attack → geskipt.
+        let PipeDef::Sample { extra: em, .. } = &montre.pipes[0] else {
+            panic!("montre-pijp hoort een sample te zijn");
+        };
+        assert!(em.releases.is_empty());
+        assert!(em.tremulant_sample.is_none());
+    }
+
+    #[test]
+    fn test_enclosure_mapping() {
+        let def = mini_definition();
+
+        // Eén zwelkast, prefix "Enclosure " gestript, windchest met enclosure-id.
+        assert_eq!(def.enclosures.len(), 1);
+        assert_eq!(def.enclosures[0].name, "Grand Orgue");
+        assert_eq!(def.windchests.len(), 1);
+        assert_eq!(def.windchests[0].number, 7);
+        assert_eq!(def.windchests[0].enclosure_ids, vec![7]);
+        assert_eq!(def.organ.number_of_enclosures, 1);
+
+        // Bourdon (beide pijpen in kast 7) → windchest_group 7;
+        // Montre (niet omkast) → windchest_group 0.
+        let bourdon = def.stops.iter().find(|s| s.name == "Bourdon 8").unwrap();
+        let montre = def.stops.iter().find(|s| s.name == "Montre 8").unwrap();
+        assert_eq!(bourdon.windchest_group, 7);
+        assert_eq!(montre.windchest_group, 0);
+
+        // De downstream-detectie: windchest van de stop heeft enclosure_ids.
+        let wc = def
+            .windchests
+            .iter()
+            .find(|w| w.number == bourdon.windchest_group)
+            .unwrap();
+        assert!(!wc.enclosure_ids.is_empty());
+    }
+
     /// Local smoke test against a real Hauptwerk set. Set JM_HW_TEST_ODF to the
     /// `.Organ_Hauptwerk_xml` path and run with `--ignored --nocapture`.
     #[test]
@@ -636,18 +971,39 @@ mod tests {
         let def = load_hauptwerk(Path::new(&path)).expect("load");
         println!("Organ: {} by {}", def.organ.church_name, def.organ.organ_builder);
         println!("Manuals: {}", def.manuals.len());
+        println!("Enclosures: {:?}", def.enclosures.iter().map(|e| (e.number, e.name.as_str())).collect::<Vec<_>>());
         let mut sample_ok = 0;
         let mut sample_missing = 0;
         for s in &def.stops {
             let first = s.first_midi_note.unwrap_or(0);
             let n_real = s.pipes.iter().filter(|p| matches!(p, PipeDef::Sample { .. })).count();
-            println!("  [{}] {} — {} pipes, first_midi={}, harmonic={}",
-                s.windchest_group, s.name, n_real, first, s.harmonic_number);
+            // Extra's: releases en tremulant-laag per stop samengevat.
+            let (mut n_rel, mut n_trem) = (0usize, 0usize);
             for p in &s.pipes {
-                if let PipeDef::Sample { path, .. } = p {
+                if let PipeDef::Sample { extra, .. } = p {
+                    n_rel += extra.releases.len();
+                    n_trem += extra.tremulant_sample.is_some() as usize;
+                }
+            }
+            println!("  [{}] {} — {} pipes, first_midi={}, harmonic={}, releases={}, trem={}",
+                s.windchest_group, s.name, n_real, first, s.harmonic_number, n_rel, n_trem);
+            for p in &s.pipes {
+                if let PipeDef::Sample { path, extra } = p {
                     if path.exists() { sample_ok += 1; } else {
                         sample_missing += 1;
                         if sample_missing <= 3 { println!("    MISSING: {:?}", path); }
+                    }
+                    for r in &extra.releases {
+                        if r.path.exists() { sample_ok += 1; } else {
+                            sample_missing += 1;
+                            if sample_missing <= 3 { println!("    MISSING rel: {:?}", r.path); }
+                        }
+                    }
+                    if let Some(t) = &extra.tremulant_sample {
+                        if t.exists() { sample_ok += 1; } else {
+                            sample_missing += 1;
+                            if sample_missing <= 3 { println!("    MISSING trem: {:?}", t); }
+                        }
                     }
                 }
             }

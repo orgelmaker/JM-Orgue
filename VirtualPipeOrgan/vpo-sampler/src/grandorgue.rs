@@ -63,6 +63,9 @@ pub struct OrganInfo {
     pub number_of_tremulants: u32,
     pub number_of_windchest_groups: u32,
     pub amplitude_level: f32,
+    /// Orgel-brede Gain in dB ([Organ] Gain, default 0.0). Onderdeel van de
+    /// GrandOrgue-inschalingshiërarchie: Organ -> Windchest -> Stop/Rank -> Pipe.
+    pub gain_db: f32,
 }
 
 /// Manual/keyboard definition from [ManualXXX] section
@@ -91,12 +94,14 @@ pub struct StopDef {
     pub name: String,
     /// Harmonic number (8 = 8', 16 = 4', 32 = 2', etc.)
     pub harmonic_number: u32,
-    /// Pitch correction in cents
-    pub pitch_correction: i32,
+    /// Pitch correction in cents (stop-niveau, bv. Voix Céleste-zweving)
+    pub pitch_correction: f32,
     pub number_of_pipes: u32,
     pub first_accessible_pipe_logical_key: u32,
     pub windchest_group: u32,
     pub amplitude_level: f32,
+    /// Stop-niveau Gain in dB (ODF [Stop]/[Rank] Gain)
+    pub gain_db: f32,
     pub percussive: bool,
     /// Whether the stop's pipes are pitched (accept retuning). GrandOrgue sets
     /// AcceptsRetuning=N on mechanical/noise recordings (key action, stop/blower/
@@ -139,14 +144,46 @@ impl StopDef {
     }
 }
 
+/// Extra per-pijp informatie uit de ODF: inschaling, stemming, loops en
+/// release-samples. Alles optioneel; `Default` = "niets opgegeven".
+#[derive(Debug, Clone, Default)]
+pub struct PipeExtra {
+    /// AmplitudeLevel in procenten (GrandOrgue: 0-1000, 100 = neutraal)
+    pub amplitude_level: Option<f32>,
+    /// Gain in dB (GrandOrgue PipeXXXGain / [Organ] Gain-hiërarchie)
+    pub gain_db: Option<f32>,
+    /// PitchTuning in cents (float! bv. "4.79062")
+    pub pitch_tuning_cents: Option<f32>,
+    /// PitchCorrection in cents
+    pub pitch_correction_cents: Option<f32>,
+    /// One-shot afspelen (klok/glockenspiel) — pipe-niveau override op de stop
+    pub percussive: Option<bool>,
+    /// ODF-looppunten (fallback wanneer de WAV geen smpl-chunk heeft)
+    pub loop_start: Option<u32>,
+    pub loop_end: Option<u32>,
+    /// Release-samples (opgenomen kerkakoestiek per toetsduur)
+    pub releases: Vec<ReleaseDef>,
+    /// Aparte tremulant-opname van deze pijp (Hauptwerk "tremmed"-laag)
+    pub tremulant_sample: Option<PathBuf>,
+}
+
+/// Eén release-sample van een pijp. `max_key_press_time_ms = None` of `-1`
+/// betekent: de default/langste release (GrandOrgue MaxKeyPressTime-conventie).
+#[derive(Debug, Clone)]
+pub struct ReleaseDef {
+    pub path: PathBuf,
+    pub max_key_press_time_ms: Option<i32>,
+    pub cue_point: Option<u32>,
+    pub release_end: Option<u32>,
+}
+
 /// Pipe definition - either a direct sample path or a reference
 #[derive(Debug, Clone)]
 pub enum PipeDef {
     /// Direct path to WAV file
     Sample {
         path: PathBuf,
-        amplitude_level: Option<f32>,
-        pitch_correction: Option<i32>,
+        extra: PipeExtra,
     },
     /// Reference to another pipe: REF:manual:stop:pipe
     Reference {
@@ -309,6 +346,7 @@ impl OdfParser {
             number_of_tremulants: self.parse_u32(section, "NumberOfTremulants").unwrap_or(0),
             number_of_windchest_groups: self.parse_u32(section, "NumberOfWindchestGroups").unwrap_or(1),
             amplitude_level: self.parse_f32(section, "AmplitudeLevel").unwrap_or(100.0),
+            gain_db: self.parse_f32(section, "Gain").unwrap_or(0.0),
         })
     }
 
@@ -396,7 +434,8 @@ impl OdfParser {
                         id,
                         name: section.get("Name").cloned().unwrap_or_default(),
                         harmonic_number: harmonic,
-                        pitch_correction: self.parse_i32(section, "PitchCorrection").unwrap_or(0),
+                        pitch_correction: self.parse_f32(section, "PitchCorrection").unwrap_or(0.0),
+                        gain_db: self.parse_f32(section, "Gain").unwrap_or(0.0),
                         number_of_pipes: pipes.len() as u32,
                         first_accessible_pipe_logical_key: self.parse_u32(section, "FirstAccessiblePipeLogicalKeyNumber").unwrap_or(1),
                         windchest_group: self.parse_u32(section, "WindchestGroup").unwrap_or(1),
@@ -471,8 +510,9 @@ impl OdfParser {
                 } else {
                     pipes.push(PipeDef::Sample {
                         path: self.resolve_path(value),
-                        amplitude_level: self.parse_f32(rank_section, &format!("{}Gain", key)),
-                        pitch_correction: self.parse_i32(rank_section, &format!("{}PitchCorrection", key)),
+                        // Inschaling, stemming, percussive, loops en releases
+                        // komen uit de rank-sectie met dezelfde sleutelnamen.
+                        extra: self.parse_pipe_extra(rank_section, &key),
                     });
                 }
             }
@@ -483,6 +523,67 @@ impl OdfParser {
         } else {
             Some((pipes, harmonic))
         }
+    }
+
+    /// Parse alle extra pijp-attributen voor de pijp met sleutelprefix `key`
+    /// (bv. "Pipe001") uit `section`. Gedeeld door het inline-pad (parse_pipes)
+    /// en het rank-pad (parse_stop_ranks); de sleutelnamen zijn identiek.
+    ///
+    /// LET OP eenheden: `{key}Gain` is dB, `{key}AmplitudeLevel` is % en
+    /// PitchTuning/PitchCorrection zijn cents (floats, bv. "4.79062").
+    fn parse_pipe_extra(&self, section: &HashMap<String, String>, key: &str) -> PipeExtra {
+        // ODF-looppunten: alleen de eerste loop is nodig (fallback wanneer de
+        // WAV zelf geen smpl-chunk heeft).
+        let has_loops = self
+            .parse_u32(section, &format!("{}LoopCount", key))
+            .unwrap_or(0)
+            > 0;
+        let (loop_start, loop_end) = if has_loops {
+            (
+                self.parse_u32(section, &format!("{}Loop001Start", key)),
+                self.parse_u32(section, &format!("{}Loop001End", key)),
+            )
+        } else {
+            (None, None)
+        };
+
+        PipeExtra {
+            amplitude_level: self.parse_f32(section, &format!("{}AmplitudeLevel", key)),
+            gain_db: self.parse_f32(section, &format!("{}Gain", key)),
+            pitch_tuning_cents: self.parse_f32(section, &format!("{}PitchTuning", key)),
+            pitch_correction_cents: self.parse_f32(section, &format!("{}PitchCorrection", key)),
+            // Pipe-niveau Percussive (Y/N) overschrijft het stop-niveau; None = niet opgegeven.
+            percussive: section.get(&format!("{}Percussive", key)).map(|v| v == "Y"),
+            loop_start,
+            loop_end,
+            releases: self.parse_pipe_releases(section, key),
+            tremulant_sample: None,
+        }
+    }
+
+    /// Parse de release-samples van één pijp: `{key}ReleaseCount` gevolgd door
+    /// per release `{key}Release{jjj}` (pad), `...MaxKeyPressTime` (ms, -1 =
+    /// default/langste release), `...CuePoint` en `...ReleaseEnd` (samplenummers).
+    fn parse_pipe_releases(&self, section: &HashMap<String, String>, key: &str) -> Vec<ReleaseDef> {
+        let count = self
+            .parse_u32(section, &format!("{}ReleaseCount", key))
+            .unwrap_or(0);
+        let mut releases = Vec::with_capacity(count as usize);
+
+        for j in 1..=count {
+            let release_key = format!("{}Release{:03}", key, j);
+            if let Some(path) = section.get(&release_key) {
+                releases.push(ReleaseDef {
+                    path: self.resolve_path(path),
+                    max_key_press_time_ms: self
+                        .parse_i32(section, &format!("{}MaxKeyPressTime", release_key)),
+                    cue_point: self.parse_u32(section, &format!("{}CuePoint", release_key)),
+                    release_end: self.parse_u32(section, &format!("{}ReleaseEnd", release_key)),
+                });
+            }
+        }
+
+        releases
     }
 
     /// Parse pipe definitions for a stop
@@ -507,13 +608,10 @@ impl OdfParser {
                 } else {
                     // Sample path
                     let path = self.resolve_path(value);
-                    let amp_key = format!("Pipe{:03}AmplitudeLevel", i);
-                    let pitch_key = format!("Pipe{:03}PitchCorrection", i);
-
                     PipeDef::Sample {
                         path,
-                        amplitude_level: self.parse_f32(section, &amp_key),
-                        pitch_correction: self.parse_i32(section, &pitch_key),
+                        // Inschaling, stemming, percussive, loops en releases.
+                        extra: self.parse_pipe_extra(section, &key),
                     }
                 };
 
@@ -689,11 +787,18 @@ impl OrganDefinition {
         match reference {
             PipeDef::Sample { .. } => Some(reference),
             PipeDef::Empty => None,
-            PipeDef::Reference { manual: _, stop, pipe } => {
-                // Find the referenced stop
-                self.stops.iter()
-                    .find(|s| s.id == *stop)
-                    .and_then(|s| s.pipes.get(*pipe as usize - 1))
+            PipeDef::Reference { manual, stop, pipe } => {
+                // GrandOrgue's REF:mm:ss:pp gebruikt de MANUAL-RELATIEVE stopindex
+                // (1-based positie in de stoplijst van manual mm), niet de globale
+                // stop-id. Zoek dus eerst via het manual; val terug op de globale
+                // id voor sets die (incorrect maar voorkomend) zo verwijzen.
+                let resolved_stop = self.manuals.iter()
+                    .find(|m| m.number == *manual)
+                    .and_then(|m| m.stop_ids.get((*stop as usize).saturating_sub(1)))
+                    .and_then(|sid| self.stops.iter().find(|s| s.id == *sid))
+                    .or_else(|| self.stops.iter().find(|s| s.id == *stop));
+                resolved_stop
+                    .and_then(|s| s.pipes.get((*pipe as usize).saturating_sub(1)))
                     .and_then(|p| self.resolve_reference(p))
             }
         }
@@ -960,11 +1065,12 @@ mod tests {
             id: 1,
             name: name.to_string(),
             harmonic_number: 8,
-            pitch_correction: 0,
+            pitch_correction: 0.0,
             number_of_pipes: 1,
             first_accessible_pipe_logical_key: 1,
             windchest_group: 1,
             amplitude_level: 100.0,
+            gain_db: 0.0,
             percussive: false,
             accepts_retuning: retune,
             first_midi_note: None,
@@ -980,5 +1086,205 @@ mod tests {
         assert!(mk("Ambient noise", true).is_noise_or_mechanical());
         // Unpitched recording (AcceptsRetuning=N) is filtered regardless of name.
         assert!(mk("Whatever", false).is_noise_or_mechanical());
+    }
+
+    /// Testhelper: schrijf een mini-ODF naar een uniek tempbestand, parse hem
+    /// en ruim het bestand weer op. `name` moet per test uniek zijn zodat
+    /// parallel draaiende tests elkaar niet in de weg zitten.
+    fn parse_odf_str(name: &str, content: &str) -> OrganDefinition {
+        let path = std::env::temp_dir().join(format!(
+            "vpo_go_test_{}_{}.organ",
+            name,
+            std::process::id()
+        ));
+        fs::write(&path, content).expect("kan test-ODF niet schrijven");
+        let result = OdfParser::parse(&path);
+        let _ = fs::remove_file(&path);
+        result.expect("test-ODF moet parsen")
+    }
+
+    #[test]
+    fn test_parse_release_samples() {
+        // Inline-pad: releases met MaxKeyPressTime, CuePoint en ReleaseEnd,
+        // plus [Organ] Gain (taak 1).
+        let organ = parse_odf_str("releases", "\
+[Organ]
+ChurchName=Testkerk
+NumberOfManuals=1
+Gain=14
+[Manual001]
+Name=Manuaal
+NumberOfStops=1
+Stop001=001
+[Stop001]
+Name=Prestant 8'
+NumberOfLogicalPipes=1
+Pipe001=samples\\036-c.wav
+Pipe001ReleaseCount=2
+Pipe001Release001=rel\\short\\036-c.wav
+Pipe001Release001MaxKeyPressTime=500
+Pipe001Release001CuePoint=1000
+Pipe001Release001ReleaseEnd=48000
+Pipe001Release002=rel\\long\\036-c.wav
+Pipe001Release002MaxKeyPressTime=-1
+");
+        // [Organ] Gain in dB
+        assert_eq!(organ.organ.gain_db, 14.0);
+
+        let stop = organ.get_stop(1).expect("stop 1 moet bestaan");
+        let PipeDef::Sample { extra, .. } = &stop.pipes[0] else {
+            panic!("pijp 1 moet een Sample zijn");
+        };
+        assert_eq!(extra.releases.len(), 2);
+
+        // Korte release: alle attributen aanwezig
+        let r1 = &extra.releases[0];
+        assert!(r1.path.ends_with("rel/short/036-c.wav"));
+        assert_eq!(r1.max_key_press_time_ms, Some(500));
+        assert_eq!(r1.cue_point, Some(1000));
+        assert_eq!(r1.release_end, Some(48000));
+
+        // Lange release: MaxKeyPressTime=-1 (= default/langste), rest afwezig
+        let r2 = &extra.releases[1];
+        assert!(r2.path.ends_with("rel/long/036-c.wav"));
+        assert_eq!(r2.max_key_press_time_ms, Some(-1));
+        assert_eq!(r2.cue_point, None);
+        assert_eq!(r2.release_end, None);
+    }
+
+    #[test]
+    fn test_parse_release_samples_rank_path() {
+        // Rank-pad: dezelfde release-sleutels maar dan in de [Rank]-sectie.
+        let organ = parse_odf_str("releases_rank", "\
+[Organ]
+ChurchName=Testkerk
+NumberOfManuals=1
+[Manual001]
+Name=Manuaal
+NumberOfStops=1
+Stop001=001
+[Stop001]
+Name=Bourdon 16'
+NumberOfRanks=1
+Rank001=001
+NumberOfAccessiblePipes=1
+[Rank001]
+Name=Bourdon 16'
+NumberOfLogicalPipes=1
+Pipe001=samples\\036-c.wav
+Pipe001ReleaseCount=1
+Pipe001Release001=rel\\036-c.wav
+Pipe001Release001MaxKeyPressTime=-1
+Pipe001Percussive=Y
+Pipe001LoopCount=1
+Pipe001Loop001Start=4410
+Pipe001Loop001End=88200
+");
+        let stop = organ.get_stop(1).expect("stop 1 moet bestaan");
+        let PipeDef::Sample { extra, .. } = &stop.pipes[0] else {
+            panic!("pijp 1 moet een Sample zijn");
+        };
+        // Release uit de rank-sectie
+        assert_eq!(extra.releases.len(), 1);
+        assert!(extra.releases[0].path.ends_with("rel/036-c.wav"));
+        assert_eq!(extra.releases[0].max_key_press_time_ms, Some(-1));
+        // Per-pipe Percussive en ODF-looppunten (taak 3 en 4, rank-pad)
+        assert_eq!(extra.percussive, Some(true));
+        assert_eq!(extra.loop_start, Some(4410));
+        assert_eq!(extra.loop_end, Some(88200));
+    }
+
+    #[test]
+    fn test_parse_pitch_tuning_float() {
+        // PitchTuning is een float in cents (bv. "4.79062" uit GreenPositiv);
+        // een integer-parse zou dit stilletjes laten vallen.
+        let organ = parse_odf_str("pitch_tuning", "\
+[Organ]
+ChurchName=Testkerk
+NumberOfManuals=1
+[Manual001]
+Name=Manuaal
+NumberOfStops=1
+Stop001=001
+[Stop001]
+Name=Flet kryty 8'
+NumberOfLogicalPipes=2
+Pipe001=samples\\036-c.wav
+Pipe001PitchTuning=4.79062
+Pipe001Percussive=N
+Pipe002=samples\\037-c#.wav
+Pipe002PitchTuning=-7.48608
+");
+        let stop = organ.get_stop(1).expect("stop 1 moet bestaan");
+        let PipeDef::Sample { extra: e1, .. } = &stop.pipes[0] else {
+            panic!("pijp 1 moet een Sample zijn");
+        };
+        let PipeDef::Sample { extra: e2, .. } = &stop.pipes[1] else {
+            panic!("pijp 2 moet een Sample zijn");
+        };
+        assert!((e1.pitch_tuning_cents.unwrap() - 4.79062).abs() < 1e-4);
+        assert!((e2.pitch_tuning_cents.unwrap() - -7.48608).abs() < 1e-4);
+        // Per-pipe Percussive=N is Some(false); afwezig is None
+        assert_eq!(e1.percussive, Some(false));
+        assert_eq!(e2.percussive, None);
+        // Geen loops of releases opgegeven
+        assert_eq!(e1.loop_start, None);
+        assert!(e1.releases.is_empty());
+    }
+
+    #[test]
+    fn test_ref_resolution_manual_relative() {
+        // REF:mm:ss:pp gebruikt de MANUAL-RELATIEVE stopindex: REF:001:002:001
+        // moet de TWEEDE stop uit de stoplijst van manual 1 pakken (hier globale
+        // stop-id 4), niet de stop met globale id 2 (die bij manual 2 hoort).
+        let organ = parse_odf_str("ref_manual_relative", "\
+[Organ]
+ChurchName=Testkerk
+NumberOfManuals=2
+[Manual001]
+Name=Hoofdwerk
+NumberOfStops=2
+Stop001=003
+Stop002=004
+[Manual002]
+Name=Zwelwerk
+NumberOfStops=2
+Stop001=001
+Stop002=002
+[Stop001]
+Name=Zwelstop A
+NumberOfLogicalPipes=1
+Pipe001=zwel_a\\036-c.wav
+[Stop002]
+Name=Zwelstop B
+NumberOfLogicalPipes=1
+Pipe001=zwel_b\\036-c.wav
+[Stop003]
+Name=Hoofdstop A
+NumberOfLogicalPipes=1
+Pipe001=hoofd_a\\036-c.wav
+[Stop004]
+Name=Hoofdstop B
+NumberOfLogicalPipes=1
+Pipe001=hoofd_b\\036-c.wav
+[Stop005]
+Name=Koppelstop
+NumberOfLogicalPipes=1
+Pipe001=REF:001:002:001
+");
+        // De REF verwijst naar manual 1, stopindex 2 => globale stop-id 4
+        // ("Hoofdstop B"), dus hoofd_b — NIET zwel_b (globale stop-id 2).
+        let stop = organ.get_stop(5).expect("stop 5 moet bestaan");
+        let resolved = organ
+            .resolve_reference(&stop.pipes[0])
+            .expect("REF moet resolven");
+        let PipeDef::Sample { path, .. } = resolved else {
+            panic!("REF moet naar een Sample resolven");
+        };
+        assert!(
+            path.ends_with("hoofd_b/036-c.wav"),
+            "REF:001:002:001 resolvde naar {:?} maar moet de tweede stop van manual 1 zijn",
+            path
+        );
     }
 }

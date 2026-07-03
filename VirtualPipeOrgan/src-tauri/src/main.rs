@@ -131,7 +131,7 @@ fn main() {
                         info!("Uitgestelde ASIO-wissel: opgeslagen voorkeur wordt gecontroleerd/toegepast");
                         match st.apply_deferred_asio_pref() {
                             Ok(Some(id)) => {
-                                let res = if id.to_lowercase().ends_with(".organ") {
+                                let res = if commands::is_organ_file_id(&id) {
                                     commands::do_load_organ(&st, &id)
                                 } else {
                                     commands::do_load_samples_from_directory(&st, &id)

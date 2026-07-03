@@ -281,7 +281,7 @@ fn handle_audio_output(state: &AppState, body: &str) -> Result<Value, (u16, Stri
     // Mimic the frontend: reload the current organ so its samples re-register
     // on the freshly created audio thread.
     if let Some(id) = organ.clone() {
-        if id.to_lowercase().ends_with(".organ") {
+        if crate::commands::is_organ_file_id(&id) {
             crate::commands::do_load_organ(state, &id).map_err(|e| (500u16, e))?;
         } else {
             crate::commands::do_load_samples_from_directory(state, &id).map_err(|e| (500u16, e))?;

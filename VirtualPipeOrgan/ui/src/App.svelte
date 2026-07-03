@@ -329,7 +329,10 @@
       else localStorage.removeItem('jm-orgue-audio-buffer');
 
       if (organId) {
-        if (organId.toLowerCase().endsWith('.organ')) {
+        // Orgel-definitiebestanden (GrandOrgue .organ én Hauptwerk
+        // .Organ_Hauptwerk_xml) via loadOrgan; anders is het een sample-map.
+        const idLower = organId.toLowerCase();
+        if (idLower.endsWith('.organ') || idLower.endsWith('.organ_hauptwerk_xml')) {
           await loadOrgan(organId);
         } else {
           await loadFromFolder(organId);

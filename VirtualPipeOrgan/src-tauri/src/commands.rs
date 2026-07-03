@@ -505,6 +505,24 @@ pub fn load_organ(state: State<AppState>, path: String) -> Result<OrganInfoDto, 
 
 /// Herbruikbare load-organ logic die zowel vanuit Tauri commands als vanuit de test API
 /// kan worden aangeroepen. Neemt een `&AppState` (niet `State<AppState>`).
+/// GrandOrgue AmplitudeLevel (procent; 100 = neutraal, 0-1000) → dB.
+/// 0 of afwezig behandelen we als "niet gezet" → neutraal (0 dB).
+fn ampl_to_db(ampl: f32) -> f32 {
+    if ampl > 0.0 && (ampl - 100.0).abs() > f32::EPSILON {
+        20.0 * (ampl / 100.0).log10()
+    } else {
+        0.0
+    }
+}
+
+/// Is dit orgel-id een orgel-definitiebestand (GrandOrgue .organ of Hauptwerk
+/// .Organ_Hauptwerk_xml) — en dus voor do_load_organ — of een sample-map (voor
+/// do_load_samples_from_directory)? Gebruikt door alle herlaad-routes.
+pub fn is_organ_file_id(id: &str) -> bool {
+    let l = id.to_lowercase();
+    l.ends_with(".organ") || l.ends_with(".organ_hauptwerk_xml")
+}
+
 pub fn do_load_organ(state: &AppState, path: &str) -> Result<OrganInfoDto, String> {
     // Serialiseer t.o.v. audio-wissels en andere loads (zie load_switch_gate):
     // een wissel midden in een load zou de net-geregistreerde preload-buffers
@@ -534,13 +552,24 @@ pub fn do_load_organ(state: &AppState, path: &str) -> Result<OrganInfoDto, Strin
 
     info!("Parsed organ: {} by {}", definition.organ.church_name, definition.organ.organ_builder);
 
-    // Divisions sitting in a swell box: a GrandOrgue Enclosure is referenced by a
-    // WindchestGroup; match that windchest's name to the (cleaned) division name.
-    // (NumberOfEnclosures in [Organ] is sometimes wrong, but the windchest's
-    // Enclosure refs are authoritative.)
-    let enclosed_divs: std::collections::HashSet<String> = definition.windchests.iter()
-        .filter(|w| !w.enclosure_ids.is_empty())
-        .map(|w| clean_division_name(&w.comment))
+    // Divisions sitting in a swell box: een divisie is 'enclosed' wanneer de
+    // meerderheid van haar échte registers op een windchest staat die een
+    // Enclosure refereert. Structureel (geen naam-match): fixt sets waar de
+    // windchest-naam afwijkt van de divisienaam (bv. Bureå "Enclosed Manual
+    // wind-chest") en dekt ook de Hauptwerk-import (enclosure-per-windchest).
+    let enclosed_divs: std::collections::HashSet<String> = definition.manuals.iter()
+        .filter(|m| {
+            let (enclosed, total) = m.stop_ids.iter()
+                .filter_map(|sid| definition.stops.iter().find(|s| s.id == *sid))
+                .filter(|s| !s.is_noise_or_mechanical())
+                .fold((0usize, 0usize), |(e, t), s| {
+                    let enc = definition.windchests.iter()
+                        .any(|w| w.number == s.windchest_group && !w.enclosure_ids.is_empty());
+                    (e + enc as usize, t + 1)
+                });
+            total > 0 && enclosed * 2 >= total
+        })
+        .map(|m| m.name.clone())
         .collect();
     if !enclosed_divs.is_empty() {
         info!("Swell-enclosed divisions: {:?}", enclosed_divs);
@@ -566,16 +595,52 @@ pub fn do_load_organ(state: &AppState, path: &str) -> Result<OrganInfoDto, Strin
         // kan streamen. pipe_num = pijp-index+1 (zoals de NoteOn-route verwacht:
         // midi_note - first_midi_note + 1).
         let mut load_tasks: Vec<((u32, u32), PathBuf)> = Vec::new();
+        // Percussieve stops (one-shot: klok e.d.) en ODF-looppunten per bestand
+        // (fallback voor WAV's zonder smpl-chunk) — verzameld tijdens de loop.
+        let mut percussive_stops: HashSet<u32> = HashSet::new();
+        let mut odf_loops: HashMap<PathBuf, (u32, u32)> = HashMap::new();
+        // ODF-intonatie per pijp: de GrandOrgue-hiërarchie Organ × Stop × Pipe
+        // (AmplitudeLevel% en Gain-dB stapelen als dB-som; alle pitch-velden in
+        // cents opgeteld). Gaat als aparte laag naar de engine, gescheiden van
+        // de gebruikers-voicing.
+        let mut odf_voicings: HashMap<(u32, u32), (f32, f32)> = HashMap::new();
+        // Hauptwerk-tremulantlaag: aparte trem-opname per pijp.
+        let mut trem_tasks: Vec<((u32, u32), PathBuf)> = Vec::new();
+        let organ_db = ampl_to_db(definition.organ.amplitude_level) + definition.organ.gain_db;
         for stop in &definition.stops {
             // Sla mechaniek-/ruisopnamen over (klep-/registergeluid, blaasbalg,
             // ambient) — die horen geen speelbaar register te zijn.
             if stop.is_noise_or_mechanical() {
                 continue;
             }
+            if stop.percussive {
+                percussive_stops.insert(stop.id);
+            }
+            let stop_db = ampl_to_db(stop.amplitude_level) + stop.gain_db;
             for (pipe_idx, pipe) in stop.pipes.iter().enumerate() {
                 let pipe_num = (pipe_idx + 1) as u32;
                 if let Some(resolved) = definition.resolve_reference(pipe) {
-                    if let PipeDef::Sample { path, .. } = resolved {
+                    if let PipeDef::Sample { path, extra } = resolved {
+                        if extra.percussive == Some(true) {
+                            percussive_stops.insert(stop.id);
+                        }
+                        if let (Some(ls), Some(le)) = (extra.loop_start, extra.loop_end) {
+                            if le > ls {
+                                odf_loops.entry(path.clone()).or_insert((ls, le));
+                            }
+                        }
+                        let pipe_db = extra.amplitude_level.map(ampl_to_db).unwrap_or(0.0)
+                            + extra.gain_db.unwrap_or(0.0);
+                        let total_db = organ_db + stop_db + pipe_db;
+                        let total_cents = stop.pitch_correction
+                            + extra.pitch_tuning_cents.unwrap_or(0.0)
+                            + extra.pitch_correction_cents.unwrap_or(0.0);
+                        if total_db.abs() > 0.01 || total_cents.abs() > 0.01 {
+                            odf_voicings.insert((stop.id, pipe_num), (total_db, total_cents));
+                        }
+                        if let Some(trem_path) = &extra.tremulant_sample {
+                            trem_tasks.push(((stop.id, pipe_num), trem_path.clone()));
+                        }
                         load_tasks.push(((stop.id, pipe_num), path.clone()));
                     }
                 }
@@ -589,6 +654,7 @@ pub fn do_load_organ(state: &AppState, path: &str) -> Result<OrganInfoDto, Strin
         let mut seen = HashSet::new();
         let unique_paths: Vec<PathBuf> = load_tasks
             .iter()
+            .chain(trem_tasks.iter())
             .filter(|(_, p)| seen.insert(p.clone()))
             .map(|(_, p)| p.clone())
             .collect();
@@ -599,7 +665,7 @@ pub fn do_load_organ(state: &AppState, path: &str) -> Result<OrganInfoDto, Strin
             unique_paths.len()
         );
         let start_time = std::time::Instant::now();
-        let path_buffers: HashMap<PathBuf, Arc<PreloadBuffer>> = unique_paths
+        let mut path_buffers: HashMap<PathBuf, Arc<PreloadBuffer>> = unique_paths
             .par_iter()
             .filter_map(|p| match load_audio_preload(p, PRELOAD_SAMPLES) {
                 Ok(buf) => Some((p.clone(), Arc::new(buf))),
@@ -609,6 +675,26 @@ pub fn do_load_organ(state: &AppState, path: &str) -> Result<OrganInfoDto, Strin
                 }
             })
             .collect();
+
+        // ODF-looppunten als fallback voor WAV's zonder smpl-chunk. Alleen de
+        // preload-fase: de volledige achtergrond-load kent alleen smpl-punten
+        // (ODF-loops zouden daar mee-geresampled moeten worden — zeldzaam geval).
+        // De Arc's zijn hier nog uniek (net gebouwd), dus get_mut werkt.
+        let mut odf_loops_applied = 0usize;
+        for (path, (ls, le)) in &odf_loops {
+            if let Some(buf) = path_buffers.get_mut(path) {
+                if buf.loop_start.is_none() {
+                    if let Some(b) = Arc::get_mut(buf) {
+                        b.loop_start = Some(*ls as u64);
+                        b.loop_end = Some(*le as u64);
+                        odf_loops_applied += 1;
+                    }
+                }
+            }
+        }
+        if odf_loops_applied > 0 {
+            info!("ODF-looppunten toegepast op {} bestanden zonder smpl-chunk", odf_loops_applied);
+        }
         info!(
             "Loaded {} unieke preload-buffers in {:.2}s",
             path_buffers.len(),
@@ -621,6 +707,12 @@ pub fn do_load_organ(state: &AppState, path: &str) -> Result<OrganInfoDto, Strin
             .filter_map(|(key, p)| path_buffers.get(p).map(|buf| (*key, buf.clone())))
             .collect();
 
+        // Hauptwerk-tremulantlaag: fan-out van de trem-samples naar per-key buffers.
+        let trem_buffers: HashMap<(u32, u32), Arc<PreloadBuffer>> = trem_tasks
+            .iter()
+            .filter_map(|(key, p)| path_buffers.get(p).map(|buf| (*key, buf.clone())))
+            .collect();
+
         info!("Registering {} preload buffers for instant playback", preload_buffers.len());
         {
             let player_lock = state.audio_player.read();
@@ -628,6 +720,16 @@ pub fn do_load_organ(state: &AppState, path: &str) -> Result<OrganInfoDto, Strin
                 player
                     .send_command(crate::audio::AudioCommand::RegisterPreloadBuffers(Arc::new(preload_buffers)))
                     .map_err(|e| format!("Failed to register preload buffers: {}", e))?;
+                // Altijd sturen (ook leeg): vervangt de sets van het vorige orgel.
+                let _ = player.send_command(crate::audio::AudioCommand::RegisterPercussiveStops(percussive_stops));
+                if !trem_buffers.is_empty() {
+                    info!("Tremulant-samplelaag: {} pijpen (echte trem-opnamen)", trem_buffers.len());
+                }
+                let _ = player.send_command(crate::audio::AudioCommand::RegisterTremulantBuffers(Arc::new(trem_buffers)));
+                if !odf_voicings.is_empty() {
+                    info!("ODF-intonatie: {} pijpen met gain/pitch uit de sampleset", odf_voicings.len());
+                }
+                let _ = player.send_command(crate::audio::AudioCommand::RegisterOdfVoicings(Arc::new(odf_voicings)));
             }
         }
     }
@@ -739,6 +841,32 @@ pub fn do_load_organ(state: &AppState, path: &str) -> Result<OrganInfoDto, Strin
     state.send_audio_command(AudioCommand::RegisterStopDivisionMap(stop_div_map));
     state.reset_division_gains(organ_info.divisions.len());
     state.reset_division_settings(organ_info.divisions.len());
+
+    // ODF-tremulantparameters als default voor de per-divisie LFO: rate uit
+    // Period (ms), diepte uit AmpModDepth (%). Eventueel per orgel opgeslagen
+    // gebruikersinstellingen overschrijven dit daarna via de normale restore.
+    for (div_idx, manual) in definition.manuals.iter().enumerate() {
+        if let Some(tid) = manual.tremulant_ids.first() {
+            if let Some(trem) = definition.tremulants.iter().find(|t| t.number == *tid) {
+                if trem.period > 1.0 {
+                    let rate = (1000.0 / trem.period).clamp(0.5, 12.0);
+                    let amp_depth = if trem.amp_mod_depth > 0.0 {
+                        trem.amp_mod_depth.clamp(1.0, 50.0)
+                    } else {
+                        10.0
+                    };
+                    info!("ODF-tremulant '{}': {:.1} Hz, amp-diepte {:.0}%", manual.name, rate, amp_depth);
+                    state.send_audio_command(AudioCommand::SetTremulantLFO {
+                        division_index: div_idx as u8,
+                        active: false,
+                        rate,
+                        amp_depth,
+                        pitch_depth: 15.0,
+                    });
+                }
+            }
+        }
+    }
 
     {
         let mut current = state.loaded_organ_info.write();
@@ -2818,6 +2946,10 @@ pub fn do_load_samples_from_directory(state: &AppState, directory: &str) -> Resu
         if let Some(ref player) = *player_lock {
             player.send_command(crate::audio::AudioCommand::RegisterPreloadBuffers(Arc::new(preload_buffers)))
                 .map_err(|e| format!("Failed to register preload buffers: {}", e))?;
+            // Custom sample-mappen kennen geen percussieve stops of ODF-intonatie:
+            // wis de sets van een eventueel vorig (GrandOrgue/Hauptwerk-)orgel.
+            let _ = player.send_command(crate::audio::AudioCommand::RegisterPercussiveStops(Default::default()));
+            let _ = player.send_command(crate::audio::AudioCommand::RegisterOdfVoicings(Arc::new(Default::default())));
         }
     }
 

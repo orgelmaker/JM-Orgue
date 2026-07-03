@@ -43,6 +43,9 @@ pub enum SampleSource {
 pub enum AudioCommand {
     /// Note on: (stop_id, pipe_num, midi_note, velocity)
     NoteOn { stop_id: u32, pipe_num: u32, midi_note: u8, velocity: f32 },
+    /// Stop-ids die one-shot afspelen (ODF Percussive: klok/glockenspiel —
+    /// niet loopen maar één keer uitklinken).
+    RegisterPercussiveStops(std::collections::HashSet<u32>),
     /// Note off: (stop_id, pipe_num)
     NoteOff { stop_id: u32, pipe_num: u32 },
     /// All notes off
@@ -100,6 +103,11 @@ pub enum AudioCommand {
     SetDivisionCcis { division_index: u8, enabled: bool },
     /// Set per-pipe voicing (volume + pitch adjustment)
     SetPipeVoicing { stop_id: u32, pipe_num: u32, volume_db: f32, pitch_cents: f32 },
+    /// ODF-intonatie uit de sampleset (GrandOrgue Gain/AmplitudeLevel/PitchTuning-
+    /// hiërarchie), per (stop_id, pipe_num) → (volume_db, pitch_cents). Staat LOS
+    /// van de gebruikers-voicing (SetPipeVoicing) en stapelt daarmee — zo blijft
+    /// de eigen intonatie van de gebruiker gescheiden van wat de set voorschrijft.
+    RegisterOdfVoicings(Arc<HashMap<(u32, u32), (f32, f32)>>),
     /// Clear all samples
     ClearSamples,
     /// Shutdown
@@ -128,6 +136,8 @@ struct PlayingVoice {
     target_envelope: f32,
     envelope_speed: f32,
     releasing: bool,
+    /// One-shot (ODF Percussive): niet loopen, één keer uitklinken.
+    one_shot: bool,
     stop_id: u32,
     pipe_num: u32,
     midi_note: u8,
@@ -136,15 +146,18 @@ struct PlayingVoice {
 }
 
 impl PlayingVoice {
-    fn new_from_sample(sample: SampleRef, stop_id: u32, pipe_num: u32, midi_note: u8, velocity: f32) -> Self {
+    fn new_from_sample(sample: SampleRef, stop_id: u32, pipe_num: u32, midi_note: u8, _velocity: f32) -> Self {
         Self {
             source: VoiceSampleSource::Full(sample),
             position: 0.0,
             rate: 1.0,
             envelope: 0.0,
-            target_envelope: velocity,
+            // Orgelpijpen zijn niet aanslaggevoelig: altijd vol volume,
+            // ongeacht MIDI-velocity (zoals GrandOrgue/Hauptwerk).
+            target_envelope: 1.0,
             envelope_speed: 0.005,
             releasing: false,
+            one_shot: false,
             stop_id,
             pipe_num,
             midi_note,
@@ -152,7 +165,7 @@ impl PlayingVoice {
         }
     }
 
-    fn new_from_preload(preload: Arc<PreloadBuffer>, stop_id: u32, pipe_num: u32, midi_note: u8, velocity: f32, output_sample_rate: u32) -> Self {
+    fn new_from_preload(preload: Arc<PreloadBuffer>, stop_id: u32, pipe_num: u32, midi_note: u8, _velocity: f32, output_sample_rate: u32) -> Self {
         // Calculate playback rate to correct for sample rate mismatch
         let rate = preload.sample_rate as f64 / output_sample_rate as f64;
         Self {
@@ -160,9 +173,11 @@ impl PlayingVoice {
             position: 0.0,
             rate,
             envelope: 0.0,
-            target_envelope: velocity,
+            // Orgelpijpen zijn niet aanslaggevoelig (zie new_from_sample).
+            target_envelope: 1.0,
             envelope_speed: 0.005,
             releasing: false,
+            one_shot: false,
             stop_id,
             pipe_num,
             midi_note,
@@ -202,6 +217,7 @@ impl PlayingVoice {
             target_envelope,         // Fade up to original level
             envelope_speed: 0.00015, // ~140ms crossfade at 48kHz
             releasing: false,
+            one_shot: false,
             stop_id,
             pipe_num,
             midi_note,
@@ -277,6 +293,8 @@ impl PlayingVoice {
         // sample end, so ODF-looped samples wrapped with a HARD jump → a periodic
         // click ("tikken") on sustained notes. read_voice() blends the loop tail
         // into the pre-loop region so the seam is value-continuous.
+        // One-shot (Percussive) leest net als release: lineair uitspelen, geen loop.
+        let no_loop = self.releasing || self.one_shot;
         let value = match &self.source {
             VoiceSampleSource::Full(sample) => {
                 let len = sample.data.len();
@@ -285,18 +303,39 @@ impl PlayingVoice {
                     _ => (len / 4, len),
                 };
                 let xfade = loop_xfade(le.saturating_sub(ls), ls);
-                read_voice(&sample.data, ls, le, xfade, &mut self.position, self.releasing, &mut self.envelope)
+                read_voice(&sample.data, ls, le, xfade, &mut self.position, no_loop, &mut self.envelope)
             }
             VoiceSampleSource::PreloadOnly { preload, .. } => {
-                // The preload holds only the attack chunk; loop within it.
+                // The preload holds only the attack chunk. Gebruik de ECHTE
+                // looppunten wanneer die (geheel of gedeeltelijk) binnen de
+                // attack-buffer vallen — de vorige ¾-fallback liet de attack-
+                // transient periodiek terugkeren tot de full load klaar was.
                 let alen = preload.attack_data.len();
-                let ls = alen / 4;
-                let xfade = loop_xfade(alen.saturating_sub(ls), ls);
-                read_voice(&preload.attack_data, ls, alen, xfade, &mut self.position, self.releasing, &mut self.envelope)
+                let (ls, le) = match (loop_start, loop_end) {
+                    // Volledige loop binnen de preload: exact gebruiken.
+                    (Some(a), Some(b)) if b > a && (b as usize) <= alen => (a as usize, b as usize),
+                    // Loop begint binnen de preload maar eindigt erbuiten: loop
+                    // vanaf het echte startpunt tot het einde van de buffer —
+                    // de attack blijft dan tenminste buiten het loopgebied.
+                    (Some(a), _) if (a as usize) + 1024 < alen => (a as usize, alen),
+                    _ => (alen / 4, alen),
+                };
+                let xfade = loop_xfade(le.saturating_sub(ls), ls);
+                read_voice(&preload.attack_data, ls, le, xfade, &mut self.position, no_loop, &mut self.envelope)
             }
         };
 
         self.position += self.rate;
+
+        // One-shot: klaar zodra het einde bereikt is — daarna opruimen via retain.
+        if self.one_shot && !self.releasing
+            && self.position as usize + 1 >= self.get_sample_len()
+        {
+            self.releasing = true;
+            self.target_envelope = 0.0;
+            self.envelope = 0.0;
+        }
+
         value * self.envelope
     }
 }
@@ -706,6 +745,9 @@ fn run_audio_thread(
     ));
     // Set of stop_ids that have tremulant samples (populated at load time)
     let stops_with_trem_samples: Arc<RwLock<std::collections::HashSet<u32>>> = Arc::new(RwLock::new(std::collections::HashSet::new()));
+    // ODF-intonatie van de sampleset: (stop_id, pipe_num) → (volume_db, pitch_cents).
+    // Stapelt met de gebruikers-voicing (pipe_voicing) in de render-lus.
+    let odf_voicing: Arc<RwLock<HashMap<(u32, u32), (f32, f32)>>> = Arc::new(RwLock::new(HashMap::new()));
     // Per-division wind models
     let wind_models: Arc<RwLock<Vec<WindModel>>> = Arc::new(RwLock::new(
         (0..32).map(|_| WindModel::new(sample_rate)).collect()
@@ -727,6 +769,8 @@ fn run_audio_thread(
     let use_algorithmic_reverb: Arc<RwLock<bool>> = Arc::new(RwLock::new(false));
     // Parametric EQ
     let parametric_eq: Arc<RwLock<ParametricEq>> = Arc::new(RwLock::new(ParametricEq::new(sample_rate)));
+    // Stop-ids die one-shot afspelen (ODF Percussive: klok e.d.)
+    let percussive_stops: Arc<RwLock<std::collections::HashSet<u32>>> = Arc::new(RwLock::new(Default::default()));
     // Per-pipe voicing: (stop_id, pipe_num) → (volume_db, pitch_cents)
     let pipe_voicing: Arc<RwLock<HashMap<(u32, u32), (f32, f32)>>> = Arc::new(RwLock::new(HashMap::new()));
 
@@ -777,6 +821,7 @@ fn run_audio_thread(
     let voices_clone = voices.clone();
     let master_gain_clone = master_gain.clone();
     let master_expression_clone = master_expression.clone();
+    let percussive_stops_clone = percussive_stops.clone();
     let division_gains_clone = division_gains.clone();
     let trem_lfos_clone = trem_lfos.clone();
     let stops_with_trem_clone = stops_with_trem_samples.clone();
@@ -792,6 +837,7 @@ fn run_audio_thread(
     let use_algo_reverb_clone = use_algorithmic_reverb.clone();
     let eq_clone = parametric_eq.clone();
     let voicing_clone = pipe_voicing.clone();
+    let odf_voicing_clone = odf_voicing.clone();
     let output_channels_clone = division_output_channels.clone();
     let ccis_enabled_clone = ccis_enabled.clone();
     let ccis_params_clone = ccis_params.clone();
@@ -845,9 +891,13 @@ fn run_audio_thread(
                             samples_lock.get(&key).cloned()
                         };
 
+                        // One-shot (ODF Percussive)? Dan niet loopen maar uitklinken.
+                        let one_shot = percussive_stops_clone.read().contains(&stop_id);
+
                         if let Some(sample) = sample_opt {
                             // Full sample available - instant playback
-                            let voice = PlayingVoice::new_from_sample(sample.clone(), stop_id, pipe_num, midi_note, velocity);
+                            let mut voice = PlayingVoice::new_from_sample(sample.clone(), stop_id, pipe_num, midi_note, velocity);
+                            voice.one_shot = one_shot;
                             voices_clone.write().push(voice);
                             debug!("NoteOn (full): stop={}, pipe={}, note={}", stop_id, pipe_num, midi_note);
                         } else {
@@ -865,6 +915,7 @@ fn run_audio_thread(
                             if let Some(preload) = preload_opt {
                                 // Start playing from preload buffer immediately
                                 let mut voice = PlayingVoice::new_from_preload(preload.clone(), stop_id, pipe_num, midi_note, velocity, sample_rate);
+                                voice.one_shot = one_shot;
 
                                 // Request background load of full sample
                                 let path = preload.source_path.clone();
@@ -882,10 +933,26 @@ fn run_audio_thread(
                     }
                     AudioCommand::NoteOff { stop_id, pipe_num } => {
                         for voice in voices_clone.write().iter_mut() {
-                            if voice.stop_id == stop_id && voice.pipe_num == pipe_num && !voice.releasing {
+                            // One-shot-voices (Percussive: klok) klinken uit en
+                            // negeren note-off, zoals GrandOrgue dat doet.
+                            if voice.stop_id == stop_id && voice.pipe_num == pipe_num
+                                && !voice.releasing && !voice.one_shot
+                            {
                                 voice.release();
                             }
                         }
+                    }
+                    AudioCommand::RegisterPercussiveStops(set) => {
+                        if !set.is_empty() {
+                            info!("Percussieve (one-shot) stops geregistreerd: {}", set.len());
+                        }
+                        *percussive_stops_clone.write() = set;
+                    }
+                    AudioCommand::RegisterOdfVoicings(map) => {
+                        if !map.is_empty() {
+                            info!("ODF-intonatie geregistreerd voor {} pijpen", map.len());
+                        }
+                        *odf_voicing_clone.write() = (*map).clone();
                     }
                     AudioCommand::AllNotesOff => {
                         for voice in voices_clone.write().iter_mut() {
@@ -1138,6 +1205,8 @@ fn run_audio_thread(
                         preloads_clone.write().clear();
                         trem_preloads_clone.write().clear();
                         trem_active_clone.write().clear();
+                        percussive_stops_clone.write().clear();
+                        odf_voicing_clone.write().clear();
                         voices_clone.write().clear();
                         stop_to_division_clone.write().clear();
                         *division_gains_clone.write() = vec![1.0; 32];
@@ -1189,6 +1258,7 @@ fn run_audio_thread(
                 let mut voices_lock = voices_clone.write();
                 let mut swell_flt = swell_filters_clone.write();
                 let pipe_voicing_map = voicing_clone.read();
+                let odf_voicing_map = odf_voicing_clone.read();
                 let mut wm = wind_models_clone.write();
                 let mut trem_lfo = trem_lfos_clone.write();
                 let stops_with_trem = stops_with_trem_clone.read();
@@ -1278,10 +1348,17 @@ fn run_audio_thread(
                         // van de sample worden toegepast (zodat ze de huidige sample beïnvloedt)
                         // én valt onder de `voice.rate = original_rate`-reset hieronder. Anders
                         // compoundeert de detune elke sample en loopt de toonhoogte weg.
-                        let (voicing_vol, voicing_pitch) = pipe_voicing_map
+                        // ODF-intonatie (uit de sampleset) en gebruikers-voicing stapelen:
+                        // dB's en cents worden opgeteld.
+                        let (user_vol, user_pitch) = pipe_voicing_map
                             .get(&(voice.stop_id, voice.pipe_num))
                             .copied()
                             .unwrap_or((0.0, 0.0));
+                        let (odf_vol, odf_pitch) = odf_voicing_map
+                            .get(&(voice.stop_id, voice.pipe_num))
+                            .copied()
+                            .unwrap_or((0.0, 0.0));
+                        let (voicing_vol, voicing_pitch) = (user_vol + odf_vol, user_pitch + odf_pitch);
                         if voicing_pitch.abs() > 0.01 {
                             let vr = 2.0_f64.powf(voicing_pitch as f64 / 1200.0);
                             voice.rate *= vr;

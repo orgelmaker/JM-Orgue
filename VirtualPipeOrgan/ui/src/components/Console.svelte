@@ -1528,8 +1528,10 @@
       const selected = await open({
         multiple: false,
         filters: [{
-          name: 'Orgeldefinitie',
-          extensions: ['organ']
+          name: 'Orgeldefinitie (GrandOrgue / Hauptwerk)',
+          // Hauptwerk-sets gebruiken *.Organ_Hauptwerk_xml; de backend routeert
+          // beide via do_load_organ (is_organ_file_id).
+          extensions: ['organ', 'Organ_Hauptwerk_xml']
         }]
       });
       if (selected) {
