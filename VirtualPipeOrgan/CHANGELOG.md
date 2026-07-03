@@ -9,9 +9,12 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ### Opgelost
 
-- 🔊 **ASIO**: automatische WASAPI-warm-up bij koude start op ASIO — voorkomt dat ASIO4ALL stil blijft na een koude start
-- 🔊 **ASIO→ASIO-wissel** sluit nu eerst de oude stream voordat de nieuwe wordt geopend
-- 📊 **Audio-callback-watchdog** in het log — meldt wanneer audio-callbacks na init stoppen
+- 🔊 **ASIO**: uitgestelde ASIO-wissel bij een opgeslagen ASIO-voorkeur (start op WASAPI, automatische wissel ±10 s na de app-start) — voorkomt dat ASIO4ALL stil blijft na een koude start
+- 🔊 **ASIO→ASIO-wissel** sluit nu eerst de oude stream voordat de nieuwe wordt geopend (ASIO-drivers zijn single-client)
+- 📊 **Audio-callback-watchdog** in het log — meldt wanneer audio-callbacks stoppen (init én periodiek elke 30 s)
+- 🎹 **MIDI-opname**: stopknop stopt de capture nu echt — noten tijdens de opslagdialoog belanden niet meer in het .mid-bestand
+- 🎚️ **MIDI-volumepedaal (CC7/CC11)** stuurt nu een correct dB-bereik (was: lineaire waarde als dB geïnterpreteerd, waardoor het pedaal feitelijk niets deed)
+- 🩹 **Frontend**: crescendo-stap aanklikken past nu echt de registers toe; SetzerBar-MIDI-acties (tremulant/EQ/afsluiten) werken weer; opgeslagen voicings zichtbaar na herladen; knopgrootte/layout van het registervenster springt niet meer terug; versienummer in de statusbalk is dynamisch
 
 ## [0.4.0] - 2026-06-24
 

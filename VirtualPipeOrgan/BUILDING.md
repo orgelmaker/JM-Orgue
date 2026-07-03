@@ -121,11 +121,14 @@ werken zoals voorheen.
 #### Problemen met ASIO4ALL
 
 **Symptoom:** de stream start zonder fout maar blijft stil. In het log zie je
-dan: `Audio-watchdog: callbacks GESTOPT na init`.
+dan: `Audio-watchdog: callbacks GESTOPT`.
 
-**Oorzaak:** ASIO4ALL initialiseert na een koude start vaak niet goed. De app
-doet daarom automatisch een korte WASAPI-warm-up wanneer ASIO de opgeslagen
-host is.
+**Oorzaak:** ASIO4ALL levert bij een kóúde start (direct bij het opstarten van
+de app) alleen een korte callback-burst en valt dan stil; dezelfde wissel werkt
+wél betrouwbaar op een volledig draaiende app. Bij een opgeslagen ASIO-voorkeur
+start de app daarom eerst op WASAPI en voert hij ±10 s na de start automatisch
+de ASIO-wissel uit (het orgel wordt daarbij opnieuw geladen). In het log:
+`Uitgestelde ASIO-wissel wordt uitgevoerd`.
 
 **Werkt het dan nog niet:**
 - sluit andere audio-apps;
