@@ -377,7 +377,9 @@
       </div>
     </div>
 
-    <div class="panel-content" class:divisions-vertical={layout === 'vertical'}>
+    <!-- --stop-min-width op de container zodat ook .division (min-width in
+         verticale modus) de ingestelde knopgrootte kan gebruiken -->
+    <div class="panel-content" class:divisions-vertical={layout === 'vertical'} style="--stop-min-width: {stopSize}px">
       {#each selectedDivisions.map(name => organInfo.divisions.find(d => d.name === name)).filter(Boolean) as division}
         {@const hasTrem = division.stops.some(s => s.has_tremulant)}
         <div class="division">
@@ -503,15 +505,24 @@
     flex-direction: column;
     gap: 0.75rem;
   }
+  /* Verticale modus: divisies naast elkaar op volle hoogte, zodat de
+     kolommen in .stops-grid.stops-vertical (styles.css) kunnen vullen. */
   .panel-content.divisions-vertical {
     flex-direction: row;
-    align-items: flex-start;
-    flex-wrap: wrap;
-    overflow-x: auto;
+    align-items: stretch;
+    flex-wrap: nowrap;
+    overflow-x: auto;   /* veel divisies → horizontaal scrollen */
+    overflow-y: hidden; /* hoogte van het venster is de grens */
   }
   .panel-content.divisions-vertical > :global(.division) {
     flex: 1 1 0;
-    min-width: 0;
+    /* Minstens één kolom breed (knop + padding) */
+    min-width: calc(var(--stop-min-width, 100px) + 1.5rem);
+    display: flex;
+    flex-direction: column;
+  }
+  .panel-content.divisions-vertical > :global(.division) > :global(.division-header) {
+    flex-shrink: 0; /* kop blijft op vaste hoogte bovenaan */
   }
   .panel-toggle-btn {
     display: flex;

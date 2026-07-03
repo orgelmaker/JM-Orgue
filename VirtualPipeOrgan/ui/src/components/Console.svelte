@@ -2024,20 +2024,77 @@
     saveStopOrder();
   }
 
-  function handleDrop(divName, toIdx) {
-    if (dragDiv !== divName || dragIdx === null || dragIdx === toIdx) return;
-    // Base the reorder on the CURRENTLY DISPLAYED order so the drag/drop indices
-    // always match what the user sees (and so the saved order is complete).
+  // Herordenen op basis van de GETOONDE volgorde (displayOrgan) zodat de indices
+  // altijd kloppen met wat de gebruiker ziet (en de bewaarde volgorde compleet is).
+  // Gedeeld door de sorteerlijst (Instellingen) én het pointer-slepen op het orgelscherm.
+  function reorderStop(divName, fromIdx, toIdx) {
     const organ = displayOrgan || organInfo || demoOrgan;
     const div = organ.divisions.find(d => d.name === divName);
     if (!div) return;
-    const currentOrder = div.stops.map(s => s.id);
-    const item = currentOrder.splice(dragIdx, 1)[0];
-    currentOrder.splice(toIdx, 0, item);
-    stopOrder[divName] = currentOrder;
+    const order = div.stops.map(s => s.id);
+    const [item] = order.splice(fromIdx, 1);
+    order.splice(toIdx, 0, item);
+    stopOrder[divName] = order;
     stopOrder = stopOrder;
     saveStopOrder();
+  }
+
+  function handleDrop(divName, toIdx) {
+    if (dragDiv !== divName || dragIdx === null || dragIdx === toIdx) return;
+    reorderStop(divName, dragIdx, toIdx);
     dragDiv = null; dragIdx = null; dropIdx = null;
+  }
+
+  // --- Registerknoppen verslepen op het orgelscherm zelf (alleen met de muis) ---
+  // Pointer-events i.p.v. HTML5 draggable: native drag-and-drop is onbetrouwbaar
+  // in WebView2 (daarom bestaan de ▲▼-knoppen hierboven). Een drempel van 8px
+  // zorgt dat een gewone klik het register blijft togglen; rechtsklik en
+  // touch-long-press blijven van use:midiLearn (touch wordt hier genegeerd).
+  const KNOB_DRAG_THRESHOLD_PX = 8;
+  let knobDrag = null;           // { div, fromIdx, startX, startY, active, overIdx }
+  let knobDragJustEnded = false; // onderdrukt de click die direct op een sleep volgt
+
+  function knobPointerDown(e, divName, idx) {
+    if (e.pointerType !== 'mouse' || e.button !== 0) return; // alleen linkermuisknop
+    knobDrag = { div: divName, fromIdx: idx, startX: e.clientX, startY: e.clientY, active: false, overIdx: null };
+    // Pointer capture: ook buiten de knop (en het venster) blijven events binnenkomen.
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {}
+    window.addEventListener('pointermove', knobPointerMove);
+    window.addEventListener('pointerup', knobPointerUp);
+    window.addEventListener('pointercancel', knobPointerUp);
+  }
+
+  function knobPointerMove(e) {
+    if (!knobDrag) return;
+    if (!knobDrag.active) {
+      // Pas een sleep na >8px beweging — daaronder blijft het een gewone klik.
+      if (Math.hypot(e.clientX - knobDrag.startX, e.clientY - knobDrag.startY) < KNOB_DRAG_THRESHOLD_PX) return;
+      knobDrag.active = true;
+    }
+    // Doelpositie via hit-test onder de cursor — werkt in horizontale én verticale layout.
+    const el = document.elementFromPoint(e.clientX, e.clientY);
+    const hit = el && el.closest ? el.closest('[data-knob-div]') : null;
+    if (hit && hit.dataset.knobDiv === knobDrag.div) {
+      knobDrag.overIdx = parseInt(hit.dataset.knobIdx, 10);
+    } else {
+      knobDrag.overIdx = null; // buiten de eigen divisie → geen geldig doel
+    }
+    knobDrag = knobDrag; // reactieve update voor de visuele feedback
+  }
+
+  function knobPointerUp(e) {
+    window.removeEventListener('pointermove', knobPointerMove);
+    window.removeEventListener('pointerup', knobPointerUp);
+    window.removeEventListener('pointercancel', knobPointerUp);
+    const d = knobDrag;
+    knobDrag = null;
+    if (!d || !d.active) return; // geen sleep geweest → het click-event togglet gewoon
+    // De click die op deze pointerup volgt mag het register NIET togglen.
+    knobDragJustEnded = true;
+    setTimeout(() => { knobDragJustEnded = false; }, 0);
+    if (e.type === 'pointercancel') return;
+    if (d.overIdx === null || Number.isNaN(d.overIdx) || d.overIdx === d.fromIdx) return;
+    reorderStop(d.div, d.fromIdx, d.overIdx);
   }
 
   $: if (organInfo) loadStopOrder();
@@ -2305,7 +2362,9 @@
         </div>
 
         <!-- Single register view -->
-        <div class="divisions-container" class:divisions-vertical={mainLayout === 'vertical'}>
+        <!-- --stop-min-width op de container zodat ook .division (min-width in
+             verticale modus) de ingestelde knopgrootte kan gebruiken -->
+        <div class="divisions-container" class:divisions-vertical={mainLayout === 'vertical'} style="--stop-min-width: {stopSize}px">
           {#each selectedDivisions.map(name => displayOrgan.divisions.find(d => d.name === name)).filter(Boolean) as division}
             {@const tremDivIdx = displayOrgan.divisions.findIndex(d => d.name === division.name)}
             <div class="division">
@@ -2327,14 +2386,24 @@
                   </div>
                 {/if}
               </div>
-              <div class="stops-grid" class:stops-vertical={mainLayout === 'vertical'} style="--stop-min-width: {stopSize}px">
-                {#each division.stops as stop}
+              <div
+                class="stops-grid"
+                class:stops-vertical={mainLayout === 'vertical'}
+                class:knob-dragging={!!(knobDrag && knobDrag.active && knobDrag.div === division.name)}
+                style="--stop-min-width: {stopSize}px"
+              >
+                {#each division.stops as stop, stopIdx}
                   {@const name = cleanStopName(stop)}
                   <button
                     class="stop-knob {getStopClass(stop)}"
                     class:engaged={stop.drawn}
                     class:has-midi={stopMidiBindings[stop.midi_action_code] > 0}
-                    on:click={() => dispatch('toggleStop', stop.id)}
+                    class:dragging={!!(knobDrag && knobDrag.active && knobDrag.div === division.name && knobDrag.fromIdx === stopIdx)}
+                    class:drag-target={!!(knobDrag && knobDrag.active && knobDrag.div === division.name && knobDrag.overIdx === stopIdx && knobDrag.fromIdx !== stopIdx)}
+                    data-knob-div={division.name}
+                    data-knob-idx={stopIdx}
+                    on:pointerdown={(e) => knobPointerDown(e, division.name, stopIdx)}
+                    on:click={() => { if (knobDragJustEnded) return; dispatch('toggleStop', stop.id); }}
                     use:midiLearn={{ onTrigger: () => showStopContextMenuAt(stop.midi_action_code) }}
                     aria-label="{stop.name} {stop.pitch || ''} — {stop.drawn ? 'ingeschakeld' : 'uitgeschakeld'}"
                     aria-pressed={stop.drawn}

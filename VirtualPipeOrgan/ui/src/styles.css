@@ -980,9 +980,24 @@ input[type="range"]::-webkit-slider-thumb:hover {
   flex-shrink: 0;
 }
 
-/* Vertical stops layout - responsive grid per divisie */
+/* Verticale modus: registers vullen een KOLOM van boven naar beneden;
+   kolom vol → volgende kolom rechts ernaast (CSS multi-column).
+   Vereist een begrensde hoogte — die komt uit .divisions-vertical .division
+   (flex-kolom op volle hoogte). --stop-min-width blijft de kolombreedte sturen. */
 .stops-grid.stops-vertical {
-  grid-template-columns: repeat(auto-fill, minmax(var(--stop-min-width, 90px), 1fr));
+  display: block;                        /* multi-column i.p.v. grid */
+  columns: var(--stop-min-width, 100px); /* kolombreedte = knopgrootte-instelling */
+  column-gap: 0.4rem;
+  column-fill: auto;                     /* eerst kolom 1 helemaal vullen, dan pas kolom 2 */
+  flex: 1 1 auto;                        /* vult de divisie onder de kop */
+  min-height: 0;
+  overflow-x: auto;                      /* meer kolommen dan breedte → horizontaal scrollen */
+  overflow-y: hidden;
+}
+
+.stops-grid.stops-vertical .stop-knob {
+  break-inside: avoid;                   /* knop nooit over twee kolommen splitsen */
+  margin-bottom: 0.4rem;                 /* vervangt de grid-gap uit de horizontale modus */
 }
 
 /* ============================================
@@ -1044,18 +1059,28 @@ input[type="range"]::-webkit-slider-thumb:hover {
   gap: 0.75rem;
 }
 
-/* Vertical mode: divisies naast elkaar als kolommen */
+/* Vertical mode: divisies naast elkaar als kolommen op volle hoogte.
+   nowrap + stretch: elke divisie krijgt de volledige viewport-hoogte zodat de
+   kolommen in .stops-grid.stops-vertical iets hebben om tegenaan te vullen. */
 .divisions-container.divisions-vertical {
   flex-direction: row;
-  align-items: flex-start;
-  flex-wrap: wrap;
-  overflow-x: auto;
+  align-items: stretch;
+  flex-wrap: nowrap;
+  overflow-x: auto;   /* veel divisies → container scrollt horizontaal */
+  overflow-y: hidden; /* hoogte is de grens; verticaal scrollen gebeurt niet */
   gap: 0.75rem;
 }
 
 .divisions-vertical .division {
   flex: 1 1 0;
-  min-width: 0;
+  /* Minstens één kolom breed (knop + padding), anders knijpen divisies elkaar weg */
+  min-width: calc(var(--stop-min-width, 100px) + 1.5rem);
+  display: flex;
+  flex-direction: column;
+}
+
+.divisions-vertical .division .division-header {
+  flex-shrink: 0; /* kop blijft op vaste hoogte bovenaan */
 }
 
 .division {
@@ -1138,6 +1163,23 @@ input[type="range"]::-webkit-slider-thumb:hover {
   overflow: hidden;
   box-shadow: 0 2px 4px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.05);
   flex-shrink: 0;
+  user-select: none; /* geen tekstselectie tijdens pointer-drag van knoppen */
+}
+
+/* Slepen van registerknoppen op het orgelscherm (pointer-drag, alleen muis) */
+.stop-knob.dragging {
+  opacity: 0.45; /* bron-knop half transparant tijdens het slepen */
+}
+
+.stop-knob.drag-target {
+  /* Insertion-indicator op de doelpositie (vgl. .sort-row.drag-over) */
+  outline: 2px dashed var(--gold-border);
+  outline-offset: 2px;
+}
+
+.stops-grid.knob-dragging,
+.stops-grid.knob-dragging .stop-knob {
+  cursor: grabbing;
 }
 
 /* Porselein plaatje in het midden */
