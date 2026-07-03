@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Diepgaand Forumonderzoek — Digitale Orgelsoftware 2026</title>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,500;0,9..144,700;0,9..144,900;1,9..144,400&family=DM+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#FAFAF7;--bg2:#F0EDE7;--card:#FFF;--text:#1A1815;--muted:#6D6458;--light:#A39E94;
+  --accent:#6B3A1F;--accent2:#A0612E;--blue:#1A5276;--green:#1B6B35;--purple:#5B2C8A;--orange:#B74B0E;--red:#A83232;
+  --border:#E4DFD7;--shadow:0 2px 12px rgba(26,24,21,.06);
+}
+html{scroll-behavior:smooth}
+body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);line-height:1.72;font-size:16.5px;-webkit-font-smoothing:antialiased}
+
+/* ===== HERO ===== */
+.hero{min-height:100vh;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;padding:4rem 2rem;background:linear-gradient(175deg,#F5F0E8 0%,#EDE7DB 40%,#F0EDE7 100%);position:relative;overflow:hidden}
+.hero::after{content:'';position:absolute;inset:0;background:url("data:image/svg+xml,%3Csvg width='40' height='40' xmlns='http://www.w3.org/2000/svg'%3E%3Ccircle cx='20' cy='20' r='0.8' fill='%236B3A1F' opacity='0.08'/%3E%3C/svg%3E");pointer-events:none}
+.hero-inner{position:relative;z-index:1;max-width:780px}
+.hero-badge{display:inline-block;padding:.4rem 1.2rem;border:1px solid var(--accent2);color:var(--accent);font-size:.75rem;font-weight:600;letter-spacing:.12em;text-transform:uppercase;border-radius:99px;margin-bottom:2rem}
+.hero h1{font-family:'Fraunces',serif;font-size:clamp(2.6rem,5.5vw,4.2rem);font-weight:900;line-height:1.08;color:var(--text);margin-bottom:1.2rem}
+.hero h1 em{font-style:italic;color:var(--accent)}
+.hero-sub{font-size:1.15rem;color:var(--muted);max-width:580px;margin:0 auto 2.5rem;font-weight:300}
+.hero-stats{display:flex;gap:2.5rem;justify-content:center;flex-wrap:wrap}
+.hero-stat{text-align:center}
+.hero-stat .num{font-family:'Fraunces',serif;font-size:2rem;font-weight:700;color:var(--accent);display:block}
+.hero-stat .lbl{font-size:.72rem;text-transform:uppercase;letter-spacing:.1em;color:var(--light);font-weight:600}
+
+/* ===== NAV ===== */
+.nav{position:sticky;top:0;z-index:100;background:rgba(250,250,247,.92);backdrop-filter:blur(16px);border-bottom:1px solid var(--border);overflow-x:auto}
+.nav ul{list-style:none;display:flex;justify-content:center;gap:0;max-width:1050px;margin:0 auto}
+.nav a{display:block;padding:.85rem 1.2rem;text-decoration:none;color:var(--muted);font-size:.78rem;font-weight:600;text-transform:uppercase;letter-spacing:.08em;border-bottom:2px solid transparent;transition:all .2s;white-space:nowrap}
+.nav a:hover{color:var(--accent);border-bottom-color:var(--accent)}
+
+/* ===== LAYOUT ===== */
+.wrap{max-width:860px;margin:0 auto;padding:0 1.75rem}
+section{padding:4.5rem 0}
+section+section{border-top:1px solid var(--border)}
+.label{font-family:'JetBrains Mono',monospace;font-size:.7rem;text-transform:uppercase;letter-spacing:.14em;color:var(--light);margin-bottom:.6rem}
+h2{font-family:'Fraunces',serif;font-size:2.1rem;font-weight:700;margin-bottom:1.2rem;line-height:1.15}
+h3{font-family:'Fraunces',serif;font-size:1.35rem;font-weight:700;margin:2.2rem 0 .8rem;color:var(--text)}
+p{margin-bottom:1.1rem}
+strong{font-weight:600}
+
+/* ===== SOFTWARE HEADER ===== */
+.sw-head{display:flex;align-items:center;gap:1.1rem;margin-bottom:1.8rem;padding-bottom:1.3rem;border-bottom:2px solid var(--border)}
+.sw-dot{width:52px;height:52px;border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:1.3rem;color:#fff;font-weight:700;flex-shrink:0;box-shadow:var(--shadow)}
+.sw-dot.hw{background:linear-gradient(135deg,#1A5276,#0E3A52)}.sw-dot.sq{background:linear-gradient(135deg,#1B6B35,#145228)}.sw-dot.oq{background:linear-gradient(135deg,#5B2C8A,#3E1D61)}.sw-dot.go{background:linear-gradient(135deg,#B74B0E,#842F07)}
+.sw-head h2{margin-bottom:.15rem;font-size:1.8rem}
+.sw-tag{color:var(--muted);font-size:.88rem;font-style:italic}
+
+/* ===== VERDICT GRID ===== */
+.vg{display:grid;grid-template-columns:1fr 1fr;gap:1.3rem;margin:1.8rem 0}
+@media(max-width:640px){.vg{grid-template-columns:1fr}}
+.vc{background:var(--card);border-radius:10px;padding:1.5rem;border:1px solid var(--border);box-shadow:var(--shadow)}
+.vc h4{font-size:.75rem;text-transform:uppercase;letter-spacing:.1em;font-weight:700;margin-bottom:.8rem;display:flex;align-items:center;gap:.4rem}
+.vc.pro h4{color:var(--green)}.vc.con h4{color:var(--red)}
+.vc ul{list-style:none;padding:0}
+.vc li{padding:.4rem 0 .4rem 1.3rem;position:relative;font-size:.9rem;line-height:1.5;border-bottom:1px solid rgba(0,0,0,.03)}
+.vc li:last-child{border:none}
+.vc.pro li::before{content:'✓';position:absolute;left:0;color:var(--green);font-weight:700}
+.vc.con li::before{content:'✗';position:absolute;left:0;color:var(--red);font-weight:700}
+
+/* ===== QUOTE ===== */
+.q{background:var(--bg2);border-left:3px solid var(--accent2);padding:1.3rem 1.6rem;margin:1.8rem 0;border-radius:0 8px 8px 0;font-style:italic;color:var(--muted);position:relative}
+.q .src{display:block;margin-top:.6rem;font-style:normal;font-size:.75rem;color:var(--light);font-weight:600;text-transform:uppercase;letter-spacing:.05em}
+
+/* ===== DETAIL BOX (new deep-dive panels) ===== */
+.detail{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:1.5rem 1.75rem;margin:1.5rem 0;box-shadow:var(--shadow)}
+.detail h4{font-family:'Fraunces',serif;font-size:1.05rem;font-weight:700;margin-bottom:.6rem;color:var(--accent)}
+.detail p{font-size:.92rem;margin-bottom:.6rem}
+.detail p:last-child{margin-bottom:0}
+
+/* ===== TABLE ===== */
+.tw{overflow-x:auto;margin:1.8rem 0;border-radius:10px;border:1px solid var(--border);box-shadow:var(--shadow)}
+table{width:100%;border-collapse:collapse;font-size:.85rem;background:var(--card)}
+thead th{background:var(--text);color:#fff;padding:.85rem 1rem;text-align:left;font-weight:600;font-size:.76rem;text-transform:uppercase;letter-spacing:.06em;white-space:nowrap}
+thead th:first-child{border-radius:9px 0 0 0}thead th:last-child{border-radius:0 9px 0 0}
+tbody td{padding:.75rem 1rem;border-bottom:1px solid #EDE8E1;vertical-align:top}
+tbody tr:hover{background:rgba(107,58,31,.02)}tbody tr:nth-child(even){background:rgba(240,237,231,.4)}
+td:first-child{font-weight:600;color:var(--accent);white-space:nowrap}
+
+/* ===== WISHLIST ===== */
+.wl-item{display:flex;align-items:flex-start;gap:.9rem;padding:1.1rem 0;border-bottom:1px solid var(--border)}
+.wl-item:last-child{border:none}
+.wl-n{width:32px;height:32px;background:var(--accent);color:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.8rem;flex-shrink:0}
+.wl-c h4{font-size:.98rem;font-weight:700;margin-bottom:.15rem}
+.wl-c p{font-size:.88rem;color:var(--muted);margin:0}
+
+/* ===== CONCLUSION ===== */
+.cbox{background:linear-gradient(135deg,rgba(107,58,31,.04),rgba(26,82,118,.04));border:1px solid var(--border);border-radius:14px;padding:2.2rem;margin:1.8rem 0}
+.cbox h3{margin-top:0;color:var(--accent)}
+
+/* ===== VERSION TIMELINE (new) ===== */
+.timeline{position:relative;padding-left:2rem;margin:1.5rem 0}
+.timeline::before{content:'';position:absolute;left:.5rem;top:0;bottom:0;width:2px;background:var(--border)}
+.tl-item{position:relative;margin-bottom:1.2rem;padding-left:1rem}
+.tl-item::before{content:'';position:absolute;left:-1.65rem;top:.45rem;width:10px;height:10px;border-radius:50%;background:var(--accent);border:2px solid var(--bg)}
+.tl-item .tl-date{font-family:'JetBrains Mono',monospace;font-size:.72rem;color:var(--light);text-transform:uppercase}
+.tl-item .tl-title{font-weight:600;font-size:.95rem}
+.tl-item .tl-desc{font-size:.85rem;color:var(--muted)}
+
+footer{background:var(--text);color:rgba(255,255,255,.45);padding:2.5rem 2rem;text-align:center;font-size:.82rem}
+footer strong{color:rgba(255,255,255,.75)}
+
+@media(max-width:768px){.wrap{padding:0 1.1rem}section{padding:3rem 0}h2{font-size:1.65rem}.hero h1{font-size:2rem}.hero-stats{gap:1.2rem}.nav ul{justify-content:flex-start;padding:0 .8rem}.sw-head{flex-direction:column;text-align:center}}
+</style>
+</head>
+<body>
+
+<header class="hero">
+<div class="hero-inner">
+  <div class="hero-badge">Diepgaand Forumonderzoek</div>
+  <h1>Digitale Orgelsoftware:<br><em>Wat vinden gebruikers écht?</em></h1>
+  <p class="hero-sub">Een uitgebreid onderzoek naar Hauptwerk, Sweelinq, Organteq &amp; GrandOrgue — gebaseerd op honderden forumbijdragen, reviews en gebruikerservaringen uit 12+ bronnen.</p>
+  <div class="hero-stats">
+    <div class="hero-stat"><span class="num">12+</span><span class="lbl">Forums onderzocht</span></div>
+    <div class="hero-stat"><span class="num">50+</span><span class="lbl">Threads geanalyseerd</span></div>
+    <div class="hero-stat"><span class="num">5</span><span class="lbl">Platforms vergeleken</span></div>
+    <div class="hero-stat"><span class="num">2026</span><span class="lbl">Bijgewerkt t/m</span></div>
+  </div>
+</div>
+</header>
+
+<nav class="nav"><ul>
+  <li><a href="#intro">Inleiding</a></li>
+  <li><a href="#hw">Hauptwerk</a></li>
+  <li><a href="#sq">Sweelinq</a></li>
+  <li><a href="#oq">Organteq</a></li>
+  <li><a href="#go">GrandOrgue</a></li>
+  <li><a href="#table">Vergelijking</a></li>
+  <li><a href="#wish">Wensenlijst</a></li>
+  <li><a href="#end">Conclusie</a></li>
+</ul></nav>
+
+<main>
+
+<!-- ======== INLEIDING ======== -->
+<section id="intro"><div class="wrap">
+  <div class="label">01 — Onderzoeksopzet</div>
+  <h2>Hoe dit onderzoek is uitgevoerd</h2>
+  <p>Dit rapport is samengesteld op basis van een systematische analyse van openbare forumdiscussies, reviews en gebruikerservaringen uit meer dan twaalf verschillende bronnen. De onderzochte forums omvatten: <strong>The Organ Forum</strong> (organforum.com), <strong>Contrebombarde</strong>, <strong>MusicaSacra Church Music Forum</strong>, <strong>KVR Audio Forum</strong>, <strong>Modartt User Forum</strong>, <strong>Gearspace</strong>, <strong>VI-Control</strong>, <strong>Mod Wiggler</strong>, het officiële <strong>Hauptwerk Forum</strong> (forum.hauptwerk.com), <strong>SourceForge Reviews</strong>, <strong>Sound On Sound</strong>, <strong>Equipboard</strong>, en productwebsites van Hauptwerk, Sweelinq, Organteq, Content Organs, Mixtuur, Meta Organworks en Noorlander.</p>
+  <p>De virtuele pijporgelsoftwaremarkt is een niche, maar een met buitengewoon betrokken en kritische gebruikers. Organisten zijn gedetailleerd in hun eisen aan klank, responsiviteit en authenticiteit — wat de forumdiscussies uitzonderlijk informatief maakt. We behandelen vier hoofdplatforms die elk een fundamenteel andere benadering kiezen.</p>
+  
+  <div class="detail">
+    <h4>Bronnen-overzicht per platform</h4>
+    <p><strong>Hauptwerk:</strong> Officieel forum (38.700+ posts), The Organ Forum (meerdere uitgebreide threads over V4→V9), MusicaSacra (kerkinstallaties), KVR Audio (producenten-perspectief), Mod Wiggler (synth-community), Equipboard (Reddit/forum-aggregatie), Meta Organworks (professioneel bouwerperspectief).</p>
+    <p><strong>Sweelinq:</strong> The Organ Forum (uitgebreide V1.0 en V2.0 reviews door dezelfde HW-veteraan), Modartt Forum (vergelijkingen met Organteq), Content Organs &amp; Noorlander (fabrikantperspectief), Joh. de Heer (dealerperspectief op V3.0).</p>
+    <p><strong>Organteq:</strong> Modartt Forum (officieel, incl. beta-testers), KVR Audio (release-discussies), The Organ Forum (V2 beta-tester review), Sound On Sound (professionele review), VI-Control (componisten-perspectief).</p>
+    <p><strong>GrandOrgue:</strong> SourceForge (80+ reviews), GitHub (issues/discussions), The Organ Forum (vergelijkingsthreads), Wikipedia, Piotr Grabowski (samplesetmaker-perspectief).</p>
+  </div>
+</div></section>
+
+<!-- ======== HAUPTWERK ======== -->
+<section id="hw"><div class="wrap">
+  <div class="sw-head">
+    <div class="sw-dot hw">H</div>
+    <div><h2>Hauptwerk</h2><div class="sw-tag">De industriestandaard — ongeëvenaard geluid, steile leercurve, nu bij versie 9</div></div>
+  </div>
+
+  <p>Hauptwerk wordt op vrijwel elk onderzocht forum beschouwd als de referentie voor virtuele pijporgels. Met meer dan 200 professioneel opgenomen orgels en per-noot sampling levert het een geluidservaring die gebruikers consequent omschrijven als overweldigend realistisch. Inmiddels is <strong>versie 9</strong> uitgebracht (begin 2025) met een volledig vernieuwde Touch Menu, per-orgel IR-galm en vereenvoudigde audio-routing.</p>
+
+  <div class="q">
+    Op het Mod Wiggler synthforum en MusicaSacra beschrijven zelfs voormalig sceptici hun bekering: een pijporgelbouwer met 25 jaar ervaring noemt het een complete ommekeer in zijn denken over digitale orgels. Op The Organ Forum zijn gebruikers die nog steeds op versie 4.2 draaien en geen reden zien om te upgraden — wat tegelijk de kracht en het probleem van Hauptwerk illustreert.
+    <span class="src">Samenvatting Meta Organworks, Mod Wiggler, The Organ Forum</span>
+  </div>
+
+  <h3>Versiegeschiedenis &amp; forumreacties</h3>
+  <div class="timeline">
+    <div class="tl-item"><div class="tl-date">2011–2019</div><div class="tl-title">Versie 4.x — "Het hoogtepunt"</div><div class="tl-desc">Veel forumgebruikers beschouwen V4.2 als de beste balans tussen functionaliteit en gebruiksgemak. Nog steeds in gebruik bij een trouwe achterban.</div></div>
+    <div class="tl-item"><div class="tl-date">2019</div><div class="tl-title">Versie 5 — Controversiële breuk</div><div class="tl-desc">Nieuwe encryptie na crack van V4. Geen backward compatibility. Gebruikers verliezen zorgvuldig opgebouwde configuraties. Veel frustratie op forums.</div></div>
+    <div class="tl-item"><div class="tl-date">2023</div><div class="tl-title">Versie 6 — Betaalde upgrade na 11 maanden</div><div class="tl-desc">$99 upgrade slechts 11 maanden na V5 leidde tot boze reacties op het officiële forum. Sommigen verdedigen het: "minder dan $2 per week voor dit niveau software."</div></div>
+    <div class="tl-item"><div class="tl-date">2024</div><div class="tl-title">Versie 8 — Prestatieverbetering</div><div class="tl-desc">50-100% polyfonieverbetering op Intel 12e gen. Sneller laden/ontladen. Launchpad-ondersteuning. Forumreacties overwegend positief.</div></div>
+    <div class="tl-item"><div class="tl-date">Feb 2025</div><div class="tl-title">Versie 9 — Nieuwe UI</div><div class="tl-desc">Vernieuwde Touch Menu als enige interface. Per-orgel IR-galm. Simplify-instellingen. Forumreacties gemengd: UI beter maar floating panels verdwenen bij upgrade ("60 orgels opnieuw instellen kost uren").</div></div>
+  </div>
+
+  <div class="vg">
+    <div class="vc pro">
+      <h4>✦ Wat gebruikers waarderen</h4>
+      <ul>
+        <li>Ongeëvenaarde geluidskwaliteit bij goede samplesets — de referentie</li>
+        <li>Enorme bibliotheek: 200+ orgels, van barok tot romantiek tot theaterorgels</li>
+        <li>Per-noot sampling met convolutiegalm en wind-modellering</li>
+        <li>Geavanceerde multi-kanaals audiorouting (tot 512 kanalen, Advanced)</li>
+        <li>Onbeperkte polyfonie (Advanced) — 150+ stops tegelijk zonder problemen</li>
+        <li>Actieve ontwikkelaar (Martin Dyde) persoonlijk op forum aanwezig</li>
+        <li>V9: per-orgel galm-instellingen die automatisch bewaard worden</li>
+        <li>V9: vereenvoudigde audio-routing voor snellere setup</li>
+        <li>V8: 50-100% polyfonieverbetering op moderne processors</li>
+        <li>Samplesetmakers voegen continu eigen innovaties toe</li>
+        <li>Geschikt voor professionele kerkinstallaties (met juiste speakers)</li>
+      </ul>
+    </div>
+    <div class="vc con">
+      <h4>✦ Kritiek &amp; frustraties</h4>
+      <ul>
+        <li>Zeer complexe installatie en configuratie — niet voor computerleken</li>
+        <li>V9: alle floating mini-panels verdwijnen na upgrade (uren herwerk)</li>
+        <li>Problematische upgradepaden: V4→V5 brak backward compatibility</li>
+        <li>Hoge kosten: $599 perpetueel + samplesets ($100–$1500 per stuk)</li>
+        <li>Abonnementsoptie ~$30/mnd — duurder op lange termijn dan perpetueel</li>
+        <li>Zware hardware-eisen: min. 16-32 GB RAM, snelle multi-core CPU, SSD</li>
+        <li>Geen disk-streaming — complete samplesets moeten in RAM laden</li>
+        <li>Slechte DAW-integratie: standalone-only, geen echte VST-plugin</li>
+        <li>Geen telefonische support — alleen forum en e-mail</li>
+        <li>Veel "magic numbers" in de interface (32 MIDI-poorten, 64 favorieten)</li>
+        <li>Bij kerken: resultaat volledig afhankelijk van speakerkwaliteit</li>
+        <li>iLok-licentiesysteem als extra afhankelijkheid</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="detail">
+    <h4>Diepte-inzicht: Hauptwerk in kerken</h4>
+    <p>Uit MusicaSacra en het Hauptwerk Forum blijkt dat kerkinstallaties een gemengd beeld geven. Succesvolle installaties met 24+ audiokanalen en goede speakers worden beschreven als "tremendously impressive". Maar gebruikers waarschuwen ook: met slechte speakers is het resultaat "awful". Een Braziliaanse kerkorganist beschrijft hoe hij ondanks uitstekende resultaten het systeem niet onvoorwaardelijk zou aanbevelen vanwege "difficult moments during Mass" door technische problemen. De consensus: Hauptwerk is een uitstekende interim-oplossing, maar vergt technische expertise die veel kerken missen.</p>
+  </div>
+</div></section>
+
+<!-- ======== SWEELINQ ======== -->
+<section id="sq"><div class="wrap">
+  <div class="sw-head">
+    <div class="sw-dot sq">S</div>
+    <div><h2>Sweelinq</h2><div class="sw-tag">De toegankelijke uitdager uit Nederland — snel, simpel, in snelle ontwikkeling</div></div>
+  </div>
+
+  <p>Sweelinq (Orgelmakerij Noorlander, NL) heeft in korte tijd een enthousiaste aanhang opgebouwd. Het platform richt zich op gebruiksgemak en een laagdrempelig abonnementsmodel. Inmiddels is <strong>versie 2.0</strong> uitgebracht met flinke verbeteringen, en <strong>versie 3.0</strong> is in ontwikkeling met een Premium-abonnement voor extra functies.</p>
+
+  <div class="q">
+    Een ervaren Hauptwerk-gebruiker die zowel V1.0 als V2.0 uitgebreid reviewde op The Organ Forum concludeert: "Deze versie is veel beter dan twee jaar geleden." Maar voegt eraan toe dat de geluidskwaliteit nog steeds gecomprimeerder is dan Hauptwerk, met minder detail en ruimtelijke indruk. Specifiek: de tremulanten worden als "uniformly terrible" beschreven — tenzij je van theaterorgel houdt.
+    <span class="src">The Organ Forum — uitgebreide V1.0 en V2.0 reviews door dezelfde gebruiker</span>
+  </div>
+
+  <h3>Versiegeschiedenis</h3>
+  <div class="timeline">
+    <div class="tl-item"><div class="tl-date">Juli 2021</div><div class="tl-title">Beta-lancering</div><div class="tl-desc">Honderden gebruikers melden zich aan zonder actieve marketing. "A bull's eye" volgens Noorlander.</div></div>
+    <div class="tl-item"><div class="tl-date">2023</div><div class="tl-title">Versie 1.0 — Officiële release</div><div class="tl-desc">4 orgels beschikbaar. Forumreview: "snel en makkelijk, maar geluid mist detail en orgels klinken te veel op elkaar."</div></div>
+    <div class="tl-item"><div class="tl-date">2024</div><div class="tl-title">Versie 2.0 — Grote kwaliteitssprong</div><div class="tl-desc">20+ orgels. Bass/treble-aanpassing. Dynamische klaviertoewijzing. In-app updates. Geluid "heaps better" maar tremulanten nog problematisch.</div></div>
+    <div class="tl-item"><div class="tl-date">In ontwikkeling</div><div class="tl-title">Versie 3.0 — Premium &amp; meertalig</div><div class="tl-desc">Belooft sneller, slimmer, meertalig. Premium-abonnement met 96kHz HD-audio, uitgebreid toetsenbeireik, extra koppelingen.</div></div>
+  </div>
+
+  <div class="vg">
+    <div class="vc pro">
+      <h4>✦ Wat gebruikers waarderen</h4>
+      <ul>
+        <li>Razendsnel installeren en opstarten — "geen koffie nodig"</li>
+        <li>Zeer intuïtieve, overzichtelijke interface</li>
+        <li>Betaalbaar: €10,99/mnd Standard, €14,99/mnd Premium (alle orgels)</li>
+        <li>Indrukwekkend windmodel — lof van Hauptwerk-veteranen, essentieel voor Nederlandse koraalmuziek</li>
+        <li>Lage hardware-eisen — draait op standaard PC/laptop</li>
+        <li>Snel wisselen tussen orgels — seconden in plaats van minuten</li>
+        <li>Cross-platform: Windows, macOS én Linux</li>
+        <li>V2.0: flinke kwaliteitsverbetering, meer orgels, in-app updates</li>
+        <li>Touchscreen-vriendelijk</li>
+        <li>Metrische toename in orgel-aanbod</li>
+      </ul>
+    </div>
+    <div class="vc con">
+      <h4>✦ Kritiek &amp; frustraties</h4>
+      <ul>
+        <li>Geluid gecomprimeerder dan Hauptwerk — minder dynamisch bereik</li>
+        <li>Ontbrekende hoge frequenties vergeleken met HW</li>
+        <li>Geen ruimtelijke indruk: "elke pijp even ver weg"</li>
+        <li>Tremulanten "uniformly terrible" — te veel pitch-shifting zoals theaterorgel</li>
+        <li>Galm vlak, zelfs op dichtste instelling nog te veel reverb (geen droog oefenen)</li>
+        <li>Expressie-pedaal: beperkt dynamisch bereik, weinig "bloom"</li>
+        <li>Mist: divisional pistons, reversibles, crescendo pedaal, meer koppels</li>
+        <li>Voicing rudimentair en minder flexibel dan Hauptwerk</li>
+        <li>Sommige pijpen hebben vreemd gedrag bij aanslag</li>
+        <li>~20 orgels — nog bescheiden vs. Hauptwerks 200+</li>
+        <li>Vendor lock-in: abo stopt = geen toegang meer</li>
+        <li>GUI functioneel maar "rudimentair en simplistisch" (Modartt-forum)</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="detail">
+    <h4>Diepte-inzicht: V2.0 Gedetailleerde geluidsanalyse</h4>
+    <p>De reviewer op The Organ Forum testte vier orgels in V2.0 (St. Hippolyte Cavaillé-Coll, Kampen Hinsz, Dordrecht Bach, Amsterdam Vater-Müller) en stelde vast dat de samplebestanden even groot zijn als bij Hauptwerk — de kwaliteitsverschillen zitten dus in hoe de software de samples verwerkt, niet in de opnames zelf. De compressie van dynamiek heeft voor- en nadelen: het klinkt gelijkmatiger maar mist de subtiliteit van stille passages. Het zwelkast-effect mist de frequentie-afhankelijke filtering die een echte (of Hauptwerk-) zwelkast geeft: bij Sweelinq verandert vooral het volume, niet het karakter van de klank.</p>
+  </div>
+</div></section>
+
+<!-- ======== ORGANTEQ ======== -->
+<section id="oq"><div class="wrap">
+  <div class="sw-head">
+    <div class="sw-dot oq">O</div>
+    <div><h2>Organteq</h2><div class="sw-tag">De toekomst? — fysieke modellering, geen samples, enorme flexibiliteit</div></div>
+  </div>
+
+  <p>Organteq van Modartt is fundamenteel anders: het berekent pijpklanken wiskundig via fysieke modellering. Geen opnames, slechts ~30 MB groot. <strong>Versie 2</strong> (2024-2025) bracht aanzienlijke verbeteringen. Een beta-tester op The Organ Forum schreef een uitgebreide analyse die zowel enthousiast als kritisch is.</p>
+
+  <div class="q">
+    Op KVR Audio vergelijken meerdere gebruikers Organteq met Pianoteq versie 1: "It's in the uncanny valley — impressive, but a properly sampled instrument in Hauptwerk still sounds more authentic." De verwachting is dat het net als Pianoteq uiteindelijk de samplingkwaliteit zal benaderen, maar daar zijn we nog niet.
+    <span class="src">KVR Audio, Sound On Sound, The Organ Forum (beta-tester)</span>
+  </div>
+
+  <div class="vg">
+    <div class="vc pro">
+      <h4>✦ Wat gebruikers waarderen</h4>
+      <ul>
+        <li>Baanbrekende technologie — eerste betaalbare fysiek gemodelleerde pijporgel</li>
+        <li>Slechts ~30 MB — vrijwel instant laden</li>
+        <li>Pijpen individueel aanpasbaar: klank, volume, stemming, harmonische partials</li>
+        <li>Uitstekende VST/AU/AAX-plugin — naadloos in DAWs, meerdere instanties</li>
+        <li>V2: flinke kwaliteitssprong, royale demoversie ("bijna geen reden om te kopen")</li>
+        <li>8 temperamenten + eigen tuning maps</li>
+        <li>Ranks toewijsbaar aan stops — unieke celeste-voicings mogelijk</li>
+        <li>Standalone én plugin-modus</li>
+        <li>Toegankelijker dan Hauptwerk voor blinde/slechtziende gebruikers</li>
+      </ul>
+    </div>
+    <div class="vc con">
+      <h4>✦ Kritiek &amp; frustraties</h4>
+      <ul>
+        <li>Klank nog niet op sampleniveau — sommige pijpen inconsistent (bijv. Vox Humana)</li>
+        <li>Max 512 stemmen polyfonie — tutti met koppelingen onmogelijk (zelfs op M1 Max)</li>
+        <li>Hoog CPU-verbruik: grand jeu van 11 stops klipt al op een i9-12900K (96kHz)</li>
+        <li>Slechts 1 orgelmodel: 3 manualen + pedaal, geen specifieke historische orgels</li>
+        <li>Beperkte MIDI-mapping: max 10 generals, 50 stop-buttons, geen reversibles</li>
+        <li>Geen 4-manuaals consoles, Great niet onder te plaatsen</li>
+        <li>Meegeleverde galm matig — convolutie-effect extern aanbevolen</li>
+        <li>Geen multi-kanaals routing zoals Hauptwerk</li>
+        <li>~€250: hoog voor niet-organisten als bijinstrument</li>
+        <li>GUI: lof en kritiek tegelijk — "efficiënt ontworpen" maar piepkleine knoppen</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="detail">
+    <h4>Diepte-inzicht: Organteq 2 beta-tester analyse</h4>
+    <p>Een beta-tester op The Organ Forum met een Apple M1 Max (10 cores) testte Organteq 2 uitvoerig. Bij 512 stemmen polyfonie met alle koppelingen schoot de processor naar 30% met hoorbare audioklippen. Ter vergelijking: Hauptwerk laadde de PAB Gravissimo met 150 stops en alle koppelingen zonder enig probleem op dezelfde machine ("het lacht om de stresstest"). De tester merkt op dat 512 stemmen bij droge samples vergelijkbaar is met Hauptwerk's polyfonie (waar natte samples incl. nagalm meetellen), maar dat het in de praktijk te beperkend is voor groot orgelrepertoire.</p>
+    <p>Een blinde gebruiker op het Modartt-forum meldt dat Hauptwerk volledig onbruikbaar is met een screenreader, en dat Organteq een beter (maar nog niet perfect) alternatief biedt. Hij heeft zelfs aangeboden als accessibility-adviseur bij te dragen aan de ontwikkeling.</p>
+  </div>
+</div></section>
+
+<!-- ======== GRANDORGUE ======== -->
+<section id="go"><div class="wrap">
+  <div class="sw-head">
+    <div class="sw-dot go">G</div>
+    <div><h2>GrandOrgue</h2><div class="sw-tag">Het gratis alternatief — open source, community-driven, Raspberry Pi-ready</div></div>
+  </div>
+
+  <p>GrandOrgue is het gratis, open-source alternatief. Oorspronkelijk ontwikkeld als "MyOrgan" (een vrije versie van Hauptwerk 1) in 2006, met actieve ontwikkeling op GitHub. Het draait zelfs op een Raspberry Pi 4/5 via de Pipebian-distributie.</p>
+
+  <div class="vg">
+    <div class="vc pro">
+      <h4>✦ Wat gebruikers waarderen</h4>
+      <ul>
+        <li>Volledig gratis en open source (GPL)</li>
+        <li>Cross-platform: Windows, macOS, Linux, zelfs Raspberry Pi</li>
+        <li>Goede basiskwaliteit — "5 sterren verdiend" aldus SourceForge-reviews</li>
+        <li>Polyfonie tot 8.128 noten (uitbreidbaar via code)</li>
+        <li>Tot 8 audio-uitgangen</li>
+        <li>Per-pijp routing mogelijk (granulairder dan Hauptwerk, zij het handmatig)</li>
+        <li>Actieve GitHub-community met continue verbeteringen</li>
+        <li>OpenPipes-project: compleet open-source VPO-systeem voor zelfbouw</li>
+      </ul>
+    </div>
+    <div class="vc con">
+      <h4>✦ Kritiek &amp; frustraties</h4>
+      <ul>
+        <li>Beperkt samplesetaanbod: alleen onversleutelde sets</li>
+        <li>Samplesetmakers bieden vaak geen of beperkte GO-support</li>
+        <li>Interface overweldigend en niet intuïtief</li>
+        <li>Voicing: handmatig via tekstbestanden of organ settings-scherm</li>
+        <li>Installatie samplesets vergt RAR-kennis en mapstructuur-begrip</li>
+        <li>UI-schaling nog steeds contra-intuïtief — apart versies nodig per resolutie</li>
+        <li>Percussieve stops met dempers klinken onnatuurlijk (te korte crossfade)</li>
+        <li>Audio-engine minder geavanceerd: geluid kan afwijken van HW-versies</li>
+        <li>Geen formele support — je bent op de community aangewezen</li>
+        <li>Latency soms problematisch, zelfs met ASIO-drivers</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="detail">
+    <h4>Diepte-inzicht: Het perspectief van samplesetmakers</h4>
+    <p>Piotr Grabowski, een van de meest productieve samplesetmakers, schrijft expliciet op zijn website dat zijn sets primair voor Hauptwerk zijn ontworpen en dat hij geen GrandOrgue-support biedt. Hij somt een lijst beperkingen op: andere audio-engine (geluid kan afwijken), geen percussie-dempers, temperamentwisseling hertunt het hele orgel, en de installatieprocedure is complexer. Dit patroon — samplesetmakers die GrandOrgue als tweederangs behandelen — beperkt het platform fundamenteel.</p>
+  </div>
+</div></section>
+
+<!-- ======== VERGELIJKING ======== -->
+<section id="table"><div class="wrap">
+  <div class="label">06 — Head-to-head</div>
+  <h2>Uitgebreide vergelijkingstabel</h2>
+
+  <div class="tw"><table>
+    <thead><tr><th>Criterium</th><th>Hauptwerk (V9)</th><th>Sweelinq (V2)</th><th>Organteq (V2)</th><th>GrandOrgue</th></tr></thead>
+    <tbody>
+    <tr><td>Technologie</td><td>Sampling (per noot)</td><td>Sampling (per noot)</td><td>Fysieke modellering</td><td>Sampling (per noot)</td></tr>
+    <tr><td>Geluidskwaliteit</td><td>Uitstekend (referentie)</td><td>Goed, flinke sprong in V2</td><td>Goed, nog in "uncanny valley"</td><td>Goed (setafhankelijk)</td></tr>
+    <tr><td>Gebruiksgemak</td><td>Steile leercurve (V9 iets beter)</td><td>Zeer eenvoudig</td><td>Gemiddeld</td><td>Matig</td></tr>
+    <tr><td>Installatiesnelheid</td><td>Traag (minuten-uren laden)</td><td>Snel (seconden)</td><td>Instant (~30 MB)</td><td>Matig</td></tr>
+    <tr><td>Orgelbibliotheek</td><td>200+ orgels</td><td>~20 orgels (snel groeiend)</td><td>1 model, presets</td><td>Beperkt (onversleuteld)</td></tr>
+    <tr><td>Kosten</td><td>$599 + sets ($100-1500)</td><td>€11–15/mnd (alle orgels)</td><td>~€250 eenmalig</td><td>Gratis</td></tr>
+    <tr><td>Hardware-eisen</td><td>Hoog (16-32GB RAM+)</td><td>Laag (standaard PC)</td><td>Hoog (CPU-intensief)</td><td>Laag-gemiddeld</td></tr>
+    <tr><td>Polyfonie</td><td>Onbeperkt (Advanced)</td><td>Niet gespecificeerd</td><td>Max 512 stemmen</td><td>Max 8.128</td></tr>
+    <tr><td>DAW-integratie</td><td>Slecht (AU/VST link only)</td><td>Nee (standalone)</td><td>Uitstekend (VST/AU/AAX)</td><td>Nee (standalone)</td></tr>
+    <tr><td>Audio-kanalen</td><td>Tot 512 (Advanced)</td><td>Basis stereo + surround</td><td>Beperkt</td><td>Tot 8</td></tr>
+    <tr><td>Windmodel</td><td>Ja (geavanceerd)</td><td>Ja (geprezen)</td><td>Ja (inherent aan modellering)</td><td>Beperkt</td></tr>
+    <tr><td>Convolutiegalm</td><td>Ja (per orgel in V9)</td><td>IR-gebaseerd</td><td>Ingebouwd (basis)</td><td>Nee</td></tr>
+    <tr><td>Besturingssysteem</td><td>Windows, macOS</td><td>Windows, macOS, Linux</td><td>Windows, macOS, Linux</td><td>Windows, macOS, Linux</td></tr>
+    <tr><td>Licentie</td><td>Perpetueel of abonnement (iLok)</td><td>Abonnement</td><td>Perpetueel</td><td>GPL (gratis)</td></tr>
+    <tr><td>Ideaal voor</td><td>Serieuze organisten, kerken</td><td>Hobbyisten, studenten, docenten</td><td>Componisten, experimenteerders</td><td>Beginners, beperkt budget</td></tr>
+    </tbody>
+  </table></div>
+</div></section>
+
+<!-- ======== WENSENLIJST ======== -->
+<section id="wish"><div class="wrap">
+  <div class="label">07 — De stem van de gebruiker</div>
+  <h2>Top 10 meest gewenste verbeteringen</h2>
+  <p>Gerangschikt op frequentie van vermelding in alle onderzochte forumthreads:</p>
+
+  <div class="wl-item"><div class="wl-n">1</div><div class="wl-c"><h4>Hauptwerk-kwaliteit met Sweelinq-gemak</h4><p>De rode draad door álles: gebruikers willen het beste van beide werelden. Een intuïtieve interface die geen computerexpertise vereist, maar wel topgeluid levert.</p></div></div>
+  <div class="wl-item"><div class="wl-n">2</div><div class="wl-c"><h4>Lagere totaalkosten / transparantere prijsmodellen</h4><p>De optelsom van HW-software + samplesets + hardware + touchscreens loopt in de duizenden. Sweelinq's abo is aantrekkelijk maar creëert lock-in-angst.</p></div></div>
+  <div class="wl-item"><div class="wl-n">3</div><div class="wl-c"><h4>Betere VST/DAW-integratie</h4><p>Componisten en producenten (KVR, VI-Control, Gearspace) willen orgelsoftware naadloos in hun workflow. Organteq blinkt hier uit; de rest blijft achter.</p></div></div>
+  <div class="wl-item"><div class="wl-n">4</div><div class="wl-c"><h4>Pijnloze upgrades zonder configuratieverlies</h4><p>Hauptwerk V5 en V9 veroorzaakten allebei dataverlies. Gebruikers willen dat hun jarenlang opgebouwde instellingen overleven bij versie-upgrades.</p></div></div>
+  <div class="wl-item"><div class="wl-n">5</div><div class="wl-c"><h4>Disk-streaming voor grote samplesets</h4><p>Hauptwerk laadt alles in RAM — geen streaming van SSD. Bij 50 GB-samplesets vereist dit enorm veel geheugen. Gebruikers op Gearspace noemen dit "ridiculous for this price".</p></div></div>
+  <div class="wl-item"><div class="wl-n">6</div><div class="wl-c"><h4>Betere tremulanten en expressie bij Sweelinq</h4><p>Forumreviews zijn unaniem: de tremulanten moeten fundamenteel beter, en het expressie-pedaal heeft meer dynamisch bereik en frequentie-afhankelijke filtering nodig.</p></div></div>
+  <div class="wl-item"><div class="wl-n">7</div><div class="wl-c"><h4>Meer historische orgels in fysieke modellering</h4><p>Organteq-gebruikers willen specifieke beroemde orgels bespelen (zoals Pianoteq specifieke vleugels modelleert), niet alleen een generiek model.</p></div></div>
+  <div class="wl-item"><div class="wl-n">8</div><div class="wl-c"><h4>Hogere polyfonie + lagere CPU-belasting bij Organteq</h4><p>512 stemmen is te weinig voor groot repertoire. GPU-versnelling wordt geopperd als mogelijke oplossing op het Modartt-forum.</p></div></div>
+  <div class="wl-item"><div class="wl-n">9</div><div class="wl-c"><h4>Toegankelijkheid voor blinde/slechtziende gebruikers</h4><p>Hauptwerk is onbruikbaar met screenreaders. Organteq beter maar niet perfect. Een blinde gebruiker biedt tevergeefs aan als accessibility-adviseur mee te werken.</p></div></div>
+  <div class="wl-item"><div class="wl-n">10</div><div class="wl-c"><h4>Ingebouwde ruimtecorrectie</h4><p>Software als Room EQ Wizard of Dirac Live verbetert het geluid significant, maar vereist aparte aanschaf en expertise. Integratie in de orgelsoftware zou een doorbraak zijn.</p></div></div>
+</div></section>
+
+<!-- ======== CONCLUSIE ======== -->
+<section id="end"><div class="wrap">
+  <div class="label">08 — Slotwoord</div>
+  <h2>Conclusie</h2>
+
+  <div class="cbox">
+    <h3>De ideale orgelsoftware bestaat nog niet — maar de concurrentie groeit</h3>
+    <p>Gebruikers dromen van software die de <strong>geluidskwaliteit van Hauptwerk</strong> combineert met het <strong>installatiegemak van Sweelinq</strong>, de <strong>flexibiliteit van Organteq</strong> en de <strong>prijs van GrandOrgue</strong>. Tot die software verschijnt, blijft de keuze afhankelijk van persoonlijke prioriteiten.</p>
+  </div>
+
+  <p><strong>Hauptwerk</strong> (V9) blijft de onbetwiste referentie voor geluidskwaliteit, maar de toenemende complexiteit, stijgende kosten en controversiële upgrade-beslissingen eroderen het vertrouwen van de trouwe achterban. Versie 9 toont dat de ontwikkelaar luistert (vereenvoudigde setup, betere UI), maar oude pijnpunten (geen disk-streaming, slechte DAW-integratie) blijven onopgelost.</p>
+
+  <p><strong>Sweelinq</strong> (V2, V3 in ontwikkeling) is de snelst groeiende speler. De kwaliteitssprong van V1 naar V2 is veelbelovend en toont dat Noorlander serieus investeert. Maar voor de meest kritische organisten moeten tremulanten, expressiviteit en ruimtelijke impressie nog fundamenteel verbeteren. Als V3 deze punten adresseert, kan Sweelinq een echte bedreiging voor Hauptwerk worden.</p>
+
+  <p><strong>Organteq</strong> (V2) vertegenwoordigt de meest innovatieve technologie, maar staat nog aan het begin van zijn reis — vergelijkbaar met waar Pianoteq 15 jaar geleden was. Voor componisten en producenten is het nu al de beste keuze dankzij VST-integratie. Voor concertorganisten is het nog te beperkt in polyfonie en orgelkeuze.</p>
+
+  <p><strong>GrandOrgue</strong> blijft essentieel als democratiserend platform: het maakt orgelspelen toegankelijk voor iedereen, ongeacht budget. Het OpenPipes-project (compleet open-source VPO-systeem op Raspberry Pi) laat zien dat de community innovatief denkt.</p>
+
+  <p>Eén ding is zeker op basis van al deze forumbijdragen: de komende jaren worden de meest spannende in de geschiedenis van digitale orgelsoftware. De concurrentie is goed voor de gebruiker — en dat klinkt de forumleden als muziek in de oren.</p>
+
+  <div class="detail">
+    <h4>Methodologische kanttekening</h4>
+    <p>Dit onderzoek is gebaseerd op openbaar beschikbare forumbijdragen en vertegenwoordigt de mening van actieve forumgebruikers — een zelfgeselecteerde groep die doorgaans meer technisch onderlegd en kritischer is dan de gemiddelde gebruiker. Positieve ervaringen van tevreden gebruikers die niet op forums schrijven zijn inherent ondervertegenwoordigd. De bevindingen van fabrikantwebsites (Sweelinq, Noorlander, Content, Mixtuur) zijn gemarkeerd als zodanig en met passende scepsis behandeld.</p>
+  </div>
+</div></section>
+
+</main>
+
+<footer>
+  <p><strong>Diepgaand Forumonderzoek Digitale Orgelsoftware</strong> — Maart 2026</p>
+  <p style="margin-top:.4rem">12+ bronnen: The Organ Forum · Contrebombarde · MusicaSacra · KVR Audio · Modartt Forum · Gearspace · VI-Control · Mod Wiggler · Hauptwerk Forum · SourceForge · Sound On Sound · Equipboard · productwebsites</p>
+</footer>
+
+</body>
+</html>

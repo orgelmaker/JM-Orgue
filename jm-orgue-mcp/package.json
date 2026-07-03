@@ -1,0 +1,16 @@
+{
+  "name": "jm-orgue-mcp",
+  "version": "0.1.0",
+  "description": "MCP server voor JM-Orgue test API — laat Claude de virtuele orgelsoftware aansturen",
+  "type": "module",
+  "main": "src/server.js",
+  "bin": {
+    "jm-orgue-mcp": "src/server.js"
+  },
+  "scripts": {
+    "start": "node src/server.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  }
+}

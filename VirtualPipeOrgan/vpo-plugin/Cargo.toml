@@ -1,0 +1,35 @@
+[package]
+name = "vpo-plugin"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+description = "JM-Orgue VST3/CLAP plugin — virtueel pijporgel in je DAW"
+
+[lib]
+crate-type = ["cdylib"]
+
+[[bin]]
+name = "vpo-plugin-standalone"
+path = "src/bin/standalone.rs"
+required-features = ["standalone"]
+
+[dependencies]
+# nih-plug — Rust framework voor VST3/CLAP plugins
+# We pinnen op huidige master tip; bij future updates evt. herpinnen op specifieke commit.
+nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", rev = "f36931f7af4646065488a9845d8f8c2f95252c23", features = ["assert_process_allocs"] }
+
+# Workspace crates die we hergebruiken
+vpo-core = { path = "../vpo-core" }
+vpo-sampler = { path = "../vpo-sampler" }
+vpo-midi = { path = "../vpo-midi" }
+
+# Logging
+tracing = { workspace = true }
+
+# Sample loading helpers
+parking_lot = { workspace = true }
+
+[features]
+default = []
+# Standalone executable variant (handig voor lokaal testen zonder DAW)
+standalone = ["nih_plug/standalone"]

@@ -1,0 +1,2231 @@
+/* JM-Orgue Virtual Pipe Organ - Design Tokens
+   ============================================
+   Alle waarden hier zijn instelbaar via LayoutSettings.
+   Geen hardcoded kleuren in de rest van dit bestand!
+*/
+
+:root {
+  /* === Accent / primair === */
+  --primary: #b8960b;
+  --primary-hover: #d4af37;
+  --primary-dark: #8b7209;
+
+  /* === Achtergronden === */
+  --bg-darkest: #e8e0d0;
+  --bg-dark: #f0ebe0;
+  --bg-panel: #f5f0e6;
+  --bg-elevated: #faf6ee;
+  --bg-control: #1a1a1a;
+  --bg-hover: #2a2a2a;
+  --bg-overlay: rgba(0, 0, 0, 0.6);
+
+  /* === Tekst === */
+  --text: #2c1810;
+  --text-secondary: #5c4030;
+  --text-muted: #8a7060;
+  --text-on-stop: #1a1200;             /* tekst op porselein register */
+  --text-on-stop-secondary: #5a4a30;   /* pitch label op porselein */
+  --stop-active-text: #1a1200;         /* tekst op actief (geel) register */
+  --stop-active-text-secondary: #4a3800;
+  --text-on-division: #2c1810;         /* tekst in division header (gold gradient) */
+  --text-on-division-badge: #3a2010;
+  --text-on-primary: #ffffff;          /* tekst op accent achtergrond */
+
+  /* === Registerknop / porselein === */
+  --stop-porcelain: #f5f0e0;
+  --stop-porcelain-border: #c8b898;
+  --stop-active: #e8c820;
+  --stop-active-border: #c8a810;
+
+  /* === Bladgoud / sieraccent === */
+  --gold-border: #d4af37;
+  --gold-shadow: rgba(180, 150, 11, 0.3);
+  --gold-gradient: linear-gradient(135deg, #d4af37 0%, #f0d060 30%, #d4af37 50%, #b8960b 100%);
+  --accent-soft: var(--accent-soft);   /* zachte rand/highlight */
+  --accent-soft-2: rgba(180, 150, 11, 0.20);
+  --accent-soft-hover: var(--accent-soft-hover);
+
+  /* === Status === */
+  --success: #4caf50;
+  --warning: #ff9800;
+  --error: #c44030;
+
+  /* === LEDs / indicatoren === */
+  --led-off: rgba(0, 0, 0, 0.25);
+  --led-green: #4ade80;
+  --led-green-glow: rgba(74, 222, 128, 0.4);
+  --led-blue: #4a90d9;
+  --midi-indicator: #6495ed;     /* rand om knop met MIDI-mapping */
+
+  /* === Meters === */
+  --meter-bar-bg: #d8d0c0;
+
+  /* === Naamplaatje === */
+  --nameplate-frame-start: #2a2218;
+  --nameplate-frame-mid: #1a1510;
+  --nameplate-frame-end: #3a3028;
+  --nameplate-face-start: #faf6ee;
+  --nameplate-face-mid: #f0ebe0;
+  --nameplate-face-end: #e8e2d4;
+  --nameplate-face-border: #c8b898;
+  --nameplate-text: #1a1008;
+
+  /* === Scrollbar === */
+  --scrollbar-thumb: #c8b898;
+  --scrollbar-thumb-hover: var(--primary);
+
+  /* === Context menu === */
+  --menu-bg: #2a2a2a;
+  --menu-border: #555;
+  --menu-text: #ccc;
+  --menu-hover-bg: #444;
+  --menu-hover-text: #fff;
+
+  /* === Shadows === */
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.12);
+  --shadow-md: 0 3px 8px rgba(0, 0, 0, 0.15);
+  --shadow-lg: 0 6px 16px rgba(0, 0, 0, 0.18);
+  --shadow-glow: 0 0 12px var(--gold-shadow);
+
+  /* === Transitions === */
+  --transition-fast: 0.1s ease;
+  --transition-normal: 0.2s ease;
+  --transition-slow: 0.3s ease;
+
+  /* === Borders / radii === */
+  --border-subtle: 1px solid var(--accent-soft);
+  --border-gold: 2px solid var(--gold-border);
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --radius-xl: 14px;
+
+  /* === Lettertype voor registers (instelbaar) === */
+  --stop-font-family: 'Georgia', 'Times New Roman', serif;
+  --stop-font-size: 0.8rem;
+  --stop-font-weight: 500;
+
+  /* === Touch targets === */
+  --touch-target: 44px;
+  --touch-target-lg: 56px;
+
+  /* === Setzer balk (donkere chrome onderaan) === */
+  --setzer-bg: #1a1a1a;
+  --setzer-bg-elevated: #2a2a2a;     /* knoppen */
+  --setzer-bg-active: #3a3a3a;       /* knop hover */
+  --setzer-text: #cccccc;
+  --setzer-text-strong: #ffffff;
+  --setzer-text-muted: #888888;
+  --setzer-border: #333333;
+  --setzer-border-strong: #444444;
+  --setzer-border-hover: #666666;
+  --setzer-display-bg: #0a0a0a;
+  --setzer-display-fg: #e8a020;      /* oranje LED-display */
+  --setzer-cresc-led-bg: #2a2a2a;
+  --setzer-cresc-led-on-start: #ff5050;
+  --setzer-cresc-led-on-end: #ff8060;
+  --setzer-cresc-label: #d47070;
+  --setzer-cresc-value: #c0c0c0;
+  --setzer-set-bg: #2a2010;          /* SET-knop normaal */
+  --setzer-set-bg-active: var(--primary);
+  --setzer-set-text: var(--primary-hover);
+  --setzer-set-text-active: #1a1a00;
+  --setzer-gc-bg: #2a1010;           /* General Cancel */
+  --setzer-gc-border: #cc4444;
+  --setzer-gc-text: #ee6666;
+}
+
+/* ============================================
+   TOUCHSCREEN OPTIMALISATIE
+   Alle interactieve elementen worden vergroot tot >= --touch-target.
+   Voorkom kleine targets (<44px) en te dicht op elkaar staande elementen.
+   ============================================ */
+@media (pointer: coarse) {
+  /* Generieke knoppen */
+  .btn, button {
+    min-height: var(--touch-target);
+    min-width: var(--touch-target);
+  }
+  .btn-icon-sm,
+  .btn-sm,
+  .panel-layout-btn,
+  .panel-add-btn {
+    min-height: var(--touch-target) !important;
+  }
+
+  /* Registerknoppen */
+  .stop-knob {
+    min-height: var(--touch-target-lg) !important;
+    min-width: var(--touch-target-lg) !important;
+    font-size: 0.85rem !important;
+  }
+
+  /* Tabs en navigatie */
+  .header-tab {
+    padding: 0.75rem 1.2rem !important;
+    font-size: 0.9rem !important;
+    min-height: var(--touch-target);
+  }
+  .panel-div-btn {
+    min-height: var(--touch-target);
+    padding: 0.5rem 0.85rem !important;
+    font-size: 0.82rem !important;
+  }
+
+  /* Sliders */
+  input[type="range"],
+  .slider-control input[type="range"],
+  .swell-config-row input[type="range"] {
+    height: 28px !important;
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    width: 24px;
+    height: 24px;
+  }
+
+  /* Form inputs */
+  input[type="text"],
+  input[type="number"],
+  input[type="color"],
+  select,
+  textarea {
+    min-height: var(--touch-target);
+    font-size: 0.9rem;
+  }
+  input[type="color"] {
+    width: var(--touch-target) !important;
+    height: var(--touch-target) !important;
+  }
+  input[type="checkbox"] {
+    width: 22px !important;
+    height: 22px !important;
+  }
+
+  /* Setzer balk */
+  .setzer-digit, .setzer-btn {
+    min-width: var(--touch-target) !important;
+    min-height: var(--touch-target) !important;
+    font-size: 1rem !important;
+  }
+
+  /* LEDs en kleine indicatoren */
+  .swell-led {
+    width: 20px !important;
+    height: 20px !important;
+  }
+  .crescendo-step {
+    height: 28px;
+  }
+
+  /* Sortable rows */
+  .sort-row {
+    padding: 0.6rem 0.75rem !important;
+    font-size: 0.88rem !important;
+  }
+
+  /* Library / cards */
+  .library-card {
+    min-height: var(--touch-target-lg);
+  }
+  .library-card-delete {
+    width: 32px !important;
+    height: 32px !important;
+    opacity: 1 !important;
+  }
+  .preset-delete {
+    width: 28px !important;
+    height: 28px !important;
+    opacity: 1 !important;
+  }
+
+  /* Lijst items en device select */
+  .device-item,
+  .stop-item,
+  .pipe-btn,
+  .preset-card {
+    min-height: var(--touch-target);
+  }
+
+  /* Context menu — items groter zodat ze duidelijk te tappen zijn */
+  .coupler-context-menu button,
+  .setzer-context-menu button {
+    min-height: var(--touch-target);
+    padding: 0.85rem 1.2rem !important;
+    font-size: 0.9rem !important;
+  }
+
+  /* Color rows in LayoutSettings */
+  .color-row,
+  .font-row,
+  .texture-row {
+    padding: 0.85rem 1rem !important;
+  }
+
+  /* MIDI mapping rij */
+  .midi-mapping-row {
+    padding: 1rem !important;
+  }
+  .midi-channel-select select,
+  .midi-transpose input {
+    padding: 0.6rem 0.75rem !important;
+    font-size: 0.95rem !important;
+  }
+
+  /* Coupler checkboxes */
+  .coupler-check input[type="checkbox"] {
+    width: 22px !important;
+    height: 22px !important;
+  }
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  background: var(--bg-dark);
+  color: var(--text);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: var(--bg-dark);
+}
+
+/* ============================================
+   HEADER - met bladgoud rand
+   ============================================ */
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 1.5rem;
+  height: 56px;
+  background: var(--bg-panel);
+  border-bottom: 2px solid var(--gold-border);
+  flex-shrink: 0;
+  box-shadow: 0 2px 8px var(--gold-shadow);
+}
+
+.header-brand {
+  display: flex;
+  align-items: center;
+}
+
+/* Porselein naamplaatje - Witte orgelmakers stijl */
+.nameplate {
+  position: relative;
+  padding: 2px;
+  border-radius: 40px;
+  background: linear-gradient(145deg, var(--nameplate-frame-start) 0%, var(--nameplate-frame-mid) 40%, var(--nameplate-frame-end) 100%);
+  box-shadow:
+    0 1px 4px rgba(0,0,0,0.35),
+    inset 0 1px 0 rgba(255,255,255,0.08);
+  margin: 6px 0;
+}
+
+.nameplate-inner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px 20px;
+  border-radius: 38px;
+  background: linear-gradient(175deg, var(--nameplate-face-start) 0%, var(--nameplate-face-mid) 40%, var(--nameplate-face-end) 100%);
+  border: 1px solid var(--nameplate-face-border);
+  box-shadow:
+    inset 0 1px 2px rgba(255,255,255,0.7),
+    inset 0 -1px 1px rgba(0,0,0,0.04);
+}
+
+.nameplate-title {
+  font-family: 'Georgia', 'Times New Roman', 'Palatino Linotype', serif;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--nameplate-text);
+  letter-spacing: 0.06em;
+  line-height: 1;
+}
+
+.header-center {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2rem;
+}
+
+.header-organ-name {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text);
+  font-family: var(--stop-font-family);
+}
+
+.header-tabs {
+  display: flex;
+  gap: 2px;
+  background: var(--bg-darkest);
+  padding: 2px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--accent-soft);
+}
+
+.header-tab {
+  padding: 0.35rem 1rem;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  font-weight: 500;
+}
+
+.header-tab:hover {
+  color: var(--text);
+}
+
+.header-tab.active {
+  background: var(--bg-panel);
+  color: var(--text);
+  box-shadow: var(--shadow-sm);
+}
+
+.btn-icon-sm {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+}
+
+.header-controls {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+/* ============================================
+   MAIN LAYOUT
+   ============================================ */
+
+.main-content {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* Device selector */
+.device-select {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.device-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  background: var(--bg-elevated);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  border: 1px solid var(--accent-soft);
+}
+
+.device-item:hover {
+  border-color: var(--gold-border);
+}
+
+.device-item.selected {
+  border-color: var(--gold-border);
+  background: var(--accent-soft-hover);
+  box-shadow: 0 0 0 1px var(--gold-border);
+}
+
+.device-icon {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-darkest);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+}
+
+.device-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.device-name {
+  font-size: 0.875rem;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.device-status {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+
+/* Contextuele hint onder de apparatenlijst (bv. ASIO-uitleg) */
+.audio-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  padding: 0.6rem 0.7rem;
+  font-size: 0.75rem;
+  line-height: 1.45;
+  color: var(--text-secondary);
+  background: var(--accent-soft);
+  border: 1px solid var(--gold-border);
+  border-radius: var(--radius-sm);
+}
+
+.audio-hint svg {
+  color: var(--gold-border);
+}
+
+/* Volume/Reverb sliders */
+.slider-control {
+  margin-bottom: 1.25rem;
+}
+
+.slider-control:last-child {
+  margin-bottom: 0;
+}
+
+.slider-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.slider-label {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.slider-value {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  font-family: 'JetBrains Mono', monospace;
+}
+
+input[type="range"] {
+  -webkit-appearance: none;
+  width: 100%;
+  height: 6px;
+  background: var(--bg-darkest);
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 18px;
+  height: 18px;
+  background: var(--primary);
+  border-radius: 50%;
+  cursor: pointer;
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+  border: 2px solid var(--primary-hover);
+}
+
+input[type="range"]::-webkit-slider-thumb:hover {
+  transform: scale(1.1);
+  box-shadow: var(--shadow-glow);
+}
+
+/* VU Meters */
+.meters-container {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 1rem;
+  background: var(--bg-darkest);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--accent-soft);
+}
+
+.meter-channel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.meter-bar {
+  width: 24px;
+  height: 120px;
+  background: var(--meter-bar-bg);
+  border-radius: var(--radius-sm);
+  position: relative;
+  overflow: hidden;
+}
+
+.meter-fill {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: linear-gradient(to top,
+    var(--success) 0%,
+    var(--success) 60%,
+    var(--warning) 80%,
+    var(--error) 100%
+  );
+  transition: height 0.05s linear;
+  border-radius: var(--radius-sm);
+}
+
+.meter-label {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+
+/* Pistons */
+.pistons-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 0.5rem;
+}
+
+.piston {
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-darkest);
+  border-radius: var(--radius-sm);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  border: 1px solid var(--accent-soft-2);
+}
+
+.piston:hover {
+  border-color: var(--gold-border);
+  transform: translateY(-1px);
+}
+
+.piston.active {
+  background: var(--primary);
+  color: var(--text-on-primary);
+}
+
+/* ============================================
+   CONSOLE (Main organ display)
+   ============================================ */
+
+.console {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg-dark);
+}
+
+/* Organ browser */
+.organ-browser {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.organ-browser-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1.5rem;
+  background: var(--bg-panel);
+  border-bottom: 2px solid var(--gold-border);
+}
+
+.organ-browser-title {
+  font-size: 1.1rem;
+  font-weight: 600;
+  font-family: var(--stop-font-family);
+  margin: 0;
+}
+
+.organ-browser-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.organ-browser-actions .btn {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+  padding: 0.3rem 0.6rem;
+}
+
+/* Library organ grid — maximaal schermoppervlak */
+.organ-library-grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 1rem;
+  padding: 1rem;
+  overflow-y: auto;
+  align-content: start;
+}
+
+.library-card {
+  position: relative;
+  background: var(--bg-panel);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  cursor: pointer;
+  transition: all var(--transition-normal);
+  border: 1px solid var(--accent-soft-2);
+}
+
+.library-card:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-lg);
+  border-color: var(--gold-border);
+}
+
+.library-card-delete {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: none;
+  background: var(--bg-overlay);
+  color: var(--menu-text);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.library-card:hover .library-card-delete {
+  opacity: 1;
+}
+
+.library-card-delete:hover {
+  background: var(--error);
+  color: var(--text-on-primary);
+}
+
+.library-card-image {
+  aspect-ratio: 4/3;
+  background: var(--bg-elevated);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  overflow: hidden;
+}
+
+.library-card-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.library-card-info {
+  padding: 0.5rem 0.65rem;
+}
+
+.library-card-name {
+  font-weight: 600;
+  font-size: 0.8rem;
+  margin-bottom: 0.15rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.library-card-meta {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+
+.library-empty {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 3rem;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.library-empty p {
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+/* Legacy organ card styles (kept for compatibility) */
+.organ-card {
+  background: var(--bg-panel);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  cursor: pointer;
+  transition: all var(--transition-normal);
+  border: 1px solid var(--accent-soft-2);
+}
+
+.organ-card:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--shadow-lg);
+  border-color: var(--gold-border);
+}
+
+.organ-card-image {
+  aspect-ratio: 4/3;
+  background: var(--bg-elevated);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 3rem;
+}
+
+.organ-card-info {
+  padding: 1rem;
+}
+
+.organ-card-name {
+  font-weight: 600;
+  font-size: 0.95rem;
+  margin-bottom: 0.25rem;
+}
+
+.organ-card-location {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.organ-card-meta {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+
+/* ============================================
+   ORGEL VIEW - Multi-panel registers
+   ============================================ */
+
+.orgel-view {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.panel-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.4rem 1rem;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--accent-soft);
+  flex-shrink: 0;
+}
+
+.panel-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.stop-size-control {
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+  color: var(--text-muted);
+}
+.stop-size-btn {
+  min-width: 1.6rem;
+  padding: 0.2rem 0.4rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.panel-toolbar-label {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 600;
+}
+
+.panel-layout-btn {
+  font-size: 0.75rem !important;
+  padding: 0.25rem 0.7rem !important;
+  gap: 0.35rem !important;
+  display: inline-flex !important;
+  align-items: center !important;
+}
+
+.panel-add-btn {
+  font-size: 0.75rem !important;
+  padding: 0.25rem 0.7rem !important;
+  gap: 0.35rem !important;
+  display: inline-flex !important;
+  align-items: center !important;
+}
+
+/* Panel window header (used in extra register windows) */
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.4rem 0.75rem;
+  background: var(--bg-darkest);
+  flex-shrink: 0;
+  gap: 0.5rem;
+  border-bottom: 1px solid var(--accent-soft);
+}
+
+.panel-config {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.panel-div-btn {
+  font-size: 0.7rem;
+  padding: 0.2rem 0.6rem;
+  border: 1px solid var(--accent-soft-2);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+}
+
+.panel-div-btn:hover {
+  border-color: var(--gold-border);
+  color: var(--text);
+}
+
+.panel-div-btn.selected {
+  background: var(--accent-soft);
+  border-color: var(--gold-border);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.panel-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+/* Vertical stops layout - responsive grid per divisie */
+.stops-grid.stops-vertical {
+  grid-template-columns: repeat(auto-fill, minmax(var(--stop-min-width, 90px), 1fr));
+}
+
+/* ============================================
+   INSTELLINGEN VIEW
+   ============================================ */
+
+.instellingen-view {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1.25rem;
+}
+
+.instellingen-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2rem;
+  max-width: 1200px;
+}
+
+.instellingen-section {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.settings-block {
+  background: var(--bg-panel);
+  border-radius: var(--radius-lg);
+  padding: 1rem 1.25rem;
+  border: 1px solid var(--accent-soft-2);
+}
+
+.settings-block-title {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  letter-spacing: 0.1em;
+  font-weight: 600;
+  margin-bottom: 0.75rem;
+}
+
+@media (max-width: 900px) {
+  .instellingen-columns {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ============================================
+   DIVISIONS - met bladgoud sierkader
+   ============================================ */
+
+.divisions-container {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+/* Vertical mode: divisies naast elkaar als kolommen */
+.divisions-container.divisions-vertical {
+  flex-direction: row;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  overflow-x: auto;
+  gap: 0.75rem;
+}
+
+.divisions-vertical .division {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.division {
+  background: var(--bg-panel);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  border: 2px solid var(--gold-border);
+  box-shadow: 0 2px 8px var(--gold-shadow);
+}
+
+.division-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.7rem 1rem;
+  background: var(--gold-gradient);
+  color: var(--text-on-division);
+}
+
+/* Compacte divisie-kop: alleen mapnaam */
+.division-header-compact {
+  padding: 0.35rem 0.75rem;
+}
+
+.division-header-compact .division-name {
+  font-size: 0.75rem;
+}
+
+.division-name {
+  font-weight: 700;
+  font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-family: var(--stop-font-family);
+  text-shadow: 0 1px 0 rgba(255,255,255,0.3);
+}
+
+.division-badge {
+  font-size: 0.6rem;
+  padding: 0.1rem 0.4rem;
+  background: rgba(0,0,0,0.12);
+  border-radius: var(--radius-sm);
+  color: var(--text-on-division-badge);
+  font-weight: 500;
+}
+
+.division-controls {
+  display: flex;
+  gap: 0.5rem;
+}
+
+/* ============================================
+   REGISTERKNOPPEN - Zwart met porselein plaatje
+   ============================================ */
+
+.stops-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--stop-min-width, 100px), 1fr));
+  gap: 0.4rem;
+  padding: 0.5rem;
+  background: var(--bg-elevated);
+}
+
+.stop-knob {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 56px;
+  padding: 0.25rem 0.4rem;
+  border: none;
+  border-radius: 5px;
+  background: var(--bg-control);
+  color: var(--text);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.05);
+  flex-shrink: 0;
+}
+
+/* Porselein plaatje in het midden */
+.stop-knob::before {
+  content: '';
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  top: 6px;
+  bottom: 6px;
+  background: var(--stop-porcelain);
+  border-radius: 3px;
+  border: 1px solid var(--stop-porcelain-border);
+  box-shadow: inset 0 1px 2px rgba(0,0,0,0.06);
+  transition: all var(--transition-fast);
+}
+
+.stop-knob:hover {
+  background: var(--bg-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 3px 6px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.08);
+}
+
+.stop-knob:active {
+  transform: translateY(1px);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.3);
+}
+
+/* Actief = geel porselein */
+.stop-knob.engaged {
+  background: var(--bg-control);
+}
+
+.stop-knob.engaged::before {
+  background: var(--stop-active);
+  border-color: var(--stop-active-border);
+  box-shadow: inset 0 1px 2px rgba(0,0,0,0.1), 0 0 8px rgba(232, 200, 32, 0.3);
+}
+
+.stop-knob.engaged .stop-name {
+  color: var(--stop-active-text);
+}
+
+.stop-knob.engaged .stop-pitch {
+  color: var(--stop-active-text-secondary);
+}
+
+/* Stop family - geen aparte kleuren meer, alles zwart met porselein */
+.stop-knob.flute::before,
+.stop-knob.string::before,
+.stop-knob.reed::before,
+.stop-knob.mixture::before,
+.stop-knob.coupler::before,
+.stop-knob.tremulant::before,
+.stop-knob.pedal::before {
+  /* Zelfde porselein stijl voor alle families */
+  background: var(--stop-porcelain);
+  border-color: var(--stop-porcelain-border);
+}
+
+.stop-knob.engaged.flute::before,
+.stop-knob.engaged.string::before,
+.stop-knob.engaged.reed::before,
+.stop-knob.engaged.mixture::before,
+.stop-knob.engaged.coupler::before,
+.stop-knob.engaged.tremulant::before,
+.stop-knob.engaged.pedal::before {
+  background: var(--stop-active);
+  border-color: var(--stop-active-border);
+}
+
+/* Coupler buttons - same size as regular stops */
+.stop-knob.coupler-knob {
+  padding: 0.25rem 0.4rem;
+}
+
+.stop-knob.coupler-knob::before {
+  background: var(--stop-porcelain);
+  border-color: var(--stop-porcelain-border);
+}
+
+.stop-knob.coupler-knob.engaged::before {
+  background: var(--stop-active);
+  border-color: var(--stop-active-border);
+}
+
+.coupler-line {
+  font-family: var(--stop-font-family);
+  font-size: 0.68rem;
+  font-weight: var(--stop-font-weight);
+  text-align: center;
+  line-height: 1.15;
+  white-space: nowrap;
+  position: relative;
+  z-index: 1;
+  color: var(--text-on-stop);
+  display: block;
+}
+
+.stop-knob.coupler-knob.engaged .coupler-line {
+  color: var(--stop-active-text);
+}
+
+/* MIDI indicator for coupler and stop buttons */
+.stop-knob.coupler-knob.has-midi,
+.stop-knob.has-midi {
+  box-shadow: 0 2px 4px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.05), 0 0 0 1px var(--midi-indicator);
+}
+
+.stop-name {
+  font-family: var(--stop-font-family);
+  font-size: var(--stop-font-size);
+  font-weight: var(--stop-font-weight);
+  text-align: center;
+  line-height: 1.2;
+  white-space: nowrap;
+  position: relative;
+  z-index: 1;
+  color: var(--text-on-stop);
+}
+
+.stop-pitch {
+  font-family: var(--stop-font-family);
+  font-size: calc(var(--stop-font-size) - 0.05rem);
+  font-weight: 600;
+  color: var(--text-on-stop-secondary);
+  margin-top: 1px;
+  position: relative;
+  z-index: 1;
+}
+
+/* ============================================
+   STATUS BAR - met gouden bovenlijn
+   ============================================ */
+
+.status-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem 1.5rem;
+  height: 34px;
+  background: var(--bg-panel);
+  border-top: 2px solid var(--gold-border);
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.status-group {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+}
+
+.status-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+
+.status-dot.active {
+  background: var(--success);
+  box-shadow: 0 0 8px var(--success);
+}
+
+.status-dot.warning {
+  background: var(--warning);
+  box-shadow: 0 0 8px var(--warning);
+}
+
+.status-dot.error {
+  background: var(--error);
+  box-shadow: 0 0 8px var(--error);
+}
+
+/* ============================================
+   BUTTONS
+   ============================================ */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.625rem 1.25rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.btn-primary {
+  background: var(--primary);
+  color: var(--text-on-primary);
+  border: 1px solid var(--primary-hover);
+}
+
+.btn-primary:hover {
+  background: var(--primary-hover);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-glow);
+}
+
+.btn-secondary {
+  background: var(--bg-elevated);
+  color: var(--text);
+  border: 1px solid var(--accent-soft-2);
+}
+
+.btn-secondary:hover {
+  border-color: var(--gold-border);
+  background: var(--bg-darkest);
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.btn-ghost:hover {
+  background: var(--bg-darkest);
+  color: var(--text);
+}
+
+.btn-icon {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: var(--radius-sm);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none !important;
+}
+
+/* ============================================
+   LOADING & EMPTY STATES
+   ============================================ */
+
+.loading-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: 1.5rem;
+}
+
+.spinner {
+  width: 48px;
+  height: 48px;
+  border: 3px solid var(--bg-darkest);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.loading-text {
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+}
+
+.loading-progress {
+  width: 200px;
+  height: 4px;
+  background: var(--bg-darkest);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.loading-progress-bar {
+  height: 100%;
+  background: var(--primary);
+  transition: width var(--transition-normal);
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: 1rem;
+  color: var(--text-muted);
+  text-align: center;
+  padding: 2rem;
+}
+
+.empty-state-icon {
+  font-size: 4rem;
+  opacity: 0.3;
+}
+
+.empty-state-title {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  font-family: var(--stop-font-family);
+}
+
+.empty-state-text {
+  max-width: 300px;
+  font-size: 0.9rem;
+}
+
+/* ============================================
+   SCROLLBAR
+   ============================================ */
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-darkest);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+}
+
+/* ============================================
+   ANIMATIONS
+   ============================================ */
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.fade-in {
+  animation: fadeIn var(--transition-normal);
+}
+
+.slide-up {
+  animation: slideUp var(--transition-slow);
+}
+
+/* ============================================
+   MIDI MAPPING
+   ============================================ */
+
+.midi-mapping-container {
+  padding: 1.5rem;
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+.midi-mapping-header {
+  margin-bottom: 1.5rem;
+}
+
+.midi-mapping-header h3 {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 0.5rem;
+}
+
+.midi-mapping-header p {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.midi-mapping-row {
+  display: grid;
+  grid-template-columns: 160px auto;
+  align-items: center;
+  padding: 1rem;
+  background: var(--bg-panel);
+  border-radius: var(--radius-md);
+  margin-bottom: 0.75rem;
+  border: 1px solid var(--accent-soft-2);
+  gap: 0.75rem;
+}
+
+.midi-mapping-division {
+  min-width: 0;
+}
+
+.division-label {
+  font-weight: 500;
+  color: var(--text);
+}
+
+.division-range {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  margin-left: 0.5rem;
+  opacity: 0.8;
+}
+
+.midi-mapping-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.midi-channel-select {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  white-space: nowrap;
+}
+
+.swell-toggle {
+  white-space: nowrap;
+}
+
+.midi-channel-select label,
+.midi-transpose label {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.midi-channel-select select {
+  padding: 0.4rem 0.75rem;
+  background: var(--bg-elevated);
+  border: 1px solid var(--accent-soft-2);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.midi-channel-select select:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+.midi-learn-btn {
+  padding: 0.4rem 0.75rem;
+  font-size: 0.8rem;
+  min-width: 130px;
+}
+
+.midi-learn-btn svg {
+  flex-shrink: 0;
+}
+
+.midi-learn-btn.learning {
+  background: var(--primary);
+  color: white;
+  animation: pulse 1s infinite;
+}
+
+.midi-learn-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.reverb-ir-control {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.4rem;
+}
+
+.reverb-ir-name {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 150px;
+}
+
+.learning-indicator {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  background: white;
+  border-radius: 50%;
+  margin-right: 6px;
+  animation: blink 0.5s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+.midi-transpose {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.midi-transpose input {
+  width: 60px;
+  padding: 0.4rem 0.5rem;
+  background: var(--bg-elevated);
+  border: 1px solid var(--accent-soft-2);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 0.85rem;
+  text-align: center;
+}
+
+.midi-transpose input:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+.transpose-unit {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+/* Reverb type selector */
+.reverb-type-selector {
+  display: flex;
+  gap: 0.3rem;
+  margin-bottom: 0.6rem;
+}
+.reverb-type-selector .btn-sm {
+  flex: 1;
+  padding: 0.3rem 0.5rem;
+  font-size: 0.72rem;
+  border: 1px solid var(--border-color);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-radius: 4px;
+}
+.reverb-type-selector .btn-active {
+  background: var(--primary);
+  color: white;
+  border-color: var(--primary);
+}
+.reverb-preset-select {
+  width: 100%;
+  padding: 0.3rem 0.5rem;
+  font-size: 0.8rem;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
+/* BLE MIDI activity indicator */
+.ble-activity {
+  font-size: 0.7rem;
+  color: var(--success);
+  margin-left: 0.5rem;
+  font-weight: 600;
+  animation: ble-pulse 1s ease-in-out infinite;
+}
+@keyframes ble-pulse {
+  0%, 100% { opacity: 0.7; }
+  50% { opacity: 1; }
+}
+
+/* Bluetooth MIDI badge */
+.bt-badge {
+  display: inline-block;
+  padding: 0.1rem 0.35rem;
+  margin-left: 0.4rem;
+  font-size: 0.6rem;
+  font-weight: 700;
+  background: var(--led-blue);
+  color: var(--text-on-primary);
+  border-radius: 3px;
+  vertical-align: middle;
+}
+
+/* Bluetooth help text */
+.bt-help {
+  margin-top: 0.5rem;
+  padding: 0.5rem 0.7rem;
+  background: var(--bg-elevated);
+  border-left: 3px solid var(--led-blue);
+  border-radius: 4px;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+.bt-help strong {
+  color: var(--text);
+  font-size: 0.8rem;
+}
+
+/* Custom temperament editor */
+.custom-temperament-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.2rem;
+  margin-top: 0.4rem;
+  padding: 0.5rem;
+  background: var(--bg-elevated);
+  border-radius: 4px;
+  border: 1px solid var(--border-subtle);
+}
+.custom-temp-row {
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+  font-size: 0.72rem;
+}
+.custom-temp-note {
+  min-width: 18px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.custom-temp-input {
+  width: 52px;
+  padding: 0.15rem 0.3rem;
+  font-size: 0.72rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: 3px;
+  background: var(--bg-panel);
+  color: var(--text);
+  text-align: right;
+}
+.custom-temp-unit {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+}
+
+/* Register sorting */
+.sort-division {
+  margin-bottom: 1rem;
+}
+.sort-division-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.3rem;
+}
+.sort-division-name {
+  font-weight: 600;
+  font-size: 0.8rem;
+}
+.sort-presets {
+  display: flex;
+  gap: 0.2rem;
+}
+.sort-presets .btn-xs {
+  padding: 0.1rem 0.4rem;
+  font-size: 0.65rem;
+}
+.sort-list {
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+.sort-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.25rem 0.4rem;
+  font-size: 0.75rem;
+  border-bottom: 1px solid var(--border-color);
+  cursor: grab;
+  background: var(--bg-primary);
+  transition: background 0.1s;
+}
+.sort-row:last-child { border-bottom: none; }
+.sort-row:hover { background: var(--bg-secondary); }
+.sort-row.drag-over { border-top: 2px solid var(--primary); }
+.sort-row:active { cursor: grabbing; }
+.sort-handle {
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  cursor: grab;
+}
+.sort-color {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+.sort-name {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sort-pitch {
+  color: var(--text-secondary);
+  font-size: 0.7rem;
+  min-width: 25px;
+  text-align: right;
+}
+
+/* Crescendo bar */
+.crescendo-bar {
+  display: flex;
+  gap: 2px;
+  height: 20px;
+}
+.crescendo-step {
+  flex: 1;
+  background: var(--border-color);
+  border-radius: 2px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.crescendo-step.active {
+  background: var(--primary);
+}
+.crescendo-step:hover {
+  opacity: 0.8;
+}
+
+/* Swell box config sliders */
+.swell-config-sliders {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin-top: 0.4rem;
+  width: 100%;
+}
+.swell-config-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+}
+.swell-config-label {
+  min-width: 80px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.swell-config-row input[type="range"] {
+  flex: 1;
+  height: 4px;
+}
+/* Crescendo-editor matrix (stappen × registers). */
+.cresc-editor-hint {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  margin: 0.5rem 0 0.3rem;
+  line-height: 1.3;
+}
+.cresc-table-wrap {
+  max-height: 340px;
+  overflow: auto;
+  border: 1px solid var(--accent-soft-2);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+}
+.cresc-table {
+  border-collapse: collapse;
+  font-size: 0.7rem;
+}
+.cresc-table th, .cresc-table td {
+  border: 1px solid var(--accent-soft-2);
+  padding: 0;
+  text-align: center;
+}
+.cresc-corner {
+  position: sticky;
+  left: 0;
+  top: 0;
+  z-index: 3;
+  background: var(--bg-panel);
+  color: var(--text-secondary);
+  font-weight: 600;
+  padding: 0.2rem 0.5rem;
+  text-align: left;
+  white-space: nowrap;
+}
+.cresc-step-h {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--bg-panel);
+  color: var(--text-secondary);
+  min-width: 22px;
+  padding: 0.25rem 0;
+  cursor: pointer;
+  font-weight: 600;
+}
+.cresc-step-h:hover { color: var(--text); }
+.cresc-step-h.active { background: var(--gold-border); color: var(--bg-dark); }
+.cresc-div-name {
+  position: sticky;
+  left: 0;
+  background: var(--bg-panel);
+  color: var(--gold-border);
+  font-weight: 700;
+  text-align: left;
+  padding: 0.2rem 0.5rem;
+  text-transform: uppercase;
+  font-size: 0.62rem;
+  letter-spacing: 0.04em;
+}
+.cresc-stop-name {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--bg-elevated);
+  color: var(--text);
+  text-align: left;
+  padding: 0.15rem 0.5rem;
+  white-space: nowrap;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cresc-cell { width: 24px; height: 24px; padding: 0; }
+.cresc-cell.colactive { background: rgba(180, 150, 11, 0.12); }
+.cresc-cell-btn {
+  width: 100%;
+  height: 22px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: #5cb85c;
+  font-size: 0.85rem;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.cresc-cell-btn:hover { background: rgba(255, 255, 255, 0.06); }
+.cresc-cell-btn.on { background: rgba(120, 200, 120, 0.22); }
+
+/* Live volgbalk voor zwel/crescendo-instellingen. */
+.follow-bar {
+  flex: 1;
+  height: 10px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--accent-soft-2);
+  border-radius: 5px;
+  overflow: hidden;
+}
+.follow-bar-fill {
+  height: 100%;
+  background: linear-gradient(to right, #5cb85c, #b4960b);
+  transition: width 0.06s linear;
+}
+
+/* Pedaal-bereik (min/max CC) number-inputs. */
+.pedal-range-input {
+  width: 52px;
+  padding: 0.15rem 0.3rem;
+  background: var(--bg-elevated);
+  border: 1px solid var(--accent-soft-2);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 0.75rem;
+  text-align: center;
+}
+
+/* Record-knop (MP3-opname). */
+.record-btn { display: inline-flex; align-items: center; gap: 0.35rem; }
+.record-btn.recording { color: #ff4040; border-color: #ff4040; }
+/* MIDI-opname-knop: zelfde vorm, eigen (blauwe) kleur om te onderscheiden van MP3. */
+.midi-record-btn.recording { color: #3b82f6; border-color: #3b82f6; }
+.midi-record-btn .record-dot.on {
+  background: #3b82f6;
+  box-shadow: 0 0 6px rgba(59, 130, 246, 0.7);
+}
+.record-dot {
+  display: inline-block;
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  transition: background 0.15s ease;
+}
+.record-dot.on {
+  background: #ff4040;
+  box-shadow: 0 0 6px rgba(255, 64, 64, 0.7);
+  animation: rec-pulse 1.2s ease-in-out infinite;
+}
+@keyframes rec-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+/* Multi-channel kanaal-chips per klavier (vrije set fysieke uitgangen). */
+.ch-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 0.45rem;
+  border: 1px solid var(--accent-soft-2);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.12s ease;
+}
+.ch-chip input { display: none; }
+.ch-chip:hover { border-color: var(--gold-border); color: var(--text); }
+.ch-chip.on {
+  background: var(--gold-border);
+  color: var(--bg-dark);
+  border-color: var(--gold-border);
+}
+/* Globaal C/Cis-spreidingsblok bovenaan de MIDI-mapping-sectie. */
+.ccis-global {
+  margin: 0.4rem 0 0.8rem 0;
+  padding: 0.6rem 0.75rem;
+  border: 1px dashed var(--accent-soft-2);
+  border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.08);
+}
+.swell-config-value {
+  min-width: 55px;
+  text-align: right;
+  color: var(--text-muted);
+  font-size: 0.7rem;
+}
+
+/* Temperament selector */
+.temperament-select {
+  width: 100%;
+  padding: 0.4rem 0.5rem;
+  background: var(--bg-dark);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.temperament-select:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+/* Context menu for MIDI learn (used by couplers in Console/RegisterPanel) */
+.coupler-context-menu {
+  position: fixed;
+  z-index: 10000;
+  background: var(--menu-bg);
+  border: 1px solid var(--menu-border);
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+  overflow: hidden;
+}
+
+.coupler-context-menu button {
+  display: block;
+  width: 100%;
+  padding: 0.5rem 1rem;
+  border: none;
+  background: transparent;
+  color: var(--menu-text);
+  font-size: 0.8rem;
+  cursor: pointer;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.coupler-context-menu button:hover {
+  background: var(--menu-hover-bg);
+  color: var(--menu-hover-text);
+}
+
+.midi-mapping-info {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  margin-top: 1.5rem;
+  padding: 1rem;
+  background: var(--accent-soft-hover);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--accent-soft-2);
+}
+
+.midi-mapping-info svg {
+  flex-shrink: 0;
+  color: var(--primary);
+  margin-top: 2px;
+}
+
+.midi-mapping-info span {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+/* ============================================
+   SWELL LED INDICATOR (Zwelkast)
+   ============================================ */
+
+.swell-leds {
+  display: flex;
+  gap: 2px;
+  align-items: center;
+  margin-left: auto;
+  padding-left: 0.5rem;
+}
+
+.swell-led {
+  width: 8px;
+  height: 14px;
+  border-radius: 1px;
+  background: rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+
+.swell-led:hover {
+  background: rgba(74, 222, 128, 0.5);
+}
+
+.swell-led.active {
+  background: var(--led-green);
+  box-shadow: 0 0 4px var(--led-green-glow);
+}
+
+.swell-learn-btn {
+  min-width: 110px;
+  font-size: 0.75rem !important;
+  padding: 0.35rem 0.6rem !important;
+}
+
+.swell-clear-btn {
+  padding: 0.2rem 0.4rem !important;
+  font-size: 0.7rem !important;
+  min-width: auto !important;
+  color: var(--text-muted) !important;
+}
+
+.swell-clear-btn:hover {
+  color: var(--error) !important;
+}
+
+.swell-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.swell-toggle input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+
+.swell-toggle-label {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+/* Coupler mapping in Instellingen */
+.coupler-check {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.coupler-check input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+
+.coupler-mapping-row {
+  padding: 0.65rem 1rem;
+  grid-template-columns: auto 1fr;
+}
+
+.coupler-mapping-row .midi-mapping-division {
+  white-space: nowrap;
+}

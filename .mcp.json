@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "jm-orgue": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["./jm-orgue-mcp/src/server.js"],
+      "env": {}
+    }
+  }
+}

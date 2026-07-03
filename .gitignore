@@ -1,0 +1,18 @@
+# Build-artefacten
+VirtualPipeOrgan/target/
+VirtualPipeOrgan/ui/node_modules/
+VirtualPipeOrgan/ui/dist/
+jm-orgue-mcp/node_modules/
+
+# Grote sample-/testdata, installers en screenshots (geen code)
+Sample set homemade/
+testen/
+releases/
+screenshots/
+
+# Lokale Claude-instellingen
+.claude/settings.local.json
+
+# Diversen
+*.log
+nul

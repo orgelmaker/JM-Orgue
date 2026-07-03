@@ -1,0 +1,934 @@
+//! Sample loading from various formats (WAV, MP3)
+
+use hound::{WavReader, WavSpec};
+use std::path::Path;
+use std::fs::File;
+use std::io::{Read, Seek, SeekFrom};
+use thiserror::Error;
+use tracing::{info, warn, debug, trace};
+use vpo_core::SampleRate;
+
+use symphonia::core::audio::SampleBuffer;
+use symphonia::core::codecs::{DecoderOptions, CODEC_TYPE_NULL};
+use symphonia::core::formats::FormatOptions;
+use symphonia::core::io::MediaSourceStream;
+use symphonia::core::meta::MetadataOptions;
+use symphonia::core::probe::Hint;
+
+#[derive(Error, Debug)]
+pub enum SampleError {
+    #[error("Failed to open file: {0}")]
+    FileError(String),
+    
+    #[error("Unsupported format: {0}")]
+    UnsupportedFormat(String),
+    
+    #[error("Decode error: {0}")]
+    DecodeError(String),
+    
+    #[error("Resample error: {0}")]
+    ResampleError(String),
+}
+
+/// Loaded sample data
+#[derive(Debug, Clone)]
+pub struct SampleData {
+    /// Sample data (mono, normalized to -1.0 to 1.0)
+    pub data: Vec<f32>,
+    /// Original sample rate
+    pub sample_rate: SampleRate,
+    /// Number of channels in original file
+    pub channels: u16,
+    /// Loop start (in samples)
+    pub loop_start: Option<u64>,
+    /// Loop end (in samples)
+    pub loop_end: Option<u64>,
+}
+
+impl SampleData {
+    /// Get the duration in seconds
+    pub fn duration(&self) -> f32 {
+        self.data.len() as f32 / self.sample_rate as f32
+    }
+    
+    /// Get the number of samples
+    pub fn len(&self) -> usize {
+        self.data.len()
+    }
+    
+    pub fn is_empty(&self) -> bool {
+        self.data.is_empty()
+    }
+}
+
+/// Refine `loop_end` so the audio just after it best matches the audio at
+/// `loop_start` — i.e. snap the loop to a phase-aligned point. WAV `smpl` loop
+/// points are often not phase-accurate, which makes the loop wrap a click. By
+/// searching a small window around the authored `loop_end` for the position whose
+/// forward window best matches the loop start (lowest sum-of-squared-difference),
+/// the seam becomes (near) continuous even before any playback crossfade.
+///
+/// `loop_start` is kept fixed; only `loop_end` moves, within a fraction of the
+/// loop so the loop length (and pitch) barely changes.
+pub fn optimize_loop_points(sample: &mut SampleData) {
+    let (ls, le) = match (sample.loop_start, sample.loop_end) {
+        (Some(a), Some(b)) if b > a => (a as usize, b as usize),
+        _ => return,
+    };
+    let n = sample.data.len();
+    let win = 128usize; // comparison window (~3 ms @ 48k)
+    if le <= ls || ls + win >= n || le + win >= n {
+        return;
+    }
+    let data = &sample.data;
+    let loop_len = le - ls;
+    // Search ±(quarter loop) around the authored loop end, clamped to a few periods
+    // and to the valid index range.
+    let search = (loop_len / 4).clamp(64, 2400);
+    let lo = le.saturating_sub(search).max(ls + 1);
+    let hi = (le + search).min(n - win - 1);
+    if hi <= lo {
+        return;
+    }
+    let mut best_e = le;
+    let mut best_cost = f32::INFINITY;
+    for e in lo..=hi {
+        let mut ssd = 0.0f32;
+        for k in 0..win {
+            let d = data[ls + k] - data[e + k];
+            ssd += d * d;
+        }
+        // Tiny bias toward the original loop end to avoid needless drift between
+        // near-equal matches.
+        let cost = ssd + (e as f32 - le as f32).abs() * 1e-6;
+        if cost < best_cost {
+            best_cost = cost;
+            best_e = e;
+        }
+    }
+    if best_e != le {
+        sample.loop_end = Some(best_e as u64);
+    }
+}
+
+/// Read loop points from WAV smpl chunk
+fn read_wav_loop_points(path: &Path) -> Option<(u64, u64)> {
+    let mut file = File::open(path).ok()?;
+    let mut header = [0u8; 12];
+    file.read_exact(&mut header).ok()?;
+
+    // Check RIFF/WAVE header
+    if &header[0..4] != b"RIFF" || &header[8..12] != b"WAVE" {
+        return None;
+    }
+
+    // Search for smpl chunk
+    loop {
+        let mut chunk_header = [0u8; 8];
+        if file.read_exact(&mut chunk_header).is_err() {
+            break;
+        }
+
+        let chunk_id = &chunk_header[0..4];
+        let chunk_size = u32::from_le_bytes([
+            chunk_header[4], chunk_header[5], chunk_header[6], chunk_header[7]
+        ]) as u64;
+
+        if chunk_id == b"smpl" && chunk_size >= 36 {
+            // Read smpl chunk data
+            let mut smpl_data = vec![0u8; chunk_size as usize];
+            if file.read_exact(&mut smpl_data).is_err() {
+                break;
+            }
+
+            // Number of sample loops at offset 28
+            let num_loops = u32::from_le_bytes([
+                smpl_data[28], smpl_data[29], smpl_data[30], smpl_data[31]
+            ]);
+
+            if num_loops > 0 && chunk_size >= 60 {
+                // First loop: start at offset 44, end at offset 48
+                let loop_start = u32::from_le_bytes([
+                    smpl_data[44], smpl_data[45], smpl_data[46], smpl_data[47]
+                ]) as u64;
+                let loop_end = u32::from_le_bytes([
+                    smpl_data[48], smpl_data[49], smpl_data[50], smpl_data[51]
+                ]) as u64;
+
+                info!("Found WAV loop points: start={}, end={}", loop_start, loop_end);
+                return Some((loop_start, loop_end));
+            }
+            break;
+        } else {
+            // Skip this chunk
+            let skip = if chunk_size % 2 == 1 { chunk_size + 1 } else { chunk_size };
+            if file.seek(SeekFrom::Current(skip as i64)).is_err() {
+                break;
+            }
+        }
+    }
+
+    None
+}
+
+/// Load a WAV file
+pub fn load_wav(path: &Path) -> Result<SampleData, SampleError> {
+    // First, try to read loop points from smpl chunk
+    let loop_points = read_wav_loop_points(path);
+
+    let reader = match WavReader::open(path) {
+        Ok(r) => r,
+        Err(hound_err) => {
+            // Hound is strict over fmt chunk size — sommige WAV encoders schrijven extra
+            // bytes of niet-standaard chunks. Probeer eerst symphonia (ondersteunt diverse
+            // WAV-varianten), bij verdere failure val terug op onze eigen manual parser
+            // die simpelweg de fmt chunk leest zonder strict-checks.
+            warn!("Hound kon {} niet lezen ({}), probeer symphonia", path.display(), hound_err);
+            match load_via_symphonia(path, "wav") {
+                Ok(mut sd) => {
+                    if let Some((s, e)) = loop_points {
+                        sd.loop_start = Some(s);
+                        sd.loop_end = Some(e);
+                    }
+                    return Ok(sd);
+                }
+                Err(symph_err) => {
+                    warn!("Symphonia kon {} ook niet lezen ({}), probeer manual WAV parser", path.display(), symph_err);
+                    return load_wav_manual(path).map(|mut sd| {
+                        if let Some((s, e)) = loop_points {
+                            sd.loop_start = Some(s);
+                            sd.loop_end = Some(e);
+                        }
+                        sd
+                    });
+                }
+            }
+        }
+    };
+
+    let spec = reader.spec();
+    debug!("Loading WAV: {:?}, {} Hz, {} ch, {} bits",
+           path.file_name(), spec.sample_rate, spec.channels, spec.bits_per_sample);
+
+    let samples: Vec<f32> = match spec.sample_format {
+        hound::SampleFormat::Float => {
+            reader.into_samples::<f32>()
+                .map(|s| s.unwrap_or(0.0))
+                .collect()
+        }
+        hound::SampleFormat::Int => {
+            let max_val = (1i64 << (spec.bits_per_sample - 1)) as f32;
+            match spec.bits_per_sample {
+                8 => {
+                    reader.into_samples::<i8>()
+                        .map(|s| s.unwrap_or(0) as f32 / max_val)
+                        .collect()
+                }
+                16 => {
+                    reader.into_samples::<i16>()
+                        .map(|s| s.unwrap_or(0) as f32 / max_val)
+                        .collect()
+                }
+                24 | 32 => {
+                    reader.into_samples::<i32>()
+                        .map(|s| s.unwrap_or(0) as f32 / max_val)
+                        .collect()
+                }
+                _ => return Err(SampleError::UnsupportedFormat(
+                    format!("{} bits per sample", spec.bits_per_sample)
+                )),
+            }
+        }
+    };
+
+    // Convert to mono if stereo
+    let mono = if spec.channels == 2 {
+        samples.chunks(2)
+            .map(|chunk| (chunk[0] + chunk.get(1).unwrap_or(&0.0)) * 0.5)
+            .collect()
+    } else if spec.channels == 1 {
+        samples
+    } else {
+        // Take first channel only for multi-channel
+        samples.into_iter().step_by(spec.channels as usize).collect()
+    };
+
+    // Adjust loop points for mono conversion (divide by channels if stereo)
+    let (loop_start, loop_end) = if let Some((start, end)) = loop_points {
+        // Loop points in smpl chunk are per-frame, not per-sample
+        // So they should work directly for mono
+        (Some(start), Some(end))
+    } else {
+        (None, None)
+    };
+
+    let mut sd = SampleData {
+        data: mono,
+        sample_rate: spec.sample_rate,
+        channels: spec.channels,
+        loop_start,
+        loop_end,
+    };
+    optimize_loop_points(&mut sd);
+    Ok(sd)
+}
+
+/// Resample to target sample rate
+pub fn resample(sample: &SampleData, target_rate: SampleRate) -> Result<SampleData, SampleError> {
+    if sample.sample_rate == target_rate {
+        return Ok(sample.clone());
+    }
+    
+    use rubato::{FftFixedIn, Resampler};
+    
+    let ratio = target_rate as f64 / sample.sample_rate as f64;
+    let chunk_size = 1024;
+    
+    let mut resampler = FftFixedIn::<f32>::new(
+        sample.sample_rate as usize,
+        target_rate as usize,
+        chunk_size,
+        2,
+        1
+    ).map_err(|e| SampleError::ResampleError(e.to_string()))?;
+    
+    let mut output = Vec::new();
+    let mut input_pos = 0;
+    
+    while input_pos < sample.data.len() {
+        let end = (input_pos + chunk_size).min(sample.data.len());
+        let mut chunk = sample.data[input_pos..end].to_vec();
+        
+        // Pad if necessary
+        if chunk.len() < chunk_size {
+            chunk.resize(chunk_size, 0.0);
+        }
+        
+        let input = vec![chunk];
+        let result = resampler.process(&input, None)
+            .map_err(|e| SampleError::ResampleError(e.to_string()))?;
+        
+        output.extend(&result[0]);
+        input_pos += chunk_size;
+    }
+    
+    // Adjust loop points
+    let loop_start = sample.loop_start.map(|l| (l as f64 * ratio) as u64);
+    let loop_end = sample.loop_end.map(|l| (l as f64 * ratio) as u64);
+    
+    let mut sd = SampleData {
+        data: output,
+        sample_rate: target_rate,
+        channels: 1,
+        loop_start,
+        loop_end,
+    };
+    optimize_loop_points(&mut sd);
+    Ok(sd)
+}
+
+/// Normalize sample to peak level
+pub fn normalize(sample: &mut SampleData, target_db: f32) {
+    let peak = sample.data.iter()
+        .map(|s| s.abs())
+        .fold(0.0_f32, |a, b| a.max(b));
+    
+    if peak > 0.0 {
+        let target_linear = 10.0_f32.powf(target_db / 20.0);
+        let gain = target_linear / peak;
+        
+        for s in &mut sample.data {
+            *s *= gain;
+        }
+    }
+}
+
+/// Apply fade in/out to sample
+pub fn apply_fades(sample: &mut SampleData, fade_in_ms: f32, fade_out_ms: f32) {
+    let sr = sample.sample_rate as f32;
+    let fade_in_samples = (fade_in_ms / 1000.0 * sr) as usize;
+    let fade_out_samples = (fade_out_ms / 1000.0 * sr) as usize;
+
+    // Fade in
+    for (i, s) in sample.data.iter_mut().take(fade_in_samples).enumerate() {
+        let t = i as f32 / fade_in_samples as f32;
+        *s *= t * t; // Quadratic fade
+    }
+
+    // Fade out
+    let len = sample.data.len();
+    if len > fade_out_samples {
+        for (i, s) in sample.data.iter_mut().skip(len - fade_out_samples).enumerate() {
+            let t = 1.0 - (i as f32 / fade_out_samples as f32);
+            *s *= t * t;
+        }
+    }
+}
+
+/// Preload buffer info - contains attack portion for instant playback
+#[derive(Debug, Clone)]
+pub struct PreloadBuffer {
+    /// Attack portion of the sample (first ~100-200ms)
+    pub attack_data: Vec<f32>,
+    /// Original sample rate
+    pub sample_rate: SampleRate,
+    /// Total sample length (for reference)
+    pub total_samples: usize,
+    /// Loop start point (if any)
+    pub loop_start: Option<u64>,
+    /// Loop end point (if any)
+    pub loop_end: Option<u64>,
+    /// Path to full sample file for streaming
+    pub source_path: std::path::PathBuf,
+    /// Number of channels in original file
+    pub channels: u16,
+    /// Bits per sample
+    pub bits_per_sample: u16,
+    /// Byte offset where audio data starts in the WAV file
+    pub data_offset: u64,
+}
+
+/// Load only the attack portion of a WAV file (first N samples)
+/// This enables instant playback while the rest streams from disk
+pub fn load_wav_preload(path: &Path, preload_samples: usize) -> Result<PreloadBuffer, SampleError> {
+    use std::io::BufReader;
+
+    // First, get loop points from smpl chunk
+    let loop_points = read_wav_loop_points(path);
+
+    let file = File::open(path)
+        .map_err(|e| SampleError::FileError(format!("{}: {}", path.display(), e)))?;
+    let mut reader = BufReader::new(file);
+
+    // Read RIFF header
+    let mut header = [0u8; 12];
+    reader.read_exact(&mut header)
+        .map_err(|e| SampleError::FileError(format!("Failed to read header: {}", e)))?;
+
+    if &header[0..4] != b"RIFF" || &header[8..12] != b"WAVE" {
+        return Err(SampleError::UnsupportedFormat("Not a valid WAV file".to_string()));
+    }
+
+    // Find fmt and data chunks
+    let mut sample_rate = 0u32;
+    let mut channels = 0u16;
+    let mut bits_per_sample = 0u16;
+    let mut sample_format = hound::SampleFormat::Int;
+    let mut data_offset = 0u64;
+    let mut data_size = 0u32;
+    let mut current_pos = 12u64;
+
+    loop {
+        let mut chunk_header = [0u8; 8];
+        if reader.read_exact(&mut chunk_header).is_err() {
+            break;
+        }
+        current_pos += 8;
+
+        let chunk_id = &chunk_header[0..4];
+        let chunk_size = u32::from_le_bytes([
+            chunk_header[4], chunk_header[5], chunk_header[6], chunk_header[7]
+        ]);
+
+        if chunk_id == b"fmt " {
+            let mut fmt_data = vec![0u8; chunk_size as usize];
+            reader.read_exact(&mut fmt_data)
+                .map_err(|e| SampleError::FileError(format!("Failed to read fmt chunk: {}", e)))?;
+
+            let audio_format = u16::from_le_bytes([fmt_data[0], fmt_data[1]]);
+            channels = u16::from_le_bytes([fmt_data[2], fmt_data[3]]);
+            sample_rate = u32::from_le_bytes([fmt_data[4], fmt_data[5], fmt_data[6], fmt_data[7]]);
+            bits_per_sample = u16::from_le_bytes([fmt_data[14], fmt_data[15]]);
+
+            sample_format = if audio_format == 3 {
+                hound::SampleFormat::Float
+            } else {
+                hound::SampleFormat::Int
+            };
+
+            current_pos += chunk_size as u64;
+        } else if chunk_id == b"data" {
+            data_offset = current_pos;
+            data_size = chunk_size;
+            break;
+        } else {
+            // Skip chunk
+            let skip = if chunk_size % 2 == 1 { chunk_size + 1 } else { chunk_size };
+            reader.seek(SeekFrom::Current(skip as i64))
+                .map_err(|e| SampleError::FileError(format!("Failed to seek: {}", e)))?;
+            current_pos += skip as u64;
+        }
+    }
+
+    if data_offset == 0 {
+        return Err(SampleError::UnsupportedFormat("No data chunk found".to_string()));
+    }
+
+    // Calculate total samples
+    let bytes_per_sample = bits_per_sample as usize / 8;
+    let total_frames = data_size as usize / (bytes_per_sample * channels as usize);
+
+    // Read preload portion
+    let frames_to_read = preload_samples.min(total_frames);
+    let bytes_to_read = frames_to_read * bytes_per_sample * channels as usize;
+
+    let mut raw_data = vec![0u8; bytes_to_read];
+    reader.read_exact(&mut raw_data)
+        .map_err(|e| SampleError::FileError(format!("Failed to read audio data: {}", e)))?;
+
+    // Convert to f32
+    let samples: Vec<f32> = match (sample_format, bits_per_sample) {
+        (hound::SampleFormat::Float, 32) => {
+            raw_data.chunks(4)
+                .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+                .collect()
+        }
+        (hound::SampleFormat::Int, 16) => {
+            let max_val = i16::MAX as f32;
+            raw_data.chunks(2)
+                .map(|b| i16::from_le_bytes([b[0], b[1]]) as f32 / max_val)
+                .collect()
+        }
+        (hound::SampleFormat::Int, 24) => {
+            let max_val = (1i32 << 23) as f32;
+            raw_data.chunks(3)
+                .map(|b| {
+                    let val = ((b[0] as i32) | ((b[1] as i32) << 8) | ((b[2] as i32) << 16))
+                        << 8 >> 8; // Sign extend
+                    val as f32 / max_val
+                })
+                .collect()
+        }
+        (hound::SampleFormat::Int, 32) => {
+            let max_val = i32::MAX as f32;
+            raw_data.chunks(4)
+                .map(|b| i32::from_le_bytes([b[0], b[1], b[2], b[3]]) as f32 / max_val)
+                .collect()
+        }
+        _ => {
+            return Err(SampleError::UnsupportedFormat(
+                format!("{} bits {:?} not supported for preload", bits_per_sample, sample_format)
+            ));
+        }
+    };
+
+    // Convert to mono if stereo
+    let mono = if channels == 2 {
+        samples.chunks(2)
+            .map(|chunk| (chunk[0] + chunk.get(1).unwrap_or(&0.0)) * 0.5)
+            .collect()
+    } else if channels == 1 {
+        samples
+    } else {
+        // Take first channel for multi-channel
+        samples.into_iter().step_by(channels as usize).collect()
+    };
+
+    let (loop_start, loop_end) = if let Some((start, end)) = loop_points {
+        (Some(start), Some(end))
+    } else {
+        (None, None)
+    };
+
+    // Attack alignment: detect onset and trim leading silence
+    // Keep 32 samples before onset for a natural attack start
+    let onset_threshold = 0.002; // ~-54dB
+    let pre_onset_keep = 32;     // samples to keep before detected onset
+    let onset_pos = mono.iter().position(|&s| s.abs() > onset_threshold).unwrap_or(0);
+    let trim_start = onset_pos.saturating_sub(pre_onset_keep);
+    let aligned_data = if trim_start > 0 {
+        debug!("Attack alignment: trimmed {} silent samples from {:?}", trim_start, path.file_name());
+        mono[trim_start..].to_vec()
+    } else {
+        mono
+    };
+
+    debug!("Preloaded {} samples from {:?} (total: {}, loop: {:?}-{:?}, onset_trim: {})",
+           aligned_data.len(), path.file_name(), total_frames, loop_start, loop_end, trim_start);
+
+    // Adjust loop points for trimmed samples
+    let adj_loop_start = loop_start.map(|ls| ls.saturating_sub(trim_start as u64));
+    let adj_loop_end = loop_end.map(|le| le.saturating_sub(trim_start as u64));
+
+    Ok(PreloadBuffer {
+        attack_data: aligned_data,
+        sample_rate,
+        total_samples: total_frames.saturating_sub(trim_start),
+        loop_start: adj_loop_start,
+        loop_end: adj_loop_end,
+        source_path: path.to_path_buf(),
+        channels,
+        bits_per_sample,
+        data_offset,
+    })
+}
+
+/// Load remaining samples after the preload buffer (for background loading)
+pub fn load_wav_remainder(preload: &PreloadBuffer, target_rate: SampleRate) -> Result<SampleData, SampleError> {
+    // Load the full sample
+    let mut full_sample = load_wav(&preload.source_path)?;
+
+    // Resample if needed
+    if full_sample.sample_rate != target_rate {
+        full_sample = resample(&full_sample, target_rate)?;
+    }
+
+    Ok(full_sample)
+}
+
+/// Load an MP3 file using symphonia
+pub fn load_mp3(path: &Path) -> Result<SampleData, SampleError> {
+    load_via_symphonia(path, "mp3")
+}
+
+/// Handmatige WAV-loader — tolerante fallback voor bestanden waar hound én symphonia op klagen.
+///
+/// Negeert strict-checks op fmt chunk size en leest direct de essentiële velden.
+/// Werkt voor PCM 8/16/24/32-bit Int en 32-bit Float WAV-bestanden.
+pub fn load_wav_manual(path: &Path) -> Result<SampleData, SampleError> {
+    use std::io::BufReader;
+
+    let file = File::open(path)
+        .map_err(|e| SampleError::FileError(format!("{}: {}", path.display(), e)))?;
+    let mut reader = BufReader::new(file);
+
+    // RIFF header
+    let mut header = [0u8; 12];
+    reader.read_exact(&mut header)
+        .map_err(|e| SampleError::FileError(format!("Failed to read RIFF header: {}", e)))?;
+
+    if &header[0..4] != b"RIFF" || &header[8..12] != b"WAVE" {
+        return Err(SampleError::UnsupportedFormat("Not a valid RIFF/WAVE file".to_string()));
+    }
+
+    let mut sample_rate = 0u32;
+    let mut channels = 0u16;
+    let mut bits_per_sample = 0u16;
+    let mut sample_format = hound::SampleFormat::Int;
+    let mut data: Option<Vec<u8>> = None;
+
+    loop {
+        let mut chunk_header = [0u8; 8];
+        if reader.read_exact(&mut chunk_header).is_err() {
+            break;
+        }
+        let chunk_id = &chunk_header[0..4];
+        let chunk_size = u32::from_le_bytes([
+            chunk_header[4], chunk_header[5], chunk_header[6], chunk_header[7],
+        ]) as usize;
+
+        if chunk_id == b"fmt " {
+            // Lees zoveel bytes als het bestand zegt te hebben — geen aanname over precieze grootte.
+            // We lezen min(chunk_size, 40) want na byte 16 (PCM) of byte 18 (extensible) hebben we wat
+            // we nodig hebben; rest is padding/extra fmt info die we negeren.
+            let to_read = chunk_size.min(40);
+            let mut fmt_data = vec![0u8; to_read];
+            reader.read_exact(&mut fmt_data)
+                .map_err(|e| SampleError::FileError(format!("Failed to read fmt chunk: {}", e)))?;
+
+            if fmt_data.len() < 16 {
+                return Err(SampleError::UnsupportedFormat("fmt chunk te klein".to_string()));
+            }
+
+            let audio_format = u16::from_le_bytes([fmt_data[0], fmt_data[1]]);
+            channels = u16::from_le_bytes([fmt_data[2], fmt_data[3]]);
+            sample_rate = u32::from_le_bytes([fmt_data[4], fmt_data[5], fmt_data[6], fmt_data[7]]);
+            bits_per_sample = u16::from_le_bytes([fmt_data[14], fmt_data[15]]);
+
+            sample_format = match audio_format {
+                1 => hound::SampleFormat::Int,           // WAVE_FORMAT_PCM
+                3 => hound::SampleFormat::Float,         // WAVE_FORMAT_IEEE_FLOAT
+                0xFFFE => {
+                    // WAVE_FORMAT_EXTENSIBLE: subformaat staat in bytes 24-39 (eerste 2 bytes)
+                    if fmt_data.len() >= 26 {
+                        let subformat = u16::from_le_bytes([fmt_data[24], fmt_data[25]]);
+                        if subformat == 3 { hound::SampleFormat::Float } else { hound::SampleFormat::Int }
+                    } else {
+                        hound::SampleFormat::Int
+                    }
+                }
+                _ => hound::SampleFormat::Int, // optimistische default
+            };
+
+            // Skip eventuele extra fmt-bytes
+            if chunk_size > to_read {
+                let extra = chunk_size - to_read;
+                let skip = if extra % 2 == 1 { extra + 1 } else { extra };
+                reader.seek(SeekFrom::Current(skip as i64))
+                    .map_err(|e| SampleError::FileError(format!("Failed to skip extra fmt: {}", e)))?;
+            } else if chunk_size % 2 == 1 {
+                reader.seek(SeekFrom::Current(1)).ok();
+            }
+        } else if chunk_id == b"data" {
+            let mut raw = vec![0u8; chunk_size];
+            reader.read_exact(&mut raw)
+                .map_err(|e| SampleError::FileError(format!("Failed to read data chunk: {}", e)))?;
+            data = Some(raw);
+            break;
+        } else {
+            // Onbekende chunk → overslaan (incl. word-padding)
+            let skip = if chunk_size % 2 == 1 { chunk_size + 1 } else { chunk_size };
+            reader.seek(SeekFrom::Current(skip as i64))
+                .map_err(|e| SampleError::FileError(format!("Failed to skip chunk: {}", e)))?;
+        }
+    }
+
+    let raw_data = data.ok_or_else(|| SampleError::UnsupportedFormat("Geen data chunk gevonden".into()))?;
+
+    if sample_rate == 0 || channels == 0 || bits_per_sample == 0 {
+        return Err(SampleError::UnsupportedFormat("Ongeldige fmt-velden".into()));
+    }
+
+    let samples: Vec<f32> = match (sample_format, bits_per_sample) {
+        (hound::SampleFormat::Float, 32) => raw_data
+            .chunks_exact(4)
+            .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+            .collect(),
+        (hound::SampleFormat::Int, 16) => {
+            let max = i16::MAX as f32;
+            raw_data.chunks_exact(2)
+                .map(|b| i16::from_le_bytes([b[0], b[1]]) as f32 / max)
+                .collect()
+        }
+        (hound::SampleFormat::Int, 24) => {
+            let max = (1i32 << 23) as f32;
+            raw_data.chunks_exact(3)
+                .map(|b| {
+                    let val = ((b[0] as i32) | ((b[1] as i32) << 8) | ((b[2] as i32) << 16))
+                        << 8 >> 8; // sign extend
+                    val as f32 / max
+                })
+                .collect()
+        }
+        (hound::SampleFormat::Int, 32) => {
+            let max = i32::MAX as f32;
+            raw_data.chunks_exact(4)
+                .map(|b| i32::from_le_bytes([b[0], b[1], b[2], b[3]]) as f32 / max)
+                .collect()
+        }
+        (hound::SampleFormat::Int, 8) => raw_data.iter()
+            .map(|&b| ((b as i16) - 128) as f32 / 127.0)
+            .collect(),
+        _ => {
+            return Err(SampleError::UnsupportedFormat(
+                format!("{:?} {} bits niet ondersteund in manual loader", sample_format, bits_per_sample),
+            ));
+        }
+    };
+
+    // Stereo → mono of multi-channel → eerste kanaal
+    let mono: Vec<f32> = if channels == 2 {
+        samples.chunks_exact(2).map(|c| (c[0] + c[1]) * 0.5).collect()
+    } else if channels == 1 {
+        samples
+    } else {
+        samples.into_iter().step_by(channels as usize).collect()
+    };
+
+    Ok(SampleData {
+        data: mono,
+        sample_rate,
+        channels,
+        loop_start: None,
+        loop_end: None,
+    })
+}
+
+/// Generic loader via symphonia — voor MP3 en als WAV-fallback wanneer hound faalt.
+pub fn load_via_symphonia(path: &Path, extension_hint: &str) -> Result<SampleData, SampleError> {
+    let file = File::open(path)
+        .map_err(|e| SampleError::FileError(format!("{}: {}", path.display(), e)))?;
+
+    let mss = MediaSourceStream::new(Box::new(file), Default::default());
+
+    // Create a hint to help the prober identify the format
+    let mut hint = Hint::new();
+    hint.with_extension(extension_hint);
+
+    // Probe the media source
+    let probed = symphonia::default::get_probe()
+        .format(&hint, mss, &FormatOptions::default(), &MetadataOptions::default())
+        .map_err(|e| SampleError::DecodeError(format!("Failed to probe: {}", e)))?;
+
+    let mut format = probed.format;
+
+    // Find the first audio track
+    let track = format
+        .tracks()
+        .iter()
+        .find(|t| t.codec_params.codec != CODEC_TYPE_NULL)
+        .ok_or_else(|| SampleError::DecodeError("No audio track found".to_string()))?;
+
+    let track_id = track.id;
+    let sample_rate = track.codec_params.sample_rate.unwrap_or(44100);
+    let channels = track.codec_params.channels.map(|c| c.count()).unwrap_or(2) as u16;
+
+    debug!("Loading MP3: {:?}, {} Hz, {} ch", path.file_name(), sample_rate, channels);
+
+    // Create a decoder
+    let mut decoder = symphonia::default::get_codecs()
+        .make(&track.codec_params, &DecoderOptions::default())
+        .map_err(|e| SampleError::DecodeError(format!("Failed to create decoder: {}", e)))?;
+
+    let mut all_samples: Vec<f32> = Vec::new();
+
+    // Decode all packets
+    loop {
+        let packet = match format.next_packet() {
+            Ok(packet) => packet,
+            Err(symphonia::core::errors::Error::IoError(ref e))
+                if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
+            Err(e) => return Err(SampleError::DecodeError(format!("Failed to read packet: {}", e))),
+        };
+
+        // Skip packets from other tracks
+        if packet.track_id() != track_id {
+            continue;
+        }
+
+        // Decode the packet
+        let decoded = match decoder.decode(&packet) {
+            Ok(decoded) => decoded,
+            Err(e) => {
+                warn!("Failed to decode packet: {}", e);
+                continue;
+            }
+        };
+
+        // Get the audio buffer spec
+        let spec = *decoded.spec();
+        let num_frames = decoded.frames();
+
+        // Create a sample buffer
+        let mut sample_buf = SampleBuffer::<f32>::new(num_frames as u64, spec);
+        sample_buf.copy_interleaved_ref(decoded);
+
+        // Extend our samples
+        all_samples.extend(sample_buf.samples());
+    }
+
+    // Convert to mono if stereo
+    let mono = if channels == 2 {
+        all_samples.chunks(2)
+            .map(|chunk| (chunk[0] + chunk.get(1).unwrap_or(&0.0)) * 0.5)
+            .collect()
+    } else if channels == 1 {
+        all_samples
+    } else {
+        // Take first channel for multi-channel
+        all_samples.into_iter().step_by(channels as usize).collect()
+    };
+
+    Ok(SampleData {
+        data: mono,
+        sample_rate,
+        channels,
+        loop_start: None, // MP3 doesn't support loop points
+        loop_end: None,
+    })
+}
+
+/// Load an audio file (auto-detect format based on extension)
+pub fn load_audio(path: &Path) -> Result<SampleData, SampleError> {
+    let ext = path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_lowercase())
+        .unwrap_or_default();
+
+    match ext.as_str() {
+        "wav" => load_wav(path),
+        "mp3" => load_mp3(path),
+        _ => Err(SampleError::UnsupportedFormat(format!("Unknown extension: {}", ext))),
+    }
+}
+
+/// Load preload buffer for any audio format
+pub fn load_audio_preload(path: &Path, preload_samples: usize) -> Result<PreloadBuffer, SampleError> {
+    let ext = path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_lowercase())
+        .unwrap_or_default();
+
+    match ext.as_str() {
+        "wav" => load_wav_preload(path, preload_samples),
+        "mp3" => {
+            // For MP3, we need to load the entire file and take the first N samples
+            // (MP3 doesn't support random access like WAV)
+            let full_sample = load_mp3(path)?;
+            let attack_len = preload_samples.min(full_sample.data.len());
+            let raw_attack = full_sample.data[..attack_len].to_vec();
+
+            // Attack alignment: trim leading silence
+            let onset_threshold = 0.002;
+            let pre_onset_keep = 32;
+            let onset_pos = raw_attack.iter().position(|&s| s.abs() > onset_threshold).unwrap_or(0);
+            let trim_start = onset_pos.saturating_sub(pre_onset_keep);
+            let attack_data = if trim_start > 0 {
+                raw_attack[trim_start..].to_vec()
+            } else {
+                raw_attack
+            };
+
+            Ok(PreloadBuffer {
+                attack_data,
+                sample_rate: full_sample.sample_rate,
+                total_samples: full_sample.data.len().saturating_sub(trim_start),
+                loop_start: None,
+                loop_end: None,
+                source_path: path.to_path_buf(),
+                channels: full_sample.channels,
+                bits_per_sample: 16, // MP3 is typically decoded to 16-bit equivalent
+                data_offset: 0,
+            })
+        }
+        _ => Err(SampleError::UnsupportedFormat(format!("Unknown extension: {}", ext))),
+    }
+}
+
+#[cfg(test)]
+mod loop_opt_tests {
+    use super::*;
+
+    fn seam_mismatch(sd: &SampleData) -> f32 {
+        let ls = sd.loop_start.unwrap() as usize;
+        let le = sd.loop_end.unwrap() as usize;
+        let win = 128;
+        let mut ssd = 0.0f32;
+        for k in 0..win {
+            let d = sd.data[ls + k] - sd.data[le + k];
+            ssd += d * d;
+        }
+        ssd
+    }
+
+    #[test]
+    fn optimize_snaps_loop_end_to_phase_match() {
+        // A pure sine with period 200 samples. Phase-matched loop ends sit at
+        // ls + k*200. We author a loop end ~0.45 period off → a bad (clicky) seam.
+        let period = 200.0f32;
+        let n = 8000usize;
+        let data: Vec<f32> = (0..n)
+            .map(|i| (i as f32 / period * std::f32::consts::TAU).sin())
+            .collect();
+        let ls = 1000usize;
+        let le_authored = 5000 + 90; // 90 samples ≈ 0.45 period off a true match at 5000
+        let mut sd = SampleData {
+            data,
+            sample_rate: 48000,
+            channels: 1,
+            loop_start: Some(ls as u64),
+            loop_end: Some(le_authored as u64),
+        };
+
+        let before = seam_mismatch(&sd);
+        optimize_loop_points(&mut sd);
+        let after = seam_mismatch(&sd);
+
+        assert!(
+            after < before * 0.25,
+            "loop optimization should sharply reduce seam mismatch: before={} after={}",
+            before,
+            after
+        );
+    }
+}

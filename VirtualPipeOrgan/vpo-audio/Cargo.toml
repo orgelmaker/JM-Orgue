@@ -1,0 +1,24 @@
+[package]
+name = "vpo-audio"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+vpo-core = { path = "../vpo-core" }
+
+cpal = { workspace = true }
+rodio = { workspace = true }
+rubato = { workspace = true }
+realfft = { workspace = true }
+num-complex = "0.4"
+
+tokio = { workspace = true }
+crossbeam-channel = { workspace = true }
+parking_lot = { workspace = true }
+rayon = { workspace = true }
+bytemuck = { workspace = true }
+hound = { workspace = true }
+
+thiserror = { workspace = true }
+tracing = { workspace = true }
