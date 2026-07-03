@@ -5,6 +5,12 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.5.1] - 2026-07-03
+
+### Opgelost
+
+- 📚 **Dubbele samplesets in de bibliotheek**: verschillende pad-notaties (forward/backslash) leverden dubbele entries op; paden worden nu genormaliseerd en bestaande duplicaten worden bij het starten automatisch samengevoegd (instellingen blijven behouden)
+
 ## [0.5.0] - 2026-07-03
 
 ### Toegevoegd

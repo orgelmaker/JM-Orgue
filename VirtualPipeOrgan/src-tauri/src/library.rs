@@ -272,15 +272,52 @@ impl Default for OrganLibrary {
     }
 }
 
+/// Normaliseer pad-notaties en voeg duplicaten samen die door verschillende
+/// notaties zijn ontstaan (forward slashes via de test-API/scripts vs
+/// backslashes via de UI). Backslash-entries zijn de originelen en winnen bij
+/// een botsing; settings onder een forward-slash-key verhuizen alleen mee als
+/// er onder de genormaliseerde key nog niets staat.
+fn normalize_library(lib: &mut OrganLibrary) {
+    let norm = |s: &str| s.replace('/', "\\");
+    let key = |s: &str| norm(s).to_lowercase();
+
+    let organs = std::mem::take(&mut lib.organs);
+    let before = organs.len();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let (originals, converted): (Vec<_>, Vec<_>) =
+        organs.into_iter().partition(|o| !o.id.contains('/'));
+    for mut o in originals.into_iter().chain(converted) {
+        if seen.insert(key(&o.id)) {
+            o.id = norm(&o.id);
+            o.source_path = norm(&o.source_path);
+            lib.organs.push(o);
+        }
+    }
+    if lib.organs.len() < before {
+        info!(
+            "Bibliotheek geschoond: {} dubbele orgel-entries (pad-notatie) samengevoegd",
+            before - lib.organs.len()
+        );
+    }
+
+    let settings = std::mem::take(&mut lib.settings);
+    let (orig, conv): (Vec<_>, Vec<_>) =
+        settings.into_iter().partition(|(k, _)| !k.contains('/'));
+    for (k, v) in orig.into_iter().chain(conv) {
+        lib.settings.entry(norm(&k)).or_insert(v);
+    }
+}
+
 /// Load library from JSON file, or create empty if not found
 pub fn load_library(app_data_dir: &Path) -> OrganLibrary {
     let path = app_data_dir.join("organ_library.json");
     if path.exists() {
         match std::fs::read_to_string(&path) {
             Ok(json) => {
-                match serde_json::from_str(&json) {
-                    Ok(lib) => {
+                match serde_json::from_str::<OrganLibrary>(&json) {
+                    Ok(mut lib) => {
                         info!("Loaded organ library from {:?}", path);
+                        normalize_library(&mut lib);
                         return lib;
                     }
                     Err(e) => {
@@ -379,4 +416,46 @@ pub fn image_to_base64(path: &str) -> Option<String> {
     };
     let b64 = base64::engine::general_purpose::STANDARD.encode(&data);
     Some(format!("data:{};base64,{}", mime, b64))
+}
+
+#[cfg(test)]
+mod library_tests {
+    use super::*;
+
+    fn entry(id: &str) -> OrganLibraryEntry {
+        OrganLibraryEntry {
+            id: id.to_string(),
+            name: "Test".into(),
+            builder: String::new(),
+            location: String::new(),
+            year: None,
+            stop_count: 1,
+            source_type: "sample_directory".into(),
+            source_path: id.to_string(),
+            image_path: None,
+        }
+    }
+
+    #[test]
+    fn test_normalize_library_dedupliceert_padnotaties() {
+        // Duplicaten door forward vs backslash-notatie moeten samenvouwen;
+        // de backslash-variant (UI-origineel) wint, incl. zijn settings.
+        let mut lib = OrganLibrary::default();
+        lib.organs.push(entry("C:/Orgels/Batz"));
+        lib.organs.push(entry(r"C:\Orgels\Batz"));
+        lib.organs.push(entry("C:/Orgels/Uniek"));
+        lib.settings.insert(r"C:\Orgels\Batz".into(), OrganSettings { master_volume_db: Some(-3.0), ..Default::default() });
+        lib.settings.insert("C:/Orgels/Batz".into(), OrganSettings { master_volume_db: Some(-9.9), ..Default::default() });
+
+        normalize_library(&mut lib);
+
+        assert_eq!(lib.organs.len(), 2, "duplicaat samengevoegd, unieke blijft");
+        assert!(lib.organs.iter().all(|o| !o.id.contains('/')), "alle ids op backslash-vorm");
+        assert_eq!(lib.settings.len(), 1);
+        assert_eq!(
+            lib.settings.get(r"C:\Orgels\Batz").and_then(|s| s.master_volume_db),
+            Some(-3.0),
+            "settings van de UI-variant winnen"
+        );
+    }
 }

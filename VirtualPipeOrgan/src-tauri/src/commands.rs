@@ -547,6 +547,10 @@ pub fn do_load_organ(state: &AppState, path: &str) -> Result<OrganInfoDto, Strin
     // een wissel midden in een load zou de net-geregistreerde preload-buffers
     // weggooien en het herladen missen (current_organ_id nog niet gezet).
     let _gate = state.load_switch_gate.lock();
+    // Normaliseer de pad-notatie (test-API/scripts leveren soms forward
+    // slashes): orgel-id, bibliotheek en per-orgel-settings zien zo altijd
+    // dezelfde vorm — voorkomt dubbele bibliotheek-entries.
+    let path = &path.replace('/', "\\");
     info!("Loading organ from: {}", path);
 
     let odf_path = Path::new(path);
@@ -2855,6 +2859,9 @@ pub fn load_samples_from_directory(state: State<AppState>, directory: String) ->
 pub fn do_load_samples_from_directory(state: &AppState, directory: &str) -> Result<OrganInfoDto, String> {
     // Serialiseer t.o.v. audio-wissels en andere loads (zie load_switch_gate).
     let _gate = state.load_switch_gate.lock();
+    // Normaliseer de pad-notatie (zie do_load_organ) — voorkomt dubbele
+    // bibliotheek-entries en gesplitste per-orgel-settings.
+    let directory = &directory.replace('/', "\\");
     use std::collections::HashMap;
     use std::sync::Arc;
     use rayon::prelude::*;
@@ -3073,8 +3080,10 @@ pub fn do_load_samples_from_directory(state: &AppState, directory: &str) -> Resu
 
 fn add_to_library_if_new(state: &AppState, organ_info: &OrganInfoDto, source_path: &str, source_type: &str) {
     let mut lib = state.organ_library.write();
-    // Check if already in library
-    if lib.organs.iter().any(|o| o.source_path == source_path) {
+    // Check if already in library — genormaliseerd (slashes + case), zodat
+    // pad-notatieverschillen geen dubbele entries opleveren.
+    let norm = |s: &str| s.replace('/', "\\").to_lowercase();
+    if lib.organs.iter().any(|o| norm(&o.source_path) == norm(source_path)) {
         info!("Organ already in library: {}", source_path);
         return;
     }
