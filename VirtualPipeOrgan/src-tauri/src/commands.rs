@@ -515,6 +515,25 @@ fn ampl_to_db(ampl: f32) -> f32 {
     }
 }
 
+/// Kies de default/langste release van een pijp: MaxKeyPressTime `None` of `-1`
+/// betekent "geen limiet" (GrandOrgue-conventie) en wint; anders de langste
+/// tijd. Releases die naar het attack-bestand zelf wijzen (release in dezelfde
+/// WAV, CuePoint-model) slaan we over — die route speelt de engine (nog) niet.
+/// Toetsduur-afhankelijke selectie (R0/R1/R2) is een latere uitbreiding.
+fn pick_default_release(
+    releases: &[vpo_sampler::ReleaseDef],
+    attack_path: &Path,
+) -> Option<std::path::PathBuf> {
+    releases
+        .iter()
+        .filter(|r| r.path != attack_path)
+        .max_by_key(|r| match r.max_key_press_time_ms {
+            None | Some(-1) => i64::MAX,
+            Some(t) => t as i64,
+        })
+        .map(|r| r.path.clone())
+}
+
 /// Is dit orgel-id een orgel-definitiebestand (GrandOrgue .organ of Hauptwerk
 /// .Organ_Hauptwerk_xml) — en dus voor do_load_organ — of een sample-map (voor
 /// do_load_samples_from_directory)? Gebruikt door alle herlaad-routes.
@@ -606,6 +625,10 @@ pub fn do_load_organ(state: &AppState, path: &str) -> Result<OrganInfoDto, Strin
         let mut odf_voicings: HashMap<(u32, u32), (f32, f32)> = HashMap::new();
         // Hauptwerk-tremulantlaag: aparte trem-opname per pijp.
         let mut trem_tasks: Vec<((u32, u32), PathBuf)> = Vec::new();
+        // Release-samples (opgenomen kerkakoestiek): één default-release per pijp,
+        // onder de gemarkeerde key (pipe_num | RELEASE_PIPE_FLAG) zodat ze door de
+        // bestaande preload-/background-load-mechanismen meereizen.
+        let mut release_tasks: Vec<((u32, u32), PathBuf)> = Vec::new();
         let organ_db = ampl_to_db(definition.organ.amplitude_level) + definition.organ.gain_db;
         for stop in &definition.stops {
             // Sla mechaniek-/ruisopnamen over (klep-/registergeluid, blaasbalg,
@@ -641,6 +664,12 @@ pub fn do_load_organ(state: &AppState, path: &str) -> Result<OrganInfoDto, Strin
                         if let Some(trem_path) = &extra.tremulant_sample {
                             trem_tasks.push(((stop.id, pipe_num), trem_path.clone()));
                         }
+                        if let Some(rel_path) = pick_default_release(&extra.releases, path) {
+                            release_tasks.push((
+                                (stop.id, pipe_num | crate::audio::RELEASE_PIPE_FLAG),
+                                rel_path,
+                            ));
+                        }
                         load_tasks.push(((stop.id, pipe_num), path.clone()));
                     }
                 }
@@ -655,6 +684,7 @@ pub fn do_load_organ(state: &AppState, path: &str) -> Result<OrganInfoDto, Strin
         let unique_paths: Vec<PathBuf> = load_tasks
             .iter()
             .chain(trem_tasks.iter())
+            .chain(release_tasks.iter())
             .filter(|(_, p)| seen.insert(p.clone()))
             .map(|(_, p)| p.clone())
             .collect();
@@ -701,11 +731,17 @@ pub fn do_load_organ(state: &AppState, path: &str) -> Result<OrganInfoDto, Strin
             start_time.elapsed().as_secs_f32()
         );
 
-        // Fan-out naar per-key buffers (gedeelde Arc).
+        // Fan-out naar per-key buffers (gedeelde Arc). Release-keys (gemarkeerd
+        // met RELEASE_PIPE_FLAG) gaan mee in dezelfde preload-map: NoteOff zoekt
+        // ze daar op en de background-load/upgrade werkt er ongewijzigd mee.
         let preload_buffers: HashMap<(u32, u32), Arc<PreloadBuffer>> = load_tasks
             .iter()
+            .chain(release_tasks.iter())
             .filter_map(|(key, p)| path_buffers.get(p).map(|buf| (*key, buf.clone())))
             .collect();
+        if !release_tasks.is_empty() {
+            info!("Release-samples: {} pijpen met opgenomen kerkakoestiek bij note-off", release_tasks.len());
+        }
 
         // Hauptwerk-tremulantlaag: fan-out van de trem-samples naar per-key buffers.
         let trem_buffers: HashMap<(u32, u32), Arc<PreloadBuffer>> = trem_tasks

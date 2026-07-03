@@ -21,6 +21,12 @@ use vpo_audio::{ConvolutionReverb, OnePoleFilter, WindModel, Tremulant, FdnRever
 /// Longer buffer = smoother loop while full sample loads in background
 pub const PRELOAD_SAMPLES: usize = 96000;
 
+/// Bit-vlag op `pipe_num` die een key markeert als RELEASE-sample van die pijp
+/// (opgenomen kerkakoestiek, afgespeeld bij note-off). Release-buffers reizen zo
+/// mee door de bestaande preload-/background-load-/upgrade-mechanismen zonder
+/// aparte maps; echte pipe_nums blijven er ver onder.
+pub const RELEASE_PIPE_FLAG: u32 = 0x8000_0000;
+
 /// Sample source with preload buffer for instant playback
 #[derive(Debug, Clone)]
 pub enum SampleSource {
@@ -331,6 +337,8 @@ impl PlayingVoice {
         if self.one_shot && !self.releasing
             && self.position as usize + 1 >= self.get_sample_len()
         {
+            debug!("One-shot klaar: stop={} pipe={:#x} pos={:.0} len={}",
+                   self.stop_id, self.pipe_num, self.position, self.get_sample_len());
             self.releasing = true;
             self.target_envelope = 0.0;
             self.envelope = 0.0;
@@ -932,14 +940,59 @@ fn run_audio_thread(
                         }
                     }
                     AudioCommand::NoteOff { stop_id, pipe_num } => {
-                        for voice in voices_clone.write().iter_mut() {
+                        // Echte release-samples (opgenomen kerkakoestiek): staan
+                        // onder de gemarkeerde key. Gevonden → start een one-shot
+                        // release-voice op het huidige niveau van de stervende
+                        // voice en fade de sustain kort uit (42 ms overlap werkt
+                        // als crossfade). Niet gevonden → klassieke fade alleen.
+                        let release_key = (stop_id, pipe_num | RELEASE_PIPE_FLAG);
+                        let rel_full = samples_clone.read().get(&release_key).cloned();
+                        let rel_pre = if rel_full.is_none() {
+                            preloads_clone.read().get(&release_key).cloned()
+                        } else {
+                            None
+                        };
+
+                        let mut spawn: Option<PlayingVoice> = None;
+                        let mut voices_lock = voices_clone.write();
+                        for voice in voices_lock.iter_mut() {
                             // One-shot-voices (Percussive: klok) klinken uit en
                             // negeren note-off, zoals GrandOrgue dat doet.
                             if voice.stop_id == stop_id && voice.pipe_num == pipe_num
                                 && !voice.releasing && !voice.one_shot
                             {
+                                if spawn.is_none() && (rel_full.is_some() || rel_pre.is_some()) {
+                                    // Niveau-overname: de release start op het
+                                    // huidige envelope-niveau van de sustain.
+                                    let level = voice.envelope.clamp(0.05, 1.0);
+                                    let mut rv = if let Some(sample) = rel_full.clone() {
+                                        PlayingVoice::new_from_sample(sample, stop_id, release_key.1, voice.midi_note, 1.0)
+                                    } else {
+                                        let pre = rel_pre.clone().unwrap();
+                                        let mut v = PlayingVoice::new_from_preload(
+                                            pre, stop_id, release_key.1, voice.midi_note, 1.0, sample_rate,
+                                        );
+                                        // Stream de volledige release-staart bij.
+                                        if let Some(path) = v.needs_background_load() {
+                                            v.mark_load_requested();
+                                            let _ = load_tx_clone.try_send((release_key, path, sample_rate));
+                                        }
+                                        v
+                                    };
+                                    rv.one_shot = true;
+                                    rv.envelope = level;
+                                    rv.target_envelope = level;
+                                    debug!("Release-voice gestart: stop={} pipe={} niveau={:.2} bron={} len={} rate={:.3}",
+                                           stop_id, pipe_num, level,
+                                           if rel_full.is_some() { "full" } else { "preload" },
+                                           rv.get_sample_len(), rv.rate);
+                                    spawn = Some(rv);
+                                }
                                 voice.release();
                             }
+                        }
+                        if let Some(rv) = spawn {
+                            voices_lock.push(rv);
                         }
                     }
                     AudioCommand::RegisterPercussiveStops(set) => {
@@ -1349,13 +1402,15 @@ fn run_audio_thread(
                         // én valt onder de `voice.rate = original_rate`-reset hieronder. Anders
                         // compoundeert de detune elke sample en loopt de toonhoogte weg.
                         // ODF-intonatie (uit de sampleset) en gebruikers-voicing stapelen:
-                        // dB's en cents worden opgeteld.
+                        // dB's en cents worden opgeteld. Release-voices (gemarkeerde
+                        // pipe_num) erven de intonatie van hun pijp.
+                        let vkey = (voice.stop_id, voice.pipe_num & !RELEASE_PIPE_FLAG);
                         let (user_vol, user_pitch) = pipe_voicing_map
-                            .get(&(voice.stop_id, voice.pipe_num))
+                            .get(&vkey)
                             .copied()
                             .unwrap_or((0.0, 0.0));
                         let (odf_vol, odf_pitch) = odf_voicing_map
-                            .get(&(voice.stop_id, voice.pipe_num))
+                            .get(&vkey)
                             .copied()
                             .unwrap_or((0.0, 0.0));
                         let (voicing_vol, voicing_pitch) = (user_vol + odf_vol, user_pitch + odf_pitch);
