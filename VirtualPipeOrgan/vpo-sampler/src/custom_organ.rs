@@ -733,6 +733,10 @@ fn build_stops_from_folder(
         let (is_bass, is_treble) = match half {
             StopHalf::Bass => (true, false),
             StopHalf::Discant => (false, true),
+            // Bereik-detectie alleen voor manualen: een pedaalregister beslaat
+            // van nature precies het "bas"-bereik (C–f1) en zou anders altijd
+            // onterecht "(Bas)" heten. Bas/discant bestaat op het pedaal niet.
+            StopHalf::Full if is_pedal => (false, false),
             StopHalf::Full => detect_bass_treble(&pipes),
         };
         let first_note = pipes.first().map(|p| p.midi_note).unwrap_or(36);
@@ -1336,5 +1340,28 @@ mod tests {
         assert_eq!(format_stop_name("Prestant", false, false), "Prestant");
         assert_eq!(format_stop_name("Trompet", true, false), "Trompet (Bas)");
         assert_eq!(format_stop_name("Trompet", false, true), "Trompet (Disc)");
+    }
+
+    #[test]
+    fn test_pedaalregister_krijgt_geen_bas_label() {
+        // Een pedaalregister beslaat van nature het "bas"-bereik (36-60); de
+        // bereik-heuristiek mag daar dus géén "(Bas)" van maken. Voor een
+        // manuaal met hetzelfde bereik is "(Bas)" juist wél correct (halve stop).
+        let base = std::env::temp_dir().join(format!("jm_pedaal_bas_test_{}", std::process::id()));
+        let stop = base.join("Subbas_16");
+        std::fs::create_dir_all(&stop).unwrap();
+        for n in [36u32, 48, 60] {
+            std::fs::write(stop.join(format!("{:03}-C.wav", n)), b"x").unwrap();
+        }
+
+        let ped = build_stops_from_folder("Subbas_16", &stop, &base, true, "p", Vec::new()).unwrap();
+        assert_eq!(ped.len(), 1);
+        assert_eq!(ped[0].stop.name, "Subbas", "pedaal: geen (Bas)-suffix");
+        assert!(!ped[0].is_bass);
+
+        let man = build_stops_from_folder("Subbas_16", &stop, &base, false, "m", Vec::new()).unwrap();
+        assert_eq!(man[0].stop.name, "Subbas (Bas)", "manuaal: zelfde bereik is wél een bas-helft");
+
+        std::fs::remove_dir_all(&base).ok();
     }
 }
