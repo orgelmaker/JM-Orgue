@@ -5,6 +5,12 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.5.2] - 2026-07-03
+
+### Opgelost
+
+- 🖱️ **Sorteerlijst-verslepen werkt nu echt**: de registersorteerlijst in Instellingen gebruikte nog native browser-drag (verbodsteken in WebView2); nu hetzelfde betrouwbare pointer-mechanisme als de registerknoppen — met de muis overal op de rij, met touch via het ☰-handvat
+
 ## [0.5.1] - 2026-07-03
 
 ### Opgelost

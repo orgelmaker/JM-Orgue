@@ -1928,9 +1928,9 @@
 
   // Stop order per division (drag & drop sorting)
   let stopOrder = {}; // { divisionName: [stopId1, stopId2, ...] }
-  let dragDiv = null;
-  let dragIdx = null;
-  let dropIdx = null;
+  // Pointer-based slepen van de sorteerlijst-rijen. Géén HTML5 draggable:
+  // native drag-and-drop toont in WebView2 een verbodsteken en dropt nooit.
+  let sortDrag = null; // { div, fromIdx, startX, startY, active, overIdx }
 
   function loadStopOrder() {
     if (!organInfo) return;
@@ -1993,21 +1993,43 @@
     saveStopOrder();
   }
 
-  function handleDragStart(e, divName, idx) {
-    dragDiv = divName;
-    dragIdx = idx;
-    if (e.dataTransfer) {
-      e.dataTransfer.effectAllowed = 'move';
-      // Some webviews require data to be set for the drag to initiate.
-      try { e.dataTransfer.setData('text/plain', String(idx)); } catch (_) {}
+  function sortPointerDown(e, divName, idx) {
+    // ▲▼-knoppen in de rij blijven gewoon klikbaar.
+    if (e.target.closest('button')) return;
+    // Muis: alleen linkermuisknop. Touch/pen: alleen via het ☰-handvat
+    // (touch-action: none op het handvat voorkomt scroll-conflict).
+    const onHandle = !!e.target.closest('.sort-handle');
+    if (e.pointerType === 'mouse' ? e.button !== 0 : !onHandle) return;
+    sortDrag = { div: divName, fromIdx: idx, startX: e.clientX, startY: e.clientY, active: false, overIdx: null };
+    window.addEventListener('pointermove', sortPointerMove);
+    window.addEventListener('pointerup', sortPointerUp);
+    window.addEventListener('pointercancel', sortPointerUp);
+  }
+
+  function sortPointerMove(e) {
+    if (!sortDrag) return;
+    if (!sortDrag.active) {
+      if (Math.hypot(e.clientX - sortDrag.startX, e.clientY - sortDrag.startY) < KNOB_DRAG_THRESHOLD_PX) return;
+      sortDrag.active = true;
     }
+    const el = document.elementFromPoint(e.clientX, e.clientY);
+    const hit = el && el.closest ? el.closest('[data-sort-div]') : null;
+    sortDrag.overIdx = (hit && hit.dataset.sortDiv === sortDrag.div)
+      ? parseInt(hit.dataset.sortIdx, 10)
+      : null;
+    sortDrag = sortDrag; // reactieve update voor de visuele feedback
   }
-  function handleDragOver(e, idx) {
-    e.preventDefault();
-    if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
-    dropIdx = idx;
+
+  function sortPointerUp(e) {
+    window.removeEventListener('pointermove', sortPointerMove);
+    window.removeEventListener('pointerup', sortPointerUp);
+    window.removeEventListener('pointercancel', sortPointerUp);
+    const d = sortDrag;
+    sortDrag = null;
+    if (!d || !d.active || e.type === 'pointercancel') return;
+    if (d.overIdx === null || Number.isNaN(d.overIdx) || d.overIdx === d.fromIdx) return;
+    reorderStop(d.div, d.fromIdx, d.overIdx);
   }
-  function handleDragEnd() { dragDiv = null; dragIdx = null; dropIdx = null; }
   // Reliable reorder via up/down buttons (works on touch and mouse, unlike
   // native HTML5 drag-and-drop which doesn't fire on touch screens).
   function moveStop(divName, fromIdx, delta) {
@@ -2037,12 +2059,6 @@
     stopOrder[divName] = order;
     stopOrder = stopOrder;
     saveStopOrder();
-  }
-
-  function handleDrop(divName, toIdx) {
-    if (dragDiv !== divName || dragIdx === null || dragIdx === toIdx) return;
-    reorderStop(divName, dragIdx, toIdx);
-    dragDiv = null; dragIdx = null; dropIdx = null;
   }
 
   // --- Registerknoppen verslepen op het orgelscherm zelf (alleen met de muis) ---
@@ -2904,12 +2920,11 @@
                       {#each division.stops as stop, idx}
                         <div
                           class="sort-row"
-                          class:drag-over={dragDiv === division.name && dropIdx === idx}
-                          draggable="true"
-                          on:dragstart={(e) => handleDragStart(e, division.name, idx)}
-                          on:dragover={(e) => handleDragOver(e, idx)}
-                          on:drop|preventDefault={() => handleDrop(division.name, idx)}
-                          on:dragend={handleDragEnd}
+                          class:drag-over={!!(sortDrag && sortDrag.active && sortDrag.div === division.name && sortDrag.overIdx === idx && sortDrag.fromIdx !== idx)}
+                          class:dragging={!!(sortDrag && sortDrag.active && sortDrag.div === division.name && sortDrag.fromIdx === idx)}
+                          data-sort-div={division.name}
+                          data-sort-idx={idx}
+                          on:pointerdown={(e) => sortPointerDown(e, division.name, idx)}
                         >
                           <span class="sort-handle">&#x2630;</span>
                           <span class="sort-color" style="background: {stop.color || '#999'}"></span>

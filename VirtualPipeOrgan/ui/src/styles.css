@@ -1889,11 +1889,16 @@ input[type="range"]::-webkit-slider-thumb:hover {
 .sort-row:last-child { border-bottom: none; }
 .sort-row:hover { background: var(--bg-secondary); }
 .sort-row.drag-over { border-top: 2px solid var(--primary); }
+.sort-row.dragging { opacity: 0.45; }
 .sort-row:active { cursor: grabbing; }
+.sort-row { user-select: none; }
 .sort-handle {
   color: var(--text-muted);
   font-size: 0.7rem;
   cursor: grab;
+  /* Slepen mag op touch alleen via dit handvat; touch-action: none voorkomt
+     dat de browser het gebaar als scroll claimt (pointercancel). */
+  touch-action: none;
 }
 .sort-color {
   width: 10px;
