@@ -30,6 +30,11 @@ mp3lame-encoder = "0.2"
 base64 = "0.22"
 dirs = "5"
 tiny_http = "0.12"
+# Alleen voor het driver-loos oplijsten van ASIO-drivernamen (registry-scan):
+# een échte cpal-enumeratie laadt/init't de driver, en ASIO4ALL claimt daarbij
+# de WASAPI-endpoints exclusief — dat doodt de lopende stream. Zelfde versie
+# als cpal's eigen asio-sys, dus geen extra dependency in de lock.
+asio-sys = { version = "0.2.6", optional = true }
 
 [features]
 default = ["custom-protocol"]
@@ -39,4 +44,4 @@ custom-protocol = ["tauri/custom-protocol"]
 # one-time local setup (LLVM/libclang; the Steinberg ASIO SDK is downloaded
 # automatically by asio-sys — CPAL_ASIO_DIR is only a fallback for a manual SDK).
 # See BUILDING.md. Build with: cargo build --release -p vpo-app --features asio
-asio = ["cpal/asio"]
+asio = ["cpal/asio", "dep:asio-sys"]

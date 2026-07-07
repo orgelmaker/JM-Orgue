@@ -272,34 +272,37 @@ fn handle_audio_output(state: &AppState, body: &str) -> Result<Value, (u16, Stri
     let buffer_frames = v.get("buffer_frames").and_then(|x| x.as_u64()).map(|n| n as u32);
 
     info!("test_api: audio_output switch host={:?} device={:?} buffer={:?}", host, device, buffer_frames);
-    let organ = state.switch_audio_output(crate::audio::AudioOutputConfig {
+    let outcome = state.switch_audio_output(crate::audio::AudioOutputConfig {
         host_name: host,
         device_name: device,
         buffer_frames,
     }).map_err(|e| (500u16, e))?;
 
     // Mimic the frontend: reload the current organ so its samples re-register
-    // on the freshly created audio thread.
-    if let Some(id) = organ.clone() {
-        if crate::commands::is_organ_file_id(&id) {
-            crate::commands::do_load_organ(state, &id).map_err(|e| (500u16, e))?;
-        } else {
-            crate::commands::do_load_samples_from_directory(state, &id).map_err(|e| (500u16, e))?;
+    // on the freshly created audio thread — ook wanneer de wissel zelf faalde
+    // maar er wél een nieuwe (herstelde/fallback-)audio-thread is.
+    let mut reloaded = None;
+    if outcome.player_rebuilt {
+        if let Some(id) = outcome.organ_id.clone() {
+            if crate::commands::is_organ_file_id(&id) {
+                crate::commands::do_load_organ(state, &id).map_err(|e| (500u16, e))?;
+            } else {
+                crate::commands::do_load_samples_from_directory(state, &id).map_err(|e| (500u16, e))?;
+            }
+            reloaded = Some(id);
         }
     }
 
-    let (cur_host, cur_device, cur_buf) = state.audio_player.read().as_ref()
-        .map(|p| (
-            p.current_host.read().clone(),
-            p.current_device.read().clone(),
-            *p.current_buffer_frames.read(),
-        ))
+    let cur_buf = state.audio_player.read().as_ref()
+        .map(|p| *p.current_buffer_frames.read())
         .unwrap_or_default();
     Ok(json!({
-        "ok": true,
-        "reloaded_organ": organ,
-        "host": cur_host,
-        "device": cur_device,
+        "ok": outcome.switched,
+        "player_rebuilt": outcome.player_rebuilt,
+        "message": outcome.message,
+        "reloaded_organ": reloaded,
+        "host": outcome.actual_host,
+        "device": outcome.actual_device,
         "buffer_frames": cur_buf,
     }))
 }
@@ -399,7 +402,12 @@ fn handle_sampleset_loop_apply(body: &str) -> Result<Value, (u16, String)> {
 
 fn handle_toggle_stop(state: &AppState, stop_id: &str) -> Result<Value, (u16, String)> {
     match state.toggle_stop(stop_id) {
-        Some(active) => Ok(json!({ "stop_id": stop_id, "active": active })),
+        Some(active) => {
+            // Zelfde gedrag als de frontend-command (commands::toggle_stop):
+            // ingedrukte toetsen klinken direct mee (AAN) of zwijgen direct (UIT).
+            state.sync_stop_voices(stop_id, active);
+            Ok(json!({ "stop_id": stop_id, "active": active }))
+        }
         None => Err((404u16, format!("Onbekende stop_id: {}", stop_id))),
     }
 }
@@ -579,17 +587,34 @@ fn handle_set_temperament(state: &AppState, query: &str) -> Result<Value, (u16, 
 
 fn handle_set_eq(state: &AppState, query: &str) -> Result<Value, (u16, String)> {
     let gain: f32 = parse_query(query, "gain").unwrap_or(0.0);
-    let eq = crate::library::EqSettingsSaved {
-        enabled: true, low_freq: 200.0, low_gain: 0.0,
-        mid_freq: 1000.0, mid_gain: gain, mid_q: 1.0,
-        high_freq: 4000.0, high_gain: 0.0,
-    };
-    state.send_audio_command(AudioCommand::SetParametricEq {
-        enabled: eq.enabled, low_freq: eq.low_freq, low_gain: eq.low_gain,
-        mid_freq: eq.mid_freq, mid_gain: eq.mid_gain, mid_q: eq.mid_q,
-        high_freq: eq.high_freq, high_gain: eq.high_gain,
+    let freq: f32 = parse_query(query, "freq").unwrap_or(1000.0);
+    let band_type: String = parse_query(query, "type").unwrap_or_else(|| "peak".to_string());
+    let bandwidth: f32 = parse_query(query, "bw").unwrap_or(1.0);
+    let channel: Option<u8> = parse_query(query, "channel");
+    let enabled: bool = parse_query::<u8>(query, "enabled").map(|v| v != 0).unwrap_or(true);
+    // Zelfde pad als de frontend: vrije banden (hier één band als test).
+    let bands = vec![crate::library::EqBandSaved {
+        enabled,
+        band_type,
+        freq,
+        gain_db: gain,
+        bandwidth,
+        channel,
+    }];
+    state.send_audio_command(AudioCommand::SetEqBands {
+        enabled: true,
+        bands: bands.iter().map(|b| vpo_audio::EqBandSpec {
+            enabled: b.enabled,
+            band_type: vpo_audio::EqBandType::from_str(&b.band_type),
+            freq: b.freq,
+            gain_db: b.gain_db,
+            bandwidth_oct: b.bandwidth,
+            channel: b.channel,
+        }).collect(),
     });
-    *state.eq_settings.write() = Some(eq);
+    *state.eq_settings.write() = Some(crate::library::EqSettingsSaved {
+        enabled: true, bands, ..Default::default()
+    });
     Ok(json!({ "ok": true, "mid_gain": gain }))
 }
 

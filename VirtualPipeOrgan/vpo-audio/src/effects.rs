@@ -304,6 +304,149 @@ impl BiquadFilter {
     }
 }
 
+/// Type van een vrije EQ-band (GrandOrgue-stijl).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EqBandType {
+    Peak,
+    LowPass,
+    HighPass,
+    BandPass,
+    LowShelf,
+    HighShelf,
+}
+
+impl EqBandType {
+    /// Parse vanaf de wire-representatie (frontend stuurt strings).
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "lowpass" => Self::LowPass,
+            "highpass" => Self::HighPass,
+            "bandpass" => Self::BandPass,
+            "lowshelf" => Self::LowShelf,
+            "highshelf" => Self::HighShelf,
+            _ => Self::Peak,
+        }
+    }
+}
+
+/// Eén vrij instelbare EQ-band: type, frequentie, gain, bandbreedte (octaven)
+/// en doelkanaal (None = alle uitgangskanalen).
+#[derive(Debug, Clone, Copy)]
+pub struct EqBandSpec {
+    pub enabled: bool,
+    pub band_type: EqBandType,
+    pub freq: f32,
+    pub gain_db: f32,
+    /// Bandbreedte in octaven (RBJ-cookbook); bepaalt de Q van peak/band/pass-types.
+    pub bandwidth_oct: f32,
+    /// Fysiek uitgangskanaal (0-based); None = alle kanalen.
+    pub channel: Option<u8>,
+}
+
+impl BiquadFilter {
+    /// Bouw een biquad voor een EQ-band volgens de RBJ-cookbook, met alpha
+    /// afgeleid van de bandbreedte in octaven:
+    ///   alpha = sin(w0) * sinh( ln2/2 * BW * w0/sin(w0) )
+    pub fn from_band_spec(spec: &EqBandSpec, sample_rate: SampleRate) -> Self {
+        let freq = spec.freq.clamp(10.0, sample_rate as f32 * 0.45);
+        let bw = spec.bandwidth_oct.clamp(0.05, 8.0);
+        let omega = 2.0 * PI * freq / sample_rate as f32;
+        let sin_omega = omega.sin();
+        let cos_omega = omega.cos();
+        let ln2_2 = 0.5 * std::f32::consts::LN_2;
+        let alpha = sin_omega * (ln2_2 * bw * omega / sin_omega).sinh();
+
+        match spec.band_type {
+            EqBandType::Peak => {
+                let a = 10.0_f32.powf(spec.gain_db / 40.0);
+                let b0 = 1.0 + alpha * a;
+                let b1 = -2.0 * cos_omega;
+                let b2 = 1.0 - alpha * a;
+                let a0 = 1.0 + alpha / a;
+                let a1 = -2.0 * cos_omega;
+                let a2 = 1.0 - alpha / a;
+                Self {
+                    b0: b0 / a0, b1: b1 / a0, b2: b2 / a0,
+                    a1: a1 / a0, a2: a2 / a0,
+                    x1: 0.0, x2: 0.0, y1: 0.0, y2: 0.0,
+                }
+            }
+            EqBandType::LowPass => {
+                let b0 = (1.0 - cos_omega) / 2.0;
+                let b1 = 1.0 - cos_omega;
+                let b2 = (1.0 - cos_omega) / 2.0;
+                let a0 = 1.0 + alpha;
+                let a1 = -2.0 * cos_omega;
+                let a2 = 1.0 - alpha;
+                Self {
+                    b0: b0 / a0, b1: b1 / a0, b2: b2 / a0,
+                    a1: a1 / a0, a2: a2 / a0,
+                    x1: 0.0, x2: 0.0, y1: 0.0, y2: 0.0,
+                }
+            }
+            EqBandType::HighPass => {
+                let b0 = (1.0 + cos_omega) / 2.0;
+                let b1 = -(1.0 + cos_omega);
+                let b2 = (1.0 + cos_omega) / 2.0;
+                let a0 = 1.0 + alpha;
+                let a1 = -2.0 * cos_omega;
+                let a2 = 1.0 - alpha;
+                Self {
+                    b0: b0 / a0, b1: b1 / a0, b2: b2 / a0,
+                    a1: a1 / a0, a2: a2 / a0,
+                    x1: 0.0, x2: 0.0, y1: 0.0, y2: 0.0,
+                }
+            }
+            EqBandType::BandPass => {
+                // Constant 0 dB peak gain bandpass
+                let b0 = alpha;
+                let b1 = 0.0;
+                let b2 = -alpha;
+                let a0 = 1.0 + alpha;
+                let a1 = -2.0 * cos_omega;
+                let a2 = 1.0 - alpha;
+                Self {
+                    b0: b0 / a0, b1: b1 / a0, b2: b2 / a0,
+                    a1: a1 / a0, a2: a2 / a0,
+                    x1: 0.0, x2: 0.0, y1: 0.0, y2: 0.0,
+                }
+            }
+            EqBandType::LowShelf => Self::low_shelf(freq, spec.gain_db, sample_rate),
+            EqBandType::HighShelf => Self::high_shelf(freq, spec.gain_db, sample_rate),
+        }
+    }
+}
+
+/// Vrije multi-band EQ voor één audiokanaal: een serieschakeling van biquads,
+/// gebouwd uit de banden die op dit kanaal van toepassing zijn.
+pub struct ChannelEq {
+    filters: Vec<BiquadFilter>,
+}
+
+impl ChannelEq {
+    /// Bouw de keten voor kanaal `channel` uit `bands` (banden met een ander
+    /// expliciet kanaal worden overgeslagen; None = alle kanalen).
+    pub fn build(bands: &[EqBandSpec], channel: u8, sample_rate: SampleRate) -> Self {
+        let filters = bands.iter()
+            .filter(|b| b.enabled && b.channel.map_or(true, |c| c == channel))
+            .map(|b| BiquadFilter::from_band_spec(b, sample_rate))
+            .collect();
+        Self { filters }
+    }
+
+    #[inline]
+    pub fn is_empty(&self) -> bool { self.filters.is_empty() }
+
+    #[inline]
+    pub fn process(&mut self, input: f32) -> f32 {
+        let mut x = input;
+        for f in &mut self.filters {
+            x = f.process(x);
+        }
+        x
+    }
+}
+
 /// 3-band Parametric EQ (Low shelf + Mid peak + High shelf)
 pub struct ParametricEq {
     pub enabled: bool,

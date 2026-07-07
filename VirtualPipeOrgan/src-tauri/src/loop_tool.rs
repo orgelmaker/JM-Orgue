@@ -83,7 +83,7 @@ fn collect_wav_files(dir: &Path, out: &mut Vec<PathBuf>) {
 }
 
 /// MIDI note parsed from a leading number in the filename ("036-c.wav" -> 36).
-fn midi_note_from_name(path: &Path) -> u8 {
+pub(crate) fn midi_note_from_name(path: &Path) -> u8 {
     let stem = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
     let digits: String = stem.chars().take_while(|c| c.is_ascii_digit()).collect();
     digits.parse::<u8>().unwrap_or(60)
@@ -247,7 +247,7 @@ fn bake_crossfade(inter: &mut [f32], channels: usize, ls: usize, le: usize, peri
 }
 
 /// Build a `smpl` chunk (one forward loop) as raw bytes.
-fn build_smpl_chunk(sample_rate: u32, midi_note: u8, loop_start: u32, loop_end_incl: u32) -> Vec<u8> {
+pub(crate) fn build_smpl_chunk(sample_rate: u32, midi_note: u8, loop_start: u32, loop_end_incl: u32) -> Vec<u8> {
     let mut d = Vec::with_capacity(68);
     let mut w32 = |v: u32, out: &mut Vec<u8>| out.extend_from_slice(&v.to_le_bytes());
     let sample_period = if sample_rate > 0 { 1_000_000_000u32 / sample_rate } else { 0 };
@@ -276,7 +276,7 @@ fn build_smpl_chunk(sample_rate: u32, midi_note: u8, loop_start: u32, loop_end_i
 
 /// Insert a `smpl` chunk into a RIFF/WAVE byte buffer (right before the `data`
 /// chunk) and fix the RIFF size.
-fn insert_smpl(wav: &[u8], smpl: &[u8]) -> Result<Vec<u8>, String> {
+pub(crate) fn insert_smpl(wav: &[u8], smpl: &[u8]) -> Result<Vec<u8>, String> {
     if wav.len() < 12 || &wav[0..4] != b"RIFF" || &wav[8..12] != b"WAVE" {
         return Err("not a RIFF/WAVE buffer".into());
     }
@@ -301,7 +301,7 @@ fn insert_smpl(wav: &[u8], smpl: &[u8]) -> Result<Vec<u8>, String> {
 }
 
 /// Encode interleaved samples to a WAV byte buffer via hound (native format).
-fn encode_wav(spec: hound::WavSpec, data_f32: &[f32], is_float: bool) -> Result<Vec<u8>, String> {
+pub(crate) fn encode_wav(spec: hound::WavSpec, data_f32: &[f32], is_float: bool) -> Result<Vec<u8>, String> {
     let mut buf: Vec<u8> = Vec::new();
     {
         let cursor = Cursor::new(&mut buf);

@@ -111,8 +111,23 @@ pub fn optimize_loop_points(sample: &mut SampleData) {
     }
 }
 
-/// Read loop points from WAV smpl chunk
-fn read_wav_loop_points(path: &Path) -> Option<(u64, u64)> {
+/// Alle sample-markers uit een WAV: loops (smpl), release-marker (cue) en het
+/// aantal frames. Loop-eindes worden hier al naar EXCLUSIEF omgerekend
+/// (GrandOrgue-semantiek: smpl dwEnd is de laatste frame, ínclusief).
+#[derive(Debug, Clone, Default)]
+pub struct WavMarkers {
+    /// Gevalideerde loops als (start, einde-exclusief), in frame-offsets.
+    pub loops: Vec<(u64, u64)>,
+    /// Release-marker: hoogste cue-punt uit de `cue `-chunk (frame-offset).
+    pub cue_frame: Option<u64>,
+    /// Totaal aantal frames in de data-chunk (0 als fmt/data ontbreekt).
+    pub frames: u64,
+}
+
+/// Lees smpl-loops, cue-marker en framecount uit een WAV (chunk-walk zonder de
+/// audiodata te decoderen). Loops worden per GrandOrgue-regels gevalideerd:
+/// start<einde, binnen het bestand, einde>0 — ongeldige records vervallen stil.
+pub fn read_wav_markers(path: &Path) -> Option<WavMarkers> {
     let mut file = File::open(path).ok()?;
     let mut header = [0u8; 12];
     file.read_exact(&mut header).ok()?;
@@ -122,7 +137,11 @@ fn read_wav_loop_points(path: &Path) -> Option<(u64, u64)> {
         return None;
     }
 
-    // Search for smpl chunk
+    let mut markers = WavMarkers::default();
+    let mut raw_loops: Vec<(u64, u64)> = Vec::new(); // (start, end_inclusief)
+    let mut bytes_per_frame = 0u64;
+    let mut data_bytes = 0u64;
+
     loop {
         let mut chunk_header = [0u8; 8];
         if file.read_exact(&mut chunk_header).is_err() {
@@ -133,42 +152,93 @@ fn read_wav_loop_points(path: &Path) -> Option<(u64, u64)> {
         let chunk_size = u32::from_le_bytes([
             chunk_header[4], chunk_header[5], chunk_header[6], chunk_header[7]
         ]) as u64;
+        let skip = if chunk_size % 2 == 1 { chunk_size + 1 } else { chunk_size };
 
-        if chunk_id == b"smpl" && chunk_size >= 36 {
-            // Read smpl chunk data
-            let mut smpl_data = vec![0u8; chunk_size as usize];
-            if file.read_exact(&mut smpl_data).is_err() {
-                break;
+        match chunk_id {
+            b"fmt " if chunk_size >= 16 => {
+                let mut fmt = [0u8; 16];
+                if file.read_exact(&mut fmt).is_err() { break; }
+                let channels = u16::from_le_bytes([fmt[2], fmt[3]]) as u64;
+                let bits = u16::from_le_bytes([fmt[14], fmt[15]]) as u64;
+                bytes_per_frame = channels * (bits / 8).max(1);
+                let rest = skip - 16;
+                if rest > 0 && file.seek(SeekFrom::Current(rest as i64)).is_err() { break; }
             }
-
-            // Number of sample loops at offset 28
-            let num_loops = u32::from_le_bytes([
-                smpl_data[28], smpl_data[29], smpl_data[30], smpl_data[31]
-            ]);
-
-            if num_loops > 0 && chunk_size >= 60 {
-                // First loop: start at offset 44, end at offset 48
-                let loop_start = u32::from_le_bytes([
-                    smpl_data[44], smpl_data[45], smpl_data[46], smpl_data[47]
-                ]) as u64;
-                let loop_end = u32::from_le_bytes([
-                    smpl_data[48], smpl_data[49], smpl_data[50], smpl_data[51]
-                ]) as u64;
-
-                info!("Found WAV loop points: start={}, end={}", loop_start, loop_end);
-                return Some((loop_start, loop_end));
+            b"data" => {
+                data_bytes = chunk_size;
+                if file.seek(SeekFrom::Current(skip as i64)).is_err() { break; }
             }
-            break;
-        } else {
-            // Skip this chunk
-            let skip = if chunk_size % 2 == 1 { chunk_size + 1 } else { chunk_size };
-            if file.seek(SeekFrom::Current(skip as i64)).is_err() {
-                break;
+            b"smpl" if chunk_size >= 36 => {
+                let mut smpl_data = vec![0u8; chunk_size as usize];
+                if file.read_exact(&mut smpl_data).is_err() { break; }
+                let num_loops = u32::from_le_bytes([
+                    smpl_data[28], smpl_data[29], smpl_data[30], smpl_data[31]
+                ]) as usize;
+                for li in 0..num_loops {
+                    // Loop-record: 24 bytes vanaf offset 36; start op +8, end op +12.
+                    let base = 36 + li * 24;
+                    if base + 24 > smpl_data.len() { break; }
+                    let s = u32::from_le_bytes([
+                        smpl_data[base + 8], smpl_data[base + 9], smpl_data[base + 10], smpl_data[base + 11]
+                    ]) as u64;
+                    let e = u32::from_le_bytes([
+                        smpl_data[base + 12], smpl_data[base + 13], smpl_data[base + 14], smpl_data[base + 15]
+                    ]) as u64;
+                    raw_loops.push((s, e));
+                }
+            }
+            b"cue " if chunk_size >= 4 => {
+                let mut cue_data = vec![0u8; chunk_size as usize];
+                if file.read_exact(&mut cue_data).is_err() { break; }
+                let n = u32::from_le_bytes([cue_data[0], cue_data[1], cue_data[2], cue_data[3]]) as usize;
+                // Cue-record: 24 bytes vanaf offset 4; dwSampleOffset op +20.
+                // GrandOrgue neemt het MAXIMUM over alle cue-punten.
+                let mut max_off: Option<u64> = None;
+                for ci in 0..n {
+                    let base = 4 + ci * 24;
+                    if base + 24 > cue_data.len() { break; }
+                    let off = u32::from_le_bytes([
+                        cue_data[base + 20], cue_data[base + 21], cue_data[base + 22], cue_data[base + 23]
+                    ]) as u64;
+                    max_off = Some(max_off.map_or(off, |m: u64| m.max(off)));
+                }
+                markers.cue_frame = max_off;
+            }
+            _ => {
+                if file.seek(SeekFrom::Current(skip as i64)).is_err() { break; }
             }
         }
     }
 
-    None
+    if bytes_per_frame > 0 {
+        markers.frames = data_bytes / bytes_per_frame;
+    }
+
+    // Valideer loops (GrandOrgue-regels) en reken einde om naar exclusief.
+    let frames = markers.frames;
+    for (s, e) in raw_loops {
+        let valid = s < e && e > 0 && (frames == 0 || (s < frames && e < frames));
+        if valid {
+            markers.loops.push((s, e + 1)); // inclusief → exclusief
+        }
+    }
+
+    Some(markers)
+}
+
+/// Read loop points from WAV smpl chunk.
+/// Geeft de LANGSTE geldige loop terug als (start, einde-exclusief) — GrandOrgue
+/// laadt standaard alle loops; onze engine speelt er één, dus de langste geeft
+/// de meeste variatie en de minste herhaling.
+pub fn read_wav_loop_points(path: &Path) -> Option<(u64, u64)> {
+    let markers = read_wav_markers(path)?;
+    let best = markers.loops.iter()
+        .max_by_key(|(s, e)| e - s)
+        .copied();
+    if let Some((s, e)) = best {
+        info!("Found WAV loop points: start={}, end={} (excl., {} loops)", s, e, markers.loops.len());
+    }
+    best
 }
 
 /// Load a WAV file
@@ -280,10 +350,10 @@ pub fn resample(sample: &SampleData, target_rate: SampleRate) -> Result<SampleDa
     }
     
     use rubato::{FftFixedIn, Resampler};
-    
+
     let ratio = target_rate as f64 / sample.sample_rate as f64;
     let chunk_size = 1024;
-    
+
     let mut resampler = FftFixedIn::<f32>::new(
         sample.sample_rate as usize,
         target_rate as usize,
@@ -291,33 +361,53 @@ pub fn resample(sample: &SampleData, target_rate: SampleRate) -> Result<SampleDa
         2,
         1
     ).map_err(|e| SampleError::ResampleError(e.to_string()))?;
-    
-    let mut output = Vec::new();
-    let mut input_pos = 0;
-    
-    while input_pos < sample.data.len() {
-        let end = (input_pos + chunk_size).min(sample.data.len());
-        let mut chunk = sample.data[input_pos..end].to_vec();
-        
-        // Pad if necessary
-        if chunk.len() < chunk_size {
-            chunk.resize(chunk_size, 0.0);
-        }
-        
+
+    // De FFT-resampler heeft een vaste in-/uitloopvertraging: de output begint
+    // met `delay` samples "aanloop" en loopt evenzoveel achter op de input. Die
+    // vertraging moet worden weggeknipt, anders verschuift ALLE audio in de tijd
+    // t.o.v. de (geschaalde) looppunten én t.o.v. de preload-buffer — dat gaf
+    // een hoorbare tik op het moment dat een spelende voice naar de volledige
+    // sample upgradet, en een extra aanslag-vertraging (latency) bij 44.1k-sets.
+    let delay = resampler.output_delay();
+    let expected_len = (sample.data.len() as f64 * ratio).round() as usize;
+
+    let mut output = Vec::with_capacity(expected_len + delay + chunk_size);
+    let mut input_pos = 0usize;
+    // Voer ook na het einde van de input nul-chunks aan totdat de delay-staart
+    // eruit gespoeld is en we de verwachte lengte hebben.
+    while output.len() < expected_len + delay {
+        let mut chunk: Vec<f32> = if input_pos < sample.data.len() {
+            let end = (input_pos + chunk_size).min(sample.data.len());
+            sample.data[input_pos..end].to_vec()
+        } else {
+            Vec::new()
+        };
+        chunk.resize(chunk_size, 0.0);
+        input_pos += chunk_size;
+
         let input = vec![chunk];
         let result = resampler.process(&input, None)
             .map_err(|e| SampleError::ResampleError(e.to_string()))?;
-        
         output.extend(&result[0]);
-        input_pos += chunk_size;
+
+        // Veiligheidsklep tegen een oneindige lus bij onverwacht resampler-gedrag.
+        if input_pos > sample.data.len() + 8 * chunk_size {
+            break;
+        }
     }
-    
+
+    // Delay-aanloop wegknippen en op de verwachte lengte trimmen → output is
+    // tijd-uitgelijnd met de input (frame i ↔ input-frame i/ratio).
+    let start = delay.min(output.len());
+    let end = (start + expected_len).min(output.len());
+    let aligned: Vec<f32> = output[start..end].to_vec();
+
     // Adjust loop points
     let loop_start = sample.loop_start.map(|l| (l as f64 * ratio) as u64);
     let loop_end = sample.loop_end.map(|l| (l as f64 * ratio) as u64);
-    
+
     let mut sd = SampleData {
-        data: output,
+        data: aligned,
         sample_rate: target_rate,
         channels: 1,
         loop_start,
@@ -386,15 +476,55 @@ pub struct PreloadBuffer {
     pub bits_per_sample: u16,
     /// Byte offset where audio data starts in the WAV file
     pub data_offset: u64,
+    /// Aantal frames aanloopstilte dat bij het preloaden is weggeknipt (onset-
+    /// alignment). De volledige sample die op de achtergrond laadt is NIET
+    /// geknipt; de afspeelpositie moet bij de upgrade met dit aantal (in
+    /// bron-samplerate-frames) worden verschoven, anders verspringt de audio
+    /// hoorbaar (tik) op het upgrademoment.
+    pub trim_start: usize,
+}
+
+/// Welke uitsnede van het bestand een preload-buffer moet bevatten.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PreloadSegment {
+    /// De attack vanaf frame 0 (normale pijp-sample).
+    Full,
+    /// Het release-segment: vanaf de cue-marker (of de override uit de ODF)
+    /// tot het einde van het bestand — GrandOrgue-semantiek voor releases.
+    /// `cue_override` = ODF CuePoint; None = cue-chunk van het bestand, anders
+    /// frame 0. `require_cue` = alleen laden als het bestand écht een
+    /// release-marker + loop heeft (voor same-file releases uit de attack).
+    Release { cue_override: Option<u32>, require_cue: bool },
 }
 
 /// Load only the attack portion of a WAV file (first N samples)
 /// This enables instant playback while the rest streams from disk
 pub fn load_wav_preload(path: &Path, preload_samples: usize) -> Result<PreloadBuffer, SampleError> {
+    load_wav_preload_segment(path, preload_samples, PreloadSegment::Full)
+}
+
+/// Als `load_wav_preload`, maar met keuze van de uitsnede (attack of release-
+/// segment). Zie `PreloadSegment`.
+pub fn load_wav_preload_segment(path: &Path, preload_samples: usize, segment: PreloadSegment) -> Result<PreloadBuffer, SampleError> {
     use std::io::BufReader;
 
-    // First, get loop points from smpl chunk
-    let loop_points = read_wav_loop_points(path);
+    // Markers (loops + cue) uit de chunk-walk; bepaalt looppunten én — voor
+    // release-segmenten — het startframe.
+    let markers = read_wav_markers(path).unwrap_or_default();
+    let loop_points = markers.loops.iter().max_by_key(|(s, e)| e - s).copied();
+
+    // Release-segment: startframe bepalen (ODF-override > cue-chunk > 0).
+    let segment_start: u64 = match segment {
+        PreloadSegment::Full => 0,
+        PreloadSegment::Release { cue_override, require_cue } => {
+            if require_cue && (markers.cue_frame.is_none() || markers.loops.is_empty()) {
+                // Same-file release vereist loop + cue in het bestand (GO-regel);
+                // ontbreekt die, dan is er simpelweg geen release-segment.
+                return Err(SampleError::UnsupportedFormat("geen cue-marker/loop voor release-segment".to_string()));
+            }
+            cue_override.map(|c| c as u64).or(markers.cue_frame).unwrap_or(0)
+        }
+    };
 
     let file = File::open(path)
         .map_err(|e| SampleError::FileError(format!("{}: {}", path.display(), e)))?;
@@ -468,8 +598,15 @@ pub fn load_wav_preload(path: &Path, preload_samples: usize) -> Result<PreloadBu
     let bytes_per_sample = bits_per_sample as usize / 8;
     let total_frames = data_size as usize / (bytes_per_sample * channels as usize);
 
+    // Release-segment: start bij de cue-marker in plaats van frame 0.
+    let seg_start = (segment_start as usize).min(total_frames);
+    if seg_start > 0 {
+        reader.seek(SeekFrom::Current((seg_start * bytes_per_sample * channels as usize) as i64))
+            .map_err(|e| SampleError::FileError(format!("Failed to seek to segment: {}", e)))?;
+    }
+
     // Read preload portion
-    let frames_to_read = preload_samples.min(total_frames);
+    let frames_to_read = preload_samples.min(total_frames - seg_start);
     let bytes_to_read = frames_to_read * bytes_per_sample * channels as usize;
 
     let mut raw_data = vec![0u8; bytes_to_read];
@@ -505,6 +642,12 @@ pub fn load_wav_preload(path: &Path, preload_samples: usize) -> Result<PreloadBu
                 .map(|b| i32::from_le_bytes([b[0], b[1], b[2], b[3]]) as f32 / max_val)
                 .collect()
         }
+        (hound::SampleFormat::Int, 8) => {
+            // WAV 8-bit is UNSIGNED met 0x80 als nulpunt (GrandOrgue-conform).
+            raw_data.iter()
+                .map(|&b| (b as f32 - 128.0) / 128.0)
+                .collect()
+        }
         _ => {
             return Err(SampleError::UnsupportedFormat(
                 format!("{} bits {:?} not supported for preload", bits_per_sample, sample_format)
@@ -524,26 +667,37 @@ pub fn load_wav_preload(path: &Path, preload_samples: usize) -> Result<PreloadBu
         samples.into_iter().step_by(channels as usize).collect()
     };
 
-    let (loop_start, loop_end) = if let Some((start, end)) = loop_points {
-        (Some(start), Some(end))
-    } else {
-        (None, None)
+    // Release-segmenten loopen niet (one-shot uitklinken); alleen de attack
+    // krijgt looppunten mee.
+    let (loop_start, loop_end) = match (segment, loop_points) {
+        (PreloadSegment::Full, Some((start, end))) => (Some(start), Some(end)),
+        _ => (None, None),
     };
 
-    // Attack alignment: detect onset and trim leading silence
-    // Keep 32 samples before onset for a natural attack start
-    let onset_threshold = 0.002; // ~-54dB
-    let pre_onset_keep = 32;     // samples to keep before detected onset
-    let onset_pos = mono.iter().position(|&s| s.abs() > onset_threshold).unwrap_or(0);
-    let trim_start = onset_pos.saturating_sub(pre_onset_keep);
-    let aligned_data = if trim_start > 0 {
-        debug!("Attack alignment: trimmed {} silent samples from {:?}", trim_start, path.file_name());
-        mono[trim_start..].to_vec()
+    // Attack alignment: detect onset and trim leading silence.
+    // Alleen voor de attack (Full) — bij een release-segment zou de onset-trim
+    // juist het begin van de kerkakoestiek weghappen.
+    let onset_trim = if segment == PreloadSegment::Full {
+        let onset_threshold = 0.002; // ~-54dB
+        let pre_onset_keep = 32;     // samples to keep before detected onset
+        let onset_pos = mono.iter().position(|&s| s.abs() > onset_threshold).unwrap_or(0);
+        onset_pos.saturating_sub(pre_onset_keep)
+    } else {
+        0
+    };
+    let aligned_data = if onset_trim > 0 {
+        debug!("Attack alignment: trimmed {} silent samples from {:?}", onset_trim, path.file_name());
+        mono[onset_trim..].to_vec()
     } else {
         mono
     };
 
-    debug!("Preloaded {} samples from {:?} (total: {}, loop: {:?}-{:?}, onset_trim: {})",
+    // Totale verschuiving t.o.v. het originele bestand: segment-start (release
+    // vanaf cue) + onset-trim. De upgrade naar de volledige sample corrigeert
+    // de afspeelpositie met precies dit aantal bron-frames.
+    let trim_start = seg_start + onset_trim;
+
+    debug!("Preloaded {} samples from {:?} (total: {}, loop: {:?}-{:?}, trim: {})",
            aligned_data.len(), path.file_name(), total_frames, loop_start, loop_end, trim_start);
 
     // Adjust loop points for trimmed samples
@@ -560,6 +714,7 @@ pub fn load_wav_preload(path: &Path, preload_samples: usize) -> Result<PreloadBu
         channels,
         bits_per_sample,
         data_offset,
+        trim_start,
     })
 }
 
@@ -879,6 +1034,7 @@ pub fn load_audio_preload(path: &Path, preload_samples: usize) -> Result<Preload
                 channels: full_sample.channels,
                 bits_per_sample: 16, // MP3 is typically decoded to 16-bit equivalent
                 data_offset: 0,
+                trim_start,
             })
         }
         _ => Err(SampleError::UnsupportedFormat(format!("Unknown extension: {}", ext))),
@@ -899,6 +1055,35 @@ mod loop_opt_tests {
             ssd += d * d;
         }
         ssd
+    }
+
+    #[test]
+    fn resample_compenseert_fft_delay() {
+        // Impuls op een bekende positie: na resamplen 44100→48000 moet de piek
+        // (vrijwel) exact op positie×ratio liggen. Zonder delay-compensatie lag
+        // hij honderden samples later — dat gaf een positiesprong (tik) bij de
+        // preload→full-upgrade en extra aanslagvertraging bij 44.1k-sets.
+        let sr_in = 44100u32;
+        let sr_out = 48000u32;
+        let n = 44100usize;
+        let mut data = vec![0.0f32; n];
+        let impulse_pos = 10_000usize;
+        data[impulse_pos] = 1.0;
+        let sd = SampleData { data, sample_rate: sr_in, channels: 1, loop_start: None, loop_end: None };
+        let out = resample(&sd, sr_out).expect("resample");
+
+        let ratio = sr_out as f64 / sr_in as f64;
+        let expected = (impulse_pos as f64 * ratio) as i64;
+        let peak_pos = out.data.iter().enumerate()
+            .max_by(|a, b| a.1.abs().partial_cmp(&b.1.abs()).unwrap())
+            .map(|(i, _)| i as i64)
+            .unwrap();
+        let err = (peak_pos - expected).abs();
+        assert!(err <= 4, "resample-piek verschoven met {} samples (verwacht ≤4)", err);
+
+        let expected_len = (n as f64 * ratio).round() as i64;
+        assert!((out.data.len() as i64 - expected_len).abs() <= 2,
+                "resample-lengte {} wijkt af van verwacht {}", out.data.len(), expected_len);
     }
 
     #[test]

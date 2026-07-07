@@ -298,7 +298,42 @@ fn backup_file(src: &Path, root: &Path, backup_root: &Path) -> Result<(), String
     Ok(())
 }
 
+/// Schrijf een getrimde WAV terug. hound schrijft alleen fmt+data en gooit
+/// overige chunks weg — dus een bestaande `smpl`-loop (van de looptool of uit
+/// de sampleset zelf) zou verdwijnen en de looppunten zouden bovendien met
+/// `keep_from` frames verschuiven. Daarom: looppunten vooraf lezen, na het
+/// trimmen verschuiven en als nieuwe smpl-chunk terugschrijven.
+fn write_trimmed_wav(
+    path: &Path,
+    spec: hound::WavSpec,
+    trimmed_f32: &[f32],
+    is_float: bool,
+    keep_from: usize,
+    orig_loop: Option<(u64, u64)>,
+) -> Result<(), String> {
+    let wav = crate::loop_tool::encode_wav(spec, trimmed_f32, is_float)?;
+    let frames = trimmed_f32.len() / spec.channels.max(1) as usize;
+    let out = match orig_loop {
+        // Loop alleen behouden als hij volledig ná het weggeknipte stuk ligt en
+        // binnen het bestand blijft. `le` is hier EXCLUSIEF (read_wav_loop_points);
+        // de smpl-chunk verwacht de laatste frame ínclusief, dus le-1.
+        Some((ls, le)) if ls >= keep_from as u64 && le > ls + 1 && ((le - keep_from as u64) as usize) <= frames => {
+            let new_ls = (ls - keep_from as u64) as u32;
+            let new_le_incl = (le - 1 - keep_from as u64) as u32;
+            let smpl = crate::loop_tool::build_smpl_chunk(
+                spec.sample_rate, crate::loop_tool::midi_note_from_name(path), new_ls, new_le_incl,
+            );
+            crate::loop_tool::insert_smpl(&wav, &smpl)?
+        }
+        _ => wav,
+    };
+    fs::write(path, &out).map_err(|e| format!("write: {}", e))
+}
+
 fn trim_wav_file(path: &Path, thr_lin: f32, preroll_ms: f32) -> Result<f64, String> {
+    // Looppunten VOOR het herschrijven lezen (hound bewaart geen smpl-chunk).
+    let orig_loop = vpo_sampler::read_wav_loop_points(path);
+
     let reader = hound::WavReader::open(path).map_err(|e| format!("WAV open: {}", e))?;
     let spec = reader.spec();
     let channels = spec.channels.max(1) as usize;
@@ -313,9 +348,7 @@ fn trim_wav_file(path: &Path, thr_lin: f32, preroll_ms: f32) -> Result<f64, Stri
             let keep_from = first.saturating_sub(preroll_frames);
             if keep_from == 0 { return Ok(0.0); }
             let trimmed = &samples[keep_from * channels..];
-            let mut writer = hound::WavWriter::create(path, spec).map_err(|e| format!("WAV create: {}", e))?;
-            for &s in trimmed { writer.write_sample(s).map_err(|e| format!("WAV write: {}", e))?; }
-            writer.finalize().map_err(|e| format!("WAV finalize: {}", e))?;
+            write_trimmed_wav(path, spec, trimmed, true, keep_from, orig_loop)?;
             Ok(keep_from as f64 / spec.sample_rate as f64 * 1000.0)
         }
         hound::SampleFormat::Int => {
@@ -327,10 +360,9 @@ fn trim_wav_file(path: &Path, thr_lin: f32, preroll_ms: f32) -> Result<f64, Stri
             if first >= samples.len() / channels { return Ok(0.0); } // entirely silent — leave file alone
             let keep_from = first.saturating_sub(preroll_frames);
             if keep_from == 0 { return Ok(0.0); }
-            let trimmed = &samples[keep_from * channels..];
-            let mut writer = hound::WavWriter::create(path, spec).map_err(|e| format!("WAV create: {}", e))?;
-            for &s in trimmed { writer.write_sample(s).map_err(|e| format!("WAV write: {}", e))?; }
-            writer.finalize().map_err(|e| format!("WAV finalize: {}", e))?;
+            // Widen i32 → f32 (native waarden); encode_wav rondt terug naar Int.
+            let trimmed: Vec<f32> = samples[keep_from * channels..].iter().map(|&v| v as f32).collect();
+            write_trimmed_wav(path, spec, &trimmed, false, keep_from, orig_loop)?;
             Ok(keep_from as f64 / spec.sample_rate as f64 * 1000.0)
         }
     }

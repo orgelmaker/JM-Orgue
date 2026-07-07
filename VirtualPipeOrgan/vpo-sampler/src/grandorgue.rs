@@ -66,6 +66,9 @@ pub struct OrganInfo {
     /// Orgel-brede Gain in dB ([Organ] Gain, default 0.0). Onderdeel van de
     /// GrandOrgue-inschalingshiërarchie: Organ -> Windchest -> Stop/Rank -> Pipe.
     pub gain_db: f32,
+    /// Orgel-brede PitchTuning in cents ([Organ] PitchTuning, default 0.0) —
+    /// wordt over de hele hiërarchie gesommeerd (GO "original temperament").
+    pub pitch_tuning_cents: f32,
 }
 
 /// Manual/keyboard definition from [ManualXXX] section
@@ -94,8 +97,13 @@ pub struct StopDef {
     pub name: String,
     /// Harmonic number (8 = 8', 16 = 4', 32 = 2', etc.)
     pub harmonic_number: u32,
-    /// Pitch correction in cents (stop-niveau, bv. Voix Céleste-zweving)
+    /// Pitch correction in cents (stop-niveau). LET OP: GrandOrgue past
+    /// PitchCorrection alleen toe bij automatisch hertemperen — in de standaard
+    /// "original temperament"-modus telt alléén PitchTuning.
     pub pitch_correction: f32,
+    /// PitchTuning in cents (stop-niveau) — onderdeel van de gesommeerde
+    /// stemmingshiërarchie (Organ + Windchest + Stop/Rank + Pipe).
+    pub pitch_tuning_cents: f32,
     pub number_of_pipes: u32,
     pub first_accessible_pipe_logical_key: u32,
     pub windchest_group: u32,
@@ -158,11 +166,19 @@ pub struct PipeExtra {
     pub pitch_correction_cents: Option<f32>,
     /// One-shot afspelen (klok/glockenspiel) — pipe-niveau override op de stop
     pub percussive: Option<bool>,
-    /// ODF-looppunten (fallback wanneer de WAV geen smpl-chunk heeft)
+    /// Beste ODF-looppunten (langste van alle LoopNNN). GrandOrgue-regel: als de
+    /// ODF ten minste één loop opgeeft, worden de smpl-loops van de WAV volledig
+    /// GENEGEERD. `loop_end` is hier al EXCLUSIEF (ODF LoopEnd is inclusief).
     pub loop_start: Option<u32>,
     pub loop_end: Option<u32>,
     /// Release-samples (opgenomen kerkakoestiek per toetsduur)
     pub releases: Vec<ReleaseDef>,
+    /// PipeXXXLoadRelease (Y/N): release-segment uit het attack-bestand nemen.
+    /// None = default (true, tenzij percussive).
+    pub load_release: Option<bool>,
+    /// PipeXXXCuePoint: override van de release-marker (cue-chunk) van het
+    /// attack-bestand, in frames.
+    pub cue_point: Option<u32>,
     /// Aparte tremulant-opname van deze pijp (Hauptwerk "tremmed"-laag)
     pub tremulant_sample: Option<PathBuf>,
 }
@@ -204,6 +220,12 @@ pub struct WindchestDef {
     pub comment: String,
     pub enclosure_ids: Vec<u32>,
     pub tremulant_ids: Vec<u32>,
+    /// Windchest-niveau inschaling (GrandOrgue-hiërarchie: Organ → Windchest →
+    /// Stop/Rank → Pipe). AmplitudeLevel in % (100 = neutraal), Gain in dB,
+    /// PitchTuning in cents.
+    pub amplitude_level: f32,
+    pub gain_db: f32,
+    pub pitch_tuning_cents: f32,
 }
 
 /// Enclosure (swell box) definition
@@ -347,6 +369,7 @@ impl OdfParser {
             number_of_windchest_groups: self.parse_u32(section, "NumberOfWindchestGroups").unwrap_or(1),
             amplitude_level: self.parse_f32(section, "AmplitudeLevel").unwrap_or(100.0),
             gain_db: self.parse_f32(section, "Gain").unwrap_or(0.0),
+            pitch_tuning_cents: self.parse_f32(section, "PitchTuning").unwrap_or(0.0),
         })
     }
 
@@ -435,6 +458,7 @@ impl OdfParser {
                         name: section.get("Name").cloned().unwrap_or_default(),
                         harmonic_number: harmonic,
                         pitch_correction: self.parse_f32(section, "PitchCorrection").unwrap_or(0.0),
+                        pitch_tuning_cents: self.parse_f32(section, "PitchTuning").unwrap_or(0.0),
                         gain_db: self.parse_f32(section, "Gain").unwrap_or(0.0),
                         number_of_pipes: pipes.len() as u32,
                         first_accessible_pipe_logical_key: self.parse_u32(section, "FirstAccessiblePipeLogicalKeyNumber").unwrap_or(1),
@@ -487,6 +511,15 @@ impl OdfParser {
                 .or_else(|| self.parse_u32(rank_section, "NumberOfLogicalPipes"))
                 .unwrap_or(accessible);
 
+            // Rank-niveau inschaling (sectie-brede sleutels zónder Pipe-prefix):
+            // onderdeel van de GO-hiërarchie Organ→Windchest→Stop/Rank→Pipe.
+            // AmplitudeLevel is multiplicatief (%), Gain (dB) en PitchTuning
+            // (cents) zijn additief — hieronder in elke pijp-extra gevouwen.
+            let rank_ampl = self.parse_f32(rank_section, "AmplitudeLevel").unwrap_or(100.0);
+            let rank_gain = self.parse_f32(rank_section, "Gain").unwrap_or(0.0);
+            let rank_pitch = self.parse_f32(rank_section, "PitchTuning").unwrap_or(0.0);
+            let rank_neutral = (rank_ampl - 100.0).abs() < 1e-6 && rank_gain.abs() < 1e-6 && rank_pitch.abs() < 1e-6;
+
             for i in 0..count {
                 let key = format!("Pipe{:03}", first_pipe + i);
                 let value = match rank_section.get(&key) {
@@ -508,11 +541,20 @@ impl OdfParser {
                         });
                     }
                 } else {
+                    // Inschaling, stemming, percussive, loops en releases
+                    // komen uit de rank-sectie met dezelfde sleutelnamen.
+                    let mut extra = self.parse_pipe_extra(rank_section, &key);
+                    if !rank_neutral {
+                        // Vouw de rank-brede inschaling in de pijp-extra:
+                        // percentages vermenigvuldigen, dB/cents optellen.
+                        let pipe_ampl = extra.amplitude_level.unwrap_or(100.0);
+                        extra.amplitude_level = Some(pipe_ampl * rank_ampl / 100.0);
+                        extra.gain_db = Some(extra.gain_db.unwrap_or(0.0) + rank_gain);
+                        extra.pitch_tuning_cents = Some(extra.pitch_tuning_cents.unwrap_or(0.0) + rank_pitch);
+                    }
                     pipes.push(PipeDef::Sample {
                         path: self.resolve_path(value),
-                        // Inschaling, stemming, percussive, loops en releases
-                        // komen uit de rank-sectie met dezelfde sleutelnamen.
-                        extra: self.parse_pipe_extra(rank_section, &key),
+                        extra,
                     });
                 }
             }
@@ -532,19 +574,32 @@ impl OdfParser {
     /// LET OP eenheden: `{key}Gain` is dB, `{key}AmplitudeLevel` is % en
     /// PitchTuning/PitchCorrection zijn cents (floats, bv. "4.79062").
     fn parse_pipe_extra(&self, section: &HashMap<String, String>, key: &str) -> PipeExtra {
-        // ODF-looppunten: alleen de eerste loop is nodig (fallback wanneer de
-        // WAV zelf geen smpl-chunk heeft).
-        let has_loops = self
+        // ODF-looppunten: parse ALLE LoopNNN-records en kies de langste geldige
+        // (onze engine speelt één loop). GrandOrgue-semantiek: LoopEnd is de
+        // laatste frame ínclusief → hier omgerekend naar exclusief; en zodra de
+        // ODF een loop opgeeft, winnen die van de smpl-chunk in de WAV.
+        let loop_count = self
             .parse_u32(section, &format!("{}LoopCount", key))
             .unwrap_or(0)
-            > 0;
-        let (loop_start, loop_end) = if has_loops {
-            (
-                self.parse_u32(section, &format!("{}Loop001Start", key)),
-                self.parse_u32(section, &format!("{}Loop001End", key)),
-            )
-        } else {
-            (None, None)
+            .min(100);
+        let mut best_loop: Option<(u32, u32)> = None;
+        for li in 1..=loop_count {
+            let s = self.parse_u32(section, &format!("{}Loop{:03}Start", key, li)).unwrap_or(0);
+            let e = match self.parse_u32(section, &format!("{}Loop{:03}End", key, li)) {
+                Some(e) => e,
+                None => continue,
+            };
+            if e <= s {
+                continue; // ongeldig record
+            }
+            let e_excl = e.saturating_add(1);
+            if best_loop.map_or(true, |(bs, be)| e_excl - s > be - bs) {
+                best_loop = Some((s, e_excl));
+            }
+        }
+        let (loop_start, loop_end) = match best_loop {
+            Some((s, e)) => (Some(s), Some(e)),
+            None => (None, None),
         };
 
         PipeExtra {
@@ -557,6 +612,8 @@ impl OdfParser {
             loop_start,
             loop_end,
             releases: self.parse_pipe_releases(section, key),
+            load_release: section.get(&format!("{}LoadRelease", key)).map(|v| v.trim().eq_ignore_ascii_case("y")),
+            cue_point: self.parse_u32(section, &format!("{}CuePoint", key)),
             tremulant_sample: None,
         }
     }
@@ -659,6 +716,9 @@ impl OdfParser {
                         .unwrap_or_default(),
                     enclosure_ids,
                     tremulant_ids,
+                    amplitude_level: self.parse_f32(section, "AmplitudeLevel").unwrap_or(100.0),
+                    gain_db: self.parse_f32(section, "Gain").unwrap_or(0.0),
+                    pitch_tuning_cents: self.parse_f32(section, "PitchTuning").unwrap_or(0.0),
                 });
             }
         }
@@ -1066,6 +1126,7 @@ mod tests {
             name: name.to_string(),
             harmonic_number: 8,
             pitch_correction: 0.0,
+            pitch_tuning_cents: 0.0,
             number_of_pipes: 1,
             first_accessible_pipe_logical_key: 1,
             windchest_group: 1,
@@ -1188,10 +1249,12 @@ Pipe001Loop001End=88200
         assert_eq!(extra.releases.len(), 1);
         assert!(extra.releases[0].path.ends_with("rel/036-c.wav"));
         assert_eq!(extra.releases[0].max_key_press_time_ms, Some(-1));
-        // Per-pipe Percussive en ODF-looppunten (taak 3 en 4, rank-pad)
+        // Per-pipe Percussive en ODF-looppunten (taak 3 en 4, rank-pad).
+        // GrandOrgue: LoopEnd is de laatste frame ínclusief → de parser levert
+        // het EXCLUSIEVE einde (88200 + 1), consistent met de engine-semantiek.
         assert_eq!(extra.percussive, Some(true));
         assert_eq!(extra.loop_start, Some(4410));
-        assert_eq!(extra.loop_end, Some(88200));
+        assert_eq!(extra.loop_end, Some(88201));
     }
 
     #[test]

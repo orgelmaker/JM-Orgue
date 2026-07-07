@@ -103,6 +103,10 @@
   export let midiDevices = [];
   export let selectedAudioDevice = null;
   export let selectedMidiDevice = null;
+  // Audio-uitvoerprofielen (speakers/hoofdtelefoon) — beheerd in App.svelte.
+  export let audioProfiles = { speakers: null, headphones: null, active: null };
+  // Laatst geopende orgel automatisch laden bij het starten (App.svelte).
+  export let autoLoadLastOrgan = true;
 
   const dispatch = createEventDispatcher();
 
@@ -111,6 +115,19 @@
   // fysieke uitgang (koptelefoon/luidspreker) gebeurt in het ASIO-paneel, niet
   // hier. Dat detecteren we om een gerichte hint te tonen.
   $: isAsioHost = /asio/i.test(selectedAudioHost || '');
+
+  // Actuele audio-status (host/buffer/samplerate/kanalen) voor de
+  // latentie-indicatie in Algemene Instellingen.
+  let audioStatus = null;
+  async function refreshAudioStatus() {
+    try { audioStatus = await invoke('get_status'); } catch (e) { /* polling */ }
+  }
+  $: if (activeView === 'algemene-instellingen') refreshAudioStatus();
+  // Geschatte uitgangslatentie: ~2× de bufferduur (dubbele buffering in de
+  // driver). 0 frames = driver-default (onbekend, WASAPI ≈ 10 ms per buffer).
+  $: audioLatencyMs = (audioStatus && audioStatus.buffer_frames > 0 && audioStatus.sample_rate > 0)
+    ? (2 * audioStatus.buffer_frames / audioStatus.sample_rate * 1000)
+    : null;
 
   // Begrijpelijker label voor de host-keuze (waarde blijft de echte cpal-naam).
   function prettyHost(name) {
@@ -150,6 +167,7 @@
   const ACTION_TREM_LFO_BASE = 24;
   const ACTION_EQ_ENABLE = 40;
   const ACTION_CRESCENDO_ENABLE = 41;
+  const ACTION_AUDIO_PROFILE = 43; // wissel speakers ↔ hoofdtelefoon
   let tremLfoMidiBindings = {}; // { actionCode: count }
   let globalMidiBindings = {};  // { actionCode: count } voor algemene toggles
   let globalLearningAction = null;
@@ -168,6 +186,9 @@
     } else if (actionCode === ACTION_CRESCENDO_ENABLE) {
       crescendoEnabled = !crescendoEnabled;
       saveCrescendo();
+    } else if (actionCode === ACTION_AUDIO_PROFILE) {
+      // Snelle wissel speakers ↔ hoofdtelefoon via MIDI (bv. een piston).
+      dispatch('switchAudioProfile', null);
     } else if (actionCode === 42) {
       // Computer afsluiten — bubbel naar App.svelte zodat die bevestiging + opslag regelt
       dispatch('shutdownRequest');
@@ -178,9 +199,7 @@
     globalLearningAction = actionCode;
     try {
       await invoke('learn_preset_binding', { presetNum: actionCode });
-      const bindings = await invoke('get_preset_bindings');
-      globalMidiBindings[actionCode] = bindings.filter(b => b.preset_num === actionCode).length;
-      globalMidiBindings = globalMidiBindings;
+      await refreshMidiBindingsFull();
     } catch (e) {
       console.error('Global MIDI learn failed:', e);
     } finally {
@@ -193,10 +212,7 @@
     learningTremDivIdx = divIdx;
     try {
       await invoke('learn_preset_binding', { presetNum: actionCode });
-      // Hertel bindings na succesvol leren
-      const bindings = await invoke('get_preset_bindings');
-      tremLfoMidiBindings[actionCode] = bindings.filter(b => b.preset_num === actionCode).length;
-      tremLfoMidiBindings = tremLfoMidiBindings;
+      await refreshMidiBindingsFull();
     } catch (e) {
       console.error('Tremulant MIDI learn failed:', e);
     } finally {
@@ -204,21 +220,10 @@
     }
   }
 
-  // Tel bindings bij organ load
+  // Tel bindings bij organ load — via de centrale structurele lijst, die
+  // meteen ook de handmatige koppelingen-editor voedt.
   $: if (organInfo) {
-    invoke('get_preset_bindings').then(bindings => {
-      const tremCounts = {};
-      const globCounts = {};
-      for (const b of bindings) {
-        if (b.preset_num >= ACTION_TREM_LFO_BASE && b.preset_num < ACTION_TREM_LFO_BASE + 16) {
-          tremCounts[b.preset_num] = (tremCounts[b.preset_num] || 0) + 1;
-        } else if (b.preset_num === ACTION_EQ_ENABLE || b.preset_num === ACTION_CRESCENDO_ENABLE) {
-          globCounts[b.preset_num] = (globCounts[b.preset_num] || 0) + 1;
-        }
-      }
-      tremLfoMidiBindings = tremCounts;
-      globalMidiBindings = globCounts;
-    }).catch(() => {});
+    refreshMidiBindingsFull();
   }
 
   // Layout state for main view
@@ -577,32 +582,78 @@
     }).catch(() => {});
   }
 
-  // Parametric EQ state
+  // EQ: vrije banden (GrandOrgue-stijl) — per band type, frequentie, gain,
+  // bandbreedte (octaven) en doelkanaal (null = alle uitgangskanalen).
   let eqEnabled = false;
-  let eqLowFreq = 200, eqLowGain = 0;
-  let eqMidFreq = 1000, eqMidGain = 0, eqMidQ = 10;
-  let eqHighFreq = 4000, eqHighGain = 0;
+  const defaultEqBands = () => ([
+    { enabled: true, band_type: 'lowshelf', freq: 200, gain_db: 0, bandwidth: 1.0, channel: null },
+    { enabled: true, band_type: 'peak', freq: 1000, gain_db: 0, bandwidth: 2.0, channel: null },
+    { enabled: true, band_type: 'highshelf', freq: 4000, gain_db: 0, bandwidth: 1.0, channel: null },
+  ]);
+  let eqBands = defaultEqBands();
+
+  const eqBandTypes = [
+    { value: 'peak', label: 'Piek' },
+    { value: 'lowpass', label: 'Laagdoorlaat' },
+    { value: 'highpass', label: 'Hoogdoorlaat' },
+    { value: 'bandpass', label: 'Banddoorlaat' },
+    { value: 'lowshelf', label: 'Lage shelf' },
+    { value: 'highshelf', label: 'Hoge shelf' },
+  ];
+
+  // Log-schaal voor de frequentie-slider: 0..300 ↔ 20 Hz .. 20 kHz.
+  const freqToSlider = (f) => Math.round(100 * Math.log10(Math.max(20, Math.min(20000, f)) / 20));
+  const sliderToFreq = (v) => Math.round(20 * Math.pow(10, v / 100));
 
   // EQ wordt per orgel opgeslagen in de backend (.jm-settings.json) en bij load geladen
   // via loadAudioSettingsForOrgan() — niet meer in een globale localStorage-key.
 
   async function updateEq() {
     try {
-      await invoke('set_parametric_eq', {
+      await invoke('set_eq_bands', {
         enabled: eqEnabled,
-        lowFreq: eqLowFreq, lowGain: eqLowGain,
-        midFreq: eqMidFreq, midGain: eqMidGain, midQ: eqMidQ / 10,
-        highFreq: eqHighFreq, highGain: eqHighGain,
+        bands: eqBands.map(b => ({
+          enabled: !!b.enabled,
+          band_type: b.band_type,
+          freq: Number(b.freq) || 1000,
+          gain_db: Number(b.gain_db) || 0,
+          bandwidth: Number(b.bandwidth) || 1.0,
+          channel: (b.channel === null || b.channel === undefined) ? null : Number(b.channel),
+        })),
       });
     } catch (e) {
       console.error('Failed to set EQ:', e);
     }
   }
 
+  function onEqBandChange() {
+    eqBands = eqBands; // Svelte-reactiviteit na mutatie van een band-object
+    updateEq();
+  }
+
+  function addEqBand() {
+    eqBands = [...eqBands, { enabled: true, band_type: 'peak', freq: 1000, gain_db: 0, bandwidth: 2.0, channel: null }];
+    updateEq();
+  }
+
+  function removeEqBand(idx) {
+    eqBands = eqBands.filter((_, i) => i !== idx);
+    updateEq();
+  }
+
   let reverbIrLoaded = false;
   let reverbIrName = '';
-  let reverbType = 'convolution'; // 'convolution' or 'algorithmic'
-  let reverbPreset = 1; // 0=Kleine Kapel, 1=Dorpskerk, etc.
+  // Volledig pad van het geladen IR-bestand; wordt per orgel gepersisteerd en
+  // bij orgel-load/audiowissel automatisch herladen (voorheen: irPath ging als
+  // null de opslag in en was de eigen galm na elke herstart weg).
+  let reverbIrPath = null;
+  // Default 'algorithmic': convolutie zonder geladen IR-bestand gaf vroeger
+  // helemaal geen galm ("galm werkt niet"). De engine valt inmiddels ook zelf
+  // terug op de algoritmische galm zolang er geen IR geladen is.
+  let reverbType = 'algorithmic'; // 'convolution' of 'algorithmic'
+  // Preset-index 0..N-1 = vaste preset (zonder schuiven); -1 = "Eigen":
+  // vrij instelbaar met schuiven, per orgel vastgelegd.
+  let reverbPreset = 1; // 0=Kleine Kapel, 1=Dorpskerk, etc.; -1=Eigen
   let reverbRt60 = 2.0;
   let reverbPreDelay = 25;
   let reverbDamping = 50;
@@ -614,13 +665,14 @@
   function persistReverbConfig() {
     invoke('persist_reverb_config', {
       reverbType,
-      preset: reverbPreset,
+      // null in de opslag = "Eigen" (vrije schuifwaarden van dit orgel)
+      preset: reverbPreset >= 0 ? reverbPreset : null,
       rt60: reverbRt60,
       preDelayMs: reverbPreDelay,
       damping: reverbDamping,
       roomSize: reverbRoomSize,
       mix: reverb,
-      irPath: null,
+      irPath: reverbIrPath,
     }).catch(console.error);
   }
 
@@ -664,12 +716,17 @@
 
   function applyReverbPreset(idx) {
     reverbPreset = idx;
-    const p = reverbPresets[idx];
-    reverbRt60 = p.rt60;
-    reverbPreDelay = p.preDelay;
-    reverbDamping = p.damping;
-    reverbRoomSize = p.roomSize;
-    updateAlgorithmicReverb(true);
+    if (idx >= 0) {
+      // Vaste preset: canonieke waarden toepassen; schuiven blijven verborgen.
+      const p = reverbPresets[idx];
+      reverbRt60 = p.rt60;
+      reverbPreDelay = p.preDelay;
+      reverbDamping = p.damping;
+      reverbRoomSize = p.roomSize;
+    }
+    // Eigen (-1): huidige schuifwaarden zijn het vertrekpunt en worden per
+    // orgel vastgelegd via persistReverbConfig (in updateAlgorithmicReverb).
+    updateAlgorithmicReverb(idx >= 0);
   }
 
   // Stuur de (opgeslagen) reverb-instellingen naar de audio-engine. Nodig bij
@@ -679,17 +736,29 @@
   async function applyReverbToBackend() {
     try {
       await invoke('set_reverb_type', { algorithmic: reverbType === 'algorithmic' });
-      if (reverbType === 'algorithmic') {
-        await invoke('set_algorithmic_reverb', {
-          preset: null,
-          rt60: reverbRt60,
-          preDelayMs: reverbPreDelay,
-          damping: reverbDamping / 100,
-          roomSize: reverbRoomSize / 100,
-          mix: reverb / 100,
-        });
-      } else {
-        // Convolutie: mix toepassen (IR moet de gebruiker zelf opnieuw laden).
+      // FDN-parameters altijd meesturen: bij 'convolution' zonder geladen IR
+      // valt de engine terug op de algoritmische galm, en die moet dan de
+      // ingestelde ruimte/mix volgen in plaats van de fabrieksdefaults.
+      await invoke('set_algorithmic_reverb', {
+        preset: null,
+        rt60: reverbRt60,
+        preDelayMs: reverbPreDelay,
+        damping: reverbDamping / 100,
+        roomSize: reverbRoomSize / 100,
+        mix: reverb / 100,
+      });
+      if (reverbType !== 'algorithmic') {
+        // Convolutie: opgeslagen IR automatisch herladen (verse audio-thread
+        // start altijd zonder IR) en de mix toepassen.
+        if (reverbIrPath) {
+          try {
+            await invoke('load_impulse_response', { path: reverbIrPath });
+            reverbIrLoaded = true;
+            reverbIrName = reverbIrPath.split(/[/\\]/).pop();
+          } catch (e) {
+            console.error('Opgeslagen IR niet te herladen (bestand verplaatst?):', e);
+          }
+        }
         await invoke('set_reverb_mix', { mix: reverb / 100 });
       }
     } catch (e) {
@@ -1204,6 +1273,58 @@
     }
   }
 
+  // ===== Handmatig instellen van pedaal-koppelingen en toetsenbereik =====
+  // Het handmatige alternatief voor 'Leer pedaal'/'Leer': kanaal, CC of
+  // nootbereik direct intypen. Weergave-kanaal is 1-16; op de kabel 0-15.
+  async function setSwellManualUI(divisionName, divIdx, channelDisplay, ccNum) {
+    const ch = Math.max(1, Math.min(16, channelDisplay | 0)) - 1;
+    const cc = Math.max(0, Math.min(127, ccNum | 0));
+    try {
+      await invoke('set_swell_binding_manual', { division: divisionName, divisionIndex: divIdx, channel: ch, ccNum: cc });
+      await loadSwellBindings();
+    } catch (e) {
+      console.error('Handmatige zwelkast-koppeling mislukt:', e);
+    }
+  }
+
+  async function setCrescendoManualUI(channelDisplay, ccNum) {
+    const ch = Math.max(1, Math.min(16, channelDisplay | 0)) - 1;
+    const cc = Math.max(0, Math.min(127, ccNum | 0));
+    try {
+      await invoke('set_crescendo_binding_manual', { channel: ch, ccNum: cc });
+      const mn = crescendoBinding?.min ?? 0;
+      const mx = crescendoBinding?.max ?? 127;
+      const inv = crescendoBinding?.invert ?? false;
+      crescendoBinding = { channel: ch, cc, min: mn, max: mx, invert: inv };
+    } catch (e) {
+      console.error('Handmatige crescendo-koppeling mislukt:', e);
+    }
+  }
+
+  async function clearCrescendoBindingUI() {
+    try {
+      await invoke('clear_crescendo_binding');
+      crescendoBinding = null;
+    } catch (e) {
+      console.error('Crescendo-koppeling wissen mislukt:', e);
+    }
+  }
+
+  // Handmatig toetsenbereik (laagste/hoogste MIDI-noot) van een divisie.
+  async function setKeyRangeUI(divisionName, first, last) {
+    const clamp = (v) => (v == null || isNaN(v)) ? null : Math.max(0, Math.min(127, v | 0));
+    try {
+      await invoke('set_midi_mapping_range', {
+        division: divisionName,
+        firstMidiNote: clamp(first),
+        lastMidiNote: clamp(last),
+      });
+      dispatch('refreshMidiMappings');
+    } catch (e) {
+      console.error('Toetsenbereik instellen mislukt:', e);
+    }
+  }
+
   function onVolumeChange() {
     dispatch('volumeChange', volume);
   }
@@ -1261,18 +1382,32 @@
         await invoke('set_temperament', { noteOffsets: t0.cents, fineTune: 0, name: t0.name });
       }
 
-      // Parametric EQ: opgeslagen waarde of default (uit). Stored mid_q is gedeeld door 10.
+      // EQ: nieuw banden-formaat, of migratie vanuit het oude 3-band formaat.
       if (s && s.eq) {
         const e = s.eq;
         eqEnabled = !!e.enabled;
-        eqLowFreq = e.low_freq; eqLowGain = e.low_gain;
-        eqMidFreq = e.mid_freq; eqMidGain = e.mid_gain; eqMidQ = (e.mid_q ?? 1) * 10;
-        eqHighFreq = e.high_freq; eqHighGain = e.high_gain;
+        if (Array.isArray(e.bands) && e.bands.length > 0) {
+          eqBands = e.bands.map(b => ({
+            enabled: !!b.enabled,
+            band_type: b.band_type || 'peak',
+            freq: b.freq ?? 1000,
+            gain_db: b.gain_db ?? 0,
+            bandwidth: b.bandwidth ?? 2.0,
+            channel: (b.channel === null || b.channel === undefined) ? null : b.channel,
+          }));
+        } else {
+          // Migratie: oud 3-band formaat → drie vrije banden (Q → octaven).
+          const q = Math.max(0.05, e.mid_q ?? 1);
+          const bw = (2 / Math.LN2) * Math.asinh(1 / (2 * q));
+          eqBands = [
+            { enabled: true, band_type: 'lowshelf', freq: e.low_freq ?? 200, gain_db: e.low_gain ?? 0, bandwidth: 1.0, channel: null },
+            { enabled: true, band_type: 'peak', freq: e.mid_freq ?? 1000, gain_db: e.mid_gain ?? 0, bandwidth: bw, channel: null },
+            { enabled: true, band_type: 'highshelf', freq: e.high_freq ?? 4000, gain_db: e.high_gain ?? 0, bandwidth: 1.0, channel: null },
+          ];
+        }
       } else {
         eqEnabled = false;
-        eqLowFreq = 200; eqLowGain = 0;
-        eqMidFreq = 1000; eqMidGain = 0; eqMidQ = 10;
-        eqHighFreq = 4000; eqHighGain = 0;
+        eqBands = defaultEqBands();
       }
       await updateEq();
 
@@ -1280,17 +1415,35 @@
       // het toe met de afgestemde logica (geen galmstaart wissen tijdens poll).
       if (s && s.reverb) {
         const r = s.reverb;
-        reverbType = r.reverb_type || 'convolution';
-        reverbPreset = (r.algorithmic_preset ?? 1);
+        reverbType = r.reverb_type || 'algorithmic';
         reverbRt60 = r.rt60 ?? 2.0;
         reverbPreDelay = r.pre_delay_ms ?? 25;
         reverbDamping = r.damping ?? 50;
         reverbRoomSize = r.room_size ?? 80;
         reverb = r.mix ?? 30;
+        // Preset: null = "Eigen". Migratie van oude opslag: stond er een vaste
+        // preset mét bijgestelde schuiven (dat kon vroeger), dan wordt dat nu
+        // "Eigen" zodat de klank van de gebruiker behouden blijft.
+        const savedPreset = r.algorithmic_preset;
+        if (savedPreset == null || savedPreset < 0 || savedPreset >= reverbPresets.length) {
+          reverbPreset = -1;
+        } else {
+          const p = reverbPresets[savedPreset];
+          const matches = Math.abs(reverbRt60 - p.rt60) < 0.05
+            && Math.abs(reverbPreDelay - p.preDelay) < 3
+            && Math.abs(reverbDamping - p.damping) < 3
+            && Math.abs(reverbRoomSize - p.roomSize) < 3;
+          reverbPreset = matches ? savedPreset : -1;
+        }
+        // Eigen IR-bestand: pad herstellen; applyReverbToBackend laadt hem.
+        reverbIrPath = r.ir_path || null;
+        reverbIrLoaded = !!reverbIrPath;
+        reverbIrName = reverbIrPath ? reverbIrPath.split(/[/\\]/).pop() : '';
       } else {
-        reverbType = 'convolution';
+        reverbType = 'algorithmic';
         reverbPreset = 1; reverbRt60 = 2.0; reverbPreDelay = 25;
         reverbDamping = 50; reverbRoomSize = 80; reverb = 30;
+        reverbIrPath = null; reverbIrLoaded = false; reverbIrName = '';
       }
       await applyReverbToBackend();
 
@@ -1417,6 +1570,10 @@
         await invoke('load_impulse_response', { path: selected });
         reverbIrLoaded = true;
         reverbIrName = selected.split(/[/\\]/).pop();
+        // Pad per orgel vastleggen zodat de eigen galm een herstart of
+        // orgelwissel overleeft (applyReverbToBackend herlaadt hem dan).
+        reverbIrPath = selected;
+        persistReverbConfig();
       }
     } catch (e) {
       console.error('Failed to load IR:', e);
@@ -1843,6 +2000,7 @@
       if (result) {
         couplerMidiBindings[actionCode] = (couplerMidiBindings[actionCode] || 0) + 1;
         couplerMidiBindings = couplerMidiBindings;
+        refreshMidiBindingsFull();
       }
     } catch (e) {
       console.error('Coupler MIDI learn failed:', e);
@@ -1901,6 +2059,7 @@
       if (result) {
         stopMidiBindings[actionCode] = (stopMidiBindings[actionCode] || 0) + 1;
         stopMidiBindings = stopMidiBindings;
+        refreshMidiBindingsFull();
       }
     } catch (e) {
       console.error('Stop MIDI learn failed:', e);
@@ -1915,6 +2074,156 @@
       stopMidiBindings = stopMidiBindings;
     } catch (e) {
       console.error('Failed to clear stop MIDI:', e);
+    }
+  }
+
+  // ===== Centrale MIDI-koppelingen-editor (Orgel-instellingen) =====
+  // Toont ALLE actie-koppelingen (setzer, functies, tremulanten, koppels,
+  // registers) met hun structurele velden, en laat ze handmatig toevoegen,
+  // aanpassen en per stuk verwijderen — naast het bestaande inleren.
+  let midiBindingsFull = [];
+  let midiBindingsError = '';
+  let newBinding = { code: '', type: 'cc', channel: '', number: 0, value: 64 };
+
+  async function refreshMidiBindingsFull() {
+    try {
+      midiBindingsFull = await invoke('get_preset_bindings_full');
+      recountBindingCounters();
+    } catch (e) { /* stil: geen bindings beschikbaar */ }
+  }
+
+  function applyBindingsFull(list) {
+    midiBindingsFull = list;
+    midiBindingsError = '';
+    recountBindingCounters();
+  }
+
+  // Houd de losse tellers ('MIDI n/4' op knoppen) in sync met de centrale lijst.
+  function recountBindingCounters() {
+    const stops = {}, couplers = {}, trems = {}, globs = {};
+    for (const b of midiBindingsFull) {
+      if (b.preset_num >= 150) stops[b.preset_num] = (stops[b.preset_num] || 0) + 1;
+      else if (b.preset_num >= 100) couplers[b.preset_num] = (couplers[b.preset_num] || 0) + 1;
+      else if (b.preset_num >= ACTION_TREM_LFO_BASE && b.preset_num < ACTION_TREM_LFO_BASE + 16) trems[b.preset_num] = (trems[b.preset_num] || 0) + 1;
+      else if (b.preset_num >= 40) globs[b.preset_num] = (globs[b.preset_num] || 0) + 1;
+    }
+    stopMidiBindings = stops;
+    couplerMidiBindings = couplers;
+    tremLfoMidiBindings = trems;
+    globalMidiBindings = globs;
+  }
+
+  // Rijen met per-actie-index: nodig om precies één binding te kunnen
+  // bewerken/verwijderen wanneer een actie er meerdere heeft (max 4).
+  $: midiBindingRows = (() => {
+    const seen = {};
+    return [...midiBindingsFull]
+      .sort((a, b) => a.preset_num - b.preset_num)
+      .map(b => {
+        const idx = (seen[b.preset_num] = (seen[b.preset_num] ?? -1) + 1);
+        return { ...b, idx };
+      });
+  })();
+
+  function midiActionLabel(code) {
+    if (code >= 150) {
+      for (const d of displayOrgan?.divisions || []) {
+        const s = (d.stops || []).find(s => s.midi_action_code === code);
+        if (s) return `Register: ${s.name}${s.pitch ? ' ' + s.pitch : ''} (${d.display_name || d.name})`;
+      }
+      return `Register (code ${code})`;
+    }
+    if (code >= 100) {
+      const c = (displayOrgan?.couplers || []).find(c => c.midi_action_code === code);
+      return c ? `Koppel: ${c.name.replace(/\n/g, ' ')}` : `Koppel (code ${code})`;
+    }
+    if (code >= ACTION_TREM_LFO_BASE && code < ACTION_TREM_LFO_BASE + 16) {
+      const d = displayOrgan?.divisions?.[code - ACTION_TREM_LFO_BASE];
+      return `Tremulant: ${d ? (d.display_name || d.name) : `divisie ${code - ACTION_TREM_LFO_BASE + 1}`}`;
+    }
+    const vast = {
+      10: 'Setzer: SET', 11: 'Setzer: GC', 12: 'Setzer: vorige (−1)', 13: 'Setzer: volgende (+1)',
+      14: 'Setzer: −10', 15: 'Setzer: +10',
+      40: 'EQ aan/uit', 41: 'Crescendo aan/uit', 42: 'Computer afsluiten',
+      43: 'Speakers ↔ hoofdtelefoon',
+    };
+    if (vast[code] != null) return vast[code];
+    if (code <= 9) return `Setzer: knop ${code}`;
+    if (code >= 16 && code <= 23) return `Setzer: geheugen M${code - 15}`;
+    return `Actie ${code}`;
+  }
+
+  // Alle mogelijke doelen voor een nieuwe koppeling, gegroepeerd voor de select.
+  $: bindingTargets = (() => {
+    const functies = [];
+    for (let i = 0; i <= 23; i++) functies.push({ code: i, label: midiActionLabel(i) });
+    for (const c of [40, 41, 42, 43]) functies.push({ code: c, label: midiActionLabel(c) });
+    const trems = (displayOrgan?.divisions || []).map((d, i) => ({
+      code: ACTION_TREM_LFO_BASE + i,
+      label: `${d.display_name || d.name}`,
+    }));
+    const koppels = (displayOrgan?.couplers || []).map(c => ({
+      code: c.midi_action_code,
+      label: c.name.replace(/\n/g, ' '),
+    }));
+    const registers = [];
+    for (const d of displayOrgan?.divisions || []) {
+      for (const s of d.stops || []) {
+        if (s.midi_action_code) {
+          registers.push({ code: s.midi_action_code, label: `${s.name}${s.pitch ? ' ' + s.pitch : ''} (${d.display_name || d.name})` });
+        }
+      }
+    }
+    return { functies, trems, koppels, registers };
+  })();
+
+  function bindingNumber(b) {
+    return b.trigger_type === 'note' ? b.note : b.trigger_type === 'cc' ? b.controller : b.program;
+  }
+
+  function buildSavedBinding(presetNum, type, channelDisplay, number, value) {
+    const ch = (channelDisplay === '' || channelDisplay == null) ? null : Math.max(1, Math.min(16, channelDisplay | 0)) - 1;
+    const num = Math.max(0, Math.min(127, number | 0));
+    const b = { preset_num: presetNum, trigger_type: type, note: null, channel: null, controller: null, value: null, program: null };
+    if (type === 'note') b.note = num;
+    else if (type === 'cc') { b.channel = ch; b.controller = num; b.value = Math.max(0, Math.min(127, value | 0)); }
+    else { b.channel = ch; b.program = num; }
+    return b;
+  }
+
+  async function updateBindingRow(row, patch = {}) {
+    const type = patch.type ?? row.trigger_type;
+    const chDisp = patch.channel !== undefined ? patch.channel : (row.channel != null ? row.channel + 1 : '');
+    const num = patch.number !== undefined ? patch.number : (bindingNumber(row) ?? 0);
+    const val = patch.value !== undefined ? patch.value : (row.value ?? 64);
+    const binding = buildSavedBinding(row.preset_num, type, chDisp, num, val);
+    try {
+      applyBindingsFull(await invoke('update_preset_binding', { presetNum: row.preset_num, index: row.idx, binding }));
+    } catch (e) {
+      midiBindingsError = String(e);
+      await refreshMidiBindingsFull();
+    }
+  }
+
+  async function removeBindingRow(row) {
+    try {
+      applyBindingsFull(await invoke('remove_preset_binding', { presetNum: row.preset_num, index: row.idx }));
+    } catch (e) {
+      midiBindingsError = String(e);
+      await refreshMidiBindingsFull();
+    }
+  }
+
+  async function addNewBindingUI() {
+    if (newBinding.code === '' || newBinding.code == null) {
+      midiBindingsError = 'Kies eerst een doel voor de nieuwe koppeling.';
+      return;
+    }
+    const binding = buildSavedBinding(parseInt(newBinding.code), newBinding.type, newBinding.channel, newBinding.number, newBinding.value);
+    try {
+      applyBindingsFull(await invoke('add_preset_binding_manual', { binding }));
+    } catch (e) {
+      midiBindingsError = String(e);
     }
   }
 
@@ -2589,43 +2898,52 @@
                     {#each reverbPresets as p, i}
                       <option value={i}>{p.name}</option>
                     {/each}
+                    <option value={-1}>Eigen (per orgel)</option>
                   </select>
                 </div>
-                <!-- Sliders -->
-                <div class="swell-config-sliders">
-                  <div class="swell-config-row">
-                    <span class="swell-config-label">RT60</span>
-                    <input type="range" min="3" max="150" step="1"
-                      value={reverbRt60 * 10}
-                      on:input={(e) => { reverbRt60 = parseInt(e.target.value) / 10; updateAlgorithmicReverb(); }}
-                    />
-                    <span class="swell-config-value">{reverbRt60.toFixed(1)}s</span>
+                {#if reverbPreset === -1}
+                  <!-- Eigen preset: vrij instelbaar met schuiven; de waarden worden
+                       per orgel vastgelegd. Vaste presets tonen geen schuiven. -->
+                  <div class="swell-config-sliders">
+                    <div class="swell-config-row">
+                      <span class="swell-config-label">RT60</span>
+                      <input type="range" min="3" max="150" step="1"
+                        value={reverbRt60 * 10}
+                        on:input={(e) => { reverbRt60 = parseInt(e.target.value) / 10; updateAlgorithmicReverb(); }}
+                      />
+                      <span class="swell-config-value">{reverbRt60.toFixed(1)}s</span>
+                    </div>
+                    <div class="swell-config-row">
+                      <span class="swell-config-label">Pre-delay</span>
+                      <input type="range" min="0" max="150" step="5"
+                        bind:value={reverbPreDelay}
+                        on:input={() => updateAlgorithmicReverb()}
+                      />
+                      <span class="swell-config-value">{reverbPreDelay}ms</span>
+                    </div>
+                    <div class="swell-config-row">
+                      <span class="swell-config-label">Demping</span>
+                      <input type="range" min="0" max="95" step="5"
+                        bind:value={reverbDamping}
+                        on:input={() => updateAlgorithmicReverb()}
+                      />
+                      <span class="swell-config-value">{reverbDamping}%</span>
+                    </div>
+                    <div class="swell-config-row">
+                      <span class="swell-config-label">Ruimte</span>
+                      <input type="range" min="30" max="300" step="10"
+                        bind:value={reverbRoomSize}
+                        on:input={() => updateAlgorithmicReverb()}
+                      />
+                      <span class="swell-config-value">{reverbRoomSize}%</span>
+                    </div>
                   </div>
-                  <div class="swell-config-row">
-                    <span class="swell-config-label">Pre-delay</span>
-                    <input type="range" min="0" max="150" step="5"
-                      bind:value={reverbPreDelay}
-                      on:input={() => updateAlgorithmicReverb()}
-                    />
-                    <span class="swell-config-value">{reverbPreDelay}ms</span>
-                  </div>
-                  <div class="swell-config-row">
-                    <span class="swell-config-label">Demping</span>
-                    <input type="range" min="0" max="95" step="5"
-                      bind:value={reverbDamping}
-                      on:input={() => updateAlgorithmicReverb()}
-                    />
-                    <span class="swell-config-value">{reverbDamping}%</span>
-                  </div>
-                  <div class="swell-config-row">
-                    <span class="swell-config-label">Ruimte</span>
-                    <input type="range" min="30" max="300" step="10"
-                      bind:value={reverbRoomSize}
-                      on:input={() => updateAlgorithmicReverb()}
-                    />
-                    <span class="swell-config-value">{reverbRoomSize}%</span>
-                  </div>
-                </div>
+                {:else}
+                  <p style="margin: 0.2rem 0 0; font-size: 0.68rem; color: var(--text-muted); line-height: 1.35;">
+                    Vaste ruimteklank. Kies "Eigen (per orgel)" om RT60, pre-delay,
+                    demping en ruimte zelf in te stellen — die instelling wordt bij dit orgel bewaard.
+                  </p>
+                {/if}
               {/if}
             </div>
 
@@ -2653,21 +2971,76 @@
                 </button>
               </div>
               {#if eqEnabled}
-                <div class="swell-config-sliders" style="margin-top: 0.4rem;">
-                  <div class="swell-config-row">
-                    <span class="swell-config-label">Laag {eqLowFreq}Hz</span>
-                    <input type="range" min="-12" max="12" step="1" bind:value={eqLowGain} on:input={updateEq} />
-                    <span class="swell-config-value">{eqLowGain > 0 ? '+' : ''}{eqLowGain}dB</span>
-                  </div>
-                  <div class="swell-config-row">
-                    <span class="swell-config-label">Midden {eqMidFreq}Hz</span>
-                    <input type="range" min="-12" max="12" step="1" bind:value={eqMidGain} on:input={updateEq} />
-                    <span class="swell-config-value">{eqMidGain > 0 ? '+' : ''}{eqMidGain}dB</span>
-                  </div>
-                  <div class="swell-config-row">
-                    <span class="swell-config-label">Hoog {eqHighFreq}Hz</span>
-                    <input type="range" min="-12" max="12" step="1" bind:value={eqHighGain} on:input={updateEq} />
-                    <span class="swell-config-value">{eqHighGain > 0 ? '+' : ''}{eqHighGain}dB</span>
+                <div style="margin-top:0.5rem; display:flex; flex-direction:column; gap:0.5rem;">
+                  {#each eqBands as band, bi (bi)}
+                    <div style="border:1px solid var(--accent-soft-2); border-radius:var(--radius-sm); padding:0.4rem 0.5rem; opacity:{band.enabled ? 1 : 0.55};">
+                      <div style="display:flex; align-items:center; gap:0.45rem; flex-wrap:wrap; margin-bottom:0.35rem;">
+                        <label class="swell-toggle" style="margin:0;" title="Band aan/uit">
+                          <input type="checkbox" bind:checked={band.enabled} on:change={onEqBandChange} />
+                          <span class="swell-toggle-label">Band {bi + 1}</span>
+                        </label>
+                        <select
+                          style="font-size:0.75rem; padding:0.15rem 0.3rem; background:var(--bg-elevated); border:1px solid var(--accent-soft-2); border-radius:var(--radius-sm); color:var(--text);"
+                          bind:value={band.band_type} on:change={onEqBandChange} title="Filtertype"
+                        >
+                          {#each eqBandTypes as t}
+                            <option value={t.value}>{t.label}</option>
+                          {/each}
+                        </select>
+                        <select
+                          style="font-size:0.75rem; padding:0.15rem 0.3rem; background:var(--bg-elevated); border:1px solid var(--accent-soft-2); border-radius:var(--radius-sm); color:var(--text);"
+                          value={band.channel === null || band.channel === undefined ? 'all' : String(band.channel)}
+                          on:change={(e) => { band.channel = e.target.value === 'all' ? null : parseInt(e.target.value, 10); onEqBandChange(); }}
+                          title="Doelkanaal (Alle = hele mix)"
+                        >
+                          <option value="all">Alle kanalen</option>
+                          {#each Array(Math.max(2, audioChannelCount)) as _, ch}
+                            <option value={String(ch)}>Kanaal {ch + 1}</option>
+                          {/each}
+                        </select>
+                        <button
+                          class="btn btn-ghost btn-sm"
+                          style="margin-left:auto; font-size:0.75rem; padding:0.1rem 0.45rem;"
+                          on:click={() => removeEqBand(bi)}
+                          title="Band verwijderen"
+                        >✕</button>
+                      </div>
+                      <div class="swell-config-sliders">
+                        <div class="swell-config-row">
+                          <span class="swell-config-label">Frequentie</span>
+                          <input type="range" min="0" max="300" step="1"
+                            value={freqToSlider(band.freq)}
+                            on:input={(e) => { band.freq = sliderToFreq(parseInt(e.target.value, 10)); onEqBandChange(); }}
+                          />
+                          <input type="number" min="20" max="20000" step="1"
+                            style="width:4.6rem; font-size:0.75rem; padding:0.1rem 0.25rem; background:var(--bg-elevated); border:1px solid var(--accent-soft-2); border-radius:var(--radius-sm); color:var(--text);"
+                            value={band.freq}
+                            on:change={(e) => { band.freq = Math.max(20, Math.min(20000, parseFloat(e.target.value) || 1000)); onEqBandChange(); }}
+                          />
+                          <span class="swell-config-value" style="width:1.4rem;">Hz</span>
+                        </div>
+                        {#if band.band_type === 'peak' || band.band_type === 'lowshelf' || band.band_type === 'highshelf'}
+                          <div class="swell-config-row">
+                            <span class="swell-config-label">Gain</span>
+                            <input type="range" min="-24" max="24" step="0.5" bind:value={band.gain_db} on:input={onEqBandChange} />
+                            <span class="swell-config-value">{band.gain_db > 0 ? '+' : ''}{Number(band.gain_db).toFixed(1)} dB</span>
+                          </div>
+                        {/if}
+                        {#if band.band_type !== 'lowshelf' && band.band_type !== 'highshelf'}
+                          <div class="swell-config-row">
+                            <span class="swell-config-label">Bandbreedte</span>
+                            <input type="range" min="0.1" max="4" step="0.05" bind:value={band.bandwidth} on:input={onEqBandChange} />
+                            <span class="swell-config-value">{Number(band.bandwidth).toFixed(2)} oct</span>
+                          </div>
+                        {/if}
+                      </div>
+                    </div>
+                  {/each}
+                  <div style="display:flex; gap:0.4rem;">
+                    <button class="btn btn-secondary btn-sm" on:click={addEqBand}>+ Band toevoegen</button>
+                    <span style="font-size:0.7rem; color:var(--text-muted); align-self:center;">
+                      EQ werkt per uitgangskanaal, na de galm — kies "Alle kanalen" of een specifiek kanaal per band.
+                    </span>
                   </div>
                 </div>
               {/if}
@@ -2866,6 +3239,29 @@
                       Leer pedaal
                     {/if}
                   </button>
+                  <!-- Handmatig: kanaal + CC direct invullen (alternatief voor inleren) -->
+                  <div class="swell-config-row" style="margin-top:0.3rem;" title="Handmatig: MIDI-kanaal en CC-nummer van het crescendopedaal (alternatief voor inleren)">
+                    <span class="swell-config-label">Handmatig</span>
+                    <select
+                      value={crescendoBinding ? crescendoBinding.channel + 1 : ''}
+                      on:change={(e) => { if (e.target.value !== '') setCrescendoManualUI(parseInt(e.target.value), crescendoBinding?.cc ?? 7); }}
+                      title="MIDI-kanaal (1-16)"
+                    >
+                      <option value="" disabled>kan.</option>
+                      {#each Array(16).fill().map((_, i) => i + 1) as ch}
+                        <option value={ch}>{ch}</option>
+                      {/each}
+                    </select>
+                    <input type="number" min="0" max="127" class="pedal-range-input"
+                      value={crescendoBinding?.cc ?? ''}
+                      placeholder="CC"
+                      on:change={(e) => setCrescendoManualUI((crescendoBinding?.channel ?? 0) + 1, parseInt(e.target.value) || 0)}
+                      title="CC-nummer (0-127)"
+                    />
+                    {#if crescendoBinding}
+                      <button class="btn btn-ghost btn-sm swell-clear-btn" on:click={clearCrescendoBindingUI} title="Crescendo-pedaalkoppeling wissen">&#x2715;</button>
+                    {/if}
+                  </div>
                   {#if crescendoBinding}
                     <label class="swell-toggle" style="margin-top: 0.4rem; width: 100%;" title="Spiegelbeeld: keert de pedaalrichting om (handig als de pedaal de andere kant op werkt)">
                       <input
@@ -3008,10 +3404,16 @@
                   <div class="midi-mapping-controls">
                     <div class="midi-channel-select">
                       <label for="channel-{division.name}">Kanaal:</label>
+                      <!-- Weergave is 1-16 (zoals op MIDI-apparatuur); intern/op de
+                           kabel is het kanaal 0-15. De oude versie stuurde de
+                           1-16-waarde ongecorrigeerd door, waardoor handmatig
+                           "kanaal 1" op wire-kanaal 1 (= apparaat-kanaal 2)
+                           filterde en het klavier zweeg; geleerde kanalen (0-15)
+                           pasten bovendien bij geen enkele optie → lege dropdown. -->
                       <select
                         id="channel-{division.name}"
-                        value={(m?.channel) ?? ''}
-                        on:change={(e) => setMidiChannel(division.name, e.target.value === '' ? null : parseInt(e.target.value))}
+                        value={(m?.channel != null) ? m.channel + 1 : ''}
+                        on:change={(e) => setMidiChannel(division.name, e.target.value === '' ? null : parseInt(e.target.value) - 1)}
                       >
                         <option value="">Alle</option>
                         {#each Array(16).fill().map((_, i) => i + 1) as ch}
@@ -3052,6 +3454,25 @@
                       />
                     </div>
 
+                    <!-- Handmatig toetsenbereik (alternatief voor 'Leer'): laagste
+                         en hoogste MIDI-noot van dit klavier, direct in te typen. -->
+                    <div class="midi-transpose" title="Handmatig toetsenbereik: laagste en hoogste MIDI-noot (alternatief voor 'Leer'). Leeg = geen begrenzing.">
+                      <label for="range-lo-{division.name}">Bereik:</label>
+                      <input
+                        id="range-lo-{division.name}"
+                        type="number" min="0" max="127" placeholder="laag"
+                        value={m?.first_midi_note ?? ''}
+                        on:change={(e) => setKeyRangeUI(division.name, e.target.value === '' ? null : parseInt(e.target.value), m?.last_midi_note ?? null)}
+                        title="Laagste MIDI-noot {m?.first_midi_note != null ? `(${midiToNoteName(m.first_midi_note)})` : ''}"
+                      />
+                      <input
+                        type="number" min="0" max="127" placeholder="hoog"
+                        value={m?.last_midi_note ?? ''}
+                        on:change={(e) => setKeyRangeUI(division.name, m?.first_midi_note ?? null, e.target.value === '' ? null : parseInt(e.target.value))}
+                        title="Hoogste MIDI-noot {m?.last_midi_note != null ? `(${midiToNoteName(m.last_midi_note)})` : ''}"
+                      />
+                    </div>
+
                     <label class="swell-toggle" title="Zwelkast aan/uit">
                       <input
                         type="checkbox"
@@ -3076,6 +3497,26 @@
                           Leer pedaal
                         {/if}
                       </button>
+                      <!-- Handmatig: kanaal + CC direct invullen (alternatief voor inleren) -->
+                      <div class="swell-config-row" title="Handmatig: MIDI-kanaal en CC-nummer van het zwelpedaal (alternatief voor inleren)">
+                        <span class="swell-config-label">Handmatig</span>
+                        <select
+                          value={swellBindings[division.name] ? swellBindings[division.name].channel + 1 : ''}
+                          on:change={(e) => { if (e.target.value !== '') setSwellManualUI(division.name, divIdx, parseInt(e.target.value), swellBindings[division.name]?.cc_num ?? 7); }}
+                          title="MIDI-kanaal (1-16)"
+                        >
+                          <option value="" disabled>kan.</option>
+                          {#each Array(16).fill().map((_, i) => i + 1) as ch}
+                            <option value={ch}>{ch}</option>
+                          {/each}
+                        </select>
+                        <input type="number" min="0" max="127" class="pedal-range-input"
+                          value={swellBindings[division.name]?.cc_num ?? ''}
+                          placeholder="CC"
+                          on:change={(e) => setSwellManualUI(division.name, divIdx, (swellBindings[division.name]?.channel ?? 0) + 1, parseInt(e.target.value) || 0)}
+                          title="CC-nummer (0-127)"
+                        />
+                      </div>
                       {#if swellBindings[division.name]}
                         <button
                           class="btn btn-ghost btn-sm swell-clear-btn"
@@ -3278,6 +3719,141 @@
                 {/each}
               {/if}
             </div>
+
+            <!-- ============ MIDI-koppelingen: overzicht + handmatig bewerken ============ -->
+            <div class="settings-block">
+              <h3 class="settings-block-title">MIDI-koppelingen (handmatig bewerken)</h3>
+              <p style="margin: 0 0 0.5rem; font-size: 0.7rem; color: var(--text-muted); line-height: 1.4;">
+                Alle MIDI-koppelingen van dit orgel in één lijst. Pas type, kanaal of nummer direct aan,
+                verwijder een koppeling met ✕, of voeg er onderaan handmatig één toe — inleren blijft
+                daarnaast gewoon werken. Kanaal 'Alle' = reageert op elk kanaal. Bij CC geldt:
+                activeert zodra de waarde ≥ de drempel.
+              </p>
+              {#if midiBindingsError}
+                <p style="color: #e07a6a; font-size: 0.72rem; margin: 0 0 0.4rem;">{midiBindingsError}</p>
+              {/if}
+              <div class="midi-bindings-wrap">
+                <table class="midi-bindings-table">
+                  <thead>
+                    <tr>
+                      <th>Doel</th>
+                      <th>Type</th>
+                      <th>Kanaal</th>
+                      <th>Nummer</th>
+                      <th>Drempel</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {#each midiBindingRows as row (`${row.preset_num}-${row.idx}`)}
+                      <tr>
+                        <td class="midi-bindings-doel" title={midiActionLabel(row.preset_num)}>
+                          {midiActionLabel(row.preset_num)}{row.idx > 0 ? ` (${row.idx + 1})` : ''}
+                        </td>
+                        <td>
+                          <select value={row.trigger_type} on:change={(e) => updateBindingRow(row, { type: e.target.value })}>
+                            <option value="note">Noot</option>
+                            <option value="cc">CC</option>
+                            <option value="program">Program</option>
+                          </select>
+                        </td>
+                        <td>
+                          {#if row.trigger_type === 'note'}
+                            <span style="color: var(--text-muted);">—</span>
+                          {:else}
+                            <select
+                              value={row.channel != null ? row.channel + 1 : ''}
+                              on:change={(e) => updateBindingRow(row, { channel: e.target.value === '' ? '' : parseInt(e.target.value) })}
+                            >
+                              <option value="">Alle</option>
+                              {#each Array(16).fill().map((_, i) => i + 1) as ch}
+                                <option value={ch}>{ch}</option>
+                              {/each}
+                            </select>
+                          {/if}
+                        </td>
+                        <td style="white-space: nowrap;">
+                          <input type="number" min="0" max="127" class="pedal-range-input"
+                            value={bindingNumber(row) ?? 0}
+                            on:change={(e) => updateBindingRow(row, { number: parseInt(e.target.value) || 0 })}
+                            title={row.trigger_type === 'note' ? 'Nootnummer' : row.trigger_type === 'cc' ? 'CC-nummer' : 'Programmanummer'}
+                          />
+                          {#if row.trigger_type === 'note'}
+                            <span style="font-size: 0.65rem; color: var(--text-muted);">{midiToNoteName(bindingNumber(row) ?? 0)}</span>
+                          {/if}
+                        </td>
+                        <td>
+                          {#if row.trigger_type === 'cc'}
+                            <input type="number" min="0" max="127" class="pedal-range-input"
+                              value={row.value ?? 64}
+                              on:change={(e) => updateBindingRow(row, { value: parseInt(e.target.value) || 0 })}
+                              title="Activeert zodra de CC-waarde ≥ deze drempel"
+                            />
+                          {:else}
+                            <span style="color: var(--text-muted);">—</span>
+                          {/if}
+                        </td>
+                        <td>
+                          <button class="btn btn-ghost btn-sm swell-clear-btn" on:click={() => removeBindingRow(row)} title="Deze koppeling verwijderen">&#x2715;</button>
+                        </td>
+                      </tr>
+                    {:else}
+                      <tr>
+                        <td colspan="6" style="color: var(--text-muted); padding: 0.6rem;">
+                          Nog geen MIDI-koppelingen — leer ze in, of voeg er hieronder handmatig één toe.
+                        </td>
+                      </tr>
+                    {/each}
+                  </tbody>
+                </table>
+              </div>
+              <!-- Nieuwe koppeling handmatig toevoegen -->
+              <div style="display: flex; align-items: center; gap: 0.4rem; margin-top: 0.55rem; flex-wrap: wrap;">
+                <span style="font-size: 0.72rem; color: var(--text-secondary);">Nieuw:</span>
+                <select bind:value={newBinding.code} style="max-width: 15rem;">
+                  <option value="">— kies doel —</option>
+                  <optgroup label="Functies">
+                    {#each bindingTargets.functies as t}<option value={t.code}>{t.label}</option>{/each}
+                  </optgroup>
+                  {#if bindingTargets.trems.length}
+                    <optgroup label="Tremulanten">
+                      {#each bindingTargets.trems as t}<option value={t.code}>{t.label}</option>{/each}
+                    </optgroup>
+                  {/if}
+                  {#if bindingTargets.koppels.length}
+                    <optgroup label="Koppels">
+                      {#each bindingTargets.koppels as t}<option value={t.code}>{t.label}</option>{/each}
+                    </optgroup>
+                  {/if}
+                  {#if bindingTargets.registers.length}
+                    <optgroup label="Registers">
+                      {#each bindingTargets.registers as t}<option value={t.code}>{t.label}</option>{/each}
+                    </optgroup>
+                  {/if}
+                </select>
+                <select bind:value={newBinding.type} title="Triggertype">
+                  <option value="note">Noot</option>
+                  <option value="cc">CC</option>
+                  <option value="program">Program</option>
+                </select>
+                {#if newBinding.type !== 'note'}
+                  <select bind:value={newBinding.channel} title="MIDI-kanaal">
+                    <option value="">Alle kanalen</option>
+                    {#each Array(16).fill().map((_, i) => i + 1) as ch}
+                      <option value={ch}>Kanaal {ch}</option>
+                    {/each}
+                  </select>
+                {/if}
+                <input type="number" min="0" max="127" class="pedal-range-input" bind:value={newBinding.number}
+                  title="Noot-/CC-/programmanummer (0-127)" />
+                {#if newBinding.type === 'cc'}
+                  <input type="number" min="0" max="127" class="pedal-range-input" bind:value={newBinding.value}
+                    title="Drempel: activeert zodra de CC-waarde ≥ dit" />
+                {/if}
+                <button class="btn btn-secondary btn-sm" on:click={addNewBindingUI}>Toevoegen</button>
+                <button class="btn btn-ghost btn-sm" on:click={refreshMidiBindingsFull} title="Lijst opnieuw laden (bv. na inleren via de knoppen)">↻</button>
+              </div>
+            </div>
           </div>
 
         </div>
@@ -3418,13 +3994,84 @@
                 Laagste latency: kies <strong>ASIO</strong> als host en een kleine buffer (32–64). WASAPI (gedeeld) negeert kleine buffers en blijft op de driver-default.
               </p>
               <div style="margin-top: 0.7rem;">
-                <button class="btn btn-primary btn-sm" on:click={() => dispatch('applyAudioOutput')}>
+                <button class="btn btn-primary btn-sm" on:click={() => { dispatch('applyAudioOutput'); setTimeout(refreshAudioStatus, 1500); }}>
                   {$t('settings.audio_apply')}
                 </button>
               </div>
+
+              <!-- Actuele status + geschatte latentie -->
+              {#if audioStatus && audioStatus.audio_running}
+                <div style="margin-top: 0.6rem; padding: 0.45rem 0.6rem; background: var(--bg-elevated); border: 1px solid var(--accent-soft-2); border-radius: var(--radius-sm); font-size: 0.74rem; line-height: 1.5;">
+                  <strong>Actueel:</strong>
+                  {audioStatus.audio_host} · {audioStatus.audio_device || 'standaard'} ·
+                  {audioStatus.sample_rate} Hz · {audioStatus.channels || 2} kanalen ·
+                  buffer {audioStatus.buffer_frames > 0 ? `${audioStatus.buffer_frames} frames` : 'driver-default'}
+                  {#if audioLatencyMs !== null}
+                    · <strong>geschatte latentie ≈ {audioLatencyMs.toFixed(1)} ms</strong>
+                  {:else}
+                    · latentie: driver-default (WASAPI ≈ 20–30 ms; kies ASIO + kleine buffer voor minder)
+                  {/if}
+                </div>
+              {/if}
               <p style="margin: 0.5rem 0 0; font-size: 0.7rem; color: var(--text-muted); line-height: 1.4;">
                 {$t('settings.audio_latency_hint')}
               </p>
+
+              <!-- Uitvoerprofielen: snelle wissel speakers ↔ hoofdtelefoon -->
+              <div style="margin-top: 0.85rem; padding-top: 0.75rem; border-top: var(--border-subtle);">
+                <h4 style="margin: 0 0 0.35rem; font-size: 0.85rem;">Uitvoerprofielen — snelle wissel</h4>
+                <p style="margin: 0 0 0.5rem; font-size: 0.7rem; color: var(--text-muted); line-height: 1.4;">
+                  Sla twee uitvoer-instellingen op (bijv. luidsprekers via ASIO en een hoofdtelefoon
+                  via WASAPI). Daarna wissel je met één knop in de balk bovenin — of via een
+                  ingeleerde MIDI-knop. Kies hierboven eerst host, apparaat en buffer, en sla dan op.
+                </p>
+                {#each [['speakers', 'Speakers'], ['headphones', 'Hoofdtelefoon']] as [kind, label]}
+                  {@const prof = audioProfiles?.[kind]}
+                  <div style="display:flex; align-items:center; gap:0.45rem; margin-bottom:0.4rem; flex-wrap:wrap;">
+                    <strong style="font-size:0.78rem; width:7.5rem;">
+                      {label}{audioProfiles?.active === kind ? ' ●' : ''}
+                    </strong>
+                    <span style="flex:1; font-size:0.72rem; color:var(--text-muted); min-width:10rem;">
+                      {#if prof}
+                        {prof.host || '?'} · {prof.device || 'standaard'}{prof.bufferFrames ? ` · ${prof.bufferFrames} frames` : ''}
+                      {:else}
+                        — niet ingesteld —
+                      {/if}
+                    </span>
+                    <button class="btn btn-secondary btn-sm" style="font-size:0.7rem; padding:0.15rem 0.5rem;"
+                      on:click={() => dispatch('saveAudioProfile', kind)}
+                      title="Huidige selectie (host/apparaat/buffer) opslaan als {label}-profiel"
+                    >Huidige selectie opslaan</button>
+                    {#if prof}
+                      <button class="btn btn-secondary btn-sm" style="font-size:0.7rem; padding:0.15rem 0.5rem;"
+                        on:click={() => dispatch('switchAudioProfile', kind)}
+                        title="Nu naar dit profiel wisselen (ook om een haperende uitgang opnieuw op te bouwen)"
+                      >Activeer</button>
+                      <button class="btn btn-ghost btn-sm" style="font-size:0.7rem; padding:0.15rem 0.4rem;"
+                        on:click={() => dispatch('clearAudioProfile', kind)}
+                        title="Profiel wissen"
+                      >✕</button>
+                    {/if}
+                  </div>
+                {/each}
+                <div style="display:flex; align-items:center; gap:0.5rem;">
+                  <span style="font-size:0.72rem; color:var(--text-muted);">MIDI-knop voor de wissel:</span>
+                  <button
+                    class="btn btn-ghost btn-sm"
+                    class:learning={globalLearningAction === ACTION_AUDIO_PROFILE}
+                    on:click={() => learnGlobalAction(ACTION_AUDIO_PROFILE)}
+                    disabled={globalLearningAction !== null && globalLearningAction !== ACTION_AUDIO_PROFILE}
+                    title="MIDI inleren voor speakers/hoofdtelefoon-wissel ({globalMidiBindings[ACTION_AUDIO_PROFILE] || 0}/4)"
+                    style="font-size:0.7rem; padding:0.2rem 0.5rem; border:1px solid {globalMidiBindings[ACTION_AUDIO_PROFILE] > 0 ? 'var(--midi-indicator)' : 'var(--accent-soft-2)'};"
+                  >
+                    {#if globalLearningAction === ACTION_AUDIO_PROFILE}
+                      <span class="learning-indicator"></span>Wacht...
+                    {:else}
+                      MIDI {globalMidiBindings[ACTION_AUDIO_PROFILE] || 0}/4
+                    {/if}
+                  </button>
+                </div>
+              </div>
 
               <!-- Automatisch starten bij Windows -->
               <div style="margin-top: 0.85rem; padding-top: 0.75rem; border-top: var(--border-subtle);">
@@ -3435,6 +4082,14 @@
                     on:change={(e) => dispatch('setAutostart', e.target.checked)}
                   />
                   <span>Automatisch starten bij Windows</span>
+                </label>
+                <label class="swell-toggle" style="margin-top:0.4rem;" title="Aan: bij het starten van de app wordt het laatst geopende orgel automatisch geladen. Uit: de app opent met de orgelkeuze.">
+                  <input
+                    type="checkbox"
+                    checked={autoLoadLastOrgan}
+                    on:change={(e) => dispatch('setAutoLoadLastOrgan', e.target.checked)}
+                  />
+                  <span>Laatst geopende orgel automatisch laden bij starten</span>
                 </label>
                 <label class="swell-toggle" style="margin-top:0.4rem;" title="Aan: bij het openen van een orgel komen de laatst getrokken registers terug. Uit: schone start (geen registers aan).">
                   <input

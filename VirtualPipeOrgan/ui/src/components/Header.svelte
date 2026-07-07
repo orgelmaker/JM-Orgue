@@ -6,8 +6,19 @@
   export let organLoaded = false;
   export let status = {};
   export let activeView = 'orgel';
+  // Audio-uitvoerprofielen (speakers/hoofdtelefoon) voor de snelle wissel.
+  export let audioProfiles = { speakers: null, headphones: null, active: null };
+  export let audioProfileSwitching = false;
 
   const dispatch = createEventDispatcher();
+
+  $: onHeadphones = audioProfiles?.active === 'headphones';
+  $: hasAnyProfile = !!(audioProfiles?.speakers || audioProfiles?.headphones);
+  // active === null: de huidige uitgang hoort bij geen van beide profielen
+  // (bv. handmatig gekozen in Instellingen) — toon dan een neutraal label.
+  $: profileLabel = audioProfiles?.active === 'headphones' ? 'Hoofdtelefoon'
+    : audioProfiles?.active === 'speakers' ? 'Speakers'
+    : 'Uitgang';
 </script>
 
 <header class="header">
@@ -68,6 +79,32 @@
   {/if}
 
   <div class="header-controls">
+    {#if hasAnyProfile}
+      <!-- Snelle wissel speakers ↔ hoofdtelefoon (audio-uitvoerprofielen) -->
+      <button
+        class="btn btn-secondary"
+        disabled={audioProfileSwitching}
+        on:click={() => dispatch('toggleAudioProfile')}
+        title={onHeadphones ? 'Wissel naar speakers' : 'Wissel naar hoofdtelefoon'}
+      >
+        {#if audioProfileSwitching}
+          <span class="learning-indicator"></span>
+        {:else if onHeadphones}
+          <!-- hoofdtelefoon-icoon: actief profiel -->
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M3 18v-6a9 9 0 0 1 18 0v6"/>
+            <path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/>
+          </svg>
+        {:else}
+          <!-- speaker-icoon: actief profiel -->
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+            <path d="M15.54 8.46a5 5 0 0 1 0 7.07M19.07 4.93a10 10 0 0 1 0 14.14"/>
+          </svg>
+        {/if}
+        {profileLabel}
+      </button>
+    {/if}
     {#if status.audioRunning}
       <button class="btn btn-secondary" on:click={() => dispatch('stopAudio')}>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">

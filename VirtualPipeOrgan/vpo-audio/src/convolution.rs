@@ -145,21 +145,31 @@ impl ConvolutionReverb {
     /// Process a block of samples
     pub fn process(&mut self, input: &[f32], output: &mut [f32]) {
         for (i, &sample) in input.iter().enumerate() {
-            // Add to FFT input buffer
-            self.fft_input[self.output_pos] = sample;
-            
-            // Output from previous convolution
-            let wet = self.output_buffer[self.output_pos] * self.gain;
+            let wet = self.process_wet_sample(sample);
             output[i] = sample * (1.0 - self.mix) + wet * self.mix;
-            
-            self.output_pos += 1;
-            
-            // When we have a full partition, process
-            if self.output_pos >= self.partition_size {
-                self.process_partition();
-                self.output_pos = 0;
-            }
         }
+    }
+
+    /// Verwerk één sample en geef alleen het WET-signaal terug (gain toegepast,
+    /// mix niet — die past de aanroeper toe). Zo kan de engine de galm als
+    /// additief effect bij het droge signaal mengen zonder dry/wet-truc.
+    #[inline]
+    pub fn process_wet_sample(&mut self, sample: f32) -> f32 {
+        // Add to FFT input buffer
+        self.fft_input[self.output_pos] = sample;
+
+        // Output from previous convolution
+        let wet = self.output_buffer[self.output_pos] * self.gain;
+
+        self.output_pos += 1;
+
+        // When we have a full partition, process
+        if self.output_pos >= self.partition_size {
+            self.process_partition();
+            self.output_pos = 0;
+        }
+
+        wet
     }
     
     /// Process one partition

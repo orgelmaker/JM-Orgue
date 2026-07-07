@@ -323,6 +323,7 @@ fn build_definition(
             name,
             harmonic_number: if harmonic > 0 { harmonic } else { 8 },
             pitch_correction: 0.0,
+            pitch_tuning_cents: 0.0,
             gain_db: 0.0,
             number_of_pipes: pipe_list.len() as u32,
             first_accessible_pipe_logical_key: 1,
@@ -463,6 +464,9 @@ fn build_definition(
             comment: name,
             enclosure_ids: vec![eid],
             tremulant_ids: Vec::new(),
+            amplitude_level: 100.0,
+            gain_db: 0.0,
+            pitch_tuning_cents: 0.0,
         });
     }
     if !enclosure_defs.is_empty() {
@@ -491,6 +495,7 @@ fn build_definition(
         amplitude_level: 100.0,
         // Hauptwerk kent geen orgel-brede Gain; neutraal (0 dB).
         gain_db: 0.0,
+        pitch_tuning_cents: 0.0,
     };
 
     let stop_defs: Vec<StopDef> = stop_entries.into_iter().map(|(_, s)| s).collect();

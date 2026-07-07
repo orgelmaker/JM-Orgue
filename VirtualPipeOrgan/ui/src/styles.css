@@ -1976,6 +1976,46 @@ input[type="range"]::-webkit-slider-thumb:hover {
   border-radius: var(--radius-sm);
   background: var(--bg-elevated);
 }
+
+/* ===== Centrale MIDI-koppelingen-editor (Orgel-instellingen) ===== */
+.midi-bindings-wrap {
+  max-height: 340px;
+  overflow: auto;
+  border: 1px solid var(--accent-soft-2);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+}
+.midi-bindings-table {
+  border-collapse: collapse;
+  font-size: 0.72rem;
+  width: 100%;
+}
+.midi-bindings-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg-panel);
+  color: var(--text-secondary);
+  font-weight: 600;
+  padding: 0.3rem 0.45rem;
+  text-align: left;
+  border-bottom: 1px solid var(--accent-soft-2);
+  white-space: nowrap;
+}
+.midi-bindings-table td {
+  padding: 0.18rem 0.45rem;
+  border-bottom: 1px solid var(--accent-soft-2);
+  vertical-align: middle;
+}
+.midi-bindings-table tr:hover td { background: rgba(255, 255, 255, 0.02); }
+.midi-bindings-table select,
+.midi-bindings-table input { font-size: 0.72rem; }
+.midi-bindings-doel {
+  white-space: nowrap;
+  max-width: 16rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .cresc-table {
   border-collapse: collapse;
   font-size: 0.7rem;

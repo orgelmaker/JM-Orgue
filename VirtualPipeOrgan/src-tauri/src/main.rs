@@ -103,6 +103,8 @@ fn main() {
             info!("App data directory: {:?}", app_data_dir);
 
             let state = AppState::new(app_data_dir);
+            // AppHandle voor frontend-events (laad-voortgang tijdens organ-load).
+            *state.app_handle.write() = Some(app.handle().clone());
 
             // Start test-API thread als --test-api flag aanwezig is.
             if let Some(port) = test_api_port {
@@ -130,14 +132,24 @@ fn main() {
                         // wissel interleaved niet met een lopende orgel-load.
                         info!("Uitgestelde ASIO-wissel: opgeslagen voorkeur wordt gecontroleerd/toegepast");
                         match st.apply_deferred_asio_pref() {
-                            Ok(Some(id)) => {
-                                let res = if commands::is_organ_file_id(&id) {
-                                    commands::do_load_organ(&st, &id)
-                                } else {
-                                    commands::do_load_samples_from_directory(&st, &id)
-                                };
-                                if let Err(e) = res {
-                                    tracing::warn!("Orgel herladen na ASIO-wissel mislukte: {}", e);
+                            Ok(Some(o)) => {
+                                if !o.switched {
+                                    tracing::warn!("Uitgestelde ASIO-wissel niet gelukt: {}",
+                                        o.message.as_deref().unwrap_or("onbekende oorzaak"));
+                                }
+                                // Ook bij een herstelde/fallback-uitgang is er een
+                                // nieuwe audio-thread → orgel herladen.
+                                if o.player_rebuilt {
+                                    if let Some(id) = o.organ_id {
+                                        let res = if commands::is_organ_file_id(&id) {
+                                            commands::do_load_organ(&st, &id)
+                                        } else {
+                                            commands::do_load_samples_from_directory(&st, &id)
+                                        };
+                                        if let Err(e) = res {
+                                            tracing::warn!("Orgel herladen na ASIO-wissel mislukte: {}", e);
+                                        }
+                                    }
                                 }
                             }
                             Ok(None) => {}
@@ -146,6 +158,32 @@ fn main() {
                         }
                     });
                 }
+            }
+
+            // Audio-noodherstel-thread: wanneer de watchdog in de audio-thread
+            // de stream niet meer herbouwd krijgt (vlag restart_needed), bouwen
+            // we hier de hele player opnieuw en herladen we het orgel — zelfde
+            // patroon als de uitgestelde ASIO-wissel hierboven. Throttle van
+            // 15 s na een herstel voorkomt flapperen.
+            {
+                let st = state.clone();
+                std::thread::spawn(move || loop {
+                    std::thread::sleep(std::time::Duration::from_secs(3));
+                    if let Some(organ) = st.recover_audio_if_flagged() {
+                        if let Some(id) = organ {
+                            let res = if commands::is_organ_file_id(&id) {
+                                commands::do_load_organ(&st, &id)
+                            } else {
+                                commands::do_load_samples_from_directory(&st, &id)
+                            };
+                            match res {
+                                Ok(_) => info!("Audio-noodherstel geslaagd; orgel herladen"),
+                                Err(e) => tracing::warn!("Orgel herladen na audio-noodherstel mislukte: {}", e),
+                            }
+                        }
+                        std::thread::sleep(std::time::Duration::from_secs(15));
+                    }
+                });
             }
 
             app.manage(state);
@@ -183,6 +221,13 @@ fn main() {
             commands::learn_preset_binding,
             commands::clear_preset_binding,
             commands::poll_preset_trigger,
+            commands::get_preset_bindings_full,
+            commands::add_preset_binding_manual,
+            commands::remove_preset_binding,
+            commands::update_preset_binding,
+            commands::set_swell_binding_manual,
+            commands::set_crescendo_binding_manual,
+            commands::set_midi_mapping_range,
             commands::load_organ,
             commands::get_organ_info,
             commands::set_stop,
@@ -255,6 +300,7 @@ fn main() {
             commands::get_division_ccis,
             commands::query_audio_channel_count,
             commands::set_parametric_eq,
+            commands::set_eq_bands,
             commands::persist_reverb_config,
             commands::set_algorithmic_reverb,
             commands::set_reverb_type,

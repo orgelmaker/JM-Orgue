@@ -144,15 +144,23 @@ impl FdnReverb {
     pub fn configure(&mut self, rt60: f32, pre_delay_ms: f32, damping: f32, room_size: f32, mix: f32) {
         self.rt60 = rt60.clamp(0.3, 15.0);
         self.damping = damping.clamp(0.0, 0.95);
-        self.room_size = room_size.clamp(0.3, 3.0);
         self.mix = mix.clamp(0.0, 1.0);
 
-        // Resize delay lines
-        self.delay_lengths = Self::scale_delays(self.room_size, self.sample_rate);
-        for i in 0..8 {
-            self.delay_lines[i].resize(self.delay_lengths[i], 0.0);
-            self.delay_lines[i].fill(0.0);
-            self.delay_pos[i] = 0;
+        // Delaylijnen alleen hersizen (en dus de staart wissen) als room_size écht
+        // verandert — de UI roept configure bij elke slider-beweging aan en een
+        // rt60/damping/mix-wijziging moet de klinkende galmstaart niet afkappen.
+        let new_room = room_size.clamp(0.3, 3.0);
+        if (new_room - self.room_size).abs() > 1e-3 {
+            self.room_size = new_room;
+            self.delay_lengths = Self::scale_delays(self.room_size, self.sample_rate);
+            for i in 0..8 {
+                self.delay_lines[i].resize(self.delay_lengths[i], 0.0);
+                self.delay_lines[i].fill(0.0);
+                self.delay_pos[i] = 0;
+            }
+            for d in &mut self.input_diffusers {
+                d.clear();
+            }
         }
 
         // Update feedback gains
@@ -163,15 +171,13 @@ impl FdnReverb {
             f.set_damping(self.damping);
         }
 
-        // Update pre-delay
-        self.pre_delay_len = ((pre_delay_ms.clamp(0.0, 150.0) * self.sample_rate / 1000.0) as usize).max(1);
-        self.pre_delay.resize(self.pre_delay_len, 0.0);
-        self.pre_delay.fill(0.0);
-        self.pre_delay_pos = 0;
-
-        // Clear diffusers
-        for d in &mut self.input_diffusers {
-            d.clear();
+        // Pre-delay idem: alleen bij echte wijziging hersizen/wissen.
+        let new_len = ((pre_delay_ms.clamp(0.0, 250.0) * self.sample_rate / 1000.0) as usize).max(1);
+        if new_len != self.pre_delay_len {
+            self.pre_delay_len = new_len;
+            self.pre_delay.resize(self.pre_delay_len, 0.0);
+            self.pre_delay.fill(0.0);
+            self.pre_delay_pos = 0;
         }
     }
 
@@ -189,7 +195,11 @@ impl FdnReverb {
         self.configure(rt60, pre_delay, damping, room_size, mix);
     }
 
-    pub fn process(&mut self, input: f32) -> f32 {
+    /// Voer één sample door het netwerk en geef de 8 delay-taps van dít moment
+    /// terug (vóór het wegschrijven). Gemeenschappelijke kern voor de mono- en
+    /// stereo-uitgangen.
+    #[inline]
+    fn advance(&mut self, input: f32) -> [f32; 8] {
         // Pre-delay
         let pre_out = self.pre_delay[self.pre_delay_pos];
         self.pre_delay[self.pre_delay_pos] = input;
@@ -230,11 +240,35 @@ impl FdnReverb {
             self.delay_pos[i] = (self.delay_pos[i] + 1) % self.delay_lengths[i];
         }
 
+        taps
+    }
+
+    pub fn process(&mut self, input: f32) -> f32 {
+        let taps = self.advance(input);
+
         // Output: sum of first 4 taps (for density)
         let wet = (taps[0] + taps[1] + taps[2] + taps[3]) * 0.25;
 
         // Mix dry/wet
         input * (1.0 - self.mix) + wet * self.mix
+    }
+
+    /// Stereo variant: geeft PUUR WET (l, r) terug — de mix past de aanroeper toe.
+    /// L en R tappen elk een eigen (disjuncte) helft van de delaylijnen, zodat de
+    /// galmstaart gedecorreleerd is en echt ruimtelijk klinkt in plaats van
+    /// "mono in het midden".
+    ///
+    /// Uitgangsweging 1.0 (i.p.v. 0.25): elke lijn krijgt maar 1/8 van de input
+    /// en de circulatie-opbouw levert per tap ≈ 0.3× input — met 0.25 kwam het
+    /// wet-signaal op ≈ -15 dB t.o.v. droog uit ("galm nauwelijks hoorbaar").
+    /// Met weging 1.0 ligt wet bij mix=1 rond het droge niveau (-5..0 dB),
+    /// vergelijkbaar met GrandOrgue; de tanh-limiter vangt uitschieters op.
+    #[inline]
+    pub fn process_stereo(&mut self, input_l: f32, input_r: f32) -> (f32, f32) {
+        let taps = self.advance((input_l + input_r) * 0.5);
+        let wet_l = taps[0] + taps[2] + taps[4] + taps[6];
+        let wet_r = taps[1] + taps[3] + taps[5] + taps[7];
+        (wet_l, wet_r)
     }
 
     pub fn clear(&mut self) {

@@ -155,6 +155,8 @@ pub struct StatusDto {
     pub audio_device: String,
     /// Actual buffer size in frames (0 = driver default)
     pub buffer_frames: u32,
+    /// Actual number of output channels of the open stream
+    pub channels: u16,
 }
 
 // ============ Commands ============
@@ -189,20 +191,27 @@ pub fn list_output_devices(state: State<AppState>, host: Option<String>) -> Resu
 }
 
 /// Switch the audio output host/device/buffer and persist the choice.
-/// Returns the current organ id (if any) so the frontend can reload it, which
-/// re-registers samples on the new audio thread and re-applies DSP settings.
+/// Retourneert een eerlijke `SwitchOutcome`: de frontend herlaadt het orgel
+/// wanneer `player_rebuilt` en markeert het profiel pas actief bij `switched`.
+/// Async + spawn_blocking: de wissel kan (met retry-ladder en orgel-herlaad)
+/// seconden duren en mag de webview-IPC niet bevriezen.
 #[tauri::command]
-pub fn set_audio_output(
-    state: State<AppState>,
+pub async fn set_audio_output(
+    state: State<'_, AppState>,
     host: Option<String>,
     device: Option<String>,
     buffer_frames: Option<u32>,
-) -> Result<Option<String>, String> {
-    state.switch_audio_output(crate::audio::AudioOutputConfig {
-        host_name: host,
-        device_name: device,
-        buffer_frames,
+) -> Result<crate::state::SwitchOutcome, String> {
+    let st = state.inner().clone();
+    tokio::task::spawn_blocking(move || {
+        st.switch_audio_output(crate::audio::AudioOutputConfig {
+            host_name: host,
+            device_name: device,
+            buffer_frames,
+        })
     })
+    .await
+    .map_err(|e| format!("audio-wissel-taak mislukt: {}", e))?
 }
 
 /// Scan a sample folder for leading silence in WAV/MP3 files (read-only report).
@@ -498,6 +507,125 @@ pub fn poll_preset_trigger(state: State<AppState>) -> Option<u8> {
     state.poll_preset_trigger()
 }
 
+// ============ Handmatig beheer van MIDI-koppelingen ============
+// get_preset_bindings geeft alleen een mens-leesbare string; voor de
+// bewerken-UI zijn de structurele velden nodig. PresetBindingSaved (het
+// opslagformaat) is daarvoor het natuurlijke DTO.
+
+fn preset_binding_to_saved(b: &crate::state::MidiPresetBinding) -> PresetBindingSaved {
+    use crate::state::MidiPresetTrigger;
+    match b.trigger {
+        MidiPresetTrigger::Note { note } => PresetBindingSaved {
+            preset_num: b.preset_num,
+            trigger_type: "note".to_string(),
+            note: Some(note),
+            channel: None,
+            controller: None,
+            value: None,
+            program: None,
+        },
+        MidiPresetTrigger::ControlChange { channel, controller, value } => PresetBindingSaved {
+            preset_num: b.preset_num,
+            trigger_type: "cc".to_string(),
+            note: None,
+            channel,
+            controller: Some(controller),
+            value: Some(value),
+            program: None,
+        },
+        MidiPresetTrigger::ProgramChange { channel, program } => PresetBindingSaved {
+            preset_num: b.preset_num,
+            trigger_type: "program".to_string(),
+            note: None,
+            channel,
+            controller: None,
+            value: None,
+            program: Some(program),
+        },
+    }
+}
+
+fn saved_to_preset_binding(b: &PresetBindingSaved) -> Result<crate::state::MidiPresetBinding, String> {
+    use crate::state::{MidiPresetBinding, MidiPresetTrigger};
+    let trigger = match b.trigger_type.as_str() {
+        "note" => MidiPresetTrigger::Note {
+            note: b.note.ok_or("Nootnummer ontbreekt")?.min(127),
+        },
+        "cc" => MidiPresetTrigger::ControlChange {
+            channel: b.channel.map(|c| c.min(15)),
+            controller: b.controller.ok_or("CC-nummer ontbreekt")?.min(127),
+            value: b.value.unwrap_or(64).min(127),
+        },
+        "program" => MidiPresetTrigger::ProgramChange {
+            channel: b.channel.map(|c| c.min(15)),
+            program: b.program.ok_or("Programmanummer ontbreekt")?.min(127),
+        },
+        other => return Err(format!("Onbekend triggertype '{}'", other)),
+    };
+    Ok(MidiPresetBinding { preset_num: b.preset_num, trigger })
+}
+
+/// Alle actie-koppelingen structureel (voor de handmatige bewerken-UI).
+#[tauri::command]
+pub fn get_preset_bindings_full(state: State<AppState>) -> Vec<PresetBindingSaved> {
+    state.get_preset_bindings().iter().map(preset_binding_to_saved).collect()
+}
+
+/// Voeg handmatig een koppeling toe (zelfde regels als inleren: max 4 per
+/// actie, duplicaten geweigerd). Retourneert de bijgewerkte volledige lijst.
+#[tauri::command]
+pub fn add_preset_binding_manual(state: State<AppState>, binding: PresetBindingSaved) -> Result<Vec<PresetBindingSaved>, String> {
+    let b = saved_to_preset_binding(&binding)?;
+    info!("Handmatige MIDI-koppeling toevoegen voor actie {}: {:?}", b.preset_num, b.trigger);
+    state.add_preset_binding(b)?;
+    Ok(state.get_preset_bindings().iter().map(preset_binding_to_saved).collect())
+}
+
+/// Verwijder één koppeling: de `index`-de (0-based) binding van deze actiecode.
+#[tauri::command]
+pub fn remove_preset_binding(state: State<AppState>, preset_num: u8, index: usize) -> Result<Vec<PresetBindingSaved>, String> {
+    info!("MIDI-koppeling #{} voor actie {} verwijderen", index + 1, preset_num);
+    state.remove_preset_binding_at(preset_num, index)?;
+    Ok(state.get_preset_bindings().iter().map(preset_binding_to_saved).collect())
+}
+
+/// Vervang één koppeling in-place (bewerken in de UI).
+#[tauri::command]
+pub fn update_preset_binding(state: State<AppState>, preset_num: u8, index: usize, binding: PresetBindingSaved) -> Result<Vec<PresetBindingSaved>, String> {
+    let b = saved_to_preset_binding(&binding)?;
+    info!("MIDI-koppeling #{} voor actie {} bijwerken naar {:?}", index + 1, preset_num, b.trigger);
+    state.replace_preset_binding_at(preset_num, index, b)?;
+    Ok(state.get_preset_bindings().iter().map(preset_binding_to_saved).collect())
+}
+
+/// Zet handmatig kanaal + CC voor de zwelkast van een divisie (het handmatige
+/// alternatief voor 'Leer pedaal'). Kanaal is 0-based (wire), zoals overal.
+#[tauri::command]
+pub fn set_swell_binding_manual(state: State<AppState>, division: String, division_index: u8, channel: u8, cc_num: u8) -> Result<(), String> {
+    info!("Handmatige zwelkast-koppeling voor {}: ch={} cc={}", division, channel + 1, cc_num);
+    state.set_swell_binding_manual(&division, division_index, channel.min(15), cc_num.min(127));
+    Ok(())
+}
+
+/// Zet handmatig kanaal + CC voor de generaal-crescendo. Bestaand bereik en
+/// invert blijven behouden.
+#[tauri::command]
+pub fn set_crescendo_binding_manual(state: State<AppState>, channel: u8, cc_num: u8) -> Result<(), String> {
+    info!("Handmatige crescendo-koppeling: ch={} cc={}", channel + 1, cc_num);
+    let mut b = state.crescendo_binding.write();
+    let (mn, mx, inv) = b.map(|(_, _, mn, mx, inv)| (mn, mx, inv)).unwrap_or((0, 127, false));
+    *b = Some((channel.min(15), cc_num.min(127), mn, mx, inv));
+    Ok(())
+}
+
+/// Zet handmatig het toetsenbereik (laagste/hoogste MIDI-noot) van een divisie.
+#[tauri::command]
+pub fn set_midi_mapping_range(state: State<AppState>, division: String, first_midi_note: Option<u8>, last_midi_note: Option<u8>) -> Result<(), String> {
+    info!("Handmatig toetsenbereik voor {}: {:?}..{:?}", division, first_midi_note, last_midi_note);
+    state.set_midi_mapping_range(&division, first_midi_note.map(|n| n.min(127)), last_midi_note.map(|n| n.min(127)));
+    Ok(())
+}
+
 #[tauri::command]
 pub fn load_organ(state: State<AppState>, path: String) -> Result<OrganInfoDto, String> {
     do_load_organ(&state, &path)
@@ -517,13 +645,13 @@ fn ampl_to_db(ampl: f32) -> f32 {
 
 /// Kies de default/langste release van een pijp: MaxKeyPressTime `None` of `-1`
 /// betekent "geen limiet" (GrandOrgue-conventie) en wint; anders de langste
-/// tijd. Releases die naar het attack-bestand zelf wijzen (release in dezelfde
-/// WAV, CuePoint-model) slaan we over — die route speelt de engine (nog) niet.
+/// tijd. Releases die naar het attack-bestand zelf wijzen worden hier
+/// overgeslagen — dat geval dekt de same-file-release-route (cue-marker).
 /// Toetsduur-afhankelijke selectie (R0/R1/R2) is een latere uitbreiding.
-fn pick_default_release(
-    releases: &[vpo_sampler::ReleaseDef],
+fn pick_default_release<'a>(
+    releases: &'a [vpo_sampler::ReleaseDef],
     attack_path: &Path,
-) -> Option<std::path::PathBuf> {
+) -> Option<&'a vpo_sampler::ReleaseDef> {
     releases
         .iter()
         .filter(|r| r.path != attack_path)
@@ -531,7 +659,6 @@ fn pick_default_release(
             None | Some(-1) => i64::MAX,
             Some(t) => t as i64,
         })
-        .map(|r| r.path.clone())
 }
 
 /// Is dit orgel-id een orgel-definitiebestand (GrandOrgue .organ of Hauptwerk
@@ -540,6 +667,32 @@ fn pick_default_release(
 pub fn is_organ_file_id(id: &str) -> bool {
     let l = id.to_lowercase();
     l.ends_with(".organ") || l.ends_with(".organ_hauptwerk_xml")
+}
+
+/// Map waarin de per-orgel `.jm-settings.json` hoort: naast het orgelbestand
+/// (GrandOrgue én Hauptwerk, hoofdletter-ongevoelig) of de sample-map zelf.
+/// De oude check (`ends_with(".organ")`, hoofdlettergevoelig) behandelde een
+/// Hauptwerk-bestand — en elk `.Organ`-bestand — als map, waardoor instellingen
+/// naast zulke orgels nooit werden weggeschreven of teruggelezen.
+fn organ_settings_dir(organ_id: &str) -> Option<std::path::PathBuf> {
+    if is_organ_file_id(organ_id) {
+        std::path::Path::new(organ_id).parent().map(|p| p.to_path_buf())
+    } else {
+        Some(std::path::PathBuf::from(organ_id))
+    }
+}
+
+/// Stuur laad-voortgang naar de frontend (LoadingOverlay). Headless (test-API
+/// vóór Tauri-setup) is er geen AppHandle — dan stilletjes overslaan.
+fn emit_load_progress(state: &AppState, loaded: usize, total: usize, message: &str) {
+    if let Some(app) = state.app_handle.read().as_ref() {
+        use tauri::Emitter;
+        let _ = app.emit("load-progress", serde_json::json!({
+            "loaded": loaded,
+            "total": total,
+            "message": message,
+        }));
+    }
 }
 
 pub fn do_load_organ(state: &AppState, path: &str) -> Result<OrganInfoDto, String> {
@@ -610,30 +763,50 @@ pub fn do_load_organ(state: &AppState, path: &str) -> Result<OrganInfoDto, Strin
         use std::path::PathBuf;
         use std::sync::Arc;
         use rayon::prelude::*;
-        use vpo_sampler::{load_audio_preload, PipeDef, PreloadBuffer};
+        use vpo_sampler::{load_audio_preload, load_wav_preload_segment, PipeDef, PreloadBuffer, PreloadSegment};
         use crate::audio::PRELOAD_SAMPLES;
+
+        /// Welke uitsnede van een bestand geladen moet worden — attacks en
+        /// release-segmenten van hetzélfde bestand zijn verschillende buffers.
+        #[derive(Clone, Copy, PartialEq, Eq, Hash)]
+        enum SegKey {
+            Attack,
+            /// `require_cue`: same-file release (moet loop+cue hebben, anders
+            /// bestaat er geen release); anders apart release-bestand (start op
+            /// cue-marker als die er is, anders frame 0).
+            Release { cue_override: Option<u32>, require_cue: bool },
+        }
 
         // (stop_id, pipe_num) → concreet samplepad. Referenties (REF:...) worden
         // hier al opgelost zodat de achtergrond-loader rechtstreeks van het bestand
         // kan streamen. pipe_num = pijp-index+1 (zoals de NoteOn-route verwacht:
         // midi_note - first_midi_note + 1).
         let mut load_tasks: Vec<((u32, u32), PathBuf)> = Vec::new();
-        // Percussieve stops (one-shot: klok e.d.) en ODF-looppunten per bestand
-        // (fallback voor WAV's zonder smpl-chunk) — verzameld tijdens de loop.
+        // Percussieve stops (one-shot: klok e.d.) en ODF-looppunten per bestand.
+        // GrandOrgue-regel: zodra de ODF een loop opgeeft, winnen die van de
+        // smpl-chunk in de WAV (override, geen fallback).
         let mut percussive_stops: HashSet<u32> = HashSet::new();
         let mut odf_loops: HashMap<PathBuf, (u32, u32)> = HashMap::new();
-        // ODF-intonatie per pijp: de GrandOrgue-hiërarchie Organ × Stop × Pipe
-        // (AmplitudeLevel% en Gain-dB stapelen als dB-som; alle pitch-velden in
-        // cents opgeteld). Gaat als aparte laag naar de engine, gescheiden van
-        // de gebruikers-voicing.
+        // ODF-intonatie per pijp: de volledige GrandOrgue-hiërarchie
+        // Organ × Windchest × Stop/Rank × Pipe. AmplitudeLevel% en Gain-dB
+        // stapelen als dB-som; PitchTuning (cents) wordt gesommeerd.
+        // PitchCorrection blijft hier bewust BUITEN: GrandOrgue past die alleen
+        // toe bij automatisch hertemperen, niet in de standaard "original
+        // temperament"-modus (anders zweeft bv. een Voix Céleste dubbel).
         let mut odf_voicings: HashMap<(u32, u32), (f32, f32)> = HashMap::new();
         // Hauptwerk-tremulantlaag: aparte trem-opname per pijp.
         let mut trem_tasks: Vec<((u32, u32), PathBuf)> = Vec::new();
-        // Release-samples (opgenomen kerkakoestiek): één default-release per pijp,
-        // onder de gemarkeerde key (pipe_num | RELEASE_PIPE_FLAG) zodat ze door de
-        // bestaande preload-/background-load-mechanismen meereizen.
-        let mut release_tasks: Vec<((u32, u32), PathBuf)> = Vec::new();
+        // Release-samples (opgenomen kerkakoestiek), onder de gemarkeerde key
+        // (pipe_num | RELEASE_PIPE_FLAG). Twee vormen: een apart release-bestand,
+        // of het release-segment ná de loop in het attack-bestand zelf
+        // (cue-marker, GrandOrgue-model voor oudere natte sets).
+        let mut release_tasks: Vec<((u32, u32), PathBuf, SegKey)> = Vec::new();
         let organ_db = ampl_to_db(definition.organ.amplitude_level) + definition.organ.gain_db;
+        let organ_cents = definition.organ.pitch_tuning_cents;
+        // Windchest-niveau inschaling per groepsnummer.
+        let windchest_voicing: HashMap<u32, (f32, f32)> = definition.windchests.iter()
+            .map(|w| (w.number, (ampl_to_db(w.amplitude_level) + w.gain_db, w.pitch_tuning_cents)))
+            .collect();
         for stop in &definition.stops {
             // Sla mechaniek-/ruisopnamen over (klep-/registergeluid, blaasbalg,
             // ambient) — die horen geen speelbaar register te zijn.
@@ -643,11 +816,16 @@ pub fn do_load_organ(state: &AppState, path: &str) -> Result<OrganInfoDto, Strin
             if stop.percussive {
                 percussive_stops.insert(stop.id);
             }
+            let (wc_db, wc_cents) = windchest_voicing.get(&stop.windchest_group)
+                .copied()
+                .unwrap_or((0.0, 0.0));
             let stop_db = ampl_to_db(stop.amplitude_level) + stop.gain_db;
+            let stop_cents = stop.pitch_tuning_cents;
             for (pipe_idx, pipe) in stop.pipes.iter().enumerate() {
                 let pipe_num = (pipe_idx + 1) as u32;
                 if let Some(resolved) = definition.resolve_reference(pipe) {
                     if let PipeDef::Sample { path, extra } = resolved {
+                        let effective_percussive = extra.percussive.unwrap_or(stop.percussive);
                         if extra.percussive == Some(true) {
                             percussive_stops.insert(stop.id);
                         }
@@ -658,20 +836,33 @@ pub fn do_load_organ(state: &AppState, path: &str) -> Result<OrganInfoDto, Strin
                         }
                         let pipe_db = extra.amplitude_level.map(ampl_to_db).unwrap_or(0.0)
                             + extra.gain_db.unwrap_or(0.0);
-                        let total_db = organ_db + stop_db + pipe_db;
-                        let total_cents = stop.pitch_correction
-                            + extra.pitch_tuning_cents.unwrap_or(0.0)
-                            + extra.pitch_correction_cents.unwrap_or(0.0);
+                        let total_db = organ_db + wc_db + stop_db + pipe_db;
+                        let total_cents = organ_cents + wc_cents + stop_cents
+                            + extra.pitch_tuning_cents.unwrap_or(0.0);
                         if total_db.abs() > 0.01 || total_cents.abs() > 0.01 {
                             odf_voicings.insert((stop.id, pipe_num), (total_db, total_cents));
                         }
                         if let Some(trem_path) = &extra.tremulant_sample {
                             trem_tasks.push(((stop.id, pipe_num), trem_path.clone()));
                         }
-                        if let Some(rel_path) = pick_default_release(&extra.releases, path) {
+                        let release_key = (stop.id, pipe_num | crate::audio::RELEASE_PIPE_FLAG);
+                        if let Some(rel) = pick_default_release(&extra.releases, path) {
+                            // Apart release-bestand: start op de cue-marker van
+                            // dat bestand (of de ODF CuePoint-override), anders 0.
                             release_tasks.push((
-                                (stop.id, pipe_num | crate::audio::RELEASE_PIPE_FLAG),
-                                rel_path,
+                                release_key,
+                                rel.path.clone(),
+                                SegKey::Release { cue_override: rel.cue_point, require_cue: false },
+                            ));
+                        } else if !effective_percussive && extra.load_release.unwrap_or(true) {
+                            // Geen apart release-bestand: probeer het release-
+                            // segment uit het attack-bestand zelf (loop + cue).
+                            // De loader slaat dit stil over als het bestand geen
+                            // cue-marker/loop heeft.
+                            release_tasks.push((
+                                release_key,
+                                path.clone(),
+                                SegKey::Release { cue_override: extra.cue_point, require_cue: true },
                             ));
                         }
                         load_tasks.push(((stop.id, pipe_num), path.clone()));
@@ -681,53 +872,79 @@ pub fn do_load_organ(state: &AppState, path: &str) -> Result<OrganInfoDto, Strin
         }
 
         // GrandOrgue-stops delen vaak één rank: meerdere (stop,pijp)-keys wijzen
-        // dan naar hetzelfde bestand. Laad de attack van elk UNIEK bestand maar
-        // één keer en deel de Arc<PreloadBuffer> over alle keys (minder disk-I/O
-        // en minder geheugen).
-        let mut seen = HashSet::new();
-        let unique_paths: Vec<PathBuf> = load_tasks
+        // dan naar hetzelfde bestand. Laad elke UNIEKE (bestand, segment)-combinatie
+        // maar één keer en deel de Arc<PreloadBuffer> over alle keys (minder
+        // disk-I/O en minder geheugen).
+        let mut seen: HashSet<(PathBuf, SegKey)> = HashSet::new();
+        let unique_loads: Vec<(PathBuf, SegKey)> = load_tasks
             .iter()
-            .chain(trem_tasks.iter())
-            .chain(release_tasks.iter())
-            .filter(|(_, p)| seen.insert(p.clone()))
-            .map(|(_, p)| p.clone())
+            .map(|(_, p)| (p.clone(), SegKey::Attack))
+            .chain(trem_tasks.iter().map(|(_, p)| (p.clone(), SegKey::Attack)))
+            .chain(release_tasks.iter().map(|(_, p, seg)| (p.clone(), *seg)))
+            .filter(|entry| seen.insert(entry.clone()))
             .collect();
 
         info!(
-            "GrandOrgue: {} pijp-keys, {} unieke samplebestanden — attack-preloads laden...",
+            "GrandOrgue: {} pijp-keys, {} unieke (bestand, segment)-loads — attack-preloads laden...",
             load_tasks.len(),
-            unique_paths.len()
+            unique_loads.len()
         );
         let start_time = std::time::Instant::now();
-        let mut path_buffers: HashMap<PathBuf, Arc<PreloadBuffer>> = unique_paths
+        // Voortgang naar de frontend: zonder events blijft de laad-overlay op 0%
+        // staan en oogt een grote set (30-60s koud van schijf) als vastgelopen.
+        let progress_total = unique_loads.len();
+        let progress_count = std::sync::atomic::AtomicUsize::new(0);
+        emit_load_progress(state, 0, progress_total, "Samples laden");
+        let mut path_buffers: HashMap<(PathBuf, SegKey), Arc<PreloadBuffer>> = unique_loads
             .par_iter()
-            .filter_map(|p| match load_audio_preload(p, PRELOAD_SAMPLES) {
-                Ok(buf) => Some((p.clone(), Arc::new(buf))),
-                Err(e) => {
-                    warn!("Failed to preload {:?}: {}", p, e);
-                    None
+            .filter_map(|entry| {
+                let (p, seg) = entry;
+                let n = progress_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                if n % 100 == 0 || n == progress_total {
+                    emit_load_progress(state, n, progress_total, "Samples laden");
+                }
+                let result = match seg {
+                    SegKey::Attack => load_audio_preload(p, PRELOAD_SAMPLES),
+                    SegKey::Release { cue_override, require_cue } => load_wav_preload_segment(
+                        p,
+                        PRELOAD_SAMPLES,
+                        PreloadSegment::Release { cue_override: *cue_override, require_cue: *require_cue },
+                    ),
+                };
+                match result {
+                    Ok(buf) => Some((entry.clone(), Arc::new(buf))),
+                    Err(e) => {
+                        // Same-file release zonder cue/loop is geen fout: dat
+                        // bestand heeft simpelweg geen release-segment.
+                        if !matches!(seg, SegKey::Release { require_cue: true, .. }) {
+                            warn!("Failed to preload {:?}: {}", p, e);
+                        }
+                        None
+                    }
                 }
             })
             .collect();
 
-        // ODF-looppunten als fallback voor WAV's zonder smpl-chunk. Alleen de
-        // preload-fase: de volledige achtergrond-load kent alleen smpl-punten
-        // (ODF-loops zouden daar mee-geresampled moeten worden — zeldzaam geval).
-        // De Arc's zijn hier nog uniek (net gebouwd), dus get_mut werkt.
+        // ODF-looppunten: GrandOrgue-regel — heeft de ODF een loop, dan winnen
+        // die van de smpl-chunk (override). Looppunten zijn bestandsframes; de
+        // buffer is onset-getrimd, dus verschuiven met trim_start. De Arc's zijn
+        // hier nog uniek (net gebouwd), dus get_mut werkt.
         let mut odf_loops_applied = 0usize;
         for (path, (ls, le)) in &odf_loops {
-            if let Some(buf) = path_buffers.get_mut(path) {
-                if buf.loop_start.is_none() {
-                    if let Some(b) = Arc::get_mut(buf) {
-                        b.loop_start = Some(*ls as u64);
-                        b.loop_end = Some(*le as u64);
+            if let Some(buf) = path_buffers.get_mut(&(path.clone(), SegKey::Attack)) {
+                if let Some(b) = Arc::get_mut(buf) {
+                    let trim = b.trim_start as u64;
+                    let (ls, le) = (*ls as u64, *le as u64);
+                    if le > trim && le.saturating_sub(trim) > ls.saturating_sub(trim) {
+                        b.loop_start = Some(ls.saturating_sub(trim));
+                        b.loop_end = Some(le - trim);
                         odf_loops_applied += 1;
                     }
                 }
             }
         }
         if odf_loops_applied > 0 {
-            info!("ODF-looppunten toegepast op {} bestanden zonder smpl-chunk", odf_loops_applied);
+            info!("ODF-looppunten toegepast op {} bestanden (override op smpl)", odf_loops_applied);
         }
         info!(
             "Loaded {} unieke preload-buffers in {:.2}s",
@@ -737,20 +954,25 @@ pub fn do_load_organ(state: &AppState, path: &str) -> Result<OrganInfoDto, Strin
 
         // Fan-out naar per-key buffers (gedeelde Arc). Release-keys (gemarkeerd
         // met RELEASE_PIPE_FLAG) gaan mee in dezelfde preload-map: NoteOff zoekt
-        // ze daar op en de background-load/upgrade werkt er ongewijzigd mee.
+        // ze daar op en de background-load/upgrade werkt er ongewijzigd mee
+        // (PreloadBuffer.trim_start = segment-start voor release-uitsneden).
         let preload_buffers: HashMap<(u32, u32), Arc<PreloadBuffer>> = load_tasks
             .iter()
-            .chain(release_tasks.iter())
-            .filter_map(|(key, p)| path_buffers.get(p).map(|buf| (*key, buf.clone())))
+            .map(|(key, p)| (key, p.clone(), SegKey::Attack))
+            .chain(release_tasks.iter().map(|(key, p, seg)| (key, p.clone(), *seg)))
+            .filter_map(|(key, p, seg)| path_buffers.get(&(p, seg)).map(|buf| (*key, buf.clone())))
             .collect();
-        if !release_tasks.is_empty() {
-            info!("Release-samples: {} pijpen met opgenomen kerkakoestiek bij note-off", release_tasks.len());
+        let release_count = preload_buffers.keys()
+            .filter(|(_, pn)| pn & crate::audio::RELEASE_PIPE_FLAG != 0)
+            .count();
+        if release_count > 0 {
+            info!("Release-samples: {} pijpen met opgenomen kerkakoestiek bij note-off", release_count);
         }
 
         // Hauptwerk-tremulantlaag: fan-out van de trem-samples naar per-key buffers.
         let trem_buffers: HashMap<(u32, u32), Arc<PreloadBuffer>> = trem_tasks
             .iter()
-            .filter_map(|(key, p)| path_buffers.get(p).map(|buf| (*key, buf.clone())))
+            .filter_map(|(key, p)| path_buffers.get(&(p.clone(), SegKey::Attack)).map(|buf| (*key, buf.clone())))
             .collect();
 
         info!("Registering {} preload buffers for instant playback", preload_buffers.len());
@@ -973,108 +1195,105 @@ pub fn get_organ_info(state: State<AppState>) -> Result<Option<OrganInfoDto>, St
 
 #[tauri::command]
 pub fn set_stop(state: State<AppState>, stop_id: String, active: bool) -> Result<(), String> {
-    let mut organ = state.loaded_organ_info.write();
-
-    if let Some(ref mut o) = *organ {
+    let changed = {
+        let mut organ = state.loaded_organ_info.write();
+        let Some(ref mut o) = *organ else {
+            return Err(format!("Stop not found: {}", stop_id));
+        };
+        let mut found = false;
+        let mut changed = false;
         for division in &mut o.divisions {
             if let Some(stop) = division.stops.iter_mut().find(|s| s.id == stop_id) {
+                changed = stop.drawn != active;
                 stop.drawn = active;
-                state.set_stop_drawn(&stop_id, active);
-                info!("Stop {} set to {}", stop_id, active);
-                return Ok(());
+                found = true;
+                break;
             }
         }
-    }
+        if !found {
+            return Err(format!("Stop not found: {}", stop_id));
+        }
+        changed
+    };
 
-    Err(format!("Stop not found: {}", stop_id))
+    state.set_stop_drawn(&stop_id, active);
+    if changed {
+        // Direct hoorbaar tijdens het spelen (zie toggle_stop).
+        state.sync_stop_voices(&stop_id, active);
+    }
+    info!("Stop {} set to {}", stop_id, active);
+    Ok(())
 }
 
 #[tauri::command]
 pub fn toggle_stop(state: State<AppState>, stop_id: String) -> Result<bool, String> {
-    let mut organ = state.loaded_organ_info.write();
-
-    if let Some(ref mut o) = *organ {
+    let drawn = {
+        let mut organ = state.loaded_organ_info.write();
+        let Some(ref mut o) = *organ else {
+            return Err(format!("Stop not found: {}", stop_id));
+        };
+        let mut found = None;
         for division in &mut o.divisions {
             if let Some(stop) = division.stops.iter_mut().find(|s| s.id == stop_id) {
                 stop.drawn = !stop.drawn;
-                let drawn = stop.drawn;
-                let internal_id = stop.internal_stop_id;
-                let first_midi = stop.first_midi_note as u32;
-                let last_midi = stop.last_midi_note as u32;
-                state.set_stop_drawn(&stop_id, drawn);
-
-                // When turning a stop OFF, release all its active voices immediately
-                if !drawn {
-                    for pipe_num in 1..=(last_midi - first_midi + 1) {
-                        state.send_audio_command(AudioCommand::NoteOff {
-                            stop_id: internal_id,
-                            pipe_num,
-                        });
-                    }
-                    info!("Stop {} turned OFF - released {} pipes", stop_id, last_midi - first_midi + 1);
-                } else {
-                    // When turning a stop ON, play all currently held notes through it
-                    let div_name = division.name.clone();
-                    let held = state.held_notes.read();
-                    let mappings = state.midi_mappings.read();
-                    let mapping = mappings.iter().find(|m| m.division == div_name);
-
-                    let mut triggered = 0;
-                    for &(ch, note, vel) in held.iter() {
-                        // Check channel filter
-                        let accepts = match mapping {
-                            Some(m) => m.channel.map_or(true, |mch| mch == ch),
-                            None => true,
-                        };
-                        if !accepts { continue; }
-
-                        let transpose = mapping.map_or(0, |m| m.transpose);
-                        let transposed = (note as i16 + transpose as i16).clamp(0, 127) as u8;
-                        let t = transposed as u32;
-
-                        if t >= first_midi && t <= last_midi {
-                            let pipe_num = t - first_midi + 1;
-                            state.send_audio_command(AudioCommand::NoteOn {
-                                stop_id: internal_id,
-                                pipe_num,
-                                midi_note: transposed,
-                                velocity: vel as f32 / 127.0,
-                            });
-                            triggered += 1;
-                        }
-                    }
-                    info!("Stop {} turned ON - triggered {} held notes", stop_id, triggered);
-                }
-
-                return Ok(drawn);
+                found = Some(stop.drawn);
+                break;
             }
         }
-    }
+        match found {
+            Some(d) => d,
+            None => return Err(format!("Stop not found: {}", stop_id)),
+        }
+    }; // organ-write-lock vrijgeven vóór sync (die neemt zelf read-locks)
 
-    Err(format!("Stop not found: {}", stop_id))
+    state.set_stop_drawn(&stop_id, drawn);
+    // Direct hoorbaar tijdens het spelen: AAN speelt ingedrukte toetsen (incl.
+    // koppels) meteen door dit register, UIT laat alle pijpen direct los.
+    state.sync_stop_voices(&stop_id, drawn);
+    info!("Stop {} → {}", stop_id, if drawn { "AAN" } else { "UIT" });
+    Ok(drawn)
 }
 
 /// Set all drawn stops at once (for setzer/preset recall)
 /// Stops in the list become drawn=true, all others become drawn=false
 #[tauri::command]
 pub fn set_drawn_stops(state: State<AppState>, stop_ids: Vec<String>) -> Result<(), String> {
-    let mut organ = state.loaded_organ_info.write();
-
-    if let Some(ref mut o) = *organ {
+    // Verzamel de wijzigingen onder de write-lock, synchroniseer daarna de
+    // klinkende voices per gewijzigd register: een preset-oproep of setzer
+    // tijdens het spelen moet direct hoorbaar zijn (bijgetrokken registers
+    // spelen de ingedrukte toetsen mee, weggetrokken registers zwijgen).
+    let mut turned_on: Vec<String> = Vec::new();
+    let mut turned_off: Vec<String> = Vec::new();
+    {
+        let mut organ = state.loaded_organ_info.write();
+        let Some(ref mut o) = *organ else {
+            return Err("Geen orgel geladen".into());
+        };
         for division in &mut o.divisions {
             for stop in &mut division.stops {
                 let should_draw = stop_ids.contains(&stop.id);
                 if stop.drawn != should_draw {
                     stop.drawn = should_draw;
-                    state.set_stop_drawn(&stop.id, should_draw);
+                    if should_draw {
+                        turned_on.push(stop.id.clone());
+                    } else {
+                        turned_off.push(stop.id.clone());
+                    }
                 }
             }
         }
-        info!("set_drawn_stops: {} stops activated", stop_ids.len());
-        Ok(())
-    } else {
-        Err("Geen orgel geladen".into())
     }
+    for id in &turned_off {
+        state.set_stop_drawn(id, false);
+        state.sync_stop_voices(id, false);
+    }
+    for id in &turned_on {
+        state.set_stop_drawn(id, true);
+        state.sync_stop_voices(id, true);
+    }
+    info!("set_drawn_stops: {} aan, {} uit (van {} gevraagd)",
+          turned_on.len(), turned_off.len(), stop_ids.len());
+    Ok(())
 }
 
 /// Play a note for a specific stop
@@ -1843,17 +2062,67 @@ pub fn set_division_pan(state: State<AppState>, division: String, pan: f32) -> R
     Err(format!("Division not found: {}", division))
 }
 
-/// Configure 3-band parametric EQ
+/// Wire-DTO voor één EQ-band (frontend ↔ backend).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EqBandDto {
+    pub enabled: bool,
+    /// "peak" | "lowpass" | "highpass" | "bandpass" | "lowshelf" | "highshelf"
+    pub band_type: String,
+    pub freq: f32,
+    pub gain_db: f32,
+    /// Bandbreedte in octaven
+    pub bandwidth: f32,
+    /// None = alle kanalen; anders 0-based fysiek uitgangskanaal
+    pub channel: Option<u8>,
+}
+
+fn eq_bands_to_specs(bands: &[EqBandDto]) -> Vec<vpo_audio::EqBandSpec> {
+    bands.iter().map(|b| vpo_audio::EqBandSpec {
+        enabled: b.enabled,
+        band_type: vpo_audio::EqBandType::from_str(&b.band_type),
+        freq: b.freq,
+        gain_db: b.gain_db,
+        bandwidth_oct: b.bandwidth,
+        channel: b.channel,
+    }).collect()
+}
+
+/// Vrije multi-band EQ (GrandOrgue-stijl): per band type, frequentie, gain,
+/// bandbreedte en doelkanaal (null = alle kanalen).
 #[tauri::command]
-pub fn set_parametric_eq(state: State<AppState>, enabled: bool, low_freq: f32, low_gain: f32, mid_freq: f32, mid_gain: f32, mid_q: f32, high_freq: f32, high_gain: f32) -> Result<(), String> {
-    state.send_audio_command(AudioCommand::SetParametricEq {
-        enabled, low_freq, low_gain, mid_freq, mid_gain, mid_q, high_freq, high_gain
+pub fn set_eq_bands(state: State<AppState>, enabled: bool, bands: Vec<EqBandDto>) -> Result<(), String> {
+    state.send_audio_command(AudioCommand::SetEqBands {
+        enabled,
+        bands: eq_bands_to_specs(&bands),
     });
     // Onthoud voor per-orgel opslag (save_current_organ_settings leest dit veld).
     *state.eq_settings.write() = Some(library::EqSettingsSaved {
-        enabled, low_freq, low_gain, mid_freq, mid_gain, mid_q, high_freq, high_gain,
+        enabled,
+        bands: bands.into_iter().map(|b| library::EqBandSaved {
+            enabled: b.enabled,
+            band_type: b.band_type,
+            freq: b.freq,
+            gain_db: b.gain_db,
+            bandwidth: b.bandwidth,
+            channel: b.channel,
+        }).collect(),
+        ..Default::default()
     });
     Ok(())
+}
+
+/// Legacy 3-band EQ (oude frontend/test-API): omgezet naar drie vrije banden.
+#[tauri::command]
+pub fn set_parametric_eq(state: State<AppState>, enabled: bool, low_freq: f32, low_gain: f32, mid_freq: f32, mid_gain: f32, mid_q: f32, high_freq: f32, high_gain: f32) -> Result<(), String> {
+    // Q → bandbreedte in octaven: BW ≈ (2/ln2) * asinh(1/(2Q)).
+    let q = mid_q.max(0.05);
+    let bw = (2.0 / std::f32::consts::LN_2) * (1.0 / (2.0 * q)).asinh();
+    let bands = vec![
+        EqBandDto { enabled: true, band_type: "lowshelf".into(), freq: low_freq, gain_db: low_gain, bandwidth: 1.0, channel: None },
+        EqBandDto { enabled: true, band_type: "peak".into(), freq: mid_freq, gain_db: mid_gain, bandwidth: bw, channel: None },
+        EqBandDto { enabled: true, band_type: "highshelf".into(), freq: high_freq, gain_db: high_gain, bandwidth: 1.0, channel: None },
+    ];
+    set_eq_bands(state, enabled, bands)
 }
 
 /// Bewaar de volledige reverb-configuratie van het huidige orgel voor per-orgel opslag.
@@ -1964,14 +2233,15 @@ pub fn get_status(state: State<AppState>) -> Result<StatusDto, String> {
         .map(|m| !m.connected_devices().is_empty())
         .unwrap_or(false);
     let peaks = state.peak_meters();
-    let (sample_rate, audio_host, audio_device, buffer_frames) = state.audio_player.read().as_ref()
+    let (sample_rate, audio_host, audio_device, buffer_frames, channels) = state.audio_player.read().as_ref()
         .map(|p| (
             *p.sample_rate.read(),
             p.current_host.read().clone(),
             p.current_device.read().clone(),
             *p.current_buffer_frames.read(),
+            *p.current_channels.read(),
         ))
-        .unwrap_or((0, String::new(), String::new(), 0));
+        .unwrap_or((0, String::new(), String::new(), 0, 0));
 
     Ok(StatusDto {
         audio_running: state.audio_player.read().is_some(),
@@ -1984,6 +2254,7 @@ pub fn get_status(state: State<AppState>) -> Result<StatusDto, String> {
         audio_host,
         audio_device,
         buffer_frames,
+        channels,
     })
 }
 
@@ -2964,8 +3235,17 @@ pub fn do_load_samples_from_directory(state: &AppState, directory: &str) -> Resu
     info!("Loading {} preload buffers (attack portions)...", load_tasks.len());
     let start_time = std::time::Instant::now();
 
+    // Voortgang naar de frontend (zie do_load_organ): anders staat de
+    // laad-overlay op 0% en oogt een koude load als vastgelopen.
+    let progress_total = load_tasks.len();
+    let progress_count = std::sync::atomic::AtomicUsize::new(0);
+    emit_load_progress(state, 0, progress_total, "Samples laden");
     let preload_results: Vec<_> = load_tasks.par_iter()
         .filter_map(|(key, path)| {
+            let n = progress_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+            if n % 100 == 0 || n == progress_total {
+                emit_load_progress(state, n, progress_total, "Samples laden");
+            }
             match load_audio_preload(path, PRELOAD_SAMPLES) {
                 Ok(preload) => Some((*key, Arc::new(preload))),
                 Err(e) => {
@@ -3494,12 +3774,7 @@ pub fn do_save_organ_settings(state: &AppState, presets: HashMap<String, PresetD
     };
 
     // Save to organ directory as well (.jm-settings.json next to the organ)
-    let organ_dir = if organ_id.ends_with(".organ") {
-        std::path::Path::new(&organ_id).parent().map(|p| p.to_path_buf())
-    } else {
-        Some(std::path::PathBuf::from(&organ_id))
-    };
-    if let Some(dir) = organ_dir {
+    if let Some(dir) = organ_settings_dir(&organ_id) {
         let settings_path = dir.join(".jm-settings.json");
         match serde_json::to_string_pretty(&settings) {
             Ok(json) => {
@@ -3534,12 +3809,7 @@ pub fn get_organ_settings(state: State<AppState>) -> Option<OrganSettings> {
     }
 
     // Fallback: try .jm-settings.json in organ directory
-    let organ_dir = if organ_id.ends_with(".organ") {
-        std::path::Path::new(&organ_id).parent().map(|p| p.to_path_buf())
-    } else {
-        Some(std::path::PathBuf::from(&organ_id))
-    };
-    if let Some(dir) = organ_dir {
+    if let Some(dir) = organ_settings_dir(&organ_id) {
         let settings_path = dir.join(".jm-settings.json");
         if let Ok(json) = std::fs::read_to_string(&settings_path) {
             if let Ok(settings) = serde_json::from_str::<OrganSettings>(&json) {
@@ -3590,8 +3860,10 @@ pub fn import_settings(state: State<AppState>, path: String) -> Result<OrganSett
 
 #[tauri::command]
 pub fn get_organ_image(source_path: String) -> Option<String> {
-    // Try to find the image path from the source
-    let source_type = if source_path.ends_with(".organ") { "organ_file" } else { "sample_directory" };
+    // Try to find the image path from the source. Hoofdletter-ongevoelig en
+    // incl. Hauptwerk (.Organ_Hauptwerk_xml) — anders wordt een orgelbestand
+    // als sample-map behandeld en verschijnt er nooit een afbeelding.
+    let source_type = if is_organ_file_id(&source_path) { "organ_file" } else { "sample_directory" };
     let image_path = library::find_organ_image(&source_path, source_type)?;
     library::image_to_base64(&image_path)
 }

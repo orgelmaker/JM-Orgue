@@ -15,7 +15,7 @@ use crossbeam_channel::{Sender, Receiver, bounded};
 use tracing::{info, error, warn, debug};
 
 use vpo_sampler::{LoadedOrgan, SampleRef, SampleData, load_audio, resample, PreloadBuffer};
-use vpo_audio::{ConvolutionReverb, OnePoleFilter, WindModel, Tremulant, FdnReverb, ParametricEq};
+use vpo_audio::{ConvolutionReverb, OnePoleFilter, WindModel, Tremulant, FdnReverb, ChannelEq, EqBandSpec};
 
 /// Preload buffer size in samples (~2s at 48kHz)
 /// Longer buffer = smoother loop while full sample loads in background
@@ -54,6 +54,11 @@ pub enum AudioCommand {
     RegisterPercussiveStops(std::collections::HashSet<u32>),
     /// Note off: (stop_id, pipe_num)
     NoteOff { stop_id: u32, pipe_num: u32 },
+    /// Laat ALLE klinkende pijpen van één register los (register weggetrokken
+    /// tijdens het spelen). Eén commando i.p.v. een NoteOff per pijp: een
+    /// preset-wissel die 20 registers wegtrekt zou anders >1000 berichten
+    /// sturen en de bounded(512) command-queue laten blokkeren.
+    ReleaseStop { stop_id: u32 },
     /// All notes off
     AllNotesOff,
     /// Set master volume in dB
@@ -94,8 +99,10 @@ pub enum AudioCommand {
     SetAlgorithmicReverb { preset: Option<u8>, rt60: f32, pre_delay_ms: f32, damping: f32, room_size: f32, mix: f32 },
     /// Switch reverb type: true=algorithmic, false=convolution
     SetReverbType { algorithmic: bool },
-    /// Configure 3-band parametric EQ
-    SetParametricEq { enabled: bool, low_freq: f32, low_gain: f32, mid_freq: f32, mid_gain: f32, mid_q: f32, high_freq: f32, high_gain: f32 },
+    /// Vrije multi-band EQ (GrandOrgue-stijl): banden met type/freq/gain/band-
+    /// breedte en optioneel doelkanaal. Wordt per fysiek uitgangskanaal als
+    /// biquad-keten toegepast op de volledige uitgangsmix (droog + galm).
+    SetEqBands { enabled: bool, bands: Vec<EqBandSpec> },
     /// Route a division naar een willekeurige set fysieke output-kanalen.
     /// Lege lijst = standaard (voorste paar 0/1). Opeenvolgende kanalen worden als
     /// stereo-paren (L,R) gevuld; een los laatste kanaal krijgt mono.
@@ -161,7 +168,9 @@ impl PlayingVoice {
             // Orgelpijpen zijn niet aanslaggevoelig: altijd vol volume,
             // ongeacht MIDI-velocity (zoals GrandOrgue/Hauptwerk).
             target_envelope: 1.0,
-            envelope_speed: 0.005,
+            // ~2 ms fade-in @48k: net genoeg om een klik bij retriggeren te
+            // voorkomen, kort genoeg om de aanslag niet te vertragen.
+            envelope_speed: 0.01,
             releasing: false,
             one_shot: false,
             stop_id,
@@ -181,7 +190,7 @@ impl PlayingVoice {
             envelope: 0.0,
             // Orgelpijpen zijn niet aanslaggevoelig (zie new_from_sample).
             target_envelope: 1.0,
-            envelope_speed: 0.005,
+            envelope_speed: 0.01, // ~2 ms fade-in (zie new_from_sample)
             releasing: false,
             one_shot: false,
             stop_id,
@@ -194,15 +203,22 @@ impl PlayingVoice {
     /// Upgrade from preload to full sample (called when background load completes)
     /// The full sample is already resampled to output rate, so reset rate to 1.0
     fn upgrade_to_full(&mut self, sample: SampleRef) {
-        // The preload buffer may have been playing at a different rate (sample rate mismatch).
-        // The full sample is resampled to output rate (rate=1.0).
-        // We need to convert the current position from preload-rate to full-sample-rate.
+        // De preload-buffer is onset-getrimd (aanloopstilte weggeknipt); de
+        // volledige sample NIET. De positie moet dus eerst terug naar de
+        // coördinaten van het originele bestand (+ trim_start), en daarna van
+        // bron-samplerate naar output-samplerate (de volledige sample is al
+        // geresampled, rate=1.0). Zonder beide correcties verspringt de audio
+        // hoorbaar (tik) op het upgrademoment.
+        let trim = match &self.source {
+            VoiceSampleSource::PreloadOnly { preload, .. } => preload.trim_start as f64,
+            _ => 0.0,
+        };
         let old_rate = self.rate;
-        if old_rate > 0.0 && (old_rate - 1.0).abs() > 0.01 {
-            // Position in preload was at preload sample rate;
-            // full sample is at output rate. Convert position.
-            self.position /= old_rate;
+        let mut pos = self.position + trim;
+        if old_rate > 0.0 && (old_rate - 1.0).abs() > 1e-9 {
+            pos /= old_rate;
         }
+        self.position = pos;
         // Clamp position to valid range
         let max_pos = sample.data.len().saturating_sub(2) as f64;
         if self.position > max_pos {
@@ -235,6 +251,17 @@ impl PlayingVoice {
         self.releasing = true;
         self.target_envelope = 0.0;
         self.envelope_speed = 0.0005;
+    }
+
+    /// Release met expliciete fade-duur (ms) — GrandOrgue's toonhoogte-
+    /// afhankelijke release-crossfade (get_fader_length): lage pijpen sterven
+    /// langzaam uit (~184 ms), hoge snel (~6 ms). Eén vaste 42 ms gaf bassen
+    /// een te abrupte, en discanten een te trage overgang naar de release.
+    fn release_ms(&mut self, ms: f32, sample_rate: u32) {
+        self.releasing = true;
+        self.target_envelope = 0.0;
+        let frames = (ms.max(1.0) * 0.001 * sample_rate as f32).max(8.0);
+        self.envelope_speed = 1.0 / frames;
     }
 
     /// Slow release for tremulant crossfade (fade out over ~140ms)
@@ -348,6 +375,23 @@ impl PlayingVoice {
     }
 }
 
+/// GrandOrgue's automatische release-crossfade-duur (ms) per MIDI-noot
+/// (`get_fader_length`): 184 ms onder noot 42, 6 ms boven noot 86, lineair
+/// ertussen; 46 ms wanneer de noot onbekend is.
+#[inline]
+fn release_fade_ms(midi_note: u8) -> f32 {
+    let n = midi_note as f32;
+    if midi_note == 0 {
+        46.0
+    } else if n < 42.0 {
+        184.0
+    } else if n > 86.0 {
+        6.0
+    } else {
+        184.0 - (n - 42.0) * 178.0 / 44.0
+    }
+}
+
 /// Crossfade length for a loop of `loop_len` samples whose start is at index `ls`.
 /// Long crossfades (Hauptwerk-style, up to ~500 ms) mask imperfect loop points;
 /// bounded by half the loop and by the available pre-loop data (`ls`).
@@ -391,6 +435,11 @@ fn read_voice(
         return data[i] + (data[i + 1] - data[i]) * frac;
     }
 
+    // Klem het loop-einde op len-1: bij le == len (preload-/fallback-loops) kon
+    // de positie in [len-1, len) belanden vóórdat de wrap-check (>= le) afging;
+    // de leesindex i == len-1 gaf dan één sample 0.0 terug — een periodieke tik
+    // bij elke loop-omloop. Met le <= len-1 wrapt de positie altijd eerst.
+    let le = le.min(len - 1).max(ls + 1);
     let loop_len = le.saturating_sub(ls);
 
     // Wrap the play position into the loop region.
@@ -469,6 +518,29 @@ mod loop_seam_tests {
     }
 
     #[test]
+    fn loop_end_at_buffer_end_has_no_zero_sample_tick() {
+        // le == len, zoals bij preload-buffers en fallback-loops. De oude code
+        // liet de positie in [len-1, len) belanden vóór de wrap-check en gaf
+        // dan één sample 0.0 terug → een periodieke tik bij elke loop-omloop.
+        let data = sine(6000);
+        let (ls, le) = (1000usize, 6000usize); // le == data.len()
+        let xfade = super::loop_xfade(le - ls, ls);
+        let mut pos = 0.0f64;
+        let mut env = 1.0f32;
+        let mut prev: Option<f32> = None;
+        let mut max_jump = 0.0f32;
+        for _ in 0..30_000 {
+            let v = read_voice(&data, ls, le, xfade, &mut pos, false, &mut env);
+            if let Some(p) = prev {
+                max_jump = max_jump.max((v - p).abs());
+            }
+            prev = Some(v);
+            pos += 1.0;
+        }
+        assert!(max_jump < 0.15, "tik bij loop-einde == bufferlengte: max jump = {}", max_jump);
+    }
+
+    #[test]
     fn hard_wrap_without_crossfade_does_click() {
         // Sanity check: with the crossfade disabled (xfade = 0) the SAME loop jumps,
         // proving the test sample really has a discontinuous seam.
@@ -501,6 +573,137 @@ pub struct AudioOutputConfig {
     pub device_name: Option<String>,
     /// Requested buffer size in frames. None/0 = driver default.
     pub buffer_frames: Option<u32>,
+}
+
+/// Drivernamen van de ASIO-host, ZONDER een driver te laden of te initialiseren
+/// (pure registry-scan). Belangrijk: een cpal-enumeratie van de ASIO-host laadt
+/// en init't elke driver, en ASIO4ALL claimt bij init de WASAPI-endpoints
+/// exclusief — dat doodt een lopende WASAPI-stream en verstoort volgende
+/// ASIO-inits. Gebruik daarom déze functie voor apparaatlijsten in de UI.
+#[cfg(feature = "asio")]
+pub fn asio_driver_names() -> Vec<String> {
+    asio_sys::Asio::new().driver_names()
+}
+
+#[cfg(not(feature = "asio"))]
+pub fn asio_driver_names() -> Vec<String> {
+    Vec::new()
+}
+
+// ===== Procesbrede ASIO-driver-cache =====
+// ASIO4ALL kan binnen één proces maar één keer succesvol initialiseren: na een
+// gedraaide sessie faalt élke her-init blijvend ("No audio output device
+// found"), ook minuten later — empirisch vastgesteld op deze hardware met
+// probes (2026-07-07). Daarom wordt de driver één keer geladen en daarna
+// vastgehouden; elke volgende ASIO-wissel bouwt een nieuwe stream op de al
+// geladen driver (dat werkt onbeperkt vaak). Prijs: zolang de cache leeft,
+// houdt ASIO4ALL de door hem gewrapte WASAPI-endpoints exclusief bezet —
+// `asio_release_cached_driver` geeft ze desgewenst weer vrij.
+#[cfg(feature = "asio")]
+struct AsioCache {
+    host: cpal::Host,
+    driver_name: String,
+    // Houdt de driver via zijn interne Arc in leven; zonder deze keeper wordt
+    // de driver bij de laatste stream-drop vernietigd en is ASIO voor de rest
+    // van de procesduur onbruikbaar.
+    _keeper: cpal::Device,
+}
+
+#[cfg(feature = "asio")]
+static ASIO_CACHE: parking_lot::Mutex<Option<AsioCache>> = parking_lot::Mutex::new(None);
+
+/// Geef een bruikbaar ASIO-`Device` terug: uit de cache (zonder her-init) of
+/// vers geladen (en dan meteen gecachet). `want = None` betekent: de eerste
+/// beschikbare driver.
+#[cfg(feature = "asio")]
+pub fn asio_get_or_load_device(want: Option<&str>) -> Result<cpal::Device, String> {
+    use cpal::traits::{DeviceTrait, HostTrait};
+    let mut cache = ASIO_CACHE.lock();
+
+    // Cache-hit: een enumeratie via de gecachte host vindt de al geladen
+    // driver terug (weak-upgrade in asio-sys) en initialiseert dus NIET
+    // opnieuw. Een verse host zou dat wél doen — en falen.
+    if let Some(c) = cache.as_ref() {
+        let name_ok = want.map(|w| w == c.driver_name).unwrap_or(true);
+        if name_ok {
+            let want_name = c.driver_name.clone();
+            if let Some(d) = c.host.output_devices().ok().and_then(|mut devs| {
+                devs.find(|d| d.name().map(|n| n == want_name).unwrap_or(false))
+            }) {
+                return Ok(d);
+            }
+            warn!("Gecachte ASIO-driver '{}' niet meer zichtbaar; cache wordt ververst", c.driver_name);
+        } else {
+            warn!("Andere ASIO-driver gevraagd ({:?} i.p.v. '{}'); cache wordt ververst — her-init kan falen",
+                  want, c.driver_name);
+        }
+    }
+    *cache = None; // oude driver loslaten vóór een nieuwe load
+
+    let host_id = cpal::available_hosts()
+        .into_iter()
+        .find(|id| id.name().eq_ignore_ascii_case("asio"))
+        .ok_or_else(|| "ASIO-host niet beschikbaar in deze build".to_string())?;
+    let host = cpal::host_from_id(host_id).map_err(|e| format!("ASIO-host niet te openen: {}", e))?;
+    let keeper = match want {
+        Some(w) => host
+            .output_devices()
+            .ok()
+            .and_then(|mut devs| devs.find(|d| d.name().map(|n| n == w).unwrap_or(false)))
+            .ok_or_else(|| format!(
+                "Uitvoerapparaat '{}' niet gevonden op host ASIO (bezet, of de driver kan in dit proces niet opnieuw initialiseren?)", w))?,
+        None => host
+            .output_devices()
+            .ok()
+            .and_then(|mut devs| devs.next())
+            .ok_or_else(|| "Geen ASIO-apparaat gevonden".to_string())?,
+    };
+    let driver_name = keeper.name().map_err(|e| format!("ASIO-apparaatnaam onleesbaar: {}", e))?;
+    info!("ASIO-driver '{}' geladen en gecachet voor de procesduur", driver_name);
+    *cache = Some(AsioCache { host, driver_name: driver_name.clone(), _keeper: keeper });
+
+    // Tweede exemplaar voor de aanroeper via de gecachte host: deelt de al
+    // geladen driver, geen nieuwe init.
+    let c = cache.as_ref().unwrap();
+    c.host
+        .output_devices()
+        .ok()
+        .and_then(|mut devs| devs.find(|d| d.name().map(|n| n == driver_name).unwrap_or(false)))
+        .ok_or_else(|| format!("ASIO-apparaat '{}' direct na laden niet meer zichtbaar", driver_name))
+}
+
+/// Laat een idle gecachte ASIO-driver los, bv. omdat de gebruiker expliciet
+/// een WASAPI-uitgang kiest op het endpoint dat ASIO4ALL bezet houdt.
+/// Retourneert true als er iets vrijgegeven is. LET OP: door de
+/// her-init-beperking van ASIO4ALL is ASIO daarna tot een app-herstart
+/// meestal niet meer bruikbaar — alleen aanroepen als de gevraagde niet-ASIO-
+/// uitgang anders niet kan starten.
+#[cfg(feature = "asio")]
+pub fn asio_release_cached_driver() -> bool {
+    let mut cache = ASIO_CACHE.lock();
+    if cache.is_some() {
+        warn!("Gecachte ASIO-driver wordt vrijgegeven; ASIO is tot een app-herstart mogelijk niet meer beschikbaar");
+        *cache = None;
+        true
+    } else {
+        false
+    }
+}
+
+#[cfg(not(feature = "asio"))]
+pub fn asio_release_cached_driver() -> bool {
+    false
+}
+
+/// Feature-onafhankelijke wrapper: zonder asio-feature een nette fout.
+#[cfg(feature = "asio")]
+fn asio_get_or_load_device_checked(want: Option<&str>) -> Result<cpal::Device, String> {
+    asio_get_or_load_device(want)
+}
+
+#[cfg(not(feature = "asio"))]
+fn asio_get_or_load_device_checked(_want: Option<&str>) -> Result<cpal::Device, String> {
+    Err("ASIO niet beschikbaar in deze build (compileer met --features asio)".to_string())
 }
 
 /// Resolve a cpal host by (case-insensitive) name, falling back to the default host.
@@ -537,6 +740,14 @@ pub struct AudioPlayer {
     pub current_device: Arc<RwLock<String>>,
     /// Actual buffer size in frames (0 = driver default)
     pub current_buffer_frames: Arc<RwLock<u32>>,
+    /// Actual number of output channels of the open stream
+    pub current_channels: Arc<RwLock<u16>>,
+    /// Noodrem: de watchdog kon de stream herhaaldelijk niet herbouwen (bv.
+    /// apparaat verdwenen en de nieuwe default heeft een ander formaat). De
+    /// herstel-thread (main.rs) ziet deze vlag en bouwt de HELE player opnieuw.
+    pub restart_needed: Arc<AtomicBool>,
+    /// True zodra de audio-thread volledig is afgerond (stream/driver vrij).
+    thread_done: Arc<AtomicBool>,
 }
 
 // Explicitly implement Send and Sync since all our fields are thread-safe
@@ -561,6 +772,16 @@ impl AudioPlayer {
         let current_host = Arc::new(RwLock::new(String::new()));
         let current_device = Arc::new(RwLock::new(String::new()));
         let current_buffer_frames = Arc::new(RwLock::new(0u32));
+        let current_channels = Arc::new(RwLock::new(2u16));
+        let restart_needed = Arc::new(AtomicBool::new(false));
+        // Teller van geleverde audio-callbacks. Een stream kan "starten" zonder
+        // ooit een callback te leveren (ASIO4ALL koud/bezet) — pas als deze
+        // teller loopt is er echt geluid mogelijk.
+        let callbacks_seen = Arc::new(AtomicU64::new(0));
+        // Wordt true zodra de audio-thread écht klaar is (stream + driver
+        // vrijgegeven). shutdown_and_wait pollt hierop: een ASIO-init kan pas
+        // slagen als de vorige stream het apparaat aantoonbaar heeft losgelaten.
+        let thread_done = Arc::new(AtomicBool::new(false));
 
         let voice_count_clone = voice_count.clone();
         let peak_left_clone = peak_left.clone();
@@ -572,24 +793,63 @@ impl AudioPlayer {
         let host_clone = current_host.clone();
         let device_clone = current_device.clone();
         let buffer_clone = current_buffer_frames.clone();
+        let channels_clone = current_channels.clone();
+        let restart_clone = restart_needed.clone();
+        let callbacks_clone = callbacks_seen.clone();
         // Readiness channel: the audio thread reports whether the output stream
         // actually built+started, so we can fail cleanly (e.g. ASIO unavailable)
         // instead of silently ending up with no audio.
         let (ready_tx, ready_rx) = bounded::<Result<(), String>>(1);
+        let done_clone = thread_done.clone();
         thread::spawn(move || {
             if let Err(e) = run_audio_thread(
                 command_rx, voice_count_clone, peak_left_clone, peak_right_clone,
-                running_clone, sr_clone, cfg, host_clone, device_clone, buffer_clone, ready_tx,
+                running_clone, sr_clone, cfg, host_clone, device_clone, buffer_clone,
+                channels_clone, restart_clone, callbacks_clone, ready_tx,
             ) {
                 error!("Audio thread error: {}", e);
             }
+            done_clone.store(true, Ordering::Relaxed);
         });
 
         // Wait for the stream to build/start (or fail) before returning.
         match ready_rx.recv_timeout(std::time::Duration::from_secs(8)) {
             Ok(Ok(())) => {}
-            Ok(Err(e)) => return Err(e),
-            Err(_) => return Err("Audio stream did not start within 8s".to_string()),
+            Ok(Err(e)) => {
+                // Zorg dat de gespawnde thread stopt — anders blijft een
+                // "zombie" doorleven die later alsnog apparaten claimt.
+                running.store(false, Ordering::Relaxed);
+                return Err(e);
+            }
+            Err(crossbeam_channel::RecvTimeoutError::Disconnected) => {
+                // Thread eindigde zonder ready-melding (zou met de expliciete
+                // sends niet meer moeten gebeuren, maar wees eerlijk over de
+                // oorzaak i.p.v. een misleidende 8s-timeout te rapporteren).
+                running.store(false, Ordering::Relaxed);
+                return Err("Audio-thread stopte tijdens het opstarten (apparaat/driver-fout)".to_string());
+            }
+            Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
+                running.store(false, Ordering::Relaxed);
+                return Err("Audio stream did not start within 8s".to_string());
+            }
+        }
+
+        // Een stream die "start" is nog geen geluid: ASIO4ALL kan succesvol
+        // bouwen+starten en vervolgens NOOIT een callback leveren (koud/bezet
+        // apparaat — gedocumenteerd op deze hardware). Pas als de eerste
+        // callback binnen is, is de wissel echt geslaagd; anders melden we een
+        // fout zodat switch_audio_output op de oude uitgang kan blijven of
+        // terug kan vallen. Normaal komt de eerste callback binnen ~10-50 ms.
+        let verify_deadline = std::time::Instant::now() + std::time::Duration::from_millis(2500);
+        loop {
+            if callbacks_seen.load(Ordering::Relaxed) > 0 {
+                break;
+            }
+            if std::time::Instant::now() >= verify_deadline {
+                running.store(false, Ordering::Relaxed);
+                return Err("Audiostream gestart maar levert geen audio-callbacks (apparaat bezet/offline?)".to_string());
+            }
+            thread::sleep(std::time::Duration::from_millis(10));
         }
 
         info!("Audio player started");
@@ -604,6 +864,9 @@ impl AudioPlayer {
             current_host,
             current_device,
             current_buffer_frames,
+            current_channels,
+            restart_needed,
+            thread_done,
         })
     }
 
@@ -638,7 +901,28 @@ impl AudioPlayer {
     /// Stop playback
     pub fn stop(&self) {
         self.running.store(false, Ordering::Relaxed);
-        let _ = self.command_tx.send(AudioCommand::Shutdown);
+        // try_send, niet send: bij een volle command-queue (dode stream terwijl
+        // er doorgespeeld werd) zou een blokkerende send de Drop — en daarmee de
+        // hele audio-wissel onder de load_switch_gate — voorgoed laten hangen.
+        // running=false volstaat: de watchdog-lus checkt dat elke 100 ms en de
+        // render-callback bij elke buffer.
+        let _ = self.command_tx.try_send(AudioCommand::Shutdown);
+    }
+
+    /// Stop en wacht (begrensd) tot de audio-thread écht klaar is. Nodig vóór
+    /// een wissel van/naar ASIO: zolang de oude stream of driver nog leeft,
+    /// houdt ASIO4ALL/WASAPI het apparaat vast en faalt de init van de nieuwe
+    /// uitgang ("No audio output device found" / apparaat bezet).
+    pub fn shutdown_and_wait(&self, timeout: std::time::Duration) {
+        self.stop();
+        let deadline = std::time::Instant::now() + timeout;
+        while !self.thread_done.load(Ordering::Relaxed) {
+            if std::time::Instant::now() >= deadline {
+                warn!("Audio-thread niet gestopt binnen {:?}; wissel gaat toch verder", timeout);
+                return;
+            }
+            thread::sleep(std::time::Duration::from_millis(20));
+        }
     }
 }
 
@@ -663,25 +947,78 @@ fn run_audio_thread(
     host_out: Arc<RwLock<String>>,
     device_out: Arc<RwLock<String>>,
     buffer_out: Arc<RwLock<u32>>,
+    channels_out: Arc<RwLock<u16>>,
+    restart_needed: Arc<AtomicBool>,
+    callbacks_seen: Arc<AtomicU64>,
     ready_tx: crossbeam_channel::Sender<Result<(), String>>,
 ) -> Result<(), String> {
     use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
-    // Resolve host (by name, fallback to default host)
-    let host = resolve_host(cfg.host_name.as_deref());
+    // Resolve output device. STRIKT wanneer er een apparaatnaam gevraagd is:
+    // stilletjes terugvallen op het default-apparaat betekent "wissel geslaagd"
+    // terwijl het geluid ergens anders speelt (hoofdtelefoon↔speakers-bug).
+    // Fouten gaan via ready_tx zodat AudioPlayer::new de échte oorzaak meldt
+    // in plaats van een misleidende timeout (kanaal-disconnect ≠ 8s-timeout).
+    // ASIO gaat via de procesbrede driver-cache: ASIO4ALL kan maar één keer
+    // per proces initialiseren, dus de geladen driver wordt hergebruikt.
+    let host_is_asio = cfg.host_name.as_deref()
+        .map(|h| h.eq_ignore_ascii_case("asio"))
+        .unwrap_or(false);
+    let (device, host_display_name) = if host_is_asio {
+        match asio_get_or_load_device_checked(cfg.device_name.as_deref()) {
+            Ok(d) => (d, "ASIO".to_string()),
+            Err(msg) => {
+                let _ = ready_tx.send(Err(msg.clone()));
+                return Err(msg);
+            }
+        }
+    } else {
+        let host = resolve_host(cfg.host_name.as_deref());
+        let dev = match cfg.device_name.as_deref() {
+            Some(want) => {
+                let found = host.output_devices().ok().and_then(|mut devs| {
+                    devs.find(|d| d.name().map(|n| n == want).unwrap_or(false))
+                });
+                match found {
+                    Some(d) => d,
+                    None => {
+                        let msg = format!(
+                            "Uitvoerapparaat '{}' niet gevonden op host {} (bezet of losgekoppeld?)",
+                            want, host.id().name()
+                        );
+                        let _ = ready_tx.send(Err(msg.clone()));
+                        return Err(msg);
+                    }
+                }
+            }
+            None => match host.default_output_device() {
+                Some(d) => d,
+                None => {
+                    let msg = "No audio output device found".to_string();
+                    let _ = ready_tx.send(Err(msg.clone()));
+                    return Err(msg);
+                }
+            },
+        };
+        let name = host.id().name().to_string();
+        (dev, name)
+    };
 
-    // Resolve output device (by name within the host, fallback to default device)
-    let device = cfg.device_name.as_deref()
-        .and_then(|want| {
-            host.output_devices().ok().and_then(|mut devs| {
-                devs.find(|d| d.name().map(|n| n == want).unwrap_or(false))
-            })
-        })
-        .or_else(|| host.default_output_device())
-        .ok_or_else(|| "No audio output device found".to_string())?;
+    let supported = match device.default_output_config() {
+        Ok(s) => s,
+        Err(e) => {
+            let msg = format!("Failed to get audio config: {}", e);
+            let _ = ready_tx.send(Err(msg.clone()));
+            return Err(msg);
+        }
+    };
 
-    let supported = device.default_output_config()
-        .map_err(|e| format!("Failed to get audio config: {}", e))?;
+    // AudioPlayer::new kan intussen opgegeven hebben (8s-timeout of geen
+    // callbacks): stop dan hier, anders blijft een zombie-thread het apparaat
+    // claimen en er later mee vechten.
+    if !running.load(Ordering::Relaxed) {
+        return Ok(());
+    }
 
     let sample_rate = supported.sample_rate().0;
 
@@ -710,12 +1047,13 @@ fn run_audio_thread(
     let mut stream_config: cpal::StreamConfig = supported.config();
     stream_config.buffer_size = buffer_size;
 
-    let host_name = host.id().name().to_string();
+    let host_name = host_display_name;
     let device_name = device.name().unwrap_or_default();
     *sample_rate_out.write() = sample_rate;
     *host_out.write() = host_name.clone();
     *device_out.write() = device_name.clone();
     *buffer_out.write() = used_buffer_frames;
+    *channels_out.write() = stream_config.channels;
     info!("Audio host: {}, device: {}, sample rate: {}, buffer: {}, format: {:?}, kanalen: {}",
           host_name, device_name, sample_rate,
           if used_buffer_frames > 0 { used_buffer_frames.to_string() } else { "default".to_string() },
@@ -775,8 +1113,10 @@ fn run_audio_thread(
     // Algorithmic FDN reverb
     let fdn_reverb: Arc<RwLock<FdnReverb>> = Arc::new(RwLock::new(FdnReverb::new(sample_rate)));
     let use_algorithmic_reverb: Arc<RwLock<bool>> = Arc::new(RwLock::new(false));
-    // Parametric EQ
-    let parametric_eq: Arc<RwLock<ParametricEq>> = Arc::new(RwLock::new(ParametricEq::new(sample_rate)));
+    // Vrije multi-band EQ: per fysiek uitgangskanaal een biquad-keten, gebouwd
+    // uit de actuele bandenlijst (kanaal None = alle kanalen).
+    let eq_enabled: Arc<RwLock<bool>> = Arc::new(RwLock::new(false));
+    let eq_channels: Arc<RwLock<Vec<ChannelEq>>> = Arc::new(RwLock::new(Vec::new()));
     // Stop-ids die one-shot afspelen (ODF Percussive: klok e.d.)
     let percussive_stops: Arc<RwLock<std::collections::HashSet<u32>>> = Arc::new(RwLock::new(Default::default()));
     // Per-pipe voicing: (stop_id, pipe_num) → (volume_db, pitch_cents)
@@ -843,7 +1183,8 @@ fn run_audio_thread(
     let reverb_mix_clone = reverb_mix.clone();
     let fdn_reverb_clone = fdn_reverb.clone();
     let use_algo_reverb_clone = use_algorithmic_reverb.clone();
-    let eq_clone = parametric_eq.clone();
+    let eq_enabled_clone = eq_enabled.clone();
+    let eq_channels_clone = eq_channels.clone();
     let voicing_clone = pipe_voicing.clone();
     let odf_voicing_clone = odf_voicing.clone();
     let output_channels_clone = division_output_channels.clone();
@@ -943,15 +1284,15 @@ fn run_audio_thread(
                         // Echte release-samples (opgenomen kerkakoestiek): staan
                         // onder de gemarkeerde key. Gevonden → start een one-shot
                         // release-voice op het huidige niveau van de stervende
-                        // voice en fade de sustain kort uit (42 ms overlap werkt
-                        // als crossfade). Niet gevonden → klassieke fade alleen.
+                        // voice; de sustain fade't toonhoogte-afhankelijk uit
+                        // (GrandOrgue get_fader_length: bas ~184 ms, discant ~6 ms)
+                        // wat als crossfade werkt. Niet gevonden → fade alleen.
                         let release_key = (stop_id, pipe_num | RELEASE_PIPE_FLAG);
                         let rel_full = samples_clone.read().get(&release_key).cloned();
-                        let rel_pre = if rel_full.is_none() {
-                            preloads_clone.read().get(&release_key).cloned()
-                        } else {
-                            None
-                        };
+                        // Preload óók bij een geladen full sample ophalen: die
+                        // draagt trim_start = segment-start (release-uitsnede in
+                        // hetzelfde bestand) — de full sample begint op frame 0.
+                        let rel_pre = preloads_clone.read().get(&release_key).cloned();
 
                         let mut spawn: Option<PlayingVoice> = None;
                         let mut voices_lock = voices_clone.write();
@@ -966,7 +1307,18 @@ fn run_audio_thread(
                                     // huidige envelope-niveau van de sustain.
                                     let level = voice.envelope.clamp(0.05, 1.0);
                                     let mut rv = if let Some(sample) = rel_full.clone() {
-                                        PlayingVoice::new_from_sample(sample, stop_id, release_key.1, voice.midi_note, 1.0)
+                                        let mut v = PlayingVoice::new_from_sample(sample, stop_id, release_key.1, voice.midi_note, 1.0);
+                                        // Same-file release: de volledige sample is
+                                        // het HELE bestand — spring naar het
+                                        // release-segment (cue-marker), in
+                                        // output-rate frames.
+                                        if let Some(ref pre) = rel_pre {
+                                            if pre.trim_start > 0 && pre.sample_rate > 0 {
+                                                v.position = pre.trim_start as f64
+                                                    * sample_rate as f64 / pre.sample_rate as f64;
+                                            }
+                                        }
+                                        v
                                     } else {
                                         let pre = rel_pre.clone().unwrap();
                                         let mut v = PlayingVoice::new_from_preload(
@@ -982,18 +1334,68 @@ fn run_audio_thread(
                                     rv.one_shot = true;
                                     rv.envelope = level;
                                     rv.target_envelope = level;
-                                    debug!("Release-voice gestart: stop={} pipe={} niveau={:.2} bron={} len={} rate={:.3}",
+                                    debug!("Release-voice gestart: stop={} pipe={} niveau={:.2} bron={} len={} rate={:.3} pos={:.0}",
                                            stop_id, pipe_num, level,
                                            if rel_full.is_some() { "full" } else { "preload" },
-                                           rv.get_sample_len(), rv.rate);
+                                           rv.get_sample_len(), rv.rate, rv.position);
                                     spawn = Some(rv);
                                 }
-                                voice.release();
+                                voice.release_ms(release_fade_ms(voice.midi_note), sample_rate);
                             }
                         }
                         if let Some(rv) = spawn {
                             voices_lock.push(rv);
                         }
+                    }
+                    AudioCommand::ReleaseStop { stop_id } => {
+                        // Alle klinkende pijpen van dit register loslaten, met
+                        // dezelfde release-sample-logica als NoteOff (opgenomen
+                        // kerkakoestiek per pijp, maximaal één per pijp).
+                        let mut voices_lock = voices_clone.write();
+                        let mut spawned: std::collections::HashSet<u32> = Default::default();
+                        let mut spawns: Vec<PlayingVoice> = Vec::new();
+                        for voice in voices_lock.iter_mut() {
+                            if voice.stop_id != stop_id || voice.releasing || voice.one_shot {
+                                continue;
+                            }
+                            let release_key = (stop_id, voice.pipe_num | RELEASE_PIPE_FLAG);
+                            if !spawned.contains(&voice.pipe_num) {
+                                let rel_full = samples_clone.read().get(&release_key).cloned();
+                                let rel_pre = preloads_clone.read().get(&release_key).cloned();
+                                if rel_full.is_some() || rel_pre.is_some() {
+                                    let level = voice.envelope.clamp(0.05, 1.0);
+                                    let mut rv = if let Some(sample) = rel_full {
+                                        let mut v = PlayingVoice::new_from_sample(sample, stop_id, release_key.1, voice.midi_note, 1.0);
+                                        // Same-file release: spring naar het segment
+                                        // (zie NoteOff voor de uitleg).
+                                        if let Some(ref pre) = rel_pre {
+                                            if pre.trim_start > 0 && pre.sample_rate > 0 {
+                                                v.position = pre.trim_start as f64
+                                                    * sample_rate as f64 / pre.sample_rate as f64;
+                                            }
+                                        }
+                                        v
+                                    } else {
+                                        let pre = rel_pre.unwrap();
+                                        let mut v = PlayingVoice::new_from_preload(
+                                            pre, stop_id, release_key.1, voice.midi_note, 1.0, sample_rate,
+                                        );
+                                        if let Some(path) = v.needs_background_load() {
+                                            v.mark_load_requested();
+                                            let _ = load_tx_clone.try_send((release_key, path, sample_rate));
+                                        }
+                                        v
+                                    };
+                                    rv.one_shot = true;
+                                    rv.envelope = level;
+                                    rv.target_envelope = level;
+                                    spawns.push(rv);
+                                    spawned.insert(voice.pipe_num);
+                                }
+                            }
+                            voice.release_ms(release_fade_ms(voice.midi_note), sample_rate);
+                        }
+                        voices_lock.extend(spawns);
                     }
                     AudioCommand::RegisterPercussiveStops(set) => {
                         if !set.is_empty() {
@@ -1199,6 +1601,9 @@ fn run_audio_thread(
                         }
                     }
                     AudioCommand::SetAlgorithmicReverb { preset, rt60, pre_delay_ms, damping, room_size, mix } => {
+                        // Mix centraal bijhouden: de render-lus vermenigvuldigt het
+                        // wet-signaal met reverb_mix, voor FDN én convolutie gelijk.
+                        *reverb_mix_clone.write() = mix.clamp(0.0, 1.0);
                         let mut fdn = fdn_reverb_clone.write();
                         if let Some(p) = preset {
                             fdn.apply_preset(p, mix);
@@ -1246,12 +1651,14 @@ fn run_audio_thread(
                             info!("Division {} C/Cis spread: {}", division_index, enabled);
                         }
                     }
-                    AudioCommand::SetParametricEq { enabled, low_freq, low_gain, mid_freq, mid_gain, mid_q, high_freq, high_gain } => {
-                        let mut eq = eq_clone.write();
-                        eq.enabled = enabled;
-                        eq.configure(low_freq, low_gain, mid_freq, mid_gain, mid_q, high_freq, high_gain, sample_rate);
-                        info!("Parametric EQ: enabled={}, low={:.0}Hz/{:.1}dB, mid={:.0}Hz/{:.1}dB/Q{:.1}, high={:.0}Hz/{:.1}dB",
-                              enabled, low_freq, low_gain, mid_freq, mid_gain, mid_q, high_freq, high_gain);
+                    AudioCommand::SetEqBands { enabled, bands } => {
+                        *eq_enabled_clone.write() = enabled;
+                        // Bouw per fysiek uitgangskanaal de biquad-keten opnieuw.
+                        let chains: Vec<ChannelEq> = (0..channels)
+                            .map(|ci| ChannelEq::build(&bands, ci as u8, sample_rate))
+                            .collect();
+                        *eq_channels_clone.write() = chains;
+                        info!("EQ: enabled={}, {} banden over {} kanalen", enabled, bands.len(), channels);
                     }
                     AudioCommand::ClearSamples => {
                         samples_clone.write().clear();
@@ -1340,6 +1747,14 @@ fn run_audio_thread(
                 // C/Cis-spreiding is globaal actief zodra de sterkte > 0; per-divisie
                 // aan/uit wordt per voice gecheckt.
                 let ccis_on = ccis_strength > 1e-4;
+
+                // Galm + EQ: locks één keer per callback nemen (niet per sample).
+                let use_algo = *use_algo_reverb_clone.read();
+                let reverb_mix_now = *reverb_mix_clone.read();
+                let mut fdn_lock = fdn_reverb_clone.write();
+                let mut conv_lock = reverb_clone.write();
+                let eq_on = *eq_enabled_clone.read();
+                let mut eq_chains = eq_channels_clone.write();
 
                 for frame in data.chunks_mut(channels) {
                     // Per-division STEREO mix buckets (L/R): per-noot C/Cis-panning + per-
@@ -1511,53 +1926,62 @@ fn run_audio_thread(
                         }
                     }
 
-                    // Reverb (convolutie IR of algoritmische FDN) + EQ op het mono droog-signaal.
-                    let dry_mono = (sum_l + sum_r) * 0.5;
-                    let mut processed = dry_mono;
-                    if *use_algo_reverb_clone.read() {
-                        let mut fdn = fdn_reverb_clone.write();
-                        processed = fdn.process(processed);
-                    } else if let Some(ref mut rev) = *reverb_clone.write() {
-                        let mut out = [0.0f32; 1];
-                        rev.process(&[processed], &mut out);
-                        processed = out[0];
+                    // Galm: stereo, puur WET, additief op het droge signaal (geen
+                    // dry/wet-aftrek meer — die dempte het droge signaal en maakte
+                    // de galm nauwelijks hoorbaar). FDN levert gedecorreleerd L/R.
+                    // Convolutie (mono-IR) alleen wanneer er echt een IR geladen is;
+                    // anders valt de engine terug op de FDN zodat er ALTIJD galm
+                    // beschikbaar is zodra de mix > 0 staat.
+                    let (mut wet_l, mut wet_r) = (0.0f32, 0.0f32);
+                    if use_algo || conv_lock.is_none() {
+                        let (l, r) = fdn_lock.process_stereo(sum_l, sum_r);
+                        wet_l = l * reverb_mix_now;
+                        wet_r = r * reverb_mix_now;
+                    } else if let Some(ref mut rev) = *conv_lock {
+                        let w = rev.process_wet_sample((sum_l + sum_r) * 0.5) * reverb_mix_now;
+                        wet_l = w;
+                        wet_r = w;
                     }
-                    {
-                        let mut eq = eq_clone.write();
-                        processed = eq.process(processed);
-                    }
-                    // Het "diffuse" deel (galm-staart + EQ-kleuring) blijft hoorbaar als de
-                    // toetsen losgelaten zijn (dry_mono == 0), zodat de galm netjes uitklinkt.
-                    let diffuse = processed - dry_mono;
 
                     if channels >= 2 {
-                        // Diffuse galm naar het voorste paar (0/1).
-                        frame[0] += diffuse;
-                        frame[1] += diffuse;
-                        // Bij 6/8 kanalen: milde center-fill (ch 2) als geen divisie die expliciet
-                        // adresseert; LFE (ch 3) blijft leeg tenzij een divisie er naartoe routet.
+                        // Galm naar het voorste paar (0/1).
+                        frame[0] += wet_l;
+                        frame[1] += wet_r;
+                        // Bij 6/8 kanalen: milde galm-center-fill (ch 2) als geen divisie
+                        // die expliciet adresseert; LFE (ch 3) blijft leeg tenzij een
+                        // divisie er naartoe routet.
                         if channels >= 6 && (touched & (1u64 << 2)) == 0 {
-                            frame[2] += processed * 0.3;
-                        }
-                        // Soft clipping per kanaal + peak-meters (voorste paar).
-                        for (ci, s) in frame.iter_mut().enumerate() {
-                            *s = s.tanh();
-                            if ci == 0 { peak_l = peak_l.max(s.abs()); }
-                            else if ci == 1 { peak_r = peak_r.max(s.abs()); }
+                            frame[2] += (wet_l + wet_r) * 0.5 * 0.6;
                         }
                     } else {
-                        let out = (frame[0] + diffuse).tanh();
-                        frame[0] = out;
-                        peak_l = peak_l.max(out.abs());
-                        peak_r = peak_r.max(out.abs());
+                        frame[0] += (wet_l + wet_r) * 0.5;
+                    }
+
+                    // Vrije multi-band EQ: per fysiek uitgangskanaal een eigen keten,
+                    // toegepast op de volledige mix (droog + galm) van dat kanaal.
+                    if eq_on {
+                        for (ci, s) in frame.iter_mut().enumerate() {
+                            if let Some(chain) = eq_chains.get_mut(ci) {
+                                if !chain.is_empty() {
+                                    *s = chain.process(*s);
+                                }
+                            }
+                        }
+                    }
+
+                    // Soft clipping per kanaal + peak-meters (voorste paar).
+                    for (ci, s) in frame.iter_mut().enumerate() {
+                        *s = s.tanh();
+                        if ci == 0 { peak_l = peak_l.max(s.abs()); }
+                        else if ci == 1 { peak_r = peak_r.max(s.abs()); }
                     }
                     // Recorder-tap: neem de VOLLEDIGE stereo-downmix op (alle divisies +
                     // galm), onafhankelijk van de fysieke kanaalrouting. Anders zou een
                     // klavier dat naar surround-kanalen geroutet is niet in de opname
                     // belanden. sum_l/sum_r bevatten alle divisies vóór kanaalroutering.
                     if rec_active.is_some() {
-                        let l = (sum_l + diffuse).tanh();
-                        let r = (sum_r + diffuse).tanh();
+                        let l = (sum_l + wet_l).tanh();
+                        let r = (sum_r + wet_r).tanh();
                         rec_buf.push(l);
                         rec_buf.push(r);
                     }
@@ -1588,63 +2012,94 @@ fn run_audio_thread(
     // Build the output stream in the device's native sample format. WASAPI is
     // typically F32; ASIO drivers (e.g. ASIO4ALL) are often I32/I16. For non-f32
     // formats we render into an f32 scratch buffer and convert.
-    // Diagnose: tel callbacks zodat de watchdog verderop kan zien of de driver
+    //
+    // De render-closure staat achter een Arc<Mutex<..>> zodat de watchdog de
+    // stream kan HERBOUWEN met dezelfde render-staat: een WASAPI-stream sterft
+    // wanneer Windows het default-apparaat wisselt of een apparaat verdwijnt
+    // (bv. bluetooth-koptelefoon verbindt) — zonder herstel blijft de app dan
+    // geluidloos tot een herstart.
+    // Diagnose: tel callbacks zodat de watchdog kan zien of de driver
     // überhaupt audio komt ophalen — een stream kan "starten" zonder ooit een
     // callback te leveren (bv. ASIO4ALL met bezet/offline apparaat) → stilte.
-    let cb_count = Arc::new(AtomicU64::new(0));
-    let cb_f32 = cb_count.clone();
-    let cb_i32 = cb_count.clone();
-    let cb_i16 = cb_count.clone();
-    let build = match sample_format {
-        cpal::SampleFormat::F32 => device.build_output_stream(
-            &stream_config,
-            move |d: &mut [f32], _: &cpal::OutputCallbackInfo| { cb_f32.fetch_add(1, Ordering::Relaxed); render(d); },
-            |err| error!("Audio stream error: {}", err),
-            None,
-        ),
-        cpal::SampleFormat::I32 => {
-            let mut scratch: Vec<f32> = Vec::new();
-            device.build_output_stream(
-                &stream_config,
-                move |d: &mut [i32], _: &cpal::OutputCallbackInfo| {
-                    cb_i32.fetch_add(1, Ordering::Relaxed);
-                    if scratch.len() != d.len() { scratch.resize(d.len(), 0.0); }
-                    render(&mut scratch);
-                    for (o, s) in d.iter_mut().zip(scratch.iter()) {
-                        *o = ((*s).clamp(-1.0, 1.0) * 2_147_483_647.0) as i32;
-                    }
-                },
-                |err| error!("Audio stream error: {}", err),
-                None,
-            )
-        }
-        cpal::SampleFormat::I16 => {
-            let mut scratch: Vec<f32> = Vec::new();
-            device.build_output_stream(
-                &stream_config,
-                move |d: &mut [i16], _: &cpal::OutputCallbackInfo| {
-                    cb_i16.fetch_add(1, Ordering::Relaxed);
-                    if scratch.len() != d.len() { scratch.resize(d.len(), 0.0); }
-                    render(&mut scratch);
-                    for (o, s) in d.iter_mut().zip(scratch.iter()) {
-                        *o = ((*s).clamp(-1.0, 1.0) * 32_767.0) as i16;
-                    }
-                },
-                |err| error!("Audio stream error: {}", err),
-                None,
-            )
-        }
-        other => {
-            let msg = format!("Unsupported sample format: {:?}", other);
-            let _ = ready_tx.send(Err(msg.clone()));
-            return Err(msg);
-        }
+    // De teller is gedeeld met AudioPlayer::new, die de eerste callback
+    // afwacht voordat de wissel als geslaagd geldt.
+    let cb_count = callbacks_seen;
+    let stream_error = Arc::new(AtomicBool::new(false));
+    let render_shared: Arc<parking_lot::Mutex<dyn FnMut(&mut [f32]) + Send>> =
+        Arc::new(parking_lot::Mutex::new(render));
+
+    // Herbruikbare stream-bouwer: bouwt (opnieuw) een output-stream op `device`
+    // rond de gedeelde render-closure.
+    let build_stream = |device: &cpal::Device,
+                        stream_config: &cpal::StreamConfig,
+                        sample_format: cpal::SampleFormat,
+                        render_shared: &Arc<parking_lot::Mutex<dyn FnMut(&mut [f32]) + Send>>,
+                        cb_count: &Arc<AtomicU64>,
+                        stream_error: &Arc<AtomicBool>|
+     -> Result<cpal::Stream, String> {
+        let err_flag = stream_error.clone();
+        let err_cb = move |err| {
+            error!("Audio stream error: {}", err);
+            err_flag.store(true, Ordering::Relaxed);
+        };
+        let build = match sample_format {
+            cpal::SampleFormat::F32 => {
+                let r = render_shared.clone();
+                let c = cb_count.clone();
+                device.build_output_stream(
+                    stream_config,
+                    move |d: &mut [f32], _: &cpal::OutputCallbackInfo| {
+                        c.fetch_add(1, Ordering::Relaxed);
+                        (r.lock())(d);
+                    },
+                    err_cb,
+                    None,
+                )
+            }
+            cpal::SampleFormat::I32 => {
+                let r = render_shared.clone();
+                let c = cb_count.clone();
+                let mut scratch: Vec<f32> = Vec::new();
+                device.build_output_stream(
+                    stream_config,
+                    move |d: &mut [i32], _: &cpal::OutputCallbackInfo| {
+                        c.fetch_add(1, Ordering::Relaxed);
+                        if scratch.len() != d.len() { scratch.resize(d.len(), 0.0); }
+                        (r.lock())(&mut scratch);
+                        for (o, s) in d.iter_mut().zip(scratch.iter()) {
+                            *o = ((*s).clamp(-1.0, 1.0) * 2_147_483_647.0) as i32;
+                        }
+                    },
+                    err_cb,
+                    None,
+                )
+            }
+            cpal::SampleFormat::I16 => {
+                let r = render_shared.clone();
+                let c = cb_count.clone();
+                let mut scratch: Vec<f32> = Vec::new();
+                device.build_output_stream(
+                    stream_config,
+                    move |d: &mut [i16], _: &cpal::OutputCallbackInfo| {
+                        c.fetch_add(1, Ordering::Relaxed);
+                        if scratch.len() != d.len() { scratch.resize(d.len(), 0.0); }
+                        (r.lock())(&mut scratch);
+                        for (o, s) in d.iter_mut().zip(scratch.iter()) {
+                            *o = ((*s).clamp(-1.0, 1.0) * 32_767.0) as i16;
+                        }
+                    },
+                    err_cb,
+                    None,
+                )
+            }
+            other => return Err(format!("Unsupported sample format: {:?}", other)),
+        };
+        build.map_err(|e| format!("Failed to build audio stream: {}", e))
     };
 
-    let stream = match build {
+    let mut stream = match build_stream(&device, &stream_config, sample_format, &render_shared, &cb_count, &stream_error) {
         Ok(s) => s,
-        Err(e) => {
-            let msg = format!("Failed to build audio stream: {}", e);
+        Err(msg) => {
             let _ = ready_tx.send(Err(msg.clone()));
             return Err(msg);
         }
@@ -1664,12 +2119,122 @@ fn run_audio_thread(
     // een delta-check. Een driver kan een init-burst leveren en daarna stoppen
     // (ASIO4ALL na een koude start), of zelfs pas na minuten uitvallen: de stream
     // lijkt dan actief maar is stil. Alleen een positieve delta bewijst audio.
+    // Bij een stream-fout (apparaat verdwenen/gewisseld) of stilgevallen
+    // callbacks probeert de watchdog de stream elke ~2s opnieuw op te bouwen op
+    // het (dan geldende) standaardapparaat.
     let mut ticks = 0u64;
     let mut prev_count = 0u64;
     let mut was_flowing = false;
+    let mut rebuild_pending = false;
+    let mut rebuild_failures = 0u32;
+    // Verificatievenster na een herbouw: (start-tick, callback-baseline).
+    // Een herbouwde stream telt pas als hersteld wanneer er écht callbacks
+    // komen — ASIO4ALL kan bouwen+starten en toch stil blijven.
+    let mut verify_since: Option<(u64, u64)> = None;
     while running.load(Ordering::Relaxed) {
         thread::sleep(std::time::Duration::from_millis(100));
         ticks += 1;
+
+        if stream_error.swap(false, Ordering::Relaxed) {
+            rebuild_pending = true;
+        }
+
+        // Loopt er een verificatievenster? Callbacks gezien → herstel bevestigd;
+        // na ~2,5 s zonder callbacks → als mislukking tellen en opnieuw proberen.
+        if let Some((t0, baseline)) = verify_since {
+            if cb_count.load(Ordering::Relaxed) > baseline {
+                verify_since = None;
+                rebuild_failures = 0;
+                info!("Audio-watchdog: herstel bevestigd — callbacks stromen weer");
+            } else if ticks.saturating_sub(t0) >= 25 {
+                verify_since = None;
+                rebuild_pending = true;
+                rebuild_failures += 1;
+                warn!("Audio-watchdog: herbouwde stream blijft stil ({} mislukte pogingen)", rebuild_failures);
+                if rebuild_failures >= 5 && rebuild_failures % 5 == 0 && rebuild_failures <= 15 {
+                    warn!("Audio-watchdog: volledige audio-herstart aangevraagd");
+                    restart_needed.store(true, Ordering::Relaxed);
+                }
+            }
+        }
+
+        // Herbouwpoging (elke ~2s zolang nodig): zelfde host, apparaat opnieuw
+        // resolven (het oorspronkelijke apparaat kan weg zijn → default).
+        if rebuild_pending && ticks % 20 == 0 {
+            warn!("Audio-watchdog: stream herbouwen (apparaat weggevallen of callbacks gestopt)...");
+            let mut attempt_ok = false;
+            // ASIO: altijd via de driver-cache — een verse host-enumeratie zou
+            // de al geladen driver niet vinden (her-init faalt) en de rebuild
+            // structureel laten mislukken.
+            let new_device = if host_is_asio {
+                asio_get_or_load_device_checked(cfg.device_name.as_deref()).ok()
+            } else {
+                let host = resolve_host(cfg.host_name.as_deref());
+                cfg.device_name.as_deref()
+                    .and_then(|want| {
+                        host.output_devices().ok().and_then(|mut devs| {
+                            devs.find(|d| d.name().map(|n| n == want).unwrap_or(false))
+                        })
+                    })
+                    .or_else(|| host.default_output_device())
+            };
+            if let Some(new_device) = new_device {
+                match new_device.default_output_config() {
+                    Ok(new_supported) => {
+                        // De render-closure is gebouwd op het oorspronkelijke
+                        // kanaalaantal en de oorspronkelijke samplerate (samples
+                        // zijn daarop geresampled). Forceer die config op het
+                        // nieuwe apparaat — lukt dat niet, dan proberen we het
+                        // over 2s opnieuw (garbled interleave of een systematische
+                        // pitch-shift is erger dan even geen geluid).
+                        let mut new_config: cpal::StreamConfig = new_supported.config();
+                        new_config.channels = stream_config.channels;
+                        new_config.sample_rate = cpal::SampleRate(sample_rate);
+                        new_config.buffer_size = stream_config.buffer_size;
+                        let dev_name = new_device.name().unwrap_or_default();
+                        match build_stream(&new_device, &new_config, new_supported.sample_format(), &render_shared, &cb_count, &stream_error) {
+                            Ok(new_stream) => match new_stream.play() {
+                                Ok(()) => {
+                                    stream = new_stream;
+                                    *device_out.write() = dev_name.clone();
+                                    rebuild_pending = false;
+                                    was_flowing = false;
+                                    attempt_ok = true;
+                                    prev_count = cb_count.load(Ordering::Relaxed);
+                                    // Nog niet als geslaagd tellen: eerst
+                                    // verifiëren dat er callbacks komen.
+                                    verify_since = Some((ticks, prev_count));
+                                    info!("Audio-watchdog: stream herbouwd op '{}' — wachten op callbacks", dev_name);
+                                }
+                                Err(e) => warn!("Audio-watchdog: herstelde stream start niet: {}", e),
+                            },
+                            Err(e) => warn!("Audio-watchdog: herbouwen mislukt ({}); nieuwe poging over 2s", e),
+                        }
+                    }
+                    Err(e) => warn!("Audio-watchdog: geen apparaat-config: {}", e),
+                }
+            } else {
+                warn!("Audio-watchdog: geen uitvoerapparaat beschikbaar; nieuwe poging over 2s");
+            }
+
+            // Noodrem: in-thread herbouwen kan structureel falen wanneer het
+            // vervangende apparaat een ander mix-formaat (samplerate/kanalen)
+            // heeft dan waarop deze render-thread gebouwd is. Elke 5 mislukte
+            // pogingen (~10 s) vragen we een VOLLEDIGE audio-herstart aan
+            // (herhaalbaar, met plafond tegen eindeloos flapperen); de
+            // herstel-thread (main.rs) bouwt dan een nieuwe player op de dan
+            // geldende apparaat-config en herlaadt het orgel.
+            // NB: bij een geslaagde build wordt de teller pas gereset zodra het
+            // verificatievenster hierboven echte callbacks heeft gezien.
+            if !attempt_ok {
+                rebuild_failures += 1;
+                if rebuild_failures >= 5 && rebuild_failures % 5 == 0 && rebuild_failures <= 15 {
+                    warn!("Audio-watchdog: {} herbouwpogingen mislukt — volledige audio-herstart aangevraagd", rebuild_failures);
+                    restart_needed.store(true, Ordering::Relaxed);
+                }
+            }
+        }
+
         let check = ticks == 30 || ticks == 60 || ticks % 300 == 0;
         if !check { continue; }
         let n = cb_count.load(Ordering::Relaxed);
@@ -1682,9 +2247,10 @@ fn run_audio_thread(
             }
             was_flowing = n > 0;
         } else if delta == 0 && was_flowing {
-            warn!("Audio-watchdog: callbacks GESTOPT ({} totaal) op host '{}' ({}) — er stroomt geen audio meer (apparaat bezet/offline? start desnoods op WASAPI en wissel daarna naar ASIO)",
+            warn!("Audio-watchdog: callbacks GESTOPT ({} totaal) op host '{}' ({}) — herbouwpoging volgt",
                   n, host_name, device_name);
             was_flowing = false;
+            rebuild_pending = true;
         } else if delta > 0 && !was_flowing {
             info!("Audio-watchdog: callbacks (weer) op gang ({} in dit venster)", delta);
             was_flowing = true;

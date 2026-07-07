@@ -10,7 +10,20 @@ use vpo_sampler::{OrganDefinition, LoadedOrgan};
 use vpo_midi::{MidiInputManager, MidiMessage};
 
 use crate::audio::{AudioPlayer, AudioCommand, AudioOutputConfig, resolve_host};
-use crate::commands::OrganInfoDto;
+use crate::commands::{OrganInfoDto, CouplerDto};
+
+/// Eén effectieve koppel-route na uitvouwen van (transitieve) koppels:
+/// speel toetsen van `source_division` óók op `destination_division`, met
+/// `pitch_offset` halve tonen verschuiving. `gate_type` is het type van de
+/// eerste schakel ("melody"/"bass" filteren op de hoogste/laagste ingedrukte
+/// toets van het bronklavier; overige typen gedragen zich als unisono).
+#[derive(Debug, Clone)]
+pub(crate) struct ExpandedCouplerRoute {
+    pub source_division: String,
+    pub destination_division: String,
+    pub pitch_offset: i32,
+    pub gate_type: String,
+}
 use crate::library::{OrganLibrary, load_library, save_library, TemperamentSettingsSaved, ReverbSettingsSaved, EqSettingsSaved};
 
 /// MIDI device info (safe to share)
@@ -78,7 +91,7 @@ pub struct LearnedKeyboardRange {
 }
 
 /// MIDI binding for a preset button
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MidiPresetBinding {
     /// Preset number (1-8)
     pub preset_num: u8,
@@ -87,7 +100,7 @@ pub struct MidiPresetBinding {
 }
 
 /// Types of MIDI events that can trigger a preset
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MidiPresetTrigger {
     /// A specific note on any channel
     Note { note: u8 },
@@ -139,6 +152,55 @@ pub struct AudioDeviceInfo {
     pub is_default: bool,
     pub sample_rates: Vec<u32>,
     pub channels: Vec<u16>,
+}
+
+/// Eerlijk resultaat van een audio-uitvoerwissel. De frontend beslist hiermee:
+/// orgel herladen wanneer `player_rebuilt` (nieuwe audio-thread = lege
+/// sample-maps), profiel pas actief markeren wanneer `switched`, en anders de
+/// `message` tonen. Vervangt de oude aanpak waarbij een fallback op de default
+/// host als "gelukt" werd gemeld en het geluid stil op het verkeerde apparaat
+/// belandde.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SwitchOutcome {
+    /// De gevráágde configuratie draait nu echt.
+    pub switched: bool,
+    /// Er is een nieuwe audio-thread: de aanroeper moet het orgel herladen.
+    pub player_rebuilt: bool,
+    /// Wat er nu werkelijk speelt (host/apparaat).
+    pub actual_host: String,
+    pub actual_device: String,
+    /// Huidig orgel-id (voor de herlaad-stap), indien geladen.
+    pub organ_id: Option<String>,
+    /// Nederlandse uitleg wanneer de wissel niet (volledig) slaagde.
+    pub message: Option<String>,
+}
+
+/// Bouw een AudioPlayer met een retry-ladder. ASIO4ALL en WASAPI geven hun
+/// apparaten asynchroon vrij na het sluiten van een stream/driver; direct
+/// opnieuw openen kan dan falen terwijl het een halve seconde later gewoon
+/// lukt. `delays_ms[i]` is de wachttijd vóór poging i (eerste meestal 0).
+fn build_player_with_retries(cfg: &AudioOutputConfig, delays_ms: &[u64]) -> Result<AudioPlayer, String> {
+    let mut last_err = String::from("geen poging gedaan");
+    for (i, delay) in delays_ms.iter().enumerate() {
+        if *delay > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(*delay));
+        }
+        match AudioPlayer::new(cfg.clone()) {
+            Ok(p) => {
+                if i > 0 {
+                    tracing::info!("Audio-uitgang {:?}/{:?} gebouwd bij poging {}",
+                        cfg.host_name, cfg.device_name, i + 1);
+                }
+                return Ok(p);
+            }
+            Err(e) => {
+                tracing::warn!("Poging {}/{} voor {:?}/{:?} faalde: {}",
+                    i + 1, delays_ms.len(), cfg.host_name, cfg.device_name, e);
+                last_err = e;
+            }
+        }
+    }
+    Err(last_err)
 }
 
 /// Shared application state
@@ -197,6 +259,10 @@ pub struct AppState {
     /// audio-thread) en mist de reload omdat current_organ_id nog niet gezet is;
     /// twee interleavende wissels kunnen elkaars player/prefs overschrijven.
     pub load_switch_gate: Arc<parking_lot::Mutex<()>>,
+    /// Tauri AppHandle voor events naar de frontend (laad-voortgang e.d.).
+    /// None bij headless gebruik (test-API vóór setup) — events worden dan
+    /// stilletjes overgeslagen.
+    pub app_handle: Arc<RwLock<Option<tauri::AppHandle>>>,
     /// Per-pipe voicing overrides: (stop_id, pipe_num) -> (volume_db, pitch_cents)
     pub pipe_voicings: Arc<RwLock<std::collections::HashMap<(u32, u32), (f32, f32)>>>,
     /// Per-divisie output-kanalen: lijst fysieke kanaalindices (leeg = standaard voorste paar 0/1).
@@ -430,6 +496,7 @@ impl AppState {
             crescendo_active_stops,
             midi_recording,
             load_switch_gate: Arc::new(parking_lot::Mutex::new(())),
+            app_handle: Arc::new(RwLock::new(None)),
             pipe_voicings: Arc::new(RwLock::new(std::collections::HashMap::new())),
             division_output_channels: Arc::new(RwLock::new(vec![Vec::new(); 32])),
             division_ccis_enabled: Arc::new(RwLock::new(vec![false; 32])),
@@ -842,6 +909,7 @@ impl AppState {
                         &msg, &crescendo_binding, &crescendo_enabled, &crescendo_stages,
                         &crescendo_stage, &crescendo_active_stops, &drawn_stops,
                         &audio_player, &loaded_organ_info,
+                        &midi_mappings, &active_couplers, &held_notes,
                     );
 
                     // Then handle normal MIDI (notes, etc.)
@@ -875,6 +943,7 @@ impl AppState {
                     &msg, &crescendo_binding, &crescendo_enabled, &crescendo_stages,
                     &crescendo_stage, &crescendo_active_stops, &drawn_stops,
                     &audio_player, &loaded_organ_info,
+                    &midi_mappings, &active_couplers, &held_notes,
                 );
                 Self::handle_midi_message(
                     msg,
@@ -1023,6 +1092,9 @@ impl AppState {
         drawn_stops: &Arc<RwLock<Vec<String>>>,
         audio_player: &Arc<RwLock<Option<AudioPlayer>>>,
         loaded_organ_info: &Arc<RwLock<Option<OrganInfoDto>>>,
+        midi_mappings: &Arc<RwLock<Vec<MidiChannelMapping>>>,
+        active_couplers: &Arc<RwLock<Vec<String>>>,
+        held_notes: &Arc<RwLock<Vec<(u8, u8, u8)>>>,
     ) {
         // Extract CC fields
         let (channel, controller, value) = match msg {
@@ -1102,7 +1174,9 @@ impl AppState {
         *crescendo_active_stops.write() = new_active.clone();
         *crescendo_stage.write() = new_stage;
 
-        // Update organ_info active state + send NoteOff for removed stops to release voices
+        // Update organ_info active state + synchroniseer klinkende voices:
+        // weggetrokken registers zwijgen direct, bijgetrokken registers spelen de
+        // ingedrukte toetsen direct mee (GrandOrgue-gedrag tijdens het spelen).
         {
             let drawn_now = drawn_stops.read().clone();
             let mut organ = loaded_organ_info.write();
@@ -1112,21 +1186,15 @@ impl AppState {
                         stop.drawn = drawn_now.contains(&stop.id);
                     }
                 }
-                // Send NoteOff to released stops (release any sounding voices)
                 if let Some(ref player) = *audio_player.read() {
+                    let mappings = midi_mappings.read();
+                    let couplers = active_couplers.read();
+                    let held = held_notes.read();
                     for removed_id in &to_remove {
-                        for div in &o.divisions {
-                            if let Some(stop) = div.stops.iter().find(|s| &s.id == removed_id) {
-                                let first = stop.first_midi_note as u32;
-                                let last = stop.last_midi_note as u32;
-                                for pipe_num in 1..=(last - first + 1) {
-                                    let _ = player.send_command(AudioCommand::NoteOff {
-                                        stop_id: stop.internal_stop_id,
-                                        pipe_num,
-                                    });
-                                }
-                            }
-                        }
+                        Self::sync_stop_voices_inner(o, player, &mappings, &couplers, &held, removed_id, false);
+                    }
+                    for added_id in &to_add {
+                        Self::sync_stop_voices_inner(o, player, &mappings, &couplers, &held, added_id, true);
                     }
                 }
             }
@@ -1469,7 +1537,8 @@ impl AppState {
                     }
                 }
 
-                // Coupler routing: play coupled division stops
+                // Coupler routing: play coupled division stops. De routes zijn
+                // transitief uitgevouwen (Pedaal→HW + HW→NW ⇒ ook Pedaal→NW).
                 let couplers = active_couplers.read();
                 if !couplers.is_empty() {
                     if let Some(ref coupler_list) = o.couplers {
@@ -1479,15 +1548,11 @@ impl AppState {
                             .map(|c| c.source_division.clone())
                             .collect();
 
-                        for coupler in coupler_list {
-                            if !couplers.contains(&coupler.id) { continue; }
-                            // T.A. koppels are handled separately (they suppress reeds)
-                            if coupler.coupler_type == "ta" { continue; }
-
+                        for route in Self::expand_coupler_routes(coupler_list, &couplers) {
                             // Melody coupler: only couple if this is the highest held note on the source division
-                            if coupler.coupler_type == "melody" {
+                            if route.gate_type == "melody" {
                                 let held = held_notes.read();
-                                let src_mapping_m = mappings.iter().find(|m| m.division == coupler.source_division);
+                                let src_mapping_m = mappings.iter().find(|m| m.division == route.source_division);
                                 let highest = held.iter()
                                     .filter(|&&(ch, _, _)| src_mapping_m.map_or(true, |m| m.channel.map_or(true, |mch| mch == ch)))
                                     .map(|&(_, n, _)| n)
@@ -1496,9 +1561,9 @@ impl AppState {
                             }
 
                             // Bass coupler: only couple if this is the lowest held note on the source division
-                            if coupler.coupler_type == "bass" {
+                            if route.gate_type == "bass" {
                                 let held = held_notes.read();
-                                let src_mapping_b = mappings.iter().find(|m| m.division == coupler.source_division);
+                                let src_mapping_b = mappings.iter().find(|m| m.division == route.source_division);
                                 let lowest = held.iter()
                                     .filter(|&&(ch, _, _)| src_mapping_b.map_or(true, |m| m.channel.map_or(true, |mch| mch == ch)))
                                     .map(|&(_, n, _)| n)
@@ -1507,19 +1572,22 @@ impl AppState {
                             }
 
                             // Check if source division accepts this MIDI channel
-                            let src_mapping = mappings.iter().find(|m| m.division == coupler.source_division);
+                            let src_mapping = mappings.iter().find(|m| m.division == route.source_division);
                             let src_accepts = match src_mapping {
                                 Some(m) => m.channel.map_or(true, |ch| ch == channel),
                                 None => true,
                             };
                             if !src_accepts { continue; }
                             let src_transpose = src_mapping.map_or(0, |m| m.transpose);
-                            // Apply source transpose + coupler pitch offset
-                            let coupled_note = (note as i32 + src_transpose as i32 + coupler.pitch_offset).clamp(0, 127) as u8;
+                            // Apply source transpose + (gesommeerde) coupler pitch offset
+                            let coupled_note = (note as i32 + src_transpose as i32 + route.pitch_offset).clamp(0, 127) as u8;
                             // Play through destination division's drawn stops
-                            if let Some(dest_div) = o.divisions.iter().find(|d| d.name == coupler.destination_division) {
+                            if let Some(dest_div) = o.divisions.iter().find(|d| d.name == route.destination_division) {
+                                let dest_ta = ta_divisions.contains(&dest_div.name);
                                 for stop in &dest_div.stops {
                                     if stops.contains(&stop.id) {
+                                        // T.A. op de doeldivisie: geen tongwerken meekoppelen
+                                        if dest_ta && stop.is_reed { continue; }
                                         let s_first = stop.first_midi_note as u32;
                                         let s_last = stop.last_midi_note as u32;
                                         let t = coupled_note as u32;
@@ -1591,22 +1659,25 @@ impl AppState {
                     }
                 }
 
-                // Coupler routing for NoteOff - send to ALL stops (not just drawn)
+                // Coupler routing for NoteOff - send to ALL stops (not just drawn).
+                // Zelfde transitieve route-uitvouwing als NoteOn; melody/bass-
+                // poorten worden hier NIET toegepast (de gekoppelde noot kan al
+                // klinken terwijl hij inmiddels niet meer de hoogste/laagste is —
+                // NoteOff moet hem altijd kunnen loslaten; NoteOff op een niet-
+                // klinkende pijp is onschuldig).
                 let couplers = active_couplers.read();
                 if !couplers.is_empty() {
                     if let Some(ref coupler_list) = o.couplers {
-                        for coupler in coupler_list {
-                            if !couplers.contains(&coupler.id) { continue; }
-                            if coupler.coupler_type == "ta" { continue; }
-                            let src_mapping = mappings.iter().find(|m| m.division == coupler.source_division);
+                        for route in Self::expand_coupler_routes(coupler_list, &couplers) {
+                            let src_mapping = mappings.iter().find(|m| m.division == route.source_division);
                             let src_accepts = match src_mapping {
                                 Some(m) => m.channel.map_or(true, |ch| ch == channel),
                                 None => true,
                             };
                             if !src_accepts { continue; }
                             let src_transpose = src_mapping.map_or(0, |m| m.transpose);
-                            let coupled_note = (note as i32 + src_transpose as i32 + coupler.pitch_offset).clamp(0, 127) as u8;
-                            if let Some(dest_div) = o.divisions.iter().find(|d| d.name == coupler.destination_division) {
+                            let coupled_note = (note as i32 + src_transpose as i32 + route.pitch_offset).clamp(0, 127) as u8;
+                            if let Some(dest_div) = o.divisions.iter().find(|d| d.name == route.destination_division) {
                                 for stop in &dest_div.stops {
                                     let s_first = stop.first_midi_note as u32;
                                     let s_last = stop.last_midi_note as u32;
@@ -1681,6 +1752,26 @@ impl AppState {
     /// List output devices for a given host name (None = default host).
     pub fn list_audio_devices_for_host(&self, host_name: Option<&str>) -> Vec<AudioDeviceInfo> {
         use cpal::traits::{DeviceTrait, HostTrait};
+        // ASIO: alléén drivernamen uit het register — géén cpal-enumeratie.
+        // Die laadt en init't elke driver, waarbij ASIO4ALL de WASAPI-endpoints
+        // exclusief claimt: de lopende stream valt weg (watchdog-herbouw bij
+        // elke start) en een volgende ASIO-init in dit proces kan falen met
+        // "No audio output device found". De driver wordt nu pas geladen op
+        // het moment dat er echt een ASIO-stream gebouwd wordt.
+        if host_name.map(|h| h.eq_ignore_ascii_case("asio")).unwrap_or(false) {
+            return crate::audio::asio_driver_names()
+                .into_iter()
+                .enumerate()
+                .map(|(i, name)| AudioDeviceInfo {
+                    is_default: i == 0,
+                    name,
+                    // Niet opgevraagd (zou de driver initialiseren); de
+                    // gangbare rates volstaan voor de instellingen-UI.
+                    sample_rates: vec![44100, 48000],
+                    channels: vec![2],
+                })
+                .collect();
+        }
         let host = resolve_host(host_name);
         let default_name = host.default_output_device().and_then(|d| d.name().ok());
         let mut out = Vec::new();
@@ -1731,12 +1822,12 @@ impl AppState {
     /// The new audio thread starts with empty sample maps, so the caller (the
     /// frontend) must reload the current organ afterwards — that re-registers the
     /// preload buffers AND re-applies all per-organ DSP settings via the normal
-    /// post-load path. `current_organ_id` is returned so the caller knows whether
-    /// a reload is needed.
-    pub fn switch_audio_output(&self, cfg: AudioOutputConfig) -> Result<Option<String>, String> {
+    /// post-load path. De `SwitchOutcome` vertelt de aanroeper eerlijk wat er
+    /// gebeurd is: gewisseld, hersteld naar de vorige uitgang, of teruggevallen.
+    pub fn switch_audio_output(&self, cfg: AudioOutputConfig) -> Result<SwitchOutcome, String> {
         // Serialiseer t.o.v. orgel-loads en andere wissels (zie load_switch_gate).
         let _gate = self.load_switch_gate.lock();
-        self.switch_audio_output_inner(cfg)
+        self.switch_audio_output_inner(cfg, true, false)
     }
 
     /// Voer de opgeslagen ASIO-voorkeur uitgesteld uit (aangeroepen door main.rs,
@@ -1744,7 +1835,7 @@ impl AppState {
     /// stream op). Herleest de prefs en checkt de actieve host BINNEN de gate,
     /// zodat een tussentijdse handmatige keuze van de gebruiker nooit wordt
     /// teruggedraaid en de wissel niet met een lopende orgel-load interleaved.
-    pub fn apply_deferred_asio_pref(&self) -> Result<Option<String>, String> {
+    pub fn apply_deferred_asio_pref(&self) -> Result<Option<SwitchOutcome>, String> {
         let _gate = self.load_switch_gate.lock();
         let prefs = load_audio_prefs(&self.app_data_dir);
         let still_asio = prefs.host.as_deref()
@@ -1760,70 +1851,246 @@ impl AppState {
             host_name: prefs.host.clone(),
             device_name: prefs.device.clone(),
             buffer_frames: prefs.buffer_frames,
-        })
+        }, true, false).map(Some)
     }
 
-    fn switch_audio_output_inner(&self, cfg: AudioOutputConfig) -> Result<Option<String>, String> {
-        // ASIO-drivers zijn single-client: zolang de oude player de driver vast-
-        // houdt, ziet een tweede open geen apparaat ("No audio output device
-        // found"). Bij een ASIO→ASIO-wissel (bv. andere buffergrootte) moet de
-        // oude stream dus éérst dicht. Mislukt de nieuwe daarna, dan vallen we
-        // terug op de default host zodat er altijd audio blijft.
+    /// `persist`: sla de gevraagde configuratie op als voorkeur. Alleen wanneer
+    /// de wissel een bewuste keuze is (UI/deferred ASIO) — het noodherstel mag
+    /// de voorkeur van de gebruiker nooit overschrijven.
+    /// `force_teardown`: breek de oude player altijd éérst af (noodherstel:
+    /// de oude player is aantoonbaar kapot, "bouw eerst nieuw" heeft geen zin).
+    fn switch_audio_output_inner(&self, cfg: AudioOutputConfig, persist: bool, force_teardown: bool) -> Result<SwitchOutcome, String> {
         let new_is_asio = cfg.host_name.as_deref()
             .map(|h| h.eq_ignore_ascii_case("asio"))
             .unwrap_or(false);
         let old_is_asio = self.audio_player.read().as_ref()
             .map(|p| p.current_host.read().eq_ignore_ascii_case("asio"))
             .unwrap_or(false);
-
-        if new_is_asio && old_is_asio {
-            let old = { self.audio_player.write().take() };
-            drop(old);
-            let built = AudioPlayer::new(cfg.clone())
-                .or_else(|e| {
-                    tracing::warn!("ASIO→ASIO-wissel faalde ({}); terugvallen op default host", e);
-                    AudioPlayer::new_default()
-                })
-                .or_else(|e| {
-                    // De driver kan het apparaat met vertraging vrijgeven; één
-                    // nieuwe poging na 500 ms dicht dat venster.
-                    tracing::warn!("Fallback faalde ook ({}); nieuwe poging na 500 ms", e);
-                    std::thread::sleep(std::time::Duration::from_millis(500));
-                    AudioPlayer::new(cfg.clone()).or_else(|_| AudioPlayer::new_default())
-                });
-            match built {
-                Ok(p) => *self.audio_player.write() = Some(p),
-                // audio_player is nu leeg tot een volgende wissel slaagt — meld
-                // dat expliciet i.p.v. stil geluidloos te blijven.
-                Err(e) => return Err(format!(
-                    "Audio-wissel mislukt en geen fallback beschikbaar; geluid is uit tot een nieuwe wissel slaagt: {}", e)),
+        // Huidige configuratie onthouden: bij een mislukte wissel herstellen we
+        // de VORIGE uitgang (niet zomaar de default — "geluid ineens uit de
+        // laptopspeakers" terwijl de UI hoofdtelefoon toont is precies de bug).
+        let old_cfg = self.audio_player.read().as_ref().map(|p| {
+            let host = p.current_host.read().clone();
+            let device = p.current_device.read().clone();
+            let buffer = *p.current_buffer_frames.read();
+            AudioOutputConfig {
+                host_name: if host.is_empty() { None } else { Some(host) },
+                device_name: if device.is_empty() { None } else { Some(device) },
+                buffer_frames: if buffer > 0 { Some(buffer) } else { None },
             }
-        } else {
-            // 1) Build the new player BEFORE tearing down the old one, so a failure
-            //    (e.g. ASIO device busy) leaves the existing audio intact. Voor
-            //    WASAPI→ASIO is dit bovendien functioneel: ASIO4ALL initialiseert
-            //    alleen betrouwbaar terwijl er al een stream op het apparaat draait
-            //    (zelfde warm-up-effect als in AppState::new).
-            let new_player = AudioPlayer::new(cfg.clone())?;
-
-            // 2) Swap it in under a short write lock; drop the OLD player only AFTER
-            //    releasing the guard so its Drop/Shutdown can't block other readers
-            //    (parking_lot RwLock is not re-entrant).
-            let old = {
-                let mut guard = self.audio_player.write();
-                guard.replace(new_player)
-            };
-            drop(old);
-        }
-
-        // 3) Persist the selection.
-        save_audio_prefs(&self.app_data_dir, &AudioPrefs {
-            host: cfg.host_name.clone(),
-            device: cfg.device_name.clone(),
-            buffer_frames: cfg.buffer_frames,
         });
 
-        Ok(self.current_organ_id.read().clone())
+        let outcome = |switched: bool, player_rebuilt: bool, message: Option<String>, state: &Self| {
+            let (actual_host, actual_device) = state.audio_player.read().as_ref()
+                .map(|p| (p.current_host.read().clone(), p.current_device.read().clone()))
+                .unwrap_or_default();
+            SwitchOutcome {
+                switched,
+                player_rebuilt,
+                actual_host,
+                actual_device,
+                organ_id: state.current_organ_id.read().clone(),
+                message,
+            }
+        };
+
+        // Van of naar ASIO (of noodherstel): oude player éérst volledig sluiten.
+        // ASIO4ALL claimt bij init de WASAPI-endpoints exclusief; zolang onze
+        // eigen stream (of zijn watchdog, die elke 2s herbouwt!) het apparaat
+        // vasthoudt, faalt de ASIO-init met "No audio output device found".
+        // Andersom houdt een oude ASIO-player het endpoint exclusief vast,
+        // waardoor een nieuwe WASAPI-stream op datzelfde apparaat niet kan
+        // starten (0x8889000A, device in use). Empirisch geverifieerd op deze
+        // hardware (probe 2026-07-07). De retry-ladder vangt het asynchrone
+        // vrijgeven van endpoints/driver op.
+        if new_is_asio || old_is_asio || force_teardown {
+            if let Some(old) = { self.audio_player.write().take() } {
+                old.shutdown_and_wait(std::time::Duration::from_secs(2));
+                drop(old);
+            }
+            // ASIO-doel: ruime ladder (driver/endpoints komen asynchroon vrij).
+            // Niet-ASIO-doel: kort — als het endpoint bezet is door de idle
+            // ASIO-cache helpt wachten niet; de release-stap hieronder wel.
+            let ladder: &[u64] = if new_is_asio { &[0, 500, 1200, 2500] } else { &[0, 400] };
+            match build_player_with_retries(&cfg, ladder) {
+                Ok(p) => {
+                    *self.audio_player.write() = Some(p);
+                    if persist {
+                        save_audio_prefs(&self.app_data_dir, &AudioPrefs {
+                            host: cfg.host_name.clone(),
+                            device: cfg.device_name.clone(),
+                            buffer_frames: cfg.buffer_frames,
+                        });
+                    }
+                    return Ok(outcome(true, true, None, self));
+                }
+                Err(e) => {
+                    // Doel is niet-ASIO maar er hangt nog een (idle) gecachte
+                    // ASIO-driver die het endpoint exclusief bezet kan houden
+                    // (0x8889000A, device in use): driver vrijgeven en nog één
+                    // keer proberen. Bewust pas hier — na vrijgave kan ASIO in
+                    // dit proces meestal niet meer terugkomen.
+                    if !new_is_asio && crate::audio::asio_release_cached_driver() {
+                        if let Ok(p) = build_player_with_retries(&cfg, &[300, 900]) {
+                            *self.audio_player.write() = Some(p);
+                            if persist {
+                                save_audio_prefs(&self.app_data_dir, &AudioPrefs {
+                                    host: cfg.host_name.clone(),
+                                    device: cfg.device_name.clone(),
+                                    buffer_frames: cfg.buffer_frames,
+                                });
+                            }
+                            return Ok(outcome(true, true, None, self));
+                        }
+                    }
+                    tracing::warn!("Wissel naar {:?}/{:?} definitief mislukt ({}); vorige uitgang herstellen",
+                        cfg.host_name, cfg.device_name, e);
+                    // Vorige uitgang terugbouwen zodat de gebruiker hoorbaar
+                    // blijft waar hij was; de voorkeur blijft onaangetast.
+                    if let Some(oldc) = old_cfg {
+                        if let Ok(p) = build_player_with_retries(&oldc, &[0, 600]) {
+                            *self.audio_player.write() = Some(p);
+                            return Ok(outcome(false, true, Some(format!(
+                                "Wissel mislukt: {}. De vorige uitgang is hersteld.", e)), self));
+                        }
+                    }
+                    // Vorige uitgang ook niet terug te bouwen → default host,
+                    // er moet altijd een uitweg naar geluid blijven.
+                    match build_player_with_retries(&AudioOutputConfig::default(), &[0, 600]) {
+                        Ok(p) => {
+                            *self.audio_player.write() = Some(p);
+                            Ok(outcome(false, true, Some(format!(
+                                "Wissel mislukt: {}. Audio speelt nu op het standaardapparaat.", e)), self))
+                        }
+                        Err(e2) => Err(format!(
+                            "Audio-wissel mislukt en geen fallback beschikbaar; geluid is uit tot een nieuwe wissel slaagt: {} / {}", e, e2)),
+                    }
+                }
+            }
+        } else {
+            // Puur WASAPI↔WASAPI: bouw de nieuwe player éérst, wissel daarna —
+            // een mislukte wissel laat de huidige uitgang dan volledig intact.
+            match AudioPlayer::new(cfg.clone()) {
+                Ok(new_player) => {
+                    // Swap onder een kort write-lock; de OUDE player pas droppen
+                    // ná het vrijgeven van de guard (parking_lot RwLock is niet
+                    // re-entrant; Drop/Shutdown mag andere lezers niet blokkeren).
+                    let old = {
+                        let mut guard = self.audio_player.write();
+                        guard.replace(new_player)
+                    };
+                    drop(old);
+                    if persist {
+                        save_audio_prefs(&self.app_data_dir, &AudioPrefs {
+                            host: cfg.host_name.clone(),
+                            device: cfg.device_name.clone(),
+                            buffer_frames: cfg.buffer_frames,
+                        });
+                    }
+                    Ok(outcome(true, true, None, self))
+                }
+                Err(e) if old_cfg.is_some() => {
+                    // Mogelijk houdt een idle gecachte ASIO-driver het gevraagde
+                    // WASAPI-endpoint bezet: vrijgeven en één keer opnieuw.
+                    if crate::audio::asio_release_cached_driver() {
+                        if let Ok(new_player) = build_player_with_retries(&cfg, &[300, 900]) {
+                            let old = {
+                                let mut guard = self.audio_player.write();
+                                guard.replace(new_player)
+                            };
+                            drop(old);
+                            if persist {
+                                save_audio_prefs(&self.app_data_dir, &AudioPrefs {
+                                    host: cfg.host_name.clone(),
+                                    device: cfg.device_name.clone(),
+                                    buffer_frames: cfg.buffer_frames,
+                                });
+                            }
+                            return Ok(outcome(true, true, None, self));
+                        }
+                    }
+                    // Oude uitgang draait gewoon door: eerlijk melden, niets
+                    // herladen, voorkeuren onaangetast.
+                    Ok(outcome(false, false, Some(format!(
+                        "Wissel mislukt: {}. De huidige uitgang blijft actief.", e)), self))
+                }
+                Err(e) => {
+                    // Er wás geen player (audio lag er al uit): probeer de
+                    // default host zodat er in elk geval weer geluid komt.
+                    match build_player_with_retries(&AudioOutputConfig::default(), &[0, 600]) {
+                        Ok(p) => {
+                            *self.audio_player.write() = Some(p);
+                            Ok(outcome(false, true, Some(format!(
+                                "Wissel mislukt: {}. Audio speelt nu op het standaardapparaat.", e)), self))
+                        }
+                        Err(e2) => Err(format!(
+                            "Audio-wissel mislukt en geen fallback beschikbaar; geluid is uit tot een nieuwe wissel slaagt: {} / {}", e, e2)),
+                    }
+                }
+            }
+        }
+    }
+
+    /// Noodherstel van de audio: de watchdog in de audio-thread kon de stream
+    /// herhaaldelijk niet herbouwen (bv. apparaat verdwenen en de vervangende
+    /// default heeft een ander mix-formaat dan waarop de render-thread is
+    /// gebouwd). Bouw dan de HELE player opnieuw volgens de opgeslagen
+    /// voorkeur — of de default host als dat faalt — zodat er weer geluid komt.
+    /// Retourneert `Some(organ_id)` wanneer er hersteld is en het orgel herladen
+    /// moet worden; `None` wanneer er niets te doen was.
+    pub fn recover_audio_if_flagged(&self) -> Option<Option<String>> {
+        // Goedkope voorcontrole zonder gate (dit draait elke 3 s). Een player
+        // die helemaal WEG is (eerdere wissel/herstel volledig mislukt) telt
+        // ook als herstel-behoefte — anders blijft de app voorgoed geluidloos.
+        let maybe_flagged = {
+            let guard = self.audio_player.read();
+            match guard.as_ref() {
+                Some(p) => p.restart_needed.load(std::sync::atomic::Ordering::Relaxed),
+                None => true,
+            }
+        };
+        if !maybe_flagged {
+            return None;
+        }
+
+        // Serialiseer met wissels/orgel-loads en HERCHECK de vlag bínnen de
+        // gate: een gelijktijdige handmatige wissel plaatst een verse player
+        // (vlag=false) en die mag hier niet overschreven worden. NB: de gate is
+        // niet reentrant, dus hieronder de inner-variant gebruiken.
+        let _gate = self.load_switch_gate.lock();
+        let flagged = {
+            let guard = self.audio_player.read();
+            match guard.as_ref() {
+                Some(p) => p.restart_needed.swap(false, std::sync::atomic::Ordering::Relaxed),
+                None => true,
+            }
+        };
+        if !flagged {
+            return None;
+        }
+
+        tracing::warn!("Audio-noodherstel: volledige audio-herstart (watchdog kreeg de stream niet meer aan de praat)");
+        // Voorkeur pas binnen de gate lezen: een zojuist gelukte handmatige
+        // keuze wordt zo meegenomen in plaats van een verouderde voorkeur.
+        // force_teardown: de oude player is aantoonbaar kapot — altijd eerst
+        // afbreken, "bouw eerst nieuw" zou alleen maar om het apparaat vechten.
+        let prefs = load_audio_prefs(&self.app_data_dir);
+        let cfg = AudioOutputConfig {
+            host_name: prefs.host,
+            device_name: prefs.device,
+            buffer_frames: prefs.buffer_frames,
+        };
+        match self.switch_audio_output_inner(cfg, false, true) {
+            // Ook een niet-geslaagde wissel kan een werkende fallback-player
+            // hebben opgeleverd (switched=false, player_rebuilt=true): het
+            // orgel moet dan evengoed herladen worden.
+            Ok(o) if o.player_rebuilt => Some(o.organ_id),
+            Ok(_) => None,
+            Err(e) => {
+                tracing::error!("Audio-noodherstel volledig mislukt ({}); nieuwe poging volgt", e);
+                None
+            }
+        }
     }
 
     /// Send audio command
@@ -1883,6 +2150,170 @@ impl AppState {
         } else {
             drawn.push(stop_id.to_string());
             Some(true)
+        }
+    }
+
+    /// Vouw de actieve koppels uit tot effectieve routes, ínclusief doorkoppelen
+    /// (transitief): is Pedaal→Hoofdwerk actief én Hoofdwerk→Nevenwerk, dan
+    /// ontstaat ook de route Pedaal→Nevenwerk (met gesommeerde octaaf-offsets,
+    /// bv. Pedaal→HW 4' + HW→NW 16' = Pedaal→NW unisono). Het poort-type
+    /// (melody/bass) van de EERSTE schakel blijft gelden — die filtert op de
+    /// fysiek ingedrukte toetsen van het bronklavier; tussenliggende schakels
+    /// gedragen zich als unisono-doorvoer. Cykels (HW→NW én NW→HW actief)
+    /// worden afgekapt via een bezocht-set en een dieptelimiet.
+    pub(crate) fn expand_coupler_routes(
+        coupler_list: &[CouplerDto],
+        active: &[String],
+    ) -> Vec<ExpandedCouplerRoute> {
+        use std::collections::HashSet;
+        const MAX_DEPTH: usize = 8;
+        const MAX_ROUTES: usize = 64;
+
+        let active_couplers: Vec<&CouplerDto> = coupler_list.iter()
+            .filter(|c| c.coupler_type != "ta" && active.contains(&c.id))
+            .collect();
+
+        let mut routes: Vec<ExpandedCouplerRoute> = Vec::new();
+        let mut seen: HashSet<(String, String, i32, String)> = HashSet::new();
+
+        // Start met de directe (eerste-schakel) routes.
+        let mut frontier: Vec<ExpandedCouplerRoute> = active_couplers.iter()
+            .map(|c| ExpandedCouplerRoute {
+                source_division: c.source_division.clone(),
+                destination_division: c.destination_division.clone(),
+                pitch_offset: c.pitch_offset,
+                gate_type: c.coupler_type.clone(),
+            })
+            .collect();
+
+        let mut depth = 0;
+        while !frontier.is_empty() && depth < MAX_DEPTH && routes.len() < MAX_ROUTES {
+            let mut next: Vec<ExpandedCouplerRoute> = Vec::new();
+            for r in frontier {
+                let key = (r.source_division.clone(), r.destination_division.clone(), r.pitch_offset, r.gate_type.clone());
+                if !seen.insert(key) {
+                    continue;
+                }
+                // Doorkoppelen: koppels waarvan de bron gelijk is aan het doel
+                // van deze route koppelen verder (transitief).
+                for c in &active_couplers {
+                    if c.source_division == r.destination_division {
+                        next.push(ExpandedCouplerRoute {
+                            source_division: r.source_division.clone(),
+                            destination_division: c.destination_division.clone(),
+                            pitch_offset: r.pitch_offset + c.pitch_offset,
+                            gate_type: r.gate_type.clone(),
+                        });
+                    }
+                }
+                routes.push(r);
+            }
+            frontier = next;
+            depth += 1;
+        }
+        routes
+    }
+
+    /// GrandOrgue-gedrag: een register dat aan/uit gaat terwijl toetsen zijn
+    /// ingedrukt moet direct klinken/zwijgen. Bij AAN worden de ingedrukte
+    /// toetsen door het register gespeeld — zowel via de directe klavier-route
+    /// als via actieve koppels die naar de divisie van het register wijzen.
+    /// Bij UIT worden alle pijpen van het register direct losgelaten.
+    pub fn sync_stop_voices(&self, stop_id: &str, drawn: bool) {
+        let organ = self.loaded_organ_info.read();
+        let Some(ref o) = *organ else { return; };
+        let player_guard = self.audio_player.read();
+        let Some(ref player) = *player_guard else { return; };
+        let mappings = self.midi_mappings.read();
+        let couplers = self.active_couplers.read();
+        let held = self.held_notes.read();
+        Self::sync_stop_voices_inner(o, player, &mappings, &couplers, &held, stop_id, drawn);
+    }
+
+    /// Kern van sync_stop_voices, ook aanroepbaar vanaf de MIDI-thread
+    /// (crescendo-pedaal) waar de state via losse Arcs beschikbaar is.
+    pub(crate) fn sync_stop_voices_inner(
+        o: &OrganInfoDto,
+        player: &AudioPlayer,
+        mappings: &[MidiChannelMapping],
+        active_couplers: &[String],
+        held: &[(u8, u8, u8)],
+        stop_id: &str,
+        drawn: bool,
+    ) {
+        // Vind het register + zijn divisie.
+        let Some((div_name, stop)) = o.divisions.iter().find_map(|d| {
+            d.stops.iter().find(|s| s.id == stop_id).map(|s| (d.name.as_str(), s))
+        }) else { return; };
+
+        let first = stop.first_midi_note as u32;
+        let last = stop.last_midi_note as u32;
+        if last < first { return; }
+
+        if !drawn {
+            // Register weggetrokken: alle klinkende pijpen in één commando
+            // loslaten (een preset-wissel kan tientallen registers tegelijk
+            // wegtrekken — per-pijp NoteOffs zouden de command-queue vol duwen).
+            let _ = player.send_command(AudioCommand::ReleaseStop {
+                stop_id: stop.internal_stop_id,
+            });
+            return;
+        }
+
+        if held.is_empty() { return; }
+
+        let send_note_on = |note: u8, vel: u8| {
+            let t = note as u32;
+            if t >= first && t <= last {
+                let _ = player.send_command(AudioCommand::NoteOn {
+                    stop_id: stop.internal_stop_id,
+                    pipe_num: t - first + 1,
+                    midi_note: note,
+                    velocity: vel as f32 / 127.0,
+                });
+            }
+        };
+
+        // T.A. (Tongwerken Af) actief op deze divisie? Dan geen tongwerken starten.
+        let ta_active = o.couplers.as_ref().map_or(false, |cl| cl.iter().any(|c| {
+            c.coupler_type == "ta" && active_couplers.contains(&c.id) && c.source_division == div_name
+        }));
+
+        // 1) Directe route: ingedrukte toetsen op het eigen klavier van het register.
+        if !(ta_active && stop.is_reed) {
+            let mapping = mappings.iter().find(|m| m.division == div_name);
+            for &(ch, note, vel) in held {
+                let accepts = mapping.map_or(true, |m| m.channel.map_or(true, |mch| mch == ch));
+                if !accepts { continue; }
+                let transpose = mapping.map_or(0, |m| m.transpose);
+                let transposed = (note as i16 + transpose as i16).clamp(0, 127) as u8;
+                send_note_on(transposed, vel);
+            }
+        }
+
+        // 2) Koppel-routes: actieve koppels met de divisie van dit register als
+        // bestemming spelen hun bronklavier-toetsen ook door dit register —
+        // transitief uitgevouwen (Pedaal→HW + HW→NW telt ook als Pedaal→NW).
+        if let Some(cl) = o.couplers.as_ref() {
+            for route in Self::expand_coupler_routes(cl, active_couplers) {
+                if route.destination_division != div_name { continue; }
+                let src_mapping = mappings.iter().find(|m| m.division == route.source_division);
+                let src_notes: Vec<(u8, u8)> = held.iter()
+                    .filter(|&&(ch, _, _)| src_mapping.map_or(true, |m| m.channel.map_or(true, |mch| mch == ch)))
+                    .map(|&(_, n, v)| (n, v))
+                    .collect();
+                for &(note, vel) in &src_notes {
+                    // Melody/bass-poort (eerste schakel): alleen de hoogste
+                    // resp. laagste toets van het bronklavier.
+                    if route.gate_type == "melody"
+                        && src_notes.iter().map(|&(n, _)| n).max() != Some(note) { continue; }
+                    if route.gate_type == "bass"
+                        && src_notes.iter().map(|&(n, _)| n).min() != Some(note) { continue; }
+                    let src_transpose = src_mapping.map_or(0, |m| m.transpose);
+                    let coupled = (note as i32 + src_transpose as i32 + route.pitch_offset).clamp(0, 127) as u8;
+                    send_note_on(coupled, vel);
+                }
+            }
         }
     }
 
@@ -2002,6 +2433,62 @@ impl AppState {
         let _ = self.midi_tx.send(MidiCommand::SetPresetBindings(updated));
     }
 
+    /// Voeg handmatig een koppeling toe (zelfde regels als inleren: max 4 per
+    /// actie, exacte duplicaten geweigerd). De MIDI-thread houdt een eigen
+    /// kopie bij, dus na elke mutatie gaat de volledige lijst via
+    /// SetPresetBindings mee.
+    pub fn add_preset_binding(&self, binding: MidiPresetBinding) -> Result<(), String> {
+        let mut bindings = self.preset_bindings.write();
+        let count = bindings.iter().filter(|b| b.preset_num == binding.preset_num).count();
+        if count >= 4 {
+            return Err("Maximaal 4 MIDI-koppelingen per actie; verwijder er eerst één".to_string());
+        }
+        if bindings.iter().any(|b| *b == binding) {
+            return Err("Deze MIDI-koppeling bestaat al voor deze actie".to_string());
+        }
+        bindings.push(binding);
+        let updated = bindings.clone();
+        drop(bindings);
+        let _ = self.midi_tx.send(MidiCommand::SetPresetBindings(updated));
+        Ok(())
+    }
+
+    /// Verwijder één specifieke koppeling: de `index`-de binding (0-based)
+    /// binnen de bindingen van deze actiecode.
+    pub fn remove_preset_binding_at(&self, preset_num: u8, index: usize) -> Result<(), String> {
+        let mut bindings = self.preset_bindings.write();
+        let pos = bindings.iter()
+            .enumerate()
+            .filter(|(_, b)| b.preset_num == preset_num)
+            .map(|(i, _)| i)
+            .nth(index)
+            .ok_or_else(|| format!("Geen MIDI-koppeling #{} voor actie {}", index + 1, preset_num))?;
+        bindings.remove(pos);
+        let updated = bindings.clone();
+        drop(bindings);
+        let _ = self.midi_tx.send(MidiCommand::SetPresetBindings(updated));
+        Ok(())
+    }
+
+    /// Vervang één specifieke koppeling in-place (bewerken in de UI).
+    pub fn replace_preset_binding_at(&self, preset_num: u8, index: usize, new_binding: MidiPresetBinding) -> Result<(), String> {
+        let mut bindings = self.preset_bindings.write();
+        if bindings.iter().any(|b| *b == new_binding) {
+            return Err("Deze MIDI-koppeling bestaat al".to_string());
+        }
+        let pos = bindings.iter()
+            .enumerate()
+            .filter(|(_, b)| b.preset_num == preset_num)
+            .map(|(i, _)| i)
+            .nth(index)
+            .ok_or_else(|| format!("Geen MIDI-koppeling #{} voor actie {}", index + 1, preset_num))?;
+        bindings[pos] = new_binding;
+        let updated = bindings.clone();
+        drop(bindings);
+        let _ = self.midi_tx.send(MidiCommand::SetPresetBindings(updated));
+        Ok(())
+    }
+
     /// Poll for triggered presets (non-blocking)
     pub fn poll_preset_trigger(&self) -> Option<u8> {
         self.preset_trigger_rx.try_recv().ok()
@@ -2098,10 +2585,126 @@ impl AppState {
         *self.swell_bindings.write() = bindings;
     }
 
+    /// Zet handmatig kanaal + CC voor de zwelkast van een divisie. Bestaande
+    /// min/max/invert blijven behouden; zonder bestaande binding worden de
+    /// gangbare defaults gebruikt (volledig bereik, niet gespiegeld). De
+    /// MIDI-thread leest deze gedeelde lijst rechtstreeks.
+    pub fn set_swell_binding_manual(&self, division_name: &str, division_index: u8, channel: u8, cc_num: u8) {
+        let mut bindings = self.swell_bindings.write();
+        if let Some(b) = bindings.iter_mut().find(|b| b.division_name == division_name) {
+            b.channel = channel;
+            b.cc_num = cc_num;
+            b.division_index = division_index;
+        } else {
+            bindings.push(SwellBinding {
+                division_name: division_name.to_string(),
+                division_index,
+                channel,
+                cc_num,
+                min_val: 0,
+                max_val: 127,
+                invert: false,
+            });
+        }
+    }
+
+    /// Zet handmatig het toetsenbereik (laagste/hoogste MIDI-noot) van een
+    /// divisie — het handmatige alternatief voor de twee-noten-inleer.
+    pub fn set_midi_mapping_range(&self, division: &str, first: Option<u8>, last: Option<u8>) {
+        let mut mappings = self.midi_mappings.write();
+        if let Some(m) = mappings.iter_mut().find(|m| m.division == division) {
+            m.first_midi_note = first;
+            m.last_midi_note = last;
+        } else {
+            mappings.push(MidiChannelMapping {
+                division: division.to_string(),
+                channel: None,
+                transpose: 0,
+                first_midi_note: first,
+                last_midi_note: last,
+            });
+        }
+        let _ = self.midi_tx.send(MidiCommand::SetChannelMapping(mappings.clone()));
+    }
+
     /// Set MIDI channel mappings (for library restore)
     pub fn set_midi_mappings(&self, mappings: Vec<MidiChannelMapping>) {
         *self.midi_mappings.write() = mappings.clone();
         let _ = self.midi_tx.send(MidiCommand::SetChannelMapping(mappings));
+    }
+}
+
+#[cfg(test)]
+mod coupler_route_tests {
+    use super::*;
+
+    fn coupler(id: &str, src: &str, dest: &str, ctype: &str, offset: i32) -> CouplerDto {
+        CouplerDto {
+            id: id.to_string(),
+            name: id.to_string(),
+            source_division: src.to_string(),
+            destination_division: dest.to_string(),
+            active: false,
+            display_in_division: src.to_string(),
+            midi_action_code: 0,
+            coupler_type: ctype.to_string(),
+            pitch_offset: offset,
+        }
+    }
+
+    #[test]
+    fn doorkoppelen_pedaal_via_hoofdwerk_naar_nevenwerk() {
+        // Pedaal→HW en HW→NW actief ⇒ ook een route Pedaal→NW (transitief).
+        let list = vec![
+            coupler("c1", "Pedaal", "Hoofdwerk", "unison", 0),
+            coupler("c2", "Hoofdwerk", "Nevenwerk", "unison", 0),
+        ];
+        let active = vec!["c1".to_string(), "c2".to_string()];
+        let routes = AppState::expand_coupler_routes(&list, &active);
+        assert!(routes.iter().any(|r| r.source_division == "Pedaal" && r.destination_division == "Hoofdwerk"));
+        assert!(routes.iter().any(|r| r.source_division == "Hoofdwerk" && r.destination_division == "Nevenwerk"));
+        assert!(routes.iter().any(|r| r.source_division == "Pedaal" && r.destination_division == "Nevenwerk" && r.pitch_offset == 0),
+                "transitieve route Pedaal→Nevenwerk ontbreekt: {:?}", routes.iter().map(|r| (r.source_division.clone(), r.destination_division.clone())).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn octaaf_offsets_sommeren_over_de_keten() {
+        // Pedaal→HW 4' (+12) + HW→NW 16' (-12) ⇒ Pedaal→NW unisono (0).
+        let list = vec![
+            coupler("c1", "Pedaal", "Hoofdwerk", "super", 12),
+            coupler("c2", "Hoofdwerk", "Nevenwerk", "sub", -12),
+        ];
+        let active = vec!["c1".to_string(), "c2".to_string()];
+        let routes = AppState::expand_coupler_routes(&list, &active);
+        assert!(routes.iter().any(|r| r.source_division == "Pedaal" && r.destination_division == "Nevenwerk" && r.pitch_offset == 0));
+    }
+
+    #[test]
+    fn cykel_wordt_afgekapt() {
+        // HW→NW én NW→HW actief: mag niet oneindig doorlopen; beide directe
+        // routes bestaan, en de terug-route levert geen self-route-explosie op.
+        let list = vec![
+            coupler("c1", "Hoofdwerk", "Nevenwerk", "unison", 0),
+            coupler("c2", "Nevenwerk", "Hoofdwerk", "unison", 0),
+        ];
+        let active = vec!["c1".to_string(), "c2".to_string()];
+        let routes = AppState::expand_coupler_routes(&list, &active);
+        assert!(routes.len() <= 64);
+        assert!(routes.iter().any(|r| r.source_division == "Hoofdwerk" && r.destination_division == "Nevenwerk"));
+        assert!(routes.iter().any(|r| r.source_division == "Nevenwerk" && r.destination_division == "Hoofdwerk"));
+    }
+
+    #[test]
+    fn inactieve_en_ta_koppels_doen_niet_mee() {
+        let list = vec![
+            coupler("c1", "Pedaal", "Hoofdwerk", "unison", 0),
+            coupler("c2", "Hoofdwerk", "Nevenwerk", "unison", 0),
+            coupler("ta1", "Hoofdwerk", "Hoofdwerk", "ta", 0),
+        ];
+        let active = vec!["c1".to_string(), "ta1".to_string()]; // c2 NIET actief
+        let routes = AppState::expand_coupler_routes(&list, &active);
+        assert_eq!(routes.len(), 1);
+        assert_eq!(routes[0].destination_division, "Hoofdwerk");
     }
 }
 

@@ -12,10 +12,10 @@ pub mod streaming;
 pub mod custom_organ;
 
 pub use loader::{
-    SampleData, SampleError, PreloadBuffer,
-    load_wav, load_wav_preload, load_wav_remainder,
+    SampleData, SampleError, PreloadBuffer, PreloadSegment, WavMarkers,
+    load_wav, load_wav_preload, load_wav_preload_segment, load_wav_remainder,
     load_mp3, load_audio, load_audio_preload,
-    resample, normalize, apply_fades
+    resample, normalize, apply_fades, read_wav_loop_points, read_wav_markers
 };
 pub use cache::*;
 pub use pool::*;

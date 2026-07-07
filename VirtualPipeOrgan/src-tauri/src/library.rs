@@ -134,16 +134,42 @@ pub struct ReverbSettingsSaved {
     pub ir_path: Option<String>,
 }
 
-/// Saved parametric EQ instellingen
+/// Eén opgeslagen EQ-band (vrij formaat, GrandOrgue-stijl).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EqBandSaved {
+    pub enabled: bool,
+    /// "peak" | "lowpass" | "highpass" | "bandpass" | "lowshelf" | "highshelf"
+    pub band_type: String,
+    pub freq: f32,
+    pub gain_db: f32,
+    /// Bandbreedte in octaven
+    pub bandwidth: f32,
+    /// None = alle kanalen; anders 0-based fysiek uitgangskanaal
+    pub channel: Option<u8>,
+}
+
+/// Saved EQ instellingen. Nieuw formaat: vrije banden (`bands`). De losse
+/// low/mid/high-velden zijn het oude 3-band formaat en blijven bestaan zodat
+/// oudere .jm-settings.json-bestanden gemigreerd kunnen worden (bands leeg →
+/// migreren uit de legacy-velden gebeurt in de frontend bij het laden).
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct EqSettingsSaved {
     pub enabled: bool,
+    #[serde(default)]
+    pub bands: Vec<EqBandSaved>,
+    #[serde(default)]
     pub low_freq: f32,
+    #[serde(default)]
     pub low_gain: f32,
+    #[serde(default)]
     pub mid_freq: f32,
+    #[serde(default)]
     pub mid_gain: f32,
+    #[serde(default)]
     pub mid_q: f32,
+    #[serde(default)]
     pub high_freq: f32,
+    #[serde(default)]
     pub high_gain: f32,
 }
 

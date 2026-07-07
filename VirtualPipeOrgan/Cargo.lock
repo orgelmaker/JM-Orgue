@@ -5516,8 +5516,9 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "vpo-app"
-version = "0.5.2"
+version = "0.6.1"
 dependencies = [
+ "asio-sys",
  "base64 0.22.1",
  "cpal",
  "crossbeam-channel",
@@ -5544,7 +5545,7 @@ dependencies = [
 
 [[package]]
 name = "vpo-audio"
-version = "0.5.2"
+version = "0.6.1"
 dependencies = [
  "bytemuck",
  "cpal",
@@ -5564,7 +5565,7 @@ dependencies = [
 
 [[package]]
 name = "vpo-core"
-version = "0.5.2"
+version = "0.6.1"
 dependencies = [
  "bincode",
  "serde",
@@ -5575,7 +5576,7 @@ dependencies = [
 
 [[package]]
 name = "vpo-midi"
-version = "0.5.2"
+version = "0.6.1"
 dependencies = [
  "btleplug",
  "crossbeam-channel",
@@ -5592,7 +5593,7 @@ dependencies = [
 
 [[package]]
 name = "vpo-plugin"
-version = "0.5.2"
+version = "0.6.1"
 dependencies = [
  "nih_plug",
  "parking_lot",
@@ -5604,7 +5605,7 @@ dependencies = [
 
 [[package]]
 name = "vpo-sampler"
-version = "0.5.2"
+version = "0.6.1"
 dependencies = [
  "bincode",
  "bytemuck",

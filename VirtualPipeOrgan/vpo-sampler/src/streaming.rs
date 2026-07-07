@@ -409,8 +409,11 @@ mod tests {
 
     #[test]
     fn test_resample_buffer() {
-        let input = vec![0.0, 1.0, 0.0, -1.0];
+        // Lang genoeg dat de output bij 44.1k → 48k ook na afronding langer is
+        // (bij 4 samples rondde 4×1.088 naar beneden af op 4 → onterecht rood).
+        let input: Vec<f32> = (0..441).map(|i| (i as f32 * 0.1).sin()).collect();
         let output = StreamingEngine::resample_buffer(&input, 44100, 48000);
-        assert!(output.len() > input.len());
+        assert!(output.len() > input.len(),
+                "upsampled output ({}) moet langer zijn dan input ({})", output.len(), input.len());
     }
 }
