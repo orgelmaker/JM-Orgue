@@ -9,6 +9,9 @@
   // Audio-uitvoerprofielen (speakers/hoofdtelefoon) voor de snelle wissel.
   export let audioProfiles = { speakers: null, headphones: null, active: null };
   export let audioProfileSwitching = false;
+  // Secundaire modus (extra registerscherm): toont een "balk verbergen"-knop;
+  // de betekenis van de overige knoppen wordt door de shell (PanelApp) bepaald.
+  export let secondary = false;
 
   const dispatch = createEventDispatcher();
 
@@ -118,6 +121,19 @@
           <polygon points="6,4 20,12 6,20"/>
         </svg>
         {$t('header.start')}
+      </button>
+    {/if}
+    {#if secondary}
+      <!-- Hoofdbalk verbergen op dit extra scherm (keuze wordt per scherm onthouden) -->
+      <button
+        class="btn btn-ghost btn-icon btn-icon-sm"
+        on:click={() => dispatch('toggleHeader')}
+        title="Hoofdbalk verbergen (via de knop in de werkbalk weer te tonen)"
+        aria-label="Hoofdbalk verbergen"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="18 15 12 9 6 15"/>
+        </svg>
       </button>
     {/if}
   </div>

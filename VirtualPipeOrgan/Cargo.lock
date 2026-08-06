@@ -5516,7 +5516,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "vpo-app"
-version = "0.6.1"
+version = "0.7.0"
 dependencies = [
  "asio-sys",
  "base64 0.22.1",
@@ -5524,6 +5524,7 @@ dependencies = [
  "crossbeam-channel",
  "dirs 5.0.1",
  "hound",
+ "midly",
  "mp3lame-encoder",
  "parking_lot",
  "rayon",
@@ -5541,11 +5542,12 @@ dependencies = [
  "vpo-core",
  "vpo-midi",
  "vpo-sampler",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
 name = "vpo-audio"
-version = "0.6.1"
+version = "0.7.0"
 dependencies = [
  "bytemuck",
  "cpal",
@@ -5565,7 +5567,7 @@ dependencies = [
 
 [[package]]
 name = "vpo-core"
-version = "0.6.1"
+version = "0.7.0"
 dependencies = [
  "bincode",
  "serde",
@@ -5576,7 +5578,7 @@ dependencies = [
 
 [[package]]
 name = "vpo-midi"
-version = "0.6.1"
+version = "0.7.0"
 dependencies = [
  "btleplug",
  "crossbeam-channel",
@@ -5593,7 +5595,7 @@ dependencies = [
 
 [[package]]
 name = "vpo-plugin"
-version = "0.6.1"
+version = "0.7.0"
 dependencies = [
  "nih_plug",
  "parking_lot",
@@ -5605,7 +5607,7 @@ dependencies = [
 
 [[package]]
 name = "vpo-sampler"
-version = "0.6.1"
+version = "0.7.0"
 dependencies = [
  "bincode",
  "bytemuck",

@@ -12,10 +12,10 @@ use std::thread;
 use std::path::PathBuf;
 use parking_lot::RwLock;
 use crossbeam_channel::{Sender, Receiver, bounded};
-use tracing::{info, error, warn, debug};
+use tracing::{info, error, warn};
 
 use vpo_sampler::{LoadedOrgan, SampleRef, SampleData, load_audio, resample, PreloadBuffer};
-use vpo_audio::{ConvolutionReverb, OnePoleFilter, WindModel, Tremulant, FdnReverb, ChannelEq, EqBandSpec};
+use vpo_audio::{ConvolutionReverb, OnePoleFilter, WindModel, Tremulant, FdnReverb, ChannelEq, EqBandSpec, MasterLimiter};
 
 /// Preload buffer size in samples (~2s at 48kHz)
 /// Longer buffer = smoother loop while full sample loads in background
@@ -26,6 +26,16 @@ pub const PRELOAD_SAMPLES: usize = 96000;
 /// mee door de bestaande preload-/background-load-/upgrade-mechanismen zonder
 /// aparte maps; echte pipe_nums blijven er ver onder.
 pub const RELEASE_PIPE_FLAG: u32 = 0x8000_0000;
+
+/// Harde bovengrens op het aantal gelijktijdige voices in het echte audiopad.
+/// Dit is een vangnet tegen op hol geslagen groei (blijvende noten, koppel-
+/// lussen, een tutti + release-staarten) — niet een muzikale limiet: bij een
+/// normaal orgel blijf je er ruim onder. Zonder deze grens groeide de voice-Vec
+/// onbeperkt en kon één zwaar akkoord de render-thread over de buffer-deadline
+/// duwen → underruns → gekraak. Bij overschrijding wordt de zachtste voice
+/// gestolen (voice-stealing). Gekoppeld aan de workspace-brede polyfonie-
+/// constante zodat er maar één waarheid is.
+pub const MAX_LIVE_VOICES: usize = vpo_audio::MAX_POLYPHONY;
 
 /// Sample source with preload buffer for instant playback
 #[derive(Debug, Clone)]
@@ -93,8 +103,10 @@ pub enum AudioCommand {
     RegisterStopDivisionMap(HashMap<u32, u8>),
     /// Set temperament: 12 cent offsets [C,C#,D,...,B] + global fine-tuning in cents
     SetTemperament { note_offsets: [f32; 12], fine_tune: f32 },
-    /// Load impulse response for convolution reverb
-    LoadImpulseResponse(PathBuf),
+    /// Vooraf gebouwde convolutiegalm inpluggen. Het decoderen + FFT-partitioneren
+    /// gebeurt op de command-thread (commands.rs) — voorheen draaide disk-I/O en
+    /// een volledige FFT-opbouw ín de realtime audio-callback (auditbevinding 12).
+    LoadImpulseResponse(Box<ConvolutionReverb>),
     /// Configure algorithmic FDN reverb (preset=None means custom params)
     SetAlgorithmicReverb { preset: Option<u8>, rt60: f32, pre_delay_ms: f32, damping: f32, room_size: f32, mix: f32 },
     /// Switch reverb type: true=algorithmic, false=convolution
@@ -121,6 +133,10 @@ pub enum AudioCommand {
     /// van de gebruikers-voicing (SetPipeVoicing) en stapelt daarmee — zo blijft
     /// de eigen intonatie van de gebruiker gescheiden van wat de set voorschrijft.
     RegisterOdfVoicings(Arc<HashMap<(u32, u32), (f32, f32)>>),
+    /// ODF-looppunten per bestand (GrandOrgue-regel: ODF wint van smpl-chunk).
+    /// Nodig zodat óók de achtergrond-full-sample-load dezelfde loop gebruikt
+    /// als de preload — anders verspringt de loop op het upgrademoment.
+    RegisterOdfLoops(Arc<HashMap<PathBuf, (u32, u32)>>),
     /// Clear all samples
     ClearSamples,
     /// Shutdown
@@ -156,6 +172,27 @@ struct PlayingVoice {
     midi_note: u8,
     /// When using preload, track if we've requested full load
     load_requested: bool,
+    /// Laatste twee RUWE samplewaarden (voor envelope/gain) — voor de
+    /// release-fase-uitlijning (GrandOrgue BLOCK_HISTORY=2).
+    hist_last: f32,
+    hist_prev: f32,
+    /// Leeftijd in output-samples (monotone klok; position loopt in de loop
+    /// rond) — voor de geschaalde releases bij staccato (fase C).
+    age_samples: u64,
+    // ── Per-callback voorgerekende constanten ────────────────────────────
+    // Deze waarden zijn constant over de duur van één audio-callback en worden
+    // één keer per callback ververst (zie de pre-pass in de render-lus). Ze
+    // stonden vroeger ín de per-sample-lus als HashMap-lookups + powf, wat bij
+    // veel registers miljoenen keren per seconde draaide → CPU-overbelasting →
+    // gekraak. Nu gebeurt dat werk één keer per voice per callback.
+    /// Divisie-index (0..31) van deze voice; 0 als niet gemapt.
+    c_div: usize,
+    /// Lineaire volume-factor uit de gestapelde voicing (gebruiker + ODF-intonatie).
+    c_voicing_gain: f32,
+    /// Rate-vermenigvuldiger uit temperament × voicing-toonhoogte.
+    c_pitch_mul: f64,
+    /// Of de LFO-tremulant op deze voice moet werken (stops zonder trem-samples).
+    c_use_lfo_trem: bool,
 }
 
 impl PlayingVoice {
@@ -177,6 +214,15 @@ impl PlayingVoice {
             pipe_num,
             midi_note,
             load_requested: false,
+            hist_last: 0.0,
+            hist_prev: 0.0,
+            age_samples: 0,
+            // Placeholders; de pre-pass in de render-lus ververst deze elke
+            // callback vóór de voice voor het eerst gemixt wordt.
+            c_div: 0,
+            c_voicing_gain: 1.0,
+            c_pitch_mul: 1.0,
+            c_use_lfo_trem: true,
         }
     }
 
@@ -197,6 +243,15 @@ impl PlayingVoice {
             pipe_num,
             midi_note,
             load_requested: false,
+            hist_last: 0.0,
+            hist_prev: 0.0,
+            age_samples: 0,
+            // Placeholders; de pre-pass in de render-lus ververst deze elke
+            // callback vóór de voice voor het eerst gemixt wordt.
+            c_div: 0,
+            c_voicing_gain: 1.0,
+            c_pitch_mul: 1.0,
+            c_use_lfo_trem: true,
         }
     }
 
@@ -244,6 +299,15 @@ impl PlayingVoice {
             pipe_num,
             midi_note,
             load_requested: false,
+            hist_last: 0.0,
+            hist_prev: 0.0,
+            age_samples: 0,
+            // Placeholders; de pre-pass in de render-lus ververst deze elke
+            // callback vóór de voice voor het eerst gemixt wordt.
+            c_div: 0,
+            c_voicing_gain: 1.0,
+            c_pitch_mul: 1.0,
+            c_use_lfo_trem: true,
         }
     }
 
@@ -364,12 +428,16 @@ impl PlayingVoice {
         if self.one_shot && !self.releasing
             && self.position as usize + 1 >= self.get_sample_len()
         {
-            debug!("One-shot klaar: stop={} pipe={:#x} pos={:.0} len={}",
-                   self.stop_id, self.pipe_num, self.position, self.get_sample_len());
             self.releasing = true;
             self.target_envelope = 0.0;
             self.envelope = 0.0;
         }
+
+        // Golfvorm-historie voor de release-fase-uitlijning: de laatste twee
+        // RUWE waarden (zelfde domein als de release-sampledata).
+        self.hist_prev = self.hist_last;
+        self.hist_last = value;
+        self.age_samples += 1;
 
         value * self.envelope
     }
@@ -392,6 +460,103 @@ fn release_fade_ms(midi_note: u8) -> f32 {
     }
 }
 
+/// Voeg een voice toe met respect voor [`MAX_LIVE_VOICES`]. Zit de Vec vol, dan
+/// wordt eerst de "goedkoopste" voice gestolen: bij voorkeur een al uitklinkende
+/// (releasing) voice, en daarbinnen die met het laagste envelope-niveau — dus de
+/// minst hoorbare. `swap_remove` is O(1); de mix-lus en `retain` zijn ongevoelig
+/// voor de volgorde. Alleen wanneer de grens bereikt is doen we de O(n)-scan.
+#[inline]
+fn push_voice_capped(voices: &mut Vec<PlayingVoice>, v: PlayingVoice, sample_rate: u32) {
+    // Kies het slachtoffer: releasing voices eerst, daarbinnen het laagste
+    // envelope-niveau.
+    let pick_worst = |voices: &Vec<PlayingVoice>| {
+        let mut worst = 0usize;
+        let mut worst_score = f32::INFINITY;
+        for (i, ex) in voices.iter().enumerate() {
+            let score = ex.envelope + if ex.releasing { 0.0 } else { 10.0 };
+            if score < worst_score {
+                worst_score = score;
+                worst = i;
+            }
+        }
+        worst
+    };
+    if voices.len() >= MAX_LIVE_VOICES + 64 {
+        // Harde noodgrens (zou zelden bereikt moeten worden): desnoods knippen.
+        let worst = pick_worst(voices);
+        voices.swap_remove(worst);
+    } else if voices.len() >= MAX_LIVE_VOICES {
+        // Zachte kap: een hoorbaar klinkende voice kreeg voorheen een harde
+        // knip (klik, auditbevinding 54). Nu: al (bijna) stil → weghalen,
+        // anders een 5ms-fade en heel even boven de kap laten meetellen.
+        let worst = pick_worst(voices);
+        if voices[worst].releasing && voices[worst].envelope < 0.01 {
+            voices.swap_remove(worst);
+        } else {
+            voices[worst].release_ms(5.0, sample_rate);
+        }
+    }
+    voices.push(v);
+}
+
+/// Geschaalde releases bij staccato (GrandOrgue m_IsScaledReleases, fase C).
+/// Geeft (gain-schaal voor het startniveau, optionele staart-decay in ms):
+/// - noot losgelaten tijdens de (geschatte) aanslag: release-gain 0,2..1,0;
+/// - korte noot: de kerkgalm in de release-opname is nog niet opgebouwd
+///   ("time to full reverb", 100-350 ms afhankelijk van de release-lengte) —
+///   de staart wordt dan actief weggefaded (200 ms .. 6 s, evenredig met de
+///   nootduur). Lange noten: (1.0, None) — volledig natuurlijk gedrag.
+fn scaled_release_params(note_ms: f32, midi_note: u8, release_secs: f32) -> (f32, Option<f32>) {
+    // Aanslagduur-schatting per toonhoogte: 50 ms boven MIDI 96, 500 ms onder
+    // MIDI 24, lineair ertussen; onbekende noot -> gemiddelde pijp (60).
+    let k = if midi_note == 0 || midi_note > 133 { 60 } else { midi_note };
+    let attack_ms = if k >= 96 {
+        50.0
+    } else if k < 24 {
+        500.0
+    } else {
+        500.0 + (24.0 - k as f32) * 6.25
+    };
+    let mut gain = 1.0f32;
+    if note_ms < attack_ms {
+        let ai = (note_ms / attack_ms).clamp(0.0, 1.0);
+        gain = 0.2 + 0.8 * (2.0 * ai - ai * ai);
+    }
+    let ttfr = (60.0 * release_secs + 40.0).clamp(100.0, 350.0);
+    let decay = if note_ms < ttfr {
+        Some(ttfr + 6000.0 * note_ms / ttfr)
+    } else {
+        None
+    };
+    (gain, decay)
+}
+
+/// Begrens het aantal gelijktijdige release-staarten (one-shot voices): een
+/// vol-werk-loslating op een natte GO-set spawnde per pijp × register een
+/// release-voice (200+ in één klap, >600 stemmen totaal) — de mix verzoop,
+/// het kraakte en de afbouw duurde heel lang. Boven het budget maakt de
+/// stilste bestaande staart versneld plaats (30 ms fade) voor de nieuwe.
+const MAX_RELEASE_VOICES: usize = 160;
+fn budget_release_voices(voices: &mut Vec<PlayingVoice>, sample_rate: u32) {
+    let count = voices.iter().filter(|v| v.one_shot).count();
+    if count < MAX_RELEASE_VOICES {
+        return;
+    }
+    let mut worst: Option<usize> = None;
+    let mut worst_env = f32::INFINITY;
+    for (i, v) in voices.iter().enumerate() {
+        if v.one_shot && !v.releasing && v.envelope < worst_env {
+            worst_env = v.envelope;
+            worst = Some(i);
+        }
+    }
+    if let Some(i) = worst {
+        // 250 ms, zoals GrandOrgue's polyfonie-limiter (die gebruikt 370 ms):
+        // kort genoeg om CPU te winnen, lang genoeg om onhoorbaar te blijven.
+        voices[i].release_ms(250.0, sample_rate);
+    }
+}
+
 /// Crossfade length for a loop of `loop_len` samples whose start is at index `ls`.
 /// Long crossfades (Hauptwerk-style, up to ~500 ms) mask imperfect loop points;
 /// bounded by half the loop and by the available pre-loop data (`ls`).
@@ -400,7 +565,31 @@ fn loop_xfade(loop_len: usize, ls: usize) -> usize {
     (loop_len / 2).min(ls).clamp(256, 24_000)
 }
 
-/// Read one linearly-interpolated sample from `data`, looping over `[ls, le)` with
+/// 4-punts Catmull-Rom/Hermite-interpolatie rond index `i` (leest i-1..i+2,
+/// geklemd op de bufferranden). Lineaire interpolatie gaf bij fractionele
+/// afspeelsnelheden (48kHz-set op een 44,1kHz-apparaat: rate≈1.088, en bij
+/// temperament-/tremulant-detune) hoorbare aliasing/dofheid op heldere
+/// registers; Hermite onderdrukt dat sterk voor ~5 extra mul/adds per sample.
+/// Bij frac==0 (rate exact 1.0) is de uitkomst bit-exact data[i].
+#[inline]
+fn hermite4(data: &[f32], i: usize, frac: f32) -> f32 {
+    if frac == 0.0 {
+        return data[i];
+    }
+    let n = data.len();
+    let xm1 = data[i.saturating_sub(1)];
+    let x0 = data[i];
+    let x1 = data[(i + 1).min(n - 1)];
+    let x2 = data[(i + 2).min(n - 1)];
+    let c = (x1 - xm1) * 0.5;
+    let v = x0 - x1;
+    let w = c + v;
+    let a = w + v + (x2 - x0) * 0.5;
+    let b = w + a;
+    ((a * frac - b) * frac + c) * frac + x0
+}
+
+/// Read one interpolated sample from `data`, looping over `[ls, le)` with
 /// a crossfaded seam so there is no click at the loop wrap. During release the
 /// buffer plays out linearly to its end (no loop). `position` is wrapped in place;
 /// `envelope` is forced to 0 when playback finishes.
@@ -432,7 +621,7 @@ fn read_voice(
             return 0.0;
         }
         let frac = (*position - i as f64) as f32;
-        return data[i] + (data[i + 1] - data[i]) * frac;
+        return hermite4(data, i, frac);
     }
 
     // Klem het loop-einde op len-1: bij le == len (preload-/fallback-loops) kon
@@ -454,7 +643,7 @@ fn read_voice(
         return 0.0;
     }
     let frac = (p - i as f64) as f32;
-    let primary = data[i] + (data[i + 1] - data[i]) * frac;
+    let primary = hermite4(data, i, frac);
 
     // Seamless loop seam: within the last `xfade` samples before `le`, crossfade
     // the loop tail into the pre-loop region so the output reaches data[ls] exactly
@@ -476,7 +665,7 @@ fn read_voice(
             let j = pre as usize;
             if j + 1 < len {
                 let pfrac = (pre - j as f64) as f32;
-                let blended = data[j] + (data[j + 1] - data[j]) * pfrac;
+                let blended = hermite4(data, j, pfrac);
                 return primary * w_primary + blended * w_blended;
             }
         }
@@ -763,7 +952,12 @@ impl AudioPlayer {
 
     /// Create an audio player for a specific host/device/buffer selection.
     pub fn new(cfg: AudioOutputConfig) -> Result<Self, String> {
-        let (command_tx, command_rx) = bounded::<AudioCommand>(512);
+        // 4096 i.p.v. 512: een tutti-akkoord op een groot orgel met koppels
+        // produceert in één klap honderden NoteOn-commando's (stops × noten).
+        // Op 512 liep de queue vol en blokkeerde send_timeout de aanroepende
+        // thread (UI/MIDI/test-API) tot 3 s per commando — dat voelde als een
+        // bevroren app. AudioCommand is klein; 4096 kost vrijwel niets.
+        let (command_tx, command_rx) = bounded::<AudioCommand>(4096);
         let voice_count = Arc::new(AtomicUsize::new(0));
         let peak_left = Arc::new(RwLock::new(0.0f32));
         let peak_right = Arc::new(RwLock::new(0.0f32));
@@ -933,7 +1127,12 @@ impl Drop for AudioPlayer {
 }
 
 /// Channel for background loading requests
-type LoadRequest = ((u32, u32), PathBuf, u32); // (key, path, target_sample_rate)
+// (key, path, target_sample_rate, load_generation)
+// De generatie voorkomt dat een achtergrond-load die pas ná een orgelwissel
+// afrondt zijn sample onder een hergebruikte (stop,pipe)-key van het NIEUWE
+// orgel registreert — dat gaf potentieel de verkeerde pijp of de verkeerde
+// samplerate na een snelle orgelwissel.
+type LoadRequest = ((u32, u32), PathBuf, u32, u64, Option<(u32, u32)>);
 
 /// Run the audio thread with cpal
 fn run_audio_thread(
@@ -1093,7 +1292,9 @@ fn run_audio_thread(
     let stops_with_trem_samples: Arc<RwLock<std::collections::HashSet<u32>>> = Arc::new(RwLock::new(std::collections::HashSet::new()));
     // ODF-intonatie van de sampleset: (stop_id, pipe_num) → (volume_db, pitch_cents).
     // Stapelt met de gebruikers-voicing (pipe_voicing) in de render-lus.
-    let odf_voicing: Arc<RwLock<HashMap<(u32, u32), (f32, f32)>>> = Arc::new(RwLock::new(HashMap::new()));
+    // Arc-in-RwLock: RegisterOdfVoicings wisselt alleen de Arc om — de oude
+    // code kloonde een duizenden-entries HashMap ín de audio-callback (audit 55).
+    let odf_voicing: Arc<RwLock<Arc<HashMap<(u32, u32), (f32, f32)>>>> = Arc::new(RwLock::new(Arc::new(HashMap::new())));
     // Per-division wind models
     let wind_models: Arc<RwLock<Vec<WindModel>>> = Arc::new(RwLock::new(
         (0..32).map(|_| WindModel::new(sample_rate)).collect()
@@ -1122,45 +1323,134 @@ fn run_audio_thread(
     // Per-pipe voicing: (stop_id, pipe_num) → (volume_db, pitch_cents)
     let pipe_voicing: Arc<RwLock<HashMap<(u32, u32), (f32, f32)>>> = Arc::new(RwLock::new(HashMap::new()));
 
-    // Channel for background loading
-    let (load_tx, load_rx) = bounded::<LoadRequest>(64);
-    let (loaded_tx, loaded_rx) = bounded::<((u32, u32), SampleRef)>(64);
+    // Channel for background loading.
+    // 1024 i.p.v. 64: een tutti-akkoord loslaten op een GO-set vraagt tientallen
+    // release-loads tegelijk; bij een volle queue werden verzoeken STIL gedropt
+    // en bleef de voice voorgoed op zijn 2s-attackloop hangen ("zombie").
+    let (load_tx, load_rx) = bounded::<LoadRequest>(1024);
+    // None = laden mislukt: de render-thread moet dan wél zijn in-flight-marker
+    // opruimen, anders zou die pijp deze sessie nooit meer bijgeladen worden.
+    let (loaded_tx, loaded_rx) = bounded::<((u32, u32), Option<SampleRef>, u64)>(256);
 
-    // Spawn background loader thread
-    let loaded_tx_clone = loaded_tx.clone();
-    let running_bg = running.clone();
-    thread::spawn(move || {
-        while running_bg.load(Ordering::Relaxed) {
-            match load_rx.recv_timeout(std::time::Duration::from_millis(100)) {
-                Ok((key, path, target_rate)) => {
-                    debug!("Background loading: {:?}", path);
-                    match load_audio(&path) {
-                        Ok(mut sample_data) => {
-                            // Resample if needed
-                            if sample_data.sample_rate != target_rate {
-                                match resample(&sample_data, target_rate) {
-                                    Ok(resampled) => sample_data = resampled,
-                                    Err(e) => {
-                                        warn!("Failed to resample {:?}: {}", path, e);
-                                        continue;
+    // Opruim-kanaal ("janitor"): grote datastructuren die de audio-callback
+    // moet loslaten (oude sample-maps bij een orgelwissel, geëvicte samples)
+    // worden hierheen verplaatst en op een gewone thread gedropt. Gigabytes
+    // aan Arc's vrijgeven ín de callback stalde de audio-thread seconden lang
+    // (drop-storm) — precies genoeg om de watchdog te triggeren en gekraak of
+    // volledige uitval te veroorzaken bij het wisselen van orgel na lang spelen.
+    let (gc_tx, gc_rx) = bounded::<Box<dyn std::any::Any + Send>>(64);
+    {
+        let running_gc = running.clone();
+        thread::spawn(move || {
+            while running_gc.load(Ordering::Relaxed) {
+                match gc_rx.recv_timeout(std::time::Duration::from_millis(200)) {
+                    Ok(garbage) => drop(garbage),
+                    Err(crossbeam_channel::RecvTimeoutError::Timeout) => continue,
+                    Err(_) => break,
+                }
+            }
+        });
+    }
+
+    // Achtergrondlader-POOL (3 workers, crossbeam-kanalen zijn MPMC): één
+    // thread werkte een tutti-loslating (tientallen release-bestanden ineens)
+    // serieel af, waardoor late releases seconden op hun staart wachtten en
+    // zolang op het preload-fragment bleven hangen. Gedeelde staat:
+    // - decode_cache (pad → Weak): GO-stops delen vaak één rank (REF) en
+    //   same-file releases gebruiken hetzelfde bestand als de attack — zonder
+    //   cache werd zo'n bestand per (stop,pijp)-key opnieuw gedecodeerd én
+    //   geresampled. Weak: dedupliceert zolang de engine de sample vasthoudt,
+    //   maar houdt zelf geen geheugen in leven (RAM-cap blijft leidend).
+    // - max_generation: verzoeken van vóór een orgelwissel overslaan.
+    let decode_cache: Arc<parking_lot::Mutex<HashMap<PathBuf, (u64, std::sync::Weak<SampleData>)>>> =
+        Arc::new(parking_lot::Mutex::new(HashMap::new()));
+    let max_generation = Arc::new(AtomicU64::new(0));
+    for worker in 0..3 {
+        let loaded_tx_clone = loaded_tx.clone();
+        let load_rx = load_rx.clone();
+        let running_bg = running.clone();
+        let decode_cache = decode_cache.clone();
+        let max_generation = max_generation.clone();
+        thread::Builder::new()
+            .name(format!("sample-loader-{}", worker))
+            .spawn(move || {
+                // Onder normale prioriteit: WAV-decodes van vol werk (20+
+                // registers loslaten/aanslaan op een natte GO-set) verdrongen
+                // de audio-callback van zijn CPU-tijd → hapers/tikken. De
+                // loads duren iets langer; de preload-buffers overbruggen dat.
+                #[cfg(windows)]
+                unsafe {
+                    use windows_sys::Win32::System::Threading::{
+                        GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_BELOW_NORMAL,
+                    };
+                    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
+                }
+                while running_bg.load(Ordering::Relaxed) {
+                    match load_rx.recv_timeout(std::time::Duration::from_millis(100)) {
+                        Ok((key, path, target_rate, generation, odf_loop)) => {
+                            let seen = max_generation.fetch_max(generation, Ordering::Relaxed).max(generation);
+                            if generation < seen {
+                                continue; // verouderd verzoek van een vorig orgel
+                            }
+                            {
+                                let cache = decode_cache.lock();
+                                if let Some((g, weak)) = cache.get(&path) {
+                                    if *g == generation {
+                                        if let Some(cached) = weak.upgrade() {
+                                            let _ = loaded_tx_clone.send((key, Some(cached), generation));
+                                            continue;
+                                        }
                                     }
                                 }
                             }
-                            let sample = Arc::new(sample_data);
-                            let _ = loaded_tx_clone.send((key, sample));
-                            debug!("Background load complete: {:?}", path);
+                            match load_audio(&path) {
+                                Ok(mut sample_data) => {
+                                    // GO-regel: ODF-looppunten winnen van de smpl-chunk —
+                                    // zelfde override als het preload-pad, anders verspringt
+                                    // de loop op het preload→full-upgrademoment.
+                                    if let Some((ls, le)) = odf_loop {
+                                        if le > ls {
+                                            sample_data.loop_start = Some(ls as u64);
+                                            sample_data.loop_end = Some(le as u64);
+                                            vpo_sampler::optimize_loop_points(&mut sample_data);
+                                        }
+                                    }
+                                    // Resample if needed
+                                    if sample_data.sample_rate != target_rate {
+                                        match resample(&sample_data, target_rate) {
+                                            Ok(resampled) => sample_data = resampled,
+                                            Err(e) => {
+                                                warn!("Failed to resample {:?}: {}", path, e);
+                                                // Faal-marker: render-thread ruimt
+                                                // zijn in-flight-administratie op.
+                                                let _ = loaded_tx_clone.send((key, None, generation));
+                                                continue;
+                                            }
+                                        }
+                                    }
+                                    let sample = Arc::new(sample_data);
+                                    {
+                                        // Verlopen generaties en dode verwijzingen opruimen.
+                                        let mut cache = decode_cache.lock();
+                                        cache.retain(|_, (g, w)| *g == generation && w.strong_count() > 0);
+                                        cache.insert(path.clone(), (generation, Arc::downgrade(&sample)));
+                                    }
+                                    let _ = loaded_tx_clone.send((key, Some(sample), generation));
+                                }
+                                Err(e) => {
+                                    warn!("Failed to background load {:?}: {}", path, e);
+                                    let _ = loaded_tx_clone.send((key, None, generation));
+                                }
+                            }
                         }
-                        Err(e) => {
-                            warn!("Failed to background load {:?}: {}", path, e);
-                        }
+                        Err(crossbeam_channel::RecvTimeoutError::Timeout) => continue,
+                        Err(_) => break,
                     }
                 }
-                Err(crossbeam_channel::RecvTimeoutError::Timeout) => continue,
-                Err(_) => break,
-            }
-        }
-        info!("Background loader thread stopped");
-    });
+                info!("Background loader thread stopped");
+            })
+            .expect("sample-loader thread spawn");
+    }
 
     let samples_clone = samples.clone();
     let preloads_clone = preloads.clone();
@@ -1197,8 +1487,44 @@ fn run_audio_thread(
     let running_clone = running.clone();
     let command_rx_clone = command_rx.clone();
     let load_tx_clone = load_tx.clone();
+    // ODF-looppunt-overrides per bestandspad (RegisterOdfLoops); alleen de
+    // render-closure gebruikt dit — lookup bij het versturen van een
+    // achtergrond-laadverzoek zodat de full sample dezelfde loop krijgt.
+    let odf_loops_clone: Arc<RwLock<Arc<HashMap<PathBuf, (u32, u32)>>>> = Arc::new(RwLock::new(Arc::new(HashMap::new())));
 
     let channels = stream_config.channels as usize;
+
+    // Achtergrondlaad-administratie van de render-thread (closure-state, geen
+    // locks): welke keys al onderweg zijn (dedup — een tutti stuurt anders
+    // hetzelfde bestand tientallen keren de queue in) en de huidige laad-
+    // generatie (resultaten van vóór een orgelwissel worden genegeerd).
+    let mut inflight_loads: std::collections::HashSet<(u32, u32)> = std::collections::HashSet::new();
+    // Pijpen zonder sample waarvoor al één warn is gelogd (max 1 per pijp per orgel).
+    let mut missing_sample_warned: std::collections::HashSet<(u32, u32)> = std::collections::HashSet::new();
+    let mut load_generation: u64 = 0;
+    // RAM-plafond op volledig geladen samples. Zonder plafond groeide het
+    // geheugen tijdens lang spelen onbegrensd (elke gespeelde pijp + release
+    // blijft resident): uren spelen op een grote GO-set = vele GB's → paging →
+    // gekraak, en een orgelwissel daarna dropte al die GB's in één callback.
+    // Eviction is altijd veilig: klinkende voices houden hun eigen Arc vast;
+    // een geëvicte pijp start de volgende keer gewoon weer van zijn preload.
+    const SAMPLES_BYTES_CAP: usize = 1_500_000_000; // ~1,5 GB
+    let mut samples_bytes: usize = 0;
+    let mut sample_fifo: std::collections::VecDeque<(u32, u32)> = std::collections::VecDeque::new();
+    let gc_tx_render = gc_tx.clone();
+    // Master-limiter (unit-getest in vpo-audio): plafond 0.97 (~-0,26 dBFS),
+    // attack ~1,5 ms (gedoseerd — één piek trekt niet het hele orgel omlaag),
+    // release ~250 ms. Zie het limiterblok in de frame-lus voor waarom dit de
+    // kale tanh-vervorming vervangt.
+    let mut master_limiter = MasterLimiter::new(0.97, 0.0015, 0.25, sample_rate);
+    // Wachtrij voor opruimwerk dat de janitor even niet aankon (kanaal vol):
+    // vasthouden en de volgende callback opnieuw aanbieden — NOOIT inline
+    // droppen, want dat is precies de drop-storm die de janitor voorkomt.
+    let mut gc_backlog: Vec<Box<dyn std::any::Any + Send>> = Vec::new();
+    // Voor de galm-bypass: bij de overgang naar mix 0 één keer de staart
+    // wissen — anders klinkt bij her-inschakelen eerst een bevroren, oude
+    // staart die niets met het huidige spel te maken heeft.
+    let mut reverb_was_audible = true;
 
     let sample_format = supported.sample_format();
     let mut render = move |data: &mut [f32]| {
@@ -1214,19 +1540,79 @@ fn run_audio_thread(
                 _mm_setcsr(_mm_getcsr() | 0x8040); // FTZ (bit 15) | DAZ (bit 6)
             }
 
-            // Check for completed background loads
-            while let Ok((key, sample)) = loaded_rx.try_recv() {
-                samples_clone.write().insert(key, sample.clone());
-                // Upgrade any playing voices using this sample
-                for voice in voices_clone.write().iter_mut() {
-                    if voice.stop_id == key.0 && voice.pipe_num == key.1 {
-                        voice.upgrade_to_full(sample.clone());
-                    }
+            // Achtergestelde opruimboxen alsnog naar de janitor proberen te
+            // schuiven (kanaal was vol op het moment van ontstaan).
+            while let Some(item) = gc_backlog.pop() {
+                if let Err(e) = gc_tx_render.try_send(item) {
+                    gc_backlog.push(e.into_inner());
+                    break;
                 }
             }
 
-            // Process commands
-            while let Ok(cmd) = command_rx_clone.try_recv() {
+            // Check for completed background loads. Gecapt per callback: elke
+            // integratie doet een map-insert + voice-scan; tientallen tegelijk
+            // verwerken zou de callback over zijn deadline duwen. De rest wacht
+            // gewoon één callback (~3-6 ms) langer in het kanaal.
+            let mut integrated = 0;
+            while integrated < 16 {
+                match loaded_rx.try_recv() {
+                    Ok((key, sample_opt, generation)) => {
+                        // Resultaat van vóór een orgelwissel → volledig negeren:
+                        // de key kan in het nieuwe orgel een ándere pijp
+                        // betekenen, en zijn in-flight-marker (van een eventuele
+                        // verse aanvraag onder dezelfde key) mag hij níet wissen.
+                        if generation != load_generation {
+                            continue;
+                        }
+                        inflight_loads.remove(&key);
+                        // None = laden mislukt; alleen de administratie opruimen
+                        // zodat een volgende NoteOn het opnieuw mag proberen.
+                        let Some(sample) = sample_opt else { continue };
+                        let size = sample.data.len() * std::mem::size_of::<f32>();
+                        if let Some(old) = samples_clone.write().insert(key, sample.clone()) {
+                            // Zelfde key opnieuw geladen: oude telling eraf.
+                            samples_bytes = samples_bytes
+                                .saturating_sub(old.data.len() * std::mem::size_of::<f32>());
+                        } else {
+                            sample_fifo.push_back(key);
+                        }
+                        samples_bytes += size;
+                        // Upgrade any playing voices using this sample
+                        for voice in voices_clone.write().iter_mut() {
+                            if voice.stop_id == key.0 && voice.pipe_num == key.1 {
+                                voice.upgrade_to_full(sample.clone());
+                            }
+                        }
+                        integrated += 1;
+                    }
+                    Err(_) => break,
+                }
+            }
+
+            // RAM-plafond handhaven: oudste full samples wijken (max 4 per
+            // callback — begrensd werk). De drop zelf gaat naar de janitor-
+            // thread zodat de callback geen grote deallocaties doet.
+            let mut evicted = 0;
+            while samples_bytes > SAMPLES_BYTES_CAP && evicted < 4 {
+                let Some(old_key) = sample_fifo.pop_front() else { break; };
+                if let Some(old) = samples_clone.write().remove(&old_key) {
+                    samples_bytes = samples_bytes
+                        .saturating_sub(old.data.len() * std::mem::size_of::<f32>());
+                    if let Err(e) = gc_tx_render.try_send(Box::new(old)) { gc_backlog.push(e.into_inner()); }
+                    evicted += 1;
+                }
+            }
+
+            // Process commands. Gecapt per callback: een tutti-akkoord op veel
+            // registers levert in één klap honderden NoteOn/NoteOff-commando's;
+            // die allemaal binnen één callback verwerken (met map-lookups en
+            // voice-scans per commando) kon de realtime-deadline overschrijden.
+            // De rest wacht één callback (~3-6 ms) — onhoorbaar, en de FIFO-
+            // volgorde blijft intact.
+            let mut cmds_done = 0u32;
+            while cmds_done < 256 {
+                let Ok(cmd) = command_rx_clone.try_recv() else { break };
+                cmds_done += 1;
                 match cmd {
                     AudioCommand::NoteOn { stop_id, pipe_num, midi_note, velocity } => {
                         let key = (stop_id, pipe_num);
@@ -1247,8 +1633,7 @@ fn run_audio_thread(
                             // Full sample available - instant playback
                             let mut voice = PlayingVoice::new_from_sample(sample.clone(), stop_id, pipe_num, midi_note, velocity);
                             voice.one_shot = one_shot;
-                            voices_clone.write().push(voice);
-                            debug!("NoteOn (full): stop={}, pipe={}, note={}", stop_id, pipe_num, midi_note);
+                            push_voice_capped(&mut voices_clone.write(), voice, sample_rate);
                         } else {
                             // Check for preload buffer - use tremulant if active and available
                             let preload_opt = if trem_on {
@@ -1266,17 +1651,33 @@ fn run_audio_thread(
                                 let mut voice = PlayingVoice::new_from_preload(preload.clone(), stop_id, pipe_num, midi_note, velocity, sample_rate);
                                 voice.one_shot = one_shot;
 
-                                // Request background load of full sample
-                                let path = preload.source_path.clone();
-                                voice.mark_load_requested();
-                                let _ = load_tx_clone.try_send((key, path, sample_rate));
+                                // Request background load of full sample.
+                                // Dedup: loopt er al een load voor deze key, dan
+                                // niet opnieuw insturen — de upgrade-scan pakt
+                                // álle voices met deze key. Alleen markeren bij
+                                // een geslaagde send: bij een volle queue mag een
+                                // volgende NoteOn het opnieuw proberen.
+                                if inflight_loads.contains(&key) {
+                                    voice.mark_load_requested();
+                                } else {
+                                    let path = preload.source_path.clone();
+                                    let odf_lp = odf_loops_clone.read().get(&path).copied();
+                                    if load_tx_clone.try_send((key, path, sample_rate, load_generation, odf_lp)).is_ok() {
+                                        inflight_loads.insert(key);
+                                        voice.mark_load_requested();
+                                    }
+                                }
 
-                                let rate = voice.rate;
-                                voices_clone.write().push(voice);
-                                debug!("NoteOn (preload{}): stop={}, pipe={}, rate={}",
-                                    if trem_on { "+trem" } else { "" }, stop_id, pipe_num, rate);
+                                push_voice_capped(&mut voices_clone.write(), voice, sample_rate);
                             } else {
-                                warn!("NoteOn: No sample or preload for stop={}, pipe={}", stop_id, pipe_num);
+                                // Max één warn per pijp: dit pad is bereikbaar in
+                                // normaal spel (onopgeloste REF-pijpen) en logde
+                                // voorheen bij ÉLKE toetsaanslag — bestand-I/O
+                                // onder een globale mutex in de audio-callback
+                                // (auditbevinding 3).
+                                if missing_sample_warned.insert((stop_id, pipe_num)) {
+                                    warn!("NoteOn: No sample or preload for stop={}, pipe={}", stop_id, pipe_num);
+                                }
                             }
                         }
                     }
@@ -1304,17 +1705,33 @@ fn run_audio_thread(
                             {
                                 if spawn.is_none() && (rel_full.is_some() || rel_pre.is_some()) {
                                     // Niveau-overname: de release start op het
-                                    // huidige envelope-niveau van de sustain.
-                                    let level = voice.envelope.clamp(0.05, 1.0);
+                                    // huidige envelope-niveau van de sustain,
+                                    // geschaald voor staccato (fase C).
+                                    let note_ms = voice.age_samples as f32 * 1000.0 / (sample_rate.max(1)) as f32;
+                                    let rel_secs = rel_pre.as_ref()
+                                        .map(|p| p.total_samples as f32 / (p.sample_rate.max(1)) as f32)
+                                        .unwrap_or(2.0);
+                                    let (stacc_gain, stacc_decay) = scaled_release_params(note_ms, voice.midi_note, rel_secs);
+                                    let level = (voice.envelope * stacc_gain).clamp(0.05, 1.0);
+                                    // Fase-uitlijning (GrandOrgue-stijl, fase B):
+                                    // start de release op de positie waarvan de
+                                    // golfvorm aansluit op de stervende stem —
+                                    // start op frame 0 gaf een hoorbare tik.
+                                    let align_pos: u64 = rel_pre.as_ref()
+                                        .and_then(|p| p.align_table.as_ref())
+                                        .map(|t| t.position_for(voice.hist_last, voice.hist_prev) as u64)
+                                        .unwrap_or(0);
                                     let mut rv = if let Some(sample) = rel_full.clone() {
                                         let mut v = PlayingVoice::new_from_sample(sample, stop_id, release_key.1, voice.midi_note, 1.0);
                                         // Same-file release: de volledige sample is
                                         // het HELE bestand — spring naar het
-                                        // release-segment (cue-marker), in
-                                        // output-rate frames.
+                                        // release-segment (cue-marker) + de
+                                        // fase-uitlijn-offset, in output-rate frames
+                                        // (de full sample is naar output-rate
+                                        // geresampled).
                                         if let Some(ref pre) = rel_pre {
-                                            if pre.trim_start > 0 && pre.sample_rate > 0 {
-                                                v.position = pre.trim_start as f64
+                                            if pre.sample_rate > 0 {
+                                                v.position = (pre.trim_start as u64 + align_pos) as f64
                                                     * sample_rate as f64 / pre.sample_rate as f64;
                                             }
                                         }
@@ -1324,27 +1741,39 @@ fn run_audio_thread(
                                         let mut v = PlayingVoice::new_from_preload(
                                             pre, stop_id, release_key.1, voice.midi_note, 1.0, sample_rate,
                                         );
-                                        // Stream de volledige release-staart bij.
+                                        // Fase-uitlijning: preload-data begint op het
+                                        // segment; positie is in bron-frames.
+                                        if align_pos > 0 {
+                                            v.position = align_pos as f64;
+                                        }
+                                        // Stream de volledige release-staart bij (met dedup).
                                         if let Some(path) = v.needs_background_load() {
-                                            v.mark_load_requested();
-                                            let _ = load_tx_clone.try_send((release_key, path, sample_rate));
+                                            let odf_lp = odf_loops_clone.read().get(&path).copied();
+                                            if inflight_loads.contains(&release_key) {
+                                                v.mark_load_requested();
+                                            } else if load_tx_clone.try_send((release_key, path, sample_rate, load_generation, odf_lp)).is_ok() {
+                                                inflight_loads.insert(release_key);
+                                                v.mark_load_requested();
+                                            }
                                         }
                                         v
                                     };
                                     rv.one_shot = true;
                                     rv.envelope = level;
                                     rv.target_envelope = level;
-                                    debug!("Release-voice gestart: stop={} pipe={} niveau={:.2} bron={} len={} rate={:.3} pos={:.0}",
-                                           stop_id, pipe_num, level,
-                                           if rel_full.is_some() { "full" } else { "preload" },
-                                           rv.get_sample_len(), rv.rate, rv.position);
+                                    // Korte noot: staart actief afbouwen — de galm
+                                    // in de opname is nog niet volledig opgebouwd.
+                                    if let Some(decay_ms) = stacc_decay {
+                                        rv.release_ms(decay_ms, sample_rate);
+                                    }
                                     spawn = Some(rv);
                                 }
                                 voice.release_ms(release_fade_ms(voice.midi_note), sample_rate);
                             }
                         }
                         if let Some(rv) = spawn {
-                            voices_lock.push(rv);
+                            budget_release_voices(&mut voices_lock, sample_rate);
+                            push_voice_capped(&mut voices_lock, rv, sample_rate);
                         }
                     }
                     AudioCommand::ReleaseStop { stop_id } => {
@@ -1363,14 +1792,25 @@ fn run_audio_thread(
                                 let rel_full = samples_clone.read().get(&release_key).cloned();
                                 let rel_pre = preloads_clone.read().get(&release_key).cloned();
                                 if rel_full.is_some() || rel_pre.is_some() {
-                                    let level = voice.envelope.clamp(0.05, 1.0);
+                                    // Staccato-schaal + fase-uitlijning — zie NoteOff.
+                                    let note_ms = voice.age_samples as f32 * 1000.0 / (sample_rate.max(1)) as f32;
+                                    let rel_secs = rel_pre.as_ref()
+                                        .map(|p| p.total_samples as f32 / (p.sample_rate.max(1)) as f32)
+                                        .unwrap_or(2.0);
+                                    let (stacc_gain, stacc_decay) = scaled_release_params(note_ms, voice.midi_note, rel_secs);
+                                    let level = (voice.envelope * stacc_gain).clamp(0.05, 1.0);
+                                    // Fase-uitlijning — zie NoteOff.
+                                    let align_pos: u64 = rel_pre.as_ref()
+                                        .and_then(|p| p.align_table.as_ref())
+                                        .map(|t| t.position_for(voice.hist_last, voice.hist_prev) as u64)
+                                        .unwrap_or(0);
                                     let mut rv = if let Some(sample) = rel_full {
                                         let mut v = PlayingVoice::new_from_sample(sample, stop_id, release_key.1, voice.midi_note, 1.0);
                                         // Same-file release: spring naar het segment
-                                        // (zie NoteOff voor de uitleg).
+                                        // + fase-offset (zie NoteOff voor de uitleg).
                                         if let Some(ref pre) = rel_pre {
-                                            if pre.trim_start > 0 && pre.sample_rate > 0 {
-                                                v.position = pre.trim_start as f64
+                                            if pre.sample_rate > 0 {
+                                                v.position = (pre.trim_start as u64 + align_pos) as f64
                                                     * sample_rate as f64 / pre.sample_rate as f64;
                                             }
                                         }
@@ -1380,22 +1820,36 @@ fn run_audio_thread(
                                         let mut v = PlayingVoice::new_from_preload(
                                             pre, stop_id, release_key.1, voice.midi_note, 1.0, sample_rate,
                                         );
+                                        if align_pos > 0 {
+                                            v.position = align_pos as f64;
+                                        }
                                         if let Some(path) = v.needs_background_load() {
-                                            v.mark_load_requested();
-                                            let _ = load_tx_clone.try_send((release_key, path, sample_rate));
+                                            let odf_lp = odf_loops_clone.read().get(&path).copied();
+                                            if inflight_loads.contains(&release_key) {
+                                                v.mark_load_requested();
+                                            } else if load_tx_clone.try_send((release_key, path, sample_rate, load_generation, odf_lp)).is_ok() {
+                                                inflight_loads.insert(release_key);
+                                                v.mark_load_requested();
+                                            }
                                         }
                                         v
                                     };
                                     rv.one_shot = true;
                                     rv.envelope = level;
                                     rv.target_envelope = level;
+                                    if let Some(decay_ms) = stacc_decay {
+                                        rv.release_ms(decay_ms, sample_rate);
+                                    }
                                     spawns.push(rv);
                                     spawned.insert(voice.pipe_num);
                                 }
                             }
                             voice.release_ms(release_fade_ms(voice.midi_note), sample_rate);
                         }
-                        voices_lock.extend(spawns);
+                        for rv in spawns {
+                            budget_release_voices(&mut voices_lock, sample_rate);
+                            push_voice_capped(&mut voices_lock, rv, sample_rate);
+                        }
                     }
                     AudioCommand::RegisterPercussiveStops(set) => {
                         if !set.is_empty() {
@@ -1407,7 +1861,13 @@ fn run_audio_thread(
                         if !map.is_empty() {
                             info!("ODF-intonatie geregistreerd voor {} pijpen", map.len());
                         }
-                        *odf_voicing_clone.write() = (*map).clone();
+                        *odf_voicing_clone.write() = map;
+                    }
+                    AudioCommand::RegisterOdfLoops(map) => {
+                        if !map.is_empty() {
+                            info!("ODF-looppunten geregistreerd voor {} bestanden (ook voor full-sample-loads)", map.len());
+                        }
+                        *odf_loops_clone.write() = map;
                     }
                     AudioCommand::AllNotesOff => {
                         for voice in voices_clone.write().iter_mut() {
@@ -1428,24 +1888,72 @@ fn run_audio_thread(
                         info!("Reverb mix set to {:.2}", mix);
                     }
                     AudioCommand::LoadSamples(new_samples) => {
-                        let mut samples_lock = samples_clone.write();
-                        samples_lock.clear();
-                        for (k, v) in new_samples.iter() {
-                            samples_lock.insert(*k, v.clone());
+                        {
+                            let mut samples_lock = samples_clone.write();
+                            // Oude map (kan GB's zijn na lang spelen) naar de
+                            // janitor-thread — droppen in de callback stalde de
+                            // audio-thread seconden lang.
+                            let old = std::mem::take(&mut *samples_lock);
+                            if let Err(e) = gc_tx_render.try_send(Box::new(old)) { gc_backlog.push(e.into_inner()); }
+                            samples_bytes = 0;
+                            sample_fifo.clear();
+                            for (k, v) in new_samples.iter() {
+                                samples_bytes += v.data.len() * std::mem::size_of::<f32>();
+                                sample_fifo.push_back(*k);
+                                samples_lock.insert(*k, v.clone());
+                            }
                         }
-                        preloads_clone.write().clear();
-                        voices_clone.write().clear();
+                        {
+                            let mut preloads_lock = preloads_clone.write();
+                            let old = std::mem::take(&mut *preloads_lock);
+                            if let Err(e) = gc_tx_render.try_send(Box::new(old)) { gc_backlog.push(e.into_inner()); }
+                        }
+                        {
+                            let mut voices_lock = voices_clone.write();
+                            let old = std::mem::take(&mut *voices_lock);
+                            if let Err(e) = gc_tx_render.try_send(Box::new(old)) { gc_backlog.push(e.into_inner()); }
+                        }
+                        // Nieuwe laad-generatie: uitstaande achtergrond-loads van
+                        // het vorige orgel mogen hun (hergebruikte) keys niet vullen.
+                        load_generation += 1;
+                        inflight_loads.clear();
+                        missing_sample_warned.clear();
+                        // Vers orgel = verse limiter-staat (geen ingehouden gain
+                        // van een luide passage op het vorige orgel).
+                        master_limiter.reset();
                         info!("Loaded {} preloaded samples", new_samples.len());
                     }
                     AudioCommand::RegisterPreloadBuffers(buffers) => {
-                        // Clear previous and register new preload buffers
-                        samples_clone.write().clear();
-                        let mut preloads_lock = preloads_clone.write();
-                        preloads_lock.clear();
-                        for (k, v) in buffers.iter() {
-                            preloads_lock.insert(*k, v.clone());
+                        // Clear previous and register new preload buffers.
+                        // Oude maps naar de janitor (zie LoadSamples): dit is
+                        // het orgelwissel-pad — na uren spelen zaten hier GB's.
+                        {
+                            let mut samples_lock = samples_clone.write();
+                            let old = std::mem::take(&mut *samples_lock);
+                            if let Err(e) = gc_tx_render.try_send(Box::new(old)) { gc_backlog.push(e.into_inner()); }
+                            samples_bytes = 0;
+                            sample_fifo.clear();
                         }
-                        voices_clone.write().clear();
+                        {
+                            let mut preloads_lock = preloads_clone.write();
+                            let old = std::mem::take(&mut *preloads_lock);
+                            if let Err(e) = gc_tx_render.try_send(Box::new(old)) { gc_backlog.push(e.into_inner()); }
+                            for (k, v) in buffers.iter() {
+                                preloads_lock.insert(*k, v.clone());
+                            }
+                        }
+                        {
+                            let mut voices_lock = voices_clone.write();
+                            let old = std::mem::take(&mut *voices_lock);
+                            if let Err(e) = gc_tx_render.try_send(Box::new(old)) { gc_backlog.push(e.into_inner()); }
+                        }
+                        // Nieuwe laad-generatie (zie LoadSamples).
+                        load_generation += 1;
+                        inflight_loads.clear();
+                        missing_sample_warned.clear();
+                        // Vers orgel = verse limiter-staat (geen ingehouden gain
+                        // van een luide passage op het vorige orgel).
+                        master_limiter.reset();
                         info!("Registered {} preload buffers for instant playback", buffers.len());
                     }
                     AudioCommand::RegisterTremulantBuffers(buffers) => {
@@ -1460,7 +1968,14 @@ fn run_audio_thread(
                         info!("Registered {} tremulant preload buffers ({} stops with trem samples)", buffers.len(), trem_stops.len());
                     }
                     AudioCommand::RegisterFullSample { key, sample } => {
-                        samples_clone.write().insert(key, sample);
+                        let size = sample.data.len() * std::mem::size_of::<f32>();
+                        if let Some(old) = samples_clone.write().insert(key, sample) {
+                            samples_bytes = samples_bytes
+                                .saturating_sub(old.data.len() * std::mem::size_of::<f32>());
+                        } else {
+                            sample_fifo.push_back(key);
+                        }
+                        samples_bytes += size;
                     }
                     AudioCommand::SetTremulant { stop_ids, active } => {
                         // Crossfade: for currently playing voices on these stops,
@@ -1485,17 +2000,22 @@ fn run_audio_thread(
                                             alt_buf, voice.stop_id, voice.pipe_num, voice.midi_note,
                                             voice.target_envelope, voice.position, sample_rate
                                         );
-                                        // Request background load for new voice
+                                        // Request background load for new voice (met dedup)
                                         if let Some(path) = nv.needs_background_load() {
-                                            nv.mark_load_requested();
-                                            let _ = load_tx_clone.try_send((key, path, sample_rate));
+                                            let odf_lp = odf_loops_clone.read().get(&path).copied();
+                                            if inflight_loads.contains(&key) {
+                                                nv.mark_load_requested();
+                                            } else if load_tx_clone.try_send((key, path, sample_rate, load_generation, odf_lp)).is_ok() {
+                                                inflight_loads.insert(key);
+                                                nv.mark_load_requested();
+                                            }
                                         }
                                         new_voices.push(nv);
                                     }
                                 }
                             }
                             // Add new crossfade voices
-                            voices_lock.extend(new_voices);
+                            for nv in new_voices { push_voice_capped(&mut voices_lock, nv, sample_rate); }
                         }
                         // Update tremulant state for future notes
                         let mut trem = trem_active_clone.write();
@@ -1588,17 +2108,11 @@ fn run_audio_thread(
                         *temperament_clone.write() = ratios;
                         info!("Temperament set: fine_tune={} cents", fine_tune);
                     }
-                    AudioCommand::LoadImpulseResponse(ir_path) => {
-                        match ConvolutionReverb::from_wav(&ir_path, 1024) {
-                            Ok(mut rev) => {
-                                rev.mix = *reverb_mix_clone.read();
-                                *reverb_clone.write() = Some(rev);
-                                info!("Loaded impulse response: {:?}", ir_path);
-                            }
-                            Err(e) => {
-                                warn!("Failed to load impulse response {:?}: {}", ir_path, e);
-                            }
-                        }
+                    AudioCommand::LoadImpulseResponse(rev) => {
+                        // Kant-en-klaar aangeleverd; hier alleen inpluggen.
+                        let mut rev = *rev;
+                        rev.mix = *reverb_mix_clone.read();
+                        *reverb_clone.write() = Some(rev);
                     }
                     AudioCommand::SetAlgorithmicReverb { preset, rt60, pre_delay_ms, damping, room_size, mix } => {
                         // Mix centraal bijhouden: de render-lus vermenigvuldigt het
@@ -1661,13 +2175,35 @@ fn run_audio_thread(
                         info!("EQ: enabled={}, {} banden over {} kanalen", enabled, bands.len(), channels);
                     }
                     AudioCommand::ClearSamples => {
-                        samples_clone.write().clear();
-                        preloads_clone.write().clear();
-                        trem_preloads_clone.write().clear();
+                        // Grote maps naar de janitor-thread (zie LoadSamples).
+                        {
+                            let old = std::mem::take(&mut *samples_clone.write());
+                            if let Err(e) = gc_tx_render.try_send(Box::new(old)) { gc_backlog.push(e.into_inner()); }
+                            samples_bytes = 0;
+                            sample_fifo.clear();
+                        }
+                        {
+                            let old = std::mem::take(&mut *preloads_clone.write());
+                            if let Err(e) = gc_tx_render.try_send(Box::new(old)) { gc_backlog.push(e.into_inner()); }
+                        }
+                        {
+                            let old = std::mem::take(&mut *trem_preloads_clone.write());
+                            if let Err(e) = gc_tx_render.try_send(Box::new(old)) { gc_backlog.push(e.into_inner()); }
+                        }
                         trem_active_clone.write().clear();
                         percussive_stops_clone.write().clear();
-                        odf_voicing_clone.write().clear();
-                        voices_clone.write().clear();
+                        *odf_voicing_clone.write() = Arc::new(HashMap::new());
+                        {
+                            let old = std::mem::take(&mut *voices_clone.write());
+                            if let Err(e) = gc_tx_render.try_send(Box::new(old)) { gc_backlog.push(e.into_inner()); }
+                        }
+                        // Nieuwe laad-generatie (zie LoadSamples).
+                        load_generation += 1;
+                        inflight_loads.clear();
+                        missing_sample_warned.clear();
+                        // Vers orgel = verse limiter-staat (geen ingehouden gain
+                        // van een luide passage op het vorige orgel).
+                        master_limiter.reset();
                         stop_to_division_clone.write().clear();
                         *division_gains_clone.write() = vec![1.0; 32];
                         *temperament_clone.write() = [1.0; 12];
@@ -1700,15 +2236,22 @@ fn run_audio_thread(
                 Vec::new()
             };
 
-            // Generate audio
+            // Generate audio.
+            // Deze config-locks worden UITSLUITEND geschreven in de command-fase
+            // hierboven (zelfde thread, vóór dit punt). Tijdens het renderen is er
+            // dus geen enkele schrijver — we houden read-guards vast i.p.v. elke
+            // callback zes Vecs te klonen (incl. de geneste Vec<Vec<u8>> van de
+            // routing). Dat scheelt zes heap-allocaties per callback; op ASIO4ALL
+            // (zeer hoge callback-frequentie) is dat merkbaar minder allocatie-
+            // jitter op de audio-thread — precies wat gekraak veroorzaakt.
             let gain = *master_gain_clone.read() * *master_expression_clone.read();
-            let div_gains = division_gains_clone.read().clone();
-            let div_pans = division_pans_clone.read().clone();
-            let out_chans_lock = output_channels_clone.read().clone();
-            let ccis_en_lock = ccis_enabled_clone.read().clone();
+            let div_gains = division_gains_clone.read();
+            let div_pans = division_pans_clone.read();
+            let out_chans_lock = output_channels_clone.read();
+            let ccis_en_lock = ccis_enabled_clone.read();
             let (ccis_strength, ccis_falloff, ccis_swap) = *ccis_params_clone.read();
-            let wind_group_assignment = wind_groups_clone.read().clone();
-            let swell_cfgs = swell_configs_clone.read().clone();
+            let wind_group_assignment = wind_groups_clone.read();
+            let swell_cfgs = swell_configs_clone.read();
             let stop_div_map = stop_to_division_clone.read();
             let temp_ratios = *temperament_clone.read();
             let mut peak_l = 0.0f32;
@@ -1756,6 +2299,70 @@ fn run_audio_thread(
                 let eq_on = *eq_enabled_clone.read();
                 let mut eq_chains = eq_channels_clone.write();
 
+                // Galm-bypass-overgang: zodra de mix naar 0 gaat wordt het
+                // galmblok in de frame-lus overgeslagen (rekenwerk besparen),
+                // maar de interne vertragingslijnen bevriezen dan met de oude
+                // staart erin. Eén keer wissen bij de overgang, zodat her-
+                // inschakelen met een schone (stille) galm begint.
+                let reverb_audible = reverb_mix_now > 1e-6;
+                if !reverb_audible && reverb_was_audible {
+                    fdn_lock.clear();
+                    if let Some(ref mut rev) = *conv_lock {
+                        rev.reset();
+                    }
+                }
+                reverb_was_audible = reverb_audible;
+
+                // ── Voorrekenen per voice (één keer per callback, niet per sample) ──
+                // De divisie-index, de gestapelde voicing (gebruiker + ODF-intonatie)
+                // en of de LFO-tremulant meedoet zijn constant over deze callback.
+                // Vroeger deed de per-sample-lus hiervoor 4 HashMap-lookups + tot 2
+                // powf PER VOICE PER SAMPLE — bij ~200 voices op 44,1 kHz zijn dat
+                // tientallen miljoenen bewerkingen per seconde op één kern, wat het
+                // buffer-budget oversteeg en gekraak gaf. Nu gebeurt het één keer per
+                // voice per callback (~6 ms), dus honderden malen minder vaak.
+                // Voicing/temperament-wijzigingen worden zo de volgende callback
+                // (onhoorbaar snel) opgepakt — live bijregelen blijft dus werken.
+                for voice in voices_lock.iter_mut() {
+                    voice.c_div = stop_div_map.get(&voice.stop_id).copied().unwrap_or(0) as usize;
+
+                    let vkey = (voice.stop_id, voice.pipe_num & !RELEASE_PIPE_FLAG);
+                    let (user_vol, user_pitch) = pipe_voicing_map.get(&vkey).copied().unwrap_or((0.0, 0.0));
+                    let (odf_vol, odf_pitch) = odf_voicing_map.get(&vkey).copied().unwrap_or((0.0, 0.0));
+                    let voicing_vol = user_vol + odf_vol;
+                    let voicing_pitch = user_pitch + odf_pitch;
+                    voice.c_voicing_gain = if voicing_vol.abs() > 1e-6 {
+                        10.0_f32.powf(voicing_vol / 20.0)
+                    } else {
+                        1.0
+                    };
+
+                    let note_class = (voice.midi_note % 12) as usize;
+                    let temp = temp_ratios[note_class] as f64;
+                    let pitch_mul = if voicing_pitch.abs() > 0.01 {
+                        2.0_f64.powf(voicing_pitch as f64 / 1200.0)
+                    } else {
+                        1.0
+                    };
+                    voice.c_pitch_mul = temp * pitch_mul;
+
+                    voice.c_use_lfo_trem = !stops_with_trem.contains(&voice.stop_id);
+                }
+
+                // Per-divisie basis-pan → constant-power L/R (cos/sin), één keer per
+                // callback. div_pans wordt elke callback opnieuw gelezen, dus een
+                // divisie live verpannen blijft direct hoorbaar. Alleen wanneer de
+                // C/Cis-spreiding voor een divisie aanstaat wijkt de pan per noot af
+                // en rekenen we cos/sin daar in de lus opnieuw uit.
+                let mut div_pan_cos = [0.0f32; 32];
+                let mut div_pan_sin = [0.0f32; 32];
+                for d in 0..32 {
+                    let bp = div_pans.get(d).copied().unwrap_or(0.0);
+                    let angle = (bp + 1.0) * 0.25 * std::f32::consts::PI;
+                    div_pan_cos[d] = angle.cos();
+                    div_pan_sin[d] = angle.sin();
+                }
+
                 for frame in data.chunks_mut(channels) {
                     // Per-division STEREO mix buckets (L/R): per-noot C/Cis-panning + per-
                     // divisie pan worden hier toegepast zodat losse noten links/rechts
@@ -1783,91 +2390,84 @@ fn run_audio_thread(
                         trem_mods[i] = trem.process();
                     }
 
+                    // Wind- en tremulant-modulatie zijn per DIVISIE gelijk voor alle
+                    // voices in die divisie. Bereken de dure powf/sqrt hier één keer
+                    // per divisie (max 32) i.p.v. per voice — dat scheelt bij veel
+                    // voices het leeuwendeel van het rekenwerk. In de rustsituatie
+                    // (geen wind, geen LFO-trem) blijft alles op 1.0 en draait er
+                    // geen enkele powf.
+                    let mut wind_rate = [1.0f64; 32];
+                    let mut wind_gain = [1.0f32; 32];
+                    for d in 0..32 {
+                        let wp = wind_pressures[d];
+                        if (wp - 1.0).abs() > 1e-6 {
+                            wind_rate[d] = 2.0_f64.powf(((wp - 1.0) * 30.0) as f64 / 1200.0);
+                            wind_gain[d] = wp.sqrt();
+                        }
+                    }
+                    let mut trem_rate = [1.0f64; 32];
+                    for d in 0..32 {
+                        let tp = trem_mods[d].1;
+                        if tp.abs() > 0.01 {
+                            trem_rate[d] = 2.0_f64.powf(tp as f64 / 1200.0);
+                        }
+                    }
+
                     for voice in voices_lock.iter_mut() {
-                        let div_idx = stop_div_map.get(&voice.stop_id)
-                            .copied()
-                            .unwrap_or(0) as usize;
+                        let div_idx = voice.c_div;
 
-                        // Apply per-note temperament tuning
-                        let original_rate = voice.rate;
-                        let note_class = (voice.midi_note % 12) as usize;
-                        let ratio = temp_ratios[note_class];
-                        if (ratio - 1.0_f64).abs() > 1e-10 {
-                            voice.rate = original_rate * ratio;
+                        // Effectieve afspeel-rate = basis (samplerate-correctie) ×
+                        // gecachte temperament+voicing-pitch × per-sample wind/trem.
+                        // next_sample() leest self.rate; we zetten hem tijdelijk en
+                        // herstellen daarna de basis (anders compoundeert de detune).
+                        let base_rate = voice.rate;
+                        let mut eff_rate = base_rate * voice.c_pitch_mul;
+                        if div_idx < 32 {
+                            eff_rate *= wind_rate[div_idx];
+                            if voice.c_use_lfo_trem {
+                                eff_rate *= trem_rate[div_idx];
+                            }
                         }
-
-                        // Apply wind model pitch effect
-                        let wind_p = if div_idx < 32 { wind_pressures[div_idx] } else { 1.0 };
-                        if (wind_p - 1.0).abs() > 1e-6 {
-                            let pitch_cents = (wind_p - 1.0) * 30.0;
-                            let wind_ratio = 2.0_f64.powf(pitch_cents as f64 / 1200.0);
-                            voice.rate *= wind_ratio;
-                        }
-
-                        // Apply tremulant LFO pitch effect (only for stops WITHOUT trem samples)
-                        let (trem_amp, trem_pitch) = if div_idx < 32 { trem_mods[div_idx] } else { (1.0, 0.0) };
-                        let use_lfo_trem = !stops_with_trem.contains(&voice.stop_id);
-                        if use_lfo_trem && trem_pitch.abs() > 0.01 {
-                            let trem_ratio = 2.0_f64.powf(trem_pitch as f64 / 1200.0);
-                            voice.rate *= trem_ratio;
-                        }
-
-                        // Per-pipe voicing (volume + pitch). De pitch-detune moet VÓÓR het lezen
-                        // van de sample worden toegepast (zodat ze de huidige sample beïnvloedt)
-                        // én valt onder de `voice.rate = original_rate`-reset hieronder. Anders
-                        // compoundeert de detune elke sample en loopt de toonhoogte weg.
-                        // ODF-intonatie (uit de sampleset) en gebruikers-voicing stapelen:
-                        // dB's en cents worden opgeteld. Release-voices (gemarkeerde
-                        // pipe_num) erven de intonatie van hun pijp.
-                        let vkey = (voice.stop_id, voice.pipe_num & !RELEASE_PIPE_FLAG);
-                        let (user_vol, user_pitch) = pipe_voicing_map
-                            .get(&vkey)
-                            .copied()
-                            .unwrap_or((0.0, 0.0));
-                        let (odf_vol, odf_pitch) = odf_voicing_map
-                            .get(&vkey)
-                            .copied()
-                            .unwrap_or((0.0, 0.0));
-                        let (voicing_vol, voicing_pitch) = (user_vol + odf_vol, user_pitch + odf_pitch);
-                        if voicing_pitch.abs() > 0.01 {
-                            let vr = 2.0_f64.powf(voicing_pitch as f64 / 1200.0);
-                            voice.rate *= vr;
-                        }
-
+                        voice.rate = eff_rate;
                         let sample = voice.next_sample();
-                        voice.rate = original_rate;
+                        voice.rate = base_rate;
 
-                        // Apply wind model volume effect
-                        let wind_vol = wind_p.sqrt();
-                        // Apply tremulant LFO amplitude effect
-                        let trem_vol = if use_lfo_trem { trem_amp } else { 1.0 };
-                        // Apply per-pipe volume voicing
-                        let voicing_gain = 10.0_f32.powf(voicing_vol / 20.0);
-
-                        let contribution = sample * wind_vol * trem_vol * voicing_gain;
+                        // Volume = gecachte voicing-gain × per-sample wind/trem-amplitude.
+                        let mut g = voice.c_voicing_gain;
+                        if div_idx < 32 {
+                            g *= wind_gain[div_idx];
+                            if voice.c_use_lfo_trem {
+                                g *= trem_mods[div_idx].0;
+                            }
+                        }
+                        let contribution = sample * g;
                         if div_idx >= 32 { continue; }
 
-                        // C/Cis-lade spreiding: even MIDI-noten (C,D,E,Fis,Gis,Ais) naar de ene
-                        // kant, oneven (Cis,Dis,F,G,A,B) naar de andere. Het effect is het sterkst
-                        // bij de laagste (grootste) pijpen en loopt naar boven toe steeds meer in
-                        // elkaar over (kleine pijpen, dicht bij elkaar in het front).
-                        let mut note_pan = 0.0f32;
-                        if ccis_on && ccis_en_lock.get(div_idx).copied().unwrap_or(false) {
+                        // Panning: standaard de per-callback voorgerekende constant-
+                        // power cos/sin van de divisie (geen transcendente functies in
+                        // het hete pad). Alleen wanneer de C/Cis-lade-spreiding voor
+                        // deze divisie actief is, wijkt de pan per noot af — even MIDI-
+                        // noten naar de ene kant, oneven naar de andere, sterkst bij de
+                        // laagste pijpen — en rekenen we cos/sin hier opnieuw uit.
+                        let (pan_cos, pan_sin) = if ccis_on
+                            && ccis_en_lock.get(div_idx).copied().unwrap_or(false)
+                        {
                             let n = voice.midi_note as f32;
                             let norm = ((n - 36.0) / 60.0).clamp(0.0, 1.0); // 0 bij C groot, 1 bij c''''
                             let pitch_factor = (1.0 - ccis_falloff * norm).clamp(0.0, 1.0);
                             let sep = (ccis_strength * pitch_factor).clamp(0.0, 0.95);
                             let mut side = if voice.midi_note % 2 == 0 { -1.0 } else { 1.0 };
                             if ccis_swap { side = -side; }
-                            note_pan = side * sep;
-                        }
-
-                        // Combineer met de per-divisie basis-pan → constant-power L/R.
-                        let base_pan = div_pans.get(div_idx).copied().unwrap_or(0.0);
-                        let total_pan = (base_pan + note_pan).clamp(-1.0, 1.0);
-                        let angle = (total_pan + 1.0) * 0.25 * std::f32::consts::PI;
-                        div_l[div_idx] += contribution * angle.cos();
-                        div_r[div_idx] += contribution * angle.sin();
+                            let note_pan = side * sep;
+                            let base_pan = div_pans.get(div_idx).copied().unwrap_or(0.0);
+                            let total_pan = (base_pan + note_pan).clamp(-1.0, 1.0);
+                            let angle = (total_pan + 1.0) * 0.25 * std::f32::consts::PI;
+                            (angle.cos(), angle.sin())
+                        } else {
+                            (div_pan_cos[div_idx], div_pan_sin[div_idx])
+                        };
+                        div_l[div_idx] += contribution * pan_cos;
+                        div_r[div_idx] += contribution * pan_sin;
                     }
 
                     // Reset frame
@@ -1882,6 +2482,12 @@ fn run_audio_thread(
                         let l_raw = div_l[idx];
                         let r_raw = div_r[idx];
                         if l_raw.abs() < 1e-10 && r_raw.abs() < 1e-10 { continue; }
+                        // NaN/Inf hier al afvangen, vóór de stateful keten (zwel-
+                        // filters/FDN/EQ): een niet-eindige som vergiftigt anders
+                        // de filter-staat blijvend — het vangnet aan het einde
+                        // schoont alleen het uitgangsframe (auditbevinding 14).
+                        let l_raw = if l_raw.is_finite() { l_raw } else { 0.0 };
+                        let r_raw = if r_raw.is_finite() { r_raw } else { 0.0 };
                         let pedal_pos = div_gains.get(idx).copied().unwrap_or(1.0);
                         let (min_db, _cutoff_closed) = swell_cfgs.get(idx).copied().unwrap_or((-20.0, 800.0));
                         let (lf, rf) = if let Some((fl, fr)) = swell_flt.get_mut(idx) {
@@ -1901,16 +2507,32 @@ fn run_audio_thread(
                         match out_chans_lock.get(idx) {
                             Some(list) if !list.is_empty() => {
                                 let mut i = 0;
+                                let mut routed = false;
                                 while i < list.len() {
                                     let lc = list[i] as usize;
                                     if i + 1 < list.len() {
                                         let rc = list[i + 1] as usize;
-                                        if lc < channels { frame[lc] += l; touched |= 1u64 << lc.min(63); }
-                                        if rc < channels { frame[rc] += r; touched |= 1u64 << rc.min(63); }
+                                        if lc < channels { frame[lc] += l; touched |= 1u64 << lc.min(63); routed = true; }
+                                        if rc < channels { frame[rc] += r; touched |= 1u64 << rc.min(63); routed = true; }
                                         i += 2;
                                     } else {
-                                        if lc < channels { frame[lc] += (l + r) * 0.5; touched |= 1u64 << lc.min(63); }
+                                        if lc < channels { frame[lc] += (l + r) * 0.5; touched |= 1u64 << lc.min(63); routed = true; }
                                         i += 1;
+                                    }
+                                }
+                                // Alle geconfigureerde kanalen vallen buiten dit
+                                // apparaat (bv. 8-kanaals routing op een stereo-
+                                // uitgang na een profielwissel): val terug op het
+                                // voorste paar i.p.v. het droge signaal geluidloos
+                                // te laten verdwijnen terwijl de galm wél klinkt
+                                // (auditbevinding 37).
+                                if !routed {
+                                    if channels >= 2 {
+                                        frame[0] += l; frame[1] += r;
+                                        touched |= 0b11;
+                                    } else if channels >= 1 {
+                                        frame[0] += (l + r) * 0.5;
+                                        touched |= 0b1;
                                     }
                                 }
                             }
@@ -1933,14 +2555,20 @@ fn run_audio_thread(
                     // anders valt de engine terug op de FDN zodat er ALTIJD galm
                     // beschikbaar is zodra de mix > 0 staat.
                     let (mut wet_l, mut wet_r) = (0.0f32, 0.0f32);
-                    if use_algo || conv_lock.is_none() {
-                        let (l, r) = fdn_lock.process_stereo(sum_l, sum_r);
-                        wet_l = l * reverb_mix_now;
-                        wet_r = r * reverb_mix_now;
-                    } else if let Some(ref mut rev) = *conv_lock {
-                        let w = rev.process_wet_sample((sum_l + sum_r) * 0.5) * reverb_mix_now;
-                        wet_l = w;
-                        wet_r = w;
+                    // Staat de galm op 0 (of uit), sla dan het HELE galm-blok over:
+                    // de FDN/convolutie draaide voorheen elke sample door, zelfs bij
+                    // mix 0 — puur weggegooid rekenwerk. Bij mix 0 is er ook geen
+                    // staart om te bewaren, dus overslaan is klik-vrij.
+                    if reverb_mix_now > 1e-6 {
+                        if use_algo || conv_lock.is_none() {
+                            let (l, r) = fdn_lock.process_stereo(sum_l, sum_r);
+                            wet_l = l * reverb_mix_now;
+                            wet_r = r * reverb_mix_now;
+                        } else if let Some(ref mut rev) = *conv_lock {
+                            let w = rev.process_wet_sample((sum_l + sum_r) * 0.5) * reverb_mix_now;
+                            wet_l = w;
+                            wet_r = w;
+                        }
                     }
 
                     if channels >= 2 {
@@ -1969,9 +2597,33 @@ fn run_audio_thread(
                         }
                     }
 
-                    // Soft clipping per kanaal + peak-meters (voorste paar).
+                    // Master-limiter + peak-meters (voorste paar). Dit verving de
+                    // kale tanh-per-kanaal: bij een vol werk (honderden stemmen,
+                    // som ver boven 1.0) betekende tanh diepe saturatie — hoorbare
+                    // vervorming ("overstuur") én platgeslagen dynamiek ("gedempt"),
+                    // waarbij elk kanaal onafhankelijk vervormde en het stereobeeld
+                    // instortte. De limiter verlaagt in plaats daarvan de TOTALE
+                    // gain: attack direct (piek kan nooit boven het plafond uit),
+                    // release ~250 ms terug naar 1.0. Geen vervorming, de onderlinge
+                    // balans en het stereobeeld blijven intact, en na de piek veert
+                    // het niveau vanzelf terug.
+                    let mut frame_peak = 0.0f32;
+                    for s in frame.iter() {
+                        frame_peak = frame_peak.max(s.abs());
+                    }
+                    // NaN/Inf-vangnet (dit deed de oude tanh impliciet: tanh(±inf)=±1).
+                    // Zonder deze guard zou een niet-eindige sample (defect bestand,
+                    // instabiel filter) via threshold/inf → gain 0 → inf×0 = NaN de
+                    // hele uitgang vergiftigen.
+                    if !frame_peak.is_finite() {
+                        for s in frame.iter_mut() {
+                            if !s.is_finite() { *s = 0.0; }
+                        }
+                        frame_peak = frame.iter().fold(0.0f32, |m, s| m.max(s.abs()));
+                    }
+                    let limiter_gain = master_limiter.process(frame_peak);
                     for (ci, s) in frame.iter_mut().enumerate() {
-                        *s = s.tanh();
+                        *s = (*s * limiter_gain).clamp(-1.0, 1.0);
                         if ci == 0 { peak_l = peak_l.max(s.abs()); }
                         else if ci == 1 { peak_r = peak_r.max(s.abs()); }
                     }
@@ -1979,9 +2631,11 @@ fn run_audio_thread(
                     // galm), onafhankelijk van de fysieke kanaalrouting. Anders zou een
                     // klavier dat naar surround-kanalen geroutet is niet in de opname
                     // belanden. sum_l/sum_r bevatten alle divisies vóór kanaalroutering.
+                    // Zelfde limiter-gain als de uitgang, zodat de opname klinkt als
+                    // wat er gespeeld werd.
                     if rec_active.is_some() {
-                        let l = (sum_l + wet_l).tanh();
-                        let r = (sum_r + wet_r).tanh();
+                        let l = ((sum_l + wet_l) * limiter_gain).clamp(-1.0, 1.0);
+                        let r = ((sum_r + wet_r) * limiter_gain).clamp(-1.0, 1.0);
                         rec_buf.push(l);
                         rec_buf.push(r);
                     }
@@ -2131,12 +2785,33 @@ fn run_audio_thread(
     // Een herbouwde stream telt pas als hersteld wanneer er écht callbacks
     // komen — ASIO4ALL kan bouwen+starten en toch stil blijven.
     let mut verify_since: Option<(u64, u64)> = None;
+    // Een enkele stream-fout is onder piekbelasting vaak een kortstondige
+    // ASIO-underrun: de driver meldt een fout maar blíjft callbacks leveren.
+    // De stream dán meteen afbreken maakt een korte hapering juist een langere
+    // stilte (en kan op ASIO4ALL escaleren naar een volledige herstart +
+    // orgel-herlaad). We markeren de fout daarom als "verdacht" en herbouwen
+    // pas als de callbacks ook echt stoppen. (start-tick, callback-baseline)
+    let mut error_suspect: Option<(u64, u64)> = None;
     while running.load(Ordering::Relaxed) {
         thread::sleep(std::time::Duration::from_millis(100));
         ticks += 1;
 
-        if stream_error.swap(false, Ordering::Relaxed) {
-            rebuild_pending = true;
+        if stream_error.swap(false, Ordering::Relaxed)
+            && error_suspect.is_none()
+            && verify_since.is_none()
+        {
+            error_suspect = Some((ticks, cb_count.load(Ordering::Relaxed)));
+        }
+        // Verdachte stream-fout uitzoeken: lopen de callbacks door → tijdelijke
+        // glitch, negeren. Staan ze ~0,8 s later nog stil → echte uitval, herbouw.
+        if let Some((t0, baseline)) = error_suspect {
+            if cb_count.load(Ordering::Relaxed) > baseline + 1 {
+                error_suspect = None;
+            } else if ticks.saturating_sub(t0) >= 8 {
+                error_suspect = None;
+                rebuild_pending = true;
+                warn!("Audio-watchdog: stream-fout + callbacks gestopt — herbouw volgt");
+            }
         }
 
         // Loopt er een verificatievenster? Callbacks gezien → herstel bevestigd;

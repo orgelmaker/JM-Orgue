@@ -81,6 +81,26 @@ pub struct MidiChannelMapping {
     pub last_midi_note: Option<u8>,
 }
 
+impl MidiChannelMapping {
+    /// Accepteert dit klavier dit kanaal + deze (fysieke) noot?
+    /// - channel None = expliciet "alle kanalen".
+    /// - Het ingeleerde toetsbereik begrenst: noten erbuiten (bv. pistons die
+    ///   MIDI-noten sturen op hetzelfde kanaal) horen NIET bij dit klavier en
+    ///   mogen dus niet als orgelnoten klinken.
+    pub fn accepts(&self, channel: u8, note: u8) -> bool {
+        if let Some(ch) = self.channel {
+            if ch != channel { return false; }
+        }
+        if let Some(f) = self.first_midi_note {
+            if note < f { return false; }
+        }
+        if let Some(l) = self.last_midi_note {
+            if note > l { return false; }
+        }
+        true
+    }
+}
+
 /// Result of learning a keyboard range
 #[derive(Debug, Clone)]
 pub struct LearnedKeyboardRange {
@@ -102,8 +122,11 @@ pub struct MidiPresetBinding {
 /// Types of MIDI events that can trigger a preset
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MidiPresetTrigger {
-    /// A specific note on any channel
-    Note { note: u8 },
+    /// Een specifieke noot. channel None = elk kanaal (oude, her-in-te-leren
+    /// koppelingen); mét kanaal vuurt de preset alleen op dat kanaal — anders
+    /// triggert een piston-noot ook bij dezelfde toets op een klavier
+    /// (presets sprongen "alle kanten op" tijdens het spelen).
+    Note { channel: Option<u8>, note: u8 },
     /// A control change message
     ControlChange { channel: Option<u8>, controller: u8, value: u8 },
     /// Program change
@@ -141,6 +164,13 @@ pub enum MidiCommand {
     LearnSwellPedal(String, u8, Sender<Option<SwellBinding>>),
     /// Clear swell pedal binding for a division
     ClearSwellPedal(String),
+    /// Wacht op een pedaalstand: beweeg + stilhouden → (kanaal, cc, waarde).
+    /// Filter Some((ch,cc)) beperkt fase 2 tot dezelfde trede. Voor de
+    /// stapsgewijze zwel-/crescendo-inleer-popup.
+    LearnPedalPosition(Option<(u8, u8)>, Sender<Option<(u8, u8, u8)>>),
+    /// Wacht op één toetsaanslag: (kanaal, noot). Voor de stapsgewijze
+    /// klavier-inleer-popup (laagste toets → groen → hoogste toets).
+    LearnSingleNote(Sender<Option<(u8, u8)>>),
     /// Learn crescendo pedal CC binding
     LearnCrescendoPedal(Sender<Option<(u8, u8)>>), // returns (channel, cc_num)
     Shutdown,
@@ -268,6 +298,11 @@ pub struct AppState {
     /// Per-divisie output-kanalen: lijst fysieke kanaalindices (leeg = standaard voorste paar 0/1).
     /// Opeenvolgende kanalen vormen (L,R)-paren; een los laatste kanaal krijgt mono.
     pub division_output_channels: Arc<RwLock<Vec<Vec<u8>>>>,
+    /// Kanaal-override van het actieve uitvoerprofiel (speakers/hoofdtelefoon):
+    /// (divisienaam → kanaallijst). Zolang deze actief is wint hij van de per-orgel
+    /// opgeslagen routing (apply_saved_output_channels past hem als laatste toe) en
+    /// wordt de per-orgel routing NIET overschreven bij opslaan. None = geen override.
+    pub profile_channel_override: Arc<RwLock<Option<Vec<(String, Vec<u8>)>>>>,
     /// C/Cis-lade spreiding aan/uit per divisie (even tonen ene kant, oneven andere).
     pub division_ccis_enabled: Arc<RwLock<Vec<bool>>>,
     /// Globale C/Cis-parameters: (sterkte 0..1, afval-met-toonhoogte 0..1, kanten omdraaien).
@@ -277,6 +312,14 @@ pub struct AppState {
     /// Of de getrokken registratie ("laatste stand") bij het laden van een orgel
     /// hersteld wordt. Default false = schone start (geen registers aan bij opstart).
     pub restore_registration: Arc<RwLock<bool>>,
+    /// Live registratie-snapshot rond een audio-uitvoer-wissel:
+    /// (orgel-id, getrokken registers, actieve koppels). De verplichte orgel-
+    /// herlaad na een wissel wist drawn_stops onvoorwaardelijk en herstelde ze
+    /// alleen wanneer de losse "herstel laatste registratie"-toggle aanstond —
+    /// een hoofdtelefoon-wissel gooide dus stilletjes alle registers uit. De
+    /// eerstvolgende load van HETZELFDE orgel consumeert dit snapshot en zet de
+    /// live registratie terug, onafhankelijk van die toggle.
+    pub pending_registration_restore: Arc<RwLock<Option<(Option<String>, Vec<String>, Vec<String>)>>>,
     /// Wind-groep toewijzing per divisie (0..31). Default: divisie i → groep i (elke divisie eigen groep).
     /// Divisies in dezelfde groep delen één wind-reservoir (gecombineerd voice-count).
     pub division_wind_groups: Arc<RwLock<Vec<u8>>>,
@@ -499,10 +542,12 @@ impl AppState {
             app_handle: Arc::new(RwLock::new(None)),
             pipe_voicings: Arc::new(RwLock::new(std::collections::HashMap::new())),
             division_output_channels: Arc::new(RwLock::new(vec![Vec::new(); 32])),
+            profile_channel_override: Arc::new(RwLock::new(None)),
             division_ccis_enabled: Arc::new(RwLock::new(vec![false; 32])),
             ccis_spread: Arc::new(RwLock::new((0.7, 0.6, false))),
             recorder: Arc::new(crate::recorder::Recorder::new()),
             restore_registration: Arc::new(RwLock::new(false)),
+            pending_registration_restore: Arc::new(RwLock::new(None)),
             // Identity-default: divisie 0 → groep 0, divisie 1 → groep 1, ... (elke divisie eigen groep)
             division_wind_groups: Arc::new(RwLock::new((0..32u8).collect())),
             // Default: 8 groepen actief — gebruiker beperkt zelf naar wens
@@ -685,6 +730,42 @@ impl AppState {
                             let _ = response_tx.send(None);
                         }
                     }
+                    MidiCommand::LearnPedalPosition(filter, response_tx) => {
+                        tracing::info!("Learning pedal position (filter={:?})", filter);
+                        if let Some(rx) = midi_receiver.as_ref() { while rx.try_recv().is_ok() {} }
+                        while ble_message_rx.try_recv().is_ok() {}
+                        let result = match filter {
+                            None => Self::learn_wait_settled(
+                                midi_receiver.as_ref(), &ble_message_rx, std::time::Duration::from_secs(20),
+                                &audio_player, &organ_definition, &loaded_organ_info, &drawn_stops,
+                                &midi_mappings, &active_couplers, &swell_bindings, &division_gains, &held_notes,
+                                &ble_message_count,
+                            ),
+                            Some((ch, cc)) => Self::learn_wait_settled_on(
+                                midi_receiver.as_ref(), &ble_message_rx, ch, cc,
+                                std::time::Duration::from_secs(20),
+                                &audio_player, &organ_definition, &loaded_organ_info, &drawn_stops,
+                                &midi_mappings, &active_couplers, &swell_bindings, &division_gains, &held_notes,
+                                &ble_message_count,
+                            ).map(|v| (ch, cc, v)),
+                        };
+                        let _ = response_tx.send(result);
+                    }
+                    MidiCommand::LearnSingleNote(response_tx) => {
+                        tracing::info!("Learning single note: press a key");
+                        if let Some(ref rx) = midi_receiver {
+                            while rx.try_recv().is_ok() {}
+                            let forward = |m: MidiMessage| Self::handle_midi_message(
+                                m, &audio_player, &organ_definition, &loaded_organ_info, &drawn_stops,
+                                &midi_mappings, &active_couplers, &swell_bindings, &division_gains, &held_notes,
+                                false,
+                            );
+                            let result = Self::wait_for_note_on(rx, std::time::Duration::from_secs(20), &forward);
+                            let _ = response_tx.send(result);
+                        } else {
+                            let _ = response_tx.send(None);
+                        }
+                    }
                     MidiCommand::LearnKeyboardRange(division, first_sample_note, response_tx) => {
                         // Learn keyboard range like the reference software:
                         // 1. Wait for first note (lowest key) - this gives us channel and start note
@@ -693,14 +774,20 @@ impl AppState {
                         tracing::info!("Learning keyboard range for {}: press lowest key, then highest key", division);
 
                         if let Some(ref rx) = midi_receiver {
+                            // Releases die tijdens het leren binnenkomen tóch naar de audio.
+                            let forward = |m: MidiMessage| Self::handle_midi_message(
+                                m, &audio_player, &organ_definition, &loaded_organ_info, &drawn_stops,
+                                &midi_mappings, &active_couplers, &swell_bindings, &division_gains, &held_notes,
+                                false,
+                            );
                             // Wait for first note (lowest key)
-                            let first_result = Self::wait_for_note_on(rx, std::time::Duration::from_secs(30));
+                            let first_result = Self::wait_for_note_on(rx, std::time::Duration::from_secs(30), &forward);
 
                             if let Some((channel, first_note)) = first_result {
                                 tracing::info!("Learned first note: channel={}, note={}", channel, first_note);
 
                                 // Wait for second note (highest key) - same channel
-                                let second_result = Self::wait_for_note_on(rx, std::time::Duration::from_secs(30));
+                                let second_result = Self::wait_for_note_on(rx, std::time::Duration::from_secs(30), &forward);
 
                                 if let Some((_, second_note)) = second_result {
                                     // Determine which is lowest and highest
@@ -765,8 +852,8 @@ impl AppState {
                         if let Some(ref rx) = midi_receiver {
                             if let Ok(msg) = rx.recv_timeout(std::time::Duration::from_secs(10)) {
                                 let trigger = match msg {
-                                    MidiMessage::NoteOn { note, .. } => {
-                                        Some(MidiPresetTrigger::Note { note })
+                                    MidiMessage::NoteOn { channel, note, .. } => {
+                                        Some(MidiPresetTrigger::Note { channel: Some(channel), note })
                                     }
                                     MidiMessage::ControlChange { channel, controller, value } => {
                                         Some(MidiPresetTrigger::ControlChange {
@@ -840,10 +927,14 @@ impl AppState {
                             );
 
                             if let Some(max_val) = second {
-                                let (actual_min, actual_max) = if min_val <= max_val {
-                                    (min_val, max_val)
+                                // Laagste stand gaf een hógere CC-waarde dan de hoogste
+                                // stand → trede is omgekeerd gemonteerd: min/max wisselen
+                                // én invert zetten (zoals apply_learned_swell in commands.rs;
+                                // hier stond invert altijd op false → omgekeerde lampjes/volume).
+                                let (actual_min, actual_max, inverted) = if min_val <= max_val {
+                                    (min_val, max_val, false)
                                 } else {
-                                    (max_val, min_val)
+                                    (max_val, min_val, true)
                                 };
                                 let binding = SwellBinding {
                                     division_name: division_name.clone(),
@@ -852,10 +943,23 @@ impl AppState {
                                     cc_num,
                                     min_val: actual_min,
                                     max_val: actual_max,
-                                    invert: false,
+                                    invert: inverted,
                                 };
                                 tracing::info!("Swell learned: {} → CC{} ch{} range {}-{}",
                                     division_name, cc_num, channel, actual_min, actual_max);
+                                // Wederzijds exclusief met de generaal crescendo:
+                                // een oude crescendo-koppeling op dezelfde CC
+                                // "claimde" de trede en hield de zwelkast dood.
+                                // Laatst ingeleerd wint.
+                                {
+                                    let mut cb = crescendo_binding.write();
+                                    if let Some((bch, bcc, _, _, _)) = *cb {
+                                        if bch == channel && bcc == cc_num {
+                                            tracing::info!("Crescendo-koppeling op dezelfde CC gewist (zwel-inleer wint)");
+                                            *cb = None;
+                                        }
+                                    }
+                                }
                                 let mut bindings = swell_bindings.write();
                                 bindings.retain(|b| b.division_name != division_name);
                                 bindings.push(binding.clone());
@@ -895,14 +999,29 @@ impl AppState {
                 }
             }
 
-            // Process MIDI messages
+            // Process MIDI messages. Pedaal-bursts samenvoegen: één crescendo-
+            // sweep levert per drain tientallen CC's, en élke tussenliggende
+            // trapwissel stuurt (registers × toetsen × routes) audio-commando's.
+            // Zolang de MIDI-thread daarin hangt worden binnenkomende note-offs
+            // niet verwerkt (invoerqueue loopt over → hangers). Daarom telt per
+            // drain alleen de LAATSTE crescendo-CC; tussenstanden slaan we over
+            // (wel opnemen/preset-checken — alleen de trapwissel zelf vervalt).
             if let Some(ref rx) = midi_receiver {
-                while let Ok(msg) = rx.try_recv() {
+                let mut batch: Vec<MidiMessage> = Vec::new();
+                while let Ok(msg) = rx.try_recv() { batch.push(msg); }
+                let last_cresc_idx = batch.iter()
+                    .rposition(|m| Self::cc_claimed_by_crescendo(m, &crescendo_binding));
+                for (i, msg) in batch.into_iter().enumerate() {
                     // Leg het ingespeelde event vast als er een MIDI-opname loopt
                     Self::capture_midi_event(&midi_recording, &msg);
 
                     // Check for preset triggers first
                     Self::check_preset_trigger(&msg, &preset_bindings, &preset_trigger_tx);
+
+                    let cc_claim = Self::cc_claimed_by_crescendo(&msg, &crescendo_binding);
+                    if cc_claim && Some(i) != last_cresc_idx {
+                        continue; // tussenliggende pedaalstand — alleen de laatste telt
+                    }
 
                     // Check crescendo CC
                     Self::process_crescendo_cc(
@@ -924,14 +1043,20 @@ impl AppState {
                         &swell_bindings,
                         &division_gains,
                         &held_notes,
+                        cc_claim,
                     );
                 }
             }
 
             // Process BLE MIDI messages (from BleMidiManager)
-            while let Ok(msg) = ble_message_rx.try_recv() {
+            // Zelfde crescendo-CC-coalescing als de USB-lus hierboven.
+            let mut ble_batch: Vec<MidiMessage> = Vec::new();
+            while let Ok(msg) = ble_message_rx.try_recv() { ble_batch.push(msg); }
+            let ble_last_cresc_idx = ble_batch.iter()
+                .rposition(|m| Self::cc_claimed_by_crescendo(m, &crescendo_binding));
+            for (i, msg) in ble_batch.into_iter().enumerate() {
                 ble_message_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                tracing::debug!("BLE MIDI received: {:?}", msg);
+                tracing::trace!("BLE MIDI received: {:?}", msg);
                 // Leg het ingespeelde event vast als er een MIDI-opname loopt
                 Self::capture_midi_event(&midi_recording, &msg);
                 // Forward CC messages to learn-tap channel (non-blocking; drop if full)
@@ -939,6 +1064,10 @@ impl AppState {
                     let _ = ble_learn_tx.try_send(msg.clone());
                 }
                 Self::check_preset_trigger(&msg, &preset_bindings, &preset_trigger_tx);
+                let cc_claim = Self::cc_claimed_by_crescendo(&msg, &crescendo_binding);
+                if cc_claim && Some(i) != ble_last_cresc_idx {
+                    continue; // tussenliggende pedaalstand — alleen de laatste telt
+                }
                 Self::process_crescendo_cc(
                     &msg, &crescendo_binding, &crescendo_enabled, &crescendo_stages,
                     &crescendo_stage, &crescendo_active_stops, &drawn_stops,
@@ -956,6 +1085,7 @@ impl AppState {
                     &swell_bindings,
                     &division_gains,
                     &held_notes,
+                    cc_claim,
                 );
             }
 
@@ -963,6 +1093,9 @@ impl AppState {
             // Bewust NIET vastleggen in de opname: dit is afspelen, geen live spel —
             // anders zou een opname tijdens playback de noten dubbel/terug-opnemen.
             while let Ok(msg) = player_rx.try_recv() {
+                // Ook bij afspelen: een opgenomen crescendo-CC mag het volume
+                // niet dempen via de expressie-fallback.
+                let cc_claim = Self::cc_claimed_by_crescendo(&msg, &crescendo_binding);
                 Self::handle_midi_message(
                     msg,
                     &audio_player,
@@ -974,6 +1107,7 @@ impl AppState {
                     &swell_bindings,
                     &division_gains,
                     &held_notes,
+                    cc_claim,
                 );
             }
 
@@ -1023,8 +1157,13 @@ impl AppState {
 
     /// Wait for a NoteOn message with velocity > 0
     /// Simple version: just detect NoteOn and add a small delay
-    fn wait_for_note_on(rx: &Receiver<MidiMessage>, timeout: std::time::Duration) -> Option<(u8, u8)> {
+    fn wait_for_note_on(rx: &Receiver<MidiMessage>, timeout: std::time::Duration, forward: &dyn Fn(MidiMessage)) -> Option<(u8, u8)> {
         let start = std::time::Instant::now();
+
+        // NoteOffs (en NoteOn vel=0) DOORSTUREN naar de audio: releases van
+        // al-klinkende noten gingen hier voorheen verloren, waardoor stemmen
+        // eeuwig in hun sustain-loop bleven hangen (auditbevinding 43).
+        let is_release = |m: &MidiMessage| matches!(m, MidiMessage::NoteOff { .. } | MidiMessage::NoteOn { velocity: 0, .. });
 
         while start.elapsed() < timeout {
             match rx.recv_timeout(std::time::Duration::from_millis(100)) {
@@ -1032,12 +1171,15 @@ impl AppState {
                     tracing::info!("Got NoteOn: channel={}, note={}, velocity={}", channel, note, velocity);
                     // Wait 500ms to allow the user to release the key and prepare for the next
                     std::thread::sleep(std::time::Duration::from_millis(500));
-                    // Drain any pending messages (NoteOff etc)
-                    while rx.try_recv().is_ok() {}
+                    // Drain pending messages, maar releases doorsturen
+                    while let Ok(m) = rx.try_recv() {
+                        if is_release(&m) { forward(m); }
+                    }
                     return Some((channel, note));
                 }
-                Ok(_) => {
-                    // Ignore other messages (NoteOff, CC, etc)
+                Ok(m) => {
+                    // Releases doorsturen; overige berichten negeren (stille leer-modus)
+                    if is_release(&m) { forward(m); }
                     continue;
                 }
                 Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
@@ -1139,15 +1281,29 @@ impl AppState {
         if new_stage == current_stage { return; }
 
         // Compute new active stops for this stage
-        let new_active: Vec<String> = if new_stage == 0 {
+        let stage_stops: Vec<String> = if new_stage == 0 {
             Vec::new()
         } else {
             stages.get((new_stage - 1) as usize).cloned().unwrap_or_default()
         };
         drop(stages);
 
-        // Compute diff
         let old_active = crescendo_active_stops.read().clone();
+        // GrandOrgue-gedrag: registers/koppels die de organist al handmatig
+        // getrokken had claimt de crescendo NIET — terugveren van de trede mag
+        // ze dus ook niet wegtrekken. Alleen wat de trede zelf bijtrok
+        // (old_active) of wat nu nog niet actief is hoort bij de trede.
+        // Stappen kunnen ook koppels bevatten ("coupler_"-prefix).
+        let new_active: Vec<String> = {
+            let drawn = drawn_stops.read();
+            let couplers_now = active_couplers.read();
+            stage_stops.into_iter()
+                .filter(|s| old_active.contains(s)
+                    || if s.starts_with("coupler_") { !couplers_now.contains(s) } else { !drawn.contains(s) })
+                .collect()
+        };
+
+        // Compute diff
         let to_remove: Vec<String> = old_active.iter()
             .filter(|s| !new_active.contains(s))
             .cloned()
@@ -1157,15 +1313,29 @@ impl AppState {
             .cloned()
             .collect();
 
-        // Update drawn_stops: remove stops we're deactivating, add new ones
+        // Update drawn_stops (registers) en active_couplers (koppels)
         {
             let mut drawn = drawn_stops.write();
-            for stop in &to_remove {
+            for stop in to_remove.iter().filter(|s| !s.starts_with("coupler_")) {
                 drawn.retain(|s| s != stop);
             }
-            for stop in &to_add {
+            for stop in to_add.iter().filter(|s| !s.starts_with("coupler_")) {
                 if !drawn.contains(stop) {
                     drawn.push(stop.clone());
+                }
+            }
+        }
+        // Snapshot van de koppelstand VÓÓR de wijziging: nodig om hieronder de
+        // stemmen van weggevallen/bijgekomen koppelroutes te synchroniseren.
+        let couplers_before: Vec<String> = active_couplers.read().clone();
+        {
+            let mut ac = active_couplers.write();
+            for id in to_remove.iter().filter(|s| s.starts_with("coupler_")) {
+                ac.retain(|c| c != id);
+            }
+            for id in to_add.iter().filter(|s| s.starts_with("coupler_")) {
+                if !ac.contains(id) {
+                    ac.push(id.clone());
                 }
             }
         }
@@ -1177,8 +1347,14 @@ impl AppState {
         // Update organ_info active state + synchroniseer klinkende voices:
         // weggetrokken registers zwijgen direct, bijgetrokken registers spelen de
         // ingedrukte toetsen direct mee (GrandOrgue-gedrag tijdens het spelen).
+        // Vlaggen bijwerken onder een KORT write-lock; de voice-sync hieronder
+        // stuurt (potentieel blokkerende) audio-commando's en draait daarom
+        // onder een read-lock — een write-lock daaroverheen blokkeerde elke
+        // get_organ_info-poll van de UI zolang de audio-queue vol zat
+        // (auditbevinding 4).
         {
             let drawn_now = drawn_stops.read().clone();
+            let couplers_now = active_couplers.read().clone();
             let mut organ = loaded_organ_info.write();
             if let Some(ref mut o) = *organ {
                 for div in &mut o.divisions {
@@ -1186,16 +1362,31 @@ impl AppState {
                         stop.drawn = drawn_now.contains(&stop.id);
                     }
                 }
+                if let Some(ref mut cl) = o.couplers {
+                    for c in cl.iter_mut() {
+                        c.active = couplers_now.contains(&c.id);
+                    }
+                }
+            }
+        }
+        {
+            let organ = loaded_organ_info.read();
+            if let Some(ref o) = *organ {
                 if let Some(ref player) = *audio_player.read() {
                     let mappings = midi_mappings.read();
                     let couplers = active_couplers.read();
                     let held = held_notes.read();
-                    for removed_id in &to_remove {
+                    for removed_id in to_remove.iter().filter(|s| !s.starts_with("coupler_")) {
                         Self::sync_stop_voices_inner(o, player, &mappings, &couplers, &held, removed_id, false);
                     }
-                    for added_id in &to_add {
+                    for added_id in to_add.iter().filter(|s| !s.starts_with("coupler_")) {
                         Self::sync_stop_voices_inner(o, player, &mappings, &couplers, &held, added_id, true);
                     }
+                    // Koppels in de trap: stemmen van weggevallen routes loslaten
+                    // en bijgekomen routes laten meeklinken. Zonder dit bleven
+                    // gekoppelde stemmen eeuwig hangen zodra hun koppel uitging
+                    // terwijl toetsen ingedrukt waren (hanger-hoofdoorzaak).
+                    Self::sync_coupler_voices_inner(o, player, &mappings, &held, &couplers_before, &couplers);
                 }
             }
         }
@@ -1238,6 +1429,7 @@ impl AppState {
                     Self::handle_midi_message(
                         msg, audio_player, organ_definition, loaded_organ_info, drawn_stops,
                         midi_mappings, active_couplers, swell_bindings, division_gains, held_notes,
+                        false,
                     );
                 }
             }
@@ -1251,6 +1443,7 @@ impl AppState {
                 Self::handle_midi_message(
                     msg, audio_player, organ_definition, loaded_organ_info, drawn_stops,
                     midi_mappings, active_couplers, swell_bindings, division_gains, held_notes,
+                    false,
                 );
             }
 
@@ -1299,6 +1492,7 @@ impl AppState {
                     Self::handle_midi_message(
                         msg, audio_player, organ_definition, loaded_organ_info, drawn_stops,
                         midi_mappings, active_couplers, swell_bindings, division_gains, held_notes,
+                        false,
                     );
                 }
             }
@@ -1313,6 +1507,7 @@ impl AppState {
                 Self::handle_midi_message(
                     msg, audio_player, organ_definition, loaded_organ_info, drawn_stops,
                     midi_mappings, active_couplers, swell_bindings, division_gains, held_notes,
+                    false,
                 );
             }
 
@@ -1399,8 +1594,8 @@ impl AppState {
 
         for binding in bindings.iter() {
             let matches = match (&binding.trigger, msg) {
-                (MidiPresetTrigger::Note { note: trigger_note }, MidiMessage::NoteOn { note, velocity, .. }) => {
-                    *note == *trigger_note && *velocity > 0
+                (MidiPresetTrigger::Note { channel: trigger_ch, note: trigger_note }, MidiMessage::NoteOn { channel, note, velocity }) => {
+                    trigger_ch.map_or(true, |c| c == *channel) && *note == *trigger_note && *velocity > 0
                 }
                 (MidiPresetTrigger::ControlChange { channel: trigger_ch, controller: trigger_cc, value: trigger_val },
                  MidiMessage::ControlChange { channel, controller, value }) => {
@@ -1418,12 +1613,36 @@ impl AppState {
 
             if matches {
                 tracing::info!("MIDI triggered preset {}", binding.preset_num);
-                let _ = preset_trigger_tx.send(binding.preset_num);
+                // try_send: zonder gemounte consumer (orgel-load, orgelbrowser)
+                // liep het bounded(16)-kanaal vol en BLOKKEERDE de hele
+                // MIDI-thread op een blocking send; bovendien werden de
+                // opgespaarde oude piston-acties later in één keer afgespeeld
+                // (auditbevinding 9). Een gemiste trigger zonder zichtbare
+                // setzer is het juiste gedrag.
+                let _ = preset_trigger_tx.try_send(binding.preset_num);
             }
         }
     }
 
     /// Handle a single MIDI message
+    /// Is dit CC-bericht de ingeleerde generaal-crescendo-pedaal? Zo ja, dan mag
+    /// het NIET ook als zwelkast of als CC7/11-expressie verwerkt worden: de
+    /// crescendotrede voegt registers toe, maar de expressie-fallback trok
+    /// tegelijk het mastervolume omlaag ("registers erbij, geluid zachter").
+    /// Bewust ongeacht crescendo_enabled: een als crescendo ingeleerde pedaal
+    /// is nooit tegelijk een volumepedaal.
+    fn cc_claimed_by_crescendo(
+        msg: &MidiMessage,
+        crescendo_binding: &Arc<RwLock<Option<(u8, u8, u8, u8, bool)>>>,
+    ) -> bool {
+        if let MidiMessage::ControlChange { channel, controller, .. } = msg {
+            if let Some((bound_ch, bound_cc, _, _, _)) = *crescendo_binding.read() {
+                return *channel == bound_ch && *controller == bound_cc;
+            }
+        }
+        false
+    }
+
     fn handle_midi_message(
         msg: MidiMessage,
         audio_player: &Arc<RwLock<Option<AudioPlayer>>>,
@@ -1435,6 +1654,7 @@ impl AppState {
         swell_bindings: &Arc<RwLock<Vec<SwellBinding>>>,
         division_gains: &Arc<RwLock<Vec<f32>>>,
         held_notes: &Arc<RwLock<Vec<(u8, u8, u8)>>>,
+        cc_claimed_by_crescendo: bool,
     ) {
         match msg {
             MidiMessage::NoteOn { channel, note, velocity } => {
@@ -1443,7 +1663,7 @@ impl AppState {
                     Self::handle_midi_message(
                         MidiMessage::NoteOff { channel, note, velocity: 0 },
                         audio_player, organ_definition, loaded_organ_info, drawn_stops, midi_mappings, active_couplers,
-                        swell_bindings, division_gains, held_notes,
+                        swell_bindings, division_gains, held_notes, cc_claimed_by_crescendo,
                     );
                     return;
                 }
@@ -1455,7 +1675,7 @@ impl AppState {
                     held.push((channel, note, velocity));
                 }
 
-                tracing::info!("MIDI NoteOn: ch={}, note={}, vel={}", channel, note, velocity);
+                tracing::trace!("MIDI NoteOn: ch={}, note={}, vel={}", channel, note, velocity);
 
                 let organ = loaded_organ_info.read();
                 let definition = organ_definition.read();
@@ -1483,8 +1703,13 @@ impl AppState {
                     // Check if this division accepts this MIDI channel
                     let mapping = mappings.iter().find(|m| m.division == division.name);
                     let accepts_channel = match mapping {
-                        Some(m) => m.channel.map_or(true, |ch| ch == channel),
-                        None => true, // No mapping = accept all channels
+                        Some(m) => m.accepts(channel, note),
+                        // Geen inleer = geen respons: piston-/setzerknoppen die
+                        // noten sturen mogen niet als orgelnoten klinken. Een
+                        // koppeling met kanaal "alle" blijft mogelijk; het
+                        // ingeleerde toetsbereik filtert pistons op hetzelfde
+                        // kanaal er ook uit.
+                        None => false,
                     };
 
                     if !accepts_channel {
@@ -1522,7 +1747,7 @@ impl AppState {
                                 let pipe_num = transposed_u32 - stop_first_midi + 1;
                                 let vel_f = velocity as f32 / 127.0;
 
-                                tracing::info!("Playing stop={} '{}', note={}, pipe={}, range={}-{}",
+                                tracing::trace!("Playing stop={} '{}', note={}, pipe={}, range={}-{}",
                                     stop.internal_stop_id, stop.name, transposed_note, pipe_num,
                                     stop_first_midi, stop_last_midi);
 
@@ -1554,7 +1779,7 @@ impl AppState {
                                 let held = held_notes.read();
                                 let src_mapping_m = mappings.iter().find(|m| m.division == route.source_division);
                                 let highest = held.iter()
-                                    .filter(|&&(ch, _, _)| src_mapping_m.map_or(true, |m| m.channel.map_or(true, |mch| mch == ch)))
+                                    .filter(|&&(ch, n, _)| src_mapping_m.map_or(false, |m| m.accepts(ch, n)))
                                     .map(|&(_, n, _)| n)
                                     .max();
                                 if highest != Some(note) { continue; }
@@ -1565,7 +1790,7 @@ impl AppState {
                                 let held = held_notes.read();
                                 let src_mapping_b = mappings.iter().find(|m| m.division == route.source_division);
                                 let lowest = held.iter()
-                                    .filter(|&&(ch, _, _)| src_mapping_b.map_or(true, |m| m.channel.map_or(true, |mch| mch == ch)))
+                                    .filter(|&&(ch, n, _)| src_mapping_b.map_or(false, |m| m.accepts(ch, n)))
                                     .map(|&(_, n, _)| n)
                                     .min();
                                 if lowest != Some(note) { continue; }
@@ -1574,8 +1799,8 @@ impl AppState {
                             // Check if source division accepts this MIDI channel
                             let src_mapping = mappings.iter().find(|m| m.division == route.source_division);
                             let src_accepts = match src_mapping {
-                                Some(m) => m.channel.map_or(true, |ch| ch == channel),
-                                None => true,
+                                Some(m) => m.accepts(channel, note),
+                                None => false, // geen inleer = geen respons
                             };
                             if !src_accepts { continue; }
                             let src_transpose = src_mapping.map_or(0, |m| m.transpose);
@@ -1631,8 +1856,8 @@ impl AppState {
                 for division in &o.divisions {
                     let mapping = mappings.iter().find(|m| m.division == division.name);
                     let accepts_channel = match mapping {
-                        Some(m) => m.channel.map_or(true, |ch| ch == channel),
-                        None => true,
+                        Some(m) => m.accepts(channel, note),
+                        None => false, // geen inleer = geen respons (zie NoteOn)
                     };
 
                     if !accepts_channel {
@@ -1671,8 +1896,8 @@ impl AppState {
                         for route in Self::expand_coupler_routes(coupler_list, &couplers) {
                             let src_mapping = mappings.iter().find(|m| m.division == route.source_division);
                             let src_accepts = match src_mapping {
-                                Some(m) => m.channel.map_or(true, |ch| ch == channel),
-                                None => true,
+                                Some(m) => m.accepts(channel, note),
+                                None => false, // geen inleer = geen respons
                             };
                             if !src_accepts { continue; }
                             let src_transpose = src_mapping.map_or(0, |m| m.transpose);
@@ -1696,6 +1921,10 @@ impl AppState {
                 }
             }
             MidiMessage::ControlChange { channel, controller, value } => {
+                // De generaal-crescendo-CC is exclusief voor de crescendotrede
+                // (al verwerkt via process_crescendo_cc): niet ook als zwelkast
+                // of expressie-fallback interpreteren.
+                if cc_claimed_by_crescendo { return; }
                 // Check swell pedal bindings first
                 let bindings = swell_bindings.read();
                 let mut handled = false;
@@ -1723,22 +1952,13 @@ impl AppState {
                 }
                 drop(bindings);
 
-                // Fallback: CC#7/CC#11 → expressie-factor (only if not handled by swell).
-                // Bewust NIET SetMasterGain: dat zou de master-volume-slider (en de
-                // per-orgel-opslag daarvan) overschrijven. De expressie schaalt
-                // multiplicatief op de slider: CC 127 = ×1.0 (sliderwaarde),
-                // CC 1 ≈ -40 dB, CC 0 = stil.
-                if !handled && (controller == 7 || controller == 11) {
-                    if let Some(ref player) = *audio_player.read() {
-                        let factor = if value == 0 {
-                            0.0
-                        } else {
-                            let db = -40.0 * (1.0 - value as f32 / 127.0);
-                            10.0_f32.powf(db / 20.0)
-                        };
-                        let _ = player.send_command(AudioCommand::SetMasterExpression(factor));
-                    }
-                }
+                // De vroegere CC#7/CC#11→master-expressie-fallback is VERWIJDERD:
+                // consoles met meerdere zwel-/crescendotreden (die standaard CC7/11
+                // sturen) kregen daardoor drie ongevraagde volumeregelaars zonder
+                // dat er iets was ingeleerd. Een trede doet nu niets totdat hij
+                // expliciet is ingeleerd als zwelkast (divisie) of als generaal
+                // crescendo.
+                let _ = handled;
             }
             _ => {}
         }
@@ -1860,6 +2080,20 @@ impl AppState {
     /// `force_teardown`: breek de oude player altijd éérst af (noodherstel:
     /// de oude player is aantoonbaar kapot, "bouw eerst nieuw" heeft geen zin).
     fn switch_audio_output_inner(&self, cfg: AudioOutputConfig, persist: bool, force_teardown: bool) -> Result<SwitchOutcome, String> {
+        // Live registratie vastleggen vóór de wissel: de verplichte orgel-
+        // herlaad hierna wist drawn_stops/koppels; de eerstvolgende load van
+        // hetzelfde orgel zet dit snapshot terug (zie do_load_organ). Zo
+        // overleeft de registratie een speakers↔hoofdtelefoon-wissel.
+        {
+            let snapshot = (
+                self.current_organ_id.read().clone(),
+                self.drawn_stops.read().clone(),
+                self.active_couplers.read().clone(),
+            );
+            if snapshot.0.is_some() && (!snapshot.1.is_empty() || !snapshot.2.is_empty()) {
+                *self.pending_registration_restore.write() = Some(snapshot);
+            }
+        }
         let new_is_asio = cfg.host_name.as_deref()
             .map(|h| h.eq_ignore_ascii_case("asio"))
             .unwrap_or(false);
@@ -1904,7 +2138,11 @@ impl AppState {
         // hardware (probe 2026-07-07). De retry-ladder vangt het asynchrone
         // vrijgeven van endpoints/driver op.
         if new_is_asio || old_is_asio || force_teardown {
-            if let Some(old) = { self.audio_player.write().take() } {
+            // Guard EERST laten vallen via een losse let-binding: een if-let op
+            // een blok-temporary hield de write-lock de volle 2s shutdown vast,
+            // waardoor MIDI-verwerking en get_status blokkeerden (audit 59).
+            let old_player = { self.audio_player.write().take() };
+            if let Some(old) = old_player {
                 old.shutdown_and_wait(std::time::Duration::from_secs(2));
                 drop(old);
             }
@@ -1962,8 +2200,14 @@ impl AppState {
                             Ok(outcome(false, true, Some(format!(
                                 "Wissel mislukt: {}. Audio speelt nu op het standaardapparaat.", e)), self))
                         }
-                        Err(e2) => Err(format!(
-                            "Audio-wissel mislukt en geen fallback beschikbaar; geluid is uit tot een nieuwe wissel slaagt: {} / {}", e, e2)),
+                        Err(e2) => {
+                            // Geen herlaad meer op komst: snapshot opruimen zodat
+                            // het niet bij een willekeurige latere load van
+                            // hetzelfde orgel alsnog toegepast wordt (audit 60).
+                            *self.pending_registration_restore.write() = None;
+                            Err(format!(
+                            "Audio-wissel mislukt en geen fallback beschikbaar; geluid is uit tot een nieuwe wissel slaagt: {} / {}", e, e2))
+                        }
                     }
                 }
             }
@@ -1972,14 +2216,21 @@ impl AppState {
             // een mislukte wissel laat de huidige uitgang dan volledig intact.
             match AudioPlayer::new(cfg.clone()) {
                 Ok(new_player) => {
-                    // Swap onder een kort write-lock; de OUDE player pas droppen
+                    // Swap onder een kort write-lock; de OUDE player pas afbreken
                     // ná het vrijgeven van de guard (parking_lot RwLock is niet
                     // re-entrant; Drop/Shutdown mag andere lezers niet blokkeren).
+                    // shutdown_and_wait i.p.v. kale drop: Drop doet alleen een
+                    // niet-blokkerende stop, waardoor de oude stream nog even
+                    // doorleefde — kort dubbel geluid en apparaat-contentie
+                    // direct na een speakers↔hoofdtelefoon-wissel. De nieuwe
+                    // stream speelt al, dus dit wachten geeft geen stilte.
                     let old = {
                         let mut guard = self.audio_player.write();
                         guard.replace(new_player)
                     };
-                    drop(old);
+                    if let Some(old) = old {
+                        old.shutdown_and_wait(std::time::Duration::from_millis(800));
+                    }
                     if persist {
                         save_audio_prefs(&self.app_data_dir, &AudioPrefs {
                             host: cfg.host_name.clone(),
@@ -1998,7 +2249,9 @@ impl AppState {
                                 let mut guard = self.audio_player.write();
                                 guard.replace(new_player)
                             };
-                            drop(old);
+                            if let Some(old) = old {
+                                old.shutdown_and_wait(std::time::Duration::from_millis(800));
+                            }
                             if persist {
                                 save_audio_prefs(&self.app_data_dir, &AudioPrefs {
                                     host: cfg.host_name.clone(),
@@ -2010,7 +2263,10 @@ impl AppState {
                         }
                     }
                     // Oude uitgang draait gewoon door: eerlijk melden, niets
-                    // herladen, voorkeuren onaangetast.
+                    // herladen, voorkeuren onaangetast. Snapshot opruimen — er
+                    // volgt geen herlaad, dus het mag niet blijven hangen tot
+                    // een willekeurige latere load van hetzelfde orgel.
+                    *self.pending_registration_restore.write() = None;
                     Ok(outcome(false, false, Some(format!(
                         "Wissel mislukt: {}. De huidige uitgang blijft actief.", e)), self))
                 }
@@ -2023,8 +2279,14 @@ impl AppState {
                             Ok(outcome(false, true, Some(format!(
                                 "Wissel mislukt: {}. Audio speelt nu op het standaardapparaat.", e)), self))
                         }
-                        Err(e2) => Err(format!(
-                            "Audio-wissel mislukt en geen fallback beschikbaar; geluid is uit tot een nieuwe wissel slaagt: {} / {}", e, e2)),
+                        Err(e2) => {
+                            // Geen herlaad meer op komst: snapshot opruimen zodat
+                            // het niet bij een willekeurige latere load van
+                            // hetzelfde orgel alsnog toegepast wordt (audit 60).
+                            *self.pending_registration_restore.write() = None;
+                            Err(format!(
+                            "Audio-wissel mislukt en geen fallback beschikbaar; geluid is uit tot een nieuwe wissel slaagt: {} / {}", e, e2))
+                        }
                     }
                 }
             }
@@ -2176,20 +2438,22 @@ impl AppState {
         let mut routes: Vec<ExpandedCouplerRoute> = Vec::new();
         let mut seen: HashSet<(String, String, i32, String)> = HashSet::new();
 
-        // Start met de directe (eerste-schakel) routes.
-        let mut frontier: Vec<ExpandedCouplerRoute> = active_couplers.iter()
-            .map(|c| ExpandedCouplerRoute {
+        // Start met de directe (eerste-schakel) routes. De bool markeert of de
+        // laatste schakel een zelf-koppel was (bron == doel, bv. een octaaf-
+        // koppel op het eigen klavier).
+        let mut frontier: Vec<(ExpandedCouplerRoute, bool)> = active_couplers.iter()
+            .map(|c| (ExpandedCouplerRoute {
                 source_division: c.source_division.clone(),
                 destination_division: c.destination_division.clone(),
                 pitch_offset: c.pitch_offset,
                 gate_type: c.coupler_type.clone(),
-            })
+            }, c.source_division == c.destination_division))
             .collect();
 
         let mut depth = 0;
         while !frontier.is_empty() && depth < MAX_DEPTH && routes.len() < MAX_ROUTES {
-            let mut next: Vec<ExpandedCouplerRoute> = Vec::new();
-            for r in frontier {
+            let mut next: Vec<(ExpandedCouplerRoute, bool)> = Vec::new();
+            for (r, last_hop_self) in frontier {
                 let key = (r.source_division.clone(), r.destination_division.clone(), r.pitch_offset, r.gate_type.clone());
                 if !seen.insert(key) {
                     continue;
@@ -2198,12 +2462,22 @@ impl AppState {
                 // van deze route koppelen verder (transitief).
                 for c in &active_couplers {
                     if c.source_division == r.destination_division {
-                        next.push(ExpandedCouplerRoute {
+                        let c_self = c.source_division == c.destination_division;
+                        // Zelf-koppels cascaderen niet op elkaar: één octaaf-
+                        // koppel HW 4' leverde anders +12, +24, ... +96 op
+                        // (elke stap een andere pitch_offset ontwijkt de
+                        // seen-set; auditbevinding 19). Ná een kruis-koppel is
+                        // één zelf-koppel-hop wél toegestaan (Ped→HW + HW 4'
+                        // ⇒ Ped→HW+12, zoals GrandOrgue).
+                        if c_self && last_hop_self {
+                            continue;
+                        }
+                        next.push((ExpandedCouplerRoute {
                             source_division: r.source_division.clone(),
                             destination_division: c.destination_division.clone(),
                             pitch_offset: r.pitch_offset + c.pitch_offset,
                             gate_type: r.gate_type.clone(),
-                        });
+                        }, c_self));
                     }
                 }
                 routes.push(r);
@@ -2283,7 +2557,7 @@ impl AppState {
         if !(ta_active && stop.is_reed) {
             let mapping = mappings.iter().find(|m| m.division == div_name);
             for &(ch, note, vel) in held {
-                let accepts = mapping.map_or(true, |m| m.channel.map_or(true, |mch| mch == ch));
+                let accepts = mapping.map_or(false, |m| m.accepts(ch, note));
                 if !accepts { continue; }
                 let transpose = mapping.map_or(0, |m| m.transpose);
                 let transposed = (note as i16 + transpose as i16).clamp(0, 127) as u8;
@@ -2299,7 +2573,7 @@ impl AppState {
                 if route.destination_division != div_name { continue; }
                 let src_mapping = mappings.iter().find(|m| m.division == route.source_division);
                 let src_notes: Vec<(u8, u8)> = held.iter()
-                    .filter(|&&(ch, _, _)| src_mapping.map_or(true, |m| m.channel.map_or(true, |mch| mch == ch)))
+                    .filter(|&&(ch, n, _)| src_mapping.map_or(false, |m| m.accepts(ch, n)))
                     .map(|&(_, n, v)| (n, v))
                     .collect();
                 for &(note, vel) in &src_notes {
@@ -2315,6 +2589,108 @@ impl AppState {
                 }
             }
         }
+    }
+
+    /// Koppelstand gewijzigd terwijl toetsen zijn ingedrukt: stemmen synchroniseren.
+    /// Zonder dit kregen stemmen die via een koppel klonken NOOIT meer een NoteOff
+    /// zodra dat koppel uitging (NoteOff vouwt routes uit met de NIEUWE koppelstand)
+    /// — de "hangers" bij crescendotrappen met koppels. Route-diff oud↔nieuw:
+    /// - weggevallen routes → NoteOff naar álle registers van de doeldivisie
+    ///   (drawn of niet; NoteOff op een stille pijp is onschuldig — zelfde
+    ///   afspraak als het normale NoteOff-pad)
+    /// - nieuwe routes → NoteOn voor getrokken registers van de doeldivisie
+    ///   (GrandOrgue-gedrag: bijgekoppeld klavier klinkt direct mee)
+    /// Kanttekening: klinkt dezelfde pijp óók via een blijvende route (bv. direct
+    /// gespeeld op de doeldivisie), dan releast de NoteOff die mee — zeldzaam en
+    /// veel minder erg dan een permanente hanger.
+    pub(crate) fn sync_coupler_voices_inner(
+        o: &OrganInfoDto,
+        player: &AudioPlayer,
+        mappings: &[MidiChannelMapping],
+        held: &[(u8, u8, u8)],
+        old_couplers: &[String],
+        new_couplers: &[String],
+    ) {
+        if held.is_empty() || old_couplers == new_couplers { return; }
+        let Some(ref coupler_list) = o.couplers else { return; };
+
+        let route_key = |r: &ExpandedCouplerRoute| (
+            r.source_division.clone(), r.destination_division.clone(), r.pitch_offset, r.gate_type.clone()
+        );
+        let old_routes = Self::expand_coupler_routes(coupler_list, old_couplers);
+        let new_routes = Self::expand_coupler_routes(coupler_list, new_couplers);
+        let old_keys: std::collections::HashSet<_> = old_routes.iter().map(route_key).collect();
+        let new_keys: std::collections::HashSet<_> = new_routes.iter().map(route_key).collect();
+
+        // 1) Weggevallen routes → NoteOff (geen melody/bass-filter: de gekoppelde
+        //    noot kan klinken terwijl hij inmiddels niet meer de hoogste/laagste is).
+        for route in old_routes.iter().filter(|r| !new_keys.contains(&route_key(r))) {
+            let src_mapping = mappings.iter().find(|m| m.division == route.source_division);
+            let Some(dest_div) = o.divisions.iter().find(|d| d.name == route.destination_division) else { continue; };
+            for &(ch, note, _v) in held {
+                if !src_mapping.map_or(false, |m| m.accepts(ch, note)) { continue; }
+                let src_transpose = src_mapping.map_or(0, |m| m.transpose);
+                let t = (note as i32 + src_transpose as i32 + route.pitch_offset).clamp(0, 127) as u32;
+                for stop in &dest_div.stops {
+                    let s_first = stop.first_midi_note as u32;
+                    let s_last = stop.last_midi_note as u32;
+                    if t >= s_first && t <= s_last {
+                        let _ = player.send_command(AudioCommand::NoteOff {
+                            stop_id: stop.internal_stop_id,
+                            pipe_num: t - s_first + 1,
+                        });
+                    }
+                }
+            }
+        }
+
+        // 2) Nieuwe routes → NoteOn voor getrokken registers (met melody/bass-poort
+        //    en T.A.-regel, zoals sync_stop_voices_inner).
+        for route in new_routes.iter().filter(|r| !old_keys.contains(&route_key(r))) {
+            let src_mapping = mappings.iter().find(|m| m.division == route.source_division);
+            let src_notes: Vec<(u8, u8)> = held.iter()
+                .filter(|&&(ch, n, _)| src_mapping.map_or(false, |m| m.accepts(ch, n)))
+                .map(|&(_, n, v)| (n, v))
+                .collect();
+            if src_notes.is_empty() { continue; }
+            let Some(dest_div) = o.divisions.iter().find(|d| d.name == route.destination_division) else { continue; };
+            let ta_active = coupler_list.iter().any(|c| {
+                c.coupler_type == "ta" && new_couplers.contains(&c.id) && c.source_division == dest_div.name
+            });
+            for &(note, vel) in &src_notes {
+                if route.gate_type == "melody"
+                    && src_notes.iter().map(|&(n, _)| n).max() != Some(note) { continue; }
+                if route.gate_type == "bass"
+                    && src_notes.iter().map(|&(n, _)| n).min() != Some(note) { continue; }
+                let src_transpose = src_mapping.map_or(0, |m| m.transpose);
+                let t = (note as i32 + src_transpose as i32 + route.pitch_offset).clamp(0, 127) as u32;
+                for stop in dest_div.stops.iter().filter(|s| s.drawn) {
+                    if ta_active && stop.is_reed { continue; }
+                    let s_first = stop.first_midi_note as u32;
+                    let s_last = stop.last_midi_note as u32;
+                    if t >= s_first && t <= s_last {
+                        let _ = player.send_command(AudioCommand::NoteOn {
+                            stop_id: stop.internal_stop_id,
+                            pipe_num: t - s_first + 1,
+                            midi_note: t as u8,
+                            velocity: vel as f32 / 127.0,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    /// Wrapper voor de command-thread (toggle_coupler / set_active_couplers);
+    /// de MIDI-thread (crescendo) roept sync_coupler_voices_inner direct aan.
+    pub fn sync_coupler_voices(&self, old_couplers: &[String], new_couplers: &[String]) {
+        let organ = self.loaded_organ_info.read();
+        let Some(ref o) = *organ else { return; };
+        let player_guard = self.audio_player.read();
+        let Some(ref player) = *player_guard else { return; };
+        let mappings = self.midi_mappings.read();
+        let held = self.held_notes.read();
+        Self::sync_coupler_voices_inner(o, player, &mappings, &held, old_couplers, new_couplers);
     }
 
     /// Set a stop drawn state
@@ -2333,7 +2709,9 @@ impl AppState {
     pub fn list_midi_devices(&self) -> Vec<MidiDeviceInfo> {
         let (tx, rx) = bounded(1);
         if self.midi_tx.send(MidiCommand::ListDevices(tx)).is_ok() {
-            rx.recv().unwrap_or_default()
+            // Timeout: de MIDI-thread kan tot ~65s in een leer-handler zitten;
+            // een kale recv() blokkeerde dan alle Tauri-commands (audit 42).
+            rx.recv_timeout(std::time::Duration::from_secs(3)).unwrap_or_default()
         } else {
             Vec::new()
         }
@@ -2344,7 +2722,8 @@ impl AppState {
         let (tx, rx) = bounded(1);
         self.midi_tx.send(MidiCommand::Connect(device_name.to_string(), tx))
             .map_err(|e| e.to_string())?;
-        rx.recv().map_err(|e| e.to_string())?
+        rx.recv_timeout(std::time::Duration::from_secs(10))
+            .map_err(|_| "MIDI-thread bezet (leermodus actief?) — probeer zo opnieuw".to_string())?
     }
 
     /// Connect to all MIDI devices
@@ -2352,7 +2731,8 @@ impl AppState {
         let (tx, rx) = bounded(1);
         self.midi_tx.send(MidiCommand::ConnectAll(tx))
             .map_err(|e| e.to_string())?;
-        rx.recv().map_err(|e| e.to_string())?
+        rx.recv_timeout(std::time::Duration::from_secs(10))
+            .map_err(|_| "MIDI-thread bezet (leermodus actief?) — probeer zo opnieuw".to_string())?
     }
 
     /// Disconnect all MIDI devices
@@ -2392,7 +2772,10 @@ impl AppState {
         let (tx, rx) = bounded(1);
         self.midi_tx.send(MidiCommand::LearnChannel(division.to_string(), tx))
             .map_err(|e| e.to_string())?;
-        rx.recv().map_err(|e| e.to_string())
+        // Ruim boven de eigen leer-timeout van de handler, plus marge voor een
+        // eventueel nog lopende ándere leer-sessie.
+        rx.recv_timeout(std::time::Duration::from_secs(100))
+            .map_err(|_| "MIDI-thread reageert niet (leermodus?)".to_string())
     }
 
     /// Learn keyboard range for a division (two-note: press lowest, then highest key)
@@ -2422,7 +2805,8 @@ impl AppState {
         let (tx, rx) = bounded(1);
         self.midi_tx.send(MidiCommand::LearnPresetBinding(preset_num, tx))
             .map_err(|e| e.to_string())?;
-        rx.recv().map_err(|e| e.to_string())
+        rx.recv_timeout(std::time::Duration::from_secs(100))
+            .map_err(|_| "MIDI-thread reageert niet (leermodus?)".to_string())
     }
 
     /// Clear all MIDI bindings for a specific action/preset number
@@ -2551,6 +2935,24 @@ impl AppState {
         self.division_swell_configs.write().clear();
         self.division_tremulants.write().clear();
         self.wind_group_configs.write().clear();
+    }
+
+    /// Wacht op een pedaalstand (kanaal, cc, waarde) — stapsgewijze trede-inleer.
+    pub fn learn_pedal_position(&self, filter: Option<(u8, u8)>) -> Result<Option<(u8, u8, u8)>, String> {
+        let (tx, rx) = bounded(1);
+        self.midi_tx.send(MidiCommand::LearnPedalPosition(filter, tx))
+            .map_err(|e| e.to_string())?;
+        rx.recv_timeout(std::time::Duration::from_secs(25))
+            .map_err(|_| "MIDI-thread reageert niet (loopt er nog een leermodus?)".to_string())
+    }
+
+    /// Wacht op één toetsaanslag (kanaal, noot) — stapsgewijze klavier-inleer.
+    pub fn learn_single_note(&self) -> Result<Option<(u8, u8)>, String> {
+        let (tx, rx) = bounded(1);
+        self.midi_tx.send(MidiCommand::LearnSingleNote(tx))
+            .map_err(|e| e.to_string())?;
+        rx.recv_timeout(std::time::Duration::from_secs(25))
+            .map_err(|_| "MIDI-thread reageert niet (loopt er nog een leermodus?)".to_string())
     }
 
     /// Learn swell pedal binding for a division (blocking, waits for CC)

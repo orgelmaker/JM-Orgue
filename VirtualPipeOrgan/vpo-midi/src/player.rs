@@ -161,6 +161,10 @@ pub struct MidiFilePlayer {
     /// 0.25 .. 4.0 (multiplier on real-time)
     speed_x100: Arc<std::sync::atomic::AtomicU32>,
     stop_flag: Arc<AtomicBool>,
+    /// Generatie van de actieve playerthread: load_and_play verhoogt dit; een
+    /// oude thread die het korte stop_flag-venster miste, ziet de nieuwe
+    /// generatie en stopt alsnog (auditbevinding 29).
+    generation: Arc<AtomicU64>,
     out_rx: Receiver<MidiMessage>,
     /// Wanneer deze drop wordt, krijgt de thread een None bij recv en stopt.
     _out_tx_handle: Sender<MidiMessage>,
@@ -177,6 +181,7 @@ impl MidiFilePlayer {
             seek_to_micros: Arc::new(RwLock::new(None)),
             speed_x100: Arc::new(std::sync::atomic::AtomicU32::new(100)),
             stop_flag: Arc::new(AtomicBool::new(false)),
+            generation: Arc::new(AtomicU64::new(0)),
             out_rx: rx,
             _out_tx_handle: tx,
             file_loaded: Arc::new(RwLock::new(false)),
@@ -254,34 +259,61 @@ impl MidiFilePlayer {
         let stop_flag = self.stop_flag.clone();
         let speed = self.speed_x100.clone();
         let tx = self._out_tx_handle.clone();
+        let generation = self.generation.clone();
+        let my_gen = generation.fetch_add(1, Ordering::Relaxed) + 1;
 
         thread::spawn(move || {
             let mut idx = 0usize;
-            let start = Instant::now();
-            let mut play_origin_micros: u64 = 0; // virtual time at "real start"
+            // Klok-anker: virtual_now = play_origin + elapsed×speed. Het anker
+            // wordt OPNIEUW gezet bij seek, hervatten na pauze en een
+            // snelheidswissel — voorheen bleef `start` voor altijd staan,
+            // waardoor seek/pauze/snelheid de positie lieten springen en een
+            // event-vloed veroorzaakten (auditbevinding 6).
+            let mut start = Instant::now();
+            let mut play_origin_micros: u64 = 0;
+            let mut last_speed = speed.load(Ordering::Relaxed);
+            let mut was_paused = false;
 
-            while !stop_flag.load(Ordering::Relaxed) {
+            while !stop_flag.load(Ordering::Relaxed) && generation.load(Ordering::Relaxed) == my_gen {
                 let s = *state.read();
                 if s == PlayerState::Stopped {
                     break;
                 }
                 if s == PlayerState::Paused {
+                    if !was_paused {
+                        // Positie bevriezen op het pauzemoment.
+                        let sf = last_speed as f64 / 100.0;
+                        play_origin_micros += (start.elapsed().as_micros() as f64 * sf) as u64;
+                        was_paused = true;
+                    }
                     thread::sleep(Duration::from_millis(20));
                     continue;
+                }
+                if was_paused {
+                    // Hervat: klok opnieuw verankeren op de bevroren positie.
+                    start = Instant::now();
+                    was_paused = false;
+                }
+
+                // Snelheidswissel: verstreken tijd vastklikken op de OUDE
+                // snelheid en opnieuw verankeren.
+                let cur_speed = speed.load(Ordering::Relaxed);
+                if cur_speed != last_speed {
+                    let sf = last_speed as f64 / 100.0;
+                    play_origin_micros += (start.elapsed().as_micros() as f64 * sf) as u64;
+                    start = Instant::now();
+                    last_speed = cur_speed;
                 }
 
                 // Apply pending seek
                 let pending_seek = seek.write().take();
                 if let Some(target) = pending_seek {
                     pos.store(target, Ordering::Relaxed);
-                    // Reset start anchor — virtual time = target, real time = now
+                    // Anker: virtual time = target, real time = nu
                     play_origin_micros = target;
-                    let _start = Instant::now();
+                    start = Instant::now();
                     // Find first event >= target
                     idx = events.partition_point(|e| e.micros < target);
-                    let _ = _start;  // unused
-                    // Update reference instant
-                    let _ = play_origin_micros;
                 }
 
                 if idx >= events.len() {
@@ -291,7 +323,7 @@ impl MidiFilePlayer {
 
                 // Bereken huidige virtual time op basis van real elapsed * speed
                 let real_elapsed = start.elapsed().as_micros() as u64;
-                let speed_factor = speed.load(Ordering::Relaxed) as f64 / 100.0;
+                let speed_factor = (last_speed as f64 / 100.0).max(0.01);
                 let virtual_now = play_origin_micros + (real_elapsed as f64 * speed_factor) as u64;
                 pos.store(virtual_now, Ordering::Relaxed);
 

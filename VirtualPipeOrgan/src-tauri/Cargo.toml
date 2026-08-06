@@ -7,6 +7,11 @@ authors.workspace = true
 [build-dependencies]
 tauri-build = { workspace = true, features = [] }
 
+[target.'cfg(windows)'.dependencies]
+# Threadprioriteit van de achtergrond-sample-laders verlagen (auditopvolging:
+# decode-pieken bij het loslaten/aanslaan van vol werk verdrongen de audio-thread).
+windows-sys = { version = "0.59", features = ["Win32_System_Threading", "Win32_Foundation"] }
+
 [dependencies]
 vpo-core = { path = "../vpo-core" }
 vpo-audio = { path = "../vpo-audio" }
@@ -15,6 +20,8 @@ vpo-sampler = { path = "../vpo-sampler" }
 
 tauri = { workspace = true, features = ["devtools"] }
 tauri-plugin-dialog = "2"
+# Notatie-module: MIDI-opname parsen voor de MusicXML-conversie.
+midly = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }

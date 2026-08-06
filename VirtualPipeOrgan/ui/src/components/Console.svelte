@@ -6,6 +6,7 @@
   import MidiPlayer from './MidiPlayer.svelte';
   import { t, tx } from '../lib/i18n.js';
   import SetzerBar from './SetzerBar.svelte';
+  import { loadPanelState, savePanelState } from '../lib/panelState.js';
   import { midiLearn } from '../lib/midiLearn.js';
   import { invoke } from '@tauri-apps/api/core';
 
@@ -19,6 +20,15 @@
   export let sampleRate = 0;
   export let autostartEnabled = false;
   export let restoreRegistration = false;
+  // Secundaire modus: deze Console draait in een extra registerscherm
+  // (PanelApp). Backend-pushes bij orgelwissel en MIDI-trigger-consumptie
+  // blijven dan uit (het hoofdvenster doet die), en divisiekeuze/layout
+  // worden per scherm bewaard (panelNumber) i.p.v. in de gedeelde keys.
+  export let secondary = false;
+  export let panelNumber = null;
+  // Secundair + hoofdbalk verborgen: toon in de werkbalk een knop om de balk
+  // (Header met tabs/profielwissel/start-stop) weer zichtbaar te maken.
+  export let showPanelHeaderToggle = false;
   let supportedSampleRates = [];
 
   async function loadSupportedSampleRates() {
@@ -105,6 +115,10 @@
   export let selectedMidiDevice = null;
   // Audio-uitvoerprofielen (speakers/hoofdtelefoon) — beheerd in App.svelte.
   export let audioProfiles = { speakers: null, headphones: null, active: null };
+  // Telt op bij elke geslaagde audio-uitgang-herbouw: de per-orgel DSP moet dan
+  // opnieuw op de verse audio-thread toegepast worden, ook al is het orgel-id
+  // gelijk gebleven (auditbevinding 20).
+  export let audioEpoch = 0;
   // Laatst geopende orgel automatisch laden bij het starten (App.svelte).
   export let autoLoadLastOrgan = true;
 
@@ -229,6 +243,7 @@
   // Layout state for main view
   let mainLayout = 'horizontal';
   let stopSize = 100; // min-breedte registerknop in px (instelbaar)
+  let knobShape = 'rect'; // 'rect' | 'round' — vorm van de registerknoppen (per orgel)
 
   // MP3-recorder status (poll vanuit backend).
   let recorderStatus = { recording: false, seconds: 0, path: null, frames_dropped: 0, error: null };
@@ -317,6 +332,48 @@
       await invoke('midi_play_file', { path: lastMidiPath });
     } catch (e) {
       alert(`Afspelen mislukt: ${e}`);
+    }
+  }
+
+  // ---- Noteren: MIDI-opname als notenschrift in het notatievenster ----
+  // Opent een eigen venster (#notation) dat de opname via de backend naar
+  // MusicXML omzet en met OpenSheetMusicDisplay rendert (afdrukken/PDF/
+  // MusicXML-opslag gebeurt dáár). Zonder recente opname: bestandskeuze.
+  async function openNotationWindow(midiPath) {
+    try {
+      const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow');
+      const label = `notation-${Date.now()}`;
+      const webview = new WebviewWindow(label, {
+        url: `index.html#notation&file=${encodeURIComponent(midiPath)}`,
+        title: 'JM-Orgue - Notatie',
+        width: 1000,
+        height: 800,
+        center: true,
+        resizable: true,
+      });
+      webview.once('tauri://error', (e) => {
+        console.error('Notatievenster openen mislukt:', e);
+        alert('Notatievenster openen mislukt.');
+      });
+    } catch (e) {
+      alert(`Notatievenster openen mislukt: ${e}`);
+    }
+  }
+
+  async function openNotation() {
+    if (lastMidiPath) {
+      await openNotationWindow(lastMidiPath);
+      return;
+    }
+    try {
+      const { open } = await import('@tauri-apps/plugin-dialog');
+      const sel = await open({
+        multiple: false,
+        filters: [{ name: 'MIDI-bestand', extensions: ['mid', 'midi'] }],
+      });
+      if (sel) await openNotationWindow(sel);
+    } catch (e) {
+      console.error('MIDI-bestand kiezen mislukt:', e);
     }
   }
   let selectedDivisions = [];
@@ -478,7 +535,10 @@
       }
     } catch (e) { crescendoStages = []; }
     try {
-      await invoke('set_crescendo_config', { stages: crescendoStages, enabled: crescendoEnabled });
+      // Secundair venster: alleen de UI-state laden — het hoofdvenster heeft de
+      // config al naar de backend gepusht (dubbele push zou onnodig verkeer en
+      // races geven).
+      if (!secondary) await invoke('set_crescendo_config', { stages: crescendoStages, enabled: crescendoEnabled });
     } catch (e) { /* backend nog niet klaar — UI-state blijft leidend */ }
   }
 
@@ -539,16 +599,7 @@
   }
 
   async function learnCrescendoPedal() {
-    crescendoLearning = true;
-    try {
-      const result = await invoke('learn_crescendo_pedal');
-      if (result) {
-        crescendoBinding = { channel: result[0], cc: result[1], min: 0, max: 127, invert: false };
-      }
-    } catch (e) {
-      console.error('Failed to learn crescendo pedal:', e);
-    }
-    crescendoLearning = false;
+    await learnPedalFlow('crescendo');
   }
 
   async function toggleCrescendoInvert(invert) {
@@ -774,7 +825,9 @@
     const key = organInfo ? `${organInfo.name}|${reverbType}` : null;
     if (key && key !== lastReverbAppliedKey) {
       lastReverbAppliedKey = key;
-      applyReverbToBackend();
+      // Secundair venster pusht niet: het hoofdvenster heeft de galm al gezet;
+      // een tweede set_algorithmic_reverb zou de galmstaart wissen.
+      if (!secondary) applyReverbToBackend();
     }
   }
 
@@ -908,7 +961,12 @@
 
   // Pas de opgeslagen divisie→wind-groep toewijzing toe vanuit de backend (per orgel).
   // De groep-config + UI-waarden worden in loadAudioSettingsForOrgan() geladen en toegepast.
-  $: if (organInfo) {
+  let windAppliedFor = '';
+  $: if (!secondary && organInfo?.id && `${organInfo.id}::${audioEpoch}` !== windAppliedFor) {
+    // Alleen bij een echte orgel-load of audio-herbouw: dit vuurde voorheen bij
+    // ELKE organInfo-wijziging (elke registerklik) en draaide een net gekozen
+    // windgroep terug vóór de gebruiker kon opslaan (auditbevinding 19).
+    windAppliedFor = `${organInfo.id}::${audioEpoch}`;
     invoke('apply_saved_wind_groups').catch(() => {});
   }
 
@@ -970,14 +1028,23 @@
   let bleCountInterval = null;
 
   onMount(() => {
-    // Poll BLE message counter every 250ms
-    bleCountInterval = setInterval(async () => {
-      try {
-        bleMessageCount = await invoke('get_ble_midi_count');
-      } catch (e) {}
-    }, 250);
     return () => { if (bleCountInterval) clearInterval(bleCountInterval); };
   });
+
+  // BLE-teller alleen pollen wanneer de Algemene Instellingen (met de
+  // Bluetooth-sectie) zichtbaar zijn — elders is de waarde onzichtbaar.
+  $: {
+    if (activeView === 'algemene-instellingen' && !bleCountInterval) {
+      bleCountInterval = setInterval(async () => {
+        try {
+          bleMessageCount = await invoke('get_ble_midi_count');
+        } catch (e) {}
+      }, 250);
+    } else if (activeView !== 'algemene-instellingen' && bleCountInterval) {
+      clearInterval(bleCountInterval);
+      bleCountInterval = null;
+    }
+  }
 
   async function scanBleMidi() {
     bleScanning = true;
@@ -1054,16 +1121,10 @@
   // divisies die in de bron (ODF) een tremulant hebben (DivisionDto.has_tremulant),
   // tenzij de gebruiker hier al een keuze voor maakte. Zo "mist" een geïmporteerd
   // orgel zijn tremulant niet meer.
-  $: if (organInfo) {
-    let tremChanged = false;
-    for (const div of (organInfo.divisions || [])) {
-      if (div.has_tremulant && tremLfoEnabled[div.name] === undefined) {
-        tremLfoEnabled[div.name] = true;
-        tremChanged = true;
-      }
-    }
-    if (tremChanged) { tremLfoEnabled = tremLfoEnabled; persistTrem(); }
-  }
+  // (Auditbevinding 46: de reactive die hier has_tremulant-defaults zette is
+  // verwijderd — hij draaide bij een orgelwissel met de stale map van het
+  // vórige orgel en persisteerde die. Dezelfde defaulting gebeurt al in
+  // loadAudioSettingsForOrgan, ná het resetten van de maps.)
 
   // Zet de tremulant live aan/uit voor een divisie (vanuit het register of MIDI).
   // Stuurt sample-tremulant (als de divisie trem-samples heeft) én LFO-synthese
@@ -1165,19 +1226,26 @@
       if (div.has_swell && swellEnabled[div.name] === undefined) swellEnabled[div.name] = true;
     }
     swellEnabled = swellEnabled;
-    localStorage.setItem(organUiKey('jm-orgue-swell-enabled'), JSON.stringify(swellEnabled));
+    // Alleen het hoofdvenster schrijft de defaults terug (single writer).
+    if (!secondary) localStorage.setItem(organUiKey('jm-orgue-swell-enabled'), JSON.stringify(swellEnabled));
     // Koppel-zichtbaarheid
     try { visibleCouplers = JSON.parse(readOrganUiPref('jm-orgue-visible-couplers') || '{}'); } catch (e) { visibleCouplers = {}; }
     for (const c of (organInfo.couplers || [])) {
       if (c.id && c.id.startsWith('real_coupler_') && visibleCouplers[c.id] === undefined) visibleCouplers[c.id] = true;
     }
     visibleCouplers = visibleCouplers;
-    localStorage.setItem(organUiKey('jm-orgue-visible-couplers'), JSON.stringify(visibleCouplers));
-    // Layout + knopgrootte (puur UI, per orgel)
-    const ml = readOrganUiPref('jm-orgue-main-layout');
-    if (ml === 'horizontal' || ml === 'vertical') mainLayout = ml;
+    if (!secondary) localStorage.setItem(organUiKey('jm-orgue-visible-couplers'), JSON.stringify(visibleCouplers));
+    // Layout (main-layout is exclusief van het hoofdvenster; secundaire
+    // vensters laden hun layout per scherm uit de panel-state — zie de
+    // divisie-reset-reactive) + knopgrootte (gedeeld, puur UI, per orgel)
+    if (!secondary) {
+      const ml = readOrganUiPref('jm-orgue-main-layout');
+      if (ml === 'horizontal' || ml === 'vertical') mainLayout = ml;
+    }
     const ss = parseInt(readOrganUiPref('jm-orgue-stop-size'), 10);
     if (ss >= 70 && ss <= 220) stopSize = ss;
+    // Vorm van de registerknoppen (rechthoekig/rond)
+    knobShape = readOrganUiPref('jm-orgue-knob-shape') === 'round' ? 'round' : 'rect';
   }
 
   async function pollDivisionVolumes() {
@@ -1216,24 +1284,58 @@
     }
   }
 
-  async function learnSwellPedal(divisionName) {
+  // Stapsgewijze trede-inleer (zwel + crescendo), zelfde patroon als het
+  // klavier-inleren: laagste stand -> groen zodra herkend -> hoogste stand.
+  let pedalLearnModal = null; // { kind:'zwel'|'crescendo', division, step:1|2|'klaar'|'fout', first, msg }
+
+  async function learnPedalFlow(kind, divisionName = null) {
     if (!midiConnected) {
       alert('Verbind eerst een MIDI apparaat!');
       return;
     }
-    learningSwellDivision = divisionName;
-    swellLearnStep = 1;
+    pedalLearnModal = { kind, division: divisionName, step: 1, first: null, msg: '' };
     try {
-      const result = await invoke('learn_swell_pedal', { division: divisionName });
-      if (result) {
-        await loadSwellBindings();
+      const first = await invoke('learn_pedal_position', { channel: null, ccNum: null });
+      if (!pedalLearnModal) return; // geannuleerd
+      if (!first) {
+        pedalLearnModal = { ...pedalLearnModal, step: 'fout', msg: 'Geen pedaalbeweging ontvangen (time-out van 20 s). Beweeg de trede naar de laagste stand en houd hem daar stil.' };
+        return;
       }
+      pedalLearnModal = { ...pedalLearnModal, step: 2, first: { channel: first[0], cc: first[1], value: first[2] } };
+      const second = await invoke('learn_pedal_position', { channel: first[0], ccNum: first[1] });
+      if (!pedalLearnModal) return;
+      if (!second) {
+        pedalLearnModal = { ...pedalLearnModal, step: 'fout', msg: 'Geen hoogste stand ontvangen (time-out van 20 s).' };
+        return;
+      }
+      if (kind === 'zwel') {
+        const divisionIndex = Math.max(0, (organInfo?.divisions || []).findIndex(d => d.name === divisionName));
+        await invoke('apply_learned_swell', {
+          division: divisionName, divisionIndex,
+          channel: first[0], ccNum: first[1],
+          lowVal: pedalLearnModal.first.value, highVal: second[2],
+        });
+        await loadSwellBindings();
+      } else {
+        await invoke('apply_learned_crescendo', {
+          channel: first[0], ccNum: first[1],
+          lowVal: pedalLearnModal.first.value, highVal: second[2],
+        });
+        const inverted = pedalLearnModal.first.value > second[2];
+        const lo = Math.min(pedalLearnModal.first.value, second[2]);
+        const hi = Math.max(pedalLearnModal.first.value, second[2]);
+        crescendoBinding = { channel: first[0], cc: first[1], min: lo, max: hi, invert: inverted };
+      }
+      pedalLearnModal = { ...pedalLearnModal, step: 'klaar', msg: `CC ${first[1]} · MIDI-kanaal ${first[0] + 1}` };
+      dispatch('refreshMidiMappings');
+      setTimeout(() => { if (pedalLearnModal && pedalLearnModal.step === 'klaar') pedalLearnModal = null; }, 2000);
     } catch (e) {
-      console.error('Swell learn failed:', e);
-    } finally {
-      learningSwellDivision = null;
-      swellLearnStep = 0;
+      if (pedalLearnModal) pedalLearnModal = { ...pedalLearnModal, step: 'fout', msg: String(e) };
     }
+  }
+
+  async function learnSwellPedal(divisionName) {
+    learnPedalFlow('zwel', divisionName);
   }
 
   async function clearSwellBinding(divisionName) {
@@ -1348,15 +1450,23 @@
   // de backend (.jm-settings.json) en pas ze toe. Vervangt de oude globale/runtime-bron zodat
   // deze instellingen niet meer tussen orgels lekken en na herstart bewaard blijven.
   // Wordt 1x per echte orgelwissel aangeroepen (zie reactive op organInfo.id).
-  async function loadAudioSettingsForOrgan() {
+  // pushToBackend=false (secundaire vensters): alleen de UI-state uit de
+  // backend-spiegel laden, GEEN set_*-commando's sturen — het hoofdvenster
+  // heeft de instellingen al toegepast; een tweede push zou dubbel verkeer,
+  // gewiste galmstaarten en teruggedraaide keuzes geven.
+  async function loadAudioSettingsForOrgan(pushToBackend = true) {
+    // Stale-guard: bij een snelle orgelwissel kan een OUDE run van deze
+    // functie nog lopen; zonder guard pushte die instellingen van orgel A in
+    // de mirrors/audio van orgel B (auditbevinding 47).
+    const myOrgan = organInfo?.id;
     try {
       const s = await invoke('get_organ_settings');
-      // Master volume: opgeslagen waarde, anders de UI-default. Push altijd zodat audio +
-      // opslag synchroon lopen met de slider (ook bij default bij een nieuw orgel).
-      if (s && typeof s.master_volume_db === 'number') {
-        volume = s.master_volume_db;
-      }
-      dispatch('volumeChange', volume);
+      if (organInfo?.id !== myOrgan) return;
+      // Master volume: opgeslagen waarde, anders de ECHTE default (-6 dB) — niet de
+      // sliderwaarde van het vorige orgel, anders lekt diens volume dit orgel in
+      // én wordt het bij de eerste autosave als instelling van dít orgel bewaard.
+      volume = (s && typeof s.master_volume_db === 'number') ? s.master_volume_db : -6;
+      if (pushToBackend) dispatch('volumeChange', volume);
       // Temperament: zoek de opgeslagen stemming terug in de lijst (op naam, anders op cents).
       if (s && s.temperament) {
         const t = s.temperament;
@@ -1369,17 +1479,17 @@
         }
         if (idx >= 0) {
           selectedTemperament = idx;
-          await invoke('set_temperament', { noteOffsets: temperaments[idx].cents, fineTune, name: temperaments[idx].name });
+          if (pushToBackend) await invoke('set_temperament', { noteOffsets: temperaments[idx].cents, fineTune, name: temperaments[idx].name });
         } else if (Array.isArray(t.custom_cents)) {
           customCents = [...t.custom_cents];
-          await invoke('set_temperament', { noteOffsets: t.custom_cents, fineTune, name: t.name || 'Aangepast' });
+          if (pushToBackend) await invoke('set_temperament', { noteOffsets: t.custom_cents, fineTune, name: t.name || 'Aangepast' });
         }
       } else {
         // Geen opgeslagen stemming → default (gelijkzwevend) toepassen i.p.v. die van het vorige orgel.
         selectedTemperament = 0;
         fineTune = 0;
         const t0 = temperaments[0];
-        await invoke('set_temperament', { noteOffsets: t0.cents, fineTune: 0, name: t0.name });
+        if (pushToBackend) await invoke('set_temperament', { noteOffsets: t0.cents, fineTune: 0, name: t0.name });
       }
 
       // EQ: nieuw banden-formaat, of migratie vanuit het oude 3-band formaat.
@@ -1409,7 +1519,7 @@
         eqEnabled = false;
         eqBands = defaultEqBands();
       }
-      await updateEq();
+      if (pushToBackend) await updateEq();
 
       // Reverb: opgeslagen volledige configuratie of default. applyReverbToBackend() past
       // het toe met de afgestemde logica (geen galmstaart wissen tijdens poll).
@@ -1440,19 +1550,26 @@
         reverbIrLoaded = !!reverbIrPath;
         reverbIrName = reverbIrPath ? reverbIrPath.split(/[/\\]/).pop() : '';
       } else {
+        // Geen opgeslagen galm voor dit orgel. GO-/Hauptwerk-imports zijn NAT
+        // opgenomen (de kerkakoestiek zit al in de samples) — daar bovenop
+        // standaard 30% Dorpskerk zetten gaf een troebel dubbel-galm-geluid
+        // ("wet-on-wet"). Externe orgelbestanden starten daarom droog; eigen
+        // (droge) samplemappen houden de vertrouwde standaardgalm.
+        const isImportedOrganFile = /\.(organ|organ_hauptwerk_xml)$/i.test(organInfo?.id || '');
         reverbType = 'algorithmic';
         reverbPreset = 1; reverbRt60 = 2.0; reverbPreDelay = 25;
-        reverbDamping = 50; reverbRoomSize = 80; reverb = 30;
+        reverbDamping = 50; reverbRoomSize = 80;
+        reverb = isImportedOrganFile ? 0 : 30;
         reverbIrPath = null; reverbIrLoaded = false; reverbIrName = '';
       }
-      await applyReverbToBackend();
+      if (pushToBackend) await applyReverbToBackend();
 
       // ===== Per-divisie DSP (pan, zwel-config, tremulant, wind-groep) per orgel uit backend =====
       // Pan: backend slaat -1..1 op; UI gebruikt -100..100. Push past de audio toe.
       divisionPans = {};
       for (const p of (s?.division_pans || [])) {
         divisionPans[p.division] = Math.round(p.pan * 100);
-        invoke('set_division_pan', { division: p.division, pan: p.pan }).catch(() => {});
+        if (pushToBackend) invoke('set_division_pan', { division: p.division, pan: p.pan }).catch(() => {});
       }
       divisionPans = divisionPans;
 
@@ -1461,7 +1578,7 @@
       for (const sc of (s?.division_swell_configs || [])) {
         swellMinDb[sc.division] = sc.min_db;
         swellFilterCutoff[sc.division] = sc.filter_cutoff;
-        invoke('set_swell_config', { division: sc.division, minDb: sc.min_db, filterCutoff: sc.filter_cutoff }).catch(() => {});
+        if (pushToBackend) invoke('set_swell_config', { division: sc.division, minDb: sc.min_db, filterCutoff: sc.filter_cutoff }).catch(() => {});
       }
       swellMinDb = swellMinDb; swellFilterCutoff = swellFilterCutoff;
 
@@ -1480,7 +1597,7 @@
       }
       tremLfoEnabled = tremLfoEnabled; tremLfoRate = tremLfoRate;
       tremLfoAmpDepth = tremLfoAmpDepth; tremLfoPitchDepth = tremLfoPitchDepth;
-      persistTrem();
+      if (pushToBackend) persistTrem();
 
       // Wind-groep toewijzing (UI) uit backend + aantal groepen + per-groep config.
       try {
@@ -1500,10 +1617,12 @@
         };
       }
       windGroupConfig = windGroupConfig;
-      for (const gk of Object.keys(windGroupConfig)) pushWindGroupConfig(parseInt(gk, 10));
+      if (pushToBackend) {
+        for (const gk of Object.keys(windGroupConfig)) pushWindGroupConfig(parseInt(gk, 10));
+      }
 
       // Output-kanalen + C/Cis: apply_saved past de backend-audio toe; lees daarna voor de UI.
-      try { await invoke('apply_saved_output_channels'); } catch (e) {}
+      if (pushToBackend) { try { await invoke('apply_saved_output_channels'); } catch (e) {} }
       try {
         const chans = await invoke('get_division_output_channels');
         const ccisArr = await invoke('get_division_ccis');
@@ -1580,6 +1699,32 @@
     }
   }
 
+  // Gedeelde per-orgel-prefs (knopgrootte, knopvorm, zwel-/koppel-zichtbaarheid,
+  // registervolgorde) van andere vensters volgen. Storage-events zijn tussen
+  // WebView2-vensters onbetrouwbaar → 1s-poll met verander-guards zodat een
+  // ongewijzigde waarde geen re-render triggert. Draait in ALLE vensters:
+  // zo pikt ook het hoofdvenster wijzigingen uit een extra scherm op.
+  let sharedPrefsInterval = null;
+  function refreshSharedPrefs() {
+    if (!organInfo) return;
+    const ss = parseInt(readOrganUiPref('jm-orgue-stop-size'), 10);
+    if (ss >= 70 && ss <= 220 && ss !== stopSize) stopSize = ss;
+    const ks = readOrganUiPref('jm-orgue-knob-shape') === 'round' ? 'round' : 'rect';
+    if (ks !== knobShape) knobShape = ks;
+    try {
+      const se = readOrganUiPref('jm-orgue-swell-enabled');
+      if (se && se !== JSON.stringify(swellEnabled)) swellEnabled = JSON.parse(se);
+    } catch (e) {}
+    try {
+      const vc = readOrganUiPref('jm-orgue-visible-couplers');
+      if (vc && vc !== JSON.stringify(visibleCouplers)) visibleCouplers = JSON.parse(vc);
+    } catch (e) {}
+    try {
+      const so = localStorage.getItem(`jm-orgue-stop-order-${organInfo.id || 'default'}`) || '{}';
+      if (so !== JSON.stringify(stopOrder)) stopOrder = JSON.parse(so);
+    } catch (e) {}
+  }
+
   onMount(() => {
     // Layout + knopgrootte worden per orgel geladen in loadUiPrefsForOrgan(); hier alleen
     // een neutrale begin-default vóórdat een orgel geladen is.
@@ -1587,8 +1732,10 @@
     loadSwellBindings();
     swellPollInterval = setInterval(pollDivisionVolumes, 100);
     pollRecorder();
-    recorderPoll = setInterval(pollRecorder, 500);
-    crescLivePoll = setInterval(pollCrescLive, 100);
+    // Ook de MIDI-opname-status meepollen: een opname kan óók vanaf een extra
+    // registerscherm gestart/gestopt worden en moet hier zichtbaar blijven.
+    recorderPoll = setInterval(() => { pollRecorder(); pollMidiRec(); }, 500);
+    sharedPrefsInterval = setInterval(refreshSharedPrefs, 1000);
   });
 
   onDestroy(() => {
@@ -1597,11 +1744,22 @@
     if (recorderPoll) clearInterval(recorderPoll);
     if (midiRecPoll) clearInterval(midiRecPoll);
     if (crescLivePoll) clearInterval(crescLivePoll);
+    if (sharedPrefsInterval) clearInterval(sharedPrefsInterval);
   });
 
   // Live crescendo-pedaalstand volgen: werkt de balk bij terwijl de gebruiker het
   // pedaal beweegt (of min/max instelt), zodat je direct ziet wat er gebeurt.
+  // Alleen pollen wanneer de bewerkbalk ook zichtbaar is (orgel-instellingen) —
+  // scheelt 10 IPC-calls/s per venster in de andere weergaven.
   let crescLivePoll = null;
+  $: {
+    if (activeView === 'orgel-instellingen' && !crescLivePoll) {
+      crescLivePoll = setInterval(pollCrescLive, 100);
+    } else if (activeView !== 'orgel-instellingen' && crescLivePoll) {
+      clearInterval(crescLivePoll);
+      crescLivePoll = null;
+    }
+  }
   async function pollCrescLive() {
     try {
       const r = await invoke('get_crescendo_state'); // [enabled, stage, total]
@@ -1620,7 +1778,13 @@
 
   function toggleMainLayout() {
     mainLayout = mainLayout === 'horizontal' ? 'vertical' : 'horizontal';
-    localStorage.setItem(organUiKey('jm-orgue-main-layout'), mainLayout);
+    if (secondary) {
+      // Per scherm onthouden — niet in de gedeelde main-layout-key, anders
+      // vechten hoofdvenster en panelen om dezelfde waarde.
+      savePanelState(organInfo?.id, panelNumber, { layout: mainLayout });
+    } else {
+      localStorage.setItem(organUiKey('jm-orgue-main-layout'), mainLayout);
+    }
   }
 
   // Registerknop-grootte aanpassen (min-breedte in px); per orgel persistent.
@@ -1629,50 +1793,130 @@
     localStorage.setItem(organUiKey('jm-orgue-stop-size'), String(stopSize));
   }
 
-  // Bewaar de set open extra-vensters in de sessie zodat ze bij opstart heropend kunnen worden.
-  function saveOpenPanelsToSession() {
+  // Vorm van de registerknoppen (rechthoekig ↔ rond); per orgel persistent.
+  // Extra schermen volgen via hun refreshSettings-poll (RegisterPanel).
+  function toggleKnobShape() {
+    knobShape = knobShape === 'round' ? 'rect' : 'round';
+    localStorage.setItem(organUiKey('jm-orgue-knob-shape'), knobShape);
+  }
+
+  // ---- Extra register-vensters: per orgel onthouden en herstellen ----
+  // Het hoofdvenster is de enige schrijver van de lijst "open schermen"
+  // (jm-orgue-panels-open-<orgelhash>); elk scherm bewaart zelf zijn
+  // divisiekeuze + positie/grootte onder jm-orgue-panel-state-<nr>-<orgelhash>
+  // (zie RegisterPanel). Zo heeft elke sleutel één schrijver en zijn er geen races.
+  function panelsOpenKey() { return organUiKey('jm-orgue-panels-open'); }
+  function savePanelsOpenList() {
     try {
-      const cur = JSON.parse(localStorage.getItem('jm-orgue-session') || '{}');
-      cur.openPanels = openPanels.map(p => ({ count: 1 })); // alleen aantal — labels zijn tijdgebonden
-      localStorage.setItem('jm-orgue-session', JSON.stringify(cur));
+      localStorage.setItem(panelsOpenKey(), JSON.stringify(openPanels.map(p => p.number).sort((a, b) => a - b)));
     } catch (e) {}
   }
 
-  // Open extra register window. Geëxporteerd zodat App.svelte het bij sessie-herstel
-  // kan aanroepen (om eerder open vensters automatisch te heropenen).
+  // Vensters die de app zélf sluit (orgelwissel/afsluiten) mogen de bewaarde
+  // lijst NIET wijzigen — anders "vergeet" de app welke schermen je open had.
+  // Telt hoeveel destroyed-events programmatisch (te verwachten) zijn.
+  let panelCloseGuard = 0;
+
+  // Open extra register window. Geëxporteerd zodat App.svelte het kan aanroepen
+  // ("Nieuw scherm" vanuit een extra venster komt als Tauri-event bij App binnen).
   export async function openPanel() { return openExtraWindow(); }
 
-  async function openExtraWindow() {
+  // Alle extra vensters sluiten ZONDER de bewaarde per-orgel-lijst te wijzigen.
+  // Aangeroepen (via App.closeExtraPanels) bij orgelwissel en bij afsluiten.
+  export async function closeAllPanels() {
+    if (secondary) return; // vensterbeheer is exclusief het hoofdvenster
+    try {
+      const { getAllWebviewWindows } = await import('@tauri-apps/api/webviewWindow');
+      const wins = (await getAllWebviewWindows()).filter(w => w.label && w.label.startsWith('panel-'));
+      panelCloseGuard += wins.length;
+      // Direct leegmaken: restorePanels() kan dan meteen verse vensters openen
+      // zonder dat de nummers van de (nog sluitende) oude vensters bezet lijken.
+      openPanels = [];
+      for (const w of wins) {
+        try { await w.close(); } catch (e) { panelCloseGuard = Math.max(0, panelCloseGuard - 1); }
+      }
+    } catch (e) { /* niet in Tauri of geen extra vensters */ }
+  }
+
+  // Heropen de schermen die bij dít orgel open stonden (na het laden van het orgel).
+  export async function restorePanels() {
+    if (secondary) return; // vensterbeheer is exclusief het hoofdvenster
+    if (!organInfo) return;
+    let numbers = [];
+    try { numbers = JSON.parse(localStorage.getItem(panelsOpenKey()) || '[]'); } catch (e) {}
+    if (!Array.isArray(numbers)) numbers = [];
+    // Migratie: oudere versies bewaarden alleen het AANTAL vensters in de sessie.
+    if (numbers.length === 0) {
+      try {
+        const sess = JSON.parse(localStorage.getItem('jm-orgue-session') || '{}');
+        if (Array.isArray(sess.openPanels) && sess.openPanels.length > 0) {
+          numbers = sess.openPanels.map((_, i) => i + 2);
+          delete sess.openPanels;
+          localStorage.setItem('jm-orgue-session', JSON.stringify(sess));
+        }
+      } catch (e) {}
+    }
+    for (const n of numbers) {
+      if (Number.isInteger(n) && n >= 2 && !openPanels.some(p => p.number === n)) {
+        await openExtraWindow(n);
+      }
+    }
+  }
+
+  async function openExtraWindow(restoreNumber = null) {
+    if (secondary) {
+      // "Nieuw scherm" vanuit een extra venster: het hoofdvenster beheert de
+      // vensterlijst (enige schrijver van jm-orgue-panels-open) — doorsturen.
+      try {
+        const { emit } = await import('@tauri-apps/api/event');
+        await emit('jm-orgue:open-panel');
+      } catch (e) { console.error('Nieuw scherm aanvragen mislukt:', e); }
+      return;
+    }
     try {
       const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow');
-      // Find lowest available screen number
-      const usedNumbers = openPanels.map(p => p.number);
-      let screenNum = 2;
-      while (usedNumbers.includes(screenNum)) screenNum++;
-      const label = `panel-${Date.now()}`;
+      // Nummer: bij herstel het bewaarde nummer, anders het laagste vrije.
+      // (restoreNumber kan ook een MouseEvent zijn als de knop direct doorgeeft.)
+      let screenNum;
+      if (Number.isInteger(restoreNumber) && restoreNumber >= 2) {
+        screenNum = restoreNumber;
+      } else {
+        const usedNumbers = openPanels.map(p => p.number);
+        screenNum = 2;
+        while (usedNumbers.includes(screenNum)) screenNum++;
+      }
+      // Bewaarde positie/grootte van dít scherm bij dít orgel (door het scherm
+      // zelf weggeschreven — zie PanelApp.saveGeometry).
+      let st = null;
+      try { st = JSON.parse(localStorage.getItem(organUiKey(`jm-orgue-panel-state-${screenNum}`)) || 'null'); } catch (e) {}
+      // Schermnummer in het label: twee opens binnen dezelfde milliseconde
+      // (sessie-herstel!) kregen anders hetzélfde label → venster 2 faalde
+      // stil en werd door de error-handler ook nog uit de bewaarde lijst gewist.
+      const label = `panel-${screenNum}-${Date.now()}`;
       const offset = openPanels.length;
       const webview = new WebviewWindow(label, {
-        url: 'index.html#panel',
+        url: `index.html#panel&n=${screenNum}`,
         title: `JM-Orgue - Scherm ${screenNum}`,
-        width: 700,
-        height: 500,
+        width: (st && st.width >= 200) ? Math.min(st.width, 4000) : 700,
+        height: (st && st.height >= 150) ? Math.min(st.height, 4000) : 500,
         decorations: true,
         resizable: true,
         center: false,
-        x: 100 + (offset * 30),
-        y: 100 + (offset * 30),
+        x: (st && typeof st.x === 'number') ? st.x : 100 + (offset * 30),
+        y: (st && typeof st.y === 'number') ? st.y : 100 + (offset * 30),
       });
       const panelEntry = { label, number: screenNum };
       openPanels = [...openPanels, panelEntry];
-      saveOpenPanelsToSession();
+      savePanelsOpenList();
       webview.once('tauri://destroyed', () => {
         openPanels = openPanels.filter(p => p.label !== label);
-        saveOpenPanelsToSession();
+        if (panelCloseGuard > 0) panelCloseGuard--; // programmatisch gesloten → lijst bewaren
+        else savePanelsOpenList();                  // gebruiker sloot het venster zelf
       });
       webview.once('tauri://error', (e) => {
         console.error('Window creation error:', e);
         openPanels = openPanels.filter(p => p.label !== label);
-        saveOpenPanelsToSession();
+        savePanelsOpenList();
       });
     } catch (e) {
       console.error('Failed to open window:', e);
@@ -1802,19 +2046,63 @@
     dispatch('setMidiMapping', { division: divisionName, channel, transpose });
   }
 
+  // Stapsgewijs klavier-inleren met echte terugkoppeling (popup):
+  // stap 1 laagste toets → groen zodra herkend → stap 2 hoogste toets → klaar.
+  let kbLearnModal = null; // { division, step: 1|2|'klaar'|'fout', first, msg }
+  const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+  function noteName(n) { return NOTE_NAMES[n % 12] + (Math.floor(n / 12) - 1); }
+
   async function learnChannel(divisionName) {
     if (!midiConnected) {
-      alert('Verbind eerst een MIDI apparaat in de zijbalk!');
+      alert('Verbind eerst een MIDI apparaat!');
       return;
     }
     learningDivision = divisionName;
     learningStep = 1;
-    setTimeout(() => {
-      if (learningDivision === divisionName && learningStep === 1) {
-        learningStep = 2;
+    kbLearnModal = { division: divisionName, step: 1, first: null, msg: '' };
+    try {
+      const first = await invoke('learn_keyboard_note');
+      if (!kbLearnModal || kbLearnModal.division !== divisionName) return; // geannuleerd
+      if (!first) {
+        kbLearnModal = { ...kbLearnModal, step: 'fout', msg: 'Geen toets ontvangen (time-out van 20 s).' };
+        return;
       }
-    }, 3000);
-    dispatch('learnKeyboardRange', { division: divisionName, firstSampleNote: 36 });
+      kbLearnModal = { ...kbLearnModal, step: 2, first: { channel: first[0], note: first[1] } };
+      learningStep = 2;
+      const second = await invoke('learn_keyboard_note');
+      if (!kbLearnModal || kbLearnModal.division !== divisionName) return;
+      if (!second) {
+        kbLearnModal = { ...kbLearnModal, step: 'fout', msg: 'Geen tweede toets ontvangen (time-out van 20 s).' };
+        return;
+      }
+      if (second[0] !== kbLearnModal.first.channel) {
+        kbLearnModal = { ...kbLearnModal, step: 'fout',
+          msg: `De tweede toets kwam op MIDI-kanaal ${second[0] + 1} i.p.v. ${kbLearnModal.first.channel + 1} — druk beide toetsen op hetzelfde klavier.` };
+        return;
+      }
+      const res = await invoke('apply_learned_keyboard_range', {
+        division: divisionName,
+        channel: kbLearnModal.first.channel,
+        low: kbLearnModal.first.note,
+        high: second[1],
+        firstSampleNote: 36,
+      });
+      kbLearnModal = { ...kbLearnModal, step: 'klaar',
+        msg: `${noteName(res.first_note)} t/m ${noteName(res.last_note)} · MIDI-kanaal ${res.channel + 1}` };
+      dispatch('refreshMidiMappings');
+      setTimeout(() => { if (kbLearnModal && kbLearnModal.step === 'klaar') closeKbLearn(); }, 2000);
+    } catch (e) {
+      if (kbLearnModal) kbLearnModal = { ...kbLearnModal, step: 'fout', msg: String(e) };
+    } finally {
+      learningDivision = null;
+      learningStep = 0;
+    }
+  }
+
+  function closeKbLearn() {
+    kbLearnModal = null;
+    learningDivision = null;
+    learningStep = 0;
   }
 
   export function onLearnComplete() {
@@ -2447,6 +2735,22 @@
     if (names && names !== prevDivisionNames) {
       prevDivisionNames = names;
       selectedDivisions = displayOrgan.divisions.map(d => d.name);
+      if (secondary && organInfo?.id) {
+        // Divisiekeuze + layout van dít scherm bij dít orgel terugzetten
+        // (per-scherm-state; zie lib/panelState.js).
+        const st = loadPanelState(organInfo.id, panelNumber);
+        if (st && Array.isArray(st.divisions) && st.divisions.length > 0) {
+          const valid = st.divisions.filter(n => displayOrgan.divisions.some(d => d.name === n));
+          if (valid.length > 0) selectedDivisions = valid;
+        }
+        if (st?.layout === 'horizontal' || st?.layout === 'vertical') {
+          mainLayout = st.layout;
+        } else {
+          // Migratie: layout-key van het oude RegisterPanel (per orgel gedeeld).
+          const legacy = readOrganUiPref('jm-orgue-panel-layout');
+          if (legacy === 'horizontal' || legacy === 'vertical') mainLayout = legacy;
+        }
+      }
     }
   }
 
@@ -2455,11 +2759,12 @@
   // want twee verschillende orgels kunnen identieke divisie-namen hebben — dan zou een
   // tremulant die op het vorige orgel aanstond ten onrechte "actief" blijven.
   let crescLoadedFor = '';
-  $: if (organInfo && organInfo.id && organInfo.id !== crescLoadedFor) {
-    crescLoadedFor = organInfo.id;
+  $: if (organInfo && organInfo.id && `${organInfo.id}::${audioEpoch}` !== crescLoadedFor) {
+    crescLoadedFor = `${organInfo.id}::${audioEpoch}`;
     tremActive = {};
     loadCrescendoForOrgan();
-    loadAudioSettingsForOrgan();
+    // Secundaire vensters laden alleen de UI-state (geen backend-pushes).
+    loadAudioSettingsForOrgan(!secondary);
     loadUiPrefsForOrgan();
   }
 
@@ -2474,6 +2779,9 @@
     } else {
       selectedDivisions = [...selectedDivisions, name];
     }
+    // Per-scherm onthouden (alleen extra vensters; het hoofdvenster toont
+    // standaard alles en bewaart geen divisiekeuze).
+    if (secondary) savePanelState(organInfo?.id, panelNumber, { divisions: selectedDivisions });
   }
 </script>
 
@@ -2621,7 +2929,37 @@
                 Horizontaal
               {/if}
             </button>
-            <button class="btn btn-ghost btn-sm panel-add-btn" on:click={openExtraWindow}>
+            <button
+              class="btn btn-ghost btn-sm panel-layout-btn"
+              on:click={toggleKnobShape}
+              title="{knobShape === 'round' ? 'Rechthoekige registerknoppen' : 'Ronde registerknoppen (trekregisters)'}"
+            >
+              {#if knobShape === 'round'}
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="3" y="6" width="18" height="12" rx="2"/>
+                </svg>
+                Recht
+              {:else}
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="12" r="9"/>
+                </svg>
+                Rond
+              {/if}
+            </button>
+            {#if secondary && showPanelHeaderToggle}
+              <!-- Hoofdbalk (tabs/profielwissel/start-stop) tonen op dit scherm -->
+              <button
+                class="btn btn-ghost btn-sm panel-layout-btn"
+                on:click={() => dispatch('showHeaderRequest')}
+                title="Hoofdbalk tonen (tabbladen, profielwissel, audio start/stop)"
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polyline points="6 9 12 15 18 9"/>
+                </svg>
+                Balk
+              </button>
+            {/if}
+            <button class="btn btn-ghost btn-sm panel-add-btn" on:click={() => openExtraWindow()}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <rect x="2" y="3" width="20" height="14" rx="2"/>
                 <line x1="8" y1="21" x2="16" y2="21"/>
@@ -2671,6 +3009,22 @@
                 Opname afspelen
               </button>
             {/if}
+            {#if !midiRec.recording}
+              <button
+                class="btn btn-ghost btn-sm"
+                on:click={openNotation}
+                title={lastMidiPath
+                  ? 'De zojuist opgenomen MIDI als notenschrift tonen (bewerken, afdrukken, opslaan als PDF/MusicXML)'
+                  : 'Een MIDI-bestand als notenschrift tonen (maak eerst een MIDI-opname, of kies een bestand)'}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="7" cy="18" r="3"/>
+                  <path d="M10 18V5l8-2v12"/>
+                  <circle cx="15" cy="15" r="3"/>
+                </svg>
+                Noteren
+              </button>
+            {/if}
             <button
               class="btn btn-ghost btn-sm shutdown-btn"
               on:click={() => dispatch('shutdownRequest')}
@@ -2714,6 +3068,7 @@
               <div
                 class="stops-grid"
                 class:stops-vertical={mainLayout === 'vertical'}
+                class:knobs-round={knobShape === 'round'}
                 class:knob-dragging={!!(knobDrag && knobDrag.active && knobDrag.div === division.name)}
                 style="--stop-min-width: {stopSize}px"
               >
@@ -2775,8 +3130,12 @@
             </div>
           {/each}
         </div>
+        <!-- In secundaire vensters consumeert de SetzerBar GEEN MIDI-triggers:
+             alleen het hoofdvenster leest het (consumerende) trigger-kanaal,
+             anders worden presets/acties dubbel toegepast. -->
         <SetzerBar
           organInfo={displayOrgan}
+          consumeMidiTriggers={!secondary}
           on:externalAction={(e) => handleExternalAction(e.detail.actionCode)}
         />
       </div>
@@ -3143,7 +3502,7 @@
                 <div style="margin-top: 0.5rem;">
                   <div class="swell-config-row" style="margin-bottom: 0.5rem;">
                     <span class="swell-config-label">Stappen</span>
-                    <select style="flex:1; font-size: 0.8rem;" bind:value={crescendoNumStages} on:change={() => { crescendoStages = []; saveCrescendo(); }}>
+                    <select style="flex:1; font-size: 0.8rem;" bind:value={crescendoNumStages} on:change={() => { crescendoStages = ensureCrescStages(); saveCrescendo(); }}>
                       {#each [8, 12, 15, 20, 24, 32] as n}
                         <option value={n}>{n}</option>
                       {/each}
@@ -3197,6 +3556,28 @@
                           </tr>
                         </thead>
                         <tbody>
+                          {#if (organInfo?.couplers || []).length}
+                            <tr class="cresc-div-row">
+                              <td class="cresc-div-name" colspan={crescendoNumStages + 1}>Koppels</td>
+                            </tr>
+                            {#each organInfo.couplers as koppel}
+                              <tr>
+                                <td class="cresc-stop-name" title="{koppel.name}">{koppel.name}</td>
+                                {#each Array(crescendoNumStages) as _, s}
+                                  <td class="cresc-cell" class:colactive={s + 1 === crescendoStage}>
+                                    <button
+                                      type="button"
+                                      class="cresc-cell-btn"
+                                      class:on={(crescendoStages[s] || []).includes(koppel.id)}
+                                      on:click={(e) => { if (e.shiftKey) fillStopFrom(s, koppel.id); else toggleCrescCell(s, koppel.id); }}
+                                      title="Stap {s + 1} · {koppel.name} — klik = aan/uit, Shift+klik = cumulatief"
+                                      aria-label="Stap {s + 1} {koppel.name}"
+                                    >{(crescendoStages[s] || []).includes(koppel.id) ? '●' : ''}</button>
+                                  </td>
+                                {/each}
+                              </tr>
+                            {/each}
+                          {/if}
                           {#each displayOrgan.divisions as div}
                             <tr class="cresc-div-row">
                               <td class="cresc-div-name" colspan={crescendoNumStages + 1}>{div.display_name || div.name}</td>
@@ -4022,8 +4403,11 @@
                 <h4 style="margin: 0 0 0.35rem; font-size: 0.85rem;">Uitvoerprofielen — snelle wissel</h4>
                 <p style="margin: 0 0 0.5rem; font-size: 0.7rem; color: var(--text-muted); line-height: 1.4;">
                   Sla twee uitvoer-instellingen op (bijv. luidsprekers via ASIO en een hoofdtelefoon
-                  via WASAPI). Daarna wissel je met één knop in de balk bovenin — of via een
-                  ingeleerde MIDI-knop. Kies hierboven eerst host, apparaat en buffer, en sla dan op.
+                  via WASAPI — of dezelfde ASIO-interface met verschillende kanalen). De kanaalkeuze
+                  per klavier (de "Kanalen"-vinkjes onder MIDI Kanaal per Klavier) wordt in het
+                  profiel mee opgeslagen en wisselt mee. Daarna wissel je met één knop in de balk
+                  bovenin — of via een ingeleerde MIDI-knop. Kies eerst host, apparaat, buffer en
+                  kanalen, en sla dan op.
                 </p>
                 {#each [['speakers', 'Speakers'], ['headphones', 'Hoofdtelefoon']] as [kind, label]}
                   {@const prof = audioProfiles?.[kind]}
@@ -4033,14 +4417,14 @@
                     </strong>
                     <span style="flex:1; font-size:0.72rem; color:var(--text-muted); min-width:10rem;">
                       {#if prof}
-                        {prof.host || '?'} · {prof.device || 'standaard'}{prof.bufferFrames ? ` · ${prof.bufferFrames} frames` : ''}
+                        {prof.host || '?'} · {prof.device || 'standaard'}{prof.bufferFrames ? ` · ${prof.bufferFrames} frames` : ''}{prof.channels ? ' · incl. kanalen' : ''}
                       {:else}
                         — niet ingesteld —
                       {/if}
                     </span>
                     <button class="btn btn-secondary btn-sm" style="font-size:0.7rem; padding:0.15rem 0.5rem;"
                       on:click={() => dispatch('saveAudioProfile', kind)}
-                      title="Huidige selectie (host/apparaat/buffer) opslaan als {label}-profiel"
+                      title="Huidige selectie (host/apparaat/buffer + kanaalkeuze per klavier) opslaan als {label}-profiel"
                     >Huidige selectie opslaan</button>
                     {#if prof}
                       <button class="btn btn-secondary btn-sm" style="font-size:0.7rem; padding:0.15rem 0.5rem;"
@@ -4382,4 +4766,71 @@
       </button>
     </div>
   {/if}
+
+{#if pedalLearnModal}
+  <div class="kb-learn-overlay">
+    <div class="kb-learn-modal">
+      <h3>{pedalLearnModal.kind === 'zwel' ? `Zweltrede inleren — ${pedalLearnModal.division}` : 'Generaal crescendo inleren'}</h3>
+      {#if pedalLearnModal.step === 1}
+        <div class="kb-learn-step kb-learn-wait">
+          <span class="learning-indicator"></span>
+          Zet de trede in de <strong>LAAGSTE</strong> stand (dicht) en houd hem even stil&hellip;
+        </div>
+      {:else if pedalLearnModal.step === 2}
+        <div class="kb-learn-step kb-learn-ok">
+          &#10004; Laagste stand herkend: CC {pedalLearnModal.first.cc}, kanaal {pedalLearnModal.first.channel + 1} (waarde {pedalLearnModal.first.value})
+        </div>
+        <div class="kb-learn-step kb-learn-wait">
+          <span class="learning-indicator"></span>
+          Zet de trede nu in de <strong>HOOGSTE</strong> stand (open) en houd hem even stil&hellip;
+        </div>
+      {:else if pedalLearnModal.step === 'klaar'}
+        <div class="kb-learn-step kb-learn-ok">&#10004; Trede ingeleerd: {pedalLearnModal.msg}</div>
+      {:else}
+        <div class="kb-learn-step kb-learn-fout">&#10006; {pedalLearnModal.msg}</div>
+      {/if}
+      <div class="kb-learn-knoppen">
+        {#if pedalLearnModal.step === 'fout'}
+          <button class="btn btn-secondary btn-sm" on:click={() => { const k = pedalLearnModal.kind; const d = pedalLearnModal.division; pedalLearnModal = null; learnPedalFlow(k, d); }}>Opnieuw</button>
+        {/if}
+        <button class="btn btn-ghost btn-sm" on:click={() => pedalLearnModal = null}>
+          {pedalLearnModal.step === 'klaar' ? 'Sluiten' : 'Annuleren'}
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
+{#if kbLearnModal}
+  <div class="kb-learn-overlay">
+    <div class="kb-learn-modal">
+      <h3>Klavier inleren — {kbLearnModal.division}</h3>
+      {#if kbLearnModal.step === 1}
+        <div class="kb-learn-step kb-learn-wait">
+          <span class="learning-indicator"></span>
+          Druk nu de <strong>LAAGSTE</strong> toets van dit klavier in…
+        </div>
+      {:else if kbLearnModal.step === 2}
+        <div class="kb-learn-step kb-learn-ok">
+          ✔ Laagste toets herkend: <strong>{noteName(kbLearnModal.first.note)}</strong> (MIDI-kanaal {kbLearnModal.first.channel + 1})
+        </div>
+        <div class="kb-learn-step kb-learn-wait">
+          <span class="learning-indicator"></span>
+          Druk nu de <strong>HOOGSTE</strong> toets in…
+        </div>
+      {:else if kbLearnModal.step === 'klaar'}
+        <div class="kb-learn-step kb-learn-ok">✔ Klavier ingeleerd: {kbLearnModal.msg}</div>
+      {:else}
+        <div class="kb-learn-step kb-learn-fout">✖ {kbLearnModal.msg}</div>
+      {/if}
+      <div class="kb-learn-knoppen">
+        {#if kbLearnModal.step === 'fout'}
+          <button class="btn btn-secondary btn-sm" on:click={() => { const d = kbLearnModal.division; closeKbLearn(); learnChannel(d); }}>Opnieuw</button>
+        {/if}
+        <button class="btn btn-ghost btn-sm" on:click={closeKbLearn}>
+          {kbLearnModal.step === 'klaar' ? 'Sluiten' : 'Annuleren'}
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
 </main>

@@ -68,7 +68,22 @@ pub fn start_test_api(state: AppState, port: u16, log_path: PathBuf) {
                     String::new()
                 };
 
-                let response = route(&state, &log_path, method, &url, &body);
+                // catch_unwind: een panic in een handler mag de API-thread niet
+                // doden — de server-lus stopte dan voorgoed ("fetch failed" bij
+                // elke volgende aanroep terwijl de app gewoon doorspeelde).
+                let response = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    route(&state, &log_path, method, &url, &body)
+                }))
+                .unwrap_or_else(|_| {
+                    warn!("Test-API handler panic op {} — 500 teruggegeven, server draait door", url);
+                    tiny_http::Response::from_string(
+                        json!({ "error": "interne panic in test-api handler" }).to_string(),
+                    )
+                    .with_status_code(500)
+                    .with_header(
+                        tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
+                    )
+                });
                 let _ = request.respond(response);
             }
         })
@@ -100,6 +115,8 @@ fn route(
         (tiny_http::Method::Post, "/panic") => {
             let _ = body;
             state.send_audio_command(AudioCommand::AllNotesOff);
+            // Spooktoetsen mee opruimen (zie stop_audio in commands.rs).
+            state.held_notes.write().clear();
             Ok(json!({"ok": true}))
         }
         (tiny_http::Method::Post, "/load_organ") => handle_load_organ(state, body),

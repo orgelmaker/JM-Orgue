@@ -326,11 +326,20 @@ fn normalize_library(lib: &mut OrganLibrary) {
         );
     }
 
+    // Settings-keys: merge óók hoofdletter-varianten, op de spelling van de
+    // bijbehorende bibliotheek-entry (dat is wat current_organ_id wordt bij
+    // laden via de bibliotheek) — anders splitsen instellingen zich per
+    // pad-notatie (auditbevinding 49).
+    let by_lower: std::collections::HashMap<String, String> = lib.organs.iter()
+        .map(|o| (o.id.to_lowercase(), o.id.clone()))
+        .collect();
     let settings = std::mem::take(&mut lib.settings);
     let (orig, conv): (Vec<_>, Vec<_>) =
         settings.into_iter().partition(|(k, _)| !k.contains('/'));
     for (k, v) in orig.into_iter().chain(conv) {
-        lib.settings.entry(norm(&k)).or_insert(v);
+        let nk = norm(&k);
+        let canon = by_lower.get(&nk.to_lowercase()).cloned().unwrap_or(nk);
+        lib.settings.entry(canon).or_insert(v);
     }
 }
 

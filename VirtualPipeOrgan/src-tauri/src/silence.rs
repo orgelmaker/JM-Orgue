@@ -310,10 +310,11 @@ fn write_trimmed_wav(
     is_float: bool,
     keep_from: usize,
     orig_loop: Option<(u64, u64)>,
+    orig_cue: Option<u64>,
 ) -> Result<(), String> {
     let wav = crate::loop_tool::encode_wav(spec, trimmed_f32, is_float)?;
     let frames = trimmed_f32.len() / spec.channels.max(1) as usize;
-    let out = match orig_loop {
+    let mut out = match orig_loop {
         // Loop alleen behouden als hij volledig ná het weggeknipte stuk ligt en
         // binnen het bestand blijft. `le` is hier EXCLUSIEF (read_wav_loop_points);
         // de smpl-chunk verwacht de laatste frame ínclusief, dus le-1.
@@ -327,12 +328,43 @@ fn write_trimmed_wav(
         }
         _ => wav,
     };
-    fs::write(path, &out).map_err(|e| format!("write: {}", e))
+    // Cue-marker (release-segment in hetzelfde bestand) behouden en mee-
+    // verschuiven: de loader weigert een same-file release zonder cue — de
+    // trim gooide hem stilletjes weg (auditbevinding 2).
+    if let Some(cf) = orig_cue {
+        if cf >= keep_from as u64 && ((cf - keep_from as u64) as usize) < frames {
+            let shifted = (cf - keep_from as u64) as u32;
+            out = crate::loop_tool::insert_smpl(&out, &build_cue_chunk(shifted))?;
+        }
+    }
+    // Veilig herschrijven: eerst temp, dan rename — een crash halverwege liet
+    // anders een half/corrupt samplebestand achter (auditbevinding 24; de
+    // .bak-kopie bestond al als vangnet).
+    let tmp = path.with_extension("jm-tmp");
+    fs::write(&tmp, &out).map_err(|e| format!("write temp: {}", e))?;
+    fs::rename(&tmp, path).map_err(|e| format!("rename: {}", e))
+}
+
+/// Bouw een minimale `cue `-chunk met één marker op `cue_frame`.
+fn build_cue_chunk(cue_frame: u32) -> Vec<u8> {
+    let mut c = Vec::with_capacity(8 + 4 + 24);
+    c.extend_from_slice(b"cue ");
+    c.extend_from_slice(&28u32.to_le_bytes());
+    c.extend_from_slice(&1u32.to_le_bytes());      // aantal cues
+    c.extend_from_slice(&1u32.to_le_bytes());      // dwName (id)
+    c.extend_from_slice(&cue_frame.to_le_bytes()); // dwPosition
+    c.extend_from_slice(b"data");                  // fccChunk
+    c.extend_from_slice(&0u32.to_le_bytes());      // dwChunkStart
+    c.extend_from_slice(&0u32.to_le_bytes());      // dwBlockStart
+    c.extend_from_slice(&cue_frame.to_le_bytes()); // dwSampleOffset
+    c
 }
 
 fn trim_wav_file(path: &Path, thr_lin: f32, preroll_ms: f32) -> Result<f64, String> {
-    // Looppunten VOOR het herschrijven lezen (hound bewaart geen smpl-chunk).
+    // Looppunten en cue-marker VOOR het herschrijven lezen (hound bewaart
+    // geen smpl-/cue-chunks).
     let orig_loop = vpo_sampler::read_wav_loop_points(path);
+    let orig_cue = vpo_sampler::read_wav_markers(path).and_then(|m| m.cue_frame);
 
     let reader = hound::WavReader::open(path).map_err(|e| format!("WAV open: {}", e))?;
     let spec = reader.spec();
@@ -348,7 +380,7 @@ fn trim_wav_file(path: &Path, thr_lin: f32, preroll_ms: f32) -> Result<f64, Stri
             let keep_from = first.saturating_sub(preroll_frames);
             if keep_from == 0 { return Ok(0.0); }
             let trimmed = &samples[keep_from * channels..];
-            write_trimmed_wav(path, spec, trimmed, true, keep_from, orig_loop)?;
+            write_trimmed_wav(path, spec, trimmed, true, keep_from, orig_loop, orig_cue)?;
             Ok(keep_from as f64 / spec.sample_rate as f64 * 1000.0)
         }
         hound::SampleFormat::Int => {
@@ -362,7 +394,7 @@ fn trim_wav_file(path: &Path, thr_lin: f32, preroll_ms: f32) -> Result<f64, Stri
             if keep_from == 0 { return Ok(0.0); }
             // Widen i32 → f32 (native waarden); encode_wav rondt terug naar Int.
             let trimmed: Vec<f32> = samples[keep_from * channels..].iter().map(|&v| v as f32).collect();
-            write_trimmed_wav(path, spec, &trimmed, false, keep_from, orig_loop)?;
+            write_trimmed_wav(path, spec, &trimmed, false, keep_from, orig_loop, orig_cue)?;
             Ok(keep_from as f64 / spec.sample_rate as f64 * 1000.0)
         }
     }

@@ -71,16 +71,27 @@ impl SampleData {
 /// `loop_start` is kept fixed; only `loop_end` moves, within a fraction of the
 /// loop so the loop length (and pitch) barely changes.
 pub fn optimize_loop_points(sample: &mut SampleData) {
-    let (ls, le) = match (sample.loop_start, sample.loop_end) {
-        (Some(a), Some(b)) if b > a => (a as usize, b as usize),
-        _ => return,
-    };
-    let n = sample.data.len();
+    if let (Some(a), Some(b)) = (sample.loop_start, sample.loop_end) {
+        if b > a {
+            if let Some(e) = optimize_loop_end(&sample.data, a as usize, b as usize) {
+                sample.loop_end = Some(e as u64);
+            }
+        }
+    }
+}
+
+/// Kern van de looppunt-optimalisatie op een kale samplebuffer: zoek rond het
+/// aangeleverde exclusieve loop-einde `le` de positie waarvan het vervolg het
+/// best fase-matcht met `ls`, en geef die terug (of None wanneer er niets te
+/// verbeteren valt). Gedeeld door het full-sample-pad (optimize_loop_points)
+/// en het preload-pad — de eerste ~2 seconden van elke noot loopen op de
+/// preload-buffer, dus ook dáár moet de naad fase-uitgelijnd zijn.
+pub fn optimize_loop_end(data: &[f32], ls: usize, le: usize) -> Option<usize> {
+    let n = data.len();
     let win = 128usize; // comparison window (~3 ms @ 48k)
     if le <= ls || ls + win >= n || le + win >= n {
-        return;
+        return None;
     }
-    let data = &sample.data;
     let loop_len = le - ls;
     // Search ±(quarter loop) around the authored loop end, clamped to a few periods
     // and to the valid index range.
@@ -88,7 +99,7 @@ pub fn optimize_loop_points(sample: &mut SampleData) {
     let lo = le.saturating_sub(search).max(ls + 1);
     let hi = (le + search).min(n - win - 1);
     if hi <= lo {
-        return;
+        return None;
     }
     let mut best_e = le;
     let mut best_cost = f32::INFINITY;
@@ -106,9 +117,7 @@ pub fn optimize_loop_points(sample: &mut SampleData) {
             best_e = e;
         }
     }
-    if best_e != le {
-        sample.loop_end = Some(best_e as u64);
-    }
+    if best_e != le { Some(best_e) } else { None }
 }
 
 /// Alle sample-markers uit een WAV: loops (smpl), release-marker (cue) en het
@@ -236,15 +245,66 @@ pub fn read_wav_loop_points(path: &Path) -> Option<(u64, u64)> {
         .max_by_key(|(s, e)| e - s)
         .copied();
     if let Some((s, e)) = best {
-        info!("Found WAV loop points: start={}, end={} (excl., {} loops)", s, e, markers.loops.len());
+        // debug!: dit draait per bestand (duizenden keren per orgel-load en
+        // opnieuw per achtergrond-load) — op info-niveau verstopte het de log
+        // en vulde het de stderr-pipe van beheerd gestarte processen.
+        debug!("Found WAV loop points: start={}, end={} (excl., {} loops)", s, e, markers.loops.len());
     }
     best
+}
+
+/// Lees alleen de fmt-chunk-grootte van een WAV (chunk-walk over headers, geen
+/// audiodata). Hound accepteert uitsluitend fmt-groottes 16/18/40; veel
+/// sampleset-encoders (o.a. Piotr Grabowski-sets) schrijven afwijkende
+/// groottes waardoor élk bestand eerst door hound én symphonia faalde voordat
+/// de manual parser het las — twee mislukte parse-pogingen plus twee
+/// warn-logregels per bestand, duizenden keren per orgel. Met deze probe
+/// kiezen we direct de juiste parser.
+fn wav_fmt_chunk_size(path: &Path) -> Option<u32> {
+    use std::io::BufReader;
+    let file = File::open(path).ok()?;
+    let mut reader = BufReader::new(file);
+    let mut header = [0u8; 12];
+    reader.read_exact(&mut header).ok()?;
+    if &header[0..4] != b"RIFF" || &header[8..12] != b"WAVE" {
+        return None;
+    }
+    loop {
+        let mut chunk_header = [0u8; 8];
+        reader.read_exact(&mut chunk_header).ok()?;
+        let chunk_size = u32::from_le_bytes([
+            chunk_header[4], chunk_header[5], chunk_header[6], chunk_header[7],
+        ]);
+        if &chunk_header[0..4] == b"fmt " {
+            return Some(chunk_size);
+        }
+        let skip = if chunk_size % 2 == 1 { chunk_size + 1 } else { chunk_size };
+        reader.seek(SeekFrom::Current(skip as i64)).ok()?;
+    }
 }
 
 /// Load a WAV file
 pub fn load_wav(path: &Path) -> Result<SampleData, SampleError> {
     // First, try to read loop points from smpl chunk
     let loop_points = read_wav_loop_points(path);
+
+    // fmt-grootte die hound niet accepteert → direct de manual parser (die is
+    // compleet voor 8/16/24/32-bit int + 32-bit float + extensible). Zo vervalt
+    // de dubbele fail-cascade per bestand. Belangrijk: óók hier de looppunt-
+    // optimalisatie toepassen — die draaide eerst alleen in het hound-pad,
+    // waardoor juist deze samplesets loop-naad-tikken hielden.
+    let fmt_size = wav_fmt_chunk_size(path);
+    if !matches!(fmt_size, None | Some(16) | Some(18) | Some(40)) {
+        if let Ok(mut sd) = load_wav_manual(path) {
+            if let Some((s, e)) = loop_points {
+                sd.loop_start = Some(s);
+                sd.loop_end = Some(e);
+            }
+            optimize_loop_points(&mut sd);
+            return Ok(sd);
+        }
+        // Manual faalde onverwacht → alsnog de normale cascade proberen.
+    }
 
     let reader = match WavReader::open(path) {
         Ok(r) => r,
@@ -253,22 +313,26 @@ pub fn load_wav(path: &Path) -> Result<SampleData, SampleError> {
             // bytes of niet-standaard chunks. Probeer eerst symphonia (ondersteunt diverse
             // WAV-varianten), bij verdere failure val terug op onze eigen manual parser
             // die simpelweg de fmt chunk leest zonder strict-checks.
-            warn!("Hound kon {} niet lezen ({}), probeer symphonia", path.display(), hound_err);
+            // debug! i.p.v. warn!: dit pad is verwacht gedrag voor hele samplesets
+            // en spamde het log met twee regels per bestand (duizenden per orgel).
+            debug!("Hound kon {} niet lezen ({}), probeer symphonia", path.display(), hound_err);
             match load_via_symphonia(path, "wav") {
                 Ok(mut sd) => {
                     if let Some((s, e)) = loop_points {
                         sd.loop_start = Some(s);
                         sd.loop_end = Some(e);
                     }
+                    optimize_loop_points(&mut sd);
                     return Ok(sd);
                 }
                 Err(symph_err) => {
-                    warn!("Symphonia kon {} ook niet lezen ({}), probeer manual WAV parser", path.display(), symph_err);
+                    debug!("Symphonia kon {} ook niet lezen ({}), probeer manual WAV parser", path.display(), symph_err);
                     return load_wav_manual(path).map(|mut sd| {
                         if let Some((s, e)) = loop_points {
                             sd.loop_start = Some(s);
                             sd.loop_end = Some(e);
                         }
+                        optimize_loop_points(&mut sd);
                         sd
                     });
                 }
@@ -280,10 +344,14 @@ pub fn load_wav(path: &Path) -> Result<SampleData, SampleError> {
     debug!("Loading WAV: {:?}, {} Hz, {} ch, {} bits",
            path.file_name(), spec.sample_rate, spec.channels, spec.bits_per_sample);
 
+    // Leesfouten (afgeknot bestand) niet meer stil naar 0.0 mappen zonder spoor:
+    // tellen en één warn per bestand — anders leek een load "geslaagd" terwijl
+    // de staart stilte was (auditbevinding 36).
+    let mut read_errors: usize = 0;
     let samples: Vec<f32> = match spec.sample_format {
         hound::SampleFormat::Float => {
             reader.into_samples::<f32>()
-                .map(|s| s.unwrap_or(0.0))
+                .map(|s| s.unwrap_or_else(|_| { read_errors += 1; 0.0 }))
                 .collect()
         }
         hound::SampleFormat::Int => {
@@ -291,17 +359,17 @@ pub fn load_wav(path: &Path) -> Result<SampleData, SampleError> {
             match spec.bits_per_sample {
                 8 => {
                     reader.into_samples::<i8>()
-                        .map(|s| s.unwrap_or(0) as f32 / max_val)
+                        .map(|s| s.unwrap_or_else(|_| { read_errors += 1; 0 }) as f32 / max_val)
                         .collect()
                 }
                 16 => {
                     reader.into_samples::<i16>()
-                        .map(|s| s.unwrap_or(0) as f32 / max_val)
+                        .map(|s| s.unwrap_or_else(|_| { read_errors += 1; 0 }) as f32 / max_val)
                         .collect()
                 }
                 24 | 32 => {
                     reader.into_samples::<i32>()
-                        .map(|s| s.unwrap_or(0) as f32 / max_val)
+                        .map(|s| s.unwrap_or_else(|_| { read_errors += 1; 0 }) as f32 / max_val)
                         .collect()
                 }
                 _ => return Err(SampleError::UnsupportedFormat(
@@ -310,6 +378,10 @@ pub fn load_wav(path: &Path) -> Result<SampleData, SampleError> {
             }
         }
     };
+    if read_errors > 0 {
+        warn!("{}: {} sample-leesfouten (afgeknot/corrupt bestand?) — ontbrekende data als stilte ingevuld",
+            path.display(), read_errors);
+    }
 
     // Convert to mono if stereo
     let mono = if spec.channels == 2 {
@@ -455,6 +527,100 @@ pub fn apply_fades(sample: &mut SampleData, fade_in_ms: f32, fade_out_ms: f32) {
     }
 }
 
+/// Release-fase-uitlijningstabel (naar het GrandOrgue-algoritme,
+/// GOSoundReleaseAlignTable): per (helling-bucket x amplitude-bucket) de eerste
+/// samplepositie in de release met die golfvorm-toestand. Bij het loslaten van
+/// een noot start de release-sample dan op de positie die qua fase aansluit op
+/// het klinkende signaal, in plaats van op frame 0 — dat scheelt de hoorbare
+/// fase-discontinuiteit ("tik") bij elke NoteOff op natte samplesets.
+pub const ALIGN_AMPS: usize = 16;
+pub const ALIGN_DERIVS: usize = 16;
+/// Analysevenster: de periode van de laagst verwachte pijp (20 Hz).
+const ALIGN_MIN_FREQUENCY: u32 = 20;
+
+#[derive(Debug, Clone)]
+pub struct ReleaseAlignTable {
+    max_amp: f32,
+    max_deriv: f32,
+    positions: [[u32; ALIGN_AMPS]; ALIGN_DERIVS],
+}
+
+impl ReleaseAlignTable {
+    fn bucket(x: f32, max: f32, n: usize) -> usize {
+        if max <= 0.0 {
+            return n / 2;
+        }
+        let t = ((x + max) / (2.0 * max)).clamp(0.0, 1.0);
+        ((t * n as f32) as usize).min(n - 1)
+    }
+
+    /// Bouw de tabel over het begin van een release-segment (mono data op
+    /// bestands-samplerate). Geeft None wanneer het segment te kort of te stil
+    /// is — uitlijning helpt dan toch niet (GrandOrgue doet hetzelfde).
+    pub fn compute(data: &[f32], sample_rate: SampleRate) -> Option<Self> {
+        let search = (sample_rate / ALIGN_MIN_FREQUENCY) as usize;
+        if data.len() < search + 2 || search < ALIGN_AMPS * ALIGN_DERIVS * 2 {
+            return None;
+        }
+        let mut max_amp = 0.0f32;
+        let mut max_deriv = 0.0f32;
+        for i in 1..search {
+            max_amp = max_amp.max(data[i].abs());
+            max_deriv = max_deriv.max((data[i] - data[i - 1]).abs());
+        }
+        if max_amp <= 1e-5 || max_deriv <= 1e-7 {
+            return None;
+        }
+        let mut positions = [[0u32; ALIGN_AMPS]; ALIGN_DERIVS];
+        let mut filled = [[false; ALIGN_AMPS]; ALIGN_DERIVS];
+        for i in 1..search {
+            let f = data[i];
+            let v = f - data[i - 1];
+            let ai = Self::bucket(f, max_amp, ALIGN_AMPS);
+            let di = Self::bucket(v, max_deriv, ALIGN_DERIVS);
+            if !filled[di][ai] {
+                positions[di][ai] = (i + 1) as u32;
+                filled[di][ai] = true;
+            }
+        }
+        // Lege cellen vullen met de dichtstbijzijnde gevulde (Manhattan-afstand).
+        let any = filled.iter().flatten().any(|&b| b);
+        if !any {
+            return None;
+        }
+        for di in 0..ALIGN_DERIVS {
+            for ai in 0..ALIGN_AMPS {
+                if !filled[di][ai] {
+                    let mut best = u32::MAX;
+                    let mut best_pos = 0u32;
+                    for dj in 0..ALIGN_DERIVS {
+                        for aj in 0..ALIGN_AMPS {
+                            if filled[dj][aj] {
+                                let dist = (di as i32 - dj as i32).unsigned_abs()
+                                    + (ai as i32 - aj as i32).unsigned_abs();
+                                if dist < best {
+                                    best = dist;
+                                    best_pos = positions[dj][aj];
+                                }
+                            }
+                        }
+                    }
+                    positions[di][ai] = best_pos;
+                }
+            }
+        }
+        Some(Self { max_amp, max_deriv, positions })
+    }
+
+    /// Startpositie (frames binnen het release-segment) die past bij de laatste
+    /// twee ruwe samplewaarden van de stervende stem.
+    pub fn position_for(&self, last: f32, prev: f32) -> u32 {
+        let ai = Self::bucket(last, self.max_amp, ALIGN_AMPS);
+        let di = Self::bucket(last - prev, self.max_deriv, ALIGN_DERIVS);
+        self.positions[di][ai]
+    }
+}
+
 /// Preload buffer info - contains attack portion for instant playback
 #[derive(Debug, Clone)]
 pub struct PreloadBuffer {
@@ -476,6 +642,9 @@ pub struct PreloadBuffer {
     pub bits_per_sample: u16,
     /// Byte offset where audio data starts in the WAV file
     pub data_offset: u64,
+    /// Fase-uitlijningstabel (alleen voor release-segmenten): startpositie in
+    /// dit segment die aansluit op de golfvorm van de stervende stem.
+    pub align_table: Option<ReleaseAlignTable>,
     /// Aantal frames aanloopstilte dat bij het preloaden is weggeknipt (onset-
     /// alignment). De volledige sample die op de achtergrond laadt is NIET
     /// geknipt; de afspeelpositie moet bij de upgrade met dit aantal (in
@@ -561,6 +730,14 @@ pub fn load_wav_preload_segment(path: &Path, preload_samples: usize, segment: Pr
         ]);
 
         if chunk_id == b"fmt " {
+            // Guard tegen misvormde fmt-chunks: minimaal 16 bytes nodig voor de
+            // velden hieronder; een gigantische chunk_size mag geen giga-alloc
+            // worden (auditbevinding 15).
+            if chunk_size < 16 || chunk_size > 65536 {
+                return Err(SampleError::UnsupportedFormat(
+                    format!("fmt-chunk met onbruikbare grootte {}", chunk_size)
+                ));
+            }
             let mut fmt_data = vec![0u8; chunk_size as usize];
             reader.read_exact(&mut fmt_data)
                 .map_err(|e| SampleError::FileError(format!("Failed to read fmt chunk: {}", e)))?;
@@ -570,10 +747,25 @@ pub fn load_wav_preload_segment(path: &Path, preload_samples: usize, segment: Pr
             sample_rate = u32::from_le_bytes([fmt_data[4], fmt_data[5], fmt_data[6], fmt_data[7]]);
             bits_per_sample = u16::from_le_bytes([fmt_data[14], fmt_data[15]]);
 
-            sample_format = if audio_format == 3 {
-                hound::SampleFormat::Float
-            } else {
-                hound::SampleFormat::Int
+            // Alleen PCM (1), float (3) en extensible (0xFFFE) zijn leesbaar met
+            // de vaste bytes-per-sample-aanname hieronder; ADPCM e.d. (formaat 2,
+            // 17, ...) gaf een deling-door-nul-panic.
+            if !matches!(audio_format, 1 | 3 | 0xFFFE) {
+                return Err(SampleError::UnsupportedFormat(
+                    format!("WAV audio-formaat {} (gecomprimeerd?) wordt niet ondersteund", audio_format)
+                ));
+            }
+
+            sample_format = match audio_format {
+                3 => hound::SampleFormat::Float,
+                // WAVE_FORMAT_EXTENSIBLE: het echte formaat staat in het
+                // subformaat (bytes 24-25). Vóór deze check werden extensible
+                // FLOAT-bestanden als int gedecodeerd → luide ruis.
+                0xFFFE if fmt_data.len() >= 26 => {
+                    let subformat = u16::from_le_bytes([fmt_data[24], fmt_data[25]]);
+                    if subformat == 3 { hound::SampleFormat::Float } else { hound::SampleFormat::Int }
+                }
+                _ => hound::SampleFormat::Int,
             };
 
             current_pos += chunk_size as u64;
@@ -594,8 +786,14 @@ pub fn load_wav_preload_segment(path: &Path, preload_samples: usize, segment: Pr
         return Err(SampleError::UnsupportedFormat("No data chunk found".to_string()));
     }
 
-    // Calculate total samples
+    // Calculate total samples. Guard: bits<8 (ADPCM die door de check glipt) of
+    // channels==0 (data-chunk vóór fmt-chunk) gaf hier een deling door nul.
     let bytes_per_sample = bits_per_sample as usize / 8;
+    if bytes_per_sample == 0 || channels == 0 {
+        return Err(SampleError::UnsupportedFormat(
+            format!("onbruikbare WAV-parameters: {} bits, {} kanalen", bits_per_sample, channels)
+        ));
+    }
     let total_frames = data_size as usize / (bytes_per_sample * channels as usize);
 
     // Release-segment: start bij de cue-marker in plaats van frame 0.
@@ -700,9 +898,36 @@ pub fn load_wav_preload_segment(path: &Path, preload_samples: usize, segment: Pr
     debug!("Preloaded {} samples from {:?} (total: {}, loop: {:?}-{:?}, trim: {})",
            aligned_data.len(), path.file_name(), total_frames, loop_start, loop_end, trim_start);
 
-    // Adjust loop points for trimmed samples
-    let adj_loop_start = loop_start.map(|ls| ls.saturating_sub(trim_start as u64));
-    let adj_loop_end = loop_end.map(|le| le.saturating_sub(trim_start as u64));
+    // Looppunten naar buffer-coördinaten verschuiven, mét twee correcties die
+    // het full-sample-pad al had maar de preload miste:
+    // 1. Ligt het loop-begin vóór de trim (onset-trim at het loopgebied aan),
+    //    dan is de loop in dit segment onbetrouwbaar → geen looppunten (de
+    //    engine valt terug op zijn ¾-buffer-fallback) i.p.v. een stilletjes
+    //    naar 0 geklemde, verschoven loop.
+    // 2. Past de loop volledig in de buffer, lijn dan het loop-einde fase-uit
+    //    (optimize_loop_end) — de eerste ~2 s van elke noot loopt op déze
+    //    buffer en tikte anders op de naad ("geen mooie loops").
+    let (adj_loop_start, adj_loop_end) = match (loop_start, loop_end) {
+        (Some(ls), Some(le)) if ls >= trim_start as u64 && le > ls => {
+            let a = ls - trim_start as u64;
+            let mut e = le - trim_start as u64;
+            if (e as usize) <= aligned_data.len() {
+                if let Some(better) = optimize_loop_end(&aligned_data, a as usize, e as usize) {
+                    e = better as u64;
+                }
+            }
+            (Some(a), Some(e))
+        }
+        _ => (None, None),
+    };
+
+    // Fase-uitlijningstabel voor release-segmenten (GrandOrgue-stijl): het
+    // scanvenster (periode van 20 Hz) valt ruim binnen de preload.
+    let align_table = if matches!(segment, PreloadSegment::Release { .. }) {
+        ReleaseAlignTable::compute(&aligned_data, sample_rate)
+    } else {
+        None
+    };
 
     Ok(PreloadBuffer {
         attack_data: aligned_data,
@@ -715,6 +940,7 @@ pub fn load_wav_preload_segment(path: &Path, preload_samples: usize, segment: Pr
         bits_per_sample,
         data_offset,
         trim_start,
+        align_table,
     })
 }
 
@@ -861,8 +1087,10 @@ pub fn load_wav_manual(path: &Path) -> Result<SampleData, SampleError> {
                 .map(|b| i32::from_le_bytes([b[0], b[1], b[2], b[3]]) as f32 / max)
                 .collect()
         }
+        // Zelfde normalisatie (/128) als het hound-pad, anders klinkt een
+        // 8-bit bestand ~0,07 dB harder afhankelijk van welke parser hem las.
         (hound::SampleFormat::Int, 8) => raw_data.iter()
-            .map(|&b| ((b as i16) - 128) as f32 / 127.0)
+            .map(|&b| ((b as i16) - 128) as f32 / 128.0)
             .collect(),
         _ => {
             return Err(SampleError::UnsupportedFormat(
@@ -1035,6 +1263,7 @@ pub fn load_audio_preload(path: &Path, preload_samples: usize) -> Result<Preload
                 bits_per_sample: 16, // MP3 is typically decoded to 16-bit equivalent
                 data_offset: 0,
                 trim_start,
+                align_table: None,
             })
         }
         _ => Err(SampleError::UnsupportedFormat(format!("Unknown extension: {}", ext))),

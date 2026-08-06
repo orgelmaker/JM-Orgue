@@ -1,15 +1,20 @@
 <script>
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
 
   import Header from './components/Header.svelte';
   import Console from './components/Console.svelte';
   import StatusBar from './components/StatusBar.svelte';
-  import RegisterPanel from './components/RegisterPanel.svelte';
+  import PanelApp from './components/PanelApp.svelte';
+  import NotationWindow from './components/NotationWindow.svelte';
   import { tx } from './lib/i18n.js';
+  import { loadAudioProfiles, profileMatchesOutput, deriveProfileFromOutput as deriveProfile, AUDIO_PROFILES_KEY } from './lib/audioProfiles.js';
+  import { pickDevice } from './lib/audioDevices.js';
 
-  // Check if this window is a panel (extra register window)
+  // Venstertype uit de URL-hash: extra registerscherm (#panel&n=N) of
+  // notatievenster (#notation&file=...); anders het hoofdvenster.
   const isPanel = window.location.hash.includes('panel');
+  const isNotation = window.location.hash.includes('notation');
 
   // Sessie-bestand: laatst geopend orgel + open extra-vensters (per gebruiker).
   // Bewaard in localStorage zodat de app opent waar je gebleven was.
@@ -76,10 +81,17 @@
   };
 
   onMount(async () => {
-    if (isPanel) return; // Panel windows handle their own state
+    if (isPanel || isNotation) return; // panel-/notatievensters regelen hun eigen state
 
     await refreshDevices();
     await refreshStatus();
+
+    // Kanaal-override van het actieve uitvoerprofiel direct naar de backend —
+    // vóór de autoload van het laatste orgel, zodat diens
+    // apply_saved_output_channels de profielkanalen meteen meeneemt.
+    if (audioProfiles.active && audioProfiles[audioProfiles.active]) {
+      await pushProfileChannelOverride(audioProfiles[audioProfiles.active]);
+    }
     await refreshMidiMappings();
 
     // Auto-connect ALL available MIDI devices at startup
@@ -109,8 +121,6 @@
     // belastte de audio-thread en kon — met actieve reverb — de audio-callback laten
     // vastlopen bij een note-on. Door de no-op-poll te negeren blijft de UI gesynct
     // zónder onnodig commando-verkeer.
-    let lastOrganInfoJson = null;
-    let lastDrawnSignature = '';
     const organInterval = setInterval(async () => {
       if (organInfo || status.organLoaded) {
         try {
@@ -139,10 +149,20 @@
     const midiRescanInterval = setInterval(async () => {
       try {
         const newDevices = await invoke('get_midi_devices');
-        if (newDevices.length !== midiDevices.length) {
+        const countChanged = newDevices.length !== midiDevices.length;
+        if (countChanged) {
           midiDevices = newDevices;
-          // Auto-connect newly available devices
-          await invoke('connect_all_midi');
+        }
+        // Ook zonder apparaat-wijziging opnieuw verbinden zolang er inputs
+        // zijn maar geen actieve verbinding: een console die nét ingeschakeld
+        // is kan de eerste connect-poging laten mislukken (USB-handshake), en
+        // die werd voorheen nooit herhaald — de gebruiker moest dan handmatig
+        // MIDI "aan/uit zetten" om de klavieren te activeren.
+        if ((countChanged || !status.midiConnected) && newDevices.some(d => d.is_input)) {
+          const count = await invoke('connect_all_midi');
+          if (count > 0) {
+            selectedMidiDevice = 'all';
+          }
         }
       } catch(e) {}
     }, 5000);
@@ -195,19 +215,66 @@
       });
     } catch (e) { /* niet in Tauri context (browser/dev) */ }
 
+    // Acties vanuit extra registerschermen (die missen de App-context) komen
+    // als Tauri-event bij dit hoofdvenster binnen: vensterbeheer, afsluiten,
+    // orgel laden/sluiten, audio-uitvoer/profielen en settings-wijzigingen.
+    let panelUnlisteners = [];
+    try {
+      const { listen } = await import('@tauri-apps/api/event');
+      panelUnlisteners.push(await listen('jm-orgue:open-panel', () => {
+        try { consoleComponent?.openPanel?.(); } catch (e) {}
+      }));
+      // De bevestigingsvraag is al in het extra scherm gesteld.
+      panelUnlisteners.push(await listen('jm-orgue:shutdown', () => { doShutdown(); }));
+      // Orgel laden/sluiten vanuit een paneel: de bestaande flows hier regelen
+      // het sluiten + herstellen van de panelen al correct.
+      panelUnlisteners.push(await listen('jm-orgue:load-organ', (e) => {
+        const p = e?.payload || {};
+        if (!p.path) return;
+        if (p.kind === 'folder') loadFromFolder(p.path);
+        else loadOrgan(p.path);
+      }));
+      panelUnlisteners.push(await listen('jm-orgue:close-organ', () => { closeOrgan(); }));
+      // Profielwissel/audio-uitvoer vanuit een paneel: alleen het hoofdvenster
+      // draait de volledige wissel-flow (herlaad, vlaggen, panelbeheer).
+      panelUnlisteners.push(await listen('jm-orgue:switch-profile', (e) => {
+        switchAudioProfile(e?.payload?.kind ?? null);
+      }));
+      panelUnlisteners.push(await listen('jm-orgue:apply-audio-output', async (e) => {
+        const p = e?.payload || {};
+        try {
+          if (p.host) { selectedAudioHost = p.host; await refreshDevicesForHost(); }
+          if (p.device) selectedAudioDevice = p.device;
+          selectedBufferFrames = p.bufferFrames || null;
+          await applyAudioOutput();
+        } catch (err) { /* fout staat al in `error` */ }
+      }));
+      panelUnlisteners.push(await listen('jm-orgue:save-audio-profile', (e) => {
+        const p = e?.payload || {};
+        if (p.kind) saveAudioProfile(p.kind, { host: p.host, device: p.device, bufferFrames: p.bufferFrames });
+      }));
+      panelUnlisteners.push(await listen('jm-orgue:clear-audio-profile', (e) => {
+        const p = e?.payload || {};
+        if (p.kind) clearAudioProfile(p.kind);
+      }));
+      // Instellingen gewijzigd in een paneel: lijsten verversen + autosaven
+      // (zelfde route als Console's eigen refreshMidiMappings-event).
+      panelUnlisteners.push(await listen('jm-orgue:settings-changed', (e) => {
+        try { refreshMidiMappings(); } catch (err) {}
+        if (e?.payload?.scope === 'persist') persistOrganSettings();
+        else scheduleAutoSave();
+      }));
+    } catch (e) { /* niet in Tauri context */ }
+
     // Herstel laatst geopend orgel als er een sessie is — instelbaar via
     // "Laatst geopende orgel automatisch laden" (Algemene Instellingen).
+    // De extra registerschermen van dat orgel heropent loadOrgan/loadFromFolder
+    // zelf (per orgel onthouden — zie Console.restorePanels).
     try {
       const sess = loadSession();
       if (autoLoadLastOrgan && sess?.lastOrgan?.path && !organInfo) {
         if (sess.lastOrgan.kind === 'folder') await loadFromFolder(sess.lastOrgan.path);
         else await loadOrgan(sess.lastOrgan.path);
-        // Heropen extra register-vensters die open waren (aantal bewaard in sessie).
-        if (Array.isArray(sess.openPanels) && sess.openPanels.length > 0) {
-          for (let i = 0; i < sess.openPanels.length; i++) {
-            try { await consoleComponent?.openPanel?.(); } catch (e) {}
-          }
-        }
       }
     } catch (e) { /* sessie-herstel mag niet de app slopen */ }
 
@@ -219,6 +286,7 @@
       window.removeEventListener('keyup', handleKeyUp);
       if (unlistenClose) try { unlistenClose(); } catch(e) {}
       if (unlistenProgress) try { unlistenProgress(); } catch(e) {}
+      for (const un of panelUnlisteners) { try { un(); } catch(e) {} }
     };
   });
 
@@ -313,13 +381,7 @@
     } catch (e) {
       audioDevices = [];
     }
-    const saved = localStorage.getItem('jm-orgue-audio-device');
-    if (saved && audioDevices.some(d => d.name === saved)) {
-      selectedAudioDevice = saved;
-    } else {
-      const def = audioDevices.find(d => d.is_default);
-      selectedAudioDevice = def ? def.name : (audioDevices[0] ? audioDevices[0].name : null);
-    }
+    selectedAudioDevice = pickDevice(audioDevices, localStorage.getItem('jm-orgue-audio-device'));
   }
 
   async function handleSelectAudioHost(host) {
@@ -335,34 +397,71 @@
   // Twee opgeslagen host/apparaat/buffer-combinaties; één knop (of MIDI-actie)
   // wisselt ertussen via de bestaande applyAudioOutput-route (incl. herladen
   // van het orgel op de nieuwe audio-thread).
-  const AUDIO_PROFILES_KEY = 'jm-orgue-audio-profiles';
-  let audioProfiles = { speakers: null, headphones: null, active: null };
-  try {
-    audioProfiles = { speakers: null, headphones: null, active: null, ...JSON.parse(localStorage.getItem(AUDIO_PROFILES_KEY) || '{}') };
-  } catch (e) { /* corrupte opslag → defaults */ }
+  // Sleutel + laden via lib/audioProfiles.js (gedeeld met de extra schermen).
+  let audioProfiles = loadAudioProfiles();
   let audioProfileSwitching = false;
+  // Dedup-cache van de organ-poll (component-scope: directe organInfo-updates
+  // zetten hem op null zodat de eerstvolgende poll gegarandeerd verst; in de
+  // onMount-closure kon een directe update permanent gemaskeerd blijven —
+  // auditbevinding 40).
+  let lastOrganInfoJson = null;
+  let lastDrawnSignature = '';
+  // Telt op bij elke geslaagde audio-herbouw; Console herlaadt dan de per-orgel
+  // DSP op de verse audio-thread (auditbevinding 20).
+  let audioEpoch = 0;
 
   function persistAudioProfiles() {
     localStorage.setItem(AUDIO_PROFILES_KEY, JSON.stringify(audioProfiles));
   }
 
-  // Bewaar de HUIDIGE selectie (host/apparaat/buffer) als profiel.
-  function saveAudioProfile(kind) {
+  // Bewaar de HUIDIGE selectie (host/apparaat/buffer + kanaalroutering) als
+  // profiel. De kanalen (per divisie, op naam) horen bij het profiel: zo kan
+  // dezelfde ASIO-interface met speakers op eigen kanalen én de hoofdtelefoon
+  // op een ander kanalenpaar gebruikt worden, en wisselt de kanaalkeuze mee.
+  // `config` (host/device/bufferFrames) is optioneel: een extra scherm stuurt
+  // zijn eigen selectie mee via het save-audio-profile-event — die mag de
+  // selectie van dit hoofdvenster niet hoeven te delen.
+  async function saveAudioProfile(kind, config = null) {
+    let channels = null;
+    try {
+      if (organInfo?.divisions?.length) {
+        const chans = await invoke('get_division_output_channels');
+        channels = organInfo.divisions.map((d, i) => [d.name, Array.isArray(chans?.[i]) ? chans[i] : []]);
+      }
+    } catch (e) { /* geen orgel of backend-fout → profiel zonder kanalen */ }
     audioProfiles[kind] = {
-      host: selectedAudioHost,
-      device: selectedAudioDevice,
-      bufferFrames: selectedBufferFrames || null,
+      host: config ? (config.host ?? null) : selectedAudioHost,
+      device: config ? (config.device ?? null) : selectedAudioDevice,
+      bufferFrames: (config ? config.bufferFrames : selectedBufferFrames) || null,
+      channels,
     };
     if (!audioProfiles.active) audioProfiles.active = kind;
     audioProfiles = audioProfiles;
     persistAudioProfiles();
+    // Is dit profiel nu actief, dan is de zojuist vastgelegde routing meteen de
+    // geldende override (zodat een orgel-load hem niet terugdraait).
+    if (audioProfiles.active === kind) pushProfileChannelOverride(audioProfiles[kind]);
   }
 
   function clearAudioProfile(kind) {
     audioProfiles[kind] = null;
-    if (audioProfiles.active === kind) audioProfiles.active = null;
+    if (audioProfiles.active === kind) {
+      audioProfiles.active = null;
+      pushProfileChannelOverride(null);
+    }
     audioProfiles = audioProfiles;
     persistAudioProfiles();
+  }
+
+  // Kanaal-override van het actieve profiel naar de backend pushen (dedupe op
+  // inhoud). null = geen override → per-orgel opgeslagen routing geldt weer.
+  let lastPushedChannelOverride;
+  async function pushProfileChannelOverride(profile) {
+    const payload = profile?.channels ?? null;
+    const key = JSON.stringify(payload);
+    if (key === lastPushedChannelOverride) return;
+    lastPushedChannelOverride = key;
+    try { await invoke('set_profile_channel_override', { channels: payload }); } catch (e) {}
   }
 
   // Pas één profiel toe. Uitkomsten:
@@ -397,14 +496,9 @@
   }
 
   // Bepaal welk profiel bij de (echt spelende) uitgang hoort; null = geen.
+  // Pure logica in lib/audioProfiles.js (gedeeld met de extra schermen).
   function deriveProfileFromOutput(host, device) {
-    if (!host) return audioProfiles.active;
-    const hp = profileMatchesOutput(audioProfiles.headphones, host, device);
-    const sp = profileMatchesOutput(audioProfiles.speakers, host, device);
-    if (hp && !sp) return 'headphones';
-    if (sp && !hp) return 'speakers';
-    if (!sp && !hp) return null;       // uitgang hoort bij geen profiel
-    return audioProfiles.active;       // ambigu (zelfde config) → laat staan
+    return deriveProfile(audioProfiles, host, device);
   }
 
   // Wissel naar `kind`, of zonder argument: naar het ándere profiel.
@@ -430,8 +524,14 @@
       return;
     }
     audioProfileSwitching = true;
+    // Extra schermen tonen de wissel-spinner via dit broadcast-event.
+    emitProfileSwitchState(true);
     try {
       const label = target === 'headphones' ? 'Hoofdtelefoon' : 'Speakers';
+      // Kanaal-override VÓÓR de wissel zetten: de wissel herlaadt het orgel en
+      // elke apply_saved_output_channels tijdens die load moet de kanalen van
+      // het DOELprofiel al meenemen (anders wint de per-orgel routing even).
+      await pushProfileChannelOverride(p);
       const outcome = await applyProfileConfig(p, label);
       if (outcome === 'ok') {
         audioProfiles.active = target;
@@ -443,7 +543,9 @@
         return;
       }
       if (outcome === 'unavailable') {
-        // Uitgang onaangeraakt; alleen de melding tonen — geen revert nodig.
+        // Uitgang onaangeraakt; alleen de melding tonen — geen revert nodig,
+        // wel de kanaal-override terug naar het profiel dat echt actief is.
+        await pushProfileChannelOverride(audioProfiles.active ? audioProfiles[audioProfiles.active] : null);
         return;
       }
       // Mislukt ('failed-intact' of 'failed-rebuilt'): de backend heeft de
@@ -456,6 +558,7 @@
         audioProfiles = audioProfiles;
         persistAudioProfiles();
       }
+      await pushProfileChannelOverride(audioProfiles.active ? audioProfiles[audioProfiles.active] : null);
       // Instellingen-selectie terug naar de echte uitgang.
       if (status.audioHost) {
         selectedAudioHost = status.audioHost;
@@ -464,7 +567,17 @@
       }
     } finally {
       audioProfileSwitching = false;
+      emitProfileSwitchState(false);
     }
+  }
+
+  // Broadcast de wissel-status naar alle vensters (extra schermen tonen de
+  // spinner + het actieve profiel in hun eigen hoofdbalk).
+  async function emitProfileSwitchState(switching) {
+    try {
+      const { emit } = await import('@tauri-apps/api/event');
+      await emit('jm-orgue:profile-switch-state', { switching, active: audioProfiles.active });
+    } catch (e) { /* niet in Tauri context */ }
   }
 
   // Apply the chosen host/device/buffer and reload the current organ so its
@@ -480,6 +593,7 @@
         device: selectedAudioDevice,
         bufferFrames: selectedBufferFrames || null,
       });
+      if (res.player_rebuilt) audioEpoch += 1;
       if (res.player_rebuilt && res.organ_id) {
         // Orgel-definitiebestanden (GrandOrgue .organ én Hauptwerk
         // .Organ_Hauptwerk_xml) via loadOrgan; anders is het een sample-map.
@@ -530,12 +644,7 @@
   // handmatige wijziging in Instellingen zou de wisselknop anders een oude
   // stand tonen — en dan lijkt "geen geluid op de speakers" een kapotte
   // schakeling terwijl gewoon het hoofdtelefoon-profiel actief is.
-  function profileMatchesOutput(p, host, device) {
-    if (!p || !p.host) return false;
-    if (p.host !== host) return false;
-    // Profiel zonder expliciet apparaat = default van die host → host-match volstaat.
-    return !p.device || p.device === device;
-  }
+  // (profileMatchesOutput komt uit lib/audioProfiles.js.)
   // Direct na een geslaagde wissel kan get_status kortstondig nog de oude
   // uitgang rapporteren; binnen deze gratieperiode niet terug-deriven.
   let profileDeriveGraceUntil = 0;
@@ -550,6 +659,9 @@
         // van de gebruiker niet overschrijven.
         audioProfiles.active = derived;
         audioProfiles = audioProfiles;
+        // De kanaal-override hoort bij het profiel dat ECHT speelt (ook na
+        // een handmatige wissel in Instellingen: derived=null → override weg).
+        pushProfileChannelOverride(derived ? audioProfiles[derived] : null);
       }
     }
   }
@@ -581,8 +693,13 @@
 
   // Sluit alle extra register-paneel-vensters (labels "panel-..."). Aangeroepen
   // bij het laden van een (ander) orgel — anders blijven oude panels open staan
-  // met de registers van het vorige orgel.
+  // met de registers van het vorige orgel. Loopt via Console.closeAllPanels,
+  // die de per-orgel-lijst "open schermen" intact laat (guard) zodat de vensters
+  // bij het volgende laden van dit orgel weer terugkomen.
   async function closeExtraPanels() {
+    if (consoleComponent && consoleComponent.closeAllPanels) {
+      try { await consoleComponent.closeAllPanels(); return; } catch (e) {}
+    }
     try {
       const { getAllWebviewWindows } = await import('@tauri-apps/api/webviewWindow');
       const wins = await getAllWebviewWindows();
@@ -606,11 +723,19 @@
       await closeExtraPanels();
       loadingMessage = tx('status.loading_samples');
       organInfo = await invoke('load_organ', { path });
+      lastOrganInfoJson = null;
       showOrganBrowser = false;
       await restorePresetsToLocalStorage();
       try { await invoke('apply_saved_voicings'); } catch (e) {}
       try { await invoke('apply_saved_output_channels'); } catch (e) {}
+      // De backend herstelt de per-orgel MIDI-koppelingen (klavier-inleren)
+      // tijdens de load; zonder deze refresh bleef de UI de lijst van vóór de
+      // load tonen ("leeg") en leerde de gebruiker onnodig elke keer opnieuw in.
+      try { await refreshMidiMappings(); } catch (e) {}
       saveSession({ lastOrgan: { kind: 'organ', path } });
+      // Extra registerschermen die bij dít orgel open stonden heropenen
+      // (met hun eigen divisiekeuze en vensterpositie).
+      try { await tick(); await consoleComponent?.restorePanels?.(); } catch (e) {}
     } catch (e) {
       error = e.toString();
     } finally {
@@ -630,11 +755,16 @@
       await closeExtraPanels();
       loadingMessage = tx('status.loading_samples');
       organInfo = await invoke('load_samples_from_directory', { directory });
+      lastOrganInfoJson = null;
       showOrganBrowser = false;
       await restorePresetsToLocalStorage();
       try { await invoke('apply_saved_voicings'); } catch (e) {}
       try { await invoke('apply_saved_output_channels'); } catch (e) {}
+      // Zie loadOrgan: herstelde MIDI-koppelingen ook in de UI tonen.
+      try { await refreshMidiMappings(); } catch (e) {}
       saveSession({ lastOrgan: { kind: 'folder', path: directory } });
+      // Extra registerschermen die bij dít orgel open stonden heropenen.
+      try { await tick(); await consoleComponent?.restorePanels?.(); } catch (e) {}
     } catch (e) {
       error = e.toString();
     } finally {
@@ -649,7 +779,7 @@
       const presets = await invoke('get_saved_presets');
       if (presets && Object.keys(presets).length > 0) {
         const hash = hashCode(organInfo.id);
-        const storageKey = `jm-orgue-presets-${hash}`;
+        const storageKey = `jm-orgue-presets-${hash}-m1`;
         localStorage.setItem(storageKey, JSON.stringify(presets));
       }
     } catch (e) {
@@ -682,8 +812,13 @@
   // set_drawn_stops + organ-info verversen.
   async function applyCrescendoStage(stopIds) {
     try {
-      await invoke('set_drawn_stops', { stopIds });
+      // Crescendostappen kunnen ook koppels bevatten ("coupler_"-prefix).
+      const stops = stopIds.filter(id => !id.startsWith('coupler_'));
+      const couplers = stopIds.filter(id => id.startsWith('coupler_'));
+      await invoke('set_drawn_stops', { stopIds: stops });
+      await invoke('set_active_couplers', { couplerIds: couplers });
       organInfo = await invoke('get_organ_info');
+      lastOrganInfoJson = null;
     } catch (e) {
       error = e.toString();
     }
@@ -705,18 +840,24 @@
     // Save current organ settings before closing
     await flushAutoSave();
     await persistOrganSettings();
+    // Extra schermen mee sluiten — de guard houdt de bewaarde per-orgel-lijst
+    // intact, dus bij de volgende load van dit orgel komen ze gewoon terug.
+    // Zonder dit bleven panelen het gesloten orgel tonen (ook wanneer "orgel
+    // sluiten" vanuit een paneel-hoofdbalk wordt aangevraagd).
+    await closeExtraPanels();
     organInfo = null;
     showOrganBrowser = true;
   }
 
   // Autostart bij Windows + computer afsluiten (#13)
   let autostartEnabled = false;
-  invoke('get_autostart_enabled').then(v => { autostartEnabled = !!v; }).catch(() => {});
+  if (!isPanel && !isNotation) invoke('get_autostart_enabled').then(v => { autostartEnabled = !!v; }).catch(() => {});
 
   // Laatste registratie herstellen bij openen (default uit = schone start).
   let restoreRegistration = localStorage.getItem('jm-orgue-restore-registration') === 'true';
   // Push de opgeslagen voorkeur direct naar de backend zodat het herstel klopt.
-  invoke('set_restore_registration', { enabled: restoreRegistration }).catch(() => {});
+  // Alleen vanuit het hoofdvenster (paneel-vensters zouden dubbel pushen).
+  if (!isPanel && !isNotation) invoke('set_restore_registration', { enabled: restoreRegistration }).catch(() => {});
   async function setRestoreRegistration(enabled) {
     restoreRegistration = enabled;
     localStorage.setItem('jm-orgue-restore-registration', String(enabled));
@@ -741,10 +882,10 @@
     }
   }
 
-  // Bevestiging vragen, opslaan, computer netjes afsluiten.
-  async function requestShutdown() {
-    const ok = window.confirm('Software én computer afsluiten?\n\nDe laatste stand wordt opgeslagen.');
-    if (!ok) return;
+  // Opslaan en computer netjes afsluiten. De bevestigingsvraag zit bij de
+  // aanroeper: requestShutdown (hoofdvenster) of het extra registerscherm
+  // (dat stuurt na bevestiging het 'jm-orgue:shutdown'-event).
+  async function doShutdown() {
     try {
       await flushAutoSave();
       await persistOrganSettings();
@@ -752,6 +893,13 @@
     } catch (e) {}
     try { await invoke('shutdown_computer'); }
     catch (e) { error = `Afsluiten mislukt: ${e}`; }
+  }
+
+  // Bevestiging vragen, opslaan, computer netjes afsluiten.
+  async function requestShutdown() {
+    const ok = window.confirm('Software én computer afsluiten?\n\nDe laatste stand wordt opgeslagen.');
+    if (!ok) return;
+    await doShutdown();
   }
 
   // MIDI-leren voor de afsluit-actie (preset_num 42).
@@ -764,7 +912,10 @@
     if (!organInfo) return;
     try {
       const hash = hashCode(organInfo.id);
-      const storageKey = `jm-orgue-presets-${hash}`;
+      // Zelfde sleutel als SetzerBar (geheugenniveau 1 = standaard): de oude
+      // suffix-loze sleutel bestond niet meer, waardoor setzer-presets nooit in
+      // de bibliotheek belandden (auditbevinding 26).
+      const storageKey = `jm-orgue-presets-${hash}-m1`;
       let presets = {};
       try {
         const saved = localStorage.getItem(storageKey);
@@ -807,6 +958,11 @@
     try {
       await invoke('set_midi_mapping', { division, channel, transpose });
       await refreshMidiMappings();
+      // Direct persistent maken: geleerde/gezette MIDI-koppelingen werden
+      // voorheen alleen bij een nette afsluiting of orgelwissel opgeslagen —
+      // een geforceerde afsluiting (of de 2,5s-close-timeout) gooide ze weg
+      // en de klavieren moesten elke sessie opnieuw ingeleerd worden.
+      scheduleAutoSave();
     } catch (e) {
       error = e.toString();
     }
@@ -819,6 +975,8 @@
       if (learnedChannel !== null) {
         // A channel was learned, refresh mappings
         await refreshMidiMappings();
+        // Direct persistent maken (zie setMidiMapping).
+        scheduleAutoSave();
       }
     } catch (e) {
       error = e.toString();
@@ -833,6 +991,8 @@
       if (result !== null) {
         // Range was learned, refresh mappings
         await refreshMidiMappings();
+        // Direct persistent maken (zie setMidiMapping).
+        scheduleAutoSave();
       }
       // Notify console that learning is complete
       if (consoleComponent) {
@@ -849,9 +1009,13 @@
 
 </script>
 
-{#if isPanel}
-  <!-- Extra register window - standalone panel -->
-  <RegisterPanel />
+{#if isNotation}
+  <!-- Notatievenster: MIDI-opname als notenschrift (bladmuziek). -->
+  <NotationWindow />
+{:else if isPanel}
+  <!-- Extra registerscherm: secundaire App-shell (Header optioneel + volledige
+       Console in secondary-modus + StatusBar) — zie PanelApp.svelte. -->
+  <PanelApp />
 {:else}
 <div id="app">
   <Header
@@ -900,7 +1064,7 @@
       on:scanFolder={(e) => loadFromFolder(e.detail)}
       on:setTremulant={(e) => setTremulant(e.detail.division, e.detail.active)}
       on:setMidiMapping={(e) => setMidiMapping(e.detail.division, e.detail.channel, e.detail.transpose)}
-      on:refreshMidiMappings={refreshMidiMappings}
+      on:refreshMidiMappings={() => { refreshMidiMappings(); scheduleAutoSave(); }}
       on:learnMidiChannel={(e) => learnMidiChannel(e.detail)}
       on:learnKeyboardRange={(e) => learnKeyboardRange(e.detail.division, e.detail.firstSampleNote)}
       on:selectAudioDevice={(e) => handleSelectAudioDevice(e.detail)}
@@ -908,6 +1072,7 @@
       on:selectBuffer={(e) => handleSelectBuffer(e.detail)}
       on:applyAudioOutput={applyAudioOutput}
       {audioProfiles}
+      {audioEpoch}
       on:saveAudioProfile={(e) => saveAudioProfile(e.detail)}
       on:clearAudioProfile={(e) => clearAudioProfile(e.detail)}
       on:switchAudioProfile={(e) => switchAudioProfile(e.detail)}

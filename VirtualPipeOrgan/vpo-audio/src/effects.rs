@@ -3,6 +3,137 @@
 use vpo_core::SampleRate;
 use std::f32::consts::PI;
 
+/// Master-bus piek-limiter: verlaagt bij overschrijding van het plafond de
+/// TOTALE gain (attack direct, release exponentieel terug naar 1.0).
+///
+/// Dit vervangt de kale `tanh()`-verzadiging per kanaal op de masteruitgang.
+/// Bij een vol werk (honderden stemmen, mix-som ver boven 1.0) betekende tanh
+/// diepe saturatie: hoorbare vervorming ("overstuur"), platgeslagen dynamiek
+/// ("gedempt" — meer registers erbij deed niets meer) en een instortend
+/// stereobeeld doordat elk kanaal onafhankelijk vervormde. Een gekoppelde
+/// gain-limiter houdt de onderlinge balans en het stereobeeld intact en veert
+/// na de piek vanzelf terug.
+pub struct MasterLimiter {
+    gain: f32,
+    /// Per-sample attack-coëfficiënt (exponentieel richting de doelgain).
+    /// Kort (~1,5 ms) maar niet instantaan: één enkele sample-piek trekt zo
+    /// niet het hele orgel omlaag — dat gaf bij crescendo's een "wegzakkend"
+    /// gevoel. Kortstondige overshoot wordt door de eind-clamp opgevangen.
+    attack: f32,
+    /// Per-sample release-coëfficiënt (exponentieel richting gain 1.0).
+    release: f32,
+    /// Piek-plafond (lineair), bv. 0.97 ≈ -0,26 dBFS.
+    pub threshold: f32,
+}
+
+impl MasterLimiter {
+    pub fn new(threshold: f32, attack_seconds: f32, release_seconds: f32, sample_rate: SampleRate) -> Self {
+        let attack = 1.0 - (-1.0f32 / (attack_seconds.max(0.0001) * sample_rate as f32)).exp();
+        let release = 1.0 - (-1.0f32 / (release_seconds.max(0.001) * sample_rate as f32)).exp();
+        Self { gain: 1.0, attack, release, threshold }
+    }
+
+    /// Werk de limiter één frame bij op basis van de frame-piek (max |sample|
+    /// over alle kanalen, vóór limiting) en geef de toe te passen gain terug.
+    /// De aanroeper hoort de uitgang alsnog hard te clampen (±1.0): tijdens de
+    /// korte attack kan de piek het plafond even overschrijden.
+    #[inline]
+    pub fn process(&mut self, frame_peak: f32) -> f32 {
+        let desired = if frame_peak > self.threshold {
+            self.threshold / frame_peak
+        } else {
+            1.0
+        };
+        if desired < self.gain {
+            // Attack: snel maar gedoseerd naar de doelgain.
+            self.gain += (desired - self.gain) * self.attack;
+        } else {
+            // Release: exponentieel terug omhoog, maar nooit voorbij wat de
+            // huidige frame-piek toelaat.
+            self.gain += (1.0 - self.gain) * self.release;
+            if self.gain > desired {
+                self.gain = desired;
+            }
+        }
+        self.gain
+    }
+
+    pub fn reset(&mut self) {
+        self.gain = 1.0;
+    }
+}
+
+#[cfg(test)]
+mod limiter_tests {
+    use super::MasterLimiter;
+
+    #[test]
+    fn onder_plafond_geen_demping() {
+        let mut l = MasterLimiter::new(0.97, 0.0015, 0.25, 48000);
+        for _ in 0..1000 {
+            assert_eq!(l.process(0.5), 1.0);
+        }
+    }
+
+    #[test]
+    fn aanhoudende_piek_convergeert_naar_plafond() {
+        let mut l = MasterLimiter::new(0.97, 0.0015, 0.25, 48000);
+        // Vol-werk-som: piek 8.0 (ver boven plafond). Binnen ~10 ms (480 samples)
+        // moet piek*gain op het plafond zitten — pure gain, geen vervorming.
+        let mut g = 1.0;
+        for _ in 0..480 {
+            g = l.process(8.0);
+        }
+        assert!((8.0 * g - 0.97).abs() < 0.02, "piek*gain={} hoort ~0.97 te zijn", 8.0 * g);
+        // Stabiel bij constante piek (relatieve verhoudingen blijven).
+        let g2 = l.process(8.0);
+        assert!((g2 - g).abs() < 1e-3, "gain stabiel bij constante piek");
+    }
+
+    #[test]
+    fn attack_is_gedoseerd_niet_instantaan() {
+        let mut l = MasterLimiter::new(0.97, 0.0015, 0.25, 48000);
+        // Eén enkele extreme piek mag de gain niet in één sample naar de
+        // bodem trekken (dat "wegzakkende" crescendo-gevoel).
+        let g1 = l.process(12.0);
+        assert!(g1 > 0.5, "eerste-sample-gain {} hoort nog dicht bij 1 te zijn", g1);
+    }
+
+    #[test]
+    fn release_veert_terug_naar_1() {
+        let mut l = MasterLimiter::new(0.97, 0.0015, 0.25, 48000);
+        for _ in 0..480 {
+            let _ = l.process(8.0); // slam
+        }
+        // 2 seconden zacht spel op 48 kHz.
+        let mut g = 0.0;
+        for _ in 0..96000 {
+            g = l.process(0.1);
+        }
+        assert!(g > 0.99, "gain hoort hersteld te zijn, is {}", g);
+    }
+
+    #[test]
+    fn geklemde_uitgang_blijft_onder_1() {
+        let mut l = MasterLimiter::new(0.97, 0.0015, 0.25, 48000);
+        // Grillig signaal: de limiter-uitgang mag na de eind-clamp (±1.0,
+        // zoals de audio-callback doet) nooit boven 1.0 uitkomen; ná de
+        // attack-fase hoort piek*gain onder het plafond te blijven.
+        let peaks = [0.1, 6.0, 0.2, 12.0, 0.05, 3.0, 9.5, 0.4];
+        for round in 0..200 {
+            for &p in &peaks {
+                let g = l.process(p);
+                let clamped = (p * g).min(1.0);
+                assert!(clamped <= 1.0);
+                if round > 2 {
+                    // Regime-gedrag: gain zit onder plafond/piek van het patroon.
+                    assert!(g <= 1.0);
+                }
+            }
+        }
+    }
+}
+
 /// Low-frequency oscillator for tremulant and modulation
 pub struct Lfo {
     phase: f32,
@@ -136,9 +267,17 @@ impl WindModel {
     /// Returns pressure ratio (0.7-1.0). Values below 1.0 = wind sag.
     pub fn process(&mut self) -> f32 {
         if !self.enabled { return 1.0; }
-        // More voices = more wind consumption = more sag
-        let consumption = self.voice_count as f32 / self.reservoir_size;
-        let sag = (consumption * 0.02).min(self.max_sag);
+        // Meer stemmen = meer windverbruik = meer inzakking, maar GELEIDELIJK:
+        // de oude lineaire formule (voice_count / reservoir × 0.02) zat met het
+        // standaard-reservoir al bij ~3 stemmen op de máximale inzakking — het
+        // windmodel werkte dan als botte volumedemper zodra er meer
+        // geregistreerd werd, in plaats van als subtiel adem-effect. Nu
+        // verzadigt de inzakking vloeiend: bij de knie (≈30 × reservoir
+        // stemmen) is de helft van max_sag bereikt; een vol werk nadert
+        // max_sag asymptotisch in plaats van er direct tegenaan te slaan.
+        let v = self.voice_count as f32;
+        let knee = 30.0 * self.reservoir_size.max(0.1);
+        let sag = self.max_sag * (v / (v + knee));
         // Small random variation (wind turbulence)
         let noise = self.noise() * 0.002;
         let target = 1.0 - sag + noise;

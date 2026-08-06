@@ -113,18 +113,17 @@ impl MidiInputManager {
             self.connections.clear();
         }
 
-        // Get fresh port list
-        let midi_in = MidiInput::new("VPO MIDI Input Scan")
-            .map_err(|e| MidiError::OpenError(e.to_string()))?;
-        let ports: Vec<_> = midi_in.ports().into_iter().collect();
+        // Per POORT verbinden i.p.v. terug via de naam: twee interfaces met een
+        // identieke naam verbonden anders twee keer dezelfde eerste poort en de
+        // tweede bleef dood (auditbevinding 27).
+        let ports: Vec<_> = self.midi_in.ports().into_iter().collect();
         let mut connected = 0;
 
         for port in ports {
-            if let Ok(name) = midi_in.port_name(&port) {
-                match self.connect(&name) {
-                    Ok(()) => connected += 1,
-                    Err(e) => warn!("Failed to connect to {}: {}", name, e),
-                }
+            let name = self.midi_in.port_name(&port).unwrap_or_else(|_| "?".to_string());
+            match self.connect_port(port) {
+                Ok(()) => connected += 1,
+                Err(e) => warn!("Failed to connect to {}: {}", name, e),
             }
         }
 

@@ -451,9 +451,20 @@ fn parse_ble_midi_packet(data: &[u8], tx: &Sender<MidiMessage>) {
                 i += 1;
                 continue;
             }
-            if b >= 0xF0 {
-                // System common (variable length, skip)
+            if b == 0xF0 {
+                // SysEx: payloadbytes overslaan t/m EOX (0xF7) — anders werden
+                // ze via running status als spook-events geëmit (audit 53).
+                running_status = 0;
                 i += 1;
+                while i < data.len() && data[i] != 0xF7 { i += 1; }
+                i += 1; // voorbij EOX (of einde pakket)
+                continue;
+            }
+            if b >= 0xF0 {
+                // System common (F1-F7): status + eventuele databytes overslaan.
+                running_status = 0;
+                let skip = match b { 0xF1 | 0xF3 => 1, 0xF2 => 2, _ => 0 };
+                i += 1 + skip;
                 continue;
             }
             // Channel voice status (0x80-0xEF)

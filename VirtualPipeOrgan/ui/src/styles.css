@@ -978,6 +978,11 @@ input[type="range"]::-webkit-slider-thumb:hover {
   display: flex;
   gap: 4px;
   flex-shrink: 0;
+  /* Extra schermen hebben nu ook opname-/afsluitknoppen: bij een smal venster
+     netjes doorlopen op een tweede regel i.p.v. uit beeld vallen. */
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
 }
 
 /* Verticale modus: registers vullen een KOLOM van boven naar beneden;
@@ -1287,6 +1292,49 @@ input[type="range"]::-webkit-slider-thumb:hover {
 .stop-knob.coupler-knob.has-midi,
 .stop-knob.has-midi {
   box-shadow: 0 2px 4px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.05), 0 0 0 1px var(--midi-indicator);
+}
+
+/* ============================================
+   RONDE REGISTERKNOPPEN (optioneel, per orgel)
+   Klassieke trekregisters: cirkel met rond porseleinen front.
+   Aan/uit via de knop "Rond"/"Recht" in de werkbalk (jm-orgue-knob-shape).
+   ============================================ */
+
+/* Horizontale modus: grid-cellen kunnen breder zijn dan de knop → centreren */
+.stops-grid.knobs-round {
+  justify-items: center;
+}
+
+.stops-grid.knobs-round .stop-knob {
+  width: var(--stop-min-width, 100px);
+  max-width: 100%;
+  aspect-ratio: 1 / 1;
+  min-height: 0;
+  height: auto;
+  border-radius: 50%;
+  padding: 0.3rem 0.55rem;
+}
+
+/* Porseleinen plaatje wordt een rond knopfront */
+.stops-grid.knobs-round .stop-knob::before {
+  left: 6px;
+  right: 6px;
+  top: 6px;
+  bottom: 6px;
+  border-radius: 50%;
+}
+
+/* In een cirkel is horizontale ruimte schaars: namen mogen afbreken */
+.stops-grid.knobs-round .stop-name,
+.stops-grid.knobs-round .coupler-line {
+  white-space: normal;
+  word-break: break-word;
+  line-height: 1.1;
+}
+
+/* Verticale modus (CSS-kolommen): knop vult de kolombreedte, blijft rond */
+.stops-grid.stops-vertical.knobs-round .stop-knob {
+  width: 100%;
 }
 
 .stop-name {
@@ -2349,3 +2397,24 @@ input[type="range"]::-webkit-slider-thumb:hover {
 .coupler-mapping-row .midi-mapping-division {
   white-space: nowrap;
 }
+
+
+/* Stapsgewijze klavier-inleer-popup */
+.kb-learn-overlay {
+  position: fixed; inset: 0; z-index: 900;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex; align-items: center; justify-content: center;
+}
+.kb-learn-modal {
+  background: var(--bg-elevated, #2a2a2a);
+  border: 1px solid var(--accent-soft-2, #555);
+  border-radius: var(--radius-md, 8px);
+  padding: 1.2rem 1.5rem;
+  min-width: 22rem; max-width: 90vw;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
+}
+.kb-learn-modal h3 { margin: 0 0 0.8rem; font-size: 1rem; }
+.kb-learn-step { display: flex; align-items: center; gap: 0.5rem; padding: 0.45rem 0; font-size: 0.92rem; }
+.kb-learn-ok { color: var(--success, #6c6); }
+.kb-learn-fout { color: var(--error, #e66); }
+.kb-learn-knoppen { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 0.9rem; }

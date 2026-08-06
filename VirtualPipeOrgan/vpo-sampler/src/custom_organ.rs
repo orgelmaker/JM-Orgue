@@ -299,47 +299,64 @@ impl CustomOrgan {
 
             for (stop_idx, stop) in div.stops.iter().enumerate() {
                 let sid = stop_ids[stop_idx];
-                let num_pipes = stop.pipes.len() as u32;
-                let first_pipe_key = if num_pipes > 0 {
-                    1
+
+                // GrandOrgue-standaard: harmonic = 64 / voet (8' → 8). De oude
+                // tabel schreef 32/voet, waardoor elke geëxporteerde stop na
+                // herimport een verdubbelde voetmaat kreeg (auditbevinding 38).
+                let harmonic = if stop.pitch_feet > 0.01 {
+                    ((64.0 / stop.pitch_feet).round() as u32).max(1)
                 } else {
-                    1
+                    8
                 };
 
-                // Convert pitch_feet to harmonic number
-                let harmonic = match stop.pitch_feet as u32 {
-                    32 => 1,
-                    16 => 2,
-                    8 => 4,
-                    4 => 8,
-                    2 => 16,
-                    1 => 32,
-                    _ => (8.0 / stop.pitch_feet * 4.0) as u32,
-                };
+                // Pijpen op hun échte toets: gesorteerd op midi_note, gaten als
+                // DUMMY, en FirstAccessiblePipeLogicalKeyNumber = positie van de
+                // laagste pijp binnen het klavier. De oude export schreef alles
+                // aaneengesloten vanaf toets 1 en gooide midi_note weg, waardoor
+                // discant-registers en gaten bij herimport alle toetsen
+                // verschoven (auditbevinding 16).
+                let mut by_note: std::collections::BTreeMap<u32, &CustomPipe> = std::collections::BTreeMap::new();
+                for pipe in &stop.pipes {
+                    by_note.entry(pipe.midi_note as u32).or_insert(pipe);
+                }
+                let div_first = div.first_midi_note as u32;
+                let stop_first = by_note.keys().next().copied().unwrap_or(div_first);
+                let stop_last = by_note.keys().next_back().copied().unwrap_or(stop_first);
+                let span = if by_note.is_empty() { 0 } else { stop_last - stop_first + 1 };
+                let first_pipe_key = stop_first.saturating_sub(div_first) + 1;
 
                 writeln!(out, "[Stop{:03}]", sid).unwrap();
                 writeln!(out, "Name={}", stop.name).unwrap();
-                writeln!(out, "NumberOfLogicalPipes={}", num_pipes).unwrap();
-                writeln!(out, "NumberOfAccessiblePipes={}", num_pipes).unwrap();
+                writeln!(out, "NumberOfLogicalPipes={}", span).unwrap();
+                writeln!(out, "NumberOfAccessiblePipes={}", span).unwrap();
                 writeln!(out, "FirstAccessiblePipeLogicalKeyNumber={}", first_pipe_key).unwrap();
                 writeln!(out, "WindchestGroup={:03}", wc_num).unwrap();
                 writeln!(out, "Percussive=N").unwrap();
                 writeln!(out, "HarmonicNumber={}", harmonic).unwrap();
                 writeln!(out, "AmplitudeLevel=100").unwrap();
 
-                // Pipe definitions
-                for (pipe_idx, pipe) in stop.pipes.iter().enumerate() {
-                    let path_str = pipe.sample_path.to_string_lossy().replace('\\', "/");
-                    if pipe.volume_db.abs() > 0.1 || pipe.pitch_cents != 0 {
-                        // Include amplitude and pitch correction
-                        let amp = 100.0 * 10.0_f32.powf(pipe.volume_db / 20.0);
-                        write!(out, "Pipe{:03}={}:{:.0}", pipe_idx + 1, path_str, amp).unwrap();
-                        if pipe.pitch_cents != 0 {
-                            write!(out, ":{}", pipe.pitch_cents).unwrap();
+                // Pipe definitions: dicht bereik stop_first..=stop_last, gaten DUMMY.
+                if !by_note.is_empty() {
+                    for (pipe_idx, note) in (stop_first..=stop_last).enumerate() {
+                        match by_note.get(&note) {
+                            Some(pipe) => {
+                                let path_str = pipe.sample_path.to_string_lossy().replace('\\', "/");
+                                if pipe.volume_db.abs() > 0.1 || pipe.pitch_cents != 0 {
+                                    // Include amplitude and pitch correction
+                                    let amp = 100.0 * 10.0_f32.powf(pipe.volume_db / 20.0);
+                                    write!(out, "Pipe{:03}={}:{:.0}", pipe_idx + 1, path_str, amp).unwrap();
+                                    if pipe.pitch_cents != 0 {
+                                        write!(out, ":{}", pipe.pitch_cents).unwrap();
+                                    }
+                                    writeln!(out).unwrap();
+                                } else {
+                                    writeln!(out, "Pipe{:03}={}", pipe_idx + 1, path_str).unwrap();
+                                }
+                            }
+                            None => {
+                                writeln!(out, "Pipe{:03}=DUMMY", pipe_idx + 1).unwrap();
+                            }
                         }
-                        writeln!(out).unwrap();
-                    } else {
-                        writeln!(out, "Pipe{:03}={}", pipe_idx + 1, path_str).unwrap();
                     }
                 }
                 writeln!(out).unwrap();
@@ -864,7 +881,9 @@ fn check_new_structure(dir: &Path) -> bool {
         // Check what's inside this subdirectory
         let mut has_audio_directly = false;
         let mut has_subdirs_with_audio = false;
+        let mut has_variant_subdirs = false;
 
+        let dir_lower = dir_name.to_lowercase();
         for sub_entry in std::fs::read_dir(&path).into_iter().flatten().flatten() {
             let sub_path = sub_entry.path();
 
@@ -873,6 +892,18 @@ fn check_new_structure(dir: &Path) -> bool {
             }
 
             if sub_path.is_dir() {
+                // Bas/discant- en tremulant-varianten (Stop/Stop_bas, Stop_dis,
+                // *_trem) zijn conventies van de OUDE structuur: die submappen
+                // maakten deze map voorheen ten onrechte een "division" — elke
+                // stop werd dan een klavier (auditbevinding 37).
+                let sub_name = sub_path.file_name()
+                    .map(|n| n.to_string_lossy().to_lowercase())
+                    .unwrap_or_default();
+                if sub_name == format!("{}_bas", dir_lower)
+                    || sub_name == format!("{}_dis", dir_lower)
+                    || is_tremulant_folder(&sub_name) {
+                    has_variant_subdirs = true;
+                }
                 // Check if this subdir contains audio files (would be a stop folder)
                 for file_entry in std::fs::read_dir(&sub_path).into_iter().flatten().flatten().take(5) {
                     if file_entry.path().is_file() && is_audio_file(&file_entry.path()) {
@@ -886,6 +917,12 @@ fn check_new_structure(dir: &Path) -> bool {
         // If we found audio files directly in the first level subdir -> old structure
         if has_audio_directly {
             info!("Detected OLD structure: {} contains audio files directly", dir_name);
+            return false;
+        }
+
+        // Bas/dis/tremulant-varianten → dit is een STOPmap van de oude structuur.
+        if has_variant_subdirs {
+            info!("Detected OLD structure: {} bevat bas/dis/trem-variantmappen", dir_name);
             return false;
         }
 

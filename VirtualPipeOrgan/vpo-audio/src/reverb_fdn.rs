@@ -93,7 +93,15 @@ impl FdnReverb {
         let delay_lengths = Self::scale_delays(room_size, sr);
         let feedback_gains = Self::compute_feedback(rt60, &delay_lengths, sr);
 
-        let delay_lines = core::array::from_fn(|i| vec![0.0; delay_lengths[i]]);
+        // Capaciteit meteen op de MAXIMALE room_size (3.0) reserveren: configure()
+        // hersized dan altijd binnen capaciteit en alloceert dus nooit meer op de
+        // audio-thread (auditbevinding 57). Idem pre-delay (max 250 ms).
+        let max_lengths = Self::scale_delays(3.0, sr);
+        let delay_lines = core::array::from_fn(|i| {
+            let mut v = Vec::with_capacity(max_lengths[i]);
+            v.resize(delay_lengths[i], 0.0);
+            v
+        });
         let damping_filters = core::array::from_fn(|_| DampingFilter::new(damping));
 
         // Input diffusers with prime-length delays
@@ -114,7 +122,12 @@ impl FdnReverb {
             feedback_gains,
             damping_filters,
             input_diffusers,
-            pre_delay: vec![0.0; pre_delay_len.max(1)],
+            pre_delay: {
+                let max_pre = ((250.0 * sr / 1000.0) as usize).max(1);
+                let mut v = Vec::with_capacity(max_pre);
+                v.resize(pre_delay_len.max(1), 0.0);
+                v
+            },
             pre_delay_pos: 0,
             pre_delay_len,
             mix: 0.3,

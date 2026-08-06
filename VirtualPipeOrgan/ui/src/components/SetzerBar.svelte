@@ -34,6 +34,11 @@
   // Context menu state
   let contextMenu = null; // { x, y, action }
 
+  // Alleen het hoofdvenster consumeert MIDI-preset-triggers: het kanaal is
+  // consumerend (try_recv), dus een tweede poller (extra registerpaneel) zou
+  // triggers willekeurig "stelen" (auditbevinding 5/10).
+  export let consumeMidiTriggers = true;
+
   // MIDI polling interval
   let pollInterval;
 
@@ -51,11 +56,29 @@
   $: storageKey = organId ? `jm-orgue-presets-${hashCode(organId)}-m${memoryLevel}` : '';
   $: currentBank = currentPreset >= 0 ? Math.floor(currentPreset / 10) : 0;
 
+  function keyForLevel(level) {
+    return organId ? `jm-orgue-presets-${hashCode(organId)}-m${level}` : '';
+  }
+
   function switchMemoryLevel(level) {
     // Save current presets first
     savePresetsToStorage();
     memoryLevel = level;
-    loadPresets();
+    // NIET via de reactive storageKey laden: die is binnen deze handler nog
+    // niet herberekend, waardoor het OUDE niveau geladen werd (audit 8).
+    loadPresetsFromKey(keyForLevel(level));
+  }
+
+  function loadPresetsFromKey(key) {
+    if (!key) return;
+    try {
+      const saved = localStorage.getItem(key);
+      // Leeg niveau = echt leeg — niet de presets van het vorige niveau laten staan.
+      presets = saved ? JSON.parse(saved) : {};
+    } catch (e) {
+      console.warn('Failed to load presets:', e);
+      presets = {};
+    }
   }
 
   function hashCode(str) {
@@ -101,8 +124,21 @@
   onMount(() => {
     loadPresets();
     loadMidiBindingCounts();
-    // Poll for MIDI triggers every 100ms
-    pollInterval = setInterval(pollMidiTriggers, 100);
+    if (consumeMidiTriggers) {
+      // Eerst opgespaarde triggers van vóór het mounten WEGGOOIEN: dat waren
+      // oude piston-drukken (bv. tijdens een orgel-load) die anders nu in één
+      // keer afgespeeld werden (auditbevinding 9).
+      (async () => {
+        try {
+          for (let i = 0; i < 20; i++) {
+            const t = await invoke('poll_preset_trigger');
+            if (t === null || t === undefined) break;
+          }
+        } catch (e) {}
+      })();
+      // Poll for MIDI triggers every 100ms
+      pollInterval = setInterval(pollMidiTriggers, 100);
+    }
     crescPollInterval = setInterval(pollCrescendoState, 100);
     // Close context menu on click elsewhere
     window.addEventListener('click', closeContextMenu);
@@ -121,13 +157,7 @@
       savePresetsToStorage();
       return;
     }
-    if (!storageKey) return;
-    try {
-      const saved = localStorage.getItem(storageKey);
-      if (saved) presets = JSON.parse(saved);
-    } catch (e) {
-      console.warn('Failed to load presets:', e);
-    }
+    loadPresetsFromKey(storageKey);
   }
 
   // Save presets to localStorage

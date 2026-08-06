@@ -9,6 +9,7 @@ mod commands;
 mod library;
 mod silence;
 mod loop_tool;
+mod notation;
 mod recorder;
 mod state;
 mod test_api;
@@ -52,14 +53,31 @@ fn main() {
     std::fs::create_dir_all(&log_dir).ok();
     let log_path = log_dir.join("jm-orgue.log");
 
-    // Logbestand wordt bij elke start GETRUNCATEERD: één sessie per bestand.
+    // Eén sessie per bestand, maar NIET blind truncaten: een tweede instantie
+    // (per ongeluk dubbel gestart, of een testinstantie) wiste anders het log
+    // van de draaiende instantie (auditbevinding 50). Truncaten alleen als het
+    // bestand niet "warm" is (ouder dan 30 s); anders appenden met marker.
+    let recently_written = std::fs::metadata(&log_path)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.elapsed().ok())
+        .map(|age| age.as_secs() < 30)
+        .unwrap_or(false);
     let file = match std::fs::OpenOptions::new()
         .create(true)
         .write(true)
-        .truncate(true)
+        .truncate(!recently_written)
+        .append(recently_written)
         .open(&log_path)
     {
-        Ok(f) => Some(f),
+        Ok(f) => {
+            if recently_written {
+                use std::io::Write;
+                let mut f2 = &f;
+                let _ = writeln!(f2, "==== tweede instantie gestart (log niet getruncateerd) ====");
+            }
+            Some(f)
+        }
         Err(e) => {
             eprintln!("Could not open log file {:?}: {}", log_path, e);
             None
@@ -141,13 +159,30 @@ fn main() {
                                 // nieuwe audio-thread → orgel herladen.
                                 if o.player_rebuilt {
                                     if let Some(id) = o.organ_id {
-                                        let res = if commands::is_organ_file_id(&id) {
-                                            commands::do_load_organ(&st, &id)
+                                        // Race-guard: tussen de wissel en dit punt kan de
+                                        // gebruiker zélf een ander orgel geladen hebben; dan
+                                        // zou dit herladen het níeuwe orgel overschrijven
+                                        // met het oude id. Alleen herladen wanneer het id
+                                        // nog actueel is.
+                                        // Guard + herlaad atomair onder de gate (audit 25):
+                                        // anders kan een gebruikers-load er tussendoor komen.
+                                        // LET OP: daarom hier de _locked-varianten — de
+                                        // gewone do_load_* nemen de gate opnieuw en dat
+                                        // deadlockt permanent (niet re-entrant).
+                                        let _gate = st.load_switch_gate.lock();
+                                        let fresh = st.current_organ_id.read().clone();
+                                        if fresh.as_deref() == Some(id.as_str()) {
+                                            let res = if commands::is_organ_file_id(&id) {
+                                                commands::do_load_organ_locked(&st, &id)
+                                            } else {
+                                                commands::do_load_samples_from_directory_locked(&st, &id)
+                                            };
+                                            match res {
+                                                Ok(_) => commands::apply_dsp_after_backend_reload(&st),
+                                                Err(e) => tracing::warn!("Orgel herladen na ASIO-wissel mislukte: {}", e),
+                                            }
                                         } else {
-                                            commands::do_load_samples_from_directory(&st, &id)
-                                        };
-                                        if let Err(e) = res {
-                                            tracing::warn!("Orgel herladen na ASIO-wissel mislukte: {}", e);
+                                            info!("Herlaad na ASIO-wissel overgeslagen: orgel intussen gewisseld naar {:?}", fresh);
                                         }
                                     }
                                 }
@@ -171,14 +206,29 @@ fn main() {
                     std::thread::sleep(std::time::Duration::from_secs(3));
                     if let Some(organ) = st.recover_audio_if_flagged() {
                         if let Some(id) = organ {
-                            let res = if commands::is_organ_file_id(&id) {
-                                commands::do_load_organ(&st, &id)
+                            // Zelfde race-guard als bij de uitgestelde ASIO-wissel:
+                            // nooit een intussen door de gebruiker geladen orgel
+                            // overschrijven met een verouderd id.
+                            // Guard + herlaad atomair onder de gate (audit 25).
+                            // _locked-varianten: de gate is hier al genomen en
+                            // opnieuw nemen deadlockt permanent (niet re-entrant).
+                            let _gate = st.load_switch_gate.lock();
+                            let fresh = st.current_organ_id.read().clone();
+                            if fresh.as_deref() == Some(id.as_str()) {
+                                let res = if commands::is_organ_file_id(&id) {
+                                    commands::do_load_organ_locked(&st, &id)
+                                } else {
+                                    commands::do_load_samples_from_directory_locked(&st, &id)
+                                };
+                                match res {
+                                    Ok(_) => {
+                                        commands::apply_dsp_after_backend_reload(&st);
+                                        info!("Audio-noodherstel geslaagd; orgel herladen (DSP hersteld)");
+                                    }
+                                    Err(e) => tracing::warn!("Orgel herladen na audio-noodherstel mislukte: {}", e),
+                                }
                             } else {
-                                commands::do_load_samples_from_directory(&st, &id)
-                            };
-                            match res {
-                                Ok(_) => info!("Audio-noodherstel geslaagd; orgel herladen"),
-                                Err(e) => tracing::warn!("Orgel herladen na audio-noodherstel mislukte: {}", e),
+                                info!("Herlaad na noodherstel overgeslagen: orgel intussen gewisseld naar {:?}", fresh);
                             }
                         }
                         std::thread::sleep(std::time::Duration::from_secs(15));
@@ -217,6 +267,11 @@ fn main() {
             commands::get_midi_mappings,
             commands::learn_midi_channel,
             commands::learn_keyboard_range,
+            commands::learn_keyboard_note,
+            commands::apply_learned_keyboard_range,
+            commands::learn_pedal_position,
+            commands::apply_learned_swell,
+            commands::apply_learned_crescendo,
             commands::get_preset_bindings,
             commands::learn_preset_binding,
             commands::clear_preset_binding,
@@ -284,6 +339,8 @@ fn main() {
             commands::suggest_midi_recording_path,
             commands::save_midi_recording,
             commands::clear_midi_recording,
+            commands::convert_midi_to_musicxml,
+            commands::save_musicxml,
             commands::set_pipe_voicing,
             commands::get_pipe_voicings,
             commands::reset_pipe_voicing,
@@ -294,6 +351,7 @@ fn main() {
             commands::set_division_pan,
             commands::set_division_output_channels,
             commands::get_division_output_channels,
+            commands::set_profile_channel_override,
             commands::set_ccis_spread,
             commands::get_ccis_spread,
             commands::set_division_ccis,

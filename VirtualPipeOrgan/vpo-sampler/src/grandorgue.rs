@@ -462,7 +462,18 @@ impl OdfParser {
                         gain_db: self.parse_f32(section, "Gain").unwrap_or(0.0),
                         number_of_pipes: pipes.len() as u32,
                         first_accessible_pipe_logical_key: self.parse_u32(section, "FirstAccessiblePipeLogicalKeyNumber").unwrap_or(1),
-                        windchest_group: self.parse_u32(section, "WindchestGroup").unwrap_or(1),
+                        // Moderne rank-gebaseerde ODF's zetten WindchestGroup op de
+                        // [RankNNN]-sectie, niet op de stop zelf. Zonder deze fallback
+                        // kregen alle rank-stops groep 1 → de enclosure-koppeling
+                        // (windchest → Enclosure → has_swell) vuurde nooit en
+                        // zwelkasten uit de orgeldefinitie werden genegeerd.
+                        windchest_group: self.parse_u32(section, "WindchestGroup")
+                            .or_else(|| {
+                                self.parse_u32(section, "Rank001")
+                                    .and_then(|rid| self.sections.get(&format!("Rank{:03}", rid)))
+                                    .and_then(|rs| self.parse_u32(rs, "WindchestGroup"))
+                            })
+                            .unwrap_or(1),
                         amplitude_level: self.parse_f32(section, "AmplitudeLevel").unwrap_or(100.0),
                         percussive: section.get("Percussive").map(|v| v == "Y").unwrap_or(false),
                         accepts_retuning: section.get("AcceptsRetuning").map(|v| v != "N").unwrap_or(true),
@@ -491,8 +502,20 @@ impl OdfParser {
         }
 
         let accessible = self.parse_u32(stop_section, "NumberOfAccessiblePipes").unwrap_or(0);
-        let mut pipes = Vec::new();
         let mut harmonic = 0u32;
+
+        // Pijpen worden op TOETS-positie gelegd i.p.v. blind achter elkaar
+        // geplakt. Multi-rank stops zijn meestal splices (elke rank dekt een
+        // ander toetsbereik, via RankNNNFirstAccessibleKeyNumber — bv. een
+        // geleende bas of een repeterende kwint); de oude platte append ging
+        // alleen goed wanneer de ranks toevallig aansluitend in ODF-volgorde
+        // stonden, en schoof bovendien álle volgende pijpen een positie op
+        // wanneer een REF-regel misvormd was (→ verkeerde pijp op elke toets
+        // erna). Overlappende ranks (echte gestapelde mixturen) spelen we nog
+        // niet meerstemmig af: het eerste koor wint, met een duidelijke warn.
+        use std::collections::BTreeMap;
+        let mut by_key: BTreeMap<u32, PipeDef> = BTreeMap::new();
+        let mut stacked_dropped = 0usize;
 
         for r in 1..=num_ranks {
             let rank_id = match self.parse_u32(stop_section, &format!("Rank{:03}", r)) {
@@ -506,10 +529,19 @@ impl OdfParser {
             let first_pipe = self
                 .parse_u32(stop_section, &format!("Rank{:03}FirstPipeNumber", r))
                 .unwrap_or(1);
+            // Caps op ODF-tellers: een corrupte/kwaadaardige waarde mag geen
+            // gigalussen of een alloc-abort veroorzaken (auditbevindingen 22/45).
             let count = self
                 .parse_u32(stop_section, &format!("Rank{:03}PipeCount", r))
                 .or_else(|| self.parse_u32(rank_section, "NumberOfLogicalPipes"))
-                .unwrap_or(accessible);
+                .unwrap_or(accessible)
+                .min(1024);
+            // Op welke toets (1-based, binnen het bereik van de stop) deze
+            // rank-slice begint. Zonder deze sleutel: toets 1 (zoals GO).
+            let first_key = self
+                .parse_u32(stop_section, &format!("Rank{:03}FirstAccessibleKeyNumber", r))
+                .unwrap_or(1)
+                .min(512);
 
             // Rank-niveau inschaling (sectie-brede sleutels zónder Pipe-prefix):
             // onderdeel van de GO-hiërarchie Organ→Windchest→Stop/Rank→Pipe.
@@ -531,14 +563,30 @@ impl OdfParser {
                         harmonic = h;
                     }
                 }
-                if let Some(rest) = value.strip_prefix("REF:") {
+                let key_num = first_key + i;
+                let pd = if value.eq_ignore_ascii_case("DUMMY") {
+                    // GO-plaatshouder: bewust geen sample op deze toets.
+                    PipeDef::Empty
+                } else if let Some(rest) = value.strip_prefix("REF:") {
+                    // Misvormd (verkeerd aantal delen óf niet-numeriek): slot
+                    // leeg laten en loggen — een unwrap_or(0)-terugval wees
+                    // voorheen stilletjes naar de eerste pijp van de eerste
+                    // pedaalstop (auditbevinding 39).
                     let parts: Vec<&str> = rest.split(':').collect();
-                    if parts.len() == 3 {
-                        pipes.push(PipeDef::Reference {
-                            manual: parts[0].parse().unwrap_or(0),
-                            stop: parts[1].parse().unwrap_or(0),
-                            pipe: parts[2].parse().unwrap_or(0),
-                        });
+                    let parsed = if parts.len() == 3 {
+                        match (parts[0].trim().parse::<u32>(), parts[1].trim().parse::<u32>(), parts[2].trim().parse::<u32>()) {
+                            (Ok(m), Ok(s), Ok(p)) => Some((m, s, p)),
+                            _ => None,
+                        }
+                    } else {
+                        None
+                    };
+                    match parsed {
+                        Some((manual, stop, pipe)) => PipeDef::Reference { manual, stop, pipe },
+                        None => {
+                            warn!("Misvormde REF '{}' (toets {}): slot leeg gelaten", value, key_num);
+                            PipeDef::Empty
+                        }
                     }
                 } else {
                     // Inschaling, stemming, percussive, loops en releases
@@ -552,17 +600,45 @@ impl OdfParser {
                         extra.gain_db = Some(extra.gain_db.unwrap_or(0.0) + rank_gain);
                         extra.pitch_tuning_cents = Some(extra.pitch_tuning_cents.unwrap_or(0.0) + rank_pitch);
                     }
-                    pipes.push(PipeDef::Sample {
+                    PipeDef::Sample {
                         path: self.resolve_path(value),
                         extra,
-                    });
+                    }
+                };
+                match by_key.entry(key_num) {
+                    std::collections::btree_map::Entry::Vacant(e) => { e.insert(pd); }
+                    std::collections::btree_map::Entry::Occupied(mut e) => {
+                        // Zelfde toets al bezet door een eerdere rank. Een échte
+                        // pijp verdringt een leeg slot; anders wint het eerste
+                        // koor (gestapelde koren nog niet ondersteund).
+                        if matches!(e.get(), PipeDef::Empty) && !matches!(pd, PipeDef::Empty) {
+                            e.insert(pd);
+                        } else if !matches!(pd, PipeDef::Empty) {
+                            stacked_dropped += 1;
+                        }
+                    }
                 }
             }
         }
 
-        if pipes.is_empty() {
+        if stacked_dropped > 0 {
+            let name = stop_section.get("Name").map(String::as_str).unwrap_or("?");
+            warn!(
+                "Stop '{}': {} gestapelde rank-pijpen genegeerd — meerkorige stapeling wordt nog niet meerstemmig afgespeeld (eerste koor klinkt)",
+                name, stacked_dropped
+            );
+        }
+
+        if by_key.is_empty() {
             None
         } else {
+            // Dichte lijst vanaf toets 1: gaten blijven Empty zodat de
+            // noot→pijp-uitlijning (pipe_num = noot - eerste + 1) klopt.
+            let max_key = *by_key.keys().max().unwrap_or(&0);
+            let mut pipes = Vec::with_capacity(max_key as usize);
+            for k in 1..=max_key {
+                pipes.push(by_key.remove(&k).unwrap_or(PipeDef::Empty));
+            }
             Some((pipes, harmonic))
         }
     }
@@ -622,9 +698,12 @@ impl OdfParser {
     /// per release `{key}Release{jjj}` (pad), `...MaxKeyPressTime` (ms, -1 =
     /// default/langste release), `...CuePoint` en `...ReleaseEnd` (samplenummers).
     fn parse_pipe_releases(&self, section: &HashMap<String, String>, key: &str) -> Vec<ReleaseDef> {
+        // Cap zoals bij LoopCount: een ODF-waarde als 4294967295 gaf hier een
+        // ~200 GB Vec::with_capacity → alloc-abort van het hele proces.
         let count = self
             .parse_u32(section, &format!("{}ReleaseCount", key))
-            .unwrap_or(0);
+            .unwrap_or(0)
+            .min(100);
         let mut releases = Vec::with_capacity(count as usize);
 
         for j in 1..=count {
@@ -647,20 +726,32 @@ impl OdfParser {
     fn parse_pipes(&self, section: &HashMap<String, String>, num_pipes: u32) -> Result<Vec<PipeDef>, OdfError> {
         let mut pipes = Vec::new();
 
-        for i in 1..=num_pipes {
+        // Cap tegen giga-lussen op een corrupte NumberOfPipes-achtige teller.
+        for i in 1..=num_pipes.min(1024) {
             let key = format!("Pipe{:03}", i);
             if let Some(value) = section.get(&key) {
-                let pipe = if value.starts_with("REF:") {
-                    // Reference format: REF:manual:stop:pipe
+                let pipe = if value.eq_ignore_ascii_case("DUMMY") {
+                    // GO-plaatshouder: bewust geen sample op deze toets (ook
+                    // door onze eigen export gebruikt voor gaten in een stop).
+                    PipeDef::Empty
+                } else if value.starts_with("REF:") {
+                    // Reference format: REF:manual:stop:pipe. Misvormd (delen of
+                    // niet-numeriek) → slot leeg + log, net als in het rank-pad.
                     let parts: Vec<&str> = value[4..].split(':').collect();
-                    if parts.len() == 3 {
-                        PipeDef::Reference {
-                            manual: parts[0].parse().unwrap_or(0),
-                            stop: parts[1].parse().unwrap_or(0),
-                            pipe: parts[2].parse().unwrap_or(0),
+                    let parsed = if parts.len() == 3 {
+                        match (parts[0].trim().parse::<u32>(), parts[1].trim().parse::<u32>(), parts[2].trim().parse::<u32>()) {
+                            (Ok(m), Ok(s), Ok(p)) => Some((m, s, p)),
+                            _ => None,
                         }
                     } else {
-                        return Err(OdfError::InvalidReference(value.clone()));
+                        None
+                    };
+                    match parsed {
+                        Some((manual, stop, pipe)) => PipeDef::Reference { manual, stop, pipe },
+                        None => {
+                            warn!("Misvormde REF '{}' (pijp {}): slot leeg gelaten", value, i);
+                            PipeDef::Empty
+                        }
                     }
                 } else {
                     // Sample path
@@ -844,6 +935,17 @@ impl OrganDefinition {
 
     /// Resolve a pipe reference to its actual sample path
     pub fn resolve_reference<'a>(&'a self, reference: &'a PipeDef) -> Option<&'a PipeDef> {
+        self.resolve_reference_depth(reference, 0)
+    }
+
+    fn resolve_reference_depth<'a>(&'a self, reference: &'a PipeDef, depth: u32) -> Option<&'a PipeDef> {
+        // Dieptebegrenzer: een REF kan naar een REF wijzen; een cyclus of een
+        // pathologische keten in een misvormde ODF gaf hier voorheen een
+        // stack-overflow (crash van de hele app tijdens het laden).
+        if depth > 8 {
+            warn!("REF-keten dieper dan 8 schakels — vermoedelijk een cyclus in de ODF; verwijzing genegeerd");
+            return None;
+        }
         match reference {
             PipeDef::Sample { .. } => Some(reference),
             PipeDef::Empty => None,
@@ -859,7 +961,7 @@ impl OrganDefinition {
                     .or_else(|| self.stops.iter().find(|s| s.id == *stop));
                 resolved_stop
                     .and_then(|s| s.pipes.get((*pipe as usize).saturating_sub(1)))
-                    .and_then(|p| self.resolve_reference(p))
+                    .and_then(|p| self.resolve_reference_depth(p, depth + 1))
             }
         }
     }

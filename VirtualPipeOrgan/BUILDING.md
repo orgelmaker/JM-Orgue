@@ -54,7 +54,8 @@ JM-Orgue/
         │   ├── Console.svelte    # Main console + Settings
         │   ├── Header.svelte     # Top bar + tabs
         │   ├── SetzerBar.svelte  # Setzer + crescendo indicator
-        │   └── RegisterPanel.svelte  # Extra panel window
+        │   ├── PanelApp.svelte       # Extra registerscherm (secundaire App-shell)
+        │   └── NotationWindow.svelte # Notatievenster (MIDI-opname → bladmuziek)
         ├── temperaments.js  # 52 historical temperaments
         └── styles.css
 ```

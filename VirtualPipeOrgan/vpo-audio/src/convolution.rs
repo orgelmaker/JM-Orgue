@@ -7,6 +7,7 @@ use realfft::{RealFftPlanner, RealToComplex, ComplexToReal};
 use std::sync::Arc;
 
 /// Partitioned convolution reverb
+#[derive(Clone)]
 pub struct ConvolutionReverb {
     /// FFT size (must be power of 2)
     fft_size: usize,
@@ -54,9 +55,23 @@ pub struct ConvolutionReverb {
     pub gain: f32,
 }
 
+impl std::fmt::Debug for ConvolutionReverb {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConvolutionReverb")
+            .field("num_partitions", &self.num_partitions)
+            .field("partition_size", &self.partition_size)
+            .finish()
+    }
+}
+
 impl ConvolutionReverb {
     /// Create a new convolution reverb with the given impulse response
     pub fn new(impulse_response: &[f32], partition_size: usize) -> Self {
+        // Lege IR → één stille partitie. num_partitions = 0 gaf verderop een
+        // index-out-of-bounds / rest-deling-door-nul-panic ín de audio-callback
+        // (auditbevinding 13).
+        let silent = [0.0f32];
+        let impulse_response: &[f32] = if impulse_response.is_empty() { &silent } else { impulse_response };
         let fft_size = partition_size * 2;
         let num_partitions = (impulse_response.len() + partition_size - 1) / partition_size;
         
@@ -110,11 +125,14 @@ impl ConvolutionReverb {
         }
     }
     
-    /// Load impulse response from WAV file
-    pub fn from_wav(path: &std::path::Path, partition_size: usize) -> Result<Self, String> {
+    /// Load impulse response from WAV file. `target_sample_rate` is de
+    /// engine-samplerate: een IR op een andere rate wordt lineair geresampled —
+    /// voorheen werd de rate volledig genegeerd en klonk de galm te snel/langzaam
+    /// met verschoven spectrum (auditbevinding 30).
+    pub fn from_wav(path: &std::path::Path, partition_size: usize, target_sample_rate: u32) -> Result<Self, String> {
         let reader = hound::WavReader::open(path)
             .map_err(|e| format!("Failed to open WAV file: {}", e))?;
-        
+
         let spec = reader.spec();
         let samples: Vec<f32> = match spec.sample_format {
             hound::SampleFormat::Float => {
@@ -123,13 +141,16 @@ impl ConvolutionReverb {
                     .collect()
             }
             hound::SampleFormat::Int => {
-                let max_val = (1 << (spec.bits_per_sample - 1)) as f32;
+                // i64-shift: `1 << 31` als i32 is overflow — een 32-bit int-IR
+                // kreeg daardoor i32::MIN als deler en een omgekeerde polariteit
+                // (auditbevinding 56).
+                let max_val = (1i64 << (spec.bits_per_sample - 1)) as f32;
                 reader.into_samples::<i32>()
                     .map(|s| s.unwrap_or(0) as f32 / max_val)
                     .collect()
             }
         };
-        
+
         // Convert to mono if stereo
         let mono: Vec<f32> = if spec.channels == 2 {
             samples.chunks(2)
@@ -138,7 +159,29 @@ impl ConvolutionReverb {
         } else {
             samples
         };
-        
+
+        if mono.is_empty() {
+            return Err("IR-bestand bevat geen samples".to_string());
+        }
+
+        // Lineaire resample naar de engine-rate (voor een galm-IR ruim voldoende).
+        let mono: Vec<f32> = if spec.sample_rate != target_sample_rate && spec.sample_rate > 0 {
+            let ratio = spec.sample_rate as f64 / target_sample_rate as f64;
+            let out_len = ((mono.len() as f64) / ratio).max(1.0) as usize;
+            (0..out_len)
+                .map(|i| {
+                    let src = i as f64 * ratio;
+                    let i0 = src.floor() as usize;
+                    let frac = (src - i0 as f64) as f32;
+                    let a = mono.get(i0).copied().unwrap_or(0.0);
+                    let b = mono.get(i0 + 1).copied().unwrap_or(a);
+                    a + (b - a) * frac
+                })
+                .collect()
+        } else {
+            mono
+        };
+
         Ok(Self::new(&mono, partition_size))
     }
     
