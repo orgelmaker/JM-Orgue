@@ -86,6 +86,25 @@
     await refreshDevices();
     await refreshStatus();
 
+    // Migratie (0.7.3): er mag nooit een "profielloze" derde toestand bestaan.
+    // Draait er wél een uitgang maar is er geen profiel actief, leg die uitgang
+    // dan eenmalig vast als profiel — Hoofdtelefoon als alleen dát bestaat,
+    // anders Speakers — zodat de wisselknop altijd twee heldere standen heeft.
+    if (!audioProfiles.active && status.audioHost) {
+      const kind = (audioProfiles.headphones && !audioProfiles.speakers) ? 'headphones' : 'speakers';
+      if (!audioProfiles[kind]) {
+        audioProfiles[kind] = {
+          host: status.audioHost,
+          device: status.audioDevice || null,
+          bufferFrames: selectedBufferFrames || null,
+          channels: null,
+        };
+      }
+      audioProfiles.active = kind;
+      audioProfiles = audioProfiles;
+      persistAudioProfiles();
+    }
+
     // Kanaal-override van het actieve uitvoerprofiel direct naar de backend —
     // vóór de autoload van het laatste orgel, zodat diens
     // apply_saved_output_channels de profielkanalen meteen meeneemt.
@@ -517,10 +536,19 @@
         : (audioProfiles.speakers ? 'speakers' : 'headphones'));
     const p = audioProfiles[target];
     if (!p) {
-      error = (target === 'headphones'
-        ? 'Geen hoofdtelefoon-profiel ingesteld.'
-        : 'Geen speakers-profiel ingesteld.')
-        + ' Kies bij Algemene Instellingen → Audio-uitvoer het gewenste apparaat en sla het op als profiel.';
+      // Geen doelprofiel: geen foutmelding en geen derde toestand meer (0.7.3).
+      // Leg de HUIDIGE (echt spelende) uitgang vast als dit profiel en maak het
+      // actief. De gebruiker verfijnt het daarna in Instellingen → Audio-uitvoer
+      // naar een ander apparaat als de fysieke uitgang echt verschilt.
+      await saveAudioProfile(target, {
+        host: status.audioHost || selectedAudioHost || null,
+        device: status.audioDevice || selectedAudioDevice || null,
+        bufferFrames: selectedBufferFrames || null,
+      });
+      audioProfiles.active = target;
+      audioProfiles = audioProfiles;
+      persistAudioProfiles();
+      await pushProfileChannelOverride(audioProfiles[target]);
       return;
     }
     audioProfileSwitching = true;

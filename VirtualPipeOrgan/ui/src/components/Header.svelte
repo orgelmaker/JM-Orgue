@@ -16,12 +16,9 @@
   const dispatch = createEventDispatcher();
 
   $: onHeadphones = audioProfiles?.active === 'headphones';
-  $: hasAnyProfile = !!(audioProfiles?.speakers || audioProfiles?.headphones);
-  // active === null: de huidige uitgang hoort bij geen van beide profielen
-  // (bv. handmatig gekozen in Instellingen) — toon dan een neutraal label.
-  $: profileLabel = audioProfiles?.active === 'headphones' ? 'Hoofdtelefoon'
-    : audioProfiles?.active === 'speakers' ? 'Speakers'
-    : 'Uitgang';
+  // Twee heldere standen (0.7.3): Hoofdtelefoon of Speakers — nooit een derde
+  // "profielloos" label. Alles wat geen hoofdtelefoon is, toont "Speakers".
+  $: profileLabel = onHeadphones ? 'Hoofdtelefoon' : 'Speakers';
 </script>
 
 <header class="header">
@@ -82,9 +79,8 @@
   {/if}
 
   <div class="header-controls">
-    {#if hasAnyProfile}
-      <!-- Snelle wissel speakers ↔ hoofdtelefoon (audio-uitvoerprofielen) -->
-      <button
+    <!-- Snelle wissel speakers ↔ hoofdtelefoon (altijd zichtbaar: 0.7.3) -->
+    <button
         class="btn btn-secondary"
         disabled={audioProfileSwitching}
         on:click={() => dispatch('toggleAudioProfile')}
@@ -107,7 +103,6 @@
         {/if}
         {profileLabel}
       </button>
-    {/if}
     {#if status.audioRunning}
       <button class="btn btn-secondary" on:click={() => dispatch('stopAudio')}>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">

@@ -24,15 +24,15 @@ export function profileMatchesOutput(p, host, device) {
   return !p.device || p.device === device;
 }
 
-// Bepaal welk profiel bij de actuele uitgang hoort; null = geen van beide.
-// Bij ambiguïteit (beide profielen matchen dezelfde config) of onbekende host
-// blijft de huidige `active`-stand staan.
+// Bepaal welk profiel bij de actuele uitgang hoort. Er is bewust géén derde
+// "profielloos"-toestand meer (0.7.3): kan de uitgang niet eenduidig aan één
+// profiel worden gekoppeld — onbekend apparaat, of beide profielen identiek —
+// dan blijft de huidige `active`-stand gewoon staan.
 export function deriveProfileFromOutput(profiles, host, device) {
   if (!host) return profiles.active;
   const hp = profileMatchesOutput(profiles.headphones, host, device);
   const sp = profileMatchesOutput(profiles.speakers, host, device);
   if (hp && !sp) return 'headphones';
   if (sp && !hp) return 'speakers';
-  if (!sp && !hp) return null;   // uitgang hoort bij geen profiel
-  return profiles.active;        // ambigu (zelfde config) → laat staan
+  return profiles.active;   // geen eenduidige match → laat staan
 }
