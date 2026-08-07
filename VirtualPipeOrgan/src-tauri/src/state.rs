@@ -203,6 +203,12 @@ pub struct SwitchOutcome {
     pub organ_id: Option<String>,
     /// Nederlandse uitleg wanneer de wissel niet (volledig) slaagde.
     pub message: Option<String>,
+    /// De wissel kon niet (op tijd) starten of afronden: er liep al een wissel
+    /// (gate bezet) of de harde deadline werd bereikt. De UI reset dan zijn
+    /// "bezig"-vlag en toont een geduld-melding i.p.v. te bevriezen. `switched`
+    /// en `player_rebuilt` zijn dan false; de huidige uitgang blijft intact.
+    #[serde(default)]
+    pub busy: bool,
 }
 
 /// Bouw een AudioPlayer met een retry-ladder. ASIO4ALL en WASAPI geven hun
@@ -210,8 +216,25 @@ pub struct SwitchOutcome {
 /// opnieuw openen kan dan falen terwijl het een halve seconde later gewoon
 /// lukt. `delays_ms[i]` is de wachttijd vóór poging i (eerste meestal 0).
 fn build_player_with_retries(cfg: &AudioOutputConfig, delays_ms: &[u64]) -> Result<AudioPlayer, String> {
+    build_player_with_retries_deadline(cfg, delays_ms, None)
+}
+
+/// Als `deadline` gezet is en verstreken, worden de resterende (wacht-)pogingen
+/// overgeslagen — maar er wordt altijd minstens één poging gedaan. Zo blijft een
+/// enkele wissel binnen zijn tijdsbudget zonder ooit zonder poging te eindigen.
+fn build_player_with_retries_deadline(cfg: &AudioOutputConfig, delays_ms: &[u64], deadline: Option<std::time::Instant>) -> Result<AudioPlayer, String> {
     let mut last_err = String::from("geen poging gedaan");
     for (i, delay) in delays_ms.iter().enumerate() {
+        // Voorbij de deadline: geen verdere wacht-rungs meer (poging 0 is al gedaan).
+        if i > 0 {
+            if let Some(dl) = deadline {
+                if std::time::Instant::now() >= dl {
+                    tracing::warn!("Audio-wissel deadline bereikt; resterende pogingen voor {:?}/{:?} overgeslagen",
+                        cfg.host_name, cfg.device_name);
+                    break;
+                }
+            }
+        }
         if *delay > 0 {
             std::thread::sleep(std::time::Duration::from_millis(*delay));
         }
@@ -2210,7 +2233,23 @@ impl AppState {
     /// gebeurd is: gewisseld, hersteld naar de vorige uitgang, of teruggevallen.
     pub fn switch_audio_output(&self, cfg: AudioOutputConfig) -> Result<SwitchOutcome, String> {
         // Serialiseer t.o.v. orgel-loads en andere wissels (zie load_switch_gate).
-        let _gate = self.load_switch_gate.lock();
+        // Tweede wissel-verzoek terwijl er al één loopt: niet in de rij gaan staan
+        // (dat gaf een eeuwig hangende "bezig"-vlag), maar direct Busy melden.
+        let _gate = match self.load_switch_gate.try_lock_for(std::time::Duration::from_millis(100)) {
+            Some(g) => g,
+            None => {
+                let (actual_host, actual_device) = self.audio_player.read().as_ref()
+                    .map(|p| (p.current_host.read().clone(), p.current_device.read().clone()))
+                    .unwrap_or_default();
+                return Ok(SwitchOutcome {
+                    switched: false, player_rebuilt: false,
+                    actual_host, actual_device,
+                    organ_id: self.current_organ_id.read().clone(),
+                    message: Some("Er loopt al een audio-wissel — nog even geduld.".into()),
+                    busy: true,
+                });
+            }
+        };
         self.switch_audio_output_inner(cfg, true, false)
     }
 
@@ -2289,8 +2328,13 @@ impl AppState {
                 actual_device,
                 organ_id: state.current_organ_id.read().clone(),
                 message,
+                busy: false,
             }
         };
+        // Harde deadline over de hele ladder: een enkele wissel mag nooit
+        // onbeperkt blijven hangen (bevriezende UI). De herstel-rungen (oude
+        // uitgang / default) blijven wél doorlopen — stilte is erger dan wachten.
+        let overall_deadline = std::time::Instant::now() + std::time::Duration::from_secs(12);
 
         // Van of naar ASIO (of noodherstel): oude player éérst volledig sluiten.
         // ASIO4ALL claimt bij init de WASAPI-endpoints exclusief; zolang onze
@@ -2314,7 +2358,7 @@ impl AppState {
             // Niet-ASIO-doel: kort — als het endpoint bezet is door de idle
             // ASIO-cache helpt wachten niet; de release-stap hieronder wel.
             let ladder: &[u64] = if new_is_asio { &[0, 500, 1200, 2500] } else { &[0, 400] };
-            match build_player_with_retries(&cfg, ladder) {
+            match build_player_with_retries_deadline(&cfg, ladder, Some(overall_deadline)) {
                 Ok(p) => {
                     *self.audio_player.write() = Some(p);
                     if persist {

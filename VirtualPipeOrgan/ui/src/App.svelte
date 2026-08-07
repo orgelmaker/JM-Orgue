@@ -576,6 +576,13 @@
         await pushProfileChannelOverride(audioProfiles.active ? audioProfiles[audioProfiles.active] : null);
         return;
       }
+      if (outcome === 'busy') {
+        // Al een wissel bezig of deadline bereikt: huidige uitgang blijft. Geen
+        // revert, geen herlaad; de finally reset de bezig-vlag zodat de knop
+        // vrijkomt (voorheen bleef die hangen bij een traag/hangend scenario).
+        await pushProfileChannelOverride(audioProfiles.active ? audioProfiles[audioProfiles.active] : null);
+        return;
+      }
       // Mislukt ('failed-intact' of 'failed-rebuilt'): de backend heeft de
       // uitgang intact gelaten of zelf hersteld. Alleen de UI gelijktrekken
       // met wat er werkelijk speelt; de foutmelding staat al in `error`.
@@ -631,6 +638,13 @@
         } else {
           await loadFromFolder(res.organ_id);
         }
+      }
+      if (res.busy) {
+        // Er liep al een wissel of de harde deadline werd bereikt: huidige
+        // uitgang blijft intact, niets herladen. De aanroeper reset zijn
+        // bezig-vlag zodat de knop niet eeuwig blijft hangen.
+        error = res.message || 'Audio-wissel loopt langer dan verwacht — nog even geduld.';
+        return 'busy';
       }
       if (res.switched) {
         if (selectedAudioHost) localStorage.setItem('jm-orgue-audio-host', selectedAudioHost);
