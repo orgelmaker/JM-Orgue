@@ -48,6 +48,18 @@
   let recording = false;
   let selectionIds = new Set(); // Set<eventId>
 
+  // Klik-op-noot (0.7.4): na elke render correleren we elke gerenderde OSMD-noot
+  // met een LayerEv.id, zodat een klik in de bladmuziek een noot kan selecteren
+  // en de selectie als absolute-position overlay wordt gemarkeerd. De correlatie
+  // is volledig frontend-side en backend-vrij: OSMD levert per noot een
+  // frequentie (→ offset-vrije MIDI) en een absolute tijdstempel; de balk-index
+  // wijst naar de n-de niet-lege laag (zoals build_musicxml de parts nummert);
+  // matchen gebeurt op (laag, midi, tijd-in-interval) — dat vangt ook overgebonden
+  // noten (ties) die als meerdere noteheads renderen. Coördinaten zijn relatief
+  // aan de scroll-content van .notation-sheet.
+  let noteBoxes = [];          // [{ eventId, midi, x, y, w, h, cx, cy }]
+  $: selectedBoxes = noteBoxes.filter(b => selectionIds.has(b.eventId));
+
   function isPedalName(n) { const l = (n||'').toLowerCase(); return l.includes('pedaal')||l.includes('pedal'); }
 
   const keyChoices = [
@@ -109,11 +121,141 @@
       if (xml) {
         await osmd.load(xml);
         osmd.render();
+        if (isLive) buildNoteBoxes();
       }
       error = null;
     } catch (e) {
       error = String(e);
     }
+  }
+
+  // ---- Klik-op-noot: OSMD-noot ↔ LayerEv.id correlatie ----
+  // OSMD's interne graphical-model is geen publieke API; alles staat in een
+  // try/catch zodat een toekomstige OSMD-wijziging hooguit de overlay uitschakelt
+  // (cursor-navigatie blijft dan werken) i.p.v. de render te breken.
+  function midiFromPitch(pitch) {
+    // Frequentie → MIDI is offset-vrij (geen aannames over OSMD's octaaf-interne
+    // nummering). A4 = 440 Hz = MIDI 69.
+    const f = pitch?.Frequency;
+    if (!f || !(f > 0)) return null;
+    return Math.round(69 + 12 * Math.log2(f / 440));
+  }
+  // Lagen in dezelfde volgorde als build_musicxml de parts nummert: elke laag
+  // met minstens één noot in een zichtbare take, op laag-volgorde. OSMD-balkindex
+  // s hoort bij partLayers[s].
+  function nonEmptyPartLayers() {
+    return (score?.layers ?? []).filter(l =>
+      l.takes.some(t => t.visible && t.events.length > 0));
+  }
+  function buildNoteBoxes() {
+    noteBoxes = [];
+    try {
+      if (!osmd || !container) return;
+      const gsheet = osmd.GraphicSheet || osmd.graphic;
+      const measureList = gsheet?.MeasureList;
+      if (!measureList) return;
+      const partLayers = nonEmptyPartLayers();
+      if (partLayers.length === 0) return;
+      const bpm = Number(score?.bpm) || 90;
+      const wholeNoteSec = 240 / bpm; // 1 hele noot = 4 kwartnoten
+      const sheetRect = container.getBoundingClientRect();
+      const sx = container.scrollLeft, sy = container.scrollTop;
+      // Per laag: platte lijst events uit zichtbare takes (met tijden in sec).
+      const eventsByLayer = partLayers.map(l => {
+        const evs = [];
+        for (const t of l.takes) {
+          if (!t.visible) continue;
+          for (const e of t.events) {
+            evs.push({ id: e.id, midi: e.midi,
+              startSec: e.start_us / 1e6, endSec: e.end_us / 1e6 });
+          }
+        }
+        return evs;
+      });
+      const usedFirst = new Set(); // eventId → eerste notehead al gekoppeld (voor cx/cy-cursor)
+      for (let m = 0; m < measureList.length; m++) {
+        const row = measureList[m];
+        if (!row) continue;
+        for (let s = 0; s < row.length; s++) {
+          const gMeasure = row[s];
+          if (!gMeasure || !gMeasure.staffEntries) continue;
+          const layerEvents = eventsByLayer[s];
+          if (!layerEvents) continue;
+          for (const se of gMeasure.staffEntries) {
+            let tsWhole = 0;
+            try { const ts = se.getAbsoluteTimestamp();
+              tsWhole = (ts?.RealValue != null) ? ts.RealValue
+                : (ts ? ts.Numerator / ts.Denominator : 0); } catch (e) {}
+            const tSec = tsWhole * wholeNoteSec;
+            for (const gve of (se.graphicalVoiceEntries || [])) {
+              for (const gnote of (gve.notes || [])) {
+                const src = gnote.sourceNote;
+                if (!src || (src.isRest && src.isRest())) continue;
+                const midi = midiFromPitch(src.Pitch);
+                if (midi == null) continue;
+                // Match: zelfde midi in deze laag, tijdstip binnen [start,end];
+                // anders dichtstbijzijnde start binnen ~1 tel.
+                let best = null, bestScore = Infinity;
+                for (const ev of layerEvents) {
+                  if (ev.midi !== midi) continue;
+                  const contains = tSec >= ev.startSec - 1e-3 && tSec <= ev.endSec + 1e-3;
+                  const dStart = Math.abs(ev.startSec - tSec);
+                  const score2 = contains ? dStart : dStart + 1000; // interval-match wint
+                  if (score2 < bestScore) { bestScore = score2; best = ev; }
+                }
+                const window = Math.max(0.35, 60 / bpm); // ~1 tel tolerantie
+                if (!best || (bestScore >= 1000 && Math.abs(best.startSec - tSec) > window)) continue;
+                let g = null;
+                try { g = gnote.getSVGGElement && gnote.getSVGGElement(); } catch (e) {}
+                if (!g) continue;
+                const r = g.getBoundingClientRect();
+                if (!r || (r.width === 0 && r.height === 0)) continue;
+                const x = r.left - sheetRect.left + sx;
+                const y = r.top - sheetRect.top + sy;
+                noteBoxes.push({
+                  eventId: best.id, midi, x, y, w: r.width, h: r.height,
+                  cx: x + r.width / 2, cy: y + r.height / 2,
+                  first: !usedFirst.has(best.id),
+                });
+                usedFirst.add(best.id);
+              }
+            }
+          }
+        }
+      }
+    } catch (e) {
+      noteBoxes = []; // stille degradatie: cursor blijft werken
+    }
+    noteBoxes = noteBoxes; // reactiviteit
+  }
+
+  // Klik in de bladmuziek → dichtstbijzijnde gerenderde noot binnen drempel.
+  // Shift+klik voegt toe aan de selectie; gewone klik vervangt. De cursor volgt
+  // de klik zodat pijltjes vanaf daar verder navigeren.
+  function handleSheetClick(e) {
+    if (!isLive || noteBoxes.length === 0) return;
+    const rect = container.getBoundingClientRect();
+    const px = e.clientX - rect.left + container.scrollLeft;
+    const py = e.clientY - rect.top + container.scrollTop;
+    let best = null, bestDist = Infinity;
+    for (const b of noteBoxes) {
+      // Binnen de bounding box telt als 0; anders afstand tot het centrum.
+      const inside = px >= b.x && px <= b.x + b.w && py >= b.y && py <= b.y + b.h;
+      const d = inside ? 0 : Math.hypot(px - b.cx, py - b.cy);
+      if (d < bestDist) { bestDist = d; best = b; }
+    }
+    const threshold = 40; // px — ruim genoeg om net-naast te klikken
+    if (!best || bestDist > threshold) return;
+    if (e.shiftKey) {
+      const next = new Set(selectionIds);
+      next.has(best.eventId) ? next.delete(best.eventId) : next.add(best.eventId);
+      selectionIds = next;
+    } else {
+      selectionIds = new Set([best.eventId]);
+    }
+    // Cursor gelijktrekken met de aangeklikte noot.
+    const idx = flatEvents.findIndex(ev => ev.id === best.eventId);
+    if (idx >= 0) cursorIndex = idx;
   }
 
   // ---- File-modus initieel: divisies + balk-indeling ----
@@ -325,8 +467,19 @@
   }
   function printScore() { window.print(); }
 
+  // OSMD's autoResize re-rendert bij vensterwijziging; de noot-boxen (in pixels)
+  // moeten dan opnieuw worden opgemeten. Debounce zodat een sleep-resize niet
+  // tientallen keren herberekent.
+  let resizeTimer = null;
+  function handleResize() {
+    if (!isLive) return;
+    if (resizeTimer) clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => { buildNoteBoxes(); }, 200);
+  }
+
   onMount(async () => {
     window.addEventListener('keydown', handleKey);
+    window.addEventListener('resize', handleResize);
     if (isLive) {
       await setupLive();
     } else {
@@ -336,8 +489,10 @@
   });
   onDestroy(() => {
     window.removeEventListener('keydown', handleKey);
+    window.removeEventListener('resize', handleResize);
     if (renderDebounceTimer) clearTimeout(renderDebounceTimer);
     if (renderCeilingTimer) clearTimeout(renderCeilingTimer);
+    if (resizeTimer) clearTimeout(resizeTimer);
     for (const un of unlisteners) { try { un(); } catch (e) {} }
     // Live-opname veilig stoppen bij sluiten.
     if (recording && scoreId != null) invoke('notation_stop_recording').catch(() => {});
@@ -453,10 +608,16 @@
       <button class="btn btn-ghost btn-sm layer-add" on:click={addLayer} title="Nieuwe notenbalk">+ Balk</button>
     </div>
 
-    <!-- Selectie/cursor-indicator (visuele SVG-highlight komt in fase C+). -->
+    <!-- Selectie/cursor-indicator; klik in de bladmuziek selecteert een noot. -->
     <div class="notation-cursor">
-      {#if flatEvents.length > 0 && cursorEvent}
-        <span>Selectie: <b>{noteName(cursorEvent.midi)}</b> (noot {cursorIndex + 1} van {flatEvents.length}, balk "{cursorEvent._layer}")</span>
+      {#if flatEvents.length > 0}
+        {#if selectionIds.size > 1}
+          <span><b>{selectionIds.size}</b> noten geselecteerd — klik een noot (Shift+klik = meerdere), of pijltjes ←/→.</span>
+        {:else if cursorEvent}
+          <span>Selectie: <b>{noteName(cursorEvent.midi)}</b> (noot {cursorIndex + 1} van {flatEvents.length}, balk "{cursorEvent._layer}") — klik een noot om te kiezen.</span>
+        {:else}
+          <span>Klik een noot in de bladmuziek om te selecteren, of gebruik ←/→.</span>
+        {/if}
       {:else}
         <span class="cursor-empty">Nog geen noten in de partituur — druk op Opname en speel.</span>
       {/if}
@@ -490,11 +651,22 @@
   {#if error}<div class="notation-error">{error}</div>{/if}
   {#if converting}<div class="notation-busy">Bezig met noteren…</div>{/if}
 
-  <div class="notation-sheet" bind:this={container}></div>
+  <div class="notation-sheet" class:clickable={isLive} bind:this={container} on:click={handleSheetClick}>
+    {#if isLive}
+      <!-- Selectie-overlay: absolute-position markering per geselecteerde noot
+           (OSMD zelf blijft ongemuteerd; selectie wijzigen vergt geen re-render). -->
+      <div class="notation-selection-overlay">
+        {#each selectedBoxes as b (b.eventId + '@' + b.x + ',' + b.y)}
+          <div class="note-highlight"
+            style="left:{b.x - 3}px; top:{b.y - 3}px; width:{b.w + 6}px; height:{b.h + 6}px;"></div>
+        {/each}
+      </div>
+    {/if}
+  </div>
 
   <div class="notation-hint">
     {#if isLive}
-      Tip: druk op Opname en begin te spelen — de eerste noot is beat 1. Meerdere takes op dezelfde balk = overdub (vink ze in de LayerBar aan/uit). Pijltjes ←/→ selecteren noten; ↑/↓ transponeren, Delete verwijdert, Ctrl+Z ongedaan.
+      Tip: druk op Opname en begin te spelen — de eerste noot is beat 1. Meerdere takes op dezelfde balk = overdub (vink ze in de LayerBar aan/uit). Klik een noot om te selecteren (Shift+klik = meerdere); pijltjes ←/→ selecteren, ↑/↓ transponeren, Delete verwijdert, Ctrl+Z ongedaan.
     {:else}
       Tip: vrij ingespeeld? Stel het tempo in waarop je speelde en schuif "Ritme" naar los als de kwantisatie te strak aanvoelt.
     {/if}
@@ -584,7 +756,20 @@
 
   .notation-error { padding: 0.5rem 0.75rem; background: #7a2020; color: #fff; font-size: 0.85rem; }
   .notation-busy { padding: 0.35rem 0.75rem; background: #f4ecd4; color: #6b5b1e; font-size: 0.8rem; }
-  .notation-sheet { flex: 1; overflow-y: auto; padding: 1rem 1.5rem; background: #fff; }
+  .notation-sheet { flex: 1; overflow-y: auto; padding: 1rem 1.5rem; background: #fff; position: relative; }
+  .notation-sheet.clickable { cursor: pointer; }
+  /* Overlay ligt over de SVG maar vangt zelf geen klikken (die gaan naar de
+     sheet-handler). Verankerd op de content-oorsprong (top/left:0, 0×0 met
+     zichtbare overflow) zodat de markeringen — die in content-coördinaten staan —
+     met de bladmuziek meescrollen i.p.v. aan de zichtbare rand te blijven kleven. */
+  .notation-selection-overlay { position: absolute; top: 0; left: 0; width: 0; height: 0; overflow: visible; pointer-events: none; z-index: 5; }
+  .note-highlight {
+    position: absolute;
+    background: rgba(80, 140, 255, 0.22);
+    border: 1.5px solid rgba(40, 110, 240, 0.85);
+    border-radius: 4px;
+    box-sizing: border-box;
+  }
   .notation-hint { padding: 0.4rem 0.75rem; font-size: 0.75rem; color: #666; background: #f4f4f0; border-top: 1px solid #ddd; flex-shrink: 0; }
 
   @media print {
