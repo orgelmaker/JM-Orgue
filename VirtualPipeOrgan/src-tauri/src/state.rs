@@ -12,6 +12,23 @@ use vpo_midi::{MidiInputManager, MidiMessage};
 use crate::audio::{AudioPlayer, AudioCommand, AudioOutputConfig, resolve_host};
 use crate::commands::{OrganInfoDto, CouplerDto};
 
+/// Teller van gedropte realtime audio-commando's (volle queue / consumer weg).
+static RT_DROP_COUNT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Realtime send voor het notenpad: non-blocking `try_send` op een gekloonde
+/// zender (dus BUITEN de player-read-lock). Bij een volle queue of ontbrekende
+/// consumer wordt het commando gedropt en periodiek (elke 50 drops) gewaarschuwd
+/// — een realtime-noot mag nooit tot 3s blokkeren en zo een audio-wissel ophouden.
+#[inline]
+fn rt_send(tx: &Sender<AudioCommand>, cmd: AudioCommand) {
+    if tx.try_send(cmd).is_err() {
+        let n = RT_DROP_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+        if n % 50 == 0 {
+            tracing::warn!("Realtime audio-commando's gedropt (queue vol of consumer weg): totaal {}", n);
+        }
+    }
+}
+
 /// Eén effectieve koppel-route na uitvouwen van (transitieve) koppels:
 /// speel toetsen van `source_division` óók op `destination_division`, met
 /// `pitch_offset` halve tonen verschuiving. `gate_type` is het type van de
@@ -1875,11 +1892,17 @@ impl AppState {
                     return;
                 };
 
-                // Check if we have an audio player
-                let player_guard = audio_player.read();
-                let Some(ref player) = *player_guard else {
-                    tracing::warn!("No audio player");
-                    return;
+                // Pak de command-zender onder een KORTE read-lock en laat de lock
+                // dan los: het hele noot-routing-blok hierna (per stop + koppels)
+                // draait buiten de player-lock met non-blocking try_send, zodat een
+                // gelijktijdige audio-wissel (write-lock) niet achter een reeks
+                // sends van 3s hoeft te wachten.
+                let cmd_tx = {
+                    let player_guard = audio_player.read();
+                    match player_guard.as_ref() {
+                        Some(p) => p.command_sender(),
+                        None => { tracing::warn!("No audio player"); return; }
+                    }
                 };
 
                 // For custom sample sets without ODF, definition may be None
@@ -1938,7 +1961,7 @@ impl AppState {
                                     stop.internal_stop_id, stop.name, transposed_note, pipe_num,
                                     stop_first_midi, stop_last_midi);
 
-                                let _ = player.send_command(AudioCommand::NoteOn {
+                                rt_send(&cmd_tx, AudioCommand::NoteOn {
                                     stop_id: stop.internal_stop_id,
                                     pipe_num,
                                     midi_note: transposed_note,
@@ -2006,7 +2029,7 @@ impl AppState {
                                         if t >= s_first && t <= s_last {
                                             let pipe_num = t - s_first + 1;
                                             let vel_f = velocity as f32 / 127.0;
-                                            let _ = player.send_command(AudioCommand::NoteOn {
+                                            rt_send(&cmd_tx, AudioCommand::NoteOn {
                                                 stop_id: stop.internal_stop_id,
                                                 pipe_num,
                                                 midi_note: coupled_note,
@@ -2032,8 +2055,12 @@ impl AppState {
                 let mappings = midi_mappings.read();
 
                 let Some(ref o) = *organ else { return; };
-                let player_guard = audio_player.read();
-                let Some(ref player) = *player_guard else { return; };
+                // Zender onder korte read-lock pakken; releases (per stop + koppels)
+                // gaan daarna buiten de player-lock via non-blocking try_send.
+                let cmd_tx = {
+                    let player_guard = audio_player.read();
+                    match player_guard.as_ref() { Some(p) => p.command_sender(), None => return }
+                };
 
                 let _has_definition = definition.is_some();
 
@@ -2063,7 +2090,7 @@ impl AppState {
                         if transposed_u32 >= stop_first_midi && transposed_u32 <= stop_last_midi {
                             let pipe_num = transposed_u32 - stop_first_midi + 1;
 
-                            let _ = player.send_command(AudioCommand::NoteOff {
+                            rt_send(&cmd_tx, AudioCommand::NoteOff {
                                 stop_id: stop.internal_stop_id,
                                 pipe_num,
                             });
@@ -2096,7 +2123,7 @@ impl AppState {
                                     let t = coupled_note as u32;
                                     if t >= s_first && t <= s_last {
                                         let pipe_num = t - s_first + 1;
-                                        let _ = player.send_command(AudioCommand::NoteOff {
+                                        rt_send(&cmd_tx, AudioCommand::NoteOff {
                                             stop_id: stop.internal_stop_id,
                                             pipe_num,
                                         });

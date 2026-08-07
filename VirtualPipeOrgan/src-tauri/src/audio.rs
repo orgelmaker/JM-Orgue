@@ -1093,6 +1093,14 @@ impl AudioPlayer {
             .map_err(|e| format!("audio command not delivered (audio thread stalled?): {}", e))
     }
 
+    /// Kloon van de command-zender. Voor het realtime-notenpad (NoteOn/NoteOff):
+    /// de aanroeper pakt deze onder een KORTE player-read-lock, laat de lock los,
+    /// en doet daarna non-blocking `try_send` — zo houdt een reeks noot-sends de
+    /// read-lock niet vast terwijl een audio-wissel op de write-lock wacht.
+    pub fn command_sender(&self) -> Sender<AudioCommand> {
+        self.command_tx.clone()
+    }
+
     /// Get current voice count
     pub fn voice_count(&self) -> usize {
         self.voice_count.load(Ordering::Relaxed)
