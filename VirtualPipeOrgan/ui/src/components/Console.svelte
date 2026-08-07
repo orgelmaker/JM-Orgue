@@ -359,43 +359,9 @@
     }
   }
 
-  async function openNotationWindow(midiPath) {
-    try {
-      const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow');
-      const label = `notation-${Date.now()}`;
-      const webview = new WebviewWindow(label, {
-        url: `index.html#notation&file=${encodeURIComponent(midiPath)}`,
-        title: 'JM-Orgue - Notatie',
-        width: 1000,
-        height: 800,
-        center: true,
-        resizable: true,
-      });
-      webview.once('tauri://error', (e) => {
-        console.error('Notatievenster openen mislukt:', e);
-        alert('Notatievenster openen mislukt.');
-      });
-    } catch (e) {
-      alert(`Notatievenster openen mislukt: ${e}`);
-    }
-  }
-
-  async function openNotation() {
-    if (lastMidiPath) {
-      await openNotationWindow(lastMidiPath);
-      return;
-    }
-    try {
-      const { open } = await import('@tauri-apps/plugin-dialog');
-      const sel = await open({
-        multiple: false,
-        filters: [{ name: 'MIDI-bestand', extensions: ['mid', 'midi'] }],
-      });
-      if (sel) await openNotationWindow(sel);
-    } catch (e) {
-      console.error('MIDI-bestand kiezen mislukt:', e);
-    }
-  }
+  // (Oude file-modus openers verwijderd — één ingang naar notatie: het
+  // live-notatievenster. Binnen het venster kies je via "Openen…" een
+  // bestaand MIDI-bestand dat als import-take aan de score wordt toegevoegd.)
   let selectedDivisions = [];
   let openPanels = [];
 
@@ -3032,10 +2998,8 @@
             {#if !midiRec.recording}
               <button
                 class="btn btn-ghost btn-sm"
-                on:click={openNotation}
-                title={lastMidiPath
-                  ? 'De zojuist opgenomen MIDI als notenschrift tonen (bewerken, afdrukken, opslaan als PDF/MusicXML)'
-                  : 'Een MIDI-bestand als notenschrift tonen (maak eerst een MIDI-opname, of kies een bestand)'}
+                on:click={openLiveNotation}
+                title="Notatievenster openen: live inspelen met noten die verschijnen terwijl je speelt (lagen, overdub, ritme-tolerantie, bewerken); binnen het venster kun je ook een bestaand MIDI-bestand openen"
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <circle cx="7" cy="18" r="3"/>
@@ -3043,19 +3007,6 @@
                   <circle cx="15" cy="15" r="3"/>
                 </svg>
                 Noteren
-              </button>
-              <button
-                class="btn btn-ghost btn-sm"
-                on:click={openLiveNotation}
-                title="Live noteren: open het notatievenster en zie de noten verschijnen terwijl je speelt (lagen, overdub, ritme-tolerantie, bewerken)"
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <circle cx="7" cy="18" r="3"/>
-                  <path d="M10 18V5l8-2v12"/>
-                  <circle cx="15" cy="15" r="3"/>
-                  <circle cx="19" cy="5" r="2" fill="currentColor"/>
-                </svg>
-                Live noteren
               </button>
             {/if}
             <button

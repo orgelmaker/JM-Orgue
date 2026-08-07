@@ -357,6 +357,7 @@ fn main() {
             commands::notation_set_key,
             commands::notation_undo,
             commands::notation_redo,
+            commands::notation_import_midi,
             commands::set_pipe_voicing,
             commands::get_pipe_voicings,
             commands::reset_pipe_voicing,

@@ -5,6 +5,12 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.2] - 2026-08-07
+
+### Verbeterd — één "Noteren"-knop met "Openen…" binnen het venster
+
+- 🎼 De aparte "Live noteren"-knop is verdwenen: **"Noteren"** opent nu direct het notatievenster (live-modus). Wil je een bestaand MIDI-bestand inladen? Dat gaat via de knop **"Openen…"** in het venster zelf — het bestand komt binnen als extra take per notenbalk (zodat je bestaande opnames niet kwijtraakt), en vervolgens kun je live verder opnemen bovenop wat er al staat
+
 ## [0.7.1] - 2026-08-07
 
 ### Opgelost — koppel-toets "ontkoppelt" bij dubbele aanslag

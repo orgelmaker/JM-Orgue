@@ -216,6 +216,27 @@
     } catch (e) { error = String(e); }
   }
 
+  // "Openen…" in live-modus: kies een MIDI-bestand en importeer het als
+  // extra take(s) in de huidige score — per laag een nieuwe take
+  // "Import (<bestandsnaam>)". Zo blijft bestaand werk staan en zet de
+  // import zich er náást (in plaats van "een ander scherm openen").
+  async function openMidiFile() {
+    if (!isLive || scoreId == null) return;
+    try {
+      const { open } = await import('@tauri-apps/plugin-dialog');
+      const sel = await open({
+        multiple: false,
+        filters: [{ name: 'MIDI-bestand', extensions: ['mid', 'midi'] }],
+      });
+      if (!sel) return;
+      await invoke('notation_import_midi', { scoreId, path: sel, intoTake: null });
+      // score-changed-event zorgt voor render; score-snapshot verfrissen voor LayerBar.
+      score = await invoke('notation_get_score', { scoreId });
+    } catch (e) {
+      alert(`MIDI importeren mislukt: ${e}`);
+    }
+  }
+
   // ---- Selectie + bewerkacties (cursor-based) ----
   // Alle noot-events uit alle zichtbare takes op tijd-volgorde. Cursor-index
   // volgt deze lijst; visuele highlight is voorlopig een tekstuele indicator
@@ -360,6 +381,7 @@
       <button class="btn btn-ghost btn-sm" on:click={() => transposeSelection(+12)} title="Octaaf omhoog (Shift+↑)">+8va</button>
       <button class="btn btn-ghost btn-sm" on:click={doUndo} title="Ongedaan (Ctrl+Z)">↶</button>
       <button class="btn btn-ghost btn-sm" on:click={doRedo} title="Opnieuw (Ctrl+Y)">↷</button>
+      <button class="btn btn-ghost btn-sm" on:click={openMidiFile} title="Bestaand MIDI-bestand als extra take(s) in deze partituur importeren">Openen…</button>
       <button class="btn btn-primary btn-sm" on:click={printScore} disabled={!xml}>Afdrukken / PDF</button>
       <button class="btn btn-ghost btn-sm" on:click={saveMusicXml} disabled={!xml}>Opslaan</button>
     {:else}

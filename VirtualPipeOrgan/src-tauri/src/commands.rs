@@ -2416,6 +2416,108 @@ pub fn notation_undo(state: State<AppState>, app: tauri::AppHandle, score_id: u3
     Ok(gen)
 }
 
+/// Importeer een MIDI-bestand in een bepaalde take van een score. De noten
+/// worden toegewezen aan lagen via de kanaal→divisie-mapping (zelfde regel als
+/// bij het spelen); noten op een niet-gemapt kanaal komen in de opgegeven
+/// standaard-laag (`fallback_layer`). Als `into_take` `None` is, wordt een
+/// nieuwe take aangemaakt in de armed laag. Gebruikt voor "Openen…" in het
+/// notatievenster: het bestand komt binnen zonder de bestaande opname te wissen.
+#[tauri::command]
+pub fn notation_import_midi(
+    state: State<AppState>,
+    app: tauri::AppHandle,
+    score_id: u32,
+    path: String,
+    into_take: Option<u32>,
+) -> Result<u64, String> {
+    let bytes = std::fs::read(&path).map_err(|e| format!("Kan MIDI-bestand niet lezen: {}", e))?;
+    let raw = crate::notation::extract_notes(&bytes)?;
+    if raw.is_empty() {
+        return Err("Geen noten gevonden in het MIDI-bestand".into());
+    }
+
+    // Kanaal → divisienaam (voor de layer-toewijzing).
+    let mappings = state.midi_mappings.read().clone();
+
+    let gen = {
+        let mut scores = state.notation_scores.write();
+        let sc = scores.get_mut(&score_id).ok_or_else(|| format!("Score {} niet gevonden", score_id))?;
+
+        // Bepaal doelbalk voor elke divisie-naam (bestaande laag met die naam,
+        // anders eerste laag als fallback zodat er niets verloren gaat).
+        let mut division_to_layer: HashMap<String, u32> = HashMap::new();
+        for layer in &sc.layers {
+            division_to_layer.entry(layer.name.clone()).or_insert(layer.id);
+        }
+        let fallback_layer = sc.layers.first().map(|l| l.id).ok_or("Score heeft geen enkele laag")?;
+
+        // Doel-take per laag: bij expliciet `into_take` gaat álles daar naartoe
+        // (op de laag waar die take bij hoort); anders per laag een nieuwe take
+        // "Import (bestandsnaam)".
+        let file_stem = std::path::Path::new(&path).file_stem()
+            .and_then(|s| s.to_str()).unwrap_or("import").to_string();
+        let mut take_for_layer: HashMap<u32, u32> = HashMap::new();
+
+        if let Some(tid) = into_take {
+            // Zoek de laag waar deze take bij hoort en gebruik hem als algemene doelbak.
+            let owner_layer = sc.layers.iter()
+                .find(|l| l.takes.iter().any(|t| t.id == tid))
+                .map(|l| l.id)
+                .ok_or("Take niet gevonden in deze score")?;
+            take_for_layer.insert(owner_layer, tid);
+        }
+
+        for n in raw {
+            // Kanaal → divisienaam (eerste mapping die deze noot accepteert).
+            let target_layer = mappings.iter()
+                .find(|m| m.accepts(n.channel, n.note))
+                .and_then(|m| division_to_layer.get(&m.division).copied())
+                .unwrap_or(fallback_layer);
+
+            // Voor deze laag een take reserveren (bij ontbreken van into_take:
+            // maak per laag een nieuwe take zodat de import naast bestaande
+            // opnames staat en er niets over elkaar heen komt).
+            let take_id = match take_for_layer.get(&target_layer) {
+                Some(id) => *id,
+                None => {
+                    // Nieuwe take aanmaken via sc.add_take (die bump't gen).
+                    let new_take = sc.add_take(target_layer).ok_or("Kan geen take toevoegen")?;
+                    // Naam mooier maken dan "Take N": pak de zojuist toegevoegde take en hernoem.
+                    if let Some(layer) = sc.layers.iter_mut().find(|l| l.id == target_layer) {
+                        if let Some(take) = layer.takes.iter_mut().find(|t| t.id == new_take) {
+                            take.name = format!("Import ({})", file_stem);
+                        }
+                    }
+                    take_for_layer.insert(target_layer, new_take);
+                    new_take
+                }
+            };
+
+            // Klinkende toonhoogte via de mapping-transpose, gelijk aan spelen.
+            let transpose = mappings.iter()
+                .find(|m| m.accepts(n.channel, n.note))
+                .map(|m| m.transpose).unwrap_or(0);
+            let midi = (n.note as i16 + transpose as i16).clamp(0, 127) as u8;
+
+            let ev_id = sc.new_event_id();
+            let start_us = (n.start_sec * 1_000_000.0) as u64;
+            let end_us = ((n.end_sec * 1_000_000.0) as u64).max(start_us + 20_000);
+            if let Some(layer) = sc.layers.iter_mut().find(|l| l.id == target_layer) {
+                if let Some(take) = layer.takes.iter_mut().find(|t| t.id == take_id) {
+                    take.events.push(crate::notation::LayerEv {
+                        id: ev_id, midi, start_us, end_us,
+                        channel: n.channel, locked: false,
+                    });
+                }
+            }
+        }
+        sc.bump_gen();
+        sc.generation
+    };
+    tauri::async_runtime::spawn(emit_score_changed(app, score_id, gen));
+    Ok(gen)
+}
+
 #[tauri::command]
 pub fn notation_redo(state: State<AppState>, app: tauri::AppHandle, score_id: u32) -> Result<u64, String> {
     let gen = with_score_mut(&state, score_id, |sc| {
