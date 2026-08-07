@@ -80,8 +80,76 @@
     '2': 61, '3': 63, '5': 66, '6': 68, '7': 70,
   };
 
+  // ---- Hoofdvenster-geometrie (globaal — het hoofdvenster is er maar één,
+  // dus bewust níet per orgel zoals de panel-state). Zelfde aanpak als
+  // PanelApp.saveGeometry: logische coördinaten, minimized negeren, en bij
+  // gemaximaliseerd alleen de vlag bijwerken zodat "herstellen" na een
+  // herstart op de laatst bekende vensterpositie terugvalt.
+  const MAIN_GEOM_KEY = 'jm-orgue-main-window';
+  let mainGeomTimer = null;
+  async function restoreMainGeometry() {
+    try {
+      const st = JSON.parse(localStorage.getItem(MAIN_GEOM_KEY) || 'null');
+      if (!st) return;
+      const { getCurrentWindow, LogicalPosition, LogicalSize } = await import('@tauri-apps/api/window');
+      const w = getCurrentWindow();
+      if (typeof st.x === 'number' && typeof st.y === 'number' && st.x > -30000 && st.y > -30000) {
+        await w.setPosition(new LogicalPosition(st.x, st.y));
+      }
+      if (st.width >= 400 && st.height >= 300) {
+        await w.setSize(new LogicalSize(Math.min(st.width, 8000), Math.min(st.height, 8000)));
+      }
+      if (st.maximized) await w.maximize();
+    } catch (e) { /* niet in Tauri of corrupte opslag — standaardpositie is prima */ }
+  }
+  async function saveMainGeometry() {
+    try {
+      const { getCurrentWindow } = await import('@tauri-apps/api/window');
+      const w = getCurrentWindow();
+      if (await w.isMinimized()) return; // Windows meldt dan -32000,-32000
+      const prev = (() => { try { return JSON.parse(localStorage.getItem(MAIN_GEOM_KEY) || '{}') || {}; } catch (e) { return {}; } })();
+      if (await w.isMaximized()) {
+        localStorage.setItem(MAIN_GEOM_KEY, JSON.stringify({ ...prev, maximized: true }));
+        return;
+      }
+      const factor = await w.scaleFactor();
+      const pos = (await w.outerPosition()).toLogical(factor);
+      const size = (await w.innerSize()).toLogical(factor);
+      if (pos.x < -30000 || pos.y < -30000) return;
+      localStorage.setItem(MAIN_GEOM_KEY, JSON.stringify({
+        x: Math.round(pos.x), y: Math.round(pos.y),
+        width: Math.round(size.width), height: Math.round(size.height),
+        maximized: false,
+      }));
+    } catch (e) {}
+  }
+  async function initMainGeometryTracking() {
+    try {
+      const { getCurrentWindow } = await import('@tauri-apps/api/window');
+      const w = getCurrentWindow();
+      const schedule = () => {
+        if (mainGeomTimer) clearTimeout(mainGeomTimer);
+        mainGeomTimer = setTimeout(saveMainGeometry, 400);
+      };
+      await w.onMoved(schedule);
+      await w.onResized(schedule);
+      // Laatste kans bij sluiten; de debounce-saves onderweg zijn het vangnet
+      // wanneer de close het asynchrone bewaren zou afbreken.
+      await w.onCloseRequested(async () => {
+        if (mainGeomTimer) { clearTimeout(mainGeomTimer); mainGeomTimer = null; }
+        await saveMainGeometry();
+      });
+    } catch (e) { /* niet in Tauri */ }
+  }
+
   onMount(async () => {
     if (isPanel || isNotation) return; // panel-/notatievensters regelen hun eigen state
+
+    // Hoofdvenster-geometrie herstellen + vastleggen (extra schermen doen dit
+    // al zelf in PanelApp; het hoofdvenster had tot 0.7.11 géén persistentie
+    // en opende dus altijd op de standaardpositie).
+    await restoreMainGeometry();
+    initMainGeometryTracking();
 
     await refreshDevices();
     await refreshStatus();
