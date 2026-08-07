@@ -62,6 +62,106 @@
 
   function isPedalName(n) { const l = (n||'').toLowerCase(); return l.includes('pedaal')||l.includes('pedal'); }
 
+  // ---- Metronoom + count-in (0.7.5) ----
+  // Aparte WebAudio-klik in het notatievenster: géén orgelpijp en volledig buiten
+  // de sample-graph van de backend, zodat de tik nooit in een opname of galm
+  // terechtkomt. Downbeat = hogere/hardere tik. Config (aan/uit + count-in) staat
+  // in het Score-model en wordt via notation_set_metronome gepersisteerd.
+  let metroOn = false;
+  let countInBeats = 0;         // 0/1/2/4 tellen voortellen vóór opname
+  let metroAudioCtx = null;
+  let metroTimer = null;        // lookahead-scheduler
+  let metroNextTime = 0;        // AudioContext-tijd van de volgende tik
+  let metroBeat = 0;            // 0 = downbeat van de maat
+  let countInRemaining = 0;     // tellen die nog voor-tikken (>0 = aftellen)
+  let armedWaiting = false;     // true tijdens count-in: "wacht op tel 1"
+  const METRO_LOOKAHEAD = 0.12; // s vooruit plannen
+
+  function ensureMetroCtx() {
+    if (!metroAudioCtx) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      metroAudioCtx = new AC();
+    }
+    if (metroAudioCtx.state === 'suspended') metroAudioCtx.resume();
+    return metroAudioCtx;
+  }
+  function scheduleClick(time, downbeat) {
+    const ctx = metroAudioCtx;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'square';
+    osc.frequency.value = downbeat ? 1600 : 1000;
+    const peak = downbeat ? 0.5 : 0.28;
+    gain.gain.setValueAtTime(0.0001, time);
+    gain.gain.exponentialRampToValueAtTime(peak, time + 0.001);
+    gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.05);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(time);
+    osc.stop(time + 0.06);
+  }
+  function metroSchedulerTick() {
+    if (!metroAudioCtx) return;
+    const ctx = metroAudioCtx;
+    const beatDur = 60 / (Number(bpm) || 90);
+    const beatsPer = Number(score?.beats_per_bar) || Number(beatsPerBar) || 4;
+    while (metroNextTime < ctx.currentTime + METRO_LOOKAHEAD) {
+      const downbeat = (metroBeat % beatsPer) === 0;
+      scheduleClick(metroNextTime, downbeat);
+      metroNextTime += beatDur;
+      metroBeat++;
+      if (countInRemaining > 0) {
+        countInRemaining--;
+        if (countInRemaining === 0 && armedWaiting) {
+          // Count-in klaar → nu pas echt opnemen. De backend nult op de eerste
+          // gespeelde noot, dus dit hoeft niet exact op de tik te vallen.
+          armedWaiting = false;
+          startBackendRecording();
+        }
+      }
+    }
+  }
+  function startMetronome(withCountIn) {
+    ensureMetroCtx();
+    metroBeat = 0;
+    metroNextTime = metroAudioCtx.currentTime + 0.12;
+    countInRemaining = withCountIn ? (Number(countInBeats) || 0) : 0;
+    armedWaiting = countInRemaining > 0;
+    if (metroTimer) clearInterval(metroTimer);
+    metroTimer = setInterval(metroSchedulerTick, 25);
+    metroSchedulerTick();
+  }
+  function stopMetronome() {
+    if (metroTimer) { clearInterval(metroTimer); metroTimer = null; }
+    countInRemaining = 0;
+    armedWaiting = false;
+  }
+  // BPM-voorbeeld: laat één maat tikken zonder op te nemen, zodat de speler het
+  // tempo hoort. Loopt niet door en raakt de opname niet.
+  function previewTempo() {
+    if (recording || armedWaiting) return;
+    ensureMetroCtx();
+    const ctx = metroAudioCtx;
+    const beatDur = 60 / (Number(bpm) || 90);
+    const beatsPer = Number(score?.beats_per_bar) || Number(beatsPerBar) || 4;
+    let t = ctx.currentTime + 0.08;
+    for (let i = 0; i < beatsPer; i++) {
+      scheduleClick(t, i === 0);
+      t += beatDur;
+    }
+  }
+  async function setMetronomeCfg(on, countIn) {
+    metroOn = on;
+    countInBeats = countIn;
+    if (!isLive || scoreId == null) return;
+    try { await invoke('notation_set_metronome', { scoreId, clickOn: on, countInBeats: countIn }); } catch (e) {}
+  }
+  function syncMetronomeFromScore() {
+    if (score?.metronome) {
+      metroOn = !!score.metronome.click_on;
+      countInBeats = Number(score.metronome.count_in_beats) || 0;
+    }
+  }
+
   const keyChoices = [
     { v: -7, label: 'Ces / as' }, { v: -6, label: 'Ges / es' }, { v: -5, label: 'Des / bes' },
     { v: -4, label: 'As / f' }, { v: -3, label: 'Es / c' }, { v: -2, label: 'Bes / g' },
@@ -288,6 +388,7 @@
     try {
       scoreId = await invoke('notation_new_score');
       score = await invoke('notation_get_score', { scoreId });
+      syncMetronomeFromScore();
       lastGeneration = 0;
       // Event-listeners voor live updates + edit-emits.
       const { listen } = await import('@tauri-apps/api/event');
@@ -306,12 +407,21 @@
     }
   }
 
+  async function startBackendRecording() {
+    try {
+      await invoke('notation_start_recording', { scoreId });
+      recording = true;
+    } catch (e) { alert(`Opname-fout: ${e}`); }
+  }
   async function toggleRecording() {
     if (!scoreId) return;
     try {
-      if (recording) {
-        await invoke('notation_stop_recording');
+      if (recording || armedWaiting) {
+        // Stoppen — breekt ook een lopende count-in af.
+        stopMetronome();
+        if (recording) await invoke('notation_stop_recording');
         recording = false;
+        armedWaiting = false;
         // De laatste openstaande notes hebben events geëmit; render zodat
         // ze zichtbaar worden.
         scheduleRender();
@@ -321,8 +431,15 @@
         if (!score.armed_layer && score.layers.length > 0) {
           await invoke('notation_arm_layer', { scoreId, layerId: score.layers[0].id });
         }
-        await invoke('notation_start_recording', { scoreId });
-        recording = true;
+        const withCountIn = metroOn && (Number(countInBeats) || 0) > 0;
+        if (metroOn) {
+          startMetronome(withCountIn);
+          // Zonder count-in meteen opnemen; mét count-in start de scheduler de
+          // opname zodra het aftellen klaar is.
+          if (!withCountIn) await startBackendRecording();
+        } else {
+          await startBackendRecording();
+        }
       }
     } catch (e) { alert(`Opname-fout: ${e}`); }
   }
@@ -493,6 +610,8 @@
     if (renderDebounceTimer) clearTimeout(renderDebounceTimer);
     if (renderCeilingTimer) clearTimeout(renderCeilingTimer);
     if (resizeTimer) clearTimeout(resizeTimer);
+    stopMetronome();
+    if (metroAudioCtx) { try { metroAudioCtx.close(); } catch (e) {} metroAudioCtx = null; }
     for (const un of unlisteners) { try { un(); } catch (e) {} }
     // Live-opname veilig stoppen bij sluiten.
     if (recording && scoreId != null) invoke('notation_stop_recording').catch(() => {});
@@ -504,15 +623,28 @@
     {#if isLive}
       <button
         class="btn record-toggle"
-        class:recording
+        class:recording={recording || armedWaiting}
         on:click={toggleRecording}
-        title={recording ? 'Opname stoppen' : 'Opname starten — begint bij de eerste noot'}
+        title={recording || armedWaiting ? 'Opname stoppen' : 'Opname starten — begint bij de eerste noot'}
       >
-        <span class="record-dot" class:on={recording}></span>
-        {recording ? 'Stop' : 'Opname'}
+        <span class="record-dot" class:on={recording || armedWaiting}></span>
+        {#if armedWaiting}Aftellen… {countInRemaining}{:else if recording}Stop{:else}Opname{/if}
       </button>
       <label>Tempo
         <input type="number" min="20" max="300" value={bpm} on:change={(e) => setBpmLive(e.currentTarget.value)} />
+      </label>
+      <button class="btn btn-ghost btn-sm" on:click={previewTempo} title="Eén maat voortikken om het tempo te horen (neemt niets op)">♪ Test</button>
+      <label class="metro-toggle" title="Metronoom-tik in het notatievenster (aparte klik, geen orgelpijp)">
+        <input type="checkbox" checked={metroOn} on:change={(e) => setMetronomeCfg(e.currentTarget.checked, countInBeats)} />
+        Metronoom
+      </label>
+      <label title="Aantal tellen voortellen vóór de opname begint">Count-in
+        <select value={countInBeats} on:change={(e) => setMetronomeCfg(metroOn, Number(e.currentTarget.value))}>
+          <option value={0}>uit</option>
+          <option value={1}>1</option>
+          <option value={2}>2</option>
+          <option value={4}>4</option>
+        </select>
       </label>
       <label>Toonsoort
         <select value={keyFifths} on:change={(e) => setKeyLive(e.currentTarget.value)}>
@@ -609,8 +741,10 @@
     </div>
 
     <!-- Selectie/cursor-indicator; klik in de bladmuziek selecteert een noot. -->
-    <div class="notation-cursor">
-      {#if flatEvents.length > 0}
+    <div class="notation-cursor" class:counting={armedWaiting}>
+      {#if armedWaiting}
+        <span>Aftellen vóór opname… nog <b>{countInRemaining}</b> tel{countInRemaining === 1 ? '' : 'len'} — speel op tel 1.</span>
+      {:else if flatEvents.length > 0}
         {#if selectionIds.size > 1}
           <span><b>{selectionIds.size}</b> noten geselecteerd — klik een noot (Shift+klik = meerdere), of pijltjes ←/→.</span>
         {:else if cursorEvent}
@@ -734,7 +868,9 @@
     background: #f4ecd4; color: #6b5b1e;
     font-size: 0.78rem; border-bottom: 1px solid #ddd; flex-shrink: 0;
   }
+  .notation-cursor.counting { background: #7a2020; color: #fff; font-weight: 600; }
   .cursor-empty { color: #999; font-style: italic; }
+  .metro-toggle { cursor: pointer; }
 
   .notation-staves {
     display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem;

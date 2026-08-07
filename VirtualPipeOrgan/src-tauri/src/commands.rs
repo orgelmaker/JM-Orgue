@@ -2402,6 +2402,18 @@ pub fn notation_set_key(state: State<AppState>, app: tauri::AppHandle, score_id:
     Ok(gen)
 }
 
+/// Metronoom-configuratie per score (aan/uit + aantal count-in-tellen). Puur
+/// een afspeel-hulp in het notatievenster (aparte WebAudio-klik, geen orgelpijp)
+/// en dus géén notatie-wijziging: geen undo, geen generation-bump — de UI houdt
+/// zijn eigen toggle-stand bij en persist't hem hiermee in het Score-model.
+#[tauri::command]
+pub fn notation_set_metronome(state: State<AppState>, score_id: u32, click_on: bool, count_in_beats: u8) -> Result<(), String> {
+    with_score_mut(&state, score_id, |sc| {
+        sc.metronome = crate::notation::MetronomeCfg { click_on, count_in_beats: count_in_beats.min(8) };
+    })?;
+    Ok(())
+}
+
 #[tauri::command]
 pub fn notation_undo(state: State<AppState>, app: tauri::AppHandle, score_id: u32) -> Result<u64, String> {
     let gen = with_score_mut(&state, score_id, |sc| {
