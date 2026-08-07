@@ -5,6 +5,26 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.1] - 2026-08-07
+
+### Opgelost — koppel-toets "ontkoppelt" bij dubbele aanslag
+
+- 🎹 **Zelfde pijp via koppel + direct aangeslagen valt niet meer stil bij loslaten van één bron.** Voorbeeld: Pedaal→Hoofdwerk-koppel actief, Pedaal-C ingedrukt, óók HW-C aangeslagen, HW-C weer los → de HW-pijp bleef eerst kort stil, ondanks dat de pedaal-C nog vasthield. De audio-engine deelt nu één "luchtkolom" per pijp met een tellertje: elke bron (directe klavieraanslag, koppel-route, laterale koppel) telt mee bij aanslag, de release komt pas als alle bronnen hebben losgelaten. Extra winst: geen dubbele amplitude / lichte comb-filter meer wanneer dezelfde pijp via twee routes klinkt
+
+### Nieuw — live noteren met lagen en bewerken
+
+- 🎼 **Nieuwe knop "Live noteren"** naast "Noteren": opent een notatievenster met een verse partituur en een rode opname-knop. Zodra je op Opname klikt en gaat spelen, verschijnen de noten meteen op de bladmuziek (per orgeldivisie een eigen notenbalk, Pedaal in de bassleutel). De maat start bij de eerste toets — geen count-in nodig
+- 📚 **Lagen met overdub (meerdere takes per balk)**: elke notenbalk heeft een armed-bolletje; klik → daar wordt opgenomen. Onder elke balk staan de takes met vinkjes; nieuwe opname = nieuwe take. Meerdere zichtbare takes op één balk = overdub (samensmelting op tijd). Nieuwe balken en takes bij te maken met "+ Balk" / "+"
+- 🎚️ **Ritme-schuif "los ↔ strak"** (fouttolerantie): schuif tijdens of na de opname; strak = alles op het raster, los = kleine timing-afwijkingen krijgen een fijner sub-raster en blijven zichtbaar
+- ✂️ **Bewerken vanuit de toolbar of het toetsenbord**: pijl ←/→ selecteert de vorige/volgende noot; ↑/↓ transponeert een halve toon; Shift+↑/↓ een heel octaaf; Delete verwijdert de selectie. **Undo/redo** (Ctrl+Z / Ctrl+Y) op alle bewerkacties + tempo/toonsoort/tolerantie-wijzigingen
+
+### Bekende beperkingen (bewust in scope gehouden voor deze sessie)
+
+- Selectie is nu cursor-gebaseerd (pijltjestoetsen); klikken direct op een noot in de bladmuziek en muisselectie volgen in een latere versie
+- Één stem per notenbalk (meerdere overlappende takes worden ingekort tot de volgende inzet); polyfone stemmen op één balk komen later
+- Copy/paste + duurwijziging (kwart ↔ achtste ↔ punt) staan op het groeitraject
+- Klik-op-noot om te selecteren, drag-drop, dynamiek en tekstlabels zijn expliciet fase 2+
+
 ## [0.7.0] - 2026-08-06
 
 ### Nieuw — volledige hoofdbalk op extra schermen

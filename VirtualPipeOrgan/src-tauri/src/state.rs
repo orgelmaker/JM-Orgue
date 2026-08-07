@@ -284,6 +284,27 @@ pub struct AppState {
     pub crescendo_active_stops: Arc<RwLock<Vec<String>>>,
     /// MIDI recording state
     pub midi_recording: Arc<RwLock<Option<MidiRecording>>>,
+    /// Live-notatie-scores per notatievenster. Elke Score is een bewerkbare
+    /// partituur met lagen + takes; het notatievenster leest hem via commands
+    /// (notation_get_score / notation_get_musicxml) en muteert via edit-
+    /// commands. Tijdens opname schrijft `capture_midi_event` de events in de
+    /// armed take van de armed layer van de armed Score (score_id).
+    pub notation_scores: Arc<RwLock<std::collections::HashMap<u32, crate::notation::Score>>>,
+    /// Score waarvoor de MIDI-opname op dit moment live opneemt (None = geen
+    /// live-notatie). Slechts één Score tegelijk staat armed.
+    pub notation_armed_score: Arc<RwLock<Option<u32>>>,
+    /// Volgnummer voor de eerstvolgende nieuwe Score-ID.
+    pub notation_next_id: Arc<RwLock<u32>>,
+    /// Open note-events per (score_id, layer_id, take_id, channel, note) →
+    /// starttijd in microseconden vanaf recording-start. Bij NoteOff pairen we
+    /// deze met de eindtijd en emitten een `note-added` event.
+    pub notation_open_notes: Arc<RwLock<std::collections::HashMap<(u32, u32, u32, u8, u8), u64>>>,
+    /// Starttijd van de huidige notatie-opname (vanaf "arm & wait for first note",
+    /// gezet bij de eerste inkomende NoteOn zodra armed). None = geen actieve opname.
+    pub notation_start_time: Arc<RwLock<Option<std::time::Instant>>>,
+    /// AppHandle-spiegel voor de MIDI-thread (die kent `state.app_handle` niet
+    /// direct); wordt geset door commands.rs::notation_ready zodra de setup klaar is.
+    pub notation_app_handle: Arc<RwLock<Option<tauri::AppHandle>>>,
     /// Serialiseert orgel-loads en audio-wissels onderling: een wissel midden in
     /// een load gooit anders net-geregistreerde preload-buffers weg (nieuwe lege
     /// audio-thread) en mist de reload omdat current_organ_id nog niet gezet is;
@@ -482,6 +503,19 @@ impl AppState {
         let cresc_binding_for_midi = crescendo_binding.clone();
         let cresc_active_for_midi = crescendo_active_stops.clone();
         let recording_for_midi = midi_recording.clone();
+        // Live-notatie: extra Arcs voor de midi-thread (armed score/laag/take
+        // volgen, open-notes pairen, note-added-events emitten naar het
+        // notatievenster).
+        let notation_scores = Arc::new(RwLock::new(std::collections::HashMap::<u32, crate::notation::Score>::new()));
+        let notation_armed_score = Arc::new(RwLock::new(None::<u32>));
+        let notation_open_notes = Arc::new(RwLock::new(std::collections::HashMap::<(u32, u32, u32, u8, u8), u64>::new()));
+        let notation_start_time = Arc::new(RwLock::new(None::<std::time::Instant>));
+        let notation_app_handle = Arc::new(RwLock::new(None::<tauri::AppHandle>));
+        let notation_scores_for_midi = notation_scores.clone();
+        let notation_armed_for_midi = notation_armed_score.clone();
+        let notation_open_for_midi = notation_open_notes.clone();
+        let notation_start_for_midi = notation_start_time.clone();
+        let notation_app_for_midi = notation_app_handle.clone();
 
         // Start MIDI management thread
         thread::spawn(move || {
@@ -510,6 +544,11 @@ impl AppState {
                 cresc_active_for_midi,
                 player_rx,
                 recording_for_midi,
+                notation_scores_for_midi,
+                notation_armed_for_midi,
+                notation_open_for_midi,
+                notation_start_for_midi,
+                notation_app_for_midi,
             );
         });
 
@@ -538,6 +577,12 @@ impl AppState {
             crescendo_binding,
             crescendo_active_stops,
             midi_recording,
+            notation_scores,
+            notation_armed_score,
+            notation_next_id: Arc::new(RwLock::new(1)),
+            notation_open_notes,
+            notation_start_time,
+            notation_app_handle,
             load_switch_gate: Arc::new(parking_lot::Mutex::new(())),
             app_handle: Arc::new(RwLock::new(None)),
             pipe_voicings: Arc::new(RwLock::new(std::collections::HashMap::new())),
@@ -600,6 +645,11 @@ impl AppState {
         crescendo_active_stops: Arc<RwLock<Vec<String>>>,
         player_rx: Receiver<MidiMessage>,
         midi_recording: Arc<RwLock<Option<MidiRecording>>>,
+        notation_scores: Arc<RwLock<std::collections::HashMap<u32, crate::notation::Score>>>,
+        notation_armed_score: Arc<RwLock<Option<u32>>>,
+        notation_open_notes: Arc<RwLock<std::collections::HashMap<(u32, u32, u32, u8, u8), u64>>>,
+        notation_start_time: Arc<RwLock<Option<std::time::Instant>>>,
+        app_handle_notation: Arc<RwLock<Option<tauri::AppHandle>>>,
     ) {
         tracing::info!("MIDI thread started");
 
@@ -1014,6 +1064,8 @@ impl AppState {
                 for (i, msg) in batch.into_iter().enumerate() {
                     // Leg het ingespeelde event vast als er een MIDI-opname loopt
                     Self::capture_midi_event(&midi_recording, &msg);
+                    Self::capture_notation_event(&msg, &notation_scores, &notation_armed_score,
+                        &notation_open_notes, &notation_start_time, &app_handle_notation);
 
                     // Check for preset triggers first
                     Self::check_preset_trigger(&msg, &preset_bindings, &preset_trigger_tx);
@@ -1152,6 +1204,100 @@ impl AppState {
                 let elapsed_us = rec.start_time.elapsed().as_micros() as u64;
                 rec.events.push((elapsed_us, status, data1, data2, channel));
             }
+        }
+    }
+
+    /// Live-notatie: schrijf een MIDI-note in de armed take van de armed
+    /// layer van de armed Score en emit `jm-orgue:notation:note-open` (NoteOn)
+    /// of `jm-orgue:notation:note-added` (NoteOff) naar het notatievenster.
+    ///
+    /// Concurrency-model: één Score is armed tegelijk; slechts één laag +
+    /// take binnen die Score is armed (zie NotationMode-uitleg in commands.rs).
+    /// De starttijd staat op de eerste NoteOn die armed binnenkomt (zonder
+    /// count-in, zoals afgesproken).
+    #[allow(clippy::too_many_arguments)]
+    fn capture_notation_event(
+        msg: &MidiMessage,
+        notation_scores: &Arc<RwLock<std::collections::HashMap<u32, crate::notation::Score>>>,
+        notation_armed_score: &Arc<RwLock<Option<u32>>>,
+        notation_open_notes: &Arc<RwLock<std::collections::HashMap<(u32, u32, u32, u8, u8), u64>>>,
+        notation_start_time: &Arc<RwLock<Option<std::time::Instant>>>,
+        app_handle: &Arc<RwLock<Option<tauri::AppHandle>>>,
+    ) {
+        use tauri::Emitter;
+        // Snelle uitgang: geen armed Score → niets doen (het gros van de MIDI-events).
+        let score_id = match *notation_armed_score.read() {
+            Some(id) => id,
+            None => return,
+        };
+        // Bepaal de armed laag + take binnen deze score (kortste lock mogelijk).
+        let (layer_id, take_id) = {
+            let scores = notation_scores.read();
+            let Some(sc) = scores.get(&score_id) else { return };
+            let Some(lid) = sc.armed_layer else { return };
+            let Some(layer) = sc.layers.iter().find(|l| l.id == lid) else { return };
+            let Some(tid) = layer.armed_take else { return };
+            (lid, tid)
+        };
+
+        match msg {
+            MidiMessage::NoteOn { channel, note, velocity } if *velocity > 0 => {
+                // Starttijd instellen bij het allereerste event (geen count-in).
+                let now = std::time::Instant::now();
+                let start = {
+                    let mut st = notation_start_time.write();
+                    *st.get_or_insert(now)
+                };
+                let elapsed_us = now.saturating_duration_since(start).as_micros() as u64;
+                let key = (score_id, layer_id, take_id, *channel, *note);
+                notation_open_notes.write().insert(key, elapsed_us);
+                // Live "note-open" event: UI kan (optioneel) een grijze cue tonen.
+                if let Some(handle) = app_handle.read().as_ref() {
+                    let _ = handle.emit("jm-orgue:notation:note-open", serde_json::json!({
+                        "score": score_id, "layer": layer_id, "take": take_id,
+                        "midi": *note, "channel": *channel, "at_us": elapsed_us,
+                    }));
+                }
+            }
+            MidiMessage::NoteOff { channel, note, .. }
+            | MidiMessage::NoteOn { channel, note, velocity: 0 } => {
+                let now = std::time::Instant::now();
+                let start = {
+                    let st = notation_start_time.read();
+                    match *st { Some(s) => s, None => return }
+                };
+                let end_us = now.saturating_duration_since(start).as_micros() as u64;
+                let key = (score_id, layer_id, take_id, *channel, *note);
+                let start_us = match notation_open_notes.write().remove(&key) {
+                    Some(s) => s,
+                    None => return, // geen matchende NoteOn (bv. voor de opname)
+                };
+                let end_us = end_us.max(start_us + 20_000); // minimaal 20 ms
+                // Event toevoegen aan de score-take en generation bump'en.
+                let ev_id = {
+                    let mut scores = notation_scores.write();
+                    let Some(sc) = scores.get_mut(&score_id) else { return };
+                    let ev_id = sc.new_event_id();
+                    if let Some(layer) = sc.layers.iter_mut().find(|l| l.id == layer_id) {
+                        if let Some(take) = layer.takes.iter_mut().find(|t| t.id == take_id) {
+                            take.events.push(crate::notation::LayerEv {
+                                id: ev_id, midi: *note, start_us, end_us,
+                                channel: *channel, locked: false,
+                            });
+                        }
+                    }
+                    sc.bump_gen();
+                    ev_id
+                };
+                if let Some(handle) = app_handle.read().as_ref() {
+                    let _ = handle.emit("jm-orgue:notation:note-added", serde_json::json!({
+                        "score": score_id, "layer": layer_id, "take": take_id,
+                        "id": ev_id, "midi": *note, "channel": *channel,
+                        "start_us": start_us, "end_us": end_us,
+                    }));
+                }
+            }
+            _ => {}
         }
     }
 
@@ -1666,6 +1812,24 @@ impl AppState {
                         swell_bindings, division_gains, held_notes, cc_claimed_by_crescendo,
                     );
                     return;
+                }
+
+                // Retrigger-normalisatie: een NoteOn op een reeds vastgehouden
+                // (kanaal, noot) zónder tussenliggende NoteOff (sommige oude
+                // controllers/DAW's doen dit) → éérst een NoteOff sturen. De
+                // audio-refcount per pijp (audio.rs::PlayingVoice.note_on_count)
+                // eist gebalanceerde NoteOn/NoteOff-paren; anders klimt de
+                // teller en blijft de pijp bij release doorklinken.
+                let is_retrigger = {
+                    let held = held_notes.read();
+                    held.iter().any(|&(ch, n, _)| ch == channel && n == note)
+                };
+                if is_retrigger {
+                    Self::handle_midi_message(
+                        MidiMessage::NoteOff { channel, note, velocity: 0 },
+                        audio_player, organ_definition, loaded_organ_info, drawn_stops, midi_mappings, active_couplers,
+                        swell_bindings, division_gains, held_notes, cc_claimed_by_crescendo,
+                    );
                 }
 
                 // Track held notes for re-triggering when stops are toggled on
@@ -2600,9 +2764,10 @@ impl AppState {
     ///   afspraak als het normale NoteOff-pad)
     /// - nieuwe routes → NoteOn voor getrokken registers van de doeldivisie
     ///   (GrandOrgue-gedrag: bijgekoppeld klavier klinkt direct mee)
-    /// Kanttekening: klinkt dezelfde pijp óók via een blijvende route (bv. direct
-    /// gespeeld op de doeldivisie), dan releast de NoteOff die mee — zeldzaam en
-    /// veel minder erg dan een permanente hanger.
+    /// Refcount per pijp (audio.rs::PlayingVoice.note_on_count) zorgt dat een
+    /// pijp die zowel via een blijvende route als via een vervallende koppel
+    /// klonk, alleen zijn koppel-trigger verliest — de directe klank blijft
+    /// door de nog-actieve refcount gewoon staan.
     pub(crate) fn sync_coupler_voices_inner(
         o: &OrganInfoDto,
         player: &AudioPlayer,

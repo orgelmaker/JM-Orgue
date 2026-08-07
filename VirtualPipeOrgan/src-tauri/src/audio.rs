@@ -193,6 +193,14 @@ struct PlayingVoice {
     c_pitch_mul: f64,
     /// Of de LFO-tremulant op deze voice moet werken (stops zonder trem-samples).
     c_use_lfo_trem: bool,
+    /// Aantal actieve triggers voor deze pijp (directe route + koppels).
+    /// Eén luchtkolom per pijp: een NoteOn op een reeds klinkende pijp bumpt
+    /// deze teller i.p.v. een tweede voice te spawnen; NoteOff decrementeert
+    /// en releast pas bij 0. Voorkomt (i) verdubbelde amplitude/comb-filter
+    /// wanneer een pijp via meerdere bronnen (bv. direct + koppel) klinkt en
+    /// (ii) het "onkoppelt"-effect waarbij één bron loslaten de pijp stilzet
+    /// terwijl een andere bron nog vasthoudt.
+    note_on_count: u32,
 }
 
 impl PlayingVoice {
@@ -223,6 +231,7 @@ impl PlayingVoice {
             c_voicing_gain: 1.0,
             c_pitch_mul: 1.0,
             c_use_lfo_trem: true,
+            note_on_count: 1,
         }
     }
 
@@ -252,6 +261,7 @@ impl PlayingVoice {
             c_voicing_gain: 1.0,
             c_pitch_mul: 1.0,
             c_use_lfo_trem: true,
+            note_on_count: 1,
         }
     }
 
@@ -308,6 +318,7 @@ impl PlayingVoice {
             c_voicing_gain: 1.0,
             c_pitch_mul: 1.0,
             c_use_lfo_trem: true,
+            note_on_count: 1,
         }
     }
 
@@ -1617,6 +1628,25 @@ fn run_audio_thread(
                     AudioCommand::NoteOn { stop_id, pipe_num, midi_note, velocity } => {
                         let key = (stop_id, pipe_num);
 
+                        // Één luchtkolom per pijp: klinkt deze pijp al (via de
+                        // directe route of via een koppel), dan géén tweede voice
+                        // spawnen maar de refcount bumpen. NoteOff decrementeert;
+                        // de release komt pas als álle bronnen hebben losgelaten.
+                        // Voorkomt (a) dubbele amplitude + comb-filter bij
+                        // dubbele aanslag, (b) het "ontkoppelt"-effect waarbij
+                        // één bron loslaten de pijp stilzette terwijl een andere
+                        // nog vasthield (pedaal-koppel + zelfde noot op HW).
+                        {
+                            let mut voices_lock = voices_clone.write();
+                            if let Some(v) = voices_lock.iter_mut().find(|v|
+                                v.stop_id == stop_id && v.pipe_num == pipe_num
+                                    && !v.releasing && !v.one_shot
+                            ) {
+                                v.note_on_count = v.note_on_count.saturating_add(1);
+                                continue;
+                            }
+                        }
+
                         // Check if tremulant is active for this stop
                         let trem_on = trem_active_clone.read().contains(&stop_id);
 
@@ -1703,6 +1733,13 @@ fn run_audio_thread(
                             if voice.stop_id == stop_id && voice.pipe_num == pipe_num
                                 && !voice.releasing && !voice.one_shot
                             {
+                                // Refcount: er is meer dan één bron actief op
+                                // deze pijp → alleen decrementeren, geen release.
+                                if voice.note_on_count > 1 {
+                                    voice.note_on_count -= 1;
+                                    continue;
+                                }
+                                voice.note_on_count = 0;
                                 if spawn.is_none() && (rel_full.is_some() || rel_pre.is_some()) {
                                     // Niveau-overname: de release start op het
                                     // huidige envelope-niveau van de sustain,

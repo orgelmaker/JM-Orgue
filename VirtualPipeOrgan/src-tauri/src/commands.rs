@@ -2165,6 +2165,271 @@ pub fn save_musicxml(path: String, xml: String) -> Result<(), String> {
     Ok(())
 }
 
+// ============ Live-notatie: Score-lifecycle + edits ============
+// Elke Score is een aparte partituur (één per notatievenster). De opname is
+// gebonden aan de armed_score + armed_layer + armed_take. Wijzigingen aan de
+// Score gaan via editing-commands; de UI ontvangt bij elke wijziging een
+// generation-bump + `score-changed`-event (de frontend regenereert dan de XML).
+
+fn with_score_mut<T>(
+    state: &State<AppState>,
+    score_id: u32,
+    f: impl FnOnce(&mut crate::notation::Score) -> T,
+) -> Result<T, String> {
+    let mut scores = state.notation_scores.write();
+    match scores.get_mut(&score_id) {
+        Some(sc) => Ok(f(sc)),
+        None => Err(format!("Score {} niet gevonden", score_id)),
+    }
+}
+
+async fn emit_score_changed(app: tauri::AppHandle, score_id: u32, generation: u64) {
+    use tauri::Emitter;
+    let _ = app.emit("jm-orgue:notation:score-changed", serde_json::json!({
+        "score": score_id, "generation": generation,
+    }));
+}
+
+/// Nieuwe (lege) Score aanmaken; geeft de score-ID terug.
+#[tauri::command]
+pub fn notation_new_score(state: State<AppState>, app: tauri::AppHandle) -> Result<u32, String> {
+    let id = {
+        let mut next = state.notation_next_id.write();
+        let id = *next;
+        *next = next.saturating_add(1);
+        id
+    };
+    let mut sc = crate::notation::Score::new(id);
+    // Startlagen: één laag per divisie in het geladen orgel (Pedaal → bas).
+    // Zonder orgel: één generieke laag.
+    {
+        let organ = state.loaded_organ_info.read();
+        if let Some(ref o) = *organ {
+            for d in &o.divisions {
+                let lname = d.name.to_lowercase();
+                let bass = lname.contains("pedaal") || lname.contains("pedal");
+                sc.add_layer(d.name.clone(), Some(bass));
+            }
+        }
+        if sc.layers.is_empty() {
+            sc.add_layer("Balk 1".into(), Some(false));
+        }
+    }
+    // Eerste laag standaard armed → gebruiker kan direct opnemen.
+    sc.armed_layer = sc.layers.first().map(|l| l.id);
+    state.notation_scores.write().insert(id, sc);
+    // AppHandle-spiegel voor de MIDI-thread: eenmalig doorgeven.
+    *state.notation_app_handle.write() = Some(app.clone());
+    Ok(id)
+}
+
+/// Score-snapshot uitlezen (voor de UI: LayerBar + selectie-model).
+#[tauri::command]
+pub fn notation_get_score(state: State<AppState>, score_id: u32) -> Result<crate::notation::Score, String> {
+    let scores = state.notation_scores.read();
+    scores.get(&score_id).cloned().ok_or_else(|| format!("Score {} niet gevonden", score_id))
+}
+
+/// MusicXML voor het gerenderde beeld (zichtbare takes van alle lagen).
+#[tauri::command]
+pub fn notation_get_musicxml(state: State<AppState>, score_id: u32) -> Result<String, String> {
+    let scores = state.notation_scores.read();
+    let sc = scores.get(&score_id).ok_or_else(|| format!("Score {} niet gevonden", score_id))?;
+    crate::notation::build_musicxml_from_score(sc)
+}
+
+/// Nieuwe laag toevoegen. Geeft de laag-ID terug.
+#[tauri::command]
+pub fn notation_add_layer(state: State<AppState>, score_id: u32, name: String, bass_clef: Option<bool>) -> Result<u32, String> {
+    with_score_mut(&state, score_id, |sc| sc.add_layer(name, bass_clef))
+}
+
+/// Extra take onder een laag toevoegen (overdub). Geeft de nieuwe take-ID terug.
+#[tauri::command]
+pub fn notation_add_take(state: State<AppState>, score_id: u32, layer_id: u32) -> Result<u32, String> {
+    with_score_mut(&state, score_id, |sc| sc.add_take(layer_id))?
+        .ok_or_else(|| "Laag niet gevonden".into())
+}
+
+/// Zet of wis armed voor een laag (opname-doel). Slechts één laag tegelijk.
+#[tauri::command]
+pub fn notation_arm_layer(state: State<AppState>, score_id: u32, layer_id: Option<u32>) -> Result<(), String> {
+    with_score_mut(&state, score_id, |sc| {
+        sc.armed_layer = layer_id.filter(|id| sc.layers.iter().any(|l| l.id == *id));
+    })
+}
+
+/// Zichtbaarheid van een take (overdub-vinkje).
+#[tauri::command]
+pub fn notation_set_take_visible(state: State<AppState>, score_id: u32, layer_id: u32, take_id: u32, visible: bool) -> Result<(), String> {
+    with_score_mut(&state, score_id, |sc| {
+        if let Some(l) = sc.layers.iter_mut().find(|l| l.id == layer_id) {
+            if let Some(t) = l.takes.iter_mut().find(|t| t.id == take_id) {
+                t.visible = visible;
+                sc.bump_gen();
+            }
+        }
+    })
+}
+
+/// Live-opname starten voor deze score: armed_score = score_id, starttijd
+/// wordt door de MIDI-thread bij de eerste NoteOn gezet (geen count-in).
+#[tauri::command]
+pub fn notation_start_recording(state: State<AppState>, score_id: u32) -> Result<(), String> {
+    // Verse open-notes + starttijd (die krijgt zijn waarde bij de eerste NoteOn).
+    state.notation_open_notes.write().clear();
+    *state.notation_start_time.write() = None;
+    *state.notation_armed_score.write() = Some(score_id);
+    Ok(())
+}
+
+/// Live-opname stoppen. Open notes worden op "nu" afgesloten (paniek-safe).
+#[tauri::command]
+pub fn notation_stop_recording(state: State<AppState>) -> Result<(), String> {
+    use tauri::Emitter;
+    let handle = state.notation_app_handle.read().clone();
+    let start = state.notation_start_time.read().clone();
+    let armed = state.notation_armed_score.read().clone();
+    if let (Some(handle), Some(start), Some(score_id)) = (handle, start, armed) {
+        let end_us = std::time::Instant::now().saturating_duration_since(start).as_micros() as u64;
+        // Alle openstaande NoteOns netjes afsluiten (voorkomt eeuwig-hangende
+        // pedaalnoten in de notatie).
+        let open: Vec<((u32, u32, u32, u8, u8), u64)> = state.notation_open_notes.write().drain().collect();
+        let mut scores = state.notation_scores.write();
+        for ((sid, lid, tid, ch, note), start_us) in open {
+            if sid != score_id { continue; }
+            if let Some(sc) = scores.get_mut(&sid) {
+                let ev_id = sc.new_event_id();
+                if let Some(layer) = sc.layers.iter_mut().find(|l| l.id == lid) {
+                    if let Some(take) = layer.takes.iter_mut().find(|t| t.id == tid) {
+                        let end_us = end_us.max(start_us + 20_000);
+                        take.events.push(crate::notation::LayerEv {
+                            id: ev_id, midi: note, start_us, end_us,
+                            channel: ch, locked: false,
+                        });
+                        let _ = handle.emit("jm-orgue:notation:note-added", serde_json::json!({
+                            "score": sid, "layer": lid, "take": tid,
+                            "id": ev_id, "midi": note, "channel": ch,
+                            "start_us": start_us, "end_us": end_us,
+                        }));
+                    }
+                }
+                sc.bump_gen();
+            }
+        }
+    }
+    *state.notation_armed_score.write() = None;
+    Ok(())
+}
+
+/// Bewerk-commando's toepassen (Delete/Transpose/…); geeft de nieuwe generation
+/// terug zodat de UI weet dat regenereren nodig is.
+#[tauri::command]
+pub fn notation_delete_events(state: State<AppState>, app: tauri::AppHandle, score_id: u32, event_ids: Vec<u64>) -> Result<u64, String> {
+    let events_to_delete = with_score_mut(&state, score_id, |sc| {
+        // Verzamel (layer, take, LayerEv) voor het commando.
+        let mut out = Vec::new();
+        for id in &event_ids {
+            if let Some((li, ti, ei)) = sc.locate(*id) {
+                let l_id = sc.layers[li].id;
+                let t_id = sc.layers[li].takes[ti].id;
+                out.push((l_id, t_id, sc.layers[li].takes[ti].events[ei].clone()));
+            }
+        }
+        out
+    })?;
+    if events_to_delete.is_empty() { return Err("Geen geldige notatie-events geselecteerd".into()); }
+    let gen = with_score_mut(&state, score_id, |sc| {
+        let cmd = crate::notation::EditCommand::DeleteEvents { events: events_to_delete };
+        if let Some(inv) = cmd.apply(sc) {
+            sc.push_undo(inv);
+        }
+        sc.generation
+    })?;
+    tauri::async_runtime::spawn(emit_score_changed(app, score_id, gen));
+    Ok(gen)
+}
+
+#[tauri::command]
+pub fn notation_transpose(state: State<AppState>, app: tauri::AppHandle, score_id: u32, event_ids: Vec<u64>, semitones: i8) -> Result<u64, String> {
+    let gen = with_score_mut(&state, score_id, |sc| {
+        let cmd = crate::notation::EditCommand::Transpose { ids: event_ids, semitones };
+        if let Some(inv) = cmd.apply(sc) {
+            sc.push_undo(inv);
+        }
+        sc.generation
+    })?;
+    tauri::async_runtime::spawn(emit_score_changed(app, score_id, gen));
+    Ok(gen)
+}
+
+#[tauri::command]
+pub fn notation_set_tolerance(state: State<AppState>, app: tauri::AppHandle, score_id: u32, tolerance_pct: u8) -> Result<u64, String> {
+    let gen = with_score_mut(&state, score_id, |sc| {
+        let cmd = crate::notation::EditCommand::SetTolerance { old: sc.tolerance_pct, new: tolerance_pct };
+        if let Some(inv) = cmd.apply(sc) {
+            sc.push_undo(inv);
+        }
+        sc.generation
+    })?;
+    tauri::async_runtime::spawn(emit_score_changed(app, score_id, gen));
+    Ok(gen)
+}
+
+#[tauri::command]
+pub fn notation_set_bpm(state: State<AppState>, app: tauri::AppHandle, score_id: u32, bpm: f64) -> Result<u64, String> {
+    let gen = with_score_mut(&state, score_id, |sc| {
+        let cmd = crate::notation::EditCommand::SetBpm { old: sc.bpm, new: bpm.max(20.0).min(300.0) };
+        if let Some(inv) = cmd.apply(sc) {
+            sc.push_undo(inv);
+        }
+        sc.generation
+    })?;
+    tauri::async_runtime::spawn(emit_score_changed(app, score_id, gen));
+    Ok(gen)
+}
+
+#[tauri::command]
+pub fn notation_set_key(state: State<AppState>, app: tauri::AppHandle, score_id: u32, key_fifths: i8) -> Result<u64, String> {
+    let gen = with_score_mut(&state, score_id, |sc| {
+        let cmd = crate::notation::EditCommand::SetKey { old: sc.key_fifths, new: key_fifths };
+        if let Some(inv) = cmd.apply(sc) {
+            sc.push_undo(inv);
+        }
+        sc.generation
+    })?;
+    tauri::async_runtime::spawn(emit_score_changed(app, score_id, gen));
+    Ok(gen)
+}
+
+#[tauri::command]
+pub fn notation_undo(state: State<AppState>, app: tauri::AppHandle, score_id: u32) -> Result<u64, String> {
+    let gen = with_score_mut(&state, score_id, |sc| {
+        if let Some(cmd) = sc.pop_undo() {
+            if let Some(redo_cmd) = cmd.apply(sc) {
+                sc.push_redo(redo_cmd);
+            }
+        }
+        sc.generation
+    })?;
+    tauri::async_runtime::spawn(emit_score_changed(app, score_id, gen));
+    Ok(gen)
+}
+
+#[tauri::command]
+pub fn notation_redo(state: State<AppState>, app: tauri::AppHandle, score_id: u32) -> Result<u64, String> {
+    let gen = with_score_mut(&state, score_id, |sc| {
+        if let Some(cmd) = sc.pop_redo() {
+            if let Some(undo_cmd) = cmd.apply(sc) {
+                sc.push_undo_no_clear_redo(undo_cmd);
+            }
+        }
+        sc.generation
+    })?;
+    tauri::async_runtime::spawn(emit_score_changed(app, score_id, gen));
+    Ok(gen)
+}
+
 /// Helper: write variable-length quantity
 fn write_var_len(buf: &mut Vec<u8>, mut value: u32) {
     if value == 0 {

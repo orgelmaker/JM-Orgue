@@ -339,6 +339,26 @@
   // Opent een eigen venster (#notation) dat de opname via de backend naar
   // MusicXML omzet en met OpenSheetMusicDisplay rendert (afdrukken/PDF/
   // MusicXML-opslag gebeurt dáár). Zonder recente opname: bestandskeuze.
+  // Open het notatievenster in live-modus (verse Score) — geen bestand nodig.
+  // Achter de rode opname-knop in het venster start capture_notation_event.
+  async function openLiveNotation() {
+    try {
+      const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow');
+      const label = `notation-${Date.now()}`;
+      const webview = new WebviewWindow(label, {
+        url: `index.html#notation&live=1`,
+        title: 'JM-Orgue - Live noteren',
+        width: 1100, height: 800, center: true, resizable: true,
+      });
+      webview.once('tauri://error', (e) => {
+        console.error('Live-notatievenster openen mislukt:', e);
+        alert('Notatievenster openen mislukt.');
+      });
+    } catch (e) {
+      alert(`Notatievenster openen mislukt: ${e}`);
+    }
+  }
+
   async function openNotationWindow(midiPath) {
     try {
       const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow');
@@ -3023,6 +3043,19 @@
                   <circle cx="15" cy="15" r="3"/>
                 </svg>
                 Noteren
+              </button>
+              <button
+                class="btn btn-ghost btn-sm"
+                on:click={openLiveNotation}
+                title="Live noteren: open het notatievenster en zie de noten verschijnen terwijl je speelt (lagen, overdub, ritme-tolerantie, bewerken)"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="7" cy="18" r="3"/>
+                  <path d="M10 18V5l8-2v12"/>
+                  <circle cx="15" cy="15" r="3"/>
+                  <circle cx="19" cy="5" r="2" fill="currentColor"/>
+                </svg>
+                Live noteren
               </button>
             {/if}
             <button

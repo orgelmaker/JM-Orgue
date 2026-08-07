@@ -36,6 +36,10 @@ pub struct NotationOptions {
     /// None/leeg = automatisch één balk per divisie.
     #[serde(default)]
     pub staves: Option<Vec<StaffSpec>>,
+    /// Kwantisatie-tolerantie 0..=100 ("los" ↔ "strak"): 100 = hard raster,
+    /// 0 = losser (afwijkingen krijgen een fijner sub-raster). None = 100.
+    #[serde(default)]
+    pub tolerance_pct: Option<u8>,
 }
 
 /// Door de gebruiker samengestelde notenbalk (notatievenster → backend).
@@ -168,13 +172,38 @@ struct Chord {
 /// Kwantiseer de noten van één balk naar rastereenheden en groepeer
 /// gelijktijdige inzetten tot akkoorden. Overlap wordt ingekort tot de
 /// volgende inzet (één stem per balk in v1).
-fn quantize_staff(notes: &[NoteEv], bpm: f64, q: u8) -> Vec<Chord> {
+///
+/// `tolerance_pct`: 0..=100 — schuif "los ↔ strak":
+/// - 100 = hard kwantiseren: elke noot naar het raster (huidig gedrag);
+/// - 0   = losser: noten die verder van het raster af zitten dan de tolerantie
+///   worden op een fijner sub-raster (halveringen, tot 8× fijner) neergezet.
+/// Dit vermijdt onhoorbare drift zonder de partituur onleesbaar te maken.
+fn quantize_staff(notes: &[NoteEv], bpm: f64, q: u8, tolerance_pct: u8) -> Vec<Chord> {
     let grid_per_sec = (bpm / 60.0) * q as f64;
+    // Bij 100% tolerantie mag een noot maximaal 0,5 rastereenheid afwijken en
+    // wordt hij toch gekwantiseerd — dat is precies het huidige gedrag.
+    // Bij 0% tolerantie is de drempel klein (0,05) → bijna elke afwijking
+    // duwt de noot naar een fijner sub-raster.
+    let tol = (tolerance_pct.min(100) as f64 / 100.0) * 0.45 + 0.05;
+    let quantize_one = |t: f64| -> u64 {
+        if t <= 0.0 { return 0; }
+        let base = t * grid_per_sec;
+        let rounded = base.round();
+        let mut diff = (base - rounded).abs();
+        if diff <= tol { return rounded.max(0.0) as u64; }
+        // Verfijn: sub-raster 1/2, 1/4, 1/8 van de rastereenheid.
+        for sub in [2.0_f64, 4.0, 8.0] {
+            let r = (base * sub).round() / sub;
+            diff = (base - r).abs();
+            if diff <= tol { return r.max(0.0).round() as u64; }
+        }
+        // Uiterste ondergrens: naar het 1/8-sub-raster.
+        ((base * 8.0).round() / 8.0).max(0.0).round() as u64
+    };
     let mut quantized: Vec<(u64, u64, u8)> = notes.iter().map(|n| {
-        let s = (n.start_sec * grid_per_sec).round() as i64;
-        let e = (n.end_sec * grid_per_sec).round() as i64;
-        let s = s.max(0) as u64;
-        let e = (e.max(s as i64 + 1)) as u64;
+        let s = quantize_one(n.start_sec);
+        let e = quantize_one(n.end_sec);
+        let e = e.max(s + 1);
         (s, e, n.midi)
     }).collect();
     quantized.sort_by_key(|&(s, _, m)| (s, m));
@@ -272,9 +301,10 @@ pub fn build_musicxml(staves: &[Staff], opts: &NotationOptions) -> Result<String
     let bpm = if opts.bpm.is_finite() && opts.bpm >= 20.0 && opts.bpm <= 300.0 { opts.bpm } else { 90.0 };
     let measure_len = beats * q;
 
+    let tolerance = opts.tolerance_pct.unwrap_or(100);
     let quantized: Vec<(usize, Vec<Chord>)> = staves.iter().enumerate()
         .filter(|(_, st)| !st.notes.is_empty())
-        .map(|(i, st)| (i, quantize_staff(&st.notes, bpm, opts.quantize.clamp(1, 8))))
+        .map(|(i, st)| (i, quantize_staff(&st.notes, bpm, opts.quantize.clamp(1, 8), tolerance)))
         .collect();
     if quantized.is_empty() {
         return Err("Geen noten gevonden in de opname".into());
@@ -392,12 +422,347 @@ pub fn build_musicxml(staves: &[Staff], opts: &NotationOptions) -> Result<String
     Ok(xml)
 }
 
+// =============================================================================
+// Live-notatie: Score/Layer/Take-model voor het notatievenster
+// =============================================================================
+//
+// Datamodel voor de "live noteren"-workflow. Één laag per notenbalk (multi-
+// voice-per-balk is bewust NIET in scope — te groot voor deze sessie); elke
+// laag mag meerdere takes bevatten (overdub: neem opnieuw op, oude takes
+// blijven staan en zijn per stuk aan/uit te vinken).
+//
+// De pairing van MIDI-NoteOn/NoteOff naar afgesloten `LayerEv`'s gebeurt in
+// state.rs::MidiRecording::capture_midi_event (die schrijft ook de events
+// die het notatievenster tijdens de opname live rendert).
+
+use serde::Serialize;
+use std::collections::HashMap;
+
+/// Eén afgeronde noot in een take (nieuwe naam voor NoteEv-instantie in de
+/// live-flow; NoteEv zelf blijft de "flat" struct voor de kwantiseerder).
+#[derive(Debug, Clone, Serialize)]
+pub struct LayerEv {
+    /// Stabiel ID voor selectie/edit (monotoon per Score).
+    pub id: u64,
+    pub midi: u8,
+    /// Starttijd t.o.v. het startpunt van de opname (microseconden).
+    pub start_us: u64,
+    pub end_us: u64,
+    /// Origineel MIDI-kanaal (voor debug + latere balk-hertoewijzing).
+    pub channel: u8,
+    /// Handmatig verplaatst/gecorrigeerd → niet opnieuw kwantiseren.
+    pub locked: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Take {
+    pub id: u32,
+    pub name: String,
+    pub visible: bool,
+    pub events: Vec<LayerEv>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Layer {
+    pub id: u32,
+    pub name: String,
+    /// None = automatisch bepalen op basis van de laagnaam.
+    pub bass_clef: Option<bool>,
+    /// Volgorde: eerste take = eerste opname; nieuwe take = laatste.
+    pub takes: Vec<Take>,
+    /// Take waar nieuwe MIDI-events in geschreven worden (armed).
+    pub armed_take: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MetronomeCfg {
+    pub click_on: bool,
+    pub count_in_beats: u8,
+}
+impl Default for MetronomeCfg {
+    fn default() -> Self { Self { click_on: false, count_in_beats: 0 } }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Score {
+    pub id: u32,
+    pub layers: Vec<Layer>,
+    pub bpm: f64,
+    pub beats_per_bar: u8,
+    pub quantize: u8,
+    pub key_fifths: i8,
+    pub title: String,
+    /// Kwantisatie-tolerantie (0..=100) — schuif "los ↔ strak".
+    pub tolerance_pct: u8,
+    pub metronome: MetronomeCfg,
+    /// Alleen armed = actief onder één laag tegelijk; None = geen opname.
+    pub armed_layer: Option<u32>,
+    /// Monotoon oplopende counter — de UI regenereert MusicXML zodra deze wijzigt.
+    pub generation: u64,
+    /// Interne teller voor stabiele event-ID's; niet naar de UI.
+    #[serde(skip)]
+    next_event_id: u64,
+    #[serde(skip)]
+    next_layer_id: u32,
+    #[serde(skip)]
+    next_take_id: u32,
+    /// Undo/redo-stapels (niet naar de UI; alleen counts worden geëxposeerd).
+    #[serde(skip)]
+    undo: Vec<EditCommand>,
+    #[serde(skip)]
+    redo: Vec<EditCommand>,
+}
+
+impl Score {
+    pub fn new(id: u32) -> Self {
+        Self {
+            id, layers: Vec::new(),
+            bpm: 90.0, beats_per_bar: 4, quantize: 4, key_fifths: 0,
+            title: String::from("Live opname"),
+            tolerance_pct: 80,
+            metronome: MetronomeCfg::default(),
+            armed_layer: None,
+            generation: 1,
+            next_event_id: 1, next_layer_id: 1, next_take_id: 1,
+            undo: Vec::new(), redo: Vec::new(),
+        }
+    }
+    pub fn undo_len(&self) -> usize { self.undo.len() }
+    pub fn redo_len(&self) -> usize { self.redo.len() }
+    pub fn new_event_id(&mut self) -> u64 { let id = self.next_event_id; self.next_event_id += 1; id }
+    pub fn bump_gen(&mut self) { self.generation = self.generation.saturating_add(1); }
+
+    /// Push undo-inverse; wist de redo-stack (nieuwe bewerking = redo-tak dood).
+    pub fn push_undo(&mut self, cmd: EditCommand) {
+        self.undo.push(cmd);
+        self.redo.clear();
+    }
+    /// Push undo-inverse zonder de redo-stack te wissen (voor de redo-flow zelf).
+    pub fn push_undo_no_clear_redo(&mut self, cmd: EditCommand) {
+        self.undo.push(cmd);
+    }
+    pub fn push_redo(&mut self, cmd: EditCommand) { self.redo.push(cmd); }
+    pub fn pop_undo(&mut self) -> Option<EditCommand> { self.undo.pop() }
+    pub fn pop_redo(&mut self) -> Option<EditCommand> { self.redo.pop() }
+
+    pub fn add_layer(&mut self, name: String, bass_clef: Option<bool>) -> u32 {
+        let id = self.next_layer_id; self.next_layer_id += 1;
+        // Nieuwe laag krijgt automatisch een eerste (lege) take.
+        let take_id = self.next_take_id; self.next_take_id += 1;
+        self.layers.push(Layer {
+            id, name, bass_clef,
+            takes: vec![Take { id: take_id, name: "Take 1".into(), visible: true, events: Vec::new() }],
+            armed_take: Some(take_id),
+        });
+        self.bump_gen();
+        id
+    }
+
+    pub fn add_take(&mut self, layer_id: u32) -> Option<u32> {
+        let take_id = self.next_take_id; self.next_take_id += 1;
+        let layer = self.layers.iter_mut().find(|l| l.id == layer_id)?;
+        let name = format!("Take {}", layer.takes.len() + 1);
+        layer.takes.push(Take { id: take_id, name, visible: true, events: Vec::new() });
+        layer.armed_take = Some(take_id);
+        self.bump_gen();
+        Some(take_id)
+    }
+
+    /// Zoek een event op ID in de score; geeft (laag-index, take-index, event-index).
+    pub fn locate(&self, ev_id: u64) -> Option<(usize, usize, usize)> {
+        for (li, l) in self.layers.iter().enumerate() {
+            for (ti, t) in l.takes.iter().enumerate() {
+                if let Some(ei) = t.events.iter().position(|e| e.id == ev_id) {
+                    return Some((li, ti, ei));
+                }
+            }
+        }
+        None
+    }
+}
+
+/// Snapshot van een Score → notenbalken die de bestaande `build_musicxml`
+/// direct kan renderen. Alleen zichtbare takes tellen mee; verwijderde noten
+/// (edit) zijn al uit `Take.events` gehaald. Take-events op dezelfde balk
+/// worden samengevoegd op tijd (één stem per balk in v1; overlap wordt door
+/// `quantize_staff` ingekort tot de volgende inzet).
+pub fn score_to_staves(score: &Score) -> Vec<Staff> {
+    fn is_pedal_name(s: &str) -> bool {
+        let l = s.to_lowercase();
+        l.contains("pedaal") || l.contains("pedal")
+    }
+    score.layers.iter().map(|layer| {
+        let bass = layer.bass_clef.unwrap_or_else(|| is_pedal_name(&layer.name));
+        let mut notes: Vec<NoteEv> = Vec::new();
+        for take in layer.takes.iter().filter(|t| t.visible) {
+            for ev in &take.events {
+                notes.push(NoteEv {
+                    midi: ev.midi,
+                    start_sec: ev.start_us as f64 / 1_000_000.0,
+                    end_sec: ev.end_us as f64 / 1_000_000.0,
+                });
+            }
+        }
+        // Sorteer op starttijd zodat de kwantiseerder de akkoord-groepering doet.
+        notes.sort_by(|a, b| a.start_sec.partial_cmp(&b.start_sec).unwrap_or(std::cmp::Ordering::Equal));
+        Staff { name: layer.name.clone(), bass_clef: bass, notes }
+    }).collect()
+}
+
+/// Bouw MusicXML uit een Score met de Score-eigen opties + tolerantie.
+pub fn build_musicxml_from_score(score: &Score) -> Result<String, String> {
+    let staves = score_to_staves(score);
+    let opts = NotationOptions {
+        bpm: score.bpm,
+        beats_per_bar: score.beats_per_bar,
+        quantize: score.quantize,
+        key_fifths: score.key_fifths,
+        title: Some(score.title.clone()),
+        staves: None,
+        tolerance_pct: Some(score.tolerance_pct),
+    };
+    build_musicxml(&staves, &opts)
+}
+
+/// Undo-bare bewerkingen. Elk commando kent zijn eigen inverse; `apply`
+/// muteert de Score én push't de inverse op de undo-stack.
+#[derive(Debug, Clone)]
+pub enum EditCommand {
+    /// Noten verwijderen; bewaar voor undo de originelen + hun locatie.
+    DeleteEvents { events: Vec<(u32 /*layer*/, u32 /*take*/, LayerEv)> },
+    /// Transponeer selectie met N halve tonen (mag negatief).
+    Transpose { ids: Vec<u64>, semitones: i8 },
+    /// Wijzig tolerantie (met inverse-waarde).
+    SetTolerance { old: u8, new: u8 },
+    /// Wijzig BPM.
+    SetBpm { old: f64, new: f64 },
+    /// Wijzig toonsoort.
+    SetKey { old: i8, new: i8 },
+    /// Voeg een take toe (met inverse: verwijder die take).
+    /// Voor de undo bewaren we ID + laag; content is leeg bij add.
+    AddTake { layer: u32, take_id: u32 },
+    /// Verwijder een laag met alle takes (undo herstelt de complete laag).
+    RemoveLayer { snapshot: Layer, position: usize },
+    /// Undo-inverse van AddTake: verwijderde take terugzetten op dezelfde plek.
+    RestoreTake { layer: u32, index: usize, take: Take },
+    /// Undo-inverse van RemoveLayer: laag terugzetten op dezelfde plek.
+    RestoreLayer { snapshot: Layer, position: usize },
+}
+
+impl EditCommand {
+    /// Voer het commando uit op de score en geef het INVERSE terug voor de undo-stack.
+    pub fn apply(self, score: &mut Score) -> Option<EditCommand> {
+        match self {
+            EditCommand::DeleteEvents { events } => {
+                let mut removed: Vec<(u32, u32, LayerEv)> = Vec::new();
+                for (layer_id, take_id, ev) in events.iter() {
+                    if let Some(l) = score.layers.iter_mut().find(|l| l.id == *layer_id) {
+                        if let Some(t) = l.takes.iter_mut().find(|t| t.id == *take_id) {
+                            if let Some(pos) = t.events.iter().position(|e| e.id == ev.id) {
+                                removed.push((*layer_id, *take_id, t.events.remove(pos)));
+                            }
+                        }
+                    }
+                }
+                if removed.is_empty() { return None; }
+                score.bump_gen();
+                Some(EditCommand::DeleteEvents { events: removed })
+            }
+            EditCommand::Transpose { ids, semitones } => {
+                let mut changed = 0usize;
+                for id in &ids {
+                    if let Some((li, ti, ei)) = score.locate(*id) {
+                        let ev = &mut score.layers[li].takes[ti].events[ei];
+                        let new_midi = (ev.midi as i16 + semitones as i16).clamp(0, 127) as u8;
+                        if new_midi != ev.midi {
+                            ev.midi = new_midi;
+                            ev.locked = true;
+                            changed += 1;
+                        }
+                    }
+                }
+                if changed == 0 { return None; }
+                score.bump_gen();
+                Some(EditCommand::Transpose { ids, semitones: -semitones })
+            }
+            EditCommand::SetTolerance { old, new } => {
+                score.tolerance_pct = new.min(100);
+                score.bump_gen();
+                Some(EditCommand::SetTolerance { old: new, new: old })
+            }
+            EditCommand::SetBpm { old, new } => {
+                score.bpm = new;
+                score.bump_gen();
+                Some(EditCommand::SetBpm { old: new, new: old })
+            }
+            EditCommand::SetKey { old, new } => {
+                score.key_fifths = new.clamp(-7, 7);
+                score.bump_gen();
+                Some(EditCommand::SetKey { old: new, new: old })
+            }
+            EditCommand::AddTake { layer, take_id } => {
+                // "Inverse" van add = de zojuist toegevoegde take verwijderen.
+                if let Some(l) = score.layers.iter_mut().find(|l| l.id == layer) {
+                    if let Some(idx) = l.takes.iter().position(|t| t.id == take_id) {
+                        let snapshot = l.takes.remove(idx);
+                        if l.armed_take == Some(take_id) {
+                            l.armed_take = l.takes.last().map(|t| t.id);
+                        }
+                        score.bump_gen();
+                        return Some(EditCommand::RestoreTake { layer, index: idx, take: snapshot });
+                    }
+                }
+                None
+            }
+            EditCommand::RestoreTake { layer, index, take } => {
+                if let Some(l) = score.layers.iter_mut().find(|l| l.id == layer) {
+                    let take_id = take.id;
+                    let idx = index.min(l.takes.len());
+                    l.takes.insert(idx, take);
+                    score.bump_gen();
+                    return Some(EditCommand::AddTake { layer, take_id });
+                }
+                None
+            }
+            EditCommand::RemoveLayer { snapshot, position } => {
+                let idx = score.layers.iter().position(|l| l.id == snapshot.id);
+                if let Some(i) = idx {
+                    let removed = score.layers.remove(i);
+                    if score.armed_layer == Some(removed.id) {
+                        score.armed_layer = score.layers.first().map(|l| l.id);
+                    }
+                    score.bump_gen();
+                    Some(EditCommand::RestoreLayer { snapshot: removed, position: position.min(score.layers.len()) })
+                } else {
+                    None
+                }
+            }
+            EditCommand::RestoreLayer { snapshot, position } => {
+                let snapshot_id = snapshot.id;
+                let idx = position.min(score.layers.len());
+                score.layers.insert(idx, snapshot);
+                score.bump_gen();
+                Some(EditCommand::RemoveLayer {
+                    snapshot: score.layers[idx].clone(),
+                    position: idx,
+                })
+                    .map(|inv| {
+                        // De inverse "RemoveLayer" die we teruggeven bevat een verse snapshot;
+                        // dat is redundant maar corrrect: bij redo verwijdert hij dezelfde laag opnieuw.
+                        let _ = snapshot_id; // silence unused warning in de release-build
+                        inv
+                    })
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn opts() -> NotationOptions {
-        NotationOptions { bpm: 60.0, beats_per_bar: 4, quantize: 4, key_fifths: 0, title: Some("Test".into()), staves: None }
+        NotationOptions { bpm: 60.0, beats_per_bar: 4, quantize: 4, key_fifths: 0, title: Some("Test".into()), staves: None, tolerance_pct: None }
     }
 
     #[test]
@@ -424,7 +789,7 @@ mod tests {
             NoteEv { midi: 64, start_sec: 0.02, end_sec: 0.98 }, // E4 → zelfde inzet (akkoord)
             NoteEv { midi: 67, start_sec: 0.5, end_sec: 1.5 },   // G4 → nieuwe inzet, kort C/E in
         ];
-        let chords = quantize_staff(&notes, 60.0, 4);
+        let chords = quantize_staff(&notes, 60.0, 4, 100);
         assert_eq!(chords.len(), 2);
         assert_eq!(chords[0].notes, vec![60, 64]);
         assert_eq!(chords[0].start, 0);
