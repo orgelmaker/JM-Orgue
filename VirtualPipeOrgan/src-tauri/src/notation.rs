@@ -630,6 +630,13 @@ pub fn build_musicxml_from_score(score: &Score) -> Result<String, String> {
 pub enum EditCommand {
     /// Noten verwijderen; bewaar voor undo de originelen + hun locatie.
     DeleteEvents { events: Vec<(u32 /*layer*/, u32 /*take*/, LayerEv)> },
+    /// Noten (opnieuw) invoegen — inverse van DeleteEvents en de motor achter
+    /// plakken. Elke tuple = (laag, take, event); apply voegt toe en geeft een
+    /// DeleteEvents-inverse terug.
+    InsertEvents { events: Vec<(u32 /*layer*/, u32 /*take*/, LayerEv)> },
+    /// Duur wijzigen: zet per event een nieuw absoluut eind (µs). Bewaart voor
+    /// undo de oude einden zodat de round-trip exact is (geen kwantisatie-drift).
+    SetEnds { items: Vec<(u64 /*event id*/, u64 /*end_us*/)> },
     /// Transponeer selectie met N halve tonen (mag negatief).
     Transpose { ids: Vec<u64>, semitones: i8 },
     /// Wijzig tolerantie (met inverse-waarde).
@@ -666,7 +673,42 @@ impl EditCommand {
                 }
                 if removed.is_empty() { return None; }
                 score.bump_gen();
-                Some(EditCommand::DeleteEvents { events: removed })
+                // Inverse van verwijderen = opnieuw invoegen (herstelt de noten).
+                Some(EditCommand::InsertEvents { events: removed })
+            }
+            EditCommand::InsertEvents { events } => {
+                let mut inserted: Vec<(u32, u32, LayerEv)> = Vec::new();
+                for (layer_id, take_id, ev) in events.into_iter() {
+                    if let Some(l) = score.layers.iter_mut().find(|l| l.id == layer_id) {
+                        if let Some(t) = l.takes.iter_mut().find(|t| t.id == take_id) {
+                            // Dubbele id's weren (idempotent bij herhaalde redo).
+                            if !t.events.iter().any(|e| e.id == ev.id) {
+                                t.events.push(ev.clone());
+                                inserted.push((layer_id, take_id, ev));
+                            }
+                        }
+                    }
+                }
+                if inserted.is_empty() { return None; }
+                score.bump_gen();
+                Some(EditCommand::DeleteEvents { events: inserted })
+            }
+            EditCommand::SetEnds { items } => {
+                let mut old: Vec<(u64, u64)> = Vec::new();
+                for (id, new_end) in items.into_iter() {
+                    if let Some((li, ti, ei)) = score.locate(id) {
+                        let ev = &mut score.layers[li].takes[ti].events[ei];
+                        let clamped = new_end.max(ev.start_us + 1000); // ≥1 ms
+                        if clamped != ev.end_us {
+                            old.push((id, ev.end_us));
+                            ev.end_us = clamped;
+                            ev.locked = true;
+                        }
+                    }
+                }
+                if old.is_empty() { return None; }
+                score.bump_gen();
+                Some(EditCommand::SetEnds { items: old })
             }
             EditCommand::Transpose { ids, semitones } => {
                 let mut changed = 0usize;

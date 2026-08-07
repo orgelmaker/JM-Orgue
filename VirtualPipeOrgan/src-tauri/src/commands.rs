@@ -2363,6 +2363,66 @@ pub fn notation_transpose(state: State<AppState>, app: tauri::AppHandle, score_i
     Ok(gen)
 }
 
+/// Duur van geselecteerde noten wijzigen (halveren/verdubbelen/punt): de UI
+/// rekent per event het nieuwe absolute eind (µs) uit en stuurt (id, end_us).
+/// De backend zet het via SetEnds (exacte undo). Render kwantiseert de nieuwe
+/// duur naar het raster.
+#[tauri::command]
+pub fn notation_set_durations(state: State<AppState>, app: tauri::AppHandle, score_id: u32, ends: Vec<(u64, u64)>) -> Result<u64, String> {
+    let gen = with_score_mut(&state, score_id, |sc| {
+        let cmd = crate::notation::EditCommand::SetEnds { items: ends };
+        if let Some(inv) = cmd.apply(sc) {
+            sc.push_undo(inv);
+        }
+        sc.generation
+    })?;
+    tauri::async_runtime::spawn(emit_score_changed(app, score_id, gen));
+    Ok(gen)
+}
+
+/// Eén te plakken noot (absolute tijden al door de UI berekend: cursor-relatief
+/// en op het doelbalk-raster gesnapt).
+#[derive(serde::Deserialize)]
+pub struct PasteNote {
+    pub midi: u8,
+    pub start_us: u64,
+    pub end_us: u64,
+    #[serde(default)]
+    pub channel: u8,
+}
+
+/// Plak noten in een laag (armed take, of de eerste zichtbare take). De backend
+/// kent verse id's toe en voegt ze via InsertEvents in (undo = verwijderen).
+#[tauri::command]
+pub fn notation_paste(state: State<AppState>, app: tauri::AppHandle, score_id: u32, layer_id: u32, notes: Vec<PasteNote>) -> Result<u64, String> {
+    if notes.is_empty() { return Err("Klembord is leeg".into()); }
+    let gen = with_score_mut(&state, score_id, |sc| {
+        // Doeltake bepalen: armed take, anders de eerste zichtbare, anders de eerste.
+        let take_id = sc.layers.iter().find(|l| l.id == layer_id).and_then(|l| {
+            l.armed_take
+                .or_else(|| l.takes.iter().find(|t| t.visible).map(|t| t.id))
+                .or_else(|| l.takes.first().map(|t| t.id))
+        });
+        let take_id = match take_id { Some(t) => t, None => return sc.generation };
+        let mut events = Vec::with_capacity(notes.len());
+        for n in notes.iter() {
+            let id = sc.new_event_id();
+            let start_us = n.start_us;
+            let end_us = n.end_us.max(start_us + 1000);
+            events.push((layer_id, take_id, crate::notation::LayerEv {
+                id, midi: n.midi, start_us, end_us, channel: n.channel, locked: true,
+            }));
+        }
+        let cmd = crate::notation::EditCommand::InsertEvents { events };
+        if let Some(inv) = cmd.apply(sc) {
+            sc.push_undo(inv);
+        }
+        sc.generation
+    })?;
+    tauri::async_runtime::spawn(emit_score_changed(app, score_id, gen));
+    Ok(gen)
+}
+
 #[tauri::command]
 pub fn notation_set_tolerance(state: State<AppState>, app: tauri::AppHandle, score_id: u32, tolerance_pct: u8) -> Result<u64, String> {
     let gen = with_score_mut(&state, score_id, |sc| {

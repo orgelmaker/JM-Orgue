@@ -356,6 +356,8 @@ fn main() {
             commands::notation_set_bpm,
             commands::notation_set_key,
             commands::notation_set_metronome,
+            commands::notation_set_durations,
+            commands::notation_paste,
             commands::notation_undo,
             commands::notation_redo,
             commands::notation_import_midi,

@@ -501,7 +501,7 @@
   // volgt deze lijst; visuele highlight is voorlopig een tekstuele indicator
   // in de toolbar (klik-op-noot in de SVG is v2 werk).
   $: flatEvents = (score?.layers ?? []).flatMap(l =>
-    l.takes.filter(t => t.visible).flatMap(t => t.events.map(e => ({ ...e, _layer: l.name })))
+    l.takes.filter(t => t.visible).flatMap(t => t.events.map(e => ({ ...e, _layer: l.name, _layerId: l.id, _takeId: t.id })))
   ).sort((a, b) => a.start_us - b.start_us);
   let cursorIndex = 0;
   $: if (cursorIndex >= flatEvents.length) cursorIndex = Math.max(0, flatEvents.length - 1);
@@ -551,6 +551,74 @@
   async function doUndo() { try { await invoke('notation_undo', { scoreId }); } catch (e) { alert(String(e)); } }
   async function doRedo() { try { await invoke('notation_redo', { scoreId }); } catch (e) { alert(String(e)); } }
 
+  // ---- Duur wijzigen + kopiëren/plakken (0.7.6) ----
+  // In-app klembord (verdwijnt bij sluiten van het venster). Elke entry bewaart
+  // de noot relatief aan de vroegste geselecteerde inzet, zodat plakken de groep
+  // als geheel cursor-relatief neerzet.
+  let notationClipboard = { events: [] };
+  $: clipboardCount = notationClipboard.events.length;
+
+  function selectedIdsOrCursor() {
+    if (selectionIds.size) return Array.from(selectionIds);
+    return cursorEvent ? [cursorEvent.id] : [];
+  }
+  // Heuristiek: is deze duur (µs) een gepunteerde waarde? → dan haalt de
+  // punt-toggle de punt eraf (×2/3), anders zet hij er een op (×1.5).
+  function isDottedDur(durUs) {
+    const q = 60e6 / (Number(bpm) || 90); // µs per kwartnoot
+    const base = (durUs / q) / 1.5;       // ontpunte lengte in kwartnoten
+    return [0.125, 0.25, 0.5, 1, 2, 4, 8].some(p => Math.abs(base - p) < 0.06 * p + 0.02);
+  }
+  async function changeDuration(kind) {
+    const ids = selectedIdsOrCursor();
+    if (!ids.length) return;
+    const byId = new Map(flatEvents.map(e => [e.id, e]));
+    const ends = [];
+    for (const id of ids) {
+      const ev = byId.get(id);
+      if (!ev) continue;
+      const dur = ev.end_us - ev.start_us;
+      let f = kind === 'halve' ? 0.5 : kind === 'double' ? 2 : (isDottedDur(dur) ? (2 / 3) : 1.5);
+      const newEnd = Math.round(ev.start_us + Math.max(1000, dur * f));
+      ends.push([id, newEnd]);
+    }
+    if (!ends.length) return;
+    try { await invoke('notation_set_durations', { scoreId, ends }); } catch (e) { alert(String(e)); }
+  }
+  function copySelection() {
+    const ids = selectedIdsOrCursor();
+    const evs = flatEvents.filter(e => ids.includes(e.id));
+    if (!evs.length) return;
+    const minStart = Math.min(...evs.map(e => e.start_us));
+    notationClipboard = { events: evs.map(e => ({
+      midi: e.midi, channel: e.channel ?? 0,
+      rel_start: e.start_us - minStart, dur: Math.max(1000, e.end_us - e.start_us),
+    })) };
+  }
+  async function pasteClipboard() {
+    if (!isLive || scoreId == null || notationClipboard.events.length === 0) return;
+    // Doellaag: laag van de cursor-noot, anders de armed laag, anders de eerste.
+    const targetLayerId = cursorEvent?._layerId ?? score?.armed_layer ?? score?.layers?.[0]?.id;
+    if (targetLayerId == null) return;
+    // Basistijd: cursorpositie; zonder cursor het eind van de doel-take.
+    let baseUs;
+    if (cursorEvent) {
+      baseUs = cursorEvent.start_us;
+    } else {
+      const le = flatEvents.filter(e => e._layerId === targetLayerId);
+      baseUs = le.length ? Math.max(...le.map(e => e.end_us)) : 0;
+    }
+    // Snap naar de rasterlijn van de doelbalk.
+    const gridUs = (60e6 / (Number(bpm) || 90)) / (Number(score?.quantize) || 4);
+    const snapped = Math.round(baseUs / gridUs) * gridUs;
+    const notes = notationClipboard.events.map(e => ({
+      midi: e.midi, channel: e.channel ?? 0,
+      start_us: Math.round(snapped + e.rel_start),
+      end_us: Math.round(snapped + e.rel_start + e.dur),
+    }));
+    try { await invoke('notation_paste', { scoreId, layerId: targetLayerId, notes }); } catch (e) { alert(String(e)); }
+  }
+
   function handleKey(e) {
     if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
     if (!isLive) return;
@@ -561,8 +629,13 @@
     else if (e.key === 'ArrowDown' && e.shiftKey) { transposeSelection(-12); e.preventDefault(); }
     else if (e.key === 'ArrowUp') { transposeSelection(1); e.preventDefault(); }
     else if (e.key === 'ArrowDown') { transposeSelection(-1); e.preventDefault(); }
+    else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c') { copySelection(); e.preventDefault(); }
+    else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') { pasteClipboard(); e.preventDefault(); }
     else if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z') { doUndo(); e.preventDefault(); }
     else if ((e.ctrlKey || e.metaKey) && (e.shiftKey && e.key.toLowerCase() === 'z' || e.key.toLowerCase() === 'y')) { doRedo(); e.preventDefault(); }
+    else if (e.key === '[') { changeDuration('halve'); e.preventDefault(); }
+    else if (e.key === ']') { changeDuration('double'); e.preventDefault(); }
+    else if (e.key === '.') { changeDuration('dot'); e.preventDefault(); }
   }
 
   // ---- File-modus bestandsacties ----
@@ -666,6 +739,11 @@
       <button class="btn btn-ghost btn-sm" on:click={() => transposeSelection(+1)} title="Halve toon omhoog (↑)">+½</button>
       <button class="btn btn-ghost btn-sm" on:click={() => transposeSelection(-12)} title="Octaaf omlaag (Shift+↓)">−8va</button>
       <button class="btn btn-ghost btn-sm" on:click={() => transposeSelection(+12)} title="Octaaf omhoog (Shift+↑)">+8va</button>
+      <button class="btn btn-ghost btn-sm" on:click={() => changeDuration('halve')} title="Duur halveren ([)">÷2</button>
+      <button class="btn btn-ghost btn-sm" on:click={() => changeDuration('double')} title="Duur verdubbelen (])">×2</button>
+      <button class="btn btn-ghost btn-sm" on:click={() => changeDuration('dot')} title="Punt aan/uit (.)">• punt</button>
+      <button class="btn btn-ghost btn-sm" on:click={copySelection} title="Kopiëren (Ctrl+C)">Kopiëren</button>
+      <button class="btn btn-ghost btn-sm" on:click={pasteClipboard} disabled={clipboardCount === 0} title="Plakken op de cursor (Ctrl+V)">Plakken{clipboardCount ? ` (${clipboardCount})` : ''}</button>
       <button class="btn btn-ghost btn-sm" on:click={doUndo} title="Ongedaan (Ctrl+Z)">↶</button>
       <button class="btn btn-ghost btn-sm" on:click={doRedo} title="Opnieuw (Ctrl+Y)">↷</button>
       <button class="btn btn-ghost btn-sm" on:click={openMidiFile} title="Bestaand MIDI-bestand als extra take(s) in deze partituur importeren">Openen…</button>
@@ -800,7 +878,7 @@
 
   <div class="notation-hint">
     {#if isLive}
-      Tip: druk op Opname en begin te spelen — de eerste noot is beat 1. Meerdere takes op dezelfde balk = overdub (vink ze in de LayerBar aan/uit). Klik een noot om te selecteren (Shift+klik = meerdere); pijltjes ←/→ selecteren, ↑/↓ transponeren, Delete verwijdert, Ctrl+Z ongedaan.
+      Tip: druk op Opname en begin te spelen — de eerste noot is beat 1. Meerdere takes op dezelfde balk = overdub (vink ze in de LayerBar aan/uit). Klik een noot om te selecteren (Shift+klik = meerdere); ←/→ selecteren, ↑/↓ transponeren, Delete verwijdert. Duur: [ halveren, ] verdubbelen, . punt. Ctrl+C/Ctrl+V kopiëren/plakken (op de cursor), Ctrl+Z ongedaan.
     {:else}
       Tip: vrij ingespeeld? Stel het tempo in waarop je speelde en schuif "Ritme" naar los als de kwantisatie te strak aanvoelt.
     {/if}
