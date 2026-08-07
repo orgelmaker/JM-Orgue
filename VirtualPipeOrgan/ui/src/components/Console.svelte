@@ -137,6 +137,85 @@
     try { audioStatus = await invoke('get_status'); } catch (e) { /* polling */ }
   }
   $: if (activeView === 'algemene-instellingen') refreshAudioStatus();
+
+  // ===== MIDI-uit terugkoppeling (0.7.9): registerlampen/display op de console =====
+  // Protocol + poort + kanaal komen uit localStorage; bij een registratiewijziging
+  // stuurt fbSendActive() de actieve id's naar de backend (die diff't en batcht).
+  let fbProtocol = localStorage.getItem('jm-orgue-fb-protocol') || 'off';
+  let fbPort = localStorage.getItem('jm-orgue-fb-port') || '';
+  let fbChannel = Number(localStorage.getItem('jm-orgue-fb-channel')) || 1;      // 1..16
+  let fbBaseNote = Number(localStorage.getItem('jm-orgue-fb-basenote')) || 36;   // NoteOnOff auto-toewijzing
+  let fbOutputs = [];
+  let fbConfigured = false;
+  let fbLastSent = null;   // signature van laatst-verstuurde actieve set (dedup)
+  let fbBusy = false;
+
+  async function fbRefreshOutputs() {
+    try { fbOutputs = await invoke('feedback_list_outputs'); } catch (e) { fbOutputs = []; }
+  }
+  // Alle registers + koppels in stabiele volgorde; note = basisnoot + index.
+  function fbBuildSlots() {
+    const slots = [];
+    let i = 0;
+    for (const d of (organInfo?.divisions || [])) {
+      for (const s of (d.stops || [])) { slots.push({ id: s.id, note: (fbBaseNote + i) & 0x7F }); i++; }
+    }
+    for (const c of (organInfo?.couplers || [])) { slots.push({ id: c.id, note: (fbBaseNote + i) & 0x7F }); i++; }
+    return slots;
+  }
+  function fbActiveIds() {
+    const ids = [];
+    for (const d of (organInfo?.divisions || [])) for (const s of (d.stops || [])) if (s.drawn) ids.push(s.id);
+    for (const c of (organInfo?.couplers || [])) if (c.active) ids.push(c.id);
+    return ids;
+  }
+  async function fbApplyConfig() {
+    fbBusy = true;
+    localStorage.setItem('jm-orgue-fb-protocol', fbProtocol);
+    localStorage.setItem('jm-orgue-fb-port', fbPort);
+    localStorage.setItem('jm-orgue-fb-channel', String(fbChannel));
+    localStorage.setItem('jm-orgue-fb-basenote', String(fbBaseNote));
+    try {
+      await invoke('feedback_configure', {
+        protocol: fbProtocol,
+        port: fbProtocol === 'off' ? null : (fbPort || null),
+        channel: Math.max(0, Math.min(15, (Number(fbChannel) || 1) - 1)),
+        slots: fbBuildSlots(),
+        organName: organInfo?.name || '',
+      });
+      fbConfigured = fbProtocol !== 'off' && !!fbPort;
+      fbLastSent = null;          // forceer een volledige (re)sync
+      await fbSendActive();
+    } catch (e) { alert(`Terugkoppeling instellen mislukt: ${e}`); }
+    finally { fbBusy = false; }
+  }
+  async function fbAllOff() {
+    try { await invoke('feedback_all_off'); fbLastSent = null; } catch (e) {}
+  }
+  async function fbSendActive() {
+    if (!fbConfigured) return;
+    const ids = fbActiveIds();
+    const sig = ids.join(',');
+    if (sig === fbLastSent) return;
+    fbLastSent = sig;
+    try { await invoke('feedback_apply', { activeIds: ids }); } catch (e) {}
+  }
+  // Registratie gewijzigd (toggle/preset/tutti/crescendo/orgel-load) → console
+  // meelichten. organInfo wordt door App bij elke wijziging vervangen; de
+  // signature-dedup in fbSendActive voorkomt onnodige sends bij ongewijzigde poll.
+  $: if (organInfo && fbConfigured) { fbSendActive(); }
+  // Auto-verbinden bij opstart: zodra een orgel geladen is (organInfo) en er een
+  // opgeslagen protocol+poort staat, verbindt de terugkoppeling zichzelf zodat de
+  // fysieke console meteen meelicht — ongeacht welk tabblad open staat.
+  let fbAutoConfigured = false;
+  $: if (!fbAutoConfigured && fbProtocol !== 'off' && fbPort && organInfo) {
+    fbAutoConfigured = true;
+    fbRefreshOutputs();
+    fbApplyConfig();
+  }
+  // Poortlijst verversen wanneer de Algemene Instellingen open gaan.
+  $: if (activeView === 'algemene-instellingen') fbRefreshOutputs();
+
   // Geschatte uitgangslatentie: ~2× de bufferduur (dubbele buffering in de
   // driver). 0 frames = driver-default (onbekend, WASAPI ≈ 10 ms per buffer).
   $: audioLatencyMs = (audioStatus && audioStatus.buffer_frames > 0 && audioStatus.sample_rate > 0)
@@ -4694,6 +4773,62 @@
                   </div>
                 {/if}
               </div>
+            </div>
+
+            <!-- Terugkoppeling: MIDI-uit naar de fysieke console (registerlampen/display) -->
+            <div class="settings-block">
+              <h3 class="settings-block-title">Terugkoppeling (MIDI-uit)</h3>
+              <p class="settings-hint" style="margin: 0 0 0.5rem;">
+                Laat de fysieke console meelichten met de registratie: registerlampen (Note On/Off),
+                een Hauptwerk-tekstdisplay, of een Johannus/Content-console.
+              </p>
+              <div class="audio-select-row">
+                <label class="audio-select-label" for="fb-protocol">Protocol</label>
+                <select id="fb-protocol" class="temperament-select" bind:value={fbProtocol} on:change={fbApplyConfig}>
+                  <option value="off">Uit</option>
+                  <option value="note">Registerlampen (Note On/Off)</option>
+                  <option value="lcd">Hauptwerk LCD-display</option>
+                  <option value="johannus">Johannus / Content (PC + JOHAS)</option>
+                </select>
+              </div>
+              {#if fbProtocol !== 'off'}
+                <div class="audio-select-row">
+                  <label class="audio-select-label" for="fb-port">MIDI-uitgang</label>
+                  <select id="fb-port" class="temperament-select" bind:value={fbPort} on:change={fbApplyConfig}>
+                    <option value="">— kies een poort —</option>
+                    {#each fbOutputs as p}<option value={p}>{p}</option>{/each}
+                  </select>
+                </div>
+                <div class="audio-select-row">
+                  <label class="audio-select-label" for="fb-channel">Kanaal</label>
+                  <input id="fb-channel" class="temperament-select" type="number" min="1" max="16"
+                    bind:value={fbChannel} on:change={fbApplyConfig} style="width: 5rem;" />
+                </div>
+                {#if fbProtocol === 'note'}
+                  <div class="audio-select-row">
+                    <label class="audio-select-label" for="fb-basenote">Basisnoot (auto)</label>
+                    <input id="fb-basenote" class="temperament-select" type="number" min="0" max="127"
+                      bind:value={fbBaseNote} on:change={fbApplyConfig} style="width: 5rem;" />
+                  </div>
+                  <p class="settings-hint" style="margin: 0.2rem 0 0;">
+                    Elk register krijgt automatisch een nootnummer vanaf de basisnoot (register-volgorde).
+                  </p>
+                {/if}
+                <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem;">
+                  <button class="btn btn-secondary btn-sm" on:click={fbApplyConfig} disabled={fbBusy}>
+                    {fbBusy ? 'Bezig…' : 'Toepassen / verbinden'}
+                  </button>
+                  <button class="btn btn-ghost btn-sm" on:click={fbAllOff}>Alles uit</button>
+                  <button class="btn btn-ghost btn-sm" on:click={fbRefreshOutputs} title="Poortlijst verversen">↻</button>
+                </div>
+                <p class="settings-hint" style="margin: 0.4rem 0 0;">
+                  {#if fbConfigured}
+                    <span style="color: var(--success);">Actief</span> — de console licht mee met elke registerwissel, preset en tutti.
+                  {:else}
+                    Kies een poort en klik "Toepassen" om te verbinden.
+                  {/if}
+                </p>
+              {/if}
             </div>
           </div>
 

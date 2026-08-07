@@ -419,6 +419,9 @@ pub struct AppState {
     pub division_tremulants: Arc<RwLock<std::collections::HashMap<String, (bool, f32, f32, f32)>>>,
     /// Wind-groep-config (enabled, reservoir, damping, max_sag) per groep-index (0..31).
     pub wind_group_configs: Arc<RwLock<std::collections::HashMap<u8, (bool, f32, f32, f32)>>>,
+    /// MIDI-uit terugkoppeling naar de fysieke console (registerlampen/display).
+    /// Fase 1: gevoed door de UI via feedback_apply. Zie feedback.rs.
+    pub feedback: Arc<parking_lot::Mutex<crate::feedback::FeedbackManager>>,
 }
 
 /// MIDI recording state
@@ -650,6 +653,7 @@ impl AppState {
             division_swell_configs: Arc::new(RwLock::new(std::collections::HashMap::new())),
             division_tremulants: Arc::new(RwLock::new(std::collections::HashMap::new())),
             wind_group_configs: Arc::new(RwLock::new(std::collections::HashMap::new())),
+            feedback: Arc::new(parking_lot::Mutex::new(crate::feedback::FeedbackManager::new())),
         }
     }
 

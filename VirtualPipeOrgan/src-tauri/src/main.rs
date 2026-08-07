@@ -6,6 +6,7 @@
 
 mod audio;
 mod commands;
+mod feedback;
 mod library;
 mod silence;
 mod loop_tool;
@@ -358,6 +359,10 @@ fn main() {
             commands::notation_set_metronome,
             commands::notation_set_durations,
             commands::notation_paste,
+            commands::feedback_list_outputs,
+            commands::feedback_configure,
+            commands::feedback_apply,
+            commands::feedback_all_off,
             commands::notation_undo,
             commands::notation_redo,
             commands::notation_import_midi,

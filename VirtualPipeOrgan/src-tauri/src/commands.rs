@@ -410,6 +410,52 @@ pub fn disconnect_midi(state: State<AppState>) -> Result<(), String> {
     Ok(())
 }
 
+// ===== MIDI-uit terugkoppeling (fase 1): registerlampen/display =====
+
+/// Beschikbare MIDI-uitgangspoorten (voor de terugkoppel-poortkeuze).
+#[tauri::command]
+pub fn feedback_list_outputs(state: State<AppState>) -> Vec<String> {
+    state.feedback.lock().list_outputs()
+}
+
+/// Eén register-slot uit de UI: id (stop/koppel) + nootnummer (NoteOnOff).
+#[derive(serde::Deserialize)]
+pub struct FeedbackSlotDto {
+    pub id: String,
+    #[serde(default)]
+    pub note: u8,
+}
+
+/// Protocol + poort + kanaal + slot-lijst instellen. `protocol`: "off"/"note"/
+/// "lcd"/"johannus". Volgorde van `slots` = register-index (LCD/Johannus).
+#[tauri::command]
+pub fn feedback_configure(
+    state: State<AppState>,
+    protocol: String,
+    port: Option<String>,
+    channel: u8,
+    slots: Vec<FeedbackSlotDto>,
+    organ_name: String,
+) -> Result<(), String> {
+    let proto = crate::feedback::FeedbackProtocol::parse(&protocol);
+    let slots = slots.into_iter()
+        .map(|s| crate::feedback::FeedbackSlot { id: s.id, note: s.note })
+        .collect();
+    state.feedback.lock().configure(proto, port, channel, slots, organ_name)
+}
+
+/// Nieuwe actieve registratie (stop- + koppel-id's) — diff'd en gebatcht gestuurd.
+#[tauri::command]
+pub fn feedback_apply(state: State<AppState>, active_ids: Vec<String>) {
+    state.feedback.lock().apply(&active_ids);
+}
+
+/// Alles uit op de console (bij Johannus incl. JOHAS-reset).
+#[tauri::command]
+pub fn feedback_all_off(state: State<AppState>) {
+    state.feedback.lock().all_off();
+}
+
 #[tauri::command]
 pub fn set_midi_mapping(state: State<AppState>, division: String, channel: Option<u8>, transpose: i8) -> Result<(), String> {
     info!("Setting MIDI mapping for {}: channel={:?}, transpose={}", division, channel, transpose);
