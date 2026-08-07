@@ -1346,6 +1346,11 @@
     } catch (e) {}
   }
 
+  // LET OP: in de MARKUP niet via deze helper lezen maar rechtstreeks
+  // `divisionVolumes[naam]` — Svelte 4 trackt template-afhankelijkheden op de
+  // variabelen die in de expressie zelf staan; via de helper zag het fragment
+  // de 100ms-poll-updates niet en stonden de zwel-lampjes/percentage stil
+  // terwijl de audio wél reageerde (bug gefixt in 0.7.12).
   function getSwellLevel(divisionName) {
     return divisionVolumes[divisionName] ?? 1.0;
   }
@@ -3128,7 +3133,7 @@
                     {#each Array(10) as _, i}
                       <span
                         class="swell-led"
-                        class:active={i < Math.round(getSwellLevel(division.name) * 10)}
+                        class:active={i < Math.round((divisionVolumes[division.name] ?? 1.0) * 10)}
                         on:click|stopPropagation={() => setSwellLevel(division.name, (i + 1) / 10)}
                         on:keypress={(e) => e.key === 'Enter' && setSwellLevel(division.name, (i + 1) / 10)}
                         role="button"
@@ -4004,9 +4009,9 @@
                         <div class="swell-config-row" title="Live zwelstand (volgt het pedaal)">
                           <span class="swell-config-label">Live</span>
                           <div class="follow-bar">
-                            <div class="follow-bar-fill" style="width: {Math.round(getSwellLevel(division.name) * 100)}%"></div>
+                            <div class="follow-bar-fill" style="width: {Math.round((divisionVolumes[division.name] ?? 1.0) * 100)}%"></div>
                           </div>
-                          <span class="swell-config-value">{Math.round(getSwellLevel(division.name) * 100)}%</span>
+                          <span class="swell-config-value">{Math.round((divisionVolumes[division.name] ?? 1.0) * 100)}%</span>
                         </div>
                       {/if}
                       <div class="swell-config-sliders">
