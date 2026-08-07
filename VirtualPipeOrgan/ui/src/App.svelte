@@ -528,12 +528,14 @@
   async function switchAudioProfile(kind = null) {
     if (audioProfileSwitching) return;
     // Zonder expliciet doel: vanaf hoofdtelefoon → speakers; vanaf speakers →
-    // hoofdtelefoon; vanaf een onbekende/handmatige uitgang (active=null) →
-    // eerst terug naar speakers (de normale stand), anders hoofdtelefoon.
+    // hoofdtelefoon; zonder actieve stand (zeldzaam sinds de 0.7.3-migratie,
+    // bv. net een profiel gewist): naar het profiel dat wél bestaat, en bestaat
+    // er geen enkel profiel dan Speakers — de normale stand; de huidige uitgang
+    // wordt dan hieronder als Speakers vastgelegd, niet als Hoofdtelefoon.
     const target = kind
       || (audioProfiles.active === 'headphones' ? 'speakers'
         : audioProfiles.active === 'speakers' ? 'headphones'
-        : (audioProfiles.speakers ? 'speakers' : 'headphones'));
+        : (!audioProfiles.speakers && audioProfiles.headphones ? 'headphones' : 'speakers'));
     const p = audioProfiles[target];
     if (!p) {
       // Geen doelprofiel: geen foutmelding en geen derde toestand meer (0.7.3).

@@ -169,7 +169,10 @@
     for (const c of (organInfo?.couplers || [])) if (c.active) ids.push(c.id);
     return ids;
   }
-  async function fbApplyConfig() {
+  // `silent`: de automatische paden (opstart/orgelwissel) mogen geen alert-popup
+  // opwerpen wanneer de opgeslagen poort even niet bestaat (console niet
+  // aangesloten) — stil degraderen; alleen handmatig "Toepassen" meldt hardop.
+  async function fbApplyConfig(silent = false) {
     fbBusy = true;
     localStorage.setItem('jm-orgue-fb-protocol', fbProtocol);
     localStorage.setItem('jm-orgue-fb-port', fbPort);
@@ -186,7 +189,11 @@
       fbConfigured = fbProtocol !== 'off' && !!fbPort;
       fbLastSent = null;          // forceer een volledige (re)sync
       await fbSendActive();
-    } catch (e) { alert(`Terugkoppeling instellen mislukt: ${e}`); }
+    } catch (e) {
+      fbConfigured = false;
+      if (silent === true) console.warn('Terugkoppeling auto-verbinden mislukt:', e);
+      else alert(`Terugkoppeling instellen mislukt: ${e}`);
+    }
     finally { fbBusy = false; }
   }
   async function fbAllOff() {
@@ -203,15 +210,19 @@
   // Registratie gewijzigd (toggle/preset/tutti/crescendo/orgel-load) → console
   // meelichten. organInfo wordt door App bij elke wijziging vervangen; de
   // signature-dedup in fbSendActive voorkomt onnodige sends bij ongewijzigde poll.
-  $: if (organInfo && fbConfigured) { fbSendActive(); }
-  // Auto-verbinden bij opstart: zodra een orgel geladen is (organInfo) en er een
-  // opgeslagen protocol+poort staat, verbindt de terugkoppeling zichzelf zodat de
-  // fysieke console meteen meelicht — ongeacht welk tabblad open staat.
-  let fbAutoConfigured = false;
-  $: if (!fbAutoConfigured && fbProtocol !== 'off' && fbPort && organInfo) {
-    fbAutoConfigured = true;
+  // Alleen het HOOFDVENSTER stuurt (niet elk extra scherm — de backend is één
+  // gedeelde FeedbackManager; panelen zouden alles dubbel sturen).
+  $: if (!secondary && organInfo && fbConfigured) { fbSendActive(); }
+  // Auto-verbinden bij opstart én HER-configureren bij orgelwissel: de slot-lijst
+  // (register-id's → nootnummers) en de orgelnaam (LCD) horen bij het geladen
+  // orgel; zonder resync zou een nieuw orgel geen lampen krijgen totdat de
+  // gebruiker handmatig "Toepassen" klikt.
+  let fbConfiguredOrganId = null;
+  $: if (!secondary && fbProtocol !== 'off' && fbPort && organInfo
+        && organInfo.id !== fbConfiguredOrganId) {
+    fbConfiguredOrganId = organInfo.id;
     fbRefreshOutputs();
-    fbApplyConfig();
+    fbApplyConfig(true);
   }
   // Poortlijst verversen wanneer de Algemene Instellingen open gaan.
   $: if (activeView === 'algemene-instellingen') fbRefreshOutputs();
