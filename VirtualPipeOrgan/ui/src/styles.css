@@ -2429,3 +2429,19 @@ input[type="range"]::-webkit-slider-thumb:hover {
   font-size: 0.85rem;
   flex-shrink: 0;
 }
+
+/* Terugkoppeling: per-register inleer-lijst (Console.svelte) */
+.fb-learn-list {
+  max-height: 16rem; overflow-y: auto;
+  border: 1px solid var(--accent-soft, #555); border-radius: 6px;
+  padding: 0.2rem 0.4rem;
+}
+.fb-learn-row {
+  display: flex; align-items: center; gap: 0.5rem;
+  padding: 0.15rem 0.2rem; font-size: 0.8rem;
+  border-bottom: 1px solid rgba(128,128,128,0.15);
+}
+.fb-learn-row:last-child { border-bottom: none; }
+.fb-learn-row.learning { background: rgba(220, 180, 60, 0.15); }
+.fb-learn-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fb-learn-note { color: var(--text-muted, #aaa); min-width: 5.5rem; text-align: right; }

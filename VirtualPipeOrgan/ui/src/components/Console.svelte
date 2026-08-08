@@ -153,15 +153,86 @@
   async function fbRefreshOutputs() {
     try { fbOutputs = await invoke('feedback_list_outputs'); } catch (e) { fbOutputs = []; }
   }
-  // Alle registers + koppels in stabiele volgorde; note = basisnoot + index.
+  // Per-register ingeleerde nootnummers (console-tabs volgen zelden een nette
+  // reeks). Per orgel bewaard; een ingeleerde noot wint van de auto-toewijzing.
+  let fbLearnedNotes = {};   // registerId -> nootnummer
+  let fbLearningId = null;   // register dat nú inleert (wacht op consoleknop)
+  let fbLearnAll = false;    // sequentiële "alles inleren"-loop actief
+  let fbShowLearnList = false;
+  function fbLoadLearned() {
+    try { fbLearnedNotes = JSON.parse(localStorage.getItem(organUiKey('jm-orgue-fb-notes')) || '{}') || {}; }
+    catch (e) { fbLearnedNotes = {}; }
+  }
+  function fbSaveLearned() {
+    try { localStorage.setItem(organUiKey('jm-orgue-fb-notes'), JSON.stringify(fbLearnedNotes)); } catch (e) {}
+  }
+  // Alle registers + koppels in stabiele volgorde; ingeleerde noot wint van
+  // basisnoot + index (zelfde volgorde als fbRegList hieronder).
   function fbBuildSlots() {
     const slots = [];
     let i = 0;
     for (const d of (organInfo?.divisions || [])) {
-      for (const s of (d.stops || [])) { slots.push({ id: s.id, note: (fbBaseNote + i) & 0x7F }); i++; }
+      for (const s of (d.stops || [])) { slots.push({ id: s.id, note: fbLearnedNotes[s.id] ?? ((fbBaseNote + i) & 0x7F) }); i++; }
     }
-    for (const c of (organInfo?.couplers || [])) { slots.push({ id: c.id, note: (fbBaseNote + i) & 0x7F }); i++; }
+    for (const c of (organInfo?.couplers || [])) { slots.push({ id: c.id, note: fbLearnedNotes[c.id] ?? ((fbBaseNote + i) & 0x7F) }); i++; }
     return slots;
+  }
+  // Lijst voor de inleer-UI. Als $:-statement met expliciete afhankelijkheden —
+  // een kale helper-aanroep in de markup zou updates missen (zelfde Svelte-
+  // valkuil als de zwel-lampjes, zie 0.7.12).
+  $: fbRegList = (() => {
+    const list = [];
+    let i = 0;
+    for (const d of (organInfo?.divisions || [])) {
+      for (const s of (d.stops || [])) {
+        list.push({ id: s.id, name: `${d.name} — ${s.name} ${s.pitch || ''}`.trim(), auto: (fbBaseNote + i) & 0x7F, learned: fbLearnedNotes[s.id] });
+        i++;
+      }
+    }
+    for (const c of (organInfo?.couplers || [])) {
+      list.push({ id: c.id, name: `Koppel — ${(c.name || '').replace(/\n/g, ' ')}`, auto: (fbBaseNote + i) & 0x7F, learned: fbLearnedNotes[c.id] });
+      i++;
+    }
+    return list;
+  })();
+  // Eén register inleren: wacht op de eerstvolgende NoteOn van de console
+  // (hergebruikt learn_keyboard_note, 20s timeout). De eerste inleer neemt ook
+  // het kanaal van de console over.
+  async function fbLearnOne(id) {
+    if (fbLearningId) return false;
+    if (!midiConnected) { alert('Verbind eerst een MIDI apparaat!'); return false; }
+    fbLearningId = id;
+    try {
+      const res = await invoke('learn_keyboard_note');
+      if (res) {
+        const [ch, note] = res;
+        fbLearnedNotes[id] = note;
+        fbLearnedNotes = fbLearnedNotes;
+        fbChannel = ch + 1; // kanaal van de console overnemen
+        fbSaveLearned();
+        await fbApplyConfig(true);
+        return true;
+      }
+      return false; // time-out: niets ontvangen
+    } catch (e) { return false; }
+    finally { fbLearningId = null; }
+  }
+  // Alles inleren, op volgorde van de lijst; nogmaals klikken stopt. Stopt ook
+  // vanzelf bij een time-out (geen knop ingedrukt binnen 20s).
+  async function fbLearnAllSeq() {
+    if (fbLearnAll) { fbLearnAll = false; return; }
+    fbLearnAll = true;
+    for (const r of fbRegList) {
+      if (!fbLearnAll) break;
+      const ok = await fbLearnOne(r.id);
+      if (!ok) break;
+    }
+    fbLearnAll = false;
+  }
+  function fbClearLearned() {
+    fbLearnedNotes = {};
+    fbSaveLearned();
+    fbApplyConfig(true);
   }
   function fbActiveIds() {
     const ids = [];
@@ -221,8 +292,16 @@
   $: if (!secondary && fbProtocol !== 'off' && fbPort && organInfo
         && organInfo.id !== fbConfiguredOrganId) {
     fbConfiguredOrganId = organInfo.id;
+    fbLoadLearned();
     fbRefreshOutputs();
     fbApplyConfig(true);
+  }
+  // Ingeleerde register-noten horen bij het orgel — ook laden wanneer de
+  // terugkoppeling (nog) niet actief is, zodat de inleer-lijst klopt.
+  let fbNotesOrganId = null;
+  $: if (organInfo && organInfo.id !== fbNotesOrganId) {
+    fbNotesOrganId = organInfo.id;
+    fbLoadLearned();
   }
   // Poortlijst verversen wanneer de Algemene Instellingen open gaan.
   $: if (activeView === 'algemene-instellingen') fbRefreshOutputs();
@@ -4858,8 +4937,37 @@
                       bind:value={fbBaseNote} on:change={fbApplyConfig} style="width: 5rem;" />
                   </div>
                   <p class="settings-hint" style="margin: 0.2rem 0 0;">
-                    Elk register krijgt automatisch een nootnummer vanaf de basisnoot (register-volgorde).
+                    Elk register krijgt automatisch een nootnummer vanaf de basisnoot (register-volgorde),
+                    óf leer per register de echte consoleknop in:
                   </p>
+                  <button class="btn btn-ghost btn-sm" style="margin-top: 0.3rem;" on:click={() => fbShowLearnList = !fbShowLearnList}>
+                    {fbShowLearnList ? 'Verberg inleer-lijst' : 'Per register inleren…'}
+                    {Object.keys(fbLearnedNotes).length ? ` (${Object.keys(fbLearnedNotes).length} ingeleerd)` : ''}
+                  </button>
+                  {#if fbShowLearnList}
+                    <div style="display: flex; gap: 0.5rem; margin: 0.4rem 0;">
+                      <button class="btn btn-secondary btn-sm" on:click={fbLearnAllSeq} disabled={!!fbLearningId && !fbLearnAll}>
+                        {fbLearnAll ? 'Stop inleren' : 'Alles inleren (op volgorde)'}
+                      </button>
+                      <button class="btn btn-ghost btn-sm" on:click={fbClearLearned} disabled={!Object.keys(fbLearnedNotes).length}>Wis inleer</button>
+                    </div>
+                    {#if fbLearningId}
+                      <p class="settings-hint" style="color: var(--warning, #db5);">
+                        Druk nu op de bijbehorende registerknop op je console… (20 s)
+                      </p>
+                    {/if}
+                    <div class="fb-learn-list">
+                      {#each fbRegList as r (r.id)}
+                        <div class="fb-learn-row" class:learning={fbLearningId === r.id}>
+                          <span class="fb-learn-name" title={r.name}>{r.name}</span>
+                          <span class="fb-learn-note">{r.learned != null ? `noot ${r.learned}` : `auto ${r.auto}`}</span>
+                          <button class="btn btn-ghost btn-sm" on:click={() => fbLearnOne(r.id)} disabled={!!fbLearningId}>
+                            {fbLearningId === r.id ? '…' : 'Inleer'}
+                          </button>
+                        </div>
+                      {/each}
+                    </div>
+                  {/if}
                 {/if}
                 <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem;">
                   <button class="btn btn-secondary btn-sm" on:click={fbApplyConfig} disabled={fbBusy}>
