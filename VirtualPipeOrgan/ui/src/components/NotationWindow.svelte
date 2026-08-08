@@ -333,10 +333,18 @@
   // Shift+klik voegt toe aan de selectie; gewone klik vervangt. De cursor volgt
   // de klik zodat pijltjes vanaf daar verder navigeren.
   function handleSheetClick(e) {
-    if (!isLive || noteBoxes.length === 0) return;
+    if (!isLive) return;
     const rect = container.getBoundingClientRect();
     const px = e.clientX - rect.left + container.scrollLeft;
     const py = e.clientY - rect.top + container.scrollTop;
+    // Stapinvoer: klik plaatst een stamtoon op de invoercursor van de
+    // aangeklikte balk (geen selectie-wijziging in deze modus).
+    if (stepMode) {
+      const hit = sheetPointToPitch(px, py);
+      if (hit) stepInsert([hit.midi], hit.layerId);
+      return;
+    }
+    if (noteBoxes.length === 0) return;
     let best = null, bestDist = Infinity;
     for (const b of noteBoxes) {
       // Binnen de bounding box telt als 0; anders afstand tot het centrum.
@@ -435,6 +443,106 @@
     setLayerDivisions(layer.id, cur.includes(div) ? cur.filter(d => d !== div) : [...cur, div]);
   }
 
+  // ---- Stapinvoer (0.7.15): noot-voor-noot op kiesbare waarde ----
+  // MIDI: speel een toets/akkoord → geplaatst op de invoercursor met de gekozen
+  // nootwaarde (gelijktijdig ingedrukte toetsen = akkoord; commit zodra alles
+  // los is). Muis: klik op een notenbalk → toonhoogte uit de klik-y (diatonisch,
+  // via de VexFlow-stave-lijnen), geplaatst op de invoercursor van die balk.
+  let stepMode = false;
+  let stepQuarters = 1;      // nootwaarde in kwartnoten (4=heel … 0.125=32e)
+  let stepDotted = false;
+  let stepPosUs = 0;         // invoercursor (µs)
+  let stepHeld = new Set();  // nu ingedrukte toetsen
+  let stepChord = new Set(); // verzameld akkoord van deze aanslag
+  $: stepDurUs = Math.round((60e6 / (Number(bpm) || 90)) * stepQuarters * (stepDotted ? 1.5 : 1));
+
+  function stepTargetLayerId() {
+    return score?.armed_layer ?? score?.layers?.[0]?.id ?? null;
+  }
+  function stepInitPos() {
+    if (cursorEvent) { stepPosUs = cursorEvent.start_us; return; }
+    const lid = stepTargetLayerId();
+    const le = flatEvents.filter(e => e._layerId === lid);
+    stepPosUs = le.length ? Math.max(...le.map(e => e.end_us)) : 0;
+  }
+  async function setStepMode(on) {
+    stepMode = on;
+    stepHeld = new Set(); stepChord = new Set();
+    if (on) {
+      if (recording || armedWaiting) await toggleRecording(); // opname stoppen
+      stepInitPos();
+    }
+    try { await invoke('notation_set_step_input', { scoreId, enabled: on }); } catch (e) {}
+  }
+  async function stepInsert(notes, layerId = null) {
+    const lid = layerId ?? stepTargetLayerId();
+    if (lid == null || !notes.length) return;
+    try {
+      await invoke('notation_insert_notes', {
+        scoreId, layerId: lid, notes,
+        startUs: Math.round(stepPosUs), durUs: stepDurUs,
+      });
+      stepPosUs += stepDurUs;
+    } catch (e) { alert(String(e)); }
+  }
+  function stepCommitChord() {
+    const notes = Array.from(stepChord);
+    stepChord = new Set();
+    if (notes.length) stepInsert(notes);
+  }
+  function stepRest() { if (stepMode) stepPosUs += stepDurUs; }
+  function onStepNoteOn(midi) { stepHeld.add(midi); stepChord.add(midi); }
+  function onStepNoteOff(midi) {
+    stepHeld.delete(midi);
+    if (stepHeld.size === 0) stepCommitChord();
+  }
+
+  // Muisklik → toonhoogte: vind de maat (VexFlow-stave) onder de klik en reken
+  // de balklijn om naar een diatonische toon (stamtoon; alteratie daarna via
+  // de transponeer-knoppen/↑↓). Geeft {midi, layerId} of null.
+  const DEG_TO_SEMI = [0, 2, 4, 5, 7, 9, 11]; // C D E F G A B
+  function diatonicToMidi(di) {
+    return 12 * Math.floor(di / 7) + DEG_TO_SEMI[((di % 7) + 7) % 7];
+  }
+  function sheetPointToPitch(px, py) {
+    try {
+      const gsheet = osmd?.GraphicSheet || osmd?.graphic;
+      const measureList = gsheet?.MeasureList;
+      const svg = container?.querySelector('svg');
+      if (!measureList || !svg) return null;
+      const partLayers = nonEmptyPartLayers();
+      const svgRect = svg.getBoundingClientRect();
+      const sheetRect = container.getBoundingClientRect();
+      // Klikpunt (content-coördinaten) → SVG-coördinaten.
+      const sx = px - (svgRect.left - sheetRect.left + container.scrollLeft);
+      const sy = py - (svgRect.top - sheetRect.top + container.scrollTop);
+      for (let m = 0; m < measureList.length; m++) {
+        const row = measureList[m];
+        if (!row) continue;
+        for (let s = 0; s < row.length; s++) {
+          const gm = row[s];
+          const stave = gm && gm.getVFStave && gm.getVFStave();
+          if (!stave || !stave.getYForLine) continue;
+          const x0 = stave.getX ? stave.getX() : stave.x;
+          const w = stave.getWidth ? stave.getWidth() : stave.width;
+          const yTop = stave.getYForLine(0), yBot = stave.getYForLine(4);
+          const margin = 30; // ook net boven/onder de balk (hulplijn-gebied)
+          if (sx >= x0 && sx <= x0 + w && sy >= yTop - margin && sy <= yBot + margin) {
+            const spacing = (yBot - yTop) / 4;
+            const stepsFromTop = Math.round(((sy - yTop) / spacing) * 2);
+            const layer = partLayers[s];
+            if (!layer) return null;
+            const bass = layer.bass_clef === true || (layer.bass_clef == null && isPedalName(layer.name));
+            const refDi = bass ? 33 : 45; // bovenste lijn: A3 (bas) / F5 (viool)
+            const midi = Math.max(0, Math.min(127, diatonicToMidi(refDi - stepsFromTop)));
+            return { midi, layerId: layer.id };
+          }
+        }
+      }
+    } catch (e) {}
+    return null;
+  }
+
   // ---- Live-modus initieel + event-listeners ----
   let unlisteners = [];
   async function setupLive() {
@@ -454,6 +562,15 @@
       unlisteners.push(await listen('jm-orgue:notation:score-changed', (e) => {
         if (e?.payload?.score !== scoreId) return;
         scheduleRender();
+      }));
+      // Stapinvoer: gespeelde toetsen op de invoercursor plaatsen.
+      unlisteners.push(await listen('jm-orgue:notation:step-note-on', (e) => {
+        if (e?.payload?.score !== scoreId || !stepMode) return;
+        onStepNoteOn(e.payload.midi);
+      }));
+      unlisteners.push(await listen('jm-orgue:notation:step-note-off', (e) => {
+        if (e?.payload?.score !== scoreId || !stepMode) return;
+        onStepNoteOff(e.payload.midi);
       }));
       // Eerste render (lege partituur → foutmelding "geen noten" is normaal).
       await doRender();
@@ -481,6 +598,8 @@
         // ze zichtbaar worden.
         scheduleRender();
       } else {
+        // Stapinvoer uit vóór een live-opname (opname gaat vóór).
+        if (stepMode) await setStepMode(false);
         // Zorg dat er een armed laag + take is; anders eerste laag armen.
         if (!score) score = await invoke('notation_get_score', { scoreId });
         if (!score.armed_layer && score.layers.length > 0) {
@@ -741,8 +860,9 @@
     stopMetronome();
     if (metroAudioCtx) { try { metroAudioCtx.close(); } catch (e) {} metroAudioCtx = null; }
     for (const un of unlisteners) { try { un(); } catch (e) {} }
-    // Live-opname veilig stoppen bij sluiten.
+    // Live-opname + stapinvoer veilig stoppen bij sluiten.
     if (recording && scoreId != null) invoke('notation_stop_recording').catch(() => {});
+    if (stepMode && scoreId != null) invoke('notation_set_step_input', { scoreId, enabled: false }).catch(() => {});
   });
 </script>
 
@@ -818,6 +938,24 @@
           <option value={4}>4</option>
         </select>
       </label>
+      <label class="metro-toggle" title="Stapinvoer: speel een toets of akkoord op het klavier — of klik op de balk — en de noot komt op de invoercursor met de gekozen waarde">
+        <input type="checkbox" checked={stepMode} on:change={(e) => setStepMode(e.currentTarget.checked)} />
+        Stapinvoer
+      </label>
+      {#if stepMode}
+        <select bind:value={stepQuarters} title="Nootwaarde voor stapinvoer">
+          <option value={4}>heel</option>
+          <option value={2}>half</option>
+          <option value={1}>kwart</option>
+          <option value={0.5}>achtste</option>
+          <option value={0.25}>16e</option>
+          <option value={0.125}>32e</option>
+        </select>
+        <label title="Gepunteerde waarde (×1,5)" class="metro-toggle">
+          <input type="checkbox" bind:checked={stepDotted} />punt
+        </label>
+        <button class="btn btn-ghost btn-sm" on:click={stepRest} title="Rust invoegen: de invoercursor schuift één waarde op">𝄽 rust</button>
+      {/if}
       <label>Toonsoort
         <select value={keyFifths} on:change={(e) => setKeyLive(e.currentTarget.value)}>
           {#each keyChoices as k}<option value={k.v}>{k.label}</option>{/each}
@@ -996,7 +1134,7 @@
 
   <div class="notation-hint">
     {#if isLive}
-      Tip: druk op Opname en begin te spelen — de eerste noot is beat 1. Meerdere takes op dezelfde balk = overdub (vink ze in de LayerBar aan/uit). Klik een noot om te selecteren (Shift+klik = meerdere); ←/→ selecteren, ↑/↓ transponeren, Delete verwijdert. Duur: [ halveren, ] verdubbelen, . punt. Ctrl+C/Ctrl+V kopiëren/plakken (op de cursor), Ctrl+Z ongedaan.
+      Tip: druk op Opname en begin te spelen — elke divisie landt op zijn eigen balk (zie de chips in de LayerBar). Stapinvoer: kies een waarde en speel toets/akkoord, of klik op de balk (stamtoon; ↑/↓ voor kruis/mol) — "rust" schuift de cursor op. Klik een noot om te selecteren (Shift+klik = meerdere); ←/→ selecteren, ↑/↓ transponeren, Delete verwijdert. Duur: [ ÷2, ] ×2, . punt. Ctrl+C/V kopiëren/plakken, Ctrl+Z ongedaan.
     {:else}
       Tip: vrij ingespeeld? Stel het tempo in waarop je speelde en schuif "Ritme" naar los als de kwantisatie te strak aanvoelt.
     {/if}

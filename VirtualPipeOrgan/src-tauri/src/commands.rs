@@ -2569,6 +2569,45 @@ pub fn notation_set_layer_divisions(state: State<AppState>, score_id: u32, layer
     })
 }
 
+/// Stapinvoer aan/uit voor een score. Met stapinvoer aan stuurt de midi-thread
+/// step-note-events naar het notatievenster (de toets klinkt gewoon mee);
+/// het venster plaatst de noot op de invoercursor. Live-opname gaat altijd vóór.
+#[tauri::command]
+pub fn notation_set_step_input(state: State<AppState>, score_id: u32, enabled: bool) -> Result<(), String> {
+    *state.notation_step_input.write() = if enabled { Some(score_id) } else { None };
+    Ok(())
+}
+
+/// Stapinvoer/muisplaatsing: voeg één noot of akkoord toe op een absolute tijd
+/// met een expliciete duur (beide µs). Gaat via InsertEvents → undo werkt.
+#[tauri::command]
+pub fn notation_insert_notes(state: State<AppState>, app: tauri::AppHandle, score_id: u32, layer_id: u32, notes: Vec<u8>, start_us: u64, dur_us: u64) -> Result<u64, String> {
+    if notes.is_empty() { return Err("Geen noten om in te voegen".into()); }
+    let gen = with_score_mut(&state, score_id, |sc| {
+        let take_id = sc.layers.iter().find(|l| l.id == layer_id).and_then(|l| {
+            l.armed_take
+                .or_else(|| l.takes.iter().find(|t| t.visible).map(|t| t.id))
+                .or_else(|| l.takes.first().map(|t| t.id))
+        });
+        let take_id = match take_id { Some(t) => t, None => return sc.generation };
+        let dur = dur_us.max(1000);
+        let mut events = Vec::with_capacity(notes.len());
+        for midi in notes.iter() {
+            let id = sc.new_event_id();
+            events.push((layer_id, take_id, crate::notation::LayerEv {
+                id, midi: *midi, start_us, end_us: start_us + dur, channel: 0, locked: true,
+            }));
+        }
+        let cmd = crate::notation::EditCommand::InsertEvents { events };
+        if let Some(inv) = cmd.apply(sc) {
+            sc.push_undo(inv);
+        }
+        sc.generation
+    })?;
+    tauri::async_runtime::spawn(emit_score_changed(app, score_id, gen));
+    Ok(gen)
+}
+
 /// Metronoom-configuratie per score (aan/uit + aantal count-in-tellen). Puur
 /// een afspeel-hulp in het notatievenster (aparte WebAudio-klik, geen orgelpijp)
 /// en dus géén notatie-wijziging: geen undo, geen generation-bump — de UI houdt

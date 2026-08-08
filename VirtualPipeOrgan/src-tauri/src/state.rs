@@ -345,6 +345,10 @@ pub struct AppState {
     /// AppHandle-spiegel voor de MIDI-thread (die kent `state.app_handle` niet
     /// direct); wordt geset door commands.rs::notation_ready zodra de setup klaar is.
     pub notation_app_handle: Arc<RwLock<Option<tauri::AppHandle>>>,
+    /// Score-id in stapinvoer-modus (notatievenster): de midi-thread emit dan
+    /// step-note-events zodat gespeelde toetsen op de invoercursor geplaatst
+    /// worden. None = geen stapinvoer actief.
+    pub notation_step_input: Arc<RwLock<Option<u32>>>,
     /// Serialiseert orgel-loads en audio-wissels onderling: een wissel midden in
     /// een load gooit anders net-geregistreerde preload-buffers weg (nieuwe lege
     /// audio-thread) en mist de reload omdat current_organ_id nog niet gezet is;
@@ -554,11 +558,15 @@ impl AppState {
         let notation_open_notes = Arc::new(RwLock::new(std::collections::HashMap::<(u32, u32, u32, u8, u8), u64>::new()));
         let notation_start_time = Arc::new(RwLock::new(None::<std::time::Instant>));
         let notation_app_handle = Arc::new(RwLock::new(None::<tauri::AppHandle>));
+        // Stapinvoer (0.7.15): score-id dat in stap-modus staat; de midi-thread
+        // emit dan step-events naar het notatievenster (naast het gewone spelen).
+        let notation_step_input = Arc::new(RwLock::new(None::<u32>));
         let notation_scores_for_midi = notation_scores.clone();
         let notation_armed_for_midi = notation_armed_score.clone();
         let notation_open_for_midi = notation_open_notes.clone();
         let notation_start_for_midi = notation_start_time.clone();
         let notation_app_for_midi = notation_app_handle.clone();
+        let notation_step_for_midi = notation_step_input.clone();
 
         // Start MIDI management thread
         thread::spawn(move || {
@@ -592,6 +600,7 @@ impl AppState {
                 notation_open_for_midi,
                 notation_start_for_midi,
                 notation_app_for_midi,
+                notation_step_for_midi,
             );
         });
 
@@ -626,6 +635,7 @@ impl AppState {
             notation_open_notes,
             notation_start_time,
             notation_app_handle,
+            notation_step_input,
             load_switch_gate: Arc::new(parking_lot::Mutex::new(())),
             app_handle: Arc::new(RwLock::new(None)),
             pipe_voicings: Arc::new(RwLock::new(std::collections::HashMap::new())),
@@ -694,6 +704,7 @@ impl AppState {
         notation_open_notes: Arc<RwLock<std::collections::HashMap<(u32, u32, u32, u8, u8), u64>>>,
         notation_start_time: Arc<RwLock<Option<std::time::Instant>>>,
         app_handle_notation: Arc<RwLock<Option<tauri::AppHandle>>>,
+        notation_step_input: Arc<RwLock<Option<u32>>>,
     ) {
         tracing::info!("MIDI thread started");
 
@@ -1111,6 +1122,8 @@ impl AppState {
                     Self::capture_notation_event(&msg, &notation_scores, &notation_armed_score,
                         &notation_open_notes, &notation_start_time, &app_handle_notation,
                         &midi_mappings);
+                    Self::emit_step_input_event(&msg, &notation_step_input,
+                        &notation_armed_score, &app_handle_notation);
 
                     // Check for preset triggers first
                     Self::check_preset_trigger(&msg, &preset_bindings, &preset_trigger_tx);
@@ -1358,6 +1371,36 @@ impl AppState {
                 }
             }
             _ => {}
+        }
+    }
+
+    /// Stapinvoer (0.7.15): staat het notatievenster in stap-modus (en loopt er
+    /// géén live-opname), stuur de toetsaanslag dan als step-event naar het
+    /// venster. De toets klinkt gewoon mee op het orgel (normale afhandeling
+    /// gaat door); het venster plaatst de noot op de invoercursor met de daar
+    /// gekozen nootwaarde en bundelt gelijktijdig ingedrukte toetsen tot een
+    /// akkoord (commit zodra alles losgelaten is).
+    fn emit_step_input_event(
+        msg: &MidiMessage,
+        notation_step_input: &Arc<RwLock<Option<u32>>>,
+        notation_armed_score: &Arc<RwLock<Option<u32>>>,
+        app_handle: &Arc<RwLock<Option<tauri::AppHandle>>>,
+    ) {
+        use tauri::Emitter;
+        let Some(score_id) = *notation_step_input.read() else { return };
+        if notation_armed_score.read().is_some() { return; } // live-opname gaat vóór
+        let (event, channel, note) = match msg {
+            MidiMessage::NoteOn { channel, note, velocity } if *velocity > 0 =>
+                ("jm-orgue:notation:step-note-on", *channel, *note),
+            MidiMessage::NoteOff { channel, note, .. }
+            | MidiMessage::NoteOn { channel, note, velocity: 0 } =>
+                ("jm-orgue:notation:step-note-off", *channel, *note),
+            _ => return,
+        };
+        if let Some(handle) = app_handle.read().as_ref() {
+            let _ = handle.emit(event, serde_json::json!({
+                "score": score_id, "midi": note, "channel": channel,
+            }));
         }
     }
 
