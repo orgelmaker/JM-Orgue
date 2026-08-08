@@ -2,8 +2,7 @@
 // De repo is publiek; api.github.com staat CORS toe, dus een gewone fetch
 // vanuit de webview volstaat (geen backend-dependency).
 
-// LET OP: eigenaar wordt ingevuld zodra de repo is aangemaakt (gh auth).
-export const GITHUB_REPO = 'INVULLEN-EIGENAAR/JM-Orgue';
+export const GITHUB_REPO = 'orgelmaker/JM-Orgue';
 
 export const githubRepoUrl = () => `https://github.com/${GITHUB_REPO}`;
 export const githubIssuesUrl = () => `https://github.com/${GITHUB_REPO}/issues`;

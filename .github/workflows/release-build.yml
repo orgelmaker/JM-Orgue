@@ -13,6 +13,11 @@ on:
     types: [published]
   workflow_dispatch:
 
+# Nodig om de gebouwde installers aan de release te kunnen hangen (nieuwe
+# repos hebben standaard een read-only workflow-token).
+permissions:
+  contents: write
+
 jobs:
   build-windows:
     runs-on: windows-latest
