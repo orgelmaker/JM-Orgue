@@ -474,15 +474,34 @@
     }
     try { await invoke('notation_set_step_input', { scoreId, enabled: on }); } catch (e) {}
   }
-  async function stepInsert(notes, layerId = null) {
+  // Laatst geplaatste invoer (voor R=herhaal, ↑/↓=kruis/mol, Shift+letter=
+  // akkoord uitbreiden, Backspace=stap terug) — MuseScore-conventies.
+  let stepLastIds = [];        // event-ids van de laatste plaatsing
+  let stepLastChordNotes = []; // midi's van de laatste plaatsing
+  let stepLastPos = null;      // starttijd van de laatste plaatsing
+  let stepLastMidi = 60;       // referentie voor letter-invoer (dichtstbijzijnde octaaf)
+
+  async function stepInsert(notes, layerId = null, opts = {}) {
     const lid = layerId ?? stepTargetLayerId();
     if (lid == null || !notes.length) return;
+    const at = opts.at != null ? opts.at : stepPosUs;
     try {
-      await invoke('notation_insert_notes', {
+      const res = await invoke('notation_insert_notes', {
         scoreId, layerId: lid, notes,
-        startUs: Math.round(stepPosUs), durUs: stepDurUs,
+        startUs: Math.round(at), durUs: stepDurUs,
       });
-      stepPosUs += stepDurUs;
+      const ids = Array.isArray(res) ? (res[1] || []) : [];
+      if (opts.at != null) {
+        // Toevoeging aan het zojuist geplaatste akkoord (Shift+letter).
+        stepLastIds = [...stepLastIds, ...ids];
+        stepLastChordNotes = [...stepLastChordNotes, ...notes];
+      } else {
+        stepLastIds = ids;
+        stepLastChordNotes = [...notes];
+        stepLastPos = at;
+        stepPosUs = at + stepDurUs;
+      }
+      stepLastMidi = notes[notes.length - 1];
     } catch (e) { alert(String(e)); }
   }
   function stepCommitChord() {
@@ -491,6 +510,35 @@
     if (notes.length) stepInsert(notes);
   }
   function stepRest() { if (stepMode) stepPosUs += stepDurUs; }
+  // Letter-invoer (A–G): dichtstbijzijnde toonhoogte bij de vorige noot.
+  const LETTER_PC = { c: 0, d: 2, e: 4, f: 5, g: 7, a: 9, b: 11 };
+  function nearestMidiForLetter(letter) {
+    const pc = LETTER_PC[letter];
+    let best = null, bestD = Infinity;
+    for (let oct = 0; oct <= 10; oct++) {
+      const m = 12 * oct + pc;
+      if (m > 127) break;
+      const d = Math.abs(m - stepLastMidi);
+      if (d < bestD) { bestD = d; best = m; }
+    }
+    return best;
+  }
+  // Kruis/mol (±1) of octaaf (±12) op de laatste plaatsing.
+  async function stepAlterLast(semi) {
+    if (!stepLastIds.length) return;
+    try {
+      await invoke('notation_transpose', { scoreId, eventIds: stepLastIds, semitones: semi });
+      stepLastChordNotes = stepLastChordNotes.map(n => Math.max(0, Math.min(127, n + semi)));
+      stepLastMidi = Math.max(0, Math.min(127, stepLastMidi + semi));
+    } catch (e) {}
+  }
+  // Backspace: laatste plaatsing terugnemen (undo) en de cursor terugzetten.
+  async function stepUndoLast() {
+    if (stepLastPos == null) return;
+    await doUndo();
+    stepPosUs = stepLastPos;
+    stepLastIds = []; stepLastChordNotes = []; stepLastPos = null;
+  }
   function onStepNoteOn(midi) { stepHeld.add(midi); stepChord.add(midi); }
   function onStepNoteOff(midi) {
     stepHeld.delete(midi);
@@ -817,8 +865,34 @@
   }
 
   function handleKey(e) {
-    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT')) return;
     if (!isLive) return;
+    // ---- Stapinvoer-sneltoetsen (MuseScore-conventies) ----
+    if (stepMode) {
+      const k = e.key.toLowerCase();
+      if (e.key === 'Escape') { setStepMode(false); e.preventDefault(); return; }
+      // Letters A–G: noot plaatsen (dichtstbijzijnde octaaf); Shift+letter =
+      // toevoegen aan het zojuist geplaatste akkoord.
+      if (!e.ctrlKey && !e.metaKey && LETTER_PC[k] !== undefined) {
+        const m = nearestMidiForLetter(k);
+        if (m != null) {
+          if (e.shiftKey && stepLastPos != null) stepInsert([m], null, { at: stepLastPos });
+          else stepInsert([m]);
+        }
+        e.preventDefault(); return;
+      }
+      if (k === 'r' && stepLastChordNotes.length) { stepInsert([...stepLastChordNotes]); e.preventDefault(); return; }
+      if (e.key === '0') { stepRest(); e.preventDefault(); return; }
+      const DUR_KEYS = { '2': 0.125, '3': 0.25, '4': 0.5, '5': 1, '6': 2, '7': 4 };
+      if (DUR_KEYS[e.key] !== undefined) { stepQuarters = DUR_KEYS[e.key]; e.preventDefault(); return; }
+      if (e.key === '.') { stepDotted = !stepDotted; e.preventDefault(); return; }
+      if (e.key === 'ArrowUp' && !e.shiftKey) { stepAlterLast(e.ctrlKey ? 12 : 1); e.preventDefault(); return; }
+      if (e.key === 'ArrowDown' && !e.shiftKey) { stepAlterLast(e.ctrlKey ? -12 : -1); e.preventDefault(); return; }
+      if (e.key === 'Backspace') { stepUndoLast(); e.preventDefault(); return; }
+      // overige toetsen (Ctrl+Z e.d.) vallen door naar de gewone afhandeling
+    }
+    // N = stapinvoer aan/uit (MuseScore).
+    if (e.key.toLowerCase() === 'n' && !e.ctrlKey && !e.metaKey && !e.shiftKey) { setStepMode(!stepMode); e.preventDefault(); return; }
     if (e.key === 'ArrowRight') { moveCursor(+1); e.preventDefault(); }
     else if (e.key === 'ArrowLeft') { moveCursor(-1); e.preventDefault(); }
     else if (e.key === 'Delete' || e.key === 'Backspace') { deleteSelection(); e.preventDefault(); }
@@ -966,18 +1040,20 @@
         Stapinvoer
       </label>
       {#if stepMode}
-        <select bind:value={stepQuarters} title="Nootwaarde voor stapinvoer">
-          <option value={4}>heel</option>
-          <option value={2}>half</option>
-          <option value={1}>kwart</option>
-          <option value={0.5}>achtste</option>
-          <option value={0.25}>16e</option>
-          <option value={0.125}>32e</option>
-        </select>
-        <label title="Gepunteerde waarde (×1,5)" class="metro-toggle">
+        <span class="step-durs" role="group" aria-label="Nootwaarde">
+          {#each [[4, '𝅝', '7'], [2, '𝅗𝅥', '6'], [1, '♩', '5'], [0.5, '♪', '4'], [0.25, '𝅘𝅥𝅯', '3'], [0.125, '𝅘𝅥𝅰', '2']] as [q, sym, key]}
+            <button class="btn btn-ghost btn-sm step-dur" class:active={stepQuarters === q}
+              on:click={() => stepQuarters = q} title="Nootwaarde (toets {key})">{sym}</button>
+          {/each}
+        </span>
+        <label title="Gepunteerde waarde ×1,5 (toets .)" class="metro-toggle">
           <input type="checkbox" bind:checked={stepDotted} />punt
         </label>
-        <button class="btn btn-ghost btn-sm" on:click={stepRest} title="Rust invoegen: de invoercursor schuift één waarde op">𝄽 rust</button>
+        <button class="btn btn-ghost btn-sm" on:click={stepRest} title="Rust: cursor schuift één waarde op (toets 0)">𝄽</button>
+        <button class="btn btn-ghost btn-sm" on:click={() => stepLastChordNotes.length && stepInsert([...stepLastChordNotes])}
+          disabled={!stepLastChordNotes.length} title="Herhaal de laatste noot/het laatste akkoord (toets R)">R</button>
+        <button class="btn btn-ghost btn-sm" on:click={() => stepAlterLast(1)} disabled={!stepLastIds.length} title="Laatste plaatsing halve toon omhoog (↑)">♯</button>
+        <button class="btn btn-ghost btn-sm" on:click={() => stepAlterLast(-1)} disabled={!stepLastIds.length} title="Laatste plaatsing halve toon omlaag (↓)">♭</button>
       {/if}
       <label>Toonsoort
         <select value={keyFifths} on:change={(e) => setKeyLive(e.currentTarget.value)}>
@@ -1167,7 +1243,7 @@
 
   <div class="notation-hint">
     {#if isLive}
-      Tip: druk op Opname en begin te spelen — elke divisie landt op zijn eigen balk (zie de chips in de LayerBar). Stapinvoer: kies een waarde en speel toets/akkoord, of klik op de balk (stamtoon; ↑/↓ voor kruis/mol) — "rust" schuift de cursor op. Klik een noot om te selecteren (Shift+klik = meerdere); ←/→ selecteren, ↑/↓ transponeren, Delete verwijdert. Duur: [ ÷2, ] ×2, . punt. Ctrl+C/V kopiëren/plakken, Ctrl+Z ongedaan.
+      Tip: Opname = spelen, elke divisie op zijn eigen balk (chips in de LayerBar). Stapinvoer (N): speel toets/akkoord op het klavier, typ A–G (Shift+letter = akkoord), of klik op de balk. Cijfers 2–7 = nootwaarde, . = punt, 0 = rust, R = herhaal, ↑/↓ = kruis/mol (Ctrl = octaaf), Backspace = stap terug, Esc = stoppen. Buiten stapinvoer: klik/←→ selecteren, ↑/↓ transponeren, Delete, [ ÷2, ] ×2, Ctrl+C/V, Ctrl+Z.
     {:else}
       Tip: vrij ingespeeld? Stel het tempo in waarop je speelde en schuif "Ritme" naar los als de kwantisatie te strak aanvoelt.
     {/if}
@@ -1238,6 +1314,10 @@
   .notation-cursor.counting { background: #7a2020; color: #fff; font-weight: 600; }
   .cursor-empty { color: #999; font-style: italic; }
   .metro-toggle { cursor: pointer; }
+  /* Stapinvoer: nootwaarde-palet */
+  .step-durs { display: inline-flex; gap: 0.15rem; }
+  .step-dur { font-size: 1.05rem; line-height: 1; padding: 0.15rem 0.4rem; }
+  .step-dur.active { background: var(--accent, #6a8); color: #fff; border-radius: 4px; }
 
   .notation-staves {
     display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem;
