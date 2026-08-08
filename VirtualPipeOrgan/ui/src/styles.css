@@ -2418,3 +2418,14 @@ input[type="range"]::-webkit-slider-thumb:hover {
 .kb-learn-ok { color: var(--success, #6c6); }
 .kb-learn-fout { color: var(--error, #e66); }
 .kb-learn-knoppen { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 0.9rem; }
+
+/* Update-melding (App.svelte): smalle balk onder de hoofdbalk. */
+.update-banner {
+  display: flex; align-items: center; gap: 0.6rem;
+  padding: 0.35rem 0.9rem;
+  background: var(--bg-elevated, #2e3a2e);
+  color: var(--text, #eee);
+  border-bottom: 1px solid var(--accent-soft, #555);
+  font-size: 0.85rem;
+  flex-shrink: 0;
+}

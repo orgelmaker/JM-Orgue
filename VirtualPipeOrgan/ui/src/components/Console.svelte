@@ -227,6 +227,37 @@
   // Poortlijst verversen wanneer de Algemene Instellingen open gaan.
   $: if (activeView === 'algemene-instellingen') fbRefreshOutputs();
 
+  // ===== Over & feedback (GitHub) =====
+  let appVersion = '';
+  let manualUpdateResult = null; // null | 'checking' | 'uptodate' | { version, url }
+  async function loadAppVersion() {
+    try {
+      const { getVersion } = await import('@tauri-apps/api/app');
+      appVersion = await getVersion();
+    } catch (e) {}
+  }
+  async function openFeedbackPage() {
+    try {
+      const { githubIssuesUrl } = await import('../lib/github.js');
+      await invoke('open_external_url', { url: githubIssuesUrl() });
+    } catch (e) { alert(`Kan de feedbackpagina niet openen: ${e}`); }
+  }
+  async function manualUpdateCheck() {
+    manualUpdateResult = 'checking';
+    try {
+      const { checkForUpdate } = await import('../lib/github.js');
+      if (!appVersion) await loadAppVersion();
+      const upd = await checkForUpdate(appVersion);
+      manualUpdateResult = upd || 'uptodate';
+    } catch (e) { manualUpdateResult = 'uptodate'; }
+  }
+  async function openManualUpdate() {
+    if (manualUpdateResult && manualUpdateResult.url) {
+      try { await invoke('open_external_url', { url: manualUpdateResult.url }); } catch (e) {}
+    }
+  }
+  $: if (activeView === 'algemene-instellingen' && !appVersion) loadAppVersion();
+
   // Geschatte uitgangslatentie: ~2× de bufferduur (dubbele buffering in de
   // driver). 0 frames = driver-default (onbekend, WASAPI ≈ 10 ms per buffer).
   $: audioLatencyMs = (audioStatus && audioStatus.buffer_frames > 0 && audioStatus.sample_rate > 0)
@@ -4843,6 +4874,31 @@
                   {:else}
                     Kies een poort en klik "Toepassen" om te verbinden.
                   {/if}
+                </p>
+              {/if}
+            </div>
+
+            <!-- Over & feedback: versie, GitHub-feedback en handmatige update-check -->
+            <div class="settings-block">
+              <h3 class="settings-block-title">Over &amp; feedback</h3>
+              <p class="settings-hint" style="margin: 0 0 0.5rem;">
+                JM-Orgue {appVersion ? `versie ${appVersion}` : ''} — © Martijn van der Kolk, alle rechten voorbehouden.
+                De code mag niet zonder toestemming worden gebruikt.
+              </p>
+              <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                <button class="btn btn-secondary btn-sm" on:click={openFeedbackPage} title="Opent de GitHub-issuespagina in je browser">
+                  Feedback / probleem melden
+                </button>
+                <button class="btn btn-ghost btn-sm" on:click={manualUpdateCheck} disabled={manualUpdateResult === 'checking'}>
+                  {manualUpdateResult === 'checking' ? 'Controleren…' : 'Controleer op updates'}
+                </button>
+              </div>
+              {#if manualUpdateResult === 'uptodate'}
+                <p class="settings-hint" style="margin: 0.4rem 0 0;">Je gebruikt de nieuwste versie.</p>
+              {:else if manualUpdateResult && manualUpdateResult.version}
+                <p class="settings-hint" style="margin: 0.4rem 0 0;">
+                  Nieuwe versie <b>{manualUpdateResult.version}</b> beschikbaar —
+                  <button class="btn btn-primary btn-sm" on:click={openManualUpdate}>Downloaden</button>
                 </p>
               {/if}
             </div>

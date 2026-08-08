@@ -410,6 +410,22 @@ pub fn disconnect_midi(state: State<AppState>) -> Result<(), String> {
     Ok(())
 }
 
+/// Open een https-URL in de standaardbrowser van de gebruiker (feedback-knop,
+/// release-pagina bij een update). Bewust via rundll32 FileProtocolHandler:
+/// geen shell-parsing van de URL (cmd /C start zou &-tekens interpreteren) en
+/// geen extra plugin-dependency. Alleen https:// toegestaan.
+#[tauri::command]
+pub fn open_external_url(url: String) -> Result<(), String> {
+    if !url.starts_with("https://") {
+        return Err("Alleen https-URL's kunnen geopend worden".into());
+    }
+    std::process::Command::new("rundll32")
+        .args(["url.dll,FileProtocolHandler", &url])
+        .spawn()
+        .map_err(|e| format!("Browser openen mislukt: {}", e))?;
+    Ok(())
+}
+
 // ===== MIDI-uit terugkoppeling (fase 1): registerlampen/display =====
 
 /// Beschikbare MIDI-uitgangspoorten (voor de terugkoppel-poortkeuze).

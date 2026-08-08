@@ -80,6 +80,30 @@
     '2': 61, '3': 63, '5': 66, '6': 68, '7': 70,
   };
 
+  // ---- Update-check (GitHub releases) ----
+  // Stil bij elke start; toont een wegklikbare balk wanneer er een nieuwere
+  // release staat. Wegklikken onthoudt die ene versie (volgende versie meldt
+  // zich gewoon weer). Faalt geluidloos zonder internet.
+  let updateInfo = null; // { version, url } of null
+  async function runUpdateCheck() {
+    try {
+      const { checkForUpdate } = await import('./lib/github.js');
+      const { getVersion } = await import('@tauri-apps/api/app');
+      const current = await getVersion();
+      const upd = await checkForUpdate(current);
+      if (upd && localStorage.getItem('jm-orgue-update-dismissed') !== upd.version) {
+        updateInfo = upd;
+      }
+    } catch (e) { /* stil — update-check mag de opstart nooit storen */ }
+  }
+  async function openUpdatePage() {
+    try { await invoke('open_external_url', { url: updateInfo.url }); } catch (e) {}
+  }
+  function dismissUpdate() {
+    try { localStorage.setItem('jm-orgue-update-dismissed', updateInfo.version); } catch (e) {}
+    updateInfo = null;
+  }
+
   // ---- Hoofdvenster-geometrie (globaal — het hoofdvenster is er maar één,
   // dus bewust níet per orgel zoals de panel-state). Zelfde aanpak als
   // PanelApp.saveGeometry: logische coördinaten, minimized negeren, en bij
@@ -150,6 +174,9 @@
     // en opende dus altijd op de standaardpositie).
     await restoreMainGeometry();
     initMainGeometryTracking();
+
+    // Update-check ná de drukke opstart (audio/orgel-load gaat vóór).
+    setTimeout(runUpdateCheck, 3000);
 
     await refreshDevices();
     await refreshStatus();
@@ -1143,6 +1170,16 @@
     on:setView={(e) => activeView = e.detail}
     on:toggleAudioProfile={() => switchAudioProfile()}
   />
+
+  {#if updateInfo}
+    <!-- Update-melding: wegklikken onthoudt déze versie; een volgende release
+         meldt zich gewoon weer (zie runUpdateCheck). -->
+    <div class="update-banner">
+      <span>Nieuwe versie <b>{updateInfo.version}</b> beschikbaar.</span>
+      <button class="btn btn-primary btn-sm" on:click={openUpdatePage}>Downloaden</button>
+      <button class="btn btn-ghost btn-sm" on:click={dismissUpdate} title="Deze melding voor deze versie niet meer tonen" aria-label="Sluiten">✕</button>
+    </div>
+  {/if}
 
   <div class="main-content">
     <Console

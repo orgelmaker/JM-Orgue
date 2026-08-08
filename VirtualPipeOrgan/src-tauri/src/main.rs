@@ -359,6 +359,7 @@ fn main() {
             commands::notation_set_metronome,
             commands::notation_set_durations,
             commands::notation_paste,
+            commands::open_external_url,
             commands::feedback_list_outputs,
             commands::feedback_configure,
             commands::feedback_apply,
