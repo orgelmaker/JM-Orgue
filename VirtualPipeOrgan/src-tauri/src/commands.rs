@@ -2569,6 +2569,43 @@ pub fn notation_set_layer_divisions(state: State<AppState>, score_id: u32, layer
     })
 }
 
+/// Maatsoort (x/4) van een live-score wijzigen — met undo, zoals bpm/toonsoort.
+#[tauri::command]
+pub fn notation_set_meter(state: State<AppState>, app: tauri::AppHandle, score_id: u32, beats_per_bar: u8) -> Result<u64, String> {
+    let gen = with_score_mut(&state, score_id, |sc| {
+        let cmd = crate::notation::EditCommand::SetMeter { old: sc.beats_per_bar, new: beats_per_bar };
+        if let Some(inv) = cmd.apply(sc) {
+            sc.push_undo(inv);
+        }
+        sc.generation
+    })?;
+    tauri::async_runtime::spawn(emit_score_changed(app, score_id, gen));
+    Ok(gen)
+}
+
+/// Titel van een live-score (boven de partituur + bestandsnaam-suggestie).
+#[tauri::command]
+pub fn notation_set_title(state: State<AppState>, app: tauri::AppHandle, score_id: u32, title: String) -> Result<u64, String> {
+    let gen = with_score_mut(&state, score_id, |sc| {
+        sc.title = title;
+        sc.bump_gen();
+        sc.generation
+    })?;
+    tauri::async_runtime::spawn(emit_score_changed(app, score_id, gen));
+    Ok(gen)
+}
+
+/// "Opslaan als MIDI…": exporteer de zichtbare takes als .mid-bestand.
+#[tauri::command]
+pub fn notation_export_midi(state: State<AppState>, score_id: u32, path: String) -> Result<(), String> {
+    let bytes = {
+        let scores = state.notation_scores.read();
+        let sc = scores.get(&score_id).ok_or_else(|| format!("Score {} niet gevonden", score_id))?;
+        crate::notation::score_to_smf_bytes(sc)?
+    };
+    std::fs::write(&path, bytes).map_err(|e| format!("MIDI-bestand opslaan mislukt: {}", e))
+}
+
 /// Stapinvoer aan/uit voor een score. Met stapinvoer aan stuurt de midi-thread
 /// step-note-events naar het notatievenster (de toets klinkt gewoon mee);
 /// het venster plaatst de noot op de invoercursor. Live-opname gaat altijd vóór.

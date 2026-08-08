@@ -550,6 +550,8 @@
       scoreId = await invoke('notation_new_score');
       score = await invoke('notation_get_score', { scoreId });
       syncMetronomeFromScore();
+      beatsPerBar = score.beats_per_bar || 4;
+      title = score.title || '';
       await loadDivisions();      // divisienamen voor wizard + LayerBar-chips
       openWizardFromScore();      // balkindeling kiezen vóór het inspelen
       lastGeneration = 0;
@@ -724,6 +726,27 @@
   }
   async function doUndo() { try { await invoke('notation_undo', { scoreId }); } catch (e) { alert(String(e)); } }
   async function doRedo() { try { await invoke('notation_redo', { scoreId }); } catch (e) { alert(String(e)); } }
+
+  // ---- Maatsoort + titel + MIDI-export (0.7.16) ----
+  async function setMeterLive(v) {
+    if (!isLive || scoreId == null) return;
+    beatsPerBar = Number(v) || 4;
+    try { await invoke('notation_set_meter', { scoreId, beatsPerBar }); } catch (e) {}
+  }
+  async function setTitleLive(v) {
+    if (!isLive || scoreId == null) return;
+    title = v;
+    try { await invoke('notation_set_title', { scoreId, title: v }); } catch (e) {}
+  }
+  async function saveMidiAs() {
+    if (!isLive || scoreId == null) return;
+    try {
+      const { save } = await import('@tauri-apps/plugin-dialog');
+      const suggested = (score?.title || 'opname') + '.mid';
+      const path = await save({ defaultPath: suggested, filters: [{ name: 'MIDI-bestand', extensions: ['mid'] }] });
+      if (path) { await invoke('notation_export_midi', { scoreId, path }); alert(`MIDI opgeslagen:\n${path}`); }
+    } catch (e) { alert(`MIDI opslaan mislukt: ${e}`); }
+  }
 
   // ---- Duur wijzigen + kopiëren/plakken (0.7.6) ----
   // In-app klembord (verdwijnt bij sluiten van het venster). Elke entry bewaart
@@ -961,6 +984,15 @@
           {#each keyChoices as k}<option value={k.v}>{k.label}</option>{/each}
         </select>
       </label>
+      <label>Maat
+        <select value={beatsPerBar} on:change={(e) => setMeterLive(e.currentTarget.value)}>
+          <option value={2}>2/4</option><option value={3}>3/4</option>
+          <option value={4}>4/4</option><option value={6}>6/4</option>
+        </select>
+      </label>
+      <label class="notation-title-field">Titel
+        <input type="text" value={title} on:change={(e) => setTitleLive(e.currentTarget.value)} />
+      </label>
       <label class="tolerance-slider" title="Sleep naar links voor letterlijk (los), naar rechts voor strak (hard kwantiseren)">
         Ritme
         <input type="range" min="0" max="100" step="5"
@@ -984,6 +1016,7 @@
       <button class="btn btn-ghost btn-sm" on:click={doUndo} title="Ongedaan (Ctrl+Z)">↶</button>
       <button class="btn btn-ghost btn-sm" on:click={doRedo} title="Opnieuw (Ctrl+Y)">↷</button>
       <button class="btn btn-ghost btn-sm" on:click={openMidiFile} title="Bestaand MIDI-bestand als extra take(s) in deze partituur importeren">Openen…</button>
+      <button class="btn btn-ghost btn-sm" on:click={saveMidiAs} title="Partituur (zichtbare takes) opslaan als MIDI-bestand">Opslaan als MIDI…</button>
       <button class="btn btn-primary btn-sm" on:click={printScore} disabled={!xml}>Afdrukken / PDF</button>
       <button class="btn btn-ghost btn-sm" on:click={saveMusicXml} disabled={!xml}>Opslaan</button>
     {:else}

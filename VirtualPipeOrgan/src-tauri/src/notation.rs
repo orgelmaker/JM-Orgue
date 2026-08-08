@@ -630,6 +630,60 @@ pub fn build_musicxml_from_score(score: &Score) -> Result<String, String> {
     build_musicxml(&staves, &opts)
 }
 
+/// Exporteer de zichtbare takes van een Score als Standard MIDI File (format 1,
+/// 480 ppq): track 0 = tempo + maatsoort, daarna één track per balk met noten
+/// (originele MIDI-kanalen behouden; note-off vóór note-on bij gelijke tick).
+pub fn score_to_smf_bytes(score: &Score) -> Result<Vec<u8>, String> {
+    use midly::{Smf, Header, Format, Timing, TrackEvent, TrackEventKind, MetaMessage, MidiMessage};
+    use midly::num::{u4, u7, u15, u24, u28};
+    const PPQ: u64 = 480;
+    let bpm = if score.bpm.is_finite() && score.bpm >= 20.0 && score.bpm <= 300.0 { score.bpm } else { 90.0 };
+    let us_per_qn: u32 = (60_000_000.0 / bpm).round() as u32;
+    let to_ticks = |us: u64| -> u64 { (us as u128 * PPQ as u128 / us_per_qn as u128) as u64 };
+
+    let mut smf = Smf::new(Header::new(Format::Parallel, Timing::Metrical(u15::new(PPQ as u16))));
+    let mut t0: Vec<TrackEvent> = Vec::new();
+    t0.push(TrackEvent { delta: u28::new(0), kind: TrackEventKind::Meta(MetaMessage::Tempo(u24::new(us_per_qn))) });
+    // Maatsoort x/4 (noemer als macht van 2: 2 → kwartnoot).
+    t0.push(TrackEvent { delta: u28::new(0), kind: TrackEventKind::Meta(MetaMessage::TimeSignature(score.beats_per_bar.clamp(1, 12), 2, 24, 8)) });
+    t0.push(TrackEvent { delta: u28::new(0), kind: TrackEventKind::Meta(MetaMessage::EndOfTrack) });
+    smf.tracks.push(t0);
+
+    for layer in &score.layers {
+        // (tick, soort 0=off/1=on, midi, kanaal) — off vóór on bij gelijke tick.
+        let mut evs: Vec<(u64, u8, u8, u8)> = Vec::new();
+        for take in layer.takes.iter().filter(|t| t.visible) {
+            for e in &take.events {
+                evs.push((to_ticks(e.start_us), 1, e.midi & 0x7F, e.channel & 0x0F));
+                evs.push((to_ticks(e.end_us.max(e.start_us + 1000)), 0, e.midi & 0x7F, e.channel & 0x0F));
+            }
+        }
+        if evs.is_empty() { continue; }
+        evs.sort_by_key(|&(t, kind, m, _)| (t, kind, m));
+        let mut track: Vec<TrackEvent> = Vec::new();
+        track.push(TrackEvent { delta: u28::new(0), kind: TrackEventKind::Meta(MetaMessage::TrackName(layer.name.as_bytes())) });
+        let mut last: u64 = 0;
+        for (t, kind, midi, ch) in evs {
+            let delta = t.saturating_sub(last).min(u32::from(u28::max_value()) as u64) as u32;
+            last = t;
+            let message = if kind == 1 {
+                MidiMessage::NoteOn { key: u7::new(midi), vel: u7::new(100) }
+            } else {
+                MidiMessage::NoteOff { key: u7::new(midi), vel: u7::new(0) }
+            };
+            track.push(TrackEvent { delta: u28::new(delta), kind: TrackEventKind::Midi { channel: u4::new(ch), message } });
+        }
+        track.push(TrackEvent { delta: u28::new(0), kind: TrackEventKind::Meta(MetaMessage::EndOfTrack) });
+        smf.tracks.push(track);
+    }
+    if smf.tracks.len() <= 1 {
+        return Err("Geen noten om te exporteren".into());
+    }
+    let mut out: Vec<u8> = Vec::new();
+    smf.write_std(&mut out).map_err(|e| format!("MIDI schrijven mislukt: {}", e))?;
+    Ok(out)
+}
+
 /// Undo-bare bewerkingen. Elk commando kent zijn eigen inverse; `apply`
 /// muteert de Score én push't de inverse op de undo-stack.
 #[derive(Debug, Clone)]
@@ -651,6 +705,8 @@ pub enum EditCommand {
     SetBpm { old: f64, new: f64 },
     /// Wijzig toonsoort.
     SetKey { old: i8, new: i8 },
+    /// Wijzig maatsoort (tellen per maat, x/4).
+    SetMeter { old: u8, new: u8 },
     /// Voeg een take toe (met inverse: verwijder die take).
     /// Voor de undo bewaren we ID + laag; content is leeg bij add.
     AddTake { layer: u32, take_id: u32 },
@@ -747,6 +803,11 @@ impl EditCommand {
                 score.key_fifths = new.clamp(-7, 7);
                 score.bump_gen();
                 Some(EditCommand::SetKey { old: new, new: old })
+            }
+            EditCommand::SetMeter { old, new } => {
+                score.beats_per_bar = new.clamp(1, 12);
+                score.bump_gen();
+                Some(EditCommand::SetMeter { old: new, new: old })
             }
             EditCommand::AddTake { layer, take_id } => {
                 // "Inverse" van add = de zojuist toegevoegde take verwijderen.
