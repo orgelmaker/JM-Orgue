@@ -472,6 +472,11 @@ pub struct Layer {
     pub takes: Vec<Take>,
     /// Take waar nieuwe MIDI-events in geschreven worden (armed).
     pub armed_take: Option<u32>,
+    /// Divisienamen die tijdens het inspelen naar déze balk routeren (via de
+    /// kanaal-inleer van die divisie). Leeg = geen routering; events zonder
+    /// passende divisie/balk vallen terug op de armed laag.
+    #[serde(default)]
+    pub divisions: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -553,6 +558,7 @@ impl Score {
             id, name, bass_clef,
             takes: vec![Take { id: take_id, name: "Take 1".into(), visible: true, events: Vec::new() }],
             armed_take: Some(take_id),
+            divisions: Vec::new(),
         });
         self.bump_gen();
         id

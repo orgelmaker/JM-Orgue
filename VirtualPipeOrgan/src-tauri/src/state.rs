@@ -1109,7 +1109,8 @@ impl AppState {
                     // Leg het ingespeelde event vast als er een MIDI-opname loopt
                     Self::capture_midi_event(&midi_recording, &msg);
                     Self::capture_notation_event(&msg, &notation_scores, &notation_armed_score,
-                        &notation_open_notes, &notation_start_time, &app_handle_notation);
+                        &notation_open_notes, &notation_start_time, &app_handle_notation,
+                        &midi_mappings);
 
                     // Check for preset triggers first
                     Self::check_preset_trigger(&msg, &preset_bindings, &preset_trigger_tx);
@@ -1267,6 +1268,7 @@ impl AppState {
         notation_open_notes: &Arc<RwLock<std::collections::HashMap<(u32, u32, u32, u8, u8), u64>>>,
         notation_start_time: &Arc<RwLock<Option<std::time::Instant>>>,
         app_handle: &Arc<RwLock<Option<tauri::AppHandle>>>,
+        midi_mappings: &Arc<RwLock<Vec<MidiChannelMapping>>>,
     ) {
         use tauri::Emitter;
         // Snelle uitgang: geen armed Score → niets doen (het gros van de MIDI-events).
@@ -1274,14 +1276,28 @@ impl AppState {
             Some(id) => id,
             None => return,
         };
-        // Bepaal de armed laag + take binnen deze score (kortste lock mogelijk).
+        // Doellaag bepalen: eerst divisie-routering (kanaal+noot → divisie via de
+        // inleer, → balk met die divisie toegewezen), anders de armed laag. De
+        // take is de armed take van de doellaag (of diens eerste take). Zo komt
+        // elke divisie tijdens het inspelen op zijn eigen balk terecht.
         let (layer_id, take_id) = {
+            let chan_note = match msg {
+                MidiMessage::NoteOn { channel, note, .. } => Some((*channel, *note)),
+                MidiMessage::NoteOff { channel, note, .. } => Some((*channel, *note)),
+                _ => None,
+            };
+            let division = chan_note.and_then(|(ch, nt)| {
+                let maps = midi_mappings.read();
+                maps.iter().find(|m| m.accepts(ch, nt)).map(|m| m.division.clone())
+            });
             let scores = notation_scores.read();
             let Some(sc) = scores.get(&score_id) else { return };
-            let Some(lid) = sc.armed_layer else { return };
-            let Some(layer) = sc.layers.iter().find(|l| l.id == lid) else { return };
-            let Some(tid) = layer.armed_take else { return };
-            (lid, tid)
+            let layer = division.as_ref()
+                .and_then(|d| sc.layers.iter().find(|l| l.divisions.iter().any(|x| x == d)))
+                .or_else(|| sc.armed_layer.and_then(|lid| sc.layers.iter().find(|l| l.id == lid)));
+            let Some(layer) = layer else { return };
+            let Some(tid) = layer.armed_take.or_else(|| layer.takes.first().map(|t| t.id)) else { return };
+            (layer.id, tid)
         };
 
         match msg {

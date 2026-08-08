@@ -2271,6 +2271,9 @@ pub fn notation_new_score(state: State<AppState>, app: tauri::AppHandle) -> Resu
                 let lname = d.name.to_lowercase();
                 let bass = lname.contains("pedaal") || lname.contains("pedal");
                 sc.add_layer(d.name.clone(), Some(bass));
+                // Standaard-routering: elke balk krijgt zijn eigen divisie, zodat
+                // inspelen meteen per divisie op de juiste balk landt (0.7.14).
+                if let Some(l) = sc.layers.last_mut() { l.divisions = vec![d.name.clone()]; }
             }
         }
         if sc.layers.is_empty() {
@@ -2522,6 +2525,48 @@ pub fn notation_set_key(state: State<AppState>, app: tauri::AppHandle, score_id:
     })?;
     tauri::async_runtime::spawn(emit_score_changed(app, score_id, gen));
     Ok(gen)
+}
+
+/// Eén balk-specificatie uit de wizard van het notatievenster.
+#[derive(serde::Deserialize)]
+pub struct LayerSpecDto {
+    pub name: String,
+    pub bass_clef: bool,
+    #[serde(default)]
+    pub divisions: Vec<String>,
+}
+
+/// Wizard: vervang de balkindeling van een nog lege score (aantal balken,
+/// naam, sleutel, divisie-routering). Alleen toegestaan zolang er geen noten
+/// zijn — daarna zou vervangen werk weggooien; wijzigingen gaan dan via
+/// notation_set_layer_divisions / notation_add_layer.
+#[tauri::command]
+pub fn notation_configure_layers(state: State<AppState>, app: tauri::AppHandle, score_id: u32, layers: Vec<LayerSpecDto>) -> Result<u64, String> {
+    if layers.is_empty() { return Err("Minstens één balk is nodig".into()); }
+    let gen = with_score_mut(&state, score_id, |sc| {
+        let has_events = sc.layers.iter().any(|l| l.takes.iter().any(|t| !t.events.is_empty()));
+        if has_events { return Err("De balkindeling kan alleen gewijzigd worden zolang de partituur leeg is".to_string()); }
+        sc.layers.clear();
+        for spec in layers {
+            sc.add_layer(spec.name, Some(spec.bass_clef));
+            if let Some(l) = sc.layers.last_mut() { l.divisions = spec.divisions; }
+        }
+        sc.armed_layer = sc.layers.first().map(|l| l.id);
+        Ok(sc.generation)
+    })??;
+    tauri::async_runtime::spawn(emit_score_changed(app, score_id, gen));
+    Ok(gen)
+}
+
+/// Divisie-routering van één balk wijzigen (LayerBar-chips). Geen notatie-
+/// wijziging → geen undo/generation-bump.
+#[tauri::command]
+pub fn notation_set_layer_divisions(state: State<AppState>, score_id: u32, layer_id: u32, divisions: Vec<String>) -> Result<(), String> {
+    with_score_mut(&state, score_id, |sc| {
+        if let Some(l) = sc.layers.iter_mut().find(|l| l.id == layer_id) {
+            l.divisions = divisions;
+        }
+    })
 }
 
 /// Metronoom-configuratie per score (aan/uit + aantal count-in-tellen). Puur

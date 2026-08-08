@@ -357,6 +357,8 @@ fn main() {
             commands::notation_set_bpm,
             commands::notation_set_key,
             commands::notation_set_metronome,
+            commands::notation_configure_layers,
+            commands::notation_set_layer_divisions,
             commands::notation_set_durations,
             commands::notation_paste,
             commands::open_external_url,

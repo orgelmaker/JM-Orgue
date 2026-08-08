@@ -382,6 +382,59 @@
   function removeStaff(staffIdx) { staffConfig = staffConfig.filter((_, i) => i !== staffIdx); scheduleRender(); }
   function setStaffBass(staffIdx, v) { staffConfig[staffIdx].bass = v; staffConfig = staffConfig; scheduleRender(); }
 
+  // ---- Wizard: balkindeling + divisie-routering (0.7.14) ----
+  // Bij het openen van het live-venster: kies aantal balken, naam, sleutel en
+  // welke divisies tijdens het inspelen naar welke balk routeren. Zolang de
+  // partituur leeg is kan de indeling volledig vervangen worden; daarna zijn
+  // alleen de divisie-chips per balk nog aanpasbaar (LayerBar).
+  let wizard = null; // { staves: [{name, bass, divisions: []}] } of null
+  let divEditLayerId = null; // LayerBar: balk waarvan de divisie-chips openstaan
+
+  function openWizardFromScore() {
+    wizard = {
+      staves: (score?.layers ?? []).map(l => ({
+        name: l.name,
+        bass: l.bass_clef === true || (l.bass_clef == null && isPedalName(l.name)),
+        divisions: [...(l.divisions || [])],
+      })),
+    };
+    if (wizard.staves.length === 0) wizard.staves = [{ name: 'Balk 1', bass: false, divisions: [] }];
+  }
+  function wizardAddStaff() {
+    wizard.staves = [...wizard.staves, { name: `Balk ${wizard.staves.length + 1}`, bass: false, divisions: [] }];
+  }
+  function wizardRemoveStaff(i) {
+    wizard.staves = wizard.staves.filter((_, idx) => idx !== i);
+  }
+  function wizardToggleDivision(i, div) {
+    const st = wizard.staves[i];
+    st.divisions = st.divisions.includes(div) ? st.divisions.filter(d => d !== div) : [...st.divisions, div];
+    wizard.staves = wizard.staves;
+  }
+  async function wizardApply() {
+    if (!wizard || wizard.staves.length === 0) return;
+    try {
+      await invoke('notation_configure_layers', {
+        scoreId,
+        layers: wizard.staves.map(s => ({ name: s.name || 'Balk', bass_clef: !!s.bass, divisions: s.divisions })),
+      });
+      score = await invoke('notation_get_score', { scoreId });
+      wizard = null;
+      scheduleRender();
+    } catch (e) { alert(String(e)); }
+  }
+  $: scoreHasEvents = (score?.layers ?? []).some(l => l.takes.some(t => t.events.length > 0));
+  async function setLayerDivisions(layerId, divs) {
+    try {
+      await invoke('notation_set_layer_divisions', { scoreId, layerId, divisions: divs });
+      score = await invoke('notation_get_score', { scoreId });
+    } catch (e) { alert(String(e)); }
+  }
+  function toggleLayerDivision(layer, div) {
+    const cur = layer.divisions || [];
+    setLayerDivisions(layer.id, cur.includes(div) ? cur.filter(d => d !== div) : [...cur, div]);
+  }
+
   // ---- Live-modus initieel + event-listeners ----
   let unlisteners = [];
   async function setupLive() {
@@ -389,6 +442,8 @@
       scoreId = await invoke('notation_new_score');
       score = await invoke('notation_get_score', { scoreId });
       syncMetronomeFromScore();
+      await loadDivisions();      // divisienamen voor wizard + LayerBar-chips
+      openWizardFromScore();      // balkindeling kiezen vóór het inspelen
       lastGeneration = 0;
       // Event-listeners voor live updates + edit-emits.
       const { listen } = await import('@tauri-apps/api/event');
@@ -692,6 +747,50 @@
 </script>
 
 <div class="notation-window">
+  {#if isLive && wizard}
+    <!-- Wizard: balkindeling + divisie-routering, vóór het inspelen. -->
+    <div class="wizard-overlay">
+      <div class="wizard-modal">
+        <h3>Balkindeling</h3>
+        <p class="wizard-hint">
+          Kies hoeveel notenbalken je wilt, met welke sleutel, en welke divisies
+          tijdens het inspelen naar welke balk gaan. Meerdere opnamen (takes) over
+          elkaar per balk kan daarna via de LayerBar.
+        </p>
+        {#each wizard.staves as st, i}
+          <div class="wizard-staff">
+            <input class="wizard-staff-name" type="text" bind:value={st.name} title="Naam van de balk" />
+            <select bind:value={st.bass} title="Sleutel">
+              <option value={false}>𝄞 viool</option>
+              <option value={true}>𝄢 bas</option>
+            </select>
+            <span class="wizard-divs">
+              {#each divisions as div}
+                <label class="wizard-div">
+                  <input type="checkbox" checked={st.divisions.includes(div)} on:change={() => wizardToggleDivision(i, div)} />
+                  {div}
+                </label>
+              {/each}
+              {#if divisions.length === 0}<span class="wizard-hint">geen orgel geladen — routering kan later</span>{/if}
+            </span>
+            {#if wizard.staves.length > 1}
+              <button class="wizard-remove" on:click={() => wizardRemoveStaff(i)} title="Balk verwijderen" aria-label="Balk verwijderen">×</button>
+            {/if}
+          </div>
+        {/each}
+        <div class="wizard-actions">
+          <button class="btn btn-ghost btn-sm" on:click={wizardAddStaff}>+ Balk</button>
+          <span class="notation-spacer"></span>
+          {#if scoreHasEvents}
+            <span class="wizard-hint">Er staan al noten — indeling vervangen kan alleen bij een lege partituur.</span>
+            <button class="btn btn-secondary btn-sm" on:click={() => wizard = null}>Sluiten</button>
+          {:else}
+            <button class="btn btn-primary btn-sm" on:click={wizardApply}>Start met deze indeling</button>
+          {/if}
+        </div>
+      </div>
+    </div>
+  {/if}
   <div class="notation-toolbar">
     {#if isLive}
       <button
@@ -813,9 +912,28 @@
             {/each}
             <button class="btn btn-ghost btn-sm take-add" on:click={() => addTake(layer.id)} title="Nieuwe take (overdub)">+</button>
           </span>
+          <!-- Divisie-routering van deze balk (klik om te wijzigen) -->
+          <button
+            class="layer-divs"
+            on:click={() => divEditLayerId = divEditLayerId === layer.id ? null : layer.id}
+            title="Welke divisies routeren tijdens het inspelen naar deze balk"
+          >
+            {(layer.divisions && layer.divisions.length) ? layer.divisions.join(' + ') : 'geen divisie'} ▾
+          </button>
+          {#if divEditLayerId === layer.id}
+            <span class="layer-divs-edit">
+              {#each divisions as div}
+                <label class="wizard-div">
+                  <input type="checkbox" checked={(layer.divisions || []).includes(div)} on:change={() => toggleLayerDivision(layer, div)} />
+                  {div}
+                </label>
+              {/each}
+            </span>
+          {/if}
         </div>
       {/each}
       <button class="btn btn-ghost btn-sm layer-add" on:click={addLayer} title="Nieuwe notenbalk">+ Balk</button>
+      <button class="btn btn-ghost btn-sm" on:click={openWizardFromScore} title="Balkindeling (wizard) openen">Indeling…</button>
     </div>
 
     <!-- Selectie/cursor-indicator; klik in de bladmuziek selecteert een noot. -->
@@ -967,6 +1085,42 @@
   .notation-staff-div { display: flex; align-items: center; gap: 0.2rem; white-space: nowrap; cursor: pointer; }
   .notation-staff-bass { font-size: 1.1rem; line-height: 1; }
   .notation-staff-remove { border: none; background: none; color: #cc6666; font-size: 1rem; cursor: pointer; padding: 0 0.2rem; }
+
+  /* Wizard: balkindeling + divisie-routering */
+  .wizard-overlay {
+    position: fixed; inset: 0; z-index: 50;
+    background: rgba(0, 0, 0, 0.55);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .wizard-modal {
+    background: var(--bg-panel, #2a2a2a); color: var(--text, #eee);
+    border: 1px solid var(--accent-soft, #555); border-radius: 8px;
+    padding: 1rem 1.2rem; max-width: 46rem; width: calc(100% - 3rem);
+    max-height: 80vh; overflow-y: auto;
+  }
+  .wizard-modal h3 { margin: 0 0 0.4rem; }
+  .wizard-hint { font-size: 0.78rem; color: var(--text-muted, #aaa); margin: 0 0 0.6rem; }
+  .wizard-staff {
+    display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem;
+    padding: 0.35rem 0.5rem; margin-bottom: 0.4rem;
+    border: 1px solid var(--accent-soft, #555); border-radius: 6px;
+  }
+  .wizard-staff-name { width: 9rem; }
+  .wizard-divs { display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem; }
+  .wizard-div { display: flex; align-items: center; gap: 0.25rem; font-size: 0.8rem; white-space: nowrap; cursor: pointer; }
+  .wizard-remove { margin-left: auto; border: none; background: none; color: #cc6666; font-size: 1.1rem; cursor: pointer; }
+  .wizard-actions { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.6rem; }
+  .layer-divs {
+    border: 1px dashed var(--accent-soft, #666); border-radius: 5px;
+    background: transparent; color: var(--text-muted, #bbb);
+    font-size: 0.72rem; padding: 0.1rem 0.4rem; cursor: pointer;
+  }
+  .layer-divs-edit {
+    display: flex; align-items: center; flex-wrap: wrap; gap: 0.45rem;
+    padding: 0.15rem 0.4rem;
+    border: 1px solid var(--accent-soft, #555); border-radius: 5px;
+    background: var(--bg-elevated, #333);
+  }
 
   .notation-error { padding: 0.5rem 0.75rem; background: #7a2020; color: #fff; font-size: 0.85rem; }
   .notation-busy { padding: 0.35rem 0.75rem; background: #f4ecd4; color: #6b5b1e; font-size: 0.8rem; }
