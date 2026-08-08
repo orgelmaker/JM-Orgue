@@ -409,6 +409,43 @@
     }
   }
 
+  // ===== Consoleknoppen (pistons): zichtbare inleer-lijst (0.7.19) =====
+  // Deze acties waren alleen inleerbaar via rechtermuis/3s op de setzerbalk
+  // (en "Computer afsluiten" helemaal nergens). Eén vindbare lijst in de
+  // Algemene Instellingen; hergebruikt learn_preset_binding/clear_preset_binding.
+  const GLOBAL_ACTIONS = [
+    { code: 10, name: 'SET — registratie opslaan' },
+    { code: 11, name: 'Afsteller — alles af (GC)' },
+    { code: 12, name: 'Preset −1' },
+    { code: 13, name: 'Preset +1' },
+    { code: 14, name: 'Preset −10' },
+    { code: 15, name: 'Preset +10' },
+    { code: 16, name: 'Geheugenniveau M1' },
+    { code: 17, name: 'Geheugenniveau M2' },
+    { code: 18, name: 'Geheugenniveau M3' },
+    { code: 19, name: 'Geheugenniveau M4' },
+    { code: 20, name: 'Geheugenniveau M5' },
+    { code: 21, name: 'Geheugenniveau M6' },
+    { code: 22, name: 'Geheugenniveau M7' },
+    { code: 23, name: 'Geheugenniveau M8' },
+    { code: 40, name: 'EQ aan/uit' },
+    { code: 41, name: 'Generaal crescendo aan/uit' },
+    { code: 42, name: 'Computer afsluiten' },
+    { code: 43, name: 'Speakers ↔ hoofdtelefoon' },
+  ];
+  let showActionLearnList = false;
+  $: actionBound = (() => {
+    const m = {};
+    for (const b of midiBindingsFull) m[b.preset_num] = (m[b.preset_num] || 0) + 1;
+    return m;
+  })();
+  async function clearGlobalAction(actionCode) {
+    try {
+      await invoke('clear_preset_binding', { presetNum: actionCode });
+      await refreshMidiBindingsFull();
+    } catch (e) {}
+  }
+
   async function learnGlobalAction(actionCode) {
     globalLearningAction = actionCode;
     try {
@@ -4983,6 +5020,38 @@
                     Kies een poort en klik "Toepassen" om te verbinden.
                   {/if}
                 </p>
+              {/if}
+            </div>
+
+            <!-- Consoleknoppen (pistons): vaste functies inleerbaar op één plek -->
+            <div class="settings-block">
+              <h3 class="settings-block-title">Consoleknoppen inleren</h3>
+              <p class="settings-hint" style="margin: 0 0 0.5rem;">
+                Leer vaste consoleknoppen (pistons) in: afsteller, SET, preset-stappen,
+                geheugenniveaus, computer afsluiten, enz. De cijferknoppen 0–9 leer je op
+                de setzerbalk zelf (rechtermuisklik of 3 s ingedrukt houden).
+              </p>
+              <button class="btn btn-ghost btn-sm" on:click={() => { showActionLearnList = !showActionLearnList; if (showActionLearnList) refreshMidiBindingsFull(); }}>
+                {showActionLearnList ? 'Verberg lijst' : 'Knoppen inleren…'}
+              </button>
+              {#if showActionLearnList}
+                {#if globalLearningAction != null}
+                  <p class="settings-hint" style="color: var(--warning, #db5); margin: 0.4rem 0 0;">
+                    Druk nu op de gewenste knop op je console… (20 s)
+                  </p>
+                {/if}
+                <div class="fb-learn-list" style="margin-top: 0.4rem;">
+                  {#each GLOBAL_ACTIONS as a (a.code)}
+                    <div class="fb-learn-row" class:learning={globalLearningAction === a.code}>
+                      <span class="fb-learn-name">{a.name}</span>
+                      <span class="fb-learn-note">{actionBound[a.code] ? '✓ ingeleerd' : '—'}</span>
+                      <button class="btn btn-ghost btn-sm" on:click={() => learnGlobalAction(a.code)} disabled={globalLearningAction != null}>
+                        {globalLearningAction === a.code ? '…' : 'Inleer'}
+                      </button>
+                      <button class="btn btn-ghost btn-sm" on:click={() => clearGlobalAction(a.code)} disabled={!actionBound[a.code] || globalLearningAction != null} title="Koppeling wissen">×</button>
+                    </div>
+                  {/each}
+                </div>
               {/if}
             </div>
 
