@@ -2445,3 +2445,17 @@ input[type="range"]::-webkit-slider-thumb:hover {
 .fb-learn-row.learning { background: rgba(220, 180, 60, 0.15); }
 .fb-learn-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fb-learn-note { color: var(--text-muted, #aaa); min-width: 5.5rem; text-align: right; }
+
+/* Feedback-popup (Console.svelte) */
+.fbk-overlay {
+  position: fixed; inset: 0; z-index: 60;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex; align-items: center; justify-content: center;
+}
+.fbk-modal {
+  background: var(--bg-panel, #2a2a2a); color: var(--text, #eee);
+  border: 1px solid var(--accent-soft, #555); border-radius: 8px;
+  padding: 1rem 1.2rem; max-width: 32rem; width: calc(100% - 3rem);
+}
+.fbk-modal h3 { margin: 0 0 0.4rem; }
+.fbk-modal textarea, .fbk-modal input { box-sizing: border-box; }

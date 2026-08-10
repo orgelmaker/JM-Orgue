@@ -321,6 +321,35 @@
       await invoke('open_external_url', { url: githubIssuesUrl() });
     } catch (e) { alert(`Kan de feedbackpagina niet openen: ${e}`); }
   }
+
+  // Feedback-popup (0.7.23): bericht gaat via een mail-relay (FEEDBACK_ENDPOINT
+  // in lib/github.js) rechtstreeks als e-mail naar de maker — zonder dat diens
+  // adres in de app staat. Zonder endpoint valt de popup terug op GitHub-issues.
+  let fbkOpen = false;
+  let fbkMessage = '';
+  let fbkEmail = '';
+  let fbkStatus = null; // null | 'sending' | 'ok' | 'error' | 'noendpoint'
+  async function fbkSubmit() {
+    if (!fbkMessage.trim() || fbkStatus === 'sending') return;
+    fbkStatus = 'sending';
+    try {
+      const { FEEDBACK_ENDPOINT } = await import('../lib/github.js');
+      if (!FEEDBACK_ENDPOINT) { fbkStatus = 'noendpoint'; return; }
+      if (!appVersion) await loadAppVersion();
+      const res = await fetch(FEEDBACK_ENDPOINT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({
+          bericht: fbkMessage,
+          afzender: fbkEmail || '(geen afzender opgegeven)',
+          versie: appVersion || '?',
+          orgel: organInfo?.name || '-',
+        }),
+      });
+      fbkStatus = res.ok ? 'ok' : 'error';
+      if (res.ok) fbkMessage = '';
+    } catch (e) { fbkStatus = 'error'; }
+  }
   async function manualUpdateCheck() {
     manualUpdateResult = 'checking';
     try {
@@ -5087,13 +5116,42 @@
                 De code mag niet zonder toestemming worden gebruikt.
               </p>
               <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
-                <button class="btn btn-secondary btn-sm" on:click={openFeedbackPage} title="Opent de GitHub-issuespagina in je browser">
-                  Feedback / probleem melden
+                <button class="btn btn-secondary btn-sm" on:click={() => { fbkOpen = true; fbkStatus = null; }} title="Stuur een bericht dat rechtstreeks (per e-mail) bij de maker binnenkomt">
+                  Feedback sturen…
+                </button>
+                <button class="btn btn-ghost btn-sm" on:click={openFeedbackPage} title="Opent de GitHub-issuespagina in je browser">
+                  Via GitHub (issues)
                 </button>
                 <button class="btn btn-ghost btn-sm" on:click={manualUpdateCheck} disabled={manualUpdateResult === 'checking'}>
                   {manualUpdateResult === 'checking' ? 'Controleren…' : 'Controleer op updates'}
                 </button>
               </div>
+              {#if fbkOpen}
+                <div class="fbk-overlay">
+                  <div class="fbk-modal">
+                    <h3>Feedback sturen</h3>
+                    <p class="settings-hint" style="margin: 0 0 0.5rem;">
+                      Je bericht gaat rechtstreeks naar de maker. Er wordt niets meegestuurd
+                      behalve wat hieronder staat plus het versienummer en de orgelnaam.
+                    </p>
+                    <textarea rows="6" bind:value={fbkMessage} placeholder="Wat wil je melden? (bug, wens, vraag…)" style="width: 100%; resize: vertical;"></textarea>
+                    <input type="text" bind:value={fbkEmail} placeholder="Je e-mailadres (optioneel — voor een antwoord)" style="width: 100%; margin-top: 0.4rem;" />
+                    {#if fbkStatus === 'ok'}
+                      <p class="settings-hint" style="color: var(--success); margin: 0.4rem 0 0;">Verzonden — dank je wel!</p>
+                    {:else if fbkStatus === 'error'}
+                      <p class="settings-hint" style="color: var(--error, #e66); margin: 0.4rem 0 0;">Versturen mislukt (geen internet?). Probeer het later nog eens of gebruik de GitHub-knop.</p>
+                    {:else if fbkStatus === 'noendpoint'}
+                      <p class="settings-hint" style="color: var(--warning, #db5); margin: 0.4rem 0 0;">De mail-route is nog niet geconfigureerd in deze versie — gebruik voorlopig de GitHub-knop.</p>
+                    {/if}
+                    <div style="display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 0.6rem;">
+                      <button class="btn btn-ghost btn-sm" on:click={() => { fbkOpen = false; }}>Sluiten</button>
+                      <button class="btn btn-primary btn-sm" on:click={fbkSubmit} disabled={!fbkMessage.trim() || fbkStatus === 'sending'}>
+                        {fbkStatus === 'sending' ? 'Versturen…' : 'Versturen'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              {/if}
               {#if manualUpdateResult === 'uptodate'}
                 <p class="settings-hint" style="margin: 0.4rem 0 0;">Je gebruikt de nieuwste versie.</p>
               {:else if manualUpdateResult && manualUpdateResult.version}

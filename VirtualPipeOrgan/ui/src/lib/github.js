@@ -4,6 +4,14 @@
 
 export const GITHUB_REPO = 'orgelmaker/JM-Orgue';
 
+// Feedback-per-mail relay (Formspree of vergelijkbaar): berichten uit de
+// feedback-popup worden hierheen ge-POST en komen als e-mail bij de maker
+// binnen — zonder dat het e-mailadres in de app of de repo staat. Leeg =
+// nog niet geconfigureerd; de popup valt dan terug op de GitHub-issues-route.
+// Instellen: gratis formulier aanmaken op formspree.io (doel: je eigen mail),
+// en hier de endpoint-URL invullen, bv. 'https://formspree.io/f/abcdwxyz'.
+export const FEEDBACK_ENDPOINT = '';
+
 export const githubRepoUrl = () => `https://github.com/${GITHUB_REPO}`;
 export const githubIssuesUrl = () => `https://github.com/${GITHUB_REPO}/issues`;
 
