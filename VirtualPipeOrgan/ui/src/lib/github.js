@@ -10,7 +10,7 @@ export const GITHUB_REPO = 'orgelmaker/JM-Orgue';
 // nog niet geconfigureerd; de popup valt dan terug op de GitHub-issues-route.
 // Instellen: gratis formulier aanmaken op formspree.io (doel: je eigen mail),
 // en hier de endpoint-URL invullen, bv. 'https://formspree.io/f/abcdwxyz'.
-export const FEEDBACK_ENDPOINT = '';
+export const FEEDBACK_ENDPOINT = 'https://formspree.io/f/xvkpkqev';
 
 export const githubRepoUrl = () => `https://github.com/${GITHUB_REPO}`;
 export const githubIssuesUrl = () => `https://github.com/${GITHUB_REPO}/issues`;
