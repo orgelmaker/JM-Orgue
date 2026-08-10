@@ -5130,9 +5130,13 @@
                 <div class="fbk-overlay">
                   <div class="fbk-modal">
                     <h3>Feedback sturen</h3>
-                    <p class="settings-hint" style="margin: 0 0 0.5rem;">
+                    <p class="settings-hint" style="margin: 0 0 0.35rem;">
                       Je bericht gaat rechtstreeks naar de maker. Er wordt niets meegestuurd
                       behalve wat hieronder staat plus het versienummer en de orgelnaam.
+                    </p>
+                    <p class="settings-hint" style="margin: 0 0 0.5rem; font-style: italic;">
+                      Let op: JM-Orgue is een hobbyproject — een reactie kan daarom enkele
+                      dagen duren. Alvast dank voor je geduld!
                     </p>
                     <textarea rows="6" bind:value={fbkMessage} placeholder="Wat wil je melden? (bug, wens, vraag…)" style="width: 100%; resize: vertical;"></textarea>
                     <input type="text" bind:value={fbkEmail} placeholder="Je e-mailadres (optioneel — voor een antwoord)" style="width: 100%; margin-top: 0.4rem;" />
