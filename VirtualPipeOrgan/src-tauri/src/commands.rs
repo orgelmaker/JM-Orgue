@@ -892,6 +892,23 @@ pub fn do_load_organ(state: &AppState, path: &str) -> Result<OrganInfoDto, Strin
 /// en riep do_load_organ aan, die hem opnieuw nam → audio-wissel voorgoed
 /// vast en elke volgende load/autosave bevroor de hele app.
 pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto, String> {
+    // Watchdog pauzeren voor de duur van de load (RAII: ook bij een vroege
+    // ?-return gaat de vlag weer uit). Een zware load kan ASIO4ALL-callbacks
+    // tijdelijk laten haperen; zonder pauze escaleerde de watchdog dat tot een
+    // volledige audio-herstart waarbij ASIO soms verloren ging (→ WASAPI).
+    struct WatchdogHoldGuard(Option<std::sync::Arc<std::sync::atomic::AtomicBool>>);
+    impl Drop for WatchdogHoldGuard {
+        fn drop(&mut self) {
+            if let Some(f) = &self.0 { f.store(false, std::sync::atomic::Ordering::Relaxed); }
+        }
+    }
+    let _watchdog_hold = {
+        let guard = state.audio_player.read();
+        let flag = guard.as_ref().map(|p| p.watchdog_hold.clone());
+        if let Some(f) = &flag { f.store(true, std::sync::atomic::Ordering::Relaxed); }
+        WatchdogHoldGuard(flag)
+    };
+
     // Normaliseer de pad-notatie (test-API/scripts leveren soms forward
     // slashes): orgel-id, bibliotheek en per-orgel-settings zien zo altijd
     // dezelfde vorm — voorkomt dubbele bibliotheek-entries.

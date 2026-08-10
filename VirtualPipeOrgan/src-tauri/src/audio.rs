@@ -946,6 +946,13 @@ pub struct AudioPlayer {
     /// apparaat verdwenen en de nieuwe default heeft een ander formaat). De
     /// herstel-thread (main.rs) ziet deze vlag en bouwt de HELE player opnieuw.
     pub restart_needed: Arc<AtomicBool>,
+    /// Teller van geleverde audio-callbacks (loopt zolang de stream leeft).
+    /// Gebruikt door het noodherstel om een vals alarm uit te sluiten.
+    pub callbacks_seen: Arc<AtomicU64>,
+    /// Watchdog-pauze: tijdens een orgel-load is een callback-stilte verwacht
+    /// (zware disk/CPU hapert ASIO4ALL). Zolang deze vlag staat escaleert de
+    /// watchdog niet (geen herbouwpogingen, geen volledige-herstart-vlag).
+    pub watchdog_hold: Arc<AtomicBool>,
     /// True zodra de audio-thread volledig is afgerond (stream/driver vrij).
     thread_done: Arc<AtomicBool>,
 }
@@ -1001,6 +1008,8 @@ impl AudioPlayer {
         let channels_clone = current_channels.clone();
         let restart_clone = restart_needed.clone();
         let callbacks_clone = callbacks_seen.clone();
+        let watchdog_hold = Arc::new(AtomicBool::new(false));
+        let watchdog_hold_clone = watchdog_hold.clone();
         // Readiness channel: the audio thread reports whether the output stream
         // actually built+started, so we can fail cleanly (e.g. ASIO unavailable)
         // instead of silently ending up with no audio.
@@ -1010,7 +1019,7 @@ impl AudioPlayer {
             if let Err(e) = run_audio_thread(
                 command_rx, voice_count_clone, peak_left_clone, peak_right_clone,
                 running_clone, sr_clone, cfg, host_clone, device_clone, buffer_clone,
-                channels_clone, restart_clone, callbacks_clone, ready_tx,
+                channels_clone, restart_clone, callbacks_clone, watchdog_hold_clone, ready_tx,
             ) {
                 error!("Audio thread error: {}", e);
             }
@@ -1071,6 +1080,8 @@ impl AudioPlayer {
             current_buffer_frames,
             current_channels,
             restart_needed,
+            callbacks_seen,
+            watchdog_hold,
             thread_done,
         })
     }
@@ -1168,6 +1179,7 @@ fn run_audio_thread(
     channels_out: Arc<RwLock<u16>>,
     restart_needed: Arc<AtomicBool>,
     callbacks_seen: Arc<AtomicU64>,
+    watchdog_hold: Arc<AtomicBool>,
     ready_tx: crossbeam_channel::Sender<Result<(), String>>,
 ) -> Result<(), String> {
     use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -2840,6 +2852,22 @@ fn run_audio_thread(
     while running.load(Ordering::Relaxed) {
         thread::sleep(std::time::Duration::from_millis(100));
         ticks += 1;
+
+        // Orgel-load bezig: callback-stilte is dan verwacht (zware disk/CPU kan
+        // ASIO4ALL laten haperen). Niet meten en zeker niet escaleren; alle
+        // tellers schoon zodat er na de load met een verse lei gemeten wordt.
+        // Dit stopt de watchdog-amplificatie die bij een orgelwissel "soms de
+        // ASIO kwijt" raakte (herbouw-spiraal → volledige herstart → WASAPI).
+        if watchdog_hold.load(Ordering::Relaxed) {
+            rebuild_pending = false;
+            rebuild_failures = 0;
+            verify_since = None;
+            error_suspect = None;
+            was_flowing = false;
+            prev_count = cb_count.load(Ordering::Relaxed);
+            let _ = stream_error.swap(false, Ordering::Relaxed);
+            continue;
+        }
 
         if stream_error.swap(false, Ordering::Relaxed)
             && error_suspect.is_none()

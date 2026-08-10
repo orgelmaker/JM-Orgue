@@ -2629,6 +2629,24 @@ impl AppState {
             return None;
         }
 
+        // Vals alarm uitsluiten (0.7.22): lopen de callbacks inmiddels gewoon
+        // weer (de stilte was tijdelijk — bv. een zware orgel-load), dan niets
+        // herbouwen. De vlag is hierboven al gewist; bij een échte stilstand
+        // zet de watchdog hem vanzelf opnieuw en komen we hier terug.
+        let alive_before = self.audio_player.read().as_ref()
+            .map(|p| p.callbacks_seen.load(std::sync::atomic::Ordering::Relaxed));
+        if let Some(c0) = alive_before {
+            std::thread::sleep(std::time::Duration::from_millis(400));
+            let alive_after = self.audio_player.read().as_ref()
+                .map(|p| p.callbacks_seen.load(std::sync::atomic::Ordering::Relaxed));
+            if let Some(c1) = alive_after {
+                if c1 > c0 {
+                    tracing::info!("Audio-noodherstel overgeslagen: callbacks lopen weer ({} → {})", c0, c1);
+                    return None;
+                }
+            }
+        }
+
         tracing::warn!("Audio-noodherstel: volledige audio-herstart (watchdog kreeg de stream niet meer aan de praat)");
         // Voorkeur pas binnen de gate lezen: een zojuist gelukte handmatige
         // keuze wordt zo meegenomen in plaats van een verouderde voorkeur.
