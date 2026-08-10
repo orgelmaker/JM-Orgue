@@ -2054,6 +2054,12 @@
   export async function closeAllPanels() {
     if (secondary) return; // vensterbeheer is exclusief het hoofdvenster
     try {
+      // Panelen laten weten dat dít programmatisch sluiten is (orgelwissel/
+      // afsluiten) — anders zou hun kruisje-handler de hele app afsluiten (0.7.21).
+      try {
+        const { emit } = await import('@tauri-apps/api/event');
+        await emit('jm-orgue:panels-closing');
+      } catch (e) {}
       const { getAllWebviewWindows } = await import('@tauri-apps/api/webviewWindow');
       const wins = (await getAllWebviewWindows()).filter(w => w.label && w.label.startsWith('panel-'));
       panelCloseGuard += wins.length;
@@ -2122,17 +2128,35 @@
       // stil en werd door de error-handler ook nog uit de bewaarde lijst gewist.
       const label = `panel-${screenNum}-${Date.now()}`;
       const offset = openPanels.length;
+      // Fysieke geometrie (px/py/pw/ph, 0.7.21) wordt NA aanmaak toegepast via
+      // setPosition/setSize — de config-x/y zijn logisch en misplaatsten
+      // vensters op een tweede beeldscherm met andere schaal. Oude logische
+      // opslag (x/y/width/height) dient alleen nog als beginschatting.
+      const hasPhysical = st && typeof st.px === 'number';
       const webview = new WebviewWindow(label, {
         url: `index.html#panel&n=${screenNum}`,
         title: `JM-Orgue - Scherm ${screenNum}`,
-        width: (st && st.width >= 200) ? Math.min(st.width, 4000) : 700,
-        height: (st && st.height >= 150) ? Math.min(st.height, 4000) : 500,
+        width: (!hasPhysical && st && st.width >= 200) ? Math.min(st.width, 4000) : 700,
+        height: (!hasPhysical && st && st.height >= 150) ? Math.min(st.height, 4000) : 500,
         decorations: true,
         resizable: true,
         center: false,
-        x: (st && typeof st.x === 'number') ? st.x : 100 + (offset * 30),
-        y: (st && typeof st.y === 'number') ? st.y : 100 + (offset * 30),
+        x: (!hasPhysical && st && typeof st.x === 'number') ? st.x : 100 + (offset * 30),
+        y: (!hasPhysical && st && typeof st.y === 'number') ? st.y : 100 + (offset * 30),
       });
+      if (hasPhysical) {
+        webview.once('tauri://created', async () => {
+          try {
+            const { PhysicalPosition, PhysicalSize } = await import('@tauri-apps/api/dpi');
+            if (st.px > -30000 && st.py > -30000) {
+              await webview.setPosition(new PhysicalPosition(st.px, st.py));
+            }
+            if (st.pw >= 200 && st.ph >= 150) {
+              await webview.setSize(new PhysicalSize(Math.min(st.pw, 16000), Math.min(st.ph, 16000)));
+            }
+          } catch (e) { /* venster blijft dan op de beginschatting staan */ }
+        });
+      }
       const panelEntry = { label, number: screenNum };
       openPanels = [...openPanels, panelEntry];
       savePanelsOpenList();

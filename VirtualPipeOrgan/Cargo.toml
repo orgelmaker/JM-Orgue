@@ -10,7 +10,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.7.20"
+version = "0.7.21"
 edition = "2021"
 authors = ["Martijn <martijn@3bm.co.nl>"]
 # Alle rechten voorbehouden — zie ../LICENSE (geen gebruik zonder toestemming).

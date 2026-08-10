@@ -109,19 +109,25 @@
   // PanelApp.saveGeometry: logische coördinaten, minimized negeren, en bij
   // gemaximaliseerd alleen de vlag bijwerken zodat "herstellen" na een
   // herstart op de laatst bekende vensterpositie terugvalt.
+  // FYSIEKE pixels (0.7.21): logische coördinaten zijn dubbelzinnig bij meerdere
+  // beeldschermen met verschillende schaal — precies de opstelling van een
+  // orgelconsole. Fysieke coördinaten zijn absoluut over alle monitoren.
   const MAIN_GEOM_KEY = 'jm-orgue-main-window';
   let mainGeomTimer = null;
   async function restoreMainGeometry() {
     try {
       const st = JSON.parse(localStorage.getItem(MAIN_GEOM_KEY) || 'null');
-      if (!st) return;
-      const { getCurrentWindow, LogicalPosition, LogicalSize } = await import('@tauri-apps/api/window');
+      // Alleen het nieuwe fysieke formaat herstellen; oude logische opslag
+      // (x/y/width/height) bewust negeren — verkeerd terugrekenen is erger
+      // dan één keer opnieuw neerzetten.
+      if (!st || typeof st.px !== 'number') return;
+      const { getCurrentWindow, PhysicalPosition, PhysicalSize } = await import('@tauri-apps/api/window');
       const w = getCurrentWindow();
-      if (typeof st.x === 'number' && typeof st.y === 'number' && st.x > -30000 && st.y > -30000) {
-        await w.setPosition(new LogicalPosition(st.x, st.y));
+      if (st.px > -30000 && st.py > -30000) {
+        await w.setPosition(new PhysicalPosition(st.px, st.py));
       }
-      if (st.width >= 400 && st.height >= 300) {
-        await w.setSize(new LogicalSize(Math.min(st.width, 8000), Math.min(st.height, 8000)));
+      if (st.pw >= 400 && st.ph >= 300) {
+        await w.setSize(new PhysicalSize(Math.min(st.pw, 16000), Math.min(st.ph, 16000)));
       }
       if (st.maximized) await w.maximize();
     } catch (e) { /* niet in Tauri of corrupte opslag — standaardpositie is prima */ }
@@ -136,13 +142,11 @@
         localStorage.setItem(MAIN_GEOM_KEY, JSON.stringify({ ...prev, maximized: true }));
         return;
       }
-      const factor = await w.scaleFactor();
-      const pos = (await w.outerPosition()).toLogical(factor);
-      const size = (await w.innerSize()).toLogical(factor);
+      const pos = await w.outerPosition();   // fysieke pixels
+      const size = await w.innerSize();      // fysieke pixels
       if (pos.x < -30000 || pos.y < -30000) return;
       localStorage.setItem(MAIN_GEOM_KEY, JSON.stringify({
-        x: Math.round(pos.x), y: Math.round(pos.y),
-        width: Math.round(size.width), height: Math.round(size.height),
+        px: pos.x, py: pos.y, pw: size.width, ph: size.height,
         maximized: false,
       }));
     } catch (e) {}
@@ -153,16 +157,13 @@
       const w = getCurrentWindow();
       const schedule = () => {
         if (mainGeomTimer) clearTimeout(mainGeomTimer);
-        mainGeomTimer = setTimeout(saveMainGeometry, 400);
+        mainGeomTimer = setTimeout(saveMainGeometry, 300);
       };
       await w.onMoved(schedule);
       await w.onResized(schedule);
-      // Laatste kans bij sluiten; de debounce-saves onderweg zijn het vangnet
-      // wanneer de close het asynchrone bewaren zou afbreken.
-      await w.onCloseRequested(async () => {
-        if (mainGeomTimer) { clearTimeout(mainGeomTimer); mainGeomTimer = null; }
-        await saveMainGeometry();
-      });
+      // NB: bewust géén eigen onCloseRequested meer — de centrale close-handler
+      // (verderop in onMount) bewaart de geometrie expliciet vóór destroy();
+      // twee close-handlers raceten met elkaar en de write verloor het weleens.
     } catch (e) { /* niet in Tauri */ }
   }
 
@@ -315,6 +316,10 @@
         try {
           await Promise.race([
             (async () => {
+              // Geometrie éérst (goedkoop en synchroon af te ronden) zodat de
+              // vensterpositie ook bij een snelle close zeker bewaard is.
+              if (mainGeomTimer) { clearTimeout(mainGeomTimer); mainGeomTimer = null; }
+              await saveMainGeometry();
               const rec = await invoke('get_recording_status').catch(() => null);
               if (rec && rec.recording) { await invoke('stop_recording').catch(() => {}); }
               await flushAutoSave();
@@ -340,6 +345,15 @@
       }));
       // De bevestigingsvraag is al in het extra scherm gesteld.
       panelUnlisteners.push(await listen('jm-orgue:shutdown', () => { doShutdown(); }));
+      // Kruisje op een extra scherm = de HELE software afsluiten (0.7.21).
+      // close() triggert de centrale close-handler hierboven (opslaan +
+      // resterende panelen sluiten + destroy).
+      panelUnlisteners.push(await listen('jm-orgue:app-quit', async () => {
+        try {
+          const { getCurrentWindow } = await import('@tauri-apps/api/window');
+          await getCurrentWindow().close();
+        } catch (e) {}
+      }));
       // Orgel laden/sluiten vanuit een paneel: de bestaande flows hier regelen
       // het sluiten + herstellen van de panelen al correct.
       panelUnlisteners.push(await listen('jm-orgue:load-organ', (e) => {

@@ -156,21 +156,38 @@
   let unlistenMoved = null;
   let unlistenResized = null;
   let unlistenCloseReq = null;
+  let unlistenPanelsClosing = null;
+  // Programmatisch sluiten (orgelwissel/afsluiten door het hoofdvenster) mag de
+  // app níet afsluiten; alleen een echte gebruikers-klik op het kruisje wel.
+  // Het hoofdvenster broadcast 'jm-orgue:panels-closing' vlak vóór het zelf
+  // panelen sluit; dat zet hier kort een vlag.
+  let programmaticClose = false;
+  let programmaticCloseTimer = null;
   async function initGeometryTracking() {
     if (panelNumber == null) return;
     try {
       const { getCurrentWindow } = await import('@tauri-apps/api/window');
+      const { listen } = await import('@tauri-apps/api/event');
       const w = getCurrentWindow();
       const schedule = () => {
         if (geomTimer) clearTimeout(geomTimer);
-        geomTimer = setTimeout(saveGeometry, 400);
+        geomTimer = setTimeout(saveGeometry, 300);
       };
       unlistenMoved = await w.onMoved(schedule);
       unlistenResized = await w.onResized(schedule);
-      // Bij sluiten (handmatig óf programmatisch) de laatste positie vastleggen.
+      unlistenPanelsClosing = await listen('jm-orgue:panels-closing', () => {
+        programmaticClose = true;
+        if (programmaticCloseTimer) clearTimeout(programmaticCloseTimer);
+        programmaticCloseTimer = setTimeout(() => { programmaticClose = false; }, 10000);
+      });
+      // Bij sluiten de laatste positie vastleggen; een gebruikers-klik op het
+      // kruisje sluit daarna de HELE software af (0.7.21).
       unlistenCloseReq = await w.onCloseRequested(async () => {
         if (geomTimer) { clearTimeout(geomTimer); geomTimer = null; }
         await saveGeometry();
+        if (!programmaticClose) {
+          await emitToMain('jm-orgue:app-quit');
+        }
       });
     } catch (e) { /* niet in Tauri */ }
   }
@@ -180,13 +197,13 @@
       const w = getCurrentWindow();
       // Geminimaliseerd venster meldt op Windows -32000,-32000 — niet bewaren.
       if (await w.isMinimized()) return;
-      const factor = await w.scaleFactor();
-      const pos = (await w.outerPosition()).toLogical(factor);
-      const size = (await w.innerSize()).toLogical(factor);
+      // FYSIEKE pixels (0.7.21): eenduidig over meerdere beeldschermen met
+      // verschillende schaal; logische coördinaten misplaatsten scherm 3.
+      const pos = await w.outerPosition();
+      const size = await w.innerSize();
       if (pos.x < -30000 || pos.y < -30000) return;
       savePanelState(organInfo?.id, panelNumber, {
-        x: Math.round(pos.x), y: Math.round(pos.y),
-        width: Math.round(size.width), height: Math.round(size.height),
+        px: pos.x, py: pos.y, pw: size.width, ph: size.height,
       });
     } catch (e) {}
   }
@@ -342,6 +359,8 @@
     if (unlistenMoved) try { unlistenMoved(); } catch (e) {}
     if (unlistenResized) try { unlistenResized(); } catch (e) {}
     if (unlistenCloseReq) try { unlistenCloseReq(); } catch (e) {}
+    if (unlistenPanelsClosing) try { unlistenPanelsClosing(); } catch (e) {}
+    if (programmaticCloseTimer) clearTimeout(programmaticCloseTimer);
     for (const un of panelUnlisteners) { try { un(); } catch (e) {} }
     window.removeEventListener('keydown', handleKeyDown);
   });
