@@ -26,6 +26,10 @@ pub const PRELOAD_SAMPLES: usize = 96000;
 /// mee door de bestaande preload-/background-load-/upgrade-mechanismen zonder
 /// aparte maps; echte pipe_nums blijven er ver onder.
 pub const RELEASE_PIPE_FLAG: u32 = 0x8000_0000;
+/// Masker om van een release-pipe_num weer de kale pijp te maken: de vlag
+/// (bit 31) plus de release-index (bits 24-30) van de MaxKeyPressTime-
+/// varianten (0.7.26). Gebruik dit — niet alleen de vlag — bij voicing-lookups.
+pub const RELEASE_KEY_MASK: u32 = 0xFF00_0000;
 
 /// Harde bovengrens op het aantal gelijktijdige voices in het echte audiopad.
 /// Dit is een vangnet tegen op hol geslagen groei (blijvende noten, koppel-
@@ -59,6 +63,11 @@ pub enum SampleSource {
 pub enum AudioCommand {
     /// Note on: (stop_id, pipe_num, midi_note, velocity)
     NoteOn { stop_id: u32, pipe_num: u32, midi_note: u8, velocity: f32 },
+    /// Toetsduur-afhankelijke releases (GrandOrgue MaxKeyPressTime, 0.7.26):
+    /// per (stop, pijp) een oplopend gesorteerde lijst (max_ms, release-key-
+    /// pipe_num); -1 = onbegrensd (default) en staat achteraan. NoteOff kiest
+    /// de eerste entry waarvan max_ms ≥ de gespeelde duur.
+    RegisterReleaseMeta(std::collections::HashMap<(u32, u32), Vec<(i32, u32)>>),
     /// Stop-ids die one-shot afspelen (ODF Percussive: klok/glockenspiel —
     /// niet loopen maar één keer uitklinken).
     RegisterPercussiveStops(std::collections::HashSet<u32>),
@@ -1532,6 +1541,8 @@ fn run_audio_thread(
     let mut inflight_loads: std::collections::HashSet<(u32, u32)> = std::collections::HashSet::new();
     // Pijpen zonder sample waarvoor al één warn is gelogd (max 1 per pijp per orgel).
     let mut missing_sample_warned: std::collections::HashSet<(u32, u32)> = std::collections::HashSet::new();
+    // Toetsduur-afhankelijke releases: (stop, pijp) → gesorteerde (max_ms, key).
+    let mut release_meta: std::collections::HashMap<(u32, u32), Vec<(i32, u32)>> = std::collections::HashMap::new();
     let mut load_generation: u64 = 0;
     // RAM-plafond op volledig geladen samples. Zonder plafond groeide het
     // geheugen tijdens lang spelen onbegrensd (elke gespeelde pijp + release
@@ -1731,6 +1742,10 @@ fn run_audio_thread(
                             }
                         }
                     }
+                    AudioCommand::RegisterReleaseMeta(m) => {
+                        info!("Toetsduur-releases geregistreerd voor {} pijpen (MaxKeyPressTime)", m.len());
+                        release_meta = m;
+                    }
                     AudioCommand::NoteOff { stop_id, pipe_num } => {
                         // Echte release-samples (opgenomen kerkakoestiek): staan
                         // onder de gemarkeerde key. Gevonden → start een one-shot
@@ -1738,13 +1753,9 @@ fn run_audio_thread(
                         // voice; de sustain fade't toonhoogte-afhankelijk uit
                         // (GrandOrgue get_fader_length: bas ~184 ms, discant ~6 ms)
                         // wat als crossfade werkt. Niet gevonden → fade alleen.
-                        let release_key = (stop_id, pipe_num | RELEASE_PIPE_FLAG);
-                        let rel_full = samples_clone.read().get(&release_key).cloned();
-                        // Preload óók bij een geladen full sample ophalen: die
-                        // draagt trim_start = segment-start (release-uitsnede in
-                        // hetzelfde bestand) — de full sample begint op frame 0.
-                        let rel_pre = preloads_clone.read().get(&release_key).cloned();
-
+                        // De KEUZE van de release (kort R0 / lang R1 / default)
+                        // hangt af van de gespeelde duur en gebeurt per voice in
+                        // de lus (MaxKeyPressTime, 0.7.26).
                         let mut spawn: Option<PlayingVoice> = None;
                         let mut voices_lock = voices_clone.write();
                         for voice in voices_lock.iter_mut() {
@@ -1760,15 +1771,41 @@ fn run_audio_thread(
                                     continue;
                                 }
                                 voice.note_on_count = 0;
-                                if spawn.is_none() && (rel_full.is_some() || rel_pre.is_some()) {
-                                    // Niveau-overname: de release start op het
-                                    // huidige envelope-niveau van de sustain,
-                                    // geschaald voor staccato (fase C).
+                                if spawn.is_none() {
                                     let note_ms = voice.age_samples as f32 * 1000.0 / (sample_rate.max(1)) as f32;
+                                    // Toetsduur-release kiezen: eerste variant met
+                                    // max_ms ≥ gespeelde duur; anders de default
+                                    // (-1, achteraan). Geen meta → klassieke key.
+                                    let chosen_pipe = release_meta.get(&(stop_id, pipe_num))
+                                        .and_then(|list| list.iter()
+                                            .find(|(max_ms, _)| *max_ms >= 0 && note_ms as i64 <= *max_ms as i64)
+                                            .or_else(|| list.last())
+                                            .map(|(_, key)| *key))
+                                        .unwrap_or(pipe_num | RELEASE_PIPE_FLAG);
+                                    let is_default_release = chosen_pipe == (pipe_num | RELEASE_PIPE_FLAG);
+                                    let release_key = (stop_id, chosen_pipe);
+                                    let rel_full = samples_clone.read().get(&release_key).cloned();
+                                    // Preload óók bij een geladen full sample ophalen:
+                                    // die draagt trim_start = segment-start (release-
+                                    // uitsnede in hetzelfde bestand).
+                                    let rel_pre = preloads_clone.read().get(&release_key).cloned();
+                                    if rel_full.is_none() && rel_pre.is_none() {
+                                        voice.release_ms(release_fade_ms(voice.midi_note), sample_rate);
+                                        continue;
+                                    }
+                                    // Niveau-overname: de release start op het
+                                    // huidige envelope-niveau van de sustain.
+                                    // Staccato-schaling alleen op de DEFAULT
+                                    // (lange) release — een echte korte opname
+                                    // (R0) is al voor die duur opgenomen.
                                     let rel_secs = rel_pre.as_ref()
                                         .map(|p| p.total_samples as f32 / (p.sample_rate.max(1)) as f32)
                                         .unwrap_or(2.0);
-                                    let (stacc_gain, stacc_decay) = scaled_release_params(note_ms, voice.midi_note, rel_secs);
+                                    let (stacc_gain, stacc_decay) = if is_default_release {
+                                        scaled_release_params(note_ms, voice.midi_note, rel_secs)
+                                    } else {
+                                        (1.0, None)
+                                    };
                                     let level = (voice.envelope * stacc_gain).clamp(0.05, 1.0);
                                     // Fase-uitlijning (GrandOrgue-stijl, fase B):
                                     // start de release op de positie waarvan de
@@ -1844,17 +1881,30 @@ fn run_audio_thread(
                             if voice.stop_id != stop_id || voice.releasing || voice.one_shot {
                                 continue;
                             }
-                            let release_key = (stop_id, voice.pipe_num | RELEASE_PIPE_FLAG);
+                            // Toetsduur-release kiezen — zelfde model als NoteOff.
+                            let note_ms = voice.age_samples as f32 * 1000.0 / (sample_rate.max(1)) as f32;
+                            let chosen_pipe = release_meta.get(&(stop_id, voice.pipe_num))
+                                .and_then(|list| list.iter()
+                                    .find(|(max_ms, _)| *max_ms >= 0 && note_ms as i64 <= *max_ms as i64)
+                                    .or_else(|| list.last())
+                                    .map(|(_, key)| *key))
+                                .unwrap_or(voice.pipe_num | RELEASE_PIPE_FLAG);
+                            let is_default_release = chosen_pipe == (voice.pipe_num | RELEASE_PIPE_FLAG);
+                            let release_key = (stop_id, chosen_pipe);
                             if !spawned.contains(&voice.pipe_num) {
                                 let rel_full = samples_clone.read().get(&release_key).cloned();
                                 let rel_pre = preloads_clone.read().get(&release_key).cloned();
                                 if rel_full.is_some() || rel_pre.is_some() {
-                                    // Staccato-schaal + fase-uitlijning — zie NoteOff.
-                                    let note_ms = voice.age_samples as f32 * 1000.0 / (sample_rate.max(1)) as f32;
+                                    // Staccato-schaal alleen op de default (lange)
+                                    // release + fase-uitlijning — zie NoteOff.
                                     let rel_secs = rel_pre.as_ref()
                                         .map(|p| p.total_samples as f32 / (p.sample_rate.max(1)) as f32)
                                         .unwrap_or(2.0);
-                                    let (stacc_gain, stacc_decay) = scaled_release_params(note_ms, voice.midi_note, rel_secs);
+                                    let (stacc_gain, stacc_decay) = if is_default_release {
+                                        scaled_release_params(note_ms, voice.midi_note, rel_secs)
+                                    } else {
+                                        (1.0, None)
+                                    };
                                     let level = (voice.envelope * stacc_gain).clamp(0.05, 1.0);
                                     // Fase-uitlijning — zie NoteOff.
                                     let align_pos: u64 = rel_pre.as_ref()
@@ -2383,7 +2433,7 @@ fn run_audio_thread(
                 for voice in voices_lock.iter_mut() {
                     voice.c_div = stop_div_map.get(&voice.stop_id).copied().unwrap_or(0) as usize;
 
-                    let vkey = (voice.stop_id, voice.pipe_num & !RELEASE_PIPE_FLAG);
+                    let vkey = (voice.stop_id, voice.pipe_num & !RELEASE_KEY_MASK);
                     let (user_vol, user_pitch) = pipe_voicing_map.get(&vkey).copied().unwrap_or((0.0, 0.0));
                     let (odf_vol, odf_pitch) = odf_voicing_map.get(&vkey).copied().unwrap_or((0.0, 0.0));
                     let voicing_vol = user_vol + odf_vol;

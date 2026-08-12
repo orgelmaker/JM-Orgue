@@ -1010,6 +1010,8 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
         // of het release-segment ná de loop in het attack-bestand zelf
         // (cue-marker, GrandOrgue-model voor oudere natte sets).
         let mut release_tasks: Vec<((u32, u32), PathBuf, SegKey)> = Vec::new();
+        // Toetsduur-release-metadata: (stop, pijp) → gesorteerde (max_ms, key).
+        let mut release_meta: Vec<((u32, u32), Vec<(i32, u32)>)> = Vec::new();
         let organ_db = ampl_to_db(definition.organ.amplitude_level) + definition.organ.gain_db;
         let organ_cents = definition.organ.pitch_tuning_cents;
         // Windchest-niveau inschaling per groepsnummer.
@@ -1066,14 +1068,43 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
                             trem_tasks.push(((stop.id, pipe_num), trem_path.clone()));
                         }
                         let release_key = (stop.id, pipe_num | crate::audio::RELEASE_PIPE_FLAG);
-                        if let Some(rel) = pick_default_release(&extra.releases, path) {
-                            // Apart release-bestand: start op de cue-marker van
-                            // dat bestand (of de ODF CuePoint-override), anders 0.
-                            release_tasks.push((
-                                release_key,
-                                rel.path.clone(),
-                                SegKey::Release { cue_override: rel.cue_point, require_cue: false },
-                            ));
+                        // Alle losse release-bestanden (R0/R1/…, toetsduur-
+                        // varianten): oplopend op MaxKeyPressTime, de default
+                        // (-1/None, langste) achteraan op de klassieke index-
+                        // loze key — sets met één release gedragen zich exact
+                        // als voorheen. Kortere varianten krijgen een index in
+                        // bits 24-30; de audio-thread kiest per NoteOff op de
+                        // gespeelde duur (RegisterReleaseMeta, 0.7.26).
+                        let mut file_releases: Vec<&vpo_sampler::ReleaseDef> = extra.releases.iter()
+                            .filter(|r| r.path != *path)
+                            .collect();
+                        if !file_releases.is_empty() {
+                            file_releases.sort_by_key(|r| match r.max_key_press_time_ms {
+                                None | Some(-1) => i64::MAX,
+                                Some(t) => t as i64,
+                            });
+                            file_releases.truncate(8); // idx past in 3 bits + default
+                            let n = file_releases.len();
+                            let mut meta: Vec<(i32, u32)> = Vec::with_capacity(n);
+                            for (idx, rel) in file_releases.iter().enumerate() {
+                                let key_pipe = if idx + 1 == n {
+                                    release_key.1 // default/langste → klassieke key
+                                } else {
+                                    pipe_num | crate::audio::RELEASE_PIPE_FLAG | (((idx as u32) + 1) << 24)
+                                };
+                                release_tasks.push((
+                                    (stop.id, key_pipe),
+                                    rel.path.clone(),
+                                    SegKey::Release { cue_override: rel.cue_point, require_cue: false },
+                                ));
+                                meta.push((
+                                    match rel.max_key_press_time_ms { None | Some(-1) => -1, Some(t) => t },
+                                    key_pipe,
+                                ));
+                            }
+                            if meta.len() > 1 {
+                                release_meta.push(((stop.id, pipe_num), meta));
+                            }
                         } else if !effective_percussive && extra.load_release.unwrap_or(true) {
                             // Geen apart release-bestand: probeer het release-
                             // segment uit het attack-bestand zelf (loop + cue).
@@ -1230,6 +1261,14 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
                 // load gebruikt dan dezelfde loop als de preload (geen versprong
                 // op het upgrademoment bij WAVs zonder/met afwijkende smpl-chunk).
                 let _ = player.send_command(crate::audio::AudioCommand::RegisterOdfLoops(Arc::new(odf_loops.clone())));
+                // Toetsduur-releases (altijd sturen, ook leeg — vervangt de map
+                // van het vorige orgel): NoteOff kiest hiermee de R0/R1-variant
+                // die bij de gespeelde duur hoort (MaxKeyPressTime, 0.7.26).
+                if !release_meta.is_empty() {
+                    info!("Toetsduur-releases: {} pijpen met meerdere release-varianten", release_meta.len());
+                }
+                let _ = player.send_command(crate::audio::AudioCommand::RegisterReleaseMeta(
+                    release_meta.iter().cloned().collect()));
             }
         }
     }
