@@ -361,6 +361,7 @@ fn main() {
             commands::notation_set_layer_divisions,
             commands::notation_set_step_input,
             commands::notation_insert_notes,
+            commands::notation_shift_events,
             commands::notation_set_meter,
             commands::notation_set_title,
             commands::notation_export_midi,

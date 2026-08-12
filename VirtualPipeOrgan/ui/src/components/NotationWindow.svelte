@@ -334,6 +334,7 @@
   // de klik zodat pijltjes vanaf daar verder navigeren.
   function handleSheetClick(e) {
     if (!isLive) return;
+    if (dragConsumedClick) return; // net een noot versleept — geen selectie-klik
     const rect = container.getBoundingClientRect();
     const px = e.clientX - rect.left + container.scrollLeft;
     const py = e.clientY - rect.top + container.scrollTop;
@@ -775,6 +776,104 @@
   async function doUndo() { try { await invoke('notation_undo', { scoreId }); } catch (e) { alert(String(e)); } }
   async function doRedo() { try { await invoke('notation_redo', { scoreId }); } catch (e) { alert(String(e)); } }
 
+  // ---- Corrigeren: verschuiven, slepen, zoom, afspelen (0.7.27) ----
+  // Verschuif de selectie één rastereenheid in de tijd (Shift+←/→).
+  async function shiftSelection(gridSteps) {
+    const ids = selectedIdsOrCursor();
+    if (!ids.length) return;
+    const gridUs = (60e6 / (Number(bpm) || 90)) / (Number(score?.quantize) || 4);
+    try {
+      await invoke('notation_shift_events', { scoreId, eventIds: ids, deltaUs: Math.round(gridSteps * gridUs) });
+    } catch (e) {}
+  }
+
+  // Verticaal slepen op een noot = toonhoogte wijzigen (diatonisch, zoals
+  // MuseScore; halve balklijn ≈ 5 px bij zoom 1). Horizontaal verschuiven gaat
+  // via Shift+←/→ (raster-exact — slepen in de tijd is optisch onnauwkeurig).
+  let noteDrag = null; // { id, startY, origMidi, moved }
+  let dragConsumedClick = false;
+  function nearestDiatonicIndex(midi) {
+    const oct = Math.floor(midi / 12), pc = midi % 12;
+    const DEG = [0, 2, 4, 5, 7, 9, 11];
+    let deg = 0;
+    for (let i = 0; i < 7; i++) if (DEG[i] <= pc) deg = i;
+    return oct * 7 + deg;
+  }
+  function handleSheetMouseDown(e) {
+    if (!isLive || stepMode || noteBoxes.length === 0) return;
+    const rect = container.getBoundingClientRect();
+    const px = e.clientX - rect.left + container.scrollLeft;
+    const py = e.clientY - rect.top + container.scrollTop;
+    let best = null, bestDist = Infinity;
+    for (const b of noteBoxes) {
+      const inside = px >= b.x && px <= b.x + b.w && py >= b.y && py <= b.y + b.h;
+      const d = inside ? 0 : Math.hypot(px - b.cx, py - b.cy);
+      if (d < bestDist) { bestDist = d; best = b; }
+    }
+    if (!best || bestDist > 12) return; // alleen op/vlakbij een noot beginnen
+    noteDrag = { id: best.eventId, startY: e.clientY, origMidi: best.midi, moved: false };
+    window.addEventListener('mousemove', handleNoteDragMove);
+    window.addEventListener('mouseup', handleNoteDragUp);
+  }
+  function handleNoteDragMove(e) {
+    if (noteDrag && Math.abs(e.clientY - noteDrag.startY) > 5) noteDrag.moved = true;
+  }
+  async function handleNoteDragUp(e) {
+    window.removeEventListener('mousemove', handleNoteDragMove);
+    window.removeEventListener('mouseup', handleNoteDragUp);
+    const d = noteDrag; noteDrag = null;
+    if (!d || !d.moved) return;
+    // De click ná de mouseup mag geen selectie-wijziging meer doen.
+    dragConsumedClick = true;
+    setTimeout(() => { dragConsumedClick = false; }, 0);
+    const steps = -Math.round((e.clientY - d.startY) / (5 * (osmdZoom || 1)));
+    if (!steps) return;
+    const to = Math.max(0, Math.min(127, diatonicToMidi(nearestDiatonicIndex(d.origMidi) + steps)));
+    const delta = Math.max(-24, Math.min(24, to - d.origMidi));
+    if (!delta) return;
+    selectionIds = new Set([d.id]);
+    try { await invoke('notation_transpose', { scoreId, eventIds: [d.id], semitones: delta }); } catch (e2) {}
+  }
+
+  // Zoom (OSMD.Zoom): knoppen −/+ in de toolbar; noot-boxen daarna hermeten.
+  let osmdZoom = 1;
+  function setZoom(z) {
+    osmdZoom = Math.max(0.5, Math.min(2, Math.round(z * 10) / 10));
+    if (osmd) {
+      try { osmd.Zoom = osmdZoom; osmd.render(); if (isLive) buildNoteBoxes(); } catch (e) {}
+    }
+  }
+
+  // Afspelen: partituur → tijdelijk .mid → bestaande MIDI-speler (speelt door
+  // het orgel met de huidige registratie). Nogmaals klikken stopt.
+  let playingScore = false;
+  let playPollTimer = null;
+  async function togglePlayScore() {
+    if (playingScore) {
+      try { await invoke('midi_stop_playback'); } catch (e) {}
+      playingScore = false;
+      if (playPollTimer) { clearInterval(playPollTimer); playPollTimer = null; }
+      return;
+    }
+    try {
+      const { tempDir, join } = await import('@tauri-apps/api/path');
+      const path = await join(await tempDir(), `jm-orgue-notatie-${scoreId}.mid`);
+      await invoke('notation_export_midi', { scoreId, path });
+      await invoke('midi_play_file', { path });
+      playingScore = true;
+      // Einde detecteren zodat de knop terugspringt naar ▶.
+      playPollTimer = setInterval(async () => {
+        try {
+          const s = await invoke('midi_player_status');
+          if (!s || s.state !== 'playing') {
+            playingScore = false;
+            clearInterval(playPollTimer); playPollTimer = null;
+          }
+        } catch (e) {}
+      }, 500);
+    } catch (e) { alert(`Afspelen mislukt: ${e}`); }
+  }
+
   // ---- Maatsoort + titel + MIDI-export (0.7.16) ----
   async function setMeterLive(v) {
     if (!isLive || scoreId == null) return;
@@ -893,6 +992,9 @@
     }
     // N = stapinvoer aan/uit (MuseScore).
     if (e.key.toLowerCase() === 'n' && !e.ctrlKey && !e.metaKey && !e.shiftKey) { setStepMode(!stepMode); e.preventDefault(); return; }
+    // Shift+←/→ = selectie één rastereenheid verschuiven in de tijd (0.7.27).
+    if (e.key === 'ArrowRight' && e.shiftKey) { shiftSelection(+1); e.preventDefault(); return; }
+    if (e.key === 'ArrowLeft' && e.shiftKey) { shiftSelection(-1); e.preventDefault(); return; }
     if (e.key === 'ArrowRight') { moveCursor(+1); e.preventDefault(); }
     else if (e.key === 'ArrowLeft') { moveCursor(-1); e.preventDefault(); }
     else if (e.key === 'Delete' || e.key === 'Backspace') { deleteSelection(); e.preventDefault(); }
@@ -954,6 +1056,10 @@
     if (renderDebounceTimer) clearTimeout(renderDebounceTimer);
     if (renderCeilingTimer) clearTimeout(renderCeilingTimer);
     if (resizeTimer) clearTimeout(resizeTimer);
+    if (playPollTimer) clearInterval(playPollTimer);
+    if (playingScore) invoke('midi_stop_playback').catch(() => {});
+    window.removeEventListener('mousemove', handleNoteDragMove);
+    window.removeEventListener('mouseup', handleNoteDragUp);
     stopMetronome();
     if (metroAudioCtx) { try { metroAudioCtx.close(); } catch (e) {} metroAudioCtx = null; }
     for (const un of unlisteners) { try { un(); } catch (e) {} }
@@ -1018,6 +1124,10 @@
       >
         <span class="record-dot" class:on={recording || armedWaiting}></span>
         {#if armedWaiting}Aftellen… {countInRemaining}{:else if recording}Stop{:else}Opname{/if}
+      </button>
+      <button class="btn btn-secondary btn-sm" on:click={togglePlayScore} disabled={recording || armedWaiting}
+        title={playingScore ? 'Afspelen stoppen' : 'Partituur afspelen door het orgel (huidige registratie)'}>
+        {playingScore ? '◼ Stop' : '▶ Afspelen'}
       </button>
       <label>Tempo
         <input type="number" min="20" max="300" value={bpm} on:change={(e) => setBpmLive(e.currentTarget.value)} />
@@ -1091,6 +1201,9 @@
       <button class="btn btn-ghost btn-sm" on:click={pasteClipboard} disabled={clipboardCount === 0} title="Plakken op de cursor (Ctrl+V)">Plakken{clipboardCount ? ` (${clipboardCount})` : ''}</button>
       <button class="btn btn-ghost btn-sm" on:click={doUndo} title="Ongedaan (Ctrl+Z)">↶</button>
       <button class="btn btn-ghost btn-sm" on:click={doRedo} title="Opnieuw (Ctrl+Y)">↷</button>
+      <button class="btn btn-ghost btn-sm" on:click={() => setZoom(osmdZoom - 0.1)} title="Uitzoomen">−</button>
+      <span class="zoom-pct">{Math.round(osmdZoom * 100)}%</span>
+      <button class="btn btn-ghost btn-sm" on:click={() => setZoom(osmdZoom + 0.1)} title="Inzoomen">+</button>
       <button class="btn btn-ghost btn-sm" on:click={openMidiFile} title="Bestaand MIDI-bestand als extra take(s) in deze partituur importeren">Openen…</button>
       <button class="btn btn-ghost btn-sm" on:click={saveMidiAs} title="Partituur (zichtbare takes) opslaan als MIDI-bestand">Opslaan als MIDI…</button>
       <button class="btn btn-primary btn-sm" on:click={printScore} disabled={!xml}>Afdrukken / PDF</button>
@@ -1228,7 +1341,7 @@
   {#if error}<div class="notation-error">{error}</div>{/if}
   {#if converting}<div class="notation-busy">Bezig met noteren…</div>{/if}
 
-  <div class="notation-sheet" class:clickable={isLive} bind:this={container} on:click={handleSheetClick}>
+  <div class="notation-sheet" class:clickable={isLive} bind:this={container} on:click={handleSheetClick} on:mousedown={handleSheetMouseDown}>
     {#if isLive}
       <!-- Selectie-overlay: absolute-position markering per geselecteerde noot
            (OSMD zelf blijft ongemuteerd; selectie wijzigen vergt geen re-render). -->
@@ -1243,7 +1356,7 @@
 
   <div class="notation-hint">
     {#if isLive}
-      Tip: Opname = spelen, elke divisie op zijn eigen balk (chips in de LayerBar). Stapinvoer (N): speel toets/akkoord op het klavier, typ A–G (Shift+letter = akkoord), of klik op de balk. Cijfers 2–7 = nootwaarde, . = punt, 0 = rust, R = herhaal, ↑/↓ = kruis/mol (Ctrl = octaaf), Backspace = stap terug, Esc = stoppen. Buiten stapinvoer: klik/←→ selecteren, ↑/↓ transponeren, Delete, [ ÷2, ] ×2, Ctrl+C/V, Ctrl+Z.
+      Tip: Opname = spelen, elke divisie op zijn eigen balk; ▶ speelt de partituur af door het orgel. Stapinvoer (N): speel toets/akkoord, typ A–G (Shift = akkoord), of klik op de balk; 2–7 = waarde, . punt, 0 rust, R herhaal, ↑/↓ kruis/mol, Backspace terug. Corrigeren: klik/←→ selecteren, sleep een noot omhoog/omlaag voor de toonhoogte, ↑/↓ transponeren, Shift+←/→ verschuiven in de tijd, Delete, [ ÷2, ] ×2, Ctrl+C/V, Ctrl+Z.
     {:else}
       Tip: vrij ingespeeld? Stel het tempo in waarop je speelde en schuif "Ritme" naar los als de kwantisatie te strak aanvoelt.
     {/if}
@@ -1314,6 +1427,7 @@
   .notation-cursor.counting { background: #7a2020; color: #fff; font-weight: 600; }
   .cursor-empty { color: #999; font-style: italic; }
   .metro-toggle { cursor: pointer; }
+  .zoom-pct { font-size: 0.72rem; color: var(--text-muted, #aaa); min-width: 2.6rem; text-align: center; }
   /* Stapinvoer: nootwaarde-palet */
   .step-durs { display: inline-flex; gap: 0.15rem; }
   .step-dur { font-size: 1.05rem; line-height: 1; padding: 0.15rem 0.4rem; }

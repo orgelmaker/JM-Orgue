@@ -2625,6 +2625,31 @@ pub fn notation_set_layer_divisions(state: State<AppState>, score_id: u32, layer
     })
 }
 
+/// Selectie in de tijd verschuiven (µs, mag negatief; klemt op 0). De UI stuurt
+/// een raster-gesnapte delta (Shift+←/→ of slepen); via SetTimes → exacte undo.
+#[tauri::command]
+pub fn notation_shift_events(state: State<AppState>, app: tauri::AppHandle, score_id: u32, event_ids: Vec<u64>, delta_us: i64) -> Result<u64, String> {
+    if event_ids.is_empty() || delta_us == 0 { return Err("Niets te verschuiven".into()); }
+    let gen = with_score_mut(&state, score_id, |sc| {
+        let mut items: Vec<(u64, u64, u64)> = Vec::new();
+        for id in &event_ids {
+            if let Some((li, ti, ei)) = sc.locate(*id) {
+                let ev = &sc.layers[li].takes[ti].events[ei];
+                let start = (ev.start_us as i64 + delta_us).max(0) as u64;
+                let end = (ev.end_us as i64 + delta_us).max(1000) as u64;
+                items.push((*id, start, end));
+            }
+        }
+        let cmd = crate::notation::EditCommand::SetTimes { items };
+        if let Some(inv) = cmd.apply(sc) {
+            sc.push_undo(inv);
+        }
+        sc.generation
+    })?;
+    tauri::async_runtime::spawn(emit_score_changed(app, score_id, gen));
+    Ok(gen)
+}
+
 /// Maatsoort (x/4) van een live-score wijzigen — met undo, zoals bpm/toonsoort.
 #[tauri::command]
 pub fn notation_set_meter(state: State<AppState>, app: tauri::AppHandle, score_id: u32, beats_per_bar: u8) -> Result<u64, String> {

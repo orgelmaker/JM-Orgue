@@ -697,6 +697,9 @@ pub enum EditCommand {
     /// Duur wijzigen: zet per event een nieuw absoluut eind (µs). Bewaart voor
     /// undo de oude einden zodat de round-trip exact is (geen kwantisatie-drift).
     SetEnds { items: Vec<(u64 /*event id*/, u64 /*end_us*/)> },
+    /// Verschuiven in de tijd: zet per event nieuwe absolute (start, eind)-tijden
+    /// (µs). Undo bewaart de oude tijden exact — de motor achter Shift+←/→.
+    SetTimes { items: Vec<(u64 /*event id*/, u64 /*start_us*/, u64 /*end_us*/)> },
     /// Transponeer selectie met N halve tonen (mag negatief).
     Transpose { ids: Vec<u64>, semitones: i8 },
     /// Wijzig tolerantie (met inverse-waarde).
@@ -771,6 +774,25 @@ impl EditCommand {
                 if old.is_empty() { return None; }
                 score.bump_gen();
                 Some(EditCommand::SetEnds { items: old })
+            }
+            EditCommand::SetTimes { items } => {
+                let mut old: Vec<(u64, u64, u64)> = Vec::new();
+                for (id, new_start, new_end) in items.into_iter() {
+                    if let Some((li, ti, ei)) = score.locate(id) {
+                        let ev = &mut score.layers[li].takes[ti].events[ei];
+                        let start = new_start;
+                        let end = new_end.max(start + 1000); // ≥1 ms
+                        if start != ev.start_us || end != ev.end_us {
+                            old.push((id, ev.start_us, ev.end_us));
+                            ev.start_us = start;
+                            ev.end_us = end;
+                            ev.locked = true;
+                        }
+                    }
+                }
+                if old.is_empty() { return None; }
+                score.bump_gen();
+                Some(EditCommand::SetTimes { items: old })
             }
             EditCommand::Transpose { ids, semitones } => {
                 let mut changed = 0usize;
