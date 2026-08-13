@@ -3321,8 +3321,10 @@
 
         <!-- Single register view -->
         <!-- --stop-min-width op de container zodat ook .division (min-width in
-             verticale modus) de ingestelde knopgrootte kan gebruiken -->
-        <div class="divisions-container" class:divisions-vertical={mainLayout === 'vertical'} style="--stop-min-width: {stopSize}px">
+             verticale modus) de ingestelde knopgrootte kan gebruiken;
+             --stop-size-n is hetzelfde getal zonder eenheid (CSS-calc kan niet
+             door een lengte delen) voor de vensterbreedte-schaling in styles.css -->
+        <div class="divisions-container" class:divisions-vertical={mainLayout === 'vertical'} style="--stop-min-width: {stopSize}px; --stop-size-n: {stopSize}">
           {#each selectedDivisions.map(name => displayOrgan.divisions.find(d => d.name === name)).filter(Boolean) as division}
             {@const tremDivIdx = displayOrgan.divisions.findIndex(d => d.name === division.name)}
             <div class="division">
@@ -3349,7 +3351,7 @@
                 class:stops-vertical={mainLayout === 'vertical'}
                 class:knobs-round={knobShape === 'round'}
                 class:knob-dragging={!!(knobDrag && knobDrag.active && knobDrag.div === division.name)}
-                style="--stop-min-width: {stopSize}px"
+                style="--stop-min-width: {stopSize}px; --stop-size-n: {stopSize}"
               >
                 {#each division.stops as stop, stopIdx}
                   {@const name = cleanStopName(stop)}

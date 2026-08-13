@@ -991,7 +991,7 @@ input[type="range"]::-webkit-slider-thumb:hover {
    (flex-kolom op volle hoogte). --stop-min-width blijft de kolombreedte sturen. */
 .stops-grid.stops-vertical {
   display: block;                        /* multi-column i.p.v. grid */
-  columns: var(--stop-min-width, 100px); /* kolombreedte = knopgrootte-instelling */
+  columns: var(--stop-w, 100px);         /* kolombreedte = effectieve knopmaat */
   column-gap: 0.4rem;
   column-fill: auto;                     /* eerst kolom 1 helemaal vullen, dan pas kolom 2 */
   flex: 1 1 auto;                        /* vult de divisie onder de kop */
@@ -1062,6 +1062,20 @@ input[type="range"]::-webkit-slider-thumb:hover {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+  /* Effectieve knopmaat: de gekozen maat (--stop-min-width), maar in een
+     venster smaller dan de referentie (1400px) schaalt hij evenredig mee —
+     te grote knoppen passen zich dan aan de vensterbreedte aan.
+     --stop-size-n is dezelfde waarde als kaal getal (calc kan niet door een
+     lengte delen); ontbreekt hij, dan is de cap zo hoog dat hij nooit grijpt. */
+  --stop-w: min(var(--stop-min-width, 100px),
+                calc(var(--stop-size-n, 9999) * 100vw / 1400));
+}
+
+/* Horizontale modus: divisies mogen niet krimpen. Flex perste ze bij
+   ruimtegebrek in elkaar, waarna overflow:hidden de knoppenrijen afsneed —
+   bij meer inhoud dan hoogte scrolt .divisions-container nu gewoon. */
+.divisions-container:not(.divisions-vertical) .division {
+  flex-shrink: 0;
 }
 
 /* Vertical mode: divisies naast elkaar als kolommen op volle hoogte.
@@ -1079,7 +1093,7 @@ input[type="range"]::-webkit-slider-thumb:hover {
 .divisions-vertical .division {
   flex: 1 1 0;
   /* Minstens één kolom breed (knop + padding), anders knijpen divisies elkaar weg */
-  min-width: calc(var(--stop-min-width, 100px) + 1.5rem);
+  min-width: calc(var(--stop-w, 100px) + 1.5rem);
   display: flex;
   flex-direction: column;
 }
@@ -1144,7 +1158,12 @@ input[type="range"]::-webkit-slider-thumb:hover {
 
 .stops-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(var(--stop-min-width, 100px), 1fr));
+  /* Zelfde effectieve-maat-afleiding als .divisions-container, zodat grids
+     die los van die container staan (panelen) ook meeschalen. De extra
+     min(…, 100%) voorkomt horizontale overloop in extreem smalle vensters. */
+  --stop-w: min(var(--stop-min-width, 100px),
+                calc(var(--stop-size-n, 9999) * 100vw / 1400));
+  grid-template-columns: repeat(auto-fill, minmax(min(var(--stop-w, 100px), 100%), 1fr));
   gap: 0.4rem;
   padding: 0.5rem;
   background: var(--bg-elevated);
@@ -1303,10 +1322,13 @@ input[type="range"]::-webkit-slider-thumb:hover {
 /* Horizontale modus: grid-cellen kunnen breder zijn dan de knop → centreren */
 .stops-grid.knobs-round {
   justify-items: center;
+  /* Cirkels met dikke rand ogen snel "geplakt": ruimere tussenruimte dan de
+     rechthoekige knoppen, zodat er bij elke maat lucht tussen de knoppen zit. */
+  gap: 0.7rem 0.85rem;
 }
 
 .stops-grid.knobs-round .stop-knob {
-  width: var(--stop-min-width, 100px);
+  width: var(--stop-w, 100px);
   max-width: 100%;
   aspect-ratio: 1 / 1;
   min-height: 0;
