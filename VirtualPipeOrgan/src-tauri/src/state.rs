@@ -1169,6 +1169,13 @@ impl AppState {
                 tracing::trace!("BLE MIDI received: {:?}", msg);
                 // Leg het ingespeelde event vast als er een MIDI-opname loopt
                 Self::capture_midi_event(&midi_recording, &msg);
+                // Zelfde notatie-hooks als de USB-lus: BLE-klavieren (en de
+                // test-API-injectie) moeten ook in de live-notatie belanden.
+                Self::capture_notation_event(&msg, &notation_scores, &notation_armed_score,
+                    &notation_open_notes, &notation_start_time, &app_handle_notation,
+                    &midi_mappings);
+                Self::emit_step_input_event(&msg, &notation_step_input,
+                    &notation_armed_score, &app_handle_notation);
                 // Forward CC messages to learn-tap channel (non-blocking; drop if full)
                 if matches!(msg, MidiMessage::ControlChange { .. }) {
                     let _ = ble_learn_tx.try_send(msg.clone());
