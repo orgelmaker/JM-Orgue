@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Extra Info.plist-sleutels voor de macOS-bundle; Tauri voegt dit bestand
+     automatisch samen met de gegenereerde Info.plist. Zonder de Bluetooth-
+     tekst beëindigt macOS de app zodra btleplug (BLE-MIDI) gaat scannen. -->
+<plist version="1.0">
+<dict>
+  <key>NSBluetoothAlwaysUsageDescription</key>
+  <string>JM-Orgue gebruikt Bluetooth om draadloze BLE-MIDI-klavieren te vinden en te verbinden.</string>
+  <key>NSBluetoothPeripheralUsageDescription</key>
+  <string>JM-Orgue gebruikt Bluetooth om draadloze BLE-MIDI-klavieren te vinden en te verbinden.</string>
+</dict>
+</plist>
