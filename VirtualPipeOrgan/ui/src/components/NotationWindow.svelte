@@ -486,10 +486,15 @@
     const lid = layerId ?? stepTargetLayerId();
     if (lid == null || !notes.length) return;
     const at = opts.at != null ? opts.at : stepPosUs;
+    const dur = stepDurUs;
+    // Cursor DIRECT opschuiven (vóór de await): bij snel typen lazen
+    // opeenvolgende inserts anders dezelfde positie en stapelden de noten
+    // als een cluster op één tel (gezien bij de eerste visuele test).
+    if (opts.at == null) stepPosUs = at + dur;
     try {
       const res = await invoke('notation_insert_notes', {
         scoreId, layerId: lid, notes,
-        startUs: Math.round(at), durUs: stepDurUs,
+        startUs: Math.round(at), durUs: dur,
       });
       const ids = Array.isArray(res) ? (res[1] || []) : [];
       if (opts.at != null) {
@@ -500,10 +505,12 @@
         stepLastIds = ids;
         stepLastChordNotes = [...notes];
         stepLastPos = at;
-        stepPosUs = at + stepDurUs;
       }
       stepLastMidi = notes[notes.length - 1];
-    } catch (e) { alert(String(e)); }
+    } catch (e) {
+      if (opts.at == null) stepPosUs = at; // mislukt → cursor terug
+      alert(String(e));
+    }
   }
   function stepCommitChord() {
     const notes = Array.from(stepChord);
