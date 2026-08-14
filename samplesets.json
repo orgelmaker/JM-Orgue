@@ -10,6 +10,16 @@
       "zip_mb": 107,
       "uitgepakt_mb": 211,
       "map_naam": "Bätz-Witte Puttershoek"
+    },
+    {
+      "id": "test-download-tijdelijk",
+      "naam": "PH Download-test (tijdelijk)",
+      "beschrijving": "Tijdelijke testvermelding — wordt na de verificatie weer verwijderd.",
+      "versie": 1,
+      "zip_url": "https://github.com/orgelmaker/JM-Orgue/releases/download/sampleset-batz-witte-puttershoek/JM-Orgue-Sampleset-Batz-Witte-Puttershoek-v1.zip",
+      "zip_mb": 107,
+      "uitgepakt_mb": 211,
+      "map_naam": "PH-Download-test"
     }
   ]
 }
