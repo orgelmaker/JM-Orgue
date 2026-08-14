@@ -328,6 +328,7 @@
   let fbkOpen = false;
   let fbkMessage = '';
   let fbkEmail = '';
+  let fbkIncludeLog = true; // logstaart (huidige + vorige sessie) meesturen
   let fbkStatus = null; // null | 'sending' | 'ok' | 'error' | 'noendpoint'
   async function fbkSubmit() {
     if (!fbkMessage.trim() || fbkStatus === 'sending') return;
@@ -336,6 +337,12 @@
       const { FEEDBACK_ENDPOINT } = await import('../lib/github.js');
       if (!FEEDBACK_ENDPOINT) { fbkStatus = 'noendpoint'; return; }
       if (!appVersion) await loadAppVersion();
+      // Logstaart alleen ophalen als de gebruiker het vinkje aan laat; fouten
+      // (bv. geen logbestand) mogen het versturen niet blokkeren.
+      let logTail = null;
+      if (fbkIncludeLog) {
+        try { logTail = await invoke('get_log_tail', { maxKb: 24 }); } catch (e) { logTail = `(log ophalen mislukt: ${e})`; }
+      }
       const res = await fetch(FEEDBACK_ENDPOINT, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
@@ -344,6 +351,7 @@
           afzender: fbkEmail || '(geen afzender opgegeven)',
           versie: appVersion || '?',
           orgel: organInfo?.name || '-',
+          ...(logTail != null ? { log: logTail } : {}),
         }),
       });
       fbkStatus = res.ok ? 'ok' : 'error';
@@ -2173,15 +2181,37 @@
         x: (!hasPhysical && st && typeof st.x === 'number') ? st.x : 100 + (offset * 30),
         y: (!hasPhysical && st && typeof st.y === 'number') ? st.y : 100 + (offset * 30),
       });
-      if (hasPhysical) {
+      if (hasPhysical || (st && st.maximized)) {
         webview.once('tauri://created', async () => {
           try {
             const { PhysicalPosition, PhysicalSize } = await import('@tauri-apps/api/dpi');
+            if (st.maximized) {
+              // Eerst op het scherm van de maximalisatie zetten (anker uit de
+              // maximized-save of de windowed-terugvalpositie), dán maximaliseren
+              // — maximize() pakt het scherm waar het venster op dat moment staat.
+              const ax = (typeof st.mpx === 'number') ? st.mpx : (typeof st.px === 'number' ? st.px : null);
+              const ay = (typeof st.mpy === 'number') ? st.mpy : (typeof st.py === 'number' ? st.py : null);
+              if (ax !== null && ay !== null && ax > -30000 && ay > -30000) {
+                await webview.setPosition(new PhysicalPosition(ax + 64, ay + 64));
+              }
+              await webview.maximize();
+              return;
+            }
             if (st.px > -30000 && st.py > -30000) {
               await webview.setPosition(new PhysicalPosition(st.px, st.py));
             }
             if (st.pw >= 200 && st.ph >= 150) {
-              await webview.setSize(new PhysicalSize(Math.min(st.pw, 16000), Math.min(st.ph, 16000)));
+              const apply = () => webview.setSize(new PhysicalSize(Math.min(st.pw, 16000), Math.min(st.ph, 16000)));
+              await apply();
+              // Cross-DPI-controle (zie App.svelte): asynchrone herschaling bij
+              // verhuizing naar een anders-geschaald scherm kan de maat
+              // overschrijven — één keer verifiëren en zonodig opnieuw zetten.
+              setTimeout(async () => {
+                try {
+                  const cur = await webview.innerSize();
+                  if (Math.abs(cur.width - st.pw) > 4 || Math.abs(cur.height - st.ph) > 4) await apply();
+                } catch (e) {}
+              }, 250);
             }
           } catch (e) { /* venster blijft dan op de beginschatting staan */ }
         });
@@ -5133,8 +5163,9 @@
                   <div class="fbk-modal">
                     <h3>Feedback sturen</h3>
                     <p class="settings-hint" style="margin: 0 0 0.35rem;">
-                      Je bericht gaat rechtstreeks naar de maker. Er wordt niets meegestuurd
-                      behalve wat hieronder staat plus het versienummer en de orgelnaam.
+                      Je bericht gaat rechtstreeks naar de maker. Meegestuurd worden alleen
+                      wat hieronder staat, het versienummer en de orgelnaam — plus de log
+                      als je dat hieronder aangevinkt laat.
                     </p>
                     <p class="settings-hint" style="margin: 0 0 0.5rem; font-style: italic;">
                       Let op: JM-Orgue is een hobbyproject — een reactie kan daarom enkele
@@ -5142,6 +5173,12 @@
                     </p>
                     <textarea rows="6" bind:value={fbkMessage} placeholder="Wat wil je melden? (bug, wens, vraag…)" style="width: 100%; resize: vertical;"></textarea>
                     <input type="text" bind:value={fbkEmail} placeholder="Je e-mailadres (optioneel — voor een antwoord)" style="width: 100%; margin-top: 0.4rem;" />
+                    <label style="display: flex; align-items: center; gap: 0.4rem; margin-top: 0.45rem; cursor: pointer;">
+                      <input type="checkbox" bind:checked={fbkIncludeLog} />
+                      <span class="settings-hint" style="margin: 0;">
+                        Logbestand meesturen (technische log van deze en de vorige sessie — helpt bij het opsporen van fouten)
+                      </span>
+                    </label>
                     {#if fbkStatus === 'ok'}
                       <p class="settings-hint" style="color: var(--success); margin: 0.4rem 0 0;">Verzonden — dank je wel!</p>
                     {:else if fbkStatus === 'error'}

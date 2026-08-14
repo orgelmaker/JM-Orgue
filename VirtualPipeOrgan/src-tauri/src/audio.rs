@@ -404,6 +404,31 @@ impl PlayingVoice {
             return 0.0;
         }
 
+        // Release-voice (one-shot) die nog op zijn preload draait en het einde
+        // daarvan nadert terwijl de volledige WAV nog niet geladen is (tutti-
+        // loslating → laadqueue vol): vloeiend uitfaden over de resterende
+        // samples in plaats van hard stilvallen en later terug-poppen zodra de
+        // load alsnog landt. Landt de load tijdens de fade, dan is de source
+        // Full en vuurt deze tak niet meer — de staart speelt gewoon door.
+        let mut preload_edge_fade = 1.0f32;
+        if self.one_shot {
+            if let VoiceSampleSource::PreloadOnly { preload, .. } = &self.source {
+                const EDGE_FADE: f64 = 4096.0; // ~90 ms bij 44,1 kHz
+                let rest = preload.attack_data.len() as f64 - self.position;
+                if rest <= 1.0 {
+                    // Einde bereikt zonder full load: definitief klaar — een
+                    // late load mag de staart niet laten herrijzen.
+                    self.releasing = true;
+                    self.envelope = 0.0;
+                    self.target_envelope = 0.0;
+                    return 0.0;
+                }
+                if rest < EDGE_FADE {
+                    preload_edge_fade = (rest / EDGE_FADE) as f32;
+                }
+            }
+        }
+
         // Read the next sample with a seamless crossfade at the loop seam.
         // Loop region = ODF points when valid, else a fallback over the last 3/4
         // of the buffer. The previous code keyed its crossfade to the absolute
@@ -459,7 +484,7 @@ impl PlayingVoice {
         self.hist_last = value;
         self.age_samples += 1;
 
-        value * self.envelope
+        value * self.envelope * preload_edge_fade
     }
 }
 
@@ -821,6 +846,26 @@ struct AsioCache {
 #[cfg(feature = "asio")]
 static ASIO_CACHE: parking_lot::Mutex<Option<AsioCache>> = parking_lot::Mutex::new(None);
 
+/// Is de ASIO-driver in dít proces ooit succesvol geladen? Onderscheidt de
+/// éénrichtingsdeur (driver werkte, is vrijgegeven en kan niet her-initialiseren
+/// → een app-herstart helpt) van "ASIO doet het hier gewoon niet" (geen
+/// herstart proberen).
+static ASIO_WORKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn asio_worked_this_process() -> bool {
+    ASIO_WORKED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+#[cfg(feature = "asio")]
+pub fn asio_cache_present() -> bool {
+    ASIO_CACHE.lock().is_some()
+}
+
+#[cfg(not(feature = "asio"))]
+pub fn asio_cache_present() -> bool {
+    false
+}
+
 /// Geef een bruikbaar ASIO-`Device` terug: uit de cache (zonder her-init) of
 /// vers geladen (en dan meteen gecachet). `want = None` betekent: de eerste
 /// beschikbare driver.
@@ -836,18 +881,28 @@ pub fn asio_get_or_load_device(want: Option<&str>) -> Result<cpal::Device, Strin
         let name_ok = want.map(|w| w == c.driver_name).unwrap_or(true);
         if name_ok {
             let want_name = c.driver_name.clone();
-            if let Some(d) = c.host.output_devices().ok().and_then(|mut devs| {
-                devs.find(|d| d.name().map(|n| n == want_name).unwrap_or(false))
-            }) {
-                return Ok(d);
+            // Transiënte enumeratie-hapering niet afstraffen met een cache-drop:
+            // droppen vernietigt de driver en maakt ASIO door de her-init-
+            // beperking permanent onbruikbaar. Kort retryen en anders de cache
+            // BEHOUDEN en een tijdelijke fout teruggeven.
+            for poging in 0..3u8 {
+                if let Some(d) = c.host.output_devices().ok().and_then(|mut devs| {
+                    devs.find(|d| d.name().map(|n| n == want_name).unwrap_or(false))
+                }) {
+                    return Ok(d);
+                }
+                if poging < 2 { std::thread::sleep(std::time::Duration::from_millis(100)); }
             }
-            warn!("Gecachte ASIO-driver '{}' niet meer zichtbaar; cache wordt ververst", c.driver_name);
+            warn!("Gecachte ASIO-driver '{}' antwoordt niet op enumeratie; cache blijft behouden", c.driver_name);
+            return Err(format!(
+                "ASIO-driver '{}' is geladen maar reageert tijdelijk niet; probeer de wissel opnieuw",
+                c.driver_name));
         } else {
             warn!("Andere ASIO-driver gevraagd ({:?} i.p.v. '{}'); cache wordt ververst — her-init kan falen",
                   want, c.driver_name);
         }
     }
-    *cache = None; // oude driver loslaten vóór een nieuwe load
+    *cache = None; // alleen bij een expliciet ándere driver: oude loslaten vóór een nieuwe load
 
     let host_id = cpal::available_hosts()
         .into_iter()
@@ -869,6 +924,7 @@ pub fn asio_get_or_load_device(want: Option<&str>) -> Result<cpal::Device, Strin
     };
     let driver_name = keeper.name().map_err(|e| format!("ASIO-apparaatnaam onleesbaar: {}", e))?;
     info!("ASIO-driver '{}' geladen en gecachet voor de procesduur", driver_name);
+    ASIO_WORKED.store(true, std::sync::atomic::Ordering::Relaxed);
     *cache = Some(AsioCache { host, driver_name: driver_name.clone(), _keeper: keeper });
 
     // Tweede exemplaar voor de aanroeper via de gecachte host: deelt de al
@@ -1558,7 +1614,12 @@ fn run_audio_thread(
     // attack ~1,5 ms (gedoseerd — één piek trekt niet het hele orgel omlaag),
     // release ~250 ms. Zie het limiterblok in de frame-lus voor waarom dit de
     // kale tanh-vervorming vervangt.
-    let mut master_limiter = MasterLimiter::new(0.97, 0.0015, 0.25, sample_rate);
+    // Release 1,2 s (was 0,25 s): na het loslaten van een groot akkoord veerde
+    // de gain in een kwart seconde terug omhoog terwijl release-samples + galm
+    // nog klonken — de staart zwol daardoor hoorbaar aan ("hik"). Met de
+    // tragere release (plus de 300 ms-hold in de limiter zelf) volgt de gain
+    // het natuurlijke uitsterven in plaats van er tegenin te pompen.
+    let mut master_limiter = MasterLimiter::new(0.97, 0.0015, 1.2, sample_rate);
     // Wachtrij voor opruimwerk dat de janitor even niet aankon (kanaal vol):
     // vasthouden en de volgende callback opnieuw aanbieden — NOOIT inline
     // droppen, want dat is precies de drop-storm die de janitor voorkomt.
@@ -1853,8 +1914,21 @@ fn run_audio_thread(
                                         v
                                     };
                                     rv.one_shot = true;
-                                    rv.envelope = level;
-                                    rv.target_envelope = level;
+                                    if align_pos > 0 {
+                                        // Fase-uitgelijnd: instant op niveau is dan
+                                        // juist goed (GrandOrgue-gedrag).
+                                        rv.envelope = level;
+                                        rv.target_envelope = level;
+                                    } else {
+                                        // Geen (betrouwbare) fase-uitlijning: een
+                                        // instant start op vol niveau geeft een
+                                        // amplitudesprong — een tik per loslating.
+                                        // In ~4 ms opfaden is onhoorbaar kort maar
+                                        // haalt de sprong eruit.
+                                        rv.envelope = 0.0;
+                                        rv.target_envelope = level;
+                                        rv.envelope_speed = (level / (0.004 * sample_rate as f32)).max(1e-6);
+                                    }
                                     // Korte noot: staart actief afbouwen — de galm
                                     // in de opname is nog niet volledig opgebouwd.
                                     if let Some(decay_ms) = stacc_decay {
@@ -1942,8 +2016,16 @@ fn run_audio_thread(
                                         v
                                     };
                                     rv.one_shot = true;
-                                    rv.envelope = level;
-                                    rv.target_envelope = level;
+                                    if align_pos > 0 {
+                                        rv.envelope = level;
+                                        rv.target_envelope = level;
+                                    } else {
+                                        // Zie NoteOff: zonder fase-uitlijning in
+                                        // ~4 ms opfaden i.p.v. instant vol niveau.
+                                        rv.envelope = 0.0;
+                                        rv.target_envelope = level;
+                                        rv.envelope_speed = (level / (0.004 * sample_rate as f32)).max(1e-6);
+                                    }
                                     if let Some(decay_ms) = stacc_decay {
                                         rv.release_ms(decay_ms, sample_rate);
                                     }

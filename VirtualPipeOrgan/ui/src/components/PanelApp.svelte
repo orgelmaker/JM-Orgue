@@ -175,6 +175,8 @@
       };
       unlistenMoved = await w.onMoved(schedule);
       unlistenResized = await w.onResized(schedule);
+      pollMonitors();
+      setInterval(pollMonitors, 3000);
       unlistenPanelsClosing = await listen('jm-orgue:panels-closing', () => {
         programmaticClose = true;
         if (programmaticCloseTimer) clearTimeout(programmaticCloseTimer);
@@ -191,8 +193,28 @@
       });
     } catch (e) { /* niet in Tauri */ }
   }
+  // Zie App.svelte: kort na een wijziging in de monitoropstelling niet saven —
+  // Windows verplaatst vensters dan zelf en die noodpositie is geen gebruikerswens.
+  let monCount = null;
+  let monChangedAt = 0;
+  async function pollMonitors() {
+    try {
+      const { availableMonitors } = await import('@tauri-apps/api/window');
+      const n = (await availableMonitors()).length;
+      if (monCount !== null && n !== monCount) monChangedAt = Date.now();
+      monCount = n;
+    } catch (e) {}
+  }
   async function saveGeometry() {
     try {
+      if (Date.now() - monChangedAt < 8000) return;
+      // savePanelState dropt stil zonder organId; zolang organInfo nog niet
+      // binnen is (paneel net geopend) de save kort uitstellen i.p.v. verliezen.
+      if (!organInfo?.id) {
+        if (geomTimer) clearTimeout(geomTimer);
+        geomTimer = setTimeout(saveGeometry, 1000);
+        return;
+      }
       const { getCurrentWindow } = await import('@tauri-apps/api/window');
       const w = getCurrentWindow();
       // Geminimaliseerd venster meldt op Windows -32000,-32000 — niet bewaren.
@@ -202,8 +224,17 @@
       const pos = await w.outerPosition();
       const size = await w.innerSize();
       if (pos.x < -30000 || pos.y < -30000) return;
+      if (await w.isMaximized()) {
+        // Zelfde patroon als het hoofdvenster: alleen de vlag + het monitor-
+        // anker; px/py/pw/ph blijven de windowed-terugvalstand.
+        savePanelState(organInfo?.id, panelNumber, {
+          maximized: true, mpx: pos.x, mpy: pos.y,
+        });
+        return;
+      }
       savePanelState(organInfo?.id, panelNumber, {
         px: pos.x, py: pos.y, pw: size.width, ph: size.height,
+        maximized: false,
       });
     } catch (e) {}
   }

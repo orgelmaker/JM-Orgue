@@ -18,10 +18,18 @@ pub struct MasterLimiter {
     /// Per-sample attack-coëfficiënt (exponentieel richting de doelgain).
     /// Kort (~1,5 ms) maar niet instantaan: één enkele sample-piek trekt zo
     /// niet het hele orgel omlaag — dat gaf bij crescendo's een "wegzakkend"
-    /// gevoel. Kortstondige overshoot wordt door de eind-clamp opgevangen.
+    /// gevoel. Kortstondige overshoot wordt door de nood-clamp in process()
+    /// opgevangen (nooit meer hard clippen op de uitgang).
     attack: f32,
     /// Per-sample release-coëfficiënt (exponentieel richting gain 1.0).
     release: f32,
+    /// Hold: aantal samples dat de gain na de laatste overschrijding blijft
+    /// staan voordat de release begint. Zonder hold veerde de gain direct na
+    /// het loslaten van een akkoord in ~250 ms terug omhoog terwijl de
+    /// release-samples + galm nog klonken — de staart zwol dan hoorbaar aan
+    /// ("hik"). De hold overbrugt precies dat moment.
+    hold_samples: u32,
+    hold_left: u32,
     /// Piek-plafond (lineair), bv. 0.97 ≈ -0,26 dBFS.
     pub threshold: f32,
 }
@@ -30,13 +38,17 @@ impl MasterLimiter {
     pub fn new(threshold: f32, attack_seconds: f32, release_seconds: f32, sample_rate: SampleRate) -> Self {
         let attack = 1.0 - (-1.0f32 / (attack_seconds.max(0.0001) * sample_rate as f32)).exp();
         let release = 1.0 - (-1.0f32 / (release_seconds.max(0.001) * sample_rate as f32)).exp();
-        Self { gain: 1.0, attack, release, threshold }
+        // Vaste hold van 300 ms: lang genoeg om het gat tussen loslaten en de
+        // natuurlijke release-staart te overbruggen, kort genoeg om dynamiek
+        // niet merkbaar te drukken.
+        let hold_samples = (0.3 * sample_rate as f32) as u32;
+        Self { gain: 1.0, attack, release, hold_samples, hold_left: 0, threshold }
     }
 
     /// Werk de limiter één frame bij op basis van de frame-piek (max |sample|
     /// over alle kanalen, vóór limiting) en geef de toe te passen gain terug.
-    /// De aanroeper hoort de uitgang alsnog hard te clampen (±1.0): tijdens de
-    /// korte attack kan de piek het plafond even overschrijden.
+    /// Inclusief nood-clamp: de teruggegeven gain laat de uitgang nooit boven
+    /// 1.0 uitkomen, ook niet tijdens de gedoseerde attack.
     #[inline]
     pub fn process(&mut self, frame_peak: f32) -> f32 {
         let desired = if frame_peak > self.threshold {
@@ -47,6 +59,10 @@ impl MasterLimiter {
         if desired < self.gain {
             // Attack: snel maar gedoseerd naar de doelgain.
             self.gain += (desired - self.gain) * self.attack;
+            self.hold_left = self.hold_samples;
+        } else if self.hold_left > 0 {
+            // Hold: gain blijft staan; pas daarna terugveren.
+            self.hold_left -= 1;
         } else {
             // Release: exponentieel terug omhoog, maar nooit voorbij wat de
             // huidige frame-piek toelaat.
@@ -55,11 +71,20 @@ impl MasterLimiter {
                 self.gain = desired;
             }
         }
+        // Noodplafond, alleen voor DIT frame: tijdens de gedoseerde attack mag
+        // de uitgang nooit hard clippen (dat gaf tikken/kraken bij akkoord-
+        // aanslagen op grote sets). De gain-STATE blijft gedoseerd — een
+        // instant-verlaagde state gaf juist het "wegzakkende" crescendo-gevoel
+        // dat de 1,5 ms-attack voorkomt. Eén stiller frame is onhoorbaar.
+        if frame_peak * self.gain > 1.0 {
+            return 1.0 / frame_peak;
+        }
         self.gain
     }
 
     pub fn reset(&mut self) {
         self.gain = 1.0;
+        self.hold_left = 0;
     }
 }
 
@@ -93,10 +118,14 @@ mod limiter_tests {
     #[test]
     fn attack_is_gedoseerd_niet_instantaan() {
         let mut l = MasterLimiter::new(0.97, 0.0015, 0.25, 48000);
-        // Eén enkele extreme piek mag de gain niet in één sample naar de
-        // bodem trekken (dat "wegzakkende" crescendo-gevoel).
+        // Eén enkele extreme piek krijgt voor DAT frame het noodplafond (geen
+        // hard clippen meer), maar de gain-STATE mag niet naar de bodem: het
+        // eerstvolgende normale frame hoort weer vrijwel ongedempt te zijn
+        // (geen "wegzakkend" crescendo-gevoel).
         let g1 = l.process(12.0);
-        assert!(g1 > 0.5, "eerste-sample-gain {} hoort nog dicht bij 1 te zijn", g1);
+        assert!(g1 <= 1.0 / 12.0 + 1e-6, "piekframe hoort tegen het noodplafond aan te zitten, is {}", g1);
+        let g2 = l.process(0.5);
+        assert!(g2 > 0.95, "state-gain {} hoort na één piekje dicht bij 1 te blijven", g2);
     }
 
     #[test]

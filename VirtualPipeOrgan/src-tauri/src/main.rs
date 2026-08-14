@@ -64,6 +64,15 @@ fn main() {
         .and_then(|t| t.elapsed().ok())
         .map(|age| age.as_secs() < 30)
         .unwrap_or(false);
+    // Vorige sessie bewaren als jm-orgue.log.1 (één generatie): een probleem
+    // gevolgd door een herstart zou anders zijn bewijs kwijt zijn — de
+    // feedbackknop kan de vorige log dan nog meesturen. Niet roteren bij een
+    // "warme" log (tweede instantie): die appendt juist aan het huidige log.
+    if !recently_written && log_path.exists() {
+        let prev_path = log_dir.join("jm-orgue.log.1");
+        let _ = std::fs::remove_file(&prev_path);
+        let _ = std::fs::rename(&log_path, &prev_path);
+    }
     let file = match std::fs::OpenOptions::new()
         .create(true)
         .write(true)
@@ -130,6 +139,21 @@ fn main() {
                 test_api::start_test_api(state.clone(), port, log_path_for_api.clone());
             }
 
+            // Na een ASIO-herstel-herstart (zie switch_audio_output): de live
+            // registratie van vlak vóór de mislukte wissel is als one-shot-
+            // bestand over de processtart heen getild. Hier inlezen zodat de
+            // orgel-load hem via het bestaande pending-mechanisme toepast.
+            {
+                let marker = state.app_data_dir.join("herstart-registratie.json");
+                if let Ok(json) = std::fs::read_to_string(&marker) {
+                    if let Ok(snap) = serde_json::from_str::<(Option<String>, Vec<String>, Vec<String>)>(&json) {
+                        info!("Registratie-snapshot van vóór de ASIO-herstart ingelezen ({} registers)", snap.1.len());
+                        *state.pending_registration_restore.write() = Some(snap);
+                    }
+                    let _ = std::fs::remove_file(&marker);
+                }
+            }
+
             // Uitgestelde ASIO-wissel. Een kóúde start op ASIO levert (op ASIO4ALL)
             // een stille stream op, terwijl exact dezelfde wissel op een volledig
             // draaiende app betrouwbaar werkt (geverifieerd 2026-07-03; zie ook
@@ -152,7 +176,12 @@ fn main() {
                         info!("Uitgestelde ASIO-wissel: opgeslagen voorkeur wordt gecontroleerd/toegepast");
                         match st.apply_deferred_asio_pref() {
                             Ok(Some(o)) => {
-                                if !o.switched {
+                                if o.switched {
+                                    // ASIO draait weer: herstart-guard opruimen zodat
+                                    // een láter vastgelopen wissel opnieuw een
+                                    // herstel-herstart mag doen.
+                                    let _ = std::fs::remove_file(st.app_data_dir.join("asio-herstart-guard"));
+                                } else {
                                     tracing::warn!("Uitgestelde ASIO-wissel niet gelukt: {}",
                                         o.message.as_deref().unwrap_or("onbekende oorzaak"));
                                 }
@@ -242,6 +271,7 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::get_log_tail,
             commands::get_audio_devices,
             commands::list_audio_hosts,
             commands::list_output_devices,
@@ -420,6 +450,21 @@ fn main() {
             commands::restore_swell_bindings,
             commands::get_saved_presets,
         ])
-        .run(tauri::generate_context!())
-        .expect("Error running application");
+        .build(tauri::generate_context!())
+        .expect("Error running application")
+        .run(|_app, event| {
+            // Afsluit-waakhond: de audio-teardown (m.n. een ASIO-driver die in
+            // een kernel-call blijft hangen) kon het proces bij het sluiten
+            // laten "zombiën" — venster weg, proces onkillbaar, poort 8765
+            // bezet, en de volgende start vindt een dode API. Zodra de
+            // event-loop eindigt krijgen de Drops 5 s; daarna forceren we de
+            // exit zodat er nooit een half-dood proces achterblijft.
+            if let tauri::RunEvent::Exit = event {
+                std::thread::spawn(|| {
+                    std::thread::sleep(std::time::Duration::from_secs(5));
+                    tracing::warn!("Afsluiten duurde >5 s (audio-teardown hangt?); proces wordt geforceerd beëindigd");
+                    std::process::exit(0);
+                });
+            }
+        });
 }

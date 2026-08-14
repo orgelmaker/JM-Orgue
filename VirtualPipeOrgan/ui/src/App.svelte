@@ -114,32 +114,86 @@
   // orgelconsole. Fysieke coördinaten zijn absoluut over alle monitoren.
   const MAIN_GEOM_KEY = 'jm-orgue-main-window';
   let mainGeomTimer = null;
+  // Wijzigingen in de monitoropstelling (scherm valt uit, of is bij het booten
+  // van het testorgel nog niet actief): Windows verplaatst vensters dan zélf,
+  // en die noodpositie mag de bewaarde stand niet overschrijven. We pollen het
+  // aantal monitoren; kort na een wijziging worden geometrie-saves overgeslagen.
+  let monCount = null;
+  let monChangedAt = 0;
+  async function pollMonitors() {
+    try {
+      const { availableMonitors } = await import('@tauri-apps/api/window');
+      const n = (await availableMonitors()).length;
+      if (monCount !== null && n !== monCount) monChangedAt = Date.now();
+      monCount = n;
+    } catch (e) {}
+  }
+  // Diagnose: laatste restore-uitkomst (stap of fout) — uitleesbaar via
+  // localStorage bij meerschermen-problemen op afstand (testorgel).
+  const geomDbg = (s) => { try { localStorage.setItem('jm-orgue-geom-last-restore', `${s} @${new Date().toISOString()}`); } catch (e) {} };
   async function restoreMainGeometry() {
     try {
+      geomDbg('start');
       const st = JSON.parse(localStorage.getItem(MAIN_GEOM_KEY) || 'null');
-      // Alleen het nieuwe fysieke formaat herstellen; oude logische opslag
-      // (x/y/width/height) bewust negeren — verkeerd terugrekenen is erger
-      // dan één keer opnieuw neerzetten.
-      if (!st || typeof st.px !== 'number') return;
+      if (!st) { geomDbg('geen-opslag'); return; }
       const { getCurrentWindow, PhysicalPosition, PhysicalSize } = await import('@tauri-apps/api/window');
       const w = getCurrentWindow();
+      if (st.maximized) {
+        // Eerst het venster op het juiste SCHERM zetten (anker uit de
+        // maximized-save, of anders de laatste windowed-positie), dán pas
+        // maximaliseren: maximize() pakt het scherm waar het venster op dat
+        // moment staat. +64 zodat het punt ruim binnen de monitor valt (de
+        // outerPosition van een gemaximaliseerd venster ligt door de
+        // vensterrand iets búiten de werkruimte).
+        const ax = (typeof st.mpx === 'number') ? st.mpx : (typeof st.px === 'number' ? st.px : null);
+        const ay = (typeof st.mpy === 'number') ? st.mpy : (typeof st.py === 'number' ? st.py : null);
+        if (ax !== null && ay !== null && ax > -30000 && ay > -30000) {
+          await w.setPosition(new PhysicalPosition(ax + 64, ay + 64));
+        }
+        await w.maximize();
+        geomDbg('gemaximaliseerd-hersteld');
+        return;
+      }
+      // Alleen het fysieke formaat (0.7.21) herstellen; oude logische opslag
+      // (x/y/width/height) bewust negeren — verkeerd terugrekenen is erger
+      // dan één keer opnieuw neerzetten.
+      if (typeof st.px !== 'number') return;
       if (st.px > -30000 && st.py > -30000) {
         await w.setPosition(new PhysicalPosition(st.px, st.py));
       }
       if (st.pw >= 400 && st.ph >= 300) {
-        await w.setSize(new PhysicalSize(Math.min(st.pw, 16000), Math.min(st.ph, 16000)));
+        const apply = () => w.setSize(new PhysicalSize(Math.min(st.pw, 16000), Math.min(st.ph, 16000)));
+        await apply();
+        // Cross-DPI-controle: verhuist het venster hierboven naar een scherm
+        // met een andere schaal, dan kan de asynchrone DPI-herschaling de
+        // gezette maat overschrijven. Eén keer verifiëren en zonodig opnieuw.
+        setTimeout(async () => {
+          try {
+            const cur = await w.innerSize();
+            if (Math.abs(cur.width - st.pw) > 4 || Math.abs(cur.height - st.ph) > 4) await apply();
+          } catch (e) {}
+        }, 250);
       }
-      if (st.maximized) await w.maximize();
-    } catch (e) { /* niet in Tauri of corrupte opslag — standaardpositie is prima */ }
+      geomDbg('windowed-hersteld');
+    } catch (e) { geomDbg(`FOUT: ${e?.message || e}`); /* standaardpositie is prima */ }
   }
   async function saveMainGeometry() {
     try {
+      // Vlak na een monitor-wijziging niet saven: de positie is dan vaak een
+      // door Windows gekozen noodpositie, niet de wens van de gebruiker.
+      if (Date.now() - monChangedAt < 8000) return;
       const { getCurrentWindow } = await import('@tauri-apps/api/window');
       const w = getCurrentWindow();
       if (await w.isMinimized()) return; // Windows meldt dan -32000,-32000
       const prev = (() => { try { return JSON.parse(localStorage.getItem(MAIN_GEOM_KEY) || '{}') || {}; } catch (e) { return {}; } })();
       if (await w.isMaximized()) {
-        localStorage.setItem(MAIN_GEOM_KEY, JSON.stringify({ ...prev, maximized: true }));
+        // Ook het monitor-anker vastleggen: de outerPosition van het
+        // gemaximaliseerde venster identificeert het scherm, zodat het herstel
+        // op het júiste scherm maximaliseert (3-schermen-testorgel).
+        const pos = await w.outerPosition();
+        const patch = { ...prev, maximized: true };
+        if (pos.x > -30000 && pos.y > -30000) { patch.mpx = pos.x; patch.mpy = pos.y; }
+        localStorage.setItem(MAIN_GEOM_KEY, JSON.stringify(patch));
         return;
       }
       const pos = await w.outerPosition();   // fysieke pixels
@@ -161,6 +215,8 @@
       };
       await w.onMoved(schedule);
       await w.onResized(schedule);
+      pollMonitors();
+      setInterval(pollMonitors, 3000);
       // NB: bewust géén eigen onCloseRequested meer — de centrale close-handler
       // (verderop in onMount) bewaart de geometrie expliciet vóór destroy();
       // twee close-handlers raceten met elkaar en de write verloor het weleens.
@@ -647,10 +703,18 @@
         : (!audioProfiles.speakers && audioProfiles.headphones ? 'headphones' : 'speakers'));
     const p = audioProfiles[target];
     if (!p) {
-      // Geen doelprofiel: geen foutmelding en geen derde toestand meer (0.7.3).
-      // Leg de HUIDIGE (echt spelende) uitgang vast als dit profiel en maak het
-      // actief. De gebruiker verfijnt het daarna in Instellingen → Audio-uitvoer
-      // naar een ander apparaat als de fysieke uitgang echt verschilt.
+      if (target === 'headphones') {
+        // Een niet-ingesteld hóófdtelefoonprofiel stilzwijgend vullen met de
+        // huidige (speaker-)uitgang gaf "er gebeurt niets" — de knop leek stuk
+        // ("schakeling hoofdtelefoon lukt niet") en beide profielen werden
+        // identiek. Eerlijk zeggen wat er moet gebeuren in plaats van raden.
+        error = 'Het profiel Hoofdtelefoon is nog niet ingesteld. Kies eerst de hoofdtelefoon-uitgang '
+          + '(host, apparaat en eventueel kanalen) in Instellingen → Audio-uitvoer en sla die op als '
+          + 'Hoofdtelefoon; daarna wisselt deze knop direct.';
+        return;
+      }
+      // Speakers zonder profiel: de huidige (echt spelende) uitgang vastleggen
+      // is dáár wel de juiste aanname — dat is de normale stand (0.7.3-migratie).
       await saveAudioProfile(target, {
         host: status.audioHost || selectedAudioHost || null,
         device: status.audioDevice || selectedAudioDevice || null,

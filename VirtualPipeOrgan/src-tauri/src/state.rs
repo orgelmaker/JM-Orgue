@@ -232,6 +232,11 @@ pub struct SwitchOutcome {
 /// apparaten asynchroon vrij na het sluiten van een stream/driver; direct
 /// opnieuw openen kan dan falen terwijl het een halve seconde later gewoon
 /// lukt. `delays_ms[i]` is de wachttijd vóór poging i (eerste meestal 0).
+/// Laatst-bewezen-werkende uitvoerconfiguratie (procesbreed). Gevuld bij elke
+/// geslaagde player-build; gebruikt als herstel-anker wanneer een wissel faalt
+/// en er geen levende player (meer) is om de "vorige uitgang" uit af te lezen.
+static LAST_GOOD_OUTPUT: parking_lot::Mutex<Option<AudioOutputConfig>> = parking_lot::Mutex::new(None);
+
 fn build_player_with_retries(cfg: &AudioOutputConfig, delays_ms: &[u64]) -> Result<AudioPlayer, String> {
     build_player_with_retries_deadline(cfg, delays_ms, None)
 }
@@ -261,6 +266,7 @@ fn build_player_with_retries_deadline(cfg: &AudioOutputConfig, delays_ms: &[u64]
                     tracing::info!("Audio-uitgang {:?}/{:?} gebouwd bij poging {}",
                         cfg.host_name, cfg.device_name, i + 1);
                 }
+                *LAST_GOOD_OUTPUT.lock() = Some(cfg.clone());
                 return Ok(p);
             }
             Err(e) => {
@@ -2486,12 +2492,63 @@ impl AppState {
                             return Ok(outcome(true, true, None, self));
                         }
                     }
+                    // ASIO-éénrichtingsdeur: de driver werkte eerder dit proces,
+                    // is daarna vrijgegeven (voor een WASAPI-wissel) en kan per
+                    // proces maar één keer initialiseren. Een verse processtart
+                    // lost dat gegarandeerd op — de uitgestelde ASIO-wissel bij
+                    // de start doet de wissel dan alsnog. Guard-bestand voorkomt
+                    // een herstart-lus: bestaat hij al (vorige herstart hielp
+                    // niet), dan vallen we door naar het eerlijke faalpad.
+                    if new_is_asio
+                        && crate::audio::asio_worked_this_process()
+                        && !crate::audio::asio_cache_present()
+                    {
+                        let guard_path = self.app_data_dir.join("asio-herstart-guard");
+                        if !guard_path.exists() {
+                            // Wens expliciet vastleggen zodat de nieuwe processtart
+                            // hem oppakt (ook wanneer persist niet gezet was).
+                            save_audio_prefs(&self.app_data_dir, &AudioPrefs {
+                                host: cfg.host_name.clone(),
+                                device: cfg.device_name.clone(),
+                                buffer_frames: cfg.buffer_frames,
+                            });
+                            // Live registratie over de herstart heen tillen: het
+                            // snapshot van deze wissel naar een one-shot-bestand;
+                            // de start leest hem in pending_registration_restore
+                            // en de orgel-load past hem toe.
+                            if let Some(snap) = self.pending_registration_restore.read().clone() {
+                                if let Ok(json) = serde_json::to_string(&snap) {
+                                    let _ = std::fs::write(self.app_data_dir.join("herstart-registratie.json"), json);
+                                }
+                            }
+                            let _ = std::fs::write(&guard_path, "1");
+                            let handle = self.app_handle.read().clone();
+                            if let Some(app) = handle {
+                                tracing::warn!(
+                                    "ASIO kan in dit proces niet opnieuw initialiseren; app herstart om de wissel naar {:?} af te maken",
+                                    cfg.device_name);
+                                app.restart(); // keert niet terug
+                            }
+                            // Geen AppHandle (headless test-API): guard weer weg
+                            // en gewoon doorvallen naar het faalpad.
+                            let _ = std::fs::remove_file(&guard_path);
+                        } else {
+                            // Eerdere herstart loste het niet op: guard opruimen
+                            // (her-armen voor een latere poging) en eerlijk falen.
+                            let _ = std::fs::remove_file(&guard_path);
+                            tracing::warn!("ASIO-herstart hielp eerder niet; wissel faalt zonder nieuwe herstart");
+                        }
+                    }
                     tracing::warn!("Wissel naar {:?}/{:?} definitief mislukt ({}); vorige uitgang herstellen",
                         cfg.host_name, cfg.device_name, e);
                     // Vorige uitgang terugbouwen zodat de gebruiker hoorbaar
                     // blijft waar hij was; de voorkeur blijft onaangetast.
-                    if let Some(oldc) = old_cfg {
-                        if let Ok(p) = build_player_with_retries(&oldc, &[0, 600]) {
+                    // Zonder levende oude player: terugvallen op de laatst-
+                    // bewezen-werkende configuratie. Ladder ruimer (WASAPI
+                    // geeft endpoints asynchroon vrij; USB/BT komt traag terug).
+                    let herstel_cfg = old_cfg.or_else(|| LAST_GOOD_OUTPUT.lock().clone());
+                    if let Some(oldc) = herstel_cfg {
+                        if let Ok(p) = build_player_with_retries(&oldc, &[0, 600, 1500]) {
                             *self.audio_player.write() = Some(p);
                             return Ok(outcome(false, true, Some(format!(
                                 "Wissel mislukt: {}. De vorige uitgang is hersteld.", e)), self));

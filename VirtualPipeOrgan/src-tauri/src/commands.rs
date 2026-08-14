@@ -5436,6 +5436,41 @@ fn current_exe_path() -> Result<String, String> {
     Ok(exe.to_string_lossy().to_string())
 }
 
+/// Staart van het logbestand (en van de vorige sessie, zie de log-rotatie in
+/// main.rs) voor de feedback-popup. max_kb begrenst de huidige log; de vorige
+/// sessie krijgt de helft, zodat het totaal klein genoeg blijft voor de
+/// mail-relay.
+#[tauri::command]
+pub fn get_log_tail(max_kb: Option<u32>) -> Result<String, String> {
+    fn tail_of(path: &std::path::Path, max_bytes: usize) -> Option<String> {
+        let data = std::fs::read(path).ok()?;
+        if data.is_empty() { return None; }
+        let start = data.len().saturating_sub(max_bytes);
+        // Niet midden in een regel beginnen: doorschuiven tot na de eerstvolgende newline.
+        let mut s = start;
+        if s > 0 {
+            while s < data.len() && data[s] != b'\n' { s += 1; }
+            s = (s + 1).min(data.len());
+        }
+        Some(String::from_utf8_lossy(&data[s..]).into_owned())
+    }
+    let dir = dirs::data_dir()
+        .map(|d| d.join("nl.jm-orgue.app"))
+        .ok_or_else(|| "Geen data-map gevonden".to_string())?;
+    let per_file = (max_kb.unwrap_or(24).clamp(1, 128) as usize) * 1024;
+    let mut out = String::new();
+    if let Some(t) = tail_of(&dir.join("jm-orgue.log"), per_file) {
+        out.push_str("==== huidige sessie (jm-orgue.log) ====\n");
+        out.push_str(&t);
+    }
+    if let Some(t) = tail_of(&dir.join("jm-orgue.log.1"), per_file / 2) {
+        out.push_str("\n==== vorige sessie (jm-orgue.log.1) ====\n");
+        out.push_str(&t);
+    }
+    if out.is_empty() { out.push_str("(geen logbestand gevonden)"); }
+    Ok(out)
+}
+
 /// Lees of JM-Orgue ingesteld staat om automatisch te starten bij Windows-aanmelding.
 #[tauri::command]
 pub fn get_autostart_enabled() -> Result<bool, String> {
