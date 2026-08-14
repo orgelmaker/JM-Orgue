@@ -1,0 +1,15 @@
+{
+  "_uitleg": "Manifest van online beschikbare samplesets. De bibliotheek in de app haalt dit bestand op via raw.githubusercontent.com (master) en toont per set een downloadkaart. zip_url moet een GitHub-URL zijn (de app weigert andere hosts). 'versie' verhogen bij een nieuwe zip; 'map_naam' is de mapnaam die de app aanmaakt.",
+  "samplesets": [
+    {
+      "id": "batz-witte-puttershoek",
+      "naam": "Bätz-Witte Puttershoek",
+      "beschrijving": "Zelf opgenomen sampleset van het Bätz-Witte-orgel te Puttershoek — 20 stemmen, Hoofdwerk/Nevenwerk/Pedaal.",
+      "versie": 1,
+      "zip_url": "https://github.com/orgelmaker/JM-Orgue/releases/download/sampleset-batz-witte-puttershoek/JM-Orgue-Sampleset-Batz-Witte-Puttershoek-v1.zip",
+      "zip_mb": 107,
+      "uitgepakt_mb": 211,
+      "map_naam": "Bätz-Witte Puttershoek"
+    }
+  ]
+}
