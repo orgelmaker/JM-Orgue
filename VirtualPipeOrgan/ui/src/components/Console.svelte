@@ -2269,6 +2269,50 @@
     }
   }
 
+  // ---- Online samplesets (bibliotheek-downloads) ----
+  // Manifest in onze eigen repo; raw.githubusercontent.com staat CORS toe
+  // (zelfde patroon als de update-check). Faalt stil: geen internet = geen
+  // downloadkaarten, de bibliotheek werkt gewoon door.
+  const SAMPLESETS_MANIFEST = 'https://raw.githubusercontent.com/orgelmaker/JM-Orgue/master/samplesets.json';
+  let onlineSets = [];
+  let onlineBusy = null;   // id van de lopende download
+  let onlinePct = 0;
+  let onlineFase = 'download';
+  async function refreshOnlineSets() {
+    try {
+      const res = await fetch(SAMPLESETS_MANIFEST, { cache: 'no-cache' });
+      if (!res.ok) { onlineSets = []; return; }
+      const mf = await res.json();
+      const geinstalleerd = new Set((libraryOrgans || []).map(o => o.name));
+      onlineSets = (mf.samplesets || []).filter(s => s.naam && s.zip_url && !geinstalleerd.has(s.naam));
+    } catch (e) { onlineSets = []; }
+  }
+  $: if (showOrganBrowser) refreshOnlineSets();
+  async function downloadOnlineSet(s) {
+    if (onlineBusy) return;
+    let un = null;
+    try {
+      const basis = await open({ multiple: false, directory: true, title: tx('library.download_where') });
+      if (!basis) return;
+      onlineBusy = s.id; onlinePct = 0; onlineFase = 'download';
+      const { listen } = await import('@tauri-apps/api/event');
+      un = await listen('jm-orgue:sampleset-download', (e) => {
+        if (e.payload?.id === s.id) { onlinePct = e.payload.pct || 0; onlineFase = e.payload.fase || 'download'; }
+      });
+      const pad = await invoke('download_sampleset', {
+        id: s.id, url: s.zip_url, doelMap: `${basis}/${s.map_naam || s.naam}`,
+      });
+      // Zelfde route als "Scan map": laadt het orgel en zet het in de bibliotheek.
+      dispatch('scanFolder', pad);
+    } catch (e) {
+      alert(`${tx('library.download_failed')}: ${e}`);
+    } finally {
+      if (un) un();
+      onlineBusy = null;
+      refreshOnlineSets();
+    }
+  }
+
   async function openExternalSampleset() {
     try {
       const selected = await open({
@@ -3197,6 +3241,45 @@
           </div>
         {/if}
       </div>
+
+      <!-- Online beschikbare samplesets (manifest in de repo); verdwijnen uit
+           deze lijst zodra ze geïnstalleerd zijn. -->
+      {#if onlineSets.length > 0}
+        <h2 class="organ-browser-subtitle">{$t('library.online_title')}</h2>
+        <div class="organ-library-grid">
+          {#each onlineSets as s (s.id)}
+            <div
+              class="library-card"
+              class:library-card-busy={onlineBusy === s.id}
+              on:click={() => downloadOnlineSet(s)}
+              on:keypress={(e) => e.key === 'Enter' && downloadOnlineSet(s)}
+              role="button"
+              tabindex="0"
+            >
+              <div class="library-card-image">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.55">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                  <polyline points="7 10 12 15 17 10"/>
+                  <line x1="12" y1="15" x2="12" y2="3"/>
+                </svg>
+              </div>
+              <div class="library-card-info">
+                <div class="library-card-name">{s.naam}</div>
+                <div class="library-card-meta">
+                  {#if onlineBusy === s.id}
+                    {onlineFase === 'uitpakken' ? $t('library.unpacking') : $t('library.downloading')} {onlinePct}%
+                  {:else}
+                    {$t('library.download_size').replace('{mb}', s.zip_mb || '?')}
+                  {/if}
+                </div>
+                {#if s.beschrijving}
+                  <div class="library-card-meta">{s.beschrijving}</div>
+                {/if}
+              </div>
+            </div>
+          {/each}
+        </div>
+      {/if}
     </div>
 
   {:else if displayOrgan}

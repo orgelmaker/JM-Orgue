@@ -26,7 +26,13 @@
     "remove_from_library": "Aus Bibliothek entfernen",
     "empty_title": "Noch keine Orgeln in der Bibliothek.",
     "empty_hint": "Verwenden Sie die Schaltflächen oben rechts, um eine Orgel zu laden.",
-    "stops_count": "{count} Register"
+    "stops_count": "{count} Register",
+    "online_title": "Zum Download verfügbar",
+    "downloading": "Wird heruntergeladen…",
+    "unpacking": "Wird entpackt…",
+    "download_size": "Herunterladen (± {mb} MB)",
+    "download_where": "Ordner wählen, in dem das Sample-Set gespeichert wird",
+    "download_failed": "Download fehlgeschlagen"
   },
   "settings": {
     "audio_output": "Audio-Ausgabe",

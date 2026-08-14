@@ -696,6 +696,21 @@ input[type="range"]::-webkit-slider-thumb:hover {
   margin: 0;
 }
 
+/* Kop boven de online-downloadkaarten in de bibliotheek */
+.organ-browser-subtitle {
+  font-size: 0.95rem;
+  font-weight: 600;
+  font-family: var(--stop-font-family);
+  color: var(--text-muted);
+  margin: 1.25rem 0 0.5rem;
+}
+
+/* Lopende download: kaart niet nogmaals klikbaar laten ogen */
+.library-card-busy {
+  opacity: 0.75;
+  pointer-events: none;
+}
+
 .organ-browser-actions {
   display: flex;
   gap: 0.5rem;

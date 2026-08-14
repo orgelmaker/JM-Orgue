@@ -26,7 +26,13 @@
     "remove_from_library": "Remove from library",
     "empty_title": "No organs in the library yet.",
     "empty_hint": "Use the buttons in the top right to load an organ.",
-    "stops_count": "{count} stops"
+    "stops_count": "{count} stops",
+    "online_title": "Available to download",
+    "downloading": "Downloading…",
+    "unpacking": "Unpacking…",
+    "download_size": "Download (± {mb} MB)",
+    "download_where": "Choose the folder where the sample set will be stored",
+    "download_failed": "Download failed"
   },
   "settings": {
     "audio_output": "Audio Output",

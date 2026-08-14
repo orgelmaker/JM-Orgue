@@ -26,7 +26,13 @@
     "remove_from_library": "Retirer de la bibliothèque",
     "empty_title": "Aucun orgue dans la bibliothèque.",
     "empty_hint": "Utilisez les boutons en haut à droite pour charger un orgue.",
-    "stops_count": "{count} jeux"
+    "stops_count": "{count} jeux",
+    "online_title": "Disponibles au téléchargement",
+    "downloading": "Téléchargement…",
+    "unpacking": "Décompression…",
+    "download_size": "Télécharger (± {mb} Mo)",
+    "download_where": "Choisissez le dossier où placer le jeu d'échantillons",
+    "download_failed": "Échec du téléchargement"
   },
   "settings": {
     "audio_output": "Sortie Audio",

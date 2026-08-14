@@ -5471,6 +5471,91 @@ pub fn get_log_tail(max_kb: Option<u32>) -> Result<String, String> {
     Ok(out)
 }
 
+/// Download een sampleset-zip (GitHub-release-asset uit ons eigen
+/// samplesets.json-manifest) en pak hem uit in `doel_map`. De map wordt
+/// aangemaakt en moet nieuw of leeg zijn. Voortgang via het event
+/// "jm-orgue:sampleset-download" ({id, fase: "download"|"uitpakken", pct}).
+/// Bij een fout wordt de (door ons aangemaakte) doelmap weer opgeruimd.
+#[tauri::command]
+pub async fn download_sampleset(app: tauri::AppHandle, id: String, url: String, doel_map: String) -> Result<String, String> {
+    use tauri::Emitter;
+    // Alleen onze eigen distributieroute: GitHub (release-assets redirecten
+    // naar objects.githubusercontent.com — dat volgt ureq zelf).
+    if !url.starts_with("https://github.com/") {
+        return Err("Alleen GitHub-URL's uit het sampleset-manifest zijn toegestaan".to_string());
+    }
+    let doel = std::path::PathBuf::from(&doel_map);
+    if doel.exists() && std::fs::read_dir(&doel).map(|mut d| d.next().is_some()).unwrap_or(true) {
+        return Err(format!("Doelmap bestaat al en is niet leeg: {}", doel_map));
+    }
+    let emit = {
+        let app = app.clone();
+        let id = id.clone();
+        move |fase: &str, pct: u32| {
+            let _ = app.emit("jm-orgue:sampleset-download", serde_json::json!({
+                "id": id, "fase": fase, "pct": pct.min(100),
+            }));
+        }
+    };
+    let result = tokio::task::spawn_blocking(move || -> Result<String, String> {
+        std::fs::create_dir_all(&doel).map_err(|e| format!("Doelmap aanmaken mislukt: {}", e))?;
+        let zip_pad = doel.join(".download.zip");
+        // ---- Downloaden (streaming, met voortgang op content-length) ----
+        let resp = ureq::get(&url).call().map_err(|e| format!("Download mislukt: {}", e))?;
+        let totaal: u64 = resp.header("Content-Length")
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
+        {
+            let mut reader = resp.into_reader();
+            let mut file = std::fs::File::create(&zip_pad)
+                .map_err(|e| format!("Zip wegschrijven mislukt: {}", e))?;
+            let mut buf = [0u8; 65536];
+            let mut gelezen: u64 = 0;
+            let mut laatst_pct = 0u32;
+            loop {
+                let n = std::io::Read::read(&mut reader, &mut buf)
+                    .map_err(|e| format!("Download afgebroken: {}", e))?;
+                if n == 0 { break; }
+                std::io::Write::write_all(&mut file, &buf[..n])
+                    .map_err(|e| format!("Zip wegschrijven mislukt: {}", e))?;
+                gelezen += n as u64;
+                if totaal > 0 {
+                    let pct = ((gelezen * 100) / totaal) as u32;
+                    if pct > laatst_pct { laatst_pct = pct; emit("download", pct); }
+                }
+            }
+        }
+        // ---- Uitpakken (zip-slip-veilig via enclosed_name) ----
+        emit("uitpakken", 0);
+        let file = std::fs::File::open(&zip_pad).map_err(|e| e.to_string())?;
+        let mut archief = zip::ZipArchive::new(file).map_err(|e| format!("Zip onleesbaar: {}", e))?;
+        let n_entries = archief.len().max(1);
+        for i in 0..archief.len() {
+            let mut entry = archief.by_index(i).map_err(|e| e.to_string())?;
+            let Some(rel) = entry.enclosed_name() else { continue; };
+            let uit = doel.join(rel);
+            if entry.is_dir() {
+                std::fs::create_dir_all(&uit).map_err(|e| e.to_string())?;
+            } else {
+                if let Some(parent) = uit.parent() {
+                    std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+                }
+                let mut f = std::fs::File::create(&uit).map_err(|e| e.to_string())?;
+                std::io::copy(&mut entry, &mut f).map_err(|e| format!("Uitpakken mislukt: {}", e))?;
+            }
+            emit("uitpakken", ((i + 1) * 100 / n_entries) as u32);
+        }
+        let _ = std::fs::remove_file(&zip_pad);
+        info!("Sampleset gedownload en uitgepakt naar {:?}", doel);
+        Ok(doel.to_string_lossy().to_string())
+    }).await.map_err(|e| format!("Downloadtaak crashte: {}", e))?;
+    if result.is_err() {
+        // Halve download niet laten slingeren; de map was van ons.
+        let _ = std::fs::remove_dir_all(std::path::Path::new(&doel_map));
+    }
+    result
+}
+
 /// Lees of JM-Orgue ingesteld staat om automatisch te starten bij Windows-aanmelding.
 #[tauri::command]
 pub fn get_autostart_enabled() -> Result<bool, String> {

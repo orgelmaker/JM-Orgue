@@ -26,7 +26,13 @@
     "remove_from_library": "Verwijder uit bibliotheek",
     "empty_title": "Nog geen orgels in de bibliotheek.",
     "empty_hint": "Gebruik de knoppen rechtsboven om een orgel te laden.",
-    "stops_count": "{count} registers"
+    "stops_count": "{count} registers",
+    "online_title": "Beschikbaar om te downloaden",
+    "downloading": "Downloaden…",
+    "unpacking": "Uitpakken…",
+    "download_size": "Downloaden (± {mb} MB)",
+    "download_where": "Kies de map waarin de sampleset komt te staan",
+    "download_failed": "Download mislukt"
   },
   "settings": {
     "audio_output": "Audio Uitvoer",
