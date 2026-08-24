@@ -2492,16 +2492,22 @@ impl AppState {
                             return Ok(outcome(true, true, None, self));
                         }
                     }
-                    // ASIO-éénrichtingsdeur: de driver werkte eerder dit proces,
-                    // is daarna vrijgegeven (voor een WASAPI-wissel) en kan per
-                    // proces maar één keer initialiseren. Een verse processtart
-                    // lost dat gegarandeerd op — de uitgestelde ASIO-wissel bij
-                    // de start doet de wissel dan alsnog. Guard-bestand voorkomt
-                    // een herstart-lus: bestaat hij al (vorige herstart hielp
-                    // niet), dan vallen we door naar het eerlijke faalpad.
+                    // ASIO-éénrichtingsdeur: de driver werkte eerder dit proces
+                    // maar is nu onbruikbaar — óf vrijgegeven (voor een WASAPI-
+                    // wissel; ASIO4ALL kan per proces maar één keer initialiseren),
+                    // óf nog gecachet maar dood voor enumeratie (ESI GIGAPORT eX
+                    // na een WASAPI-uitstap, testorgel-log 2026-08-22). Alleen
+                    // dán lost een verse processtart het gegarandeerd op — de
+                    // uitgestelde ASIO-wissel bij de start doet de wissel dan
+                    // alsnog. Een gewoon afwezig/bezet apparaat (kaart uit,
+                    // USB losgetrokken, andere app claimt hem) valt hier NIET
+                    // onder: dat hoort een nette foutmelding te geven, geen
+                    // herstart. Guard-bestand voorkomt een herstart-lus: bestaat
+                    // hij al (vorige herstart hielp niet), dan vallen we door
+                    // naar het eerlijke faalpad.
                     if new_is_asio
                         && crate::audio::asio_worked_this_process()
-                        && !crate::audio::asio_cache_present()
+                        && crate::audio::asio_door_closed()
                     {
                         let guard_path = self.app_data_dir.join("asio-herstart-guard");
                         if !guard_path.exists() {

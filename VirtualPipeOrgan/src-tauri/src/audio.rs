@@ -335,17 +335,45 @@ impl PlayingVoice {
         self.releasing = true;
         self.target_envelope = 0.0;
         self.envelope_speed = 0.0005;
+        self.clamp_release_to_buffer();
+    }
+
+    /// Zorg dat de lopende uitfade de beschikbare sampledata niet overschrijdt.
+    /// Tijdens de release loopt de voice niet meer (read_voice speelt lineair
+    /// uit), dus er is alleen data tot het buffereinde; duurt de fade langer,
+    /// dan kapt `i >= len - 1` de klank hard af op een willekeurige golfwaarde →
+    /// tik bij het loslaten. Verhoogt zonodig de fadesnelheid; verlaagt nooit.
+    fn clamp_release_to_buffer(&mut self) {
+        let avail = self.available_len() as f64;
+        if avail <= 0.0 { return; }
+        let rest_src = (avail - 1.0 - self.position).max(0.0);
+        let rest_out = ((rest_src / self.rate.max(1e-6)) as f32 * 0.9).max(8.0);
+        let min_speed = self.envelope.max(1e-6) / rest_out;
+        if self.envelope_speed < min_speed {
+            self.envelope_speed = min_speed;
+        }
     }
 
     /// Release met expliciete fade-duur (ms) — GrandOrgue's toonhoogte-
     /// afhankelijke release-crossfade (get_fader_length): lage pijpen sterven
     /// langzaam uit (~184 ms), hoge snel (~6 ms). Eén vaste 42 ms gaf bassen
     /// een te abrupte, en discanten een te trage overgang naar de release.
+    ///
+    /// De fade wordt ingekort tot wat er nog aan sampledata ligt: tijdens de
+    /// release wordt NIET meer geloopt (read_voice speelt lineair uit), dus een
+    /// noot die in de loop werd losgelaten heeft alleen het stuk tussen de
+    /// huidige positie en het bufferEINDE nog. Was de fade langer dan dat, dan
+    /// kapte `i >= len - 1` de klank hard af op een willekeurige golfwaarde —
+    /// een hoorbare TIK bij élk loslaten (gebruikersmelding testorgel; hier
+    /// gemeten bij 4 van de 5 loslatingen).
     fn release_ms(&mut self, ms: f32, sample_rate: u32) {
         self.releasing = true;
         self.target_envelope = 0.0;
         let frames = (ms.max(1.0) * 0.001 * sample_rate as f32).max(8.0);
-        self.envelope_speed = 1.0 / frames;
+        // Vanaf het HUIDIGE niveau in `frames` samples naar 0 (envelope kan al
+        // lager staan, bv. bij een zachte staccato-noot).
+        self.envelope_speed = self.envelope.max(1e-6) / frames;
+        self.clamp_release_to_buffer();
     }
 
     /// Slow release for tremulant crossfade (fade out over ~140ms)
@@ -353,6 +381,7 @@ impl PlayingVoice {
         self.releasing = true;
         self.target_envelope = 0.0;
         self.envelope_speed = 0.00015; // Match crossfade speed
+        self.clamp_release_to_buffer();
     }
 
     fn is_finished(&self) -> bool {
@@ -386,6 +415,18 @@ impl PlayingVoice {
         match &self.source {
             VoiceSampleSource::Full(sample) => sample.data.len(),
             VoiceSampleSource::PreloadOnly { preload, .. } => preload.total_samples,
+        }
+    }
+
+    /// Aantal bronframes dat NU echt in het geheugen staat. Verschilt van
+    /// `get_sample_len` bij een preload: die meldt de lengte van het volledige
+    /// bestand, terwijl read_voice alleen uit `attack_data` leest zolang de
+    /// achtergrondlading niet klaar is. De release-fade moet zich naar déze
+    /// lengte richten, anders kapt de klank af op de preload-rand.
+    fn available_len(&self) -> usize {
+        match &self.source {
+            VoiceSampleSource::Full(sample) => sample.data.len(),
+            VoiceSampleSource::PreloadOnly { preload, .. } => preload.attack_data.len(),
         }
     }
 
@@ -486,6 +527,19 @@ impl PlayingVoice {
 
         value * self.envelope * preload_edge_fade
     }
+}
+
+/// Laat een net gestarte release-voice INFADEN naar `level` over `fade_ms` —
+/// dezelfde duur waarmee de speelnoot uitfadet, zodat de twee samen één vloeiende
+/// crossfade vormen. Zonder dit startte de release instant op vol niveau bovenop
+/// de nog klinkende speelnoot: een niveausprong bij élk loslaten (op Friesach
+/// gemeten als +4 dB en een viervoudige sample-sprong) — de "tik na loslaten".
+#[inline]
+fn crossfade_in(voice: &mut PlayingVoice, level: f32, fade_ms: f32, sample_rate: u32) {
+    let frames = (fade_ms.max(1.0) * 0.001 * sample_rate as f32).max(8.0);
+    voice.envelope = 0.0;
+    voice.target_envelope = level;
+    voice.envelope_speed = (level / frames).max(1e-7);
 }
 
 /// GrandOrgue's automatische release-crossfade-duur (ms) per MIDI-noot
@@ -605,9 +659,187 @@ fn budget_release_voices(voices: &mut Vec<PlayingVoice>, sample_rate: u32) {
 /// Crossfade length for a loop of `loop_len` samples whose start is at index `ls`.
 /// Long crossfades (Hauptwerk-style, up to ~500 ms) mask imperfect loop points;
 /// bounded by half the loop and by the available pre-loop data (`ls`).
+/// GEEN ondergrens meer: de oude .clamp(256, …) kon bij weinig pre-loop-data
+/// (ls < 256) een xfade GROTER dan ls opleveren, waarna read_voice de blend
+/// helemaal oversloeg (guard `ls >= xfade`) — een harde naad die elke
+/// loop-omloop tikte. Een korte blend is altijd beter dan géén.
 #[inline]
 fn loop_xfade(loop_len: usize, ls: usize) -> usize {
-    (loop_len / 2).min(ls).clamp(256, 24_000)
+    (loop_len / 2).min(ls).min(24_000)
+}
+
+/// Maximaal aantal fysieke uitgangskanalen waarvoor galm-gewichten worden
+/// bijgehouden (ruim boven elke praktijkkaart; 8 bij een GIGAPORT eX).
+const MAX_OUT_CH: usize = 64;
+
+/// Galm-gewicht per fysiek uitgangskanaal, afgeleid uit de effectieve
+/// divisie-routing: de galm hoort te klinken uit dezélfde luidsprekers als het
+/// droge signaal, in dezélfde verhouding.
+///
+/// Per échte divisie (0..n_divs) worden de (L,R)-paren geparseerd zoals de
+/// droge routering dat doet (even index = L, oneven = R, los laatste kanaal =
+/// mono); een lege of volledig buiten het apparaat vallende lijst valt — net
+/// als droog — terug op het voorste paar. Elke divisie draagt `1/n_divs` bij
+/// aan de kanalen die zíj gebruikt. Daardoor geldt:
+///   * alle divisies op één paar (hoofdtelefoonprofiel) → dat paar krijgt de
+///     volledige galm, de overige kanalen niets;
+///   * elke divisie op een eigen paar → elk paar 1/n, samen precies één keer
+///     de galm (geen N-voudige optelling die alles te nat maakt);
+///   * overlappende routings → een gedeeld kanaal telt per divisie één keer,
+///     dus geen dubbele galm op dat kanaal.
+/// Vaste arrays: geen heap-allocatie op de audio-thread.
+/// Retourneert (gewicht_links, gewicht_rechts, aantal_actieve_kanalen).
+fn wet_channel_weights(
+    out_chans: &[Vec<u8>],
+    n_divs: usize,
+    channels: usize,
+) -> ([f32; MAX_OUT_CH], [f32; MAX_OUT_CH], usize) {
+    let mut wl = [0.0f32; MAX_OUT_CH];
+    let mut wr = [0.0f32; MAX_OUT_CH];
+    let ch = channels.min(MAX_OUT_CH);
+    if ch == 0 { return (wl, wr, 0); }
+    let divs = n_divs.max(1);
+    let share = 1.0 / divs as f32;
+    let mut hoogste = 0usize;
+    for idx in 0..divs {
+        let mut routed = false;
+        if let Some(list) = out_chans.get(idx) {
+            let mut i = 0;
+            while i < list.len() {
+                let lc = list[i] as usize;
+                let rc = if i + 1 < list.len() { Some(list[i + 1] as usize) } else { None };
+                match rc {
+                    // Volwaardig (L,R)-paar binnen het apparaat.
+                    Some(rc) if lc < ch && rc < ch => {
+                        wl[lc] += share; wr[rc] += share;
+                        hoogste = hoogste.max(lc + 1).max(rc + 1);
+                        routed = true;
+                    }
+                    // Eén helft valt buiten het apparaat, of een los laatste
+                    // kanaal: de overgebleven kant krijgt de gesomde (mono)
+                    // galm — net zoals droog daar mono terechtkomt.
+                    Some(rc) => {
+                        let keep = if lc < ch { Some(lc) } else if rc < ch { Some(rc) } else { None };
+                        if let Some(c) = keep {
+                            wl[c] += share * 0.5; wr[c] += share * 0.5;
+                            hoogste = hoogste.max(c + 1);
+                            routed = true;
+                        }
+                    }
+                    None => {
+                        if lc < ch {
+                            wl[lc] += share * 0.5; wr[lc] += share * 0.5;
+                            hoogste = hoogste.max(lc + 1);
+                            routed = true;
+                        }
+                    }
+                }
+                i += if rc.is_some() { 2 } else { 1 };
+            }
+        }
+        if !routed {
+            // Geen (bruikbare) routing: voorste paar, gelijk aan het droge pad.
+            if ch >= 2 {
+                wl[0] += share; wr[1] += share;
+                hoogste = hoogste.max(2);
+            } else {
+                wl[0] += share * 0.5; wr[0] += share * 0.5;
+                hoogste = hoogste.max(1);
+            }
+        }
+    }
+    (wl, wr, hoogste.min(ch))
+}
+
+#[cfg(test)]
+mod wet_weights_tests {
+    use super::wet_channel_weights;
+
+    /// Compacte weergave: alleen kanalen met gewicht, als (kanaal, wl, wr).
+    fn actief(wl: &[f32], wr: &[f32], n: usize) -> Vec<(usize, f32, f32)> {
+        (0..n).filter(|&c| wl[c] > 1e-6 || wr[c] > 1e-6)
+            .map(|c| (c, (wl[c] * 1000.0).round() / 1000.0, (wr[c] * 1000.0).round() / 1000.0))
+            .collect()
+    }
+
+    #[test]
+    fn standaard_stereo_naar_voorste_paar() {
+        // Geen routing geconfigureerd: volle galm op (0,1), zoals vóór 0.7.33.
+        let chans: Vec<Vec<u8>> = vec![Vec::new(); 32];
+        let (wl, wr, n) = wet_channel_weights(&chans, 3, 2);
+        assert_eq!(actief(&wl, &wr, n), vec![(0, 1.0, 0.0), (1, 0.0, 1.0)]);
+    }
+
+    #[test]
+    fn hoofdtelefoonprofiel_volgt_override() {
+        // Testorgel-klacht: alle divisies via de override op [0,1] van een
+        // 8-kanaals apparaat → volle galm op (0,1), niets op 2..7.
+        let mut chans: Vec<Vec<u8>> = vec![Vec::new(); 32];
+        for i in 0..3 { chans[i] = vec![0, 1]; }
+        let (wl, wr, n) = wet_channel_weights(&chans, 3, 8);
+        assert_eq!(actief(&wl, &wr, n), vec![(0, 1.0, 0.0), (1, 0.0, 1.0)]);
+    }
+
+    #[test]
+    fn speakerprofiel_alle_divisies_op_alle_paren() {
+        // Elke divisie speelt droog op alle drie de paren → elk paar krijgt ook
+        // de volle galm; de droog/galm-balans per luidspreker blijft gelijk.
+        let mut chans: Vec<Vec<u8>> = vec![Vec::new(); 32];
+        for i in 0..3 { chans[i] = vec![2, 3, 4, 5, 6, 7]; }
+        let (wl, wr, n) = wet_channel_weights(&chans, 3, 8);
+        assert_eq!(actief(&wl, &wr, n), vec![
+            (2, 1.0, 0.0), (3, 0.0, 1.0), (4, 1.0, 0.0), (5, 0.0, 1.0), (6, 1.0, 0.0), (7, 0.0, 1.0)]);
+    }
+
+    #[test]
+    fn divisie_per_paar_telt_op_tot_een_keer_galm() {
+        // Klassieke multikanaals-opstelling: elk werk zijn eigen paar. Elk paar
+        // krijgt 1/3 galm — samen precies één keer, niet drie keer (anders
+        // wordt alles fors natter zodra je de werken uit elkaar trekt).
+        let mut chans: Vec<Vec<u8>> = vec![Vec::new(); 32];
+        chans[0] = vec![0, 1]; chans[1] = vec![2, 3]; chans[2] = vec![4, 5];
+        let (wl, wr, n) = wet_channel_weights(&chans, 3, 8);
+        let a = actief(&wl, &wr, n);
+        assert_eq!(a, vec![(0, 0.333, 0.0), (1, 0.0, 0.333), (2, 0.333, 0.0),
+                           (3, 0.0, 0.333), (4, 0.333, 0.0), (5, 0.0, 0.333)]);
+        let totaal_l: f32 = (0..n).map(|c| wl[c]).sum();
+        assert!((totaal_l - 1.0).abs() < 0.01, "totale galm moet 1x zijn, is {}", totaal_l);
+    }
+
+    #[test]
+    fn gedeeld_kanaal_krijgt_galm_niet_dubbel() {
+        // Overlappende routings: kanaal 0 wordt door beide divisies gebruikt en
+        // krijgt daarom precies hun sommatie (1.0), niet twee volle kopieën.
+        let mut chans: Vec<Vec<u8>> = vec![Vec::new(); 32];
+        chans[0] = vec![0, 1]; chans[1] = vec![0, 2];
+        let (wl, wr, n) = wet_channel_weights(&chans, 2, 8);
+        assert_eq!(actief(&wl, &wr, n), vec![(0, 1.0, 0.0), (1, 0.0, 0.5), (2, 0.0, 0.5)]);
+    }
+
+    #[test]
+    fn los_laatste_kanaal_wordt_mono() {
+        let mut chans: Vec<Vec<u8>> = vec![Vec::new(); 32];
+        chans[0] = vec![4, 5, 6];
+        let (wl, wr, n) = wet_channel_weights(&chans, 1, 8);
+        assert_eq!(actief(&wl, &wr, n), vec![(4, 1.0, 0.0), (5, 0.0, 1.0), (6, 0.5, 0.5)]);
+    }
+
+    #[test]
+    fn routing_buiten_apparaat_valt_terug() {
+        // 8-kanaals routing op een stereo-apparaat (na profielwissel): terugval
+        // op het voorste paar, net als het droge signaal (auditbevinding 37).
+        let mut chans: Vec<Vec<u8>> = vec![Vec::new(); 32];
+        chans[0] = vec![2, 3, 4, 5];
+        let (wl, wr, n) = wet_channel_weights(&chans, 1, 2);
+        assert_eq!(actief(&wl, &wr, n), vec![(0, 1.0, 0.0), (1, 0.0, 1.0)]);
+    }
+
+    #[test]
+    fn mono_apparaat_somt_naar_kanaal_nul() {
+        let chans: Vec<Vec<u8>> = vec![Vec::new(); 32];
+        let (wl, wr, n) = wet_channel_weights(&chans, 2, 1);
+        assert_eq!(actief(&wl, &wr, n), vec![(0, 0.5, 0.5)]);
+    }
 }
 
 /// 4-punts Catmull-Rom/Hermite-interpolatie rond index `i` (leest i-1..i+2,
@@ -856,15 +1088,27 @@ pub fn asio_worked_this_process() -> bool {
     ASIO_WORKED.load(std::sync::atomic::Ordering::Relaxed)
 }
 
-#[cfg(feature = "asio")]
-pub fn asio_cache_present() -> bool {
-    ASIO_CACHE.lock().is_some()
+/// Is ASIO in dit proces in de éénrichtingsdeur beland? Twee bekende vormen:
+/// de gecachte driver is vrijgegeven (voor een WASAPI-wissel; ASIO4ALL kan per
+/// proces maar één keer initialiseren), of de cache leeft nog maar de driver
+/// antwoordt niet meer op enumeratie (ESI GIGAPORT eX na een WASAPI-uitstap).
+/// Alleen déze twee rechtvaardigen een herstel-herstart; een gewoon afwezig of
+/// bezet apparaat moet gewoon een nette foutmelding geven.
+static ASIO_DOOR_CLOSED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn asio_door_closed() -> bool {
+    ASIO_DOOR_CLOSED.load(std::sync::atomic::Ordering::Relaxed)
 }
 
-#[cfg(not(feature = "asio"))]
-pub fn asio_cache_present() -> bool {
-    false
+/// Wis de "deur dicht"-vlag; aanroepen zodra ASIO weer werkt (na een geslaagde
+/// wissel/herstart), zodat een látere vastloper opnieuw hersteld mag worden.
+pub fn asio_clear_door_closed() {
+    ASIO_DOOR_CLOSED.store(false, std::sync::atomic::Ordering::Relaxed);
 }
+
+// (asio_cache_present is vervallen: de herstel-herstart in state.rs vuurt nu
+// óók wanneer de cache nog bestaat maar de driver dood is voor enumeratie —
+// het GIGAPORT-geval — dus de aanwezigheidscheck deed er niet meer toe.)
 
 /// Geef een bruikbaar ASIO-`Device` terug: uit de cache (zonder her-init) of
 /// vers geladen (en dan meteen gecachet). `want = None` betekent: de eerste
@@ -894,6 +1138,9 @@ pub fn asio_get_or_load_device(want: Option<&str>) -> Result<cpal::Device, Strin
                 if poging < 2 { std::thread::sleep(std::time::Duration::from_millis(100)); }
             }
             warn!("Gecachte ASIO-driver '{}' antwoordt niet op enumeratie; cache blijft behouden", c.driver_name);
+            // Éénrichtingsdeur-vorm 2: driver leeft, maar praat niet meer. Alleen
+            // een verse processtart krijgt hem terug (zie asio_door_closed).
+            ASIO_DOOR_CLOSED.store(true, std::sync::atomic::Ordering::Relaxed);
             return Err(format!(
                 "ASIO-driver '{}' is geladen maar reageert tijdelijk niet; probeer de wissel opnieuw",
                 c.driver_name));
@@ -949,6 +1196,9 @@ pub fn asio_release_cached_driver() -> bool {
     if cache.is_some() {
         warn!("Gecachte ASIO-driver wordt vrijgegeven; ASIO is tot een app-herstart mogelijk niet meer beschikbaar");
         *cache = None;
+        // Éénrichtingsdeur-vorm 1: vrijgegeven driver kan in dit proces niet
+        // meer initialiseren (zie asio_door_closed).
+        ASIO_DOOR_CLOSED.store(true, std::sync::atomic::Ordering::Relaxed);
         true
     } else {
         false
@@ -1914,25 +2164,23 @@ fn run_audio_thread(
                                         v
                                     };
                                     rv.one_shot = true;
-                                    if align_pos > 0 {
-                                        // Fase-uitgelijnd: instant op niveau is dan
-                                        // juist goed (GrandOrgue-gedrag).
+                                    if let Some(decay_ms) = stacc_decay {
+                                        // Korte noot: staart actief afbouwen — de galm
+                                        // in de opname is nog niet volledig opgebouwd.
+                                        // Hier geen fade-in: de uitfade begint meteen
+                                        // en die twee doelen gaan niet samen.
                                         rv.envelope = level;
                                         rv.target_envelope = level;
-                                    } else {
-                                        // Geen (betrouwbare) fase-uitlijning: een
-                                        // instant start op vol niveau geeft een
-                                        // amplitudesprong — een tik per loslating.
-                                        // In ~4 ms opfaden is onhoorbaar kort maar
-                                        // haalt de sprong eruit.
-                                        rv.envelope = 0.0;
-                                        rv.target_envelope = level;
-                                        rv.envelope_speed = (level / (0.004 * sample_rate as f32)).max(1e-6);
-                                    }
-                                    // Korte noot: staart actief afbouwen — de galm
-                                    // in de opname is nog niet volledig opgebouwd.
-                                    if let Some(decay_ms) = stacc_decay {
                                         rv.release_ms(decay_ms, sample_rate);
+                                    } else {
+                                        // Échte crossfade: de release komt op terwijl
+                                        // de speelnoot uitfadet, met DEZELFDE duur.
+                                        // Startte de release instant op vol niveau
+                                        // (het oude gedrag), dan telden beide even
+                                        // samen op — een niveausprong van enkele dB
+                                        // bij élk loslaten, hoorbaar als tik/bump
+                                        // (gemeten op Friesach: +4 dB, |dx| ×4).
+                                        crossfade_in(&mut rv, level, release_fade_ms(voice.midi_note), sample_rate);
                                     }
                                     spawn = Some(rv);
                                 }
@@ -2016,18 +2264,14 @@ fn run_audio_thread(
                                         v
                                     };
                                     rv.one_shot = true;
-                                    if align_pos > 0 {
+                                    if let Some(decay_ms) = stacc_decay {
                                         rv.envelope = level;
                                         rv.target_envelope = level;
-                                    } else {
-                                        // Zie NoteOff: zonder fase-uitlijning in
-                                        // ~4 ms opfaden i.p.v. instant vol niveau.
-                                        rv.envelope = 0.0;
-                                        rv.target_envelope = level;
-                                        rv.envelope_speed = (level / (0.004 * sample_rate as f32)).max(1e-6);
-                                    }
-                                    if let Some(decay_ms) = stacc_decay {
                                         rv.release_ms(decay_ms, sample_rate);
+                                    } else {
+                                        // Zie NoteOff: complementaire crossfade i.p.v.
+                                        // instant vol niveau (anders een niveausprong).
+                                        crossfade_in(&mut rv, level, release_fade_ms(voice.midi_note), sample_rate);
                                     }
                                     spawns.push(rv);
                                     spawned.insert(voice.pipe_num);
@@ -2442,6 +2686,14 @@ fn run_audio_thread(
             let wind_group_assignment = wind_groups_clone.read();
             let swell_cfgs = swell_configs_clone.read();
             let stop_div_map = stop_to_division_clone.read();
+            // Galm-gewichten per kanaal: de galm moet over DEZELFDE kanalen
+            // lopen als het droge signaal (testorgel-feedback: op het
+            // hoofdtelefoonprofiel [0,1] klonk de galm door op de speaker-
+            // kanalen [2..7]). Eén keer per callback afgeleid uit de effectieve
+            // routing van de ÉCHTE divisies (aantal uit de stop→divisie-map);
+            // vaste arrays, dus geen allocatie op de audio-thread.
+            let n_real_divs = stop_div_map.values().map(|&d| d as usize + 1).max().unwrap_or(0);
+            let (wet_w_l, wet_w_r, wet_ch) = wet_channel_weights(&out_chans_lock, n_real_divs, channels);
             let temp_ratios = *temperament_clone.read();
             let mut peak_l = 0.0f32;
             let mut peak_r = 0.0f32;
@@ -2666,7 +2918,6 @@ fn run_audio_thread(
                     // naar de toegewezen fysieke kanalen. Som ook tot mono voor de galm.
                     let mut sum_l = 0.0f32;
                     let mut sum_r = 0.0f32;
-                    let mut touched: u64 = 0;
                     for idx in 0..32 {
                         let l_raw = div_l[idx];
                         let r_raw = div_r[idx];
@@ -2701,11 +2952,11 @@ fn run_audio_thread(
                                     let lc = list[i] as usize;
                                     if i + 1 < list.len() {
                                         let rc = list[i + 1] as usize;
-                                        if lc < channels { frame[lc] += l; touched |= 1u64 << lc.min(63); routed = true; }
-                                        if rc < channels { frame[rc] += r; touched |= 1u64 << rc.min(63); routed = true; }
+                                        if lc < channels { frame[lc] += l; routed = true; }
+                                        if rc < channels { frame[rc] += r; routed = true; }
                                         i += 2;
                                     } else {
-                                        if lc < channels { frame[lc] += (l + r) * 0.5; touched |= 1u64 << lc.min(63); routed = true; }
+                                        if lc < channels { frame[lc] += (l + r) * 0.5; routed = true; }
                                         i += 1;
                                     }
                                 }
@@ -2718,20 +2969,16 @@ fn run_audio_thread(
                                 if !routed {
                                     if channels >= 2 {
                                         frame[0] += l; frame[1] += r;
-                                        touched |= 0b11;
                                     } else if channels >= 1 {
                                         frame[0] += (l + r) * 0.5;
-                                        touched |= 0b1;
                                     }
                                 }
                             }
                             _ => {
                                 if channels >= 2 {
                                     frame[0] += l; frame[1] += r;
-                                    touched |= 0b11;
                                 } else if channels >= 1 {
                                     frame[0] += (l + r) * 0.5;
-                                    touched |= 0b1;
                                 }
                             }
                         }
@@ -2760,18 +3007,20 @@ fn run_audio_thread(
                         }
                     }
 
-                    if channels >= 2 {
-                        // Galm naar het voorste paar (0/1).
-                        frame[0] += wet_l;
-                        frame[1] += wet_r;
-                        // Bij 6/8 kanalen: milde galm-center-fill (ch 2) als geen divisie
-                        // die expliciet adresseert; LFE (ch 3) blijft leeg tenzij een
-                        // divisie er naartoe routet.
-                        if channels >= 6 && (touched & (1u64 << 2)) == 0 {
-                            frame[2] += (wet_l + wet_r) * 0.5 * 0.6;
+                    // Galm over dezelfde kanalen als het droge signaal, gewogen
+                    // naar het aandeel dat elke luidspreker droog krijgt (zie
+                    // wet_channel_weights). De oude vaste routering (altijd 0/1
+                    // + center-fill op kanaal 2) stuurde op het testorgel de galm
+                    // naar de hoofdtelefoon terwijl de speakers droog speelden —
+                    // en andersom lekte hij naar de speakers bij spelen op de
+                    // hoofdtelefoon.
+                    if wet_l != 0.0 || wet_r != 0.0 {
+                        for c in 0..wet_ch {
+                            let w_l = wet_w_l[c];
+                            let w_r = wet_w_r[c];
+                            if w_l != 0.0 { frame[c] += wet_l * w_l; }
+                            if w_r != 0.0 { frame[c] += wet_r * w_r; }
                         }
-                    } else {
-                        frame[0] += (wet_l + wet_r) * 0.5;
                     }
 
                     // Vrije multi-band EQ: per fysiek uitgangskanaal een eigen keten,

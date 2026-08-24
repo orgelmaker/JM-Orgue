@@ -176,11 +176,14 @@ fn main() {
                         info!("Uitgestelde ASIO-wissel: opgeslagen voorkeur wordt gecontroleerd/toegepast");
                         match st.apply_deferred_asio_pref() {
                             Ok(Some(o)) => {
+                                // Guard hoe dan ook opruimen: bij succes omdat
+                                // ASIO weer werkt, bij mislukking omdat een
+                                // blijvende guard een látere (wél oplosbare)
+                                // vastloper zou blokkeren. De guard hoeft alleen
+                                // de herstart-lus binnen één opstart te breken.
+                                let _ = std::fs::remove_file(st.app_data_dir.join("asio-herstart-guard"));
                                 if o.switched {
-                                    // ASIO draait weer: herstart-guard opruimen zodat
-                                    // een láter vastgelopen wissel opnieuw een
-                                    // herstel-herstart mag doen.
-                                    let _ = std::fs::remove_file(st.app_data_dir.join("asio-herstart-guard"));
+                                    crate::audio::asio_clear_door_closed();
                                 } else {
                                     tracing::warn!("Uitgestelde ASIO-wissel niet gelukt: {}",
                                         o.message.as_deref().unwrap_or("onbekende oorzaak"));
