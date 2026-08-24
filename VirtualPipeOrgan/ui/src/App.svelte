@@ -232,8 +232,13 @@
     await restoreMainGeometry();
     initMainGeometryTracking();
 
-    // Update-check ná de drukke opstart (audio/orgel-load gaat vóór).
+    // Update-check ná de drukke opstart (audio/orgel-load gaat vóór), en daarna
+    // elk uur opnieuw: een orgel staat vaak dagen achtereen aan, en met alleen
+    // de start-check kwam een nieuwe release pas ná een herstart binnen (melding
+    // gebruiker: "nu krijg ik toch geen update melding"). De check is één
+    // GitHub-aanroep, faalt geluidloos en toont niets als er niets nieuws is.
     setTimeout(runUpdateCheck, 3000);
+    setInterval(runUpdateCheck, 60 * 60 * 1000);
 
     await refreshDevices();
     await refreshStatus();
