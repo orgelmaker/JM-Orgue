@@ -19,7 +19,7 @@
   "library": {
     "title": "Bibliothèque d'orgues",
     "open_organ_file": ".organ",
-    "scan_folder": "Scanner dossier",
+    "scan_folder": "Import JM-Rec",
     "external_set": "Externe",
     "export": "Exporter",
     "app_settings_button": "Paramètres généraux",
@@ -172,7 +172,18 @@
     "export_settings": "Exporter paramètres...",
     "import_settings": "Importer paramètres...",
     "import_dialog_title": "Sélectionner fichier de paramètres",
-    "export_dialog_title": "Enregistrer sous..."
+    "export_dialog_title": "Enregistrer sous...",
+    "panel_close_quits": "Fermer un écran supplémentaire ferme toute l'application",
+    "panel_close_quits_title": "Activé : la croix d'un écran supplémentaire quitte JM-Orgue entièrement (pratique sur une console). Désactivé : seul cet écran se ferme, l'orgue continue.",
+    "output_pair": "Canaux de sortie",
+    "output_pair_hint": "Quels deux canaux de l'interface audio l'orgue utilise (p. ex. sorties 3–4 d'une interface ASIO). Réglage par clavier sous Canal MIDI par clavier.",
+    "output_pair_custom": "Par clavier (personnalisé)",
+    "polyphony": "Polyphonie (voix max.)",
+    "polyphony_hint": "Nombre maximal de tuyaux sonnant simultanément, queues de relâchement incluses. Plus élevé = plus de CPU sur un cœur ; gardez la charge sous ~80 %.",
+    "polyphony_load": "Charge du thread audio : {load} % (pic {peak} %)",
+    "stereo_samples": "Lire les échantillons stéréo en stéréo",
+    "stereo_samples_hint": "Activé : les enregistrements stéréo gardent leur image spatiale (plus de mémoire). Désactivé : mixage mono comme avant.",
+    "reload_hint": "Prend effet après le rechargement de l'orgue."
   },
   "stops": {
     "tremulant": "Trémulant",
@@ -242,7 +253,8 @@
     "midi_connected": "MIDI connecté",
     "midi_disconnected": "MIDI déconnecté",
     "voices": "voix",
-    "version": "v{version}"
+    "version": "v{version}",
+    "load_title": "Voix actives / limite de polyphonie · charge du thread audio"
   },
   "actions": {
     "save": "Enregistrer",
@@ -266,8 +278,9 @@
     "no_organ_loaded": "Aucun orgue chargé"
   },
   "dialogs": {
-    "sample_folder_title": "Sélectionnez un dossier contenant les dossiers d'échantillons",
-    "organ_file_title": "Ouvrir fichier .organ"
+    "sample_folder_title": "Sélectionnez le dossier du projet JM-Rec (ou un dossier contenant des dossiers d'échantillons)",
+    "organ_file_title": "Ouvrir fichier .organ",
+    "shutdown_confirm": "Fermer le logiciel ET éteindre l'ordinateur ?\n\nL'état actuel sera d'abord enregistré."
   },
   "alerts": {
     "max_midi_signals": "Maximum 4 signaux MIDI par bouton d'accouplement/jeu"
@@ -334,5 +347,32 @@
     "scrollbar_thumb": "Barre de défilement",
     "menu_bg": "Arrière-plan menu contextuel",
     "menu_text": "Texte menu contextuel"
+  },
+  "toolbar": {
+    "size_title": "Taille des tirants",
+    "vertical": "Vertical",
+    "horizontal": "Horizontal",
+    "layout_title_vertical": "Rangée verticale",
+    "layout_title_horizontal": "Rangée horizontale",
+    "rect": "Carré",
+    "round": "Rond",
+    "shape_title_rect": "Tirants rectangulaires",
+    "shape_title_round": "Tirants ronds (à tirer)",
+    "bar": "Barre",
+    "bar_title": "Afficher la barre principale (onglets, profil, audio marche/arrêt)",
+    "new_screen": "Nouvel écran",
+    "rec_audio_running": "Enregistrement audio — {t} · Cliquer pour arrêter",
+    "rec_audio_start": "Démarrer l'enregistrement MP3 (ce que vous entendez) dans Documents\\JM-Orgue-opnames",
+    "rec_midi_running": "Enregistrement MIDI — {n} événements · {t} · Cliquer pour arrêter",
+    "rec_midi_start": "Démarrer l'enregistrement MIDI (ce que vous jouez — notes seules) ; enregistré dans Documents\\JM-Orgue-opnames",
+    "play_recording": "Lire l'enregistrement",
+    "play_recording_title": "Charger le MIDI que vous venez d'enregistrer dans le lecteur et le rejouer (tirez vous-même les jeux)",
+    "notate": "Noter",
+    "notate_title": "Ouvrir la fenêtre de notation : jouez et voyez les notes apparaître en direct (couches, overdub, tolérance rythmique, édition) ; vous pouvez aussi y ouvrir un fichier MIDI existant",
+    "shutdown": "Éteindre le PC",
+    "shutdown_title": "Fermer le logiciel ET éteindre l'ordinateur · clic droit ou maintenir 3 s = apprentissage MIDI",
+    "couplers": "Accouplements",
+    "couplers_to_bar": "Afficher les accouplements dans une barre séparée",
+    "couplers_to_division": "Afficher les accouplements comme boutons dans le clavier"
   }
 }

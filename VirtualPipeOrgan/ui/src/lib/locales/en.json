@@ -19,7 +19,7 @@
   "library": {
     "title": "Organ Library",
     "open_organ_file": ".organ",
-    "scan_folder": "Scan folder",
+    "scan_folder": "JM-Rec import",
     "external_set": "External",
     "export": "Export",
     "app_settings_button": "App Settings",
@@ -172,7 +172,18 @@
     "export_settings": "Export settings...",
     "import_settings": "Import settings...",
     "import_dialog_title": "Select settings file",
-    "export_dialog_title": "Save as..."
+    "export_dialog_title": "Save as...",
+    "panel_close_quits": "Closing an extra screen closes the whole application",
+    "panel_close_quits_title": "On: the close button on an extra screen quits JM-Orgue entirely (handy on an organ console). Off: only that screen closes; the organ keeps playing.",
+    "output_pair": "Output channels",
+    "output_pair_hint": "Which two channels of the audio device the organ uses (e.g. outputs 3–4 of an ASIO interface). Per-division routing is under MIDI channel per division.",
+    "output_pair_custom": "Per division (custom)",
+    "polyphony": "Polyphony (max. voices)",
+    "polyphony_hint": "Maximum number of simultaneously sounding pipes incl. release tails. Higher = more CPU on one core; keep the load below ~80%.",
+    "polyphony_load": "Audio thread load: {load}% (peak {peak}%)",
+    "stereo_samples": "Play stereo samples in stereo",
+    "stereo_samples_hint": "On: stereo recordings keep their spatial image (more memory). Off: mix down to mono as before.",
+    "reload_hint": "Takes effect after reloading the organ."
   },
   "stops": {
     "tremulant": "Tremulant",
@@ -242,7 +253,8 @@
     "midi_connected": "MIDI connected",
     "midi_disconnected": "MIDI disconnected",
     "voices": "voices",
-    "version": "v{version}"
+    "version": "v{version}",
+    "load_title": "Sounding voices / polyphony limit · audio thread load"
   },
   "actions": {
     "save": "Save",
@@ -266,8 +278,9 @@
     "no_organ_loaded": "No organ loaded"
   },
   "dialogs": {
-    "sample_folder_title": "Select a folder containing sample folders",
-    "organ_file_title": "Open .organ file"
+    "sample_folder_title": "Select the JM-Rec project folder (or a folder containing sample folders)",
+    "organ_file_title": "Open .organ file",
+    "shutdown_confirm": "Close the software AND shut down the computer?\n\nThe current state will be saved first."
   },
   "alerts": {
     "max_midi_signals": "Maximum 4 MIDI signals per coupler/stop button"
@@ -334,5 +347,32 @@
     "scrollbar_thumb": "Scrollbar",
     "menu_bg": "Context menu background",
     "menu_text": "Context menu text"
+  },
+  "toolbar": {
+    "size_title": "Stop knob size",
+    "vertical": "Vertical",
+    "horizontal": "Horizontal",
+    "layout_title_vertical": "Vertical row",
+    "layout_title_horizontal": "Horizontal row",
+    "rect": "Square",
+    "round": "Round",
+    "shape_title_rect": "Rectangular stop knobs",
+    "shape_title_round": "Round stop knobs (drawknobs)",
+    "bar": "Bar",
+    "bar_title": "Show main bar (tabs, profile switch, audio start/stop)",
+    "new_screen": "New screen",
+    "rec_audio_running": "Audio recording — {t} · Click to stop",
+    "rec_audio_start": "Start MP3 recording (what you hear) into Documents\\JM-Orgue-opnames",
+    "rec_midi_running": "MIDI recording — {n} events · {t} · Click to stop",
+    "rec_midi_start": "Start MIDI recording (what you play — notes only); saved in Documents\\JM-Orgue-opnames",
+    "play_recording": "Play recording",
+    "play_recording_title": "Load the MIDI you just recorded into the player and play it back (draw the stops yourself)",
+    "notate": "Notate",
+    "notate_title": "Open the notation window: play live and see the notes appear as you play (layers, overdub, rhythm tolerance, editing); you can also open an existing MIDI file there",
+    "shutdown": "Shut down PC",
+    "shutdown_title": "Close the software AND shut down the computer · right-click or hold 3s = MIDI learn",
+    "couplers": "Couplers",
+    "couplers_to_bar": "Show couplers in their own bar",
+    "couplers_to_division": "Show couplers as knobs within the division"
   }
 }

@@ -60,6 +60,13 @@ pub struct AudioPrefs {
     pub device: Option<String>,
     /// Buffer size in frames (None/0 = driver default)
     pub buffer_frames: Option<u32>,
+    /// Polyfonie-kap (aantal gelijktijdige stemmen); None = standaard (1024).
+    #[serde(default)]
+    pub polyphony: Option<u32>,
+    /// Stereo-samples als twee kanalen laden; None = aan. Uit = oude mono-mix
+    /// (halveert RAM bij stereo-sets). Wijziging vergt herladen van het orgel.
+    #[serde(default)]
+    pub stereo_samples: Option<bool>,
 }
 
 /// Load audio preferences from `<app_data_dir>/audio_config.json` (defaults if absent).
@@ -452,6 +459,10 @@ impl AppState {
         let organ_library = Arc::new(RwLock::new(load_library(&app_data_dir)));
         // Load persisted audio output preferences and create the audio player
         let audio_prefs = load_audio_prefs(&app_data_dir);
+        // Polyfonie-kap en stereo-laden vóór de eerste audio/orgel-load zetten.
+        crate::audio::set_polyphony_target(
+            audio_prefs.polyphony.map(|n| n as usize).unwrap_or(vpo_audio::DEFAULT_POLYPHONY));
+        vpo_sampler::set_stereo_loading(audio_prefs.stereo_samples.unwrap_or(true));
         let saved_cfg = AudioOutputConfig {
             host_name: audio_prefs.host.clone(),
             device_name: audio_prefs.device.clone(),
@@ -2469,6 +2480,7 @@ impl AppState {
                             host: cfg.host_name.clone(),
                             device: cfg.device_name.clone(),
                             buffer_frames: cfg.buffer_frames,
+                            ..load_audio_prefs(&self.app_data_dir)
                         });
                     }
                     return Ok(outcome(true, true, None, self));
@@ -2487,6 +2499,7 @@ impl AppState {
                                     host: cfg.host_name.clone(),
                                     device: cfg.device_name.clone(),
                                     buffer_frames: cfg.buffer_frames,
+                                    ..load_audio_prefs(&self.app_data_dir)
                                 });
                             }
                             return Ok(outcome(true, true, None, self));
@@ -2517,6 +2530,7 @@ impl AppState {
                                 host: cfg.host_name.clone(),
                                 device: cfg.device_name.clone(),
                                 buffer_frames: cfg.buffer_frames,
+                                ..load_audio_prefs(&self.app_data_dir)
                             });
                             // Live registratie over de herstart heen tillen: het
                             // snapshot van deze wissel naar een one-shot-bestand;
@@ -2604,6 +2618,7 @@ impl AppState {
                             host: cfg.host_name.clone(),
                             device: cfg.device_name.clone(),
                             buffer_frames: cfg.buffer_frames,
+                            ..load_audio_prefs(&self.app_data_dir)
                         });
                     }
                     Ok(outcome(true, true, None, self))
@@ -2625,6 +2640,7 @@ impl AppState {
                                     host: cfg.host_name.clone(),
                                     device: cfg.device_name.clone(),
                                     buffer_frames: cfg.buffer_frames,
+                                    ..load_audio_prefs(&self.app_data_dir)
                                 });
                             }
                             return Ok(outcome(true, true, None, self));

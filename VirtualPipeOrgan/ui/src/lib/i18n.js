@@ -32,10 +32,13 @@ function getInitialLocale() {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved && AVAILABLE_LOCALES.includes(saved)) return saved;
   } catch (e) {}
-  // Fallback: bekijk browser-taal
+  // Fallback: bekijk browser-/systeemtaal. Onbekende taal (bv. Pools) ->
+  // Engels, niet Nederlands: een Poolse tester kreeg een Nederlandse app en
+  // een Nederlandse afsluit-dialoog, en zette per ongeluk zijn pc uit.
   try {
-    const browserLang = (navigator.language || 'nl').slice(0, 2);
+    const browserLang = (navigator.language || '').slice(0, 2).toLowerCase();
     if (AVAILABLE_LOCALES.includes(browserLang)) return browserLang;
+    if (browserLang) return 'en';
   } catch (e) {}
   return DEFAULT_LOCALE;
 }

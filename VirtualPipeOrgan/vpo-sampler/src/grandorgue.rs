@@ -1068,7 +1068,7 @@ impl LoadedOrgan {
     /// Get total memory usage in bytes
     pub fn memory_usage(&self) -> usize {
         self.samples.values()
-            .map(|s| s.data.len() * std::mem::size_of::<f32>())
+            .map(|s| s.bytes())
             .sum()
     }
 }

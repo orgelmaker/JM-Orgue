@@ -19,7 +19,7 @@
   "library": {
     "title": "Orgel-Bibliothek",
     "open_organ_file": ".organ",
-    "scan_folder": "Ordner scannen",
+    "scan_folder": "JM-Rec-Import",
     "external_set": "Extern",
     "export": "Exportieren",
     "app_settings_button": "Allgemeine Einstellungen",
@@ -172,7 +172,18 @@
     "export_settings": "Einstellungen exportieren...",
     "import_settings": "Einstellungen importieren...",
     "import_dialog_title": "Einstellungsdatei auswählen",
-    "export_dialog_title": "Speichern unter..."
+    "export_dialog_title": "Speichern unter...",
+    "panel_close_quits": "Schließen eines Zusatzbildschirms beendet das ganze Programm",
+    "panel_close_quits_title": "An: das Schließen-Kreuz eines Zusatzbildschirms beendet JM-Orgue komplett (praktisch am Spieltisch). Aus: nur dieser Bildschirm schließt, die Orgel spielt weiter.",
+    "output_pair": "Ausgangskanäle",
+    "output_pair_hint": "Welche zwei Kanäle des Audiogeräts die Orgel nutzt (z. B. Ausgang 3–4 eines ASIO-Interfaces). Pro Werk einstellbar unter MIDI-Kanal pro Werk.",
+    "output_pair_custom": "Pro Werk (angepasst)",
+    "polyphony": "Polyphonie (max. Stimmen)",
+    "polyphony_hint": "Maximale Zahl gleichzeitig klingender Pfeifen inkl. Ausklingphasen. Höher = mehr CPU auf einem Kern; Last unter ~80 % halten.",
+    "polyphony_load": "Auslastung Audio-Thread: {load} % (Spitze {peak} %)",
+    "stereo_samples": "Stereo-Samples in Stereo wiedergeben",
+    "stereo_samples_hint": "An: Stereo-Aufnahmen behalten ihr Raumbild (mehr Speicher). Aus: Mono-Mischung wie bisher.",
+    "reload_hint": "Wirkt nach dem Neuladen der Orgel."
   },
   "stops": {
     "tremulant": "Tremulant",
@@ -242,7 +253,8 @@
     "midi_connected": "MIDI verbunden",
     "midi_disconnected": "MIDI nicht verbunden",
     "voices": "Stimmen",
-    "version": "v{version}"
+    "version": "v{version}",
+    "load_title": "Klingende Stimmen / Polyphonie-Grenze · Auslastung Audio-Thread"
   },
   "actions": {
     "save": "Speichern",
@@ -266,8 +278,9 @@
     "no_organ_loaded": "Keine Orgel geladen"
   },
   "dialogs": {
-    "sample_folder_title": "Wählen Sie einen Ordner mit Sample-Unterordnern",
-    "organ_file_title": ".organ-Datei öffnen"
+    "sample_folder_title": "JM-Rec-Projektordner wählen (oder einen Ordner mit Sample-Ordnern)",
+    "organ_file_title": ".organ-Datei öffnen",
+    "shutdown_confirm": "Software schließen UND Computer herunterfahren?\n\nDer aktuelle Zustand wird vorher gespeichert."
   },
   "alerts": {
     "max_midi_signals": "Maximal 4 MIDI-Signale pro Koppel-/Registertaste"
@@ -334,5 +347,32 @@
     "scrollbar_thumb": "Scrollbar",
     "menu_bg": "Kontextmenü-Hintergrund",
     "menu_text": "Kontextmenü-Text"
+  },
+  "toolbar": {
+    "size_title": "Größe der Registerknöpfe",
+    "vertical": "Vertikal",
+    "horizontal": "Horizontal",
+    "layout_title_vertical": "Vertikale Reihe",
+    "layout_title_horizontal": "Horizontale Reihe",
+    "rect": "Eckig",
+    "round": "Rund",
+    "shape_title_rect": "Rechteckige Registerknöpfe",
+    "shape_title_round": "Runde Registerknöpfe (Züge)",
+    "bar": "Leiste",
+    "bar_title": "Hauptleiste anzeigen (Reiter, Profilwechsel, Audio Start/Stopp)",
+    "new_screen": "Neuer Bildschirm",
+    "rec_audio_running": "Audioaufnahme läuft — {t} · Klicken zum Stoppen",
+    "rec_audio_start": "MP3-Aufnahme (was Sie hören) starten in Dokumente\\JM-Orgue-opnames",
+    "rec_midi_running": "MIDI-Aufnahme läuft — {n} Events · {t} · Klicken zum Stoppen",
+    "rec_midi_start": "MIDI-Aufnahme (was Sie spielen — nur Noten) starten; gespeichert in Dokumente\\JM-Orgue-opnames",
+    "play_recording": "Aufnahme abspielen",
+    "play_recording_title": "Die soeben aufgenommene MIDI-Datei in den Player laden und abspielen (Register selbst ziehen)",
+    "notate": "Notieren",
+    "notate_title": "Notationsfenster öffnen: live einspielen und die Noten beim Spielen erscheinen sehen (Ebenen, Overdub, Rhythmus-Toleranz, Bearbeiten); dort lässt sich auch eine bestehende MIDI-Datei öffnen",
+    "shutdown": "PC herunterfahren",
+    "shutdown_title": "Software schließen UND Computer herunterfahren · Rechtsklick oder 3 s halten = MIDI-Lernen",
+    "couplers": "Koppeln",
+    "couplers_to_bar": "Koppeln in eigener Leiste anzeigen",
+    "couplers_to_division": "Koppeln als Knöpfe im Werk anzeigen"
   }
 }

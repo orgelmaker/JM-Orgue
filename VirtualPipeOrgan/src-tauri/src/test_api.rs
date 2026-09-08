@@ -127,6 +127,18 @@ fn route(
         (tiny_http::Method::Post, "/sampleset/trim") => handle_sampleset_trim(body),
         (tiny_http::Method::Post, "/sampleset/loop_scan") => handle_sampleset_loop_scan(body),
         (tiny_http::Method::Post, "/sampleset/loop_apply") => handle_sampleset_loop_apply(body),
+        (tiny_http::Method::Post, "/polyphony") => {
+            let v: serde_json::Value = serde_json::from_str(body).unwrap_or_default();
+            let n = v.get("voices").and_then(|x| x.as_u64()).unwrap_or(1024) as usize;
+            crate::audio::set_polyphony_target(n);
+            Ok(json!({"polyphony": crate::audio::polyphony_target()}))
+        }
+        (tiny_http::Method::Post, "/stereo_samples") => {
+            let v: serde_json::Value = serde_json::from_str(body).unwrap_or_default();
+            let on = v.get("on").and_then(|x| x.as_bool()).unwrap_or(true);
+            vpo_sampler::set_stereo_loading(on);
+            Ok(json!({"stereo_samples": vpo_sampler::stereo_loading()}))
+        }
         (tiny_http::Method::Post, "/record/start") => handle_record_start(state, body),
         (tiny_http::Method::Post, "/record/stop") => handle_record_stop(state),
         // MIDI-opname (events) — los van de MP3-opname hierboven. Voor self-testing van
@@ -201,6 +213,10 @@ fn handle_status(state: &AppState) -> Value {
         "audio_running": audio.is_some(),
         "sample_rate": sample_rate,
         "voice_count": voice_count,
+        "polyphony": crate::audio::polyphony_target(),
+        "render_load": crate::audio::render_load().0,
+        "render_peak": crate::audio::render_load().1,
+        "stereo_samples": vpo_sampler::stereo_loading(),
         "peak_left": peaks.0,
         "peak_right": peaks.1,
         "organ_loaded": organ.is_some(),

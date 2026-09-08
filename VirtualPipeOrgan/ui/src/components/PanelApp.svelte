@@ -8,6 +8,7 @@
   // hoofdbalk-zichtbaarheid worden per scherm × orgel bewaard (panel-state).
   import { onMount, onDestroy } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
+  import { tx } from '../lib/i18n.js';
 
   import Header from './Header.svelte';
   import Console from './Console.svelte';
@@ -94,6 +95,8 @@
         midiConnected: s.midi_connected,
         organLoaded: s.organ_loaded,
         voiceCount: s.voice_count,
+        polyphony: s.polyphony,
+        renderLoad: s.render_load,
         peakLeft: s.peak_left,
         peakRight: s.peak_right,
         sampleRate: s.sample_rate,
@@ -182,12 +185,17 @@
         if (programmaticCloseTimer) clearTimeout(programmaticCloseTimer);
         programmaticCloseTimer = setTimeout(() => { programmaticClose = false; }, 10000);
       });
-      // Bij sluiten de laatste positie vastleggen; een gebruikers-klik op het
-      // kruisje sluit daarna de HELE software af (0.7.21).
+      // Bij sluiten de laatste positie vastleggen. Een gebruikers-klik op het
+      // kruisje sluit standaard alleen dít scherm; alleen met de instelling
+      // "Kruisje op extra scherm sluit de hele software" (orgelconsole, 0.7.21)
+      // gaat de hele app dicht. De vlag wordt hier live gelezen zodat een
+      // wijziging in het hoofdvenster meteen geldt.
       unlistenCloseReq = await w.onCloseRequested(async () => {
         if (geomTimer) { clearTimeout(geomTimer); geomTimer = null; }
         await saveGeometry();
-        if (!programmaticClose) {
+        let quitsApp = false;
+        try { quitsApp = localStorage.getItem('jm-orgue-panel-close-quits') === 'true'; } catch (e) {}
+        if (!programmaticClose && quitsApp) {
           await emitToMain('jm-orgue:app-quit');
         }
       });
@@ -320,7 +328,7 @@
   }
 
   function requestShutdown() {
-    if (!window.confirm('Software én computer afsluiten?\n\nDe laatste stand wordt opgeslagen.')) return;
+    if (!window.confirm(tx('dialogs.shutdown_confirm'))) return;
     emitToMain('jm-orgue:shutdown');
   }
 

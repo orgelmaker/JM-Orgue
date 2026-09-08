@@ -14,7 +14,8 @@ pub mod custom_organ;
 pub use loader::{
     SampleData, SampleError, PreloadBuffer, PreloadSegment, WavMarkers, ReleaseAlignTable,
     load_wav, load_wav_preload, load_wav_preload_segment, load_wav_remainder,
-    load_mp3, load_audio, load_audio_preload, optimize_loop_end, optimize_loop_points,
+    load_mp3, load_audio, load_audio_preload, optimize_loop_end, optimize_loop_end_lr, optimize_loop_points,
+    split_channels, set_stereo_loading, stereo_loading,
     resample, normalize, apply_fades, read_wav_loop_points, read_wav_markers
 };
 pub use cache::*;

@@ -157,9 +157,42 @@ pub struct StatusDto {
     pub buffer_frames: u32,
     /// Actual number of output channels of the open stream
     pub channels: u16,
+    /// Ingestelde polyfonie-kap (max. gelijktijdige stemmen).
+    pub polyphony: usize,
+    /// Belasting van de render-thread (0..1+, EMA) en piek.
+    pub render_load: f32,
+    pub render_peak: f32,
+    /// Stereo-samples als twee kanalen laden (instelling).
+    pub stereo_samples: bool,
 }
 
 // ============ Commands ============
+
+/// Polyfonie-kap instellen (256..=4096), direct actief én opgeslagen in de
+/// audio-voorkeuren. Hoger = meer CPU op de (ene) render-kern; de status
+/// toont de belasting zodat de gebruiker onder ~80% kan blijven.
+#[tauri::command]
+pub fn set_polyphony(state: State<AppState>, voices: u32) -> Result<usize, String> {
+    let n = (voices as usize).clamp(crate::audio::MIN_LIVE_VOICES, crate::audio::MAX_LIVE_VOICES);
+    crate::audio::set_polyphony_target(n);
+    let mut prefs = crate::state::load_audio_prefs(&state.app_data_dir);
+    prefs.polyphony = Some(n as u32);
+    crate::state::save_audio_prefs(&state.app_data_dir, &prefs);
+    info!("Polyfonie-kap ingesteld op {} stemmen", n);
+    Ok(n)
+}
+
+/// Stereo-samples als twee kanalen laden (aan) of naar mono mengen (uit).
+/// Geldt voor het volgende (her)laden van een orgel.
+#[tauri::command]
+pub fn set_stereo_samples(state: State<AppState>, on: bool) -> Result<(), String> {
+    vpo_sampler::set_stereo_loading(on);
+    let mut prefs = crate::state::load_audio_prefs(&state.app_data_dir);
+    prefs.stereo_samples = Some(on);
+    crate::state::save_audio_prefs(&state.app_data_dir, &prefs);
+    info!("Stereo-samples laden: {}", if on { "aan" } else { "uit (mono-mix)" });
+    Ok(())
+}
 
 #[tauri::command]
 pub fn get_audio_devices(state: State<AppState>) -> Result<Vec<AudioDeviceDto>, String> {
@@ -1195,8 +1228,8 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
                         // Zelfde fase-uitlijning als het smpl-pad: de eerste
                         // ~2 s van elke noot loopt op deze buffer.
                         if (e as usize) <= b.attack_data.len() {
-                            if let Some(better) = vpo_sampler::optimize_loop_end(
-                                &b.attack_data, a as usize, e as usize,
+                            if let Some(better) = vpo_sampler::optimize_loop_end_lr(
+                                &b.attack_data, b.attack_right.as_deref(), a as usize, e as usize,
                             ) {
                                 e = better as u64;
                             }
@@ -3532,6 +3565,10 @@ pub fn get_status(state: State<AppState>) -> Result<StatusDto, String> {
         audio_device,
         buffer_frames,
         channels,
+        polyphony: crate::audio::polyphony_target(),
+        render_load: crate::audio::render_load().0,
+        render_peak: crate::audio::render_load().1,
+        stereo_samples: vpo_sampler::stereo_loading(),
     })
 }
 
@@ -4449,6 +4486,50 @@ pub fn do_load_samples_from_directory_locked(state: &AppState, directory: &str) 
     let path = Path::new(&directory);
     if !path.exists() {
         return Err("Directory does not exist".to_string());
+    }
+
+    // JM-Rec (vanaf 3.x) exporteert naast de sample-mappen een .organ-
+    // definitie met manualen, registernamen/voettallen, zwelkasten,
+    // tremulanten én koppels. De mapscan hieronder leidt alles alleen uit
+    // mapnamen af en kent geen koppels — bij zo'n projectmap dus de definitie
+    // laden, niet de mappen scannen (melding gebruiker: "koppels en registers
+    // komen niet goed over" bij een set uit de nieuwste JM-Rec). Alleen bij
+    // precies één .organ in de map zelf; anders blijft het gedrag ongewijzigd
+    // (Puttershoek-stijl mappen zonder definitie).
+    if let Ok(entries) = std::fs::read_dir(path) {
+        let organ_files: Vec<std::path::PathBuf> = entries
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| p.is_file()
+                && p.extension().map(|x| x.eq_ignore_ascii_case("organ")).unwrap_or(false))
+            .collect();
+        if !organ_files.is_empty() {
+            // Bij meerdere definities (GrandOrgue-sets leveren vaak varianten
+            // zoals "Naam FullImageResolution.organ"): eerst de definitie
+            // waarvan de bestandsnaam gelijk is aan de mapnaam, anders de
+            // kortste bestandsnaam — varianten voegen een achtervoegsel toe.
+            let folder_stem = path.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
+            let chosen = organ_files.iter()
+                .find(|p| p.file_stem().map(|s| s.to_string_lossy().to_lowercase() == folder_stem).unwrap_or(false))
+                .or_else(|| organ_files.iter().min_by_key(|p| p.file_name().map(|n| n.len()).unwrap_or(usize::MAX)))
+                .cloned()
+                .unwrap_or_else(|| organ_files[0].clone());
+            let organ_path = chosen.to_string_lossy().to_string();
+            if organ_files.len() > 1 {
+                warn!("Map bevat {} .organ-bestanden; gekozen: {} (kies anders het gewenste bestand via de .organ-knop)", organ_files.len(), organ_path);
+            } else {
+                info!("Map bevat een .organ-definitie (JM-Rec-export): laden via {}", organ_path);
+            }
+            return do_load_organ_locked(state, &organ_path);
+        }
+        // Wel een JM-Rec-project, maar de .organ is (nog) niet geëxporteerd:
+        // de mapscan kent geen koppels/voettallen — de gebruiker moet in JM-Rec
+        // "Exporteer .organ (JM-Orgue)" doen.
+        let has_jmrec_json = std::fs::read_dir(path).ok().into_iter().flatten()
+            .filter_map(|e| e.ok())
+            .any(|e| e.file_name().to_string_lossy().to_lowercase().ends_with(".jm-rec.json"));
+        if has_jmrec_json {
+            warn!("JM-Rec-projectmap zonder .organ-definitie: mapscan gebruikt (geen koppels/voettallen). Exporteer in JM-Rec via Instellingen → Exporteer .organ (JM-Orgue).");
+        }
     }
 
     let organ_name = path.file_name()

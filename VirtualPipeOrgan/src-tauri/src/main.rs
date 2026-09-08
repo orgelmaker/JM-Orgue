@@ -275,6 +275,8 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::get_log_tail,
+            commands::set_polyphony,
+            commands::set_stereo_samples,
             commands::download_sampleset,
             commands::get_audio_devices,
             commands::list_audio_hosts,

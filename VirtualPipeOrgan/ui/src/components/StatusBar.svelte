@@ -31,7 +31,9 @@
       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <path d="M12 20v-6M6 20V10M18 20V4"/>
       </svg>
-      <span>{status.voiceCount} {$t('status_bar.voices')}</span>
+      <span title={$t('status_bar.load_title')}>
+        {status.voiceCount}{status.polyphony ? `/${status.polyphony}` : ''} {$t('status_bar.voices')}{typeof status.renderLoad === 'number' ? ` · ${Math.round(status.renderLoad * 100)}%` : ''}
+      </span>
     </div>
   </div>
 

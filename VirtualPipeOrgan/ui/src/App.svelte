@@ -849,6 +849,8 @@
         midiConnected: s.midi_connected,
         organLoaded: s.organ_loaded,
         voiceCount: s.voice_count,
+        polyphony: s.polyphony,
+        renderLoad: s.render_load,
         peakLeft: s.peak_left,
         peakRight: s.peak_right,
         sampleRate: s.sample_rate,
@@ -1093,6 +1095,14 @@
     autoLoadLastOrgan = enabled;
     localStorage.setItem('jm-orgue-autoload-organ', String(enabled));
   }
+  // Kruisje op een extra scherm: alleen dat scherm sluiten (standaard, de
+  // gangbare vensterconventie) of de hele software (orgelconsole-gebruik,
+  // 0.7.21). PanelApp leest de vlag zelf uit localStorage bij het sluiten.
+  let panelCloseQuits = localStorage.getItem('jm-orgue-panel-close-quits') === 'true';
+  function setPanelCloseQuits(enabled) {
+    panelCloseQuits = enabled;
+    localStorage.setItem('jm-orgue-panel-close-quits', String(enabled));
+  }
 
   async function setAutostart(enabled) {
     try {
@@ -1118,7 +1128,7 @@
 
   // Bevestiging vragen, opslaan, computer netjes afsluiten.
   async function requestShutdown() {
-    const ok = window.confirm('Software én computer afsluiten?\n\nDe laatste stand wordt opgeslagen.');
+    const ok = window.confirm(tx('dialogs.shutdown_confirm'));
     if (!ok) return;
     await doShutdown();
   }
@@ -1285,6 +1295,7 @@
       {autostartEnabled}
       {restoreRegistration}
       {autoLoadLastOrgan}
+      {panelCloseQuits}
       on:toggleStop={(e) => toggleStop(e.detail)}
       on:toggleCoupler={(e) => toggleCoupler(e.detail)}
       on:crescendoChange={(e) => applyCrescendoStage(e.detail)}
@@ -1315,6 +1326,7 @@
       on:setAutostart={(e) => setAutostart(e.detail)}
       on:setRestoreRegistration={(e) => setRestoreRegistration(e.detail)}
       on:setAutoLoadLastOrgan={(e) => setAutoLoadLastOrgan(e.detail)}
+      on:setPanelCloseQuits={(e) => setPanelCloseQuits(e.detail)}
       on:persistSettings={persistOrganSettings}
     />
   </div>

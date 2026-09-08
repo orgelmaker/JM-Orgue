@@ -121,6 +121,9 @@
   export let audioEpoch = 0;
   // Laatst geopende orgel automatisch laden bij het starten (App.svelte).
   export let autoLoadLastOrgan = true;
+  // Kruisje op een extra scherm sluit de hele software (App.svelte; standaard
+  // uit — een tester verwachtte dat alleen dát venster dichtgaat).
+  export let panelCloseQuits = false;
 
   const dispatch = createEventDispatcher();
 
@@ -1256,6 +1259,49 @@
     const c = divisionOutputChannels[div];
     return Array.isArray(c) ? c : [];
   }
+
+  // Uitgangspaar voor het hele orgel (Algemene instellingen → Audio-uitvoer):
+  // één keuze "kanalen 1–2 / 3–4 / …" die alle klavieren tegelijk zet. Wie
+  // klavieren over verschillende uitgangen verdeelt (per-klavier-instelling
+  // onder MIDI-kanaal per klavier) ziet hier "aangepast".
+  $: outputChannelTotal = Math.max(2, (audioStatus && audioStatus.channels) || audioChannelCount || 2);
+  $: outputPairSel = computeOutputPair(divisionOutputChannels, organInfo);
+  function computeOutputPair(chmap, oi) {
+    const divs = oi?.divisions || [];
+    if (!divs.length) return '0';
+    let first = null;
+    for (const d of divs) {
+      const c = Array.isArray(chmap[d.name]) && chmap[d.name].length ? chmap[d.name] : [0, 1];
+      const key = c.join(',');
+      if (first === null) first = key;
+      else if (first !== key) return 'custom';
+    }
+    const arr = first.split(',').map(Number);
+    if (arr.length === 2 && arr[1] === arr[0] + 1 && arr[0] % 2 === 0) return String(arr[0] / 2);
+    return 'custom';
+  }
+  function setOutputPair(v) {
+    if (v === 'custom') return;
+    const pair = Number(v);
+    const list = [pair * 2, pair * 2 + 1];
+    for (const d of (organInfo?.divisions || [])) {
+      divisionOutputChannels[d.name] = list.slice();
+      invoke('set_division_output_channels', { division: d.name, channels: list }).catch(() => {});
+    }
+    divisionOutputChannels = divisionOutputChannels;
+  }
+
+  // Polyfonie-kap en stereo-samples (globale audio-voorkeuren; waarde via get_status).
+  const POLYPHONY_CHOICES = [512, 1024, 1536, 2048, 3072, 4096];
+  async function setPolyphony(v) {
+    try { await invoke('set_polyphony', { voices: Number(v) }); } catch (e) { console.error(e); }
+    refreshAudioStatus();
+  }
+  let stereoReloadHint = false;
+  async function setStereoSamples(on) {
+    try { await invoke('set_stereo_samples', { on }); stereoReloadHint = true; } catch (e) { console.error(e); }
+    refreshAudioStatus();
+  }
   function isChannelSelected(div, ch) { return getDivisionChannels(div).includes(ch); }
   function toggleDivisionChannel(div, ch) {
     let list = getDivisionChannels(div).slice();
@@ -1453,6 +1499,37 @@
     return visibleCouplers[couplerId] === true;
   }
 
+  // Koppels op het hoofdscherm: in een eigen balk ('bar', standaard — zoals
+  // een echte speeltafel en zoals GrandOrgue/Hauptwerk ze tonen) of als
+  // registerknop binnen de divisie ('division', het oude gedrag). Per orgel.
+  let couplerPlacement = 'bar';
+  function toggleCouplerPlacement() {
+    couplerPlacement = couplerPlacement === 'bar' ? 'division' : 'bar';
+    localStorage.setItem(organUiKey('jm-orgue-coupler-placement'), couplerPlacement);
+  }
+  // Balkgroepen: per klavier (in divisievolgorde) de zichtbare koppels,
+  // unison eerst, dan super/sub, dan de rest.
+  $: couplerBarGroups = buildCouplerGroups(displayOrgan, visibleCouplers, couplerPlacement);
+  function buildCouplerGroups(org, vis, placement) {
+    if (placement !== 'bar' || !org?.couplers?.length) return [];
+    const order = (org.divisions || []).map(d => d.name);
+    const groups = new Map();
+    for (const c of org.couplers) {
+      if (vis[c.id] !== true) continue;
+      const key = c.display_in_division || c.source_division || '';
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(c);
+    }
+    const rank = t => (t === 'unison' ? 0 : t === 'super' ? 1 : t === 'sub' ? 2 : 3);
+    return [...groups.entries()]
+      .sort((a, b) => order.indexOf(a[0]) - order.indexOf(b[0]))
+      .map(([division, couplers]) => ({
+        division,
+        couplers: couplers.slice().sort((a, b) => rank(a.coupler_type) - rank(b.coupler_type) || a.name.localeCompare(b.name)),
+      }));
+  }
+  function couplerLabel(c) { return (c.name || '').replace(/\n/g, ' '); }
+
   function toggleCouplerVisibility(couplerId) {
     visibleCouplers[couplerId] = !isCouplerVisible(couplerId);
     visibleCouplers = visibleCouplers;
@@ -1491,10 +1568,13 @@
     // Koppel-zichtbaarheid
     try { visibleCouplers = JSON.parse(readOrganUiPref('jm-orgue-visible-couplers') || '{}'); } catch (e) { visibleCouplers = {}; }
     for (const c of (organInfo.couplers || [])) {
-      if (c.id && c.id.startsWith('real_coupler_') && visibleCouplers[c.id] === undefined) visibleCouplers[c.id] = true;
+      // Echte ODF/JM-Rec-koppels én de gegenereerde unison-koppels standaard
+      // zichtbaar; super/sub e.d. blijven opt-in (instellingen → koppels).
+      if (c.id && (c.id.startsWith('real_coupler_') || c.coupler_type === 'unison') && visibleCouplers[c.id] === undefined) visibleCouplers[c.id] = true;
     }
     visibleCouplers = visibleCouplers;
     if (!secondary) localStorage.setItem(organUiKey('jm-orgue-visible-couplers'), JSON.stringify(visibleCouplers));
+    couplerPlacement = readOrganUiPref('jm-orgue-coupler-placement') === 'division' ? 'division' : 'bar';
     // Layout (main-layout is exclusief van het hoofdvenster; secundaire
     // vensters laden hun layout per scherm uit de panel-state — zie de
     // divisie-reset-reactive) + knopgrootte (gedeeld, puur UI, per orgel)
@@ -1984,6 +2064,8 @@
       const vc = readOrganUiPref('jm-orgue-visible-couplers');
       if (vc && vc !== JSON.stringify(visibleCouplers)) visibleCouplers = JSON.parse(vc);
     } catch (e) {}
+    const cp = readOrganUiPref('jm-orgue-coupler-placement') === 'division' ? 'division' : 'bar';
+    if (cp !== couplerPlacement) couplerPlacement = cp;
     try {
       const so = localStorage.getItem(`jm-orgue-stop-order-${organInfo.id || 'default'}`) || '{}';
       if (so !== JSON.stringify(stopOrder)) stopOrder = JSON.parse(so);
@@ -3022,9 +3104,19 @@
   let knobDrag = null;           // { div, fromIdx, startX, startY, active, overIdx }
   let knobDragJustEnded = false; // onderdrukt de click die direct op een sleep volgt
 
+  // Twee sleepmodi (feedback professionele tester, GrandOrgue/Hauptwerk-
+  // conventie): gewoon slepen "schildert" registers aan of uit — de stand van
+  // de eerste knop bepaalt of de knoppen eronder AAN of UIT gaan. Alleen
+  // Shift+slepen hersorteert nog (de sorteerlijst in Instellingen blijft).
   function knobPointerDown(e, divName, idx) {
     if (e.pointerType !== 'mouse' || e.button !== 0) return; // alleen linkermuisknop
-    knobDrag = { div: divName, fromIdx: idx, startX: e.clientX, startY: e.clientY, active: false, overIdx: null };
+    const mode = e.shiftKey ? 'reorder' : 'paint';
+    const organ = displayOrgan || organInfo || demoOrgan;
+    const first = organ?.divisions?.find(d => d.name === divName)?.stops?.[idx];
+    knobDrag = {
+      div: divName, fromIdx: idx, startX: e.clientX, startY: e.clientY, active: false, overIdx: null,
+      mode, target: first ? !first.drawn : true, firstId: first?.id ?? null, painted: new Set(),
+    };
     // Pointer capture: ook buiten de knop (en het venster) blijven events binnenkomen.
     try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {}
     window.addEventListener('pointermove', knobPointerMove);
@@ -3038,16 +3130,45 @@
       // Pas een sleep na >8px beweging — daaronder blijft het een gewone klik.
       if (Math.hypot(e.clientX - knobDrag.startX, e.clientY - knobDrag.startY) < KNOB_DRAG_THRESHOLD_PX) return;
       knobDrag.active = true;
+      if (knobDrag.mode === 'paint' && knobDrag.firstId) {
+        // De click op de eerste knop wordt straks onderdrukt (knobDragJustEnded);
+        // die eerste knop hier zelf in de doelstand zetten.
+        paintStop(knobDrag.firstId, knobDrag.target);
+      }
     }
     // Doelpositie via hit-test onder de cursor — werkt in horizontale én verticale layout.
     const el = document.elementFromPoint(e.clientX, e.clientY);
     const hit = el && el.closest ? el.closest('[data-knob-div]') : null;
+    if (knobDrag.mode === 'paint') {
+      // Schilderen mag over divisiegrenzen heen: elke knop onder de cursor
+      // krijgt de doelstand, één keer per sleep.
+      if (hit) {
+        const organ = displayOrgan || organInfo || demoOrgan;
+        const st = organ?.divisions?.find(d => d.name === hit.dataset.knobDiv)?.stops?.[parseInt(hit.dataset.knobIdx, 10)];
+        if (st) paintStop(st.id, knobDrag.target);
+      }
+      return;
+    }
     if (hit && hit.dataset.knobDiv === knobDrag.div) {
       knobDrag.overIdx = parseInt(hit.dataset.knobIdx, 10);
     } else {
       knobDrag.overIdx = null; // buiten de eigen divisie → geen geldig doel
     }
     knobDrag = knobDrag; // reactieve update voor de visuele feedback
+  }
+
+  // Zet een register in de gevraagde stand (één keer per sleep). De stand
+  // wordt uit de huidige orgeldata gelezen; toggleStop draait hem om.
+  function paintStop(stopId, target) {
+    if (!knobDrag || knobDrag.painted.has(stopId)) return;
+    knobDrag.painted.add(stopId);
+    const organ = displayOrgan || organInfo || demoOrgan;
+    let cur = null;
+    for (const d of (organ?.divisions || [])) {
+      const f = (d.stops || []).find(x => x.id === stopId);
+      if (f) { cur = f; break; }
+    }
+    if (cur && !!cur.drawn !== !!target) dispatch('toggleStop', stopId);
   }
 
   function knobPointerUp(e) {
@@ -3061,6 +3182,7 @@
     knobDragJustEnded = true;
     setTimeout(() => { knobDragJustEnded = false; }, 0);
     if (e.type === 'pointercancel') return;
+    if (d.mode !== 'reorder') return; // schilderen is al tijdens het slepen gebeurd
     if (d.overIdx === null || Number.isNaN(d.overIdx) || d.overIdx === d.fromIdx) return;
     reorderStop(d.div, d.fromIdx, d.overIdx);
   }
@@ -3299,7 +3421,7 @@
             {/each}
           </div>
           <div class="panel-toolbar-right">
-            <div class="stop-size-control" title="Registerknop-grootte">
+            <div class="stop-size-control" title={$t('toolbar.size_title')}>
               <button class="btn btn-ghost btn-sm stop-size-btn" on:click={() => adjustStopSize(-15)} aria-label="Kleiner">−</button>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="6" width="18" height="12" rx="2"/></svg>
               <button class="btn btn-ghost btn-sm stop-size-btn" on:click={() => adjustStopSize(15)} aria-label="Groter">+</button>
@@ -3307,50 +3429,63 @@
             <button
               class="btn btn-ghost btn-sm panel-layout-btn"
               on:click={toggleMainLayout}
-              title="{mainLayout === 'horizontal' ? 'Verticale rij' : 'Horizontale rij'}"
+              title={mainLayout === 'horizontal' ? $t('toolbar.layout_title_vertical') : $t('toolbar.layout_title_horizontal')}
             >
               {#if mainLayout === 'horizontal'}
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <rect x="3" y="3" width="7" height="18" rx="1"/>
                   <rect x="14" y="3" width="7" height="18" rx="1"/>
                 </svg>
-                Verticaal
+                {$t('toolbar.vertical')}
               {:else}
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <rect x="3" y="3" width="18" height="7" rx="1"/>
                   <rect x="3" y="14" width="18" height="7" rx="1"/>
                 </svg>
-                Horizontaal
+                {$t('toolbar.horizontal')}
               {/if}
             </button>
             <button
               class="btn btn-ghost btn-sm panel-layout-btn"
               on:click={toggleKnobShape}
-              title="{knobShape === 'round' ? 'Rechthoekige registerknoppen' : 'Ronde registerknoppen (trekregisters)'}"
+              title={knobShape === 'round' ? $t('toolbar.shape_title_rect') : $t('toolbar.shape_title_round')}
             >
               {#if knobShape === 'round'}
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <rect x="3" y="6" width="18" height="12" rx="2"/>
                 </svg>
-                Recht
+                {$t('toolbar.rect')}
               {:else}
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <circle cx="12" cy="12" r="9"/>
                 </svg>
-                Rond
+                {$t('toolbar.round')}
               {/if}
             </button>
+            {#if displayOrgan.couplers && displayOrgan.couplers.length > 0}
+              <button
+                class="btn btn-ghost btn-sm panel-layout-btn"
+                on:click={toggleCouplerPlacement}
+                title={couplerPlacement === 'bar' ? $t('toolbar.couplers_to_division') : $t('toolbar.couplers_to_bar')}
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+                  <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+                </svg>
+                {$t('toolbar.couplers')}
+              </button>
+            {/if}
             {#if secondary && showPanelHeaderToggle}
               <!-- Hoofdbalk (tabs/profielwissel/start-stop) tonen op dit scherm -->
               <button
                 class="btn btn-ghost btn-sm panel-layout-btn"
                 on:click={() => dispatch('showHeaderRequest')}
-                title="Hoofdbalk tonen (tabbladen, profielwissel, audio start/stop)"
+                title={$t('toolbar.bar_title')}
               >
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <polyline points="6 9 12 15 18 9"/>
                 </svg>
-                Balk
+                {$t('toolbar.bar')}
               </button>
             {/if}
             <button class="btn btn-ghost btn-sm panel-add-btn" on:click={() => openExtraWindow()}>
@@ -3359,15 +3494,15 @@
                 <line x1="8" y1="21" x2="16" y2="21"/>
                 <line x1="12" y1="17" x2="12" y2="21"/>
               </svg>
-              Nieuw scherm
+              {$t('toolbar.new_screen')}
             </button>
             <button
               class="btn btn-ghost btn-sm record-btn"
               class:recording={recorderStatus.recording}
               on:click={toggleRecording}
               title={recorderStatus.recording
-                ? `Audio-opname loopt — ${formatSeconds(recorderStatus.seconds)} · Klik om te stoppen`
-                : 'MP3-opname (wat je hoort) starten in Documenten\\JM-Orgue-opnames'}
+                ? $t('toolbar.rec_audio_running').replace('{t}', formatSeconds(recorderStatus.seconds))
+                : $t('toolbar.rec_audio_start')}
             >
               <span class="record-dot" class:on={recorderStatus.recording}></span>
               {#if recorderStatus.recording}
@@ -3381,8 +3516,8 @@
               class:recording={midiRec.recording}
               on:click={toggleMidiRecording}
               title={midiRec.recording
-                ? `MIDI-opname loopt — ${midiRec.event_count} events · ${formatSeconds(midiRec.seconds)} · Klik om te stoppen`
-                : 'MIDI-opname (wat je speelt — alleen noten) starten; opslaan in Documenten\\JM-Orgue-opnames'}
+                ? $t('toolbar.rec_midi_running').replace('{n}', midiRec.event_count).replace('{t}', formatSeconds(midiRec.seconds))
+                : $t('toolbar.rec_midi_start')}
             >
               <span class="record-dot" class:on={midiRec.recording}></span>
               {#if midiRec.recording}
@@ -3395,39 +3530,39 @@
               <button
                 class="btn btn-ghost btn-sm"
                 on:click={playLastMidi}
-                title="Zojuist opgenomen MIDI in de speler laden en afspelen (trek zelf de registers)"
+                title={$t('toolbar.play_recording_title')}
               >
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
                   <polygon points="6,4 20,12 6,20"/>
                 </svg>
-                Opname afspelen
+                {$t('toolbar.play_recording')}
               </button>
             {/if}
             {#if !midiRec.recording}
               <button
                 class="btn btn-ghost btn-sm"
                 on:click={openLiveNotation}
-                title="Notatievenster openen: live inspelen met noten die verschijnen terwijl je speelt (lagen, overdub, ritme-tolerantie, bewerken); binnen het venster kun je ook een bestaand MIDI-bestand openen"
+                title={$t('toolbar.notate_title')}
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <circle cx="7" cy="18" r="3"/>
                   <path d="M10 18V5l8-2v12"/>
                   <circle cx="15" cy="15" r="3"/>
                 </svg>
-                Noteren
+                {$t('toolbar.notate')}
               </button>
             {/if}
             <button
               class="btn btn-ghost btn-sm shutdown-btn"
               on:click={() => dispatch('shutdownRequest')}
               use:midiLearn={{ onTrigger: () => dispatch('shutdownLearn') }}
-              title="Software + computer afsluiten · rechtermuis of 3s ingedrukt = MIDI inleren"
+              title={$t('toolbar.shutdown_title')}
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M18.36 6.64a9 9 0 1 1-12.73 0"/>
                 <line x1="12" y1="2" x2="12" y2="12"/>
               </svg>
-              Afsluiten
+              {$t('toolbar.shutdown')}
             </button>
           </div>
         </div>
@@ -3463,7 +3598,7 @@
                 class="stops-grid"
                 class:stops-vertical={mainLayout === 'vertical'}
                 class:knobs-round={knobShape === 'round'}
-                class:knob-dragging={!!(knobDrag && knobDrag.active && knobDrag.div === division.name)}
+                class:knob-dragging={!!(knobDrag && knobDrag.active && knobDrag.mode === 'reorder' && knobDrag.div === division.name)}
                 style="--stop-min-width: {stopSize}px; --stop-size-n: {stopSize}"
               >
                 {#each division.stops as stop, stopIdx}
@@ -3472,8 +3607,8 @@
                     class="stop-knob {getStopClass(stop)}"
                     class:engaged={stop.drawn}
                     class:has-midi={stopMidiBindings[stop.midi_action_code] > 0}
-                    class:dragging={!!(knobDrag && knobDrag.active && knobDrag.div === division.name && knobDrag.fromIdx === stopIdx)}
-                    class:drag-target={!!(knobDrag && knobDrag.active && knobDrag.div === division.name && knobDrag.overIdx === stopIdx && knobDrag.fromIdx !== stopIdx)}
+                    class:dragging={!!(knobDrag && knobDrag.active && knobDrag.mode === 'reorder' && knobDrag.div === division.name && knobDrag.fromIdx === stopIdx)}
+                    class:drag-target={!!(knobDrag && knobDrag.active && knobDrag.mode === 'reorder' && knobDrag.div === division.name && knobDrag.overIdx === stopIdx && knobDrag.fromIdx !== stopIdx)}
                     data-knob-div={division.name}
                     data-knob-idx={stopIdx}
                     on:pointerdown={(e) => knobPointerDown(e, division.name, stopIdx)}
@@ -3503,7 +3638,7 @@
                 {/if}
                 <!-- Koppelknoppen (alleen zichtbare) -->
                 {#if displayOrgan.couplers}
-                  {#each displayOrgan.couplers.filter(c => c.display_in_division === division.name && isCouplerVisible(c.id)) as coupler}
+                  {#each displayOrgan.couplers.filter(c => couplerPlacement === 'division' && c.display_in_division === division.name && isCouplerVisible(c.id)) as coupler}
                     <button
                       class="stop-knob coupler coupler-knob"
                       class:engaged={coupler.active}
@@ -3524,6 +3659,27 @@
             </div>
           {/each}
         </div>
+        <!-- Koppelbalk: alle zichtbare koppels gegroepeerd per klavier -->
+        {#if couplerBarGroups.length > 0}
+          <div class="coupler-bar" role="group" aria-label={$t('couplers.title')}>
+            {#each couplerBarGroups as grp (grp.division)}
+              <div class="coupler-bar-group">
+                <span class="coupler-bar-title">{grp.division}</span>
+                {#each grp.couplers as coupler (coupler.id)}
+                  <button
+                    class="coupler-bar-btn"
+                    class:engaged={coupler.active}
+                    class:has-midi={couplerMidiBindings[coupler.midi_action_code] > 0}
+                    on:click={() => dispatch('toggleCoupler', coupler.id)}
+                    use:midiLearn={{ onTrigger: () => showCouplerContextMenuAt(coupler.midi_action_code) }}
+                    title={couplerLabel(coupler)}
+                    aria-pressed={coupler.active}
+                  >{couplerLabel(coupler)}</button>
+                {/each}
+              </div>
+            {/each}
+          </div>
+        {/if}
         <!-- In secundaire vensters consumeert de SetzerBar GEEN MIDI-triggers:
              alleen het hoofdvenster leest het (consumerende) trigger-kanaal,
              anders worden presets/acties dubbel toegepast. -->
@@ -4751,6 +4907,43 @@
                 </div>
               {/if}
 
+              <!-- Uitgangspaar (welke kanalen van het apparaat) -->
+              {#if organInfo && outputChannelTotal > 2}
+                <div class="audio-select-row" style="margin-top: 0.7rem;" title={$t('settings.output_pair_hint')}>
+                  <label class="audio-select-label" for="audio-output-pair">{$t('settings.output_pair')}</label>
+                  <select id="audio-output-pair" class="temperament-select" on:change={(e) => setOutputPair(e.target.value)}>
+                    {#each Array(Math.floor(outputChannelTotal / 2)) as _, i}
+                      <option value={String(i)} selected={outputPairSel === String(i)}>{i * 2 + 1}–{i * 2 + 2}</option>
+                    {/each}
+                    <option value="custom" selected={outputPairSel === 'custom'} disabled={outputPairSel !== 'custom'}>{$t('settings.output_pair_custom')}</option>
+                  </select>
+                </div>
+              {/if}
+
+              <!-- Polyfonie -->
+              <div class="audio-select-row" style="margin-top: 0.7rem;" title={$t('settings.polyphony_hint')}>
+                <label class="audio-select-label" for="audio-polyphony">{$t('settings.polyphony')}</label>
+                <select id="audio-polyphony" class="temperament-select" on:change={(e) => setPolyphony(e.target.value)}>
+                  {#each POLYPHONY_CHOICES as n}
+                    <option value={n} selected={(audioStatus?.polyphony || 1024) === n}>{n}{n === 1024 ? ` (${$t('settings.audio_buffer_default').toLowerCase()})` : ''}</option>
+                  {/each}
+                </select>
+              </div>
+              {#if audioStatus && audioStatus.audio_running}
+                <p style="margin: 0.2rem 0 0; font-size: 0.68rem; color: var(--text-muted); line-height: 1.35;">
+                  {$t('settings.polyphony_load').replace('{load}', Math.round((audioStatus.render_load || 0) * 100)).replace('{peak}', Math.round((audioStatus.render_peak || 0) * 100))}
+                </p>
+              {/if}
+
+              <!-- Stereo-samples -->
+              <label class="swell-toggle" style="margin-top: 0.7rem; display: flex; align-items: center; gap: 0.4rem;" title={$t('settings.stereo_samples_hint')}>
+                <input type="checkbox" checked={audioStatus ? audioStatus.stereo_samples !== false : true} on:change={(e) => setStereoSamples(e.target.checked)} />
+                <span>{$t('settings.stereo_samples')}</span>
+              </label>
+              {#if stereoReloadHint}
+                <p style="margin: 0.2rem 0 0; font-size: 0.68rem; color: var(--warning, #d9a441); line-height: 1.35;">{$t('settings.reload_hint')}</p>
+              {/if}
+
               <!-- Buffer size + apply -->
               <div class="audio-select-row" style="margin-top: 0.7rem;">
                 <label class="audio-select-label" for="audio-buffer">{$t('settings.audio_buffer')}</label>
@@ -4868,6 +5061,14 @@
                     on:change={(e) => dispatch('setAutoLoadLastOrgan', e.target.checked)}
                   />
                   <span>Laatst geopende orgel automatisch laden bij starten</span>
+                </label>
+                <label class="swell-toggle" style="margin-top:0.4rem;" title={$t('settings.panel_close_quits_title')}>
+                  <input
+                    type="checkbox"
+                    checked={panelCloseQuits}
+                    on:change={(e) => dispatch('setPanelCloseQuits', e.target.checked)}
+                  />
+                  <span>{$t('settings.panel_close_quits')}</span>
                 </label>
                 <label class="swell-toggle" style="margin-top:0.4rem;" title="Aan: bij het openen van een orgel komen de laatst getrokken registers terug. Uit: schone start (geen registers aan).">
                   <input

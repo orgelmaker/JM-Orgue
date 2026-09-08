@@ -33,8 +33,14 @@ pub enum SampleError {
 /// Loaded sample data
 #[derive(Debug, Clone)]
 pub struct SampleData {
-    /// Sample data (mono, normalized to -1.0 to 1.0)
+    /// Sample data (genormaliseerd -1.0..1.0): mono, óf het LINKERkanaal wanneer
+    /// `right` gevuld is. Planair i.p.v. interleaved zodat alle lengte-/positie-
+    /// berekeningen in frames blijven en het mono-pad bit-exact ongewijzigd is.
     pub data: Vec<f32>,
+    /// Rechterkanaal (zelfde lengte als `data`) bij stereo-samples; None = mono.
+    /// Vóór 0.7.36 werd stereo altijd naar mono gemengd — de ruimte-informatie
+    /// van stereo-opnamen ging verloren (feedback sampleset-maker).
+    pub right: Option<Vec<f32>>,
     /// Original sample rate
     pub sample_rate: SampleRate,
     /// Number of channels in original file
@@ -46,6 +52,14 @@ pub struct SampleData {
 }
 
 impl SampleData {
+    /// Stereo (twee vlakken) of mono.
+    pub fn is_stereo(&self) -> bool { self.right.is_some() }
+    /// Aantal frames (= lengte van één vlak).
+    pub fn frames(&self) -> usize { self.data.len() }
+    /// Geheugengebruik van de sampledata in bytes (beide vlakken).
+    pub fn bytes(&self) -> usize {
+        (self.data.len() + self.right.as_ref().map_or(0, |r| r.len())) * std::mem::size_of::<f32>()
+    }
     /// Get the duration in seconds
     pub fn duration(&self) -> f32 {
         self.data.len() as f32 / self.sample_rate as f32
@@ -73,8 +87,55 @@ impl SampleData {
 pub fn optimize_loop_points(sample: &mut SampleData) {
     if let (Some(a), Some(b)) = (sample.loop_start, sample.loop_end) {
         if b > a {
-            if let Some(e) = optimize_loop_end(&sample.data, a as usize, b as usize) {
+            if let Some(e) = optimize_loop_end_lr(&sample.data, sample.right.as_deref(), a as usize, b as usize) {
                 sample.loop_end = Some(e as u64);
+            }
+        }
+    }
+}
+
+/// Stereo-bestanden als twee kanalen laden (true, standaard) of — zoals vóór
+/// 0.7.36 — naar mono mengen (false; halveert het RAM-gebruik van stereo-sets).
+/// Proces-breed, gezet vanuit de instelling "Stereo-samples afspelen".
+static STEREO_LOADING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+pub fn set_stereo_loading(on: bool) { STEREO_LOADING.store(on, std::sync::atomic::Ordering::Relaxed); }
+pub fn stereo_loading() -> bool { STEREO_LOADING.load(std::sync::atomic::Ordering::Relaxed) }
+
+/// Interleaved samples → planair (links/mono, optioneel rechts). Eén gedeelde
+/// splitser voor alle laadpaden (hound, preload-segment, handmatige WAV-lezer,
+/// symphonia/MP3). Mono geeft de Vec ongewijzigd door (geen kopie, bit-exact);
+/// stereo levert (L, Some(R)) of — met stereo-laden uit — de oude (L+R)/2-mix;
+/// >2 kanalen: kanaal 0 (+ kanaal 1 als rechts).
+pub fn split_channels(samples: Vec<f32>, channels: u16) -> (Vec<f32>, Option<Vec<f32>>) {
+    match channels {
+        0 | 1 => (samples, None),
+        2 if stereo_loading() => {
+            let n = samples.len() / 2;
+            let mut l = Vec::with_capacity(n);
+            let mut r = Vec::with_capacity(n);
+            for c in samples.chunks_exact(2) {
+                l.push(c[0]);
+                r.push(c[1]);
+            }
+            (l, Some(r))
+        }
+        2 => (
+            samples.chunks(2)
+                .map(|chunk| (chunk[0] + chunk.get(1).unwrap_or(&0.0)) * 0.5)
+                .collect(),
+            None,
+        ),
+        n => {
+            let n = n as usize;
+            let mut l: Vec<f32> = samples.iter().step_by(n).copied().collect();
+            if stereo_loading() {
+                let mut r: Vec<f32> = samples.iter().skip(1).step_by(n).copied().collect();
+                let m = l.len().min(r.len());
+                l.truncate(m);
+                r.truncate(m);
+                (l, Some(r))
+            } else {
+                (l, None)
             }
         }
     }
@@ -87,6 +148,13 @@ pub fn optimize_loop_points(sample: &mut SampleData) {
 /// en het preload-pad — de eerste ~2 seconden van elke noot loopen op de
 /// preload-buffer, dus ook dáár moet de naad fase-uitgelijnd zijn.
 pub fn optimize_loop_end(data: &[f32], ls: usize, le: usize) -> Option<usize> {
+    optimize_loop_end_lr(data, None, ls, le)
+}
+
+/// Als [`optimize_loop_end`], maar met een optioneel rechtervlak: de kosten
+/// zijn de som van de SSD over beide kanalen zodat de naad voor L én R klopt.
+/// Zonder rechtervlak exact dezelfde berekening als voorheen.
+pub fn optimize_loop_end_lr(data: &[f32], right: Option<&[f32]>, ls: usize, le: usize) -> Option<usize> {
     let n = data.len();
     let win = 128usize; // comparison window (~3 ms @ 48k)
     if le <= ls || ls + win >= n || le + win >= n {
@@ -108,6 +176,14 @@ pub fn optimize_loop_end(data: &[f32], ls: usize, le: usize) -> Option<usize> {
         for k in 0..win {
             let d = data[ls + k] - data[e + k];
             ssd += d * d;
+        }
+        if let Some(r) = right {
+            if e + win <= r.len() {
+                for k in 0..win {
+                    let d = r[ls + k] - r[e + k];
+                    ssd += d * d;
+                }
+            }
         }
         // Tiny bias toward the original loop end to avoid needless drift between
         // near-equal matches.
@@ -383,19 +459,10 @@ pub fn load_wav(path: &Path) -> Result<SampleData, SampleError> {
             path.display(), read_errors);
     }
 
-    // Convert to mono if stereo
-    let mono = if spec.channels == 2 {
-        samples.chunks(2)
-            .map(|chunk| (chunk[0] + chunk.get(1).unwrap_or(&0.0)) * 0.5)
-            .collect()
-    } else if spec.channels == 1 {
-        samples
-    } else {
-        // Take first channel only for multi-channel
-        samples.into_iter().step_by(spec.channels as usize).collect()
-    };
+    // Interleaved → planair (mono ongewijzigd; stereo als L + R).
+    let (left, right) = split_channels(samples, spec.channels);
 
-    // Adjust loop points for mono conversion (divide by channels if stereo)
+    // Looppunten uit de smpl-chunk staan al in frames — geldig voor beide vlakken.
     let (loop_start, loop_end) = if let Some((start, end)) = loop_points {
         // Loop points in smpl chunk are per-frame, not per-sample
         // So they should work directly for mono
@@ -405,7 +472,8 @@ pub fn load_wav(path: &Path) -> Result<SampleData, SampleError> {
     };
 
     let mut sd = SampleData {
-        data: mono,
+        data: left,
+        right,
         sample_rate: spec.sample_rate,
         channels: spec.channels,
         loop_start,
@@ -426,12 +494,18 @@ pub fn resample(sample: &SampleData, target_rate: SampleRate) -> Result<SampleDa
     let ratio = target_rate as f64 / sample.sample_rate as f64;
     let chunk_size = 1024;
 
+    // Eén of twee vlakken (L/R) door dezelfde resampler: identieke delay-
+    // compensatie per kanaal, dus L en R blijven sample-exact uitgelijnd.
+    let planes: Vec<&[f32]> = match &sample.right {
+        Some(r) => vec![&sample.data[..], &r[..]],
+        None => vec![&sample.data[..]],
+    };
     let mut resampler = FftFixedIn::<f32>::new(
         sample.sample_rate as usize,
         target_rate as usize,
         chunk_size,
         2,
-        1
+        planes.len()
     ).map_err(|e| SampleError::ResampleError(e.to_string()))?;
 
     // De FFT-resampler heeft een vaste in-/uitloopvertraging: de output begint
@@ -443,24 +517,30 @@ pub fn resample(sample: &SampleData, target_rate: SampleRate) -> Result<SampleDa
     let delay = resampler.output_delay();
     let expected_len = (sample.data.len() as f64 * ratio).round() as usize;
 
-    let mut output = Vec::with_capacity(expected_len + delay + chunk_size);
+    let mut outputs: Vec<Vec<f32>> = planes.iter()
+        .map(|_| Vec::with_capacity(expected_len + delay + chunk_size))
+        .collect();
     let mut input_pos = 0usize;
     // Voer ook na het einde van de input nul-chunks aan totdat de delay-staart
     // eruit gespoeld is en we de verwachte lengte hebben.
-    while output.len() < expected_len + delay {
-        let mut chunk: Vec<f32> = if input_pos < sample.data.len() {
-            let end = (input_pos + chunk_size).min(sample.data.len());
-            sample.data[input_pos..end].to_vec()
-        } else {
-            Vec::new()
-        };
-        chunk.resize(chunk_size, 0.0);
+    while outputs[0].len() < expected_len + delay {
+        let input: Vec<Vec<f32>> = planes.iter().map(|plane| {
+            let mut chunk: Vec<f32> = if input_pos < plane.len() {
+                let end = (input_pos + chunk_size).min(plane.len());
+                plane[input_pos..end].to_vec()
+            } else {
+                Vec::new()
+            };
+            chunk.resize(chunk_size, 0.0);
+            chunk
+        }).collect();
         input_pos += chunk_size;
 
-        let input = vec![chunk];
         let result = resampler.process(&input, None)
             .map_err(|e| SampleError::ResampleError(e.to_string()))?;
-        output.extend(&result[0]);
+        for (out, res) in outputs.iter_mut().zip(result.iter()) {
+            out.extend(res);
+        }
 
         // Veiligheidsklep tegen een oneindige lus bij onverwacht resampler-gedrag.
         if input_pos > sample.data.len() + 8 * chunk_size {
@@ -470,9 +550,13 @@ pub fn resample(sample: &SampleData, target_rate: SampleRate) -> Result<SampleDa
 
     // Delay-aanloop wegknippen en op de verwachte lengte trimmen → output is
     // tijd-uitgelijnd met de input (frame i ↔ input-frame i/ratio).
-    let start = delay.min(output.len());
-    let end = (start + expected_len).min(output.len());
-    let aligned: Vec<f32> = output[start..end].to_vec();
+    let mut aligned_planes = outputs.into_iter().map(|output| {
+        let start = delay.min(output.len());
+        let end = (start + expected_len).min(output.len());
+        output[start..end].to_vec()
+    });
+    let aligned: Vec<f32> = aligned_planes.next().unwrap_or_default();
+    let aligned_right: Option<Vec<f32>> = aligned_planes.next();
 
     // Adjust loop points
     let loop_start = sample.loop_start.map(|l| (l as f64 * ratio) as u64);
@@ -480,8 +564,9 @@ pub fn resample(sample: &SampleData, target_rate: SampleRate) -> Result<SampleDa
 
     let mut sd = SampleData {
         data: aligned,
+        right: aligned_right,
         sample_rate: target_rate,
-        channels: 1,
+        channels: sample.channels,
         loop_start,
         loop_end,
     };
@@ -495,12 +580,20 @@ pub fn normalize(sample: &mut SampleData, target_db: f32) {
         .map(|s| s.abs())
         .fold(0.0_f32, |a, b| a.max(b));
     
+    let peak = sample.right.as_ref()
+        .map(|r| r.iter().map(|s| s.abs()).fold(peak, |a, b| a.max(b)))
+        .unwrap_or(peak);
     if peak > 0.0 {
         let target_linear = 10.0_f32.powf(target_db / 20.0);
         let gain = target_linear / peak;
-        
+
         for s in &mut sample.data {
             *s *= gain;
+        }
+        if let Some(r) = sample.right.as_mut() {
+            for s in r.iter_mut() {
+                *s *= gain;
+            }
         }
     }
 }
@@ -511,18 +604,24 @@ pub fn apply_fades(sample: &mut SampleData, fade_in_ms: f32, fade_out_ms: f32) {
     let fade_in_samples = (fade_in_ms / 1000.0 * sr) as usize;
     let fade_out_samples = (fade_out_ms / 1000.0 * sr) as usize;
 
-    // Fade in
-    for (i, s) in sample.data.iter_mut().take(fade_in_samples).enumerate() {
-        let t = i as f32 / fade_in_samples as f32;
-        *s *= t * t; // Quadratic fade
+    let mut planes: Vec<&mut Vec<f32>> = vec![&mut sample.data];
+    if let Some(r) = sample.right.as_mut() {
+        planes.push(r);
     }
+    for plane in planes {
+        // Fade in
+        for (i, s) in plane.iter_mut().take(fade_in_samples).enumerate() {
+            let t = i as f32 / fade_in_samples as f32;
+            *s *= t * t; // Quadratic fade
+        }
 
-    // Fade out
-    let len = sample.data.len();
-    if len > fade_out_samples {
-        for (i, s) in sample.data.iter_mut().skip(len - fade_out_samples).enumerate() {
-            let t = 1.0 - (i as f32 / fade_out_samples as f32);
-            *s *= t * t;
+        // Fade out
+        let len = plane.len();
+        if len > fade_out_samples {
+            for (i, s) in plane.iter_mut().skip(len - fade_out_samples).enumerate() {
+                let t = 1.0 - (i as f32 / fade_out_samples as f32);
+                *s *= t * t;
+            }
         }
     }
 }
@@ -624,8 +723,10 @@ impl ReleaseAlignTable {
 /// Preload buffer info - contains attack portion for instant playback
 #[derive(Debug, Clone)]
 pub struct PreloadBuffer {
-    /// Attack portion of the sample (first ~100-200ms)
+    /// Attack portion of the sample (first ~100-200ms): mono, óf links bij stereo.
     pub attack_data: Vec<f32>,
+    /// Rechterkanaal van de attack (zelfde lengte als `attack_data`); None = mono.
+    pub attack_right: Option<Vec<f32>>,
     /// Original sample rate
     pub sample_rate: SampleRate,
     /// Total sample length (for reference)
@@ -651,6 +752,15 @@ pub struct PreloadBuffer {
     /// bron-samplerate-frames) worden verschoven, anders verspringt de audio
     /// hoorbaar (tik) op het upgrademoment.
     pub trim_start: usize,
+}
+
+impl PreloadBuffer {
+    /// Stereo (twee vlakken) of mono.
+    pub fn is_stereo(&self) -> bool { self.attack_right.is_some() }
+    /// Geheugengebruik van de attack-data in bytes (beide vlakken).
+    pub fn bytes(&self) -> usize {
+        (self.attack_data.len() + self.attack_right.as_ref().map_or(0, |r| r.len())) * std::mem::size_of::<f32>()
+    }
 }
 
 /// Welke uitsnede van het bestand een preload-buffer moet bevatten.
@@ -853,17 +963,8 @@ pub fn load_wav_preload_segment(path: &Path, preload_samples: usize, segment: Pr
         }
     };
 
-    // Convert to mono if stereo
-    let mono = if channels == 2 {
-        samples.chunks(2)
-            .map(|chunk| (chunk[0] + chunk.get(1).unwrap_or(&0.0)) * 0.5)
-            .collect()
-    } else if channels == 1 {
-        samples
-    } else {
-        // Take first channel for multi-channel
-        samples.into_iter().step_by(channels as usize).collect()
-    };
+    // Interleaved → planair (mono ongewijzigd; stereo als L + R).
+    let (mono, right) = split_channels(samples, channels);
 
     // Release-segmenten loopen niet (one-shot uitklinken); alleen de attack
     // krijgt looppunten mee.
@@ -878,7 +979,11 @@ pub fn load_wav_preload_segment(path: &Path, preload_samples: usize, segment: Pr
     let onset_trim = if segment == PreloadSegment::Full {
         let onset_threshold = 0.002; // ~-54dB
         let pre_onset_keep = 32;     // samples to keep before detected onset
-        let onset_pos = mono.iter().position(|&s| s.abs() > onset_threshold).unwrap_or(0);
+        // Onset = eerste frame waar L óf R boven de drempel komt (mono: alleen L).
+        let onset_pos = (0..mono.len())
+            .position(|i| mono[i].abs() > onset_threshold
+                || right.as_ref().map_or(false, |r| r[i].abs() > onset_threshold))
+            .unwrap_or(0);
         onset_pos.saturating_sub(pre_onset_keep)
     } else {
         0
@@ -889,6 +994,7 @@ pub fn load_wav_preload_segment(path: &Path, preload_samples: usize, segment: Pr
     } else {
         mono
     };
+    let aligned_right = right.map(|r| if onset_trim > 0 { r[onset_trim..].to_vec() } else { r });
 
     // Totale verschuiving t.o.v. het originele bestand: segment-start (release
     // vanaf cue) + onset-trim. De upgrade naar de volledige sample corrigeert
@@ -912,7 +1018,7 @@ pub fn load_wav_preload_segment(path: &Path, preload_samples: usize, segment: Pr
             let a = ls - trim_start as u64;
             let mut e = le - trim_start as u64;
             if (e as usize) <= aligned_data.len() {
-                if let Some(better) = optimize_loop_end(&aligned_data, a as usize, e as usize) {
+                if let Some(better) = optimize_loop_end_lr(&aligned_data, aligned_right.as_deref(), a as usize, e as usize) {
                     e = better as u64;
                 }
             }
@@ -923,14 +1029,23 @@ pub fn load_wav_preload_segment(path: &Path, preload_samples: usize, segment: Pr
 
     // Fase-uitlijningstabel voor release-segmenten (GrandOrgue-stijl): het
     // scanvenster (periode van 20 Hz) valt ruim binnen de preload.
+    // Bij stereo op de monosom (L+R)/2 — hetzelfde domein als de golfvorm-
+    // historie van de stervende stem in de engine; mono: exact als voorheen.
     let align_table = if matches!(segment, PreloadSegment::Release { .. }) {
-        ReleaseAlignTable::compute(&aligned_data, sample_rate)
+        match &aligned_right {
+            Some(r) => {
+                let sum: Vec<f32> = aligned_data.iter().zip(r.iter()).map(|(a, b)| (a + b) * 0.5).collect();
+                ReleaseAlignTable::compute(&sum, sample_rate)
+            }
+            None => ReleaseAlignTable::compute(&aligned_data, sample_rate),
+        }
     } else {
         None
     };
 
     Ok(PreloadBuffer {
         attack_data: aligned_data,
+        attack_right: aligned_right,
         sample_rate,
         total_samples: total_frames.saturating_sub(trim_start),
         loop_start: adj_loop_start,
@@ -1099,17 +1214,12 @@ pub fn load_wav_manual(path: &Path) -> Result<SampleData, SampleError> {
         }
     };
 
-    // Stereo → mono of multi-channel → eerste kanaal
-    let mono: Vec<f32> = if channels == 2 {
-        samples.chunks_exact(2).map(|c| (c[0] + c[1]) * 0.5).collect()
-    } else if channels == 1 {
-        samples
-    } else {
-        samples.into_iter().step_by(channels as usize).collect()
-    };
+    // Interleaved → planair (mono ongewijzigd; stereo als L + R).
+    let (left, right) = split_channels(samples, channels);
 
     Ok(SampleData {
-        data: mono,
+        data: left,
+        right,
         sample_rate,
         channels,
         loop_start: None,
@@ -1190,20 +1300,12 @@ pub fn load_via_symphonia(path: &Path, extension_hint: &str) -> Result<SampleDat
         all_samples.extend(sample_buf.samples());
     }
 
-    // Convert to mono if stereo
-    let mono = if channels == 2 {
-        all_samples.chunks(2)
-            .map(|chunk| (chunk[0] + chunk.get(1).unwrap_or(&0.0)) * 0.5)
-            .collect()
-    } else if channels == 1 {
-        all_samples
-    } else {
-        // Take first channel for multi-channel
-        all_samples.into_iter().step_by(channels as usize).collect()
-    };
+    // Interleaved → planair (mono ongewijzigd; stereo als L + R).
+    let (left, right) = split_channels(all_samples, channels);
 
     Ok(SampleData {
-        data: mono,
+        data: left,
+        right,
         sample_rate,
         channels,
         loop_start: None, // MP3 doesn't support loop points
@@ -1240,6 +1342,7 @@ pub fn load_audio_preload(path: &Path, preload_samples: usize) -> Result<Preload
             let full_sample = load_mp3(path)?;
             let attack_len = preload_samples.min(full_sample.data.len());
             let raw_attack = full_sample.data[..attack_len].to_vec();
+            let raw_right = full_sample.right.as_ref().map(|r| r[..attack_len].to_vec());
 
             // Attack alignment: trim leading silence
             let onset_threshold = 0.002;
@@ -1251,9 +1354,11 @@ pub fn load_audio_preload(path: &Path, preload_samples: usize) -> Result<Preload
             } else {
                 raw_attack
             };
+            let attack_right = raw_right.map(|r| if trim_start > 0 { r[trim_start..].to_vec() } else { r });
 
             Ok(PreloadBuffer {
                 attack_data,
+                attack_right,
                 sample_rate: full_sample.sample_rate,
                 total_samples: full_sample.data.len().saturating_sub(trim_start),
                 loop_start: None,
@@ -1267,6 +1372,69 @@ pub fn load_audio_preload(path: &Path, preload_samples: usize) -> Result<Preload
             })
         }
         _ => Err(SampleError::UnsupportedFormat(format!("Unknown extension: {}", ext))),
+    }
+}
+
+#[cfg(test)]
+mod stereo_tests {
+    use super::*;
+
+    /// Mono blijft bit-exact dezelfde Vec (geen kopie/rekenwerk).
+    #[test]
+    fn split_mono_is_identity() {
+        let v = vec![0.1f32, -0.2, 0.3];
+        let (l, r) = split_channels(v.clone(), 1);
+        assert_eq!(l, v);
+        assert!(r.is_none());
+    }
+
+    /// Stereo wordt planair L/R met gelijke lengte; de smpl-looppunten blijven
+    /// in frames (worden niet aangeraakt).
+    #[test]
+    fn split_stereo_planar() {
+        set_stereo_loading(true);
+        let inter = vec![1.0f32, -1.0, 2.0, -2.0, 3.0, -3.0];
+        let (l, r) = split_channels(inter, 2);
+        assert_eq!(l, vec![1.0, 2.0, 3.0]);
+        assert_eq!(r, Some(vec![-1.0, -2.0, -3.0]));
+    }
+
+    /// Met stereo-laden uit: de oude (L+R)/2-mix. (Eigen helper i.p.v. de
+    /// globale schakelaar, zodat parallelle tests elkaar niet storen.)
+    #[test]
+    fn downmix_matches_old_formula() {
+        let inter = vec![1.0f32, 0.0, 0.5, 0.5];
+        let mixed: Vec<f32> = inter.chunks(2).map(|c| (c[0] + c.get(1).unwrap_or(&0.0)) * 0.5).collect();
+        assert_eq!(mixed, vec![0.5, 0.5]);
+    }
+
+    /// Stereo-resample: beide vlakken krijgen dezelfde delay-compensatie —
+    /// een impuls in L op p en in R op q landen op p·ratio en q·ratio.
+    #[test]
+    fn resample_stereo_keeps_planes_aligned() {
+        let (sr_in, sr_out) = (44100u32, 48000u32);
+        let n = 44100usize;
+        let mut l = vec![0.0f32; n];
+        let mut r = vec![0.0f32; n];
+        let (p, q) = (10_000usize, 20_000usize);
+        l[p] = 1.0;
+        r[q] = 1.0;
+        let sd = SampleData { data: l, right: Some(r), sample_rate: sr_in, channels: 2, loop_start: None, loop_end: None };
+        let out = resample(&sd, sr_out).expect("resample");
+        let ratio = sr_out as f64 / sr_in as f64;
+        let argmax = |v: &[f32]| v.iter().enumerate().fold((0usize, 0.0f32), |a, (i, &x)| if x.abs() > a.1 { (i, x.abs()) } else { a }).0;
+        let rd = out.right.as_ref().expect("rechtervlak");
+        assert_eq!(out.data.len(), rd.len());
+        assert!((argmax(&out.data) as f64 - p as f64 * ratio).abs() <= 2.0);
+        assert!((argmax(rd) as f64 - q as f64 * ratio).abs() <= 2.0);
+    }
+
+    /// bytes() telt beide vlakken.
+    #[test]
+    fn bytes_counts_both_planes() {
+        let sd = SampleData { data: vec![0.0; 10], right: Some(vec![0.0; 10]), sample_rate: 48000, channels: 2, loop_start: None, loop_end: None };
+        assert_eq!(sd.bytes(), 20 * 4);
+        assert_eq!(sd.frames(), 10);
     }
 }
 
@@ -1298,7 +1466,7 @@ mod loop_opt_tests {
         let mut data = vec![0.0f32; n];
         let impulse_pos = 10_000usize;
         data[impulse_pos] = 1.0;
-        let sd = SampleData { data, sample_rate: sr_in, channels: 1, loop_start: None, loop_end: None };
+        let sd = SampleData { data, right: None, sample_rate: sr_in, channels: 1, loop_start: None, loop_end: None };
         let out = resample(&sd, sr_out).expect("resample");
 
         let ratio = sr_out as f64 / sr_in as f64;
@@ -1328,6 +1496,7 @@ mod loop_opt_tests {
         let le_authored = 5000 + 90; // 90 samples ≈ 0.45 period off a true match at 5000
         let mut sd = SampleData {
             data,
+            right: None,
             sample_rate: 48000,
             channels: 1,
             loop_start: Some(ls as u64),

@@ -62,7 +62,7 @@ impl SampleCache {
             sample = crate::resample(&sample, self.target_rate)?;
         }
         
-        let sample_size = sample.data.len() * std::mem::size_of::<f32>();
+        let sample_size = sample.bytes();
         let sample_ref = Arc::new(sample);
         
         // Add to cache
@@ -75,7 +75,7 @@ impl SampleCache {
                 // Simple eviction: remove first entry
                 if let Some(key) = cache.keys().next().cloned() {
                     if let Some(removed) = cache.remove(&key) {
-                        *size -= removed.data.len() * std::mem::size_of::<f32>();
+                        *size -= removed.bytes();
                     }
                 }
             }

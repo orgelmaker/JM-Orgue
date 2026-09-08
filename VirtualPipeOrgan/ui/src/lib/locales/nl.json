@@ -19,7 +19,7 @@
   "library": {
     "title": "Orgel Bibliotheek",
     "open_organ_file": ".organ",
-    "scan_folder": "Scan map",
+    "scan_folder": "JM-Rec import",
     "external_set": "Extern",
     "export": "Exporteer",
     "app_settings_button": "Algemene Instellingen",
@@ -172,7 +172,18 @@
     "export_settings": "Exporteer instellingen...",
     "import_settings": "Importeer instellingen...",
     "import_dialog_title": "Selecteer instellingen-bestand",
-    "export_dialog_title": "Opslaan als..."
+    "export_dialog_title": "Opslaan als...",
+    "panel_close_quits": "Kruisje op een extra scherm sluit de hele software",
+    "panel_close_quits_title": "Aan: het kruisje op een extra scherm sluit JM-Orgue helemaal af (handig op een orgelconsole). Uit: alleen dat scherm gaat dicht, het orgel speelt door.",
+    "output_pair": "Uitgangskanalen",
+    "output_pair_hint": "Welke twee kanalen van het audio-apparaat het orgel gebruikt (bijv. uitgang 3–4 van een ASIO-interface). Per klavier apart instellen kan onder MIDI-kanaal per klavier.",
+    "output_pair_custom": "Per klavier (aangepast)",
+    "polyphony": "Polyfonie (max. stemmen)",
+    "polyphony_hint": "Maximaal aantal gelijktijdig klinkende pijpen incl. nagalmstaarten. Hoger = meer CPU op één kern; houd de belasting onder ~80%.",
+    "polyphony_load": "Belasting audio-thread: {load}% (piek {peak}%)",
+    "stereo_samples": "Stereo-samples in stereo afspelen",
+    "stereo_samples_hint": "Aan: stereo-opnamen behouden hun ruimtebeeld (meer geheugen). Uit: mengen naar mono zoals vroeger.",
+    "reload_hint": "Wordt actief na het opnieuw laden van het orgel."
   },
   "stops": {
     "tremulant": "Tremulant",
@@ -242,7 +253,8 @@
     "midi_connected": "MIDI verbonden",
     "midi_disconnected": "MIDI niet verbonden",
     "voices": "stemmen",
-    "version": "v{version}"
+    "version": "v{version}",
+    "load_title": "Klinkende stemmen / polyfonie-kap · belasting van de audio-thread"
   },
   "actions": {
     "save": "Opslaan",
@@ -266,8 +278,9 @@
     "no_organ_loaded": "Geen orgel geladen"
   },
   "dialogs": {
-    "sample_folder_title": "Selecteer een map met sample-mappen",
-    "organ_file_title": "Open .organ bestand"
+    "sample_folder_title": "Selecteer de JM-Rec-projectmap (of een map met sample-mappen)",
+    "organ_file_title": "Open .organ bestand",
+    "shutdown_confirm": "Software én computer afsluiten?\n\nDe laatste stand wordt opgeslagen."
   },
   "alerts": {
     "max_midi_signals": "Maximaal 4 MIDI-signalen per koppelknop/registerknop"
@@ -334,5 +347,32 @@
     "scrollbar_thumb": "Scrollbar",
     "menu_bg": "Contextmenu achtergrond",
     "menu_text": "Contextmenu tekst"
+  },
+  "toolbar": {
+    "size_title": "Registerknop-grootte",
+    "vertical": "Verticaal",
+    "horizontal": "Horizontaal",
+    "layout_title_vertical": "Verticale rij",
+    "layout_title_horizontal": "Horizontale rij",
+    "rect": "Recht",
+    "round": "Rond",
+    "shape_title_rect": "Rechthoekige registerknoppen",
+    "shape_title_round": "Ronde registerknoppen (trekregisters)",
+    "bar": "Balk",
+    "bar_title": "Hoofdbalk tonen (tabbladen, profielwissel, audio start/stop)",
+    "new_screen": "Nieuw scherm",
+    "rec_audio_running": "Audio-opname loopt — {t} · Klik om te stoppen",
+    "rec_audio_start": "MP3-opname (wat je hoort) starten in Documenten\\JM-Orgue-opnames",
+    "rec_midi_running": "MIDI-opname loopt — {n} events · {t} · Klik om te stoppen",
+    "rec_midi_start": "MIDI-opname (wat je speelt — alleen noten) starten; opslaan in Documenten\\JM-Orgue-opnames",
+    "play_recording": "Opname afspelen",
+    "play_recording_title": "Zojuist opgenomen MIDI in de speler laden en afspelen (trek zelf de registers)",
+    "notate": "Noteren",
+    "notate_title": "Notatievenster openen: live inspelen met noten die verschijnen terwijl je speelt (lagen, overdub, ritme-tolerantie, bewerken); binnen het venster kun je ook een bestaand MIDI-bestand openen",
+    "shutdown": "Afsluiten",
+    "shutdown_title": "Software + computer afsluiten · rechtermuis of 3s ingedrukt = MIDI inleren",
+    "couplers": "Koppels",
+    "couplers_to_bar": "Koppels in een eigen balk tonen",
+    "couplers_to_division": "Koppels als knop bij het klavier tonen"
   }
 }
