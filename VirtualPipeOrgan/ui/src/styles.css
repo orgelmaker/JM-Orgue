@@ -2288,6 +2288,13 @@ input[type="range"]::-webkit-slider-thumb:hover {
   outline: none;
   border-color: var(--primary);
 }
+/* Hertemperen: indicator (gemeten pijptoonhoogtes) + uitleg onder de keuzelijst */
+.temperament-hint {
+  font-size: 0.8rem;
+  opacity: 0.75;
+  margin-top: 0.3rem;
+  line-height: 1.3;
+}
 
 /* Context menu for MIDI learn (used by couplers in Console/RegisterPanel) */
 .coupler-context-menu {

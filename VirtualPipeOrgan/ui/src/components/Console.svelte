@@ -9,6 +9,7 @@
   import { loadPanelState, savePanelState } from '../lib/panelState.js';
   import { midiLearn } from '../lib/midiLearn.js';
   import { invoke } from '@tauri-apps/api/core';
+  import { listen } from '@tauri-apps/api/event';
 
   export let organInfo = null;
   export let loading = false;
@@ -451,8 +452,7 @@
       eqEnabled = !eqEnabled;
       updateEq();
     } else if (actionCode === ACTION_CRESCENDO_ENABLE) {
-      crescendoEnabled = !crescendoEnabled;
-      saveCrescendo();
+      setCrescendoEnabledUI(!crescendoEnabled);
     } else if (actionCode === ACTION_AUDIO_PROFILE) {
       // Snelle wissel speakers ↔ hoofdtelefoon via MIDI (bv. een piston).
       dispatch('switchAudioProfile', null);
@@ -626,6 +626,102 @@
     }
   }
 
+  // ---- Automatisch MIDI-archief (0.7.38) ----
+  // Achtergrond-recorder in de backend (midi_archive.rs): start bij de eerste
+  // noot, stopt na stilte, schrijft .mid in de archiefmap. Hier alleen de
+  // instellingen, de live status en de lijst met de nieuwste bestanden.
+  let archiveCfg = { enabled: false, dir: '', dir_is_default: true, silence_secs: 20, min_notes: 4, min_secs: 5 };
+  let archiveStatus = { enabled: false, archiving: false, event_count: 0, seconds: 0, files_written: 0, last_file: null, last_error: null };
+  let archiveFiles = [];
+  let archiveFilesStamp = -1;
+  let archivePoll = null;
+
+  async function loadArchiveConfig() {
+    try { archiveCfg = await invoke('get_midi_archive_config'); } catch (e) {}
+  }
+  async function saveArchiveConfig() {
+    try {
+      archiveCfg = await invoke('set_midi_archive_config', { config: {
+        enabled: !!archiveCfg.enabled,
+        // Standaardmap niet als eigen keuze vastleggen: leeg = standaard.
+        dir: archiveCfg.dir_is_default ? '' : (archiveCfg.dir || ''),
+        dir_is_default: !!archiveCfg.dir_is_default,
+        silence_secs: Number(archiveCfg.silence_secs) || 0,
+        min_notes: Number(archiveCfg.min_notes) || 0,
+        min_secs: Number(archiveCfg.min_secs) || 0,
+      } });
+      await refreshArchiveList();
+    } catch (e) {
+      alert(tx('midi_archive.error').replace('{error}', String(e)));
+      await loadArchiveConfig();
+    }
+  }
+  async function refreshArchiveList() {
+    try { archiveFiles = await invoke('midi_archive_list'); } catch (e) { archiveFiles = []; }
+  }
+  async function pollArchive() {
+    try {
+      const s = await invoke('midi_archive_status');
+      archiveStatus = s;
+      if (s.files_written !== archiveFilesStamp) {
+        archiveFilesStamp = s.files_written;
+        await refreshArchiveList();
+      }
+    } catch (e) {}
+  }
+  async function chooseArchiveDir() {
+    try {
+      const d = await open({ directory: true, multiple: false, defaultPath: archiveCfg.dir || undefined });
+      if (d) {
+        archiveCfg.dir = d;
+        archiveCfg.dir_is_default = false;
+        await saveArchiveConfig();
+      }
+    } catch (e) {
+      alert(tx('midi_archive.error').replace('{error}', String(e)));
+    }
+  }
+  async function resetArchiveDir() {
+    archiveCfg.dir = '';
+    archiveCfg.dir_is_default = true;
+    await saveArchiveConfig();
+  }
+  async function openArchiveDir() {
+    try { await invoke('midi_archive_open_dir'); }
+    catch (e) { alert(tx('midi_archive.error').replace('{error}', String(e))); }
+  }
+  // Bestaande speler; MidiPlayer.svelte toont de voortgang. Net als bij
+  // playLastMidi: registers zelf trekken (archief = alleen noten).
+  async function playArchiveFile(f) {
+    try { await invoke('midi_play_file', { path: f.path }); }
+    catch (e) { alert(tx('recording.play_failed').replace('{error}', String(e))); }
+  }
+  async function deleteArchiveFile(f) {
+    if (!window.confirm(tx('midi_archive.delete_confirm').replace('{name}', f.name))) return;
+    try {
+      await invoke('midi_archive_delete', { path: f.path });
+      await refreshArchiveList();
+    } catch (e) {
+      alert(tx('midi_archive.error').replace('{error}', String(e)));
+    }
+  }
+  function fmtEpoch(e) {
+    try { return new Date(e * 1000).toLocaleString(); } catch (err) { return ''; }
+  }
+  // Status/lijst alleen pollen zolang de Algemene Instellingen zichtbaar zijn
+  // (zelfde patroon als de BLE-teller); elders is het blok onzichtbaar.
+  $: {
+    if (activeView === 'algemene-instellingen' && !archivePoll) {
+      loadArchiveConfig();
+      refreshArchiveList();
+      pollArchive();
+      archivePoll = setInterval(pollArchive, 500);
+    } else if (activeView !== 'algemene-instellingen' && archivePoll) {
+      clearInterval(archivePoll);
+      archivePoll = null;
+    }
+  }
+
   // ---- Noteren: MIDI-opname als notenschrift in het notatievenster ----
   // Opent een eigen venster (#notation) dat de opname via de backend naar
   // MusicXML omzet en met OpenSheetMusicDisplay rendert (afdrukken/PDF/
@@ -660,7 +756,7 @@
   let volume = -6;
   let reverb = 30;
   import { temperaments } from '../temperaments.js';
-  let selectedTemperament = 0; // index into temperaments array (0 = equal)
+  let selectedTemperament = 0; // index into temperaments array (0 = Origineel (zoals opgenomen), 1 = gelijkzwevend)
   let showCustomTemperament = false;
   let customCents = [0,0,0,0,0,0,0,0,0,0,0,0];
   const noteNames = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
@@ -695,7 +791,8 @@
 
   function applyCustomCents() {
     const name = temperaments[selectedTemperament]?.name || 'Aangepast';
-    invoke('set_temperament', { noteOffsets: customCents, fineTune, name }).catch(console.error);
+    // Eigen cents = een echte stemming → hertemperen (zoals GrandOrgue).
+    invoke('set_temperament', { noteOffsets: customCents, fineTune, name, retune: true }).catch(console.error);
   }
   let fineTune = 0; // cents offset from A440
   // Crescendo state
@@ -705,16 +802,9 @@
   let crescendoNumStages = 15;
   let crescendoLearning = false;
   let crescendoBinding = null;
-
-  try {
-    const saved = localStorage.getItem('jm-orgue-crescendo');
-    if (saved) {
-      const cfg = JSON.parse(saved);
-      crescendoEnabled = cfg.enabled || false;
-      crescendoStages = cfg.stages || [];
-      crescendoNumStages = cfg.numStages || 15;
-    }
-  } catch (e) {}
+  // Na een lokale matrix-bewerking de backend-poll even niet laten terugschrijven
+  // (de push is nog onderweg; een oud poll-antwoord zou de bewerking wissen).
+  let crescDirtyUntil = 0;
 
   function getAllStopIds() {
     if (!displayOrgan) return [];
@@ -763,8 +853,9 @@
     saveCrescendo();
   }
 
-  // Crescendo wordt PER ORGEL bewaard (stop-IDs verschillen per orgel). Sleutel op
-  // een hash van het orgel-id; valt terug op de globale sleutel als er geen orgel is.
+  // Crescendo wordt PER ORGEL bewaard — sinds 0.7.38 in de backend (OrganSettings,
+  // .jm-settings.json), niet meer in localStorage. De oude per-orgel-sleutel
+  // (hash van het orgel-id) wordt eenmalig gemigreerd en daarna verwijderd.
   function hashCode(str) {
     let h = 0;
     for (let i = 0; i < (str || '').length; i++) { h = ((h << 5) - h) + str.charCodeAt(i); h |= 0; }
@@ -785,38 +876,98 @@
     return localStorage.getItem(base); // legacy globale waarde (migratie naar dit orgel)
   }
 
+  // Matrix/aantal stappen naar de backend (bron van waarheid; past de huidige
+  // trap direct opnieuw toe) en de per-orgel opslag laten bijwerken.
   async function saveCrescendo() {
-    localStorage.setItem(crescKey(), JSON.stringify({
-      enabled: crescendoEnabled, stages: crescendoStages, numStages: crescendoNumStages
-    }));
+    crescDirtyUntil = Date.now() + 1500;
     try {
-      await invoke('set_crescendo_config', { stages: crescendoStages, enabled: crescendoEnabled });
+      await invoke('set_crescendo_config', { stages: crescendoStages, enabled: crescendoEnabled, numStages: crescendoNumStages });
+      dispatch('refreshOrgan');
+      dispatch('refreshMidiMappings');
     } catch (e) {
       console.error('Failed to save crescendo:', e);
     }
   }
 
-  // Laad de crescendo-config voor het huidige orgel en stuur die naar de backend.
+  // Alleen aan/uit (checkbox, piston 41): stuurt de (mogelijk verouderde) matrix
+  // van dit venster NIET mee. Uit → backend trekt de trede-registers weg.
+  async function setCrescendoEnabledUI(enabled) {
+    crescendoEnabled = enabled;
+    crescDirtyUntil = Date.now() + 1500;
+    try {
+      await invoke('set_crescendo_enabled', { enabled });
+      dispatch('refreshOrgan');
+      dispatch('refreshMidiMappings');
+    } catch (e) {
+      console.error('Failed to toggle crescendo:', e);
+    }
+  }
+
+  // Backend-config → UI-state, met JSON-guard (geen re-render bij gelijke inhoud).
+  function applyCrescendoConfig(cfg) {
+    if (!cfg || typeof cfg !== 'object') return;
+    const stages = Array.isArray(cfg.stages) ? cfg.stages : [];
+    if (JSON.stringify(stages) !== JSON.stringify(crescendoStages)) crescendoStages = stages;
+    if (!!cfg.enabled !== crescendoEnabled) crescendoEnabled = !!cfg.enabled;
+    const n = cfg.num_stages > 0 ? cfg.num_stages : 15;
+    if (n !== crescendoNumStages) crescendoNumStages = n;
+    if (typeof cfg.stage === 'number' && cfg.stage !== crescendoStage) crescendoStage = cfg.stage;
+    // Pedaalbinding (elders ingeleerd/gewijzigd) meenemen, met JSON-guard.
+    const b = Array.isArray(cfg.binding) && cfg.binding.length === 5
+      ? { channel: cfg.binding[0], cc: cfg.binding[1], min: cfg.binding[2], max: cfg.binding[3], invert: !!cfg.binding[4] }
+      : null;
+    if (JSON.stringify(b) !== JSON.stringify(crescendoBinding)) crescendoBinding = b;
+  }
+
+  // Laad de crescendo-config voor het huidige orgel uit de backend. Staat daar
+  // nog niets (orgel van vóór 0.7.38), dan eenmalig de oude localStorage-config
+  // migreren (alleen het hoofdvenster pusht) en de oude sleutels verwijderen.
   async function loadCrescendoForOrgan() {
-    try {
-      // Per-orgel sleutel; val eenmalig terug op de oude globale sleutel als migratie.
-      const saved = localStorage.getItem(crescKey()) || localStorage.getItem('jm-orgue-crescendo');
-      if (saved) {
-        const cfg = JSON.parse(saved);
-        crescendoEnabled = cfg.enabled || false;
-        crescendoStages = cfg.stages || [];
-        crescendoNumStages = cfg.numStages || 15;
-      } else {
-        // Geen config voor dit orgel: begin leeg i.p.v. de vorige organ-config hergebruiken.
-        crescendoStages = [];
+    let cfg = null;
+    try { cfg = await invoke('get_crescendo_config'); } catch (e) { cfg = null; }
+    const backendLeeg = !cfg || (!Array.isArray(cfg.stages) || cfg.stages.length === 0) && !cfg.enabled;
+    if (backendLeeg && !secondary) {
+      let legacy = null;
+      try {
+        const saved = localStorage.getItem(crescKey()) || localStorage.getItem('jm-orgue-crescendo');
+        if (saved) legacy = JSON.parse(saved);
+      } catch (e) { legacy = null; }
+      let gepusht = false;
+      if (legacy && Array.isArray(legacy.stages) && legacy.stages.length) {
+        // Alleen IDs die in dít orgel bestaan (de globale sleutel kon van een ander orgel zijn).
+        const known = new Set([...getAllStopIds(), ...((organInfo?.couplers || []).map(c => c.id))]);
+        const stages = legacy.stages.map(s => (Array.isArray(s) ? s.filter(id => known.has(id)) : []));
+        if (stages.some(s => s.length)) {
+          crescendoStages = stages;
+          crescendoEnabled = legacy.enabled || false;
+          crescendoNumStages = legacy.numStages || 15;
+          try {
+            await invoke('set_crescendo_config', { stages: crescendoStages, enabled: crescendoEnabled, numStages: crescendoNumStages });
+            dispatch('refreshMidiMappings');
+            gepusht = true;
+          } catch (e) { console.error('Crescendo-migratie mislukt:', e); }
+        }
       }
-    } catch (e) { crescendoStages = []; }
+      try { localStorage.removeItem(crescKey()); localStorage.removeItem('jm-orgue-crescendo'); } catch (e) {}
+      if (!gepusht) { crescendoStages = []; crescendoEnabled = false; crescendoNumStages = 15; }
+    } else if (cfg) {
+      applyCrescendoConfig(cfg);
+    } else {
+      crescendoStages = [];
+    }
+    crescendoStage = 0;
+    loadCrescendoBinding();
+  }
+
+  // Backend-config volgen (andere vensters/piston/pedaal): elke seconde vanuit
+  // refreshSharedPrefs, met guard tegen terugschrijven van een lopende bewerking.
+  async function pollCrescendoConfig() {
+    if (Date.now() < crescDirtyUntil) return;
     try {
-      // Secundair venster: alleen de UI-state laden — het hoofdvenster heeft de
-      // config al naar de backend gepusht (dubbele push zou onnodig verkeer en
-      // races geven).
-      if (!secondary) await invoke('set_crescendo_config', { stages: crescendoStages, enabled: crescendoEnabled });
-    } catch (e) { /* backend nog niet klaar — UI-state blijft leidend */ }
+      const cfg = await invoke('get_crescendo_config');
+      if (Date.now() < crescDirtyUntil) return;
+      applyCrescendoConfig(cfg);
+    } catch (e) {}
   }
 
   // ---- Crescendo-editor (matrix: rijen = registers, kolommen = stappen) ----
@@ -856,20 +1007,28 @@
     crescendoStages = Array.from({ length: crescendoNumStages }, () => []);
     saveCrescendo();
   }
+  // Aantal stappen wijzigen: bij krimp met gevulde hogere stappen eerst bevestigen
+  // (die stappen gaan verloren); de backend clampt de huidige trap.
+  function setCrescendoNumStagesUI(n) {
+    const oud = crescendoNumStages;
+    const verlies = n < oud && (crescendoStages || []).slice(n).some(s => Array.isArray(s) && s.length);
+    if (verlies && !confirm(tx('crescendo.shrink_confirm').replace('{old}', String(oud)).replace('{new}', String(n)))) {
+      crescendoNumStages = oud; // select terugzetten
+      return;
+    }
+    crescendoNumStages = n;
+    crescendoStages = ensureCrescStages();
+    if (crescendoStage > n) crescendoStage = n;
+    saveCrescendo();
+  }
 
+  // Trap zetten (klik op de balk/kolomkop): de backend past hem additief toe
+  // (zelfde kern als het pedaal); daarna alleen get_organ_info verversen.
   async function setCrescendoStage(stage) {
     try {
-      const targetStops = await invoke('set_crescendo_stage', { stage });
-      // De backend geeft null terug voor "niet toepassen" en een (mogelijk lege)
-      // array voor "toepassen" — een lege stap moet registers ook kunnen
-      // leegtrekken, dus alleen op array-zijn checken, niet op lengte.
-      if (Array.isArray(targetStops)) {
-        // Stappenteller alleen bijwerken als de stap echt is toegepast.
-        crescendoStage = stage;
-        // De backend zet hier alleen de trap-teller en geeft de doelregisters
-        // terug; App.svelte past ze toe (on:crescendoChange → set_drawn_stops).
-        dispatch('crescendoChange', targetStops);
-      }
+      await invoke('set_crescendo_stage', { stage });
+      crescendoStage = stage;
+      dispatch('refreshOrgan');
     } catch (e) {
       console.error('Failed to set crescendo stage:', e);
     }
@@ -882,7 +1041,8 @@
   async function toggleCrescendoInvert(invert) {
     try {
       await invoke('set_crescendo_invert', { invert });
-      if (crescendoBinding) { crescendoBinding.invert = invert; crescendoBinding = crescendoBinding; }
+      await loadCrescendoBinding();
+      dispatch('refreshMidiMappings');
     } catch (e) {
       console.error('Failed to toggle crescendo invert:', e);
     }
@@ -891,23 +1051,31 @@
   async function setCrescendoRangeUI(minVal, maxVal) {
     const mn = Math.max(0, Math.min(127, minVal | 0));
     const mx = Math.max(0, Math.min(127, maxVal | 0));
+    if (Math.abs(mx - mn) < 8) {
+      alert(tx('learn.pedal_range_too_small'));
+      await loadCrescendoBinding();
+      return;
+    }
     try {
       await invoke('set_crescendo_range', { minVal: mn, maxVal: mx });
-      if (crescendoBinding) { crescendoBinding.min = mn; crescendoBinding.max = mx; crescendoBinding = crescendoBinding; }
+      await loadCrescendoBinding();
+      dispatch('refreshMidiMappings');
     } catch (e) {
       console.error('Failed to set crescendo range:', e);
     }
   }
 
-  // Bij organ-load: huidige crescendo-binding (incl. min/max/invert) ophalen voor de UI.
-  $: if (organInfo) {
-    invoke('get_crescendo_binding').then(r => {
+  // Crescendo-binding (incl. min/max/invert) uit de backend — bij orgel-load en
+  // na elke binding-mutatie expliciet, niet via een reactive op organInfo.
+  async function loadCrescendoBinding() {
+    try {
+      const r = await invoke('get_crescendo_binding');
       if (Array.isArray(r) && r.length === 5) {
         crescendoBinding = { channel: r[0], cc: r[1], min: r[2], max: r[3], invert: !!r[4] };
       } else {
         crescendoBinding = null;
       }
-    }).catch(() => {});
+    } catch (e) {}
   }
 
   // EQ: vrije banden (GrandOrgue-stijl) — per band type, frequentie, gain,
@@ -1133,6 +1301,7 @@
     try {
       // set_swell_config schrijft de per-orgel opslag-spiegel in de backend.
       await invoke('set_swell_config', { division: divisionName, minDb, filterCutoff: cutoff });
+      dispatch('refreshMidiMappings'); // autosave
     } catch (e) {
       console.error('Failed to set swell config:', e);
     }
@@ -1337,6 +1506,38 @@
   async function setStereoSamples(on) {
     try { await invoke('set_stereo_samples', { on }); stereoReloadHint = true; } catch (e) { console.error(e); }
     refreshAudioStatus();
+  }
+
+  // Perspectieven en gestapelde ranks (0.7.38): per orgel welke microfoon-
+  // posities geladen worden (vraagt herladen) en hun live volume. De backend
+  // spiegelt de runtime-staat in organInfo.perspectives, dus de 300 ms-poll
+  // zet geen verouderde waarden terug.
+  let perspectives = [];
+  $: perspectives = organInfo?.perspectives || [];
+  let perspReloadHint = false;
+  async function setPerspectiveEnabled(name, on) {
+    try {
+      perspReloadHint = await invoke('set_perspective_enabled', { name, enabled: on });
+      perspectives = perspectives.map(p => p.name === name ? { ...p, enabled: on } : p);
+      // Autosave via App (refreshMidiMappings → scheduleAutoSave).
+      dispatch('refreshMidiMappings');
+    } catch (e) { console.error(e); }
+  }
+  let perspGainTimer = null;
+  function setPerspectiveGain(name, v) {
+    const gainDb = Number(v);
+    perspectives = perspectives.map(p => p.name === name ? { ...p, gain_db: gainDb } : p);
+    invoke('set_perspective_gain', { name, gainDb }).catch(console.error);
+    clearTimeout(perspGainTimer);
+    perspGainTimer = setTimeout(() => dispatch('refreshMidiMappings'), 400);
+  }
+  function reloadCurrentOrgan() {
+    const id = organInfo?.id;
+    if (!id) return;
+    perspReloadHint = false;
+    const l = id.toLowerCase();
+    if (l.endsWith('.organ') || l.endsWith('.organ_hauptwerk_xml')) dispatch('loadOrgan', id);
+    else dispatch('scanFolder', id);
   }
   function isChannelSelected(div, ch) { return getDivisionChannels(div).includes(ch); }
   function toggleDivisionChannel(div, ch) {
@@ -1583,11 +1784,37 @@
     swellEnabled[divisionName] = !swellEnabled[divisionName];
     swellEnabled = swellEnabled;
     localStorage.setItem(organUiKey('jm-orgue-swell-enabled'), JSON.stringify(swellEnabled));
-    // Reset volume to 100% when disabling
+    const stashKey = organUiKey('jm-orgue-swell-binding-stash');
+    let stash = {};
+    try { stash = JSON.parse(localStorage.getItem(stashKey) || '{}'); } catch (e) { stash = {}; }
     if (!swellEnabled[divisionName]) {
+      // Vinkje uit: kast open (100 %) en de pedaalkoppeling PARKEREN — niet
+      // wissen (uit/aan vergde vroeger opnieuw inleren), maar ook niet actief
+      // laten (het pedaal zou een verborgen kast blijven sluiten).
+      const b = swellBindings[divisionName];
+      if (b) {
+        stash[divisionName] = { channel: b.channel, cc_num: b.cc_num, min_val: b.min_val, max_val: b.max_val, invert: !!b.invert };
+        localStorage.setItem(stashKey, JSON.stringify(stash));
+        invoke('clear_swell_binding', { division: divisionName }).catch(() => {});
+        delete swellBindings[divisionName];
+        swellBindings = swellBindings;
+      }
       setSwellLevel(divisionName, 1.0);
-      // Clear any existing binding
-      clearSwellBinding(divisionName);
+    } else if (stash[divisionName]) {
+      // Vinkje aan: geparkeerde koppeling terugzetten (incl. bereik/inversie).
+      const b = stash[divisionName];
+      const divIdx = Math.max(0, (organInfo?.divisions || []).findIndex(d => d.name === divisionName));
+      (async () => {
+        try {
+          await invoke('set_swell_binding_manual', { division: divisionName, divisionIndex: divIdx, channel: b.channel, ccNum: b.cc_num });
+          if (b.min_val != null && b.max_val != null) await invoke('set_swell_range', { division: divisionName, minVal: b.min_val, maxVal: b.max_val });
+          if (b.invert) await invoke('set_swell_invert', { division: divisionName, invert: true });
+        } catch (e) { console.error('Zwelkoppeling terugzetten mislukt:', e); }
+        delete stash[divisionName];
+        localStorage.setItem(stashKey, JSON.stringify(stash));
+        await loadSwellBindings();
+        dispatch('refreshMidiMappings');
+      })();
     }
   }
 
@@ -1671,25 +1898,49 @@
   // Stapsgewijze trede-inleer (zwel + crescendo), zelfde patroon als het
   // klavier-inleren: laagste stand -> groen zodra herkend -> hoogste stand.
   let pedalLearnModal = null; // { kind:'zwel'|'crescendo', division, step:1|2|'klaar'|'fout', first, msg }
+  // Flow-token: Annuleren/Opnieuw laat de oude (nog blokkerende) backend-lus
+  // niet meer in een nieuwe flow landen — antwoorden van een oude generatie
+  // worden genegeerd en de backend-lus wordt expliciet afgebroken.
+  let learnGen = 0;
+  const MIN_PEDAL_RANGE = 8; // CC-eenheden tussen laagste en hoogste stand
+
+  async function cancelPedalLearn() {
+    learnGen++;
+    // De finally van de afgebroken flow ziet een andere generatie en laat de
+    // learning-vlaggen dus staan — de leerknoppen bleven daardoor disabled en
+    // de crescendoknop bleef "inleren…" tonen. Hier expliciet wissen; een
+    // direct volgende flow (Opnieuw) zet ze zelf weer.
+    learningSwellDivision = null;
+    crescendoLearning = false;
+    try { await invoke('cancel_pedal_learn'); } catch (e) {}
+  }
 
   async function learnPedalFlow(kind, divisionName = null) {
     if (!midiConnected) {
       alert(tx('midi.connect_first'));
       return;
     }
+    const gen = ++learnGen;
     pedalLearnModal = { kind, division: divisionName, step: 1, first: null, msg: '' };
+    if (kind === 'zwel') learningSwellDivision = divisionName; else crescendoLearning = true;
     try {
       const first = await invoke('learn_pedal_position', { channel: null, ccNum: null });
-      if (!pedalLearnModal) return; // geannuleerd
+      if (gen !== learnGen || !pedalLearnModal) return; // geannuleerd / nieuwe flow
       if (!first) {
         pedalLearnModal = { ...pedalLearnModal, step: 'fout', msg: tx('learn.pedal_timeout_low') };
         return;
       }
       pedalLearnModal = { ...pedalLearnModal, step: 2, first: { channel: first[0], cc: first[1], value: first[2] } };
       const second = await invoke('learn_pedal_position', { channel: first[0], ccNum: first[1] });
-      if (!pedalLearnModal) return;
+      if (gen !== learnGen || !pedalLearnModal) return;
       if (!second) {
         pedalLearnModal = { ...pedalLearnModal, step: 'fout', msg: tx('learn.pedal_timeout_high') };
+        return;
+      }
+      // Bereikcontrole: (vrijwel) gelijke laag/hoog-waarde zou de zwel dicht
+      // laten (of de crescendo op 0) — weigeren met 'Opnieuw'.
+      if (Math.abs(second[2] - pedalLearnModal.first.value) < MIN_PEDAL_RANGE) {
+        pedalLearnModal = { ...pedalLearnModal, step: 'fout', msg: tx('learn.pedal_range_too_small') };
         return;
       }
       if (kind === 'zwel') {
@@ -1705,16 +1956,19 @@
           channel: first[0], ccNum: first[1],
           lowVal: pedalLearnModal.first.value, highVal: second[2],
         });
-        const inverted = pedalLearnModal.first.value > second[2];
-        const lo = Math.min(pedalLearnModal.first.value, second[2]);
-        const hi = Math.max(pedalLearnModal.first.value, second[2]);
-        crescendoBinding = { channel: first[0], cc: first[1], min: lo, max: hi, invert: inverted };
+        await loadCrescendoBinding();
       }
+      if (gen !== learnGen || !pedalLearnModal) return;
       pedalLearnModal = { ...pedalLearnModal, step: 'klaar', msg: tx('learn.pedal_result').replace('{cc}', String(first[1])).replace('{channel}', String(first[0] + 1)) };
       dispatch('refreshMidiMappings');
       setTimeout(() => { if (pedalLearnModal && pedalLearnModal.step === 'klaar') pedalLearnModal = null; }, 2000);
     } catch (e) {
-      if (pedalLearnModal) pedalLearnModal = { ...pedalLearnModal, step: 'fout', msg: String(e) };
+      if (gen === learnGen && pedalLearnModal) pedalLearnModal = { ...pedalLearnModal, step: 'fout', msg: String(e) };
+    } finally {
+      if (gen === learnGen) {
+        learningSwellDivision = null;
+        crescendoLearning = false;
+      }
     }
   }
 
@@ -1727,6 +1981,7 @@
       await invoke('clear_swell_binding', { division: divisionName });
       delete swellBindings[divisionName];
       swellBindings = swellBindings;
+      dispatch('refreshMidiMappings');
     } catch (e) {
       console.error('Failed to clear swell binding:', e);
     }
@@ -1739,6 +1994,7 @@
         swellBindings[divisionName].invert = invert;
         swellBindings = swellBindings;
       }
+      dispatch('refreshMidiMappings');
     } catch (e) {
       console.error('Failed to toggle swell invert:', e);
     }
@@ -1747,13 +2003,15 @@
   async function setSwellRangeUI(divisionName, minVal, maxVal) {
     const mn = Math.max(0, Math.min(127, minVal | 0));
     const mx = Math.max(0, Math.min(127, maxVal | 0));
+    if (Math.abs(mx - mn) < MIN_PEDAL_RANGE) {
+      alert(tx('learn.pedal_range_too_small'));
+      await loadSwellBindings(); // invoervelden terug op de geldende waarden
+      return;
+    }
     try {
       await invoke('set_swell_range', { division: divisionName, minVal: mn, maxVal: mx });
-      if (swellBindings[divisionName]) {
-        swellBindings[divisionName].min_val = mn;
-        swellBindings[divisionName].max_val = mx;
-        swellBindings = swellBindings;
-      }
+      await loadSwellBindings(); // backend ordent min/max
+      dispatch('refreshMidiMappings');
     } catch (e) {
       console.error('Failed to set swell range:', e);
     }
@@ -1768,6 +2026,7 @@
     try {
       await invoke('set_swell_binding_manual', { division: divisionName, divisionIndex: divIdx, channel: ch, ccNum: cc });
       await loadSwellBindings();
+      dispatch('refreshMidiMappings');
     } catch (e) {
       console.error('Handmatige zwelkast-koppeling mislukt:', e);
     }
@@ -1778,10 +2037,8 @@
     const cc = Math.max(0, Math.min(127, ccNum | 0));
     try {
       await invoke('set_crescendo_binding_manual', { channel: ch, ccNum: cc });
-      const mn = crescendoBinding?.min ?? 0;
-      const mx = crescendoBinding?.max ?? 127;
-      const inv = crescendoBinding?.invert ?? false;
-      crescendoBinding = { channel: ch, cc, min: mn, max: mx, invert: inv };
+      await loadCrescendoBinding();
+      dispatch('refreshMidiMappings');
     } catch (e) {
       console.error('Handmatige crescendo-koppeling mislukt:', e);
     }
@@ -1791,6 +2048,7 @@
     try {
       await invoke('clear_crescendo_binding');
       crescendoBinding = null;
+      dispatch('refreshMidiMappings');
     } catch (e) {
       console.error('Crescendo-koppeling wissen mislukt:', e);
     }
@@ -1824,7 +2082,9 @@
     try {
       const t = temperaments[selectedTemperament];
       // name wordt per orgel opgeslagen zodat de keuze bij herladen hersteld kan worden.
-      await invoke('set_temperament', { noteOffsets: t.cents, fineTune: fineTune, name: t.name });
+      // retune: alles behalve "Origineel (zoals opgenomen)" hertempert per pijp
+      // vanaf de gemeten toonhoogte (GrandOrgue-semantiek).
+      await invoke('set_temperament', { noteOffsets: t.cents, fineTune: fineTune, name: t.name, retune: !t.original });
     } catch (e) {
       console.error('Failed to set temperament:', e);
     }
@@ -1856,24 +2116,36 @@
         const t = s.temperament;
         fineTune = t.fine_tune_cents || 0;
         let idx = -1;
-        if (t.name) idx = temperaments.findIndex(x => x.name === t.name);
-        if (idx < 0 && Array.isArray(t.custom_cents)) {
-          idx = temperaments.findIndex(x => Array.isArray(x.cents) && x.cents.length === 12
-            && x.cents.every((c, i) => Math.abs(c - t.custom_cents[i]) < 0.01));
+        // Migratie (0.7.38): een bestand van vóór het retune-veld met de oude
+        // default "Equal Temperament" (of zonder naam) wordt "Origineel (zoals
+        // opgenomen)" — klank ongewijzigd; de naam wijzigt bij de eerstvolgende
+        // autosave. Alle andere opgeslagen stemmingen worden op naam gevonden
+        // en hertemperen voortaan per pijp (retune = !original).
+        const legacy = (t.retune === null || t.retune === undefined);
+        if (legacy && (!t.name || t.name === 'Equal Temperament')) {
+          idx = 0;
+        } else {
+          if (t.name) idx = temperaments.findIndex(x => x.name === t.name);
+          // Cents-fallback: Origineel (allemaal nullen) uitsluiten, anders
+          // matcht elke nul-cents-stemming met onbekende naam index 0.
+          if (idx < 0 && Array.isArray(t.custom_cents)) {
+            idx = temperaments.findIndex(x => !x.original && Array.isArray(x.cents) && x.cents.length === 12
+              && x.cents.every((c, i) => Math.abs(c - t.custom_cents[i]) < 0.01));
+          }
         }
         if (idx >= 0) {
           selectedTemperament = idx;
-          if (pushToBackend) await invoke('set_temperament', { noteOffsets: temperaments[idx].cents, fineTune, name: temperaments[idx].name });
+          if (pushToBackend) await invoke('set_temperament', { noteOffsets: temperaments[idx].cents, fineTune, name: temperaments[idx].name, retune: !temperaments[idx].original });
         } else if (Array.isArray(t.custom_cents)) {
           customCents = [...t.custom_cents];
-          if (pushToBackend) await invoke('set_temperament', { noteOffsets: t.custom_cents, fineTune, name: t.name || 'Aangepast' });
+          if (pushToBackend) await invoke('set_temperament', { noteOffsets: t.custom_cents, fineTune, name: t.name || 'Aangepast', retune: true });
         }
       } else {
-        // Geen opgeslagen stemming → default (gelijkzwevend) toepassen i.p.v. die van het vorige orgel.
+        // Geen opgeslagen stemming → default (Origineel, zoals opgenomen) toepassen i.p.v. die van het vorige orgel.
         selectedTemperament = 0;
         fineTune = 0;
         const t0 = temperaments[0];
-        if (pushToBackend) await invoke('set_temperament', { noteOffsets: t0.cents, fineTune: 0, name: t0.name });
+        if (pushToBackend) await invoke('set_temperament', { noteOffsets: t0.cents, fineTune: 0, name: t0.name, retune: false });
       }
 
       // EQ: nieuw banden-formaat, of migratie vanuit het oude 3-band formaat.
@@ -2109,6 +2381,36 @@
       const so = localStorage.getItem(`jm-orgue-stop-order-${organInfo.id || 'default'}`) || '{}';
       if (so !== JSON.stringify(stopOrder)) stopOrder = JSON.parse(so);
     } catch (e) {}
+    // Crescendo-matrix/aan-uit uit de backend (bewerkt in een ander venster,
+    // piston 41, of de pedaal).
+    pollCrescendoConfig();
+  }
+
+  // ===== Afstandsbediening in het netwerk (0.7.38) =====
+  // Instellingenblok (Algemene Instellingen): schakelaar, poort, URL('s), QR,
+  // nieuw token. Alleen het hoofdvenster laadt/pollt dit (niet in PanelApp).
+  let remote = { enabled: false, running: false, port: 8766, token: '', urls: [], qr_svg: null, error: null };
+  let remotePortInput = 8766;
+  let remoteBusy = false;
+  let unlistenRemoteVol = null;
+  async function refreshRemote() {
+    try {
+      remote = await invoke('get_remote_status');
+      remotePortInput = remote.port;
+    } catch (e) { console.warn('get_remote_status:', e); }
+  }
+  async function setRemoteEnabled(on) {
+    remoteBusy = true;
+    try {
+      remote = await invoke('set_remote_enabled', { enabled: on, port: Number(remotePortInput) || 8766 });
+    } catch (e) {
+      remote = { ...remote, enabled: false, running: false, error: String(e) };
+    } finally { remoteBusy = false; }
+  }
+  async function newRemoteToken() {
+    if (!confirm(tx('remote.new_token_confirm'))) return;
+    try { remote = await invoke('new_remote_token'); }
+    catch (e) { remote = { ...remote, error: String(e) }; }
   }
 
   onMount(() => {
@@ -2122,6 +2424,19 @@
     // registerscherm gestart/gestopt worden en moet hier zichtbaar blijven.
     recorderPoll = setInterval(() => { pollRecorder(); pollMidiRec(); }, 500);
     sharedPrefsInterval = setInterval(refreshSharedPrefs, 1000);
+    if (!secondary) {
+      // Volume-event van de afstandsbediening: slider volgt zonder echo naar de
+      // backend (die heeft master_volume_db al; dispatch('volumeChange') niet nodig).
+      (async () => {
+        try {
+          unlistenRemoteVol = await listen('jm-orgue:remote-master-volume', (e) => {
+            const db = e.payload && e.payload.db;
+            if (typeof db === 'number') volume = db;
+          });
+        } catch (e) {}
+      })();
+      refreshRemote();
+    }
   });
 
   onDestroy(() => {
@@ -2129,8 +2444,10 @@
     if (swellPollInterval) clearInterval(swellPollInterval);
     if (recorderPoll) clearInterval(recorderPoll);
     if (midiRecPoll) clearInterval(midiRecPoll);
+    if (archivePoll) clearInterval(archivePoll);
     if (crescLivePoll) clearInterval(crescLivePoll);
     if (sharedPrefsInterval) clearInterval(sharedPrefsInterval);
+    if (unlistenRemoteVol) unlistenRemoteVol();
   });
 
   // Live crescendo-pedaalstand volgen: werkt de balk bij terwijl de gebruiker het
@@ -2153,8 +2470,10 @@
         crescLiveEnabled = r[0];
         crescLiveStage = r[1];
         crescLiveTotal = r[2];
-        // Houd de bewerk-balk in sync met de werkelijke (pedaal-gestuurde) stand.
+        // Houd de bewerk-balk in sync met de werkelijke (pedaal-gestuurde) stand
+        // én de aan/uit-stand (piston/paneel) — zonder terug te schrijven.
         crescendoStage = r[1];
+        if (r[0] !== crescendoEnabled && Date.now() >= crescDirtyUntil) crescendoEnabled = r[0];
       }
     } catch (e) {}
   }
@@ -3727,6 +4046,7 @@
           organInfo={displayOrgan}
           consumeMidiTriggers={!secondary}
           on:externalAction={(e) => handleExternalAction(e.detail.actionCode)}
+          on:learnCrescendo={() => learnPedalFlow('crescendo')}
         />
       </div>
 
@@ -3767,6 +4087,18 @@
                     <option value={i}>{tp.names?.[$locale] ?? tp.nameDutch ?? tp.name}</option>
                   {/each}
                 </select>
+                <!-- Hertemperen op gemeten pijptoonhoogte: indicator + uitleg per modus -->
+                <div class="temperament-hint">
+                  {#if organInfo?.retune_pipes > 0}
+                    {$t('settings.temperament_measured')
+                      .replace('{n}', Number(organInfo.retune_pipes).toLocaleString($locale))
+                      .replace('{total}', Number(organInfo.retune_total).toLocaleString($locale))}
+                  {:else}
+                    {$t('settings.temperament_no_measured')}
+                  {/if}
+                  <br/>
+                  {temperaments[selectedTemperament]?.original ? $t('settings.temperament_original_hint') : $t('settings.temperament_retune_hint')}
+                </div>
               </div>
               <div class="slider-control">
                 <div class="slider-header">
@@ -4062,13 +4394,60 @@
               {/each}
             </div>
 
+            <!-- Perspectieven en gestapelde ranks (0.7.38) -->
+            {#if !secondary && ((organInfo?.perspectives?.length || 0) > 0 || (organInfo?.layered_stops || 0) > 0)}
+            <div class="settings-block">
+              <h3 class="settings-block-title">{$t('perspectives.title')}</h3>
+              {#if (organInfo?.layered_stops || 0) > 0}
+                <p class="settings-hint" style="margin: 0 0 0.4rem;">{$t('perspectives.stacked_note').replace('{n}', organInfo.layered_stops)}</p>
+              {/if}
+              {#if perspectives.length > 0}
+                <p class="settings-hint" style="margin: 0 0 0.4rem;">{$t('perspectives.desc')}</p>
+                {#each perspectives as p (p.name)}
+                  <div class="slider-control">
+                    <div class="slider-header">
+                      <label class="swell-toggle" style="display:flex; align-items:center; gap:0.4rem;" title={$t('perspectives.enabled')}>
+                        <input type="checkbox" checked={p.enabled} on:change={(e) => setPerspectiveEnabled(p.name, e.target.checked)} />
+                        <span class="slider-label">{p.name}</span>
+                      </label>
+                      <span class="slider-value">
+                        {$t('perspectives.pipes').replace('{n}', p.pipe_count)}
+                        {#if p.loaded}
+                          · {p.gain_db} dB
+                        {:else}
+                          · {$t('perspectives.not_loaded')} · {$t('perspectives.ram_hint').replace('{mb}', Math.round(p.pipe_count * 0.75))}
+                        {/if}
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min="-24"
+                      max="6"
+                      step="0.5"
+                      value={p.gain_db}
+                      disabled={!p.loaded}
+                      title={$t('perspectives.gain')}
+                      on:input={(e) => setPerspectiveGain(p.name, e.target.value)}
+                    />
+                  </div>
+                {/each}
+              {:else}
+                <p class="settings-hint" style="margin: 0;">{$t('perspectives.none')}</p>
+              {/if}
+              {#if perspReloadHint}
+                <p style="margin: 0.2rem 0 0; font-size: 0.68rem; color: var(--warning, #d9a441); line-height: 1.35;">{$t('perspectives.reload_hint')}</p>
+                <button class="btn btn-sm" style="margin-top: 0.3rem;" on:click={reloadCurrentOrgan}>{$t('perspectives.reload_now')}</button>
+              {/if}
+            </div>
+            {/if}
+
             <!-- Crescendo -->
             <div class="settings-block">
               <h3 class="settings-block-title">{$t('settings.crescendo')}</h3>
               <div style="display:flex; align-items:center; gap:0.5rem;">
                 <label class="swell-toggle">
-                  <input type="checkbox" bind:checked={crescendoEnabled}
-                    on:change={() => saveCrescendo()}
+                  <input type="checkbox" checked={crescendoEnabled}
+                    on:change={(e) => setCrescendoEnabledUI(e.target.checked)}
                   />
                   <span class="swell-toggle-label">{$t('settings.crescendo_enabled')}</span>
                 </label>
@@ -4091,7 +4470,7 @@
                 <div style="margin-top: 0.5rem;">
                   <div class="swell-config-row" style="margin-bottom: 0.5rem;">
                     <span class="swell-config-label">{$t('settings.crescendo_steps')}</span>
-                    <select style="flex:1; font-size: 0.8rem;" bind:value={crescendoNumStages} on:change={() => { crescendoStages = ensureCrescStages(); saveCrescendo(); }}>
+                    <select style="flex:1; font-size: 0.8rem;" value={crescendoNumStages} on:change={(e) => setCrescendoNumStagesUI(parseInt(e.target.value, 10) || 15)}>
                       {#each [8, 12, 15, 20, 24, 32] as n}
                         <option value={n}>{n}</option>
                       {/each}
@@ -4111,7 +4490,7 @@
                       <div
                         class="crescendo-step"
                         class:active={i < crescendoStage}
-                        on:click={() => setCrescendoStage(i + 1)}
+                        on:click={() => setCrescendoStage(i + 1 === crescendoStage ? 0 : i + 1)}
                         title={$t('crescendo.step_title').replace('{n}', i + 1).replace('{count}', crescendoStages[i] ? crescendoStages[i].length : 0)}
                       ></div>
                     {/each}
@@ -4138,7 +4517,7 @@
                               <th
                                 class="cresc-step-h"
                                 class:active={s + 1 === crescendoStage}
-                                on:click={() => setCrescendoStage(s + 1)}
+                                on:click={() => setCrescendoStage(s + 1 === crescendoStage ? 0 : s + 1)}
                                 title={$t('crescendo.step_preview_title').replace('{n}', s + 1)}
                               >{s + 1}</th>
                             {/each}
@@ -4200,6 +4579,7 @@
                   <button class="btn btn-secondary midi-learn-btn" style="width: 100%; margin-top: 0.5rem;"
                     class:learning={crescendoLearning}
                     on:click={learnCrescendoPedal}
+                    disabled={crescendoLearning || learningSwellDivision !== null}
                   >
                     {#if crescendoLearning}
                       <span class="learning-indicator"></span> {$t('settings.crescendo_learning')}
@@ -4456,7 +4836,7 @@
                         class="btn btn-secondary midi-learn-btn swell-learn-btn"
                         class:learning={learningSwellDivision === division.name}
                         on:click={() => learnSwellPedal(division.name)}
-                        disabled={learningSwellDivision !== null && learningSwellDivision !== division.name}
+                        disabled={learningSwellDivision !== null || crescendoLearning}
                       >
                         {#if learningSwellDivision === division.name}
                           <span class="learning-indicator"></span>
@@ -5128,6 +5508,104 @@
                 </label>
               </div>
 
+              <!-- Automatisch MIDI-archief (0.7.38) -->
+              <div style="margin-top: 0.85rem; padding-top: 0.75rem; border-top: var(--border-subtle);">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.4rem;">
+                  <span style="font-size:0.8rem; color:var(--text-secondary); font-weight:500;">{$t('midi_archive.title')}</span>
+                  <span style="display:flex; align-items:center; gap:0.4rem; font-size:0.72rem; color:var(--text-muted);">
+                    <span class="record-dot" class:on={archiveStatus.archiving}></span>
+                    {#if !archiveCfg.enabled}
+                      {$t('midi_archive.status_off')}
+                    {:else if archiveStatus.archiving}
+                      {$t('midi_archive.status_archiving').replace('{n}', String(archiveStatus.event_count)).replace('{t}', formatSeconds(archiveStatus.seconds))}
+                    {:else}
+                      {$t('midi_archive.status_idle')}
+                    {/if}
+                  </span>
+                </div>
+                <div style="font-size:0.72rem; color:var(--text-muted); margin-bottom:0.4rem;">{$t('midi_archive.subtitle')}</div>
+                <label class="swell-toggle" title={$t('midi_archive.enabled_title')}>
+                  <input
+                    type="checkbox"
+                    checked={archiveCfg.enabled}
+                    on:change={(e) => { archiveCfg.enabled = e.target.checked; saveArchiveConfig(); }}
+                  />
+                  <span>{$t('midi_archive.enabled')}</span>
+                </label>
+                <div class="audio-select-row" style="margin-top:0.5rem;">
+                  <label class="audio-select-label">{$t('midi_archive.folder')}</label>
+                  <span style="flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:0.75rem;" title={archiveCfg.dir}>{archiveCfg.dir}</span>
+                  <button class="btn btn-ghost btn-sm" on:click={chooseArchiveDir}>{$t('midi_archive.folder_choose')}</button>
+                  <button class="btn btn-ghost btn-sm" on:click={openArchiveDir}>{$t('midi_archive.folder_open')}</button>
+                  {#if !archiveCfg.dir_is_default}
+                    <button class="btn btn-ghost btn-sm" on:click={resetArchiveDir}>{$t('midi_archive.folder_default')}</button>
+                  {/if}
+                </div>
+                <!-- Eigen flex-rij (niet .audio-select-row: die zet flex:1 op inputs) -->
+                <div style="display:flex; align-items:center; gap:0.6rem; margin-top:0.4rem; flex-wrap:wrap;" title={$t('midi_archive.limits_title')}>
+                  <label class="audio-select-label" for="archive-silence">{$t('midi_archive.silence')}</label>
+                  <input id="archive-silence" type="number" min="3" max="600" step="1" style="width:4.5rem;" bind:value={archiveCfg.silence_secs} on:change={saveArchiveConfig} />
+                  <label class="audio-select-label" for="archive-min-notes">{$t('midi_archive.min_notes')}</label>
+                  <input id="archive-min-notes" type="number" min="0" max="100" step="1" style="width:4rem;" bind:value={archiveCfg.min_notes} on:change={saveArchiveConfig} />
+                  <label class="audio-select-label" for="archive-min-secs">{$t('midi_archive.min_secs')}</label>
+                  <input id="archive-min-secs" type="number" min="0" max="600" step="1" style="width:4.5rem;" bind:value={archiveCfg.min_secs} on:change={saveArchiveConfig} />
+                </div>
+                {#if archiveStatus.last_error}
+                  <div style="font-size:0.72rem; color:var(--error); margin-top:0.3rem;">{archiveStatus.last_error}</div>
+                {/if}
+                <div style="margin-top:0.6rem; font-size:0.75rem; color:var(--text-secondary);">{$t('midi_archive.recent')}</div>
+                {#if archiveFiles.length === 0}
+                  <div style="font-size:0.72rem; color:var(--text-muted);">{$t('midi_archive.empty')}</div>
+                {:else}
+                  <div style="display:flex; flex-direction:column; gap:0.2rem; margin-top:0.3rem;">
+                    {#each archiveFiles as f (f.path)}
+                      <div style="display:flex; align-items:center; gap:0.5rem; font-size:0.75rem;">
+                        <span style="flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title={f.path}>{f.name}</span>
+                        <span style="color:var(--text-muted); white-space:nowrap;">{fmtEpoch(f.modified_epoch)} · {Math.max(1, Math.round(f.size_bytes / 1024))} kB</span>
+                        <button class="btn btn-ghost btn-sm" on:click={() => playArchiveFile(f)}>{$t('midi_archive.play')}</button>
+                        <button class="btn btn-ghost btn-sm" on:click={() => deleteArchiveFile(f)}>{$t('midi_archive.delete')}</button>
+                      </div>
+                    {/each}
+                  </div>
+                {/if}
+              </div>
+
+              <!-- Afstandsbediening in het netwerk (0.7.38) -->
+              <div style="margin-top: 0.85rem; padding-top: 0.75rem; border-top: var(--border-subtle);">
+                <label class="swell-toggle" title={$t('remote.enable_title')}>
+                  <input
+                    type="checkbox"
+                    checked={remote.enabled}
+                    disabled={remoteBusy}
+                    on:change={(e) => setRemoteEnabled(e.target.checked)}
+                  />
+                  <span>{$t('remote.enable')}</span>
+                </label>
+                <div style="display:flex; align-items:center; gap:0.5rem; margin-top:0.4rem; flex-wrap:wrap;">
+                  <span style="font-size:0.8rem; color:var(--text-secondary);">{$t('remote.port')}</span>
+                  <input type="number" min="1024" max="65535" bind:value={remotePortInput} disabled={remote.enabled} style="width:6rem;" />
+                  <button class="btn btn-ghost btn-sm" on:click={newRemoteToken}>{$t('remote.new_token')}</button>
+                  <span style="font-size:0.75rem; color:{remote.running ? 'var(--success)' : 'var(--text-muted)'};">{remote.running ? $t('remote.running') : $t('remote.stopped')}</span>
+                </div>
+                {#if remote.enabled && remote.running}
+                  <div style="margin-top:0.4rem; font-size:0.8rem; color:var(--text-secondary);">{$t('remote.url_label')}</div>
+                  {#each remote.urls as u}
+                    <div style="font-family:'JetBrains Mono',monospace; font-size:0.85rem; user-select:text;">{u}</div>
+                  {/each}
+                  {#if remote.urls.length === 0}
+                    <p style="margin:0.2rem 0 0; font-size:0.75rem; color:var(--text-muted);">{$t('remote.no_lan_ip')}</p>
+                  {/if}
+                  {#if remote.qr_svg}
+                    <!-- {@html} is veilig: de SVG komt uit de eigen qrcode-crate, niet uit gebruikersinvoer. -->
+                    <div style="background:#fff; padding:8px; width:196px; border-radius:6px; margin-top:0.4rem;">{@html remote.qr_svg}</div>
+                  {/if}
+                {/if}
+                {#if remote.error}
+                  <p style="margin:0.3rem 0 0; font-size:0.75rem; color:var(--error);">{remote.error}</p>
+                {/if}
+                <p style="margin:0.4rem 0 0; font-size:0.7rem; color:var(--text-muted); line-height:1.4;">{$t('remote.hint')}</p>
+              </div>
+
               <!-- Sample Rate info -->
               <div style="margin-top: 0.85rem; padding-top: 0.75rem; border-top: var(--border-subtle);">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem;">
@@ -5608,9 +6086,9 @@
       {/if}
       <div class="kb-learn-knoppen">
         {#if pedalLearnModal.step === 'fout'}
-          <button class="btn btn-secondary btn-sm" on:click={() => { const k = pedalLearnModal.kind; const d = pedalLearnModal.division; pedalLearnModal = null; learnPedalFlow(k, d); }}>{$t('learn.retry')}</button>
+          <button class="btn btn-secondary btn-sm" on:click={async () => { const k = pedalLearnModal.kind; const d = pedalLearnModal.division; pedalLearnModal = null; await cancelPedalLearn(); learnPedalFlow(k, d); }}>{$t('learn.retry')}</button>
         {/if}
-        <button class="btn btn-ghost btn-sm" on:click={() => pedalLearnModal = null}>
+        <button class="btn btn-ghost btn-sm" on:click={() => { const klaar = pedalLearnModal.step === 'klaar'; pedalLearnModal = null; if (!klaar) cancelPedalLearn(); }}>
           {pedalLearnModal.step === 'klaar' ? $t('actions.close') : $t('actions.cancel')}
         </button>
       </div>

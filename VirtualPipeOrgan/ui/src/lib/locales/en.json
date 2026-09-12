@@ -119,6 +119,10 @@
     "temperament_custom_close": "Close",
     "temperament_fine_tune": "Fine tuning",
     "temperament_a4": "A4 reference",
+    "temperament_original_hint": "Original: the samples sound as recorded (sample-set PitchTuning applied, no retuning).",
+    "temperament_retune_hint": "Retuning: every pipe is tuned from its measured pitch to the selected temperament (as in GrandOrgue); celestes keep their intended detuning.",
+    "temperament_measured": "This set has measured pipe pitches ({n} of {total} pipes).",
+    "temperament_no_measured": "No measured pipe pitches in this set — 'Equal temperament' sounds the same as 'Original'; other temperaments are applied as offsets on the recording.",
     "swell_box": "Swell box",
     "transpose": "Transpose",
     "pan": "Pan",
@@ -242,6 +246,19 @@
     "loops_skipped": "skipped",
     "polyphony_default": "default"
   },
+  "perspectives": {
+    "title": "Perspectives and stacked ranks",
+    "desc": "This sample set has several microphone positions. Choose which ones to load (uses memory) and mix them per position.",
+    "enabled": "Load",
+    "gain": "Volume (dB)",
+    "pipes": "{n} pipes",
+    "ram_hint": "≈ {mb} MB extra when loaded",
+    "not_loaded": "Not loaded",
+    "stacked_note": "{n} stops consist of several ranks (e.g. mixtures); those always sound in full.",
+    "reload_hint": "The choice of loaded perspectives takes effect after reloading the organ.",
+    "reload_now": "Reload organ",
+    "none": "This organ has a single perspective."
+  },
   "stops": {
     "tremulant": "Tremulant",
     "drawn": "engaged",
@@ -322,7 +339,9 @@
     "midi_disconnected": "MIDI disconnected",
     "voices": "voices",
     "version": "v{version}",
-    "load_title": "Sounding voices / polyphony limit · audio thread load"
+    "load_title": "Sounding voices / polyphony limit · audio thread load",
+    "archiving": "MIDI archive",
+    "archiving_title": "The automatic MIDI archive is capturing your playing; the file is saved after the silence period."
   },
   "actions": {
     "save": "Save",
@@ -548,6 +567,29 @@
     "midi_error": "MIDI recording error: {error}",
     "play_failed": "Playback failed: {error}"
   },
+  "midi_archive": {
+    "title": "Automatic MIDI archive",
+    "subtitle": "Silently captures everything you play as a .mid file: starts at the first note, stops after silence. Notes only — draw the stops yourself when playing back.",
+    "enabled": "Enable MIDI archive",
+    "enabled_title": "On: every playing session is saved automatically as .mid in the archive folder. Off: manual MIDI recording only.",
+    "folder": "Folder",
+    "folder_choose": "Choose…",
+    "folder_open": "Open folder",
+    "folder_default": "Default",
+    "silence": "Silence (s)",
+    "min_notes": "Min. notes",
+    "min_secs": "Min. length (s)",
+    "limits_title": "Silence: the file is closed after this many seconds without a key press. Min. notes / min. length: shorter takes (an accidental key press) are not kept.",
+    "status_off": "Off",
+    "status_idle": "Waiting for the first note",
+    "status_archiving": "Archiving · {n} events · {t}",
+    "recent": "Recent archive files",
+    "empty": "No archive files yet.",
+    "play": "Play",
+    "delete": "Delete",
+    "delete_confirm": "Permanently delete archive file {name}?",
+    "error": "MIDI archive error: {error}"
+  },
   "notation": {
     "live_window_title": "JM-Orgue - Live notation",
     "open_failed": "Could not open the notation window.",
@@ -717,6 +759,7 @@
   "learn": {
     "pedal_timeout_low": "No pedal movement received (20 s time-out). Move the pedal to its lowest position and hold it still there.",
     "pedal_timeout_high": "No highest position received (20 s time-out).",
+    "pedal_range_too_small": "The lowest and highest positions are too close together (fewer than 8 CC steps). Move the pedal from fully closed to fully open and try again.",
     "pedal_result": "CC {cc} · MIDI channel {channel}",
     "key_timeout_first": "No key received (20 s time-out).",
     "key_timeout_second": "No second key received (20 s time-out).",
@@ -798,6 +841,7 @@
   },
   "crescendo": {
     "learn_enable_title": "MIDI learn for Crescendo on/off ({n}/4)",
+    "shrink_confirm": "Fewer steps ({old} → {new}): the stops in the steps above {new} will be lost. Continue?",
     "autofill": "Auto-fill",
     "autofill_title": "Distribute all stops automatically over the steps (ascending)",
     "clear_title": "Clear all steps",
@@ -885,5 +929,17 @@
     "auto_load_last_organ_title": "On: the last opened organ is loaded automatically when the app starts. Off: the app opens with the organ selection.",
     "restore_registration": "Restore the last registration when opening",
     "restore_registration_title": "On: when an organ is opened, the last drawn stops come back. Off: clean start (no stops on)."
+  },
+  "remote": {
+    "enable": "Network remote control (tablet/phone)",
+    "enable_title": "On: JM-Orgue listens on all network adapters. Open the address or scan the QR code on a tablet or phone in the same (Wi-Fi) network to control stops, couplers, tremulant, setzer and volume remotely. Off: no network access.",
+    "port": "Port",
+    "new_token": "New token",
+    "new_token_confirm": "Create a new token? Previously scanned QR codes and saved addresses will stop working.",
+    "url_label": "Address for tablet/phone (or scan the QR code):",
+    "no_lan_ip": "No network address found — is this PC connected to Wi-Fi or a network cable?",
+    "running": "Running",
+    "stopped": "Not running",
+    "hint": "The first time, Windows Firewall asks whether JM-Orgue may accept connections: choose 'Allow access' for private networks. Declined it? Enable it via Windows Security → Firewall → 'Allow an app through firewall' (JM-Orgue, Private). The address only works inside your own (Wi-Fi) network and is not encrypted; do not share the token and create a new token to revoke access."
   }
 }

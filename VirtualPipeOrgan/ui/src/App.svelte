@@ -382,6 +382,8 @@
               await saveMainGeometry();
               const rec = await invoke('get_recording_status').catch(() => null);
               if (rec && rec.recording) { await invoke('stop_recording').catch(() => {}); }
+              // Automatisch MIDI-archief: lopende take nu wegschrijven (synchroon, enkele ms).
+              await invoke('midi_archive_flush').catch(() => {});
               await flushAutoSave();
               await persistOrganSettings();
               await closeExtraPanels();
@@ -895,7 +897,8 @@
         audioHost: s.audio_host,
         audioDevice: s.audio_device,
         channels: s.channels,
-        bufferFrames: s.buffer_frames
+        bufferFrames: s.buffer_frames,
+        midiArchiving: s.midi_archiving
       };
     } catch (e) {
       // Ignore polling errors
@@ -1069,17 +1072,11 @@
     }
   }
 
-  // Crescendo-stap uit de UI toepassen: de backend zet bij een klik alleen de
-  // trap-teller en geeft de doelregisters terug (Console dispatcht die hierheen).
-  // Toepassen gaat via hetzelfde patroon als preset-herstel in SetzerBar:
-  // set_drawn_stops + organ-info verversen.
-  async function applyCrescendoStage(stopIds) {
+  // Registratie direct verversen na een backend-mutatie die de 300 ms-poll
+  // niet mag afwachten (crescendo-trap/aan-uit vanuit de Console). De backend
+  // past de trede zelf additief toe (apply_crescendo_stage); hier alleen lezen.
+  async function refreshOrganInfoNow() {
     try {
-      // Crescendostappen kunnen ook koppels bevatten ("coupler_"-prefix).
-      const stops = stopIds.filter(id => !id.startsWith('coupler_'));
-      const couplers = stopIds.filter(id => id.startsWith('coupler_'));
-      await invoke('set_drawn_stops', { stopIds: stops });
-      await invoke('set_active_couplers', { couplerIds: couplers });
       organInfo = await invoke('get_organ_info');
       lastOrganInfoJson = null;
     } catch (e) {
@@ -1162,6 +1159,8 @@
       await persistOrganSettings();
       await closeExtraPanels();
     } catch (e) {}
+    // Automatisch MIDI-archief: lopende take nog wegschrijven vóór de computer uitgaat.
+    try { await invoke('midi_archive_flush'); } catch (e) {}
     try { await invoke('shutdown_computer'); }
     catch (e) { error = tx('errors.shutdown_failed').replace('{error}', String(e)); }
   }
@@ -1344,7 +1343,7 @@
       on:toggleStop={(e) => toggleStop(e.detail)}
       on:toggleCoupler={(e) => toggleCoupler(e.detail)}
       on:divisionChannelsChanged={syncActiveProfileChannels}
-      on:crescendoChange={(e) => applyCrescendoStage(e.detail)}
+      on:refreshOrgan={refreshOrganInfoNow}
       on:refreshDevices={refreshDevices}
       on:refresh={refreshDevices}
       on:setView={(e) => activeView = e.detail}

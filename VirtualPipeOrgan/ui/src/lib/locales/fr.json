@@ -119,6 +119,10 @@
     "temperament_custom_close": "Fermer",
     "temperament_fine_tune": "Accord fin",
     "temperament_a4": "Référence A4",
+    "temperament_original_hint": "Original : les échantillons sonnent tels qu'enregistrés (PitchTuning de l'ensemble appliqué, pas de retempérament).",
+    "temperament_retune_hint": "Retempérament : chaque tuyau est accordé de sa hauteur mesurée vers le tempérament choisi (comme GrandOrgue) ; les célestes gardent leur désaccord voulu.",
+    "temperament_measured": "Cet ensemble contient des hauteurs de tuyaux mesurées ({n} tuyaux sur {total}).",
+    "temperament_no_measured": "Aucune hauteur de tuyau mesurée dans cet ensemble — « Tempérament égal » sonne comme « Original » ; les autres tempéraments sont appliqués comme décalages sur l'enregistrement.",
     "swell_box": "Boîte expressive",
     "transpose": "Transposer",
     "pan": "Panoramique",
@@ -242,6 +246,19 @@
     "loops_skipped": "ignorés",
     "polyphony_default": "par défaut"
   },
+  "perspectives": {
+    "title": "Perspectives et rangs superposés",
+    "desc": "Cet ensemble d'échantillons comporte plusieurs positions de micro. Choisissez celles à charger (mémoire) et dosez-les par position.",
+    "enabled": "Charger",
+    "gain": "Volume (dB)",
+    "pipes": "{n} tuyaux",
+    "ram_hint": "≈ {mb} Mo de plus au chargement",
+    "not_loaded": "Non chargé",
+    "stacked_note": "{n} jeux sont composés de plusieurs rangs (p. ex. mixtures) ; ils sonnent toujours au complet.",
+    "reload_hint": "Le choix des perspectives chargées prend effet après le rechargement de l'orgue.",
+    "reload_now": "Recharger l'orgue",
+    "none": "Cet orgue n'a qu'une seule perspective."
+  },
   "stops": {
     "tremulant": "Trémulant",
     "drawn": "tiré",
@@ -322,7 +339,9 @@
     "midi_disconnected": "MIDI déconnecté",
     "voices": "voix",
     "version": "v{version}",
-    "load_title": "Voix actives / limite de polyphonie · charge du thread audio"
+    "load_title": "Voix actives / limite de polyphonie · charge du thread audio",
+    "archiving": "Archive MIDI",
+    "archiving_title": "L'archive MIDI automatique enregistre votre jeu ; le fichier est sauvegardé après la période de silence."
   },
   "actions": {
     "save": "Enregistrer",
@@ -548,6 +567,29 @@
     "midi_error": "Erreur d'enregistrement MIDI : {error}",
     "play_failed": "Échec de la lecture : {error}"
   },
+  "midi_archive": {
+    "title": "Archive MIDI automatique",
+    "subtitle": "Enregistre en arrière-plan tout ce que vous jouez dans un fichier .mid : démarre à la première note, s'arrête après un silence. Notes uniquement — tirez vous-même les jeux à la lecture.",
+    "enabled": "Activer l'archive MIDI",
+    "enabled_title": "Activé : chaque session de jeu est enregistrée automatiquement en .mid dans le dossier d'archive. Désactivé : enregistrement MIDI manuel uniquement.",
+    "folder": "Dossier",
+    "folder_choose": "Choisir…",
+    "folder_open": "Ouvrir le dossier",
+    "folder_default": "Par défaut",
+    "silence": "Silence (s)",
+    "min_notes": "Notes min.",
+    "min_secs": "Durée min. (s)",
+    "limits_title": "Silence : le fichier est clôturé après ce nombre de secondes sans touche enfoncée. Notes min. / durée min. : les prises plus courtes (touche effleurée par accident) ne sont pas conservées.",
+    "status_off": "Désactivé",
+    "status_idle": "En attente de la première note",
+    "status_archiving": "Archivage · {n} événements · {t}",
+    "recent": "Derniers fichiers archivés",
+    "empty": "Aucun fichier archivé pour l'instant.",
+    "play": "Lire",
+    "delete": "Supprimer",
+    "delete_confirm": "Supprimer définitivement le fichier d'archive {name} ?",
+    "error": "Erreur d'archive MIDI : {error}"
+  },
   "notation": {
     "live_window_title": "JM-Orgue - Notation en direct",
     "open_failed": "Impossible d'ouvrir la fenêtre de notation.",
@@ -717,6 +759,7 @@
   "learn": {
     "pedal_timeout_low": "Aucun mouvement de pédale reçu (délai de 20 s dépassé). Placez la pédale en position basse et maintenez-la immobile.",
     "pedal_timeout_high": "Position haute non reçue (délai de 20 s dépassé).",
+    "pedal_range_too_small": "Les positions basse et haute sont trop proches (moins de 8 pas CC). Déplacez la pédale de complètement fermée à complètement ouverte et réessayez.",
     "pedal_result": "CC {cc} · canal MIDI {channel}",
     "key_timeout_first": "Aucune touche reçue (délai de 20 s dépassé).",
     "key_timeout_second": "Aucune seconde touche reçue (délai de 20 s dépassé).",
@@ -798,6 +841,7 @@
   },
   "crescendo": {
     "learn_enable_title": "Apprentissage MIDI pour le crescendo marche/arrêt ({n}/4)",
+    "shrink_confirm": "Moins de pas ({old} → {new}) : les jeux des pas au-dessus de {new} seront perdus. Continuer ?",
     "autofill": "Remplissage auto",
     "autofill_title": "Répartir automatiquement tous les jeux sur les étapes (croissant)",
     "clear_title": "Vider toutes les étapes",
@@ -885,5 +929,17 @@
     "auto_load_last_organ_title": "Activé : au démarrage de l'application, le dernier orgue ouvert est chargé automatiquement. Désactivé : l'application s'ouvre sur le choix de l'orgue.",
     "restore_registration": "Restaurer la dernière registration à l'ouverture",
     "restore_registration_title": "Activé : à l'ouverture d'un orgue, les derniers jeux tirés reviennent. Désactivé : départ propre (aucun jeu tiré)."
+  },
+  "remote": {
+    "enable": "Télécommande sur le réseau (tablette/téléphone)",
+    "enable_title": "Activé : JM-Orgue écoute sur toutes les cartes réseau. Ouvrez l'adresse ou scannez le code QR sur une tablette ou un téléphone du même réseau (Wi-Fi) pour commander à distance les jeux, accouplements, tremblant, combinateur et volume. Désactivé : aucun accès depuis le réseau.",
+    "port": "Port",
+    "new_token": "Nouveau jeton",
+    "new_token_confirm": "Créer un nouveau jeton ? Les codes QR déjà scannés et les adresses enregistrées ne fonctionneront plus.",
+    "url_label": "Adresse pour tablette/téléphone (ou scannez le code QR) :",
+    "no_lan_ip": "Aucune adresse réseau trouvée — ce PC est-il connecté au Wi-Fi ou par câble réseau ?",
+    "running": "Actif",
+    "stopped": "Inactif",
+    "hint": "La première fois, le pare-feu Windows demande si JM-Orgue peut accepter des connexions : choisissez « Autoriser l'accès » pour les réseaux privés. Refusé ? Activez-le via Sécurité Windows → Pare-feu → « Autoriser une application via le pare-feu » (JM-Orgue, Privé). L'adresse ne fonctionne que dans votre propre réseau (Wi-Fi), sans chiffrement ; ne partagez pas le jeton et créez un nouveau jeton pour révoquer l'accès."
   }
 }

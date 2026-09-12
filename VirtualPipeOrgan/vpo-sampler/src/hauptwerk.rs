@@ -24,7 +24,11 @@
 //! - de tremulant-laag (PipeLayerNumber 2, "tremmed" opnamen zoals in
 //!   Saint-Jean-de-Luz) → [`PipeExtra::tremulant_sample`];
 //! - zwelkasten (`Enclosure`/`EnclosurePipe`) → per kast een [`WindchestDef`]
-//!   met `enclosure_ids`, en `windchest_group` op de omkaste stops.
+//!   met `enclosure_ids`, en `windchest_group` op de omkaste stops;
+//! - microfoonperspectieven: een stop met meerdere StopRanks over dezelfde
+//!   noten (SJDL: "(front)/(rear)/(dry)") krijgt per extra StopRank een
+//!   [`PipeLayer`] met een canoniek perspectief-label (perspective.rs); de
+//!   eerste StopRank in documentvolgorde is laag 0 / `primary_perspective`.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -33,7 +37,7 @@ use tracing::{info, warn};
 
 use crate::grandorgue::{
     CouplerDef, EnclosureDef, ManualDef, OdfError, OrganDefinition, OrganInfo, PipeDef,
-    PipeExtra, ReleaseDef, StopDef, WindchestDef,
+    PipeExtra, PipeLayer, ReleaseDef, StopDef, WindchestDef,
 };
 
 /// Load a Hauptwerk organ definition and translate it to an [`OrganDefinition`].
@@ -88,6 +92,7 @@ fn build_definition(
     let divisions = extract_objects(xml, "Division");
     let stops = extract_objects(xml, "Stop");
     let stopranks = extract_objects(xml, "StopRank");
+    let ranks_xml = extract_objects(xml, "Rank");
     let pipes = extract_objects(xml, "Pipe_SoundEngine01");
     let layers = extract_objects(xml, "Pipe_SoundEngine01_Layer");
     let attack_samples = extract_objects(xml, "Pipe_SoundEngine01_AttackSample");
@@ -115,6 +120,14 @@ fn build_definition(
             pipes_by_rank.entry(rid).or_default().insert(note, pid);
         }
     }
+    // rank_id -> Rank-Name (SJDL: "01. GO  Bourdon 16 (front)"); terugval voor
+    // de perspectiefdetectie wanneer de StopRank zelf geen Name draagt.
+    let mut rank_name: HashMap<u32, String> = HashMap::new();
+    for r in &ranks_xml {
+        if let (Some(rid), Some(n)) = (r.get_u32("RankID"), r.get("Name")) {
+            rank_name.entry(rid).or_insert_with(|| n.clone());
+        }
+    }
     // rank_id -> base pitch harmonic (from its first pipe), for footage display
     let mut rank_harmonic: HashMap<u32, u32> = HashMap::new();
     for p in &pipes {
@@ -123,6 +136,27 @@ fn build_definition(
             p.get_u32("Pitch_Tempered_RankBasePitch64ftHarmonicNum"),
         ) {
             rank_harmonic.entry(rid).or_insert(h);
+        }
+    }
+    // pipe_id -> toonhoogte-metadata (hertemperen): toets, harmonisch,
+    // gemeten originele pijptoon (Hz → cents) en behoud-percentage.
+    let mut pipe_pitch: HashMap<u32, HwPipePitch> = HashMap::new();
+    for p in &pipes {
+        if let (Some(pid), Some(key)) = (p.get_u32("PipeID"), p.get_u32("NormalMIDINoteNumber")) {
+            let harmonic = p
+                .get_u32("Pitch_Tempered_RankBasePitch64ftHarmonicNum")
+                .filter(|h| *h > 0);
+            let original_cents = if p.get_u32("Pitch_OriginalOrgan_SpecificationMethodCode") == Some(2) {
+                p.get_f32("Pitch_OriginalOrgan_PitchHz").filter(|hz| *hz > 0.0).map(hz_to_cents)
+            } else {
+                None
+            };
+            let keep_pct = if p.get_u32("Pitch_Tempered_BaseTuningSchemeCode") == Some(4) {
+                p.get_f32("Pitch_Tempered_BaseTuningDeviation")
+            } else {
+                None
+            };
+            pipe_pitch.insert(pid, HwPipePitch { key, harmonic, original_cents, keep_pct });
         }
     }
     // pipe_id -> lagen [(PipeLayerNumber, LayerID)], gesorteerd op laagnummer.
@@ -170,6 +204,27 @@ fn build_definition(
             sample_file.insert(sid, (pkg, fname.clone()));
         }
     }
+    // sample_id -> gemeten samplepitch in cents (Pitch_SpecificationMethodCode:
+    // 4 = exacte frequentie in Hz; 2/3 = MIDI-noot (+ harmonisch); 1/leeg =
+    // smpl-chunk van het bestand → geen entry, de loader leest die zelf).
+    let mut sample_pitch_cents: HashMap<u32, f32> = HashMap::new();
+    for s in &samples {
+        let Some(sid) = s.get_u32("SampleID") else { continue };
+        let cents = match s.get_u32("Pitch_SpecificationMethodCode") {
+            Some(4) => s.get_f32("Pitch_ExactSamplePitch").filter(|hz| *hz > 0.0).map(hz_to_cents),
+            Some(2) | Some(3) => s
+                .get_u32("Pitch_NormalMIDINoteNumber")
+                .filter(|n| *n > 0)
+                .map(|n| {
+                    let h = s.get_u32("Pitch_RankBasePitch64ftHarmonicNum").filter(|h| *h > 0);
+                    100.0 * n as f32 + h.map_or(0.0, |h| 1200.0 * (h as f32 / 8.0).log2())
+                }),
+            _ => None,
+        };
+        if let Some(c) = cents {
+            sample_pitch_cents.insert(sid, c);
+        }
+    }
     // pipe_id -> enclosure_id (zwelkast waar de pijp in staat; eerste wint).
     let mut enclosure_of_pipe: HashMap<u32, u32> = HashMap::new();
     for ep in &enclosure_pipes {
@@ -194,6 +249,15 @@ fn build_definition(
         let path = resolve_sample(sample_id)?;
 
         let mut extra = PipeExtra::default();
+        // Toonhoogte-metadata voor hertemperen (sample-veld > smpl-chunk >
+        // originele pijptoon; de keuze valt in de retune-opbouw).
+        extra.sample_pitch_cents = sample_pitch_cents.get(&sample_id).copied();
+        if let Some(pp) = pipe_pitch.get(&pipe_id) {
+            extra.key_midi_note = Some(pp.key);
+            extra.harmonic_number = pp.harmonic;
+            extra.original_pitch_cents = pp.original_cents;
+            extra.retune_keep_pct = pp.keep_pct;
+        }
         // Release-samples van de hoofdlaag. Sommige sets (Ledziny) laten de
         // release naar hetzelfde bestand als de attack wijzen (release zit in
         // dezelfde wav); zo'n "release" slaan we over — de engine valt dan
@@ -244,11 +308,22 @@ fn build_definition(
             Some(v) => v,
             None => continue,
         };
+        // Stop-Name is in de praktijk al schoon ("GO  Bourdon 16"); het
+        // perspectief-suffix zit op de StopRank/Rank. De ruwe naam wordt pas
+        // ná de laag-analyse van een eventueel perspectief-suffix ontdaan
+        // (alleen als er écht perspectieven zijn — anders werd 'Trompet
+        // Direct' ten onrechte 'Trompet'); de meldingen hieronder gebruiken
+        // de ruwe naam.
         let name = clean_stop_name(st.get("Name").map(|s| s.as_str()).unwrap_or(""));
 
-        // Collect (division_note -> pipe + sample path + extra's) across all
-        // stopranks of this stop.
+        // Collect (division_note -> pipe + sample path + extra's) PER StopRank,
+        // in documentvolgorde. StopRanks met disjuncte noten (splice, geleende
+        // bas) smelten samen in laag 0 (eerste wint, zoals voorheen); een
+        // StopRank die noten van laag 0 overlapt — de microfoonperspectieven
+        // front/rear/dry van SJDL — wordt een eigen PipeLayer.
         let mut by_note: HashMap<u32, (u32, PathBuf, PipeExtra)> = HashMap::new();
+        let mut first_rank_label: Option<String> = None;
+        let mut extra_layers: Vec<(String, HashMap<u32, (u32, PathBuf, PipeExtra)>)> = Vec::new();
         let mut harmonic = 0u32;
         for sr in stopranks_by_stop.get(&stop_id).into_iter().flatten() {
             let rank_id = match sr.get_u32("RankID") {
@@ -264,21 +339,48 @@ fn build_definition(
                     harmonic = *h;
                 }
             }
+            // Perspectief-bron: StopRank-Name ("PED  Soubasse 16 (front)"),
+            // anders de Rank-Name, anders een neutrale naam.
+            let sr_name = sr
+                .get("Name")
+                .filter(|n| !n.trim().is_empty())
+                .cloned()
+                .or_else(|| rank_name.get(&rank_id).cloned())
+                .unwrap_or_else(|| format!("Rank {}", rank_id));
             let first_div = sr.get_u32("MIDINoteNumOfFirstMappedDivisionInputNode").unwrap_or(36);
             let count = sr.get_u32("NumberOfMappedDivisionInputNodes").unwrap_or(0);
             let inc = sr.get_i32("MIDINoteNumIncrementFromDivisionToRank").unwrap_or(0);
+            let mut own: HashMap<u32, (u32, PathBuf, PipeExtra)> = HashMap::new();
             for k in 0..count {
                 let div_note = first_div + k;
                 let rank_note = (div_note as i64 + inc as i64) as u32;
                 if let Some(pid) = rank_pipes.get(&rank_note) {
-                    // Eerste rank die een noot levert wint (zelfde gedrag als
-                    // het eerdere or_insert); resolve alleen bij een lege slot.
-                    if !by_note.contains_key(&div_note) {
+                    if !own.contains_key(&div_note) {
                         if let Some((path, extra)) = resolve_pipe(*pid) {
-                            by_note.insert(div_note, (*pid, path, extra));
+                            own.insert(div_note, (*pid, path, extra));
                         }
                     }
                 }
+            }
+            if own.is_empty() {
+                continue;
+            }
+            if first_rank_label.is_none() {
+                first_rank_label = Some(sr_name.clone());
+            }
+            let overlaps = own.keys().any(|n| by_note.contains_key(n));
+            if !overlaps {
+                // Splice / eerste rank: in laag 0.
+                for (n, v) in own {
+                    by_note.entry(n).or_insert(v);
+                }
+            } else if extra_layers.len() < 15 {
+                extra_layers.push((sr_name, own));
+            } else {
+                warn!(
+                    "Hauptwerk stop '{}' (id {}): StopRank '{}' genegeerd — meer dan 15 extra lagen",
+                    name, stop_id, sr_name
+                );
             }
         }
 
@@ -305,16 +407,68 @@ fn build_definition(
                 .unwrap_or(0)
         };
 
-        // Dense, keyboard-aligned pipe list from the stop's lowest to highest note;
-        // gaps within the compass become Empty so key→pipe alignment is preserved.
-        let min_note = *by_note.keys().min().unwrap();
-        let max_note = *by_note.keys().max().unwrap();
+        // Dense, keyboard-aligned pipe list from the stop's lowest to highest note
+        // over ALLE lagen; gaps within the compass become Empty so key→pipe
+        // alignment is preserved. Noten die alleen in een extra laag zitten
+        // zijn in laag 0 Empty (stil) en klinken via die laag als hij aanstaat.
+        let min_note = by_note
+            .keys()
+            .chain(extra_layers.iter().flat_map(|(_, m)| m.keys()))
+            .copied()
+            .min()
+            .unwrap();
+        let max_note = by_note
+            .keys()
+            .chain(extra_layers.iter().flat_map(|(_, m)| m.keys()))
+            .copied()
+            .max()
+            .unwrap();
         let mut pipe_list: Vec<PipeDef> = Vec::with_capacity((max_note - min_note + 1) as usize);
         for note in min_note..=max_note {
             match by_note.remove(&note) {
                 Some((_, path, extra)) => pipe_list.push(PipeDef::Sample { path, extra }),
                 None => pipe_list.push(PipeDef::Empty),
             }
+        }
+        let mut layers: Vec<PipeLayer> = Vec::with_capacity(extra_layers.len());
+        for (i, (lname, mut m)) in extra_layers.into_iter().enumerate() {
+            let mut lp: Vec<PipeDef> = Vec::with_capacity((max_note - min_note + 1) as usize);
+            for note in min_note..=max_note {
+                match m.remove(&note) {
+                    Some((_, path, extra)) => lp.push(PipeDef::Sample { path, extra }),
+                    None => lp.push(PipeDef::Empty),
+                }
+            }
+            let perspective = crate::perspective::detect_perspective(&lname);
+            layers.push(PipeLayer { index: (i + 1) as u8, name: lname, perspective, pipes: lp });
+        }
+        let has_perspectives = layers.iter().any(|l| l.perspective.is_some());
+        let primary_perspective = if has_perspectives {
+            first_rank_label.as_deref().and_then(crate::perspective::detect_perspective)
+        } else {
+            None
+        };
+        // Perspectief-suffix alleen van de stopnaam strippen wanneer ≥1 laag
+        // een perspectief heeft; zonder perspectieven blijft de naam intact.
+        let name = if has_perspectives {
+            crate::perspective::strip_perspective(&name)
+        } else {
+            name
+        };
+        if !layers.is_empty() {
+            info!(
+                "Hauptwerk stop '{}': {} extra laag/lagen: {}",
+                name,
+                layers.len(),
+                layers
+                    .iter()
+                    .map(|l| match &l.perspective {
+                        Some(p) => format!("{} [{}]", l.name, p),
+                        None => l.name.clone(),
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
         }
 
         let division_id = st.get_u32("DivisionID").unwrap_or(0);
@@ -333,6 +487,8 @@ fn build_definition(
             accepts_retuning: true,
             first_midi_note: Some(min_note),
             pipes: pipe_list,
+            layers,
+            primary_perspective,
         }));
     }
 
@@ -467,6 +623,7 @@ fn build_definition(
             amplitude_level: 100.0,
             gain_db: 0.0,
             pitch_tuning_cents: 0.0,
+            pitch_correction_cents: 0.0,
         });
     }
     if !enclosure_defs.is_empty() {
@@ -496,6 +653,7 @@ fn build_definition(
         // Hauptwerk kent geen orgel-brede Gain; neutraal (0 dB).
         gain_db: 0.0,
         pitch_tuning_cents: 0.0,
+        pitch_correction_cents: 0.0,
     };
 
     let stop_defs: Vec<StopDef> = stop_entries.into_iter().map(|(_, s)| s).collect();
@@ -546,6 +704,8 @@ type FieldMap = HashMap<String, String>;
 trait FieldMapExt {
     fn get_u32(&self, key: &str) -> Option<u32>;
     fn get_i32(&self, key: &str) -> Option<i32>;
+    /// Float (Hauptwerk schrijft ook exponentnotatie zoals "1e+2").
+    fn get_f32(&self, key: &str) -> Option<f32>;
 }
 impl FieldMapExt for FieldMap {
     fn get_u32(&self, key: &str) -> Option<u32> {
@@ -554,6 +714,29 @@ impl FieldMapExt for FieldMap {
     fn get_i32(&self, key: &str) -> Option<i32> {
         self.get(key).and_then(|v| v.trim().parse().ok())
     }
+    fn get_f32(&self, key: &str) -> Option<f32> {
+        self.get(key).and_then(|v| v.trim().parse().ok())
+    }
+}
+
+/// Absolute toonhoogte in cents (6900 = a' 440 Hz) uit een frequentie.
+fn hz_to_cents(hz: f32) -> f32 {
+    6900.0 + 1200.0 * (hz / 440.0).log2()
+}
+
+/// Toonhoogte-metadata per Hauptwerk-pijp (Pipe_SoundEngine01), voor het
+/// hertemperen vanaf de gemeten pijptoonhoogte.
+#[derive(Debug, Clone, Copy)]
+struct HwPipePitch {
+    /// NormalMIDINoteNumber: MIDI-toets van de pijp.
+    key: u32,
+    /// Pitch_Tempered_RankBasePitch64ftHarmonicNum (0/leeg → None → 8).
+    harmonic: Option<u32>,
+    /// Pitch_OriginalOrgan_PitchHz (alleen bij SpecificationMethodCode 2).
+    original_cents: Option<f32>,
+    /// Pitch_Tempered_BaseTuningDeviation (alleen bij BaseTuningSchemeCode 4):
+    /// percentage van de originele afwijking dat behouden blijft.
+    keep_pct: Option<f32>,
 }
 
 /// Extract every object of `object_type` from its `<ObjectList ObjectType="..">`
@@ -873,19 +1056,21 @@ mod tests {
     }
 
     /// Mini-Hauptwerk-XML met twee stops: "Bourdon 8" (2 pijpen, in zwelkast 7,
-    /// met R0/R1-releases en een tremulant-laag) en "Montre 8" (1 pijp, niet
-    /// omkast, release wijst naar hetzelfde bestand als de attack → geskipt).
+    /// met R0/R1-releases en een tremulant-laag, plus een tweede StopRank
+    /// "(rear)" over dezelfde noten → perspectief-laag) en "Montre 8" (1 pijp,
+    /// niet omkast, release wijst naar hetzelfde bestand als de attack → geskipt).
     fn mini_xml() -> String {
         r#"<Hauptwerk FileFormat="Organ" FileFormatVersion="4.0">
 <ObjectList ObjectType="_General"><_General><Identification_Name>Testorgel</Identification_Name></_General></ObjectList>
 <ObjectList ObjectType="Division"><Division><DivisionID>1</DivisionID><Name>Grand Orgue</Name></Division></ObjectList>
 <ObjectList ObjectType="Stop"><Stop><StopID>1</StopID><Name>Bourdon 8</Name><DivisionID>1</DivisionID></Stop><Stop><StopID>2</StopID><Name>Montre 8</Name><DivisionID>1</DivisionID></Stop></ObjectList>
-<ObjectList ObjectType="StopRank"><StopRank><StopID>1</StopID><RankID>1</RankID><MIDINoteNumOfFirstMappedDivisionInputNode>36</MIDINoteNumOfFirstMappedDivisionInputNode><NumberOfMappedDivisionInputNodes>2</NumberOfMappedDivisionInputNodes><MIDINoteNumIncrementFromDivisionToRank>0</MIDINoteNumIncrementFromDivisionToRank></StopRank><StopRank><StopID>2</StopID><RankID>2</RankID><MIDINoteNumOfFirstMappedDivisionInputNode>36</MIDINoteNumOfFirstMappedDivisionInputNode><NumberOfMappedDivisionInputNodes>1</NumberOfMappedDivisionInputNodes><MIDINoteNumIncrementFromDivisionToRank>0</MIDINoteNumIncrementFromDivisionToRank></StopRank></ObjectList>
-<ObjectList ObjectType="Pipe_SoundEngine01"><Pipe_SoundEngine01><PipeID>11</PipeID><RankID>1</RankID><NormalMIDINoteNumber>36</NormalMIDINoteNumber></Pipe_SoundEngine01><Pipe_SoundEngine01><PipeID>12</PipeID><RankID>1</RankID><NormalMIDINoteNumber>37</NormalMIDINoteNumber></Pipe_SoundEngine01><Pipe_SoundEngine01><PipeID>21</PipeID><RankID>2</RankID><NormalMIDINoteNumber>36</NormalMIDINoteNumber></Pipe_SoundEngine01></ObjectList>
-<ObjectList ObjectType="Pipe_SoundEngine01_Layer"><Pipe_SoundEngine01_Layer><LayerID>111</LayerID><PipeID>11</PipeID><PipeLayerNumber>1</PipeLayerNumber></Pipe_SoundEngine01_Layer><Pipe_SoundEngine01_Layer><LayerID>511</LayerID><PipeID>11</PipeID><PipeLayerNumber>2</PipeLayerNumber></Pipe_SoundEngine01_Layer><Pipe_SoundEngine01_Layer><LayerID>112</LayerID><PipeID>12</PipeID><PipeLayerNumber>1</PipeLayerNumber></Pipe_SoundEngine01_Layer><Pipe_SoundEngine01_Layer><LayerID>121</LayerID><PipeID>21</PipeID><PipeLayerNumber>1</PipeLayerNumber></Pipe_SoundEngine01_Layer></ObjectList>
-<ObjectList ObjectType="Pipe_SoundEngine01_AttackSample"><Pipe_SoundEngine01_AttackSample><UniqueID>1</UniqueID><LayerID>111</LayerID><SampleID>1</SampleID></Pipe_SoundEngine01_AttackSample><Pipe_SoundEngine01_AttackSample><UniqueID>2</UniqueID><LayerID>511</LayerID><SampleID>2</SampleID></Pipe_SoundEngine01_AttackSample><Pipe_SoundEngine01_AttackSample><UniqueID>3</UniqueID><LayerID>112</LayerID><SampleID>3</SampleID></Pipe_SoundEngine01_AttackSample><Pipe_SoundEngine01_AttackSample><UniqueID>4</UniqueID><LayerID>121</LayerID><SampleID>4</SampleID></Pipe_SoundEngine01_AttackSample></ObjectList>
+<ObjectList ObjectType="StopRank"><StopRank><StopID>1</StopID><RankID>1</RankID><Name>GO  Bourdon 8 (front)</Name><MIDINoteNumOfFirstMappedDivisionInputNode>36</MIDINoteNumOfFirstMappedDivisionInputNode><NumberOfMappedDivisionInputNodes>2</NumberOfMappedDivisionInputNodes><MIDINoteNumIncrementFromDivisionToRank>0</MIDINoteNumIncrementFromDivisionToRank></StopRank><StopRank><StopID>1</StopID><RankID>1001</RankID><Name>GO  Bourdon 8 (rear)</Name><MIDINoteNumOfFirstMappedDivisionInputNode>36</MIDINoteNumOfFirstMappedDivisionInputNode><NumberOfMappedDivisionInputNodes>2</NumberOfMappedDivisionInputNodes><MIDINoteNumIncrementFromDivisionToRank>0</MIDINoteNumIncrementFromDivisionToRank></StopRank><StopRank><StopID>2</StopID><RankID>2</RankID><MIDINoteNumOfFirstMappedDivisionInputNode>36</MIDINoteNumOfFirstMappedDivisionInputNode><NumberOfMappedDivisionInputNodes>1</NumberOfMappedDivisionInputNodes><MIDINoteNumIncrementFromDivisionToRank>0</MIDINoteNumIncrementFromDivisionToRank></StopRank></ObjectList>
+<ObjectList ObjectType="Rank"><Rank><RankID>1</RankID><Name>01. GO  Bourdon 8 (front)</Name></Rank><Rank><RankID>1001</RankID><Name>01. GO  Bourdon 8 (rear)</Name></Rank><Rank><RankID>2</RankID><Name>02. GO  Montre 8</Name></Rank></ObjectList>
+<ObjectList ObjectType="Pipe_SoundEngine01"><Pipe_SoundEngine01><PipeID>11</PipeID><RankID>1</RankID><NormalMIDINoteNumber>36</NormalMIDINoteNumber><Pitch_Tempered_RankBasePitch64ftHarmonicNum>8</Pitch_Tempered_RankBasePitch64ftHarmonicNum><Pitch_OriginalOrgan_SpecificationMethodCode>2</Pitch_OriginalOrgan_SpecificationMethodCode><Pitch_OriginalOrgan_PitchHz>65.8</Pitch_OriginalOrgan_PitchHz></Pipe_SoundEngine01><Pipe_SoundEngine01><PipeID>12</PipeID><RankID>1</RankID><NormalMIDINoteNumber>37</NormalMIDINoteNumber></Pipe_SoundEngine01><Pipe_SoundEngine01><PipeID>1011</PipeID><RankID>1001</RankID><NormalMIDINoteNumber>36</NormalMIDINoteNumber></Pipe_SoundEngine01><Pipe_SoundEngine01><PipeID>1012</PipeID><RankID>1001</RankID><NormalMIDINoteNumber>37</NormalMIDINoteNumber></Pipe_SoundEngine01><Pipe_SoundEngine01><PipeID>21</PipeID><RankID>2</RankID><NormalMIDINoteNumber>36</NormalMIDINoteNumber><Pitch_Tempered_BaseTuningSchemeCode>4</Pitch_Tempered_BaseTuningSchemeCode><Pitch_Tempered_BaseTuningDeviation>1e+2</Pitch_Tempered_BaseTuningDeviation></Pipe_SoundEngine01></ObjectList>
+<ObjectList ObjectType="Pipe_SoundEngine01_Layer"><Pipe_SoundEngine01_Layer><LayerID>111</LayerID><PipeID>11</PipeID><PipeLayerNumber>1</PipeLayerNumber></Pipe_SoundEngine01_Layer><Pipe_SoundEngine01_Layer><LayerID>511</LayerID><PipeID>11</PipeID><PipeLayerNumber>2</PipeLayerNumber></Pipe_SoundEngine01_Layer><Pipe_SoundEngine01_Layer><LayerID>112</LayerID><PipeID>12</PipeID><PipeLayerNumber>1</PipeLayerNumber></Pipe_SoundEngine01_Layer><Pipe_SoundEngine01_Layer><LayerID>1111</LayerID><PipeID>1011</PipeID><PipeLayerNumber>1</PipeLayerNumber></Pipe_SoundEngine01_Layer><Pipe_SoundEngine01_Layer><LayerID>1112</LayerID><PipeID>1012</PipeID><PipeLayerNumber>1</PipeLayerNumber></Pipe_SoundEngine01_Layer><Pipe_SoundEngine01_Layer><LayerID>121</LayerID><PipeID>21</PipeID><PipeLayerNumber>1</PipeLayerNumber></Pipe_SoundEngine01_Layer></ObjectList>
+<ObjectList ObjectType="Pipe_SoundEngine01_AttackSample"><Pipe_SoundEngine01_AttackSample><UniqueID>1</UniqueID><LayerID>111</LayerID><SampleID>1</SampleID></Pipe_SoundEngine01_AttackSample><Pipe_SoundEngine01_AttackSample><UniqueID>2</UniqueID><LayerID>511</LayerID><SampleID>2</SampleID></Pipe_SoundEngine01_AttackSample><Pipe_SoundEngine01_AttackSample><UniqueID>3</UniqueID><LayerID>112</LayerID><SampleID>3</SampleID></Pipe_SoundEngine01_AttackSample><Pipe_SoundEngine01_AttackSample><UniqueID>4</UniqueID><LayerID>121</LayerID><SampleID>4</SampleID></Pipe_SoundEngine01_AttackSample><Pipe_SoundEngine01_AttackSample><UniqueID>5</UniqueID><LayerID>1111</LayerID><SampleID>7</SampleID></Pipe_SoundEngine01_AttackSample><Pipe_SoundEngine01_AttackSample><UniqueID>6</UniqueID><LayerID>1112</LayerID><SampleID>8</SampleID></Pipe_SoundEngine01_AttackSample></ObjectList>
 <ObjectList ObjectType="Pipe_SoundEngine01_ReleaseSample"><Pipe_SoundEngine01_ReleaseSample><UniqueID>10</UniqueID><LayerID>111</LayerID><SampleID>5</SampleID><ReleaseSelCriteria_LatestKeyReleaseTimeMs>99999</ReleaseSelCriteria_LatestKeyReleaseTimeMs></Pipe_SoundEngine01_ReleaseSample><Pipe_SoundEngine01_ReleaseSample><UniqueID>11</UniqueID><LayerID>111</LayerID><SampleID>6</SampleID><ReleaseSelCriteria_LatestKeyReleaseTimeMs>750</ReleaseSelCriteria_LatestKeyReleaseTimeMs></Pipe_SoundEngine01_ReleaseSample><Pipe_SoundEngine01_ReleaseSample><UniqueID>12</UniqueID><LayerID>121</LayerID><SampleID>4</SampleID><ReleaseSelCriteria_LatestKeyReleaseTimeMs>99999</ReleaseSelCriteria_LatestKeyReleaseTimeMs></Pipe_SoundEngine01_ReleaseSample></ObjectList>
-<ObjectList ObjectType="Sample"><Sample><SampleID>1</SampleID><InstallationPackageID>1</InstallationPackageID><SampleFilename>Bourdon/A0/036-c.wav</SampleFilename></Sample><Sample><SampleID>2</SampleID><InstallationPackageID>1</InstallationPackageID><SampleFilename>Bourdon/AT0/036-c.wav</SampleFilename></Sample><Sample><SampleID>3</SampleID><InstallationPackageID>1</InstallationPackageID><SampleFilename>Bourdon/A0/037-c#.wav</SampleFilename></Sample><Sample><SampleID>4</SampleID><InstallationPackageID>1</InstallationPackageID><SampleFilename>Montre/036-c.wav</SampleFilename></Sample><Sample><SampleID>5</SampleID><InstallationPackageID>1</InstallationPackageID><SampleFilename>Bourdon/R0/036-c.wav</SampleFilename></Sample><Sample><SampleID>6</SampleID><InstallationPackageID>1</InstallationPackageID><SampleFilename>Bourdon/R1/036-c.wav</SampleFilename></Sample></ObjectList>
+<ObjectList ObjectType="Sample"><Sample><SampleID>1</SampleID><InstallationPackageID>1</InstallationPackageID><SampleFilename>Bourdon/A0/036-c.wav</SampleFilename><Pitch_SpecificationMethodCode>4</Pitch_SpecificationMethodCode><Pitch_ExactSamplePitch>66</Pitch_ExactSamplePitch></Sample><Sample><SampleID>2</SampleID><InstallationPackageID>1</InstallationPackageID><SampleFilename>Bourdon/AT0/036-c.wav</SampleFilename></Sample><Sample><SampleID>3</SampleID><InstallationPackageID>1</InstallationPackageID><SampleFilename>Bourdon/A0/037-c#.wav</SampleFilename></Sample><Sample><SampleID>4</SampleID><InstallationPackageID>1</InstallationPackageID><SampleFilename>Montre/036-c.wav</SampleFilename></Sample><Sample><SampleID>5</SampleID><InstallationPackageID>1</InstallationPackageID><SampleFilename>Bourdon/R0/036-c.wav</SampleFilename></Sample><Sample><SampleID>6</SampleID><InstallationPackageID>1</InstallationPackageID><SampleFilename>Bourdon/R1/036-c.wav</SampleFilename></Sample><Sample><SampleID>7</SampleID><InstallationPackageID>1</InstallationPackageID><SampleFilename>Bourdon_rear/A0/036-c.wav</SampleFilename></Sample><Sample><SampleID>8</SampleID><InstallationPackageID>1</InstallationPackageID><SampleFilename>Bourdon_rear/A0/037-c#.wav</SampleFilename></Sample></ObjectList>
 <ObjectList ObjectType="Enclosure"><Enclosure><EnclosureID>7</EnclosureID><Name>Enclosure Grand Orgue</Name></Enclosure></ObjectList>
 <ObjectList ObjectType="EnclosurePipe"><EnclosurePipe><PipeID>11</PipeID><EnclosureID>7</EnclosureID></EnclosurePipe><EnclosurePipe><PipeID>12</PipeID><EnclosureID>7</EnclosureID></EnclosurePipe></ObjectList>
 </Hauptwerk>"#.to_string()
@@ -934,6 +1119,59 @@ mod tests {
         };
         assert!(em.releases.is_empty());
         assert!(em.tremulant_sample.is_none());
+    }
+
+    #[test]
+    fn test_pitch_metadata() {
+        // Hertemperen: Sample-pitch (method 4, Hz), originele pijptoon (method
+        // 2, Hz), toets/harmonisch per pijp en het behoud-percentage.
+        let def = mini_definition();
+        let bourdon = def.stops.iter().find(|s| s.name == "Bourdon 8").unwrap();
+        let montre = def.stops.iter().find(|s| s.name == "Montre 8").unwrap();
+        let PipeDef::Sample { extra, .. } = &bourdon.pipes[0] else { panic!("sample") };
+        // 66 Hz → 6900 + 1200·log2(66/440) = 3615.64 ct
+        assert!((extra.sample_pitch_cents.unwrap() - 3615.64).abs() < 0.05, "{:?}", extra.sample_pitch_cents);
+        // 65.8 Hz → 3610.39 ct
+        assert!((extra.original_pitch_cents.unwrap() - 3610.39).abs() < 0.05, "{:?}", extra.original_pitch_cents);
+        assert_eq!(extra.key_midi_note, Some(36));
+        assert_eq!(extra.harmonic_number, Some(8));
+        assert_eq!(extra.retune_keep_pct, None);
+        // Pijp 37: geen pitch-velden → alleen de toets.
+        let PipeDef::Sample { extra: e37, .. } = &bourdon.pipes[1] else { panic!("sample") };
+        assert_eq!(e37.key_midi_note, Some(37));
+        assert_eq!(e37.sample_pitch_cents, None);
+        assert_eq!(e37.original_pitch_cents, None);
+        // Montre: BaseTuningSchemeCode 4 + "1e+2" → keep 100 %.
+        let PipeDef::Sample { extra: em, .. } = &montre.pipes[0] else { panic!("sample") };
+        assert_eq!(em.retune_keep_pct, Some(100.0));
+        assert_eq!(em.harmonic_number, None);
+    }
+
+    #[test]
+    fn test_perspectieven_front_rear() {
+        let def = mini_definition();
+        let bourdon = def.stops.iter().find(|s| s.name == "Bourdon 8").unwrap();
+        let montre = def.stops.iter().find(|s| s.name == "Montre 8").unwrap();
+
+        // Tweede StopRank "(rear)" over dezelfde noten → laag 1 met perspectief
+        // 'rear'; laag 0 blijft de front-opname en krijgt 'front' als primair.
+        assert_eq!(bourdon.layers.len(), 1);
+        assert_eq!(bourdon.layers[0].index, 1);
+        assert_eq!(bourdon.layers[0].perspective.as_deref(), Some("rear"));
+        assert_eq!(bourdon.layers[0].pipes.len(), bourdon.pipes.len());
+        let PipeDef::Sample { path, .. } = &bourdon.layers[0].pipes[0] else { panic!("rear-pijp 36 moet Sample zijn") };
+        assert!(path.ends_with("Bourdon_rear/A0/036-c.wav"), "{path:?}");
+        let PipeDef::Sample { path: p37, .. } = &bourdon.layers[0].pipes[1] else { panic!("rear-pijp 37 moet Sample zijn") };
+        assert!(p37.ends_with("Bourdon_rear/A0/037-c#.wav"), "{p37:?}");
+        assert_eq!(bourdon.primary_perspective.as_deref(), Some("front"));
+        let PipeDef::Sample { path: front, .. } = &bourdon.pipes[0] else { panic!("front-pijp 36 moet Sample zijn") };
+        assert!(front.ends_with("Bourdon/A0/036-c.wav"), "laag 0 blijft front: {front:?}");
+        // Stopnaam blijft schoon (geen "(front)").
+        assert_eq!(bourdon.name, "Bourdon 8");
+
+        // Montre: één StopRank → geen lagen, geen perspectief.
+        assert!(montre.layers.is_empty());
+        assert_eq!(montre.primary_perspective, None);
     }
 
     #[test]
@@ -990,8 +1228,11 @@ mod tests {
                     n_trem += extra.tremulant_sample.is_some() as usize;
                 }
             }
-            println!("  [{}] {} — {} pipes, first_midi={}, harmonic={}, releases={}, trem={}",
-                s.windchest_group, s.name, n_real, first, s.harmonic_number, n_rel, n_trem);
+            println!("  [{}] {} — {} pipes, first_midi={}, harmonic={}, releases={}, trem={}, primair={:?}, lagen={:?}",
+                s.windchest_group, s.name, n_real, first, s.harmonic_number, n_rel, n_trem,
+                s.primary_perspective,
+                s.layers.iter().map(|l| (l.index, l.perspective.clone(),
+                    l.pipes.iter().filter(|p| matches!(p, PipeDef::Sample { .. })).count())).collect::<Vec<_>>());
             for p in &s.pipes {
                 if let PipeDef::Sample { path, extra } = p {
                     if path.exists() { sample_ok += 1; } else {
@@ -1016,5 +1257,18 @@ mod tests {
         println!("Samples on disk: ok={} missing={}", sample_ok, sample_missing);
         assert!(sample_missing == 0, "all resolved samples should exist on disk");
         assert!(!def.stops.is_empty());
+        // Saint-Jean-de-Luz (choeur): 16 stops, elk front (primair) + rear + dry.
+        if path.contains("SaintJeanDeLuz") {
+            assert_eq!(def.stops.len(), 16);
+            for s in &def.stops {
+                assert_eq!(s.primary_perspective.as_deref(), Some("front"), "{}", s.name);
+                let persp: Vec<&str> = s.layers.iter().filter_map(|l| l.perspective.as_deref()).collect();
+                assert_eq!(persp, vec!["rear", "dry"], "{}", s.name);
+                for l in &s.layers {
+                    assert!(l.pipes.len() <= s.pipes.len());
+                    assert!(l.pipes.iter().all(|p| !matches!(p, PipeDef::Sample { path, .. } if !path.exists())));
+                }
+            }
+        }
     }
 }

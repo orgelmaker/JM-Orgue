@@ -10,8 +10,11 @@ mod feedback;
 mod library;
 mod silence;
 mod loop_tool;
+mod midi_archive;
 mod notation;
 mod recorder;
+mod remote;
+mod retune;
 mod state;
 mod test_api;
 
@@ -94,26 +97,35 @@ fn main() {
         }
     };
 
-    // Build subscriber: log to stderr AND to file (if available)
-    let stderr_layer = fmt::layer()
-        .with_writer(std::io::stderr)
-        .with_target(false);
+    // Build subscriber: log to file (if available) AND — alleen op een echte
+    // terminal — naar stderr. Vóór 0.7.38 schreef de stderr-layer altijd: als
+    // een starter (MCP-server, testscript, Windows-snelkoppeling met pipe) de
+    // stderr-pipe nooit leegt, blokkeert WriteFile zodra ~80 KB gelogd is en
+    // hangt ELKE thread bij zijn eerstvolgende logregel (Stderr zit achter een
+    // ReentrantMutex): UI-polls, test-API, MIDI-thread — de hele app "bevriest"
+    // terwijl de audio doorspeelt (twee keer gezien op 2026-09-12; eerder al
+    // de stderr-pipe-les van 2026-07-13). De file-layer staat nu binnenin,
+    // zodat het logbestand bij een toekomstige blokkade wél de laatste regel
+    // krijgt.
+    use std::io::IsTerminal;
+    let on_tty = std::io::stderr().is_terminal();
 
     let env_filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| EnvFilter::new("info,vpo_midi=debug,vpo_app=debug"));
 
-    let registry = tracing_subscriber::registry()
-        .with(env_filter)
-        .with(stderr_layer);
+    let registry = tracing_subscriber::registry().with(env_filter);
 
     if let Some(f) = file {
         let file_layer = fmt::layer()
             .with_writer(std::sync::Mutex::new(f))
             .with_ansi(false)
             .with_target(true);
-        registry.with(file_layer).init();
+        // Option<Layer> is zelf een Layer (None = niets loggen naar stderr).
+        let stderr_layer = on_tty.then(|| fmt::layer().with_writer(std::io::stderr).with_target(false));
+        registry.with(file_layer).with(stderr_layer).init();
     } else {
-        registry.init();
+        let stderr_layer = on_tty.then(|| fmt::layer().with_writer(std::io::stderr).with_target(false));
+        registry.with(stderr_layer).init();
     }
 
     info!("=== JM-Orgue starting ===");
@@ -138,6 +150,10 @@ fn main() {
             if let Some(port) = test_api_port {
                 test_api::start_test_api(state.clone(), port, log_path_for_api.clone());
             }
+
+            // Afstandsbediening in het netwerk (0.7.38): bindt synchroon als hij in
+            // de prefs aan staat — de Windows-firewallprompt verschijnt dan hier.
+            remote::start_from_prefs(&state);
 
             // Na een ASIO-herstel-herstart (zie switch_audio_output): de live
             // registratie van vlak vóór de mislukte wissel is als one-shot-
@@ -274,9 +290,18 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            // Afstandsbediening in het netwerk (0.7.38)
+            commands::report_setzer_state,
+            remote::get_remote_status,
+            remote::set_remote_enabled,
+            remote::new_remote_token,
             commands::get_log_tail,
             commands::set_polyphony,
             commands::set_stereo_samples,
+            // Gestapelde ranks en microfoonperspectieven (0.7.38)
+            commands::get_perspectives,
+            commands::set_perspective_enabled,
+            commands::set_perspective_gain,
             commands::download_sampleset,
             commands::get_audio_devices,
             commands::list_audio_hosts,
@@ -345,8 +370,11 @@ fn main() {
             commands::export_settings,
             commands::import_settings,
             commands::set_crescendo_config,
+            commands::set_crescendo_enabled,
             commands::set_crescendo_stage,
             commands::get_crescendo_config,
+            commands::get_crescendo_claims,
+            commands::cancel_pedal_learn,
             commands::get_crescendo_state,
             commands::learn_crescendo_pedal,
             commands::clear_crescendo_binding,
@@ -376,6 +404,13 @@ fn main() {
             commands::suggest_midi_recording_path,
             commands::save_midi_recording,
             commands::clear_midi_recording,
+            commands::get_midi_archive_config,
+            commands::set_midi_archive_config,
+            commands::midi_archive_status,
+            commands::midi_archive_list,
+            commands::midi_archive_delete,
+            commands::midi_archive_open_dir,
+            commands::midi_archive_flush,
             commands::convert_midi_to_musicxml,
             commands::save_musicxml,
             commands::notation_new_score,
@@ -458,7 +493,7 @@ fn main() {
         ])
         .build(tauri::generate_context!())
         .expect("Error running application")
-        .run(|_app, event| {
+        .run(|app, event| {
             // Afsluit-waakhond: de audio-teardown (m.n. een ASIO-driver die in
             // een kernel-call blijft hangen) kon het proces bij het sluiten
             // laten "zombiën" — venster weg, proces onkillbaar, poort 8765
@@ -466,6 +501,16 @@ fn main() {
             // event-loop eindigt krijgen de Drops 5 s; daarna forceren we de
             // exit zodat er nooit een half-dood proces achterblijft.
             if let tauri::RunEvent::Exit = event {
+                // Vangnet voor het automatische MIDI-archief: paden die de
+                // close-handler in App.svelte omzeilen (paneel-quit, webview-
+                // crash). Alleen wachten als er écht een take loopt.
+                if let Some(state) = app.try_state::<AppState>() {
+                    if state.midi_archive.archiving.load(std::sync::atomic::Ordering::Relaxed) {
+                        if let Some(p) = state.midi_archive_flush(std::time::Duration::from_millis(800)) {
+                            tracing::info!("MIDI-archief bij afsluiten geschreven: {:?}", p);
+                        }
+                    }
+                }
                 std::thread::spawn(|| {
                     std::thread::sleep(std::time::Duration::from_secs(5));
                     tracing::warn!("Afsluiten duurde >5 s (audio-teardown hangt?); proces wordt geforceerd beëindigd");

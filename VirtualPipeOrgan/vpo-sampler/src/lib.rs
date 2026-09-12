@@ -10,6 +10,7 @@ pub mod grandorgue;
 pub mod hauptwerk;
 pub mod streaming;
 pub mod custom_organ;
+pub mod perspective;
 
 pub use loader::{
     SampleData, SampleError, PreloadBuffer, PreloadSegment, WavMarkers, ReleaseAlignTable,
@@ -24,3 +25,4 @@ pub use grandorgue::*;
 pub use hauptwerk::{load_hauptwerk, is_hauptwerk_path, clean_stop_name, clean_division_name};
 pub use streaming::*;
 pub use custom_organ::*;
+pub use perspective::*;

@@ -104,6 +104,7 @@
         audioDevice: s.audio_device,
         channels: s.channels,
         bufferFrames: s.buffer_frames,
+        midiArchiving: s.midi_archiving,
       };
       // Vangnet voor gemiste events: actief profiel afleiden uit wat er echt
       // speelt (zelfde logica als het hoofdvenster; niet tijdens een wissel).
@@ -260,17 +261,6 @@
   async function toggleCoupler(couplerId) {
     try {
       await invoke('toggle_coupler', { couplerId });
-      await pollOrganInfo(true);
-    } catch (e) { error = e.toString(); }
-  }
-
-  // Zelfde patroon als App.applyCrescendoStage (globale backend-commando's).
-  async function applyCrescendoStage(stopIds) {
-    try {
-      const stops = stopIds.filter(id => !id.startsWith('coupler_'));
-      const couplers = stopIds.filter(id => id.startsWith('coupler_'));
-      await invoke('set_drawn_stops', { stopIds: stops });
-      await invoke('set_active_couplers', { couplerIds: couplers });
       await pollOrganInfo(true);
     } catch (e) { error = e.toString(); }
   }
@@ -460,7 +450,7 @@
       on:toggleStop={(e) => toggleStop(e.detail)}
       on:toggleCoupler={(e) => toggleCoupler(e.detail)}
       on:divisionChannelsChanged={() => emitToMain('jm-orgue:division-channels-changed', {})}
-      on:crescendoChange={(e) => applyCrescendoStage(e.detail)}
+      on:refreshOrgan={() => pollOrganInfo(true)}
       on:refreshDevices={refreshDevices}
       on:refresh={refreshDevices}
       on:setView={(e) => activeView = e.detail}

@@ -81,6 +81,32 @@ pub struct OrganInfoDto {
     pub stop_count: usize,
     pub divisions: Vec<DivisionDto>,
     pub couplers: Option<Vec<CouplerDto>>,
+    /// Hertemperen: aantal speelbare pijpen met een plausibele gemeten
+    /// toonhoogte (smpl-chunk/ODF/HW) — 0 bij JM-Rec/eigen sets.
+    #[serde(default)]
+    pub retune_pipes: usize,
+    /// Totaal aantal speelbare pijp-keys (exclusief release-keys).
+    #[serde(default)]
+    pub retune_total: usize,
+    /// Microfoonperspectieven van dit orgel (0.7.38); leeg = één perspectief.
+    #[serde(default)]
+    pub perspectives: Vec<PerspectiveDto>,
+    /// Aantal registers met ≥1 echte extra rank (laag zonder perspectief,
+    /// bv. mixtuurkoren) — die klinken altijd volledig.
+    #[serde(default)]
+    pub layered_stops: usize,
+}
+
+/// Microfoonperspectief voor de frontend (Orgel-Instellingen → Perspectieven).
+#[derive(Debug, Clone, Serialize)]
+pub struct PerspectiveDto {
+    pub name: String,
+    /// Gewenst: laden bij de volgende (her)load.
+    pub enabled: bool,
+    pub gain_db: f32,
+    /// Nu daadwerkelijk geladen.
+    pub loaded: bool,
+    pub pipe_count: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -164,6 +190,8 @@ pub struct StatusDto {
     pub render_peak: f32,
     /// Stereo-samples als twee kanalen laden (instelling).
     pub stereo_samples: bool,
+    /// Automatisch MIDI-archief legt op dit moment een take vast.
+    pub midi_archiving: bool,
 }
 
 // ============ Commands ============
@@ -192,6 +220,224 @@ pub fn set_stereo_samples(state: State<AppState>, on: bool) -> Result<(), String
     crate::state::save_audio_prefs(&state.app_data_dir, &prefs);
     info!("Stereo-samples laden: {}", if on { "aan" } else { "uit (mono-mix)" });
     Ok(())
+}
+
+// ============ Gestapelde ranks en microfoonperspectieven (0.7.38) ============
+
+use crate::state::{PerspectiveRuntime, RankSummary, RankLayerSummary};
+use crate::library::PerspectiveSaved;
+
+/// Opgeslagen instellingen van een orgel: bibliotheek (exact, dan case-/
+/// slash-ongevoelig — zelfde orgel, andere pad-notatie, audit 49), anders de
+/// `.jm-settings.json` naast het orgel; die wordt dan in de bibliotheek
+/// geïmporteerd zodat álle herstel-paden hem daarna zien (auditbevinding 17).
+fn saved_settings_for(state: &AppState, organ_id: &str) -> Option<OrganSettings> {
+    let from_lib = {
+        let lib = state.organ_library.read();
+        lib.settings.get(organ_id).cloned().or_else(|| {
+            let want = organ_id.replace('/', "\\").to_lowercase();
+            lib.settings.iter()
+                .find(|(k, _)| k.replace('/', "\\").to_lowercase() == want)
+                .map(|(_, v)| v.clone())
+        })
+    };
+    if from_lib.is_some() {
+        return from_lib;
+    }
+    let from_file = organ_settings_dir(organ_id)
+        .map(|d| d.join(".jm-settings.json"))
+        .filter(|p| p.exists())
+        .and_then(|p| std::fs::read_to_string(&p).ok())
+        .and_then(|j| serde_json::from_str::<OrganSettings>(&j).ok())?;
+    info!("Instellingen geïmporteerd uit .jm-settings.json naast het orgel (geen bibliotheek-entry)");
+    state.organ_library.write().settings.insert(organ_id.to_string(), from_file.clone());
+    state.save_library();
+    Some(from_file)
+}
+
+/// Perspectief-voorkeuren (naam, aan/uit, gain) voor de komende load. Bij een
+/// herlaad van HETZELFDE orgel de runtime-staat (de gebruiker heeft net op een
+/// vinkje geklikt; de 800 ms-autosave kan later komen dan de "Orgel opnieuw
+/// laden"-klik → geen save/reload-race), anders de opgeslagen instellingen.
+fn perspective_prefs_for(state: &AppState, organ_id: &str) -> Vec<PerspectiveSaved> {
+    let same = state.current_organ_id.read().as_deref() == Some(organ_id);
+    if same {
+        let rt = state.perspectives.read();
+        if !rt.is_empty() {
+            return rt.iter()
+                .map(|p| PerspectiveSaved { name: p.name.clone(), enabled: p.enabled, gain_db: p.gain_db })
+                .collect();
+        }
+    }
+    saved_settings_for(state, organ_id).map(|s| s.perspectives).unwrap_or_default()
+}
+
+/// Laadplan voor perspectieven uit waarnemingen `(label, is-laag-0, #pijpen)`
+/// in stop-/laagvolgorde. Labels in eerste-voorkomen-volgorde; `enabled` =
+/// opgeslagen waarde, anders aan als het label ergens als PRIMAIR perspectief
+/// (laag 0) voorkomt — labels die alléén als extra laag voorkomen staan
+/// standaard uit, anders klinkt een ongelabelde laag 0 dubbel met een
+/// gelabelde extra laag. Hoogstens 15 labels (gain-slots 1..15); daarboven
+/// warn + overslaan (die lagen worden niet geladen). `loaded` blijft false;
+/// de laadroute zet hem gelijk aan `enabled`.
+fn plan_perspectives_from<I>(obs: I, saved: &[PerspectiveSaved]) -> Vec<PerspectiveRuntime>
+where
+    I: IntoIterator<Item = (String, bool, usize)>,
+{
+    let mut out: Vec<PerspectiveRuntime> = Vec::new();
+    let mut primary_seen: Vec<bool> = Vec::new();
+    let mut skipped: Vec<String> = Vec::new();
+    for (label, primary, pipes) in obs {
+        if let Some(i) = out.iter().position(|p| p.name == label) {
+            out[i].pipe_count += pipes;
+            primary_seen[i] |= primary;
+        } else if out.len() < crate::audio::MAX_LAYERS - 1 {
+            out.push(PerspectiveRuntime {
+                name: label,
+                enabled: false,
+                gain_db: 0.0,
+                loaded: false,
+                slot: (out.len() + 1) as u8,
+                pipe_count: pipes,
+            });
+            primary_seen.push(primary);
+        } else if !skipped.contains(&label) {
+            skipped.push(label);
+        }
+    }
+    if !skipped.is_empty() {
+        warn!("Meer dan 15 perspectieven: {:?} worden niet geladen", skipped);
+    }
+    for (i, p) in out.iter_mut().enumerate() {
+        match saved.iter().find(|s| s.name == p.name) {
+            Some(s) => {
+                p.enabled = s.enabled;
+                p.gain_db = s.gain_db.clamp(-40.0, 12.0);
+            }
+            None => p.enabled = primary_seen[i],
+        }
+    }
+    out
+}
+
+/// Laadplan voor een GrandOrgue/Hauptwerk-definitie (niet-ruis-stops).
+fn plan_perspectives(definition: &OrganDefinition, saved: &[PerspectiveSaved]) -> Vec<PerspectiveRuntime> {
+    use vpo_sampler::PipeDef;
+    let obs = definition.stops.iter()
+        .filter(|s| !s.is_noise_or_mechanical())
+        .flat_map(|s| s.all_layers().filter_map(|(idx, persp, pipes)| {
+            persp.map(|p| (
+                p.to_string(),
+                idx == 0,
+                pipes.iter().filter(|x| !matches!(x, PipeDef::Empty)).count(),
+            ))
+        }).collect::<Vec<_>>());
+    plan_perspectives_from(obs, saved)
+}
+
+/// Laadplan voor een eigen sample-map (labels = submapnamen).
+fn plan_perspectives_custom(organ: &CustomOrgan, saved: &[PerspectiveSaved]) -> Vec<PerspectiveRuntime> {
+    let obs = organ.divisions.iter().flat_map(|d| d.stops.iter()).flat_map(|s| {
+        let mut v: Vec<(String, bool, usize)> = Vec::new();
+        if let Some(p) = &s.primary_perspective {
+            v.push((p.clone(), true, s.pipes.len()));
+        }
+        for p in &s.perspectives {
+            v.push((p.name.clone(), false, p.pipes.len()));
+        }
+        v
+    });
+    plan_perspectives_from(obs, saved)
+}
+
+fn perspective_dtos(list: &[PerspectiveRuntime]) -> Vec<PerspectiveDto> {
+    list.iter().map(|p| PerspectiveDto {
+        name: p.name.clone(),
+        enabled: p.enabled,
+        gain_db: p.gain_db,
+        loaded: p.loaded,
+        pipe_count: p.pipe_count,
+    }).collect()
+}
+
+/// Lagen-samenvatting van een GO/HW-stop (diagnose: /ranks, layered_stops).
+fn rank_summary_of(stop: &vpo_sampler::StopDef, dto_id: String) -> RankSummary {
+    use vpo_sampler::PipeDef;
+    RankSummary {
+        stop_id: stop.id,
+        dto_id,
+        name: clean_stop_name(&stop.name),
+        layers: stop.all_layers().map(|(idx, persp, pipes)| RankLayerSummary {
+            index: idx,
+            name: if idx == 0 {
+                stop.name.clone()
+            } else {
+                stop.layers.iter().find(|l| l.index == idx).map(|l| l.name.clone()).unwrap_or_default()
+            },
+            perspective: persp.map(|s| s.to_string()),
+            pipes_nonempty: pipes.iter().filter(|x| !matches!(x, PipeDef::Empty)).count(),
+        }).collect(),
+    }
+}
+
+/// Spiegel de runtime-perspectieven naar de bewaarde DTO, zodat de 300 ms-
+/// organ-poll van de frontend (en GET /organ) geen verouderde enabled/gain-
+/// waarden terugzet over de zojuist gezette (zelfde patroon als de drawn-vlaggen).
+fn sync_perspective_dto(state: &AppState) {
+    let dto = perspective_dtos(&state.perspectives.read());
+    if let Some(o) = state.loaded_organ_info.write().as_mut() {
+        o.perspectives = dto;
+    }
+}
+
+/// Kern (niet-Tauri; ook de test-API): perspectief aan/uit. Retourneert true
+/// als herladen nodig is (enabled != loaded voor ≥1 perspectief). Slaat NIET
+/// direct op: de reguliere autosave bewaart `state.perspectives`, en een
+/// herlaad van hetzelfde orgel leest de runtime-staat (perspective_prefs_for).
+pub fn do_set_perspective_enabled(state: &AppState, name: &str, enabled: bool) -> Result<bool, String> {
+    let reload_needed = {
+        let mut list = state.perspectives.write();
+        let p = list.iter_mut().find(|p| p.name == name)
+            .ok_or_else(|| format!("Onbekend perspectief: {}", name))?;
+        p.enabled = enabled;
+        list.iter().any(|p| p.enabled != p.loaded)
+    };
+    sync_perspective_dto(state);
+    info!("Perspectief '{}' {} (herladen nodig: {})", name, if enabled { "aan" } else { "uit" }, reload_needed);
+    Ok(reload_needed)
+}
+
+/// Kern: live volume van een perspectief (clamp -40..+12 dB), zonder herlaad.
+pub fn do_set_perspective_gain(state: &AppState, name: &str, gain_db: f32) -> Result<(), String> {
+    let g = if gain_db.is_finite() { gain_db.clamp(-40.0, 12.0) } else { 0.0 };
+    let slot = {
+        let mut list = state.perspectives.write();
+        let p = list.iter_mut().find(|p| p.name == name)
+            .ok_or_else(|| format!("Onbekend perspectief: {}", name))?;
+        p.gain_db = g;
+        p.slot
+    };
+    state.send_audio_command(AudioCommand::SetPerspectiveGain { slot, gain_db: g });
+    sync_perspective_dto(state);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn get_perspectives(state: State<AppState>) -> Vec<PerspectiveDto> {
+    perspective_dtos(&state.perspectives.read())
+}
+
+/// Zet een perspectief aan/uit; true = herladen nodig. Geen schijf-I/O
+/// (de UI triggert de autosave via de bestaande debounce).
+#[tauri::command]
+pub fn set_perspective_enabled(state: State<AppState>, name: String, enabled: bool) -> Result<bool, String> {
+    do_set_perspective_enabled(&state, &name, enabled)
+}
+
+/// Live volume van een perspectief in dB.
+#[tauri::command]
+pub fn set_perspective_gain(state: State<AppState>, name: String, gain_db: f32) -> Result<(), String> {
+    do_set_perspective_gain(&state, &name, gain_db)
 }
 
 #[tauri::command]
@@ -595,6 +841,8 @@ pub fn apply_learned_swell(state: State<AppState>, division: String, division_in
         min_val,
         max_val,
         invert,
+        // De trede staat nu in de hoogste stand (laatste inleerstap).
+        last_value: Some(high_val),
     };
     let mut bindings = state.swell_bindings.write();
     bindings.retain(|b| b.division_name != division);
@@ -613,7 +861,9 @@ pub fn apply_learned_crescendo(state: State<AppState>, channel: u8, cc_num: u8, 
         (high_val, low_val, true)
     };
     *state.crescendo_binding.write() = Some((channel, cc_num, min_val, max_val, invert));
-    *state.crescendo_stage.write() = 0;
+    // Via de kern: claims los, trede-registers weg, DTO-vlaggen en voice-sync
+    // (een ruwe stage-write liet trede-registers met lege teller staan).
+    let _ = state.apply_crescendo_stage(0);
     // Wederzijds exclusief + expressie-reset (zie learn_crescendo_pedal).
     state.swell_bindings.write().retain(|b| !(b.channel == channel && b.cc_num == cc_num));
     state.send_audio_command(AudioCommand::SetMasterExpression(1.0));
@@ -706,7 +956,17 @@ pub fn clear_preset_binding(state: State<AppState>, preset_num: u8) {
 
 #[tauri::command]
 pub fn poll_preset_trigger(state: State<AppState>) -> Option<u8> {
+    // Heartbeat voor de afstandsbediening: zolang SetzerBar (Orgel-tabblad)
+    // gemount is komt deze poll elke 100 ms; /action weigert anders met 409.
+    *state.preset_poll_seen.write() = Some(std::time::Instant::now());
     state.poll_preset_trigger()
+}
+
+/// Setzerstand van het hoofdvenster spiegelen (voor GET /state van de
+/// afstandsbediening). Tauri 2 zet het camelCase-argument setMode om.
+#[tauri::command]
+pub fn report_setzer_state(state: State<AppState>, level: u8, preset: i32, set_mode: bool, data: Vec<bool>) {
+    *state.setzer_mirror.write() = crate::state::SetzerMirror { level, preset, set_mode, data };
 }
 
 // ============ Handmatig beheer van MIDI-koppelingen ============
@@ -858,6 +1118,24 @@ fn ampl_to_db(ampl: f32) -> f32 {
     }
 }
 
+/// MIDI-noot van pijp-index 0 van een stop. Hauptwerk zet de eerste noot
+/// direct (first_midi_note); GrandOrgue: eerste toets van het manual +
+/// (FirstAccessiblePipeLogicalKeyNumber − 1) — zo komt een discant-helft op
+/// bv. MIDI 60 i.p.v. op de 36 van het manual. Zonder manual (stop niet in
+/// een stoplijst): terugval op 36.
+fn stop_first_midi(definition: &OrganDefinition, stop: &vpo_sampler::StopDef) -> u32 {
+    if let Some(n) = stop.first_midi_note {
+        return n;
+    }
+    let manual_first = definition
+        .manuals
+        .iter()
+        .find(|m| m.stop_ids.contains(&stop.id))
+        .map(|m| m.first_accessible_key_midi_note)
+        .unwrap_or(36);
+    manual_first + stop.first_accessible_pipe_logical_key.saturating_sub(1)
+}
+
 /// Kies de default/langste release van een pijp: MaxKeyPressTime `None` of `-1`
 /// betekent "geen limiet" (GrandOrgue-conventie) en wint; anders de langste
 /// tijd. Releases die naar het attack-bestand zelf wijzen worden hier
@@ -1000,6 +1278,13 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
     // In plaats daarvan: alleen de attack (~PRELOAD_SAMPLES frames) per uniek
     // bestand inlezen voor directe respons; de audio-thread streamt de volledige
     // sample op de achtergrond zodra een noot gespeeld wordt.
+    // Hertemper-indicator voor de DTO: aantal pijpen met plausibele gemeten
+    // toonhoogte / aantal speelbare pijpen (gevuld in het laadblok hieronder).
+    let retune_pipes: usize;
+    let retune_total: usize;
+    // Perspectieven-plan (gevuld in het laadblok; ná reset_organ_scoped_state
+    // in state.perspectives gezet — anders wist de reset hem direct weer).
+    let persp: Vec<PerspectiveRuntime>;
     {
         use std::collections::{HashMap, HashSet};
         use std::path::PathBuf;
@@ -1032,10 +1317,16 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
         // ODF-intonatie per pijp: de volledige GrandOrgue-hiërarchie
         // Organ × Windchest × Stop/Rank × Pipe. AmplitudeLevel% en Gain-dB
         // stapelen als dB-som; PitchTuning (cents) wordt gesommeerd.
-        // PitchCorrection blijft hier bewust BUITEN: GrandOrgue past die alleen
-        // toe bij automatisch hertemperen, niet in de standaard "original
-        // temperament"-modus (anders zweeft bv. een Voix Céleste dubbel).
+        // PitchCorrection blijft hier bewust BUITEN: dat is in GrandOrgue een
+        // bewuste, OPGETELDE afwijking (zwever van een celeste) die alléén in
+        // hertemper-modus meetelt — zie `retune_inputs` hieronder / retune.rs.
+        // In "Origineel" telt alléén PitchTuning (anders zweeft een Voix
+        // Céleste dubbel).
         let mut odf_voicings: HashMap<(u32, u32), (f32, f32)> = HashMap::new();
+        // Hertemperen op gemeten pijptoonhoogte: per speelbare pijp de invoer
+        // voor retune::retune_cents + het attack-pad (voor de smpl-meting uit
+        // de preload-buffer) + de HW-terugval (originele pijptoon).
+        let mut retune_inputs: Vec<((u32, u32), PathBuf, crate::retune::PipePitchInput, Option<f32>)> = Vec::new();
         // Hauptwerk-tremulantlaag: aparte trem-opname per pijp.
         let mut trem_tasks: Vec<((u32, u32), PathBuf)> = Vec::new();
         // Release-samples (opgenomen kerkakoestiek), onder de gemarkeerde key
@@ -1047,10 +1338,23 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
         let mut release_meta: Vec<((u32, u32), Vec<(i32, u32)>)> = Vec::new();
         let organ_db = ampl_to_db(definition.organ.amplitude_level) + definition.organ.gain_db;
         let organ_cents = definition.organ.pitch_tuning_cents;
-        // Windchest-niveau inschaling per groepsnummer.
-        let windchest_voicing: HashMap<u32, (f32, f32)> = definition.windchests.iter()
-            .map(|w| (w.number, (ampl_to_db(w.amplitude_level) + w.gain_db, w.pitch_tuning_cents)))
+        // Windchest-niveau inschaling per groepsnummer: (dB, PitchTuning,
+        // PitchCorrection).
+        let windchest_voicing: HashMap<u32, (f32, f32, f32)> = definition.windchests.iter()
+            .map(|w| (w.number, (ampl_to_db(w.amplitude_level) + w.gain_db, w.pitch_tuning_cents, w.pitch_correction_cents)))
             .collect();
+        // Perspectieven (0.7.38): welke labels laden (opgeslagen/runtime-
+        // voorkeur; standaard alleen het primaire) en het laadplan per stop
+        // voor de NoteOn-fan-out in de audio-thread. Echte extra ranks
+        // (laag zonder perspectief) worden altijd geladen.
+        let saved_persp = perspective_prefs_for(state, path);
+        let mut persp_plan = plan_perspectives(&definition, &saved_persp);
+        let enabled_labels: HashSet<String> = persp_plan.iter()
+            .filter(|p| p.enabled)
+            .map(|p| p.name.clone())
+            .collect();
+        let mut rank_layout: HashMap<u32, Vec<(u8, u8)>> = HashMap::new();
+        let mut skipped_layers = 0usize;
         for stop in &definition.stops {
             // Sla mechaniek-/ruisopnamen over (klep-/registergeluid, blaasbalg,
             // ambient) — die horen geen speelbaar register te zijn.
@@ -1060,13 +1364,26 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
             if stop.percussive {
                 percussive_stops.insert(stop.id);
             }
-            let (wc_db, wc_cents) = windchest_voicing.get(&stop.windchest_group)
+            let (wc_db, wc_cents, _wc_pc) = windchest_voicing.get(&stop.windchest_group)
                 .copied()
-                .unwrap_or((0.0, 0.0));
+                .unwrap_or((0.0, 0.0, 0.0));
             let stop_db = ampl_to_db(stop.amplitude_level) + stop.gain_db;
             let stop_cents = stop.pitch_tuning_cents;
-            for (pipe_idx, pipe) in stop.pipes.iter().enumerate() {
-                let pipe_num = (pipe_idx + 1) as u32;
+            for (layer_idx, layer_persp, layer_pipes) in stop.all_layers() {
+            if let Some(p) = layer_persp {
+                if !enabled_labels.contains(p) {
+                    skipped_layers += 1;
+                    continue;
+                }
+            }
+            let slot = persp_plan.iter()
+                .position(|x| Some(x.name.as_str()) == layer_persp)
+                .map(|i| i as u8 + 1)
+                .unwrap_or(0);
+            let mut layer_any = false;
+            for (pipe_idx, pipe) in layer_pipes.iter().enumerate() {
+                // Engine-sleutel: pijpindex in bits 0-15, laag in bits 16-23.
+                let pipe_num = crate::audio::layer_key((pipe_idx + 1) as u32, layer_idx);
                 let resolved_opt = definition.resolve_reference(pipe);
                 if resolved_opt.is_none() && matches!(pipe, PipeDef::Reference { .. }) {
                     // Onopgeloste REF was voorheen VOLLEDIG stil — de toets deed
@@ -1096,6 +1413,35 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
                             + extra.pitch_tuning_cents.unwrap_or(0.0);
                         if total_db.abs() > 0.01 || total_cents.abs() > 0.01 {
                             odf_voicings.insert((stop.id, pipe_num), (total_db, total_cents));
+                        }
+                        // Hertemper-invoer met EIGENAAR-semantiek: bij een REF
+                        // (Octaaf 4' → Prestant 8') gelden toets, HarmonicNumber,
+                        // PitchCorrection en windchest van de eigenaar-stop, zodat
+                        // de geleende pijp exact dezelfde correctie krijgt als het
+                        // origineel (GO: GOReferencePipe speelt de eigenaar-pijp).
+                        if let Some((owner, owner_idx, _)) = definition.resolve_reference_owner(stop, pipe_idx, pipe) {
+                            let owner_wc_pc = windchest_voicing.get(&owner.windchest_group).map(|v| v.2).unwrap_or(0.0);
+                            let key_midi = extra.key_midi_note
+                                .unwrap_or(stop_first_midi(&definition, owner) + owner_idx as u32);
+                            let odf_measured = extra.sample_pitch_cents.or(extra
+                                .midi_key_number
+                                .map(|k| 100.0 * k as f32 + extra.midi_pitch_fraction.unwrap_or(0.0)));
+                            retune_inputs.push((
+                                (stop.id, pipe_num),
+                                path.clone(),
+                                crate::retune::PipePitchInput {
+                                    key_midi,
+                                    harmonic: extra.harmonic_number.unwrap_or(owner.harmonic_number).max(1),
+                                    measured_cents: odf_measured,
+                                    pitch_correction_cents: definition.organ.pitch_correction_cents
+                                        + owner_wc_pc
+                                        + owner.pitch_correction
+                                        + extra.pitch_correction_cents.unwrap_or(0.0),
+                                    keep_pct: extra.retune_keep_pct.unwrap_or(0.0),
+                                    original_pitch_tuning_cents: total_cents,
+                                },
+                                extra.original_pitch_cents,
+                            ));
                         }
                         if let Some(trem_path) = &extra.tremulant_sample {
                             trem_tasks.push(((stop.id, pipe_num), trem_path.clone()));
@@ -1150,9 +1496,22 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
                             ));
                         }
                         load_tasks.push(((stop.id, pipe_num), path.clone()));
+                        layer_any = true;
                     }
                 }
             }
+            if layer_any {
+                rank_layout.entry(stop.id).or_default().push((layer_idx, slot));
+            }
+            } // for layer
+        }
+        let multi_layer_stops = rank_layout.values().filter(|v| v.len() > 1).count();
+        if multi_layer_stops > 0 || skipped_layers > 0 {
+            info!(
+                "Lagen: {} stops met meerdere lagen geladen, {} perspectief-lagen overgeslagen (uitgeschakeld); perspectieven: {:?}",
+                multi_layer_stops, skipped_layers,
+                persp_plan.iter().map(|p| format!("{}={}", p.name, if p.enabled { "aan" } else { "uit" })).collect::<Vec<_>>()
+            );
         }
 
         // GrandOrgue-stops delen vaak één rank: meerdere (stop,pijp)-keys wijzen
@@ -1250,6 +1609,41 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
             start_time.elapsed().as_secs_f32()
         );
 
+        // Hertemper-tabel: per pijp de correctie in cents die in hertemper-
+        // modus de ODF-PitchTuning VERVANGT. Meting (prioriteit): ODF/HW-
+        // sampleveld > smpl-chunk van het attack-bestand > HW originele
+        // pijptoon. Onplausibele metingen (> 600 ct t.o.v. PitchTuning, GO's
+        // waarschuwingsgrens) vallen af — die pijp blijft op PitchTuning.
+        let mut odf_retune: HashMap<(u32, u32), f32> = HashMap::new();
+        let mut retune_rejected = 0usize;
+        for (key, path, mut inp, original_cents) in retune_inputs {
+            if inp.measured_cents.is_none() {
+                let target = crate::retune::target_cents(inp.key_midi, inp.harmonic);
+                inp.measured_cents = path_buffers
+                    .get(&(path, SegKey::Attack))
+                    .and_then(|b| crate::retune::measured_from_smpl_for_target(b.smpl_unity_note, b.smpl_pitch_fraction_cents, target))
+                    .or(original_cents)
+                    // Geen meting (MP3-pijpen, WAV zonder smpl): zoals GrandOrgue
+                    // de pijp als nominaal zuiver beschouwen — de temperament-
+                    // offsets gelden dan t.o.v. de nominale toon en de ODF-
+                    // PitchCorrection wordt wél toegepast. Anders viel bij
+                    // JM-Rec-sets in MP3 het hele hertemperen stilletjes weg.
+                    .or(Some(target));
+            }
+            let had_measurement = inp.measured_cents.is_some();
+            match crate::retune::retune_cents(&inp) {
+                Some(c) => { odf_retune.insert(key, c); }
+                None if had_measurement => retune_rejected += 1,
+                None => {}
+            }
+        }
+        retune_pipes = odf_retune.len();
+        retune_total = load_tasks.len();
+        info!(
+            "Hertemperen: {} van {} pijpen met gemeten toonhoogte ({} onplausibel verworpen)",
+            retune_pipes, retune_total, retune_rejected
+        );
+
         // Fan-out naar per-key buffers (gedeelde Arc). Release-keys (gemarkeerd
         // met RELEASE_PIPE_FLAG) gaan mee in dezelfde preload-map: NoteOff zoekt
         // ze daar op en de background-load/upgrade werkt er ongewijzigd mee
@@ -1290,6 +1684,9 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
                     info!("ODF-intonatie: {} pijpen met gain/pitch uit de sampleset", odf_voicings.len());
                 }
                 let _ = player.send_command(crate::audio::AudioCommand::RegisterOdfVoicings(Arc::new(odf_voicings)));
+                // Altijd sturen (ook leeg): vervangt de hertemper-tabel van het
+                // vorige orgel (botsende (stop_id, pipe_num)-keys!).
+                let _ = player.send_command(crate::audio::AudioCommand::RegisterOdfRetune(Arc::new(odf_retune)));
                 // Ook de ODF-looppunten registreren: de achtergrond-full-sample-
                 // load gebruikt dan dezelfde loop als de preload (geen versprong
                 // op het upgrademoment bij WAVs zonder/met afwijkende smpl-chunk).
@@ -1302,14 +1699,25 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
                 }
                 let _ = player.send_command(crate::audio::AudioCommand::RegisterReleaseMeta(
                     release_meta.iter().cloned().collect()));
+                // Laadplan per stop (altijd sturen, ook leeg — vervangt de map
+                // van het vorige orgel) + live gains per perspectief-slot.
+                let _ = player.send_command(crate::audio::AudioCommand::RegisterRankLayout(Arc::new(rank_layout)));
+                for p in &persp_plan {
+                    let _ = player.send_command(crate::audio::AudioCommand::SetPerspectiveGain { slot: p.slot, gain_db: p.gain_db });
+                }
             }
         }
+        for p in persp_plan.iter_mut() {
+            p.loaded = p.enabled;
+        }
+        persp = persp_plan;
     }
 
     // Build organ info for UI
     let mut divisions: Vec<DivisionDto> = Vec::new();
     let mut stop_action_code: u8 = 150; // Stops use action codes 150-255
     let mut skipped_noise = 0usize;
+    let mut rank_summary: Vec<RankSummary> = Vec::new();
 
     for manual in &definition.manuals {
         let mut stops: Vec<StopDto> = Vec::new();
@@ -1322,6 +1730,7 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
                     skipped_noise += 1;
                     continue;
                 }
+                rank_summary.push(rank_summary_of(stop, format!("{}_{}", manual.number, stop.id)));
                 let pitch = OrganDefinition::harmonic_to_footage(stop.harmonic_number);
                 let color = get_stop_color(&stop.name);
 
@@ -1330,10 +1739,7 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
                 // discant-split stops): its first pipe sounds at the manual's first
                 // key + (FirstAccessiblePipeLogicalKeyNumber - 1). Honoring that puts
                 // a discant half at e.g. MIDI 60 instead of wrongly at the manual's 36.
-                let first_midi = stop.first_midi_note
-                    .map(|n| n as u8)
-                    .unwrap_or_else(|| (manual.first_accessible_key_midi_note
-                        + stop.first_accessible_pipe_logical_key.saturating_sub(1)) as u8);
+                let first_midi = stop_first_midi(&definition, stop) as u8;
                 let last_midi = first_midi.saturating_add(stop.number_of_pipes.saturating_sub(1) as u8);
 
                 stops.push(StopDto {
@@ -1397,6 +1803,10 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
         stop_count,
         divisions,
         couplers: Some(couplers),
+        retune_pipes,
+        retune_total,
+        perspectives: perspective_dtos(&persp),
+        layered_stops: rank_summary.iter().filter(|r| r.is_stacked()).count(),
     };
 
     // Reset bij orgelwissel: stop alle klinkende noten en wis de getrokken registratie +
@@ -1413,6 +1823,10 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
     *state.crescendo_stage.write() = 0;
     state.set_active_couplers(Vec::new());
     reset_organ_scoped_state(state);
+    // Perspectieven + lagen-samenvatting van dít orgel (altijd zetten, ook
+    // leeg — vervangt die van het vorige orgel).
+    *state.perspectives.write() = persp;
+    *state.rank_summary.write() = rank_summary;
 
     // Build stop→division map and register with audio thread
     let stop_div_map = build_stop_division_map(&organ_info.divisions);
@@ -1480,6 +1894,8 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
     // current_organ_id is al vóór de DTO-publicatie gezet (auditbevinding 41).
     restore_organ_settings(state, path);
     apply_pending_registration(state, &organ_info);
+    // Zwelstand terugzetten (RegisterStopDivisionMap zette de audio op open).
+    apply_swell_positions(state);
 
     Ok(fill_live_registration_flags(state, organ_info))
 }
@@ -1528,6 +1944,8 @@ pub fn apply_dsp_after_backend_reload(state: &AppState) {
         if let Some(cents) = t.custom_cents {
             state.send_audio_command(AudioCommand::SetTemperament {
                 note_offsets: cents, fine_tune: t.fine_tune_cents,
+                // Bestand van vóór het retune-veld = Origineel (geen klankverandering).
+                retune: t.retune.unwrap_or(false),
             });
         }
     }
@@ -1569,6 +1987,9 @@ pub fn apply_dsp_after_backend_reload(state: &AppState) {
             }
         }
     }
+    drop(organ);
+    // Laatst bekende zwelstand per divisie (de verse audio-thread staat op open).
+    apply_swell_positions(state);
     info!("DSP hersteld na backend-herlaad ({} kanaal-routes)", n);
 }
 
@@ -1582,8 +2003,23 @@ pub fn apply_dsp_after_backend_reload(state: &AppState) {
 fn reset_organ_scoped_state(state: &AppState) {
     state.set_midi_mappings(Vec::new());
     state.set_preset_bindings_replace(Vec::new());
+    // Laatste zwelstanden van het VORIGE orgel (loaded_organ_info is hier nog
+    // het oude) bewaren voor een herlaad/wissel van hetzelfde orgel.
+    {
+        let prev_id = state.loaded_organ_info.read().as_ref().map(|o| o.id.clone());
+        let stash: Vec<(String, u8)> = state.get_swell_bindings().iter()
+            .filter_map(|b| b.last_value.map(|v| (b.division_name.clone(), v)))
+            .collect();
+        *state.swell_last_stash.write() = prev_id.filter(|_| !stash.is_empty()).map(|id| (id, stash));
+    }
     state.set_swell_bindings_replace(Vec::new());
     *state.crescendo_binding.write() = None;
+    // Crescendo-matrix + aan/uit zijn per orgel (stop-IDs verschillen); zonder
+    // deze reset duwde een pedaalbeweging in het venster tussen wissel en
+    // restore stop-IDs van het vórige orgel in drawn_stops.
+    state.crescendo_stages.write().clear();
+    *state.crescendo_enabled.write() = false;
+    *state.crescendo_num_stages.write() = 15;
     // DSP-spiegels: None = "dit orgel heeft nog niets gezet". De frontend past
     // bij load zijn defaults toe; bewust geen audio-commando's hier (zelfde
     // afspraak als in restore_organ_settings).
@@ -1635,8 +2071,9 @@ fn apply_pending_registration(state: &AppState, organ_info: &OrganInfoDto) {
     }
 }
 
-#[tauri::command]
-pub fn get_organ_info(state: State<AppState>) -> Result<Option<OrganInfoDto>, String> {
+/// Gecachte orgel-DTO met actuele drawn-/koppelvlaggen (gedeeld door het
+/// Tauri-commando get_organ_info en GET /organ van test-API/afstandsbediening).
+pub fn organ_info_merged(state: &AppState) -> Option<OrganInfoDto> {
     let organ = state.loaded_organ_info.read();
     match organ.clone() {
         Some(mut o) => {
@@ -1659,10 +2096,15 @@ pub fn get_organ_info(state: State<AppState>) -> Result<Option<OrganInfoDto>, St
                     }
                 }
             }
-            Ok(Some(o))
+            Some(o)
         }
-        None => Ok(None),
+        None => None,
     }
+}
+
+#[tauri::command]
+pub fn get_organ_info(state: State<AppState>) -> Result<Option<OrganInfoDto>, String> {
+    Ok(organ_info_merged(&state))
 }
 
 #[tauri::command]
@@ -1697,8 +2139,10 @@ pub fn set_stop(state: State<AppState>, stop_id: String, active: bool) -> Result
     Ok(())
 }
 
-#[tauri::command]
-pub fn toggle_stop(state: State<AppState>, stop_id: String) -> Result<bool, String> {
+/// Register omschakelen (kern van het Tauri-commando toggle_stop; ook gebruikt
+/// door de test-API en de afstandsbediening). Werkt de DTO-vlag, de drawn-set
+/// en de klinkende stemmen bij.
+pub fn toggle_stop_inner(state: &AppState, stop_id: &str) -> Result<bool, String> {
     let drawn = {
         let mut organ = state.loaded_organ_info.write();
         let Some(ref mut o) = *organ else {
@@ -1718,12 +2162,19 @@ pub fn toggle_stop(state: State<AppState>, stop_id: String) -> Result<bool, Stri
         }
     }; // organ-write-lock vrijgeven vóór sync (die neemt zelf read-locks)
 
-    state.set_stop_drawn(&stop_id, drawn);
+    state.set_stop_drawn(stop_id, drawn);
+    // Handmatig omgezet → geen trede-claim meer (zie note_manual_change).
+    state.note_manual_change(stop_id);
     // Direct hoorbaar tijdens het spelen: AAN speelt ingedrukte toetsen (incl.
     // koppels) meteen door dit register, UIT laat alle pijpen direct los.
-    state.sync_stop_voices(&stop_id, drawn);
+    state.sync_stop_voices(stop_id, drawn);
     info!("Stop {} → {}", stop_id, if drawn { "AAN" } else { "UIT" });
     Ok(drawn)
+}
+
+#[tauri::command]
+pub fn toggle_stop(state: State<AppState>, stop_id: String) -> Result<bool, String> {
+    toggle_stop_inner(&state, &stop_id)
 }
 
 /// Set all drawn stops at once (for setzer/preset recall)
@@ -1769,14 +2220,22 @@ pub fn set_drawn_stops(state: State<AppState>, stop_ids: Vec<String>) -> Result<
     }
     for id in &turned_off {
         state.set_stop_drawn(id, false);
+        state.note_manual_change(id);
         // ReleaseStop is onschuldig als het register al stil was.
         state.sync_stop_voices(id, false);
     }
     for (id, start_voices) in &turned_on {
         state.set_stop_drawn(id, true);
+        state.note_manual_change(id);
         if *start_voices {
             state.sync_stop_voices(id, true);
         }
+    }
+    // Alles wat de preset expliciet bevat is handregistratie — ook registers
+    // die de trede al had geclaimd (anders trekt terugveren een preset-register
+    // weg).
+    for id in &stop_ids {
+        state.note_manual_change(id);
     }
     info!("set_drawn_stops: {} aan, {} uit (van {} gevraagd)",
           turned_on.len(), turned_off.len(), stop_ids.len());
@@ -1942,11 +2401,16 @@ pub fn stop_note_all_stops(state: State<AppState>, note: u8) -> Result<(), Strin
     Ok(())
 }
 
-#[tauri::command]
-pub fn set_master_volume(state: State<AppState>, db: f32) -> Result<(), String> {
+/// Hoofdvolume zetten (kern van set_master_volume; ook voor de afstandsbediening).
+pub fn set_master_volume_inner(state: &AppState, db: f32) {
     state.send_audio_command(AudioCommand::SetMasterGain(db));
     // Onthoud voor per-orgel opslag (save_current_organ_settings leest dit veld).
     *state.master_volume_db.write() = Some(db);
+}
+
+#[tauri::command]
+pub fn set_master_volume(state: State<AppState>, db: f32) -> Result<(), String> {
+    set_master_volume_inner(&state, db);
     Ok(())
 }
 
@@ -1963,52 +2427,123 @@ pub fn set_algorithmic_reverb(state: State<AppState>, preset: Option<u8>, rt60: 
     Ok(())
 }
 
-/// Set crescendo stages configuration
+/// Crescendo-matrix + aan/uit (+ optioneel kolomaantal) zetten. De backend is
+/// de bron van waarheid (per orgel opgeslagen); de huidige trap wordt direct
+/// opnieuw toegepast zodat een editor-wijziging live hoorbaar is, een krimp
+/// van de matrix de trap clampt en uitschakelen de trede-registers wegtrekt.
 #[tauri::command]
-pub fn set_crescendo_config(state: State<AppState>, stages: Vec<Vec<String>>, enabled: bool) -> Result<(), String> {
-    *state.crescendo_stages.write() = stages;
-    *state.crescendo_enabled.write() = enabled;
+pub fn set_crescendo_config(state: State<AppState>, stages: Vec<Vec<String>>, enabled: bool, num_stages: Option<u8>) -> Result<(), String> {
+    set_crescendo_config_inner(&state, stages, enabled, num_stages);
     Ok(())
 }
 
-/// Set crescendo stage (0 = off, 1..N = active stage)
+pub fn set_crescendo_config_inner(state: &AppState, mut stages: Vec<Vec<String>>, enabled: bool, num_stages: Option<u8>) {
+    if let Some(n) = num_stages {
+        *state.crescendo_num_stages.write() = n.max(1);
+    } else if !stages.is_empty() {
+        // Zonder expliciet aantal (test-API, oudere aanroepers) bepaalt de
+        // matrix het aantal trappen.
+        *state.crescendo_num_stages.write() = stages.len().clamp(1, 255) as u8;
+    }
+    // Matrix tot num_stages padden met lege trappen (een lege trap erft de
+    // dichtstbijzijnde lagere), zodat pedaal (len()) en balk/editor
+    // (num_stages) hetzelfde bereik hebben.
+    let n = *state.crescendo_num_stages.read() as usize;
+    if stages.len() < n {
+        stages.resize(n, Vec::new());
+    }
+    *state.crescendo_stages.write() = stages;
+    set_crescendo_enabled_inner(state, enabled);
+}
+
+/// Alleen aan/uit (piston 41, checkbox, paneel) — zonder de (mogelijk
+/// verouderde) matrix van dat venster mee te sturen.
 #[tauri::command]
-pub fn set_crescendo_stage(state: State<AppState>, stage: u8) -> Result<Option<Vec<String>>, String> {
-    // None = niet toepassen (crescendo uit / niet geconfigureerd);
-    // Some(lijst) = toepassen, óók als de lijst leeg is — een lege stap of
-    // stap 0 moet de registers juist wegtrekken.
-    if !*state.crescendo_enabled.read() {
-        return Ok(None);
-    }
-    let stages = state.crescendo_stages.read();
-    if stages.is_empty() {
-        return Ok(None);
-    }
-    let clamped = (stage as usize).min(stages.len());
-    *state.crescendo_stage.write() = clamped as u8;
+pub fn set_crescendo_enabled(state: State<AppState>, enabled: bool) -> Result<(), String> {
+    set_crescendo_enabled_inner(&state, enabled);
+    Ok(())
+}
 
-    // Get target stop IDs for this stage
-    let target_stops: Vec<String> = if clamped == 0 {
-        Vec::new()
+/// Kern van aan/uit: uit → trap 0 (trede-registers weg, claims leeg);
+/// aan → de huidige trap (geclamped) opnieuw toepassen.
+pub fn set_crescendo_enabled_inner(state: &AppState, enabled: bool) {
+    let was = *state.crescendo_enabled.read();
+    *state.crescendo_enabled.write() = enabled;
+    if !enabled {
+        if was || !state.crescendo_active_stops.read().is_empty() || *state.crescendo_stage.read() != 0 {
+            state.apply_crescendo_stage(0);
+        }
     } else {
-        stages[clamped - 1].clone()
-    };
+        let stage = *state.crescendo_stage.read();
+        state.apply_crescendo_stage(stage);
+    }
+}
 
-    // Active-set mee-syncen: de MIDI-pedaal rekent zijn diff tegen deze set;
-    // zonder sync rekende hij na een UI-klik met een verouderde stand
-    // (auditbevinding 36).
-    *state.crescendo_active_stops.write() = target_stops.clone();
+/// Trap zetten vanuit de UI (klik op een trap/kolomkop) of de test-API:
+/// 0 = uit, 1..N. Zelfde kern als het pedaal; de aanroeper ververst daarna
+/// alleen get_organ_info.
+#[tauri::command]
+pub fn set_crescendo_stage(state: State<AppState>, stage: u8) -> Result<(), String> {
+    set_crescendo_stage_inner(&state, stage)
+}
 
-    Ok(Some(target_stops))
+pub fn set_crescendo_stage_inner(state: &AppState, stage: u8) -> Result<(), String> {
+    if !*state.crescendo_enabled.read() {
+        return Err("Crescendo staat uit".to_string());
+    }
+    if state.crescendo_stages.read().is_empty() {
+        return Err("Geen crescendo-stappen ingesteld".to_string());
+    }
+    state.apply_crescendo_stage(stage);
+    Ok(())
+}
+
+/// Crescendo-config voor de frontend (bron van waarheid: backend).
+#[derive(Debug, Clone, Serialize)]
+pub struct CrescendoConfigDto {
+    pub enabled: bool,
+    pub stage: u8,
+    pub stages: Vec<Vec<String>>,
+    pub num_stages: u8,
+    /// Registers/koppels die de trede nu bijgetrokken heeft (claims).
+    pub active_stops: Vec<String>,
+    /// Pedaalbinding (channel, cc, min, max, invert) — zodat andere vensters
+    /// een elders ingeleerde trede zien zonder extra IPC.
+    pub binding: Option<(u8, u8, u8, u8, bool)>,
 }
 
 /// Get current crescendo config
 #[tauri::command]
-pub fn get_crescendo_config(state: State<AppState>) -> (bool, u8, Vec<Vec<String>>) {
-    let enabled = *state.crescendo_enabled.read();
-    let stage = *state.crescendo_stage.read();
-    let stages = state.crescendo_stages.read().clone();
-    (enabled, stage, stages)
+pub fn get_crescendo_config(state: State<AppState>) -> CrescendoConfigDto {
+    crescendo_config_dto(&state)
+}
+
+pub fn crescendo_config_dto(state: &AppState) -> CrescendoConfigDto {
+    CrescendoConfigDto {
+        enabled: *state.crescendo_enabled.read(),
+        stage: *state.crescendo_stage.read(),
+        stages: state.crescendo_stages.read().clone(),
+        num_stages: *state.crescendo_num_stages.read(),
+        active_stops: state.crescendo_active_stops.read().clone(),
+        binding: *state.crescendo_binding.read(),
+    }
+}
+
+/// Registers/koppels die de crescendotrede nu geclaimd heeft — de setzer-SET
+/// trekt ze af zodat een preset geen trede-registers bevat.
+#[tauri::command]
+pub fn get_crescendo_claims(state: State<AppState>) -> Vec<String> {
+    state.crescendo_active_stops.read().clone()
+}
+
+/// Lopende trede-inleer afbreken (Annuleren/Opnieuw in de popup). Async:
+/// de blokkerende learn_pedal_position houdt de main-thread bezet, dus dit
+/// commando moet op een eigen taak lopen om überhaupt aan te komen.
+#[tauri::command]
+pub async fn cancel_pedal_learn(state: State<'_, AppState>) -> Result<(), String> {
+    state.learn_cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+    state.midi_tx.send(crate::state::MidiCommand::CancelLearn).map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 /// Lightweight poll for crescendo live state (enabled, current stage, total stages)
@@ -2028,16 +2563,10 @@ pub fn get_crescendo_state(state: State<AppState>) -> (bool, u8, u8) {
 /// algoritme verstoort en de gebruiker een onstabiele inleer-ervaring geeft.
 #[tauri::command]
 pub fn learn_crescendo_pedal(state: State<AppState>) -> Result<Option<(u8, u8)>, String> {
-    // Stille leer-modus
+    // Stille leer-modus: trede-registers netjes wegtrekken (zelfde kern als
+    // het pedaal, incl. voice-sync en DTO-vlaggen) en de binding wissen.
     *state.crescendo_binding.write() = None;
-    *state.crescendo_stage.write() = 0;
-    {
-        let mut active = state.crescendo_active_stops.write();
-        for sid in active.iter() {
-            state.set_stop_drawn(sid, false);
-        }
-        active.clear();
-    }
+    state.apply_crescendo_stage(0);
     state.send_audio_command(AudioCommand::AllNotesOff);
 
     let (tx, rx) = crossbeam_channel::bounded(1);
@@ -2140,7 +2669,15 @@ pub fn suggest_midi_recording_path() -> String {
 
 /// Codeer opgenomen events naar een Standard MIDI File (formaat 0, 480 PPQ, vast 120 BPM).
 /// `events` = (timestamp_us, status, data1, data2, channel) zoals vastgelegd in de MIDI-thread.
+/// Byte-identiek aan `encode_smf_with_name(events, None)`.
 pub fn encode_smf(events: &[(u64, u8, u8, u8, u8)]) -> Vec<u8> {
+    encode_smf_with_name(events, None)
+}
+
+/// Als `encode_smf`, optioneel met een Track-Name-meta (FF 03) direct na de
+/// tempo-meta — het automatische MIDI-archief zet daar de orgelnaam in. midly
+/// slaat dit meta-event bij het afspelen/noteren gewoon over.
+pub fn encode_smf_with_name(events: &[(u64, u8, u8, u8, u8)], name: Option<&str>) -> Vec<u8> {
     let mut data: Vec<u8> = Vec::new();
 
     // Header chunk: MThd
@@ -2156,6 +2693,18 @@ pub fn encode_smf(events: &[(u64, u8, u8, u8, u8)]) -> Vec<u8> {
     // Tempo: 120 BPM = 500000 us/quarter
     track_data.extend_from_slice(&[0x00, 0xFF, 0x51, 0x03]);
     track_data.extend_from_slice(&500000u32.to_be_bytes()[1..4]);
+
+    // Optionele Track-Name-meta (FF 03). Afkappen op TEKENS, niet op bytes,
+    // zodat een UTF-8-teken ('Bätz') nooit gesplitst wordt.
+    if let Some(n) = name {
+        let n: String = n.chars().take(120).collect();
+        let b = n.as_bytes();
+        if !b.is_empty() {
+            track_data.extend_from_slice(&[0x00, 0xFF, 0x03]);
+            write_var_len(&mut track_data, b.len() as u32);
+            track_data.extend_from_slice(b);
+        }
+    }
 
     let mut prev_tick: u32 = 0;
     for &(timestamp_us, status, data1, data2, _ch) in events {
@@ -2212,6 +2761,165 @@ pub fn save_midi_recording(state: State<AppState>, path: String) -> Result<(), S
 #[tauri::command]
 pub fn clear_midi_recording(state: State<AppState>) {
     *state.midi_recording.write() = None;
+}
+
+// ============ Automatisch MIDI-archief ============
+// Zie midi_archive.rs. De instellingen staan in <app_data_dir>/midi_archive.json;
+// de live status komt uit de atomics in state.midi_archive. Gedeelde logica
+// (config-DTO opbouwen/toepassen) wordt ook door de test-API gebruikt.
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct MidiArchiveConfigDto {
+    pub enabled: bool,
+    /// Feitelijke archiefmap (eigen keuze of standaard).
+    pub dir: String,
+    /// true = er is geen eigen map gekozen (standaardmap in gebruik).
+    pub dir_is_default: bool,
+    pub silence_secs: u32,
+    pub min_notes: u32,
+    pub min_secs: u32,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct MidiArchiveStatusDto {
+    pub enabled: bool,
+    pub archiving: bool,
+    pub event_count: u32,
+    /// Verstreken tijd van de lopende take (0 als er geen take loopt).
+    pub seconds: f64,
+    pub files_written: u32,
+    pub last_file: Option<String>,
+    pub last_error: Option<String>,
+}
+
+/// Huidige archief-instellingen als DTO (uit midi_archive.json).
+pub(crate) fn midi_archive_config_dto(state: &AppState) -> MidiArchiveConfigDto {
+    let prefs = crate::midi_archive::load_prefs(&state.app_data_dir);
+    MidiArchiveConfigDto {
+        enabled: prefs.enabled,
+        dir: prefs.effective_dir().to_string_lossy().to_string(),
+        dir_is_default: prefs.dir.is_none(),
+        silence_secs: prefs.silence_secs,
+        min_notes: prefs.min_notes,
+        min_secs: prefs.min_secs,
+    }
+}
+
+/// Nieuwe archief-instellingen toepassen: begrenzen, map aanmaken, bewaren en
+/// naar de MIDI-thread doorzetten. Uitzetten terwijl een take loopt: de
+/// MIDI-thread sluit die zelf af via ArchiveRecorder::poll (enabled=false).
+pub(crate) fn apply_midi_archive_config(state: &AppState, cfg: MidiArchiveConfigDto) -> Result<MidiArchiveConfigDto, String> {
+    let dir = cfg.dir.trim();
+    let prefs = crate::midi_archive::MidiArchivePrefs {
+        enabled: cfg.enabled,
+        dir: if dir.is_empty() { None } else { Some(dir.to_string()) },
+        silence_secs: cfg.silence_secs,
+        min_notes: cfg.min_notes,
+        min_secs: cfg.min_secs,
+    }.clamped();
+    std::fs::create_dir_all(prefs.effective_dir())
+        .map_err(|e| format!("Archiefmap niet aan te maken: {}", e))?;
+    crate::midi_archive::save_prefs(&state.app_data_dir, &prefs);
+    state.midi_archive.apply(&prefs);
+    info!(
+        "MIDI-archief: enabled={} dir={:?} stilte={}s min_noten={} min_lengte={}s",
+        prefs.enabled, prefs.effective_dir(), prefs.silence_secs, prefs.min_notes, prefs.min_secs
+    );
+    Ok(midi_archive_config_dto(state))
+}
+
+/// Live status van het archief als DTO (ook door de test-API gebruikt).
+pub(crate) fn midi_archive_status_dto(state: &AppState) -> MidiArchiveStatusDto {
+    use std::sync::atomic::Ordering;
+    let sh = &state.midi_archive;
+    let archiving = sh.archiving.load(Ordering::Relaxed);
+    let seconds = if archiving {
+        let started = sh.take_started_epoch_ms.load(Ordering::Relaxed);
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        now.saturating_sub(started) as f64 / 1000.0
+    } else {
+        0.0
+    };
+    MidiArchiveStatusDto {
+        enabled: sh.enabled.load(Ordering::Relaxed),
+        archiving,
+        event_count: sh.event_count.load(Ordering::Relaxed),
+        seconds,
+        files_written: sh.files_written.load(Ordering::Relaxed),
+        last_file: sh.last_file.read().as_ref().map(|p| p.to_string_lossy().to_string()),
+        last_error: sh.last_error.read().clone(),
+    }
+}
+
+#[tauri::command]
+pub fn get_midi_archive_config(state: State<AppState>) -> MidiArchiveConfigDto {
+    midi_archive_config_dto(&state)
+}
+
+/// JS: invoke('set_midi_archive_config', { config })
+#[tauri::command]
+pub fn set_midi_archive_config(state: State<AppState>, config: MidiArchiveConfigDto) -> Result<MidiArchiveConfigDto, String> {
+    apply_midi_archive_config(&state, config)
+}
+
+#[tauri::command]
+pub fn midi_archive_status(state: State<AppState>) -> MidiArchiveStatusDto {
+    midi_archive_status_dto(&state)
+}
+
+/// De 10 nieuwste archiefbestanden (nieuwste eerst).
+#[tauri::command]
+pub fn midi_archive_list(state: State<AppState>) -> Vec<crate::midi_archive::ArchiveFileInfo> {
+    let dir = state.midi_archive.dir.read().clone();
+    crate::midi_archive::list_recent(&dir, 10)
+}
+
+/// Verwijder een archiefbestand — alleen .mid-bestanden direct in de archiefmap.
+#[tauri::command]
+pub fn midi_archive_delete(state: State<AppState>, path: String) -> Result<(), String> {
+    let dir = state.midi_archive.dir.read().clone();
+    let file = std::path::Path::new(&path);
+    if !crate::midi_archive::is_inside_archive_dir(&dir, file) {
+        return Err("Alleen bestanden in de archiefmap kunnen verwijderd worden".into());
+    }
+    std::fs::remove_file(file).map_err(|e| format!("Verwijderen mislukt: {}", e))?;
+    let mut last = state.midi_archive.last_file.write();
+    if last.as_ref().map(|p| p.as_path() == file).unwrap_or(false) {
+        *last = None;
+    }
+    info!("MIDI-archief: bestand verwijderd: {}", path);
+    Ok(())
+}
+
+/// Archiefmap in de Verkenner openen (zonder shell-parsing, zoals open_external_url).
+#[tauri::command]
+pub fn midi_archive_open_dir(state: State<AppState>) -> Result<(), String> {
+    let dir = state.midi_archive.dir.read().clone();
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| format!("Archiefmap niet aan te maken: {}", e))?;
+    std::process::Command::new("explorer")
+        .arg(dir.as_os_str())
+        .spawn()
+        .map_err(|e| format!("Verkenner openen mislukt: {}", e))?;
+    Ok(())
+}
+
+/// Lopende take nu afsluiten en wegschrijven (afsluiten app); antwoord = pad of null.
+/// Async + spawn_blocking (patroon set_audio_output): het wachten op de
+/// MIDI-thread (tot 1,5 s, bv. midden in een leermodus) mag de UI-thread
+/// niet blokkeren.
+#[tauri::command]
+pub async fn midi_archive_flush(state: State<'_, AppState>) -> Result<Option<String>, String> {
+    let st = state.inner().clone();
+    tokio::task::spawn_blocking(move || {
+        st.midi_archive_flush(std::time::Duration::from_millis(1500))
+            .map(|p| p.to_string_lossy().to_string())
+    })
+    .await
+    .map_err(|e| format!("archief-flush-taak mislukt: {}", e))
 }
 
 // ============ Muzieknotatie (MIDI → MusicXML) ============
@@ -3436,20 +4144,26 @@ pub fn set_reverb_type(state: State<AppState>, algorithmic: bool) -> Result<(), 
 
 /// Set temperament: 12 cent offsets per note class [C..B] + global fine-tuning.
 /// `name`/`a4_hz` zijn optioneel en dienen alleen voor per-orgel opslag (UI-herstel van de
-/// gekozen stemming); de audio gebruikt enkel note_offsets + fine_tune.
+/// gekozen stemming); de audio gebruikt note_offsets + fine_tune + retune.
+/// `retune` (default false = Origineel): hertemperen per pijp vanaf de gemeten
+/// toonhoogte (GrandOrgue-semantiek voor elke niet-"Original" stemming); false =
+/// "Origineel (zoals opgenomen)" — alleen PitchTuning + offsets.
 #[tauri::command]
-pub fn set_temperament(state: State<AppState>, note_offsets: Vec<f32>, fine_tune: f32, name: Option<String>, a4_hz: Option<f32>) -> Result<(), String> {
+pub fn set_temperament(state: State<AppState>, note_offsets: Vec<f32>, fine_tune: f32, name: Option<String>, a4_hz: Option<f32>, retune: Option<bool>) -> Result<(), String> {
     let mut offsets = [0.0f32; 12];
     for (i, &v) in note_offsets.iter().take(12).enumerate() {
         offsets[i] = v;
     }
-    state.send_audio_command(AudioCommand::SetTemperament { note_offsets: offsets, fine_tune });
+    // Niet opgegeven = Origineel (geen hertemperen); de UI geeft retune expliciet mee.
+    let retune_on = retune.unwrap_or(false);
+    state.send_audio_command(AudioCommand::SetTemperament { note_offsets: offsets, fine_tune, retune: retune_on });
     // Onthoud voor per-orgel opslag (save_current_organ_settings leest dit veld).
     *state.temperament_settings.write() = Some(library::TemperamentSettingsSaved {
         name: name.unwrap_or_default(),
         custom_cents: Some(offsets),
         fine_tune_cents: fine_tune,
         a4_hz: a4_hz.unwrap_or(440.0),
+        retune: Some(retune_on),
     });
     Ok(())
 }
@@ -3502,6 +4216,9 @@ pub fn set_tremulant(state: State<AppState>, division_name: String, active: bool
 
     if let Some(ref o) = *organ {
         if let Some(div) = o.divisions.iter().find(|d| d.name == division_name) {
+            // Spiegel voor de afstandsbediening (GET /state) — ook zonder
+            // trem-samples: de Console-stand is dan tóch 'aan' via de LFO.
+            state.tremulant_live.write().insert(division_name.clone(), active);
             let stop_ids: Vec<u32> = div.stops.iter()
                 .filter(|s| s.has_tremulant)
                 .map(|s| s.internal_stop_id)
@@ -3568,6 +4285,7 @@ pub fn get_status(state: State<AppState>) -> Result<StatusDto, String> {
         render_load: crate::audio::render_load().0,
         render_peak: crate::audio::render_load().1,
         stereo_samples: vpo_sampler::stereo_loading(),
+        midi_archiving: state.midi_archive.archiving.load(std::sync::atomic::Ordering::Relaxed),
     })
 }
 
@@ -3712,12 +4430,21 @@ pub fn query_supported_sample_rates(state: State<AppState>) -> Result<Vec<u32>, 
     Ok(rates.into_iter().collect())
 }
 
-/// Toggle a coupler on/off
-#[tauri::command]
-pub fn toggle_coupler(state: State<AppState>, coupler_id: String) -> Result<bool, String> {
+/// Koppel omschakelen (kern van het Tauri-commando toggle_coupler; ook voor de
+/// afstandsbediening). Controleert eerst of de koppel bestaat, zodat een
+/// willekeurige string nooit in active_couplers belandt.
+pub fn toggle_coupler_inner(state: &AppState, coupler_id: &str) -> Result<bool, String> {
+    let exists = state.loaded_organ_info.read().as_ref()
+        .and_then(|o| o.couplers.as_ref())
+        .map(|list| list.iter().any(|c| c.id == coupler_id))
+        .unwrap_or(false);
+    if !exists {
+        return Err(format!("Onbekende koppel: {}", coupler_id));
+    }
     info!("Toggle coupler: {}", coupler_id);
     let couplers_before: Vec<String> = state.active_couplers.read().clone();
-    let active = state.toggle_coupler(&coupler_id);
+    let active = state.toggle_coupler(coupler_id);
+    state.note_manual_change(coupler_id);
 
     // Update coupler active state in organ info
     {
@@ -3739,12 +4466,23 @@ pub fn toggle_coupler(state: State<AppState>, coupler_id: String) -> Result<bool
     Ok(active)
 }
 
+/// Toggle a coupler on/off
+#[tauri::command]
+pub fn toggle_coupler(state: State<AppState>, coupler_id: String) -> Result<bool, String> {
+    toggle_coupler_inner(&state, &coupler_id)
+}
+
 /// Set all active couplers at once (for preset recall)
 #[tauri::command]
 pub fn set_active_couplers(state: State<AppState>, coupler_ids: Vec<String>) -> Result<(), String> {
     info!("set_active_couplers: {:?}", coupler_ids);
     let couplers_before: Vec<String> = state.active_couplers.read().clone();
     state.set_active_couplers(coupler_ids.clone());
+    // Alle betrokken koppels zijn vanaf nu handmatig (trede-claim vervalt) —
+    // ook koppels die de preset bevat én de trede al had geclaimd.
+    for id in couplers_before.iter().chain(coupler_ids.iter()) {
+        state.note_manual_change(id);
+    }
 
     // Update coupler active states in organ info
     {
@@ -3803,6 +4541,8 @@ pub fn set_tremulant_lfo(state: State<AppState>, division: String, active: bool,
     let organ = state.loaded_organ_info.read();
     if let Some(ref o) = *organ {
         if let Some(idx) = o.divisions.iter().position(|d| d.name == division) {
+            // Spiegel voor de afstandsbediening (GET /state).
+            state.tremulant_live.write().insert(division.clone(), active);
             state.send_audio_command(AudioCommand::SetTremulantLFO {
                 division_index: idx as u8,
                 active,
@@ -4019,10 +4759,12 @@ pub fn set_crescendo_range(state: State<AppState>, min_val: u8, max_val: u8) -> 
 /// De MIDI-thread leest min/max live per CC-bericht, dus de wijziging werkt direct.
 #[tauri::command]
 pub fn set_swell_range(state: State<AppState>, division: String, min_val: u8, max_val: u8) -> Result<(), String> {
+    // Geordend: bij min > max werd de zwel een stapfunctie.
+    let (lo, hi) = (min_val.min(max_val).min(127), max_val.max(min_val).min(127));
     let mut bindings = state.get_swell_bindings();
     let mut found = false;
     for b in bindings.iter_mut() {
-        if b.division_name == division { b.min_val = min_val.min(127); b.max_val = max_val.min(127); found = true; }
+        if b.division_name == division { b.min_val = lo; b.max_val = hi; found = true; }
     }
     if !found { return Err(format!("Geen zwelbinding voor {}", division)); }
     state.set_swell_bindings_replace(bindings);
@@ -4546,6 +5288,17 @@ pub fn do_load_samples_from_directory_locked(state: &AppState, directory: &str) 
 
     info!("Found {} stops with {} pipes", custom_organ.stop_count(), custom_organ.pipe_count());
 
+    // Microfoonperspectieven (submappen per stop, 0.7.38): laadplan uit de
+    // opgeslagen/runtime-voorkeur; standaard alleen de eerste positie.
+    let saved_persp = perspective_prefs_for(state, directory);
+    let mut persp = plan_perspectives_custom(&custom_organ, &saved_persp);
+    let enabled_labels: std::collections::HashSet<String> = persp.iter()
+        .filter(|p| p.enabled)
+        .map(|p| p.name.clone())
+        .collect();
+    let mut rank_layout: HashMap<u32, Vec<(u8, u8)>> = HashMap::new();
+    let mut rank_summary: Vec<RankSummary> = Vec::new();
+
     // Collect all sample paths with their keys
     let mut load_tasks: Vec<((u32, u32), std::path::PathBuf)> = Vec::new();
     let mut trem_load_tasks: Vec<((u32, u32), std::path::PathBuf)> = Vec::new();
@@ -4562,30 +5315,79 @@ pub fn do_load_samples_from_directory_locked(state: &AppState, directory: &str) 
             let internal_stop_id = stop_id_counter;
             stop_id_counter += 1;
 
-            // Find the first and last MIDI note for THIS stop (not the division)
+            // Find the first and last MIDI note for THIS stop (not the division).
+            // De eerste noot komt ALTIJD uit laag 0 (ook als die positie is
+            // uitgeschakeld): de noot→pipe_num-uitlijning van alle lagen hangt
+            // eraan. De laatste noot over alle posities.
             let stop_first_note = stop.pipes.first().map(|p| p.midi_note).unwrap_or(36);
-            let stop_last_note = stop.pipes.last().map(|p| p.midi_note).unwrap_or(96);
+            let stop_last_note = stop.pipes.last().map(|p| p.midi_note)
+                .into_iter()
+                .chain(stop.perspectives.iter().filter_map(|p| p.pipes.last().map(|x| x.midi_note)))
+                .max()
+                .unwrap_or(96);
 
-            // Collect sample paths for preloading (dry samples)
-            for pipe in &stop.pipes {
-                let full_path = path.join(&pipe.sample_path);
-                let pipe_num = (pipe.midi_note as u32).saturating_sub(stop_first_note as u32) + 1;
-                load_tasks.push(((internal_stop_id, pipe_num), full_path));
+            // Lagen: 0 = primair (pipes/tremulant_pipes), i = perspectives[i-1].
+            let mut layers: Vec<(u8, Option<&str>, &[vpo_sampler::CustomPipe], &[vpo_sampler::CustomPipe])> = vec![
+                (0u8, stop.primary_perspective.as_deref(), stop.pipes.as_slice(),
+                 if stop.has_tremulant { stop.tremulant_pipes.as_slice() } else { &[] }),
+            ];
+            for (i, p) in stop.perspectives.iter().enumerate() {
+                layers.push(((i + 1) as u8, Some(p.name.as_str()), p.pipes.as_slice(), p.tremulant_pipes.as_slice()));
             }
-
-            // Collect tremulant sample paths (same key mapping as dry)
-            if stop.has_tremulant {
-                for pipe in &stop.tremulant_pipes {
+            let mut any_trem = false;
+            for (layer_idx, label, lpipes, ltrem) in &layers {
+                if let Some(l) = label {
+                    if !enabled_labels.contains(*l) {
+                        continue;
+                    }
+                }
+                let slot = persp.iter()
+                    .position(|x| Some(x.name.as_str()) == *label)
+                    .map(|i| i as u8 + 1)
+                    .unwrap_or(0);
+                let mut layer_any = false;
+                // Collect sample paths for preloading (dry samples)
+                for pipe in lpipes.iter() {
+                    if pipe.midi_note < stop_first_note {
+                        warn!("Stop '{}' positie {:?}: noot {} ligt onder de eerste noot {} van de primaire positie — overgeslagen",
+                              stop.name, label, pipe.midi_note, stop_first_note);
+                        continue;
+                    }
                     let full_path = path.join(&pipe.sample_path);
-                    let pipe_num = (pipe.midi_note as u32).saturating_sub(stop_first_note as u32) + 1;
-                    trem_load_tasks.push(((internal_stop_id, pipe_num), full_path));
+                    let base = (pipe.midi_note as u32) - stop_first_note as u32 + 1;
+                    load_tasks.push(((internal_stop_id, crate::audio::layer_key(base, *layer_idx)), full_path));
+                    layer_any = true;
+                }
+                // Collect tremulant sample paths (same key mapping as dry)
+                for pipe in ltrem.iter() {
+                    if pipe.midi_note < stop_first_note {
+                        continue;
+                    }
+                    let full_path = path.join(&pipe.sample_path);
+                    let base = (pipe.midi_note as u32) - stop_first_note as u32 + 1;
+                    trem_load_tasks.push(((internal_stop_id, crate::audio::layer_key(base, *layer_idx)), full_path));
+                    any_trem = true;
+                }
+                if layer_any {
+                    rank_layout.entry(internal_stop_id).or_default().push((*layer_idx, slot));
                 }
             }
+            rank_summary.push(RankSummary {
+                stop_id: internal_stop_id,
+                dto_id: format!("{}_{}", div_idx, internal_stop_id),
+                name: stop.name.clone(),
+                layers: layers.iter().map(|(idx, label, lpipes, _)| RankLayerSummary {
+                    index: *idx,
+                    name: label.map(|s| s.to_string()).unwrap_or_else(|| stop.name.clone()),
+                    perspective: label.map(|s| s.to_string()),
+                    pipes_nonempty: lpipes.len(),
+                }).collect(),
+            });
 
             let color = get_stop_color(&stop.name);
 
-            info!("Stop '{}': internal_id={}, MIDI range {}-{}, trem={}",
-                  stop.name, internal_stop_id, stop_first_note, stop_last_note, stop.has_tremulant);
+            info!("Stop '{}': internal_id={}, MIDI range {}-{}, trem={}, posities={}",
+                  stop.name, internal_stop_id, stop_first_note, stop_last_note, any_trem, layers.len());
 
             let reed = matches!(stop.family, vpo_sampler::custom_organ::StopFamily::Reed) || is_reed_stop(&stop.name);
             stops.push(StopDto {
@@ -4595,7 +5397,7 @@ pub fn do_load_samples_from_directory_locked(state: &AppState, directory: &str) 
                     .unwrap_or_else(|| format!("{}'", stop.pitch_feet as u32)),
                 drawn: false,
                 color: Some(color.to_string()),
-                has_tremulant: stop.has_tremulant,
+                has_tremulant: any_trem,
                 midi_action_code: stop_action_code,
                 internal_stop_id,
                 first_midi_note: stop_first_note,
@@ -4664,6 +5466,9 @@ pub fn do_load_samples_from_directory_locked(state: &AppState, directory: &str) 
             // wis de sets van een eventueel vorig (GrandOrgue/Hauptwerk-)orgel.
             let _ = player.send_command(crate::audio::AudioCommand::RegisterPercussiveStops(Default::default()));
             let _ = player.send_command(crate::audio::AudioCommand::RegisterOdfVoicings(Arc::new(Default::default())));
+            // Ook de hertemper-tabel wissen: (stop_id, pipe_num)-keys van een
+            // vorig GO-orgel zouden anders op deze set doorwerken.
+            let _ = player.send_command(crate::audio::AudioCommand::RegisterOdfRetune(Arc::new(Default::default())));
             let _ = player.send_command(crate::audio::AudioCommand::RegisterOdfLoops(Arc::new(Default::default())));
             // Ook de tremulant-samplelaag wissen: had het vórige orgel echte
             // trem-opnamen en dit orgel niet, dan bleven die buffers (en
@@ -4705,6 +5510,21 @@ pub fn do_load_samples_from_directory_locked(state: &AppState, directory: &str) 
         }
     }
 
+    // Laadplan per stop (altijd sturen, ook leeg — vervangt de map van het
+    // vorige orgel) + live gains per perspectief-slot.
+    {
+        let multi = rank_layout.values().filter(|v| v.len() > 1).count();
+        if multi > 0 {
+            info!("Perspectieven: {} stops met meerdere posities geladen; {:?}", multi,
+                  persp.iter().map(|p| format!("{}={}", p.name, if p.enabled { "aan" } else { "uit" })).collect::<Vec<_>>());
+        }
+        state.send_audio_command(crate::audio::AudioCommand::RegisterRankLayout(Arc::new(rank_layout)));
+        for p in persp.iter_mut() {
+            state.send_audio_command(crate::audio::AudioCommand::SetPerspectiveGain { slot: p.slot, gain_db: p.gain_db });
+            p.loaded = p.enabled;
+        }
+    }
+
     let stop_count: usize = divisions.iter().map(|d| d.stops.len()).sum();
     let couplers = generate_couplers(&divisions);
 
@@ -4717,6 +5537,10 @@ pub fn do_load_samples_from_directory_locked(state: &AppState, directory: &str) 
         stop_count,
         divisions,
         couplers: Some(couplers),
+        retune_pipes: 0,
+        retune_total: 0,
+        perspectives: perspective_dtos(&persp),
+        layered_stops: 0,
     };
 
     // Reset bij orgelwissel: stop alle klinkende noten en wis de getrokken registratie +
@@ -4733,6 +5557,9 @@ pub fn do_load_samples_from_directory_locked(state: &AppState, directory: &str) 
     *state.crescendo_stage.write() = 0;
     state.set_active_couplers(Vec::new());
     reset_organ_scoped_state(state);
+    // Perspectieven + lagen-samenvatting van dít orgel (ná de reset).
+    *state.perspectives.write() = persp;
+    *state.rank_summary.write() = rank_summary;
 
     // Build stop→division map and register with audio thread
     let stop_div_map = build_stop_division_map(&organ_info.divisions);
@@ -4758,6 +5585,8 @@ pub fn do_load_samples_from_directory_locked(state: &AppState, directory: &str) 
     // current_organ_id is al vóór de DTO-publicatie gezet (auditbevinding 41).
     restore_organ_settings(state, directory);
     apply_pending_registration(state, &organ_info);
+    // Zwelstand terugzetten (RegisterStopDivisionMap zette de audio op open).
+    apply_swell_positions(state);
 
     Ok(fill_live_registration_flags(state, organ_info))
 }
@@ -4796,40 +5625,14 @@ fn add_to_library_if_new(state: &AppState, organ_info: &OrganInfoDto, source_pat
 fn restore_organ_settings(state: &AppState, organ_id: &str) {
     use crate::state::{MidiPresetBinding, MidiPresetTrigger, MidiChannelMapping, SwellBinding};
 
-    let settings = {
-        let lib = state.organ_library.read();
-        lib.settings.get(organ_id).cloned().or_else(|| {
-            // Zelfde orgel, andere pad-notatie (case/slashes): vind de entry
-            // case-insensitief zodat instellingen niet "zoekraken" (audit 49).
-            let want = organ_id.replace('/', "\\").to_lowercase();
-            lib.settings.iter()
-                .find(|(k, _)| k.replace('/', "\\").to_lowercase() == want)
-                .map(|(_, v)| v.clone())
-        })
-    };
-    let settings = match settings {
+    // Bibliotheek (exact/case-ongevoelig, audit 49), anders .jm-settings.json
+    // naast het orgel (wordt geïmporteerd, auditbevinding 17) — zie
+    // saved_settings_for; dezelfde bron gebruikt de perspectieven-planning
+    // vóór de load. Perspectief-gains zijn daar al toegepast (SetPerspectiveGain
+    // bij de load), dus hier niets extra's voor perspectieven.
+    let settings = match saved_settings_for(state, organ_id) {
         Some(s) => s,
-        None => {
-            // Fallback: .jm-settings.json naast het orgel (verse AppData, andere
-            // pc of herinstallatie). Importeer hem in de bibliotheek zodat ALLE
-            // herstel-paden (apply_saved_*, presets) hem daarna ook zien —
-            // voorheen ging vrijwel alles verloren en werd het bestand bij de
-            // eerste autosave zelfs overschreven (auditbevinding 17).
-            let from_file = organ_settings_dir(organ_id)
-                .map(|d| d.join(".jm-settings.json"))
-                .filter(|p| p.exists())
-                .and_then(|p| std::fs::read_to_string(&p).ok())
-                .and_then(|j| serde_json::from_str::<OrganSettings>(&j).ok());
-            match from_file {
-                Some(s) => {
-                    info!("Instellingen geïmporteerd uit .jm-settings.json naast het orgel (geen bibliotheek-entry)");
-                    state.organ_library.write().settings.insert(organ_id.to_string(), s.clone());
-                    state.save_library();
-                    s
-                }
-                None => return,
-            }
-        }
+        None => return,
     };
 
     info!("Restoring settings for organ: {}", organ_id);
@@ -4875,22 +5678,38 @@ fn restore_organ_settings(state: &AppState, organ_id: &str) {
         info!("Restored {} preset bindings", count);
     }
 
-    // Restore swell bindings
+    // Restore swell bindings — de divisie-index wordt herleid uit de
+    // divisienaam (de opgeslagen index kan verschoven zijn na her-import).
+    // Bij een herlaad/wissel van hetzelfde orgel wint de laatst ontvangen
+    // pedaalstand (stash) van de opgeslagen waarde.
     if !settings.swell_bindings.is_empty() {
-        let bindings: Vec<SwellBinding> = settings.swell_bindings.iter().map(|b| {
-            SwellBinding {
-                division_name: b.division_name.clone(),
-                division_index: b.division_index,
-                channel: b.channel,
-                cc_num: b.cc_num,
-                min_val: b.min_val,
-                max_val: b.max_val,
-                invert: b.invert,
+        let mut bindings = swell_bindings_from_saved(state, &settings.swell_bindings);
+        if let Some((prev_id, stash)) = state.swell_last_stash.write().take() {
+            if prev_id.eq_ignore_ascii_case(organ_id) {
+                for b in bindings.iter_mut() {
+                    if let Some((_, v)) = stash.iter().find(|(d, _)| *d == b.division_name) {
+                        b.last_value = Some(*v);
+                    }
+                }
             }
-        }).collect();
+        }
         let count = bindings.len();
         state.set_swell_bindings_replace(bindings);
         info!("Restored {} swell bindings", count);
+    }
+    // Stash is alleen voor déze herlaad; niet laten liggen voor een latere.
+    *state.swell_last_stash.write() = None;
+
+    // Generaal-crescendo matrix + aan/uit + kolomaantal (per orgel; de
+    // load-reset heeft ze net gewist). De trede zelf staat na een load op 0;
+    // de registers van de trede komen dus alleen via het pedaal terug.
+    if !settings.crescendo_stages.is_empty() || settings.crescendo_enabled {
+        *state.crescendo_stages.write() = settings.crescendo_stages.clone();
+        *state.crescendo_enabled.write() = settings.crescendo_enabled;
+        info!("Restored crescendo config: {} stages, enabled={}", settings.crescendo_stages.len(), settings.crescendo_enabled);
+    }
+    if settings.crescendo_num_stages > 0 {
+        *state.crescendo_num_stages.write() = settings.crescendo_num_stages;
     }
 
     // Restore de "laatste stand": getrokken registratie + actieve koppels. Alleen de
@@ -5005,6 +5824,19 @@ pub async fn save_current_organ_settings(state: State<'_, AppState>, presets: Ha
         .map_err(|e| format!("instellingen-opslaan-taak mislukt: {}", e))
 }
 
+/// Handregistratie = getrokken registers/koppels MINUS de claims van de
+/// crescendotrede (lidmaatschap van de claimlijst, geen naamprefix). Gebruikt
+/// door de autosave 'laatste stand' en de setzer-SET.
+pub fn registration_without_crescendo(
+    drawn: &[String],
+    couplers: &[String],
+    claims: &[String],
+) -> (Vec<String>, Vec<String>) {
+    let stops = drawn.iter().filter(|s| !claims.contains(s)).cloned().collect();
+    let cpl = couplers.iter().filter(|c| !claims.contains(c)).cloned().collect();
+    (stops, cpl)
+}
+
 /// Kern van het opslaan van per-orgel instellingen — herbruikbaar buiten de Tauri-command
 /// (o.a. de test-API). Verzamelt de huidige state in OrganSettings en schrijft naar library
 /// + .jm-settings.json.
@@ -5085,6 +5917,7 @@ pub fn do_save_organ_settings(state: &AppState, presets: HashMap<String, PresetD
             min_val: b.min_val,
             max_val: b.max_val,
             invert: b.invert,
+            last_value: b.last_value,
         }
     }).collect();
 
@@ -5149,14 +5982,21 @@ pub fn do_save_organ_settings(state: &AppState, presets: HashMap<String, PresetD
         Some(library::CcisSpreadSaved { strength, falloff, swap })
     };
 
-    // Laatste stand: getrokken registratie + actieve koppels (hersteld bij laden)
-    let drawn_stops = state.drawn_stops.read().clone();
-    let active_couplers = state.get_active_couplers();
+    // Laatste stand: getrokken registratie + actieve koppels (hersteld bij laden),
+    // MINUS wat de crescendotrede bijtrok: die registers zijn geen
+    // handregistratie en zouden na een herstart vast getrokken staan (de trede
+    // begint dan op 0 en trekt ze nooit meer weg).
+    let (drawn_stops, active_couplers) = registration_without_crescendo(
+        &state.drawn_stops.read(), &state.get_active_couplers(), &state.crescendo_active_stops.read());
 
     // Generaal-crescendo pedaalbinding (channel/cc/min/max/invert) — persistent
     let crescendo_binding = state.crescendo_binding.read().map(|(ch, cc, mn, mx, inv)| library::CrescendoBindingSaved {
         channel: ch, cc_num: cc, min_val: mn, max_val: mx, invert: inv,
     });
+    // Crescendo-matrix + aan/uit + kolomaantal (per orgel).
+    let crescendo_stages = state.crescendo_stages.read().clone();
+    let crescendo_enabled = *state.crescendo_enabled.read();
+    let crescendo_num_stages = *state.crescendo_num_stages.read();
 
     // Gather current division-wind-group toewijzing
     let division_wind_groups: Vec<library::DivisionWindGroupSaved> = {
@@ -5216,6 +6056,11 @@ pub fn do_save_organ_settings(state: &AppState, presets: HashMap<String, PresetD
         })
         .collect();
 
+    // Microfoonperspectieven: aan/uit (laden) + volume per label.
+    let perspectives: Vec<PerspectiveSaved> = state.perspectives.read().iter()
+        .map(|p| PerspectiveSaved { name: p.name.clone(), enabled: p.enabled, gain_db: p.gain_db })
+        .collect();
+
     let settings = OrganSettings {
         presets,
         preset_bindings,
@@ -5234,10 +6079,14 @@ pub fn do_save_organ_settings(state: &AppState, presets: HashMap<String, PresetD
         drawn_stops,
         active_couplers,
         crescendo_binding,
+        crescendo_stages,
+        crescendo_enabled,
+        crescendo_num_stages,
         division_pans,
         division_swell_configs,
         division_tremulants,
         wind_group_configs,
+        perspectives,
     };
 
     // Save to organ directory as well (.jm-settings.json next to the organ)
@@ -5374,20 +6223,62 @@ pub fn restore_preset_bindings(state: State<AppState>, bindings: Vec<PresetBindi
 
 #[tauri::command]
 pub fn restore_swell_bindings(state: State<AppState>, bindings: Vec<SwellBindingSaved>) {
-    use crate::state::SwellBinding;
+    let swell = swell_bindings_from_saved(&state, &bindings);
+    state.set_swell_bindings_replace(swell);
+    apply_swell_positions(&state);
+}
 
-    let swell: Vec<SwellBinding> = bindings.into_iter().map(|b| {
-        SwellBinding {
-            division_name: b.division_name,
-            division_index: b.division_index,
+/// Opgeslagen zwelbindingen → runtime-bindingen. De divisie-index wordt uit de
+/// divisienaam van het geladen orgel herleid; een binding op een naam die dit
+/// orgel niet (meer) kent wordt overgeslagen (met melding) — anders stuurde de
+/// zweltrede na een her-import met verschoven divisievolgorde het verkeerde
+/// klavier aan. Zonder geladen orgel blijft de opgeslagen index gelden.
+fn swell_bindings_from_saved(state: &AppState, saved: &[SwellBindingSaved]) -> Vec<crate::state::SwellBinding> {
+    use crate::state::SwellBinding;
+    let division_names: Option<Vec<String>> = state.loaded_organ_info.read().as_ref()
+        .map(|o| o.divisions.iter().map(|d| d.name.clone()).collect());
+    saved.iter().filter_map(|b| {
+        let division_index = match &division_names {
+            Some(names) => match names.iter().position(|n| *n == b.division_name) {
+                Some(i) => i as u8,
+                None => {
+                    warn!("Zwelbinding voor '{}' overgeslagen: divisie bestaat niet in dit orgel", b.division_name);
+                    return None;
+                }
+            },
+            None => b.division_index,
+        };
+        Some(SwellBinding {
+            division_name: b.division_name.clone(),
+            division_index,
             channel: b.channel,
             cc_num: b.cc_num,
             min_val: b.min_val,
             max_val: b.max_val,
             invert: b.invert,
-        }
-    }).collect();
-    state.set_swell_bindings_replace(swell);
+            last_value: b.last_value,
+        })
+    }).collect()
+}
+
+/// Zet de laatst bekende zwelstand per binding terug op de audio-thread én in
+/// de UI-spiegel (division_gains). Nodig na elke orgel-(her)laad en audio-
+/// wissel: RegisterStopDivisionMap/ClearSamples zetten de audio-gains hard op
+/// 1.0 terwijl de fysieke trede dicht kan staan. Zonder bekende stand blijft
+/// 1.0 (open) het veilige default.
+pub fn apply_swell_positions(state: &AppState) {
+    use crate::state::swell_gain_from_cc;
+    let bindings = state.get_swell_bindings();
+    let mut n = 0;
+    for b in bindings.iter() {
+        let Some(v) = b.last_value else { continue; };
+        let gain = swell_gain_from_cc(v, b.min_val, b.max_val, b.invert);
+        state.set_division_gain(b.division_index, gain);
+        n += 1;
+    }
+    if n > 0 {
+        info!("Zwelstand hersteld voor {} divisie(s)", n);
+    }
 }
 
 // ============ MP3-recorder ============
@@ -5429,7 +6320,9 @@ fn make_timestamped_recording_path(ext: &str) -> std::path::PathBuf {
 }
 
 /// Zet epoch-seconden om naar (jaar, maand, dag, uur, min, sec) — UTC.
-fn epoch_to_ymdhms(epoch: u64) -> (u32, u32, u32, u32, u32, u32) {
+/// pub(crate): midi_archive.rs gebruikt dit als niet-Windows-fallback.
+#[allow(dead_code)]
+pub(crate) fn epoch_to_ymdhms(epoch: u64) -> (u32, u32, u32, u32, u32, u32) {
     let s = (epoch % 60) as u32;
     let m = ((epoch / 60) % 60) as u32;
     let h = ((epoch / 3600) % 24) as u32;
@@ -5703,12 +6596,118 @@ pub fn shutdown_computer() -> Result<(), String> {
 }
 
 #[cfg(test)]
+mod perspective_plan_tests {
+    use super::{plan_perspectives_custom, plan_perspectives_from, PerspectiveSaved};
+    use vpo_sampler::custom_organ::{CustomOrgan, CustomPerspective, StopFamily};
+
+    fn saved(name: &str, enabled: bool, gain_db: f32) -> PerspectiveSaved {
+        PerspectiveSaved { name: name.into(), enabled, gain_db }
+    }
+
+    #[test]
+    fn zonder_opslag_alleen_primaire_labels_aan() {
+        // SJDL-vorm: front primair, rear/dry extra → alleen front aan.
+        let obs = vec![
+            ("front".to_string(), true, 56), ("rear".to_string(), false, 56), ("dry".to_string(), false, 56),
+            ("front".to_string(), true, 30), ("rear".to_string(), false, 30), ("dry".to_string(), false, 30),
+        ];
+        let plan = plan_perspectives_from(obs, &[]);
+        let names: Vec<&str> = plan.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, vec!["front", "rear", "dry"]);
+        assert_eq!(plan.iter().map(|p| p.enabled).collect::<Vec<_>>(), vec![true, false, false]);
+        assert_eq!(plan.iter().map(|p| p.slot).collect::<Vec<_>>(), vec![1, 2, 3]);
+        assert_eq!(plan[0].pipe_count, 86);
+        assert!(plan.iter().all(|p| !p.loaded && p.gain_db == 0.0));
+    }
+
+    #[test]
+    fn opgeslagen_rear_aan_wordt_gehonoreerd_en_onbekend_genegeerd() {
+        let obs = vec![("front".to_string(), true, 10), ("rear".to_string(), false, 10)];
+        let plan = plan_perspectives_from(obs, &[saved("rear", true, -6.0), saved("front", false, 99.0), saved("spook", true, 0.0)]);
+        assert_eq!(plan.len(), 2, "onbekend label 'spook' komt niet in de lijst");
+        assert!(!plan[0].enabled && plan[0].gain_db == 12.0, "front uit, gain geclampt op +12");
+        assert!(plan[1].enabled && (plan[1].gain_db + 6.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn extra_laag_label_zonder_primair_staat_standaard_uit() {
+        // GO-set met ongelabelde laag 0 en een "(rear)"-rank als extra laag:
+        // rear komt nergens als primair voor → standaard uit (anders dubbel).
+        let obs = vec![("rear".to_string(), false, 20)];
+        let plan = plan_perspectives_from(obs, &[]);
+        assert_eq!(plan.len(), 1);
+        assert!(!plan[0].enabled);
+        // Echte ranks zonder label leveren geen waarneming en dus geen entry.
+        let empty = plan_perspectives_from(Vec::<(String, bool, usize)>::new(), &[]);
+        assert!(empty.is_empty());
+    }
+
+    #[test]
+    fn hoogstens_vijftien_labels() {
+        let obs: Vec<(String, bool, usize)> = (0..20).map(|i| (format!("mic{}", i), i == 0, 1)).collect();
+        let plan = plan_perspectives_from(obs, &[]);
+        assert_eq!(plan.len(), 15);
+        assert_eq!(plan.last().unwrap().slot, 15);
+    }
+
+    #[test]
+    fn custom_plan_uit_submappen() {
+        let mut organ = CustomOrgan::new("MicTest");
+        let div = organ.add_division("HW", 36, 96);
+        let s = div.add_stop("Prestant", 8.0, StopFamily::Principal);
+        s.add_pipe(36, "HW/Prestant_8/Front/036-c.wav".into());
+        s.primary_perspective = Some("Front".into());
+        s.perspectives.push(CustomPerspective {
+            name: "Rear".into(),
+            pipes: vec![],
+            tremulant_pipes: vec![],
+        });
+        let plan = plan_perspectives_custom(&organ, &[]);
+        assert_eq!(plan.iter().map(|p| (p.name.as_str(), p.enabled)).collect::<Vec<_>>(), vec![("Front", true), ("Rear", false)]);
+        // Stop zonder posities → geen labels.
+        let plain = CustomOrgan::new("Plain");
+        assert!(plan_perspectives_custom(&plain, &[]).is_empty());
+    }
+}
+
+#[cfg(test)]
 mod smf_tests {
-    use super::encode_smf;
+    use super::{encode_smf, encode_smf_with_name};
 
     /// Lees een big-endian u32 op offset.
     fn be_u32(d: &[u8], off: usize) -> u32 {
         u32::from_be_bytes([d[off], d[off + 1], d[off + 2], d[off + 3]])
+    }
+
+    #[test]
+    fn encode_smf_with_name_emits_ff03() {
+        let events = vec![(0u64, 0xC0u8, 5u8, 0u8, 0u8)];
+        let data = encode_smf_with_name(&events, Some("Bätz"));
+        let track_len = be_u32(&data, 18) as usize;
+        let track = &data[22..22 + track_len];
+        // Track: [tempo-meta 7 bytes] [00 FF 03 len naam...] [PC] [eot]
+        assert_eq!(&track[0..7], &[0x00, 0xFF, 0x51, 0x03, 0x07, 0xA1, 0x20]);
+        let name = "Bätz".as_bytes();
+        assert_eq!(&track[7..10], &[0x00, 0xFF, 0x03]);
+        assert_eq!(track[10] as usize, name.len());
+        assert_eq!(&track[11..11 + name.len()], name);
+        // PC-event volgt direct op de naam.
+        assert_eq!(&track[11 + name.len()..11 + name.len() + 3], &[0x00, 0xC0, 0x05]);
+        // Zonder naam: byte-identiek aan de wrapper (geen FF 03).
+        assert_eq!(encode_smf_with_name(&events, None), encode_smf(&events));
+        assert!(!encode_smf(&events).windows(2).any(|w| w == [0xFF, 0x03]));
+        // Lege naam → geen meta.
+        assert_eq!(encode_smf_with_name(&events, Some("")), encode_smf(&events));
+        // Lange naam wordt op tekens afgekapt (120) en blijft geldige UTF-8.
+        let long: String = std::iter::repeat('ä').take(200).collect();
+        let d2 = encode_smf_with_name(&events, Some(&long));
+        let t2 = &d2[22..];
+        // 120 tekens × 2 bytes = 240 → var-len in twee bytes (0x81 0x70).
+        assert_eq!(&t2[7..12], &[0x00, 0xFF, 0x03, 0x81, 0x70]);
+        let smf = midly::Smf::parse(&d2).expect("geldige SMF");
+        let has_name = smf.tracks[0].iter().any(|ev| matches!(ev.kind,
+            midly::TrackEventKind::Meta(midly::MetaMessage::TrackName(n)) if n.len() == 240));
+        assert!(has_name);
     }
 
     #[test]
@@ -5751,5 +6750,28 @@ mod smf_tests {
         assert_eq!(track[pc_pos + 1], 0x05);
         // Na de PC (1 databyte) volgt de end-of-track delta (0x00) + 0xFF 0x2F 0x00.
         assert_eq!(&track[pc_pos + 2..pc_pos + 6], &[0x00, 0xFF, 0x2F, 0x00]);
+    }
+}
+
+#[cfg(test)]
+mod crescendo_save_tests {
+    use super::registration_without_crescendo;
+
+    fn ids(v: &[&str]) -> Vec<String> { v.iter().map(|s| s.to_string()).collect() }
+
+    #[test]
+    fn opslaan_minus_trede_claims() {
+        let drawn = ids(&["Prestant_8", "Trompet_8", "Octaaf_4"]);
+        let couplers = ids(&["real_coupler_1", "coupler_II_I"]);
+        let claims = ids(&["Octaaf_4", "real_coupler_1"]);
+        let (stops, cpl) = registration_without_crescendo(&drawn, &couplers, &claims);
+        assert_eq!(stops, ids(&["Prestant_8", "Trompet_8"]));
+        assert_eq!(cpl, ids(&["coupler_II_I"]));
+        // Zonder claims blijft alles staan; lege registratie blijft leeg.
+        let (s2, c2) = registration_without_crescendo(&drawn, &couplers, &[]);
+        assert_eq!(s2, drawn);
+        assert_eq!(c2, couplers);
+        let (s3, c3) = registration_without_crescendo(&[], &[], &claims);
+        assert!(s3.is_empty() && c3.is_empty());
     }
 }

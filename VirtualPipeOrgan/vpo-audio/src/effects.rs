@@ -337,6 +337,11 @@ impl OnePoleFilter {
     }
 
     pub fn reset(&mut self) { self.state = 0.0; }
+
+    /// Filterstaat op het ingangssignaal zetten terwijl het filter gebypasst
+    /// is (zwelkast open): zo start het zonder sprong zodra het weer meedoet.
+    #[inline]
+    pub fn prime(&mut self, input: f32) { self.state = input; }
 }
 
 /// Biquad filter for more precise filtering

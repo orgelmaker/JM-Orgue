@@ -68,6 +68,26 @@ pub struct CustomStop {
     /// Whether this stop has a tremulant variant available
     #[serde(default)]
     pub has_tremulant: bool,
+    /// Naam van de microfoonpositie (submap) waaruit `pipes` komt — alléén
+    /// gezet als de stopmap meerdere posities heeft (zie `perspectives`).
+    #[serde(default)]
+    pub primary_perspective: Option<String>,
+    /// Overige microfoonposities (submappen) van deze stop, elk met eigen
+    /// (droge + tremulant-)pijpen. Leeg bij een stopmap zonder submappen.
+    #[serde(default)]
+    pub perspectives: Vec<CustomPerspective>,
+}
+
+/// Eén extra microfoonpositie van een stop (submap in de stopmap).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CustomPerspective {
+    /// Submapnaam zoals de gebruiker hem koos (bv. "Rear"); tevens het label
+    /// in de perspectieven-UI.
+    pub name: String,
+    pub pipes: Vec<CustomPipe>,
+    /// Tremulant-opnamen van dezelfde positie (uit `<stop>_trem/<naam>/`).
+    #[serde(default)]
+    pub tremulant_pipes: Vec<CustomPipe>,
 }
 
 /// Stop family for UI coloring
@@ -198,6 +218,14 @@ impl CustomOrgan {
         writeln!(out, "NumberOfEnclosures=0").unwrap();
         writeln!(out, "NumberOfTremulants={}", num_tremulants).unwrap();
         writeln!(out, "NumberOfWindchestGroups={}", num_windchests).unwrap();
+        let num_ranks: usize = self.divisions.iter()
+            .flat_map(|d| d.stops.iter())
+            .filter(|s| !s.perspectives.is_empty())
+            .map(|s| 1 + s.perspectives.len())
+            .sum();
+        if num_ranks > 0 {
+            writeln!(out, "NumberOfRanks={}", num_ranks).unwrap();
+        }
         writeln!(out, "AmplitudeLevel=100").unwrap();
         writeln!(out).unwrap();
 
@@ -292,13 +320,95 @@ impl CustomOrgan {
             writeln!(out).unwrap();
         }
 
-        // Stop sections with pipe definitions
+        // Stop sections with pipe definitions. Stops met meerdere microfoon-
+        // posities krijgen het rank-formaat: per positie een [RankNNN] met
+        // Name "<stopnaam> (<positie>)" — de GO-parser legt die bij herimport
+        // als lagen/perspectieven terug (parse_stop_ranks). Stops zonder
+        // posities blijven inline (ongewijzigd formaat).
+        let mut next_rank_id = 1u32;
         for (div_idx, div) in self.divisions.iter().enumerate() {
             let wc_num = div_idx + 1;
             let stop_ids = &stop_ids_per_div[div_idx];
 
             for (stop_idx, stop) in div.stops.iter().enumerate() {
                 let sid = stop_ids[stop_idx];
+                if !stop.perspectives.is_empty() {
+                    let harmonic = if stop.pitch_feet > 0.01 {
+                        ((64.0 / stop.pitch_feet).round() as u32).max(1)
+                    } else {
+                        8
+                    };
+                    // Lagen: primair + perspectieven, allemaal op hetzelfde
+                    // dichte bereik (laagste..hoogste noot over alle posities).
+                    let mut layers: Vec<(String, &Vec<CustomPipe>)> = Vec::new();
+                    layers.push((stop.primary_perspective.clone().unwrap_or_default(), &stop.pipes));
+                    for p in &stop.perspectives {
+                        layers.push((p.name.clone(), &p.pipes));
+                    }
+                    let all_notes = layers.iter().flat_map(|(_, p)| p.iter().map(|x| x.midi_note as u32));
+                    let div_first = div.first_midi_note as u32;
+                    let stop_first = all_notes.clone().min().unwrap_or(div_first);
+                    let stop_last = all_notes.max().unwrap_or(stop_first);
+                    let span = stop_last - stop_first + 1;
+                    let first_pipe_key = stop_first.saturating_sub(div_first) + 1;
+                    let rank_ids: Vec<u32> = (0..layers.len()).map(|i| next_rank_id + i as u32).collect();
+                    next_rank_id += layers.len() as u32;
+
+                    writeln!(out, "[Stop{:03}]", sid).unwrap();
+                    writeln!(out, "Name={}", stop.name).unwrap();
+                    writeln!(out, "NumberOfRanks={}", layers.len()).unwrap();
+                    for (i, rid) in rank_ids.iter().enumerate() {
+                        writeln!(out, "Rank{:03}={:03}", i + 1, rid).unwrap();
+                        writeln!(out, "Rank{:03}FirstAccessibleKeyNumber=1", i + 1).unwrap();
+                        writeln!(out, "Rank{:03}PipeCount={}", i + 1, span).unwrap();
+                    }
+                    writeln!(out, "NumberOfAccessiblePipes={}", span).unwrap();
+                    writeln!(out, "FirstAccessiblePipeLogicalKeyNumber={}", first_pipe_key).unwrap();
+                    writeln!(out, "WindchestGroup={:03}", wc_num).unwrap();
+                    writeln!(out, "Percussive=N").unwrap();
+                    writeln!(out, "HarmonicNumber={}", harmonic).unwrap();
+                    writeln!(out, "AmplitudeLevel=100").unwrap();
+                    writeln!(out).unwrap();
+
+                    for ((lname, lpipes), rid) in layers.iter().zip(rank_ids.iter()) {
+                        let mut by_note: std::collections::BTreeMap<u32, &CustomPipe> = std::collections::BTreeMap::new();
+                        for pipe in lpipes.iter() {
+                            by_note.entry(pipe.midi_note as u32).or_insert(pipe);
+                        }
+                        writeln!(out, "[Rank{:03}]", rid).unwrap();
+                        if lname.is_empty() {
+                            writeln!(out, "Name={}", stop.name).unwrap();
+                        } else {
+                            writeln!(out, "Name={} ({})", stop.name, lname).unwrap();
+                        }
+                        writeln!(out, "WindchestGroup={:03}", wc_num).unwrap();
+                        writeln!(out, "FirstMidiNoteNumber={}", stop_first).unwrap();
+                        writeln!(out, "NumberOfLogicalPipes={}", span).unwrap();
+                        writeln!(out, "Percussive=N").unwrap();
+                        writeln!(out, "HarmonicNumber={}", harmonic).unwrap();
+                        writeln!(out, "AmplitudeLevel=100").unwrap();
+                        for (pipe_idx, note) in (stop_first..=stop_last).enumerate() {
+                            match by_note.get(&note) {
+                                Some(pipe) => {
+                                    let path_str = pipe.sample_path.to_string_lossy().replace('\\', "/");
+                                    writeln!(out, "Pipe{:03}={}", pipe_idx + 1, path_str).unwrap();
+                                    if pipe.volume_db.abs() > 0.1 {
+                                        let amp = 100.0 * 10.0_f32.powf(pipe.volume_db / 20.0);
+                                        writeln!(out, "Pipe{:03}AmplitudeLevel={:.0}", pipe_idx + 1, amp).unwrap();
+                                    }
+                                    if pipe.pitch_cents != 0 {
+                                        writeln!(out, "Pipe{:03}PitchTuning={}", pipe_idx + 1, pipe.pitch_cents).unwrap();
+                                    }
+                                }
+                                None => {
+                                    writeln!(out, "Pipe{:03}=DUMMY", pipe_idx + 1).unwrap();
+                                }
+                            }
+                        }
+                        writeln!(out).unwrap();
+                    }
+                    continue;
+                }
 
                 // GrandOrgue-standaard: harmonic = 64 / voet (8' → 8). De oude
                 // tabel schreef 32/voet, waardoor elke geëxporteerde stop na
@@ -380,6 +490,8 @@ impl CustomDivision {
             pipes: Vec::new(),
             tremulant_pipes: Vec::new(),
             has_tremulant: false,
+            primary_perspective: None,
+            perspectives: Vec::new(),
         });
         self.stops.last_mut().unwrap()
     }
@@ -656,22 +768,40 @@ fn classify_half(sub_name: &str) -> Option<StopHalf> {
     }
 }
 
+/// Eén variant van een stopmap: bas-/discanthelft of volledig bereik, met
+/// eventueel meerdere microfoonposities (alleen bij `Full`).
+struct StopVariant {
+    half: StopHalf,
+    pipes: Vec<CustomPipe>,
+    /// Submapnaam van `pipes` als er ≥2 posities zijn.
+    primary_perspective: Option<String>,
+    /// Overige posities: (submapnaam, pijpen).
+    perspectives: Vec<(String, Vec<CustomPipe>)>,
+}
+
 /// Determine the sample variants inside a stop folder.
 ///
 /// Priority:
 /// 1. Audio files directly in the folder -> one `Full` variant.
 /// 2. `*_bas` / `*_dis` sub-folders -> separate `Bass` / `Discant` variants
 ///    (this is how bass/discant-divided registers are stored).
-/// 3. Otherwise treat sub-folders as multi-microphone positions and use the
-///    first one alphabetically as a single `Full` variant.
+/// 3. Otherwise treat sub-folders as multi-microphone positions: the first
+///    one alphabetically becomes the primary `Full` variant, the rest become
+///    selectable perspectives.
 fn scan_stop_variants(
     stop_path: &Path,
     base_dir: &Path,
-) -> Result<Vec<(StopHalf, Vec<CustomPipe>)>, std::io::Error> {
+) -> Result<Vec<StopVariant>, std::io::Error> {
+    let full = |pipes: Vec<CustomPipe>| StopVariant {
+        half: StopHalf::Full,
+        pipes,
+        primary_perspective: None,
+        perspectives: Vec::new(),
+    };
     // 1. Direct audio files -> full-compass stop.
     let direct = scan_audio_files(stop_path, base_dir)?;
     if !direct.is_empty() {
-        return Ok(vec![(StopHalf::Full, direct)]);
+        return Ok(vec![full(direct)]);
     }
 
     // 2. Look for bass/discant sub-folders.
@@ -704,21 +834,30 @@ fn scan_stop_variants(
     if !bass.is_empty() || !disc.is_empty() {
         let mut variants = Vec::new();
         if !bass.is_empty() {
-            variants.push((StopHalf::Bass, bass));
+            variants.push(StopVariant { half: StopHalf::Bass, pipes: bass, primary_perspective: None, perspectives: Vec::new() });
         }
         if !disc.is_empty() {
-            variants.push((StopHalf::Discant, disc));
+            variants.push(StopVariant { half: StopHalf::Discant, pipes: disc, primary_perspective: None, perspectives: Vec::new() });
         }
         return Ok(variants);
     }
 
-    // 3. No bass/discant split -> multi-mic fallback (first sub-folder with audio).
-    let full = scan_audio_files_with_multimic(stop_path, base_dir)?;
-    if full.is_empty() {
-        Ok(Vec::new())
-    } else {
-        Ok(vec![(StopHalf::Full, full)])
+    // 3. No bass/discant split -> multi-mic: eerste submap = primair, de
+    //    rest wordt een kiesbaar perspectief.
+    let mut mics = scan_audio_files_multimic_all(stop_path, base_dir)?;
+    if mics.is_empty() {
+        return Ok(Vec::new());
     }
+    let (first_name, first_pipes) = mics.remove(0);
+    if mics.is_empty() {
+        return Ok(vec![full(first_pipes)]);
+    }
+    Ok(vec![StopVariant {
+        half: StopHalf::Full,
+        pipes: first_pipes,
+        primary_perspective: Some(first_name),
+        perspectives: mics,
+    }])
 }
 
 /// Build one or more `ScannedStop`s from a single stop folder.
@@ -727,21 +866,42 @@ fn scan_stop_variants(
 /// (with `*_bas` and `*_dis` sub-folders) yields a separate stop per half so
 /// both appear as their own draw-knob (e.g. "Trompet (Bas)" + "Trompet (Disc)").
 ///
-/// `trem_pipes` are attached only to a single full-compass stop.
+/// `trem_variants` (per microfoonpositie: (submapnaam, pijpen); één entry met
+/// lege naam bij een trem-map zonder submappen) are attached only to a single
+/// full-compass stop. Bij multi-mic wordt de trem-positie op submapnaam aan
+/// dezelfde droge positie gekoppeld (hoofdletterongevoelig).
 fn build_stops_from_folder(
     dir_name_str: &str,
     stop_path: &Path,
     base_dir: &Path,
     is_pedal: bool,
     id_prefix: &str,
-    trem_pipes: Vec<CustomPipe>,
+    trem_variants: Vec<(String, Vec<CustomPipe>)>,
 ) -> Result<Vec<ScannedStop>, std::io::Error> {
     let (stop_name, pitch, family, pitch_label) = parse_stop_info(dir_name_str);
     let variants = scan_stop_variants(stop_path, base_dir)?;
     let is_divided = variants.len() > 1;
 
+    // Trem-pijpen voor een positie: op submapnaam gematcht. Een platte
+    // trem-map (één entry zonder naam) geldt voor de primaire positie; een
+    // droge map zónder posities neemt de eerste trem-entry (oude gedrag).
+    // Bij posities zonder naam-match: géén trem voor die positie (terugval
+    // op de LFO-tremulant, zoals bij ontbrekende trem-samples).
+    let trem_flat = trem_variants.len() == 1 && trem_variants[0].0.is_empty();
+    let trem_for = |name: Option<&str>| -> Vec<CustomPipe> {
+        match name {
+            None => trem_variants.first().map(|(_, p)| p.clone()).unwrap_or_default(),
+            Some(_) if trem_flat => trem_variants[0].1.clone(),
+            Some(n) => trem_variants
+                .iter()
+                .find(|(tn, _)| tn.eq_ignore_ascii_case(n))
+                .map(|(_, p)| p.clone())
+                .unwrap_or_default(),
+        }
+    };
+
     let mut out = Vec::new();
-    for (half, mut pipes) in variants {
+    for StopVariant { half, mut pipes, primary_perspective, perspectives } in variants {
         if pipes.is_empty() {
             continue;
         }
@@ -760,12 +920,34 @@ fn build_stops_from_folder(
         let last_note = pipes.last().map(|p| p.midi_note).unwrap_or(96);
 
         // Tremulant only makes sense for a single full-compass stop.
-        let (tremulant_pipes, has_tremulant) =
-            if half == StopHalf::Full && !is_divided && !trem_pipes.is_empty() {
-                (trem_pipes.clone(), true)
-            } else {
-                (Vec::new(), false)
-            };
+        let trem_applies = half == StopHalf::Full && !is_divided && !trem_variants.is_empty();
+        let (tremulant_pipes, has_tremulant) = if trem_applies {
+            let mut t = trem_for(primary_perspective.as_deref());
+            t.sort_by_key(|p| p.midi_note);
+            let has = !t.is_empty();
+            (t, has)
+        } else {
+            (Vec::new(), false)
+        };
+        // Overige microfoonposities, elk met de trem-opnamen van dezelfde positie.
+        let perspectives: Vec<CustomPerspective> = perspectives
+            .into_iter()
+            .filter(|(_, p)| !p.is_empty())
+            .map(|(pname, mut ppipes)| {
+                ppipes.sort_by_key(|p| p.midi_note);
+                let mut t = if trem_applies { trem_for(Some(&pname)) } else { Vec::new() };
+                t.sort_by_key(|p| p.midi_note);
+                CustomPerspective { name: pname, pipes: ppipes, tremulant_pipes: t }
+            })
+            .collect();
+        let primary_perspective = if perspectives.is_empty() { None } else { primary_perspective };
+        if !perspectives.is_empty() {
+            info!(
+                "    Multi-mic: primair '{}', extra posities: {}",
+                primary_perspective.as_deref().unwrap_or("?"),
+                perspectives.iter().map(|p| format!("{} ({} samples)", p.name, p.pipes.len())).collect::<Vec<_>>().join(", ")
+            );
+        }
 
         let display_name = format_stop_name(&stop_name, is_bass, is_treble);
         let half_suffix = match half {
@@ -800,6 +982,8 @@ fn build_stops_from_folder(
                 pipes,
                 tremulant_pipes,
                 has_tremulant,
+                primary_perspective,
+                perspectives,
             },
             first_note,
             last_note,
@@ -899,9 +1083,13 @@ fn check_new_structure(dir: &Path) -> bool {
                 let sub_name = sub_path.file_name()
                     .map(|n| n.to_string_lossy().to_lowercase())
                     .unwrap_or_default();
+                // Alleen varianten die bij DEZE map horen (Stop/Stop_trem);
+                // een willekeurige `_trem`-stopmap in een divisiemap
+                // (Divisie/Prestant_8_trem) is juist de NIEUWE structuur.
                 if sub_name == format!("{}_bas", dir_lower)
                     || sub_name == format!("{}_dis", dir_lower)
-                    || is_tremulant_folder(&sub_name) {
+                    || sub_name == format!("{}_trem", dir_lower)
+                    || sub_name == format!("{}_tr", dir_lower) {
                     has_variant_subdirs = true;
                 }
                 // Check if this subdir contains audio files (would be a stop folder)
@@ -909,6 +1097,24 @@ fn check_new_structure(dir: &Path) -> bool {
                     if file_entry.path().is_file() && is_audio_file(&file_entry.path()) {
                         has_subdirs_with_audio = true;
                         break;
+                    }
+                }
+                // Stopmap met alléén submappen (microfoonposities Front/Rear,
+                // of bas/dis-helften): één niveau dieper kijken — anders viel
+                // een multi-mic-set (Divisie/Stop/Positie/036-c.wav) terug op
+                // de oude structuur en werd er niets gevonden.
+                if !has_subdirs_with_audio {
+                    'deeper: for mic_entry in std::fs::read_dir(&sub_path).into_iter().flatten().flatten().take(10) {
+                        let mic_path = mic_entry.path();
+                        if !mic_path.is_dir() {
+                            continue;
+                        }
+                        for file_entry in std::fs::read_dir(&mic_path).into_iter().flatten().flatten().take(5) {
+                            if file_entry.path().is_file() && is_audio_file(&file_entry.path()) {
+                                has_subdirs_with_audio = true;
+                                break 'deeper;
+                            }
+                        }
                     }
                 }
             }
@@ -1025,21 +1231,20 @@ fn scan_new_structure(dir: &Path, organ_name: &str) -> Result<CustomOrgan, std::
         let id_prefix = division_name.replace(' ', "_").to_lowercase();
 
         for (dir_name_str, stop_path) in &dry_stops {
-            // Look for a matching tremulant folder.
+            // Look for a matching tremulant folder (per microfoonpositie).
             let dir_name_lower = dir_name_str.to_lowercase();
-            let mut tremulant_pipes: Vec<CustomPipe> = Vec::new();
+            let mut tremulant_variants: Vec<(String, Vec<CustomPipe>)> = Vec::new();
             for (idx, (trem_dir, trem_base, trem_path)) in trem_stops.iter().enumerate() {
                 if trem_base.to_lowercase() == dir_name_lower {
                     info!("  Found tremulant variant: {} -> {}", trem_dir, dir_name_str);
-                    tremulant_pipes = scan_audio_files_with_multimic(trem_path, dir)?;
-                    tremulant_pipes.sort_by_key(|p| p.midi_note);
+                    tremulant_variants = scan_audio_files_multimic_all(trem_path, dir)?;
                     matched_trem_indices[idx] = true;
                     break;
                 }
             }
 
             let stops = build_stops_from_folder(
-                dir_name_str, stop_path, dir, is_pedal, &id_prefix, tremulant_pipes,
+                dir_name_str, stop_path, dir, is_pedal, &id_prefix, tremulant_variants,
             )?;
             scanned_stops.extend(stops);
         }
@@ -1118,21 +1323,20 @@ fn scan_old_structure(dir: &Path, organ_name: &str) -> Result<CustomOrgan, std::
         let is_pedal = is_pedal_stop(dir_name_str);
         let id_prefix = if is_pedal { "ped" } else { "manual" };
 
-        // Look for a matching tremulant folder.
+        // Look for a matching tremulant folder (per microfoonpositie).
         let dir_name_lower = dir_name_str.to_lowercase();
-        let mut tremulant_pipes: Vec<CustomPipe> = Vec::new();
+        let mut tremulant_variants: Vec<(String, Vec<CustomPipe>)> = Vec::new();
         for (idx, (trem_dir, trem_base, trem_path)) in trem_folders.iter().enumerate() {
             if trem_base.to_lowercase() == dir_name_lower {
                 info!("Found tremulant variant: {} -> {}", trem_dir, dir_name_str);
-                tremulant_pipes = scan_audio_files_with_multimic(trem_path, dir)?;
-                tremulant_pipes.sort_by_key(|p| p.midi_note);
+                tremulant_variants = scan_audio_files_multimic_all(trem_path, dir)?;
                 matched_trem_indices[idx] = true;
                 break;
             }
         }
 
         let stops = build_stops_from_folder(
-            dir_name_str, path, dir, is_pedal, id_prefix, tremulant_pipes,
+            dir_name_str, path, dir, is_pedal, id_prefix, tremulant_variants,
         )?;
         scanned_stops.extend(stops);
     }
@@ -1204,27 +1408,31 @@ fn scan_old_structure(dir: &Path, organ_name: &str) -> Result<CustomOrgan, std::
     Ok(organ)
 }
 
-/// Scan audio files with multi-mic support.
-/// First tries to find audio files directly in the stop folder.
-/// If no audio files found directly, looks for subfolders (multi-mic positions)
-/// and uses the first one found as the primary mic position.
-fn scan_audio_files_with_multimic(stop_path: &Path, base_dir: &Path) -> Result<Vec<CustomPipe>, std::io::Error> {
+/// Scan audio files with multi-mic support: ALLE microfoonposities.
+/// Directe audiobestanden in de map → één entry met lege naam. Anders elke
+/// submap (alfabetisch, `.`-mappen overgeslagen) met audio → (submapnaam,
+/// pijpen). Leeg als er niets gevonden is.
+fn scan_audio_files_multimic_all(
+    stop_path: &Path,
+    base_dir: &Path,
+) -> Result<Vec<(String, Vec<CustomPipe>)>, std::io::Error> {
     // First try direct audio files in the stop folder
-    let pipes = scan_audio_files(stop_path, base_dir)?;
+    let mut pipes = scan_audio_files(stop_path, base_dir)?;
     if !pipes.is_empty() {
-        return Ok(pipes);
+        pipes.sort_by_key(|p| p.midi_note);
+        return Ok(vec![(String::new(), pipes)]);
     }
 
     // No direct audio files - check for multi-mic subfolders
-    // Use the first subfolder that contains audio files (primary mic position)
     let mut subdirs: Vec<_> = std::fs::read_dir(stop_path)?
         .flatten()
         .filter(|e| e.path().is_dir())
         .collect();
 
-    // Sort for deterministic selection (alphabetical = first mic position)
+    // Sort for deterministic order (alphabetical = first mic position)
     subdirs.sort_by_key(|e| e.file_name());
 
+    let mut out = Vec::new();
     for sub_entry in subdirs {
         let sub_path = sub_entry.path();
         let sub_name = sub_entry.file_name().to_string_lossy().to_string();
@@ -1233,14 +1441,29 @@ fn scan_audio_files_with_multimic(stop_path: &Path, base_dir: &Path) -> Result<V
             continue;
         }
 
-        let sub_pipes = scan_audio_files(&sub_path, base_dir)?;
+        let mut sub_pipes = scan_audio_files(&sub_path, base_dir)?;
         if !sub_pipes.is_empty() {
-            info!("    Multi-mic: using '{}' as primary ({} samples)", sub_name, sub_pipes.len());
-            return Ok(sub_pipes);
+            sub_pipes.sort_by_key(|p| p.midi_note);
+            out.push((sub_name, sub_pipes));
         }
     }
 
-    Ok(Vec::new())
+    Ok(out)
+}
+
+/// Scan audio files with multi-mic support — alleen de PRIMAIRE positie
+/// (directe bestanden, anders de eerste submap met audio). Dunne wrapper om
+/// `scan_audio_files_multimic_all` voor de bas-/discanthelften.
+fn scan_audio_files_with_multimic(stop_path: &Path, base_dir: &Path) -> Result<Vec<CustomPipe>, std::io::Error> {
+    let mut all = scan_audio_files_multimic_all(stop_path, base_dir)?;
+    if all.is_empty() {
+        return Ok(Vec::new());
+    }
+    let (name, pipes) = all.remove(0);
+    if !name.is_empty() {
+        info!("    Multi-mic: using '{}' as primary ({} samples)", name, pipes.len());
+    }
+    Ok(pipes)
 }
 
 /// Scan audio files (WAV/MP3) in a directory
@@ -1377,6 +1600,66 @@ mod tests {
         assert_eq!(format_stop_name("Prestant", false, false), "Prestant");
         assert_eq!(format_stop_name("Trompet", true, false), "Trompet (Bas)");
         assert_eq!(format_stop_name("Trompet", false, true), "Trompet (Disc)");
+    }
+
+    #[test]
+    fn test_multimic_submappen_worden_perspectieven() {
+        // Nieuwe structuur: Orgel/Divisie/Stop/<positie>/036-c.wav. De eerste
+        // positie (alfabetisch) is primair, de rest wordt een kiesbaar
+        // perspectief; trem-submappen koppelen op positienaam.
+        let base = std::env::temp_dir().join(format!("jm_multimic_test_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        // Twee noten (36 + 72) zodat de bas/discant-heuristiek de stop niet
+        // als "(Bas)" bestempelt.
+        let stop = base.join("HW").join("Prestant_8");
+        for pos in ["Front", "Rear"] {
+            std::fs::create_dir_all(stop.join(pos)).unwrap();
+            std::fs::write(stop.join(pos).join("036-c.wav"), b"x").unwrap();
+            std::fs::write(stop.join(pos).join("072-c.wav"), b"x").unwrap();
+        }
+        let trem = base.join("HW").join("Prestant_8_trem");
+        std::fs::create_dir_all(trem.join("Rear")).unwrap();
+        std::fs::write(trem.join("Rear").join("036-c.wav"), b"x").unwrap();
+
+        let organ = scan_samples_directory(&base, "MicTest").unwrap();
+        assert_eq!(organ.divisions.len(), 1, "één divisie (HW)");
+        assert_eq!(organ.divisions[0].stops.len(), 1, "één stop");
+        let s = &organ.divisions[0].stops[0];
+        assert_eq!(s.name, "Prestant");
+        assert_eq!(s.pipes.len(), 2);
+        assert_eq!(s.primary_perspective.as_deref(), Some("Front"));
+        assert_eq!(s.perspectives.len(), 1);
+        assert_eq!(s.perspectives[0].name, "Rear");
+        assert_eq!(s.perspectives[0].pipes.len(), 2);
+        assert!(s.perspectives[0].pipes[0].sample_path.to_string_lossy().contains("Rear"));
+        // Trem alleen voor Rear: primair heeft geen trem, Rear wel.
+        assert!(!s.has_tremulant, "primair (Front) heeft geen trem-map");
+        assert_eq!(s.perspectives[0].tremulant_pipes.len(), 1);
+
+        // Export → rank-formaat met een [Rank] per positie; herimport via de
+        // GO-parser levert één laag met perspectief 'rear' en primair 'front'.
+        let odf = base.join("MicTest.organ");
+        organ.export_organ_file(&odf).unwrap();
+        let def = crate::grandorgue::OrganDefinition::load(&odf).unwrap();
+        let gs = def.stops.iter().find(|s| s.name == "Prestant").expect("stop na herimport");
+        assert_eq!(gs.pipes.len(), 37, "dicht bereik 36..=72");
+        assert_eq!(gs.layers.len(), 1);
+        assert_eq!(gs.layers[0].perspective.as_deref(), Some("rear"));
+        assert_eq!(gs.layers[0].pipes.len(), 37);
+        assert!(matches!(gs.layers[0].pipes[0], crate::grandorgue::PipeDef::Sample { .. }));
+        assert!(matches!(gs.layers[0].pipes[1], crate::grandorgue::PipeDef::Empty));
+        assert_eq!(gs.primary_perspective.as_deref(), Some("front"));
+
+        // Zonder submappen (Puttershoek-stijl) → geen perspectieven.
+        let plain = base.join("HW").join("Holpijp_8");
+        std::fs::create_dir_all(&plain).unwrap();
+        std::fs::write(plain.join("036-c.wav"), b"x").unwrap();
+        let organ2 = scan_samples_directory(&base, "MicTest").unwrap();
+        let h = organ2.divisions[0].stops.iter().find(|s| s.name.starts_with("Holpijp")).unwrap();
+        assert!(h.perspectives.is_empty());
+        assert_eq!(h.primary_perspective, None);
+
+        std::fs::remove_dir_all(&base).ok();
     }
 
     #[test]

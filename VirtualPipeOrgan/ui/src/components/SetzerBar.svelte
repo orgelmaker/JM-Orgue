@@ -109,16 +109,11 @@
   }
 
   // Crescendo-pedaal (continue CC) inleren — direct vanaf de indicator (rechtermuis/long-press).
+  // Via de tweefasen-popup van de Console (laagste → hoogste stand, met bereik/inversie);
+  // het oude één-fase-pad (learn_crescendo_pedal) leerde zonder bereik en wiste stil de zwelbinding.
   let crescLearning = false;
-  async function learnCrescendoPedal() {
-    if (crescLearning) return;
-    crescLearning = true;
-    try {
-      await invoke('learn_crescendo_pedal');
-    } catch (e) {
-      console.error('Crescendo-pedaal inleren mislukt:', e);
-    }
-    crescLearning = false;
+  function learnCrescendoPedal() {
+    dispatch('learnCrescendo');
   }
 
   onMount(() => {
@@ -197,10 +192,14 @@
     return organInfo.couplers.filter(c => c.active).map(c => c.id);
   }
 
-  // Save current registration to a preset slot
-  function savePreset(num) {
-    const stopIds = getDrawnStopIds();
-    const couplerIds = getActiveCouplerIds();
+  // Save current registration to a preset slot — MINUS wat de crescendotrede
+  // bijgetrokken heeft (die registers/koppels zijn geen handregistratie).
+  async function savePreset(num) {
+    let claims = [];
+    try { claims = await invoke('get_crescendo_claims'); } catch (e) { claims = []; }
+    const claimed = new Set(Array.isArray(claims) ? claims : []);
+    const stopIds = getDrawnStopIds().filter(id => !claimed.has(id));
+    const couplerIds = getActiveCouplerIds().filter(id => !claimed.has(id));
     presets[num] = { stops: stopIds, couplers: couplerIds };
     presets = presets; // trigger reactivity
     savePresetsToStorage();
@@ -275,6 +274,13 @@
     // New format: { stops, couplers }
     return (p.stops && p.stops.length > 0) || (p.couplers && p.couplers.length > 0);
   });
+
+  // Spiegel voor de afstandsbediening (GET /state); alleen het hoofdvenster
+  // rapporteert (zelfde vlag als de MIDI-poll). Vuurt bij elke wijziging van
+  // niveau/preset/SET-stand/bezette cijfers.
+  $: if (consumeMidiTriggers && organId) {
+    invoke('report_setzer_state', { level: memoryLevel, preset: currentPreset, setMode, data: dataFlags }).catch(() => {});
+  }
 
   // Context menu handling
   function showContextMenu(e, actionCode) {

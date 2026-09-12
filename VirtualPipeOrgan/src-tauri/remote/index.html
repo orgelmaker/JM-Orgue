@@ -1,0 +1,322 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#121212">
+<title>JM-Orgue</title>
+<style>
+  /* Afstandsbediening JM-Orgue — ingebed via include_str! (test_api.rs), geen externe resources. */
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: #121212; color: #eee; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; font-size: 17px; touch-action: manipulation; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; }
+  body { padding-bottom: 150px; }
+  header { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: #1a1a1a; border-bottom: 1px solid #333; }
+  header .name { flex: 1; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  header .voices { font-size: 14px; color: #aaa; white-space: nowrap; }
+  .dot { width: 12px; height: 12px; border-radius: 50%; background: #c33; flex: none; }
+  .dot.on { background: #3c3; }
+  .banner { display: none; padding: 10px 14px; font-weight: 600; text-align: center; }
+  .banner.show { display: block; }
+  #noconn { background: #a12; color: #fff; }
+  #nosetzer { background: #c90; color: #111; }
+  #noorgan { display: none; padding: 40px 14px; text-align: center; color: #aaa; }
+  main { padding: 8px 10px; }
+  section { margin: 10px 0 16px; }
+  .divhead { display: flex; align-items: center; gap: 10px; margin: 6px 2px 8px; }
+  .divhead h2 { flex: 1; margin: 0; font-size: 18px; font-weight: 600; color: #e0a040; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+  button { font: inherit; color: #eee; background: #1e1e1e; border: 1px solid #333; border-radius: 10px; min-height: 56px; padding: 6px 10px; text-align: center; cursor: pointer; line-height: 1.2; }
+  button:active { filter: brightness(1.3); }
+  button.on { background: #e0a040; color: #111; border-color: #e0a040; }
+  button.stop { display: flex; flex-direction: column; justify-content: center; align-items: center; border-left-width: 4px; }
+  button.stop .pitch { font-size: 12px; opacity: 0.75; margin-top: 2px; }
+  button.trem { min-height: 40px; min-width: 110px; padding: 4px 12px; font-size: 14px; }
+  .volume { display: flex; align-items: center; gap: 12px; padding: 6px 4px; }
+  .volume label { font-size: 15px; color: #aaa; white-space: nowrap; }
+  .volume input { flex: 1; height: 44px; accent-color: #e0a040; }
+  .volume .val { min-width: 4.5em; text-align: right; font-variant-numeric: tabular-nums; }
+  .panic { display: flex; justify-content: flex-end; padding: 6px 4px; }
+  .panic button { min-height: 40px; background: #3a1414; border-color: #a12; color: #f88; font-size: 14px; }
+  footer { position: fixed; left: 0; right: 0; bottom: 0; z-index: 10; background: #1a1a1a; border-top: 1px solid #333; padding: 6px 8px 8px; }
+  .mems { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; overflow-x: auto; }
+  .mems button { min-height: 36px; min-width: 44px; padding: 2px 8px; font-size: 14px; border-radius: 8px; flex: none; }
+  .mems .preset { flex: 1; text-align: right; font-size: 15px; color: #ccc; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .setzer { display: grid; grid-template-columns: repeat(14, 1fr); gap: 5px; }
+  .setzer button { min-height: 52px; padding: 2px; font-size: 16px; position: relative; }
+  .setzer button.set.on { animation: blink 0.8s steps(2, start) infinite; }
+  .setzer button .d { position: absolute; top: 5px; right: 6px; width: 7px; height: 7px; border-radius: 50%; background: #e0a040; display: none; }
+  .setzer button.has .d { display: block; }
+  .setzer button.on .d { background: #111; }
+  @keyframes blink { 50% { background: #1e1e1e; color: #eee; } }
+  @media (max-width: 560px) {
+    .setzer { grid-template-columns: repeat(7, 1fr); }
+    .grid { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); }
+  }
+</style>
+</head>
+<body>
+<header>
+  <span class="name" id="orgname">JM-Orgue</span>
+  <span class="voices" id="voices"></span>
+  <span class="dot" id="audiodot" title="audio"></span>
+</header>
+<div class="banner" id="noconn"></div>
+<div class="banner" id="nosetzer"></div>
+<div id="noorgan"></div>
+<main id="main"></main>
+<footer id="footer">
+  <div class="mems" id="mems"></div>
+  <div class="setzer" id="setzer"></div>
+</footer>
+<script>
+(function () {
+  'use strict';
+  var STR = {
+    nl: { tremulant: 'Tremulant', couplers: 'Koppels', volume: 'Volume', no_connection: 'Geen verbinding met JM-Orgue', no_organ: 'Geen orgel geladen in JM-Orgue', no_setzer: 'Orgelscherm niet actief — open het Orgel-tabblad in JM-Orgue', set: 'SET', gc: 'GC', panic: 'Panic', level: 'M' },
+    en: { tremulant: 'Tremulant', couplers: 'Couplers', volume: 'Volume', no_connection: 'No connection to JM-Orgue', no_organ: 'No organ loaded in JM-Orgue', no_setzer: 'Organ screen not active — open the Organ tab in JM-Orgue', set: 'SET', gc: 'GC', panic: 'Panic', level: 'M' },
+    fr: { tremulant: 'Tremblant', couplers: 'Accouplements', volume: 'Volume', no_connection: 'Pas de connexion à JM-Orgue', no_organ: 'Aucun orgue chargé dans JM-Orgue', no_setzer: 'Écran orgue inactif — ouvrez l’onglet Orgue dans JM-Orgue', set: 'SET', gc: 'GC', panic: 'Panique', level: 'M' },
+    de: { tremulant: 'Tremulant', couplers: 'Koppeln', volume: 'Lautstärke', no_connection: 'Keine Verbindung zu JM-Orgue', no_organ: 'Kein Orgel in JM-Orgue geladen', no_setzer: 'Orgelbildschirm nicht aktiv — öffnen Sie den Orgel-Tab in JM-Orgue', set: 'SET', gc: 'GC', panic: 'Panik', level: 'M' }
+  };
+  var lang = ((navigator.language || 'en').slice(0, 2).toLowerCase());
+  var T = STR[lang] || STR.en;
+
+  // Pagina-URL is /r/<token>/ — alle fetches relatief, het token staat nergens in de JS.
+  var base = location.pathname;
+  if (base.charAt(base.length - 1) !== '/') base += '/';
+  function api(p, m) {
+    return fetch(base + p, { method: m || 'GET', cache: 'no-store' }).then(function (r) {
+      if (!r.ok) { var e = new Error(String(r.status)); e.status = r.status; throw e; }
+      return r.json();
+    });
+  }
+  function post(p) {
+    return api(p, 'POST').then(function (v) { hideSetzerBanner(); return v; }, function (e) {
+      if (e && e.status === 409) showSetzerBanner();
+      throw e;
+    });
+  }
+
+  var $ = function (id) { return document.getElementById(id); };
+  var organ = null, currentOrganId = null, failures = 0, dragging = false, volTimer = null, volPending = null;
+  var stopBtns = {}, couplerBtns = {}, tremBtns = [], digitBtns = [], memBtns = [], setBtn = null, presetEl = null, volEl = null, volVal = null;
+
+  $('noconn').textContent = T.no_connection;
+  $('nosetzer').textContent = T.no_setzer;
+  $('noorgan').textContent = T.no_organ;
+
+  function showSetzerBanner() { $('nosetzer').classList.add('show'); }
+  function hideSetzerBanner() { $('nosetzer').classList.remove('show'); }
+
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined && text !== null) e.textContent = text;
+    return e;
+  }
+  function esc(s) { return encodeURIComponent(String(s)); }
+
+  function toggleBtn(btn, path) {
+    btn.classList.toggle('on'); // optimistisch; de volgende poll corrigeert
+    post(path).catch(function () {});
+  }
+
+  function render(o) {
+    organ = o;
+    var main = $('main');
+    main.innerHTML = '';
+    stopBtns = {}; couplerBtns = {}; tremBtns = [];
+    if (!o) {
+      $('noorgan').style.display = 'block';
+      $('footer').style.display = 'none';
+      $('orgname').textContent = 'JM-Orgue';
+      return;
+    }
+    $('noorgan').style.display = 'none';
+    $('footer').style.display = '';
+    $('orgname').textContent = o.name || 'JM-Orgue';
+
+    (o.divisions || []).forEach(function (div, di) {
+      var sec = el('section');
+      var head = el('div', 'divhead');
+      head.appendChild(el('h2', null, div.display_name || div.name));
+      if (div.has_tremulant) {
+        var tb = el('button', 'trem', T.tremulant);
+        tb.addEventListener('click', function () { toggleBtn(tb, 'action/' + (24 + di)); });
+        tremBtns[di] = tb;
+        head.appendChild(tb);
+      }
+      sec.appendChild(head);
+      var grid = el('div', 'grid');
+      (div.stops || []).forEach(function (s) {
+        var b = el('button', 'stop');
+        b.appendChild(el('span', 'nm', s.name));
+        if (s.pitch) b.appendChild(el('span', 'pitch', s.pitch));
+        if (s.color) b.style.borderLeftColor = s.color;
+        if (s.drawn) b.classList.add('on');
+        b.addEventListener('click', function () { toggleBtn(b, 'stops/' + esc(s.id) + '/toggle'); });
+        stopBtns[s.id] = b;
+        grid.appendChild(b);
+      });
+      sec.appendChild(grid);
+      main.appendChild(sec);
+    });
+
+    if (o.couplers && o.couplers.length) {
+      var csec = el('section');
+      var chead = el('div', 'divhead');
+      chead.appendChild(el('h2', null, T.couplers));
+      csec.appendChild(chead);
+      var cgrid = el('div', 'grid');
+      o.couplers.forEach(function (c) {
+        var b = el('button', null, c.name);
+        if (c.active) b.classList.add('on');
+        b.addEventListener('click', function () { toggleBtn(b, 'couplers/' + esc(c.id) + '/toggle'); });
+        couplerBtns[c.id] = b;
+        cgrid.appendChild(b);
+      });
+      csec.appendChild(cgrid);
+      main.appendChild(csec);
+    }
+
+    // Volume
+    var vsec = el('section');
+    var vrow = el('div', 'volume');
+    vrow.appendChild(el('label', null, T.volume));
+    volEl = document.createElement('input');
+    volEl.type = 'range'; volEl.min = '-40'; volEl.max = '6'; volEl.step = '1'; volEl.value = '-6';
+    volVal = el('span', 'val', '-6 dB');
+    volEl.addEventListener('pointerdown', function () { dragging = true; });
+    volEl.addEventListener('touchstart', function () { dragging = true; }, { passive: true });
+    volEl.addEventListener('input', function () {
+      volVal.textContent = volEl.value + ' dB';
+      volPending = volEl.value;
+      if (!volTimer) {
+        volTimer = setTimeout(function () {
+          volTimer = null;
+          if (volPending !== null) { var v = volPending; volPending = null; post('master?db=' + esc(v)).catch(function () {}); }
+        }, 150);
+      }
+    });
+    function endDrag() {
+      dragging = false;
+      if (volTimer) { clearTimeout(volTimer); volTimer = null; }
+      volPending = null;
+      post('master?db=' + esc(volEl.value)).catch(function () {});
+    }
+    volEl.addEventListener('change', endDrag);
+    volEl.addEventListener('pointerup', function () { dragging = false; });
+    volEl.addEventListener('pointercancel', function () { dragging = false; });
+    volEl.addEventListener('touchend', function () { dragging = false; }, { passive: true });
+    vrow.appendChild(volEl);
+    vrow.appendChild(volVal);
+    vsec.appendChild(vrow);
+    var prow = el('div', 'panic');
+    var pb = el('button', null, T.panic);
+    pb.addEventListener('click', function () { post('panic').catch(function () {}); });
+    prow.appendChild(pb);
+    vsec.appendChild(prow);
+    main.appendChild(vsec);
+
+    renderSetzer();
+  }
+
+  function renderSetzer() {
+    var mems = $('mems'), sz = $('setzer');
+    mems.innerHTML = ''; sz.innerHTML = '';
+    memBtns = []; digitBtns = [];
+    for (var m = 1; m <= 8; m++) {
+      (function (n) {
+        var b = el('button', null, T.level + n);
+        b.addEventListener('click', function () { post('action/' + (15 + n)).catch(function () {}); });
+        memBtns[n] = b;
+        mems.appendChild(b);
+      })(m);
+    }
+    presetEl = el('span', 'preset', T.level + '1 · —');
+    mems.appendChild(presetEl);
+
+    setBtn = el('button', 'set', T.set);
+    setBtn.addEventListener('click', function () { setBtn.classList.toggle('on'); post('action/10').catch(function () {}); });
+    sz.appendChild(setBtn);
+    for (var d = 0; d <= 9; d++) {
+      (function (dd) {
+        var b = el('button', 'digit', String(dd));
+        b.appendChild(el('span', 'd'));
+        b.addEventListener('click', function () { post('action/' + dd).catch(function () {}); });
+        digitBtns[dd] = b;
+        sz.appendChild(b);
+      })(d);
+    }
+    var steps = [['−1', 12], ['+1', 13], [T.gc, 11]];
+    steps.forEach(function (s) {
+      var b = el('button', null, s[0]);
+      b.addEventListener('click', function () { post('action/' + s[1]).catch(function () {}); });
+      sz.appendChild(b);
+    });
+  }
+
+  function apply(st) {
+    $('voices').textContent = st.voices !== undefined ? st.voices + ' ♪' : '';
+    $('audiodot').classList.toggle('on', !!st.audio_running);
+    if (st.organ_name) $('orgname').textContent = st.organ_name;
+    if (!organ) return;
+    var drawn = {}; (st.drawn || []).forEach(function (id) { drawn[id] = true; });
+    Object.keys(stopBtns).forEach(function (id) { stopBtns[id].classList.toggle('on', !!drawn[id]); });
+    var cp = {}; (st.couplers || []).forEach(function (id) { cp[id] = true; });
+    Object.keys(couplerBtns).forEach(function (id) { couplerBtns[id].classList.toggle('on', !!cp[id]); });
+    (st.tremulant || []).forEach(function (on, i) { if (tremBtns[i]) tremBtns[i].classList.toggle('on', !!on); });
+    if (volEl && !dragging && typeof st.master_db === 'number') {
+      var v = String(Math.round(st.master_db));
+      if (volEl.value !== v) { volEl.value = v; volVal.textContent = v + ' dB'; }
+    }
+    var sz = st.setzer || {};
+    if (setBtn) setBtn.classList.toggle('on', !!sz.set_mode);
+    var lvl = sz.level || 1;
+    for (var n = 1; n <= 8; n++) if (memBtns[n]) memBtns[n].classList.toggle('on', lvl === n);
+    var preset = typeof sz.preset === 'number' ? sz.preset : -1;
+    var digit = preset >= 0 ? preset % 10 : -1;
+    for (var d = 0; d <= 9; d++) {
+      if (!digitBtns[d]) continue;
+      digitBtns[d].classList.toggle('on', digit === d);
+      digitBtns[d].classList.toggle('has', !!(sz.data && sz.data[d]));
+    }
+    if (presetEl) presetEl.textContent = T.level + lvl + ' · ' + (preset >= 0 ? String(preset) : '—');
+  }
+
+  var pollTimer = null;
+  function schedule(ms) {
+    if (pollTimer) clearTimeout(pollTimer);
+    pollTimer = setTimeout(poll, ms);
+  }
+  function poll() {
+    pollTimer = null;
+    if (document.hidden) return; // hervat op visibilitychange
+    api('state').then(function (st) {
+      failures = 0;
+      $('noconn').classList.remove('show');
+      var id = st.organ_loaded ? (st.organ_id || null) : null;
+      if (id !== currentOrganId) {
+        currentOrganId = id;
+        return api('organ').then(function (o) { render(o || null); apply(st); });
+      }
+      apply(st);
+    }).catch(function () {
+      failures++;
+      if (failures >= 3) $('noconn').classList.add('show');
+    }).then(function () { schedule(500); });
+  }
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden) schedule(0);
+  });
+
+  // Start: orgel ophalen (null zolang er geen orgel geladen is), dan pollen.
+  api('organ').then(function (o) {
+    currentOrganId = o ? (o.id || null) : null;
+    render(o || null);
+  }).catch(function () { render(null); }).then(function () { schedule(0); });
+})();
+</script>
+</body>
+</html>

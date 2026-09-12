@@ -67,6 +67,15 @@ pub struct AudioPrefs {
     /// (halveert RAM bij stereo-sets). Wijziging vergt herladen van het orgel.
     #[serde(default)]
     pub stereo_samples: Option<bool>,
+    /// Afstandsbediening in het netwerk (0.7.38): aan/uit; None = uit.
+    #[serde(default)]
+    pub remote_enabled: Option<bool>,
+    /// Poort van de afstandsbediening; None = 8766 (remote::DEFAULT_PORT).
+    #[serde(default)]
+    pub remote_port: Option<u16>,
+    /// Toegangstoken van de afstandsbediening; None = nog nooit aangemaakt.
+    #[serde(default)]
+    pub remote_token: Option<String>,
 }
 
 /// Load audio preferences from `<app_data_dir>/audio_config.json` (defaults if absent).
@@ -169,6 +178,89 @@ pub struct SwellBinding {
     /// Spiegelbeeld: keert de pedaalrichting om (open ↔ dicht). Handig voor pedalen
     /// die fysiek de andere kant op werken dan de software verwacht.
     pub invert: bool,
+    /// Laatst ontvangen ruwe CC-waarde van deze trede. Na een orgel-herlaad of
+    /// audio-wissel (die de audio-gains hard op 1.0 zetten) wordt hieruit de
+    /// zwelstand teruggezet — anders klonk een dichte kast na de wissel vol open
+    /// en sprong het volume bij de eerste pedaalbeweging tot 20 dB.
+    pub last_value: Option<u8>,
+}
+
+/// Zwelstand 0..1 uit een ruwe CC-waarde en het ingestelde bereik (min/max
+/// worden geordend als vangnet; invert spiegelt). Eén implementatie voor de
+/// MIDI-thread, het herstel na herlaad en de tests.
+pub fn swell_gain_from_cc(value: u8, min_val: u8, max_val: u8, invert: bool) -> f32 {
+    let lo = min_val.min(max_val) as f32;
+    let hi = max_val.max(min_val) as f32;
+    let range = (hi - lo).max(1.0);
+    let mut normalized = ((value as f32 - lo) / range).clamp(0.0, 1.0);
+    if invert { normalized = 1.0 - normalized; }
+    normalized
+}
+
+/// Ruwe crescendo-CC → pedaalwaarde 0..127 binnen het ingestelde bereik
+/// (min/max geordend als vangnet) en gespiegeld bij invert.
+pub fn crescendo_mapped_value(value: u8, min_val: u8, max_val: u8, invert: bool) -> u8 {
+    let lo = min_val.min(max_val) as f32;
+    let hi = max_val.max(min_val) as f32;
+    let span = (hi - lo).max(1.0);
+    let scaled = (((value as f32 - lo) / span).clamp(0.0, 1.0) * 127.0) as u8;
+    if invert { 127u8.saturating_sub(scaled) } else { scaled }
+}
+
+/// Pedaalwaarde 0..127 → trap 0..=n (0 = uit; dode zone 0..3; 4..=127 lineair
+/// over 1..=n). Zonder hysterese — zie crescendo_next_stage.
+pub fn crescendo_stage_for(mapped: u8, num_stages: usize) -> u8 {
+    if num_stages == 0 || mapped < 4 { return 0; }
+    let s = ((mapped as usize - 4) * num_stages) / 124 + 1;
+    s.min(num_stages) as u8
+}
+
+/// Laagste en hoogste pedaalwaarde die (zonder hysterese) op `stage` uitkomen.
+pub fn crescendo_stage_bounds(stage: u8, num_stages: usize) -> (u8, u8) {
+    let mut lo = u8::MAX;
+    let mut hi = 0u8;
+    for m in 0..=127u8 {
+        if crescendo_stage_for(m, num_stages) == stage {
+            lo = lo.min(m);
+            hi = hi.max(m);
+        }
+    }
+    if lo == u8::MAX { (0, 0) } else { (lo, hi) }
+}
+
+/// Hysterese-breedte (Schmitt) in CC-eenheden rond een trapgrens: een potmeter
+/// die op een grens ruist klapperde anders registers aan/uit.
+pub const CRESCENDO_HYSTERESIS: u8 = 2;
+
+/// Schmitt-beslissing: nieuwe trap voor pedaalwaarde `mapped` gegeven de
+/// huidige trap, of None om te blijven staan. Omhoog pas H eenheden voorbij de
+/// bovengrens van de huidige trap (of bij de volle pedaalweg), omlaag pas H
+/// eenheden onder de ondergrens; de dode zone (mapped < 4 → trap 0) geldt
+/// altijd, zodat een losgelaten trede altijd op 0 komt. Sprongen over meerdere
+/// trappen blijven mogelijk (de doeltrap wordt uit `mapped` herberekend).
+pub fn crescendo_next_stage(mapped: u8, current: u8, num_stages: usize) -> Option<u8> {
+    let target = crescendo_stage_for(mapped, num_stages);
+    if target == current { return None; }
+    if (current as usize) > num_stages { return Some(target); } // matrix gekrompen
+    let h = CRESCENDO_HYSTERESIS;
+    if target > current {
+        let (_, hi) = crescendo_stage_bounds(current, num_stages);
+        if mapped == 127 || mapped > hi.saturating_add(h) { Some(target) } else { None }
+    } else if target == 0 {
+        Some(0)
+    } else {
+        let (lo, _) = crescendo_stage_bounds(current, num_stages);
+        if mapped.saturating_add(h) < lo { Some(target) } else { None }
+    }
+}
+
+/// Registers/koppels van trap `stage` (1-based; 0 = leeg). Een lege trap erft
+/// de dichtstbijzijnde lagere gevulde trap, zodat een matrix waarvan alleen de
+/// eerste k kolommen gevuld zijn bij dieper intrappen niet alles wegtrekt.
+pub fn crescendo_effective_stops(stages: &[Vec<String>], stage: usize) -> Vec<String> {
+    (1..=stage.min(stages.len())).rev()
+        .find_map(|s| stages.get(s - 1).filter(|v| !v.is_empty()).cloned())
+        .unwrap_or_default()
 }
 
 /// Commands to send to the MIDI thread
@@ -197,6 +289,14 @@ pub enum MidiCommand {
     LearnSingleNote(Sender<Option<(u8, u8)>>),
     /// Learn crescendo pedal CC binding
     LearnCrescendoPedal(Sender<Option<(u8, u8)>>), // returns (channel, cc_num)
+    /// Lopende trede-inleer afbreken (Annuleren/Opnieuw in de popup). De
+    /// leerlus zelf kijkt elke 20 ms naar de `learn_cancel`-vlag; dit commando
+    /// wordt ná de afgebroken lus verwerkt en wist de vlag weer, zodat een
+    /// direct daarna gestarte nieuwe inleer niet met een oude cancel begint.
+    CancelLearn,
+    /// Lopende archief-take geforceerd afsluiten en synchroon wegschrijven
+    /// (afsluiten app / test-API); antwoord = geschreven pad.
+    ArchiveFlush(Sender<Option<std::path::PathBuf>>),
     Shutdown,
 }
 
@@ -287,6 +387,10 @@ fn build_player_with_retries_deadline(cfg: &AudioOutputConfig, delays_ms: &[u64]
 }
 
 /// Shared application state
+/// Zie apply_crescendo_stage_inner: één toepassing tegelijk (procesbreed;
+/// er is één AppState).
+static CRESCENDO_APPLY: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+
 #[derive(Clone)]
 pub struct AppState {
     /// Audio player (handles playback)
@@ -335,6 +439,16 @@ pub struct AppState {
     pub crescendo_binding: Arc<RwLock<Option<(u8, u8, u8, u8, bool)>>>,
     /// Stops currently activated by the crescendo (additive on top of manual stops)
     pub crescendo_active_stops: Arc<RwLock<Vec<String>>>,
+    /// Aantal kolommen in de crescendo-editor (UI-voorkeur, per orgel
+    /// opgeslagen; `crescendo_stages.len()` kan kleiner zijn).
+    pub crescendo_num_stages: Arc<RwLock<u8>>,
+    /// Annuleer-vlag voor een lopende trede-inleer (zie MidiCommand::CancelLearn).
+    pub learn_cancel: Arc<std::sync::atomic::AtomicBool>,
+    /// Laatste zwelstanden (divisie → ruwe CC) van het orgel dat bij een
+    /// (her)laad wordt vervangen, met zijn orgel-id. Herlaad/wissel van
+    /// HETZELFDE orgel neemt ze over (de opgeslagen waarde kan ouder zijn dan
+    /// de laatste pedaalbeweging); een ander orgel laat ze vallen.
+    pub swell_last_stash: Arc<RwLock<Option<(String, Vec<(String, u8)>)>>>,
     /// MIDI recording state
     pub midi_recording: Arc<RwLock<Option<MidiRecording>>>,
     /// Live-notatie-scores per notatievenster. Elke Score is een bewerkbare
@@ -439,6 +553,73 @@ pub struct AppState {
     /// MIDI-uit terugkoppeling naar de fysieke console (registerlampen/display).
     /// Fase 1: gevoed door de UI via feedback_apply. Zie feedback.rs.
     pub feedback: Arc<parking_lot::Mutex<crate::feedback::FeedbackManager>>,
+    /// Automatisch MIDI-archief: instellingen + live status als atomics; de
+    /// buffer zelf leeft lokaal in de MIDI-thread (ArchiveRecorder).
+    pub midi_archive: Arc<crate::midi_archive::MidiArchiveShared>,
+    // ---- Afstandsbediening in het netwerk (0.7.38) ----
+    /// Divisienaam → tremulant live aan/uit (spiegel van de Console-state tremActive;
+    /// gevuld door set_tremulant/set_tremulant_lfo, gewist bij orgelwissel).
+    pub tremulant_live: Arc<RwLock<std::collections::HashMap<String, bool>>>,
+    /// Setzerstand gerapporteerd door SetzerBar (hoofdvenster).
+    pub setzer_mirror: Arc<RwLock<SetzerMirror>>,
+    /// Draaiende remote-server (None = uit).
+    pub remote_api: Arc<parking_lot::Mutex<Option<crate::test_api::ApiServer>>>,
+    /// Laatste start-fout van de afstandsbediening (bind mislukt) voor de UI.
+    pub remote_last_error: Arc<RwLock<Option<String>>>,
+    /// Heartbeat van de piston-consument: tijdstip van de laatste poll_preset_trigger.
+    /// SetzerBar pollt elke 100 ms zolang het Orgel-tabblad open staat; de
+    /// afstandsbediening weigert acties (409) als er geen consument is.
+    pub preset_poll_seen: Arc<RwLock<Option<std::time::Instant>>>,
+    // ---- Gestapelde ranks en microfoonperspectieven (0.7.38) ----
+    /// Perspectieven van het geladen orgel (labels in eerste-voorkomen-
+    /// volgorde): aan/uit (= laden bij de volgende load), live gain, of het
+    /// nú geladen is, het gain-slot in de audio-thread en het aantal pijpen.
+    /// Gezet in beide laadroutes NÁ reset_organ_scoped_state; leeg bij
+    /// orgels zonder perspectieven.
+    pub perspectives: Arc<RwLock<Vec<PerspectiveRuntime>>>,
+    /// Lagen per (niet-ruis-)stop van het geladen orgel — diagnose (/ranks,
+    /// layered_stops), gevuld in beide laadroutes (ook custom sets, waar
+    /// organ_definition None/verouderd is).
+    pub rank_summary: Arc<RwLock<Vec<RankSummary>>>,
+}
+
+/// Runtime-staat van één microfoonperspectief (zie AppState::perspectives).
+#[derive(Debug, Clone, PartialEq)]
+pub struct PerspectiveRuntime {
+    pub name: String,
+    /// Gewenst: laden bij de (volgende) load.
+    pub enabled: bool,
+    pub gain_db: f32,
+    /// Nu geladen (enabled op het moment van de load).
+    pub loaded: bool,
+    /// Gain-slot 1..15 in de audio-thread (0 = geen perspectief).
+    pub slot: u8,
+    /// Aantal niet-lege pijpen in lagen met dit label.
+    pub pipe_count: usize,
+}
+
+/// Lagen van één stop (diagnose): laag 0 = primair met `primary_perspective`.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct RankSummary {
+    pub stop_id: u32,
+    pub dto_id: String,
+    pub name: String,
+    pub layers: Vec<RankLayerSummary>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct RankLayerSummary {
+    pub index: u8,
+    pub name: String,
+    pub perspective: Option<String>,
+    pub pipes_nonempty: usize,
+}
+
+impl RankSummary {
+    /// Stop met ≥1 echte extra rank (laag zonder perspectief).
+    pub fn is_stacked(&self) -> bool {
+        self.layers.iter().any(|l| l.index > 0 && l.perspective.is_none())
+    }
 }
 
 /// MIDI recording state
@@ -453,12 +634,31 @@ pub struct MidiRecording {
     pub stopped_elapsed: Option<f64>,
 }
 
+/// Spiegel van de setzerstand in het hoofdvenster (SetzerBar rapporteert via
+/// report_setzer_state); gelezen door GET /state van de afstandsbediening.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SetzerMirror {
+    pub level: u8,
+    pub preset: i32,
+    pub set_mode: bool,
+    pub data: Vec<bool>,
+}
+
+impl Default for SetzerMirror {
+    fn default() -> Self {
+        Self { level: 1, preset: -1, set_mode: false, data: vec![false; 10] }
+    }
+}
+
 impl AppState {
     pub fn new(app_data_dir: PathBuf) -> Self {
         // Load organ library from disk
         let organ_library = Arc::new(RwLock::new(load_library(&app_data_dir)));
         // Load persisted audio output preferences and create the audio player
         let audio_prefs = load_audio_prefs(&app_data_dir);
+        // Automatisch MIDI-archief: instellingen laden, gedeelde atomics aanmaken.
+        let archive_prefs = crate::midi_archive::load_prefs(&app_data_dir);
+        let midi_archive = Arc::new(crate::midi_archive::MidiArchiveShared::from_prefs(&archive_prefs));
         // Polyfonie-kap en stereo-laden vóór de eerste audio/orgel-load zetten.
         crate::audio::set_polyphony_target(
             audio_prefs.polyphony.map(|n| n as usize).unwrap_or(vpo_audio::DEFAULT_POLYPHONY));
@@ -545,6 +745,8 @@ impl AppState {
         let crescendo_enabled: Arc<RwLock<bool>> = Arc::new(RwLock::new(false));
         let crescendo_binding: Arc<RwLock<Option<(u8, u8, u8, u8, bool)>>> = Arc::new(RwLock::new(None));
         let crescendo_active_stops: Arc<RwLock<Vec<String>>> = Arc::new(RwLock::new(Vec::new()));
+        let learn_cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let learn_cancel_for_midi = learn_cancel.clone();
         // MIDI-opname state - gedeeld met de MIDI-thread (capture-hook in de message-loops)
         let midi_recording: Arc<RwLock<Option<MidiRecording>>> = Arc::new(RwLock::new(None));
 
@@ -567,6 +769,7 @@ impl AppState {
         let cresc_binding_for_midi = crescendo_binding.clone();
         let cresc_active_for_midi = crescendo_active_stops.clone();
         let recording_for_midi = midi_recording.clone();
+        let archive_for_midi = midi_archive.clone();
         // Live-notatie: extra Arcs voor de midi-thread (armed score/laag/take
         // volgen, open-notes pairen, note-added-events emitten naar het
         // notatievenster).
@@ -610,8 +813,10 @@ impl AppState {
                 cresc_enabled_for_midi,
                 cresc_binding_for_midi,
                 cresc_active_for_midi,
+                learn_cancel_for_midi,
                 player_rx,
                 recording_for_midi,
+                archive_for_midi,
                 notation_scores_for_midi,
                 notation_armed_for_midi,
                 notation_open_for_midi,
@@ -645,7 +850,11 @@ impl AppState {
             crescendo_enabled,
             crescendo_binding,
             crescendo_active_stops,
+            crescendo_num_stages: Arc::new(RwLock::new(15)),
+            learn_cancel,
+            swell_last_stash: Arc::new(RwLock::new(None)),
             midi_recording,
+            midi_archive,
             notation_scores,
             notation_armed_score,
             notation_next_id: Arc::new(RwLock::new(1)),
@@ -681,6 +890,13 @@ impl AppState {
             division_tremulants: Arc::new(RwLock::new(std::collections::HashMap::new())),
             wind_group_configs: Arc::new(RwLock::new(std::collections::HashMap::new())),
             feedback: Arc::new(parking_lot::Mutex::new(crate::feedback::FeedbackManager::new())),
+            tremulant_live: Arc::new(RwLock::new(std::collections::HashMap::new())),
+            setzer_mirror: Arc::new(RwLock::new(SetzerMirror::default())),
+            remote_api: Arc::new(parking_lot::Mutex::new(None)),
+            remote_last_error: Arc::new(RwLock::new(None)),
+            preset_poll_seen: Arc::new(RwLock::new(None)),
+            perspectives: Arc::new(RwLock::new(Vec::new())),
+            rank_summary: Arc::new(RwLock::new(Vec::new())),
         }
     }
 
@@ -714,8 +930,10 @@ impl AppState {
         crescendo_enabled: Arc<RwLock<bool>>,
         crescendo_binding: Arc<RwLock<Option<(u8, u8, u8, u8, bool)>>>,
         crescendo_active_stops: Arc<RwLock<Vec<String>>>,
+        learn_cancel: Arc<std::sync::atomic::AtomicBool>,
         player_rx: Receiver<MidiMessage>,
         midi_recording: Arc<RwLock<Option<MidiRecording>>>,
+        midi_archive: Arc<crate::midi_archive::MidiArchiveShared>,
         notation_scores: Arc<RwLock<std::collections::HashMap<u32, crate::notation::Score>>>,
         notation_armed_score: Arc<RwLock<Option<u32>>>,
         notation_open_notes: Arc<RwLock<std::collections::HashMap<(u32, u32, u32, u8, u8), u64>>>,
@@ -738,6 +956,8 @@ impl AppState {
         };
 
         let mut midi_receiver: Option<Receiver<MidiMessage>> = None;
+        // Automatisch MIDI-archief: buffer lokaal in deze thread, geen lock per event.
+        let mut archive = crate::midi_archive::ArchiveRecorder::new(midi_archive);
 
         loop {
             // Check for commands (non-blocking if we have MIDI messages to process)
@@ -861,14 +1081,14 @@ impl AppState {
                                 midi_receiver.as_ref(), &ble_message_rx, std::time::Duration::from_secs(20),
                                 &audio_player, &organ_definition, &loaded_organ_info, &drawn_stops,
                                 &midi_mappings, &active_couplers, &swell_bindings, &division_gains, &held_notes,
-                                &ble_message_count,
+                                &ble_message_count, &learn_cancel,
                             ),
                             Some((ch, cc)) => Self::learn_wait_settled_on(
                                 midi_receiver.as_ref(), &ble_message_rx, ch, cc,
                                 std::time::Duration::from_secs(20),
                                 &audio_player, &organ_definition, &loaded_organ_info, &drawn_stops,
                                 &midi_mappings, &active_couplers, &swell_bindings, &division_gains, &held_notes,
-                                &ble_message_count,
+                                &ble_message_count, &learn_cancel,
                             ).map(|v| (ch, cc, v)),
                         };
                         let _ = response_tx.send(result);
@@ -1030,7 +1250,7 @@ impl AppState {
                             midi_receiver.as_ref(), &ble_message_rx, std::time::Duration::from_secs(15),
                             &audio_player, &organ_definition, &loaded_organ_info, &drawn_stops,
                             &midi_mappings, &active_couplers, &swell_bindings, &division_gains, &held_notes,
-                            &ble_message_count,
+                            &ble_message_count, &learn_cancel,
                         );
 
                         if let Some((channel, cc_num, min_val)) = first {
@@ -1045,7 +1265,7 @@ impl AppState {
                                 std::time::Duration::from_secs(15),
                                 &audio_player, &organ_definition, &loaded_organ_info, &drawn_stops,
                                 &midi_mappings, &active_couplers, &swell_bindings, &division_gains, &held_notes,
-                                &ble_message_count,
+                                &ble_message_count, &learn_cancel,
                             );
 
                             if let Some(max_val) = second {
@@ -1066,6 +1286,7 @@ impl AppState {
                                     min_val: actual_min,
                                     max_val: actual_max,
                                     invert: inverted,
+                                    last_value: Some(max_val),
                                 };
                                 tracing::info!("Swell learned: {} → CC{} ch{} range {}-{}",
                                     division_name, cc_num, channel, actual_min, actual_max);
@@ -1107,7 +1328,7 @@ impl AppState {
                             midi_receiver.as_ref(), &ble_message_rx, std::time::Duration::from_secs(15),
                             &audio_player, &organ_definition, &loaded_organ_info, &drawn_stops,
                             &midi_mappings, &active_couplers, &swell_bindings, &division_gains, &held_notes,
-                            &ble_message_count,
+                            &ble_message_count, &learn_cancel,
                         );
                         if let Some((channel, cc_num, _val)) = first {
                             tracing::info!("Crescendo pedal learned: ch={}, cc={}", channel, cc_num);
@@ -1116,6 +1337,19 @@ impl AppState {
                             tracing::info!("Crescendo learn timed out");
                             let _ = response_tx.send(None);
                         }
+                    }
+                    MidiCommand::ArchiveFlush(response_tx) => {
+                        // Synchroon schrijven: de aanroeper (close-handler / exit /
+                        // test-API) wacht op het pad; enkele ms.
+                        let now = std::time::Instant::now();
+                        let written = archive.force_finish(now)
+                            .and_then(|t| crate::midi_archive::write_now(&archive.shared(), t));
+                        let _ = response_tx.send(written);
+                    }
+                    MidiCommand::CancelLearn => {
+                        // De afgebroken leerlus is al teruggekeerd (die zag de
+                        // vlag); hier alleen de vlag wissen voor de volgende inleer.
+                        learn_cancel.store(false, std::sync::atomic::Ordering::Relaxed);
                     }
                     MidiCommand::Shutdown => break,
                 }
@@ -1136,6 +1370,10 @@ impl AppState {
                 for (i, msg) in batch.into_iter().enumerate() {
                     // Leg het ingespeelde event vast als er een MIDI-opname loopt
                     Self::capture_midi_event(&midi_recording, &msg);
+                    // Automatisch MIDI-archief (live spel; de closure — één
+                    // read-lock op loaded_organ_info — draait alleen bij take-start).
+                    archive.on_event(&msg, std::time::Instant::now(),
+                        || loaded_organ_info.read().as_ref().map(|o| o.name.clone()).unwrap_or_default());
                     Self::capture_notation_event(&msg, &notation_scores, &notation_armed_score,
                         &notation_open_notes, &notation_start_time, &app_handle_notation,
                         &midi_mappings);
@@ -1186,6 +1424,10 @@ impl AppState {
                 tracing::trace!("BLE MIDI received: {:?}", msg);
                 // Leg het ingespeelde event vast als er een MIDI-opname loopt
                 Self::capture_midi_event(&midi_recording, &msg);
+                // Automatisch MIDI-archief: BLE-klavieren (en de test-API-injectie)
+                // tellen als live spel.
+                archive.on_event(&msg, std::time::Instant::now(),
+                    || loaded_organ_info.read().as_ref().map(|o| o.name.clone()).unwrap_or_default());
                 // Zelfde notatie-hooks als de USB-lus: BLE-klavieren (en de
                 // test-API-injectie) moeten ook in de live-notatie belanden.
                 Self::capture_notation_event(&msg, &notation_scores, &notation_armed_score,
@@ -1224,12 +1466,28 @@ impl AppState {
             }
 
             // Process MIDI file player messages (afspelen .mid bestanden)
-            // Bewust NIET vastleggen in de opname: dit is afspelen, geen live spel —
-            // anders zou een opname tijdens playback de noten dubbel/terug-opnemen.
-            while let Ok(msg) = player_rx.try_recv() {
+            // Bewust NIET vastleggen in de opname én NIET in het automatische
+            // MIDI-archief: dit is afspelen, geen live spel — anders zou een
+            // opname tijdens playback de noten dubbel/terug-opnemen.
+            // Zelfde crescendo-CC-coalescing + trapwissel als de live lussen:
+            // een opname met crescendobewegingen speelt de trede ook af.
+            let mut player_batch: Vec<MidiMessage> = Vec::new();
+            while let Ok(msg) = player_rx.try_recv() { player_batch.push(msg); }
+            let player_last_cresc_idx = player_batch.iter()
+                .rposition(|m| Self::cc_claimed_by_crescendo(m, &crescendo_binding));
+            for (i, msg) in player_batch.into_iter().enumerate() {
                 // Ook bij afspelen: een opgenomen crescendo-CC mag het volume
                 // niet dempen via de expressie-fallback.
                 let cc_claim = Self::cc_claimed_by_crescendo(&msg, &crescendo_binding);
+                if cc_claim && Some(i) != player_last_cresc_idx {
+                    continue; // tussenliggende pedaalstand — alleen de laatste telt
+                }
+                Self::process_crescendo_cc(
+                    &msg, &crescendo_binding, &crescendo_enabled, &crescendo_stages,
+                    &crescendo_stage, &crescendo_active_stops, &drawn_stops,
+                    &audio_player, &loaded_organ_info,
+                    &midi_mappings, &active_couplers, &held_notes,
+                );
                 Self::handle_midi_message(
                     msg,
                     &audio_player,
@@ -1243,6 +1501,12 @@ impl AppState {
                     &held_notes,
                     cc_claim,
                 );
+            }
+
+            // Automatisch MIDI-archief: take afsluiten bij stilte/uitzetten/limiet
+            // (1 atomic-load + Instant::now per iteratie); schrijven op een eigen thread.
+            if let Some(take) = archive.poll(std::time::Instant::now()) {
+                crate::midi_archive::spawn_write(archive.shared(), take);
             }
 
             // Small sleep to prevent busy loop
@@ -1496,7 +1760,10 @@ impl AppState {
         Self::wait_for_cc_settled_dual(Some(rx), &crossbeam_channel::never(), timeout)
     }
 
-    /// Process incoming MIDI CC for crescendo pedal: maps value → stage, applies stops additively.
+    /// Pedaal-CC van de generaal crescendo: ruwe waarde → bereik/spiegel →
+    /// trap (met Schmitt-hysterese, zie crescendo_next_stage) → apply. Alle
+    /// registratie-mutatie zit in apply_crescendo_stage_inner (één
+    /// implementatie met de UI-klik/editor/uitschakelen).
     fn process_crescendo_cc(
         msg: &MidiMessage,
         crescendo_binding: &Arc<RwLock<Option<(u8, u8, u8, u8, bool)>>>,
@@ -1511,120 +1778,122 @@ impl AppState {
         active_couplers: &Arc<RwLock<Vec<String>>>,
         held_notes: &Arc<RwLock<Vec<(u8, u8, u8)>>>,
     ) {
-        // Extract CC fields
         let (channel, controller, value) = match msg {
             MidiMessage::ControlChange { channel, controller, value } => (*channel, *controller, *value),
             _ => return,
         };
 
-        // Check binding match
         let binding = *crescendo_binding.read();
         let Some((bound_ch, bound_cc, min_val, max_val, invert)) = binding else { return; };
         if channel != bound_ch || controller != bound_cc { return; }
-
-        // Check enabled
         if !*crescendo_enabled.read() { return; }
 
-        // Get stages
-        let stages = crescendo_stages.read();
-        let num_stages = stages.len();
+        let num_stages = crescendo_stages.read().len();
         if num_stages == 0 { return; }
 
-        // Normaliseer de ruwe CC-waarde van het ingestelde [min,max]-bereik naar 0..127.
-        let scaled = {
-            let lo = min_val.min(max_val) as f32;
-            let hi = max_val.max(min_val) as f32;
-            let span = (hi - lo).max(1.0);
-            (((value as f32 - lo) / span).clamp(0.0, 1.0) * 127.0) as u8
-        };
-        // Spiegelbeeld: keer de pedaalpositie om voordat we naar trap mappen.
-        let mapped_value: u8 = if invert { 127u8.saturating_sub(scaled) } else { scaled };
-
-        // Map CC value (0-127) to stage (0..=num_stages, where 0 = off)
-        // Use a small dead-zone at the bottom (CC 0-3 = stage 0)
-        let new_stage: u8 = if mapped_value < 4 {
-            0
-        } else {
-            // Map 4..=127 linearly to 1..=num_stages
-            let scaled = ((mapped_value as usize - 4) * num_stages) / 124 + 1;
-            scaled.min(num_stages) as u8
-        };
-
+        let mapped = crescendo_mapped_value(value, min_val, max_val, invert);
         let current_stage = *crescendo_stage.read();
-        if new_stage == current_stage { return; }
+        let Some(new_stage) = crescendo_next_stage(mapped, current_stage, num_stages) else { return; };
 
-        // Compute new active stops for this stage
-        let stage_stops: Vec<String> = if new_stage == 0 {
-            Vec::new()
-        } else {
-            stages.get((new_stage - 1) as usize).cloned().unwrap_or_default()
+        let (added, removed) = Self::apply_crescendo_stage_inner(
+            new_stage, crescendo_stages, crescendo_stage, crescendo_active_stops, drawn_stops,
+            active_couplers, audio_player, loaded_organ_info, midi_mappings, held_notes,
+        );
+        let active = crescendo_active_stops.read().len();
+        tracing::info!("Crescendo: CC={} (pedaal {}) → stage {} → {} (+{} −{}, {} active stops)",
+            value, mapped, current_stage, new_stage, added.len(), removed.len(), active);
+    }
+
+    /// Kern van de generaal crescendo — één implementatie voor pedaal, UI-klik
+    /// op een trap, editor-wijziging, uitschakelen (trap 0) en herstel. Zet trap
+    /// `new_stage` (geclamped op het aantal stappen) en werkt drawn_stops,
+    /// active_couplers, de claimlijst (crescendo_active_stops), de trapteller en
+    /// de DTO-vlaggen bij, inclusief voice-sync van ingedrukte toetsen.
+    /// - Additief (GrandOrgue): wat de organist zelf trok wordt nooit geclaimd
+    ///   en dus ook niet weggetrokken bij terugveren.
+    /// - Koppels worden herkend op lidmaatschap van de koppellijst van het
+    ///   orgel (ook echte ODF-koppels `real_coupler_N`), niet op een naamprefix.
+    /// - Een lege trap erft de dichtstbijzijnde lagere gevulde trap; onbekende
+    ///   IDs (matrix van een andere sampleset) worden genegeerd.
+    /// Retourneert (bijgetrokken, weggetrokken) IDs.
+    pub(crate) fn apply_crescendo_stage_inner(
+        new_stage: u8,
+        crescendo_stages: &Arc<RwLock<Vec<Vec<String>>>>,
+        crescendo_stage: &Arc<RwLock<u8>>,
+        crescendo_active_stops: &Arc<RwLock<Vec<String>>>,
+        drawn_stops: &Arc<RwLock<Vec<String>>>,
+        active_couplers: &Arc<RwLock<Vec<String>>>,
+        audio_player: &Arc<RwLock<Option<AudioPlayer>>>,
+        loaded_organ_info: &Arc<RwLock<Option<OrganInfoDto>>>,
+        midi_mappings: &Arc<RwLock<Vec<MidiChannelMapping>>>,
+        held_notes: &Arc<RwLock<Vec<(u8, u8, u8)>>>,
+    ) -> (Vec<String>, Vec<String>) {
+        // Serialiseer pedaal (MIDI-thread) en UI/editor/test-API (command-thread):
+        // beide lezen claims/drawn/koppels, rekenen een diff en schrijven terug.
+        // Onder deze lock wordt geen andere lock in omgekeerde volgorde
+        // genomen; rt_send blokkeert niet, dus de wachttijd is microseconden.
+        let _apply_guard = CRESCENDO_APPLY.lock();
+        use std::collections::HashSet;
+
+        let (new_stage, stage_stops): (u8, Vec<String>) = {
+            let stages = crescendo_stages.read();
+            let s = (new_stage as usize).min(stages.len());
+            (s as u8, crescendo_effective_stops(&stages, s))
         };
-        drop(stages);
+
+        // Lidmaatschapstest voor koppels + geldige IDs van dít orgel.
+        let (coupler_ids, stop_ids): (HashSet<String>, HashSet<String>) = {
+            let organ = loaded_organ_info.read();
+            match organ.as_ref() {
+                Some(o) => (
+                    o.couplers.as_ref().map(|cl| cl.iter().map(|c| c.id.clone()).collect()).unwrap_or_default(),
+                    o.divisions.iter().flat_map(|d| d.stops.iter().map(|s| s.id.clone())).collect(),
+                ),
+                None => (HashSet::new(), HashSet::new()),
+            }
+        };
+        let is_coupler = |id: &String| coupler_ids.contains(id);
 
         let old_active = crescendo_active_stops.read().clone();
-        // GrandOrgue-gedrag: registers/koppels die de organist al handmatig
-        // getrokken had claimt de crescendo NIET — terugveren van de trede mag
-        // ze dus ook niet wegtrekken. Alleen wat de trede zelf bijtrok
-        // (old_active) of wat nu nog niet actief is hoort bij de trede.
-        // Stappen kunnen ook koppels bevatten ("coupler_"-prefix).
         let new_active: Vec<String> = {
             let drawn = drawn_stops.read();
             let couplers_now = active_couplers.read();
             stage_stops.into_iter()
+                .filter(|s| coupler_ids.contains(s) || stop_ids.contains(s))
                 .filter(|s| old_active.contains(s)
-                    || if s.starts_with("coupler_") { !couplers_now.contains(s) } else { !drawn.contains(s) })
+                    || if is_coupler(s) { !couplers_now.contains(s) } else { !drawn.contains(s) })
                 .collect()
         };
 
-        // Compute diff
-        let to_remove: Vec<String> = old_active.iter()
-            .filter(|s| !new_active.contains(s))
-            .cloned()
-            .collect();
-        let to_add: Vec<String> = new_active.iter()
-            .filter(|s| !old_active.contains(s))
-            .cloned()
-            .collect();
+        let to_remove: Vec<String> = old_active.iter().filter(|s| !new_active.contains(s)).cloned().collect();
+        let to_add: Vec<String> = new_active.iter().filter(|s| !old_active.contains(s)).cloned().collect();
 
-        // Update drawn_stops (registers) en active_couplers (koppels)
         {
             let mut drawn = drawn_stops.write();
-            for stop in to_remove.iter().filter(|s| !s.starts_with("coupler_")) {
+            for stop in to_remove.iter().filter(|s| !is_coupler(s)) {
                 drawn.retain(|s| s != stop);
             }
-            for stop in to_add.iter().filter(|s| !s.starts_with("coupler_")) {
-                if !drawn.contains(stop) {
-                    drawn.push(stop.clone());
-                }
+            for stop in to_add.iter().filter(|s| !is_coupler(s)) {
+                if !drawn.contains(stop) { drawn.push(stop.clone()); }
             }
         }
-        // Snapshot van de koppelstand VÓÓR de wijziging: nodig om hieronder de
-        // stemmen van weggevallen/bijgekomen koppelroutes te synchroniseren.
+        // Snapshot van de koppelstand VÓÓR de wijziging (voice-sync hieronder).
         let couplers_before: Vec<String> = active_couplers.read().clone();
         {
             let mut ac = active_couplers.write();
-            for id in to_remove.iter().filter(|s| s.starts_with("coupler_")) {
+            for id in to_remove.iter().filter(|s| is_coupler(s)) {
                 ac.retain(|c| c != id);
             }
-            for id in to_add.iter().filter(|s| s.starts_with("coupler_")) {
-                if !ac.contains(id) {
-                    ac.push(id.clone());
-                }
+            for id in to_add.iter().filter(|s| is_coupler(s)) {
+                if !ac.contains(id) { ac.push(id.clone()); }
             }
         }
 
-        // Update tracker
-        *crescendo_active_stops.write() = new_active.clone();
+        *crescendo_active_stops.write() = new_active;
         *crescendo_stage.write() = new_stage;
 
-        // Update organ_info active state + synchroniseer klinkende voices:
-        // weggetrokken registers zwijgen direct, bijgetrokken registers spelen de
-        // ingedrukte toetsen direct mee (GrandOrgue-gedrag tijdens het spelen).
-        // Vlaggen bijwerken onder een KORT write-lock; de voice-sync hieronder
-        // stuurt (potentieel blokkerende) audio-commando's en draait daarom
-        // onder een read-lock — een write-lock daaroverheen blokkeerde elke
-        // get_organ_info-poll van de UI zolang de audio-queue vol zat
-        // (auditbevinding 4).
+        // DTO-vlaggen onder een KORT write-lock; de voice-sync (potentieel
+        // blokkerende audio-commando's) daarna onder een read-lock.
         {
             let drawn_now = drawn_stops.read().clone();
             let couplers_now = active_couplers.read().clone();
@@ -1649,23 +1918,47 @@ impl AppState {
                     let mappings = midi_mappings.read();
                     let couplers = active_couplers.read();
                     let held = held_notes.read();
-                    for removed_id in to_remove.iter().filter(|s| !s.starts_with("coupler_")) {
+                    for removed_id in to_remove.iter().filter(|s| !is_coupler(s)) {
                         Self::sync_stop_voices_inner(o, player, &mappings, &couplers, &held, removed_id, false);
                     }
-                    for added_id in to_add.iter().filter(|s| !s.starts_with("coupler_")) {
+                    for added_id in to_add.iter().filter(|s| !is_coupler(s)) {
                         Self::sync_stop_voices_inner(o, player, &mappings, &couplers, &held, added_id, true);
                     }
-                    // Koppels in de trap: stemmen van weggevallen routes loslaten
-                    // en bijgekomen routes laten meeklinken. Zonder dit bleven
-                    // gekoppelde stemmen eeuwig hangen zodra hun koppel uitging
-                    // terwijl toetsen ingedrukt waren (hanger-hoofdoorzaak).
                     Self::sync_coupler_voices_inner(o, player, &mappings, &held, &couplers_before, &couplers);
                 }
             }
         }
+        (to_add, to_remove)
+    }
 
-        tracing::info!("Crescendo: CC={} → stage {} → {} ({} active stops)",
-            value, current_stage, new_stage, new_active.len());
+    /// Generaal crescendo op trap `stage` zetten vanaf de command-thread
+    /// (UI-klik, editor, uitschakelen, herstel). Zelfde kern als het pedaal.
+    pub fn apply_crescendo_stage(&self, stage: u8) -> (Vec<String>, Vec<String>) {
+        let before = *self.crescendo_stage.read();
+        let (added, removed) = Self::apply_crescendo_stage_inner(
+            stage, &self.crescendo_stages, &self.crescendo_stage, &self.crescendo_active_stops,
+            &self.drawn_stops, &self.active_couplers, &self.audio_player, &self.loaded_organ_info,
+            &self.midi_mappings, &self.held_notes,
+        );
+        let after = *self.crescendo_stage.read();
+        tracing::info!("Crescendo (UI): stage {} → {} (+{} −{})", before, after, added.len(), removed.len());
+        (added, removed)
+    }
+
+    /// Handmatige registratiewijziging (knop/preset/koppel): een register of
+    /// koppel dat de organist zelf omzet is vanaf nu handregistratie — de
+    /// claim van de crescendotrede vervalt. Handmatig terugduwen laat het
+    /// register bij doortrappen dus weer terugkomen; handmatig aanzetten van
+    /// een geclaimd register houdt het staan bij terugveren.
+    pub fn note_manual_change(&self, id: &str) {
+        Self::note_manual_change_inner(&self.crescendo_active_stops, id);
+    }
+
+    pub(crate) fn note_manual_change_inner(claims: &Arc<RwLock<Vec<String>>>, id: &str) {
+        let mut claims = claims.write();
+        if claims.iter().any(|s| s == id) {
+            claims.retain(|s| s != id);
+        }
     }
 
     /// Learn-mode wait: drains both USB and BLE channels, FORWARDS messages to audio
@@ -1685,19 +1978,36 @@ impl AppState {
         division_gains: &Arc<RwLock<Vec<f32>>>,
         held_notes: &Arc<RwLock<Vec<(u8, u8, u8)>>>,
         ble_message_count: &Arc<std::sync::atomic::AtomicU64>,
+        cancel: &std::sync::atomic::AtomicBool,
     ) -> Option<(u8, u8, u8)> {
         let start = std::time::Instant::now();
         let mut last_cc: Option<(u8, u8, u8)> = None;
         let mut last_change = std::time::Instant::now();
         let settle_time = std::time::Duration::from_millis(1500);
+        // 14-bit-consoles sturen per pedaalstand een paar CC n (MSB) + CC n+32
+        // (LSB); zonder filter "won" de LSB als laatst gezien bericht en werd
+        // de fijnregel-CC ingeleerd. Een LSB (32-63) telt niet mee zodra zijn
+        // MSB (n−32) in dezelfde inleerperiode gezien is.
+        let mut seen_cc = [false; 128];
+        let mut note_cc = |channel: u8, controller: u8, value: u8,
+                           last_cc: &mut Option<(u8, u8, u8)>, last_change: &mut std::time::Instant| {
+            let c = controller as usize & 127;
+            seen_cc[c] = true;
+            if (32..=63).contains(&c) && seen_cc[c - 32] { return; }
+            *last_cc = Some((channel, controller, value));
+            *last_change = std::time::Instant::now();
+        };
 
         while start.elapsed() < timeout {
+            if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                tracing::info!("Trede-inleer afgebroken");
+                return None;
+            }
             // Drain USB
             if let Some(rx) = usb_rx {
                 while let Ok(msg) = rx.try_recv() {
                     if let MidiMessage::ControlChange { channel, controller, value } = msg {
-                        last_cc = Some((channel, controller, value));
-                        last_change = std::time::Instant::now();
+                        note_cc(channel, controller, value, &mut last_cc, &mut last_change);
                     }
                     Self::handle_midi_message(
                         msg, audio_player, organ_definition, loaded_organ_info, drawn_stops,
@@ -1710,8 +2020,7 @@ impl AppState {
             while let Ok(msg) = ble_rx.try_recv() {
                 ble_message_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 if let MidiMessage::ControlChange { channel, controller, value } = msg {
-                    last_cc = Some((channel, controller, value));
-                    last_change = std::time::Instant::now();
+                    note_cc(channel, controller, value, &mut last_cc, &mut last_change);
                 }
                 Self::handle_midi_message(
                     msg, audio_player, organ_definition, loaded_organ_info, drawn_stops,
@@ -1747,6 +2056,7 @@ impl AppState {
         division_gains: &Arc<RwLock<Vec<f32>>>,
         held_notes: &Arc<RwLock<Vec<(u8, u8, u8)>>>,
         ble_message_count: &Arc<std::sync::atomic::AtomicU64>,
+        cancel: &std::sync::atomic::AtomicBool,
     ) -> Option<u8> {
         let start = std::time::Instant::now();
         let mut last_val: Option<u8> = None;
@@ -1754,6 +2064,10 @@ impl AppState {
         let settle_time = std::time::Duration::from_millis(1500);
 
         while start.elapsed() < timeout {
+            if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                tracing::info!("Trede-inleer (fase 2) afgebroken");
+                return None;
+            }
             if let Some(rx) = usb_rx {
                 while let Ok(msg) = rx.try_recv() {
                     if let MidiMessage::ControlChange { channel, controller, value } = msg {
@@ -2226,14 +2540,14 @@ impl AppState {
                 // (al verwerkt via process_crescendo_cc): niet ook als zwelkast
                 // of expressie-fallback interpreteren.
                 if cc_claimed_by_crescendo { return; }
-                // Check swell pedal bindings first
-                let bindings = swell_bindings.read();
+                // Zwelkast-bindingen. Write-lock: de laatste ruwe pedaalstand
+                // wordt per binding onthouden (herstel na herlaad/wissel).
+                let mut bindings = swell_bindings.write();
                 let mut handled = false;
-                for binding in bindings.iter() {
+                for binding in bindings.iter_mut() {
                     if binding.channel == channel && binding.cc_num == controller {
-                        let range = (binding.max_val as f32 - binding.min_val as f32).max(1.0);
-                        let mut normalized = ((value as f32 - binding.min_val as f32) / range).clamp(0.0, 1.0);
-                        if binding.invert { normalized = 1.0 - normalized; }
+                        binding.last_value = Some(value);
+                        let normalized = swell_gain_from_cc(value, binding.min_val, binding.max_val, binding.invert);
                         // Update AppState gains for frontend polling
                         {
                             let mut gains = division_gains.write();
@@ -2241,9 +2555,13 @@ impl AppState {
                                 gains[binding.division_index as usize] = normalized;
                             }
                         }
-                        // Send to audio thread
-                        if let Some(ref player) = *audio_player.read() {
-                            let _ = player.send_command(AudioCommand::SetDivisionGain {
+                        // Naar de audio-thread via het realtime pad (try_send):
+                        // een volle queue mag de MIDI-thread niet 3 s blokkeren
+                        // (note-offs bleven dan liggen → hangers); bij een drop
+                        // is de volgende pedaal-CC toch de waarheid.
+                        let cmd_tx = audio_player.read().as_ref().map(|p| p.command_sender());
+                        if let Some(tx) = cmd_tx {
+                            rt_send(&tx, AudioCommand::SetDivisionGain {
                                 division_index: binding.division_index,
                                 gain: normalized,
                             });
@@ -2925,12 +3243,15 @@ impl AppState {
         let first = stop.first_midi_note as u32;
         let last = stop.last_midi_note as u32;
         if last < first { return; }
+        // Realtime pad (try_send): een trapwissel/preset mag de MIDI-thread niet
+        // tot 3 s per commando blokkeren bij een volle audio-queue (hangers).
+        let tx = player.command_sender();
 
         if !drawn {
             // Register weggetrokken: alle klinkende pijpen in één commando
             // loslaten (een preset-wissel kan tientallen registers tegelijk
             // wegtrekken — per-pijp NoteOffs zouden de command-queue vol duwen).
-            let _ = player.send_command(AudioCommand::ReleaseStop {
+            rt_send(&tx, AudioCommand::ReleaseStop {
                 stop_id: stop.internal_stop_id,
             });
             return;
@@ -2941,7 +3262,7 @@ impl AppState {
         let send_note_on = |note: u8, vel: u8| {
             let t = note as u32;
             if t >= first && t <= last {
-                let _ = player.send_command(AudioCommand::NoteOn {
+                rt_send(&tx, AudioCommand::NoteOn {
                     stop_id: stop.internal_stop_id,
                     pipe_num: t - first + 1,
                     midi_note: note,
@@ -3016,6 +3337,7 @@ impl AppState {
     ) {
         if held.is_empty() || old_couplers == new_couplers { return; }
         let Some(ref coupler_list) = o.couplers else { return; };
+        let tx = player.command_sender();
 
         let route_key = |r: &ExpandedCouplerRoute| (
             r.source_division.clone(), r.destination_division.clone(), r.pitch_offset, r.gate_type.clone()
@@ -3038,7 +3360,7 @@ impl AppState {
                     let s_first = stop.first_midi_note as u32;
                     let s_last = stop.last_midi_note as u32;
                     if t >= s_first && t <= s_last {
-                        let _ = player.send_command(AudioCommand::NoteOff {
+                        rt_send(&tx, AudioCommand::NoteOff {
                             stop_id: stop.internal_stop_id,
                             pipe_num: t - s_first + 1,
                         });
@@ -3072,7 +3394,7 @@ impl AppState {
                     let s_first = stop.first_midi_note as u32;
                     let s_last = stop.last_midi_note as u32;
                     if t >= s_first && t <= s_last {
-                        let _ = player.send_command(AudioCommand::NoteOn {
+                        rt_send(&tx, AudioCommand::NoteOn {
                             stop_id: stop.internal_stop_id,
                             pipe_num: t - s_first + 1,
                             midi_note: t as u8,
@@ -3106,6 +3428,18 @@ impl AppState {
         } else if !drawn && exists {
             stops.retain(|s| s != stop_id);
         }
+    }
+
+    /// Automatisch MIDI-archief: lopende take geforceerd afsluiten en synchroon
+    /// wegschrijven (afsluiten app / test-API). None als er geen take liep, de
+    /// take afgekeurd is, of de MIDI-thread niet binnen `timeout` antwoordt
+    /// (bv. midden in een leer-modus).
+    pub fn midi_archive_flush(&self, timeout: std::time::Duration) -> Option<std::path::PathBuf> {
+        let (tx, rx) = bounded(1);
+        if self.midi_tx.send(MidiCommand::ArchiveFlush(tx)).is_err() {
+            return None;
+        }
+        rx.recv_timeout(timeout).ok().flatten()
     }
 
     /// List MIDI devices
@@ -3338,6 +3672,8 @@ impl AppState {
         self.division_swell_configs.write().clear();
         self.division_tremulants.write().clear();
         self.wind_group_configs.write().clear();
+        // Live tremulantstand (spiegel voor de afstandsbediening) hoort bij het vorige orgel.
+        self.tremulant_live.write().clear();
     }
 
     /// Wacht op een pedaalstand (kanaal, cc, waarde) — stapsgewijze trede-inleer.
@@ -3409,6 +3745,7 @@ impl AppState {
                 min_val: 0,
                 max_val: 127,
                 invert: false,
+                last_value: None,
             });
         }
     }
@@ -3573,5 +3910,204 @@ mod recording_tests {
         let rec: Arc<RwLock<Option<MidiRecording>>> = Arc::new(RwLock::new(None));
         AppState::capture_midi_event(&rec, &MidiMessage::NoteOn { channel: 0, note: 60, velocity: 100 });
         assert!(rec.read().is_none());
+    }
+}
+
+#[cfg(test)]
+mod crescendo_tests {
+    use super::*;
+    use crate::commands::{DivisionDto, StopDto};
+
+    fn stop(id: &str, n: u32) -> StopDto {
+        StopDto {
+            id: id.to_string(), name: id.to_string(), pitch: "8".to_string(), drawn: false,
+            color: None, has_tremulant: false, midi_action_code: 0, internal_stop_id: n,
+            first_midi_note: 36, last_midi_note: 96, is_reed: false,
+        }
+    }
+
+    fn organ() -> OrganInfoDto {
+        OrganInfoDto {
+            id: "test".into(), name: "Test".into(), builder: String::new(), location: String::new(),
+            year: None, stop_count: 3,
+            divisions: vec![DivisionDto {
+                name: "Hoofdwerk".into(), display_name: "Hoofdwerk".into(),
+                stops: vec![stop("a", 1), stop("b", 2), stop("c", 3)],
+                has_tremulant: false, has_swell: false,
+            }],
+            couplers: Some(vec![CouplerDto {
+                id: "real_coupler_1".into(), name: "II/I".into(), source_division: "Hoofdwerk".into(),
+                destination_division: "Hoofdwerk".into(), active: false, display_in_division: "Hoofdwerk".into(),
+                midi_action_code: 0, coupler_type: "unison".into(), pitch_offset: 0,
+            }]),
+            retune_pipes: 0, retune_total: 0, perspectives: Vec::new(), layered_stops: 0,
+        }
+    }
+
+    fn ids(v: &[&str]) -> Vec<String> { v.iter().map(|s| s.to_string()).collect() }
+
+    struct Rig {
+        stages: Arc<RwLock<Vec<Vec<String>>>>,
+        stage: Arc<RwLock<u8>>,
+        claims: Arc<RwLock<Vec<String>>>,
+        drawn: Arc<RwLock<Vec<String>>>,
+        couplers: Arc<RwLock<Vec<String>>>,
+        player: Arc<RwLock<Option<AudioPlayer>>>,
+        organ: Arc<RwLock<Option<OrganInfoDto>>>,
+        mappings: Arc<RwLock<Vec<MidiChannelMapping>>>,
+        held: Arc<RwLock<Vec<(u8, u8, u8)>>>,
+    }
+
+    impl Rig {
+        fn new(stages: Vec<Vec<String>>, drawn: Vec<String>) -> Self {
+            Rig {
+                stages: Arc::new(RwLock::new(stages)),
+                stage: Arc::new(RwLock::new(0)),
+                claims: Arc::new(RwLock::new(Vec::new())),
+                drawn: Arc::new(RwLock::new(drawn)),
+                couplers: Arc::new(RwLock::new(Vec::new())),
+                player: Arc::new(RwLock::new(None)),
+                organ: Arc::new(RwLock::new(Some(organ()))),
+                mappings: Arc::new(RwLock::new(Vec::new())),
+                held: Arc::new(RwLock::new(Vec::new())),
+            }
+        }
+        fn apply(&self, s: u8) -> (Vec<String>, Vec<String>) {
+            AppState::apply_crescendo_stage_inner(
+                s, &self.stages, &self.stage, &self.claims, &self.drawn, &self.couplers,
+                &self.player, &self.organ, &self.mappings, &self.held,
+            )
+        }
+        fn sorted(v: &Arc<RwLock<Vec<String>>>) -> Vec<String> {
+            let mut x = v.read().clone(); x.sort(); x
+        }
+    }
+
+    #[test]
+    fn trapformule_en_grenzen() {
+        assert_eq!(crescendo_stage_for(0, 7), 0);
+        assert_eq!(crescendo_stage_for(3, 7), 0);
+        assert_eq!(crescendo_stage_for(4, 7), 1);
+        assert_eq!(crescendo_stage_for(127, 7), 7);
+        assert_eq!(crescendo_stage_for(64, 0), 0);
+        assert_eq!(crescendo_stage_bounds(0, 7), (0, 3));
+        assert_eq!(crescendo_stage_bounds(1, 7).0, 4);
+        assert_eq!(crescendo_stage_bounds(7, 7).1, 127);
+        // Trap 3 begint bij 40 (zie meetplan-model).
+        assert_eq!(crescendo_stage_for(39, 7), 2);
+        assert_eq!(crescendo_stage_for(40, 7), 3);
+        assert_eq!(crescendo_stage_bounds(3, 7).0, 40);
+        assert_eq!(crescendo_stage_bounds(2, 7).1, 39);
+    }
+
+    #[test]
+    fn hysterese_klappert_niet_op_een_trapgrens() {
+        let n = 7;
+        // Omhoog pas H voorbij de bovengrens van trap 2 (39): 40 en 41 blijven staan.
+        assert_eq!(crescendo_next_stage(40, 2, n), None);
+        assert_eq!(crescendo_next_stage(41, 2, n), None);
+        assert_eq!(crescendo_next_stage(42, 2, n), Some(3));
+        // Omlaag pas H onder de ondergrens van trap 3 (40): 39 en 38 blijven staan.
+        assert_eq!(crescendo_next_stage(39, 3, n), None);
+        assert_eq!(crescendo_next_stage(38, 3, n), None);
+        assert_eq!(crescendo_next_stage(37, 3, n), Some(2));
+        // Ruis 39<->40 rond de grens: geen enkele wissel vanaf trap 2 of 3.
+        for _ in 0..20 {
+            assert_eq!(crescendo_next_stage(40, 2, n), None);
+            assert_eq!(crescendo_next_stage(39, 2, n), None);
+            assert_eq!(crescendo_next_stage(39, 3, n), None);
+            assert_eq!(crescendo_next_stage(40, 3, n), None);
+        }
+        // Volle pedaalweg en dode zone gelden altijd; sprongen over trappen mogen.
+        assert_eq!(crescendo_next_stage(127, 1, n), Some(7));
+        assert_eq!(crescendo_next_stage(3, 5, n), Some(0));
+        assert_eq!(crescendo_next_stage(0, 1, n), Some(0));
+        assert_eq!(crescendo_next_stage(4, 0, n), None);
+        assert_eq!(crescendo_next_stage(6, 0, n), Some(1));
+        assert_eq!(crescendo_next_stage(64, crescendo_stage_for(64, n), n), None);
+        // Gekrompen matrix: huidige trap > N -> direct naar de doeltrap.
+        assert_eq!(crescendo_next_stage(64, 12, n), Some(crescendo_stage_for(64, n)));
+        // Gespiegeld/bereik: 110 in bereik 20..110 = vol, 20 = 0.
+        assert_eq!(crescendo_mapped_value(110, 20, 110, false), 127);
+        assert_eq!(crescendo_mapped_value(20, 20, 110, false), 0);
+        assert_eq!(crescendo_mapped_value(127, 110, 20, true), 0);
+    }
+
+    #[test]
+    fn lege_trap_erft_lagere_gevulde_trap() {
+        let stages = vec![ids(&["a"]), ids(&["a", "b"]), Vec::new(), Vec::new()];
+        assert_eq!(crescendo_effective_stops(&stages, 0), Vec::<String>::new());
+        assert_eq!(crescendo_effective_stops(&stages, 1), ids(&["a"]));
+        assert_eq!(crescendo_effective_stops(&stages, 3), ids(&["a", "b"]));
+        assert_eq!(crescendo_effective_stops(&stages, 4), ids(&["a", "b"]));
+        assert_eq!(crescendo_effective_stops(&stages, 9), ids(&["a", "b"]));
+    }
+
+    #[test]
+    fn apply_diff_claimt_alleen_wat_de_trede_bijtrekt() {
+        let stages = vec![ids(&["a"]), ids(&["a", "b", "real_coupler_1", "onbekend"]), ids(&["a", "b", "c", "real_coupler_1"])];
+        let rig = Rig::new(stages, ids(&["c"])); // c handmatig getrokken
+        let (added, removed) = rig.apply(2);
+        assert_eq!(*rig.stage.read(), 2);
+        assert!(removed.is_empty());
+        let mut a = added.clone(); a.sort();
+        assert_eq!(a, ids(&["a", "b", "real_coupler_1"]));
+        assert_eq!(Rig::sorted(&rig.drawn), ids(&["a", "b", "c"]));
+        assert_eq!(Rig::sorted(&rig.couplers), ids(&["real_coupler_1"]), "echte ODF-koppel gaat via lidmaatschap aan");
+        assert_eq!(Rig::sorted(&rig.claims), ids(&["a", "b", "real_coupler_1"]));
+        assert!(!rig.claims.read().iter().any(|s| s == "onbekend"), "onbekende IDs worden genegeerd");
+        // DTO-vlaggen volgen.
+        let o = rig.organ.read().clone().unwrap();
+        assert!(o.divisions[0].stops.iter().find(|s| s.id == "a").unwrap().drawn);
+        assert!(o.couplers.as_ref().unwrap()[0].active);
+
+        // Trap 3: c stond al handmatig -> niet geclaimd.
+        rig.apply(3);
+        assert_eq!(Rig::sorted(&rig.claims), ids(&["a", "b", "real_coupler_1"]));
+
+        // Terug naar 0: handregistratie c blijft, trede-registers en koppel weg.
+        let (_, removed) = rig.apply(0);
+        assert_eq!(removed.len(), 3);
+        assert_eq!(Rig::sorted(&rig.drawn), ids(&["c"]));
+        assert!(rig.couplers.read().is_empty());
+        assert!(rig.claims.read().is_empty());
+        assert_eq!(*rig.stage.read(), 0);
+
+        // Clamp: trap 9 op een matrix van 3 = trap 3.
+        rig.apply(9);
+        assert_eq!(*rig.stage.read(), 3);
+    }
+
+    #[test]
+    fn handmatig_terugduwen_laat_claim_vallen() {
+        let stages = vec![ids(&["a"]), ids(&["a", "b"])];
+        let rig = Rig::new(stages, Vec::new());
+        rig.apply(2);
+        assert_eq!(Rig::sorted(&rig.claims), ids(&["a", "b"]));
+        // Organist duwt a terug: claim weg (drawn zelf wordt door toggle_stop bijgewerkt).
+        rig.drawn.write().retain(|s| s != "a");
+        AppState::note_manual_change_inner(&rig.claims, "a");
+        assert_eq!(Rig::sorted(&rig.claims), ids(&["b"]));
+        // Bij opnieuw toepassen van trap 2 komt a als trede-register terug.
+        let (added, _) = rig.apply(2);
+        assert_eq!(added, ids(&["a"]));
+        assert_eq!(Rig::sorted(&rig.claims), ids(&["a", "b"]));
+        // Handmatig aanzetten van een geclaimd register -> geen claim meer, blijft staan bij trap 0.
+        AppState::note_manual_change_inner(&rig.claims, "b");
+        rig.apply(0);
+        assert_eq!(Rig::sorted(&rig.drawn), ids(&["b"]));
+    }
+
+    #[test]
+    fn zwelstand_uit_cc() {
+        assert_eq!(swell_gain_from_cc(0, 0, 127, false), 0.0);
+        assert_eq!(swell_gain_from_cc(127, 0, 127, false), 1.0);
+        assert!((swell_gain_from_cc(40, 0, 127, false) - 40.0 / 127.0).abs() < 1e-6);
+        assert_eq!(swell_gain_from_cc(0, 0, 127, true), 1.0);
+        assert_eq!(swell_gain_from_cc(19, 20, 110, false), 0.0);
+        assert_eq!(swell_gain_from_cc(111, 20, 110, false), 1.0);
+        assert!((swell_gain_from_cc(65, 20, 110, false) - 0.5).abs() < 1e-6);
+        // min > max wordt geordend (vangnet), geen stapfunctie.
+        assert!((swell_gain_from_cc(65, 110, 20, false) - 0.5).abs() < 1e-6);
     }
 }

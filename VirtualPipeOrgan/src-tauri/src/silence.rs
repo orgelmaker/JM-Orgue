@@ -194,6 +194,119 @@ pub(crate) fn decode_mp3_interleaved(path: &Path) -> Result<(Vec<f32>, u16, u32)
     Ok((out, channels, sample_rate))
 }
 
+/// Dominante spectrale piek (Hz) van een opname — toonhoogtemeting voor de
+/// test-API (hertemperen). Werkwijze: interleaved → mono-mix, de LAATSTE
+/// min(len, 131072) frames (2,73 s @ 48 kHz: sluit aanloopstilte en attack
+/// uit), DC weg, Hann-venster, zero-pad tot N = 262144, realfft, sterkste bin
+/// tussen 20 en 5000 Hz, parabolische interpolatie op ln|X| over (k−1, k, k+1).
+/// Bin-resolutie 0,18 Hz @ 48 kHz; na interpolatie < 0,5 ct bij ≥ 260 Hz. De
+/// piek kan op een boventoon liggen (principaal): de meetscripts normaliseren
+/// naar het dichtstbijzijnde veelvoud van de verwachte grondtoon.
+pub fn dominant_peak_hz(samples: &[f32], channels: usize, sample_rate: u32) -> f64 {
+    use realfft::RealFftPlanner;
+    const N: usize = 262_144;
+    const WINDOW: usize = 131_072;
+    let ch = channels.max(1);
+    let frames = samples.len() / ch;
+    if frames < 64 || sample_rate == 0 {
+        return 0.0;
+    }
+    let take = frames.min(WINDOW);
+    let start = frames - take;
+    let mut mono: Vec<f64> = (start..frames)
+        .map(|f| {
+            let base = f * ch;
+            samples[base..base + ch].iter().map(|&x| x as f64).sum::<f64>() / ch as f64
+        })
+        .collect();
+    let mean = mono.iter().sum::<f64>() / mono.len() as f64;
+    for v in mono.iter_mut() { *v -= mean; }
+
+    let mut planner = RealFftPlanner::<f64>::new();
+    let fft = planner.plan_fft_forward(N);
+    let mut input = fft.make_input_vec();
+    let mut spectrum = fft.make_output_vec();
+    let n = mono.len();
+    for (i, v) in mono.iter().enumerate() {
+        let w = 0.5 - 0.5 * (2.0 * std::f64::consts::PI * i as f64 / (n as f64 - 1.0)).cos();
+        input[i] = v * w;
+    }
+    if fft.process(&mut input, &mut spectrum).is_err() {
+        return 0.0;
+    }
+    let bin_hz = sample_rate as f64 / N as f64;
+    let lo = ((20.0 / bin_hz).ceil() as usize).max(1);
+    let hi = ((5000.0 / bin_hz).floor() as usize).min(spectrum.len().saturating_sub(2));
+    if hi <= lo {
+        return 0.0;
+    }
+    let mag = |k: usize| spectrum[k].norm();
+    let mut best = lo;
+    let mut best_mag = 0.0f64;
+    for k in lo..=hi {
+        let m = mag(k);
+        if m > best_mag {
+            best_mag = m;
+            best = k;
+        }
+    }
+    if best_mag <= 0.0 {
+        return 0.0;
+    }
+    let (a, b, c) = ((mag(best - 1) + 1e-30).ln(), (best_mag + 1e-30).ln(), (mag(best + 1) + 1e-30).ln());
+    let denom = a - 2.0 * b + c;
+    let delta = if denom.abs() > 1e-12 { 0.5 * (a - c) / denom } else { 0.0 };
+    (best as f64 + delta.clamp(-0.5, 0.5)) * bin_hz
+}
+
+#[cfg(test)]
+mod peak_tests {
+    use super::dominant_peak_hz;
+
+    fn cents(a: f64, b: f64) -> f64 { 1200.0 * (a / b).log2() }
+
+    /// Zuivere sinus van 262,60 Hz (= C4 + 6,40 ct), 48 kHz, 4 s, mono.
+    #[test]
+    fn sine_262_60_within_0_3_cents() {
+        let sr = 48000u32;
+        let f = 262.60f64;
+        let n = 4 * sr as usize;
+        let s: Vec<f32> = (0..n).map(|i| (2.0 * std::f64::consts::PI * f * i as f64 / sr as f64).sin() as f32 * 0.5).collect();
+        let peak = dominant_peak_hz(&s, 1, sr);
+        assert!(cents(peak, f).abs() < 0.3, "peak {peak} Hz, {:.3} ct", cents(peak, f));
+        assert!((cents(peak, 261.626) - 6.40).abs() < 0.3);
+    }
+
+    /// Grondtoon + 2e harmonische (1,5× zo sterk), stereo: de piek ligt op
+    /// 2·262,60 = 525,2 Hz; normalisatie naar k·261,626 (k = round) geeft
+    /// weer +6,4 ct — dezelfde normalisatie als het API-script gebruikt.
+    #[test]
+    fn harmonic_peak_normalizes_back() {
+        let sr = 48000u32;
+        let f = 262.60f64;
+        let n = 4 * sr as usize;
+        let mut s: Vec<f32> = Vec::with_capacity(n * 2);
+        for i in 0..n {
+            let t = i as f64 / sr as f64;
+            let v = (2.0 * std::f64::consts::PI * f * t).sin() * 0.3
+                + (2.0 * std::f64::consts::PI * 2.0 * f * t).sin() * 0.45;
+            s.push(v as f32);
+            s.push(v as f32);
+        }
+        let peak = dominant_peak_hz(&s, 2, sr);
+        assert!((peak - 525.2).abs() < 0.2, "peak {peak}");
+        let k = (peak / 261.626).round();
+        assert_eq!(k, 2.0);
+        assert!((cents(peak, k * 261.626) - 6.40).abs() < 0.3, "{:.3} ct", cents(peak, k * 261.626));
+    }
+
+    #[test]
+    fn empty_is_zero() {
+        assert_eq!(dominant_peak_hz(&[], 1, 48000), 0.0);
+        assert_eq!(dominant_peak_hz(&[0.0; 10], 1, 48000), 0.0);
+    }
+}
+
 fn analyze_mp3(path: &Path, thr_lin: f32) -> Result<LeadingInfo, String> {
     let (samples, channels, sample_rate) = decode_mp3_interleaved(path)?;
     let ch = channels.max(1) as usize;

@@ -69,6 +69,9 @@ pub struct OrganInfo {
     /// Orgel-brede PitchTuning in cents ([Organ] PitchTuning, default 0.0) —
     /// wordt over de hele hiërarchie gesommeerd (GO "original temperament").
     pub pitch_tuning_cents: f32,
+    /// Orgel-brede PitchCorrection in cents ([Organ] PitchCorrection, default
+    /// 0.0) — alleen in hertemper-modus, gesommeerd over de hiërarchie.
+    pub pitch_correction_cents: f32,
 }
 
 /// Manual/keyboard definition from [ManualXXX] section
@@ -97,9 +100,11 @@ pub struct StopDef {
     pub name: String,
     /// Harmonic number (8 = 8', 16 = 4', 32 = 2', etc.)
     pub harmonic_number: u32,
-    /// Pitch correction in cents (stop-niveau). LET OP: GrandOrgue past
-    /// PitchCorrection alleen toe bij automatisch hertemperen — in de standaard
-    /// "original temperament"-modus telt alléén PitchTuning.
+    /// Pitch correction in cents (stop-niveau). GrandOrgue-semantiek: een
+    /// BEWUSTE, OPGETELDE afwijking t.o.v. de getemperde toon (bv. de zwever
+    /// van een Voix céleste) die alléén bij hertemperen (niet-"Original"
+    /// temperament) meetelt, met plusteken: retune = (doel − gemeten) +
+    /// PitchCorrection. In "Origineel" telt alléén PitchTuning.
     pub pitch_correction: f32,
     /// PitchTuning in cents (stop-niveau) — onderdeel van de gesommeerde
     /// stemmingshiërarchie (Organ + Windchest + Stop/Rank + Pipe).
@@ -120,11 +125,25 @@ pub struct StopDef {
     /// default). `Some(n)` is used by the Hauptwerk importer, where stops in one
     /// division can have different compasses.
     pub first_midi_note: Option<u32>,
-    /// Pipe definitions (path or reference)
+    /// Pipe definitions (path or reference) — de primaire pijplaag (laag 0).
     pub pipes: Vec<PipeDef>,
+    /// Extra pijplagen (gestapelde ranks / microfoonperspectieven), elk dicht
+    /// uitgelijnd op dezelfde eerste toets als `pipes`. Invariant: elke laag
+    /// heeft `pipes.len() <= number_of_pipes`.
+    pub layers: Vec<PipeLayer>,
+    /// Canoniek perspectief-label van laag 0 (bv. "front") — alléén gezet als
+    /// ten minste één extra laag een perspectief heeft; anders None.
+    pub primary_perspective: Option<String>,
 }
 
 impl StopDef {
+    /// Alle lagen inclusief de primaire: (laagindex, perspectief, pijpen).
+    /// Laag 0 = `pipes` met `primary_perspective`; daarna `layers` op volgorde.
+    pub fn all_layers(&self) -> impl Iterator<Item = (u8, Option<&str>, &[PipeDef])> {
+        std::iter::once((0u8, self.primary_perspective.as_deref(), self.pipes.as_slice()))
+            .chain(self.layers.iter().map(|l| (l.index, l.perspective.as_deref(), l.pipes.as_slice())))
+    }
+
     /// Heuristic: is this "stop" actually a mechanical/noise recording rather
     /// than a playable musical register?
     ///
@@ -181,6 +200,27 @@ pub struct PipeExtra {
     pub cue_point: Option<u32>,
     /// Aparte tremulant-opname van deze pijp (Hauptwerk "tremmed"-laag)
     pub tremulant_sample: Option<PathBuf>,
+    // ── Toonhoogte-metadata voor hertemperen (GO GOSoundingPipe-semantiek) ──
+    /// ODF `{key}MIDIKeyNumber` (0..127): MIDI-toets van de opgenomen sample;
+    /// overschrijft de smpl-chunk van de WAV. −1/afwezig → None.
+    pub midi_key_number: Option<u32>,
+    /// ODF `{key}MIDIPitchFraction` (cents 0..100 boven MIDIKeyNumber).
+    pub midi_pitch_fraction: Option<f32>,
+    /// `{key}HarmonicNumber` (pijp-niveau, anders rank-niveau; 8 = 8').
+    pub harmonic_number: Option<u32>,
+    /// MIDI-toets waarop deze pijp klinkt volgens de rank
+    /// (FirstMidiNoteNumber + pijpindex). None = afleiden uit de stop.
+    pub key_midi_note: Option<u32>,
+    /// Hauptwerk: absolute samplepitch in cents (6900 = a' 440 Hz), uit
+    /// Pitch_ExactSamplePitch of Pitch_NormalMIDINoteNumber.
+    pub sample_pitch_cents: Option<f32>,
+    /// Hauptwerk: gemeten toonhoogte van de originele pijp in cents
+    /// (Pitch_OriginalOrgan_PitchHz) — terugval als sample/smpl ontbreken.
+    pub original_pitch_cents: Option<f32>,
+    /// Hauptwerk Pitch_Tempered_BaseTuningDeviation: percentage van de
+    /// originele afwijking dat bij hertemperen behouden blijft (100 = niet
+    /// hertemperen).
+    pub retune_keep_pct: Option<f32>,
 }
 
 /// Eén release-sample van een pijp. `max_key_press_time_ms = None` of `-1`
@@ -213,6 +253,22 @@ pub enum PipeDef {
     Empty,
 }
 
+/// Extra pijplaag van een stop: een gestapelde rank (mixtuurkoor) óf een
+/// microfoonperspectief. De engine-sleutel blijft (stop_id, pipe_num); de
+/// laagindex reist mee in bits 16–23 van pipe_num (zie audio.rs `layer_key`).
+#[derive(Debug, Clone)]
+pub struct PipeLayer {
+    /// Laagindex 1..=15 (0 = `StopDef.pipes`); gaat in bits 16–23 van pipe_num.
+    pub index: u8,
+    /// Bronnaam (ODF [Rank] Name / HW StopRank-/Rank-Name / submapnaam).
+    pub name: String,
+    /// Canoniek perspectief-label; None = echte extra rank (altijd laden).
+    pub perspective: Option<String>,
+    /// Dicht vanaf toets 1 van de stop, zelfde uitlijning als `StopDef.pipes`;
+    /// gaten = PipeDef::Empty.
+    pub pipes: Vec<PipeDef>,
+}
+
 /// Windchest group definition
 #[derive(Debug, Clone)]
 pub struct WindchestDef {
@@ -226,6 +282,8 @@ pub struct WindchestDef {
     pub amplitude_level: f32,
     pub gain_db: f32,
     pub pitch_tuning_cents: f32,
+    /// PitchCorrection in cents (alleen hertemper-modus, gesommeerd).
+    pub pitch_correction_cents: f32,
 }
 
 /// Enclosure (swell box) definition
@@ -370,6 +428,7 @@ impl OdfParser {
             amplitude_level: self.parse_f32(section, "AmplitudeLevel").unwrap_or(100.0),
             gain_db: self.parse_f32(section, "Gain").unwrap_or(0.0),
             pitch_tuning_cents: self.parse_f32(section, "PitchTuning").unwrap_or(0.0),
+            pitch_correction_cents: self.parse_f32(section, "PitchCorrection").unwrap_or(0.0),
         })
     }
 
@@ -438,20 +497,24 @@ impl OdfParser {
                     // Modern GrandOrgue: a stop references one or more [RankNNN]
                     // sections that hold the pipes. Older/simple ODFs list the pipes
                     // inline in the [StopNNN] section. Try ranks first, then inline.
-                    let (pipes, harmonic) = match self.parse_stop_ranks(section) {
-                        Some((rank_pipes, rank_harmonic)) => {
+                    let (pipes, harmonic, layers, primary_perspective) = match self.parse_stop_ranks(section) {
+                        Some((rank_pipes, rank_harmonic, layers, primary)) => {
                             let h = self.parse_u32(section, "HarmonicNumber")
                                 .unwrap_or(if rank_harmonic > 0 { rank_harmonic } else { 8 });
-                            (rank_pipes, h)
+                            (rank_pipes, h, layers, primary)
                         }
                         None => {
                             let num_pipes = self.parse_u32(section, "NumberOfLogicalPipes")
                                 .or_else(|| self.parse_u32(section, "NumberOfAccessiblePipes"))
                                 .unwrap_or(0);
                             let inline = self.parse_pipes(section, num_pipes)?;
-                            (inline, self.parse_u32(section, "HarmonicNumber").unwrap_or(8))
+                            (inline, self.parse_u32(section, "HarmonicNumber").unwrap_or(8), Vec::new(), None)
                         }
                     };
+                    debug_assert!(
+                        layers.iter().all(|l| l.pipes.len() <= pipes.len()),
+                        "laag langer dan de primaire pijplijst"
+                    );
 
                     stops.push(StopDef {
                         id,
@@ -479,6 +542,8 @@ impl OdfParser {
                         accepts_retuning: section.get("AcceptsRetuning").map(|v| v != "N").unwrap_or(true),
                         first_midi_note: None,
                         pipes,
+                        layers,
+                        primary_perspective,
                     });
                 }
             }
@@ -492,10 +557,14 @@ impl OdfParser {
 
     /// Build a stop's pipe list from the [RankNNN] sections it references (modern
     /// GrandOrgue format). Honors RankNNNFirstPipeNumber / RankNNNPipeCount so a
-    /// stop can use a slice of a shared rank. Returns the pipes (in keyboard order)
-    /// and the detected harmonic number, or None if the stop has no rank refs
-    /// (older inline-pipe format — handled by parse_pipes instead).
-    fn parse_stop_ranks(&self, stop_section: &HashMap<String, String>) -> Option<(Vec<PipeDef>, u32)> {
+    /// stop can use a slice of a shared rank. Returns the pipes (in keyboard
+    /// order), the detected harmonic number, de extra pijplagen (gestapelde
+    /// ranks / perspectieven) en het perspectief van laag 0, or None if the stop
+    /// has no rank refs (older inline-pipe format — handled by parse_pipes instead).
+    fn parse_stop_ranks(
+        &self,
+        stop_section: &HashMap<String, String>,
+    ) -> Option<(Vec<PipeDef>, u32, Vec<PipeLayer>, Option<String>)> {
         let num_ranks = self.parse_u32(stop_section, "NumberOfRanks")?;
         if num_ranks == 0 {
             return None;
@@ -511,11 +580,19 @@ impl OdfParser {
         // alleen goed wanneer de ranks toevallig aansluitend in ODF-volgorde
         // stonden, en schoof bovendien álle volgende pijpen een positie op
         // wanneer een REF-regel misvormd was (→ verkeerde pijp op elke toets
-        // erna). Overlappende ranks (echte gestapelde mixturen) spelen we nog
-        // niet meerstemmig af: het eerste koor wint, met een duidelijke warn.
+        // erna). Overlappende ranks (gestapelde mixtuurkoren, of microfoon-
+        // perspectieven als aparte ranks) gaan in EXTRA LAGEN (PipeLayer):
+        // zodra een rank op een al bezette toets komt, krijgt die rank een
+        // eigen laag en gaan ál zijn volgende pijpen daarin (rank-intact: één
+        // ODF-[Rank] = één PipeLayer). Splices met disjuncte toetsen blijven
+        // laagloos. Maximaal 15 lagen; daarboven droppen met een warn.
         use std::collections::BTreeMap;
         let mut by_key: BTreeMap<u32, PipeDef> = BTreeMap::new();
+        // laagindex → (ranknaam, toets → pijp)
+        let mut extra: BTreeMap<u8, (String, BTreeMap<u32, PipeDef>)> = BTreeMap::new();
+        let mut next_layer: u8 = 1;
         let mut stacked_dropped = 0usize;
+        let mut first_rank_name: Option<String> = None;
 
         for r in 1..=num_ranks {
             let rank_id = match self.parse_u32(stop_section, &format!("Rank{:03}", r)) {
@@ -526,6 +603,16 @@ impl OdfParser {
                 Some(s) => s,
                 None => continue,
             };
+            let rank_name = rank_section
+                .get("Name")
+                .cloned()
+                .unwrap_or_else(|| format!("Rank {}", rank_id));
+            if first_rank_name.is_none() {
+                first_rank_name = Some(rank_name.clone());
+            }
+            // Laag van deze rank: None zolang hij (nog) in de primaire lijst
+            // past; Some zodra hij ergens overlapt (rank-intact daarna).
+            let mut layer: Option<u8> = None;
             let first_pipe = self
                 .parse_u32(stop_section, &format!("Rank{:03}FirstPipeNumber", r))
                 .unwrap_or(1);
@@ -550,7 +637,16 @@ impl OdfParser {
             let rank_ampl = self.parse_f32(rank_section, "AmplitudeLevel").unwrap_or(100.0);
             let rank_gain = self.parse_f32(rank_section, "Gain").unwrap_or(0.0);
             let rank_pitch = self.parse_f32(rank_section, "PitchTuning").unwrap_or(0.0);
-            let rank_neutral = (rank_ampl - 100.0).abs() < 1e-6 && rank_gain.abs() < 1e-6 && rank_pitch.abs() < 1e-6;
+            // Rank-brede PitchCorrection (hertemperen), HarmonicNumber (GO-
+            // default voor pijpen zonder eigen waarde) en FirstMidiNoteNumber
+            // (MIDI-toets van Pipe001 → key_midi_note per pijp).
+            let rank_pc = self.parse_f32(rank_section, "PitchCorrection").unwrap_or(0.0);
+            let rank_h = self.parse_u32(rank_section, "HarmonicNumber");
+            let rank_first_midi = self.parse_u32(rank_section, "FirstMidiNoteNumber");
+            let rank_neutral = (rank_ampl - 100.0).abs() < 1e-6
+                && rank_gain.abs() < 1e-6
+                && rank_pitch.abs() < 1e-6
+                && rank_pc.abs() < 1e-6;
 
             for i in 0..count {
                 let key = format!("Pipe{:03}", first_pipe + i);
@@ -559,7 +655,10 @@ impl OdfParser {
                     None => break, // past the end of the rank
                 };
                 if harmonic == 0 {
-                    if let Some(h) = self.parse_u32(rank_section, &format!("{}HarmonicNumber", key)) {
+                    if let Some(h) = self
+                        .parse_u32(rank_section, &format!("{}HarmonicNumber", key))
+                        .or(rank_h)
+                    {
                         harmonic = h;
                     }
                 }
@@ -599,47 +698,112 @@ impl OdfParser {
                         extra.amplitude_level = Some(pipe_ampl * rank_ampl / 100.0);
                         extra.gain_db = Some(extra.gain_db.unwrap_or(0.0) + rank_gain);
                         extra.pitch_tuning_cents = Some(extra.pitch_tuning_cents.unwrap_or(0.0) + rank_pitch);
+                        extra.pitch_correction_cents = Some(extra.pitch_correction_cents.unwrap_or(0.0) + rank_pc);
                     }
+                    // Rank-HarmonicNumber als default per pijp (GORank::Load →
+                    // GOSoundingPipe::Load) en de MIDI-toets van deze pijp.
+                    extra.harmonic_number = extra.harmonic_number.or(rank_h);
+                    extra.key_midi_note = rank_first_midi.map(|f| f + first_pipe + i - 1);
                     PipeDef::Sample {
                         path: self.resolve_path(value),
                         extra,
                     }
                 };
+                if let Some(l) = layer {
+                    // Rank-intact: deze rank heeft al een laag → alles erin.
+                    if !matches!(pd, PipeDef::Empty) {
+                        if let Some((_, m)) = extra.get_mut(&l) {
+                            m.insert(key_num, pd);
+                        }
+                    }
+                    continue;
+                }
                 match by_key.entry(key_num) {
                     std::collections::btree_map::Entry::Vacant(e) => { e.insert(pd); }
                     std::collections::btree_map::Entry::Occupied(mut e) => {
                         // Zelfde toets al bezet door een eerdere rank. Een échte
-                        // pijp verdringt een leeg slot; anders wint het eerste
-                        // koor (gestapelde koren nog niet ondersteund).
+                        // pijp verdringt een leeg slot (DUMMY); een echte
+                        // botsing maakt van deze rank een extra laag.
                         if matches!(e.get(), PipeDef::Empty) && !matches!(pd, PipeDef::Empty) {
                             e.insert(pd);
                         } else if !matches!(pd, PipeDef::Empty) {
-                            stacked_dropped += 1;
+                            if (next_layer as usize) < 16 {
+                                let l = next_layer;
+                                next_layer += 1;
+                                let mut m = BTreeMap::new();
+                                m.insert(key_num, pd);
+                                extra.insert(l, (rank_name.clone(), m));
+                                layer = Some(l);
+                            } else {
+                                stacked_dropped += 1;
+                            }
                         }
                     }
                 }
             }
         }
 
+        let stop_name = stop_section.get("Name").map(String::as_str).unwrap_or("?");
         if stacked_dropped > 0 {
-            let name = stop_section.get("Name").map(String::as_str).unwrap_or("?");
             warn!(
-                "Stop '{}': {} gestapelde rank-pijpen genegeerd — meerkorige stapeling wordt nog niet meerstemmig afgespeeld (eerste koor klinkt)",
-                name, stacked_dropped
+                "Stop '{}': {} gestapelde rank-pijpen genegeerd — meer dan 15 extra lagen worden niet ondersteund",
+                stop_name, stacked_dropped
             );
         }
 
-        if by_key.is_empty() {
+        if by_key.is_empty() && extra.is_empty() {
             None
         } else {
             // Dichte lijst vanaf toets 1: gaten blijven Empty zodat de
-            // noot→pijp-uitlijning (pipe_num = noot - eerste + 1) klopt.
-            let max_key = *by_key.keys().max().unwrap_or(&0);
+            // noot→pijp-uitlijning (pipe_num = noot - eerste + 1) klopt. Het
+            // bereik loopt tot de hoogste toets over ALLE lagen, zodat elke
+            // laag binnen `number_of_pipes` past (invariant).
+            let max_key = by_key
+                .keys()
+                .copied()
+                .chain(extra.values().flat_map(|(_, m)| m.keys().copied()))
+                .max()
+                .unwrap_or(0);
             let mut pipes = Vec::with_capacity(max_key as usize);
             for k in 1..=max_key {
                 pipes.push(by_key.remove(&k).unwrap_or(PipeDef::Empty));
             }
-            Some((pipes, harmonic))
+            let mut layers: Vec<PipeLayer> = Vec::with_capacity(extra.len());
+            let mut layered_pipes = 0usize;
+            for (index, (name, mut m)) in extra {
+                layered_pipes += m.len();
+                let mut lp = Vec::with_capacity(max_key as usize);
+                for k in 1..=max_key {
+                    lp.push(m.remove(&k).unwrap_or(PipeDef::Empty));
+                }
+                let perspective = crate::perspective::detect_perspective(&name);
+                layers.push(PipeLayer { index, name, perspective, pipes: lp });
+            }
+            // Perspectief van laag 0 alléén wanneer ≥1 laag er een heeft —
+            // anders krijgt een enkel-perspectief-set met "(front)" in alle
+            // ranknamen een fantoomperspectief.
+            let primary_perspective = if layers.iter().any(|l| l.perspective.is_some()) {
+                first_rank_name.as_deref().and_then(crate::perspective::detect_perspective)
+            } else {
+                None
+            };
+            if !layers.is_empty() {
+                info!(
+                    "Stop '{}': {} pijpen in {} extra laag/lagen (gestapelde ranks/perspectieven): {}",
+                    stop_name,
+                    layered_pipes,
+                    layers.len(),
+                    layers
+                        .iter()
+                        .map(|l| match &l.perspective {
+                            Some(p) => format!("{} [{}]", l.name, p),
+                            None => l.name.clone(),
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+            }
+            Some((pipes, harmonic, layers, primary_perspective))
         }
     }
 
@@ -691,6 +855,20 @@ impl OdfParser {
             load_release: section.get(&format!("{}LoadRelease", key)).map(|v| v.trim().eq_ignore_ascii_case("y")),
             cue_point: self.parse_u32(section, &format!("{}CuePoint", key)),
             tremulant_sample: None,
+            // Toonhoogte-metadata (hertemperen). MIDIKeyNumber=-1 geeft via
+            // parse_u32 al None; MIDIPitchFraction=-1 parset wél (-1.0) en
+            // moet expliciet buiten 0..=100 vallen.
+            midi_key_number: self
+                .parse_u32(section, &format!("{}MIDIKeyNumber", key))
+                .filter(|k| *k <= 127),
+            midi_pitch_fraction: self
+                .parse_f32(section, &format!("{}MIDIPitchFraction", key))
+                .filter(|f| (0.0..=100.0).contains(f)),
+            harmonic_number: self.parse_u32(section, &format!("{}HarmonicNumber", key)),
+            key_midi_note: None,
+            sample_pitch_cents: None,
+            original_pitch_cents: None,
+            retune_keep_pct: None,
         }
     }
 
@@ -810,6 +988,7 @@ impl OdfParser {
                     amplitude_level: self.parse_f32(section, "AmplitudeLevel").unwrap_or(100.0),
                     gain_db: self.parse_f32(section, "Gain").unwrap_or(0.0),
                     pitch_tuning_cents: self.parse_f32(section, "PitchTuning").unwrap_or(0.0),
+                    pitch_correction_cents: self.parse_f32(section, "PitchCorrection").unwrap_or(0.0),
                 });
             }
         }
@@ -921,10 +1100,12 @@ impl OrganDefinition {
         let mut paths = Vec::new();
 
         for stop in &self.stops {
-            for pipe in &stop.pipes {
-                if let PipeDef::Sample { path, .. } = pipe {
-                    if !paths.contains(path) {
-                        paths.push(path.clone());
+            for (_, _, pipes) in stop.all_layers() {
+                for pipe in pipes {
+                    if let PipeDef::Sample { path, .. } = pipe {
+                        if !paths.contains(path) {
+                            paths.push(path.clone());
+                        }
                     }
                 }
             }
@@ -936,6 +1117,50 @@ impl OrganDefinition {
     /// Resolve a pipe reference to its actual sample path
     pub fn resolve_reference<'a>(&'a self, reference: &'a PipeDef) -> Option<&'a PipeDef> {
         self.resolve_reference_depth(reference, 0)
+    }
+
+    /// Als `resolve_reference`, maar geeft óók de EIGENAAR van de uiteindelijke
+    /// sample terug: (eigenaar-stop, 0-based pijpindex binnen die stop, de
+    /// `PipeDef::Sample`). Voor een directe Sample is dat (`owner`, `pipe_idx`,
+    /// self). Nodig voor hertemperen: een REF-pijp (bv. Octaaf 4' → Prestant
+    /// 8') moet de HarmonicNumber/PitchCorrection/windchest van de EIGENAAR
+    /// gebruiken (GO: GOReferencePipe speelt de GOSoundingPipe van de eigenaar),
+    /// niet die van de lenende stop — anders ±1200-ct-uitschieters.
+    pub fn resolve_reference_owner<'a>(
+        &'a self,
+        owner: &'a StopDef,
+        pipe_idx: usize,
+        reference: &'a PipeDef,
+    ) -> Option<(&'a StopDef, usize, &'a PipeDef)> {
+        self.resolve_reference_owner_depth(owner, pipe_idx, reference, 0)
+    }
+
+    fn resolve_reference_owner_depth<'a>(
+        &'a self,
+        owner: &'a StopDef,
+        pipe_idx: usize,
+        reference: &'a PipeDef,
+        depth: u32,
+    ) -> Option<(&'a StopDef, usize, &'a PipeDef)> {
+        if depth > 8 {
+            return None; // cyclus/pathologische keten (zie resolve_reference_depth)
+        }
+        match reference {
+            PipeDef::Sample { .. } => Some((owner, pipe_idx, reference)),
+            PipeDef::Empty => None,
+            PipeDef::Reference { manual, stop, pipe } => {
+                // Zelfde keten als resolve_reference_depth: manual-relatieve
+                // stopindex, terugval op de globale stop-id.
+                let resolved_stop = self.manuals.iter()
+                    .find(|m| m.number == *manual)
+                    .and_then(|m| m.stop_ids.get((*stop as usize).saturating_sub(1)))
+                    .and_then(|sid| self.stops.iter().find(|s| s.id == *sid))
+                    .or_else(|| self.stops.iter().find(|s| s.id == *stop))?;
+                let idx = (*pipe as usize).saturating_sub(1);
+                let p = resolved_stop.pipes.get(idx)?;
+                self.resolve_reference_owner_depth(resolved_stop, idx, p, depth + 1)
+            }
+        }
     }
 
     fn resolve_reference_depth<'a>(&'a self, reference: &'a PipeDef, depth: u32) -> Option<&'a PipeDef> {
@@ -1238,6 +1463,8 @@ mod tests {
             accepts_retuning: retune,
             first_midi_note: None,
             pipes: Vec::new(),
+            layers: Vec::new(),
+            primary_perspective: None,
         };
         // Real registers are kept.
         assert!(!mk("Prestant 8'", true).is_noise_or_mechanical());
@@ -1395,6 +1622,224 @@ Pipe002PitchTuning=-7.48608
         // Geen loops of releases opgegeven
         assert_eq!(e1.loop_start, None);
         assert!(e1.releases.is_empty());
+    }
+
+    #[test]
+    fn test_parse_pitch_metadata_rank_path() {
+        // Hertemperen: PitchCorrection wordt over Organ+Windchest+Rank+Pipe
+        // gesommeerd (rank+pijp in de extra; organ/windchest apart), de rank-
+        // FirstMidiNoteNumber levert key_midi_note per pijp, en per pijp
+        // MIDIKeyNumber/MIDIPitchFraction/HarmonicNumber (rank-default).
+        let organ = parse_odf_str("pitch_metadata", "\
+[Organ]
+ChurchName=Testkerk
+NumberOfManuals=1
+NumberOfWindchestGroups=1
+PitchCorrection=1
+[WindchestGroup001]
+Name=Main
+PitchCorrection=2
+[Manual001]
+Name=Manuaal
+NumberOfStops=1
+Stop001=001
+[Stop001]
+Name=Prestant 8'
+NumberOfRanks=1
+Rank001=001
+HarmonicNumber=8
+[Rank001]
+Name=Prestant 8'
+FirstMidiNoteNumber=48
+PitchCorrection=3
+HarmonicNumber=8
+NumberOfLogicalPipes=3
+Pipe001=samples\\048-c.wav
+Pipe001PitchCorrection=4
+Pipe001MIDIKeyNumber=48
+Pipe001MIDIPitchFraction=12.5
+Pipe001HarmonicNumber=16
+Pipe002=samples\\049-cs.wav
+Pipe003=samples\\050-d.wav
+Pipe003MIDIKeyNumber=-1
+Pipe003MIDIPitchFraction=-1
+");
+        assert!((organ.organ.pitch_correction_cents - 1.0).abs() < 1e-6);
+        assert!((organ.windchests[0].pitch_correction_cents - 2.0).abs() < 1e-6);
+        let stop = organ.get_stop(1).expect("stop 1 moet bestaan");
+        let PipeDef::Sample { extra: e1, .. } = &stop.pipes[0] else { panic!("pijp 1 moet een Sample zijn") };
+        let PipeDef::Sample { extra: e2, .. } = &stop.pipes[1] else { panic!("pijp 2 moet een Sample zijn") };
+        let PipeDef::Sample { extra: e3, .. } = &stop.pipes[2] else { panic!("pijp 3 moet een Sample zijn") };
+        // Rank (3) + pijp (4) = 7; pijp 2 alleen rank (3).
+        assert!((e1.pitch_correction_cents.unwrap() - 7.0).abs() < 1e-5);
+        assert!((e2.pitch_correction_cents.unwrap() - 3.0).abs() < 1e-5);
+        assert_eq!(e1.key_midi_note, Some(48));
+        assert_eq!(e2.key_midi_note, Some(49));
+        assert_eq!(e3.key_midi_note, Some(50));
+        assert_eq!(e1.midi_key_number, Some(48));
+        assert!((e1.midi_pitch_fraction.unwrap() - 12.5).abs() < 1e-5);
+        assert_eq!(e1.harmonic_number, Some(16));
+        // Rank-HarmonicNumber als default; -1-waarden vallen weg.
+        assert_eq!(e2.harmonic_number, Some(8));
+        assert_eq!(e2.midi_key_number, None);
+        assert_eq!(e2.midi_pitch_fraction, None);
+        assert_eq!(e3.midi_key_number, None);
+        assert_eq!(e3.midi_pitch_fraction, None);
+        // PitchTuning blijft neutraal (0) door PitchCorrection.
+        assert!(e1.pitch_tuning_cents.unwrap_or(0.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_resolve_reference_owner() {
+        // Octaaf 4' leent via REF van Prestant 8': de eigenaar-resolutie moet
+        // de Prestant-stop + 0-based index van de verwezen pijp teruggeven.
+        let organ = parse_odf_str("ref_owner", "\
+[Organ]
+ChurchName=Testkerk
+NumberOfManuals=1
+[Manual001]
+Name=Manuaal
+NumberOfStops=2
+Stop001=001
+Stop002=002
+[Stop001]
+Name=Prestant 8'
+NumberOfLogicalPipes=2
+Pipe001=samples\\036-c.wav
+Pipe002=samples\\037-cs.wav
+[Stop002]
+Name=Octaaf 4'
+HarmonicNumber=16
+NumberOfLogicalPipes=1
+Pipe001=REF:001:001:002
+");
+        let octaaf = organ.get_stop(2).unwrap();
+        let (owner, idx, pd) = organ
+            .resolve_reference_owner(octaaf, 0, &octaaf.pipes[0])
+            .expect("REF moet oplossen");
+        assert_eq!(owner.id, 1);
+        assert_eq!(idx, 1);
+        assert!(matches!(pd, PipeDef::Sample { path, .. } if path.ends_with("037-cs.wav")));
+        // Directe sample: eigenaar = de stop zelf, index ongewijzigd.
+        let prestant = organ.get_stop(1).unwrap();
+        let (o2, i2, _) = organ.resolve_reference_owner(prestant, 1, &prestant.pipes[1]).unwrap();
+        assert_eq!((o2.id, i2), (1, 1));
+    }
+
+    /// Mini-ODF met één stop van twee ranks; `rank2_first_key` = de
+    /// RankNNNFirstAccessibleKeyNumber van Rank002, `names` = de Rank-namen.
+    fn stacked_odf(name: &str, rank2_first_key: u32, rank2_count: u32, names: (&str, &str)) -> OrganDefinition {
+        parse_odf_str(name, &format!("\
+[Organ]
+ChurchName=Testkerk
+NumberOfManuals=1
+[Manual001]
+Name=Manuaal
+NumberOfStops=1
+Stop001=001
+[Stop001]
+Name=Gestapeld
+NumberOfRanks=2
+Rank001=001
+Rank001PipeCount=3
+Rank001FirstAccessibleKeyNumber=1
+Rank002=002
+Rank002PipeCount={count}
+Rank002FirstAccessibleKeyNumber={first}
+[Rank001]
+Name={n1}
+NumberOfLogicalPipes=3
+Pipe001=r1\\036-c.wav
+Pipe002=r1\\037-cs.wav
+Pipe003=r1\\038-d.wav
+[Rank002]
+Name={n2}
+NumberOfLogicalPipes=3
+Pipe001=r2\\036-c.wav
+Pipe002=r2\\037-cs.wav
+Pipe003=r2\\038-d.wav
+", count = rank2_count, first = rank2_first_key, n1 = names.0, n2 = names.1))
+    }
+
+    #[test]
+    fn test_stacked_ranks_worden_lagen() {
+        // Twee ranks over dezelfde toetsen → Rank002 wordt laag 1, met zijn
+        // eigen paden; laag 0 houdt Rank001.
+        let organ = stacked_odf("stacked", 1, 3, ("Mixtur rank 1", "Mixtur rank 2"));
+        let stop = organ.get_stop(1).unwrap();
+        assert_eq!(stop.pipes.len(), 3);
+        assert_eq!(stop.number_of_pipes, 3);
+        assert_eq!(stop.layers.len(), 1);
+        assert_eq!(stop.layers[0].index, 1);
+        assert_eq!(stop.layers[0].name, "Mixtur rank 2");
+        assert_eq!(stop.layers[0].pipes.len(), 3);
+        let PipeDef::Sample { path, .. } = &stop.layers[0].pipes[1] else { panic!("laag 1 pijp 2 moet Sample zijn") };
+        assert!(path.ends_with("r2/037-cs.wav"), "{path:?}");
+        let PipeDef::Sample { path: p0, .. } = &stop.pipes[1] else { panic!("laag 0 pijp 2 moet Sample zijn") };
+        assert!(p0.ends_with("r1/037-cs.wav"), "{p0:?}");
+        // all_layers levert beide lagen in volgorde.
+        let idx: Vec<u8> = stop.all_layers().map(|(i, _, _)| i).collect();
+        assert_eq!(idx, vec![0, 1]);
+        // get_sample_paths ziet ook de laag-bestanden.
+        assert_eq!(organ.get_sample_paths().len(), 6);
+    }
+
+    #[test]
+    fn test_splice_geeft_geen_lagen() {
+        // GreenPositiv-vorm: Rank002 begint op toets 4 → disjunct → geen lagen,
+        // dichte lijst van 6 pijpen.
+        let organ = stacked_odf("splice", 4, 3, ("Kwinta", "Kwinta rep"));
+        let stop = organ.get_stop(1).unwrap();
+        assert!(stop.layers.is_empty());
+        assert_eq!(stop.pipes.len(), 6);
+        assert_eq!(stop.primary_perspective, None);
+        let PipeDef::Sample { path, .. } = &stop.pipes[3] else { panic!("toets 4 moet Sample zijn") };
+        assert!(path.ends_with("r2/036-c.wav"), "{path:?}");
+    }
+
+    #[test]
+    fn test_deeloverlap_blijft_een_rank() {
+        // Rank002 op toets 2..=4 overlapt gedeeltelijk met Rank001 (1..=3):
+        // rank-intact → ÁL zijn pijpen in laag 1 (ook toets 4, die in laag 0
+        // vrij was); laag 0 krijgt daar Empty en het bereik loopt tot toets 4.
+        let organ = stacked_odf("deeloverlap", 2, 3, ("A", "B"));
+        let stop = organ.get_stop(1).unwrap();
+        assert_eq!(stop.layers.len(), 1);
+        assert_eq!(stop.pipes.len(), 4);
+        assert!(matches!(stop.pipes[3], PipeDef::Empty));
+        let l = &stop.layers[0];
+        assert_eq!(l.pipes.len(), 4);
+        assert!(matches!(l.pipes[0], PipeDef::Empty));
+        for k in 1..=3 {
+            let PipeDef::Sample { path, .. } = &l.pipes[k] else { panic!("laag pijp {k} moet Sample zijn") };
+            assert!(path.starts_with(organ.base_path.join("r2")) || path.to_string_lossy().contains("r2"), "{path:?}");
+        }
+        // Geen pijp van Rank002 in laag 0.
+        for p in &stop.pipes {
+            if let PipeDef::Sample { path, .. } = p {
+                assert!(!path.to_string_lossy().contains("r2"), "Rank002-pijp in laag 0: {path:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn test_rank_naam_perspectief() {
+        let organ = stacked_odf("persp", 1, 3, ("Principal 8' (front)", "Principal 8' (rear)"));
+        let stop = organ.get_stop(1).unwrap();
+        assert_eq!(stop.primary_perspective.as_deref(), Some("front"));
+        assert_eq!(stop.layers[0].perspective.as_deref(), Some("rear"));
+    }
+
+    #[test]
+    fn test_mixtuur_zonder_perspectief() {
+        let organ = stacked_odf("mixtuur", 1, 3, ("Mixtur rank 1", "Mixtur rank 2"));
+        let stop = organ.get_stop(1).unwrap();
+        assert_eq!(stop.primary_perspective, None);
+        assert_eq!(stop.layers[0].perspective, None);
+        // Eén perspectief-naam in de PRIMAIRE rank alleen → geen fantoom.
+        let organ2 = stacked_odf("fantoom", 1, 3, ("Principal 8' (front)", "Mixtur rank 2"));
+        let s2 = organ2.get_stop(1).unwrap();
+        assert_eq!(s2.primary_perspective, None);
     }
 
     #[test]

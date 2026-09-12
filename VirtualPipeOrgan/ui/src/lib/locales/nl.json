@@ -119,6 +119,10 @@
     "temperament_custom_close": "Sluit",
     "temperament_fine_tune": "Fijnstemming",
     "temperament_a4": "A4 referentie",
+    "temperament_original_hint": "Origineel: de samples klinken zoals opgenomen (PitchTuning van de sampleset wel, geen hertemperen).",
+    "temperament_retune_hint": "Hertemperen: elke pijp wordt van haar gemeten toonhoogte naar de gekozen stemming gestemd (zoals GrandOrgue); zwevers behouden hun bewuste afwijking.",
+    "temperament_measured": "Deze set heeft gemeten pijptoonhoogtes ({n} van {total} pijpen).",
+    "temperament_no_measured": "Geen gemeten pijptoonhoogtes in deze set — 'Gelijkzwevend' klinkt gelijk aan 'Origineel'; andere stemmingen worden als offset op de opname gelegd.",
     "swell_box": "Zwelkast",
     "transpose": "Transponeren",
     "pan": "Pan",
@@ -242,6 +246,19 @@
     "loops_skipped": "overgeslagen",
     "polyphony_default": "standaard"
   },
+  "perspectives": {
+    "title": "Perspectieven en gestapelde ranks",
+    "desc": "Deze sampleset heeft meerdere microfoonposities. Kies welke worden geladen (kost geheugen) en meng ze per positie.",
+    "enabled": "Laden",
+    "gain": "Volume (dB)",
+    "pipes": "{n} pijpen",
+    "ram_hint": "± {mb} MB extra bij laden",
+    "not_loaded": "Niet geladen",
+    "stacked_note": "{n} registers bestaan uit meerdere ranks (bv. mixturen); die klinken altijd volledig.",
+    "reload_hint": "De keuze van geladen perspectieven wordt actief na het opnieuw laden van het orgel.",
+    "reload_now": "Orgel opnieuw laden",
+    "none": "Dit orgel heeft één perspectief."
+  },
   "stops": {
     "tremulant": "Tremulant",
     "drawn": "ingeschakeld",
@@ -322,7 +339,9 @@
     "midi_disconnected": "MIDI niet verbonden",
     "voices": "stemmen",
     "version": "v{version}",
-    "load_title": "Klinkende stemmen / polyfonie-kap · belasting van de audio-thread"
+    "load_title": "Klinkende stemmen / polyfonie-kap · belasting van de audio-thread",
+    "archiving": "MIDI-archief",
+    "archiving_title": "Het automatische MIDI-archief legt je spel nu vast; het bestand wordt na de stiltetijd opgeslagen."
   },
   "actions": {
     "save": "Opslaan",
@@ -548,6 +567,29 @@
     "midi_error": "MIDI-opname-fout: {error}",
     "play_failed": "Afspelen mislukt: {error}"
   },
+  "midi_archive": {
+    "title": "Automatisch MIDI-archief",
+    "subtitle": "Legt op de achtergrond alles vast wat je speelt als .mid-bestand: start bij de eerste noot, stopt na stilte. Alleen noten — trek bij het afspelen zelf de registers.",
+    "enabled": "MIDI-archief inschakelen",
+    "enabled_title": "Aan: elke speelsessie wordt automatisch als .mid opgeslagen in de archiefmap. Uit: alleen handmatige MIDI-opname.",
+    "folder": "Map",
+    "folder_choose": "Kiezen…",
+    "folder_open": "Map openen",
+    "folder_default": "Standaard",
+    "silence": "Stiltetijd (s)",
+    "min_notes": "Min. noten",
+    "min_secs": "Min. lengte (s)",
+    "limits_title": "Stiltetijd: na zoveel seconden zonder toetsaanslag wordt het bestand afgesloten. Min. noten / min. lengte: kortere takes (per ongeluk een toets geraakt) worden niet bewaard.",
+    "status_off": "Uit",
+    "status_idle": "Wacht op de eerste noot",
+    "status_archiving": "Archiveert · {n} events · {t}",
+    "recent": "Laatste archiefbestanden",
+    "empty": "Nog geen archiefbestanden.",
+    "play": "Afspelen",
+    "delete": "Verwijderen",
+    "delete_confirm": "Archiefbestand {name} definitief verwijderen?",
+    "error": "MIDI-archief-fout: {error}"
+  },
   "notation": {
     "live_window_title": "JM-Orgue - Live noteren",
     "open_failed": "Notatievenster openen mislukt.",
@@ -717,6 +759,7 @@
   "learn": {
     "pedal_timeout_low": "Geen pedaalbeweging ontvangen (time-out van 20 s). Beweeg de trede naar de laagste stand en houd hem daar stil.",
     "pedal_timeout_high": "Geen hoogste stand ontvangen (time-out van 20 s).",
+    "pedal_range_too_small": "De laagste en hoogste stand liggen te dicht bij elkaar (minder dan 8 CC-stappen). Beweeg de trede van helemaal dicht naar helemaal open en probeer het opnieuw.",
     "pedal_result": "CC {cc} · MIDI-kanaal {channel}",
     "key_timeout_first": "Geen toets ontvangen (time-out van 20 s).",
     "key_timeout_second": "Geen tweede toets ontvangen (time-out van 20 s).",
@@ -798,6 +841,7 @@
   },
   "crescendo": {
     "learn_enable_title": "MIDI inleren voor Crescendo aan/uit ({n}/4)",
+    "shrink_confirm": "Minder stappen ({old} → {new}): de registers in de stappen boven {new} gaan verloren. Doorgaan?",
     "autofill": "Auto-fill",
     "autofill_title": "Verdeel alle registers automatisch over de stappen (oplopend)",
     "clear_title": "Alle stappen leegmaken",
@@ -885,5 +929,17 @@
     "auto_load_last_organ_title": "Aan: bij het starten van de app wordt het laatst geopende orgel automatisch geladen. Uit: de app opent met de orgelkeuze.",
     "restore_registration": "Laatste registratie herstellen bij openen",
     "restore_registration_title": "Aan: bij het openen van een orgel komen de laatst getrokken registers terug. Uit: schone start (geen registers aan)."
+  },
+  "remote": {
+    "enable": "Afstandsbediening in het netwerk (tablet/telefoon)",
+    "enable_title": "Aan: JM-Orgue luistert op alle netwerkkaarten. Open het adres of scan de QR-code op een tablet of telefoon in hetzelfde (wifi-)netwerk om registers, koppels, tremulant, setzer en volume op afstand te bedienen. Uit: geen toegang vanuit het netwerk.",
+    "port": "Poort",
+    "new_token": "Nieuw token",
+    "new_token_confirm": "Nieuw token maken? Eerder gescande QR-codes en opgeslagen adressen werken daarna niet meer.",
+    "url_label": "Adres voor tablet/telefoon (of scan de QR-code):",
+    "no_lan_ip": "Geen netwerkadres gevonden — is deze pc verbonden met wifi of een netwerkkabel?",
+    "running": "Actief",
+    "stopped": "Niet actief",
+    "hint": "De eerste keer vraagt Windows Firewall of JM-Orgue verbindingen mag ontvangen: kies 'Toegang toestaan' voor privénetwerken. Geweigerd? Zet het aan via Windows-beveiliging → Firewall → 'Een app toestaan via de firewall' (JM-Orgue, Privé). Het adres werkt alleen binnen het eigen (wifi-)netwerk, zonder versleuteling; deel het token niet en maak een nieuw token om toegang in te trekken."
   }
 }

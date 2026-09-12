@@ -207,6 +207,12 @@ pub struct WavMarkers {
     pub cue_frame: Option<u64>,
     /// Totaal aantal frames in de data-chunk (0 als fmt/data ontbreekt).
     pub frames: u64,
+    /// smpl dwMIDIUnityNote (1..=127): MIDI-toets van de opgenomen toonhoogte.
+    /// None = geen smpl-chunk of 0/ongeldig.
+    pub unity_note: Option<u8>,
+    /// smpl dwMIDIPitchFraction omgerekend naar cents (0..100) bóven de
+    /// unity note; alleen gezet als `unity_note` gezet is.
+    pub pitch_fraction_cents: Option<f32>,
 }
 
 /// Lees smpl-loops, cue-marker en framecount uit een WAV (chunk-walk zonder de
@@ -256,6 +262,20 @@ pub fn read_wav_markers(path: &Path) -> Option<WavMarkers> {
             b"smpl" if chunk_size >= 36 => {
                 let mut smpl_data = vec![0u8; chunk_size as usize];
                 if file.read_exact(&mut smpl_data).is_err() { break; }
+                // Gemeten toonhoogte van de sample (GrandOrgue-semantiek voor
+                // hertemperen): dwMIDIUnityNote op +12, dwMIDIPitchFraction
+                // op +16 als 32-bit fractie van een halve toon (0x80000000 =
+                // 50 ct). Unity 0 = "onbekend".
+                let unity = u32::from_le_bytes([
+                    smpl_data[12], smpl_data[13], smpl_data[14], smpl_data[15]
+                ]);
+                let frac = u32::from_le_bytes([
+                    smpl_data[16], smpl_data[17], smpl_data[18], smpl_data[19]
+                ]);
+                if (1..=127).contains(&unity) {
+                    markers.unity_note = Some(unity as u8);
+                    markers.pitch_fraction_cents = Some((frac as f64 / 4294967296.0 * 100.0) as f32);
+                }
                 let num_loops = u32::from_le_bytes([
                     smpl_data[28], smpl_data[29], smpl_data[30], smpl_data[31]
                 ]) as usize;
@@ -752,6 +772,11 @@ pub struct PreloadBuffer {
     /// bron-samplerate-frames) worden verschoven, anders verspringt de audio
     /// hoorbaar (tik) op het upgrademoment.
     pub trim_start: usize,
+    /// smpl dwMIDIUnityNote van het bronbestand (gemeten toonhoogte, voor
+    /// hertemperen); None bij mp3 of WAV zonder (geldige) smpl-chunk.
+    pub smpl_unity_note: Option<u8>,
+    /// smpl-pitchfractie in cents boven de unity note (zie WavMarkers).
+    pub smpl_pitch_fraction_cents: Option<f32>,
 }
 
 impl PreloadBuffer {
@@ -1056,6 +1081,8 @@ pub fn load_wav_preload_segment(path: &Path, preload_samples: usize, segment: Pr
         data_offset,
         trim_start,
         align_table,
+        smpl_unity_note: markers.unity_note,
+        smpl_pitch_fraction_cents: markers.pitch_fraction_cents,
     })
 }
 
@@ -1369,9 +1396,101 @@ pub fn load_audio_preload(path: &Path, preload_samples: usize) -> Result<Preload
                 data_offset: 0,
                 trim_start,
                 align_table: None,
+                smpl_unity_note: None,
+                smpl_pitch_fraction_cents: None,
             })
         }
         _ => Err(SampleError::UnsupportedFormat(format!("Unknown extension: {}", ext))),
+    }
+}
+
+#[cfg(test)]
+mod smpl_pitch_tests {
+    use super::*;
+
+    /// Schrijf een minimale WAV (16-bit mono 48 kHz, 4 frames) met optioneel
+    /// een smpl-chunk (unity note + pitch fraction + één loop 0..3).
+    fn write_test_wav(name: &str, smpl: Option<(u32, u32)>) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!("vpo_smpl_test_{}_{}.wav", name, std::process::id()));
+        let mut body: Vec<u8> = Vec::new();
+        // fmt
+        body.extend_from_slice(b"fmt ");
+        body.extend_from_slice(&16u32.to_le_bytes());
+        body.extend_from_slice(&1u16.to_le_bytes()); // PCM
+        body.extend_from_slice(&1u16.to_le_bytes()); // mono
+        body.extend_from_slice(&48000u32.to_le_bytes());
+        body.extend_from_slice(&96000u32.to_le_bytes());
+        body.extend_from_slice(&2u16.to_le_bytes());
+        body.extend_from_slice(&16u16.to_le_bytes());
+        // data: 4 frames
+        body.extend_from_slice(b"data");
+        body.extend_from_slice(&8u32.to_le_bytes());
+        for v in [1000i16, -1000, 1000, -1000] { body.extend_from_slice(&v.to_le_bytes()); }
+        if let Some((unity, frac)) = smpl {
+            body.extend_from_slice(b"smpl");
+            body.extend_from_slice(&(36u32 + 24).to_le_bytes());
+            body.extend_from_slice(&0u32.to_le_bytes()); // manufacturer
+            body.extend_from_slice(&0u32.to_le_bytes()); // product
+            body.extend_from_slice(&20833u32.to_le_bytes()); // sample period
+            body.extend_from_slice(&unity.to_le_bytes());
+            body.extend_from_slice(&frac.to_le_bytes());
+            body.extend_from_slice(&0u32.to_le_bytes()); // smpte format
+            body.extend_from_slice(&0u32.to_le_bytes()); // smpte offset
+            body.extend_from_slice(&1u32.to_le_bytes()); // cSampleLoops
+            body.extend_from_slice(&0u32.to_le_bytes()); // sampler data
+            // loop-record
+            body.extend_from_slice(&0u32.to_le_bytes()); // id
+            body.extend_from_slice(&0u32.to_le_bytes()); // type
+            body.extend_from_slice(&0u32.to_le_bytes()); // start
+            body.extend_from_slice(&2u32.to_le_bytes()); // end (incl.)
+            body.extend_from_slice(&0u32.to_le_bytes()); // fraction
+            body.extend_from_slice(&0u32.to_le_bytes()); // play count
+        }
+        let mut out: Vec<u8> = Vec::new();
+        out.extend_from_slice(b"RIFF");
+        out.extend_from_slice(&((body.len() + 4) as u32).to_le_bytes());
+        out.extend_from_slice(b"WAVE");
+        out.extend_from_slice(&body);
+        std::fs::write(&path, out).expect("test-WAV schrijven");
+        path
+    }
+
+    /// smpl: unity 60 + fractie 0x80000000 → 60 / 50,0 ct; loop komt mee.
+    #[test]
+    fn read_wav_markers_reads_unity_and_fraction() {
+        let path = write_test_wav("with_smpl", Some((60, 0x8000_0000)));
+        let m = read_wav_markers(&path).expect("markers");
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(m.unity_note, Some(60));
+        assert!((m.pitch_fraction_cents.unwrap() - 50.0).abs() < 0.01);
+        assert_eq!(m.loops.len(), 1);
+        assert_eq!(m.frames, 4);
+    }
+
+    /// Zonder smpl-chunk: beide None; unity 0 telt als onbekend.
+    #[test]
+    fn read_wav_markers_without_smpl() {
+        let path = write_test_wav("no_smpl", None);
+        let m = read_wav_markers(&path).expect("markers");
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(m.unity_note, None);
+        assert_eq!(m.pitch_fraction_cents, None);
+
+        let path0 = write_test_wav("unity0", Some((0, 12345)));
+        let m0 = read_wav_markers(&path0).expect("markers");
+        let _ = std::fs::remove_file(&path0);
+        assert_eq!(m0.unity_note, None);
+        assert_eq!(m0.pitch_fraction_cents, None);
+    }
+
+    /// De preload-buffer draagt dezelfde smpl-metadata.
+    #[test]
+    fn preload_buffer_carries_smpl_pitch() {
+        let path = write_test_wav("preload", Some((48, 0x4000_0000)));
+        let buf = load_wav_preload_segment(&path, 64, PreloadSegment::Full).expect("preload");
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(buf.smpl_unity_note, Some(48));
+        assert!((buf.smpl_pitch_fraction_cents.unwrap() - 25.0).abs() < 0.01);
     }
 }
 

@@ -5,6 +5,39 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.38] - 2026-09-12
+
+### Gestapelde ranks en perspectieven, hertemperen, afstandsbediening, MIDI-archief, crescendo en zweltreden
+
+**Klank**
+- **Gestapelde ranks en microfoonperspectieven.** Registers met meerdere ranks per toets (mixturen/cornetten als aparte ranks in GrandOrgue-ODF's, multi-mic-sets van Hauptwerk, JM-Rec-sets met meerdere microfoonmappen) klinken nu volledig: per toets één stem per rank. Perspectieven (front/rear/dry, of eigen mapnamen) zijn per orgel aan/uit te zetten met eigen volume onder Orgel-Instellingen → Perspectieven; alleen ingeschakelde perspectieven worden geladen (RAM).
+- **Hertemperen op gemeten pijptoonhoogte.** Nieuwe standaardstemming "Origineel (zoals opgenomen)": de set klinkt zoals de maker hem afleverde. Kies je een ander temperament, dan wordt — zoals in GrandOrgue en Hauptwerk — per pijp de gemeten afwijking (PitchCorrection, Hauptwerk-pitchvelden, smpl-metadata) verrekend, zodat ook "detuned" geleverde sets zuiver in bijvoorbeeld gelijkzwevend a=440 of middentoon komen te staan. Bestaande opgeslagen stemmingen blijven klinken zoals voorheen (migratie naar "Origineel").
+
+**Generaal crescendo en zweltreden**
+- Hysterese op de trapgrenzen: registers klapperen niet meer bij pedaalruis.
+- Klikken op een trap in de editor is nu net zo additief als het pedaal: handmatig getrokken registers en echte ODF-koppels blijven staan; terugtreden haalt alleen weg wat het crescendo zelf bijtrok; crescendo uitschakelen ruimt op; een handmatig teruggeduwd register wordt niet meer "geclaimd".
+- Lege hogere trappen erven de dichtstbijzijnde gevulde trap; de matrix, aan/uit en het aantal trappen worden per orgel in de backend bewaard (niet meer alleen in het venster).
+- Zwelkast: pedaalstand wordt na herladen of audio-wissel teruggezet (geen sprong bij de eerste beweging), het klankfilter wordt bij een orgelwissel gereset (geen doffe divisie meer) en de zwelgain loopt gesmootheerd (geen trapjes of zipper bij treden die in stappen sturen).
+- Inleren van treden: annuleren/opnieuw breekt de vorige leerlus af, een te klein bereik wordt geweigerd, het zwelkast-vinkje uitzetten wist de koppeling niet meer; wijzigingen aan bereik/inversie worden bewaard; crescendo-CC werkt nu ook bij het afspelen van MIDI-opnamen.
+
+**Bediening**
+- **Afstandsbediening in het netwerk** (Algemene instellingen → Afstandsbediening): schakel in, scan de QR-code of open de link op een tablet of telefoon in hetzelfde netwerk, en bedien registers, koppels, tremulant, setzer en volume zonder MIDI-hardware. Beveiligd met een token; standaard uit. (Windows vraagt bij de eerste keer om firewall-toestemming.)
+- **Automatisch MIDI-archief** (Algemene instellingen → Algemeen): alles wat je speelt wordt op de achtergrond als MIDI-bestand bewaard (start bij de eerste noot, stopt na instelbare stilte) in Documenten/JM-Orgue-opnames/MIDI-archief, met een lijst van recente opnamen om af te spelen of te verwijderen. Standaard uit.
+
+**Stabiliteit**
+- De app logde altijd ook naar stderr; werd hij gestart door een programma dat die uitvoer niet leest (bijv. een testtool of MCP-server), dan bevroor de hele bediening na ±80 KB log terwijl het geluid doorspeelde. Logging naar stderr gebeurt nu alleen op een echte terminal; het logbestand is leidend.
+
+**Test-API**: `/temperament`, `/tuning`, `/perspectives`, `/ranks`, `/midi/archive/*`, `/midi/player/*`, `/remote/*`, `/crescendo*`, `/swell*`, `/midi/inject?cc=`, `/midi/mapping`.
+
+## [0.7.3] t/m [0.7.37] - 2026-08-07 t/m 2026-09-12
+
+Deze versies zijn niet in dit bestand bijgehouden; de volledige notities staan bij de
+GitHub-releases (https://github.com/orgelmaker/JM-Orgue/releases). Hoofdpunten: hoofdbalk
+op extra schermen en live notatie (0.7.0–0.7.2), MIDI-uit-terugkoppeling, consoleknoppen,
+bibliotheek met sampleset-downloads (0.7.32), galm volgt kanalen en release-crossfade (0.7.33),
+echte stereo, instelbare polyfonie, koppelbalk en JM-Rec-import (0.7.36), alle uitgangen van
+de geluidskaart bij de klavieren en volledige vertaling NL/EN/FR/DE (0.7.37).
+
 ## [0.7.2] - 2026-08-07
 
 ### Verbeterd — één "Noteren"-knop met "Openen…" binnen het venster

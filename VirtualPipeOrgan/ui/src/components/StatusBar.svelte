@@ -27,6 +27,14 @@
       <span>{status.midiConnected ? $t('status_bar.midi_connected') : $t('status_bar.midi_disconnected')}</span>
     </div>
 
+    {#if status.midiArchiving}
+      <!-- Automatisch MIDI-archief legt een take vast (rood pulserend puntje; .record-dot.on uit styles.css) -->
+      <div class="status-item" title={$t('status_bar.archiving_title')}>
+        <span class="record-dot on"></span>
+        <span>{$t('status_bar.archiving')}</span>
+      </div>
+    {/if}
+
     <div class="status-item">
       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <path d="M12 20v-6M6 20V10M18 20V4"/>

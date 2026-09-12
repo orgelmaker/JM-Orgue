@@ -58,6 +58,10 @@ pub struct SwellBindingSaved {
     pub max_val: u8,
     #[serde(default)]
     pub invert: bool,
+    /// Laatst ontvangen pedaalstand (ruwe CC-waarde); hersteld bij laden zodat
+    /// de zwelkast na een herstart/herlaad niet stilzwijgend vol open staat.
+    #[serde(default)]
+    pub last_value: Option<u8>,
 }
 
 /// Saved crescendo pedal binding (channel, cc, min, max, invert)
@@ -180,6 +184,10 @@ pub struct TemperamentSettingsSaved {
     pub custom_cents: Option<[f32; 12]>,
     pub fine_tune_cents: f32,
     pub a4_hz: f32,
+    /// Hertemperen op gemeten pijptoonhoogte (0.7.38). None = bestand van
+    /// vóór dit veld → behandelen als Origineel (geen klankverandering).
+    #[serde(default)]
+    pub retune: Option<bool>,
 }
 
 /// Saved divisie-naar-wind-groep toewijzing
@@ -225,6 +233,16 @@ pub struct WindGroupConfigSaved {
     pub max_sag: f32,
 }
 
+/// Microfoonperspectief (gestapelde ranks/perspectieven, 0.7.38): per label
+/// of het geladen wordt (RAM; vraagt herladen) en het live volume in dB.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct PerspectiveSaved {
+    pub name: String,
+    pub enabled: bool,
+    #[serde(default)]
+    pub gain_db: f32,
+}
+
 /// Per-organ saved settings
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct OrganSettings {
@@ -268,6 +286,16 @@ pub struct OrganSettings {
     /// Generaal-crescendo pedaalbinding (channel, cc, min, max, invert)
     #[serde(default)]
     pub crescendo_binding: Option<CrescendoBindingSaved>,
+    /// Generaal-crescendo matrix: per trap de register-/koppel-IDs (bron van
+    /// waarheid sinds 0.7.38; voorheen alleen localStorage van de webview).
+    #[serde(default)]
+    pub crescendo_stages: Vec<Vec<String>>,
+    /// Generaal crescendo ingeschakeld.
+    #[serde(default)]
+    pub crescendo_enabled: bool,
+    /// Aantal kolommen in de crescendo-editor (0 = niet opgeslagen → 15).
+    #[serde(default)]
+    pub crescendo_num_stages: u8,
     /// Per-divisie stereo-pan
     #[serde(default)]
     pub division_pans: Vec<DivisionPanSaved>,
@@ -280,6 +308,9 @@ pub struct OrganSettings {
     /// Per-wind-groep model-config (reservoir/demping/sag)
     #[serde(default)]
     pub wind_group_configs: Vec<WindGroupConfigSaved>,
+    /// Microfoonperspectieven: geladen (aan/uit) + volume per label.
+    #[serde(default)]
+    pub perspectives: Vec<PerspectiveSaved>,
 }
 
 /// The entire library

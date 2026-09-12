@@ -24,6 +24,7 @@
 export const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 
 export const CATEGORIES = {
+  original: "Origineel (zoals opgenomen)",
   equal: "Gelijkzwevend",
   meantone: "Middentoonstemming",
   well: "Welgetempereerd",
@@ -33,6 +34,26 @@ export const CATEGORIES = {
 };
 
 export const temperaments = [
+  // ============================================================
+  // ORIGINEEL (zoals opgenomen) — GrandOrgue "Original temperament":
+  // géén hertemperen, alleen de PitchTuning van de sampleset. Staat op
+  // index 0 en is de standaard. `original: true` → set_temperament met
+  // retune=false; alle andere stemmingen hertemperen per pijp vanaf de
+  // gemeten toonhoogte (retune=true).
+  // ============================================================
+  {
+    name: "Original (as recorded)",
+    nameDutch: "Origineel (zoals opgenomen)",
+    names: { nl: "Origineel (zoals opgenomen)", en: "Original (as recorded)", fr: "Original (tel qu'enregistré)", de: "Original (wie aufgenommen)" },
+    category: "original",
+    original: true,
+    period: "",
+    year: null,
+    modernUse: true,
+    description: "De samples klinken precies zoals opgenomen (GrandOrgue 'Original temperament'). Alleen de PitchTuning van de sampleset wordt toegepast; er wordt niet hertemperd.",
+    cents: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+  },
+
   // ============================================================
   // GELIJKZWEVEND (Equal Temperament)
   // ============================================================

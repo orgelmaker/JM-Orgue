@@ -119,6 +119,10 @@
     "temperament_custom_close": "Schließen",
     "temperament_fine_tune": "Feinstimmung",
     "temperament_a4": "A4-Referenz",
+    "temperament_original_hint": "Original: Die Samples klingen wie aufgenommen (PitchTuning des Samplesets ja, kein Umstimmen).",
+    "temperament_retune_hint": "Umstimmen: Jede Pfeife wird von ihrer gemessenen Tonhöhe auf die gewählte Stimmung gestimmt (wie in GrandOrgue); Schwebungen behalten ihre gewollte Abweichung.",
+    "temperament_measured": "Dieses Set hat gemessene Pfeifentonhöhen ({n} von {total} Pfeifen).",
+    "temperament_no_measured": "Keine gemessenen Pfeifentonhöhen in diesem Set — „Gleichstufig“ klingt wie „Original“; andere Stimmungen werden als Offset auf die Aufnahme gelegt.",
     "swell_box": "Schwellkasten",
     "transpose": "Transponieren",
     "pan": "Panorama",
@@ -242,6 +246,19 @@
     "loops_skipped": "übersprungen",
     "polyphony_default": "Standard"
   },
+  "perspectives": {
+    "title": "Perspektiven und gestapelte Reihen",
+    "desc": "Dieses Sampleset hat mehrere Mikrofonpositionen. Wählen Sie, welche geladen werden (Speicherbedarf), und mischen Sie sie pro Position.",
+    "enabled": "Laden",
+    "gain": "Lautstärke (dB)",
+    "pipes": "{n} Pfeifen",
+    "ram_hint": "≈ {mb} MB zusätzlich beim Laden",
+    "not_loaded": "Nicht geladen",
+    "stacked_note": "{n} Register bestehen aus mehreren Reihen (z. B. Mixturen); diese klingen immer vollständig.",
+    "reload_hint": "Die Auswahl der geladenen Perspektiven wirkt nach dem Neuladen der Orgel.",
+    "reload_now": "Orgel neu laden",
+    "none": "Diese Orgel hat nur eine Perspektive."
+  },
   "stops": {
     "tremulant": "Tremulant",
     "drawn": "gezogen",
@@ -322,7 +339,9 @@
     "midi_disconnected": "MIDI nicht verbunden",
     "voices": "Stimmen",
     "version": "v{version}",
-    "load_title": "Klingende Stimmen / Polyphonie-Grenze · Auslastung Audio-Thread"
+    "load_title": "Klingende Stimmen / Polyphonie-Grenze · Auslastung Audio-Thread",
+    "archiving": "MIDI-Archiv",
+    "archiving_title": "Das automatische MIDI-Archiv zeichnet Ihr Spiel auf; die Datei wird nach der Stillezeit gespeichert."
   },
   "actions": {
     "save": "Speichern",
@@ -548,6 +567,29 @@
     "midi_error": "MIDI-Aufnahmefehler: {error}",
     "play_failed": "Wiedergabe fehlgeschlagen: {error}"
   },
+  "midi_archive": {
+    "title": "Automatisches MIDI-Archiv",
+    "subtitle": "Zeichnet im Hintergrund alles, was Sie spielen, als .mid-Datei auf: startet bei der ersten Note, endet nach Stille. Nur Noten — ziehen Sie beim Abspielen die Register selbst.",
+    "enabled": "MIDI-Archiv einschalten",
+    "enabled_title": "Ein: jede Spielsitzung wird automatisch als .mid im Archivordner gespeichert. Aus: nur manuelle MIDI-Aufnahme.",
+    "folder": "Ordner",
+    "folder_choose": "Wählen…",
+    "folder_open": "Ordner öffnen",
+    "folder_default": "Standard",
+    "silence": "Stille (s)",
+    "min_notes": "Min. Noten",
+    "min_secs": "Min. Länge (s)",
+    "limits_title": "Stille: nach so vielen Sekunden ohne Tastendruck wird die Datei abgeschlossen. Min. Noten / min. Länge: kürzere Aufnahmen (versehentlicher Tastendruck) werden nicht behalten.",
+    "status_off": "Aus",
+    "status_idle": "Wartet auf die erste Note",
+    "status_archiving": "Archiviert · {n} Events · {t}",
+    "recent": "Letzte Archivdateien",
+    "empty": "Noch keine Archivdateien.",
+    "play": "Abspielen",
+    "delete": "Löschen",
+    "delete_confirm": "Archivdatei {name} endgültig löschen?",
+    "error": "MIDI-Archiv-Fehler: {error}"
+  },
   "notation": {
     "live_window_title": "JM-Orgue - Live-Notation",
     "open_failed": "Notationsfenster konnte nicht geöffnet werden.",
@@ -717,6 +759,7 @@
   "learn": {
     "pedal_timeout_low": "Keine Pedalbewegung empfangen (Zeitüberschreitung 20 s). Bewegen Sie den Tritt in die tiefste Stellung und halten Sie ihn dort still.",
     "pedal_timeout_high": "Keine höchste Stellung empfangen (Zeitüberschreitung 20 s).",
+    "pedal_range_too_small": "Die tiefste und die höchste Stellung liegen zu dicht beieinander (weniger als 8 CC-Schritte). Bewegen Sie den Tritt von ganz geschlossen bis ganz offen und versuchen Sie es erneut.",
     "pedal_result": "CC {cc} · MIDI-Kanal {channel}",
     "key_timeout_first": "Keine Taste empfangen (Zeitüberschreitung 20 s).",
     "key_timeout_second": "Keine zweite Taste empfangen (Zeitüberschreitung 20 s).",
@@ -798,6 +841,7 @@
   },
   "crescendo": {
     "learn_enable_title": "MIDI-Lernen für Crescendo an/aus ({n}/4)",
+    "shrink_confirm": "Weniger Stufen ({old} → {new}): die Register in den Stufen über {new} gehen verloren. Fortfahren?",
     "autofill": "Auto-Füllen",
     "autofill_title": "Alle Register automatisch auf die Stufen verteilen (aufsteigend)",
     "clear_title": "Alle Stufen leeren",
@@ -885,5 +929,17 @@
     "auto_load_last_organ_title": "Ein: Beim Start der App wird die zuletzt geöffnete Orgel automatisch geladen. Aus: Die App öffnet mit der Orgelauswahl.",
     "restore_registration": "Letzte Registrierung beim Öffnen wiederherstellen",
     "restore_registration_title": "Ein: Beim Öffnen einer Orgel kehren die zuletzt gezogenen Register zurück. Aus: sauberer Start (keine Register an)."
+  },
+  "remote": {
+    "enable": "Fernbedienung im Netzwerk (Tablet/Telefon)",
+    "enable_title": "Ein: JM-Orgue lauscht auf allen Netzwerkkarten. Öffnen Sie die Adresse oder scannen Sie den QR-Code auf einem Tablet oder Telefon im selben (WLAN-)Netzwerk, um Register, Koppeln, Tremulant, Setzer und Lautstärke fernzubedienen. Aus: kein Zugriff aus dem Netzwerk.",
+    "port": "Port",
+    "new_token": "Neues Token",
+    "new_token_confirm": "Neues Token erstellen? Bereits gescannte QR-Codes und gespeicherte Adressen funktionieren danach nicht mehr.",
+    "url_label": "Adresse für Tablet/Telefon (oder QR-Code scannen):",
+    "no_lan_ip": "Keine Netzwerkadresse gefunden — ist dieser PC mit WLAN oder einem Netzwerkkabel verbunden?",
+    "running": "Aktiv",
+    "stopped": "Nicht aktiv",
+    "hint": "Beim ersten Mal fragt die Windows-Firewall, ob JM-Orgue Verbindungen annehmen darf: Wählen Sie „Zugriff zulassen“ für private Netzwerke. Abgelehnt? Aktivieren Sie es über Windows-Sicherheit → Firewall → „Eine App durch die Firewall zulassen“ (JM-Orgue, Privat). Die Adresse funktioniert nur im eigenen (WLAN-)Netzwerk und ist unverschlüsselt; teilen Sie das Token nicht und erstellen Sie ein neues Token, um den Zugriff zu widerrufen."
   }
 }

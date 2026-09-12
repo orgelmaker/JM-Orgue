@@ -3660,6 +3660,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "qrcode"
+version = "0.14.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d68782463e408eb1e668cf6152704bd856c78c5b6417adaee3203d8f4c1fc9ec"
+
+[[package]]
 name = "quick-xml"
 version = "0.38.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5613,7 +5619,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "vpo-app"
-version = "0.7.37"
+version = "0.7.38"
 dependencies = [
  "asio-sys",
  "base64 0.22.1",
@@ -5624,7 +5630,10 @@ dependencies = [
  "midly",
  "mp3lame-encoder",
  "parking_lot",
+ "qrcode",
+ "rand 0.8.5",
  "rayon",
+ "realfft",
  "serde",
  "serde_json",
  "symphonia",
@@ -5646,7 +5655,7 @@ dependencies = [
 
 [[package]]
 name = "vpo-audio"
-version = "0.7.37"
+version = "0.7.38"
 dependencies = [
  "bytemuck",
  "cpal",
@@ -5666,7 +5675,7 @@ dependencies = [
 
 [[package]]
 name = "vpo-core"
-version = "0.7.37"
+version = "0.7.38"
 dependencies = [
  "bincode",
  "serde",
@@ -5677,7 +5686,7 @@ dependencies = [
 
 [[package]]
 name = "vpo-midi"
-version = "0.7.37"
+version = "0.7.38"
 dependencies = [
  "btleplug",
  "crossbeam-channel",
@@ -5694,7 +5703,7 @@ dependencies = [
 
 [[package]]
 name = "vpo-plugin"
-version = "0.7.37"
+version = "0.7.38"
 dependencies = [
  "nih_plug",
  "parking_lot",
@@ -5706,7 +5715,7 @@ dependencies = [
 
 [[package]]
 name = "vpo-sampler"
-version = "0.7.37"
+version = "0.7.38"
 dependencies = [
  "bincode",
  "bytemuck",

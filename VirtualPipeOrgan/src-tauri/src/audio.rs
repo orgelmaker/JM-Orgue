@@ -31,6 +31,63 @@ pub const RELEASE_PIPE_FLAG: u32 = 0x8000_0000;
 /// varianten (0.7.26). Gebruik dit — niet alleen de vlag — bij voicing-lookups.
 pub const RELEASE_KEY_MASK: u32 = 0xFF00_0000;
 
+/// Laagindex (gestapelde rank / microfoonperspectief, 0.7.38) in bits 16–23
+/// van pipe_num; de pijpindex blijft in bits 0–15 (ODF-cap 1024 + 512). Alle
+/// engine-maps (preloads, trem, releases, release_meta, odf_voicings,
+/// inflight_loads) werken ongewijzigd per laagsleutel; alleen de NoteOn-
+/// fan-out en de NoteOff-match kennen de lagen.
+pub const RANK_SHIFT: u32 = 16;
+pub const RANK_MASK: u32 = 0x00FF_0000;
+/// Maximaal aantal lagen per stop (laag 0 + 15 extra); tevens het aantal
+/// perspectief-gain-slots (slot 0 = geen perspectief, altijd 1.0).
+pub const MAX_LAYERS: usize = 16;
+/// Laadplan-default voor stops zonder lagen: alleen laag 0, slot 0.
+static DEFAULT_LAYOUT: [(u8, u8); 1] = [(0, 0)];
+
+/// Engine-sleutel van pijp `pipe_num` in laag `layer`.
+#[inline]
+pub fn layer_key(pipe_num: u32, layer: u8) -> u32 {
+    debug_assert!(
+        pipe_num & (RANK_MASK | RELEASE_KEY_MASK) == 0 && (layer as usize) < MAX_LAYERS,
+        "layer_key: pipe_num {:#x} / laag {} buiten bereik", pipe_num, layer
+    );
+    pipe_num | ((layer as u32) << RANK_SHIFT)
+}
+
+/// Kale pijpindex (zonder laag- en release-bits) — voor de gebruikers-voicing
+/// (VoicingPanel keyt op de kale pipe_num) en de NoteOff-match over lagen.
+#[inline]
+pub fn base_pipe(pipe_num: u32) -> u32 {
+    pipe_num & !(RANK_MASK | RELEASE_KEY_MASK)
+}
+
+#[cfg(test)]
+mod layer_key_tests {
+    use super::*;
+
+    #[test]
+    fn layer_key_zet_laag_in_bits_16_23() {
+        assert_eq!(layer_key(5, 0), 5);
+        assert_eq!(layer_key(5, 2), 0x0002_0005);
+        assert_eq!(layer_key(1024, 15), 0x000F_0400);
+        // Geen overlap met de release-bits (24–31): een release-variant op een
+        // laagsleutel houdt beide intact.
+        assert_eq!(layer_key(1024, 15) & RELEASE_KEY_MASK, 0);
+        let rel = layer_key(7, 3) | RELEASE_PIPE_FLAG | (3 << 24);
+        assert_eq!(rel & RANK_MASK, 3 << RANK_SHIFT);
+        assert_eq!(rel & RELEASE_KEY_MASK, RELEASE_PIPE_FLAG | (3 << 24));
+    }
+
+    #[test]
+    fn base_pipe_strip_laag_en_release_bits() {
+        assert_eq!(base_pipe(layer_key(5, 2) | RELEASE_PIPE_FLAG | (3 << 24)), 5);
+        assert_eq!(base_pipe(layer_key(1536, 15)), 1536);
+        assert_eq!(base_pipe(42), 42);
+        // Laagsleutel zonder release-bits blijft de ODF-intonatie-sleutel.
+        assert_eq!(layer_key(9, 4) & !RELEASE_KEY_MASK, layer_key(9, 4));
+    }
+}
+
 /// Harde bovengrens op het aantal gelijktijdige voices in het echte audiopad.
 /// Dit is een vangnet tegen op hol geslagen groei (blijvende noten, koppel-
 /// lussen, een tutti + release-staarten) — niet een muzikale limiet: bij een
@@ -134,8 +191,11 @@ pub enum AudioCommand {
     SetTremulantLFO { division_index: u8, active: bool, rate: f32, amp_depth: f32, pitch_depth: f32 },
     /// Register stop_id → division_index mapping (set when organ loads)
     RegisterStopDivisionMap(HashMap<u32, u8>),
-    /// Set temperament: 12 cent offsets [C,C#,D,...,B] + global fine-tuning in cents
-    SetTemperament { note_offsets: [f32; 12], fine_tune: f32 },
+    /// Set temperament: 12 cent offsets [C,C#,D,...,B] + global fine-tuning in cents.
+    /// `retune` = hertemperen per pijp vanaf de gemeten toonhoogte (de
+    /// RegisterOdfRetune-tabel vervangt dan de ODF-PitchTuning); false =
+    /// "Origineel (zoals opgenomen)".
+    SetTemperament { note_offsets: [f32; 12], fine_tune: f32, retune: bool },
     /// Vooraf gebouwde convolutiegalm inpluggen. Het decoderen + FFT-partitioneren
     /// gebeurt op de command-thread (commands.rs) — voorheen draaide disk-I/O en
     /// een volledige FFT-opbouw ín de realtime audio-callback (auditbevinding 12).
@@ -166,10 +226,23 @@ pub enum AudioCommand {
     /// van de gebruikers-voicing (SetPipeVoicing) en stapelt daarmee — zo blijft
     /// de eigen intonatie van de gebruiker gescheiden van wat de set voorschrijft.
     RegisterOdfVoicings(Arc<HashMap<(u32, u32), (f32, f32)>>),
+    /// Hertemper-tabel: per (stop_id, pipe_num) de cents die in hertemper-
+    /// modus (SetTemperament.retune) de ODF-PitchTuning van die pijp
+    /// VERVANGEN — (doeltoon − gemeten samplepitch) + PitchCorrection. Bevat
+    /// alleen pijpen met een plausibele meting; de rest blijft op PitchTuning.
+    RegisterOdfRetune(Arc<HashMap<(u32, u32), f32>>),
     /// ODF-looppunten per bestand (GrandOrgue-regel: ODF wint van smpl-chunk).
     /// Nodig zodat óók de achtergrond-full-sample-load dezelfde loop gebruikt
     /// als de preload — anders verspringt de loop op het upgrademoment.
     RegisterOdfLoops(Arc<HashMap<PathBuf, (u32, u32)>>),
+    /// Per stop de te spawnen lagen bij een NoteOn: (laagindex, perspectief-
+    /// slot 0..15; 0 = geen perspectief). Stops zonder entry → [(0, 0)].
+    /// Altijd sturen bij een load (ook leeg): vervangt de map van het vorige
+    /// orgel. Arc-swap in de audio-thread, geen kloon in de callback.
+    RegisterRankLayout(Arc<HashMap<u32, Vec<(u8, u8)>>>),
+    /// Lineaire gain per perspectief-slot (live, geen herlaad). Slot 0 is
+    /// altijd 1.0 en wordt genegeerd.
+    SetPerspectiveGain { slot: u8, gain_db: f32 },
     /// Clear all samples
     ClearSamples,
     /// Shutdown
@@ -234,6 +307,10 @@ struct PlayingVoice {
     /// (ii) het "onkoppelt"-effect waarbij één bron loslaten de pijp stilzet
     /// terwijl een andere bron nog vasthoudt.
     note_on_count: u32,
+    /// Perspectief-gain-slot (0 = geen perspectief). Release- en crossfade-
+    /// voices erven dit van de voice waaruit ze ontstaan, zodat de
+    /// perspectief-gain niet wegvalt bij loslaten of een tremulant-wissel.
+    persp_slot: u8,
 }
 
 impl PlayingVoice {
@@ -265,6 +342,7 @@ impl PlayingVoice {
             c_pitch_mul: 1.0,
             c_use_lfo_trem: true,
             note_on_count: 1,
+            persp_slot: 0,
         }
     }
 
@@ -295,6 +373,7 @@ impl PlayingVoice {
             c_pitch_mul: 1.0,
             c_use_lfo_trem: true,
             note_on_count: 1,
+            persp_slot: 0,
         }
     }
 
@@ -352,6 +431,7 @@ impl PlayingVoice {
             c_pitch_mul: 1.0,
             c_use_lfo_trem: true,
             note_on_count: 1,
+            persp_slot: 0,
         }
     }
 
@@ -802,6 +882,94 @@ fn wet_channel_weights(
         }
     }
     (wl, wr, hoogste.min(ch))
+}
+
+/// Zwelkast-DSP (pure functies, unit-getest): smoothing van de pedaalstand,
+/// volume en logaritmische filtermapping. Gebruikt door de render-lus per
+/// MIX_BLOCK; niets hiervan hoort in de per-frame-lus.
+pub(crate) mod swell_dsp {
+    /// Tijdconstante van de zwel-smoothing (s): ~20 ms voor de volle weg,
+    /// snel genoeg voor een ruk aan de trede, traag genoeg tegen zipper/tikken.
+    pub const TAU_S: f32 = 0.020;
+    /// Vanaf deze (gesmoothede) stand wordt het low-pass-filter overgeslagen
+    /// (kast open, of divisie zonder zwelkast die altijd op 1.0 staat).
+    pub const BYPASS_ABOVE: f32 = 0.999;
+
+    /// One-pole-coëfficiënt voor een blok van `frames` frames.
+    pub fn block_alpha(frames: usize, sample_rate: u32, tau_s: f32) -> f32 {
+        let sr = sample_rate.max(1) as f32;
+        let tau = tau_s.max(1e-4);
+        (1.0 - (-(frames.max(1) as f32) / (tau * sr)).exp()).clamp(0.0, 1.0)
+    }
+
+    /// Eén smoothing-stap richting `target`; snapt op het doel zodra het
+    /// verschil onhoorbaar klein is (voorkomt eeuwig 'bijna'-rekenen).
+    pub fn smooth_step(g: f32, target: f32, alpha: f32) -> f32 {
+        let next = g + (target - g) * alpha;
+        if (next - target).abs() < 1e-4 { target } else { next }
+    }
+
+    /// Lineair volume bij pedaalstand `g` (0 = dicht → min_db, 1 = open → 0 dB).
+    pub fn volume(min_db: f32, g: f32) -> f32 {
+        10.0_f32.powf(min_db * (1.0 - g.clamp(0.0, 1.0)) / 20.0)
+    }
+
+    /// Logaritmische cutoff-mapping: `cutoff_closed` bij dicht, 20 kHz bij open;
+    /// halverwege het meetkundig gemiddelde (lineair lag de cutoff bij 0,5 al
+    /// op ~10 kHz, dus het timbre-effect zat vrijwel geheel onderin de weg).
+    pub fn cutoff_hz(cutoff_closed: f32, g: f32) -> f32 {
+        let c = cutoff_closed.clamp(20.0, 20000.0);
+        c * (20000.0 / c).powf(g.clamp(0.0, 1.0))
+    }
+}
+
+#[cfg(test)]
+mod swell_dsp_tests {
+    use super::swell_dsp::*;
+
+    #[test]
+    fn alpha_in_bereik_en_groter_bij_groter_blok() {
+        let a256 = block_alpha(256, 48000, TAU_S);
+        let a64 = block_alpha(64, 48000, TAU_S);
+        assert!(a256 > 0.0 && a256 < 1.0);
+        assert!(a64 > 0.0 && a64 < a256);
+        // Kapotte invoer valt veilig terug.
+        assert!(block_alpha(0, 0, 0.0) <= 1.0);
+    }
+
+    #[test]
+    fn smoothing_loopt_monotoon_en_convergeert_binnen_5_tau() {
+        let sr = 48000u32;
+        let alpha = block_alpha(256, sr, TAU_S);
+        let mut g = 1.0f32;
+        let mut prev = g;
+        let mut blocks = 0;
+        while g != 0.0 && blocks < 10_000 {
+            g = smooth_step(g, 0.0, alpha);
+            assert!(g <= prev, "niet monotoon dalend");
+            prev = g;
+            blocks += 1;
+        }
+        // Binnen ~5τ (100 ms = 4800 frames ≈ 19 blokken van 256) op het doel.
+        assert!(blocks <= 40, "convergeert te traag: {} blokken", blocks);
+        assert!(blocks >= 2, "te snel (geen smoothing): {} blokken", blocks);
+        // Na 1τ ≈ 63 % van de weg afgelegd.
+        let mut g2 = 1.0f32;
+        let per_tau = (TAU_S * sr as f32 / 256.0).round() as usize;
+        for _ in 0..per_tau { g2 = smooth_step(g2, 0.0, alpha); }
+        assert!((g2 - (-1.0f32).exp()).abs() < 0.08, "na 1 tau: {}", g2);
+    }
+
+    #[test]
+    fn volume_en_cutoff_mapping() {
+        assert!((volume(-20.0, 0.0) - 0.1).abs() < 1e-5);
+        assert!((volume(-20.0, 1.0) - 1.0).abs() < 1e-6);
+        assert!((volume(-30.0, 0.5) - 10f32.powf(-15.0 / 20.0)).abs() < 1e-5);
+        assert!((cutoff_hz(800.0, 0.0) - 800.0).abs() < 0.01);
+        assert!((cutoff_hz(800.0, 1.0) - 20000.0).abs() < 0.5);
+        assert!((cutoff_hz(800.0, 0.5) - 4000.0).abs() < 1.0); // meetkundig gemiddelde
+        assert!(cutoff_hz(800.0, 0.25) < cutoff_hz(800.0, 0.75));
+    }
 }
 
 #[cfg(test)]
@@ -1795,6 +1963,9 @@ fn run_audio_thread(
     // Arc-in-RwLock: RegisterOdfVoicings wisselt alleen de Arc om — de oude
     // code kloonde een duizenden-entries HashMap ín de audio-callback (audit 55).
     let odf_voicing: Arc<RwLock<Arc<HashMap<(u32, u32), (f32, f32)>>>> = Arc::new(RwLock::new(Arc::new(HashMap::new())));
+    // Hertemper-tabel (zelfde Arc-swap-patroon): (stop_id, pipe_num) → cents die
+    // in hertemper-modus de ODF-PitchTuning van die pijp vervangen.
+    let odf_retune: Arc<RwLock<Arc<HashMap<(u32, u32), f32>>>> = Arc::new(RwLock::new(Arc::new(HashMap::new())));
     // Per-division wind models
     let wind_models: Arc<RwLock<Vec<WindModel>>> = Arc::new(RwLock::new(
         (0..32).map(|_| WindModel::new(sample_rate)).collect()
@@ -1806,8 +1977,9 @@ fn run_audio_thread(
     ));
     // Mapping from stop_id → division_index (set when organ loads)
     let stop_to_division: Arc<RwLock<HashMap<u32, u8>>> = Arc::new(RwLock::new(HashMap::new()));
-    // Global tuning ratio (derived from cents offset)
-    let temperament_ratios: Arc<RwLock<[f64; 12]>> = Arc::new(RwLock::new([1.0; 12]));
+    // Global tuning ratio (derived from cents offset) + hertemper-vlag
+    // (true = odf_retune vervangt de ODF-PitchTuning per pijp).
+    let temperament_ratios: Arc<RwLock<([f64; 12], bool)>> = Arc::new(RwLock::new(([1.0; 12], false)));
     // Convolution reverb (initialized when IR is loaded)
     let reverb: Arc<RwLock<Option<ConvolutionReverb>>> = Arc::new(RwLock::new(None));
     let reverb_mix: Arc<RwLock<f32>> = Arc::new(RwLock::new(0.0));
@@ -1977,6 +2149,7 @@ fn run_audio_thread(
     let eq_channels_clone = eq_channels.clone();
     let voicing_clone = pipe_voicing.clone();
     let odf_voicing_clone = odf_voicing.clone();
+    let odf_retune_clone = odf_retune.clone();
     let output_channels_clone = division_output_channels.clone();
     let ccis_enabled_clone = ccis_enabled.clone();
     let ccis_params_clone = ccis_params.clone();
@@ -2004,6 +2177,13 @@ fn run_audio_thread(
     // Toetsduur-afhankelijke releases: (stop, pijp) → gesorteerde (max_ms, key).
     let mut release_meta: std::collections::HashMap<(u32, u32), Vec<(i32, u32)>> = std::collections::HashMap::new();
     let mut load_generation: u64 = 0;
+    // Gestapelde ranks / perspectieven (0.7.38): laadplan per stop (Arc-swap
+    // via RegisterRankLayout), lineaire gain per perspectief-slot en een
+    // vooraf gereserveerde scratch-Vec voor de release-spawns per laag in
+    // NoteOff (nooit krimpen; groeit hooguit één keer bij >32 lagen).
+    let mut rank_layout: Arc<HashMap<u32, Vec<(u8, u8)>>> = Arc::new(HashMap::new());
+    let mut persp_gain: [f32; MAX_LAYERS] = [1.0; MAX_LAYERS];
+    let mut release_spawn_scratch: Vec<PlayingVoice> = Vec::with_capacity(32);
     // RAM-plafond op volledig geladen samples. Zonder plafond groeide het
     // geheugen tijdens lang spelen onbegrensd (elke gespeelde pijp + release
     // blijft resident): uren spelen op een grote GO-set = vele GB's → paging →
@@ -2032,6 +2212,16 @@ fn run_audio_thread(
     // wissen — anders klinkt bij her-inschakelen eerst een bevroren, oude
     // staart die niets met het huidige spel te maken heeft.
     let mut reverb_was_audible = true;
+    // Zwelkast per divisie (alleen op de render-thread): `division_gains` is
+    // de DOELstand (gezet door SetDivisionGain); hier de gesmoothede stand
+    // (τ ≈ 20 ms, per MIX_BLOCK bijgewerkt), het lineaire volume daaruit en
+    // of het low-pass-filter overgeslagen wordt (kast open / geen zwelkast).
+    // Voorheen sprong gain + cutoff hard per callback (zipper/trapjes) en
+    // stond er powf + set_cutoff in de per-frame-lus.
+    let mut swell_g = [1.0f32; 32];
+    let mut swell_vol = [1.0f32; 32];
+    let mut swell_bypass = [true; 32];
+    let mut swell_dirty = [false; 32];
 
     let sample_format = supported.sample_format();
     // Blokbuffers voor de stem-major mengloop (zie render): per frame in het
@@ -2139,7 +2329,17 @@ fn run_audio_thread(
                 cmds_done += 1;
                 match cmd {
                     AudioCommand::NoteOn { stop_id, pipe_num, midi_note, velocity } => {
-                        let key = (stop_id, pipe_num);
+                        // Fan-out over de lagen van deze stop (gestapelde ranks
+                        // en ingeschakelde perspectieven, 0.7.38): één NoteOn
+                        // → één voice per laag, elk onder zijn eigen laagsleutel.
+                        // Stops zonder lagen: precies het oude pad ([(0,0)]).
+                        let layout: &[(u8, u8)] = rank_layout
+                            .get(&stop_id)
+                            .map(|v| v.as_slice())
+                            .unwrap_or(&DEFAULT_LAYOUT);
+                        let mut spawned_any = false;
+                        for &(layer, slot) in layout {
+                        let key = (stop_id, layer_key(pipe_num, layer));
 
                         // Één luchtkolom per pijp: klinkt deze pijp al (via de
                         // directe route of via een koppel), dan géén tweede voice
@@ -2152,10 +2352,11 @@ fn run_audio_thread(
                         {
                             let mut voices_lock = voices_clone.write();
                             if let Some(v) = voices_lock.iter_mut().find(|v|
-                                v.stop_id == stop_id && v.pipe_num == pipe_num
+                                v.stop_id == stop_id && v.pipe_num == key.1
                                     && !v.releasing && !v.one_shot
                             ) {
                                 v.note_on_count = v.note_on_count.saturating_add(1);
+                                spawned_any = true;
                                 continue;
                             }
                         }
@@ -2174,8 +2375,10 @@ fn run_audio_thread(
 
                         if let Some(sample) = sample_opt {
                             // Full sample available - instant playback
-                            let mut voice = PlayingVoice::new_from_sample(sample.clone(), stop_id, pipe_num, midi_note, velocity);
+                            let mut voice = PlayingVoice::new_from_sample(sample.clone(), stop_id, key.1, midi_note, velocity);
                             voice.one_shot = one_shot;
+                            voice.persp_slot = slot;
+                            spawned_any = true;
                             { let mut vl = voices_clone.write(); budget_release_voices(&mut vl, sample_rate, live_cap); push_voice_capped(&mut vl, voice, sample_rate, live_cap); }
                         } else {
                             // Check for preload buffer - use tremulant if active and available
@@ -2191,8 +2394,10 @@ fn run_audio_thread(
 
                             if let Some(preload) = preload_opt {
                                 // Start playing from preload buffer immediately
-                                let mut voice = PlayingVoice::new_from_preload(preload.clone(), stop_id, pipe_num, midi_note, velocity, sample_rate);
+                                let mut voice = PlayingVoice::new_from_preload(preload.clone(), stop_id, key.1, midi_note, velocity, sample_rate);
                                 voice.one_shot = one_shot;
+                                voice.persp_slot = slot;
+                                spawned_any = true;
 
                                 // Request background load of full sample.
                                 // Dedup: loopt er al een load voor deze key, dan
@@ -2212,21 +2417,36 @@ fn run_audio_thread(
                                 }
 
                                 { let mut vl = voices_clone.write(); budget_release_voices(&mut vl, sample_rate, live_cap); push_voice_capped(&mut vl, voice, sample_rate, live_cap); }
-                            } else {
-                                // Max één warn per pijp: dit pad is bereikbaar in
-                                // normaal spel (onopgeloste REF-pijpen) en logde
-                                // voorheen bij ÉLKE toetsaanslag — bestand-I/O
-                                // onder een globale mutex in de audio-callback
-                                // (auditbevinding 3).
-                                if missing_sample_warned.insert((stop_id, pipe_num)) {
-                                    warn!("NoteOn: No sample or preload for stop={}, pipe={}", stop_id, pipe_num);
-                                }
+                            }
+                        }
+                        } // for layer
+                        if !spawned_any {
+                            // Max één warn per pijp: dit pad is bereikbaar in
+                            // normaal spel (onopgeloste REF-pijpen) en logde
+                            // voorheen bij ÉLKE toetsaanslag — bestand-I/O
+                            // onder een globale mutex in de audio-callback
+                            // (auditbevinding 3). Alleen als géén enkele laag
+                            // iets spawnde (een laag met een gat is normaal).
+                            if missing_sample_warned.insert((stop_id, pipe_num)) {
+                                warn!("NoteOn: No sample or preload for stop={}, pipe={}", stop_id, pipe_num);
                             }
                         }
                     }
                     AudioCommand::RegisterReleaseMeta(m) => {
                         info!("Toetsduur-releases geregistreerd voor {} pijpen (MaxKeyPressTime)", m.len());
                         release_meta = m;
+                    }
+                    AudioCommand::RegisterRankLayout(m) => {
+                        let multi = m.values().filter(|v| v.len() > 1).count();
+                        if multi > 0 {
+                            info!("Rank-layout: {} stops met meerdere lagen (gestapelde ranks/perspectieven)", multi);
+                        }
+                        rank_layout = m;
+                    }
+                    AudioCommand::SetPerspectiveGain { slot, gain_db } => {
+                        if slot > 0 && (slot as usize) < MAX_LAYERS {
+                            persp_gain[slot as usize] = 10f32.powf(gain_db / 20.0);
+                        }
                     }
                     AudioCommand::NoteOff { stop_id, pipe_num } => {
                         // Echte release-samples (opgenomen kerkakoestiek): staan
@@ -2237,13 +2457,15 @@ fn run_audio_thread(
                         // wat als crossfade werkt. Niet gevonden → fade alleen.
                         // De KEUZE van de release (kort R0 / lang R1 / default)
                         // hangt af van de gespeelde duur en gebeurt per voice in
-                        // de lus (MaxKeyPressTime, 0.7.26).
-                        let mut spawn: Option<PlayingVoice> = None;
+                        // de lus (MaxKeyPressTime, 0.7.26). Match op de KALE
+                        // pijp (base_pipe): één NoteOff laat alle lagen van
+                        // die toets los, elk met de release van zijn eigen laag
+                        // (release_spawn_scratch: één release-voice per laag).
                         let mut voices_lock = voices_clone.write();
                         for voice in voices_lock.iter_mut() {
                             // One-shot-voices (Percussive: klok) klinken uit en
                             // negeren note-off, zoals GrandOrgue dat doet.
-                            if voice.stop_id == stop_id && voice.pipe_num == pipe_num
+                            if voice.stop_id == stop_id && base_pipe(voice.pipe_num) == pipe_num
                                 && !voice.releasing && !voice.one_shot
                             {
                                 // Refcount: er is meer dan één bron actief op
@@ -2253,18 +2475,22 @@ fn run_audio_thread(
                                     continue;
                                 }
                                 voice.note_on_count = 0;
-                                if spawn.is_none() {
+                                {
+                                    // Laagsleutel van déze voice (niet de inkomende
+                                    // kale pipe_num): release-meta en -buffers
+                                    // staan per laag geregistreerd.
+                                    let vpipe = voice.pipe_num;
                                     let note_ms = voice.age_samples as f32 * 1000.0 / (sample_rate.max(1)) as f32;
                                     // Toetsduur-release kiezen: eerste variant met
                                     // max_ms ≥ gespeelde duur; anders de default
                                     // (-1, achteraan). Geen meta → klassieke key.
-                                    let chosen_pipe = release_meta.get(&(stop_id, pipe_num))
+                                    let chosen_pipe = release_meta.get(&(stop_id, vpipe))
                                         .and_then(|list| list.iter()
                                             .find(|(max_ms, _)| *max_ms >= 0 && note_ms as i64 <= *max_ms as i64)
                                             .or_else(|| list.last())
                                             .map(|(_, key)| *key))
-                                        .unwrap_or(pipe_num | RELEASE_PIPE_FLAG);
-                                    let is_default_release = chosen_pipe == (pipe_num | RELEASE_PIPE_FLAG);
+                                        .unwrap_or(vpipe | RELEASE_PIPE_FLAG);
+                                    let is_default_release = chosen_pipe == (vpipe | RELEASE_PIPE_FLAG);
                                     let release_key = (stop_id, chosen_pipe);
                                     let rel_full = samples_clone.read().get(&release_key).cloned();
                                     // Preload óók bij een geladen full sample ophalen:
@@ -2335,6 +2561,10 @@ fn run_audio_thread(
                                         v
                                     };
                                     rv.one_shot = true;
+                                    // Perspectief-gain overerven: de release van
+                                    // een rear-laag klinkt op rear-niveau (anders
+                                    // een niveausprong bij loslaten).
+                                    rv.persp_slot = voice.persp_slot;
                                     if let Some(decay_ms) = stacc_decay {
                                         // Korte noot: staart actief afbouwen — de galm
                                         // in de opname is nog niet volledig opgebouwd.
@@ -2353,12 +2583,12 @@ fn run_audio_thread(
                                         // (gemeten op Friesach: +4 dB, |dx| ×4).
                                         crossfade_in(&mut rv, level, release_fade_ms(voice.midi_note), sample_rate);
                                     }
-                                    spawn = Some(rv);
+                                    release_spawn_scratch.push(rv);
                                 }
                                 voice.release_ms(release_fade_ms(voice.midi_note), sample_rate);
                             }
                         }
-                        if let Some(rv) = spawn {
+                        for rv in release_spawn_scratch.drain(..) {
                             budget_release_voices(&mut voices_lock, sample_rate, live_cap);
                             push_voice_capped(&mut voices_lock, rv, sample_rate, live_cap);
                         }
@@ -2435,6 +2665,8 @@ fn run_audio_thread(
                                         v
                                     };
                                     rv.one_shot = true;
+                                    // Perspectief-gain overerven (zie NoteOff).
+                                    rv.persp_slot = voice.persp_slot;
                                     if let Some(decay_ms) = stacc_decay {
                                         rv.envelope = level;
                                         rv.target_envelope = level;
@@ -2466,6 +2698,12 @@ fn run_audio_thread(
                             info!("ODF-intonatie geregistreerd voor {} pijpen", map.len());
                         }
                         *odf_voicing_clone.write() = map;
+                    }
+                    AudioCommand::RegisterOdfRetune(map) => {
+                        if !map.is_empty() {
+                            info!("Hertemper-tabel geregistreerd voor {} pijpen", map.len());
+                        }
+                        *odf_retune_clone.write() = map;
                     }
                     AudioCommand::RegisterOdfLoops(map) => {
                         if !map.is_empty() {
@@ -2604,6 +2842,9 @@ fn run_audio_thread(
                                             alt_buf, voice.stop_id, voice.pipe_num, voice.midi_note,
                                             voice.target_envelope, voice.position, sample_rate
                                         );
+                                        // Perspectief-gain overerven: de trem-laag van
+                                        // een rear-perspectief blijft op rear-niveau.
+                                        nv.persp_slot = voice.persp_slot;
                                         // Request background load for new voice (met dedup)
                                         if let Some(path) = nv.needs_background_load() {
                                             let odf_lp = odf_loops_clone.read().get(&path).copied();
@@ -2633,25 +2874,19 @@ fn run_audio_thread(
                         info!("Tremulant {}: active stops = {}", if active { "ON" } else { "OFF" }, trem.len());
                     }
                     AudioCommand::SetDivisionGain { division_index, gain } => {
+                        // Alleen de DOELstand; de render-lus loopt er per blok
+                        // gesmootheerd naartoe en leidt volume + cutoff daaruit af.
                         let mut gains = division_gains_clone.write();
                         if (division_index as usize) < gains.len() {
-                            gains[division_index as usize] = gain;
-                            // Update swell filter cutoff based on gain and config
-                            let configs = swell_configs_clone.read();
-                            if let Some(&(_min_db, cutoff_closed)) = configs.get(division_index as usize) {
-                                let cutoff = cutoff_closed + gain * (20000.0 - cutoff_closed);
-                                let mut filters = swell_filters_clone.write();
-                                if let Some((fl, fr)) = filters.get_mut(division_index as usize) {
-                                    fl.set_cutoff(cutoff, sample_rate);
-                                    fr.set_cutoff(cutoff, sample_rate);
-                                }
-                            }
+                            gains[division_index as usize] = gain.clamp(0.0, 1.0);
                         }
                     }
                     AudioCommand::SetSwellConfig { division_index, min_db, filter_cutoff_closed } => {
                         let mut configs = swell_configs_clone.write();
                         if (division_index as usize) < configs.len() {
                             configs[division_index as usize] = (min_db, filter_cutoff_closed);
+                            // Volume + cutoff bij de huidige stand herberekenen.
+                            swell_dirty[division_index as usize] = true;
                             info!("Swell config div {}: min={}dB, filter={}Hz", division_index, min_db, filter_cutoff_closed);
                         }
                     }
@@ -2685,8 +2920,18 @@ fn run_audio_thread(
                     }
                     AudioCommand::RegisterStopDivisionMap(map) => {
                         *stop_to_division_clone.write() = map;
-                        // Reset all division gains to 1.0 (fully open)
+                        // Reset all division gains to 1.0 (fully open) — inclusief
+                        // de gesmoothede stand en de zwelfilters (die bleven anders
+                        // op de cutoff van het vórige orgel staan: doffe divisie).
                         *division_gains_clone.write() = vec![1.0; 32];
+                        swell_g = [1.0; 32];
+                        swell_vol = [1.0; 32];
+                        swell_bypass = [true; 32];
+                        swell_dirty = [false; 32];
+                        for (fl, fr) in swell_filters_clone.write().iter_mut() {
+                            fl.set_cutoff(20000.0, sample_rate); fl.reset();
+                            fr.set_cutoff(20000.0, sample_rate); fr.reset();
+                        }
                         // Reset alle tremulant-LFO active-vlaggen: anders blijft een
                         // tremulant die op het vórige orgel aanstond doormoduleren op
                         // dezelfde divisie-index van het nieuwe orgel (stale state).
@@ -2703,14 +2948,14 @@ fn run_audio_thread(
                         *ccis_enabled_clone.write() = vec![false; 32];
                         info!("Registered stop→division map ({} entries); gains, tremulant, routing + C/Cis reset", stop_to_division_clone.read().len());
                     }
-                    AudioCommand::SetTemperament { note_offsets, fine_tune } => {
+                    AudioCommand::SetTemperament { note_offsets, fine_tune, retune } => {
                         let mut ratios = [0.0f64; 12];
                         for i in 0..12 {
                             let total_cents = note_offsets[i] as f64 + fine_tune as f64;
                             ratios[i] = 2.0_f64.powf(total_cents / 1200.0);
                         }
-                        *temperament_clone.write() = ratios;
-                        info!("Temperament set: fine_tune={} cents", fine_tune);
+                        *temperament_clone.write() = (ratios, retune);
+                        info!("Temperament set: fine_tune={} cents, retune={}", fine_tune, retune);
                     }
                     AudioCommand::LoadImpulseResponse(rev) => {
                         // Kant-en-klaar aangeleverd; hier alleen inpluggen.
@@ -2797,6 +3042,7 @@ fn run_audio_thread(
                         trem_active_clone.write().clear();
                         percussive_stops_clone.write().clear();
                         *odf_voicing_clone.write() = Arc::new(HashMap::new());
+                        *odf_retune_clone.write() = Arc::new(HashMap::new());
                         {
                             let old = std::mem::take(&mut *voices_clone.write());
                             if let Err(e) = gc_tx_render.try_send(Box::new(old)) { gc_backlog.push(e.into_inner()); }
@@ -2810,7 +3056,15 @@ fn run_audio_thread(
                         master_limiter.reset();
                         stop_to_division_clone.write().clear();
                         *division_gains_clone.write() = vec![1.0; 32];
-                        *temperament_clone.write() = [1.0; 12];
+                        swell_g = [1.0; 32];
+                        swell_vol = [1.0; 32];
+                        swell_bypass = [true; 32];
+                        swell_dirty = [false; 32];
+                        for (fl, fr) in swell_filters_clone.write().iter_mut() {
+                            fl.set_cutoff(20000.0, sample_rate); fl.reset();
+                            fr.set_cutoff(20000.0, sample_rate); fr.reset();
+                        }
+                        *temperament_clone.write() = ([1.0; 12], false);
                         // Reset ook de per-divisie tremulant-LFO active-vlaggen.
                         {
                             let mut lfos = trem_lfos_clone.write();
@@ -2865,7 +3119,7 @@ fn run_audio_thread(
             // vaste arrays, dus geen allocatie op de audio-thread.
             let n_real_divs = stop_div_map.values().map(|&d| d as usize + 1).max().unwrap_or(0);
             let (wet_w_l, wet_w_r, wet_ch) = wet_channel_weights(&out_chans_lock, n_real_divs, channels);
-            let temp_ratios = *temperament_clone.read();
+            let (temp_ratios, retune_on) = *temperament_clone.read();
             let mut peak_l = 0.0f32;
             let mut peak_r = 0.0f32;
 
@@ -2874,6 +3128,7 @@ fn run_audio_thread(
                 let mut swell_flt = swell_filters_clone.write();
                 let pipe_voicing_map = voicing_clone.read();
                 let odf_voicing_map = odf_voicing_clone.read();
+                let odf_retune_map = odf_retune_clone.read();
                 let mut wm = wind_models_clone.write();
                 let mut trem_lfo = trem_lfos_clone.write();
                 let stops_with_trem = stops_with_trem_clone.read();
@@ -2938,16 +3193,34 @@ fn run_audio_thread(
                 for voice in voices_lock.iter_mut() {
                     voice.c_div = stop_div_map.get(&voice.stop_id).copied().unwrap_or(0) as usize;
 
-                    let vkey = (voice.stop_id, voice.pipe_num & !RELEASE_KEY_MASK);
-                    let (user_vol, user_pitch) = pipe_voicing_map.get(&vkey).copied().unwrap_or((0.0, 0.0));
-                    let (odf_vol, odf_pitch) = odf_voicing_map.get(&vkey).copied().unwrap_or((0.0, 0.0));
+                    // Gebruikers-voicing (VoicingPanel) keyt op de KALE pijp en
+                    // geldt dus voor álle lagen van die toets; ODF-intonatie en
+                    // hertemper-tabel staan per laag (laagsleutel zonder
+                    // release-bits).
+                    let ukey = (voice.stop_id, base_pipe(voice.pipe_num));
+                    let okey = (voice.stop_id, voice.pipe_num & !RELEASE_KEY_MASK);
+                    let (user_vol, user_pitch) = pipe_voicing_map.get(&ukey).copied().unwrap_or((0.0, 0.0));
+                    let (odf_vol, odf_pitch) = odf_voicing_map.get(&okey).copied().unwrap_or((0.0, 0.0));
+                    // Hertemper-modus: de gemeten-toonhoogte-correctie van deze
+                    // pijp VERVANGT de ODF-PitchTuning; zonder meting blijft
+                    // PitchTuning staan. Eén HashMap-lookup per voice per
+                    // callback (zelfde orde als de bestaande lookups); okey
+                    // maskeert de release-vlag, dus release- en tremulantlaag-
+                    // voices volgen dezelfde correctie.
+                    let odf_pitch_eff = if retune_on {
+                        odf_retune_map.get(&okey).copied().unwrap_or(odf_pitch)
+                    } else {
+                        odf_pitch
+                    };
                     let voicing_vol = user_vol + odf_vol;
-                    let voicing_pitch = user_pitch + odf_pitch;
+                    let voicing_pitch = user_pitch + odf_pitch_eff;
                     voice.c_voicing_gain = if voicing_vol.abs() > 1e-6 {
                         10.0_f32.powf(voicing_vol / 20.0)
                     } else {
                         1.0
                     };
+                    // Perspectief-volume (live, per slot): één array-read + mul.
+                    voice.c_voicing_gain *= persp_gain[(voice.persp_slot as usize) & (MAX_LAYERS - 1)];
 
                     let note_class = (voice.midi_note % 12) as usize;
                     let temp = temp_ratios[note_class] as f64;
@@ -2989,6 +3262,36 @@ fn run_audio_thread(
                 let mut fi = 0usize;
                 while fi < n_frames {
                     let bn = (n_frames - fi).min(MIX_BLOCK);
+
+                    // ── Zwelkast per blok: doelstand → gesmoothede stand → volume + filter ──
+                    // Eén exp per blok + per gewijzigde divisie één powf en één
+                    // set_cutoff (exp); niets hiervan meer in de per-frame-lus.
+                    {
+                        let alpha = swell_dsp::block_alpha(bn, sample_rate, swell_dsp::TAU_S);
+                        for idx in 0..32 {
+                            let target = div_gains.get(idx).copied().unwrap_or(1.0);
+                            let g_prev = swell_g[idx];
+                            let moved = g_prev != target;
+                            if moved {
+                                swell_g[idx] = swell_dsp::smooth_step(g_prev, target, alpha);
+                            }
+                            if moved || swell_dirty[idx] {
+                                swell_dirty[idx] = false;
+                                let g = swell_g[idx];
+                                let (min_db, cutoff_closed) = swell_cfgs.get(idx).copied().unwrap_or((-20.0, 800.0));
+                                swell_vol[idx] = swell_dsp::volume(min_db, g);
+                                let bypass = g >= swell_dsp::BYPASS_ABOVE;
+                                swell_bypass[idx] = bypass;
+                                if !bypass {
+                                    if let Some((fl, fr)) = swell_flt.get_mut(idx) {
+                                        let c = swell_dsp::cutoff_hz(cutoff_closed, g);
+                                        fl.set_cutoff(c, sample_rate);
+                                        fr.set_cutoff(c, sample_rate);
+                                    }
+                                }
+                            }
+                        }
+                    }
 
                     // ── Pass 1: wind/tremulant per frame (modellen in volgorde stappen) ──
                     for f in 0..bn {
@@ -3119,15 +3422,20 @@ fn run_audio_thread(
                             // schoont alleen het uitgangsframe (auditbevinding 14).
                             let l_raw = if l_raw.is_finite() { l_raw } else { 0.0 };
                             let r_raw = if r_raw.is_finite() { r_raw } else { 0.0 };
-                            let pedal_pos = div_gains.get(idx).copied().unwrap_or(1.0);
-                            let (min_db, _cutoff_closed) = swell_cfgs.get(idx).copied().unwrap_or((-20.0, 800.0));
-                            let (lf, rf) = if let Some((fl, fr)) = swell_flt.get_mut(idx) {
-                                (fl.process(l_raw), fr.process(r_raw))
-                            } else {
-                                (l_raw, r_raw)
+                            // Zwelkast: volume + cutoff zijn per blok voorgerekend.
+                            // Kast (vrijwel) open → filter overslaan, maar wel
+                            // 'primen' zodat het zonder sprong invalt zodra de
+                            // trede weer sluit.
+                            let (lf, rf) = match swell_flt.get_mut(idx) {
+                                Some((fl, fr)) if swell_bypass[idx] => {
+                                    fl.prime(l_raw);
+                                    fr.prime(r_raw);
+                                    (l_raw, r_raw)
+                                }
+                                Some((fl, fr)) => (fl.process(l_raw), fr.process(r_raw)),
+                                None => (l_raw, r_raw),
                             };
-                            let db = min_db * (1.0 - pedal_pos);
-                            let vol = 10.0_f32.powf(db / 20.0);
+                            let vol = swell_vol[idx];
                             let l = lf * vol * gain;
                             let r = rf * vol * gain;
                             sum_l += l;

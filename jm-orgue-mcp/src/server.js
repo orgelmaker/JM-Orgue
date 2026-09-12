@@ -76,7 +76,9 @@ async function ensureAppRunning() {
   }
   appProcess = spawn(APP_EXE, ['--test-api', String(API_PORT)], {
     detached: false,
-    stdio: ['ignore', 'pipe', 'pipe'],
+    // stdout/stderr NIET als pipe laten hangen: een nooit-geleegde pipe
+    // blokkeert de app zodra ~80 KB gelogd is (het logbestand bevat alles al).
+    stdio: ['ignore', 'ignore', 'ignore'],
   });
   appProcess.on('exit', () => { appProcess = null; });
 
