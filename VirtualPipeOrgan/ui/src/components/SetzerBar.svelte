@@ -409,7 +409,7 @@
     class:active={setMode}
     on:click={toggleSetMode}
     use:midiLearn={{ onTrigger: () => showContextMenuAt(ACTION_SET) }}
-    title="Registratie opslaan (SET) · rechtermuis of 3s ingedrukt = MIDI inleren"
+    title="{$t('setzer.set')} · {$t('setzer.midi_learn_hint')}"
   >SET</button>
 
   <!-- Digit buttons 0-9 -->
@@ -423,7 +423,7 @@
         class:has-midi={midiBindings[d] > 0}
         on:click={() => digitPressed(d)}
         use:midiLearn={{ onTrigger: () => showContextMenuAt(d) }}
-        title="Preset {currentBank * 10 + d} · rechtermuis of 3s ingedrukt = MIDI inleren"
+        title="{$t('setzer.preset').replace('{n}', currentBank * 10 + d)} · {$t('setzer.midi_learn_hint')}"
       >{d}</button>
     {/each}
   </div>
@@ -465,7 +465,7 @@
   </div>
 
   <!-- Digital display -->
-  <div class="setzer-display" title="Preset nummer">
+  <div class="setzer-display" title={$t('setzer.preset_number')}>
     {currentPreset >= 0 ? String(currentPreset).padStart(3, '0') : '---'}
   </div>
 
@@ -503,9 +503,9 @@
       role="button"
       tabindex="0"
       use:midiLearn={{ onTrigger: learnCrescendoPedal }}
-      title="{$t('settings.crescendo')}: {$t('settings.crescendo_stage')} {crescStage}/{crescTotal}{crescEnabled ? '' : ' (uit)'} · rechtermuis of 3s ingedrukt = pedaal inleren"
+      title="{$t('settings.crescendo')}: {$t('settings.crescendo_stage')} {crescStage}/{crescTotal}{crescEnabled ? '' : ' ' + $t('setzer.cresc_off')} · {$t('setzer.pedal_learn_hint')}"
     >
-      <span class="cresc-label">Cresc</span>
+      <span class="cresc-label">{$t('setzer.cresc_label')}</span>
       <div class="cresc-leds">
         {#each Array(crescTotal) as _, i}
           <span class="cresc-led" class:active={crescEnabled && i < crescStage}></span>

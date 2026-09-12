@@ -103,7 +103,7 @@
           </svg>
         </button>
       {:else}
-        <button class="btn btn-primary transport-btn" on:click={pickFile} title="Start afspelen">
+        <button class="btn btn-primary transport-btn" on:click={pickFile} title={$t('midi_player.start_title')}>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
             <polygon points="6,4 20,12 6,20"/>
           </svg>

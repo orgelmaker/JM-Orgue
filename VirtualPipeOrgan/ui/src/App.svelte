@@ -7,7 +7,7 @@
   import StatusBar from './components/StatusBar.svelte';
   import PanelApp from './components/PanelApp.svelte';
   import NotationWindow from './components/NotationWindow.svelte';
-  import { tx } from './lib/i18n.js';
+  import { t, tx } from './lib/i18n.js';
   import { loadAudioProfiles, profileMatchesOutput, deriveProfileFromOutput as deriveProfile, AUDIO_PROFILES_KEY } from './lib/audioProfiles.js';
   import { pickDevice } from './lib/audioDevices.js';
 
@@ -445,6 +445,11 @@
         const p = e?.payload || {};
         if (p.kind) clearAudioProfile(p.kind);
       }));
+      // Kanaalkeuze gewijzigd op een extra scherm: profielkopie bijwerken en de
+      // spiegel in het hoofdvenster verversen (divisionChannelsVersion).
+      panelUnlisteners.push(await listen('jm-orgue:division-channels-changed', () => {
+        syncActiveProfileChannels();
+      }));
       // Instellingen gewijzigd in een paneel: lijsten verversen + autosaven
       // (zelfde route als Console's eigen refreshMidiMappings-event).
       panelUnlisteners.push(await listen('jm-orgue:settings-changed', (e) => {
@@ -652,6 +657,28 @@
     try { await invoke('set_profile_channel_override', { channels: payload }); } catch (e) {}
   }
 
+  // Handmatige kanaalwijziging (chips per klavier of uitgangspaar) terwijl het
+  // actieve profiel een kanaallijst heeft: die lijst mee-updaten, anders zet de
+  // volgende profielwissel de oude profielkanalen stilletjes terug. De backend-
+  // override is door set_division_output_channels al bijgewerkt; hier alleen de
+  // opgeslagen profielkopie en de dedupe-sleutel gelijktrekken.
+  let divisionChannelsVersion = 0;
+  async function syncActiveProfileChannels() {
+    divisionChannelsVersion += 1;
+    const kind = audioProfiles.active;
+    const p = kind && audioProfiles[kind];
+    if (!p || !p.channels || !organInfo?.divisions?.length) return;
+    try {
+      const chans = await invoke('get_division_output_channels');
+      const map = new Map(p.channels);
+      organInfo.divisions.forEach((d, i) => map.set(d.name, Array.isArray(chans?.[i]) ? chans[i] : []));
+      p.channels = [...map];
+      audioProfiles = audioProfiles;
+      persistAudioProfiles();
+      lastPushedChannelOverride = JSON.stringify(p.channels);
+    } catch (e) {}
+  }
+
   // Pas één profiel toe. Uitkomsten:
   //   'ok'             — wissel geslaagd;
   //   'unavailable'    — profiel-apparaat is er niet (bv. hoofdtelefoon uit);
@@ -669,7 +696,7 @@
     selectedAudioHost = p.host || selectedAudioHost;
     await refreshDevicesForHost();
     if (p.device && !audioDevices.some(d => d.name === p.device)) {
-      error = `${label}: apparaat "${p.device}" is nu niet beschikbaar (staat het aan / is het aangesloten?). De huidige uitgang blijft actief.`;
+      error = tx('audio.profile_device_unavailable').replace('{label}', label).replace('{device}', p.device);
       // Huidige uitgang nooit aangeraakt — UI-selectie netjes terugzetten.
       selectedAudioHost = snapshot.host;
       await refreshDevicesForHost();
@@ -680,6 +707,19 @@
     // p.device null = de standaard van die host (bewust géén oud apparaat erven).
     selectedAudioDevice = p.device || (audioDevices.find(d => d.is_default)?.name ?? selectedAudioDevice);
     selectedBufferFrames = p.bufferFrames || null;
+    // Zelfde host + apparaat + buffer als wat nu speelt (bv. hoofdtelefoon =
+    // ander uitgangspaar op dezelfde interface): de stream NIET herbouwen en
+    // het orgel niet herladen — de kanaal-override is al gepusht en door de
+    // engine direct toegepast (set_profile_channel_override). Dat maakt de
+    // wissel klikvrij en onmiddellijk, zoals een monitor-set-wissel in een DAW.
+    // Alleen de spiegel van de kanaalkeuze in de vensters verversen.
+    const sameHost = (p.host || '').toLowerCase() === (status.audioHost || '').toLowerCase();
+    const sameDevice = !!p.device && p.device === status.audioDevice;
+    const sameBuffer = (p.bufferFrames || 0) === (status.bufferFrames || 0);
+    if (status.audioRunning && sameHost && sameDevice && sameBuffer) {
+      divisionChannelsVersion += 1;
+      return 'ok';
+    }
     return await applyAudioOutput();
   }
 
@@ -712,9 +752,7 @@
         // huidige (speaker-)uitgang gaf "er gebeurt niets" — de knop leek stuk
         // ("schakeling hoofdtelefoon lukt niet") en beide profielen werden
         // identiek. Eerlijk zeggen wat er moet gebeuren in plaats van raden.
-        error = 'Het profiel Hoofdtelefoon is nog niet ingesteld. Kies eerst de hoofdtelefoon-uitgang '
-          + '(host, apparaat en eventueel kanalen) in Instellingen → Audio-uitvoer en sla die op als '
-          + 'Hoofdtelefoon; daarna wisselt deze knop direct.';
+        error = tx('audio.headphones_profile_not_set');
         return;
       }
       // Speakers zonder profiel: de huidige (echt spelende) uitgang vastleggen
@@ -734,7 +772,7 @@
     // Extra schermen tonen de wissel-spinner via dit broadcast-event.
     emitProfileSwitchState(true);
     try {
-      const label = target === 'headphones' ? 'Hoofdtelefoon' : 'Speakers';
+      const label = target === 'headphones' ? tx('settings.audio_profile_headphones') : tx('settings.audio_profile_speakers');
       // Kanaal-override VÓÓR de wissel zetten: de wissel herlaadt het orgel en
       // elke apply_saved_output_channels tijdens die load moet de kanalen van
       // het DOELprofiel al meenemen (anders wint de per-orgel routing even).
@@ -822,7 +860,7 @@
         // Er liep al een wissel of de harde deadline werd bereikt: huidige
         // uitgang blijft intact, niets herladen. De aanroeper reset zijn
         // bezig-vlag zodat de knop niet eeuwig blijft hangen.
-        error = res.message || 'Audio-wissel loopt langer dan verwacht — nog even geduld.';
+        error = res.message || tx('audio.switch_taking_long');
         return 'busy';
       }
       if (res.switched) {
@@ -832,7 +870,7 @@
         else localStorage.removeItem('jm-orgue-audio-buffer');
         return 'ok';
       }
-      error = res.message || 'Audio-wissel mislukt.';
+      error = res.message || tx('audio.switch_failed');
       return res.player_rebuilt ? 'failed-rebuilt' : 'failed-intact';
     } catch (e) {
       // Catastrofaal (geen fallback meer beschikbaar): backend-melding tonen.
@@ -855,7 +893,9 @@
         peakRight: s.peak_right,
         sampleRate: s.sample_rate,
         audioHost: s.audio_host,
-        audioDevice: s.audio_device
+        audioDevice: s.audio_device,
+        channels: s.channels,
+        bufferFrames: s.buffer_frames
       };
     } catch (e) {
       // Ignore polling errors
@@ -1109,7 +1149,7 @@
       await invoke('set_autostart_enabled', { enabled });
       autostartEnabled = enabled;
     } catch (e) {
-      error = `Autostart wijzigen mislukt: ${e}`;
+      error = tx('errors.autostart_failed').replace('{error}', String(e));
     }
   }
 
@@ -1123,7 +1163,7 @@
       await closeExtraPanels();
     } catch (e) {}
     try { await invoke('shutdown_computer'); }
-    catch (e) { error = `Afsluiten mislukt: ${e}`; }
+    catch (e) { error = tx('errors.shutdown_failed').replace('{error}', String(e)); }
   }
 
   // Bevestiging vragen, opslaan, computer netjes afsluiten.
@@ -1267,9 +1307,9 @@
     <!-- Update-melding: wegklikken onthoudt déze versie; een volgende release
          meldt zich gewoon weer (zie runUpdateCheck). -->
     <div class="update-banner">
-      <span>Nieuwe versie <b>{updateInfo.version}</b> beschikbaar.</span>
-      <button class="btn btn-primary btn-sm" on:click={openUpdatePage}>Downloaden</button>
-      <button class="btn btn-ghost btn-sm" on:click={dismissUpdate} title="Deze melding voor deze versie niet meer tonen" aria-label="Sluiten">✕</button>
+      <span>{$t('update.new_version_prefix')} <b>{updateInfo.version}</b> {$t('update.new_version_suffix')}</span>
+      <button class="btn btn-primary btn-sm" on:click={openUpdatePage}>{$t('update.download')}</button>
+      <button class="btn btn-ghost btn-sm" on:click={dismissUpdate} title={$t('update.dismiss_title')} aria-label={$t('actions.close')}>✕</button>
     </div>
   {/if}
 
@@ -1292,12 +1332,18 @@
       {selectedMidiDevice}
       midiConnected={status.midiConnected}
       sampleRate={status.sampleRate || 0}
+      audioChannels={status.channels || 0}
+      audioHostActual={status.audioHost || ''}
+      audioDeviceActual={status.audioDevice || ''}
+      audioBufferFrames={status.bufferFrames || 0}
+      {divisionChannelsVersion}
       {autostartEnabled}
       {restoreRegistration}
       {autoLoadLastOrgan}
       {panelCloseQuits}
       on:toggleStop={(e) => toggleStop(e.detail)}
       on:toggleCoupler={(e) => toggleCoupler(e.detail)}
+      on:divisionChannelsChanged={syncActiveProfileChannels}
       on:crescendoChange={(e) => applyCrescendoStage(e.detail)}
       on:refreshDevices={refreshDevices}
       on:refresh={refreshDevices}

@@ -4,7 +4,7 @@
   import LayoutSettings from './LayoutSettings.svelte';
   import VoicingPanel from './VoicingPanel.svelte';
   import MidiPlayer from './MidiPlayer.svelte';
-  import { t, tx } from '../lib/i18n.js';
+  import { t, tx, locale } from '../lib/i18n.js';
   import SetzerBar from './SetzerBar.svelte';
   import { loadPanelState, savePanelState } from '../lib/panelState.js';
   import { midiLearn } from '../lib/midiLearn.js';
@@ -95,7 +95,7 @@
   }
   async function applyLoops() {
     if (!samplesetDir()) return;
-    if (!confirm('Loops detecteren en in de WAV-bestanden schrijven? De originelen worden eerst geback-upt naar een "_loopbackup"-map.')) return;
+    if (!confirm(tx('sampleset.loops_confirm'))) return;
     loopBusy = true;
     try {
       loopApply = await invoke('apply_sampleset_loops', {
@@ -119,6 +119,16 @@
   // opnieuw op de verse audio-thread toegepast worden, ook al is het orgel-id
   // gelijk gebleven (auditbevinding 20).
   export let audioEpoch = 0;
+  // Actuele stream (uit de 100-ms status-poll in App/PanelApp): kanaalaantal,
+  // host, apparaat, buffer. Eén bron voor chips, EQ-kanaalkeuze en uitgangspaar
+  // — vóór 0.7.37 werd het kanaalaantal één keer bij het aanmaken opgevraagd en
+  // nooit ververst, zodat na de (uitgestelde) ASIO-wissel 2 chips bleven staan.
+  export let audioChannels = 0;
+  export let audioHostActual = '';
+  export let audioDeviceActual = '';
+  export let audioBufferFrames = 0;
+  // Telt op wanneer een ander venster de kanaalkeuze per klavier wijzigde.
+  export let divisionChannelsVersion = 0;
   // Laatst geopende orgel automatisch laden bij het starten (App.svelte).
   export let autoLoadLastOrgan = true;
   // Kruisje op een extra scherm sluit de hele software (App.svelte; standaard
@@ -139,7 +149,8 @@
   async function refreshAudioStatus() {
     try { audioStatus = await invoke('get_status'); } catch (e) { /* polling */ }
   }
-  $: if (activeView === 'algemene-instellingen') refreshAudioStatus();
+  $: audioStatusKey = `${audioHostActual}|${audioDeviceActual}|${audioChannels}|${audioBufferFrames}|${audioEpoch}`;
+  $: if (activeView === 'algemene-instellingen' && audioStatusKey) refreshAudioStatus();
 
   // ===== MIDI-uit terugkoppeling (0.7.9): registerlampen/display op de console =====
   // Protocol + poort + kanaal komen uit localStorage; bij een registratiewijziging
@@ -193,7 +204,7 @@
       }
     }
     for (const c of (organInfo?.couplers || [])) {
-      list.push({ id: c.id, name: `Koppel — ${(c.name || '').replace(/\n/g, ' ')}`, auto: (fbBaseNote + i) & 0x7F, learned: fbLearnedNotes[c.id] });
+      list.push({ id: c.id, name: $t('feedback.coupler_prefix').replace('{name}', (c.name || '').replace(/\n/g, ' ')), auto: (fbBaseNote + i) & 0x7F, learned: fbLearnedNotes[c.id] });
       i++;
     }
     return list;
@@ -203,7 +214,7 @@
   // het kanaal van de console over.
   async function fbLearnOne(id) {
     if (fbLearningId) return false;
-    if (!midiConnected) { alert('Verbind eerst een MIDI apparaat!'); return false; }
+    if (!midiConnected) { alert(tx('midi.connect_first')); return false; }
     fbLearningId = id;
     try {
       const res = await invoke('learn_keyboard_note');
@@ -266,7 +277,7 @@
     } catch (e) {
       fbConfigured = false;
       if (silent === true) console.warn('Terugkoppeling auto-verbinden mislukt:', e);
-      else alert(`Terugkoppeling instellen mislukt: ${e}`);
+      else alert(tx('feedback.configure_failed').replace('{error}', String(e)));
     }
     finally { fbBusy = false; }
   }
@@ -322,7 +333,7 @@
     try {
       const { githubIssuesUrl } = await import('../lib/github.js');
       await invoke('open_external_url', { url: githubIssuesUrl() });
-    } catch (e) { alert(`Kan de feedbackpagina niet openen: ${e}`); }
+    } catch (e) { alert(tx('about.feedback_page_failed').replace('{error}', String(e))); }
   }
 
   // Feedback-popup (0.7.23): bericht gaat via een mail-relay (FEEDBACK_ENDPOINT
@@ -384,10 +395,12 @@
     : null;
 
   // Begrijpelijker label voor de host-keuze (waarde blijft de echte cpal-naam).
-  function prettyHost(name) {
+  // Tweede parameter `_t` wordt in het template als $t meegegeven zodat de
+  // keuzelijst bij een taalwissel opnieuw rendert (anders blijft het oude label).
+  function prettyHost(name, _t = $t) {
     const n = (name || '').toLowerCase();
-    if (/asio/.test(n)) return `${name} (lage latency)`;
-    if (/wasapi/.test(n)) return `${name} (Windows — per uitgang)`;
+    if (/asio/.test(n)) return _t('audio.host_low_latency').replace('{name}', name);
+    if (/wasapi/.test(n)) return _t('audio.host_wasapi').replace('{name}', name);
     return name || '—';
   }
 
@@ -453,25 +466,26 @@
   // Deze acties waren alleen inleerbaar via rechtermuis/3s op de setzerbalk
   // (en "Computer afsluiten" helemaal nergens). Eén vindbare lijst in de
   // Algemene Instellingen; hergebruikt learn_preset_binding/clear_preset_binding.
-  const GLOBAL_ACTIONS = [
-    { code: 10, name: 'SET — registratie opslaan' },
-    { code: 11, name: 'Afsteller — alles af (GC)' },
-    { code: 12, name: 'Preset −1' },
-    { code: 13, name: 'Preset +1' },
-    { code: 14, name: 'Preset −10' },
-    { code: 15, name: 'Preset +10' },
-    { code: 16, name: 'Geheugenniveau M1' },
-    { code: 17, name: 'Geheugenniveau M2' },
-    { code: 18, name: 'Geheugenniveau M3' },
-    { code: 19, name: 'Geheugenniveau M4' },
-    { code: 20, name: 'Geheugenniveau M5' },
-    { code: 21, name: 'Geheugenniveau M6' },
-    { code: 22, name: 'Geheugenniveau M7' },
-    { code: 23, name: 'Geheugenniveau M8' },
-    { code: 40, name: 'EQ aan/uit' },
-    { code: 41, name: 'Generaal crescendo aan/uit' },
-    { code: 42, name: 'Computer afsluiten' },
-    { code: 43, name: 'Speakers ↔ hoofdtelefoon' },
+  // Reactief ($t) zodat de labels de taalkeuze volgen; de markup leest `.name`.
+  $: GLOBAL_ACTIONS = [
+    { code: 10, name: $t('pistons.set') },
+    { code: 11, name: $t('pistons.general_cancel') },
+    { code: 12, name: $t('pistons.preset_prev') },
+    { code: 13, name: $t('pistons.preset_next') },
+    { code: 14, name: $t('pistons.preset_minus_10') },
+    { code: 15, name: $t('pistons.preset_plus_10') },
+    { code: 16, name: $t('pistons.memory_level').replace('{n}', '1') },
+    { code: 17, name: $t('pistons.memory_level').replace('{n}', '2') },
+    { code: 18, name: $t('pistons.memory_level').replace('{n}', '3') },
+    { code: 19, name: $t('pistons.memory_level').replace('{n}', '4') },
+    { code: 20, name: $t('pistons.memory_level').replace('{n}', '5') },
+    { code: 21, name: $t('pistons.memory_level').replace('{n}', '6') },
+    { code: 22, name: $t('pistons.memory_level').replace('{n}', '7') },
+    { code: 23, name: $t('pistons.memory_level').replace('{n}', '8') },
+    { code: 40, name: $t('pistons.eq_toggle') },
+    { code: 41, name: $t('pistons.crescendo_toggle') },
+    { code: 42, name: $t('pistons.shutdown') },
+    { code: 43, name: $t('pistons.audio_profile') },
   ];
   let showActionLearnList = false;
   $: actionBound = (() => {
@@ -540,14 +554,14 @@
         const final = await invoke('stop_recording');
         recorderStatus = final;
         if (final && final.path) {
-          alert(`Opname opgeslagen:\n${final.path}\n(${formatSeconds(final.seconds)})`);
+          alert(tx('recording.audio_saved').replace('{path}', final.path).replace('{time}', formatSeconds(final.seconds)));
         }
       } else {
         const path = await invoke('start_recording', { path: null });
         recorderStatus = { recording: true, seconds: 0, path, frames_dropped: 0, error: null };
       }
     } catch (e) {
-      alert(`Opname-fout: ${e}`);
+      alert(tx('recording.audio_error').replace('{error}', String(e)));
     }
   }
 
@@ -570,7 +584,7 @@
         midiRec = { recording: false, event_count: count, seconds: midiRec.seconds };
         if (!count) {
           await invoke('clear_midi_recording');
-          alert('Geen noten opgenomen — speel op het klavier (via MIDI) tijdens de opname.');
+          alert(tx('recording.midi_no_notes'));
           return;
         }
         // Opslagdialoog, standaard in Documenten\JM-Orgue-opnames met tijdgestempelde naam.
@@ -578,12 +592,12 @@
         const { save } = await import('@tauri-apps/plugin-dialog');
         const path = await save({
           defaultPath: suggested,
-          filters: [{ name: 'MIDI-bestand', extensions: ['mid'] }],
+          filters: [{ name: tx('recording.midi_file_filter'), extensions: ['mid'] }],
         });
         if (path) {
           await invoke('save_midi_recording', { path });
           lastMidiPath = path;
-          alert(`MIDI-opname opgeslagen:\n${path}\n(${count} events)`);
+          alert(tx('recording.midi_saved').replace('{path}', path).replace('{n}', String(count)));
         } else {
           // Geannuleerd → opname verwerpen zodat de status schoon is.
           await invoke('clear_midi_recording');
@@ -597,7 +611,7 @@
         midiRecPoll = setInterval(pollMidiRec, 300);
       }
     } catch (e) {
-      alert(`MIDI-opname-fout: ${e}`);
+      alert(tx('recording.midi_error').replace('{error}', String(e)));
     }
   }
 
@@ -608,7 +622,7 @@
     try {
       await invoke('midi_play_file', { path: lastMidiPath });
     } catch (e) {
-      alert(`Afspelen mislukt: ${e}`);
+      alert(tx('recording.play_failed').replace('{error}', String(e)));
     }
   }
 
@@ -624,15 +638,15 @@
       const label = `notation-${Date.now()}`;
       const webview = new WebviewWindow(label, {
         url: `index.html#notation&live=1`,
-        title: 'JM-Orgue - Live noteren',
+        title: tx('notation.live_window_title'),
         width: 1100, height: 800, center: true, resizable: true,
       });
       webview.once('tauri://error', (e) => {
         console.error('Live-notatievenster openen mislukt:', e);
-        alert('Notatievenster openen mislukt.');
+        alert(tx('notation.open_failed'));
       });
     } catch (e) {
-      alert(`Notatievenster openen mislukt: ${e}`);
+      alert(tx('notation.open_failed_error').replace('{error}', String(e)));
     }
   }
 
@@ -663,7 +677,7 @@
   } catch (e) {}
 
   function saveCustomTemperament() {
-    const name = prompt('Naam voor deze stemming:');
+    const name = prompt(tx('temperaments.name_prompt'));
     if (!name) return;
     const custom = {
       name, nameDutch: name, category: 'custom', period: 'Eigen', year: 2026,
@@ -906,13 +920,14 @@
   ]);
   let eqBands = defaultEqBands();
 
-  const eqBandTypes = [
-    { value: 'peak', label: 'Piek' },
-    { value: 'lowpass', label: 'Laagdoorlaat' },
-    { value: 'highpass', label: 'Hoogdoorlaat' },
-    { value: 'bandpass', label: 'Banddoorlaat' },
-    { value: 'lowshelf', label: 'Lage shelf' },
-    { value: 'highshelf', label: 'Hoge shelf' },
+  // Reactief ($t) zodat de labels de taalkeuze volgen; de markup leest `.label`.
+  $: eqBandTypes = [
+    { value: 'peak', label: $t('eq.band_peak') },
+    { value: 'lowpass', label: $t('eq.band_lowpass') },
+    { value: 'highpass', label: $t('eq.band_highpass') },
+    { value: 'bandpass', label: $t('eq.band_bandpass') },
+    { value: 'lowshelf', label: $t('eq.band_lowshelf') },
+    { value: 'highshelf', label: $t('eq.band_highshelf') },
   ];
 
   // Log-schaal voor de frequentie-slider: 0..300 ↔ 20 Hz .. 20 kHz.
@@ -990,13 +1005,15 @@
     }).catch(console.error);
   }
 
-  const reverbPresets = [
-    { name: 'Kleine Kapel', rt60: 1.2, preDelay: 10, damping: 60, roomSize: 50 },
-    { name: 'Dorpskerk', rt60: 2.0, preDelay: 25, damping: 50, roomSize: 80 },
-    { name: 'Grote Kerk', rt60: 3.5, preDelay: 40, damping: 40, roomSize: 120 },
-    { name: 'Kathedraal', rt60: 6.0, preDelay: 60, damping: 30, roomSize: 180 },
-    { name: 'Gotische Kathedraal', rt60: 10.0, preDelay: 80, damping: 20, roomSize: 250 },
-    { name: 'Concertzaal', rt60: 2.2, preDelay: 30, damping: 50, roomSize: 100 },
+  // Reactief ($t) zodat de namen de taalkeuze volgen; de markup leest `.name`,
+  // de functies hieronder lezen alleen de numerieke velden (index blijft gelijk).
+  $: reverbPresets = [
+    { name: $t('reverb.preset_small_chapel'), rt60: 1.2, preDelay: 10, damping: 60, roomSize: 50 },
+    { name: $t('reverb.preset_village_church'), rt60: 2.0, preDelay: 25, damping: 50, roomSize: 80 },
+    { name: $t('reverb.preset_large_church'), rt60: 3.5, preDelay: 40, damping: 40, roomSize: 120 },
+    { name: $t('reverb.preset_cathedral'), rt60: 6.0, preDelay: 60, damping: 30, roomSize: 180 },
+    { name: $t('reverb.preset_gothic_cathedral'), rt60: 10.0, preDelay: 80, damping: 20, roomSize: 250 },
+    { name: $t('reverb.preset_concert_hall'), rt60: 2.2, preDelay: 30, damping: 50, roomSize: 100 },
   ];
 
   async function updateAlgorithmicReverb(usePreset = false) {
@@ -1129,10 +1146,10 @@
   let divisionPans = {};
 
   function getDivisionPan(div) { return divisionPans[div] ?? 0; }
-  function formatPan(v) {
-    if (v === 0) return 'C';
-    if (v < 0) return `L${Math.abs(v)}`;
-    return `R${v}`;
+  function formatPan(v, _t = $t) {
+    if (v === 0) return _t('pan.center');
+    if (v < 0) return _t('pan.left').replace('{n}', String(Math.abs(v)));
+    return _t('pan.right').replace('{n}', String(v));
   }
   function onPanChange(div, value) {
     divisionPans[div] = value;
@@ -1240,19 +1257,37 @@
   let ccisStrength = 70;           // 0..100 (UI) → 0..1 backend
   let ccisFalloff = 60;            // 0..100 (UI) → 0..1 backend
   let ccisSwap = false;
-  let audioChannelCount = 2;       // wordt vanuit backend gelezen
+  // Kanaalaantal van de lopende stream: gelatcht uit de status-poll (blijft
+  // stabiel tijdens het korte 'geen player'-venster van een ASIO-wissel of
+  // noodherstel), met de eenmalige query als bootstrap vóór de eerste poll.
+  let lastKnownChannels = 0;
+  let queriedChannelCount = 0;
+  $: if (audioChannels > 0) lastKnownChannels = audioChannels;
+  $: audioChannelCount = lastKnownChannels || queriedChannelCount || 2;
 
   // Output-kanalen, C/Cis-aan/uit per divisie en C/Cis-spreiding worden per orgel in de backend
   // bewaard (apply_saved_output_channels) en in loadAudioSettingsForOrgan() voor de UI geladen —
   // niet meer in globale localStorage-keys.
 
-  invoke('query_audio_channel_count').then(c => { audioChannelCount = c; }).catch(() => {});
+  invoke('query_audio_channel_count').then(c => { queriedChannelCount = c; }).catch(() => {});
 
-  // Vriendelijke kanaalnamen volgens de gangbare WASAPI/7.1-ordening.
+  // Neutrale uitgangsnamen: bij stereo Links/Rechts, anders 'Uitgang N' — op een
+  // 8-kanaals interface zijn het uitgangen 3…8, geen 7.1-luidsprekers.
   function channelLabel(ch, total) {
-    if (total <= 2) return ['Links', 'Rechts'][ch] ?? `Kanaal ${ch + 1}`;
-    const names = ['Voor L', 'Voor R', 'Center', 'LFE', 'Achter L', 'Achter R', 'Zij L', 'Zij R'];
-    return names[ch] ?? `Kanaal ${ch + 1}`;
+    if (total <= 2) return ch === 0 ? $t('settings.channel_left') : ch === 1 ? $t('settings.channel_right') : $t('settings.channel_n').replace('{n}', ch + 1);
+    return $t('settings.channel_n').replace('{n}', ch + 1);
+  }
+
+  // Spiegel van de per-klavier-kanalen verversen wanneer een ander venster ze
+  // wijzigde (alleen lezen; apply_saved_output_channels niet opnieuw draaien).
+  $: if (divisionChannelsVersion > 0 && organInfo?.divisions?.length) refreshDivisionChannelMirror();
+  async function refreshDivisionChannelMirror() {
+    try {
+      const chans = await invoke('get_division_output_channels');
+      const m = {};
+      organInfo.divisions.forEach((d, i) => { if (Array.isArray(chans?.[i]) && chans[i].length) m[d.name] = chans[i]; });
+      divisionOutputChannels = m;
+    } catch (e) {}
   }
 
   function getDivisionChannels(div) {
@@ -1264,7 +1299,7 @@
   // één keuze "kanalen 1–2 / 3–4 / …" die alle klavieren tegelijk zet. Wie
   // klavieren over verschillende uitgangen verdeelt (per-klavier-instelling
   // onder MIDI-kanaal per klavier) ziet hier "aangepast".
-  $: outputChannelTotal = Math.max(2, (audioStatus && audioStatus.channels) || audioChannelCount || 2);
+  $: outputChannelTotal = Math.max(2, audioChannelCount);
   $: outputPairSel = computeOutputPair(divisionOutputChannels, organInfo);
   function computeOutputPair(chmap, oi) {
     const divs = oi?.divisions || [];
@@ -1284,11 +1319,12 @@
     if (v === 'custom') return;
     const pair = Number(v);
     const list = [pair * 2, pair * 2 + 1];
-    for (const d of (organInfo?.divisions || [])) {
-      divisionOutputChannels[d.name] = list.slice();
-      invoke('set_division_output_channels', { division: d.name, channels: list }).catch(() => {});
-    }
+    const divs = organInfo?.divisions || [];
+    for (const d of divs) divisionOutputChannels[d.name] = list.slice();
     divisionOutputChannels = divisionOutputChannels;
+    Promise.all(divs.map(d => invoke('set_division_output_channels', { division: d.name, channels: list })))
+      .then(() => dispatch('divisionChannelsChanged'))
+      .catch(() => {});
   }
 
   // Polyfonie-kap en stereo-samples (globale audio-voorkeuren; waarde via get_status).
@@ -1309,8 +1345,11 @@
     else { list.push(ch); list.sort((a, b) => a - b); }
     divisionOutputChannels[div] = list;
     divisionOutputChannels = divisionOutputChannels;
-    // set_division_output_channels schrijft de per-orgel state in de backend (geen localStorage meer).
-    invoke('set_division_output_channels', { division: div, channels: list }).catch(() => {});
+    // set_division_output_channels schrijft de per-orgel state in de backend (geen localStorage meer);
+    // daarna het actieve profiel laten bijwerken (App.svelte) — pas na bevestiging.
+    invoke('set_division_output_channels', { division: div, channels: list })
+      .then(() => dispatch('divisionChannelsChanged'))
+      .catch(() => {});
   }
 
   function getDivisionCcis(div) { return divisionCcis[div] === true; }
@@ -1361,7 +1400,7 @@
       bleScanComplete = true;
     } catch (e) {
       console.error('BLE scan failed:', e);
-      alert('Bluetooth scan mislukt: ' + e);
+      alert(tx('midi.bluetooth_scan_failed').replace('{error}', String(e)));
     }
     bleScanning = false;
   }
@@ -1379,7 +1418,7 @@
       bleDevices = bleDevices.map(d => ({ ...d, connected: connectedIds.has(d.id) }));
     } catch (e) {
       console.error('BLE toggle failed:', e);
-      alert('Bluetooth verbinding mislukt: ' + e);
+      alert(tx('midi.bluetooth_connect_failed').replace('{error}', String(e)));
     }
   }
 
@@ -1635,7 +1674,7 @@
 
   async function learnPedalFlow(kind, divisionName = null) {
     if (!midiConnected) {
-      alert('Verbind eerst een MIDI apparaat!');
+      alert(tx('midi.connect_first'));
       return;
     }
     pedalLearnModal = { kind, division: divisionName, step: 1, first: null, msg: '' };
@@ -1643,14 +1682,14 @@
       const first = await invoke('learn_pedal_position', { channel: null, ccNum: null });
       if (!pedalLearnModal) return; // geannuleerd
       if (!first) {
-        pedalLearnModal = { ...pedalLearnModal, step: 'fout', msg: 'Geen pedaalbeweging ontvangen (time-out van 20 s). Beweeg de trede naar de laagste stand en houd hem daar stil.' };
+        pedalLearnModal = { ...pedalLearnModal, step: 'fout', msg: tx('learn.pedal_timeout_low') };
         return;
       }
       pedalLearnModal = { ...pedalLearnModal, step: 2, first: { channel: first[0], cc: first[1], value: first[2] } };
       const second = await invoke('learn_pedal_position', { channel: first[0], ccNum: first[1] });
       if (!pedalLearnModal) return;
       if (!second) {
-        pedalLearnModal = { ...pedalLearnModal, step: 'fout', msg: 'Geen hoogste stand ontvangen (time-out van 20 s).' };
+        pedalLearnModal = { ...pedalLearnModal, step: 'fout', msg: tx('learn.pedal_timeout_high') };
         return;
       }
       if (kind === 'zwel') {
@@ -1671,7 +1710,7 @@
         const hi = Math.max(pedalLearnModal.first.value, second[2]);
         crescendoBinding = { channel: first[0], cc: first[1], min: lo, max: hi, invert: inverted };
       }
-      pedalLearnModal = { ...pedalLearnModal, step: 'klaar', msg: `CC ${first[1]} · MIDI-kanaal ${first[0] + 1}` };
+      pedalLearnModal = { ...pedalLearnModal, step: 'klaar', msg: tx('learn.pedal_result').replace('{cc}', String(first[1])).replace('{channel}', String(first[0] + 1)) };
       dispatch('refreshMidiMappings');
       setTimeout(() => { if (pedalLearnModal && pedalLearnModal.step === 'klaar') pedalLearnModal = null; }, 2000);
     } catch (e) {
@@ -1995,7 +2034,7 @@
     try {
       const { save } = await import('@tauri-apps/plugin-dialog');
       const path = await save({
-        filters: [{ name: 'JM-Orgue Instellingen', extensions: ['json'] }],
+        filters: [{ name: tx('dialogs.settings_file_filter'), extensions: ['json'] }],
         defaultPath: 'jm-orgue-instellingen.json',
       });
       if (path) {
@@ -2010,7 +2049,7 @@
     try {
       const { open } = await import('@tauri-apps/plugin-dialog');
       const path = await open({
-        filters: [{ name: 'JM-Orgue Instellingen', extensions: ['json'] }],
+        filters: [{ name: tx('dialogs.settings_file_filter'), extensions: ['json'] }],
         multiple: false,
       });
       if (path) {
@@ -2027,7 +2066,7 @@
     try {
       const selected = await open({
         title: tx('settings.reverb_ir_dialog_title'),
-        filters: [{ name: 'WAV bestanden', extensions: ['wav'] }],
+        filters: [{ name: tx('dialogs.wav_files'), extensions: ['wav'] }],
         multiple: false,
       });
       if (selected) {
@@ -2254,7 +2293,7 @@
       const hasPhysical = st && typeof st.px === 'number';
       const webview = new WebviewWindow(label, {
         url: `index.html#panel&n=${screenNum}`,
-        title: `JM-Orgue - Scherm ${screenNum}`,
+        title: tx('dialogs.panel_window_title').replace('{n}', String(screenNum)),
         width: (!hasPhysical && st && st.width >= 200) ? Math.min(st.width, 4000) : 700,
         height: (!hasPhysical && st && st.height >= 150) ? Math.min(st.height, 4000) : 500,
         decorations: true,
@@ -2322,7 +2361,7 @@
       const selected = await open({
         multiple: false,
         filters: [{
-          name: 'Orgeldefinitie (GrandOrgue / Hauptwerk)',
+          name: tx('dialogs.organ_definition_filter'),
           // Hauptwerk-sets gebruiken *.Organ_Hauptwerk_xml; de backend routeert
           // beide via do_load_organ (is_organ_file_id).
           extensions: ['organ', 'Organ_Hauptwerk_xml']
@@ -2400,7 +2439,7 @@
       const selected = await open({
         multiple: false,
         directory: true,
-        title: 'Externe sampleset — selecteer de hoofdmap (alleen onversleutelde .wav bestanden)'
+        title: tx('dialogs.external_sampleset_title')
       });
       if (selected) {
         dispatch('scanFolder', selected);
@@ -2416,24 +2455,24 @@
       const sourceDir = await open({
         multiple: false,
         directory: true,
-        title: 'Selecteer de sample map om te exporteren'
+        title: tx('dialogs.export_source_folder_title')
       });
       if (!sourceDir) return;
 
       // Then select output file
       const { save } = await import('@tauri-apps/plugin-dialog');
       const outputPath = await save({
-        title: 'Sla .organ bestand op',
+        title: tx('dialogs.export_organ_save_title'),
         defaultPath: 'orgel.organ',
-        filters: [{ name: 'Orgeldefinitie', extensions: ['organ'] }]
+        filters: [{ name: tx('dialogs.organ_definition'), extensions: ['organ'] }]
       });
       if (!outputPath) return;
 
       await invoke('export_organ_file', { directory: sourceDir, outputPath });
-      alert('Orgeldefinitie succesvol geëxporteerd!');
+      alert(tx('dialogs.export_organ_success'));
     } catch (e) {
       console.error('Export failed:', e);
-      alert('Export mislukt: ' + e);
+      alert(tx('dialogs.export_failed').replace('{error}', String(e)));
     }
   }
 
@@ -2491,7 +2530,7 @@
 
   async function learnChannel(divisionName) {
     if (!midiConnected) {
-      alert('Verbind eerst een MIDI apparaat!');
+      alert(tx('midi.connect_first'));
       return;
     }
     learningDivision = divisionName;
@@ -2501,7 +2540,7 @@
       const first = await invoke('learn_keyboard_note');
       if (!kbLearnModal || kbLearnModal.division !== divisionName) return; // geannuleerd
       if (!first) {
-        kbLearnModal = { ...kbLearnModal, step: 'fout', msg: 'Geen toets ontvangen (time-out van 20 s).' };
+        kbLearnModal = { ...kbLearnModal, step: 'fout', msg: tx('learn.key_timeout_first') };
         return;
       }
       kbLearnModal = { ...kbLearnModal, step: 2, first: { channel: first[0], note: first[1] } };
@@ -2509,12 +2548,12 @@
       const second = await invoke('learn_keyboard_note');
       if (!kbLearnModal || kbLearnModal.division !== divisionName) return;
       if (!second) {
-        kbLearnModal = { ...kbLearnModal, step: 'fout', msg: 'Geen tweede toets ontvangen (time-out van 20 s).' };
+        kbLearnModal = { ...kbLearnModal, step: 'fout', msg: tx('learn.key_timeout_second') };
         return;
       }
       if (second[0] !== kbLearnModal.first.channel) {
         kbLearnModal = { ...kbLearnModal, step: 'fout',
-          msg: `De tweede toets kwam op MIDI-kanaal ${second[0] + 1} i.p.v. ${kbLearnModal.first.channel + 1} — druk beide toetsen op hetzelfde klavier.` };
+          msg: tx('learn.key_channel_mismatch').replace('{second}', String(second[0] + 1)).replace('{first}', String(kbLearnModal.first.channel + 1)) };
         return;
       }
       const res = await invoke('apply_learned_keyboard_range', {
@@ -2525,7 +2564,7 @@
         firstSampleNote: 36,
       });
       kbLearnModal = { ...kbLearnModal, step: 'klaar',
-        msg: `${noteName(res.first_note)} t/m ${noteName(res.last_note)} · MIDI-kanaal ${res.channel + 1}` };
+        msg: tx('learn.key_result').replace('{low}', noteName(res.first_note)).replace('{high}', noteName(res.last_note)).replace('{channel}', String(res.channel + 1)) };
       dispatch('refreshMidiMappings');
       setTimeout(() => { if (kbLearnModal && kbLearnModal.step === 'klaar') closeKbLearn(); }, 2000);
     } catch (e) {
@@ -2850,32 +2889,33 @@
       });
   })();
 
-  function midiActionLabel(code) {
+  function midiActionLabel(code, _t = $t) {
     if (code >= 150) {
       for (const d of displayOrgan?.divisions || []) {
         const s = (d.stops || []).find(s => s.midi_action_code === code);
-        if (s) return `Register: ${s.name}${s.pitch ? ' ' + s.pitch : ''} (${d.display_name || d.name})`;
+        if (s) return _t('bindings.stop_label').replace('{name}', `${s.name}${s.pitch ? ' ' + s.pitch : ''}`).replace('{division}', d.display_name || d.name);
       }
-      return `Register (code ${code})`;
+      return _t('bindings.stop_code').replace('{code}', String(code));
     }
     if (code >= 100) {
       const c = (displayOrgan?.couplers || []).find(c => c.midi_action_code === code);
-      return c ? `Koppel: ${c.name.replace(/\n/g, ' ')}` : `Koppel (code ${code})`;
+      return c ? _t('bindings.coupler_label').replace('{name}', c.name.replace(/\n/g, ' ')) : _t('bindings.coupler_code').replace('{code}', String(code));
     }
     if (code >= ACTION_TREM_LFO_BASE && code < ACTION_TREM_LFO_BASE + 16) {
       const d = displayOrgan?.divisions?.[code - ACTION_TREM_LFO_BASE];
-      return `Tremulant: ${d ? (d.display_name || d.name) : `divisie ${code - ACTION_TREM_LFO_BASE + 1}`}`;
+      const divName = d ? (d.display_name || d.name) : _t('bindings.division_n').replace('{n}', String(code - ACTION_TREM_LFO_BASE + 1));
+      return _t('bindings.tremulant_label').replace('{name}', divName);
     }
     const vast = {
-      10: 'Setzer: SET', 11: 'Setzer: GC', 12: 'Setzer: vorige (−1)', 13: 'Setzer: volgende (+1)',
-      14: 'Setzer: −10', 15: 'Setzer: +10',
-      40: 'EQ aan/uit', 41: 'Crescendo aan/uit', 42: 'Computer afsluiten',
-      43: 'Speakers ↔ hoofdtelefoon',
+      10: _t('bindings.setzer_set'), 11: _t('bindings.setzer_gc'), 12: _t('bindings.setzer_prev'), 13: _t('bindings.setzer_next'),
+      14: _t('bindings.setzer_minus_10'), 15: _t('bindings.setzer_plus_10'),
+      40: _t('pistons.eq_toggle'), 41: _t('pistons.crescendo_toggle'), 42: _t('pistons.shutdown'),
+      43: _t('pistons.audio_profile'),
     };
     if (vast[code] != null) return vast[code];
-    if (code <= 9) return `Setzer: knop ${code}`;
-    if (code >= 16 && code <= 23) return `Setzer: geheugen M${code - 15}`;
-    return `Actie ${code}`;
+    if (code <= 9) return _t('bindings.setzer_button').replace('{n}', String(code));
+    if (code >= 16 && code <= 23) return _t('bindings.setzer_memory').replace('{n}', String(code - 15));
+    return _t('bindings.action_n').replace('{n}', String(code));
   }
 
   // Alle mogelijke doelen voor een nieuwe koppeling, gegroepeerd voor de select.
@@ -2941,7 +2981,7 @@
 
   async function addNewBindingUI() {
     if (newBinding.code === '' || newBinding.code == null) {
-      midiBindingsError = 'Kies eerst een doel voor de nieuwe koppeling.';
+      midiBindingsError = tx('bindings.choose_target_first');
       return;
     }
     const binding = buildSavedBinding(parseInt(newBinding.code), newBinding.type, newBinding.channel, newBinding.number, newBinding.value);
@@ -3277,7 +3317,7 @@
       <div class="organ-browser-header">
         <h1 class="organ-browser-title">{$t('library.title')}</h1>
         <div class="organ-browser-actions">
-          <button class="btn btn-secondary btn-sm" on:click={openOrganFile} title=".organ">
+          <button class="btn btn-secondary btn-sm" on:click={openOrganFile} title={$t('library.open_organ_file')}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
               <line x1="12" y1="11" x2="12" y2="17"/>
@@ -3329,7 +3369,7 @@
             <button
               class="library-card-delete"
               on:click={(e) => removeFromLibrary(e, organ.id)}
-              title="Verwijder uit bibliotheek"
+              title={$t('library.remove_from_library')}
             >&times;</button>
             <div class="library-card-image">
               {#if organImages[organ.id]}
@@ -3345,7 +3385,7 @@
             </div>
             <div class="library-card-info">
               <div class="library-card-name">{organ.name}</div>
-              <div class="library-card-meta">{organ.stop_count} registers</div>
+              <div class="library-card-meta">{$t('library.stops_count').replace('{count}', organ.stop_count)}</div>
             </div>
           </div>
         {/each}
@@ -3422,9 +3462,9 @@
           </div>
           <div class="panel-toolbar-right">
             <div class="stop-size-control" title={$t('toolbar.size_title')}>
-              <button class="btn btn-ghost btn-sm stop-size-btn" on:click={() => adjustStopSize(-15)} aria-label="Kleiner">−</button>
+              <button class="btn btn-ghost btn-sm stop-size-btn" on:click={() => adjustStopSize(-15)} aria-label={$t('toolbar.size_smaller')}>−</button>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="6" width="18" height="12" rx="2"/></svg>
-              <button class="btn btn-ghost btn-sm stop-size-btn" on:click={() => adjustStopSize(15)} aria-label="Groter">+</button>
+              <button class="btn btn-ghost btn-sm stop-size-btn" on:click={() => adjustStopSize(15)} aria-label={$t('toolbar.size_larger')}>+</button>
             </div>
             <button
               class="btn btn-ghost btn-sm panel-layout-btn"
@@ -3614,7 +3654,7 @@
                     on:pointerdown={(e) => knobPointerDown(e, division.name, stopIdx)}
                     on:click={() => { if (knobDragJustEnded) return; dispatch('toggleStop', stop.id); }}
                     use:midiLearn={{ onTrigger: () => showStopContextMenuAt(stop.midi_action_code) }}
-                    aria-label="{stop.name} {stop.pitch || ''} — {stop.drawn ? 'ingeschakeld' : 'uitgeschakeld'}"
+                    aria-label="{stop.name} {stop.pitch || ''} — {stop.drawn ? $t('stops.drawn') : $t('stops.not_drawn')}"
                     aria-pressed={stop.drawn}
                   >
                     <span class="stop-name" style="{stopNameStyle(name)}">{name}</span>
@@ -3630,10 +3670,10 @@
                     class:has-midi={tremDivIdx >= 0 && tremLfoMidiBindings[ACTION_TREM_LFO_BASE + tremDivIdx] > 0}
                     on:click={() => setTremActive(division, tremActive[division.name] !== true)}
                     use:midiLearn={{ onTrigger: () => { if (tremDivIdx >= 0) learnTremulantLfo(tremDivIdx); } }}
-                    aria-label="Tremulant {division.name} — {tremActive[division.name] === true ? 'aan' : 'uit'}"
+                    aria-label="{$t('stops.tremulant')} {division.name} — {tremActive[division.name] === true ? $t('stops.drawn') : $t('stops.not_drawn')}"
                     aria-pressed={tremActive[division.name] === true}
                   >
-                    <span class="stop-name">Tremulant</span>
+                    <span class="stop-name">{$t('stops.tremulant')}</span>
                   </button>
                 {/if}
                 <!-- Koppelknoppen (alleen zichtbare) -->
@@ -3646,7 +3686,7 @@
                       on:click={() => dispatch('toggleCoupler', coupler.id)}
                       use:midiLearn={{ onTrigger: () => showCouplerContextMenuAt(coupler.midi_action_code) }}
                       title={coupler.name.replace(/\n/g, ' ')}
-                      aria-label="{coupler.name.replace(/\n/g, ' ')} — {coupler.active ? 'ingeschakeld' : 'uitgeschakeld'}"
+                      aria-label="{coupler.name.replace(/\n/g, ' ')} — {coupler.active ? $t('stops.drawn') : $t('stops.not_drawn')}"
                       aria-pressed={coupler.active}
                     >
                       {#each coupler.name.split('\n') as line}
@@ -3702,7 +3742,7 @@
               <h3 class="settings-block-title">{$t('settings.master')}</h3>
               <div class="slider-control">
                 <div class="slider-header">
-                  <span class="slider-label">Volume</span>
+                  <span class="slider-label">{$t('settings.master_volume')}</span>
                   <span class="slider-value">{volume} dB</span>
                 </div>
                 <input
@@ -3716,21 +3756,21 @@
               </div>
               <div class="slider-control">
                 <div class="slider-header">
-                  <span class="slider-label">Stemming</span>
+                  <span class="slider-label">{$t('settings.temperament')}</span>
                 </div>
                 <select
                   class="temperament-select"
                   bind:value={selectedTemperament}
                   on:change={onTemperamentChange}
                 >
-                  {#each temperaments as t, i}
-                    <option value={i}>{t.nameDutch || t.name}</option>
+                  {#each temperaments as tp, i}
+                    <option value={i}>{tp.names?.[$locale] ?? tp.nameDutch ?? tp.name}</option>
                   {/each}
                 </select>
               </div>
               <div class="slider-control">
                 <div class="slider-header">
-                  <span class="slider-label">Fijnstemming</span>
+                  <span class="slider-label">{$t('settings.temperament_fine_tune')}</span>
                   <span class="slider-value">{fineTune > 0 ? '+' : ''}{fineTune} cent</span>
                 </div>
                 <input
@@ -3745,7 +3785,7 @@
               <!-- Custom temperament editor -->
               <button class="btn btn-secondary btn-sm" style="margin-top: 0.3rem;"
                 on:click={() => { showCustomTemperament = !showCustomTemperament; if (showCustomTemperament) customCents = [...(temperaments[selectedTemperament]?.cents || [0,0,0,0,0,0,0,0,0,0,0,0])]; }}>
-                {showCustomTemperament ? 'Sluiten' : 'Eigen stemming...'}
+                {showCustomTemperament ? $t('settings.temperament_custom_close') : $t('tuning.custom_open')}
               </button>
               {#if showCustomTemperament}
                 <div class="custom-temperament-grid">
@@ -3761,7 +3801,7 @@
                     </div>
                   {/each}
                   <button class="btn btn-primary btn-sm" style="margin-top: 0.3rem; width: 100%;" on:click={saveCustomTemperament}>
-                    Opslaan als preset
+                    {$t('tuning.save_as_preset')}
                   </button>
                 </div>
               {/if}
@@ -3772,14 +3812,14 @@
               <h3 class="settings-block-title">{$t('settings.reverb')}</h3>
               <!-- Type selector -->
               <div class="reverb-type-selector">
-                <button class="btn btn-sm" class:btn-active={reverbType === 'convolution'} on:click={() => switchReverbType('convolution')}>Convolutie (IR)</button>
-                <button class="btn btn-sm" class:btn-active={reverbType === 'algorithmic'} on:click={() => switchReverbType('algorithmic')}>Algoritmisch</button>
+                <button class="btn btn-sm" class:btn-active={reverbType === 'convolution'} on:click={() => switchReverbType('convolution')}>{$t('settings.reverb_type_convolution')}</button>
+                <button class="btn btn-sm" class:btn-active={reverbType === 'algorithmic'} on:click={() => switchReverbType('algorithmic')}>{$t('settings.reverb_type_algorithmic')}</button>
               </div>
 
               <!-- Mix slider (shared) -->
               <div class="slider-control">
                 <div class="slider-header">
-                  <span class="slider-label">Mix</span>
+                  <span class="slider-label">{$t('settings.reverb_mix')}</span>
                   <span class="slider-value">{reverb}%</span>
                 </div>
                 <input type="range" min="0" max="100" step="1"
@@ -3791,7 +3831,7 @@
               {#if reverbType === 'convolution'}
                 <div class="reverb-ir-control">
                   <button class="midi-learn-btn" on:click={loadReverbIR}>
-                    {reverbIrLoaded ? 'Wijzig IR' : 'Laad Impuls Response'}
+                    {reverbIrLoaded ? $t('settings.reverb_ir_change') : $t('settings.reverb_ir_load')}
                   </button>
                   {#if reverbIrLoaded}
                     <span class="reverb-ir-name" title={reverbIrName}>{reverbIrName}</span>
@@ -3801,13 +3841,13 @@
                 <!-- Preset selector -->
                 <div class="slider-control" style="margin-bottom: 0.5rem;">
                   <div class="slider-header">
-                    <span class="slider-label">Preset</span>
+                    <span class="slider-label">{$t('reverb.preset')}</span>
                   </div>
                   <select class="reverb-preset-select" bind:value={reverbPreset} on:change={() => applyReverbPreset(reverbPreset)}>
                     {#each reverbPresets as p, i}
                       <option value={i}>{p.name}</option>
                     {/each}
-                    <option value={-1}>Eigen (per orgel)</option>
+                    <option value={-1}>{$t('reverb.custom_per_organ')}</option>
                   </select>
                 </div>
                 {#if reverbPreset === -1}
@@ -3823,7 +3863,7 @@
                       <span class="swell-config-value">{reverbRt60.toFixed(1)}s</span>
                     </div>
                     <div class="swell-config-row">
-                      <span class="swell-config-label">Pre-delay</span>
+                      <span class="swell-config-label">{$t('settings.reverb_pre_delay')}</span>
                       <input type="range" min="0" max="150" step="5"
                         bind:value={reverbPreDelay}
                         on:input={() => updateAlgorithmicReverb()}
@@ -3831,7 +3871,7 @@
                       <span class="swell-config-value">{reverbPreDelay}ms</span>
                     </div>
                     <div class="swell-config-row">
-                      <span class="swell-config-label">Demping</span>
+                      <span class="swell-config-label">{$t('settings.reverb_damping')}</span>
                       <input type="range" min="0" max="95" step="5"
                         bind:value={reverbDamping}
                         on:input={() => updateAlgorithmicReverb()}
@@ -3839,7 +3879,7 @@
                       <span class="swell-config-value">{reverbDamping}%</span>
                     </div>
                     <div class="swell-config-row">
-                      <span class="swell-config-label">Ruimte</span>
+                      <span class="swell-config-label">{$t('settings.reverb_room_size')}</span>
                       <input type="range" min="30" max="300" step="10"
                         bind:value={reverbRoomSize}
                         on:input={() => updateAlgorithmicReverb()}
@@ -3849,8 +3889,7 @@
                   </div>
                 {:else}
                   <p style="margin: 0.2rem 0 0; font-size: 0.68rem; color: var(--text-muted); line-height: 1.35;">
-                    Vaste ruimteklank. Kies "Eigen (per orgel)" om RT60, pre-delay,
-                    demping en ruimte zelf in te stellen — die instelling wordt bij dit orgel bewaard.
+                    {$t('reverb.fixed_room_hint')}
                   </p>
                 {/if}
               {/if}
@@ -3862,20 +3901,20 @@
               <div style="display:flex; align-items:center; gap:0.5rem;">
                 <label class="swell-toggle">
                   <input type="checkbox" bind:checked={eqEnabled} on:change={updateEq} />
-                  <span class="swell-toggle-label">Ingeschakeld</span>
+                  <span class="swell-toggle-label">{$t('settings.eq_enabled')}</span>
                 </label>
                 <button
                   class="btn btn-ghost btn-sm"
                   class:learning={globalLearningAction === ACTION_EQ_ENABLE}
                   on:click={() => learnGlobalAction(ACTION_EQ_ENABLE)}
                   disabled={globalLearningAction !== null && globalLearningAction !== ACTION_EQ_ENABLE}
-                  title="MIDI inleren voor EQ aan/uit ({globalMidiBindings[ACTION_EQ_ENABLE] || 0}/4)"
+                  title={$t('eq.learn_enable_title').replace('{n}', globalMidiBindings[ACTION_EQ_ENABLE] || 0)}
                   style="font-size:0.7rem; padding:0.2rem 0.5rem; border:1px solid {globalMidiBindings[ACTION_EQ_ENABLE] > 0 ? 'var(--midi-indicator)' : 'var(--accent-soft-2)'};"
                 >
                   {#if globalLearningAction === ACTION_EQ_ENABLE}
-                    <span class="learning-indicator"></span>Wacht...
+                    <span class="learning-indicator"></span>{$t('midi.learning_wait')}
                   {:else}
-                    MIDI {globalMidiBindings[ACTION_EQ_ENABLE] || 0}/4
+                    {$t('midi.learn_short').replace('{count}', globalMidiBindings[ACTION_EQ_ENABLE] || 0).replace('{max}', 4)}
                   {/if}
                 </button>
               </div>
@@ -3884,13 +3923,13 @@
                   {#each eqBands as band, bi (bi)}
                     <div style="border:1px solid var(--accent-soft-2); border-radius:var(--radius-sm); padding:0.4rem 0.5rem; opacity:{band.enabled ? 1 : 0.55};">
                       <div style="display:flex; align-items:center; gap:0.45rem; flex-wrap:wrap; margin-bottom:0.35rem;">
-                        <label class="swell-toggle" style="margin:0;" title="Band aan/uit">
+                        <label class="swell-toggle" style="margin:0;" title={$t('eq.band_toggle_title')}>
                           <input type="checkbox" bind:checked={band.enabled} on:change={onEqBandChange} />
-                          <span class="swell-toggle-label">Band {bi + 1}</span>
+                          <span class="swell-toggle-label">{$t('eq.band_n').replace('{n}', bi + 1)}</span>
                         </label>
                         <select
                           style="font-size:0.75rem; padding:0.15rem 0.3rem; background:var(--bg-elevated); border:1px solid var(--accent-soft-2); border-radius:var(--radius-sm); color:var(--text);"
-                          bind:value={band.band_type} on:change={onEqBandChange} title="Filtertype"
+                          bind:value={band.band_type} on:change={onEqBandChange} title={$t('eq.filter_type')}
                         >
                           {#each eqBandTypes as t}
                             <option value={t.value}>{t.label}</option>
@@ -3900,23 +3939,23 @@
                           style="font-size:0.75rem; padding:0.15rem 0.3rem; background:var(--bg-elevated); border:1px solid var(--accent-soft-2); border-radius:var(--radius-sm); color:var(--text);"
                           value={band.channel === null || band.channel === undefined ? 'all' : String(band.channel)}
                           on:change={(e) => { band.channel = e.target.value === 'all' ? null : parseInt(e.target.value, 10); onEqBandChange(); }}
-                          title="Doelkanaal (Alle = hele mix)"
+                          title={$t('settings.eq_channel_hint')}
                         >
-                          <option value="all">Alle kanalen</option>
+                          <option value="all">{$t('settings.eq_all_channels')}</option>
                           {#each Array(Math.max(2, audioChannelCount)) as _, ch}
-                            <option value={String(ch)}>Kanaal {ch + 1}</option>
+                            <option value={String(ch)}>{$t('settings.channel_n').replace('{n}', ch + 1)}</option>
                           {/each}
                         </select>
                         <button
                           class="btn btn-ghost btn-sm"
                           style="margin-left:auto; font-size:0.75rem; padding:0.1rem 0.45rem;"
                           on:click={() => removeEqBand(bi)}
-                          title="Band verwijderen"
+                          title={$t('eq.band_remove')}
                         >✕</button>
                       </div>
                       <div class="swell-config-sliders">
                         <div class="swell-config-row">
-                          <span class="swell-config-label">Frequentie</span>
+                          <span class="swell-config-label">{$t('eq.frequency')}</span>
                           <input type="range" min="0" max="300" step="1"
                             value={freqToSlider(band.freq)}
                             on:input={(e) => { band.freq = sliderToFreq(parseInt(e.target.value, 10)); onEqBandChange(); }}
@@ -3930,14 +3969,14 @@
                         </div>
                         {#if band.band_type === 'peak' || band.band_type === 'lowshelf' || band.band_type === 'highshelf'}
                           <div class="swell-config-row">
-                            <span class="swell-config-label">Gain</span>
+                            <span class="swell-config-label">{$t('eq.gain')}</span>
                             <input type="range" min="-24" max="24" step="0.5" bind:value={band.gain_db} on:input={onEqBandChange} />
                             <span class="swell-config-value">{band.gain_db > 0 ? '+' : ''}{Number(band.gain_db).toFixed(1)} dB</span>
                           </div>
                         {/if}
                         {#if band.band_type !== 'lowshelf' && band.band_type !== 'highshelf'}
                           <div class="swell-config-row">
-                            <span class="swell-config-label">Bandbreedte</span>
+                            <span class="swell-config-label">{$t('eq.bandwidth')}</span>
                             <input type="range" min="0.1" max="4" step="0.05" bind:value={band.bandwidth} on:input={onEqBandChange} />
                             <span class="swell-config-value">{Number(band.bandwidth).toFixed(2)} oct</span>
                           </div>
@@ -3946,9 +3985,9 @@
                     </div>
                   {/each}
                   <div style="display:flex; gap:0.4rem;">
-                    <button class="btn btn-secondary btn-sm" on:click={addEqBand}>+ Band toevoegen</button>
+                    <button class="btn btn-secondary btn-sm" on:click={addEqBand}>{$t('eq.band_add')}</button>
                     <span style="font-size:0.7rem; color:var(--text-muted); align-self:center;">
-                      EQ werkt per uitgangskanaal, na de galm — kies "Alle kanalen" of een specifiek kanaal per band.
+                      {$t('eq.channel_note')}
                     </span>
                   </div>
                 </div>
@@ -3959,7 +3998,7 @@
             <div class="settings-block">
               <h3 class="settings-block-title">{$t('settings.wind_system')}</h3>
               <div class="swell-config-row" style="margin-bottom: 0.6rem;">
-                <span class="swell-config-label" title="Aantal windvoorzieningen / windladen. Default = elke divisie eigen.">{$t('settings.wind_groups_count')}</span>
+                <span class="swell-config-label" title={$t('wind.groups_count_title')}>{$t('settings.wind_groups_count')}</span>
                 <select
                   style="flex:1; font-size:0.85rem; padding:0.3rem 0.5rem; background:var(--bg-elevated); border:1px solid var(--accent-soft-2); border-radius:var(--radius-sm); color:var(--text);"
                   value={numWindGroups}
@@ -4031,27 +4070,27 @@
                   <input type="checkbox" bind:checked={crescendoEnabled}
                     on:change={() => saveCrescendo()}
                   />
-                  <span class="swell-toggle-label">Ingeschakeld</span>
+                  <span class="swell-toggle-label">{$t('settings.crescendo_enabled')}</span>
                 </label>
                 <button
                   class="btn btn-ghost btn-sm"
                   class:learning={globalLearningAction === ACTION_CRESCENDO_ENABLE}
                   on:click={() => learnGlobalAction(ACTION_CRESCENDO_ENABLE)}
                   disabled={globalLearningAction !== null && globalLearningAction !== ACTION_CRESCENDO_ENABLE}
-                  title="MIDI inleren voor Crescendo aan/uit ({globalMidiBindings[ACTION_CRESCENDO_ENABLE] || 0}/4)"
+                  title={$t('crescendo.learn_enable_title').replace('{n}', globalMidiBindings[ACTION_CRESCENDO_ENABLE] || 0)}
                   style="font-size:0.7rem; padding:0.2rem 0.5rem; border:1px solid {globalMidiBindings[ACTION_CRESCENDO_ENABLE] > 0 ? 'var(--midi-indicator)' : 'var(--accent-soft-2)'};"
                 >
                   {#if globalLearningAction === ACTION_CRESCENDO_ENABLE}
-                    <span class="learning-indicator"></span>Wacht...
+                    <span class="learning-indicator"></span>{$t('midi.learning_wait')}
                   {:else}
-                    MIDI {globalMidiBindings[ACTION_CRESCENDO_ENABLE] || 0}/4
+                    {$t('midi.learn_short').replace('{count}', globalMidiBindings[ACTION_CRESCENDO_ENABLE] || 0).replace('{max}', 4)}
                   {/if}
                 </button>
               </div>
               {#if crescendoEnabled}
                 <div style="margin-top: 0.5rem;">
                   <div class="swell-config-row" style="margin-bottom: 0.5rem;">
-                    <span class="swell-config-label">Stappen</span>
+                    <span class="swell-config-label">{$t('settings.crescendo_steps')}</span>
                     <select style="flex:1; font-size: 0.8rem;" bind:value={crescendoNumStages} on:change={() => { crescendoStages = ensureCrescStages(); saveCrescendo(); }}>
                       {#each [8, 12, 15, 20, 24, 32] as n}
                         <option value={n}>{n}</option>
@@ -4059,11 +4098,11 @@
                     </select>
                   </div>
                   <div style="display:flex; gap:0.4rem; margin-bottom: 0.5rem;">
-                    <button class="btn btn-secondary btn-sm" style="flex:1;" on:click={autoFillCrescendo} title="Verdeel alle registers automatisch over de stappen (oplopend)">
-                      Auto-fill
+                    <button class="btn btn-secondary btn-sm" style="flex:1;" on:click={autoFillCrescendo} title={$t('crescendo.autofill_title')}>
+                      {$t('crescendo.autofill')}
                     </button>
-                    <button class="btn btn-ghost btn-sm" on:click={clearCrescendo} title="Alle stappen leegmaken">
-                      Wissen
+                    <button class="btn btn-ghost btn-sm" on:click={clearCrescendo} title={$t('crescendo.clear_title')}>
+                      {$t('settings.crescendo_clear')}
                     </button>
                   </div>
                   <!-- Stage indicator -->
@@ -4073,14 +4112,14 @@
                         class="crescendo-step"
                         class:active={i < crescendoStage}
                         on:click={() => setCrescendoStage(i + 1)}
-                        title="Stap {i + 1}: {crescendoStages[i] ? crescendoStages[i].length : 0} registers"
+                        title={$t('crescendo.step_title').replace('{n}', i + 1).replace('{count}', crescendoStages[i] ? crescendoStages[i].length : 0)}
                       ></div>
                     {/each}
                   </div>
                   <div style="text-align: center; font-size: 0.7rem; color: var(--text-secondary); margin-top: 0.3rem;">
-                    Stap {crescendoStage} / {crescendoNumStages}
+                    {$t('settings.crescendo_stage')} {crescendoStage} / {crescendoNumStages}
                     {#if crescendoStages[crescendoStage - 1]}
-                      — {crescendoStages[crescendoStage - 1].length} registers
+                      — {$t('library.stops_count').replace('{count}', crescendoStages[crescendoStage - 1].length)}
                     {/if}
                   </div>
 
@@ -4088,19 +4127,19 @@
                        Klik een cel = aan/uit. Shift+klik = cumulatief vanaf die stap t/m het einde. -->
                   {#if displayOrgan}
                     <div class="cresc-editor-hint">
-                      Klik een vakje = register aan/uit in die stap · <strong>Shift+klik</strong> = cumulatief vanaf die stap
+                      {$t('crescendo.editor_hint_click')} · <strong>{$t('crescendo.shift_click')}</strong> {$t('crescendo.editor_hint_shift')}
                     </div>
                     <div class="cresc-table-wrap">
                       <table class="cresc-table">
                         <thead>
                           <tr>
-                            <th class="cresc-corner">Register \ Stap</th>
+                            <th class="cresc-corner">{$t('crescendo.corner_header')}</th>
                             {#each Array(crescendoNumStages) as _, s}
                               <th
                                 class="cresc-step-h"
                                 class:active={s + 1 === crescendoStage}
                                 on:click={() => setCrescendoStage(s + 1)}
-                                title="Stap {s + 1} voorbeluisteren"
+                                title={$t('crescendo.step_preview_title').replace('{n}', s + 1)}
                               >{s + 1}</th>
                             {/each}
                           </tr>
@@ -4108,7 +4147,7 @@
                         <tbody>
                           {#if (organInfo?.couplers || []).length}
                             <tr class="cresc-div-row">
-                              <td class="cresc-div-name" colspan={crescendoNumStages + 1}>Koppels</td>
+                              <td class="cresc-div-name" colspan={crescendoNumStages + 1}>{$t('couplers.title')}</td>
                             </tr>
                             {#each organInfo.couplers as koppel}
                               <tr>
@@ -4120,8 +4159,8 @@
                                       class="cresc-cell-btn"
                                       class:on={(crescendoStages[s] || []).includes(koppel.id)}
                                       on:click={(e) => { if (e.shiftKey) fillStopFrom(s, koppel.id); else toggleCrescCell(s, koppel.id); }}
-                                      title="Stap {s + 1} · {koppel.name} — klik = aan/uit, Shift+klik = cumulatief"
-                                      aria-label="Stap {s + 1} {koppel.name}"
+                                      title={$t('crescendo.cell_title').replace('{n}', s + 1).replace('{name}', koppel.name)}
+                                      aria-label={$t('crescendo.cell_label').replace('{n}', s + 1).replace('{name}', koppel.name)}
                                     >{(crescendoStages[s] || []).includes(koppel.id) ? '●' : ''}</button>
                                   </td>
                                 {/each}
@@ -4144,8 +4183,8 @@
                                       class="cresc-cell-btn"
                                       class:on={(crescendoStages[s] || []).includes(stop.id)}
                                       on:click={(e) => { if (e.shiftKey) fillStopFrom(s, stop.id); else toggleCrescCell(s, stop.id); }}
-                                      title="Stap {s + 1} · {stop.name} — klik = aan/uit, Shift+klik = cumulatief"
-                                      aria-label="Stap {s + 1} {stop.name}"
+                                      title={$t('crescendo.cell_title').replace('{n}', s + 1).replace('{name}', stop.name)}
+                                      aria-label={$t('crescendo.cell_label').replace('{n}', s + 1).replace('{name}', stop.name)}
                                     >{(crescendoStages[s] || []).includes(stop.id) ? '●' : ''}</button>
                                   </td>
                                 {/each}
@@ -4163,22 +4202,22 @@
                     on:click={learnCrescendoPedal}
                   >
                     {#if crescendoLearning}
-                      <span class="learning-indicator"></span> Wacht op pedaal...
+                      <span class="learning-indicator"></span> {$t('settings.crescendo_learning')}
                     {:else if crescendoBinding}
-                      Pedaal: CC{crescendoBinding.cc}
+                      {$t('crescendo.pedal_cc').replace('{cc}', crescendoBinding.cc)}
                     {:else}
-                      Leer pedaal
+                      {$t('settings.crescendo_learn')}
                     {/if}
                   </button>
                   <!-- Handmatig: kanaal + CC direct invullen (alternatief voor inleren) -->
-                  <div class="swell-config-row" style="margin-top:0.3rem;" title="Handmatig: MIDI-kanaal en CC-nummer van het crescendopedaal (alternatief voor inleren)">
-                    <span class="swell-config-label">Handmatig</span>
+                  <div class="swell-config-row" style="margin-top:0.3rem;" title={$t('crescendo.manual_title')}>
+                    <span class="swell-config-label">{$t('crescendo.manual')}</span>
                     <select
                       value={crescendoBinding ? crescendoBinding.channel + 1 : ''}
                       on:change={(e) => { if (e.target.value !== '') setCrescendoManualUI(parseInt(e.target.value), crescendoBinding?.cc ?? 7); }}
-                      title="MIDI-kanaal (1-16)"
+                      title={$t('crescendo.midi_channel_title')}
                     >
-                      <option value="" disabled>kan.</option>
+                      <option value="" disabled>{$t('crescendo.channel_abbr')}</option>
                       {#each Array(16).fill().map((_, i) => i + 1) as ch}
                         <option value={ch}>{ch}</option>
                       {/each}
@@ -4187,38 +4226,38 @@
                       value={crescendoBinding?.cc ?? ''}
                       placeholder="CC"
                       on:change={(e) => setCrescendoManualUI((crescendoBinding?.channel ?? 0) + 1, parseInt(e.target.value) || 0)}
-                      title="CC-nummer (0-127)"
+                      title={$t('crescendo.cc_number_title')}
                     />
                     {#if crescendoBinding}
-                      <button class="btn btn-ghost btn-sm swell-clear-btn" on:click={clearCrescendoBindingUI} title="Crescendo-pedaalkoppeling wissen">&#x2715;</button>
+                      <button class="btn btn-ghost btn-sm swell-clear-btn" on:click={clearCrescendoBindingUI} title={$t('crescendo.clear_binding_title')}>&#x2715;</button>
                     {/if}
                   </div>
                   {#if crescendoBinding}
-                    <label class="swell-toggle" style="margin-top: 0.4rem; width: 100%;" title="Spiegelbeeld: keert de pedaalrichting om (handig als de pedaal de andere kant op werkt)">
+                    <label class="swell-toggle" style="margin-top: 0.4rem; width: 100%;" title={$t('crescendo.invert_title')}>
                       <input
                         type="checkbox"
                         checked={crescendoBinding.invert === true}
                         on:change={(e) => toggleCrescendoInvert(e.target.checked)}
                       />
-                      <span>Spiegelbeeld (pedaal omkeren)</span>
+                      <span>{$t('crescendo.invert')}</span>
                     </label>
-                    <div class="swell-config-row" style="margin-top:0.3rem;" title="Handmatig CC-bereik van het crescendo-pedaal (0–127). Min = af, Max = vol.">
-                      <span class="swell-config-label">Pedaal-bereik</span>
+                    <div class="swell-config-row" style="margin-top:0.3rem;" title={$t('crescendo.range_title')}>
+                      <span class="swell-config-label">{$t('crescendo.range')}</span>
                       <input type="number" min="0" max="127" class="pedal-range-input"
                         value={crescendoBinding.min}
                         on:change={(e) => setCrescendoRangeUI(parseInt(e.target.value), crescendoBinding.max)}
-                        title="Min (af)"
+                        title={$t('crescendo.range_min')}
                       />
                       <span style="color:var(--text-muted);">–</span>
                       <input type="number" min="0" max="127" class="pedal-range-input"
                         value={crescendoBinding.max}
                         on:change={(e) => setCrescendoRangeUI(crescendoBinding.min, parseInt(e.target.value))}
-                        title="Max (vol)"
+                        title={$t('crescendo.range_max')}
                       />
                     </div>
                     <!-- Live volgbalk: toont de actuele crescendo-trap terwijl je het pedaal beweegt. -->
-                    <div class="swell-config-row" style="margin-top:0.3rem;" title="Live crescendo-stand (volgt het pedaal)">
-                      <span class="swell-config-label">Live</span>
+                    <div class="swell-config-row" style="margin-top:0.3rem;" title={$t('crescendo.live_title')}>
+                      <span class="swell-config-label">{$t('crescendo.live')}</span>
                       <div class="follow-bar">
                         <div class="follow-bar-fill" style="width: {crescLiveTotal > 0 ? Math.round((crescLiveStage / crescLiveTotal) * 100) : 0}%"></div>
                       </div>
@@ -4238,9 +4277,9 @@
                     <div class="sort-division-header">
                       <span class="sort-division-name">{division.display_name || division.name}</span>
                       <div class="sort-presets">
-                        <button class="btn btn-ghost btn-xs" on:click={() => sortByPitch(division.name, (organInfo || demoOrgan).divisions.find(d => d.name === division.name)?.stops || [])}>Voetmaat</button>
-                        <button class="btn btn-ghost btn-xs" on:click={() => sortByFamily(division.name, (organInfo || demoOrgan).divisions.find(d => d.name === division.name)?.stops || [])}>Familie</button>
-                        <button class="btn btn-ghost btn-xs" on:click={() => resetOrder(division.name)}>Reset</button>
+                        <button class="btn btn-ghost btn-xs" on:click={() => sortByPitch(division.name, (organInfo || demoOrgan).divisions.find(d => d.name === division.name)?.stops || [])}>{$t('sorting.by_pitch')}</button>
+                        <button class="btn btn-ghost btn-xs" on:click={() => sortByFamily(division.name, (organInfo || demoOrgan).divisions.find(d => d.name === division.name)?.stops || [])}>{$t('sorting.by_family')}</button>
+                        <button class="btn btn-ghost btn-xs" on:click={() => resetOrder(division.name)}>{$t('actions.reset')}</button>
                       </div>
                     </div>
                     <div class="sort-list">
@@ -4257,9 +4296,9 @@
                           <span class="sort-color" style="background: {stop.color || '#999'}"></span>
                           <span class="sort-name">{stop.name}</span>
                           <span class="sort-pitch">{stop.pitch || ''}</span>
-                          <button class="btn btn-ghost btn-xs" title="Omhoog" disabled={idx === 0}
+                          <button class="btn btn-ghost btn-xs" title={$t('sorting.move_up')} disabled={idx === 0}
                             on:click|stopPropagation={() => moveStop(division.name, idx, -1)}>▲</button>
-                          <button class="btn btn-ghost btn-xs" title="Omlaag" disabled={idx === division.stops.length - 1}
+                          <button class="btn btn-ghost btn-xs" title={$t('sorting.move_down')} disabled={idx === division.stops.length - 1}
                             on:click|stopPropagation={() => moveStop(division.name, idx, 1)}>▼</button>
                         </div>
                       {/each}
@@ -4274,14 +4313,14 @@
               <h3 class="settings-block-title">{$t('settings.export_import')}</h3>
               <div style="display: flex; flex-direction: column; gap: 0.4rem;">
                 <button class="btn btn-secondary btn-sm" on:click={exportSettings}>
-                  Exporteer instellingen...
+                  {$t('settings.export_settings')}
                 </button>
                 <button class="btn btn-secondary btn-sm" on:click={importSettings}>
-                  Importeer instellingen...
+                  {$t('settings.import_settings')}
                 </button>
               </div>
               <p style="font-size: 0.7rem; color: var(--text-secondary); margin-top: 0.4rem;">
-                Instellingen worden automatisch opgeslagen in de orgelmap en in de app.
+                {$t('settings.autosave_hint')}
               </p>
             </div>
           </div>
@@ -4291,31 +4330,31 @@
             <div class="midi-mapping-container">
               <div class="midi-mapping-header">
                 <h3>{$t('settings.midi_mapping_title')}</h3>
-                <p>Druk eerst de <strong>laagste toets</strong>, dan de <strong>hoogste toets</strong>.</p>
+                <p>{$t('learn.hint_press_first')} <strong>{$t('learn.hint_lowest_key')}</strong>{$t('learn.hint_then')} <strong>{$t('learn.hint_highest_key')}</strong>.</p>
               </div>
 
               {#if audioChannelCount >= 2}
-                <div class="ccis-global" title="Globale C/Cis-lade spreiding — werkt per klavier waar je hieronder de spreiding aanzet.">
+                <div class="ccis-global" title={$t('ccis.global_title')}>
                   <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.4rem;">
-                    <strong style="color: var(--text);">C/Cis-lade spreiding (globaal)</strong>
-                    <span style="font-size:0.72rem; color:var(--text-muted);">— C (en D, E, …) naar de ene kant, Cis (en Dis, F, …) naar de andere</span>
+                    <strong style="color: var(--text);">{$t('ccis.global_label')}</strong>
+                    <span style="font-size:0.72rem; color:var(--text-muted);">{$t('ccis.global_desc')}</span>
                   </div>
                   <div class="swell-config-sliders">
-                    <div class="swell-config-row" title="Hoe sterk de twee laden van elkaar gescheiden klinken (0% = mono, 95% = bijna volledig L/R)">
-                      <span class="swell-config-label">Sterkte</span>
+                    <div class="swell-config-row" title={$t('ccis.strength_title')}>
+                      <span class="swell-config-label">{$t('ccis.strength')}</span>
                       <input type="range" min="0" max="100" step="5" bind:value={ccisStrength} on:change={applyCcisSpread} />
                       <span class="swell-config-value">{ccisStrength}%</span>
                     </div>
-                    <div class="swell-config-row" title="Hoe snel de spreiding in elkaar overloopt naar boven toe (0% = bovenin nog even sterk, 100% = bovenin volledig mono — zoals een echt orgel)">
-                      <span class="swell-config-label">Afval</span>
+                    <div class="swell-config-row" title={$t('ccis.falloff_title')}>
+                      <span class="swell-config-label">{$t('ccis.falloff')}</span>
                       <input type="range" min="0" max="100" step="5" bind:value={ccisFalloff} on:change={applyCcisSpread} />
                       <span class="swell-config-value">{ccisFalloff}%</span>
                     </div>
-                    <div class="swell-config-row" title="Wissel welke kant C en welke kant Cis is">
-                      <span class="swell-config-label">Kanten</span>
+                    <div class="swell-config-row" title={$t('ccis.swap_title')}>
+                      <span class="swell-config-label">{$t('ccis.sides')}</span>
                       <label class="swell-toggle" style="flex:1;">
                         <input type="checkbox" bind:checked={ccisSwap} on:change={applyCcisSpread} />
-                        <span>omdraaien (Cis links, C rechts)</span>
+                        <span>{$t('ccis.swap_label')}</span>
                       </label>
                     </div>
                   </div>
@@ -4334,7 +4373,7 @@
 
                   <div class="midi-mapping-controls">
                     <div class="midi-channel-select">
-                      <label for="channel-{division.name}">Kanaal:</label>
+                      <label for="channel-{division.name}">{$t('settings.midi_channel')}:</label>
                       <!-- Weergave is 1-16 (zoals op MIDI-apparatuur); intern/op de
                            kabel is het kanaal 0-15. De oude versie stuurde de
                            1-16-waarde ongecorrigeerd door, waardoor handmatig
@@ -4346,7 +4385,7 @@
                         value={(m?.channel != null) ? m.channel + 1 : ''}
                         on:change={(e) => setMidiChannel(division.name, e.target.value === '' ? null : parseInt(e.target.value) - 1)}
                       >
-                        <option value="">Alle</option>
+                        <option value="">{$t('settings.midi_all_channels')}</option>
                         {#each Array(16).fill().map((_, i) => i + 1) as ch}
                           <option value={ch}>{ch}</option>
                         {/each}
@@ -4362,19 +4401,19 @@
                       {#if learningDivision === division.name}
                         <span class="learning-indicator"></span>
                         {#if learningStep === 1}
-                          Laagste toets...
+                          {$t('learn.lowest_key_wait')}
                         {:else if learningStep === 2}
-                          Hoogste toets...
+                          {$t('learn.highest_key_wait')}
                         {:else}
-                          Leren...
+                          {$t('learn.learning')}
                         {/if}
                       {:else}
-                        Leer
+                        {$t('learn.learn')}
                       {/if}
                     </button>
 
                     <div class="midi-transpose">
-                      <label for="transpose-{division.name}">Transp:</label>
+                      <label for="transpose-{division.name}">{$t('settings.midi_transpose_abbr')}:</label>
                       <input
                         id="transpose-{division.name}"
                         type="number"
@@ -4387,30 +4426,30 @@
 
                     <!-- Handmatig toetsenbereik (alternatief voor 'Leer'): laagste
                          en hoogste MIDI-noot van dit klavier, direct in te typen. -->
-                    <div class="midi-transpose" title="Handmatig toetsenbereik: laagste en hoogste MIDI-noot (alternatief voor 'Leer'). Leeg = geen begrenzing.">
-                      <label for="range-lo-{division.name}">Bereik:</label>
+                    <div class="midi-transpose" title={$t('settings.midi_key_range_title')}>
+                      <label for="range-lo-{division.name}">{$t('settings.midi_key_range')}:</label>
                       <input
                         id="range-lo-{division.name}"
-                        type="number" min="0" max="127" placeholder="laag"
+                        type="number" min="0" max="127" placeholder={$t('settings.midi_key_range_low')}
                         value={m?.first_midi_note ?? ''}
                         on:change={(e) => setKeyRangeUI(division.name, e.target.value === '' ? null : parseInt(e.target.value), m?.last_midi_note ?? null)}
-                        title="Laagste MIDI-noot {m?.first_midi_note != null ? `(${midiToNoteName(m.first_midi_note)})` : ''}"
+                        title="{$t('settings.midi_lowest_note_title')} {m?.first_midi_note != null ? `(${midiToNoteName(m.first_midi_note)})` : ''}"
                       />
                       <input
-                        type="number" min="0" max="127" placeholder="hoog"
+                        type="number" min="0" max="127" placeholder={$t('settings.midi_key_range_high')}
                         value={m?.last_midi_note ?? ''}
                         on:change={(e) => setKeyRangeUI(division.name, m?.first_midi_note ?? null, e.target.value === '' ? null : parseInt(e.target.value))}
-                        title="Hoogste MIDI-noot {m?.last_midi_note != null ? `(${midiToNoteName(m.last_midi_note)})` : ''}"
+                        title="{$t('settings.midi_highest_note_title')} {m?.last_midi_note != null ? `(${midiToNoteName(m.last_midi_note)})` : ''}"
                       />
                     </div>
 
-                    <label class="swell-toggle" title="Zwelkast aan/uit">
+                    <label class="swell-toggle" title={$t('swell.toggle_title')}>
                       <input
                         type="checkbox"
                         checked={isSwellEnabled(division.name)}
                         on:change={() => toggleSwellEnabled(division.name)}
                       />
-                      <span class="swell-toggle-label">Zwelkast</span>
+                      <span class="swell-toggle-label">{$t('settings.swell_box')}</span>
                     </label>
                     {#if isSwellEnabled(division.name)}
                       <button
@@ -4421,22 +4460,22 @@
                       >
                         {#if learningSwellDivision === division.name}
                           <span class="learning-indicator"></span>
-                          Laagste stand...
+                          {$t('settings.midi_swell_learning')}
                         {:else if swellBindings[division.name]}
                           CC{swellBindings[division.name].cc_num}
                         {:else}
-                          Leer pedaal
+                          {$t('settings.midi_swell_learn')}
                         {/if}
                       </button>
                       <!-- Handmatig: kanaal + CC direct invullen (alternatief voor inleren) -->
-                      <div class="swell-config-row" title="Handmatig: MIDI-kanaal en CC-nummer van het zwelpedaal (alternatief voor inleren)">
-                        <span class="swell-config-label">Handmatig</span>
+                      <div class="swell-config-row" title={$t('swell.manual_title')}>
+                        <span class="swell-config-label">{$t('swell.manual')}</span>
                         <select
                           value={swellBindings[division.name] ? swellBindings[division.name].channel + 1 : ''}
                           on:change={(e) => { if (e.target.value !== '') setSwellManualUI(division.name, divIdx, parseInt(e.target.value), swellBindings[division.name]?.cc_num ?? 7); }}
-                          title="MIDI-kanaal (1-16)"
+                          title={$t('swell.midi_channel_title')}
                         >
-                          <option value="" disabled>kan.</option>
+                          <option value="" disabled>{$t('swell.channel_abbr')}</option>
                           {#each Array(16).fill().map((_, i) => i + 1) as ch}
                             <option value={ch}>{ch}</option>
                           {/each}
@@ -4445,40 +4484,40 @@
                           value={swellBindings[division.name]?.cc_num ?? ''}
                           placeholder="CC"
                           on:change={(e) => setSwellManualUI(division.name, divIdx, (swellBindings[division.name]?.channel ?? 0) + 1, parseInt(e.target.value) || 0)}
-                          title="CC-nummer (0-127)"
+                          title={$t('swell.cc_number_title')}
                         />
                       </div>
                       {#if swellBindings[division.name]}
                         <button
                           class="btn btn-ghost btn-sm swell-clear-btn"
                           on:click={() => clearSwellBinding(division.name)}
-                          title="Wis zwelpedaal binding"
+                          title={$t('swell.clear_binding_title')}
                         >&#x2715;</button>
-                        <label class="swell-toggle" title="Spiegelbeeld: keert de pedaalrichting om (handig als de pedaal de andere kant op werkt)">
+                        <label class="swell-toggle" title={$t('swell.invert_title')}>
                           <input
                             type="checkbox"
                             checked={swellBindings[division.name].invert === true}
                             on:change={(e) => toggleSwellInvert(division.name, e.target.checked)}
                           />
-                          <span>Spiegelbeeld</span>
+                          <span>{$t('swell.invert')}</span>
                         </label>
-                        <div class="swell-config-row" title="Handmatig CC-bereik van de zwelpedaal (0–127). Min = dicht, Max = open.">
-                          <span class="swell-config-label">Pedaal-bereik</span>
+                        <div class="swell-config-row" title={$t('swell.range_title')}>
+                          <span class="swell-config-label">{$t('swell.range')}</span>
                           <input type="number" min="0" max="127" class="pedal-range-input"
                             value={swellBindings[division.name].min_val}
                             on:change={(e) => setSwellRangeUI(division.name, parseInt(e.target.value), swellBindings[division.name].max_val)}
-                            title="Min (dicht)"
+                            title={$t('swell.range_min')}
                           />
                           <span style="color:var(--text-muted);">–</span>
                           <input type="number" min="0" max="127" class="pedal-range-input"
                             value={swellBindings[division.name].max_val}
                             on:change={(e) => setSwellRangeUI(division.name, swellBindings[division.name].min_val, parseInt(e.target.value))}
-                            title="Max (open)"
+                            title={$t('swell.range_max')}
                           />
                         </div>
                         <!-- Live volgbalk: toont de actuele zwelstand terwijl je het pedaal beweegt. -->
-                        <div class="swell-config-row" title="Live zwelstand (volgt het pedaal)">
-                          <span class="swell-config-label">Live</span>
+                        <div class="swell-config-row" title={$t('swell.live_title')}>
+                          <span class="swell-config-label">{$t('swell.live')}</span>
                           <div class="follow-bar">
                             <div class="follow-bar-fill" style="width: {Math.round((divisionVolumes[division.name] ?? 1.0) * 100)}%"></div>
                           </div>
@@ -4487,7 +4526,7 @@
                       {/if}
                       <div class="swell-config-sliders">
                         <div class="swell-config-row">
-                          <span class="swell-config-label">Min. volume</span>
+                          <span class="swell-config-label">{$t('swell.min_volume')}</span>
                           <input type="range" min="-30" max="-5" step="1"
                             value={getSwellMinDb(division.name)}
                             on:input={(e) => { swellMinDb[division.name] = parseInt(e.target.value); swellMinDb = swellMinDb; updateSwellConfig(division.name); }}
@@ -4495,7 +4534,7 @@
                           <span class="swell-config-value">{getSwellMinDb(division.name)} dB</span>
                         </div>
                         <div class="swell-config-row">
-                          <span class="swell-config-label">Filter dicht</span>
+                          <span class="swell-config-label">{$t('swell.filter_closed')}</span>
                           <input type="range" min="200" max="5000" step="50"
                             value={getSwellFilterCutoff(division.name)}
                             on:input={(e) => { swellFilterCutoff[division.name] = parseInt(e.target.value); swellFilterCutoff = swellFilterCutoff; updateSwellConfig(division.name); }}
@@ -4508,15 +4547,15 @@
                     <!-- Wind-groep keuze (per-groep config zit in aparte sectie boven) -->
                     <div style="display:flex; align-items:center; gap:0.6rem; margin-top:0.3rem; flex-wrap:wrap;">
                       <label style="display:flex; align-items:center; gap:0.35rem; font-size:0.78rem; color:var(--text-secondary);">
-                        <span title="Wind-groep: divisies in dezelfde groep delen één wind-reservoir">Windvoorziening</span>
+                        <span title={$t('wind.group_title')}>{$t('settings.windvoorziening')}</span>
                         <select
                           value={getWindGroup(division.name, divIdx)}
                           on:change={(e) => onWindGroupChange(division.name, e.target.value)}
                           style="padding:0.25rem 0.5rem; background:var(--bg-elevated); border:1px solid var(--accent-soft-2); border-radius:var(--radius-sm); color:var(--text); font-size:0.78rem;"
-                          title="Kies wind-groep. Hetzelfde nummer kiezen voor twee divisies = gedeeld reservoir (bv. pedaal apart, 2 manualen samen)."
+                          title={$t('wind.group_select_title')}
                         >
                           {#each Array(Math.max(1, Math.min(numWindGroups, 8))) as _, gIdx}
-                            <option value={gIdx}>Groep {gIdx + 1}</option>
+                            <option value={gIdx}>{$t('settings.wind_group')} {gIdx + 1}</option>
                           {/each}
                         </select>
                       </label>
@@ -4525,17 +4564,19 @@
                     <!-- Stereo Pan -->
                     <div class="swell-config-sliders" style="margin-top: 0.3rem;">
                       <div class="swell-config-row">
-                        <span class="swell-config-label">Pan</span>
+                        <span class="swell-config-label">{$t('settings.pan')}</span>
                         <input type="range" min="-100" max="100" step="5"
                           value={getDivisionPan(division.name)}
                           on:input={(e) => onPanChange(division.name, parseInt(e.target.value))}
                         />
-                        <span class="swell-config-value">{formatPan(getDivisionPan(division.name))}</span>
+                        <span class="swell-config-value">{formatPan(getDivisionPan(division.name), $t)}</span>
                       </div>
                       {#if audioChannelCount >= 2}
                         {@const divChannels = Array.isArray(divisionOutputChannels[division.name]) ? divisionOutputChannels[division.name] : []}
-                        <div class="swell-config-row" title="Kies vrij welke fysieke output-kanalen deze divisie gebruikt (1 t/m alle). Opeenvolgende kanalen vormen een stereo paar.">
-                          <span class="swell-config-label">Kanalen</span>
+                        {@const allOut = divChannels.length > 0 && divChannels.every(c => c >= audioChannelCount)}
+                        {@const partOut = !allOut && divChannels.some(c => c >= audioChannelCount)}
+                        <div class="swell-config-row" title={$t('settings.channels_per_division_hint').replace('{host}', audioHostActual || '?')}>
+                          <span class="swell-config-label">{$t('settings.channels_per_division')}</span>
                           <div style="display:flex; flex-wrap:wrap; gap:0.25rem; flex:1;">
                             {#each Array(audioChannelCount) as _, ch}
                               {@const isOn = divChannels.includes(ch)}
@@ -4547,11 +4588,21 @@
                           </div>
                           <span class="swell-config-value">{audioChannelCount}ch</span>
                         </div>
-                        <div class="swell-config-row" title="C/Cis-lade spreiding: even tonen klinken naar de ene kant, oneven naar de andere — zoals een echt orgel met afzonderlijke C- en Cis-laden. Voor (laagste) tonen sterk gescheiden, naar boven steeds meer ineenlopend.">
-                          <span class="swell-config-label">C/Cis</span>
+                        {#if allOut || partOut}
+                          <div class="swell-config-row">
+                            <span class="swell-config-label"></span>
+                            <span class="swell-config-value" style="color: var(--warning, #d9a441); flex:1; text-align:left;" title={$t('settings.channel_out_of_range_hint')}>
+                              {allOut
+                                ? $t('settings.channel_out_of_range')
+                                : $t('settings.channel_partly_out_of_range').replace('{list}', divChannels.filter(c => c >= audioChannelCount).map(c => c + 1).join(', '))}
+                            </span>
+                          </div>
+                        {/if}
+                        <div class="swell-config-row" title={$t('ccis.division_title')}>
+                          <span class="swell-config-label">{$t('ccis.short_label')}</span>
                           <label class="swell-toggle" style="flex:1;">
                             <input type="checkbox" checked={getDivisionCcis(division.name)} on:change={() => toggleDivisionCcis(division.name)} />
-                            <span>spreiding aan op dit klavier</span>
+                            <span>{$t('ccis.enable_on_division')}</span>
                           </label>
                         </div>
                       {/if}
@@ -4559,33 +4610,33 @@
 
                     <!-- Tremulant LFO + MIDI learn knopje -->
                     <div style="display:flex; align-items:center; gap:0.5rem; margin-top:0.3rem;">
-                      <label class="swell-toggle" title="Tremulant beschikbaar maken op dit klavier — er verschijnt dan een Tremulant-register in de orgelweergave">
+                      <label class="swell-toggle" title={$t('settings.tremulant_enable_title')}>
                         <input
                           type="checkbox"
                           checked={tremLfoEnabled[division.name] === true}
                           on:change={() => setTremEnabled(division, tremLfoEnabled[division.name] !== true)}
                         />
-                        <span class="swell-toggle-label">Tremulant (LFO)</span>
+                        <span class="swell-toggle-label">{$t('settings.tremulant_lfo')}</span>
                       </label>
                       <button
                         class="btn btn-ghost btn-sm"
                         class:learning={learningTremDivIdx === divIdx}
                         on:click={() => learnTremulantLfo(divIdx)}
                         disabled={learningTremDivIdx !== null && learningTremDivIdx !== divIdx}
-                        title="MIDI inleren voor Tremulant LFO ({tremLfoMidiBindings[ACTION_TREM_LFO_BASE + divIdx] || 0}/4)"
+                        title={$t('settings.tremulant_learn_title').replace('{n}', tremLfoMidiBindings[ACTION_TREM_LFO_BASE + divIdx] || 0)}
                         style="font-size:0.7rem; padding:0.2rem 0.5rem; border:1px solid {tremLfoMidiBindings[ACTION_TREM_LFO_BASE + divIdx] > 0 ? 'var(--midi-indicator)' : 'var(--accent-soft-2)'};"
                       >
                         {#if learningTremDivIdx === divIdx}
-                          <span class="learning-indicator"></span>Wacht...
+                          <span class="learning-indicator"></span>{$t('midi.learning_wait')}
                         {:else}
-                          MIDI {tremLfoMidiBindings[ACTION_TREM_LFO_BASE + divIdx] || 0}/4
+                          {$t('midi.learn_short').replace('{count}', tremLfoMidiBindings[ACTION_TREM_LFO_BASE + divIdx] || 0).replace('{max}', 4)}
                         {/if}
                       </button>
                     </div>
                     {#if tremLfoEnabled[division.name]}
                       <div class="swell-config-sliders">
                         <div class="swell-config-row">
-                          <span class="swell-config-label">Snelheid</span>
+                          <span class="swell-config-label">{$t('settings.tremulant_rate')}</span>
                           <input type="range" min="30" max="100" step="5"
                             value={(tremLfoRate[division.name] ?? 6.0) * 10}
                             on:input={(e) => { tremLfoRate[division.name] = parseInt(e.target.value) / 10; tremLfoRate = tremLfoRate; updateTremLfoParams(division.name); }}
@@ -4593,7 +4644,7 @@
                           <span class="swell-config-value">{(tremLfoRate[division.name] ?? 6.0).toFixed(1)} Hz</span>
                         </div>
                         <div class="swell-config-row">
-                          <span class="swell-config-label">Volume</span>
+                          <span class="swell-config-label">{$t('settings.tremulant_amp_depth')}</span>
                           <input type="range" min="1" max="25" step="1"
                             value={tremLfoAmpDepth[division.name] ?? 10}
                             on:input={(e) => { tremLfoAmpDepth[division.name] = parseInt(e.target.value); tremLfoAmpDepth = tremLfoAmpDepth; updateTremLfoParams(division.name); }}
@@ -4601,7 +4652,7 @@
                           <span class="swell-config-value">{tremLfoAmpDepth[division.name] ?? 10}%</span>
                         </div>
                         <div class="swell-config-row">
-                          <span class="swell-config-label">Pitch</span>
+                          <span class="swell-config-label">{$t('settings.tremulant_pitch_depth')}</span>
                           <input type="range" min="5" max="40" step="1"
                             value={tremLfoPitchDepth[division.name] ?? 15}
                             on:input={(e) => { tremLfoPitchDepth[division.name] = parseInt(e.target.value); tremLfoPitchDepth = tremLfoPitchDepth; updateTremLfoParams(division.name); }}
@@ -4617,7 +4668,7 @@
               <!-- Koppels -->
               {#if displayOrgan.couplers && displayOrgan.couplers.length > 0}
                 <div class="midi-mapping-header" style="margin-top: 1.5rem;">
-                  <h3>Koppels</h3>
+                  <h3>{$t('couplers.title')}</h3>
                 </div>
                 {#each displayOrgan.couplers as coupler}
                   <div class="midi-mapping-row coupler-mapping-row">
@@ -4636,13 +4687,13 @@
                         class="btn btn-secondary midi-learn-btn swell-learn-btn"
                         on:click={() => learnCouplerMidi(coupler.midi_action_code)}
                       >
-                        MIDI ({couplerMidiBindings[coupler.midi_action_code] || 0}/4)
+                        {$t('midi.learn_short').replace('{count}', couplerMidiBindings[coupler.midi_action_code] || 0).replace('{max}', 4)}
                       </button>
                       {#if couplerMidiBindings[coupler.midi_action_code] > 0}
                         <button
                           class="btn btn-ghost btn-sm swell-clear-btn"
                           on:click={() => clearCouplerMidi(coupler.midi_action_code)}
-                          title="Wis MIDI binding"
+                          title={$t('midi.learn_clear')}
                         >&#x2715;</button>
                       {/if}
                     </div>
@@ -4653,12 +4704,9 @@
 
             <!-- ============ MIDI-koppelingen: overzicht + handmatig bewerken ============ -->
             <div class="settings-block">
-              <h3 class="settings-block-title">MIDI-koppelingen (handmatig bewerken)</h3>
+              <h3 class="settings-block-title">{$t('bindings.editor_title')}</h3>
               <p style="margin: 0 0 0.5rem; font-size: 0.7rem; color: var(--text-muted); line-height: 1.4;">
-                Alle MIDI-koppelingen van dit orgel in één lijst. Pas type, kanaal of nummer direct aan,
-                verwijder een koppeling met ✕, of voeg er onderaan handmatig één toe — inleren blijft
-                daarnaast gewoon werken. Kanaal 'Alle' = reageert op elk kanaal. Bij CC geldt:
-                activeert zodra de waarde ≥ de drempel.
+                {$t('bindings.editor_intro')}
               </p>
               {#if midiBindingsError}
                 <p style="color: #e07a6a; font-size: 0.72rem; margin: 0 0 0.4rem;">{midiBindingsError}</p>
@@ -4667,25 +4715,25 @@
                 <table class="midi-bindings-table">
                   <thead>
                     <tr>
-                      <th>Doel</th>
-                      <th>Type</th>
-                      <th>Kanaal</th>
-                      <th>Nummer</th>
-                      <th>Drempel</th>
+                      <th>{$t('bindings.col_target')}</th>
+                      <th>{$t('bindings.col_type')}</th>
+                      <th>{$t('settings.midi_channel')}</th>
+                      <th>{$t('bindings.col_number')}</th>
+                      <th>{$t('bindings.col_threshold')}</th>
                       <th></th>
                     </tr>
                   </thead>
                   <tbody>
                     {#each midiBindingRows as row (`${row.preset_num}-${row.idx}`)}
                       <tr>
-                        <td class="midi-bindings-doel" title={midiActionLabel(row.preset_num)}>
-                          {midiActionLabel(row.preset_num)}{row.idx > 0 ? ` (${row.idx + 1})` : ''}
+                        <td class="midi-bindings-doel" title={midiActionLabel(row.preset_num, $t)}>
+                          {midiActionLabel(row.preset_num, $t)}{row.idx > 0 ? ` (${row.idx + 1})` : ''}
                         </td>
                         <td>
                           <select value={row.trigger_type} on:change={(e) => updateBindingRow(row, { type: e.target.value })}>
-                            <option value="note">Noot</option>
+                            <option value="note">{$t('bindings.type_note')}</option>
                             <option value="cc">CC</option>
-                            <option value="program">Program</option>
+                            <option value="program">{$t('bindings.type_program')}</option>
                           </select>
                         </td>
                         <td>
@@ -4696,7 +4744,7 @@
                               value={row.channel != null ? row.channel + 1 : ''}
                               on:change={(e) => updateBindingRow(row, { channel: e.target.value === '' ? '' : parseInt(e.target.value) })}
                             >
-                              <option value="">Alle</option>
+                              <option value="">{$t('settings.midi_all_channels')}</option>
                               {#each Array(16).fill().map((_, i) => i + 1) as ch}
                                 <option value={ch}>{ch}</option>
                               {/each}
@@ -4707,7 +4755,7 @@
                           <input type="number" min="0" max="127" class="pedal-range-input"
                             value={bindingNumber(row) ?? 0}
                             on:change={(e) => updateBindingRow(row, { number: parseInt(e.target.value) || 0 })}
-                            title={row.trigger_type === 'note' ? 'Nootnummer' : row.trigger_type === 'cc' ? 'CC-nummer' : 'Programmanummer'}
+                            title={row.trigger_type === 'note' ? $t('bindings.note_number') : row.trigger_type === 'cc' ? $t('bindings.cc_number') : $t('bindings.program_number')}
                           />
                           {#if row.trigger_type === 'note'}
                             <span style="font-size: 0.65rem; color: var(--text-muted);">{midiToNoteName(bindingNumber(row) ?? 0)}</span>
@@ -4718,20 +4766,20 @@
                             <input type="number" min="0" max="127" class="pedal-range-input"
                               value={row.value ?? 64}
                               on:change={(e) => updateBindingRow(row, { value: parseInt(e.target.value) || 0 })}
-                              title="Activeert zodra de CC-waarde ≥ deze drempel"
+                              title={$t('bindings.threshold_title')}
                             />
                           {:else}
                             <span style="color: var(--text-muted);">—</span>
                           {/if}
                         </td>
                         <td>
-                          <button class="btn btn-ghost btn-sm swell-clear-btn" on:click={() => removeBindingRow(row)} title="Deze koppeling verwijderen">&#x2715;</button>
+                          <button class="btn btn-ghost btn-sm swell-clear-btn" on:click={() => removeBindingRow(row)} title={$t('bindings.remove_title')}>&#x2715;</button>
                         </td>
                       </tr>
                     {:else}
                       <tr>
                         <td colspan="6" style="color: var(--text-muted); padding: 0.6rem;">
-                          Nog geen MIDI-koppelingen — leer ze in, of voeg er hieronder handmatig één toe.
+                          {$t('bindings.empty')}
                         </td>
                       </tr>
                     {/each}
@@ -4740,49 +4788,49 @@
               </div>
               <!-- Nieuwe koppeling handmatig toevoegen -->
               <div style="display: flex; align-items: center; gap: 0.4rem; margin-top: 0.55rem; flex-wrap: wrap;">
-                <span style="font-size: 0.72rem; color: var(--text-secondary);">Nieuw:</span>
+                <span style="font-size: 0.72rem; color: var(--text-secondary);">{$t('bindings.new')}</span>
                 <select bind:value={newBinding.code} style="max-width: 15rem;">
-                  <option value="">— kies doel —</option>
-                  <optgroup label="Functies">
-                    {#each bindingTargets.functies as t}<option value={t.code}>{t.label}</option>{/each}
+                  <option value="">{$t('bindings.choose_target')}</option>
+                  <optgroup label={$t('bindings.group_functions')}>
+                    {#each bindingTargets.functies as tgt}<option value={tgt.code}>{tgt.label}</option>{/each}
                   </optgroup>
                   {#if bindingTargets.trems.length}
-                    <optgroup label="Tremulanten">
-                      {#each bindingTargets.trems as t}<option value={t.code}>{t.label}</option>{/each}
+                    <optgroup label={$t('bindings.group_tremulants')}>
+                      {#each bindingTargets.trems as tgt}<option value={tgt.code}>{tgt.label}</option>{/each}
                     </optgroup>
                   {/if}
                   {#if bindingTargets.koppels.length}
-                    <optgroup label="Koppels">
-                      {#each bindingTargets.koppels as t}<option value={t.code}>{t.label}</option>{/each}
+                    <optgroup label={$t('couplers.title')}>
+                      {#each bindingTargets.koppels as tgt}<option value={tgt.code}>{tgt.label}</option>{/each}
                     </optgroup>
                   {/if}
                   {#if bindingTargets.registers.length}
-                    <optgroup label="Registers">
-                      {#each bindingTargets.registers as t}<option value={t.code}>{t.label}</option>{/each}
+                    <optgroup label={$t('bindings.group_stops')}>
+                      {#each bindingTargets.registers as tgt}<option value={tgt.code}>{tgt.label}</option>{/each}
                     </optgroup>
                   {/if}
                 </select>
-                <select bind:value={newBinding.type} title="Triggertype">
-                  <option value="note">Noot</option>
+                <select bind:value={newBinding.type} title={$t('bindings.trigger_type_title')}>
+                  <option value="note">{$t('bindings.type_note')}</option>
                   <option value="cc">CC</option>
-                  <option value="program">Program</option>
+                  <option value="program">{$t('bindings.type_program')}</option>
                 </select>
                 {#if newBinding.type !== 'note'}
-                  <select bind:value={newBinding.channel} title="MIDI-kanaal">
-                    <option value="">Alle kanalen</option>
+                  <select bind:value={newBinding.channel} title={$t('bindings.channel_title')}>
+                    <option value="">{$t('settings.eq_all_channels')}</option>
                     {#each Array(16).fill().map((_, i) => i + 1) as ch}
-                      <option value={ch}>Kanaal {ch}</option>
+                      <option value={ch}>{$t('settings.midi_channel')} {ch}</option>
                     {/each}
                   </select>
                 {/if}
                 <input type="number" min="0" max="127" class="pedal-range-input" bind:value={newBinding.number}
-                  title="Noot-/CC-/programmanummer (0-127)" />
+                  title={$t('bindings.number_title')} />
                 {#if newBinding.type === 'cc'}
                   <input type="number" min="0" max="127" class="pedal-range-input" bind:value={newBinding.value}
-                    title="Drempel: activeert zodra de CC-waarde ≥ dit" />
+                    title={$t('bindings.threshold_new_title')} />
                 {/if}
-                <button class="btn btn-secondary btn-sm" on:click={addNewBindingUI}>Toevoegen</button>
-                <button class="btn btn-ghost btn-sm" on:click={refreshMidiBindingsFull} title="Lijst opnieuw laden (bv. na inleren via de knoppen)">↻</button>
+                <button class="btn btn-secondary btn-sm" on:click={addNewBindingUI}>{$t('bindings.add')}</button>
+                <button class="btn btn-ghost btn-sm" on:click={refreshMidiBindingsFull} title={$t('bindings.reload_title')}>↻</button>
               </div>
             </div>
           </div>
@@ -4830,7 +4878,7 @@
                   on:change={(e) => dispatch('selectAudioHost', e.target.value)}
                 >
                   {#each audioHosts as h}
-                    <option value={h} selected={h === selectedAudioHost}>{prettyHost(h)}</option>
+                    <option value={h} selected={h === selectedAudioHost}>{prettyHost(h, $t)}</option>
                   {/each}
                   {#if audioHosts.length === 0}
                     <option value="">—</option>
@@ -4907,6 +4955,14 @@
                 </div>
               {/if}
 
+              <!-- Beschikbare uitgangen van de nu geopende audio-uitgang -->
+              <p style="margin: 0.5rem 0 0; font-size: 0.72rem; color: var(--text);">
+                {$t('settings.audio_channels_available').replace('{n}', audioChannelCount).replace('{host}', audioHostActual || (audioStatus?.audio_host ?? '?'))}
+              </p>
+              <p style="margin: 0.15rem 0 0; font-size: 0.68rem; color: var(--text-muted); line-height: 1.35;">
+                {$t('settings.audio_channels_hint')}{#if !isAsioHost} {$t('settings.audio_channels_hint_wasapi')}{/if}
+              </p>
+
               <!-- Uitgangspaar (welke kanalen van het apparaat) -->
               {#if organInfo && outputChannelTotal > 2}
                 <div class="audio-select-row" style="margin-top: 0.7rem;" title={$t('settings.output_pair_hint')}>
@@ -4925,7 +4981,7 @@
                 <label class="audio-select-label" for="audio-polyphony">{$t('settings.polyphony')}</label>
                 <select id="audio-polyphony" class="temperament-select" on:change={(e) => setPolyphony(e.target.value)}>
                   {#each POLYPHONY_CHOICES as n}
-                    <option value={n} selected={(audioStatus?.polyphony || 1024) === n}>{n}{n === 1024 ? ` (${$t('settings.audio_buffer_default').toLowerCase()})` : ''}</option>
+                    <option value={n} selected={(audioStatus?.polyphony || 1024) === n}>{n}{n === 1024 ? ` (${$t('settings.polyphony_default')})` : ''}</option>
                   {/each}
                 </select>
               </div>
@@ -4958,9 +5014,6 @@
                   {/each}
                 </select>
               </div>
-              <p style="margin: 0.3rem 0 0; font-size: 0.68rem; color: var(--text-muted); line-height: 1.35;">
-                Laagste latency: kies <strong>ASIO</strong> als host en een kleine buffer (32–64). WASAPI (gedeeld) negeert kleine buffers en blijft op de driver-default.
-              </p>
               <div style="margin-top: 0.7rem;">
                 <button class="btn btn-primary btn-sm" on:click={() => { dispatch('applyAudioOutput'); setTimeout(refreshAudioStatus, 1500); }}>
                   {$t('settings.audio_apply')}
@@ -4970,14 +5023,14 @@
               <!-- Actuele status + geschatte latentie -->
               {#if audioStatus && audioStatus.audio_running}
                 <div style="margin-top: 0.6rem; padding: 0.45rem 0.6rem; background: var(--bg-elevated); border: 1px solid var(--accent-soft-2); border-radius: var(--radius-sm); font-size: 0.74rem; line-height: 1.5;">
-                  <strong>Actueel:</strong>
-                  {audioStatus.audio_host} · {audioStatus.audio_device || 'standaard'} ·
-                  {audioStatus.sample_rate} Hz · {audioStatus.channels || 2} kanalen ·
-                  buffer {audioStatus.buffer_frames > 0 ? `${audioStatus.buffer_frames} frames` : 'driver-default'}
+                  <strong>{$t('settings.audio_current')}</strong>
+                  {audioStatus.audio_host} · {audioStatus.audio_device || $t('settings.default_device')} ·
+                  {audioStatus.sample_rate} Hz · {$t('settings.audio_current_channels').replace('{n}', audioStatus.channels || audioChannelCount)} ·
+                  {audioStatus.buffer_frames > 0 ? $t('settings.audio_buffer_frames').replace('{n}', audioStatus.buffer_frames) : $t('settings.audio_buffer_driver_default')}
                   {#if audioLatencyMs !== null}
-                    · <strong>geschatte latentie ≈ {audioLatencyMs.toFixed(1)} ms</strong>
+                    · <strong>{$t('settings.audio_latency_est').replace('{ms}', audioLatencyMs.toFixed(1))}</strong>
                   {:else}
-                    · latentie: driver-default (WASAPI ≈ 20–30 ms; kies ASIO + kleine buffer voor minder)
+                    · {$t('settings.audio_latency_driver_default')}
                   {/if}
                 </div>
               {/if}
@@ -4987,16 +5040,11 @@
 
               <!-- Uitvoerprofielen: snelle wissel speakers ↔ hoofdtelefoon -->
               <div style="margin-top: 0.85rem; padding-top: 0.75rem; border-top: var(--border-subtle);">
-                <h4 style="margin: 0 0 0.35rem; font-size: 0.85rem;">Uitvoerprofielen — snelle wissel</h4>
+                <h4 style="margin: 0 0 0.35rem; font-size: 0.85rem;">{$t('settings.audio_profiles_title')}</h4>
                 <p style="margin: 0 0 0.5rem; font-size: 0.7rem; color: var(--text-muted); line-height: 1.4;">
-                  Sla twee uitvoer-instellingen op (bijv. luidsprekers via ASIO en een hoofdtelefoon
-                  via WASAPI — of dezelfde ASIO-interface met verschillende kanalen). De kanaalkeuze
-                  per klavier (de "Kanalen"-vinkjes onder MIDI Kanaal per Klavier) wordt in het
-                  profiel mee opgeslagen en wisselt mee. Daarna wissel je met één knop in de balk
-                  bovenin — of via een ingeleerde MIDI-knop. Kies eerst host, apparaat, buffer en
-                  kanalen, en sla dan op.
+                  {$t('settings.audio_profiles_desc')}
                 </p>
-                {#each [['speakers', 'Speakers'], ['headphones', 'Hoofdtelefoon']] as [kind, label]}
+                {#each [['speakers', $t('settings.audio_profile_speakers')], ['headphones', $t('settings.audio_profile_headphones')]] as [kind, label]}
                   {@const prof = audioProfiles?.[kind]}
                   <div style="display:flex; align-items:center; gap:0.45rem; margin-bottom:0.4rem; flex-wrap:wrap;">
                     <strong style="font-size:0.78rem; width:7.5rem;">
@@ -5004,41 +5052,41 @@
                     </strong>
                     <span style="flex:1; font-size:0.72rem; color:var(--text-muted); min-width:10rem;">
                       {#if prof}
-                        {prof.host || '?'} · {prof.device || 'standaard'}{prof.bufferFrames ? ` · ${prof.bufferFrames} frames` : ''}{prof.channels ? ' · incl. kanalen' : ''}
+                        {prof.host || '?'} · {prof.device || $t('settings.default_device')}{prof.bufferFrames ? ` · ${$t('settings.audio_buffer_frames').replace('{n}', prof.bufferFrames)}` : ''}{prof.channels ? ` · ${$t('settings.audio_profile_incl_channels')}` : ''}
                       {:else}
-                        — niet ingesteld —
+                        {$t('settings.audio_profile_not_set')}
                       {/if}
                     </span>
                     <button class="btn btn-secondary btn-sm" style="font-size:0.7rem; padding:0.15rem 0.5rem;"
                       on:click={() => dispatch('saveAudioProfile', kind)}
-                      title="Huidige selectie (host/apparaat/buffer + kanaalkeuze per klavier) opslaan als {label}-profiel"
-                    >Huidige selectie opslaan</button>
+                      title={$t('settings.audio_profile_save_title').replace('{name}', label)}
+                    >{$t('settings.audio_profile_save')}</button>
                     {#if prof}
                       <button class="btn btn-secondary btn-sm" style="font-size:0.7rem; padding:0.15rem 0.5rem;"
                         on:click={() => dispatch('switchAudioProfile', kind)}
-                        title="Nu naar dit profiel wisselen (ook om een haperende uitgang opnieuw op te bouwen)"
-                      >Activeer</button>
+                        title={$t('settings.audio_profile_activate_title')}
+                      >{$t('settings.audio_profile_activate')}</button>
                       <button class="btn btn-ghost btn-sm" style="font-size:0.7rem; padding:0.15rem 0.4rem;"
                         on:click={() => dispatch('clearAudioProfile', kind)}
-                        title="Profiel wissen"
+                        title={$t('settings.audio_profile_clear')}
                       >✕</button>
                     {/if}
                   </div>
                 {/each}
                 <div style="display:flex; align-items:center; gap:0.5rem;">
-                  <span style="font-size:0.72rem; color:var(--text-muted);">MIDI-knop voor de wissel:</span>
+                  <span style="font-size:0.72rem; color:var(--text-muted);">{$t('settings.audio_profile_midi_button')}</span>
                   <button
                     class="btn btn-ghost btn-sm"
                     class:learning={globalLearningAction === ACTION_AUDIO_PROFILE}
                     on:click={() => learnGlobalAction(ACTION_AUDIO_PROFILE)}
                     disabled={globalLearningAction !== null && globalLearningAction !== ACTION_AUDIO_PROFILE}
-                    title="MIDI inleren voor speakers/hoofdtelefoon-wissel ({globalMidiBindings[ACTION_AUDIO_PROFILE] || 0}/4)"
+                    title={$t('settings.audio_profile_learn_title').replace('{n}', globalMidiBindings[ACTION_AUDIO_PROFILE] || 0)}
                     style="font-size:0.7rem; padding:0.2rem 0.5rem; border:1px solid {globalMidiBindings[ACTION_AUDIO_PROFILE] > 0 ? 'var(--midi-indicator)' : 'var(--accent-soft-2)'};"
                   >
                     {#if globalLearningAction === ACTION_AUDIO_PROFILE}
-                      <span class="learning-indicator"></span>Wacht...
+                      <span class="learning-indicator"></span>{$t('midi.learning_wait')}
                     {:else}
-                      MIDI {globalMidiBindings[ACTION_AUDIO_PROFILE] || 0}/4
+                      {$t('midi.learn_short').replace('{count}', globalMidiBindings[ACTION_AUDIO_PROFILE] || 0).replace('{max}', 4)}
                     {/if}
                   </button>
                 </div>
@@ -5046,21 +5094,21 @@
 
               <!-- Automatisch starten bij Windows -->
               <div style="margin-top: 0.85rem; padding-top: 0.75rem; border-top: var(--border-subtle);">
-                <label class="swell-toggle" title="JM-Orgue wordt na aanmelden automatisch gestart. Handig bij een vaste console-PC.">
+                <label class="swell-toggle" title={$t('general.autostart_title')}>
                   <input
                     type="checkbox"
                     checked={autostartEnabled}
                     on:change={(e) => dispatch('setAutostart', e.target.checked)}
                   />
-                  <span>Automatisch starten bij Windows</span>
+                  <span>{$t('general.autostart')}</span>
                 </label>
-                <label class="swell-toggle" style="margin-top:0.4rem;" title="Aan: bij het starten van de app wordt het laatst geopende orgel automatisch geladen. Uit: de app opent met de orgelkeuze.">
+                <label class="swell-toggle" style="margin-top:0.4rem;" title={$t('general.auto_load_last_organ_title')}>
                   <input
                     type="checkbox"
                     checked={autoLoadLastOrgan}
                     on:change={(e) => dispatch('setAutoLoadLastOrgan', e.target.checked)}
                   />
-                  <span>Laatst geopende orgel automatisch laden bij starten</span>
+                  <span>{$t('general.auto_load_last_organ')}</span>
                 </label>
                 <label class="swell-toggle" style="margin-top:0.4rem;" title={$t('settings.panel_close_quits_title')}>
                   <input
@@ -5070,13 +5118,13 @@
                   />
                   <span>{$t('settings.panel_close_quits')}</span>
                 </label>
-                <label class="swell-toggle" style="margin-top:0.4rem;" title="Aan: bij het openen van een orgel komen de laatst getrokken registers terug. Uit: schone start (geen registers aan).">
+                <label class="swell-toggle" style="margin-top:0.4rem;" title={$t('general.restore_registration_title')}>
                   <input
                     type="checkbox"
                     checked={restoreRegistration}
                     on:change={(e) => dispatch('setRestoreRegistration', e.target.checked)}
                   />
-                  <span>Laatste registratie herstellen bij openen</span>
+                  <span>{$t('general.restore_registration')}</span>
                 </label>
               </div>
 
@@ -5155,27 +5203,27 @@
 
             <!-- Sampleset: loops detecteren + inbakken -->
             <div class="settings-block">
-              <h3 class="settings-block-title">Sampleset — loops</h3>
+              <h3 class="settings-block-title">{$t('settings.loops_title')}</h3>
               {#if !samplesetDir()}
-                <p style="font-size:0.75rem; color:var(--text-muted);">Laad eerst een orgel/sampleset.</p>
+                <p style="font-size:0.75rem; color:var(--text-muted);">{$t('settings.sampleset_no_organ')}</p>
               {:else}
                 <p style="font-size:0.72rem; color:var(--text-muted); line-height:1.4; margin:0 0 0.5rem;">
-                  Detecteert per WAV een goede sustain-loop (grondtoon-periode, fase-uitgelijnd), bakt een crossfade in voor een naadloze overgang en schrijft de loop-punten in het bestand (smpl-chunk). Voor samplesets zonder loops, zodat noten blijven klinken. Originelen worden eerst geback-upt.
+                  {$t('settings.loops_desc')}
                 </p>
                 <label class="audio-select-row" style="cursor:pointer;">
                   <input type="checkbox" bind:checked={loopOnlyMissing} />
-                  <span class="audio-select-label" style="margin-left:0.4rem;">Alleen bestanden zonder loop</span>
+                  <span class="audio-select-label" style="margin-left:0.4rem;">{$t('settings.loops_only_missing')}</span>
                 </label>
                 <div style="display:flex; gap:0.5rem; margin-top:0.7rem; flex-wrap:wrap;">
-                  <button class="btn btn-secondary btn-sm" on:click={scanLoops} disabled={loopBusy}>Scannen</button>
-                  <button class="btn btn-primary btn-sm" on:click={applyLoops} disabled={loopBusy || !loopScan || loopScan.files_loopable === 0}>Loops aanmaken</button>
+                  <button class="btn btn-secondary btn-sm" on:click={scanLoops} disabled={loopBusy}>{$t('settings.sampleset_scan')}</button>
+                  <button class="btn btn-primary btn-sm" on:click={applyLoops} disabled={loopBusy || !loopScan || loopScan.files_loopable === 0}>{$t('settings.loops_apply')}</button>
                 </div>
                 {#if loopBusy}
-                  <p style="font-size:0.75rem; color:var(--text-secondary); margin-top:0.5rem;">Bezig… (dit kan even duren bij veel bestanden)</p>
+                  <p style="font-size:0.75rem; color:var(--text-secondary); margin-top:0.5rem;">{$t('settings.sampleset_busy')}</p>
                 {/if}
                 {#if loopScan}
                   <div style="margin-top:0.6rem; font-size:0.76rem;">
-                    <div>WAV's: {loopScan.files_scanned} · zonder loop: <strong>{loopScan.files_without_loop}</strong> · loopbaar: <strong>{loopScan.files_loopable}</strong></div>
+                    <div>{$t('settings.loops_wavs')}: {loopScan.files_scanned} · {$t('settings.loops_without_loop')}: <strong>{loopScan.files_without_loop}</strong> · {$t('settings.loops_loopable')}: <strong>{loopScan.files_loopable}</strong></div>
                     {#if loopScan.errors.length > 0}
                       <div style="color:#d47070; margin-top:0.3rem;">{loopScan.errors.length} ⚠</div>
                     {/if}
@@ -5183,7 +5231,7 @@
                 {/if}
                 {#if loopApply}
                   <div style="margin-top:0.5rem; font-size:0.76rem; color:var(--success);">
-                    Loops geschreven: {loopApply.files_looped} · overgeslagen: {loopApply.files_skipped} · backup: {loopApply.backup_dir}
+                    {$t('settings.loops_written')}: {loopApply.files_looped} · {$t('settings.loops_skipped')}: {loopApply.files_skipped} · {$t('settings.sampleset_backup')}: {loopApply.backup_dir}
                   </div>
                 {/if}
               {/if}
@@ -5309,66 +5357,64 @@
 
             <!-- Terugkoppeling: MIDI-uit naar de fysieke console (registerlampen/display) -->
             <div class="settings-block">
-              <h3 class="settings-block-title">Terugkoppeling (MIDI-uit)</h3>
+              <h3 class="settings-block-title">{$t('feedback.title')}</h3>
               <p class="settings-hint" style="margin: 0 0 0.5rem;">
-                Laat de fysieke console meelichten met de registratie: registerlampen (Note On/Off),
-                een Hauptwerk-tekstdisplay, of een Johannus/Content-console.
+                {$t('feedback.desc')}
               </p>
               <div class="audio-select-row">
-                <label class="audio-select-label" for="fb-protocol">Protocol</label>
+                <label class="audio-select-label" for="fb-protocol">{$t('feedback.protocol')}</label>
                 <select id="fb-protocol" class="temperament-select" bind:value={fbProtocol} on:change={fbApplyConfig}>
-                  <option value="off">Uit</option>
-                  <option value="note">Registerlampen (Note On/Off)</option>
-                  <option value="lcd">Hauptwerk LCD-display</option>
-                  <option value="johannus">Johannus / Content (PC + JOHAS)</option>
+                  <option value="off">{$t('feedback.protocol_off')}</option>
+                  <option value="note">{$t('feedback.protocol_note')}</option>
+                  <option value="lcd">{$t('feedback.protocol_lcd')}</option>
+                  <option value="johannus">{$t('feedback.protocol_johannus')}</option>
                 </select>
               </div>
               {#if fbProtocol !== 'off'}
                 <div class="audio-select-row">
-                  <label class="audio-select-label" for="fb-port">MIDI-uitgang</label>
+                  <label class="audio-select-label" for="fb-port">{$t('feedback.midi_output')}</label>
                   <select id="fb-port" class="temperament-select" bind:value={fbPort} on:change={fbApplyConfig}>
-                    <option value="">— kies een poort —</option>
+                    <option value="">{$t('feedback.choose_port')}</option>
                     {#each fbOutputs as p}<option value={p}>{p}</option>{/each}
                   </select>
                 </div>
                 <div class="audio-select-row">
-                  <label class="audio-select-label" for="fb-channel">Kanaal</label>
+                  <label class="audio-select-label" for="fb-channel">{$t('settings.midi_channel')}</label>
                   <input id="fb-channel" class="temperament-select" type="number" min="1" max="16"
                     bind:value={fbChannel} on:change={fbApplyConfig} style="width: 5rem;" />
                 </div>
                 {#if fbProtocol === 'note'}
                   <div class="audio-select-row">
-                    <label class="audio-select-label" for="fb-basenote">Basisnoot (auto)</label>
+                    <label class="audio-select-label" for="fb-basenote">{$t('feedback.base_note')}</label>
                     <input id="fb-basenote" class="temperament-select" type="number" min="0" max="127"
                       bind:value={fbBaseNote} on:change={fbApplyConfig} style="width: 5rem;" />
                   </div>
                   <p class="settings-hint" style="margin: 0.2rem 0 0;">
-                    Elk register krijgt automatisch een nootnummer vanaf de basisnoot (register-volgorde),
-                    óf leer per register de echte consoleknop in:
+                    {$t('feedback.base_note_hint')}
                   </p>
                   <button class="btn btn-ghost btn-sm" style="margin-top: 0.3rem;" on:click={() => fbShowLearnList = !fbShowLearnList}>
-                    {fbShowLearnList ? 'Verberg inleer-lijst' : 'Per register inleren…'}
-                    {Object.keys(fbLearnedNotes).length ? ` (${Object.keys(fbLearnedNotes).length} ingeleerd)` : ''}
+                    {fbShowLearnList ? $t('feedback.hide_learn_list') : $t('feedback.learn_per_stop')}
+                    {Object.keys(fbLearnedNotes).length ? ` ${$t('feedback.learned_count').replace('{n}', Object.keys(fbLearnedNotes).length)}` : ''}
                   </button>
                   {#if fbShowLearnList}
                     <div style="display: flex; gap: 0.5rem; margin: 0.4rem 0;">
                       <button class="btn btn-secondary btn-sm" on:click={fbLearnAllSeq} disabled={!!fbLearningId && !fbLearnAll}>
-                        {fbLearnAll ? 'Stop inleren' : 'Alles inleren (op volgorde)'}
+                        {fbLearnAll ? $t('feedback.learn_stop') : $t('feedback.learn_all')}
                       </button>
-                      <button class="btn btn-ghost btn-sm" on:click={fbClearLearned} disabled={!Object.keys(fbLearnedNotes).length}>Wis inleer</button>
+                      <button class="btn btn-ghost btn-sm" on:click={fbClearLearned} disabled={!Object.keys(fbLearnedNotes).length}>{$t('feedback.learn_clear')}</button>
                     </div>
                     {#if fbLearningId}
                       <p class="settings-hint" style="color: var(--warning, #db5);">
-                        Druk nu op de bijbehorende registerknop op je console… (20 s)
+                        {$t('feedback.learn_prompt')}
                       </p>
                     {/if}
                     <div class="fb-learn-list">
                       {#each fbRegList as r (r.id)}
                         <div class="fb-learn-row" class:learning={fbLearningId === r.id}>
                           <span class="fb-learn-name" title={r.name}>{r.name}</span>
-                          <span class="fb-learn-note">{r.learned != null ? `noot ${r.learned}` : `auto ${r.auto}`}</span>
+                          <span class="fb-learn-note">{r.learned != null ? $t('feedback.note_n').replace('{n}', r.learned) : $t('feedback.auto_n').replace('{n}', r.auto)}</span>
                           <button class="btn btn-ghost btn-sm" on:click={() => fbLearnOne(r.id)} disabled={!!fbLearningId}>
-                            {fbLearningId === r.id ? '…' : 'Inleer'}
+                            {fbLearningId === r.id ? '…' : $t('learn.learn')}
                           </button>
                         </div>
                       {/each}
@@ -5377,16 +5423,16 @@
                 {/if}
                 <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem;">
                   <button class="btn btn-secondary btn-sm" on:click={fbApplyConfig} disabled={fbBusy}>
-                    {fbBusy ? 'Bezig…' : 'Toepassen / verbinden'}
+                    {fbBusy ? $t('feedback.busy') : $t('feedback.apply_connect')}
                   </button>
-                  <button class="btn btn-ghost btn-sm" on:click={fbAllOff}>Alles uit</button>
-                  <button class="btn btn-ghost btn-sm" on:click={fbRefreshOutputs} title="Poortlijst verversen">↻</button>
+                  <button class="btn btn-ghost btn-sm" on:click={fbAllOff}>{$t('feedback.all_off')}</button>
+                  <button class="btn btn-ghost btn-sm" on:click={fbRefreshOutputs} title={$t('feedback.refresh_ports')}>↻</button>
                 </div>
                 <p class="settings-hint" style="margin: 0.4rem 0 0;">
                   {#if fbConfigured}
-                    <span style="color: var(--success);">Actief</span> — de console licht mee met elke registerwissel, preset en tutti.
+                    <span style="color: var(--success);">{$t('feedback.active')}</span> {$t('feedback.active_desc')}
                   {:else}
-                    Kies een poort en klik "Toepassen" om te verbinden.
+                    {$t('feedback.inactive_hint')}
                   {/if}
                 </p>
               {/if}
@@ -5394,30 +5440,28 @@
 
             <!-- Consoleknoppen (pistons): vaste functies inleerbaar op één plek -->
             <div class="settings-block">
-              <h3 class="settings-block-title">Consoleknoppen inleren</h3>
+              <h3 class="settings-block-title">{$t('pistons.learn_title')}</h3>
               <p class="settings-hint" style="margin: 0 0 0.5rem;">
-                Leer vaste consoleknoppen (pistons) in: afsteller, SET, preset-stappen,
-                geheugenniveaus, computer afsluiten, enz. De cijferknoppen 0–9 leer je op
-                de setzerbalk zelf (rechtermuisklik of 3 s ingedrukt houden).
+                {$t('pistons.learn_desc')}
               </p>
               <button class="btn btn-ghost btn-sm" on:click={() => { showActionLearnList = !showActionLearnList; if (showActionLearnList) refreshMidiBindingsFull(); }}>
-                {showActionLearnList ? 'Verberg lijst' : 'Knoppen inleren…'}
+                {showActionLearnList ? $t('pistons.hide_list') : $t('pistons.learn_buttons')}
               </button>
               {#if showActionLearnList}
                 {#if globalLearningAction != null}
                   <p class="settings-hint" style="color: var(--warning, #db5); margin: 0.4rem 0 0;">
-                    Druk nu op de gewenste knop op je console… (20 s)
+                    {$t('pistons.learn_prompt')}
                   </p>
                 {/if}
                 <div class="fb-learn-list" style="margin-top: 0.4rem;">
                   {#each GLOBAL_ACTIONS as a (a.code)}
                     <div class="fb-learn-row" class:learning={globalLearningAction === a.code}>
                       <span class="fb-learn-name">{a.name}</span>
-                      <span class="fb-learn-note">{actionBound[a.code] ? '✓ ingeleerd' : '—'}</span>
+                      <span class="fb-learn-note">{actionBound[a.code] ? $t('pistons.learned') : '—'}</span>
                       <button class="btn btn-ghost btn-sm" on:click={() => learnGlobalAction(a.code)} disabled={globalLearningAction != null}>
-                        {globalLearningAction === a.code ? '…' : 'Inleer'}
+                        {globalLearningAction === a.code ? '…' : $t('learn.learn')}
                       </button>
-                      <button class="btn btn-ghost btn-sm" on:click={() => clearGlobalAction(a.code)} disabled={!actionBound[a.code] || globalLearningAction != null} title="Koppeling wissen">×</button>
+                      <button class="btn btn-ghost btn-sm" on:click={() => clearGlobalAction(a.code)} disabled={!actionBound[a.code] || globalLearningAction != null} title={$t('pistons.clear_binding')}>×</button>
                     </div>
                   {/each}
                 </div>
@@ -5426,65 +5470,61 @@
 
             <!-- Over & feedback: versie, GitHub-feedback en handmatige update-check -->
             <div class="settings-block">
-              <h3 class="settings-block-title">Over &amp; feedback</h3>
+              <h3 class="settings-block-title">{$t('about.title')}</h3>
               <p class="settings-hint" style="margin: 0 0 0.5rem;">
-                JM-Orgue {appVersion ? `versie ${appVersion}` : ''} — © Martijn van der Kolk, alle rechten voorbehouden.
-                De code mag niet zonder toestemming worden gebruikt.
+                JM-Orgue {appVersion ? $t('about.version').replace('{version}', appVersion) : ''} — {$t('about.copyright')}
               </p>
               <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
-                <button class="btn btn-secondary btn-sm" on:click={() => { fbkOpen = true; fbkStatus = null; }} title="Stuur een bericht dat rechtstreeks (per e-mail) bij de maker binnenkomt">
-                  Feedback sturen…
+                <button class="btn btn-secondary btn-sm" on:click={() => { fbkOpen = true; fbkStatus = null; }} title={$t('about.send_feedback_title')}>
+                  {$t('about.send_feedback')}
                 </button>
-                <button class="btn btn-ghost btn-sm" on:click={openFeedbackPage} title="Opent de GitHub-issuespagina in je browser">
-                  Via GitHub (issues)
+                <button class="btn btn-ghost btn-sm" on:click={openFeedbackPage} title={$t('about.github_title')}>
+                  {$t('about.github')}
                 </button>
                 <button class="btn btn-ghost btn-sm" on:click={manualUpdateCheck} disabled={manualUpdateResult === 'checking'}>
-                  {manualUpdateResult === 'checking' ? 'Controleren…' : 'Controleer op updates'}
+                  {manualUpdateResult === 'checking' ? $t('update.checking') : $t('update.check')}
                 </button>
               </div>
               {#if fbkOpen}
                 <div class="fbk-overlay">
                   <div class="fbk-modal">
-                    <h3>Feedback sturen</h3>
+                    <h3>{$t('about.feedback_modal_title')}</h3>
                     <p class="settings-hint" style="margin: 0 0 0.35rem;">
-                      Je bericht gaat rechtstreeks naar de maker. Meegestuurd worden alleen
-                      wat hieronder staat, het versienummer en de orgelnaam — plus de log
-                      als je dat hieronder aangevinkt laat.
+                      {$t('about.feedback_privacy')}
                     </p>
                     <p class="settings-hint" style="margin: 0 0 0.5rem; font-style: italic;">
-                      Let op: JM-Orgue is een hobbyproject — een reactie kan daarom enkele
-                      dagen duren. Alvast dank voor je geduld!
+                      {$t('about.feedback_hobby')}
                     </p>
-                    <textarea rows="6" bind:value={fbkMessage} placeholder="Wat wil je melden? (bug, wens, vraag…)" style="width: 100%; resize: vertical;"></textarea>
-                    <input type="text" bind:value={fbkEmail} placeholder="Je e-mailadres (optioneel — voor een antwoord)" style="width: 100%; margin-top: 0.4rem;" />
+                    <textarea rows="6" bind:value={fbkMessage} placeholder={$t('about.feedback_placeholder')} style="width: 100%; resize: vertical;"></textarea>
+                    <input type="text" bind:value={fbkEmail} placeholder={$t('about.feedback_email_placeholder')} style="width: 100%; margin-top: 0.4rem;" />
                     <label style="display: flex; align-items: center; gap: 0.4rem; margin-top: 0.45rem; cursor: pointer;">
                       <input type="checkbox" bind:checked={fbkIncludeLog} />
                       <span class="settings-hint" style="margin: 0;">
-                        Logbestand meesturen (technische log van deze en de vorige sessie — helpt bij het opsporen van fouten)
+                        {$t('about.feedback_include_log')}
                       </span>
                     </label>
                     {#if fbkStatus === 'ok'}
-                      <p class="settings-hint" style="color: var(--success); margin: 0.4rem 0 0;">Verzonden — dank je wel!</p>
+                      <p class="settings-hint" style="color: var(--success); margin: 0.4rem 0 0;">{$t('about.feedback_sent')}</p>
                     {:else if fbkStatus === 'error'}
-                      <p class="settings-hint" style="color: var(--error, #e66); margin: 0.4rem 0 0;">Versturen mislukt (geen internet?). Probeer het later nog eens of gebruik de GitHub-knop.</p>
+                      <p class="settings-hint" style="color: var(--error, #e66); margin: 0.4rem 0 0;">{$t('about.feedback_failed')}</p>
                     {:else if fbkStatus === 'noendpoint'}
-                      <p class="settings-hint" style="color: var(--warning, #db5); margin: 0.4rem 0 0;">De mail-route is nog niet geconfigureerd in deze versie — gebruik voorlopig de GitHub-knop.</p>
+                      <p class="settings-hint" style="color: var(--warning, #db5); margin: 0.4rem 0 0;">{$t('about.feedback_no_endpoint')}</p>
                     {/if}
                     <div style="display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 0.6rem;">
-                      <button class="btn btn-ghost btn-sm" on:click={() => { fbkOpen = false; }}>Sluiten</button>
+                      <button class="btn btn-ghost btn-sm" on:click={() => { fbkOpen = false; }}>{$t('actions.close')}</button>
                       <button class="btn btn-primary btn-sm" on:click={fbkSubmit} disabled={!fbkMessage.trim() || fbkStatus === 'sending'}>
-                        {fbkStatus === 'sending' ? 'Versturen…' : 'Versturen'}
+                        {fbkStatus === 'sending' ? $t('about.feedback_sending') : $t('about.feedback_send')}
                       </button>
                     </div>
                   </div>
                 </div>
               {/if}
               {#if manualUpdateResult === 'uptodate'}
-                <p class="settings-hint" style="margin: 0.4rem 0 0;">Je gebruikt de nieuwste versie.</p>
+                <p class="settings-hint" style="margin: 0.4rem 0 0;">{$t('update.up_to_date')}</p>
               {:else if manualUpdateResult && manualUpdateResult.version}
                 <p class="settings-hint" style="margin: 0.4rem 0 0;">
-                  Nieuwe versie <b>{manualUpdateResult.version}</b> beschikbaar —
-                  <button class="btn btn-primary btn-sm" on:click={openManualUpdate}>Downloaden</button>
+                  {$t('update.new_version_prefix')} <b>{manualUpdateResult.version}</b> {$t('update.new_version_suffix')}
+                  <button class="btn btn-primary btn-sm" on:click={openManualUpdate}>{$t('update.download')}</button>
                 </p>
               {/if}
             </div>
@@ -5502,11 +5542,11 @@
   {#if couplerContextMenu}
     <div class="coupler-context-menu" style="left: {couplerContextMenu.x}px; top: {couplerContextMenu.y}px;">
       <button on:click={() => learnCouplerMidi(couplerContextMenu.action)}>
-        MIDI Inleren ({couplerMidiBindings[couplerContextMenu.action] || 0}/4)
+        {$t('midi.learn_title')} ({couplerMidiBindings[couplerContextMenu.action] || 0}/4)
       </button>
       {#if couplerMidiBindings[couplerContextMenu.action] > 0}
         <button on:click={() => clearCouplerMidi(couplerContextMenu.action)}>
-          MIDI Wissen
+          {$t('midi.learn_clear')}
         </button>
       {/if}
     </div>
@@ -5516,11 +5556,11 @@
   {#if stopContextMenu}
     <div class="coupler-context-menu" style="left: {stopContextMenu.x}px; top: {stopContextMenu.y}px;">
       <button on:click={() => learnStopMidi(stopContextMenu.action)}>
-        MIDI Inleren ({stopMidiBindings[stopContextMenu.action] || 0}/4)
+        {$t('midi.learn_title')} ({stopMidiBindings[stopContextMenu.action] || 0}/4)
       </button>
       {#if stopMidiBindings[stopContextMenu.action] > 0}
         <button on:click={() => clearStopMidi(stopContextMenu.action)}>
-          MIDI Wissen
+          {$t('midi.learn_clear')}
         </button>
       {/if}
     </div>
@@ -5536,10 +5576,10 @@
           <rect x="25" y="8" width="5" height="24" rx="1.5" fill="currentColor" opacity="0.3"/>
         </svg>
       </div>
-      <h2 class="empty-state-title">Geen orgel geladen</h2>
-      <p class="empty-state-text">Selecteer een orgel uit de bibliotheek.</p>
+      <h2 class="empty-state-title">{$t('status.no_organ_loaded')}</h2>
+      <p class="empty-state-text">{$t('register_panel.select_from_library')}</p>
       <button class="btn btn-primary" on:click={() => showOrganBrowser = true}>
-        Open Orgel Bibliotheek
+        {$t('library.open_button')}
       </button>
     </div>
   {/if}
@@ -5547,31 +5587,31 @@
 {#if pedalLearnModal}
   <div class="kb-learn-overlay">
     <div class="kb-learn-modal">
-      <h3>{pedalLearnModal.kind === 'zwel' ? `Zweltrede inleren — ${pedalLearnModal.division}` : 'Generaal crescendo inleren'}</h3>
+      <h3>{pedalLearnModal.kind === 'zwel' ? $t('learn.swell_pedal_title').replace('{name}', pedalLearnModal.division) : $t('learn.crescendo_title')}</h3>
       {#if pedalLearnModal.step === 1}
         <div class="kb-learn-step kb-learn-wait">
           <span class="learning-indicator"></span>
-          Zet de trede in de <strong>LAAGSTE</strong> stand (dicht) en houd hem even stil&hellip;
+          {$t('learn.pedal_low_prompt')}
         </div>
       {:else if pedalLearnModal.step === 2}
         <div class="kb-learn-step kb-learn-ok">
-          &#10004; Laagste stand herkend: CC {pedalLearnModal.first.cc}, kanaal {pedalLearnModal.first.channel + 1} (waarde {pedalLearnModal.first.value})
+          &#10004; {$t('learn.pedal_low_detected').replace('{cc}', pedalLearnModal.first.cc).replace('{channel}', pedalLearnModal.first.channel + 1).replace('{value}', pedalLearnModal.first.value)}
         </div>
         <div class="kb-learn-step kb-learn-wait">
           <span class="learning-indicator"></span>
-          Zet de trede nu in de <strong>HOOGSTE</strong> stand (open) en houd hem even stil&hellip;
+          {$t('learn.pedal_high_prompt')}
         </div>
       {:else if pedalLearnModal.step === 'klaar'}
-        <div class="kb-learn-step kb-learn-ok">&#10004; Trede ingeleerd: {pedalLearnModal.msg}</div>
+        <div class="kb-learn-step kb-learn-ok">&#10004; {$t('learn.pedal_learned')} {pedalLearnModal.msg}</div>
       {:else}
         <div class="kb-learn-step kb-learn-fout">&#10006; {pedalLearnModal.msg}</div>
       {/if}
       <div class="kb-learn-knoppen">
         {#if pedalLearnModal.step === 'fout'}
-          <button class="btn btn-secondary btn-sm" on:click={() => { const k = pedalLearnModal.kind; const d = pedalLearnModal.division; pedalLearnModal = null; learnPedalFlow(k, d); }}>Opnieuw</button>
+          <button class="btn btn-secondary btn-sm" on:click={() => { const k = pedalLearnModal.kind; const d = pedalLearnModal.division; pedalLearnModal = null; learnPedalFlow(k, d); }}>{$t('learn.retry')}</button>
         {/if}
         <button class="btn btn-ghost btn-sm" on:click={() => pedalLearnModal = null}>
-          {pedalLearnModal.step === 'klaar' ? 'Sluiten' : 'Annuleren'}
+          {pedalLearnModal.step === 'klaar' ? $t('actions.close') : $t('actions.cancel')}
         </button>
       </div>
     </div>
@@ -5580,31 +5620,31 @@
 {#if kbLearnModal}
   <div class="kb-learn-overlay">
     <div class="kb-learn-modal">
-      <h3>Klavier inleren — {kbLearnModal.division}</h3>
+      <h3>{$t('learn.keyboard_title').replace('{name}', kbLearnModal.division)}</h3>
       {#if kbLearnModal.step === 1}
         <div class="kb-learn-step kb-learn-wait">
           <span class="learning-indicator"></span>
-          Druk nu de <strong>LAAGSTE</strong> toets van dit klavier in…
+          {$t('learn.key_low_prompt')}
         </div>
       {:else if kbLearnModal.step === 2}
         <div class="kb-learn-step kb-learn-ok">
-          ✔ Laagste toets herkend: <strong>{noteName(kbLearnModal.first.note)}</strong> (MIDI-kanaal {kbLearnModal.first.channel + 1})
+          ✔ {$t('learn.key_low_detected')} <strong>{noteName(kbLearnModal.first.note)}</strong> {$t('learn.key_midi_channel').replace('{channel}', kbLearnModal.first.channel + 1)}
         </div>
         <div class="kb-learn-step kb-learn-wait">
           <span class="learning-indicator"></span>
-          Druk nu de <strong>HOOGSTE</strong> toets in…
+          {$t('learn.key_high_prompt')}
         </div>
       {:else if kbLearnModal.step === 'klaar'}
-        <div class="kb-learn-step kb-learn-ok">✔ Klavier ingeleerd: {kbLearnModal.msg}</div>
+        <div class="kb-learn-step kb-learn-ok">✔ {$t('learn.keyboard_learned')} {kbLearnModal.msg}</div>
       {:else}
         <div class="kb-learn-step kb-learn-fout">✖ {kbLearnModal.msg}</div>
       {/if}
       <div class="kb-learn-knoppen">
         {#if kbLearnModal.step === 'fout'}
-          <button class="btn btn-secondary btn-sm" on:click={() => { const d = kbLearnModal.division; closeKbLearn(); learnChannel(d); }}>Opnieuw</button>
+          <button class="btn btn-secondary btn-sm" on:click={() => { const d = kbLearnModal.division; closeKbLearn(); learnChannel(d); }}>{$t('learn.retry')}</button>
         {/if}
         <button class="btn btn-ghost btn-sm" on:click={closeKbLearn}>
-          {kbLearnModal.step === 'klaar' ? 'Sluiten' : 'Annuleren'}
+          {kbLearnModal.step === 'klaar' ? $t('actions.close') : $t('actions.cancel')}
         </button>
       </div>
     </div>

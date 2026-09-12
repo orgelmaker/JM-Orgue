@@ -1734,6 +1734,15 @@ fn run_audio_thread(
         _ => 0,
     };
 
+    // Kanaalaantal van de stream = wat cpal als default meldt: onder ASIO
+    // `ASIOGetChannels().outs` (ALLE uitgangen van de driver, bv. 8 op een
+    // 8-kanaals interface), onder WASAPI het shared-mode mix-formaat van het
+    // endpoint (= de luidsprekerconfiguratie in Windows; cpal 0.15 kent geen
+    // exclusive mode en accepteert in shared mode geen ander aantal). Meer
+    // aanvragen is dus onmogelijk én onnodig — de UI moet dít aantal tonen
+    // (StatusDto.channels), niet zelf enumereren. De logregel hieronder
+    // ("kanalen: N") is het verificatiepunt: op een 8-uits ASIO-interface
+    // hoort hier 8 te staan.
     let mut stream_config: cpal::StreamConfig = supported.config();
     stream_config.buffer_size = buffer_size;
 

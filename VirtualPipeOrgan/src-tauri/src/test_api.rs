@@ -127,6 +127,8 @@ fn route(
         (tiny_http::Method::Post, "/sampleset/trim") => handle_sampleset_trim(body),
         (tiny_http::Method::Post, "/sampleset/loop_scan") => handle_sampleset_loop_scan(body),
         (tiny_http::Method::Post, "/sampleset/loop_apply") => handle_sampleset_loop_apply(body),
+        (tiny_http::Method::Get, "/division_channels") => Ok(handle_division_channels(state)),
+        (tiny_http::Method::Post, "/division_channels") => handle_set_division_channels(state, body),
         (tiny_http::Method::Post, "/polyphony") => {
             let v: serde_json::Value = serde_json::from_str(body).unwrap_or_default();
             let n = v.get("voices").and_then(|x| x.as_u64()).unwrap_or(1024) as usize;
@@ -202,9 +204,11 @@ fn method_str(m: &tiny_http::Method) -> &'static str {
 
 fn handle_status(state: &AppState) -> Value {
     let audio = state.audio_player.read();
-    let (sample_rate, voice_count, peaks) = match audio.as_ref() {
-        Some(p) => (*p.sample_rate.read(), p.voice_count(), p.peak_meters()),
-        None => (0, 0, (0.0, 0.0)),
+    let (sample_rate, voice_count, peaks, channels, audio_host, audio_device, buffer_frames) = match audio.as_ref() {
+        Some(p) => (*p.sample_rate.read(), p.voice_count(), p.peak_meters(),
+                    *p.current_channels.read(), p.current_host.read().clone(),
+                    p.current_device.read().clone(), *p.current_buffer_frames.read()),
+        None => (0, 0, (0.0, 0.0), 0u16, String::new(), String::new(), 0u32),
     };
     let organ = state.loaded_organ_info.read();
     let drawn = state.drawn_stops.read();
@@ -212,6 +216,10 @@ fn handle_status(state: &AppState) -> Value {
     json!({
         "audio_running": audio.is_some(),
         "sample_rate": sample_rate,
+        "channels": channels,
+        "audio_host": audio_host,
+        "audio_device": audio_device,
+        "buffer_frames": buffer_frames,
         "voice_count": voice_count,
         "polyphony": crate::audio::polyphony_target(),
         "render_load": crate::audio::render_load().0,
@@ -359,6 +367,36 @@ fn handle_reverb(state: &AppState, body: &str) -> Result<Value, (u16, String)> {
         preset, rt60, pre_delay_ms, damping, room_size, mix,
     });
     Ok(json!({ "ok": true, "preset": preset, "rt60": rt60, "mix": mix }))
+}
+
+/// Kanaalaantal van de lopende stream + per divisie de gekozen uitgangen.
+/// Lock-volgorde: eerst loaded_organ_info, dan division_output_channels
+/// (audit 44); audio_player apart en direct weer los.
+fn handle_division_channels(state: &AppState) -> Value {
+    let channels = {
+        let g = state.audio_player.read();
+        g.as_ref().map(|p| *p.current_channels.read()).unwrap_or(0)
+    };
+    let organ = state.loaded_organ_info.read();
+    let chans = state.division_output_channels.read();
+    let divisions: Vec<Value> = organ.as_ref().map(|o| o.divisions.iter().enumerate().map(|(i, d)| json!({
+        "name": d.name,
+        "channels": chans.get(i).cloned().unwrap_or_default(),
+    })).collect()).unwrap_or_default();
+    json!({ "channels": channels, "divisions": divisions })
+}
+
+fn handle_set_division_channels(state: &AppState, body: &str) -> Result<Value, (u16, String)> {
+    let v: Value = serde_json::from_str(body)
+        .map_err(|e| (400u16, format!("Ongeldige JSON body: {}", e)))?;
+    let division = v.get("division").and_then(|d| d.as_str())
+        .ok_or((400u16, "Missing 'division' in body".to_string()))?;
+    let channels: Vec<u8> = v.get("channels").and_then(|c| c.as_array())
+        .map(|a| a.iter().filter_map(|x| x.as_u64()).map(|x| x as u8).collect())
+        .unwrap_or_default();
+    crate::commands::set_division_output_channels_inner(state, division, channels.clone())
+        .map_err(|e| (500u16, e))?;
+    Ok(json!({ "ok": true, "division": division, "channels": channels }))
 }
 
 fn handle_record_start(state: &AppState, body: &str) -> Result<Value, (u16, String)> {

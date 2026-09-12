@@ -198,7 +198,7 @@
               <span class="stop-item-name">{stop.name}</span>
               <span class="stop-item-pitch">{stop.pitch}</span>
               {#if stopHasAnyVoicing(stop)}
-                <span class="edit-dot" title="Heeft voicing-aanpassingen">●</span>
+                <span class="edit-dot" title={$t('voicing.has_edits')}>●</span>
               {/if}
             </button>
           {/each}

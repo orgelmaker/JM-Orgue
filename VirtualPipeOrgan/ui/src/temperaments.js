@@ -39,6 +39,7 @@ export const temperaments = [
   {
     name: "Equal Temperament",
     nameDutch: "Gelijkzwevende stemming",
+    names: { nl: "Gelijkzwevende stemming", en: "Equal temperament", fr: "Tempérament égal", de: "Gleichstufige Stimmung" },
     category: "equal",
     period: "Theoretisch beschreven ca. 1584 (Zhu Zaiyu / Stevin), algemeen verspreid vanaf 19e eeuw",
     year: 1584,
@@ -53,6 +54,7 @@ export const temperaments = [
   {
     name: "Pythagorean",
     nameDutch: "Pythagorische stemming",
+    names: { nl: "Pythagorische stemming", en: "Pythagorean tuning", fr: "Tempérament pythagoricien", de: "Pythagoreische Stimmung" },
     category: "pythagorean",
     period: "Oudheid / Middeleeuwen (Pythagoras, ca. 500 v.Chr.)",
     year: -500,
@@ -67,6 +69,7 @@ export const temperaments = [
   {
     name: "Just Intonation (Major)",
     nameDutch: "Reine stemming (majeur)",
+    names: { nl: "Reine stemming (majeur)", en: "Just intonation (major)", fr: "Intonation juste (majeur)", de: "Reine Stimmung (Dur)" },
     category: "just",
     period: "Theoretisch, o.a. Zarlino (1558), Marpurg",
     year: 1558,
@@ -81,6 +84,7 @@ export const temperaments = [
   {
     name: "Quarter-comma Meantone",
     nameDutch: "1/4-komma middentoon (Aaron)",
+    names: { nl: "1/4-komma middentoon (Aaron)", en: "1/4-comma meantone (Aaron)", fr: "Mésotonique 1/4 de comma (Aaron)", de: "1/4-Komma-Mitteltönig (Aaron)" },
     category: "meantone",
     period: "Renaissance / Vroege Barok (Pietro Aaron, 1523; Zarlino 1571; Salinas 1577)",
     year: 1523,
@@ -91,6 +95,7 @@ export const temperaments = [
   {
     name: "Quarter-comma Meantone (D# variant)",
     nameDutch: "1/4-komma middentoon (met D# i.p.v. Eb)",
+    names: { nl: "1/4-komma middentoon (met D# i.p.v. Eb)", en: "1/4-comma meantone (D# instead of Eb)", fr: "Mésotonique 1/4 de comma (D# au lieu de Eb)", de: "1/4-Komma-Mitteltönig (Dis statt Es)" },
     category: "meantone",
     period: "Renaissance / Vroege Barok",
     year: 1523,
@@ -101,6 +106,7 @@ export const temperaments = [
   {
     name: "1/5-comma Meantone (Rossi)",
     nameDutch: "1/5-komma middentoon (Rossi)",
+    names: { nl: "1/5-komma middentoon (Rossi)", en: "1/5-comma meantone (Rossi)", fr: "Mésotonique 1/5 de comma (Rossi)", de: "1/5-Komma-Mitteltönig (Rossi)" },
     category: "meantone",
     period: "Barok (Lemme Rossi, 1666)",
     year: 1666,
@@ -111,6 +117,7 @@ export const temperaments = [
   {
     name: "1/6-comma Meantone (Silbermann)",
     nameDutch: "1/6-komma middentoon (Silbermann)",
+    names: { nl: "1/6-komma middentoon (Silbermann)", en: "1/6-comma meantone (Silbermann)", fr: "Mésotonique 1/6 de comma (Silbermann)", de: "1/6-Komma-Mitteltönig (Silbermann)" },
     category: "meantone",
     period: "Barok (Gottfried Silbermann, ca. 1700-1750; ook Sauveur 1707)",
     year: 1700,
@@ -121,6 +128,7 @@ export const temperaments = [
   {
     name: "2/9-comma Meantone (Rossi)",
     nameDutch: "2/9-komma middentoon (Rossi)",
+    names: { nl: "2/9-komma middentoon (Rossi)", en: "2/9-comma meantone (Rossi)", fr: "Mésotonique 2/9 de comma (Rossi)", de: "2/9-Komma-Mitteltönig (Rossi)" },
     category: "meantone",
     period: "Barok (Lemme Rossi)",
     year: 1666,
@@ -131,6 +139,7 @@ export const temperaments = [
   {
     name: "1/3-comma Meantone (Salinas)",
     nameDutch: "1/3-komma middentoon (Salinas)",
+    names: { nl: "1/3-komma middentoon (Salinas)", en: "1/3-comma meantone (Salinas)", fr: "Mésotonique 1/3 de comma (Salinas)", de: "1/3-Komma-Mitteltönig (Salinas)" },
     category: "meantone",
     period: "Renaissance (Francisco de Salinas, 1577)",
     year: 1577,
@@ -141,6 +150,7 @@ export const temperaments = [
   {
     name: "2/7-comma Meantone (Zarlino)",
     nameDutch: "2/7-komma middentoon (Zarlino)",
+    names: { nl: "2/7-komma middentoon (Zarlino)", en: "2/7-comma meantone (Zarlino)", fr: "Mésotonique 2/7 de comma (Zarlino)", de: "2/7-Komma-Mitteltönig (Zarlino)" },
     category: "meantone",
     period: "Renaissance (Gioseffo Zarlino, 1558)",
     year: 1558,
@@ -155,6 +165,7 @@ export const temperaments = [
   {
     name: "Werckmeister III",
     nameDutch: "Werckmeister III",
+    names: { nl: "Werckmeister III", en: "Werckmeister III", fr: "Werckmeister III", de: "Werckmeister III" },
     category: "well",
     period: "Barok (Andreas Werckmeister, 1691)",
     year: 1691,
@@ -165,6 +176,7 @@ export const temperaments = [
   {
     name: "Werckmeister IV",
     nameDutch: "Werckmeister IV",
+    names: { nl: "Werckmeister IV", en: "Werckmeister IV", fr: "Werckmeister IV", de: "Werckmeister IV" },
     category: "well",
     period: "Barok (Andreas Werckmeister, 1691)",
     year: 1691,
@@ -175,6 +187,7 @@ export const temperaments = [
   {
     name: "Werckmeister V",
     nameDutch: "Werckmeister V",
+    names: { nl: "Werckmeister V", en: "Werckmeister V", fr: "Werckmeister V", de: "Werckmeister V" },
     category: "well",
     period: "Barok (Andreas Werckmeister, 1691)",
     year: 1691,
@@ -185,6 +198,7 @@ export const temperaments = [
   {
     name: "Werckmeister VI",
     nameDutch: "Werckmeister VI (Septenarius)",
+    names: { nl: "Werckmeister VI (Septenarius)", en: "Werckmeister VI (Septenarius)", fr: "Werckmeister VI (Septenarius)", de: "Werckmeister VI (Septenarius)" },
     category: "well",
     period: "Barok (Andreas Werckmeister, 1691)",
     year: 1691,
@@ -195,6 +209,7 @@ export const temperaments = [
   {
     name: "Kirnberger II",
     nameDutch: "Kirnberger II",
+    names: { nl: "Kirnberger II", en: "Kirnberger II", fr: "Kirnberger II", de: "Kirnberger II" },
     category: "well",
     period: "Barok / Klassiek (Johann Philipp Kirnberger, 1771)",
     year: 1771,
@@ -205,6 +220,7 @@ export const temperaments = [
   {
     name: "Kirnberger III",
     nameDutch: "Kirnberger III",
+    names: { nl: "Kirnberger III", en: "Kirnberger III", fr: "Kirnberger III", de: "Kirnberger III" },
     category: "well",
     period: "Barok / Klassiek (Johann Philipp Kirnberger, 1779)",
     year: 1779,
@@ -215,6 +231,7 @@ export const temperaments = [
   {
     name: "Vallotti",
     nameDutch: "Vallotti (Vallotti-Young)",
+    names: { nl: "Vallotti (Vallotti-Young)", en: "Vallotti (Vallotti-Young)", fr: "Vallotti (Vallotti-Young)", de: "Vallotti (Vallotti-Young)" },
     category: "well",
     period: "Barok / Klassiek (Francesco Vallotti, ca. 1728; gepubliceerd 1779)",
     year: 1728,
@@ -225,6 +242,7 @@ export const temperaments = [
   {
     name: "Young II",
     nameDutch: "Young II",
+    names: { nl: "Young II", en: "Young II", fr: "Young II", de: "Young II" },
     category: "well",
     period: "Klassiek (Thomas Young, 1800)",
     year: 1800,
@@ -235,6 +253,7 @@ export const temperaments = [
   {
     name: "Young I",
     nameDutch: "Young I",
+    names: { nl: "Young I", en: "Young I", fr: "Young I", de: "Young I" },
     category: "well",
     period: "Klassiek (Thomas Young, 1799)",
     year: 1799,
@@ -249,6 +268,7 @@ export const temperaments = [
   {
     name: "Kellner",
     nameDutch: "Kellner (Bach)",
+    names: { nl: "Kellner (Bach)", en: "Kellner (Bach)", fr: "Kellner (Bach)", de: "Kellner (Bach)" },
     category: "well",
     period: "Reconstructie (Herbert Anton Kellner, 1975/1982)",
     year: 1975,
@@ -259,6 +279,7 @@ export const temperaments = [
   {
     name: "Barnes (Bach)",
     nameDutch: "Barnes (Bach, 1977)",
+    names: { nl: "Barnes (Bach, 1977)", en: "Barnes (Bach, 1977)", fr: "Barnes (Bach, 1977)", de: "Barnes (Bach, 1977)" },
     category: "well",
     period: "Reconstructie (John Barnes, 1977)",
     year: 1977,
@@ -269,6 +290,7 @@ export const temperaments = [
   {
     name: "Bach-Lehman",
     nameDutch: "Bach-Lehman (2005)",
+    names: { nl: "Bach-Lehman (2005)", en: "Bach-Lehman (2005)", fr: "Bach-Lehman (2005)", de: "Bach-Lehman (2005)" },
     category: "well",
     period: "Reconstructie (Bradley Lehman, 2005, gebaseerd op titelpagina WTC)",
     year: 2005,
@@ -279,6 +301,7 @@ export const temperaments = [
   {
     name: "Bach (Klais)",
     nameDutch: "Bach-Klais",
+    names: { nl: "Bach-Klais", en: "Bach-Klais", fr: "Bach-Klais", de: "Bach-Klais" },
     category: "well",
     period: "Reconstructie (Orgelbau Klais, Bonn)",
     year: 1970,
@@ -289,6 +312,7 @@ export const temperaments = [
   {
     name: "Neidhardt I (Grosse Stadt)",
     nameDutch: "Neidhardt I (Grote Stad)",
+    names: { nl: "Neidhardt I (Grote Stad)", en: "Neidhardt I (large town)", fr: "Neidhardt I (grande ville)", de: "Neidhardt I (Große Stadt)" },
     category: "well",
     period: "Barok (Johann Georg Neidhardt, 1724/1732)",
     year: 1724,
@@ -299,6 +323,7 @@ export const temperaments = [
   {
     name: "Neidhardt II (Kleine Stadt)",
     nameDutch: "Neidhardt II (Kleine Stad)",
+    names: { nl: "Neidhardt II (Kleine Stad)", en: "Neidhardt II (small town)", fr: "Neidhardt II (petite ville)", de: "Neidhardt II (Kleine Stadt)" },
     category: "well",
     period: "Barok (Johann Georg Neidhardt, 1724/1732)",
     year: 1724,
@@ -309,6 +334,7 @@ export const temperaments = [
   {
     name: "Neidhardt III (Dorf)",
     nameDutch: "Neidhardt III (Dorp)",
+    names: { nl: "Neidhardt III (Dorp)", en: "Neidhardt III (village)", fr: "Neidhardt III (village)", de: "Neidhardt III (Dorf)" },
     category: "well",
     period: "Barok (Johann Georg Neidhardt, 1724/1732)",
     year: 1724,
@@ -319,6 +345,7 @@ export const temperaments = [
   {
     name: "Bendeler III",
     nameDutch: "Bendeler III",
+    names: { nl: "Bendeler III", en: "Bendeler III", fr: "Bendeler III", de: "Bendeler III" },
     category: "well",
     period: "Barok (Johann Philipp Bendeler, ca. 1690)",
     year: 1690,
@@ -329,6 +356,7 @@ export const temperaments = [
   {
     name: "Lambert",
     nameDutch: "Lambert",
+    names: { nl: "Lambert", en: "Lambert", fr: "Lambert", de: "Lambert" },
     category: "well",
     period: "Klassiek (Johann Heinrich Lambert, 1774)",
     year: 1774,
@@ -343,6 +371,7 @@ export const temperaments = [
   {
     name: "Rameau (modified 1/4-comma)",
     nameDutch: "Rameau (gemodificeerde 1/4-komma)",
+    names: { nl: "Rameau (gemodificeerde 1/4-komma)", en: "Rameau (modified 1/4-comma)", fr: "Rameau (1/4 de comma modifié)", de: "Rameau (modifiziertes 1/4-Komma)" },
     category: "historical",
     period: "Barok (Jean-Philippe Rameau, 1726)",
     year: 1726,
@@ -353,6 +382,7 @@ export const temperaments = [
   {
     name: "Schlick (Vogel)",
     nameDutch: "Schlick (reconstructie Vogel)",
+    names: { nl: "Schlick (reconstructie Vogel)", en: "Schlick (Vogel reconstruction)", fr: "Schlick (reconstruction Vogel)", de: "Schlick (Rekonstruktion Vogel)" },
     category: "historical",
     period: "Late Middeleeuwen / Renaissance (Arnolt Schlick, 1511; reconstructie H. Vogel)",
     year: 1511,
@@ -363,6 +393,7 @@ export const temperaments = [
   {
     name: "Bruder 1829",
     nameDutch: "Bruder (1829)",
+    names: { nl: "Bruder (1829)", en: "Bruder (1829)", fr: "Bruder (1829)", de: "Bruder (1829)" },
     category: "historical",
     period: "Romantiek (Gebruder Bruder, 1829, Schwarzwald)",
     year: 1829,
@@ -373,6 +404,7 @@ export const temperaments = [
   {
     name: "Van Zwolle",
     nameDutch: "Van Zwolle",
+    names: { nl: "Van Zwolle", en: "Van Zwolle", fr: "Van Zwolle", de: "Van Zwolle" },
     category: "historical",
     period: "Late Middeleeuwen (Henri Arnaut de Zwolle, ca. 1440)",
     year: 1440,
@@ -384,6 +416,7 @@ export const temperaments = [
   {
     name: "Tartini-Vallotti",
     nameDutch: "Tartini-Vallotti",
+    names: { nl: "Tartini-Vallotti", en: "Tartini-Vallotti", fr: "Tartini-Vallotti", de: "Tartini-Vallotti" },
     category: "well",
     period: "18e eeuw (Tartini/Vallotti variant)",
     year: 1754,
@@ -394,6 +427,7 @@ export const temperaments = [
   {
     name: "D'Alembert",
     nameDutch: "D'Alembert",
+    names: { nl: "D'Alembert", en: "D'Alembert", fr: "D'Alembert", de: "D'Alembert" },
     category: "well",
     period: "18e eeuw (Jean le Rond d'Alembert, 1752)",
     year: 1752,
@@ -404,6 +438,7 @@ export const temperaments = [
   {
     name: "Marpurg I",
     nameDutch: "Marpurg I",
+    names: { nl: "Marpurg I", en: "Marpurg I", fr: "Marpurg I", de: "Marpurg I" },
     category: "well",
     period: "18e eeuw (Friedrich Wilhelm Marpurg, 1756)",
     year: 1756,
@@ -414,6 +449,7 @@ export const temperaments = [
   {
     name: "Marpurg II",
     nameDutch: "Marpurg II",
+    names: { nl: "Marpurg II", en: "Marpurg II", fr: "Marpurg II", de: "Marpurg II" },
     category: "well",
     period: "18e eeuw (Friedrich Wilhelm Marpurg)",
     year: 1756,
@@ -424,6 +460,7 @@ export const temperaments = [
   {
     name: "Marpurg III",
     nameDutch: "Marpurg III",
+    names: { nl: "Marpurg III", en: "Marpurg III", fr: "Marpurg III", de: "Marpurg III" },
     category: "well",
     period: "18e eeuw (Friedrich Wilhelm Marpurg)",
     year: 1756,
@@ -434,6 +471,7 @@ export const temperaments = [
   {
     name: "Stanhope",
     nameDutch: "Stanhope",
+    names: { nl: "Stanhope", en: "Stanhope", fr: "Stanhope", de: "Stanhope" },
     category: "well",
     period: "18e eeuw (Charles Stanhope, 1806)",
     year: 1806,
@@ -444,6 +482,7 @@ export const temperaments = [
   {
     name: "Thomas Young (origineel)",
     nameDutch: "Thomas Young (origineel)",
+    names: { nl: "Thomas Young (origineel)", en: "Thomas Young (original)", fr: "Thomas Young (original)", de: "Thomas Young (Original)" },
     category: "well",
     period: "19e eeuw (Thomas Young, 1799)",
     year: 1799,
@@ -454,6 +493,7 @@ export const temperaments = [
   {
     name: "Prinz",
     nameDutch: "Prinz",
+    names: { nl: "Prinz", en: "Prinz", fr: "Prinz", de: "Prinz" },
     category: "well",
     period: "17e eeuw (Johann Georg Prinz)",
     year: 1690,
@@ -464,6 +504,7 @@ export const temperaments = [
   {
     name: "Sorge",
     nameDutch: "Sorge",
+    names: { nl: "Sorge", en: "Sorge", fr: "Sorge", de: "Sorge" },
     category: "well",
     period: "18e eeuw (Georg Andreas Sorge, 1744)",
     year: 1744,
@@ -474,6 +515,7 @@ export const temperaments = [
   {
     name: "Grammateus",
     nameDutch: "Grammateus",
+    names: { nl: "Grammateus", en: "Grammateus", fr: "Grammateus", de: "Grammateus" },
     category: "historical",
     period: "Renaissance (Henricus Grammateus, 1518)",
     year: 1518,
@@ -484,6 +526,7 @@ export const temperaments = [
   {
     name: "Fogliano-Bentivoglio",
     nameDutch: "Fogliano-Bentivoglio",
+    names: { nl: "Fogliano-Bentivoglio", en: "Fogliano-Bentivoglio", fr: "Fogliano-Bentivoglio", de: "Fogliano-Bentivoglio" },
     category: "historical",
     period: "Renaissance (Lodovico Fogliano, 1529)",
     year: 1529,
@@ -494,6 +537,7 @@ export const temperaments = [
   {
     name: "De Caus",
     nameDutch: "De Caus",
+    names: { nl: "De Caus", en: "De Caus", fr: "De Caus", de: "De Caus" },
     category: "historical",
     period: "17e eeuw (Salomon de Caus, 1615)",
     year: 1615,
@@ -504,6 +548,7 @@ export const temperaments = [
   {
     name: "Praetorius",
     nameDutch: "Praetorius",
+    names: { nl: "Praetorius", en: "Praetorius", fr: "Praetorius", de: "Praetorius" },
     category: "historical",
     period: "Vroeg-barok (Michael Praetorius, 1619)",
     year: 1619,
@@ -514,6 +559,7 @@ export const temperaments = [
   {
     name: "Neidhardt IV (Dorf)",
     nameDutch: "Neidhardt IV (Dorp)",
+    names: { nl: "Neidhardt IV (Dorp)", en: "Neidhardt IV (village)", fr: "Neidhardt IV (village)", de: "Neidhardt IV (Dorf)" },
     category: "well",
     period: "18e eeuw (Johann Georg Neidhardt, 1724)",
     year: 1724,
@@ -524,6 +570,7 @@ export const temperaments = [
   {
     name: "Neidhardt V (Kleine Stadt)",
     nameDutch: "Neidhardt V (Kleine stad)",
+    names: { nl: "Neidhardt V (Kleine stad)", en: "Neidhardt V (small town)", fr: "Neidhardt V (petite ville)", de: "Neidhardt V (Kleine Stadt)" },
     category: "well",
     period: "18e eeuw (Johann Georg Neidhardt, 1724)",
     year: 1724,
@@ -534,6 +581,7 @@ export const temperaments = [
   {
     name: "Colonna",
     nameDutch: "Colonna",
+    names: { nl: "Colonna", en: "Colonna", fr: "Colonna", de: "Colonna" },
     category: "historical",
     period: "Renaissance (Fabio Colonna, 1618)",
     year: 1618,
@@ -544,6 +592,7 @@ export const temperaments = [
   {
     name: "Schlick (gemodificeerd)",
     nameDutch: "Schlick (gemodificeerd)",
+    names: { nl: "Schlick (gemodificeerd)", en: "Schlick (modified)", fr: "Schlick (modifié)", de: "Schlick (modifiziert)" },
     category: "historical",
     period: "Vroeg 16e eeuw (Arnolt Schlick, 1511)",
     year: 1511,
@@ -554,6 +603,7 @@ export const temperaments = [
   {
     name: "Lambert 1774",
     nameDutch: "Lambert 1774",
+    names: { nl: "Lambert 1774", en: "Lambert 1774", fr: "Lambert 1774", de: "Lambert 1774" },
     category: "well",
     period: "18e eeuw (Johann Heinrich Lambert, 1774)",
     year: 1774,
@@ -564,6 +614,7 @@ export const temperaments = [
   {
     name: "Barnes-Bach",
     nameDutch: "Barnes-Bach",
+    names: { nl: "Barnes-Bach", en: "Barnes-Bach", fr: "Barnes-Bach", de: "Barnes-Bach" },
     category: "well",
     period: "20e-eeuwse reconstructie (John Barnes, 1979)",
     year: 1979,
@@ -574,6 +625,7 @@ export const temperaments = [
   {
     name: "Vallotti-Young",
     nameDutch: "Vallotti-Young",
+    names: { nl: "Vallotti-Young", en: "Vallotti-Young", fr: "Vallotti-Young", de: "Vallotti-Young" },
     category: "well",
     period: "18e-eeuwse synthese (Vallotti 1779 / Young 1800)",
     year: 1800,

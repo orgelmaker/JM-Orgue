@@ -18,7 +18,7 @@
   $: onHeadphones = audioProfiles?.active === 'headphones';
   // Twee heldere standen (0.7.3): Hoofdtelefoon of Speakers — nooit een derde
   // "profielloos" label. Alles wat geen hoofdtelefoon is, toont "Speakers".
-  $: profileLabel = onHeadphones ? 'Hoofdtelefoon' : 'Speakers';
+  $: profileLabel = onHeadphones ? $t('settings.audio_profile_headphones') : $t('settings.audio_profile_speakers');
 </script>
 
 <header class="header">
@@ -84,7 +84,7 @@
         class="btn btn-secondary"
         disabled={audioProfileSwitching}
         on:click={() => dispatch('toggleAudioProfile')}
-        title={onHeadphones ? 'Wissel naar speakers' : 'Wissel naar hoofdtelefoon'}
+        title={onHeadphones ? $t('settings.audio_switch_to_speakers') : $t('settings.audio_switch_to_headphones')}
       >
         {#if audioProfileSwitching}
           <span class="learning-indicator"></span>
@@ -123,8 +123,8 @@
       <button
         class="btn btn-ghost btn-icon btn-icon-sm"
         on:click={() => dispatch('toggleHeader')}
-        title="Hoofdbalk verbergen (via de knop in de werkbalk weer te tonen)"
-        aria-label="Hoofdbalk verbergen"
+        title={$t('header.hide_bar_title')}
+        aria-label={$t('header.hide_bar')}
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <polyline points="18 15 12 9 6 15"/>

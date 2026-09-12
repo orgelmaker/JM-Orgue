@@ -14,6 +14,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
   import { OpenSheetMusicDisplay } from 'opensheetmusicdisplay';
+  import { t, tx } from '../lib/i18n.js';
 
   // URL-hash parsen: file-pad (file-modus) of live-vlag (live-modus).
   const isLive = /[&?]live=1/.test(window.location.hash);
@@ -162,19 +163,20 @@
     }
   }
 
-  const keyChoices = [
-    { v: -7, label: 'Ces / as' }, { v: -6, label: 'Ges / es' }, { v: -5, label: 'Des / bes' },
-    { v: -4, label: 'As / f' }, { v: -3, label: 'Es / c' }, { v: -2, label: 'Bes / g' },
-    { v: -1, label: 'F / d' }, { v: 0, label: 'C / a' }, { v: 1, label: 'G / e' },
-    { v: 2, label: 'D / b' }, { v: 3, label: 'A / fis' }, { v: 4, label: 'E / cis' },
-    { v: 5, label: 'B / gis' }, { v: 6, label: 'Fis / dis' }, { v: 7, label: 'Cis / ais' },
+  // Toonsoort-labels per taal (nl/de 'A / fis', en 'A / F#m', fr 'La / fa♯ m').
+  const KEY_FIFTHS = [
+    [-7, 'key_flat_7'], [-6, 'key_flat_6'], [-5, 'key_flat_5'], [-4, 'key_flat_4'],
+    [-3, 'key_flat_3'], [-2, 'key_flat_2'], [-1, 'key_flat_1'], [0, 'key_c'],
+    [1, 'key_sharp_1'], [2, 'key_sharp_2'], [3, 'key_sharp_3'], [4, 'key_sharp_4'],
+    [5, 'key_sharp_5'], [6, 'key_sharp_6'], [7, 'key_sharp_7'],
   ];
-  const gridChoices = [
-    { v: 1, label: 'Kwartnoten' }, { v: 2, label: 'Achtsten' },
-    { v: 4, label: 'Zestienden' }, { v: 8, label: '32e noten' },
+  $: keyChoices = KEY_FIFTHS.map(([v, k]) => ({ v, label: $t('notation.' + k) }));
+  $: gridChoices = [
+    { v: 1, label: $t('notation.grid_quarter') }, { v: 2, label: $t('notation.grid_eighth') },
+    { v: 4, label: $t('notation.grid_sixteenth') }, { v: 8, label: $t('notation.grid_32nd') },
   ];
 
-  function titleFromPath(p) { return p ? p.split(/[\\/]/).pop().replace(/\.(mid|midi)$/i, '') : 'Opname'; }
+  function titleFromPath(p) { return p ? p.split(/[\\/]/).pop().replace(/\.(mid|midi)$/i, '') : tx('notation.default_title'); }
   if (!isLive) title = titleFromPath(filePath);
 
   // ---- Rendering (debounced) ----
@@ -386,7 +388,7 @@
     scheduleRender();
   }
   function addStaff() {
-    staffConfig = [...staffConfig, { name: `Balk ${staffConfig.length + 1}`, divisions: [], bass: false }];
+    staffConfig = [...staffConfig, { name: tx('notation.staff_n').replace('{n}', staffConfig.length + 1), divisions: [], bass: false }];
   }
   function removeStaff(staffIdx) { staffConfig = staffConfig.filter((_, i) => i !== staffIdx); scheduleRender(); }
   function setStaffBass(staffIdx, v) { staffConfig[staffIdx].bass = v; staffConfig = staffConfig; scheduleRender(); }
@@ -407,10 +409,10 @@
         divisions: [...(l.divisions || [])],
       })),
     };
-    if (wizard.staves.length === 0) wizard.staves = [{ name: 'Balk 1', bass: false, divisions: [] }];
+    if (wizard.staves.length === 0) wizard.staves = [{ name: tx('notation.staff_n').replace('{n}', 1), bass: false, divisions: [] }];
   }
   function wizardAddStaff() {
-    wizard.staves = [...wizard.staves, { name: `Balk ${wizard.staves.length + 1}`, bass: false, divisions: [] }];
+    wizard.staves = [...wizard.staves, { name: tx('notation.staff_n').replace('{n}', wizard.staves.length + 1), bass: false, divisions: [] }];
   }
   function wizardRemoveStaff(i) {
     wizard.staves = wizard.staves.filter((_, idx) => idx !== i);
@@ -425,7 +427,7 @@
     try {
       await invoke('notation_configure_layers', {
         scoreId,
-        layers: wizard.staves.map(s => ({ name: s.name || 'Balk', bass_clef: !!s.bass, divisions: s.divisions })),
+        layers: wizard.staves.map(s => ({ name: s.name || tx('notation.staff'), bass_clef: !!s.bass, divisions: s.divisions })),
       });
       score = await invoke('notation_get_score', { scoreId });
       wizard = null;
@@ -641,7 +643,7 @@
     try {
       await invoke('notation_start_recording', { scoreId });
       recording = true;
-    } catch (e) { alert(`Opname-fout: ${e}`); }
+    } catch (e) { alert(tx('notation.record_error').replace('{error}', e)); }
   }
   async function toggleRecording() {
     if (!scoreId) return;
@@ -673,7 +675,7 @@
           await startBackendRecording();
         }
       }
-    } catch (e) { alert(`Opname-fout: ${e}`); }
+    } catch (e) { alert(tx('notation.record_error').replace('{error}', e)); }
   }
 
   // ---- LayerBar-acties ----
@@ -685,7 +687,7 @@
   }
   async function addLayer() {
     try {
-      const name = window.prompt('Naam van de nieuwe notenbalk?', `Balk ${(score?.layers?.length ?? 0) + 1}`);
+      const name = window.prompt(tx('notation.new_staff_prompt'), tx('notation.staff_n').replace('{n}', (score?.layers?.length ?? 0) + 1));
       if (!name) return;
       await invoke('notation_add_layer', { scoreId, name, bassClef: null });
       score = await invoke('notation_get_score', { scoreId });
@@ -717,14 +719,14 @@
       const { open } = await import('@tauri-apps/plugin-dialog');
       const sel = await open({
         multiple: false,
-        filters: [{ name: 'MIDI-bestand', extensions: ['mid', 'midi'] }],
+        filters: [{ name: tx('notation.midi_file_filter'), extensions: ['mid', 'midi'] }],
       });
       if (!sel) return;
       await invoke('notation_import_midi', { scoreId, path: sel, intoTake: null });
       // score-changed-event zorgt voor render; score-snapshot verfrissen voor LayerBar.
       score = await invoke('notation_get_score', { scoreId });
     } catch (e) {
-      alert(`MIDI importeren mislukt: ${e}`);
+      alert(tx('notation.midi_import_failed').replace('{error}', e));
     }
   }
 
@@ -878,7 +880,7 @@
           }
         } catch (e) {}
       }, 500);
-    } catch (e) { alert(`Afspelen mislukt: ${e}`); }
+    } catch (e) { alert(tx('notation.play_failed').replace('{error}', e)); }
   }
 
   // ---- Maatsoort + titel + MIDI-export (0.7.16) ----
@@ -896,10 +898,10 @@
     if (!isLive || scoreId == null) return;
     try {
       const { save } = await import('@tauri-apps/plugin-dialog');
-      const suggested = (score?.title || 'opname') + '.mid';
-      const path = await save({ defaultPath: suggested, filters: [{ name: 'MIDI-bestand', extensions: ['mid'] }] });
-      if (path) { await invoke('notation_export_midi', { scoreId, path }); alert(`MIDI opgeslagen:\n${path}`); }
-    } catch (e) { alert(`MIDI opslaan mislukt: ${e}`); }
+      const suggested = (score?.title || tx('notation.default_title')) + '.mid';
+      const path = await save({ defaultPath: suggested, filters: [{ name: tx('notation.midi_file_filter'), extensions: ['mid'] }] });
+      if (path) { await invoke('notation_export_midi', { scoreId, path }); alert(tx('notation.midi_saved').replace('{path}', path)); }
+    } catch (e) { alert(tx('notation.midi_save_failed').replace('{error}', e)); }
   }
 
   // ---- Duur wijzigen + kopiëren/plakken (0.7.6) ----
@@ -1022,7 +1024,7 @@
   async function openOtherFile() {
     try {
       const { open } = await import('@tauri-apps/plugin-dialog');
-      const sel = await open({ multiple: false, filters: [{ name: 'MIDI-bestand', extensions: ['mid', 'midi'] }] });
+      const sel = await open({ multiple: false, filters: [{ name: tx('notation.midi_file_filter'), extensions: ['mid', 'midi'] }] });
       if (sel) { filePath = sel; title = titleFromPath(sel); scheduleRender(); }
     } catch (e) { error = String(e); }
   }
@@ -1030,10 +1032,10 @@
     if (!xml) return;
     try {
       const { save } = await import('@tauri-apps/plugin-dialog');
-      const suggested = (filePath ? filePath.replace(/\.(mid|midi)$/i, '') : (score?.title || 'notatie')) + '.musicxml';
+      const suggested = (filePath ? filePath.replace(/\.(mid|midi)$/i, '') : (score?.title || tx('notation.default_musicxml_name'))) + '.musicxml';
       const path = await save({ defaultPath: suggested, filters: [{ name: 'MusicXML', extensions: ['musicxml', 'xml'] }] });
-      if (path) { await invoke('save_musicxml', { path, xml }); alert(`MusicXML opgeslagen:\n${path}`); }
-    } catch (e) { alert(`Opslaan mislukt: ${e}`); }
+      if (path) { await invoke('save_musicxml', { path, xml }); alert(tx('notation.musicxml_saved').replace('{path}', path)); }
+    } catch (e) { alert(tx('notation.save_failed').replace('{error}', e)); }
   }
   function printScore() { window.print(); }
 
@@ -1081,18 +1083,14 @@
     <!-- Wizard: balkindeling + divisie-routering, vóór het inspelen. -->
     <div class="wizard-overlay">
       <div class="wizard-modal">
-        <h3>Balkindeling</h3>
-        <p class="wizard-hint">
-          Kies hoeveel notenbalken je wilt, met welke sleutel, en welke divisies
-          tijdens het inspelen naar welke balk gaan. Meerdere opnamen (takes) over
-          elkaar per balk kan daarna via de LayerBar.
-        </p>
+        <h3>{$t('notation.wizard_title')}</h3>
+        <p class="wizard-hint">{$t('notation.wizard_hint')}</p>
         {#each wizard.staves as st, i}
           <div class="wizard-staff">
-            <input class="wizard-staff-name" type="text" bind:value={st.name} title="Naam van de balk" />
-            <select bind:value={st.bass} title="Sleutel">
-              <option value={false}>𝄞 viool</option>
-              <option value={true}>𝄢 bas</option>
+            <input class="wizard-staff-name" type="text" bind:value={st.name} title={$t('notation.staff_name_title')} />
+            <select bind:value={st.bass} title={$t('notation.clef')}>
+              <option value={false}>𝄞 {$t('notation.clef_treble')}</option>
+              <option value={true}>𝄢 {$t('notation.clef_bass')}</option>
             </select>
             <span class="wizard-divs">
               {#each divisions as div}
@@ -1101,21 +1099,21 @@
                   {div}
                 </label>
               {/each}
-              {#if divisions.length === 0}<span class="wizard-hint">geen orgel geladen — routering kan later</span>{/if}
+              {#if divisions.length === 0}<span class="wizard-hint">{$t('notation.no_organ_routing_later')}</span>{/if}
             </span>
             {#if wizard.staves.length > 1}
-              <button class="wizard-remove" on:click={() => wizardRemoveStaff(i)} title="Balk verwijderen" aria-label="Balk verwijderen">×</button>
+              <button class="wizard-remove" on:click={() => wizardRemoveStaff(i)} title={$t('notation.remove_staff')} aria-label={$t('notation.remove_staff')}>×</button>
             {/if}
           </div>
         {/each}
         <div class="wizard-actions">
-          <button class="btn btn-ghost btn-sm" on:click={wizardAddStaff}>+ Balk</button>
+          <button class="btn btn-ghost btn-sm" on:click={wizardAddStaff}>{$t('notation.add_staff')}</button>
           <span class="notation-spacer"></span>
           {#if scoreHasEvents}
-            <span class="wizard-hint">Er staan al noten — indeling vervangen kan alleen bij een lege partituur.</span>
-            <button class="btn btn-secondary btn-sm" on:click={() => wizard = null}>Sluiten</button>
+            <span class="wizard-hint">{$t('notation.wizard_has_notes')}</span>
+            <button class="btn btn-secondary btn-sm" on:click={() => wizard = null}>{$t('actions.close')}</button>
           {:else}
-            <button class="btn btn-primary btn-sm" on:click={wizardApply}>Start met deze indeling</button>
+            <button class="btn btn-primary btn-sm" on:click={wizardApply}>{$t('notation.wizard_start')}</button>
           {/if}
         </div>
       </div>
@@ -1127,145 +1125,145 @@
         class="btn record-toggle"
         class:recording={recording || armedWaiting}
         on:click={toggleRecording}
-        title={recording || armedWaiting ? 'Opname stoppen' : 'Opname starten — begint bij de eerste noot'}
+        title={recording || armedWaiting ? $t('notation.record_stop_title') : $t('notation.record_start_title')}
       >
         <span class="record-dot" class:on={recording || armedWaiting}></span>
-        {#if armedWaiting}Aftellen… {countInRemaining}{:else if recording}Stop{:else}Opname{/if}
+        {#if armedWaiting}{$t('notation.counting_in').replace('{n}', countInRemaining)}{:else if recording}{$t('midi_player.stop')}{:else}{$t('notation.record')}{/if}
       </button>
       <button class="btn btn-secondary btn-sm" on:click={togglePlayScore} disabled={recording || armedWaiting}
-        title={playingScore ? 'Afspelen stoppen' : 'Partituur afspelen door het orgel (huidige registratie)'}>
-        {playingScore ? '◼ Stop' : '▶ Afspelen'}
+        title={playingScore ? $t('notation.play_stop_title') : $t('notation.play_title')}>
+        {playingScore ? '◼ ' + $t('midi_player.stop') : '▶ ' + $t('notation.play')}
       </button>
-      <label>Tempo
+      <label>{$t('notation.tempo')}
         <input type="number" min="20" max="300" value={bpm} on:change={(e) => setBpmLive(e.currentTarget.value)} />
       </label>
-      <button class="btn btn-ghost btn-sm" on:click={previewTempo} title="Eén maat voortikken om het tempo te horen (neemt niets op)">♪ Test</button>
-      <label class="metro-toggle" title="Metronoom-tik in het notatievenster (aparte klik, geen orgelpijp)">
+      <button class="btn btn-ghost btn-sm" on:click={previewTempo} title={$t('notation.tempo_test_title')}>♪ {$t('notation.tempo_test')}</button>
+      <label class="metro-toggle" title={$t('notation.metronome_title')}>
         <input type="checkbox" checked={metroOn} on:change={(e) => setMetronomeCfg(e.currentTarget.checked, countInBeats)} />
-        Metronoom
+        {$t('notation.metronome')}
       </label>
-      <label title="Aantal tellen voortellen vóór de opname begint">Count-in
+      <label title={$t('notation.count_in_title')}>{$t('notation.count_in')}
         <select value={countInBeats} on:change={(e) => setMetronomeCfg(metroOn, Number(e.currentTarget.value))}>
-          <option value={0}>uit</option>
+          <option value={0}>{$t('notation.count_in_off')}</option>
           <option value={1}>1</option>
           <option value={2}>2</option>
           <option value={4}>4</option>
         </select>
       </label>
-      <label class="metro-toggle" title="Stapinvoer: speel een toets of akkoord op het klavier — of klik op de balk — en de noot komt op de invoercursor met de gekozen waarde">
+      <label class="metro-toggle" title={$t('notation.step_input_title')}>
         <input type="checkbox" checked={stepMode} on:change={(e) => setStepMode(e.currentTarget.checked)} />
-        Stapinvoer
+        {$t('notation.step_input')}
       </label>
       {#if stepMode}
-        <span class="step-durs" role="group" aria-label="Nootwaarde">
+        <span class="step-durs" role="group" aria-label={$t('notation.note_value')}>
           {#each [[4, '𝅝', '7'], [2, '𝅗𝅥', '6'], [1, '♩', '5'], [0.5, '♪', '4'], [0.25, '𝅘𝅥𝅯', '3'], [0.125, '𝅘𝅥𝅰', '2']] as [q, sym, key]}
             <button class="btn btn-ghost btn-sm step-dur" class:active={stepQuarters === q}
-              on:click={() => stepQuarters = q} title="Nootwaarde (toets {key})">{sym}</button>
+              on:click={() => stepQuarters = q} title={$t('notation.note_value_key').replace('{key}', key)}>{sym}</button>
           {/each}
         </span>
-        <label title="Gepunteerde waarde ×1,5 (toets .)" class="metro-toggle">
-          <input type="checkbox" bind:checked={stepDotted} />punt
+        <label title={$t('notation.dotted_title')} class="metro-toggle">
+          <input type="checkbox" bind:checked={stepDotted} />{$t('notation.dot')}
         </label>
-        <button class="btn btn-ghost btn-sm" on:click={stepRest} title="Rust: cursor schuift één waarde op (toets 0)">𝄽</button>
+        <button class="btn btn-ghost btn-sm" on:click={stepRest} title={$t('notation.rest_title')}>𝄽</button>
         <button class="btn btn-ghost btn-sm" on:click={() => stepLastChordNotes.length && stepInsert([...stepLastChordNotes])}
-          disabled={!stepLastChordNotes.length} title="Herhaal de laatste noot/het laatste akkoord (toets R)">R</button>
-        <button class="btn btn-ghost btn-sm" on:click={() => stepAlterLast(1)} disabled={!stepLastIds.length} title="Laatste plaatsing halve toon omhoog (↑)">♯</button>
-        <button class="btn btn-ghost btn-sm" on:click={() => stepAlterLast(-1)} disabled={!stepLastIds.length} title="Laatste plaatsing halve toon omlaag (↓)">♭</button>
+          disabled={!stepLastChordNotes.length} title={$t('notation.repeat_last_title')}>R</button>
+        <button class="btn btn-ghost btn-sm" on:click={() => stepAlterLast(1)} disabled={!stepLastIds.length} title={$t('notation.step_sharp_title')}>♯</button>
+        <button class="btn btn-ghost btn-sm" on:click={() => stepAlterLast(-1)} disabled={!stepLastIds.length} title={$t('notation.step_flat_title')}>♭</button>
       {/if}
-      <label>Toonsoort
+      <label>{$t('notation.key_signature')}
         <select value={keyFifths} on:change={(e) => setKeyLive(e.currentTarget.value)}>
           {#each keyChoices as k}<option value={k.v}>{k.label}</option>{/each}
         </select>
       </label>
-      <label>Maat
+      <label>{$t('notation.meter')}
         <select value={beatsPerBar} on:change={(e) => setMeterLive(e.currentTarget.value)}>
           <option value={2}>2/4</option><option value={3}>3/4</option>
           <option value={4}>4/4</option><option value={6}>6/4</option>
         </select>
       </label>
-      <label class="notation-title-field">Titel
+      <label class="notation-title-field">{$t('notation.title')}
         <input type="text" value={title} on:change={(e) => setTitleLive(e.currentTarget.value)} />
       </label>
-      <label class="tolerance-slider" title="Sleep naar links voor letterlijk (los), naar rechts voor strak (hard kwantiseren)">
-        Ritme
+      <label class="tolerance-slider" title={$t('notation.tolerance_title')}>
+        {$t('notation.rhythm')}
         <input type="range" min="0" max="100" step="5"
           bind:value={tolerancePct}
           on:change={(e) => setToleranceLive(Number(e.currentTarget.value))} />
-        <span class="tolerance-value">{tolerancePct < 33 ? 'los' : tolerancePct > 66 ? 'strak' : 'midden'}</span>
+        <span class="tolerance-value">{tolerancePct < 33 ? $t('notation.tol_loose') : tolerancePct > 66 ? $t('notation.tol_tight') : $t('notation.tol_medium')}</span>
       </label>
       <span class="notation-spacer"></span>
-      <button class="btn btn-ghost btn-sm" on:click={() => moveCursor(-1)} title="Vorige noot (←)">◄</button>
-      <button class="btn btn-ghost btn-sm" on:click={() => moveCursor(+1)} title="Volgende noot (→)">►</button>
-      <button class="btn btn-ghost btn-sm" on:click={deleteSelection} title="Selectie verwijderen (Delete)">Delete</button>
-      <button class="btn btn-ghost btn-sm" on:click={() => transposeSelection(-1)} title="Halve toon omlaag (↓)">−½</button>
-      <button class="btn btn-ghost btn-sm" on:click={() => transposeSelection(+1)} title="Halve toon omhoog (↑)">+½</button>
-      <button class="btn btn-ghost btn-sm" on:click={() => transposeSelection(-12)} title="Octaaf omlaag (Shift+↓)">−8va</button>
-      <button class="btn btn-ghost btn-sm" on:click={() => transposeSelection(+12)} title="Octaaf omhoog (Shift+↑)">+8va</button>
-      <button class="btn btn-ghost btn-sm" on:click={() => changeDuration('halve')} title="Duur halveren ([)">÷2</button>
-      <button class="btn btn-ghost btn-sm" on:click={() => changeDuration('double')} title="Duur verdubbelen (])">×2</button>
-      <button class="btn btn-ghost btn-sm" on:click={() => changeDuration('dot')} title="Punt aan/uit (.)">• punt</button>
-      <button class="btn btn-ghost btn-sm" on:click={copySelection} title="Kopiëren (Ctrl+C)">Kopiëren</button>
-      <button class="btn btn-ghost btn-sm" on:click={pasteClipboard} disabled={clipboardCount === 0} title="Plakken op de cursor (Ctrl+V)">Plakken{clipboardCount ? ` (${clipboardCount})` : ''}</button>
-      <button class="btn btn-ghost btn-sm" on:click={doUndo} title="Ongedaan (Ctrl+Z)">↶</button>
-      <button class="btn btn-ghost btn-sm" on:click={doRedo} title="Opnieuw (Ctrl+Y)">↷</button>
-      <button class="btn btn-ghost btn-sm" on:click={() => setZoom(osmdZoom - 0.1)} title="Uitzoomen">−</button>
+      <button class="btn btn-ghost btn-sm" on:click={() => moveCursor(-1)} title={$t('notation.prev_note_title')}>◄</button>
+      <button class="btn btn-ghost btn-sm" on:click={() => moveCursor(+1)} title={$t('notation.next_note_title')}>►</button>
+      <button class="btn btn-ghost btn-sm" on:click={deleteSelection} title={$t('notation.delete_selection_title')}>{$t('actions.delete')}</button>
+      <button class="btn btn-ghost btn-sm" on:click={() => transposeSelection(-1)} title={$t('notation.semitone_down_title')}>−½</button>
+      <button class="btn btn-ghost btn-sm" on:click={() => transposeSelection(+1)} title={$t('notation.semitone_up_title')}>+½</button>
+      <button class="btn btn-ghost btn-sm" on:click={() => transposeSelection(-12)} title={$t('notation.octave_down_title')}>−8va</button>
+      <button class="btn btn-ghost btn-sm" on:click={() => transposeSelection(+12)} title={$t('notation.octave_up_title')}>+8va</button>
+      <button class="btn btn-ghost btn-sm" on:click={() => changeDuration('halve')} title={$t('notation.halve_duration_title')}>÷2</button>
+      <button class="btn btn-ghost btn-sm" on:click={() => changeDuration('double')} title={$t('notation.double_duration_title')}>×2</button>
+      <button class="btn btn-ghost btn-sm" on:click={() => changeDuration('dot')} title={$t('notation.dot_toggle_title')}>• {$t('notation.dot')}</button>
+      <button class="btn btn-ghost btn-sm" on:click={copySelection} title={$t('notation.copy_title')}>{$t('notation.copy')}</button>
+      <button class="btn btn-ghost btn-sm" on:click={pasteClipboard} disabled={clipboardCount === 0} title={$t('notation.paste_title')}>{$t('notation.paste')}{clipboardCount ? ` (${clipboardCount})` : ''}</button>
+      <button class="btn btn-ghost btn-sm" on:click={doUndo} title={$t('notation.undo_title')}>↶</button>
+      <button class="btn btn-ghost btn-sm" on:click={doRedo} title={$t('notation.redo_title')}>↷</button>
+      <button class="btn btn-ghost btn-sm" on:click={() => setZoom(osmdZoom - 0.1)} title={$t('notation.zoom_out')}>−</button>
       <span class="zoom-pct">{Math.round(osmdZoom * 100)}%</span>
-      <button class="btn btn-ghost btn-sm" on:click={() => setZoom(osmdZoom + 0.1)} title="Inzoomen">+</button>
-      <button class="btn btn-ghost btn-sm" on:click={openMidiFile} title="Bestaand MIDI-bestand als extra take(s) in deze partituur importeren">Openen…</button>
-      <button class="btn btn-ghost btn-sm" on:click={saveMidiAs} title="Partituur (zichtbare takes) opslaan als MIDI-bestand">Opslaan als MIDI…</button>
-      <button class="btn btn-primary btn-sm" on:click={printScore} disabled={!xml}>Afdrukken / PDF</button>
-      <button class="btn btn-ghost btn-sm" on:click={saveMusicXml} disabled={!xml}>Opslaan</button>
+      <button class="btn btn-ghost btn-sm" on:click={() => setZoom(osmdZoom + 0.1)} title={$t('notation.zoom_in')}>+</button>
+      <button class="btn btn-ghost btn-sm" on:click={openMidiFile} title={$t('notation.open_import_title')}>{$t('notation.open')}</button>
+      <button class="btn btn-ghost btn-sm" on:click={saveMidiAs} title={$t('notation.save_as_midi_title')}>{$t('notation.save_as_midi')}</button>
+      <button class="btn btn-primary btn-sm" on:click={printScore} disabled={!xml}>{$t('notation.print_pdf')}</button>
+      <button class="btn btn-ghost btn-sm" on:click={saveMusicXml} disabled={!xml}>{$t('actions.save')}</button>
     {:else}
-      <label>Tempo
+      <label>{$t('notation.tempo')}
         <input type="number" min="20" max="300" bind:value={bpm} on:change={scheduleRender} />
       </label>
-      <label>Maat
+      <label>{$t('notation.meter')}
         <select bind:value={beatsPerBar} on:change={scheduleRender}>
           <option value={2}>2/4</option><option value={3}>3/4</option>
           <option value={4}>4/4</option><option value={6}>6/4</option>
         </select>
       </label>
-      <label>Raster
+      <label>{$t('notation.grid')}
         <select bind:value={quantize} on:change={scheduleRender}>
           {#each gridChoices as g}<option value={g.v}>{g.label}</option>{/each}
         </select>
       </label>
-      <label>Toonsoort
+      <label>{$t('notation.key_signature')}
         <select bind:value={keyFifths} on:change={scheduleRender}>
           {#each keyChoices as k}<option value={k.v}>{k.label}</option>{/each}
         </select>
       </label>
-      <label class="tolerance-slider" title="Sleep naar links voor letterlijk (los), naar rechts voor strak (hard kwantiseren)">
-        Ritme
+      <label class="tolerance-slider" title={$t('notation.tolerance_title')}>
+        {$t('notation.rhythm')}
         <input type="range" min="0" max="100" step="5" bind:value={tolerancePct} on:change={scheduleRender} />
-        <span class="tolerance-value">{tolerancePct < 33 ? 'los' : tolerancePct > 66 ? 'strak' : 'midden'}</span>
+        <span class="tolerance-value">{tolerancePct < 33 ? $t('notation.tol_loose') : tolerancePct > 66 ? $t('notation.tol_tight') : $t('notation.tol_medium')}</span>
       </label>
-      <label class="notation-title-field">Titel
+      <label class="notation-title-field">{$t('notation.title')}
         <input type="text" bind:value={title} on:change={scheduleRender} />
       </label>
       <span class="notation-spacer"></span>
-      <button class="btn btn-ghost btn-sm" on:click={openOtherFile}>Openen…</button>
-      <button class="btn btn-ghost btn-sm" on:click={saveMusicXml} disabled={!xml}>Opslaan als MusicXML</button>
-      <button class="btn btn-primary btn-sm" on:click={printScore} disabled={!xml}>Afdrukken / PDF</button>
+      <button class="btn btn-ghost btn-sm" on:click={openOtherFile}>{$t('notation.open')}</button>
+      <button class="btn btn-ghost btn-sm" on:click={saveMusicXml} disabled={!xml}>{$t('notation.save_as_musicxml')}</button>
+      <button class="btn btn-primary btn-sm" on:click={printScore} disabled={!xml}>{$t('notation.print_pdf')}</button>
     {/if}
   </div>
 
   {#if isLive && score}
     <!-- LayerBar: per laag armed-bol + naam + Take-vinkjes + "+ Take". -->
     <div class="notation-layers">
-      <span class="notation-staves-label">Balken:</span>
+      <span class="notation-staves-label">{$t('notation.staves_label')}</span>
       {#each score.layers as layer}
         <div class="notation-layer">
           <button
             class="layer-arm"
             class:armed={score.armed_layer === layer.id}
             on:click={() => armLayer(layer.id)}
-            title={score.armed_layer === layer.id ? 'Deze balk staat armed — opname schrijft hierheen' : 'Klik om deze balk armed te zetten'}
+            title={score.armed_layer === layer.id ? $t('notation.layer_armed_title') : $t('notation.layer_arm_title')}
           >●</button>
           <span class="layer-name">{layer.name}</span>
           <span class="layer-takes">
             {#each layer.takes as take}
-              <label class="take-chip" title="Take zichtbaar in notatie? Meerdere zichtbare takes samen = overdub op deze balk">
+              <label class="take-chip" title={$t('notation.take_visible_title')}>
                 <input
                   type="checkbox"
                   checked={take.visible}
@@ -1277,15 +1275,15 @@
                 {/if}
               </label>
             {/each}
-            <button class="btn btn-ghost btn-sm take-add" on:click={() => addTake(layer.id)} title="Nieuwe take (overdub)">+</button>
+            <button class="btn btn-ghost btn-sm take-add" on:click={() => addTake(layer.id)} title={$t('notation.new_take_title')}>+</button>
           </span>
           <!-- Divisie-routering van deze balk (klik om te wijzigen) -->
           <button
             class="layer-divs"
             on:click={() => divEditLayerId = divEditLayerId === layer.id ? null : layer.id}
-            title="Welke divisies routeren tijdens het inspelen naar deze balk"
+            title={$t('notation.layer_divisions_title')}
           >
-            {(layer.divisions && layer.divisions.length) ? layer.divisions.join(' + ') : 'geen divisie'} ▾
+            {(layer.divisions && layer.divisions.length) ? layer.divisions.join(' + ') : $t('notation.no_division')} ▾
           </button>
           {#if divEditLayerId === layer.id}
             <span class="layer-divs-edit">
@@ -1299,31 +1297,31 @@
           {/if}
         </div>
       {/each}
-      <button class="btn btn-ghost btn-sm layer-add" on:click={addLayer} title="Nieuwe notenbalk">+ Balk</button>
-      <button class="btn btn-ghost btn-sm" on:click={openWizardFromScore} title="Balkindeling (wizard) openen">Indeling…</button>
+      <button class="btn btn-ghost btn-sm layer-add" on:click={addLayer} title={$t('notation.new_staff_title')}>{$t('notation.add_staff')}</button>
+      <button class="btn btn-ghost btn-sm" on:click={openWizardFromScore} title={$t('notation.layout_title')}>{$t('notation.layout')}</button>
     </div>
 
     <!-- Selectie/cursor-indicator; klik in de bladmuziek selecteert een noot. -->
     <div class="notation-cursor" class:counting={armedWaiting}>
       {#if armedWaiting}
-        <span>Aftellen vóór opname… nog <b>{countInRemaining}</b> tel{countInRemaining === 1 ? '' : 'len'} — speel op tel 1.</span>
+        <span>{$t('notation.count_in_prefix')} <b>{countInRemaining}</b> {countInRemaining === 1 ? $t('notation.count_in_suffix_one') : $t('notation.count_in_suffix_many')}</span>
       {:else if flatEvents.length > 0}
         {#if selectionIds.size > 1}
-          <span><b>{selectionIds.size}</b> noten geselecteerd — klik een noot (Shift+klik = meerdere), of pijltjes ←/→.</span>
+          <span><b>{selectionIds.size}</b> {$t('notation.selected_many')}</span>
         {:else if cursorEvent}
-          <span>Selectie: <b>{noteName(cursorEvent.midi)}</b> (noot {cursorIndex + 1} van {flatEvents.length}, balk "{cursorEvent._layer}") — klik een noot om te kiezen.</span>
+          <span>{$t('notation.selection_label')} <b>{noteName(cursorEvent.midi)}</b> {$t('notation.selection_detail').replace('{i}', cursorIndex + 1).replace('{total}', flatEvents.length).replace('{layer}', cursorEvent._layer)}</span>
         {:else}
-          <span>Klik een noot in de bladmuziek om te selecteren, of gebruik ←/→.</span>
+          <span>{$t('notation.click_to_select')}</span>
         {/if}
       {:else}
-        <span class="cursor-empty">Nog geen noten in de partituur — druk op Opname en speel.</span>
+        <span class="cursor-empty">{$t('notation.empty_score')}</span>
       {/if}
     </div>
   {/if}
 
   {#if !isLive && divisions.length > 0}
     <div class="notation-staves">
-      <span class="notation-staves-label">Notenbalken:</span>
+      <span class="notation-staves-label">{$t('notation.staves_label_full')}</span>
       {#each staffConfig as st, i}
         <div class="notation-staff-card">
           <input class="notation-staff-name" type="text" bind:value={st.name} on:change={scheduleRender} />
@@ -1333,20 +1331,20 @@
               {div}
             </label>
           {/each}
-          <label class="notation-staff-div notation-staff-bass" title="Bassleutel">
+          <label class="notation-staff-div notation-staff-bass" title={$t('notation.bass_clef')}>
             <input type="checkbox" checked={st.bass} on:change={(e) => setStaffBass(i, e.currentTarget.checked)} />𝄢
           </label>
           {#if staffConfig.length > 1}
-            <button class="notation-staff-remove" on:click={() => removeStaff(i)} aria-label="Balk verwijderen">×</button>
+            <button class="notation-staff-remove" on:click={() => removeStaff(i)} aria-label={$t('notation.remove_staff')}>×</button>
           {/if}
         </div>
       {/each}
-      <button class="btn btn-ghost btn-sm" on:click={addStaff}>+ Balk</button>
+      <button class="btn btn-ghost btn-sm" on:click={addStaff}>{$t('notation.add_staff')}</button>
     </div>
   {/if}
 
   {#if error}<div class="notation-error">{error}</div>{/if}
-  {#if converting}<div class="notation-busy">Bezig met noteren…</div>{/if}
+  {#if converting}<div class="notation-busy">{$t('notation.busy')}</div>{/if}
 
   <div class="notation-sheet" class:clickable={isLive} bind:this={container} on:click={handleSheetClick} on:mousedown={handleSheetMouseDown}>
     {#if isLive}
@@ -1363,9 +1361,9 @@
 
   <div class="notation-hint">
     {#if isLive}
-      Tip: Opname = spelen, elke divisie op zijn eigen balk; ▶ speelt de partituur af door het orgel. Stapinvoer (N): speel toets/akkoord, typ A–G (Shift = akkoord), of klik op de balk; 2–7 = waarde, . punt, 0 rust, R herhaal, ↑/↓ kruis/mol, Backspace terug. Corrigeren: klik/←→ selecteren, sleep een noot omhoog/omlaag voor de toonhoogte, ↑/↓ transponeren, Shift+←/→ verschuiven in de tijd, Delete, [ ÷2, ] ×2, Ctrl+C/V, Ctrl+Z.
+      {$t('notation.hint_live')}
     {:else}
-      Tip: vrij ingespeeld? Stel het tempo in waarop je speelde en schuif "Ritme" naar los als de kwantisatie te strak aanvoelt.
+      {$t('notation.hint_file')}
     {/if}
   </div>
 </div>

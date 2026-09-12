@@ -3173,6 +3173,12 @@ pub fn reset_stop_voicing(state: State<AppState>, stop_id: u32) -> Result<(), St
 /// uit 1 t/m alle beschikbare kanalen klinken (eigen ideale mapping).
 #[tauri::command]
 pub fn set_division_output_channels(state: State<AppState>, division: String, channels: Vec<u8>) -> Result<(), String> {
+    set_division_output_channels_inner(&state, &division, channels)
+}
+
+/// Kern van set_division_output_channels, ook aanroepbaar zonder Tauri-State
+/// (test-API: POST /division_channels).
+pub fn set_division_output_channels_inner(state: &AppState, division: &str, channels: Vec<u8>) -> Result<(), String> {
     let organ = state.loaded_organ_info.read();
     if let Some(ref o) = *organ {
         if let Some(idx) = o.divisions.iter().position(|d| d.name == division) {
@@ -3186,10 +3192,10 @@ pub fn set_division_output_channels(state: State<AppState>, division: String, ch
             {
                 let mut ov = state.profile_channel_override.write();
                 if let Some(ref mut entries) = *ov {
-                    if let Some(e) = entries.iter_mut().find(|(name, _)| *name == division) {
+                    if let Some(e) = entries.iter_mut().find(|(name, _)| name == division) {
                         e.1 = channels.clone();
                     } else {
-                        entries.push((division.clone(), channels.clone()));
+                        entries.push((division.to_string(), channels.clone()));
                     }
                 }
             }
@@ -3305,33 +3311,26 @@ pub fn get_division_ccis(state: State<AppState>) -> Vec<bool> {
     state.division_ccis_enabled.read().clone()
 }
 
-/// Lees het aantal audio output-kanalen van het ACTUEEL geselecteerde device
-/// (niet het systeem-default). Anders toont de UI een verkeerd kanaalaantal en
-/// routet de gebruiker naar niet-bestaande kanalen → vreemd/stil gedrag.
+/// Kanaalaantal van de GEOPENDE audio-stream (= StatusDto.channels).
+///
+/// Vóór 0.7.37 enumereerde dit een verse cpal-host en las het
+/// `default_output_config()` van het apparaat. Twee problemen: (1) onder ASIO
+/// laadt een verse host de driver opnieuw (ASIOInit) en bij het opruimen van
+/// dat tijdelijke Device volgt ASIOExit — de SPELENDE driver wordt geëxit
+/// (asio-sys houdt `loaded_driver` per Asio-instantie) — dat gebeurde bij elk
+/// extra scherm en bij de knop "Ondersteunde sample rates"; (2) faalde de
+/// enumeratie, dan bleef de UI op 2 kanalen staan, terwijl de stream (ASIO:
+/// alle driver-uitgangen) al lang meer had. Nu: de waarde van de lopende
+/// stream, zonder enumeratie. Zonder player: 0 — de UI neemt binnen 100 ms de
+/// waarde uit get_status over zodra er wél een stream is.
 #[tauri::command]
 pub fn query_audio_channel_count(state: State<AppState>) -> Result<u16, String> {
-    use cpal::traits::{DeviceTrait, HostTrait};
-    // Lees het door de audio-player gekozen host/device.
-    let (host_name, device_name) = {
-        let ap = state.audio_player.read();
-        match ap.as_ref() {
-            Some(p) => (p.current_host.read().clone(), p.current_device.read().clone()),
-            None => (String::new(), String::new()),
-        }
+    // Eén read-guard, direct laten vallen (deadlock-les audit 44/59).
+    let live = {
+        let g = state.audio_player.read();
+        g.as_ref().map(|p| *p.current_channels.read())
     };
-    let host = crate::audio::resolve_host(if host_name.is_empty() { None } else { Some(&host_name) });
-    let device = (!device_name.is_empty())
-        .then(|| {
-            host.output_devices().ok().and_then(|mut devs| {
-                devs.find(|d| d.name().map(|n| n == device_name).unwrap_or(false))
-            })
-        })
-        .flatten()
-        .or_else(|| host.default_output_device())
-        .ok_or_else(|| "Geen audio output device gevonden".to_string())?;
-    let cfg = device.default_output_config()
-        .map_err(|e| format!("Kan config niet ophalen: {}", e))?;
-    Ok(cfg.channels())
+    Ok(live.unwrap_or(0))
 }
 
 /// Set per-division stereo pan
@@ -3664,19 +3663,23 @@ pub fn midi_player_status(state: State<AppState>) -> Result<MidiPlayerStatus, St
     })
 }
 
-/// Lijst van sample rates die het standaard audio-device ondersteunt
+/// Lijst van sample rates die het ACTUEEL gebruikte audio-device ondersteunt.
+/// Onder ASIO wordt bewust NIET geënumereerd (een verse cpal-host exit de
+/// spelende driver — zie query_audio_channel_count); daar geldt de rate uit het
+/// ASIO-configuratiepaneel, dus geven we de lopende rate terug.
 #[tauri::command]
 pub fn query_supported_sample_rates(state: State<AppState>) -> Result<Vec<u32>, String> {
     use cpal::traits::{DeviceTrait, HostTrait};
-    // Kijk naar het ACTUEEL geselecteerde host/device (niet het systeem-default),
-    // zelfde patroon als query_audio_channel_count.
-    let (host_name, device_name) = {
+    let (host_name, device_name, live_rate) = {
         let ap = state.audio_player.read();
         match ap.as_ref() {
-            Some(p) => (p.current_host.read().clone(), p.current_device.read().clone()),
-            None => (String::new(), String::new()),
+            Some(p) => (p.current_host.read().clone(), p.current_device.read().clone(), *p.sample_rate.read()),
+            None => (String::new(), String::new(), 0u32),
         }
     };
+    if host_name.eq_ignore_ascii_case("asio") {
+        return Ok(if live_rate > 0 { vec![live_rate] } else { Vec::new() });
+    }
     let host = crate::audio::resolve_host(if host_name.is_empty() { None } else { Some(&host_name) });
     let device = (!device_name.is_empty())
         .then(|| {

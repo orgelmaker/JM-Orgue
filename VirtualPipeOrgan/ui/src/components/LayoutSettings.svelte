@@ -706,7 +706,7 @@
 
     <div class="font-preview">
       <span style="font-family: '{font.family}', serif; font-size: {font.size}; font-weight: {font.weight};">
-        Prestant 8' &bull; Holpijp 8' &bull; Tremulant
+        {$t('fonts.preview_sample')}
       </span>
     </div>
   </div>

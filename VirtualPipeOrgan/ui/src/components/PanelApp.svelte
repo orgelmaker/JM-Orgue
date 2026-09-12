@@ -102,6 +102,8 @@
         sampleRate: s.sample_rate,
         audioHost: s.audio_host,
         audioDevice: s.audio_device,
+        channels: s.channels,
+        bufferFrames: s.buffer_frames,
       };
       // Vangnet voor gemiste events: actief profiel afleiden uit wat er echt
       // speelt (zelfde logica als het hoofdvenster; niet tijdens een wissel).
@@ -338,7 +340,7 @@
   }
 
   function setAutostart(enabled) {
-    invoke('set_autostart_enabled', { enabled }).catch(e => { error = `Autostart wijzigen mislukt: ${e}`; });
+    invoke('set_autostart_enabled', { enabled }).catch(e => { error = tx('errors.autostart_failed').replace('{error}', String(e)); });
   }
   function setRestoreRegistration(enabled) {
     localStorage.setItem('jm-orgue-restore-registration', String(enabled));
@@ -446,6 +448,10 @@
       {selectedMidiDevice}
       midiConnected={status.midiConnected}
       sampleRate={status.sampleRate || 0}
+      audioChannels={status.channels || 0}
+      audioHostActual={status.audioHost || ''}
+      audioDeviceActual={status.audioDevice || ''}
+      audioBufferFrames={status.bufferFrames || 0}
       autostartEnabled={false}
       restoreRegistration={localStorage.getItem('jm-orgue-restore-registration') === 'true'}
       autoLoadLastOrgan={localStorage.getItem('jm-orgue-autoload-organ') !== 'false'}
@@ -453,6 +459,7 @@
       audioEpoch={0}
       on:toggleStop={(e) => toggleStop(e.detail)}
       on:toggleCoupler={(e) => toggleCoupler(e.detail)}
+      on:divisionChannelsChanged={() => emitToMain('jm-orgue:division-channels-changed', {})}
       on:crescendoChange={(e) => applyCrescendoStage(e.detail)}
       on:refreshDevices={refreshDevices}
       on:refresh={refreshDevices}
