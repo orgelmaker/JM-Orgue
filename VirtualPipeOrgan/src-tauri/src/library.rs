@@ -26,7 +26,23 @@ pub struct OrganLibraryEntry {
     pub source_path: String,
     /// Absolute path to discovered image file, if any
     pub image_path: Option<String>,
+    /// Handmatig gekozen afbeelding (bibliotheekkaart -> "Afbeelding kiezen").
+    /// Blokkeert het automatisch zoeken zodat een herlaad de keuze niet
+    /// overschrijft. `#[serde(default)]`: bestaande organ_library.json blijft
+    /// leesbaar.
+    #[serde(default)]
+    pub image_manual: bool,
+    /// Versie van het zoekalgoritme waarmee voor het laatst naar een
+    /// afbeelding is gezocht. Dit is de NEGATIEVE cache: zonder dit veld werd
+    /// elke entry zonder afbeelding bij iedere opening van de bibliotheek
+    /// (en per extra registervenster) opnieuw diep gescand.
+    #[serde(default)]
+    pub image_searched: Option<u32>,
 }
+
+/// Versie van het zoekalgoritme voor orgelafbeeldingen. Ophogen laat alle
+/// entries zonder handmatige keuze opnieuw zoeken (negatieve cache vervalt).
+pub const IMAGE_SEARCH_VERSION: u32 = 2;
 
 /// Saved preset data (stops + couplers)
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -243,6 +259,66 @@ pub struct PerspectiveSaved {
     pub gain_db: f32,
 }
 
+/// Serde-default voor de "toon dit onderdeel"-vlaggen: een oudere
+/// .jm-settings.json zonder deze velden toont alles (zoals vóór 0.7.39).
+fn default_true() -> bool { true }
+
+/// Indeling van de afstandsbediening (0.7.39): welke onderdelen het externe
+/// scherm toont en in welke volgorde. Het HOOFDVENSTER publiceert dit
+/// (set_remote_layout) zodat de afstandsbediening dezelfde indeling krijgt als
+/// het registreerscherm — de UI-voorkeuren zelf blijven in localStorage van de
+/// webview wonen. Elk veld heeft een serde-default zodat bestaande
+/// .jm-settings.json-bestanden leesbaar blijven.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RemoteLayoutSaved {
+    /// Divisienamen in schermvolgorde (= selectie); leeg = alle divisies in
+    /// de volgorde van het orgel.
+    #[serde(default)]
+    pub divisions: Vec<String>,
+    /// Zichtbare koppels (id's, in orgelvolgorde) — precies de koppels die ook
+    /// op het orgelscherm staan.
+    #[serde(default)]
+    pub visible_couplers: Vec<String>,
+    /// "bar" (koppelbalk per klavier, standaard) of "division" (koppelknop
+    /// tussen de registers van de divisie).
+    #[serde(default)]
+    pub coupler_placement: String,
+    /// Registervolgorde per divisienaam (de gesleepte volgorde van het
+    /// orgelscherm); onbekende registers komen achteraan.
+    #[serde(default)]
+    pub stop_order: HashMap<String, Vec<String>>,
+    /// "rect" of "round" (vorm van de registerknoppen).
+    #[serde(default)]
+    pub knob_shape: String,
+    #[serde(default = "default_true")]
+    pub show_couplers: bool,
+    #[serde(default = "default_true")]
+    pub show_tremulant: bool,
+    #[serde(default = "default_true")]
+    pub show_setzer: bool,
+    #[serde(default = "default_true")]
+    pub show_volume: bool,
+    #[serde(default = "default_true")]
+    pub show_panic: bool,
+}
+
+impl Default for RemoteLayoutSaved {
+    fn default() -> Self {
+        Self {
+            divisions: Vec::new(),
+            visible_couplers: Vec::new(),
+            coupler_placement: String::new(),
+            stop_order: HashMap::new(),
+            knob_shape: String::new(),
+            show_couplers: true,
+            show_tremulant: true,
+            show_setzer: true,
+            show_volume: true,
+            show_panic: true,
+        }
+    }
+}
+
 /// Per-organ saved settings
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct OrganSettings {
@@ -311,6 +387,10 @@ pub struct OrganSettings {
     /// Microfoonperspectieven: geladen (aan/uit) + volume per label.
     #[serde(default)]
     pub perspectives: Vec<PerspectiveSaved>,
+    /// Indeling van de afstandsbediening (0.7.39). None = nooit gepubliceerd →
+    /// de afstandsbediening gebruikt dezelfde defaults als het orgelscherm.
+    #[serde(default)]
+    pub remote_layout: Option<RemoteLayoutSaved>,
 }
 
 /// The entire library
@@ -417,52 +497,332 @@ pub fn save_library(app_data_dir: &Path, library: &OrganLibrary) {
     }
 }
 
-/// Search for an image file in the organ's directory
-pub fn find_organ_image(source_path: &str, source_type: &str) -> Option<String> {
-    let dir = if source_type == "organ_file" {
-        Path::new(source_path).parent()?.to_path_buf()
-    } else {
-        PathBuf::from(source_path)
+/// Bestandsextensies die we als afbeelding accepteren (ook in de
+/// bestandsdialoog van "Afbeelding kiezen").
+pub const IMAGE_EXTENSIONS: [&str; 5] = ["jpg", "jpeg", "png", "bmp", "webp"];
+
+/// Bestandsnamen die zo goed als zeker de orgelfoto zijn (map van de set).
+const PREFERRED_NAMES: [&str; 13] = [
+    "image", "cover", "organ", "orgel", "orgue", "photo", "foto", "picture",
+    "front", "console", "church", "kerk", "main",
+];
+
+/// Naamdelen die in de diepe scan op een orgel-/consolefoto wijzen.
+const NAME_HINTS: [&str; 14] = [
+    "console", "organ", "orgel", "orgue", "church", "kerk", "front", "main",
+    "background", "photo", "foto", "cover", "image", "picture",
+];
+
+/// Ondergrens waaronder een afbeelding zeker geen orgelfoto is maar een
+/// knop-/toetsbitmap. Bestandsgrootte alleen werkt NIET: de echte foto PH.jpg
+/// (24,7 kB) is even groot als een registerknop-bitmap. Afmeting wel:
+/// PH.jpg = 278x338 (93 964 px), een koppelknop 100x99 (9 900 px).
+const MIN_IMAGE_W: u32 = 200;
+const MIN_IMAGE_H: u32 = 200;
+const MIN_IMAGE_AREA: u64 = 60_000;
+
+/// Bovengrens: een paneelachtergrond gaat als base64 (+33%) naar de UI, dus
+/// bestanden daarboven slaan we over (SJdL heeft een 8 MB-achtergrond).
+const MAX_IMAGE_BYTES: u64 = 12 * 1024 * 1024;
+
+/// Budgetten voor de diepe scan (grote sets hebben honderden bitmaps).
+const SCAN_MAX_DEPTH: usize = 4;
+const SCAN_MAX_ENTRIES: usize = 20_000;
+const SCAN_MAX_PROBES: usize = 1_500;
+
+/// Afmetingen van een afbeelding uit de bestandskop (geen image-crate in dit
+/// project). Ondersteunt PNG, JPEG, BMP en WebP; onbekend formaat -> None.
+pub fn image_dimensions(path: &Path) -> Option<(u32, u32)> {
+    use std::io::Read;
+    let mut f = std::fs::File::open(path).ok()?;
+    let mut b = vec![0u8; 65_536];
+    let n = f.read(&mut b).ok()?;
+    b.truncate(n);
+    let be16 = |i: usize| -> Option<u32> { Some(u16::from_be_bytes([*b.get(i)?, *b.get(i + 1)?]) as u32) };
+    let le16 = |i: usize| -> Option<u32> { Some(u16::from_le_bytes([*b.get(i)?, *b.get(i + 1)?]) as u32) };
+    let be32 = |i: usize| -> Option<u32> {
+        Some(u32::from_be_bytes([*b.get(i)?, *b.get(i + 1)?, *b.get(i + 2)?, *b.get(i + 3)?]))
+    };
+    let le32 = |i: usize| -> Option<u32> {
+        Some(u32::from_le_bytes([*b.get(i)?, *b.get(i + 1)?, *b.get(i + 2)?, *b.get(i + 3)?]))
     };
 
-    if !dir.exists() {
+    // PNG: IHDR staat altijd direct achter de 8-byte signatuur.
+    if b.starts_with(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]) {
+        return Some((be32(16)?, be32(20)?));
+    }
+    // BMP: BITMAPINFOHEADER, breedte/hoogte als i32 (hoogte kan negatief zijn).
+    if b.starts_with(b"BM") {
+        let w = le32(18)? as i32;
+        let h = le32(22)? as i32;
+        return Some((w.unsigned_abs(), h.unsigned_abs()));
+    }
+    // JPEG: doorloop de markers tot een SOFn-frame.
+    if b.starts_with(&[0xFF, 0xD8]) {
+        let mut i = 2usize;
+        while i + 9 < b.len() {
+            if b[i] != 0xFF {
+                i += 1;
+                continue;
+            }
+            let m = b[i + 1];
+            if m == 0xD8 || m == 0x01 || (0xD0..=0xD7).contains(&m) {
+                i += 2;
+                continue;
+            }
+            let len = be16(i + 2)? as usize;
+            let is_sof = (0xC0..=0xCF).contains(&m) && m != 0xC4 && m != 0xC8 && m != 0xCC;
+            if is_sof {
+                return Some((be16(i + 7)?, be16(i + 5)?));
+            }
+            if len < 2 {
+                return None;
+            }
+            i += 2 + len;
+        }
+        return None;
+    }
+    // WebP: RIFF-container met VP8X (uitgebreid), VP8 (lossy) of VP8L.
+    if b.starts_with(b"RIFF") && b.len() > 30 && &b[8..12] == b"WEBP" {
+        match &b[12..16] {
+            b"VP8X" => {
+                let w = 1 + (*b.get(24)? as u32 | (*b.get(25)? as u32) << 8 | (*b.get(26)? as u32) << 16);
+                let h = 1 + (*b.get(27)? as u32 | (*b.get(28)? as u32) << 8 | (*b.get(29)? as u32) << 16);
+                return Some((w, h));
+            }
+            b"VP8 " => {
+                // Keyframe-header: 3 bytes frame-tag, dan 9D 01 2A, dan 2x u16.
+                let w = le16(26)? & 0x3FFF;
+                let h = le16(28)? & 0x3FFF;
+                return Some((w, h));
+            }
+            b"VP8L" => {
+                let bits = le32(21)?;
+                return Some(((bits & 0x3FFF) + 1, ((bits >> 14) & 0x3FFF) + 1));
+            }
+            _ => return None,
+        }
+    }
+    None
+}
+
+/// Pad met één soort scheidingsteken. Het ODF-pad komt met `/` binnen
+/// (`resolve_path`-normalisatie) terwijl de rest van de bibliotheek backslashes
+/// gebruikt; gemengd werkt wel, maar leest en vergelijkt slecht.
+fn tidy_path(p: &Path) -> String {
+    let s = p.to_string_lossy().to_string();
+    if std::path::MAIN_SEPARATOR == '\\' { s.replace('/', "\\") } else { s }
+}
+
+/// Heeft dit pad een afbeeldingsextensie die we ondersteunen?
+pub fn has_image_extension(path: &Path) -> bool {
+    match path.extension() {
+        Some(e) => IMAGE_EXTENSIONS.contains(&e.to_string_lossy().to_lowercase().as_str()),
+        None => false,
+    }
+}
+
+/// Bruikbaar als kaartafbeelding: bestaat, juiste extensie, niet te groot en
+/// groot genoeg in pixels (scheidt foto's van knop-/toetsbitmaps).
+fn usable_image(path: &Path) -> bool {
+    if !has_image_extension(path) {
+        return false;
+    }
+    let meta = match std::fs::metadata(path) {
+        Ok(m) if m.is_file() => m,
+        _ => return false,
+    };
+    if meta.len() == 0 || meta.len() > MAX_IMAGE_BYTES {
+        return false;
+    }
+    match image_dimensions(path) {
+        Some((w, h)) => w >= MIN_IMAGE_W && h >= MIN_IMAGE_H && (w as u64) * (h as u64) >= MIN_IMAGE_AREA,
+        // Onleesbare kop: niet afkeuren op een formaat dat we niet kennen.
+        None => true,
+    }
+}
+
+/// Stam zonder extensie, kleine letters.
+fn stem_lower(path: &Path) -> String {
+    path.file_stem().map(|s| s.to_string_lossy().to_lowercase()).unwrap_or_default()
+}
+
+/// Is dit een "orgel.jpg"-achtige naam: precies een voorkeursnaam, eventueel
+/// met een cijfer/streepje erachter (orgel2.jpg, console-1.png)?
+fn preferred_rank(stem: &str) -> Option<usize> {
+    PREFERRED_NAMES.iter().position(|n| {
+        stem == *n
+            || (stem.starts_with(n)
+                && stem[n.len()..]
+                    .chars()
+                    .all(|c| c.is_ascii_digit() || c == '_' || c == '-' || c == ' '))
+    })
+}
+
+/// Voorkeursnaam-afbeelding direct in een map (niet recursief,
+/// hoofdletter-ongevoelig via read_dir).
+fn preferred_in_dir(dir: &Path) -> Option<String> {
+    let mut best: Option<(usize, PathBuf)> = None;
+    for e in std::fs::read_dir(dir).ok()?.flatten() {
+        let p = e.path();
+        if let Some(rank) = preferred_rank(&stem_lower(&p)) {
+            if usable_image(&p) && best.as_ref().map(|(r, _)| rank < *r).unwrap_or(true) {
+                best = Some((rank, p));
+            }
+        }
+    }
+    best.map(|(_, p)| p.to_string_lossy().to_string())
+}
+
+/// Beste afbeelding direct in een map: voorkeursnaam wint, anders de grootste
+/// bruikbare afbeelding (pakketroot van een Hauptwerk-set: PH.jpg).
+fn best_in_dir(dir: &Path) -> Option<String> {
+    if let Some(p) = preferred_in_dir(dir) {
+        return Some(p);
+    }
+    let mut best: Option<(u64, PathBuf)> = None;
+    for e in std::fs::read_dir(dir).ok()?.flatten() {
+        let p = e.path();
+        if !usable_image(&p) {
+            continue;
+        }
+        let area = image_dimensions(&p).map(|(w, h)| (w as u64) * (h as u64)).unwrap_or(0);
+        if best.as_ref().map(|(a, _)| area > *a).unwrap_or(true) {
+            best = Some((area, p));
+        }
+    }
+    best.map(|(_, p)| p.to_string_lossy().to_string())
+}
+
+/// Hauptwerk: de pakketmappen onder `OrganInstallationPackages`.
+fn hauptwerk_package_dirs(odf_path: &Path) -> Vec<PathBuf> {
+    let root = match vpo_sampler::find_package_root(odf_path) {
+        Some(r) => r,
+        None => return Vec::new(),
+    };
+    match std::fs::read_dir(root.join("OrganInstallationPackages")) {
+        Ok(rd) => rd.flatten().map(|e| e.path()).filter(|p| p.is_dir()).collect(),
+        Err(_) => Vec::new(),
+    }
+}
+
+/// Gescoorde scan in de breedte (ondiepe mappen eerst) over meerdere wortels.
+/// Score: naamtreffer > mapnaam-treffer > ondiep; gelijk -> grootste vlak,
+/// daarna het kleinste bestand (Images70 boven FullImageResolution).
+fn scan_scored(roots: &[PathBuf]) -> Option<String> {
+    use std::collections::{HashSet, VecDeque};
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut queue: VecDeque<(PathBuf, usize)> = VecDeque::new();
+    for r in roots {
+        if r.is_dir() && seen.insert(r.to_string_lossy().to_lowercase()) {
+            queue.push_back((r.clone(), 0));
+        }
+    }
+    let mut entries = 0usize;
+    let mut probes = 0usize;
+    // (score, vlak, -bestandsgrootte) -> pad
+    let mut best: Option<((i64, u64, i64), String)> = None;
+
+    while let Some((dir, depth)) = queue.pop_front() {
+        let rd = match std::fs::read_dir(&dir) {
+            Ok(rd) => rd,
+            Err(_) => continue,
+        };
+        let dir_name = dir.file_name().map(|s| s.to_string_lossy().to_lowercase()).unwrap_or_default();
+        let dir_bonus = if dir_name.contains("image") || dir_name.contains("console") || dir_name.contains("organinfo") {
+            4
+        } else {
+            0
+        };
+        for e in rd.flatten() {
+            entries += 1;
+            if entries > SCAN_MAX_ENTRIES || probes > SCAN_MAX_PROBES {
+                break;
+            }
+            let p = e.path();
+            let is_dir = e.file_type().map(|t| t.is_dir()).unwrap_or(false);
+            if is_dir {
+                if depth + 1 <= SCAN_MAX_DEPTH && seen.insert(p.to_string_lossy().to_lowercase()) {
+                    queue.push_back((p, depth + 1));
+                }
+                continue;
+            }
+            if !has_image_extension(&p) {
+                continue;
+            }
+            let size = match std::fs::metadata(&p) {
+                Ok(m) if m.len() > 0 && m.len() <= MAX_IMAGE_BYTES => m.len(),
+                _ => continue,
+            };
+            probes += 1;
+            let (w, h) = match image_dimensions(&p) {
+                Some(d) => d,
+                None => continue,
+            };
+            let area = (w as u64) * (h as u64);
+            if w < MIN_IMAGE_W || h < MIN_IMAGE_H || area < MIN_IMAGE_AREA {
+                continue;
+            }
+            let stem = stem_lower(&p);
+            let mut score: i64 = dir_bonus - depth as i64;
+            if preferred_rank(&stem).is_some() {
+                score += 20;
+            } else if NAME_HINTS.iter().any(|n| stem.contains(n)) {
+                score += 10;
+            }
+            let key = (score, area, -(size as i64));
+            if best.as_ref().map(|(k, _)| key > *k).unwrap_or(true) {
+                best = Some((key, p.to_string_lossy().to_string()));
+            }
+        }
+        if entries > SCAN_MAX_ENTRIES || probes > SCAN_MAX_PROBES {
+            break;
+        }
+    }
+    best.map(|(_, p)| p)
+}
+
+/// Zoek de afbeelding voor een bibliotheekkaart (zoekversie
+/// `IMAGE_SEARCH_VERSION`). Gelaagd, stopt bij de eerste treffer:
+/// (A) voorkeursnaam in de map van de set zelf (orgel.jpg, console.png, ...);
+/// (B) de definitie zelf: GrandOrgue `[Image001] Image=` (paneelachtergrond),
+///     Hauptwerk de afbeelding in de pakketroot (PH.jpg);
+/// (C) gescoorde scan tot diepte 4 (GO bewaart beelden in `Data - X/Images..`,
+///     Hauptwerk in `<pakket>/Images/`), met een minimumafmeting zodat
+///     knop-/toetsbitmaps afvallen.
+pub fn find_organ_image(source_path: &str, source_type: &str) -> Option<String> {
+    let is_file = source_type == "organ_file";
+    let src = Path::new(source_path);
+    let dir = if is_file { src.parent()?.to_path_buf() } else { src.to_path_buf() };
+    if !dir.is_dir() {
         return None;
     }
 
-    let image_extensions = ["jpg", "jpeg", "png", "bmp", "webp"];
-    let preferred_names = ["image", "cover", "organ", "photo", "picture", "front"];
-
-    // First pass: look for files with preferred names
-    for name in &preferred_names {
-        for ext in &image_extensions {
-            let filename = format!("{}.{}", name, ext);
-            let path = dir.join(&filename);
-            if path.exists() {
-                return Some(path.to_string_lossy().to_string());
-            }
-            // Also check uppercase
-            let filename_upper = format!("{}.{}", name.to_uppercase(), ext.to_uppercase());
-            let path = dir.join(&filename_upper);
-            if path.exists() {
-                return Some(path.to_string_lossy().to_string());
-            }
-        }
+    // (A) map van de set zelf.
+    if let Some(p) = preferred_in_dir(&dir) {
+        return Some(p);
     }
 
-    // Second pass: any image file in the directory
-    if let Ok(entries) = std::fs::read_dir(&dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if let Some(ext) = path.extension() {
-                let ext_lower = ext.to_string_lossy().to_lowercase();
-                if image_extensions.contains(&ext_lower.as_str()) {
-                    return Some(path.to_string_lossy().to_string());
+    // (B) wat de definitie zelf aanwijst.
+    let mut roots: Vec<PathBuf> = vec![dir.clone()];
+    if is_file {
+        if vpo_sampler::is_hauptwerk_path(src) {
+            let pkgs = hauptwerk_package_dirs(src);
+            for pkg in &pkgs {
+                if let Some(p) = best_in_dir(pkg) {
+                    return Some(p);
                 }
             }
+            roots.extend(pkgs);
+        } else if let Some(p) = vpo_sampler::panel_image_path(src) {
+            if usable_image(&p) {
+                return Some(tidy_path(&p));
+            }
         }
     }
 
-    None
+    // (C) gescoorde scan.
+    scan_scored(&roots)
 }
 
 /// Read an image file and return it as a base64 data URL
@@ -499,6 +859,8 @@ mod library_tests {
             source_type: "sample_directory".into(),
             source_path: id.to_string(),
             image_path: None,
+            image_manual: false,
+            image_searched: None,
         }
     }
 
@@ -523,5 +885,113 @@ mod library_tests {
             Some(-3.0),
             "settings van de UI-variant winnen"
         );
+    }
+
+    // ---- Afbeelding-zoektocht v2 ----
+
+    /// Minimale, geldige PNG-kop met de gevraagde afmetingen (de zoektocht
+    /// leest alleen IHDR, dus de rest hoeft geen echte pixeldata te zijn).
+    fn png_bytes(w: u32, h: u32) -> Vec<u8> {
+        let mut v = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+        v.extend_from_slice(&13u32.to_be_bytes());
+        v.extend_from_slice(b"IHDR");
+        v.extend_from_slice(&w.to_be_bytes());
+        v.extend_from_slice(&h.to_be_bytes());
+        v.extend_from_slice(&[8, 2, 0, 0, 0, 0, 0, 0, 0]);
+        v
+    }
+
+    fn jpeg_bytes(w: u16, h: u16) -> Vec<u8> {
+        let mut v = vec![0xFF, 0xD8, 0xFF, 0xC0, 0x00, 0x11, 0x08];
+        v.extend_from_slice(&h.to_be_bytes());
+        v.extend_from_slice(&w.to_be_bytes());
+        v.extend_from_slice(&[3, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11, 1]);
+        v
+    }
+
+    fn tmp(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(name);
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    #[test]
+    fn test_image_dimensions_png_en_jpeg() {
+        let d = tmp("jm_imgdim");
+        let p = d.join("a.png");
+        std::fs::write(&p, png_bytes(1344, 896)).unwrap();
+        assert_eq!(image_dimensions(&p), Some((1344, 896)));
+        let j = d.join("b.jpg");
+        std::fs::write(&j, jpeg_bytes(278, 338)).unwrap();
+        assert_eq!(image_dimensions(&j), Some((278, 338)));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn test_find_image_knopbitmaps_vallen_af() {
+        // Alleen kleine knop-bitmaps (100x99) -> geen kaartafbeelding.
+        let d = tmp("jm_img_knoppen");
+        std::fs::create_dir_all(d.join("Images")).unwrap();
+        for n in ["Coupler-1.png", "Stop-3.png"] {
+            std::fs::write(d.join("Images").join(n), png_bytes(100, 99)).unwrap();
+        }
+        assert_eq!(find_organ_image(&d.to_string_lossy(), "sample_directory"), None);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn test_find_image_vindt_achtergrond_diep() {
+        // Achtergrond op diepte 3, zoals Friesach (Data - X/Images/Console/0).
+        let d = tmp("jm_img_diep");
+        let deep = d.join("Data - X").join("Images60").join("Console");
+        std::fs::create_dir_all(&deep).unwrap();
+        std::fs::write(deep.join("Background.png"), png_bytes(1152, 648)).unwrap();
+        std::fs::write(d.join("Data - X").join("Images60").join("Knop.png"), png_bytes(60, 60)).unwrap();
+        let got = find_organ_image(&d.to_string_lossy(), "sample_directory").unwrap();
+        assert!(got.ends_with("Background.png"), "kreeg {}", got);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn test_find_image_root_wint_en_is_hoofdletter_ongevoelig() {
+        // "Orgel.JPG" in de setmap wint van een diepe paneelachtergrond.
+        let d = tmp("jm_img_root");
+        let deep = d.join("Images");
+        std::fs::create_dir_all(&deep).unwrap();
+        std::fs::write(deep.join("Background.png"), png_bytes(1600, 974)).unwrap();
+        std::fs::write(d.join("Orgel.JPG"), jpeg_bytes(459, 500)).unwrap();
+        let got = find_organ_image(&d.to_string_lossy(), "sample_directory").unwrap();
+        assert!(got.ends_with("Orgel.JPG"), "kreeg {}", got);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn test_find_image_odf_paneelverwijzing() {
+        // GrandOrgue: [Image001] wijst de console-achtergrond aan; die ligt
+        // niet in de setmap en heeft geen voorkeursnaam.
+        let d = tmp("jm_img_odf");
+        let sub = d.join("Data - Y").join("Images70");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(sub.join("Achtergrond1.png"), png_bytes(1344, 896)).unwrap();
+        let odf = d.join("Test.organ");
+        std::fs::write(
+            &odf,
+            b"[Image001]\r\nImage=Data - Y\\Images70\\Achtergrond1.png\r\n\r\n[Organ]\r\nChurchName=Y\r\n".to_vec(),
+        )
+        .unwrap();
+        let got = find_organ_image(&odf.to_string_lossy(), "organ_file").unwrap();
+        assert!(got.ends_with("Achtergrond1.png"), "kreeg {}", got);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn test_find_image_te_groot_bestand_wordt_overgeslagen() {
+        let d = tmp("jm_img_groot");
+        let mut big = png_bytes(2000, 1500);
+        big.resize((MAX_IMAGE_BYTES + 1024) as usize, 0);
+        std::fs::write(d.join("console.png"), big).unwrap();
+        assert_eq!(find_organ_image(&d.to_string_lossy(), "sample_directory"), None);
+        let _ = std::fs::remove_dir_all(&d);
     }
 }

@@ -37,13 +37,22 @@ def check(label, ok, detail=""):
     print(("  OK   " if ok else "  FAIL ") + label + (f"  [{detail}]" if detail else ""))
     return ok
 
+# files_written telt per APP-SESSIE door (niet per testmap). Draaide dit script
+# eerder tegen dezelfde draaiende app, dan staat de teller al hoger; daarom
+# rekent de test met het VERSCHIL ten opzichte van de stand bij aanvang.
+FILES_START = 0
+
+def geschreven(st):
+    """Aantal bestanden dat DEZE testronde geschreven heeft."""
+    return (st or {}).get("files_written", FILES_START) - FILES_START
+
 def wait_archive(expect_files, max_s=3.0):
-    """Poll-lus (max. max_s, elke 0,25 s) tot archiving=false én files_written == expect_files."""
+    """Poll-lus (max. max_s, elke 0,25 s) tot archiving=false én er `expect_files` bestanden bij zijn gekomen."""
     st = None
     t0 = time.time()
     while time.time() - t0 < max_s:
         st = get("/midi/archive/status")
-        if not st["archiving"] and st["files_written"] == expect_files:
+        if not st["archiving"] and geschreven(st) == expect_files:
             return st
         time.sleep(0.25)
     return st
@@ -98,6 +107,8 @@ NOTES = [n for n in (60, 64, 67, 72) if lo_note <= n <= hi_note] or [lo_note + i
 
 # ---------- oorspronkelijke instellingen bewaren ----------
 orig = get("/midi/archive/status")
+# Nulstand van de sessieteller: alle controles hierna rekenen met het verschil.
+FILES_START = orig.get("files_written", 0)
 print("  oorspronkelijk:", {k: orig.get(k) for k in ("enabled", "dir", "dir_is_default", "silence_secs", "min_notes", "min_secs")})
 
 # ---------- 2. config ----------
@@ -137,7 +148,7 @@ check("/status midi_archiving=true", get("/status").get("midi_archiving") is Tru
 time.sleep(4)
 st = wait_archive(1)
 check("archiving=false na stilte", st and not st["archiving"], str(st))
-check("files_written=1", st and st["files_written"] == 1, str(st and st["files_written"]))
+check("1 bestand geschreven", st and geschreven(st) == 1, str(geschreven(st)))
 last = (st or {}).get("last_file")
 check("last_file eindigt op .mid en bestaat", last and last.lower().endswith(".mid") and os.path.isfile(last), str(last))
 check("bestandsnaam-regex", last and re.match(r"^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}(_.*)?\.mid$", os.path.basename(last)) is not None, os.path.basename(last or ""))
@@ -171,21 +182,21 @@ check("player gestopt", get("/midi/player/status")["state"] == "stopped")
 # ---------- 9. afspelen niet gearchiveerd ----------
 time.sleep(4)
 st = wait_archive(1)
-check("afspelen niet gearchiveerd (files_written=1)", st and st["files_written"] == 1 and not st["archiving"], str(st))
+check("afspelen niet gearchiveerd (nog steeds 1 bestand)", st and geschreven(st) == 1 and not st["archiving"], str(st))
 
 # ---------- 10. min-noten-filter ----------
 play_notes(NOTES[:1], ch)
 check("take gestart met 1 noot", get("/midi/archive/status")["archiving"])
 time.sleep(4)
 st = wait_archive(1)
-check("1 noot afgekeurd (files_written blijft 1)", st and st["files_written"] == 1 and not st["archiving"], str(st))
+check("1 noot afgekeurd (nog steeds 1 bestand)", st and geschreven(st) == 1 and not st["archiving"], str(st))
 
 # ---------- 11. flush ----------
 play_notes(NOTES, ch)
 fl = post("/midi/archive/flush")
 check("flush file != null", fl.get("ok") and fl.get("file"), str(fl))
 st = get("/midi/archive/status")
-check("files_written=2 na flush", st["files_written"] == 2 and not st["archiving"], str(st))
+check("2 bestanden na flush", geschreven(st) == 2 and not st["archiving"], str(st))
 check("flush-bestand bestaat", fl.get("file") and os.path.isfile(fl["file"]))
 lst = get("/midi/archive/list")["files"]
 check("list: 2 bestanden, nieuwste eerst", len(lst) == 2 and norm(lst[0]["path"]) == norm(fl.get("file") or ""))

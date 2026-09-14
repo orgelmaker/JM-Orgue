@@ -5,6 +5,31 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.39] - 2026-09-14
+
+### Negen punten van het testorgel: tremulant-opnamen, galm bij korte noten, zweltreden en crescendo, afstandsbediening, startscherm, JM-Rec-namen en orgelfoto's
+
+**Klank**
+- **Tremulant met opgenomen samples (GrandOrgue-golfvormtremulant).** Sets die per pijp een aparte tremulant-opname leveren (GrandOrgue `TremulantType=Wave` met `IsTremulant`-attacks en -releases, Hauptwerk-sets met een "tremmed" laag, eigen sets met `_trem`-mappen) krijgen nu een echte tremulantknop: de tremulant-opnamen spelen, inclusief de bijbehorende release, en bij het in- of uitschakelen klinkt een nette overgang op klinkende noten. Voorheen bleef de knop voor zulke sets weg en klonk hooguit de nagebootste tremulant.
+- **Galm bij korte noten en het slotakkoord (GrandOrgue-sets).** Drie oorzaken verholpen: de zojuist gestarte nagalm van een losgelaten toets kon door de stemmenbegrenzer meteen weer worden weggehaald (bij een akkoord bleef dan alleen de laatste noot over), korte noten kregen hun nagalm ineens op vol niveau in plaats van vloeiend, en de verkorte releases van toetsduur-varianten werden niet geschaald zoals GrandOrgue dat doet. Staccato gevolgd door een slotakkoord klinkt daardoor weer als in GrandOrgue.
+
+**Zweltreden en generaal crescendo**
+- Eén pedaal kan niet langer tegelijk als zwelkast én als generaal crescendo gekoppeld staan. Wie een pedaal opnieuw koppelt, ziet nu welke koppeling daarmee vervalt, en beide vakken worden meteen bijgewerkt. Voorheen kon je twee koppelingen op dezelfde CC maken waarbij er stilletjes maar één werkte.
+- Waarschuwing als het crescendopedaal wel gekoppeld is maar het crescendo uit staat of geen trappen heeft.
+- **Reactie op pedalen en toetsen tot dertig keer sneller.** De MIDI-lus wachtte per ronde op een Windows-timer die in stappen van ruim vijftien milliseconde tikt, waardoor elke pedaalstand, noot en piston tot 31 ms bleef liggen en een pedaalbeweging in brokjes binnenkwam. De lus wordt nu gewekt door het bericht zelf: gemeten vertraging ging van gemiddeld 29 ms naar ongeveer 1 ms. Dit was de belangrijkste oorzaak van het haperen van zweltrede en crescendo, en het maakt ook het spelen strakker.
+- Haperen bij trapwissels: het werk per audio-blok schaalt nu mee met de buffergrootte, zodat een trapwissel met veel registers niet meer in één blok wordt afgehandeld. De statusbalk telt zware blokken en gemiste opdrachten, en bij herhaalde overbelasting met een zeer kleine buffer stelt de app voor de buffer op 128 te zetten.
+- Een als knop ingeleerde bediening op een doorlopende regelaar reageert nu alleen op de aanslag. Wie ooit een setzerknop op de CC van een zweltrede leerde, zag bij elke pedaalbeweging registraties omklappen.
+
+**Bediening**
+- **Afstandsbediening volgt het orgelscherm.** Tablet of telefoon toont dezelfde indeling als het registreerscherm: dezelfde divisievolgorde, dezelfde registervolgorde, dezelfde knopvorm en alleen de koppels die je zelf zichtbaar hebt gemaakt. Nieuw zijn keuzevinkjes onder Algemene instellingen → Afstandsbediening voor wat er op het externe scherm verschijnt (divisies, koppels, tremulant, setzer, volume, paniekknop). De pagina volgt wijzigingen zonder herladen.
+
+**Starten en bibliotheek**
+- Opstartscherm in JM-Orgue-stijl overbrugt de eerste seconden, zodat de bibliotheek en een eventuele updatemelding samen verschijnen in plaats van na elkaar.
+- Taalknoppen (NL EN FR DE) op het startscherm.
+- Zonder geladen orgel kun je vanuit de instellingen weer terug naar de bibliotheek.
+- **JM-Rec-sets heten nu zoals je ze hebt ingevoerd**: kerknaam - orgelbouwer - plaats, in plaats van de afkorting van de projectmap. Bouwer en plaats staan onder de naam op de bibliotheekkaart.
+- **Orgelfoto's**: de app zoekt breder (ook de afbeelding uit de GrandOrgue-definitie en de afbeeldingen van een Hauptwerk-pakket) en je kunt op elke bibliotheekkaart zelf een foto kiezen of terugzetten op automatisch.
+
 ## [0.7.38] - 2026-09-12
 
 ### Gestapelde ranks en perspectieven, hertemperen, afstandsbediening, MIDI-archief, crescendo en zweltreden

@@ -119,6 +119,13 @@ pub struct DivisionDto {
     /// LFO-tremulant available by default so the tremulant isn't "missing".
     #[serde(default)]
     pub has_tremulant: bool,
+    /// Soort tremulant van deze divisie, voor de UI-default van de synth-LFO:
+    /// `"wave"` = de sampleset heeft echte tremulant-OPNAMEN (GrandOrgue
+    /// `TremulantType=Wave`), `"samples"` = trem-opnamen zonder ODF-tremulant
+    /// (Hauptwerk "tremmed"-laag, JM-Rec `_trem`-map), `"synth"` = alleen een
+    /// ODF-tremulant met LFO-parameters. `None` = geen tremulant.
+    #[serde(default)]
+    pub tremulant_kind: Option<String>,
     /// True when this division sits in a swell box (GrandOrgue Enclosure). The UI
     /// enables the swell box (expression) for it by default.
     #[serde(default)]
@@ -188,6 +195,13 @@ pub struct StatusDto {
     /// Belasting van de render-thread (0..1+, EMA) en piek.
     pub render_load: f32,
     pub render_peak: f32,
+    /// Aantal callbacks dat sinds het starten van de stream over 80 % van zijn
+    /// buffertijd ging (cumulatief). Loopt deze op tijdens een crescendo-sweep,
+    /// dan is de buffer te klein voor het werk per trapwissel.
+    pub render_overloads: u64,
+    /// Gedropte realtime audio-commando's (volle queue) — sluit een volle
+    /// commandowachtrij uit als oorzaak van haperen/ontbrekende noten.
+    pub rt_drops: u64,
     /// Stereo-samples als twee kanalen laden (instelling).
     pub stereo_samples: bool,
     /// Automatisch MIDI-archief legt op dit moment een take vast.
@@ -815,24 +829,18 @@ pub fn learn_pedal_position(state: State<AppState>, channel: Option<u8>, cc_num:
 
 /// Pas een via de popup ingeleerde ZWELTREDE toe. Inversie wordt automatisch
 /// gedetecteerd (laagste stand gaf hogere CC-waarde dan hoogste stand).
-/// Wederzijds exclusief met de generaal crescendo (laatst ingeleerd wint).
+/// Wederzijds exclusief met de generaal crescendo (laatst ingeleerd wint) —
+/// via de gedeelde helper `claim_pedal_cc`; de verdrongen koppeling gaat terug
+/// naar de UI zodat de popup meldt wat er is overgenomen.
 #[tauri::command]
-pub fn apply_learned_swell(state: State<AppState>, division: String, division_index: u8, channel: u8, cc_num: u8, low_val: u8, high_val: u8) -> Result<(), String> {
-    use crate::state::SwellBinding;
+pub fn apply_learned_swell(state: State<AppState>, division: String, division_index: u8, channel: u8, cc_num: u8, low_val: u8, high_val: u8) -> Result<Vec<crate::state::DisplacedPedalBinding>, String> {
+    use crate::state::{PedalCcKind, SwellBinding};
     let (min_val, max_val, invert) = if low_val <= high_val {
         (low_val, high_val, false)
     } else {
         (high_val, low_val, true)
     };
-    {
-        let mut cb = state.crescendo_binding.write();
-        if let Some((bch, bcc, _, _, _)) = *cb {
-            if bch == channel && bcc == cc_num {
-                info!("Crescendo-koppeling op dezelfde CC gewist (zwel-inleer wint)");
-                *cb = None;
-            }
-        }
-    }
+    let verdrongen = state.claim_pedal_cc(PedalCcKind::Swell, channel, cc_num);
     let binding = SwellBinding {
         division_name: division.clone(),
         division_index,
@@ -849,27 +857,31 @@ pub fn apply_learned_swell(state: State<AppState>, division: String, division_in
     bindings.push(binding);
     info!("Zweltrede ingeleerd via popup: {} → CC{} kanaal {} bereik {}-{}{}",
         division, cc_num, channel + 1, min_val, max_val, if invert { " (geïnverteerd)" } else { "" });
-    Ok(())
+    Ok(verdrongen)
 }
 
 /// Pas een via de popup ingeleerde CRESCENDOTREDE toe (zelfde inversie-detectie).
+/// Verdringt zwelkoppelingen op dezelfde (kanaal, CC) via de gedeelde helper en
+/// meldt ze terug aan de UI.
 #[tauri::command]
-pub fn apply_learned_crescendo(state: State<AppState>, channel: u8, cc_num: u8, low_val: u8, high_val: u8) -> Result<(), String> {
+pub fn apply_learned_crescendo(state: State<AppState>, channel: u8, cc_num: u8, low_val: u8, high_val: u8) -> Result<Vec<crate::state::DisplacedPedalBinding>, String> {
+    use crate::state::PedalCcKind;
     let (min_val, max_val, invert) = if low_val <= high_val {
         (low_val, high_val, false)
     } else {
         (high_val, low_val, true)
     };
     *state.crescendo_binding.write() = Some((channel, cc_num, min_val, max_val, invert));
+    // Wederzijds exclusief (gedeelde helper, logt zelf) + expressie-reset
+    // (zie learn_crescendo_pedal).
+    let verdrongen = state.claim_pedal_cc(PedalCcKind::Crescendo, channel, cc_num);
     // Via de kern: claims los, trede-registers weg, DTO-vlaggen en voice-sync
     // (een ruwe stage-write liet trede-registers met lege teller staan).
     let _ = state.apply_crescendo_stage(0);
-    // Wederzijds exclusief + expressie-reset (zie learn_crescendo_pedal).
-    state.swell_bindings.write().retain(|b| !(b.channel == channel && b.cc_num == cc_num));
     state.send_audio_command(AudioCommand::SetMasterExpression(1.0));
     info!("Crescendotrede ingeleerd via popup: CC{} kanaal {} bereik {}-{}{}",
         cc_num, channel + 1, min_val, max_val, if invert { " (geïnverteerd)" } else { "" });
-    Ok(())
+    Ok(verdrongen)
 }
 
 /// Wacht op één toetsaanslag (voor de stapsgewijze klavier-inleer-popup).
@@ -1063,27 +1075,33 @@ pub fn update_preset_binding(state: State<AppState>, preset_num: u8, index: usiz
 
 /// Zet handmatig kanaal + CC voor de zwelkast van een divisie (het handmatige
 /// alternatief voor 'Leer pedaal'). Kanaal is 0-based (wire), zoals overal.
+/// Dezelfde exclusiviteit als de inleer-popup (claim_pedal_cc): een crescendo
+/// op deze CC vervalt en wordt aan de UI gemeld — vroeger ontstonden hier twee
+/// koppelingen op dezelfde CC waarvan er stilletjes één dood was.
 #[tauri::command]
-pub fn set_swell_binding_manual(state: State<AppState>, division: String, division_index: u8, channel: u8, cc_num: u8) -> Result<(), String> {
-    info!("Handmatige zwelkast-koppeling voor {}: ch={} cc={}", division, channel + 1, cc_num);
-    state.set_swell_binding_manual(&division, division_index, channel.min(15), cc_num.min(127));
-    Ok(())
+pub fn set_swell_binding_manual(state: State<AppState>, division: String, division_index: u8, channel: u8, cc_num: u8) -> Result<Vec<crate::state::DisplacedPedalBinding>, String> {
+    info!("Handmatige zwelkast-koppeling voor {}: kanaal {} CC{}", division, channel + 1, cc_num);
+    Ok(state.set_swell_binding_manual(&division, division_index, channel.min(15), cc_num.min(127)))
 }
 
 /// Zet handmatig kanaal + CC voor de generaal-crescendo. Bestaand bereik en
-/// invert blijven behouden.
+/// invert blijven behouden. Verdringt zwelkoppelingen op dezelfde (kanaal, CC)
+/// via de gedeelde helper en meldt ze terug aan de UI.
 #[tauri::command]
-pub fn set_crescendo_binding_manual(state: State<AppState>, channel: u8, cc_num: u8) -> Result<(), String> {
-    info!("Handmatige crescendo-koppeling: ch={} cc={}", channel + 1, cc_num);
+pub fn set_crescendo_binding_manual(state: State<AppState>, channel: u8, cc_num: u8) -> Result<Vec<crate::state::DisplacedPedalBinding>, String> {
+    use crate::state::PedalCcKind;
+    let (ch, cc) = (channel.min(15), cc_num.min(127));
+    info!("Handmatige crescendo-koppeling: kanaal {} CC{}", ch + 1, cc);
     {
         let mut b = state.crescendo_binding.write();
         let (mn, mx, inv) = b.map(|(_, _, mn, mx, inv)| (mn, mx, inv)).unwrap_or((0, 127, false));
-        *b = Some((channel.min(15), cc_num.min(127), mn, mx, inv));
+        *b = Some((ch, cc, mn, mx, inv));
     }
+    let verdrongen = state.claim_pedal_cc(PedalCcKind::Crescendo, ch, cc);
     // Deze CC is vanaf nu exclusief crescendo; een eerdere expressie-demping
     // van dezelfde pedaal (CC7/11-fallback) zou anders blijvend hangen.
     state.send_audio_command(AudioCommand::SetMasterExpression(1.0));
-    Ok(())
+    Ok(verdrongen)
 }
 
 /// Zet handmatig het toetsenbereik (laagste/hoogste MIDI-noot) van een divisie.
@@ -1154,6 +1172,102 @@ fn pick_default_release<'a>(
         })
 }
 
+/// Manifest dat JM-Rec naast de `.organ` schrijft (`<stem>.jm-rec.json`) —
+/// alleen de velden die de bibliotheeknaam bepalen. Dit is de PRIMAIRE bron:
+/// het bevat precies wat de gebruiker in de wizard invoerde. De ODF-velden
+/// zijn de terugval, want JM-Rec schrijft de MAPCODE als `ChurchName` zodra de
+/// kerknaam leeg bleef (bv. "PuttBätz").
+#[derive(Debug, Clone, Default, Deserialize)]
+struct JmRecManifest {
+    #[serde(default)]
+    kerk: String,
+    #[serde(default)]
+    plaats: String,
+    #[serde(default)]
+    bouwer: String,
+}
+
+/// Lees `<stem>.jm-rec.json` naast een orgelbestand (None als het er niet is
+/// of niet te lezen valt).
+fn read_jm_rec_manifest(odf_path: &Path) -> Option<JmRecManifest> {
+    let stem = odf_path.file_stem()?.to_string_lossy().to_string();
+    let manifest = odf_path.with_file_name(format!("{}.jm-rec.json", stem));
+    let txt = std::fs::read_to_string(&manifest).ok()?;
+    serde_json::from_str::<JmRecManifest>(&txt).ok()
+}
+
+/// De JM-Rec-naamregel: "Kerknaam - Orgelbouwer - Plaats", lege delen weg.
+/// None als er niets bruikbaars overblijft.
+fn jm_rec_naam(kerk: &str, bouwer: &str, plaats: &str) -> Option<String> {
+    let delen: Vec<&str> = [kerk.trim(), bouwer.trim(), plaats.trim()]
+        .into_iter()
+        .filter(|d| !d.is_empty())
+        .collect();
+    if delen.is_empty() {
+        None
+    } else {
+        Some(delen.join(" - "))
+    }
+}
+
+/// Naam/bouwer/plaats uit een JM-Rec-manifest in een SAMPLE-MAP: een
+/// projectmap waarvan de gebruiker (nog) geen .organ exporteerde, die dus via
+/// de mapscan geladen wordt. Zonder dit zou zo'n set als mapcode ("PuttBätz")
+/// in de bibliotheek komen.
+fn jm_rec_identity_for_dir(dir: &Path) -> Option<(String, String, String)> {
+    let manifest = std::fs::read_dir(dir).ok()?.flatten().map(|e| e.path()).find(|p| {
+        p.file_name()
+            .map(|n| n.to_string_lossy().to_lowercase().ends_with(".jm-rec.json"))
+            .unwrap_or(false)
+    })?;
+    let m: JmRecManifest = serde_json::from_str(&std::fs::read_to_string(&manifest).ok()?).ok()?;
+    let naam = jm_rec_naam(&m.kerk, &m.bouwer, &m.plaats)?;
+    Some((naam, m.bouwer.trim().to_string(), m.plaats.trim().to_string()))
+}
+
+/// Naam, bouwer en plaats voor bibliotheek + kopregel.
+///
+/// * JM-Rec-set (manifest ernaast óf `OrganComments` begint met "Opgenomen met
+///   JM-Rec"): **"Kerknaam - Orgelbouwer - Plaats"**. Lege delen vallen weg, en
+///   zónder manifest valt een `ChurchName` die gelijk is aan de bestandsstam
+///   (de mapcode van JM-Rec) ook weg.
+/// * Andere sets (GrandOrgue/Hauptwerk): naam en bouwer ongewijzigd — die namen
+///   bevatten de plaats vaak al ("Lędziny, St. Clement").
+///
+/// `location` is voor álle orgeldefinities de PLAATS (`ChurchAddress`, bij
+/// Hauptwerk `OrganInfo_Location`); alleen als die leeg is valt hij terug op
+/// `RecordingDetails` — dat stond er vroeger altijd ("Recorded by ...").
+pub fn display_identity(odf_path: &Path, organ: &vpo_sampler::OrganInfo) -> (String, String, String) {
+    let address = organ.church_address.trim();
+    let location = if address.is_empty() {
+        organ.recording_details.trim().to_string()
+    } else {
+        address.to_string()
+    };
+
+    let manifest = read_jm_rec_manifest(odf_path);
+    let is_jm_rec = manifest.is_some() || organ.organ_comments.starts_with("Opgenomen met JM-Rec");
+    if !is_jm_rec {
+        return (organ.church_name.clone(), organ.organ_builder.clone(), location);
+    }
+
+    let (kerk, bouwer, plaats) = match &manifest {
+        Some(m) => (m.kerk.trim().to_string(), m.bouwer.trim().to_string(), m.plaats.trim().to_string()),
+        None => {
+            let stem = odf_path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+            let kerk = organ.church_name.trim();
+            // Mapcode als kerknaam: niet tonen.
+            let kerk = if kerk.eq_ignore_ascii_case(&stem) { "" } else { kerk };
+            (kerk.to_string(), organ.organ_builder.trim().to_string(), address.to_string())
+        }
+    };
+
+    let naam = jm_rec_naam(&kerk, &bouwer, &plaats).unwrap_or_else(|| organ.church_name.clone());
+    let builder = if bouwer.is_empty() { organ.organ_builder.clone() } else { bouwer };
+    let plek = if plaats.is_empty() { location } else { plaats };
+    (naam, builder, plek)
+}
+
 /// Is dit orgel-id een orgel-definitiebestand (GrandOrgue .organ of Hauptwerk
 /// .Organ_Hauptwerk_xml) — en dus voor do_load_organ — of een sample-map (voor
 /// do_load_samples_from_directory)? Gebruikt door alle herlaad-routes.
@@ -1172,6 +1286,34 @@ fn organ_settings_dir(organ_id: &str) -> Option<std::path::PathBuf> {
         std::path::Path::new(organ_id).parent().map(|p| p.to_path_buf())
     } else {
         Some(std::path::PathBuf::from(organ_id))
+    }
+}
+
+/// Welke soort tremulant meldt deze divisie aan de UI?
+///
+/// * `"wave"` — er zijn ECHTE trem-opnamen én de ODF noemt het een
+///   golfvormtremulant (`TremulantType=Wave`). De UI zet de synth-LFO dan uit:
+///   de tremulant zit al in het geluid.
+/// * `"samples"` — echte trem-opnamen zonder die vlag (o.a. Hauptwerk-"tremmed").
+/// * `"synth"` — de ODF kent wel een tremulant, maar er is geen enkele opname:
+///   alleen de synthetische LFO kan hem dan laten horen.
+/// * `None` — deze divisie heeft geen tremulant.
+///
+/// De vlag alléén was eerder genoeg voor `"wave"`. Een set die
+/// `TremulantType=Wave` zet maar waarvan wij geen trem-opname laden (bv. omdat
+/// de pijpen geen `IsTremulant=1`-attack hebben) hield daardoor helemaal géén
+/// tremulant over: de LFO stond uit en er viel niets te horen.
+fn tremulant_kind_voor_divisie(
+    heeft_trem_opnamen: bool,
+    odf_zegt_wave: bool,
+    heeft_odf_tremulant: bool,
+) -> Option<&'static str> {
+    if heeft_trem_opnamen {
+        if odf_zegt_wave { Some("wave") } else { Some("samples") }
+    } else if heeft_odf_tremulant {
+        Some("synth")
+    } else {
+        None
     }
 }
 
@@ -1285,6 +1427,10 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
     // Perspectieven-plan (gevuld in het laadblok; ná reset_organ_scoped_state
     // in state.perspectives gezet — anders wist de reset hem direct weer).
     let persp: Vec<PerspectiveRuntime>;
+    // Registers met échte tremulant-opnamen (GO `IsTremulant=1`, Hauptwerk
+    // "tremmed"-laag): vult StopDto.has_tremulant en de engine-set die de
+    // synth-LFO voor die registers uitschakelt.
+    let mut stops_with_trem: std::collections::HashSet<u32> = std::collections::HashSet::new();
     {
         use std::collections::{HashMap, HashSet};
         use std::path::PathBuf;
@@ -1327,8 +1473,11 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
         // voor retune::retune_cents + het attack-pad (voor de smpl-meting uit
         // de preload-buffer) + de HW-terugval (originele pijptoon).
         let mut retune_inputs: Vec<((u32, u32), PathBuf, crate::retune::PipePitchInput, Option<f32>)> = Vec::new();
-        // Hauptwerk-tremulantlaag: aparte trem-opname per pijp.
-        let mut trem_tasks: Vec<((u32, u32), PathBuf)> = Vec::new();
+        // Door de sampleset opgegeven crossfade-duur per release-key (ms):
+        // GrandOrgue `ReleaseCrossfadeLength`, 1-3000 ms.
+        let mut release_xfade: HashMap<(u32, u32), u32> = HashMap::new();
+        // Aantal pijpen met een aparte tremulant-opname (voor de logregel).
+        let mut trem_pipe_count = 0usize;
         // Release-samples (opgenomen kerkakoestiek), onder de gemarkeerde key
         // (pipe_num | RELEASE_PIPE_FLAG). Twee vormen: een apart release-bestand,
         // of het release-segment ná de loop in het attack-bestand zelf
@@ -1336,6 +1485,78 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
         let mut release_tasks: Vec<((u32, u32), PathBuf, SegKey)> = Vec::new();
         // Toetsduur-release-metadata: (stop, pijp) → gesorteerde (max_ms, key).
         let mut release_meta: Vec<((u32, u32), Vec<(i32, u32)>)> = Vec::new();
+
+        /// Zet de release-bestanden van één pijp om in laadtaken + toetsduur-meta.
+        /// `key_pipe` is de pijpsleutel (met laagbits en, voor de tremulantstand,
+        /// `TREM_FLAG`); de release-keys krijgen daar `RELEASE_PIPE_FLAG` en —
+        /// voor de kortere MaxKeyPressTime-varianten — een index in bits 24-26 bij.
+        ///
+        /// Alle losse release-bestanden (R0/R1/…, toetsduur-varianten): oplopend
+        /// op MaxKeyPressTime, de default (-1/None, langste) achteraan op de
+        /// klassieke index-loze key — sets met één release gedragen zich exact als
+        /// voorheen. De audio-thread kiest per NoteOff op de gespeelde duur
+        /// (RegisterReleaseMeta, 0.7.26). Zonder losse bestanden: het
+        /// release-segment ná de loop in het attack-bestand zelf (cue-marker).
+        #[allow(clippy::too_many_arguments)]
+        fn push_pipe_releases(
+            stop_id: u32,
+            key_pipe: u32,
+            attack_path: &PathBuf,
+            attack_cue: Option<u32>,
+            load_release: Option<bool>,
+            percussive: bool,
+            releases: &[vpo_sampler::ReleaseDef],
+            release_tasks: &mut Vec<((u32, u32), PathBuf, SegKey)>,
+            release_meta: &mut Vec<((u32, u32), Vec<(i32, u32)>)>,
+            release_xfade: &mut HashMap<(u32, u32), u32>,
+        ) {
+            let default_key = (stop_id, key_pipe | crate::audio::RELEASE_PIPE_FLAG);
+            let mut file_releases: Vec<&vpo_sampler::ReleaseDef> = releases
+                .iter()
+                .filter(|r| r.path != *attack_path)
+                .collect();
+            if !file_releases.is_empty() {
+                file_releases.sort_by_key(|r| match r.max_key_press_time_ms {
+                    None | Some(-1) => i64::MAX,
+                    Some(t) => t as i64,
+                });
+                file_releases.truncate(8); // idx past in 3 bits + default
+                let n = file_releases.len();
+                let mut meta: Vec<(i32, u32)> = Vec::with_capacity(n);
+                for (idx, rel) in file_releases.iter().enumerate() {
+                    let kp = if idx + 1 == n {
+                        default_key.1 // default/langste → klassieke key
+                    } else {
+                        key_pipe | crate::audio::RELEASE_PIPE_FLAG | (((idx as u32) + 1) << 24)
+                    };
+                    release_tasks.push((
+                        (stop_id, kp),
+                        rel.path.clone(),
+                        SegKey::Release { cue_override: rel.cue_point, require_cue: false },
+                    ));
+                    if let Some(ms) = rel.crossfade_ms {
+                        release_xfade.insert((stop_id, kp), ms);
+                    }
+                    meta.push((
+                        match rel.max_key_press_time_ms { None | Some(-1) => -1, Some(t) => t },
+                        kp,
+                    ));
+                }
+                if meta.len() > 1 {
+                    release_meta.push(((stop_id, key_pipe), meta));
+                }
+            } else if !percussive && load_release.unwrap_or(true) {
+                // Geen apart release-bestand: probeer het release-segment uit het
+                // attack-bestand zelf (loop + cue). De loader slaat dit stil over
+                // als het bestand geen cue-marker/loop heeft.
+                release_tasks.push((
+                    default_key,
+                    attack_path.clone(),
+                    SegKey::Release { cue_override: attack_cue, require_cue: true },
+                ));
+            }
+        }
+
         let organ_db = ampl_to_db(definition.organ.amplitude_level) + definition.organ.gain_db;
         let organ_cents = definition.organ.pitch_tuning_cents;
         // Windchest-niveau inschaling per groepsnummer: (dB, PitchTuning,
@@ -1401,7 +1622,14 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
                         if extra.percussive == Some(true) {
                             percussive_stops.insert(stop.id);
                         }
-                        if let (Some(ls), Some(le)) = (extra.loop_start, extra.loop_end) {
+                        // Is de PRIMAIRE opname de tremulantvariant (ODF
+                        // `{key}IsTremulant=1`), dan staat de droge in een extra
+                        // attack — die wint dan als attack-bestand van deze pijp.
+                        let (path, attack_loop, attack_cue, attack_load_release) = match &extra.dry_attack {
+                            Some(a) => (&a.path, (a.loop_start, a.loop_end), a.cue_point, a.load_release),
+                            None => (path, (extra.loop_start, extra.loop_end), extra.cue_point, extra.load_release),
+                        };
+                        if let (Some(ls), Some(le)) = attack_loop {
                             if le > ls {
                                 odf_loops.entry(path.clone()).or_insert((ls, le));
                             }
@@ -1443,59 +1671,38 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
                                 extra.original_pitch_cents,
                             ));
                         }
-                        if let Some(trem_path) = &extra.tremulant_sample {
-                            trem_tasks.push(((stop.id, pipe_num), trem_path.clone()));
-                        }
-                        let release_key = (stop.id, pipe_num | crate::audio::RELEASE_PIPE_FLAG);
-                        // Alle losse release-bestanden (R0/R1/…, toetsduur-
-                        // varianten): oplopend op MaxKeyPressTime, de default
-                        // (-1/None, langste) achteraan op de klassieke index-
-                        // loze key — sets met één release gedragen zich exact
-                        // als voorheen. Kortere varianten krijgen een index in
-                        // bits 24-30; de audio-thread kiest per NoteOff op de
-                        // gespeelde duur (RegisterReleaseMeta, 0.7.26).
-                        let mut file_releases: Vec<&vpo_sampler::ReleaseDef> = extra.releases.iter()
-                            .filter(|r| r.path != *path)
-                            .collect();
-                        if !file_releases.is_empty() {
-                            file_releases.sort_by_key(|r| match r.max_key_press_time_ms {
-                                None | Some(-1) => i64::MAX,
-                                Some(t) => t as i64,
-                            });
-                            file_releases.truncate(8); // idx past in 3 bits + default
-                            let n = file_releases.len();
-                            let mut meta: Vec<(i32, u32)> = Vec::with_capacity(n);
-                            for (idx, rel) in file_releases.iter().enumerate() {
-                                let key_pipe = if idx + 1 == n {
-                                    release_key.1 // default/langste → klassieke key
-                                } else {
-                                    pipe_num | crate::audio::RELEASE_PIPE_FLAG | (((idx as u32) + 1) << 24)
-                                };
-                                release_tasks.push((
-                                    (stop.id, key_pipe),
-                                    rel.path.clone(),
-                                    SegKey::Release { cue_override: rel.cue_point, require_cue: false },
-                                ));
-                                meta.push((
-                                    match rel.max_key_press_time_ms { None | Some(-1) => -1, Some(t) => t },
-                                    key_pipe,
-                                ));
-                            }
-                            if meta.len() > 1 {
-                                release_meta.push(((stop.id, pipe_num), meta));
-                            }
-                        } else if !effective_percussive && extra.load_release.unwrap_or(true) {
-                            // Geen apart release-bestand: probeer het release-
-                            // segment uit het attack-bestand zelf (loop + cue).
-                            // De loader slaat dit stil over als het bestand geen
-                            // cue-marker/loop heeft.
-                            release_tasks.push((
-                                release_key,
-                                path.clone(),
-                                SegKey::Release { cue_override: extra.cue_point, require_cue: true },
-                            ));
-                        }
+                        push_pipe_releases(
+                            stop.id, pipe_num, path, attack_cue, attack_load_release,
+                            effective_percussive, &extra.releases,
+                            &mut release_tasks, &mut release_meta, &mut release_xfade,
+                        );
                         load_tasks.push(((stop.id, pipe_num), path.clone()));
+                        // Tremulant-OPNAME van deze pijp (GrandOrgue
+                        // `{key}Attack{jjj}IsTremulant=1`, Hauptwerk "tremmed"-laag):
+                        // een gewone preload onder dezelfde sleutel + TREM_FLAG.
+                        // Attack, achtergrond-load, full sample en release staan zo
+                        // per tremulantstand apart — NoteOn kiest de sleutel op de
+                        // stand van het register.
+                        if let Some(trem) = &extra.tremulant_attack {
+                            let trem_pipe = pipe_num | crate::audio::TREM_FLAG;
+                            if let (Some(ls), Some(le)) = (trem.loop_start, trem.loop_end) {
+                                if le > ls {
+                                    odf_loops.entry(trem.path.clone()).or_insert((ls, le));
+                                }
+                            }
+                            // Releases van de tremulantstand. Is `tremulant_releases`
+                            // leeg (geen trem-specifieke releases), dan blijft alleen
+                            // de same-file-terugval over en valt NoteOff verder
+                            // vanzelf terug op de droge release van dezelfde pijp.
+                            push_pipe_releases(
+                                stop.id, trem_pipe, &trem.path, trem.cue_point, trem.load_release,
+                                effective_percussive, &extra.tremulant_releases,
+                                &mut release_tasks, &mut release_meta, &mut release_xfade,
+                            );
+                            load_tasks.push(((stop.id, trem_pipe), trem.path.clone()));
+                            stops_with_trem.insert(stop.id);
+                            trem_pipe_count += 1;
+                        }
                         layer_any = true;
                     }
                 }
@@ -1522,7 +1729,6 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
         let unique_loads: Vec<(PathBuf, SegKey)> = load_tasks
             .iter()
             .map(|(_, p)| (p.clone(), SegKey::Attack))
-            .chain(trem_tasks.iter().map(|(_, p)| (p.clone(), SegKey::Attack)))
             .chain(release_tasks.iter().map(|(_, p, seg)| (p.clone(), *seg)))
             .filter(|entry| seen.insert(entry.clone()))
             .collect();
@@ -1661,12 +1867,6 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
             info!("Release-samples: {} pijpen met opgenomen kerkakoestiek bij note-off", release_count);
         }
 
-        // Hauptwerk-tremulantlaag: fan-out van de trem-samples naar per-key buffers.
-        let trem_buffers: HashMap<(u32, u32), Arc<PreloadBuffer>> = trem_tasks
-            .iter()
-            .filter_map(|(key, p)| path_buffers.get(&(p.clone(), SegKey::Attack)).map(|buf| (*key, buf.clone())))
-            .collect();
-
         info!("Registering {} preload buffers for instant playback", preload_buffers.len());
         {
             let player_lock = state.audio_player.read();
@@ -1676,10 +1876,18 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
                     .map_err(|e| format!("Failed to register preload buffers: {}", e))?;
                 // Altijd sturen (ook leeg): vervangt de sets van het vorige orgel.
                 let _ = player.send_command(crate::audio::AudioCommand::RegisterPercussiveStops(percussive_stops));
-                if !trem_buffers.is_empty() {
-                    info!("Tremulant-samplelaag: {} pijpen (echte trem-opnamen)", trem_buffers.len());
+                if trem_pipe_count > 0 {
+                    info!(
+                        "Tremulant-samplelaag: {} pijpen in {} registers (echte trem-opnamen)",
+                        trem_pipe_count, stops_with_trem.len()
+                    );
                 }
-                let _ = player.send_command(crate::audio::AudioCommand::RegisterTremulantBuffers(Arc::new(trem_buffers)));
+                // Altijd sturen (ook leeg): vervangt de set van het vorige orgel.
+                let _ = player.send_command(crate::audio::AudioCommand::RegisterTremStops(stops_with_trem.clone()));
+                if !release_xfade.is_empty() {
+                    info!("ReleaseCrossfadeLength: {} releases met eigen crossfade-duur", release_xfade.len());
+                }
+                let _ = player.send_command(crate::audio::AudioCommand::RegisterReleaseCrossfade(Arc::new(release_xfade)));
                 if !odf_voicings.is_empty() {
                     info!("ODF-intonatie: {} pijpen met gain/pitch uit de sampleset", odf_voicings.len());
                 }
@@ -1712,6 +1920,26 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
         }
         persp = persp_plan;
     }
+
+    // GrandOrgue past een tremulant via de WINDCHEST toe; de [Manual]-
+    // verwijzing gebruikt hij alleen voor de divisionals. Een ODF die zijn
+    // tremulant alléén op de windchest noemt gaf daardoor has_tremulant=false.
+    // Neem dus beide bronnen mee.
+    let manual_trem_ids = |manual: &vpo_sampler::ManualDef| -> Vec<u32> {
+        let mut ids: Vec<u32> = manual.tremulant_ids.clone();
+        for sid in &manual.stop_ids {
+            if let Some(stop) = definition.stops.iter().find(|s| s.id == *sid) {
+                if let Some(wc) = definition.windchests.iter().find(|w| w.number == stop.windchest_group) {
+                    for t in &wc.tremulant_ids {
+                        if !ids.contains(t) {
+                            ids.push(*t);
+                        }
+                    }
+                }
+            }
+        }
+        ids
+    };
 
     // Build organ info for UI
     let mut divisions: Vec<DivisionDto> = Vec::new();
@@ -1748,7 +1976,11 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
                     pitch,
                     drawn: false,
                     color: Some(color.to_string()),
-                    has_tremulant: false,
+                    // Echte tremulant-opnamen van dit register (gevuld in het
+                    // laadblok). Stond hier hard op false — daardoor stuurde
+                    // set_tremulant nooit een SetTremulant en was ook het
+                    // Hauptwerk-"tremmed"-pad in de praktijk dood.
+                    has_tremulant: stops_with_trem.contains(&stop.id),
                     midi_action_code: stop_action_code,
                     internal_stop_id: stop.id,
                     first_midi_note: first_midi,
@@ -1765,12 +1997,28 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
             format!("{} ({})", manual.name, roman_numeral(manual.number as usize))
         };
 
+        // Tremulant van deze divisie: een ODF-verwijzing (manual óf windchest)
+        // en/of registers met echte trem-opnamen.
+        let trem_ids = manual_trem_ids(manual);
+        let stops_have_trem = stops.iter().any(|s| s.has_tremulant);
+        let trem_wave = trem_ids.iter().any(|tid| {
+            definition.tremulants.iter().any(|t| t.number == *tid && t.wave)
+        });
+        let tremulant_kind = tremulant_kind_voor_divisie(stops_have_trem, trem_wave, !trem_ids.is_empty());
+        if trem_wave && !stops_have_trem {
+            warn!(
+                "Manuaal '{}': TremulantType=Wave maar geen enkele trem-opname geladen → synthetische tremulant",
+                manual.name
+            );
+        }
         divisions.push(DivisionDto {
             name: manual.name.clone(),
             display_name,
             stops,
-            // ODF defines a tremulant for this manual (or its windchest).
-            has_tremulant: !manual.tremulant_ids.is_empty(),
+            // ODF defines a tremulant for this manual (or its windchest), or the
+            // sample set has real tremulant recordings for one of its stops.
+            has_tremulant: !trem_ids.is_empty() || stops_have_trem,
+            tremulant_kind: tremulant_kind.map(str::to_string),
             // Division sits in a swell box (its windchest references an Enclosure).
             has_swell: enclosed_divs.contains(&manual.name),
         });
@@ -1790,11 +2038,15 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
         real_couplers
     };
 
+    // Naam/bouwer/plaats: JM-Rec-sets krijgen "Kerknaam - Orgelbouwer - Plaats",
+    // en `location` is voortaan de PLAATS (ChurchAddress) i.p.v. RecordingDetails.
+    let (display_name, display_builder, display_location) =
+        display_identity(odf_path, &definition.organ);
     let organ_info = OrganInfoDto {
         id: path.to_string(),
-        name: definition.organ.church_name.clone(),
-        builder: definition.organ.organ_builder.clone(),
-        location: definition.organ.recording_details.clone(),
+        name: display_name,
+        builder: display_builder,
+        location: display_location,
         year: if definition.organ.organ_build_date.is_empty() {
             None
         } else {
@@ -1838,9 +2090,14 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
     // Period (ms), diepte uit AmpModDepth (%). Eventueel per orgel opgeslagen
     // gebruikersinstellingen overschrijven dit daarna via de normale restore.
     for (div_idx, manual) in definition.manuals.iter().enumerate() {
-        if let Some(tid) = manual.tremulant_ids.first() {
+        if let Some(tid) = manual_trem_ids(manual).first() {
             if let Some(trem) = definition.tremulants.iter().find(|t| t.number == *tid) {
-                if trem.period > 1.0 {
+                if trem.wave {
+                    // TremulantType=Wave: de set heeft echte tremulant-opnamen;
+                    // GrandOrgue leest Period/AmpModDepth dan niet en er hoort
+                    // geen synth-LFO overheen.
+                    info!("ODF-tremulant '{}': golfvorm (echte opnamen) — geen synth-LFO", manual.name);
+                } else if trem.period > 1.0 {
                     let rate = (1000.0 / trem.period).clamp(0.5, 12.0);
                     let amp_depth = if trem.amp_mod_depth > 0.0 {
                         trem.amp_mod_depth.clamp(1.0, 50.0)
@@ -1889,7 +2146,7 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
     info!("Organ loaded: {} stops in {} divisions", stop_count, organ_info.divisions.len());
 
     // Add to library if not already present
-    add_to_library_if_new(state, &organ_info, path, "organ_file");
+    add_or_refresh_library_entry(state, &organ_info, path, "organ_file");
 
     // current_organ_id is al vóór de DTO-publicatie gezet (auditbevinding 41).
     restore_organ_settings(state, path);
@@ -2556,41 +2813,52 @@ pub fn get_crescendo_state(state: State<AppState>) -> (bool, u8, u8) {
 }
 
 /// Learn crescendo pedal MIDI binding.
-/// Stille leer-modus: voordat we de MIDI-thread laten luisteren, wissen we de
-/// bestaande crescendo-binding en stoppen we alle klinkende noten + crescendo-stops.
-/// Anders zou de bewegende pedaal tijdens het leren een al-gebonden crescendo
-/// activeren (registers worden gestoken/teruggetrokken), wat het settle-detectie
-/// algoritme verstoort en de gebruiker een onstabiele inleer-ervaring geeft.
+/// Stille leer-modus: tijdens het luisteren staat de bestaande crescendo-binding
+/// even uit en stoppen we alle klinkende noten + crescendo-stops. Anders zou de
+/// bewegende pedaal tijdens het leren een al-gebonden crescendo activeren
+/// (registers worden gestoken/teruggetrokken), wat het settle-detectie-algoritme
+/// verstoort. De oude binding wordt PAS vervangen bij een geslaagde inleer: bij
+/// een time-out of afbreken komt hij ongeschonden terug (voorheen was je hem
+/// dan kwijt).
 #[tauri::command]
 pub fn learn_crescendo_pedal(state: State<AppState>) -> Result<Option<(u8, u8)>, String> {
+    use crate::state::PedalCcKind;
     // Stille leer-modus: trede-registers netjes wegtrekken (zelfde kern als
-    // het pedaal, incl. voice-sync en DTO-vlaggen) en de binding wissen.
-    *state.crescendo_binding.write() = None;
+    // het pedaal, incl. voice-sync en DTO-vlaggen) en de binding parkeren.
+    let vorige = state.crescendo_binding.write().take();
     state.apply_crescendo_stage(0);
     state.send_audio_command(AudioCommand::AllNotesOff);
 
     let (tx, rx) = crossbeam_channel::bounded(1);
     state.midi_tx.send(crate::state::MidiCommand::LearnCrescendoPedal(tx))
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| {
+            *state.crescendo_binding.write() = vorige;
+            e.to_string()
+        })?;
     match rx.recv_timeout(std::time::Duration::from_secs(20)) {
         Ok(result) => {
             if let Some((ch, cc)) = result {
                 // Behoud bestaande invert-keuze als die er was; nieuwe binding
                 // (channel, cc, min=0, max=127, invert=false)
                 *state.crescendo_binding.write() = Some((ch, cc, 0, 127, false));
-                // Wederzijds exclusief: een zwel-koppeling op dezelfde CC zou
-                // door de crescendo-claim toch dood zijn — opruimen zodat de
-                // editor geen spook-koppeling toont. Laatst ingeleerd wint.
-                state.swell_bindings.write().retain(|b| !(b.channel == ch && b.cc_num == cc));
+                // Wederzijds exclusief via de gedeelde helper: een zwel-koppeling
+                // op dezelfde CC zou door de crescendo-claim toch dood zijn.
+                let _ = state.claim_pedal_cc(PedalCcKind::Crescendo, ch, cc);
                 // Tijdens het inleren was de binding gewist, dus een CC7/11-pedaal
                 // heeft dan via de expressie-fallback het mastervolume gedempt.
                 // Nu de CC exclusief crescendo is komt er nooit meer een
                 // expressie-update op deze CC — zet de demping expliciet terug.
                 state.send_audio_command(AudioCommand::SetMasterExpression(1.0));
+            } else {
+                // Time-out in de MIDI-thread: oude koppeling terug.
+                *state.crescendo_binding.write() = vorige;
             }
             Ok(result)
         }
-        Err(_) => Ok(None),
+        Err(_) => {
+            *state.crescendo_binding.write() = vorige;
+            Ok(None)
+        }
     }
 }
 
@@ -4212,13 +4480,21 @@ pub fn load_impulse_response(state: State<AppState>, path: String) -> Result<(),
 /// Finds all stops in the division that have tremulant samples and toggles them
 #[tauri::command]
 pub fn set_tremulant(state: State<AppState>, division_name: String, active: bool) -> Result<(), String> {
+    do_set_tremulant(&state, &division_name, active).map(|_| ())
+}
+
+/// Kern van [`set_tremulant`], ook gebruikt door de test-API (POST /tremulant).
+/// Geeft het aantal registers terug waarvan de tremulant-OPNAMEN geschakeld
+/// zijn (0 = divisie bestaat, maar heeft geen trem-samples — dan doet alleen
+/// de synth-LFO het werk).
+pub fn do_set_tremulant(state: &AppState, division_name: &str, active: bool) -> Result<usize, String> {
     let organ = state.loaded_organ_info.read();
 
     if let Some(ref o) = *organ {
         if let Some(div) = o.divisions.iter().find(|d| d.name == division_name) {
             // Spiegel voor de afstandsbediening (GET /state) — ook zonder
             // trem-samples: de Console-stand is dan tóch 'aan' via de LFO.
-            state.tremulant_live.write().insert(division_name.clone(), active);
+            state.tremulant_live.write().insert(division_name.to_string(), active);
             let stop_ids: Vec<u32> = div.stops.iter()
                 .filter(|s| s.has_tremulant)
                 .map(|s| s.internal_stop_id)
@@ -4226,14 +4502,15 @@ pub fn set_tremulant(state: State<AppState>, division_name: String, active: bool
 
             if stop_ids.is_empty() {
                 info!("No tremulant samples available for division '{}'", division_name);
-                return Ok(());
+                return Ok(0);
             }
 
+            let n = stop_ids.len();
             info!("Tremulant {} for division '{}': {} stops",
-                  if active { "ON" } else { "OFF" }, division_name, stop_ids.len());
+                  if active { "ON" } else { "OFF" }, division_name, n);
 
             state.send_audio_command(AudioCommand::SetTremulant { stop_ids, active });
-            return Ok(());
+            return Ok(n);
         }
     }
 
@@ -4284,6 +4561,8 @@ pub fn get_status(state: State<AppState>) -> Result<StatusDto, String> {
         polyphony: crate::audio::polyphony_target(),
         render_load: crate::audio::render_load().0,
         render_peak: crate::audio::render_load().1,
+        render_overloads: crate::audio::render_overload_count(),
+        rt_drops: crate::state::rt_drop_count(),
         stereo_samples: vpo_sampler::stereo_loading(),
         midi_archiving: state.midi_archive.archiving.load(std::sync::atomic::Ordering::Relaxed),
     })
@@ -4562,6 +4841,22 @@ pub fn set_tremulant_lfo(state: State<AppState>, division: String, active: bool,
 pub fn persist_tremulant_config(state: State<AppState>, division: String, enabled: bool, rate: f32, amp_depth: f32, pitch_depth: f32) -> Result<(), String> {
     state.division_tremulants.write().insert(division, (enabled, rate, amp_depth, pitch_depth));
     Ok(())
+}
+
+/// Publiceer de indeling van de afstandsbediening (welke divisies/registers/
+/// koppels en welke onderdelen het externe scherm toont). Alleen het
+/// HOOFDVENSTER schrijft dit (single writer, zoals de andere gedeelde
+/// UI-voorkeuren); de waarde wordt met de orgel-instellingen bewaard.
+/// Mirror-only: er gaat geen audio-commando uit.
+#[tauri::command]
+pub fn set_remote_layout(state: State<AppState>, layout: library::RemoteLayoutSaved) -> Result<(), String> {
+    set_remote_layout_inner(&state, layout);
+    Ok(())
+}
+
+/// Kern van set_remote_layout — ook gebruikt door de test-API.
+pub fn set_remote_layout_inner(state: &AppState, layout: library::RemoteLayoutSaved) {
+    state.set_remote_layout_mirror(Some(layout));
 }
 
 /// Bewaar de wind-model-config van een wind-groep voor per-orgel opslag. Stuurt zelf geen audio
@@ -5280,6 +5575,15 @@ pub fn do_load_samples_from_directory_locked(state: &AppState, directory: &str) 
     let organ_name = path.file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| "Custom Organ".to_string());
+    // JM-Rec-projectmap zonder .organ: naam/bouwer/plaats uit het manifest,
+    // anders zou de mapCODE de bibliotheeknaam worden.
+    let (organ_name, organ_builder, organ_location) = match jm_rec_identity_for_dir(path) {
+        Some((naam, bouwer, plaats)) => {
+            info!("JM-Rec-manifest gevonden: '{}'", naam);
+            (naam, bouwer, plaats)
+        }
+        None => (organ_name, "Custom Samples".to_string(), directory.to_string()),
+    };
 
     info!("Scanning directory for samples: {}", directory);
 
@@ -5301,7 +5605,8 @@ pub fn do_load_samples_from_directory_locked(state: &AppState, directory: &str) 
 
     // Collect all sample paths with their keys
     let mut load_tasks: Vec<((u32, u32), std::path::PathBuf)> = Vec::new();
-    let mut trem_load_tasks: Vec<((u32, u32), std::path::PathBuf)> = Vec::new();
+    // Registers met een `_trem`-map (echte tremulant-opnamen).
+    let mut stops_with_trem: std::collections::HashSet<u32> = std::collections::HashSet::new();
     let mut stop_id_counter = 1u32;
     let mut stop_action_code: u8 = 150; // Stops use action codes 150-255
 
@@ -5365,12 +5670,18 @@ pub fn do_load_samples_from_directory_locked(state: &AppState, directory: &str) 
                     }
                     let full_path = path.join(&pipe.sample_path);
                     let base = (pipe.midi_note as u32) - stop_first_note as u32 + 1;
-                    trem_load_tasks.push(((internal_stop_id, crate::audio::layer_key(base, *layer_idx)), full_path));
+                    // Zelfde sleutel als droog + TREM_FLAG: NoteOn kiest hem op
+                    // de tremulantstand van het register (0.7.39).
+                    let key = crate::audio::layer_key(base, *layer_idx) | crate::audio::TREM_FLAG;
+                    load_tasks.push(((internal_stop_id, key), full_path));
                     any_trem = true;
                 }
                 if layer_any {
                     rank_layout.entry(internal_stop_id).or_default().push((*layer_idx, slot));
                 }
+            }
+            if any_trem {
+                stops_with_trem.insert(internal_stop_id);
             }
             rank_summary.push(RankSummary {
                 stop_id: internal_stop_id,
@@ -5420,6 +5731,8 @@ pub fn do_load_samples_from_directory_locked(state: &AppState, directory: &str) 
             display_name,
             stops,
             has_tremulant: div_has_trem,
+            // Echte opnamen (`_trem`-map), geen ODF-tremulant.
+            tremulant_kind: if div_has_trem { Some("samples".to_string()) } else { None },
             has_swell: false, // custom sample folders carry no enclosure info
         });
     }
@@ -5470,43 +5783,17 @@ pub fn do_load_samples_from_directory_locked(state: &AppState, directory: &str) 
             // vorig GO-orgel zouden anders op deze set doorwerken.
             let _ = player.send_command(crate::audio::AudioCommand::RegisterOdfRetune(Arc::new(Default::default())));
             let _ = player.send_command(crate::audio::AudioCommand::RegisterOdfLoops(Arc::new(Default::default())));
-            // Ook de tremulant-samplelaag wissen: had het vórige orgel echte
-            // trem-opnamen en dit orgel niet, dan bleven die buffers (en
-            // stops_with_trem) staan en kon een verkeerde laag klinken
-            // (auditbevinding 38). Eigen trem-buffers van dit orgel worden
-            // hierna alsnog geregistreerd.
-            let _ = player.send_command(crate::audio::AudioCommand::RegisterTremulantBuffers(Arc::new(Default::default())));
-        }
-    }
-
-    // Load tremulant preload buffers (if any)
-    if !trem_load_tasks.is_empty() {
-        info!("Loading {} tremulant preload buffers...", trem_load_tasks.len());
-        let trem_start = std::time::Instant::now();
-
-        let trem_results: Vec<_> = trem_load_tasks.par_iter()
-            .filter_map(|(key, path)| {
-                match load_audio_preload(path, PRELOAD_SAMPLES) {
-                    Ok(preload) => Some((*key, Arc::new(preload))),
-                    Err(e) => {
-                        warn!("Failed to preload tremulant {:?}: {}", path, e);
-                        None
-                    }
-                }
-            })
-            .collect();
-
-        let trem_elapsed = trem_start.elapsed();
-        info!("Loaded {} tremulant buffers in {:.2}s", trem_results.len(), trem_elapsed.as_secs_f32());
-
-        let trem_buffers: HashMap<(u32, u32), Arc<PreloadBuffer>> = trem_results.into_iter().collect();
-
-        {
-            let player_lock = state.audio_player.read();
-            if let Some(ref player) = *player_lock {
-                player.send_command(crate::audio::AudioCommand::RegisterTremulantBuffers(Arc::new(trem_buffers)))
-                    .map_err(|e| format!("Failed to register tremulant buffers: {}", e))?;
+            // Ook de tremulantregisters opnieuw zetten: had het vórige orgel
+            // echte trem-opnamen en dit orgel niet, dan bleef die set staan en
+            // zweeg de synth-LFO voor de verkeerde registers (auditbevinding 38).
+            if !stops_with_trem.is_empty() {
+                info!("Tremulant-samplelaag: {} registers met een _trem-map", stops_with_trem.len());
             }
+            let _ = player.send_command(crate::audio::AudioCommand::RegisterTremStops(stops_with_trem.clone()));
+            // Custom sample-mappen kennen geen toetsduur-releases of
+            // ReleaseCrossfadeLength: wis de tabellen van een vorig ODF-orgel.
+            let _ = player.send_command(crate::audio::AudioCommand::RegisterReleaseMeta(Default::default()));
+            let _ = player.send_command(crate::audio::AudioCommand::RegisterReleaseCrossfade(Arc::new(Default::default())));
         }
     }
 
@@ -5531,8 +5818,8 @@ pub fn do_load_samples_from_directory_locked(state: &AppState, directory: &str) 
     let organ_info = OrganInfoDto {
         id: directory.to_string(),
         name: organ_name,
-        builder: "Custom Samples".to_string(),
-        location: directory.to_string(),
+        builder: organ_builder,
+        location: organ_location,
         year: None,
         stop_count,
         divisions,
@@ -5580,7 +5867,7 @@ pub fn do_load_samples_from_directory_locked(state: &AppState, directory: &str) 
     info!("Loaded custom organ: {} stops (preload buffers ready)", stop_count);
 
     // Add to library if not already present
-    add_to_library_if_new(state, &organ_info, directory, "sample_directory");
+    add_or_refresh_library_entry(state, &organ_info, directory, "sample_directory");
 
     // current_organ_id is al vóór de DTO-publicatie gezet (auditbevinding 41).
     restore_organ_settings(state, directory);
@@ -5593,33 +5880,111 @@ pub fn do_load_samples_from_directory_locked(state: &AppState, directory: &str) 
 
 // ============ Library Helper Functions ============
 
-fn add_to_library_if_new(state: &AppState, organ_info: &OrganInfoDto, source_path: &str, source_type: &str) {
-    let mut lib = state.organ_library.write();
-    // Check if already in library — genormaliseerd (slashes + case), zodat
-    // pad-notatieverschillen geen dubbele entries opleveren.
+/// Zet dit orgel in de bibliotheek, of VERVERS de bestaande entry.
+///
+/// Verversen is nodig sinds de naamregel voor JM-Rec-sets: anders zou een set
+/// die al in de bibliotheek staat zijn oude naam (de mapcode) houden. `id` en
+/// `source_path` blijven ongemoeid — die zijn de sleutel van de opgeslagen
+/// instellingen (`lib.settings`, `.jm-settings.json`, `current_organ_id`).
+///
+/// De afbeelding wordt alleen (her)gezocht als er nog geen is, het bestand
+/// verdwenen is, of de zoekversie is opgehoogd — en NOOIT als de gebruiker er
+/// zelf een koos (`image_manual`).
+///
+/// LOCKVOLGORDE (zoals get_organ_image): korte READ-lock om te beslissen, lock
+/// LOS tijdens de diepe afbeeldingszoektocht (die loopt over de hele
+/// sample-map en duurde seconden), dan een korte WRITE-lock om te schrijven.
+/// Anders bevriest elk venster dat de bibliotheek leest tijdens die scan — en
+/// bij de eerste start na een upgrade heeft élke entry nog image_searched=None.
+fn add_or_refresh_library_entry(state: &AppState, organ_info: &OrganInfoDto, source_path: &str, source_type: &str) {
     let norm = |s: &str| s.replace('/', "\\").to_lowercase();
-    if lib.organs.iter().any(|o| norm(&o.source_path) == norm(source_path)) {
-        info!("Organ already in library: {}", source_path);
-        return;
-    }
-    // Find image
-    let image_path = library::find_organ_image(source_path, source_type);
-    info!("Organ image: {:?}", image_path);
+    let key = norm(source_path);
 
-    let entry = OrganLibraryEntry {
-        id: source_path.to_string(),
-        name: organ_info.name.clone(),
-        builder: organ_info.builder.clone(),
-        location: organ_info.location.clone(),
-        year: organ_info.year.clone(),
-        stop_count: organ_info.stop_count,
-        source_type: source_type.to_string(),
-        source_path: source_path.to_string(),
-        image_path,
+    // 1) Korte read-lock: bestaat de entry al, en moet er gezocht worden?
+    let (bestaat, moet_zoeken) = {
+        let lib = state.organ_library.read();
+        match lib.organs.iter().find(|o| norm(&o.source_path) == key) {
+            Some(e) => {
+                let bestand_weg = e.image_path.as_ref().map(|p| !Path::new(p).is_file()).unwrap_or(true);
+                let al_gezocht = e.image_searched == Some(library::IMAGE_SEARCH_VERSION);
+                (true, !e.image_manual && bestand_weg && !al_gezocht)
+            }
+            // Nieuw: afbeelding meteen zoeken (en het resultaat — ook "niets" —
+            // vastleggen zodat de diepe scan niet elke keer herhaald wordt).
+            None => (false, true),
+        }
     };
-    lib.organs.push(entry);
-    drop(lib);
-    state.save_library();
+
+    // 2) Zoeken ZONDER lock.
+    let gezocht = if moet_zoeken {
+        let found = library::find_organ_image(source_path, source_type);
+        info!("Bibliotheek: afbeelding gezocht voor {} → {:?}", source_path, found);
+        Some(found)
+    } else {
+        None
+    };
+
+    // 3) Korte write-lock om te schrijven. De entry kan intussen veranderd zijn
+    //    (ander venster koos een afbeelding, of voegde hem net toe): opnieuw
+    //    opzoeken en een handmatige keuze respecteren.
+    let mut changed = false;
+    {
+        let mut lib = state.organ_library.write();
+        match lib.organs.iter().position(|o| norm(&o.source_path) == key) {
+            Some(idx) => {
+                let e = &mut lib.organs[idx];
+                for (veld, nieuw) in [
+                    (&mut e.name, &organ_info.name),
+                    (&mut e.builder, &organ_info.builder),
+                    (&mut e.location, &organ_info.location),
+                ] {
+                    if *veld != *nieuw {
+                        *veld = nieuw.clone();
+                        changed = true;
+                    }
+                }
+                if e.year != organ_info.year {
+                    e.year = organ_info.year.clone();
+                    changed = true;
+                }
+                if e.stop_count != organ_info.stop_count {
+                    e.stop_count = organ_info.stop_count;
+                    changed = true;
+                }
+                if let Some(found) = gezocht {
+                    if !e.image_manual {
+                        e.image_path = found;
+                        e.image_searched = Some(library::IMAGE_SEARCH_VERSION);
+                        changed = true;
+                    }
+                }
+                if changed && bestaat {
+                    info!("Bibliotheek-entry ververst: {}", source_path);
+                }
+            }
+            None => {
+                lib.organs.push(OrganLibraryEntry {
+                    id: source_path.to_string(),
+                    name: organ_info.name.clone(),
+                    builder: organ_info.builder.clone(),
+                    location: organ_info.location.clone(),
+                    year: organ_info.year.clone(),
+                    stop_count: organ_info.stop_count,
+                    source_type: source_type.to_string(),
+                    source_path: source_path.to_string(),
+                    image_path: gezocht.flatten(),
+                    image_manual: false,
+                    image_searched: Some(library::IMAGE_SEARCH_VERSION),
+                });
+                changed = true;
+            }
+        }
+    }
+    // parking_lot is niet re-entrant: save_library() neemt zelf een read-lock,
+    // dus pas opslaan als de write-guard gevallen is.
+    if changed {
+        state.save_library();
+    }
 }
 
 fn restore_organ_settings(state: &AppState, organ_id: &str) {
@@ -5747,7 +6112,7 @@ fn restore_organ_settings(state: &AppState, organ_id: &str) {
     // Crescendo-pedaalbinding herstellen (channel/cc/min/max/invert).
     if let Some(b) = settings.crescendo_binding.clone() {
         *state.crescendo_binding.write() = Some((b.channel, b.cc_num, b.min_val, b.max_val, b.invert));
-        info!("Restored crescendo binding: ch={}, cc={}, invert={}", b.channel, b.cc_num, b.invert);
+        info!("Crescendo-koppeling hersteld: kanaal {} CC{} invert={}", b.channel + 1, b.cc_num, b.invert);
     }
 
     // Audio-DSP (master volume, temperament, reverb, EQ): zet ALLEEN de runtime-spiegels op
@@ -5787,12 +6152,185 @@ fn restore_organ_settings(state: &AppState, organ_id: &str) {
             wg.insert(w.group, (w.enabled, w.reservoir_size, w.damping, w.max_sag));
         }
     }
+    // Indeling van de afstandsbediening van DIT orgel (reset_division_settings
+    // zette hem net op None). De rev-bump laat de remote-pagina /organ opnieuw
+    // ophalen; het hoofdvenster publiceert daarna dezelfde indeling opnieuw.
+    if settings.remote_layout.is_some() {
+        state.set_remote_layout_mirror(settings.remote_layout.clone());
+        info!("Restored remote layout");
+    }
 }
 
 // ============ Library Commands ============
 
+/// Is de bibliotheek in dit proces al één keer opgefrist? (punt 8: bestaande
+/// kaarten tonen anders hun oude naam — bv. de mapcode "PuttBätz" — totdat je
+/// het orgel een keer opent.)
+static BIB_NAMEN_VERVERST: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Hoelang de eerste `get_organ_library` op de opfrisser wacht. Daarna loopt
+/// die gewoon door op de achtergrond: een weggehaalde USB-schijf of een trage
+/// netwerkmap mag het openen van de bibliotheek nooit ophouden.
+const BIB_VERVERS_WACHT_MS: u64 = 400;
+
+/// Lees ALLEEN de `[Organ]`-sectie van een GrandOrgue-`.organ`, zonder de rest
+/// te parsen: de sectie staat vooraan, dus de eerste 64 kB volstaat. Zo blijft
+/// een ODF van tientallen MB's buiten het geheugen en worden er geen samples
+/// aangeraakt. `None` = bestand onleesbaar (schijf weg) of geen `[Organ]`.
+fn lees_organ_sectie_licht(path: &Path) -> Option<vpo_sampler::OrganInfo> {
+    use std::io::Read;
+    let f = std::fs::File::open(path).ok()?;
+    let mut buf = Vec::new();
+    f.take(64 * 1024).read_to_end(&mut buf).ok()?;
+
+    // Zelfde decodering als de volledige parser: UTF-8, anders Latin-1. Een
+    // afgekapt laatste teken telt NIET als "dus Latin-1" (dat zou mojibake
+    // geven), vandaar de marge van 4 bytes.
+    let txt = match std::str::from_utf8(&buf) {
+        Ok(s) => s.to_string(),
+        Err(e) if e.valid_up_to() + 4 >= buf.len() => {
+            String::from_utf8_lossy(&buf[..e.valid_up_to()]).into_owned()
+        }
+        Err(_) => buf.iter().map(|&b| b as char).collect(),
+    };
+
+    let mut info = vpo_sampler::OrganInfo::default();
+    let mut in_organ = false;
+    let mut gevonden = false;
+    for regel in txt.lines() {
+        let regel = regel.trim_start_matches('\u{feff}').trim();
+        if regel.is_empty() || regel.starts_with(';') {
+            continue;
+        }
+        if regel.starts_with('[') && regel.ends_with(']') {
+            if in_organ {
+                break; // volgende sectie: klaar
+            }
+            in_organ = regel[1..regel.len() - 1].eq_ignore_ascii_case("Organ");
+            gevonden |= in_organ;
+            continue;
+        }
+        if !in_organ {
+            continue;
+        }
+        let Some(eq) = regel.find('=') else { continue };
+        let (sleutel, waarde) = (regel[..eq].trim(), regel[eq + 1..].trim());
+        match sleutel {
+            "ChurchName" => info.church_name = waarde.to_string(),
+            "ChurchAddress" => info.church_address = waarde.to_string(),
+            "OrganBuilder" => info.organ_builder = waarde.to_string(),
+            "OrganComments" => info.organ_comments = waarde.to_string(),
+            "RecordingDetails" => info.recording_details = waarde.to_string(),
+            _ => {}
+        }
+    }
+    if gevonden { Some(info) } else { None }
+}
+
+/// Naam/bouwer/plaats van één bibliotheek-entry, LICHTGEWICHT: alleen het
+/// JM-Rec-manifest (`<stem>.jm-rec.json`) en/of de `[Organ]`-sectie — geen
+/// volledige ODF-parse en geen samples. `None` = niets te zeggen (pad weg,
+/// Hauptwerk-XML, of een mapscan zonder manifest) → entry ongemoeid laten.
+fn bibliotheek_identiteit_licht(source_path: &str, source_type: &str) -> Option<(String, String, String)> {
+    let pad = Path::new(source_path);
+    if is_organ_file_id(source_path) {
+        // Hauptwerk-XML valt hier bewust buiten: dat bestand is niet in één
+        // sectie te lezen en de naamregel van 0.7.39 raakt het niet.
+        if source_path.to_lowercase().ends_with(".organ_hauptwerk_xml") {
+            return None;
+        }
+        let info = lees_organ_sectie_licht(pad)?;
+        return Some(display_identity(pad, &info));
+    }
+    if source_type == "sample_directory" {
+        // Mapscan: alleen een JM-Rec-manifest kan hier iets zinnigs zeggen.
+        return jm_rec_identity_for_dir(pad);
+    }
+    None
+}
+
+/// Werk de naam/bouwer/plaats van de meegegeven entries bij. Schrijft in één
+/// korte write-lock en slaat alleen op als er echt iets veranderd is.
+fn ververs_bibliotheek_namen(state: &AppState, entries: Vec<(String, String, String, String, String)>) {
+    let norm = |s: &str| s.replace('/', "\\").to_lowercase();
+    let mut wijzigingen: Vec<(String, String, String, String)> = Vec::new();
+    for (source_path, source_type, naam, bouwer, plaats) in entries {
+        if let Some((n, b, p)) = bibliotheek_identiteit_licht(&source_path, &source_type) {
+            if n != naam || b != bouwer || p != plaats {
+                wijzigingen.push((source_path, n, b, p));
+            }
+        }
+    }
+    if wijzigingen.is_empty() {
+        return;
+    }
+
+    let mut aantal = 0usize;
+    {
+        let mut lib = state.organ_library.write();
+        for (source_path, n, b, p) in wijzigingen {
+            let sleutel = norm(&source_path);
+            // Opnieuw opzoeken: de entry kan intussen weg zijn of al door een
+            // echte load zijn bijgewerkt.
+            if let Some(e) = lib.organs.iter_mut().find(|o| norm(&o.source_path) == sleutel) {
+                if e.name != n || e.builder != b || e.location != p {
+                    info!("Bibliotheek opgefrist: '{}' → '{}'", e.name, n);
+                    e.name = n;
+                    e.builder = b;
+                    e.location = p;
+                    aantal += 1;
+                }
+            }
+        }
+    }
+    // parking_lot is niet re-entrant: save_library() neemt zelf een read-lock.
+    if aantal > 0 {
+        state.save_library();
+    }
+}
+
+/// Fris de bibliotheekkaarten ÉÉN keer per proces op (punt 8). Het werk loopt
+/// op een achtergrondthread; de aanroeper wacht er hooguit
+/// [`BIB_VERVERS_WACHT_MS`] op, zodat de eerste opening van de bibliotheek de
+/// nieuwe namen meestal al toont maar een onbereikbaar pad niets ophoudt.
+/// Ontbrekende bestanden leveren `None` op en laten de entry dus staan — er
+/// wordt nooit iets gewist.
+fn ververs_bibliotheek_namen_eenmalig(state: &AppState) {
+    if BIB_NAMEN_VERVERST.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        return;
+    }
+    // Snapshot onder een KORTE read-lock; het lezen van schijf gebeurt zonder lock.
+    let entries: Vec<(String, String, String, String, String)> = {
+        let lib = state.organ_library.read();
+        lib.organs
+            .iter()
+            .map(|o| {
+                (
+                    o.source_path.clone(),
+                    o.source_type.clone(),
+                    o.name.clone(),
+                    o.builder.clone(),
+                    o.location.clone(),
+                )
+            })
+            .collect()
+    };
+    if entries.is_empty() {
+        return;
+    }
+
+    let st = state.clone();
+    let (tx, rx) = std::sync::mpsc::channel::<()>();
+    std::thread::spawn(move || {
+        ververs_bibliotheek_namen(&st, entries);
+        let _ = tx.send(());
+    });
+    let _ = rx.recv_timeout(std::time::Duration::from_millis(BIB_VERVERS_WACHT_MS));
+}
+
 #[tauri::command]
 pub fn get_organ_library(state: State<AppState>) -> Vec<OrganLibraryEntry> {
+    ververs_bibliotheek_namen_eenmalig(state.inner());
     state.organ_library.read().organs.clone()
 }
 
@@ -5800,9 +6338,21 @@ pub fn get_organ_library(state: State<AppState>) -> Vec<OrganLibraryEntry> {
 pub fn remove_from_library(state: State<AppState>, id: String) {
     info!("Removing organ from library: {}", id);
     let mut lib = state.organ_library.write();
+    // Een handmatig gekozen afbeelding staat als KOPIE in de app-datamap; die
+    // hoort met de entry mee te verdwijnen.
+    let kopie: Vec<String> = lib.organs.iter()
+        .filter(|o| o.id == id)
+        .filter_map(|o| o.image_path.clone())
+        .collect();
     lib.organs.retain(|o| o.id != id);
     lib.settings.remove(&id);
     drop(lib);
+    let map = organ_images_dir(&state);
+    for k in kopie {
+        if Path::new(&k).starts_with(&map) {
+            let _ = std::fs::remove_file(&k);
+        }
+    }
     state.save_library();
 }
 
@@ -6023,11 +6573,11 @@ pub fn do_save_organ_settings(state: &AppState, presets: HashMap<String, PresetD
     // Alle audio-DSP-instellingen worden uit de runtime-mirrors verzameld (gezet door de
     // set_*/persist_*-commands); de reeds opgeslagen waarde dient als fallback wanneer
     // deze sessie nog niets gezet heeft (.or(existing_*)).
-    let (existing_master, existing_reverb, existing_eq, existing_temperament) = {
+    let (existing_master, existing_reverb, existing_eq, existing_temperament, existing_remote_layout) = {
         let lib = state.organ_library.read();
         match lib.settings.get(&organ_id) {
-            Some(s) => (s.master_volume_db, s.reverb.clone(), s.eq.clone(), s.temperament.clone()),
-            None => (None, None, None, None),
+            Some(s) => (s.master_volume_db, s.reverb.clone(), s.eq.clone(), s.temperament.clone(), s.remote_layout.clone()),
+            None => (None, None, None, None, None),
         }
     };
     let master_volume_db = (*state.master_volume_db.read()).or(existing_master);
@@ -6061,6 +6611,11 @@ pub fn do_save_organ_settings(state: &AppState, presets: HashMap<String, PresetD
         .map(|p| PerspectiveSaved { name: p.name.clone(), enabled: p.enabled, gain_db: p.gain_db })
         .collect();
 
+    // Indeling van de afstandsbediening: de spiegel van het hoofdvenster, met
+    // de reeds opgeslagen indeling als terugval (een opslag vóórdat de Console
+    // gepubliceerd heeft mag de bewaarde indeling niet wissen).
+    let remote_layout = state.remote_layout.read().clone().or(existing_remote_layout);
+
     let settings = OrganSettings {
         presets,
         preset_bindings,
@@ -6087,6 +6642,7 @@ pub fn do_save_organ_settings(state: &AppState, presets: HashMap<String, PresetD
         division_tremulants,
         wind_group_configs,
         perspectives,
+        remote_layout,
     };
 
     // Save to organ directory as well (.jm-settings.json next to the organ)
@@ -6174,14 +6730,142 @@ pub fn import_settings(state: State<AppState>, path: String) -> Result<OrganSett
     Ok(settings)
 }
 
+/// Map waarin handmatig gekozen orgelafbeeldingen als kopie terechtkomen.
+/// Kopiëren (i.p.v. het pad onthouden) is bewust: de bron kan een USB-stick of
+/// een tijdelijke map zijn.
+fn organ_images_dir(state: &AppState) -> std::path::PathBuf {
+    state.app_data_dir.join("organ_images")
+}
+
+/// Korte, stabiele bestandsnaam voor de kopie (FNV-1a 64 over het orgel-id).
+fn image_copy_stem(id: &str) -> String {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in id.to_lowercase().as_bytes() {
+        h ^= *b as u64;
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    format!("{:016x}", h)
+}
+
+/// Afbeelding voor een bibliotheekkaart, op ID (= genormaliseerd bronpad).
+///
+/// Gebruikt de afbeelding die in de bibliotheek is opgeslagen; alleen als die
+/// er niet is én er met deze zoekversie nog niet gezocht is, wordt de
+/// zoektocht gedaan — en het resultaat (ook "niets gevonden") in de entry
+/// vastgelegd. Zonder die negatieve cache scande elke opening van de
+/// bibliotheek, en élk extra registervenster, de hele sampleset opnieuw.
 #[tauri::command]
-pub fn get_organ_image(source_path: String) -> Option<String> {
-    // Try to find the image path from the source. Hoofdletter-ongevoelig en
-    // incl. Hauptwerk (.Organ_Hauptwerk_xml) — anders wordt een orgelbestand
-    // als sample-map behandeld en verschijnt er nooit een afbeelding.
-    let source_type = if is_organ_file_id(&source_path) { "organ_file" } else { "sample_directory" };
-    let image_path = library::find_organ_image(&source_path, source_type)?;
-    library::image_to_base64(&image_path)
+pub fn get_organ_image(state: State<AppState>, id: String) -> Option<String> {
+    let norm = |s: &str| s.replace('/', "\\").to_lowercase();
+    let key = norm(&id);
+
+    let (pad, source_path, source_type, manual, al_gezocht, in_lib) = {
+        let lib = state.organ_library.read();
+        match lib.organs.iter().find(|o| norm(&o.id) == key || norm(&o.source_path) == key) {
+            Some(e) => (
+                e.image_path.clone(),
+                e.source_path.clone(),
+                e.source_type.clone(),
+                e.image_manual,
+                e.image_searched == Some(library::IMAGE_SEARCH_VERSION),
+                true,
+            ),
+            None => (
+                None,
+                id.clone(),
+                if is_organ_file_id(&id) { "organ_file".to_string() } else { "sample_directory".to_string() },
+                false,
+                false,
+                false,
+            ),
+        }
+    };
+
+    if let Some(p) = pad.as_ref() {
+        if Path::new(p).is_file() {
+            return library::image_to_base64(p);
+        }
+    }
+    // Handmatige keuze waarvan het bestand weg is: niet stilletjes een andere
+    // afbeelding gaan zoeken — de gebruiker heeft bewust gekozen.
+    if manual || al_gezocht {
+        return None;
+    }
+
+    let found = library::find_organ_image(&source_path, &source_type);
+    if in_lib {
+        let mut lib = state.organ_library.write();
+        if let Some(e) = lib.organs.iter_mut().find(|o| norm(&o.id) == key || norm(&o.source_path) == key) {
+            e.image_path = found.clone();
+            e.image_searched = Some(library::IMAGE_SEARCH_VERSION);
+        }
+        drop(lib); // save_library() neemt zelf een read-lock (parking_lot)
+        state.save_library();
+    }
+    library::image_to_base64(&found?)
+}
+
+/// Kies handmatig een afbeelding voor een bibliotheekkaart, of zet hem terug
+/// op automatisch zoeken (`path = None`). Het gekozen bestand wordt naar
+/// `<app-data>/organ_images/` gekopieerd zodat de kaart blijft werken als de
+/// bron (USB, Downloads) verdwijnt.
+#[tauri::command]
+pub fn set_organ_image(state: State<AppState>, id: String, path: Option<String>) -> Result<OrganLibraryEntry, String> {
+    let norm = |s: &str| s.replace('/', "\\").to_lowercase();
+    let key = norm(&id);
+    let map = organ_images_dir(&state);
+
+    // Doelbestand eerst klaarzetten (buiten de lock — kopiëren kan traag zijn).
+    let nieuw: Option<String> = match path.as_ref() {
+        Some(src) => {
+            let src_path = Path::new(src);
+            if !library::has_image_extension(src_path) {
+                return Err("Geen ondersteund afbeeldingsformaat (jpg, jpeg, png, bmp, webp)".to_string());
+            }
+            if !src_path.is_file() {
+                return Err(format!("Bestand niet gevonden: {}", src));
+            }
+            let ext = src_path.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_else(|| "jpg".into());
+            std::fs::create_dir_all(&map).map_err(|e| format!("Kan map niet maken: {}", e))?;
+            let doel = map.join(format!("{}.{}", image_copy_stem(&key), ext));
+            std::fs::copy(src_path, &doel).map_err(|e| format!("Kopiëren mislukt: {}", e))?;
+            Some(doel.to_string_lossy().to_string())
+        }
+        None => None,
+    };
+
+    let (entry, oud) = {
+        let mut lib = state.organ_library.write();
+        let e = lib.organs.iter_mut()
+            .find(|o| norm(&o.id) == key || norm(&o.source_path) == key)
+            .ok_or_else(|| format!("Orgel niet in de bibliotheek: {}", id))?;
+        let oud = e.image_path.clone();
+        match &nieuw {
+            Some(p) => {
+                e.image_path = Some(p.clone());
+                e.image_manual = true;
+                e.image_searched = Some(library::IMAGE_SEARCH_VERSION);
+            }
+            None => {
+                // Terug naar automatisch: de negatieve cache wissen zodat er
+                // bij de volgende opening opnieuw gezocht wordt.
+                e.image_path = None;
+                e.image_manual = false;
+                e.image_searched = None;
+            }
+        }
+        (e.clone(), oud)
+    };
+    // Oude kopie opruimen (alleen in onze eigen map, nooit het origineel van
+    // de gebruiker).
+    if let Some(o) = oud {
+        if Some(&o) != nieuw.as_ref() && Path::new(&o).starts_with(&map) {
+            let _ = std::fs::remove_file(&o);
+        }
+    }
+    state.save_library();
+    info!("Orgelafbeelding ingesteld voor {}: {:?}", id, entry.image_path);
+    Ok(entry)
 }
 
 #[tauri::command]
@@ -6773,5 +7457,226 @@ mod crescendo_save_tests {
         assert_eq!(c2, couplers);
         let (s3, c3) = registration_without_crescendo(&[], &[], &claims);
         assert!(s3.is_empty() && c3.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod jmrec_naam_tests {
+    use super::display_identity;
+    use std::path::Path;
+    use vpo_sampler::grandorgue::OrganInfo;
+
+    fn info(kerk: &str, bouwer: &str, adres: &str, comments: &str) -> OrganInfo {
+        OrganInfo {
+            church_name: kerk.into(),
+            church_address: adres.into(),
+            organ_builder: bouwer.into(),
+            organ_comments: comments.into(),
+            recording_details: "44100 Hz, 16-bit, mp3".into(),
+            ..Default::default()
+        }
+    }
+
+    /// Schrijf een JM-Rec-projectmap in de tempmap: <stem>.organ bestaat niet
+    /// echt (display_identity leest hem niet), het manifest wel.
+    fn manifest_dir(naam: &str, json: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(naam);
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("PuttBatz.jm-rec.json"), json).unwrap();
+        d
+    }
+
+    #[test]
+    fn jmrec_marker_geeft_kerk_bouwer_plaats() {
+        // Geen manifest: herkenning via OrganComments, delen uit de ODF.
+        let o = info("Hervormde Kerk", "Bätz-Witte", "Puttershoek", "Opgenomen met JM-Rec v3.10");
+        let (naam, bouwer, plaats) = display_identity(Path::new(r"C:\X\PuttBatz\PuttBatz.organ"), &o);
+        assert_eq!(naam, "Hervormde Kerk - Bätz-Witte - Puttershoek");
+        assert_eq!(bouwer, "Bätz-Witte");
+        assert_eq!(plaats, "Puttershoek");
+    }
+
+    #[test]
+    fn jmrec_mapcode_als_kerknaam_valt_weg() {
+        // JM-Rec schrijft de mapcode als ChurchName zodra de kerknaam leeg is.
+        let o = info("PuttBatz", "Bätz-Witte", "Puttershoek", "Opgenomen met JM-Rec v3.10");
+        let (naam, _, _) = display_identity(Path::new(r"C:\X\PuttBatz\PuttBatz.organ"), &o);
+        assert_eq!(naam, "Bätz-Witte - Puttershoek");
+    }
+
+    #[test]
+    fn manifest_wint_van_de_odf_velden() {
+        let d = manifest_dir(
+            "jm_manifest_1",
+            r#"{"jm_rec_version":"3.10","organ":"PuttBatz","kerk":"Hervormde Kerk","plaats":"Puttershoek","bouwer":"Bätz-Witte"}"#,
+        );
+        // ODF heeft de mapcode als kerknaam; het manifest de echte naam.
+        let o = info("PuttBatz", "Onbekend", "", "");
+        let (naam, bouwer, plaats) = display_identity(&d.join("PuttBatz.organ"), &o);
+        assert_eq!(naam, "Hervormde Kerk - Bätz-Witte - Puttershoek");
+        assert_eq!(bouwer, "Bätz-Witte");
+        assert_eq!(plaats, "Puttershoek");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn manifest_met_lege_kerk_laat_dat_deel_weg() {
+        let d = manifest_dir(
+            "jm_manifest_2",
+            r#"{"organ":"PuttBatz","kerk":"","plaats":"Puttershoek","bouwer":"Bätz-Witte"}"#,
+        );
+        let o = info("PuttBatz", "Bätz-Witte", "Puttershoek", "");
+        let (naam, _, _) = display_identity(&d.join("PuttBatz.organ"), &o);
+        assert_eq!(naam, "Bätz-Witte - Puttershoek");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn go_set_houdt_eigen_naam_en_krijgt_plaats() {
+        // Geen JM-Rec-marker → naam ongewijzigd; location = ChurchAddress.
+        let o = info("GreenPositiv", "Stanisław Pielczyk", "Katowice, Poland",
+                     "Sample set was made by Piotr Grabowski.");
+        let (naam, bouwer, plaats) = display_identity(Path::new(r"C:\X\GreenPositiv.organ"), &o);
+        assert_eq!(naam, "GreenPositiv");
+        assert_eq!(bouwer, "Stanisław Pielczyk");
+        assert_eq!(plaats, "Katowice, Poland", "plaats uit ChurchAddress, niet RecordingDetails");
+    }
+
+    #[test]
+    fn lege_plaats_valt_terug_op_opnamedetails() {
+        let o = info("Oud orgel", "Bouwer", "", "");
+        let (_, _, plaats) = display_identity(Path::new(r"C:\X\Oud.organ"), &o);
+        assert_eq!(plaats, "44100 Hz, 16-bit, mp3");
+    }
+}
+
+#[cfg(test)]
+mod tremulant_kind_tests {
+    use super::tremulant_kind_voor_divisie;
+
+    #[test]
+    fn wave_vlag_zonder_opnamen_wordt_synth() {
+        // Regressie: TremulantType=Wave zette de UI-LFO uit terwijl er geen
+        // enkele trem-opname geladen was → helemaal geen tremulant meer.
+        assert_eq!(tremulant_kind_voor_divisie(false, true, true), Some("synth"));
+    }
+
+    #[test]
+    fn opnamen_bepalen_wave_of_samples() {
+        assert_eq!(tremulant_kind_voor_divisie(true, true, true), Some("wave"));
+        // Hauptwerk-"tremmed"-lagen: opnamen zonder ODF-wave-vlag.
+        assert_eq!(tremulant_kind_voor_divisie(true, false, false), Some("samples"));
+    }
+
+    #[test]
+    fn odf_tremulant_zonder_opnamen_is_synth_en_niets_is_niets() {
+        assert_eq!(tremulant_kind_voor_divisie(false, false, true), Some("synth"));
+        assert_eq!(tremulant_kind_voor_divisie(false, false, false), None);
+    }
+}
+
+#[cfg(test)]
+mod bibliotheek_opfris_tests {
+    use super::{bibliotheek_identiteit_licht, lees_organ_sectie_licht};
+    use std::path::{Path, PathBuf};
+
+    fn tempmap(naam: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(naam);
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    /// Een .organ met een [Organ]-sectie gevolgd door véél andere secties: de
+    /// lichte lezer mag alleen de eerste sectie gebruiken.
+    fn schrijf_organ(dir: &Path, stem: &str, organ_sectie: &str) -> PathBuf {
+        let p = dir.join(format!("{}.organ", stem));
+        let mut txt = format!("[Organ]\n{}\n", organ_sectie);
+        for i in 1..=50 {
+            txt.push_str(&format!("[Stop{:03}]\nChurchName=FOUT\nName=Prestant\n", i));
+        }
+        std::fs::write(&p, txt).unwrap();
+        p
+    }
+
+    #[test]
+    fn leest_alleen_de_organ_sectie() {
+        let d = tempmap("jm_lib_licht_1");
+        let p = schrijf_organ(
+            &d,
+            "GreenPositiv",
+            "ChurchName=GreenPositiv\nChurchAddress=Katowice, Poland\nOrganBuilder=Pielczyk\nRecordingDetails=Piotr Grabowski\nNumberOfManuals=1",
+        );
+        let info = lees_organ_sectie_licht(&p).expect("[Organ] moet gelezen worden");
+        assert_eq!(info.church_name, "GreenPositiv", "latere secties mogen niet meetellen");
+        assert_eq!(info.church_address, "Katowice, Poland");
+        assert_eq!(info.organ_builder, "Pielczyk");
+
+        // Geen JM-Rec-markering → naam ongewijzigd, plaats uit ChurchAddress.
+        let (naam, bouwer, plaats) =
+            bibliotheek_identiteit_licht(&p.to_string_lossy(), "organ_file").expect("identiteit");
+        assert_eq!(naam, "GreenPositiv");
+        assert_eq!(bouwer, "Pielczyk");
+        assert_eq!(plaats, "Katowice, Poland");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn jmrec_manifest_geeft_de_nieuwe_kaartnaam() {
+        // Punt 8: de kaart toonde nog de mapcode "PuttBatz".
+        let d = tempmap("jm_lib_licht_2");
+        let p = schrijf_organ(&d, "PuttBatz", "ChurchName=PuttBatz\nNumberOfManuals=2");
+        std::fs::write(
+            d.join("PuttBatz.jm-rec.json"),
+            r#"{"jm_rec_version":"3.10","organ":"PuttBatz","kerk":"Hervormde Kerk","plaats":"Puttershoek","bouwer":"Bätz-Witte"}"#,
+        )
+        .unwrap();
+        let (naam, bouwer, plaats) =
+            bibliotheek_identiteit_licht(&p.to_string_lossy(), "organ_file").expect("identiteit");
+        assert_eq!(naam, "Hervormde Kerk - Bätz-Witte - Puttershoek");
+        assert_eq!(bouwer, "Bätz-Witte");
+        assert_eq!(plaats, "Puttershoek");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn mapscan_zonder_manifest_laat_de_entry_staan() {
+        let d = tempmap("jm_lib_licht_3");
+        // Sample-map zonder manifest: niets te zeggen → None (niet wissen).
+        assert!(bibliotheek_identiteit_licht(&d.to_string_lossy(), "sample_directory").is_none());
+        std::fs::write(
+            d.join("PuttBatz.jm-rec.json"),
+            r#"{"organ":"PuttBatz","kerk":"","plaats":"Puttershoek","bouwer":"Bätz-Witte"}"#,
+        )
+        .unwrap();
+        let (naam, _, plaats) =
+            bibliotheek_identiteit_licht(&d.to_string_lossy(), "sample_directory").expect("manifest");
+        assert_eq!(naam, "Bätz-Witte - Puttershoek");
+        assert_eq!(plaats, "Puttershoek");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn weggehaalde_schijf_en_hauptwerk_geven_none() {
+        // USB eruit: het pad bestaat niet → niets bijwerken, niets wissen.
+        assert!(lees_organ_sectie_licht(Path::new(r"Q:\bestaat-niet\x.organ")).is_none());
+        assert!(bibliotheek_identiteit_licht(r"Q:\bestaat-niet\x.organ", "organ_file").is_none());
+        // Hauptwerk-XML bewust overgeslagen (niet lichtgewicht te lezen).
+        assert!(bibliotheek_identiteit_licht(r"Q:\x\Set.Organ_Hauptwerk_xml", "organ_file").is_none());
+    }
+
+    #[test]
+    fn latin1_organ_sectie_blijft_leesbaar() {
+        // Oude ODF's staan vaak in ISO-8859-1; "Bätz" mag niet verminken.
+        let d = tempmap("jm_lib_licht_4");
+        let p = d.join("Oud.organ");
+        let mut bytes = b"[Organ]\nChurchName=B".to_vec();
+        bytes.push(0xE4); // 'ä' in Latin-1
+        bytes.extend_from_slice(b"tz-kerk\nOrganBuilder=Onbekend\n[Manual001]\n");
+        std::fs::write(&p, bytes).unwrap();
+        let info = lees_organ_sectie_licht(&p).expect("[Organ]");
+        assert_eq!(info.church_name, "Bätz-kerk");
+        let _ = std::fs::remove_dir_all(&d);
     }
 }

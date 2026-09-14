@@ -37,7 +37,13 @@
 //!   POST /crescendo/stage?stage=N - trap zetten zoals een UI-klik
 //!   GET  /swell                   - per divisie {division,index,position,binding,min_db,cutoff}
 //!   POST /swell/binding           - body {"division","channel","cc","min"?,"max"?,"invert"?} | {"division","clear":true}
+//!   POST /tremulant?division=<naam>&active=0|1 - tremulant van een divisie live
+//!        aan/uit (zelfde kern als het Tauri-commando set_tremulant) →
+//!        {"ok","division","active","stops"}; stops = aantal registers met échte
+//!        tremulant-OPNAMEN dat geschakeld is (0 = alleen de synth-LFO).
+//!        Spiegelt in GET /state.tremulant[i]. Alleen test-scope, niet remote.
 //!   POST /settings/master|temperament|eq|reverb|pan|trem|save - instellingen zetten
+//!        /settings/trem?division=..&rate=..&enabled=0|1 (enabled default 1)
 //!        /settings/temperament?name=..&fine=..&cents=c0,..,c11&retune=0|1 (retune default 0 = Origineel)
 //!   POST /temperament             - body: {"name":"..","cents":[12],"retune":bool,"fine":..} (zelfde als hierboven, JSON)
 //!   GET  /tuning                  - hertemperen: retune_pipes/retune_total (orgel) + retune/name/fine_tune (mirror)
@@ -65,7 +71,18 @@
 //! remote-poort. GET /organ geeft nu (ook op de test-API) altijd actuele
 //! drawn-/koppelvlaggen (organ_info_merged). Test-only routes voor de
 //! afstandsbediening zelf: GET /remote/status, POST /remote/enable
-//! {"enabled":bool,"port":u16?}, POST /remote/new_token.
+//! {"enabled":bool,"port":u16?}, POST /remote/new_token, GET/POST
+//! /remote/layout (indeling; body = RemoteLayoutSaved-JSON).
+//!
+//! Indeling (0.7.39): GET /organ op de remote-scope volgt de indeling die het
+//! hoofdvenster publiceerde (Tauri-commando set_remote_layout) — divisie-
+//! volgorde/-selectie, registervolgorde, alléén de koppels die ook op het
+//! orgelscherm zichtbaar zijn, per divisie `div_index` (DTO-index, zodat
+//! actiecode 24+i blijft kloppen) en `show_tremulant`, plus een `layout`-blok
+//! (coupler_placement/knob_shape/show_*/rev). GET /state draagt `layout_rev`
+//! zodat de pagina bij een indelingswijziging /organ opnieuw ophaalt. Let op:
+//! het filteren van koppels is cosmetisch — POST /couplers/{id}/toggle werkt
+//! (met geldig token) voor élke koppel-id, ook een verborgen.
 
 use crate::audio::AudioCommand;
 use crate::state::{AppState, MidiRecording};
@@ -379,6 +396,22 @@ fn route_test_only(
             let dto = crate::remote::set_enabled_inner(state, enabled, port).map_err(|e| (500u16, e))?;
             serde_json::to_value(dto).map_err(|e| (500u16, e.to_string()))
         }
+        // Indeling van de afstandsbediening (0.7.39). Strikt Test-only: een
+        // tablet mag de indeling van het hoofdscherm NIET herschrijven —
+        // route_shared (de whitelist van de remote-poort) kent deze routes niet.
+        (tiny_http::Method::Get, "/remote/layout") => {
+            let layout = state.remote_layout.read().clone();
+            Ok(json!({
+                "layout": layout,
+                "rev": state.remote_layout_revision(),
+            }))
+        }
+        (tiny_http::Method::Post, "/remote/layout") => {
+            let layout: crate::library::RemoteLayoutSaved = serde_json::from_str(body)
+                .map_err(|e| (400u16, format!("Ongeldige JSON body: {}", e)))?;
+            crate::commands::set_remote_layout_inner(state, layout);
+            Ok(json!({ "ok": true, "rev": state.remote_layout_revision() }))
+        }
         (tiny_http::Method::Post, "/remote/new_token") => {
             let dto = crate::remote::new_token_inner(state).map_err(|e| (500u16, e))?;
             serde_json::to_value(dto).map_err(|e| (500u16, e.to_string()))
@@ -443,6 +476,9 @@ fn route_test_only(
         (tiny_http::Method::Post, "/settings/reverb") => handle_set_reverb(state, query),
         (tiny_http::Method::Post, "/settings/pan") => handle_set_pan(state, query),
         (tiny_http::Method::Post, "/settings/trem") => handle_set_trem(state, query),
+        // Tremulant live schakelen zonder UI (het Orgel-tabblad hoeft niet open
+        // te staan, anders dan bij POST /action/{24+i}).
+        (tiny_http::Method::Post, "/tremulant") => handle_tremulant(state, query),
         (tiny_http::Method::Post, "/settings/save") => Ok(handle_settings_save(state)),
         (tiny_http::Method::Get, "/settings/organ") => Ok(handle_settings_organ(state)),
         (tiny_http::Method::Get, "/settings/mirror") => Ok(handle_settings_mirror(state)),
@@ -556,6 +592,9 @@ fn handle_remote_state(state: &AppState, scope: ApiScope) -> Value {
         "audio_running": audio_running,
         "setzer": { "level": setzer.level, "preset": setzer.preset, "set_mode": setzer.set_mode, "data": setzer.data },
         "crescendo": { "enabled": cresc_enabled, "stage": cresc_stage, "stages": cresc_stages },
+        // Revisie van de indeling: wijzigt hij, dan haalt de remote-pagina
+        // /organ opnieuw op (ook zonder orgelwissel).
+        "layout_rev": state.remote_layout_revision(),
     })
 }
 
@@ -593,6 +632,8 @@ fn handle_status(state: &AppState) -> Value {
         "polyphony": crate::audio::polyphony_target(),
         "render_load": crate::audio::render_load().0,
         "render_peak": crate::audio::render_load().1,
+        "render_overloads": crate::audio::render_overload_count(),
+        "rt_drops": crate::state::rt_drop_count(),
         "stereo_samples": vpo_sampler::stereo_loading(),
         "peak_left": peaks.0,
         "peak_right": peaks.1,
@@ -659,7 +700,7 @@ fn handle_ranks(state: &AppState) -> Value {
 /// wat index.html rendert.
 fn handle_organ(state: &AppState, scope: ApiScope) -> Value {
     match crate::commands::organ_info_merged(state) {
-        Some(o) if scope == ApiScope::Remote => remote_organ_dto(&o),
+        Some(o) if scope == ApiScope::Remote => remote_organ_dto(state, &o),
         Some(o) => serde_json::to_value(o).unwrap_or(json!(null)),
         None => json!(null),
     }
@@ -675,31 +716,126 @@ fn short_id(id: &str) -> String {
     format!("{:016x}", h)
 }
 
-/// Uitgeklede orgel-DTO voor de afstandsbediening (zie handle_organ).
-fn remote_organ_dto(o: &crate::commands::OrganInfoDto) -> Value {
-    let divisions: Vec<Value> = o.divisions.iter().map(|d| json!({
-        "name": d.name,
-        "display_name": d.display_name,
-        "has_tremulant": d.has_tremulant,
-        "stops": d.stops.iter().map(|s| json!({
-            "id": s.id,
-            "name": s.name,
-            "pitch": s.pitch,
-            "color": s.color,
-            "drawn": s.drawn,
-        })).collect::<Vec<_>>(),
-    })).collect();
-    let couplers: Vec<Value> = o.couplers.as_ref().map(|cl| cl.iter().map(|c| json!({
-        "id": c.id,
-        "name": c.name,
-        "active": c.active,
-        "display_in_division": c.display_in_division,
-    })).collect()).unwrap_or_default();
+/// Registernaam zonder het voettal dat er al achter staat — dezelfde
+/// opschoning als cleanStopName op het orgelscherm (Console.svelte), zodat het
+/// externe scherm "Prestant" + "8'" toont en niet "Prestant 8" + "8'".
+fn strip_pitch_suffix(name: &str, pitch: &str) -> String {
+    if pitch.is_empty() {
+        return name.to_string();
+    }
+    if let Some(rest) = name.trim_end().strip_suffix(pitch) {
+        let rest = rest.trim_end();
+        if !rest.is_empty() {
+            return rest.to_string();
+        }
+    }
+    name.to_string()
+}
+
+/// Uitgeklede orgel-DTO voor de afstandsbediening (zie handle_organ). Volgt de
+/// indeling die het hoofdvenster publiceerde (set_remote_layout).
+/// Lock-volgorde: organ_info_merged gaf al een clone terug; remote_layout en
+/// division_tremulants worden daarna apart gelezen, nooit genest (audit 44).
+fn remote_organ_dto(state: &AppState, o: &crate::commands::OrganInfoDto) -> Value {
+    let layout = state.remote_layout.read().clone();
+    let trems = state.division_tremulants.read().clone();
+    let rev = state.remote_layout_revision();
+    remote_organ_dto_inner(o, layout.as_ref(), &trems, rev)
+}
+
+/// Kern van remote_organ_dto zonder locks (testbaar).
+/// - divisies: volgorde + selectie uit de indeling; onbekende namen vervallen
+///   en een lege uitkomst (bv. indeling van een ánder orgel) toont alles;
+/// - `div_index` is de index in de orgel-DTO, zodat actiecode 24+i (tremulant)
+///   blijft kloppen ook als de remote een andere volgorde toont;
+/// - registers: de gesleepte volgorde van het orgelscherm, onbekende achteraan;
+/// - `show_tremulant` per divisie = hetzelfde criterium als het orgelscherm;
+/// - koppels: alléén de koppels die ook op het orgelscherm zichtbaar zijn.
+fn remote_organ_dto_inner(
+    o: &crate::commands::OrganInfoDto,
+    layout: Option<&crate::library::RemoteLayoutSaved>,
+    trems: &std::collections::HashMap<String, (bool, f32, f32, f32)>,
+    rev: u64,
+) -> Value {
+    let order: Vec<usize> = {
+        let sel: Vec<usize> = layout
+            .map(|l| {
+                l.divisions.iter()
+                    .filter_map(|n| o.divisions.iter().position(|d| &d.name == n))
+                    .collect()
+            })
+            .unwrap_or_default();
+        if sel.is_empty() { (0..o.divisions.len()).collect() } else { sel }
+    };
+    let divisions: Vec<Value> = order.iter().filter_map(|&di| {
+        let d = o.divisions.get(di)?;
+        let mut ordered: Vec<&crate::commands::StopDto> = Vec::with_capacity(d.stops.len());
+        if let Some(ids) = layout.and_then(|l| l.stop_order.get(&d.name)) {
+            for id in ids {
+                if let Some(s) = d.stops.iter().find(|s| &s.id == id) {
+                    if !ordered.iter().any(|x| x.id == s.id) { ordered.push(s); }
+                }
+            }
+        }
+        for s in &d.stops {
+            if !ordered.iter().any(|x| x.id == s.id) { ordered.push(s); }
+        }
+        // Orgelscherm: stops.some(has_tremulant) || tremLfoEnabled[divisie],
+        // met als default van tremLfoEnabled: has_tremulant én geen
+        // golfvormtremulant (die heeft echte opnamen, geen synth-LFO).
+        let show_trem = d.stops.iter().any(|s| s.has_tremulant)
+            || trems.get(&d.name).map(|t| t.0)
+                .unwrap_or(d.has_tremulant && d.tremulant_kind.as_deref() != Some("wave"));
+        Some(json!({
+            "name": d.name,
+            "div_index": di,
+            "show_tremulant": show_trem,
+            "stops": ordered.iter().map(|s| json!({
+                "id": s.id,
+                "name": strip_pitch_suffix(&s.name, &s.pitch),
+                "pitch": s.pitch,
+                "color": s.color,
+                "drawn": s.drawn,
+            })).collect::<Vec<_>>(),
+        }))
+    }).collect();
+    let couplers: Vec<Value> = o.couplers.as_ref().map(|cl| cl.iter()
+        .filter(|c| match layout {
+            Some(l) => l.visible_couplers.iter().any(|id| id == &c.id),
+            // Nog niets gepubliceerd: dezelfde default als het orgelscherm —
+            // echte ODF/JM-Rec-koppels en de gegenereerde unison-koppels.
+            None => c.id.starts_with("real_coupler_") || c.coupler_type == "unison",
+        })
+        .map(|c| json!({
+            "id": c.id,
+            "name": c.name,
+            "active": c.active,
+            "display_in_division": c.display_in_division,
+            "coupler_type": c.coupler_type,
+        })).collect()).unwrap_or_default();
+    let (placement, shape, show_couplers, show_trem, show_setzer, show_volume, show_panic) = match layout {
+        Some(l) => (
+            if l.coupler_placement == "division" { "division" } else { "bar" },
+            if l.knob_shape == "round" { "round" } else { "rect" },
+            l.show_couplers, l.show_tremulant, l.show_setzer, l.show_volume, l.show_panic,
+        ),
+        None => ("bar", "rect", true, true, true, true, true),
+    };
     json!({
         "id": short_id(&o.id),
         "name": o.name,
         "divisions": divisions,
         "couplers": couplers,
+        "layout": {
+            "coupler_placement": placement,
+            "knob_shape": shape,
+            "show_couplers": show_couplers,
+            "show_tremulant": show_trem,
+            "show_setzer": show_setzer,
+            "show_volume": show_volume,
+            "show_panic": show_panic,
+            "rev": rev,
+        },
     })
 }
 
@@ -724,6 +860,8 @@ fn handle_library(state: &AppState) -> Value {
         "stop_count": o.stop_count,
         "source_type": o.source_type,
         "source_path": o.source_path,
+        "image_path": o.image_path,
+        "image_manual": o.image_manual,
     })).collect();
     json!({ "organs": entries })
 }
@@ -1172,8 +1310,10 @@ fn handle_crescendo_config(state: &AppState, body: &str) -> Result<Value, (u16, 
 }
 
 /// POST /crescendo/binding {"channel","cc","min"?,"max"?,"invert"?} | {"clear": true}.
-/// Zet de trede op 0, wist een zwelbinding op dezelfde CC (laatst ingesteld
-/// wint) en herstelt de master-expressie — zoals de inleer-paden.
+/// Zet de trede op 0, wist zwelbindingen op dezelfde (kanaal, CC) via dezelfde
+/// gedeelde helper als de UI-paden (claim_pedal_cc — laatst ingesteld wint) en
+/// herstelt de master-expressie. Het antwoord bevat "displaced": wat er is
+/// verdrongen.
 fn handle_crescendo_binding(state: &AppState, body: &str) -> Result<Value, (u16, String)> {
     let v: Value = serde_json::from_str(body).map_err(|e| (400u16, format!("Ongeldige JSON: {}", e)))?;
     if v.get("clear").and_then(|x| x.as_bool()).unwrap_or(false) {
@@ -1191,10 +1331,14 @@ fn handle_crescendo_binding(state: &AppState, body: &str) -> Result<Value, (u16,
     if let Some(x) = v.get("max").and_then(|x| x.as_u64()) { mx = (x as u8).min(127); }
     if let Some(x) = v.get("invert").and_then(|x| x.as_bool()) { inv = x; }
     *state.crescendo_binding.write() = Some((channel, cc, mn, mx, inv));
+    let verdrongen = state.claim_pedal_cc(crate::state::PedalCcKind::Crescendo, channel, cc);
     state.apply_crescendo_stage(0);
-    state.swell_bindings.write().retain(|b| !(b.channel == channel && b.cc_num == cc));
     state.send_audio_command(AudioCommand::SetMasterExpression(1.0));
-    Ok(handle_crescendo_get(state))
+    let mut out = handle_crescendo_get(state);
+    if let Some(obj) = out.as_object_mut() {
+        obj.insert("displaced".into(), serde_json::to_value(&verdrongen).unwrap_or(json!([])));
+    }
+    Ok(out)
 }
 
 /// POST /crescendo/stage?stage=N — trap zetten zoals een UI-klik.
@@ -1248,6 +1392,10 @@ fn handle_swell_binding(state: &AppState, body: &str) -> Result<Value, (u16, Str
         .ok_or((400u16, "Veld 'channel' ontbreekt".to_string()))? as u8;
     let cc = v.get("cc").and_then(|x| x.as_u64())
         .ok_or((400u16, "Veld 'cc' ontbreekt".to_string()))? as u8;
+    // Gedeelde helper (in set_swell_binding_manual): een crescendo-koppeling op
+    // dezelfde (kanaal, CC) vervalt hier net als in de UI-paden. Het antwoord
+    // blijft de zwel-lijst (vorm ongewijzigd); de verdringing is zichtbaar via
+    // GET /crescendo (binding null) en in het log.
     state.set_swell_binding_manual(&division, idx as u8, channel.min(15), cc.min(127));
     {
         let mut bindings = state.swell_bindings.write();
@@ -1497,8 +1645,33 @@ fn handle_set_pan(state: &AppState, query: &str) -> Result<Value, (u16, String)>
 fn handle_set_trem(state: &AppState, query: &str) -> Result<Value, (u16, String)> {
     let division: String = parse_query(query, "division").unwrap_or_else(|| "Manuaal".to_string());
     let rate: f32 = parse_query(query, "rate").unwrap_or(6.0);
-    state.division_tremulants.write().insert(division.clone(), (true, rate, 10.0, 15.0));
-    Ok(json!({ "ok": true, "division": division, "rate": rate }))
+    // `enabled` (beschikbaarheid van de LFO-tremulant voor deze divisie) werd
+    // eerder genegeerd en stond altijd hard op true.
+    let enabled = parse_bool_query(query, "enabled").unwrap_or(true);
+    state.division_tremulants.write().insert(division.clone(), (enabled, rate, 10.0, 15.0));
+    Ok(json!({ "ok": true, "division": division, "rate": rate, "enabled": enabled }))
+}
+
+/// POST /tremulant?division=<naam>&active=0|1 — tremulant van een divisie live
+/// aan/uit via dezelfde kern als het Tauri-commando `set_tremulant`.
+fn handle_tremulant(state: &AppState, query: &str) -> Result<Value, (u16, String)> {
+    let division: String = parse_query(query, "division")
+        .ok_or((400u16, "Ontbrekende parameter 'division'".to_string()))?;
+    let active = parse_bool_query(query, "active").unwrap_or(true);
+    let stops = crate::commands::do_set_tremulant(state, &division, active)
+        .map_err(|e| (404u16, e))?;
+    Ok(json!({ "ok": true, "division": division, "active": active, "stops": stops }))
+}
+
+/// Booleaanse queryparameter: 1/true/on/yes/aan = waar, 0/false/off/no/uit =
+/// onwaar; ontbreekt hij (of is hij onleesbaar) dan None.
+fn parse_bool_query(query: &str, key: &str) -> Option<bool> {
+    let raw: String = parse_query(query, key)?;
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "on" | "yes" | "aan" => Some(true),
+        "0" | "false" | "off" | "no" | "uit" => Some(false),
+        _ => None,
+    }
 }
 
 fn handle_settings_save(state: &AppState) -> Value {
@@ -1643,6 +1816,195 @@ mod tests {
     fn url_decode_stop_ids() {
         assert_eq!(url_decode("Prestant%208"), "Prestant 8");
         assert_eq!(url_decode("Prestant_8"), "Prestant_8");
+    }
+
+    // ---- Indeling van de afstandsbediening (0.7.39) ----
+
+    fn testorgel() -> crate::commands::OrganInfoDto {
+        use crate::commands::{CouplerDto, DivisionDto, OrganInfoDto, StopDto};
+        let stop = |id: &str, name: &str, pitch: &str, trem: bool| StopDto {
+            id: id.to_string(),
+            name: name.to_string(),
+            pitch: pitch.to_string(),
+            drawn: false,
+            color: None,
+            has_tremulant: trem,
+            midi_action_code: 150,
+            internal_stop_id: 0,
+            first_midi_note: 36,
+            last_midi_note: 96,
+            is_reed: false,
+        };
+        let coupler = |id: &str, kind: &str, div: &str| CouplerDto {
+            id: id.to_string(),
+            name: id.to_string(),
+            source_division: div.to_string(),
+            destination_division: div.to_string(),
+            active: false,
+            display_in_division: div.to_string(),
+            midi_action_code: 60,
+            coupler_type: kind.to_string(),
+            pitch_offset: 0,
+        };
+        OrganInfoDto {
+            id: r"C:\Orgels\Test\organ.organ".to_string(),
+            name: "Testorgel".to_string(),
+            builder: String::new(),
+            location: String::new(),
+            year: None,
+            stop_count: 3,
+            divisions: vec![
+                DivisionDto {
+                    name: "Hoofdwerk".to_string(),
+                    display_name: "Hoofdwerk (I)".to_string(),
+                    stops: vec![stop("hw_prestant", "Prestant 8'", "8'", false), stop("hw_octaaf", "Octaaf", "4'", false)],
+                    has_tremulant: false,
+                    tremulant_kind: None,
+                    has_swell: false,
+                },
+                DivisionDto {
+                    name: "Pedaal".to_string(),
+                    display_name: "Pedaal".to_string(),
+                    stops: vec![stop("ped_subbas", "Subbas", "16'", false)],
+                    has_tremulant: true,
+                    tremulant_kind: Some("synth".to_string()),
+                    has_swell: false,
+                },
+            ],
+            couplers: Some(vec![
+                coupler("real_coupler_0", "unison", "Pedaal"),
+                coupler("coupler_hw_ped_unison", "unison", "Pedaal"),
+                coupler("coupler_hw_ped_super", "super", "Pedaal"),
+            ]),
+            retune_pipes: 0,
+            retune_total: 0,
+            perspectives: Vec::new(),
+            layered_stops: 0,
+        }
+    }
+
+    fn div_namen(v: &Value) -> Vec<String> {
+        v["divisions"].as_array().unwrap().iter()
+            .map(|d| d["name"].as_str().unwrap().to_string()).collect()
+    }
+    fn koppel_ids(v: &Value) -> Vec<String> {
+        v["couplers"].as_array().unwrap().iter()
+            .map(|c| c["id"].as_str().unwrap().to_string()).collect()
+    }
+
+    #[test]
+    fn remote_organ_dto_default_zonder_layout() {
+        let o = testorgel();
+        let trems = std::collections::HashMap::new();
+        let v = remote_organ_dto_inner(&o, None, &trems, 0);
+        // Zelfde default als het orgelscherm: real_coupler_* + unison.
+        assert_eq!(koppel_ids(&v), vec!["real_coupler_0", "coupler_hw_ped_unison"]);
+        assert_eq!(div_namen(&v), vec!["Hoofdwerk", "Pedaal"]);
+        assert_eq!(v["divisions"][0]["div_index"], json!(0));
+        assert_eq!(v["divisions"][1]["div_index"], json!(1));
+        assert_eq!(v["layout"]["coupler_placement"], json!("bar"));
+        assert_eq!(v["layout"]["show_setzer"], json!(true));
+        // Divisiekop = de naam van het orgelscherm, niet display_name.
+        assert!(v["divisions"][0].get("display_name").is_none());
+        // Voettal niet dubbel: "Prestant 8'" + pitch "8'" → "Prestant".
+        assert_eq!(v["divisions"][0]["stops"][0]["name"], json!("Prestant"));
+        assert_eq!(v["divisions"][0]["stops"][1]["name"], json!("Octaaf"));
+    }
+
+    #[test]
+    fn remote_organ_dto_filtert_koppels_en_onderdelen() {
+        let o = testorgel();
+        let trems = std::collections::HashMap::new();
+        let layout = crate::library::RemoteLayoutSaved {
+            visible_couplers: vec!["coupler_hw_ped_super".to_string()],
+            coupler_placement: "division".to_string(),
+            knob_shape: "round".to_string(),
+            show_setzer: false,
+            show_volume: false,
+            ..Default::default()
+        };
+        let v = remote_organ_dto_inner(&o, Some(&layout), &trems, 7);
+        assert_eq!(koppel_ids(&v), vec!["coupler_hw_ped_super"]);
+        assert_eq!(v["couplers"][0]["display_in_division"], json!("Pedaal"));
+        assert_eq!(v["layout"]["coupler_placement"], json!("division"));
+        assert_eq!(v["layout"]["knob_shape"], json!("round"));
+        assert_eq!(v["layout"]["show_setzer"], json!(false));
+        assert_eq!(v["layout"]["show_volume"], json!(false));
+        assert_eq!(v["layout"]["show_panic"], json!(true));
+        assert_eq!(v["layout"]["rev"], json!(7));
+    }
+
+    #[test]
+    fn remote_organ_dto_volgt_divisievolgorde_en_registervolgorde() {
+        let o = testorgel();
+        let trems = std::collections::HashMap::new();
+        let mut stop_order = std::collections::HashMap::new();
+        stop_order.insert("Hoofdwerk".to_string(), vec!["hw_octaaf".to_string()]);
+        let layout = crate::library::RemoteLayoutSaved {
+            divisions: vec!["Pedaal".to_string(), "Hoofdwerk".to_string()],
+            stop_order,
+            ..Default::default()
+        };
+        let v = remote_organ_dto_inner(&o, Some(&layout), &trems, 1);
+        assert_eq!(div_namen(&v), vec!["Pedaal", "Hoofdwerk"]);
+        // div_index blijft de DTO-index (actiecode 24+i).
+        assert_eq!(v["divisions"][0]["div_index"], json!(1));
+        assert_eq!(v["divisions"][1]["div_index"], json!(0));
+        // Gesleepte volgorde eerst, onbekende registers achteraan.
+        let ids: Vec<&str> = v["divisions"][1]["stops"].as_array().unwrap().iter()
+            .map(|s| s["id"].as_str().unwrap()).collect();
+        assert_eq!(ids, vec!["hw_octaaf", "hw_prestant"]);
+        // Onbekende divisienaam (indeling van een ánder orgel) → alles tonen.
+        let vreemd = crate::library::RemoteLayoutSaved {
+            divisions: vec!["Rugwerk".to_string()],
+            ..Default::default()
+        };
+        let v2 = remote_organ_dto_inner(&o, Some(&vreemd), &trems, 1);
+        assert_eq!(div_namen(&v2), vec!["Hoofdwerk", "Pedaal"]);
+    }
+
+    #[test]
+    fn remote_organ_dto_tremulantcriterium_als_orgelscherm() {
+        let o = testorgel();
+        // Zonder opgeslagen keuze: has_tremulant (en geen golfvorm) → knop.
+        let leeg = std::collections::HashMap::new();
+        let v = remote_organ_dto_inner(&o, None, &leeg, 0);
+        assert_eq!(v["divisions"][0]["show_tremulant"], json!(false));
+        assert_eq!(v["divisions"][1]["show_tremulant"], json!(true));
+        // Gebruiker zette de LFO-tremulant uit → knop weg (geen stop met
+        // tremulant-opnamen in deze divisie).
+        let mut uit = std::collections::HashMap::new();
+        uit.insert("Pedaal".to_string(), (false, 6.0, 10.0, 15.0));
+        let v2 = remote_organ_dto_inner(&o, None, &uit, 0);
+        assert_eq!(v2["divisions"][1]["show_tremulant"], json!(false));
+        // En aan voor een divisie zonder bron-tremulant.
+        let mut aan = std::collections::HashMap::new();
+        aan.insert("Hoofdwerk".to_string(), (true, 6.0, 10.0, 15.0));
+        let v3 = remote_organ_dto_inner(&o, None, &aan, 0);
+        assert_eq!(v3["divisions"][0]["show_tremulant"], json!(true));
+    }
+
+    #[test]
+    fn strip_pitch_suffix_zoals_orgelscherm() {
+        assert_eq!(strip_pitch_suffix("Prestant 8'", "8'"), "Prestant");
+        assert_eq!(strip_pitch_suffix("Prestant8'", "8'"), "Prestant");
+        assert_eq!(strip_pitch_suffix("Octaaf", "4'"), "Octaaf");
+        assert_eq!(strip_pitch_suffix("Mixtuur", ""), "Mixtuur");
+        // Alleen een voettal als naam blijft staan (nooit leeg).
+        assert_eq!(strip_pitch_suffix("8'", "8'"), "8'");
+    }
+
+    #[test]
+    fn remote_layout_json_zonder_velden_toont_alles() {
+        // Een oude .jm-settings.json (of een minimale POST) moet leesbaar zijn
+        // en standaard alle onderdelen tonen.
+        let l: crate::library::RemoteLayoutSaved = serde_json::from_str("{}").unwrap();
+        assert!(l.show_couplers && l.show_tremulant && l.show_setzer && l.show_volume && l.show_panic);
+        assert!(l.divisions.is_empty() && l.visible_couplers.is_empty());
+        let l2: crate::library::RemoteLayoutSaved =
+            serde_json::from_str(r#"{"show_setzer":false,"divisions":["Pedaal"]}"#).unwrap();
+        assert!(!l2.show_setzer && l2.show_volume);
+        assert_eq!(l2.divisions, vec!["Pedaal".to_string()]);
     }
 
     #[test]

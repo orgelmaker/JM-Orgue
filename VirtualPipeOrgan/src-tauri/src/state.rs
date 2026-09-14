@@ -29,6 +29,14 @@ fn rt_send(tx: &Sender<AudioCommand>, cmd: AudioCommand) {
     }
 }
 
+/// Stand van de drop-teller (gedropte realtime audio-commando's). De status
+/// (UI + test-API) toont hem naast de renderbelasting: loopt hij op tijdens een
+/// crescendo-sweep, dan zit het haperen in een volle commandowachtrij en niet in
+/// de rendertijd zelf.
+pub fn rt_drop_count() -> u64 {
+    RT_DROP_COUNT.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// Eén effectieve koppel-route na uitvouwen van (transitieve) koppels:
 /// speel toetsen van `source_division` óók op `destination_division`, met
 /// `pitch_offset` halve tonen verschuiving. `gate_type` is het type van de
@@ -166,6 +174,65 @@ pub enum MidiPresetTrigger {
     ProgramChange { channel: Option<u8>, program: u8 },
 }
 
+/// Flankdetectie voor pistons die op een ControlChange zijn ingeleerd.
+///
+/// `check_preset_trigger` vuurde vroeger bij ELK CC-bericht met een waarde op of
+/// boven de ingeleerde drempel. Wie een piston had geleerd op een CC die ook een
+/// pedaal verstuurt (of op dezelfde CC als de zweltrede) kreeg bij elke
+/// pedaalbeweging tientallen preset-triggers achter elkaar: registraties
+/// klapten om terwijl je het pedaal bewoog. Nu vuurt een binding alleen op de
+/// OPGAANDE flank (van onder de drempel naar op/boven de drempel) en wapent hij
+/// pas weer als de waarde onder de hysteresegrens zakt — ruis rond de drempel
+/// blijft dus niet vuren.
+#[derive(Debug, Default)]
+pub struct PresetCcGate {
+    /// Per binding (preset, kanaal, controller, drempel): staat de trigger nog
+    /// scherp? Ontbrekende sleutel = scherp, zodat de eerste flank altijd vuurt.
+    armed: std::collections::HashMap<(u8, Option<u8>, u8, u8), bool>,
+}
+
+impl PresetCcGate {
+    /// Hoeveel de waarde onder de drempel moet zakken voordat de binding weer
+    /// scherp staat. Zonder marge zou een pedaal dat rond de drempel trilt
+    /// alsnog salvo's presets vuren.
+    const HYSTERESE: u8 = 8;
+
+    /// Vergeet alle standen. Aanroepen zodra de bindingenlijst opnieuw wordt
+    /// gezet of uitgebreid: een nieuwe binding hoort scherp te beginnen en
+    /// standen van verdwenen bindingen horen niet te blijven hangen.
+    pub fn reset(&mut self) {
+        self.armed.clear();
+    }
+
+    /// Mag deze CC-waarde de piston vuren? Werkt de stand van de binding bij.
+    ///
+    /// `drempel_ruw` is de ingeleerde waarde; 0 telt als 1, want `waarde >= 0`
+    /// is altijd waar en zou de binding bij élk CC-bericht van deze controller
+    /// laten vuren (en nooit meer laten herwapenen).
+    fn vuurt_op_flank(
+        &mut self,
+        sleutel: (u8, Option<u8>, u8, u8),
+        drempel_ruw: u8,
+        waarde: u8,
+    ) -> bool {
+        let drempel = drempel_ruw.max(1);
+        let herwapengrens = drempel.saturating_sub(Self::HYSTERESE);
+        let scherp = self.armed.entry(sleutel).or_insert(true);
+        if waarde >= drempel {
+            if *scherp {
+                *scherp = false;
+                return true;
+            }
+            false
+        } else {
+            if waarde <= herwapengrens {
+                *scherp = true;
+            }
+            false
+        }
+    }
+}
+
 /// Swell pedal MIDI binding for a division
 #[derive(Debug, Clone)]
 pub struct SwellBinding {
@@ -185,6 +252,33 @@ pub struct SwellBinding {
     pub last_value: Option<u8>,
 }
 
+/// Welke pedaalfunctie legt beslag op een (MIDI-kanaal, CC)? Zwelkast en
+/// generaal crescendo sluiten elkaar per definitie uit: de crescendo-claim in
+/// `cc_claimed_by_crescendo` laat een zwelbinding op dezelfde CC dood achter.
+/// Deze enum stuurt de gedeelde helper `AppState::claim_pedal_cc`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PedalCcKind {
+    /// Zwelkast van een divisie.
+    Swell,
+    /// Generaal crescendo.
+    Crescendo,
+}
+
+/// Koppeling die door een nieuwe pedaalkoppeling op dezelfde (kanaal, CC) is
+/// verdrongen. Alle bindingpaden geven dit terug zodat de UI kan melden wát er
+/// is overgenomen ("vervangt: generaal crescendo") in plaats van stilzwijgend
+/// een werkende koppeling te wissen.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DisplacedPedalBinding {
+    /// "swell" of "crescendo" (wire-waarde voor de frontend).
+    pub kind: String,
+    /// Divisienaam bij een verdrongen zwelkoppeling; None bij de crescendo.
+    pub division: Option<String>,
+    /// MIDI-kanaal 0-based (zoals overal op de wire; de UI telt +1).
+    pub channel: u8,
+    pub cc: u8,
+}
+
 /// Zwelstand 0..1 uit een ruwe CC-waarde en het ingestelde bereik (min/max
 /// worden geordend als vangnet; invert spiegelt). Eén implementatie voor de
 /// MIDI-thread, het herstel na herlaad en de tests.
@@ -195,6 +289,64 @@ pub fn swell_gain_from_cc(value: u8, min_val: u8, max_val: u8, invert: bool) -> 
     let mut normalized = ((value as f32 - lo) / range).clamp(0.0, 1.0);
     if invert { normalized = 1.0 - normalized; }
     normalized
+}
+
+/// Kern van de wederzijdse uitsluiting (zie `AppState::claim_pedal_cc`): één
+/// implementatie voor de inleer-popup, de handmatige invoer, het zwel-vinkje en
+/// de test-API. Vrije functie met de twee gedeelde staten als argument, zodat de
+/// tests hem zonder volledige AppState kunnen draaien.
+pub(crate) fn claim_pedal_cc_inner(
+    kind: PedalCcKind,
+    channel: u8,
+    cc_num: u8,
+    crescendo_binding: &Arc<RwLock<Option<(u8, u8, u8, u8, bool)>>>,
+    swell_bindings: &Arc<RwLock<Vec<SwellBinding>>>,
+) -> Vec<DisplacedPedalBinding> {
+    let mut verdrongen: Vec<DisplacedPedalBinding> = Vec::new();
+    match kind {
+        PedalCcKind::Swell => {
+            let mut cb = crescendo_binding.write();
+            if let Some((bch, bcc, _, _, _)) = *cb {
+                if bch == channel && bcc == cc_num {
+                    *cb = None;
+                    verdrongen.push(DisplacedPedalBinding {
+                        kind: "crescendo".to_string(),
+                        division: None,
+                        channel,
+                        cc: cc_num,
+                    });
+                }
+            }
+        }
+        PedalCcKind::Crescendo => {
+            let mut bindings = swell_bindings.write();
+            bindings.retain(|b| {
+                if b.channel == channel && b.cc_num == cc_num {
+                    verdrongen.push(DisplacedPedalBinding {
+                        kind: "swell".to_string(),
+                        division: Some(b.division_name.clone()),
+                        channel,
+                        cc: cc_num,
+                    });
+                    false
+                } else {
+                    true
+                }
+            });
+        }
+    }
+    // Eén regel per verdrongen koppeling, kanaal 1-based (zoals de UI toont).
+    for v in &verdrongen {
+        match v.division.as_deref() {
+            Some(div) => tracing::info!(
+                "Zwelkoppeling {} op kanaal {} CC{} gewist: die trede is nu het generaal crescendo",
+                div, channel + 1, cc_num),
+            None => tracing::info!(
+                "Crescendo-koppeling op kanaal {} CC{} gewist: die trede is nu een zwelkast",
+                channel + 1, cc_num),
+        }
+    }
+    verdrongen
 }
 
 /// Ruwe crescendo-CC → pedaalwaarde 0..127 binnen het ingestelde bereik
@@ -562,6 +714,15 @@ pub struct AppState {
     pub tremulant_live: Arc<RwLock<std::collections::HashMap<String, bool>>>,
     /// Setzerstand gerapporteerd door SetzerBar (hoofdvenster).
     pub setzer_mirror: Arc<RwLock<SetzerMirror>>,
+    /// Indeling van de afstandsbediening (0.7.39): welke onderdelen/divisies/
+    /// koppels het externe scherm toont. Gepubliceerd door het HOOFDVENSTER
+    /// (set_remote_layout), per orgel bewaard in OrganSettings.remote_layout.
+    /// None = nog niets gepubliceerd → de remote-DTO valt terug op dezelfde
+    /// defaults als het orgelscherm (echte koppels + unison zichtbaar).
+    pub remote_layout: Arc<RwLock<Option<crate::library::RemoteLayoutSaved>>>,
+    /// Revisieteller van `remote_layout`: de pagina van de afstandsbediening
+    /// ziet hem in GET /state en haalt /organ opnieuw op zodra hij verandert.
+    pub remote_layout_rev: Arc<std::sync::atomic::AtomicU64>,
     /// Draaiende remote-server (None = uit).
     pub remote_api: Arc<parking_lot::Mutex<Option<crate::test_api::ApiServer>>>,
     /// Laatste start-fout van de afstandsbediening (bind mislukt) voor de UI.
@@ -892,6 +1053,8 @@ impl AppState {
             feedback: Arc::new(parking_lot::Mutex::new(crate::feedback::FeedbackManager::new())),
             tremulant_live: Arc::new(RwLock::new(std::collections::HashMap::new())),
             setzer_mirror: Arc::new(RwLock::new(SetzerMirror::default())),
+            remote_layout: Arc::new(RwLock::new(None)),
+            remote_layout_rev: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             remote_api: Arc::new(parking_lot::Mutex::new(None)),
             remote_last_error: Arc::new(RwLock::new(None)),
             preset_poll_seen: Arc::new(RwLock::new(None)),
@@ -958,21 +1121,21 @@ impl AppState {
         let mut midi_receiver: Option<Receiver<MidiMessage>> = None;
         // Automatisch MIDI-archief: buffer lokaal in deze thread, geen lock per event.
         let mut archive = crate::midi_archive::ArchiveRecorder::new(midi_archive);
+        // Flankdetectie voor pistons op een ControlChange: leeft zolang deze
+        // thread leeft en wordt gewist zodra de bindingen opnieuw worden gezet.
+        let mut preset_cc_gate = PresetCcGate::default();
+        // Gesloten kanalen zijn in een Select altijd "klaar"; zonder deze vlaggen
+        // zou de wachtstap onderaan de lus na het afsluiten gaan rondtollen.
+        let (mut ble_live, mut player_live, mut usb_live) = (true, true, true);
 
         loop {
-            // Check for commands (non-blocking if we have MIDI messages to process)
-            let cmd = if midi_receiver.is_some() {
-                cmd_rx.try_recv().ok()
-            } else {
-                // Niet permanent blokkeren: zonder verbonden USB-device zouden BLE-MIDI en
-                // speler-events (afspelen) anders nooit verwerkt — en dus ook niet opgenomen —
-                // worden tot er toevallig een command binnenkomt. Wek de loop periodiek zodat
-                // die kanalen ook zonder USB-device gedraind worden.
-                match cmd_rx.recv_timeout(std::time::Duration::from_millis(2)) {
-                    Ok(c) => Some(c),
-                    Err(crossbeam_channel::RecvTimeoutError::Timeout) => None,
-                    Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break, // Channel closed
-                }
+            // Commando's zijn niet-blokkerend; het wachten gebeurt ONDERAAN de lus
+            // op alle kanalen tegelijk (zie de Select daar). Een gesloten
+            // commandokanaal betekent afsluiten.
+            let cmd = match cmd_rx.try_recv() {
+                Ok(c) => Some(c),
+                Err(crossbeam_channel::TryRecvError::Empty) => None,
+                Err(crossbeam_channel::TryRecvError::Disconnected) => break, // Channel closed
             };
 
             if let Some(cmd) = cmd {
@@ -995,6 +1158,7 @@ impl AppState {
                                 Ok(()) => {
                                     *midi_connected.write() = true;
                                     midi_receiver = Some(mgr.receiver());
+                                    usb_live = true;
                                     tracing::info!("Connected to MIDI device: {}", device_name);
                                     Ok(())
                                 }
@@ -1012,6 +1176,7 @@ impl AppState {
                                     if count > 0 {
                                         *midi_connected.write() = true;
                                         midi_receiver = Some(mgr.receiver());
+                                        usb_live = true;
                                         tracing::info!("Connected to {} MIDI devices", count);
                                     }
                                     Ok(count)
@@ -1187,52 +1352,76 @@ impl AppState {
                     }
                     MidiCommand::SetPresetBindings(bindings) => {
                         *preset_bindings.write() = bindings;
+                        // Standen van de oude bindingen horen niet mee te reizen:
+                        // elke (nieuwe) binding begint scherp.
+                        preset_cc_gate.reset();
                         tracing::info!("MIDI preset bindings updated");
                     }
                     MidiCommand::LearnPresetBinding(preset_num, response_tx) => {
-                        // Wait for next MIDI message and learn it as a preset trigger
+                        // Wacht op het eerste BRUIKBARE MIDI-bericht en leer dat als
+                        // piston-trigger. Een ControlChange telt alleen mee bij een
+                        // duidelijke knopwaarde (0 of 127): een zwel- of crescendo-
+                        // pedaal loopt door alle tussenwaarden en hoort geen piston
+                        // te worden. Tussenwaarden slaan we over en we blijven
+                        // luisteren tot de deadline, zodat een pedaalbeweging het
+                        // inleren niet meteen afbreekt.
                         if let Some(ref rx) = midi_receiver {
-                            if let Ok(msg) = rx.recv_timeout(std::time::Duration::from_secs(10)) {
-                                let trigger = match msg {
-                                    MidiMessage::NoteOn { channel, note, .. } => {
-                                        Some(MidiPresetTrigger::Note { channel: Some(channel), note })
+                            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+                            let mut trigger: Option<MidiPresetTrigger> = None;
+                            loop {
+                                let resterend = deadline.saturating_duration_since(std::time::Instant::now());
+                                if resterend.is_zero() { break; }
+                                match rx.recv_timeout(resterend) {
+                                    Ok(MidiMessage::NoteOn { channel, note, .. }) => {
+                                        trigger = Some(MidiPresetTrigger::Note { channel: Some(channel), note });
+                                        break;
                                     }
-                                    MidiMessage::ControlChange { channel, controller, value } => {
-                                        Some(MidiPresetTrigger::ControlChange {
-                                            channel: Some(channel),
-                                            controller,
-                                            value,
-                                        })
+                                    Ok(MidiMessage::ControlChange { channel, controller, value }) => {
+                                        if value == 0 || value == 127 {
+                                            trigger = Some(MidiPresetTrigger::ControlChange {
+                                                channel: Some(channel),
+                                                controller,
+                                                value,
+                                            });
+                                            break;
+                                        }
+                                        tracing::debug!(
+                                            "Inleren piston {}: CC{} waarde {} overgeslagen (geen knopwaarde, lijkt een pedaal)",
+                                            preset_num, controller, value);
                                     }
-                                    MidiMessage::ProgramChange { channel, program } => {
-                                        Some(MidiPresetTrigger::ProgramChange {
+                                    Ok(MidiMessage::ProgramChange { channel, program }) => {
+                                        trigger = Some(MidiPresetTrigger::ProgramChange {
                                             channel: Some(channel),
                                             program,
-                                        })
-                                    }
-                                    _ => None,
-                                };
-
-                                // If we learned a trigger, save the binding (max 4 per action)
-                                if let Some(ref trig) = trigger {
-                                    let mut bindings = preset_bindings.write();
-                                    let count = bindings.iter().filter(|b| b.preset_num == preset_num).count();
-                                    if count < 4 {
-                                        bindings.push(MidiPresetBinding {
-                                            preset_num,
-                                            trigger: trig.clone(),
                                         });
-                                        tracing::info!("Learned MIDI binding {}/{} for action {}: {:?}", count + 1, 4, preset_num, trig);
-                                    } else {
-                                        tracing::warn!("Max 4 MIDI bindings reached for action {}", preset_num);
+                                        break;
                                     }
+                                    Ok(_) => {}
+                                    Err(_) => break,
                                 }
+                            }
 
-                                let _ = response_tx.send(trigger);
+                            if let Some(ref trig) = trigger {
+                                // If we learned a trigger, save the binding (max 4 per action)
+                                let mut bindings = preset_bindings.write();
+                                let count = bindings.iter().filter(|b| b.preset_num == preset_num).count();
+                                if count < 4 {
+                                    bindings.push(MidiPresetBinding {
+                                        preset_num,
+                                        trigger: trig.clone(),
+                                    });
+                                    tracing::info!("Learned MIDI binding {}/{} for action {}: {:?}", count + 1, 4, preset_num, trig);
+                                } else {
+                                    tracing::warn!("Max 4 MIDI bindings reached for action {}", preset_num);
+                                }
+                                drop(bindings);
+                                // Verse binding = verse flankstand.
+                                preset_cc_gate.reset();
                             } else {
                                 tracing::info!("MIDI learn timed out for preset {}", preset_num);
-                                let _ = response_tx.send(None);
                             }
+
+                            let _ = response_tx.send(trigger);
                         } else {
                             tracing::warn!("No MIDI connection for learning preset");
                             let _ = response_tx.send(None);
@@ -1254,7 +1443,7 @@ impl AppState {
                         );
 
                         if let Some((channel, cc_num, min_val)) = first {
-                            tracing::info!("Swell low position: ch={}, cc={}, val={}", channel, cc_num, min_val);
+                            tracing::info!("Zwel laagste stand: kanaal {} CC{} waarde {}", channel + 1, cc_num, min_val);
                             // Drain again
                             if let Some(rx) = midi_receiver.as_ref() { while rx.try_recv().is_ok() {} }
                             while ble_message_rx.try_recv().is_ok() {}
@@ -1288,21 +1477,16 @@ impl AppState {
                                     invert: inverted,
                                     last_value: Some(max_val),
                                 };
-                                tracing::info!("Swell learned: {} → CC{} ch{} range {}-{}",
-                                    division_name, cc_num, channel, actual_min, actual_max);
-                                // Wederzijds exclusief met de generaal crescendo:
-                                // een oude crescendo-koppeling op dezelfde CC
-                                // "claimde" de trede en hield de zwelkast dood.
+                                tracing::info!("Zweltrede ingeleerd: {} → CC{} kanaal {} bereik {}-{}",
+                                    division_name, cc_num, channel + 1, actual_min, actual_max);
+                                // Wederzijds exclusief met de generaal crescendo
+                                // via dezelfde gedeelde helper als alle andere
+                                // paden: een oude crescendo-koppeling op dezelfde
+                                // CC "claimde" de trede en hield de zwelkast dood.
                                 // Laatst ingeleerd wint.
-                                {
-                                    let mut cb = crescendo_binding.write();
-                                    if let Some((bch, bcc, _, _, _)) = *cb {
-                                        if bch == channel && bcc == cc_num {
-                                            tracing::info!("Crescendo-koppeling op dezelfde CC gewist (zwel-inleer wint)");
-                                            *cb = None;
-                                        }
-                                    }
-                                }
+                                let _ = claim_pedal_cc_inner(
+                                    PedalCcKind::Swell, channel, cc_num,
+                                    &crescendo_binding, &swell_bindings);
                                 let mut bindings = swell_bindings.write();
                                 bindings.retain(|b| b.division_name != division_name);
                                 bindings.push(binding.clone());
@@ -1331,7 +1515,7 @@ impl AppState {
                             &ble_message_count, &learn_cancel,
                         );
                         if let Some((channel, cc_num, _val)) = first {
-                            tracing::info!("Crescendo pedal learned: ch={}, cc={}", channel, cc_num);
+                            tracing::info!("Crescendotrede ingeleerd: kanaal {} CC{}", channel + 1, cc_num);
                             let _ = response_tx.send(Some((channel, cc_num)));
                         } else {
                             tracing::info!("Crescendo learn timed out");
@@ -1364,7 +1548,13 @@ impl AppState {
             // (wel opnemen/preset-checken — alleen de trapwissel zelf vervalt).
             if let Some(ref rx) = midi_receiver {
                 let mut batch: Vec<MidiMessage> = Vec::new();
-                while let Ok(msg) = rx.try_recv() { batch.push(msg); }
+                loop {
+                    match rx.try_recv() {
+                        Ok(msg) => batch.push(msg),
+                        Err(crossbeam_channel::TryRecvError::Empty) => break,
+                        Err(crossbeam_channel::TryRecvError::Disconnected) => { usb_live = false; break; }
+                    }
+                }
                 let last_cresc_idx = batch.iter()
                     .rposition(|m| Self::cc_claimed_by_crescendo(m, &crescendo_binding));
                 for (i, msg) in batch.into_iter().enumerate() {
@@ -1381,7 +1571,7 @@ impl AppState {
                         &notation_armed_score, &app_handle_notation);
 
                     // Check for preset triggers first
-                    Self::check_preset_trigger(&msg, &preset_bindings, &preset_trigger_tx);
+                    Self::check_preset_trigger(&msg, &preset_bindings, &preset_trigger_tx, &mut preset_cc_gate);
 
                     let cc_claim = Self::cc_claimed_by_crescendo(&msg, &crescendo_binding);
                     if cc_claim && Some(i) != last_cresc_idx {
@@ -1416,7 +1606,13 @@ impl AppState {
             // Process BLE MIDI messages (from BleMidiManager)
             // Zelfde crescendo-CC-coalescing als de USB-lus hierboven.
             let mut ble_batch: Vec<MidiMessage> = Vec::new();
-            while let Ok(msg) = ble_message_rx.try_recv() { ble_batch.push(msg); }
+            loop {
+                match ble_message_rx.try_recv() {
+                    Ok(msg) => ble_batch.push(msg),
+                    Err(crossbeam_channel::TryRecvError::Empty) => break,
+                    Err(crossbeam_channel::TryRecvError::Disconnected) => { ble_live = false; break; }
+                }
+            }
             let ble_last_cresc_idx = ble_batch.iter()
                 .rposition(|m| Self::cc_claimed_by_crescendo(m, &crescendo_binding));
             for (i, msg) in ble_batch.into_iter().enumerate() {
@@ -1439,7 +1635,7 @@ impl AppState {
                 if matches!(msg, MidiMessage::ControlChange { .. }) {
                     let _ = ble_learn_tx.try_send(msg.clone());
                 }
-                Self::check_preset_trigger(&msg, &preset_bindings, &preset_trigger_tx);
+                Self::check_preset_trigger(&msg, &preset_bindings, &preset_trigger_tx, &mut preset_cc_gate);
                 let cc_claim = Self::cc_claimed_by_crescendo(&msg, &crescendo_binding);
                 if cc_claim && Some(i) != ble_last_cresc_idx {
                     continue; // tussenliggende pedaalstand — alleen de laatste telt
@@ -1472,7 +1668,13 @@ impl AppState {
             // Zelfde crescendo-CC-coalescing + trapwissel als de live lussen:
             // een opname met crescendobewegingen speelt de trede ook af.
             let mut player_batch: Vec<MidiMessage> = Vec::new();
-            while let Ok(msg) = player_rx.try_recv() { player_batch.push(msg); }
+            loop {
+                match player_rx.try_recv() {
+                    Ok(msg) => player_batch.push(msg),
+                    Err(crossbeam_channel::TryRecvError::Empty) => break,
+                    Err(crossbeam_channel::TryRecvError::Disconnected) => { player_live = false; break; }
+                }
+            }
             let player_last_cresc_idx = player_batch.iter()
                 .rposition(|m| Self::cc_claimed_by_crescendo(m, &crescendo_binding));
             for (i, msg) in player_batch.into_iter().enumerate() {
@@ -1509,8 +1711,28 @@ impl AppState {
                 crate::midi_archive::spawn_write(archive.shared(), take);
             }
 
-            // Small sleep to prevent busy loop
-            std::thread::sleep(std::time::Duration::from_micros(100));
+            // Wachten tot er ergens werk klaarstaat — op ALLE kanalen tegelijk.
+            // Waarom geen thread::sleep/recv_timeout meer: de klokresolutie van
+            // Windows is standaard ~15,6 ms, dus een sleep(100 µs) duurde een
+            // hele tik en het commando-wachtje van 2 ms nóg een. Samen liep de
+            // lus daardoor maar ~30× per seconde rond en kreeg élk MIDI-bericht
+            // tot ~31 ms vertraging — zichtbaar als een haperende zwel- en
+            // crescendotrede (pedaalstanden kwamen in brokjes van 2 CC binnen)
+            // en als traag aansprekende toetsen. Select::ready_timeout wordt
+            // door de zender zelf gewekt (microseconden) en valt alleen bij
+            // stilte terug op de timeout; die timeout houdt het aflopen van een
+            // archief-take (archive.poll) aan de gang. Alleen nog verbonden
+            // kanalen meedoen: een gesloten kanaal is altijd "klaar" en zou de
+            // lus laten rondtollen.
+            let mut sel = crossbeam_channel::Select::new();
+            sel.recv(&cmd_rx);
+            if ble_live { sel.recv(&ble_message_rx); }
+            if player_live { sel.recv(&player_rx); }
+            match midi_receiver {
+                Some(ref rx) if usb_live => { sel.recv(rx); }
+                _ => {}
+            }
+            let _ = sel.ready_timeout(std::time::Duration::from_millis(2));
         }
 
         tracing::info!("MIDI thread ended");
@@ -1800,8 +2022,8 @@ impl AppState {
             active_couplers, audio_player, loaded_organ_info, midi_mappings, held_notes,
         );
         let active = crescendo_active_stops.read().len();
-        tracing::info!("Crescendo: CC={} (pedaal {}) → stage {} → {} (+{} −{}, {} active stops)",
-            value, mapped, current_stage, new_stage, added.len(), removed.len(), active);
+        tracing::info!("Crescendo: kanaal {} CC{}={} (pedaal {}) → stage {} → {} (+{} −{}, {} active stops)",
+            bound_ch + 1, bound_cc, value, mapped, current_stage, new_stage, added.len(), removed.len(), active);
     }
 
     /// Kern van de generaal crescendo — één implementatie voor pedaal, UI-klik
@@ -2172,10 +2394,15 @@ impl AppState {
     }
 
     /// Check if a MIDI message triggers a preset
+    ///
+    /// `cc_gate` houdt per CC-binding bij of de trigger scherp staat: een piston
+    /// op een continue CC (zweltrede, crescendopedaal) mag alleen op de opgaande
+    /// flank vuren, niet bij elk CC-bericht van de pedaalbeweging.
     fn check_preset_trigger(
         msg: &MidiMessage,
         preset_bindings: &Arc<RwLock<Vec<MidiPresetBinding>>>,
         preset_trigger_tx: &Sender<u8>,
+        cc_gate: &mut PresetCcGate,
     ) {
         let bindings = preset_bindings.read();
 
@@ -2186,9 +2413,18 @@ impl AppState {
                 }
                 (MidiPresetTrigger::ControlChange { channel: trigger_ch, controller: trigger_cc, value: trigger_val },
                  MidiMessage::ControlChange { channel, controller, value }) => {
-                    trigger_ch.map_or(true, |ch| ch == *channel) &&
-                    *controller == *trigger_cc &&
-                    *value >= *trigger_val
+                    if trigger_ch.map_or(true, |ch| ch == *channel) && *controller == *trigger_cc {
+                        // Flankdetectie per binding: vuren bij de overgang naar
+                        // op/boven de drempel, pas herwapenen als de waarde weer
+                        // onder de hysteresegrens zakt.
+                        cc_gate.vuurt_op_flank(
+                            (binding.preset_num, *trigger_ch, *trigger_cc, *trigger_val),
+                            *trigger_val,
+                            *value,
+                        )
+                    } else {
+                        false
+                    }
                 }
                 (MidiPresetTrigger::ProgramChange { channel: trigger_ch, program: trigger_prog },
                  MidiMessage::ProgramChange { channel, program }) => {
@@ -3674,6 +3910,23 @@ impl AppState {
         self.wind_group_configs.write().clear();
         // Live tremulantstand (spiegel voor de afstandsbediening) hoort bij het vorige orgel.
         self.tremulant_live.write().clear();
+        // Indeling van de afstandsbediening hoort óók bij het vorige orgel.
+        // De rev-bump zorgt dat de remote-pagina zijn /organ opnieuw ophaalt,
+        // ook wanneer het nieuwe orgel GEEN opgeslagen instellingen heeft
+        // (restore_organ_settings keert dan vroeg terug) of hetzelfde id heeft.
+        self.set_remote_layout_mirror(None);
+    }
+
+    /// Zet de gepubliceerde indeling van de afstandsbediening en verhoog de
+    /// revisieteller (de remote-pagina pollt die in GET /state).
+    pub fn set_remote_layout_mirror(&self, layout: Option<crate::library::RemoteLayoutSaved>) {
+        *self.remote_layout.write() = layout;
+        self.remote_layout_rev.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Huidige revisie van de indeling van de afstandsbediening.
+    pub fn remote_layout_revision(&self) -> u64 {
+        self.remote_layout_rev.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Wacht op een pedaalstand (kanaal, cc, waarde) — stapsgewijze trede-inleer.
@@ -3726,11 +3979,32 @@ impl AppState {
         *self.swell_bindings.write() = bindings;
     }
 
+    /// Eén (kanaal, CC) kan maar ÉÉN pedaalfunctie hebben: de crescendo-claim
+    /// (`cc_claimed_by_crescendo`) keert af vóór de zwelbindingen, dus twee
+    /// koppelingen op dezelfde CC laten er altijd één dood achter — de klacht
+    /// "als het één werkt, werkt het ander niet". Deze helper is het ENIGE punt
+    /// waar die exclusiviteit wordt afgedwongen; alle paden (inleer-popup,
+    /// handmatige invoer, zwel-vinkje, test-API) lopen erdoorheen zodat er geen
+    /// varianten meer naast elkaar bestaan.
+    ///
+    /// - `Swell` claimt: een crescendo-binding op dezelfde (kanaal, CC) vervalt.
+    /// - `Crescendo` claimt: álle zwelbindingen op die (kanaal, CC) vervallen.
+    ///
+    /// Meerdere zwelkasten op dezelfde trede blijven toegestaan (één pedaal dat
+    /// twee kasten stuurt is een legitieme opstelling).
+    /// Retourneert wat er verdrongen is, zodat de UI het kan melden.
+    pub fn claim_pedal_cc(&self, kind: PedalCcKind, channel: u8, cc_num: u8) -> Vec<DisplacedPedalBinding> {
+        claim_pedal_cc_inner(kind, channel, cc_num, &self.crescendo_binding, &self.swell_bindings)
+    }
+
     /// Zet handmatig kanaal + CC voor de zwelkast van een divisie. Bestaande
     /// min/max/invert blijven behouden; zonder bestaande binding worden de
     /// gangbare defaults gebruikt (volledig bereik, niet gespiegeld). De
     /// MIDI-thread leest deze gedeelde lijst rechtstreeks.
-    pub fn set_swell_binding_manual(&self, division_name: &str, division_index: u8, channel: u8, cc_num: u8) {
+    /// Dwingt dezelfde exclusiviteit af als de inleer-paden (claim_pedal_cc) en
+    /// geeft terug wat er daardoor verdrongen is.
+    pub fn set_swell_binding_manual(&self, division_name: &str, division_index: u8, channel: u8, cc_num: u8) -> Vec<DisplacedPedalBinding> {
+        let verdrongen = self.claim_pedal_cc(PedalCcKind::Swell, channel, cc_num);
         let mut bindings = self.swell_bindings.write();
         if let Some(b) = bindings.iter_mut().find(|b| b.division_name == division_name) {
             b.channel = channel;
@@ -3748,6 +4022,7 @@ impl AppState {
                 last_value: None,
             });
         }
+        verdrongen
     }
 
     /// Zet handmatig het toetsenbereik (laagste/hoogste MIDI-noot) van een
@@ -3933,7 +4208,7 @@ mod crescendo_tests {
             divisions: vec![DivisionDto {
                 name: "Hoofdwerk".into(), display_name: "Hoofdwerk".into(),
                 stops: vec![stop("a", 1), stop("b", 2), stop("c", 3)],
-                has_tremulant: false, has_swell: false,
+                has_tremulant: false, tremulant_kind: None, has_swell: false,
             }],
             couplers: Some(vec![CouplerDto {
                 id: "real_coupler_1".into(), name: "II/I".into(), source_division: "Hoofdwerk".into(),
@@ -4109,5 +4384,206 @@ mod crescendo_tests {
         assert!((swell_gain_from_cc(65, 20, 110, false) - 0.5).abs() < 1e-6);
         // min > max wordt geordend (vangnet), geen stapfunctie.
         assert!((swell_gain_from_cc(65, 110, 20, false) - 0.5).abs() < 1e-6);
+    }
+    // ---- Wederzijdse uitsluiting zwelkast <-> generaal crescendo ----
+    fn zwel(div: &str, ch: u8, cc: u8) -> SwellBinding {
+        SwellBinding {
+            division_name: div.to_string(), division_index: 0, channel: ch, cc_num: cc,
+            min_val: 0, max_val: 127, invert: false, last_value: None,
+        }
+    }
+
+    #[test]
+    fn zwelclaim_verdringt_crescendo_op_dezelfde_cc() {
+        let cresc = Arc::new(RwLock::new(Some((0u8, 7u8, 0u8, 127u8, false))));
+        let zwellen = Arc::new(RwLock::new(vec![zwel("Nevenwerk", 0, 11)]));
+        // Andere CC: crescendo blijft staan.
+        let v = claim_pedal_cc_inner(PedalCcKind::Swell, 0, 11, &cresc, &zwellen);
+        assert!(v.is_empty());
+        assert!(cresc.read().is_some());
+        // Ander kanaal, zelfde CC-nummer: ook geen verdringing.
+        let v = claim_pedal_cc_inner(PedalCcKind::Swell, 1, 7, &cresc, &zwellen);
+        assert!(v.is_empty());
+        assert!(cresc.read().is_some());
+        // Zelfde (kanaal, CC): crescendo-koppeling vervalt en wordt gemeld.
+        let v = claim_pedal_cc_inner(PedalCcKind::Swell, 0, 7, &cresc, &zwellen);
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].kind, "crescendo");
+        assert_eq!((v[0].channel, v[0].cc), (0, 7));
+        assert!(v[0].division.is_none());
+        assert!(cresc.read().is_none());
+        // Zwelbindingen blijven onaangeroerd.
+        assert_eq!(zwellen.read().len(), 1);
+    }
+
+    #[test]
+    fn crescendoclaim_verdringt_alle_zwellen_op_dezelfde_cc() {
+        let cresc: Arc<RwLock<Option<(u8, u8, u8, u8, bool)>>> = Arc::new(RwLock::new(None));
+        let zwellen = Arc::new(RwLock::new(vec![
+            zwel("Nevenwerk", 0, 7),
+            zwel("Bovenwerk", 0, 7),   // zelfde trede voor twee kasten
+            zwel("Rugwerk", 1, 7),     // ander kanaal
+            zwel("Borstwerk", 0, 11),  // andere CC
+        ]));
+        let v = claim_pedal_cc_inner(PedalCcKind::Crescendo, 0, 7, &cresc, &zwellen);
+        assert_eq!(v.len(), 2);
+        assert!(v.iter().all(|d| d.kind == "swell" && d.channel == 0 && d.cc == 7));
+        let overgebleven: Vec<String> = zwellen.read().iter().map(|b| b.division_name.clone()).collect();
+        assert_eq!(overgebleven, vec!["Rugwerk".to_string(), "Borstwerk".to_string()]);
+    }
+
+    #[test]
+    fn beide_functies_op_verschillende_cc_blijven_naast_elkaar() {
+        // Het normale geval uit de klacht: zwel op CC11, crescendo op CC7 - geen
+        // van beide mag de ander verdringen, in welke volgorde ook.
+        let cresc = Arc::new(RwLock::new(Some((0u8, 7u8, 0u8, 127u8, false))));
+        let zwellen = Arc::new(RwLock::new(vec![zwel("Nevenwerk", 0, 11)]));
+        assert!(claim_pedal_cc_inner(PedalCcKind::Crescendo, 0, 7, &cresc, &zwellen).is_empty());
+        assert!(claim_pedal_cc_inner(PedalCcKind::Swell, 0, 11, &cresc, &zwellen).is_empty());
+        assert!(cresc.read().is_some());
+        assert_eq!(zwellen.read().len(), 1);
+    }
+}
+
+
+#[cfg(test)]
+mod piston_flank_tests {
+    use super::*;
+
+    fn cc(kanaal: u8, controller: u8, waarde: u8) -> MidiMessage {
+        MidiMessage::ControlChange { channel: kanaal, controller, value: waarde }
+    }
+
+    fn binding_cc(preset: u8, kanaal: Option<u8>, controller: u8, drempel: u8) -> MidiPresetBinding {
+        MidiPresetBinding {
+            preset_num: preset,
+            trigger: MidiPresetTrigger::ControlChange { channel: kanaal, controller, value: drempel },
+        }
+    }
+
+    /// Stuurt een reeks CC-waarden door `check_preset_trigger` en geeft terug
+    /// welke presets daarbij gevuurd hebben.
+    fn sweep(
+        bindings: &Arc<RwLock<Vec<MidiPresetBinding>>>,
+        gate: &mut PresetCcGate,
+        tx: &Sender<u8>,
+        rx: &Receiver<u8>,
+        kanaal: u8,
+        controller: u8,
+        waarden: &[u8],
+    ) -> Vec<u8> {
+        for w in waarden {
+            AppState::check_preset_trigger(&cc(kanaal, controller, *w), bindings, tx, gate);
+        }
+        rx.try_iter().collect()
+    }
+
+    #[test]
+    fn piston_op_continue_cc_vuurt_alleen_op_de_opgaande_flank() {
+        // De klacht: een piston ingeleerd op dezelfde CC als een pedaal gaf bij
+        // één pedaalbeweging tientallen preset-triggers.
+        let bindings = Arc::new(RwLock::new(vec![binding_cc(3, Some(0), 11, 127)]));
+        let (tx, rx) = bounded::<u8>(64);
+        let mut gate = PresetCcGate::default();
+
+        // Pedaal van dicht naar open: pas bij 127 één keer vuren, daarna niet meer.
+        let gevuurd = sweep(&bindings, &mut gate, &tx, &rx, 0, 11,
+            &[0, 20, 60, 100, 126, 127, 127, 127]);
+        assert_eq!(gevuurd, vec![3]);
+
+        // Pedaal terug en weer omhoog: precies één nieuwe trigger.
+        let gevuurd = sweep(&bindings, &mut gate, &tx, &rx, 0, 11, &[110, 60, 0, 127]);
+        assert_eq!(gevuurd, vec![3]);
+    }
+
+    #[test]
+    fn ruis_rond_de_drempel_herwapent_niet() {
+        // Drempel 64 → herwapengrens 56. Trillen tussen 58 en 70 mag maar één
+        // keer vuren; pas onder 56 staat de piston weer scherp.
+        let bindings = Arc::new(RwLock::new(vec![binding_cc(1, Some(0), 7, 64)]));
+        let (tx, rx) = bounded::<u8>(64);
+        let mut gate = PresetCcGate::default();
+
+        let gevuurd = sweep(&bindings, &mut gate, &tx, &rx, 0, 7,
+            &[63, 64, 70, 62, 65, 58, 66, 60, 64]);
+        assert_eq!(gevuurd, vec![1]);
+
+        let gevuurd = sweep(&bindings, &mut gate, &tx, &rx, 0, 7, &[55, 64]);
+        assert_eq!(gevuurd, vec![1]);
+    }
+
+    #[test]
+    fn ingeleerde_waarde_nul_vuurt_niet_bij_elk_bericht() {
+        // Een knop die 0 stuurde levert drempel 0; zonder ondergrens zou
+        // `waarde >= 0` bij élk CC-bericht vuren.
+        let bindings = Arc::new(RwLock::new(vec![binding_cc(2, Some(0), 20, 0)]));
+        let (tx, rx) = bounded::<u8>(64);
+        let mut gate = PresetCcGate::default();
+
+        let gevuurd = sweep(&bindings, &mut gate, &tx, &rx, 0, 20, &[0, 0, 0]);
+        assert!(gevuurd.is_empty(), "waarde 0 is de ruststand, niet de flank");
+
+        let gevuurd = sweep(&bindings, &mut gate, &tx, &rx, 0, 20, &[127, 127, 0, 127]);
+        assert_eq!(gevuurd, vec![2, 2], "knop indrukken, loslaten, indrukken");
+    }
+
+    #[test]
+    fn andere_controller_of_kanaal_raakt_de_stand_niet() {
+        let bindings = Arc::new(RwLock::new(vec![binding_cc(5, Some(1), 11, 127)]));
+        let (tx, rx) = bounded::<u8>(64);
+        let mut gate = PresetCcGate::default();
+
+        // Ander kanaal en andere CC: nooit vuren, en de eigen stand blijft scherp.
+        let gevuurd = sweep(&bindings, &mut gate, &tx, &rx, 0, 11, &[127, 0, 127]);
+        assert!(gevuurd.is_empty());
+        let gevuurd = sweep(&bindings, &mut gate, &tx, &rx, 1, 12, &[127, 0, 127]);
+        assert!(gevuurd.is_empty());
+        let gevuurd = sweep(&bindings, &mut gate, &tx, &rx, 1, 11, &[127]);
+        assert_eq!(gevuurd, vec![5]);
+    }
+
+    #[test]
+    fn twee_pistons_op_dezelfde_cc_houden_hun_eigen_stand() {
+        let bindings = Arc::new(RwLock::new(vec![
+            binding_cc(1, Some(0), 11, 64),
+            binding_cc(2, Some(0), 11, 127),
+        ]));
+        let (tx, rx) = bounded::<u8>(64);
+        let mut gate = PresetCcGate::default();
+
+        let gevuurd = sweep(&bindings, &mut gate, &tx, &rx, 0, 11, &[0, 64, 90, 127, 127]);
+        assert_eq!(gevuurd, vec![1, 2]);
+    }
+
+    #[test]
+    fn reset_zet_alle_bindingen_weer_scherp() {
+        let bindings = Arc::new(RwLock::new(vec![binding_cc(4, Some(0), 11, 127)]));
+        let (tx, rx) = bounded::<u8>(64);
+        let mut gate = PresetCcGate::default();
+
+        assert_eq!(sweep(&bindings, &mut gate, &tx, &rx, 0, 11, &[127, 127]), vec![4]);
+        gate.reset();
+        assert_eq!(sweep(&bindings, &mut gate, &tx, &rx, 0, 11, &[127]), vec![4]);
+    }
+
+    #[test]
+    fn noten_en_programmawissels_blijven_ongemoeid() {
+        let bindings = Arc::new(RwLock::new(vec![
+            MidiPresetBinding { preset_num: 6, trigger: MidiPresetTrigger::Note { channel: Some(0), note: 36 } },
+            MidiPresetBinding { preset_num: 7, trigger: MidiPresetTrigger::ProgramChange { channel: Some(0), program: 2 } },
+        ]));
+        let (tx, rx) = bounded::<u8>(64);
+        let mut gate = PresetCcGate::default();
+
+        for msg in [
+            MidiMessage::NoteOn { channel: 0, note: 36, velocity: 100 },
+            MidiMessage::NoteOn { channel: 0, note: 36, velocity: 0 },
+            MidiMessage::NoteOn { channel: 0, note: 36, velocity: 100 },
+            MidiMessage::ProgramChange { channel: 0, program: 2 },
+            MidiMessage::ProgramChange { channel: 0, program: 2 },
+        ] {
+            AppState::check_preset_trigger(&msg, &bindings, &tx, &mut gate);
+        }
+        assert_eq!(rx.try_iter().collect::<Vec<_>>(), vec![6, 6, 7, 7]);
     }
 }

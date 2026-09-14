@@ -3,6 +3,9 @@
     "title": "JM-Orgue",
     "subtitle": "Virtueel pijporgel"
   },
+  "splash": {
+    "starting": "Bezig met starten…"
+  },
   "nav": {
     "orgel": "Orgel",
     "instellingen": "Instellingen",
@@ -35,6 +38,10 @@
     "download_size": "Downloaden (± {mb} MB)",
     "download_where": "Kies de map waarin de sampleset komt te staan",
     "download_failed": "Download mislukt",
+    "choose_image": "Afbeelding kiezen…",
+    "choose_image_title": "Kies een foto van het orgel",
+    "image_auto": "Afbeelding automatisch zoeken",
+    "image_failed": "Afbeelding kon niet worden ingesteld",
     "open_button": "Open Orgel Bibliotheek"
   },
   "settings": {
@@ -244,7 +251,10 @@
     "loops_loopable": "loopbaar",
     "loops_written": "Loops geschreven",
     "loops_skipped": "overgeslagen",
-    "polyphony_default": "standaard"
+    "polyphony_default": "standaard",
+    "audio_buffer_fast_pc": "alleen voor zeer snelle pc's",
+    "audio_buffer_recommended": "aanbevolen",
+    "audio_buffer_hint": "Kleiner = minder vertraging, maar de audio-thread moet al het werk van een register- of crescendowissel in die tijd doen. 128 frames (2,7 ms) is voor vrijwel elke pc de goede keuze; 32/48 alleen op een zeer snelle pc zonder galm."
   },
   "perspectives": {
     "title": "Perspectieven en gestapelde ranks",
@@ -341,7 +351,9 @@
     "version": "v{version}",
     "load_title": "Klinkende stemmen / polyfonie-kap · belasting van de audio-thread",
     "archiving": "MIDI-archief",
-    "archiving_title": "Het automatische MIDI-archief legt je spel nu vast; het bestand wordt na de stiltetijd opgeslagen."
+    "archiving_title": "Het automatische MIDI-archief legt je spel nu vast; het bestand wordt na de stiltetijd opgeslagen.",
+    "peak": "piek",
+    "overload_title": "Een audio-callback ging over zijn deadline: vergroot de buffergrootte (Instellingen → Audio Uitvoer) of verlaag de polyfonie."
   },
   "actions": {
     "save": "Opslaan",
@@ -372,6 +384,7 @@
     "wav_files": "WAV bestanden",
     "panel_window_title": "JM-Orgue - Scherm {n}",
     "organ_definition_filter": "Orgeldefinitie (GrandOrgue / Hauptwerk)",
+    "image_filter": "Afbeeldingen",
     "organ_definition": "Orgeldefinitie",
     "external_sampleset_title": "Externe sampleset — selecteer de hoofdmap (alleen onversleutelde .wav bestanden)",
     "export_source_folder_title": "Selecteer de sample map om te exporteren",
@@ -536,7 +549,9 @@
     "profile_device_unavailable": "{label}: apparaat \"{device}\" is nu niet beschikbaar (staat het aan / is het aangesloten?). De huidige uitgang blijft actief.",
     "headphones_profile_not_set": "Het profiel Hoofdtelefoon is nog niet ingesteld. Kies eerst de hoofdtelefoon-uitgang (host, apparaat en eventueel kanalen) in Instellingen → Audio-uitvoer en sla die op als Hoofdtelefoon; daarna wisselt deze knop direct.",
     "switch_taking_long": "Audio-wissel loopt langer dan verwacht — nog even geduld.",
-    "switch_failed": "Audio-wissel mislukt."
+    "switch_failed": "Audio-wissel mislukt.",
+    "overload_warn": "De audio-thread haalt zijn deadline niet (piek {peak}% van de buffertijd bij {frames} frames). Dat hoor je als tikken of haperen bij register- en crescendowissels.",
+    "overload_fix": "Zet de buffer op 128"
   },
   "pistons": {
     "set": "SET — registratie opslaan",
@@ -867,7 +882,9 @@
     "range_min": "Min (af)",
     "range_max": "Max (vol)",
     "live": "Live",
-    "live_title": "Live crescendo-stand (volgt het pedaal)"
+    "live_title": "Live crescendo-stand (volgt het pedaal)",
+    "binding_disabled_warn": "Er is een crescendotrede ingeleerd (kanaal {channel} · CC{cc}), maar het generaal crescendo staat uit. Die trede doet nu niets — ook niet als zwelkast, want de CC blijft voor het crescendo gereserveerd.",
+    "binding_empty_warn": "Er is een crescendotrede ingeleerd (kanaal {channel} · CC{cc}), maar er zijn nog geen trappen gevuld. Gebruik Auto-fill of de matrix, anders doet de trede niets."
   },
   "sorting": {
     "by_pitch": "Voetmaat",
@@ -940,6 +957,21 @@
     "no_lan_ip": "Geen netwerkadres gevonden — is deze pc verbonden met wifi of een netwerkkabel?",
     "running": "Actief",
     "stopped": "Niet actief",
-    "hint": "De eerste keer vraagt Windows Firewall of JM-Orgue verbindingen mag ontvangen: kies 'Toegang toestaan' voor privénetwerken. Geweigerd? Zet het aan via Windows-beveiliging → Firewall → 'Een app toestaan via de firewall' (JM-Orgue, Privé). Het adres werkt alleen binnen het eigen (wifi-)netwerk, zonder versleuteling; deel het token niet en maak een nieuw token om toegang in te trekken."
+    "hint": "De eerste keer vraagt Windows Firewall of JM-Orgue verbindingen mag ontvangen: kies 'Toegang toestaan' voor privénetwerken. Geweigerd? Zet het aan via Windows-beveiliging → Firewall → 'Een app toestaan via de firewall' (JM-Orgue, Privé). Het adres werkt alleen binnen het eigen (wifi-)netwerk, zonder versleuteling; deel het token niet en maak een nieuw token om toegang in te trekken.",
+    "parts_title": "Onderdelen op het externe scherm",
+    "parts_divisions": "Divisies op het externe scherm",
+    "part_couplers": "Koppels",
+    "part_tremulant": "Tremulant",
+    "part_setzer": "Setzer",
+    "part_volume": "Volume",
+    "part_panic": "Panic",
+    "parts_hint": "Het externe scherm volgt verder de indeling van het orgelscherm: dezelfde volgorde van divisies en registers, dezelfde knopvorm en dezelfde koppels. Welke koppels zichtbaar zijn kies je bij Orgel-instellingen → Koppels; het externe scherm toont er nooit meer dan het orgelscherm."
+  },
+  "pedal": {
+    "replaces_prefix": "vervangt:",
+    "replaces_crescendo": "generaal crescendo",
+    "replaces_swell": "zwelkast {division}",
+    "taken_over": "Deze trede was al gekoppeld aan {what}; die koppeling is overgenomen. Eén pedaal kan maar één functie hebben.",
+    "cc_required": "Vul ook een CC-nummer in — alleen een kanaal kiezen maakt geen koppeling."
   }
 }

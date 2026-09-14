@@ -97,6 +97,12 @@
         voiceCount: s.voice_count,
         polyphony: s.polyphony,
         renderLoad: s.render_load,
+        // Piek + tellers meenemen: de StatusBar kleurt de belastingsmeter op
+        // renderPeak, en zonder deze drie bleef die op extra registerschermen
+        // altijd stil (gelijkgetrokken met App.refreshStatus).
+        renderPeak: s.render_peak,
+        renderOverloads: s.render_overloads,
+        rtDrops: s.rt_drops,
         peakLeft: s.peak_left,
         peakRight: s.peak_right,
         sampleRate: s.sample_rate,
@@ -340,12 +346,25 @@
     localStorage.setItem('jm-orgue-autoload-organ', String(enabled));
   }
 
+  // Zelfde navigatieregel als het hoofdvenster: zonder geladen orgel bestaat
+  // er geen Orgel(-Instellingen)-weergave, dus die routes tonen de bibliotheek;
+  // Algemene Instellingen verlaat de bibliotheek expliciet.
+  function setView(view) {
+    if (!organInfo && view !== 'algemene-instellingen') {
+      activeView = 'orgel';
+      showOrganBrowser = true;
+      return;
+    }
+    activeView = view;
+    showOrganBrowser = false;
+  }
+
   // F1/F2/F3-tabwissel, zoals in het hoofdvenster (alleen zinvol met balk aan).
   function handleKeyDown(event) {
     if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') return;
-    if (event.key === 'F1') { event.preventDefault(); activeView = 'orgel'; }
-    else if (event.key === 'F2') { event.preventDefault(); activeView = 'orgel-instellingen'; }
-    else if (event.key === 'F3') { event.preventDefault(); activeView = 'algemene-instellingen'; }
+    if (event.key === 'F1') { event.preventDefault(); setView('orgel'); }
+    else if (event.key === 'F2') { event.preventDefault(); setView('orgel-instellingen'); }
+    else if (event.key === 'F3') { event.preventDefault(); setView('algemene-instellingen'); }
   }
 
   // Apparaatlijsten pas (ver)laden wanneer de instellingen zichtbaar worden.
@@ -402,6 +421,7 @@
     <Header
       organName={organInfo?.name}
       organLoaded={!showOrganBrowser && organInfo}
+      showTabs={!showOrganBrowser}
       {status}
       {activeView}
       {audioProfiles}
@@ -410,7 +430,7 @@
       on:startAudio={startAudio}
       on:stopAudio={stopAudio}
       on:closeOrgan={() => emitToMain('jm-orgue:close-organ', {})}
-      on:setView={(e) => activeView = e.detail}
+      on:setView={(e) => setView(e.detail)}
       on:toggleAudioProfile={() => emitToMain('jm-orgue:switch-profile', { kind: null })}
       on:toggleHeader={() => setShowHeader(false)}
     />
@@ -453,7 +473,7 @@
       on:refreshOrgan={() => pollOrganInfo(true)}
       on:refreshDevices={refreshDevices}
       on:refresh={refreshDevices}
-      on:setView={(e) => activeView = e.detail}
+      on:setView={(e) => setView(e.detail)}
       on:loadOrgan={(e) => emitToMain('jm-orgue:load-organ', { kind: 'organ', path: e.detail })}
       on:scanFolder={(e) => emitToMain('jm-orgue:load-organ', { kind: 'folder', path: e.detail })}
       on:setTremulant={(e) => setTremulant(e.detail.division, e.detail.active)}

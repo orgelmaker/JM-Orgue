@@ -39,8 +39,12 @@
       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <path d="M12 20v-6M6 20V10M18 20V4"/>
       </svg>
-      <span title={$t('status_bar.load_title')}>
-        {status.voiceCount}{status.polyphony ? `/${status.polyphony}` : ''} {$t('status_bar.voices')}{typeof status.renderLoad === 'number' ? ` · ${Math.round(status.renderLoad * 100)}%` : ''}
+      <!-- Belasting + piek: de piek (traag vervallend) laat zien dat een
+           callback zijn deadline miste, ook als het gemiddelde alweer laag is —
+           precies het beeld bij haperen rond een crescendo-trapwissel. -->
+      <span title={status.renderPeak > 1.0 ? $t('status_bar.overload_title') : $t('status_bar.load_title')}
+            style={status.renderPeak > 1.0 ? 'color: var(--warning, #d9a441);' : ''}>
+        {status.voiceCount}{status.polyphony ? `/${status.polyphony}` : ''} {$t('status_bar.voices')}{typeof status.renderLoad === 'number' ? ` · ${Math.round(status.renderLoad * 100)}%` : ''}{typeof status.renderPeak === 'number' ? ` (${$t('status_bar.peak')} ${Math.round(status.renderPeak * 100)}%)` : ''}
       </span>
     </div>
   </div>

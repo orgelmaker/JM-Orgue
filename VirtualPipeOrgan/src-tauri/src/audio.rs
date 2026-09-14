@@ -28,8 +28,27 @@ pub const PRELOAD_SAMPLES: usize = 96000;
 pub const RELEASE_PIPE_FLAG: u32 = 0x8000_0000;
 /// Masker om van een release-pipe_num weer de kale pijp te maken: de vlag
 /// (bit 31) plus de release-index (bits 24-30) van de MaxKeyPressTime-
-/// varianten (0.7.26). Gebruik dit — niet alleen de vlag — bij voicing-lookups.
+/// varianten (0.7.26) én de tremulant-vlag (bit 30). Gebruik dit — niet alleen
+/// de vlag — bij voicing-lookups.
 pub const RELEASE_KEY_MASK: u32 = 0xFF00_0000;
+
+/// Bit-vlag op `pipe_num` die een key markeert als TREMULANT-opname van die
+/// pijp (GrandOrgue `IsTremulant=1`, Hauptwerk "tremmed"-laag, JM-Rec
+/// `_trem`-map). Attack én release van de tremulantstand krijgen zo hun eigen
+/// sleutel in dezelfde preload-/sample-/inflight-maps als de droge opname —
+/// zonder aparte maps, en zonder dat een achtergrond-load van de ene stand die
+/// van de andere overschrijft.
+///
+/// Bitindeling van `pipe_num` (samen met `RANK_MASK`/`RELEASE_KEY_MASK`):
+///   bits 0-15  pijpindex binnen de stop (ODF-cap 1024 + 512)
+///   bits 16-23 laagindex (gestapelde rank / microfoonperspectief)
+///   bits 24-26 release-index van de MaxKeyPressTime-variant ((idx+1) << 24)
+///   bit  30    tremulant-opname (deze vlag)
+///   bit  31    release-sample van de pijp (`RELEASE_PIPE_FLAG`)
+/// Bit 30 valt binnen `RELEASE_KEY_MASK`, dus `base_pipe()` en de
+/// intonatie-/hertemper-sleutel (`& !RELEASE_KEY_MASK`) strippen hem vanzelf:
+/// een tremulant-voice erft de voicing van zijn droge pijp.
+pub const TREM_FLAG: u32 = 0x4000_0000;
 
 /// Laagindex (gestapelde rank / microfoonperspectief, 0.7.38) in bits 16–23
 /// van pipe_num; de pijpindex blijft in bits 0–15 (ODF-cap 1024 + 512). Alle
@@ -86,6 +105,24 @@ mod layer_key_tests {
         // Laagsleutel zonder release-bits blijft de ODF-intonatie-sleutel.
         assert_eq!(layer_key(9, 4) & !RELEASE_KEY_MASK, layer_key(9, 4));
     }
+
+    #[test]
+    fn trem_flag_ligt_binnen_het_release_masker() {
+        // De vlag moet door base_pipe() en de intonatiesleutel gestript worden,
+        // anders krijgt een tremulant-voice geen ODF-gain/hertemper-correctie.
+        assert_eq!(TREM_FLAG & RELEASE_KEY_MASK, TREM_FLAG);
+        assert_eq!(TREM_FLAG & (RANK_MASK | 0xFFFF), 0);
+        assert_eq!(base_pipe(layer_key(5, 2) | TREM_FLAG), 5);
+        assert_eq!(base_pipe(layer_key(5, 2) | TREM_FLAG | RELEASE_PIPE_FLAG | (3 << 24)), 5);
+        let k = layer_key(9, 4);
+        assert_eq!((k | TREM_FLAG) & !RELEASE_KEY_MASK, k);
+        // Geen botsing met de release-index (idx+1) << 24 voor idx < 7.
+        for idx in 0u32..7 {
+            assert_eq!(((idx + 1) << 24) & TREM_FLAG, 0);
+        }
+        // En de laag blijft intact naast de vlag.
+        assert_eq!((layer_key(7, 3) | TREM_FLAG) & RANK_MASK, 3 << RANK_SHIFT);
+    }
 }
 
 /// Harde bovengrens op het aantal gelijktijdige voices in het echte audiopad.
@@ -122,6 +159,23 @@ pub fn render_load() -> (f32, f32) {
      RENDER_PEAK_PM.load(Ordering::Relaxed) as f32 / 1000.0)
 }
 
+/// Cumulatief aantal callbacks dat over 80 % van zijn buffertijd ging, sinds het
+/// starten van de stream (nooit gereset). Stond eerder alleen als closure-lokale
+/// teller in de warn-tekst en was daardoor niet meetbaar; nu leest de status
+/// (UI + test-API) hem uit, zodat "hapert het?" een getal wordt in plaats van een
+/// gevoel: neemt hij toe tijdens een crescendo-sweep, dan is de buffer te klein.
+static RENDER_OVERLOAD_COUNT: AtomicU64 = AtomicU64::new(0);
+pub fn render_overload_count() -> u64 {
+    RENDER_OVERLOAD_COUNT.load(Ordering::Relaxed)
+}
+
+/// Diagnose-teller: hoe vaak een release-staart het EINDE van zijn preload
+/// bereikte terwijl de volledige WAV nog niet geladen was. Elke treffer is een
+/// staart die op ~2 s werd afgekapt (laadlatentie bij grote akkoorden). Alleen
+/// een atomaire optelling in de callback — de watchdog-thread logt de stand
+/// hooguit 1x per 5 s, zodat er geen log-I/O in het audiopad komt.
+static RELEASE_PRELOAD_EDGE_HITS: AtomicU64 = AtomicU64::new(0);
+
 /// Sample source with preload buffer for instant playback
 #[derive(Debug, Clone)]
 pub enum SampleSource {
@@ -157,7 +211,7 @@ pub enum AudioCommand {
     /// Laat ALLE klinkende pijpen van één register los (register weggetrokken
     /// tijdens het spelen). Eén commando i.p.v. een NoteOff per pijp: een
     /// preset-wissel die 20 registers wegtrekt zou anders >1000 berichten
-    /// sturen en de bounded(512) command-queue laten blokkeren.
+    /// sturen en de (bounded) command-queue laten vollopen.
     ReleaseStop { stop_id: u32 },
     /// All notes off
     AllNotesOff,
@@ -172,8 +226,15 @@ pub enum AudioCommand {
     LoadSamples(Arc<HashMap<(u32, u32), SampleRef>>),
     /// Register preload buffers (attack portions only - fast loading!)
     RegisterPreloadBuffers(Arc<HashMap<(u32, u32), Arc<PreloadBuffer>>>),
-    /// Register tremulant preload buffers (keyed same as dry, used when trem is on)
-    RegisterTremulantBuffers(Arc<HashMap<(u32, u32), Arc<PreloadBuffer>>>),
+    /// Stop-ids met echte tremulant-OPNAMEN. De buffers zelf staan sinds 0.7.39
+    /// gewoon in de preload-map onder `pipe_num | TREM_FLAG`; deze set zegt
+    /// alleen voor welke registers de synth-LFO moet zwijgen (die stops hebben
+    /// hun tremulant al in de opname).
+    RegisterTremStops(std::collections::HashSet<u32>),
+    /// Door de sampleset opgegeven crossfade-duur (ms) per RELEASE-key
+    /// (GrandOrgue `ReleaseCrossfadeLength`). Ontbreekt een key, dan geldt de
+    /// automatische, toonhoogte-afhankelijke duur (`release_fade_ms`).
+    RegisterReleaseCrossfade(Arc<HashMap<(u32, u32), u32>>),
     /// Register a fully loaded sample (from background loading)
     RegisterFullSample { key: (u32, u32), sample: SampleRef },
     /// Enable/disable tremulant for a set of stop IDs
@@ -311,6 +372,18 @@ struct PlayingVoice {
     /// voices erven dit van de voice waaruit ze ontstaan, zodat de
     /// perspectief-gain niet wegvalt bij loslaten of een tremulant-wissel.
     persp_slot: u8,
+    /// Uitgestelde staart-decay (in output-frames) voor een geschaalde release
+    /// bij een korte noot, zoals GrandOrgue's GOSoundFader: de release fadet
+    /// eerst IN (complementair aan de uitfadende speelnoot) en begint pas
+    /// daarna aan zijn eigen uitsterving. Zolang dit Some is, is de voice nog
+    /// aan het infaden en telt hij niet mee als slachtoffer voor het
+    /// staartbudget.
+    pending_decay_frames: Option<u32>,
+    /// Leeftijd (`age_samples`) waarop de lopende staart-decay op 0 hoort te
+    /// staan. Wordt gezet zodra de decay begint, en gebruikt door
+    /// `upgrade_to_full` om de fadesnelheid opnieuw te berekenen wanneer de
+    /// volledige sample halverwege de decay binnenkomt.
+    decay_end_age: Option<u64>,
 }
 
 impl PlayingVoice {
@@ -343,6 +416,8 @@ impl PlayingVoice {
             c_use_lfo_trem: true,
             note_on_count: 1,
             persp_slot: 0,
+            pending_decay_frames: None,
+            decay_end_age: None,
         }
     }
 
@@ -374,6 +449,8 @@ impl PlayingVoice {
             c_use_lfo_trem: true,
             note_on_count: 1,
             persp_slot: 0,
+            pending_decay_frames: None,
+            decay_end_age: None,
         }
     }
 
@@ -403,6 +480,17 @@ impl PlayingVoice {
         }
         self.source = VoiceSampleSource::Full(sample);
         self.rate = 1.0;
+        // Loopt er een staart-decay, dan was de fadesnelheid mogelijk ingekort
+        // tot de preload-rand (clamp_release_to_buffer): met de volledige
+        // sample erbij is er weer data genoeg, dus de decay mag zijn
+        // oorspronkelijke tempo terugkrijgen — anders sterft een 5 s-staart in
+        // ~1,8 s uit ("galm stopt abrupt vroeg"). De clamp blijft daarna staan
+        // als vangrail voor het einde van de sample.
+        if let Some(end) = self.decay_end_age {
+            let rest = end.saturating_sub(self.age_samples).max(8) as f32;
+            self.envelope_speed = self.envelope.max(1e-6) / rest;
+            self.clamp_release_to_buffer();
+        }
     }
 
     /// Create a new voice for crossfade: starts from given position, fades in slowly
@@ -432,7 +520,74 @@ impl PlayingVoice {
             c_use_lfo_trem: true,
             note_on_count: 1,
             persp_slot: 0,
+            pending_decay_frames: None,
+            decay_end_age: None,
         }
+    }
+
+    /// Rekent de HUIDIGE afspeelpositie van deze stem om naar het domein van
+    /// `dst` — de doelbuffer van een tremulant-crossfade (de droge en de
+    /// tremulant-opname van dezelfde pijp wisselen elkaar af).
+    ///
+    /// Een positie is nooit universeel:
+    ///   * `Full`    — frames van de VOLLEDIGE, naar de uitgangs-samplerate
+    ///                 geresamplede sample; frame 0 = begin van het bestand.
+    ///   * preload   — frames van `attack_data` op de BRON-samplerate, waarbij
+    ///                 frame 0 hoort bij bestandsframe `trim_start`
+    ///                 (segment-start + weggeknipte aanloopstilte).
+    ///
+    /// De doelbuffer is een ándere opname: eigen lengte, eigen `trim_start` en
+    /// mogelijk een andere samplerate. De ruwe positie doorgeven liet de nieuwe
+    /// stem daardoor op een willekeurige plek landen — bij een 44,1 kHz-set op
+    /// een 48 kHz-uitgang en een lang vastgehouden noot ruim voorbij het einde
+    /// van de (korte) trem-preload, dus stilte of een terugspringende attack.
+    ///
+    /// De omrekening gaat daarom via de TIJD, het enige domein dat beide
+    /// opnamen delen:
+    ///   1. positie → seconden sinds het begin van de opname
+    ///      (preload: positie + eigen trim, gedeeld door de bronrate;
+    ///       full: positie gedeeld door de uitgangsrate — die sample staat al
+    ///       op uitgangsrate en is niet getrimd);
+    ///   2. seconden → frames van de doelbuffer (× doelrate, − diens trim);
+    ///   3. klemmen binnen de data die er écht ligt.
+    /// Valt de uitkomst buiten de buffer, dan vouwen we hem terug in de loop van
+    /// de doelbuffer: een vastgehouden noot klinkt daar sowieso, dus elke plek
+    /// in de loop is muzikaal juist. Heeft de doelbuffer geen bruikbare loop,
+    /// dan het midden van de buffer — nooit opnieuw door de attack, nooit
+    /// voorbij het einde.
+    fn crossfade_position_in(&self, dst: &PreloadBuffer, output_sample_rate: u32) -> f64 {
+        let dst_len = dst.attack_data.len();
+        if dst_len < 2 {
+            return 0.0;
+        }
+        let max_pos = (dst_len - 2) as f64;
+        // 1. Huidige positie → seconden sinds het begin van de bronopname.
+        let secs = match &self.source {
+            VoiceSampleSource::Full(_) => self.position / output_sample_rate.max(1) as f64,
+            VoiceSampleSource::PreloadOnly { preload, .. } => {
+                (self.position + preload.trim_start as f64)
+                    / preload.sample_rate.max(1) as f64
+            }
+        };
+        // 2. Seconden → frames van de doelbuffer (frame 0 = diens trim_start).
+        let mut pos = secs * dst.sample_rate.max(1) as f64 - dst.trim_start as f64;
+        // 3. Buiten de beschikbare data? Terugvouwen in de loop van het doel.
+        //    Alleen looppunten die écht in de buffer passen tellen (dezelfde
+        //    voorwaarde als de leeslus in `next_sample`).
+        if !pos.is_finite() || pos < 0.0 || pos > max_pos {
+            let loop_region = match (dst.loop_start, dst.loop_end) {
+                (Some(a), Some(b)) if b > a + 1 && (b as usize) <= dst_len => {
+                    Some((a as f64, b as f64))
+                }
+                _ => None,
+            };
+            pos = match loop_region {
+                Some((ls, le)) if pos.is_finite() && pos > ls => ls + (pos - ls) % (le - ls),
+                Some((ls, _)) => ls,
+                None => dst_len as f64 * 0.5,
+            };
+        }
+        pos.clamp(0.0, max_pos)
     }
 
     fn release(&mut self) {
@@ -473,6 +628,11 @@ impl PlayingVoice {
     fn release_ms(&mut self, ms: f32, sample_rate: u32) {
         self.releasing = true;
         self.target_envelope = 0.0;
+        // Een expliciete release overschrijft een (uitgestelde of lopende)
+        // staart-decay: de boekhouding daarvan mag `upgrade_to_full` straks niet
+        // verleiden de zojuist opgelegde fade weer te verlengen.
+        self.pending_decay_frames = None;
+        self.decay_end_age = None;
         let frames = (ms.max(1.0) * 0.001 * sample_rate as f32).max(8.0);
         // Vanaf het HUIDIGE niveau in `frames` samples naar 0 (envelope kan al
         // lager staan, bv. bij een zachte staccato-noot).
@@ -542,6 +702,21 @@ impl PlayingVoice {
             self.envelope = (self.envelope - self.envelope_speed).max(self.target_envelope);
         }
 
+        // Geschaalde release van een korte noot: de infade is klaar (het
+        // snijpunt van op- en neergaande helling is bereikt), dus nu begint de
+        // staart-decay over de RESTERENDE tijd — samen precies GrandOrgue's
+        // GOSoundFader (Setup + StartDecreasingVolume).
+        if let Some(frames) = self.pending_decay_frames {
+            if !self.releasing && self.envelope >= self.target_envelope {
+                self.pending_decay_frames = None;
+                self.decay_end_age = Some(self.age_samples + frames as u64);
+                self.releasing = true;
+                self.target_envelope = 0.0;
+                self.envelope_speed = self.envelope.max(1e-6) / (frames as f32).max(8.0);
+                self.clamp_release_to_buffer();
+            }
+        }
+
         let (loop_start, loop_end) = self.get_loop_points();
         let total_len = self.get_sample_len();
 
@@ -563,6 +738,11 @@ impl PlayingVoice {
                 if rest <= 1.0 {
                     // Einde bereikt zonder full load: definitief klaar — een
                     // late load mag de staart niet laten herrijzen.
+                    // Eenmalig tellen (daarna is envelope 0 én releasing true),
+                    // zodat de watchdog de laadlatentie kan melden.
+                    if !self.releasing || self.envelope > 0.0 {
+                        RELEASE_PRELOAD_EDGE_HITS.fetch_add(1, Ordering::Relaxed);
+                    }
                     self.releasing = true;
                     self.envelope = 0.0;
                     self.target_envelope = 0.0;
@@ -646,6 +826,29 @@ fn crossfade_in(voice: &mut PlayingVoice, level: f32, fade_ms: f32, sample_rate:
     voice.envelope = 0.0;
     voice.target_envelope = level;
     voice.envelope_speed = (level / frames).max(1e-7);
+}
+
+/// Korte noot met geschaalde release: infade EN staart-decay tegelijk, precies
+/// zoals GrandOrgue's `GOSoundFader` (`Setup(gain, vel, crossfade)` gevolgd door
+/// `StartDecreasingVolume(gain_decay_length)`). De opgaande helling blijft
+/// `level / F` — complementair aan de uitfadende speelnoot — maar het DOEL zakt
+/// naar het snijpunt van beide hellingen, T' = level·D/(F+D); vanaf daar loopt
+/// de neergaande helling (`level/D`) door naar 0, wat nog D·D/(F+D) frames duurt.
+///
+/// Het oude gedrag startte de release instant op vol niveau bovenop de nog
+/// klinkende speelnoot ("die twee doelen gaan niet samen") — een niveaubult van
+/// enkele dB bij élke korte noot, en bij een kort aangeslagen slotakkoord op
+/// álle pijpen tegelijk.
+#[inline]
+fn crossfade_in_with_decay(voice: &mut PlayingVoice, level: f32, fade_ms: f32, decay_ms: f32, sample_rate: u32) {
+    let f = (fade_ms.max(1.0) * 0.001 * sample_rate as f32).max(8.0);
+    let d = (decay_ms.max(1.0) * 0.001 * sample_rate as f32).max(8.0);
+    let ratio = d / (f + d);
+    // Zet eerst de volle infade (helling level/F), verlaag daarna het doel naar
+    // het snijpunt: de helling blijft zo exact complementair aan de speelnoot.
+    crossfade_in(voice, level, fade_ms, sample_rate);
+    voice.target_envelope = level * ratio;
+    voice.pending_decay_frames = Some((d * ratio).max(8.0) as u32);
 }
 
 /// GrandOrgue's automatische release-crossfade-duur (ms) per MIDI-noot
@@ -761,7 +964,22 @@ fn scaled_release_params(note_ms: f32, midi_note: u8, release_secs: f32) -> (f32
 /// vol-werk-loslating op een natte GO-set spawnde per pijp × register een
 /// release-voice (200+ in één klap, >600 stemmen totaal) — de mix verzoop,
 /// het kraakte en de afbouw duurde heel lang. Boven het budget maakt de
-/// stilste bestaande staart versneld plaats (30 ms fade) voor de nieuwe.
+/// OUDSTE bestaande staart versneld plaats (250 ms fade) voor de nieuwe.
+///
+/// Slachtofferkeuze (GrandOrgue-stijl, `GOSoundSamplerPlayer::ProcessSampler`:
+/// boven de zachte polyfonie-grens faden alleen staarten die al even lopen):
+///  - alleen one-shot staarten die NIET al aan het uitfaden zijn;
+///  - minstens 20 ms oud (zelfde jongeren-bescherming als `push_voice_capped`);
+///  - infade helemaal klaar (`envelope >= target_envelope`) en geen uitgestelde
+///    staart-decay meer open;
+///  - daarbinnen de OUDSTE.
+///
+/// De oude keuze ("laagste envelope") koos gegarandeerd de zojuist gespawnde
+/// release: die staat door `crossfade_in` op envelope 0,0, terwijl natuurlijke
+/// staarten op hun startniveau blijven (de afname zit in de sampledata). Bij een
+/// akkoord-loslating onder budgetdruk overleefde daardoor alleen de láátst
+/// gespawnde staart — spawn 2 doodde spawn 1, spawn 3 doodde spawn 2 — en klonk
+/// een slotakkoord na een staccato-passage vrijwel zonder nagalm.
 const MAX_RELEASE_VOICES: usize = 160;
 fn budget_release_voices(voices: &mut Vec<PlayingVoice>, sample_rate: u32, cap: usize) {
     // Staartbudget groeit mee met de kap (minimaal het oude 160); daarnaast
@@ -774,15 +992,22 @@ fn budget_release_voices(voices: &mut Vec<PlayingVoice>, sample_rate: u32, cap: 
     if count < budget && voices.len() < soft_limit {
         return;
     }
-    let mut worst: Option<usize> = None;
-    let mut worst_env = f32::INFINITY;
+    let min_age = (sample_rate as u64 / 50).max(1);
+    let mut oldest: Option<usize> = None;
+    let mut oldest_age = 0u64;
     for (i, v) in voices.iter().enumerate() {
-        if v.one_shot && !v.releasing && v.envelope < worst_env {
-            worst_env = v.envelope;
-            worst = Some(i);
+        if !v.one_shot || v.releasing || v.pending_decay_frames.is_some() {
+            continue;
+        }
+        if v.age_samples < min_age || v.envelope < v.target_envelope {
+            continue;
+        }
+        if oldest.is_none() || v.age_samples > oldest_age {
+            oldest_age = v.age_samples;
+            oldest = Some(i);
         }
     }
-    if let Some(i) = worst {
+    if let Some(i) = oldest {
         // 250 ms, zoals GrandOrgue's polyfonie-limiter (die gebruikt 370 ms):
         // kort genoeg om CPU te winnen, lang genoeg om onhoorbaar te blijven.
         voices[i].release_ms(250.0, sample_rate);
@@ -1336,6 +1561,342 @@ mod loop_seam_tests {
             pos += 1.0;
         }
         assert!(max_jump > 0.3, "expected an audible jump without crossfade, got {}", max_jump);
+    }
+}
+
+/// Release-gedrag bij korte noten en onder staartbudget-druk (onderwerp 7:
+/// "galm gaat niet goed bij GrandOrgue-sets; kort aanslaan klinkt raar bij het
+/// slotakkoord").
+#[cfg(test)]
+mod release_tests {
+    use super::*;
+
+    /// Constante sample: `read_voice` levert dan exact de envelope terug, zodat
+    /// een test het NIVEAUVERLOOP meet en niet de golfvorm.
+    fn vlakke_sample(frames: usize) -> SampleRef {
+        std::sync::Arc::new(SampleData {
+            data: vec![1.0; frames],
+            right: None,
+            sample_rate: 48_000,
+            channels: 1,
+            loop_start: None,
+            loop_end: None,
+        })
+    }
+
+    /// Natuurlijke release-staart: speelt op zijn startniveau door (de afname
+    /// zit in de sampledata), dus envelope == target_envelope.
+    fn staart(age_samples: u64) -> PlayingVoice {
+        let mut v = PlayingVoice::new_from_sample(
+            vlakke_sample(48_000), 1, 100 | RELEASE_PIPE_FLAG, 60, 1.0,
+        );
+        v.one_shot = true;
+        v.envelope = 1.0;
+        v.target_envelope = 1.0;
+        v.age_samples = age_samples;
+        v
+    }
+
+    /// Het staartbudget mag NOOIT de zojuist gespawnde release stelen (die
+    /// staat nog op envelope 0 door de crossfade-infade); het slachtoffer is de
+    /// oudste natuurlijke staart.
+    #[test]
+    fn staartbudget_spaart_verse_crossfade_en_kiest_de_oudste() {
+        let cap = 1024usize;
+        let budget = (cap / 3).max(MAX_RELEASE_VOICES);
+        let mut voices: Vec<PlayingVoice> =
+            (0..budget).map(|i| staart(48_000 + i as u64)).collect();
+        let mut vers = staart(0);
+        crossfade_in(&mut vers, 1.0, release_fade_ms(36), 48_000);
+        voices.push(vers);
+
+        budget_release_voices(&mut voices, 48_000, cap);
+
+        assert!(!voices[budget].releasing, "de verse crossfade-release werd gestolen");
+        assert!(voices[budget].target_envelope > 0.0, "verse release kreeg doel 0");
+        let slachtoffers: Vec<usize> = voices.iter().enumerate()
+            .filter(|(_, v)| v.releasing).map(|(i, _)| i).collect();
+        assert_eq!(slachtoffers.len(), 1, "verwacht precies één slachtoffer, kreeg {:?}", slachtoffers);
+        assert_eq!(slachtoffers[0], budget - 1, "niet de OUDSTE staart gekozen");
+    }
+
+    /// Ook een release die nog aan zijn uitgestelde staart-decay moet beginnen
+    /// is beschermd — anders komt de "kettingmoord" via de achterdeur terug.
+    #[test]
+    fn staartbudget_spaart_ook_een_release_met_uitgestelde_decay() {
+        let cap = 1024usize;
+        let budget = (cap / 3).max(MAX_RELEASE_VOICES);
+        let mut voices: Vec<PlayingVoice> =
+            (0..budget).map(|i| staart(48_000 + i as u64)).collect();
+        let mut vers = staart(0);
+        crossfade_in_with_decay(&mut vers, 1.0, release_fade_ms(36), 1200.0, 48_000);
+        // Doe alsof de infade al klaar is: zonder de pending-decay-guard zou
+        // deze verse staart nu kandidaat zijn (age 0 beschermt hem niet meer).
+        vers.envelope = vers.target_envelope;
+        vers.age_samples = 48_000 * 2;
+        voices.push(vers);
+
+        budget_release_voices(&mut voices, 48_000, cap);
+
+        assert!(!voices[budget].releasing, "release met uitgestelde decay werd gestolen");
+    }
+
+    /// Zijn álle staarten net gespawnd (< 20 ms), dan wordt er niets gestolen:
+    /// liever even boven het budget dan een akkoord zijn hele nagalm afnemen.
+    #[test]
+    fn staartbudget_laat_alles_met_rust_als_alle_staarten_vers_zijn() {
+        let cap = 1024usize;
+        let budget = (cap / 3).max(MAX_RELEASE_VOICES);
+        let mut voices: Vec<PlayingVoice> = (0..=budget).map(|_| {
+            let mut v = staart(0);
+            crossfade_in(&mut v, 1.0, release_fade_ms(36), 48_000);
+            v
+        }).collect();
+
+        budget_release_voices(&mut voices, 48_000, cap);
+
+        assert!(voices.iter().all(|v| !v.releasing), "er werd toch een verse staart gestolen");
+    }
+
+    /// Korte noot: de som van de uitfadende speelnoot en de inkomende release
+    /// blijft ≈ constant (geen niveaubult), en de staart dooft daarna netjes
+    /// uit op 0.
+    #[test]
+    fn korte_noot_houdt_niveau_constant_en_dooft_uit() {
+        let sr = 48_000u32;
+        let midi = 36u8;
+        let fade = release_fade_ms(midi); // 184 ms in de bas
+        let decay_ms = 1200.0f32;
+
+        let mut speel = PlayingVoice::new_from_sample(vlakke_sample(480_000), 1, 100, midi, 1.0);
+        speel.envelope = 1.0;
+        speel.target_envelope = 1.0;
+        speel.release_ms(fade, sr);
+
+        let mut rel = PlayingVoice::new_from_sample(
+            vlakke_sample(480_000), 1, 100 | RELEASE_PIPE_FLAG, midi, 1.0,
+        );
+        rel.one_shot = true;
+        crossfade_in_with_decay(&mut rel, 1.0, fade, decay_ms, sr);
+
+        let fade_frames = (fade * 0.001 * sr as f32) as usize;
+        let mut max_som = 0.0f32;
+        for _ in 0..fade_frames {
+            let (a, _) = speel.next_sample();
+            let (b, _) = rel.next_sample();
+            max_som = max_som.max(a + b);
+        }
+        assert!(max_som <= 1.02,
+                "niveaubult bij het loslaten: {:.3} (instant-start gaf ~2,0)", max_som);
+        assert!(rel.pending_decay_frames.is_none(), "de uitgestelde decay is niet gestart");
+        assert!(rel.releasing, "de staart is na de infade niet gaan uitsterven");
+
+        let rest = (decay_ms * 0.001 * sr as f32) as usize + fade_frames;
+        for _ in 0..rest {
+            if rel.is_finished() { break; }
+            rel.next_sample();
+        }
+        assert!(rel.is_finished(), "staart dooft niet uit (envelope {:.5})", rel.envelope);
+    }
+
+    /// Controle op dezelfde opstelling: het OUDE gedrag (release instant op vol
+    /// niveau) geeft wél een bult — bewijst dat de test hem zou zien.
+    #[test]
+    fn instant_start_release_geeft_wel_een_bult() {
+        let sr = 48_000u32;
+        let midi = 36u8;
+        let fade = release_fade_ms(midi);
+
+        let mut speel = PlayingVoice::new_from_sample(vlakke_sample(480_000), 1, 100, midi, 1.0);
+        speel.envelope = 1.0;
+        speel.target_envelope = 1.0;
+        speel.release_ms(fade, sr);
+
+        let mut rel = PlayingVoice::new_from_sample(
+            vlakke_sample(480_000), 1, 100 | RELEASE_PIPE_FLAG, midi, 1.0,
+        );
+        rel.one_shot = true;
+        rel.envelope = 1.0;
+        rel.target_envelope = 1.0;
+        rel.release_ms(1200.0, sr);
+
+        let mut max_som = 0.0f32;
+        for _ in 0..(fade * 0.001 * sr as f32) as usize {
+            let (a, _) = speel.next_sample();
+            let (b, _) = rel.next_sample();
+            max_som = max_som.max(a + b);
+        }
+        assert!(max_som > 1.5, "verwachtte een niveaubult, kreeg {:.3}", max_som);
+    }
+
+    /// Landt de volledige sample halverwege de decay, dan mag de staart niet
+    /// blijven hangen op de (tot de preload-rand ingekorte) snelheid: de
+    /// resterende decay wordt herberekend en de staart dooft uit op tijd.
+    #[test]
+    fn upgrade_to_full_herberekent_de_resterende_decay() {
+        let sr = 48_000u32;
+        let mut rel = PlayingVoice::new_from_sample(
+            vlakke_sample(480_000), 1, 100 | RELEASE_PIPE_FLAG, 48, 1.0,
+        );
+        rel.one_shot = true;
+        rel.envelope = 1.0;
+        rel.target_envelope = 1.0;
+        rel.releasing = true;
+        rel.age_samples = 0;
+        rel.decay_end_age = Some(240_000); // 5 s decay
+        // Doe alsof de fade was ingekort tot de preload-rand (~1,8 s).
+        rel.envelope_speed = 1.0 / 86_400.0;
+
+        rel.upgrade_to_full(vlakke_sample(480_000));
+
+        let verwacht = 1.0f32 / 240_000.0;
+        assert!((rel.envelope_speed - verwacht).abs() < verwacht * 0.05,
+                "fadesnelheid niet hersteld: {} (verwacht ~{})", rel.envelope_speed, verwacht);
+    }
+}
+
+/// Tremulant-crossfade: de nieuwe stem moet ALTIJD binnen de doelbuffer landen.
+/// De positie van de klinkende stem staat in het domein van zijn eigen bron
+/// (volledige sample op uitgangsrate, óf preload op bronrate mét trim); de
+/// doelbuffer is een andere opname met eigen lengte, trim en samplerate.
+#[cfg(test)]
+mod tremulant_crossfade_tests {
+    use super::*;
+
+    /// Kale preload-buffer: vlakke data (0,25) zodat een test posities meet en
+    /// niet de golfvorm.
+    fn preload(frames: usize, rate: u32, trim: usize, lp: Option<(u64, u64)>) -> Arc<PreloadBuffer> {
+        Arc::new(PreloadBuffer {
+            attack_data: vec![0.25; frames],
+            attack_right: None,
+            sample_rate: rate,
+            total_samples: frames + trim,
+            loop_start: lp.map(|(a, _)| a),
+            loop_end: lp.map(|(_, b)| b),
+            source_path: std::path::PathBuf::from("trem.wav"),
+            channels: 1,
+            bits_per_sample: 16,
+            data_offset: 0,
+            align_table: None,
+            trim_start: trim,
+            smpl_unity_note: None,
+            smpl_pitch_fraction_cents: None,
+        })
+    }
+
+    /// Klinkende stem die nog op zijn preload draait (bronrate ≠ uitgangsrate).
+    fn stem_op_preload(pos: f64, frames: usize, rate: u32, trim: usize, out_rate: u32) -> PlayingVoice {
+        let mut v = PlayingVoice::new_from_preload(
+            preload(frames, rate, trim, Some((frames as u64 / 4, frames as u64))),
+            7, 60, 60, 1.0, out_rate,
+        );
+        v.position = pos;
+        v
+    }
+
+    /// Klinkende stem op de volledige sample: die staat al op uitgangsrate
+    /// (rate = 1,0) en is NIET getrimd — positie = frames sinds bestandsbegin.
+    fn stem_op_volledige_sample(pos: f64, frames: usize, out_rate: u32) -> PlayingVoice {
+        let sample: SampleRef = Arc::new(SampleData {
+            data: vec![0.25; frames],
+            right: None,
+            sample_rate: out_rate,
+            channels: 1,
+            loop_start: None,
+            loop_end: None,
+        });
+        let mut v = PlayingVoice::new_from_sample(sample, 7, 60, 60, 1.0);
+        v.position = pos;
+        v
+    }
+
+    /// Gelijke samplerate, verschillende trim: de nieuwe stem landt op exact
+    /// hetzelfde TIJDSTIP in de doelopname (trimverschil netjes verrekend).
+    #[test]
+    fn crossfade_rekent_trimverschil_om() {
+        let bron = stem_op_preload(40_000.0, 200_000, 44_100, 1_000, 48_000);
+        let doel = preload(200_000, 44_100, 500, Some((50_000, 190_000)));
+
+        let pos = bron.crossfade_position_in(&doel, 48_000);
+
+        // (40 000 + 1 000)/44 100 s → ×44 100 − 500 = 40 500 doelframes.
+        assert!((pos - 40_500.0).abs() < 1.0, "verwachtte ~40500, kreeg {pos}");
+        assert!(pos <= (doel.attack_data.len() - 2) as f64);
+    }
+
+    /// 44,1 kHz-set op een 48 kHz-uitgang, lang vastgehouden noot op de
+    /// VOLLEDIGE sample: de ruwe positie (480 000 output-frames = 10 s) ligt
+    /// ver voorbij het einde van de trem-preload (2 s). De omrekening moet hem
+    /// in de loop van de doelbuffer terugvouwen in plaats van in stilte.
+    #[test]
+    fn crossfade_vouwt_lange_noot_terug_in_de_loop() {
+        let bron = stem_op_volledige_sample(480_000.0, 960_000, 48_000);
+        let (ls, le) = (22_050u64, 80_000u64);
+        let doel = preload(88_200, 44_100, 0, Some((ls, le)));
+
+        // Zonder omrekening (het oude gedrag) lag de startpositie buiten de
+        // buffer — bewijs dat deze test de regressie zou zien.
+        assert!(bron.position > doel.attack_data.len() as f64);
+
+        let pos = bron.crossfade_position_in(&doel, 48_000);
+
+        assert!(pos >= ls as f64 && pos < le as f64,
+                "landde buiten de loop van de doelbuffer: {pos}");
+        // Exacte terugvouwing: 10 s = 441 000 doelframes → ls + (441000−ls) mod (le−ls).
+        let verwacht = ls as f64 + (441_000.0 - ls as f64) % (le - ls) as f64;
+        assert!((pos - verwacht).abs() < 1.0, "verwachtte ~{verwacht}, kreeg {pos}");
+    }
+
+    /// Doelbuffer zonder bruikbare looppunten: veilig midden in de buffer —
+    /// nooit opnieuw door de attack en nooit voorbij het einde.
+    #[test]
+    fn crossfade_zonder_looppunten_landt_midden_in_de_buffer() {
+        let bron = stem_op_preload(300_000.0, 400_000, 48_000, 0, 48_000);
+        let doel = preload(40_000, 44_100, 0, None);
+
+        let pos = bron.crossfade_position_in(&doel, 48_000);
+
+        assert!((pos - 20_000.0).abs() < 1.0, "verwachtte het midden, kreeg {pos}");
+        assert!(pos <= (doel.attack_data.len() - 2) as f64);
+    }
+
+    /// Alle combinaties van bron-/doelrate, trim en lengte: de uitkomst ligt
+    /// ALTIJD binnen de doelbuffer, en de gemaakte stem klinkt ook echt
+    /// (leest geldige data i.p.v. stilte).
+    #[test]
+    fn crossfade_blijft_bij_elke_ratio_binnen_de_doelbuffer() {
+        let rates = [44_100u32, 48_000, 96_000];
+        let out_rates = [44_100u32, 48_000];
+        for &out in &out_rates {
+            for &br in &rates {
+                for &dr in &rates {
+                    for &trim in &[0usize, 5_000] {
+                        for &pos in &[0.0f64, 1_000.0, 250_000.0, 5_000_000.0] {
+                            let bron = stem_op_preload(pos, 300_000, br, trim, out);
+                            let doel = preload(60_000, dr, trim / 2, Some((15_000, 58_000)));
+                            let p = bron.crossfade_position_in(&doel, out);
+                            assert!(p.is_finite() && p >= 0.0 && p <= 59_998.0,
+                                    "buiten de doelbuffer: {p} (bron {br} Hz, doel {dr} Hz, uit {out} Hz, pos {pos})");
+
+                            // De stem die hiermee ontstaat moet klinken: na de
+                            // infade komt er signaal uit, en de leespositie
+                            // blijft binnen de data.
+                            let mut nv = PlayingVoice::new_crossfade(
+                                doel.clone(), 7, 60 | TREM_FLAG, 60, 1.0, p, out,
+                            );
+                            let mut laatste = 0.0f32;
+                            for _ in 0..2_000 {
+                                laatste = nv.next_sample().0;
+                            }
+                            assert!(laatste > 0.0,
+                                    "crossfade-stem bleef stil (bron {br} Hz, doel {dr} Hz, pos {pos})");
+                            assert!(nv.position >= 0.0 && nv.position < 60_000.0,
+                                    "leespositie liep de buffer uit: {}", nv.position);
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -1931,8 +2492,6 @@ fn run_audio_thread(
     let samples: Arc<RwLock<HashMap<(u32, u32), SampleRef>>> = Arc::new(RwLock::new(HashMap::new()));
     // Preload buffers (attack portions for instant playback)
     let preloads: Arc<RwLock<HashMap<(u32, u32), Arc<PreloadBuffer>>>> = Arc::new(RwLock::new(HashMap::new()));
-    // Tremulant preload buffers (same keys as dry, used when tremulant is active)
-    let trem_preloads: Arc<RwLock<HashMap<(u32, u32), Arc<PreloadBuffer>>>> = Arc::new(RwLock::new(HashMap::new()));
     // Set of stop IDs that currently have tremulant active
     let trem_active: Arc<RwLock<std::collections::HashSet<u32>>> = Arc::new(RwLock::new(std::collections::HashSet::new()));
     let voices: Arc<RwLock<Vec<PlayingVoice>>> = Arc::new(RwLock::new(Vec::new()));
@@ -2126,7 +2685,6 @@ fn run_audio_thread(
 
     let samples_clone = samples.clone();
     let preloads_clone = preloads.clone();
-    let trem_preloads_clone = trem_preloads.clone();
     let trem_active_clone = trem_active.clone();
     let voices_clone = voices.clone();
     let master_gain_clone = master_gain.clone();
@@ -2176,6 +2734,8 @@ fn run_audio_thread(
     let mut missing_sample_warned: std::collections::HashSet<(u32, u32)> = std::collections::HashSet::new();
     // Toetsduur-afhankelijke releases: (stop, pijp) → gesorteerde (max_ms, key).
     let mut release_meta: std::collections::HashMap<(u32, u32), Vec<(i32, u32)>> = std::collections::HashMap::new();
+    // Door de sampleset opgegeven crossfade-duur per release-key (ms).
+    let mut release_xfade: Arc<HashMap<(u32, u32), u32>> = Arc::new(HashMap::new());
     let mut load_generation: u64 = 0;
     // Gestapelde ranks / perspectieven (0.7.38): laadplan per stop (Arc-swap
     // via RegisterRankLayout), lineaire gain per perspectief-slot en een
@@ -2254,6 +2814,33 @@ fn run_audio_thread(
             let live_cap = polyphony_target();
             let render_t0 = std::time::Instant::now();
 
+            // Aantal frames van DEZE callback = het werkbudget. De vaste kappen
+            // (16 integraties, 256 commando's) waren bedacht voor 3-6 ms-buffers;
+            // bij ASIO met 32 frames (0,67 ms) is dezelfde hoeveelheid werk een
+            // veelvoud van de deadline — precies het haperen bij een trapwissel
+            // van het crescendo (per trap: ReleaseStop per weggetrokken register
+            // + een NoteOn per ingedrukte toets per bijgetrokken register).
+            // Daarom schalen de budgetten nu mee met de buffergrootte; wat niet
+            // past blijft FIFO in de queue voor de volgende callback (bij 32
+            // frames dus hooguit enkele ms later — onhoorbaar).
+            let frames_now = data.len() / channels.max(1);
+            // Stemstarts (NoteOn-fan-out, release-spawns van NoteOff én van
+            // ReleaseStop): het dure werk, elk met voice-scans onder de
+            // write-lock. Óók de NoteOff zelf telt mee (één eenheid per bericht):
+            // een slotakkoord loslaten stuurt een NoteOff per register per toets
+            // — inclusief alle koppeldoelen — en elk daarvan doet minimaal een
+            // O(stemmen)-scan. frames/8 komt neer op een constante ~6000
+            // eenheden per seconde (onafhankelijk van de buffergrootte): een
+            // tutti-registratie van 300 stemmen klinkt dan binnen ~50 ms
+            // volledig — ruim binnen wat een echte registerlade doet, en per
+            // callback hooguit ~10 % van de rendertijd.
+            // De ondergrens van 8 is essentieel: het budget kan nooit 0 worden,
+            // dus élke callback verwerkt minstens één bericht en de queue kan
+            // niet vollopen (wat niet past blijft FIFO staan).
+            let spawn_budget = (frames_now / 8).max(8);
+            // Afgeronde achtergrond-loads integreren: map-insert + O(V)-scan.
+            let integrate_budget = (frames_now / 32).max(2);
+
             // Achtergestelde opruimboxen alsnog naar de janitor proberen te
             // schuiven (kanaal was vol op het moment van ontstaan).
             while let Some(item) = gc_backlog.pop() {
@@ -2263,12 +2850,13 @@ fn run_audio_thread(
                 }
             }
 
-            // Check for completed background loads. Gecapt per callback: elke
-            // integratie doet een map-insert + voice-scan; tientallen tegelijk
-            // verwerken zou de callback over zijn deadline duwen. De rest wacht
-            // gewoon één callback (~3-6 ms) langer in het kanaal.
+            // Check for completed background loads. Gecapt per callback (budget
+            // geschaald met de buffergrootte, zie boven): elke integratie doet een
+            // map-insert + voice-scan; tientallen tegelijk verwerken zou de
+            // callback over zijn deadline duwen. De rest wacht gewoon één
+            // callback langer in het kanaal.
             let mut integrated = 0;
-            while integrated < 16 {
+            while integrated < integrate_budget {
                 match loaded_rx.try_recv() {
                     Ok((key, sample_opt, generation)) => {
                         // Resultaat van vóór een orgelwissel → volledig negeren:
@@ -2318,13 +2906,19 @@ fn run_audio_thread(
             }
 
             // Process commands. Gecapt per callback: een tutti-akkoord op veel
-            // registers levert in één klap honderden NoteOn/NoteOff-commando's;
-            // die allemaal binnen één callback verwerken (met map-lookups en
-            // voice-scans per commando) kon de realtime-deadline overschrijden.
-            // De rest wacht één callback (~3-6 ms) — onhoorbaar, en de FIFO-
-            // volgorde blijft intact.
+            // registers (of een crescendo-trapwissel) levert in één klap honderden
+            // NoteOn/ReleaseStop-commando's; die allemaal binnen één callback
+            // verwerken (met map-lookups en voice-scans per commando) overschrijdt
+            // de realtime-deadline. Het DURE werk (stemstarts) heeft nu een budget
+            // dat met de buffergrootte meeschaalt; goedkope commando's (gains,
+            // config) blijven onder de vaste bovengrens van 256 vallen zodat een
+            // stroom kleine commando's de callback ook niet kan vullen.
+            // Zodra het budget op is stoppen we met tappen — NIET alleen voor
+            // NoteOn: de FIFO-volgorde moet intact blijven, anders komt een
+            // NoteOff vóór zijn NoteOn te liggen (hanger).
             let mut cmds_done = 0u32;
-            while cmds_done < 256 {
+            let mut spawns_done = 0usize;
+            while cmds_done < 256 && spawns_done < spawn_budget {
                 let Ok(cmd) = command_rx_clone.try_recv() else { break };
                 cmds_done += 1;
                 match cmd {
@@ -2338,8 +2932,25 @@ fn run_audio_thread(
                             .map(|v| v.as_slice())
                             .unwrap_or(&DEFAULT_LAYOUT);
                         let mut spawned_any = false;
+                        // Tremulantstand van dit register: één lookup per
+                        // NoteOn (gold voorheen pas ná de refcount-check).
+                        let trem_on = trem_active_clone.read().contains(&stop_id);
                         for &(layer, slot) in layout {
-                        let key = (stop_id, layer_key(pipe_num, layer));
+                        // Staat de tremulant aan én bestaat er een trem-opname
+                        // voor deze pijp, dan is de TREM-sleutel de speelsleutel:
+                        // attack, achtergrond-load, full sample en release staan
+                        // daar allemaal onder. Zonder deze scheiding overschreef
+                        // de eerste achtergrond-load de gedeelde sleutel en
+                        // negeerde elke volgende NoteOn de tremulantstand.
+                        let base_key = layer_key(pipe_num, layer);
+                        let key_pipe = if trem_on
+                            && preloads_clone.read().contains_key(&(stop_id, base_key | TREM_FLAG))
+                        {
+                            base_key | TREM_FLAG
+                        } else {
+                            base_key
+                        };
+                        let key = (stop_id, key_pipe);
 
                         // Één luchtkolom per pijp: klinkt deze pijp al (via de
                         // directe route of via een koppel), dan géén tweede voice
@@ -2361,9 +2972,6 @@ fn run_audio_thread(
                             }
                         }
 
-                        // Check if tremulant is active for this stop
-                        let trem_on = trem_active_clone.read().contains(&stop_id);
-
                         // First check for fully loaded sample
                         let sample_opt = {
                             let samples_lock = samples_clone.read();
@@ -2381,16 +2989,12 @@ fn run_audio_thread(
                             spawned_any = true;
                             { let mut vl = voices_clone.write(); budget_release_voices(&mut vl, sample_rate, live_cap); push_voice_capped(&mut vl, voice, sample_rate, live_cap); }
                         } else {
-                            // Check for preload buffer - use tremulant if active and available
-                            let preload_opt = if trem_on {
-                                let trem_lock = trem_preloads_clone.read();
-                                trem_lock.get(&key).cloned()
-                            } else {
-                                None
-                            }.or_else(|| {
+                            // Preload-buffer (droog of tremulant — de sleutel
+                            // draagt de stand al).
+                            let preload_opt = {
                                 let preloads_lock = preloads_clone.read();
                                 preloads_lock.get(&key).cloned()
-                            });
+                            };
 
                             if let Some(preload) = preload_opt {
                                 // Start playing from preload buffer immediately
@@ -2420,6 +3024,9 @@ fn run_audio_thread(
                             }
                         }
                         } // for layer
+                        // Elke laag is een mogelijke stemstart: tel de hele
+                        // fan-out mee in het werkbudget van deze callback.
+                        spawns_done += layout.len();
                         if !spawned_any {
                             // Max één warn per pijp: dit pad is bereikbaar in
                             // normaal spel (onopgeloste REF-pijpen) en logde
@@ -2475,45 +3082,71 @@ fn run_audio_thread(
                                     continue;
                                 }
                                 voice.note_on_count = 0;
+                                // Crossfade-duur tussen speelnoot en release: de
+                                // automatische (GrandOrgue get_fader_length) tenzij
+                                // de gekozen release een eigen lengte meebrengt.
+                                let mut fade_ms = release_fade_ms(voice.midi_note);
                                 {
                                     // Laagsleutel van déze voice (niet de inkomende
                                     // kale pipe_num): release-meta en -buffers
-                                    // staan per laag geregistreerd.
+                                    // staan per laag geregistreerd. De TREM-vlag
+                                    // reist mee: een tremulant-voice zoekt eerst
+                                    // zijn eigen trem-release op.
                                     let vpipe = voice.pipe_num;
                                     let note_ms = voice.age_samples as f32 * 1000.0 / (sample_rate.max(1)) as f32;
                                     // Toetsduur-release kiezen: eerste variant met
                                     // max_ms ≥ gespeelde duur; anders de default
                                     // (-1, achteraan). Geen meta → klassieke key.
-                                    let chosen_pipe = release_meta.get(&(stop_id, vpipe))
-                                        .and_then(|list| list.iter()
-                                            .find(|(max_ms, _)| *max_ms >= 0 && note_ms as i64 <= *max_ms as i64)
-                                            .or_else(|| list.last())
-                                            .map(|(_, key)| *key))
-                                        .unwrap_or(vpipe | RELEASE_PIPE_FLAG);
-                                    let is_default_release = chosen_pipe == (vpipe | RELEASE_PIPE_FLAG);
-                                    let release_key = (stop_id, chosen_pipe);
-                                    let rel_full = samples_clone.read().get(&release_key).cloned();
+                                    let pick = |vp: u32| -> u32 {
+                                        release_meta.get(&(stop_id, vp))
+                                            .and_then(|list| list.iter()
+                                                .find(|(max_ms, _)| *max_ms >= 0 && note_ms as i64 <= *max_ms as i64)
+                                                .or_else(|| list.last())
+                                                .map(|(_, key)| *key))
+                                            .unwrap_or(vp | RELEASE_PIPE_FLAG)
+                                    };
+                                    let mut chosen_pipe = pick(vpipe);
+                                    let mut release_key = (stop_id, chosen_pipe);
+                                    let mut rel_full = samples_clone.read().get(&release_key).cloned();
                                     // Preload óók bij een geladen full sample ophalen:
                                     // die draagt trim_start = segment-start (release-
                                     // uitsnede in hetzelfde bestand).
-                                    let rel_pre = preloads_clone.read().get(&release_key).cloned();
+                                    let mut rel_pre = preloads_clone.read().get(&release_key).cloned();
+                                    if rel_full.is_none() && rel_pre.is_none() && vpipe & TREM_FLAG != 0 {
+                                        // Sampleset zonder aparte trem-release: de
+                                        // droge release van dezelfde pijp geldt dan
+                                        // ook met tremulant aan (GO IsTremulant=-1).
+                                        chosen_pipe = pick(vpipe & !TREM_FLAG);
+                                        release_key = (stop_id, chosen_pipe);
+                                        rel_full = samples_clone.read().get(&release_key).cloned();
+                                        rel_pre = preloads_clone.read().get(&release_key).cloned();
+                                    }
                                     if rel_full.is_none() && rel_pre.is_none() {
-                                        voice.release_ms(release_fade_ms(voice.midi_note), sample_rate);
+                                        voice.release_ms(fade_ms, sample_rate);
                                         continue;
+                                    }
+                                    // Door de sampleset opgegeven crossfade-duur
+                                    // (ReleaseCrossfadeLength) wint van de
+                                    // automatische, toonhoogte-afhankelijke duur.
+                                    if let Some(ms) = release_xfade.get(&release_key) {
+                                        fade_ms = *ms as f32;
                                     }
                                     // Niveau-overname: de release start op het
                                     // huidige envelope-niveau van de sustain.
-                                    // Staccato-schaling alleen op de DEFAULT
-                                    // (lange) release — een echte korte opname
-                                    // (R0) is al voor die duur opgenomen.
+                                    // Staccato-schaling geldt voor ÉLKE gekozen
+                                    // release, ook een MaxKeyPressTime-variant
+                                    // (GrandOrgue CreateReleaseSampler kent geen
+                                    // uitzondering voor de default): de "time to
+                                    // full reverb" wordt berekend uit de lengte
+                                    // van de GEKOZEN release. Een R1 die bij
+                                    // 150 ms toetsdruk is opgenomen dekt een tik
+                                    // van 40 ms niet — zonder schaling bloeide
+                                    // die staart op vol niveau op.
                                     let rel_secs = rel_pre.as_ref()
                                         .map(|p| p.total_samples as f32 / (p.sample_rate.max(1)) as f32)
                                         .unwrap_or(2.0);
-                                    let (stacc_gain, stacc_decay) = if is_default_release {
-                                        scaled_release_params(note_ms, voice.midi_note, rel_secs)
-                                    } else {
-                                        (1.0, None)
-                                    };
+                                    let (stacc_gain, stacc_decay) =
+                                        scaled_release_params(note_ms, voice.midi_note, rel_secs);
                                     let level = (voice.envelope * stacc_gain).clamp(0.05, 1.0);
                                     // Fase-uitlijning (GrandOrgue-stijl, fase B):
                                     // start de release op de positie waarvan de
@@ -2568,11 +3201,15 @@ fn run_audio_thread(
                                     if let Some(decay_ms) = stacc_decay {
                                         // Korte noot: staart actief afbouwen — de galm
                                         // in de opname is nog niet volledig opgebouwd.
-                                        // Hier geen fade-in: de uitfade begint meteen
-                                        // en die twee doelen gaan niet samen.
-                                        rv.envelope = level;
-                                        rv.target_envelope = level;
-                                        rv.release_ms(decay_ms, sample_rate);
+                                        // Infade én afbouw combineren zoals
+                                        // GOSoundFader: eerst complementair opkomen
+                                        // met de uitfadende speelnoot (tot het
+                                        // snijpunt), daarna uitsterven. Instant op
+                                        // vol niveau starten gaf een niveaubult.
+                                        crossfade_in_with_decay(
+                                            &mut rv, level, fade_ms,
+                                            decay_ms, sample_rate,
+                                        );
                                     } else {
                                         // Échte crossfade: de release komt op terwijl
                                         // de speelnoot uitfadet, met DEZELFDE duur.
@@ -2581,13 +3218,26 @@ fn run_audio_thread(
                                         // samen op — een niveausprong van enkele dB
                                         // bij élk loslaten, hoorbaar als tik/bump
                                         // (gemeten op Friesach: +4 dB, |dx| ×4).
-                                        crossfade_in(&mut rv, level, release_fade_ms(voice.midi_note), sample_rate);
+                                        crossfade_in(&mut rv, level, fade_ms, sample_rate);
                                     }
                                     release_spawn_scratch.push(rv);
                                 }
-                                voice.release_ms(release_fade_ms(voice.midi_note), sample_rate);
+                                voice.release_ms(fade_ms, sample_rate);
                             }
                         }
+                        // Werkbudget: één eenheid voor het bericht zelf (élke
+                        // NoteOff doet de O(stemmen)-scan hierboven onder de
+                        // write-lock, ook als er niets los te laten valt) plus
+                        // één per daadwerkelijk gespawnde release-stem — dat is
+                        // het dure deel (sample-lookups, fase-uitlijning,
+                        // staartbudget). Zonder deze telling glipte een
+                        // slotakkoord loslaten (NoteOff per register per toets,
+                        // koppeldoelen incluis) ongelimiteerd door één callback
+                        // heen: precies de piek die als haperen te horen was.
+                        // Het bericht is hier al volledig afgehandeld — we
+                        // splitsen dus niets; de rest van de wachtrij schuift
+                        // gewoon FIFO door naar de volgende callback.
+                        spawns_done += 1 + release_spawn_scratch.len();
                         for rv in release_spawn_scratch.drain(..) {
                             budget_release_voices(&mut voices_lock, sample_rate, live_cap);
                             push_voice_capped(&mut voices_lock, rv, sample_rate, live_cap);
@@ -2606,28 +3256,41 @@ fn run_audio_thread(
                             }
                             // Toetsduur-release kiezen — zelfde model als NoteOff.
                             let note_ms = voice.age_samples as f32 * 1000.0 / (sample_rate.max(1)) as f32;
-                            let chosen_pipe = release_meta.get(&(stop_id, voice.pipe_num))
-                                .and_then(|list| list.iter()
-                                    .find(|(max_ms, _)| *max_ms >= 0 && note_ms as i64 <= *max_ms as i64)
-                                    .or_else(|| list.last())
-                                    .map(|(_, key)| *key))
-                                .unwrap_or(voice.pipe_num | RELEASE_PIPE_FLAG);
-                            let is_default_release = chosen_pipe == (voice.pipe_num | RELEASE_PIPE_FLAG);
-                            let release_key = (stop_id, chosen_pipe);
-                            if !spawned.contains(&voice.pipe_num) {
-                                let rel_full = samples_clone.read().get(&release_key).cloned();
-                                let rel_pre = preloads_clone.read().get(&release_key).cloned();
+                            let vpipe = voice.pipe_num;
+                            let pick = |vp: u32| -> u32 {
+                                release_meta.get(&(stop_id, vp))
+                                    .and_then(|list| list.iter()
+                                        .find(|(max_ms, _)| *max_ms >= 0 && note_ms as i64 <= *max_ms as i64)
+                                        .or_else(|| list.last())
+                                        .map(|(_, key)| *key))
+                                    .unwrap_or(vp | RELEASE_PIPE_FLAG)
+                            };
+                            let mut release_key = (stop_id, pick(vpipe));
+                            let mut fade_ms = release_fade_ms(voice.midi_note);
+                            // Eén release per pijp+laag; de TREM-vlag telt hier niet
+                            // mee zodat een droge en een trem-voice op dezelfde pijp
+                            // samen één staart geven.
+                            if !spawned.contains(&(vpipe & !TREM_FLAG)) {
+                                let mut rel_full = samples_clone.read().get(&release_key).cloned();
+                                let mut rel_pre = preloads_clone.read().get(&release_key).cloned();
+                                if rel_full.is_none() && rel_pre.is_none() && vpipe & TREM_FLAG != 0 {
+                                    // Geen trem-release → droge release (zie NoteOff).
+                                    release_key = (stop_id, pick(vpipe & !TREM_FLAG));
+                                    rel_full = samples_clone.read().get(&release_key).cloned();
+                                    rel_pre = preloads_clone.read().get(&release_key).cloned();
+                                }
+                                if let Some(ms) = release_xfade.get(&release_key) {
+                                    fade_ms = *ms as f32;
+                                }
                                 if rel_full.is_some() || rel_pre.is_some() {
-                                    // Staccato-schaal alleen op de default (lange)
-                                    // release + fase-uitlijning — zie NoteOff.
+                                    // Staccato-schaal op ELKE gekozen release
+                                    // (ook MaxKeyPressTime-varianten) + fase-
+                                    // uitlijning — zie NoteOff.
                                     let rel_secs = rel_pre.as_ref()
                                         .map(|p| p.total_samples as f32 / (p.sample_rate.max(1)) as f32)
                                         .unwrap_or(2.0);
-                                    let (stacc_gain, stacc_decay) = if is_default_release {
-                                        scaled_release_params(note_ms, voice.midi_note, rel_secs)
-                                    } else {
-                                        (1.0, None)
-                                    };
+                                    let (stacc_gain, stacc_decay) =
+                                        scaled_release_params(note_ms, voice.midi_note, rel_secs);
                                     let level = (voice.envelope * stacc_gain).clamp(0.05, 1.0);
                                     // Fase-uitlijning — zie NoteOff.
                                     let align_pos: u64 = rel_pre.as_ref()
@@ -2668,20 +3331,30 @@ fn run_audio_thread(
                                     // Perspectief-gain overerven (zie NoteOff).
                                     rv.persp_slot = voice.persp_slot;
                                     if let Some(decay_ms) = stacc_decay {
-                                        rv.envelope = level;
-                                        rv.target_envelope = level;
-                                        rv.release_ms(decay_ms, sample_rate);
+                                        // Infade + afbouw gecombineerd — zie NoteOff.
+                                        crossfade_in_with_decay(
+                                            &mut rv, level, fade_ms,
+                                            decay_ms, sample_rate,
+                                        );
                                     } else {
                                         // Zie NoteOff: complementaire crossfade i.p.v.
                                         // instant vol niveau (anders een niveausprong).
-                                        crossfade_in(&mut rv, level, release_fade_ms(voice.midi_note), sample_rate);
+                                        crossfade_in(&mut rv, level, fade_ms, sample_rate);
                                     }
                                     spawns.push(rv);
-                                    spawned.insert(voice.pipe_num);
+                                    spawned.insert(vpipe & !TREM_FLAG);
                                 }
                             }
-                            voice.release_ms(release_fade_ms(voice.midi_note), sample_rate);
+                            voice.release_ms(fade_ms, sample_rate);
                         }
+                        // ATOMAIR houden: een half uitgevoerde ReleaseStop zou bij
+                        // pedaaljitter rond een trapgrens (hysterese H=2) door de
+                        // direct volgende NoteOn van hetzelfde register worden
+                        // ingehaald — de nieuwe stem raakt dan in de lopende
+                        // release verstrikt en de noot valt dood. Wel telt het
+                        // gedane werk mee, zodat de rest van de queue naar de
+                        // volgende callback doorschuift.
+                        spawns_done += spawns.len();
                         for rv in spawns {
                             budget_release_voices(&mut voices_lock, sample_rate, live_cap);
                             push_voice_capped(&mut voices_lock, rv, sample_rate, live_cap);
@@ -2759,6 +3432,10 @@ fn run_audio_thread(
                         // het vorige orgel mogen hun (hergebruikte) keys niet vullen.
                         load_generation += 1;
                         inflight_loads.clear();
+                        // Vooraf reserveren: insert tijdens het spelen (NoteOn →
+                        // inflight_loads, achtergrond-load → samples) mag in de
+                        // callback geen rehash-allocatie veroorzaken.
+                        inflight_loads.reserve(new_samples.len().min(8192));
                         missing_sample_warned.clear();
                         // Vers orgel = verse limiter-staat (geen ingehouden gain
                         // van een luide passage op het vorige orgel).
@@ -2773,6 +3450,9 @@ fn run_audio_thread(
                             let mut samples_lock = samples_clone.write();
                             let old = std::mem::take(&mut *samples_lock);
                             if let Err(e) = gc_tx_render.try_send(Box::new(old)) { gc_backlog.push(e.into_inner()); }
+                            // Ruimte voor de volledige WAV's die straks per
+                            // achtergrond-load IN de callback worden ingevoegd.
+                            samples_lock.reserve(buffers.len().min(8192));
                             samples_bytes = 0;
                             sample_fifo.clear();
                         }
@@ -2780,6 +3460,7 @@ fn run_audio_thread(
                             let mut preloads_lock = preloads_clone.write();
                             let old = std::mem::take(&mut *preloads_lock);
                             if let Err(e) = gc_tx_render.try_send(Box::new(old)) { gc_backlog.push(e.into_inner()); }
+                            preloads_lock.reserve(buffers.len());
                             for (k, v) in buffers.iter() {
                                 preloads_lock.insert(*k, v.clone());
                             }
@@ -2792,22 +3473,25 @@ fn run_audio_thread(
                         // Nieuwe laad-generatie (zie LoadSamples).
                         load_generation += 1;
                         inflight_loads.clear();
+                        // Zie LoadSamples: reserveren zodat de callback niet rehasht.
+                        inflight_loads.reserve(buffers.len().min(8192));
                         missing_sample_warned.clear();
                         // Vers orgel = verse limiter-staat (geen ingehouden gain
                         // van een luide passage op het vorige orgel).
                         master_limiter.reset();
                         info!("Registered {} preload buffers for instant playback", buffers.len());
                     }
-                    AudioCommand::RegisterTremulantBuffers(buffers) => {
-                        let mut trem_lock = trem_preloads_clone.write();
-                        trem_lock.clear();
-                        let mut trem_stops = stops_with_trem_clone.write();
-                        trem_stops.clear();
-                        for (k, v) in buffers.iter() {
-                            trem_lock.insert(*k, v.clone());
-                            trem_stops.insert(k.0); // stop_id
+                    AudioCommand::RegisterTremStops(set) => {
+                        if !set.is_empty() {
+                            info!("Registers met echte tremulant-opnamen: {}", set.len());
                         }
-                        info!("Registered {} tremulant preload buffers ({} stops with trem samples)", buffers.len(), trem_stops.len());
+                        *stops_with_trem_clone.write() = set;
+                    }
+                    AudioCommand::RegisterReleaseCrossfade(map) => {
+                        if !map.is_empty() {
+                            info!("ReleaseCrossfadeLength uit de sampleset: {} release-keys", map.len());
+                        }
+                        release_xfade = map;
                     }
                     AudioCommand::RegisterFullSample { key, sample } => {
                         let size = sample.bytes();
@@ -2826,25 +3510,58 @@ fn run_audio_thread(
                         {
                             let mut voices_lock = voices_clone.write();
                             for voice in voices_lock.iter_mut() {
-                                if stop_ids.contains(&voice.stop_id) && !voice.releasing {
-                                    let key = (voice.stop_id, voice.pipe_num);
-                                    // Get alternate buffer: if turning ON → trem buffer, OFF → dry buffer
-                                    let alt_buffer = if active {
-                                        trem_preloads_clone.read().get(&key).cloned()
+                                if stop_ids.contains(&voice.stop_id) && !voice.releasing && !voice.one_shot {
+                                    // Andere stand van DEZELFDE pijp: aan → TREM-vlag
+                                    // erbij, uit → eraf. Staat de voice al in de
+                                    // gevraagde stand, dan is er niets te doen.
+                                    let alt_pipe = if active {
+                                        voice.pipe_num | TREM_FLAG
                                     } else {
-                                        preloads_clone.read().get(&key).cloned()
+                                        voice.pipe_num & !TREM_FLAG
                                     };
+                                    if alt_pipe == voice.pipe_num {
+                                        continue;
+                                    }
+                                    let key = (voice.stop_id, alt_pipe);
+                                    let alt_buffer = preloads_clone.read().get(&key).cloned();
                                     if let Some(alt_buf) = alt_buffer {
+                                        // Niveau van de klinkende stem BEWAREN vóór
+                                        // de uitfade: crossfade_release() zet
+                                        // target_envelope op 0, en dat veld ging
+                                        // daarna als startniveau naar de nieuwe stem
+                                        // — die fadete dus naar stilte in plaats van
+                                        // naar het niveau van de oude (tremulant
+                                        // omschakelen tijdens het klinken maakte de
+                                        // noot stil; bestond al vóór 0.7.39, maar was
+                                        // pas meetbaar met echte tremulant-opnamen).
+                                        let level = voice.target_envelope.max(voice.envelope);
+                                        // Startpositie in het domein van de DOEL-
+                                        // buffer: de positie van de klinkende stem
+                                        // staat in de coördinaten van zijn eigen
+                                        // bron (volledige sample op uitgangsrate,
+                                        // óf preload op bronrate mét trim). Ruw
+                                        // doorgeven liet de nieuwe stem op een
+                                        // willekeurige plek of voorbij het einde
+                                        // landen — zie crossfade_position_in.
+                                        let start_pos =
+                                            voice.crossfade_position_in(&alt_buf, sample_rate);
                                         // Fade out current voice slowly
                                         voice.crossfade_release();
-                                        // Create new voice from alternate buffer at same position
+                                        // Create new voice from alternate buffer at same position.
+                                        // De nieuwe voice draagt de ALT-sleutel: zijn
+                                        // achtergrond-load landt daardoor onder de
+                                        // juiste (trem- of droge) key.
                                         let mut nv = PlayingVoice::new_crossfade(
-                                            alt_buf, voice.stop_id, voice.pipe_num, voice.midi_note,
-                                            voice.target_envelope, voice.position, sample_rate
+                                            alt_buf, voice.stop_id, alt_pipe, voice.midi_note,
+                                            level, start_pos, sample_rate
                                         );
                                         // Perspectief-gain overerven: de trem-laag van
                                         // een rear-perspectief blijft op rear-niveau.
                                         nv.persp_slot = voice.persp_slot;
+                                        // Refcount meenemen: houdt een koppel de
+                                        // pijp ook vast, dan mag de eerste NoteOff
+                                        // hem niet al loslaten.
+                                        nv.note_on_count = voice.note_on_count;
                                         // Request background load for new voice (met dedup)
                                         if let Some(path) = nv.needs_background_load() {
                                             let odf_lp = odf_loops_clone.read().get(&path).copied();
@@ -3035,11 +3752,8 @@ fn run_audio_thread(
                             let old = std::mem::take(&mut *preloads_clone.write());
                             if let Err(e) = gc_tx_render.try_send(Box::new(old)) { gc_backlog.push(e.into_inner()); }
                         }
-                        {
-                            let old = std::mem::take(&mut *trem_preloads_clone.write());
-                            if let Err(e) = gc_tx_render.try_send(Box::new(old)) { gc_backlog.push(e.into_inner()); }
-                        }
                         trem_active_clone.write().clear();
+                        stops_with_trem_clone.write().clear();
                         percussive_stops_clone.write().clear();
                         *odf_voicing_clone.write() = Arc::new(HashMap::new());
                         *odf_retune_clone.write() = Arc::new(HashMap::new());
@@ -3602,21 +4316,29 @@ fn run_audio_thread(
             }
 
             // Belastingsmeter: rendertijd t.o.v. de buffertijd van deze callback.
-            let frames_now = data.len() / channels.max(1);
+            // (frames_now is bovenaan de callback bepaald — zie werkbudget.)
             if frames_now > 0 && sample_rate > 0 {
                 let budget = frames_now as f64 / sample_rate as f64;
                 let load = render_t0.elapsed().as_secs_f64() / budget;
                 let pm = (load * 1000.0).clamp(0.0, 9999.0) as u32;
                 let prev = RENDER_LOAD_PM.load(Ordering::Relaxed);
-                // EMA (~1 s bij 5 ms-buffers) + piek met langzaam verval.
+                // EMA met alpha 1/16: het venster is 16 CALLBACKS, niet een vaste
+                // tijd — bij 32 frames ≈ 11 ms, bij 512 frames ≈ 170 ms. Een
+                // getoond percentage vlak na een zware callback is dus een
+                // momentopname, geen volgehouden gemiddelde. Piek met traag verval.
                 RENDER_LOAD_PM.store((prev * 15 + pm) / 16, Ordering::Relaxed);
                 let peak_prev = RENDER_PEAK_PM.load(Ordering::Relaxed);
                 RENDER_PEAK_PM.store(pm.max(peak_prev.saturating_sub(peak_prev / 200 + 1)), Ordering::Relaxed);
                 if pm > 800 {
                     overload_callbacks += 1;
+                    RENDER_OVERLOAD_COUNT.store(overload_callbacks, Ordering::Relaxed);
                     if last_overload_warn.map_or(true, |t: std::time::Instant| t.elapsed().as_secs() >= 5) {
-                        warn!("Audio-render zwaar belast: {}% van de buffertijd ({} stemmen, kap {}; {} zware callbacks) — verlaag de polyfonie of vergroot de buffer",
-                            pm / 10, voice_count_clone.load(Ordering::Relaxed), live_cap, overload_callbacks);
+                        // Concreet advies: de buffergrootte is de knop die het
+                        // vaakst helpt (128 frames geeft 4x meer tijd per callback
+                        // dan 32 en is voor een huisorgel ruim snel genoeg).
+                        warn!("Audio-render zwaar belast: {}% van de buffertijd bij {} frames ({:.2} ms), {} stemmen (kap {}); {} zware callbacks sinds start — zet de buffergrootte op ten minste 128 frames, verlaag de polyfonie of zet de galm uit",
+                            pm / 10, frames_now, frames_now as f64 * 1000.0 / sample_rate as f64,
+                            voice_count_clone.load(Ordering::Relaxed), live_cap, overload_callbacks);
                         last_overload_warn = Some(std::time::Instant::now());
                     }
                 }
@@ -3752,6 +4474,9 @@ fn run_audio_thread(
     // orgel-herlaad). We markeren de fout daarom als "verdacht" en herbouwen
     // pas als de callbacks ook echt stoppen. (start-tick, callback-baseline)
     let mut error_suspect: Option<(u64, u64)> = None;
+    // Laatst gemelde stand van de preload-rand-teller (release-staarten die op
+    // de preload afliepen omdat de volledige WAV nog niet geladen was).
+    let mut preload_edge_prev = RELEASE_PRELOAD_EDGE_HITS.load(Ordering::Relaxed);
     while running.load(Ordering::Relaxed) {
         thread::sleep(std::time::Duration::from_millis(100));
         ticks += 1;
@@ -3883,6 +4608,18 @@ fn run_audio_thread(
                     warn!("Audio-watchdog: {} herbouwpogingen mislukt — volledige audio-herstart aangevraagd", rebuild_failures);
                     restart_needed.store(true, Ordering::Relaxed);
                 }
+            }
+        }
+
+        // Laadlatentie-diagnose: hooguit 1x per 5 s, en alleen als er iets te
+        // melden valt. De telling zelf gebeurt in de callback (één atomaire
+        // optelling per afgekapte staart), het loggen hier.
+        if ticks % 50 == 0 {
+            let hits = RELEASE_PRELOAD_EDGE_HITS.load(Ordering::Relaxed);
+            if hits > preload_edge_prev {
+                info!("Release-staarten afgekapt op de preload-rand (volledige sample nog niet geladen): +{} (totaal {})",
+                      hits - preload_edge_prev, hits);
+                preload_edge_prev = hits;
             }
         }
 

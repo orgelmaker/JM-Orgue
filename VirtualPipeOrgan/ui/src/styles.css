@@ -227,10 +227,16 @@
   .library-card {
     min-height: var(--touch-target-lg);
   }
-  .library-card-delete {
+  .library-card-delete,
+  .library-card-btn {
     width: 32px !important;
     height: 32px !important;
     opacity: 1 !important;
+  }
+  .library-card-pick {
+    opacity: 1 !important;
+    font-size: 0.8rem !important;
+    padding: 0.4rem !important;
   }
   .preset-delete {
     width: 28px !important;
@@ -724,6 +730,35 @@ input[type="range"]::-webkit-slider-thumb:hover {
   padding: 0.3rem 0.6rem;
 }
 
+/* Titel + taalknoppen links in de kop van de bibliotheek */
+.organ-browser-titlegroup {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+/* Kleine taalknoppen (NL EN FR DE) op het startscherm */
+.lang-switch {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.lang-switch .btn {
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  padding: 0.25rem 0.5rem;
+  min-width: 2.3rem;
+  justify-content: center;
+}
+
+.lang-switch .btn.active {
+  border-color: var(--gold-border);
+  background: var(--bg-darkest);
+  color: var(--primary);
+  box-shadow: 0 0 0 1px var(--gold-border);
+}
+
 /* Library organ grid — maximaal schermoppervlak */
 .organ-library-grid {
   flex: 1;
@@ -751,6 +786,57 @@ input[type="range"]::-webkit-slider-thumb:hover {
   border-color: var(--gold-border);
 }
 
+/* Knoppenrij rechtsboven op een bibliotheekkaart: automatisch zoeken,
+   foto kiezen, verwijderen. Alleen zichtbaar bij hover (mobiel: altijd). */
+.library-card-actions {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 2;
+  display: flex;
+  gap: 4px;
+}
+
+.library-card-btn {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 50%;
+  border: none;
+  background: var(--bg-overlay);
+  color: var(--menu-text);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.library-card:hover .library-card-btn {
+  opacity: 1;
+}
+
+/* Toetsenbord: zonder focus-varianten zijn dit onzichtbare tabstops. Focus
+   ergens binnen de kaart (ook op de kaart zelf) toont de hele knoppenrij,
+   net als hover. */
+.library-card:focus-within .library-card-btn,
+.library-card-btn:focus-visible {
+  opacity: 1;
+}
+
+.library-card-btn:hover {
+  background: var(--primary);
+  color: var(--text-on-primary);
+}
+
+/* De verwijderknop staat nu in de rij; positionering komt van de rij zelf. */
+.library-card-actions .library-card-delete {
+  position: static;
+  top: auto;
+  right: auto;
+}
+
 .library-card-delete {
   position: absolute;
   top: 4px;
@@ -773,6 +859,11 @@ input[type="range"]::-webkit-slider-thumb:hover {
 }
 
 .library-card:hover .library-card-delete {
+  opacity: 1;
+}
+
+.library-card:focus-within .library-card-delete,
+.library-card-delete:focus-visible {
   opacity: 1;
 }
 
@@ -813,6 +904,58 @@ input[type="range"]::-webkit-slider-thumb:hover {
 .library-card-meta {
   font-size: 0.7rem;
   color: var(--text-muted);
+}
+
+/* "bouwer · plaats" onder de naam van het orgel */
+.library-card-sub {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  margin-bottom: 0.1rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Kaart zonder foto: knop over de plaatshouder om er zelf een te kiezen */
+.library-card-image {
+  position: relative;
+}
+
+.library-card-pick {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  border: none;
+  background: var(--bg-overlay);
+  color: var(--menu-text);
+  font-size: 0.68rem;
+  padding: 0.2rem 0.3rem;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.library-card:hover .library-card-pick {
+  opacity: 1;
+}
+
+.library-card:focus-within .library-card-pick,
+.library-card-pick:focus-visible {
+  opacity: 1;
+}
+
+/* En een zichtbare rand om de knop die de focus heeft. */
+.library-card-btn:focus-visible,
+.library-card-delete:focus-visible,
+.library-card-pick:focus-visible {
+  outline: 2px solid var(--gold-border);
+  outline-offset: 1px;
+}
+
+.library-card-pick:hover {
+  background: var(--primary);
+  color: var(--text-on-primary);
 }
 
 .library-empty {
@@ -1556,6 +1699,62 @@ input[type="range"]::-webkit-slider-thumb:hover {
   transition: width var(--transition-normal);
 }
 
+/* Opstart-splash: vult de eerste seconden van het hoofdvenster. Bewust alleen
+   kleuren die statisch in :root staan — --accent-soft* wordt pas gezet zodra
+   Algemene Instellingen (LayoutSettings) een keer geopend is. z-index 2000 ligt
+   boven de overlays (kb-learn 900, feedback 60) en onder het contextmenu. */
+.boot-splash {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  background: var(--bg-dark);
+  color: var(--text);
+}
+
+.nameplate-lg .nameplate-inner {
+  padding: 8px 36px;
+}
+
+.nameplate-lg .nameplate-title {
+  font-size: 1.8rem;
+}
+
+.boot-splash-mark {
+  color: var(--primary);
+}
+
+.boot-splash-sub {
+  font-family: var(--stop-font-family);
+  font-size: 1rem;
+  color: var(--text-secondary);
+}
+
+.boot-splash-version {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.boot-splash-bar {
+  width: 220px;
+}
+
+/* Onbepaalde voortgang: bij de start valt er nog niets te tellen. */
+.boot-splash-bar-run {
+  width: 40%;
+  transition: none;
+  animation: splashSlide 1.2s ease-in-out infinite;
+}
+
+@keyframes splashSlide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(250%); }
+}
+
 .empty-state {
   display: flex;
   flex-direction: column;
@@ -2047,6 +2246,21 @@ input[type="range"]::-webkit-slider-thumb:hover {
   flex: 1;
   height: 4px;
 }
+/* Pedaalkoppelingen (zwel/crescendo): waarschuwing bij een ingeleerde maar
+   niet-werkende trede, en de korte melding welke koppeling is overgenomen. */
+.pedal-warn {
+  margin: 0.35rem 0 0;
+  font-size: 0.68rem;
+  line-height: 1.35;
+  color: var(--warning, #d9a441);
+}
+.pedal-notice {
+  margin: 0.3rem 0 0;
+  font-size: 0.68rem;
+  line-height: 1.35;
+  color: var(--text-muted);
+}
+
 /* Crescendo-editor matrix (stappen × registers). */
 .cresc-editor-hint {
   font-size: 0.68rem;

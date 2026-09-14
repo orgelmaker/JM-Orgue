@@ -15,11 +15,27 @@ ontwikkelsessies van 0.7.36–0.7.38 en documenteren hoe de functies zijn geveri
 | `test_crescendo_zwel.py` | Zweltrede (sweep, jitter, sprong, bereik/inversie) en generaal crescendo (hysterese, additiviteit, persistentie). |
 | `test_remote.py [poort]` | Afstandsbediening: token, pagina, acties, uit/aan, nieuw token. |
 | `test_midi_archive.py` | Automatisch MIDI-archief: start/stilte/min-noten/flush/lijst/speler. |
-| `test_jmrec_import.py` | Map-import met `.organ` (JM-Rec) vs. mapscan. |
+| `test_jmrec_import.py` | Map-import met `.organ` (JM-Rec) vs. mapscan, bibliotheeknaam "Kerk - Bouwer - Plaats" en de gevonden orgelafbeelding. |
+| `maak_go_testtrem.py [map]` | Maakt `TestTrem.organ` + `TestTremWc.organ` (GrandOrgue-golfvormtremulant: trem-attack en trem-release met een eigen toonhoogte) in `%TEMP%\jm-orgue-testodf`. |
+| `test_tremulant_samples.py` | Tremulant-OPNAMEN: registervlaggen, `POST /tremulant`, attack en release per stand (FFT-piek), crossfade tijdens het klinken, regressie zonder trem-samples. |
 | `check_i18n_keys.py` / `i18n_merge_check.py` | Sleutelsets nl/en/fr/de gelijk; dekking van `$t()`-sleutels in de code. |
 | `capture_window.ps1` / `click.ps1` | Screenshot (PrintWindow) en klik/scroll in het app-venster op venster-coördinaten. |
 
-Let op: enkele drempels in `test_crescendo_zwel.py` en de release-wachttijd (2,5 s) in
-`test_ranks_perspectives.py` zijn streng; Friesach-releases duren ~5 s en het hysterese-
-model kan 1 CC-eenheid afwijken bij een trapgrens. Paden naar samplesets staan bovenin
-de scripts.
+`test_tremulant_samples.py` onderscheidt de standen aan de toonhoogte: droge attack `f`,
+tremulant-attack `2f`, droge release `1,26f` (een grote terts: een octaaf zou zijn tweede
+boventoon met de grondtoon van de aanslag delen), tremulant-release `1,5f`. Een FFT-piek die op een
+boventoon vastloopt geeft daar een FAIL met de gemeten Hz erbij — lees de waarden voordat je
+concludeert dat de tremulant niet werkt.
+
+Let op bij het beoordelen van metingen (lessen uit 0.7.39):
+- Wachttijden op release-staarten zijn nu poll-lussen: natte sets (Friesach, Saint-Jean-de-Luz)
+  klinken 5 tot 8 seconden na, en sinds 0.7.39 worden verse staarten niet meer weggekozen.
+- Niveaumetingen op ÉÉN opname zeggen weinig: de samples zelf zwellen met een periode van
+  ongeveer een seconde ±1,7 dB aan, en twee registers op dezelfde toonhoogte zweven tegen
+  elkaar in. Meet een trapwissel daarom met registers van verschillende toonhoogte en
+  vergelijk altijd met een rustmeting uit dezelfde opname.
+- Tellers als `files_written` lopen per app-sessie door; reken met het verschil ten opzichte
+  van de stand bij aanvang, niet met absolute waarden.
+- Een FFT-piek is de sterkste partiaal, niet de grondtoon. Kies testtoonhoogtes die geen
+  octaaf of boventoon van elkaar zijn.
+Paden naar samplesets staan bovenin de scripts.

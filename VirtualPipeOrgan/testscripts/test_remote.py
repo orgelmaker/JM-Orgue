@@ -1,4 +1,4 @@
-# Integratietest afstandsbediening in het netwerk (0.7.38).
+# Integratietest afstandsbediening in het netwerk (0.7.38; sectie 10 indeling 0.7.39).
 # Vereist: vpo-app gestart met --test-api (poort 8765), bij voorkeur met een
 # geladen orgel én het hoofdvenster op het Orgel-tabblad (voor de /action-tests).
 # Gebruik:  python test_remote.py            (poort 8766)
@@ -108,6 +108,11 @@ if not organ:
 else:
     print("4. register")
     sid = organ["divisions"][0]["stops"][0]["id"]
+    # Uitgangsstand afdwingen: een eerder testscript kan registers hebben laten
+    # staan, en dan zet de eerste toggle het register juist UIT.
+    _, _d = get_json(TEST + "/stops/drawn")
+    if sid in (_d.get("drawn_stops") or []):
+        get_json(TEST + f"/stops/{urllib.request.quote(sid, safe='')}/toggle", method="POST")
     s, r = get_json(R + f"/stops/{urllib.request.quote(sid, safe='')}/toggle", method="POST")
     check("toggle → 200 active=true", s == 200 and r.get("active") is True and r.get("stop_id") == sid, f"{s} {r}")
     s, d = get_json(TEST + "/stops/drawn"); check("8765 /stops/drawn bevat id", sid in d.get("drawn_stops", []))
@@ -168,6 +173,94 @@ else:
             s, st = get_json(R + "/state"); check("tremulant[0] gewisseld", st["tremulant"][0] != t0, f"{t0} → {st['tremulant'][0]}")
             get_json(R + "/action/24", method="POST")
 
+# ---------- 10. indeling: de afstandsbediening volgt het registreerscherm ----------
+# (0.7.39) Het hoofdvenster publiceert de indeling via het Tauri-commando
+# set_remote_layout; de test-API kan hem lezen/zetten via GET/POST
+# /remote/layout — die routes bestaan NIET op de remote-poort.
+print("10. indeling (onderdelen, koppelfilter, volgorde)")
+s, before = get_json(TEST + "/remote/layout")
+check("GET 8765 /remote/layout -> 200 met rev", s == 200 and isinstance(before, dict) and "rev" in before, str(s))
+rev0 = (before or {}).get("rev", 0)
+lay0 = (before or {}).get("layout")
+s, _, _ = req(R + "/remote/layout"); check("GET /remote/layout via remote -> 404", s == 404, str(s))
+s, _, _ = req(R + "/remote/layout", method="POST", body={"divisions": []})
+check("POST /remote/layout via remote -> 404 (tablet mag de indeling niet zetten)", s == 404, str(s))
+
+if not organ:
+    print("  (geen orgel geladen - rest van 10 overgeslagen)")
+else:
+    s, rorg = get_json(R + "/organ")
+    check("8766 /organ -> 200 met layout-blok", s == 200 and isinstance(rorg, dict) and isinstance(rorg.get("layout"), dict), str(s))
+    alle = set(c["id"] for c in (organ.get("couplers") or []))
+    remote_cps = set(c["id"] for c in (rorg.get("couplers") or []))
+    check("nooit meer koppels dan het orgel heeft", remote_cps <= alle, f"{len(remote_cps)} van {len(alle)}")
+    if lay0:
+        zicht = set(lay0.get("visible_couplers") or [])
+        check("remote toont exact de zichtbare koppels van het orgelscherm", remote_cps == (zicht & alle),
+              f"{sorted(remote_cps)} vs {sorted(zicht & alle)}")
+    else:
+        dflt = set(c["id"] for c in (organ.get("couplers") or [])
+                   if c["id"].startswith("real_coupler_") or c.get("coupler_type") == "unison")
+        check("zonder indeling: dezelfde default als het orgelscherm", remote_cps == dflt,
+              f"{sorted(remote_cps)} vs {sorted(dflt)}")
+    namen = [d["name"] for d in organ["divisions"]]
+    ok_idx = all(isinstance(d.get("div_index"), int) and 0 <= d["div_index"] < len(namen)
+                 and namen[d["div_index"]] == d["name"] for d in rorg["divisions"])
+    check("div_index wijst naar dezelfde divisie in 8765 /organ (actiecode 24+i)", ok_idx,
+          str([(d["name"], d.get("div_index")) for d in rorg["divisions"]]))
+
+    omgekeerd = list(reversed(namen))
+    een = sorted(alle)[:1]
+    s, r = get_json(TEST + "/remote/layout", method="POST", body={
+        "divisions": omgekeerd, "visible_couplers": een, "coupler_placement": "division",
+        "knob_shape": "round", "show_setzer": False})
+    check("POST 8765 /remote/layout -> 200", s == 200, f"{s} {r}")
+    rev1 = (r or {}).get("rev", 0)
+    check("layout_rev verhoogd", rev1 > rev0, f"{rev0} -> {rev1}")
+    s, st = get_json(R + "/state")
+    check("/state.layout_rev volgt (pagina ververst /organ)", st.get("layout_rev") == rev1, str(st.get("layout_rev")))
+    s, rorg2 = get_json(R + "/organ")
+    check("divisievolgorde omgekeerd", [d["name"] for d in rorg2["divisions"]] == omgekeerd,
+          str([d["name"] for d in rorg2["divisions"]]))
+    check("div_index blijft de orgel-index", rorg2["divisions"][0].get("div_index") == len(namen) - 1,
+          str(rorg2["divisions"][0].get("div_index")))
+    if een:
+        check("alleen de gekozen koppel", [c["id"] for c in (rorg2.get("couplers") or [])] == een,
+              str([c["id"] for c in (rorg2.get("couplers") or [])]))
+    check("layout: setzer uit, rond, koppels in de divisie",
+          rorg2["layout"]["show_setzer"] is False and rorg2["layout"]["knob_shape"] == "round"
+          and rorg2["layout"]["coupler_placement"] == "division", str(rorg2["layout"]))
+
+    s, r = get_json(TEST + "/remote/layout", method="POST", body={"divisions": [namen[0]]})
+    s, rorg3 = get_json(R + "/organ")
+    check("selectie: alleen de gekozen divisie", [d["name"] for d in rorg3["divisions"]] == [namen[0]],
+          str([d["name"] for d in rorg3["divisions"]]))
+    check("weggelaten onderdelen staan weer aan (serde-defaults)",
+          rorg3["layout"]["show_setzer"] is True and rorg3["layout"]["show_volume"] is True, str(rorg3["layout"]))
+    s, rorg4 = get_json(TEST + "/organ")
+    check("8765 /organ blijft het VOLLEDIGE orgel (indeling geldt alleen remote)",
+          len(rorg4["divisions"]) == len(namen) and len(rorg4.get("couplers") or []) == len(alle),
+          f"{len(rorg4['divisions'])} divisies, {len(rorg4.get('couplers') or [])} koppels")
+
+    # Persistentie: opslaan -> remote_layout staat bij de orgel-instellingen.
+    get_json(TEST + "/settings/save", method="POST")
+    s, saved = get_json(TEST + "/settings/organ")
+    rl = (saved or {}).get("remote_layout")
+    check("remote_layout bewaard bij de orgel-instellingen",
+          isinstance(rl, dict) and rl.get("divisions") == [namen[0]], str(rl)[:140])
+
+    # Indeling van het hoofdvenster terugzetten (de Console publiceert pas
+    # opnieuw na een wijziging of orgelwissel) en opnieuw bewaren.
+    if lay0:
+        get_json(TEST + "/remote/layout", method="POST", body=lay0)
+        get_json(TEST + "/settings/save", method="POST")
+        s, rorgx = get_json(R + "/organ")
+        check("indeling teruggezet", [d["name"] for d in rorgx["divisions"]] == [d["name"] for d in rorg["divisions"]],
+              str([d["name"] for d in rorgx["divisions"]]))
+    else:
+        print("  LET OP: er was nog geen indeling gepubliceerd; wissel van orgel of wijzig")
+        print("  een instelling in het hoofdvenster om de eigen indeling terug te krijgen.")
+
 # ---------- 9. uit/aan/poort/token ----------
 print("9. uit/aan/nieuw token")
 s, dto = get_json(TEST + "/remote/enable", method="POST", body={"enabled": False})
@@ -189,5 +282,5 @@ s, st2 = get_json(TEST + "/remote/status"); check("na fout: nog steeds actief op
 
 print()
 print("KLAAR — fouten:", fails)
-print("Handmatig: telefoon in hetzelfde wifi → QR scannen in Algemene Instellingen; app herstarten → 10 (persistentie) controleren met GET", f"{REMOTE}/r/{NEW}/state")
+print("Handmatig: telefoon in hetzelfde wifi → QR scannen in Algemene Instellingen; app herstarten → token-persistentie controleren met GET", f"{REMOTE}/r/{NEW}/state")
 sys.exit(1 if fails else 0)

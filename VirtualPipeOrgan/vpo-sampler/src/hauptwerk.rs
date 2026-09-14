@@ -22,7 +22,8 @@
 //! - release-samples van de hoofdlaag (`Pipe_SoundEngine01_ReleaseSample`,
 //!   incl. toetsduur-varianten via `ReleaseSelCriteria_LatestKeyReleaseTimeMs`);
 //! - de tremulant-laag (PipeLayerNumber 2, "tremmed" opnamen zoals in
-//!   Saint-Jean-de-Luz) → [`PipeExtra::tremulant_sample`];
+//!   Saint-Jean-de-Luz) → [`PipeExtra::tremulant_attack`], inclusief de
+//!   release-samples van díe laag → [`PipeExtra::tremulant_releases`];
 //! - zwelkasten (`Enclosure`/`EnclosurePipe`) → per kast een [`WindchestDef`]
 //!   met `enclosure_ids`, en `windchest_group` op de omkaste stops;
 //! - microfoonperspectieven: een stop met meerdere StopRanks over dezelfde
@@ -37,7 +38,7 @@ use tracing::{info, warn};
 
 use crate::grandorgue::{
     CouplerDef, EnclosureDef, ManualDef, OdfError, OrganDefinition, OrganInfo, PipeDef,
-    PipeExtra, PipeLayer, ReleaseDef, StopDef, WindchestDef,
+    AttackDef, PipeExtra, PipeLayer, ReleaseDef, StopDef, WindchestDef,
 };
 
 /// Load a Hauptwerk organ definition and translate it to an [`OrganDefinition`].
@@ -274,6 +275,7 @@ fn build_definition(
                             // laten we aan de WAV-markers over.
                             cue_point: None,
                             release_end: None,
+                            crossfade_ms: None,
                         });
                     }
                 }
@@ -284,11 +286,36 @@ fn build_definition(
                 .sort_by_key(|r| r.max_key_press_time_ms.map(i64::from).unwrap_or(i64::MAX));
         }
         // Tremulant-laag: attack-sample van de eerstvolgende hogere laag.
-        // De hoofdlaag blijft het droge sample!
+        // De hoofdlaag blijft het droge sample! De release-samples van die
+        // laag horen er ook bij: met tremulant aan klinkt bij loslaten de
+        // tremulant-release (vroeger altijd de droge).
         if let Some((_, trem_layer)) = lyrs.iter().find(|(num, _)| *num > main_num) {
-            extra.tremulant_sample = sample_of_layer
+            let trem_path = sample_of_layer
                 .get(trem_layer)
                 .and_then(|sid| resolve_sample(*sid));
+            if let Some(tp) = trem_path {
+                if let Some(rels) = releases_by_layer.get(trem_layer) {
+                    for (sid, max_ms) in rels {
+                        if let Some(rpath) = resolve_sample(*sid) {
+                            // Zelfde filter als de hoofdlaag: een "release" die
+                            // naar het attack-bestand zelf wijst is er geen.
+                            if rpath != tp {
+                                extra.tremulant_releases.push(ReleaseDef {
+                                    path: rpath,
+                                    max_key_press_time_ms: *max_ms,
+                                    cue_point: None,
+                                    release_end: None,
+                                    crossfade_ms: None,
+                                });
+                            }
+                        }
+                    }
+                    extra
+                        .tremulant_releases
+                        .sort_by_key(|r| r.max_key_press_time_ms.map(i64::from).unwrap_or(i64::MAX));
+                }
+                extra.tremulant_attack = Some(AttackDef { path: tp, ..Default::default() });
+            }
         }
         Some((path, extra))
     };
@@ -903,7 +930,9 @@ pub fn clean_division_name(raw: &str) -> String {
 }
 
 /// Find the ancestor directory containing `OrganInstallationPackages`.
-fn find_package_root(odf_path: &Path) -> Option<PathBuf> {
+/// Publiek omdat de bibliotheek hem gebruikt om de pakketmappen (met de
+/// console-/orgelfoto) te vinden voor de kaartafbeelding.
+pub fn find_package_root(odf_path: &Path) -> Option<PathBuf> {
     let mut dir = odf_path.parent();
     while let Some(d) = dir {
         if d.join("OrganInstallationPackages").is_dir() {
@@ -1069,8 +1098,8 @@ mod tests {
 <ObjectList ObjectType="Pipe_SoundEngine01"><Pipe_SoundEngine01><PipeID>11</PipeID><RankID>1</RankID><NormalMIDINoteNumber>36</NormalMIDINoteNumber><Pitch_Tempered_RankBasePitch64ftHarmonicNum>8</Pitch_Tempered_RankBasePitch64ftHarmonicNum><Pitch_OriginalOrgan_SpecificationMethodCode>2</Pitch_OriginalOrgan_SpecificationMethodCode><Pitch_OriginalOrgan_PitchHz>65.8</Pitch_OriginalOrgan_PitchHz></Pipe_SoundEngine01><Pipe_SoundEngine01><PipeID>12</PipeID><RankID>1</RankID><NormalMIDINoteNumber>37</NormalMIDINoteNumber></Pipe_SoundEngine01><Pipe_SoundEngine01><PipeID>1011</PipeID><RankID>1001</RankID><NormalMIDINoteNumber>36</NormalMIDINoteNumber></Pipe_SoundEngine01><Pipe_SoundEngine01><PipeID>1012</PipeID><RankID>1001</RankID><NormalMIDINoteNumber>37</NormalMIDINoteNumber></Pipe_SoundEngine01><Pipe_SoundEngine01><PipeID>21</PipeID><RankID>2</RankID><NormalMIDINoteNumber>36</NormalMIDINoteNumber><Pitch_Tempered_BaseTuningSchemeCode>4</Pitch_Tempered_BaseTuningSchemeCode><Pitch_Tempered_BaseTuningDeviation>1e+2</Pitch_Tempered_BaseTuningDeviation></Pipe_SoundEngine01></ObjectList>
 <ObjectList ObjectType="Pipe_SoundEngine01_Layer"><Pipe_SoundEngine01_Layer><LayerID>111</LayerID><PipeID>11</PipeID><PipeLayerNumber>1</PipeLayerNumber></Pipe_SoundEngine01_Layer><Pipe_SoundEngine01_Layer><LayerID>511</LayerID><PipeID>11</PipeID><PipeLayerNumber>2</PipeLayerNumber></Pipe_SoundEngine01_Layer><Pipe_SoundEngine01_Layer><LayerID>112</LayerID><PipeID>12</PipeID><PipeLayerNumber>1</PipeLayerNumber></Pipe_SoundEngine01_Layer><Pipe_SoundEngine01_Layer><LayerID>1111</LayerID><PipeID>1011</PipeID><PipeLayerNumber>1</PipeLayerNumber></Pipe_SoundEngine01_Layer><Pipe_SoundEngine01_Layer><LayerID>1112</LayerID><PipeID>1012</PipeID><PipeLayerNumber>1</PipeLayerNumber></Pipe_SoundEngine01_Layer><Pipe_SoundEngine01_Layer><LayerID>121</LayerID><PipeID>21</PipeID><PipeLayerNumber>1</PipeLayerNumber></Pipe_SoundEngine01_Layer></ObjectList>
 <ObjectList ObjectType="Pipe_SoundEngine01_AttackSample"><Pipe_SoundEngine01_AttackSample><UniqueID>1</UniqueID><LayerID>111</LayerID><SampleID>1</SampleID></Pipe_SoundEngine01_AttackSample><Pipe_SoundEngine01_AttackSample><UniqueID>2</UniqueID><LayerID>511</LayerID><SampleID>2</SampleID></Pipe_SoundEngine01_AttackSample><Pipe_SoundEngine01_AttackSample><UniqueID>3</UniqueID><LayerID>112</LayerID><SampleID>3</SampleID></Pipe_SoundEngine01_AttackSample><Pipe_SoundEngine01_AttackSample><UniqueID>4</UniqueID><LayerID>121</LayerID><SampleID>4</SampleID></Pipe_SoundEngine01_AttackSample><Pipe_SoundEngine01_AttackSample><UniqueID>5</UniqueID><LayerID>1111</LayerID><SampleID>7</SampleID></Pipe_SoundEngine01_AttackSample><Pipe_SoundEngine01_AttackSample><UniqueID>6</UniqueID><LayerID>1112</LayerID><SampleID>8</SampleID></Pipe_SoundEngine01_AttackSample></ObjectList>
-<ObjectList ObjectType="Pipe_SoundEngine01_ReleaseSample"><Pipe_SoundEngine01_ReleaseSample><UniqueID>10</UniqueID><LayerID>111</LayerID><SampleID>5</SampleID><ReleaseSelCriteria_LatestKeyReleaseTimeMs>99999</ReleaseSelCriteria_LatestKeyReleaseTimeMs></Pipe_SoundEngine01_ReleaseSample><Pipe_SoundEngine01_ReleaseSample><UniqueID>11</UniqueID><LayerID>111</LayerID><SampleID>6</SampleID><ReleaseSelCriteria_LatestKeyReleaseTimeMs>750</ReleaseSelCriteria_LatestKeyReleaseTimeMs></Pipe_SoundEngine01_ReleaseSample><Pipe_SoundEngine01_ReleaseSample><UniqueID>12</UniqueID><LayerID>121</LayerID><SampleID>4</SampleID><ReleaseSelCriteria_LatestKeyReleaseTimeMs>99999</ReleaseSelCriteria_LatestKeyReleaseTimeMs></Pipe_SoundEngine01_ReleaseSample></ObjectList>
-<ObjectList ObjectType="Sample"><Sample><SampleID>1</SampleID><InstallationPackageID>1</InstallationPackageID><SampleFilename>Bourdon/A0/036-c.wav</SampleFilename><Pitch_SpecificationMethodCode>4</Pitch_SpecificationMethodCode><Pitch_ExactSamplePitch>66</Pitch_ExactSamplePitch></Sample><Sample><SampleID>2</SampleID><InstallationPackageID>1</InstallationPackageID><SampleFilename>Bourdon/AT0/036-c.wav</SampleFilename></Sample><Sample><SampleID>3</SampleID><InstallationPackageID>1</InstallationPackageID><SampleFilename>Bourdon/A0/037-c#.wav</SampleFilename></Sample><Sample><SampleID>4</SampleID><InstallationPackageID>1</InstallationPackageID><SampleFilename>Montre/036-c.wav</SampleFilename></Sample><Sample><SampleID>5</SampleID><InstallationPackageID>1</InstallationPackageID><SampleFilename>Bourdon/R0/036-c.wav</SampleFilename></Sample><Sample><SampleID>6</SampleID><InstallationPackageID>1</InstallationPackageID><SampleFilename>Bourdon/R1/036-c.wav</SampleFilename></Sample><Sample><SampleID>7</SampleID><InstallationPackageID>1</InstallationPackageID><SampleFilename>Bourdon_rear/A0/036-c.wav</SampleFilename></Sample><Sample><SampleID>8</SampleID><InstallationPackageID>1</InstallationPackageID><SampleFilename>Bourdon_rear/A0/037-c#.wav</SampleFilename></Sample></ObjectList>
+<ObjectList ObjectType="Pipe_SoundEngine01_ReleaseSample"><Pipe_SoundEngine01_ReleaseSample><UniqueID>10</UniqueID><LayerID>111</LayerID><SampleID>5</SampleID><ReleaseSelCriteria_LatestKeyReleaseTimeMs>99999</ReleaseSelCriteria_LatestKeyReleaseTimeMs></Pipe_SoundEngine01_ReleaseSample><Pipe_SoundEngine01_ReleaseSample><UniqueID>11</UniqueID><LayerID>111</LayerID><SampleID>6</SampleID><ReleaseSelCriteria_LatestKeyReleaseTimeMs>750</ReleaseSelCriteria_LatestKeyReleaseTimeMs></Pipe_SoundEngine01_ReleaseSample><Pipe_SoundEngine01_ReleaseSample><UniqueID>12</UniqueID><LayerID>121</LayerID><SampleID>4</SampleID><ReleaseSelCriteria_LatestKeyReleaseTimeMs>99999</ReleaseSelCriteria_LatestKeyReleaseTimeMs></Pipe_SoundEngine01_ReleaseSample><Pipe_SoundEngine01_ReleaseSample><UniqueID>13</UniqueID><LayerID>511</LayerID><SampleID>9</SampleID><ReleaseSelCriteria_LatestKeyReleaseTimeMs>99999</ReleaseSelCriteria_LatestKeyReleaseTimeMs></Pipe_SoundEngine01_ReleaseSample></ObjectList>
+<ObjectList ObjectType="Sample"><Sample><SampleID>1</SampleID><InstallationPackageID>1</InstallationPackageID><SampleFilename>Bourdon/A0/036-c.wav</SampleFilename><Pitch_SpecificationMethodCode>4</Pitch_SpecificationMethodCode><Pitch_ExactSamplePitch>66</Pitch_ExactSamplePitch></Sample><Sample><SampleID>2</SampleID><InstallationPackageID>1</InstallationPackageID><SampleFilename>Bourdon/AT0/036-c.wav</SampleFilename></Sample><Sample><SampleID>3</SampleID><InstallationPackageID>1</InstallationPackageID><SampleFilename>Bourdon/A0/037-c#.wav</SampleFilename></Sample><Sample><SampleID>4</SampleID><InstallationPackageID>1</InstallationPackageID><SampleFilename>Montre/036-c.wav</SampleFilename></Sample><Sample><SampleID>5</SampleID><InstallationPackageID>1</InstallationPackageID><SampleFilename>Bourdon/R0/036-c.wav</SampleFilename></Sample><Sample><SampleID>6</SampleID><InstallationPackageID>1</InstallationPackageID><SampleFilename>Bourdon/R1/036-c.wav</SampleFilename></Sample><Sample><SampleID>7</SampleID><InstallationPackageID>1</InstallationPackageID><SampleFilename>Bourdon_rear/A0/036-c.wav</SampleFilename></Sample><Sample><SampleID>8</SampleID><InstallationPackageID>1</InstallationPackageID><SampleFilename>Bourdon_rear/A0/037-c#.wav</SampleFilename></Sample><Sample><SampleID>9</SampleID><InstallationPackageID>1</InstallationPackageID><SampleFilename>Bourdon/RT0/036-c.wav</SampleFilename></Sample></ObjectList>
 <ObjectList ObjectType="Enclosure"><Enclosure><EnclosureID>7</EnclosureID><Name>Enclosure Grand Orgue</Name></Enclosure></ObjectList>
 <ObjectList ObjectType="EnclosurePipe"><EnclosurePipe><PipeID>11</PipeID><EnclosureID>7</EnclosureID></EnclosurePipe><EnclosurePipe><PipeID>12</PipeID><EnclosureID>7</EnclosureID></EnclosurePipe></ObjectList>
 </Hauptwerk>"#.to_string()
@@ -1099,26 +1128,33 @@ mod tests {
         assert!(extra.releases[0].path.ends_with("Bourdon/R1/036-c.wav"));
         assert_eq!(extra.releases[1].max_key_press_time_ms, None); // 99999 → default
         assert!(extra.releases[1].path.ends_with("Bourdon/R0/036-c.wav"));
-        // Tremulant-laag (PipeLayerNumber 2) → tremulant_sample, hoofdlaag droog.
+        // Tremulant-laag (PipeLayerNumber 2) → tremulant_attack, hoofdlaag droog.
         assert!(extra
-            .tremulant_sample
+            .tremulant_attack
             .as_ref()
             .unwrap()
+            .path
             .ends_with("Bourdon/AT0/036-c.wav"));
+        // …inclusief de release-samples van díe laag (RT0), zodat loslaten met
+        // tremulant aan de tremulant-release geeft en niet de droge.
+        assert_eq!(extra.tremulant_releases.len(), 1);
+        assert!(extra.tremulant_releases[0].path.ends_with("Bourdon/RT0/036-c.wav"));
+        assert_eq!(extra.tremulant_releases[0].max_key_press_time_ms, None);
 
         // Bourdon-pijp 37 heeft geen releases en geen tremulant-laag.
         let PipeDef::Sample { extra: e37, .. } = &bourdon.pipes[1] else {
             panic!("pijp 37 hoort een sample te zijn");
         };
         assert!(e37.releases.is_empty());
-        assert!(e37.tremulant_sample.is_none());
+        assert!(e37.tremulant_attack.is_none());
+        assert!(e37.tremulant_releases.is_empty());
 
         // Montre: release wijst naar hetzelfde bestand als de attack → geskipt.
         let PipeDef::Sample { extra: em, .. } = &montre.pipes[0] else {
             panic!("montre-pijp hoort een sample te zijn");
         };
         assert!(em.releases.is_empty());
-        assert!(em.tremulant_sample.is_none());
+        assert!(em.tremulant_attack.is_none());
     }
 
     #[test]
@@ -1225,7 +1261,7 @@ mod tests {
             for p in &s.pipes {
                 if let PipeDef::Sample { extra, .. } = p {
                     n_rel += extra.releases.len();
-                    n_trem += extra.tremulant_sample.is_some() as usize;
+                    n_trem += extra.tremulant_attack.is_some() as usize;
                 }
             }
             println!("  [{}] {} — {} pipes, first_midi={}, harmonic={}, releases={}, trem={}, primair={:?}, lagen={:?}",
@@ -1245,10 +1281,16 @@ mod tests {
                             if sample_missing <= 3 { println!("    MISSING rel: {:?}", r.path); }
                         }
                     }
-                    if let Some(t) = &extra.tremulant_sample {
-                        if t.exists() { sample_ok += 1; } else {
+                    if let Some(t) = &extra.tremulant_attack {
+                        if t.path.exists() { sample_ok += 1; } else {
                             sample_missing += 1;
-                            if sample_missing <= 3 { println!("    MISSING trem: {:?}", t); }
+                            if sample_missing <= 3 { println!("    MISSING trem: {:?}", t.path); }
+                        }
+                    }
+                    for r in &extra.tremulant_releases {
+                        if r.path.exists() { sample_ok += 1; } else {
+                            sample_missing += 1;
+                            if sample_missing <= 3 { println!("    MISSING trem-rel: {:?}", r.path); }
                         }
                     }
                 }

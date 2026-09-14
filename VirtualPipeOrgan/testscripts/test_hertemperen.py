@@ -20,11 +20,27 @@
 #             2_28 (SW Vox celeste 8') noot 60: Origineel +22.96, ET +15.62, middentoon +25.89
 #             (ET-meting ~0 of ~+38.6 => teken van PitchCorrection verkeerd)
 #   Puttershoek: retune_pipes == 0; ET == Origineel (±0.5 ct); middentoon = Origineel + T[noot]
-import json, urllib.request, time, sys, os, math
+import json, urllib.request, time, sys, os, math, subprocess, tempfile
 
 B = "http://127.0.0.1:8765"
 SP = os.path.dirname(os.path.abspath(__file__))
-ODF_TEST = os.path.join(SP, "go_testodf", "TestRanks.organ")
+
+def _testranks_odf():
+    """Pad naar TestRanks.organ; genereert hem als hij nog niet bestaat.
+
+    De ODF staat in %TEMP%\jm-orgue-testodf (buiten de repo, samen met de
+    junction naar de Puttershoek-samples) en wordt gemaakt door
+    testscripts/maak_go_testodf.py.
+    """
+    d = os.path.join(tempfile.gettempdir(), "jm-orgue-testodf")
+    p = os.path.join(d, "TestRanks.organ")
+    if not os.path.exists(p):
+        gen = os.path.join(SP, "maak_go_testodf.py")
+        print(f"TestRanks.organ ontbreekt, generator draaien: {gen}")
+        subprocess.run([sys.executable, gen, d], check=True)
+    return p
+
+ODF_TEST = _testranks_odf()
 ODF_FRIESACH = r"C:\Bronbestanden\JM-Orgue\Sample set homemade\Friesach_GrandOrgue\Friesach.organ"
 DIR_PUTTERSHOEK = r"C:\Bronbestanden\JM-Orgue\Sample set homemade\Bätz-Witte Puttershoek"
 REC = os.path.join(os.environ.get("TEMP", SP), "jm_tune.mp3")
@@ -56,24 +72,42 @@ def measure(stop_id, note, hold=3.0):
     peak = float(r.get("peak_hz") or 0.0)
     if peak <= 0:
         return float("nan"), peak
-    k = max(1, round(peak / f_et(note)))
-    return 1200 * math.log2(peak / (k * f_et(note))), peak
+    # peak_hz is de STERKSTE piek, niet per se de grondtoon: vouw eerst hele
+    # octaven weg (16'/4'-ranks klinken een octaaf onder/boven de nominale toon)
+    # en deel daarna door de dichtstbijzijnde hele boventoon.
+    ratio = peak / f_et(note)
+    ratio /= 2 ** round(math.log2(ratio))
+    k = max(1, round(ratio))
+    return 1200 * math.log2(ratio / k), peak
 
 def expected_cents(mode, base, note):
     return base + (MEANTONE[note % 12] if mode == "Middentoon" else 0.0)
 
-def run(cases, expect):
-    """cases: [(label, stop_id, note, base_cents_per_mode)], expect: dict mode->fn(base)->cents"""
+def run(cases, expect, relatief=False):
+    """cases: [(label, stop_id, note, base_cents_per_mode)], expect: dict mode->fn(base)->cents
+
+    Met `relatief=True` gelden de verwachte waarden TEN OPZICHTE VAN de gemeten
+    stand in "Origineel". Dat is nodig voor sets die zelf niet op a=440 staan: de
+    Puttershoek-opnamen klinken ~30 cent hoog, en "Origineel (zoals opgenomen)"
+    hoort die stand juist te laten staan. Getoetst wordt dan de VERSCHUIVING die
+    een echt temperament aanbrengt: de opgegeven PitchCorrection plus de
+    temperament-afwijking van die toon.
+    """
     fails = 0
     for label, stop_id, note, base in cases:
         print(f"\n== {label} (stop {stop_id}, noot {note}) ==")
+        nul = 0.0
+        if relatief:
+            post("/temperament", MODES[0][1])
+            nul, _ = measure(stop_id, note)
+            print(f"  (referentie 'Origineel': {nul:+7.2f} ct — verwachtingen gelden hierop)")
         for mode, body in MODES:
             r = post("/temperament", body)
             assert r.get("retune") == body["retune"], r
             t = get("/tuning")
             assert t["retune"] == body["retune"], t
             cents, peak = measure(stop_id, note)
-            exp = expected_cents(mode, base[mode], note)
+            exp = expected_cents(mode, base[mode], note) + nul
             ok = abs(cents - exp) <= 3.0
             fails += 0 if ok else 1
             print(f"  {mode:11s}: peak {peak:9.3f} Hz -> {cents:+7.2f} ct  (verwacht {exp:+7.2f})  {'OK' if ok else 'FOUT'}")
@@ -126,13 +160,18 @@ def main():
         print(f"retune_pipes={tuning['retune_pipes']} retune_total={tuning['retune_total']} (verwacht total-54 metingen)")
         if tuning["retune_pipes"] != tuning["retune_total"] - 54:
             print("  LET OP: aantal metingen wijkt af van de verwachting")
-        enkel = stops["Enkel"]["id"]; gest = stops["Gestapeld"]["id"]
+        enkel = stops["Enkel"]["id"]
+        pijp_pc = stops["Enkel pijp-PC"]["id"]; rank_pc = stops["Enkel rank-PC"]["id"]
         fails += run([
-            ("Enkel c' (Rank003, geen PC)", enkel, 60, {"Origineel": 0.0, "ET": 0.0, "Middentoon": 0.0}),
-            ("Enkel d' (Rank003, geen PC)", enkel, 62, {"Origineel": 0.0, "ET": 0.0, "Middentoon": 0.0}),
-            ("Gestapeld c' (Rank001 PC -20)", gest, 60, {"Origineel": 0.0, "ET": -20.0, "Middentoon": -20.0}),
-            ("Gestapeld d' (Rank001 PC -20)", gest, 62, {"Origineel": 0.0, "ET": -20.0, "Middentoon": -20.0}),
-        ], None)
+            ("Enkel c' (geen PC)", enkel, 60, {"Origineel": 0.0, "ET": 0.0, "Middentoon": 0.0}),
+            ("Enkel d' (geen PC)", enkel, 62, {"Origineel": 0.0, "ET": 0.0, "Middentoon": 0.0}),
+            # PitchCorrection per pijp (-20 ct) en per rank (+30 ct), elk op een
+            # ENKELVOUDIG register: "Origineel" laat de opname staan, een echt
+            # temperament rekent de opgegeven afwijking weg.
+            ("Enkel pijp-PC c' (-20 ct)", pijp_pc, 60, {"Origineel": 0.0, "ET": -20.0, "Middentoon": -20.0}),
+            ("Enkel pijp-PC d' (-20 ct)", pijp_pc, 62, {"Origineel": 0.0, "ET": -20.0, "Middentoon": -20.0}),
+            ("Enkel rank-PC c' (+30 ct)", rank_pc, 60, {"Origineel": 0.0, "ET": 30.0, "Middentoon": 30.0}),
+        ], None, relatief=True)
 
     # Persistentie: ET+retune opslaan, herladen, /tuning moet retune=true tonen.
     post("/temperament", MODES[1][1]); post("/settings/save")

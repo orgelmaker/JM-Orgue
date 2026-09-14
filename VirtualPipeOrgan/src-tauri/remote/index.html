@@ -8,10 +8,14 @@
 <meta name="theme-color" content="#121212">
 <title>JM-Orgue</title>
 <style>
-  /* Afstandsbediening JM-Orgue — ingebed via include_str! (test_api.rs), geen externe resources. */
+  /* Afstandsbediening JM-Orgue — ingebed via include_str! (test_api.rs), geen externe resources.
+     De pagina volgt de indeling van het registreerscherm: GET /organ levert de
+     divisievolgorde/-selectie, de registervolgorde, alléén de zichtbare koppels
+     en een layout-blok (koppelplaatsing, knopvorm, welke onderdelen). */
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; background: #121212; color: #eee; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; font-size: 17px; touch-action: manipulation; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; }
   body { padding-bottom: 150px; }
+  body.nosetzerbar { padding-bottom: 16px; }
   header { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: #1a1a1a; border-bottom: 1px solid #333; }
   header .name { flex: 1; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   header .voices { font-size: 14px; color: #aaa; white-space: nowrap; }
@@ -32,7 +36,13 @@
   button.on { background: #e0a040; color: #111; border-color: #e0a040; }
   button.stop { display: flex; flex-direction: column; justify-content: center; align-items: center; border-left-width: 4px; }
   button.stop .pitch { font-size: 12px; opacity: 0.75; margin-top: 2px; }
-  button.trem { min-height: 40px; min-width: 110px; padding: 4px 12px; font-size: 14px; }
+  /* Knopvorm van het orgelscherm: rond = sterk afgeronde knoppen (op een
+     telefoon is een volledige cirkel te smal voor de registernaam). */
+  body.round button.stop, body.round button.coupler { border-radius: 999px; }
+  button.trem { border-left-color: #8a6; }
+  button.coupler { display: flex; flex-direction: column; justify-content: center; align-items: center; font-size: 15px; }
+  .cgroup { margin-bottom: 10px; }
+  .cgroup .ctitle { display: block; font-size: 13px; color: #aaa; margin: 0 2px 5px; }
   .volume { display: flex; align-items: center; gap: 12px; padding: 6px 4px; }
   .volume label { font-size: 15px; color: #aaa; white-space: nowrap; }
   .volume input { flex: 1; height: 44px; accent-color: #e0a040; }
@@ -99,7 +109,7 @@
   }
 
   var $ = function (id) { return document.getElementById(id); };
-  var organ = null, currentOrganId = null, failures = 0, dragging = false, volTimer = null, volPending = null;
+  var organ = null, currentOrganId = null, currentLayoutRev = null, failures = 0, dragging = false, volTimer = null, volPending = null;
   var stopBtns = {}, couplerBtns = {}, tremBtns = [], digitBtns = [], memBtns = [], setBtn = null, presetEl = null, volEl = null, volVal = null;
 
   $('noconn').textContent = T.no_connection;
@@ -122,31 +132,84 @@
     post(path).catch(function () {});
   }
 
+  // Koppelknop (zelfde label als het orgelscherm: regelafbrekingen worden spaties).
+  function couplerButton(c) {
+    var b = el('button', 'coupler', (c.name || '').replace(/\n/g, ' '));
+    if (c.active) b.classList.add('on');
+    b.addEventListener('click', function () { toggleBtn(b, 'couplers/' + esc(c.id) + '/toggle'); });
+    couplerBtns[c.id] = b;
+    return b;
+  }
+
+  // Koppelbalk: per klavier gegroepeerd in de getoonde divisievolgorde,
+  // unison eerst, dan super/sub, dan de rest — zoals buildCouplerGroups op
+  // het orgelscherm. Groepen van niet-getoonde divisies komen achteraan.
+  function renderCouplerBar(couplers, divOrder) {
+    var groups = [], byKey = {};
+    couplers.forEach(function (c) {
+      var key = c.display_in_division || '';
+      if (!byKey[key]) { byKey[key] = { division: key, couplers: [] }; groups.push(byKey[key]); }
+      byKey[key].couplers.push(c);
+    });
+    var rank = function (t) { return t === 'unison' ? 0 : t === 'super' ? 1 : t === 'sub' ? 2 : 3; };
+    var pos = function (name) { var i = divOrder.indexOf(name); return i < 0 ? divOrder.length : i; };
+    groups.sort(function (a, b) { return pos(a.division) - pos(b.division); });
+    var sec = el('section');
+    var head = el('div', 'divhead');
+    head.appendChild(el('h2', null, T.couplers));
+    sec.appendChild(head);
+    groups.forEach(function (g) {
+      var wrap = el('div', 'cgroup');
+      if (g.division) wrap.appendChild(el('span', 'ctitle', g.division));
+      var grid = el('div', 'grid');
+      g.couplers.sort(function (a, b) {
+        return rank(a.coupler_type) - rank(b.coupler_type) || String(a.name).localeCompare(String(b.name));
+      });
+      g.couplers.forEach(function (c) { grid.appendChild(couplerButton(c)); });
+      wrap.appendChild(grid);
+      sec.appendChild(wrap);
+    });
+    $('main').appendChild(sec);
+  }
+
   function render(o) {
     organ = o;
     var main = $('main');
     main.innerHTML = '';
     stopBtns = {}; couplerBtns = {}; tremBtns = [];
     if (!o) {
+      currentLayoutRev = null;
       $('noorgan').style.display = 'block';
       $('footer').style.display = 'none';
+      document.body.classList.remove('round');
       $('orgname').textContent = 'JM-Orgue';
       return;
     }
     $('noorgan').style.display = 'none';
-    $('footer').style.display = '';
     $('orgname').textContent = o.name || 'JM-Orgue';
 
-    (o.divisions || []).forEach(function (div, di) {
+    // Indeling van het registreerscherm (ontbreekt hij, dan alles tonen).
+    var L = o.layout || {};
+    currentLayoutRev = typeof L.rev === 'number' ? L.rev : null;
+    var placement = L.coupler_placement === 'division' ? 'division' : 'bar';
+    var showCouplers = L.show_couplers !== false;
+    var showTrem = L.show_tremulant !== false;
+    var showSetzer = L.show_setzer !== false;
+    var showVolume = L.show_volume !== false;
+    var showPanic = L.show_panic !== false;
+    document.body.classList.toggle('round', L.knob_shape === 'round');
+    document.body.classList.toggle('nosetzerbar', !showSetzer);
+    $('footer').style.display = showSetzer ? '' : 'none';
+
+    var divs = o.divisions || [];
+    var divOrder = divs.map(function (d) { return d.name; });
+    divs.forEach(function (div, i) {
+      // div_index = index in het orgel zelf: actiecode 24+i (tremulant) en
+      // /state.tremulant[i] blijven kloppen bij een andere schermvolgorde.
+      var di = typeof div.div_index === 'number' ? div.div_index : i;
       var sec = el('section');
       var head = el('div', 'divhead');
-      head.appendChild(el('h2', null, div.display_name || div.name));
-      if (div.has_tremulant) {
-        var tb = el('button', 'trem', T.tremulant);
-        tb.addEventListener('click', function () { toggleBtn(tb, 'action/' + (24 + di)); });
-        tremBtns[di] = tb;
-        head.appendChild(tb);
-      }
+      head.appendChild(el('h2', null, div.name));
       sec.appendChild(head);
       var grid = el('div', 'grid');
       (div.stops || []).forEach(function (s) {
@@ -159,67 +222,78 @@
         stopBtns[s.id] = b;
         grid.appendChild(b);
       });
+      // Tremulant: knop ná de registers, net als op het orgelscherm.
+      if (showTrem && div.show_tremulant) {
+        var tb = el('button', 'stop trem');
+        tb.appendChild(el('span', 'nm', T.tremulant));
+        tb.addEventListener('click', function () { toggleBtn(tb, 'action/' + (24 + di)); });
+        tremBtns[di] = tb;
+        grid.appendChild(tb);
+      }
+      // Koppels tussen de registers (koppelplaatsing 'divisie').
+      if (showCouplers && placement === 'division') {
+        (o.couplers || []).forEach(function (c) {
+          if (c.display_in_division === div.name) grid.appendChild(couplerButton(c));
+        });
+      }
       sec.appendChild(grid);
       main.appendChild(sec);
     });
 
-    if (o.couplers && o.couplers.length) {
-      var csec = el('section');
-      var chead = el('div', 'divhead');
-      chead.appendChild(el('h2', null, T.couplers));
-      csec.appendChild(chead);
-      var cgrid = el('div', 'grid');
-      o.couplers.forEach(function (c) {
-        var b = el('button', null, c.name);
-        if (c.active) b.classList.add('on');
-        b.addEventListener('click', function () { toggleBtn(b, 'couplers/' + esc(c.id) + '/toggle'); });
-        couplerBtns[c.id] = b;
-        cgrid.appendChild(b);
-      });
-      csec.appendChild(cgrid);
-      main.appendChild(csec);
+    if (showCouplers && placement === 'bar' && o.couplers && o.couplers.length) {
+      renderCouplerBar(o.couplers.slice(), divOrder);
     }
 
-    // Volume
-    var vsec = el('section');
-    var vrow = el('div', 'volume');
-    vrow.appendChild(el('label', null, T.volume));
-    volEl = document.createElement('input');
-    volEl.type = 'range'; volEl.min = '-40'; volEl.max = '6'; volEl.step = '1'; volEl.value = '-6';
-    volVal = el('span', 'val', '-6 dB');
-    volEl.addEventListener('pointerdown', function () { dragging = true; });
-    volEl.addEventListener('touchstart', function () { dragging = true; }, { passive: true });
-    volEl.addEventListener('input', function () {
-      volVal.textContent = volEl.value + ' dB';
-      volPending = volEl.value;
-      if (!volTimer) {
-        volTimer = setTimeout(function () {
-          volTimer = null;
-          if (volPending !== null) { var v = volPending; volPending = null; post('master?db=' + esc(v)).catch(function () {}); }
-        }, 150);
+    if (showVolume || showPanic) {
+      var vsec = el('section');
+      if (showVolume) {
+        var vrow = el('div', 'volume');
+        vrow.appendChild(el('label', null, T.volume));
+        volEl = document.createElement('input');
+        volEl.type = 'range'; volEl.min = '-40'; volEl.max = '6'; volEl.step = '1'; volEl.value = '-6';
+        volVal = el('span', 'val', '-6 dB');
+        volEl.addEventListener('pointerdown', function () { dragging = true; });
+        volEl.addEventListener('touchstart', function () { dragging = true; }, { passive: true });
+        volEl.addEventListener('input', function () {
+          volVal.textContent = volEl.value + ' dB';
+          volPending = volEl.value;
+          if (!volTimer) {
+            volTimer = setTimeout(function () {
+              volTimer = null;
+              if (volPending !== null) { var v = volPending; volPending = null; post('master?db=' + esc(v)).catch(function () {}); }
+            }, 150);
+          }
+        });
+        var endDrag = function () {
+          dragging = false;
+          if (volTimer) { clearTimeout(volTimer); volTimer = null; }
+          volPending = null;
+          post('master?db=' + esc(volEl.value)).catch(function () {});
+        };
+        volEl.addEventListener('change', endDrag);
+        volEl.addEventListener('pointerup', function () { dragging = false; });
+        volEl.addEventListener('pointercancel', function () { dragging = false; });
+        volEl.addEventListener('touchend', function () { dragging = false; }, { passive: true });
+        vrow.appendChild(volEl);
+        vrow.appendChild(volVal);
+        vsec.appendChild(vrow);
+      } else {
+        volEl = null; volVal = null;
       }
-    });
-    function endDrag() {
-      dragging = false;
-      if (volTimer) { clearTimeout(volTimer); volTimer = null; }
-      volPending = null;
-      post('master?db=' + esc(volEl.value)).catch(function () {});
+      if (showPanic) {
+        var prow = el('div', 'panic');
+        var pb = el('button', null, T.panic);
+        pb.addEventListener('click', function () { post('panic').catch(function () {}); });
+        prow.appendChild(pb);
+        vsec.appendChild(prow);
+      }
+      main.appendChild(vsec);
+    } else {
+      volEl = null; volVal = null;
     }
-    volEl.addEventListener('change', endDrag);
-    volEl.addEventListener('pointerup', function () { dragging = false; });
-    volEl.addEventListener('pointercancel', function () { dragging = false; });
-    volEl.addEventListener('touchend', function () { dragging = false; }, { passive: true });
-    vrow.appendChild(volEl);
-    vrow.appendChild(volVal);
-    vsec.appendChild(vrow);
-    var prow = el('div', 'panic');
-    var pb = el('button', null, T.panic);
-    pb.addEventListener('click', function () { post('panic').catch(function () {}); });
-    prow.appendChild(pb);
-    vsec.appendChild(prow);
-    main.appendChild(vsec);
 
-    renderSetzer();
+    if (showSetzer) renderSetzer();
+    else { $('mems').innerHTML = ''; $('setzer').innerHTML = ''; memBtns = []; digitBtns = []; setBtn = null; presetEl = null; }
   }
 
   function renderSetzer() {
@@ -297,8 +371,11 @@
       failures = 0;
       $('noconn').classList.remove('show');
       var id = st.organ_loaded ? (st.organ_id || null) : null;
-      if (id !== currentOrganId) {
+      // Ander orgel, óf het hoofdscherm wijzigde de indeling (layout_rev).
+      var rev = typeof st.layout_rev === 'number' ? st.layout_rev : null;
+      if (id !== currentOrganId || (id !== null && rev !== null && rev !== currentLayoutRev)) {
         currentOrganId = id;
+        currentLayoutRev = rev;
         return api('organ').then(function (o) { render(o || null); apply(st); });
       }
       apply(st);
@@ -312,6 +389,8 @@
   });
 
   // Start: orgel ophalen (null zolang er geen orgel geladen is), dan pollen.
+  // render() zet currentLayoutRev uit o.layout.rev, zodat de eerste /state-poll
+  // niet meteen een tweede /organ+render veroorzaakt.
   api('organ').then(function (o) {
     currentOrganId = o ? (o.id || null) : null;
     render(o || null);

@@ -1,5 +1,6 @@
 <script>
   import { onMount, tick } from 'svelte';
+  import { fade } from 'svelte/transition';
   import { invoke } from '@tauri-apps/api/core';
 
   import Header from './components/Header.svelte';
@@ -55,6 +56,12 @@
   let showOrganBrowser = true;
   let activeView = 'orgel';
 
+  // Opstart-splash: dekt de eerste seconden af zodat het startscherm in één
+  // keer compleet in beeld komt — inclusief de update-balk, die anders ná de
+  // bibliotheek inplofte en alles naar beneden duwde. Alleen het hoofdvenster.
+  let booting = true;
+  let appVersion = '';
+
   // MIDI mapping state
   let midiMappings = [];
 
@@ -85,11 +92,23 @@
   // release staat. Wegklikken onthoudt die ene versie (volgende versie meldt
   // zich gewoon weer). Faalt geluidloos zonder internet.
   let updateInfo = null; // { version, url } of null
+
+  // De splash wacht ook op de eerste ophaalronde van de online samplesets
+  // (Console.refreshOnlineSets). Zonder dat verscheen het blok "Online
+  // beschikbaar" op een trage verbinding een tot twee seconden ná het
+  // startscherm en sprong de bibliotheek alsnog na. Console meldt zich via
+  // on:onlineSetsSettled (ook bij een mislukte fetch); de race met dezelfde
+  // 4 s als de update-check zorgt dat een dode verbinding de opstart nooit
+  // ophoudt.
+  let meldOnlineSetsKlaar = () => {};
+  const onlineSetsSettled = new Promise((r) => { meldOnlineSetsKlaar = r; });
+
   async function runUpdateCheck() {
     try {
       const { checkForUpdate } = await import('./lib/github.js');
       const { getVersion } = await import('@tauri-apps/api/app');
       const current = await getVersion();
+      appVersion = current;
       const upd = await checkForUpdate(current);
       if (upd && localStorage.getItem('jm-orgue-update-dismissed') !== upd.version) {
         updateInfo = upd;
@@ -226,18 +245,42 @@
   onMount(async () => {
     if (isPanel || isNotation) return; // panel-/notatievensters regelen hun eigen state
 
+    // Tijdlijn van de opstart-splash: hij verdwijnt pas als de init klaar is
+    // én de update-check is afgerond (of 4 s om zijn), met een ondergrens van
+    // 1,5 s zodat hij niet even opflitst. Zo staat de update-balk er al vóór
+    // het wegfaden en springt er achteraf niets meer na.
+    const bootStart = performance.now();
+    // Noodrem: wat er in de init ook blijft hangen, na 8 s is de splash weg —
+    // een onklikbaar startscherm is erger dan een balk die alsnog inploft.
+    const bootFailsafe = setTimeout(() => { booting = false; }, 8000);
+
     // Hoofdvenster-geometrie herstellen + vastleggen (extra schermen doen dit
     // al zelf in PanelApp; het hoofdvenster had tot 0.7.11 géén persistentie
     // en opende dus altijd op de standaardpositie).
     await restoreMainGeometry();
     initMainGeometryTracking();
 
-    // Update-check ná de drukke opstart (audio/orgel-load gaat vóór).
+    // Update-check meteen bij de start (was: 3 s uitgesteld "ná de drukke
+    // opstart"). Die vertraging kan vervallen omdat dit één fetch is op de
+    // netwerkthread van de webview (lib/github.js) die de audio-opstart in Rust
+    // niet raakt — en de splash wacht er nu op, zodat de balk er staat vóórdat
+    // het startscherm verschijnt in plaats van er later overheen te ploffen.
     // BEWUST alleen hier en via de knop "Controleer op updates" in Algemene
     // Instellingen: een melding die tijdens het spelen in beeld ploft stoort een
     // dienst of opname. Nieuwe versies komen dus bij de eerstvolgende start
     // binnen (0.7.34 probeerde een uurlijkse check — teruggedraaid op verzoek).
-    setTimeout(runUpdateCheck, 3000);
+    // De fetch heeft geen eigen time-out; vandaar de race met 4 s, anders hangt
+    // de splash zonder internet op de socket-time-out van het besturingssysteem.
+    const updateSettled = Promise.race([
+      runUpdateCheck(),
+      new Promise((r) => setTimeout(r, 4000)),
+    ]);
+    // Zelfde grens voor de online-sampleset-lijst: klaar is klaar, maar nooit
+    // langer dan 4 s wachten (en zonder netwerk hangt de opstart dus niet).
+    const onlineSetsWait = Promise.race([
+      onlineSetsSettled,
+      new Promise((r) => setTimeout(r, 4000)),
+    ]);
 
     await refreshDevices();
     await refreshStatus();
@@ -461,6 +504,17 @@
       }));
     } catch (e) { /* niet in Tauri context */ }
 
+    // Init is klaar: de splash mag weg zodra ook de update-check is afgerond
+    // (of de 4 s om zijn) én hij minstens ~1,5 s te zien was. De autoload
+    // hieronder valt er bewust buiten: die toont zijn eigen voortgangsbalk, en
+    // een grote sampleset achter een splash zonder voortgang oogt als een
+    // vastloper (les uit 0.6.4).
+    Promise.all([
+      updateSettled,
+      onlineSetsWait,
+      new Promise((r) => setTimeout(r, Math.max(0, 1500 - (performance.now() - bootStart)))),
+    ]).then(() => { clearTimeout(bootFailsafe); booting = false; });
+
     // Herstel laatst geopend orgel als er een sessie is — instelbaar via
     // "Laatst geopende orgel automatisch laden" (Algemene Instellingen).
     // De extra registerschermen van dat orgel heropent loadOrgan/loadFromFolder
@@ -505,15 +559,41 @@
     if (autoSavePromise) await autoSavePromise;
   }
 
+  // Eén doorgang voor élke weergavewissel (tabs in de balk, F1/F2/F3 en de
+  // knoppen in de Console). Zonder geladen orgel bestaat er geen zinvolle
+  // Orgel- of Orgel-Instellingen-weergave — die toonden tot nu toe het
+  // ingebouwde "Demo Orgel" — dus die routes leiden terug naar de bibliotheek.
+  // Algemene Instellingen mag wél zonder orgel, maar moet de bibliotheek dan
+  // expliciet verlaten: in de Console wint de bibliotheek-tak van de
+  // instellingen-tak. Zo kun je nooit meer stranden in de instellingen.
+  function setView(view) {
+    if (!organInfo && !loading && view !== 'algemene-instellingen') {
+      activeView = 'orgel';
+      showOrganBrowser = true;
+      return;
+    }
+    activeView = view;
+    showOrganBrowser = false;
+  }
+
   function handleKeyDown(event) {
     // Ignore if typing in input
     if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') return;
 
     // Global function keys (always handled)
-    if (event.key === 'F1') { event.preventDefault(); activeView = 'orgel'; return; }
-    if (event.key === 'F2') { event.preventDefault(); activeView = 'orgel-instellingen'; return; }
-    if (event.key === 'F3') { event.preventDefault(); activeView = 'algemene-instellingen'; return; }
-    if (event.key === 'Escape' && organInfo) { event.preventDefault(); showOrganBrowser = true; return; }
+    if (event.key === 'F1') { event.preventDefault(); setView('orgel'); return; }
+    if (event.key === 'F2') { event.preventDefault(); setView('orgel-instellingen'); return; }
+    if (event.key === 'F3') { event.preventDefault(); setView('algemene-instellingen'); return; }
+    // Escape gaat altijd naar de bibliotheek, óók zonder geladen orgel: dat is
+    // de vluchtroute als je in de instellingen bent beland. Zonder orgel ook de
+    // weergave terugzetten, anders opent het orgel dat je zo kiest meteen in de
+    // instellingen in plaats van aan de klavieren.
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      if (!organInfo) activeView = 'orgel';
+      showOrganBrowser = true;
+      return;
+    }
 
     // Ignore repeated keydown events
     if (event.repeat) return;
@@ -891,6 +971,9 @@
         voiceCount: s.voice_count,
         polyphony: s.polyphony,
         renderLoad: s.render_load,
+        renderPeak: s.render_peak,
+        renderOverloads: s.render_overloads,
+        rtDrops: s.rt_drops,
         peakLeft: s.peak_left,
         peakRight: s.peak_right,
         sampleRate: s.sample_rate,
@@ -900,9 +983,58 @@
         bufferFrames: s.buffer_frames,
         midiArchiving: s.midi_archiving
       };
+      volgAudioOverbelasting(s);
     } catch (e) {
       // Ignore polling errors
     }
+  }
+
+  // ===== Advies bij herhaalde audio-overbelasting =====
+  // Een te kleine buffer (32/48 frames) is de vaakst voorkomende oorzaak van
+  // "het hapert": bij een crescendo-trapwissel of registerwissel moet de
+  // callback in 0,67 ms tientallen stemmen starten en stoppen. Eén piek is
+  // normaal (orgel laden, tutti); pas bij HERHALING binnen ~10 s is het advies
+  // terecht. We tellen daarvoor per 100 ms-poll de metingen met piek > 100 % van
+  // de buffertijd, plus hoeveel zware callbacks de backend er sindsdien bij
+  // kreeg (render_overloads) — dat laatste onderscheidt één trage callback met
+  // een langzaam dalende piek van echte, doorlopende overbelasting.
+  let overbelastingMetingen = [];   // [{ t, nieuw }]
+  let vorigeOverloadTeller = null;
+  let audioOverbelastAdvies = false;
+  let audioOverbelastGenegeerd = false;
+  const OVERBELAST_VENSTER_MS = 10000;
+  function volgAudioOverbelasting(s) {
+    const nu = Date.now();
+    const teller = typeof s.render_overloads === 'number' ? s.render_overloads : 0;
+    const nieuw = vorigeOverloadTeller == null ? 0 : Math.max(0, teller - vorigeOverloadTeller);
+    vorigeOverloadTeller = teller;
+    if ((s.render_peak || 0) > 1.0) overbelastingMetingen.push({ t: nu, nieuw });
+    while (overbelastingMetingen.length && nu - overbelastingMetingen[0].t > OVERBELAST_VENSTER_MS) overbelastingMetingen.shift();
+    const zwareCallbacks = overbelastingMetingen.reduce((a, m) => a + m.nieuw, 0);
+    const buf = s.buffer_frames || 0;
+    audioOverbelastAdvies = !audioOverbelastGenegeerd && !!s.audio_running
+      && overbelastingMetingen.length >= 3 && zwareCallbacks >= 3
+      && buf > 0 && buf < 128;
+  }
+
+  // Knop in de melding: buffer op 128 frames zetten via het gewone
+  // applyAudioOutput-pad (incl. herladen van het orgel) en het ACTIEVE profiel
+  // meteen bijwerken — anders zet de eerstvolgende profielwissel de oude,
+  // te kleine buffer stilletjes terug.
+  async function zetBufferOp128() {
+    // Bewust GEEN 'genegeerd'-vlag: mislukt de wissel (apparaat weg), dan blijft
+    // de buffer klein en mag het advies na ~10 s nieuwe overbelasting terugkomen.
+    audioOverbelastAdvies = false;
+    overbelastingMetingen = [];
+    vorigeOverloadTeller = null;
+    selectedBufferFrames = 128;
+    const kind = audioProfiles.active;
+    if (kind && audioProfiles[kind]) {
+      audioProfiles[kind].bufferFrames = 128;
+      audioProfiles = audioProfiles;
+      persistAudioProfiles();
+    }
+    await applyAudioOutput();
   }
 
   // Houd het getoonde actieve profiel in lijn met de ÉCHTE actuele uitgang.
@@ -1106,6 +1238,12 @@
     // sluiten" vanuit een paneel-hoofdbalk wordt aangevraagd).
     await closeExtraPanels();
     organInfo = null;
+    // Ook de weergave terugzetten via dezelfde helper als de rest (setView):
+    // sloot je het orgel vanuit een instellingen-tab, dan bleef activeView op
+    // die tab staan en opende het orgel dat je daarna koos meteen in de
+    // instellingen in plaats van aan de klavieren. showOrganBrowser daarna nog
+    // eens hard op true, want tijdens een laadactie neemt setView de andere tak.
+    setView('orgel');
     showOrganBrowser = true;
   }
 
@@ -1287,10 +1425,38 @@
        Console in secondary-modus + StatusBar) — zie PanelApp.svelte. -->
   <PanelApp />
 {:else}
+{#if booting}
+  <!-- Opstart-splash: vult de eerste seconden zodat het startscherm compleet
+       verschijnt (inclusief een eventuele update-balk) in plaats van stukje bij
+       beetje. Staat bewust alléén hier — extra registerschermen (PanelApp) en
+       het notatievenster krijgen geen splash. -->
+  <div class="boot-splash" out:fade={{ duration: 400 }}>
+    <div class="nameplate nameplate-lg">
+      <div class="nameplate-inner">
+        <span class="nameplate-title">{$t('app.title')}</span>
+      </div>
+    </div>
+    <svg class="boot-splash-mark" width="72" height="72" viewBox="0 0 36 36" fill="none" aria-hidden="true">
+      <rect x="4" y="6" width="5" height="26" rx="1.5" fill="currentColor" opacity="0.3"/>
+      <rect x="11" y="10" width="5" height="22" rx="1.5" fill="currentColor" opacity="0.4"/>
+      <rect x="18" y="4" width="5" height="28" rx="1.5" fill="currentColor" opacity="0.5"/>
+      <rect x="25" y="8" width="5" height="24" rx="1.5" fill="currentColor" opacity="0.4"/>
+    </svg>
+    <div class="boot-splash-sub">{$t('app.subtitle')}</div>
+    {#if appVersion}
+      <div class="boot-splash-version">{$t('about.version').replace('{version}', appVersion)}</div>
+    {/if}
+    <div class="loading-progress boot-splash-bar">
+      <div class="loading-progress-bar boot-splash-bar-run"></div>
+    </div>
+    <div class="loading-text">{$t('splash.starting')}</div>
+  </div>
+{/if}
 <div id="app">
   <Header
     organName={organInfo?.name}
     organLoaded={!showOrganBrowser && organInfo}
+    showTabs={!showOrganBrowser}
     {status}
     {activeView}
     {audioProfiles}
@@ -1298,7 +1464,7 @@
     on:startAudio={startAudio}
     on:stopAudio={stopAudio}
     on:closeOrgan={closeOrgan}
-    on:setView={(e) => activeView = e.detail}
+    on:setView={(e) => setView(e.detail)}
     on:toggleAudioProfile={() => switchAudioProfile()}
   />
 
@@ -1309,6 +1475,18 @@
       <span>{$t('update.new_version_prefix')} <b>{updateInfo.version}</b> {$t('update.new_version_suffix')}</span>
       <button class="btn btn-primary btn-sm" on:click={openUpdatePage}>{$t('update.download')}</button>
       <button class="btn btn-ghost btn-sm" on:click={dismissUpdate} title={$t('update.dismiss_title')} aria-label={$t('actions.close')}>✕</button>
+    </div>
+  {/if}
+
+  {#if audioOverbelastAdvies}
+    <!-- Niet-modaal: de organist kan gewoon doorspelen; één klik zet de buffer
+         op 128 frames (4x meer tijd per callback dan 32). -->
+    <div class="update-banner">
+      <span>{$t('audio.overload_warn')
+        .replace('{peak}', Math.round((status.renderPeak || 0) * 100))
+        .replace('{frames}', status.bufferFrames || 0)}</span>
+      <button class="btn btn-primary btn-sm" on:click={zetBufferOp128}>{$t('audio.overload_fix')}</button>
+      <button class="btn btn-ghost btn-sm" on:click={() => { audioOverbelastAdvies = false; audioOverbelastGenegeerd = true; }} title={$t('actions.close')} aria-label={$t('actions.close')}>✕</button>
     </div>
   {/if}
 
@@ -1343,10 +1521,11 @@
       on:toggleStop={(e) => toggleStop(e.detail)}
       on:toggleCoupler={(e) => toggleCoupler(e.detail)}
       on:divisionChannelsChanged={syncActiveProfileChannels}
+      on:onlineSetsSettled={() => meldOnlineSetsKlaar()}
       on:refreshOrgan={refreshOrganInfoNow}
       on:refreshDevices={refreshDevices}
       on:refresh={refreshDevices}
-      on:setView={(e) => activeView = e.detail}
+      on:setView={(e) => setView(e.detail)}
       on:loadOrgan={(e) => loadOrgan(e.detail)}
       on:scanFolder={(e) => loadFromFolder(e.detail)}
       on:setTremulant={(e) => setTremulant(e.detail.division, e.detail.active)}

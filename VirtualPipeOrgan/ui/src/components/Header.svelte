@@ -12,6 +12,10 @@
   // Secundaire modus (extra registerscherm): toont een "balk verbergen"-knop;
   // de betekenis van de overige knoppen wordt door de shell (PanelApp) bepaald.
   export let secondary = false;
+  // Tabs tonen. Bewust los van organLoaded: zonder geladen orgel moeten Orgel
+  // (= de bibliotheek) en Algemene Instellingen bereikbaar blijven, anders is
+  // er vanuit de instellingen geen weg terug naar het startscherm.
+  export let showTabs = false;
 
   const dispatch = createEventDispatcher();
 
@@ -30,45 +34,51 @@
     </div>
   </div>
 
-  {#if organLoaded && organName}
+  {#if showTabs}
     <div class="header-center">
-      <div class="header-organ-name">
-        <span>{organName}</span>
-        <button class="btn btn-ghost btn-icon btn-icon-sm" on:click={() => dispatch('closeOrgan')} title={$t('header.close_organ')}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M18 6L6 18M6 6l12 12"/>
-          </svg>
-        </button>
-      </div>
+      {#if organLoaded && organName}
+        <div class="header-organ-name">
+          <span>{organName}</span>
+          <button class="btn btn-ghost btn-icon btn-icon-sm" on:click={() => dispatch('closeOrgan')} title={$t('header.close_organ')}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M18 6L6 18M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
+      {/if}
       <div class="header-tabs" role="tablist" aria-label={$t('nav.orgel')}>
         <button
           class="header-tab"
           class:active={activeView === 'orgel'}
           on:click={() => dispatch('setView', 'orgel')}
-          on:keydown={(e) => { if (e.key === 'ArrowRight') dispatch('setView', 'orgel-instellingen'); }}
+          on:keydown={(e) => { if (e.key === 'ArrowRight') dispatch('setView', organLoaded ? 'orgel-instellingen' : 'algemene-instellingen'); }}
           role="tab"
           aria-selected={activeView === 'orgel'}
           tabindex={activeView === 'orgel' ? 0 : -1}
           title="F1"
         >{$t('nav.orgel')}</button>
-        <button
-          class="header-tab"
-          class:active={activeView === 'orgel-instellingen'}
-          on:click={() => dispatch('setView', 'orgel-instellingen')}
-          on:keydown={(e) => {
-            if (e.key === 'ArrowLeft') dispatch('setView', 'orgel');
-            if (e.key === 'ArrowRight') dispatch('setView', 'algemene-instellingen');
-          }}
-          role="tab"
-          aria-selected={activeView === 'orgel-instellingen'}
-          tabindex={activeView === 'orgel-instellingen' ? 0 : -1}
-          title="F2"
-        >{$t('nav.orgel_instellingen')}</button>
+        {#if organLoaded}
+          <!-- Orgel-Instellingen heeft zonder geladen orgel niets om in te
+               stellen; de tab verdwijnt dan uit de rij. -->
+          <button
+            class="header-tab"
+            class:active={activeView === 'orgel-instellingen'}
+            on:click={() => dispatch('setView', 'orgel-instellingen')}
+            on:keydown={(e) => {
+              if (e.key === 'ArrowLeft') dispatch('setView', 'orgel');
+              if (e.key === 'ArrowRight') dispatch('setView', 'algemene-instellingen');
+            }}
+            role="tab"
+            aria-selected={activeView === 'orgel-instellingen'}
+            tabindex={activeView === 'orgel-instellingen' ? 0 : -1}
+            title="F2"
+          >{$t('nav.orgel_instellingen')}</button>
+        {/if}
         <button
           class="header-tab"
           class:active={activeView === 'algemene-instellingen'}
           on:click={() => dispatch('setView', 'algemene-instellingen')}
-          on:keydown={(e) => { if (e.key === 'ArrowLeft') dispatch('setView', 'orgel-instellingen'); }}
+          on:keydown={(e) => { if (e.key === 'ArrowLeft') dispatch('setView', organLoaded ? 'orgel-instellingen' : 'orgel'); }}
           role="tab"
           aria-selected={activeView === 'algemene-instellingen'}
           tabindex={activeView === 'algemene-instellingen' ? 0 : -1}

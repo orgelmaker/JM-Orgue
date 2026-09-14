@@ -16,3 +16,20 @@ screenshots/
 # Diversen
 *.log
 nul
+
+# Uitvoer van de testscripts (opnamen, gegenereerde test-orgels, tijdelijke mappen):
+# de scripts zelf horen wél in de repo, hun resultaten niet.
+VirtualPipeOrgan/testscripts/*.mp3
+VirtualPipeOrgan/testscripts/*.mid
+VirtualPipeOrgan/testscripts/*.json
+!VirtualPipeOrgan/testscripts/samplesets.json
+VirtualPipeOrgan/testscripts/*.organ
+VirtualPipeOrgan/testscripts/.jm-settings.json
+VirtualPipeOrgan/testscripts/go_testodf/
+VirtualPipeOrgan/testscripts/MicTest/
+VirtualPipeOrgan/testscripts/jmrec_naamtest/
+VirtualPipeOrgan/testscripts/archief_test_*/
+
+# Python-cache van de testscripts
+__pycache__/
+*.pyc

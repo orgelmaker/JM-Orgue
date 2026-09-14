@@ -198,8 +198,18 @@ pub struct PipeExtra {
     /// PipeXXXCuePoint: override van de release-marker (cue-chunk) van het
     /// attack-bestand, in frames.
     pub cue_point: Option<u32>,
-    /// Aparte tremulant-opname van deze pijp (Hauptwerk "tremmed"-laag)
-    pub tremulant_sample: Option<PathBuf>,
+    /// Aparte tremulant-opname (attack) van deze pijp: de Hauptwerk
+    /// "tremmed"-laag of een GrandOrgue `{key}Attack{jjj}` met `IsTremulant=1`.
+    pub tremulant_attack: Option<AttackDef>,
+    /// Droge attack wanneer juist de PRIMAIRE opname de tremulantvariant is
+    /// (`{key}IsTremulant=1`) en een extra attack de droge: dan wint deze als
+    /// attack-bestand. Normaal `None`.
+    pub dry_attack: Option<AttackDef>,
+    /// Release-samples die alléén met tremulant aan gelden (`IsTremulant=1`,
+    /// plus de `-1`-releases die voor beide standen gelden). Leeg = de set
+    /// heeft geen trem-specifieke releases; dan gelden de droge ook met
+    /// tremulant aan.
+    pub tremulant_releases: Vec<ReleaseDef>,
     // ── Toonhoogte-metadata voor hertemperen (GO GOSoundingPipe-semantiek) ──
     /// ODF `{key}MIDIKeyNumber` (0..127): MIDI-toets van de opgenomen sample;
     /// overschrijft de smpl-chunk van de WAV. −1/afwezig → None.
@@ -231,6 +241,26 @@ pub struct ReleaseDef {
     pub max_key_press_time_ms: Option<i32>,
     pub cue_point: Option<u32>,
     pub release_end: Option<u32>,
+    /// `{release}ReleaseCrossfadeLength` (ms, 0-3000): door de sampleset
+    /// opgegeven crossfade-duur tussen speelnoot en release. `None` (of 0) =
+    /// de automatische, toonhoogte-afhankelijke duur van de engine.
+    pub crossfade_ms: Option<u32>,
+}
+
+/// Eén attack-opname van een pijp: de primaire (`{key}=pad`) of een extra
+/// `{key}Attack{jjj}`. Gebruikt voor de tremulant-laag van een GrandOrgue-
+/// golfvormtremulant (`{key}Attack{jjj}IsTremulant=1`) en voor de Hauptwerk-
+/// "tremmed"-laag.
+#[derive(Debug, Clone, Default)]
+pub struct AttackDef {
+    pub path: PathBuf,
+    /// Beste ODF-looppunten van DEZE opname (`loop_end` exclusief).
+    pub loop_start: Option<u32>,
+    pub loop_end: Option<u32>,
+    /// `{attack}CuePoint`: override van de release-marker in dit bestand.
+    pub cue_point: Option<u32>,
+    /// `{attack}LoadRelease` (Y/N): release-segment uit dit bestand nemen.
+    pub load_release: Option<bool>,
 }
 
 /// Pipe definition - either a direct sample path or a reference
@@ -300,6 +330,11 @@ pub struct EnclosureDef {
 pub struct TremulantDef {
     pub number: u32,
     pub name: String,
+    /// `TremulantType=Wave`: de sampleset heeft echte tremulant-OPNAMEN en
+    /// schakelt de pijpen van de betrokken windladen tussen `IsTremulant=0`
+    /// en `=1`. GrandOrgue leest Period/AmpModDepth/StartRate/StopRate dan
+    /// niet — die gelden alleen voor `TremulantType=Synth` (de LFO).
+    pub wave: bool,
     /// Period in milliseconds
     pub period: f32,
     /// Amplitude modulation depth (%)
@@ -690,7 +725,7 @@ impl OdfParser {
                 } else {
                     // Inschaling, stemming, percussive, loops en releases
                     // komen uit de rank-sectie met dezelfde sleutelnamen.
-                    let mut extra = self.parse_pipe_extra(rank_section, &key);
+                    let mut extra = self.parse_pipe_extra(rank_section, &key, value);
                     if !rank_neutral {
                         // Vouw de rank-brede inschaling in de pijp-extra:
                         // percentages vermenigvuldigen, dB/cents optellen.
@@ -807,25 +842,20 @@ impl OdfParser {
         }
     }
 
-    /// Parse alle extra pijp-attributen voor de pijp met sleutelprefix `key`
-    /// (bv. "Pipe001") uit `section`. Gedeeld door het inline-pad (parse_pipes)
-    /// en het rank-pad (parse_stop_ranks); de sleutelnamen zijn identiek.
-    ///
-    /// LET OP eenheden: `{key}Gain` is dB, `{key}AmplitudeLevel` is % en
-    /// PitchTuning/PitchCorrection zijn cents (floats, bv. "4.79062").
-    fn parse_pipe_extra(&self, section: &HashMap<String, String>, key: &str) -> PipeExtra {
-        // ODF-looppunten: parse ALLE LoopNNN-records en kies de langste geldige
-        // (onze engine speelt één loop). GrandOrgue-semantiek: LoopEnd is de
-        // laatste frame ínclusief → hier omgerekend naar exclusief; en zodra de
-        // ODF een loop opgeeft, winnen die van de smpl-chunk in de WAV.
+    /// ODF-looppunten onder sleutelprefix `prefix` (`{key}` of
+    /// `{key}Attack{jjj}`): parse ALLE LoopNNN-records en kies de langste
+    /// geldige (onze engine speelt één loop). GrandOrgue-semantiek: LoopEnd is
+    /// de laatste frame ínclusief → hier omgerekend naar exclusief; en zodra de
+    /// ODF een loop opgeeft, winnen die van de smpl-chunk in de WAV.
+    fn parse_loops(&self, section: &HashMap<String, String>, prefix: &str) -> (Option<u32>, Option<u32>) {
         let loop_count = self
-            .parse_u32(section, &format!("{}LoopCount", key))
+            .parse_u32(section, &format!("{}LoopCount", prefix))
             .unwrap_or(0)
             .min(100);
         let mut best_loop: Option<(u32, u32)> = None;
         for li in 1..=loop_count {
-            let s = self.parse_u32(section, &format!("{}Loop{:03}Start", key, li)).unwrap_or(0);
-            let e = match self.parse_u32(section, &format!("{}Loop{:03}End", key, li)) {
+            let s = self.parse_u32(section, &format!("{}Loop{:03}Start", prefix, li)).unwrap_or(0);
+            let e = match self.parse_u32(section, &format!("{}Loop{:03}End", prefix, li)) {
                 Some(e) => e,
                 None => continue,
             };
@@ -837,10 +867,95 @@ impl OdfParser {
                 best_loop = Some((s, e_excl));
             }
         }
-        let (loop_start, loop_end) = match best_loop {
+        match best_loop {
             Some((s, e)) => (Some(s), Some(e)),
             None => (None, None),
-        };
+        }
+    }
+
+    /// Parse alle extra pijp-attributen voor de pijp met sleutelprefix `key`
+    /// (bv. "Pipe001") uit `section`. Gedeeld door het inline-pad (parse_pipes)
+    /// en het rank-pad (parse_stop_ranks); de sleutelnamen zijn identiek.
+    ///
+    /// LET OP eenheden: `{key}Gain` is dB, `{key}AmplitudeLevel` is % en
+    /// PitchTuning/PitchCorrection zijn cents (floats, bv. "4.79062").
+    fn parse_pipe_extra(&self, section: &HashMap<String, String>, key: &str, primary: &str) -> PipeExtra {
+        let (loop_start, loop_end) = self.parse_loops(section, key);
+        let cue_point = self.parse_u32(section, &format!("{}CuePoint", key));
+        let load_release = section
+            .get(&format!("{}LoadRelease", key))
+            .map(|v| v.trim().eq_ignore_ascii_case("y"));
+
+        // GrandOrgue-golfvormtremulant: een pijp kan meerdere attack-opnamen
+        // hebben (`{key}AttackCount` + `{key}Attack{jjj}`). `IsTremulant` zegt
+        // voor welke stand een opname geldt: -1 = beide (default), 0 = alleen
+        // zonder tremulant, 1 = alleen met tremulant. Alléén `IsTremulant==1`
+        // wordt hier de tremulant-laag; andere extra attacks (velocity- of
+        // herhalingsvarianten, zoals in GreenPositiv) blijven net als voorheen
+        // ongebruikt — hun gedrag verandert dus niet.
+        let primary_is_trem = self
+            .parse_i32(section, &format!("{}IsTremulant", key))
+            .unwrap_or(-1);
+        let attack_count = self
+            .parse_u32(section, &format!("{}AttackCount", key))
+            .unwrap_or(0)
+            .min(100);
+        let mut tremulant_attack: Option<AttackDef> = None;
+        let mut dry_attack: Option<AttackDef> = None;
+        for j in 1..=attack_count {
+            let akey = format!("{}Attack{:03}", key, j);
+            let apath = match section.get(&akey) {
+                Some(p) => p,
+                None => continue,
+            };
+            let is_trem = self
+                .parse_i32(section, &format!("{}IsTremulant", akey))
+                .unwrap_or(-1);
+            let (als, ale) = self.parse_loops(section, &akey);
+            let def = AttackDef {
+                path: self.resolve_path(apath),
+                loop_start: als,
+                loop_end: ale,
+                cue_point: self.parse_u32(section, &format!("{}CuePoint", akey)),
+                load_release: section
+                    .get(&format!("{}LoadRelease", akey))
+                    .map(|v| v.trim().eq_ignore_ascii_case("y")),
+            };
+            if is_trem == 1 {
+                if tremulant_attack.is_none() {
+                    tremulant_attack = Some(def);
+                }
+            } else if primary_is_trem == 1 && dry_attack.is_none() {
+                // De primaire opname is de trem-variant → deze is de droge.
+                dry_attack = Some(def);
+            }
+        }
+        if primary_is_trem == 1 {
+            if dry_attack.is_some() {
+                // Rollen omdraaien: de primaire opname IS de tremulantvariant.
+                tremulant_attack = Some(AttackDef {
+                    path: self.resolve_path(primary),
+                    loop_start,
+                    loop_end,
+                    cue_point,
+                    load_release,
+                });
+            } else {
+                warn!(
+                    "Pijp '{}': IsTremulant=1 zonder droge tegenhanger — deze opname wordt ook zonder tremulant gebruikt",
+                    key
+                );
+            }
+        }
+
+        // Releases PAS NU: de splitsing droog/tremulant hangt af van het
+        // bestaan van een tremulant-LAAG. Zonder trem-attack bestaat er geen
+        // tremulant-sleutel (TREM_FLAG) om trem-releases aan te hangen — die
+        // releases zouden dan in het niets verdwijnen (regressie: een pijp met
+        // alleen `Release001IsTremulant=1` als lange default raakte zijn
+        // release helemaal kwijt). Dan blijven ALLE releases dus droog.
+        let (releases, tremulant_releases) =
+            self.parse_pipe_releases(section, key, tremulant_attack.is_some());
 
         PipeExtra {
             amplitude_level: self.parse_f32(section, &format!("{}AmplitudeLevel", key)),
@@ -851,10 +966,12 @@ impl OdfParser {
             percussive: section.get(&format!("{}Percussive", key)).map(|v| v == "Y"),
             loop_start,
             loop_end,
-            releases: self.parse_pipe_releases(section, key),
-            load_release: section.get(&format!("{}LoadRelease", key)).map(|v| v.trim().eq_ignore_ascii_case("y")),
-            cue_point: self.parse_u32(section, &format!("{}CuePoint", key)),
-            tremulant_sample: None,
+            releases,
+            load_release,
+            cue_point,
+            tremulant_attack,
+            dry_attack,
+            tremulant_releases,
             // Toonhoogte-metadata (hertemperen). MIDIKeyNumber=-1 geeft via
             // parse_u32 al None; MIDIPitchFraction=-1 parset wél (-1.0) en
             // moet expliciet buiten 0..=100 vallen.
@@ -874,8 +991,28 @@ impl OdfParser {
 
     /// Parse de release-samples van één pijp: `{key}ReleaseCount` gevolgd door
     /// per release `{key}Release{jjj}` (pad), `...MaxKeyPressTime` (ms, -1 =
-    /// default/langste release), `...CuePoint` en `...ReleaseEnd` (samplenummers).
-    fn parse_pipe_releases(&self, section: &HashMap<String, String>, key: &str) -> Vec<ReleaseDef> {
+    /// default/langste release), `...CuePoint`, `...ReleaseEnd` (samplenummers),
+    /// `...ReleaseCrossfadeLength` (ms) en `...IsTremulant`.
+    ///
+    /// Geeft twee lijsten terug: (droge releases, tremulant-releases). GO-
+    /// semantiek van `IsTremulant`: -1 = geldt voor beide standen (default),
+    /// 0 = alleen zonder tremulant, 1 = alleen met tremulant. Heeft geen enkele
+    /// release `IsTremulant=1`, dan blijft de tweede lijst LEEG — de droge
+    /// releases gelden dan ook met tremulant aan en er wordt geen geheugen
+    /// verdubbeld.
+    ///
+    /// `has_trem_layer` zegt of deze pijp een echte tremulant-OPNAME heeft
+    /// (`tremulant_attack`). Zonder zo'n laag bestaat er geen aparte
+    /// tremulant-sleutel om releases aan te hangen: dan gaan ALLE releases —
+    /// ook die met `IsTremulant=1` — naar de droge lijst in de volgorde van de
+    /// ODF, en blijft de tremulant-lijst leeg. Anders zou zo'n release (vaak
+    /// juist de lange default, `MaxKeyPressTime=-1`) helemaal wegvallen.
+    fn parse_pipe_releases(
+        &self,
+        section: &HashMap<String, String>,
+        key: &str,
+        has_trem_layer: bool,
+    ) -> (Vec<ReleaseDef>, Vec<ReleaseDef>) {
         // Cap zoals bij LoopCount: een ODF-waarde als 4294967295 gaf hier een
         // ~200 GB Vec::with_capacity → alloc-abort van het hele proces.
         let count = self
@@ -883,21 +1020,42 @@ impl OdfParser {
             .unwrap_or(0)
             .min(100);
         let mut releases = Vec::with_capacity(count as usize);
+        let mut trem_releases: Vec<ReleaseDef> = Vec::new();
+        let mut any_trem_specific = false;
 
         for j in 1..=count {
             let release_key = format!("{}Release{:03}", key, j);
             if let Some(path) = section.get(&release_key) {
-                releases.push(ReleaseDef {
+                let is_trem = self
+                    .parse_i32(section, &format!("{}IsTremulant", release_key))
+                    .unwrap_or(-1);
+                let def = ReleaseDef {
                     path: self.resolve_path(path),
                     max_key_press_time_ms: self
                         .parse_i32(section, &format!("{}MaxKeyPressTime", release_key)),
                     cue_point: self.parse_u32(section, &format!("{}CuePoint", release_key)),
                     release_end: self.parse_u32(section, &format!("{}ReleaseEnd", release_key)),
-                });
+                    // 0 (of afwezig) = geen opgave → automatische duur.
+                    crossfade_ms: self
+                        .parse_u32(section, &format!("{}ReleaseCrossfadeLength", release_key))
+                        .filter(|ms| *ms > 0 && *ms <= 3000),
+                };
+                if is_trem != 1 || !has_trem_layer {
+                    releases.push(def.clone());
+                }
+                if is_trem != 0 && has_trem_layer {
+                    trem_releases.push(def);
+                }
+                if is_trem == 1 {
+                    any_trem_specific = true;
+                }
             }
         }
 
-        releases
+        if !any_trem_specific || !has_trem_layer {
+            trem_releases.clear();
+        }
+        (releases, trem_releases)
     }
 
     /// Parse pipe definitions for a stop
@@ -937,7 +1095,7 @@ impl OdfParser {
                     PipeDef::Sample {
                         path,
                         // Inschaling, stemming, percussive, loops en releases.
-                        extra: self.parse_pipe_extra(section, &key),
+                        extra: self.parse_pipe_extra(section, &key, value),
                     }
                 };
 
@@ -1025,6 +1183,10 @@ impl OdfParser {
                 tremulants.push(TremulantDef {
                     number: i,
                     name: section.get("Name").cloned().unwrap_or_default(),
+                    wave: section
+                        .get("TremulantType")
+                        .map(|t| t.trim().eq_ignore_ascii_case("wave"))
+                        .unwrap_or(false),
                     period: self.parse_f32(section, "Period").unwrap_or(160.0),
                     amp_mod_depth: self.parse_f32(section, "AmpModDepth").unwrap_or(18.0),
                     start_rate: self.parse_f32(section, "StartRate").unwrap_or(8.0),
@@ -1425,6 +1587,60 @@ pub fn load_grandorgue_organ(
     loader.load(odf_path)
 }
 
+/// Pad van de PANEEL-ACHTERGROND uit een GrandOrgue-ODF (`[Image001] Image=`),
+/// voor de bibliotheekkaart. De ODF wijst daarmee zelf de console-afbeelding
+/// aan; zoeken op bestandsnaam/afmeting is dan niet meer nodig.
+///
+/// Leest het bestand als BYTES met dezelfde Latin-1-terugval als
+/// `OdfParser::parse` (oude Zweedse/Duitse sets zijn geen UTF-8) en strip een
+/// UTF-8-BOM: bij GreenPositiv/Friesach staat `[Image001]` op de eerste regel
+/// en zou een BOM de sectiekop onherkenbaar maken. Het teruggegeven pad is
+/// genormaliseerd zoals `resolve_path` (backslashes naar `/`, `.\` eraf) en
+/// relatief t.o.v. de ODF-map; of het bestand bestaat wordt hier NIET getoetst.
+pub fn panel_image_path(odf_path: &Path) -> Option<PathBuf> {
+    let bytes = fs::read(odf_path).ok()?;
+    let content = String::from_utf8(bytes.clone())
+        .unwrap_or_else(|_| bytes.iter().map(|&b| b as char).collect());
+    let content = content.trim_start_matches('\u{feff}');
+    let base = odf_path.parent().unwrap_or(Path::new(".")).to_path_buf();
+
+    // Sectie -> waarde van Image= (eerste voorkomen wint, zoals de ini-parser).
+    let mut current = String::new();
+    let mut found: HashMap<String, String> = HashMap::new();
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with(';') {
+            continue;
+        }
+        if line.starts_with('[') && line.ends_with(']') {
+            current = line[1..line.len() - 1].to_ascii_lowercase();
+            continue;
+        }
+        if let Some(eq) = line.find('=') {
+            if line[..eq].trim().eq_ignore_ascii_case("Image") {
+                let v = line[eq + 1..].trim().to_string();
+                if !v.is_empty() {
+                    found.entry(current.clone()).or_insert(v);
+                }
+            }
+        }
+    }
+
+    // Hoofdpaneel eerst, daarna de eerste extra panelen.
+    for key in ["image001", "panel000image001", "panel001image001", "panel002image001"] {
+        if let Some(v) = found.get(key) {
+            // Sommige ODF's bevatten een dubbele backslash in het pad
+            // (GreenPositiv Panel002) -> na normalisatie "//" samenvouwen.
+            let normalized = v
+                .replace('\\', "/")
+                .trim_start_matches("./")
+                .replace("//", "/");
+            return Some(base.join(normalized));
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1540,6 +1756,206 @@ Pipe001Release002MaxKeyPressTime=-1
         assert_eq!(r2.max_key_press_time_ms, Some(-1));
         assert_eq!(r2.cue_point, None);
         assert_eq!(r2.release_end, None);
+    }
+
+    #[test]
+    fn test_wave_tremulant_attack_en_releases() {
+        // GrandOrgue-golfvormtremulant: primaire opname droog (IsTremulant=0),
+        // Attack001 de tremulant-opname (IsTremulant=1), twee releases waarvan
+        // één droog (0) en één voor de tremulantstand (1).
+        let organ = parse_odf_str("wavetrem", "\
+[Organ]
+ChurchName=Testkerk
+NumberOfManuals=1
+NumberOfTremulants=1
+[Tremulant001]
+Name=Tremulant
+TremulantType=Wave
+[Manual001]
+Name=Manuaal
+NumberOfStops=1
+Stop001=001
+NumberOfTremulants=1
+Tremulant001=001
+[Stop001]
+Name=Prestant 8'
+NumberOfLogicalPipes=1
+Pipe001=samples\\dry\\060-c.wav
+Pipe001IsTremulant=0
+Pipe001AttackCount=1
+Pipe001Attack001=samples\\trem\\060-c.wav
+Pipe001Attack001IsTremulant=1
+Pipe001Attack001LoopCount=1
+Pipe001Attack001Loop001Start=100
+Pipe001Attack001Loop001End=199
+Pipe001ReleaseCount=2
+Pipe001Release001=rel\\dry\\060-c.wav
+Pipe001Release001IsTremulant=0
+Pipe001Release001MaxKeyPressTime=-1
+Pipe001Release001ReleaseCrossfadeLength=120
+Pipe001Release002=rel\\trem\\060-c.wav
+Pipe001Release002IsTremulant=1
+Pipe001Release002MaxKeyPressTime=-1
+");
+        // TremulantType=Wave herkend (geen synth-LFO-parameters).
+        assert!(organ.tremulants[0].wave, "TremulantType=Wave moet wave=true geven");
+
+        let stop = organ.get_stop(1).expect("stop 1 moet bestaan");
+        let PipeDef::Sample { path, extra } = &stop.pipes[0] else {
+            panic!("pijp 1 moet een Sample zijn");
+        };
+        // De primaire (droge) opname blijft het attack-bestand.
+        assert!(path.ends_with("samples/dry/060-c.wav"), "{path:?}");
+        assert!(extra.dry_attack.is_none(), "geen omwisseling nodig");
+        // Tremulant-attack met eigen looppunten (LoopEnd exclusief).
+        let trem = extra.tremulant_attack.as_ref().expect("trem-attack ontbreekt");
+        assert!(trem.path.ends_with("samples/trem/060-c.wav"), "{:?}", trem.path);
+        assert_eq!((trem.loop_start, trem.loop_end), (Some(100), Some(200)));
+        // Releases gesplitst op IsTremulant.
+        assert_eq!(extra.releases.len(), 1);
+        assert!(extra.releases[0].path.ends_with("rel/dry/060-c.wav"));
+        assert_eq!(extra.releases[0].crossfade_ms, Some(120));
+        assert_eq!(extra.tremulant_releases.len(), 1);
+        assert!(extra.tremulant_releases[0].path.ends_with("rel/trem/060-c.wav"));
+    }
+
+    #[test]
+    fn test_release_is_tremulant_min_een_geldt_voor_beide() {
+        // IsTremulant=-1 (of afwezig) betekent "geldt in beide standen": zo'n
+        // release hoort in BEIDE lijsten zodra er ook een trem-specifieke is.
+        // Vereist wél een echte tremulant-LAAG (Attack001 IsTremulant=1),
+        // anders is er geen trem-sleutel om die releases aan te hangen.
+        let organ = parse_odf_str("trembeide", "\
+[Organ]
+ChurchName=Testkerk
+NumberOfManuals=1
+[Manual001]
+Name=Manuaal
+NumberOfStops=1
+Stop001=001
+[Stop001]
+Name=Prestant 8'
+NumberOfLogicalPipes=1
+Pipe001=samples\\060-c.wav
+Pipe001IsTremulant=0
+Pipe001AttackCount=1
+Pipe001Attack001=samples\\trem\\060-c.wav
+Pipe001Attack001IsTremulant=1
+Pipe001ReleaseCount=2
+Pipe001Release001=rel\\kort\\060-c.wav
+Pipe001Release001MaxKeyPressTime=400
+Pipe001Release002=rel\\trem\\060-c.wav
+Pipe001Release002IsTremulant=1
+Pipe001Release002MaxKeyPressTime=-1
+");
+        let stop = organ.get_stop(1).expect("stop 1 moet bestaan");
+        let PipeDef::Sample { extra, .. } = &stop.pipes[0] else { panic!("Sample") };
+        assert!(extra.tremulant_attack.is_some(), "trem-laag moet er zijn");
+        assert_eq!(extra.releases.len(), 1, "alleen de -1-release is droog");
+        assert_eq!(extra.tremulant_releases.len(), 2, "-1 telt óók voor de trem-stand");
+        assert!(extra.tremulant_releases[0].path.ends_with("rel/kort/060-c.wav"));
+        assert!(extra.tremulant_releases[1].path.ends_with("rel/trem/060-c.wav"));
+    }
+
+    #[test]
+    fn test_trem_release_zonder_tremlaag_blijft_droog() {
+        // Regressie: een pijp ZONDER tremulant-opname (geen Attack IsTremulant=1)
+        // maar mét `Release00xIsTremulant=1`. Die release werd uit de droge lijst
+        // gefilterd en in tremulant_releases gezet, dat het laadpad alleen leest
+        // als er een trem-attack is — de release (hier juist de lange default)
+        // verdween daarmee volledig. Nu blijven alle releases droog.
+        let organ = parse_odf_str("tremreleasezonderlaag", "\
+[Organ]
+ChurchName=Testkerk
+NumberOfManuals=1
+[Manual001]
+Name=Manuaal
+NumberOfStops=1
+Stop001=001
+[Stop001]
+Name=Prestant 8'
+NumberOfLogicalPipes=1
+Pipe001=samples\\060-c.wav
+Pipe001ReleaseCount=2
+Pipe001Release001=rel\\kort\\060-c.wav
+Pipe001Release001IsTremulant=0
+Pipe001Release001MaxKeyPressTime=400
+Pipe001Release002=rel\\lang\\060-c.wav
+Pipe001Release002IsTremulant=1
+Pipe001Release002MaxKeyPressTime=-1
+");
+        let stop = organ.get_stop(1).expect("stop 1 moet bestaan");
+        let PipeDef::Sample { extra, .. } = &stop.pipes[0] else { panic!("Sample") };
+        assert!(extra.tremulant_attack.is_none(), "geen trem-laag in deze ODF");
+        assert_eq!(extra.releases.len(), 2, "beide releases blijven bruikbaar");
+        assert!(extra.releases[0].path.ends_with("rel/kort/060-c.wav"));
+        assert!(extra.releases[1].path.ends_with("rel/lang/060-c.wav"));
+        assert_eq!(extra.releases[1].max_key_press_time_ms, Some(-1), "lange default");
+        assert!(extra.tremulant_releases.is_empty(), "niets om aan te hangen");
+    }
+
+    #[test]
+    fn test_extra_attacks_zonder_tremulant_blijven_genegeerd() {
+        // Regressie (GreenPositiv): AttackCount=2 met IsTremulant=0 zijn
+        // velocity-/herhalingsvarianten — géén tremulant-laag, en de droge
+        // releases blijven ongewijzigd.
+        let organ = parse_odf_str("greenpositiv", "\
+[Organ]
+ChurchName=Testkerk
+NumberOfManuals=1
+[Manual001]
+Name=Manuaal
+NumberOfStops=1
+Stop001=001
+[Stop001]
+Name=Prestant 8'
+NumberOfLogicalPipes=1
+Pipe001=samples\\060-c.wav
+Pipe001IsTremulant=0
+Pipe001AttackCount=2
+Pipe001Attack001=samples\\a1\\060-c.wav
+Pipe001Attack001IsTremulant=0
+Pipe001Attack002=samples\\a2\\060-c.wav
+Pipe001Attack002IsTremulant=0
+Pipe001ReleaseCount=1
+Pipe001Release001=rel\\060-c.wav
+Pipe001Release001MaxKeyPressTime=-1
+");
+        let stop = organ.get_stop(1).expect("stop 1 moet bestaan");
+        let PipeDef::Sample { path, extra } = &stop.pipes[0] else { panic!("Sample") };
+        assert!(path.ends_with("samples/060-c.wav"));
+        assert!(extra.tremulant_attack.is_none(), "geen IsTremulant=1 → geen trem-laag");
+        assert!(extra.dry_attack.is_none());
+        assert_eq!(extra.releases.len(), 1);
+        assert!(extra.tremulant_releases.is_empty(), "geen trem-release → lijst leeg");
+        assert_eq!(extra.releases[0].crossfade_ms, None);
+    }
+
+    #[test]
+    fn test_primaire_opname_is_de_tremulantvariant() {
+        // Pathologisch maar toegestaan: de primaire opname is de trem-variant en
+        // de droge zit in een extra attack. Dan wisselen de rollen om.
+        let organ = parse_odf_str("tremprimair", "\
+[Organ]
+ChurchName=Testkerk
+NumberOfManuals=1
+[Manual001]
+Name=Manuaal
+NumberOfStops=1
+Stop001=001
+[Stop001]
+Name=Prestant 8'
+NumberOfLogicalPipes=1
+Pipe001=samples\\trem\\060-c.wav
+Pipe001IsTremulant=1
+Pipe001AttackCount=1
+Pipe001Attack001=samples\\dry\\060-c.wav
+Pipe001Attack001IsTremulant=0
+");
+        let stop = organ.get_stop(1).expect("stop 1 moet bestaan");
+        let PipeDef::Sample { extra, .. } = &stop.pipes[0] else { panic!("Sample") };
+        assert!(extra.dry_attack.as_ref().unwrap().path.ends_with("samples/dry/060-c.wav"));
+        assert!(extra.tremulant_attack.as_ref().unwrap().path.ends_with("samples/trem/060-c.wav"));
     }
 
     #[test]
@@ -1896,5 +2312,49 @@ Pipe001=REF:001:002:001
             "REF:001:002:001 resolvde naar {:?} maar moet de tweede stop van manual 1 zijn",
             path
         );
+    }
+
+    #[test]
+    fn test_panel_image_path_leest_image001() {
+        let dir = std::env::temp_dir().join("jm_panelimg_1");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let odf = dir.join("Test.organ");
+        // BOM + [Image001] op regel 1, zoals GreenPositiv/Friesach.
+        let mut data: Vec<u8> = vec![0xEF, 0xBB, 0xBF];
+        data.extend_from_slice(b"[Image001]\r\nImage=Data - X\\Images70\\Background1.png\r\n\r\n[Organ]\r\nChurchName=X\r\n");
+        fs::write(&odf, &data).unwrap();
+        let got = panel_image_path(&odf).unwrap();
+        assert_eq!(got, dir.join("Data - X/Images70/Background1.png"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_panel_image_path_latin1_en_puntslash() {
+        let dir = std::env::temp_dir().join("jm_panelimg_2");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let odf = dir.join("Test.organ");
+        // 0xE5 = 'a-bolle' in Latin-1: ongeldige UTF-8, moet via de terugval
+        // toch gelezen worden (Bureaa-set).
+        let mut data: Vec<u8> = Vec::new();
+        data.extend_from_slice(b"[Organ]\r\nChurchName=Bure");
+        data.push(0xE5);
+        data.extend_from_slice(b" Gravkapell\r\n\r\n[Image001]\r\nImage=.\\ConsoleImages\\Background.png\r\n");
+        fs::write(&odf, &data).unwrap();
+        let got = panel_image_path(&odf).unwrap();
+        assert_eq!(got, dir.join("ConsoleImages/Background.png"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_panel_image_path_zonder_image_is_none() {
+        let dir = std::env::temp_dir().join("jm_panelimg_3");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let odf = dir.join("Test.organ");
+        fs::write(&odf, b"[Organ]\r\nChurchName=Zonder beeld\r\n").unwrap();
+        assert!(panel_image_path(&odf).is_none());
+        let _ = fs::remove_dir_all(&dir);
     }
 }

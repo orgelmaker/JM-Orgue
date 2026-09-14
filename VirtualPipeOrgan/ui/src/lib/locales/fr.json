@@ -3,6 +3,9 @@
     "title": "JM-Orgue",
     "subtitle": "Orgue à tuyaux virtuel"
   },
+  "splash": {
+    "starting": "Démarrage…"
+  },
   "nav": {
     "orgel": "Orgue",
     "instellingen": "Paramètres",
@@ -35,6 +38,10 @@
     "download_size": "Télécharger (± {mb} Mo)",
     "download_where": "Choisissez le dossier où placer le jeu d'échantillons",
     "download_failed": "Échec du téléchargement",
+    "choose_image": "Choisir une image…",
+    "choose_image_title": "Choisissez une photo de l’orgue",
+    "image_auto": "Rechercher l’image automatiquement",
+    "image_failed": "Impossible de définir l’image",
     "open_button": "Ouvrir la bibliothèque d'orgues"
   },
   "settings": {
@@ -244,7 +251,10 @@
     "loops_loopable": "bouclables",
     "loops_written": "Boucles écrites",
     "loops_skipped": "ignorés",
-    "polyphony_default": "par défaut"
+    "polyphony_default": "par défaut",
+    "audio_buffer_fast_pc": "uniquement pour PC très rapides",
+    "audio_buffer_recommended": "recommandé",
+    "audio_buffer_hint": "Plus petit = moins de latence, mais le thread audio doit effectuer tout le travail d'un changement de jeu ou de crescendo dans ce laps de temps. 128 frames (2,7 ms) convient à presque tous les PC ; 32/48 seulement sur un PC très rapide sans réverbération."
   },
   "perspectives": {
     "title": "Perspectives et rangs superposés",
@@ -341,7 +351,9 @@
     "version": "v{version}",
     "load_title": "Voix actives / limite de polyphonie · charge du thread audio",
     "archiving": "Archive MIDI",
-    "archiving_title": "L'archive MIDI automatique enregistre votre jeu ; le fichier est sauvegardé après la période de silence."
+    "archiving_title": "L'archive MIDI automatique enregistre votre jeu ; le fichier est sauvegardé après la période de silence.",
+    "peak": "pointe",
+    "overload_title": "Un appel audio a dépassé son échéance : augmentez la taille du tampon (Réglages → Sortie audio) ou réduisez la polyphonie."
   },
   "actions": {
     "save": "Enregistrer",
@@ -372,6 +384,7 @@
     "wav_files": "Fichiers WAV",
     "panel_window_title": "JM-Orgue - Écran {n}",
     "organ_definition_filter": "Définition d'orgue (GrandOrgue / Hauptwerk)",
+    "image_filter": "Images",
     "organ_definition": "Définition d'orgue",
     "external_sampleset_title": "Sampleset externe — sélectionnez le dossier principal (fichiers .wav non chiffrés uniquement)",
     "export_source_folder_title": "Sélectionnez le dossier d'échantillons à exporter",
@@ -536,7 +549,9 @@
     "profile_device_unavailable": "{label} : le périphérique « {device} » n'est pas disponible actuellement (est-il allumé / branché ?). La sortie actuelle reste active.",
     "headphones_profile_not_set": "Le profil Casque n'est pas encore configuré. Choisissez d'abord la sortie casque (pilote, périphérique et éventuellement canaux) dans Paramètres → Sortie Audio et enregistrez-la comme Casque ; ensuite ce bouton basculera directement.",
     "switch_taking_long": "Le changement de sortie audio prend plus de temps que prévu — patientez un instant.",
-    "switch_failed": "Échec du changement de sortie audio."
+    "switch_failed": "Échec du changement de sortie audio.",
+    "overload_warn": "Le thread audio ne tient pas son échéance (pointe {peak} % du temps de tampon à {frames} frames). Cela s'entend comme des clics ou des saccades lors des changements de jeux et de crescendo.",
+    "overload_fix": "Régler le tampon sur 128"
   },
   "pistons": {
     "set": "SET — enregistrer la registration",
@@ -867,7 +882,9 @@
     "range_min": "Min (fermé)",
     "range_max": "Max (plein)",
     "live": "Direct",
-    "live_title": "Position actuelle du crescendo (suit la pédale)"
+    "live_title": "Position actuelle du crescendo (suit la pédale)",
+    "binding_disabled_warn": "Une pédale de crescendo a été apprise (canal {channel} · CC{cc}), mais le crescendo général est désactivé. Cette pédale ne fait donc rien — pas même comme boîte expressive, car le CC reste réservé au crescendo.",
+    "binding_empty_warn": "Une pédale de crescendo a été apprise (canal {channel} · CC{cc}), mais aucun cran n'est encore rempli. Utilisez le remplissage automatique ou la matrice, sinon la pédale ne fait rien."
   },
   "sorting": {
     "by_pitch": "Hauteur (pieds)",
@@ -940,6 +957,21 @@
     "no_lan_ip": "Aucune adresse réseau trouvée — ce PC est-il connecté au Wi-Fi ou par câble réseau ?",
     "running": "Actif",
     "stopped": "Inactif",
-    "hint": "La première fois, le pare-feu Windows demande si JM-Orgue peut accepter des connexions : choisissez « Autoriser l'accès » pour les réseaux privés. Refusé ? Activez-le via Sécurité Windows → Pare-feu → « Autoriser une application via le pare-feu » (JM-Orgue, Privé). L'adresse ne fonctionne que dans votre propre réseau (Wi-Fi), sans chiffrement ; ne partagez pas le jeton et créez un nouveau jeton pour révoquer l'accès."
+    "hint": "La première fois, le pare-feu Windows demande si JM-Orgue peut accepter des connexions : choisissez « Autoriser l'accès » pour les réseaux privés. Refusé ? Activez-le via Sécurité Windows → Pare-feu → « Autoriser une application via le pare-feu » (JM-Orgue, Privé). L'adresse ne fonctionne que dans votre propre réseau (Wi-Fi), sans chiffrement ; ne partagez pas le jeton et créez un nouveau jeton pour révoquer l'accès.",
+    "parts_title": "Éléments affichés sur l’écran distant",
+    "parts_divisions": "Divisions sur l’écran distant",
+    "part_couplers": "Accouplements",
+    "part_tremulant": "Tremblant",
+    "part_setzer": "Combinateur",
+    "part_volume": "Volume",
+    "part_panic": "Panique",
+    "parts_hint": "Pour le reste, l’écran distant suit l’écran d’orgue : même ordre des divisions et des jeux, même forme de boutons et mêmes accouplements. Choisissez les accouplements visibles dans Réglages de l’orgue → Accouplements ; l’écran distant n’en montre jamais plus que l’écran d’orgue."
+  },
+  "pedal": {
+    "replaces_prefix": "remplace :",
+    "replaces_crescendo": "crescendo général",
+    "replaces_swell": "boîte expressive {division}",
+    "taken_over": "Cette pédale était déjà affectée à {what} ; cette affectation a été reprise. Une pédale ne peut avoir qu'une seule fonction.",
+    "cc_required": "Saisissez aussi un numéro de CC — choisir uniquement un canal ne crée pas d'affectation."
   }
 }

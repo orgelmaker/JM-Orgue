@@ -1,10 +1,10 @@
 <script>
-  import { createEventDispatcher, onMount, onDestroy } from 'svelte';
+  import { createEventDispatcher, onMount, onDestroy, tick } from 'svelte';
   import { open } from '@tauri-apps/plugin-dialog';
   import LayoutSettings from './LayoutSettings.svelte';
   import VoicingPanel from './VoicingPanel.svelte';
   import MidiPlayer from './MidiPlayer.svelte';
-  import { t, tx, locale } from '../lib/i18n.js';
+  import { t, tx, locale, setLocale, AVAILABLE_LOCALES, LOCALE_LABELS } from '../lib/i18n.js';
   import SetzerBar from './SetzerBar.svelte';
   import { loadPanelState, savePanelState } from '../lib/panelState.js';
   import { midiLearn } from '../lib/midiLearn.js';
@@ -1746,6 +1746,7 @@
   function toggleCouplerPlacement() {
     couplerPlacement = couplerPlacement === 'bar' ? 'division' : 'bar';
     localStorage.setItem(organUiKey('jm-orgue-coupler-placement'), couplerPlacement);
+    publishRemoteLayout();
   }
   // Balkgroepen: per klavier (in divisievolgorde) de zichtbare koppels,
   // unison eerst, dan super/sub, dan de rest.
@@ -1774,6 +1775,7 @@
     visibleCouplers[couplerId] = !isCouplerVisible(couplerId);
     visibleCouplers = visibleCouplers;
     localStorage.setItem(organUiKey('jm-orgue-visible-couplers'), JSON.stringify(visibleCouplers));
+    publishRemoteLayout();
   }
 
   function isSwellEnabled(divisionName) {
@@ -1806,13 +1808,14 @@
       const divIdx = Math.max(0, (organInfo?.divisions || []).findIndex(d => d.name === divisionName));
       (async () => {
         try {
-          await invoke('set_swell_binding_manual', { division: divisionName, divisionIndex: divIdx, channel: b.channel, ccNum: b.cc_num });
+          const verdrongen = await invoke('set_swell_binding_manual', { division: divisionName, divisionIndex: divIdx, channel: b.channel, ccNum: b.cc_num });
           if (b.min_val != null && b.max_val != null) await invoke('set_swell_range', { division: divisionName, minVal: b.min_val, maxVal: b.max_val });
           if (b.invert) await invoke('set_swell_invert', { division: divisionName, invert: true });
+          showPedalNotice(divisionName, displacedText(verdrongen) && tx('pedal.taken_over').replace('{what}', displacedText(verdrongen)));
         } catch (e) { console.error('Zwelkoppeling terugzetten mislukt:', e); }
         delete stash[divisionName];
         localStorage.setItem(stashKey, JSON.stringify(stash));
-        await loadSwellBindings();
+        await reloadPedalBindings();
         dispatch('refreshMidiMappings');
       })();
     }
@@ -1863,6 +1866,32 @@
       }
       divisionVolumes = divisionVolumes;
     } catch (e) {}
+  }
+
+  // ===== Wederzijdse uitsluiting zwelkast ↔ generaal crescendo =====
+  // Eén (kanaal, CC) kan maar één functie hebben; de backend dwingt dat af
+  // (claim_pedal_cc) en geeft terug wát er is verdrongen. De UI moet daarom na
+  // ELKE bindingmutatie BEIDE vakken verversen — anders bleef het andere vak de
+  // gewiste koppeling tonen ("ingesteld maar werkt niet").
+  async function reloadPedalBindings() {
+    await Promise.all([loadSwellBindings(), loadCrescendoBinding()]);
+  }
+  // Korte, niet-blokkerende melding bij het vak waar de actie plaatsvond.
+  // scope = 'crescendo' of de divisienaam.
+  let pedalNotice = null;   // { scope, text }
+  let pedalNoticeTimer = null;
+  function showPedalNotice(scope, text) {
+    if (!text) return;
+    clearTimeout(pedalNoticeTimer);
+    pedalNotice = { scope, text };
+    pedalNoticeTimer = setTimeout(() => { pedalNotice = null; }, 8000);
+  }
+  // Backend-lijst met verdrongen koppelingen → leesbare tekst.
+  function displacedText(list) {
+    if (!Array.isArray(list) || !list.length) return '';
+    return list.map(d => d && d.kind === 'crescendo'
+      ? tx('pedal.replaces_crescendo')
+      : tx('pedal.replaces_swell').replace('{division}', (d && d.division) || '')).join(', ');
   }
 
   async function loadSwellBindings() {
@@ -1943,25 +1972,31 @@
         pedalLearnModal = { ...pedalLearnModal, step: 'fout', msg: tx('learn.pedal_range_too_small') };
         return;
       }
+      let verdrongen = [];
       if (kind === 'zwel') {
         const divisionIndex = Math.max(0, (organInfo?.divisions || []).findIndex(d => d.name === divisionName));
-        await invoke('apply_learned_swell', {
+        verdrongen = await invoke('apply_learned_swell', {
           division: divisionName, divisionIndex,
           channel: first[0], ccNum: first[1],
           lowVal: pedalLearnModal.first.value, highVal: second[2],
         });
-        await loadSwellBindings();
       } else {
-        await invoke('apply_learned_crescendo', {
+        verdrongen = await invoke('apply_learned_crescendo', {
           channel: first[0], ccNum: first[1],
           lowVal: pedalLearnModal.first.value, highVal: second[2],
         });
-        await loadCrescendoBinding();
       }
+      // Altijd BEIDE vakken: een crescendo-inleer wist de zwelkoppeling op
+      // dezelfde CC (en omgekeerd) — zonder deze verversing bleef het andere
+      // vak "CC7" tonen terwijl de koppeling backend-zijdig al weg was.
+      await reloadPedalBindings();
       if (gen !== learnGen || !pedalLearnModal) return;
-      pedalLearnModal = { ...pedalLearnModal, step: 'klaar', msg: tx('learn.pedal_result').replace('{cc}', String(first[1])).replace('{channel}', String(first[0] + 1)) };
+      const vervangt = displacedText(verdrongen);
+      pedalLearnModal = { ...pedalLearnModal, step: 'klaar',
+        msg: tx('learn.pedal_result').replace('{cc}', String(first[1])).replace('{channel}', String(first[0] + 1))
+             + (vervangt ? ` — ${tx('pedal.replaces_prefix')} ${vervangt}` : '') };
       dispatch('refreshMidiMappings');
-      setTimeout(() => { if (pedalLearnModal && pedalLearnModal.step === 'klaar') pedalLearnModal = null; }, 2000);
+      setTimeout(() => { if (pedalLearnModal && pedalLearnModal.step === 'klaar') pedalLearnModal = null; }, vervangt ? 5000 : 2000);
     } catch (e) {
       if (gen === learnGen && pedalLearnModal) pedalLearnModal = { ...pedalLearnModal, step: 'fout', msg: String(e) };
     } finally {
@@ -1981,6 +2016,7 @@
       await invoke('clear_swell_binding', { division: divisionName });
       delete swellBindings[divisionName];
       swellBindings = swellBindings;
+      await reloadPedalBindings();
       dispatch('refreshMidiMappings');
     } catch (e) {
       console.error('Failed to clear swell binding:', e);
@@ -2020,12 +2056,19 @@
   // ===== Handmatig instellen van pedaal-koppelingen en toetsenbereik =====
   // Het handmatige alternatief voor 'Leer pedaal'/'Leer': kanaal, CC of
   // nootbereik direct intypen. Weergave-kanaal is 1-16; op de kabel 0-15.
+  // ccNum mag hier NIET meer stilzwijgend 7 worden: alleen een kanaal kiezen
+  // (zonder CC) maakte vroeger een koppeling op CC7 aan — precies het conflict
+  // waarin zwel én crescendo op (kanaal, 7) terechtkwamen. Zonder geldige CC
+  // gebeurt er nu niets.
   async function setSwellManualUI(divisionName, divIdx, channelDisplay, ccNum) {
     const ch = Math.max(1, Math.min(16, channelDisplay | 0)) - 1;
+    if (ccNum == null || isNaN(ccNum)) { showPedalNotice(divisionName, tx('pedal.cc_required')); return; }
     const cc = Math.max(0, Math.min(127, ccNum | 0));
     try {
-      await invoke('set_swell_binding_manual', { division: divisionName, divisionIndex: divIdx, channel: ch, ccNum: cc });
-      await loadSwellBindings();
+      const verdrongen = await invoke('set_swell_binding_manual', { division: divisionName, divisionIndex: divIdx, channel: ch, ccNum: cc });
+      await reloadPedalBindings();
+      const vervangt = displacedText(verdrongen);
+      if (vervangt) showPedalNotice(divisionName, tx('pedal.taken_over').replace('{what}', vervangt));
       dispatch('refreshMidiMappings');
     } catch (e) {
       console.error('Handmatige zwelkast-koppeling mislukt:', e);
@@ -2034,10 +2077,13 @@
 
   async function setCrescendoManualUI(channelDisplay, ccNum) {
     const ch = Math.max(1, Math.min(16, channelDisplay | 0)) - 1;
+    if (ccNum == null || isNaN(ccNum)) { showPedalNotice('crescendo', tx('pedal.cc_required')); return; }
     const cc = Math.max(0, Math.min(127, ccNum | 0));
     try {
-      await invoke('set_crescendo_binding_manual', { channel: ch, ccNum: cc });
-      await loadCrescendoBinding();
+      const verdrongen = await invoke('set_crescendo_binding_manual', { channel: ch, ccNum: cc });
+      await reloadPedalBindings();
+      const vervangt = displacedText(verdrongen);
+      if (vervangt) showPedalNotice('crescendo', tx('pedal.taken_over').replace('{what}', vervangt));
       dispatch('refreshMidiMappings');
     } catch (e) {
       console.error('Handmatige crescendo-koppeling mislukt:', e);
@@ -2048,6 +2094,7 @@
     try {
       await invoke('clear_crescendo_binding');
       crescendoBinding = null;
+      await reloadPedalBindings();
       dispatch('refreshMidiMappings');
     } catch (e) {
       console.error('Crescendo-koppeling wissen mislukt:', e);
@@ -2106,6 +2153,26 @@
     try {
       const s = await invoke('get_organ_settings');
       if (organInfo?.id !== myOrgan) return;
+      // Indeling van de afstandsbediening (0.7.39): welke onderdelen en welke
+      // divisies het externe scherm toont. De rest van de indeling (zichtbare
+      // koppels, koppelplaatsing, registervolgorde, knopvorm) komt uit de
+      // UI-voorkeuren van dit orgel en wordt hieronder meegepubliceerd.
+      const rl = (s && s.remote_layout) ? s.remote_layout : null;
+      remoteParts = {
+        couplers: rl ? rl.show_couplers !== false : true,
+        tremulant: rl ? rl.show_tremulant !== false : true,
+        setzer: rl ? rl.show_setzer !== false : true,
+        volume: rl ? rl.show_volume !== false : true,
+        panic: rl ? rl.show_panic !== false : true,
+      };
+      remoteDivisions = {};
+      if (rl && Array.isArray(rl.divisions) && rl.divisions.length > 0) {
+        for (const d of (organInfo?.divisions || [])) remoteDivisions[d.name] = rl.divisions.includes(d.name);
+        // Bewaarde lijst die geen enkele huidige divisie noemt (orgel gewijzigd):
+        // alles tonen in plaats van een leeg extern scherm.
+        if (!Object.values(remoteDivisions).some(Boolean)) remoteDivisions = {};
+      }
+      lastRemoteLayoutJson = '';
       // Master volume: opgeslagen waarde, anders de ECHTE default (-6 dB) — niet de
       // sliderwaarde van het vorige orgel, anders lekt diens volume dit orgel in
       // én wordt het bij de eerste autosave als instelling van dít orgel bewaard.
@@ -2248,8 +2315,16 @@
         tremLfoPitchDepth[t.division] = t.pitch_depth;
       }
       // Bron-default: LFO-tremulant beschikbaar voor has_tremulant-divisies die nog niet bewaard zijn.
+      // Uitzondering: een golfvormtremulant (GrandOrgue TremulantType=Wave) heeft
+      // echte tremulant-OPNAMEN; daar hoort geen synthetische LFO overheen — ook
+      // GrandOrgue moduleert dan niets. Een bewaarde keuze wint altijd.
       for (const div of (organInfo?.divisions || [])) {
-        if (div.has_tremulant && tremLfoEnabled[div.name] === undefined) tremLfoEnabled[div.name] = true;
+        // Nagebootste tremulant (LFO) standaard AAN, maar niet als de set echte
+        // tremulant-opnamen heeft: 'wave' (GrandOrgue-golfvormtremulant) én
+        // 'samples' (Hauptwerk-"tremmed"-laag, eigen sets met _trem-mappen)
+        // klinken dan dubbel — opname én nabootsing over elkaar heen.
+        const echteTremOpnamen = div.tremulant_kind === 'wave' || div.tremulant_kind === 'samples';
+        if (div.has_tremulant && !echteTremOpnamen && tremLfoEnabled[div.name] === undefined) tremLfoEnabled[div.name] = true;
       }
       tremLfoEnabled = tremLfoEnabled; tremLfoRate = tremLfoRate;
       tremLfoAmpDepth = tremLfoAmpDepth; tremLfoPitchDepth = tremLfoPitchDepth;
@@ -2299,6 +2374,14 @@
       } catch (e) {}
     } catch (e) {
       console.error('loadAudioSettingsForOrgan failed:', e);
+    }
+    // Pas NU (na get_organ_settings) de indeling van de afstandsbediening
+    // publiceren: eerder zou de opgeslagen indeling van dit orgel met de
+    // defaults overschreven worden. Alleen het hoofdvenster (pushToBackend)
+    // en alleen als dit nog de actuele orgel-load is (stale-guard).
+    if (pushToBackend && organInfo?.id === myOrgan) {
+      remoteLayoutReady = true;
+      publishRemoteLayout();
     }
   }
 
@@ -2384,6 +2467,11 @@
     // Crescendo-matrix/aan-uit uit de backend (bewerkt in een ander venster,
     // piston 41, of de pedaal).
     pollCrescendoConfig();
+    // Indeling van de afstandsbediening: wijzigingen uit een EXTRA scherm
+    // (koppel-vinkje, knopvorm, registervolgorde) lopen niet door de
+    // toggle-functies hierboven; het hoofdvenster publiceert ze alsnog.
+    // De verander-guard in publishRemoteLayout voorkomt IPC elke seconde.
+    publishRemoteLayout();
   }
 
   // ===== Afstandsbediening in het netwerk (0.7.38) =====
@@ -2411,6 +2499,65 @@
     if (!confirm(tx('remote.new_token_confirm'))) return;
     try { remote = await invoke('new_remote_token'); }
     catch (e) { remote = { ...remote, error: String(e) }; }
+  }
+
+  // ---- Indeling van het externe scherm (0.7.39) ----
+  // De afstandsbediening krijgt dezelfde indeling als het registreerscherm:
+  // divisievolgorde/-selectie, registervolgorde, alléén de koppels die hier
+  // zichtbaar zijn, koppelplaatsing en knopvorm. Plus een keuze welke
+  // onderdelen op het externe scherm staan. Alleen het HOOFDVENSTER publiceert
+  // (single writer); wijzigingen uit een extra scherm komen via
+  // refreshSharedPrefs (localStorage-poll) alsnog hier langs.
+  let remoteParts = { couplers: true, tremulant: true, setzer: true, volume: true, panic: true };
+  let remoteDivisions = {};        // divisienaam → tonen (afwezig/true = tonen)
+  let remoteLayoutReady = false;   // pas publiceren nadat de opgeslagen indeling geladen is
+  let lastRemoteLayoutJson = '';   // verander-guard (refreshSharedPrefs draait 1×/s)
+
+  function isRemoteDivisionOn(name) { return remoteDivisions[name] !== false; }
+
+  function toggleRemoteDivision(name, ev) {
+    const namen = (displayOrgan?.divisions || []).map(d => d.name);
+    // Minstens één divisie moet zichtbaar blijven, anders is het externe
+    // scherm leeg (de backend zou een lege lijst als "alles" lezen).
+    if (isRemoteDivisionOn(name) && namen.filter(n => isRemoteDivisionOn(n)).length <= 1) {
+      if (ev && ev.target) ev.target.checked = true; // vinkje terugzetten
+      return;
+    }
+    remoteDivisions[name] = !isRemoteDivisionOn(name);
+    remoteDivisions = remoteDivisions;
+    publishRemoteLayout();
+  }
+
+  function setRemotePart(key, on) {
+    remoteParts = { ...remoteParts, [key]: !!on };
+    publishRemoteLayout();
+  }
+
+  async function publishRemoteLayout() {
+    if (secondary || !remoteLayoutReady || !organInfo) return;
+    const divs = displayOrgan?.divisions || [];
+    const stop_order = {};
+    for (const d of divs) stop_order[d.name] = (d.stops || []).map(s => s.id);
+    const layout = {
+      divisions: divs.map(d => d.name).filter(n => isRemoteDivisionOn(n)),
+      visible_couplers: (displayOrgan?.couplers || []).filter(c => isCouplerVisible(c.id)).map(c => c.id),
+      coupler_placement: couplerPlacement,
+      stop_order,
+      knob_shape: knobShape,
+      show_couplers: remoteParts.couplers !== false,
+      show_tremulant: remoteParts.tremulant !== false,
+      show_setzer: remoteParts.setzer !== false,
+      show_volume: remoteParts.volume !== false,
+      show_panic: remoteParts.panic !== false,
+    };
+    const json = JSON.stringify(layout);
+    if (json === lastRemoteLayoutJson) return;
+    lastRemoteLayoutJson = json;
+    try {
+      await invoke('set_remote_layout', { layout });
+      // Bewaren loopt via het bestaande (gedebouncede) autosave-pad in App.svelte.
+      dispatch('refreshMidiMappings');
+    } catch (e) { console.warn('set_remote_layout:', e); }
   }
 
   onMount(() => {
@@ -2503,6 +2650,7 @@
   function toggleKnobShape() {
     knobShape = knobShape === 'round' ? 'rect' : 'round';
     localStorage.setItem(organUiKey('jm-orgue-knob-shape'), knobShape);
+    publishRemoteLayout();
   }
 
   // ---- Extra register-vensters: per orgel onthouden en herstellen ----
@@ -2718,16 +2866,46 @@
   let onlineBusy = null;   // id van de lopende download
   let onlinePct = 0;
   let onlineFase = 'download';
+  // Mapnaam van een bibliotheek-entry: bij een .organ de map waarin het
+  // bestand staat, bij een sample-map de map zelf. De naam van een set kan
+  // veranderen (JM-Rec-sets heten nu "Kerk - Bouwer - Plaats"), de mapnaam
+  // niet — daarom bepaalt die of een online set al geïnstalleerd is.
+  function setFolderKey(o) {
+    const delen = String(o?.source_path || '').replace(/\\/g, '/').split('/').filter(Boolean);
+    if (o?.source_type === 'organ_file') delen.pop();
+    return (delen.pop() || '').toLowerCase();
+  }
+
+  // De opstart-splash in App.svelte wacht op deze eerste ronde (zie
+  // onlineSetsSettled daar), zodat het blok "Online beschikbaar" er meteen
+  // staat in plaats van ná het startscherm in te ploffen. Eén melding per
+  // venster: latere verversingen (na een download of verwijderen) tellen niet.
+  let onlineSetsGemeld = false;
+  function meldOnlineSetsKlaar() {
+    if (onlineSetsGemeld || secondary) return;
+    onlineSetsGemeld = true;
+    dispatch('onlineSetsSettled');
+  }
+
   async function refreshOnlineSets() {
     try {
       const res = await fetch(SAMPLESETS_MANIFEST, { cache: 'no-cache' });
       if (!res.ok) { onlineSets = []; return; }
       const mf = await res.json();
-      const geinstalleerd = new Set((libraryOrgans || []).map(o => o.name));
-      onlineSets = (mf.samplesets || []).filter(s => s.naam && s.zip_url && !geinstalleerd.has(s.naam));
+      const geinstalleerd = new Set();
+      for (const o of (libraryOrgans || [])) {
+        if (o?.name) geinstalleerd.add(String(o.name).toLowerCase());
+        const map = setFolderKey(o);
+        if (map) geinstalleerd.add(map);
+      }
+      onlineSets = (mf.samplesets || []).filter(s =>
+        s.naam && s.zip_url
+        && !geinstalleerd.has(String(s.naam).toLowerCase())
+        && !geinstalleerd.has(String(s.map_naam || s.naam).toLowerCase())
+      );
     } catch (e) { onlineSets = []; }
+    finally { meldOnlineSetsKlaar(); }
   }
-  $: if (showOrganBrowser) refreshOnlineSets();
   async function downloadOnlineSet(s) {
     if (onlineBusy) return;
     let un = null;
@@ -2913,13 +3091,23 @@
   let libraryOrgans = [];
   let organImages = {}; // { [id]: base64_data_url }
 
+  // "bouwer · plaats" voor onder de naam op de kaart. Lege regel als er
+  // niets zinnigs staat: een gescande sample-map heeft bouwer "Custom Samples"
+  // en als plaats het mappad zelf.
+  function cardSub(o) {
+    const bouwer = (o?.builder && o.builder !== 'Custom Samples') ? o.builder : '';
+    const plaats = (o?.location && o.location !== o.source_path) ? o.location : '';
+    return [bouwer, plaats].filter(Boolean).join(' · ');
+  }
+
   async function loadLibrary() {
     try {
       libraryOrgans = await invoke('get_organ_library');
-      // Load images for each organ
+      // Afbeelding per orgel; de backend gebruikt de opgeslagen afbeelding en
+      // zoekt alleen als er nog nooit (met deze zoekversie) gezocht is.
       for (const organ of libraryOrgans) {
         if (!organImages[organ.id]) {
-          invoke('get_organ_image', { sourcePath: organ.source_path }).then(img => {
+          invoke('get_organ_image', { id: organ.id }).then(img => {
             if (img) {
               organImages[organ.id] = img;
               organImages = organImages; // trigger reactivity
@@ -2927,8 +3115,50 @@
           }).catch(() => {});
         }
       }
+      // Online-lijst pas ná de bibliotheek: het "al geïnstalleerd"-filter leest
+      // libraryOrgans, en als losse reactive statement was die volgorde toeval.
+      if (!secondary) refreshOnlineSets();
     } catch (e) {
       console.error('Failed to load organ library:', e);
+      // Ook dán de splash vrijgeven: zonder bibliotheek komt refreshOnlineSets
+      // niet aan bod en zou de opstart op de time-out moeten wachten.
+      meldOnlineSetsKlaar();
+    }
+  }
+
+  // Handmatig een foto van het orgel kiezen (bibliotheekkaart). De backend
+  // kopieert het bestand naar de app-datamap en zet image_manual, zodat
+  // automatisch zoeken de keuze niet overschrijft.
+  async function chooseOrganImage(e, organ) {
+    e.stopPropagation();
+    try {
+      const gekozen = await open({
+        multiple: false,
+        title: tx('library.choose_image_title'),
+        filters: [{ name: tx('dialogs.image_filter'), extensions: ['jpg', 'jpeg', 'png', 'bmp', 'webp'] }],
+      });
+      if (!gekozen) return;
+      await invoke('set_organ_image', { id: organ.id, path: gekozen });
+      delete organImages[organ.id];
+      organImages = organImages;
+      await loadLibrary();
+    } catch (err) {
+      console.error('Afbeelding instellen mislukt:', err);
+      alert(`${tx('library.image_failed')}: ${err}`);
+    }
+  }
+
+  // Terug naar automatisch zoeken (wist de handmatige keuze).
+  async function autoOrganImage(e, organ) {
+    e.stopPropagation();
+    try {
+      await invoke('set_organ_image', { id: organ.id, path: null });
+      delete organImages[organ.id];
+      organImages = organImages;
+      await loadLibrary();
+    } catch (err) {
+      console.error('Automatisch zoeken mislukt:', err);
+      alert(`${tx('library.image_failed')}: ${err}`);
     }
   }
 
@@ -3339,6 +3569,11 @@
     if (!organInfo) return;
     const key = `jm-orgue-stop-order-${organInfo.id || 'default'}`;
     localStorage.setItem(key, JSON.stringify(stopOrder));
+    // Pas ná de Svelte-update publiceren: publishRemoteLayout leest de volgorde
+    // uit displayOrgan, en dat is vlak na een mutatie van stopOrder nog de
+    // vorige waarde — de afstandsbediening liep daardoor precies één
+    // verplaatsing achter.
+    tick().then(publishRemoteLayout);
   }
 
   function sortStops(stops, divName) {
@@ -3599,13 +3834,19 @@
     crescLoadedFor = `${organInfo.id}::${audioEpoch}`;
     tremActive = {};
     loadCrescendoForOrgan();
+    // Niets publiceren naar de afstandsbediening tot de opgeslagen indeling van
+    // DIT orgel geladen is (loadAudioSettingsForOrgan zet de vlag weer aan).
+    remoteLayoutReady = false;
     // Secundaire vensters laden alleen de UI-state (geen backend-pushes).
     loadAudioSettingsForOrgan(!secondary);
     loadUiPrefsForOrgan();
   }
 
-  // Load library when browser is shown
-  $: if (showOrganBrowser) { loadLibrary(); }
+  // Bibliotheek laden zodra het startscherm getoond wordt. Alleen in het
+  // hoofdvenster: een extra registerscherm toont de bibliotheek hooguit een
+  // oogwenk (tot organInfo binnen is) en zou anders per venster alle
+  // kaartafbeeldingen opnieuw ophalen.
+  $: if (showOrganBrowser && !secondary) { loadLibrary(); }
 
   function toggleDivision(name) {
     if (selectedDivisions.includes(name)) {
@@ -3634,7 +3875,24 @@
   {:else if showOrganBrowser}
     <div class="organ-browser slide-up">
       <div class="organ-browser-header">
-        <h1 class="organ-browser-title">{$t('library.title')}</h1>
+        <div class="organ-browser-titlegroup">
+          <h1 class="organ-browser-title">{$t('library.title')}</h1>
+          <!-- Taal meteen op het startscherm: dezelfde store en dezelfde
+               setLocale als de taalkaarten in Algemene Instellingen, dus beide
+               plekken lopen vanzelf in de pas (bewaard in localStorage). -->
+          <div class="lang-switch" role="group" aria-label={$t('settings.language')}>
+            {#each AVAILABLE_LOCALES as code}
+              <button
+                type="button"
+                class="btn btn-secondary btn-sm"
+                class:active={$locale === code}
+                aria-pressed={$locale === code}
+                title={LOCALE_LABELS[code]}
+                on:click={() => setLocale(code)}
+              >{code.toUpperCase()}</button>
+            {/each}
+          </div>
+        </div>
         <div class="organ-browser-actions">
           <button class="btn btn-secondary btn-sm" on:click={openOrganFile} title={$t('library.open_organ_file')}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -3685,11 +3943,37 @@
             role="button"
             tabindex="0"
           >
-            <button
-              class="library-card-delete"
-              on:click={(e) => removeFromLibrary(e, organ.id)}
-              title={$t('library.remove_from_library')}
-            >&times;</button>
+            <div class="library-card-actions">
+              {#if organ.image_manual}
+                <button
+                  class="library-card-btn"
+                  on:click={(e) => autoOrganImage(e, organ)}
+                  title={$t('library.image_auto')}
+                  aria-label={$t('library.image_auto')}
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                    <polyline points="1 4 1 10 7 10"/>
+                    <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>
+                  </svg>
+                </button>
+              {/if}
+              <button
+                class="library-card-btn"
+                on:click={(e) => chooseOrganImage(e, organ)}
+                title={$t('library.choose_image')}
+                aria-label={$t('library.choose_image')}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+                  <circle cx="12" cy="13" r="4"/>
+                </svg>
+              </button>
+              <button
+                class="library-card-delete library-card-btn"
+                on:click={(e) => removeFromLibrary(e, organ.id)}
+                title={$t('library.remove_from_library')}
+              >&times;</button>
+            </div>
             <div class="library-card-image">
               {#if organImages[organ.id]}
                 <img src={organImages[organ.id]} alt={organ.name} />
@@ -3700,10 +3984,20 @@
                   <rect x="18" y="4" width="5" height="28" rx="1.5" fill="currentColor" opacity="0.5"/>
                   <rect x="25" y="8" width="5" height="24" rx="1.5" fill="currentColor" opacity="0.4"/>
                 </svg>
+                <!-- Geen foto gevonden: hier zelf een foto kiezen. -->
+                <button class="library-card-pick" on:click={(e) => chooseOrganImage(e, organ)}>
+                  {$t('library.choose_image')}
+                </button>
               {/if}
             </div>
             <div class="library-card-info">
               <div class="library-card-name">{organ.name}</div>
+              <!-- "bouwer · plaats" onder de naam. Een gescande sample-map zonder
+                   JM-Rec-manifest heeft geen echte bouwer/plaats (bouwer =
+                   "Custom Samples", plaats = het mappad) — dan niets tonen. -->
+              {#if cardSub(organ)}
+                <div class="library-card-sub">{cardSub(organ)}</div>
+              {/if}
               <div class="library-card-meta">{$t('library.stops_count').replace('{count}', organ.stop_count)}</div>
             </div>
           </div>
@@ -4466,6 +4760,18 @@
                   {/if}
                 </button>
               </div>
+              <!-- Dode-trede-waarschuwing: BUITEN het {#if crescendoEnabled}-blok,
+                   want juist met de crescendo uit (of zonder gevulde trappen) is de
+                   ingeleerde CC voor álles dood — ook als zwelkast — en verdwijnt
+                   het hele crescendo-blok uit beeld. -->
+              {#if crescendoBinding && !crescendoEnabled}
+                <p class="pedal-warn">{$t('crescendo.binding_disabled_warn').replace('{channel}', crescendoBinding.channel + 1).replace('{cc}', crescendoBinding.cc)}</p>
+              {:else if crescendoBinding && !(crescendoStages || []).some(st => Array.isArray(st) && st.length)}
+                <p class="pedal-warn">{$t('crescendo.binding_empty_warn').replace('{channel}', crescendoBinding.channel + 1).replace('{cc}', crescendoBinding.cc)}</p>
+              {/if}
+              {#if pedalNotice && pedalNotice.scope === 'crescendo'}
+                <p class="pedal-notice">{pedalNotice.text}</p>
+              {/if}
               {#if crescendoEnabled}
                 <div style="margin-top: 0.5rem;">
                   <div class="swell-config-row" style="margin-bottom: 0.5rem;">
@@ -4594,7 +4900,7 @@
                     <span class="swell-config-label">{$t('crescendo.manual')}</span>
                     <select
                       value={crescendoBinding ? crescendoBinding.channel + 1 : ''}
-                      on:change={(e) => { if (e.target.value !== '') setCrescendoManualUI(parseInt(e.target.value), crescendoBinding?.cc ?? 7); }}
+                      on:change={(e) => { if (e.target.value !== '') setCrescendoManualUI(parseInt(e.target.value), crescendoBinding ? crescendoBinding.cc : null); }}
                       title={$t('crescendo.midi_channel_title')}
                     >
                       <option value="" disabled>{$t('crescendo.channel_abbr')}</option>
@@ -4605,7 +4911,7 @@
                     <input type="number" min="0" max="127" class="pedal-range-input"
                       value={crescendoBinding?.cc ?? ''}
                       placeholder="CC"
-                      on:change={(e) => setCrescendoManualUI((crescendoBinding?.channel ?? 0) + 1, parseInt(e.target.value) || 0)}
+                      on:change={(e) => setCrescendoManualUI((crescendoBinding?.channel ?? 0) + 1, e.target.value === '' ? null : parseInt(e.target.value))}
                       title={$t('crescendo.cc_number_title')}
                     />
                     {#if crescendoBinding}
@@ -4852,7 +5158,7 @@
                         <span class="swell-config-label">{$t('swell.manual')}</span>
                         <select
                           value={swellBindings[division.name] ? swellBindings[division.name].channel + 1 : ''}
-                          on:change={(e) => { if (e.target.value !== '') setSwellManualUI(division.name, divIdx, parseInt(e.target.value), swellBindings[division.name]?.cc_num ?? 7); }}
+                          on:change={(e) => { if (e.target.value !== '') setSwellManualUI(division.name, divIdx, parseInt(e.target.value), swellBindings[division.name] ? swellBindings[division.name].cc_num : null); }}
                           title={$t('swell.midi_channel_title')}
                         >
                           <option value="" disabled>{$t('swell.channel_abbr')}</option>
@@ -4863,10 +5169,13 @@
                         <input type="number" min="0" max="127" class="pedal-range-input"
                           value={swellBindings[division.name]?.cc_num ?? ''}
                           placeholder="CC"
-                          on:change={(e) => setSwellManualUI(division.name, divIdx, (swellBindings[division.name]?.channel ?? 0) + 1, parseInt(e.target.value) || 0)}
+                          on:change={(e) => setSwellManualUI(division.name, divIdx, (swellBindings[division.name]?.channel ?? 0) + 1, e.target.value === '' ? null : parseInt(e.target.value))}
                           title={$t('swell.cc_number_title')}
                         />
                       </div>
+                      {#if pedalNotice && pedalNotice.scope === division.name}
+                        <p class="pedal-notice">{pedalNotice.text}</p>
+                      {/if}
                       {#if swellBindings[division.name]}
                         <button
                           class="btn btn-ghost btn-sm swell-clear-btn"
@@ -5235,9 +5544,13 @@
     {:else if activeView === 'algemene-instellingen'}
       <!-- ============ ALGEMENE INSTELLINGEN ============ -->
       <div class="instellingen-view">
-        {#if !displayOrgan}
+        {#if !organInfo}
+          <!-- Zonder geladen orgel is dit de weg terug naar het startscherm.
+               Stond er al sinds 0.4.0, maar hing achter "!displayOrgan" — en dat
+               is nooit waar omdat buildDisplayOrgan terugvalt op het ingebouwde
+               "Demo Orgel". Nu gekoppeld aan het échte orgel (organInfo). -->
           <div style="margin-bottom: 1rem;">
-            <button class="btn btn-ghost btn-sm" on:click={() => { showOrganBrowser = true; }}>
+            <button class="btn btn-secondary btn-sm" on:click={() => { showOrganBrowser = true; dispatch('setView', 'orgel'); }}>
               {$t('nav.back_to_library')}
             </button>
           </div>
@@ -5390,10 +5703,11 @@
                 >
                   <option value="" selected={!selectedBufferFrames}>{$t('settings.audio_buffer_default')}</option>
                   {#each [32, 48, 64, 96, 128, 256, 512, 1024] as b}
-                    <option value={b} selected={b === selectedBufferFrames}>{b} ({(b / 48).toFixed(1)} ms @48k)</option>
+                    <option value={b} selected={b === selectedBufferFrames}>{b} ({(b / 48).toFixed(1)} ms @48k){b < 64 ? ` — ${$t('settings.audio_buffer_fast_pc')}` : (b === 128 ? ` — ${$t('settings.audio_buffer_recommended')}` : '')}</option>
                   {/each}
                 </select>
               </div>
+              <p style="margin: 0.25rem 0 0; font-size: 0.68rem; color: var(--text-muted); line-height: 1.35;">{$t('settings.audio_buffer_hint')}</p>
               <div style="margin-top: 0.7rem;">
                 <button class="btn btn-primary btn-sm" on:click={() => { dispatch('applyAudioOutput'); setTimeout(refreshAudioStatus, 1500); }}>
                   {$t('settings.audio_apply')}
@@ -5602,6 +5916,53 @@
                 {/if}
                 {#if remote.error}
                   <p style="margin:0.3rem 0 0; font-size:0.75rem; color:var(--error);">{remote.error}</p>
+                {/if}
+                <!-- Welke onderdelen staan op het externe scherm (0.7.39)?
+                     De rest van de indeling (volgorde van divisies/registers,
+                     zichtbare koppels, koppelplaatsing, knopvorm) volgt
+                     automatisch het orgelscherm. -->
+                {#if !secondary}
+                  <div style="margin-top:0.7rem; padding-top:0.6rem; border-top: var(--border-subtle);">
+                    <span style="font-size:0.8rem; color:var(--text-secondary); font-weight:500;">{$t('remote.parts_title')}</span>
+                    <div style="display:flex; flex-wrap:wrap; gap:0.2rem 1rem; margin-top:0.3rem;">
+                      <label class="swell-toggle" style="margin:0;">
+                        <input type="checkbox" checked={remoteParts.couplers !== false} on:change={(e) => setRemotePart('couplers', e.target.checked)} />
+                        <span>{$t('remote.part_couplers')}</span>
+                      </label>
+                      <label class="swell-toggle" style="margin:0;">
+                        <input type="checkbox" checked={remoteParts.tremulant !== false} on:change={(e) => setRemotePart('tremulant', e.target.checked)} />
+                        <span>{$t('remote.part_tremulant')}</span>
+                      </label>
+                      <label class="swell-toggle" style="margin:0;">
+                        <input type="checkbox" checked={remoteParts.setzer !== false} on:change={(e) => setRemotePart('setzer', e.target.checked)} />
+                        <span>{$t('remote.part_setzer')}</span>
+                      </label>
+                      <label class="swell-toggle" style="margin:0;">
+                        <input type="checkbox" checked={remoteParts.volume !== false} on:change={(e) => setRemotePart('volume', e.target.checked)} />
+                        <span>{$t('remote.part_volume')}</span>
+                      </label>
+                      <label class="swell-toggle" style="margin:0;">
+                        <input type="checkbox" checked={remoteParts.panic !== false} on:change={(e) => setRemotePart('panic', e.target.checked)} />
+                        <span>{$t('remote.part_panic')}</span>
+                      </label>
+                    </div>
+                    <!-- Op organInfo, niet op displayOrgan: dat laatste valt terug
+                         op het ingebouwde "Demo Orgel" en is dus nooit leeg —
+                         zonder geladen orgel stonden hier vinkjes voor divisies
+                         die niet bestaan. Zelfde criterium als de terug-knop. -->
+                    {#if organInfo && organInfo.divisions && organInfo.divisions.length > 0}
+                      <div style="margin-top:0.45rem; font-size:0.78rem; color:var(--text-secondary);">{$t('remote.parts_divisions')}</div>
+                      <div style="display:flex; flex-wrap:wrap; gap:0.2rem 1rem; margin-top:0.2rem;">
+                        {#each organInfo.divisions as d (d.name)}
+                          <label class="swell-toggle" style="margin:0;">
+                            <input type="checkbox" checked={remoteDivisions[d.name] !== false} on:change={(e) => toggleRemoteDivision(d.name, e)} />
+                            <span>{d.name}</span>
+                          </label>
+                        {/each}
+                      </div>
+                    {/if}
+                    <p style="margin:0.35rem 0 0; font-size:0.7rem; color:var(--text-muted); line-height:1.4;">{$t('remote.parts_hint')}</p>
+                  </div>
                 {/if}
                 <p style="margin:0.4rem 0 0; font-size:0.7rem; color:var(--text-muted); line-height:1.4;">{$t('remote.hint')}</p>
               </div>

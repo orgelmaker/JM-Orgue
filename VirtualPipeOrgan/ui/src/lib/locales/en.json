@@ -3,6 +3,9 @@
     "title": "JM-Orgue",
     "subtitle": "Virtual pipe organ"
   },
+  "splash": {
+    "starting": "Starting…"
+  },
   "nav": {
     "orgel": "Organ",
     "instellingen": "Settings",
@@ -35,6 +38,10 @@
     "download_size": "Download (± {mb} MB)",
     "download_where": "Choose the folder where the sample set will be stored",
     "download_failed": "Download failed",
+    "choose_image": "Choose image…",
+    "choose_image_title": "Choose a photo of the organ",
+    "image_auto": "Find image automatically",
+    "image_failed": "Could not set image",
     "open_button": "Open Organ Library"
   },
   "settings": {
@@ -244,7 +251,10 @@
     "loops_loopable": "loopable",
     "loops_written": "Loops written",
     "loops_skipped": "skipped",
-    "polyphony_default": "default"
+    "polyphony_default": "default",
+    "audio_buffer_fast_pc": "very fast PCs only",
+    "audio_buffer_recommended": "recommended",
+    "audio_buffer_hint": "Smaller = less latency, but the audio thread has to do all the work of a stop or crescendo change within that time. 128 frames (2.7 ms) is the right choice on almost any PC; 32/48 only on a very fast PC without reverb."
   },
   "perspectives": {
     "title": "Perspectives and stacked ranks",
@@ -341,7 +351,9 @@
     "version": "v{version}",
     "load_title": "Sounding voices / polyphony limit · audio thread load",
     "archiving": "MIDI archive",
-    "archiving_title": "The automatic MIDI archive is capturing your playing; the file is saved after the silence period."
+    "archiving_title": "The automatic MIDI archive is capturing your playing; the file is saved after the silence period.",
+    "peak": "peak",
+    "overload_title": "An audio callback exceeded its deadline: increase the buffer size (Settings → Audio Output) or lower the polyphony."
   },
   "actions": {
     "save": "Save",
@@ -372,6 +384,7 @@
     "wav_files": "WAV files",
     "panel_window_title": "JM-Orgue - Screen {n}",
     "organ_definition_filter": "Organ definition (GrandOrgue / Hauptwerk)",
+    "image_filter": "Images",
     "organ_definition": "Organ definition",
     "external_sampleset_title": "External sample set — select the main folder (unencrypted .wav files only)",
     "export_source_folder_title": "Select the sample folder to export",
@@ -536,7 +549,9 @@
     "profile_device_unavailable": "{label}: device \"{device}\" is not available right now (is it switched on / connected?). The current output stays active.",
     "headphones_profile_not_set": "The Headphones profile has not been set up yet. First choose the headphone output (host, device and optionally channels) under Settings → Audio Output and save it as Headphones; after that this button switches directly.",
     "switch_taking_long": "The audio switch is taking longer than expected — please wait a moment.",
-    "switch_failed": "Audio switch failed."
+    "switch_failed": "Audio switch failed.",
+    "overload_warn": "The audio thread is missing its deadline (peak {peak}% of the buffer time at {frames} frames). You hear this as clicks or stutter on stop and crescendo changes.",
+    "overload_fix": "Set buffer to 128"
   },
   "pistons": {
     "set": "SET — save registration",
@@ -867,7 +882,9 @@
     "range_min": "Min (off)",
     "range_max": "Max (full)",
     "live": "Live",
-    "live_title": "Live crescendo position (follows the pedal)"
+    "live_title": "Live crescendo position (follows the pedal)",
+    "binding_disabled_warn": "A crescendo pedal has been learned (channel {channel} · CC{cc}), but the general crescendo is switched off. That pedal now does nothing — not even as a swell box, because the CC stays reserved for the crescendo.",
+    "binding_empty_warn": "A crescendo pedal has been learned (channel {channel} · CC{cc}), but no steps have been filled in yet. Use Auto-fill or the matrix, otherwise the pedal does nothing."
   },
   "sorting": {
     "by_pitch": "Pitch",
@@ -940,6 +957,21 @@
     "no_lan_ip": "No network address found — is this PC connected to Wi-Fi or a network cable?",
     "running": "Running",
     "stopped": "Not running",
-    "hint": "The first time, Windows Firewall asks whether JM-Orgue may accept connections: choose 'Allow access' for private networks. Declined it? Enable it via Windows Security → Firewall → 'Allow an app through firewall' (JM-Orgue, Private). The address only works inside your own (Wi-Fi) network and is not encrypted; do not share the token and create a new token to revoke access."
+    "hint": "The first time, Windows Firewall asks whether JM-Orgue may accept connections: choose 'Allow access' for private networks. Declined it? Enable it via Windows Security → Firewall → 'Allow an app through firewall' (JM-Orgue, Private). The address only works inside your own (Wi-Fi) network and is not encrypted; do not share the token and create a new token to revoke access.",
+    "parts_title": "Parts shown on the remote screen",
+    "parts_divisions": "Divisions on the remote screen",
+    "part_couplers": "Couplers",
+    "part_tremulant": "Tremulant",
+    "part_setzer": "Setzer",
+    "part_volume": "Volume",
+    "part_panic": "Panic",
+    "parts_hint": "For the rest the remote screen follows the organ screen: the same order of divisions and stops, the same knob shape and the same couplers. Choose which couplers are visible under Organ settings → Couplers; the remote screen never shows more than the organ screen."
+  },
+  "pedal": {
+    "replaces_prefix": "replaces:",
+    "replaces_crescendo": "general crescendo",
+    "replaces_swell": "swell box {division}",
+    "taken_over": "This pedal was already assigned to {what}; that assignment has been taken over. One pedal can only have one function.",
+    "cc_required": "Enter a CC number as well — selecting only a channel does not create an assignment."
   }
 }

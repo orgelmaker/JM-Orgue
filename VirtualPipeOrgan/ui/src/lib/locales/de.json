@@ -3,6 +3,9 @@
     "title": "JM-Orgue",
     "subtitle": "Virtuelle Pfeifenorgel"
   },
+  "splash": {
+    "starting": "Wird gestartet…"
+  },
   "nav": {
     "orgel": "Orgel",
     "instellingen": "Einstellungen",
@@ -35,6 +38,10 @@
     "download_size": "Herunterladen (± {mb} MB)",
     "download_where": "Ordner wählen, in dem das Sample-Set gespeichert wird",
     "download_failed": "Download fehlgeschlagen",
+    "choose_image": "Bild wählen…",
+    "choose_image_title": "Wählen Sie ein Foto der Orgel",
+    "image_auto": "Bild automatisch suchen",
+    "image_failed": "Bild konnte nicht gesetzt werden",
     "open_button": "Orgelbibliothek öffnen"
   },
   "settings": {
@@ -244,7 +251,10 @@
     "loops_loopable": "loopbar",
     "loops_written": "Loops geschrieben",
     "loops_skipped": "übersprungen",
-    "polyphony_default": "Standard"
+    "polyphony_default": "Standard",
+    "audio_buffer_fast_pc": "nur für sehr schnelle PCs",
+    "audio_buffer_recommended": "empfohlen",
+    "audio_buffer_hint": "Kleiner = weniger Latenz, aber der Audio-Thread muss die gesamte Arbeit eines Register- oder Crescendowechsels in dieser Zeit erledigen. 128 Frames (2,7 ms) ist für nahezu jeden PC die richtige Wahl; 32/48 nur auf einem sehr schnellen PC ohne Hall."
   },
   "perspectives": {
     "title": "Perspektiven und gestapelte Reihen",
@@ -341,7 +351,9 @@
     "version": "v{version}",
     "load_title": "Klingende Stimmen / Polyphonie-Grenze · Auslastung Audio-Thread",
     "archiving": "MIDI-Archiv",
-    "archiving_title": "Das automatische MIDI-Archiv zeichnet Ihr Spiel auf; die Datei wird nach der Stillezeit gespeichert."
+    "archiving_title": "Das automatische MIDI-Archiv zeichnet Ihr Spiel auf; die Datei wird nach der Stillezeit gespeichert.",
+    "peak": "Spitze",
+    "overload_title": "Ein Audio-Callback hat seine Frist überschritten: Puffergröße erhöhen (Einstellungen → Audioausgabe) oder Polyfonie senken."
   },
   "actions": {
     "save": "Speichern",
@@ -372,6 +384,7 @@
     "wav_files": "WAV-Dateien",
     "panel_window_title": "JM-Orgue - Bildschirm {n}",
     "organ_definition_filter": "Orgeldefinition (GrandOrgue / Hauptwerk)",
+    "image_filter": "Bilder",
     "organ_definition": "Orgeldefinition",
     "external_sampleset_title": "Externes Sampleset — Hauptordner wählen (nur unverschlüsselte .wav-Dateien)",
     "export_source_folder_title": "Sample-Ordner zum Exportieren wählen",
@@ -536,7 +549,9 @@
     "profile_device_unavailable": "{label}: Gerät \"{device}\" ist derzeit nicht verfügbar (eingeschaltet / angeschlossen?). Der aktuelle Ausgang bleibt aktiv.",
     "headphones_profile_not_set": "Das Profil Kopfhörer ist noch nicht eingerichtet. Wählen Sie zuerst den Kopfhörer-Ausgang (Host, Gerät und ggf. Kanäle) unter Einstellungen → Audio-Ausgabe und speichern Sie ihn als Kopfhörer; danach wechselt diese Taste direkt.",
     "switch_taking_long": "Der Audio-Wechsel dauert länger als erwartet — bitte noch einen Moment Geduld.",
-    "switch_failed": "Audio-Wechsel fehlgeschlagen."
+    "switch_failed": "Audio-Wechsel fehlgeschlagen.",
+    "overload_warn": "Der Audio-Thread hält seine Frist nicht ein (Spitze {peak}% der Pufferzeit bei {frames} Frames). Das hört man als Knacken oder Stottern bei Register- und Crescendowechseln.",
+    "overload_fix": "Puffer auf 128 setzen"
   },
   "pistons": {
     "set": "SET — Registrierung speichern",
@@ -867,7 +882,9 @@
     "range_min": "Min (zu)",
     "range_max": "Max (voll)",
     "live": "Live",
-    "live_title": "Aktuelle Crescendo-Stufe (folgt dem Pedal)"
+    "live_title": "Aktuelle Crescendo-Stufe (folgt dem Pedal)",
+    "binding_disabled_warn": "Es wurde ein Crescendotritt eingelernt (Kanal {channel} · CC{cc}), das Generalcrescendo ist aber ausgeschaltet. Der Tritt bewirkt dann nichts — auch nicht als Schwellkasten, da der CC für das Crescendo reserviert bleibt.",
+    "binding_empty_warn": "Es wurde ein Crescendotritt eingelernt (Kanal {channel} · CC{cc}), es sind aber noch keine Stufen gefüllt. Nutzen Sie Auto-Fill oder die Matrix, sonst bewirkt der Tritt nichts."
   },
   "sorting": {
     "by_pitch": "Fußlage",
@@ -940,6 +957,21 @@
     "no_lan_ip": "Keine Netzwerkadresse gefunden — ist dieser PC mit WLAN oder einem Netzwerkkabel verbunden?",
     "running": "Aktiv",
     "stopped": "Nicht aktiv",
-    "hint": "Beim ersten Mal fragt die Windows-Firewall, ob JM-Orgue Verbindungen annehmen darf: Wählen Sie „Zugriff zulassen“ für private Netzwerke. Abgelehnt? Aktivieren Sie es über Windows-Sicherheit → Firewall → „Eine App durch die Firewall zulassen“ (JM-Orgue, Privat). Die Adresse funktioniert nur im eigenen (WLAN-)Netzwerk und ist unverschlüsselt; teilen Sie das Token nicht und erstellen Sie ein neues Token, um den Zugriff zu widerrufen."
+    "hint": "Beim ersten Mal fragt die Windows-Firewall, ob JM-Orgue Verbindungen annehmen darf: Wählen Sie „Zugriff zulassen“ für private Netzwerke. Abgelehnt? Aktivieren Sie es über Windows-Sicherheit → Firewall → „Eine App durch die Firewall zulassen“ (JM-Orgue, Privat). Die Adresse funktioniert nur im eigenen (WLAN-)Netzwerk und ist unverschlüsselt; teilen Sie das Token nicht und erstellen Sie ein neues Token, um den Zugriff zu widerrufen.",
+    "parts_title": "Elemente auf dem externen Bildschirm",
+    "parts_divisions": "Werke auf dem externen Bildschirm",
+    "part_couplers": "Koppeln",
+    "part_tremulant": "Tremulant",
+    "part_setzer": "Setzer",
+    "part_volume": "Lautstärke",
+    "part_panic": "Panik",
+    "parts_hint": "Im Übrigen folgt der externe Bildschirm dem Orgelbildschirm: gleiche Reihenfolge von Werken und Registern, gleiche Knopfform und gleiche Koppeln. Welche Koppeln sichtbar sind, wählen Sie unter Orgel-Einstellungen → Koppeln; der externe Bildschirm zeigt nie mehr als der Orgelbildschirm."
+  },
+  "pedal": {
+    "replaces_prefix": "ersetzt:",
+    "replaces_crescendo": "Generalcrescendo",
+    "replaces_swell": "Schwellkasten {division}",
+    "taken_over": "Dieser Tritt war bereits {what} zugeordnet; diese Zuordnung wurde übernommen. Ein Tritt kann nur eine Funktion haben.",
+    "cc_required": "Bitte auch eine CC-Nummer eingeben — nur einen Kanal zu wählen erzeugt keine Zuordnung."
   }
 }
