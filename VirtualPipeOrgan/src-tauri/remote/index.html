@@ -1,5 +1,7 @@
 <!doctype html>
-<html lang="nl">
+<!-- lang staat hier op de terugvaltaal; het script zet hem hieronder op de
+     werkelijk gekozen taal (browsertaal) zodra die bekend is. -->
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
@@ -87,13 +89,17 @@
     nl: { tremulant: 'Tremulant', couplers: 'Koppels', volume: 'Volume', no_connection: 'Geen verbinding met JM-Orgue', no_organ: 'Geen orgel geladen in JM-Orgue', no_setzer: 'Orgelscherm niet actief — open het Orgel-tabblad in JM-Orgue', set: 'SET', gc: 'GC', panic: 'Panic', level: 'M' },
     en: { tremulant: 'Tremulant', couplers: 'Couplers', volume: 'Volume', no_connection: 'No connection to JM-Orgue', no_organ: 'No organ loaded in JM-Orgue', no_setzer: 'Organ screen not active — open the Organ tab in JM-Orgue', set: 'SET', gc: 'GC', panic: 'Panic', level: 'M' },
     fr: { tremulant: 'Tremblant', couplers: 'Accouplements', volume: 'Volume', no_connection: 'Pas de connexion à JM-Orgue', no_organ: 'Aucun orgue chargé dans JM-Orgue', no_setzer: 'Écran orgue inactif — ouvrez l’onglet Orgue dans JM-Orgue', set: 'SET', gc: 'GC', panic: 'Panique', level: 'M' },
-    de: { tremulant: 'Tremulant', couplers: 'Koppeln', volume: 'Lautstärke', no_connection: 'Keine Verbindung zu JM-Orgue', no_organ: 'Kein Orgel in JM-Orgue geladen', no_setzer: 'Orgelbildschirm nicht aktiv — öffnen Sie den Orgel-Tab in JM-Orgue', set: 'SET', gc: 'GC', panic: 'Panik', level: 'M' },
+    de: { tremulant: 'Tremulant', couplers: 'Koppeln', volume: 'Lautstärke', no_connection: 'Keine Verbindung zu JM-Orgue', no_organ: 'Keine Orgel in JM-Orgue geladen', no_setzer: 'Orgelbildschirm nicht aktiv — öffnen Sie den Orgel-Tab in JM-Orgue', set: 'SET', gc: 'GC', panic: 'Panik', level: 'M' },
     pl: { tremulant: "Tremulant", couplers: "Sprzęgła", volume: "Głośność", no_connection: "Brak połączenia z JM-Orgue", no_organ: "Nie wczytano organów w JM-Orgue", no_setzer: "Ekran organów nieaktywny — otwórz zakładkę Organy w JM-Orgue", set: "SET", gc: "GC", panic: "Panic", level: "M" },
     it: { tremulant: "Tremolo", couplers: "Unioni", volume: "Volume", no_connection: "Nessuna connessione a JM-Orgue", no_organ: "Nessun organo caricato in JM-Orgue", no_setzer: "Schermata dell’organo non attiva — apri la scheda Organo in JM-Orgue", set: "SET", gc: "GC", panic: "Panico", level: "M" },
     es: { tremulant: "Trémolo", couplers: "Acoplamientos", volume: "Volumen", no_connection: "Sin conexión con JM-Orgue", no_organ: "No hay ningún órgano cargado en JM-Orgue", no_setzer: "Pantalla del órgano inactiva — abre la pestaña Órgano en JM-Orgue", set: "SET", gc: "GC", panic: "Pánico", level: "M" }
   };
   var lang = ((navigator.language || 'en').slice(0, 2).toLowerCase());
-  var T = STR[lang] || STR.en;
+  if (!STR[lang]) lang = 'en';
+  var T = STR[lang];
+  // Documenttaal meelopen met de gekozen taal (stond hard op 'nl'): schermlezers,
+  // woordafbreking en het vertaalaanbod van de browser gaan hierop af.
+  document.documentElement.lang = lang;
 
   // Pagina-URL is /r/<token>/ — alle fetches relatief, het token staat nergens in de JS.
   var base = location.pathname;

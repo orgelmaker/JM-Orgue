@@ -1,5 +1,12 @@
-import json, sys, io
-base = r"C:/Bronbestanden/JM-Orgue/VirtualPipeOrgan/ui/src/lib/locales/"
+"""Controleert of alle vertalingen dezelfde sleutels hebben als het Nederlands.
+
+Het pad wordt afgeleid van de plek van DIT script (testscripts/ ligt naast ui/),
+zodat het zowel op de ontwikkel-pc als op een CI-runner (Linux, ander pad) werkt.
+Draaien kan vanuit elke map: python VirtualPipeOrgan/testscripts/check_i18n_keys.py
+"""
+import json, sys, io, os
+base = os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir,
+                    "ui", "src", "lib", "locales") + os.sep
 def flat(d, p=""):
     out = set()
     for k, v in d.items():

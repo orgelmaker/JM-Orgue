@@ -686,10 +686,16 @@ input[type="range"]::-webkit-slider-thumb:hover {
   height: 100%;
 }
 
+/* De kop draagt links de titel + zeven taalknoppen en rechts vijf actieknoppen.
+   Bij een smal venster (de app staat 1024 px toe) past dat niet op één regel:
+   met flex-wrap zakt de knoppenrij netjes onder de titel in plaats van dat de
+   knoppen elkaar samendrukken. */
 .organ-browser-header {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
+  gap: 0.5rem 1rem;
   padding: 0.75rem 1.5rem;
   background: var(--bg-panel);
   border-bottom: 2px solid var(--gold-border);
@@ -719,6 +725,7 @@ input[type="range"]::-webkit-slider-thumb:hover {
 
 .organ-browser-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.5rem;
 }
 
@@ -733,13 +740,16 @@ input[type="range"]::-webkit-slider-thumb:hover {
 /* Titel + taalknoppen links in de kop van de bibliotheek */
 .organ-browser-titlegroup {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 1rem;
+  gap: 0.5rem 1rem;
 }
 
-/* Kleine taalknoppen (NL EN FR DE) op het startscherm */
+/* Kleine taalknoppen (NL EN FR DE PL IT ES) op het startscherm — zeven stuks,
+   dus ook deze rij mag afbreken als de kop smal wordt. */
 .lang-switch {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.25rem;
 }
 

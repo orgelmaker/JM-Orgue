@@ -5966,12 +5966,16 @@ fn add_or_refresh_library_entry(state: &AppState, organ_info: &OrganInfoDto, sou
     };
 
     // 2) Zoeken ZONDER lock.
-    let gezocht = if moet_zoeken {
+    let (gezocht, bron_leesbaar) = if moet_zoeken {
         let found = library::find_organ_image(source_path, source_type);
-        info!("Bibliotheek: afbeelding gezocht voor {} → {:?}", source_path, found);
-        Some(found)
+        let leesbaar = found.is_some() || afbeeldingsbron_leesbaar(source_path, source_type);
+        info!(
+            "Bibliotheek: afbeelding gezocht voor {} → {:?} (bronmap leesbaar: {})",
+            source_path, found, leesbaar
+        );
+        (Some(found), leesbaar)
     } else {
-        None
+        (None, false)
     };
 
     // 3) Korte write-lock om te schrijven. De entry kan intussen veranderd zijn
@@ -6002,7 +6006,11 @@ fn add_or_refresh_library_entry(state: &AppState, organ_info: &OrganInfoDto, sou
                     changed = true;
                 }
                 if let Some(found) = gezocht {
-                    if !e.image_manual {
+                    // Alleen vastleggen als er ook écht gezocht KON worden: op
+                    // een losgekoppelde USB- of netwerkschijf levert de
+                    // zoektocht óók None op, en dat mag geen blijvend "geen
+                    // foto" worden (en het oude pad niet wissen).
+                    if !e.image_manual && bron_leesbaar {
                         e.image_path = found;
                         e.image_searched = Some(library::IMAGE_SEARCH_VERSION);
                         changed = true;
@@ -6024,7 +6032,10 @@ fn add_or_refresh_library_entry(state: &AppState, organ_info: &OrganInfoDto, sou
                     source_path: source_path.to_string(),
                     image_path: gezocht.flatten(),
                     image_manual: false,
-                    image_searched: Some(library::IMAGE_SEARCH_VERSION),
+                    // Onbereikbare bronmap → niet als "gezocht" wegschrijven,
+                    // anders blijft dit orgel ook na het aankoppelen van de
+                    // schijf voorgoed zonder foto.
+                    image_searched: if bron_leesbaar { Some(library::IMAGE_SEARCH_VERSION) } else { None },
                 });
                 changed = true;
             }
@@ -6797,6 +6808,30 @@ fn image_copy_stem(id: &str) -> String {
     format!("{:016x}", h)
 }
 
+/// Was de bronmap waarin `find_organ_image` zoekt op dít moment leesbaar?
+///
+/// Nodig om de negatieve cache (`image_searched`) eerlijk te houden: de
+/// zoektocht geeft None zowel bij "gezocht en niets gevonden" als bij "kon
+/// niet zoeken" (USB eruit, netwerkschijf weg, geen rechten). Zonder dit
+/// onderscheid zou zo'n orgel voorgoed als "geen foto" vastliggen, ook nadat
+/// de schijf er weer is.
+///
+/// `read_dir` en niet alleen `is_dir()`: een netwerkpad kan bestaan en tóch
+/// onleesbaar zijn. De mappaden volgen `find_organ_image`: bij een
+/// orgelbestand de map eromheen, bij een sample-map het pad zelf.
+fn afbeeldingsbron_leesbaar(source_path: &str, source_type: &str) -> bool {
+    let src = Path::new(source_path);
+    let dir = if source_type == "organ_file" {
+        match src.parent() {
+            Some(p) => p.to_path_buf(),
+            None => return false,
+        }
+    } else {
+        src.to_path_buf()
+    };
+    std::fs::read_dir(&dir).is_ok()
+}
+
 /// Afbeelding voor een bibliotheekkaart, op ID (= genormaliseerd bronpad).
 ///
 /// Gebruikt de afbeelding die in de bibliotheek is opgeslagen; alleen als die
@@ -6843,7 +6878,11 @@ pub fn get_organ_image(state: State<AppState>, id: String) -> Option<String> {
     }
 
     let found = library::find_organ_image(&source_path, &source_type);
-    if in_lib {
+    // "Niets gevonden" en "kon niet zoeken" zien er allebei uit als None. Alleen
+    // het eerste mag in de negatieve cache: anders krijgt een orgel op een
+    // losgekoppelde USB- of netwerkschijf voorgoed het stempel "geen foto".
+    let bron_leesbaar = found.is_some() || afbeeldingsbron_leesbaar(&source_path, &source_type);
+    if in_lib && bron_leesbaar {
         let mut lib = state.organ_library.write();
         if let Some(e) = lib.organs.iter_mut().find(|o| norm(&o.id) == key || norm(&o.source_path) == key) {
             e.image_path = found.clone();
@@ -7727,6 +7766,42 @@ mod bibliotheek_opfris_tests {
         std::fs::write(&p, bytes).unwrap();
         let info = lees_organ_sectie_licht(&p).expect("[Organ]");
         assert_eq!(info.church_name, "Bätz-kerk");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+}
+
+#[cfg(test)]
+mod afbeeldingsbron_tests {
+    use super::afbeeldingsbron_leesbaar;
+
+    /// Punt 4: de negatieve afbeeldingscache mag "gezocht en niets gevonden"
+    /// niet verwarren met "kon niet zoeken". Alleen bij een leesbare bronmap
+    /// mag `image_searched` gezet worden.
+    #[test]
+    fn losgekoppelde_schijf_geldt_niet_als_gezocht() {
+        // USB eruit / netwerkschijf weg: er viel niets te zoeken.
+        assert!(!afbeeldingsbron_leesbaar(r"Q:\bestaat-niet\Orgel", "sample_directory"));
+        assert!(!afbeeldingsbron_leesbaar(r"Q:\bestaat-niet\Orgel\set.organ", "organ_file"));
+        assert!(!afbeeldingsbron_leesbaar(r"\\geen-server\orgels\set.organ", "organ_file"));
+    }
+
+    #[test]
+    fn bereikbare_map_geldt_wel_als_gezocht() {
+        let d = std::env::temp_dir().join("jm_afbeeldingsbron_1");
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        let odf = d.join("set.organ");
+        std::fs::write(&odf, b"[Organ]\n").unwrap();
+
+        // Sample-map: het pad zelf. Orgelbestand: de map eromheen.
+        assert!(afbeeldingsbron_leesbaar(&d.to_string_lossy(), "sample_directory"));
+        assert!(afbeeldingsbron_leesbaar(&odf.to_string_lossy(), "organ_file"));
+        // Een ODF dat zelf weg is, maar in een bestaande map stond: er kán
+        // gezocht worden, dus "geen foto" mag hier wél vastgelegd worden.
+        assert!(afbeeldingsbron_leesbaar(&d.join("weg.organ").to_string_lossy(), "organ_file"));
+        // Een bestand als sample-map opgegeven is geen leesbare map.
+        assert!(!afbeeldingsbron_leesbaar(&odf.to_string_lossy(), "sample_directory"));
+
         let _ = std::fs::remove_dir_all(&d);
     }
 }

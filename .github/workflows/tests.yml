@@ -1,0 +1,81 @@
+# Lichte controle bij ELKE push naar master en elk pull request. Tot nu toe
+# draaide er in de bouwstraat helemaal geen test: release-build en updater-json
+# starten allebei pas bij een gepubliceerde release, dus een fout bleef tot het
+# uitbrengen onzichtbaar.
+#
+# Wat er gecontroleerd wordt (in deze volgorde, want de volgende stap leunt op
+# de vorige):
+#   1. frontend bouwen — vangt Svelte/Vite-fouten, én levert ui/dist dat de
+#      Tauri-build (feature custom-protocol) inbakt; zonder dist faalt stap 3.
+#   2. vertaalsleutels — nl is de bron, de andere talen moeten exact dezelfde
+#      sleutels hebben.
+#   3. cargo test voor vpo-app en vpo-sampler, ZONDER de asio-feature: dan is
+#      de Steinberg ASIO-SDK (en LLVM/libclang voor de bindings) niet nodig en
+#      blijft de controle licht. De releasebouw draait wél mét asio.
+#
+# Waarom windows-latest en niet ubuntu (goedkoper/sneller) voor stap 3:
+#   - vpo-app is een Tauri-app met cpal; een Linux-build vraagt extra
+#     systeempakketten (webkit2gtk, ALSA, appindicator) en wordt door niemand
+#     gebruikt — er komt geen Linux-uitgave uit dit project, dus een rode
+#     controle daar zou over iets gaan wat we toch niet uitbrengen.
+#   - meerdere tests rekenen met Windows-padregels (stationsletters,
+#     backslashes: zie bibliotheek_opfris_tests en afbeeldingsbron_tests in
+#     src-tauri/src/commands.rs); die zouden op Linux iets anders meten.
+# De repo is openbaar, dus Actions-minuten zijn gratis; de kosten zitten in
+# wachttijd en die blijft klein door de caches hieronder.
+name: tests
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+# Alleen lezen: deze workflow hangt niets aan een release.
+permissions:
+  contents: read
+
+# Een nieuwe push op dezelfde tak maakt de lopende controle overbodig.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: VirtualPipeOrgan
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: VirtualPipeOrgan/ui/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # Zelfde cache-opzet als release-build: zonder deze stap bouwt elke push
+      # de hele afhankelijkhedenboom (tauri en cpal) opnieuw.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: VirtualPipeOrgan
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Frontend-afhankelijkheden installeren
+        run: npm ci
+        working-directory: VirtualPipeOrgan/ui
+
+      - name: Frontend bouwen
+        run: npm run build
+        working-directory: VirtualPipeOrgan/ui
+
+      - name: Vertaalsleutels controleren (nl is de bron)
+        run: python testscripts/check_i18n_keys.py
+
+      - name: Rust-tests (zonder ASIO)
+        run: cargo test -p vpo-app -p vpo-sampler

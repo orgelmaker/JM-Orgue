@@ -43,6 +43,16 @@ export function isMacOS() {
 // update is daar erger dan één keer handmatig de dmg installeren.
 export const autoUpdateOndersteund = () => !isMacOS();
 
+// Ruime deadline voor de download (reqwest-timeout in de plugin: van verbinden
+// tot en met het laatste brokje). Zonder deze grens blijft een verbinding die
+// blijft hangen zonder fout de balk voor altijd op "Update downloaden..." laten
+// staan en is de app alleen met een herstart te redden. 30 minuten is ruim: ook
+// een installer van 100 MB haalt dat nog bij ~55 kB/s. Loopt hij af, dan gooit
+// download() een fout, komt de nette melding in beeld en kan de gebruiker de
+// downloadpagina gebruiken. Geen afbreekknop: die zou alleen de weergave
+// terugzetten terwijl de download doorloopt (tweede poging = dubbel downloaden).
+const DOWNLOAD_TIMEOUT_MS = 30 * 60 * 1000;
+
 const releaseUrl = (version) => {
   const v = String(version || '').replace(/^v/, '');
   return v ? `${githubRepoUrl()}/releases/tag/v${v}` : `${githubRepoUrl()}/releases`;
@@ -118,7 +128,7 @@ export async function installeerUpdate(update, { onVoortgang, voorInstalleren } 
         meld('download', 100);
         break;
     }
-  });
+  }, { timeout: DOWNLOAD_TIMEOUT_MS });
 
   // Vanaf hier is de handtekening geverifieerd en staat de installer klaar.
   meld('install', 100);

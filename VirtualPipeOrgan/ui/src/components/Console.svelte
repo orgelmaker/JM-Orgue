@@ -1022,7 +1022,10 @@
   function setCrescendoNumStagesUI(n) {
     const oud = crescendoNumStages;
     const verlies = n < oud && (crescendoStages || []).slice(n).some(s => Array.isArray(s) && s.length);
-    if (verlies && !confirm(tx('crescendo.shrink_confirm').replace('{old}', String(oud)).replace('{new}', String(n)))) {
+    // LET OP: {new} staat twee keer in de tekst (in alle talen), dus met /g
+    // vervangen — een gewone .replace() pakt alleen het eerste voorkomen en
+    // laat letterlijk "{new}" in de bevestigingsvraag staan.
+    if (verlies && !confirm(tx('crescendo.shrink_confirm').replace(/\{old\}/g, String(oud)).replace(/\{new\}/g, String(n)))) {
       crescendoNumStages = oud; // select terugzetten
       return;
     }

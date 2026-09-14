@@ -176,6 +176,16 @@ pub fn render_overload_count() -> u64 {
 /// hooguit 1x per 5 s, zodat er geen log-I/O in het audiopad komt.
 static RELEASE_PRELOAD_EDGE_HITS: AtomicU64 = AtomicU64::new(0);
 
+/// Diagnose-tellers voor tremulantwissels (zelfde patroon als hierboven). Het
+/// loggen van een wissel hoorde in de commandolus van de audio-callback thuis
+/// noch binnen de write-guard op `trem_active`: de logschrijver is ongebufferd
+/// en zit achter een mutex, en zolang die guard openstaat kan géén NoteOn de
+/// tremulantstand van zijn register opzoeken. De callback telt nu alleen; de
+/// watchdog-thread meldt hooguit 1x per 5 s hoeveel wissels er waren en hoeveel
+/// registers op tremulant staan.
+static TREMULANT_SWITCHES: AtomicU64 = AtomicU64::new(0);
+static TREMULANT_ACTIVE_STOPS: AtomicU64 = AtomicU64::new(0);
+
 /// Sample source with preload buffer for instant playback
 #[derive(Debug, Clone)]
 pub enum SampleSource {
@@ -1014,6 +1024,30 @@ fn budget_release_voices(voices: &mut Vec<PlayingVoice>, sample_rate: u32, cap: 
     }
 }
 
+/// Voeg een reeks nieuwe stemmen toe zoals de commandolus dat overal doet: vóór
+/// ELKE push eerst het staartbudget bijstellen ([`budget_release_voices`]) en
+/// daarna de polyfonie-kap toepassen ([`push_voice_capped`]). De volgorde is
+/// wezenlijk: het staartbudget kiest een onhoorbaar slachtoffer, de kap een
+/// hoorbaar — doe je het budget maar één keer vooraf, dan staat de kap er bij
+/// een burst alsnog alleen voor en worden klinkende pijpen gestolen.
+///
+/// Geeft het aantal toegevoegde stemmen terug, zodat de aanroeper dat als
+/// werkeenheden op het spawn-budget van de callback kan boeken.
+#[inline]
+fn push_voices_budgeted(
+    voices: &mut Vec<PlayingVoice>,
+    new_voices: Vec<PlayingVoice>,
+    sample_rate: u32,
+    cap: usize,
+) -> usize {
+    let n = new_voices.len();
+    for v in new_voices {
+        budget_release_voices(voices, sample_rate, cap);
+        push_voice_capped(voices, v, sample_rate, cap);
+    }
+    n
+}
+
 /// Crossfade length for a loop of `loop_len` samples whose start is at index `ls`.
 /// Long crossfades (Hauptwerk-style, up to ~500 ms) mask imperfect loop points;
 /// bounded by half the loop and by the available pre-loop data (`ls`).
@@ -1639,6 +1673,43 @@ mod release_tests {
         budget_release_voices(&mut voices, 48_000, cap);
 
         assert!(!voices[budget].releasing, "release met uitgestelde decay werd gestolen");
+    }
+
+    /// Een tremulantwissel op vol werk: elke klinkende pijp krijgt er een stem
+    /// bij terwijl de oude uitfadet. Die burst moet langs het STAARTBUDGET —
+    /// vóór elke push één keer — anders groeit het stemmenaantal ongeremd
+    /// terwijl de staarten al op hun grens staan. De teruggegeven telling is
+    /// tegelijk het werk dat de callback op zijn spawn-budget boekt.
+    #[test]
+    fn tremulantburst_gaat_langs_het_staartbudget_en_telt_het_werk() {
+        let cap = 1024usize;
+        let budget = (cap / 3).max(MAX_RELEASE_VOICES);
+        // Staarten precies op het budget: elke extra stem moet er nu één
+        // onhoorbaar laten plaatsmaken.
+        let mut voices: Vec<PlayingVoice> =
+            (0..budget).map(|i| staart(48_000 + i as u64)).collect();
+
+        // Vier nieuwe crossfade-stemmen zoals SetTremulant ze maakt (klinkende
+        // pijpen, dus géén one-shot staarten).
+        let nieuw: Vec<PlayingVoice> = (0..4)
+            .map(|_| {
+                let mut v = PlayingVoice::new_from_sample(vlakke_sample(48_000), 1, 100, 60, 1.0);
+                v.envelope = 1.0;
+                v.target_envelope = 1.0;
+                v
+            })
+            .collect();
+
+        let gespawnd = push_voices_budgeted(&mut voices, nieuw, 48_000, cap);
+
+        assert_eq!(gespawnd, 4, "werkeenheden niet teruggegeven");
+        assert_eq!(voices.len(), budget + 4, "stemmen niet toegevoegd");
+        let uitfadend = voices.iter().filter(|v| v.one_shot && v.releasing).count();
+        assert_eq!(uitfadend, 4, "het staartbudget liep niet mee met elke push (kreeg {})", uitfadend);
+        assert!(
+            voices[budget..].iter().all(|v| !v.releasing),
+            "een zojuist toegevoegde crossfade-stem werd meteen weer losgelaten"
+        );
     }
 
     /// Zijn álle staarten net gespawnd (< 20 ms), dan wordt er niets gestolen:
@@ -3354,7 +3425,16 @@ fn run_audio_thread(
                         // release verstrikt en de noot valt dood. Wel telt het
                         // gedane werk mee, zodat de rest van de queue naar de
                         // volgende callback doorschuift.
-                        spawns_done += spawns.len();
+                        //
+                        // Boeking net als bij NoteOff: één eenheid voor het
+                        // bericht ZELF plus één per gespawnde staart. De
+                        // verzendkant stuurt ReleaseStop onvoorwaardelijk bij
+                        // elke registerwissel, dus een ReleaseStop die niets
+                        // loslaat is de regel — en die doet wél de volledige
+                        // O(stemmen)-scan hierboven onder de write-lock. Op 0
+                        // boeken liet een crescendo-trapwissel (tientallen
+                        // registers ineens) gratis door de callback glippen.
+                        spawns_done += 1 + spawns.len();
                         for rv in spawns {
                             budget_release_voices(&mut voices_lock, sample_rate, live_cap);
                             push_voice_capped(&mut voices_lock, rv, sample_rate, live_cap);
@@ -3507,6 +3587,9 @@ fn run_audio_thread(
                         // Crossfade: for currently playing voices on these stops,
                         // fade out old source and start new voice from alternate buffer
                         let mut new_voices: Vec<PlayingVoice> = Vec::new();
+                        // Aantal daadwerkelijk gestarte crossfade-stemmen; gaat
+                        // na afloop als werkeenheden op `spawns_done`.
+                        let spawned_count;
                         {
                             let mut voices_lock = voices_clone.write();
                             for voice in voices_lock.iter_mut() {
@@ -3576,19 +3659,50 @@ fn run_audio_thread(
                                     }
                                 }
                             }
-                            // Add new crossfade voices
-                            for nv in new_voices { push_voice_capped(&mut voices_lock, nv, sample_rate, live_cap); }
+                            // Nieuwe crossfade-stemmen erbij, mét staartbudget —
+                            // net als bij NoteOff en ReleaseStop. Juist hier kan
+                            // het stemmenaantal in één klap VERDUBBELEN (elke
+                            // klinkende pijp houdt zijn uitfadende oude stem én
+                            // krijgt een nieuwe uit de andere buffer), dus dit
+                            // was de laatste plek waar de kap ongeremd overschreden
+                            // kon worden: een tremulant aanzetten op vol werk
+                            // duwde de staarten voorbij hun budget.
+                            spawned_count = push_voices_budgeted(
+                                &mut voices_lock, new_voices, sample_rate, live_cap,
+                            );
                         }
-                        // Update tremulant state for future notes
-                        let mut trem = trem_active_clone.write();
-                        for id in stop_ids {
-                            if active {
-                                trem.insert(id);
-                            } else {
-                                trem.remove(&id);
+                        // Update tremulant state for future notes. De guard in een
+                        // eigen blok: hij mag NIET openstaan tijdens het loggen
+                        // (zie hieronder) — elke NoteOn leest deze map.
+                        {
+                            let mut trem = trem_active_clone.write();
+                            for id in stop_ids {
+                                if active {
+                                    trem.insert(id);
+                                } else {
+                                    trem.remove(&id);
+                                }
                             }
+                            TREMULANT_ACTIVE_STOPS.store(trem.len() as u64, Ordering::Relaxed);
                         }
-                        info!("Tremulant {}: active stops = {}", if active { "ON" } else { "OFF" }, trem.len());
+                        // Geen info!() in dit hete pad: de logschrijver is
+                        // ongebufferd en zit achter een mutex, dus één regel kan
+                        // de realtime-deadline opeten. Alleen tellen; de
+                        // watchdog-thread meldt de stand (zelfde patroon als
+                        // RELEASE_PRELOAD_EDGE_HITS).
+                        TREMULANT_SWITCHES.fetch_add(1, Ordering::Relaxed);
+                        // Werkbudget: één eenheid voor het bericht zelf (de
+                        // O(stemmen)-scan hierboven onder de write-lock gebeurt
+                        // ook als er niets te wisselen valt) plus één per gestarte
+                        // crossfade-stem. Dit was het ENIGE stemstart-pad in de
+                        // commandolus zonder boeking: een tremulant-wissel midden
+                        // in een tutti startte ongelimiteerd stemmen binnen één
+                        // callback. Het bericht blijft ATOMAIR — half uitgevoerd
+                        // zou een deel van de pijpen in de verkeerde stand
+                        // achterlaten; we boeken alleen het gedane werk, zodat de
+                        // rest van de wachtrij FIFO naar de volgende callback
+                        // doorschuift.
+                        spawns_done += 1 + spawned_count;
                     }
                     AudioCommand::SetDivisionGain { division_index, gain } => {
                         // Alleen de DOELstand; de render-lus loopt er per blok
@@ -4477,6 +4591,8 @@ fn run_audio_thread(
     // Laatst gemelde stand van de preload-rand-teller (release-staarten die op
     // de preload afliepen omdat de volledige WAV nog niet geladen was).
     let mut preload_edge_prev = RELEASE_PRELOAD_EDGE_HITS.load(Ordering::Relaxed);
+    // Idem voor de tremulantwissels: de callback telt, deze thread meldt.
+    let mut trem_switch_prev = TREMULANT_SWITCHES.load(Ordering::Relaxed);
     while running.load(Ordering::Relaxed) {
         thread::sleep(std::time::Duration::from_millis(100));
         ticks += 1;
@@ -4620,6 +4736,14 @@ fn run_audio_thread(
                 info!("Release-staarten afgekapt op de preload-rand (volledige sample nog niet geladen): +{} (totaal {})",
                       hits - preload_edge_prev, hits);
                 preload_edge_prev = hits;
+            }
+            // Tremulantwissels: idem — geteld in de callback, hier gemeld.
+            let trem_hits = TREMULANT_SWITCHES.load(Ordering::Relaxed);
+            if trem_hits > trem_switch_prev {
+                info!("Tremulant gewisseld: +{} (nu {} registers met tremulant)",
+                      trem_hits - trem_switch_prev,
+                      TREMULANT_ACTIVE_STOPS.load(Ordering::Relaxed));
+                trem_switch_prev = trem_hits;
             }
         }
 

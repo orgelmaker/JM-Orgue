@@ -10,6 +10,10 @@ on:
       tag:
         description: 'Release-tag, bijvoorbeeld v0.7.40'
         required: true
+      sta_pre_release:
+        description: 'Ook doen als de release een concept/pre-release is (normaal stopt het script dan)'
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -25,4 +29,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.tag }}
           GH_REPO: ${{ github.repository }}
-        run: bash .github/scripts/build-latest-json.sh "$TAG"
+          STA_PRE: ${{ inputs.sta_pre_release }}
+        run: |
+          if [ "$STA_PRE" = "true" ]; then
+            bash .github/scripts/build-latest-json.sh --sta-pre-release "$TAG"
+          else
+            bash .github/scripts/build-latest-json.sh "$TAG"
+          fi

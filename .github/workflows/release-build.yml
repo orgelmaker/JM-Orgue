@@ -216,6 +216,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Is de release per ongeluk als PRE-RELEASE of concept gepubliceerd, dan
+      # stopt het script met een fout en valt deze taak rood uit — dat is de
+      # bedoeling: latest.json wordt aan iedereen aangeboden. Moet het tóch,
+      # dan is er Actions -> updater-json met de vlag 'sta_pre_release'.
       - name: Stel latest.json samen en hang hem aan de release
         env:
           GH_TOKEN: ${{ github.token }}

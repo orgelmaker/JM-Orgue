@@ -11,9 +11,19 @@
 # hangen. Daardoor is dit script ook los te draaien (zie updater-json.yml).
 #
 # Gebruik: GH_TOKEN=... GH_REPO=orgelmaker/JM-Orgue build-latest-json.sh v0.7.40
+#          (voeg --sta-pre-release toe om een pre-release/concept tóch te doen)
 set -euo pipefail
 
-TAG="${1:?gebruik: build-latest-json.sh <tag>, bijvoorbeeld v0.7.40}"
+TAG=""
+STA_PRE_RELEASE=0
+for arg in "$@"; do
+  case "$arg" in
+    --sta-pre-release) STA_PRE_RELEASE=1 ;;
+    -*) echo "Onbekende optie: $arg" >&2; exit 2 ;;
+    *) TAG="$arg" ;;
+  esac
+done
+: "${TAG:?gebruik: build-latest-json.sh [--sta-pre-release] <tag>, bijvoorbeeld v0.7.40}"
 REPO="${GH_REPO:-${GITHUB_REPOSITORY:?GH_REPO of GITHUB_REPOSITORY is nodig}}"
 VERSION="${TAG#v}"
 
@@ -24,12 +34,25 @@ cd "$tmp"
 gh release view "$TAG" --repo "$REPO" --json assets --jq '.assets[].name' > assets.txt
 echo "Bestanden op $TAG:"; sed 's/^/  /' assets.txt
 
-# Waarschuwing: een pre-release of concept komt niet onder
-# /releases/latest/download/ te staan; de updater vindt hem dan nooit.
+# Een pre-release of concept is bijna altijd een vergissing: latest.json hoort
+# bij de versie die IEDEREEN krijgt aangeboden. Hangt hij aan een pre-release,
+# dan wijst /releases/latest/download/latest.json er niet naar (de updater
+# vindt hem nooit) én krijgt iedere gebruiker die de tag-URL wel volgt een
+# versie die nog niet af is. Daarom: stoppen, tenzij het expliciet de bedoeling
+# is (--sta-pre-release, bijvoorbeeld om een testgroep te bedienen).
 SOORT="$(gh release view "$TAG" --repo "$REPO" --json isDraft,isPrerelease --jq '"\(.isDraft) \(.isPrerelease)"')"
 if [ "$SOORT" != "false false" ]; then
-  echo "LET OP: release $TAG is een concept of pre-release (draft/prerelease = $SOORT)."
-  echo "        /releases/latest/download/latest.json wijst er dan NIET naar."
+  if [ "$STA_PRE_RELEASE" -eq 1 ]; then
+    echo "LET OP: release $TAG is een concept of pre-release (draft/prerelease = $SOORT),"
+    echo "        maar --sta-pre-release is meegegeven; latest.json wordt tóch geplaatst."
+    echo "        /releases/latest/download/latest.json wijst er NIET naar."
+  else
+    echo "FOUT: release $TAG is een concept of pre-release (draft/prerelease = $SOORT)." >&2
+    echo "      latest.json is het startsein voor de updater van ALLE gebruikers en hoort" >&2
+    echo "      bij een gewone, gepubliceerde release. Zet de release op 'latest release'," >&2
+    echo "      of geef --sta-pre-release mee als dit echt de bedoeling is." >&2
+    exit 1
+  fi
 fi
 
 pick() { grep -E "$1" assets.txt | grep -v '\.sig$' | head -1 || true; }
@@ -65,11 +88,22 @@ PUB="$(gh release view "$TAG" --repo "$REPO" --json publishedAt --jq .publishedA
 
 {
   # De app kent zijn eigen installatievorm en zoekt eerst
-  # windows-x86_64-<installer>; windows-x86_64 is de terugval. BEIDE wijzen
-  # naar de NSIS-installer: die installeert per gebruiker (geen
-  # beheerdersrechten) en herstart de app zelf. De MSI wordt bewust NIET als
-  # updatepad aangeboden — msiexec vraagt beheerdersrechten en laat de
-  # herstart aan Windows over.
+  # windows-x86_64-<installer>; windows-x86_64 is de terugval.
+  #
+  # BEIDE routes moeten erin staan. De updater kiest op de manier waarop de app
+  # geïnstalleerd is: een MSI-installatie mag alleen een MSI-update krijgen en
+  # een NSIS-installatie alleen een NSIS-update. Ontbreekt de msi-sleutel, dan
+  # krijgt wie met de MSI installeerde de NSIS-installer aangeboden — en die
+  # twee ruimen elkaar niet op: de gebruiker houdt er twee naast elkaar, en dat
+  # herhaalt zich bij iedere volgende update.
+  #
+  # Verschil tussen de twee: msiexec (MSI) installeert voor de hele machine en
+  # vraagt beheerdersrechten, en laat de herstart aan Windows over; de
+  # NSIS-installer installeert per gebruiker (geen beheerdersrechten) en
+  # herstart de app zelf. Daarom blijft de TERUGVAL windows-x86_64 op de
+  # NSIS-installer staan: wie geen installatievorm kan melden (oudere app,
+  # draagbare kopie) krijgt de installer die zonder beheerdersrechten werkt.
+  plat windows-x86_64-msi  "$MSI"
   plat windows-x86_64-nsis "$NSIS"
   plat windows-x86_64      "$NSIS"
   # macOS alleen als de mac-bouwtaak zijn update-tarball heeft geleverd. De app
