@@ -1,0 +1,10 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "updater",
+  "description": "Automatische update: alleen het hoofdvenster mag controleren, downloaden, installeren en herstarten. De extra registerschermen (panel-*) en het notatievenster hebben hier niets te zoeken.",
+  "windows": ["main"],
+  "permissions": [
+    "updater:default",
+    "process:default"
+  ]
+}

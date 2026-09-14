@@ -2687,6 +2687,29 @@ input[type="range"]::-webkit-slider-thumb:hover {
   font-size: 0.85rem;
   flex-shrink: 0;
 }
+/* Automatische update (0.7.40): voortgangsbalk in de update-melding. */
+.update-progress {
+  flex: 1; max-width: 22rem; height: 0.55rem;
+  background: rgba(128, 128, 128, 0.25);
+  border-radius: 999px; overflow: hidden;
+}
+.update-progress-fill {
+  height: 100%; background: var(--accent, #6a9);
+  border-radius: 999px; transition: width 0.15s linear;
+}
+/* Onbekende grootte (geen Content-Length): heen-en-weer lopend blokje in
+   plaats van een percentage dat nergens op slaat. */
+.update-progress-fill.onbekend {
+  width: 35% !important;
+  animation: update-onbekend 1.2s ease-in-out infinite alternate;
+}
+@keyframes update-onbekend {
+  from { margin-left: 0; }
+  to { margin-left: 65%; }
+}
+.update-progress-tekst { color: var(--text-muted, #aaa); min-width: 9rem; }
+.update-fout { color: var(--error, #e66); }
+.update-uitleg { color: var(--text-muted, #aaa); }
 
 /* Terugkoppeling: per-register inleer-lijst (Console.svelte) */
 .fb-learn-list {

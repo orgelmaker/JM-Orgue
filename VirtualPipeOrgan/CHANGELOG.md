@@ -5,6 +5,21 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.40] - 2026-09-14
+
+### Bijwerken met één klik, en drie talen erbij
+
+**Bijwerken**
+- **Een nieuwe versie installeert zichzelf.** Meldt de app een update, dan haalt de knop "Nu bijwerken" het installatiebestand op, laat de voortgang zien, installeert het en start JM-Orgue opnieuw. De downloadpagina blijft als alternatief bestaan.
+- Het pakket wordt ondertekend en de app controleert die handtekening vóór het installeren. Een gedownload bestand dat niet bij de sleutel van JM-Orgue hoort, wordt geweigerd.
+- Zoals afgesproken kijkt de app alleen bij het starten en via de knop "Controleer op updates" of er een nieuwe versie is. Er draait geen controle op de achtergrond.
+- Let op: het bijwerken werkt vanaf deze versie. Van 0.7.39 naar 0.7.40 gaat nog met de hand, daarna niet meer.
+
+**Talen**
+- **Pools, Italiaans en Spaans** erbij. Daarmee spreekt JM-Orgue zeven talen: Nederlands, Engels, Frans, Duits, Pools, Italiaans en Spaans.
+- De hele interface is vertaald, inclusief de namen van de 53 stemmingen en de pagina voor tablet of telefoon. Die pagina volgt de taal van het apparaat waarop je hem opent.
+- Ontbreekt er ooit een tekst in een taal, dan verschijnt voortaan het Engels in plaats van het Nederlands.
+
 ## [0.7.39] - 2026-09-14
 
 ### Negen punten van het testorgel: tremulant-opnamen, galm bij korte noten, zweltreden en crescendo, afstandsbediening, startscherm, JM-Rec-namen en orgelfoto's

@@ -32,6 +32,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # De updater vergelijkt de versie in latest.json (afgeleid van de tag) met
+      # de versie in de draaiende app. Lopen die uiteen, dan blijft een update
+      # zich eindeloos aanbieden of wordt hij nooit aangeboden.
+      - name: Controleer tag tegen versie in de app
+        if: github.event_name == 'release'
+        shell: bash
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          conf=$(python -c "import json;print(json.load(open('src-tauri/tauri.conf.json',encoding='utf-8'))['version'])")
+          if [ "${TAG#v}" != "$conf" ]; then
+            echo "Tag $TAG hoort bij versie ${TAG#v}, maar de app zegt $conf" >&2
+            exit 1
+          fi
+          echo "Tag en app-versie komen overeen: $conf"
+
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -71,18 +87,29 @@ jobs:
       - name: Install tauri-cli
         run: npm install -g "@tauri-apps/cli@^2"
 
-      # tauri.ci.conf.json maakt beforeBuildCommand leeg: de frontend is
-      # hierboven al expliciet gebouwd.
+      # tauri.ci.conf.json maakt beforeBuildCommand leeg (de frontend is
+      # hierboven al expliciet gebouwd) én zet createUpdaterArtifacts aan: naast
+      # de installers komen er dan .sig-bestanden uit, ondertekend met de
+      # updater-sleutel uit de secrets. Zonder die twee variabelen faalt de
+      # build met "signing private key not found".
       - name: Build installers
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: tauri build --features asio --config src-tauri/tauri.ci.conf.json
 
+      # fail_on_unmatched_files: zonder die vlag zou een ontbrekende .sig
+      # stilzwijgend doorglippen en pas in publish-updater-json opvallen.
       - name: Upload installers to release
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2
         with:
+          fail_on_unmatched_files: true
           files: |
             VirtualPipeOrgan/target/release/bundle/nsis/*.exe
+            VirtualPipeOrgan/target/release/bundle/nsis/*.exe.sig
             VirtualPipeOrgan/target/release/bundle/msi/*.msi
+            VirtualPipeOrgan/target/release/bundle/msi/*.msi.sig
 
       - name: Upload artifacts (manual run)
         if: github.event_name == 'workflow_dispatch'
@@ -91,7 +118,9 @@ jobs:
           name: installers
           path: |
             VirtualPipeOrgan/target/release/bundle/nsis/*.exe
+            VirtualPipeOrgan/target/release/bundle/nsis/*.exe.sig
             VirtualPipeOrgan/target/release/bundle/msi/*.msi
+            VirtualPipeOrgan/target/release/bundle/msi/*.msi.sig
 
   build-macos:
     runs-on: macos-latest
@@ -132,14 +161,31 @@ jobs:
       # van zichzelf). tauri.ci.conf.json maakt beforeBuildCommand leeg: de
       # frontend is hierboven al expliciet gebouwd.
       - name: Build dmg (universal)
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: tauri build --target universal-apple-darwin --config src-tauri/tauri.ci.conf.json
 
+      # De .dmg is voor de eerste installatie; het UPDATE-bestand is
+      # JM-Orgue.app.tar.gz (+ .sig) uit bundle/macos/.
+      # Twee aparte uploads: de dmg is de gewone download en mag niet sneuvelen
+      # doordat de updater-tarball ontbreekt (action-gh-release controleert
+      # ALLE patronen vóór het uploaden en faalt dan zonder iets te uploaden).
       - name: Upload dmg to release
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2
         with:
+          fail_on_unmatched_files: true
+          files: VirtualPipeOrgan/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+
+      - name: Upload macOS-updatebestanden to release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          fail_on_unmatched_files: true
           files: |
-            VirtualPipeOrgan/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+            VirtualPipeOrgan/target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz
+            VirtualPipeOrgan/target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz.sig
 
       - name: Upload artifacts (manual run)
         if: github.event_name == 'workflow_dispatch'
@@ -148,3 +194,31 @@ jobs:
           name: installers-macos
           path: |
             VirtualPipeOrgan/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+            VirtualPipeOrgan/target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz
+            VirtualPipeOrgan/target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz.sig
+
+  # Derde taak: latest.json samenstellen en als LAATSTE aan de release hangen.
+  # Dat bestand is het startsein voor de updater in de app — zolang het er niet
+  # staat, ziet niemand een update en kan er dus ook geen update aangeboden
+  # worden waarvan de installer nog ontbreekt.
+  #
+  # always() + expliciete controle op build-windows: mislukt alleen de
+  # macOS-bouw, dan krijgen Windows-gebruikers tóch hun update (het script maakt
+  # latest.json dan Windows-only). Mislukt Windows, dan wordt er niets geschreven.
+  #
+  # Bewust INLINE (geen `uses: ./.github/workflows/...`): bij herbruikbare
+  # workflows slaat "Re-run failed jobs" de downstream-taak vaker over. Gaat het
+  # tóch mis, dan is er de handmatige noodknop: Actions -> updater-json.
+  publish-updater-json:
+    needs: [build-windows, build-macos]
+    if: always() && github.event_name == 'release' && needs.build-windows.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Stel latest.json samen en hang hem aan de release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+          GH_REPO: ${{ github.repository }}
+        run: bash .github/scripts/build-latest-json.sh "$TAG"

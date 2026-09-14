@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "JM-Orgue",
-  "version": "0.7.39",
+  "version": "0.7.40",
   "identifier": "nl.jm-orgue.app",
   "build": {
     "frontendDist": "../ui/dist",
@@ -51,6 +51,17 @@
       },
       "appimage": {
         "bundleMediaFramework": true
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDE1Q0FFRkI1MzBEODNGMUUKUldRZVA5Z3d0ZS9LRmZ6VGc3N3V4cm9MWlFHMERUSTlBU3ZSUTBjUytZMkJFVEJITGx3UkNodTIK",
+      "endpoints": [
+        "https://github.com/orgelmaker/JM-Orgue/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "quiet"
       }
     }
   }

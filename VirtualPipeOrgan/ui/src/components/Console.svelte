@@ -373,12 +373,19 @@
       if (res.ok) fbkMessage = '';
     } catch (e) { fbkStatus = 'error'; }
   }
+  // Handmatige update-controle. Samen met de controle bij het starten van de
+  // app zijn dit de ENIGE twee momenten waarop er gekeken wordt — bewust geen
+  // periodieke controle (een melding die tijdens een dienst in beeld ploft).
+  // Is de update automatisch te installeren, dan handelt App.svelte dat af
+  // (balk met voortgang); hier staat alleen de knop.
+  let manualUpdateMac = false;
   async function manualUpdateCheck() {
     manualUpdateResult = 'checking';
     try {
-      const { checkForUpdate } = await import('../lib/github.js');
+      const { zoekUpdate, autoUpdateOndersteund } = await import('../lib/updater.js');
       if (!appVersion) await loadAppVersion();
-      const upd = await checkForUpdate(appVersion);
+      manualUpdateMac = !autoUpdateOndersteund();
+      const upd = await zoekUpdate(appVersion);
       manualUpdateResult = upd || 'uptodate';
     } catch (e) { manualUpdateResult = 'uptodate'; }
   }
@@ -386,6 +393,9 @@
     if (manualUpdateResult && manualUpdateResult.url) {
       try { await invoke('open_external_url', { url: manualUpdateResult.url }); } catch (e) {}
     }
+  }
+  function startManualUpdate() {
+    if (manualUpdateResult && manualUpdateResult.update) dispatch('startUpdate', manualUpdateResult);
   }
   $: if (activeView === 'algemene-instellingen' && !appVersion) loadAppVersion();
 
@@ -6363,8 +6373,16 @@
               {:else if manualUpdateResult && manualUpdateResult.version}
                 <p class="settings-hint" style="margin: 0.4rem 0 0;">
                   {$t('update.new_version_prefix')} <b>{manualUpdateResult.version}</b> {$t('update.new_version_suffix')}
-                  <button class="btn btn-primary btn-sm" on:click={openManualUpdate}>{$t('update.download')}</button>
+                  {#if manualUpdateResult.update}
+                    <button class="btn btn-primary btn-sm" on:click={startManualUpdate} title={$t('update.install_now_title')}>{$t('update.install_now')}</button>
+                    <button class="btn btn-ghost btn-sm" on:click={openManualUpdate}>{$t('update.download')}</button>
+                  {:else}
+                    <button class="btn btn-primary btn-sm" on:click={openManualUpdate}>{$t('update.download')}</button>
+                  {/if}
                 </p>
+                {#if !manualUpdateResult.update && manualUpdateMac}
+                  <p class="settings-hint" style="margin: 0.2rem 0 0;">{$t('update.macos_manual')}</p>
+                {/if}
               {/if}
             </div>
           </div>

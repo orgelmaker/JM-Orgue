@@ -29,6 +29,12 @@ export function compareVersions(a, b) {
 // Stil checken op een nieuwere release. Geeft {version, url} terug wanneer er
 // een nieuwere versie is, anders null. Faalt geluidloos (geen internet, repo
 // nog niet aangemaakt, rate-limit): update-check mag de opstart nooit storen.
+//
+// Dit is sinds 0.7.40 de TERUGVAL-route: lib/updater.js probeert eerst
+// latest.json van de release (dan kan er met één knop bijgewerkt worden) en
+// valt hierop terug als dat niets oplevert — bijvoorbeeld op macOS, vlak na
+// het publiceren van een release (installers nog niet klaar), of zonder
+// latest.json. De melding biedt dan alleen de downloadpagina.
 export async function checkForUpdate(currentVersion) {
   try {
     if (GITHUB_REPO.startsWith('INVULLEN')) return null; // nog niet gekoppeld

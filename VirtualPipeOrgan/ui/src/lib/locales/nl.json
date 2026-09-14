@@ -937,7 +937,14 @@
     "dismiss_title": "Deze melding voor deze versie niet meer tonen",
     "check": "Controleer op updates",
     "checking": "Controleren…",
-    "up_to_date": "Je gebruikt de nieuwste versie."
+    "up_to_date": "Je gebruikt de nieuwste versie.",
+    "install_now": "Nu bijwerken",
+    "install_now_title": "Downloadt de update, sluit JM-Orgue af en start automatisch opnieuw op",
+    "downloading": "Update downloaden…",
+    "installing": "Update installeren — JM-Orgue start zo opnieuw op…",
+    "failed": "Bijwerken mislukt: {error}. Je kunt de update ook zelf downloaden.",
+    "confirm_install": "JM-Orgue wordt bijgewerkt en sluit daarvoor af; daarna start de app automatisch opnieuw op. De huidige instellingen worden eerst opgeslagen. Doorgaan?",
+    "macos_manual": "Op macOS werk je handmatig bij: download de dmg en installeer de app opnieuw (automatisch bijwerken kan niet omdat de app niet door Apple is ondertekend)."
   },
   "general": {
     "autostart": "Automatisch starten bij Windows",

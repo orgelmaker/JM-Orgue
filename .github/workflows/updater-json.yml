@@ -1,0 +1,28 @@
+# Maakt latest.json opnieuw voor een bestaande release. Handmatig te starten
+# via Actions -> updater-json -> Run workflow. Nodig wanneer een bouwtaak
+# opnieuw gedraaid is en de derde job van release-build niet is meegegaan
+# ("Re-run failed jobs" slaat overgeslagen downstream-jobs soms over).
+name: updater-json
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release-tag, bijvoorbeeld v0.7.40'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  publish-updater-json:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Stel latest.json samen en hang hem aan de release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          GH_REPO: ${{ github.repository }}
+        run: bash .github/scripts/build-latest-json.sh "$TAG"

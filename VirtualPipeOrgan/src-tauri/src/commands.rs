@@ -680,6 +680,56 @@ pub fn stop_audio(state: State<AppState>) -> Result<(), String> {
     Ok(())
 }
 
+/// Vlak vóór het starten van de update-installer (0.7.40).
+///
+/// De updater-plugin start de installer en beëindigt het proces daarna met
+/// `std::process::exit(0)` — dat draait GEEN Drop-handlers. Zonder deze stap
+/// houdt het stervende proces het ASIO/WASAPI-endpoint vast terwijl de
+/// installer de exe vervangt en de app herstart: precies het zombie-scenario
+/// van sessie 2026-07-18 (nieuwe instantie zonder geluid, apparaat bezet).
+///
+/// Async + spawn_blocking: `shutdown_and_wait` blokkeert tot ~1,5 s en een
+/// sync-command draait op de UI-thread (les 2026-07-29).
+#[tauri::command]
+pub async fn prepare_for_update(state: State<'_, AppState>) -> Result<(), String> {
+    let st = state.inner().clone();
+    tokio::task::spawn_blocking(move || {
+        // Lopende MIDI-take nog wegschrijven: de app sluit hierna niet via het
+        // kruisje, dus de close-handler in App.svelte komt er niet meer aan te pas.
+        if st.midi_archive.archiving.load(std::sync::atomic::Ordering::Relaxed) {
+            if let Some(p) = st.midi_archive_flush(std::time::Duration::from_millis(800)) {
+                info!("MIDI-archief vóór de update geschreven: {:?}", p);
+            }
+        }
+        st.send_audio_command(AudioCommand::AllNotesOff);
+        st.held_notes.write().clear();
+        let guard = st.audio_player.read();
+        if let Some(p) = guard.as_ref() {
+            p.shutdown_and_wait(std::time::Duration::from_millis(1500));
+            // Vangnet: mislukt het starten van de installer alsnog, dan blijft
+            // de app draaien mét een dode audio-thread. Met deze vlag bouwt de
+            // bestaande noodherstel-thread (main.rs) de player opnieuw op.
+            //
+            // De vlag gaat BEWUST pas na 10 seconden aan. Meteen zetten liet de
+            // noodherstel-thread (die elke 3 s kijkt) de hele player én alle
+            // samples opnieuw opbouwen precies terwijl de installer de
+            // bestanden vervangt: zware schijf- en geheugendruk op het moment
+            // dat het proces juist netjes moet afsluiten. Bij een geslaagde
+            // update is het proces binnen die 10 seconden allang weg en gebeurt
+            // er dus niets.
+            let vlag = p.restart_needed.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_secs(10));
+                vlag.store(true, std::sync::atomic::Ordering::Relaxed);
+            });
+        }
+        drop(guard);
+        info!("Klaar voor de update-installer: audio-thread gestopt, apparaat vrij");
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))
+}
+
 #[tauri::command]
 pub fn connect_midi(state: State<AppState>, device_name: String) -> Result<(), String> {
     info!("Connecting to MIDI device: {}", device_name);

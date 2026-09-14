@@ -1,30 +1,40 @@
 // Simpele i18n implementatie voor JM-Orgue.
-// 4 locales: nl (default), en, fr, de.
+// 7 locales: nl (bron), en, fr, de, pl, it, es.
 //
 // Gebruik:
 //   import { t, locale, setLocale } from '../lib/i18n.js';
 //   <h1>{$t('app.title')}</h1>
 //   $: setLocale('en');
 //
-// Locale files zitten in src/lib/locales/{nl,en,fr,de}.json
+// Locale files zitten in src/lib/locales/{nl,en,fr,de,pl,it,es}.json
 // Onbekende key → toont de key zelf (zichtbaar in UI, makkelijk te debuggen).
 // Onbekende locale → fallback naar nl.
+// Ontbrekende sleutel in een andere taal dan Nederlands → Engels (niet
+// Nederlands): een Poolse gebruiker die één niet-vertaalde tekst tegenkomt
+// heeft meer aan Engels.
 
 import { writable, derived, get } from 'svelte/store';
 import nl from './locales/nl.json';
 import en from './locales/en.json';
 import fr from './locales/fr.json';
 import de from './locales/de.json';
+import pl from './locales/pl.json';
+import it from './locales/it.json';
+import es from './locales/es.json';
 
-const dictionaries = { nl, en, fr, de };
-export const AVAILABLE_LOCALES = ['nl', 'en', 'fr', 'de'];
+const dictionaries = { nl, en, fr, de, pl, it, es };
+export const AVAILABLE_LOCALES = ['nl', 'en', 'fr', 'de', 'pl', 'it', 'es'];
 export const LOCALE_LABELS = {
   nl: 'Nederlands',
   en: 'English',
   fr: 'Français',
   de: 'Deutsch',
+  pl: 'Polski',
+  it: 'Italiano',
+  es: 'Español',
 };
 const DEFAULT_LOCALE = 'nl';
+const FALLBACK_LOCALE = 'en';
 const STORAGE_KEY = 'jm-orgue-locale';
 
 function getInitialLocale() {
@@ -62,7 +72,11 @@ function translate(key, currentLocale) {
     if (cur && typeof cur === 'object' && p in cur) {
       cur = cur[p];
     } else {
-      // Fallback naar default
+      // Terugval bij een ontbrekende sleutel: eerst Engels (voor iedereen
+      // leesbaar), en pas als die ook niets heeft de brontaal Nederlands.
+      if (currentLocale !== FALLBACK_LOCALE && currentLocale !== DEFAULT_LOCALE) {
+        return translate(key, FALLBACK_LOCALE);
+      }
       if (currentLocale !== DEFAULT_LOCALE) {
         return translate(key, DEFAULT_LOCALE);
       }

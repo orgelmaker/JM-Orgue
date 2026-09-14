@@ -20,6 +20,12 @@ vpo-sampler = { path = "../vpo-sampler" }
 
 tauri = { workspace = true, features = ["devtools"] }
 tauri-plugin-dialog = "2"
+# Automatische update (0.7.40): de updater haalt latest.json op bij de
+# GitHub-release, controleert de minisign-handtekening en start de installer.
+# tauri-plugin-process levert relaunch() — alleen nodig op macOS/Linux; op
+# Windows sluit de updater het proces zelf af nadat de installer gestart is.
+tauri-plugin-updater = "2.11"
+tauri-plugin-process = "2.3"
 # Notatie-module: MIDI-opname parsen voor de MusicXML-conversie.
 midly = { workspace = true }
 serde = { workspace = true }

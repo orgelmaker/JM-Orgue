@@ -8,12 +8,12 @@ def flat(d, p=""):
         else: out.add(key)
     return out
 sets = {}
-for l in ["nl", "en", "fr", "de"]:
+for l in ["nl", "en", "fr", "de", "pl", "it", "es"]:
     with io.open(base + l + ".json", encoding="utf-8") as f:
         sets[l] = flat(json.load(f))
 ref = sets["nl"]
 ok = True
-for l in ["en", "fr", "de"]:
+for l in ["en", "fr", "de", "pl", "it", "es"]:
     missing = ref - sets[l]; extra = sets[l] - ref
     if missing or extra:
         ok = False

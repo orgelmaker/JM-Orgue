@@ -33,3 +33,9 @@ VirtualPipeOrgan/testscripts/archief_test_*/
 # Python-cache van de testscripts
 __pycache__/
 *.pyc
+
+# Ondertekeningssleutels van de automatische update mogen NOOIT in de repo
+*.key
+*.key.pub
+*.password.txt
+.tauri/

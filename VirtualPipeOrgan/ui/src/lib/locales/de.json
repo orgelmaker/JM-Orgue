@@ -937,7 +937,14 @@
     "dismiss_title": "Diesen Hinweis für diese Version nicht mehr anzeigen",
     "check": "Auf Updates prüfen",
     "checking": "Prüfe…",
-    "up_to_date": "Sie verwenden die neueste Version."
+    "up_to_date": "Sie verwenden die neueste Version.",
+    "install_now": "Jetzt aktualisieren",
+    "install_now_title": "Lädt die Aktualisierung herunter, beendet JM-Orgue und startet es automatisch neu",
+    "downloading": "Aktualisierung wird heruntergeladen…",
+    "installing": "Aktualisierung wird installiert — JM-Orgue startet gleich neu…",
+    "failed": "Aktualisierung fehlgeschlagen: {error}. Sie können sie auch selbst herunterladen.",
+    "confirm_install": "JM-Orgue wird zum Installieren der Aktualisierung beendet und danach automatisch neu gestartet. Die aktuellen Einstellungen werden vorher gespeichert. Fortfahren?",
+    "macos_manual": "Unter macOS wird manuell aktualisiert: Laden Sie die dmg herunter und installieren Sie die App neu (automatische Aktualisierung ist nicht möglich, da die App nicht von Apple signiert ist)."
   },
   "general": {
     "autostart": "Automatisch mit Windows starten",

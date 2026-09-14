@@ -87,11 +87,19 @@
     '2': 61, '3': 63, '5': 66, '6': 68, '7': 70,
   };
 
-  // ---- Update-check (GitHub releases) ----
+  // ---- Update-check + automatische update (0.7.40) ----
   // Stil bij elke start; toont een wegklikbare balk wanneer er een nieuwere
   // release staat. Wegklikken onthoudt die ene versie (volgende versie meldt
   // zich gewoon weer). Faalt geluidloos zonder internet.
-  let updateInfo = null; // { version, url } of null
+  // Is de update automatisch te installeren (Windows, latest.json gevonden),
+  // dan staat er een knop "Nu bijwerken" naast de downloadpagina: downloaden
+  // met voortgang, opslaan, installeren en opnieuw starten.
+  let updateInfo = null; // { version, url, notes, update, auto } of null
+  let updateBezig = false;      // download/installatie loopt
+  let updateVoortgang = null;   // { fase: 'download'|'install', pct, gedaan, totaal }
+  let updateFout = null;        // nette melding; de app blijft gewoon draaien
+  let updateOpMac = false;      // macOS: alleen de downloadpagina (zie lib/updater.js)
+  const updateMb = (n) => ((n || 0) / (1024 * 1024)).toFixed(1);
 
   // De splash wacht ook op de eerste ophaalronde van de online samplesets
   // (Console.refreshOnlineSets). Zonder dat verscheen het blok "Online
@@ -105,11 +113,12 @@
 
   async function runUpdateCheck() {
     try {
-      const { checkForUpdate } = await import('./lib/github.js');
+      const { zoekUpdate, autoUpdateOndersteund } = await import('./lib/updater.js');
       const { getVersion } = await import('@tauri-apps/api/app');
       const current = await getVersion();
       appVersion = current;
-      const upd = await checkForUpdate(current);
+      updateOpMac = !autoUpdateOndersteund();
+      const upd = await zoekUpdate(current);
       if (upd && localStorage.getItem('jm-orgue-update-dismissed') !== upd.version) {
         updateInfo = upd;
       }
@@ -121,6 +130,48 @@
   function dismissUpdate() {
     try { localStorage.setItem('jm-orgue-update-dismissed', updateInfo.version); } catch (e) {}
     updateInfo = null;
+    updateFout = null;
+  }
+
+  // Moet er eerst bevestigd worden? De app sluit af en start opnieuw op, dus
+  // alles wat "loopt" is een reden om het even te vragen: een geladen orgel
+  // (iemand zit te spelen), een lopende opname, of een actieve
+  // afstandsbediening (iemand anders bedient het orgel op een tablet).
+  async function updateBevestigingNodig() {
+    if (organInfo) return true;
+    try { const rec = await invoke('get_recording_status'); if (rec && rec.recording) return true; } catch (e) {}
+    try { const r = await invoke('get_remote_status'); if (r && r.running) return true; } catch (e) {}
+    return false;
+  }
+
+  // Eén knop: downloaden (met voortgang), opslaan, installeren, herstarten.
+  // `info` maakt het aanroepbaar vanuit Algemene Instellingen (Console) met
+  // het resultaat van de handmatige controle.
+  async function startUpdate(info = null) {
+    const doel = info || updateInfo;
+    if (!doel || !doel.update || updateBezig) return;
+    updateInfo = doel; // balk toont vanaf nu deze update (ook bij een handmatige controle)
+    if (await updateBevestigingNodig()) {
+      if (!window.confirm(tx('update.confirm_install'))) return;
+    }
+    updateBezig = true;
+    updateFout = null;
+    updateVoortgang = { fase: 'download', pct: null, gedaan: 0, totaal: 0 };
+    try {
+      const { installeerUpdate } = await import('./lib/updater.js');
+      await installeerUpdate(doel.update, {
+        onVoortgang: (p) => { updateVoortgang = p; },
+        voorInstalleren: bewaarVoorAfsluiten,
+      });
+      // Windows: onbereikbaar (het proces is al beëindigd door de installer).
+    } catch (e) {
+      // Mislukte download, handtekening of installatie: gewoon doorspelen, met
+      // een nette melding en de downloadpagina als terugval.
+      updateBezig = false;
+      updateVoortgang = null;
+      updateFout = String(e?.message || e);
+      console.error('Bijwerken mislukt:', e);
+    }
   }
 
   // ---- Hoofdvenster-geometrie (globaal — het hoofdvenster is er maar één,
@@ -416,24 +467,8 @@
         // expliciet met destroy(). Een harde timeout van 2,5s zorgt dat het kruisje
         // ALTIJD sluit, ook als opslaan ergens blijft hangen.
         event.preventDefault();
-        try {
-          await Promise.race([
-            (async () => {
-              // Geometrie éérst (goedkoop en synchroon af te ronden) zodat de
-              // vensterpositie ook bij een snelle close zeker bewaard is.
-              if (mainGeomTimer) { clearTimeout(mainGeomTimer); mainGeomTimer = null; }
-              await saveMainGeometry();
-              const rec = await invoke('get_recording_status').catch(() => null);
-              if (rec && rec.recording) { await invoke('stop_recording').catch(() => {}); }
-              // Automatisch MIDI-archief: lopende take nu wegschrijven (synchroon, enkele ms).
-              await invoke('midi_archive_flush').catch(() => {});
-              await flushAutoSave();
-              await persistOrganSettings();
-              await closeExtraPanels();
-            })(),
-            new Promise((r) => setTimeout(r, 2500)),
-          ]);
-        } catch (e) { /* sluiten mag niet falen */ }
+        // Zelfde opslagronde als vóór een update-installatie (bewaarVoorAfsluiten).
+        await bewaarVoorAfsluiten();
         // destroy() sluit zonder opnieuw close-requested te triggeren (geen lus).
         try { await w.destroy(); } catch (e) {}
       });
@@ -1303,6 +1338,30 @@
     catch (e) { error = tx('errors.shutdown_failed').replace('{error}', String(e)); }
   }
 
+  // Laatste stand veilig wegschrijven vlak vóór het afsluiten: bij het kruisje
+  // (onCloseRequested) én vóór het installeren van een update. Harde grens van
+  // 2,5 s zodat een hangende write het afsluiten nooit blokkeert.
+  async function bewaarVoorAfsluiten() {
+    try {
+      await Promise.race([
+        (async () => {
+          // Geometrie éérst (goedkoop en synchroon af te ronden) zodat de
+          // vensterpositie ook bij een snelle close zeker bewaard is.
+          if (mainGeomTimer) { clearTimeout(mainGeomTimer); mainGeomTimer = null; }
+          await saveMainGeometry();
+          const rec = await invoke('get_recording_status').catch(() => null);
+          if (rec && rec.recording) { await invoke('stop_recording').catch(() => {}); }
+          // Automatisch MIDI-archief: lopende take nu wegschrijven (synchroon, enkele ms).
+          await invoke('midi_archive_flush').catch(() => {});
+          await flushAutoSave();
+          await persistOrganSettings();
+          await closeExtraPanels();
+        })(),
+        new Promise((r) => setTimeout(r, 2500)),
+      ]);
+    } catch (e) { /* opslaan mag het afsluiten nooit tegenhouden */ }
+  }
+
   // Bevestiging vragen, opslaan, computer netjes afsluiten.
   async function requestShutdown() {
     const ok = window.confirm(tx('dialogs.shutdown_confirm'));
@@ -1470,11 +1529,38 @@
 
   {#if updateInfo}
     <!-- Update-melding: wegklikken onthoudt déze versie; een volgende release
-         meldt zich gewoon weer (zie runUpdateCheck). -->
+         meldt zich gewoon weer (zie runUpdateCheck). Is de update automatisch
+         te installeren, dan staat "Nu bijwerken" ernaast; tijdens het
+         downloaden vervangt de voortgang de knoppen. -->
     <div class="update-banner">
-      <span>{$t('update.new_version_prefix')} <b>{updateInfo.version}</b> {$t('update.new_version_suffix')}</span>
-      <button class="btn btn-primary btn-sm" on:click={openUpdatePage}>{$t('update.download')}</button>
-      <button class="btn btn-ghost btn-sm" on:click={dismissUpdate} title={$t('update.dismiss_title')} aria-label={$t('actions.close')}>✕</button>
+      {#if updateBezig}
+        <span>
+          {updateVoortgang?.fase === 'install' ? $t('update.installing') : $t('update.downloading')}
+        </span>
+        <div class="update-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={updateVoortgang?.pct ?? 0}>
+          <div class="update-progress-fill" class:onbekend={updateVoortgang?.pct == null} style="width: {updateVoortgang?.pct ?? 100}%"></div>
+        </div>
+        <span class="update-progress-tekst">
+          {#if updateVoortgang?.pct != null}{updateVoortgang.pct}%{/if}
+          {#if updateVoortgang?.totaal}
+            ({updateMb(updateVoortgang.gedaan)} / {updateMb(updateVoortgang.totaal)} MB)
+          {/if}
+        </span>
+      {:else}
+        <span>{$t('update.new_version_prefix')} <b>{updateInfo.version}</b> {$t('update.new_version_suffix')}</span>
+        {#if updateFout}
+          <span class="update-fout">{$t('update.failed').replace('{error}', updateFout)}</span>
+        {:else if !updateInfo.auto && updateOpMac}
+          <span class="update-uitleg">{$t('update.macos_manual')}</span>
+        {/if}
+        {#if updateInfo.auto}
+          <button class="btn btn-primary btn-sm" on:click={() => startUpdate()} title={$t('update.install_now_title')}>{$t('update.install_now')}</button>
+          <button class="btn btn-ghost btn-sm" on:click={openUpdatePage}>{$t('update.download')}</button>
+        {:else}
+          <button class="btn btn-primary btn-sm" on:click={openUpdatePage}>{$t('update.download')}</button>
+        {/if}
+        <button class="btn btn-ghost btn-sm" on:click={dismissUpdate} title={$t('update.dismiss_title')} aria-label={$t('actions.close')}>✕</button>
+      {/if}
     </div>
   {/if}
 
@@ -1522,6 +1608,7 @@
       on:toggleCoupler={(e) => toggleCoupler(e.detail)}
       on:divisionChannelsChanged={syncActiveProfileChannels}
       on:onlineSetsSettled={() => meldOnlineSetsKlaar()}
+      on:startUpdate={(e) => startUpdate(e.detail)}
       on:refreshOrgan={refreshOrganInfoNow}
       on:refreshDevices={refreshDevices}
       on:refresh={refreshDevices}

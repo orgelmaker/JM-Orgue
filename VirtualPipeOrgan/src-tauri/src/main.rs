@@ -136,6 +136,18 @@ fn main() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        // Automatische update (0.7.40). GEEN periodieke controle: de plugin
+        // doet uit zichzelf niets — check() wordt alleen aangeroepen bij het
+        // starten van de app en via de knop "Controleer op updates".
+        // De audio/MIDI-teardown vlak vóór de installer loopt NIET via een
+        // plugin-hook (die bestaat alleen op de interne UpdaterBuilder), maar
+        // via het commando `prepare_for_update`: de UI roept dat aan tussen
+        // download en install. Op Windows beëindigt de plugin het proces met
+        // exit(0) — geen Drop-handlers — dus zonder die stap houdt het
+        // stervende proces het ASIO/WASAPI-endpoint vast (zombie-scenario
+        // 2026-07-18).
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(move |app| {
             let app_data_dir = app.path().app_data_dir()
                 .expect("Failed to get app data directory");
@@ -290,6 +302,9 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            // Automatische update (0.7.40): audio/MIDI netjes afsluiten vlak
+            // vóór de installer start.
+            commands::prepare_for_update,
             // Afstandsbediening in het netwerk (0.7.38)
             commands::report_setzer_state,
             remote::get_remote_status,

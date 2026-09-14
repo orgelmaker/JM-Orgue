@@ -136,6 +136,105 @@ de ASIO-wissel uit (het orgel wordt daarbij opnieuw geladen). In het log:
 - zet het apparaat online in het ASIO4ALL-configuratiescherm;
 - of gebruik een audio-interface met eigen ASIO-driver (betrouwbaarste route).
 
+## Release + automatische update (0.7.40)
+
+### Routine voor een nieuwe versie
+
+1. versie bumpen (`Cargo.toml` + `src-tauri/tauri.conf.json`), committen, pushen
+2. `gh release create v<versie>` (een **gewone** release — een pre-release of
+   concept komt niet onder `releases/latest/` te staan en wordt door de updater
+   dus nooit gezien)
+3. `.github/workflows/release-build.yml` bouwt Windows (NSIS + MSI, mét ASIO) en
+   macOS (universal dmg), ondertekent de updater-artefacten en hangt alles aan
+   de release
+4. de derde taak `publish-updater-json` stelt `latest.json` samen en hangt die er
+   als **laatste** bij — dat bestand is het startsein voor de updater in de app
+
+> **Eerste keer**: 0.7.40 is de eerste versie mét updater aan boord. Wie 0.7.39
+> of ouder draait, moet 0.7.40 één keer handmatig installeren; pas vanaf de
+> versie daarná werkt de knop **Nu bijwerken**. Test de keten dus met een echte
+> testrelease, niet met een lokaal gebouwde exe — de updater leidt het
+> installatiepad af uit de locatie van de draaiende exe en werkt alleen
+> betrouwbaar vanuit een echt geïnstalleerde versie.
+
+### Hoe de automatische update werkt
+
+De app (`ui/src/lib/updater.js`) haalt bij het starten en via de knop
+**Controleer op updates** één bestand op:
+
+```
+https://github.com/orgelmaker/JM-Orgue/releases/latest/download/latest.json
+```
+
+Staat daar een nieuwere versie in, dan verschijnt de balk met **Nu bijwerken**.
+Die knop downloadt de installer, controleert de handtekening, slaat de
+instellingen op, sluit de audio netjes af (`prepare_for_update`) en start de
+NSIS-setup. De setup draait **stil** (`plugins.updater.windows.installMode:
+"quiet"` → `/S /UPDATE /R`) en start JM-Orgue daarna zelf weer op.
+
+Waarom stil en niet `passive`: in de NSIS-sjabloon is passive géén silent. De
+taalkeuze-dialoog (`displayLanguageSelector`) en de ASIO4ALL-vraag uit
+`installer-hooks.nsh` zouden dan midden in een automatische update verschijnen,
+terwijl de app al is afgesloten. In silent mode worden beide automatisch
+overgeslagen (`/SD IDNO`). De installer is een *currentUser*-installatie, dus
+er komt geen UAC-prompt aan te pas.
+
+**Geen periodieke controle** — bewust: alleen bij het starten en via de knop.
+Een melding die tijdens een dienst in beeld ploft, stoort.
+
+**macOS** krijgt géén automatische update: de .app is niet ondertekend en niet
+genotariseerd (geen Apple Developer-account). Daar blijft het bij de melding met
+een knop naar de downloadpagina. `latest.json` bevat de macOS-sleutels wel
+(`darwin-aarch64` én `darwin-x86_64` — `darwin-universal` bestáát niet in de
+Tauri-2-updater) voor als dat ooit verandert.
+
+### Ondertekening (minisign)
+
+Dit staat los van Windows-codesigning en Apple-notarisatie: het is een eigen
+sleutelpaar waarmee de app controleert dat een update écht van ons komt.
+
+- **Publieke sleutel**: staat als tekst in `src-tauri/tauri.conf.json` onder
+  `plugins.updater.pubkey` en zit dus in elke gebouwde binary.
+- **Privésleutel**: `C:\Users\<jij>\.tauri\jm-orgue-updater.key` (+ `.password.txt`),
+  en als GitHub-secrets `TAURI_SIGNING_PRIVATE_KEY` en
+  `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` op de repo.
+- De CI zet die twee als `env:` op de `tauri build`-stap; samen met
+  `bundle.createUpdaterArtifacts: true` (alleen in `tauri.ci.conf.json`, zodat
+  een lokale build zonder sleutel gewoon blijft werken) levert dat naast elke
+  installer een `.sig`-bestand op.
+- De client downloadt de update, controleert de handtekening en installeert pas
+  daarna. Klopt de handtekening niet, dan gebeurt er **niets**.
+
+Sleutelpaar (opnieuw) maken en de secrets zetten:
+
+```bash
+npx @tauri-apps/cli signer generate -w "$HOME/.tauri/jm-orgue-updater.key"
+gh secret set TAURI_SIGNING_PRIVATE_KEY --repo orgelmaker/JM-Orgue < "$HOME/.tauri/jm-orgue-updater.key"
+gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD --repo orgelmaker/JM-Orgue < "$HOME/.tauri/jm-orgue-updater.password.txt"
+```
+
+### Sleutel kwijt — wat dan?
+
+**Bewaar de privésleutel ook buiten deze pc** (bijvoorbeeld in een
+wachtwoordkluis), het wachtwoord apart. Raakt hij kwijt, dan:
+
+- accepteert **geen enkele al geïnstalleerde JM-Orgue** ooit nog een update:
+  die apparaten controleren tegen de publieke sleutel die in hún binary zit;
+- is de enige uitweg: een nieuw sleutelpaar maken, de nieuwe publieke sleutel in
+  `tauri.conf.json` zetten, de secrets vervangen en een nieuwe versie
+  uitbrengen die iedereen **handmatig** installeert. Vanaf die versie werkt de
+  knop weer.
+- Een oude sleutel is niet te "herstellen" en niet te vervangen door een
+  server-side truc: de controle gebeurt op het apparaat van de gebruiker.
+
+### Als `latest.json` ontbreekt
+
+Is de derde taak niet meegelopen (dat gebeurt weleens bij *Re-run failed jobs*),
+dan staan de installers er wel maar ziet de app geen update. Herstel met één
+klik: **Actions → updater-json → Run workflow** met de tag, bijvoorbeeld
+`v0.7.40`. Dat draait hetzelfde script (`.github/scripts/build-latest-json.sh`)
+op de bestanden die al aan de release hangen.
+
 ## Test-API (--test-api)
 
 Alleen voor testen/automatisering. Start de app met de vlag `--test-api`
