@@ -9,9 +9,12 @@
 #      Tauri-build (feature custom-protocol) inbakt; zonder dist faalt stap 3.
 #   2. vertaalsleutels — nl is de bron, de andere talen moeten exact dezelfde
 #      sleutels hebben.
-#   3. cargo test voor vpo-app en vpo-sampler, ZONDER de asio-feature: dan is
-#      de Steinberg ASIO-SDK (en LLVM/libclang voor de bindings) niet nodig en
-#      blijft de controle licht. De releasebouw draait wél mét asio.
+#   3. cargo test voor vpo-app, vpo-sampler, vpo-audio en vpo-core, ZONDER de
+#      asio-feature: dan is de Steinberg ASIO-SDK (en LLVM/libclang voor de
+#      bindings) niet nodig en blijft de controle licht. De releasebouw draait
+#      wél mét asio. vpo-audio en vpo-core kennen zelf geen asio-feature; zo
+#      draaien ook de convolutiegalm-tests (vpo-audio/src/convolution.rs) en
+#      de temperament-tests (vpo-core) bij elke push mee.
 #
 # Waarom windows-latest en niet ubuntu (goedkoper/sneller) voor stap 3:
 #   - vpo-app is een Tauri-app met cpal; een Linux-build vraagt extra
@@ -78,4 +81,4 @@ jobs:
         run: python testscripts/check_i18n_keys.py
 
       - name: Rust-tests (zonder ASIO)
-        run: cargo test -p vpo-app -p vpo-sampler
+        run: cargo test -p vpo-app -p vpo-sampler -p vpo-audio -p vpo-core

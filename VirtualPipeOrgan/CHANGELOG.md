@@ -5,6 +5,14 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.42] - 2026-09-15
+
+### Oude instellingen netjes overnemen
+
+- Wie in 0.7.38 dezelfde trede als zwelkast én als generaal crescendo had gekoppeld, kreeg die beide koppelingen bij het laden terug, waarna de zwelkast stil dood was. Bij het laden geldt nu dezelfde regel als bij het inleren: de crescendokoppeling wint, de zwelkoppeling op dezelfde trede wordt weggelaten en het logbestand meldt dat.
+- Stond de nagebootste tremulant aan op een klavier dat inmiddels echte tremulant-opnamen heeft, dan klonken opname en nabootsing over elkaar. De opgeslagen voorkeur wordt op zo'n klavier niet meer toegepast; het logbestand meldt dat één keer.
+- De controletaak in de bouwstraat draait nu ook de tests van de audiobibliotheek en de kern.
+
 ## [0.7.41] - 2026-09-15
 
 ### Nazorg na twee controlerondes

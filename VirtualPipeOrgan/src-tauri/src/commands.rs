@@ -7,7 +7,7 @@ use tracing::{info, warn};
 
 use crate::audio::AudioCommand;
 use crate::state::AppState;
-use crate::library::{self, OrganLibraryEntry, OrganSettings, PresetBindingSaved, SwellBindingSaved, MidiMappingSaved, PresetData};
+use crate::library::{self, OrganLibraryEntry, OrganSettings, PresetBindingSaved, SwellBindingSaved, CrescendoBindingSaved, DivisionTremulantSaved, MidiMappingSaved, PresetData};
 use vpo_sampler::{OrganDefinition, clean_stop_name, clean_division_name};
 
 /// Audio device info for frontend
@@ -6048,6 +6048,71 @@ fn add_or_refresh_library_entry(state: &AppState, organ_info: &OrganInfoDto, sou
     }
 }
 
+/// Pedaalkoppelingen uit opgeslagen instellingen, met dezelfde wederzijdse
+/// uitsluiting als `AppState::claim_pedal_cc` (0.7.39). Die helper draait
+/// alleen bij inleren/handmatig instellen; een .jm-settings.json uit 0.7.38 kan
+/// nog een zwelbinding én de crescendobinding op dezelfde (kanaal, CC)
+/// bevatten. Werden die allebei hersteld, dan won in de MIDI-lus
+/// `cc_claimed_by_crescendo` — ongeacht of het crescendo aanstaat — en was de
+/// zwelkast stil dood, zonder logregel ("als het één werkt, werkt het ander
+/// niet"). Hier wint, consistent met de runtime-claim, de crescendobinding;
+/// botsende zwelbindingen worden weggelaten met een warn!-regel (kanaal
+/// 1-based, zoals de UI toont). De opgeschoonde set gaat bij de eerstvolgende
+/// autosave mee naar schijf. Geeft (zwelbindingen, crescendobinding) terug
+/// zoals ze hersteld worden.
+fn pedaalbindingen_voor_herstel(settings: &OrganSettings) -> (Vec<SwellBindingSaved>, Option<CrescendoBindingSaved>) {
+    let crescendo = settings.crescendo_binding.clone();
+    let swell: Vec<SwellBindingSaved> = settings.swell_bindings.iter().filter(|b| {
+        let botst = crescendo.as_ref()
+            .map_or(false, |c| c.channel == b.channel && c.cc_num == b.cc_num);
+        if botst {
+            warn!(
+                "Zwelbinding voor '{}' (kanaal {}, CC {}) weggelaten: dezelfde trede is als generaal crescendo gekoppeld",
+                b.division_name, b.channel + 1, b.cc_num
+            );
+        }
+        !botst
+    }).cloned().collect();
+    (swell, crescendo)
+}
+
+/// Heeft deze divisie echte tremulant-OPNAMEN? `tremulant_kind` "wave"
+/// (GrandOrgue-golfvormtremulant) of "samples" (Hauptwerk-"tremmed"-laag,
+/// JM-Rec `_trem`-map), óf een register met een trem-laag (stops_with_trem).
+/// Daar hoort geen nagebootste LFO overheen: opname én nabootsing klinken dan
+/// over elkaar.
+fn divisie_heeft_tremulant_opnamen(div: &DivisionDto) -> bool {
+    matches!(div.tremulant_kind.as_deref(), Some("wave") | Some("samples"))
+        || div.stops.iter().any(|s| s.has_tremulant)
+}
+
+/// Opgeslagen LFO-voorkeuren afgestemd op het geladen orgel. Sinds 0.7.39 zet
+/// de UI de nagebootste tremulant niet meer standaard aan voor divisies met
+/// echte opnamen, maar een in 0.7.38 opgeslagen `enabled=true` kwam bij het
+/// laden onverkort terug en zette via set_tremulant_lfo de LFO óver de
+/// opnamen ("Tremulant LFO div X: active=true" naast de opname). Voor zulke
+/// divisies wordt enabled=true hier op false gezet; de parameters (rate/
+/// diepte) blijven staan, en voor divisies zonder opnamen blijft de voorkeur
+/// ongemoeid. Geeft de aangepaste lijst terug plus de namen van de divisies
+/// waarvoor de LFO is uitgezet (de aanroeper logt dat één keer).
+fn nagebootste_tremulant_voor_herstel(
+    saved: &[DivisionTremulantSaved],
+    divisions: &[DivisionDto],
+) -> (Vec<DivisionTremulantSaved>, Vec<String>) {
+    let mut uitgezet: Vec<String> = Vec::new();
+    let lijst = saved.iter().map(|t| {
+        let mut t = t.clone();
+        let echte_opnamen = divisions.iter()
+            .any(|d| d.name == t.division && divisie_heeft_tremulant_opnamen(d));
+        if t.enabled && echte_opnamen {
+            t.enabled = false;
+            uitgezet.push(t.division.clone());
+        }
+        t
+    }).collect();
+    (lijst, uitgezet)
+}
+
 fn restore_organ_settings(state: &AppState, organ_id: &str) {
     use crate::state::{MidiPresetBinding, MidiPresetTrigger, MidiChannelMapping, SwellBinding};
 
@@ -6108,8 +6173,12 @@ fn restore_organ_settings(state: &AppState, organ_id: &str) {
     // divisienaam (de opgeslagen index kan verschoven zijn na her-import).
     // Bij een herlaad/wissel van hetzelfde orgel wint de laatst ontvangen
     // pedaalstand (stash) van de opgeslagen waarde.
-    if !settings.swell_bindings.is_empty() {
-        let mut bindings = swell_bindings_from_saved(state, &settings.swell_bindings);
+    // Exclusiviteit zwelkast <-> generaal crescendo ook hier: een
+    // 0.7.38-bestand kan beide op dezelfde trede hebben (zie
+    // pedaalbindingen_voor_herstel — de crescendobinding wint).
+    let (swell_saved, crescendo_saved) = pedaalbindingen_voor_herstel(&settings);
+    if !swell_saved.is_empty() {
+        let mut bindings = swell_bindings_from_saved(state, &swell_saved);
         if let Some((prev_id, stash)) = state.swell_last_stash.write().take() {
             if prev_id.eq_ignore_ascii_case(organ_id) {
                 for b in bindings.iter_mut() {
@@ -6170,8 +6239,9 @@ fn restore_organ_settings(state: &AppState, organ_id: &str) {
         info!("Restored {} active couplers", settings.active_couplers.len());
     }
 
-    // Crescendo-pedaalbinding herstellen (channel/cc/min/max/invert).
-    if let Some(b) = settings.crescendo_binding.clone() {
+    // Crescendo-pedaalbinding herstellen (channel/cc/min/max/invert). Wint bij
+    // een botsing met een zwelbinding (pedaalbindingen_voor_herstel).
+    if let Some(b) = crescendo_saved {
         *state.crescendo_binding.write() = Some((b.channel, b.cc_num, b.min_val, b.max_val, b.invert));
         info!("Crescendo-koppeling hersteld: kanaal {} CC{} invert={}", b.channel + 1, b.cc_num, b.invert);
     }
@@ -6202,8 +6272,20 @@ fn restore_organ_settings(state: &AppState, organ_id: &str) {
         for s in &settings.division_swell_configs { sw.insert(s.division.clone(), (s.min_db, s.filter_cutoff)); }
     }
     {
+        // Nagebootste tremulant (LFO) nooit over echte tremulant-opnamen heen:
+        // een 0.7.38-bestand kan enabled=true hebben voor een wave/samples-
+        // divisie (zie nagebootste_tremulant_voor_herstel). Eerst de lijst
+        // bepalen onder alleen de orgel-read-lock, dan pas de spiegel schrijven.
+        let (trems, uitgezet) = {
+            let organ = state.loaded_organ_info.read();
+            let divisions: &[DivisionDto] = organ.as_ref().map(|o| o.divisions.as_slice()).unwrap_or(&[]);
+            nagebootste_tremulant_voor_herstel(&settings.division_tremulants, divisions)
+        };
+        for naam in &uitgezet {
+            warn!("Nagebootste tremulant voor '{}' uitgezet: de set heeft echte tremulant-opnamen", naam);
+        }
         let mut tr = state.division_tremulants.write();
-        for t in &settings.division_tremulants {
+        for t in &trems {
             tr.insert(t.division.clone(), (t.enabled, t.rate, t.amp_depth, t.pitch_depth));
         }
     }
@@ -6766,21 +6848,29 @@ pub fn do_save_organ_settings(state: &AppState, presets: HashMap<String, PresetD
     state.save_library();
 }
 
-/// Get saved settings for the current organ (from library or organ directory)
+/// Get saved settings for the current organ (from library or organ directory),
+/// afgestemd op het geladen orgel (instellingen_voor_frontend).
 #[tauri::command]
 pub fn get_organ_settings(state: State<AppState>) -> Option<OrganSettings> {
     let organ_id = state.current_organ_id.read().clone()?;
+    let settings = lees_opgeslagen_instellingen(&state, &organ_id)?;
+    Some(instellingen_voor_frontend(&state, settings))
+}
 
+/// Ruwe opgeslagen instellingen: bibliotheek (AppData), anders de
+/// .jm-settings.json naast het orgel. Geen afstemming op het geladen orgel —
+/// dat doet instellingen_voor_frontend.
+fn lees_opgeslagen_instellingen(state: &AppState, organ_id: &str) -> Option<OrganSettings> {
     // First try library (AppData)
     {
         let lib = state.organ_library.read();
-        if let Some(settings) = lib.settings.get(&organ_id) {
+        if let Some(settings) = lib.settings.get(organ_id) {
             return Some(settings.clone());
         }
     }
 
     // Fallback: try .jm-settings.json in organ directory
-    if let Some(dir) = organ_settings_dir(&organ_id) {
+    if let Some(dir) = organ_settings_dir(organ_id) {
         let settings_path = dir.join(".jm-settings.json");
         if let Ok(json) = std::fs::read_to_string(&settings_path) {
             if let Ok(settings) = serde_json::from_str::<OrganSettings>(&json) {
@@ -6791,6 +6881,22 @@ pub fn get_organ_settings(state: State<AppState>) -> Option<OrganSettings> {
     }
 
     None
+}
+
+/// Opgeslagen instellingen zoals de frontend ze mag TOEPASSEN: de nagebootste
+/// tremulant staat uit voor divisies met echte opnamen. Zonder deze stap zette
+/// Console.svelte (loadAudioSettingsForOrgan → tremLfoEnabled →
+/// set_tremulant_lfo) een 0.7.38-`enabled=true` alsnog als LFO over de opnamen
+/// heen en pushte hij die stand via persist_tremulant_config terug in de
+/// spiegel. Zonder geladen orgel ongewijzigd. Logt niets: restore_organ_settings
+/// meldde het al één keer bij de load.
+fn instellingen_voor_frontend(state: &AppState, mut settings: OrganSettings) -> OrganSettings {
+    let organ = state.loaded_organ_info.read();
+    if let Some(o) = organ.as_ref() {
+        let (trems, _) = nagebootste_tremulant_voor_herstel(&settings.division_tremulants, &o.divisions);
+        settings.division_tremulants = trems;
+    }
+    settings
 }
 
 /// Export all settings to a JSON file
@@ -7697,7 +7803,87 @@ mod jmrec_naam_tests {
 
 #[cfg(test)]
 mod tremulant_kind_tests {
-    use super::tremulant_kind_voor_divisie;
+    use super::{
+        divisie_heeft_tremulant_opnamen, nagebootste_tremulant_voor_herstel,
+        tremulant_kind_voor_divisie, DivisionDto, StopDto,
+    };
+    use crate::library::DivisionTremulantSaved;
+
+    fn stop(id: &str, trem: bool) -> StopDto {
+        StopDto {
+            id: id.to_string(), name: id.to_string(), pitch: "8".to_string(), drawn: false,
+            color: None, has_tremulant: trem, midi_action_code: 0, internal_stop_id: 1,
+            first_midi_note: 36, last_midi_note: 96, is_reed: false,
+        }
+    }
+
+    fn divisie(naam: &str, kind: Option<&str>, stop_trem: bool) -> DivisionDto {
+        DivisionDto {
+            name: naam.to_string(), display_name: naam.to_string(),
+            stops: vec![stop("Prestant_8", stop_trem)],
+            has_tremulant: kind.is_some() || stop_trem,
+            tremulant_kind: kind.map(str::to_string), has_swell: false,
+        }
+    }
+
+    fn opgeslagen(div: &str, enabled: bool) -> DivisionTremulantSaved {
+        DivisionTremulantSaved {
+            division: div.to_string(), enabled, rate: 5.5, amp_depth: 12.0, pitch_depth: 20.0,
+        }
+    }
+
+    #[test]
+    fn echte_opnamen_herkend_aan_soort_of_registers() {
+        assert!(divisie_heeft_tremulant_opnamen(&divisie("A", Some("wave"), false)));
+        assert!(divisie_heeft_tremulant_opnamen(&divisie("B", Some("samples"), false)));
+        assert!(divisie_heeft_tremulant_opnamen(&divisie("C", None, true)));
+        assert!(!divisie_heeft_tremulant_opnamen(&divisie("D", Some("synth"), false)));
+        assert!(!divisie_heeft_tremulant_opnamen(&divisie("E", None, false)));
+    }
+
+    #[test]
+    fn opgeslagen_lfo_gaat_uit_over_echte_opnamen() {
+        // 0.7.38-bestand: enabled=true voor divisies die sinds 0.7.39 als
+        // wave/samples gelden — opname én LFO klonken over elkaar.
+        let divs = vec![
+            divisie("Hoofdwerk", Some("wave"), true),
+            divisie("Bovenwerk", Some("samples"), true),
+            divisie("Rugwerk", None, true), // alleen registers met een trem-laag
+        ];
+        let saved = vec![
+            opgeslagen("Hoofdwerk", true), opgeslagen("Bovenwerk", true), opgeslagen("Rugwerk", true),
+        ];
+        let (lijst, uitgezet) = nagebootste_tremulant_voor_herstel(&saved, &divs);
+        assert_eq!(uitgezet, vec!["Hoofdwerk".to_string(), "Bovenwerk".to_string(), "Rugwerk".to_string()]);
+        assert_eq!(lijst.len(), 3);
+        assert!(lijst.iter().all(|t| !t.enabled));
+        // Parameters blijven staan; alleen de aan/uit-stand verandert.
+        assert_eq!(lijst[0].rate, 5.5);
+        assert_eq!(lijst[0].amp_depth, 12.0);
+        assert_eq!(lijst[0].pitch_depth, 20.0);
+    }
+
+    #[test]
+    fn opgeslagen_lfo_blijft_zonder_opnamen() {
+        // Synth-ODF-tremulant, geen tremulant, of een divisie die dit orgel
+        // niet kent: de bewaarde voorkeur blijft ongemoeid.
+        let divs = vec![divisie("Hoofdwerk", Some("synth"), false), divisie("Pedaal", None, false)];
+        let saved = vec![
+            opgeslagen("Hoofdwerk", true), opgeslagen("Pedaal", true), opgeslagen("Onbekend", true),
+        ];
+        let (lijst, uitgezet) = nagebootste_tremulant_voor_herstel(&saved, &divs);
+        assert!(uitgezet.is_empty());
+        assert_eq!(lijst.len(), 3);
+        assert!(lijst.iter().all(|t| t.enabled));
+    }
+
+    #[test]
+    fn uitstaande_lfo_wordt_niet_gemeld() {
+        let divs = vec![divisie("Hoofdwerk", Some("wave"), true)];
+        let (lijst, uitgezet) = nagebootste_tremulant_voor_herstel(&[opgeslagen("Hoofdwerk", false)], &divs);
+        assert!(uitgezet.is_empty());
+        assert!(!lijst[0].enabled);
+    }
 
     #[test]
     fn wave_vlag_zonder_opnamen_wordt_synth() {
@@ -7717,6 +7903,63 @@ mod tremulant_kind_tests {
     fn odf_tremulant_zonder_opnamen_is_synth_en_niets_is_niets() {
         assert_eq!(tremulant_kind_voor_divisie(false, false, true), Some("synth"));
         assert_eq!(tremulant_kind_voor_divisie(false, false, false), None);
+    }
+}
+
+#[cfg(test)]
+mod pedaalbinding_herstel_tests {
+    use super::pedaalbindingen_voor_herstel;
+    use crate::library::{CrescendoBindingSaved, OrganSettings, SwellBindingSaved};
+
+    fn zwel(div: &str, ch: u8, cc: u8) -> SwellBindingSaved {
+        SwellBindingSaved {
+            division_name: div.to_string(), division_index: 0, channel: ch, cc_num: cc,
+            min_val: 0, max_val: 127, invert: false, last_value: None,
+        }
+    }
+
+    fn cresc(ch: u8, cc: u8) -> CrescendoBindingSaved {
+        CrescendoBindingSaved { channel: ch, cc_num: cc, min_val: 0, max_val: 127, invert: false }
+    }
+
+    fn settings(zwellen: Vec<SwellBindingSaved>, crescendo: Option<CrescendoBindingSaved>) -> OrganSettings {
+        OrganSettings { swell_bindings: zwellen, crescendo_binding: crescendo, ..Default::default() }
+    }
+
+    #[test]
+    fn zwel_en_crescendo_op_dezelfde_trede_alleen_crescendo() {
+        // 0.7.38-bestand: beide op (kanaal 0, CC7). Voorheen werden ze allebei
+        // hersteld en was de zwelkast stil dood (cc_claimed_by_crescendo wint).
+        let s = settings(vec![zwel("Nevenwerk", 0, 7)], Some(cresc(0, 7)));
+        let (zwellen, crescendo) = pedaalbindingen_voor_herstel(&s);
+        assert!(zwellen.is_empty());
+        let c = crescendo.expect("crescendobinding blijft");
+        assert_eq!((c.channel, c.cc_num), (0, 7));
+    }
+
+    #[test]
+    fn zwel_op_ander_kanaal_blijft_naast_crescendo() {
+        let s = settings(vec![zwel("Nevenwerk", 1, 7)], Some(cresc(0, 7)));
+        let (zwellen, crescendo) = pedaalbindingen_voor_herstel(&s);
+        assert_eq!(zwellen.len(), 1);
+        assert_eq!((zwellen[0].channel, zwellen[0].cc_num), (1, 7));
+        assert!(crescendo.is_some());
+    }
+
+    #[test]
+    fn alleen_de_botsende_zwelbindingen_vervallen() {
+        let s = settings(
+            vec![zwel("Nevenwerk", 0, 7), zwel("Bovenwerk", 0, 7), zwel("Rugwerk", 0, 11)],
+            Some(cresc(0, 7)),
+        );
+        let (zwellen, _) = pedaalbindingen_voor_herstel(&s);
+        let namen: Vec<&str> = zwellen.iter().map(|b| b.division_name.as_str()).collect();
+        assert_eq!(namen, vec!["Rugwerk"]);
+        // Zonder crescendobinding blijft alles staan.
+        let s2 = settings(vec![zwel("Nevenwerk", 0, 7)], None);
+        let (z2, c2) = pedaalbindingen_voor_herstel(&s2);
+        assert_eq!(z2.len(), 1);
+        assert!(c2.is_none());
     }
 }
 
