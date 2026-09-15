@@ -5199,7 +5199,7 @@ mod trede_kiezer_tests {
         for i in 0..=10u8 {
             let t = t0 + Duration::from_millis(i as u64 * 100);
             k.zie(0, 7, i * 12, t);
-            k.zie(0, 39, (i * 37) % 128, t + Duration::from_millis(1));
+            k.zie(0, 39, ((i as u16 * 37) % 128) as u8, t + Duration::from_millis(1));
         }
         let nu = t0 + Duration::from_millis(1000 + 1600);
         assert_eq!(k.keuze(nu), Some((0, 7, 120)));
