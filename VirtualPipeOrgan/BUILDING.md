@@ -147,8 +147,10 @@ de ASIO-wissel uit (het orgel wordt daarbij opnieuw geladen). In het log:
 3. `.github/workflows/release-build.yml` bouwt Windows (NSIS + MSI, mét ASIO) en
    macOS (universal dmg), ondertekent de updater-artefacten en hangt alles aan
    de release
-4. de derde taak `publish-updater-json` stelt `latest.json` samen en hangt die er
-   als **laatste** bij — dat bestand is het startsein voor de updater in de app
+4. de derde taak `publish-updater-json` controleert eerst elke handtekening
+   tegen de publieke sleutel in de app (`minisign -V`, zie *Ondertekening*),
+   stelt dan `latest.json` samen en hangt die er als **laatste** bij — dat
+   bestand is het startsein voor de updater in de app
 
 > **Eerste keer**: 0.7.40 is de eerste versie mét updater aan boord. Wie 0.7.39
 > of ouder draait, moet 0.7.40 één keer handmatig installeren; pas vanaf de
@@ -204,6 +206,67 @@ sleutelpaar waarmee de app controleert dat een update écht van ons komt.
   installer een `.sig`-bestand op.
 - De client downloadt de update, controleert de handtekening en installeert pas
   daarna. Klopt de handtekening niet, dan gebeurt er **niets**.
+- **De bouwstraat controleert dit vooraf (fail-closed).** `tauri build` geeft
+  alleen een *waarschuwing* als de privésleutel ontbreekt of niet bij de
+  publieke sleutel hoort; de `.sig`-bestanden komen er dan tóch. Daarom
+  installeert `publish-updater-json` (en `updater-json`) het pakket `minisign`
+  en verifieert `build-latest-json.sh` elk pakket met `minisign -V` tegen de
+  publieke sleutel uit `tauri.conf.json` **op de tag** — de sleutel die in de
+  app van die release zit — vóórdat `latest.json` wordt samengesteld. Klopt er
+  één handtekening niet, dan stopt het script met een fout en komt er geen
+  `latest.json` online. Zonder die controle zou iedere installatie de update
+  volledig downloaden en daarna afkeuren ("Bijwerken mislukt").
+
+#### Hoe de handtekeningen gecodeerd zijn
+
+Tauri gebruikt minisign, maar verpakt de bestanden nog eens in base64
+(`tauri-plugin-updater`, `verify_signature`):
+
+- `plugins.updater.pubkey` = base64 van het **complete** minisign-sleutelbestand
+  (regel 1 `untrusted comment: minisign public key: <key-id>`, regel 2 de
+  sleutel `RW...`).
+- `<pakket>.sig` = base64 van het **complete** minisign-handtekeningbestand
+  (vier regels: `untrusted comment: signature from tauri secret key`, de
+  handtekening `RUQ...` — algoritme `ED` = prehashed met Blake2b-512, plus
+  key-id en ed25519-handtekening —, `trusted comment: timestamp:...<tab>file:...`,
+  en de globale handtekening). Het bestand heeft geen newline aan het einde.
+
+Eén keer `base64 -d` levert dus precies de bestanden die `minisign -p` en
+`minisign -x` verwachten; de key-id in de handtekening moet gelijk zijn aan die
+van de publieke sleutel (minisign meldt het anders expliciet).
+
+#### Handtekening zelf controleren
+
+Het script lokaal draaien doet alle controles maar uploadt niets met `--droog`
+(nodig: `gh` ingelogd, `jq`, `minisign` — op Windows
+`winget install jedisct1.minisign` en `winget install jqlang.jq`):
+
+```bash
+GH_REPO=orgelmaker/JM-Orgue bash .github/scripts/build-latest-json.sh --droog v0.7.40
+```
+
+Met de hand, voor één pakket:
+
+```bash
+gh release download v0.7.40 -p '*x64-setup.exe' -p '*x64-setup.exe.sig' -D /tmp/v0740
+jq -r '.plugins.updater.pubkey' src-tauri/tauri.conf.json | base64 -d > /tmp/v0740/minisign.pub
+base64 -d /tmp/v0740/JM-Orgue_0.7.40_x64-setup.exe.sig > /tmp/v0740/setup.minisig
+minisign -V -p /tmp/v0740/minisign.pub -m /tmp/v0740/JM-Orgue_0.7.40_x64-setup.exe -x /tmp/v0740/setup.minisig
+```
+
+Uitkomst bij een goede handtekening: `Signature and comment signature verified`
+plus de trusted comment met tijdstempel en bestandsnaam. Zonder minisign kan
+het ook in Python met het pakket `cryptography` (ed25519 + `hashlib.blake2b`
+met `digest_size=64`); de controle op v0.7.40 is op beide manieren gedaan.
+
+**Controle mislukt in de CI?** Dan hoort de privésleutel in de secrets
+(`TAURI_SIGNING_PRIVATE_KEY`/`_PASSWORD`) niet bij `plugins.updater.pubkey` op
+die tag, of is er een pakket handmatig aan de release gehangen. Herstel de
+secrets (of de publieke sleutel, zie *Sleutel kwijt*), bouw opnieuw
+(*Re-run failed jobs* op `build-windows`/`build-macos`) en draai daarna
+**Actions → updater-json**. Een verkeerd ondertekend macOS-bestand blokkeert
+ook de Windows-update: verwijder in dat geval `.app.tar.gz` + `.sig` van de
+release en draai `updater-json` opnieuw (latest.json wordt dan Windows-only).
 
 Sleutelpaar (opnieuw) maken en de secrets zetten:
 

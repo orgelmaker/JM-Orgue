@@ -2499,6 +2499,10 @@
   let remotePortInput = 8766;
   let remoteBusy = false;
   let unlistenRemoteVol = null;
+  // De backend frist de kaartnamen één keer per proces op de achtergrond op en
+  // meldt dat met 'jm-orgue:library-updated' (get_organ_library wacht daar niet
+  // meer op). Promise<UnlistenFn|null>, één keer geregistreerd.
+  let libraryUpdatedListener = null;
   async function refreshRemote() {
     try {
       remote = await invoke('get_remote_status');
@@ -2613,6 +2617,7 @@
     if (crescLivePoll) clearInterval(crescLivePoll);
     if (sharedPrefsInterval) clearInterval(sharedPrefsInterval);
     if (unlistenRemoteVol) unlistenRemoteVol();
+    if (libraryUpdatedListener) libraryUpdatedListener.then(un => { if (un) un(); });
   });
 
   // Live crescendo-pedaalstand volgen: werkt de balk bij terwijl de gebruiker het
@@ -3120,6 +3125,13 @@
 
   async function loadLibrary() {
     try {
+      // Luisteraar vóór de eerste invoke, zodat de melding van de
+      // achtergrondopfris nooit gemist wordt.
+      if (!libraryUpdatedListener) {
+        libraryUpdatedListener = listen('jm-orgue:library-updated', () => { if (showOrganBrowser) loadLibrary(); })
+          .catch(() => null);
+      }
+      await libraryUpdatedListener;
       libraryOrgans = await invoke('get_organ_library');
       // Afbeelding per orgel; de backend gebruikt de opgeslagen afbeelding en
       // zoekt alleen als er nog nooit (met deze zoekversie) gezocht is.

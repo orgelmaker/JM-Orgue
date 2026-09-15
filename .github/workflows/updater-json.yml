@@ -24,6 +24,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Zelfde controle als in release-build: het script verifieert elke
+      # handtekening met `minisign -V` tegen de publieke sleutel uit
+      # tauri.conf.json op de tag; zonder minisign stopt het (fail-closed).
+      - name: Installeer minisign
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends minisign
+          minisign -v
+
+      # Klopt een handtekening niet, dan stopt het script met een fout — ook
+      # met 'sta_pre_release'; die vlag gaat alleen over concept/pre-release.
       - name: Stel latest.json samen en hang hem aan de release
         env:
           GH_TOKEN: ${{ github.token }}

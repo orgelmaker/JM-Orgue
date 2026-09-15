@@ -2268,7 +2268,7 @@ pub fn apply_dsp_after_backend_reload(state: &AppState) {
                 if path.exists() {
                     let target_rate = state.audio_player.read().as_ref()
                         .map(|p| *p.sample_rate.read()).filter(|&x| x > 0).unwrap_or(44100);
-                    if let Ok(rev) = vpo_audio::ConvolutionReverb::from_wav(&path, 1024, target_rate) {
+                    if let Ok(rev) = vpo_audio::ConvolutionReverb::from_wav(&path, vpo_audio::ConvolutionReverb::aanbevolen_partitie(), target_rate) {
                         state.send_audio_command(AudioCommand::LoadImpulseResponse(Box::new(rev)));
                     }
                 }
@@ -4519,7 +4519,7 @@ pub fn load_impulse_response(state: State<AppState>, path: String) -> Result<(),
         .map(|p| *p.sample_rate.read())
         .filter(|&r| r > 0)
         .unwrap_or(44100);
-    let rev = vpo_audio::ConvolutionReverb::from_wav(&ir_path, 1024, target_rate)
+    let rev = vpo_audio::ConvolutionReverb::from_wav(&ir_path, vpo_audio::ConvolutionReverb::aanbevolen_partitie(), target_rate)
         .map_err(|e| format!("IR laden mislukt: {}", e))?;
     state.send_audio_command(AudioCommand::LoadImpulseResponse(Box::new(rev)));
     info!("Loaded impulse response: {} ({} Hz)", path, target_rate);
@@ -6229,10 +6229,10 @@ fn restore_organ_settings(state: &AppState, organ_id: &str) {
 /// het orgel een keer opent.)
 static BIB_NAMEN_VERVERST: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// Hoelang de eerste `get_organ_library` op de opfrisser wacht. Daarna loopt
-/// die gewoon door op de achtergrond: een weggehaalde USB-schijf of een trage
-/// netwerkmap mag het openen van de bibliotheek nooit ophouden.
-const BIB_VERVERS_WACHT_MS: u64 = 400;
+/// Event naar de frontend zodra de achtergrondopfris kaartnamen heeft
+/// gewijzigd; Console.svelte haalt de bibliotheek dan opnieuw op
+/// (`loadLibrary`). Payload: `{ "updated": <aantal gewijzigde kaarten> }`.
+pub const BIB_BIJGEWERKT_EVENT: &str = "jm-orgue:library-updated";
 
 /// Lees ALLEEN de `[Organ]`-sectie van een GrandOrgue-`.organ`, zonder de rest
 /// te parsen: de sectie staat vooraan, dus de eerste 64 kB volstaat. Zo blijft
@@ -6310,59 +6310,19 @@ fn bibliotheek_identiteit_licht(source_path: &str, source_type: &str) -> Option<
     None
 }
 
-/// Werk de naam/bouwer/plaats van de meegegeven entries bij. Schrijft in één
-/// korte write-lock en slaat alleen op als er echt iets veranderd is.
-fn ververs_bibliotheek_namen(state: &AppState, entries: Vec<(String, String, String, String, String)>) {
+/// Werk de naam/bouwer/plaats van alle bibliotheek-entries bij, LICHTGEWICHT
+/// (zie [`bibliotheek_identiteit_licht`]). Draait op een achtergrondthread.
+/// De snapshot en de bijwerking gebeuren elk onder een KORTE lock (alleen
+/// geheugenwerk); het lezen van schijf en het opslaan gebeuren zonder lock —
+/// een UI-thread die intussen de bibliotheek opent of wijzigt wacht dus
+/// hooguit microseconden. Ontbrekende bestanden leveren `None` op en laten
+/// de entry staan; er wordt nooit iets gewist. Geeft het aantal gewijzigde
+/// entries terug (0 = niets veranderd, niets opgeslagen).
+fn ververs_bibliotheek_namen(bibliotheek: &parking_lot::RwLock<library::OrganLibrary>, app_data_dir: &Path) -> usize {
     let norm = |s: &str| s.replace('/', "\\").to_lowercase();
-    let mut wijzigingen: Vec<(String, String, String, String)> = Vec::new();
-    for (source_path, source_type, naam, bouwer, plaats) in entries {
-        if let Some((n, b, p)) = bibliotheek_identiteit_licht(&source_path, &source_type) {
-            if n != naam || b != bouwer || p != plaats {
-                wijzigingen.push((source_path, n, b, p));
-            }
-        }
-    }
-    if wijzigingen.is_empty() {
-        return;
-    }
-
-    let mut aantal = 0usize;
-    {
-        let mut lib = state.organ_library.write();
-        for (source_path, n, b, p) in wijzigingen {
-            let sleutel = norm(&source_path);
-            // Opnieuw opzoeken: de entry kan intussen weg zijn of al door een
-            // echte load zijn bijgewerkt.
-            if let Some(e) = lib.organs.iter_mut().find(|o| norm(&o.source_path) == sleutel) {
-                if e.name != n || e.builder != b || e.location != p {
-                    info!("Bibliotheek opgefrist: '{}' → '{}'", e.name, n);
-                    e.name = n;
-                    e.builder = b;
-                    e.location = p;
-                    aantal += 1;
-                }
-            }
-        }
-    }
-    // parking_lot is niet re-entrant: save_library() neemt zelf een read-lock.
-    if aantal > 0 {
-        state.save_library();
-    }
-}
-
-/// Fris de bibliotheekkaarten ÉÉN keer per proces op (punt 8). Het werk loopt
-/// op een achtergrondthread; de aanroeper wacht er hooguit
-/// [`BIB_VERVERS_WACHT_MS`] op, zodat de eerste opening van de bibliotheek de
-/// nieuwe namen meestal al toont maar een onbereikbaar pad niets ophoudt.
-/// Ontbrekende bestanden leveren `None` op en laten de entry dus staan — er
-/// wordt nooit iets gewist.
-fn ververs_bibliotheek_namen_eenmalig(state: &AppState) {
-    if BIB_NAMEN_VERVERST.swap(true, std::sync::atomic::Ordering::SeqCst) {
-        return;
-    }
-    // Snapshot onder een KORTE read-lock; het lezen van schijf gebeurt zonder lock.
+    // Snapshot onder een korte read-lock; het lezen van schijf gebeurt zonder lock.
     let entries: Vec<(String, String, String, String, String)> = {
-        let lib = state.organ_library.read();
+        let lib = bibliotheek.read();
         lib.organs
             .iter()
             .map(|o| {
@@ -6376,19 +6336,97 @@ fn ververs_bibliotheek_namen_eenmalig(state: &AppState) {
             })
             .collect()
     };
-    if entries.is_empty() {
-        return;
+    let mut wijzigingen: Vec<(String, String, String, String)> = Vec::new();
+    for (source_path, source_type, naam, bouwer, plaats) in entries {
+        if let Some((n, b, p)) = bibliotheek_identiteit_licht(&source_path, &source_type) {
+            if n != naam || b != bouwer || p != plaats {
+                wijzigingen.push((source_path, n, b, p));
+            }
+        }
+    }
+    if wijzigingen.is_empty() {
+        return 0;
     }
 
-    let st = state.clone();
-    let (tx, rx) = std::sync::mpsc::channel::<()>();
-    std::thread::spawn(move || {
-        ververs_bibliotheek_namen(&st, entries);
-        let _ = tx.send(());
-    });
-    let _ = rx.recv_timeout(std::time::Duration::from_millis(BIB_VERVERS_WACHT_MS));
+    // Bijwerken onder een korte write-lock; loggen pas daarna (buiten de lock).
+    let mut gewijzigd: Vec<(String, String)> = Vec::new();
+    {
+        let mut lib = bibliotheek.write();
+        for (source_path, n, b, p) in wijzigingen {
+            let sleutel = norm(&source_path);
+            // Opnieuw opzoeken: de entry kan intussen weg zijn of al door een
+            // echte load zijn bijgewerkt.
+            if let Some(e) = lib.organs.iter_mut().find(|o| norm(&o.source_path) == sleutel) {
+                if e.name != n || e.builder != b || e.location != p {
+                    gewijzigd.push((std::mem::replace(&mut e.name, n.clone()), n));
+                    e.builder = b;
+                    e.location = p;
+                }
+            }
+        }
+    }
+    for (oud, nieuw) in &gewijzigd {
+        info!("Bibliotheek opgefrist: '{}' → '{}'", oud, nieuw);
+    }
+    if !gewijzigd.is_empty() {
+        // Opslaan van een KOPIE: `AppState::save_library()` houdt de read-lock
+        // vast tijdens het schrijven naar schijf, en dat zou een write vanaf
+        // de UI-thread (verwijderen, afbeelding kiezen) zolang laten wachten.
+        let kopie: library::OrganLibrary = (*bibliotheek.read()).clone();
+        library::save_library(app_data_dir, &kopie);
+    }
+    gewijzigd.len()
 }
 
+/// Start `werk` één keer per proces op een eigen thread en geef METEEN terug;
+/// de aanroeper wacht er nooit op. `vlag` bewaakt de eenmaligheid (tweede
+/// aanroep: `None`, er gebeurt niets). De JoinHandle is er alleen voor de
+/// tests; wie hem laat vallen laat de thread gewoon doorlopen.
+fn start_opfris_eenmalig<F>(vlag: &std::sync::atomic::AtomicBool, werk: F) -> Option<std::thread::JoinHandle<()>>
+where
+    F: FnOnce() + Send + 'static,
+{
+    if vlag.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        return None;
+    }
+    std::thread::Builder::new()
+        .name("bibliotheek-opfris".into())
+        .spawn(werk)
+        .ok()
+}
+
+/// Meld de frontend dat de achtergrondopfris kaartnamen heeft gewijzigd.
+/// Headless (test-API vóór Tauri-setup) is er geen AppHandle — dan overslaan.
+fn emit_bibliotheek_bijgewerkt(state: &AppState, aantal: usize) {
+    if let Some(app) = state.app_handle.read().as_ref() {
+        use tauri::Emitter;
+        let _ = app.emit(BIB_BIJGEWERKT_EVENT, serde_json::json!({ "updated": aantal }));
+    }
+}
+
+/// Fris de bibliotheekkaarten ÉÉN keer per proces op (punt 8), volledig op
+/// een achtergrondthread. De aanroeper (de UI-thread, via `get_organ_library`)
+/// wacht er NIET op — ook de snapshot van de entries wordt op de
+/// achtergrondthread genomen: een weggehaalde USB-schijf of een trage
+/// netwerkmap mag het openen van de bibliotheek nooit ophouden. Zijn er
+/// namen veranderd, dan gaat [`BIB_BIJGEWERKT_EVENT`] naar de frontend, die
+/// de lijst opnieuw ophaalt.
+fn ververs_bibliotheek_namen_eenmalig(state: &AppState) {
+    if BIB_NAMEN_VERVERST.load(std::sync::atomic::Ordering::SeqCst) {
+        return; // snelle uitweg: geen AppState-kloon voor niets
+    }
+    let st = state.clone();
+    start_opfris_eenmalig(&BIB_NAMEN_VERVERST, move || {
+        let aantal = ververs_bibliotheek_namen(&st.organ_library, &st.app_data_dir);
+        if aantal > 0 {
+            emit_bibliotheek_bijgewerkt(&st, aantal);
+        }
+    });
+}
+
+/// Synchroon Tauri-commando (UI-thread): geeft de bibliotheek METEEN terug.
+/// De enige lock hier is de read-lock voor de kloon van de entries —
+/// microseconden; de opfris loopt op de achtergrond (zie hierboven).
 #[tauri::command]
 pub fn get_organ_library(state: State<AppState>) -> Vec<OrganLibraryEntry> {
     ververs_bibliotheek_namen_eenmalig(state.inner());
@@ -7684,8 +7722,16 @@ mod tremulant_kind_tests {
 
 #[cfg(test)]
 mod bibliotheek_opfris_tests {
-    use super::{bibliotheek_identiteit_licht, lees_organ_sectie_licht};
+    use super::{
+        bibliotheek_identiteit_licht, lees_organ_sectie_licht, start_opfris_eenmalig,
+        ververs_bibliotheek_namen,
+    };
+    use crate::library::{OrganLibrary, OrganLibraryEntry};
+    use parking_lot::RwLock;
     use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
 
     fn tempmap(naam: &str) -> PathBuf {
         let d = std::env::temp_dir().join(naam);
@@ -7783,6 +7829,100 @@ mod bibliotheek_opfris_tests {
         std::fs::write(&p, bytes).unwrap();
         let info = lees_organ_sectie_licht(&p).expect("[Organ]");
         assert_eq!(info.church_name, "Bätz-kerk");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Onderdeel B: `get_organ_library` (UI-thread) mag NOOIT op de opfrisser
+    /// wachten. Het werk hier blokkeert tot de test het vrijgeeft — een
+    /// "losgekoppelde USB-schijf". Zou de starter erop wachten (zoals de
+    /// oude `recv_timeout` van 400 ms), dan kwam de aanroep pas na de
+    /// vrijgave terug, of nooit.
+    #[test]
+    fn get_organ_library_wacht_niet_op_de_opfrisser() {
+        let vlag = AtomicBool::new(false);
+        let (vrijgave_tx, vrijgave_rx) = std::sync::mpsc::channel::<()>();
+        let (gestart_tx, gestart_rx) = std::sync::mpsc::channel::<()>();
+        let teller = Arc::new(AtomicUsize::new(0));
+        let t = teller.clone();
+
+        let t0 = Instant::now();
+        let handle = start_opfris_eenmalig(&vlag, move || {
+            t.fetch_add(1, Ordering::SeqCst);
+            let _ = gestart_tx.send(());
+            let _ = vrijgave_rx.recv(); // trage schijf: hangt tot de test hem loslaat
+        })
+        .expect("eerste aanroep start de opfris");
+        let duur = t0.elapsed();
+        assert!(duur < Duration::from_millis(100), "aanroeper wachtte {:?} op de opfrisser", duur);
+        assert!(vlag.load(Ordering::SeqCst), "vlag staat meteen (één keer per proces)");
+
+        // De thread draait (en hangt nog) terwijl de aanroeper al terug is.
+        gestart_rx.recv_timeout(Duration::from_secs(5)).expect("opfris-thread is gestart");
+        assert_eq!(teller.load(Ordering::SeqCst), 1);
+
+        // Bibliotheek opnieuw geopend: tweede aanroep doet niets en is meteen terug.
+        let t1 = Instant::now();
+        assert!(start_opfris_eenmalig(&vlag, || panic!("mag niet nog eens draaien")).is_none());
+        assert!(t1.elapsed() < Duration::from_millis(100));
+
+        vrijgave_tx.send(()).unwrap();
+        handle.join().unwrap();
+        assert_eq!(teller.load(Ordering::SeqCst), 1, "het werk draait precies één keer");
+    }
+
+    fn entry(pad: &Path, naam: &str) -> OrganLibraryEntry {
+        OrganLibraryEntry {
+            id: pad.to_string_lossy().to_lowercase(),
+            name: naam.into(),
+            builder: "Custom Samples".into(),
+            location: String::new(),
+            year: None,
+            stop_count: 0,
+            source_type: "organ_file".into(),
+            source_path: pad.to_string_lossy().to_string(),
+            image_path: None,
+            image_manual: false,
+            image_searched: None,
+        }
+    }
+
+    /// De achtergrondopfris werkt de kaart bij en slaat op; een entry zonder
+    /// wijziging of zonder leesbaar bestand blijft met rust, en zonder
+    /// wijziging wordt er niets naar schijf geschreven.
+    #[test]
+    fn opfris_werkt_kaartnamen_bij_en_slaat_alleen_bij_wijziging_op() {
+        let d = tempmap("jm_lib_licht_5");
+        let data = d.join("appdata");
+        std::fs::create_dir_all(&data).unwrap();
+        let p = schrijf_organ(&d, "PuttBatz", "ChurchName=PuttBatz\nNumberOfManuals=2");
+        std::fs::write(
+            d.join("PuttBatz.jm-rec.json"),
+            r#"{"jm_rec_version":"3.10","organ":"PuttBatz","kerk":"Hervormde Kerk","plaats":"Puttershoek","bouwer":"Bätz-Witte"}"#,
+        )
+        .unwrap();
+        let weg = d.join("weg.organ"); // bestaat niet: USB eruit
+
+        let lib = RwLock::new(OrganLibrary {
+            organs: vec![entry(&p, "PuttBatz"), entry(&weg, "Oude naam")],
+            settings: Default::default(),
+        });
+        assert_eq!(ververs_bibliotheek_namen(&lib, &data), 1);
+        {
+            let l = lib.read();
+            assert_eq!(l.organs[0].name, "Hervormde Kerk - Bätz-Witte - Puttershoek");
+            assert_eq!(l.organs[0].builder, "Bätz-Witte");
+            assert_eq!(l.organs[0].location, "Puttershoek");
+            assert_eq!(l.organs[1].name, "Oude naam", "onleesbaar pad: entry blijft staan");
+            assert_eq!(l.organs.len(), 2, "er wordt nooit iets gewist");
+        }
+        let json = data.join("organ_library.json");
+        let txt = std::fs::read_to_string(&json).expect("bibliotheek is opgeslagen");
+        assert!(txt.contains("Hervormde Kerk - Bätz-Witte - Puttershoek"));
+
+        // Tweede ronde: niets veranderd → niets opgeslagen.
+        std::fs::remove_file(&json).unwrap();
+        assert_eq!(ververs_bibliotheek_namen(&lib, &data), 0);
+        assert!(!json.exists(), "zonder wijziging wordt er niet opgeslagen");
         let _ = std::fs::remove_dir_all(&d);
     }
 }

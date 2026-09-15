@@ -5,6 +5,34 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.41] - 2026-09-15
+
+### Nazorg na twee controlerondes
+
+Dit is de eerste versie die je via "Nu bijwerken" binnenhaalt. Ze bundelt wat twee onafhankelijke controlerondes over 0.7.39 en 0.7.40 aan het licht brachten.
+
+**Klank**
+- Boven de geheugenkap gaf een eindigende stem haar samples terug aan het systeem ín het audioblok, bij het loslaten van een akkoord tot enkele milliseconden in één keer. Dat gebeurt nu op de opruimthread.
+- De convolutiegalm rekende op elke partitiegrens alles in één blok uit, wat bij zeer kleine buffers hoorbaar tikte zodra je een eigen impulsrespons gebruikte. Het werk is nu gelijkmatig over de blokken verdeeld.
+- Het tremulant-commando telde niet mee in het werkbudget van het audioblok en duwde zijn stemmen erin zonder de staartbegrenzing; dat is rechtgezet, net als de boekhouding bij het loslaten van een register.
+
+**MIDI**
+- Knoppen die per druk alleen een puls van 127 sturen (voetcontrollers in CC-modus, eigen bouw) vuurden na 0.7.39 nog maar één keer per sessie. Ze werken weer bij elke druk, terwijl pedaalsweeps niet per ongeluk een knop indrukken. Een op waarde 0 ingeleerde knop vuurt bij het indrukken in plaats van bij het loslaten.
+
+**Bijwerken**
+- Wie met het msi-bestand installeerde, krijgt voortaan ook een msi-update en niet een tweede installatie ernaast.
+- "Controleer op updates" meldt nu eerlijk wanneer de controle mislukt, bijvoorbeeld zonder internet, in plaats van "je gebruikt de nieuwste versie".
+- Een vastgelopen download eindigt met een nette melding; twee snelle klikken starten hem niet dubbel.
+- De bouwstraat controleert elke handtekening tegen de publieke sleutel voordat een update wordt aangeboden, stopt bij een pre-release, en publiceert niets meer als een bouw wordt geannuleerd.
+
+**Interface en bibliotheek**
+- Zeven taalknoppen passen ook op smalle vensters; een bevestigingsvraag toonde letterlijk een plaatshouder; de pagina voor tablet en telefoon meldt de juiste taal en zegt in het Duits "Keine Orgel"; in het Spaans heet het logbestand niet langer "archivo de registro".
+- Een orgel op een losgekoppelde schijf wordt niet meer voorgoed als "geen foto" onthouden, ook niet bij Hauptwerk-sets waarvan alleen de pakketten elders staan.
+- De bibliotheek wacht bij het openen niet meer op het opfrissen van namen op de achtergrond.
+
+**Bouwstraat**
+- Bij elke push draait nu een controletaak met de frontend-build, de vertaalcontrole en alle tests. Tot 0.7.40 draaide er in de bouwstraat geen enkele test.
+
 ## [0.7.40] - 2026-09-14
 
 ### Bijwerken met één klik, en drie talen erbij

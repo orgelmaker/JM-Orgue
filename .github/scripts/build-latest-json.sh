@@ -10,22 +10,39 @@
 # zijn artefacten in die poging niet, terwijl de bestanden wél aan de release
 # hangen. Daardoor is dit script ook los te draaien (zie updater-json.yml).
 #
+# Fail-closed: vóórdat latest.json ontstaat wordt elke handtekening met
+# `minisign -V` gecontroleerd tegen de publieke sleutel uit tauri.conf.json op
+# de tag — de sleutel die in de app van deze release zit. Klopt er één niet,
+# dan stopt het script en komt er GEEN latest.json online (zie stap 2b/2c).
+#
+# Vereist: gh, jq, base64, minisign.
 # Gebruik: GH_TOKEN=... GH_REPO=orgelmaker/JM-Orgue build-latest-json.sh v0.7.40
-#          (voeg --sta-pre-release toe om een pre-release/concept tóch te doen)
+#          --sta-pre-release  een pre-release/concept tóch doen
+#          --droog            alles doen (ook de controles) behalve uploaden
 set -euo pipefail
 
 TAG=""
 STA_PRE_RELEASE=0
+DROOG=0
 for arg in "$@"; do
   case "$arg" in
     --sta-pre-release) STA_PRE_RELEASE=1 ;;
+    --droog) DROOG=1 ;;
     -*) echo "Onbekende optie: $arg" >&2; exit 2 ;;
     *) TAG="$arg" ;;
   esac
 done
-: "${TAG:?gebruik: build-latest-json.sh [--sta-pre-release] <tag>, bijvoorbeeld v0.7.40}"
+: "${TAG:?gebruik: build-latest-json.sh [--sta-pre-release] [--droog] <tag>, bijvoorbeeld v0.7.40}"
 REPO="${GH_REPO:-${GITHUB_REPOSITORY:?GH_REPO of GITHUB_REPOSITORY is nodig}}"
 VERSION="${TAG#v}"
+
+# Zonder minisign is er geen controle mogelijk, en zonder controle geen
+# latest.json (fail-closed). In de CI: apt-get install minisign.
+command -v minisign >/dev/null 2>&1 || {
+  echo "FOUT: minisign ontbreekt; nodig om de handtekeningen te controleren" >&2
+  echo "      (ubuntu: sudo apt-get install minisign; Windows: winget install jedisct1.minisign)" >&2
+  exit 1
+}
 
 tmp="$(mktemp -d)"
 cd "$tmp"
@@ -74,6 +91,63 @@ gh release download "$TAG" --repo "$REPO" --dir sigs --pattern '*.sig' || true
 for f in "$NSIS" "$MSI"; do
   [ -s "sigs/$f.sig" ] || { echo "FOUT: handtekening voor $f ontbreekt (bouwt de CI wel met createUpdaterArtifacts?)" >&2; exit 1; }
 done
+
+# 2b. De publieke sleutel waarmee de app van DEZE release controleert. Die komt
+#     uit tauri.conf.json op de TAG en niet uit de checkout: updater-json.yml
+#     draait op master, en na een sleutelwissel zou daar de nieuwe sleutel
+#     staan terwijl de app op de tag nog de oude in zich heeft.
+#
+#     Codering (tauri-plugin-updater, verify_signature): plugins.updater.pubkey
+#     is base64 van het complete minisign-sleutelbestand (regel 1 "untrusted
+#     comment: ...", regel 2 de sleutel "RW..."). Eén keer decoderen levert dus
+#     precies het bestand op dat `minisign -p` verwacht.
+gh api -H 'Accept: application/vnd.github.raw+json' \
+   "repos/$REPO/contents/VirtualPipeOrgan/src-tauri/tauri.conf.json?ref=$TAG" > tauri.conf.json
+PUBKEY_B64="$(jq -r '.plugins.updater.pubkey // empty' tauri.conf.json)"
+[ -n "$PUBKEY_B64" ] || { echo "FOUT: geen plugins.updater.pubkey in tauri.conf.json op $TAG" >&2; exit 1; }
+printf '%s' "$PUBKEY_B64" | base64 -d > minisign.pub \
+  || { echo "FOUT: plugins.updater.pubkey op $TAG is geen geldige base64" >&2; exit 1; }
+if ! sed -n 2p minisign.pub | grep -q '^RW'; then
+  echo "FOUT: plugins.updater.pubkey op $TAG decodeert niet naar een minisign-sleutelbestand:" >&2
+  sed 's/^/      /' minisign.pub >&2
+  exit 1
+fi
+echo "Publieke sleutel uit tauri.conf.json op $TAG: $(head -1 minisign.pub)"
+
+# 2c. Elke handtekening ÉCHT controleren tegen die sleutel. tauri-cli waarschuwt
+#     alleen als de privésleutel niet bij de publieke hoort of ontbreekt; het
+#     resultaat zou dan een latest.json zijn waarvan iedere installatie de
+#     update eerst volledig downloadt en daarna afkeurt ("Bijwerken mislukt").
+#     Daarom hier hetzelfde doen als de app straks: pakket downloaden en de
+#     handtekening met minisign controleren. Mislukt dat voor ook maar één
+#     pakket, dan stopt het script en komt er geen latest.json.
+#
+#     Codering: het .sig-bestand is base64 van het complete minisign-
+#     handtekeningbestand (vier regels: untrusted comment, handtekening "RUQ..."
+#     = algoritme "ED" (prehashed, Blake2b-512) + key-id + ed25519-handtekening,
+#     trusted comment, globale handtekening). Eén keer decoderen levert het
+#     .minisig-bestand op dat `minisign -x` verwacht; de key-id erin moet
+#     overeenkomen met die van de publieke sleutel (minisign meldt het anders).
+TE_CONTROLEREN=("$NSIS" "$MSI")
+if [ -n "$MAC" ] && [ -s "sigs/$MAC.sig" ]; then
+  TE_CONTROLEREN+=("$MAC")
+fi
+mkdir -p pak
+for f in "${TE_CONTROLEREN[@]}"; do
+  gh release download "$TAG" --repo "$REPO" --dir pak --pattern "$f"
+  [ -s "pak/$f" ] || { echo "FOUT: $f kon niet van release $TAG gedownload worden" >&2; exit 1; }
+  base64 -d "sigs/$f.sig" > "sigs/$f.minisig" \
+    || { echo "FOUT: sigs/$f.sig is geen geldige base64 (is het wel een Tauri-updater-handtekening?)" >&2; exit 1; }
+  echo "Controleer handtekening van $f ..."
+  if ! minisign -V -p minisign.pub -m "pak/$f" -x "sigs/$f.minisig"; then
+    echo "FOUT: de handtekening van $f klopt NIET bij de publieke sleutel in tauri.conf.json op $TAG." >&2
+    echo "      Iedere installatie zou deze update downloaden en daarna afkeuren. latest.json" >&2
+    echo "      wordt daarom NIET geplaatst. Meestal: TAURI_SIGNING_PRIVATE_KEY(_PASSWORD) in de" >&2
+    echo "      repo-secrets hoort niet bij plugins.updater.pubkey (zie BUILDING.md, Ondertekening)." >&2
+    exit 1
+  fi
+done
+echo "Alle handtekeningen kloppen (${#TE_CONTROLEREN[@]} pakketten)."
 
 # 3. latest.json samenstellen. De links staan vast op de tag, zodat bestand en
 #    handtekening altijd bij elkaar horen.
@@ -136,6 +210,11 @@ if gh release download "$TAG" --repo "$REPO" --dir oud --pattern 'latest.json' 2
    && jq -S . latest.json > b.json \
    && cmp -s a.json b.json; then
   echo "latest.json staat er al en is identiek - niets te doen."
+  exit 0
+fi
+
+if [ "$DROOG" -eq 1 ]; then
+  echo "Droogloop (--droog): latest.json is NIET geüpload; hij staat in $tmp/latest.json."
   exit 0
 fi
 
