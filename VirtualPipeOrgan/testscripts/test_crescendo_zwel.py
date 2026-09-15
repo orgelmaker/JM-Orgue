@@ -29,7 +29,7 @@ Wat dit script meet
 
 Feiten uit de code (0.7.37/0.7.38, alleen gelezen):
   - state.rs process_crescendo_cc: scaled = trunc(((v-lo)/span).clamp(0,1)*127); invert → 127-scaled;
-    trede = 0 als m<4, anders min(N, (m-4)*N//124 + 1), met Schmitt-hysterese H=2 CC rond elke
+    trede = 0 als m<8 (dode zone, 0.7.44; was 4), anders min(N, (m-8)*N//119 + 1), met Schmitt-hysterese H=2 CC rond elke
     grens (crescendo_next_stage). Per drain-batch telt alleen
     de laatste crescendo-CC (coalescing) — bij HTTP-injectie (≥1 ms/request, MIDI-lus 100 µs)
     komt praktisch elke CC in een eigen batch.
@@ -199,8 +199,8 @@ def mapped_value(v, lo=0, hi=127, invert=False):
 def expected_stage(v, n, lo=0, hi=127, invert=False):
     """Trap zonder hysterese (crescendo_stage_for)."""
     m = mapped_value(v, lo, hi, invert)
-    if m < 4: return 0
-    return min(n, (m - 4) * n // 124 + 1)
+    if m < 8: return 0  # dode zone CRESCENDO_DODE_ZONE = 8 (0.7.44; was 4)
+    return min(n, (m - 8) * n // 119 + 1)
 def stage_bounds(stage, n):
     ms = [m for m in range(128) if expected_stage(m, n) == stage]
     return (ms[0], ms[-1]) if ms else (0, 0)
@@ -818,9 +818,14 @@ def test_crescendo_uit_met_binding(c):
     check(any(d.get("kind") == "swell" for d in (r.get("displaced") or [])),
           "crescendo-koppeling meldt de verdrongen zwelkoppeling")
     check(swell_binding("Nevenwerk") is None, "zwelkoppeling verdrongen door de crescendo-koppeling")
+    # 0.7.44: een verdrongen zwelkast gaat OPEN (bleef tot 0.7.43 op de laatste
+    # stand staan — gedempt zonder trede om hem nog te openen).
+    time.sleep(0.15)
+    check(abs(swell_pos(idx) - 1.0) <= TH["spiegel_tol"],
+          f"verdrongen zwelkast gaat open (nu {swell_pos(idx):.2f})")
     send_cc(CH, CC, 0); time.sleep(0.08); send_cc(CH, CC, 127); time.sleep(0.08)
-    check(abs(swell_pos(idx) - pos_mid) <= TH["spiegel_tol"],
-          f"crescendo uit + binding = dode trede: zwelstand blijft {pos_mid:.2f} (nu {swell_pos(idx):.2f})")
+    check(abs(swell_pos(idx) - 1.0) <= TH["spiegel_tol"],
+          f"crescendo uit + binding = dode trede: zwelkast blijft open (nu {swell_pos(idx):.2f})")
     check(cresc_state()[1] == 0, f"crescendo uit: trede blijft 0 (nu {cresc_state()[1]})")
     # Zelfde geval met crescendo AAN maar lege matrix.
     post("/crescendo/config", {"stages": [[] for _ in range(c.N)], "enabled": True}); time.sleep(0.08)

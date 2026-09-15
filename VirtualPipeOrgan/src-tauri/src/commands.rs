@@ -1175,7 +1175,13 @@ pub fn set_crescendo_binding_manual(state: State<AppState>, channel: u8, cc_num:
     info!("Handmatige crescendo-koppeling: kanaal {} CC{}", ch + 1, cc);
     {
         let mut b = state.crescendo_binding.write();
-        let (mn, mx, inv) = b.map(|(_, _, mn, mx, inv)| (mn, mx, inv)).unwrap_or((0, 127, false));
+        // Bereik en spiegelbeeld horen bij een fysieke trede: alleen behouden
+        // als (kanaal, CC) gelijk blijft; een andere trede begint op 0..127
+        // zonder spiegel (0.7.44 — erfde eerder het bereik van de vorige trede).
+        let (mn, mx, inv) = match *b {
+            Some((och, occ, mn, mx, inv)) if och == ch && occ == cc => (mn, mx, inv),
+            _ => (0, 127, false),
+        };
         *b = Some((ch, cc, mn, mx, inv));
     }
     let verdrongen = state.claim_pedal_cc(PedalCcKind::Crescendo, ch, cc);
@@ -2154,6 +2160,8 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
     state.held_notes.write().clear();
     *state.crescendo_active_stops.write() = Vec::new();
     *state.crescendo_stage.write() = 0;
+    crate::state::CRESCENDO_HERSTART_VANAF_NUL.store(false, std::sync::atomic::Ordering::Relaxed);
+    crate::state::zwel_nazending_leeg();
     state.set_active_couplers(Vec::new());
     reset_organ_scoped_state(state);
     // Perspectieven + lagen-samenvatting van dít orgel (altijd zetten, ook
@@ -2379,6 +2387,9 @@ fn reset_organ_scoped_state(state: &AppState) {
 /// toggle: dit gaat om de LIVE stand van zojuist, niet om een opgeslagen stand.
 fn apply_pending_registration(state: &AppState, organ_info: &OrganInfoDto) {
     let pending = state.pending_registration_restore.write().take();
+    // Trap altijd verbruiken (ook bij een vroege return: een ander orgel of
+    // geen snapshot betekent dat er niets te herstellen valt).
+    let trap = state.pending_crescendo_stage.swap(0, std::sync::atomic::Ordering::Relaxed);
     let Some((snap_organ, stops, couplers)) = pending else { return; };
     if snap_organ.is_none() || snap_organ != *state.current_organ_id.read() {
         return;
@@ -2406,6 +2417,17 @@ fn apply_pending_registration(state: &AppState, organ_info: &OrganInfoDto) {
         if !restored_couplers.is_empty() {
             state.set_active_couplers(restored_couplers);
         }
+    }
+    // Crescendotrap van vóór de wissel opnieuw toepassen: het snapshot bevatte
+    // de trede-registers bewust niet (zie registratie_snapshot_zonder_crescendo),
+    // zodat ze hier weer als claims terugkomen en straks gewoon terugveren.
+    // Alleen als het crescendo (na het herstel van de instellingen) aan staat;
+    // uitgeschakeld hoort de trap op 0 zonder claims.
+    if trap > 0 && *state.crescendo_enabled.read() {
+        *state.crescendo_stage.write() = 0;
+        state.crescendo_active_stops.write().clear();
+        let (bij, _) = state.apply_crescendo_stage(trap);
+        info!("Crescendotrap {} hersteld na audio-wissel ({} trede-registers)", trap, bij.len());
     }
 }
 
@@ -2519,6 +2541,12 @@ pub fn toggle_stop(state: State<AppState>, stop_id: String) -> Result<bool, Stri
 /// Stops in the list become drawn=true, all others become drawn=false
 #[tauri::command]
 pub fn set_drawn_stops(state: State<AppState>, stop_ids: Vec<String>) -> Result<(), String> {
+    set_drawn_stops_inner(&state, stop_ids)
+}
+
+/// Kern van set_drawn_stops (setzer-oproep / General Cancel), ook voor de
+/// test-API (POST /stops/set).
+pub fn set_drawn_stops_inner(state: &AppState, stop_ids: Vec<String>) -> Result<(), String> {
     // Verzamel de wijzigingen onder de write-lock, synchroniseer daarna de
     // klinkende voices per gewijzigd register: een preset-oproep of setzer
     // tijdens het spelen moet direct hoorbaar zijn (bijgetrokken registers
@@ -2575,6 +2603,12 @@ pub fn set_drawn_stops(state: State<AppState>, stop_ids: Vec<String>) -> Result<
     for id in &stop_ids {
         state.note_manual_change(id);
     }
+    // Zijn daarmee álle trede-claims handregistratie geworden terwijl de trap
+    // nog op N stond, dan begint het crescendo opnieuw vanaf de bodem (0.7.44):
+    // anders trok het terugnemen van de trede de registers van de lagere trap
+    // bíj in plaats van weg. (Ook aan het eind van set_active_couplers: een
+    // koppel-claim verdwijnt pas daar.)
+    state.crescendo_herstart_indien_claims_leeg();
     info!("set_drawn_stops: {} aan, {} uit (van {} gevraagd)",
           turned_on.len(), turned_off.len(), stop_ids.len());
     Ok(())
@@ -2832,6 +2866,9 @@ pub fn set_crescendo_stage_inner(state: &AppState, stage: u8) -> Result<(), Stri
     if state.crescendo_stages.read().is_empty() {
         return Err("Geen crescendo-stappen ingesteld".to_string());
     }
+    // Een bewuste trapkeuze (UI/piston) heft de "eerst terug naar 0"-stand
+    // na een setzer op.
+    crate::state::CRESCENDO_HERSTART_VANAF_NUL.store(false, std::sync::atomic::Ordering::Relaxed);
     state.apply_crescendo_stage(stage);
     Ok(())
 }
@@ -2946,6 +2983,10 @@ pub fn learn_crescendo_pedal(state: State<AppState>) -> Result<Option<(u8, u8)>,
 /// Clear crescendo pedal binding
 #[tauri::command]
 pub fn clear_crescendo_binding(state: State<AppState>) {
+    // Eerst trap 0 (claims los, trede-registers weg), dan de koppeling weg:
+    // anders bleven de door de trede getrokken registers als "handmatig"
+    // staan, zonder trede om ze nog terug te nemen (0.7.44).
+    let _ = state.apply_crescendo_stage(0);
     *state.crescendo_binding.write() = None;
 }
 
@@ -4839,6 +4880,12 @@ pub fn toggle_coupler(state: State<AppState>, coupler_id: String) -> Result<bool
 /// Set all active couplers at once (for preset recall)
 #[tauri::command]
 pub fn set_active_couplers(state: State<AppState>, coupler_ids: Vec<String>) -> Result<(), String> {
+    set_active_couplers_inner(&state, coupler_ids)
+}
+
+/// Kern van set_active_couplers (setzer/General Cancel), ook voor de test-API
+/// (POST /couplers/set).
+pub fn set_active_couplers_inner(state: &AppState, coupler_ids: Vec<String>) -> Result<(), String> {
     info!("set_active_couplers: {:?}", coupler_ids);
     let couplers_before: Vec<String> = state.active_couplers.read().clone();
     state.set_active_couplers(coupler_ids.clone());
@@ -4847,6 +4894,9 @@ pub fn set_active_couplers(state: State<AppState>, coupler_ids: Vec<String>) -> 
     for id in couplers_before.iter().chain(coupler_ids.iter()) {
         state.note_manual_change(id);
     }
+    // Setzer/GC: de UI zet eerst de registers en dan de koppels; pas hier kan
+    // de laatste (koppel-)claim verdwenen zijn (0.7.44, review P1).
+    state.crescendo_herstart_indien_claims_leeg();
 
     // Update coupler active states in organ info
     {
@@ -5112,6 +5162,7 @@ pub fn set_swell_invert(state: State<AppState>, division: String, invert: bool) 
     }
     if !found { return Err(format!("Geen zwelbinding voor {}", division)); }
     state.set_swell_bindings_replace(bindings);
+    state.zwel_hertoepassen(&division); // meteen hoorbaar, niet pas bij de volgende beweging
     Ok(())
 }
 
@@ -5148,6 +5199,7 @@ pub fn set_swell_range(state: State<AppState>, division: String, min_val: u8, ma
     }
     if !found { return Err(format!("Geen zwelbinding voor {}", division)); }
     state.set_swell_bindings_replace(bindings);
+    state.zwel_hertoepassen(&division);
     Ok(())
 }
 
@@ -5927,6 +5979,8 @@ pub fn do_load_samples_from_directory_locked(state: &AppState, directory: &str) 
     state.held_notes.write().clear();
     *state.crescendo_active_stops.write() = Vec::new();
     *state.crescendo_stage.write() = 0;
+    crate::state::CRESCENDO_HERSTART_VANAF_NUL.store(false, std::sync::atomic::Ordering::Relaxed);
+    crate::state::zwel_nazending_leeg();
     state.set_active_couplers(Vec::new());
     reset_organ_scoped_state(state);
     // Perspectieven + lagen-samenvatting van dít orgel (ná de reset).

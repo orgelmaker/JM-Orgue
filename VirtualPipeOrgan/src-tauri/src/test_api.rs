@@ -12,6 +12,8 @@
 //!   POST /notes/{midi_note}/off
 //!   POST /panic                   - all notes off
 //!   POST /debug/restart_needed   - testhaak: watchdog-vlag zetten (noodherstel afdwingen)
+//!   POST /stops/set               - body: {"ids":[..]} hele registratie zetten (setzer/General Cancel)
+//!   POST /couplers/set            - body: {"ids":[..]} koppels in één keer zetten (tweede helft setzer)
 //!   GET  /logs?lines=N            - tail van logfile
 //!   POST /load_organ              - body: {"path":"..."} laad een .organ bestand
 //!   POST /load_directory          - body: {"path":"..."} scan + laad sample map
@@ -398,6 +400,21 @@ fn route_test_only(
     let method_name = method_str(&method);
     match (method, path) {
         (tiny_http::Method::Get, "/stops/drawn") => Ok(handle_drawn_stops(state)),
+        // Setzer-oproep / General Cancel: hele registratie in één keer zetten
+        // (zelfde kern als het Tauri-commando set_drawn_stops). Body {"ids":[..]}.
+        (tiny_http::Method::Post, "/stops/set") => {
+            let v: Value = serde_json::from_str(body).map_err(|e| (400u16, format!("Ongeldige JSON: {}", e)))?;
+            let ids: Vec<String> = v.get("ids").and_then(|x| serde_json::from_value(x.clone()).ok()).unwrap_or_default();
+            crate::commands::set_drawn_stops_inner(state, ids).map_err(|e| (409u16, e))?;
+            Ok(handle_drawn_stops(state))
+        }
+        // Koppels in één keer zetten (tweede helft van een setzer-oproep). Body {"ids":[..]}.
+        (tiny_http::Method::Post, "/couplers/set") => {
+            let v: Value = serde_json::from_str(body).map_err(|e| (400u16, format!("Ongeldige JSON: {}", e)))?;
+            let ids: Vec<String> = v.get("ids").and_then(|x| serde_json::from_value(x.clone()).ok()).unwrap_or_default();
+            crate::commands::set_active_couplers_inner(state, ids).map_err(|e| (409u16, e))?;
+            Ok(json!({ "ok": true, "active_couplers": state.get_active_couplers() }))
+        }
         (tiny_http::Method::Get, "/logs") => Ok(handle_logs(log_path, query)),
         (tiny_http::Method::Get, "/division_volumes") => Ok(handle_division_volumes(state)),
         (tiny_http::Method::Get, "/library") => Ok(handle_library(state)),
@@ -1338,6 +1355,8 @@ fn handle_crescendo_config(state: &AppState, body: &str) -> Result<Value, (u16, 
 fn handle_crescendo_binding(state: &AppState, body: &str) -> Result<Value, (u16, String)> {
     let v: Value = serde_json::from_str(body).map_err(|e| (400u16, format!("Ongeldige JSON: {}", e)))?;
     if v.get("clear").and_then(|x| x.as_bool()).unwrap_or(false) {
+        // Zelfde volgorde als het Tauri-commando (0.7.44): eerst trap 0, dan weg.
+        let _ = state.apply_crescendo_stage(0);
         *state.crescendo_binding.write() = None;
         return Ok(handle_crescendo_get(state));
     }
@@ -1347,7 +1366,12 @@ fn handle_crescendo_binding(state: &AppState, body: &str) -> Result<Value, (u16,
         .ok_or((400u16, "Veld 'cc' ontbreekt".to_string()))? as u8;
     let (channel, cc) = (channel.min(15), cc.min(127));
     let existing = *state.crescendo_binding.read();
-    let (mut mn, mut mx, mut inv) = existing.map(|(_, _, mn, mx, inv)| (mn, mx, inv)).unwrap_or((0, 127, false));
+    // Bereik/spiegel alleen erven van dezelfde trede (kanaal, CC) — zoals
+    // set_crescendo_binding_manual (0.7.44).
+    let (mut mn, mut mx, mut inv) = match existing {
+        Some((och, occ, mn, mx, inv)) if och == channel && occ == cc => (mn, mx, inv),
+        _ => (0, 127, false),
+    };
     if let Some(x) = v.get("min").and_then(|x| x.as_u64()) { mn = (x as u8).min(127); }
     if let Some(x) = v.get("max").and_then(|x| x.as_u64()) { mx = (x as u8).min(127); }
     if let Some(x) = v.get("invert").and_then(|x| x.as_bool()) { inv = x; }
@@ -1427,6 +1451,7 @@ fn handle_swell_binding(state: &AppState, body: &str) -> Result<Value, (u16, Str
             if let Some(x) = v.get("invert").and_then(|x| x.as_bool()) { b.invert = x; }
         }
     }
+    state.zwel_hertoepassen(&division); // bereik/spiegel meteen hoorbaar (0.7.44)
     Ok(handle_swell_get(state))
 }
 

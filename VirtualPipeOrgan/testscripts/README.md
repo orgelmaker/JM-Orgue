@@ -14,6 +14,7 @@ ontwikkelsessies van 0.7.36–0.7.38 en documenteren hoe de functies zijn geveri
 | `test_hertemperen.py` / `test_ranks_pitch.py` | Toonhoogte per modus (Origineel/ET/middentoon) via FFT-piek. |
 | `test_crescendo_zwel.py` | Zweltrede (sweep, jitter, sprong, bereik/inversie) en generaal crescendo (hysterese, additiviteit, persistentie). |
 | `test_remote.py [poort]` | Afstandsbediening: token, pagina, acties, uit/aan, nieuw token. |
+| `test_pedaal_0744.py` | Pedaalfixes 0.7.44: kast open bij verdrongen/gewiste zwelkoppeling, crescendo wissen → trap 0, erfregel bereik, spiegel meteen hoorbaar, dode zone 8, claims na audiowissel, herstart vanaf 0 na setzer, MIDI-CC-diagnose in het log. Zet de oorspronkelijke instellingen terug. |
 | `test_midi_archive.py` | Automatisch MIDI-archief: start/stilte/min-noten/flush/lijst/speler. |
 | `test_jmrec_import.py` | Map-import met `.organ` (JM-Rec) vs. mapscan, bibliotheeknaam "Kerk - Bouwer - Plaats" en de gevonden orgelafbeelding. |
 | `maak_go_testtrem.py [map]` | Maakt `TestTrem.organ` + `TestTremWc.organ` (GrandOrgue-golfvormtremulant: trem-attack en trem-release met een eigen toonhoogte) in `%TEMP%\jm-orgue-testodf`. |

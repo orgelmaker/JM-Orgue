@@ -5,6 +5,29 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.44] - 2026-09-15
+
+### Zweltreden en generaal crescendo: inleren, verdringen en terugveren
+
+Na de test op het testorgel ("zwelpedaal en generaal crescendo werken nog niet naar behoren") is het hele pedaalpad doorgelicht. De gevonden oorzaken en reparaties:
+
+- **Inleren koos "de laatst geziene CC".** Een tweede trede die in rust een beetje ruist, of een speeltafel die bij elke beweging álle tredewaarden opnieuw stuurt, won daardoor van de trede die je bewoog: je leerde de verkeerde trede in, of het inleren duurde 20 s. Nu wint de trede met de grootste slag die tot rust is gekomen; ruis en stilstaande treden tellen niet mee. Een 14-bits fijnregel-CC wordt per kanaal genegeerd.
+- **Een verdrongen of gewiste zwelkoppeling liet de kast op de laatste pedaalstand staan** (gedempt, met laagdoorlaatfilter) zonder trede om hem nog open te zetten. Leerde je het crescendo in op een trede die als zwelkast bekend was, dan bleef die divisie zacht: "als het één werkt, werkt het ander niet". De kast gaat nu open zodra haar koppeling verdwijnt.
+- **Een audiowissel of herlaad maakte de door de trede getrokken registers "handmatig"**: terugveren nam ze daarna niet meer weg. De trede-registers overleven de herlaad nu als claims van de trede en veren gewoon terug.
+- **Crescendo-koppeling wissen** liet de trede-registers staan; hij zet nu eerst trap 0.
+- **Na een setzer-oproep of General Cancel** bleef de crescendotrap op N staan terwijl de trede-registers handregistratie waren geworden: de trede terugnemen trok dan de registers van de lagere trap bíj ("trede omlaag, geluid harder"). Het crescendo begint nu opnieuw vanaf de bodem: de trede telt pas weer mee nadat hij helemaal terug (trap 0) is geweest. Geldt ook als de matrix koppels bevat.
+- **Handmatig een andere trede invullen** erfde bereik en spiegelbeeld van de vorige; een nieuwe (kanaal, CC) begint op 0..127 zonder spiegel.
+- **Spiegelbeeld en bereik van de zwel** zijn meteen hoorbaar, niet pas bij de volgende pedaalbeweging.
+- **Dode zone van het crescendo** van 4 naar 8: een trede die in rust een paar eenheden boven de ingeleerde laagste stand blijft hangen hield trap 1 vast.
+- **Zwelstand die bij een volle audiowachtrij niet weg kon** verdween stil; hij wordt nu bij de volgende ronde alsnog gestuurd.
+- **Zwelvinkje uit** wordt nu ook opgeslagen; de gewiste koppeling kwam bij de volgende load terug.
+- **MIDI-diagnose in het log:** elke binnenkomende CC wordt (hooguit vier keer per seconde per trede) gelogd met zijn interpretatie: "zwelkast Nevenwerk 50 %", "generaal crescendo" of "geen zwel-/crescendokoppeling". Zo laat het logbestand van het testorgel zien wat elke trede doet.
+- **Nog vier bevestigingsvragen** (sampleset knippen, loops aanmaken, minder crescendostappen, nieuw token) wachtten niet op het antwoord; nu wel.
+
+### Nieuw: jm-midimon, MIDI-monitor voor de speeltafel
+
+Los consoleprogramma (`jm-midimon.exe`, als bijlage bij de release) dat alle MIDI-ingangen opent, elk bericht ruw toont en logt, en je stap voor stap door "trede 1 open→dicht, trede 2, trede 3, alle drie" leidt. Per stap: welk kanaal en CC-nummer bewoog, bereik, richting, sprongen, ruis, overspraak van andere treden, 14-bits paren en NRPN. Aan het eind een conclusie of JM-Orgue de treden uit elkaar kan houden. Sluit JM-Orgue eerst af (Windows laat één programma per MIDI-poort luisteren).
+
 ## [0.7.43] - 2026-09-15
 
 ### Geen zelfherstart meer: "stoort en valt terug naar de bibliotheek" opgelost

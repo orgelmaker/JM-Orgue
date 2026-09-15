@@ -81,4 +81,4 @@ jobs:
         run: python testscripts/check_i18n_keys.py
 
       - name: Rust-tests (zonder ASIO)
-        run: cargo test -p vpo-app -p vpo-sampler -p vpo-audio -p vpo-core
+        run: cargo test -p vpo-app -p vpo-sampler -p vpo-audio -p vpo-core -p jm-midimon

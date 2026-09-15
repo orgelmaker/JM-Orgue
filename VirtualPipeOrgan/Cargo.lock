@@ -669,8 +669,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fac4744fb15ae8337dc853fee7fb3f4e48c0fbaa23d0afe49c447b4fab126118"
 dependencies = [
  "iana-time-zone",
+ "js-sys",
  "num-traits",
  "serde",
+ "wasm-bindgen",
  "windows-link 0.2.1",
 ]
 
@@ -2439,6 +2441,14 @@ dependencies = [
  "gobject-sys",
  "libc",
  "system-deps",
+]
+
+[[package]]
+name = "jm-midimon"
+version = "0.7.44"
+dependencies = [
+ "chrono",
+ "midir",
 ]
 
 [[package]]
@@ -6119,7 +6129,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "vpo-app"
-version = "0.7.43"
+version = "0.7.44"
 dependencies = [
  "asio-sys",
  "base64 0.22.1",
@@ -6157,7 +6167,7 @@ dependencies = [
 
 [[package]]
 name = "vpo-audio"
-version = "0.7.43"
+version = "0.7.44"
 dependencies = [
  "bytemuck",
  "cpal",
@@ -6177,7 +6187,7 @@ dependencies = [
 
 [[package]]
 name = "vpo-core"
-version = "0.7.43"
+version = "0.7.44"
 dependencies = [
  "bincode",
  "serde",
@@ -6188,7 +6198,7 @@ dependencies = [
 
 [[package]]
 name = "vpo-midi"
-version = "0.7.43"
+version = "0.7.44"
 dependencies = [
  "btleplug",
  "crossbeam-channel",
@@ -6205,7 +6215,7 @@ dependencies = [
 
 [[package]]
 name = "vpo-plugin"
-version = "0.7.43"
+version = "0.7.44"
 dependencies = [
  "nih_plug",
  "parking_lot",
@@ -6217,7 +6227,7 @@ dependencies = [
 
 [[package]]
 name = "vpo-sampler"
-version = "0.7.43"
+version = "0.7.44"
 dependencies = [
  "bincode",
  "bytemuck",

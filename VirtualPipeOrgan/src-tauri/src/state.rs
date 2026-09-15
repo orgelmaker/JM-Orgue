@@ -29,6 +29,55 @@ fn rt_send(tx: &Sender<AudioCommand>, cmd: AudioCommand) {
     }
 }
 
+/// Na een setzer-oproep of General Cancel (die alle trede-claims tot
+/// handregistratie maakt) begint het generaal crescendo opnieuw vanaf de
+/// bodem: pedaalbewegingen tellen pas weer mee zodra de trede eerst terug in
+/// de dode zone (trap 0) is geweest. Anders trok het TERUGnemen van de trede
+/// (bv. van 5 naar 4) de registers van trap 4 bij — "trede omlaag, geluid
+/// harder" (0.7.44, bevinding B2). Eén crescendo per proces, dus een static.
+pub static CRESCENDO_HERSTART_VANAF_NUL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Zwelstanden die bij een volle audio-wachtrij niet weg konden (0.7.44):
+/// de laatste stand per divisie wordt onthouden en door de MIDI-lus bij de
+/// volgende ronde alsnog gestuurd. Tot 0.7.43 verdween zo'n laatste stand
+/// stil, en bleef de kast tot de volgende pedaalbeweging op de vorige stand.
+static ZWEL_NAZENDING: parking_lot::Mutex<Vec<(u8, f32)>> = parking_lot::Mutex::new(Vec::new());
+
+fn rt_send_zwel(tx: &Sender<AudioCommand>, division_index: u8, gain: f32) {
+    match tx.try_send(AudioCommand::SetDivisionGain { division_index, gain }) {
+        Ok(()) => {
+            // Een nieuwere stand is doorgekomen: een oudere, nog niet nagezonden
+            // stand van dezelfde divisie mag hem niet later overschrijven.
+            let mut lijst = ZWEL_NAZENDING.lock();
+            if !lijst.is_empty() { lijst.retain(|e| e.0 != division_index); }
+        }
+        Err(_) => {
+            let n = RT_DROP_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+            if n % 50 == 0 {
+                tracing::warn!("Realtime audio-commando's gedropt (queue vol of consumer weg): totaal {}", n);
+            }
+            let mut lijst = ZWEL_NAZENDING.lock();
+            match lijst.iter_mut().find(|e| e.0 == division_index) {
+                Some(e) => e.1 = gain,
+                None => lijst.push((division_index, gain)),
+            }
+        }
+    }
+}
+
+/// Bij een orgelwissel: nazendingen voor de oude divisie-indexen vervallen.
+pub(crate) fn zwel_nazending_leeg() {
+    ZWEL_NAZENDING.lock().clear();
+}
+
+/// Alsnog sturen wat bij rt_send_zwel niet weg kon (MIDI-lus, elke ronde).
+fn nazend_zwel(audio_player: &Arc<RwLock<Option<AudioPlayer>>>) {
+    let mut lijst = ZWEL_NAZENDING.lock();
+    if lijst.is_empty() { return; }
+    let Some(tx) = audio_player.read().as_ref().map(|p| p.command_sender()) else { lijst.clear(); return; };
+    lijst.retain(|(idx, gain)| tx.try_send(AudioCommand::SetDivisionGain { division_index: *idx, gain: *gain }).is_err());
+}
+
 /// Stand van de drop-teller (gedropte realtime audio-commando's). De status
 /// (UI + test-API) toont hem naast de renderbelasting: loopt hij op tijdens een
 /// crescendo-sweep, dan zit het haperen in een volle commandowachtrij en niet in
@@ -363,6 +412,124 @@ pub fn swell_gain_from_cc(value: u8, min_val: u8, max_val: u8, invert: bool) -> 
     normalized
 }
 
+/// Kiest tijdens het inleren dé trede die de organist beweegt (0.7.44). Tot
+/// 0.7.43 won "de laatst geziene CC" na 1,5 s stilte. Dat verloor van een
+/// tweede trede die in rust ruist (±1), en van speeltafels die bij elke
+/// beweging álle tredewaarden opnieuw sturen: dan won steeds dezelfde,
+/// laatst gestuurde trede — "als het één werkt, werkt het ander niet". Nu
+/// wint de stroom (kanaal, CC) met de grootste slag die tot rust is gekomen;
+/// ruis (slag < TREDE_MIN_SLAG) telt niet mee. Een 14-bits LSB (CC 32-63)
+/// telt niet zolang zijn MSB (CC n-32) op hetzelfde kanaal gezien is.
+pub(crate) struct TredeKiezer {
+    stromen: Vec<TredeStroom>,
+    settle: std::time::Duration,
+    laatst_gezien: Option<(u8, u8)>,
+}
+
+struct TredeStroom {
+    channel: u8,
+    cc: u8,
+    min: u8,
+    max: u8,
+    last: u8,
+    last_change: std::time::Instant,
+}
+
+/// Minimale slag (CC-eenheden) om als "bewogen trede" te tellen; gelijk aan
+/// MIN_PEDAL_RANGE in de inleer-popup (Console.svelte).
+pub(crate) const TREDE_MIN_SLAG: u8 = 8;
+
+impl TredeKiezer {
+    pub(crate) fn new(settle: std::time::Duration) -> Self {
+        TredeKiezer { stromen: Vec::new(), settle, laatst_gezien: None }
+    }
+
+    pub(crate) fn zie(&mut self, channel: u8, cc: u8, value: u8, nu: std::time::Instant) {
+        if (32..=63).contains(&cc) && self.stromen.iter().any(|s| s.channel == channel && s.cc == cc - 32) {
+            return;
+        }
+        self.laatst_gezien = Some((channel, cc));
+        match self.stromen.iter_mut().find(|s| s.channel == channel && s.cc == cc) {
+            Some(s) => {
+                // Herhaalde gelijke waarden (speeltafel die blijft zenden) zetten
+                // de rustklok niet terug; alleen een échte verandering.
+                if value != s.last { s.last_change = nu; }
+                s.min = s.min.min(value);
+                s.max = s.max.max(value);
+                s.last = value;
+            }
+            None => self.stromen.push(TredeStroom { channel, cc, min: value, max: value, last: value, last_change: nu }),
+        }
+    }
+
+    fn slag(s: &TredeStroom) -> u8 { s.max - s.min }
+
+    /// Keuze zodra een stroom met voldoende slag tot rust is gekomen:
+    /// (kanaal, CC, laatste waarde).
+    pub(crate) fn keuze(&self, nu: std::time::Instant) -> Option<(u8, u8, u8)> {
+        self.stromen.iter()
+            .filter(|s| Self::slag(s) >= TREDE_MIN_SLAG && nu.duration_since(s.last_change) >= self.settle)
+            .max_by_key(|s| (Self::slag(s), s.last_change))
+            .map(|s| (s.channel, s.cc, s.last))
+    }
+
+    /// Terugval: de grootste slag (ook klein, ≥ 1) die tot rust is gekomen
+    /// (`nu` = Some), of bij time-out ongeacht rust (`nu` = None); zonder
+    /// enige beweging de laatst geziene stroom.
+    pub(crate) fn noodkeuze(&self, nu: Option<std::time::Instant>) -> Option<(u8, u8, u8)> {
+        let rustig = |s: &&TredeStroom| nu.map_or(true, |n| n.duration_since(s.last_change) >= self.settle);
+        self.stromen.iter()
+            .filter(|s| Self::slag(s) >= 1)
+            .filter(rustig)
+            .max_by_key(|s| (Self::slag(s), s.last_change))
+            .or_else(|| {
+                if nu.is_some() { return None; }
+                self.laatst_gezien.and_then(|(ch, cc)| self.stromen.iter().find(|s| s.channel == ch && s.cc == cc))
+            })
+            .map(|s| (s.channel, s.cc, s.last))
+    }
+
+    /// Geen enkele stroom is de laatste `settle` nog veranderd (ook waar bij
+    /// geen stromen): de organist beweegt niets meer.
+    pub(crate) fn alles_rustig(&self, nu: std::time::Instant) -> bool {
+        self.stromen.iter().all(|s| nu.duration_since(s.last_change) >= self.settle)
+    }
+
+    /// Voor het log: alle stromen met hun slag.
+    pub(crate) fn beschrijving(&self) -> String {
+        self.stromen.iter()
+            .map(|s| format!("kanaal {} CC{} slag {} ({}..{})", s.channel + 1, s.cc, Self::slag(s), s.min, s.max))
+            .collect::<Vec<_>>()
+            .join("; ")
+    }
+}
+
+
+/// MIDI-CC-diagnose (0.7.44): per (kanaal, CC) de laatste logtijd en -waarde,
+/// zodat een pedaalsweep hooguit ~4 regels per seconde per stroom oplevert
+/// (en altijd de uitersten 0/127 en de eerste waarde).
+static CC_DIAGNOSE: parking_lot::Mutex<Vec<((u8, u8), std::time::Instant, u8)>> = parking_lot::Mutex::new(Vec::new());
+
+pub(crate) fn log_cc_diagnose(channel: u8, cc: u8, value: u8, interpretatie: &str) {
+    let nu = std::time::Instant::now();
+    let mut lijst = CC_DIAGNOSE.lock();
+    let loggen = match lijst.iter_mut().find(|e| e.0 == (channel, cc)) {
+        Some(e) => {
+            let doen = value != e.2 && (nu.duration_since(e.1) >= std::time::Duration::from_millis(250)
+                || value == 0 || value == 127);
+            if doen { e.1 = nu; e.2 = value; }
+            doen
+        }
+        None => {
+            if lijst.len() < 256 { lijst.push(((channel, cc), nu, value)); }
+            true
+        }
+    };
+    if loggen {
+        tracing::info!("MIDI-CC kanaal {} CC{} = {} → {}", channel + 1, cc, value, interpretatie);
+    }
+}
+
 /// Kern van de wederzijdse uitsluiting (zie `AppState::claim_pedal_cc`): één
 /// implementatie voor de inleer-popup, de handmatige invoer, het zwel-vinkje en
 /// de test-API. Vrije functie met de twee gedeelde staten als argument, zodat de
@@ -431,11 +598,18 @@ pub fn crescendo_mapped_value(value: u8, min_val: u8, max_val: u8, invert: bool)
     if invert { 127u8.saturating_sub(scaled) } else { scaled }
 }
 
-/// Pedaalwaarde 0..127 → trap 0..=n (0 = uit; dode zone 0..3; 4..=127 lineair
-/// over 1..=n). Zonder hysterese — zie crescendo_next_stage.
+/// Dode zone onderaan de pedaalweg (in eenheden van de gemapte 0..127): tot
+/// deze waarde is de trap 0. Was 4; een trede die in rust een paar eenheden
+/// boven de ingeleerde laagste stand blijft hangen (speling) hield daarmee
+/// trap 1 permanent aan (0.7.44).
+pub const CRESCENDO_DODE_ZONE: u8 = 8;
+
+/// Pedaalwaarde 0..127 → trap 0..=n (0 = uit; dode zone 0..DODE_ZONE-1;
+/// daarboven lineair over 1..=n). Zonder hysterese — zie crescendo_next_stage.
 pub fn crescendo_stage_for(mapped: u8, num_stages: usize) -> u8 {
-    if num_stages == 0 || mapped < 4 { return 0; }
-    let s = ((mapped as usize - 4) * num_stages) / 124 + 1;
+    let dz = CRESCENDO_DODE_ZONE as usize;
+    if num_stages == 0 || (mapped as usize) < dz { return 0; }
+    let s = ((mapped as usize - dz) * num_stages) / (127 - dz) + 1;
     s.min(num_stages) as u8
 }
 
@@ -459,7 +633,7 @@ pub const CRESCENDO_HYSTERESIS: u8 = 2;
 /// Schmitt-beslissing: nieuwe trap voor pedaalwaarde `mapped` gegeven de
 /// huidige trap, of None om te blijven staan. Omhoog pas H eenheden voorbij de
 /// bovengrens van de huidige trap (of bij de volle pedaalweg), omlaag pas H
-/// eenheden onder de ondergrens; de dode zone (mapped < 4 → trap 0) geldt
+/// eenheden onder de ondergrens; de dode zone (mapped < CRESCENDO_DODE_ZONE → trap 0) geldt
 /// altijd, zodat een losgelaten trede altijd op 0 komt. Sprongen over meerdere
 /// trappen blijven mogelijk (de doeltrap wordt uit `mapped` herberekend).
 pub fn crescendo_next_stage(mapped: u8, current: u8, num_stages: usize) -> Option<u8> {
@@ -622,7 +796,7 @@ fn build_player_with_retries_deadline(cfg: &AudioOutputConfig, delays_ms: &[u64]
 /// Shared application state
 /// Zie apply_crescendo_stage_inner: één toepassing tegelijk (procesbreed;
 /// er is één AppState).
-static CRESCENDO_APPLY: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+pub(crate) static CRESCENDO_APPLY: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
 
 #[derive(Clone)]
 pub struct AppState {
@@ -736,6 +910,11 @@ pub struct AppState {
     /// Interne orgel-herladingen sinds de start (ASIO-wissel, noodherstel) —
     /// diagnostiek in de status en het testorgel-log.
     pub backend_reloads: Arc<std::sync::atomic::AtomicU32>,
+    /// Crescendotrap van vlak vóór een audiowissel (0.7.44): het registratie-
+    /// snapshot bevat de door de trede getrokken registers níet (die zouden
+    /// na de herlaad "handmatig" worden en niet meer terugveren); na de
+    /// herlaad wordt deze trap opnieuw toegepast. 0 = niets te herstellen.
+    pub pending_crescendo_stage: Arc<std::sync::atomic::AtomicU8>,
     /// Per-pipe voicing overrides: (stop_id, pipe_num) -> (volume_db, pitch_cents)
     pub pipe_voicings: Arc<RwLock<std::collections::HashMap<(u32, u32), (f32, f32)>>>,
     /// Per-divisie output-kanalen: lijst fysieke kanaalindices (leeg = standaard voorste paar 0/1).
@@ -1128,6 +1307,7 @@ impl AppState {
             audio_ready: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             frontend_ready: Arc::new((parking_lot::Mutex::new(false), parking_lot::Condvar::new())),
             backend_reloads: Arc::new(std::sync::atomic::AtomicU32::new(0)),
+            pending_crescendo_stage: Arc::new(std::sync::atomic::AtomicU8::new(0)),
             pipe_voicings: Arc::new(RwLock::new(std::collections::HashMap::new())),
             division_output_channels: Arc::new(RwLock::new(vec![Vec::new(); 32])),
             profile_channel_override: Arc::new(RwLock::new(None)),
@@ -1604,8 +1784,17 @@ impl AppState {
                         }
                     }
                     MidiCommand::ClearSwellPedal(division_name) => {
+                        // Kast open zodra de koppeling weg is (zie AppState::zwel_open).
+                        let idx: Option<u8> = swell_bindings.read().iter()
+                            .find(|b| b.division_name == division_name).map(|b| b.division_index);
                         swell_bindings.write().retain(|b| b.division_name != division_name);
-                        tracing::info!("Cleared swell binding for {}", division_name);
+                        if let Some(i) = idx {
+                            if let Some(g) = division_gains.write().get_mut(i as usize) { *g = 1.0; }
+                            if let Some(tx) = audio_player.read().as_ref().map(|p| p.command_sender()) {
+                                rt_send(&tx, AudioCommand::SetDivisionGain { division_index: i, gain: 1.0 });
+                            }
+                        }
+                        tracing::info!("Cleared swell binding for {} (zwelkast open)", division_name);
                     }
                     MidiCommand::LearnCrescendoPedal(response_tx) => {
                         tracing::info!("Learning crescendo pedal: move the crescendo pedal");
@@ -1838,6 +2027,7 @@ impl AppState {
                 _ => {}
             }
             let _ = sel.ready_timeout(std::time::Duration::from_millis(2));
+            nazend_zwel(&audio_player);
         }
 
         tracing::info!("MIDI thread ended");
@@ -2119,6 +2309,16 @@ impl AppState {
         if num_stages == 0 { return; }
 
         let mapped = crescendo_mapped_value(value, min_val, max_val, invert);
+        // Na een setzer/General Cancel eerst terug naar de bodem (zie
+        // CRESCENDO_HERSTART_VANAF_NUL): tot die tijd doet de trede niets.
+        if CRESCENDO_HERSTART_VANAF_NUL.load(std::sync::atomic::Ordering::Relaxed) {
+            if crescendo_stage_for(mapped, num_stages) == 0 {
+                CRESCENDO_HERSTART_VANAF_NUL.store(false, std::sync::atomic::Ordering::Relaxed);
+                tracing::info!("Crescendo: trede terug op 0 na setzer/General Cancel — de trede telt weer mee");
+            } else {
+                return;
+            }
+        }
         let current_stage = *crescendo_stage.read();
         let Some(new_stage) = crescendo_next_stage(mapped, current_stage, num_stages) else { return; };
 
@@ -2261,6 +2461,10 @@ impl AppState {
     /// Generaal crescendo op trap `stage` zetten vanaf de command-thread
     /// (UI-klik, editor, uitschakelen, herstel). Zelfde kern als het pedaal.
     pub fn apply_crescendo_stage(&self, stage: u8) -> (Vec<String>, Vec<String>) {
+        if stage == 0 {
+            // Expliciet naar 0 (uit, wissen, herstel): schone lei, geen wachtstand.
+            CRESCENDO_HERSTART_VANAF_NUL.store(false, std::sync::atomic::Ordering::Relaxed);
+        }
         let before = *self.crescendo_stage.read();
         let (added, removed) = Self::apply_crescendo_stage_inner(
             stage, &self.crescendo_stages, &self.crescendo_stage, &self.crescendo_active_stops,
@@ -2308,22 +2512,9 @@ impl AppState {
         cancel: &std::sync::atomic::AtomicBool,
     ) -> Option<(u8, u8, u8)> {
         let start = std::time::Instant::now();
-        let mut last_cc: Option<(u8, u8, u8)> = None;
-        let mut last_change = std::time::Instant::now();
         let settle_time = std::time::Duration::from_millis(1500);
-        // 14-bit-consoles sturen per pedaalstand een paar CC n (MSB) + CC n+32
-        // (LSB); zonder filter "won" de LSB als laatst gezien bericht en werd
-        // de fijnregel-CC ingeleerd. Een LSB (32-63) telt niet mee zodra zijn
-        // MSB (n−32) in dezelfde inleerperiode gezien is.
-        let mut seen_cc = [false; 128];
-        let mut note_cc = |channel: u8, controller: u8, value: u8,
-                           last_cc: &mut Option<(u8, u8, u8)>, last_change: &mut std::time::Instant| {
-            let c = controller as usize & 127;
-            seen_cc[c] = true;
-            if (32..=63).contains(&c) && seen_cc[c - 32] { return; }
-            *last_cc = Some((channel, controller, value));
-            *last_change = std::time::Instant::now();
-        };
+        // Grootste slag wint (zie TredeKiezer): niet de laatst geziene CC.
+        let mut kiezer = TredeKiezer::new(settle_time);
 
         while start.elapsed() < timeout {
             if cancel.load(std::sync::atomic::Ordering::Relaxed) {
@@ -2334,7 +2525,7 @@ impl AppState {
             if let Some(rx) = usb_rx {
                 while let Ok(msg) = rx.try_recv() {
                     if let MidiMessage::ControlChange { channel, controller, value } = msg {
-                        note_cc(channel, controller, value, &mut last_cc, &mut last_change);
+                        kiezer.zie(channel, controller, value, std::time::Instant::now());
                     }
                     Self::handle_midi_message(
                         msg, audio_player, organ_definition, loaded_organ_info, drawn_stops,
@@ -2347,7 +2538,7 @@ impl AppState {
             while let Ok(msg) = ble_rx.try_recv() {
                 ble_message_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 if let MidiMessage::ControlChange { channel, controller, value } = msg {
-                    note_cc(channel, controller, value, &mut last_cc, &mut last_change);
+                    kiezer.zie(channel, controller, value, std::time::Instant::now());
                 }
                 Self::handle_midi_message(
                     msg, audio_player, organ_definition, loaded_organ_info, drawn_stops,
@@ -2356,14 +2547,25 @@ impl AppState {
                 );
             }
 
-            // Check if settled
-            if last_cc.is_some() && last_change.elapsed() > settle_time {
-                return last_cc;
+            let nu = std::time::Instant::now();
+            if let Some(k) = kiezer.keuze(nu) {
+                tracing::info!("Trede-inleer: gekozen kanaal {} CC{} (waarde {}); gezien: {}", k.0 + 1, k.1, k.2, kiezer.beschrijving());
+                return Some(k);
+            }
+            // Stond de trede al in de gevraagde stand en is hij maar even bewogen
+            // (slag < 8), dan na 6 s de grootste slag accepteren i.p.v. 20 s wachten.
+            if start.elapsed() > std::time::Duration::from_secs(6) && kiezer.alles_rustig(nu) {
+                if let Some(k) = kiezer.noodkeuze(Some(nu)) {
+                    tracing::info!("Trede-inleer: kleine slag geaccepteerd: kanaal {} CC{} (waarde {}); gezien: {}", k.0 + 1, k.1, k.2, kiezer.beschrijving());
+                    return Some(k);
+                }
             }
 
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
-        last_cc
+        let k = kiezer.noodkeuze(None);
+        tracing::info!("Trede-inleer: time-out; terugval {:?}; gezien: {}", k.map(|k| (k.0 + 1, k.1, k.2)), kiezer.beschrijving());
+        k
     }
 
     /// Learn-mode wait for a specific channel/cc, with audio forwarding.
@@ -2883,6 +3085,22 @@ impl AppState {
                 }
             }
             MidiMessage::ControlChange { channel, controller, value } => {
+                // MIDI-diagnose (0.7.44): één logregel per CC-stroom met de
+                // interpretatie, beperkt tot ~4 per seconde per stroom (plus
+                // de uitersten), zodat een testorgel-log laat zien wat een
+                // trede doet: zwelkast van welke divisie, crescendo, of niets.
+                {
+                    let interpretatie = if cc_claimed_by_crescendo {
+                        "generaal crescendo".to_string()
+                    } else {
+                        match swell_bindings.read().iter().find(|b| b.channel == channel && b.cc_num == controller) {
+                            Some(b) => format!("zwelkast {} {:.0} %", b.division_name,
+                                swell_gain_from_cc(value, b.min_val, b.max_val, b.invert) * 100.0),
+                            None => "geen zwel-/crescendokoppeling".to_string(),
+                        }
+                    };
+                    log_cc_diagnose(channel, controller, value, &interpretatie);
+                }
                 // De generaal-crescendo-CC is exclusief voor de crescendotrede
                 // (al verwerkt via process_crescendo_cc): niet ook als zwelkast
                 // of expressie-fallback interpreteren.
@@ -2908,10 +3126,7 @@ impl AppState {
                         // is de volgende pedaal-CC toch de waarheid.
                         let cmd_tx = audio_player.read().as_ref().map(|p| p.command_sender());
                         if let Some(tx) = cmd_tx {
-                            rt_send(&tx, AudioCommand::SetDivisionGain {
-                                division_index: binding.division_index,
-                                gain: normalized,
-                            });
+                            rt_send_zwel(&tx, binding.division_index, normalized);
                         }
                         handled = true;
                     }
@@ -3003,6 +3218,19 @@ impl AppState {
         cpal::available_hosts().into_iter().map(|h| h.name().to_string()).collect()
     }
 
+    /// Registratie-snapshot voor een herlaad/herstart: de handmatig getrokken
+    /// registers en koppels, ZONDER wat de crescendotrede heeft geclaimd (die
+    /// registers komen terug door de trap opnieuw toe te passen; als handmatig
+    /// hersteld zouden ze niet meer terugveren — 0.7.44).
+    pub fn registratie_snapshot_zonder_crescendo(&self) -> (Option<String>, Vec<String>, Vec<String>) {
+        let claims = self.crescendo_active_stops.read().clone();
+        (
+            self.current_organ_id.read().clone(),
+            self.drawn_stops.read().iter().filter(|s| !claims.contains(s)).cloned().collect(),
+            self.active_couplers.read().iter().filter(|c| !claims.contains(c)).cloned().collect(),
+        )
+    }
+
     /// ASIO kan in dit proces niet meer starten: advies vastleggen (status) en
     /// de UI een event sturen. De gebruiker beslist zelf over een herstart.
     pub fn adviseer_asio_herstart(&self, cfg: &AudioOutputConfig) {
@@ -3032,6 +3260,9 @@ impl AppState {
                 ..load_audio_prefs(&self.app_data_dir)
             });
         }
+        // Volledige registratie (inclusief wat de trede trok): de trap gaat niet
+        // mee over een processtart, dus die registers komen als handregistratie
+        // terug — zoals tot 0.7.43.
         let snapshot = (
             self.current_organ_id.read().clone(),
             self.drawn_stops.read().clone(),
@@ -3127,14 +3358,16 @@ impl AppState {
         // hetzelfde orgel zet dit snapshot terug (zie do_load_organ). Zo
         // overleeft de registratie een speakers↔hoofdtelefoon-wissel.
         {
-            let snapshot = (
-                self.current_organ_id.read().clone(),
-                self.drawn_stops.read().clone(),
-                self.active_couplers.read().clone(),
-            );
-            if snapshot.0.is_some() && (!snapshot.1.is_empty() || !snapshot.2.is_empty()) {
+            let snapshot = self.registratie_snapshot_zonder_crescendo();
+            let trap = *self.crescendo_stage.read();
+            // Ook bewaren als alleen de trede registers had (lege handlijsten
+            // maar trap > 0): apply_pending_registration heeft het orgel-id
+            // nodig om de trap opnieuw toe te passen.
+            if snapshot.0.is_some() && (!snapshot.1.is_empty() || !snapshot.2.is_empty() || trap > 0) {
                 *self.pending_registration_restore.write() = Some(snapshot);
             }
+            // Trap onthouden: na de herlaad opnieuw toepassen (claims terug).
+            self.pending_crescendo_stage.store(trap, std::sync::atomic::Ordering::Relaxed);
         }
         let new_is_asio = cfg.host_name.as_deref()
             .map(|h| h.eq_ignore_ascii_case("asio"))
@@ -4131,8 +4364,14 @@ impl AppState {
 
     /// Clear swell pedal binding for a division
     pub fn clear_swell_binding(&self, division_name: &str) {
+        // Index vóór het wissen vastleggen en de kast hier meteen openzetten:
+        // de MIDI-thread verwerkt ClearSwellPedal pas later en vindt de
+        // koppeling dan mogelijk al niet meer (0.7.44).
+        let idx = self.swell_bindings.read().iter()
+            .find(|b| b.division_name == division_name).map(|b| b.division_index);
         let _ = self.midi_tx.send(MidiCommand::ClearSwellPedal(division_name.to_string()));
         self.swell_bindings.write().retain(|b| b.division_name != division_name);
+        if let Some(i) = idx { self.zwel_open(i); }
     }
 
     /// Get all swell bindings
@@ -4166,7 +4405,64 @@ impl AppState {
     /// twee kasten stuurt is een legitieme opstelling).
     /// Retourneert wat er verdrongen is, zodat de UI het kan melden.
     pub fn claim_pedal_cc(&self, kind: PedalCcKind, channel: u8, cc_num: u8) -> Vec<DisplacedPedalBinding> {
-        claim_pedal_cc_inner(kind, channel, cc_num, &self.crescendo_binding, &self.swell_bindings)
+        // Zwelkoppelingen die het crescendo hier gaat verdringen: hun divisie
+        // moet daarna open (zie zwel_open) — anders bleef de kast op de laatste
+        // pedaalstand staan zonder trede om hem nog te openen (0.7.44).
+        let te_openen: Vec<u8> = if kind == PedalCcKind::Crescendo {
+            self.swell_bindings.read().iter()
+                .filter(|b| b.channel == channel && b.cc_num == cc_num)
+                .map(|b| b.division_index)
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let verdrongen = claim_pedal_cc_inner(kind, channel, cc_num, &self.crescendo_binding, &self.swell_bindings);
+        for idx in te_openen {
+            self.zwel_open(idx);
+        }
+        verdrongen
+    }
+
+    /// Na een setzer-oproep of General Cancel (set_drawn_stops én
+    /// set_active_couplers, in die volgorde vanuit de UI): zijn álle
+    /// trede-claims handregistratie geworden terwijl de trap nog op N stond,
+    /// dan trap 0 en CRESCENDO_HERSTART_VANAF_NUL. Onder CRESCENDO_APPLY zodat
+    /// de trede er niet tussendoor kan lopen. Aan het eind van BEIDE
+    /// commando's aanroepen: een koppel-claim verdwijnt pas bij het tweede.
+    pub fn crescendo_herstart_indien_claims_leeg(&self) {
+        let _apply_guard = CRESCENDO_APPLY.lock();
+        let trap = *self.crescendo_stage.read();
+        if trap > 0 && self.crescendo_active_stops.read().is_empty() {
+            *self.crescendo_stage.write() = 0;
+            CRESCENDO_HERSTART_VANAF_NUL.store(true, std::sync::atomic::Ordering::Relaxed);
+            tracing::info!("Crescendo: trap {} losgelaten door setzer/General Cancel — de trede telt weer mee zodra hij op 0 staat", trap);
+        }
+    }
+
+    /// Zet de zwelkast van een divisie open (gain 1.0, filter open). Nodig zodra
+    /// haar pedaalkoppeling verdwijnt: verdrongen door het crescendo, gewist,
+    /// of via het zwelvinkje geparkeerd. Tot 0.7.43 bleef de divisie dan op de
+    /// laatste pedaalstand staan: gedempt en met laagdoorlaatfilter, en geen
+    /// trede die hem nog open kon zetten — "als het één werkt, werkt het ander
+    /// niet".
+    pub fn zwel_open(&self, division_index: u8) {
+        if let Some(g) = self.division_gains.write().get_mut(division_index as usize) { *g = 1.0; }
+        self.send_audio_command(AudioCommand::SetDivisionGain { division_index, gain: 1.0 });
+        tracing::info!("Zwelkast van divisie {} open gezet (koppeling weg)", division_index);
+    }
+
+    /// Zwelstand van een divisie opnieuw toepassen uit de laatst ontvangen
+    /// pedaalwaarde — na een wijziging van bereik of spiegelbeeld, die anders
+    /// pas bij de volgende pedaalbeweging hoorbaar werd (0.7.44).
+    pub fn zwel_hertoepassen(&self, division_name: &str) {
+        let b = self.swell_bindings.read().iter().find(|b| b.division_name == division_name).cloned();
+        if let Some(b) = b {
+            if let Some(v) = b.last_value {
+                let g = swell_gain_from_cc(v, b.min_val, b.max_val, b.invert);
+                if let Some(x) = self.division_gains.write().get_mut(b.division_index as usize) { *x = g; }
+                self.send_audio_command(AudioCommand::SetDivisionGain { division_index: b.division_index, gain: g });
+            }
+        }
     }
 
     /// Zet handmatig kanaal + CC voor de zwelkast van een divisie. Bestaande
@@ -4433,44 +4729,48 @@ mod crescendo_tests {
     #[test]
     fn trapformule_en_grenzen() {
         assert_eq!(crescendo_stage_for(0, 7), 0);
-        assert_eq!(crescendo_stage_for(3, 7), 0);
-        assert_eq!(crescendo_stage_for(4, 7), 1);
+        assert_eq!(crescendo_stage_for(7, 7), 0);
+        assert_eq!(crescendo_stage_for(8, 7), 1);
         assert_eq!(crescendo_stage_for(127, 7), 7);
         assert_eq!(crescendo_stage_for(64, 0), 0);
-        assert_eq!(crescendo_stage_bounds(0, 7), (0, 3));
-        assert_eq!(crescendo_stage_bounds(1, 7).0, 4);
+        assert_eq!(crescendo_stage_bounds(0, 7), (0, 7));
+        assert_eq!(crescendo_stage_bounds(1, 7).0, 8);
         assert_eq!(crescendo_stage_bounds(7, 7).1, 127);
-        // Trap 3 begint bij 40 (zie meetplan-model).
-        assert_eq!(crescendo_stage_for(39, 7), 2);
-        assert_eq!(crescendo_stage_for(40, 7), 3);
-        assert_eq!(crescendo_stage_bounds(3, 7).0, 40);
-        assert_eq!(crescendo_stage_bounds(2, 7).1, 39);
+        // Trap 3 begint bij 42 (dode zone 8: (m-8)*7/119+1; zie meetplan-model).
+        assert_eq!(crescendo_stage_for(41, 7), 2);
+        assert_eq!(crescendo_stage_for(42, 7), 3);
+        assert_eq!(crescendo_stage_bounds(3, 7).0, 42);
+        assert_eq!(crescendo_stage_bounds(2, 7).1, 41);
     }
 
     #[test]
     fn hysterese_klappert_niet_op_een_trapgrens() {
         let n = 7;
-        // Omhoog pas H voorbij de bovengrens van trap 2 (39): 40 en 41 blijven staan.
-        assert_eq!(crescendo_next_stage(40, 2, n), None);
-        assert_eq!(crescendo_next_stage(41, 2, n), None);
-        assert_eq!(crescendo_next_stage(42, 2, n), Some(3));
-        // Omlaag pas H onder de ondergrens van trap 3 (40): 39 en 38 blijven staan.
-        assert_eq!(crescendo_next_stage(39, 3, n), None);
-        assert_eq!(crescendo_next_stage(38, 3, n), None);
-        assert_eq!(crescendo_next_stage(37, 3, n), Some(2));
-        // Ruis 39<->40 rond de grens: geen enkele wissel vanaf trap 2 of 3.
+        // Omhoog pas H voorbij de bovengrens van trap 2 (41): 42 en 43 blijven staan.
+        assert_eq!(crescendo_next_stage(42, 2, n), None);
+        assert_eq!(crescendo_next_stage(43, 2, n), None);
+        assert_eq!(crescendo_next_stage(44, 2, n), Some(3));
+        // Omlaag pas H onder de ondergrens van trap 3 (42): 41 en 40 blijven staan.
+        assert_eq!(crescendo_next_stage(41, 3, n), None);
+        assert_eq!(crescendo_next_stage(40, 3, n), None);
+        assert_eq!(crescendo_next_stage(39, 3, n), Some(2));
+        // Ruis 41<->42 rond de grens: geen enkele wissel vanaf trap 2 of 3.
         for _ in 0..20 {
-            assert_eq!(crescendo_next_stage(40, 2, n), None);
-            assert_eq!(crescendo_next_stage(39, 2, n), None);
-            assert_eq!(crescendo_next_stage(39, 3, n), None);
-            assert_eq!(crescendo_next_stage(40, 3, n), None);
+            assert_eq!(crescendo_next_stage(42, 2, n), None);
+            assert_eq!(crescendo_next_stage(41, 2, n), None);
+            assert_eq!(crescendo_next_stage(41, 3, n), None);
+            assert_eq!(crescendo_next_stage(42, 3, n), None);
         }
+        // Dode zone 8 + hysterese H=2 vanaf trap 0 (bovengrens 7): 9 blijft 0, 10 wordt 1.
+        assert_eq!(crescendo_next_stage(7, 0, n), None);
+        assert_eq!(crescendo_next_stage(9, 0, n), None);
+        assert_eq!(crescendo_next_stage(10, 0, n), Some(1));
         // Volle pedaalweg en dode zone gelden altijd; sprongen over trappen mogen.
         assert_eq!(crescendo_next_stage(127, 1, n), Some(7));
         assert_eq!(crescendo_next_stage(3, 5, n), Some(0));
         assert_eq!(crescendo_next_stage(0, 1, n), Some(0));
         assert_eq!(crescendo_next_stage(4, 0, n), None);
-        assert_eq!(crescendo_next_stage(6, 0, n), Some(1));
+        assert_eq!(crescendo_next_stage(6, 0, n), None); // dode zone 8
         assert_eq!(crescendo_next_stage(64, crescendo_stage_for(64, n), n), None);
         // Gekrompen matrix: huidige trap > N -> direct naar de doeltrap.
         assert_eq!(crescendo_next_stage(64, 12, n), Some(crescendo_stage_for(64, n)));
@@ -4855,5 +5155,87 @@ mod piston_flank_tests {
 
         // Een echte nieuwe druk na een pauze vuurt wel.
         assert_eq!(p.reeks(0, 11, &[127], 2_000), vec![6]);
+    }
+}
+
+#[cfg(test)]
+mod trede_kiezer_tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    fn kiezer() -> TredeKiezer { TredeKiezer::new(Duration::from_millis(1500)) }
+
+    #[test]
+    fn ruisende_tweede_trede_wint_niet_meer() {
+        let t0 = Instant::now();
+        let mut k = kiezer();
+        // Trede A (kanaal 1 CC 11) zakt van 127 naar 20 in 1 s.
+        for i in 0..=10u8 { k.zie(0, 11, 127 - i * 10, t0 + Duration::from_millis(i as u64 * 100)); }
+        // Trede B (kanaal 2 CC 11) ruist ±1 en is het laatst gezien.
+        for i in 0..40u32 { k.zie(1, 11, 64 + (i % 2) as u8, t0 + Duration::from_millis(1000 + i as u64 * 60)); }
+        let nu = t0 + Duration::from_millis(1000 + 40 * 60 + 1600);
+        assert_eq!(k.keuze(nu), Some((0, 11, 27)));
+    }
+
+    #[test]
+    fn speeltafel_die_alles_stuurt_kiest_de_bewogen_trede() {
+        let t0 = Instant::now();
+        let mut k = kiezer();
+        // Bij elke beweging komen alle drie waarden binnen; alleen trede 2 verandert.
+        for i in 0..=12u8 {
+            let t = t0 + Duration::from_millis(i as u64 * 80);
+            k.zie(0, 11, 100, t);          // trede 1 staat stil
+            k.zie(1, 11, 120 - i * 9, t);  // trede 2 beweegt
+            k.zie(2, 11, 5, t);            // trede 3 staat stil, komt als laatste
+        }
+        let nu = t0 + Duration::from_millis(12 * 80 + 1600);
+        assert_eq!(k.keuze(nu), Some((1, 11, 120 - 12 * 9)));
+    }
+
+    #[test]
+    fn lsb_van_14_bits_paar_telt_niet() {
+        let t0 = Instant::now();
+        let mut k = kiezer();
+        for i in 0..=10u8 {
+            let t = t0 + Duration::from_millis(i as u64 * 100);
+            k.zie(0, 7, i * 12, t);
+            k.zie(0, 39, (i * 37) % 128, t + Duration::from_millis(1));
+        }
+        let nu = t0 + Duration::from_millis(1000 + 1600);
+        assert_eq!(k.keuze(nu), Some((0, 7, 120)));
+    }
+
+    #[test]
+    fn niet_gesetteld_geeft_nog_geen_keuze() {
+        let t0 = Instant::now();
+        let mut k = kiezer();
+        for i in 0..=10u8 { k.zie(0, 4, i * 10, t0 + Duration::from_millis(i as u64 * 100)); }
+        assert_eq!(k.keuze(t0 + Duration::from_millis(1200)), None);
+        assert_eq!(k.keuze(t0 + Duration::from_millis(1000 + 1500)), Some((0, 4, 100)));
+    }
+
+    #[test]
+    fn noodkeuze_kleine_slag_en_zonder_beweging() {
+        let t0 = Instant::now();
+        let mut k = kiezer();
+        k.zie(0, 4, 3, t0);
+        k.zie(0, 4, 5, t0 + Duration::from_millis(200));
+        k.zie(3, 1, 64, t0 + Duration::from_millis(300)); // laatst gezien, geen slag
+        assert_eq!(k.keuze(t0 + Duration::from_secs(5)), None, "slag 2 is geen trede");
+        assert_eq!(k.noodkeuze(Some(t0 + Duration::from_secs(5))), Some((0, 4, 5)));
+        let mut stil = kiezer();
+        stil.zie(5, 64, 127, t0);
+        assert_eq!(stil.noodkeuze(Some(t0 + Duration::from_secs(5))), None, "zonder slag alleen bij time-out");
+        assert_eq!(stil.noodkeuze(None), Some((5, 64, 127)));
+    }
+
+    #[test]
+    fn herhaalde_gelijke_waarden_zetten_de_rustklok_niet_terug() {
+        let t0 = Instant::now();
+        let mut k = kiezer();
+        for i in 0..=10u8 { k.zie(0, 11, i * 12, t0 + Duration::from_millis(i as u64 * 50)); }
+        // Speeltafel blijft dezelfde eindwaarde zenden.
+        for i in 0..100u64 { k.zie(0, 11, 120, t0 + Duration::from_millis(500 + i * 20)); }
+        assert_eq!(k.keuze(t0 + Duration::from_millis(500 + 1600)), Some((0, 11, 120)));
     }
 }

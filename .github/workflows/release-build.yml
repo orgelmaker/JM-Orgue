@@ -98,6 +98,11 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: tauri build --features asio --config src-tauri/tauri.ci.conf.json
 
+      # Los meetprogramma voor MIDI-diagnose op de speeltafel (0.7.44): een
+      # kale console-exe zonder installer, als extra bijlage bij de release.
+      - name: Build jm-midimon (MIDI-monitor)
+        run: cargo build --release -p jm-midimon
+
       # fail_on_unmatched_files: zonder die vlag zou een ontbrekende .sig
       # stilzwijgend doorglippen en pas in publish-updater-json opvallen.
       - name: Upload installers to release
@@ -110,6 +115,7 @@ jobs:
             VirtualPipeOrgan/target/release/bundle/nsis/*.exe.sig
             VirtualPipeOrgan/target/release/bundle/msi/*.msi
             VirtualPipeOrgan/target/release/bundle/msi/*.msi.sig
+            VirtualPipeOrgan/target/release/jm-midimon.exe
 
       - name: Upload artifacts (manual run)
         if: github.event_name == 'workflow_dispatch'
@@ -121,6 +127,7 @@ jobs:
             VirtualPipeOrgan/target/release/bundle/nsis/*.exe.sig
             VirtualPipeOrgan/target/release/bundle/msi/*.msi
             VirtualPipeOrgan/target/release/bundle/msi/*.msi.sig
+            VirtualPipeOrgan/target/release/jm-midimon.exe
 
   build-macos:
     runs-on: macos-latest

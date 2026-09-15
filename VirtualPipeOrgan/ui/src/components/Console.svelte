@@ -67,7 +67,7 @@
   }
   async function trimSampleset() {
     if (!samplesetDir()) return;
-    if (!confirm(tx('settings.sampleset_confirm'))) return;
+    if (!(await confirm(tx('settings.sampleset_confirm')))) return;
     samplesetBusy = true;
     try {
       samplesetTrim = await invoke('trim_sampleset_silence', {
@@ -96,7 +96,7 @@
   }
   async function applyLoops() {
     if (!samplesetDir()) return;
-    if (!confirm(tx('sampleset.loops_confirm'))) return;
+    if (!(await confirm(tx('sampleset.loops_confirm')))) return;
     loopBusy = true;
     try {
       loopApply = await invoke('apply_sampleset_loops', {
@@ -1024,13 +1024,13 @@
   }
   // Aantal stappen wijzigen: bij krimp met gevulde hogere stappen eerst bevestigen
   // (die stappen gaan verloren); de backend clampt de huidige trap.
-  function setCrescendoNumStagesUI(n) {
+  async function setCrescendoNumStagesUI(n) {
     const oud = crescendoNumStages;
     const verlies = n < oud && (crescendoStages || []).slice(n).some(s => Array.isArray(s) && s.length);
     // LET OP: {new} staat twee keer in de tekst (in alle talen), dus met /g
     // vervangen — een gewone .replace() pakt alleen het eerste voorkomen en
     // laat letterlijk "{new}" in de bevestigingsvraag staan.
-    if (verlies && !confirm(tx('crescendo.shrink_confirm').replace(/\{old\}/g, String(oud)).replace(/\{new\}/g, String(n)))) {
+    if (verlies && !(await confirm(tx('crescendo.shrink_confirm').replace(/\{old\}/g, String(oud)).replace(/\{new\}/g, String(n))))) {
       crescendoNumStages = oud; // select terugzetten
       return;
     }
@@ -1818,6 +1818,9 @@
         invoke('clear_swell_binding', { division: divisionName }).catch(() => {});
         delete swellBindings[divisionName];
         swellBindings = swellBindings;
+        // Ook opslaan: zonder autosave kwam de gewiste koppeling bij de
+        // volgende load uit .jm-settings.json terug (0.7.44).
+        dispatch('refreshMidiMappings');
       }
       setSwellLevel(divisionName, 1.0);
     } else if (stash[divisionName]) {
@@ -2518,7 +2521,7 @@
     } finally { remoteBusy = false; }
   }
   async function newRemoteToken() {
-    if (!confirm(tx('remote.new_token_confirm'))) return;
+    if (!(await confirm(tx('remote.new_token_confirm')))) return;
     try { remote = await invoke('new_remote_token'); }
     catch (e) { remote = { ...remote, error: String(e) }; }
   }

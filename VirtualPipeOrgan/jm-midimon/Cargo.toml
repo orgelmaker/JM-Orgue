@@ -1,0 +1,15 @@
+[package]
+name = "jm-midimon"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "JM-Orgue MIDI-monitor: leest de ruwe MIDI-signalen van zweltreden, crescendo en pistons uit en schrijft een verslag"
+
+[[bin]]
+name = "jm-midimon"
+path = "src/main.rs"
+
+[dependencies]
+midir = { workspace = true }
+chrono = "0.4"

@@ -6,11 +6,12 @@ members = [
     "vpo-midi",
     "vpo-sampler",
     "vpo-plugin",
+    "jm-midimon",
 ]
 resolver = "2"
 
 [workspace.package]
-version = "0.7.43"
+version = "0.7.44"
 edition = "2021"
 authors = ["Martijn <martijn@3bm.co.nl>"]
 # Alle rechten voorbehouden — zie ../LICENSE (geen gebruik zonder toestemming).
