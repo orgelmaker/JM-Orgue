@@ -472,7 +472,7 @@ mod tests {
         let mut b = Vec::new();
         for i in 0..10u8 {
             b.push(cc(i as f64 * 10.0, 1, 3, 7, i * 12));
-            b.push(cc(i as f64 * 10.0 + 1.0, 1, 3, 39, (i * 37) % 128));
+            b.push(cc(i as f64 * 10.0 + 1.0, 1, 3, 39, ((i as u16 * 37) % 128) as u8));
         }
         b.push(cc(200.0, 2, 1, 99, 1));
         b.push(cc(201.0, 2, 1, 98, 2));
