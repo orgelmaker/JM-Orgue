@@ -4,7 +4,8 @@
     "subtitle": "Virtual pipe organ"
   },
   "splash": {
-    "starting": "Starting…"
+    "starting": "Starting…",
+    "audio_starting": "Starting audio output (ASIO)…"
   },
   "nav": {
     "orgel": "Organ",
@@ -551,7 +552,10 @@
     "switch_taking_long": "The audio switch is taking longer than expected — please wait a moment.",
     "switch_failed": "Audio switch failed.",
     "overload_warn": "The audio thread is missing its deadline (peak {peak}% of the buffer time at {frames} frames). You hear this as clicks or stutter on stop and crescendo changes.",
-    "overload_fix": "Set buffer to 128"
+    "overload_fix": "Set buffer to 128",
+    "asio_restart_advice": "The ASIO driver '{device}' cannot be restarted in this session. JM-Orgue is now playing through {host}. Restart JM-Orgue to restore ASIO; your registration is kept.",
+    "asio_restart_now": "Restart JM-Orgue",
+    "asio_restart_confirm": "JM-Orgue will close and restart to restore the ASIO driver. Your settings and registration are saved first. Continue?"
   },
   "pistons": {
     "set": "SET — save registration",

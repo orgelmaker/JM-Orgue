@@ -325,8 +325,10 @@
     catch (e) { error = e.toString(); }
   }
 
-  function requestShutdown() {
-    if (!window.confirm(tx('dialogs.shutdown_confirm'))) return;
+  async function requestShutdown() {
+    // await: window.confirm is in Tauri asynchroon (dialoog-plugin); zonder
+    // await sloot één klik de computer af zonder vraag (0.7.43).
+    if (!(await window.confirm(tx('dialogs.shutdown_confirm')))) return;
     emitToMain('jm-orgue:shutdown');
   }
 

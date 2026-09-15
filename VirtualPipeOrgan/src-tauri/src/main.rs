@@ -193,10 +193,28 @@ fn main() {
                 let asio_pref = prefs.host.as_deref()
                     .map(|h| h.eq_ignore_ascii_case("asio"))
                     .unwrap_or(false);
-                if asio_pref {
+                if !asio_pref {
+                    // Geen ASIO-voorkeur: de uitgang is meteen definitief.
+                    state.audio_ready.store(true, std::sync::atomic::Ordering::Relaxed);
+                } else {
                     let st = state.clone();
                     std::thread::spawn(move || {
-                        std::thread::sleep(std::time::Duration::from_secs(10));
+                        // Startsein (0.7.43): zodra de frontend is opgestart
+                        // (commando frontend_ready — de app draait dan volledig,
+                        // wat de ASIO4ALL-koudestart-work-around vereist), met
+                        // de oude 10 s als bovengrens. Korte adempauze erna
+                        // zodat de eerste WASAPI-callbacks gelopen hebben. De
+                        // frontend wacht op audio_ready met het autoladen van
+                        // het laatste orgel: één load op de definitieve
+                        // audio-thread in plaats van een herlaad tijdens spel.
+                        {
+                            let (lock, cv) = &*st.frontend_ready;
+                            let mut klaar = lock.lock();
+                            if !*klaar {
+                                cv.wait_for(&mut klaar, std::time::Duration::from_secs(10));
+                            }
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(750));
                         // apply_deferred_asio_pref herleest de prefs en checkt de
                         // actieve host BINNEN de load/switch-gate: een handmatige
                         // keuze van de gebruiker wordt nooit teruggedraaid en de
@@ -204,11 +222,8 @@ fn main() {
                         info!("Uitgestelde ASIO-wissel: opgeslagen voorkeur wordt gecontroleerd/toegepast");
                         match st.apply_deferred_asio_pref() {
                             Ok(Some(o)) => {
-                                // Guard hoe dan ook opruimen: bij succes omdat
-                                // ASIO weer werkt, bij mislukking omdat een
-                                // blijvende guard een látere (wél oplosbare)
-                                // vastloper zou blokkeren. De guard hoeft alleen
-                                // de herstart-lus binnen één opstart te breken.
+                                // Guard-bestand van vóór 0.7.43 (automatische
+                                // herstart-lus) opruimen als het nog bestaat.
                                 let _ = std::fs::remove_file(st.app_data_dir.join("asio-herstart-guard"));
                                 if o.switched {
                                     crate::audio::asio_clear_door_closed();
@@ -233,6 +248,8 @@ fn main() {
                                         let _gate = st.load_switch_gate.lock();
                                         let fresh = st.current_organ_id.read().clone();
                                         if fresh.as_deref() == Some(id.as_str()) {
+                                            st.backend_reloads.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                                            info!("Backend-herlaad gestart (uitgestelde ASIO-wissel): {}", id);
                                             let res = if commands::is_organ_file_id(&id) {
                                                 commands::do_load_organ_locked(&st, &id)
                                             } else {
@@ -252,6 +269,8 @@ fn main() {
                             Err(e) => tracing::warn!(
                                 "Uitgestelde ASIO-wissel mislukte ({}); audio blijft op de default host", e),
                         }
+                        st.audio_ready.store(true, std::sync::atomic::Ordering::Relaxed);
+                        info!("Audio-uitgang definitief: autoladen van het laatste orgel mag starten");
                     });
                 }
             }
@@ -276,6 +295,8 @@ fn main() {
                             let _gate = st.load_switch_gate.lock();
                             let fresh = st.current_organ_id.read().clone();
                             if fresh.as_deref() == Some(id.as_str()) {
+                                st.backend_reloads.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                                info!("Backend-herlaad gestart (audio-noodherstel): {}", id);
                                 let res = if commands::is_organ_file_id(&id) {
                                     commands::do_load_organ_locked(&st, &id)
                                 } else {
@@ -305,6 +326,11 @@ fn main() {
             // Automatische update (0.7.40): audio/MIDI netjes afsluiten vlak
             // vóór de installer start.
             commands::prepare_for_update,
+            // 0.7.43: startsein voor de uitgestelde ASIO-wissel en de herstart
+            // op verzoek (balk "JM-Orgue herstarten") — de app herstart nooit
+            // meer uit zichzelf.
+            commands::frontend_ready,
+            commands::restart_for_asio,
             // Afstandsbediening in het netwerk (0.7.38)
             commands::report_setzer_state,
             remote::get_remote_status,

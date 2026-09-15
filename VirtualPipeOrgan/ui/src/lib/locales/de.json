@@ -4,7 +4,8 @@
     "subtitle": "Virtuelle Pfeifenorgel"
   },
   "splash": {
-    "starting": "Wird gestartet…"
+    "starting": "Wird gestartet…",
+    "audio_starting": "Audioausgang (ASIO) wird gestartet…"
   },
   "nav": {
     "orgel": "Orgel",
@@ -551,7 +552,10 @@
     "switch_taking_long": "Der Audio-Wechsel dauert länger als erwartet — bitte noch einen Moment Geduld.",
     "switch_failed": "Audio-Wechsel fehlgeschlagen.",
     "overload_warn": "Der Audio-Thread hält seine Frist nicht ein (Spitze {peak}% der Pufferzeit bei {frames} Frames). Das hört man als Knacken oder Stottern bei Register- und Crescendowechseln.",
-    "overload_fix": "Puffer auf 128 setzen"
+    "overload_fix": "Puffer auf 128 setzen",
+    "asio_restart_advice": "Der ASIO-Treiber „{device}“ kann in dieser Sitzung nicht neu gestartet werden. JM-Orgue spielt jetzt über {host}. Starten Sie JM-Orgue neu, um ASIO wiederherzustellen; Ihre Registrierung bleibt erhalten.",
+    "asio_restart_now": "JM-Orgue neu starten",
+    "asio_restart_confirm": "JM-Orgue wird beendet und neu gestartet, um den ASIO-Treiber wiederherzustellen. Einstellungen und Registrierung werden zuerst gespeichert. Fortfahren?"
   },
   "pistons": {
     "set": "SET — Registrierung speichern",

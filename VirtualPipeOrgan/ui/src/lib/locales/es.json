@@ -4,7 +4,8 @@
     "subtitle": "Órgano de tubos virtual"
   },
   "splash": {
-    "starting": "Iniciando…"
+    "starting": "Iniciando…",
+    "audio_starting": "Iniciando la salida de audio (ASIO)…"
   },
   "nav": {
     "orgel": "Órgano",
@@ -551,7 +552,10 @@
     "switch_taking_long": "El cambio de audio tarda más de lo previsto — espera un momento.",
     "switch_failed": "El cambio de audio ha fallado.",
     "overload_warn": "El hilo de audio no llega a su plazo (pico {peak}% del tiempo de búfer con {frames} frames). Se oye como chasquidos o cortes en los cambios de registro y de crescendo.",
-    "overload_fix": "Poner el búfer en 128"
+    "overload_fix": "Poner el búfer en 128",
+    "asio_restart_advice": "El controlador ASIO «{device}» no puede reiniciarse en esta sesión. JM-Orgue suena ahora a través de {host}. Reinicia JM-Orgue para restablecer ASIO; la registración se conserva.",
+    "asio_restart_now": "Reiniciar JM-Orgue",
+    "asio_restart_confirm": "JM-Orgue se cerrará y se reiniciará para restablecer el controlador ASIO. Los ajustes y la registración se guardan primero. ¿Continuar?"
   },
   "pistons": {
     "set": "SET — guardar la registración",

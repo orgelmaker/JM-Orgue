@@ -4,7 +4,8 @@
     "subtitle": "Virtueel pijporgel"
   },
   "splash": {
-    "starting": "Bezig met starten…"
+    "starting": "Bezig met starten…",
+    "audio_starting": "Audio-uitgang (ASIO) wordt gestart…"
   },
   "nav": {
     "orgel": "Orgel",
@@ -551,7 +552,10 @@
     "switch_taking_long": "Audio-wissel loopt langer dan verwacht — nog even geduld.",
     "switch_failed": "Audio-wissel mislukt.",
     "overload_warn": "De audio-thread haalt zijn deadline niet (piek {peak}% van de buffertijd bij {frames} frames). Dat hoor je als tikken of haperen bij register- en crescendowissels.",
-    "overload_fix": "Zet de buffer op 128"
+    "overload_fix": "Zet de buffer op 128",
+    "asio_restart_advice": "De ASIO-driver '{device}' kan in deze sessie niet opnieuw starten. JM-Orgue speelt nu via {host}. Herstart JM-Orgue om ASIO te herstellen; je registratie blijft bewaard.",
+    "asio_restart_now": "JM-Orgue herstarten",
+    "asio_restart_confirm": "JM-Orgue sluit af en start opnieuw op om de ASIO-driver te herstellen. Je instellingen en registratie worden eerst bewaard. Doorgaan?"
   },
   "pistons": {
     "set": "SET — registratie opslaan",

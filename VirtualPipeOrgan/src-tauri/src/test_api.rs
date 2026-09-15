@@ -11,6 +11,7 @@
 //!   POST /notes/{midi_note}/on?velocity=N&channel=N
 //!   POST /notes/{midi_note}/off
 //!   POST /panic                   - all notes off
+//!   POST /debug/restart_needed   - testhaak: watchdog-vlag zetten (noodherstel afdwingen)
 //!   GET  /logs?lines=N            - tail van logfile
 //!   POST /load_organ              - body: {"path":"..."} laad een .organ bestand
 //!   POST /load_directory          - body: {"path":"..."} scan + laad sample map
@@ -309,6 +310,22 @@ fn route_shared(
         (tiny_http::Method::Get, "/organ") => Ok(handle_organ(state, scope)),
         (tiny_http::Method::Get, "/version") => Ok(json!({ "version": env!("CARGO_PKG_VERSION") })),
         (tiny_http::Method::Get, "/state") => Ok(handle_remote_state(state, scope)),
+        // Testhaak (0.7.43): zet de watchdog-vlag restart_needed op de lopende
+        // player, zodat het audio-noodherstel (main.rs) binnen ~3 s afgaat —
+        // het testorgel-scenario "ASIO-stream dood, voorkeur ASIO" is zo zonder
+        // hardware na te spelen (eerst de driver vrijgeven via een WASAPI-wissel).
+        (tiny_http::Method::Post, "/debug/restart_needed") => {
+            // Zelfde stappen als prepare_for_update: stream stoppen (callbacks
+            // vallen echt stil, anders wuift het vals-alarm-filter van het
+            // noodherstel de vlag weg) en dan de vlag zetten.
+            let gezet = state.audio_player.read().as_ref().map(|p| {
+                p.shutdown_and_wait(std::time::Duration::from_millis(1500));
+                p.restart_needed.store(true, std::sync::atomic::Ordering::Relaxed);
+                true
+            }).unwrap_or(false);
+            info!("test_api: restart_needed-vlag gezet ({})", gezet);
+            Ok(json!({"ok": gezet}))
+        }
         (tiny_http::Method::Post, "/panic") => {
             state.send_audio_command(AudioCommand::AllNotesOff);
             // Spooktoetsen mee opruimen (zie stop_audio in commands.rs).
@@ -642,6 +659,10 @@ fn handle_status(state: &AppState) -> Value {
         "drawn_stop_count": drawn.len(),
         "midi_connected": *state.midi_connected.read(),
         "midi_archiving": state.midi_archive.archiving.load(std::sync::atomic::Ordering::Relaxed),
+        "audio_ready": state.audio_ready.load(std::sync::atomic::Ordering::Relaxed),
+        "asio_restart_advice": state.asio_restart_advice.read().as_ref().map(|a| a.device.clone()),
+        "backend_reloads": state.backend_reloads.load(std::sync::atomic::Ordering::Relaxed),
+        "render_frames": crate::audio::render_frames_now(),
         "layered_stops": state.rank_summary.read().iter().filter(|r| r.is_stacked()).count(),
     })
 }

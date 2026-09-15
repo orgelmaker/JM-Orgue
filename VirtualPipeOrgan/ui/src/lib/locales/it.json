@@ -4,7 +4,8 @@
     "subtitle": "Organo a canne virtuale"
   },
   "splash": {
-    "starting": "Avvio in corso…"
+    "starting": "Avvio in corso…",
+    "audio_starting": "Avvio dell'uscita audio (ASIO)…"
   },
   "nav": {
     "orgel": "Organo",
@@ -551,7 +552,10 @@
     "switch_taking_long": "Il cambio dell'audio sta durando più del previsto — ancora un momento.",
     "switch_failed": "Cambio dell'audio non riuscito.",
     "overload_warn": "Il thread audio non rispetta la sua scadenza (picco {peak}% del tempo di buffer con {frames} frame). Lo senti come schiocchi o interruzioni ai cambi di registro e di crescendo.",
-    "overload_fix": "Imposta il buffer a 128"
+    "overload_fix": "Imposta il buffer a 128",
+    "asio_restart_advice": "Il driver ASIO «{device}» non può essere riavviato in questa sessione. JM-Orgue ora suona tramite {host}. Riavvia JM-Orgue per ripristinare ASIO; la registrazione viene conservata.",
+    "asio_restart_now": "Riavvia JM-Orgue",
+    "asio_restart_confirm": "JM-Orgue si chiuderà e si riavvierà per ripristinare il driver ASIO. Impostazioni e registrazione vengono salvate prima. Continuare?"
   },
   "pistons": {
     "set": "SET — salva la registrazione",

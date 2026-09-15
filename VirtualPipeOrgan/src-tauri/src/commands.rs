@@ -206,6 +206,17 @@ pub struct StatusDto {
     pub stereo_samples: bool,
     /// Automatisch MIDI-archief legt op dit moment een take vast.
     pub midi_archiving: bool,
+    /// Audio-uitgang definitief (uitgestelde ASIO-wissel afgerond of niet
+    /// nodig); de frontend wacht hierop met het autoladen van het laatste orgel.
+    pub audio_ready: bool,
+    /// Naam van de ASIO-driver die in deze sessie niet meer kan starten; de UI
+    /// toont dan de balk met de herstart-knop. None = geen advies.
+    pub asio_restart_advice: Option<String>,
+    /// Interne orgel-herladingen sinds de start (ASIO-wissel, noodherstel).
+    pub backend_reloads: u32,
+    /// Werkelijke framegrootte van de laatste audio-callback (ook wanneer de
+    /// driver zijn eigen buffer aanhoudt en buffer_frames 0 is).
+    pub render_frames: u32,
 }
 
 // ============ Commands ============
@@ -728,6 +739,26 @@ pub async fn prepare_for_update(state: State<'_, AppState>) -> Result<(), String
     })
     .await
     .map_err(|e| format!("Task join error: {}", e))
+}
+
+/// Frontend is opgestart (0.7.43): startsein voor de uitgestelde ASIO-wissel
+/// in main.rs, die tot nu toe op een vaste 10 s na de processtart wachtte.
+#[tauri::command]
+pub fn frontend_ready(state: State<AppState>) {
+    info!("Frontend gereed gemeld (startsein voor de uitgestelde ASIO-wissel)");
+    let (lock, cv) = &*state.frontend_ready;
+    *lock.lock() = true;
+    cv.notify_all();
+}
+
+/// Herstart op verzoek van de gebruiker om de ASIO-driver terug te krijgen
+/// (balk "JM-Orgue herstarten"). Tot 0.7.42 deed de backend dit ongevraagd.
+#[tauri::command]
+pub async fn restart_for_asio(state: State<'_, AppState>) -> Result<(), String> {
+    let st = state.inner().clone();
+    tokio::task::spawn_blocking(move || st.herstart_voor_asio())
+        .await
+        .map_err(|e| format!("Task join error: {}", e))?
 }
 
 #[tauri::command]
@@ -4615,6 +4646,10 @@ pub fn get_status(state: State<AppState>) -> Result<StatusDto, String> {
         rt_drops: crate::state::rt_drop_count(),
         stereo_samples: vpo_sampler::stereo_loading(),
         midi_archiving: state.midi_archive.archiving.load(std::sync::atomic::Ordering::Relaxed),
+        audio_ready: state.audio_ready.load(std::sync::atomic::Ordering::Relaxed),
+        asio_restart_advice: state.asio_restart_advice.read().as_ref().map(|a| a.device.clone()),
+        backend_reloads: state.backend_reloads.load(std::sync::atomic::Ordering::Relaxed),
+        render_frames: crate::audio::render_frames_now(),
     })
 }
 

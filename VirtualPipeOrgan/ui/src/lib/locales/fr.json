@@ -4,7 +4,8 @@
     "subtitle": "Orgue à tuyaux virtuel"
   },
   "splash": {
-    "starting": "Démarrage…"
+    "starting": "Démarrage…",
+    "audio_starting": "Démarrage de la sortie audio (ASIO)…"
   },
   "nav": {
     "orgel": "Orgue",
@@ -551,7 +552,10 @@
     "switch_taking_long": "Le changement de sortie audio prend plus de temps que prévu — patientez un instant.",
     "switch_failed": "Échec du changement de sortie audio.",
     "overload_warn": "Le thread audio ne tient pas son échéance (pointe {peak} % du temps de tampon à {frames} frames). Cela s'entend comme des clics ou des saccades lors des changements de jeux et de crescendo.",
-    "overload_fix": "Régler le tampon sur 128"
+    "overload_fix": "Régler le tampon sur 128",
+    "asio_restart_advice": "Le pilote ASIO « {device} » ne peut pas redémarrer dans cette session. JM-Orgue joue maintenant via {host}. Redémarrez JM-Orgue pour rétablir l'ASIO ; votre registration est conservée.",
+    "asio_restart_now": "Redémarrer JM-Orgue",
+    "asio_restart_confirm": "JM-Orgue va se fermer et redémarrer pour rétablir le pilote ASIO. Vos réglages et votre registration sont d'abord enregistrés. Continuer ?"
   },
   "pistons": {
     "set": "SET — enregistrer la registration",

@@ -5,6 +5,20 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.43] - 2026-09-15
+
+### Geen zelfherstart meer: "stoort en valt terug naar de bibliotheek" opgelost
+
+Op het testorgel viel 0.7.40 tijdens het spelen steeds terug naar de bibliotheek. De oorzaak zat niet in de bibliotheek zelf: de app herstartte zichzélf. Kon de ASIO-driver in het lopende proces niet opnieuw starten (na een wissel naar WASAPI op hetzelfde apparaat, of nadat de stream was stilgevallen en de bewaking hem niet meer aan de praat kreeg), dan deed de audio-wissel sinds 0.7.31 een volledige herstart van het programma. Elke herstart begint op het startscherm, laadt het orgel opnieuw en schakelt daarna weer naar ASIO. De beveiliging tegen een herhaling werd bij elke start gewist, waardoor het zich kon blijven herhalen.
+
+- De app herstart nooit meer uit zichzelf. Kan ASIO in deze sessie niet meer starten, dan blijft de lopende uitgang gewoon spelen (bij een bewuste wissel) of valt het geluid terug op de standaarduitgang (bij een stilgevallen stream). Het orgel blijft op het scherm staan.
+- In beide gevallen verschijnt een balk: "De ASIO-driver kan in deze sessie niet opnieuw starten … Herstart JM-Orgue om ASIO te herstellen", met een knop die de herstart uitvoert nadat instellingen en registratie zijn bewaard. Jij beslist wanneer.
+- Met een ASIO-voorkeur werd het laatste orgel bij de start twéé keer geladen: eerst op de standaarduitgang en tien seconden later nog eens op de verse ASIO-thread, midden in het spel. De ASIO-wissel start nu zodra het scherm er is en het orgel wordt pas daarna geladen, één keer. Het startscherm meldt intussen "Audio-uitgang (ASIO) wordt gestart…".
+- Het bufferadvies ("Zet de buffer op 128") kijkt nu naar de werkelijke framegrootte van de audio-callback, ook wanneer de driver zijn eigen paneelinstelling aanhoudt; wegklikken geldt tien minuten in plaats van de hele sessie.
+- Werd een orgel buiten het scherm om geladen (of het scherm herladen terwijl het orgel bleef staan), dan bleef de bibliotheek in beeld met een spelend orgel erachter. De weergave volgt nu het geladen orgel.
+- De status (en de test-API) melden voortaan `audio_ready`, `asio_restart_advice`, `backend_reloads` en `render_frames`; het logbestand markeert elke interne herlaad met zijn reden. Zo is een volgend testorgel-log zonder gissen te lezen.
+- Geen enkele bevestigingsvraag werkte: de dialoogbibliotheek van Tauri vervangt `window.confirm` door een asynchrone variant, waardoor "Doorgaan?" bij bijwerken, bij **Afsluiten** (computer uitzetten, ook vanaf een extra scherm) en bij het verwijderen van een MIDI-archiefbestand als "ja" gold zonder dat er een vraag verscheen. De vijf vragen wachten nu op het antwoord; Annuleren annuleert.
+
 ## [0.7.42] - 2026-09-15
 
 ### Oude instellingen netjes overnemen

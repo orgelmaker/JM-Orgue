@@ -60,6 +60,9 @@
   // keer compleet in beeld komt — inclusief de update-balk, die anders ná de
   // bibliotheek inplofte en alles naar beneden duwde. Alleen het hoofdvenster.
   let booting = true;
+  // Splash-tekst "Audio-uitgang (ASIO) wordt gestart…" zodra de start op de
+  // uitgestelde ASIO-wissel wacht (0.7.43, zie audioReadyWait in onMount).
+  let audioStarting = false;
   let appVersion = '';
 
   // MIDI mapping state
@@ -160,7 +163,10 @@
     updateInfo = doel; // balk toont vanaf nu deze update (ook bij een handmatige controle)
     let bevestigd = true;
     try {
-      if (await updateBevestigingNodig()) bevestigd = window.confirm(tx('update.confirm_install'));
+      // LET OP: de dialoog-plugin van Tauri vervangt window.confirm door een
+      // asynchrone variant (init-iife.js) die een Promise teruggeeft. Zonder
+      // await gold elke vraag als "ja" zonder dat er iets verscheen (0.7.43).
+      if (await updateBevestigingNodig()) bevestigd = await window.confirm(tx('update.confirm_install'));
     } catch (e) { bevestigd = false; }
     if (!bevestigd) {
       updateBezig = false; // geannuleerd: guard weer vrijgeven
@@ -314,7 +320,7 @@
     const bootStart = performance.now();
     // Noodrem: wat er in de init ook blijft hangen, na 8 s is de splash weg —
     // een onklikbaar startscherm is erger dan een balk die alsnog inploft.
-    const bootFailsafe = setTimeout(() => { booting = false; }, 8000);
+    const bootFailsafe = setTimeout(() => { booting = false; audioStarting = false; }, 18000);
 
     // Hoofdvenster-geometrie herstellen + vastleggen (extra schermen doen dit
     // al zelf in PanelApp; het hoofdvenster had tot 0.7.11 géén persistentie
@@ -346,6 +352,12 @@
 
     await refreshDevices();
     await refreshStatus();
+
+    // Frontend draait: startsein voor de uitgestelde ASIO-wissel in de backend
+    // (0.7.43; die wachtte tot nu toe een vaste 10 s na de processtart). Hier,
+    // direct na de apparaat-enumeratie: de rest van de init (profielen, MIDI)
+    // raakt de audio-host niet en mag met de wissel overlappen.
+    try { await invoke('frontend_ready'); } catch (e) { /* niet in Tauri context */ }
 
     // Migratie (0.7.3): er mag nooit een "profielloze" derde toestand bestaan.
     // Draait er wél een uitgang maar is er geen profiel actief, leg die uitgang
@@ -408,7 +420,12 @@
           const freshJson = JSON.stringify(fresh);
           if (freshJson !== lastOrganInfoJson) {
             lastOrganInfoJson = freshJson;
+            const hadOrgan = !!organInfo;
             organInfo = fresh;
+            // Orgel buiten deze UI om geladen (test-API, of de webview is
+            // herladen terwijl de backend zijn orgel hield): niet in de
+            // bibliotheek blijven staan met een spelend orgel erachter.
+            if (!hadOrgan && fresh && showOrganBrowser && !loading) setView('orgel');
             // Auto-save de laatste stand (registratie + koppels) bij elke wijziging,
             // gedebounced. Schrijft via save_current_organ_settings — die leest
             // drawn_stops + actieve koppels uit de backend en bewaart .jm-settings.json.
@@ -555,9 +572,25 @@
     // hieronder valt er bewust buiten: die toont zijn eigen voortgangsbalk, en
     // een grote sampleset achter een splash zonder voortgang oogt als een
     // vastloper (les uit 0.6.4).
+    // Wachten tot de audio-uitgang definitief is (status.audioReady — meteen
+    // waar zonder ASIO-voorkeur), zodat het laatste orgel één keer op de
+    // definitieve audio-thread geladen wordt in plaats van twee keer, de
+    // tweede keer midden in het spel. Bovengrens 15 s: een hangende wissel
+    // houdt de start nooit tegen.
+    const audioReadyWait = new Promise((r) => {
+      const t0 = Date.now();
+      const tick = () => {
+        if (status.audioReady || Date.now() - t0 > 15000) { audioStarting = false; r(); return; }
+        if (Date.now() - t0 > 1200) audioStarting = true;
+        setTimeout(tick, 100);
+      };
+      tick();
+    });
+
     Promise.all([
       updateSettled,
       onlineSetsWait,
+      audioReadyWait,
       new Promise((r) => setTimeout(r, Math.max(0, 1500 - (performance.now() - bootStart)))),
     ]).then(() => { clearTimeout(bootFailsafe); booting = false; });
 
@@ -566,6 +599,7 @@
     // De extra registerschermen van dat orgel heropent loadOrgan/loadFromFolder
     // zelf (per orgel onthouden — zie Console.restorePanels).
     try {
+      await audioReadyWait;
       const sess = loadSession();
       if (autoLoadLastOrgan && sess?.lastOrgan?.path && !organInfo) {
         if (sess.lastOrgan.kind === 'folder') await loadFromFolder(sess.lastOrgan.path);
@@ -1027,9 +1061,13 @@
         audioDevice: s.audio_device,
         channels: s.channels,
         bufferFrames: s.buffer_frames,
-        midiArchiving: s.midi_archiving
+        midiArchiving: s.midi_archiving,
+        audioReady: s.audio_ready,
+        renderFrames: s.render_frames,
+        backendReloads: s.backend_reloads
       };
       volgAudioOverbelasting(s);
+      volgAsioHerstartAdvies(s);
     } catch (e) {
       // Ignore polling errors
     }
@@ -1047,8 +1085,11 @@
   let overbelastingMetingen = [];   // [{ t, nieuw }]
   let vorigeOverloadTeller = null;
   let audioOverbelastAdvies = false;
-  let audioOverbelastGenegeerd = false;
+  // Wegklikken geldt tien minuten, niet de hele sessie: blijft de buffer te
+  // klein, dan mag het advies bij nieuwe overbelasting terugkomen.
+  let audioOverbelastGenegeerdTot = 0;
   const OVERBELAST_VENSTER_MS = 10000;
+  const OVERBELAST_NEGEER_MS = 10 * 60 * 1000;
   function volgAudioOverbelasting(s) {
     const nu = Date.now();
     const teller = typeof s.render_overloads === 'number' ? s.render_overloads : 0;
@@ -1057,10 +1098,39 @@
     if ((s.render_peak || 0) > 1.0) overbelastingMetingen.push({ t: nu, nieuw });
     while (overbelastingMetingen.length && nu - overbelastingMetingen[0].t > OVERBELAST_VENSTER_MS) overbelastingMetingen.shift();
     const zwareCallbacks = overbelastingMetingen.reduce((a, m) => a + m.nieuw, 0);
-    const buf = s.buffer_frames || 0;
-    audioOverbelastAdvies = !audioOverbelastGenegeerd && !!s.audio_running
+    // render_frames is de werkelijke framegrootte van de callback; buffer_frames
+    // is 0 wanneer de driver zijn eigen paneelinstelling aanhoudt (ESI/RME), en
+    // dan verscheen het advies tot 0.7.42 nooit.
+    const buf = s.render_frames || s.buffer_frames || 0;
+    audioOverbelastAdvies = Date.now() > audioOverbelastGenegeerdTot && !!s.audio_running
       && overbelastingMetingen.length >= 3 && zwareCallbacks >= 3
       && buf > 0 && buf < 128;
+  }
+
+  // ===== ASIO-herstart-advies (0.7.43) =====
+  // De backend herstart de app niet meer zelf wanneer de ASIO-driver in dit
+  // proces niet opnieuw kan starten (vrijgegeven voor een WASAPI-wissel, of dood
+  // na een stilstand). Hij meldt het in de status; wij tonen een balk met een
+  // herstart-knop. Wegklikken geldt tot het advies vervalt (ASIO werkt weer).
+  let asioHerstartAdvies = null;
+  let asioHerstartGenegeerd = false;
+  let asioHerstartBezig = false;
+  function volgAsioHerstartAdvies(s) {
+    const advies = s.asio_restart_advice || null;
+    if (!advies) { asioHerstartAdvies = null; asioHerstartGenegeerd = false; return; }
+    if (!asioHerstartGenegeerd) asioHerstartAdvies = advies;
+  }
+  async function herstartVoorAsio() {
+    if (asioHerstartBezig) return;
+    if (organInfo && !(await window.confirm(tx('audio.asio_restart_confirm')))) return;
+    asioHerstartBezig = true;
+    try {
+      await bewaarVoorAfsluiten();
+      await invoke('restart_for_asio');
+    } catch (e) {
+      error = String(e?.message || e);
+      asioHerstartBezig = false;
+    }
   }
 
   // Knop in de melding: buffer op 128 frames zetten via het gewone
@@ -1375,7 +1445,9 @@
 
   // Bevestiging vragen, opslaan, computer netjes afsluiten.
   async function requestShutdown() {
-    const ok = window.confirm(tx('dialogs.shutdown_confirm'));
+    // await: window.confirm is in Tauri asynchroon (zie startUpdate) — zonder
+    // await zette één klik op Afsluiten de computer uit zonder vraag.
+    const ok = await window.confirm(tx('dialogs.shutdown_confirm'));
     if (!ok) return;
     await doShutdown();
   }
@@ -1519,7 +1591,7 @@
     <div class="loading-progress boot-splash-bar">
       <div class="loading-progress-bar boot-splash-bar-run"></div>
     </div>
-    <div class="loading-text">{$t('splash.starting')}</div>
+    <div class="loading-text">{audioStarting ? $t('splash.audio_starting') : $t('splash.starting')}</div>
   </div>
 {/if}
 <div id="app">
@@ -1581,9 +1653,23 @@
     <div class="update-banner">
       <span>{$t('audio.overload_warn')
         .replace('{peak}', Math.round((status.renderPeak || 0) * 100))
-        .replace('{frames}', status.bufferFrames || 0)}</span>
+        .replace('{frames}', status.renderFrames || status.bufferFrames || 0)}</span>
       <button class="btn btn-primary btn-sm" on:click={zetBufferOp128}>{$t('audio.overload_fix')}</button>
-      <button class="btn btn-ghost btn-sm" on:click={() => { audioOverbelastAdvies = false; audioOverbelastGenegeerd = true; }} title={$t('actions.close')} aria-label={$t('actions.close')}>✕</button>
+      <button class="btn btn-ghost btn-sm" on:click={() => { audioOverbelastAdvies = false; audioOverbelastGenegeerdTot = Date.now() + OVERBELAST_NEGEER_MS; }} title={$t('actions.close')} aria-label={$t('actions.close')}>✕</button>
+    </div>
+  {/if}
+
+  {#if asioHerstartAdvies}
+    <!-- ASIO-driver kan in deze sessie niet opnieuw starten (0.7.43): de app
+         herstart niet meer uit zichzelf — dat oogde als "valt steeds terug naar
+         de bibliotheek" — maar laat de organist kiezen. Het orgel speelt
+         intussen door op de teruggevallen uitgang. -->
+    <div class="update-banner">
+      <span>{$t('audio.asio_restart_advice')
+        .replace('{device}', asioHerstartAdvies)
+        .replace('{host}', status.audioHost || 'WASAPI')}</span>
+      <button class="btn btn-primary btn-sm" on:click={herstartVoorAsio} disabled={asioHerstartBezig}>{$t('audio.asio_restart_now')}</button>
+      <button class="btn btn-ghost btn-sm" on:click={() => { asioHerstartAdvies = null; asioHerstartGenegeerd = true; }} title={$t('actions.close')} aria-label={$t('actions.close')}>✕</button>
     </div>
   {/if}
 

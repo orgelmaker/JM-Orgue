@@ -532,6 +532,15 @@ pub struct AudioDeviceInfo {
     pub channels: Vec<u16>,
 }
 
+/// Gewenste ASIO-configuratie die in dit proces niet meer te starten is; het
+/// commando `restart_for_asio` legt hem als voorkeur vast en herstart de app,
+/// waarna de uitgestelde ASIO-wissel bij de start hem toepast.
+#[derive(Debug, Clone)]
+pub struct AsioRestartAdvice {
+    pub cfg: AudioOutputConfig,
+    pub device: String,
+}
+
 /// Eerlijk resultaat van een audio-uitvoerwissel. De frontend beslist hiermee:
 /// orgel herladen wanneer `player_rebuilt` (nieuwe audio-thread = lege
 /// sample-maps), profiel pas actief markeren wanneer `switched`, en anders de
@@ -709,6 +718,24 @@ pub struct AppState {
     /// None bij headless gebruik (test-API vóór setup) — events worden dan
     /// stilletjes overgeslagen.
     pub app_handle: Arc<RwLock<Option<tauri::AppHandle>>>,
+    /// Advies "herstart JM-Orgue om ASIO te herstellen" (0.7.43): gezet wanneer
+    /// de ASIO-driver in dit proces niet opnieuw kan initialiseren (vrijgegeven
+    /// voor een WASAPI-wissel, of dood voor enumeratie). De UI toont dan een
+    /// balk met een herstart-knop. Tot 0.7.42 herstartte de app zichzelf op dat
+    /// punt — ook vanuit het noodherstel van de watchdog — en dat oogde op het
+    /// testorgel als "valt steeds terug naar de bibliotheek".
+    pub asio_restart_advice: Arc<RwLock<Option<AsioRestartAdvice>>>,
+    /// Audio-uitgang definitief: geen ASIO-voorkeur, of de uitgestelde
+    /// ASIO-wissel is afgerond. De frontend laadt het laatste orgel pas hierna,
+    /// zodat het één keer op de definitieve audio-thread wordt geladen in plaats
+    /// van twee keer (de tweede keer midden in het spel).
+    pub audio_ready: Arc<std::sync::atomic::AtomicBool>,
+    /// Frontend is opgestart (commando frontend_ready): startsein voor de
+    /// uitgestelde ASIO-wissel, i.p.v. een vaste 10 s.
+    pub frontend_ready: Arc<(parking_lot::Mutex<bool>, parking_lot::Condvar)>,
+    /// Interne orgel-herladingen sinds de start (ASIO-wissel, noodherstel) —
+    /// diagnostiek in de status en het testorgel-log.
+    pub backend_reloads: Arc<std::sync::atomic::AtomicU32>,
     /// Per-pipe voicing overrides: (stop_id, pipe_num) -> (volume_db, pitch_cents)
     pub pipe_voicings: Arc<RwLock<std::collections::HashMap<(u32, u32), (f32, f32)>>>,
     /// Per-divisie output-kanalen: lijst fysieke kanaalindices (leeg = standaard voorste paar 0/1).
@@ -1097,6 +1124,10 @@ impl AppState {
             notation_step_input,
             load_switch_gate: Arc::new(parking_lot::Mutex::new(())),
             app_handle: Arc::new(RwLock::new(None)),
+            asio_restart_advice: Arc::new(RwLock::new(None)),
+            audio_ready: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            frontend_ready: Arc::new((parking_lot::Mutex::new(false), parking_lot::Condvar::new())),
+            backend_reloads: Arc::new(std::sync::atomic::AtomicU32::new(0)),
             pipe_voicings: Arc::new(RwLock::new(std::collections::HashMap::new())),
             division_output_channels: Arc::new(RwLock::new(vec![Vec::new(); 32])),
             profile_channel_override: Arc::new(RwLock::new(None)),
@@ -2972,6 +3003,66 @@ impl AppState {
         cpal::available_hosts().into_iter().map(|h| h.name().to_string()).collect()
     }
 
+    /// ASIO kan in dit proces niet meer starten: advies vastleggen (status) en
+    /// de UI een event sturen. De gebruiker beslist zelf over een herstart.
+    pub fn adviseer_asio_herstart(&self, cfg: &AudioOutputConfig) {
+        let device = cfg.device_name.clone().unwrap_or_else(|| "ASIO".to_string());
+        tracing::warn!(
+            "ASIO-driver '{}' kan in dit proces niet opnieuw initialiseren; herstart-advies naar de UI (geen automatische herstart meer sinds 0.7.43)",
+            device);
+        *self.asio_restart_advice.write() = Some(AsioRestartAdvice { cfg: cfg.clone(), device: device.clone() });
+        if let Some(app) = self.app_handle.read().clone() {
+            use tauri::Emitter;
+            let _ = app.emit("jm-orgue:asio-restart-advised", serde_json::json!({ "device": device }));
+        }
+    }
+
+    /// Herstart op verzoek van de gebruiker (balk "JM-Orgue herstarten") om de
+    /// ASIO-driver terug te krijgen. Legt de gewenste ASIO-configuratie als
+    /// voorkeur vast (de uitgestelde ASIO-wissel na de start past hem toe),
+    /// tilt de live registratie over de herstart heen (one-shot-bestand, zie
+    /// main.rs) en stopt audio/MIDI netjes vóór de herstart (zombie-les
+    /// 2026-07-18: een stervend proces mag het audio-endpoint niet vasthouden).
+    pub fn herstart_voor_asio(&self) -> Result<(), String> {
+        if let Some(a) = self.asio_restart_advice.read().clone() {
+            save_audio_prefs(&self.app_data_dir, &AudioPrefs {
+                host: a.cfg.host_name.clone(),
+                device: a.cfg.device_name.clone(),
+                buffer_frames: a.cfg.buffer_frames,
+                ..load_audio_prefs(&self.app_data_dir)
+            });
+        }
+        let snapshot = (
+            self.current_organ_id.read().clone(),
+            self.drawn_stops.read().clone(),
+            self.active_couplers.read().clone(),
+        );
+        if snapshot.0.is_some() {
+            if let Ok(json) = serde_json::to_string(&snapshot) {
+                let _ = std::fs::write(self.app_data_dir.join("herstart-registratie.json"), json);
+            }
+        }
+        if self.midi_archive.archiving.load(std::sync::atomic::Ordering::Relaxed) {
+            let _ = self.midi_archive_flush(std::time::Duration::from_millis(800));
+        }
+        self.send_audio_command(AudioCommand::AllNotesOff);
+        self.held_notes.write().clear();
+        {
+            let guard = self.audio_player.read();
+            if let Some(p) = guard.as_ref() {
+                p.shutdown_and_wait(std::time::Duration::from_millis(1500));
+            }
+        }
+        let handle = self.app_handle.read().clone();
+        match handle {
+            Some(app) => {
+                tracing::info!("Herstart op verzoek van de gebruiker om ASIO te herstellen");
+                app.restart()
+            }
+            None => Err("Geen app-handle (headless): herstart niet mogelijk".to_string()),
+        }
+    }
+
     /// Switch the audio output (host/device/buffer) and persist the choice.
     ///
     /// The new audio thread starts with empty sample maps, so the caller (the
@@ -3093,6 +3184,24 @@ impl AppState {
         // starten (0x8889000A, device in use). Empirisch geverifieerd op deze
         // hardware (probe 2026-07-07). De retry-ladder vangt het asynchrone
         // vrijgeven van endpoints/driver op.
+        // ASIO-éénrichtingsdeur (0.7.43): werkte ASIO eerder in dit proces maar
+        // is de driver nu vrijgegeven of dood voor enumeratie, dan kan alleen
+        // een verse processtart hem terugbrengen. Een bewuste wissel (UI,
+        // profiel, test-API) wordt dan geweigerd ZONDER de lopende uitgang af
+        // te breken: de organist hoort niets wegvallen, de balk in de UI biedt
+        // de herstart aan. Het noodherstel (force_teardown) heeft geen levende
+        // uitgang meer en valt hieronder meteen door naar de standaarduitgang.
+        let asio_deur_dicht = new_is_asio
+            && crate::audio::asio_worked_this_process()
+            && crate::audio::asio_door_closed();
+        if asio_deur_dicht && !force_teardown {
+            self.adviseer_asio_herstart(&cfg);
+            *self.pending_registration_restore.write() = None;
+            return Ok(outcome(false, false, Some(format!(
+                "ASIO-driver '{}' kan in deze sessie niet opnieuw starten; de huidige uitgang blijft actief. Herstart JM-Orgue om ASIO te herstellen.",
+                cfg.device_name.as_deref().unwrap_or("ASIO"))), self));
+        }
+
         if new_is_asio || old_is_asio || force_teardown {
             // Guard EERST laten vallen via een losse let-binding: een if-let op
             // een blok-temporary hield de write-lock de volle 2s shutdown vast,
@@ -3106,9 +3215,21 @@ impl AppState {
             // Niet-ASIO-doel: kort — als het endpoint bezet is door de idle
             // ASIO-cache helpt wachten niet; de release-stap hieronder wel.
             let ladder: &[u64] = if new_is_asio { &[0, 500, 1200, 2500] } else { &[0, 400] };
-            match build_player_with_retries_deadline(&cfg, ladder, Some(overall_deadline)) {
+            // Deur dicht (alleen nog bereikbaar via noodherstel): de ladder zou
+            // enkel seconden stilte kosten — meteen naar het faalpad.
+            let bouw = if asio_deur_dicht {
+                Err("ASIO-driver kan in dit proces niet opnieuw initialiseren".to_string())
+            } else {
+                build_player_with_retries_deadline(&cfg, ladder, Some(overall_deadline))
+            };
+            match bouw {
                 Ok(p) => {
                     *self.audio_player.write() = Some(p);
+                    if new_is_asio {
+                        // ASIO werkt (weer): eerder advies en deur-vlag vervallen.
+                        crate::audio::asio_clear_door_closed();
+                        *self.asio_restart_advice.write() = None;
+                    }
                     if persist {
                         save_audio_prefs(&self.app_data_dir, &AudioPrefs {
                             host: cfg.host_name.clone(),
@@ -3143,55 +3264,19 @@ impl AppState {
                     // maar is nu onbruikbaar — óf vrijgegeven (voor een WASAPI-
                     // wissel; ASIO4ALL kan per proces maar één keer initialiseren),
                     // óf nog gecachet maar dood voor enumeratie (ESI GIGAPORT eX
-                    // na een WASAPI-uitstap, testorgel-log 2026-08-22). Alleen
-                    // dán lost een verse processtart het gegarandeerd op — de
-                    // uitgestelde ASIO-wissel bij de start doet de wissel dan
-                    // alsnog. Een gewoon afwezig/bezet apparaat (kaart uit,
-                    // USB losgetrokken, andere app claimt hem) valt hier NIET
-                    // onder: dat hoort een nette foutmelding te geven, geen
-                    // herstart. Guard-bestand voorkomt een herstart-lus: bestaat
-                    // hij al (vorige herstart hielp niet), dan vallen we door
-                    // naar het eerlijke faalpad.
-                    if new_is_asio
-                        && crate::audio::asio_worked_this_process()
-                        && crate::audio::asio_door_closed()
-                    {
-                        let guard_path = self.app_data_dir.join("asio-herstart-guard");
-                        if !guard_path.exists() {
-                            // Wens expliciet vastleggen zodat de nieuwe processtart
-                            // hem oppakt (ook wanneer persist niet gezet was).
-                            save_audio_prefs(&self.app_data_dir, &AudioPrefs {
-                                host: cfg.host_name.clone(),
-                                device: cfg.device_name.clone(),
-                                buffer_frames: cfg.buffer_frames,
-                                ..load_audio_prefs(&self.app_data_dir)
-                            });
-                            // Live registratie over de herstart heen tillen: het
-                            // snapshot van deze wissel naar een one-shot-bestand;
-                            // de start leest hem in pending_registration_restore
-                            // en de orgel-load past hem toe.
-                            if let Some(snap) = self.pending_registration_restore.read().clone() {
-                                if let Ok(json) = serde_json::to_string(&snap) {
-                                    let _ = std::fs::write(self.app_data_dir.join("herstart-registratie.json"), json);
-                                }
-                            }
-                            let _ = std::fs::write(&guard_path, "1");
-                            let handle = self.app_handle.read().clone();
-                            if let Some(app) = handle {
-                                tracing::warn!(
-                                    "ASIO kan in dit proces niet opnieuw initialiseren; app herstart om de wissel naar {:?} af te maken",
-                                    cfg.device_name);
-                                app.restart(); // keert niet terug
-                            }
-                            // Geen AppHandle (headless test-API): guard weer weg
-                            // en gewoon doorvallen naar het faalpad.
-                            let _ = std::fs::remove_file(&guard_path);
-                        } else {
-                            // Eerdere herstart loste het niet op: guard opruimen
-                            // (her-armen voor een latere poging) en eerlijk falen.
-                            let _ = std::fs::remove_file(&guard_path);
-                            tracing::warn!("ASIO-herstart hielp eerder niet; wissel faalt zonder nieuwe herstart");
-                        }
+                    // na een WASAPI-uitstap, testorgel-log 2026-08-22). Alleen een
+                    // verse processtart krijgt hem gegarandeerd terug. Tot 0.7.42
+                    // herstartte de app zichzelf hier (app.restart()) — óók vanuit
+                    // het noodherstel van de watchdog, en het guard-bestand tegen
+                    // lussen werd bij elke start gewist. Op het testorgel gaf dat
+                    // "stoort en valt steeds terug naar de bibliotheek". Nu:
+                    // advies naar de UI (balk met herstart-knop, commando
+                    // restart_for_asio) en eerlijk doorvallen naar de vorige of
+                    // de standaarduitgang, zodat er geluid blijft en het orgel
+                    // op het scherm blijft staan. Een gewoon afwezig of bezet
+                    // apparaat valt hier NIET onder: dat geeft alleen de melding.
+                    if asio_deur_dicht {
+                        self.adviseer_asio_herstart(&cfg);
                     }
                     tracing::warn!("Wissel naar {:?}/{:?} definitief mislukt ({}); vorige uitgang herstellen",
                         cfg.host_name, cfg.device_name, e);
@@ -3200,7 +3285,14 @@ impl AppState {
                     // Zonder levende oude player: terugvallen op de laatst-
                     // bewezen-werkende configuratie. Ladder ruimer (WASAPI
                     // geeft endpoints asynchroon vrij; USB/BT komt traag terug).
-                    let herstel_cfg = old_cfg.or_else(|| LAST_GOOD_OUTPUT.lock().clone());
+                    // Was de vorige uitgang zélf de dode ASIO-driver, dan is
+                    // terugbouwen zinloos: meteen door naar de standaardhost.
+                    let asio_dood = |c: &AudioOutputConfig| c.host_name.as_deref()
+                        .map(|h| h.eq_ignore_ascii_case("asio")).unwrap_or(false)
+                        && crate::audio::asio_worked_this_process()
+                        && crate::audio::asio_door_closed();
+                    let herstel_cfg = old_cfg.or_else(|| LAST_GOOD_OUTPUT.lock().clone())
+                        .filter(|c| !asio_dood(c));
                     if let Some(oldc) = herstel_cfg {
                         if let Ok(p) = build_player_with_retries(&oldc, &[0, 600, 1500]) {
                             *self.audio_player.write() = Some(p);

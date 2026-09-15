@@ -4,7 +4,8 @@
     "subtitle": "Wirtualne organy piszczałkowe"
   },
   "splash": {
-    "starting": "Uruchamianie…"
+    "starting": "Uruchamianie…",
+    "audio_starting": "Uruchamianie wyjścia audio (ASIO)…"
   },
   "nav": {
     "orgel": "Organy",
@@ -551,7 +552,10 @@
     "switch_taking_long": "Przełączanie audio trwa dłużej niż zwykle — jeszcze chwila.",
     "switch_failed": "Przełączanie audio nie powiodło się.",
     "overload_warn": "Wątek audio nie mieści się w swoim czasie (szczyt {peak}% czasu bufora przy {frames} ramkach). Słychać to jako trzaski albo zacinanie przy zmianie głosów i crescenda.",
-    "overload_fix": "Ustaw bufor na 128"
+    "overload_fix": "Ustaw bufor na 128",
+    "asio_restart_advice": "Sterownik ASIO „{device}” nie może zostać ponownie uruchomiony w tej sesji. JM-Orgue gra teraz przez {host}. Uruchom JM-Orgue ponownie, aby przywrócić ASIO; registracja zostanie zachowana.",
+    "asio_restart_now": "Uruchom JM-Orgue ponownie",
+    "asio_restart_confirm": "JM-Orgue zamknie się i uruchomi ponownie, aby przywrócić sterownik ASIO. Ustawienia i registracja zostaną najpierw zapisane. Kontynuować?"
   },
   "pistons": {
     "set": "SET — zapisz registrację",

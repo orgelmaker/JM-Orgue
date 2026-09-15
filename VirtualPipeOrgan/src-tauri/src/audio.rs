@@ -169,6 +169,16 @@ pub fn render_overload_count() -> u64 {
     RENDER_OVERLOAD_COUNT.load(Ordering::Relaxed)
 }
 
+/// Framegrootte van de laatste audio-callback (0 vóór de eerste callback).
+/// Onafhankelijk van de gevráágde buffer: houdt de driver zijn eigen paneel-
+/// instelling aan ("Requested buffer … not honored"), dan is buffer_frames in
+/// de status 0 terwijl hier het echte getal staat — het bufferadvies in de UI
+/// kijkt hiernaar (0.7.43).
+static RENDER_FRAMES_NOW: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+pub fn render_frames_now() -> u32 {
+    RENDER_FRAMES_NOW.load(Ordering::Relaxed)
+}
+
 /// Diagnose-teller: hoe vaak een release-staart het EINDE van zijn preload
 /// bereikte terwijl de volledige WAV nog niet geladen was. Elke treffer is een
 /// staart die op ~2 s werd afgekapt (laadlatentie bij grote akkoorden). Alleen
@@ -3221,6 +3231,7 @@ fn run_audio_thread(
             // past blijft FIFO in de queue voor de volgende callback (bij 32
             // frames dus hooguit enkele ms later — onhoorbaar).
             let frames_now = data.len() / channels.max(1);
+            RENDER_FRAMES_NOW.store(frames_now as u32, Ordering::Relaxed);
             // Stemstarts (NoteOn-fan-out, release-spawns van NoteOff én van
             // ReleaseStop): het dure werk, elk met voice-scans onder de
             // write-lock. Óók de NoteOff zelf telt mee (één eenheid per bericht):

@@ -712,7 +712,7 @@
     catch (e) { alert(tx('recording.play_failed').replace('{error}', String(e))); }
   }
   async function deleteArchiveFile(f) {
-    if (!window.confirm(tx('midi_archive.delete_confirm').replace('{name}', f.name))) return;
+    if (!(await window.confirm(tx('midi_archive.delete_confirm').replace('{name}', f.name)))) return;
     try {
       await invoke('midi_archive_delete', { path: f.path });
       await refreshArchiveList();
