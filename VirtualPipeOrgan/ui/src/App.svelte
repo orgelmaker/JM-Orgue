@@ -150,11 +150,22 @@
   async function startUpdate(info = null) {
     const doel = info || updateInfo;
     if (!doel || !doel.update || updateBezig) return;
-    updateInfo = doel; // balk toont vanaf nu deze update (ook bij een handmatige controle)
-    if (await updateBevestigingNodig()) {
-      if (!window.confirm(tx('update.confirm_install'))) return;
-    }
+    // Vlag VÓÓR de eerste await: updateBevestigingNodig() wacht op twee
+    // invokes, en twee snelle klikken (balk + knop in Algemene Instellingen)
+    // zonder geladen orgel kwamen anders allebei voorbij de guard hierboven en
+    // startten de download dubbel. De balk toont pas voortgang zodra
+    // updateVoortgang gezet is, dus tijdens de bevestigingsvraag staat er nog
+    // gewoon de melding met de knoppen.
     updateBezig = true;
+    updateInfo = doel; // balk toont vanaf nu deze update (ook bij een handmatige controle)
+    let bevestigd = true;
+    try {
+      if (await updateBevestigingNodig()) bevestigd = window.confirm(tx('update.confirm_install'));
+    } catch (e) { bevestigd = false; }
+    if (!bevestigd) {
+      updateBezig = false; // geannuleerd: guard weer vrijgeven
+      return;
+    }
     updateFout = null;
     updateVoortgang = { fase: 'download', pct: null, gedaan: 0, totaal: 0 };
     try {
@@ -1533,7 +1544,7 @@
          te installeren, dan staat "Nu bijwerken" ernaast; tijdens het
          downloaden vervangt de voortgang de knoppen. -->
     <div class="update-banner">
-      {#if updateBezig}
+      {#if updateBezig && updateVoortgang}
         <span>
           {updateVoortgang?.fase === 'install' ? $t('update.installing') : $t('update.downloading')}
         </span>

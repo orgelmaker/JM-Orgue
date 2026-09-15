@@ -938,6 +938,7 @@
     "check": "Check for updates",
     "checking": "Checking…",
     "up_to_date": "You are using the latest version.",
+    "check_failed": "Check failed. No internet connection? Please try again later.",
     "install_now": "Update now",
     "install_now_title": "Downloads the update, closes JM-Orgue and restarts it automatically",
     "downloading": "Downloading update…",

@@ -938,6 +938,7 @@
     "check": "Controlla aggiornamenti",
     "checking": "Controllo…",
     "up_to_date": "Stai usando la versione più recente.",
+    "check_failed": "Controllo non riuscito. Nessuna connessione a Internet? Riprova più tardi.",
     "install_now": "Aggiorna ora",
     "install_now_title": "Scarica l'aggiornamento, chiude JM-Orgue e lo riavvia automaticamente",
     "downloading": "Download dell'aggiornamento…",

@@ -184,11 +184,47 @@ pub enum MidiPresetTrigger {
 /// OPGAANDE flank (van onder de drempel naar op/boven de drempel) en wapent hij
 /// pas weer als de waarde onder de hysteresegrens zakt — ruis rond de drempel
 /// blijft dus niet vuren.
-#[derive(Debug, Default)]
+///
+/// Twee soorten hardware pasten niet in dat plaatje en zijn apart afgedekt:
+///
+/// * Knoppen die per druk alléén een puls sturen (voetcontrollers in CC-modus,
+///   DIY-encoders: elke druk 127, nooit een "loslaat"-bericht). Zonder bericht
+///   onder de hysteresegrens zou zo'n knop één keer per sessie vuren. Daarom
+///   telt ook de TIJD: een bericht op/boven de drempel dat meer dan
+///   [`PresetCcGate::PULSPAUZE_MS`] na het vorige bericht van die binding komt,
+///   is een nieuwe druk. Pedaalsweeps sturen om de paar ms en blijven dus onder
+///   de hysterese vallen; knoppulsen liggen ruim verder uit elkaar.
+/// * Knoppen die 0 sturen bij indrukken (en bijvoorbeeld 127 bij loslaten, of
+///   helemaal niets). Een ingeleerde waarde 0 vuurt op de DALENDE flank naar 0,
+///   met gespiegelde hysterese: pas weer scherp als de waarde ver genoeg van 0
+///   af is geweest, of na een pauze.
+#[derive(Debug)]
 pub struct PresetCcGate {
-    /// Per binding (preset, kanaal, controller, drempel): staat de trigger nog
-    /// scherp? Ontbrekende sleutel = scherp, zodat de eerste flank altijd vuurt.
-    armed: std::collections::HashMap<(u8, Option<u8>, u8, u8), bool>,
+    /// Per binding (preset, kanaal, controller, drempel) de laatst bekende
+    /// stand. Ontbrekende sleutel = scherp en "lang stil", zodat de eerste
+    /// flank altijd vuurt.
+    standen: std::collections::HashMap<(u8, Option<u8>, u8, u8), PresetCcStand>,
+    /// Nulpunt van de gate-klok; alleen verschillen tussen berichten tellen.
+    epoch: std::time::Instant,
+}
+
+/// Stand van één CC-binding in [`PresetCcGate`].
+#[derive(Debug, Clone, Copy)]
+struct PresetCcStand {
+    /// Mag de volgende flank vuren? Gaat uit bij vuren en weer aan zodra de
+    /// waarde voorbij de hysteresegrens is geweest.
+    scherp: bool,
+    /// Tijdstip (ms op de gate-klok) van het laatste bericht op deze binding.
+    laatste_ms: u64,
+}
+
+impl Default for PresetCcGate {
+    fn default() -> Self {
+        Self {
+            standen: std::collections::HashMap::new(),
+            epoch: std::time::Instant::now(),
+        }
+    }
 }
 
 impl PresetCcGate {
@@ -197,39 +233,75 @@ impl PresetCcGate {
     /// alsnog salvo's presets vuren.
     const HYSTERESE: u8 = 8;
 
+    /// Stilte waarna een bericht op/boven de drempel als nieuwe druk telt, ook
+    /// zonder tussenliggend bericht onder de hysteresegrens. Pedaalsweeps en
+    /// contactdender sturen om de paar ms; losse knoppulsen liggen minstens zo
+    /// ver uit elkaar.
+    const PULSPAUZE_MS: u64 = 100;
+
     /// Vergeet alle standen. Aanroepen zodra de bindingenlijst opnieuw wordt
     /// gezet of uitgebreid: een nieuwe binding hoort scherp te beginnen en
     /// standen van verdwenen bindingen horen niet te blijven hangen.
     pub fn reset(&mut self) {
-        self.armed.clear();
+        self.standen.clear();
+    }
+
+    /// Huidige tijd op de gate-klok, in ms sinds het aanmaken van de gate.
+    /// De MIDI-thread geeft dit door aan `check_preset_trigger`; tests geven
+    /// een eigen, deterministisch tijdstip mee.
+    pub fn klok_ms(&self) -> u64 {
+        self.epoch.elapsed().as_millis() as u64
     }
 
     /// Mag deze CC-waarde de piston vuren? Werkt de stand van de binding bij.
     ///
-    /// `drempel_ruw` is de ingeleerde waarde; 0 telt als 1, want `waarde >= 0`
-    /// is altijd waar en zou de binding bij élk CC-bericht van deze controller
-    /// laten vuren (en nooit meer laten herwapenen).
+    /// `drempel` is de ingeleerde waarde; `nu_ms` het tijdstip van dit bericht
+    /// op de gate-klok (zie [`PresetCcGate::klok_ms`]).
     fn vuurt_op_flank(
         &mut self,
         sleutel: (u8, Option<u8>, u8, u8),
-        drempel_ruw: u8,
+        drempel: u8,
         waarde: u8,
+        nu_ms: u64,
     ) -> bool {
-        let drempel = drempel_ruw.max(1);
-        let herwapengrens = drempel.saturating_sub(Self::HYSTERESE);
-        let scherp = self.armed.entry(sleutel).or_insert(true);
-        if waarde >= drempel {
-            if *scherp {
-                *scherp = false;
-                return true;
-            }
-            false
+        let vorige = self.standen.get(&sleutel).copied();
+        // Zonder eerder bericht is het per definitie "lang stil".
+        let lang_stil = vorige.map_or(true, |v| {
+            nu_ms.saturating_sub(v.laatste_ms) >= Self::PULSPAUZE_MS
+        });
+        let mut scherp = vorige.map_or(true, |v| v.scherp);
+
+        // Ingeleerd op 0: de knop stuurt 0 bij indrukken. Vuren op de dalende
+        // flank naar 0; herwapenen zodra de waarde ver genoeg van 0 af is
+        // (gespiegelde hysterese, zodat 0↔1-ruis niet blijft vuren).
+        let op_flank = if drempel == 0 {
+            waarde == 0
         } else {
-            if waarde <= herwapengrens {
-                *scherp = true;
+            waarde >= drempel
+        };
+        let voorbij_herwapengrens = if drempel == 0 {
+            waarde >= Self::HYSTERESE
+        } else {
+            waarde <= drempel.saturating_sub(Self::HYSTERESE)
+        };
+
+        let vuurt = if op_flank {
+            // Scherp (net van de andere kant van de hysterese gekomen) óf een
+            // losse puls na een pauze: allebei een nieuwe druk.
+            let nieuw = scherp || lang_stil;
+            if nieuw {
+                scherp = false;
+            }
+            nieuw
+        } else {
+            if voorbij_herwapengrens {
+                scherp = true;
             }
             false
-        }
+        };
+
+        self.standen.insert(sleutel, PresetCcStand { scherp, laatste_ms: nu_ms });
+        vuurt
     }
 }
 
@@ -1571,7 +1643,8 @@ impl AppState {
                         &notation_armed_score, &app_handle_notation);
 
                     // Check for preset triggers first
-                    Self::check_preset_trigger(&msg, &preset_bindings, &preset_trigger_tx, &mut preset_cc_gate);
+                    let gate_nu_ms = preset_cc_gate.klok_ms();
+                    Self::check_preset_trigger(&msg, &preset_bindings, &preset_trigger_tx, &mut preset_cc_gate, gate_nu_ms);
 
                     let cc_claim = Self::cc_claimed_by_crescendo(&msg, &crescendo_binding);
                     if cc_claim && Some(i) != last_cresc_idx {
@@ -1635,7 +1708,8 @@ impl AppState {
                 if matches!(msg, MidiMessage::ControlChange { .. }) {
                     let _ = ble_learn_tx.try_send(msg.clone());
                 }
-                Self::check_preset_trigger(&msg, &preset_bindings, &preset_trigger_tx, &mut preset_cc_gate);
+                let gate_nu_ms = preset_cc_gate.klok_ms();
+                Self::check_preset_trigger(&msg, &preset_bindings, &preset_trigger_tx, &mut preset_cc_gate, gate_nu_ms);
                 let cc_claim = Self::cc_claimed_by_crescendo(&msg, &crescendo_binding);
                 if cc_claim && Some(i) != ble_last_cresc_idx {
                     continue; // tussenliggende pedaalstand — alleen de laatste telt
@@ -2397,12 +2471,16 @@ impl AppState {
     ///
     /// `cc_gate` houdt per CC-binding bij of de trigger scherp staat: een piston
     /// op een continue CC (zweltrede, crescendopedaal) mag alleen op de opgaande
-    /// flank vuren, niet bij elk CC-bericht van de pedaalbeweging.
+    /// flank vuren, niet bij elk CC-bericht van de pedaalbeweging. `nu_ms` is
+    /// het tijdstip van dit bericht op de gate-klok (`cc_gate.klok_ms()` in de
+    /// MIDI-thread; een gesimuleerde klok in tests), zodat losse knoppulsen
+    /// zonder loslaat-bericht ook na een pauze weer vuren.
     fn check_preset_trigger(
         msg: &MidiMessage,
         preset_bindings: &Arc<RwLock<Vec<MidiPresetBinding>>>,
         preset_trigger_tx: &Sender<u8>,
         cc_gate: &mut PresetCcGate,
+        nu_ms: u64,
     ) {
         let bindings = preset_bindings.read();
 
@@ -2415,12 +2493,14 @@ impl AppState {
                  MidiMessage::ControlChange { channel, controller, value }) => {
                     if trigger_ch.map_or(true, |ch| ch == *channel) && *controller == *trigger_cc {
                         // Flankdetectie per binding: vuren bij de overgang naar
-                        // op/boven de drempel, pas herwapenen als de waarde weer
-                        // onder de hysteresegrens zakt.
+                        // op/boven de drempel (of naar 0 bij ingeleerde waarde 0),
+                        // pas herwapenen als de waarde weer voorbij de
+                        // hysteresegrens is geweest — of na een pauze (losse puls).
                         cc_gate.vuurt_op_flank(
                             (binding.preset_num, *trigger_ch, *trigger_cc, *trigger_val),
                             *trigger_val,
                             *value,
+                            nu_ms,
                         )
                     } else {
                         false
@@ -4461,119 +4541,135 @@ mod piston_flank_tests {
         }
     }
 
-    /// Stuurt een reeks CC-waarden door `check_preset_trigger` en geeft terug
-    /// welke presets daarbij gevuurd hebben.
-    fn sweep(
-        bindings: &Arc<RwLock<Vec<MidiPresetBinding>>>,
-        gate: &mut PresetCcGate,
-        tx: &Sender<u8>,
-        rx: &Receiver<u8>,
-        kanaal: u8,
-        controller: u8,
-        waarden: &[u8],
-    ) -> Vec<u8> {
-        for w in waarden {
-            AppState::check_preset_trigger(&cc(kanaal, controller, *w), bindings, tx, gate);
+    /// Tussenpoos van opeenvolgende berichten in een pedaalsweep (ms). Ruim
+    /// onder `PresetCcGate::PULSPAUZE_MS`, zoals echte pedalen sturen.
+    const SWEEP_STAP_MS: u64 = 5;
+
+    /// Proefopstelling met een GESIMULEERDE klok: `check_preset_trigger` krijgt
+    /// het tijdstip expliciet mee, dus de wandklok speelt in deze tests geen rol.
+    struct Proef {
+        bindings: Arc<RwLock<Vec<MidiPresetBinding>>>,
+        gate: PresetCcGate,
+        tx: Sender<u8>,
+        rx: Receiver<u8>,
+        klok_ms: u64,
+    }
+
+    impl Proef {
+        fn new(bindings: Vec<MidiPresetBinding>) -> Self {
+            let (tx, rx) = bounded::<u8>(64);
+            Self {
+                bindings: Arc::new(RwLock::new(bindings)),
+                gate: PresetCcGate::default(),
+                tx,
+                rx,
+                klok_ms: 1_000,
+            }
         }
-        rx.try_iter().collect()
+
+        /// Stuurt één bericht, `na_ms` ms na het vorige.
+        fn stuur(&mut self, msg: MidiMessage, na_ms: u64) {
+            self.klok_ms += na_ms;
+            AppState::check_preset_trigger(&msg, &self.bindings, &self.tx, &mut self.gate, self.klok_ms);
+        }
+
+        /// Stuurt CC-waarden `tussenpoos_ms` uit elkaar en geeft terug welke
+        /// presets daarbij gevuurd hebben.
+        fn reeks(&mut self, kanaal: u8, controller: u8, waarden: &[u8], tussenpoos_ms: u64) -> Vec<u8> {
+            for w in waarden {
+                self.stuur(cc(kanaal, controller, *w), tussenpoos_ms);
+            }
+            self.gevuurd()
+        }
+
+        /// Pedaalsweep: waarden om de paar ms.
+        fn sweep(&mut self, kanaal: u8, controller: u8, waarden: &[u8]) -> Vec<u8> {
+            self.reeks(kanaal, controller, waarden, SWEEP_STAP_MS)
+        }
+
+        /// Losse knoppulsen: waarden minstens een pulspauze uit elkaar.
+        fn pulsen(&mut self, kanaal: u8, controller: u8, waarden: &[u8]) -> Vec<u8> {
+            self.reeks(kanaal, controller, waarden, 2 * PresetCcGate::PULSPAUZE_MS)
+        }
+
+        fn gevuurd(&mut self) -> Vec<u8> {
+            self.rx.try_iter().collect()
+        }
     }
 
     #[test]
     fn piston_op_continue_cc_vuurt_alleen_op_de_opgaande_flank() {
         // De klacht: een piston ingeleerd op dezelfde CC als een pedaal gaf bij
         // één pedaalbeweging tientallen preset-triggers.
-        let bindings = Arc::new(RwLock::new(vec![binding_cc(3, Some(0), 11, 127)]));
-        let (tx, rx) = bounded::<u8>(64);
-        let mut gate = PresetCcGate::default();
+        let mut p = Proef::new(vec![binding_cc(3, Some(0), 11, 127)]);
 
         // Pedaal van dicht naar open: pas bij 127 één keer vuren, daarna niet meer.
-        let gevuurd = sweep(&bindings, &mut gate, &tx, &rx, 0, 11,
-            &[0, 20, 60, 100, 126, 127, 127, 127]);
-        assert_eq!(gevuurd, vec![3]);
+        assert_eq!(p.sweep(0, 11, &[0, 20, 60, 100, 126, 127, 127, 127]), vec![3]);
 
         // Pedaal terug en weer omhoog: precies één nieuwe trigger.
-        let gevuurd = sweep(&bindings, &mut gate, &tx, &rx, 0, 11, &[110, 60, 0, 127]);
-        assert_eq!(gevuurd, vec![3]);
+        assert_eq!(p.sweep(0, 11, &[110, 60, 0, 127]), vec![3]);
     }
 
     #[test]
     fn ruis_rond_de_drempel_herwapent_niet() {
         // Drempel 64 → herwapengrens 56. Trillen tussen 58 en 70 mag maar één
         // keer vuren; pas onder 56 staat de piston weer scherp.
-        let bindings = Arc::new(RwLock::new(vec![binding_cc(1, Some(0), 7, 64)]));
-        let (tx, rx) = bounded::<u8>(64);
-        let mut gate = PresetCcGate::default();
+        let mut p = Proef::new(vec![binding_cc(1, Some(0), 7, 64)]);
 
-        let gevuurd = sweep(&bindings, &mut gate, &tx, &rx, 0, 7,
-            &[63, 64, 70, 62, 65, 58, 66, 60, 64]);
-        assert_eq!(gevuurd, vec![1]);
-
-        let gevuurd = sweep(&bindings, &mut gate, &tx, &rx, 0, 7, &[55, 64]);
-        assert_eq!(gevuurd, vec![1]);
+        assert_eq!(p.sweep(0, 7, &[63, 64, 70, 62, 65, 58, 66, 60, 64]), vec![1]);
+        assert_eq!(p.sweep(0, 7, &[55, 64]), vec![1]);
     }
 
     #[test]
     fn ingeleerde_waarde_nul_vuurt_niet_bij_elk_bericht() {
-        // Een knop die 0 stuurde levert drempel 0; zonder ondergrens zou
-        // `waarde >= 0` bij élk CC-bericht vuren.
-        let bindings = Arc::new(RwLock::new(vec![binding_cc(2, Some(0), 20, 0)]));
-        let (tx, rx) = bounded::<u8>(64);
-        let mut gate = PresetCcGate::default();
+        // Een knop die 0 stuurde levert drempel 0. Vroeger werd dat stilzwijgend
+        // drempel 1, waardoor zo'n knop pas bij het LOSLATEN (127) vuurde. Nu is
+        // de 0 zelf de flank: vuren op de eerste 0, niet op de herhalingen die
+        // om de paar ms volgen, en niet op de 127.
+        let mut p = Proef::new(vec![binding_cc(2, Some(0), 20, 0)]);
 
-        let gevuurd = sweep(&bindings, &mut gate, &tx, &rx, 0, 20, &[0, 0, 0]);
-        assert!(gevuurd.is_empty(), "waarde 0 is de ruststand, niet de flank");
+        assert_eq!(p.sweep(0, 20, &[0, 0, 0]), vec![2],
+            "de eerste 0 is de flank, de herhalingen vlak erna niet");
 
-        let gevuurd = sweep(&bindings, &mut gate, &tx, &rx, 0, 20, &[127, 127, 0, 127]);
-        assert_eq!(gevuurd, vec![2, 2], "knop indrukken, loslaten, indrukken");
+        assert_eq!(p.sweep(0, 20, &[127, 127, 0, 127]), vec![2],
+            "loslaten (127) vuurt niet, opnieuw indrukken (0) wel");
     }
 
     #[test]
     fn andere_controller_of_kanaal_raakt_de_stand_niet() {
-        let bindings = Arc::new(RwLock::new(vec![binding_cc(5, Some(1), 11, 127)]));
-        let (tx, rx) = bounded::<u8>(64);
-        let mut gate = PresetCcGate::default();
+        let mut p = Proef::new(vec![binding_cc(5, Some(1), 11, 127)]);
 
         // Ander kanaal en andere CC: nooit vuren, en de eigen stand blijft scherp.
-        let gevuurd = sweep(&bindings, &mut gate, &tx, &rx, 0, 11, &[127, 0, 127]);
-        assert!(gevuurd.is_empty());
-        let gevuurd = sweep(&bindings, &mut gate, &tx, &rx, 1, 12, &[127, 0, 127]);
-        assert!(gevuurd.is_empty());
-        let gevuurd = sweep(&bindings, &mut gate, &tx, &rx, 1, 11, &[127]);
-        assert_eq!(gevuurd, vec![5]);
+        assert!(p.sweep(0, 11, &[127, 0, 127]).is_empty());
+        assert!(p.sweep(1, 12, &[127, 0, 127]).is_empty());
+        assert_eq!(p.sweep(1, 11, &[127]), vec![5]);
     }
 
     #[test]
     fn twee_pistons_op_dezelfde_cc_houden_hun_eigen_stand() {
-        let bindings = Arc::new(RwLock::new(vec![
+        let mut p = Proef::new(vec![
             binding_cc(1, Some(0), 11, 64),
             binding_cc(2, Some(0), 11, 127),
-        ]));
-        let (tx, rx) = bounded::<u8>(64);
-        let mut gate = PresetCcGate::default();
+        ]);
 
-        let gevuurd = sweep(&bindings, &mut gate, &tx, &rx, 0, 11, &[0, 64, 90, 127, 127]);
-        assert_eq!(gevuurd, vec![1, 2]);
+        assert_eq!(p.sweep(0, 11, &[0, 64, 90, 127, 127]), vec![1, 2]);
     }
 
     #[test]
     fn reset_zet_alle_bindingen_weer_scherp() {
-        let bindings = Arc::new(RwLock::new(vec![binding_cc(4, Some(0), 11, 127)]));
-        let (tx, rx) = bounded::<u8>(64);
-        let mut gate = PresetCcGate::default();
+        let mut p = Proef::new(vec![binding_cc(4, Some(0), 11, 127)]);
 
-        assert_eq!(sweep(&bindings, &mut gate, &tx, &rx, 0, 11, &[127, 127]), vec![4]);
-        gate.reset();
-        assert_eq!(sweep(&bindings, &mut gate, &tx, &rx, 0, 11, &[127]), vec![4]);
+        assert_eq!(p.sweep(0, 11, &[127, 127]), vec![4]);
+        p.gate.reset();
+        assert_eq!(p.sweep(0, 11, &[127]), vec![4]);
     }
 
     #[test]
     fn noten_en_programmawissels_blijven_ongemoeid() {
-        let bindings = Arc::new(RwLock::new(vec![
+        let mut p = Proef::new(vec![
             MidiPresetBinding { preset_num: 6, trigger: MidiPresetTrigger::Note { channel: Some(0), note: 36 } },
             MidiPresetBinding { preset_num: 7, trigger: MidiPresetTrigger::ProgramChange { channel: Some(0), program: 2 } },
-        ]));
-        let (tx, rx) = bounded::<u8>(64);
-        let mut gate = PresetCcGate::default();
+        ]);
 
         for msg in [
             MidiMessage::NoteOn { channel: 0, note: 36, velocity: 100 },
@@ -4582,8 +4678,90 @@ mod piston_flank_tests {
             MidiMessage::ProgramChange { channel: 0, program: 2 },
             MidiMessage::ProgramChange { channel: 0, program: 2 },
         ] {
-            AppState::check_preset_trigger(&msg, &bindings, &tx, &mut gate);
+            p.stuur(msg, SWEEP_STAP_MS);
         }
-        assert_eq!(rx.try_iter().collect::<Vec<_>>(), vec![6, 6, 7, 7]);
+        assert_eq!(p.gevuurd(), vec![6, 6, 7, 7]);
+    }
+
+    #[test]
+    fn puls_zonder_loslaatbericht_vuurt_bij_elke_druk() {
+        // Voetcontrollers in CC-modus en DIY-encoders sturen per druk alleen
+        // één 127, nooit iets eronder. De hysterese alleen zou zo'n knop één
+        // keer per sessie laten vuren; de pauze tussen de drukken herwapent.
+        let mut p = Proef::new(vec![binding_cc(3, Some(0), 22, 127)]);
+
+        assert_eq!(p.pulsen(0, 22, &[127, 127, 127]), vec![3, 3, 3],
+            "drie losse drukken = drie triggers");
+
+        // Precies op de pulspauze telt ook als nieuwe druk.
+        assert_eq!(p.reeks(0, 22, &[127], PresetCcGate::PULSPAUZE_MS), vec![3]);
+
+        // Contactdender: dezelfde druk nog eens binnen enkele ms is géén nieuwe druk.
+        assert_eq!(p.reeks(0, 22, &[127, 127], 3), Vec::<u8>::new(),
+            "herhaling vlak na de druk is dender, geen tweede druk");
+        assert_eq!(p.pulsen(0, 22, &[127]), vec![3], "de volgende echte druk vuurt weer");
+    }
+
+    #[test]
+    fn pedaalsweep_heen_en_terug_vuurt_hooguit_een_keer() {
+        // Drempels midden op de schaal en op het maximum: een volledige
+        // pedaalbeweging 0→127→0 mag per binding hooguit één trigger geven.
+        let mut p = Proef::new(vec![
+            binding_cc(1, Some(0), 11, 64),
+            binding_cc(2, Some(0), 11, 100),
+            binding_cc(3, Some(0), 11, 127),
+        ]);
+
+        let heen: Vec<u8> = (0..=127).collect();
+        let terug: Vec<u8> = (0..=127).rev().collect();
+        let mut sweep = heen;
+        sweep.extend(terug);
+
+        assert_eq!(p.sweep(0, 11, &sweep), vec![1, 2, 3],
+            "elke binding precies één keer, op de opgaande flank");
+
+        // Tweede sweep meteen erachteraan: opnieuw één keer per binding.
+        assert_eq!(p.sweep(0, 11, &sweep), vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn nul_bij_indrukken_vuurt_op_de_nul_niet_op_de_127() {
+        // Knop die 0 stuurt bij indrukken en 127 bij loslaten (ingeleerd op 0).
+        let mut p = Proef::new(vec![binding_cc(4, Some(0), 30, 0)]);
+
+        p.stuur(cc(0, 30, 0), 500);      // indrukken
+        assert_eq!(p.gevuurd(), vec![4], "vuurt op het indrukken (0)");
+        p.stuur(cc(0, 30, 127), 80);     // loslaten
+        assert_eq!(p.gevuurd(), Vec::<u8>::new(), "loslaten (127) vuurt niet");
+        p.stuur(cc(0, 30, 0), 300);      // opnieuw indrukken
+        assert_eq!(p.gevuurd(), vec![4]);
+        p.stuur(cc(0, 30, 127), 80);
+        assert_eq!(p.gevuurd(), Vec::<u8>::new());
+
+        // Knop die alléén 0-pulsen stuurt: vuurt bij elke druk dankzij de pauze.
+        let mut q = Proef::new(vec![binding_cc(5, Some(0), 31, 0)]);
+        assert_eq!(q.pulsen(0, 31, &[0, 0, 0]), vec![5, 5, 5]);
+
+        // Ruis 0↔1 om de paar ms (gespiegelde hysterese): niet blijven vuren.
+        assert_eq!(q.sweep(0, 31, &[1, 0, 1, 0, 1, 0]), Vec::<u8>::new());
+        // Pas als de waarde ver genoeg van 0 af is geweest, is de volgende 0 weer een druk.
+        assert_eq!(q.sweep(0, 31, &[8, 0]), vec![5]);
+    }
+
+    #[test]
+    fn ruis_120_127_om_de_paar_ms_vuurt_niet_herhaald() {
+        // Pedaal tegen de bovenaanslag dat tussen 120 en 127 trilt: één trigger,
+        // geen salvo. 120 ligt binnen de hysterese (herwapengrens 119).
+        let mut p = Proef::new(vec![binding_cc(6, Some(0), 11, 127)]);
+
+        let ruis: Vec<u8> = [127u8, 120].iter().copied().cycle().take(40).collect();
+        assert_eq!(p.reeks(0, 11, &ruis, 3), vec![6]);
+
+        // Een waarde onder de drempel na een lange stilte vuurt óók niet: de
+        // tijdregel geldt alleen voor berichten op/boven de drempel.
+        assert_eq!(p.reeks(0, 11, &[120], 2_000), Vec::<u8>::new());
+
+        // Een echte nieuwe druk na een pauze vuurt wel.
+        assert_eq!(p.reeks(0, 11, &[127], 2_000), vec![6]);
     }
 }

@@ -938,6 +938,7 @@
     "check": "Controleer op updates",
     "checking": "Controleren…",
     "up_to_date": "Je gebruikt de nieuwste versie.",
+    "check_failed": "Controleren mislukt. Geen internetverbinding? Probeer het later opnieuw.",
     "install_now": "Nu bijwerken",
     "install_now_title": "Downloadt de update, sluit JM-Orgue af en start automatisch opnieuw op",
     "downloading": "Update downloaden…",

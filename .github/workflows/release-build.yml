@@ -130,6 +130,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Zelfde poort als in build-windows: ook de dmg en het macOS-updatebestand
+      # dragen de versie uit tauri.conf.json, en latest.json (afgeleid van de
+      # tag) noemt straks beide platformen.
+      - name: Controleer tag tegen versie in de app
+        if: github.event_name == 'release'
+        shell: bash
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          conf=$(python3 -c "import json;print(json.load(open('src-tauri/tauri.conf.json',encoding='utf-8'))['version'])")
+          if [ "${TAG#v}" != "$conf" ]; then
+            echo "Tag $TAG hoort bij versie ${TAG#v}, maar de app zegt $conf" >&2
+            exit 1
+          fi
+          echo "Tag en app-versie komen overeen: $conf"
+
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -202,16 +218,24 @@ jobs:
   # staat, ziet niemand een update en kan er dus ook geen update aangeboden
   # worden waarvan de installer nog ontbreekt.
   #
-  # always() + expliciete controle op build-windows: mislukt alleen de
+  # !cancelled() + expliciete controle op build-windows: mislukt alleen de
   # macOS-bouw, dan krijgen Windows-gebruikers tóch hun update (het script maakt
   # latest.json dan Windows-only). Mislukt Windows, dan wordt er niets geschreven.
+  #
+  # Bewust NIET always(): dat is óók waar wanneer de beheerder de run ANNULEERT.
+  # build-windows is dan meestal al klaar, latest.json kwam alsnog online en
+  # iedere Windows-gebruiker kreeg precies de update aangeboden die
+  # tegengehouden moest worden. Met !cancelled() blijft deze taak bij een
+  # annulering achterwege (en de installers zonder latest.json zijn onzichtbaar
+  # voor de updater). De ${{ }} zijn verplicht: een expressie die met ! begint
+  # leest YAML anders als tag.
   #
   # Bewust INLINE (geen `uses: ./.github/workflows/...`): bij herbruikbare
   # workflows slaat "Re-run failed jobs" de downstream-taak vaker over. Gaat het
   # tóch mis, dan is er de handmatige noodknop: Actions -> updater-json.
   publish-updater-json:
     needs: [build-windows, build-macos]
-    if: always() && github.event_name == 'release' && needs.build-windows.result == 'success'
+    if: ${{ !cancelled() && github.event_name == 'release' && needs.build-windows.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

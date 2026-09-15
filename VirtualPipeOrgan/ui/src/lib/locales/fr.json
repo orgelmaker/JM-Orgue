@@ -938,6 +938,7 @@
     "check": "Vérifier les mises à jour",
     "checking": "Vérification…",
     "up_to_date": "Vous utilisez la dernière version.",
+    "check_failed": "Vérification impossible. Pas de connexion Internet ? Réessayez plus tard.",
     "install_now": "Mettre à jour",
     "install_now_title": "Télécharge la mise à jour, ferme JM-Orgue et le redémarre automatiquement",
     "downloading": "Téléchargement de la mise à jour…",

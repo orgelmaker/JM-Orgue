@@ -67,9 +67,17 @@ const releaseUrl = (version) => {
  * is dan het handvat van de plugin). Bij auto=false is alleen de
  * downloadpagina beschikbaar.
  *
- * Faalt geluidloos: een update-controle mag de opstart nooit storen.
+ * GOOIT wanneer er niet gecontroleerd kón worden (geen internet, firewall,
+ * GitHub-rate-limit): null betekent dus écht "geen nieuwere versie", niet
+ * "weet ik niet". De knop "Controleer op updates" toont dan "Controleren
+ * mislukt"; de stille controle bij het opstarten (App.svelte: runUpdateCheck)
+ * vangt de fout zelf af en blijft stil.
  */
 export async function zoekUpdate(currentVersion) {
+  // Is latest.json gezien en zegt die dat we bij zijn? Dan is de GitHub-API
+  // hieronder alleen nog een extraatje en mag een mislukking daarvan niet als
+  // "kon niet controleren" tellen.
+  let latestJsonGezien = false;
   if (autoUpdateOndersteund()) {
     try {
       const update = await check({ timeout: 15000 });
@@ -86,12 +94,21 @@ export async function zoekUpdate(currentVersion) {
       // null = latest.json gezien en we zijn bij. Tóch nog even de GitHub-API:
       // vlak na het publiceren van een release staan de installers (en dus
       // latest.json) er nog niet, terwijl de tag al wel bestaat.
+      latestJsonGezien = true;
     } catch (e) {
       console.warn('Update-controle via latest.json mislukt:', e);
     }
   }
-  const upd = await checkViaGitHub(currentVersion);
-  return upd ? { ...upd, notes: '', update: null, auto: false } : null;
+  try {
+    const upd = await checkViaGitHub(currentVersion);
+    return upd ? { ...upd, notes: '', update: null, auto: false } : null;
+  } catch (e) {
+    if (latestJsonGezien) {
+      console.warn('GitHub-API onbereikbaar, maar latest.json zei al dat we bij zijn:', e);
+      return null;
+    }
+    throw new Error(`Kon niet op updates controleren: ${e?.message || e}`);
+  }
 }
 
 /**

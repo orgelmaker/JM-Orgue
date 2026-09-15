@@ -6819,9 +6819,17 @@ fn image_copy_stem(id: &str) -> String {
 /// `read_dir` en niet alleen `is_dir()`: een netwerkpad kan bestaan en tóch
 /// onleesbaar zijn. De mappaden volgen `find_organ_image`: bij een
 /// orgelbestand de map eromheen, bij een sample-map het pad zelf.
+///
+/// Hauptwerk: de zoektocht loopt óók door `<pakketwortel>/OrganInstallationPackages/<pakket>/`
+/// (daar staat de consolefoto, niet naast de definitie). Staan de pakketten op
+/// een losgekoppelde schijf terwijl de definitiemap wél leesbaar is, dan is er
+/// dus NIET doorzocht — anders lag "geen foto" voorgoed vast. Alleen als de
+/// pakketmap leesbaar was, telt de zoektocht als gedaan; geen pakketwortel
+/// (`find_package_root` = None, de pakketten zijn onvindbaar) telt evenmin.
 fn afbeeldingsbron_leesbaar(source_path: &str, source_type: &str) -> bool {
     let src = Path::new(source_path);
-    let dir = if source_type == "organ_file" {
+    let is_organ_file = source_type == "organ_file";
+    let dir = if is_organ_file {
         match src.parent() {
             Some(p) => p.to_path_buf(),
             None => return false,
@@ -6829,7 +6837,16 @@ fn afbeeldingsbron_leesbaar(source_path: &str, source_type: &str) -> bool {
     } else {
         src.to_path_buf()
     };
-    std::fs::read_dir(&dir).is_ok()
+    if std::fs::read_dir(&dir).is_err() {
+        return false;
+    }
+    if is_organ_file && vpo_sampler::is_hauptwerk_path(src) {
+        return match vpo_sampler::find_package_root(src) {
+            Some(root) => std::fs::read_dir(root.join("OrganInstallationPackages")).is_ok(),
+            None => false,
+        };
+    }
+    true
 }
 
 /// Afbeelding voor een bibliotheekkaart, op ID (= genormaliseerd bronpad).
@@ -7801,6 +7818,38 @@ mod afbeeldingsbron_tests {
         assert!(afbeeldingsbron_leesbaar(&d.join("weg.organ").to_string_lossy(), "organ_file"));
         // Een bestand als sample-map opgegeven is geen leesbare map.
         assert!(!afbeeldingsbron_leesbaar(&odf.to_string_lossy(), "sample_directory"));
+
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Hauptwerk: de foto staat in OrganInstallationPackages/<pakket>/, niet
+    /// naast de definitie. Een leesbare definitiemap zonder bereikbare
+    /// pakketten (losgekoppelde schijf) mag dus NIET als "doorzocht" gelden.
+    #[test]
+    fn hauptwerk_zonder_bereikbare_pakketten_geldt_niet_als_gezocht() {
+        let d = std::env::temp_dir().join("jm_afbeeldingsbron_hw");
+        let _ = std::fs::remove_dir_all(&d);
+        let defs = d.join("OrganDefinitions");
+        let pakketten = d.join("OrganInstallationPackages");
+        std::fs::create_dir_all(&defs).unwrap();
+        std::fs::create_dir_all(pakketten.join("000690")).unwrap();
+        let odf = defs.join("Set.Organ_Hauptwerk_xml");
+        std::fs::write(&odf, b"<Hauptwerk/>").unwrap();
+        let odf_s = odf.to_string_lossy().to_string();
+
+        // Pakketten bereikbaar: definitiemap én pakketmap leesbaar -> doorzocht.
+        assert!(afbeeldingsbron_leesbaar(&odf_s, "organ_file"));
+
+        // Pakketten weg (schijf eruit): definitiemap nog leesbaar, maar de
+        // plek waar de foto had moeten staan was onbereikbaar -> niet doorzocht.
+        std::fs::remove_dir_all(&pakketten).unwrap();
+        assert!(afbeeldingsbron_leesbaar(&defs.to_string_lossy(), "sample_directory"));
+        assert!(!afbeeldingsbron_leesbaar(&odf_s, "organ_file"));
+
+        // GrandOrgue (.organ) in dezelfde map kent geen pakketten: onveranderd.
+        let go = defs.join("set.organ");
+        std::fs::write(&go, b"[Organ]").unwrap();
+        assert!(afbeeldingsbron_leesbaar(&go.to_string_lossy(), "organ_file"));
 
         let _ = std::fs::remove_dir_all(&d);
     }

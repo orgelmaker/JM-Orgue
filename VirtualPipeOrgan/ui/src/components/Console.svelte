@@ -323,7 +323,7 @@
 
   // ===== Over & feedback (GitHub) =====
   let appVersion = '';
-  let manualUpdateResult = null; // null | 'checking' | 'uptodate' | { version, url }
+  let manualUpdateResult = null; // null | 'checking' | 'uptodate' | 'failed' | { version, url }
   async function loadAppVersion() {
     try {
       const { getVersion } = await import('@tauri-apps/api/app');
@@ -387,7 +387,12 @@
       manualUpdateMac = !autoUpdateOndersteund();
       const upd = await zoekUpdate(appVersion);
       manualUpdateResult = upd || 'uptodate';
-    } catch (e) { manualUpdateResult = 'uptodate'; }
+    } catch (e) {
+      // Geen internet, firewall of GitHub-rate-limit: dat is géén "je bent
+      // bij". Eigen melding, en de knop blijft actief voor een nieuwe poging.
+      console.warn('Handmatige update-controle mislukt:', e);
+      manualUpdateResult = 'failed';
+    }
   }
   async function openManualUpdate() {
     if (manualUpdateResult && manualUpdateResult.url) {
@@ -6373,6 +6378,8 @@
               {/if}
               {#if manualUpdateResult === 'uptodate'}
                 <p class="settings-hint" style="margin: 0.4rem 0 0;">{$t('update.up_to_date')}</p>
+              {:else if manualUpdateResult === 'failed'}
+                <p class="settings-hint" style="color: var(--warning, #db5); margin: 0.4rem 0 0;">{$t('update.check_failed')}</p>
               {:else if manualUpdateResult && manualUpdateResult.version}
                 <p class="settings-hint" style="margin: 0.4rem 0 0;">
                   {$t('update.new_version_prefix')} <b>{manualUpdateResult.version}</b> {$t('update.new_version_suffix')}

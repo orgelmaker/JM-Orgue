@@ -26,9 +26,13 @@ export function compareVersions(a, b) {
   return 0;
 }
 
-// Stil checken op een nieuwere release. Geeft {version, url} terug wanneer er
-// een nieuwere versie is, anders null. Faalt geluidloos (geen internet, repo
-// nog niet aangemaakt, rate-limit): update-check mag de opstart nooit storen.
+// Checken op een nieuwere release. Geeft {version, url} terug wanneer er een
+// nieuwere versie is, null als we bij zijn — en GOOIT wanneer er niet
+// gecontroleerd kón worden (geen internet, firewall, GitHub-rate-limit, repo
+// nog niet aangemaakt). Dat onderscheid is nodig voor de knop "Controleer op
+// updates": zonder internet zei die eerst "Je gebruikt de nieuwste versie".
+// De stille controle bij het opstarten vangt de fout zelf af (App.svelte:
+// runUpdateCheck) — een update-check mag de opstart nooit storen.
 //
 // Dit is sinds 0.7.40 de TERUGVAL-route: lib/updater.js probeert eerst
 // latest.json van de release (dan kan er met één knop bijgewerkt worden) en
@@ -36,17 +40,18 @@ export function compareVersions(a, b) {
 // het publiceren van een release (installers nog niet klaar), of zonder
 // latest.json. De melding biedt dan alleen de downloadpagina.
 export async function checkForUpdate(currentVersion) {
-  try {
-    if (GITHUB_REPO.startsWith('INVULLEN')) return null; // nog niet gekoppeld
-    const res = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/releases/latest`, {
-      headers: { Accept: 'application/vnd.github+json' },
-    });
-    if (!res.ok) return null;
-    const rel = await res.json();
-    const latest = String(rel.tag_name || '').replace(/^v/, '');
-    if (!latest || compareVersions(latest, currentVersion) <= 0) return null;
-    return { version: latest, url: rel.html_url || githubRepoUrl() + '/releases' };
-  } catch (e) {
-    return null;
+  if (GITHUB_REPO.startsWith('INVULLEN')) return null; // nog niet gekoppeld
+  // fetch() gooit zelf bij een netwerkfout (TypeError: Failed to fetch).
+  const res = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/releases/latest`, {
+    headers: { Accept: 'application/vnd.github+json' },
+  });
+  if (!res.ok) {
+    // 403/429 = rate-limit, 404 = geen release, 5xx = GitHub zelf: allemaal
+    // "kon niet controleren", geen bewijs dat we bij zijn.
+    throw new Error(`GitHub-API antwoordde HTTP ${res.status}`);
   }
+  const rel = await res.json();
+  const latest = String(rel.tag_name || '').replace(/^v/, '');
+  if (!latest || compareVersions(latest, currentVersion) <= 0) return null;
+  return { version: latest, url: rel.html_url || githubRepoUrl() + '/releases' };
 }

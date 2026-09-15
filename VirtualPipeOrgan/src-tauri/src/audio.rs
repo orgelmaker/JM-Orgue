@@ -878,13 +878,125 @@ fn release_fade_ms(midi_note: u8) -> f32 {
     }
 }
 
+/// Eén stuk opruimwerk voor de janitor-thread (het `gc_tx`-kanaal in `start`).
+/// `Boxed` is de algemene route voor grote structuren (oude sample-maps, een
+/// hele stemmenlijst bij een orgelwissel). `Sample` en `Preload` dragen de Arc
+/// van één losse sample rechtstreeks — zonder Box, dus zonder allocatie in de
+/// audio-callback — voor het pad dat per eindigende stem kan lopen.
+/// De velden worden nergens gelezen: ze bestaan om op de janitor-thread
+/// gedropt te worden (vandaar de dead_code-uitzondering).
+#[allow(dead_code)]
+enum GcItem {
+    Boxed(Box<dyn std::any::Any + Send>),
+    Sample(SampleRef),
+    Preload(Arc<PreloadBuffer>),
+}
+
+/// Afvoerluik van de audio-callback naar de janitor-thread: de zender plus de
+/// wachtrij voor wat de janitor even niet aankon (kanaal vol). Dat wordt
+/// vastgehouden en de volgende callback opnieuw aangeboden — NOOIT inline
+/// gedropt, want dat is precies de drop-storm die de janitor voorkomt.
+///
+/// Waarom óók per stem (0.7.40): boven de RAM-kap (`SAMPLES_BYTES_CAP`) haalt
+/// de eviction de Arc netjes uit de samples-map en stuurt die naar de janitor,
+/// maar een KLINKENDE pijp houdt intussen zijn eigen `SampleRef` vast en de
+/// decode_cache bewaart alleen een Weak. Eindigt zo'n stem, dan was het
+/// verwijderen uit de stemmenlijst de plek waar de LAATSTE Arc viel: een
+/// `Vec<f32>` van 1-3 MB gaat dan via HeapFree/NtFreeVirtualMemory terug naar
+/// het systeem (honderden pagina's plus TLB-shootdowns, ~50-150 µs per stuk).
+/// Bij een akkoordloslating waarbij 5-10 stemmen in dezelfde callback eindigen
+/// is dat 0,5-3 ms — ruim over een blok van 32 frames. Daarom gaat de bron van
+/// elke verdwijnende stem eerst langs [`GcSink::dispose_voice`].
+struct GcSink {
+    tx: Sender<GcItem>,
+    backlog: Vec<GcItem>,
+}
+
+impl GcSink {
+    fn new(tx: Sender<GcItem>) -> Self {
+        // Vooraf gereserveerd: een push in de wachtrij mag in de callback
+        // normaal gesproken geen allocatie kosten.
+        Self { tx, backlog: Vec::with_capacity(64) }
+    }
+
+    /// Eén item afvoeren; bij een vol kanaal in de wachtrij (nooit droppen).
+    #[inline]
+    fn send(&mut self, item: GcItem) {
+        if let Err(e) = self.tx.try_send(item) {
+            self.backlog.push(e.into_inner());
+        }
+    }
+
+    /// Grote structuur (oude map, hele stemmenlijst) afvoeren. De Box is hier
+    /// één kleine allocatie op het zeldzame orgelwissel-pad, niet per stem.
+    fn send_boxed<T: std::any::Any + Send>(&mut self, garbage: T) {
+        self.send(GcItem::Boxed(Box::new(garbage)));
+    }
+
+    /// Achtergestelde items alsnog aanbieden (één keer per callback).
+    fn flush_backlog(&mut self) {
+        while let Some(item) = self.backlog.pop() {
+            if let Err(e) = self.tx.try_send(item) {
+                self.backlog.push(e.into_inner());
+                break;
+            }
+        }
+    }
+
+    /// Laat een `SampleRef` los die de callback niet meer nodig heeft. Houdt
+    /// de samples-map of een klinkende stem de Arc nog vast, dan is loslaten
+    /// alleen een tellerdecrement en gebeurt dat gewoon hier. Zijn wij de
+    /// LAATSTE houder, dan gaat de Arc naar de janitor — de eigenlijke
+    /// deallocatie hoort niet in de callback.
+    #[inline]
+    fn dispose_sample(&mut self, sample: SampleRef) {
+        if Arc::strong_count(&sample) > 1 {
+            return; // alleen een teller: de data blijft leven
+        }
+        self.send(GcItem::Sample(sample));
+    }
+
+    /// Idem voor een preload-buffer (attack-fragment, honderden kB).
+    #[inline]
+    fn dispose_preload(&mut self, preload: Arc<PreloadBuffer>) {
+        if Arc::strong_count(&preload) > 1 {
+            return;
+        }
+        self.send(GcItem::Preload(preload));
+    }
+
+    /// Voert een verdwenen stem af: de bron gaat langs de laatste-houder-check,
+    /// de rest van de stem is plat en kost niets.
+    #[inline]
+    fn dispose_voice(&mut self, voice: PlayingVoice) {
+        match voice.source {
+            VoiceSampleSource::Full(sample) => self.dispose_sample(sample),
+            VoiceSampleSource::PreloadOnly { preload, .. } => self.dispose_preload(preload),
+        }
+    }
+}
+
+/// Verwijdert uitgeklonken stemmen uit de lijst — stabiele volgorde, geen
+/// allocatie — en voert hun bron af via `gc` (zie [`GcSink::dispose_voice`]).
+/// Vervangt de kale `retain`, die de laatste Arc van een geëvicte sample ín de
+/// callback liet vallen.
+#[inline]
+fn remove_finished_voices(voices: &mut Vec<PlayingVoice>, gc: &mut GcSink) {
+    for v in voices.extract_if(.., |v| v.is_finished()) {
+        gc.dispose_voice(v);
+    }
+}
+
 /// Voeg een voice toe met respect voor [`MAX_LIVE_VOICES`]. Zit de Vec vol, dan
 /// wordt eerst de "goedkoopste" voice gestolen: bij voorkeur een al uitklinkende
 /// (releasing) voice, en daarbinnen die met het laagste envelope-niveau — dus de
 /// minst hoorbare. `swap_remove` is O(1); de mix-lus en `retain` zijn ongevoelig
 /// voor de volgorde. Alleen wanneer de grens bereikt is doen we de O(n)-scan.
+/// Een direct verwijderd slachtoffer gaat via `gc` (zie [`GcSink`]): is die
+/// stem de laatste houder van zijn sample, dan valt de Arc niet hier maar op
+/// de janitor-thread.
 #[inline]
-fn push_voice_capped(voices: &mut Vec<PlayingVoice>, v: PlayingVoice, sample_rate: u32, cap: usize) {
+fn push_voice_capped(voices: &mut Vec<PlayingVoice>, v: PlayingVoice, sample_rate: u32, cap: usize, gc: &mut GcSink) {
     let cap = cap.clamp(MIN_LIVE_VOICES, MAX_LIVE_VOICES);
     if voices.len() >= cap {
         // Een net gestarte stem (< 20 ms) is nooit slachtoffer — anders stal
@@ -896,7 +1008,8 @@ fn push_voice_capped(voices: &mut Vec<PlayingVoice>, v: PlayingVoice, sample_rat
         if let Some(i) = victim {
             if voices.len() >= cap + 64 || (voices[i].releasing && voices[i].envelope < 0.01) {
                 // Harde noodgrens of al (bijna) stil: direct weg.
-                voices.swap_remove(i);
+                let stolen = voices.swap_remove(i);
+                gc.dispose_voice(stolen);
             } else {
                 // Hoorbaar klinkend: korte fade i.p.v. harde knip (klik,
                 // auditbevinding 54); telt heel even boven de kap mee.
@@ -1039,11 +1152,12 @@ fn push_voices_budgeted(
     new_voices: Vec<PlayingVoice>,
     sample_rate: u32,
     cap: usize,
+    gc: &mut GcSink,
 ) -> usize {
     let n = new_voices.len();
     for v in new_voices {
         budget_release_voices(voices, sample_rate, cap);
-        push_voice_capped(voices, v, sample_rate, cap);
+        push_voice_capped(voices, v, sample_rate, cap, gc);
     }
     n
 }
@@ -1700,7 +1814,9 @@ mod release_tests {
             })
             .collect();
 
-        let gespawnd = push_voices_budgeted(&mut voices, nieuw, 48_000, cap);
+        let (gc_tx, _gc_rx) = bounded::<GcItem>(8);
+        let mut gc = GcSink::new(gc_tx);
+        let gespawnd = push_voices_budgeted(&mut voices, nieuw, 48_000, cap, &mut gc);
 
         assert_eq!(gespawnd, 4, "werkeenheden niet teruggegeven");
         assert_eq!(voices.len(), budget + 4, "stemmen niet toegevoegd");
@@ -1823,6 +1939,214 @@ mod release_tests {
         let verwacht = 1.0f32 / 240_000.0;
         assert!((rel.envelope_speed - verwacht).abs() < verwacht * 0.05,
                 "fadesnelheid niet hersteld: {} (verwacht ~{})", rel.envelope_speed, verwacht);
+    }
+}
+
+/// Janitor per stem (0.7.40): een eindigende stem die de LAATSTE houder van
+/// zijn sample is (de map heeft hem boven de RAM-kap al geëvict) mag die Arc
+/// niet in de verwijderstap van de callback laten vallen — de deallocatie van
+/// 1-3 MB hoort op de janitor-thread. Een bron die nog gedeeld wordt (map of
+/// andere stem) is alleen een teller en wordt gewoon gedropt.
+#[cfg(test)]
+mod janitor_tests {
+    use super::*;
+    use std::sync::Weak;
+
+    /// Sample zoals de laadpijplijn hem aflevert (1 s mono op uitgangsrate).
+    fn sample() -> SampleRef {
+        Arc::new(SampleData {
+            data: vec![0.5; 48_000],
+            right: None,
+            sample_rate: 48_000,
+            channels: 1,
+            loop_start: None,
+            loop_end: None,
+        })
+    }
+
+    /// Uitgeklonken stem op `sample`: losgelaten en onder de stiltedrempel,
+    /// dus `is_finished()` — precies wat de verwijderstap opruimt.
+    fn uitgeklonken(sample: SampleRef, pipe: u32) -> PlayingVoice {
+        let mut v = PlayingVoice::new_from_sample(sample, 1, pipe, 60, 1.0);
+        v.releasing = true;
+        v.envelope = 0.0;
+        v.age_samples = 48_000;
+        v
+    }
+
+    /// Klinkende stem (niet losgelaten, vol niveau, ouder dan 20 ms).
+    fn klinkend(sample: SampleRef, pipe: u32) -> PlayingVoice {
+        let mut v = PlayingVoice::new_from_sample(sample, 1, pipe, 60, 1.0);
+        v.envelope = 1.0;
+        v.age_samples = 48_000;
+        v
+    }
+
+    /// Afvoerluik met een eigen kanaal, zodat de test kan zien wat de janitor
+    /// zou krijgen.
+    fn luik(kanaal: usize) -> (GcSink, Receiver<GcItem>) {
+        let (tx, rx) = bounded::<GcItem>(kanaal);
+        (GcSink::new(tx), rx)
+    }
+
+    /// De stem is de enige houder (de map heeft de sample geëvict; de
+    /// decode_cache heeft alleen een Weak): de Arc moet de verwijderstap
+    /// OVERLEVEN en via het gc-kanaal aankomen; pas het droppen van dat item
+    /// — het werk van de janitor-thread — geeft de sample vrij.
+    #[test]
+    fn laatste_houder_gaat_via_het_gc_kanaal_niet_via_de_verwijderstap() {
+        let s = sample();
+        let zwak: Weak<SampleData> = Arc::downgrade(&s);
+        let mut voices = vec![uitgeklonken(s, 100)];
+        assert_eq!(zwak.strong_count(), 1, "opzet: de stem hoort de enige houder te zijn");
+        let (mut gc, rx) = luik(8);
+
+        remove_finished_voices(&mut voices, &mut gc);
+
+        assert!(voices.is_empty(), "uitgeklonken stem niet verwijderd");
+        assert_eq!(zwak.strong_count(), 1, "de sample werd ín de verwijderstap gedropt");
+        assert!(gc.backlog.is_empty(), "kanaal had ruimte; niets hoort in de wachtrij");
+        let item = rx.try_recv().expect("geen item op het gc-kanaal");
+        match &item {
+            GcItem::Sample(ontvangen) => {
+                let nog = zwak.upgrade().expect("sample al weg");
+                assert!(Arc::ptr_eq(&nog, ontvangen), "ander object op het kanaal");
+            }
+            _ => panic!("verkeerd item-type op het gc-kanaal (verwacht GcItem::Sample)"),
+        }
+        assert!(rx.try_recv().is_err(), "meer dan één item verstuurd");
+        drop(item); // wat de janitor-thread doet
+        assert_eq!(zwak.strong_count(), 0, "na de janitor-drop hoort de sample vrij te zijn");
+    }
+
+    /// Gedeelde bron — nog in de samples-map én bij een andere (klinkende)
+    /// stem: de eindigende stem laat alleen zijn teller los, er gaat niets
+    /// over het kanaal, en de overblijvende stemmen houden hun volgorde.
+    #[test]
+    fn gedeelde_bron_wordt_gewoon_gedropt_en_volgorde_blijft() {
+        let s = sample();
+        let mut map: HashMap<(u32, u32), SampleRef> = HashMap::new();
+        map.insert((1, 100), s.clone());
+        let mut voices = vec![
+            uitgeklonken(s.clone(), 100),
+            klinkend(s.clone(), 101),
+            uitgeklonken(s.clone(), 100),
+            klinkend(s.clone(), 102),
+        ];
+        assert_eq!(Arc::strong_count(&s), 6); // s + map + 4 stemmen
+        let (mut gc, rx) = luik(8);
+
+        remove_finished_voices(&mut voices, &mut gc);
+
+        assert_eq!(Arc::strong_count(&s), 4, "tellers niet losgelaten: s + map + 2 klinkende");
+        assert!(rx.try_recv().is_err(), "gedeelde bron hoort NIET naar de janitor");
+        assert!(gc.backlog.is_empty());
+        let over: Vec<u32> = voices.iter().map(|v| v.pipe_num).collect();
+        assert_eq!(over, vec![101, 102], "klinkende stemmen weg of van volgorde veranderd");
+
+        // Ook wanneer alleen een ANDERE stem hem nog vasthoudt (geen map):
+        // koppel + directe aanslag op dezelfde pijp, één ervan klinkt uit.
+        let t = sample();
+        let zwak_t = Arc::downgrade(&t);
+        voices.push(uitgeklonken(t.clone(), 104));
+        voices.push(klinkend(t, 103));
+        assert_eq!(zwak_t.strong_count(), 2);
+        remove_finished_voices(&mut voices, &mut gc);
+        assert!(rx.try_recv().is_err(), "bron die een andere stem nog vasthoudt ging naar de janitor");
+        assert_eq!(zwak_t.strong_count(), 1, "teller van de uitgeklonken stem niet losgelaten");
+        let over: Vec<u32> = voices.iter().map(|v| v.pipe_num).collect();
+        assert_eq!(over, vec![101, 102, 103]);
+    }
+
+    /// Voice-stealing bij een volle kap: het direct verwijderde slachtoffer
+    /// (bijna stille staart, enige houder van zijn geëvicte sample) gaat óók
+    /// langs de janitor in plaats van in `swap_remove` te vallen.
+    #[test]
+    fn gestolen_stem_bij_volle_kap_gaat_ook_langs_de_janitor() {
+        let cap = MIN_LIVE_VOICES;
+        let gedeeld = sample();
+        let mut voices: Vec<PlayingVoice> =
+            (0..cap - 1).map(|i| klinkend(gedeeld.clone(), i as u32)).collect();
+        let eigen = sample();
+        let zwak = Arc::downgrade(&eigen);
+        let mut staart = PlayingVoice::new_from_sample(eigen, 1, 999, 60, 1.0);
+        staart.releasing = true;
+        staart.envelope = 0.005; // < 0,01: mag hard weg
+        staart.age_samples = 48_000;
+        voices.push(staart);
+        assert_eq!(voices.len(), cap);
+        let (mut gc, rx) = luik(8);
+
+        push_voice_capped(&mut voices, klinkend(gedeeld.clone(), 5000), 48_000, cap, &mut gc);
+
+        assert_eq!(voices.len(), cap, "slachtoffer niet verwijderd of nieuwe stem niet toegevoegd");
+        assert!(voices.iter().all(|v| v.pipe_num != 999), "niet de stille staart gestolen");
+        assert!(voices.iter().any(|v| v.pipe_num == 5000), "nieuwe stem ontbreekt");
+        assert_eq!(zwak.strong_count(), 1, "sample van de gestolen stem viel in de callback");
+        let item = rx.try_recv();
+        assert!(matches!(item, Ok(GcItem::Sample(_))), "gestolen sample niet op het gc-kanaal");
+        drop(item);
+        assert_eq!(zwak.strong_count(), 0);
+    }
+
+    /// Vol kanaal: het tweede item wordt in de wachtrij geparkeerd — nooit
+    /// inline gedropt — en schuift bij de volgende callback alsnog door.
+    #[test]
+    fn vol_kanaal_parkeert_in_de_wachtrij_en_dropt_niets_inline() {
+        let (mut gc, rx) = luik(1);
+        let (a, b) = (sample(), sample());
+        let (za, zb) = (Arc::downgrade(&a), Arc::downgrade(&b));
+        let mut voices = vec![uitgeklonken(a, 100), uitgeklonken(b, 101)];
+
+        remove_finished_voices(&mut voices, &mut gc);
+
+        assert!(voices.is_empty());
+        assert_eq!(za.strong_count() + zb.strong_count(), 2, "een sample viel inline");
+        assert_eq!(gc.backlog.len(), 1, "tweede item niet in de wachtrij");
+        // De janitor haalt het kanaal leeg; de volgende callback schuift de
+        // wachtrij door.
+        drop(rx.try_recv().expect("kanaal leeg"));
+        gc.flush_backlog();
+        assert!(gc.backlog.is_empty(), "wachtrij niet doorgeschoven");
+        drop(rx.try_recv().expect("doorgeschoven item niet op het kanaal"));
+        assert_eq!(za.strong_count() + zb.strong_count(), 0, "niet alles vrijgegeven");
+    }
+
+    /// Een stem op zijn preload-buffer: zelfde regel (laatste houder → janitor,
+    /// als `GcItem::Preload`).
+    #[test]
+    fn preload_bron_volgt_dezelfde_regel() {
+        let pb = Arc::new(PreloadBuffer {
+            attack_data: vec![0.25; 4_800],
+            attack_right: None,
+            sample_rate: 48_000,
+            total_samples: 4_800,
+            loop_start: None,
+            loop_end: None,
+            source_path: std::path::PathBuf::from("pijp.wav"),
+            channels: 1,
+            bits_per_sample: 16,
+            data_offset: 0,
+            align_table: None,
+            trim_start: 0,
+            smpl_unity_note: None,
+            smpl_pitch_fraction_cents: None,
+        });
+        let zwak = Arc::downgrade(&pb);
+        let mut v = PlayingVoice::new_from_preload(pb, 1, 100, 60, 1.0, 48_000);
+        v.releasing = true;
+        v.envelope = 0.0;
+        let mut voices = vec![v];
+        let (mut gc, rx) = luik(8);
+
+        remove_finished_voices(&mut voices, &mut gc);
+
+        assert!(voices.is_empty());
+        assert_eq!(zwak.strong_count(), 1, "preload viel in de verwijderstap");
+        let item = rx.try_recv();
+        assert!(matches!(item, Ok(GcItem::Preload(_))), "preload niet als GcItem::Preload verstuurd");
+        drop(item);
+        assert_eq!(zwak.strong_count(), 0);
     }
 }
 
@@ -2640,7 +2964,9 @@ fn run_audio_thread(
     // aan Arc's vrijgeven ín de callback stalde de audio-thread seconden lang
     // (drop-storm) — precies genoeg om de watchdog te triggeren en gekraak of
     // volledige uitval te veroorzaken bij het wisselen van orgel na lang spelen.
-    let (gc_tx, gc_rx) = bounded::<Box<dyn std::any::Any + Send>>(64);
+    // Sinds 0.7.40 ook per eindigende stem (zie `GcSink`): een stem die de
+    // laatste houder van een geëvicte sample is, stuurt zijn Arc hierheen.
+    let (gc_tx, gc_rx) = bounded::<GcItem>(64);
     {
         let running_gc = running.clone();
         thread::spawn(move || {
@@ -2824,7 +3150,11 @@ fn run_audio_thread(
     const SAMPLES_BYTES_CAP: usize = 1_500_000_000; // ~1,5 GB
     let mut samples_bytes: usize = 0;
     let mut sample_fifo: std::collections::VecDeque<(u32, u32)> = std::collections::VecDeque::new();
-    let gc_tx_render = gc_tx.clone();
+    // Afvoerluik naar de janitor (zender + wachtrij voor wat de janitor even
+    // niet aankon, zie `GcSink`): alles wat de callback loslaat en groot kan
+    // zijn — oude maps, stemmenlijsten, geëvicte samples én de bron van een
+    // eindigende stem — gaat hierlangs in plaats van inline te droppen.
+    let mut gc = GcSink::new(gc_tx.clone());
     // Master-limiter (unit-getest in vpo-audio): plafond 0.97 (~-0,26 dBFS),
     // attack ~1,5 ms (gedoseerd — één piek trekt niet het hele orgel omlaag),
     // release ~250 ms. Zie het limiterblok in de frame-lus voor waarom dit de
@@ -2835,10 +3165,6 @@ fn run_audio_thread(
     // tragere release (plus de 300 ms-hold in de limiter zelf) volgt de gain
     // het natuurlijke uitsterven in plaats van er tegenin te pompen.
     let mut master_limiter = MasterLimiter::new(0.97, 0.0015, 1.2, sample_rate);
-    // Wachtrij voor opruimwerk dat de janitor even niet aankon (kanaal vol):
-    // vasthouden en de volgende callback opnieuw aanbieden — NOOIT inline
-    // droppen, want dat is precies de drop-storm die de janitor voorkomt.
-    let mut gc_backlog: Vec<Box<dyn std::any::Any + Send>> = Vec::new();
     // Voor de galm-bypass: bij de overgang naar mix 0 één keer de staart
     // wissen — anders klinkt bij her-inschakelen eerst een bevroren, oude
     // staart die niets met het huidige spel te maken heeft.
@@ -2912,14 +3238,9 @@ fn run_audio_thread(
             // Afgeronde achtergrond-loads integreren: map-insert + O(V)-scan.
             let integrate_budget = (frames_now / 32).max(2);
 
-            // Achtergestelde opruimboxen alsnog naar de janitor proberen te
+            // Achtergesteld opruimwerk alsnog naar de janitor proberen te
             // schuiven (kanaal was vol op het moment van ontstaan).
-            while let Some(item) = gc_backlog.pop() {
-                if let Err(e) = gc_tx_render.try_send(item) {
-                    gc_backlog.push(e.into_inner());
-                    break;
-                }
-            }
+            gc.flush_backlog();
 
             // Check for completed background loads. Gecapt per callback (budget
             // geschaald met de buffergrootte, zie boven): elke integratie doet een
@@ -2943,9 +3264,11 @@ fn run_audio_thread(
                         let Some(sample) = sample_opt else { continue };
                         let size = sample.bytes();
                         if let Some(old) = samples_clone.write().insert(key, sample.clone()) {
-                            // Zelfde key opnieuw geladen: oude telling eraf.
+                            // Zelfde key opnieuw geladen: oude telling eraf en
+                            // de oude Arc niet hier laten vallen (janitor-check).
                             samples_bytes = samples_bytes
                                 .saturating_sub(old.bytes());
+                            gc.dispose_sample(old);
                         } else {
                             sample_fifo.push_back(key);
                         }
@@ -2964,14 +3287,17 @@ fn run_audio_thread(
 
             // RAM-plafond handhaven: oudste full samples wijken (max 4 per
             // callback — begrensd werk). De drop zelf gaat naar de janitor-
-            // thread zodat de callback geen grote deallocaties doet.
+            // thread zodat de callback geen grote deallocaties doet. Klinkt de
+            // pijp nog, dan blijft de stem de sample vasthouden en verhuist de
+            // deallocatie naar het moment dat die stem eindigt — óók dan via de
+            // janitor (zie `GcSink::dispose_voice`).
             let mut evicted = 0;
             while samples_bytes > SAMPLES_BYTES_CAP && evicted < 4 {
                 let Some(old_key) = sample_fifo.pop_front() else { break; };
                 if let Some(old) = samples_clone.write().remove(&old_key) {
                     samples_bytes = samples_bytes
                         .saturating_sub(old.bytes());
-                    if let Err(e) = gc_tx_render.try_send(Box::new(old)) { gc_backlog.push(e.into_inner()); }
+                    gc.dispose_sample(old);
                     evicted += 1;
                 }
             }
@@ -3058,7 +3384,7 @@ fn run_audio_thread(
                             voice.one_shot = one_shot;
                             voice.persp_slot = slot;
                             spawned_any = true;
-                            { let mut vl = voices_clone.write(); budget_release_voices(&mut vl, sample_rate, live_cap); push_voice_capped(&mut vl, voice, sample_rate, live_cap); }
+                            { let mut vl = voices_clone.write(); budget_release_voices(&mut vl, sample_rate, live_cap); push_voice_capped(&mut vl, voice, sample_rate, live_cap, &mut gc); }
                         } else {
                             // Preload-buffer (droog of tremulant — de sleutel
                             // draagt de stand al).
@@ -3091,7 +3417,7 @@ fn run_audio_thread(
                                     }
                                 }
 
-                                { let mut vl = voices_clone.write(); budget_release_voices(&mut vl, sample_rate, live_cap); push_voice_capped(&mut vl, voice, sample_rate, live_cap); }
+                                { let mut vl = voices_clone.write(); budget_release_voices(&mut vl, sample_rate, live_cap); push_voice_capped(&mut vl, voice, sample_rate, live_cap, &mut gc); }
                             }
                         }
                         } // for layer
@@ -3311,7 +3637,7 @@ fn run_audio_thread(
                         spawns_done += 1 + release_spawn_scratch.len();
                         for rv in release_spawn_scratch.drain(..) {
                             budget_release_voices(&mut voices_lock, sample_rate, live_cap);
-                            push_voice_capped(&mut voices_lock, rv, sample_rate, live_cap);
+                            push_voice_capped(&mut voices_lock, rv, sample_rate, live_cap, &mut gc);
                         }
                     }
                     AudioCommand::ReleaseStop { stop_id } => {
@@ -3437,7 +3763,7 @@ fn run_audio_thread(
                         spawns_done += 1 + spawns.len();
                         for rv in spawns {
                             budget_release_voices(&mut voices_lock, sample_rate, live_cap);
-                            push_voice_capped(&mut voices_lock, rv, sample_rate, live_cap);
+                            push_voice_capped(&mut voices_lock, rv, sample_rate, live_cap, &mut gc);
                         }
                     }
                     AudioCommand::RegisterPercussiveStops(set) => {
@@ -3489,7 +3815,7 @@ fn run_audio_thread(
                             // janitor-thread — droppen in de callback stalde de
                             // audio-thread seconden lang.
                             let old = std::mem::take(&mut *samples_lock);
-                            if let Err(e) = gc_tx_render.try_send(Box::new(old)) { gc_backlog.push(e.into_inner()); }
+                            gc.send_boxed(old);
                             samples_bytes = 0;
                             sample_fifo.clear();
                             for (k, v) in new_samples.iter() {
@@ -3501,12 +3827,12 @@ fn run_audio_thread(
                         {
                             let mut preloads_lock = preloads_clone.write();
                             let old = std::mem::take(&mut *preloads_lock);
-                            if let Err(e) = gc_tx_render.try_send(Box::new(old)) { gc_backlog.push(e.into_inner()); }
+                            gc.send_boxed(old);
                         }
                         {
                             let mut voices_lock = voices_clone.write();
                             let old = std::mem::take(&mut *voices_lock);
-                            if let Err(e) = gc_tx_render.try_send(Box::new(old)) { gc_backlog.push(e.into_inner()); }
+                            gc.send_boxed(old);
                         }
                         // Nieuwe laad-generatie: uitstaande achtergrond-loads van
                         // het vorige orgel mogen hun (hergebruikte) keys niet vullen.
@@ -3529,7 +3855,7 @@ fn run_audio_thread(
                         {
                             let mut samples_lock = samples_clone.write();
                             let old = std::mem::take(&mut *samples_lock);
-                            if let Err(e) = gc_tx_render.try_send(Box::new(old)) { gc_backlog.push(e.into_inner()); }
+                            gc.send_boxed(old);
                             // Ruimte voor de volledige WAV's die straks per
                             // achtergrond-load IN de callback worden ingevoegd.
                             samples_lock.reserve(buffers.len().min(8192));
@@ -3539,7 +3865,7 @@ fn run_audio_thread(
                         {
                             let mut preloads_lock = preloads_clone.write();
                             let old = std::mem::take(&mut *preloads_lock);
-                            if let Err(e) = gc_tx_render.try_send(Box::new(old)) { gc_backlog.push(e.into_inner()); }
+                            gc.send_boxed(old);
                             preloads_lock.reserve(buffers.len());
                             for (k, v) in buffers.iter() {
                                 preloads_lock.insert(*k, v.clone());
@@ -3548,7 +3874,7 @@ fn run_audio_thread(
                         {
                             let mut voices_lock = voices_clone.write();
                             let old = std::mem::take(&mut *voices_lock);
-                            if let Err(e) = gc_tx_render.try_send(Box::new(old)) { gc_backlog.push(e.into_inner()); }
+                            gc.send_boxed(old);
                         }
                         // Nieuwe laad-generatie (zie LoadSamples).
                         load_generation += 1;
@@ -3578,6 +3904,8 @@ fn run_audio_thread(
                         if let Some(old) = samples_clone.write().insert(key, sample) {
                             samples_bytes = samples_bytes
                                 .saturating_sub(old.bytes());
+                            // Vervangen sample niet inline droppen (janitor-check).
+                            gc.dispose_sample(old);
                         } else {
                             sample_fifo.push_back(key);
                         }
@@ -3668,7 +3996,7 @@ fn run_audio_thread(
                             // kon worden: een tremulant aanzetten op vol werk
                             // duwde de staarten voorbij hun budget.
                             spawned_count = push_voices_budgeted(
-                                &mut voices_lock, new_voices, sample_rate, live_cap,
+                                &mut voices_lock, new_voices, sample_rate, live_cap, &mut gc,
                             );
                         }
                         // Update tremulant state for future notes. De guard in een
@@ -3858,13 +4186,13 @@ fn run_audio_thread(
                         // Grote maps naar de janitor-thread (zie LoadSamples).
                         {
                             let old = std::mem::take(&mut *samples_clone.write());
-                            if let Err(e) = gc_tx_render.try_send(Box::new(old)) { gc_backlog.push(e.into_inner()); }
+                            gc.send_boxed(old);
                             samples_bytes = 0;
                             sample_fifo.clear();
                         }
                         {
                             let old = std::mem::take(&mut *preloads_clone.write());
-                            if let Err(e) = gc_tx_render.try_send(Box::new(old)) { gc_backlog.push(e.into_inner()); }
+                            gc.send_boxed(old);
                         }
                         trem_active_clone.write().clear();
                         stops_with_trem_clone.write().clear();
@@ -3873,7 +4201,7 @@ fn run_audio_thread(
                         *odf_retune_clone.write() = Arc::new(HashMap::new());
                         {
                             let old = std::mem::take(&mut *voices_clone.write());
-                            if let Err(e) = gc_tx_render.try_send(Box::new(old)) { gc_backlog.push(e.into_inner()); }
+                            gc.send_boxed(old);
                         }
                         // Nieuwe laad-generatie (zie LoadSamples).
                         load_generation += 1;
@@ -4412,8 +4740,12 @@ fn run_audio_thread(
                     if !rec_buf.is_empty() { rc.push_stereo(&rec_buf); }
                 }
 
-                // Remove finished voices
-                voices_lock.retain(|v| !v.is_finished());
+                // Uitgeklonken stemmen verwijderen. Niet met een kale `retain`:
+                // die liet de laatste Arc van een (boven de RAM-kap geëvicte)
+                // sample ín de callback vallen — 1-3 MB per stem terug naar het
+                // systeem, bij een akkoordloslating 0,5-3 ms. De bron gaat nu
+                // langs de janitor-check.
+                remove_finished_voices(&mut voices_lock, &mut gc);
 
                 // Update voice count
                 voice_count_clone.store(voices_lock.len(), Ordering::Relaxed);

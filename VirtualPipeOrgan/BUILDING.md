@@ -227,13 +227,28 @@ wachtwoordkluis), het wachtwoord apart. Raakt hij kwijt, dan:
 - Een oude sleutel is niet te "herstellen" en niet te vervangen door een
   server-side truc: de controle gebeurt op het apparaat van de gebruiker.
 
-### Als `latest.json` ontbreekt
+### Als `latest.json` ontbreekt of niet meer klopt
 
 Is de derde taak niet meegelopen (dat gebeurt weleens bij *Re-run failed jobs*),
 dan staan de installers er wel maar ziet de app geen update. Herstel met één
 klik: **Actions → updater-json → Run workflow** met de tag, bijvoorbeeld
 `v0.7.40`. Dat draait hetzelfde script (`.github/scripts/build-latest-json.sh`)
 op de bestanden die al aan de release hangen.
+
+**Ook na een losse herstart van `build-windows`** (*Re-run failed jobs* of één
+taak opnieuw draaien) moet `updater-json` daarna opnieuw gedraaid worden. De
+installer wordt dan namelijk opnieuw gebouwd en krijgt een nieuwe `.sig`,
+terwijl de handtekening die in de al bestaande `latest.json` staat nog bij de
+vorige installer hoort. De app downloadt dan de nieuwe installer, keurt de
+handtekening af en installeert niets — bij iedereen "Bijwerken mislukt", tot
+`latest.json` opnieuw is samengesteld. Vuistregel: is er ná het publiceren van
+`latest.json` nog een installer opnieuw gebouwd, draai `updater-json`.
+
+**Run geannuleerd?** Dan blijft `latest.json` achterwege (de derde taak draait
+alleen als de run niet is afgebroken — `!cancelled()`, bewust geen `always()`).
+Installers die al aan de release hangen zijn zonder `latest.json` onzichtbaar
+voor de updater; wil je de release alsnog uitbrengen, draai dan `updater-json`
+met de hand.
 
 ## Test-API (--test-api)
 
