@@ -1,118 +1,149 @@
-# Instagram Post — JM-Orgue: vogelvlucht + "binnen een paar weken live" (v037)
+# Instagram Post — JM-Orgue: alles wat het nu kan + "binnen een paar weken live" (v037)
 
-**Status:** voortgangspost met release-aankondiging (5 slides). Vervangt v036.
+**Status:** showcase met release-aankondiging (8 slides). Vervangt v036.
 
-**Wat is er anders dan v036?** v036 liet de speeltafel, de notatie en de
-update-melding zien (versie 0.7.28). Sindsdien staan we op **0.7.44**: zestien
-versies verder. Deze post neemt daarom bewust een **vogelvlucht** over alles wat
-er sinds die post bij is gekomen, en kondigt aan dat de software **binnen een
-paar weken live gaat en voor iedereen beschikbaar is**.
+De vorige post (v036) liet drie dingen zien bij versie 0.7.28: de speeltafel, de
+notatie en de update-melding. We staan nu op **0.7.44**. Deze post laat daarom
+het **hele instrument** zien — inclusief punten uit eerdere posts, want wie nu
+pas meekijkt moet in één carrousel zien waarom JM-Orgue er mag zijn — en
+kondigt aan dat de software **binnen een paar weken live gaat en voor iedereen
+beschikbaar is**.
 
-De notatiefunctie komt niet opnieuw in de slides: die stond al in v036. Alles
-wat je hier ziet is nieuw sinds die post.
+Toon: op hoofdlijnen, geen techniek. Wat de organist eraan heeft, niet hoe het
+onder de motorkap werkt.
 
-## Slides (5)
+## Slides (8)
 
-Bestanden in `screenshots/instagram_v037/` (printscreens uit de echte app,
-versie 0.7.44):
+Bestanden in `screenshots/instagram_v037/`. Upload de acht `*_vierkant.png` in
+deze volgorde; de `bron_*.png` zijn de onbewerkte schermafbeeldingen.
 
-| # | Bestand (bijgesneden: `_vierkant.png`) | Kop op de slide | Inhoud |
-|---|---------|-----|--------|
-| 1 | `slide1_bibliotheek.png` | De bibliotheek | **De bibliotheek**: elk orgel met foto, orgelbouwer, plaats en aantal registers; taalkeuze in zeven talen; importknoppen voor GrandOrgue (.organ), JM-Rec en externe mappen |
-| 2 | `slide2_speeltafel.png` | De speeltafel | **De speeltafel**: Friesach (44 registers, vier werken) met getrokken registratie, koppelbalk onderin, setzerbalk en de zwelkastwijzer bij het Schwellwerk |
-| 3 | `slide3_afstandsbediening.png` | Je telefoon als registreerscherm | **Op je telefoon**: dezelfde registratie live op een telefoon in hetzelfde wifi-netwerk — de registers die op de speeltafel getrokken staan, lichten hier mee op |
-| 4 | `slide4_stemming_klank.png` | Stemming en klank | **Onder de motorkap**: stemming "Origineel (zoals opgenomen)" met de melding *2.392 van 2.392 pijpen gemeten*, fijnstemming en de nagalm met ruimtepreset (de volledige schermafbeelding toont rechts ook MIDI-kanaal, zwelkast en uitgangen per klavier) |
-| 5 | `slide5_talen_audio.png` | Voor iedereen | **Voor iedereen**: zeven talen, kleurthema's voor de speeltafel, ASIO/WASAPI met instelbare polyfonie, buffergrootte en zichtbare latentie |
+| # | Uploaden | Kop op de slide | Wat je ziet |
+|---|----------|-----------------|-------------|
+| 1 | `slide1_bibliotheek_vierkant.png` | De bibliotheek | Orgels als kaarten met foto, orgelbouwer, plaats en aantal registers; zeven taalknoppen; knoppen om een GrandOrgue-set, een JM-Rec-opname of een externe map te laden |
+| 2 | `slide2_speeltafel_vierkant.png` | De speeltafel | Friesach: 44 registers over vier werken, registratie getrokken, koppelbalk, setzerbalk en de zwelkastwijzer |
+| 3 | `slide3_notatie_vierkant.png` | Bladmuziek uit je eigen spel | Een ingespeeld trio op drie balken (Hoofdwerk, Nevenwerk, Pedaal) met de werkbalk: terugspelen, opslaan als MIDI, afdrukken/PDF |
+| 4 | `slide4_telefoon_vierkant.png` | Je telefoon als registreerscherm | Dezelfde registratie als op slide 2, live op een telefoon |
+| 5 | `slide5_stemming_vierkant.png` | Stemming en klank | Stemming "Origineel (zoals opgenomen)", fijnstemming en de nagalm met ruimtepreset |
+| 6 | `slide6_klavieren_vierkant.png` | Elk klavier zijn eigen weg | Per klavier: MIDI-kanaal, toetsbereik, zwelkast, windvoorziening, panning, uitgangen en tremulant |
+| 7 | `slide7_console_vierkant.png` | Je eigen speeltafel praat mee | Terugkoppeling naar registerlampen en displays, consoleknoppen inleren, feedback en updates vanuit de app |
+| 8 | `slide8_talen_vierkant.png` | Voor iedereen | Zeven talen, kleurthema's, en de audio-instellingen |
 
-**Klaar om te plaatsen:** naast elke schermafbeelding staat een
-`*_vierkant.png` — dat zijn de bij te snijden versies, alle vijf **1080×1080
-(1:1)**, met een korte kop erboven. Upload die vijf. Instagram snijdt een
-carrousel bij op de verhouding van de eerste slide, dus alle slides moeten
-dezelfde verhouding hebben.
+Slide 3 komt uit de vorige post (dezelfde functie, ongewijzigd); de andere zeven
+zijn vers geschoten uit versie 0.7.44.
 
-Waarom vierkant en niet staand (4:5): de schermafbeeldingen zijn breed. In een
-staand vlak wordt het beeld geen millimeter groter — er komt alleen lege ruimte
-onder en boven bij.
+## Controlelijst: is alles meegenomen?
 
-Wat er per slide is weggesneden:
-- **1**: de Windows-titelbalk, en vier kaarten in plaats van zes — zo zijn de
-  orgelnamen op een telefoon leesbaar.
-- **2**: alleen de titelbalk; de hele speeltafel blijft in beeld.
-- **3**: de titelbalk van het browservenster en de schuifbalk aan de rechterkant,
-  zodat het als een telefoonscherm oogt.
-- **4**: alleen de kolom met stemming en nagalm, op vol formaat — nu is de regel
-  *"gemeten pijptoonhoogtes (2.392 van 2.392 pijpen)"* leesbaar.
-- **5**: alleen de titelbalk; taalknoppen en kleurthema's blijven leesbaar.
+Per uitgebrachte versie sinds de vorige post, en waar het in deze post terugkomt.
+"Caption" = benoemd in de tekst, "slide" = ook te zien.
 
-Het script dat de uitsneden maakt staat in `marketing/snij_insta_v037.py`:
-pas daar de uitsnede of de koptekst aan en draai het opnieuw. Wil je de slides
-zonder koptekst, haal dan de twee `gecentreerd(...)`-regels weg.
+| Versie | Wat erin kwam | In deze post |
+|--------|---------------|--------------|
+| 0.7.29 | BLE-MIDI naar de notatie; eerste macOS-build | caption (draadloze klavieren) · macOS bewust weggelaten, zie hieronder |
+| 0.7.30 | Registerknoppen schalen mee met het venster | zichtbaar op slide 2 |
+| 0.7.31 | Venstergrootte onthouden, audiowissel betrouwbaar, geen tikken, feedback met log | slide 7 (feedback) · rest is stabiliteit, niet benoemd |
+| 0.7.32 | Samplesets downloaden vanuit de bibliotheek | caption + slide 1 |
+| 0.7.33 | Nagalm volgt je luidsprekers; geen tik bij loslaten | caption (klank) |
+| 0.7.34/35 | Update-melding tijdens spelen — en weer teruggedraaid | bewust niet benoemd |
+| 0.7.36 | Echte stereo, polyfonie instelbaar, koppelbalk, slepen over registers, JM-Rec-import | caption + slides 2 en 8 |
+| 0.7.37 | Alle uitgangen van de geluidskaart per klavier, snelle profielwissel, volledige vertaling | caption + slides 6 en 8 |
+| 0.7.38 | Gestapelde ranks, microfoonperspectieven, hertemperen, afstandsbediening, MIDI-archief | caption + slides 4 en 5 |
+| 0.7.39 | Tremulant-opnamen, galm bij korte noten, snellere treden, afstandsbediening volgt het scherm, startscherm, JM-Rec-namen, orgelfoto's | caption + slides 1 en 4 |
+| 0.7.40 | Bijwerken met één klik; Pools, Italiaans en Spaans erbij | caption + slides 1 en 8 |
+| 0.7.41–0.7.44 | Nazorg: galm, tremulant, pedalen, zweltreden en crescendo, stabiliteit | caption (klank/treden) · reparaties niet apart benoemd |
+
+Uit eerdere posts herhaald, omdat het de kern van het instrument is: notatie
+(slide 3), registerlampen en pistons op de eigen console (slide 7), opgenomen
+kerkakoestiek, historische temperamenten, extra registerschermen, MIDI- en
+MP3-opname, en de bediening via rond of recht getekende registerknoppen.
+
+**Bewust niet in de post:**
+- **macOS.** Er is sinds 0.7.29 een macOS-build, maar die is niet ondertekend en
+  nauwelijks getest. Niet noemen tot dat rond is — anders beloven we iets wat we
+  bij de release niet waar kunnen maken.
+- **Techniek onder de motorkap** (buffergroottes, latentiecijfers, hoe de galm
+  rekent). Interessant voor een handleiding, niet voor een carrousel.
+- **Opgeloste fouten.** Een release-aankondiging vertelt wat het kan, niet wat er
+  stuk was.
+- **De 0.7.34-vergissing** (updatemelding tijdens het spelen, meteen
+  teruggedraaid).
 
 ## Caption (NL)
 
-🎹 **JM-Orgue — een jaar bouwen in één post, en dan: hij komt eraan.**
+> Instagram staat maximaal 2200 tekens toe. Deze caption telt er ruim 1800
+> inclusief hashtags, dus er is nog ruimte om iets toe te voegen.
 
-Sinds de vorige update is er zestien versies lang doorgebouwd. Een vogelvlucht
-over wat er bij kwam:
+🎹 **JM-Orgue is af aan het worden — en gaat binnen een paar weken live.**
 
-🎵 **Klank**
-▸ Mixturen en cornetten die uit meerdere pijprijen bestaan klinken nu volledig —
-elke rij zijn eigen stem
-▸ **Microfoonperspectieven** (voor, achter, droog) per orgel aan of uit, met
-eigen volume
-▸ **Echte tremulant-opnamen** spelen mee waar de sampleset ze levert
-▸ **Hertemperen op gemeten pijptoonhoogte**: standaard klinkt een set precies
-zoals hij is opgenomen, maar kies je middentoon of gelijkzwevend a=440, dan
-wordt elke pijp zuiver gezet
-▸ Nagalm bij staccato en het slotakkoord klinkt zoals het hoort — elke losgelaten
-toets houdt zijn eigen uitklank
+Sinds de vorige post is er flink doorgebouwd. Een rondje langs wat het nu is:
 
-🎛️ **Jouw speeltafel**
-▸ **Alle uitgangen van je geluidskaart** zijn per klavier te verdelen; twee
-uitvoerprofielen wisselen met één knop tussen luidsprekers en hoofdtelefoon
-▸ Zweltreden en generaal crescendo reageren **tot dertig keer sneller** — de
-vertraging ging van zo'n 29 naar ongeveer 1 milliseconde
-▸ **Een tablet of telefoon als tweede registreerscherm**: QR-code scannen en je
-bedient registers, koppels en setzer vanaf de orgelbank
-▸ Alles wat je speelt wordt op de achtergrond als MIDI-bestand bewaard
+⛪ **Je eigen orgel in huis**
+▸ Speelt samplesets van GrandOrgue en Hauptwerk, én je eigen opnamen uit JM-Rec
+▸ Een bibliotheek met foto, orgelbouwer en plaats bij elk orgel — en sets die je
+rechtstreeks vanuit de app binnenhaalt
+▸ Laadt in seconden op een gewone Windows-pc
 
-📚 **In gebruik**
-▸ Een **bibliotheek** met foto, orgelbouwer en plaats bij elk orgel — en
-samplesets die je rechtstreeks vanuit de app downloadt
-▸ **Zeven talen**: Nederlands, Engels, Frans, Duits, Pools, Italiaans en Spaans
-▸ Kleurthema's voor de speeltafel, van licht eiken tot nachtmodus
-▸ **Bijwerken met één klik**: de app haalt de nieuwe versie op, installeert en
-start zichzelf opnieuw op
+🎵 **Klank waar je naar wilt luisteren**
+▸ De opgenomen kerkakoestiek, in stereo, met de nagalm van de ruimte zelf
+▸ Mixturen, cornetten, microfoonstandpunten en echte tremulant-opnamen: alles
+wat de sampleset levert, klinkt ook
+▸ Origineel zoals opgenomen — of stem het hele orgel in een van de ruim vijftig
+historische temperamenten
+▸ En wil je één pijp net iets zachter of anders gestemd? Dat kan ook
 
-🗓️ **En dan het nieuws: JM-Orgue gaat binnen een paar weken live — en is dan
-voor iedereen beschikbaar.**
+🎛️ **Jouw speeltafel, jouw manier**
+▸ Klavieren via usb of draadloos via bluetooth
+▸ Elk klavier zijn eigen MIDI-kanaal, zwelkast en luidsprekers
+▸ Zweltreden, generaal crescendo, koppels, setzer en pistons: allemaal zelf in
+te leren
+▸ Registerlampen en displays van je eigen console lichten mee
+▸ Extra registerschermen, en een tablet of telefoon als tweede registreerscherm
 
-Volg deze pagina om de release niet te missen. 🎉
+🎼 **En het onthoudt wat je speelt**
+▸ Je spel verschijnt live als bladmuziek — elk werk op zijn eigen balk — en gaat
+als PDF of MIDI de deur uit
+▸ Alles wat je speelt wordt vanzelf bewaard, en je luistert het terug op
+hetzelfde orgel
+▸ Opnemen als mp3 om te delen, of een midibestand door het orgel laten spelen
 
-#orgel #pipeorgan #virtualorgan #organist #churchmusic #kerkorgel #muziek
-#software #orgelbouw #JMOrgue #hauptwerk #grandorgue #sampleset #kerkmuziek
+🌍 **Voor iedereen**
+▸ Zeven talen, een speeltafel in je eigen kleuren, en bijwerken met één klik
+
+🗓️ **Binnen een paar weken is JM-Orgue er — voor iedereen.** Volg deze pagina,
+dan mis je de release niet. 🎉
+
+#orgel #pipeorgan #virtualorgan #organist #kerkorgel #churchmusic #kerkmuziek
+#muziek #orgelbouw #JMOrgue #hauptwerk #grandorgue #sampleset
 
 ## Alt-teksten
 
 1. Schermafbeelding van de JM-Orgue-bibliotheek: vier orgels als kaarten met een
-   foto van het front, de naam van de orgelbouwer, de plaats en het aantal
-   registers; bovenaan taalknoppen voor zeven talen.
+   foto van het front, de orgelbouwer, de plaats en het aantal registers;
+   bovenaan taalknoppen voor zeven talen.
 2. Schermafbeelding van de speeltafel met het orgel van Friesach: vier werken
-   naast elkaar (Pedal, Hauptwerk, Schwellwerk, Solowerk) met enkele registers
-   getrokken, een balk met koppels en een setzerbalk onderin.
-3. Schermafbeelding van een telefoon met de afstandsbediening van JM-Orgue: de
-   registers van Pedal en Hauptwerk, waarvan dezelfde registers oplichten als op
-   de speeltafel.
-4. Schermafbeelding van de orgelinstellingen met het hoofdvolume, de stemming
-   "Origineel (zoals opgenomen)" met de melding dat 2.392 van 2.392 pijpen zijn
-   gemeten, de fijnstemming en de nagalm met de ruimtepreset "Dorpskerk".
-5. Schermafbeelding van de algemene instellingen met zeven taalknoppen,
-   kleurthema's voor de speeltafel en de audio-instellingen met polyfonie,
-   buffergrootte en latentie.
+   naast elkaar met enkele registers getrokken, een balk met koppels en een
+   setzerbalk onderin.
+3. Schermafbeelding van het notatievenster: een ingespeeld orgeltrio op drie
+   notenbalken met de titel "Psalm 134", met knoppen om af te spelen, op te
+   slaan als MIDI en af te drukken als PDF.
+4. Schermafbeelding van een telefoon met de afstandsbediening van JM-Orgue,
+   waarop dezelfde registers oplichten als op de speeltafel.
+5. Schermafbeelding van de orgelinstellingen met de stemming "Origineel (zoals
+   opgenomen)", de fijnstemming en de nagalm met een ruimtepreset.
+6. Schermafbeelding van de instellingen per klavier: MIDI-kanaal, toetsbereik,
+   zwelkast, windvoorziening, panning, uitgangen en tremulant.
+7. Schermafbeelding van de instellingen voor terugkoppeling naar de console:
+   registerlampen en displays, consoleknoppen inleren, en knoppen voor feedback
+   en updates.
+8. Schermafbeelding van de algemene instellingen met zeven taalknoppen,
+   kleurthema's voor de speeltafel en de audio-instellingen.
 
 ## Nog te doen vóór plaatsing
 
-- [x] Printscreens gemaakt uit versie 0.7.44 (`screenshots/instagram_v037/`)
-- [x] Uitsneden klaar: de vijf `*_vierkant.png` (1080×1080)
+- [x] Acht slides geschoten en bijgesneden (1080×1080, `*_vierkant.png`)
+- [x] Gecontroleerd tegen alle releases sinds de vorige post (zie controlelijst)
 - [ ] Datum van de release scherp krijgen voordat "een paar weken" wordt geplaatst
-- [ ] Caption kopiëren, de vijf vierkante slides uploaden, plaatsen
+- [ ] Caption kopiëren, de acht slides in volgorde uploaden, plaatsen
+
+Het script dat de uitsneden maakt staat in `marketing/snij_insta_v037.py`
+(draaien vanuit de repo-root). Pas daar de uitsnede of de koptekst aan en draai
+het opnieuw; zonder koptekst haal je de twee `gecentreerd(...)`-regels weg.

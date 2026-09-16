@@ -1,4 +1,4 @@
-# Instagram-uitsneden voor post v037.
+# Instagram-uitsneden voor post v037 (acht slides).
 #
 # Alle slides op hetzelfde vierkante carrouselformaat (1:1 = 1080x1080).
 # Instagram snijdt een carrousel bij op de verhouding van de eerste slide, dus
@@ -6,13 +6,15 @@
 # staand: de schermafbeeldingen zijn breed, en in een staand vlak wordt het
 # beeld geen millimeter groter — er komt alleen lege ruimte bij.
 #
-# Per slide: vensterrand en Windows-titelbalk eraf, een korte kop in Georgia
-# (het lettertype dat de app voor registernamen gebruikt), en daaronder de
+# Per slide: vensterrand en titelbalk eraf, een korte kop in Georgia (het
+# lettertype dat de app voor registernamen gebruikt), en daaronder de
 # schermafbeelding zo groot mogelijk, met dunne gouden rand en zachte schaduw
 # op de crèmekleurige achtergrond van de app.
+#
+# Draaien vanuit de repo-root:  python marketing/snij_insta_v037.py
 from PIL import Image, ImageFilter, ImageDraw, ImageFont
 
-BRON = r'C:\Bronbestanden\JM-Orgue\screenshots\instagram_v037'
+MAP = r'C:\Bronbestanden\JM-Orgue\screenshots\instagram_v037'
 ZIJDE = 1080
 MARGE = 30
 ACHTERGROND = (240, 235, 224)   # #f0ebe0 — hoofdachtergrond van de app
@@ -24,27 +26,38 @@ SCHADUW = (120, 104, 70, 70)
 KOP = ImageFont.truetype(r'C:\Windows\Fonts\georgiab.ttf', 50)
 SUB = ImageFont.truetype(r'C:\Windows\Fonts\georgia.ttf', 27)
 
-# (bestand, uitsnede uit de bron, kop, onderschrift)
+# (uitvoernaam, bronbestand, uitsnede, kop, onderschrift)
 SLIDES = [
     # Vier kaarten i.p.v. zes: dan zijn de orgelnamen op een telefoon leesbaar.
-    ('slide1_bibliotheek', (8, 32, 807, 378),
+    ('slide1_bibliotheek', 'bron_bibliotheek', (8, 32, 807, 378),
      'De bibliotheek',
      'Elk orgel met foto, orgelbouwer en plaats \u2014 in zeven talen'),
-    ('slide2_speeltafel', (8, 32, 1408, 932),
+    ('slide2_speeltafel', 'bron_speeltafel', (8, 32, 1408, 932),
      'De speeltafel',
      'Friesach: 44 registers, vier werken, koppels en setzer'),
-    # Chrome-titelbalk en vensterrand eraf: oogt als een telefoonscherm.
-    ('slide3_afstandsbediening', (2, 31, 404, 877),
+    # Werkbalk meenemen: die laat het bewerken en exporteren zien.
+    ('slide3_notatie', 'bron_notatie', (0, 8, 1260, 950),
+     'Bladmuziek uit je eigen spel',
+     'Elk werk op zijn eigen balk \u2014 terugspelen, opslaan als PDF of MIDI'),
+    # Chrome-titelbalk en schuifbalk eraf: oogt als een telefoonscherm.
+    ('slide4_telefoon', 'bron_telefoon', (2, 31, 404, 877),
      'Je telefoon als registreerscherm',
      'Dezelfde registratie, live in je eigen wifi-netwerk'),
     # Alleen de linkerkolom (master, stemming, nagalm): op vol formaat is de
     # regel 'gemeten pijptoonhoogtes (2.392 van 2.392 pijpen)' leesbaar.
-    ('slide4_stemming_klank', (28, 100, 610, 754),
+    ('slide5_stemming', 'bron_orgelinstellingen', (28, 100, 610, 754),
      'Stemming en klank',
-     'Origineel zoals opgenomen \u2014 of elk temperament, per pijp gemeten'),
-    ('slide5_talen_audio', (8, 32, 1408, 932),
+     'Origineel zoals opgenomen \u2014 of een historisch temperament'),
+    # Rechterkolom, het blok van één klavier.
+    ('slide6_klavieren', 'bron_orgelinstellingen', (660, 355, 1215, 732),
+     'Elk klavier zijn eigen weg',
+     'Eigen MIDI-kanaal, eigen zwelkast, eigen luidsprekers'),
+    ('slide7_console', 'bron_console_midi', (28, 348, 612, 878),
+     'Je eigen speeltafel praat mee',
+     'Registerlampen, displays en pistons van je eigen console'),
+    ('slide8_talen', 'bron_talen_audio', (8, 32, 1408, 932),
      'Voor iedereen',
-     'Zeven talen, eigen kleuren en je hele geluidskaart'),
+     'Zeven talen, eigen kleuren, en bijwerken met één klik'),
 ]
 
 
@@ -54,8 +67,8 @@ def gecentreerd(tek, tekst, y, font, kleur):
     return b[3] - b[1]
 
 
-def maak(naam, vak, kop, sub):
-    beeld = Image.open(f'{BRON}\\{naam}.png').convert('RGB').crop(vak)
+def maak(naam, bron, vak, kop, sub):
+    beeld = Image.open(f'{MAP}\\{bron}.png').convert('RGB').crop(vak)
     bb, bh = beeld.size
 
     doek = Image.new('RGB', (ZIJDE, ZIJDE), ACHTERGROND)
@@ -81,12 +94,12 @@ def maak(naam, vak, kop, sub):
     doek.paste(beeld, (x, yb))
     ImageDraw.Draw(doek).rectangle([x - 1, yb - 1, x + nb, yb + nh], outline=RAND, width=2)
 
-    doek.save(f'{BRON}\\{naam}_vierkant.png')
+    doek.save(f'{MAP}\\{naam}_vierkant.png')
     return (bb, bh), (nb, nh), round(schaal, 2)
 
 
-for naam, vak, kop, sub in SLIDES:
-    bron_fmt, nieuw_fmt, s = maak(naam, vak, kop, sub)
-    print(f'{naam:28s} {bron_fmt[0]}x{bron_fmt[1]} -> {nieuw_fmt[0]}x{nieuw_fmt[1]} '
-          f'(x{s}, beeld vult {round(100 * nieuw_fmt[1] / ZIJDE)}% van de hoogte)')
-print(f'\nAlle slides: {ZIJDE}x{ZIJDE} (1:1)')
+for naam, bron, vak, kop, sub in SLIDES:
+    bron_fmt, nieuw_fmt, s = maak(naam, bron, vak, kop, sub)
+    print(f'{naam:22s} {bron_fmt[0]:>4}x{bron_fmt[1]:<4} -> {nieuw_fmt[0]:>4}x{nieuw_fmt[1]:<4} '
+          f'(x{s}, beeld vult {round(100 * nieuw_fmt[1] / ZIJDE):>2}% van de hoogte)')
+print(f'\n{len(SLIDES)} slides van {ZIJDE}x{ZIJDE} (1:1)')
