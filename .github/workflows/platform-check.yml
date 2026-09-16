@@ -45,6 +45,10 @@ jobs:
             libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf \
             libasound2-dev libgtk-3-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev \
             xvfb
+          # Een bouwserver heeft geen geluidskaart; snd-dummy levert er een
+          # virtuele, zodat de rookproef ook de audio-uitgang kan openen.
+          sudo modprobe snd-dummy || echo "snd-dummy niet beschikbaar op deze runner"
+          aplay -l || true
 
       - uses: actions/setup-node@v4
         with:
