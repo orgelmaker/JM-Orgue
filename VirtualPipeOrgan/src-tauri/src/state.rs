@@ -412,6 +412,111 @@ pub fn swell_gain_from_cc(value: u8, min_val: u8, max_val: u8, invert: bool) -> 
     normalized
 }
 
+/// Demping voor ingeleerde treden (0.7.45). Een opgemeten speeltafel stuurde
+/// per zweltrede een ongefilterde potmeterwaarde: in rust een eeuwige wiebel
+/// van ±2 (de kast trilde mee, en er ging bij elke wiebel een commando naar de
+/// audiothread) en tijdens het trappen losse uitschieters van 30 tot 70
+/// eenheden. Bewogen er twee treden tegelijk, dan was bijna een derde van de
+/// berichten onbruikbaar: de speeltafel leest zijn treden om beurten uit met
+/// één meetschakeling en neemt de tijd niet om tussen de kanalen te settelen,
+/// zodat de ene trede de waarde van de andere meekrijgt. Zonder demping ging
+/// zo'n uitschieter recht door naar het zwelkastvolume, en sprong hij bij het
+/// generaal crescendo dwars door de hysterese heen — registers die aan- en
+/// uitsprongen terwijl de organist rustig trapte.
+///
+/// Drie stappen, in deze volgorde:
+///  1. **mediaan** over de laatste `TREDE_VENSTER` waarden. Haalt losse
+///     uitschieters weg en laat een echte beweging ongemoeid.
+///  2. **snelheidsbegrenzing** van `TREDE_MAX_PER_MS` eenheden per
+///     milliseconde. Een voet haalt de volle pedaalweg in hooguit ~130 ms, dus
+///     echt spel wordt nooit geremd; een sprong van 70 eenheden in 5 ms wel.
+///     De verstreken tijd telt mee tot `TREDE_STIL_MS`: na een stilte weten we
+///     niets meer over de stand van de trede en is de nieuwe waarde meteen
+///     waar. Dat houdt ook het afspelen van een midibestand en de test-API
+///     exact, want die sturen losse waarden met pauzes ertussen.
+///  3. **rustband**: pas doorgeven vanaf een verschil van `TREDE_RUSTBAND`.
+///     De uitersten 0 en 127 komen altijd door — de kast moet helemaal dicht
+///     en helemaal open kunnen.
+///
+/// Restfout die we bewust accepteren: houdt een speeltafel bij een stilstaande
+/// trede helemaal op met sturen, dan blijft de mediaan twee berichten achter op
+/// de eindstand — een paar eenheden van 127, minder dan de crescendo-hysterese
+/// en op de zwelkast onhoorbaar. Een speeltafel die blijft ruisen (juist de
+/// soort die dit filter nodig heeft) komt vanzelf precies uit.
+///
+/// Alleen aanroepen voor een CC die écht als zwelkast of als generaal crescendo
+/// is ingeleerd. Een piston op een CC blijft ongefilterd, anders mist de
+/// flankdetectie een korte druk.
+pub(crate) const TREDE_VENSTER: usize = 5;
+pub(crate) const TREDE_MAX_PER_MS: f32 = 1.0;
+pub(crate) const TREDE_STIL_MS: f32 = 150.0;
+pub(crate) const TREDE_RUSTBAND: u8 = 2;
+
+struct TredeFilterStroom {
+    channel: u8,
+    cc: u8,
+    venster: Vec<u8>,
+    /// Doorlopende (niet-afgeronde) stand, zodat een langzame beweging van
+    /// minder dan een hele eenheid per bericht toch vooruitkomt.
+    uit: f32,
+    /// Laatst dóórgegeven waarde (de rustband bijt hierop).
+    uit_afgerond: u8,
+    laatst: std::time::Instant,
+}
+
+static TREDE_FILTER: parking_lot::Mutex<Vec<TredeFilterStroom>> =
+    parking_lot::Mutex::new(Vec::new());
+
+/// Gefilterde pedaalstand voor (kanaal, CC); zie `TREDE_VENSTER`.
+pub(crate) fn trede_filter(channel: u8, cc: u8, ruw: u8) -> u8 {
+    trede_filter_op(channel, cc, ruw, std::time::Instant::now())
+}
+
+/// Als `trede_filter`, met de klok als parameter zodat de tests het verloop in
+/// de tijd kunnen naspelen zonder te wachten.
+fn trede_filter_op(channel: u8, cc: u8, ruw: u8, nu: std::time::Instant) -> u8 {
+    let mut stromen = TREDE_FILTER.lock();
+    let Some(idx) = stromen.iter().position(|s| s.channel == channel && s.cc == cc) else {
+        // Eerste waarde van deze trede: niets om op te dempen, en de stand moet
+        // meteen kloppen (bv. herstel na een orgelwissel).
+        stromen.push(TredeFilterStroom {
+            channel, cc,
+            venster: vec![ruw],
+            uit: ruw as f32,
+            uit_afgerond: ruw,
+            laatst: nu,
+        });
+        return ruw;
+    };
+    let s = &mut stromen[idx];
+
+    let ms = nu.duration_since(s.laatst).as_secs_f32() * 1000.0;
+    s.laatst = nu;
+    // Lag de trede stil, dan zegt het oude venster niets meer over waar hij nu
+    // staat: schoon beginnen, zodat de nieuwe waarde meteen geldt.
+    if ms >= TREDE_STIL_MS { s.venster.clear(); }
+
+    s.venster.push(ruw);
+    if s.venster.len() > TREDE_VENSTER { s.venster.remove(0); }
+    let mut gesorteerd = s.venster.clone();
+    gesorteerd.sort_unstable();
+    let mediaan = gesorteerd[gesorteerd.len() / 2] as f32;
+    let ruimte = (TREDE_MAX_PER_MS * ms.min(TREDE_STIL_MS)).max(1.0);
+    s.uit += (mediaan - s.uit).clamp(-ruimte, ruimte);
+
+    let kandidaat = s.uit.round().clamp(0.0, 127.0) as u8;
+    if kandidaat == 0 || kandidaat == 127 || kandidaat.abs_diff(s.uit_afgerond) >= TREDE_RUSTBAND {
+        s.uit_afgerond = kandidaat;
+    }
+    s.uit_afgerond
+}
+
+/// Bij een orgelwissel of een nieuwe inleerbeurt: schoon beginnen, zodat een
+/// trede niet vanaf de stand van het vorige orgel hoeft te kruipen.
+pub(crate) fn trede_filter_leeg() {
+    TREDE_FILTER.lock().clear();
+}
+
 /// Kiest tijdens het inleren dé trede die de organist beweegt (0.7.44). Tot
 /// 0.7.43 won "de laatst geziene CC" na 1,5 s stilte. Dat verloor van een
 /// tweede trede die in rust ruist (±1), en van speeltafels die bij elke
@@ -2308,6 +2413,9 @@ impl AppState {
         let num_stages = crescendo_stages.read().len();
         if num_stages == 0 { return; }
 
+        // Demping vóór de trapberekening: een losse uitschieter van de potmeter
+        // sprong anders dwars door de hysterese heen (zie trede_filter).
+        let value = trede_filter(channel, controller, value);
         let mapped = crescendo_mapped_value(value, min_val, max_val, invert);
         // Na een setzer/General Cancel eerst terug naar de bodem (zie
         // CRESCENDO_HERSTART_VANAF_NUL): tot die tijd doet de trede niets.
@@ -2525,7 +2633,20 @@ impl AppState {
             if let Some(rx) = usb_rx {
                 while let Ok(msg) = rx.try_recv() {
                     if let MidiMessage::ControlChange { channel, controller, value } = msg {
-                        kiezer.zie(channel, controller, value, std::time::Instant::now());
+                        // Gefilterd inleren (0.7.45): een trede die in rust
+                        // ±2 blijft wiebelen kwam nooit "tot rust", zodat het
+                        // inleren elke keer de volle 15 seconden wachtte en
+                        // daarna op de terugval uitkwam. En een uitschieter van
+                        // de potmeter zette anders de laagste of hoogste stand
+                        // tientallen eenheden verkeerd. Leert de organist een
+                        // trede opnieuw in die al gekoppeld is, dan gaat de
+                        // waarde twee keer door het filter (hier en in
+                        // handle_midi_message, dat de kast live laat meelopen);
+                        // de tweede ronde ziet dan een al vloeiend signaal en
+                        // verandert er niets wezenlijks aan.
+                        kiezer.zie(channel, controller,
+                            trede_filter(channel, controller, value),
+                            std::time::Instant::now());
                     }
                     Self::handle_midi_message(
                         msg, audio_player, organ_definition, loaded_organ_info, drawn_stops,
@@ -2538,7 +2659,9 @@ impl AppState {
             while let Ok(msg) = ble_rx.try_recv() {
                 ble_message_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 if let MidiMessage::ControlChange { channel, controller, value } = msg {
-                    kiezer.zie(channel, controller, value, std::time::Instant::now());
+                    kiezer.zie(channel, controller,
+                        trede_filter(channel, controller, value),
+                        std::time::Instant::now());
                 }
                 Self::handle_midi_message(
                     msg, audio_player, organ_definition, loaded_organ_info, drawn_stops,
@@ -3085,6 +3208,17 @@ impl AppState {
                 }
             }
             MidiMessage::ControlChange { channel, controller, value } => {
+                // Demping voor een CC die als zwelkast is ingeleerd (0.7.45).
+                // Buiten de bindingenlus, want twee divisies op dezelfde trede
+                // mogen het filter niet twee keer laten doorstappen. De
+                // crescendo-CC is hier al afgehandeld en filtert zichzelf.
+                let value = if !cc_claimed_by_crescendo
+                    && swell_bindings.read().iter().any(|b| b.channel == channel && b.cc_num == controller)
+                {
+                    trede_filter(channel, controller, value)
+                } else {
+                    value
+                };
                 // MIDI-diagnose (0.7.44): één logregel per CC-stroom met de
                 // interpretatie, beperkt tot ~4 per seconde per stroom (plus
                 // de uitersten), zodat een testorgel-log laat zien wat een
@@ -5238,4 +5372,129 @@ mod trede_kiezer_tests {
         for i in 0..100u64 { k.zie(0, 11, 120, t0 + Duration::from_millis(500 + i * 20)); }
         assert_eq!(k.keuze(t0 + Duration::from_millis(500 + 1600)), Some((0, 11, 120)));
     }
+}
+
+#[cfg(test)]
+mod trede_filter_tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    /// Speelt een reeks (waarde, ms-sinds-vorige) af op één trede en geeft de
+    /// doorgegeven standen terug. Elke test een eigen (kanaal, cc): het filter
+    /// is een static en de tests draaien naast elkaar.
+    fn speel(channel: u8, cc: u8, reeks: &[(u8, u64)]) -> Vec<u8> {
+        let mut t = Instant::now();
+        reeks.iter().map(|(v, ms)| {
+            t += Duration::from_millis(*ms);
+            trede_filter_op(channel, cc, *v, t)
+        }).collect()
+    }
+
+    #[test]
+    fn eerste_waarde_komt_ongewijzigd_door() {
+        // Herstel na een orgelwissel zet de trede in één keer op zijn stand.
+        assert_eq!(speel(90, 90, &[(73, 0)]), vec![73]);
+    }
+
+    #[test]
+    fn losse_uitschieter_haalt_de_zwelkast_niet() {
+        // Het gemeten patroon: een rustige trede rond 60 met één meetfout van
+        // 120 ertussen (overspraak van de buurtrede).
+        let reeks: Vec<(u8, u64)> = vec![
+            (60, 0), (61, 5), (59, 5), (60, 5), (120, 5), (61, 5), (60, 5), (59, 5),
+        ];
+        let uit = speel(91, 91, &reeks);
+        assert!(uit.iter().all(|v| (55..=65).contains(v)),
+            "uitschieter kwam door: {:?}", uit);
+    }
+
+    #[test]
+    fn rustwiebel_stuurt_geen_nieuwe_standen() {
+        // Trede 3 van het testorgel pendelt in rust eindeloos 110/112/114.
+        let mut reeks = vec![(112u8, 0u64)];
+        for i in 0..40 { reeks.push(([110, 112, 114, 112][i % 4], 5)); }
+        let uit = speel(92, 92, &reeks);
+        let na_inloop = &uit[6..];
+        assert!(na_inloop.iter().all(|v| *v == na_inloop[0]),
+            "de kast trilt nog mee: {:?}", na_inloop);
+    }
+
+    #[test]
+    fn echte_beweging_komt_gewoon_aan() {
+        // Zwelkast open in twee seconden: 1 eenheid per 15 ms.
+        let reeks: Vec<(u8, u64)> = (0..=127u8).map(|v| (v, 15)).collect();
+        let uit = speel(93, 93, &reeks);
+        assert!(uit.last().unwrap() >= &120, "eindstand bleef steken op {:?}", uit.last());
+        // Onderweg hooguit een paar eenheden achterstand.
+        for (i, v) in uit.iter().enumerate().skip(6) {
+            assert!((i as i16 - *v as i16).abs() <= 4, "te veel achterstand bij {}: {}", i, v);
+        }
+    }
+
+    #[test]
+    fn snelle_voet_wordt_niet_geremd() {
+        // Volle pedaalweg in 150 ms (8 eenheden per 10 ms) — sneller dan een
+        // voet kan, en toch mag de begrenzing niet bijten.
+        let reeks: Vec<(u8, u64)> = (0..16u8).map(|i| (i * 8, 10)).collect();
+        let uit = speel(94, 94, &reeks);
+        assert!(uit.last().unwrap() >= &100, "snelle beweging geremd: {:?}", uit);
+    }
+
+    #[test]
+    fn na_een_stilte_geldt_de_nieuwe_stand_meteen() {
+        // Losse waarden met pauzes ertussen: een midibestand, de test-API, of
+        // een trede die na een tijd stilstaan in één keer wordt ingetrapt.
+        let uit = speel(95, 95, &[(0, 0), (127, 300), (0, 300), (64, 300)]);
+        assert_eq!(uit, vec![0, 127, 0, 64]);
+    }
+
+    /// De kern van de klacht: een trede die in rust blijft wiebelen kwam voor
+    /// de inleerkiezer nooit "tot rust", zodat het inleren de volle time-out
+    /// uitzat en op de terugval uitkwam. Met het filter ertussen wél.
+    #[test]
+    fn wiebelende_trede_komt_bij_het_inleren_tot_rust() {
+        let t0 = Instant::now();
+        let settle = Duration::from_millis(1500);
+        // Zoals gemeten: eerst de trede indrukken, daarna eindeloos 110/112/114.
+        let mut reeks: Vec<(u8, u64)> = (0..100u8).map(|i| (10 + i, 5)).collect();
+        for i in 0..600 { reeks.push(([110, 112, 114, 112][i % 4], 5)); }
+
+        let met_filter = {
+            let mut k = TredeKiezer::new(settle);
+            let mut t = t0;
+            for (i, (v, ms)) in reeks.iter().enumerate() {
+                t += Duration::from_millis(*ms);
+                let f = trede_filter_op(98, 98, *v, t0 + Duration::from_millis(i as u64 * 5));
+                k.zie(98, 98, f, t);
+            }
+            k.keuze(t)
+        };
+        let zonder_filter = {
+            let mut k = TredeKiezer::new(settle);
+            let mut t = t0;
+            for (v, ms) in reeks.iter() {
+                t += Duration::from_millis(*ms);
+                k.zie(99, 99, *v, t);
+            }
+            k.keuze(t)
+        };
+        assert!(zonder_filter.is_none(), "ongefilterd hoorde nooit tot rust te komen");
+        let (ch, cc, stand) = met_filter.expect("gefilterd moet de trede kiezen");
+        assert_eq!((ch, cc), (98, 98));
+        assert!((108..=116).contains(&stand), "verkeerde eindstand ingeleerd: {}", stand);
+    }
+
+    #[test]
+    fn dichte_en_open_stand_komen_altijd_door() {
+        // De rustband mag de uiterste standen niet inslikken: helemaal dicht
+        // en helemaal open moeten exact gehaald worden.
+        let mut reeks = vec![(120u8, 0u64)];
+        for _ in 0..8 { reeks.push((127, 10)); }
+        // 127 eenheden terug kost bij TREDE_MAX_PER_MS ruim 130 ms.
+        for _ in 0..30 { reeks.push((0, 10)); }
+        let uit = speel(96, 96, &reeks);
+        assert!(uit.contains(&127), "kast ging niet helemaal open: {:?}", uit);
+        assert_eq!(*uit.last().unwrap(), 0, "kast ging niet helemaal dicht: {:?}", uit);
+    }
+
 }

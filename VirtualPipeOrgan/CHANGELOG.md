@@ -5,6 +5,26 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.45] - 2026-09-16
+
+### Treden die ruisen: demping op zwelkast, crescendo en inleren
+
+Een meting op het testorgel met `jm-midimon` bracht aan het licht wat de treden daar werkelijk sturen. Alle drie de zweltreden gebruiken CC 7, elk op een eigen kanaal (6, 7 en 8), dus ze zijn prima uit elkaar te houden. Maar het signaal zelf is ruw: in rust wiebelt een trede eindeloos twee eenheden op en neer, en tijdens het trappen zitten er losse uitschieters van 30 tot 70 eenheden tussen. Bewegen er twee treden tegelijk, dan is bijna een derde van de berichten onbruikbaar — de speeltafel leest zijn treden om beurten uit met één meetschakeling en neemt de tijd niet om tussen de kanalen te settelen, zodat de ene trede de waarde van de andere meekrijgt.
+
+JM-Orgue nam die waarden tot nu toe ongefilterd over. Daardoor:
+
+- **trilde de zwelkast mee** met de rustwiebel, en ging er bij elke wiebel een commando naar de audiothread;
+- **sprong het generaal crescendo dwars door zijn hysterese heen**: registers die aan- en uitsprongen terwijl de organist rustig trapte;
+- **kwam het inleren nooit tot rust.** Een trede die blijft wiebelen "beweegt" volgens de inleerkiezer altijd, dus wachtte elke inleerbeurt de volle vijftien seconden uit om daarna op de terugval uit te komen. En een uitschieter op het verkeerde moment zette de ingeleerde laagste of hoogste stand tientallen eenheden mis.
+
+Elke ingeleerde trede gaat nu door een demping in drie stappen: een mediaan over de laatste vijf waarden (haalt losse uitschieters weg), een snelheidsbegrenzing van één eenheid per milliseconde (een voet haalt de volle pedaalweg in ruim honderd milliseconde, dus echt spel wordt nooit geremd — een sprong van 70 eenheden in 5 ms wel), en een rustband van twee eenheden zodat de wiebel geen commando's meer stuurt. De uiterste standen 0 en 127 komen altijd door, en na een stilte geldt een nieuwe waarde meteen: het afspelen van een midibestand en de test-API blijven exact. Pistons op een CC blijven ongefilterd, zodat de flankdetectie geen korte druk mist.
+
+Op de gemeten reeksen daalt de gemiddelde sprong tussen twee doorgegeven standen van 17 naar 2 eenheden in het ergste geval, en van 9 naar 2 bij een gewone beweging.
+
+### Opgemerkt bij de meting, niet op te lossen in software
+
+Trede 1 van het testorgel levert over zijn volle weg maar 25 van de 127 eenheden (twee metingen, 2..27 en 3..29). Dat wijst op de mechaniek of de potmeter van die trede, niet op de software; met zo weinig bereik blijft een zwelkast grof en komt een crescendo niet boven de onderste trappen uit.
+
 ## [0.7.44] - 2026-09-15
 
 ### Zweltreden en generaal crescendo: inleren, verdringen en terugveren

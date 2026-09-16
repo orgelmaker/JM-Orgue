@@ -2179,6 +2179,7 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
     *state.crescendo_stage.write() = 0;
     crate::state::CRESCENDO_HERSTART_VANAF_NUL.store(false, std::sync::atomic::Ordering::Relaxed);
     crate::state::zwel_nazending_leeg();
+    crate::state::trede_filter_leeg();
     state.set_active_couplers(Vec::new());
     reset_organ_scoped_state(state);
     // Perspectieven + lagen-samenvatting van dít orgel (altijd zetten, ook
@@ -5998,6 +5999,7 @@ pub fn do_load_samples_from_directory_locked(state: &AppState, directory: &str) 
     *state.crescendo_stage.write() = 0;
     crate::state::CRESCENDO_HERSTART_VANAF_NUL.store(false, std::sync::atomic::Ordering::Relaxed);
     crate::state::zwel_nazending_leeg();
+    crate::state::trede_filter_leeg();
     state.set_active_couplers(Vec::new());
     reset_organ_scoped_state(state);
     // Perspectieven + lagen-samenvatting van dít orgel (ná de reset).
