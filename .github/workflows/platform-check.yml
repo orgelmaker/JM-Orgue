@@ -1,0 +1,110 @@
+# Platformcontrole: bouwt en test JM-Orgue op macOS en Linux.
+#
+# Waarom apart van tests.yml: die draait bij elke push op Windows en moet groen
+# blijven. Deze taak is er om te ONDERZOEKEN hoe ver de andere platformen komen,
+# en start daarom alleen handmatig (Actions → Platformcontrole → Run workflow).
+# Blijkt hij stabiel, dan kan hij als extra taak in tests.yml.
+#
+# Wat er per platform gebeurt:
+#   1. frontend bouwen
+#   2. cargo test van alle crates (zonder ASIO; dat is Windows-only)
+#   3. de app bouwen
+#   4. rookproef: de app starten met --test-api en de status opvragen. Een
+#      bouwserver heeft geen geluidskaart en geen MIDI, dus dit mag mislukken
+#      zonder de taak te laten falen; het logbestand wordt altijd getoond.
+name: Platformcontrole (macOS en Linux)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  controle:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            naam: macOS
+          - os: ubuntu-latest
+            naam: Linux
+    runs-on: ${{ matrix.os }}
+    name: ${{ matrix.naam }}
+    defaults:
+      run:
+        working-directory: VirtualPipeOrgan
+    steps:
+      - uses: actions/checkout@v4
+
+      # Tauri op Linux draait op webkit2gtk; zonder deze pakketten compileert de
+      # tauri-crate niet. Xvfb + een geluidsserver zijn voor de rookproef.
+      - name: Systeempakketten (alleen Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf \
+            libasound2-dev libgtk-3-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev \
+            xvfb
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: VirtualPipeOrgan/ui/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: VirtualPipeOrgan
+          key: ${{ matrix.os }}
+
+      - name: Frontend-afhankelijkheden installeren
+        run: npm ci
+        working-directory: VirtualPipeOrgan/ui
+
+      - name: Frontend bouwen
+        run: npm run build
+        working-directory: VirtualPipeOrgan/ui
+
+      - name: Rust-tests
+        run: cargo test -p vpo-app -p vpo-sampler -p vpo-audio -p vpo-core -p jm-midimon
+
+      - name: App bouwen
+        run: cargo build --release -p vpo-app -p jm-midimon
+
+      # Rookproef: start de app en vraag de status op. Zonder geluidskaart kan
+      # de audio-uitgang mislukken; dat is hier informatie, geen fout.
+      - name: Rookproef — app starten en status opvragen
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -x
+          if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
+            xvfb-run -a ./target/release/vpo-app --test-api &
+          else
+            ./target/release/vpo-app --test-api &
+          fi
+          pid=$!
+          for i in $(seq 1 30); do
+            sleep 2
+            if curl -sf http://127.0.0.1:8765/status > status.json; then break; fi
+          done
+          echo "--- status:"; cat status.json || echo "(geen antwoord van de test-API)"
+          echo "--- versie:"; curl -sf http://127.0.0.1:8765/version || true
+          echo
+          kill $pid 2>/dev/null || true
+          sleep 2
+
+      - name: Logbestand tonen
+        if: always()
+        continue-on-error: true
+        shell: bash
+        run: |
+          if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
+            log="$HOME/.local/share/nl.jm-orgue.app/jm-orgue.log"
+          else
+            log="$HOME/Library/Application Support/nl.jm-orgue.app/jm-orgue.log"
+          fi
+          echo "logbestand: $log"
+          if [ -f "$log" ]; then tail -n 120 "$log"; else echo "(geen logbestand gevonden)"; fi

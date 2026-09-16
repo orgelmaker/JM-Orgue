@@ -793,10 +793,27 @@ pub fn open_external_url(url: String) -> Result<(), String> {
     if !url.starts_with("https://") {
         return Err("Alleen https-URL's kunnen geopend worden".into());
     }
-    std::process::Command::new("rundll32")
-        .args(["url.dll,FileProtocolHandler", &url])
-        .spawn()
-        .map_err(|e| format!("Browser openen mislukt: {}", e))?;
+    // Per platform de eigen opener. Windows bewust via rundll32 (geen
+    // shell-parsing van &-tekens in de URL); macOS `open`, Linux `xdg-open`.
+    #[cfg(target_os = "windows")]
+    let mut cmd = {
+        let mut c = std::process::Command::new("rundll32");
+        c.args(["url.dll,FileProtocolHandler", &url]);
+        c
+    };
+    #[cfg(target_os = "macos")]
+    let mut cmd = {
+        let mut c = std::process::Command::new("open");
+        c.arg(&url);
+        c
+    };
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    let mut cmd = {
+        let mut c = std::process::Command::new("xdg-open");
+        c.arg(&url);
+        c
+    };
+    cmd.spawn().map_err(|e| format!("Browser openen mislukt: {}", e))?;
     Ok(())
 }
 
