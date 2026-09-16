@@ -1,4 +1,4 @@
-# Instagram Post — JM-Orgue: alles wat het nu kan + "eind september live" (v037)
+# Instagram Post — JM-Orgue: alles wat het nu kan + "oktober 2026 live" (v037)
 
 **Status:** showcase met release-aankondiging (8 slides). Vervangt v036.
 
@@ -6,7 +6,7 @@ De vorige post (v036) liet drie dingen zien bij versie 0.7.28: de speeltafel, de
 notatie en de update-melding. We staan nu op **0.7.45**. Deze post laat daarom
 het **hele instrument** zien — inclusief punten uit eerdere posts, want wie nu
 pas meekijkt moet in één carrousel zien waarom JM-Orgue er mag zijn — en
-kondigt aan dat de software **eind september live gaat en voor iedereen
+kondigt aan dat de software **in oktober 2026 live gaat en voor iedereen
 beschikbaar is**.
 
 Toon: op hoofdlijnen, geen techniek. Wat de organist eraan heeft, niet hoe het
@@ -69,10 +69,10 @@ MP3-opname, en de bediening via rond of recht getekende registerknoppen.
 
 ## Caption (NL)
 
-> Instagram staat maximaal 2200 tekens toe. Deze caption telt er 1841
+> Instagram staat maximaal 2200 tekens toe. Deze caption telt er 1833
 > inclusief hashtags, dus er is nog ruimte om iets toe te voegen.
 
-🎹 **JM-Orgue is af — en gaat eind september live.**
+🎹 **JM-Orgue is af — en gaat in oktober live.**
 
 Sinds de vorige post is er flink doorgebouwd. Een rondje langs wat het nu is:
 
@@ -108,8 +108,8 @@ hetzelfde orgel
 🌍 **Voor iedereen**
 ▸ Zeven talen, een speeltafel in je eigen kleuren, en bijwerken met één klik
 
-🗓️ **Eind september is JM-Orgue er — voor iedereen.** Volg deze pagina, dan mis
-je de release niet. 🎉
+🗓️ **In oktober is JM-Orgue er — voor iedereen.** Volg deze pagina, dan mis je
+de release niet. 🎉
 
 #orgel #pipeorgan #virtualorgan #organist #kerkorgel #churchmusic #kerkmuziek
 #muziek #orgelbouw #JMOrgue #hauptwerk #grandorgue #sampleset
@@ -141,7 +141,7 @@ je de release niet. 🎉
 
 - [x] Acht slides geschoten en bijgesneden (1080×1080, `*_vierkant.png`)
 - [x] Gecontroleerd tegen alle releases sinds de vorige post (zie controlelijst)
-- [x] Datum scherp: de release staat gepland voor eind september 2026
+- [x] Datum scherp: de release staat gepland voor oktober 2026
 - [ ] Caption kopiëren, de acht slides in volgorde uploaden, plaatsen
 
 Het script dat de uitsneden maakt staat in `marketing/snij_insta_v037.py`
