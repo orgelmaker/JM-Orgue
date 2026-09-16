@@ -7822,6 +7822,15 @@ mod jmrec_naam_tests {
     use std::path::Path;
     use vpo_sampler::grandorgue::OrganInfo;
 
+    /// Pad naar <map>/<map>.organ, opgebouwd met de scheidingstekens van het
+    /// draaiende platform. Een hardgecodeerd `C:\X\...` is op macOS en Linux
+    /// geen mappad maar één bestandsnaam, waardoor file_stem() de hele string
+    /// teruggaf en de mapcode-herkenning niet aansloeg (gevonden door de
+    /// platformcontrole in de bouwstraat).
+    fn odf_pad(map: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(map).join(format!("{}.organ", map))
+    }
+
     fn info(kerk: &str, bouwer: &str, adres: &str, comments: &str) -> OrganInfo {
         OrganInfo {
             church_name: kerk.into(),
@@ -7847,7 +7856,7 @@ mod jmrec_naam_tests {
     fn jmrec_marker_geeft_kerk_bouwer_plaats() {
         // Geen manifest: herkenning via OrganComments, delen uit de ODF.
         let o = info("Hervormde Kerk", "Bätz-Witte", "Puttershoek", "Opgenomen met JM-Rec v3.10");
-        let (naam, bouwer, plaats) = display_identity(Path::new(r"C:\X\PuttBatz\PuttBatz.organ"), &o);
+        let (naam, bouwer, plaats) = display_identity(&odf_pad("PuttBatz"), &o);
         assert_eq!(naam, "Hervormde Kerk - Bätz-Witte - Puttershoek");
         assert_eq!(bouwer, "Bätz-Witte");
         assert_eq!(plaats, "Puttershoek");
@@ -7857,7 +7866,7 @@ mod jmrec_naam_tests {
     fn jmrec_mapcode_als_kerknaam_valt_weg() {
         // JM-Rec schrijft de mapcode als ChurchName zodra de kerknaam leeg is.
         let o = info("PuttBatz", "Bätz-Witte", "Puttershoek", "Opgenomen met JM-Rec v3.10");
-        let (naam, _, _) = display_identity(Path::new(r"C:\X\PuttBatz\PuttBatz.organ"), &o);
+        let (naam, _, _) = display_identity(&odf_pad("PuttBatz"), &o);
         assert_eq!(naam, "Bätz-Witte - Puttershoek");
     }
 
