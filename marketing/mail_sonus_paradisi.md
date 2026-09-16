@@ -46,7 +46,7 @@ My name is Martijn van der Kolk. Over the past year I have been building
 **JM-Orgue**, a virtual pipe organ player for Windows. It plays GrandOrgue
 sample sets and Hauptwerk sample sets, as well as recordings made with JM-Rec,
 a companion tool I wrote for recording an organ pipe by pipe. JM-Orgue will be
-publicly available within a few weeks.
+publicly available at the end of September 2026.
 
 Before anything else: thank you for the work you have been doing for so many
 years. Sonus Paradisi has documented and preserved instruments that most

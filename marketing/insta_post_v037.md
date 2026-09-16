@@ -1,12 +1,12 @@
-# Instagram Post — JM-Orgue: alles wat het nu kan + "binnen een paar weken live" (v037)
+# Instagram Post — JM-Orgue: alles wat het nu kan + "eind september live" (v037)
 
 **Status:** showcase met release-aankondiging (8 slides). Vervangt v036.
 
 De vorige post (v036) liet drie dingen zien bij versie 0.7.28: de speeltafel, de
-notatie en de update-melding. We staan nu op **0.7.44**. Deze post laat daarom
+notatie en de update-melding. We staan nu op **0.7.45**. Deze post laat daarom
 het **hele instrument** zien — inclusief punten uit eerdere posts, want wie nu
 pas meekijkt moet in één carrousel zien waarom JM-Orgue er mag zijn — en
-kondigt aan dat de software **binnen een paar weken live gaat en voor iedereen
+kondigt aan dat de software **eind september live gaat en voor iedereen
 beschikbaar is**.
 
 Toon: op hoofdlijnen, geen techniek. Wat de organist eraan heeft, niet hoe het
@@ -29,7 +29,7 @@ deze volgorde; de `bron_*.png` zijn de onbewerkte schermafbeeldingen.
 | 8 | `slide8_talen_vierkant.png` | Voor iedereen | Zeven talen, kleurthema's, en de audio-instellingen |
 
 Slide 3 komt uit de vorige post (dezelfde functie, ongewijzigd); de andere zeven
-zijn vers geschoten uit versie 0.7.44.
+zijn geschoten uit versie 0.7.44; 0.7.45 veranderde niets aan het beeld.
 
 ## Controlelijst: is alles meegenomen?
 
@@ -49,7 +49,7 @@ Per uitgebrachte versie sinds de vorige post, en waar het in deze post terugkomt
 | 0.7.38 | Gestapelde ranks, microfoonperspectieven, hertemperen, afstandsbediening, MIDI-archief | caption + slides 4 en 5 |
 | 0.7.39 | Tremulant-opnamen, galm bij korte noten, snellere treden, afstandsbediening volgt het scherm, startscherm, JM-Rec-namen, orgelfoto's | caption + slides 1 en 4 |
 | 0.7.40 | Bijwerken met één klik; Pools, Italiaans en Spaans erbij | caption + slides 1 en 8 |
-| 0.7.41–0.7.44 | Nazorg: galm, tremulant, pedalen, zweltreden en crescendo, stabiliteit | caption (klank/treden) · reparaties niet apart benoemd |
+| 0.7.41–0.7.45 | Nazorg: galm, tremulant, pedalen, zweltreden en crescendo, stabiliteit | caption (klank/treden) · reparaties niet apart benoemd |
 
 Uit eerdere posts herhaald, omdat het de kern van het instrument is: notatie
 (slide 3), registerlampen en pistons op de eigen console (slide 7), opgenomen
@@ -69,10 +69,10 @@ MP3-opname, en de bediening via rond of recht getekende registerknoppen.
 
 ## Caption (NL)
 
-> Instagram staat maximaal 2200 tekens toe. Deze caption telt er ruim 1800
+> Instagram staat maximaal 2200 tekens toe. Deze caption telt er 1841
 > inclusief hashtags, dus er is nog ruimte om iets toe te voegen.
 
-🎹 **JM-Orgue is af aan het worden — en gaat binnen een paar weken live.**
+🎹 **JM-Orgue is af — en gaat eind september live.**
 
 Sinds de vorige post is er flink doorgebouwd. Een rondje langs wat het nu is:
 
@@ -108,8 +108,8 @@ hetzelfde orgel
 🌍 **Voor iedereen**
 ▸ Zeven talen, een speeltafel in je eigen kleuren, en bijwerken met één klik
 
-🗓️ **Binnen een paar weken is JM-Orgue er — voor iedereen.** Volg deze pagina,
-dan mis je de release niet. 🎉
+🗓️ **Eind september is JM-Orgue er — voor iedereen.** Volg deze pagina, dan mis
+je de release niet. 🎉
 
 #orgel #pipeorgan #virtualorgan #organist #kerkorgel #churchmusic #kerkmuziek
 #muziek #orgelbouw #JMOrgue #hauptwerk #grandorgue #sampleset
@@ -141,7 +141,7 @@ dan mis je de release niet. 🎉
 
 - [x] Acht slides geschoten en bijgesneden (1080×1080, `*_vierkant.png`)
 - [x] Gecontroleerd tegen alle releases sinds de vorige post (zie controlelijst)
-- [ ] Datum van de release scherp krijgen voordat "een paar weken" wordt geplaatst
+- [x] Datum scherp: de release staat gepland voor eind september 2026
 - [ ] Caption kopiëren, de acht slides in volgorde uploaden, plaatsen
 
 Het script dat de uitsneden maakt staat in `marketing/snij_insta_v037.py`
