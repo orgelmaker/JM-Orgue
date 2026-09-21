@@ -5,6 +5,31 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.49] - 2026-09-21
+
+### De mengloop gebruikt nu meerdere rekenkernen
+
+Tot deze versie deed JM-Orgue al zijn rekenwerk voor het geluid op één kern, terwijl een moderne pc er acht of meer heeft. Dat was de echte grens achter de polyfonie: het getal in de instelling kon nog zo hoog staan, één kern kwam niet verder.
+
+Gemeten op een i9-10885H (WASAPI, 48 kHz, 480 frames per callback) met Friesach en alle 44 registers getrokken, bij 1.024 gelijktijdig klinkende pijpen:
+
+| Rekenkernen | Belasting van de buffertijd |
+|---|---|
+| 1 | 188 % — ver over de deadline, hoorbaar haperen |
+| 7 | 50 % — ruim binnen de marge |
+
+Dat is **een factor 3,6**. Waar één kern rond de 770 stemmen tegen zijn grens liep, is dat nu ruim het dubbele; de polyfonie-instelling is daarmee eerder bindend dan de rekenkracht.
+
+**Het gaat vanzelf goed.** Bij de eerste start op een pc telt JM-Orgue de fysieke rekenkernen, houdt er één vrij voor het besturingssysteem, de bediening en het laden van samples, en topt af op acht. Op een machine met acht kernen komt daar zeven uit; op een tweekerns laptop één, en dan verandert er niets — wat precies de bedoeling is. Die keuze wordt vastgelegd, zodat hij daarna zichtbaar en te wijzigen is.
+
+**En het is bij te stellen.** In Algemene instellingen → Audio staat nu **"Rekenkernen voor het mengen"**, van 1 (uit, precies het oude gedrag) tot het aantal dat deze pc aankan. Eronder staat hoeveel kernen er gevonden zijn en, tijdens het spelen, welk deel van de rendertijd stemwerk is — dat is het deel dat verdeeld wordt. Met de belastingsmeter ernaast is het effect van een andere keuze meteen te zien.
+
+**Wat er onder de motorkap veranderde.** De stemmen van elk blok worden verdeeld over de audiothread en een vaste pool werkerthreads, elk met een eigen opteltabel; die tabellen worden daarna in vaste volgorde opgeteld. De werkers draaien op dezelfde prioriteit als de audio en zetten zelf denormals uit. Ze wachten eerst spinnend en parkeren daarna, zodat een stil orgel geen kernen laat rondtollen.
+
+> **Eén eerlijke kanttekening.** Met meer dan één kern verandert de volgorde waarin de stemmen bij elkaar worden opgeteld, en drijvende-kommaoptelling is niet associatief. Het geluid verschilt daardoor in de zevende decimaal van dat op één kern — onhoorbaar, maar niet bit-identiek. Bij een gelijk aantal kernen is het resultaat wel reproduceerbaar. Wie bit-gelijkheid met vorige versies wil, zet de instelling op 1.
+
+Verificatie: 204 tests, waaronder vier die met 200 echte stemmen aantonen dat verdeeld mengen hetzelfde geluid geeft (verschil onder een honderdduizendste van het niveau) en vijf voor de pool en de kerntelling. Stresstest: 200 keer de pool herbouwen terwijl 576 stemmen klinken — alle stemmen intact, nul gedropte commando's, en evenveel threads voor als na.
+
 ## [0.7.48] - 2026-09-21
 
 ### De drie getallen uit de Hauptwerk-tabel

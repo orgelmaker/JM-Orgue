@@ -291,16 +291,30 @@ unittest de gelijkheid rechtstreeks op de mengfunctie, met echte stemmen die uit
 echte preload-buffers lezen. Dat is scherper dan een WAV-vergelijking en het
 draait mee in de gewone testronde.
 
-**Fase 4 — de instelling en de automatische keuze (een dag).** De
-voorkeursinstelling, de kernendetectie, de standaardwaarde bij de eerste start,
-de teksten in zeven talen. *Verificatie: op deze machine komt er 7 uit; de
-instelling overleeft een herstart.*
+**Fase 4 — de instelling en de automatische keuze. ✅ AF (21 september 2026).**
+`AudioPrefs.mix_cores` (per pc, niet per orgel), de keuzelijst "Rekenkernen voor
+het mengen" in Algemene instellingen → Audio, en de kerntelling via
+`GetLogicalProcessorInformationEx`. Bij de eerste start zonder voorkeur kiest de
+app `min(8, max(1, fysieke_kernen - 1))` en legt dat vast. Gecontroleerd door de
+voorkeur weg te halen en opnieuw te starten: "8 fysieke kernen gevonden, 7
+ingesteld voor het mengen", en `mix_cores: 7` in het instellingenbestand.
 
-**Fase 5 — de meetknop (een dag).** Zie 4.3.
+**Fase 5 — de meetknop. ✖ Anders ingevuld, bewust.** Het plan wilde een knop die
+met een synthetische belasting opzoekt hoeveel stemmen deze pc haalt. Daar is van
+afgezien: een synthetische belasting kan het geheugengedrag van een échte
+sampleset niet nabootsen (elke stem leest uit zijn eigen buffer van megabytes),
+en een getal dat op die manier tot stand komt is mooier dan het waar is.
 
-**Fase 6 — meten en verantwoorden (een halve dag).** Dezelfde tabel als in
-paragraaf 1, nu met 1 tot 8 kernen naast elkaar, in de changelog en in het
-vergelijkingsrapport.
+In plaats daarvan staat onder de instelling nu **hoeveel procent van de
+rendertijd stemwerk is** — precies het deel dat verdeeld wordt — naast de
+bestaande belastingsmeter. Wie de instelling verandert terwijl hij speelt, ziet
+het effect op zijn eigen orgel, met zijn eigen sampleset. Dat is een eerlijker
+meting dan een benchmark, en hij kost niets.
+
+**Fase 6 — meten en verantwoorden. ✅ AF (21 september 2026).** De tabel in
+paragraaf 1 en de winstcijfers bij fase 3, plus de vergelijking in de changelog
+van 0.7.49: bij 1.024 stemmen 188 % op één kern tegen 50 % op zeven, een factor
+3,6.
 
 ## 7. Wat dit niet oplost
 

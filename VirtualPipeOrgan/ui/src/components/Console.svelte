@@ -1584,6 +1584,31 @@
   // écht haalt bepaalt de rekentijd, niet dit getal: gemeten kost elke stem
   // ongeveer 0,10 % van de buffertijd, dus ligt de grens op één rekenkern rond
   // de 770 stemmen. De belastingsmeter eronder toont dat.
+  // Rekenkernen voor de mengloop (0.7.49). De app kiest bij de eerste start
+  // zelf; hier is het te zien en bij te stellen.
+  let mixCores = { cores: 1, physical: 1, max: 8, recommended: 1 };
+  async function haalMixCores() {
+    try { mixCores = await invoke('get_mix_cores'); } catch (e) {}
+  }
+  $: if (activeView === 'algemene-instellingen' && audioStatusKey) haalMixCores();
+  async function zetMixCores(n) {
+    try {
+      await invoke('set_mix_cores', { cores: Number(n) });
+      await haalMixCores();
+      refreshAudioStatus();
+    } catch (e) { console.error('Rekenkernen zetten mislukt:', e); }
+  }
+  // Welk deel van de rendertijd is stemwerk? Dat is het deel dat over de
+  // kernen verdeeld wordt; de rest (wind, tremulant, galm, EQ, limiter) blijft
+  // op één kern en is in de praktijk een paar procent.
+  $: stemwerkAandeel = (() => {
+    const stemwerk = audioStatus?.mix_voice_load;
+    const totaal = audioStatus?.render_load || 0;
+    // Onder een paar procent belasting (stil orgel) zegt de verhouding niets.
+    if (stemwerk == null || totaal < 0.05) return null;
+    return Math.round((stemwerk / totaal) * 100);
+  })();
+
   const POLYPHONY_CHOICES = [512, 1024, 1536, 2048, 3072, 4096, 8192, 16384, 32768];
   async function setPolyphony(v) {
     try { await invoke('set_polyphony', { voices: Number(v) }); } catch (e) { console.error(e); }
@@ -5969,6 +5994,24 @@
                   {/each}
                 </select>
               </div>
+
+              <!-- Rekenkernen voor de mengloop -->
+              <div class="audio-select-row" style="margin-top: 0.7rem;" title={$t('settings.mix_cores_hint')}>
+                <label class="audio-select-label" for="audio-mix-cores">{$t('settings.mix_cores')}</label>
+                <select id="audio-mix-cores" class="temperament-select" on:change={(e) => zetMixCores(e.target.value)}>
+                  {#each Array(mixCores.max).fill().map((_, i) => i + 1) as n}
+                    <option value={n} selected={mixCores.cores === n}>
+                      {n === 1 ? $t('settings.mix_cores_one') : n}{n === mixCores.recommended ? ` (${$t('settings.mix_cores_recommended')})` : ''}
+                    </option>
+                  {/each}
+                </select>
+              </div>
+              <p class="settings-hint" style="margin: 0.25rem 0 0;">
+                {$t('settings.mix_cores_hint').replace('{n}', mixCores.physical)}
+                {#if stemwerkAandeel !== null}
+                  {' '}{$t('settings.mix_cores_share').replace('{p}', stemwerkAandeel)}
+                {/if}
+              </p>
               {#if audioStatus && audioStatus.audio_running}
                 <p style="margin: 0.2rem 0 0; font-size: 0.68rem; color: var(--text-muted); line-height: 1.35;">
                   {$t('settings.polyphony_load').replace('{load}', Math.round((audioStatus.render_load || 0) * 100)).replace('{peak}', Math.round((audioStatus.render_peak || 0) * 100))}

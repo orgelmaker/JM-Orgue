@@ -124,6 +124,11 @@ pub struct AudioPrefs {
     /// Polyfonie-kap (aantal gelijktijdige stemmen); None = standaard (1024).
     #[serde(default)]
     pub polyphony: Option<u32>,
+    /// Rekenkernen voor de mengloop (0.7.49). 1 = alles op de audiothread
+    /// (het gedrag van vóór deze versie). None = nog nooit gekozen; dan kiest
+    /// de app bij de eerste start zelf wat deze pc aankan.
+    #[serde(default)]
+    pub mix_cores: Option<u32>,
     /// Stereo-samples als twee kanalen laden; None = aan. Uit = oude mono-mix
     /// (halveert RAM bij stereo-sets). Wijziging vergt herladen van het orgel.
     #[serde(default)]
@@ -1300,6 +1305,23 @@ impl AppState {
         // Polyfonie-kap en stereo-laden vóór de eerste audio/orgel-load zetten.
         crate::audio::set_polyphony_target(
             audio_prefs.polyphony.map(|n| n as usize).unwrap_or(vpo_audio::DEFAULT_POLYPHONY));
+        // Rekenkernen voor de mengloop. Nog geen keuze gemaakt (eerste start op
+        // deze pc)? Dan bepaalt de app zelf wat verstandig is en legt dat vast,
+        // zodat het getal daarna zichtbaar en te wijzigen is.
+        let mix_cores = match audio_prefs.mix_cores {
+            Some(n) => n as usize,
+            None => {
+                let aanbevolen = crate::mengpool::aanbevolen_kernen();
+                tracing::info!(
+                    "Eerste start op deze pc: {} fysieke kernen gevonden, {} ingesteld voor het mengen",
+                    crate::mengpool::fysieke_kernen(), aanbevolen);
+                let mut p = audio_prefs.clone();
+                p.mix_cores = Some(aanbevolen as u32);
+                save_audio_prefs(&app_data_dir, &p);
+                aanbevolen
+            }
+        };
+        crate::audio::set_meng_stukken(mix_cores);
         vpo_sampler::set_stereo_loading(audio_prefs.stereo_samples.unwrap_or(true));
         let saved_cfg = AudioOutputConfig {
             host_name: audio_prefs.host.clone(),

@@ -340,6 +340,8 @@ fn main() {
             commands::get_log_tail,
             commands::set_polyphony,
             commands::set_output_test_signal,
+            commands::set_mix_cores,
+            commands::get_mix_cores,
             commands::set_short_octave,
             commands::set_load_all_perspectives,
             commands::get_load_all_perspectives,

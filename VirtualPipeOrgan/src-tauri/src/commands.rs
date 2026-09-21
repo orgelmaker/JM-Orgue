@@ -224,6 +224,10 @@ pub struct StatusDto {
     /// Werkelijke framegrootte van de laatste audio-callback (ook wanneer de
     /// driver zijn eigen buffer aanhoudt en buffer_frames 0 is).
     pub render_frames: u32,
+    /// Welk deel van de rendertijd het mengen van de stemmen is (0..1). Dat is
+    /// precies het werk dat over de rekenkernen verdeeld wordt; de rest (wind,
+    /// tremulant, zwelkast, galm, EQ, limiter) blijft op één kern.
+    pub mix_voice_load: f32,
 }
 
 // ============ Commands ============
@@ -240,6 +244,46 @@ pub fn set_polyphony(state: State<AppState>, voices: u32) -> Result<usize, Strin
     crate::state::save_audio_prefs(&state.app_data_dir, &prefs);
     info!("Polyfonie-kap ingesteld op {} stemmen", n);
     Ok(n)
+}
+
+/// Hoeveel rekenkernen de mengloop gebruikt (0.7.49). 1 = alles op de
+/// audiothread, zoals vóór deze versie. Meer kernen verdelen het stemwerk —
+/// dat is 97 % van de rendertijd bij veel klinkende pijpen.
+///
+/// De pool wordt hier herbouwd (buiten de audiothread) en de keuze wordt per
+/// pc bewaard, niet per orgel.
+#[tauri::command]
+pub fn set_mix_cores(state: State<AppState>, cores: u32) -> Result<usize, String> {
+    let n = (cores as usize).clamp(1, crate::audio::MAX_MENG_STUKKEN);
+    crate::audio::set_meng_stukken(n);
+    let mut prefs = crate::state::load_audio_prefs(&state.app_data_dir);
+    prefs.mix_cores = Some(n as u32);
+    crate::state::save_audio_prefs(&state.app_data_dir, &prefs);
+    Ok(n)
+}
+
+/// Stand van zaken voor de instelling: gekozen kernen, wat deze pc heeft, en
+/// wat de app zou aanraden.
+#[derive(Debug, Clone, Serialize)]
+pub struct MixCoresDto {
+    /// Nu in gebruik.
+    pub cores: usize,
+    /// Fysieke rekenkernen van deze pc.
+    pub physical: usize,
+    /// Hoogste keuze die de app aanbiedt.
+    pub max: usize,
+    /// Wat de app zelf zou kiezen.
+    pub recommended: usize,
+}
+
+#[tauri::command]
+pub fn get_mix_cores() -> MixCoresDto {
+    MixCoresDto {
+        cores: crate::audio::meng_stukken(),
+        physical: crate::mengpool::fysieke_kernen(),
+        max: crate::audio::MAX_MENG_STUKKEN,
+        recommended: crate::mengpool::aanbevolen_kernen(),
+    }
 }
 
 /// Luidspreker-testsignaal op één uitgangskanaal (0.7.47). `channel = None`
@@ -4953,6 +4997,7 @@ pub fn get_status(state: State<AppState>) -> Result<StatusDto, String> {
         asio_restart_advice: state.asio_restart_advice.read().as_ref().map(|a| a.device.clone()),
         backend_reloads: state.backend_reloads.load(std::sync::atomic::Ordering::Relaxed),
         render_frames: crate::audio::render_frames_now(),
+        mix_voice_load: crate::audio::render_pass_load().1,
     })
 }
 

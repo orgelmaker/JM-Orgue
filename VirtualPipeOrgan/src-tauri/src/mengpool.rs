@@ -311,9 +311,102 @@ fn werker_lus(idx: usize, gedeeld: Arc<Gedeeld>) {
     }
 }
 
+/// Aantal FYSIEKE rekenkernen. Niet de logische: hyperthreading deelt de
+/// geheugenpaden van één kern, en juist daar zit de rem bij het mengen (elke
+/// stem leest uit zijn eigen samplebuffer van megabytes). Twee threads op één
+/// fysieke kern leveren dus weinig en maken de spreiding onvoorspelbaarder.
+///
+/// Op Windows via `GetLogicalProcessorInformationEx`; lukt dat niet, dan de
+/// helft van de logische kernen als benadering (vrijwel elke pc met
+/// hyperthreading heeft er twee per kern).
+pub fn fysieke_kernen() -> usize {
+    #[cfg(windows)]
+    {
+        if let Some(n) = fysieke_kernen_windows() {
+            return n.max(1);
+        }
+    }
+    let logisch = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
+    (logisch / 2).max(1)
+}
+
+#[cfg(windows)]
+fn fysieke_kernen_windows() -> Option<usize> {
+    use windows_sys::Win32::System::SystemInformation::{
+        GetLogicalProcessorInformationEx, RelationProcessorCore,
+        SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX,
+    };
+    unsafe {
+        // Eerst de benodigde buffergrootte opvragen (de aanroep faalt dan met
+        // ERROR_INSUFFICIENT_BUFFER en vult `lengte`).
+        let mut lengte: u32 = 0;
+        GetLogicalProcessorInformationEx(RelationProcessorCore, std::ptr::null_mut(), &mut lengte);
+        if lengte == 0 {
+            return None;
+        }
+        let mut buf = vec![0u8; lengte as usize];
+        let ok = GetLogicalProcessorInformationEx(
+            RelationProcessorCore,
+            buf.as_mut_ptr() as *mut SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX,
+            &mut lengte,
+        );
+        if ok == 0 {
+            return None;
+        }
+        // De uitvoer is een aaneenschakeling van records met een eigen lengte;
+        // elk record met relatie "ProcessorCore" is één fysieke kern.
+        let mut kernen = 0usize;
+        let mut offset = 0usize;
+        while offset + std::mem::size_of::<u32>() * 2 <= lengte as usize {
+            let rec = buf.as_ptr().add(offset) as *const SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX;
+            let grootte = (*rec).Size as usize;
+            if grootte == 0 || offset + grootte > lengte as usize {
+                break;
+            }
+            if (*rec).Relationship == RelationProcessorCore {
+                kernen += 1;
+            }
+            offset += grootte;
+        }
+        (kernen > 0).then_some(kernen)
+    }
+}
+
+/// Meer werkers dan dit heeft geen zin: daarboven wint het geheugen het van de
+/// kernen en wordt de barrière langer dan hij waard is.
+pub const MAX_AANBEVOLEN_KERNEN: usize = 8;
+
+/// Wat de app op deze pc zelf kiest als er nog geen voorkeur is: alle fysieke
+/// kernen op één na (die blijft voor het besturingssysteem, de bediening en het
+/// laden van samples, dat bewust op lage prioriteit draait), afgetopt op
+/// `MAX_AANBEVOLEN_KERNEN`.
+///
+/// Op een tweekerns machine komt daar 1 uit — dan verandert er niets, en dat is
+/// de bedoeling.
+pub fn aanbevolen_kernen() -> usize {
+    fysieke_kernen().saturating_sub(1).clamp(1, MAX_AANBEVOLEN_KERNEN)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn de_kerntelling_is_geloofwaardig() {
+        let fysiek = fysieke_kernen();
+        let logisch = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
+        assert!(fysiek >= 1, "minstens één kern");
+        assert!(fysiek <= logisch, "fysiek ({}) kan niet boven logisch ({})", fysiek, logisch);
+    }
+
+    #[test]
+    fn de_aanbeveling_laat_altijd_een_kern_vrij_en_is_afgetopt() {
+        let aanbevolen = aanbevolen_kernen();
+        assert!(aanbevolen >= 1, "minstens één stuk");
+        assert!(aanbevolen <= MAX_AANBEVOLEN_KERNEN);
+        assert!(aanbevolen < fysieke_kernen().max(2),
+            "er hoort een kern vrij te blijven ({} van {})", aanbevolen, fysieke_kernen());
+    }
 
     #[test]
     fn een_pool_van_nul_werkers_werkt_en_sluit() {
