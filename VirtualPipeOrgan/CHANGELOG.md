@@ -13,12 +13,15 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 | Klinkende stemmen | Belasting van de buffertijd |
 |---|---|
-| 210 | 29 % |
-| 424 | 68 % |
-| 828 | 139 % — over de deadline |
-| 1.088 | 195 % |
+| 129 | 12 % |
+| 260 | 23 % |
+| 436 | 39 % |
+| 576 | 56 % |
+| 716 | 74 % |
 
-Elke stem kost dus ongeveer 0,17 % van de buffertijd, en rond de 500 stemmen loopt het renderen tegen zijn grens. De belastingsmeter naast de instelling toont dat live; boven ~80 % dreigen onderbrekingen. Het echte plafond is de ene rekenkern waarop de mengloop draait — dáár valt winst te halen, niet in het getal.
+Elke stem kost dus ongeveer 0,10 % van de buffertijd; op één rekenkern ligt de grens rond de 770 stemmen (bij 80 % belasting, waarboven onderbrekingen dreigen). De belastingsmeter naast de instelling toont dat live. Het echte plafond is de ene rekenkern waarop de mengloop draait — dáár valt winst te halen, niet in het getal.
+
+> *Nagekomen correctie: de eerste versie van deze tabel noemde 0,17 % per stem en een grens rond de 500 stemmen. Die meting liep terwijl de sampleset nog in de achtergrond inlaadde, wat de belasting opdreef. De tabel hierboven is de herhaalde meting op een volledig ingeladen orgel.*
 
 **Uitgangen tot 1.024.** Het plafond van de galm-weging ging van 64 naar 1.024, en — belangrijker — de kanaalnummers zelf waren een byte, dus kanaal 255 was het hoogste dat een klavier kon aanwijzen. Dat zijn nu 16-bits getallen, van de instelling tot aan de audiothread en het opgeslagen instellingenbestand. Een interface met honderden uitgangen is daarmee volledig te routeren.
 

@@ -8,34 +8,45 @@ waarop de mengloop draait, is dat wel.
 
 Gemeten op de ontwikkelmachine (Intel i9-10885H, 8 fysieke kernen / 16 logische,
 WASAPI 48 kHz, 480 frames per callback = 10 ms budget) met Friesach en alle 44
-registers getrokken:
+registers getrokken, met het meetscript `testscripts/meet_mengloop.py`:
 
-| Klinkende stemmen | Belasting van de buffertijd |
-|---|---|
-| 0 (stilte) | 1,4 % |
-| 210 | 29 % |
-| 424 | 68 % |
-| 828 | 139 % — over de deadline |
-| 1.088 | 179–195 % |
+| Klinkende stemmen | Totaal | wind/tremulant | stemwerk | keten | aandeel stemwerk |
+|---|---|---|---|---|---|
+| 0 | 1,30 % | 0,95 % | 0,00 % | 0,36 % | — |
+| 129 | 12,00 % | 0,97 % | 10,88 % | 0,44 % | 90,7 % |
+| 260 | 23,45 % | 0,96 % | 22,18 % | 0,44 % | 94,6 % |
+| 436 | 39,30 % | 0,96 % | 37,86 % | 0,44 % | 96,3 % |
+| 576 | 56,45 % | 1,02 % | 54,98 % | 0,49 % | 97,4 % |
+| 716 | 74,35 % | 1,07 % | 72,75 % | 0,55 % | 97,9 % |
 
-Twee dingen vallen daaraan op.
+Drie dingen vallen daaraan op.
 
-**De kosten zijn recht evenredig met het aantal stemmen.** Ongeveer 0,17 % van
-de buffertijd per stem, van 200 tot 1.100 stemmen zonder knik. Er is dus geen
+**De kosten zijn recht evenredig met het aantal stemmen.** Ongeveer 0,10 % van
+de buffertijd per stem, van 130 tot 716 stemmen zonder knik. Er is dus geen
 cache-instorting meer (die was er vóór 0.7.36, toen de mengloop nog frame-major
-was); wat er nu staat is een vaste prijs per stem per sample.
+was); wat er nu staat is een vaste prijs per stem per sample. Bij 80 %
+belasting — de grens waarboven onderbrekingen dreigen — ligt het plafond op
+deze machine rond de **770 stemmen**.
 
-**Alles wat niet met stemmen te maken heeft, kost niets.** De vloer — zwelkast,
-routering, galm, EQ, limiter, windmodel, tremulant — is 1,4 % van de buffertijd.
-In de zware situatie is dus **99 % van de rekentijd per-stem-werk**.
+**Alles wat niet met stemmen te maken heeft, kost niets.** De vloer is 1,3 % van
+de buffertijd: het windmodel en de tremulant-LFO's samen 0,95 %, en de hele
+keten van zwelkast, routering, galm, EQ en limiter 0,36 %. In de zware situatie
+is dus **97,9 % van de rekentijd per-stem-werk**.
 
-Dat laatste getal is het belangrijkste van dit plan. Het bepaalt via de wet van
-Amdahl wat meerkernig renderen maximaal kan opleveren: met acht kernen
-theoretisch een factor 7,5. In de praktijk wordt dat minder, omdat het werk
-geheugengebonden is (elke stem leest uit zijn eigen samplebuffer van megabytes).
-Juist daar helpen meer kernen wél goed: meer kernen betekent meer gelijktijdig
-uitstaande geheugenverzoeken. Een realistische verwachting is **een factor 3 tot
-5**, oftewel van ~500 naar 1.500–2.500 stemmen die een gewone pc volhoudt.
+**Meten vereist geduld.** De eerste meetronde gaf 0,17 % per stem en een grens
+rond de 500 stemmen. Die liep terwijl de sampleset nog in de achtergrond
+inlaadde — negentien seconden lang, waarin de belasting opgedreven werd en de
+registratie aan het eind zelfs werd teruggezet. Het meetscript wacht nu tot de
+registratie blijft staan én de belasting bij stilte laag is. Wie dit herhaalt:
+doe dat ook.
+
+Dat aandeel van 97,9 % is het belangrijkste getal van dit plan. Het bepaalt via
+de wet van Amdahl wat meerkernig renderen maximaal kan opleveren: met zeven
+werkers theoretisch een factor zes. In de praktijk wordt dat minder, omdat het
+werk geheugengebonden is (elke stem leest uit zijn eigen samplebuffer van
+megabytes). Juist daar helpen meer kernen wél goed: meer kernen betekent meer
+gelijktijdig uitstaande geheugenverzoeken. Een realistische verwachting is
+**een factor 3 tot 5**, oftewel van ~770 naar 2.300–3.800 stemmen.
 
 ## 2. Wat er precies parallel kan
 
@@ -195,17 +206,42 @@ eigen fase met een test die honderd keer achter elkaar wisselt.
 
 Elke fase is los af te ronden en te verifiëren.
 
-**Fase 1 — meten waar de tijd heen gaat (een halve dag).** Tijdmeting per pas
-(1/2/3) achter een vlag, zodat we zwart op wit hebben dat pass 2 de 99 % is en
-hoe duur een barrière op deze machine werkelijk is. Levert de drempels uit 3.3.
-*Geen gedragsverandering.*
+**Fase 1 — meten waar de tijd heen gaat. ✅ AF (21 september 2026).** Tijdmeting
+per pas, altijd aan (zes kloklezingen per blok, ~0,003 % van de buffertijd),
+zichtbaar in de test-API als `mix_pass_load`. Het meetscript
+`testscripts/meet_mengloop.py` zet de tabel uit paragraaf 1 neer. *Geen
+gedragsverandering.*
 
-**Fase 2 — de opteltabellen loskoppelen (een dag).** Pass 2 schrijft naar een
-*array van* opteltabellen in plaats van naar één, gevolgd door een
-reductiestap — maar nog steeds op één thread. Hiermee is de structuur klaar
-zonder dat er één thread bij komt, en is het verschil in optelvolgorde
-afzonderlijk te beoordelen. *Verificatie: het geluid is meetbaar gelijk (de
-bestaande FFT-tests), de belasting is onveranderd.*
+**Fase 2 — de opteltabellen loskoppelen. ✅ AF (21 september 2026).** De stemmen
+worden in `MENG_STUKKEN` aaneengesloten stukken verdeeld (instelbaar 1–8,
+standaard 1), elk met een eigen opteltabel, waarna `reduceer_deeltabellen()` ze
+in vaste stukvolgorde optelt. Stuk 0 schrijft rechtstreeks in de hoofdtabel, dus
+bij één stuk gebeurt er letterlijk niets extra's en blijft het resultaat
+bit-identiek. Onder `MENG_DREMPEL_STEMMEN` (64) blijft alles op één stuk.
+
+Gemeten prijs van het verdelen, bij 436 stemmen, drie ronden afgewisseld:
+
+| Stukken | Totale belasting | waarvan reductie |
+|---|---|---|
+| 1 | 39,00 % | 0,00 % |
+| 2 | 40,00 % | 0,02 % |
+| 4 | 39,10 % | 0,06 % |
+| 8 | 39,60 % | 0,14 % |
+
+De reductie kost dus **ruim een tiende procent van de buffertijd bij acht
+stukken**, en het totaal blijft binnen de ruis van de machine (±1 %). Afgezet
+tegen de 97,9 % die daarmee parallel te maken wordt, is dat verwaarloosbaar.
+
+Zes unittests dekken de reductie: één stuk verandert niets, alle stukken en
+divisies komen erbij, divisies boven het aantal van dit orgel blijven
+onaangeroerd, de optelvolgorde ligt vast, de instelling wordt geklemd en de
+drempel is zinnig.
+
+*Nog open voor fase 3:* een offline render-pad om twee uitvoeringen
+bit-voor-bit te vergelijken. De niveaumeters zijn daarvoor te grof gebleken —
+ze schommelen per akkoord meer dan het verschil dat we zoeken. Zonder zo'n pad
+steunt de gelijkheid op de unittests en op de redenering dat `chunks_mut` elke
+stem precies één keer raakt; dat is genoeg voor fase 2, maar niet voor fase 3.
 
 **Fase 3 — de pool en de barrière (twee tot drie dagen).** Werkers, prioriteit,
 FTZ/DAZ, spin-en-park, het opruimen bij een streamwissel. Vast op het door de

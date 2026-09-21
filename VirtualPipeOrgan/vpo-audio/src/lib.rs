@@ -30,10 +30,11 @@ pub const BLOCK_SIZE: usize = 256;
 ///
 /// Dit is een plafond, geen belofte: wat een pc écht haalt bepaalt de
 /// rekentijd, niet dit getal. Gemeten op een i9-10885H (WASAPI, 48 kHz, 480
-/// frames per callback) kost elke klinkende stem ongeveer 0,17 % van de
-/// buffertijd, dus loopt de rendertijd rond de 500 stemmen tegen zijn deadline.
-/// De belastingsmeter naast de instelling toont dat; hoger zetten heeft alleen
-/// zin op een snellere machine of met een grotere buffer.
+/// frames per callback, sampleset volledig ingeladen) kost elke klinkende stem
+/// ongeveer 0,10 % van de buffertijd — 716 stemmen geven 74 % belasting. Op één
+/// rekenkern ligt de grens dus rond de 770 stemmen. De belastingsmeter naast de
+/// instelling toont dat; hoger zetten heeft alleen zin op een snellere machine,
+/// met een grotere buffer, of zodra de mengloop meerdere kernen gebruikt.
 pub const MAX_POLYPHONY: usize = 32768;
 
 /// Standaard-polyfonie: was een vaste 512 (beschermlaag uit 0.6.2 tegen

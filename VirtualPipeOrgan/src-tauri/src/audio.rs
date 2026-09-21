@@ -148,6 +148,67 @@ pub fn polyphony_target() -> usize {
     POLYPHONY_TARGET.load(Ordering::Relaxed).clamp(MIN_LIVE_VOICES, MAX_LIVE_VOICES)
 }
 
+/// Telt de deel-opteltabellen van de stukken 1.. op bij die van stuk 0.
+///
+/// Losse functie omdat dit het enige stuk nieuwe rekenwerk is dat het verdelen
+/// met zich meebrengt, en omdat de volgorde ertoe doet: drijvende-kommasommen
+/// zijn niet associatief, dus de stukken worden altijd in dezelfde volgorde
+/// opgeteld (0, dan 1, dan 2, …). Daardoor is het resultaat bij een gelijk
+/// aantal stukken reproduceerbaar — het verschilt wél in de laatste decimaal
+/// van de som op één stuk.
+///
+/// `n_div` is het aantal divisies dat dit orgel echt heeft; de tabellen zijn
+/// altijd 32 breed, maar de rest is nul en hoeft niet aangeraakt.
+#[inline]
+pub(crate) fn reduceer_deeltabellen(
+    doel_l: &mut [[f32; 32]],
+    doel_r: &mut [[f32; 32]],
+    delen_l: &[Vec<[f32; 32]>],
+    delen_r: &[Vec<[f32; 32]>],
+    stukken: usize,
+    n_div: usize,
+    bn: usize,
+) {
+    let n_div = n_div.min(32);
+    for k in 0..stukken.saturating_sub(1) {
+        let (pl, pr) = (&delen_l[k], &delen_r[k]);
+        for f in 0..bn {
+            for d in 0..n_div {
+                doel_l[f][d] += pl[f][d];
+                doel_r[f][d] += pr[f][d];
+            }
+        }
+    }
+}
+
+/// Hoogste aantal stukken waarin de mengloop zijn stemmen verdeelt. Elk stuk
+/// heeft een eigen opteltabel; zie `MENG_STUKKEN`.
+pub const MAX_MENG_STUKKEN: usize = 8;
+
+/// In hoeveel stukken de stemmen van een blok verdeeld worden (fase 2 van de
+/// meerkernige mengloop). 1 = precies het oude gedrag: één opteltabel, geen
+/// reductie, bit-identiek resultaat.
+///
+/// Vanaf 2 krijgt elk stuk zijn eigen opteltabel die daarna in vaste volgorde
+/// wordt opgeteld. In fase 2 gebeurt dat nog gewoon achter elkaar op de
+/// audiothread — de structuur is dan klaar, en het verschil in optelvolgorde
+/// (drijvende komma is niet associatief) is los te beoordelen vóórdat er een
+/// thread bij komt.
+static MENG_STUKKEN: AtomicUsize = AtomicUsize::new(1);
+
+pub fn set_meng_stukken(n: usize) {
+    MENG_STUKKEN.store(n.clamp(1, MAX_MENG_STUKKEN), Ordering::Relaxed);
+}
+
+pub fn meng_stukken() -> usize {
+    MENG_STUKKEN.load(Ordering::Relaxed).clamp(1, MAX_MENG_STUKKEN)
+}
+
+/// Onder dit aantal klinkende stemmen blijft de mengloop op één stuk: de
+/// reductie (en straks de barrière) kost dan meer dan het verdelen oplevert.
+/// Wordt in fase 1 gemeten en zo nodig bijgesteld.
+pub const MENG_DREMPEL_STEMMEN: usize = 64;
+
 /// Testsignaal voor het opzoeken van luidsprekers (0.7.47). Wie zes of acht
 /// kanalen aansluit weet daarna nog niet welke stekker in welke kast zit; dit
 /// stuurt een herkenbaar signaal naar precies één uitgang. Proces-breed en
@@ -240,6 +301,34 @@ pub fn render_load() -> (f32, f32) {
 static RENDER_OVERLOAD_COUNT: AtomicU64 = AtomicU64::new(0);
 pub fn render_overload_count() -> u64 {
     RENDER_OVERLOAD_COUNT.load(Ordering::Relaxed)
+}
+
+/// Rendertijd per pas van de mengloop, in tienduizendsten van de buffertijd
+/// (EMA over 16 callbacks) — fase 1 van de meerkernige mengloop.
+///
+/// Fijner dan de totale belastingsmeter (promille), omdat juist de goedkope
+/// passen interessant zijn: de reductie van de deeltabellen kost op deze
+/// machine minder dan een promille en zou anders altijd als 0 verschijnen.
+///
+/// De mengloop werkt in blokken met drie passen: (1) wind en tremulant per
+/// frame, (2) de stemmen, (3) zwelkast/routering/galm/EQ/limiter per frame.
+/// Alleen pas 2 is parallel te maken, dus de verhouding bepaalt wat dat
+/// maximaal kan opleveren. Pas 4 is de reductie van de deel-opteltabellen
+/// (fase 2); die is de prijs van het parallelliseren.
+///
+/// De meting kost zes kloklezingen per blok (~300 ns) en staat daarom altijd
+/// aan: op een buffer van 10 ms is dat 0,003 %.
+static RENDER_PASS_PM: [std::sync::atomic::AtomicU32; 4] = [
+    std::sync::atomic::AtomicU32::new(0),
+    std::sync::atomic::AtomicU32::new(0),
+    std::sync::atomic::AtomicU32::new(0),
+    std::sync::atomic::AtomicU32::new(0),
+];
+
+/// (wind/tremulant, stemmen, keten, reductie) als fractie van de buffertijd.
+pub fn render_pass_load() -> (f32, f32, f32, f32) {
+    let v = |i: usize| RENDER_PASS_PM[i].load(Ordering::Relaxed) as f32 / 10_000.0;
+    (v(0), v(1), v(2), v(3))
 }
 
 /// Framegrootte van de laatste audio-callback (0 vóór de eerste callback).
@@ -3309,6 +3398,13 @@ fn run_audio_thread(
     const MIX_BLOCK: usize = 256;
     let mut blk_div_l: Vec<[f32; 32]> = vec![[0.0; 32]; MIX_BLOCK];
     let mut blk_div_r: Vec<[f32; 32]> = vec![[0.0; 32]; MIX_BLOCK];
+    // Deel-opteltabellen voor de stukken 1.. (stuk 0 is blk_div_l/r zelf, zodat
+    // het geval "één stuk" geen enkele extra bewerking kost). Eén keer op de
+    // heap; de callback alloceert niets.
+    let mut blk_part_l: Vec<Vec<[f32; 32]>> =
+        (1..MAX_MENG_STUKKEN).map(|_| vec![[0.0f32; 32]; MIX_BLOCK]).collect();
+    let mut blk_part_r: Vec<Vec<[f32; 32]>> =
+        (1..MAX_MENG_STUKKEN).map(|_| vec![[0.0f32; 32]; MIX_BLOCK]).collect();
     let mut blk_wind_rate: Vec<[f64; 32]> = vec![[1.0; 32]; MIX_BLOCK];
     let mut blk_wind_gain: Vec<[f32; 32]> = vec![[1.0; 32]; MIX_BLOCK];
     let mut blk_trem_rate: Vec<[f64; 32]> = vec![[1.0; 32]; MIX_BLOCK];
@@ -4538,9 +4634,22 @@ fn run_audio_thread(
                 // limiter). Optelvolgorde per (frame, divisie) is ongewijzigd, dus
                 // het resultaat is identiek — alleen het geheugenpatroon verschilt.
                 let n_frames = data.len() / channels.max(1);
+                // Hoeveel stukken voor deze callback? Onder de drempel blijft
+                // alles op één stuk: de reductie kost dan meer dan het
+                // verdelen oplevert. Eén keer per callback bepaald, zodat het
+                // aantal binnen de callback niet kan wisselen.
+                let stukken = {
+                    let n = voices_lock.len();
+                    if n < MENG_DREMPEL_STEMMEN { 1 } else { meng_stukken().min(n) }
+                };
+                // Tijdmeting per pas (fase 1). Opgeteld over alle blokken van
+                // deze callback; aan het eind omgerekend naar promille van de
+                // buffertijd.
+                let mut ns_pass = [0u128; 4];
                 let mut fi = 0usize;
                 while fi < n_frames {
                     let bn = (n_frames - fi).min(MIX_BLOCK);
+                    let t_pas = std::time::Instant::now();
 
                     // ── Zwelkast per blok: doelstand → gesmoothede stand → volume + filter ──
                     // Eén exp per blok + per gewijzigde divisie één powf en één
@@ -4611,9 +4720,31 @@ fn run_audio_thread(
                         blk_div_l[f] = [0.0f32; 32];
                         blk_div_r[f] = [0.0f32; 32];
                     }
+                    // Deel-opteltabellen van de stukken 1.. wissen. Alleen de
+                    // stukken die deze callback echt gebruikt worden.
+                    for k in 0..stukken.saturating_sub(1) {
+                        for f in 0..bn {
+                            blk_part_l[k][f] = [0.0f32; 32];
+                            blk_part_r[k][f] = [0.0f32; 32];
+                        }
+                    }
+                    ns_pass[0] += t_pas.elapsed().as_nanos();
 
                     // ── Pass 2: stemmen, elk zijn hele blok ──
-                    for voice in voices_lock.iter_mut() {
+                    // Verdeeld over `stukken` aaneengesloten stukken, elk met
+                    // een eigen opteltabel. Bij één stuk is dit letterlijk de
+                    // oude lus over alle stemmen met blk_div_l/r als doel.
+                    let t_pas = std::time::Instant::now();
+                    let per_stuk = voices_lock.len().div_ceil(stukken.max(1));
+                    for (stuk, deel) in voices_lock.chunks_mut(per_stuk.max(1)).enumerate() {
+                    // Stuk 0 schrijft rechtstreeks in de hoofdtabel; de rest in
+                    // zijn eigen deeltabel.
+                    let (doel_l, doel_r): (&mut Vec<[f32; 32]>, &mut Vec<[f32; 32]>) = if stuk == 0 {
+                        (&mut blk_div_l, &mut blk_div_r)
+                    } else {
+                        (&mut blk_part_l[stuk - 1], &mut blk_part_r[stuk - 1])
+                    };
+                    for voice in deel.iter_mut() {
                         let div_idx = voice.c_div;
                         let in_range = div_idx < 32;
                         // Effectieve afspeel-rate = basis (samplerate-correctie) ×
@@ -4674,12 +4805,27 @@ fn run_audio_thread(
                             let contribution_l = sl * g;
                             let contribution_r = sr * g;
                             if !in_range { continue; }
-                            blk_div_l[f][div_idx] += contribution_l * pan_cos;
-                            blk_div_r[f][div_idx] += contribution_r * pan_sin;
+                            doel_l[f][div_idx] += contribution_l * pan_cos;
+                            doel_r[f][div_idx] += contribution_r * pan_sin;
                         }
                     }
+                    }
+                    ns_pass[1] += t_pas.elapsed().as_nanos();
+
+                    // ── Pass 4: de deeltabellen optellen ──
+                    // In VASTE stukvolgorde, zodat het resultaat bij een gelijk
+                    // aantal stukken reproduceerbaar is. Bij één stuk gebeurt
+                    // hier niets. Alleen de divisies die dit orgel heeft.
+                    let t_pas = std::time::Instant::now();
+                    reduceer_deeltabellen(
+                        &mut blk_div_l, &mut blk_div_r,
+                        &blk_part_l, &blk_part_r,
+                        stukken, n_real_divs.clamp(1, 32), bn,
+                    );
+                    ns_pass[3] += t_pas.elapsed().as_nanos();
 
                     // ── Pass 3: per frame de bestaande keten ──
+                    let t_pas = std::time::Instant::now();
                     for f in 0..bn {
                         let frame = &mut data[(fi + f) * channels..(fi + f + 1) * channels];
                         let div_l = &blk_div_l[f];
@@ -4856,7 +5002,19 @@ fn run_audio_thread(
                             rec_buf.push(r);
                         }
                     }
+                    ns_pass[2] += t_pas.elapsed().as_nanos();
                     fi += bn;
+                }
+                // Tijdmeting per pas wegschrijven (fase 1): promille van de
+                // buffertijd, zelfde EMA-venster (16 callbacks) als de totale
+                // belastingsmeter zodat de getallen vergelijkbaar zijn.
+                if frames_now > 0 && sample_rate > 0 {
+                    let budget_ns = frames_now as f64 * 1_000_000_000.0 / sample_rate as f64;
+                    for i in 0..4 {
+                        let pm = ((ns_pass[i] as f64 / budget_ns) * 10_000.0).clamp(0.0, 99_999.0) as u32;
+                        let prev = RENDER_PASS_PM[i].load(Ordering::Relaxed);
+                        RENDER_PASS_PM[i].store((prev * 15 + pm) / 16, Ordering::Relaxed);
+                    }
                 }
                 // Push naar recorder (try_send — audio mag niet blokkeren).
                 if let Some(rc) = rec_active {
@@ -5287,5 +5445,105 @@ mod veel_kanalen_tests {
         let chans = vec![vec![0u16, 1]];
         let (_, _, n) = wet_channel_weights(&chans, 1, MAX_OUT_CH + 500);
         assert!(n <= MAX_OUT_CH);
+    }
+}
+
+#[cfg(test)]
+mod mengloop_stukken_tests {
+    use super::{meng_stukken, reduceer_deeltabellen, set_meng_stukken,
+                MAX_MENG_STUKKEN, MENG_DREMPEL_STEMMEN};
+
+    /// Bouwt een deeltabel waarin elke waarde uniek is, zodat een
+    /// vergeten stuk of divisie meteen opvalt.
+    fn deel(k: usize, bn: usize) -> Vec<[f32; 32]> {
+        (0..bn).map(|f| {
+            let mut rij = [0.0f32; 32];
+            for d in 0..32 { rij[d] = (k * 1000 + f * 10 + d) as f32; }
+            rij
+        }).collect()
+    }
+
+    #[test]
+    fn een_stuk_verandert_niets() {
+        let bn = 8;
+        let mut l = deel(9, bn);
+        let mut r = deel(9, bn);
+        let voor_l = l.clone();
+        let delen: Vec<Vec<[f32; 32]>> = Vec::new();
+        reduceer_deeltabellen(&mut l, &mut r, &delen, &delen, 1, 4, bn);
+        assert_eq!(l, voor_l, "bij één stuk hoort er niets opgeteld te worden");
+    }
+
+    #[test]
+    fn alle_stukken_en_divisies_komen_erbij() {
+        let bn = 4;
+        let n_div = 6;
+        let mut l = vec![[0.0f32; 32]; bn];
+        let mut r = vec![[0.0f32; 32]; bn];
+        let dl: Vec<Vec<[f32; 32]>> = (0..3).map(|k| deel(k + 1, bn)).collect();
+        let dr: Vec<Vec<[f32; 32]>> = (0..3).map(|k| deel(k + 1, bn)).collect();
+        reduceer_deeltabellen(&mut l, &mut r, &dl, &dr, 4, n_div, bn);
+        for f in 0..bn {
+            for d in 0..n_div {
+                let verwacht: f32 = (0..3).map(|k| dl[k][f][d]).sum();
+                assert_eq!(l[f][d], verwacht, "frame {} divisie {}", f, d);
+                assert_eq!(r[f][d], verwacht, "frame {} divisie {} (rechts)", f, d);
+            }
+        }
+    }
+
+    #[test]
+    fn divisies_boven_n_div_blijven_onaangeroerd() {
+        // De tabellen zijn altijd 32 breed; alles boven het aantal divisies van
+        // dit orgel is nul en hoeft niet aangeraakt — dat scheelt geheugenverkeer.
+        let bn = 2;
+        let mut l = vec![[0.0f32; 32]; bn];
+        let mut r = vec![[0.0f32; 32]; bn];
+        let dl: Vec<Vec<[f32; 32]>> = vec![deel(1, bn)];
+        reduceer_deeltabellen(&mut l, &mut r, &dl, &dl, 2, 3, bn);
+        for f in 0..bn {
+            assert_ne!(l[f][2], 0.0, "divisie 2 hoort wel opgeteld te zijn");
+            for d in 3..32 {
+                assert_eq!(l[f][d], 0.0, "divisie {} hoort nul te blijven", d);
+            }
+        }
+    }
+
+    #[test]
+    fn de_optelvolgorde_ligt_vast() {
+        // Reproduceerbaarheid is de eis: twee keer dezelfde invoer moet
+        // bit-identiek hetzelfde geven, ook bij waarden waar de volgorde
+        // aantoonbaar uitmaakt (groot + klein + klein).
+        let bn = 1;
+        let maak = |v: f32| -> Vec<[f32; 32]> {
+            let mut rij = [0.0f32; 32];
+            rij[0] = v;
+            vec![rij; bn]
+        };
+        let dl = vec![maak(1e-8), maak(1e-8), maak(1.0)];
+        let draai = |dl: &Vec<Vec<[f32; 32]>>| {
+            let mut l = vec![[0.0f32; 32]; bn];
+            let mut r = vec![[0.0f32; 32]; bn];
+            reduceer_deeltabellen(&mut l, &mut r, dl, dl, 4, 1, bn);
+            l[0][0]
+        };
+        assert_eq!(draai(&dl), draai(&dl));
+    }
+
+    #[test]
+    fn de_instelling_wordt_geklemd() {
+        set_meng_stukken(0);
+        assert_eq!(meng_stukken(), 1, "0 stukken bestaat niet");
+        set_meng_stukken(9999);
+        assert_eq!(meng_stukken(), MAX_MENG_STUKKEN);
+        set_meng_stukken(1);
+        assert_eq!(meng_stukken(), 1);
+    }
+
+    #[test]
+    fn de_drempel_is_zinnig() {
+        // Onder de drempel loont verdelen niet; hij moet wel ruim onder een
+        // gewoon akkoord met een paar registers liggen.
+        assert!(MENG_DREMPEL_STEMMEN >= 16 && MENG_DREMPEL_STEMMEN <= 256);
     }
 }

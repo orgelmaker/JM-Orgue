@@ -1582,8 +1582,8 @@
   // Polyfonie-kap en stereo-samples (globale audio-voorkeuren; waarde via get_status).
   // Tot 32.768, gelijk aan het hoogste dat andere software noemt. Wat een pc
   // écht haalt bepaalt de rekentijd, niet dit getal: gemeten kost elke stem
-  // ongeveer 0,17 % van de buffertijd, dus loopt een gewone pc rond de 500
-  // stemmen tegen zijn deadline. De belastingsmeter eronder toont dat.
+  // ongeveer 0,10 % van de buffertijd, dus ligt de grens op één rekenkern rond
+  // de 770 stemmen. De belastingsmeter eronder toont dat.
   const POLYPHONY_CHOICES = [512, 1024, 1536, 2048, 3072, 4096, 8192, 16384, 32768];
   async function setPolyphony(v) {
     try { await invoke('set_polyphony', { voices: Number(v) }); } catch (e) { console.error(e); }

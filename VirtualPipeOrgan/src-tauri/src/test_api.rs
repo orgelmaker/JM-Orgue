@@ -41,6 +41,7 @@
 //!   GET  /swell                   - per divisie {division,index,position,binding,min_db,cutoff}
 //!   POST /swell/binding           - body {"division","channel","cc","min"?,"max"?,"invert"?} | {"division","clear":true}
 //!   POST /audio/test_signal       - ?channel=<n>&kind=0|1&level_db=<dB>; zonder channel = uit
+//!   POST /audio/mix_chunks        - ?n=1..8: in hoeveel stukken de mengloop zijn stemmen verdeelt
 //!   POST /tremulant?division=<naam>&active=0|1 - tremulant van een divisie live
 //!        aan/uit (zelfde kern als het Tauri-commando set_tremulant) →
 //!        {"ok","division","active","stops"}; stops = aantal registers met échte
@@ -495,6 +496,9 @@ fn route_test_only(
         // channel gaat hij uit. Zo is te meten dat er geluid uit precies
         // een kanaal komt (peak_left/peak_right in /status).
         (tiny_http::Method::Post, "/audio/test_signal") => Ok(handle_test_signal(query)),
+        // Mengloop in N stukken verdelen (fase 2): ?n=1..8. 1 = het oude,
+        // bit-identieke gedrag.
+        (tiny_http::Method::Post, "/audio/mix_chunks") => Ok(handle_mix_chunks(query)),
         // Automatisch MIDI-archief (0.7.38)
         (tiny_http::Method::Get, "/midi/archive/status") => Ok(handle_midi_archive_status(state)),
         (tiny_http::Method::Post, "/midi/archive/config") => handle_midi_archive_config(state, query),
@@ -686,6 +690,15 @@ fn handle_status(state: &AppState) -> Value {
         "backend_reloads": state.backend_reloads.load(std::sync::atomic::Ordering::Relaxed),
         "render_frames": crate::audio::render_frames_now(),
         "layered_stops": state.rank_summary.read().iter().filter(|r| r.is_stacked()).count(),
+        // Mengloop-meting (fase 1 van het meerkernige plan): rendertijd per
+        // pas als fractie van de buffertijd, plus het aantal stukken.
+        "mix_pass_load": {
+            "wind_trem": crate::audio::render_pass_load().0,
+            "voices": crate::audio::render_pass_load().1,
+            "chain": crate::audio::render_pass_load().2,
+            "reduce": crate::audio::render_pass_load().3,
+        },
+        "mix_chunks": crate::audio::meng_stukken(),
         "release_pipes": state.loaded_organ_info.read().as_ref().map(|o| o.release_pipes).unwrap_or(0),
     })
 }
@@ -1432,6 +1445,12 @@ fn handle_swell_get(state: &AppState) -> Value {
 }
 
 /// POST /swell/binding {"division","channel","cc","min"?,"max"?,"invert"?} | {"division","clear":true}.
+fn handle_mix_chunks(query: &str) -> Value {
+    let n: usize = parse_query(query, "n").unwrap_or(1);
+    crate::audio::set_meng_stukken(n);
+    json!({ "ok": true, "mix_chunks": crate::audio::meng_stukken() })
+}
+
 fn handle_test_signal(query: &str) -> Value {
     let kind: u8 = parse_query(query, "kind").unwrap_or(0);
     let level: f32 = parse_query(query, "level_db").unwrap_or(-12.0);

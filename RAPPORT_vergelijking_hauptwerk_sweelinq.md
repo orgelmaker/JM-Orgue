@@ -30,10 +30,10 @@ ons niet, is de **VST/AU-plug-in**.
 
 Over de polyfonie hoort een eerlijke kanttekening. Het getal is sinds 0.7.48
 gelijk (32.768), maar dat is aan beide kanten een plafond en geen belofte.
-Gemeten op een i9-10885H kost bij ons elke klinkende stem ongeveer 0,17 % van
-de buffertijd: 424 stemmen geven 68 % belasting, 828 stemmen 139 % — over de
-deadline. Rond de 500 stemmen loopt het renderen dus tegen zijn grens, en dat
-komt doordat de mengloop op één rekenkern draait. **Daar** ligt de echte winst,
+Gemeten op een i9-10885H kost bij ons elke klinkende stem ongeveer 0,10 % van
+de buffertijd: 436 stemmen geven 39 % belasting, 716 stemmen 74 %. Op één
+rekenkern ligt de grens dus rond de 770 stemmen, en dat komt doordat de
+mengloop op één rekenkern draait. **Daar** ligt de echte winst,
 niet in het getal; meerkernig renderen is het volgende dat de moeite waard is.
 
 Over de samplerate hoort er ook een: de keuze werkt waar de host hem toelaat.
