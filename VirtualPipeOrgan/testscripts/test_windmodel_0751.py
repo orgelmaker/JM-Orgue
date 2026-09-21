@@ -17,7 +17,7 @@ de drie dingen die dat effect maken:
 
 Gebruik: python testscripts/test_windmodel_0751.py
 """
-import json, sys, time, urllib.request
+import atexit, json, sys, time, urllib.request
 
 B = "http://127.0.0.1:8765"
 R = {"pass": [], "fail": []}
@@ -99,6 +99,19 @@ ped_16 = ids(ped_stops, lambda s: voet(s) >= 16.0, 2) or ids(ped_stops, None, 1)
 hoog = ids(man_stops, lambda s: voet(s) <= 2.0, 1) or een_register
 print("manuaal %s (groep %d), pedaal %s (groep %d)" % (divs[MAN]["name"], MAN + 1, divs[PED]["name"], PED + 1))
 print("nul-test met %s; pleno %d registers; pedaal %s; discant op %s" % (een_register, len(pleno), ped_16, hoog))
+
+# De eigen indeling en windinstellingen van het orgel na afloop terugzetten —
+# ook als het script halverwege strandt.
+OORSPRONKELIJK = list(get("/settings/wind_group").get("groups", []))[:len(divs)]
+def herstel():
+    try:
+        post("/panic")
+        for d, g in enumerate(OORSPRONKELIJK):
+            post("/settings/wind_group?division=%d&group=%d" % (d, g))
+        post("/settings/wind_restore")
+    except Exception:
+        pass
+atexit.register(herstel)
 
 post("/panic")
 groepen(False)
@@ -196,9 +209,6 @@ check(dip3 <= 0.08 and d_h <= 0.08 and (1 - b2) <= 0.05, "kortstondig <= 8 %%, s
 
 post("/panic")
 print("\n%d geslaagd, %d mislukt" % (len(R["pass"]), len(R["fail"])))
-# Terug naar elke divisie een eigen balg, zodat de opgeslagen instellingen van
-# het orgel niet met de meetopstelling achterblijven.
-groepen(False)
 for m in R["fail"]:
     print("  FAIL", m)
 sys.exit(1 if R["fail"] else 0)

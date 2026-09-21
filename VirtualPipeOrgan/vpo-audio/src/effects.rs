@@ -335,6 +335,10 @@ pub struct WindModel {
     /// waarbij de statische inzakking de helft van `max_sag` is.
     verbruik: f32,
     q_ref: f32,
+    /// Ondergrens van de druk, kruipt naar 1 − 1,6·max_sag toe: wie de
+    /// maximale daling live verlaagt terwijl de balg ingezakt is, krijgt zo
+    /// geen sprong maar een glijdende terugkeer.
+    grens: f32,
     /// Ruisgenerator.
     noise_state: u32,
 }
@@ -360,6 +364,7 @@ impl WindModel {
             flutter: OnePoleFilter::new(2.5, sample_rate),
             verbruik: 0.0,
             q_ref: 1.0,
+            grens: 1.0 - 0.05 * 1.6,
             noise_state: 12345,
         };
         m.configure(0.5, 0.5, 0.05, sample_rate);
@@ -423,7 +428,10 @@ impl WindModel {
         self.velocity += a * self.dt;
         self.pressure += self.velocity * self.dt;
         // Het terugveren mag over het doel heen schieten, maar niet ontsporen.
-        let ondergrens = 1.0 - self.max_sag * 1.6;
+        // De grens zelf kruipt (τ ≈ 20 ms) naar de ingestelde waarde.
+        let doel_grens = 1.0 - self.max_sag * 1.6;
+        self.grens += (doel_grens - self.grens) * 0.001;
+        let ondergrens = self.grens.min(1.0);
         if self.pressure < ondergrens {
             self.pressure = ondergrens;
             self.velocity = 0.0;
@@ -561,8 +569,12 @@ impl PijpFamilie {
 #[derive(Clone, Copy, Debug)]
 pub struct StopWindProfiel {
     pub familie: PijpFamilie,
-    /// Voetmaat: 8 = 8', 16 = 16', 2.667 = 2 2/3'.
+    /// Voetmaat: 8 = 8', 16 = 16', 2.667 = 2 2/3'. Voor een mixtuur de
+    /// hoogste koorpijp (2' op een manuaal, 4' op het pedaal).
     pub voet: f32,
+    /// Aantal koren (pijpen per toets) — 1 voor een gewoon register, bij een
+    /// mixtuur uit de naam ("IV", "4-5f."), anders 4.
+    pub koren: u8,
 }
 
 fn bevat(naam: &str, woorden: &[&str]) -> bool {
@@ -644,7 +656,10 @@ pub fn verbruik_van_pijp(p: &StopWindProfiel, midi_note: u8) -> f32 {
         PijpFamilie::Fluit => 1.2,     // wijde mensuur: meer wind
         PijpFamilie::Gedekt => 0.7,    // gedekt: kleinere pijp, minder wind
         PijpFamilie::Strijker => 0.6,  // eng: het minst
-        PijpFamilie::Mixtuur => 1.5,   // meestal meer pijpen in één sample
+        // Meerdere pijpen in één sample: elk koorpijpje zit op de vloer, en
+        // een Mixtuur IV trekt dus vier keer die vloer — niet anderhalf keer
+        // een 8'-pijp (dat deed 0.7.51 bij sets zonder voetmaat: 4× te zwaar).
+        PijpFamilie::Mixtuur => p.koren.max(1) as f32,
         PijpFamilie::Tongwerk => 0.8,
     };
     (freq_term * voet_term).max(0.03) * fam
@@ -1148,11 +1163,32 @@ mod windmodel_tests {
         assert!(strak <= 1.0005, "kritisch gedempt hoort niet door te schieten, was {}", strak);
     }
 
+    /// Live de maximale daling verlagen terwijl de balg ingezakt is mag geen
+    /// sprong geven: de ondergrens kruipt, de druk glijdt.
+    #[test]
+    fn de_daling_verlagen_geeft_geen_sprong() {
+        let mut m = balg(0.8, 0.10);
+        m.set_verbruik(30.0, 10.0);
+        let diep = draai(&mut m, 2000).1;
+        assert!(diep < 0.93, "niet ingezakt: {}", diep);
+        m.configure(0.5, 0.8, 0.01, SR);
+        let mut vorige = diep;
+        let mut grootste_stap = 0.0f32;
+        for _ in 0..(SR / 2) {
+            let p = m.process();
+            grootste_stap = grootste_stap.max((p - vorige).abs());
+            vorige = p;
+        }
+        assert!(grootste_stap < 0.0005, "sprong per sample van {:.5}", grootste_stap);
+        assert!(vorige > 0.98, "kwam niet omhoog: {}", vorige);
+    }
+
     #[test]
     fn de_druk_blijft_binnen_de_perken() {
         let mut m = WindModel::new(SR);
         m.enabled = true;
         m.configure(0.1, 0.0, 0.30, SR);
+        draai(&mut m, 300); // de grens kruipt naar 0,52
         for stap in 0..60 {
             m.set_verbruik(if stap % 2 == 0 { 800.0 } else { 0.0 }, 10.0);
             let (laagste, _) = draai(&mut m, 40);
@@ -1284,7 +1320,18 @@ mod pijpprofiel_tests {
     const SR: SampleRate = 48000;
 
     fn prof(familie: PijpFamilie, voet: f32) -> StopWindProfiel {
-        StopWindProfiel { familie, voet }
+        StopWindProfiel { familie, voet, koren: 1 }
+    }
+
+    /// Een Mixtuur IV op 2' weegt vier vloerpijpjes — een fractie van een
+    /// 8'-prestant op dezelfde toets, niet anderhalf keer zoveel.
+    #[test]
+    fn een_mixtuur_weegt_vier_vloerpijpjes() {
+        let mix = StopWindProfiel { familie: PijpFamilie::Mixtuur, voet: 2.0, koren: 4 };
+        let m = verbruik_van_pijp(&mix, 60);
+        let prestant = verbruik_van_pijp(&prof(PijpFamilie::Principaal, 8.0), 60);
+        assert!((m - 0.12).abs() < 0.01, "mixtuur IV op c': {}", m);
+        assert!(m < prestant, "een mixtuur hoort lichter te wegen dan een 8'-prestant: {} vs {}", m, prestant);
     }
 
     #[test]

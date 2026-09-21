@@ -5651,28 +5651,68 @@ fn build_stop_division_map(divisions: &[DivisionDto]) -> std::collections::HashM
 /// verbruik van haar "pleno": alle registers op een vierklank een octaaf
 /// boven de laagste toets. Dat pleno is de referentie voor "vol werk", zodat
 /// een kistorgel en een domorgel bij hún pleno even ver inzakken.
+/// Aantal koren van een mixtuur uit de naam: "Mixtuur IV" → 4, "Scherp
+/// III-IV" → 4, "Mixtur major 4-5f." → 5, "Sesquialter II" → 2. Niets
+/// gevonden → 4 (de gewone mixtuur).
+fn koren_uit_naam(naam: &str) -> u8 {
+    let mut beste = 0u8;
+    for token in naam.split(|c: char| c.is_whitespace() || c == '(' || c == ')' || c == ',' || c == '.') {
+        let t = token.trim_matches(|c: char| !c.is_alphanumeric() && c != '-');
+        if t.is_empty() { continue; }
+        // Romeins: alleen I/V/X, hooguit vier tekens, evt. "III-IV".
+        for deel in t.split('-') {
+            let u = deel.to_uppercase();
+            if !u.is_empty() && u.len() <= 4 && u.chars().all(|c| c == 'I' || c == 'V' || c == 'X') {
+                let v = match u.as_str() {
+                    "I" => 1, "II" => 2, "III" => 3, "IV" => 4, "V" => 5, "VI" => 6, "VII" => 7, "VIII" => 8, _ => 0,
+                };
+                beste = beste.max(v);
+            }
+        }
+        // Arabisch met "f" (Duits/Nederlands): "4f", "4-5f", "5F".
+        let u = t.to_uppercase();
+        if u.ends_with('F') {
+            for deel in u.trim_end_matches('F').split('-') {
+                if let Ok(v) = deel.parse::<u8>() {
+                    if v <= 12 { beste = beste.max(v); }
+                }
+            }
+        }
+    }
+    if beste == 0 { 4 } else { beste }
+}
+
 fn build_stop_wind_profiles(divisions: &[DivisionDto])
     -> (std::collections::HashMap<u32, vpo_audio::StopWindProfiel>, [f32; 32])
 {
     let mut map = std::collections::HashMap::new();
     let mut pleno = [0.0f32; 32];
     for (div_idx, division) in divisions.iter().enumerate() {
-        // Een pedaal (korte omvang) speelt geen vierklank: anderhalve noot
-        // is daar "vol werk"; een manuaal vier.
+        // Een pedaal (korte omvang) speelt geen vierklank in het tenor: "vol
+        // werk" is daar twee noten in het groot octaaf (C, F, G, c, elk half);
+        // een manuaal een vierklank een octaaf boven de laagste toets.
         let omvang = division.stops.iter()
             .map(|s| s.last_midi_note.saturating_sub(s.first_midi_note))
             .max().unwrap_or(0);
-        let gewicht = if omvang < 40 { 0.375 } else { 1.0 };
+        let pedaal = omvang < 40;
+        let (intervallen, gewicht): ([i32; 4], f32) = if pedaal { ([0, 5, 7, 12], 0.5) } else { ([12, 16, 19, 24], 1.0) };
         for stop in &division.stops {
-            let profiel = vpo_audio::StopWindProfiel {
-                familie: vpo_audio::familie_van_naam(&stop.name, stop.is_reed),
-                voet: vpo_audio::voet_uit_pitch(&stop.pitch),
-            };
+            let familie = vpo_audio::familie_van_naam(&stop.name, stop.is_reed);
+            let mut voet = vpo_audio::voet_uit_pitch(&stop.pitch);
+            let mut koren = 1u8;
+            if familie == vpo_audio::PijpFamilie::Mixtuur {
+                // Sets zonder voetmaat (GrandOrgue zonder HarmonicNumber, dus
+                // ook Friesach) geven "8'" terug; een mixtuur klinkt op de
+                // hoogste koorpijp, niet op 8'.
+                if voet > 4.0 { voet = if pedaal { 4.0 } else { 2.0 }; }
+                koren = koren_uit_naam(&stop.name);
+            }
+            let profiel = vpo_audio::StopWindProfiel { familie, voet, koren };
             map.insert(stop.internal_stop_id, profiel);
             if div_idx < 32 {
                 let laag = stop.first_midi_note.max(24) as i32;
                 let hoog = stop.last_midi_note.max(stop.first_midi_note) as i32;
-                for interval in [12, 16, 19, 24] {
+                for interval in intervallen {
                     let noot = (laag + interval).min(hoog).clamp(0, 127) as u8;
                     pleno[div_idx] += gewicht * vpo_audio::verbruik_van_pijp(&profiel, noot);
                 }
@@ -5680,6 +5720,22 @@ fn build_stop_wind_profiles(divisions: &[DivisionDto])
         }
     }
     (map, pleno)
+}
+
+#[cfg(test)]
+mod windprofiel_tests {
+    use super::koren_uit_naam;
+
+    #[test]
+    fn koren_uit_de_naam() {
+        assert_eq!(koren_uit_naam("Mixtuur IV"), 4);
+        assert_eq!(koren_uit_naam("Scherp III-IV"), 4);
+        assert_eq!(koren_uit_naam("HW Mixtur major 4-5f. 2 2/3'"), 5);
+        assert_eq!(koren_uit_naam("SW Plein Jeu 4-5f. 2'"), 5);
+        assert_eq!(koren_uit_naam("Sesquialter II"), 2);
+        assert_eq!(koren_uit_naam("Cornet V"), 5);
+        assert_eq!(koren_uit_naam("Mixtuur"), 4);
+    }
 }
 
 /// Detect reed (tongwerk) stops by name

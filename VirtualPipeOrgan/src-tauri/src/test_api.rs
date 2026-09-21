@@ -52,7 +52,9 @@
 //!        /settings/temperament?name=..&fine=..&cents=c0,..,c11&retune=0|1 (retune default 0 = Origineel)
 //!   POST /temperament             - body: {"name":"..","cents":[12],"retune":bool,"fine":..} (zelfde als hierboven, JSON)
 //!   GET  /tuning                  - hertemperen: retune_pipes/retune_total (orgel) + retune/name/fine_tune (mirror)
-//!   POST /settings/wind?enabled=0|1[&reservoir=&damping=&sag=] - windmodel voor alle groepen
+//!   POST /settings/wind?enabled=0|1[&karakter=0|1&reservoir=&damping=&sag=&stoot=&kanaal=&doffer=&verschil=&tongwerk=] - windmodel voor alle groepen (audio, niet bewaard)
+//!   POST /settings/wind_restore - de bewaarde windinstellingen van het orgel opnieuw naar de audio sturen
+//!   GET  /settings/wind_group - divisie→windgroep-toewijzing
 //!   GET  /wind - live winddruk, stemmen en cent-afwijking per windgroep
 //!   POST /settings/wind_group?division=&group= - divisie aan een windgroep toewijzen
 //!   POST /record/stop             - geeft ook peak_hz (FFT-piek van de laatste ~2,7 s, toonhoogtemeting)
@@ -519,6 +521,8 @@ fn route_test_only(
         (tiny_http::Method::Post, "/settings/wind") => handle_set_wind(state, query),
         (tiny_http::Method::Get, "/wind") => handle_wind_status(state),
         (tiny_http::Method::Post, "/settings/wind_group") => handle_set_wind_group(state, query),
+        (tiny_http::Method::Get, "/settings/wind_group") => Ok(json!({ "groups": state.division_wind_groups.read().clone() })),
+        (tiny_http::Method::Post, "/settings/wind_restore") => handle_wind_restore(state),
         (tiny_http::Method::Post, "/settings/eq") => handle_set_eq(state, query),
         (tiny_http::Method::Post, "/settings/reverb") => handle_set_reverb(state, query),
         (tiny_http::Method::Post, "/settings/pan") => handle_set_pan(state, query),
@@ -1715,6 +1719,19 @@ fn handle_set_wind_group(state: &AppState, query: &str) -> Result<Value, (u16, S
         group: group.min(31),
     });
     Ok(json!({ "ok": true, "division": division, "group": group }))
+}
+
+/// De bewaarde windinstellingen van het orgel opnieuw naar de audio sturen —
+/// voor een meetscript dat via /settings/wind heeft geëxperimenteerd.
+fn handle_wind_restore(state: &AppState) -> Result<Value, (u16, String)> {
+    let configs: Vec<crate::library::WindGroupConfigSaved> = state.wind_group_configs.read().values().cloned().collect();
+    for cfg in &configs {
+        state.send_audio_command(AudioCommand::SetWindModel {
+            division_index: cfg.group,
+            instelling: crate::commands::wind_instelling_van(cfg),
+        });
+    }
+    Ok(json!({ "ok": true, "groepen": configs.len() }))
 }
 
 /// Live winddruk per groep — hetzelfde getal dat de meter in het scherm laat

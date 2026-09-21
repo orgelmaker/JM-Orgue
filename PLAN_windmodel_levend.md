@@ -42,7 +42,7 @@ pitch-bend). Het is:
 | per octaaf binnen een register | ×2,83 (f^-1,5) | HW-ODF SJdL: 2,06e-3 / 7,3e-4 / 2,58e-4 / 9,1e-5 / 3,2e-5 kg/s voor C/c/c'/c''/c''' |
 | per octaaf voetmaat, zelfde toets | ×4 (extra √(voet/8)) | HW-ODF: 16' C 2,06e-3, 8' C 5,16e-4, 4' C 1,29e-4 |
 | vloer kleinste pijp | 0,03 | HW-vloer 1,6e-5 kg/s (1/129 van 16' C) |
-| familie verbruik | principaal 1,0; fluit 1,2; gedekt 0,7; strijker 0,6; mixtuur 1,5; tongwerk 0,8 | mensuur |
+| familie verbruik | principaal 1,0; fluit 1,2; gedekt 0,7; strijker 0,6; mixtuur = aantal koren (vloerpijpjes op 2'/4'); tongwerk 0,8 | mensuur; koren uit de naam (0.7.52) |
 | toonhoogte referentie (8'-prestant c') | 80 cent per eenheid druk | HW 50-85; Logos 0,8-1,8 cent/% |
 | familie toonhoogte | principaal 1,0; fluit 1,4; gedekt 1,3; strijker 0,6; mixtuur 1,2; tongwerk 0 | Logos, HW-praktijk, tongfysica |
 | grootte | 0,75 (8' C) → 1,0 (c') → 1,25 (c''') | Logos: klein > groot |
@@ -52,9 +52,9 @@ pitch-bend). Het is:
 | balg | f0 = 3/balggrootte (6 Hz bij 50 %), ζ 0,12-1,0 | ongewijzigd t.o.v. 0.7.50 |
 | lade | 9-15 Hz, ζ 0,55-0,25 ("kanaal" kort → lang) | GOArt 10-25 Hz; Chalmers: kanaallengte dominant |
 | stoot | één 16'-C → dip ~3 % op de eigen lade, 0,65× op de andere laden van de groep; loslaten 0,4× omhoog | Woolley/Fisk; kalibratie in unittest |
-| klemmen | lade 0,92-1,04; balg 1-1,6·max_sag … 1,03; stoot per callback ±12 | karikatuurgrens ≤ 8 cent kort, ≤ 5 statisch |
+| klemmen | lade 0,92-1,04; wat de stemmen zien: onder = 1 − max(1,6·daling, 0,08) − 0,02 (0,90 bij 5 %); balg 1-1,6·max_sag (kruipend) … 1,03; stoot per callback ±12 | karikatuurgrens ≤ 8 % kort bij de standaard, ≤ 5 % statisch |
 | pijp als resonator | τ = 8 perioden (2' c''' 2 ms, 8' c' 30 ms, 16' C 240 ms) | Fletcher & Rossing; criticus |
-| doffer | tilt boven 1,5 kHz, k = 2,4·doffer·daling (max 0,6) | HW HarmonicShaping −2 dB per 3,2 % flow |
+| doffer | tilt boven 1,5 kHz, k = 6,0·doffer·daling (max 0,6) — −2 dB bij 3,2 % bij doffer 1,0 (0.7.52; was 2,4) | HW HarmonicShaping −2 dB per 3,2 % flow |
 | groepsflutter | 0,04 × daling (was 0,15) | samples bevatten de eigen wiebel al |
 
 ## 3. Fasen
@@ -70,6 +70,19 @@ regelaars; meters per lade met vastgehouden dip; pas 1 alleen voor echte
 divisies en actieve balgen; test-API `GET /wind` per lade, `POST
 /settings/wind?karakter=&stoot=&kanaal=&doffer=&verschil=&tongwerk=`, `POST
 /settings/wind_group`.
+
+**Nazorg 0.7.52 (uit de review van 0.7.51).** Windstaat schoon bij
+orgelwissel; staarten bevriezen de afwijking van het moment van loslaten
+(dev_a = 0) in plaats van een afbouw; mixturen op hun hoogste koorpijp met
+koren uit de naam; klem in pas 1 volgt de ingestelde daling; hint rekent met
+de halve daling ("vol werk"); voorkeuze Hollands = kleine balg; pedaal-
+referentie in het groot octaaf; doffer ×2,5; live herberekening van kp/kg
+bij een instelling; kruipende ondergrens van de balg. Nog open uit de
+review: doorlopend klavier geeft buiten het bereik de toets i.p.v. de
+klinkende noot aan het windprofiel (octaaf verschil; alleen als die stand
+aanstaat; fix = klinkende noot meesturen in NoteOn); de stemmenmeter telt
+stemmen i.p.v. pijpen bij meerdere perspectieven; de gecombineerde klem ligt
+bij de standaard op 10 %, niet op de 8 % uit de tekst.
 
 **Fase 2 — cancel per toets (sleeplade).** Per (divisie, toets) het verbruik
 tellen en een one-pole-kanaaldruk (τ 40 ms) die alleen zakt als er veel

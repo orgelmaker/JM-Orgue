@@ -5,6 +5,26 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.52] - 2026-09-22
+
+### Nazorg levende wind: wat de review vond
+
+Na 0.7.51 is de hele wijziging door een reviewronde gehaald (vier invalshoeken, elke bevinding door een tegenspreker bestreden): 35 bevindingen, 21 overeind, 14 weerlegd. De zeven die er echt toe doen zijn gerepareerd, plus een handvol kleine.
+
+- **Orgelwissel liet het windmodel van het vórige orgel aanstaan.** De audiothread reset bij een nieuw orgel de zwelkasten en tremulanten, maar niet de wind: laadde je na een orgel met wind een orgel zonder opgeslagen windinstelling, dan ademde en stootte dat met de instellingen van het vorige — terwijl het scherm "uit" toonde. Bestond in mindere mate al sinds 0.7.36; nu worden balgen, laden, stoten, meters en de groepsindeling bij elke orgelwissel schoongeveegd, en pas daarna de opgeslagen groepen van het nieuwe orgel gezet.
+- **Galmstaarten bogen nog mee met de loslaatopstoot.** 0.7.51 bouwde de windgevoeligheid van een staart in 200 ms af, maar liet hem intussen de druk volgen — precies in het venster waarin de opstoot komt: een pleno loslaten gaf alle staarten een korte "whoop" omhoog. Nu bevriest een losgelaten pijp (en zijn staart) de afwijking van het moment van loslaten: wat nog klinkt is uitsterven en opgenomen galm, en dat volgt de wind niet meer. Eenvoudiger én fysisch juist; de afbouw over 200 ms is weg.
+- **Mixturen zonder voetmaat wogen als een 8'-register.** GrandOrgue-sets zonder HarmonicNumber — Friesach zelf — geven "8'" terug, en de familiefactor 1,5 maakte een Mixtuur IV daarmee ruim vier keer te zwaar in het windverbruik (en te traag als resonator). Een mixtuur rekent nu op zijn hoogste koorpijp (2' op een manuaal, 4' op het pedaal) en weegt zoveel vloerpijpjes als hij koren heeft, uit de naam ("IV", "4-5f.", anders 4): een Mixtuur IV op c' trekt 0,12, een 8'-prestant op dezelfde toets 0,35.
+- **De schuif "Maximale winddaling" was boven 10 % dood.** Een vaste klem in de mengloop hield de afwijking die de pijpen zien op −10 %, terwijl balg en meter wél dieper gingen: schuif op 20 %, meter op 80 %, klank op 8 cent. De klem volgt nu de ingestelde daling (bij 5 % blijft alles zoals gemeten). En de hint eronder rekende met de volle daling, terwijl "vol werk" per definitie de hélft is: hij toonde 2× te veel cent. Nu "bij een vol werk zakt een prestant zo'n 2 cent, een fluit of mixtuur 4 cent, 0,4 dB zachter" bij 5 %.
+- **De voorkeuze "Hollands" zette per ongeluk de grote balg.** Balggrootte bepaalt sinds 0.7.51 ook hoeveel vol werk de balg aankan; de knop "Ook op de schuiven" zette Hollands op 100 % en maakte het pleno daarmee statisch vlakker dan Neutraal. Omgedraaid, zoals het hoort: spaanbalgen zijn de kleine, nerveuze balg (50 %, daling 6 %), de magazijnbalg met ventilator de grote, rustige (100 %, daling 3 %).
+- **De pedaalreferentie stond op de verkeerde toetsen.** "Vol werk" voor het pedaal werd op c–c' gerekend terwijl het pedaal in C–c wordt bespeeld: één Subbas-C op een eigen pedaalbalg zakte al bijna maximaal. Nu twee noten in het groot octaaf.
+- **Doffer was 2,5× te zwak** tegenover de Hauptwerk-referentie uit het plan (−2 dB op de hoge boventonen bij 3 % minder wind): bij het gemeten pleno gaf hij −0,4 dB, onder de hoordrempel. Nu −1 dB bij het pleno, −2,4 dB bij een diepe schrik.
+- **Verschil per pijp en "tongwerken apart" werken nu meteen** op klinkende pijpen, niet pas bij de volgende aanslag.
+- **Live de daling verlagen** terwijl de balg ingezakt was gaf een sprong (de ondergrens verschoof in één sample); die kruipt nu.
+- **Meetscript** zet na afloop de eigen windgroep-indeling en windinstellingen van het orgel terug (`GET /settings/wind_group`, `POST /settings/wind_restore`), ook als het halverwege strandt — 0.7.51's versie liet het orgel op "elke divisie een eigen balg" en zonder wind achter.
+- Correctie op de 0.7.51-notities: het waren elf nieuwe unittests, niet drieëntwintig. Nu vier erbij, waaronder één op de mengloop zelf (een staart houdt de toonhoogte van het moment van loslaten) en één op de koren-uit-de-naam.
+
+Bewust nog niet gedaan (staat in het plan): bij een doorlopend klavier krijgt een toets buiten het bereik het windprofiel van de toets in plaats van de klinkende pijp (een octaaf verschil, alleen als die stand aanstaat); de stemmenmeter telt stemmen en niet pijpen bij meerdere perspectieven.
+
 ## [0.7.51] - 2026-09-22
 
 ### Levende wind: het Hollandse windmodel

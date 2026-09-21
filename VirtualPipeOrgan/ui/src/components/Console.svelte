@@ -1511,10 +1511,13 @@
     fluit: d.cents_fluit ?? 0,
   }));
   // Wat de ingestelde maximale daling in de praktijk betekent.
-  // Referentie: een 8'-prestant rond c' zakt 0,8 cent per procent; een fluit
-  // of mixtuur in het discant 1,75x zoveel; een tongwerk blijft staan.
-  function windMaxCent(pct) { return (pct * 0.8).toFixed(0); }
-  function windMaxCentFluit(pct) { return (pct * 1.4).toFixed(0); }
+  // Bij "vol werk" (het pleno van de groep) zakt de druk de HELFT van de
+  // maximale daling; een 8'-prestant rond c' doet dan 0,8 cent per procent,
+  // een fluit of mixtuur in het discant 1,75x zoveel, een tongwerk niets.
+  // De dB-waarde (amplitude ≈ druk², dus 1 − daling bij de halve daling) klopt
+  // met dezelfde halvering.
+  function windMaxCent(pct) { return (pct * 0.4).toFixed(0); }
+  function windMaxCentFluit(pct) { return (pct * 0.7).toFixed(0); }
   function windMaxDb(pct) { return (-20 * Math.log10(1 - pct / 100)).toFixed(1); }
 
   function getWindGroupEnabled(g) { return windGroupConfig[g]?.enabled === true; }
@@ -1524,7 +1527,9 @@
   // Nieuwe groep: Hollands karakter, model uit, 5 % maximale daling.
   const WIND_STD = { enabled: false, reservoir: 0.5, damping: 0.5, maxSag: 5, karakter: 1, stoot: 1.2, kanaal: 0.8, doffer: 0.7, verschil: 1.0, tongwerkApart: true };
   // Wat een karakter met de drie schuiven zou doen (knop 'Voorkeuze toepassen').
-  const WIND_VOORKEUZE = { 0: { reservoir: 0.5, damping: 0.6, maxSag: 3 }, 1: { reservoir: 1.0, damping: 0.25, maxSag: 4 } };
+  // Spaanbalgen zijn de kleine, nerveuze balg (0,5: 6 Hz, en "vol werk" =
+  // het pleno); de magazijnbalg met ventilator is groot en rustig (1,0).
+  const WIND_VOORKEUZE = { 0: { reservoir: 1.0, damping: 0.6, maxSag: 3 }, 1: { reservoir: 0.5, damping: 0.25, maxSag: 6 } };
   function windConfigNaarBackend(g, cfg) {
     return {
       group: g, enabled: cfg.enabled === true,
@@ -5022,10 +5027,10 @@
                       <div class="swell-config-row" title={$t('wind.max_loss_title')}>
                         <span class="swell-config-label">{$t('settings.wind_max_loss')}</span>
                         <input type="range" min="1" max="30" step="1"
-                          value={windGroupConfig[gIdx]?.maxSag ?? 10}
+                          value={windGroupConfig[gIdx]?.maxSag ?? 5}
                           on:input={(e) => updateWindGroup(gIdx, { maxSag: parseInt(e.target.value) })}
                         />
-                        <span class="swell-config-value">{windGroupConfig[gIdx]?.maxSag ?? 10}%</span>
+                        <span class="swell-config-value">{windGroupConfig[gIdx]?.maxSag ?? 5}%</span>
                       </div>
                     </div>
                     <p style="margin:0.25rem 0 0; font-size:0.7rem; color:var(--text-muted); line-height:1.4;">

@@ -160,10 +160,6 @@ pub(crate) struct MengBlok<'a> {
     pub wind_dev: &'a [[f32; 32]],
     pub trem_rate: &'a [[f64; 32]],
     pub trem_amp: &'a [[f32; 32]],
-    /// Zoveel frames na het starten volgt een release-staart de wind niet
-    /// meer: de crossfade met de speelnoot is dan voorbij en wat overblijft
-    /// is opgenomen galm, die niet met latere druk meebuigt.
-    pub wind_fade_frames: f32,
     /// Constant-power pan per divisie, één keer per callback voorgerekend.
     pub pan_cos: &'a [f32; 32],
     pub pan_sin: &'a [f32; 32],
@@ -206,15 +202,10 @@ pub(crate) fn meng_stemmen_blok(
         // Wind per stem (0.7.51): de stem volgt de drukafwijking van zijn
         // divisie met zijn eigen traagheid en reageert met zijn eigen
         // gevoeligheid (fluit veel, prestant minder, tongwerk alleen in
-        // kracht). Een release-staart doet dat alleen tijdens de crossfade
-        // met de speelnoot; daarna is het opgenomen galm en die buigt niet.
-        let fade = if voice.one_shot {
-            (1.0 - voice.age_samples as f32 / blok.wind_fade_frames.max(1.0)).clamp(0.0, 1.0)
-        } else {
-            1.0
-        };
-        let kp = voice.c_kp * fade;
-        let kg = voice.c_kg * fade;
+        // kracht). Een losgelaten pijp en zijn release-staart hebben dev_a 0:
+        // ze houden de afwijking van het moment van loslaten vast.
+        let kp = voice.c_kp;
+        let kg = voice.c_kg;
         let dev_a = voice.c_dev_a;
         let mut dev_cur = voice.c_dev_cur;
         let wind_aan = in_range && (kp != 0.0 || kg != 0.0);
@@ -1084,15 +1075,17 @@ impl PlayingVoice {
     }
 
     /// Windconstanten overerven van de stem waaruit deze voortkomt (release-
-    /// staart of streaming-crossfade). Een staart trekt geen wind meer: het
-    /// ventiel is dicht. Hij volgt de druk nog wél tijdens de crossfade met
-    /// de speelnoot (anders een toonhoogtesprong) en daarna niet meer — zie
-    /// `wind_fade_frames` in de mengloop.
+    /// staart of streaming-crossfade). Een staart trekt geen wind meer (het
+    /// ventiel is dicht) en houdt de toonhoogte en sterkte van het moment van
+    /// loslaten: wat nog klinkt is uitsterven en opgenomen galm, en dat buigt
+    /// niet mee met wat de wind daarna doet. Daarom wordt de gevolgde
+    /// afwijking bevroren (dev_a = 0), niet de gevoeligheid afgebouwd — dat
+    /// laatste liet in 0.7.51 de staarten nog met de loslaatopstoot meegaan.
     fn erf_wind(&mut self, van: &PlayingVoice, staart: bool) {
         self.c_wind_flow = if staart { 0.0 } else { van.c_wind_flow };
         self.c_kp = van.c_kp;
         self.c_kg = van.c_kg;
-        self.c_dev_a = van.c_dev_a;
+        self.c_dev_a = if staart { 0.0 } else { van.c_dev_a };
         self.c_dev_cur = van.c_dev_cur;
         self.c_div = van.c_div;
     }
@@ -4070,6 +4063,9 @@ fn run_audio_thread(
                                         // Loslaten: het ventiel gaat dicht, de lade krijgt een
                                         // opstoot (0,4x de inzetstoot, Fisk's 'positive pulse').
                                         stoot_acc[voice.c_div.min(31)] -= 0.4 * voice.c_wind_flow;
+                                        // De pijp zwijgt: wat nog klinkt is uitsterven en galm, en dat volgt
+                                        // de wind niet meer. Bevries de afwijking (de staart erft hem mee).
+                                        voice.c_dev_a = 0.0;
                                         voice.release_ms(fade_ms, sample_rate);
                                         continue;
                                     }
@@ -4174,6 +4170,9 @@ fn run_audio_thread(
                                 // Loslaten: het ventiel gaat dicht, de lade krijgt een
                                 // opstoot (0,4x de inzetstoot, Fisk's 'positive pulse').
                                 stoot_acc[voice.c_div.min(31)] -= 0.4 * voice.c_wind_flow;
+                                // De pijp zwijgt: wat nog klinkt is uitsterven en galm, en dat volgt
+                                // de wind niet meer. Bevries de afwijking (de staart erft hem mee).
+                                voice.c_dev_a = 0.0;
                                 voice.release_ms(fade_ms, sample_rate);
                             }
                         }
@@ -4301,6 +4300,9 @@ fn run_audio_thread(
                             // Loslaten: het ventiel gaat dicht, de lade krijgt een
                             // opstoot (0,4x de inzetstoot, Fisk's 'positive pulse').
                             stoot_acc[voice.c_div.min(31)] -= 0.4 * voice.c_wind_flow;
+                            // De pijp zwijgt: wat nog klinkt is uitsterven en galm, en dat volgt
+                            // de wind niet meer. Bevries de afwijking (de staart erft hem mee).
+                            voice.c_dev_a = 0.0;
                             voice.release_ms(fade_ms, sample_rate);
                         }
                         // ATOMAIR houden: een half uitgevoerde ReleaseStop zou bij
@@ -4642,6 +4644,25 @@ fn run_audio_thread(
                                 }
                             }
                         }
+                        // Verschil per pijp en tongwerk-apart zitten in de
+                        // stemconstanten: klinkende speelstemmen krijgen ze
+                        // meteen (staarten houden wat ze hadden). Commando-
+                        // fase, dus de stemmenlock is hier op zijn plaats.
+                        {
+                            let wg = wind_groups_clone.read();
+                            let mut vl = voices_clone.write();
+                            for v in vl.iter_mut() {
+                                if v.one_shot { continue; }
+                                let d = v.c_div.min(31);
+                                if wg.get(d).copied().unwrap_or(d as u8) as usize != g { continue; }
+                                if let Some(p) = wind_profielen.get(&v.stop_id) {
+                                    let pw = pijp_constanten(p, v.midi_note, v.stop_id, base_pipe(v.pipe_num),
+                                                             sample_rate, instelling.verschil, instelling.tongwerk_apart);
+                                    v.c_kp = pw.kp;
+                                    v.c_kg = pw.kg;
+                                }
+                            }
+                        }
                         info!("Windgroep {}: aan={}, balg={:.2}, demping={:.2}, daling={:.3}, stoot={:.2}, kanaal={:.2}, doffer={:.2}, verschil={:.2}, tongwerk apart={}",
                               g, instelling.enabled, instelling.reservoir_size, instelling.damping, instelling.max_sag,
                               instelling.stoot, instelling.kanaal, instelling.doffer, instelling.verschil, instelling.tongwerk_apart);
@@ -4666,6 +4687,19 @@ fn run_audio_thread(
                         // Eén Arc-swap; de oude tabel is klein en mag hier vallen.
                         wind_profielen = map;
                         wind_pleno = pleno;
+                        // Nieuw orgel: alle windstaat van het vórige orgel weg,
+                        // net als de tremulanten in RegisterStopDivisionMap.
+                        // De UI stuurt daarna de opgeslagen groepen opnieuw;
+                        // een orgel zonder opgeslagen windinstelling begint
+                        // met het model uit (balg en laden lopen netjes vol).
+                        wind_instel = [WindInstelling::default(); 32];
+                        for l in laden.iter_mut() { l.enabled = false; }
+                        for m in wind_models_clone.write().iter_mut() { m.enabled = false; }
+                        stoot_acc = [0.0; 32];
+                        lade_hold = [1.0; 32];
+                        lade_hold_t = [0; 32];
+                        wind_tilt = [0.0; 32];
+                        *wind_groups_clone.write() = (0..32u8).collect();
                     }
                     AudioCommand::RegisterStopDivisionMap(map) => {
                         *stop_to_division_clone.write() = map;
@@ -4988,6 +5022,7 @@ fn run_audio_thread(
                         n_grp[grp] += n_div[d];
                     }
                 }
+                let mut wind_onder = [0.90f32; 32];
                 for (i, model) in wm.iter_mut().enumerate() {
                     // Bij balggrootte 50 % is het pleno van de groep precies
                     // "vol werk" (q = 1: halve inzakking); een grotere balg
@@ -4997,6 +5032,11 @@ fn run_audio_thread(
                     model.set_verbruik(q_grp[i], r);
                     WIND_STEMMEN[i].store(n_grp[i], Ordering::Relaxed);
                     WIND_Q_PM[i].store((q_grp[i] * 100.0).clamp(0.0, 4.0e9) as u32, Ordering::Relaxed);
+                    // Ondergrens van wat de stemmen zien: de balg mag tot
+                    // 1 − 1,6·daling, de lade daar 8 % onder; bij de standaard
+                    // (5 %) is dat 0,90, bij 20 % 0,66 — de schuif boven 10 %
+                    // was in 0.7.51 dood door een vaste klem op 0,90.
+                    wind_onder[i] = (1.0 - (1.6 * wind_instel[i].max_sag).max(0.08) - 0.02).max(0.60);
                 }
                 // Stoten op de laden: de eigen lade vol, de andere laden van
                 // dezelfde groep gedempt (de drukgolf loopt door het gedeelde
@@ -5114,7 +5154,7 @@ fn run_audio_thread(
                                 // snelle lade; de stem krijgt de afwijking (p - 1).
                                 let grp = wind_group_assignment.get(d).copied().unwrap_or(d as u8) as usize;
                                 let p = group_pressures[grp.min(31)] * laden[d].process();
-                                wd[d] = p.clamp(LADE_ONDERGRENS - 0.02, LADE_BOVENGRENS + 0.01) - 1.0;
+                                wd[d] = p.clamp(wind_onder[grp.min(31)], LADE_BOVENGRENS + 0.01) - 1.0;
                                 let (amp, tp) = trem_lfo[d].process();
                                 tr[d] = if tp.abs() > 0.01 { 2.0_f64.powf(tp as f64 / 1200.0) } else { 1.0 };
                                 ta[d] = amp;
@@ -5155,7 +5195,7 @@ fn run_audio_thread(
                     for d in 0..32 {
                         let k = if d < nd {
                             let grp = wind_group_assignment.get(d).copied().unwrap_or(d as u8) as usize;
-                            let g = 2.4 * wind_instel[grp.min(31)].doffer;
+                            let g = 6.0 * wind_instel[grp.min(31)].doffer;
                             (-blk_wind_dev[0][d] * g).clamp(0.0, 0.6)
                         } else {
                             0.0
@@ -5185,7 +5225,6 @@ fn run_audio_thread(
                         bn,
                         wind_dev: &blk_wind_dev,
                         trem_rate: &blk_trem_rate,
-                        wind_fade_frames: 0.2 * sample_rate as f32,
                         trem_amp: &blk_trem_amp,
                         pan_cos: &div_pan_cos,
                         pan_sin: &div_pan_sin,
@@ -6027,7 +6066,7 @@ mod meng_verdeling_tests {
         ccis_en: &'a [bool], bn: usize, ccis: bool,
     ) -> MengBlok<'a> {
         MengBlok {
-            bn, wind_dev, trem_rate, trem_amp, wind_fade_frames: 9600.0,
+            bn, wind_dev, trem_rate, trem_amp,
             pan_cos, pan_sin, div_pans: pans, ccis_on: ccis, ccis_en,
             ccis_strength: 0.7, ccis_falloff: 0.6, ccis_swap: false,
         }
@@ -6102,6 +6141,36 @@ mod meng_verdeling_tests {
             assert!(dl <= grens, "{} stukken: links {} verschil op niveau {}", stukken, dl, niveau);
             assert!(dr <= grens, "{} stukken: rechts {} verschil op niveau {}", stukken, dr, niveau);
         }
+    }
+
+    /// Een losgelaten pijp en zijn staart houden de afwijking van het moment
+    /// van loslaten vast; een klinkende stem volgt de wind wel.
+    #[test]
+    fn een_staart_houdt_de_toonhoogte_van_het_moment_van_loslaten() {
+        let bn = 64;
+        let mut voices = stemmen(1);
+        voices[0].c_dev_a = 0.05;
+        voices[0].c_dev_cur = -0.02;
+        let mut staart = PlayingVoice::new_from_preload(buffer(9, 4096), 1, 2, 60, 1.0, 48000);
+        staart.erf_wind(&voices[0], true);
+        staart.one_shot = true;
+        assert_eq!(staart.c_dev_cur, -0.02);
+        assert_eq!(staart.c_dev_a, 0.0);
+        assert_eq!(staart.c_wind_flow, 0.0);
+        voices.push(staart);
+        let wind_dev = vec![[0.03f32; 32]; bn];
+        let trem_rate = vec![[1.0f64; 32]; bn];
+        let trem_amp = vec![[1.0f32; 32]; bn];
+        let pan_cos = [0.7f32; 32];
+        let pan_sin = [0.7f32; 32];
+        let pans = vec![0.0f32; 32];
+        let ccis_en = vec![false; 32];
+        let blok = blok_context(&wind_dev, &trem_rate, &trem_amp, &pan_cos, &pan_sin, &pans, &ccis_en, bn, false);
+        let mut l = vec![[0.0f32; 32]; bn];
+        let mut r = vec![[0.0f32; 32]; bn];
+        meng_stemmen_blok(&mut voices, &mut l, &mut r, &blok);
+        assert!(voices[0].c_dev_cur > -0.02, "de klinkende stem hoort de wind te volgen: {}", voices[0].c_dev_cur);
+        assert_eq!(voices[1].c_dev_cur, -0.02, "de staart hoort bevroren te blijven");
     }
 
     #[test]
