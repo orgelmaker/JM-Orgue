@@ -1297,6 +1297,7 @@ fn handle_midi_mapping(state: &AppState, body: &str) -> Result<Value, (u16, Stri
     mappings.push(MidiChannelMapping {
         division: division.clone(), channel, transpose,
         first_midi_note: first, last_midi_note: last,
+        short_octave: false,
     });
     let n = mappings.len();
     state.set_midi_mappings(mappings);

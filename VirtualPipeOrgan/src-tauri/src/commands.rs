@@ -52,6 +52,7 @@ pub struct MidiMappingDto {
     pub transpose: i8,
     pub first_midi_note: Option<u8>,
     pub last_midi_note: Option<u8>,
+    pub short_octave: bool,
 }
 
 /// Coupler info for frontend
@@ -241,6 +242,31 @@ pub fn set_polyphony(state: State<AppState>, voices: u32) -> Result<usize, Strin
     Ok(n)
 }
 
+/// Luidspreker-testsignaal op één uitgangskanaal (0.7.47). `channel = None`
+/// zet hem uit. `kind`: 0 = roze ruis, 1 = sinus 440 Hz. `level_db` is het
+/// piekniveau t.o.v. volle schaal (-60..0 dB; standaard -20 dB, luid genoeg om
+/// te horen en zacht genoeg om niet te schrikken).
+///
+/// Waarom: wie zes of acht kanalen aansluit weet daarna nog niet welke stekker
+/// in welke kast zit. Dit stuurt geluid naar precies één uitgang.
+#[tauri::command]
+pub fn set_output_test_signal(channel: Option<u8>, kind: Option<u8>, level_db: Option<f32>) -> Result<(), String> {
+    match channel {
+        Some(ch) => {
+            let db = level_db.unwrap_or(-20.0).clamp(-60.0, 0.0);
+            let gain = 10f32.powf(db / 20.0);
+            crate::audio::set_test_signal(Some(ch), kind.unwrap_or(0), gain);
+            info!("Testsignaal AAN op kanaal {} ({}, {:.0} dB)", ch + 1,
+                if kind.unwrap_or(0) == 1 { "sinus 440 Hz" } else { "roze ruis" }, db);
+        }
+        None => {
+            crate::audio::set_test_signal(None, 0, 0.0);
+            info!("Testsignaal uit");
+        }
+    }
+    Ok(())
+}
+
 /// Stereo-samples als twee kanalen laden (aan) of naar mono mengen (uit).
 /// Geldt voor het volgende (her)laden van een orgel.
 #[tauri::command]
@@ -425,30 +451,49 @@ fn sync_perspective_dto(state: &AppState) {
 /// als herladen nodig is (enabled != loaded voor ≥1 perspectief). Slaat NIET
 /// direct op: de reguliere autosave bewaart `state.perspectives`, en een
 /// herlaad van hetzelfde orgel leest de runtime-staat (perspective_prefs_for).
+/// Gain waarmee een geladen maar uitgeschakelde opnamepositie wordt stilgezet.
+/// Ruim onder de hoorgrens; de samples blijven staan zodat aanzetten geen
+/// herlaad kost.
+pub const PERSPECTIEF_STIL_DB: f32 = -120.0;
+
 pub fn do_set_perspective_enabled(state: &AppState, name: &str, enabled: bool) -> Result<bool, String> {
-    let reload_needed = {
+    let (slot, gain_db, loaded, reload_needed) = {
         let mut list = state.perspectives.write();
         let p = list.iter_mut().find(|p| p.name == name)
             .ok_or_else(|| format!("Onbekend perspectief: {}", name))?;
         p.enabled = enabled;
-        list.iter().any(|p| p.enabled != p.loaded)
+        let (slot, gain_db, loaded) = (p.slot, p.gain_db, p.loaded);
+        // Herladen is alléén nodig voor een positie die de organist WIL horen
+        // maar die niet in het geheugen staat. Uitzetten kan altijd live: de
+        // samples blijven staan en de positie wordt stilgezet (0.7.47; tot dan
+        // vroeg elke wijziging om een herlaad).
+        (slot, gain_db, loaded, list.iter().any(|p| p.enabled && !p.loaded))
     };
+    if loaded {
+        let g = if enabled { gain_db } else { PERSPECTIEF_STIL_DB };
+        state.send_audio_command(AudioCommand::SetPerspectiveGain { slot, gain_db: g });
+    }
     sync_perspective_dto(state);
-    info!("Perspectief '{}' {} (herladen nodig: {})", name, if enabled { "aan" } else { "uit" }, reload_needed);
+    info!("Opnamepositie '{}' {} ({}, herladen nodig: {})", name,
+        if enabled { "aan" } else { "uit" },
+        if loaded { "live" } else { "niet geladen" }, reload_needed);
     Ok(reload_needed)
 }
 
 /// Kern: live volume van een perspectief (clamp -40..+12 dB), zonder herlaad.
 pub fn do_set_perspective_gain(state: &AppState, name: &str, gain_db: f32) -> Result<(), String> {
     let g = if gain_db.is_finite() { gain_db.clamp(-40.0, 12.0) } else { 0.0 };
-    let slot = {
+    let (slot, enabled) = {
         let mut list = state.perspectives.write();
         let p = list.iter_mut().find(|p| p.name == name)
             .ok_or_else(|| format!("Onbekend perspectief: {}", name))?;
         p.gain_db = g;
-        p.slot
+        (p.slot, p.enabled)
     };
-    state.send_audio_command(AudioCommand::SetPerspectiveGain { slot, gain_db: g });
+    // Een uitgeschakelde (maar geladen) positie blijft stil: het schuifje zet
+    // alleen de waarde klaar voor als hij weer aangaat.
+    let te_sturen = if enabled { g } else { PERSPECTIEF_STIL_DB };
+    state.send_audio_command(AudioCommand::SetPerspectiveGain { slot, gain_db: te_sturen });
     sync_perspective_dto(state);
     Ok(())
 }
@@ -463,6 +508,25 @@ pub fn get_perspectives(state: State<AppState>) -> Vec<PerspectiveDto> {
 #[tauri::command]
 pub fn set_perspective_enabled(state: State<AppState>, name: String, enabled: bool) -> Result<bool, String> {
     do_set_perspective_enabled(&state, &name, enabled)
+}
+
+/// Alle opnameposities in het geheugen houden (0.7.47), zodat wisselen
+/// ogenblikkelijk gaat. Kost geheugen: ruwweg maal het aantal posities. Werkt
+/// vanaf de volgende (her)load, dus geeft `true` terug als er nu nog posities
+/// ontbreken en een herlaad dus nog nodig is.
+#[tauri::command]
+pub fn set_load_all_perspectives(state: State<AppState>, enabled: bool) -> Result<bool, String> {
+    *state.load_all_perspectives.write() = enabled;
+    let ontbreekt = state.perspectives.read().iter().any(|p| !p.loaded);
+    info!("Alle opnameposities laden: {} (herladen nodig: {})",
+        if enabled { "aan" } else { "uit" }, enabled && ontbreekt);
+    Ok(enabled && ontbreekt)
+}
+
+/// Staat "alle opnameposities laden" aan voor het geladen orgel?
+#[tauri::command]
+pub fn get_load_all_perspectives(state: State<AppState>) -> bool {
+    *state.load_all_perspectives.read()
 }
 
 /// Live volume van een perspectief in dB.
@@ -876,6 +940,15 @@ pub fn set_midi_mapping(state: State<AppState>, division: String, channel: Optio
     Ok(())
 }
 
+/// Kort octaaf (C/E) aan of uit voor één klavier (0.7.47). Zie
+/// `MidiChannelMapping::short_octave`.
+#[tauri::command]
+pub fn set_short_octave(state: State<AppState>, division: String, enabled: bool) -> Result<(), String> {
+    info!("Kort octaaf voor {}: {}", division, if enabled { "aan" } else { "uit" });
+    state.set_short_octave(&division, enabled);
+    Ok(())
+}
+
 #[tauri::command]
 pub fn get_midi_mappings(state: State<AppState>) -> Vec<MidiMappingDto> {
     state.get_midi_mappings().into_iter().map(|m| MidiMappingDto {
@@ -884,6 +957,7 @@ pub fn get_midi_mappings(state: State<AppState>) -> Vec<MidiMappingDto> {
         transpose: m.transpose,
         first_midi_note: m.first_midi_note,
         last_midi_note: m.last_midi_note,
+        short_octave: m.short_octave,
     }).collect()
 }
 
@@ -1015,6 +1089,7 @@ pub fn apply_learned_keyboard_range(state: State<AppState>, division: String, ch
             transpose,
             first_midi_note: Some(low),
             last_midi_note: Some(high),
+            short_octave: false,
         });
     }
     state.set_midi_mappings(mappings);
@@ -1683,8 +1758,13 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
         // (laag zonder perspectief) worden altijd geladen.
         let saved_persp = perspective_prefs_for(state, path);
         let mut persp_plan = plan_perspectives(&definition, &saved_persp);
+        // "Alles laden" (0.7.47): ook de uitgeschakelde posities komen in het
+        // geheugen, zodat wisselen ogenblikkelijk is in plaats van een herlaad.
+        // Uitgeschakelde posities worden na het laden stilgezet (gain), niet
+        // weggelaten.
+        let alles_laden = *state.load_all_perspectives.read();
         let enabled_labels: HashSet<String> = persp_plan.iter()
-            .filter(|p| p.enabled)
+            .filter(|p| alles_laden || p.enabled)
             .map(|p| p.name.clone())
             .collect();
         let mut rank_layout: HashMap<u32, Vec<(u8, u8)>> = HashMap::new();
@@ -2031,12 +2111,15 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
                 // van het vorige orgel) + live gains per perspectief-slot.
                 let _ = player.send_command(crate::audio::AudioCommand::RegisterRankLayout(Arc::new(rank_layout)));
                 for p in &persp_plan {
-                    let _ = player.send_command(crate::audio::AudioCommand::SetPerspectiveGain { slot: p.slot, gain_db: p.gain_db });
+                    // Geladen maar uitgeschakeld = stil. Zo kan het aanzetten
+                    // later ogenblikkelijk door alleen de gain te herstellen.
+                    let g = if p.enabled { p.gain_db } else { PERSPECTIEF_STIL_DB };
+                    let _ = player.send_command(crate::audio::AudioCommand::SetPerspectiveGain { slot: p.slot, gain_db: g });
                 }
             }
         }
         for p in persp_plan.iter_mut() {
-            p.loaded = p.enabled;
+            p.loaded = alles_laden || p.enabled;
         }
         persp = persp_plan;
     }
@@ -6255,6 +6338,9 @@ fn restore_organ_settings(state: &AppState, organ_id: &str) {
 
     info!("Restoring settings for organ: {}", organ_id);
 
+    // Alle opnameposities in het geheugen houden (per orgel).
+    *state.load_all_perspectives.write() = settings.load_all_perspectives;
+
     // Restore MIDI channel mappings
     if !settings.midi_mappings.is_empty() {
         let mappings: Vec<MidiChannelMapping> = settings.midi_mappings.iter().map(|m| {
@@ -6264,6 +6350,7 @@ fn restore_organ_settings(state: &AppState, organ_id: &str) {
                 transpose: m.transpose,
                 first_midi_note: m.first_midi_note,
                 last_midi_note: m.last_midi_note,
+                short_octave: m.short_octave,
             }
         }).collect();
         state.set_midi_mappings(mappings);
@@ -6729,6 +6816,7 @@ pub fn do_save_organ_settings(state: &AppState, presets: HashMap<String, PresetD
             transpose: m.transpose,
             first_midi_note: m.first_midi_note,
             last_midi_note: m.last_midi_note,
+            short_octave: m.short_octave,
         }
     }).collect();
 
@@ -6950,6 +7038,7 @@ pub fn do_save_organ_settings(state: &AppState, presets: HashMap<String, PresetD
         division_tremulants,
         wind_group_configs,
         perspectives,
+        load_all_perspectives: *state.load_all_perspectives.read(),
         remote_layout,
     };
 

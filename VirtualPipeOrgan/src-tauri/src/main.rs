@@ -338,6 +338,10 @@ fn main() {
             remote::new_remote_token,
             commands::get_log_tail,
             commands::set_polyphony,
+            commands::set_output_test_signal,
+            commands::set_short_octave,
+            commands::set_load_all_perspectives,
+            commands::get_load_all_perspectives,
             commands::set_stereo_samples,
             // Gestapelde ranks en microfoonperspectieven (0.7.38)
             commands::get_perspectives,

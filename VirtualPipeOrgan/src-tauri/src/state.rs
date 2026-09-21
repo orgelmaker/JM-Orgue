@@ -169,7 +169,20 @@ pub struct MidiChannelMapping {
     pub first_midi_note: Option<u8>,
     /// Last MIDI note of the keyboard (learned)
     pub last_midi_note: Option<u8>,
+    /// Kort octaaf (C/E) op dit klavier (0.7.47). Bij historische orgels is de
+    /// onderste octaaf niet volledig: de toets die eruitziet als E klinkt als
+    /// C, Fis klinkt als D en Gis als E, en Cis/Dis ontbreken. Een moderne
+    /// MIDI-klaviatuur stuurt gewoon de fysieke toets; deze vlag zet die om,
+    /// zodat oude muziek met de linkerhand op de "verkeerde" toetsen klopt.
+    pub short_octave: bool,
 }
+
+/// Klinkende halve toon per toets van de onderste octaaf, geteld vanaf de
+/// laagste toets van het klavier. De laagste toets ziet eruit als E maar klinkt
+/// als C; daarna F→F, Fis→D, G→G, Gis→E, A→A, Bes→Bes, B→B. Vanaf de negende
+/// toets (de C erboven) loopt alles weer gelijk, vier halve tonen hoger dan de
+/// toets suggereert.
+const KORT_OCTAAF: [u8; 8] = [0, 5, 2, 7, 4, 9, 10, 11];
 
 impl MidiChannelMapping {
     /// Accepteert dit klavier dit kanaal + deze (fysieke) noot?
@@ -188,6 +201,31 @@ impl MidiChannelMapping {
             if note > l { return false; }
         }
         true
+    }
+
+    /// Fysieke toets → klinkende noot: eerst het korte octaaf, dan het
+    /// transponeren. Eén plek, zodat de directe aanslag, de koppels en de
+    /// note-off dezelfde noot uitrekenen — een verschil daartussen geeft
+    /// hangende noten.
+    pub fn speelnoot(&self, note: u8) -> u8 {
+        let n = self.kort_octaaf(note);
+        (n as i16 + self.transpose as i16).clamp(0, 127) as u8
+    }
+
+    /// Alleen de octaafomzetting (zonder transponeren). Zonder ingeleerde
+    /// laagste toets weten we niet waar de onderste octaaf begint en doet de
+    /// vlag niets — beter niets dan de verkeerde noot.
+    fn kort_octaaf(&self, note: u8) -> u8 {
+        if !self.short_octave { return note; }
+        let Some(laagste) = self.first_midi_note else { return note; };
+        if note < laagste { return note; }
+        let offset = (note - laagste) as usize;
+        let klinkend = match KORT_OCTAAF.get(offset) {
+            Some(&v) => v as u16,
+            // Vanaf de C boven het korte octaaf loopt het klavier weer gelijk.
+            None => offset as u16 + 4,
+        };
+        (laagste as u16 + klinkend).min(127) as u8
     }
 }
 
@@ -1121,6 +1159,10 @@ pub struct AppState {
     /// Gezet in beide laadroutes NÁ reset_organ_scoped_state; leeg bij
     /// orgels zonder perspectieven.
     pub perspectives: Arc<RwLock<Vec<PerspectiveRuntime>>>,
+    /// Alle opnameposities in het geheugen houden, ook de uitgeschakelde
+    /// (0.7.47), zodat wisselen ogenblikkelijk is in plaats van een herlaad.
+    /// Per orgel bewaard; geldt vanaf de volgende (her)load.
+    pub load_all_perspectives: Arc<RwLock<bool>>,
     /// Lagen per (niet-ruis-)stop van het geladen orgel — diagnose (/ranks,
     /// layered_stops), gevuld in beide laadroutes (ook custom sets, waar
     /// organ_definition None/verouderd is).
@@ -1447,6 +1489,7 @@ impl AppState {
             remote_last_error: Arc::new(RwLock::new(None)),
             preset_poll_seen: Arc::new(RwLock::new(None)),
             perspectives: Arc::new(RwLock::new(Vec::new())),
+            load_all_perspectives: Arc::new(RwLock::new(false)),
             rank_summary: Arc::new(RwLock::new(Vec::new())),
         }
     }
@@ -1610,6 +1653,7 @@ impl AppState {
                                             transpose: 0,
                                             first_midi_note: None,
                                             last_midi_note: None,
+                                            short_octave: false,
                                         });
                                     }
                                     tracing::info!("Learned MIDI channel {} for division {}", ch, division);
@@ -1716,6 +1760,7 @@ impl AppState {
                                             transpose,
                                             first_midi_note: Some(low),
                                             last_midi_note: Some(high),
+                                            short_octave: false,
                                         });
                                     }
 
@@ -3001,7 +3046,7 @@ impl AppState {
 
                     // Get transpose from mapping
                     let transpose = mapping.map_or(0, |m| m.transpose);
-                    let transposed_note = (note as i16 + transpose as i16).clamp(0, 127) as u8;
+                    let transposed_note = mapping.map_or_else(|| (note as i16 + transpose as i16).clamp(0, 127) as u8, |m| m.speelnoot(note));
 
                     // Collect active T.A. divisions before playing stops
                     let ta_active = {
@@ -3086,9 +3131,10 @@ impl AppState {
                                 None => false, // geen inleer = geen respons
                             };
                             if !src_accepts { continue; }
-                            let src_transpose = src_mapping.map_or(0, |m| m.transpose);
-                            // Apply source transpose + (gesommeerde) coupler pitch offset
-                            let coupled_note = (note as i32 + src_transpose as i32 + route.pitch_offset).clamp(0, 127) as u8;
+                            // Klinkende noot van het BRONklavier (kort octaaf +
+                            // transponeren), daarna de gesommeerde koppelinterval.
+                            let src_note = src_mapping.map_or(note, |m| m.speelnoot(note));
+                            let coupled_note = (src_note as i32 + route.pitch_offset).clamp(0, 127) as u8;
                             // Play through destination division's drawn stops
                             if let Some(dest_div) = o.divisions.iter().find(|d| d.name == route.destination_division) {
                                 let dest_ta = ta_divisions.contains(&dest_div.name);
@@ -3152,7 +3198,7 @@ impl AppState {
                     }
 
                     let transpose = mapping.map_or(0, |m| m.transpose);
-                    let transposed_note = (note as i16 + transpose as i16).clamp(0, 127) as u8;
+                    let transposed_note = mapping.map_or_else(|| (note as i16 + transpose as i16).clamp(0, 127) as u8, |m| m.speelnoot(note));
 
                     for stop in &division.stops {
                         // Send NoteOff regardless of drawn state
@@ -3187,8 +3233,8 @@ impl AppState {
                                 None => false, // geen inleer = geen respons
                             };
                             if !src_accepts { continue; }
-                            let src_transpose = src_mapping.map_or(0, |m| m.transpose);
-                            let coupled_note = (note as i32 + src_transpose as i32 + route.pitch_offset).clamp(0, 127) as u8;
+                            let src_note = src_mapping.map_or(note, |m| m.speelnoot(note));
+                            let coupled_note = (src_note as i32 + route.pitch_offset).clamp(0, 127) as u8;
                             if let Some(dest_div) = o.divisions.iter().find(|d| d.name == route.destination_division) {
                                 for stop in &dest_div.stops {
                                     let s_first = stop.first_midi_note as u32;
@@ -4058,7 +4104,7 @@ impl AppState {
                 let accepts = mapping.map_or(false, |m| m.accepts(ch, note));
                 if !accepts { continue; }
                 let transpose = mapping.map_or(0, |m| m.transpose);
-                let transposed = (note as i16 + transpose as i16).clamp(0, 127) as u8;
+                let transposed = mapping.map_or_else(|| (note as i16 + transpose as i16).clamp(0, 127) as u8, |m| m.speelnoot(note));
                 send_note_on(transposed, vel);
             }
         }
@@ -4081,8 +4127,8 @@ impl AppState {
                         && src_notes.iter().map(|&(n, _)| n).max() != Some(note) { continue; }
                     if route.gate_type == "bass"
                         && src_notes.iter().map(|&(n, _)| n).min() != Some(note) { continue; }
-                    let src_transpose = src_mapping.map_or(0, |m| m.transpose);
-                    let coupled = (note as i32 + src_transpose as i32 + route.pitch_offset).clamp(0, 127) as u8;
+                    let src_note = src_mapping.map_or(note, |m| m.speelnoot(note));
+                    let coupled = (src_note as i32 + route.pitch_offset).clamp(0, 127) as u8;
                     send_note_on(coupled, vel);
                 }
             }
@@ -4129,8 +4175,8 @@ impl AppState {
             let Some(dest_div) = o.divisions.iter().find(|d| d.name == route.destination_division) else { continue; };
             for &(ch, note, _v) in held {
                 if !src_mapping.map_or(false, |m| m.accepts(ch, note)) { continue; }
-                let src_transpose = src_mapping.map_or(0, |m| m.transpose);
-                let t = (note as i32 + src_transpose as i32 + route.pitch_offset).clamp(0, 127) as u32;
+                let src_note = src_mapping.map_or(note, |m| m.speelnoot(note));
+                let t = (src_note as i32 + route.pitch_offset).clamp(0, 127) as u32;
                 for stop in &dest_div.stops {
                     let s_first = stop.first_midi_note as u32;
                     let s_last = stop.last_midi_note as u32;
@@ -4162,8 +4208,8 @@ impl AppState {
                     && src_notes.iter().map(|&(n, _)| n).max() != Some(note) { continue; }
                 if route.gate_type == "bass"
                     && src_notes.iter().map(|&(n, _)| n).min() != Some(note) { continue; }
-                let src_transpose = src_mapping.map_or(0, |m| m.transpose);
-                let t = (note as i32 + src_transpose as i32 + route.pitch_offset).clamp(0, 127) as u32;
+                let src_note = src_mapping.map_or(note, |m| m.speelnoot(note));
+                let t = (src_note as i32 + route.pitch_offset).clamp(0, 127) as u32;
                 for stop in dest_div.stops.iter().filter(|s| s.drawn) {
                     if ta_active && stop.is_reed { continue; }
                     let s_first = stop.first_midi_note as u32;
@@ -4267,6 +4313,7 @@ impl AppState {
                 transpose,
                 first_midi_note: None,
                 last_midi_note: None,
+                short_octave: false,
             });
         }
 
@@ -4629,6 +4676,25 @@ impl AppState {
 
     /// Zet handmatig het toetsenbereik (laagste/hoogste MIDI-noot) van een
     /// divisie — het handmatige alternatief voor de twee-noten-inleer.
+    /// Kort octaaf (C/E) aan/uit voor één klavier. Zonder bestaande koppeling
+    /// wordt er een aangemaakt; het octaaf werkt pas als het toetsbereik is
+    /// ingeleerd (zie `MidiChannelMapping::kort_octaaf`).
+    pub fn set_short_octave(&self, division: &str, enabled: bool) {
+        let mut mappings = self.midi_mappings.write();
+        if let Some(m) = mappings.iter_mut().find(|m| m.division == division) {
+            m.short_octave = enabled;
+        } else {
+            mappings.push(MidiChannelMapping {
+                division: division.to_string(),
+                channel: None,
+                transpose: 0,
+                first_midi_note: None,
+                last_midi_note: None,
+                short_octave: enabled,
+            });
+        }
+    }
+
     pub fn set_midi_mapping_range(&self, division: &str, first: Option<u8>, last: Option<u8>) {
         let mut mappings = self.midi_mappings.write();
         if let Some(m) = mappings.iter_mut().find(|m| m.division == division) {
@@ -4641,6 +4707,7 @@ impl AppState {
                 transpose: 0,
                 first_midi_note: first,
                 last_midi_note: last,
+                short_octave: false,
             });
         }
         let _ = self.midi_tx.send(MidiCommand::SetChannelMapping(mappings.clone()));
@@ -5498,4 +5565,69 @@ mod trede_filter_tests {
         assert_eq!(*uit.last().unwrap(), 0, "kast ging niet helemaal dicht: {:?}", uit);
     }
 
+}
+
+#[cfg(test)]
+mod kort_octaaf_tests {
+    use super::*;
+
+    fn klavier(kort: bool, laagste: Option<u8>, transpose: i8) -> MidiChannelMapping {
+        MidiChannelMapping {
+            division: "Hoofdwerk".into(),
+            channel: Some(0),
+            transpose,
+            first_midi_note: laagste,
+            last_midi_note: Some(96),
+            short_octave: kort,
+        }
+    }
+
+    #[test]
+    fn uit_verandert_niets() {
+        let m = klavier(false, Some(36), 0);
+        for n in 36..=60u8 { assert_eq!(m.speelnoot(n), n); }
+    }
+
+    #[test]
+    fn onderste_octaaf_klinkt_zoals_op_een_historisch_orgel() {
+        // Laagste toets C3 (36) ziet eruit als E maar klinkt als C.
+        let m = klavier(true, Some(36), 0);
+        // toets:      E   F   F#  G   G#  A   Bes B   C
+        // klinkt:     C   F   D   G   E   A   Bes B   C(+1 oct)
+        let verwacht = [36u8, 41, 38, 43, 40, 45, 46, 47, 48];
+        for (i, v) in verwacht.iter().enumerate() {
+            assert_eq!(m.speelnoot(36 + i as u8), *v, "toets {}", i);
+        }
+    }
+
+    #[test]
+    fn boven_het_korte_octaaf_loopt_alles_weer_gelijk() {
+        let m = klavier(true, Some(36), 0);
+        // Vanaf de negende toets: vier halve tonen hoger dan de toets suggereert,
+        // dus een doorlopende reeks zonder gaten.
+        for i in 8..30u8 {
+            assert_eq!(m.speelnoot(36 + i), 36 + i + 4, "toets {}", i);
+        }
+    }
+
+    #[test]
+    fn zonder_ingeleerd_bereik_doet_de_vlag_niets() {
+        // We weten dan niet waar de onderste octaaf begint; liever niets dan de
+        // verkeerde noot.
+        let m = klavier(true, None, 0);
+        for n in 36..=60u8 { assert_eq!(m.speelnoot(n), n); }
+    }
+
+    #[test]
+    fn transponeren_komt_er_bovenop() {
+        let m = klavier(true, Some(36), 12);
+        assert_eq!(m.speelnoot(36), 48);        // C, een octaaf hoger
+        assert_eq!(m.speelnoot(38), 50);        // F# → D, een octaaf hoger
+    }
+
+    #[test]
+    fn noten_onder_de_laagste_toets_blijven_ongemoeid() {
+        let m = klavier(true, Some(36), 0);
+        assert_eq!(m.speelnoot(30), 30);
+    }
 }

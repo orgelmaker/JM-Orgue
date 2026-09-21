@@ -148,6 +148,79 @@ pub fn polyphony_target() -> usize {
     POLYPHONY_TARGET.load(Ordering::Relaxed).clamp(MIN_LIVE_VOICES, MAX_LIVE_VOICES)
 }
 
+/// Testsignaal voor het opzoeken van luidsprekers (0.7.47). Wie zes of acht
+/// kanalen aansluit weet daarna nog niet welke stekker in welke kast zit; dit
+/// stuurt een herkenbaar signaal naar precies één uitgang. Proces-breed en
+/// atomair, zodat de knop meteen werkt en een audio-wissel hem overneemt.
+///
+/// Codering: 0 = uit; anders `(kanaal + 1) | (soort << 16)`.
+/// Soort 0 = roze ruis (de standaard om luidsprekers uit te zoeken: breedbandig
+/// en niet schel), soort 1 = sinus 440 Hz (voor het natrekken van een kanaal op
+/// een meetapparaat).
+static TEST_SIGNAL: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+/// Niveau van het testsignaal als f32-bits (piek, 0..1).
+static TEST_SIGNAL_GAIN: std::sync::atomic::AtomicU32 =
+    std::sync::atomic::AtomicU32::new(0);
+
+/// Zet het testsignaal aan op `channel` of uit (`None`). `gain` is een piek
+/// 0..1; de render-lus klemt hem nog een keer.
+pub fn set_test_signal(channel: Option<u8>, kind: u8, gain: f32) {
+    match channel {
+        Some(ch) => {
+            TEST_SIGNAL_GAIN.store(gain.clamp(0.0, 1.0).to_bits(), Ordering::Relaxed);
+            TEST_SIGNAL.store((ch as u32 + 1) | ((kind.min(1) as u32) << 16), Ordering::Relaxed);
+        }
+        None => TEST_SIGNAL.store(0, Ordering::Relaxed),
+    }
+}
+
+/// (kanaal, soort, piekniveau) van het lopende testsignaal, of None.
+pub fn test_signal() -> Option<(u8, u8, f32)> {
+    let v = TEST_SIGNAL.load(Ordering::Relaxed);
+    if v == 0 { return None; }
+    let ch = ((v & 0xFFFF) - 1) as u8;
+    let kind = ((v >> 16) & 0xFF) as u8;
+    let gain = f32::from_bits(TEST_SIGNAL_GAIN.load(Ordering::Relaxed)).clamp(0.0, 1.0);
+    Some((ch, kind, gain))
+}
+
+/// Roze-ruisgenerator (Paul Kellett, 3-polige benadering) plus een sinusfase.
+/// Klein genoeg om op de audio-thread te draaien zonder allocatie.
+#[derive(Default)]
+pub(crate) struct Testsignaal {
+    rng: u32,
+    b0: f32,
+    b1: f32,
+    b2: f32,
+    fase: f32,
+}
+
+impl Testsignaal {
+    pub(crate) fn nieuw() -> Self {
+        Testsignaal { rng: 0x2545_F491, ..Default::default() }
+    }
+
+    /// Eén sample. `kind` 0 = roze ruis, 1 = sinus 440 Hz.
+    pub(crate) fn sample(&mut self, kind: u8, sample_rate: u32) -> f32 {
+        if kind == 1 {
+            let stap = 440.0 * std::f32::consts::TAU / sample_rate.max(1) as f32;
+            self.fase += stap;
+            if self.fase >= std::f32::consts::TAU { self.fase -= std::f32::consts::TAU; }
+            return self.fase.sin();
+        }
+        // xorshift32 → wit in -1..1
+        self.rng ^= self.rng << 13;
+        self.rng ^= self.rng >> 17;
+        self.rng ^= self.rng << 5;
+        let wit = (self.rng as f32 / u32::MAX as f32) * 2.0 - 1.0;
+        self.b0 = 0.99765 * self.b0 + wit * 0.0990460;
+        self.b1 = 0.96300 * self.b1 + wit * 0.2965164;
+        self.b2 = 0.57000 * self.b2 + wit * 1.0526913;
+        // Deler: houdt de piek van de som ruwweg binnen ±1.
+        (self.b0 + self.b1 + self.b2 + wit * 0.1848) * 0.2
+    }
+}
+
 /// Belasting van de render-thread: rendertijd / beschikbare buffertijd, als
 /// promille (EMA en piek over de laatste seconden). Boven ~800‰ dreigen
 /// underruns — de UI toont dit naast het stemmenaantal zodat de gebruiker de
@@ -3175,6 +3248,8 @@ fn run_audio_thread(
     // tragere release (plus de 300 ms-hold in de limiter zelf) volgt de gain
     // het natuurlijke uitsterven in plaats van er tegenin te pompen.
     let mut master_limiter = MasterLimiter::new(0.97, 0.0015, 1.2, sample_rate);
+    // Generator voor het luidspreker-testsignaal (zie set_test_signal).
+    let mut testsignaal = Testsignaal::nieuw();
     // Voor de galm-bypass: bij de overgang naar mix 0 één keer de staart
     // wissen — anders klinkt bij her-inschakelen eerst een bevroren, oude
     // staart die niets met het huidige spel te maken heeft.
@@ -4770,6 +4845,22 @@ fn run_audio_thread(
             {
                 let mut pr = peak_right_clone.write();
                 *pr = *pr * 0.95 + peak_r * 0.05;
+            }
+
+            // Luidspreker-testsignaal: overschrijft de uitgang volledig, zodat
+            // er gegarandeerd uit precies één kanaal geluid komt. Bewust hier en
+            // niet met een vroege return: de commandowachtrij en de stemmen
+            // worden gewoon afgehandeld, zodat aan- en uitzetten geen
+            // opgespaarde berichten achterlaat. Tijdens het uitzoeken van
+            // luidsprekers speelt er toch niets.
+            if let Some((tch, kind, gain)) = test_signal() {
+                let tch = tch as usize;
+                for frame in data.chunks_mut(channels.max(1)) {
+                    let v = testsignaal.sample(kind, sample_rate) * gain;
+                    for (ci, s) in frame.iter_mut().enumerate() {
+                        *s = if ci == tch { v.clamp(-1.0, 1.0) } else { 0.0 };
+                    }
+                }
             }
 
             // Belastingsmeter: rendertijd t.o.v. de buffertijd van deze callback.

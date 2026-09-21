@@ -103,6 +103,10 @@ pub struct MidiMappingSaved {
     pub transpose: i8,
     pub first_midi_note: Option<u8>,
     pub last_midi_note: Option<u8>,
+    /// Kort octaaf (C/E) op dit klavier. `default` houdt oudere
+    /// instellingenbestanden leesbaar.
+    #[serde(default)]
+    pub short_octave: bool,
 }
 
 /// Saved per-pipe voicing (volume + pitch detune)
@@ -387,6 +391,11 @@ pub struct OrganSettings {
     /// Microfoonperspectieven: geladen (aan/uit) + volume per label.
     #[serde(default)]
     pub perspectives: Vec<PerspectiveSaved>,
+    /// Alle opnameposities in het geheugen houden, ook de uitgeschakelde
+    /// (0.7.47). Dan is wisselen tussen posities ogenblikkelijk in plaats van
+    /// een herlaad — ten koste van geheugen (ruwweg maal het aantal posities).
+    #[serde(default)]
+    pub load_all_perspectives: bool,
     /// Indeling van de afstandsbediening (0.7.39). None = nooit gepubliceerd →
     /// de afstandsbediening gebruikt dezelfde defaults als het orgelscherm.
     #[serde(default)]

@@ -1500,6 +1500,22 @@
   // klavieren over verschillende uitgangen verdeelt (per-klavier-instelling
   // onder MIDI-kanaal per klavier) ziet hier "aangepast".
   $: outputChannelTotal = Math.max(2, audioChannelCount);
+
+  // Luidspreker-testsignaal (0.7.47): stuurt geluid naar precies één uitgang,
+  // zodat je kunt horen welke stekker in welke kast zit. null = uit.
+  let testSignaalKanaal = null;
+  let testSignaalSoort = 0;
+  async function zetTestsignaal(kanaal) {
+    // Nogmaals op hetzelfde kanaal = uit (de knop is een schakelaar).
+    const doel = (testSignaalKanaal === kanaal) ? null : kanaal;
+    try {
+      await invoke('set_output_test_signal', { channel: doel, kind: testSignaalSoort, levelDb: -20 });
+      testSignaalKanaal = doel;
+    } catch (e) { console.error('Testsignaal mislukt:', e); }
+  }
+  // Nooit met een lopend testsignaal blijven zitten: bij het verlaten van het
+  // instellingenscherm of het sluiten van het venster gaat hij uit.
+  $: if (activeView !== 'algemene-instellingen' && testSignaalKanaal !== null) zetTestsignaal(testSignaalKanaal);
   $: outputPairSel = computeOutputPair(divisionOutputChannels, organInfo);
   function computeOutputPair(chmap, oi) {
     const divs = oi?.divisions || [];
@@ -1554,6 +1570,21 @@
       dispatch('refreshMidiMappings');
     } catch (e) { console.error(e); }
   }
+  // Alle opnameposities in het geheugen houden: dan is wisselen ogenblikkelijk
+  // in plaats van een herlaad. Kost geheugen, dus expliciet aan te zetten.
+  let laadAllePosities = false;
+  async function haalLaadAllePosities() {
+    try { laadAllePosities = await invoke('get_load_all_perspectives'); } catch (e) {}
+  }
+  $: if (organInfo?.id) haalLaadAllePosities();
+  async function zetLaadAllePosities(on) {
+    try {
+      perspReloadHint = await invoke('set_load_all_perspectives', { enabled: on });
+      laadAllePosities = on;
+      dispatch('refreshMidiMappings');
+    } catch (e) { console.error(e); }
+  }
+
   let perspGainTimer = null;
   function setPerspectiveGain(name, v) {
     const gainDb = Number(v);
@@ -2133,6 +2164,15 @@
     } catch (e) {
       console.error('Crescendo-koppeling wissen mislukt:', e);
     }
+  }
+
+  // Kort octaaf (C/E) per klavier. Daarna de koppelingen opnieuw ophalen zodat
+  // het vinkje de backend volgt.
+  async function setShortOctave(division, enabled) {
+    try {
+      await invoke('set_short_octave', { division, enabled });
+      midiMappings = await invoke('get_midi_mappings');
+    } catch (e) { console.error('Kort octaaf zetten mislukt:', e); }
   }
 
   // Handmatig toetsenbereik (laagste/hoogste MIDI-noot) van een divisie.
@@ -4762,6 +4802,11 @@
               {/if}
               {#if perspectives.length > 0}
                 <p class="settings-hint" style="margin: 0 0 0.4rem;">{$t('perspectives.desc')}</p>
+                <label class="swell-toggle" style="margin-bottom:0.4rem;" title={$t('perspectives.keep_loaded_title')}>
+                  <input type="checkbox" checked={laadAllePosities}
+                    on:change={(e) => zetLaadAllePosities(e.target.checked)} />
+                  <span class="swell-toggle-label">{$t('perspectives.keep_loaded')}</span>
+                </label>
                 {#each perspectives as p (p.name)}
                   <div class="slider-control">
                     <div class="slider-header">
@@ -5193,6 +5238,22 @@
                         title="{$t('settings.midi_highest_note_title')} {m?.last_midi_note != null ? `(${midiToNoteName(m.last_midi_note)})` : ''}"
                       />
                     </div>
+
+                    <!-- Kort octaaf (C/E): historische klaviatuur waarvan de
+                         onderste octaaf niet volledig is. Werkt alleen met een
+                         ingeleerde laagste toets, dus dat staat erbij. -->
+                    <label class="swell-toggle" title={$t('settings.short_octave_title')}>
+                      <input
+                        type="checkbox"
+                        checked={m?.short_octave === true}
+                        disabled={m?.first_midi_note == null}
+                        on:change={(e) => setShortOctave(division.name, e.target.checked)}
+                      />
+                      <span class="swell-toggle-label">{$t('settings.short_octave')}</span>
+                    </label>
+                    {#if m?.short_octave && m?.first_midi_note == null}
+                      <p class="settings-hint" style="margin:0;">{$t('settings.short_octave_needs_range')}</p>
+                    {/if}
 
                     <label class="swell-toggle" title={$t('swell.toggle_title')}>
                       <input
@@ -5745,6 +5806,29 @@
                     {/each}
                     <option value="custom" selected={outputPairSel === 'custom'} disabled={outputPairSel !== 'custom'}>{$t('settings.output_pair_custom')}</option>
                   </select>
+                </div>
+              {/if}
+
+              <!-- Testsignaal per uitgang: welke stekker zit in welke kast? -->
+              {#if audioStatus && audioStatus.audio_running}
+                <div style="margin-top: 0.7rem;">
+                  <div class="audio-select-row">
+                    <span class="audio-select-label">{$t('settings.test_signal')}</span>
+                    <select class="temperament-select" bind:value={testSignaalSoort}
+                      on:change={() => { if (testSignaalKanaal !== null) { const k = testSignaalKanaal; testSignaalKanaal = null; zetTestsignaal(k); } }}>
+                      <option value={0}>{$t('settings.test_signal_pink')}</option>
+                      <option value={1}>{$t('settings.test_signal_sine')}</option>
+                    </select>
+                  </div>
+                  <div style="display:flex; flex-wrap:wrap; gap:0.3rem; margin-top:0.4rem;">
+                    {#each Array(outputChannelTotal) as _, ch}
+                      <button class="btn btn-sm" class:btn-active={testSignaalKanaal === ch}
+                        on:click={() => zetTestsignaal(ch)}>
+                        {ch + 1}{#if ch === 0} {$t('settings.test_signal_left')}{:else if ch === 1} {$t('settings.test_signal_right')}{/if}
+                      </button>
+                    {/each}
+                  </div>
+                  <p class="settings-hint" style="margin: 0.3rem 0 0;">{$t('settings.test_signal_hint')}</p>
                 </div>
               {/if}
 
