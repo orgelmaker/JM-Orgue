@@ -136,6 +136,8 @@
     "pan": "Panoramique",
     "output": "Sortie",
     "tremulant_lfo": "Trémulant LFO",
+    "tremulant_from_samples": "Issu de l'enregistrement : cet ensemble contient de vrais enregistrements de tremblant. La simulation n'est pas nécessaire par-dessus.",
+    "tremulant_simulated": "Simulé : cet ensemble ne contient pas d'enregistrements de tremblant, le tremblant est donc calculé ici.",
     "tremulant_rate": "Vitesse",
     "tremulant_amp_depth": "Amplitude",
     "tremulant_pitch_depth": "Hauteur",
@@ -768,7 +770,9 @@
     "preset_concert_hall": "Salle de concert",
     "preset": "Préréglage",
     "custom_per_organ": "Personnalisé (par orgue)",
-    "fixed_room_hint": "Acoustique fixe. Choisissez « Personnalisé (par orgue) » pour régler vous-même RT60, pré-délai, amortissement et taille de salle — ce réglage est conservé avec cet orgue."
+    "fixed_room_hint": "Acoustique fixe. Choisissez « Personnalisé (par orgue) » pour régler vous-même RT60, pré-délai, amortissement et taille de salle — ce réglage est conservé avec cet orgue.",
+    "recorded_room_hint": "Cet ensemble d'échantillons contient déjà l'acoustique de l'église ({n} tuyaux avec enregistrement de release). Une réverbération supplémentaire relève ici du goût, pas de la nécessité — trop en trouble le son.",
+    "back_to_recording": "Revenir à l'enregistrement (réverbération coupée)"
   },
   "pan": {
     "center": "C",

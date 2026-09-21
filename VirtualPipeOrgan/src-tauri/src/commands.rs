@@ -95,6 +95,12 @@ pub struct OrganInfoDto {
     /// bv. mixtuurkoren) — die klinken altijd volledig.
     #[serde(default)]
     pub layered_stops: usize,
+    /// Aantal pijpen met een RELEASE-opname. Een release is de uitklank van de
+    /// pijp ín de ruimte: staat die erin, dan heeft de sampleset de akoestiek
+    /// van de kerk zelf al meegenomen ("nat"). De frontend zet daar geen
+    /// kunstmatige galm overheen (zie de nagalm-instellingen).
+    #[serde(default)]
+    pub release_pipes: usize,
 }
 
 /// Microfoonperspectief voor de frontend (Orgel-Instellingen → Perspectieven).
@@ -1528,6 +1534,9 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
     // toonhoogte / aantal speelbare pijpen (gevuld in het laadblok hieronder).
     let retune_pipes: usize;
     let retune_total: usize;
+    // Pijpen met een release-opname (= opgenomen kerkakoestiek). Zie
+    // OrganInfoDto::release_pipes.
+    let release_pipes: usize;
     // Perspectieven-plan (gevuld in het laadblok; ná reset_organ_scoped_state
     // in state.perspectives gezet — anders wist de reset hem direct weer).
     let persp: Vec<PerspectiveRuntime>;
@@ -1949,6 +1958,13 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
         }
         retune_pipes = odf_retune.len();
         retune_total = load_tasks.len();
+        // Unieke FYSIEKE pijpen met release-opname: toetsduur-varianten,
+        // tremulantstand en perspectief-lagen van dezelfde pijp tellen als één
+        // (base_pipe haalt die bits eraf).
+        release_pipes = release_tasks.iter()
+            .map(|(key, _, _)| (key.0, crate::audio::base_pipe(key.1)))
+            .collect::<std::collections::HashSet<_>>()
+            .len();
         info!(
             "Hertemperen: {} van {} pijpen met gemeten toonhoogte ({} onplausibel verworpen)",
             retune_pipes, retune_total, retune_rejected
@@ -2163,6 +2179,7 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
         retune_total,
         perspectives: perspective_dtos(&persp),
         layered_stops: rank_summary.iter().filter(|r| r.is_stacked()).count(),
+        release_pipes,
     };
 
     // Reset bij orgelwissel: stop alle klinkende noten en wis de getrokken registratie +
@@ -5983,6 +6000,8 @@ pub fn do_load_samples_from_directory_locked(state: &AppState, directory: &str) 
         retune_total: 0,
         perspectives: perspective_dtos(&persp),
         layered_stops: 0,
+        // Eigen samplemappen kennen geen aparte release-opnamen.
+        release_pipes: 0,
     };
 
     // Reset bij orgelwissel: stop alle klinkende noten en wis de getrokken registratie +

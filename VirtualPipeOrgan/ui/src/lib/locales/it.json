@@ -136,6 +136,8 @@
     "pan": "Pan",
     "output": "Uscita",
     "tremulant_lfo": "LFO del tremolo",
+    "tremulant_from_samples": "Dalla registrazione: questo set contiene vere registrazioni del tremolo. La simulazione non serve sopra.",
+    "tremulant_simulated": "Simulato: questo set non contiene registrazioni del tremolo, quindi il tremolo viene calcolato qui.",
     "tremulant_rate": "Velocità",
     "tremulant_amp_depth": "Ampiezza",
     "tremulant_pitch_depth": "Altezza",
@@ -768,7 +770,9 @@
     "preset_concert_hall": "Sala da concerto",
     "preset": "Preset",
     "custom_per_organ": "Personalizzato (per organo)",
-    "fixed_room_hint": "Ambiente fisso. Scegli \"Personalizzato (per organo)\" per impostare tu RT60, pre-delay, smorzamento e dimensione dell'ambiente — l'impostazione viene conservata con questo organo."
+    "fixed_room_hint": "Ambiente fisso. Scegli \"Personalizzato (per organo)\" per impostare tu RT60, pre-delay, smorzamento e dimensione dell'ambiente — l'impostazione viene conservata con questo organo.",
+    "recorded_room_hint": "Questo set di campioni ha già l'acustica della chiesa nel suono ({n} canne con registrazione di release). Aggiungere riverbero qui è questione di gusto, non di necessità: troppo rende il suono torbido.",
+    "back_to_recording": "Torna alla registrazione (riverbero spento)"
   },
   "pan": {
     "center": "C",

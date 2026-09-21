@@ -136,6 +136,8 @@
     "pan": "Panorama",
     "output": "Wyjście",
     "tremulant_lfo": "LFO tremulanta",
+    "tremulant_from_samples": "Z nagrania: ten zestaw ma prawdziwe nagrania tremulanta. Symulacja nie jest tu potrzebna.",
+    "tremulant_simulated": "Symulowany: ten zestaw nie zawiera nagrań tremulanta, więc tremulant jest tu obliczany.",
     "tremulant_rate": "Szybkość",
     "tremulant_amp_depth": "Amplituda",
     "tremulant_pitch_depth": "Wysokość",
@@ -768,7 +770,9 @@
     "preset_concert_hall": "Sala koncertowa",
     "preset": "Preset",
     "custom_per_organ": "Własne (dla tych organów)",
-    "fixed_room_hint": "Stałe brzmienie wnętrza. Wybierz „Własne (dla tych organów)”, aby samodzielnie ustawić RT60, pre-delay, tłumienie i wielkość wnętrza — to ustawienie zostaje zapisane przy tych organach."
+    "fixed_room_hint": "Stałe brzmienie wnętrza. Wybierz „Własne (dla tych organów)”, aby samodzielnie ustawić RT60, pre-delay, tłumienie i wielkość wnętrza — to ustawienie zostaje zapisane przy tych organach.",
+    "recorded_room_hint": "Ten zestaw próbek ma już akustykę kościoła w dźwięku ({n} piszczałek z nagraniem wybrzmienia). Dodatkowy pogłos jest tu kwestią gustu, a nie konieczności — zbyt duży zamula brzmienie.",
+    "back_to_recording": "Powrót do nagrania (pogłos wyłączony)"
   },
   "pan": {
     "center": "C",

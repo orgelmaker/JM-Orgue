@@ -5,6 +5,21 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.46] - 2026-09-21
+
+### Nagalm: niet meer verpest door een preset
+
+De klacht was dat je de klank van een natte sampleset met de galmpresets kunt verpesten. Twee dingen daaraan:
+
+- **Een knop "Terug naar de opname"** in het nagalmblok zet alle kunstmatige galm in één klik af. Een preset die je klank troebel maakt is daarmee geen zoekplaatje meer, ook niet als je hem al bij dit orgel had opgeslagen.
+- **Een regel erboven die zegt dát deze set zijn eigen akoestiek meebrengt**, met het aantal pijpen waarvoor dat geldt. Extra galm is dan smaak, geen noodzaak — en dat staat er nu bij in plaats van dat je het moet weten.
+
+Daaronder is de maatstaf veranderd. JM-Orgue besloot tot nu toe aan de **bestandsnaam** of een set nat was: een `.organ` of een Hauptwerk-ODF kreeg geen standaardgalm, al het andere wel. Dat is nu een feit uit de set zelf: **heeft hij release-opnamen?** Een release is de uitklank van de pijp ín de ruimte, dus staat die erin, dan is de akoestiek al opgenomen. Voor de gangbare sets verandert er niets (drie GrandOrgue-sets in de testbibliotheek leveren 280, 295 en 2.392 pijpen met release-opname en starten net als voorheen droog); wat wel verandert is dat een échte droge ODF-set nu de normale standaardgalm krijgt in plaats van niets, en dat het oordeel niet langer aan een bestandsextensie hangt.
+
+### Tremulant: te zien waar hij vandaan komt
+
+Per klavier staat er nu bij of de tremulant **uit de opname** komt of **nagebootst** wordt. Dat was tot nu toe onzichtbaar, en daarmee was "waarom hoor ik de nagebootste?" een raadsel. Het antwoord is bijna altijd dat de sampleset domweg geen tremulant-opnamen bevat: de meeste GrandOrgue-sets zetten `TremulantType=Synth` en leveren alleen droge pijpopnamen. GrandOrgue zelf bootst de tremulant daar ook na. Heeft een set ze wél (Hauptwerk-"tremmed"-lagen, GrandOrgue `IsTremulant=1`, eigen `_trem`-mappen), dan worden die gespeeld en zwijgt de nabootsing — dat werkte al sinds 0.7.39 en is nu ook te zien.
+
 ## [0.7.45] - 2026-09-16
 
 ### Treden die ruisen: demping op zwelkast, crescendo en inleren

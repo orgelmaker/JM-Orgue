@@ -136,6 +136,8 @@
     "pan": "Pan",
     "output": "Output",
     "tremulant_lfo": "Tremulant LFO",
+    "tremulant_from_samples": "Uit de opname: deze sampleset heeft echte tremulant-opnamen. De nabootsing hoeft er niet overheen.",
+    "tremulant_simulated": "Nagebootst: deze sampleset bevat geen tremulant-opnamen, dus wordt de tremulant hier berekend.",
     "tremulant_rate": "Snelheid",
     "tremulant_amp_depth": "Amplitude",
     "tremulant_pitch_depth": "Toonhoogte",
@@ -768,7 +770,9 @@
     "preset_concert_hall": "Concertzaal",
     "preset": "Preset",
     "custom_per_organ": "Eigen (per orgel)",
-    "fixed_room_hint": "Vaste ruimteklank. Kies \"Eigen (per orgel)\" om RT60, pre-delay, demping en ruimtegrootte zelf in te stellen — die instelling wordt bij dit orgel bewaard."
+    "fixed_room_hint": "Vaste ruimteklank. Kies \"Eigen (per orgel)\" om RT60, pre-delay, demping en ruimtegrootte zelf in te stellen — die instelling wordt bij dit orgel bewaard.",
+    "recorded_room_hint": "Deze sampleset heeft de kerkakoestiek zelf al in het geluid ({n} pijpen met een release-opname). Extra galm is hier smaak, geen noodzaak — te veel maakt de klank troebel.",
+    "back_to_recording": "Terug naar de opname (galm uit)"
   },
   "pan": {
     "center": "C",

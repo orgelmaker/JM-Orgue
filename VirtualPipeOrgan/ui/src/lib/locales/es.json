@@ -136,6 +136,8 @@
     "pan": "Panorama",
     "output": "Salida",
     "tremulant_lfo": "LFO del trémolo",
+    "tremulant_from_samples": "De la grabación: este conjunto tiene grabaciones reales de trémolo. No hace falta añadir la simulación.",
+    "tremulant_simulated": "Simulado: este conjunto no contiene grabaciones de trémolo, así que el trémolo se calcula aquí.",
     "tremulant_rate": "Velocidad",
     "tremulant_amp_depth": "Amplitud",
     "tremulant_pitch_depth": "Altura",
@@ -768,7 +770,9 @@
     "preset_concert_hall": "Sala de conciertos",
     "preset": "Preajuste",
     "custom_per_organ": "Propia (por órgano)",
-    "fixed_room_hint": "Sonido de sala fijo. Elige «Propia (por órgano)» para ajustar tú mismo el RT60, el pre-delay, la amortiguación y el tamaño de la sala — ese ajuste se guarda con este órgano."
+    "fixed_room_hint": "Sonido de sala fijo. Elige «Propia (por órgano)» para ajustar tú mismo el RT60, el pre-delay, la amortiguación y el tamaño de la sala — ese ajuste se guarda con este órgano.",
+    "recorded_room_hint": "Este conjunto de muestras ya lleva la acústica de la iglesia en el sonido ({n} tubos con grabación de release). Añadir reverberación aquí es cuestión de gusto, no de necesidad: demasiada enturbia el sonido.",
+    "back_to_recording": "Volver a la grabación (reverberación apagada)"
   },
   "pan": {
     "center": "C",

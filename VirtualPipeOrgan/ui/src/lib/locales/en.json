@@ -136,6 +136,8 @@
     "pan": "Pan",
     "output": "Output",
     "tremulant_lfo": "Tremulant LFO",
+    "tremulant_from_samples": "From the recording: this sample set has real tremulant recordings. The simulation is not needed on top.",
+    "tremulant_simulated": "Simulated: this sample set contains no tremulant recordings, so the tremulant is computed here.",
     "tremulant_rate": "Rate",
     "tremulant_amp_depth": "Amplitude",
     "tremulant_pitch_depth": "Pitch",
@@ -768,7 +770,9 @@
     "preset_concert_hall": "Concert Hall",
     "preset": "Preset",
     "custom_per_organ": "Custom (per organ)",
-    "fixed_room_hint": "Fixed room sound. Choose \"Custom (per organ)\" to set RT60, pre-delay, damping and room size yourself — that setting is saved with this organ."
+    "fixed_room_hint": "Fixed room sound. Choose \"Custom (per organ)\" to set RT60, pre-delay, damping and room size yourself — that setting is saved with this organ.",
+    "recorded_room_hint": "This sample set already carries the church acoustics in the sound ({n} pipes with a release recording). Extra reverb here is a matter of taste, not necessity — too much makes it muddy.",
+    "back_to_recording": "Back to the recording (reverb off)"
   },
   "pan": {
     "center": "C",

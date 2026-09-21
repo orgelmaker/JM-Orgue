@@ -4818,6 +4818,7 @@ mod crescendo_tests {
                 midi_action_code: 0, coupler_type: "unison".into(), pitch_offset: 0,
             }]),
             retune_pipes: 0, retune_total: 0, perspectives: Vec::new(), layered_stops: 0,
+            release_pipes: 0,
         }
     }
 

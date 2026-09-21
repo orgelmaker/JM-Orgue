@@ -136,6 +136,8 @@
     "pan": "Panorama",
     "output": "Ausgang",
     "tremulant_lfo": "Tremulant LFO",
+    "tremulant_from_samples": "Aus der Aufnahme: Dieses Sampleset hat echte Tremulant-Aufnahmen. Die Nachbildung ist hier nicht nötig.",
+    "tremulant_simulated": "Nachgebildet: Dieses Sampleset enthält keine Tremulant-Aufnahmen, der Tremulant wird hier berechnet.",
     "tremulant_rate": "Geschwindigkeit",
     "tremulant_amp_depth": "Amplitude",
     "tremulant_pitch_depth": "Tonhöhe",
@@ -768,7 +770,9 @@
     "preset_concert_hall": "Konzertsaal",
     "preset": "Preset",
     "custom_per_organ": "Eigen (pro Orgel)",
-    "fixed_room_hint": "Fester Raumklang. Wählen Sie „Eigen (pro Orgel)“, um RT60, Pre-Delay, Dämpfung und Raumgröße selbst einzustellen — diese Einstellung wird bei dieser Orgel gespeichert."
+    "fixed_room_hint": "Fester Raumklang. Wählen Sie „Eigen (pro Orgel)“, um RT60, Pre-Delay, Dämpfung und Raumgröße selbst einzustellen — diese Einstellung wird bei dieser Orgel gespeichert.",
+    "recorded_room_hint": "Dieses Sampleset trägt die Kirchenakustik bereits im Klang ({n} Pfeifen mit Release-Aufnahme). Zusätzlicher Nachhall ist hier Geschmackssache, keine Notwendigkeit — zu viel macht den Klang trüb.",
+    "back_to_recording": "Zurück zur Aufnahme (Nachhall aus)"
   },
   "pan": {
     "center": "C",

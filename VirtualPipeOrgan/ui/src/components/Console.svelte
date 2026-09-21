@@ -1202,6 +1202,19 @@
     { name: $t('reverb.preset_concert_hall'), rt60: 2.2, preDelay: 30, damping: 50, roomSize: 100 },
   ];
 
+  // Heeft deze sampleset de kerkakoestiek zelf al in het geluid? Dat is zo
+  // zodra er release-opnamen zijn: de uitklank van de pijp in de ruimte.
+  $: natteSampleset = (organInfo?.release_pipes || 0) > 0;
+
+  /// Terug naar wat de sampleset zelf opgenomen heeft: alle kunstmatige galm
+  /// eraf. Eén klik, zodat een misgelopen preset geen zoekplaatje wordt.
+  function reverbTerugNaarOpname() {
+    reverb = 0;
+    onReverbChange();
+    if (reverbType === 'algorithmic') updateAlgorithmicReverb();
+    else persistReverbConfig();
+  }
+
   async function updateAlgorithmicReverb(usePreset = false) {
     persistReverbConfig();
     try {
@@ -2294,16 +2307,23 @@
         reverbIrLoaded = !!reverbIrPath;
         reverbIrName = reverbIrPath ? reverbIrPath.split(/[/\\]/).pop() : '';
       } else {
-        // Geen opgeslagen galm voor dit orgel. GO-/Hauptwerk-imports zijn NAT
-        // opgenomen (de kerkakoestiek zit al in de samples) — daar bovenop
-        // standaard 30% Dorpskerk zetten gaf een troebel dubbel-galm-geluid
-        // ("wet-on-wet"). Externe orgelbestanden starten daarom droog; eigen
-        // (droge) samplemappen houden de vertrouwde standaardgalm.
-        const isImportedOrganFile = /\.(organ|organ_hauptwerk_xml)$/i.test(organInfo?.id || '');
+        // Geen opgeslagen galm voor dit orgel. Een sampleset met RELEASE-opnamen
+        // heeft de uitklank van de pijp ín de kerk meegenomen: de akoestiek zit
+        // dan al in het geluid. Daar bovenop standaard 30% Dorpskerk zetten gaf
+        // een troebel dubbel-galm-geluid ("wet-on-wet"). Zo'n set start dus
+        // droog; een set zonder release-opnamen houdt de vertrouwde
+        // standaardgalm.
+        //
+        // Tot 0.7.45 keek deze regel naar de BESTANDSNAAM (.organ /
+        // .organ_hauptwerk_xml). Dat ging twee kanten op mis: dezelfde natte
+        // GrandOrgue-set als sample-MAP geopend kreeg alsnog 30% galm erover,
+        // en een droge ODF-set kreeg er juist geen.
         reverbType = 'algorithmic';
         reverbPreset = 1; reverbRt60 = 2.0; reverbPreDelay = 25;
         reverbDamping = 50; reverbRoomSize = 80;
-        reverb = isImportedOrganFile ? 0 : 30;
+        // Bewust NIET de reactieve `natteSampleset`: die volgt organInfo en kan
+        // op dit moment nog de vorige waarde hebben. Hier direct uit de DTO.
+        reverb = (organInfo?.release_pipes || 0) > 0 ? 0 : 30;
         reverbIrPath = null; reverbIrLoaded = false; reverbIrName = '';
       }
       if (pushToBackend) await applyReverbToBackend();
@@ -4469,6 +4489,18 @@
             <!-- Reverb -->
             <div class="settings-block">
               <h3 class="settings-block-title">{$t('settings.reverb')}</h3>
+              {#if natteSampleset}
+                <!-- De set heeft zijn eigen akoestiek; kunstmatige galm is hier
+                     smaak, geen noodzaak. Eén knop om alles weer af te zetten. -->
+                <p class="settings-hint" style="margin: 0 0 0.4rem;">
+                  {$t('reverb.recorded_room_hint').replace('{n}', organInfo.release_pipes)}
+                </p>
+                {#if reverb > 0}
+                  <button class="btn btn-sm" style="margin-bottom: 0.5rem;" on:click={reverbTerugNaarOpname}>
+                    {$t('reverb.back_to_recording')}
+                  </button>
+                {/if}
+              {/if}
               <!-- Type selector -->
               <div class="reverb-type-selector">
                 <button class="btn btn-sm" class:btn-active={reverbType === 'convolution'} on:click={() => switchReverbType('convolution')}>{$t('settings.reverb_type_convolution')}</button>
@@ -5329,6 +5361,20 @@
                         </div>
                       {/if}
                     </div>
+
+                    <!-- Waar komt de tremulant van deze divisie vandaan? Zonder
+                         dit regeltje bleef "waarom hoor ik de nagebootste?" een
+                         raadsel: bij de meeste GrandOrgue-sets staat er domweg
+                         geen tremulant-opname in de set. -->
+                    {#if division.has_tremulant}
+                      <p class="settings-hint" style="margin:0.35rem 0 0;">
+                        {#if division.tremulant_kind === 'wave' || division.tremulant_kind === 'samples'}
+                          {$t('settings.tremulant_from_samples')}
+                        {:else}
+                          {$t('settings.tremulant_simulated')}
+                        {/if}
+                      </p>
+                    {/if}
 
                     <!-- Tremulant LFO + MIDI learn knopje -->
                     <div style="display:flex; align-items:center; gap:0.5rem; margin-top:0.3rem;">

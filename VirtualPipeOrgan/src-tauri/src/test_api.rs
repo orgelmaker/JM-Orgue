@@ -681,6 +681,7 @@ fn handle_status(state: &AppState) -> Value {
         "backend_reloads": state.backend_reloads.load(std::sync::atomic::Ordering::Relaxed),
         "render_frames": crate::audio::render_frames_now(),
         "layered_stops": state.rank_summary.read().iter().filter(|r| r.is_stacked()).count(),
+        "release_pipes": state.loaded_organ_info.read().as_ref().map(|o| o.release_pipes).unwrap_or(0),
     })
 }
 
@@ -1926,6 +1927,7 @@ mod tests {
             retune_total: 0,
             perspectives: Vec::new(),
             layered_stops: 0,
+            release_pipes: 0,
         }
     }
 
