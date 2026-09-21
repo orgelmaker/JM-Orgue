@@ -128,6 +128,8 @@
   export let audioHostActual = '';
   export let audioDeviceActual = '';
   export let audioBufferFrames = 0;
+  /// Gevraagde samplerate; null = de standaard van het apparaat.
+  export let selectedSampleRate = null;
   // Telt op wanneer een ander venster de kanaalkeuze per klavier wijzigde.
   export let divisionChannelsVersion = 0;
   // Laatst geopende orgel automatisch laden bij het starten (App.svelte).
@@ -1578,7 +1580,11 @@
   }
 
   // Polyfonie-kap en stereo-samples (globale audio-voorkeuren; waarde via get_status).
-  const POLYPHONY_CHOICES = [512, 1024, 1536, 2048, 3072, 4096];
+  // Tot 32.768, gelijk aan het hoogste dat andere software noemt. Wat een pc
+  // écht haalt bepaalt de rekentijd, niet dit getal: gemeten kost elke stem
+  // ongeveer 0,17 % van de buffertijd, dus loopt een gewone pc rond de 500
+  // stemmen tegen zijn deadline. De belastingsmeter eronder toont dat.
+  const POLYPHONY_CHOICES = [512, 1024, 1536, 2048, 3072, 4096, 8192, 16384, 32768];
   async function setPolyphony(v) {
     try { await invoke('set_polyphony', { voices: Number(v) }); } catch (e) { console.error(e); }
     refreshAudioStatus();
@@ -6261,6 +6267,16 @@
                     {#if sampleRate >= 88200} (HD){/if}
                   </span>
                 </div>
+                <div class="audio-select-row" style="margin-bottom: 0.4rem;">
+                  <label class="audio-select-label" for="audio-rate">{$t('settings.sample_rate_choose')}</label>
+                  <select id="audio-rate" class="temperament-select"
+                    on:change={(e) => dispatch('selectSampleRate', e.target.value ? Number(e.target.value) : null)}>
+                    <option value="" selected={!selectedSampleRate}>{$t('settings.sample_rate_device_default')}</option>
+                    {#each (supportedSampleRates.length > 0 ? supportedSampleRates : [44100, 48000, 88200, 96000]) as r}
+                      <option value={r} selected={r === selectedSampleRate}>{r.toLocaleString()} Hz{r >= 88200 ? ' (HD)' : ''}</option>
+                    {/each}
+                  </select>
+                </div>
                 <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.3rem;">
                   <button class="btn btn-ghost btn-sm" on:click={loadSupportedSampleRates}>
                     {$t('settings.supported_rates')}
@@ -6271,6 +6287,7 @@
                     </span>
                   {/if}
                 </div>
+                <p class="settings-hint" style="margin: 0 0 0.3rem;">{$t('settings.sample_rate_apply_hint')}</p>
                 <p style="margin: 0; font-size: 0.7rem; color: var(--text-muted); line-height: 1.4;">
                   {$t('settings.sample_rate_hint')}
                 </p>

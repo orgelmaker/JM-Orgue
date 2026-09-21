@@ -34,6 +34,10 @@
   let audioHosts = [];
   let selectedAudioHost = null;
   let selectedBufferFrames = null;
+  // Gevraagde samplerate (0.7.48). null = wat het apparaat zelf als standaard
+  // opgeeft; een waarde die het apparaat niet kan, laat de backend staan en
+  // schrijft een waarschuwing in het log.
+  let selectedSampleRate = null;
   let midiDevices = [];
   let selectedAudioDevice = null;
   let selectedMidiDevice = null;
@@ -722,6 +726,8 @@
 
       const savedBuffer = Number(localStorage.getItem('jm-orgue-audio-buffer'));
       selectedBufferFrames = savedBuffer > 0 ? savedBuffer : null;
+    const savedRate = parseInt(localStorage.getItem('jm-orgue-audio-rate') || '0', 10);
+    selectedSampleRate = savedRate > 0 ? savedRate : null;
 
       midiDevices = await invoke('get_midi_devices');
     } catch (e) {
@@ -1006,6 +1012,7 @@
         host: selectedAudioHost,
         device: selectedAudioDevice,
         bufferFrames: selectedBufferFrames || null,
+        sampleRate: selectedSampleRate || null,
       });
       if (res.player_rebuilt) audioEpoch += 1;
       if (res.player_rebuilt && res.organ_id) {
@@ -1028,6 +1035,8 @@
       if (res.switched) {
         if (selectedAudioHost) localStorage.setItem('jm-orgue-audio-host', selectedAudioHost);
         if (selectedAudioDevice) localStorage.setItem('jm-orgue-audio-device', selectedAudioDevice);
+        if (selectedSampleRate) localStorage.setItem('jm-orgue-audio-rate', String(selectedSampleRate));
+        else localStorage.removeItem('jm-orgue-audio-rate');
         if (selectedBufferFrames) localStorage.setItem('jm-orgue-audio-buffer', String(selectedBufferFrames));
         else localStorage.removeItem('jm-orgue-audio-buffer');
         return 'ok';
@@ -1721,6 +1730,8 @@
       on:selectAudioHost={(e) => handleSelectAudioHost(e.detail)}
       on:selectBuffer={(e) => handleSelectBuffer(e.detail)}
       on:applyAudioOutput={applyAudioOutput}
+      on:selectSampleRate={(e) => (selectedSampleRate = e.detail)}
+      {selectedSampleRate}
       {audioProfiles}
       {audioEpoch}
       on:saveAudioProfile={(e) => saveAudioProfile(e.detail)}

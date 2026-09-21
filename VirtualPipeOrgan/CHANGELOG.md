@@ -5,6 +5,27 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.48] - 2026-09-21
+
+### De drie getallen uit de Hauptwerk-tabel
+
+**Polyfonie tot 32.768.** Het plafond stond op 4.096 en gaat naar 32.768, hetzelfde getal dat Hauptwerk Advanced noemt. Maar een plafond is geen belofte, en daarover moet ik eerlijk zijn: wat een pc werkelijk haalt bepaalt de rekentijd, niet dit getal. Gemeten op een i9-10885H (WASAPI, 48 kHz, 480 frames per callback, Friesach met alle 44 registers getrokken):
+
+| Klinkende stemmen | Belasting van de buffertijd |
+|---|---|
+| 210 | 29 % |
+| 424 | 68 % |
+| 828 | 139 % — over de deadline |
+| 1.088 | 195 % |
+
+Elke stem kost dus ongeveer 0,17 % van de buffertijd, en rond de 500 stemmen loopt het renderen tegen zijn grens. De belastingsmeter naast de instelling toont dat live; boven ~80 % dreigen onderbrekingen. Het echte plafond is de ene rekenkern waarop de mengloop draait — dáár valt winst te halen, niet in het getal.
+
+**Uitgangen tot 1.024.** Het plafond van de galm-weging ging van 64 naar 1.024, en — belangrijker — de kanaalnummers zelf waren een byte, dus kanaal 255 was het hoogste dat een klavier kon aanwijzen. Dat zijn nu 16-bits getallen, van de instelling tot aan de audiothread en het opgeslagen instellingenbestand. Een interface met honderden uitgangen is daarmee volledig te routeren.
+
+**Samplerate kiezen, tot 96 kHz.** JM-Orgue nam altijd klakkeloos over wat het apparaat als standaard opgaf. In de audio-instellingen staat nu een keuzelijst; bij Toepassen wordt die samplerate gevraagd. Kan het apparaat hem niet, dan blijft de huidige staan en komt er een regel in het logboek in plaats van een mislukte stream.
+
+Eén waarschuwing daarbij, uit de meting op deze pc: onder **WASAPI in gedeelde modus** legt Windows de samplerate vast op wat er bij Geluid → Eigenschappen → Geavanceerd staat; een andere waarde vragen kán daar niet en wordt netjes geweigerd. Onder **ASIO** komt de rate uit het paneel van de driver. De keuzelijst helpt dus waar de host het toelaat, en de hint eronder zegt waar je het anders instelt. Intern rekent de engine al sinds het begin in 32-bits drijvende komma.
+
 ## [0.7.47] - 2026-09-21
 
 ### Zeven punten uit de vergelijking met Hauptwerk en Sweelinq

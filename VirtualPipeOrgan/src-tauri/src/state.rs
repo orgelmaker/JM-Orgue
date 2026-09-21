@@ -117,6 +117,10 @@ pub struct AudioPrefs {
     pub device: Option<String>,
     /// Buffer size in frames (None/0 = driver default)
     pub buffer_frames: Option<u32>,
+    /// Gevraagde samplerate in Hz (0.7.48); None = wat het apparaat als
+    /// standaard opgeeft. Een onmogelijke waarde wordt genegeerd.
+    #[serde(default)]
+    pub sample_rate: Option<u32>,
     /// Polyfonie-kap (aantal gelijktijdige stemmen); None = standaard (1024).
     #[serde(default)]
     pub polyphony: Option<u32>,
@@ -1104,12 +1108,12 @@ pub struct AppState {
     pub pipe_voicings: Arc<RwLock<std::collections::HashMap<(u32, u32), (f32, f32)>>>,
     /// Per-divisie output-kanalen: lijst fysieke kanaalindices (leeg = standaard voorste paar 0/1).
     /// Opeenvolgende kanalen vormen (L,R)-paren; een los laatste kanaal krijgt mono.
-    pub division_output_channels: Arc<RwLock<Vec<Vec<u8>>>>,
+    pub division_output_channels: Arc<RwLock<Vec<Vec<u16>>>>,
     /// Kanaal-override van het actieve uitvoerprofiel (speakers/hoofdtelefoon):
     /// (divisienaam → kanaallijst). Zolang deze actief is wint hij van de per-orgel
     /// opgeslagen routing (apply_saved_output_channels past hem als laatste toe) en
     /// wordt de per-orgel routing NIET overschreven bij opslaan. None = geen override.
-    pub profile_channel_override: Arc<RwLock<Option<Vec<(String, Vec<u8>)>>>>,
+    pub profile_channel_override: Arc<RwLock<Option<Vec<(String, Vec<u16>)>>>>,
     /// C/Cis-lade spreiding aan/uit per divisie (even tonen ene kant, oneven andere).
     pub division_ccis_enabled: Arc<RwLock<Vec<bool>>>,
     /// Globale C/Cis-parameters: (sterkte 0..1, afval-met-toonhoogte 0..1, kanten omdraaien).
@@ -1301,6 +1305,7 @@ impl AppState {
             host_name: audio_prefs.host.clone(),
             device_name: audio_prefs.device.clone(),
             buffer_frames: audio_prefs.buffer_frames,
+            sample_rate: audio_prefs.sample_rate,
         };
         let wants_asio = audio_prefs.host.as_deref()
             .map(|h| h.eq_ignore_ascii_case("asio"))
@@ -3515,6 +3520,7 @@ impl AppState {
                 host: a.cfg.host_name.clone(),
                 device: a.cfg.device_name.clone(),
                 buffer_frames: a.cfg.buffer_frames,
+                sample_rate: a.cfg.sample_rate,
                 ..load_audio_prefs(&self.app_data_dir)
             });
         }
@@ -3602,6 +3608,7 @@ impl AppState {
             host_name: prefs.host.clone(),
             device_name: prefs.device.clone(),
             buffer_frames: prefs.buffer_frames,
+            sample_rate: prefs.sample_rate,
         }, true, false).map(Some)
     }
 
@@ -3644,6 +3651,8 @@ impl AppState {
                 host_name: if host.is_empty() { None } else { Some(host) },
                 device_name: if device.is_empty() { None } else { Some(device) },
                 buffer_frames: if buffer > 0 { Some(buffer) } else { None },
+                // De lopende stream is de waarheid: neem zijn samplerate over.
+                sample_rate: Some(*p.sample_rate.read()).filter(|&r| r > 0),
             }
         });
 
@@ -3726,6 +3735,7 @@ impl AppState {
                             host: cfg.host_name.clone(),
                             device: cfg.device_name.clone(),
                             buffer_frames: cfg.buffer_frames,
+                            sample_rate: cfg.sample_rate,
                             ..load_audio_prefs(&self.app_data_dir)
                         });
                     }
@@ -3745,6 +3755,7 @@ impl AppState {
                                     host: cfg.host_name.clone(),
                                     device: cfg.device_name.clone(),
                                     buffer_frames: cfg.buffer_frames,
+                                    sample_rate: cfg.sample_rate,
                                     ..load_audio_prefs(&self.app_data_dir)
                                 });
                             }
@@ -3835,6 +3846,7 @@ impl AppState {
                             host: cfg.host_name.clone(),
                             device: cfg.device_name.clone(),
                             buffer_frames: cfg.buffer_frames,
+                            sample_rate: cfg.sample_rate,
                             ..load_audio_prefs(&self.app_data_dir)
                         });
                     }
@@ -3857,6 +3869,7 @@ impl AppState {
                                     host: cfg.host_name.clone(),
                                     device: cfg.device_name.clone(),
                                     buffer_frames: cfg.buffer_frames,
+                                    sample_rate: cfg.sample_rate,
                                     ..load_audio_prefs(&self.app_data_dir)
                                 });
                             }
@@ -3960,6 +3973,7 @@ impl AppState {
             host_name: prefs.host,
             device_name: prefs.device,
             buffer_frames: prefs.buffer_frames,
+            sample_rate: prefs.sample_rate,
         };
         match self.switch_audio_output_inner(cfg, false, true) {
             // Ook een niet-geslaagde wissel kan een werkende fallback-player

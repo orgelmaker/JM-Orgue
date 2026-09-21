@@ -667,6 +667,8 @@ pub async fn set_audio_output(
     host: Option<String>,
     device: Option<String>,
     buffer_frames: Option<u32>,
+    // sample_rate: gevraagde samplerate in Hz (0.7.48); None = apparaatstandaard.
+    sample_rate: Option<u32>,
 ) -> Result<crate::state::SwitchOutcome, String> {
     let st = state.inner().clone();
     tokio::task::spawn_blocking(move || {
@@ -674,6 +676,7 @@ pub async fn set_audio_output(
             host_name: host,
             device_name: device,
             buffer_frames,
+            sample_rate,
         })
     })
     .await
@@ -4359,7 +4362,7 @@ pub fn apply_saved_wind_groups(state: State<AppState>) -> Result<usize, String> 
 }
 
 /// Migreer een oude output-pair-index (0..3) naar fysieke kanalen (gangbare 7.1-ordening).
-fn migrate_pair_to_channels(pair: u8) -> Vec<u8> {
+fn migrate_pair_to_channels(pair: u8) -> Vec<u16> {
     match pair {
         1 => vec![4, 5], // Achter L/R
         2 => vec![6, 7], // Zij L/R
@@ -4529,13 +4532,13 @@ pub fn reset_stop_voicing(state: State<AppState>, stop_id: u32) -> Result<(), St
 /// kanalen vormen (L,R)-paren; een los laatste kanaal krijgt mono. Zo kan een klavier
 /// uit 1 t/m alle beschikbare kanalen klinken (eigen ideale mapping).
 #[tauri::command]
-pub fn set_division_output_channels(state: State<AppState>, division: String, channels: Vec<u8>) -> Result<(), String> {
+pub fn set_division_output_channels(state: State<AppState>, division: String, channels: Vec<u16>) -> Result<(), String> {
     set_division_output_channels_inner(&state, &division, channels)
 }
 
 /// Kern van set_division_output_channels, ook aanroepbaar zonder Tauri-State
 /// (test-API: POST /division_channels).
-pub fn set_division_output_channels_inner(state: &AppState, division: &str, channels: Vec<u8>) -> Result<(), String> {
+pub fn set_division_output_channels_inner(state: &AppState, division: &str, channels: Vec<u16>) -> Result<(), String> {
     let organ = state.loaded_organ_info.read();
     if let Some(ref o) = *organ {
         if let Some(idx) = o.divisions.iter().position(|d| d.name == division) {
@@ -4568,7 +4571,7 @@ pub fn set_division_output_channels_inner(state: &AppState, division: &str, chan
 
 /// Lees alle divisie output-kanaal instellingen (in volgorde van de divisies)
 #[tauri::command]
-pub fn get_division_output_channels(state: State<AppState>) -> Vec<Vec<u8>> {
+pub fn get_division_output_channels(state: State<AppState>) -> Vec<Vec<u16>> {
     state.division_output_channels.read().clone()
 }
 
@@ -4581,7 +4584,7 @@ pub fn get_division_output_channels(state: State<AppState>) -> Vec<Vec<u8>> {
 /// - `None`: override weg; de per-orgel opgeslagen routing komt terug (divisies
 ///   zonder opgeslagen entry vallen terug op het standaard voorste paar).
 #[tauri::command]
-pub fn set_profile_channel_override(state: State<AppState>, channels: Option<Vec<(String, Vec<u8>)>>) -> Result<(), String> {
+pub fn set_profile_channel_override(state: State<AppState>, channels: Option<Vec<(String, Vec<u16>)>>) -> Result<(), String> {
     info!("Profiel-kanaaloverride: {}",
         channels.as_ref().map(|c| format!("{} divisies", c.len())).unwrap_or_else(|| "gewist".to_string()));
     *state.profile_channel_override.write() = channels.clone();

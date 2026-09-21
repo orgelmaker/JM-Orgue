@@ -1,7 +1,7 @@
 # JM-Orgue naast Hauptwerk en Sweelinq
 
-Peildatum 21 september 2026. Bijgewerkt na 0.7.47, waarin alles uit de lijst
-hieronder gebouwd is op de VST/AU-plug-in na. Bronnen: de editievergelijking op
+Peildatum 21 september 2026. Bijgewerkt na 0.7.48; alles uit dit rapport is
+gebouwd op de VST/AU-plug-in na. Bronnen: de editievergelijking op
 hauptwerk.com (Lite tegenover Advanced) en de release notes van Sweelinq
 Virtual Pipe Organ t/m 3.1.0 (build 1647).
 
@@ -9,9 +9,9 @@ Virtual Pipe Organ t/m 3.1.0 (build 1647).
 
 | | Lite | Advanced | JM-Orgue |
 |---|---|---|---|
-| Polyfonie | 1.024 | 32.768 | **256–4.096, instelbaar** met belastingsmeter |
-| Audio-uitgang | mono/stereo | tot 1.024 kanalen | **alle uitgangen van de kaart**, per klavier toe te wijzen |
-| Bit/samplerate | 32-bit/96 kHz | 32-bit/96 kHz | volgt de geluidskaart (WASAPI/ASIO), 32-bit float intern |
+| Polyfonie | 1.024 | 32.768 | **256–32.768, instelbaar** met belastingsmeter (0.7.48) |
+| Audio-uitgang | mono/stereo | tot 1.024 kanalen | **tot 1.024 uitgangen**, per klavier toe te wijzen (0.7.48) |
+| Bit/samplerate | 32-bit/96 kHz | 32-bit/96 kHz | **te kiezen tot 96 kHz** (0.7.48), 32-bit float intern |
 | Werkgeheugen | onbeperkt | onbeperkt | onbeperkt (64-bit) |
 | MIDI-uit | ✅ | ✅ | ✅ registerlampen, displays, drie protocollen |
 | Pc en Mac | ✅ | ✅ | Windows uitgebracht; macOS en Linux bouwen en draaien, nog niet uitgebracht |
@@ -26,10 +26,21 @@ Virtual Pipe Organ t/m 3.1.0 (build 1647).
 | Pistonbalken | 1 per scherm | 4 per scherm | setzerbalk + koppelbalk, vrij in te leren |
 
 Op de tabel van Hauptwerk na één regel dus: wat in hun **Advanced** zit en bij
-ons niet, is de **VST/AU-plug-in**. De polyfonie is het tweede aandachtspunt —
-onze bovengrens van 4.096 stemmen ligt boven hun Lite maar ver onder Advanced.
-In de praktijk is dat zelden bindend (een tutti met staarten haalt zelden
-1.000 stemmen), maar het is wel een getal waarop vergeleken wordt.
+ons niet, is de **VST/AU-plug-in**.
+
+Over de polyfonie hoort een eerlijke kanttekening. Het getal is sinds 0.7.48
+gelijk (32.768), maar dat is aan beide kanten een plafond en geen belofte.
+Gemeten op een i9-10885H kost bij ons elke klinkende stem ongeveer 0,17 % van
+de buffertijd: 424 stemmen geven 68 % belasting, 828 stemmen 139 % — over de
+deadline. Rond de 500 stemmen loopt het renderen dus tegen zijn grens, en dat
+komt doordat de mengloop op één rekenkern draait. **Daar** ligt de echte winst,
+niet in het getal; meerkernig renderen is het volgende dat de moeite waard is.
+
+Over de samplerate hoort er ook een: de keuze werkt waar de host hem toelaat.
+Onder WASAPI in gedeelde modus legt Windows de rate vast (Geluid → Eigenschappen
+→ Geavanceerd) en wordt een andere waarde geweigerd; onder ASIO komt hij uit het
+paneel van de driver. Dat geldt voor elke toepassing op dat apparaat, niet
+alleen voor ons.
 
 ## 2. Sweelinq: wat zij hebben en wij niet
 
@@ -64,8 +75,8 @@ Bewust niet gebouwd:
 - **VST/AU-plug-in.** Dat is een andere productvorm — JM-Orgue als instrument in
   een opnameprogramma — en geen ontbrekende knop. Pas overwegen als iemand er
   echt om vraagt.
-- **Polyfonie naar tienduizenden.** Onze grens van 4.096 is een bewuste
-  CPU-keuze met een zichtbare belastingsmeter; hoger zetten zonder meerkernig
-  renderen levert alleen haperingen op.
+- **Meerkernig renderen.** De mengloop draait op één kern; dat is wat de
+  polyfonie in de praktijk begrenst (zie de meting hierboven). Een zinvolle maar
+  ingrijpende verbouwing van de audiothread — een eigen project, geen bijzaak.
 - **Correcties per koptelefoonmodel.** Die zouden gemeten moeten zijn. In plaats
   daarvan staan er drie eerlijk omschreven luisterprofielen.

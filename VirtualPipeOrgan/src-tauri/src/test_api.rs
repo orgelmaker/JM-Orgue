@@ -954,12 +954,15 @@ fn handle_audio_output(state: &AppState, body: &str) -> Result<Value, (u16, Stri
     let host = v.get("host").and_then(|x| x.as_str()).map(|s| s.to_string());
     let device = v.get("device").and_then(|x| x.as_str()).map(|s| s.to_string());
     let buffer_frames = v.get("buffer_frames").and_then(|x| x.as_u64()).map(|n| n as u32);
+    let sample_rate = v.get("sample_rate").and_then(|x| x.as_u64()).map(|n| n as u32);
 
-    info!("test_api: audio_output switch host={:?} device={:?} buffer={:?}", host, device, buffer_frames);
+    info!("test_api: audio_output switch host={:?} device={:?} buffer={:?} rate={:?}",
+        host, device, buffer_frames, sample_rate);
     let outcome = state.switch_audio_output(crate::audio::AudioOutputConfig {
         host_name: host,
         device_name: device,
         buffer_frames,
+        sample_rate,
     }).map_err(|e| (500u16, e))?;
 
     // Mimic the frontend: reload the current organ so its samples re-register
@@ -1039,8 +1042,8 @@ fn handle_set_division_channels(state: &AppState, body: &str) -> Result<Value, (
         .map_err(|e| (400u16, format!("Ongeldige JSON body: {}", e)))?;
     let division = v.get("division").and_then(|d| d.as_str())
         .ok_or((400u16, "Missing 'division' in body".to_string()))?;
-    let channels: Vec<u8> = v.get("channels").and_then(|c| c.as_array())
-        .map(|a| a.iter().filter_map(|x| x.as_u64()).map(|x| x as u8).collect())
+    let channels: Vec<u16> = v.get("channels").and_then(|c| c.as_array())
+        .map(|a| a.iter().filter_map(|x| x.as_u64()).map(|x| x as u16).collect())
         .unwrap_or_default();
     crate::commands::set_division_output_channels_inner(state, division, channels.clone())
         .map_err(|e| (500u16, e))?;

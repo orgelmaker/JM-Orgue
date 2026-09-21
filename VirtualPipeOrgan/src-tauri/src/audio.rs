@@ -365,7 +365,7 @@ pub enum AudioCommand {
     /// Route a division naar een willekeurige set fysieke output-kanalen.
     /// Lege lijst = standaard (voorste paar 0/1). Opeenvolgende kanalen worden als
     /// stereo-paren (L,R) gevuld; een los laatste kanaal krijgt mono.
-    SetDivisionOutputChannels { division_index: u8, channels: Vec<u8> },
+    SetDivisionOutputChannels { division_index: u8, channels: Vec<u16> },
     /// Set per-division stereo pan (-1.0=left, 0.0=center, 1.0=right)
     SetDivisionPan { division_index: u8, pan: f32 },
     /// C/Cis-lade spreiding (globaal): sterkte 0..1, afval-met-toonhoogte 0..1, kanten omdraaien.
@@ -1259,7 +1259,11 @@ fn loop_xfade(loop_len: usize, ls: usize) -> usize {
 
 /// Maximaal aantal fysieke uitgangskanalen waarvoor galm-gewichten worden
 /// bijgehouden (ruim boven elke praktijkkaart; 8 bij een GIGAPORT eX).
-const MAX_OUT_CH: usize = 64;
+/// Plafond voor het aantal uitgangskanalen van de galm-weging. Verhoogd van
+/// 64 naar 1024 (0.7.48): de weegtabellen zijn vaste arrays die één keer per
+/// callback berekend worden, dus 2 × 1024 floats (8 kB) kost niets, en
+/// meerkanaals-interfaces boven de 64 uitgangen bestaan.
+const MAX_OUT_CH: usize = 1024;
 
 /// Galm-gewicht per fysiek uitgangskanaal, afgeleid uit de effectieve
 /// divisie-routing: de galm hoort te klinken uit dezélfde luidsprekers als het
@@ -1279,7 +1283,7 @@ const MAX_OUT_CH: usize = 64;
 /// Vaste arrays: geen heap-allocatie op de audio-thread.
 /// Retourneert (gewicht_links, gewicht_rechts, aantal_actieve_kanalen).
 fn wet_channel_weights(
-    out_chans: &[Vec<u8>],
+    out_chans: &[Vec<u16>],
     n_divs: usize,
     channels: usize,
 ) -> ([f32; MAX_OUT_CH], [f32; MAX_OUT_CH], usize) {
@@ -1442,7 +1446,7 @@ mod wet_weights_tests {
     #[test]
     fn standaard_stereo_naar_voorste_paar() {
         // Geen routing geconfigureerd: volle galm op (0,1), zoals vóór 0.7.33.
-        let chans: Vec<Vec<u8>> = vec![Vec::new(); 32];
+        let chans: Vec<Vec<u16>> = vec![Vec::new(); 32];
         let (wl, wr, n) = wet_channel_weights(&chans, 3, 2);
         assert_eq!(actief(&wl, &wr, n), vec![(0, 1.0, 0.0), (1, 0.0, 1.0)]);
     }
@@ -1451,7 +1455,7 @@ mod wet_weights_tests {
     fn hoofdtelefoonprofiel_volgt_override() {
         // Testorgel-klacht: alle divisies via de override op [0,1] van een
         // 8-kanaals apparaat → volle galm op (0,1), niets op 2..7.
-        let mut chans: Vec<Vec<u8>> = vec![Vec::new(); 32];
+        let mut chans: Vec<Vec<u16>> = vec![Vec::new(); 32];
         for i in 0..3 { chans[i] = vec![0, 1]; }
         let (wl, wr, n) = wet_channel_weights(&chans, 3, 8);
         assert_eq!(actief(&wl, &wr, n), vec![(0, 1.0, 0.0), (1, 0.0, 1.0)]);
@@ -1461,7 +1465,7 @@ mod wet_weights_tests {
     fn speakerprofiel_alle_divisies_op_alle_paren() {
         // Elke divisie speelt droog op alle drie de paren → elk paar krijgt ook
         // de volle galm; de droog/galm-balans per luidspreker blijft gelijk.
-        let mut chans: Vec<Vec<u8>> = vec![Vec::new(); 32];
+        let mut chans: Vec<Vec<u16>> = vec![Vec::new(); 32];
         for i in 0..3 { chans[i] = vec![2, 3, 4, 5, 6, 7]; }
         let (wl, wr, n) = wet_channel_weights(&chans, 3, 8);
         assert_eq!(actief(&wl, &wr, n), vec![
@@ -1473,7 +1477,7 @@ mod wet_weights_tests {
         // Klassieke multikanaals-opstelling: elk werk zijn eigen paar. Elk paar
         // krijgt 1/3 galm — samen precies één keer, niet drie keer (anders
         // wordt alles fors natter zodra je de werken uit elkaar trekt).
-        let mut chans: Vec<Vec<u8>> = vec![Vec::new(); 32];
+        let mut chans: Vec<Vec<u16>> = vec![Vec::new(); 32];
         chans[0] = vec![0, 1]; chans[1] = vec![2, 3]; chans[2] = vec![4, 5];
         let (wl, wr, n) = wet_channel_weights(&chans, 3, 8);
         let a = actief(&wl, &wr, n);
@@ -1487,7 +1491,7 @@ mod wet_weights_tests {
     fn gedeeld_kanaal_krijgt_galm_niet_dubbel() {
         // Overlappende routings: kanaal 0 wordt door beide divisies gebruikt en
         // krijgt daarom precies hun sommatie (1.0), niet twee volle kopieën.
-        let mut chans: Vec<Vec<u8>> = vec![Vec::new(); 32];
+        let mut chans: Vec<Vec<u16>> = vec![Vec::new(); 32];
         chans[0] = vec![0, 1]; chans[1] = vec![0, 2];
         let (wl, wr, n) = wet_channel_weights(&chans, 2, 8);
         assert_eq!(actief(&wl, &wr, n), vec![(0, 1.0, 0.0), (1, 0.0, 0.5), (2, 0.0, 0.5)]);
@@ -1495,7 +1499,7 @@ mod wet_weights_tests {
 
     #[test]
     fn los_laatste_kanaal_wordt_mono() {
-        let mut chans: Vec<Vec<u8>> = vec![Vec::new(); 32];
+        let mut chans: Vec<Vec<u16>> = vec![Vec::new(); 32];
         chans[0] = vec![4, 5, 6];
         let (wl, wr, n) = wet_channel_weights(&chans, 1, 8);
         assert_eq!(actief(&wl, &wr, n), vec![(4, 1.0, 0.0), (5, 0.0, 1.0), (6, 0.5, 0.5)]);
@@ -1505,7 +1509,7 @@ mod wet_weights_tests {
     fn routing_buiten_apparaat_valt_terug() {
         // 8-kanaals routing op een stereo-apparaat (na profielwissel): terugval
         // op het voorste paar, net als het droge signaal (auditbevinding 37).
-        let mut chans: Vec<Vec<u8>> = vec![Vec::new(); 32];
+        let mut chans: Vec<Vec<u16>> = vec![Vec::new(); 32];
         chans[0] = vec![2, 3, 4, 5];
         let (wl, wr, n) = wet_channel_weights(&chans, 1, 2);
         assert_eq!(actief(&wl, &wr, n), vec![(0, 1.0, 0.0), (1, 0.0, 1.0)]);
@@ -1513,7 +1517,7 @@ mod wet_weights_tests {
 
     #[test]
     fn mono_apparaat_somt_naar_kanaal_nul() {
-        let chans: Vec<Vec<u8>> = vec![Vec::new(); 32];
+        let chans: Vec<Vec<u16>> = vec![Vec::new(); 32];
         let (wl, wr, n) = wet_channel_weights(&chans, 2, 1);
         assert_eq!(actief(&wl, &wr, n), vec![(0, 0.5, 0.5)]);
     }
@@ -2389,6 +2393,10 @@ pub struct AudioOutputConfig {
     pub device_name: Option<String>,
     /// Requested buffer size in frames. None/0 = driver default.
     pub buffer_frames: Option<u32>,
+    /// Gevraagde samplerate in Hz (0.7.48). None/0 = wat het apparaat als
+    /// standaard opgeeft. Alleen gehonoreerd als het apparaat hem aanbiedt;
+    /// anders blijft de standaard staan en komt er een waarschuwing in het log.
+    pub sample_rate: Option<u32>,
 }
 
 /// Drivernamen van de ASIO-host, ZONDER een driver te laden of te initialiseren
@@ -2917,6 +2925,35 @@ fn run_audio_thread(
         return Ok(());
     }
 
+    // Gevraagde samplerate (0.7.48): alleen overnemen als het apparaat hem
+    // écht aanbiedt. cpal meldt per configuratie een min/max-bereik; valt de
+    // gevraagde waarde daarbinnen én klopt het kanaalaantal, dan gebruiken we
+    // hem. Zo is 96 kHz te kiezen op een interface die dat kan, zonder dat een
+    // onmogelijke waarde de stream laat mislukken.
+    let gevraagde_rate = cfg.sample_rate.filter(|&r| r > 0);
+    let supported = match gevraagde_rate {
+        Some(r) if r != supported.sample_rate().0 => {
+            let kanalen = supported.channels();
+            let passend = device.supported_output_configs().ok().and_then(|it| {
+                it.filter(|c| c.channels() == kanalen
+                        && c.min_sample_rate().0 <= r && r <= c.max_sample_rate().0)
+                    .map(|c| c.with_sample_rate(cpal::SampleRate(r)))
+                    .next()
+            });
+            match passend {
+                Some(c) => {
+                    info!("Samplerate {} Hz gevraagd en beschikbaar", r);
+                    c
+                }
+                None => {
+                    warn!("Samplerate {} Hz niet beschikbaar op '{}'; {} Hz blijft staan",
+                          r, device.name().unwrap_or_default(), supported.sample_rate().0);
+                    supported
+                }
+            }
+        }
+        _ => supported,
+    };
     let sample_rate = supported.sample_rate().0;
 
     // Honor a requested fixed buffer size only when the device advertises a range
@@ -2983,7 +3020,7 @@ fn run_audio_thread(
     // Per-division stereo pan: -1.0=left, 0.0=center, 1.0=right
     let division_pans: Arc<RwLock<Vec<f32>>> = Arc::new(RwLock::new(vec![0.0; 32]));
     // Per-division output-kanalen: lijst fysieke kanaalindices (leeg = standaard voorste paar)
-    let division_output_channels: Arc<RwLock<Vec<Vec<u8>>>> = Arc::new(RwLock::new(vec![Vec::new(); 32]));
+    let division_output_channels: Arc<RwLock<Vec<Vec<u16>>>> = Arc::new(RwLock::new(vec![Vec::new(); 32]));
     // C/Cis-lade spreiding: per-divisie aan/uit + globale parameters (sterkte, afval, swap)
     let ccis_enabled: Arc<RwLock<Vec<bool>>> = Arc::new(RwLock::new(vec![false; 32]));
     let ccis_params: Arc<RwLock<(f32, f32, bool)>> = Arc::new(RwLock::new((0.7, 0.6, false)));
@@ -4340,7 +4377,7 @@ fn run_audio_thread(
             // Deze config-locks worden UITSLUITEND geschreven in de command-fase
             // hierboven (zelfde thread, vóór dit punt). Tijdens het renderen is er
             // dus geen enkele schrijver — we houden read-guards vast i.p.v. elke
-            // callback zes Vecs te klonen (incl. de geneste Vec<Vec<u8>> van de
+            // callback zes Vecs te klonen (incl. de geneste Vec<Vec<u16>> van de
             // routing). Dat scheelt zes heap-allocaties per callback; op ASIO4ALL
             // (zeer hoge callback-frequentie) is dat merkbaar minder allocatie-
             // jitter op de audio-thread — precies wat gekraak veroorzaakt.
@@ -5213,4 +5250,42 @@ fn run_audio_thread(
 
     info!("Audio thread stopping");
     Ok(())
+}
+
+#[cfg(test)]
+mod veel_kanalen_tests {
+    use super::{wet_channel_weights, MAX_OUT_CH};
+
+    #[test]
+    fn het_kanaalplafond_is_ruim_genoeg_voor_grote_interfaces() {
+        assert!(MAX_OUT_CH >= 1024, "plafond te laag: {}", MAX_OUT_CH);
+    }
+
+    #[test]
+    fn honderden_kanalen_wegen_zonder_paniek() {
+        // Drie divisies, elk op een eigen paar hoog in een interface met 256
+        // uitgangen. Vóór 0.7.48 viel alles boven kanaal 63 buiten de tabel.
+        // Kanalen ver boven de oude u8-grens van 255, in een interface met 600
+        // uitgangen: pas sinds 0.7.48 kán een divisie die aanwijzen.
+        let chans = vec![vec![500u16, 501], vec![502, 503], vec![504, 505]];
+        let (wl, wr, n) = wet_channel_weights(&chans, 3, 600);
+        assert_eq!(n, 506, "hoogste gebruikte kanaal + 1");
+        for (l, r) in [(500usize, 501usize), (502, 503), (504, 505)] {
+            assert!((wl[l] - 1.0 / 3.0).abs() < 1e-6, "kanaal {} links: {}", l, wl[l]);
+            assert!((wr[r] - 1.0 / 3.0).abs() < 1e-6, "kanaal {} rechts: {}", r, wr[r]);
+        }
+        // Ongebruikte kanalen krijgen niets.
+        assert_eq!(wl[100], 0.0);
+        assert_eq!(wr[255], 0.0);
+        assert_eq!(wl[599], 0.0);
+    }
+
+    #[test]
+    fn kanalen_boven_het_plafond_worden_geklemd() {
+        // Een apparaat dat meer kanalen meldt dan de tabel aankan mag geen
+        // index-paniek geven.
+        let chans = vec![vec![0u16, 1]];
+        let (_, _, n) = wet_channel_weights(&chans, 1, MAX_OUT_CH + 500);
+        assert!(n <= MAX_OUT_CH);
+    }
 }

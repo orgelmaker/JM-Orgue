@@ -156,8 +156,10 @@ pub struct DivisionOutputPairSaved {
     pub division: String,
     #[serde(default)]
     pub pair: u8,
+    /// Uitgangskanalen van deze divisie. u16 sinds 0.7.48: met u8 was kanaal
+    /// 255 het hoogste dat een divisie kon aanwijzen.
     #[serde(default)]
-    pub channels: Option<Vec<u8>>,
+    pub channels: Option<Vec<u16>>,
 }
 
 /// C/Cis-lade spreiding aan/uit per divisie
