@@ -259,6 +259,15 @@ pub enum MidiPresetTrigger {
     ControlChange { channel: Option<u8>, controller: u8, value: u8 },
     /// Program change
     ProgramChange { channel: Option<u8>, program: u8 },
+    /// System Exclusive (0.7.47). Speeltafels die hun registers en pistons via
+    /// SysEx melden (Hauptwerk-protocol, Johannus) kunnen daarmee nu ook
+    /// schakelen. De vergelijking is byte-voor-byte op de inhoud tussen F0 en
+    /// F7; de statusbytes zelf staan er niet in.
+    SysEx { data: Vec<u8> },
+    /// Control change als BITVELD (0.7.47). Sommige speeltafels sturen de stand
+    /// van acht schakelaars in één CC-waarde, elk in een eigen bit. `bit` is
+    /// 0..6 (de waarde is 7 bits); de trigger vuurt op de flank van 0 naar 1.
+    ControlChangeBit { channel: Option<u8>, controller: u8, bit: u8 },
 }
 
 /// Flankdetectie voor pistons die op een ControlChange zijn ingeleerd.
@@ -1829,6 +1838,16 @@ impl AppState {
                                         });
                                         break;
                                     }
+                                    // System Exclusive (0.7.47): speeltafels die hun
+                                    // registers en pistons zo melden zijn nu gewoon
+                                    // in te leren. Een leeg bericht negeren we —
+                                    // dat zijn statusvragen van de driver.
+                                    Ok(MidiMessage::SysEx(data)) => {
+                                        if !data.is_empty() {
+                                            trigger = Some(MidiPresetTrigger::SysEx { data });
+                                            break;
+                                        }
+                                    }
                                     Ok(_) => {}
                                     Err(_) => break,
                                 }
@@ -2911,6 +2930,28 @@ impl AppState {
                  MidiMessage::ProgramChange { channel, program }) => {
                     trigger_ch.map_or(true, |ch| ch == *channel) &&
                     *program == *trigger_prog
+                }
+                // System Exclusive: byte-voor-byte gelijk. Geen flankdetectie
+                // nodig — een speeltafel stuurt zo'n bericht per druk één keer.
+                (MidiPresetTrigger::SysEx { data: trigger_data },
+                 MidiMessage::SysEx(data)) => data == trigger_data,
+                // Control change als bitveld: vuurt op de flank van 0 naar 1 in
+                // dat ene bit. Dezelfde poort als de gewone CC-trigger, met de
+                // bitstand (0/1) als waarde, zodat herhaalde berichten met
+                // hetzelfde bit niet blijven vuren.
+                (MidiPresetTrigger::ControlChangeBit { channel: trigger_ch, controller: trigger_cc, bit },
+                 MidiMessage::ControlChange { channel, controller, value }) => {
+                    if trigger_ch.map_or(true, |ch| ch == *channel) && controller == trigger_cc {
+                        let aan = (*value >> bit.min(&6)) & 1;
+                        cc_gate.vuurt_op_flank(
+                            (binding.preset_num, *trigger_ch, *trigger_cc, 128 + *bit),
+                            1,
+                            aan,
+                            nu_ms,
+                        )
+                    } else {
+                        false
+                    }
                 }
                 _ => false,
             };

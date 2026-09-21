@@ -55,12 +55,43 @@ pub struct PresetData {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PresetBindingSaved {
     pub preset_num: u8,
-    pub trigger_type: String, // "note", "cc", "program"
+    pub trigger_type: String, // "note", "cc", "program", "sysex", "ccbit"
     pub note: Option<u8>,
     pub channel: Option<u8>,
     pub controller: Option<u8>,
     pub value: Option<u8>,
     pub program: Option<u8>,
+    /// System Exclusive-inhoud als hex ("7D 01 04"), leesbaar in het
+    /// instellingenbestand. `default` houdt oudere bestanden leesbaar.
+    #[serde(default)]
+    pub sysex_hex: Option<String>,
+    /// Bitnummer 0..6 binnen een CC-waarde (trigger_type "ccbit").
+    #[serde(default)]
+    pub bit: Option<u8>,
+}
+
+/// SysEx-inhoud → "7D 01 04". Eén plek, zodat opslag en UI dezelfde notatie
+/// gebruiken.
+pub fn sysex_naar_hex(data: &[u8]) -> String {
+    data.iter().map(|b| format!("{:02X}", b)).collect::<Vec<_>>().join(" ")
+}
+
+/// "7D 01 04" / "7d0104" / "F0 7D 01 F7" → bytes. De omhullende F0/F7 worden
+/// weggelaten: de trigger vergelijkt alleen de inhoud.
+pub fn hex_naar_sysex(tekst: &str) -> Result<Vec<u8>, String> {
+    let schoon: String = tekst.chars().filter(|c| c.is_ascii_hexdigit()).collect();
+    if schoon.len() % 2 != 0 {
+        return Err("Oneven aantal hex-tekens".to_string());
+    }
+    let mut bytes = Vec::with_capacity(schoon.len() / 2);
+    for paar in schoon.as_bytes().chunks(2) {
+        let s = std::str::from_utf8(paar).map_err(|e| e.to_string())?;
+        bytes.push(u8::from_str_radix(s, 16).map_err(|e| e.to_string())?);
+    }
+    if bytes.first() == Some(&0xF0) { bytes.remove(0); }
+    if bytes.last() == Some(&0xF7) { bytes.pop(); }
+    if bytes.is_empty() { return Err("Geen SysEx-inhoud opgegeven".to_string()); }
+    Ok(bytes)
 }
 
 /// Saved swell binding
@@ -1002,5 +1033,36 @@ mod library_tests {
         std::fs::write(d.join("console.png"), big).unwrap();
         assert_eq!(find_organ_image(&d.to_string_lossy(), "sample_directory"), None);
         let _ = std::fs::remove_dir_all(&d);
+    }
+}
+
+#[cfg(test)]
+mod sysex_hex_tests {
+    use super::{hex_naar_sysex, sysex_naar_hex};
+
+    #[test]
+    fn heen_en_terug() {
+        assert_eq!(sysex_naar_hex(&[0x7D, 0x01, 0x04]), "7D 01 04");
+        assert_eq!(hex_naar_sysex("7D 01 04").unwrap(), vec![0x7D, 0x01, 0x04]);
+    }
+
+    #[test]
+    fn scheidingstekens_en_kleine_letters_mogen() {
+        assert_eq!(hex_naar_sysex("7d-01:04").unwrap(), vec![0x7D, 0x01, 0x04]);
+        assert_eq!(hex_naar_sysex("7d0104").unwrap(), vec![0x7D, 0x01, 0x04]);
+    }
+
+    #[test]
+    fn omhullende_f0_en_f7_worden_weggelaten() {
+        // De trigger vergelijkt alleen de INHOUD; plakt iemand het hele bericht,
+        // dan moet dat evengoed werken.
+        assert_eq!(hex_naar_sysex("F0 7D 01 04 F7").unwrap(), vec![0x7D, 0x01, 0x04]);
+    }
+
+    #[test]
+    fn onzin_geeft_een_nette_fout() {
+        assert!(hex_naar_sysex("7D 0").is_err());   // oneven
+        assert!(hex_naar_sysex("").is_err());        // leeg
+        assert!(hex_naar_sysex("F0 F7").is_err());   // geen inhoud
     }
 }

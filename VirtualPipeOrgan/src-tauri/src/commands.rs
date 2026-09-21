@@ -1123,6 +1123,13 @@ pub fn get_preset_bindings(state: State<AppState>) -> Vec<PresetBindingDto> {
                 let ch = channel.map_or("Any".to_string(), |c| format!("{}", c + 1));
                 ("program".to_string(), format!("PC{} (ch {})", program, ch))
             }
+            MidiPresetTrigger::SysEx { ref data } => {
+                ("sysex".to_string(), format!("SysEx {}", crate::library::sysex_naar_hex(data)))
+            }
+            MidiPresetTrigger::ControlChangeBit { channel, controller, bit } => {
+                let ch = channel.map_or("Any".to_string(), |c| format!("{}", c + 1));
+                ("ccbit".to_string(), format!("CC{} bit {} (ch {})", controller, bit, ch))
+            }
         };
         PresetBindingDto {
             preset_num: b.preset_num,
@@ -1176,6 +1183,8 @@ fn preset_binding_to_saved(b: &crate::state::MidiPresetBinding) -> PresetBinding
             controller: None,
             value: None,
             program: None,
+            sysex_hex: None,
+            bit: None,
         },
         MidiPresetTrigger::ControlChange { channel, controller, value } => PresetBindingSaved {
             preset_num: b.preset_num,
@@ -1185,6 +1194,8 @@ fn preset_binding_to_saved(b: &crate::state::MidiPresetBinding) -> PresetBinding
             controller: Some(controller),
             value: Some(value),
             program: None,
+            sysex_hex: None,
+            bit: None,
         },
         MidiPresetTrigger::ProgramChange { channel, program } => PresetBindingSaved {
             preset_num: b.preset_num,
@@ -1194,6 +1205,30 @@ fn preset_binding_to_saved(b: &crate::state::MidiPresetBinding) -> PresetBinding
             controller: None,
             value: None,
             program: Some(program),
+            sysex_hex: None,
+            bit: None,
+        },
+        MidiPresetTrigger::SysEx { ref data } => PresetBindingSaved {
+            preset_num: b.preset_num,
+            trigger_type: "sysex".to_string(),
+            note: None,
+            channel: None,
+            controller: None,
+            value: None,
+            program: None,
+            sysex_hex: Some(crate::library::sysex_naar_hex(data)),
+            bit: None,
+        },
+        MidiPresetTrigger::ControlChangeBit { channel, controller, bit } => PresetBindingSaved {
+            preset_num: b.preset_num,
+            trigger_type: "ccbit".to_string(),
+            note: None,
+            channel,
+            controller: Some(controller),
+            value: None,
+            program: None,
+            sysex_hex: None,
+            bit: Some(bit),
         },
     }
 }
@@ -1213,6 +1248,15 @@ fn saved_to_preset_binding(b: &PresetBindingSaved) -> Result<crate::state::MidiP
         "program" => MidiPresetTrigger::ProgramChange {
             channel: b.channel.map(|c| c.min(15)),
             program: b.program.ok_or("Programmanummer ontbreekt")?.min(127),
+        },
+        "sysex" => MidiPresetTrigger::SysEx {
+            data: crate::library::hex_naar_sysex(
+                b.sysex_hex.as_deref().ok_or("SysEx-inhoud ontbreekt")?)?,
+        },
+        "ccbit" => MidiPresetTrigger::ControlChangeBit {
+            channel: b.channel.map(|c| c.min(15)),
+            controller: b.controller.ok_or("CC-nummer ontbreekt")?.min(127),
+            bit: b.bit.unwrap_or(0).min(6),
         },
         other => return Err(format!("Onbekend triggertype '{}'", other)),
     };
@@ -6360,23 +6404,8 @@ fn restore_organ_settings(state: &AppState, organ_id: &str) {
     // Restore preset bindings
     if !settings.preset_bindings.is_empty() {
         let bindings: Vec<MidiPresetBinding> = settings.preset_bindings.iter().filter_map(|b| {
-            let trigger = match b.trigger_type.as_str() {
-                "note" => MidiPresetTrigger::Note { channel: b.channel.map(|c| c.min(15)), note: b.note? },
-                "cc" => MidiPresetTrigger::ControlChange {
-                    channel: b.channel,
-                    controller: b.controller?,
-                    value: b.value.unwrap_or(64),
-                },
-                "program" => MidiPresetTrigger::ProgramChange {
-                    channel: b.channel,
-                    program: b.program?,
-                },
-                _ => return None,
-            };
-            Some(MidiPresetBinding {
-                preset_num: b.preset_num,
-                trigger,
-            })
+            // Eén omzetting voor alle triggersoorten (ook sysex en ccbit).
+            saved_to_preset_binding(b).ok()
         }).collect();
         let count = bindings.len();
         state.set_preset_bindings_replace(bindings);
@@ -6831,6 +6860,8 @@ pub fn do_save_organ_settings(state: &AppState, presets: HashMap<String, PresetD
                 controller: None,
                 value: None,
                 program: None,
+                sysex_hex: None,
+                bit: None,
             },
             MidiPresetTrigger::ControlChange { channel, controller, value } => PresetBindingSaved {
                 preset_num: b.preset_num,
@@ -6840,16 +6871,13 @@ pub fn do_save_organ_settings(state: &AppState, presets: HashMap<String, PresetD
                 controller: Some(controller),
                 value: Some(value),
                 program: None,
+                sysex_hex: None,
+                bit: None,
             },
-            MidiPresetTrigger::ProgramChange { channel, program } => PresetBindingSaved {
+            other => preset_binding_to_saved(&crate::state::MidiPresetBinding {
                 preset_num: b.preset_num,
-                trigger_type: "program".to_string(),
-                note: None,
-                channel,
-                controller: None,
-                value: None,
-                program: Some(program),
-            },
+                trigger: other,
+            }),
         }
     }).collect();
 
@@ -7350,23 +7378,7 @@ pub fn restore_preset_bindings(state: State<AppState>, bindings: Vec<PresetBindi
     use crate::state::{MidiPresetBinding, MidiPresetTrigger};
 
     let midi_bindings: Vec<MidiPresetBinding> = bindings.into_iter().filter_map(|b| {
-        let trigger = match b.trigger_type.as_str() {
-            "note" => MidiPresetTrigger::Note { channel: b.channel.map(|c| c.min(15)), note: b.note? },
-            "cc" => MidiPresetTrigger::ControlChange {
-                channel: b.channel,
-                controller: b.controller?,
-                value: b.value.unwrap_or(64),
-            },
-            "program" => MidiPresetTrigger::ProgramChange {
-                channel: b.channel,
-                program: b.program?,
-            },
-            _ => return None,
-        };
-        Some(MidiPresetBinding {
-            preset_num: b.preset_num,
-            trigger,
-        })
+        saved_to_preset_binding(&b).ok()
     }).collect();
     state.set_preset_bindings_replace(midi_bindings);
 }

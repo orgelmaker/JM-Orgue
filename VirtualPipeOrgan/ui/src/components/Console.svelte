@@ -3585,15 +3585,20 @@
   })();
 
   function bindingNumber(b) {
-    return b.trigger_type === 'note' ? b.note : b.trigger_type === 'cc' ? b.controller : b.program;
+    if (b.trigger_type === 'note') return b.note;
+    if (b.trigger_type === 'cc' || b.trigger_type === 'ccbit') return b.controller;
+    if (b.trigger_type === 'sysex') return 0;
+    return b.program;
   }
 
-  function buildSavedBinding(presetNum, type, channelDisplay, number, value) {
+  function buildSavedBinding(presetNum, type, channelDisplay, number, value, sysexHex) {
     const ch = (channelDisplay === '' || channelDisplay == null) ? null : Math.max(1, Math.min(16, channelDisplay | 0)) - 1;
     const num = Math.max(0, Math.min(127, number | 0));
-    const b = { preset_num: presetNum, trigger_type: type, note: null, channel: null, controller: null, value: null, program: null };
+    const b = { preset_num: presetNum, trigger_type: type, note: null, channel: null, controller: null, value: null, program: null, sysex_hex: null, bit: null };
     if (type === 'note') b.note = num;
     else if (type === 'cc') { b.channel = ch; b.controller = num; b.value = Math.max(0, Math.min(127, value | 0)); }
+    else if (type === 'ccbit') { b.channel = ch; b.controller = num; b.bit = Math.max(0, Math.min(6, value | 0)); }
+    else if (type === 'sysex') { b.sysex_hex = sysexHex ?? ''; }
     else { b.channel = ch; b.program = num; }
     return b;
   }
@@ -3602,8 +3607,11 @@
     const type = patch.type ?? row.trigger_type;
     const chDisp = patch.channel !== undefined ? patch.channel : (row.channel != null ? row.channel + 1 : '');
     const num = patch.number !== undefined ? patch.number : (bindingNumber(row) ?? 0);
-    const val = patch.value !== undefined ? patch.value : (row.value ?? 64);
-    const binding = buildSavedBinding(row.preset_num, type, chDisp, num, val);
+    // Bij een bitveld staat het bitnummer in dezelfde kolom als de CC-drempel.
+    const val = patch.value !== undefined ? patch.value
+      : (type === 'ccbit' ? (row.bit ?? 0) : (row.value ?? 64));
+    const hex = patch.sysexHex !== undefined ? patch.sysexHex : (row.sysex_hex ?? '');
+    const binding = buildSavedBinding(row.preset_num, type, chDisp, num, val, hex);
     try {
       applyBindingsFull(await invoke('update_preset_binding', { presetNum: row.preset_num, index: row.idx, binding }));
     } catch (e) {
@@ -5563,6 +5571,8 @@
                             <option value="note">{$t('bindings.type_note')}</option>
                             <option value="cc">CC</option>
                             <option value="program">{$t('bindings.type_program')}</option>
+                            <option value="ccbit">{$t('bindings.type_ccbit')}</option>
+                            <option value="sysex">{$t('bindings.type_sysex')}</option>
                           </select>
                         </td>
                         <td>
@@ -5581,13 +5591,22 @@
                           {/if}
                         </td>
                         <td style="white-space: nowrap;">
-                          <input type="number" min="0" max="127" class="pedal-range-input"
-                            value={bindingNumber(row) ?? 0}
-                            on:change={(e) => updateBindingRow(row, { number: parseInt(e.target.value) || 0 })}
-                            title={row.trigger_type === 'note' ? $t('bindings.note_number') : row.trigger_type === 'cc' ? $t('bindings.cc_number') : $t('bindings.program_number')}
-                          />
-                          {#if row.trigger_type === 'note'}
-                            <span style="font-size: 0.65rem; color: var(--text-muted);">{midiToNoteName(bindingNumber(row) ?? 0)}</span>
+                          {#if row.trigger_type === 'sysex'}
+                            <input type="text" class="pedal-range-input" style="width: 9rem;"
+                              value={row.sysex_hex ?? ''}
+                              placeholder="7D 01 04"
+                              on:change={(e) => updateBindingRow(row, { sysexHex: e.target.value })}
+                              title={$t('bindings.sysex_title')}
+                            />
+                          {:else}
+                            <input type="number" min="0" max="127" class="pedal-range-input"
+                              value={bindingNumber(row) ?? 0}
+                              on:change={(e) => updateBindingRow(row, { number: parseInt(e.target.value) || 0 })}
+                              title={row.trigger_type === 'note' ? $t('bindings.note_number') : (row.trigger_type === 'cc' || row.trigger_type === 'ccbit') ? $t('bindings.cc_number') : $t('bindings.program_number')}
+                            />
+                            {#if row.trigger_type === 'note'}
+                              <span style="font-size: 0.65rem; color: var(--text-muted);">{midiToNoteName(bindingNumber(row) ?? 0)}</span>
+                            {/if}
                           {/if}
                         </td>
                         <td>
@@ -5596,6 +5615,12 @@
                               value={row.value ?? 64}
                               on:change={(e) => updateBindingRow(row, { value: parseInt(e.target.value) || 0 })}
                               title={$t('bindings.threshold_title')}
+                            />
+                          {:else if row.trigger_type === 'ccbit'}
+                            <input type="number" min="0" max="6" class="pedal-range-input"
+                              value={row.bit ?? 0}
+                              on:change={(e) => updateBindingRow(row, { value: parseInt(e.target.value) || 0 })}
+                              title={$t('bindings.bit_title')}
                             />
                           {:else}
                             <span style="color: var(--text-muted);">—</span>

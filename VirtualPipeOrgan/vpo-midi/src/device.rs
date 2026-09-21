@@ -85,8 +85,13 @@ impl MidiInputManager {
         let tx = self.message_tx.clone();
         
         // We need a new MidiInput for each connection
-        let midi_in = MidiInput::new("VPO MIDI Input")
+        let mut midi_in = MidiInput::new("VPO MIDI Input")
             .map_err(|e| MidiError::OpenError(e.to_string()))?;
+        // Niets wegfilteren: speeltafels die hun registers via System Exclusive
+        // melden (Hauptwerk-protocol, Johannus) moeten die berichten ook als
+        // schakelaar kunnen gebruiken (0.7.47). Standaard laat de driver sysex
+        // en timing weg.
+        midi_in.ignore(midir::Ignore::None);
         
         let connection = midi_in.connect(
             &port,
