@@ -22,7 +22,7 @@ Virtual Pipe Organ t/m 3.1.0 (build 1647).
 | Convolutiegalm | ❌ | ✅ | ✅ inclusief eigen IR-bestand |
 | Intonatie per pijp | ❌ | ✅ | ✅ volume en stemming per pijp |
 | Meerdere schermen | ❌ | ✅ | ✅ losse registerschermen op elk scherm |
-| Windmodel | ❌ | ✅ | ✅ per windgroep instelbaar |
+| Windmodel | ❌ | ✅ | ✅ levende wind (0.7.51): verbruik per pijp, verschil per familie, lade-stoot; per windgroep instelbaar |
 | Pistonbalken | 1 per scherm | 4 per scherm | setzerbalk + koppelbalk, vrij in te leren |
 
 Op de tabel van Hauptwerk na één regel dus: wat in hun **Advanced** zit en bij

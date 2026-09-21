@@ -276,15 +276,44 @@ pub struct DivisionTremulantSaved {
     pub pitch_depth: f32,
 }
 
-/// Per-wind-groep model-config: aan/uit + reservoir/demping/max-sag.
+/// Per-wind-groep model-config: aan/uit + balggrootte/demping/maximale
+/// daling, en sinds 0.7.51 het karakter met de diepten van de levende wind.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WindGroupConfigSaved {
     pub group: u8,
     pub enabled: bool,
     pub reservoir_size: f32,
     pub damping: f32,
+    /// Maximale winddaling in PROCENT (zoals de schuif in het scherm).
     pub max_sag: f32,
+    /// Karakter: 0 = neutraal (magazijnbalg, ventilator), 1 = Hollands
+    /// (spaanbalgen, lange kanalen), 2 = eigen. Bestanden van vóór 0.7.51
+    /// hebben dit veld niet en laden als Hollands: daar vroeg de gebruiker om.
+    #[serde(default = "wind_karakter_standaard")]
+    pub karakter: u8,
+    /// Windstoot bij inzet en loslaten (0-2). Alleen bij karakter 'eigen'.
+    #[serde(default = "wind_stoot_standaard")]
+    pub stoot: f32,
+    /// Kanaal: kort en wijd (0) tot lang en smal (1).
+    #[serde(default = "wind_kanaal_standaard")]
+    pub kanaal: f32,
+    /// Doffer worden bij inzakking (0-1).
+    #[serde(default = "wind_doffer_standaard")]
+    pub doffer: f32,
+    /// Verschil per pijp (0-1): 0 = alle pijpen zakken gelijk.
+    #[serde(default = "wind_verschil_standaard")]
+    pub verschil: f32,
+    /// Tongwerken blijven in toonhoogte staan.
+    #[serde(default = "wind_tongwerk_standaard")]
+    pub tongwerk_apart: bool,
 }
+
+fn wind_karakter_standaard() -> u8 { 1 }
+fn wind_stoot_standaard() -> f32 { 1.2 }
+fn wind_kanaal_standaard() -> f32 { 0.8 }
+fn wind_doffer_standaard() -> f32 { 0.7 }
+fn wind_verschil_standaard() -> f32 { 1.0 }
+fn wind_tongwerk_standaard() -> bool { true }
 
 /// Microfoonperspectief (gestapelde ranks/perspectieven, 0.7.38): per label
 /// of het geladen wordt (RAM; vraagt herladen) en het live volume in dB.

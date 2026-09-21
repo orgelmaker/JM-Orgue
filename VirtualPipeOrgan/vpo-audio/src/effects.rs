@@ -242,12 +242,61 @@ impl Tremulant {
     }
 }
 
-/// Hoeveel cent de toonhoogte daalt per eenheid winddruk. Een winddaling van
-/// 10 % geeft dus 12 cent lager - hoorbaar, maar nog muzikaal. De vorige waarde
-/// (30) gaf 3 cent bij dezelfde instelling, en dat merkte niemand.
-pub const WIND_CENTS_PER_EENHEID: f32 = 120.0;
+/// Hoeveel cent de toonhoogte van de REFERENTIEPIJP (een 8'-prestant rond
+/// c') daalt per eenheid winddruk. 0.7.50 had 120; sinds 0.7.51 is het 80,
+/// omdat het levende karakter nu uit de VERSCHILLEN tussen pijpen komt
+/// (fluiten en kleine pijpen zakken meer, tongwerken niet) en niet uit de
+/// diepte. Hauptwerk zit op 50-85 cent per eenheid, gemeten labialen op
+/// 0,8-1,8 cent per procent druk (Logos-datasheet).
+pub const WIND_CENTS_PER_EENHEID: f32 = 80.0;
 
-/// Windmodel: de balg van een windgroep.
+/// Toonhoogtefactor per eenheid drukafwijking, eerste orde: 2^(cent/1200)
+/// ≈ 1 + cent·ln2/1200. Bij 12 cent is de fout 2,4e-5 — onhoorbaar, en het
+/// scheelt een powf per stem per frame.
+pub const WIND_RATE_PER_EENHEID: f32 = WIND_CENTS_PER_EENHEID * 0.000_577_622_65;
+
+/// Alle instellingen van één windgroep, zoals de audiothread ze krijgt.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct WindInstelling {
+    pub enabled: bool,
+    /// Balggrootte (0,1-2,0): traagheid van de balg én hoeveel vol werk hij aankan.
+    pub reservoir_size: f32,
+    /// Demping (0-1): 0 = de balg schommelt na, 1 = kritisch gedempt.
+    pub damping: f32,
+    /// Maximale winddaling als fractie (0-0,30): schaal van alle diepten.
+    pub max_sag: f32,
+    /// Windstoot bij inzet en loslaten van pijpen (0-2; 1 = gekalibreerd op
+    /// een dip van ~3 % voor één 16'-C).
+    pub stoot: f32,
+    /// Kanaal (0-1): kort en wijd → lang en smal (de snelle lade-mode).
+    pub kanaal: f32,
+    /// Doffer worden bij inzakking (0-1).
+    pub doffer: f32,
+    /// Verschil per pijp (0-1): 0 = alle pijpen zakken gelijk (0.7.50),
+    /// 1 = elke familie en grootte op haar eigen manier.
+    pub verschil: f32,
+    /// Tongwerken blijven in toonhoogte staan en zakken alleen in kracht.
+    pub tongwerk_apart: bool,
+}
+
+impl Default for WindInstelling {
+    /// Het Hollandse karakter, model uit.
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            reservoir_size: 0.5,
+            damping: 0.5,
+            max_sag: 0.05,
+            stoot: 1.2,
+            kanaal: 0.8,
+            doffer: 0.7,
+            verschil: 1.0,
+            tongwerk_apart: true,
+        }
+    }
+}
+
+/// Windmodel: de balg van een windgroep — de TRAGE laag van het windwerk.
 ///
 /// Een echt orgel heeft een eindige windvoorziening. Wie een vol werk
 /// opentrekt en een akkoord neerzet, hoort de winddruk even inzakken: de
@@ -255,11 +304,14 @@ pub const WIND_CENTS_PER_EENHEID: f32 = 120.0;
 /// Dat is wat organisten "het orgel ademt" noemen.
 ///
 /// Het model is een balg met massa (het gewicht erop) aan een veer (de lucht
-/// eronder), aangedreven door het verbruik van de klinkende pijpen. Tweede
-/// orde dus - een eerste-orde filter kan niet naveren, en juist dat naveren is
-/// het kenmerkende geluid. (Tot 0.7.49 stond hier wel zo'n eerste-orde filter,
-/// terwijl de dempingsregelaar beloofde het naschommelen te regelen: die
-/// regelaar deed dus nooit waar hij voor stond.)
+/// eronder), aangedreven door het GEWOGEN verbruik van de klinkende pijpen
+/// (een 16'-C trekt ruim honderd keer zoveel wind als een 2'-pijpje; zie
+/// [`verbruik_van_pijp`]). De statische inzakking groeit kwadratisch met het
+/// verbruik en verzadigt daarna — zoals drukverlies in kanalen en
+/// ventielkast (ΔP ∝ Q²): één register doet niets, het pleno ademt.
+///
+/// De snelle laag (kanaal en lade, 10-15 Hz) zit in [`WindLade`], per
+/// divisie; die krijgt de stoten bij inzet en loslaten.
 pub struct WindModel {
     pub enabled: bool,
     /// Huidige winddruk. 1.0 = volle druk, lager = ingezakt.
@@ -279,17 +331,19 @@ pub struct WindModel {
     dt: f32,
     /// Trage ruis voor de turbulentie in het kanaal.
     flutter: OnePoleFilter,
-    /// Aantal klinkende stemmen op deze windgroep.
-    voice_count: u32,
+    /// Gewogen windverbruik op deze balg (8'-C-eenheden) en de referentie
+    /// waarbij de statische inzakking de helft van `max_sag` is.
+    verbruik: f32,
+    q_ref: f32,
     /// Ruisgenerator.
     noise_state: u32,
 }
 
-/// Welk deel van de actuele winddaling als turbulentie meetrilt. Bij de
-/// standaardinstelling (10 % daling) is dat plus/min 1,8 cent rond de
-/// ingezakte toonhoogte: genoeg om te leven, te weinig om zeeziek van te
-/// worden.
-const FLUTTER_DEEL: f32 = 0.15;
+/// Welk deel van de actuele winddaling als turbulentie meetrilt. Klein: de
+/// samples bevatten het eigen wiebelen van elke pijp al, en een
+/// gemeenschappelijke wiebel voor de hele balg klinkt als een tremulant.
+/// (0.7.50 had 0,15.)
+const FLUTTER_DEEL: f32 = 0.04;
 
 impl WindModel {
     pub fn new(sample_rate: SampleRate) -> Self {
@@ -299,15 +353,16 @@ impl WindModel {
             velocity: 0.0,
             reservoir_size: 0.5,
             damping: 0.5,
-            max_sag: 0.10,
+            max_sag: 0.05,
             omega: 0.0,
             zeta: 0.0,
             dt: 1.0 / sample_rate as f32,
             flutter: OnePoleFilter::new(2.5, sample_rate),
-            voice_count: 0,
+            verbruik: 0.0,
+            q_ref: 1.0,
             noise_state: 12345,
         };
-        m.configure(0.5, 0.5, 0.10, sample_rate);
+        m.configure(0.5, 0.5, 0.05, sample_rate);
         m
     }
 
@@ -317,8 +372,8 @@ impl WindModel {
         self.max_sag = max_sag.clamp(0.0, 0.30);
         self.dt = 1.0 / sample_rate as f32;
         // Een groot magazijn is zwaar en traag, een klein magazijn nerveus.
-        // Bij de standaardstand (50 %) komt daar 6 Hz uit - de orde van
-        // grootte van een echte balg.
+        // Bij de standaardstand (50 %) komt daar 6 Hz uit, bij 100 % 3 Hz —
+        // de orde van grootte van een echte balg (patent Allen: 2-5 Hz).
         let f0 = (3.0 / self.reservoir_size).clamp(0.5, 12.0);
         self.omega = 2.0 * PI * f0;
         // 0 -> zeta 0.12 (duidelijk naveren), 1 -> zeta 1.0 (kritisch gedempt:
@@ -327,12 +382,33 @@ impl WindModel {
         self.flutter.set_cutoff(2.5, sample_rate);
     }
 
-    pub fn set_voice_count(&mut self, count: u32) { self.voice_count = count; }
+    /// Gewogen verbruik op deze balg en de referentie ("vol werk") waarbij
+    /// de inzakking de helft van het maximum is. De referentie komt van het
+    /// orgel zelf (het pleno van de groep) maal de balggrootte, zodat een
+    /// kistorgel en een domorgel bij hún pleno even ver zakken.
+    pub fn set_verbruik(&mut self, verbruik: f32, q_ref: f32) {
+        self.verbruik = verbruik.max(0.0);
+        self.q_ref = q_ref.max(1e-3);
+    }
+
+    /// Statische inzakking bij het huidige verbruik (fractie), voor de meter
+    /// en de tests.
+    pub fn sag(&self) -> f32 {
+        let q = self.verbruik / self.q_ref;
+        let q2 = q * q;
+        self.max_sag * q2 / (1.0 + q2)
+    }
 
     /// Winddruk van dit moment, voor de meter in het scherm. Staat het model
     /// uit, dan is dat per definitie de volle druk.
     pub fn druk(&self) -> f32 {
         if self.enabled { self.pressure } else { 1.0 }
+    }
+
+    /// Moet dit model per sample gestapt worden? Aan, of uit maar nog niet
+    /// tot rust (dan loopt de balg nog netjes vol).
+    pub fn actief(&self) -> bool {
+        self.enabled || (self.pressure - 1.0).abs() > 1e-6 || self.velocity.abs() > 1e-6
     }
 
     fn noise(&mut self) -> f32 {
@@ -363,29 +439,273 @@ impl WindModel {
         if !self.enabled {
             // Uitzetten terwijl de wind ingezakt is mag geen toonhoogtesprong
             // geven: de balg loopt netjes vol en pas daarna is het model stil.
-            if (self.pressure - 1.0).abs() < 1e-5 && self.velocity.abs() < 1e-5 {
+            if (self.pressure - 1.0).abs() < 5e-5 && self.velocity.abs() < 1e-2 {
                 self.pressure = 1.0;
                 self.velocity = 0.0;
                 return 1.0;
             }
             return self.stap(1.0);
         }
-        // Meer stemmen = meer windverbruik = meer inzakking, maar GELEIDELIJK:
-        // de oude lineaire formule (voice_count / reservoir x 0.02) zat met het
-        // standaard-magazijn al bij ~3 stemmen op de maximale inzakking - het
-        // windmodel werkte dan als botte volumedemper zodra er meer
-        // geregistreerd werd, in plaats van als adem. Nu verzadigt de
-        // inzakking vloeiend: bij de knie (~30 x magazijn stemmen) is de helft
-        // van max_sag bereikt; een vol werk nadert max_sag asymptotisch.
-        let v = self.voice_count as f32;
-        let knee = 30.0 * self.reservoir_size.max(0.1);
-        let sag = self.max_sag * (v / (v + knee));
+        let sag = self.sag();
         // Turbulentie in het kanaal: schaalt mee met de inzakking, dus alleen
         // te horen zolang er echt wind getrokken wordt.
         let ruis = self.noise();
         let flutter = (self.flutter.process(ruis) * 50.0).clamp(-1.0, 1.0) * sag * FLUTTER_DEEL;
         self.stap(1.0 - sag + flutter)
     }
+}
+
+/// Laagste en hoogste druk die de lade kan aannemen (fractie van de rustdruk).
+/// Samen met de balg: nooit dieper dan een gezond orgel doet.
+pub const LADE_ONDERGRENS: f32 = 0.92;
+pub const LADE_BOVENGRENS: f32 = 1.04;
+
+/// Snelheidsimpuls per eenheid verbruik bij stoot 100 %. Gekalibreerd zodat
+/// één 16'-C (verbruik 4,0) op een lang, smal kanaal (kanaal 0,8: 13,8 Hz,
+/// zeta 0,31) een dip van ~3 % geeft; een 2'-pijpje (0,03) doet niets.
+const LADE_STOOT_K: f32 = 0.0105;
+
+/// De lade van één divisie: de SNELLE laag van het windwerk (ventielkast en
+/// kanaal, 9-15 Hz). Statisch doet hij niets — de statische inzakking zit in
+/// de balg — maar bij elke inzet of loslaat van een pijp krijgt hij een
+/// stoot: kort, gebonden aan een echte gebeurtenis, nooit periodiek. Dat is
+/// de "schrik" van een liggend discantakkoord als het pedaal inzet, en de
+/// opstoot als het weer loslaat (Fisk: "negative pulse … positive pulse").
+pub struct WindLade {
+    pub enabled: bool,
+    p: f32,
+    v: f32,
+    omega: f32,
+    zeta: f32,
+    dt: f32,
+}
+
+impl WindLade {
+    pub fn new(sample_rate: SampleRate) -> Self {
+        let mut l = Self { enabled: false, p: 1.0, v: 0.0, omega: 0.0, zeta: 0.5, dt: 1.0 / sample_rate as f32 };
+        l.configure(0.5, sample_rate);
+        l
+    }
+
+    /// `kanaal` 0..1: kort en wijd (9 Hz, zeta 0,55: één zucht) → lang en
+    /// smal (15 Hz, zeta 0,25: twee, drie naveerslagen — Schnitger).
+    pub fn configure(&mut self, kanaal: f32, sample_rate: SampleRate) {
+        let k = kanaal.clamp(0.0, 1.0);
+        let f0 = 9.0 + 6.0 * k;
+        self.omega = 2.0 * PI * f0;
+        self.zeta = 0.55 - 0.30 * k;
+        self.dt = 1.0 / sample_rate as f32;
+    }
+
+    /// Stoot op de lade: positief `dq` = er komt verbruik bij (dip), negatief
+    /// = er valt verbruik weg (opstoot). De impuls grijpt op de snelheid aan,
+    /// niet op de druk — de druk zelf blijft continu, dus klikvrij.
+    pub fn stoot(&mut self, dq: f32, sterkte: f32) {
+        if !self.enabled { return; }
+        self.v -= dq * sterkte * LADE_STOOT_K * self.omega;
+    }
+
+    /// Druk voor deze sample, altijd richting de rustdruk 1,0.
+    pub fn process(&mut self) -> f32 {
+        // Tot rust: dan exact 1,0. De drempel is ruim, want vlak bij 1,0 is
+        // een f32-stap 6e-8 en blijft een uitgedempte beweging anders op
+        // 1 - 1e-4 hangen (v*dt valt onder de resolutie).
+        if (self.p - 1.0).abs() < 1e-4 && self.v.abs() < 2e-2 {
+            self.p = 1.0;
+            self.v = 0.0;
+            return 1.0;
+        }
+        let a = self.omega * self.omega * (1.0 - self.p) - 2.0 * self.zeta * self.omega * self.v;
+        self.v += a * self.dt;
+        self.p += self.v * self.dt;
+        if self.p < LADE_ONDERGRENS {
+            self.p = LADE_ONDERGRENS;
+            self.v = 0.0;
+        } else if self.p > LADE_BOVENGRENS {
+            self.p = LADE_BOVENGRENS;
+            self.v = 0.0;
+        }
+        self.p
+    }
+
+    pub fn druk(&self) -> f32 { self.p }
+}
+
+// ─── Pijpprofielen: wat elke pijp van de wind trekt en hoe hij erop reageert ───
+
+/// Familie van een register, afgeleid uit de naam. Bepaalt windverbruik
+/// (mensuur) en gevoeligheid voor de druk (fluiten veel, strijkers weinig,
+/// tongwerken in toonhoogte niet).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum PijpFamilie {
+    Principaal = 0,
+    Fluit = 1,
+    Gedekt = 2,
+    Strijker = 3,
+    Mixtuur = 4,
+    Tongwerk = 5,
+}
+
+impl PijpFamilie {
+    pub fn van_u8(v: u8) -> Self {
+        match v {
+            1 => Self::Fluit, 2 => Self::Gedekt, 3 => Self::Strijker,
+            4 => Self::Mixtuur, 5 => Self::Tongwerk, _ => Self::Principaal,
+        }
+    }
+}
+
+/// Windprofiel van een register: familie en voetmaat. Per pijp volgen
+/// verbruik en gevoeligheid uit [`pijp_constanten`].
+#[derive(Clone, Copy, Debug)]
+pub struct StopWindProfiel {
+    pub familie: PijpFamilie,
+    /// Voetmaat: 8 = 8', 16 = 16', 2.667 = 2 2/3'.
+    pub voet: f32,
+}
+
+fn bevat(naam: &str, woorden: &[&str]) -> bool {
+    woorden.iter().any(|w| naam.contains(w))
+}
+
+/// Familie uit de registernaam (Nederlands, Duits, Frans, Engels, Pools).
+/// `tongwerk` komt van de bestaande tongwerkdetectie (is_reed); de lijst hier
+/// vult die alleen aan. Volgorde: tongwerk → mixtuur → gedekt → fluit →
+/// strijker → principaal (de terugval, want die is het veiligste midden).
+pub fn familie_van_naam(naam: &str, tongwerk: bool) -> PijpFamilie {
+    let n = naam.to_lowercase();
+    if tongwerk || bevat(&n, &["regaal", "regal", "vox humana", "kromhoorn", "krumhorn", "cromorne",
+        "trompet", "trumpet", "trompette", "hobo", "oboe", "hautbois", "fagot", "basson", "bassoon",
+        "dulciaan", "dulzian", "dulcian", "bazuin", "posaune", "bombard", "clairon", "clarion",
+        "schalmei", "chalumeau", "trombone", "tuba", "klarinet", "clarinet", "sordun", "ranket",
+        "rankett", "musette", "puzon", "tr\u{0105}ba", "tr\u{0105}bka", "obój"]) {
+        return PijpFamilie::Tongwerk;
+    }
+    if bevat(&n, &["mixtuur", "mixture", "mixtur", "scherp", "scharf", "cimbel", "cymbel", "cymbal",
+        "zimbel", "sesquialter", "cornet", "terzian", "tertiaan", "ruispijp", "rauschpfeife",
+        "rauschquint", "fourniture", "plein jeu", "plein-jeu", "pleinjeu", "acuta", "sharp", "mikstura"]) {
+        return PijpFamilie::Mixtuur;
+    }
+    if bevat(&n, &["gedekt", "gedackt", "gedact", "gedeckt", "bourdon", "bordun", "bordone", "holpijp",
+        "holpyp", "quintadeen", "quintadena", "quintaton", "quintatön", "subbas", "subbass", "soubasse",
+        "sousbasse", "stopped", "lieblich", "nachthoorn", "nachthorn", "roerfluit", "rohrfl",
+        "chimney", "cheminée", "koppelfluit", "kryty", "pokryty"]) {
+        return PijpFamilie::Gedekt;
+    }
+    if bevat(&n, &["fluit", "flöte", "floete", "flute", "flauto", "flûte", "flet", "spitzfl", "waldfl",
+        "blockfl", "traverso", "piccolo", "octavin", "hohlfl"]) {
+        return PijpFamilie::Fluit;
+    }
+    if bevat(&n, &["viola", "viool", "gamba", "gambe", "salicionaal", "salicional", "salicet", "celeste",
+        "céleste", "unda maris", "vox angelica", "aeoline", "dolce", "dulciana", "fugara", "voix",
+        "violon", "cello", "erzähler", "gemshoorn", "gemshorn"]) {
+        return PijpFamilie::Strijker;
+    }
+    PijpFamilie::Principaal
+}
+
+/// Voetmaat uit de toonhoogtetekst van een register: "16'" → 16, "2 2/3'" →
+/// 2,667, "1 3/5'" → 1,6. Onbekend → 8'.
+pub fn voet_uit_pitch(pitch: &str) -> f32 {
+    let t = pitch.trim().trim_end_matches('\'').trim_end_matches('’').trim();
+    let mut delen = t.split_whitespace();
+    let geheel: f32 = match delen.next().and_then(|d| d.replace(',', ".").parse::<f32>().ok()) {
+        Some(v) => v,
+        None => return 8.0,
+    };
+    let breuk = delen.next().and_then(|b| {
+        let mut tn = b.split('/');
+        let teller: f32 = tn.next()?.parse().ok()?;
+        let noemer: f32 = tn.next()?.parse().ok()?;
+        if noemer > 0.0 { Some(teller / noemer) } else { None }
+    }).unwrap_or(0.0);
+    (geheel + breuk).clamp(0.25, 64.0)
+}
+
+/// Frequentie van de pijp op deze toets: 8' c' = 261,6 Hz.
+pub fn pijpfrequentie(voet: f32, midi_note: u8) -> f32 {
+    440.0 * 2f32.powf((midi_note as f32 - 69.0) / 12.0) * (8.0 / voet.max(0.25))
+}
+
+/// Windverbruik van één pijp in 8'-C-eenheden (een 8'-prestant op C = 1,0).
+///
+/// Uit de Hauptwerk-orgeldefinities (verbruik per pijp, kg/s) volgt: binnen
+/// een register ×2,83 per octaaf omlaag (∝ f^-1,5), tussen registers ×4 per
+/// octaaf voetmaat (de extra √(voet/8)), met een vloer voor de kleinste
+/// pijpen. Een 16'-C komt op 4,0, een 4'-C op 0,25, een 2'-c''' op de vloer
+/// 0,03: verhouding ~130, zoals in de Hauptwerk-data (129).
+pub fn verbruik_van_pijp(p: &StopWindProfiel, midi_note: u8) -> f32 {
+    let f = pijpfrequentie(p.voet, midi_note);
+    let freq_term = (65.406 / f).powf(1.5).clamp(0.005, 8.0);
+    let voet_term = (p.voet / 8.0).max(0.03).sqrt();
+    let fam = match p.familie {
+        PijpFamilie::Principaal => 1.0,
+        PijpFamilie::Fluit => 1.2,     // wijde mensuur: meer wind
+        PijpFamilie::Gedekt => 0.7,    // gedekt: kleinere pijp, minder wind
+        PijpFamilie::Strijker => 0.6,  // eng: het minst
+        PijpFamilie::Mixtuur => 1.5,   // meestal meer pijpen in één sample
+        PijpFamilie::Tongwerk => 0.8,
+    };
+    (freq_term * voet_term).max(0.03) * fam
+}
+
+/// De per-stem windconstanten, één keer bij het starten van de stem bepaald.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct PijpWind {
+    /// Windverbruik (8'-C-eenheden).
+    pub verbruik: f32,
+    /// Toonhoogte: rate = 1 + kp · drukafwijking.
+    pub kp: f32,
+    /// Sterkte: gain = 1 + kg · drukafwijking.
+    pub kg: f32,
+    /// Traagheid van de pijp zelf: één-pole-coëfficiënt per sample waarmee
+    /// de stem de drukafwijking volgt (τ ≈ 8 perioden: een 2'-pijp volgt een
+    /// snelle dip volledig, een 16'-C nauwelijks — bas is oorzaak, discant
+    /// slachtoffer).
+    pub dev_alpha: f32,
+}
+
+/// Deterministische spreiding per pijp (−1..1): elke pijp reageert nét
+/// anders, en bij elke aanslag hetzelfde.
+fn pijp_spreiding(stop_id: u32, pipe_num: u32) -> f32 {
+    let h = stop_id.wrapping_mul(2_654_435_761) ^ pipe_num.wrapping_mul(40_503).rotate_left(13);
+    (h % 2001) as f32 / 1000.0 - 1.0
+}
+
+/// Constanten van één pijp. `verschil` (0-1) mengt tussen "alle pijpen
+/// gelijk" (0, het gedrag van 0.7.50) en de volle differentiatie (1).
+pub fn pijp_constanten(
+    p: &StopWindProfiel, midi_note: u8, stop_id: u32, pipe_num: u32,
+    sample_rate: SampleRate, verschil: f32, tongwerk_apart: bool,
+) -> PijpWind {
+    let f = pijpfrequentie(p.voet, midi_note);
+    let v = verschil.clamp(0.0, 1.0);
+    let tongwerk = tongwerk_apart && p.familie == PijpFamilie::Tongwerk;
+    // Toonhoogte t.o.v. de referentie (8'-prestant c' = 1,0). Gemeten: wijde
+    // mensuur en kleine pijpen verstemmen het meest (Holpijp 8' c''' 1,84
+    // cent/%, Fluit 4' c'' 0,80); strijkers eng dus weinig; tongwerken
+    // bepaalt de tong, die blijft staan.
+    let fam_p = match p.familie {
+        PijpFamilie::Principaal => 1.0,
+        PijpFamilie::Fluit => 1.4,
+        PijpFamilie::Gedekt => 1.3,
+        PijpFamilie::Strijker => 0.6,
+        PijpFamilie::Mixtuur => 1.2,
+        PijpFamilie::Tongwerk => if tongwerk { 0.0 } else { 1.0 },
+    };
+    let oct = (f / 65.406).max(1e-3).log2();
+    let grootte = 0.75 + 0.625 * (oct / 5.0).clamp(0.0, 1.0); // 8' C 0,75; c' 1,0; c''' 1,25
+    let spreiding = 1.0 + 0.2 * pijp_spreiding(stop_id, pipe_num);
+    let sens_raw = fam_p * grootte * spreiding;
+    let sens = 1.0 + v * (sens_raw - 1.0);
+    // Sterkte: labialen ≈ druk² (−0,9 dB bij −5 %), tongwerken zakken vooral
+    // in kracht (1,8×).
+    let kg_raw = if tongwerk { 3.6 } else { 2.0 };
+    let kg = 2.0 + v * (kg_raw - 2.0);
+    // Traagheid van de pijp als resonator: τ = 8 perioden.
+    let dev_alpha = (1.0 - (-f / (8.0 * sample_rate as f32)).exp()).clamp(1e-5, 0.2);
+    PijpWind { verbruik: verbruik_van_pijp(p, midi_note), kp: sens * WIND_RATE_PER_EENHEID, kg, dev_alpha }
 }
 
 /// Simple one-pole low-pass filter
@@ -750,10 +1070,18 @@ mod windmodel_tests {
         (laagste, laatste)
     }
 
+    /// Een balg in het Hollandse karakter met "vol werk" = q_ref 10.
+    fn balg(demping: f32, max_sag: f32) -> WindModel {
+        let mut m = WindModel::new(SR);
+        m.enabled = true;
+        m.configure(0.5, demping, max_sag, SR);
+        m
+    }
+
     #[test]
     fn uitgeschakeld_blijft_de_druk_vol() {
         let mut m = WindModel::new(SR);
-        m.set_voice_count(500);
+        m.set_verbruik(50.0, 10.0);
         let (laagste, laatste) = draai(&mut m, 500);
         assert_eq!(laagste, 1.0);
         assert_eq!(laatste, 1.0);
@@ -761,65 +1089,57 @@ mod windmodel_tests {
     }
 
     #[test]
-    fn zonder_stemmen_zakt_er_niets_in() {
-        let mut m = WindModel::new(SR);
-        m.enabled = true;
-        m.configure(0.5, 0.5, 0.10, SR);
+    fn zonder_verbruik_zakt_er_niets_in() {
+        let mut m = balg(0.5, 0.05);
+        m.set_verbruik(0.0, 10.0);
         let (laagste, _) = draai(&mut m, 500);
         assert!(laagste > 0.9999, "stille windlade zakte toch in: {}", laagste);
     }
 
+    /// Eén register doet niets, het pleno ademt: de inzakking groeit
+    /// kwadratisch met het verbruik en is bij "vol werk" (q = 1) de helft
+    /// van het maximum.
+    #[test]
+    fn de_inzakking_is_kwadratisch_en_verzadigt() {
+        let mut m = balg(1.0, 0.04);
+        let sag_bij = |m: &mut WindModel, q: f32| { m.set_verbruik(q, 10.0); m.sag() };
+        let s1 = sag_bij(&mut m, 1.0);   // één Holpijp-akkoord
+        let s2 = sag_bij(&mut m, 2.0);
+        let s10 = sag_bij(&mut m, 10.0); // vol werk
+        let s30 = sag_bij(&mut m, 30.0); // tutti met pedaal
+        assert!(s1 < 0.0005, "één register mag niet ademen: {}", s1);
+        assert!((s2 / s1 - 4.0).abs() < 0.2, "niet kwadratisch bij klein verbruik: {}", s2 / s1);
+        assert!((s10 - 0.02).abs() < 0.001, "vol werk hoort de helft van het maximum te zijn: {}", s10);
+        assert!(s30 > 0.035 && s30 < 0.04, "tutti nadert het maximum: {}", s30);
+    }
+
     /// De kern van de klacht "ik merk er niets van": een vol werk moet een
-    /// hoorbare inzakking geven. Hoorbaar = minstens een paar cent.
+    /// hoorbare inzakking geven — voor de referentiepijp een paar cent, en
+    /// de fluiten en mixturen zakken daar nog anderhalf keer zo ver.
     #[test]
     fn een_vol_werk_geeft_een_hoorbare_inzakking() {
-        let mut m = WindModel::new(SR);
-        m.enabled = true;
-        m.configure(0.5, 0.7, 0.10, SR);
-        m.set_voice_count(200);
+        let mut m = balg(0.7, 0.05);
+        m.set_verbruik(10.0, 10.0);
         let (_, druk) = draai(&mut m, 1500);
         let cents = (1.0 - druk) * WIND_CENTS_PER_EENHEID;
-        assert!(cents > 5.0, "te weinig effect om te horen: {:.1} cent", cents);
-        assert!(cents < 20.0, "veel te veel bij de standaardinstelling: {:.1} cent", cents);
+        assert!(cents > 1.5, "te weinig om te horen: {:.1} cent", cents);
+        assert!(cents < 4.0, "te veel voor een gezond orgel: {:.1} cent", cents);
     }
 
-    /// Meer stemmen = meer inzakking, en die verzadigt (geen botte
-    /// volumedemper die al bij drie stemmen op zijn eind zit).
-    #[test]
-    fn de_inzakking_groeit_met_de_stemmen_en_verzadigt() {
-        let meting = |stemmen: u32| {
-            let mut m = WindModel::new(SR);
-            m.enabled = true;
-            m.configure(0.5, 1.0, 0.10, SR);
-            m.set_voice_count(stemmen);
-            draai(&mut m, 2000).1
-        };
-        let (d3, d30, d300) = (meting(3), meting(30), meting(300));
-        assert!(d3 > d30 && d30 > d300, "niet monotoon: {} {} {}", d3, d30, d300);
-        assert!(1.0 - d3 < 0.35 * (1.0 - d30),
-                "drie stemmen zakken al te ver in: {:.4} tegen {:.4}", 1.0 - d3, 1.0 - d30);
-        assert!(d300 > 0.895, "voorbij de ingestelde maximale daling: {}", d300);
-    }
-
-    /// De dempingsregelaar beloofde het naschommelen te regelen maar zat op een
-    /// eerste-orde filter, dat niet kan naveren. Nu wel: laag gedempt schiet de
-    /// balg door, kritisch gedempt niet.
+    /// De dempingsregelaar bepaalt het naveren: laag gedempt schiet de balg
+    /// door, kritisch gedempt niet.
     #[test]
     fn de_demping_bepaalt_het_naveren() {
         let overschot = |demping: f32| {
-            let mut m = WindModel::new(SR);
-            m.enabled = true;
-            m.configure(0.5, demping, 0.10, SR);
-            m.set_voice_count(200);
-            let doel = draai(&mut m, 3000).1;
-            // Alle toetsen los: de balg loopt terug naar vol.
-            m.set_voice_count(0);
+            let mut m = balg(demping, 0.05);
+            m.set_verbruik(30.0, 10.0);
+            draai(&mut m, 3000);
+            m.set_verbruik(0.0, 10.0);
             let mut hoogste: f32 = 0.0;
             for _ in 0..(SR * 2) {
                 let d = m.process();
                 if d > hoogste { hoogste = d; }
             }
-            let _ = doel;
             hoogste
         };
         let los = overschot(0.05);
@@ -828,34 +1148,224 @@ mod windmodel_tests {
         assert!(strak <= 1.0005, "kritisch gedempt hoort niet door te schieten, was {}", strak);
     }
 
-    /// Het model mag nooit buiten zijn perken lopen, ook niet bij de meest
-    /// extreme instelling.
     #[test]
     fn de_druk_blijft_binnen_de_perken() {
         let mut m = WindModel::new(SR);
         m.enabled = true;
         m.configure(0.1, 0.0, 0.30, SR);
         for stap in 0..60 {
-            m.set_voice_count(if stap % 2 == 0 { 800 } else { 0 });
+            m.set_verbruik(if stap % 2 == 0 { 800.0 } else { 0.0 }, 10.0);
             let (laagste, _) = draai(&mut m, 40);
             assert!(laagste >= 1.0 - 0.30 * 1.6 - 1e-6 && laagste <= 1.031,
                     "druk liep uit de rails: {}", laagste);
         }
     }
 
-    /// Uitzetten terwijl de wind ingezakt is mag geen toonhoogtesprong geven.
     #[test]
     fn uitzetten_loopt_netjes_vol() {
-        let mut m = WindModel::new(SR);
-        m.enabled = true;
-        m.configure(0.5, 0.8, 0.10, SR);
-        m.set_voice_count(300);
+        let mut m = balg(0.8, 0.10);
+        m.set_verbruik(30.0, 10.0);
         let ingezakt = draai(&mut m, 2000).1;
-        assert!(ingezakt < 0.97, "niet ingezakt, test zegt niets: {}", ingezakt);
+        assert!(ingezakt < 0.93, "niet ingezakt, test zegt niets: {}", ingezakt);
         m.enabled = false;
         let direct = m.process();
         assert!((direct - ingezakt).abs() < 0.001, "sprong bij het uitzetten: {} -> {}", ingezakt, direct);
         let (_, na) = draai(&mut m, 2000);
         assert!((na - 1.0).abs() < 1e-4, "kwam niet op volle druk: {}", na);
+    }
+}
+
+#[cfg(test)]
+mod windlade_tests {
+    use super::*;
+
+    const SR: SampleRate = 48000;
+
+    fn lade(kanaal: f32) -> WindLade {
+        let mut l = WindLade::new(SR);
+        l.enabled = true;
+        l.configure(kanaal, SR);
+        l
+    }
+
+    /// (laagste druk, hoogste druk, tijd tot laagste in ms) over `ms`.
+    fn volg(l: &mut WindLade, ms: u32) -> (f32, f32, f32) {
+        let n = (SR as f32 * ms as f32 / 1000.0) as u32;
+        let (mut lo, mut hi, mut t_lo) = (f32::MAX, f32::MIN, 0.0);
+        for i in 0..n {
+            let p = l.process();
+            if p < lo { lo = p; t_lo = i as f32 * 1000.0 / SR as f32; }
+            if p > hi { hi = p; }
+        }
+        (lo, hi, t_lo)
+    }
+
+    /// De kalibratie: één 16'-C onder een liggend akkoord geeft op een
+    /// Hollandse lade een dip van ~3 %, binnen enkele tientallen ms, en
+    /// binnen 300 ms is de lade weer tot rust.
+    #[test]
+    fn een_zestienvoets_c_laat_de_lade_drie_procent_schrikken() {
+        let mut l = lade(0.8);
+        l.stoot(4.0, 1.0);
+        let (lo, _, t_lo) = volg(&mut l, 300);
+        let dip = 1.0 - lo;
+        assert!(dip > 0.024 && dip < 0.036, "dip {:.4} buiten de kalibratie", dip);
+        assert!(t_lo > 5.0 && t_lo < 40.0, "dip kwam op {:.1} ms", t_lo);
+        assert!((l.druk() - 1.0).abs() < 0.003, "na 300 ms nog niet tot rust: {}", l.druk());
+    }
+
+    /// Een 2'-pijpje doet niets merkbaars.
+    #[test]
+    fn een_klein_pijpje_doet_niets() {
+        let mut l = lade(0.8);
+        l.stoot(0.03, 1.0);
+        let (lo, _, _) = volg(&mut l, 200);
+        assert!(1.0 - lo < 0.0005, "een 2'-pijpje liet de lade schrikken: {}", 1.0 - lo);
+    }
+
+    /// Loslaten geeft een opstoot: de druk schiet kort boven de rustdruk.
+    #[test]
+    fn loslaten_geeft_een_opstoot() {
+        let mut l = lade(0.8);
+        l.stoot(-4.0 * 0.4, 1.0);
+        let (lo, hi, _) = volg(&mut l, 300);
+        assert!(hi > 1.008 && hi < 1.02, "opstoot {:.4}", hi);
+        assert!(lo > 0.995, "een opstoot mag niet eerst dippen: {}", lo);
+    }
+
+    /// Lang kanaal veert na, kort kanaal niet.
+    #[test]
+    fn het_kanaal_bepaalt_het_naveren() {
+        let nulldoorgangen = |kanaal: f32| {
+            let mut l = lade(kanaal);
+            l.stoot(4.0, 1.0);
+            let mut vorige = 1.0f32;
+            let mut n = 0;
+            for _ in 0..(SR / 2) {
+                let p = l.process();
+                if (p - 1.0) * (vorige - 1.0) < 0.0 { n += 1; }
+                vorige = p;
+            }
+            n
+        };
+        let (lang, kort) = (nulldoorgangen(1.0), nulldoorgangen(0.0));
+        assert!(lang >= 3, "lang kanaal hoort na te veren: {} kruisingen", lang);
+        assert!(kort <= 2 && kort < lang, "kort kanaal hoort nauwelijks na te veren: {} tegen {}", kort, lang);
+    }
+
+    /// Ook bij de wildste stapeling blijft de lade binnen de perken en komt
+    /// hij tot rust.
+    #[test]
+    fn de_lade_blijft_binnen_de_perken() {
+        let mut l = lade(1.0);
+        for i in 0..40 {
+            l.stoot(if i % 2 == 0 { 40.0 } else { -40.0 }, 2.0);
+            let (lo, hi, _) = volg(&mut l, 20);
+            assert!(lo >= LADE_ONDERGRENS - 1e-6 && hi <= LADE_BOVENGRENS + 1e-6, "{} {}", lo, hi);
+        }
+        volg(&mut l, 1000);
+        assert!((l.druk() - 1.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn uitgeschakeld_reageert_de_lade_niet() {
+        let mut l = WindLade::new(SR);
+        l.stoot(40.0, 2.0);
+        let (lo, hi, _) = volg(&mut l, 100);
+        assert_eq!(lo, 1.0);
+        assert_eq!(hi, 1.0);
+    }
+}
+
+#[cfg(test)]
+mod pijpprofiel_tests {
+    use super::*;
+
+    const SR: SampleRate = 48000;
+
+    fn prof(familie: PijpFamilie, voet: f32) -> StopWindProfiel {
+        StopWindProfiel { familie, voet }
+    }
+
+    #[test]
+    fn familie_uit_de_naam() {
+        use PijpFamilie::*;
+        assert_eq!(familie_van_naam("Trompet 8'", true), Tongwerk);
+        assert_eq!(familie_van_naam("Vox humana 8'", false), Tongwerk);
+        assert_eq!(familie_van_naam("Holpijp 8'", false), Gedekt);
+        assert_eq!(familie_van_naam("Roerfluit 4'", false), Gedekt);
+        assert_eq!(familie_van_naam("Bourdon 16'", false), Gedekt);
+        assert_eq!(familie_van_naam("Fluit 4'", false), Fluit);
+        assert_eq!(familie_van_naam("Hohlflöte 8'", false), Fluit);
+        assert_eq!(familie_van_naam("Viola di Gamba 8'", false), Strijker);
+        assert_eq!(familie_van_naam("Mixtuur IV", false), Mixtuur);
+        assert_eq!(familie_van_naam("Sesquialter II", false), Mixtuur);
+        assert_eq!(familie_van_naam("Prestant 8'", false), Principaal);
+        assert_eq!(familie_van_naam("Octaaf 4'", false), Principaal);
+        assert_eq!(familie_van_naam("Quint 2 2/3'", false), Principaal);
+    }
+
+    #[test]
+    fn voetmaat_uit_de_tekst() {
+        assert_eq!(voet_uit_pitch("16'"), 16.0);
+        assert_eq!(voet_uit_pitch("8'"), 8.0);
+        assert!((voet_uit_pitch("2 2/3'") - 2.6667).abs() < 1e-3);
+        assert!((voet_uit_pitch("1 3/5'") - 1.6).abs() < 1e-3);
+        assert_eq!(voet_uit_pitch(""), 8.0);
+        assert_eq!(voet_uit_pitch("IV"), 8.0);
+    }
+
+    /// De Hauptwerk-verhoudingen: 16' C = 4× 8' C, 4' C = ¼, en een 16'-C
+    /// trekt ruim honderd keer een 2'-c'''.
+    #[test]
+    fn verbruik_volgt_de_hauptwerk_verhoudingen() {
+        let c8 = verbruik_van_pijp(&prof(PijpFamilie::Principaal, 8.0), 36);
+        let c16 = verbruik_van_pijp(&prof(PijpFamilie::Principaal, 16.0), 36);
+        let c4 = verbruik_van_pijp(&prof(PijpFamilie::Principaal, 4.0), 36);
+        let c2_hoog = verbruik_van_pijp(&prof(PijpFamilie::Principaal, 2.0), 84);
+        assert!((c8 - 1.0).abs() < 0.01, "8' C hoort 1,0 te zijn: {}", c8);
+        assert!((c16 / c8 - 4.0).abs() < 0.3, "16' C / 8' C = {}", c16 / c8);
+        assert!((c4 / c8 - 0.25).abs() < 0.03, "4' C / 8' C = {}", c4 / c8);
+        let ratio = c16 / c2_hoog;
+        assert!(ratio > 60.0 && ratio < 250.0, "16' C / 2' c''' = {}", ratio);
+        // Binnen één register: ×2,83 per octaaf.
+        let c = verbruik_van_pijp(&prof(PijpFamilie::Principaal, 8.0), 48);
+        assert!((c8 / c - 2.83).abs() < 0.1, "per octaaf {}", c8 / c);
+    }
+
+    #[test]
+    fn gevoeligheid_verschilt_per_familie_en_grootte() {
+        let k = |fam, voet, noot| pijp_constanten(&prof(fam, voet), noot, 1, noot as u32, SR, 1.0, true);
+        let prestant_c1 = k(PijpFamilie::Principaal, 8.0, 60);
+        let fluit_c3 = k(PijpFamilie::Fluit, 8.0, 84);
+        let strijker = k(PijpFamilie::Strijker, 8.0, 60);
+        let trompet = k(PijpFamilie::Tongwerk, 8.0, 60);
+        let bas16 = k(PijpFamilie::Principaal, 16.0, 36);
+        // Referentie rond 1,0 (spreiding ±20 %).
+        assert!((prestant_c1.kp / WIND_RATE_PER_EENHEID - 1.0).abs() < 0.25, "{}", prestant_c1.kp / WIND_RATE_PER_EENHEID);
+        assert!(fluit_c3.kp > 1.3 * prestant_c1.kp, "fluit c''' hoort duidelijk gevoeliger");
+        assert!(strijker.kp < 0.8 * prestant_c1.kp, "strijker hoort minder gevoelig");
+        assert_eq!(trompet.kp, 0.0, "tongwerk blijft in toonhoogte staan");
+        assert!(trompet.kg > 3.0, "tongwerk zakt in kracht");
+        assert!(bas16.kp < prestant_c1.kp, "een grote pijp verstemt minder dan een kleine");
+        // Traagheid: de bas volgt traag, het discant snel.
+        assert!(bas16.dev_alpha < 2e-4, "16' C hoort traag te volgen: {}", bas16.dev_alpha);
+        assert!(fluit_c3.dev_alpha > 2e-3, "c''' hoort snel te volgen: {}", fluit_c3.dev_alpha);
+    }
+
+    #[test]
+    fn zonder_verschil_is_alles_gelijk_en_de_spreiding_is_deterministisch() {
+        let p = prof(PijpFamilie::Fluit, 4.0);
+        let a = pijp_constanten(&p, 84, 3, 7, SR, 0.0, true);
+        let b = pijp_constanten(&prof(PijpFamilie::Tongwerk, 8.0), 40, 9, 2, SR, 0.0, true);
+        assert_eq!(a.kp, WIND_RATE_PER_EENHEID);
+        assert_eq!(b.kp, WIND_RATE_PER_EENHEID);
+        assert_eq!(a.kg, 2.0);
+        let x = pijp_constanten(&p, 84, 3, 7, SR, 1.0, true);
+        let y = pijp_constanten(&p, 84, 3, 7, SR, 1.0, true);
+        let z = pijp_constanten(&p, 84, 3, 8, SR, 1.0, true);
+        assert_eq!(x, y, "dezelfde pijp hoort altijd dezelfde constanten te krijgen");
+        assert_ne!(x.kp, z.kp, "twee pijpen horen nét te verschillen");
+        assert!((x.kp / z.kp - 1.0).abs() < 0.5);
     }
 }

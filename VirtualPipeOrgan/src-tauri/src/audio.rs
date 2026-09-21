@@ -15,7 +15,8 @@ use crossbeam_channel::{Sender, Receiver, bounded};
 use tracing::{info, error, warn};
 
 use vpo_sampler::{LoadedOrgan, SampleRef, SampleData, load_audio, resample, PreloadBuffer};
-use vpo_audio::{ConvolutionReverb, OnePoleFilter, WindModel, Tremulant, FdnReverb, ChannelEq, EqBandSpec, MasterLimiter};
+use vpo_audio::{ConvolutionReverb, OnePoleFilter, WindModel, WindLade, WindInstelling, StopWindProfiel, PijpWind,
+    pijp_constanten, LADE_ONDERGRENS, LADE_BOVENGRENS, Tremulant, FdnReverb, ChannelEq, EqBandSpec, MasterLimiter};
 
 /// Preload buffer size in samples (~2s at 48kHz)
 /// Longer buffer = smoother loop while full sample loads in background
@@ -154,11 +155,15 @@ pub fn polyphony_target() -> usize {
 pub(crate) struct MengBlok<'a> {
     /// Aantal frames in dit blok.
     pub bn: usize,
-    /// Per frame, per divisie: de wind- en tremulantmodulatie uit pas 1.
-    pub wind_rate: &'a [[f64; 32]],
+    /// Per frame, per divisie: de drukafwijking van de wind (p - 1) uit
+    /// pas 1, en de tremulantmodulatie.
+    pub wind_dev: &'a [[f32; 32]],
     pub trem_rate: &'a [[f64; 32]],
-    pub wind_gain: &'a [[f32; 32]],
     pub trem_amp: &'a [[f32; 32]],
+    /// Zoveel frames na het starten volgt een release-staart de wind niet
+    /// meer: de crossfade met de speelnoot is dan voorbij en wat overblijft
+    /// is opgenomen galm, die niet met latere druk meebuigt.
+    pub wind_fade_frames: f32,
     /// Constant-power pan per divisie, één keer per callback voorgerekend.
     pub pan_cos: &'a [f32; 32],
     pub pan_sin: &'a [f32; 32],
@@ -198,6 +203,21 @@ pub(crate) fn meng_stemmen_blok(
         let pitch_mul = voice.c_pitch_mul;
         let use_lfo = voice.c_use_lfo_trem;
         let vgain = voice.c_voicing_gain;
+        // Wind per stem (0.7.51): de stem volgt de drukafwijking van zijn
+        // divisie met zijn eigen traagheid en reageert met zijn eigen
+        // gevoeligheid (fluit veel, prestant minder, tongwerk alleen in
+        // kracht). Een release-staart doet dat alleen tijdens de crossfade
+        // met de speelnoot; daarna is het opgenomen galm en die buigt niet.
+        let fade = if voice.one_shot {
+            (1.0 - voice.age_samples as f32 / blok.wind_fade_frames.max(1.0)).clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
+        let kp = voice.c_kp * fade;
+        let kg = voice.c_kg * fade;
+        let dev_a = voice.c_dev_a;
+        let mut dev_cur = voice.c_dev_cur;
+        let wind_aan = in_range && (kp != 0.0 || kg != 0.0);
         // Panning: per stem één keer per blok. Standaard de per-callback
         // voorgerekende constant-power cos/sin van de divisie; met C/Cis-
         // lade-spreiding wijkt de pan per noot af (even MIDI-noten naar
@@ -224,8 +244,17 @@ pub(crate) fn meng_stemmen_blok(
         };
         for f in 0..bn {
             let mut eff_rate = base_rate * pitch_mul;
+            let mut g = vgain;
             if in_range {
-                eff_rate *= blok.wind_rate[f][div_idx];
+                if wind_aan {
+                    // De pijp als resonator: één one-pole per stem volgt
+                    // de druk met tau ~ 8 perioden (bas traag, discant
+                    // snel). Toonhoogte en sterkte eerste-orde in de
+                    // afwijking: twee FMA's, geen powf per stem per frame.
+                    dev_cur += dev_a * (blok.wind_dev[f][div_idx] - dev_cur);
+                    eff_rate *= (1.0 + kp * dev_cur) as f64;
+                    g *= (1.0 + kg * dev_cur).max(0.25);
+                }
                 if use_lfo {
                     eff_rate *= blok.trem_rate[f][div_idx];
                 }
@@ -234,13 +263,9 @@ pub(crate) fn meng_stemmen_blok(
             let (sl, sr) = voice.next_sample();
             voice.rate = base_rate;
 
-            // Volume = gecachte voicing-gain × per-sample wind/trem-amplitude.
-            let mut g = vgain;
-            if in_range {
-                g *= blok.wind_gain[f][div_idx];
-                if use_lfo {
-                    g *= blok.trem_amp[f][div_idx];
-                }
+            // Volume = gecachte voicing-gain × wind × per-sample trem-amplitude.
+            if in_range && use_lfo {
+                g *= blok.trem_amp[f][div_idx];
             }
             // Mono: sl == sr → exact het oude pad. Stereo: L en R
             // gescheiden, met dezelfde pan-gewichten (pan werkt dan als
@@ -251,6 +276,7 @@ pub(crate) fn meng_stemmen_blok(
             doel_l[f][div_idx] += contribution_l * pan_cos;
             doel_r[f][div_idx] += contribution_r * pan_sin;
         }
+        voice.c_dev_cur = dev_cur;
     }
 }
 
@@ -490,6 +516,40 @@ static WIND_DRUK_PM: [std::sync::atomic::AtomicU32; 32] = {
     [NUL; 32]
 };
 
+/// Ladedruk per divisie (tienduizendsten), de vastgehouden dip ervan (een
+/// schrik van 50-150 ms valt anders tussen twee schermverversingen) en het
+/// gewogen verbruik per groep (honderdsten van een 8'-C-eenheid).
+static WIND_LADE_PM: [std::sync::atomic::AtomicU32; 32] = {
+    #[allow(clippy::declare_interior_mutable_const)]
+    const NUL: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(10_000);
+    [NUL; 32]
+};
+static WIND_DIP_PM: [std::sync::atomic::AtomicU32; 32] = {
+    #[allow(clippy::declare_interior_mutable_const)]
+    const NUL: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(10_000);
+    [NUL; 32]
+};
+static WIND_Q_PM: [std::sync::atomic::AtomicU32; 32] = {
+    #[allow(clippy::declare_interior_mutable_const)]
+    const NUL: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    [NUL; 32]
+};
+
+/// Ladedruk per divisie als fractie (1.0 = rustdruk).
+pub fn wind_laden() -> Vec<f32> {
+    (0..32).map(|i| WIND_LADE_PM[i].load(Ordering::Relaxed) as f32 / 10_000.0).collect()
+}
+
+/// Vastgehouden laagste ladedruk per divisie (fractie).
+pub fn wind_dips() -> Vec<f32> {
+    (0..32).map(|i| WIND_DIP_PM[i].load(Ordering::Relaxed) as f32 / 10_000.0).collect()
+}
+
+/// Gewogen windverbruik per groep in 8'-C-eenheden.
+pub fn wind_verbruik() -> Vec<f32> {
+    (0..32).map(|i| WIND_Q_PM[i].load(Ordering::Relaxed) as f32 / 100.0).collect()
+}
+
 /// Klinkende pijpen per windgroep (dezelfde telling die de inzakking bepaalt).
 /// Naast de drukmeter maakt dit in het scherm zichtbaar wáárom de wind zakt.
 static WIND_STEMMEN: [std::sync::atomic::AtomicU32; 32] = {
@@ -604,13 +664,16 @@ pub enum AudioCommand {
     SetSwellConfig { division_index: u8, min_db: f32, filter_cutoff_closed: f32 },
     /// Configure wind model per **groep** (was per division — wind groep met identity-default
     /// is backward compatible: divisie i → groep i)
-    SetWindModel { division_index: u8, enabled: bool, reservoir_size: f32, damping: f32, max_sag: f32 },
+    SetWindModel { division_index: u8, instelling: WindInstelling },
     /// Wijs een divisie aan een wind-groep toe (0..31). Default identity: divisie i → groep i.
     SetDivisionWindGroup { division_index: u8, group: u8 },
     /// Configure tremulant LFO per division (fallback when no trem samples exist)
     SetTremulantLFO { division_index: u8, active: bool, rate: f32, amp_depth: f32, pitch_depth: f32 },
     /// Register stop_id → division_index mapping (set when organ loads)
     RegisterStopDivisionMap(HashMap<u32, u8>),
+    /// Windprofiel per stop (familie, voetmaat) plus per divisie het
+    /// verbruik van haar pleno, de referentie voor "vol werk" (0.7.51).
+    RegisterStopWindProfiles(Arc<HashMap<u32, StopWindProfiel>>, [f32; 32]),
     /// Set temperament: 12 cent offsets [C,C#,D,...,B] + global fine-tuning in cents.
     /// `retune` = hertemperen per pijp vanaf de gemeten toonhoogte (de
     /// RegisterOdfRetune-tabel vervangt dan de ODF-PitchTuning); false =
@@ -719,6 +782,16 @@ pub(crate) struct PlayingVoice {
     c_pitch_mul: f64,
     /// Of de LFO-tremulant op deze voice moet werken (stops zonder trem-samples).
     c_use_lfo_trem: bool,
+    /// Windconstanten van deze pijp (0.7.51), bij het starten bepaald uit
+    /// het stopprofiel: verbruik (8'-C-eenheden; 0 voor release-staarten),
+    /// toonhoogte- en sterktegevoeligheid, en de traagheid waarmee de pijp
+    /// de drukafwijking volgt. Plus de gevolgde afwijking zelf: slew-staat
+    /// die ín de stem hoort (elke stem is eigendom van één werker-stuk).
+    c_wind_flow: f32,
+    c_kp: f32,
+    c_kg: f32,
+    c_dev_a: f32,
+    c_dev_cur: f32,
     /// Aantal actieve triggers voor deze pijp (directe route + koppels).
     /// Eén luchtkolom per pijp: een NoteOn op een reeds klinkende pijp bumpt
     /// deze teller i.p.v. een tweede voice te spawnen; NoteOff decrementeert
@@ -773,6 +846,11 @@ impl PlayingVoice {
             c_voicing_gain: 1.0,
             c_pitch_mul: 1.0,
             c_use_lfo_trem: true,
+            c_wind_flow: 0.0,
+            c_kp: 0.0,
+            c_kg: 0.0,
+            c_dev_a: 0.0,
+            c_dev_cur: 0.0,
             note_on_count: 1,
             persp_slot: 0,
             pending_decay_frames: None,
@@ -806,6 +884,11 @@ impl PlayingVoice {
             c_voicing_gain: 1.0,
             c_pitch_mul: 1.0,
             c_use_lfo_trem: true,
+            c_wind_flow: 0.0,
+            c_kp: 0.0,
+            c_kg: 0.0,
+            c_dev_a: 0.0,
+            c_dev_cur: 0.0,
             note_on_count: 1,
             persp_slot: 0,
             pending_decay_frames: None,
@@ -877,6 +960,11 @@ impl PlayingVoice {
             c_voicing_gain: 1.0,
             c_pitch_mul: 1.0,
             c_use_lfo_trem: true,
+            c_wind_flow: 0.0,
+            c_kp: 0.0,
+            c_kg: 0.0,
+            c_dev_a: 0.0,
+            c_dev_cur: 0.0,
             note_on_count: 1,
             persp_slot: 0,
             pending_decay_frames: None,
@@ -984,6 +1072,31 @@ impl PlayingVoice {
     /// kapte `i >= len - 1` de klank hard af op een willekeurige golfwaarde —
     /// een hoorbare TIK bij élk loslaten (gebruikersmelding testorgel; hier
     /// gemeten bij 4 van de 5 loslatingen).
+    /// Windconstanten uit het pijpprofiel zetten bij het starten van een
+    /// speelstem. Een onhoorbaar perspectief (op -120 dB) trekt geen wind.
+    fn zet_wind(&mut self, pw: &PijpWind, div: usize, hoorbaar: bool) {
+        self.c_wind_flow = if hoorbaar { pw.verbruik } else { 0.0 };
+        self.c_kp = pw.kp;
+        self.c_kg = pw.kg;
+        self.c_dev_a = pw.dev_alpha;
+        self.c_dev_cur = 0.0;
+        self.c_div = div;
+    }
+
+    /// Windconstanten overerven van de stem waaruit deze voortkomt (release-
+    /// staart of streaming-crossfade). Een staart trekt geen wind meer: het
+    /// ventiel is dicht. Hij volgt de druk nog wél tijdens de crossfade met
+    /// de speelnoot (anders een toonhoogtesprong) en daarna niet meer — zie
+    /// `wind_fade_frames` in de mengloop.
+    fn erf_wind(&mut self, van: &PlayingVoice, staart: bool) {
+        self.c_wind_flow = if staart { 0.0 } else { van.c_wind_flow };
+        self.c_kp = van.c_kp;
+        self.c_kg = van.c_kg;
+        self.c_dev_a = van.c_dev_a;
+        self.c_dev_cur = van.c_dev_cur;
+        self.c_div = van.c_div;
+    }
+
     fn release_ms(&mut self, ms: f32, sample_rate: u32) {
         self.releasing = true;
         self.target_envelope = 0.0;
@@ -3567,6 +3680,21 @@ fn run_audio_thread(
     let mut swell_vol = [1.0f32; 32];
     let mut swell_bypass = [true; 32];
     let mut swell_dirty = [false; 32];
+    // Wind per divisie (0.7.51), alleen op de render-thread: de snelle lade,
+    // de instelling per groep, de stoten die de commando's van deze callback
+    // verzamelen, het stopprofiel en het pleno per divisie, het dofferfilter
+    // en de meterstaat. Het balgmodel per groep staat in `wind_models`.
+    let mut laden: Vec<WindLade> = (0..32).map(|_| WindLade::new(sample_rate)).collect();
+    let mut wind_instel: [WindInstelling; 32] = [WindInstelling::default(); 32];
+    let mut stoot_acc = [0.0f32; 32];
+    let mut wind_profielen: Arc<HashMap<u32, StopWindProfiel>> = Arc::new(HashMap::new());
+    let mut wind_pleno = [0.0f32; 32];
+    let mut wind_flt: Vec<(OnePoleFilter, OnePoleFilter)> = (0..32)
+        .map(|_| (OnePoleFilter::new(1500.0, sample_rate), OnePoleFilter::new(1500.0, sample_rate)))
+        .collect();
+    let mut wind_tilt = [0.0f32; 32];
+    let mut lade_hold = [1.0f32; 32];
+    let mut lade_hold_t = [0u32; 32];
 
     let sample_format = supported.sample_format();
     // Blokbuffers voor de stem-major mengloop (zie render): per frame in het
@@ -3582,8 +3710,7 @@ fn run_audio_thread(
         (1..MAX_MENG_STUKKEN).map(|_| vec![[0.0f32; 32]; MIX_BLOCK]).collect();
     let mut blk_part_r: Vec<Vec<[f32; 32]>> =
         (1..MAX_MENG_STUKKEN).map(|_| vec![[0.0f32; 32]; MIX_BLOCK]).collect();
-    let mut blk_wind_rate: Vec<[f64; 32]> = vec![[1.0; 32]; MIX_BLOCK];
-    let mut blk_wind_gain: Vec<[f32; 32]> = vec![[1.0; 32]; MIX_BLOCK];
+    let mut blk_wind_dev: Vec<[f32; 32]> = vec![[0.0; 32]; MIX_BLOCK];
     let mut blk_trem_rate: Vec<[f64; 32]> = vec![[1.0; 32]; MIX_BLOCK];
     let mut blk_trem_amp: Vec<[f32; 32]> = vec![[1.0; 32]; MIX_BLOCK];
     let mut overload_callbacks: u64 = 0;
@@ -3728,6 +3855,21 @@ fn run_audio_thread(
                         // Tremulantstand van dit register: één lookup per
                         // NoteOn (gold voorheen pas ná de refcount-check).
                         let trem_on = trem_active_clone.read().contains(&stop_id);
+                        // Windprofiel van deze pijp (0.7.51): één lookup per
+                        // NoteOn; de constanten gaan in de stem. Perspectieven
+                        // van dezelfde pijp delen het verbruik (front/rear/dry
+                        // is één pijp), onhoorbare perspectieven tellen niet.
+                        let wind_div = stop_to_division_clone.read().get(&stop_id).copied().unwrap_or(0) as usize;
+                        let wind_grp = wind_groups_clone.read().get(wind_div).copied().unwrap_or(wind_div as u8) as usize;
+                        let wi = wind_instel[wind_grp.min(31)];
+                        let n_hoorbaar = layout.iter()
+                            .filter(|&&(_, s)| persp_gain[(s as usize) & (MAX_LAYERS - 1)] > 0.01)
+                            .count().max(1) as f32;
+                        let mut pw = wind_profielen.get(&stop_id)
+                            .map(|p| pijp_constanten(p, midi_note, stop_id, pipe_num, sample_rate, wi.verschil, wi.tongwerk_apart))
+                            .unwrap_or_default();
+                        pw.verbruik /= n_hoorbaar;
+                        let mut stoot_nieuw = 0.0f32;
                         for &(layer, slot) in layout {
                         // Staat de tremulant aan én bestaat er een trem-opname
                         // voor deze pijp, dan is de TREM-sleutel de speelsleutel:
@@ -3779,6 +3921,9 @@ fn run_audio_thread(
                             let mut voice = PlayingVoice::new_from_sample(sample.clone(), stop_id, key.1, midi_note, velocity);
                             voice.one_shot = one_shot;
                             voice.persp_slot = slot;
+                            let hoorbaar = persp_gain[(slot as usize) & (MAX_LAYERS - 1)] > 0.01;
+                            voice.zet_wind(&pw, wind_div, hoorbaar);
+                            if hoorbaar { stoot_nieuw += pw.verbruik; }
                             spawned_any = true;
                             { let mut vl = voices_clone.write(); budget_release_voices(&mut vl, sample_rate, live_cap); push_voice_capped(&mut vl, voice, sample_rate, live_cap, &mut gc); }
                         } else {
@@ -3794,6 +3939,9 @@ fn run_audio_thread(
                                 let mut voice = PlayingVoice::new_from_preload(preload.clone(), stop_id, key.1, midi_note, velocity, sample_rate);
                                 voice.one_shot = one_shot;
                                 voice.persp_slot = slot;
+                                let hoorbaar = persp_gain[(slot as usize) & (MAX_LAYERS - 1)] > 0.01;
+                                voice.zet_wind(&pw, wind_div, hoorbaar);
+                                if hoorbaar { stoot_nieuw += pw.verbruik; }
                                 spawned_any = true;
 
                                 // Request background load of full sample.
@@ -3817,6 +3965,10 @@ fn run_audio_thread(
                             }
                         }
                         } // for layer
+                        // De windstoot van deze inzet: alleen voor écht
+                        // gespawnde stemmen (een koppel op een al klinkende
+                        // pijp bumpt de refcount en opent geen ventiel).
+                        if stoot_nieuw > 0.0 { stoot_acc[wind_div.min(31)] += stoot_nieuw; }
                         // Elke laag is een mogelijke stemstart: tel de hele
                         // fan-out mee in het werkbudget van deze callback.
                         spawns_done += layout.len();
@@ -3915,6 +4067,9 @@ fn run_audio_thread(
                                         rel_pre = preloads_clone.read().get(&release_key).cloned();
                                     }
                                     if rel_full.is_none() && rel_pre.is_none() {
+                                        // Loslaten: het ventiel gaat dicht, de lade krijgt een
+                                        // opstoot (0,4x de inzetstoot, Fisk's 'positive pulse').
+                                        stoot_acc[voice.c_div.min(31)] -= 0.4 * voice.c_wind_flow;
                                         voice.release_ms(fade_ms, sample_rate);
                                         continue;
                                     }
@@ -3991,6 +4146,7 @@ fn run_audio_thread(
                                     // een rear-laag klinkt op rear-niveau (anders
                                     // een niveausprong bij loslaten).
                                     rv.persp_slot = voice.persp_slot;
+                                    rv.erf_wind(&*voice, true);
                                     if let Some(decay_ms) = stacc_decay {
                                         // Korte noot: staart actief afbouwen — de galm
                                         // in de opname is nog niet volledig opgebouwd.
@@ -4015,6 +4171,9 @@ fn run_audio_thread(
                                     }
                                     release_spawn_scratch.push(rv);
                                 }
+                                // Loslaten: het ventiel gaat dicht, de lade krijgt een
+                                // opstoot (0,4x de inzetstoot, Fisk's 'positive pulse').
+                                stoot_acc[voice.c_div.min(31)] -= 0.4 * voice.c_wind_flow;
                                 voice.release_ms(fade_ms, sample_rate);
                             }
                         }
@@ -4123,6 +4282,7 @@ fn run_audio_thread(
                                     rv.one_shot = true;
                                     // Perspectief-gain overerven (zie NoteOff).
                                     rv.persp_slot = voice.persp_slot;
+                                    rv.erf_wind(&*voice, true);
                                     if let Some(decay_ms) = stacc_decay {
                                         // Infade + afbouw gecombineerd — zie NoteOff.
                                         crossfade_in_with_decay(
@@ -4138,6 +4298,9 @@ fn run_audio_thread(
                                     spawned.insert(vpipe & !TREM_FLAG);
                                 }
                             }
+                            // Loslaten: het ventiel gaat dicht, de lade krijgt een
+                            // opstoot (0,4x de inzetstoot, Fisk's 'positive pulse').
+                            stoot_acc[voice.c_div.min(31)] -= 0.4 * voice.c_wind_flow;
                             voice.release_ms(fade_ms, sample_rate);
                         }
                         // ATOMAIR houden: een half uitgevoerde ReleaseStop zou bij
@@ -4365,6 +4528,7 @@ fn run_audio_thread(
                                         // Perspectief-gain overerven: de trem-laag van
                                         // een rear-perspectief blijft op rear-niveau.
                                         nv.persp_slot = voice.persp_slot;
+                                        nv.erf_wind(&*voice, false);
                                         // Refcount meenemen: houdt een koppel de
                                         // pijp ook vast, dan mag de eerste NoteOff
                                         // hem niet al loslaten.
@@ -4456,22 +4620,52 @@ fn run_audio_thread(
                                   division_index, active, rate, amp_depth, pitch_depth);
                         }
                     }
-                    AudioCommand::SetWindModel { division_index, enabled, reservoir_size, damping, max_sag } => {
-                        // `division_index` is hier eigenlijk de **groep-index** sinds wind-groepen zijn geïntroduceerd.
-                        let mut wm = wind_models_clone.write();
-                        if let Some(model) = wm.get_mut(division_index as usize) {
-                            model.enabled = enabled;
-                            model.configure(reservoir_size, damping, max_sag, sample_rate);
-                            info!("Wind model group {}: enabled={}, reservoir={}, damping={}, sag={}",
-                                  division_index, enabled, reservoir_size, damping, max_sag);
+                    AudioCommand::SetWindModel { division_index, instelling } => {
+                        // `division_index` is de GROEP-index. De balg krijgt de
+                        // trage parameters; de laden van alle divisies in de
+                        // groep de snelle (kanaal) en de aan/uit-stand.
+                        let g = (division_index as usize).min(31);
+                        wind_instel[g] = instelling;
+                        {
+                            let mut wm = wind_models_clone.write();
+                            if let Some(model) = wm.get_mut(g) {
+                                model.enabled = instelling.enabled;
+                                model.configure(instelling.reservoir_size, instelling.damping, instelling.max_sag, sample_rate);
+                            }
                         }
+                        {
+                            let wg = wind_groups_clone.read();
+                            for d in 0..32 {
+                                if wg.get(d).copied().unwrap_or(d as u8) as usize == g {
+                                    laden[d].enabled = instelling.enabled;
+                                    laden[d].configure(instelling.kanaal, sample_rate);
+                                }
+                            }
+                        }
+                        info!("Windgroep {}: aan={}, balg={:.2}, demping={:.2}, daling={:.3}, stoot={:.2}, kanaal={:.2}, doffer={:.2}, verschil={:.2}, tongwerk apart={}",
+                              g, instelling.enabled, instelling.reservoir_size, instelling.damping, instelling.max_sag,
+                              instelling.stoot, instelling.kanaal, instelling.doffer, instelling.verschil, instelling.tongwerk_apart);
                     }
                     AudioCommand::SetDivisionWindGroup { division_index, group } => {
-                        let mut wg = wind_groups_clone.write();
-                        if (division_index as usize) < wg.len() {
-                            wg[division_index as usize] = group.min(31);
-                            info!("Division {} → wind group {}", division_index, group);
+                        let d = division_index as usize;
+                        {
+                            let mut wg = wind_groups_clone.write();
+                            if d < wg.len() {
+                                wg[d] = group.min(31);
+                                info!("Division {} → wind group {}", division_index, group);
+                            }
                         }
+                        // De lade van deze divisie volgt voortaan haar nieuwe groep.
+                        if d < 32 {
+                            let wi = wind_instel[(group as usize).min(31)];
+                            laden[d].enabled = wi.enabled;
+                            laden[d].configure(wi.kanaal, sample_rate);
+                        }
+                    }
+                    AudioCommand::RegisterStopWindProfiles(map, pleno) => {
+                        // Eén Arc-swap; de oude tabel is klein en mag hier vallen.
+                        wind_profielen = map;
+                        wind_pleno = pleno;
                     }
                     AudioCommand::RegisterStopDivisionMap(map) => {
                         *stop_to_division_clone.write() = map;
@@ -4685,27 +4879,11 @@ fn run_audio_thread(
                 let mut trem_lfo = trem_lfos_clone.write();
                 let stops_with_trem = stops_with_trem_clone.read();
 
-                // Count voices per division and aggregeer naar wind-groepen.
-                // Elke divisie hoort bij één groep (default identity); divisies in dezelfde
-                // groep delen één wind-reservoir (gecombineerd voice-count).
-                let mut div_voice_counts = [0u32; 32];
-                for voice in voices_lock.iter() {
-                    if !voice.releasing {
-                        let div_idx = stop_div_map.get(&voice.stop_id).copied().unwrap_or(0) as usize;
-                        if div_idx < 32 { div_voice_counts[div_idx] += 1; }
-                    }
-                }
-                let mut group_voice_counts = [0u32; 32];
-                for div_idx in 0..32 {
-                    let grp = wind_group_assignment.get(div_idx).copied().unwrap_or(div_idx as u8) as usize;
-                    if grp < 32 {
-                        group_voice_counts[grp] += div_voice_counts[div_idx];
-                    }
-                }
-                for (i, model) in wm.iter_mut().enumerate() {
-                    model.set_voice_count(group_voice_counts[i]);
-                    WIND_STEMMEN[i].store(group_voice_counts[i], Ordering::Relaxed);
-                }
+                // De telling van het windverbruik zit sinds 0.7.51 in de
+                // pre-pass hieronder (één iteratie over de stemmen i.p.v. twee,
+                // en dus één HashMap-lookup per stem per callback minder).
+                let mut q_div = [0.0f32; 32];
+                let mut n_div = [0u32; 32];
 
                 // C/Cis-spreiding is globaal actief zodra de sterkte > 0; per-divisie
                 // aan/uit wordt per voice gecheckt.
@@ -4745,6 +4923,15 @@ fn run_audio_thread(
                 // (onhoorbaar snel) opgepakt — live bijregelen blijft dus werken.
                 for voice in voices_lock.iter_mut() {
                     voice.c_div = stop_div_map.get(&voice.stop_id).copied().unwrap_or(0) as usize;
+                    // Gewogen windverbruik (0.7.51): alleen klinkende speelstemmen
+                    // trekken wind. Release-staarten zijn one_shot met
+                    // releasing=false tot het einde van de opname: die telden
+                    // tot 0.7.50 mee, zodat de balg op een natte set seconden
+                    // ingezakt bleef ná het loslaten en nooit terugveerde.
+                    if !voice.releasing && !voice.one_shot && voice.c_div < 32 {
+                        q_div[voice.c_div] += voice.c_wind_flow;
+                        n_div[voice.c_div] += 1;
+                    }
 
                     // Gebruikers-voicing (VoicingPanel) keyt op de KALE pijp en
                     // geldt dus voor álle lagen van die toets; ODF-intonatie en
@@ -4785,6 +4972,50 @@ fn run_audio_thread(
                     voice.c_pitch_mul = temp * pitch_mul;
 
                     voice.c_use_lfo_trem = !stops_with_trem.contains(&voice.stop_id);
+                }
+
+                // Verbruik per windgroep, de referentie "vol werk" van die groep
+                // (het pleno van haar divisies × balggrootte), en de stoten die
+                // de commando's van deze callback opleverden.
+                let mut q_grp = [0.0f32; 32];
+                let mut q_ref = [0.0f32; 32];
+                let mut n_grp = [0u32; 32];
+                for d in 0..32 {
+                    let grp = wind_group_assignment.get(d).copied().unwrap_or(d as u8) as usize;
+                    if grp < 32 {
+                        q_grp[grp] += q_div[d];
+                        q_ref[grp] += wind_pleno[d];
+                        n_grp[grp] += n_div[d];
+                    }
+                }
+                for (i, model) in wm.iter_mut().enumerate() {
+                    // Bij balggrootte 50 % is het pleno van de groep precies
+                    // "vol werk" (q = 1: halve inzakking); een grotere balg
+                    // kan meer hebben. Zo zakken een kistorgel en een domorgel
+                    // bij hún pleno even ver.
+                    let r = (q_ref[i] * wind_instel[i].reservoir_size / 0.5).max(0.5);
+                    model.set_verbruik(q_grp[i], r);
+                    WIND_STEMMEN[i].store(n_grp[i], Ordering::Relaxed);
+                    WIND_Q_PM[i].store((q_grp[i] * 100.0).clamp(0.0, 4.0e9) as u32, Ordering::Relaxed);
+                }
+                // Stoten op de laden: de eigen lade vol, de andere laden van
+                // dezelfde groep gedempt (de drukgolf loopt door het gedeelde
+                // kanaal naar alle laden). Per callback geklemd, zodat een
+                // registratiewissel van twintig registers niet als één
+                // reuzenstoot binnenkomt.
+                for d in 0..32 {
+                    let dq = stoot_acc[d].clamp(-12.0, 12.0);
+                    stoot_acc[d] = 0.0;
+                    if dq == 0.0 { continue; }
+                    let grp = wind_group_assignment.get(d).copied().unwrap_or(d as u8) as usize;
+                    let sterkte = wind_instel[grp.min(31)].stoot;
+                    if sterkte <= 0.0 { continue; }
+                    for e in 0..n_real_divs.min(32) {
+                        let grp_e = wind_group_assignment.get(e).copied().unwrap_or(e as u8) as usize;
+                        if grp_e != grp { continue; }
+                        let w = if e == d { 1.0 } else { 0.65 };
+                        laden[e].stoot(dq * w, sterkte);
+                    }
                 }
 
                 // Per-divisie basis-pan → constant-power L/R (cos/sin), één keer per
@@ -4863,55 +5094,74 @@ fn run_audio_thread(
                     }
 
                     // ── Pass 1: wind/tremulant per frame (modellen in volgorde stappen) ──
+                    // Alleen de echte divisies en de actieve balgen doen mee: een
+                    // orgel met drie divisies betaalde tot 0.7.50 voor 32 balgen
+                    // en 32 tremulanten per frame.
+                    let nd = n_real_divs.min(32);
                     for f in 0..bn {
                         let mut group_pressures = [1.0f32; 32];
                         for (i, model) in wm.iter_mut().enumerate() {
-                            group_pressures[i] = model.process();
-                        }
-                        let mut wind_pressures = [1.0f32; 32];
-                        for div_idx in 0..32 {
-                            let grp = wind_group_assignment.get(div_idx).copied().unwrap_or(div_idx as u8) as usize;
-                            if grp < 32 {
-                                wind_pressures[div_idx] = group_pressures[grp];
+                            if model.actief() {
+                                group_pressures[i] = model.process();
                             }
                         }
-                        let mut trem_mods = [(1.0f32, 0.0f32); 32]; // (amp_mod, pitch_cents)
-                        for (i, trem) in trem_lfo.iter_mut().enumerate() {
-                            trem_mods[i] = trem.process();
-                        }
-                        // Dure powf/sqrt één keer per divisie per frame (max 32), niet
-                        // per stem; in rust (geen wind/LFO) blijft alles 1.0.
-                        let wr = &mut blk_wind_rate[f];
-                        let wg = &mut blk_wind_gain[f];
+                        let wd = &mut blk_wind_dev[f];
                         let tr = &mut blk_trem_rate[f];
                         let ta = &mut blk_trem_amp[f];
                         for d in 0..32 {
-                            let wp = wind_pressures[d];
-                            if (wp - 1.0).abs() > 1e-6 {
-                                // Toonhoogte: zie WIND_CENTS_PER_EENHEID. Volume:
-                                // recht evenredig met de druk (10 % daling is
-                                // ~0,9 dB zachter). Dat was sqrt(druk), de helft
-                                // daarvan, en droeg bij aan "ik hoor er niets van".
-                                wr[d] = 2.0_f64.powf(
-                                    ((wp - 1.0) * vpo_audio::WIND_CENTS_PER_EENHEID) as f64 / 1200.0);
-                                wg[d] = wp;
+                            if d < nd {
+                                // Druk op deze lade = balg van de groep × eigen
+                                // snelle lade; de stem krijgt de afwijking (p - 1).
+                                let grp = wind_group_assignment.get(d).copied().unwrap_or(d as u8) as usize;
+                                let p = group_pressures[grp.min(31)] * laden[d].process();
+                                wd[d] = p.clamp(LADE_ONDERGRENS - 0.02, LADE_BOVENGRENS + 0.01) - 1.0;
+                                let (amp, tp) = trem_lfo[d].process();
+                                tr[d] = if tp.abs() > 0.01 { 2.0_f64.powf(tp as f64 / 1200.0) } else { 1.0 };
+                                ta[d] = amp;
                             } else {
-                                wr[d] = 1.0;
-                                wg[d] = 1.0;
+                                wd[d] = 0.0;
+                                tr[d] = 1.0;
+                                ta[d] = 1.0;
                             }
-                            let tp = trem_mods[d].1;
-                            tr[d] = if tp.abs() > 0.01 { 2.0_f64.powf(tp as f64 / 1200.0) } else { 1.0 };
-                            ta[d] = trem_mods[d].0;
                         }
                         blk_div_l[f] = [0.0f32; 32];
                         blk_div_r[f] = [0.0f32; 32];
                     }
-                    // Stand van de balgen voor de meter in het scherm (één keer
-                    // per blok, niet per frame).
+                    // Meters (één keer per blok): balgdruk per groep, ladedruk per
+                    // divisie met een vastgehouden dip — een schrik van 50-150 ms
+                    // valt anders tussen twee schermverversingen.
                     for (i, model) in wm.iter().enumerate() {
                         WIND_DRUK_PM[i].store(
                             (model.druk() * 10_000.0).clamp(0.0, 20_000.0) as u32,
                             Ordering::Relaxed);
+                    }
+                    for d in 0..nd {
+                        let p = laden[d].druk();
+                        WIND_LADE_PM[d].store((p * 10_000.0).clamp(0.0, 20_000.0) as u32, Ordering::Relaxed);
+                        if p < lade_hold[d] {
+                            lade_hold[d] = p;
+                            lade_hold_t[d] = 0;
+                        } else {
+                            lade_hold_t[d] = lade_hold_t[d].saturating_add(bn as u32);
+                            if lade_hold_t[d] > sample_rate * 3 / 5 {
+                                lade_hold[d] += (p - lade_hold[d]) * 0.03;
+                            }
+                        }
+                        WIND_DIP_PM[d].store((lade_hold[d] * 10_000.0).clamp(0.0, 20_000.0) as u32, Ordering::Relaxed);
+                    }
+                    // Doffer bij inzakking (0.7.51): per blok een tilt-factor per
+                    // divisie uit de druk aan het begin van het blok, zacht
+                    // meelopend zodat een stoot geen trapje in de klankkleur geeft.
+                    for d in 0..32 {
+                        let k = if d < nd {
+                            let grp = wind_group_assignment.get(d).copied().unwrap_or(d as u8) as usize;
+                            let g = 2.4 * wind_instel[grp.min(31)].doffer;
+                            (-blk_wind_dev[0][d] * g).clamp(0.0, 0.6)
+                        } else {
+                            0.0
+                        };
+                        wind_tilt[d] += (k - wind_tilt[d]) * 0.3;
+                        if wind_tilt[d] < 1e-4 { wind_tilt[d] = 0.0; }
                     }
                     // Deel-opteltabellen van de stukken 1.. wissen. Alleen de
                     // stukken die deze callback echt gebruikt worden. Wissen
@@ -4933,9 +5183,9 @@ fn run_audio_thread(
                     let t_pas = std::time::Instant::now();
                     let blok = MengBlok {
                         bn,
-                        wind_rate: &blk_wind_rate,
+                        wind_dev: &blk_wind_dev,
                         trem_rate: &blk_trem_rate,
-                        wind_gain: &blk_wind_gain,
+                        wind_fade_frames: 0.2 * sample_rate as f32,
                         trem_amp: &blk_trem_amp,
                         pan_cos: &div_pan_cos,
                         pan_sin: &div_pan_sin,
@@ -5012,6 +5262,24 @@ fn run_audio_thread(
                                 }
                                 Some((fl, fr)) => (fl.process(l_raw), fr.process(r_raw)),
                                 None => (l_raw, r_raw),
+                            };
+                            // Doffer bij inzakking (0.7.51): bij lagere druk vallen
+                            // de hogere boventonen het eerst weg (Fletcher; Hauptwerk
+                            // HarmonicShaping). Eén one-pole-paar op 1,5 kHz per
+                            // divisie; bij volle druk overgeslagen maar geprimed,
+                            // zodat het zonder sprong invalt.
+                            let (lf, rf) = {
+                                let k = wind_tilt[idx];
+                                let (fl, fr) = &mut wind_flt[idx];
+                                if k <= 0.0 {
+                                    fl.prime(lf);
+                                    fr.prime(rf);
+                                    (lf, rf)
+                                } else {
+                                    let al = fl.process(lf);
+                                    let ar = fr.process(rf);
+                                    (lf - k * (lf - al), rf - k * (rf - ar))
+                                }
                             };
                             let vol = swell_vol[idx];
                             let l = lf * vol * gain;
@@ -5744,18 +6012,22 @@ mod meng_verdeling_tests {
             v.c_pitch_mul = 1.0 + (i % 7) as f64 * 0.001;
             v.c_use_lfo_trem = i % 3 == 0;
             v.c_voicing_gain = 0.8 + (i % 5) as f32 * 0.05;
+            // Windgevoeligheid per stem: fluit, prestant, strijker, tongwerk.
+            v.c_kp = [0.064, 0.046, 0.028, 0.0][i % 4];
+            v.c_kg = if i % 4 == 3 { 3.6 } else { 2.0 };
+            v.c_dev_a = 0.01 + (i % 3) as f32 * 0.02;
             v
         }).collect()
     }
 
     fn blok_context<'a>(
-        wind_rate: &'a [[f64; 32]], trem_rate: &'a [[f64; 32]],
-        wind_gain: &'a [[f32; 32]], trem_amp: &'a [[f32; 32]],
+        wind_dev: &'a [[f32; 32]], trem_rate: &'a [[f64; 32]],
+        trem_amp: &'a [[f32; 32]],
         pan_cos: &'a [f32; 32], pan_sin: &'a [f32; 32], pans: &'a [f32],
         ccis_en: &'a [bool], bn: usize, ccis: bool,
     ) -> MengBlok<'a> {
         MengBlok {
-            bn, wind_rate, trem_rate, wind_gain, trem_amp,
+            bn, wind_dev, trem_rate, trem_amp, wind_fade_frames: 9600.0,
             pan_cos, pan_sin, div_pans: pans, ccis_on: ccis, ccis_en,
             ccis_strength: 0.7, ccis_falloff: 0.6, ccis_swap: false,
         }
@@ -5765,9 +6037,8 @@ mod meng_verdeling_tests {
     fn meng(n_stemmen: usize, stukken: usize, bn: usize, ccis: bool)
         -> (Vec<[f32; 32]>, Vec<[f32; 32]>)
     {
-        let wind_rate = vec![[1.002f64; 32]; bn];
+        let wind_dev = vec![[-0.03f32; 32]; bn];
         let trem_rate = vec![[0.999f64; 32]; bn];
-        let wind_gain = vec![[0.97f32; 32]; bn];
         let trem_amp = vec![[1.03f32; 32]; bn];
         let mut pan_cos = [0.0f32; 32];
         let mut pan_sin = [0.0f32; 32];
@@ -5778,7 +6049,7 @@ mod meng_verdeling_tests {
         }
         let pans: Vec<f32> = (0..32).map(|d| (d as f32 / 31.0) * 2.0 - 1.0).collect();
         let ccis_en: Vec<bool> = (0..32).map(|d| d % 2 == 0).collect();
-        let blok = blok_context(&wind_rate, &trem_rate, &wind_gain, &trem_amp,
+        let blok = blok_context(&wind_dev, &trem_rate, &trem_amp,
                                 &pan_cos, &pan_sin, &pans, &ccis_en, bn, ccis);
 
         let mut voices = stemmen(n_stemmen);
@@ -5826,7 +6097,7 @@ mod meng_verdeling_tests {
             let (l, r) = meng(200, stukken, 64, true);
             let (dl, niveau) = verschil(&ref_l, &l);
             let (dr, _) = verschil(&ref_r, &r);
-            assert!(niveau > 0.1, "de test zelf produceert te weinig geluid ({})", niveau);
+            assert!(niveau > 0.05, "de test zelf produceert te weinig geluid ({})", niveau);
             let grens = niveau * 1e-5;
             assert!(dl <= grens, "{} stukken: links {} verschil op niveau {}", stukken, dl, niveau);
             assert!(dr <= grens, "{} stukken: rechts {} verschil op niveau {}", stukken, dr, niveau);

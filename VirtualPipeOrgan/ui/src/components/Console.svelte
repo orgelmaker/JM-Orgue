@@ -1464,7 +1464,7 @@
 
   // Live stand van de balgen (druk, klinkende pijpen, toonhoogteverschil).
   // Alleen pollen zolang het scherm waar de meter staat open is.
-  let windStatus = [];
+  let windStatus = { groups: [], divisions: [] };
   let windLivePoll = null;
   $: {
     if (!secondary && activeView === 'orgel-instellingen' && !windLivePoll) {
@@ -1472,7 +1472,7 @@
     } else if ((secondary || activeView !== 'orgel-instellingen') && windLivePoll) {
       clearInterval(windLivePoll);
       windLivePoll = null;
-      windStatus = [];
+      windStatus = { groups: [], divisions: [] };
     }
   }
   async function pollWindLive() {
@@ -1489,24 +1489,50 @@
   // template - de meter bleef daardoor op 100 % staan terwijl de motor al
   // netjes 92 % rapporteerde.
   $: windMeters = Array.from({ length: 8 }, (_, g) => {
-    const w = windStatus[g];
+    const w = (windStatus.groups || [])[g];
     const druk = w?.pressure ?? 1.0;
     return {
       druk,
       stemmen: w?.voices ?? 0,
+      verbruik: w?.verbruik ?? 0,
       cent: w?.cents ?? 0,
       // Balkvulling: volle druk = vol, de laagst instelbare druk (-30 %) = leeg.
       balk: Math.max(0, Math.min(100, (1 - (1 - druk) / 0.35) * 100)),
     };
   });
+  // Per lade (divisie): druk nu en de vastgehouden dip van de laatste 0,3 s,
+  // zodat een schrik van 50-150 ms ook op het scherm te zien is.
+  $: windLaden = (windStatus.divisions || []).map(d => ({
+    druk: d.pressure ?? 1.0,
+    dip: d.dip ?? 1.0,
+    balk: Math.max(0, Math.min(100, (1 - (1 - (d.pressure ?? 1)) / 0.15) * 100)),
+    dipPos: Math.max(0, Math.min(100, (1 - (1 - (d.dip ?? 1)) / 0.15) * 100)),
+    prestant: d.cents_prestant ?? 0,
+    fluit: d.cents_fluit ?? 0,
+  }));
   // Wat de ingestelde maximale daling in de praktijk betekent.
-  function windMaxCent(pct) { return (pct * 1.2).toFixed(0); }
+  // Referentie: een 8'-prestant rond c' zakt 0,8 cent per procent; een fluit
+  // of mixtuur in het discant 1,75x zoveel; een tongwerk blijft staan.
+  function windMaxCent(pct) { return (pct * 0.8).toFixed(0); }
+  function windMaxCentFluit(pct) { return (pct * 1.4).toFixed(0); }
   function windMaxDb(pct) { return (-20 * Math.log10(1 - pct / 100)).toFixed(1); }
 
   function getWindGroupEnabled(g) { return windGroupConfig[g]?.enabled === true; }
   function getWindGroupReservoir(g) { return windGroupConfig[g]?.reservoir ?? 0.5; }
   function getWindGroupDamping(g) { return windGroupConfig[g]?.damping ?? 0.5; }
-  function getWindGroupMaxSag(g) { return windGroupConfig[g]?.maxSag ?? 10; }
+  function getWindGroupMaxSag(g) { return windGroupConfig[g]?.maxSag ?? 5; }
+  // Nieuwe groep: Hollands karakter, model uit, 5 % maximale daling.
+  const WIND_STD = { enabled: false, reservoir: 0.5, damping: 0.5, maxSag: 5, karakter: 1, stoot: 1.2, kanaal: 0.8, doffer: 0.7, verschil: 1.0, tongwerkApart: true };
+  // Wat een karakter met de drie schuiven zou doen (knop 'Voorkeuze toepassen').
+  const WIND_VOORKEUZE = { 0: { reservoir: 0.5, damping: 0.6, maxSag: 3 }, 1: { reservoir: 1.0, damping: 0.25, maxSag: 4 } };
+  function windConfigNaarBackend(g, cfg) {
+    return {
+      group: g, enabled: cfg.enabled === true,
+      reservoir_size: cfg.reservoir ?? 0.5, damping: cfg.damping ?? 0.5, max_sag: cfg.maxSag ?? 5,
+      karakter: cfg.karakter ?? 1, stoot: cfg.stoot ?? 1.2, kanaal: cfg.kanaal ?? 0.8,
+      doffer: cfg.doffer ?? 0.7, verschil: cfg.verschil ?? 1.0, tongwerk_apart: cfg.tongwerkApart !== false,
+    };
+  }
 
   function saveWindGroupConfig(groupIdx) {
     // Per orgel opslaan in de backend. Bewaar de hele config of (indien meegegeven) één groep.
@@ -1515,13 +1541,7 @@
       const g = parseInt(gk, 10);
       const cfg = windGroupConfig[g];
       if (!cfg) continue;
-      invoke('persist_wind_group_config', {
-        group: g,
-        enabled: cfg.enabled === true,
-        reservoirSize: cfg.reservoir ?? 0.5,
-        damping: cfg.damping ?? 0.5,
-        maxSag: cfg.maxSag ?? 10,
-      }).catch(console.error);
+      invoke('persist_wind_group_config', { config: windConfigNaarBackend(g, cfg) }).catch(console.error);
     }
   }
 
@@ -1533,18 +1553,12 @@
     if (!organInfo?.divisions) return;
     const divInGroup = organInfo.divisions.find((d, i) => getWindGroup(d.name, i) === groupIdx);
     if (!divInGroup) return;
-    const cfg = windGroupConfig[groupIdx] ?? { enabled: false, reservoir: 0.5, damping: 0.5, maxSag: 10 };
-    invoke('set_wind_model', {
-      division: divInGroup.name,
-      enabled: cfg.enabled === true,
-      reservoirSize: cfg.reservoir,
-      damping: cfg.damping,
-      maxSag: cfg.maxSag / 100,
-    }).catch(console.error);
+    const cfg = windGroupConfig[groupIdx] ?? WIND_STD;
+    invoke('set_wind_model', { division: divInGroup.name, config: windConfigNaarBackend(groupIdx, cfg) }).catch(console.error);
   }
 
   function updateWindGroup(groupIdx, patch) {
-    windGroupConfig[groupIdx] = { ...(windGroupConfig[groupIdx] ?? { enabled: false, reservoir: 0.5, damping: 0.5, maxSag: 10 }), ...patch };
+    windGroupConfig[groupIdx] = { ...(windGroupConfig[groupIdx] ?? WIND_STD), ...patch };
     windGroupConfig = windGroupConfig;
     saveWindGroupConfig(groupIdx);
     pushWindGroupConfig(groupIdx);
@@ -2599,6 +2613,8 @@
       for (const w of (s?.wind_group_configs || [])) {
         windGroupConfig[w.group] = {
           enabled: w.enabled, reservoir: w.reservoir_size, damping: w.damping, maxSag: w.max_sag,
+          karakter: w.karakter ?? 1, stoot: w.stoot ?? 1.2, kanaal: w.kanaal ?? 0.8,
+          doffer: w.doffer ?? 0.7, verschil: w.verschil ?? 1.0, tongwerkApart: w.tongwerk_apart !== false,
         };
       }
       windGroupConfig = windGroupConfig;
@@ -4965,7 +4981,26 @@
                     <p style="margin:0.1rem 0 0.35rem; font-size:0.7rem; color:var(--text-muted); line-height:1.4;">
                       {$t('settings.wind_live')
                         .replace('{v}', windMeters[gIdx].stemmen)
+                        .replace('{q}', windMeters[gIdx].verbruik.toFixed(1))
                         .replace('{c}', windMeters[gIdx].cent.toFixed(1))}
+                    </p>
+                    <!-- Laden van deze groep: de snelle laag, met de vastgehouden dip. -->
+                    {#each divInGroup as d}
+                      {@const di = (organInfo?.divisions || []).findIndex(x => x.name === d.name)}
+                      {@const lade = windLaden[di]}
+                      {#if lade}
+                        <div class="swell-config-row" style="margin-top:0.15rem;" title={$t('wind.lade_title')}>
+                          <span class="swell-config-label" style="font-size:0.7rem;">{d.name}</span>
+                          <div style="flex:1; position:relative; height:6px; background:var(--bg-elevated); border:1px solid var(--accent-soft-2); border-radius:3px; overflow:hidden;">
+                            <div style="height:100%; width:{lade.balk}%; background:var(--accent-soft-2); transition:width 0.1s linear;"></div>
+                            <div style="position:absolute; top:0; bottom:0; left:{lade.dipPos}%; width:2px; background:var(--accent);"></div>
+                          </div>
+                          <span class="swell-config-value" style="font-size:0.68rem;">{lade.prestant.toFixed(1)} / {lade.fluit.toFixed(1)} ct</span>
+                        </div>
+                      {/if}
+                    {/each}
+                    <p style="margin:0.1rem 0 0.35rem; font-size:0.68rem; color:var(--text-muted); line-height:1.4;">
+                      {$t('settings.wind_lade_hint')}
                     </p>
                     <div class="swell-config-sliders">
                       <div class="swell-config-row" title={$t('wind.reservoir_title')}>
@@ -4995,9 +5030,68 @@
                     </div>
                     <p style="margin:0.25rem 0 0; font-size:0.7rem; color:var(--text-muted); line-height:1.4;">
                       {$t('settings.wind_max_loss_hint')
-                        .replace('{c}', windMaxCent(windGroupConfig[gIdx]?.maxSag ?? 10))
-                        .replace('{d}', windMaxDb(windGroupConfig[gIdx]?.maxSag ?? 10))}
+                        .replace('{c}', windMaxCent(windGroupConfig[gIdx]?.maxSag ?? 5))
+                        .replace('{f}', windMaxCentFluit(windGroupConfig[gIdx]?.maxSag ?? 5))
+                        .replace('{d}', windMaxDb(windGroupConfig[gIdx]?.maxSag ?? 5))}
                     </p>
+                    <!-- Karakter: één keuze die alle diepten van de levende wind zet. -->
+                    <div class="swell-config-row" style="margin-top:0.5rem;" title={$t('wind.karakter_title')}>
+                      <span class="swell-config-label">{$t('settings.wind_karakter')}</span>
+                      <select class="temperament-select" style="flex:1; font-size:0.8rem;"
+                        value={windGroupConfig[gIdx]?.karakter ?? 1}
+                        on:change={(e) => updateWindGroup(gIdx, { karakter: parseInt(e.target.value, 10) })}>
+                        <option value={1}>{$t('settings.wind_karakter_hollands')}</option>
+                        <option value={0}>{$t('settings.wind_karakter_neutraal')}</option>
+                        <option value={2}>{$t('settings.wind_karakter_eigen')}</option>
+                      </select>
+                      {#if (windGroupConfig[gIdx]?.karakter ?? 1) !== 2}
+                        <button class="btn btn-ghost btn-xs" title={$t('wind.voorkeuze_title')}
+                          on:click={() => updateWindGroup(gIdx, WIND_VOORKEUZE[windGroupConfig[gIdx]?.karakter ?? 1])}>
+                          {$t('settings.wind_voorkeuze')}
+                        </button>
+                      {/if}
+                    </div>
+                    {#if (windGroupConfig[gIdx]?.karakter ?? 1) === 2}
+                      <div class="swell-config-sliders" style="margin-top:0.25rem;">
+                        <div class="swell-config-row" title={$t('wind.stoot_title')}>
+                          <span class="swell-config-label">{$t('settings.wind_stoot')}</span>
+                          <input type="range" min="0" max="200" step="5"
+                            value={(windGroupConfig[gIdx]?.stoot ?? 1.2) * 100}
+                            on:input={(e) => updateWindGroup(gIdx, { stoot: parseInt(e.target.value) / 100 })}
+                          />
+                          <span class="swell-config-value">{((windGroupConfig[gIdx]?.stoot ?? 1.2) * 100).toFixed(0)}%</span>
+                        </div>
+                        <div class="swell-config-row" title={$t('wind.kanaal_title')}>
+                          <span class="swell-config-label">{$t('settings.wind_kanaal')}</span>
+                          <input type="range" min="0" max="100" step="5"
+                            value={(windGroupConfig[gIdx]?.kanaal ?? 0.8) * 100}
+                            on:input={(e) => updateWindGroup(gIdx, { kanaal: parseInt(e.target.value) / 100 })}
+                          />
+                          <span class="swell-config-value">{((windGroupConfig[gIdx]?.kanaal ?? 0.8) * 100).toFixed(0)}%</span>
+                        </div>
+                        <div class="swell-config-row" title={$t('wind.doffer_title')}>
+                          <span class="swell-config-label">{$t('settings.wind_doffer')}</span>
+                          <input type="range" min="0" max="100" step="5"
+                            value={(windGroupConfig[gIdx]?.doffer ?? 0.7) * 100}
+                            on:input={(e) => updateWindGroup(gIdx, { doffer: parseInt(e.target.value) / 100 })}
+                          />
+                          <span class="swell-config-value">{((windGroupConfig[gIdx]?.doffer ?? 0.7) * 100).toFixed(0)}%</span>
+                        </div>
+                        <div class="swell-config-row" title={$t('wind.verschil_title')}>
+                          <span class="swell-config-label">{$t('settings.wind_verschil')}</span>
+                          <input type="range" min="0" max="100" step="5"
+                            value={(windGroupConfig[gIdx]?.verschil ?? 1.0) * 100}
+                            on:input={(e) => updateWindGroup(gIdx, { verschil: parseInt(e.target.value) / 100 })}
+                          />
+                          <span class="swell-config-value">{((windGroupConfig[gIdx]?.verschil ?? 1.0) * 100).toFixed(0)}%</span>
+                        </div>
+                      </div>
+                      <label class="swell-toggle" style="margin-top:0.25rem;" title={$t('wind.tongwerk_title')}>
+                        <input type="checkbox" checked={windGroupConfig[gIdx]?.tongwerkApart !== false}
+                          on:change={() => updateWindGroup(gIdx, { tongwerkApart: !(windGroupConfig[gIdx]?.tongwerkApart !== false) })} />
+                        <span class="swell-toggle-label">{$t('settings.wind_tongwerk')}</span>
+                      </label>
+                    {/if}
                   {/if}
                 </div>
                 {/if}

@@ -1173,7 +1173,7 @@ pub struct AppState {
     /// (enabled, rate, amp_depth, pitch_depth) per divisie.
     pub division_tremulants: Arc<RwLock<std::collections::HashMap<String, (bool, f32, f32, f32)>>>,
     /// Wind-groep-config (enabled, reservoir, damping, max_sag) per groep-index (0..31).
-    pub wind_group_configs: Arc<RwLock<std::collections::HashMap<u8, (bool, f32, f32, f32)>>>,
+    pub wind_group_configs: Arc<RwLock<std::collections::HashMap<u8, crate::library::WindGroupConfigSaved>>>,
     /// MIDI-uit terugkoppeling naar de fysieke console (registerlampen/display).
     /// Fase 1: gevoed door de UI via feedback_apply. Zie feedback.rs.
     pub feedback: Arc<parking_lot::Mutex<crate::feedback::FeedbackManager>>,

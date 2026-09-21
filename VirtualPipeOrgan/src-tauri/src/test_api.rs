@@ -54,6 +54,7 @@
 //!   GET  /tuning                  - hertemperen: retune_pipes/retune_total (orgel) + retune/name/fine_tune (mirror)
 //!   POST /settings/wind?enabled=0|1[&reservoir=&damping=&sag=] - windmodel voor alle groepen
 //!   GET  /wind - live winddruk, stemmen en cent-afwijking per windgroep
+//!   POST /settings/wind_group?division=&group= - divisie aan een windgroep toewijzen
 //!   POST /record/stop             - geeft ook peak_hz (FFT-piek van de laatste ~2,7 s, toonhoogtemeting)
 //!   GET  /settings/organ|mirror   - opgeslagen settings / runtime-mirror (mirror bevat ook perspectives)
 //!   GET  /perspectives            - microfoonperspectieven van het geladen orgel: [{name,enabled,gain_db,loaded,slot,pipe_count}]
@@ -516,7 +517,8 @@ fn route_test_only(
         (tiny_http::Method::Post, "/temperament") => handle_set_temperament_json(state, body),
         (tiny_http::Method::Get, "/tuning") => Ok(handle_tuning(state)),
         (tiny_http::Method::Post, "/settings/wind") => handle_set_wind(state, query),
-        (tiny_http::Method::Get, "/wind") => handle_wind_status(),
+        (tiny_http::Method::Get, "/wind") => handle_wind_status(state),
+        (tiny_http::Method::Post, "/settings/wind_group") => handle_set_wind_group(state, query),
         (tiny_http::Method::Post, "/settings/eq") => handle_set_eq(state, query),
         (tiny_http::Method::Post, "/settings/reverb") => handle_set_reverb(state, query),
         (tiny_http::Method::Post, "/settings/pan") => handle_set_pan(state, query),
@@ -1672,29 +1674,59 @@ fn handle_tuning(state: &AppState) -> Value {
 /// bevatten). division_index wordt door de handler als groep-index gelezen.
 fn handle_set_wind(state: &AppState, query: &str) -> Result<Value, (u16, String)> {
     let enabled = parse_query::<u8>(query, "enabled").map(|v| v != 0).unwrap_or(false);
-    // Optioneel de drie regelaars meegeven, zodat een meetscript ook de
-    // uiterste standen kan nalopen (0.7.50).
-    let reservoir: f32 = parse_query(query, "reservoir").unwrap_or(1.0);
-    let damping: f32 = parse_query(query, "damping").unwrap_or(0.5);
-    let sag: f32 = parse_query(query, "sag").unwrap_or(0.10);
+    // Optioneel alle regelaars meegeven, zodat een meetscript ook de
+    // uiterste standen kan nalopen. `karakter` 0/1 vult de diepten zoals de
+    // voorkeuze in het scherm; losse waarden overschrijven die.
+    let karakter: u8 = parse_query(query, "karakter").unwrap_or(1);
+    let (k_stoot, k_kanaal, k_doffer, k_verschil, k_tong) = crate::commands::wind_karakter_waarden(karakter);
+    let instelling = vpo_audio::WindInstelling {
+        enabled,
+        reservoir_size: parse_query(query, "reservoir").unwrap_or(0.5),
+        damping: parse_query(query, "damping").unwrap_or(0.5),
+        max_sag: parse_query(query, "sag").unwrap_or(0.05),
+        stoot: parse_query(query, "stoot").unwrap_or(k_stoot),
+        kanaal: parse_query(query, "kanaal").unwrap_or(k_kanaal),
+        doffer: parse_query(query, "doffer").unwrap_or(k_doffer),
+        verschil: parse_query(query, "verschil").unwrap_or(k_verschil),
+        tongwerk_apart: parse_query::<u8>(query, "tongwerk").map(|v| v != 0).unwrap_or(k_tong),
+    };
     for g in 0..32u8 {
-        state.send_audio_command(AudioCommand::SetWindModel {
-            division_index: g,
-            enabled,
-            reservoir_size: reservoir,
-            damping,
-            max_sag: sag,
-        });
+        state.send_audio_command(AudioCommand::SetWindModel { division_index: g, instelling });
     }
-    Ok(json!({ "ok": true, "enabled": enabled, "reservoir": reservoir,
-               "damping": damping, "sag": sag }))
+    Ok(json!({ "ok": true, "enabled": enabled, "reservoir": instelling.reservoir_size,
+               "damping": instelling.damping, "sag": instelling.max_sag, "stoot": instelling.stoot,
+               "kanaal": instelling.kanaal, "doffer": instelling.doffer, "verschil": instelling.verschil,
+               "tongwerk_apart": instelling.tongwerk_apart }))
+}
+
+/// Divisie aan een windgroep toewijzen (zelfde route als de UI-keuze bij het
+/// klavier), zodat een meetscript pedaal en manuaal op één balg kan zetten.
+fn handle_set_wind_group(state: &AppState, query: &str) -> Result<Value, (u16, String)> {
+    let division: usize = parse_query(query, "division").ok_or((400u16, "division ontbreekt".to_string()))?;
+    let group: u8 = parse_query(query, "group").ok_or((400u16, "group ontbreekt".to_string()))?;
+    {
+        let mut wg = state.division_wind_groups.write();
+        if division < wg.len() {
+            wg[division] = group.min(31);
+        }
+    }
+    state.send_audio_command(AudioCommand::SetDivisionWindGroup {
+        division_index: division as u8,
+        group: group.min(31),
+    });
+    Ok(json!({ "ok": true, "division": division, "group": group }))
 }
 
 /// Live winddruk per groep — hetzelfde getal dat de meter in het scherm laat
 /// zien. Hiermee is met een meting aan te tonen dát het windmodel werkt.
-fn handle_wind_status() -> Result<Value, (u16, String)> {
+fn handle_wind_status(state: &AppState) -> Result<Value, (u16, String)> {
     let drukken = crate::audio::wind_drukken();
     let stemmen = crate::audio::wind_stemmen();
+    let verbruik = crate::audio::wind_verbruik();
+    let laden = crate::audio::wind_laden();
+    let dips = crate::audio::wind_dips();
+    let toewijzing = state.division_wind_groups.read().clone();
+    let n_div = state.loaded_organ_info.read().as_ref().map(|o| o.divisions.len()).unwrap_or(0).min(32);
     let groepen: Vec<Value> = (0..8usize)
         .map(|g| {
             let p = drukken[g];
@@ -1702,11 +1734,25 @@ fn handle_wind_status() -> Result<Value, (u16, String)> {
                 "group": g,
                 "pressure": p,
                 "voices": stemmen[g],
+                "verbruik": verbruik[g],
                 "cents": (p - 1.0) * vpo_audio::WIND_CENTS_PER_EENHEID,
             })
         })
         .collect();
-    Ok(json!({ "groups": groepen }))
+    let divisies: Vec<Value> = (0..n_div)
+        .map(|d| {
+            let g = toewijzing.get(d).copied().unwrap_or(d as u8) as usize;
+            let balg = drukken[g.min(31)];
+            json!({
+                "division": d,
+                "pressure": balg * laden[d],
+                "lade": laden[d],
+                "dip": balg * dips[d],
+                "cents_prestant": (balg * laden[d] - 1.0) * vpo_audio::WIND_CENTS_PER_EENHEID,
+            })
+        })
+        .collect();
+    Ok(json!({ "groups": groepen, "divisions": divisies }))
 }
 
 fn handle_set_eq(state: &AppState, query: &str) -> Result<Value, (u16, String)> {
@@ -1821,8 +1867,10 @@ fn handle_settings_mirror(state: &AppState) -> Value {
         .map(|(d, &(en, r, a, p))| json!({ "division": d, "enabled": en, "rate": r, "amp": a, "pitch": p })).collect();
     let swells: Vec<Value> = state.division_swell_configs.read().iter()
         .map(|(d, &(mdb, c))| json!({ "division": d, "min_db": mdb, "cutoff": c })).collect();
-    let winds: Vec<Value> = state.wind_group_configs.read().iter()
-        .map(|(g, &(en, r, dmp, s))| json!({ "group": g, "enabled": en, "reservoir": r, "damping": dmp, "sag": s })).collect();
+    let winds: Vec<Value> = state.wind_group_configs.read().values()
+        .map(|w| json!({ "group": w.group, "enabled": w.enabled, "reservoir": w.reservoir_size, "damping": w.damping,
+                         "sag": w.max_sag, "karakter": w.karakter, "stoot": w.stoot, "kanaal": w.kanaal,
+                         "doffer": w.doffer, "verschil": w.verschil, "tongwerk_apart": w.tongwerk_apart })).collect();
     let perspectives = handle_perspectives(state);
     json!({ "pans": pans, "tremulants": trems, "swells": swells, "winds": winds, "perspectives": perspectives })
 }

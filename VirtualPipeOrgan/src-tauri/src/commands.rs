@@ -246,37 +246,86 @@ pub fn set_polyphony(state: State<AppState>, voices: u32) -> Result<usize, Strin
     Ok(n)
 }
 
-/// Stand van één windgroep voor de meter in de instellingen (0.7.50).
+/// Stand van één windgroep (balg) voor de meter in de instellingen.
 #[derive(Debug, Clone, Serialize)]
 pub struct WindGroupStatusDto {
     /// Groep-index (0-based).
     pub group: u8,
-    /// Winddruk nu, als fractie van de volle druk.
+    /// Balgdruk nu, als fractie van de volle druk.
     pub pressure: f32,
     /// Klinkende pijpen op deze groep.
     pub voices: u32,
-    /// Toonhoogteverschil dat die druk oplevert, in cent (negatief = lager).
+    /// Gewogen windverbruik (8'-C-eenheden; een 16'-C is 4, een 2'-c''' 0,03).
+    pub verbruik: f32,
+    /// Toonhoogteverschil van de referentiepijp (8'-prestant c') in cent.
     pub cents: f32,
 }
 
-/// Live winddruk per groep. Antwoordt op "werkt het windmodel eigenlijk wel?":
-/// zolang je speelt is hier te zien hoe ver de balg inzakt en hoeveel cent dat
-/// scheelt. Alleen opgevraagd zolang het instellingenscherm open staat.
+/// Stand van één lade (divisie): de snelle laag, met de vastgehouden dip.
+#[derive(Debug, Clone, Serialize)]
+pub struct WindDivisionStatusDto {
+    pub division: u8,
+    /// Druk op de lade nu (balg × lade), fractie.
+    pub pressure: f32,
+    /// Laagste druk van de laatste ~0,3 s, zodat een schrik van 50-150 ms
+    /// ook op het scherm te zien is.
+    pub dip: f32,
+    /// Wat die druk doet met een prestant 8' c', een fluit c''' en een
+    /// tongwerk, in cent.
+    pub cents_prestant: f32,
+    pub cents_fluit: f32,
+    pub cents_tongwerk: f32,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct WindStatusDto {
+    pub groups: Vec<WindGroupStatusDto>,
+    pub divisions: Vec<WindDivisionStatusDto>,
+}
+
+/// Live winddruk per groep en per lade. Antwoordt op "werkt het windmodel
+/// eigenlijk wel?": zolang je speelt is hier te zien hoe ver balg en lade
+/// inzakken en wat dat per pijpfamilie in cent scheelt. Alleen opgevraagd
+/// zolang het instellingenscherm open staat.
 #[tauri::command]
-pub fn get_wind_status() -> Vec<WindGroupStatusDto> {
+pub fn get_wind_status(state: State<AppState>) -> WindStatusDto {
     let drukken = crate::audio::wind_drukken();
     let stemmen = crate::audio::wind_stemmen();
-    (0..8usize)
+    let verbruik = crate::audio::wind_verbruik();
+    let laden = crate::audio::wind_laden();
+    let dips = crate::audio::wind_dips();
+    let n_div = state.loaded_organ_info.read().as_ref().map(|o| o.divisions.len()).unwrap_or(0).min(32);
+    let toewijzing = state.division_wind_groups.read().clone();
+    let cents = vpo_audio::WIND_CENTS_PER_EENHEID;
+    let groups = (0..8usize)
         .map(|g| {
             let p = drukken.get(g).copied().unwrap_or(1.0);
             WindGroupStatusDto {
                 group: g as u8,
                 pressure: p,
                 voices: stemmen.get(g).copied().unwrap_or(0),
-                cents: (p - 1.0) * vpo_audio::WIND_CENTS_PER_EENHEID,
+                verbruik: verbruik.get(g).copied().unwrap_or(0.0),
+                cents: (p - 1.0) * cents,
             }
         })
-        .collect()
+        .collect();
+    let divisions = (0..n_div)
+        .map(|d| {
+            let g = toewijzing.get(d).copied().unwrap_or(d as u8) as usize;
+            let balg = drukken.get(g).copied().unwrap_or(1.0);
+            let p = balg * laden.get(d).copied().unwrap_or(1.0);
+            let dip = balg * dips.get(d).copied().unwrap_or(1.0);
+            WindDivisionStatusDto {
+                division: d as u8,
+                pressure: p,
+                dip,
+                cents_prestant: (p - 1.0) * cents,
+                cents_fluit: (p - 1.0) * cents * 1.75,
+                cents_tongwerk: 0.0,
+            }
+        })
+        .collect();
+    WindStatusDto { groups, divisions }
 }
 
 /// Hoeveel rekenkernen de mengloop gebruikt (0.7.49). 1 = alles op de
@@ -2511,6 +2560,8 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
     // Build stop→division map and register with audio thread
     let stop_div_map = build_stop_division_map(&organ_info.divisions);
     state.send_audio_command(AudioCommand::RegisterStopDivisionMap(stop_div_map));
+    let (wind_profielen, wind_pleno) = build_stop_wind_profiles(&organ_info.divisions);
+    state.send_audio_command(AudioCommand::RegisterStopWindProfiles(std::sync::Arc::new(wind_profielen), wind_pleno));
     state.reset_division_gains(organ_info.divisions.len());
     state.reset_division_settings(organ_info.divisions.len());
 
@@ -5334,20 +5385,53 @@ pub fn set_remote_layout_inner(state: &AppState, layout: library::RemoteLayoutSa
     state.set_remote_layout_mirror(Some(layout));
 }
 
+/// De diepten die bij een karakter horen: (stoot, kanaal, doffer, verschil,
+/// tongwerk apart). Neutraal = magazijnbalg met ventilator: alles half zo
+/// diep en een kort, wijd kanaal. Hollands = spaanbalgen en lange kanalen.
+pub fn wind_karakter_waarden(karakter: u8) -> (f32, f32, f32, f32, bool) {
+    match karakter {
+        0 => (0.5, 0.2, 0.3, 0.5, true),
+        1 => (1.2, 0.8, 0.7, 1.0, true),
+        _ => (1.2, 0.8, 0.7, 1.0, true),
+    }
+}
+
+/// Van de opgeslagen groepsconfig (schuiven in procenten) naar wat de
+/// audiothread wil (fracties). Bij karakter 'eigen' tellen de eigen diepten,
+/// anders die van het karakter.
+pub fn wind_instelling_van(cfg: &library::WindGroupConfigSaved) -> vpo_audio::WindInstelling {
+    let (stoot, kanaal, doffer, verschil, tongwerk) = if cfg.karakter == 2 {
+        (cfg.stoot, cfg.kanaal, cfg.doffer, cfg.verschil, cfg.tongwerk_apart)
+    } else {
+        wind_karakter_waarden(cfg.karakter)
+    };
+    vpo_audio::WindInstelling {
+        enabled: cfg.enabled,
+        reservoir_size: cfg.reservoir_size,
+        damping: cfg.damping,
+        max_sag: cfg.max_sag / 100.0,
+        stoot: stoot.clamp(0.0, 2.0),
+        kanaal: kanaal.clamp(0.0, 1.0),
+        doffer: doffer.clamp(0.0, 1.0),
+        verschil: verschil.clamp(0.0, 1.0),
+        tongwerk_apart: tongwerk,
+    }
+}
+
 /// Bewaar de wind-model-config van een wind-groep voor per-orgel opslag. Stuurt zelf geen audio
-/// — set_wind_model doet dat. `group` = wind-groep-index (0..31).
+/// — set_wind_model doet dat. `config.group` = wind-groep-index (0..31).
 ///
-/// Let op: `max_sag` staat hier in PROCENT (zoals de schuif in het scherm),
-/// terwijl `set_wind_model` een fractie verwacht. De UI deelt daar door 100.
+/// Let op: `max_sag` staat hier in PROCENT (zoals de schuif in het scherm);
+/// `wind_instelling_van` deelt door 100 voor de audiothread.
 #[tauri::command]
-pub fn persist_wind_group_config(state: State<AppState>, group: u8, enabled: bool, reservoir_size: f32, damping: f32, max_sag: f32) -> Result<(), String> {
-    state.wind_group_configs.write().insert(group, (enabled, reservoir_size, damping, max_sag));
+pub fn persist_wind_group_config(state: State<AppState>, config: library::WindGroupConfigSaved) -> Result<(), String> {
+    state.wind_group_configs.write().insert(config.group, config);
     Ok(())
 }
 
-/// Configure wind model for a division
+/// Windmodel van de groep waarin deze divisie zit instellen (audio).
 #[tauri::command]
-pub fn set_wind_model(state: State<AppState>, division: String, enabled: bool, reservoir_size: f32, damping: f32, max_sag: f32) -> Result<(), String> {
+pub fn set_wind_model(state: State<AppState>, division: String, config: library::WindGroupConfigSaved) -> Result<(), String> {
     let organ = state.loaded_organ_info.read();
     if let Some(ref o) = *organ {
         if let Some(idx) = o.divisions.iter().position(|d| d.name == division) {
@@ -5356,10 +5440,7 @@ pub fn set_wind_model(state: State<AppState>, division: String, enabled: bool, r
                 .get(idx).copied().unwrap_or(idx as u8);
             state.send_audio_command(AudioCommand::SetWindModel {
                 division_index: group, // audio thread interpreteert dit als groep-index
-                enabled,
-                reservoir_size,
-                damping,
-                max_sag,
+                instelling: wind_instelling_van(&config),
             });
             return Ok(());
         }
@@ -5564,6 +5645,41 @@ fn build_stop_division_map(divisions: &[DivisionDto]) -> std::collections::HashM
         }
     }
     map
+}
+
+/// Windprofiel per stop (familie + voetmaat, 0.7.51) en per divisie het
+/// verbruik van haar "pleno": alle registers op een vierklank een octaaf
+/// boven de laagste toets. Dat pleno is de referentie voor "vol werk", zodat
+/// een kistorgel en een domorgel bij hún pleno even ver inzakken.
+fn build_stop_wind_profiles(divisions: &[DivisionDto])
+    -> (std::collections::HashMap<u32, vpo_audio::StopWindProfiel>, [f32; 32])
+{
+    let mut map = std::collections::HashMap::new();
+    let mut pleno = [0.0f32; 32];
+    for (div_idx, division) in divisions.iter().enumerate() {
+        // Een pedaal (korte omvang) speelt geen vierklank: anderhalve noot
+        // is daar "vol werk"; een manuaal vier.
+        let omvang = division.stops.iter()
+            .map(|s| s.last_midi_note.saturating_sub(s.first_midi_note))
+            .max().unwrap_or(0);
+        let gewicht = if omvang < 40 { 0.375 } else { 1.0 };
+        for stop in &division.stops {
+            let profiel = vpo_audio::StopWindProfiel {
+                familie: vpo_audio::familie_van_naam(&stop.name, stop.is_reed),
+                voet: vpo_audio::voet_uit_pitch(&stop.pitch),
+            };
+            map.insert(stop.internal_stop_id, profiel);
+            if div_idx < 32 {
+                let laag = stop.first_midi_note.max(24) as i32;
+                let hoog = stop.last_midi_note.max(stop.first_midi_note) as i32;
+                for interval in [12, 16, 19, 24] {
+                    let noot = (laag + interval).min(hoog).clamp(0, 127) as u8;
+                    pleno[div_idx] += gewicht * vpo_audio::verbruik_van_pijp(&profiel, noot);
+                }
+            }
+        }
+    }
+    (map, pleno)
 }
 
 /// Detect reed (tongwerk) stops by name
@@ -6341,6 +6457,8 @@ pub fn do_load_samples_from_directory_locked(state: &AppState, directory: &str) 
     // Build stop→division map and register with audio thread
     let stop_div_map = build_stop_division_map(&organ_info.divisions);
     state.send_audio_command(AudioCommand::RegisterStopDivisionMap(stop_div_map));
+    let (wind_profielen, wind_pleno) = build_stop_wind_profiles(&organ_info.divisions);
+    state.send_audio_command(AudioCommand::RegisterStopWindProfiles(std::sync::Arc::new(wind_profielen), wind_pleno));
     state.reset_division_gains(organ_info.divisions.len());
     state.reset_division_settings(organ_info.divisions.len());
 
@@ -6732,7 +6850,7 @@ fn restore_organ_settings(state: &AppState, organ_id: &str) {
     {
         let mut wg = state.wind_group_configs.write();
         for w in &settings.wind_group_configs {
-            wg.insert(w.group, (w.enabled, w.reservoir_size, w.damping, w.max_sag));
+            wg.insert(w.group, w.clone());
         }
     }
     // Indeling van de afstandsbediening van DIT orgel (reset_division_settings
@@ -7221,11 +7339,8 @@ pub fn do_save_organ_settings(state: &AppState, presets: HashMap<String, PresetD
             division: division.clone(), enabled, rate, amp_depth, pitch_depth,
         })
         .collect();
-    let wind_group_configs: Vec<library::WindGroupConfigSaved> = state.wind_group_configs.read().iter()
-        .map(|(&group, &(enabled, reservoir_size, damping, max_sag))| library::WindGroupConfigSaved {
-            group, enabled, reservoir_size, damping, max_sag,
-        })
-        .collect();
+    let wind_group_configs: Vec<library::WindGroupConfigSaved> = state.wind_group_configs.read()
+        .values().cloned().collect();
 
     // Microfoonperspectieven: aan/uit (laden) + volume per label.
     let perspectives: Vec<PerspectiveSaved> = state.perspectives.read().iter()
