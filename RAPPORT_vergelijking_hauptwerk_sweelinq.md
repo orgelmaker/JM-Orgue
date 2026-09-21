@@ -1,6 +1,7 @@
 # JM-Orgue naast Hauptwerk en Sweelinq
 
-Peildatum 21 september 2026, versie 0.7.45. Bronnen: de editievergelijking op
+Peildatum 21 september 2026. Bijgewerkt na 0.7.47, waarin alles uit de lijst
+hieronder gebouwd is op de VST/AU-plug-in na. Bronnen: de editievergelijking op
 hauptwerk.com (Lite tegenover Advanced) en de release notes van Sweelinq
 Virtual Pipe Organ t/m 3.1.0 (build 1647).
 
@@ -16,7 +17,7 @@ Virtual Pipe Organ t/m 3.1.0 (build 1647).
 | Pc en Mac | ✅ | ✅ | Windows uitgebracht; macOS en Linux bouwen en draaien, nog niet uitgebracht |
 | 64-bit | ✅ | ✅ | ✅ |
 | Aanraakmenu | ✅ | ✅ | ✅ plus telefoon/tablet als tweede registreerscherm |
-| **VST/AU-plug-in** | ❌ | ✅ | **❌ — het enige echte gat** |
+| **VST/AU-plug-in** | ❌ | ✅ | **❌ — het enige echte gat, bewust open gelaten** |
 | Audio- en perspectiefmixer | ❌ | ✅ | ✅ niveau per perspectief, per divisie, per uitgang |
 | Convolutiegalm | ❌ | ✅ | ✅ inclusief eigen IR-bestand |
 | Intonatie per pijp | ❌ | ✅ | ✅ volume en stemming per pijp |
@@ -36,15 +37,15 @@ Uit hun release notes, alleen de punten die bij ons ontbreken.
 
 | Sweelinq | Wat het is | Onze stand |
 |---|---|---|
-| 2.3.0 | **Perspectieven wisselen tijdens het spelen** | Bij ons kost een andere microfoonpositie een herlaad van het orgel |
-| 2.1.0 | **Korte octaaf** | Niet aanwezig |
-| 3.0.0 | **Koppels toevoegen** die de sampleset niet heeft | Wij tonen alleen de koppels uit de set |
-| 3.0.0 | **Verlengde klaviatuur** (spelen buiten het opgenomen bereik) | Niet aanwezig |
-| 2.2.0 | **SysEx als schakelaar-invoer** | Wij sturen SysEx wél uit (Hauptwerk-LCD), maar lezen het niet als trigger |
-| 2.1.0 | **Control change als bitveld** voor schakelaars | Niet aanwezig |
-| 2.0.0 | **EQ-presets voor bekende koptelefoons** | Wij hebben EQ per kanaal, geen presets per koptelefoon |
-| 2.0.0 | **Testsignaal voor de luidsprekeropstelling** | Niet aanwezig |
-| 2.3.0 | **Linux (ook ARM)** en **ondertekening op macOS** | Linux bouwt maar is niet uitgebracht; macOS is niet ondertekend |
+| 2.3.0 | **Perspectieven wisselen tijdens het spelen** | ✅ 0.7.47 — uitzetten altijd live; met "alle posities in het geheugen houden" ook aanzetten |
+| 2.1.0 | **Korte octaaf** | ✅ 0.7.47 — per klavier, C/E |
+| 3.0.0 | **Koppels toevoegen** die de sampleset niet heeft | ✅ 0.7.47 — de ontbrekende afgeleide koppels zijn bij te schakelen |
+| 3.0.0 | **Verlengde klaviatuur** (spelen buiten het opgenomen bereik) | ✅ 0.7.47 — "doorlopend klavier", octaaf-herhaling (geen resampling) |
+| 2.2.0 | **SysEx als schakelaar-invoer** | ✅ 0.7.47 — in te leren en met de hand in te typen |
+| 2.1.0 | **Control change als bitveld** voor schakelaars | ✅ 0.7.47 |
+| 2.0.0 | **EQ-presets voor bekende koptelefoons** | ◐ 0.7.47 — drie luisterprofielen (neutraal, koptelefoon, kleine luidsprekers); geen correcties per model, die zouden gemeten moeten zijn |
+| 2.0.0 | **Testsignaal voor de luidsprekeropstelling** | ✅ 0.7.47 — roze ruis of sinus per kanaal |
+| 2.3.0 | **Linux (ook ARM)** en **ondertekening op macOS** | ✖ Linux bouwt maar is niet uitgebracht; macOS is niet ondertekend — beide een beslissing, geen code |
 
 En omgekeerd, wat wij hebben en in hun notes niet voorkomt: bladmuziek uit je
 eigen spel (live notatie, PDF/MIDI), een telefoon of tablet als
@@ -52,23 +53,19 @@ registreerscherm, ruim vijftig temperamenten met hertemperen op de gemeten
 pijptoon, per pijp intoneren, zeven talen, en een MIDI-archief dat alles wat je
 speelt vanzelf bewaart.
 
-## 3. Wat ik eruit zou halen
+## 3. Wat er sinds dit rapport gebeurd is
 
-**Nu, klein en zichtbaar:**
-1. **Testsignaal voor de luidsprekeropstelling.** Een halve dag werk en precies
-   het soort ding dat iemand bij de eerste installatie mist.
-2. **Korte octaaf.** Voor historische orgels een echte omissie, en het is een
-   toetsafbeelding — geen nieuw geluidspad.
+Alles uit paragraaf 2 is in **0.7.47** gebouwd, behalve de twee regels die geen
+code zijn maar een beslissing: een Linux-uitgave en het ondertekenen van de
+macOS-versie (zie `RAPPORT_macos_linux.md`).
 
-**Daarna, groter maar de moeite waard:**
-3. **Perspectief wisselen zonder herladen.** Sweelinq kan het en het is precies
-   wat een organist wil doen terwijl hij luistert. Wij laden de lagen al per
-   slot; wat ontbreekt is ze warm houden en live omschakelen.
-4. **Koppels toevoegen** die de set niet kent. Veel gevraagd bij oudere sets.
+Bewust niet gebouwd:
 
-**Bewust laten liggen:**
-5. **VST/AU-plug-in.** Dat is een andere productvorm (JM-Orgue als instrument in
-   een DAW), geen ontbrekende knop. Pas overwegen als iemand er echt om vraagt.
-6. **Polyfonie naar tienduizenden.** Onze grens is een bewuste CPU-keuze met een
-   zichtbare belastingsmeter; hoger zetten zonder meerkernig renderen levert
-   alleen haperingen op.
+- **VST/AU-plug-in.** Dat is een andere productvorm — JM-Orgue als instrument in
+  een opnameprogramma — en geen ontbrekende knop. Pas overwegen als iemand er
+  echt om vraagt.
+- **Polyfonie naar tienduizenden.** Onze grens van 4.096 is een bewuste
+  CPU-keuze met een zichtbare belastingsmeter; hoger zetten zonder meerkernig
+  renderen levert alleen haperingen op.
+- **Correcties per koptelefoonmodel.** Die zouden gemeten moeten zijn. In plaats
+  daarvan staan er drie eerlijk omschreven luisterprofielen.

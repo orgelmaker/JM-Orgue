@@ -232,6 +232,8 @@
     "audio_switch_to_headphones": "Switch to headphones",
     "autosave_hint": "Settings are saved automatically in the organ folder and in the app.",
     "midi_transpose_abbr": "Transp",
+    "continuous_keyboard": "Continuous keyboard",
+    "continuous_keyboard_title": "Keys outside a stop's recorded range play the pipe an octave higher or lower instead of falling silent. A 61-key keyboard then plays on through a 56-note sample set — like an organ with a repeating top octave.",
     "short_octave": "Short octave",
     "short_octave_title": "Historic keyboard with an incomplete bottom octave: the key that looks like E sounds C, F# sounds D and G# sounds E. C# and D# are missing there.",
     "short_octave_needs_range": "Learn the key range first (or fill in the lowest note): without the lowest key the app cannot tell where the bottom octave starts.",
@@ -289,6 +291,8 @@
     "not_drawn": "disengaged"
   },
   "couplers": {
+    "extra_title": "Extra couplers",
+    "extra_hint": "These couplers are not in the sample set but follow from the keyboard layout. Tick what you want; they appear on the coupler bar straight away.",
     "title": "Couplers"
   },
   "midi": {
@@ -755,6 +759,10 @@
     "name_prompt": "Name for this temperament:"
   },
   "eq": {
+    "profile": "Listening profile",
+    "profile_flat": "Neutral",
+    "profile_headphones": "Headphones",
+    "profile_small_speakers": "Small speakers",
     "band_peak": "Peak",
     "band_lowpass": "Low-pass",
     "band_highpass": "High-pass",

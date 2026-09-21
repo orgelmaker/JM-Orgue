@@ -232,6 +232,8 @@
     "audio_switch_to_headphones": "Passa alle cuffie",
     "autosave_hint": "Le impostazioni vengono salvate automaticamente nella cartella dell'organo e nell'app.",
     "midi_transpose_abbr": "Trasp",
+    "continuous_keyboard": "Tastiera continua",
+    "continuous_keyboard_title": "I tasti fuori dall'estensione registrata di un registro suonano la canna un'ottava sopra o sotto invece di tacere. Una tastiera di 61 tasti suona così su un set di 56 note, come un organo con ottava acuta ripetuta.",
     "short_octave": "Ottava corta",
     "short_octave_title": "Tastiera storica con l'ottava grave incompleta: il tasto che sembra mi suona do, fa diesis suona re e sol diesis suona mi. Lì mancano do diesis e re diesis.",
     "short_octave_needs_range": "Impara prima l'estensione della tastiera (o inserisci la nota più grave): senza il tasto più grave l'app non sa dove comincia l'ottava grave.",
@@ -289,6 +291,8 @@
     "not_drawn": "disinserito"
   },
   "couplers": {
+    "extra_title": "Unioni in più",
+    "extra_hint": "Queste unioni non sono nel set di campioni ma derivano dalla disposizione delle tastiere. Spunta quelle che vuoi; compaiono subito nella barra delle unioni.",
     "title": "Unioni"
   },
   "midi": {
@@ -755,6 +759,10 @@
     "name_prompt": "Nome di questo temperamento:"
   },
   "eq": {
+    "profile": "Profilo di ascolto",
+    "profile_flat": "Neutro",
+    "profile_headphones": "Cuffie",
+    "profile_small_speakers": "Diffusori piccoli",
     "band_peak": "Picco",
     "band_lowpass": "Passa-basso",
     "band_highpass": "Passa-alto",

@@ -427,6 +427,14 @@ pub struct OrganSettings {
     /// een herlaad — ten koste van geheugen (ruwweg maal het aantal posities).
     #[serde(default)]
     pub load_all_perspectives: bool,
+    /// Koppels die de sampleset zelf niet heeft en die de organist erbij heeft
+    /// gezet (0.7.47): de id's uit de door de app afgeleide koppellijst.
+    #[serde(default)]
+    pub extra_couplers: Vec<String>,
+    /// Doorlopend klavier: toetsen buiten het opgenomen bereik spelen de pijp
+    /// een octaaf hoger of lager in plaats van te zwijgen (0.7.47).
+    #[serde(default)]
+    pub continuous_keyboard: bool,
     /// Indeling van de afstandsbediening (0.7.39). None = nooit gepubliceerd →
     /// de afstandsbediening gebruikt dezelfde defaults als het orgelscherm.
     #[serde(default)]

@@ -5,6 +5,34 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.47] - 2026-09-21
+
+### Zeven punten uit de vergelijking met Hauptwerk en Sweelinq
+
+Na het naast elkaar leggen van de editietabel van Hauptwerk en de release notes van Sweelinq stond er een lijstje met wat zij hebben en wij niet. Op één na is dat lijstje nu leeg.
+
+**Testsignaal per uitgang.** Wie zes of acht kanalen aansluit, weet daarna nog niet welke stekker in welke kast zit. In Algemene instellingen → Audio staat nu een rij kanaalknoppen: klik er een aan en er komt roze ruis (of een sinus van 440 Hz) uit precies dat kanaal. Nog een keer klikken zet hem uit, en hij gaat vanzelf uit zodra je het scherm verlaat.
+
+**Opnamepositie wisselen zonder herladen.** Een positie uitzetten kon altijd al direct — dat weten we nu ook: de samples blijven staan en de positie wordt stilgezet. Zet je "alle posities in het geheugen houden" aan, dan staan ook de uitgeschakelde posities klaar en is áánzetten net zo ogenblikkelijk. Dat kost geheugen, ruwweg maal het aantal posities, dus het is een bewuste keuze per orgel. Tot nu toe vroeg elke wijziging om een volledige herlaad.
+
+**Kort octaaf.** Historische klaviaturen hebben een onvolledige onderste octaaf: de toets die eruitziet als E klinkt als C, Fis als D en Gis als E, en Cis en Dis ontbreken daar. Per klavier aan te zetten, zodat oude muziek met de linkerhand op de juiste toetsen valt. Werkt pas als het toetsbereik is ingeleerd — zonder laagste toets weet de app niet waar de onderste octaaf begint, en dan doet het vinkje niets in plaats van iets verkeerds.
+
+**Doorlopend klavier.** Toetsen buiten het opgenomen bereik van een register zwijgen niet meer, maar spelen de pijp een octaaf hoger of lager. Een klavier van 61 toetsen speelt daarmee door op een sampleset van 56 tonen, zoals een orgel met een herhalende bovenoctaaf. De toonhoogte klopt op het octaaf, niet op de halve toon — maar er valt geen gat waar niets klinkt.
+
+**Koppels erbij.** Een sampleset die zelf koppels meebrengt onderdrukte tot nu toe de hele afgeleide lijst: had het orgel geen sub- of superoctaafkoppel, dan was die ook niet te krijgen. Onder de koppels staan nu de koppels die de app uit de klavierindeling kan afleiden maar die in de set ontbreken. Aanvinken en ze staan meteen op de koppelbalk, zonder herlaad. De actiecodes van de bestaande koppels blijven ongemoeid, dus ingeleerde MIDI-knoppen verspringen niet.
+
+**System Exclusive als schakelaar.** Speeltafels die hun registers en pistons via SysEx melden (Hauptwerk-protocol, Johannus) kunnen daar nu ook mee schakelen. De MIDI-invoer gooit SysEx niet langer weg — dat deed de driver standaard wel — en het inleren pakt zo'n bericht net zo op als een noot of een CC. In het instellingenbestand staat de inhoud leesbaar als hex, en met de hand in te typen kan ook.
+
+**Control change als bitveld.** Sommige speeltafels stoppen acht schakelaars in één CC-waarde, elk in een eigen bit. Zo'n bit is nu als schakelaar te kiezen; hij vuurt op de overgang van 0 naar 1.
+
+### Verder
+
+**Luisterprofielen voor de EQ.** Drie knoppen die de banden in één klik vullen: neutraal, koptelefoon (de 16' dreunt op een koptelefoon eerder dan in een kerk) en kleine luidsprekers (onder de 60 Hz kunnen die toch niets, en die energie kost alleen vervorming). Bewust geen correcties per koptelefoonmodel: die zouden gemeten moeten zijn, en dat verzinnen we niet.
+
+### Wat bewust niet is gebouwd
+
+De **VST/AU-plug-in** uit Hauptwerk Advanced. Dat is een andere productvorm — JM-Orgue als instrument in een opnameprogramma — en geen ontbrekende knop. Pas overwegen als iemand er echt om vraagt.
+
 ## [0.7.46] - 2026-09-21
 
 ### Nagalm: niet meer verpest door een preset

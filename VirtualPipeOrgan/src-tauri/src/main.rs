@@ -342,6 +342,10 @@ fn main() {
             commands::set_short_octave,
             commands::set_load_all_perspectives,
             commands::get_load_all_perspectives,
+            commands::get_extra_coupler_options,
+            commands::set_extra_couplers,
+            commands::set_continuous_keyboard,
+            commands::get_continuous_keyboard,
             commands::set_stereo_samples,
             // Gestapelde ranks en microfoonperspectieven (0.7.38)
             commands::get_perspectives,

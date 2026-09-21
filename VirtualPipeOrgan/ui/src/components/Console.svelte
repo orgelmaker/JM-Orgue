@@ -1146,6 +1146,40 @@
     updateEq();
   }
 
+  // Luisterprofielen (0.7.47). Bewust GEEN correcties per koptelefoonmodel:
+  // die zouden gemeten moeten zijn, en verzinnen we niet. Dit zijn eerlijke,
+  // algemeen omschreven correcties voor de drie situaties waarin een huisorgel
+  // meestal klinkt. Ze vullen de banden; daarna is alles nog met de hand bij
+  // te stellen.
+  $: eqProfielen = [
+    { id: 'flat', label: $t('eq.profile_flat'), bands: [
+      { enabled: true, band_type: 'lowshelf',  freq: 200,  gain_db: 0, bandwidth: 1.0, channel: null },
+      { enabled: true, band_type: 'peak',      freq: 1000, gain_db: 0, bandwidth: 2.0, channel: null },
+      { enabled: true, band_type: 'highshelf', freq: 4000, gain_db: 0, bandwidth: 1.0, channel: null },
+    ] },
+    // Koptelefoon: de 16' dreunt op een koptelefoon veel eerder dan in een kerk,
+    // en het bovenwerk wordt scherp omdat er geen ruimte tussen zit.
+    { id: 'headphones', label: $t('eq.profile_headphones'), bands: [
+      { enabled: true, band_type: 'lowshelf',  freq: 120,  gain_db: -3.0, bandwidth: 1.0, channel: null },
+      { enabled: true, band_type: 'peak',      freq: 3000, gain_db: -2.0, bandwidth: 1.5, channel: null },
+      { enabled: true, band_type: 'highshelf', freq: 8000, gain_db:  1.5, bandwidth: 1.0, channel: null },
+    ] },
+    // Kleine luidsprekers kunnen onder ~60 Hz toch niets; die energie kost
+    // alleen membraanslag en vervorming.
+    { id: 'small_speakers', label: $t('eq.profile_small_speakers'), bands: [
+      { enabled: true, band_type: 'highpass',  freq: 60,   gain_db:  0,   bandwidth: 1.0, channel: null },
+      { enabled: true, band_type: 'lowshelf',  freq: 200,  gain_db:  2.5, bandwidth: 1.0, channel: null },
+      { enabled: true, band_type: 'highshelf', freq: 6000, gain_db: -1.5, bandwidth: 1.0, channel: null },
+    ] },
+  ];
+  function pasEqProfielToe(id) {
+    const p = eqProfielen.find(x => x.id === id);
+    if (!p) return;
+    eqBands = p.bands.map(b => ({ ...b }));
+    eqEnabled = true;
+    updateEq();
+  }
+
   function addEqBand() {
     eqBands = [...eqBands, { enabled: true, band_type: 'peak', freq: 1000, gain_db: 0, bandwidth: 2.0, channel: null }];
     updateEq();
@@ -1583,6 +1617,38 @@
       laadAllePosities = on;
       dispatch('refreshMidiMappings');
     } catch (e) { console.error(e); }
+  }
+
+  // Extra koppels (0.7.47): koppels die de app uit de divisie-indeling kan
+  // afleiden maar die de sampleset zelf niet levert. Bijschakelen werkt
+  // ogenblikkelijk, zonder het orgel opnieuw te laden.
+  let extraKoppelOpties = [];
+  async function haalExtraKoppels() {
+    try { extraKoppelOpties = await invoke('get_extra_coupler_options'); } catch (e) { extraKoppelOpties = []; }
+  }
+  $: if (organInfo?.id) haalExtraKoppels();
+  async function zetExtraKoppel(id, aan) {
+    const ids = extraKoppelOpties.filter(k => (k.id === id ? aan : k.active)).map(k => k.id);
+    try {
+      await invoke('set_extra_couplers', { ids });
+      await haalExtraKoppels();
+      dispatch('refreshMidiMappings');
+    } catch (e) { console.error('Extra koppel zetten mislukt:', e); }
+  }
+
+  // Doorlopend klavier: toetsen buiten het opgenomen bereik spelen de pijp een
+  // octaaf hoger of lager in plaats van te zwijgen.
+  let doorlopendKlavier = false;
+  async function haalDoorlopendKlavier() {
+    try { doorlopendKlavier = await invoke('get_continuous_keyboard'); } catch (e) {}
+  }
+  $: if (organInfo?.id) haalDoorlopendKlavier();
+  async function zetDoorlopendKlavier(aan) {
+    try {
+      await invoke('set_continuous_keyboard', { enabled: aan });
+      doorlopendKlavier = aan;
+      dispatch('refreshMidiMappings');
+    } catch (e) { console.error('Doorlopend klavier zetten mislukt:', e); }
   }
 
   let perspGainTimer = null;
@@ -4659,6 +4725,12 @@
               </div>
               {#if eqEnabled}
                 <div style="margin-top:0.5rem; display:flex; flex-direction:column; gap:0.5rem;">
+                  <div style="display:flex; flex-wrap:wrap; gap:0.3rem; margin-bottom:0.5rem; align-items:center;">
+                    <span class="audio-select-label">{$t('eq.profile')}</span>
+                    {#each eqProfielen as prof (prof.id)}
+                      <button class="btn btn-sm" on:click={() => pasEqProfielToe(prof.id)}>{prof.label}</button>
+                    {/each}
+                  </div>
                   {#each eqBands as band, bi (bi)}
                     <div style="border:1px solid var(--accent-soft-2); border-radius:var(--radius-sm); padding:0.4rem 0.5rem; opacity:{band.enabled ? 1 : 0.55};">
                       <div style="display:flex; align-items:center; gap:0.45rem; flex-wrap:wrap; margin-bottom:0.35rem;">
@@ -5502,6 +5574,13 @@
                 </div>
               {/each}
 
+              <!-- Doorlopend klavier -->
+              <label class="swell-toggle" style="margin-top:1rem;" title={$t('settings.continuous_keyboard_title')}>
+                <input type="checkbox" checked={doorlopendKlavier}
+                  on:change={(e) => zetDoorlopendKlavier(e.target.checked)} />
+                <span class="swell-toggle-label">{$t('settings.continuous_keyboard')}</span>
+              </label>
+
               <!-- Koppels -->
               {#if displayOrgan.couplers && displayOrgan.couplers.length > 0}
                 <div class="midi-mapping-header" style="margin-top: 1.5rem;">
@@ -5536,6 +5615,24 @@
                     </div>
                   </div>
                 {/each}
+              {/if}
+
+              <!-- Koppels die deze sampleset niet meebrengt maar die wel uit de
+                   klavierindeling volgen: sub, super, melodie, bas, tongwerken af. -->
+              {#if extraKoppelOpties.length > 0}
+                <div class="midi-mapping-header" style="margin-top: 1.2rem;">
+                  <h3>{$t('couplers.extra_title')}</h3>
+                </div>
+                <p class="settings-hint" style="margin: 0 0 0.4rem;">{$t('couplers.extra_hint')}</p>
+                <div style="display:flex; flex-wrap:wrap; gap:0.5rem 1rem;">
+                  {#each extraKoppelOpties as k (k.id)}
+                    <label class="coupler-check" style="min-width: 10rem;">
+                      <input type="checkbox" checked={k.active}
+                        on:change={(e) => zetExtraKoppel(k.id, e.target.checked)} />
+                      <span class="division-label">{k.name.replace(/\n/g, ' ')}</span>
+                    </label>
+                  {/each}
+                </div>
               {/if}
             </div>
 

@@ -232,6 +232,8 @@
     "audio_switch_to_headphones": "Zu Kopfhörer wechseln",
     "autosave_hint": "Einstellungen werden automatisch im Orgelordner und in der App gespeichert.",
     "midi_transpose_abbr": "Transp",
+    "continuous_keyboard": "Durchgehende Klaviatur",
+    "continuous_keyboard_title": "Tasten außerhalb des aufgenommenen Umfangs eines Registers spielen die Pfeife eine Oktave höher oder tiefer, statt zu schweigen. Eine Klaviatur mit 61 Tasten spielt so auf einem Sampleset mit 56 Tönen durch — wie eine Orgel mit repetierender Oberoktave.",
     "short_octave": "Kurze Oktave",
     "short_octave_title": "Historische Klaviatur mit unvollständiger unterster Oktave: Die Taste, die wie E aussieht, klingt als C, Fis als D und Gis als E. Cis und Dis fehlen dort.",
     "short_octave_needs_range": "Lernen Sie zuerst den Tastenumfang ein (oder tragen Sie die tiefste Note ein): ohne tiefste Taste weiß die App nicht, wo die unterste Oktave beginnt.",
@@ -289,6 +291,8 @@
     "not_drawn": "abgestoßen"
   },
   "couplers": {
+    "extra_title": "Zusätzliche Koppeln",
+    "extra_hint": "Diese Koppeln stecken nicht im Sampleset, folgen aber aus der Klaviaturanordnung. Haken Sie an, was Sie möchten; sie erscheinen sofort in der Koppelleiste.",
     "title": "Koppeln"
   },
   "midi": {
@@ -755,6 +759,10 @@
     "name_prompt": "Name für diese Stimmung:"
   },
   "eq": {
+    "profile": "Hörprofil",
+    "profile_flat": "Neutral",
+    "profile_headphones": "Kopfhörer",
+    "profile_small_speakers": "Kleine Lautsprecher",
     "band_peak": "Peak",
     "band_lowpass": "Tiefpass",
     "band_highpass": "Hochpass",

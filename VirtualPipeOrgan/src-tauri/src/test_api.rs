@@ -40,6 +40,7 @@
 //!   POST /crescendo/stage?stage=N - trap zetten zoals een UI-klik
 //!   GET  /swell                   - per divisie {division,index,position,binding,min_db,cutoff}
 //!   POST /swell/binding           - body {"division","channel","cc","min"?,"max"?,"invert"?} | {"division","clear":true}
+//!   POST /audio/test_signal       - ?channel=<n>&kind=0|1&level_db=<dB>; zonder channel = uit
 //!   POST /tremulant?division=<naam>&active=0|1 - tremulant van een divisie live
 //!        aan/uit (zelfde kern als het Tauri-commando set_tremulant) →
 //!        {"ok","division","active","stops"}; stops = aantal registers met échte
@@ -490,6 +491,10 @@ fn route_test_only(
         (tiny_http::Method::Post, "/crescendo/stage") => handle_crescendo_stage(state, query),
         (tiny_http::Method::Get, "/swell") => Ok(handle_swell_get(state)),
         (tiny_http::Method::Post, "/swell/binding") => handle_swell_binding(state, body),
+        // Luidspreker-testsignaal (0.7.47): ?channel=<n>&kind=0|1, zonder
+        // channel gaat hij uit. Zo is te meten dat er geluid uit precies
+        // een kanaal komt (peak_left/peak_right in /status).
+        (tiny_http::Method::Post, "/audio/test_signal") => Ok(handle_test_signal(query)),
         // Automatisch MIDI-archief (0.7.38)
         (tiny_http::Method::Get, "/midi/archive/status") => Ok(handle_midi_archive_status(state)),
         (tiny_http::Method::Post, "/midi/archive/config") => handle_midi_archive_config(state, query),
@@ -1424,6 +1429,21 @@ fn handle_swell_get(state: &AppState) -> Value {
 }
 
 /// POST /swell/binding {"division","channel","cc","min"?,"max"?,"invert"?} | {"division","clear":true}.
+fn handle_test_signal(query: &str) -> Value {
+    let kind: u8 = parse_query(query, "kind").unwrap_or(0);
+    let level: f32 = parse_query(query, "level_db").unwrap_or(-12.0);
+    match parse_query::<u8>(query, "channel") {
+        Some(ch) => {
+            crate::audio::set_test_signal(Some(ch), kind, 10f32.powf(level.clamp(-60.0, 0.0) / 20.0));
+            json!({ "ok": true, "channel": ch, "kind": kind })
+        }
+        None => {
+            crate::audio::set_test_signal(None, 0, 0.0);
+            json!({ "ok": true, "channel": Value::Null })
+        }
+    }
+}
+
 fn handle_swell_binding(state: &AppState, body: &str) -> Result<Value, (u16, String)> {
     let v: Value = serde_json::from_str(body).map_err(|e| (400u16, format!("Ongeldige JSON: {}", e)))?;
     let division = v.get("division").and_then(|x| x.as_str())

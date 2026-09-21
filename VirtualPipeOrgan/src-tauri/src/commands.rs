@@ -451,6 +451,79 @@ fn sync_perspective_dto(state: &AppState) {
 /// als herladen nodig is (enabled != loaded voor ≥1 perspectief). Slaat NIET
 /// direct op: de reguliere autosave bewaart `state.perspectives`, en een
 /// herlaad van hetzelfde orgel leest de runtime-staat (perspective_prefs_for).
+/// Koppels die de app uit de divisie-indeling kan afleiden maar die in de
+/// huidige koppellijst ontbreken (0.7.47). Een sampleset die zelf koppels
+/// meebrengt onderdrukte tot nu toe de afgeleide lijst volledig: had het orgel
+/// geen sub- of superoctaafkoppel, dan was die ook niet te krijgen. Dit geeft
+/// precies de ontbrekende terug, zodat de organist ze kan bijschakelen.
+///
+/// "Ontbreekt" wordt op betekenis bepaald (bron, doel, soort), niet op id: een
+/// ODF-koppel met een eigen naam is hetzelfde koppel als het afgeleide.
+fn ontbrekende_koppels(huidig: &[CouplerDto], divisions: &[DivisionDto]) -> Vec<CouplerDto> {
+    let bestaat = |k: &CouplerDto| huidig.iter().any(|h| {
+        h.source_division == k.source_division
+            && h.destination_division == k.destination_division
+            && h.coupler_type == k.coupler_type
+            && h.pitch_offset == k.pitch_offset
+    });
+    generate_couplers(divisions).into_iter().filter(|k| !bestaat(k)).collect()
+}
+
+/// Stelt de koppellijst van het geladen orgel opnieuw samen: de koppels van de
+/// sampleset plus de bijgeschakelde extra's. Actiecodes van de originele
+/// koppels blijven ongemoeid (ingeleerde MIDI-knoppen mogen niet verspringen);
+/// de extra's krijgen codes bóven de hoogste bestaande.
+fn koppellijst_herbouwen(state: &AppState) {
+    let basis = state.base_couplers.read().clone();
+    if basis.is_empty() { return; }
+    let gewenst = state.extra_coupler_ids.read().clone();
+    let divisions = match state.loaded_organ_info.read().as_ref() {
+        Some(o) => o.divisions.clone(),
+        None => return,
+    };
+    let mut lijst = basis.clone();
+    let mut code = lijst.iter().map(|c| c.midi_action_code).max().unwrap_or(100).saturating_add(1);
+    for mut k in ontbrekende_koppels(&basis, &divisions) {
+        if !gewenst.contains(&k.id) { continue; }
+        k.midi_action_code = code;
+        code = code.saturating_add(1);
+        lijst.push(k);
+    }
+    // Koppels die zijn weggehaald mogen niet actief blijven staan.
+    let ids: Vec<String> = lijst.iter().map(|c| c.id.clone()).collect();
+    let nog_actief: Vec<String> = state.get_active_couplers().into_iter()
+        .filter(|a| ids.contains(a)).collect();
+    if let Some(o) = state.loaded_organ_info.write().as_mut() {
+        o.couplers = Some(lijst);
+    }
+    state.set_active_couplers(nog_actief);
+}
+
+/// De extra koppels die voor dit orgel te krijgen zijn, met de stand of ze nu
+/// bijgeschakeld zijn (`active` wordt hier gebruikt als "staat aan in de lijst").
+#[tauri::command]
+pub fn get_extra_coupler_options(state: State<AppState>) -> Vec<CouplerDto> {
+    let basis = state.base_couplers.read().clone();
+    let divisions = match state.loaded_organ_info.read().as_ref() {
+        Some(o) => o.divisions.clone(),
+        None => return Vec::new(),
+    };
+    let gekozen = state.extra_coupler_ids.read().clone();
+    ontbrekende_koppels(&basis, &divisions).into_iter()
+        .map(|mut k| { k.active = gekozen.contains(&k.id); k })
+        .collect()
+}
+
+/// Welke extra koppels wil de organist erbij? Meteen actief, geen herlaad.
+#[tauri::command]
+pub fn set_extra_couplers(state: State<AppState>, ids: Vec<String>) -> Result<(), String> {
+    *state.extra_coupler_ids.write() = ids;
+    koppellijst_herbouwen(&state);
+    let n = state.extra_coupler_ids.read().len();
+    info!("Extra koppels: {} bijgeschakeld", n);
+    Ok(())
+}
+
 /// Gain waarmee een geladen maar uitgeschakelde opnamepositie wordt stilgezet.
 /// Ruim onder de hoorgrens; de samples blijven staan zodat aanzetten geen
 /// herlaad kost.
@@ -508,6 +581,25 @@ pub fn get_perspectives(state: State<AppState>) -> Vec<PerspectiveDto> {
 #[tauri::command]
 pub fn set_perspective_enabled(state: State<AppState>, name: String, enabled: bool) -> Result<bool, String> {
     do_set_perspective_enabled(&state, &name, enabled)
+}
+
+/// Doorlopend klavier (0.7.47): toetsen buiten het opgenomen bereik van een
+/// register spelen de pijp een octaaf hoger of lager in plaats van te zwijgen.
+/// Alle klinkende noten gaan uit bij het omzetten: NoteOn en NoteOff moeten
+/// dezelfde pijp uitrekenen, anders blijft er een noot hangen.
+#[tauri::command]
+pub fn set_continuous_keyboard(state: State<AppState>, enabled: bool) -> Result<(), String> {
+    crate::state::DOORLOPEND_KLAVIER.store(enabled, std::sync::atomic::Ordering::Relaxed);
+    state.send_audio_command(AudioCommand::AllNotesOff);
+    state.held_notes.write().clear();
+    info!("Doorlopend klavier: {}", if enabled { "aan" } else { "uit" });
+    Ok(())
+}
+
+/// Staat het doorlopende klavier aan?
+#[tauri::command]
+pub fn get_continuous_keyboard() -> bool {
+    crate::state::DOORLOPEND_KLAVIER.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 /// Alle opnameposities in het geheugen houden (0.7.47), zodat wisselen
@@ -2308,6 +2400,11 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
         layered_stops: rank_summary.iter().filter(|r| r.is_stacked()).count(),
         release_pipes,
     };
+
+    // Koppels zoals de sampleset ze levert onthouden: vertrekpunt voor het
+    // bij- en afschakelen van extra koppels (0.7.47).
+    *state.base_couplers.write() = organ_info.couplers.clone().unwrap_or_default();
+    state.extra_coupler_ids.write().clear();
 
     // Reset bij orgelwissel: stop alle klinkende noten en wis de getrokken registratie +
     // crescendo-stops + koppels, zodat geen geluid of registratie van het vórige orgel
@@ -6131,6 +6228,11 @@ pub fn do_load_samples_from_directory_locked(state: &AppState, directory: &str) 
         release_pipes: 0,
     };
 
+    // Koppels zoals de sampleset ze levert onthouden: vertrekpunt voor het
+    // bij- en afschakelen van extra koppels (0.7.47).
+    *state.base_couplers.write() = organ_info.couplers.clone().unwrap_or_default();
+    state.extra_coupler_ids.write().clear();
+
     // Reset bij orgelwissel: stop alle klinkende noten en wis de getrokken registratie +
     // crescendo-stops + koppels, zodat geen geluid of registratie van het vórige orgel
     // achterblijft (anders het symptoom "geluid is actief maar de knop niet"). De
@@ -6384,6 +6486,17 @@ fn restore_organ_settings(state: &AppState, organ_id: &str) {
 
     // Alle opnameposities in het geheugen houden (per orgel).
     *state.load_all_perspectives.write() = settings.load_all_perspectives;
+
+    // Doorlopend klavier (per orgel).
+    crate::state::DOORLOPEND_KLAVIER.store(
+        settings.continuous_keyboard, std::sync::atomic::Ordering::Relaxed);
+
+    // Extra koppels (per orgel): meteen in de koppellijst zetten.
+    if !settings.extra_couplers.is_empty() {
+        *state.extra_coupler_ids.write() = settings.extra_couplers.clone();
+        koppellijst_herbouwen(state);
+        info!("{} extra koppels hersteld", settings.extra_couplers.len());
+    }
 
     // Restore MIDI channel mappings
     if !settings.midi_mappings.is_empty() {
@@ -7067,6 +7180,8 @@ pub fn do_save_organ_settings(state: &AppState, presets: HashMap<String, PresetD
         wind_group_configs,
         perspectives,
         load_all_perspectives: *state.load_all_perspectives.read(),
+        extra_couplers: state.extra_coupler_ids.read().clone(),
+        continuous_keyboard: crate::state::DOORLOPEND_KLAVIER.load(std::sync::atomic::Ordering::Relaxed),
         remote_layout,
     };
 

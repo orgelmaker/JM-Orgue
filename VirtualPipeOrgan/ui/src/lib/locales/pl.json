@@ -232,6 +232,8 @@
     "audio_switch_to_headphones": "Przełącz na słuchawki",
     "autosave_hint": "Ustawienia są zapisywane automatycznie w folderze organów i w programie.",
     "midi_transpose_abbr": "Transp",
+    "continuous_keyboard": "Ciągła klawiatura",
+    "continuous_keyboard_title": "Klawisze poza nagraną skalą głosu grają piszczałkę o oktawę wyżej lub niżej, zamiast milczeć. Klawiatura 61-klawiszowa gra więc dalej na zestawie 56 dźwięków — jak organy z powtarzaną górną oktawą.",
     "short_octave": "Krótka oktawa",
     "short_octave_title": "Historyczna klawiatura z niepełną najniższą oktawą: klawisz wyglądający jak E brzmi jako C, Fis jako D, a Gis jako E. Cis i Dis tam nie występują.",
     "short_octave_needs_range": "Najpierw naucz zakresu klawiatury (lub wpisz najniższy dźwięk): bez najniższego klawisza aplikacja nie wie, gdzie zaczyna się najniższa oktawa.",
@@ -289,6 +291,8 @@
     "not_drawn": "wyłączony"
   },
   "couplers": {
+    "extra_title": "Dodatkowe kopuły",
+    "extra_hint": "Tych połączeń nie ma w zestawie próbek, ale wynikają z układu klawiatur. Zaznacz, czego chcesz; pojawią się od razu na pasku połączeń.",
     "title": "Sprzęgła"
   },
   "midi": {
@@ -755,6 +759,10 @@
     "name_prompt": "Nazwa tego stroju:"
   },
   "eq": {
+    "profile": "Profil odsłuchu",
+    "profile_flat": "Neutralny",
+    "profile_headphones": "Słuchawki",
+    "profile_small_speakers": "Małe głośniki",
     "band_peak": "Dzwonowy",
     "band_lowpass": "Dolnoprzepustowy",
     "band_highpass": "Górnoprzepustowy",

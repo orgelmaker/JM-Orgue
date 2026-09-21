@@ -4837,16 +4837,6 @@ fn run_audio_thread(
                 voice_count_clone.store(voices_lock.len(), Ordering::Relaxed);
             }
 
-            // Update peak meters with decay
-            {
-                let mut pl = peak_left_clone.write();
-                *pl = *pl * 0.95 + peak_l * 0.05;
-            }
-            {
-                let mut pr = peak_right_clone.write();
-                *pr = *pr * 0.95 + peak_r * 0.05;
-            }
-
             // Luidspreker-testsignaal: overschrijft de uitgang volledig, zodat
             // er gegarandeerd uit precies één kanaal geluid komt. Bewust hier en
             // niet met een vroege return: de commandowachtrij en de stemmen
@@ -4855,12 +4845,28 @@ fn run_audio_thread(
             // luidsprekers speelt er toch niets.
             if let Some((tch, kind, gain)) = test_signal() {
                 let tch = tch as usize;
+                peak_l = 0.0;
+                peak_r = 0.0;
                 for frame in data.chunks_mut(channels.max(1)) {
                     let v = testsignaal.sample(kind, sample_rate) * gain;
                     for (ci, s) in frame.iter_mut().enumerate() {
                         *s = if ci == tch { v.clamp(-1.0, 1.0) } else { 0.0 };
+                        // De niveaumeter moet het testsignaal tonen; anders lijkt
+                        // het alsof er niets gebeurt terwijl de ruis loopt.
+                        if ci == 0 { peak_l = peak_l.max(s.abs()); }
+                        else if ci == 1 { peak_r = peak_r.max(s.abs()); }
                     }
                 }
+            }
+
+            // Update peak meters with decay
+            {
+                let mut pl = peak_left_clone.write();
+                *pl = *pl * 0.95 + peak_l * 0.05;
+            }
+            {
+                let mut pr = peak_right_clone.write();
+                *pr = *pr * 0.95 + peak_r * 0.05;
             }
 
             // Belastingsmeter: rendertijd t.o.v. de buffertijd van deze callback.

@@ -232,6 +232,8 @@
     "audio_switch_to_headphones": "Wissel naar hoofdtelefoon",
     "autosave_hint": "Instellingen worden automatisch opgeslagen in de orgelmap en in de app.",
     "midi_transpose_abbr": "Transp",
+    "continuous_keyboard": "Doorlopend klavier",
+    "continuous_keyboard_title": "Toetsen buiten het opgenomen bereik van een register spelen de pijp een octaaf hoger of lager in plaats van te zwijgen. Zo speelt een klavier van 61 toetsen door op een sampleset van 56 tonen — zoals een orgel met een herhalende bovenoctaaf.",
     "short_octave": "Kort octaaf",
     "short_octave_title": "Historische klaviatuur met een onvolledige onderste octaaf: de toets die eruitziet als E klinkt als C, Fis als D en Gis als E. Cis en Dis ontbreken daar.",
     "short_octave_needs_range": "Leer eerst het toetsbereik in (of vul de laagste noot in): zonder laagste toets weet de app niet waar de onderste octaaf begint.",
@@ -289,6 +291,8 @@
     "not_drawn": "uitgeschakeld"
   },
   "couplers": {
+    "extra_title": "Koppels erbij",
+    "extra_hint": "Deze koppels zitten niet in de sampleset maar volgen wel uit de klavierindeling. Vink aan wat je erbij wilt; ze verschijnen meteen op de koppelbalk.",
     "title": "Koppels"
   },
   "midi": {
@@ -755,6 +759,10 @@
     "name_prompt": "Naam voor deze stemming:"
   },
   "eq": {
+    "profile": "Luisterprofiel",
+    "profile_flat": "Neutraal",
+    "profile_headphones": "Koptelefoon",
+    "profile_small_speakers": "Kleine luidsprekers",
     "band_peak": "Piek",
     "band_lowpass": "Laagdoorlaat",
     "band_highpass": "Hoogdoorlaat",

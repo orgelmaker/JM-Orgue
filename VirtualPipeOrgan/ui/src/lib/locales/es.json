@@ -232,6 +232,8 @@
     "audio_switch_to_headphones": "Cambiar a auriculares",
     "autosave_hint": "Los ajustes se guardan automáticamente en la carpeta del órgano y en la aplicación.",
     "midi_transpose_abbr": "Transp",
+    "continuous_keyboard": "Teclado continuo",
+    "continuous_keyboard_title": "Las teclas fuera del ámbito grabado de un registro suenan el tubo una octava más alta o más baja en vez de callar. Así un teclado de 61 teclas sigue sonando con un conjunto de 56 notas: como un órgano con octava aguda repetida.",
     "short_octave": "Octava corta",
     "short_octave_title": "Teclado histórico con la octava grave incompleta: la tecla que parece mi suena do, fa sostenido suena re y sol sostenido suena mi. Allí faltan do sostenido y re sostenido.",
     "short_octave_needs_range": "Aprende primero el ámbito del teclado (o introduce la nota más grave): sin la tecla más grave la aplicación no sabe dónde empieza la octava grave.",
@@ -289,6 +291,8 @@
     "not_drawn": "desactivado"
   },
   "couplers": {
+    "extra_title": "Acoplamientos adicionales",
+    "extra_hint": "Estos acoplamientos no están en el conjunto de muestras pero se deducen de la disposición de los teclados. Marca lo que quieras; aparecen enseguida en la barra de acoplamientos.",
     "title": "Acoplamientos"
   },
   "midi": {
@@ -755,6 +759,10 @@
     "name_prompt": "Nombre de este temperamento:"
   },
   "eq": {
+    "profile": "Perfil de escucha",
+    "profile_flat": "Neutro",
+    "profile_headphones": "Auriculares",
+    "profile_small_speakers": "Altavoces pequeños",
     "band_peak": "Pico",
     "band_lowpass": "Paso bajo",
     "band_highpass": "Paso alto",

@@ -232,6 +232,8 @@
     "audio_switch_to_headphones": "Passer au casque",
     "autosave_hint": "Les paramètres sont enregistrés automatiquement dans le dossier de l'orgue et dans l'application.",
     "midi_transpose_abbr": "Transp",
+    "continuous_keyboard": "Clavier continu",
+    "continuous_keyboard_title": "Les touches hors de l'étendue enregistrée d'un jeu font sonner le tuyau une octave plus haut ou plus bas au lieu de rester muettes. Un clavier de 61 touches joue ainsi sur un ensemble de 56 notes — comme un orgue à octave aiguë répétée.",
     "short_octave": "Octave courte",
     "short_octave_title": "Clavier historique à octave grave incomplète : la touche qui ressemble à mi sonne do, fa dièse sonne ré et sol dièse sonne mi. Do dièse et ré dièse y manquent.",
     "short_octave_needs_range": "Apprenez d'abord l'étendue du clavier (ou saisissez la note la plus grave) : sans touche la plus grave, l'application ne sait pas où commence l'octave grave.",
@@ -289,6 +291,8 @@
     "not_drawn": "repoussé"
   },
   "couplers": {
+    "extra_title": "Accouplements en plus",
+    "extra_hint": "Ces accouplements ne figurent pas dans l'ensemble d'échantillons mais découlent de la disposition des claviers. Cochez ce que vous voulez ; ils apparaissent aussitôt sur la barre d'accouplements.",
     "title": "Accouplements"
   },
   "midi": {
@@ -755,6 +759,10 @@
     "name_prompt": "Nom de ce tempérament :"
   },
   "eq": {
+    "profile": "Profil d'écoute",
+    "profile_flat": "Neutre",
+    "profile_headphones": "Casque",
+    "profile_small_speakers": "Petites enceintes",
     "band_peak": "Crête",
     "band_lowpass": "Passe-bas",
     "band_highpass": "Passe-haut",
