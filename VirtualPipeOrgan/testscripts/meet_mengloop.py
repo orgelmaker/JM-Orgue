@@ -1,11 +1,12 @@
 # -*- coding: utf-8 -*-
-"""Meting van de mengloop (fase 1 en 2 van het meerkernige plan).
+"""Meting van de mengloop (meerkernig plan, fase 1 t/m 3).
 
 Draait op een lopende vpo-app.exe --test-api met een orgel geladen. Meet:
   A. de verdeling van de rendertijd over de passen bij oplopende belasting --
      dat bepaalt via de wet van Amdahl wat meerkernig maximaal kan opleveren;
-  B. wat het verdelen in stukken kost zolang alles nog op een kern draait
-     (fase 2): de reductie is de prijs, en die moet klein zijn.
+  B. wat het verdelen in stukken oplevert: sinds fase 3 doen echte
+     werkerthreads de stukken 1.., dus dit is de winst van meerkernig mengen
+     (en de reductie is de prijs).
 
 LET OP -- twee valkuilen die de eerste metingen bedierven:
 
@@ -39,19 +40,30 @@ def get(pad):
     return json.loads(urllib.request.urlopen(B + pad, timeout=30).read())
 
 
-def wacht_tot_rustig(alle_stops, tijdslimiet=600):
-    """Wacht tot het laden klaar is: registratie blijft staan én de belasting
-    bij stilte is laag. Geeft het aantal getrokken registers terug."""
+def wacht_tot_rustig(alle_stops, tijdslimiet=900):
+    """Wacht tot het laden klaar is.
+
+    Een halve controle is niet genoeg: de registratie laat zich tijdens het
+    laden gewoon zetten, en pas als het laden klaar is (bij een grote set na
+    twintig seconden) wordt hij teruggezet. We eisen daarom dat de registratie
+    TWEE opeenvolgende vensters overleeft.
+    """
     t0 = time.time()
+    goed = 0
     while time.time() - t0 < tijdslimiet:
-        post("/stops/set", {"ids": alle_stops})
-        time.sleep(6.0)
+        if goed == 0:
+            post("/stops/set", {"ids": alle_stops})
+        time.sleep(8.0)
         st = get("/status")
         rustig = st["render_load"] < 0.10 and st["voice_count"] == 0
         if st["drawn_stop_count"] == len(alle_stops) and rustig:
-            return st
-        print("   ... nog bezig met laden (registers %d/%d, belasting %.0f%%)"
-              % (st["drawn_stop_count"], len(alle_stops), st["render_load"] * 100))
+            goed += 1
+            if goed >= 2:
+                return st
+        else:
+            goed = 0
+            print("   ... nog bezig met laden (registers %d/%d, belasting %.0f%%)"
+                  % (st["drawn_stop_count"], len(alle_stops), st["render_load"] * 100))
     sys.exit("sampleset is na %d s nog niet klaar met laden" % tijdslimiet)
 
 
@@ -107,7 +119,7 @@ def main():
               % (n_noten, r["stemmen"], r["totaal"], r["wind_trem"], r["stemwerk"],
                  r["keten"], deel))
 
-    print("\nB. Kosten van het verdelen in stukken (nog alles op een kern)")
+    print("\nB. Winst van het verdelen over werkerthreads")
     print("   drie ronden afgewisseld, mediaan per aantal stukken")
     noten = list(range(48, 48 + 10 * 2, 2))
     metingen = {k: [] for k in (1, 2, 4, 8)}

@@ -243,11 +243,53 @@ ze schommelen per akkoord meer dan het verschil dat we zoeken. Zonder zo'n pad
 steunt de gelijkheid op de unittests en op de redenering dat `chunks_mut` elke
 stem precies één keer raakt; dat is genoeg voor fase 2, maar niet voor fase 3.
 
-**Fase 3 — de pool en de barrière (twee tot drie dagen).** Werkers, prioriteit,
-FTZ/DAZ, spin-en-park, het opruimen bij een streamwissel. Vast op het door de
-gebruiker ingestelde aantal, standaard nog 1. *Verificatie: honderd
-audiowissels achter elkaar zonder achterblijvende threads; de rookproef en alle
-bestaande tests groen.*
+**Fase 3 — de pool en de barrière. ✅ AF (21 september 2026).** Een eigen
+werkerspool (`src-tauri/src/mengpool.rs`) met vaste threads op
+`THREAD_PRIORITY_TIME_CRITICAL` en eigen FTZ/DAZ. De audiothread schrijft per
+blok een taak per werker, hoogt de generatieteller op (Release), doet zijn eigen
+stuk en wacht spinnend tot iedereen klaar meldt (Acquire). Werkers wachten eerst
+spinnend (2 ms) en parkeren daarna, zodat een stil orgel geen kernen laat
+rondtollen en wakker maken tijdens het spelen geen systeemaanroep kost.
+
+**Afwijking van het ontwerp:** de pool hangt aan de *instelling*, niet aan de
+audiostream. Dat is eenvoudiger én veiliger — er bestaat altijd precies één pool
+en een audiowissel hoeft geen threads op te ruimen. De callback pakt hem met
+`try_read`; lukt dat niet (de pool wordt net herbouwd), dan mengt die callback
+op één kern.
+
+**Eén gevaar dat de meting blootlegde en dat gerepareerd is:** het opruimen van
+een oude pool joint zeven threads, en dat mag nooit in een audio-callback
+gebeuren. De callback houdt zijn kopie hooguit één callback vast, dus de
+instelling wacht nu tot zij de laatste eigenaar is voordat ze de oude pool
+loslaat.
+
+*Gemeten winst* (i9-10885H, 8 fysieke kernen, WASAPI 48 kHz, 480 frames,
+Friesach met alle 44 registers):
+
+| Stemmen | 1 kern | 8 stukken | winst |
+|---|---|---|---|
+| 428 | 35,5 % | 10,3 % | 3,5× |
+| 744 | 76,1 % | 34,0 % | 2,2× |
+| 1.024 | 178,9 % | 48,0 % | 3,7× |
+| 1.088 | 170,0 % | 50,1 % | 3,4× |
+
+En per aantal stukken bij 436 stemmen: 1 stuk 37,5 %, 2 stukken 20,5 %,
+4 stukken 12,4 %, 8 stukken 9,8 % — de reductie kost daarbij 0,02 %, 0,11 % en
+0,28 %. Dat is **een factor 3,4 tot 3,7**, precies in de voorspelde bandbreedte.
+Bij 1.024 stemmen zakt de belasting van onspeelbaar (179 %) naar comfortabel
+(48 %); de polyfonie-kap is daarmee eerder bindend dan de rekenkracht.
+
+*Verificatie:* 202 tests groen, waaronder vier die bewijzen dat verdeeld mengen
+hetzelfde geluid geeft (200 stemmen, 1 tegen 2/3/4/8 stukken, verschil onder een
+honderdduizendste van het niveau) en drie voor de pool zelf. Stresstest: 200 keer
+de pool herbouwen terwijl 576 stemmen klinken — 576 stemmen erna, één extra
+zware callback, nul gedropte realtime-commando's, en evenveel threads als ervoor
+(60 → 60), dus geen lek.
+
+*Het offline render-pad is niet gebouwd.* In plaats daarvan bewijst een
+unittest de gelijkheid rechtstreeks op de mengfunctie, met echte stemmen die uit
+echte preload-buffers lezen. Dat is scherper dan een WAV-vergelijking en het
+draait mee in de gewone testronde.
 
 **Fase 4 — de instelling en de automatische keuze (een dag).** De
 voorkeursinstelling, de kernendetectie, de standaardwaarde bij de eerste start,

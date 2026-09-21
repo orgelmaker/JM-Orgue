@@ -148,6 +148,112 @@ pub fn polyphony_target() -> usize {
     POLYPHONY_TARGET.load(Ordering::Relaxed).clamp(MIN_LIVE_VOICES, MAX_LIVE_VOICES)
 }
 
+/// Alles wat de stemmenlus van één blok nodig heeft en wat binnen dat blok
+/// niet verandert. Uitsluitend gedeelde verwijzingen, zodat dit straks zonder
+/// kopie naar een werkerthread kan.
+pub(crate) struct MengBlok<'a> {
+    /// Aantal frames in dit blok.
+    pub bn: usize,
+    /// Per frame, per divisie: de wind- en tremulantmodulatie uit pas 1.
+    pub wind_rate: &'a [[f64; 32]],
+    pub trem_rate: &'a [[f64; 32]],
+    pub wind_gain: &'a [[f32; 32]],
+    pub trem_amp: &'a [[f32; 32]],
+    /// Constant-power pan per divisie, één keer per callback voorgerekend.
+    pub pan_cos: &'a [f32; 32],
+    pub pan_sin: &'a [f32; 32],
+    /// Pan-instelling per divisie (-1..1), voor de C/Cis-spreiding.
+    pub div_pans: &'a [f32],
+    /// C/Cis-lade-spreiding: globaal aan, per divisie in- of uitgeschakeld.
+    pub ccis_on: bool,
+    pub ccis_en: &'a [bool],
+    pub ccis_strength: f32,
+    pub ccis_falloff: f32,
+    pub ccis_swap: bool,
+}
+
+/// De stemmenlus van één blok: elke stem leest zijn hele blok en telt op bij
+/// de opteltabel van zijn divisie.
+///
+/// Losse functie sinds fase 3 van de meerkernige mengloop: `deel` is een
+/// aaneengesloten stuk van de stemmenlijst en `doel_l`/`doel_r` de opteltabel
+/// van dát stuk. Eén stuk geeft precies de oude lus; meerdere stukken kunnen
+/// naast elkaar draaien omdat elk stuk alleen zijn eigen stemmen aanraakt en
+/// alleen in zijn eigen tabel schrijft.
+pub(crate) fn meng_stemmen_blok(
+    deel: &mut [PlayingVoice],
+    doel_l: &mut [[f32; 32]],
+    doel_r: &mut [[f32; 32]],
+    blok: &MengBlok<'_>,
+) {
+    let bn = blok.bn;
+    for voice in deel.iter_mut() {
+        let div_idx = voice.c_div;
+        let in_range = div_idx < 32;
+        // Effectieve afspeel-rate = basis (samplerate-correctie) ×
+        // gecachte temperament+voicing-pitch × per-sample wind/trem.
+        // next_sample() leest self.rate; we zetten hem per frame en
+        // herstellen daarna de basis (anders compoundeert de detune).
+        let base_rate = voice.rate;
+        let pitch_mul = voice.c_pitch_mul;
+        let use_lfo = voice.c_use_lfo_trem;
+        let vgain = voice.c_voicing_gain;
+        // Panning: per stem één keer per blok. Standaard de per-callback
+        // voorgerekende constant-power cos/sin van de divisie; met C/Cis-
+        // lade-spreiding wijkt de pan per noot af (even MIDI-noten naar
+        // de ene kant, oneven naar de andere, sterkst bij de laagste
+        // pijpen) — noot en instellingen zijn constant binnen de callback.
+        let (pan_cos, pan_sin) = if in_range && blok.ccis_on
+            && blok.ccis_en.get(div_idx).copied().unwrap_or(false)
+        {
+            let n = voice.midi_note as f32;
+            let norm = ((n - 36.0) / 60.0).clamp(0.0, 1.0); // 0 bij C groot, 1 bij de hoogste toets
+            let pitch_factor = (1.0 - blok.ccis_falloff * norm).clamp(0.0, 1.0);
+            let sep = (blok.ccis_strength * pitch_factor).clamp(0.0, 0.95);
+            let mut side = if voice.midi_note % 2 == 0 { -1.0 } else { 1.0 };
+            if blok.ccis_swap { side = -side; }
+            let note_pan = side * sep;
+            let base_pan = blok.div_pans.get(div_idx).copied().unwrap_or(0.0);
+            let total_pan = (base_pan + note_pan).clamp(-1.0, 1.0);
+            let angle = (total_pan + 1.0) * 0.25 * std::f32::consts::PI;
+            (angle.cos(), angle.sin())
+        } else if in_range {
+            (blok.pan_cos[div_idx], blok.pan_sin[div_idx])
+        } else {
+            (0.0, 0.0)
+        };
+        for f in 0..bn {
+            let mut eff_rate = base_rate * pitch_mul;
+            if in_range {
+                eff_rate *= blok.wind_rate[f][div_idx];
+                if use_lfo {
+                    eff_rate *= blok.trem_rate[f][div_idx];
+                }
+            }
+            voice.rate = eff_rate;
+            let (sl, sr) = voice.next_sample();
+            voice.rate = base_rate;
+
+            // Volume = gecachte voicing-gain × per-sample wind/trem-amplitude.
+            let mut g = vgain;
+            if in_range {
+                g *= blok.wind_gain[f][div_idx];
+                if use_lfo {
+                    g *= blok.trem_amp[f][div_idx];
+                }
+            }
+            // Mono: sl == sr → exact het oude pad. Stereo: L en R
+            // gescheiden, met dezelfde pan-gewichten (pan werkt dan als
+            // balans; op pan 0 blijft het niveau gelijk aan mono-sets).
+            let contribution_l = sl * g;
+            let contribution_r = sr * g;
+            if !in_range { continue; }
+            doel_l[f][div_idx] += contribution_l * pan_cos;
+            doel_r[f][div_idx] += contribution_r * pan_sin;
+        }
+    }
+}
+
 /// Telt de deel-opteltabellen van de stukken 1.. op bij die van stuk 0.
 ///
 /// Losse functie omdat dit het enige stuk nieuwe rekenwerk is dat het verdelen
@@ -196,8 +302,50 @@ pub const MAX_MENG_STUKKEN: usize = 8;
 /// thread bij komt.
 static MENG_STUKKEN: AtomicUsize = AtomicUsize::new(1);
 
+/// De werkerspool. Proces-breed en gekoppeld aan de INSTELLING, niet aan de
+/// audiostream: zo hoeft een audiowissel geen threads op te ruimen en aan te
+/// maken (dat was in het plan nog wel zo bedacht, maar een pool die de wissel
+/// overleeft is eenvoudiger én veiliger — er bestaat er altijd precies één).
+/// Staat de instelling op 1, dan bevat de pool nul threads.
+static MENGPOOL: parking_lot::RwLock<Option<std::sync::Arc<crate::mengpool::MengPool>>> =
+    parking_lot::RwLock::new(None);
+
+/// De pool voor deze callback, of None zolang hij herbouwd wordt. `try_read`
+/// omdat de audiothread nooit mag blokkeren: lukt het niet, dan mengt deze
+/// callback op één kern — hoogstens een paar milliseconden lang.
+pub(crate) fn mengpool() -> Option<std::sync::Arc<crate::mengpool::MengPool>> {
+    MENGPOOL.try_read().and_then(|p| p.clone())
+}
+
 pub fn set_meng_stukken(n: usize) {
-    MENG_STUKKEN.store(n.clamp(1, MAX_MENG_STUKKEN), Ordering::Relaxed);
+    let n = n.clamp(1, MAX_MENG_STUKKEN);
+    let vorig = MENG_STUKKEN.swap(n, Ordering::Relaxed);
+    if vorig == n && MENGPOOL.read().is_some() {
+        return;
+    }
+    // Pool opnieuw bouwen met n-1 werkers. De audiothread valt in dat korte
+    // venster terug op één kern (mengpool() geeft dan None of de oude pool).
+    let nieuw = std::sync::Arc::new(crate::mengpool::MengPool::nieuw(n.saturating_sub(1)));
+    let oud = MENGPOOL.write().replace(nieuw);
+
+    // De oude pool moet HIER opgeruimd worden, niet op de audiothread: zijn
+    // Drop joint de werkerthreads, en dat kan milliseconden duren — in een
+    // audio-callback is dat een onderbreking. De callback houdt zijn kopie
+    // hooguit één callback vast, dus we wachten tot wij de laatste eigenaar
+    // zijn en laten hem dan pas los.
+    if let Some(oud) = oud {
+        let t0 = std::time::Instant::now();
+        while std::sync::Arc::strong_count(&oud) > 1
+            && t0.elapsed() < std::time::Duration::from_secs(2)
+        {
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        if std::sync::Arc::strong_count(&oud) > 1 {
+            tracing::warn!("Mengloop: oude pool nog in gebruik na 2 s — opruimen uitgesteld");
+        }
+        drop(oud);
+    }
+    tracing::info!("Mengloop: {} stuk(ken), {} werkerthread(s)", n, n.saturating_sub(1));
 }
 
 pub fn meng_stukken() -> usize {
@@ -505,7 +653,7 @@ enum VoiceSampleSource {
 }
 
 /// A playing voice (internal to audio thread)
-struct PlayingVoice {
+pub(crate) struct PlayingVoice {
     source: VoiceSampleSource,
     position: f64,
     /// Playback rate (sample_rate / output_rate) for pitch correction
@@ -4642,6 +4790,9 @@ fn run_audio_thread(
                     let n = voices_lock.len();
                     if n < MENG_DREMPEL_STEMMEN { 1 } else { meng_stukken().min(n) }
                 };
+                // De pool één keer per callback ophalen (één atomaire
+                // Arc-verhoging), niet per blok.
+                let pool = if stukken > 1 { mengpool() } else { None };
                 // Tijdmeting per pas (fase 1). Opgeteld over alle blokken van
                 // deze callback; aan het eind omgerekend naar promille van de
                 // buffertijd.
@@ -4721,7 +4872,10 @@ fn run_audio_thread(
                         blk_div_r[f] = [0.0f32; 32];
                     }
                     // Deel-opteltabellen van de stukken 1.. wissen. Alleen de
-                    // stukken die deze callback echt gebruikt worden.
+                    // stukken die deze callback echt gebruikt worden. Wissen
+                    // gebeurt vóór het mengen, dus op basis van het GEVRAAGDE
+                    // aantal; de pool kan er daarna minder gebruiken en die
+                    // blijven dan nul.
                     for k in 0..stukken.saturating_sub(1) {
                         for f in 0..bn {
                             blk_part_l[k][f] = [0.0f32; 32];
@@ -4735,81 +4889,38 @@ fn run_audio_thread(
                     // een eigen opteltabel. Bij één stuk is dit letterlijk de
                     // oude lus over alle stemmen met blk_div_l/r als doel.
                     let t_pas = std::time::Instant::now();
-                    let per_stuk = voices_lock.len().div_ceil(stukken.max(1));
-                    for (stuk, deel) in voices_lock.chunks_mut(per_stuk.max(1)).enumerate() {
-                    // Stuk 0 schrijft rechtstreeks in de hoofdtabel; de rest in
-                    // zijn eigen deeltabel.
-                    let (doel_l, doel_r): (&mut Vec<[f32; 32]>, &mut Vec<[f32; 32]>) = if stuk == 0 {
-                        (&mut blk_div_l, &mut blk_div_r)
-                    } else {
-                        (&mut blk_part_l[stuk - 1], &mut blk_part_r[stuk - 1])
+                    let blok = MengBlok {
+                        bn,
+                        wind_rate: &blk_wind_rate,
+                        trem_rate: &blk_trem_rate,
+                        wind_gain: &blk_wind_gain,
+                        trem_amp: &blk_trem_amp,
+                        pan_cos: &div_pan_cos,
+                        pan_sin: &div_pan_sin,
+                        div_pans: &div_pans,
+                        ccis_on,
+                        ccis_en: &ccis_en_lock,
+                        ccis_strength,
+                        ccis_falloff,
+                        ccis_swap,
                     };
-                    for voice in deel.iter_mut() {
-                        let div_idx = voice.c_div;
-                        let in_range = div_idx < 32;
-                        // Effectieve afspeel-rate = basis (samplerate-correctie) ×
-                        // gecachte temperament+voicing-pitch × per-sample wind/trem.
-                        // next_sample() leest self.rate; we zetten hem per frame en
-                        // herstellen daarna de basis (anders compoundeert de detune).
-                        let base_rate = voice.rate;
-                        let pitch_mul = voice.c_pitch_mul;
-                        let use_lfo = voice.c_use_lfo_trem;
-                        let vgain = voice.c_voicing_gain;
-                        // Panning: per stem één keer per blok. Standaard de per-callback
-                        // voorgerekende constant-power cos/sin van de divisie; met C/Cis-
-                        // lade-spreiding wijkt de pan per noot af (even MIDI-noten naar
-                        // de ene kant, oneven naar de andere, sterkst bij de laagste
-                        // pijpen) — noot en instellingen zijn constant binnen de callback.
-                        let (pan_cos, pan_sin) = if in_range && ccis_on
-                            && ccis_en_lock.get(div_idx).copied().unwrap_or(false)
-                        {
-                            let n = voice.midi_note as f32;
-                            let norm = ((n - 36.0) / 60.0).clamp(0.0, 1.0); // 0 bij C groot, 1 bij c''''
-                            let pitch_factor = (1.0 - ccis_falloff * norm).clamp(0.0, 1.0);
-                            let sep = (ccis_strength * pitch_factor).clamp(0.0, 0.95);
-                            let mut side = if voice.midi_note % 2 == 0 { -1.0 } else { 1.0 };
-                            if ccis_swap { side = -side; }
-                            let note_pan = side * sep;
-                            let base_pan = div_pans.get(div_idx).copied().unwrap_or(0.0);
-                            let total_pan = (base_pan + note_pan).clamp(-1.0, 1.0);
-                            let angle = (total_pan + 1.0) * 0.25 * std::f32::consts::PI;
-                            (angle.cos(), angle.sin())
-                        } else if in_range {
-                            (div_pan_cos[div_idx], div_pan_sin[div_idx])
-                        } else {
-                            (0.0, 0.0)
-                        };
-                        for f in 0..bn {
-                            let mut eff_rate = base_rate * pitch_mul;
-                            if in_range {
-                                eff_rate *= blk_wind_rate[f][div_idx];
-                                if use_lfo {
-                                    eff_rate *= blk_trem_rate[f][div_idx];
-                                }
-                            }
-                            voice.rate = eff_rate;
-                            let (sl, sr) = voice.next_sample();
-                            voice.rate = base_rate;
-
-                            // Volume = gecachte voicing-gain × per-sample wind/trem-amplitude.
-                            let mut g = vgain;
-                            if in_range {
-                                g *= blk_wind_gain[f][div_idx];
-                                if use_lfo {
-                                    g *= blk_trem_amp[f][div_idx];
-                                }
-                            }
-                            // Mono: sl == sr → exact het oude pad. Stereo: L en R
-                            // gescheiden, met dezelfde pan-gewichten (pan werkt dan als
-                            // balans; op pan 0 blijft het niveau gelijk aan mono-sets).
-                            let contribution_l = sl * g;
-                            let contribution_r = sr * g;
-                            if !in_range { continue; }
-                            doel_l[f][div_idx] += contribution_l * pan_cos;
-                            doel_r[f][div_idx] += contribution_r * pan_sin;
+                    // Met pool: de werkers doen de stukken 1.., de audiothread
+                    // stuk 0, en we keren pas terug als iedereen klaar is.
+                    // Zonder pool (instelling 1, of pool net in herbouw): de
+                    // oude lus over alle stemmen.
+                    let echte_stukken = match pool.as_ref() {
+                        Some(p) => {
+                            p.verdeel_en_meng(
+                                &mut voices_lock, &mut blk_div_l, &mut blk_div_r,
+                                &mut blk_part_l, &mut blk_part_r, stukken, &blok,
+                            );
+                            stukken.min(p.werkers() + 1)
                         }
-                    }
-                    }
+                        None => {
+                            meng_stemmen_blok(&mut voices_lock, &mut blk_div_l, &mut blk_div_r, &blok);
+                            1
+                        }
+                    };
                     ns_pass[1] += t_pas.elapsed().as_nanos();
 
                     // ── Pass 4: de deeltabellen optellen ──
@@ -4820,7 +4931,7 @@ fn run_audio_thread(
                     reduceer_deeltabellen(
                         &mut blk_div_l, &mut blk_div_r,
                         &blk_part_l, &blk_part_r,
-                        stukken, n_real_divs.clamp(1, 32), bn,
+                        echte_stukken, n_real_divs.clamp(1, 32), bn,
                     );
                     ns_pass[3] += t_pas.elapsed().as_nanos();
 
@@ -5545,5 +5656,170 @@ mod mengloop_stukken_tests {
         // Onder de drempel loont verdelen niet; hij moet wel ruim onder een
         // gewoon akkoord met een paar registers liggen.
         assert!(MENG_DREMPEL_STEMMEN >= 16 && MENG_DREMPEL_STEMMEN <= 256);
+    }
+}
+
+#[cfg(test)]
+mod meng_verdeling_tests {
+    //! Bewijst dat het verdelen van de stemmen over stukken hetzelfde geluid
+    //! oplevert. Dit is de test die fase 3 (echte werkerthreads) afdekt: die
+    //! verandert alleen WAAR een stuk gemengd wordt, niet WAT er gebeurt.
+    use super::*;
+    use std::sync::Arc;
+    use vpo_sampler::PreloadBuffer;
+
+    /// Een preload-buffer met een herkenbare golfvorm, zodat elke stem iets
+    /// anders bijdraagt en een verwisseling meteen opvalt.
+    fn buffer(zaad: u32, lengte: usize) -> Arc<PreloadBuffer> {
+        let data: Vec<f32> = (0..lengte)
+            .map(|i| ((i as f32 * 0.01 + zaad as f32) .sin()) * 0.5)
+            .collect();
+        Arc::new(PreloadBuffer {
+            attack_data: data,
+            attack_right: None,
+            sample_rate: 48000,
+            total_samples: lengte,
+            loop_start: Some(0),
+            loop_end: Some(lengte as u64 - 1),
+            source_path: std::path::PathBuf::from("test.wav"),
+            channels: 1,
+            bits_per_sample: 16,
+            data_offset: 44,
+            align_table: None,
+            trim_start: 0,
+            smpl_unity_note: None,
+            smpl_pitch_fraction_cents: None,
+        })
+    }
+
+    fn stemmen(n: usize) -> Vec<PlayingVoice> {
+        (0..n).map(|i| {
+            let mut v = PlayingVoice::new_from_preload(
+                buffer(i as u32, 4096), i as u32, (i as u32) + 1,
+                36 + (i % 48) as u8, 1.0, 48000);
+            // De velden die de mengloop leest, gevarieerd invullen.
+            v.c_div = i % 4;
+            v.c_pitch_mul = 1.0 + (i % 7) as f64 * 0.001;
+            v.c_use_lfo_trem = i % 3 == 0;
+            v.c_voicing_gain = 0.8 + (i % 5) as f32 * 0.05;
+            v
+        }).collect()
+    }
+
+    fn blok_context<'a>(
+        wind_rate: &'a [[f64; 32]], trem_rate: &'a [[f64; 32]],
+        wind_gain: &'a [[f32; 32]], trem_amp: &'a [[f32; 32]],
+        pan_cos: &'a [f32; 32], pan_sin: &'a [f32; 32], pans: &'a [f32],
+        ccis_en: &'a [bool], bn: usize, ccis: bool,
+    ) -> MengBlok<'a> {
+        MengBlok {
+            bn, wind_rate, trem_rate, wind_gain, trem_amp,
+            pan_cos, pan_sin, div_pans: pans, ccis_on: ccis, ccis_en,
+            ccis_strength: 0.7, ccis_falloff: 0.6, ccis_swap: false,
+        }
+    }
+
+    /// Mengt `n_stemmen` in `stukken` stukken en geeft de opgetelde tabellen.
+    fn meng(n_stemmen: usize, stukken: usize, bn: usize, ccis: bool)
+        -> (Vec<[f32; 32]>, Vec<[f32; 32]>)
+    {
+        let wind_rate = vec![[1.002f64; 32]; bn];
+        let trem_rate = vec![[0.999f64; 32]; bn];
+        let wind_gain = vec![[0.97f32; 32]; bn];
+        let trem_amp = vec![[1.03f32; 32]; bn];
+        let mut pan_cos = [0.0f32; 32];
+        let mut pan_sin = [0.0f32; 32];
+        for d in 0..32 {
+            let angle = (d as f32 / 31.0 + 1.0) * 0.25 * std::f32::consts::PI;
+            pan_cos[d] = angle.cos();
+            pan_sin[d] = angle.sin();
+        }
+        let pans: Vec<f32> = (0..32).map(|d| (d as f32 / 31.0) * 2.0 - 1.0).collect();
+        let ccis_en: Vec<bool> = (0..32).map(|d| d % 2 == 0).collect();
+        let blok = blok_context(&wind_rate, &trem_rate, &wind_gain, &trem_amp,
+                                &pan_cos, &pan_sin, &pans, &ccis_en, bn, ccis);
+
+        let mut voices = stemmen(n_stemmen);
+        let mut hoofd_l = vec![[0.0f32; 32]; bn];
+        let mut hoofd_r = vec![[0.0f32; 32]; bn];
+        let mut deel_l: Vec<Vec<[f32; 32]>> =
+            (1..stukken.max(1)).map(|_| vec![[0.0f32; 32]; bn]).collect();
+        let mut deel_r: Vec<Vec<[f32; 32]>> =
+            (1..stukken.max(1)).map(|_| vec![[0.0f32; 32]; bn]).collect();
+
+        let per_stuk = voices.len().div_ceil(stukken.max(1)).max(1);
+        for (stuk, deel) in voices.chunks_mut(per_stuk).enumerate() {
+            let (dl, dr): (&mut [[f32; 32]], &mut [[f32; 32]]) = if stuk == 0 {
+                (&mut hoofd_l, &mut hoofd_r)
+            } else {
+                (&mut deel_l[stuk - 1], &mut deel_r[stuk - 1])
+            };
+            meng_stemmen_blok(deel, dl, dr, &blok);
+        }
+        reduceer_deeltabellen(&mut hoofd_l, &mut hoofd_r, &deel_l, &deel_r, stukken, 4, bn);
+        (hoofd_l, hoofd_r)
+    }
+
+    /// Grootste absolute verschil tussen twee tabellen, en het grootste
+    /// voorkomende niveau (om het verschil relatief te kunnen wegen).
+    fn verschil(a: &[[f32; 32]], b: &[[f32; 32]]) -> (f32, f32) {
+        let mut max_d = 0.0f32;
+        let mut max_v = 0.0f32;
+        for (ra, rb) in a.iter().zip(b.iter()) {
+            for d in 0..32 {
+                max_d = max_d.max((ra[d] - rb[d]).abs());
+                max_v = max_v.max(ra[d].abs());
+            }
+        }
+        (max_d, max_v)
+    }
+
+    #[test]
+    fn verdeeld_mengen_geeft_hetzelfde_geluid() {
+        // De kern van fase 3: 200 stemmen, in 1 / 2 / 4 / 8 stukken. Het
+        // verschil mag alleen de afrondingsfout van een andere optelvolgorde
+        // zijn -- ruim onder een miljoenste van het niveau.
+        let (ref_l, ref_r) = meng(200, 1, 64, true);
+        for stukken in [2usize, 3, 4, 8] {
+            let (l, r) = meng(200, stukken, 64, true);
+            let (dl, niveau) = verschil(&ref_l, &l);
+            let (dr, _) = verschil(&ref_r, &r);
+            assert!(niveau > 0.1, "de test zelf produceert te weinig geluid ({})", niveau);
+            let grens = niveau * 1e-5;
+            assert!(dl <= grens, "{} stukken: links {} verschil op niveau {}", stukken, dl, niveau);
+            assert!(dr <= grens, "{} stukken: rechts {} verschil op niveau {}", stukken, dr, niveau);
+        }
+    }
+
+    #[test]
+    fn ook_zonder_ccis_spreiding() {
+        let (ref_l, _) = meng(120, 1, 32, false);
+        let (l, _) = meng(120, 4, 32, false);
+        let (d, niveau) = verschil(&ref_l, &l);
+        assert!(d <= niveau * 1e-5, "verschil {} op niveau {}", d, niveau);
+    }
+
+    #[test]
+    fn meer_stukken_dan_stemmen_gaat_goed() {
+        // chunks_mut mag nooit meer stukken opleveren dan er deeltabellen zijn.
+        let (ref_l, _) = meng(3, 1, 16, true);
+        let (l, _) = meng(3, 8, 16, true);
+        let (d, niveau) = verschil(&ref_l, &l);
+        assert!(niveau > 0.0);
+        assert!(d <= niveau * 1e-5, "verschil {} op niveau {}", d, niveau);
+    }
+
+    #[test]
+    fn geen_enkele_stem_valt_bij_een_stukgrens_weg() {
+        // Één stem minder MOET een ander resultaat geven. Zou een stem op een
+        // stukgrens stilletjes wegvallen, dan zou het verschil nul zijn.
+        // (Luider worden is geen goede maatstaf: stemmen met verschillende
+        // fase kunnen elkaar ook uitdoven.)
+        let (met, _) = meng(200, 4, 32, false);
+        let (zonder, _) = meng(199, 4, 32, false);
+        let (d, niveau) = verschil(&met, &zonder);
+        assert!(d > niveau * 1e-4,
+            "199 en 200 stemmen geven bijna hetzelfde ({} op niveau {}) — er valt er een weg",
+            d, niveau);
     }
 }

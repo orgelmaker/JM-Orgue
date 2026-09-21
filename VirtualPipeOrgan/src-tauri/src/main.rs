@@ -10,6 +10,7 @@ mod feedback;
 mod library;
 mod silence;
 mod loop_tool;
+mod mengpool;
 mod midi_archive;
 mod notation;
 mod recorder;
