@@ -52,7 +52,8 @@
 //!        /settings/temperament?name=..&fine=..&cents=c0,..,c11&retune=0|1 (retune default 0 = Origineel)
 //!   POST /temperament             - body: {"name":"..","cents":[12],"retune":bool,"fine":..} (zelfde als hierboven, JSON)
 //!   GET  /tuning                  - hertemperen: retune_pipes/retune_total (orgel) + retune/name/fine_tune (mirror)
-//!   POST /settings/wind?enabled=0|1 - windmodel voor alle groepen aan/uit (meting zonder wind-sag)
+//!   POST /settings/wind?enabled=0|1[&reservoir=&damping=&sag=] - windmodel voor alle groepen
+//!   GET  /wind - live winddruk, stemmen en cent-afwijking per windgroep
 //!   POST /record/stop             - geeft ook peak_hz (FFT-piek van de laatste ~2,7 s, toonhoogtemeting)
 //!   GET  /settings/organ|mirror   - opgeslagen settings / runtime-mirror (mirror bevat ook perspectives)
 //!   GET  /perspectives            - microfoonperspectieven van het geladen orgel: [{name,enabled,gain_db,loaded,slot,pipe_count}]
@@ -515,6 +516,7 @@ fn route_test_only(
         (tiny_http::Method::Post, "/temperament") => handle_set_temperament_json(state, body),
         (tiny_http::Method::Get, "/tuning") => Ok(handle_tuning(state)),
         (tiny_http::Method::Post, "/settings/wind") => handle_set_wind(state, query),
+        (tiny_http::Method::Get, "/wind") => handle_wind_status(),
         (tiny_http::Method::Post, "/settings/eq") => handle_set_eq(state, query),
         (tiny_http::Method::Post, "/settings/reverb") => handle_set_reverb(state, query),
         (tiny_http::Method::Post, "/settings/pan") => handle_set_pan(state, query),
@@ -1670,16 +1672,41 @@ fn handle_tuning(state: &AppState) -> Value {
 /// bevatten). division_index wordt door de handler als groep-index gelezen.
 fn handle_set_wind(state: &AppState, query: &str) -> Result<Value, (u16, String)> {
     let enabled = parse_query::<u8>(query, "enabled").map(|v| v != 0).unwrap_or(false);
+    // Optioneel de drie regelaars meegeven, zodat een meetscript ook de
+    // uiterste standen kan nalopen (0.7.50).
+    let reservoir: f32 = parse_query(query, "reservoir").unwrap_or(1.0);
+    let damping: f32 = parse_query(query, "damping").unwrap_or(0.5);
+    let sag: f32 = parse_query(query, "sag").unwrap_or(0.10);
     for g in 0..32u8 {
         state.send_audio_command(AudioCommand::SetWindModel {
             division_index: g,
             enabled,
-            reservoir_size: 1.0,
-            damping: 0.5,
-            max_sag: 0.10,
+            reservoir_size: reservoir,
+            damping,
+            max_sag: sag,
         });
     }
-    Ok(json!({ "ok": true, "enabled": enabled }))
+    Ok(json!({ "ok": true, "enabled": enabled, "reservoir": reservoir,
+               "damping": damping, "sag": sag }))
+}
+
+/// Live winddruk per groep — hetzelfde getal dat de meter in het scherm laat
+/// zien. Hiermee is met een meting aan te tonen dát het windmodel werkt.
+fn handle_wind_status() -> Result<Value, (u16, String)> {
+    let drukken = crate::audio::wind_drukken();
+    let stemmen = crate::audio::wind_stemmen();
+    let groepen: Vec<Value> = (0..8usize)
+        .map(|g| {
+            let p = drukken[g];
+            json!({
+                "group": g,
+                "pressure": p,
+                "voices": stemmen[g],
+                "cents": (p - 1.0) * vpo_audio::WIND_CENTS_PER_EENHEID,
+            })
+        })
+        .collect();
+    Ok(json!({ "groups": groepen }))
 }
 
 fn handle_set_eq(state: &AppState, query: &str) -> Result<Value, (u16, String)> {

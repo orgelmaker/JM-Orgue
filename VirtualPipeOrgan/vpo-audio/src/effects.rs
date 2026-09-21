@@ -242,76 +242,149 @@ impl Tremulant {
     }
 }
 
-/// Wind model simulation
+/// Hoeveel cent de toonhoogte daalt per eenheid winddruk. Een winddaling van
+/// 10 % geeft dus 12 cent lager - hoorbaar, maar nog muzikaal. De vorige waarde
+/// (30) gaf 3 cent bij dezelfde instelling, en dat merkte niemand.
+pub const WIND_CENTS_PER_EENHEID: f32 = 120.0;
+
+/// Windmodel: de balg van een windgroep.
+///
+/// Een echt orgel heeft een eindige windvoorziening. Wie een vol werk
+/// opentrekt en een akkoord neerzet, hoort de winddruk even inzakken: de
+/// pijpen worden iets zachter en iets lager, en de balg veert daarna terug.
+/// Dat is wat organisten "het orgel ademt" noemen.
+///
+/// Het model is een balg met massa (het gewicht erop) aan een veer (de lucht
+/// eronder), aangedreven door het verbruik van de klinkende pijpen. Tweede
+/// orde dus - een eerste-orde filter kan niet naveren, en juist dat naveren is
+/// het kenmerkende geluid. (Tot 0.7.49 stond hier wel zo'n eerste-orde filter,
+/// terwijl de dempingsregelaar beloofde het naschommelen te regelen: die
+/// regelaar deed dus nooit waar hij voor stond.)
 pub struct WindModel {
     pub enabled: bool,
-    /// Current wind pressure (0.0-1.0 normalized, 1.0 = full pressure)
+    /// Huidige winddruk. 1.0 = volle druk, lager = ingezakt.
     pressure: f32,
-    /// Reservoir size: larger = more stable, less sag (0.1-2.0)
+    /// Snelheid waarmee de balg beweegt (de tweede toestand van het model).
+    velocity: f32,
+    /// Grootte van het magazijn: groter = trager en stabieler (0.1-2.0).
     pub reservoir_size: f32,
-    /// Damping coefficient: higher = less oscillation (0.0-1.0)
+    /// Demping: 0 = de balg schommelt duidelijk na, 1 = kritisch gedempt.
     pub damping: f32,
-    /// Maximum pressure sag as fraction (0.0-0.3)
+    /// Maximale winddaling als fractie (0.0-0.30).
     pub max_sag: f32,
-    /// Smoothing filter
-    filter: OnePoleFilter,
-    /// Current voice count on this division
+    /// Eigenfrequentie van de balg in rad/s, en de dempingsfactor zeta.
+    omega: f32,
+    zeta: f32,
+    /// Sampletijd (s); het model integreert per sample.
+    dt: f32,
+    /// Trage ruis voor de turbulentie in het kanaal.
+    flutter: OnePoleFilter,
+    /// Aantal klinkende stemmen op deze windgroep.
     voice_count: u32,
-    /// Noise generator state
+    /// Ruisgenerator.
     noise_state: u32,
 }
 
+/// Welk deel van de actuele winddaling als turbulentie meetrilt. Bij de
+/// standaardinstelling (10 % daling) is dat plus/min 1,8 cent rond de
+/// ingezakte toonhoogte: genoeg om te leven, te weinig om zeeziek van te
+/// worden.
+const FLUTTER_DEEL: f32 = 0.15;
+
 impl WindModel {
     pub fn new(sample_rate: SampleRate) -> Self {
-        // Damping of 0.5 → time constant ~200ms
-        let cutoff = 5.0; // Hz, controls response speed
-        Self {
+        let mut m = Self {
             enabled: false,
             pressure: 1.0,
+            velocity: 0.0,
             reservoir_size: 0.5,
             damping: 0.5,
             max_sag: 0.10,
-            filter: OnePoleFilter::new(cutoff, sample_rate),
+            omega: 0.0,
+            zeta: 0.0,
+            dt: 1.0 / sample_rate as f32,
+            flutter: OnePoleFilter::new(2.5, sample_rate),
             voice_count: 0,
             noise_state: 12345,
-        }
+        };
+        m.configure(0.5, 0.5, 0.10, sample_rate);
+        m
     }
 
     pub fn configure(&mut self, reservoir_size: f32, damping: f32, max_sag: f32, sample_rate: SampleRate) {
         self.reservoir_size = reservoir_size.clamp(0.1, 2.0);
         self.damping = damping.clamp(0.0, 1.0);
         self.max_sag = max_sag.clamp(0.0, 0.30);
-        // Damping controls filter cutoff: high damping = fast settling = higher cutoff
-        let cutoff = 2.0 + damping * 15.0; // 2-17 Hz
-        self.filter.set_cutoff(cutoff, sample_rate);
+        self.dt = 1.0 / sample_rate as f32;
+        // Een groot magazijn is zwaar en traag, een klein magazijn nerveus.
+        // Bij de standaardstand (50 %) komt daar 6 Hz uit - de orde van
+        // grootte van een echte balg.
+        let f0 = (3.0 / self.reservoir_size).clamp(0.5, 12.0);
+        self.omega = 2.0 * PI * f0;
+        // 0 -> zeta 0.12 (duidelijk naveren), 1 -> zeta 1.0 (kritisch gedempt:
+        // inzakken en terugkomen zonder overschot).
+        self.zeta = 0.12 + 0.88 * self.damping;
+        self.flutter.set_cutoff(2.5, sample_rate);
     }
 
     pub fn set_voice_count(&mut self, count: u32) { self.voice_count = count; }
+
+    /// Winddruk van dit moment, voor de meter in het scherm. Staat het model
+    /// uit, dan is dat per definitie de volle druk.
+    pub fn druk(&self) -> f32 {
+        if self.enabled { self.pressure } else { 1.0 }
+    }
 
     fn noise(&mut self) -> f32 {
         self.noise_state = self.noise_state.wrapping_mul(1103515245).wrapping_add(12345);
         (self.noise_state as f32 / u32::MAX as f32) * 2.0 - 1.0
     }
 
-    /// Returns pressure ratio (0.7-1.0). Values below 1.0 = wind sag.
+    /// Een stap van de balg richting `doel`. Geeft de nieuwe druk terug.
+    fn stap(&mut self, doel: f32) -> f32 {
+        let a = self.omega * self.omega * (doel - self.pressure)
+            - 2.0 * self.zeta * self.omega * self.velocity;
+        self.velocity += a * self.dt;
+        self.pressure += self.velocity * self.dt;
+        // Het terugveren mag over het doel heen schieten, maar niet ontsporen.
+        let ondergrens = 1.0 - self.max_sag * 1.6;
+        if self.pressure < ondergrens {
+            self.pressure = ondergrens;
+            self.velocity = 0.0;
+        } else if self.pressure > 1.03 {
+            self.pressure = 1.03;
+            self.velocity = 0.0;
+        }
+        self.pressure
+    }
+
+    /// Winddruk voor deze sample. 1.0 = volle druk; lager = inzakking.
     pub fn process(&mut self) -> f32 {
-        if !self.enabled { return 1.0; }
+        if !self.enabled {
+            // Uitzetten terwijl de wind ingezakt is mag geen toonhoogtesprong
+            // geven: de balg loopt netjes vol en pas daarna is het model stil.
+            if (self.pressure - 1.0).abs() < 1e-5 && self.velocity.abs() < 1e-5 {
+                self.pressure = 1.0;
+                self.velocity = 0.0;
+                return 1.0;
+            }
+            return self.stap(1.0);
+        }
         // Meer stemmen = meer windverbruik = meer inzakking, maar GELEIDELIJK:
-        // de oude lineaire formule (voice_count / reservoir × 0.02) zat met het
-        // standaard-reservoir al bij ~3 stemmen op de máximale inzakking — het
+        // de oude lineaire formule (voice_count / reservoir x 0.02) zat met het
+        // standaard-magazijn al bij ~3 stemmen op de maximale inzakking - het
         // windmodel werkte dan als botte volumedemper zodra er meer
-        // geregistreerd werd, in plaats van als subtiel adem-effect. Nu
-        // verzadigt de inzakking vloeiend: bij de knie (≈30 × reservoir
-        // stemmen) is de helft van max_sag bereikt; een vol werk nadert
-        // max_sag asymptotisch in plaats van er direct tegenaan te slaan.
+        // geregistreerd werd, in plaats van als adem. Nu verzadigt de
+        // inzakking vloeiend: bij de knie (~30 x magazijn stemmen) is de helft
+        // van max_sag bereikt; een vol werk nadert max_sag asymptotisch.
         let v = self.voice_count as f32;
         let knee = 30.0 * self.reservoir_size.max(0.1);
         let sag = self.max_sag * (v / (v + knee));
-        // Small random variation (wind turbulence)
-        let noise = self.noise() * 0.002;
-        let target = 1.0 - sag + noise;
-        self.pressure = self.filter.process(target);
-        self.pressure.clamp(1.0 - self.max_sag, 1.02)
+        // Turbulentie in het kanaal: schaalt mee met de inzakking, dus alleen
+        // te horen zolang er echt wind getrokken wordt.
+        let ruis = self.noise();
+        let flutter = (self.flutter.process(ruis) * 50.0).clamp(-1.0, 1.0) * sag * FLUTTER_DEEL;
+        self.stap(1.0 - sag + flutter)
     }
 }
 
@@ -655,5 +728,134 @@ impl ParametricEq {
         self.low.reset();
         self.mid.reset();
         self.high.reset();
+    }
+}
+
+#[cfg(test)]
+mod windmodel_tests {
+    use super::*;
+
+    const SR: SampleRate = 48000;
+
+    /// Laat het model `ms` milliseconden lopen en geef de laagste en de
+    /// laatste druk terug.
+    fn draai(m: &mut WindModel, ms: u32) -> (f32, f32) {
+        let n = (SR as f32 * ms as f32 / 1000.0) as u32;
+        let mut laagste = f32::MAX;
+        let mut laatste = 1.0;
+        for _ in 0..n {
+            laatste = m.process();
+            if laatste < laagste { laagste = laatste; }
+        }
+        (laagste, laatste)
+    }
+
+    #[test]
+    fn uitgeschakeld_blijft_de_druk_vol() {
+        let mut m = WindModel::new(SR);
+        m.set_voice_count(500);
+        let (laagste, laatste) = draai(&mut m, 500);
+        assert_eq!(laagste, 1.0);
+        assert_eq!(laatste, 1.0);
+        assert_eq!(m.druk(), 1.0);
+    }
+
+    #[test]
+    fn zonder_stemmen_zakt_er_niets_in() {
+        let mut m = WindModel::new(SR);
+        m.enabled = true;
+        m.configure(0.5, 0.5, 0.10, SR);
+        let (laagste, _) = draai(&mut m, 500);
+        assert!(laagste > 0.9999, "stille windlade zakte toch in: {}", laagste);
+    }
+
+    /// De kern van de klacht "ik merk er niets van": een vol werk moet een
+    /// hoorbare inzakking geven. Hoorbaar = minstens een paar cent.
+    #[test]
+    fn een_vol_werk_geeft_een_hoorbare_inzakking() {
+        let mut m = WindModel::new(SR);
+        m.enabled = true;
+        m.configure(0.5, 0.7, 0.10, SR);
+        m.set_voice_count(200);
+        let (_, druk) = draai(&mut m, 1500);
+        let cents = (1.0 - druk) * WIND_CENTS_PER_EENHEID;
+        assert!(cents > 5.0, "te weinig effect om te horen: {:.1} cent", cents);
+        assert!(cents < 20.0, "veel te veel bij de standaardinstelling: {:.1} cent", cents);
+    }
+
+    /// Meer stemmen = meer inzakking, en die verzadigt (geen botte
+    /// volumedemper die al bij drie stemmen op zijn eind zit).
+    #[test]
+    fn de_inzakking_groeit_met_de_stemmen_en_verzadigt() {
+        let meting = |stemmen: u32| {
+            let mut m = WindModel::new(SR);
+            m.enabled = true;
+            m.configure(0.5, 1.0, 0.10, SR);
+            m.set_voice_count(stemmen);
+            draai(&mut m, 2000).1
+        };
+        let (d3, d30, d300) = (meting(3), meting(30), meting(300));
+        assert!(d3 > d30 && d30 > d300, "niet monotoon: {} {} {}", d3, d30, d300);
+        assert!(1.0 - d3 < 0.35 * (1.0 - d30),
+                "drie stemmen zakken al te ver in: {:.4} tegen {:.4}", 1.0 - d3, 1.0 - d30);
+        assert!(d300 > 0.895, "voorbij de ingestelde maximale daling: {}", d300);
+    }
+
+    /// De dempingsregelaar beloofde het naschommelen te regelen maar zat op een
+    /// eerste-orde filter, dat niet kan naveren. Nu wel: laag gedempt schiet de
+    /// balg door, kritisch gedempt niet.
+    #[test]
+    fn de_demping_bepaalt_het_naveren() {
+        let overschot = |demping: f32| {
+            let mut m = WindModel::new(SR);
+            m.enabled = true;
+            m.configure(0.5, demping, 0.10, SR);
+            m.set_voice_count(200);
+            let doel = draai(&mut m, 3000).1;
+            // Alle toetsen los: de balg loopt terug naar vol.
+            m.set_voice_count(0);
+            let mut hoogste: f32 = 0.0;
+            for _ in 0..(SR * 2) {
+                let d = m.process();
+                if d > hoogste { hoogste = d; }
+            }
+            let _ = doel;
+            hoogste
+        };
+        let los = overschot(0.05);
+        let strak = overschot(1.0);
+        assert!(los > 1.001, "slap gedempt hoort door te schieten, was {}", los);
+        assert!(strak <= 1.0005, "kritisch gedempt hoort niet door te schieten, was {}", strak);
+    }
+
+    /// Het model mag nooit buiten zijn perken lopen, ook niet bij de meest
+    /// extreme instelling.
+    #[test]
+    fn de_druk_blijft_binnen_de_perken() {
+        let mut m = WindModel::new(SR);
+        m.enabled = true;
+        m.configure(0.1, 0.0, 0.30, SR);
+        for stap in 0..60 {
+            m.set_voice_count(if stap % 2 == 0 { 800 } else { 0 });
+            let (laagste, _) = draai(&mut m, 40);
+            assert!(laagste >= 1.0 - 0.30 * 1.6 - 1e-6 && laagste <= 1.031,
+                    "druk liep uit de rails: {}", laagste);
+        }
+    }
+
+    /// Uitzetten terwijl de wind ingezakt is mag geen toonhoogtesprong geven.
+    #[test]
+    fn uitzetten_loopt_netjes_vol() {
+        let mut m = WindModel::new(SR);
+        m.enabled = true;
+        m.configure(0.5, 0.8, 0.10, SR);
+        m.set_voice_count(300);
+        let ingezakt = draai(&mut m, 2000).1;
+        assert!(ingezakt < 0.97, "niet ingezakt, test zegt niets: {}", ingezakt);
+        m.enabled = false;
+        let direct = m.process();
+        assert!((direct - ingezakt).abs() < 0.001, "sprong bij het uitzetten: {} -> {}", ingezakt, direct);
+        let (_, na) = draai(&mut m, 2000);
+        assert!((na - 1.0).abs() < 1e-4, "kwam niet op volle druk: {}", na);
     }
 }

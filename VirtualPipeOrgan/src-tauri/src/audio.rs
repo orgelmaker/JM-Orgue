@@ -479,6 +479,35 @@ pub fn render_pass_load() -> (f32, f32, f32, f32) {
     (v(0), v(1), v(2), v(3))
 }
 
+/// Actuele winddruk per windgroep, in tienduizendsten (10.000 = volle druk).
+/// Alleen om in het scherm te laten zien dát het windmodel werkt: de klacht
+/// "ik merk er nauwelijks iets van" was niet te beantwoorden zonder meter.
+/// Eén relaxte store per groep per blok van 256 frames, dus ~190 stores per
+/// seconde per groep.
+static WIND_DRUK_PM: [std::sync::atomic::AtomicU32; 32] = {
+    #[allow(clippy::declare_interior_mutable_const)]
+    const NUL: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(10_000);
+    [NUL; 32]
+};
+
+/// Klinkende pijpen per windgroep (dezelfde telling die de inzakking bepaalt).
+/// Naast de drukmeter maakt dit in het scherm zichtbaar wáárom de wind zakt.
+static WIND_STEMMEN: [std::sync::atomic::AtomicU32; 32] = {
+    #[allow(clippy::declare_interior_mutable_const)]
+    const NUL: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    [NUL; 32]
+};
+
+/// Winddruk per windgroep als fractie (1.0 = volle druk).
+pub fn wind_drukken() -> Vec<f32> {
+    (0..32).map(|i| WIND_DRUK_PM[i].load(Ordering::Relaxed) as f32 / 10_000.0).collect()
+}
+
+/// Klinkende pijpen per windgroep.
+pub fn wind_stemmen() -> Vec<u32> {
+    (0..32).map(|i| WIND_STEMMEN[i].load(Ordering::Relaxed)).collect()
+}
+
 /// Framegrootte van de laatste audio-callback (0 vóór de eerste callback).
 /// Onafhankelijk van de gevráágde buffer: houdt de driver zijn eigen paneel-
 /// instelling aan ("Requested buffer … not honored"), dan is buffer_frames in
@@ -4675,6 +4704,7 @@ fn run_audio_thread(
                 }
                 for (i, model) in wm.iter_mut().enumerate() {
                     model.set_voice_count(group_voice_counts[i]);
+                    WIND_STEMMEN[i].store(group_voice_counts[i], Ordering::Relaxed);
                 }
 
                 // C/Cis-spreiding is globaal actief zodra de sterkte > 0; per-divisie
@@ -4858,8 +4888,13 @@ fn run_audio_thread(
                         for d in 0..32 {
                             let wp = wind_pressures[d];
                             if (wp - 1.0).abs() > 1e-6 {
-                                wr[d] = 2.0_f64.powf(((wp - 1.0) * 30.0) as f64 / 1200.0);
-                                wg[d] = wp.sqrt();
+                                // Toonhoogte: zie WIND_CENTS_PER_EENHEID. Volume:
+                                // recht evenredig met de druk (10 % daling is
+                                // ~0,9 dB zachter). Dat was sqrt(druk), de helft
+                                // daarvan, en droeg bij aan "ik hoor er niets van".
+                                wr[d] = 2.0_f64.powf(
+                                    ((wp - 1.0) * vpo_audio::WIND_CENTS_PER_EENHEID) as f64 / 1200.0);
+                                wg[d] = wp;
                             } else {
                                 wr[d] = 1.0;
                                 wg[d] = 1.0;
@@ -4870,6 +4905,13 @@ fn run_audio_thread(
                         }
                         blk_div_l[f] = [0.0f32; 32];
                         blk_div_r[f] = [0.0f32; 32];
+                    }
+                    // Stand van de balgen voor de meter in het scherm (één keer
+                    // per blok, niet per frame).
+                    for (i, model) in wm.iter().enumerate() {
+                        WIND_DRUK_PM[i].store(
+                            (model.druk() * 10_000.0).clamp(0.0, 20_000.0) as u32,
+                            Ordering::Relaxed);
                     }
                     // Deel-opteltabellen van de stukken 1.. wissen. Alleen de
                     // stukken die deze callback echt gebruikt worden. Wissen

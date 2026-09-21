@@ -5,6 +5,24 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.50] - 2026-09-21
+
+### Het windmodel doet nu wat het belooft
+
+Drie klachten over het windmodel, alle drie terecht: het was niet duidelijk wat het deed, je hoorde er nauwelijks iets van, en een gewijzigde windgroep bij een klavier kwam niet terug in het overzicht. Alle drie opgelost.
+
+**Je hoort het nu.** De winddaling stuurde de toonhoogte aan met 30 cent per eenheid druk. Bij de standaardinstelling (10 % daling) was dat 3 cent — precies op de grens van wat een mens kan horen, en dus in de praktijk niets. Dat is nu 120 cent per eenheid, oftewel zo'n 12 cent bij een vol werk, en het volume volgt de druk recht evenredig in plaats van via een wortel. Gemeten met Friesach, tien registers van het Hauptwerk en een akkoord van zeven tonen (70 klinkende pijpen): de druk zakt naar 91,3 %, goed voor 10,4 cent lager en bijna 1 dB zachter.
+
+**En de balg gedraagt zich als een balg.** Onder de motorkap zat een eerste-orde filter, terwijl de regelaar "Demping" beloofde het naschommelen te regelen — een eerste-orde filter kán niet naschommelen, dus die regelaar deed nooit waar hij voor stond. Er staat nu een echte balg: een massa (het gewicht erop) op een veer (de lucht eronder). Zet je een akkoord neer, dan zakt de wind in en veert daarna terug; slap gedempt schommelt hij hoorbaar na, strak gedempt zakt hij alleen rustig in. Daar bovenop een lichte turbulentie die meeschaalt met de daling, zodat een stil orgel ook echt stil staat.
+
+**Je ziet nu dát het werkt.** Onder de aan-uitknop van elke windgroep staat een meter met de winddruk van dit moment, hoeveel pijpen er op die balg staan en hoeveel cent dat scheelt. Speel een akkoord en je ziet de balg zakken. Dat was de enige manier om de vraag "werkt het eigenlijk wel?" fatsoenlijk te beantwoorden.
+
+**En het is uit te leggen.** Het blok heet nu "Windmodel" en begint met drie regels over wat een windmodel is. De regelaars heten "Balggrootte", "Demping" en "Maximale winddaling", elk met een uitleg als je erop blijft staan, en onder de laatste staat wat de gekozen waarde in de praktijk betekent ("bij een vol werk zo'n 12 cent lager en 0,9 dB zachter"). Windgroepen zonder divisies worden niet meer getoond: die konden toch niets laten horen. Alles in de zeven talen.
+
+**De windgroep bij een klavier komt nu meteen terug in het overzicht.** Zette je Hauptwerk op groep 1, dan bleef het overzicht in de instellingen de oude indeling tonen. Oorzaak: het overzicht riep een functie aan om de groep op te zoeken, en Svelte ververst alleen wat letterlijk in het scherm genoemd staat. Nu is de indeling een afgeleide waarde en volgt het overzicht direct. Dezelfde fout zat in de nieuwe drukmeter — die is meteen op dezelfde manier gebouwd. De keuze wordt bovendien 800 ms na de laatste wijziging weggeschreven, zodat hij niet pas bij het afsluiten op schijf belandt.
+
+Verificatie: zeven nieuwe unittests op het model zelf (inzakking hoorbaar maar niet overdreven, verzadiging, naveren bij lage demping, grenzen bij de meest extreme stand, en geen toonhoogtesprong bij het uitzetten) plus een meetscript dat aan de echte audiomotor negen controles doet met een geladen sampleset. 204 vpo-app-tests en 20 vpo-audio-tests groen.
+
 ## [0.7.49] - 2026-09-21
 
 ### De mengloop gebruikt nu meerdere rekenkernen

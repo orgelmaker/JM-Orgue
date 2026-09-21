@@ -1412,6 +1412,19 @@
     if (typeof v === 'number') return Math.min(v, numWindGroups - 1);
     return Math.min(divIdx, numWindGroups - 1);
   }
+  // De backend houdt de windinstellingen in zijn per-orgel-spiegel, maar die
+  // belandt pas op schijf bij een opslagronde. Een sliderbeweging zelf mag
+  // daar niet elke stap een schrijfactie van maken: 800 ms na de laatste
+  // wijziging is genoeg.
+  let windPersistTimer = null;
+  function bewaarWindStraks() {
+    if (windPersistTimer) clearTimeout(windPersistTimer);
+    windPersistTimer = setTimeout(() => {
+      windPersistTimer = null;
+      dispatch('persistSettings');
+    }, 800);
+  }
+
   function onWindGroupChange(div, value) {
     const v = parseInt(value, 10);
     divisionWindGroups[div] = v;
@@ -1420,13 +1433,75 @@
     invoke('set_division_wind_group', { division: div, group: v }).catch(console.error);
     // Reapply de wind-config van de NIEUWE groep op deze divisie (zodat de slider-waarden kloppen)
     pushWindGroupConfig(v);
+    bewaarWindStraks();
   }
 
   function onNumWindGroupsChange(value) {
     const n = parseInt(value, 10);
     numWindGroups = n;
     invoke('set_num_wind_groups', { count: n }).catch(console.error);
+    // De backend klemt divisies boven het nieuwe maximum terug; dat hier ook
+    // doen, anders wijst het overzicht naar groepen die niet meer bestaan.
+    for (const naam of Object.keys(divisionWindGroups)) {
+      if (divisionWindGroups[naam] > n - 1) divisionWindGroups[naam] = n - 1;
+    }
+    divisionWindGroups = divisionWindGroups;
+    bewaarWindStraks();
   }
+
+  // Afgeleide toewijzing. Dit MOET een reactieve afgeleide zijn en geen
+  // functie-aanroep in de markup: Svelte kijkt alleen naar de variabelen die
+  // letterlijk in de template staan, dus `getWindGroup(...)` in het overzicht
+  // ververste niet wanneer je bij een klavier een andere windgroep koos - het
+  // oude overzicht bleef staan tot je van orgel wisselde.
+  $: windGroepPerDivisie = (organInfo?.divisions || []).map((d, i) => {
+    const v = divisionWindGroups[d.name];
+    return Math.min(typeof v === 'number' ? v : i, Math.max(0, numWindGroups - 1));
+  });
+  $: divisiesPerWindGroep = Array.from(
+    { length: Math.max(1, Math.min(numWindGroups, 8)) },
+    (_, g) => (organInfo?.divisions || []).filter((_d, i) => windGroepPerDivisie[i] === g));
+
+  // Live stand van de balgen (druk, klinkende pijpen, toonhoogteverschil).
+  // Alleen pollen zolang het scherm waar de meter staat open is.
+  let windStatus = [];
+  let windLivePoll = null;
+  $: {
+    if (!secondary && activeView === 'orgel-instellingen' && !windLivePoll) {
+      windLivePoll = setInterval(pollWindLive, 250);
+    } else if ((secondary || activeView !== 'orgel-instellingen') && windLivePoll) {
+      clearInterval(windLivePoll);
+      windLivePoll = null;
+      windStatus = [];
+    }
+  }
+  async function pollWindLive() {
+    try { windStatus = await invoke('get_wind_status'); } catch (e) { /* polling */ }
+  }
+  onDestroy(() => {
+    if (windLivePoll) clearInterval(windLivePoll);
+    if (windPersistTimer) clearTimeout(windPersistTimer);
+  });
+
+  // Als afgeleide, niet als functie-aanroep in de markup: dezelfde valkuil als
+  // hierboven. Svelte ververst een `{windDruk(g)}` in het scherm niet wanneer
+  // alleen `windStatus` verandert, want die naam staat dan nergens in de
+  // template - de meter bleef daardoor op 100 % staan terwijl de motor al
+  // netjes 92 % rapporteerde.
+  $: windMeters = Array.from({ length: 8 }, (_, g) => {
+    const w = windStatus[g];
+    const druk = w?.pressure ?? 1.0;
+    return {
+      druk,
+      stemmen: w?.voices ?? 0,
+      cent: w?.cents ?? 0,
+      // Balkvulling: volle druk = vol, de laagst instelbare druk (-30 %) = leeg.
+      balk: Math.max(0, Math.min(100, (1 - (1 - druk) / 0.35) * 100)),
+    };
+  });
+  // Wat de ingestelde maximale daling in de praktijk betekent.
+  function windMaxCent(pct) { return (pct * 1.2).toFixed(0); }
+  function windMaxDb(pct) { return (-20 * Math.log10(1 - pct / 100)).toFixed(1); }
 
   function getWindGroupEnabled(g) { return windGroupConfig[g]?.enabled === true; }
   function getWindGroupReservoir(g) { return windGroupConfig[g]?.reservoir ?? 0.5; }
@@ -1473,6 +1548,7 @@
     windGroupConfig = windGroupConfig;
     saveWindGroupConfig(groupIdx);
     pushWindGroupConfig(groupIdx);
+    bewaarWindStraks();
   }
 
   // Pas de opgeslagen divisie→wind-groep toewijzing toe vanuit de backend (per orgel).
@@ -4836,9 +4912,12 @@
               {/if}
             </div>
 
-            <!-- Wind-systeem (groepen) -->
+            <!-- Windmodel (per windgroep) -->
             <div class="settings-block">
               <h3 class="settings-block-title">{$t('settings.wind_system')}</h3>
+              <p style="margin:0 0 0.6rem; font-size:0.74rem; color:var(--text-muted); line-height:1.5;">
+                {$t('settings.wind_intro')}
+              </p>
               <div class="swell-config-row" style="margin-bottom: 0.6rem;">
                 <span class="swell-config-label" title={$t('wind.groups_count_title')}>{$t('settings.wind_groups_count')}</span>
                 <select
@@ -4855,13 +4934,15 @@
                 {$t('settings.wind_groups_hint')}
               </p>
 
-              {#each Array(Math.max(1, Math.min(numWindGroups, 8))) as _, gIdx}
-                {@const divInGroup = (organInfo?.divisions || []).filter((d, i) => getWindGroup(d.name, i) === gIdx)}
+              <!-- Alleen groepen die ook echt divisies hebben: een lege groep
+                   kan niets laten horen, en die stonden alleen maar in de weg. -->
+              {#each divisiesPerWindGroep as divInGroup, gIdx}
+                {#if divInGroup.length > 0}
                 <div style="border-top:var(--border-subtle); padding:0.6rem 0;">
                   <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.35rem;">
                     <strong style="font-size:0.82rem;">{$t('settings.wind_group')} {gIdx + 1}</strong>
                     <span style="font-size:0.7rem; color:var(--text-muted);">
-                      {divInGroup.length === 0 ? $t('settings.wind_no_divisions') : divInGroup.map(d => d.name).join(', ')}
+                      {divInGroup.map(d => d.name).join(', ')}
                     </span>
                   </div>
                   <label class="swell-toggle">
@@ -4873,8 +4954,21 @@
                     <span class="swell-toggle-label">{$t('settings.wind_enabled')}</span>
                   </label>
                   {#if windGroupConfig[gIdx]?.enabled === true}
-                    <div class="swell-config-sliders" style="margin-top:0.35rem;">
-                      <div class="swell-config-row">
+                    <!-- Live meter: laat zien dát het werkt, en hoeveel. -->
+                    <div class="swell-config-row" style="margin-top:0.45rem;">
+                      <span class="swell-config-label" title={$t('wind.pressure_title')}>{$t('settings.wind_pressure')}</span>
+                      <div style="flex:1; height:8px; background:var(--bg-elevated); border:1px solid var(--accent-soft-2); border-radius:4px; overflow:hidden;">
+                        <div style="height:100%; width:{windMeters[gIdx].balk}%; background:{windMeters[gIdx].druk < 0.995 ? 'var(--accent)' : 'var(--accent-soft-2)'}; transition:width 0.12s linear;"></div>
+                      </div>
+                      <span class="swell-config-value">{(windMeters[gIdx].druk * 100).toFixed(1)}%</span>
+                    </div>
+                    <p style="margin:0.1rem 0 0.35rem; font-size:0.7rem; color:var(--text-muted); line-height:1.4;">
+                      {$t('settings.wind_live')
+                        .replace('{v}', windMeters[gIdx].stemmen)
+                        .replace('{c}', windMeters[gIdx].cent.toFixed(1))}
+                    </p>
+                    <div class="swell-config-sliders">
+                      <div class="swell-config-row" title={$t('wind.reservoir_title')}>
                         <span class="swell-config-label">{$t('settings.wind_reservoir')}</span>
                         <input type="range" min="10" max="200" step="5"
                           value={(windGroupConfig[gIdx]?.reservoir ?? 0.5) * 100}
@@ -4882,7 +4976,7 @@
                         />
                         <span class="swell-config-value">{((windGroupConfig[gIdx]?.reservoir ?? 0.5) * 100).toFixed(0)}%</span>
                       </div>
-                      <div class="swell-config-row">
+                      <div class="swell-config-row" title={$t('wind.damping_title')}>
                         <span class="swell-config-label">{$t('settings.wind_damping')}</span>
                         <input type="range" min="0" max="100" step="5"
                           value={(windGroupConfig[gIdx]?.damping ?? 0.5) * 100}
@@ -4890,7 +4984,7 @@
                         />
                         <span class="swell-config-value">{((windGroupConfig[gIdx]?.damping ?? 0.5) * 100).toFixed(0)}%</span>
                       </div>
-                      <div class="swell-config-row">
+                      <div class="swell-config-row" title={$t('wind.max_loss_title')}>
                         <span class="swell-config-label">{$t('settings.wind_max_loss')}</span>
                         <input type="range" min="1" max="30" step="1"
                           value={windGroupConfig[gIdx]?.maxSag ?? 10}
@@ -4899,8 +4993,14 @@
                         <span class="swell-config-value">{windGroupConfig[gIdx]?.maxSag ?? 10}%</span>
                       </div>
                     </div>
+                    <p style="margin:0.25rem 0 0; font-size:0.7rem; color:var(--text-muted); line-height:1.4;">
+                      {$t('settings.wind_max_loss_hint')
+                        .replace('{c}', windMaxCent(windGroupConfig[gIdx]?.maxSag ?? 10))
+                        .replace('{d}', windMaxDb(windGroupConfig[gIdx]?.maxSag ?? 10))}
+                    </p>
                   {/if}
                 </div>
+                {/if}
               {/each}
             </div>
 
@@ -5475,7 +5575,7 @@
                       <label style="display:flex; align-items:center; gap:0.35rem; font-size:0.78rem; color:var(--text-secondary);">
                         <span title={$t('wind.group_title')}>{$t('settings.windvoorziening')}</span>
                         <select
-                          value={getWindGroup(division.name, divIdx)}
+                          value={windGroepPerDivisie[divIdx] ?? 0}
                           on:change={(e) => onWindGroupChange(division.name, e.target.value)}
                           style="padding:0.25rem 0.5rem; background:var(--bg-elevated); border:1px solid var(--accent-soft-2); border-radius:var(--radius-sm); color:var(--text); font-size:0.78rem;"
                           title={$t('wind.group_select_title')}

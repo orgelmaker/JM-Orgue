@@ -246,6 +246,39 @@ pub fn set_polyphony(state: State<AppState>, voices: u32) -> Result<usize, Strin
     Ok(n)
 }
 
+/// Stand van één windgroep voor de meter in de instellingen (0.7.50).
+#[derive(Debug, Clone, Serialize)]
+pub struct WindGroupStatusDto {
+    /// Groep-index (0-based).
+    pub group: u8,
+    /// Winddruk nu, als fractie van de volle druk.
+    pub pressure: f32,
+    /// Klinkende pijpen op deze groep.
+    pub voices: u32,
+    /// Toonhoogteverschil dat die druk oplevert, in cent (negatief = lager).
+    pub cents: f32,
+}
+
+/// Live winddruk per groep. Antwoordt op "werkt het windmodel eigenlijk wel?":
+/// zolang je speelt is hier te zien hoe ver de balg inzakt en hoeveel cent dat
+/// scheelt. Alleen opgevraagd zolang het instellingenscherm open staat.
+#[tauri::command]
+pub fn get_wind_status() -> Vec<WindGroupStatusDto> {
+    let drukken = crate::audio::wind_drukken();
+    let stemmen = crate::audio::wind_stemmen();
+    (0..8usize)
+        .map(|g| {
+            let p = drukken.get(g).copied().unwrap_or(1.0);
+            WindGroupStatusDto {
+                group: g as u8,
+                pressure: p,
+                voices: stemmen.get(g).copied().unwrap_or(0),
+                cents: (p - 1.0) * vpo_audio::WIND_CENTS_PER_EENHEID,
+            }
+        })
+        .collect()
+}
+
 /// Hoeveel rekenkernen de mengloop gebruikt (0.7.49). 1 = alles op de
 /// audiothread, zoals vóór deze versie. Meer kernen verdelen het stemwerk —
 /// dat is 97 % van de rendertijd bij veel klinkende pijpen.
@@ -5303,6 +5336,9 @@ pub fn set_remote_layout_inner(state: &AppState, layout: library::RemoteLayoutSa
 
 /// Bewaar de wind-model-config van een wind-groep voor per-orgel opslag. Stuurt zelf geen audio
 /// — set_wind_model doet dat. `group` = wind-groep-index (0..31).
+///
+/// Let op: `max_sag` staat hier in PROCENT (zoals de schuif in het scherm),
+/// terwijl `set_wind_model` een fractie verwacht. De UI deelt daar door 100.
 #[tauri::command]
 pub fn persist_wind_group_config(state: State<AppState>, group: u8, enabled: bool, reservoir_size: f32, damping: f32, max_sag: f32) -> Result<(), String> {
     state.wind_group_configs.write().insert(group, (enabled, reservoir_size, damping, max_sag));

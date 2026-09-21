@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "JM-Orgue",
-  "version": "0.7.49",
+  "version": "0.7.50",
   "identifier": "nl.jm-orgue.app",
   "build": {
     "frontendDist": "../ui/dist",
