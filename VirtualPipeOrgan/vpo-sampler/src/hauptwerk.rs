@@ -40,6 +40,7 @@ use crate::grandorgue::{
     CouplerDef, EnclosureDef, ManualDef, OdfError, OrganDefinition, OrganInfo, PipeDef,
     AttackDef, PipeExtra, PipeLayer, ReleaseDef, StopDef, WindchestDef,
 };
+use crate::hauptwerk_compact::GecomprimeerdeOdf;
 
 /// Load a Hauptwerk organ definition and translate it to an [`OrganDefinition`].
 pub fn load_hauptwerk(odf_path: &Path) -> Result<OrganDefinition, OdfError> {
@@ -89,18 +90,26 @@ fn build_definition(
     pkg_dirs: &HashMap<u32, PathBuf>,
 ) -> Result<OrganDefinition, OdfError> {
     // --- Parse the object lists we need ---
+    // Een "compacted" ODF schrijft elk object als <o> met letter-aliassen; de
+    // vertaling daarvan naar de lange veldnamen zit in hauptwerk_compact.
+    // `_General` blijft in beide vormen leesbaar.
+    let compact = GecomprimeerdeOdf::detecteer(xml);
+    let lees = |t: &str| match &compact {
+        Some(c) => c.objecten(xml, t),
+        None => extract_objects(xml, t),
+    };
     let general = extract_objects(xml, "_General");
-    let divisions = extract_objects(xml, "Division");
-    let stops = extract_objects(xml, "Stop");
-    let stopranks = extract_objects(xml, "StopRank");
-    let ranks_xml = extract_objects(xml, "Rank");
-    let pipes = extract_objects(xml, "Pipe_SoundEngine01");
-    let layers = extract_objects(xml, "Pipe_SoundEngine01_Layer");
-    let attack_samples = extract_objects(xml, "Pipe_SoundEngine01_AttackSample");
-    let release_samples = extract_objects(xml, "Pipe_SoundEngine01_ReleaseSample");
-    let samples = extract_objects(xml, "Sample");
-    let enclosures_xml = extract_objects(xml, "Enclosure");
-    let enclosure_pipes = extract_objects(xml, "EnclosurePipe");
+    let divisions = lees("Division");
+    let stops = lees("Stop");
+    let stopranks = lees("StopRank");
+    let ranks_xml = lees("Rank");
+    let pipes = lees("Pipe_SoundEngine01");
+    let layers = lees("Pipe_SoundEngine01_Layer");
+    let attack_samples = lees("Pipe_SoundEngine01_AttackSample");
+    let release_samples = lees("Pipe_SoundEngine01_ReleaseSample");
+    let samples = lees("Sample");
+    let enclosures_xml = lees("Enclosure");
+    let enclosure_pipes = lees("EnclosurePipe");
 
     info!(
         "Hauptwerk parse: {} divisions, {} stops, {} stopranks, {} pipes, {} samples, {} releases, {} enclosures",
@@ -205,6 +214,30 @@ fn build_definition(
             sample_file.insert(sid, (pkg, fname.clone()));
         }
     }
+    // Hauptwerk bewaart zijn eigen meegeleverde sets in het gesloten
+    // .hbw-formaat. Het bestand is dan wél leesbaar en het orgel komt met
+    // registers en al binnen — er komt alleen geen noot uit, want geen enkele
+    // opname laat zich openen. Dat liever meteen zeggen dan een stom orgel
+    // opleveren.
+    if !sample_file.is_empty() {
+        let hbw = sample_file
+            .values()
+            .filter(|(_, f)| f.to_lowercase().ends_with(".hbw"))
+            .count();
+        if hbw * 2 > sample_file.len() {
+            return Err(OdfError::ParseError {
+                line: 0,
+                message: format!(
+                    "deze set bewaart zijn opnamen in Hauptwerks eigen \
+                     .hbw-formaat ({} van de {}); dat formaat is gesloten en \
+                     kan alleen door Hauptwerk zelf worden afgespeeld",
+                    hbw,
+                    sample_file.len()
+                ),
+            });
+        }
+    }
+
     // sample_id -> gemeten samplepitch in cents (Pitch_SpecificationMethodCode:
     // 4 = exacte frequentie in Hz; 2/3 = MIDI-noot (+ harmonisch); 1/leeg =
     // smpl-chunk van het bestand → geen entry, de loader leest die zelf).
@@ -569,7 +602,7 @@ fn build_definition(
     // (condition-less) actions tell us which division each keyboard normally
     // plays; the ones WITH a ConditionSwitchID are the actual user couplers
     // (e.g. "Pedal-Coppel"). MIDINoteNumberIncrement is the octave shift.
-    let key_actions = extract_objects(&xml, "KeyAction");
+    let key_actions = lees("KeyAction");
     let mut kbd_to_div: HashMap<u32, u32> = HashMap::new();
     for ka in &key_actions {
         let cond = ka.get("ConditionSwitchID").map(|s| s.trim()).unwrap_or("");
@@ -689,6 +722,16 @@ fn build_definition(
         "Hauptwerk import: '{}' — {} stops in {} divisions, {} pipes",
         organ.church_name, stop_defs.len(), manuals.len(), total_pipes
     );
+
+    // Een orgel zonder registers is geen orgel. Tot 0.7.52 kwam zo'n import
+    // als "gelukt" door en kreeg de gebruiker een leeg scherm zonder uitleg;
+    // dat gebeurde bij elke gecomprimeerde orgeldefinitie.
+    if stop_defs.is_empty() {
+        return Err(OdfError::ParseError {
+            line: 0,
+            message: "deze Hauptwerk-orgeldefinitie leverde geen enkel register op: het bestand is leesbaar, maar de indeling wordt niet herkend".into(),
+        });
+    }
 
     Ok(OrganDefinition {
         base_path: root,
@@ -1109,6 +1152,26 @@ mod tests {
         let mut pkg_dirs = HashMap::new();
         pkg_dirs.insert(1u32, PathBuf::from("/pkg"));
         build_definition(&mini_xml(), PathBuf::from("/root"), &pkg_dirs).expect("build")
+    }
+
+    /// Hauptwerks eigen meegeleverde sets staan in het gesloten .hbw-formaat.
+    /// De orgeldefinitie is dan gewoon leesbaar, dus zonder deze controle komt
+    /// er een volledig orgel binnen waar geen noot uit komt.
+    #[test]
+    fn een_set_met_hbw_opnamen_wordt_geweigerd() {
+        let mut pkg_dirs = HashMap::new();
+        pkg_dirs.insert(1u32, PathBuf::from("/pkg"));
+        let err = build_definition(
+            &mini_xml().replace(".wav", ".hbw"),
+            PathBuf::from("/root"),
+            &pkg_dirs,
+        )
+        .expect_err("een set zonder afspeelbare opnamen hoort geweigerd te worden");
+        let melding = err.to_string();
+        assert!(melding.contains(".hbw"), "onverwachte fout: {melding}");
+
+        // Dezelfde set met gewone WAV-opnamen komt gewoon binnen.
+        assert!(!mini_definition().stops.is_empty());
     }
 
     #[test]

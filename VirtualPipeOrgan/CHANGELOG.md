@@ -5,6 +5,121 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.53] - 2026-09-22
+
+### Hauptwerk-sets die "leeg" binnenkwamen laden nu wél
+
+Het orgel van de Rotterdamse Laurenskerk liet zich niet inladen: JM-Orgue
+meldde dat het gelukt was en toonde vervolgens een orgel zonder één register.
+Hetzelfde gold voor Utrecht Dom, St. Anne's Moseley en de polyfonie-testorgels
+— in feite voor élke Hauptwerk-set op die schijf.
+
+**Wat er aan de hand was.** Hauptwerk kan een orgeldefinitie "compacted"
+wegschrijven. Elk object wordt dan één regel met letter-afkortingen in plaats
+van volledige veldnamen:
+
+```
+lang:    <Stop><StopID>1</StopID><Name>Gedekt 8</Name><DivisionID>5</DivisionID>…</Stop>
+compact: <o><a>1</a><b>Gedekt 8</b><c>5</c></o>
+```
+
+De importer kende alleen de lange vorm — die is destijds gebouwd op
+Saint-Jean-de-Luz en Ledziny, en dat zijn toevallig de enige twee sets die
+níet gecomprimeerd zijn. Alleen het kopblok blijft in beide vormen leesbaar,
+en daarom kwamen de naam van het orgel en de bouwer wél door: precies genoeg
+om te denken dat het gelukt was.
+
+**Hoe het nu werkt.** De letters volgen de veldvolgorde van het
+Hauptwerk-schema, maar die volgorde verschilt per formaatversie: in versie 4
+staat bij een zwelkast de pijp voorop, in versie 5 de kast, en `Sample` heeft
+in versie 5 meer velden dan in versie 4. Een vaste vertaaltabel zou dus
+stilletjes de verkeerde velden pakken. In plaats daarvan leidt JM-Orgue de
+betekenis af uit het bestand zelf: welke letter van een pijp bevat uitsluitend
+getallen die ook als rangnummer voorkomen, welk veld bevat een bestandsnaam,
+welk veld is binnen één rang uniek (dat is de toets). Wat eruit komt is een
+gewone veldnamenlijst, zodat de rest van de import — perspectieven,
+zwelkasten, release-samples, voetmaten — ongewijzigd werkt.
+
+Vier dingen bleken daarbij verraderlijk, en alle vier zijn ze getest:
+
+- **Een veld dat ontbreekt heeft zijn standaardwaarde, en die is niet altijd
+  nul.** Voor de MIDI-noot is het 60, de c' in het midden van het klavier. In
+  177 van de 246 Rotterdamse rangen ontbrak daardoor precies die ene pijp.
+  JM-Orgue leidt die standaard nu af uit de gaten in de rangen.
+- **Het aantal toetsen van een register staat er vaak niet.** St. Anne's
+  noteert het bij 8 van de 30 registers; ontbreekt het, dan beslaat het
+  register zijn hele rang. Zonder die regel bleef dat orgel helemaal leeg.
+- **Een veld op getalbereik kiezen is niet genoeg.** Een veld dat overal `1`
+  was viel precies in het bereik van de octaafsprong. Dat kiezen verschuift
+  een heel orgel een halve toon — met samples die gewoon bestaan, dus je merkt
+  het alleen aan de toonhoogte. Het toetsbereik wordt nu gekozen op wat de
+  meeste toetsen een pijp oplevert die in die rang ook echt bestaat.
+- **Hetzelfde gold voor de release-grens.** Deze sets hebben drie
+  release-opnamen per pijp: één voor een korte tik, één voor een middellange
+  en één voor een lange noot. Welk veld die grens is, bleek niet uit het
+  bereik — de crossfade-lengte valt er ook in. Het kenmerk is dat releases van
+  dezelfde pijp juist in dít veld verschillen, en in de andere velden niet.
+  Zonder die regel klonk bij elke toetsduur dezelfde release.
+
+**Stereo-helften van één perspectief horen bij elkaar.** Hauptwerk splitst een
+microfoonpositie soms in twee rangen: "(front-L component)" en "(front-R
+component)". Die krijgen nu hetzelfde perspectief-label — anders klinken
+front-links, front-rechts én rear alle drie tegelijk in plaats van dat je
+kiest.
+
+### Twee imports die stil mislukten geven nu een melding
+
+- **Een orgeldefinitie zonder registers wordt geweigerd.** Dat was de tweede
+  helft van het probleem: zonder melding is er niets om op te zoeken.
+- **Een set met Hauptwerks eigen `.hbw`-opnamen wordt geweigerd.** Hauptwerk
+  bewaart zijn eigen meegeleverde sets (waaronder St. Anne's Moseley) in een
+  gesloten formaat dat alleen Hauptwerk zelf kan afspelen. De orgeldefinitie
+  is gewoon leesbaar, dus zonder deze controle kwam er een volledig orgel
+  binnen waar geen noot uit kwam — 4.501 van de 4.649 opnamen weigerden open
+  te gaan, alleen zichtbaar als een regel per opname in het log. De melding
+  noemt nu het formaat en de aantallen.
+
+### Nagemeten
+
+Elk sample-pad is op schijf gecontroleerd:
+
+| set | klavieren | registers | samples | ontbrekend |
+|---|---|---|---|---|
+| Rotterdam Laurenskerk (surround) | 6 | 89 | 16.564 | 0 |
+| Utrecht Dom v2 (surround) | 4 | 45 | 9.748 | 0 |
+| Utrecht Dom demo | 4 | 12 | 2.316 | 0 |
+| Polyfonie-testorgel (4 GB) | 1 | 9 | 976 | 0 |
+| St. Anne's Moseley | — | — | — | geweigerd (`.hbw`) |
+
+En op het draaiende orgel, met de Utrechtse demo:
+
+- **Klank**: vier registers over drie klavieren, 32 stemmen tegelijk, piek
+  0,15.
+- **Zwelkast**: open 0,0857 tegen dicht 0,0072, oftewel de ingestelde −20 dB.
+  Dat is meteen de test op de omgedraaide velden van versie 5.
+- **Koppel**: met alleen een Bovenwerk-register getrokken blijft het
+  Hoofdwerk-klavier stil, en klinkt het pas mét de koppel Hoofdwerk→Bovenwerk.
+- **Release**: na een tik van 100 ms is de staart hoorbaar korter en zachter
+  dan na een noot van 2,5 s (piek 0,0116 tegen 0,0235).
+
+Verificatie in code: elf nieuwe unittests — herkenning van het formaat, de
+weggelaten c', het toetsbereik zonder expliciet aantal, de omgedraaide
+zwelkast, XML-entiteiten, de release-grens (en dat er géén grens uitkomt als
+een pijp maar één release heeft), de `.hbw`-weigering, en drie op de
+stereo-helften. Plus een diagnosetest die per objecttype toont welke letter
+welk veld werd — handig wanneer Hauptwerk ooit weer een veld toevoegt.
+
+### Goed om te weten
+
+De Rotterdamse surround-set is groot: alleen al het achterperspectief vulde
+ruim 20 GB werkgeheugen, en het inladen duurde bijna een uur vanaf een externe
+schijf. Beide perspectieven tegelijk past niet in 32 GB.
+
+Nog niet gedaan: de tremulant-opnamen van deze sets. Die hangen in Hauptwerk
+aan een "alternatieve rang" die bij het aanzetten van de tremulant wordt
+ingeschakeld, en die route leest JM-Orgue nog niet — de registers klinken dus
+zonder tremulant-samples.
+
 ## [0.7.52] - 2026-09-22
 
 ### Nazorg levende wind: wat de review vond

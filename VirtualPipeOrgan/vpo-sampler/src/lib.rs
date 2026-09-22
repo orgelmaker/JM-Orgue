@@ -8,6 +8,7 @@ pub mod cache;
 pub mod pool;
 pub mod grandorgue;
 pub mod hauptwerk;
+pub(crate) mod hauptwerk_compact;
 pub mod streaming;
 pub mod custom_organ;
 pub mod perspective;

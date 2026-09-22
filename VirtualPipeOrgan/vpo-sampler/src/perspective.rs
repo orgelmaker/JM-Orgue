@@ -12,9 +12,36 @@
 //! naam wordt tegen de tabel gelegd. "Mixtur rank 2" of "Principal 8'" geven
 //! dus `None` — dat zijn echte (gestapelde) ranks, geen perspectieven.
 
+/// Stereo-helft van één opname. Hauptwerk schrijft de linker- en rechterkant
+/// van hetzelfde perspectief als aparte rangen: "(front-L component)" en
+/// "(front-R component)" (Rotterdam), of kaal "(L component)" / "(R component)"
+/// als er maar één perspectief is (Utrecht). Die twee horen bij elkaar — samen
+/// vormen ze het stereobeeld — en krijgen daarom hetzelfde label.
+fn is_stereo_helft(rest: &str) -> bool {
+    let r = rest.trim_start_matches(['-', '_', ' ', '/']).trim();
+    matches!(
+        r,
+        "l" | "r" | "left" | "right"
+            | "l component" | "r component"
+            | "left component" | "right component"
+            | "l-component" | "r-component"
+    )
+}
+
 /// Canoniek label voor één token, of None als het geen perspectief is.
 fn canonical(token: &str) -> Option<String> {
     let t = token.trim().to_lowercase();
+    // "front-L component" is het front-perspectief, alleen de linkerhelft
+    // ervan; het label moet dus gewoon "front" zijn.
+    for scheiding in ['-', ' ', '_'] {
+        if let Some((kop, rest)) = t.split_once(scheiding) {
+            if is_stereo_helft(rest) {
+                if let Some(c) = canonical(kop) {
+                    return Some(c);
+                }
+            }
+        }
+    }
     let c = match t.as_str() {
         "front" | "frontal" | "vorne" => "front",
         "close" | "near" | "nah" | "proche" => "close",
@@ -144,5 +171,37 @@ mod tests {
         // Zonder perspectief: alleen trimmen.
         assert_eq!(strip_perspective("  Principal 8'  "), "Principal 8'");
         assert_eq!(strip_perspective("Mixtur rank 2"), "Mixtur rank 2");
+    }
+}
+
+#[cfg(test)]
+mod stereo_helften {
+    use super::*;
+
+    /// Hauptwerk splitst één perspectief soms in een linker- en rechterrang.
+    /// Beide horen onder hetzelfde label, anders klinkt een orgel met
+    /// front-L, front-R én rear alle drie tegelijk.
+    #[test]
+    fn linker_en_rechterhelft_delen_hun_perspectief() {
+        assert_eq!(detect_perspective("4 Octaaf 2 (front-L component)").as_deref(), Some("front"));
+        assert_eq!(detect_perspective("4 Octaaf 2 (front-R component)").as_deref(), Some("front"));
+        assert_eq!(detect_perspective("Bourdon 16 (rear-L component)").as_deref(), Some("rear"));
+        assert_eq!(detect_perspective("Principal 8 (dry L)").as_deref(), Some("dry"));
+    }
+
+    /// Zonder perspectief ervoor is het géén perspectief maar gewoon de ene
+    /// helft van een stereo-opname: die lagen klinken samen.
+    #[test]
+    fn een_kale_helft_is_geen_perspectief() {
+        assert_eq!(detect_perspective("Praestant 8 (L component)"), None);
+        assert_eq!(detect_perspective("Praestant 8 (R component)"), None);
+    }
+
+    /// En een gewone naam met een streepje blijft met rust.
+    #[test]
+    fn gewone_namen_blijven_ongemoeid() {
+        assert_eq!(detect_perspective("Bourdon 16"), None);
+        assert_eq!(detect_perspective("Vox humana 8 (tremmed)"), None);
+        assert_eq!(detect_perspective("Trompette-en-chamade 8"), None);
     }
 }
