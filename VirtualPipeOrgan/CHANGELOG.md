@@ -5,6 +5,106 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.54] - 2026-09-23
+
+### De registerknoppen lezen weer als registerknoppen
+
+Bij een Hauptwerk-import stond er te veel op de knop. Twee dingen die er al
+naast stonden, stonden er ook nog eens op.
+
+**De divisieaanduiding is weg.** Sets zetten er vaak een kort woord voor:
+"Pos: Prestant 8", "Pd Subbas 16", "RW Fluit 2". Boven de kolom staat al
+welke divisie het is. JM-Orgue herkende zo'n aanduiding tot nu toe aan een
+vaste lijst afkortingen, en die dekte "PED " en "GO " wel maar "Pos:" en "Pd "
+niet. Zo'n lijst is nooit af, dus nu wordt de divisienaam zelf gebruikt: een
+kort woord vóór de naam is een aanduiding wanneer het met dezelfde letter
+begint als de divisie en zijn letters in volgorde in die divisienaam
+voorkomen. "RW" zit zo in "Rugwerk" en "Pd" in "Pedaal". Een dubbele punt is
+altijd goed genoeg bewijs, ook zonder dat.
+
+Het blijft van de divisie afhangen, en dat is de bedoeling. "V Cornet" op het
+Bovenwerk houdt zijn V, want dat zijn koren en geen aanduiding.
+
+**De voetmaat staat er nog maar één keer.** Onder elke knop staat de voetmaat
+al. Hauptwerk-sets schrijven hem meestal kaal achter de naam ("Gedekt 8",
+"Sifflet 1 1/3") of met een voetwoord ("Subbaß 16 Fuß"), en JM-Orgue zocht
+alleen naar de vorm mét voetteken ("Gedekt 8'"). Daardoor bleef hij staan en
+kwam hij er eronder nog een keer bij. Nu wordt ook de kale vorm herkend, met
+breuken en met voetwoord.
+
+Alleen wanneer het achter de naam dezelfde voetmaat is als het register
+werkelijk heeft. "Mixtuur 4" op een 2'-rang houdt dus zijn 4: dat zijn koren.
+
+**En die voetmaat klopte niet altijd.** Bij het opruimen viel op dat een
+register dat zijn rang een octaaf hoger aanspreekt de voetmaat van de rang
+kreeg in plaats van die van zichzelf. Saint-Jean-de-Luz toonde daardoor
+"Flûte 4" met "8'" eronder en "Flûte 2" met "8'". De sprong telt nu mee: een
+16'-rang die een octaaf hoger wordt aangesproken klinkt als 8', een kwint
+hoger als 5 1/3'.
+
+Dat is uitdrukkelijk alleen het opschrift. Het hertemperen blijft rekenen met
+de voetmaat van de rang zelf, want die twee door elkaar halen verstemt het
+orgel een octaaf. Ze staan nu als twee aparte gegevens in de import.
+
+Beide opschoningen gebeuren bij het inlezen, dus ze werken overal waar de
+naam staat: het orgelscherm, de losse registerschermen, de afstandsbediening
+en de crescendotabel.
+
+### Vegen over de registers werkt nu ook met de vinger
+
+Met de muis kon je al over de registerknoppen slepen om er in één beweging een
+reeks aan of uit te zetten. Op een aanraakscherm gebeurde er niets: de
+afhandeling liet alleen de muis toe. Vinger en pen doen nu mee.
+
+Scrollen blijft werken, want het gebaar wordt per richting verdeeld. Staan de
+divisies onder elkaar, dan veeg je zijwaarts over een rij registers en scrol
+je op en neer door de lijst. Staan ze naast elkaar, dan veeg je op en neer
+door een kolom en scrol je zijwaarts langs de divisies.
+
+Herschikken blijft muis-met-Shift. Een aanraakscherm heeft geen Shift.
+
+### Het notatievenster zegt dat het alfa is
+
+Het notenschrift is nog niet nagelopen: toonhoogte, ritme en maatindeling
+kunnen afwijken van wat er gespeeld is. Dat stond nergens. Er staat nu een
+merkje op de knop "Noteren" en een balk boven in het notatievenster.
+
+### De knop "Extern" is vervallen
+
+Die opende een mapkeuze en gaf het pad door aan dezelfde route als "JM-Rec
+import" — hetzelfde werk, twee knoppen. Hauptwerk- en GrandOrgue-sets komen
+binnen via de knop ".organ", die beide bestandssoorten accepteert.
+
+### Nagemeten
+
+De zeven talen zijn nagelopen en niet alleen op de nieuwe teksten:
+
+| controle | uitkomst |
+|---|---|
+| sleutels per taal | 951, in alle zeven gelijk |
+| nieuwe alfa-teksten | in alle zeven, elk echt vertaald |
+| vervallen Extern-teksten | overal weg |
+| vaste teksten in de schermen | geen |
+| lege waarden | geen |
+
+En op het draaiende orgel, met Saint-Jean-de-Luz en Ledziny St. Clement:
+
+| in het bestand | op de knop |
+|---|---|
+| `PED  Soubasse 16` | Soubasse, 16' |
+| `PED  Bourdon 8` | Bourdon, 8' |
+| `PED  Flûte 4` | Flûte, 4' |
+| `GO  Quinte 2 2/3` | Quinte, 2 2/3' |
+| `P  Subbaß 16 Fuß` | Subbaß, 16' |
+| `M  Portunal-Flöte 8 Fuß` | Portunal-Flöte, 8' |
+
+Verificatie in code: drie nieuwe unittests — de aanduiding die weg moet en de
+aanduiding die moet blijven staan, de kale voetmaat met breuk en voetwoord,
+"Mixtuur 4" dat zijn 4 houdt, en de octaafsprong die de voetmaat verschuift.
+
+Het vegen met de vinger is niet met een echt aanraakscherm nagelopen; de
+afhandeling en de scrollrichtingen zijn op de code gecontroleerd.
+
 ## [0.7.53] - 2026-09-22
 
 ### Hauptwerk-sets die "leeg" binnenkwamen laden nu wél

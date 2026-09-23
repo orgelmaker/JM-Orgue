@@ -1169,6 +1169,10 @@ input[type="range"]::-webkit-slider-thumb:hover {
 }
 
 .stops-grid.stops-vertical .stop-knob {
+  /* Deze band scrolt horizontaal. Horizontaal vegen laten we dus aan de
+     browser, verticaal vegen blijft van ons — en dat is hier ook de
+     natuurlijke richting, want de registers staan onder elkaar. */
+  touch-action: pan-x;
   break-inside: avoid;                   /* knop nooit over twee kolommen splitsen */
   margin-bottom: 0.4rem;                 /* vervangt de grid-gap uit de horizontale modus */
 }
@@ -1356,6 +1360,26 @@ input[type="range"]::-webkit-slider-thumb:hover {
   box-shadow: 0 2px 4px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.05);
   flex-shrink: 0;
   user-select: none; /* geen tekstselectie tijdens pointer-drag van knoppen */
+  /* Vegen met de vinger over de registers. De browser mag het gebaar niet
+     als scrollen opeisen, want dan komt er geen enkele pointermove binnen.
+     Hier staan de registers in rijen naast elkaar: zijwaarts vegen is dus
+     van ons, en op en neer blijft van de browser, zodat de lijst met
+     divisies gewoon te scrollen blijft. */
+  touch-action: pan-y;
+}
+
+/* Het notatievenster is nog niet nagelopen — dat mag je zien. */
+.alpha-tag {
+  margin-left: 0.35rem;
+  padding: 0 0.3rem;
+  border-radius: 3px;
+  background: var(--warning, #b8860b);
+  color: #fff;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  vertical-align: middle;
 }
 
 /* Slepen van registerknoppen op het orgelscherm (pointer-drag, alleen muis) */

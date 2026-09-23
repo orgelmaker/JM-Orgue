@@ -3211,20 +3211,9 @@
     }
   }
 
-  async function openExternalSampleset() {
-    try {
-      const selected = await open({
-        multiple: false,
-        directory: true,
-        title: tx('dialogs.external_sampleset_title')
-      });
-      if (selected) {
-        dispatch('scanFolder', selected);
-      }
-    } catch (e) {
-      console.error('Failed to open folder dialog:', e);
-    }
-  }
+  // (De losse "Extern"-knop is vervallen: hij deed hetzelfde als "Map
+  // scannen", en Hauptwerk- én GrandOrgue-sets komen gewoon binnen via de
+  // .organ-knop hierboven.)
 
   async function exportOrganFile() {
     try {
@@ -3998,8 +3987,11 @@
   // de eerste knop bepaalt of de knoppen eronder AAN of UIT gaan. Alleen
   // Shift+slepen hersorteert nog (de sorteerlijst in Instellingen blijft).
   function knobPointerDown(e, divName, idx) {
-    if (e.pointerType !== 'mouse' || e.button !== 0) return; // alleen linkermuisknop
-    const mode = e.shiftKey ? 'reorder' : 'paint';
+    // Muis: alleen de linkerknop. Vinger en pen doen mee, zodat je op een
+    // aanraakscherm net zo over de registers kunt vegen als met de muis.
+    // Herschikken blijft muis-met-Shift — een aanraakscherm heeft geen Shift.
+    if (e.pointerType === 'mouse' ? e.button !== 0 : !['touch', 'pen'].includes(e.pointerType)) return;
+    const mode = (e.pointerType === 'mouse' && e.shiftKey) ? 'reorder' : 'paint';
     const organ = displayOrgan || organInfo || demoOrgan;
     const first = organ?.divisions?.find(d => d.name === divName)?.stops?.[idx];
     knobDrag = {
@@ -4203,13 +4195,6 @@
               <circle cx="12" cy="13" r="3"/>
             </svg>
             {$t('library.scan_folder')}
-          </button>
-          <button class="btn btn-secondary btn-sm" on:click={openExternalSampleset} title={$t('library.external_set')}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M3 7v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-6l-2-2H5a2 2 0 0 0-2 2z"/>
-              <path d="M12 11v6M9 14h6"/>
-            </svg>
-            {$t('library.external_set')}
           </button>
           <button class="btn btn-secondary btn-sm" on:click={exportOrganFile} title={$t('library.export')}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -4490,7 +4475,7 @@
               <button
                 class="btn btn-ghost btn-sm"
                 on:click={openLiveNotation}
-                title={$t('toolbar.notate_title')}
+                title="{$t('toolbar.notate_title')} — {$t('notation.alpha_notice')}"
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <circle cx="7" cy="18" r="3"/>
@@ -4498,6 +4483,7 @@
                   <circle cx="15" cy="15" r="3"/>
                 </svg>
                 {$t('toolbar.notate')}
+                <span class="alpha-tag">{$t('notation.alpha_badge')}</span>
               </button>
             {/if}
             <button

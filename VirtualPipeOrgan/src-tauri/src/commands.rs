@@ -8,7 +8,8 @@ use tracing::{info, warn};
 use crate::audio::AudioCommand;
 use crate::state::AppState;
 use crate::library::{self, OrganLibraryEntry, OrganSettings, PresetBindingSaved, SwellBindingSaved, CrescendoBindingSaved, DivisionTremulantSaved, MidiMappingSaved, PresetData};
-use vpo_sampler::{OrganDefinition, clean_stop_name, clean_division_name};
+use vpo_sampler::{OrganDefinition, clean_stop_name, clean_stop_name_for_division,
+                  strip_pitch_from_name, clean_division_name};
 
 /// Audio device info for frontend
 #[derive(Debug, Serialize)]
@@ -2427,7 +2428,7 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
                     continue;
                 }
                 rank_summary.push(rank_summary_of(stop, format!("{}_{}", manual.number, stop.id)));
-                let pitch = OrganDefinition::harmonic_to_footage(stop.harmonic_number);
+                let pitch = OrganDefinition::harmonic_to_footage(stop.sounding_harmonic);
                 let color = get_stop_color(&stop.name);
 
                 // MIDI range. Hauptwerk sets the stop's own first note directly.
@@ -2440,7 +2441,13 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
 
                 stops.push(StopDto {
                     id: format!("{}_{}", manual.number, stop.id),
-                    name: clean_stop_name(&stop.name),
+                    // De divisieaanduiding staat al boven de kolom, en het
+                    // voettal staat al onder de knop. Allebei niet nog een
+                    // keer in de naam.
+                    name: strip_pitch_from_name(
+                        &clean_stop_name_for_division(&stop.name, &manual.name),
+                        &pitch,
+                    ),
                     pitch,
                     drawn: false,
                     color: Some(color.to_string()),

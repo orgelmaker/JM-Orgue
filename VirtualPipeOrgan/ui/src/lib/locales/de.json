@@ -26,7 +26,6 @@
     "title": "Orgel-Bibliothek",
     "open_organ_file": ".organ",
     "scan_folder": "JM-Rec-Import",
-    "external_set": "Extern",
     "export": "Exportieren",
     "app_settings_button": "Allgemeine Einstellungen",
     "remove_from_library": "Aus Bibliothek entfernen",
@@ -427,7 +426,6 @@
     "organ_definition_filter": "Orgeldefinition (GrandOrgue / Hauptwerk)",
     "image_filter": "Bilder",
     "organ_definition": "Orgeldefinition",
-    "external_sampleset_title": "Externes Sampleset — Hauptordner wählen (nur unverschlüsselte .wav-Dateien)",
     "export_source_folder_title": "Sample-Ordner zum Exportieren wählen",
     "export_organ_save_title": ".organ-Datei speichern",
     "export_organ_success": "Orgeldefinition erfolgreich exportiert!",
@@ -650,6 +648,8 @@
     "error": "MIDI-Archiv-Fehler: {error}"
   },
   "notation": {
+    "alpha_badge": "Alpha",
+    "alpha_notice": "Alpha: die Notation ist noch nicht überprüft. Tonhöhe, Rhythmus und Takteinteilung können von Ihrem Spiel abweichen.",
     "live_window_title": "JM-Orgue - Live-Notation",
     "open_failed": "Notationsfenster konnte nicht geöffnet werden.",
     "open_failed_error": "Notationsfenster konnte nicht geöffnet werden: {error}",

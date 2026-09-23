@@ -26,7 +26,6 @@
     "title": "Libreria organi",
     "open_organ_file": ".organ",
     "scan_folder": "Importa JM-Rec",
-    "external_set": "Esterno",
     "export": "Esporta",
     "app_settings_button": "Impostazioni generali",
     "remove_from_library": "Rimuovi dalla libreria",
@@ -427,7 +426,6 @@
     "organ_definition_filter": "Definizione d'organo (GrandOrgue / Hauptwerk)",
     "image_filter": "Immagini",
     "organ_definition": "Definizione d'organo",
-    "external_sampleset_title": "Set di campioni esterno — seleziona la cartella principale (solo file .wav non cifrati)",
     "export_source_folder_title": "Seleziona la cartella dei campioni da esportare",
     "export_organ_save_title": "Salva il file .organ",
     "export_organ_success": "Definizione d'organo esportata correttamente.",
@@ -650,6 +648,8 @@
     "error": "Errore dell'archivio MIDI: {error}"
   },
   "notation": {
+    "alpha_badge": "Alfa",
+    "alpha_notice": "Alfa: la notazione non è ancora stata verificata. Altezza, ritmo e battute possono differire da ciò che ha suonato.",
     "live_window_title": "JM-Orgue - Notazione dal vivo",
     "open_failed": "Impossibile aprire la finestra di notazione.",
     "open_failed_error": "Impossibile aprire la finestra di notazione: {error}",

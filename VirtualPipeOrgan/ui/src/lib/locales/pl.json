@@ -26,7 +26,6 @@
     "title": "Biblioteka organów",
     "open_organ_file": ".organ",
     "scan_folder": "Import JM-Rec",
-    "external_set": "Zewnętrzny",
     "export": "Eksportuj",
     "app_settings_button": "Ustawienia ogólne",
     "remove_from_library": "Usuń z biblioteki",
@@ -427,7 +426,6 @@
     "organ_definition_filter": "Definicja organów (GrandOrgue / Hauptwerk)",
     "image_filter": "Obrazy",
     "organ_definition": "Definicja organów",
-    "external_sampleset_title": "Zewnętrzny zestaw sampli — wybierz folder główny (tylko niezaszyfrowane pliki .wav)",
     "export_source_folder_title": "Wybierz folder sampli do eksportu",
     "export_organ_save_title": "Zapisz plik .organ",
     "export_organ_success": "Definicja organów została wyeksportowana.",
@@ -650,6 +648,8 @@
     "error": "Błąd archiwum MIDI: {error}"
   },
   "notation": {
+    "alpha_badge": "Alfa",
+    "alpha_notice": "Alfa: zapis nutowy nie został jeszcze sprawdzony. Wysokość dźwięku, rytm i podział na takty mogą różnić się od tego, co zagrano.",
     "live_window_title": "JM-Orgue - Zapis nutowy na żywo",
     "open_failed": "Nie udało się otworzyć okna zapisu nutowego.",
     "open_failed_error": "Nie udało się otworzyć okna zapisu nutowego: {error}",

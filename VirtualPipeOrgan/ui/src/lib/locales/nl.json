@@ -26,7 +26,6 @@
     "title": "Orgel Bibliotheek",
     "open_organ_file": ".organ",
     "scan_folder": "JM-Rec import",
-    "external_set": "Extern",
     "export": "Exporteer",
     "app_settings_button": "Algemene Instellingen",
     "remove_from_library": "Verwijder uit bibliotheek",
@@ -427,7 +426,6 @@
     "organ_definition_filter": "Orgeldefinitie (GrandOrgue / Hauptwerk)",
     "image_filter": "Afbeeldingen",
     "organ_definition": "Orgeldefinitie",
-    "external_sampleset_title": "Externe sampleset — selecteer de hoofdmap (alleen onversleutelde .wav bestanden)",
     "export_source_folder_title": "Selecteer de sample map om te exporteren",
     "export_organ_save_title": "Sla .organ bestand op",
     "export_organ_success": "Orgeldefinitie succesvol geëxporteerd!",
@@ -650,6 +648,8 @@
     "error": "MIDI-archief-fout: {error}"
   },
   "notation": {
+    "alpha_badge": "Alfa",
+    "alpha_notice": "Alfa: het notenschrift is nog niet nagelopen. Toonhoogte, ritme en maatindeling kunnen afwijken van wat u speelde.",
     "live_window_title": "JM-Orgue - Live noteren",
     "open_failed": "Notatievenster openen mislukt.",
     "open_failed_error": "Notatievenster openen mislukt: {error}",

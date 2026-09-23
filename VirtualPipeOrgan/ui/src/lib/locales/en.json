@@ -26,7 +26,6 @@
     "title": "Organ Library",
     "open_organ_file": ".organ",
     "scan_folder": "JM-Rec import",
-    "external_set": "External",
     "export": "Export",
     "app_settings_button": "App Settings",
     "remove_from_library": "Remove from library",
@@ -427,7 +426,6 @@
     "organ_definition_filter": "Organ definition (GrandOrgue / Hauptwerk)",
     "image_filter": "Images",
     "organ_definition": "Organ definition",
-    "external_sampleset_title": "External sample set — select the main folder (unencrypted .wav files only)",
     "export_source_folder_title": "Select the sample folder to export",
     "export_organ_save_title": "Save .organ file",
     "export_organ_success": "Organ definition exported successfully!",
@@ -650,6 +648,8 @@
     "error": "MIDI archive error: {error}"
   },
   "notation": {
+    "alpha_badge": "Alpha",
+    "alpha_notice": "Alpha: this notation has not been checked yet. Pitch, rhythm and bar layout may differ from what you played.",
     "live_window_title": "JM-Orgue - Live notation",
     "open_failed": "Could not open the notation window.",
     "open_failed_error": "Could not open the notation window: {error}",

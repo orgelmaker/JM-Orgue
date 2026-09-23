@@ -100,6 +100,14 @@ pub struct StopDef {
     pub name: String,
     /// Harmonic number (8 = 8', 16 = 4', 32 = 2', etc.)
     pub harmonic_number: u32,
+    /// De harmonische van wat je hóórt: die van de rang, verschoven met de
+    /// sprong die het register maakt. Een 16'-rang die een octaaf hoger wordt
+    /// aangesproken klinkt als 8'.
+    ///
+    /// Alleen voor de voetmaat op de knop. `harmonic_number` blijft de
+    /// harmonische van de rang zelf, want dáárop hertempert de sampler; die
+    /// twee door elkaar halen verstemt het orgel een octaaf.
+    pub sounding_harmonic: u32,
     /// Pitch correction in cents (stop-niveau). GrandOrgue-semantiek: een
     /// BEWUSTE, OPGETELDE afwijking t.o.v. de getemperde toon (bv. de zwever
     /// van een Voix céleste) die alléén bij hertemperen (niet-"Original"
@@ -555,6 +563,8 @@ impl OdfParser {
                         id,
                         name: section.get("Name").cloned().unwrap_or_default(),
                         harmonic_number: harmonic,
+                        // GrandOrgue noteert de voetmaat van het register zelf.
+                        sounding_harmonic: harmonic,
                         pitch_correction: self.parse_f32(section, "PitchCorrection").unwrap_or(0.0),
                         pitch_tuning_cents: self.parse_f32(section, "PitchTuning").unwrap_or(0.0),
                         gain_db: self.parse_f32(section, "Gain").unwrap_or(0.0),
@@ -1668,6 +1678,7 @@ mod tests {
             id: 1,
             name: name.to_string(),
             harmonic_number: 8,
+            sounding_harmonic: 8,
             pitch_correction: 0.0,
             pitch_tuning_cents: 0.0,
             number_of_pipes: 1,

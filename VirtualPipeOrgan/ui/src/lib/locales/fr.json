@@ -26,7 +26,6 @@
     "title": "Bibliothèque d'orgues",
     "open_organ_file": ".organ",
     "scan_folder": "Import JM-Rec",
-    "external_set": "Externe",
     "export": "Exporter",
     "app_settings_button": "Paramètres généraux",
     "remove_from_library": "Retirer de la bibliothèque",
@@ -427,7 +426,6 @@
     "organ_definition_filter": "Définition d'orgue (GrandOrgue / Hauptwerk)",
     "image_filter": "Images",
     "organ_definition": "Définition d'orgue",
-    "external_sampleset_title": "Sampleset externe — sélectionnez le dossier principal (fichiers .wav non chiffrés uniquement)",
     "export_source_folder_title": "Sélectionnez le dossier d'échantillons à exporter",
     "export_organ_save_title": "Enregistrer le fichier .organ",
     "export_organ_success": "Définition d'orgue exportée avec succès !",
@@ -650,6 +648,8 @@
     "error": "Erreur d'archive MIDI : {error}"
   },
   "notation": {
+    "alpha_badge": "Alpha",
+    "alpha_notice": "Alpha : la partition n'a pas encore été vérifiée. Hauteur, rythme et mesure peuvent différer de ce que vous avez joué.",
     "live_window_title": "JM-Orgue - Notation en direct",
     "open_failed": "Impossible d'ouvrir la fenêtre de notation.",
     "open_failed_error": "Impossible d'ouvrir la fenêtre de notation : {error}",

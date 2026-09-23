@@ -1119,6 +1119,12 @@
       </div>
     </div>
   {/if}
+  <!-- Het notatievenster is nog niet nagelopen; dat hoort de gebruiker te
+       weten vóór hij op het resultaat vertrouwt. -->
+  <div class="notation-alpha" role="note">
+    <span class="alpha-tag">{$t('notation.alpha_badge')}</span>
+    <span>{$t('notation.alpha_notice')}</span>
+  </div>
   <div class="notation-toolbar">
     {#if isLive}
       <button
@@ -1370,6 +1376,21 @@
 
 <style>
   .notation-window { display: flex; flex-direction: column; height: 100vh; background: #fff; color: #222; }
+  .notation-alpha {
+    display: flex; align-items: center; gap: 0.5rem;
+    padding: 0.35rem 0.75rem;
+    background: color-mix(in srgb, var(--warning, #b8860b) 22%, var(--bg-panel, #2a2a2a));
+    color: var(--text, #eee);
+    border-bottom: 1px solid var(--warning, #b8860b);
+    font-size: 0.78rem;
+    flex-shrink: 0;
+  }
+  .notation-alpha .alpha-tag {
+    padding: 0 0.3rem; border-radius: 3px;
+    background: var(--warning, #b8860b); color: #fff;
+    font-size: 0.62rem; font-weight: 700; letter-spacing: 0.04em;
+    text-transform: uppercase; white-space: nowrap;
+  }
   .notation-toolbar {
     display: flex; align-items: center; flex-wrap: wrap; gap: 0.6rem;
     padding: 0.5rem 0.75rem;

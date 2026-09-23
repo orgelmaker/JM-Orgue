@@ -385,6 +385,7 @@ fn build_definition(
         let mut first_rank_label: Option<String> = None;
         let mut extra_layers: Vec<(String, HashMap<u32, (u32, PathBuf, PipeExtra)>)> = Vec::new();
         let mut harmonic = 0u32;
+        let mut klinkend = 0u32;
         for sr in stopranks_by_stop.get(&stop_id).into_iter().flatten() {
             let rank_id = match sr.get_u32("RankID") {
                 Some(v) => v,
@@ -394,11 +395,6 @@ fn build_definition(
                 Some(m) => m,
                 None => continue,
             };
-            if harmonic == 0 {
-                if let Some(h) = rank_harmonic.get(&rank_id) {
-                    harmonic = *h;
-                }
-            }
             // Perspectief-bron: StopRank-Name ("PED  Soubasse 16 (front)"),
             // anders de Rank-Name, anders een neutrale naam.
             let sr_name = sr
@@ -410,6 +406,15 @@ fn build_definition(
             let first_div = sr.get_u32("MIDINoteNumOfFirstMappedDivisionInputNode").unwrap_or(36);
             let count = sr.get_u32("NumberOfMappedDivisionInputNodes").unwrap_or(0);
             let inc = sr.get_i32("MIDINoteNumIncrementFromDivisionToRank").unwrap_or(0);
+            // De voetmaat van de rang én die van wat je hoort. Een pedaal-
+            // Bourdon 8 kan een 16'-rang een octaaf hoger aanspreken; dan
+            // stond er "Bourdon 8" met "16'" eronder.
+            if harmonic == 0 {
+                if let Some(h) = rank_harmonic.get(&rank_id) {
+                    harmonic = *h;
+                    klinkend = klinkende_harmonische(*h, inc);
+                }
+            }
             let mut own: HashMap<u32, (u32, PathBuf, PipeExtra)> = HashMap::new();
             for k in 0..count {
                 let div_note = first_div + k;
@@ -536,6 +541,7 @@ fn build_definition(
             id: stop_id,
             name,
             harmonic_number: if harmonic > 0 { harmonic } else { 8 },
+            sounding_harmonic: if klinkend > 0 { klinkend } else if harmonic > 0 { harmonic } else { 8 },
             pitch_correction: 0.0,
             pitch_tuning_cents: 0.0,
             gain_db: 0.0,
@@ -948,6 +954,14 @@ pub fn clean_stop_name(raw: &str) -> String {
     let bytes = s.as_bytes();
     // Count leading ASCII letters.
     let letters = bytes.iter().take_while(|b| b.is_ascii_alphabetic()).count();
+    // "Pos: Prestant 8" — een dubbele punt achter een kort woord is altijd een
+    // divisieaanduiding. Die staat al boven de kolom, dus weg ermee.
+    if (1..=6).contains(&letters) && bytes.get(letters) == Some(&b':') {
+        let rest = s[letters + 1..].trim();
+        if !rest.is_empty() {
+            return rest.to_string();
+        }
+    }
     if (1..=4).contains(&letters) {
         let prefix = s[..letters].to_uppercase();
         let after = &s[letters..];
@@ -958,6 +972,131 @@ pub fn clean_stop_name(raw: &str) -> String {
         }
     }
     s.to_string()
+}
+
+/// De harmonische van wat je hoort: die van de rang, verschoven met de sprong
+/// die het register naar die rang maakt.
+///
+/// Een octaaf hoger is een twee keer zo hoge harmonische (16' → 8'), een
+/// kwint hoger anderhalf keer (8' → 5 1/3'). Zonder sprong verandert er
+/// niets.
+fn klinkende_harmonische(rang: u32, inc: i32) -> u32 {
+    if rang == 0 || inc == 0 {
+        return rang;
+    }
+    ((rang as f64 * 2f64.powf(inc as f64 / 12.0)).round() as u32).max(1)
+}
+
+/// Registernaam zonder de divisieaanduiding ervoor, mét de divisienaam als
+/// extra houvast.
+///
+/// `clean_stop_name` werkt met een vaste lijst afkortingen. Die dekt "PED  "
+/// en "GO  ", maar niet "Pd " (Pedaal) of "RW " (Rugwerk), en zo'n lijst is
+/// nooit af. Met de divisienaam erbij hoeft dat ook niet: een kort woord vóór
+/// de registernaam is een aanduiding wanneer het met dezelfde letter begint
+/// als de divisie en zijn letters in volgorde in die divisienaam voorkomen.
+/// "RW" zit zo in "Rugwerk" en "Pd" in "Pedaal", terwijl "V Cornet" op het
+/// Bovenwerk zijn V houdt — dat zijn koren.
+pub fn clean_stop_name_for_division(raw: &str, division: &str) -> String {
+    let kort = clean_stop_name(raw);
+    if kort != raw.trim() {
+        return kort; // de vaste regels hebben hem al opgeschoond
+    }
+    let letters = kort.bytes().take_while(|b| b.is_ascii_alphabetic()).count();
+    if !(2..=4).contains(&letters) {
+        return kort;
+    }
+    // Een punt achter de afkorting mag ("Pd. Subbas"), een spatie is verplicht.
+    let na = &kort[letters..];
+    let na = na.strip_prefix('.').unwrap_or(na);
+    let spaties = na.bytes().take_while(|b| *b == b' ').count();
+    if spaties == 0 {
+        return kort;
+    }
+    let rest = na[spaties..].trim();
+    if rest.is_empty() || !is_afkorting_van(&kort[..letters], division) {
+        return kort;
+    }
+    rest.to_string()
+}
+
+/// Is `kort` een afkorting van `naam`: zelfde beginletter, en alle letters in
+/// volgorde terug te vinden?
+fn is_afkorting_van(kort: &str, naam: &str) -> bool {
+    let letters = |s: &str| -> Vec<char> {
+        s.chars().filter(|c| c.is_alphabetic()).flat_map(|c| c.to_lowercase()).collect()
+    };
+    let (k, n) = (letters(kort), letters(naam));
+    if k.is_empty() || n.is_empty() || k[0] != n[0] {
+        return false;
+    }
+    let mut doel = n.into_iter();
+    k.into_iter().all(|c| doel.any(|d| d == c))
+}
+
+/// Registernaam zonder het voettal dat er al achter staat.
+///
+/// Hauptwerk-sets schrijven het voettal meestal kaal achter de naam
+/// ("Gedekt 8", "Sifflet 1 1/3") of met een voetwoord ("Subbaß 16 Fuß"), niet
+/// met een voetteken. Daardoor bleef het staan en kwam het er onder de knop
+/// nóg een keer bij.
+///
+/// We strippen alleen wanneer het achter de naam hetzelfde voettal is als het
+/// register werkelijk heeft. "Mixtuur 4" op een 2'-rang houdt dus zijn 4: dat
+/// zijn koren en geen voeten.
+pub fn strip_pitch_from_name(name: &str, pitch: &str) -> String {
+    let doel = normaliseer_voettal(pitch);
+    if doel.is_empty() {
+        return name.to_string();
+    }
+    let woorden: Vec<&str> = name.split_whitespace().collect();
+    // Een voettal beslaat hooguit drie woorden: "2 2/3 Fuß".
+    for aantal in [3usize, 2, 1] {
+        if woorden.len() <= aantal {
+            continue; // er moet een naam overblijven
+        }
+        let staart = woorden[woorden.len() - aantal..].join(" ");
+        if normaliseer_voettal(&staart) == doel {
+            return woorden[..woorden.len() - aantal].join(" ");
+        }
+    }
+    name.to_string()
+}
+
+/// Voettal in één vorm: zonder voetteken of voetwoord, breuken uitgeschreven,
+/// zodat "8'", "8", "8 Fuß" en "2⅔'" met "2 2/3'" te vergelijken zijn.
+fn normaliseer_voettal(s: &str) -> String {
+    let mut uit = String::new();
+    for c in s.chars() {
+        match c {
+            '\'' | '\u{2032}' | '\u{2019}' | '"' => {}
+            '\u{00BC}' => uit.push_str(" 1/4"),
+            '\u{00BD}' => uit.push_str(" 1/2"),
+            '\u{00BE}' => uit.push_str(" 3/4"),
+            '\u{2153}' => uit.push_str(" 1/3"),
+            '\u{2154}' => uit.push_str(" 2/3"),
+            '\u{2155}' => uit.push_str(" 1/5"),
+            '\u{2156}' => uit.push_str(" 2/5"),
+            '\u{2157}' => uit.push_str(" 3/5"),
+            '\u{2158}' => uit.push_str(" 4/5"),
+            '\u{215B}' => uit.push_str(" 1/8"),
+            '\u{215C}' => uit.push_str(" 3/8"),
+            '\u{215D}' => uit.push_str(" 5/8"),
+            '\u{215E}' => uit.push_str(" 7/8"),
+            _ => uit.push(c),
+        }
+    }
+    let mut woorden: Vec<&str> = uit.split_whitespace().collect();
+    // Voetwoord achteraan weghalen: Fuß, voet, ft, pieds, feet.
+    while let Some(laatste) = woorden.last() {
+        let l = laatste.trim_end_matches('.').to_lowercase();
+        if matches!(l.as_str(), "fuss" | "fuß" | "fus" | "voet" | "voeten" | "ft" | "feet" | "foot" | "pied" | "pieds") {
+            woorden.pop();
+        } else {
+            break;
+        }
+    }
+    woorden.join(" ")
 }
 
 /// Clean a division name: drop a leading "N. " ordinal (e.g. "1. Pédale",
@@ -1095,6 +1234,68 @@ mod tests {
         // Vangnet (oud gedrag): mapdetectie op pad-substring.
         assert!(is_hauptwerk_path(Path::new("C:/sets/MijnSet.CompPkg.Hauptwerk")));
         assert!(!is_hauptwerk_path(Path::new("C:/sets/GewoonEenMap")));
+    }
+
+    /// De divisieaanduiding staat al boven de kolom. "Pos:" en "RW " horen
+    /// dus niet nóg een keer voor elke registernaam te staan.
+    #[test]
+    fn de_divisieaanduiding_gaat_van_de_registernaam_af() {
+        // Dubbele punt: altijd een aanduiding, ook zonder divisienaam erbij.
+        assert_eq!(clean_stop_name("Pos: Prestant 8"), "Prestant 8");
+        assert_eq!(clean_stop_name("HW:Trompet 8"), "Trompet 8");
+        // De bestaande vormen blijven werken.
+        assert_eq!(clean_stop_name("PED  Soubasse 16"), "Soubasse 16");
+        assert_eq!(clean_stop_name("P  Subbaß 16 Fuß"), "Subbaß 16 Fuß");
+
+        // Mét de divisienaam erbij hoeft de afkorting niet in een lijst te
+        // staan: "Pd" zit in "Pedaal", "RW" in "Rugwerk".
+        assert_eq!(clean_stop_name_for_division("Pd Subbas 16", "Pedaal"), "Subbas 16");
+        assert_eq!(clean_stop_name_for_division("RW Fluit 2", "Rugwerk"), "Fluit 2");
+        assert_eq!(clean_stop_name_for_division("Cham. Trompet 8", "Chamade"), "Trompet 8");
+
+        // Maar niet zomaar: een kort woord dat niet bij de divisie hoort
+        // blijft staan, en koren ("V Cornet") zijn geen aanduiding.
+        assert_eq!(clean_stop_name_for_division("Bas 16", "Bovenwerk"), "Bas 16");
+        assert_eq!(clean_stop_name_for_division("V Cornet", "Bovenwerk"), "V Cornet");
+        assert_eq!(clean_stop_name_for_division("Vox humana 8", "Zwelwerk"), "Vox humana 8");
+        assert_eq!(clean_stop_name_for_division("Octaaf 4", "Hoofdwerk"), "Octaaf 4");
+    }
+
+    /// Een register kan een rang een octaaf hoger aanspreken. Dan is de
+    /// voetmaat die je hoort niet die van de rang: een pedaal-Bourdon 8 op
+    /// een 16'-rang klinkt als 8', en zo hoort hij ook op de knop te staan.
+    #[test]
+    fn de_voetmaat_volgt_de_octaafsprong_van_het_register() {
+        assert_eq!(klinkende_harmonische(4, 0), 4);    // 16' blijft 16'
+        assert_eq!(klinkende_harmonische(4, 12), 8);   // 16'-rang → 8'
+        assert_eq!(klinkende_harmonische(8, 12), 16);  // 8'-rang  → 4'
+        assert_eq!(klinkende_harmonische(8, 24), 32);  // 8'-rang  → 2'
+        assert_eq!(klinkende_harmonische(8, -12), 4);  // 8'-rang  → 16'
+        assert_eq!(klinkende_harmonische(8, 7), 12);   // kwint    → 5 1/3'
+        assert_eq!(klinkende_harmonische(0, 12), 0);   // onbekend blijft onbekend
+    }
+
+    /// Het voettal staat al onder de knop. Staat het kaal achter de naam
+    /// ("Gedekt 8") of met een voetwoord ("Subbaß 16 Fuß"), dan moet het daar
+    /// weg — maar alleen als het hetzelfde voettal is.
+    #[test]
+    fn het_voettal_komt_niet_twee_keer_voor() {
+        assert_eq!(strip_pitch_from_name("Gedekt 8", "8'"), "Gedekt");
+        assert_eq!(strip_pitch_from_name("Praestant 4", "4'"), "Praestant");
+        assert_eq!(strip_pitch_from_name("Prestant 8'", "8'"), "Prestant");
+        assert_eq!(strip_pitch_from_name("Sifflet 1 1/3", "1 1/3'"), "Sifflet");
+        assert_eq!(strip_pitch_from_name("Roerquint 2 2/3", "2 2/3'"), "Roerquint");
+        assert_eq!(strip_pitch_from_name("Subbaß 16 Fuß", "16'"), "Subbaß");
+        assert_eq!(strip_pitch_from_name("Nasard 2\u{2154}'", "2 2/3'"), "Nasard");
+
+        // Een getal dat géén voettal is blijft staan: "Mixtuur 4" op een
+        // 2'-rang telt koren.
+        assert_eq!(strip_pitch_from_name("Mixtuur 4", "2'"), "Mixtuur 4");
+        // Zonder voettal in de naam verandert er niets.
+        assert_eq!(strip_pitch_from_name("Carillion", "4'"), "Carillion");
+        assert_eq!(strip_pitch_from_name("Cornet", ""), "Cornet");
+        // En er moet altijd een naam overblijven.
+        assert_eq!(strip_pitch_from_name("8", "8'"), "8");
     }
 
     #[test]
