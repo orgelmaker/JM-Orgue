@@ -102,8 +102,10 @@ Verificatie in code: drie nieuwe unittests — de aanduiding die weg moet en de
 aanduiding die moet blijven staan, de kale voetmaat met breuk en voetwoord,
 "Mixtuur 4" dat zijn 4 houdt, en de octaafsprong die de voetmaat verschuift.
 
-Het vegen met de vinger is niet met een echt aanraakscherm nagelopen; de
-afhandeling en de scrollrichtingen zijn op de code gecontroleerd.
+Het vegen met de vinger is nagemeten met geïnjecteerde aanraakinvoer, dus
+langs dezelfde weg als een echt aanraakscherm. Eén veeg langs de
+pedaalkolom zette alle vijf registers aan, de veeg terug zette ze alle vijf
+uit, en een enkele tik zette er nog steeds precies één om.
 
 ## [0.7.53] - 2026-09-22
 
