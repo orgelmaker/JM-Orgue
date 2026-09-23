@@ -5,6 +5,104 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.55] - 2026-09-23
+
+### De tremulant van een Hauptwerk-set komt nu mee
+
+De sets van de Laurenskerk en de Utrechtse Dom hebben echte tremulant-opnamen
+aan boord, maar JM-Orgue deed er niets mee. De tremulantknop stond er bij die
+orgels niet eens.
+
+**Hauptwerk kent twee manieren om een tremulant-opname vast te leggen**, en
+JM-Orgue las er maar één. Saint-Jean-de-Luz zet de opname als tweede laag óp
+de pijp: elke pijp draagt zijn droge én zijn tremulant-versie. Dat werkte al.
+Rotterdam en Utrecht doen het anders: de tremulant-opnamen zijn een áparte
+rang ("4 Gedekt 8 (rear tremmed)") waar een schakelaar het register naartoe
+zet. Die weg lag stil, en daarmee bleven die sets stom bij het aanzetten van
+de tremulant.
+
+Beide wegen komen nu op dezelfde plek uit, zodat de rest van de keten niet
+hoeft te weten waar de opname vandaan kwam. Wat dat oplevert:
+
+| set | registers met tremulant-opnamen |
+|---|---|
+| Rotterdam Laurenskerk | 16: Borstwerk 7, Rugwerk 6, Bovenwerk 3 |
+| Utrecht Dom v2 | 22: Rugwerk en Bovenwerk |
+| Utrecht Dom demo | 7 |
+
+Er zat nog een tweede drempel: in een gecomprimeerde orgeldefinitie heet dat
+veld `p` en dat werd niet vertaald. Het staat maar bij een handvol registers
+(Rotterdam: 32 van de 201), dus op dekking valt het niet te vinden. Het
+kenmerk is een ander: het wijst naar rangen die nérgens gewoon gespeeld
+worden. Dat zijn precies de tremulant-rangen.
+
+### De centrale c van een bas/discant-register was weg
+
+Bij de Chamade van de Laurenskerk liep de bashelft tot en met de c' en de
+discant vanaf de cis'. Die c' ontbrak.
+
+De oorzaak is de standaardwaarde weer. Een weggelaten MIDI-noot betekent 60,
+en juist die pijp is bij de bashelft de laatste. JM-Orgue bepaalde het
+toetsbereik van een rang vóórdat die standaardwaarde was ingevuld, dus telde
+de rang 24 pijpen in plaats van 25 en hield het register op bij de b. Nu wordt
+de standaardwaarde eerst afgeleid en dan pas geteld.
+
+Dat raakt elk register waarvan de laatste toets de c' is — bij deze set alle
+vijf de bashelften van de Chamade.
+
+### De aanduiding vóór de registernaam gaat er nu altijd af
+
+In 0.7.54 gingen "Pos:" en "Pd " er al af, maar Rotterdam zet er een
+klaviernummer voor ("4 Gedekt 8", "1 Praestant 8") en bij de Chamade een
+afkorting ("CB Clarin 2"). Die bleven staan.
+
+Dat is één regel geworden voor allebei: een kort woord of een enkel cijfer
+vóór de naam is een aanduiding wanneer de hele divisie hetzelfde draagt. Aan
+één naam alleen zie je dat niet — "4" kan een voetmaat zijn en "Sub" het begin
+van een naam. Pas over de hele divisie is het te zien.
+
+En er moet een naam overblijven die met een letter begint. Daardoor houdt
+"1 1/3 Quint" zijn voetmaat en blijft een divisie van "Sub 16" en "Sub 8"
+heel.
+
+De oude regel die een afkorting tegen de divisienaam legde is vervallen. Die
+gaf willekeur: bij de Chamade van de Laurenskerk verdween "CD" wél (de D zit
+in "Chamade") en "CB" niet. Nu blijven ze allebei staan, en dat is ook de
+bedoeling: ze zeggen welke helft van de bas/discant-splitsing je voor je hebt.
+
+### Nagemeten
+
+Op de echte sets, met elk sample-pad gecontroleerd op schijf:
+
+| set | samples | ontbrekend |
+|---|---|---|
+| Rotterdam Laurenskerk (surround) | 20.168 | 0 |
+| Utrecht Dom v2 (surround) | — | 0 |
+| Utrecht Dom demo | — | 0 |
+
+En op het draaiende orgel, met de Chamade van de Laurenskerk (tien registers,
+alle vijf bashelften en alle vijf discanten getrokken):
+
+| toets | stemmen | piek |
+|---|---|---|
+| 58 (ais) | 5 | 0,1607 |
+| 59 (b) | 5 | 0,1438 |
+| **60 (centrale c)** | **5** | **0,1149** |
+| 61 (cis') | 5 | 0,1343 |
+| 62 (d') | 5 | 0,1171 |
+
+Verificatie in code: drie nieuwe unittests — het gedeelde voorvoegsel (cijfer,
+afkorting, dubbele punt, en de gevallen die moeten blijven staan), de
+tremulant-rang die aan zijn eigen rangen herkend wordt, en de weg van
+tremmed rang naar tremulant-opname.
+
+### Goed om te weten
+
+De tremulant-opnamen worden bij het laden meegenomen, dus een set met veel
+tremmed registers vraagt meer werkgeheugen. Voor de Rotterdamse surround-set
+gaat het om ruim een vijfde meer opnamen (16.564 → 20.168). Op 32 GB wordt dat
+krap; het achterperspectief alleen vulde al ruim 20 GB.
+
 ## [0.7.54] - 2026-09-23
 
 ### De registerknoppen lezen weer als registerknoppen

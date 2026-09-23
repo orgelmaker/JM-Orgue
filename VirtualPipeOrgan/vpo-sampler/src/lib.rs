@@ -23,7 +23,8 @@ pub use loader::{
 pub use cache::*;
 pub use pool::*;
 pub use grandorgue::*;
-pub use hauptwerk::{load_hauptwerk, is_hauptwerk_path, clean_stop_name, clean_stop_name_for_division, strip_pitch_from_name, clean_division_name, find_package_root};
+pub use hauptwerk::{load_hauptwerk, is_hauptwerk_path, clean_stop_name, strip_pitch_from_name,
+                   gedeeld_voorvoegsel, strip_voorvoegsel, clean_division_name, find_package_root};
 pub use streaming::*;
 pub use custom_organ::*;
 pub use perspective::*;

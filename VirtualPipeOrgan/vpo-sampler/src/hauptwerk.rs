@@ -427,6 +427,46 @@ fn build_definition(
                     }
                 }
             }
+            // Tremmed rang: dezelfde toetsen, maar opgenomen mét tremulant.
+            //
+            // Hauptwerk kent hier twee manieren voor. Saint-Jean-de-Luz zet
+            // de tremulant-opname als tweede laag óp de pijp; dat leest
+            // `resolve_pipe` hierboven al. Rotterdam en Utrecht gebruiken de
+            // andere: een áparte rang ("4 Gedekt 8 (rear tremmed)") waar een
+            // schakelaar het register naartoe zet. Die route stond tot nu toe
+            // stil, dus die sets klonken nooit met tremulant.
+            //
+            // Beide komen op dezelfde plek terecht — `tremulant_attack` en
+            // `tremulant_releases` — zodat de rest van de keten niet hoeft te
+            // weten waar de opname vandaan kwam.
+            if let Some(alt_id) = sr.get_u32("AlternateRankID") {
+                if let Some(alt_pipes) = pipes_by_rank.get(&alt_id) {
+                    let mut gevuld = 0usize;
+                    for (div_note, (_, _, extra)) in own.iter_mut() {
+                        let rank_note = (*div_note as i64 + inc as i64) as u32;
+                        let Some(apid) = alt_pipes.get(&rank_note) else { continue };
+                        let Some((apath, aextra)) = resolve_pipe(*apid) else { continue };
+                        // De tremmed rang heeft zelf geen tweede laag; zijn
+                        // hoofdlaag ís de tremulant-opname.
+                        extra.tremulant_releases = aextra.releases;
+                        extra.tremulant_attack = Some(AttackDef {
+                            path: apath,
+                            ..Default::default()
+                        });
+                        gevuld += 1;
+                    }
+                    if gevuld > 0 {
+                        info!(
+                            "Hauptwerk stop '{}': {} tremulant-pijpen uit rang {} ({})",
+                            name,
+                            gevuld,
+                            alt_id,
+                            rank_name.get(&alt_id).map(|s| s.as_str()).unwrap_or("naamloos")
+                        );
+                    }
+                }
+            }
+
             if own.is_empty() {
                 continue;
             }
@@ -987,51 +1027,70 @@ fn klinkende_harmonische(rang: u32, inc: i32) -> u32 {
     ((rang as f64 * 2f64.powf(inc as f64 / 12.0)).round() as u32).max(1)
 }
 
-/// Registernaam zonder de divisieaanduiding ervoor, mét de divisienaam als
-/// extra houvast.
+/// Het voorvoegsel dat vóór élke registernaam van een divisie staat.
 ///
-/// `clean_stop_name` werkt met een vaste lijst afkortingen. Die dekt "PED  "
-/// en "GO  ", maar niet "Pd " (Pedaal) of "RW " (Rugwerk), en zo'n lijst is
-/// nooit af. Met de divisienaam erbij hoeft dat ook niet: een kort woord vóór
-/// de registernaam is een aanduiding wanneer het met dezelfde letter begint
-/// als de divisie en zijn letters in volgorde in die divisienaam voorkomen.
-/// "RW" zit zo in "Rugwerk" en "Pd" in "Pedaal", terwijl "V Cornet" op het
-/// Bovenwerk zijn V houdt — dat zijn koren.
-pub fn clean_stop_name_for_division(raw: &str, division: &str) -> String {
-    let kort = clean_stop_name(raw);
-    if kort != raw.trim() {
-        return kort; // de vaste regels hebben hem al opgeschoond
+/// Sets zetten er van alles voor: een klaviernummer ("4 Gedekt 8"), een
+/// afkorting ("CB Clarin 2", "P Octaaf 8") of allebei door elkaar. Het staat
+/// al boven de kolom, dus het mag eraf — maar aan één naam alleen zie je niet
+/// óf het een aanduiding is. "4" kan een voetmaat zijn, "Sub" kan het begin
+/// van de naam zijn.
+///
+/// Pas als de hele divisie hetzelfde voorvoegsel draagt is het er een. Vandaar:
+/// minstens twee registers, elk voorvoegsel dat voorkomt is hetzelfde, de
+/// meerderheid draagt het, en wat erachter overblijft begint met een letter.
+/// Die laatste eis houdt "1 1/3 Quint" heel en redt een divisie van "Sub 16"
+/// en "Sub 8".
+pub fn gedeeld_voorvoegsel(namen: &[&str]) -> Option<String> {
+    if namen.len() < 2 {
+        return None;
     }
-    let letters = kort.bytes().take_while(|b| b.is_ascii_alphabetic()).count();
-    if !(2..=4).contains(&letters) {
-        return kort;
+    let mut gevonden: Option<String> = None;
+    let mut met = 0usize;
+    for naam in namen {
+        match voorvoegsel_van(naam) {
+            None => continue,
+            Some(v) => {
+                match &gevonden {
+                    None => gevonden = Some(v),
+                    Some(eerder) if !eerder.eq_ignore_ascii_case(&v) => return None,
+                    _ => {}
+                }
+                met += 1;
+            }
+        }
     }
-    // Een punt achter de afkorting mag ("Pd. Subbas"), een spatie is verplicht.
-    let na = &kort[letters..];
-    let na = na.strip_prefix('.').unwrap_or(na);
-    let spaties = na.bytes().take_while(|b| *b == b' ').count();
-    if spaties == 0 {
-        return kort;
-    }
-    let rest = na[spaties..].trim();
-    if rest.is_empty() || !is_afkorting_van(&kort[..letters], division) {
-        return kort;
-    }
-    rest.to_string()
+    gevonden.filter(|_| met * 2 > namen.len())
 }
 
-/// Is `kort` een afkorting van `naam`: zelfde beginletter, en alle letters in
-/// volgorde terug te vinden?
-fn is_afkorting_van(kort: &str, naam: &str) -> bool {
-    let letters = |s: &str| -> Vec<char> {
-        s.chars().filter(|c| c.is_alphabetic()).flat_map(|c| c.to_lowercase()).collect()
-    };
-    let (k, n) = (letters(kort), letters(naam));
-    if k.is_empty() || n.is_empty() || k[0] != n[0] {
-        return false;
+/// Het voorvoegsel vooraan één naam, als het er een kan zijn: één cijfer of
+/// hoogstens vier letters, eventueel met een punt of dubbele punt erachter,
+/// en dan witruimte met een echte naam erna.
+fn voorvoegsel_van(naam: &str) -> Option<String> {
+    let n = naam.trim_start();
+    let kop: String = n.chars().take_while(|c| c.is_ascii_alphanumeric()).collect();
+    let lengte = kop.len();
+    let is_cijfer = lengte == 1 && kop.chars().all(|c| c.is_ascii_digit());
+    let is_woord = (1..=4).contains(&lengte) && kop.chars().all(|c| c.is_ascii_alphabetic());
+    if !(is_cijfer || is_woord) {
+        return None;
     }
-    let mut doel = n.into_iter();
-    k.into_iter().all(|c| doel.any(|d| d == c))
+    let na = &n[lengte..];
+    let na = na.strip_prefix([':', '.']).unwrap_or(na);
+    let rest = na.strip_prefix(|c: char| c.is_whitespace())?.trim_start();
+    // Er moet een náám overblijven, geen breuk of voetmaat.
+    rest.chars().next().filter(|c| c.is_alphabetic())?;
+    Some(n[..n.len() - na.len()].to_string())
+}
+
+/// De registernaam zonder dat gedeelde voorvoegsel.
+pub fn strip_voorvoegsel(naam: &str, voorvoegsel: &str) -> String {
+    match voorvoegsel_van(naam) {
+        Some(v) if v.eq_ignore_ascii_case(voorvoegsel) => {
+            let n = naam.trim_start();
+            n[v.len()..].trim_start().to_string()
+        }
+        _ => naam.to_string(),
+    }
 }
 
 /// Registernaam zonder het voettal dat er al achter staat.
@@ -1238,6 +1297,32 @@ mod tests {
 
     /// De divisieaanduiding staat al boven de kolom. "Pos:" en "RW " horen
     /// dus niet nóg een keer voor elke registernaam te staan.
+    /// Niet elke set zet de tremulant-opname als tweede laag op de pijp.
+    /// Rotterdam en Utrecht gebruiken een aparte "tremmed" rang waar een
+    /// schakelaar het register naartoe zet. Die komt op dezelfde plek terecht
+    /// als de tweede laag, zodat de rest van de keten er niets van merkt.
+    #[test]
+    fn een_tremmed_rang_levert_dezelfde_tremulant_opname() {
+        let def = mini_definition();
+        let montre = def.stops.iter().find(|s| s.name == "Montre 8").unwrap();
+        let PipeDef::Sample { path, extra } = &montre.pipes[0] else {
+            panic!("geen sample-pijp");
+        };
+        // De hoofdopname blijft droog.
+        assert!(path.ends_with("Montre/036-c.wav"), "droge opname: {path:?}");
+        // En de tremulant-opname komt uit de tremmed rang, met zijn release.
+        let trem = extra.tremulant_attack.as_ref().expect("tremulant-opname");
+        assert!(
+            trem.path.ends_with("Montre_trem/036-c.wav"),
+            "tremulant-opname: {:?}",
+            trem.path
+        );
+        assert_eq!(extra.tremulant_releases.len(), 1);
+        assert!(extra.tremulant_releases[0]
+            .path
+            .ends_with("Montre_trem/R0/036-c.wav"));
+    }
+
     #[test]
     fn de_divisieaanduiding_gaat_van_de_registernaam_af() {
         // Dubbele punt: altijd een aanduiding, ook zonder divisienaam erbij.
@@ -1247,18 +1332,11 @@ mod tests {
         assert_eq!(clean_stop_name("PED  Soubasse 16"), "Soubasse 16");
         assert_eq!(clean_stop_name("P  Subbaß 16 Fuß"), "Subbaß 16 Fuß");
 
-        // Mét de divisienaam erbij hoeft de afkorting niet in een lijst te
-        // staan: "Pd" zit in "Pedaal", "RW" in "Rugwerk".
-        assert_eq!(clean_stop_name_for_division("Pd Subbas 16", "Pedaal"), "Subbas 16");
-        assert_eq!(clean_stop_name_for_division("RW Fluit 2", "Rugwerk"), "Fluit 2");
-        assert_eq!(clean_stop_name_for_division("Cham. Trompet 8", "Chamade"), "Trompet 8");
-
-        // Maar niet zomaar: een kort woord dat niet bij de divisie hoort
-        // blijft staan, en koren ("V Cornet") zijn geen aanduiding.
-        assert_eq!(clean_stop_name_for_division("Bas 16", "Bovenwerk"), "Bas 16");
-        assert_eq!(clean_stop_name_for_division("V Cornet", "Bovenwerk"), "V Cornet");
-        assert_eq!(clean_stop_name_for_division("Vox humana 8", "Zwelwerk"), "Vox humana 8");
-        assert_eq!(clean_stop_name_for_division("Octaaf 4", "Hoofdwerk"), "Octaaf 4");
+        // Een korte aanduiding zonder dubbele punt en met één spatie is op
+        // zichzelf niet genoeg — die gaat pas weg als de hele divisie hem
+        // draagt (zie `gedeeld_voorvoegsel`). Zo blijft "V Cornet" heel.
+        assert_eq!(clean_stop_name("Pd Subbas 16"), "Pd Subbas 16");
+        assert_eq!(clean_stop_name("V Cornet"), "V Cornet");
     }
 
     /// Een register kan een rang een octaaf hoger aanspreken. Dan is de
@@ -1273,6 +1351,43 @@ mod tests {
         assert_eq!(klinkende_harmonische(8, -12), 4);  // 8'-rang  → 16'
         assert_eq!(klinkende_harmonische(8, 7), 12);   // kwint    → 5 1/3'
         assert_eq!(klinkende_harmonische(0, 12), 0);   // onbekend blijft onbekend
+    }
+
+    /// Sommige sets zetten een klaviernummer of een afkorting vóór elke
+    /// registernaam ("4 Gedekt 8", "CB Clarin 2"). Dat staat al boven de
+    /// kolom. Maar je mag het pas wegstrepen als de hele divisie hetzelfde
+    /// draagt, anders haal je een voetmaat of het begin van een naam weg.
+    #[test]
+    fn het_voorvoegsel_gaat_eraf_als_de_hele_divisie_het_draagt() {
+        // Klaviernummer (Rotterdam, Borstwerk).
+        let bw = ["4 Gedekt 8", "4 Praestant 4", "4 Octaaf 2", "4 Tertiaan"];
+        assert_eq!(gedeeld_voorvoegsel(&bw).as_deref(), Some("4"));
+        assert_eq!(strip_voorvoegsel("4 Gedekt 8", "4"), "Gedekt 8");
+
+        // Afkorting (Rotterdam, Chamade en Pedaal).
+        let cham = ["CB Clarin 2", "CB Orlos 8", "CB Trompeta batalla 8"];
+        assert_eq!(gedeeld_voorvoegsel(&cham).as_deref(), Some("CB"));
+        assert_eq!(strip_voorvoegsel("CB Clarin 2", "CB"), "Clarin 2");
+        let ped = ["P Praestant 32", "P Octaaf 16", "P Cornet"];
+        assert_eq!(gedeeld_voorvoegsel(&ped).as_deref(), Some("P"));
+
+        // Met dubbele punt, en één register zonder voorvoegsel mag.
+        let pos = ["Pos: Prestant 8", "Pos: Fluit 4", "Cornet"];
+        assert_eq!(gedeeld_voorvoegsel(&pos).as_deref(), Some("Pos:"));
+        assert_eq!(strip_voorvoegsel("Cornet", "Pos:"), "Cornet");
+
+        // Twee verschillende voorvoegsels: dan is het er geen.
+        assert_eq!(gedeeld_voorvoegsel(&["1 Prestant 8", "2 Fluit 4"]), None);
+        assert_eq!(gedeeld_voorvoegsel(&["HW Prestant 8", "RW Fluit 4"]), None);
+        // Voetmaten en breuken vooraan blijven staan.
+        assert_eq!(gedeeld_voorvoegsel(&["1 1/3 Quint", "1 3/5 Terts"]), None);
+        assert_eq!(gedeeld_voorvoegsel(&["16 Bourdon", "16 Prestant"]), None);
+        // En een divisie van "Sub 16" en "Sub 8" houdt zijn namen: er moet
+        // een naam overblijven, geen kaal getal.
+        assert_eq!(gedeeld_voorvoegsel(&["Sub 16", "Sub 8"]), None);
+        // Zonder voorvoegsel verandert er niets, en één register zegt niets.
+        assert_eq!(gedeeld_voorvoegsel(&["Prestant 8", "Octaaf 4"]), None);
+        assert_eq!(gedeeld_voorvoegsel(&["4 Gedekt 8"]), None);
     }
 
     /// Het voettal staat al onder de knop. Staat het kaal achter de naam
@@ -1337,13 +1452,13 @@ mod tests {
 <ObjectList ObjectType="_General"><_General><Identification_Name>Testorgel</Identification_Name></_General></ObjectList>
 <ObjectList ObjectType="Division"><Division><DivisionID>1</DivisionID><Name>Grand Orgue</Name></Division></ObjectList>
 <ObjectList ObjectType="Stop"><Stop><StopID>1</StopID><Name>Bourdon 8</Name><DivisionID>1</DivisionID></Stop><Stop><StopID>2</StopID><Name>Montre 8</Name><DivisionID>1</DivisionID></Stop></ObjectList>
-<ObjectList ObjectType="StopRank"><StopRank><StopID>1</StopID><RankID>1</RankID><Name>GO  Bourdon 8 (front)</Name><MIDINoteNumOfFirstMappedDivisionInputNode>36</MIDINoteNumOfFirstMappedDivisionInputNode><NumberOfMappedDivisionInputNodes>2</NumberOfMappedDivisionInputNodes><MIDINoteNumIncrementFromDivisionToRank>0</MIDINoteNumIncrementFromDivisionToRank></StopRank><StopRank><StopID>1</StopID><RankID>1001</RankID><Name>GO  Bourdon 8 (rear)</Name><MIDINoteNumOfFirstMappedDivisionInputNode>36</MIDINoteNumOfFirstMappedDivisionInputNode><NumberOfMappedDivisionInputNodes>2</NumberOfMappedDivisionInputNodes><MIDINoteNumIncrementFromDivisionToRank>0</MIDINoteNumIncrementFromDivisionToRank></StopRank><StopRank><StopID>2</StopID><RankID>2</RankID><MIDINoteNumOfFirstMappedDivisionInputNode>36</MIDINoteNumOfFirstMappedDivisionInputNode><NumberOfMappedDivisionInputNodes>1</NumberOfMappedDivisionInputNodes><MIDINoteNumIncrementFromDivisionToRank>0</MIDINoteNumIncrementFromDivisionToRank></StopRank></ObjectList>
-<ObjectList ObjectType="Rank"><Rank><RankID>1</RankID><Name>01. GO  Bourdon 8 (front)</Name></Rank><Rank><RankID>1001</RankID><Name>01. GO  Bourdon 8 (rear)</Name></Rank><Rank><RankID>2</RankID><Name>02. GO  Montre 8</Name></Rank></ObjectList>
-<ObjectList ObjectType="Pipe_SoundEngine01"><Pipe_SoundEngine01><PipeID>11</PipeID><RankID>1</RankID><NormalMIDINoteNumber>36</NormalMIDINoteNumber><Pitch_Tempered_RankBasePitch64ftHarmonicNum>8</Pitch_Tempered_RankBasePitch64ftHarmonicNum><Pitch_OriginalOrgan_SpecificationMethodCode>2</Pitch_OriginalOrgan_SpecificationMethodCode><Pitch_OriginalOrgan_PitchHz>65.8</Pitch_OriginalOrgan_PitchHz></Pipe_SoundEngine01><Pipe_SoundEngine01><PipeID>12</PipeID><RankID>1</RankID><NormalMIDINoteNumber>37</NormalMIDINoteNumber></Pipe_SoundEngine01><Pipe_SoundEngine01><PipeID>1011</PipeID><RankID>1001</RankID><NormalMIDINoteNumber>36</NormalMIDINoteNumber></Pipe_SoundEngine01><Pipe_SoundEngine01><PipeID>1012</PipeID><RankID>1001</RankID><NormalMIDINoteNumber>37</NormalMIDINoteNumber></Pipe_SoundEngine01><Pipe_SoundEngine01><PipeID>21</PipeID><RankID>2</RankID><NormalMIDINoteNumber>36</NormalMIDINoteNumber><Pitch_Tempered_BaseTuningSchemeCode>4</Pitch_Tempered_BaseTuningSchemeCode><Pitch_Tempered_BaseTuningDeviation>1e+2</Pitch_Tempered_BaseTuningDeviation></Pipe_SoundEngine01></ObjectList>
-<ObjectList ObjectType="Pipe_SoundEngine01_Layer"><Pipe_SoundEngine01_Layer><LayerID>111</LayerID><PipeID>11</PipeID><PipeLayerNumber>1</PipeLayerNumber></Pipe_SoundEngine01_Layer><Pipe_SoundEngine01_Layer><LayerID>511</LayerID><PipeID>11</PipeID><PipeLayerNumber>2</PipeLayerNumber></Pipe_SoundEngine01_Layer><Pipe_SoundEngine01_Layer><LayerID>112</LayerID><PipeID>12</PipeID><PipeLayerNumber>1</PipeLayerNumber></Pipe_SoundEngine01_Layer><Pipe_SoundEngine01_Layer><LayerID>1111</LayerID><PipeID>1011</PipeID><PipeLayerNumber>1</PipeLayerNumber></Pipe_SoundEngine01_Layer><Pipe_SoundEngine01_Layer><LayerID>1112</LayerID><PipeID>1012</PipeID><PipeLayerNumber>1</PipeLayerNumber></Pipe_SoundEngine01_Layer><Pipe_SoundEngine01_Layer><LayerID>121</LayerID><PipeID>21</PipeID><PipeLayerNumber>1</PipeLayerNumber></Pipe_SoundEngine01_Layer></ObjectList>
-<ObjectList ObjectType="Pipe_SoundEngine01_AttackSample"><Pipe_SoundEngine01_AttackSample><UniqueID>1</UniqueID><LayerID>111</LayerID><SampleID>1</SampleID></Pipe_SoundEngine01_AttackSample><Pipe_SoundEngine01_AttackSample><UniqueID>2</UniqueID><LayerID>511</LayerID><SampleID>2</SampleID></Pipe_SoundEngine01_AttackSample><Pipe_SoundEngine01_AttackSample><UniqueID>3</UniqueID><LayerID>112</LayerID><SampleID>3</SampleID></Pipe_SoundEngine01_AttackSample><Pipe_SoundEngine01_AttackSample><UniqueID>4</UniqueID><LayerID>121</LayerID><SampleID>4</SampleID></Pipe_SoundEngine01_AttackSample><Pipe_SoundEngine01_AttackSample><UniqueID>5</UniqueID><LayerID>1111</LayerID><SampleID>7</SampleID></Pipe_SoundEngine01_AttackSample><Pipe_SoundEngine01_AttackSample><UniqueID>6</UniqueID><LayerID>1112</LayerID><SampleID>8</SampleID></Pipe_SoundEngine01_AttackSample></ObjectList>
-<ObjectList ObjectType="Pipe_SoundEngine01_ReleaseSample"><Pipe_SoundEngine01_ReleaseSample><UniqueID>10</UniqueID><LayerID>111</LayerID><SampleID>5</SampleID><ReleaseSelCriteria_LatestKeyReleaseTimeMs>99999</ReleaseSelCriteria_LatestKeyReleaseTimeMs></Pipe_SoundEngine01_ReleaseSample><Pipe_SoundEngine01_ReleaseSample><UniqueID>11</UniqueID><LayerID>111</LayerID><SampleID>6</SampleID><ReleaseSelCriteria_LatestKeyReleaseTimeMs>750</ReleaseSelCriteria_LatestKeyReleaseTimeMs></Pipe_SoundEngine01_ReleaseSample><Pipe_SoundEngine01_ReleaseSample><UniqueID>12</UniqueID><LayerID>121</LayerID><SampleID>4</SampleID><ReleaseSelCriteria_LatestKeyReleaseTimeMs>99999</ReleaseSelCriteria_LatestKeyReleaseTimeMs></Pipe_SoundEngine01_ReleaseSample><Pipe_SoundEngine01_ReleaseSample><UniqueID>13</UniqueID><LayerID>511</LayerID><SampleID>9</SampleID><ReleaseSelCriteria_LatestKeyReleaseTimeMs>99999</ReleaseSelCriteria_LatestKeyReleaseTimeMs></Pipe_SoundEngine01_ReleaseSample></ObjectList>
-<ObjectList ObjectType="Sample"><Sample><SampleID>1</SampleID><InstallationPackageID>1</InstallationPackageID><SampleFilename>Bourdon/A0/036-c.wav</SampleFilename><Pitch_SpecificationMethodCode>4</Pitch_SpecificationMethodCode><Pitch_ExactSamplePitch>66</Pitch_ExactSamplePitch></Sample><Sample><SampleID>2</SampleID><InstallationPackageID>1</InstallationPackageID><SampleFilename>Bourdon/AT0/036-c.wav</SampleFilename></Sample><Sample><SampleID>3</SampleID><InstallationPackageID>1</InstallationPackageID><SampleFilename>Bourdon/A0/037-c#.wav</SampleFilename></Sample><Sample><SampleID>4</SampleID><InstallationPackageID>1</InstallationPackageID><SampleFilename>Montre/036-c.wav</SampleFilename></Sample><Sample><SampleID>5</SampleID><InstallationPackageID>1</InstallationPackageID><SampleFilename>Bourdon/R0/036-c.wav</SampleFilename></Sample><Sample><SampleID>6</SampleID><InstallationPackageID>1</InstallationPackageID><SampleFilename>Bourdon/R1/036-c.wav</SampleFilename></Sample><Sample><SampleID>7</SampleID><InstallationPackageID>1</InstallationPackageID><SampleFilename>Bourdon_rear/A0/036-c.wav</SampleFilename></Sample><Sample><SampleID>8</SampleID><InstallationPackageID>1</InstallationPackageID><SampleFilename>Bourdon_rear/A0/037-c#.wav</SampleFilename></Sample><Sample><SampleID>9</SampleID><InstallationPackageID>1</InstallationPackageID><SampleFilename>Bourdon/RT0/036-c.wav</SampleFilename></Sample></ObjectList>
+<ObjectList ObjectType="StopRank"><StopRank><StopID>1</StopID><RankID>1</RankID><Name>GO  Bourdon 8 (front)</Name><MIDINoteNumOfFirstMappedDivisionInputNode>36</MIDINoteNumOfFirstMappedDivisionInputNode><NumberOfMappedDivisionInputNodes>2</NumberOfMappedDivisionInputNodes><MIDINoteNumIncrementFromDivisionToRank>0</MIDINoteNumIncrementFromDivisionToRank></StopRank><StopRank><StopID>1</StopID><RankID>1001</RankID><Name>GO  Bourdon 8 (rear)</Name><MIDINoteNumOfFirstMappedDivisionInputNode>36</MIDINoteNumOfFirstMappedDivisionInputNode><NumberOfMappedDivisionInputNodes>2</NumberOfMappedDivisionInputNodes><MIDINoteNumIncrementFromDivisionToRank>0</MIDINoteNumIncrementFromDivisionToRank></StopRank><StopRank><StopID>2</StopID><RankID>2</RankID><AlternateRankID>3</AlternateRankID><SwitchIDToSwitchToAlternateRank>77</SwitchIDToSwitchToAlternateRank><MIDINoteNumOfFirstMappedDivisionInputNode>36</MIDINoteNumOfFirstMappedDivisionInputNode><NumberOfMappedDivisionInputNodes>1</NumberOfMappedDivisionInputNodes><MIDINoteNumIncrementFromDivisionToRank>0</MIDINoteNumIncrementFromDivisionToRank></StopRank></ObjectList>
+<ObjectList ObjectType="Rank"><Rank><RankID>1</RankID><Name>01. GO  Bourdon 8 (front)</Name></Rank><Rank><RankID>1001</RankID><Name>01. GO  Bourdon 8 (rear)</Name></Rank><Rank><RankID>2</RankID><Name>02. GO  Montre 8</Name></Rank><Rank><RankID>3</RankID><Name>02. GO  Montre 8 (tremmed)</Name></Rank></ObjectList>
+<ObjectList ObjectType="Pipe_SoundEngine01"><Pipe_SoundEngine01><PipeID>11</PipeID><RankID>1</RankID><NormalMIDINoteNumber>36</NormalMIDINoteNumber><Pitch_Tempered_RankBasePitch64ftHarmonicNum>8</Pitch_Tempered_RankBasePitch64ftHarmonicNum><Pitch_OriginalOrgan_SpecificationMethodCode>2</Pitch_OriginalOrgan_SpecificationMethodCode><Pitch_OriginalOrgan_PitchHz>65.8</Pitch_OriginalOrgan_PitchHz></Pipe_SoundEngine01><Pipe_SoundEngine01><PipeID>12</PipeID><RankID>1</RankID><NormalMIDINoteNumber>37</NormalMIDINoteNumber></Pipe_SoundEngine01><Pipe_SoundEngine01><PipeID>1011</PipeID><RankID>1001</RankID><NormalMIDINoteNumber>36</NormalMIDINoteNumber></Pipe_SoundEngine01><Pipe_SoundEngine01><PipeID>1012</PipeID><RankID>1001</RankID><NormalMIDINoteNumber>37</NormalMIDINoteNumber></Pipe_SoundEngine01><Pipe_SoundEngine01><PipeID>31</PipeID><RankID>3</RankID><NormalMIDINoteNumber>36</NormalMIDINoteNumber></Pipe_SoundEngine01><Pipe_SoundEngine01><PipeID>21</PipeID><RankID>2</RankID><NormalMIDINoteNumber>36</NormalMIDINoteNumber><Pitch_Tempered_BaseTuningSchemeCode>4</Pitch_Tempered_BaseTuningSchemeCode><Pitch_Tempered_BaseTuningDeviation>1e+2</Pitch_Tempered_BaseTuningDeviation></Pipe_SoundEngine01></ObjectList>
+<ObjectList ObjectType="Pipe_SoundEngine01_Layer"><Pipe_SoundEngine01_Layer><LayerID>111</LayerID><PipeID>11</PipeID><PipeLayerNumber>1</PipeLayerNumber></Pipe_SoundEngine01_Layer><Pipe_SoundEngine01_Layer><LayerID>511</LayerID><PipeID>11</PipeID><PipeLayerNumber>2</PipeLayerNumber></Pipe_SoundEngine01_Layer><Pipe_SoundEngine01_Layer><LayerID>112</LayerID><PipeID>12</PipeID><PipeLayerNumber>1</PipeLayerNumber></Pipe_SoundEngine01_Layer><Pipe_SoundEngine01_Layer><LayerID>1111</LayerID><PipeID>1011</PipeID><PipeLayerNumber>1</PipeLayerNumber></Pipe_SoundEngine01_Layer><Pipe_SoundEngine01_Layer><LayerID>1112</LayerID><PipeID>1012</PipeID><PipeLayerNumber>1</PipeLayerNumber></Pipe_SoundEngine01_Layer><Pipe_SoundEngine01_Layer><LayerID>121</LayerID><PipeID>21</PipeID><PipeLayerNumber>1</PipeLayerNumber></Pipe_SoundEngine01_Layer><Pipe_SoundEngine01_Layer><LayerID>131</LayerID><PipeID>31</PipeID><PipeLayerNumber>1</PipeLayerNumber></Pipe_SoundEngine01_Layer></ObjectList>
+<ObjectList ObjectType="Pipe_SoundEngine01_AttackSample"><Pipe_SoundEngine01_AttackSample><UniqueID>1</UniqueID><LayerID>111</LayerID><SampleID>1</SampleID></Pipe_SoundEngine01_AttackSample><Pipe_SoundEngine01_AttackSample><UniqueID>2</UniqueID><LayerID>511</LayerID><SampleID>2</SampleID></Pipe_SoundEngine01_AttackSample><Pipe_SoundEngine01_AttackSample><UniqueID>3</UniqueID><LayerID>112</LayerID><SampleID>3</SampleID></Pipe_SoundEngine01_AttackSample><Pipe_SoundEngine01_AttackSample><UniqueID>4</UniqueID><LayerID>121</LayerID><SampleID>4</SampleID></Pipe_SoundEngine01_AttackSample><Pipe_SoundEngine01_AttackSample><UniqueID>7</UniqueID><LayerID>131</LayerID><SampleID>20</SampleID></Pipe_SoundEngine01_AttackSample><Pipe_SoundEngine01_AttackSample><UniqueID>5</UniqueID><LayerID>1111</LayerID><SampleID>7</SampleID></Pipe_SoundEngine01_AttackSample><Pipe_SoundEngine01_AttackSample><UniqueID>6</UniqueID><LayerID>1112</LayerID><SampleID>8</SampleID></Pipe_SoundEngine01_AttackSample></ObjectList>
+<ObjectList ObjectType="Pipe_SoundEngine01_ReleaseSample"><Pipe_SoundEngine01_ReleaseSample><UniqueID>10</UniqueID><LayerID>111</LayerID><SampleID>5</SampleID><ReleaseSelCriteria_LatestKeyReleaseTimeMs>99999</ReleaseSelCriteria_LatestKeyReleaseTimeMs></Pipe_SoundEngine01_ReleaseSample><Pipe_SoundEngine01_ReleaseSample><UniqueID>11</UniqueID><LayerID>111</LayerID><SampleID>6</SampleID><ReleaseSelCriteria_LatestKeyReleaseTimeMs>750</ReleaseSelCriteria_LatestKeyReleaseTimeMs></Pipe_SoundEngine01_ReleaseSample><Pipe_SoundEngine01_ReleaseSample><UniqueID>12</UniqueID><LayerID>121</LayerID><SampleID>4</SampleID><ReleaseSelCriteria_LatestKeyReleaseTimeMs>99999</ReleaseSelCriteria_LatestKeyReleaseTimeMs></Pipe_SoundEngine01_ReleaseSample><Pipe_SoundEngine01_ReleaseSample><UniqueID>14</UniqueID><LayerID>131</LayerID><SampleID>21</SampleID><ReleaseSelCriteria_LatestKeyReleaseTimeMs>99999</ReleaseSelCriteria_LatestKeyReleaseTimeMs></Pipe_SoundEngine01_ReleaseSample><Pipe_SoundEngine01_ReleaseSample><UniqueID>13</UniqueID><LayerID>511</LayerID><SampleID>9</SampleID><ReleaseSelCriteria_LatestKeyReleaseTimeMs>99999</ReleaseSelCriteria_LatestKeyReleaseTimeMs></Pipe_SoundEngine01_ReleaseSample></ObjectList>
+<ObjectList ObjectType="Sample"><Sample><SampleID>1</SampleID><InstallationPackageID>1</InstallationPackageID><SampleFilename>Bourdon/A0/036-c.wav</SampleFilename><Pitch_SpecificationMethodCode>4</Pitch_SpecificationMethodCode><Pitch_ExactSamplePitch>66</Pitch_ExactSamplePitch></Sample><Sample><SampleID>2</SampleID><InstallationPackageID>1</InstallationPackageID><SampleFilename>Bourdon/AT0/036-c.wav</SampleFilename></Sample><Sample><SampleID>3</SampleID><InstallationPackageID>1</InstallationPackageID><SampleFilename>Bourdon/A0/037-c#.wav</SampleFilename></Sample><Sample><SampleID>4</SampleID><InstallationPackageID>1</InstallationPackageID><SampleFilename>Montre/036-c.wav</SampleFilename></Sample><Sample><SampleID>5</SampleID><InstallationPackageID>1</InstallationPackageID><SampleFilename>Bourdon/R0/036-c.wav</SampleFilename></Sample><Sample><SampleID>6</SampleID><InstallationPackageID>1</InstallationPackageID><SampleFilename>Bourdon/R1/036-c.wav</SampleFilename></Sample><Sample><SampleID>7</SampleID><InstallationPackageID>1</InstallationPackageID><SampleFilename>Bourdon_rear/A0/036-c.wav</SampleFilename></Sample><Sample><SampleID>8</SampleID><InstallationPackageID>1</InstallationPackageID><SampleFilename>Bourdon_rear/A0/037-c#.wav</SampleFilename></Sample><Sample><SampleID>9</SampleID><InstallationPackageID>1</InstallationPackageID><SampleFilename>Bourdon/RT0/036-c.wav</SampleFilename></Sample><Sample><SampleID>20</SampleID><InstallationPackageID>1</InstallationPackageID><SampleFilename>Montre_trem/036-c.wav</SampleFilename></Sample><Sample><SampleID>21</SampleID><InstallationPackageID>1</InstallationPackageID><SampleFilename>Montre_trem/R0/036-c.wav</SampleFilename></Sample></ObjectList>
 <ObjectList ObjectType="Enclosure"><Enclosure><EnclosureID>7</EnclosureID><Name>Enclosure Grand Orgue</Name></Enclosure></ObjectList>
 <ObjectList ObjectType="EnclosurePipe"><EnclosurePipe><PipeID>11</PipeID><EnclosureID>7</EnclosureID></EnclosurePipe><EnclosurePipe><PipeID>12</PipeID><EnclosureID>7</EnclosureID></EnclosurePipe></ObjectList>
 </Hauptwerk>"#.to_string()
@@ -1418,7 +1533,12 @@ mod tests {
             panic!("montre-pijp hoort een sample te zijn");
         };
         assert!(em.releases.is_empty());
-        assert!(em.tremulant_attack.is_none());
+        // Montre heeft geen tremulant-láág; zijn tremulant-opname komt uit de
+        // tremmed rang (zie `een_tremmed_rang_levert_dezelfde_tremulant_opname`).
+        assert!(em
+            .tremulant_attack
+            .as_ref()
+            .is_some_and(|a| a.path.ends_with("Montre_trem/036-c.wav")));
     }
 
     #[test]

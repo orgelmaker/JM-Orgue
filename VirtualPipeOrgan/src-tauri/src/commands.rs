@@ -8,8 +8,8 @@ use tracing::{info, warn};
 use crate::audio::AudioCommand;
 use crate::state::AppState;
 use crate::library::{self, OrganLibraryEntry, OrganSettings, PresetBindingSaved, SwellBindingSaved, CrescendoBindingSaved, DivisionTremulantSaved, MidiMappingSaved, PresetData};
-use vpo_sampler::{OrganDefinition, clean_stop_name, clean_stop_name_for_division,
-                  strip_pitch_from_name, clean_division_name};
+use vpo_sampler::{OrganDefinition, clean_stop_name, strip_pitch_from_name,
+                  gedeeld_voorvoegsel, strip_voorvoegsel, clean_division_name};
 
 /// Audio device info for frontend
 #[derive(Debug, Serialize)]
@@ -2419,6 +2419,19 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
     for manual in &definition.manuals {
         let mut stops: Vec<StopDto> = Vec::new();
 
+        // Sommige sets zetten een klaviernummer of een afkorting vóór elke
+        // registernaam ("4 Gedekt 8", "CB Clarin 2"). Of dat een aanduiding is
+        // zie je pas als je de hele divisie overziet, dus eerst alle namen van
+        // dit klavier langs.
+        let namen_van_divisie: Vec<&str> = manual
+            .stop_ids
+            .iter()
+            .filter_map(|id| definition.stops.iter().find(|s| s.id == *id))
+            .filter(|s| !s.is_noise_or_mechanical())
+            .map(|s| s.name.as_str())
+            .collect();
+        let voorvoegsel = gedeeld_voorvoegsel(&namen_van_divisie);
+
         for stop_id in &manual.stop_ids {
             if let Some(stop) = definition.stops.iter().find(|s| s.id == *stop_id) {
                 // Mechaniek/ruis (klep-/registergeluid, blaasbalg, ambient) is geen
@@ -2444,10 +2457,16 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
                     // De divisieaanduiding staat al boven de kolom, en het
                     // voettal staat al onder de knop. Allebei niet nog een
                     // keer in de naam.
-                    name: strip_pitch_from_name(
-                        &clean_stop_name_for_division(&stop.name, &manual.name),
-                        &pitch,
-                    ),
+                    name: {
+                        let zonder_voorvoegsel = match &voorvoegsel {
+                            Some(v) => strip_voorvoegsel(&stop.name, v),
+                            None => stop.name.clone(),
+                        };
+                        strip_pitch_from_name(
+                            &clean_stop_name(&zonder_voorvoegsel),
+                            &pitch,
+                        )
+                    },
                     pitch,
                     drawn: false,
                     color: Some(color.to_string()),

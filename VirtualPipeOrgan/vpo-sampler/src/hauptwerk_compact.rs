@@ -403,6 +403,52 @@ fn kies_rangconstante(
         .or_else(|| kandidaten.into_iter().next())
 }
 
+/// De letter die naar de alternatieve rang wijst: de "tremmed" opname waar
+/// de tremulant het register naartoe zet.
+///
+/// `kies_verwijzing` helpt hier niet, want dit veld staat maar bij een handvol
+/// registers (Rotterdam: 32 van de 201). Het kenmerk is een ander: de rangen
+/// waar het naar wijst worden nérgens als gewone rang gebruikt. Dat zijn
+/// precies de tremulant-rangen, en geen enkel ander veld doet dat.
+fn kies_alternatieve_rang(
+    stopranks: &[FieldMap],
+    rank_letter: &str,
+    rang_ids: &HashSet<u32>,
+) -> Option<String> {
+    let gewone: HashSet<&str> = stopranks
+        .iter()
+        .filter_map(|o| o.get(rank_letter))
+        .map(|v| v.trim())
+        .collect();
+
+    let mut beste: Option<(usize, String)> = None;
+    for l in letters(stopranks) {
+        if l == rank_letter || l == "a" {
+            continue;
+        }
+        let mut treffers = 0usize;
+        let mut goed = true;
+        for o in stopranks {
+            let Some(v) = o.get(&l).map(|v| v.trim()).filter(|v| !v.is_empty()) else { continue };
+            // Een geldig rangnummer, niet de eigen rang, en een rang die
+            // nergens gewoon gespeeld wordt.
+            let geldig = v
+                .parse::<u32>()
+                .map(|n| rang_ids.contains(&n))
+                .unwrap_or(false);
+            if !geldig || gewone.contains(v) {
+                goed = false;
+                break;
+            }
+            treffers += 1;
+        }
+        if goed && treffers > 0 && beste.as_ref().map_or(true, |(t, _)| treffers > *t) {
+            beste = Some((treffers, l));
+        }
+    }
+    beste.map(|(_, l)| l)
+}
+
 /// Het veld dat zegt tot welke toetsduur een release hoort.
 ///
 /// Een set met een korte, een middellange en een lange release heeft per laag
@@ -725,13 +771,34 @@ impl GecomprimeerdeOdf {
         //    zojuist herkende pijpen valideren ──
         let sr = lijst("StopRank");
         let sr_rank = kies_verwijzing(sr, &rank_ids, &["a"], &["d", "e"]);
+        // De MIDI-noot heeft een standaardwaarde die niet 0 is (zie
+        // `standaard_midi_noot`). Die moet hiervóór bekend zijn: de rangen
+        // waarvan we het toetsbereik afleiden missen anders precies die ene
+        // pijp, en dan valt de laatste toets van een bashelft eraf. Bij de
+        // Chamade van de Laurenskerk was dat juist de centrale c.
+        let standaard_noot = match (&pp_rank, &pp_noot) {
+            (Some(rl), Some(nl)) => standaard_midi_noot(lijst("Pipe_SoundEngine01"), rl, nl),
+            _ => None,
+        };
+        if let Some(v) = standaard_noot {
+            info!("Hauptwerk: weggelaten MIDI-noot betekent {} (de standaardwaarde)", v);
+            standaarden.insert(
+                "Pipe_SoundEngine01".to_string(),
+                vec![("NormalMIDINoteNumber", v.to_string())],
+            );
+        }
+
         let mut noten_per_rang: HashMap<u32, HashSet<u32>> = HashMap::new();
         if let (Some(rl), Some(nl)) = (&pp_rank, &pp_noot) {
             for p in lijst("Pipe_SoundEngine01") {
-                if let (Some(r), Some(n)) = (
-                    p.get(rl).and_then(|v| v.trim().parse::<u32>().ok()),
-                    p.get(nl).and_then(|v| v.trim().parse::<u32>().ok()),
-                ) {
+                let Some(r) = p.get(rl).and_then(|v| v.trim().parse::<u32>().ok()) else {
+                    continue;
+                };
+                let noot = p
+                    .get(nl)
+                    .and_then(|v| v.trim().parse::<u32>().ok())
+                    .or(standaard_noot);
+                if let Some(n) = noot {
                     noten_per_rang.entry(r).or_default().insert(n);
                 }
             }
@@ -744,6 +811,15 @@ impl GecomprimeerdeOdf {
         for l in [&sr_rank, &sr_eerste, &sr_aantal, &sr_inc].into_iter().flatten() {
             sr_uit.push(l.as_str());
         }
+        // De tremmed rang waar de tremulant het register naartoe zet. Staat
+        // maar bij een handvol registers, dus die wordt apart herkend.
+        let sr_alt = match &sr_rank {
+            Some(rl) => kies_alternatieve_rang(sr, rl, &rank_ids),
+            None => None,
+        };
+        if let Some(l) = &sr_alt {
+            info!("Hauptwerk: letter '{}' van StopRank is de tremulant-rang", l);
+        }
         zet(
             "StopRank",
             vec![
@@ -753,6 +829,7 @@ impl GecomprimeerdeOdf {
                 (sr_eerste.clone(), "MIDINoteNumOfFirstMappedDivisionInputNode"),
                 (sr_aantal.clone(), "NumberOfMappedDivisionInputNodes"),
                 (sr_inc.clone(), "MIDINoteNumIncrementFromDivisionToRank"),
+                (sr_alt.clone(), "AlternateRankID"),
             ],
         );
 
@@ -869,18 +946,6 @@ impl GecomprimeerdeOdf {
                 (kies_verwijzing(ka, &switch_ids, &ka_uit, &["e", "f"]), "ConditionSwitchID"),
             ],
         );
-
-        // De MIDI-noot heeft een standaardwaarde die niet 0 is (zie
-        // `standaard_midi_noot`); zonder aanvullen mist elke rang een pijp.
-        if let (Some(rl), Some(nl)) = (&pp_rank, &pp_noot) {
-            if let Some(v) = standaard_midi_noot(lijst("Pipe_SoundEngine01"), rl, nl) {
-                info!("Hauptwerk: weggelaten MIDI-noot betekent {} (de standaardwaarde)", v);
-                standaarden.insert(
-                    "Pipe_SoundEngine01".to_string(),
-                    vec![("NormalMIDINoteNumber", v.to_string())],
-                );
-            }
-        }
 
         let odf = GecomprimeerdeOdf { tabel, noten_per_rang, standaarden };
         odf.log_samenvatting(&rauw);
@@ -1234,6 +1299,37 @@ mod tests {
             releases.push(r);
         }
         assert_eq!(kies_releasegrens(&releases, "b", &["a", "c"]), None);
+    }
+
+    /// De tremmed rang staat maar bij een handvol registers, dus op dekking
+    /// valt hij niet te vinden. Het kenmerk is dat hij wijst naar rangen die
+    /// nergens gewoon gespeeld worden.
+    #[test]
+    fn de_tremulant_rang_wordt_herkend_aan_zijn_eigen_rangen() {
+        let rangen: HashSet<u32> = [1u32, 2, 3, 901, 902].into_iter().collect();
+        let mut sr: Vec<FieldMap> = Vec::new();
+        for (i, (rang, alt)) in [(1u32, Some(901u32)), (2, Some(902)), (3, None)]
+            .into_iter()
+            .enumerate()
+        {
+            let mut o = FieldMap::new();
+            o.insert("a".into(), (i + 1).to_string());
+            o.insert("d".into(), rang.to_string());
+            // Een veld dat wél een getal is maar geen rang: mag niet winnen.
+            o.insert("f".into(), "7".to_string());
+            if let Some(a) = alt {
+                o.insert("p".into(), a.to_string());
+            }
+            sr.push(o);
+        }
+        assert_eq!(kies_alternatieve_rang(&sr, "d", &rangen).as_deref(), Some("p"));
+
+        // Wijst een veld naar rangen die óók gewoon gespeeld worden, dan is
+        // het geen tremulant-rang.
+        for o in sr.iter_mut() {
+            o.insert("p".into(), "2".to_string());
+        }
+        assert_eq!(kies_alternatieve_rang(&sr, "d", &rangen), None);
     }
 
     #[test]
