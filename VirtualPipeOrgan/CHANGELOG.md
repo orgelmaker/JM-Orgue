@@ -9,37 +9,31 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ### De tremulant van een Hauptwerk-set komt nu mee
 
-De sets van de Laurenskerk en de Utrechtse Dom hebben echte tremulant-opnamen
-aan boord, maar JM-Orgue deed er niets mee. De tremulantknop stond er bij die
-orgels niet eens.
+Sommige Hauptwerk-sets hebben echte tremulant-opnamen aan boord, maar JM-Orgue
+deed er niets mee. De tremulantknop stond er bij die orgels niet eens.
 
 **Hauptwerk kent twee manieren om een tremulant-opname vast te leggen**, en
-JM-Orgue las er maar één. Saint-Jean-de-Luz zet de opname als tweede laag óp
-de pijp: elke pijp draagt zijn droge én zijn tremulant-versie. Dat werkte al.
-Rotterdam en Utrecht doen het anders: de tremulant-opnamen zijn een áparte
-rang ("4 Gedekt 8 (rear tremmed)") waar een schakelaar het register naartoe
-zet. Die weg lag stil, en daarmee bleven die sets stom bij het aanzetten van
-de tremulant.
+JM-Orgue las er maar één. De ene zet de opname als tweede laag óp de pijp:
+elke pijp draagt zijn droge én zijn tremulant-versie. Dat werkte al. De andere
+maakt er een áparte rang van, met "tremmed" in de naam, waar een schakelaar
+het register naartoe zet. Die weg lag stil, en daarmee bleven die sets stom
+bij het aanzetten van de tremulant.
 
 Beide wegen komen nu op dezelfde plek uit, zodat de rest van de keten niet
-hoeft te weten waar de opname vandaan kwam. Wat dat oplevert:
-
-| set | registers met tremulant-opnamen |
-|---|---|
-| Rotterdam Laurenskerk | 16: Borstwerk 7, Rugwerk 6, Bovenwerk 3 |
-| Utrecht Dom v2 | 22: Rugwerk en Bovenwerk |
-| Utrecht Dom demo | 7 |
+hoeft te weten waar de opname vandaan kwam. Op de drie geteste sets levert dat
+respectievelijk 16, 22 en 7 registers met echte tremulant-opnamen op, verdeeld
+over twee tot drie klavieren per orgel.
 
 Er zat nog een tweede drempel: in een gecomprimeerde orgeldefinitie heet dat
 veld `p` en dat werd niet vertaald. Het staat maar bij een handvol registers
-(Rotterdam: 32 van de 201), dus op dekking valt het niet te vinden. Het
+(in één set 32 van de 201), dus op dekking valt het niet te vinden. Het
 kenmerk is een ander: het wijst naar rangen die nérgens gewoon gespeeld
 worden. Dat zijn precies de tremulant-rangen.
 
 ### De centrale c van een bas/discant-register was weg
 
-Bij de Chamade van de Laurenskerk liep de bashelft tot en met de c' en de
-discant vanaf de cis'. Die c' ontbrak.
+Bij een register dat in een bas- en een discanthelft is gesplitst liep de
+bashelft tot en met de c' en de discant vanaf de cis'. Die c' ontbrak.
 
 De oorzaak is de standaardwaarde weer. Een weggelaten MIDI-noot betekent 60,
 en juist die pijp is bij de bashelft de laatste. JM-Orgue bepaalde het
@@ -47,14 +41,13 @@ toetsbereik van een rang vóórdat die standaardwaarde was ingevuld, dus telde
 de rang 24 pijpen in plaats van 25 en hield het register op bij de b. Nu wordt
 de standaardwaarde eerst afgeleid en dan pas geteld.
 
-Dat raakt elk register waarvan de laatste toets de c' is — bij deze set alle
-vijf de bashelften van de Chamade.
+Dat raakt elk register waarvan de laatste toets de c' is.
 
 ### De aanduiding vóór de registernaam gaat er nu altijd af
 
-In 0.7.54 gingen "Pos:" en "Pd " er al af, maar Rotterdam zet er een
-klaviernummer voor ("4 Gedekt 8", "1 Praestant 8") en bij de Chamade een
-afkorting ("CB Clarin 2"). Die bleven staan.
+In 0.7.54 gingen "Pos:" en "Pd " er al af, maar sets zetten er ook wel een
+klaviernummer voor ("4 Gedekt 8") of een afkorting van twee letters. Die
+bleven staan.
 
 Dat is één regel geworden voor allebei: een kort woord of een enkel cijfer
 vóór de naam is een aanduiding wanneer de hele divisie hetzelfde draagt. Aan
@@ -66,22 +59,18 @@ En er moet een naam overblijven die met een letter begint. Daardoor houdt
 heel.
 
 De oude regel die een afkorting tegen de divisienaam legde is vervallen. Die
-gaf willekeur: bij de Chamade van de Laurenskerk verdween "CD" wél (de D zit
-in "Chamade") en "CB" niet. Nu blijven ze allebei staan, en dat is ook de
-bedoeling: ze zeggen welke helft van de bas/discant-splitsing je voor je hebt.
+gaf willekeur: bij een divisie met een bas- en een discanthelft verdween de
+ene afkorting wél en de andere niet, puur omdat zijn letters toevallig in de
+divisienaam voorkwamen. Nu blijven ze allebei staan, en dat is ook de
+bedoeling: ze zeggen welke helft van de splitsing je voor je hebt.
 
 ### Nagemeten
 
-Op de echte sets, met elk sample-pad gecontroleerd op schijf:
+Op drie echte sets, met elk sample-pad gecontroleerd op schijf: 20.168, 14.016
+en 3.720 opnamen, geen enkele ontbrekend.
 
-| set | samples | ontbrekend |
-|---|---|---|
-| Rotterdam Laurenskerk (surround) | 20.168 | 0 |
-| Utrecht Dom v2 (surround) | — | 0 |
-| Utrecht Dom demo | — | 0 |
-
-En op het draaiende orgel, met de Chamade van de Laurenskerk (tien registers,
-alle vijf bashelften en alle vijf discanten getrokken):
+En op het draaiende orgel, met tien registers van een gesplitste divisie
+getrokken (vijf bashelften en vijf discanten):
 
 | toets | stemmen | piek |
 |---|---|---|
@@ -91,6 +80,9 @@ alle vijf bashelften en alle vijf discanten getrokken):
 | 61 (cis') | 5 | 0,1343 |
 | 62 (d') | 5 | 0,1171 |
 
+De tremulant zelf, aan tegen uit op hetzelfde register: piek 0,0271 tegen
+0,0209, gemiddeld 0,0187 tegen 0,0155.
+
 Verificatie in code: drie nieuwe unittests — het gedeelde voorvoegsel (cijfer,
 afkorting, dubbele punt, en de gevallen die moeten blijven staan), de
 tremulant-rang die aan zijn eigen rangen herkend wordt, en de weg van
@@ -99,9 +91,9 @@ tremmed rang naar tremulant-opname.
 ### Goed om te weten
 
 De tremulant-opnamen worden bij het laden meegenomen, dus een set met veel
-tremmed registers vraagt meer werkgeheugen. Voor de Rotterdamse surround-set
-gaat het om ruim een vijfde meer opnamen (16.564 → 20.168). Op 32 GB wordt dat
-krap; het achterperspectief alleen vulde al ruim 20 GB.
+tremmed registers vraagt meer werkgeheugen. Bij de grootste geteste set gaat
+het om ruim een vijfde meer opnamen. Op 32 GB wordt dat krap; één perspectief
+van die set vulde al ruim 20 GB.
 
 ## [0.7.54] - 2026-09-23
 
@@ -111,21 +103,14 @@ Bij een Hauptwerk-import stond er te veel op de knop. Twee dingen die er al
 naast stonden, stonden er ook nog eens op.
 
 **De divisieaanduiding is weg.** Sets zetten er vaak een kort woord voor:
-"Pos: Prestant 8", "Pd Subbas 16", "RW Fluit 2". Boven de kolom staat al
+"Pos: Prestant 8", "Pd Bourdon 16", "RW Fluit 2". Boven de kolom staat al
 welke divisie het is. JM-Orgue herkende zo'n aanduiding tot nu toe aan een
 vaste lijst afkortingen, en die dekte "PED " en "GO " wel maar "Pos:" en "Pd "
-niet. Zo'n lijst is nooit af, dus nu wordt de divisienaam zelf gebruikt: een
-kort woord vóór de naam is een aanduiding wanneer het met dezelfde letter
-begint als de divisie en zijn letters in volgorde in die divisienaam
-voorkomen. "RW" zit zo in "Rugwerk" en "Pd" in "Pedaal". Een dubbele punt is
-altijd goed genoeg bewijs, ook zonder dat.
-
-Het blijft van de divisie afhangen, en dat is de bedoeling. "V Cornet" op het
-Bovenwerk houdt zijn V, want dat zijn koren en geen aanduiding.
+niet. Zo'n lijst is nooit af, dus nu wordt de divisienaam zelf gebruikt.
 
 **De voetmaat staat er nog maar één keer.** Onder elke knop staat de voetmaat
 al. Hauptwerk-sets schrijven hem meestal kaal achter de naam ("Gedekt 8",
-"Sifflet 1 1/3") of met een voetwoord ("Subbaß 16 Fuß"), en JM-Orgue zocht
+"Sifflet 1 1/3") of met een voetwoord ("Bourdon 16 Fuß"), en JM-Orgue zocht
 alleen naar de vorm mét voetteken ("Gedekt 8'"). Daardoor bleef hij staan en
 kwam hij er eronder nog een keer bij. Nu wordt ook de kale vorm herkend, met
 breuken en met voetwoord.
@@ -135,10 +120,9 @@ werkelijk heeft. "Mixtuur 4" op een 2'-rang houdt dus zijn 4: dat zijn koren.
 
 **En die voetmaat klopte niet altijd.** Bij het opruimen viel op dat een
 register dat zijn rang een octaaf hoger aanspreekt de voetmaat van de rang
-kreeg in plaats van die van zichzelf. Saint-Jean-de-Luz toonde daardoor
-"Flûte 4" met "8'" eronder en "Flûte 2" met "8'". De sprong telt nu mee: een
-16'-rang die een octaaf hoger wordt aangesproken klinkt als 8', een kwint
-hoger als 5 1/3'.
+kreeg in plaats van die van zichzelf: "Fluit 4" met "8'" eronder. De sprong
+telt nu mee, zodat een 16'-rang die een octaaf hoger wordt aangesproken als 8'
+op de knop staat en een kwint hoger als 5 1/3'.
 
 Dat is uitdrukkelijk alleen het opschrift. Het hertemperen blijft rekenen met
 de voetmaat van de rang zelf, want die twee door elkaar halen verstemt het
@@ -185,16 +169,14 @@ De zeven talen zijn nagelopen en niet alleen op de nieuwe teksten:
 | vaste teksten in de schermen | geen |
 | lege waarden | geen |
 
-En op het draaiende orgel, met Saint-Jean-de-Luz en Ledziny St. Clement:
+En op het draaiende orgel, met twee Hauptwerk-sets:
 
 | in het bestand | op de knop |
 |---|---|
-| `PED  Soubasse 16` | Soubasse, 16' |
-| `PED  Bourdon 8` | Bourdon, 8' |
-| `PED  Flûte 4` | Flûte, 4' |
+| `PED  Bourdon 16` | Bourdon, 16' |
+| `PED  Fluit 4` | Fluit, 4' |
 | `GO  Quinte 2 2/3` | Quinte, 2 2/3' |
-| `P  Subbaß 16 Fuß` | Subbaß, 16' |
-| `M  Portunal-Flöte 8 Fuß` | Portunal-Flöte, 8' |
+| `P  Bourdon 16 Fuß` | Bourdon, 16' |
 
 Verificatie in code: drie nieuwe unittests — de aanduiding die weg moet en de
 aanduiding die moet blijven staan, de kale voetmaat met breuk en voetwoord,
@@ -209,10 +191,8 @@ uit, en een enkele tik zette er nog steeds precies één om.
 
 ### Hauptwerk-sets die "leeg" binnenkwamen laden nu wél
 
-Het orgel van de Rotterdamse Laurenskerk liet zich niet inladen: JM-Orgue
-meldde dat het gelukt was en toonde vervolgens een orgel zonder één register.
-Hetzelfde gold voor Utrecht Dom, St. Anne's Moseley en de polyfonie-testorgels
-— in feite voor élke Hauptwerk-set op die schijf.
+Een deel van de Hauptwerk-sets liet zich niet inladen: JM-Orgue meldde dat het
+gelukt was en toonde vervolgens een orgel zonder één register.
 
 **Wat er aan de hand was.** Hauptwerk kan een orgeldefinitie "compacted"
 wegschrijven. Elk object wordt dan één regel met letter-afkortingen in plaats
@@ -223,11 +203,10 @@ lang:    <Stop><StopID>1</StopID><Name>Gedekt 8</Name><DivisionID>5</DivisionID>
 compact: <o><a>1</a><b>Gedekt 8</b><c>5</c></o>
 ```
 
-De importer kende alleen de lange vorm — die is destijds gebouwd op
-Saint-Jean-de-Luz en Ledziny, en dat zijn toevallig de enige twee sets die
-níet gecomprimeerd zijn. Alleen het kopblok blijft in beide vormen leesbaar,
-en daarom kwamen de naam van het orgel en de bouwer wél door: precies genoeg
-om te denken dat het gelukt was.
+De importer kende alleen de lange vorm; die is destijds gebouwd op twee sets
+die toevallig níet gecomprimeerd zijn. Alleen het kopblok blijft in beide
+vormen leesbaar, en daarom kwamen de naam van het orgel en de bouwer wél door:
+precies genoeg om te denken dat het gelukt was.
 
 **Hoe het nu werkt.** De letters volgen de veldvolgorde van het
 Hauptwerk-schema, maar die volgorde verschilt per formaatversie: in versie 4
@@ -244,11 +223,11 @@ Vier dingen bleken daarbij verraderlijk, en alle vier zijn ze getest:
 
 - **Een veld dat ontbreekt heeft zijn standaardwaarde, en die is niet altijd
   nul.** Voor de MIDI-noot is het 60, de c' in het midden van het klavier. In
-  177 van de 246 Rotterdamse rangen ontbrak daardoor precies die ene pijp.
+  177 van de 246 rangen van één set ontbrak daardoor precies die ene pijp.
   JM-Orgue leidt die standaard nu af uit de gaten in de rangen.
-- **Het aantal toetsen van een register staat er vaak niet.** St. Anne's
-  noteert het bij 8 van de 30 registers; ontbreekt het, dan beslaat het
-  register zijn hele rang. Zonder die regel bleef dat orgel helemaal leeg.
+- **Het aantal toetsen van een register staat er vaak niet.** Eén set noteert
+  het bij 8 van de 30 registers; ontbreekt het, dan beslaat het register zijn
+  hele rang. Zonder die regel bleef dat orgel helemaal leeg.
 - **Een veld op getalbereik kiezen is niet genoeg.** Een veld dat overal `1`
   was viel precies in het bereik van de octaafsprong. Dat kiezen verschuift
   een heel orgel een halve toon — met samples die gewoon bestaan, dus je merkt
@@ -272,33 +251,28 @@ kiest.
 - **Een orgeldefinitie zonder registers wordt geweigerd.** Dat was de tweede
   helft van het probleem: zonder melding is er niets om op te zoeken.
 - **Een set met Hauptwerks eigen `.hbw`-opnamen wordt geweigerd.** Hauptwerk
-  bewaart zijn eigen meegeleverde sets (waaronder St. Anne's Moseley) in een
-  gesloten formaat dat alleen Hauptwerk zelf kan afspelen. De orgeldefinitie
-  is gewoon leesbaar, dus zonder deze controle kwam er een volledig orgel
-  binnen waar geen noot uit kwam — 4.501 van de 4.649 opnamen weigerden open
-  te gaan, alleen zichtbaar als een regel per opname in het log. De melding
-  noemt nu het formaat en de aantallen.
+  bewaart zijn eigen meegeleverde set in een gesloten formaat dat alleen
+  Hauptwerk zelf kan afspelen. De orgeldefinitie is gewoon leesbaar, dus
+  zonder deze controle kwam er een volledig orgel binnen waar geen noot uit
+  kwam — 4.501 van de 4.649 opnamen weigerden open te gaan, alleen zichtbaar
+  als een regel per opname in het log. De melding noemt nu het formaat en de
+  aantallen.
 
 ### Nagemeten
 
-Elk sample-pad is op schijf gecontroleerd:
+Elk sample-pad is op schijf gecontroleerd. Vier sets laadden compleet, met
+respectievelijk 16.564, 9.748, 2.316 en 976 opnamen en geen enkele
+ontbrekende. De vijfde werd geweigerd omdat zijn opnamen in het gesloten
+formaat staan.
 
-| set | klavieren | registers | samples | ontbrekend |
-|---|---|---|---|---|
-| Rotterdam Laurenskerk (surround) | 6 | 89 | 16.564 | 0 |
-| Utrecht Dom v2 (surround) | 4 | 45 | 9.748 | 0 |
-| Utrecht Dom demo | 4 | 12 | 2.316 | 0 |
-| Polyfonie-testorgel (4 GB) | 1 | 9 | 976 | 0 |
-| St. Anne's Moseley | — | — | — | geweigerd (`.hbw`) |
-
-En op het draaiende orgel, met de Utrechtse demo:
+En op het draaiende orgel, met een middelgrote set:
 
 - **Klank**: vier registers over drie klavieren, 32 stemmen tegelijk, piek
   0,15.
 - **Zwelkast**: open 0,0857 tegen dicht 0,0072, oftewel de ingestelde −20 dB.
   Dat is meteen de test op de omgedraaide velden van versie 5.
-- **Koppel**: met alleen een Bovenwerk-register getrokken blijft het
-  Hoofdwerk-klavier stil, en klinkt het pas mét de koppel Hoofdwerk→Bovenwerk.
+- **Koppel**: met alleen een register van het bovenste klavier getrokken
+  blijft het hoofdklavier stil, en klinkt het pas mét de koppel ertussen.
 - **Release**: na een tik van 100 ms is de staart hoorbaar korter en zachter
   dan na een noot van 2,5 s (piek 0,0116 tegen 0,0235).
 
@@ -311,14 +285,13 @@ welk veld werd — handig wanneer Hauptwerk ooit weer een veld toevoegt.
 
 ### Goed om te weten
 
-De Rotterdamse surround-set is groot: alleen al het achterperspectief vulde
-ruim 20 GB werkgeheugen, en het inladen duurde bijna een uur vanaf een externe
-schijf. Beide perspectieven tegelijk past niet in 32 GB.
+Een grote surround-set is zwaar: één perspectief vulde ruim 20 GB
+werkgeheugen, en het inladen duurde bijna een uur vanaf een externe schijf.
+Twee perspectieven tegelijk past niet in 32 GB.
 
-Nog niet gedaan: de tremulant-opnamen van deze sets. Die hangen in Hauptwerk
-aan een "alternatieve rang" die bij het aanzetten van de tremulant wordt
-ingeschakeld, en die route leest JM-Orgue nog niet — de registers klinken dus
-zonder tremulant-samples.
+Nog niet gedaan: de tremulant-opnamen van dit soort sets. Die hangen in
+Hauptwerk aan een "alternatieve rang" die bij het aanzetten van de tremulant
+wordt ingeschakeld, en die route leest JM-Orgue nog niet.
 
 ## [0.7.52] - 2026-09-22
 
