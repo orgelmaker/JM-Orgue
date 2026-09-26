@@ -33,6 +33,8 @@
     "empty_hint": "Użyj przycisków w prawym górnym rogu, aby wczytać organy.",
     "stops_count": "{count} głosów",
     "online_title": "Dostępne do pobrania",
+    "elders_title": "Więcej zestawów próbek",
+    "elders_hint": "JM-Orgue czyta zestawy Hauptwerk i GrandOrgue bezpośrednio. Ci twórcy udostępniają zestawy do swobodnego użytku.",
     "downloading": "Pobieranie…",
     "unpacking": "Rozpakowywanie…",
     "download_size": "Pobierz (± {mb} MB)",

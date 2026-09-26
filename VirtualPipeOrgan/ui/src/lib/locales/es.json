@@ -33,6 +33,8 @@
     "empty_hint": "Usa los botones de arriba a la derecha para cargar un órgano.",
     "stops_count": "{count} registros",
     "online_title": "Disponibles para descargar",
+    "elders_title": "Más conjuntos de muestras",
+    "elders_hint": "JM-Orgue lee directamente los conjuntos de Hauptwerk y GrandOrgue. Estos autores ofrecen conjuntos de uso libre.",
     "downloading": "Descargando…",
     "unpacking": "Descomprimiendo…",
     "download_size": "Descargar (± {mb} MB)",

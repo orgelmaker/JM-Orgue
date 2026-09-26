@@ -9,7 +9,7 @@ ontwikkelsessies van 0.7.36–0.7.38 en documenteren hoe de functies zijn geveri
 | `test_stereo.py` | Stereo-weergave: L/R-correlatie van een opname (stereo-set ≠ 1, mono-set = 1). |
 | `test_tutti.py [kap] [stereo|mono]` | Polyfonie/belasting bij een tutti (30 s, 10-noots akkoorden). |
 | `licht.py` | Belasting bij 3 en 45 stemmen (referentie voor per-stem-kosten). |
-| `maak_go_testodf.py` | Maakt `go_testodf/TestRanks.organ` (2 gestapelde ranks + PitchCorrection) op Puttershoek-samples via een junction. |
+| `maak_go_testodf.py` | Maakt `go_testodf/TestRanks.organ` (2 gestapelde ranks + PitchCorrection) op eigen samples via een junction. |
 | `test_ranks_perspectives.py` | Gestapelde ranks en perspectieven (stemmen per toets, gains, HW-set, regressie). |
 | `test_hertemperen.py` / `test_ranks_pitch.py` | Toonhoogte per modus (Origineel/ET/middentoon) via FFT-piek. |
 | `test_crescendo_zwel.py` | Zweltrede (sweep, jitter, sprong, bereik/inversie) en generaal crescendo (hysterese, additiviteit, persistentie). |
@@ -30,7 +30,7 @@ boventoon vastloopt geeft daar een FAIL met de gemeten Hz erbij — lees de waar
 concludeert dat de tremulant niet werkt.
 
 Let op bij het beoordelen van metingen (lessen uit 0.7.39):
-- Wachttijden op release-staarten zijn nu poll-lussen: natte sets (Friesach, Saint-Jean-de-Luz)
+- Wachttijden op release-staarten zijn nu poll-lussen: natte sets
   klinken 5 tot 8 seconden na, en sinds 0.7.39 worden verse staarten niet meer weggekozen.
 - Niveaumetingen op ÉÉN opname zeggen weinig: de samples zelf zwellen met een periode van
   ongeveer een seconde ±1,7 dB aan, en twee registers op dezelfde toonhoogte zweven tegen

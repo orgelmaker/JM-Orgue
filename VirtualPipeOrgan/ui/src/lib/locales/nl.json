@@ -33,6 +33,8 @@
     "empty_hint": "Gebruik de knoppen rechtsboven om een orgel te laden.",
     "stops_count": "{count} registers",
     "online_title": "Beschikbaar om te downloaden",
+    "elders_title": "Meer samplesets",
+    "elders_hint": "JM-Orgue leest Hauptwerk- en GrandOrgue-sets rechtstreeks in. Deze makers bieden sets aan die vrij te gebruiken zijn.",
     "downloading": "Downloaden…",
     "unpacking": "Uitpakken…",
     "download_size": "Downloaden (± {mb} MB)",

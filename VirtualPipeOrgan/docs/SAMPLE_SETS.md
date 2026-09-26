@@ -1,8 +1,8 @@
 # Sample sets voor JM-Orgue
 
-JM-Orgue ondersteunt het GrandOrgue ODF-formaat (`.organ`). Hieronder een verzameling **gratis** en **niet-versleutelde** sample sets die met de app werken.
+JM-Orgue leest twee formaten rechtstreeks in: GrandOrgue (`.organ`) en Hauptwerk (`.Organ_Hauptwerk_xml`), zonder omzetstap. Hieronder een verzameling **gratis** en **niet-versleutelde** sample sets die met de app werken.
 
-> **Let op:** alleen sample sets met losse `.wav` bestanden werken. Versleutelde formaten (zoals Hauptwerks `.pkg`/`.iwh`/Sweelinqs `.swop`) zijn niet ondersteund.
+> **Let op:** alleen sample sets met losse `.wav` bestanden werken. Gesloten formaten zijn niet te gebruiken: Hauptwerks eigen `.hbw`, `.pkg` en `.iwh`, en Sweelinqs `.swop`. JM-Orgue weigert zo'n set met een melding in plaats van een orgel zonder geluid te tonen.
 
 ## Belangrijke bronnen
 

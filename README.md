@@ -24,4 +24,4 @@ feedback-knop in de app (Algemene Instellingen).
 **Alle rechten voorbehouden.** De broncode is uitsluitend ter inzage
 gepubliceerd; gebruik, kopiëren, wijzigen of verspreiden is niet toegestaan
 zonder voorafgaande schriftelijke toestemming van de auteur. Zie
-[LICENSE](LICENSE). Contact: martijn@3bm.co.nl
+[LICENSE](LICENSE).

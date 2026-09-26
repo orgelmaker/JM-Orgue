@@ -1177,6 +1177,56 @@ input[type="range"]::-webkit-slider-thumb:hover {
   margin-bottom: 0.4rem;                 /* vervangt de grid-gap uit de horizontale modus */
 }
 
+/* Waarschuwing op een bibliotheekkaart: een set die speelt maar nog niet
+   klinkt zoals het kan. Opvallend genoeg om te lezen, rustig genoeg om niet
+   als foutmelding over te komen. */
+.library-card-warn {
+  margin-top: 0.3rem;
+  padding: 0.3rem 0.45rem;
+  border-left: 3px solid var(--warning, #ff9800);
+  background: color-mix(in srgb, var(--warning, #ff9800) 12%, transparent);
+  border-radius: 0 3px 3px 0;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: var(--text-muted, #aaa);
+}
+
+/* Verwijzingen naar makers van vrij te gebruiken samplesets. */
+.library-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0 0.25rem 0.5rem;
+}
+.library-link {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.55rem 0.85rem;
+  /* Zelfde kleuren als de bibliotheekkaarten ernaast: dat scherm heeft een
+     eigen, lichte achtergrond, dus de donkere bedieningstokens passen hier
+     niet. */
+  background: var(--bg-panel);
+  border: 1px solid var(--accent-soft-2);
+  border-radius: var(--radius-lg);
+  color: var(--text);
+  cursor: pointer;
+  transition: all var(--transition-normal);
+}
+.library-link:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lg);
+  border-color: var(--accent);
+}
+.library-link-naam { font-weight: 600; font-size: 0.85rem; }
+.library-link-url { font-size: 0.75rem; color: var(--text-muted); }
+.organ-browser-hint {
+  margin: 0 0.25rem 0.6rem;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  max-width: 62ch;
+}
+
 /* ============================================
    INSTELLINGEN VIEW
    ============================================ */

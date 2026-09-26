@@ -33,6 +33,8 @@
     "empty_hint": "Use the buttons in the top right to load an organ.",
     "stops_count": "{count} stops",
     "online_title": "Available to download",
+    "elders_title": "More sample sets",
+    "elders_hint": "JM-Orgue reads Hauptwerk and GrandOrgue sets directly. These makers offer sets that are free to use.",
     "downloading": "Downloading…",
     "unpacking": "Unpacking…",
     "download_size": "Download (± {mb} MB)",

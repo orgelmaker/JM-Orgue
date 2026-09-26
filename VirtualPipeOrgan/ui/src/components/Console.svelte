@@ -3142,7 +3142,41 @@
   // (zelfde patroon als de update-check). Faalt stil: geen internet = geen
   // downloadkaarten, de bibliotheek werkt gewoon door.
   const SAMPLESETS_MANIFEST = 'https://raw.githubusercontent.com/orgelmaker/JM-Orgue/master/samplesets.json';
+  // Vaste verwijzingen naar makers die vrij te gebruiken samplesets aanbieden.
+  // JM-Orgue leest hun Hauptwerk- en GrandOrgue-bestanden rechtstreeks in.
+  const SAMPLESET_BRONNEN = [
+    { naam: 'Piotr Grabowski', url: 'https://piotrgrabowski.pl/instruments/', toon: 'piotrgrabowski.pl' },
+    { naam: 'Sonus Paradisi', url: 'https://www.sonusparadisi.cz/en/blog/category/free-stuff/', toon: 'sonusparadisi.cz' },
+  ];
+  async function openExterneLink(url) {
+    try { await invoke('open_external_url', { url }); } catch (e) { console.error(e); }
+  }
   let onlineSets = [];
+  let alleOnlineSets = [];
+  // Waarschuwing bij een geïnstalleerde set, gezocht op naam of mapnaam.
+  $: letOpPerSet = Object.fromEntries(
+    (alleOnlineSets || [])
+      .filter(s => s.let_op)
+      .flatMap(s => [
+        [String(s.naam || '').toLowerCase(), s.let_op],
+        [String(s.map_naam || s.naam || '').toLowerCase(), s.let_op],
+      ])
+  );
+  // LET OP: een functie-aanroep in de markup wordt door Svelte niet gevolgd —
+  // het manifest komt ná de eerste render binnen, dus dan zou de waarschuwing
+  // nooit verschijnen. Daarom een afgeleide tabel die wél in de markup staat.
+  $: letOpPerOrgel = Object.fromEntries(
+    (libraryOrgans || []).map((o) => {
+      const map = setFolderKey(o);
+      const tekst = letOpPerSet[String(o?.name || '').toLowerCase()]
+                 || (map ? letOpPerSet[map] : null)
+                 || null;
+      return [organSleutel(o), tekst];
+    }).filter(([, tekst]) => tekst)
+  );
+  function organSleutel(o) {
+    return String(o?.source_path || o?.name || '');
+  }
   let onlineBusy = null;   // id van de lopende download
   let onlinePct = 0;
   let onlineFase = 'download';
@@ -3178,6 +3212,9 @@
         const map = setFolderKey(o);
         if (map) geinstalleerd.add(map);
       }
+      // Het hele manifest bewaren: een set die al geïnstalleerd is valt uit
+      // `onlineSets`, maar zijn waarschuwing hoort ook dán zichtbaar te zijn.
+      alleOnlineSets = mf.samplesets || [];
       onlineSets = (mf.samplesets || []).filter(s =>
         s.naam && s.zip_url
         && !geinstalleerd.has(String(s.naam).toLowerCase())
@@ -4279,6 +4316,9 @@
                 <div class="library-card-sub">{cardSub(organ)}</div>
               {/if}
               <div class="library-card-meta">{$t('library.stops_count').replace('{count}', organ.stop_count)}</div>
+              {#if letOpPerOrgel[organSleutel(organ)]}
+                <div class="library-card-warn">{letOpPerOrgel[organSleutel(organ)]}</div>
+              {/if}
             </div>
           </div>
         {/each}
@@ -4330,11 +4370,32 @@
                 {#if s.beschrijving}
                   <div class="library-card-meta">{s.beschrijving}</div>
                 {/if}
+                {#if s.let_op}
+                  <div class="library-card-warn">{s.let_op}</div>
+                {/if}
               </div>
             </div>
           {/each}
         </div>
       {/if}
+
+      <!-- Waar je meer samplesets vindt. Bewust twee vaste adressen: beide
+           bieden vrij te gebruiken sets die JM-Orgue rechtstreeks inleest. -->
+      <h2 class="organ-browser-subtitle">{$t('library.elders_title')}</h2>
+      <p class="organ-browser-hint">{$t('library.elders_hint')}</p>
+      <div class="library-links">
+        {#each SAMPLESET_BRONNEN as bron}
+          <button class="library-link" on:click={() => openExterneLink(bron.url)}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+              <polyline points="15 3 21 3 21 9"/>
+              <line x1="10" y1="14" x2="21" y2="3"/>
+            </svg>
+            <span class="library-link-naam">{bron.naam}</span>
+            <span class="library-link-url">{bron.toon}</span>
+          </button>
+        {/each}
+      </div>
     </div>
 
   {:else if displayOrgan}

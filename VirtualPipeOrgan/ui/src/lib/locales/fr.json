@@ -33,6 +33,8 @@
     "empty_hint": "Utilisez les boutons en haut à droite pour charger un orgue.",
     "stops_count": "{count} jeux",
     "online_title": "Disponibles au téléchargement",
+    "elders_title": "Autres jeux d'échantillons",
+    "elders_hint": "JM-Orgue lit directement les jeux Hauptwerk et GrandOrgue. Ces créateurs proposent des jeux libres d'utilisation.",
     "downloading": "Téléchargement…",
     "unpacking": "Décompression…",
     "download_size": "Télécharger (± {mb} Mo)",

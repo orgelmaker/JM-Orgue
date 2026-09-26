@@ -301,7 +301,7 @@ Na 0.7.51 is de hele wijziging door een reviewronde gehaald (vier invalshoeken, 
 
 - **Orgelwissel liet het windmodel van het vórige orgel aanstaan.** De audiothread reset bij een nieuw orgel de zwelkasten en tremulanten, maar niet de wind: laadde je na een orgel met wind een orgel zonder opgeslagen windinstelling, dan ademde en stootte dat met de instellingen van het vorige — terwijl het scherm "uit" toonde. Bestond in mindere mate al sinds 0.7.36; nu worden balgen, laden, stoten, meters en de groepsindeling bij elke orgelwissel schoongeveegd, en pas daarna de opgeslagen groepen van het nieuwe orgel gezet.
 - **Galmstaarten bogen nog mee met de loslaatopstoot.** 0.7.51 bouwde de windgevoeligheid van een staart in 200 ms af, maar liet hem intussen de druk volgen — precies in het venster waarin de opstoot komt: een pleno loslaten gaf alle staarten een korte "whoop" omhoog. Nu bevriest een losgelaten pijp (en zijn staart) de afwijking van het moment van loslaten: wat nog klinkt is uitsterven en opgenomen galm, en dat volgt de wind niet meer. Eenvoudiger én fysisch juist; de afbouw over 200 ms is weg.
-- **Mixturen zonder voetmaat wogen als een 8'-register.** GrandOrgue-sets zonder HarmonicNumber — Friesach zelf — geven "8'" terug, en de familiefactor 1,5 maakte een Mixtuur IV daarmee ruim vier keer te zwaar in het windverbruik (en te traag als resonator). Een mixtuur rekent nu op zijn hoogste koorpijp (2' op een manuaal, 4' op het pedaal) en weegt zoveel vloerpijpjes als hij koren heeft, uit de naam ("IV", "4-5f.", anders 4): een Mixtuur IV op c' trekt 0,12, een 8'-prestant op dezelfde toets 0,35.
+- **Mixturen zonder voetmaat wogen als een 8'-register.** GrandOrgue-sets zonder HarmonicNumber geven "8'" terug, en de familiefactor 1,5 maakte een Mixtuur IV daarmee ruim vier keer te zwaar in het windverbruik (en te traag als resonator). Een mixtuur rekent nu op zijn hoogste koorpijp (2' op een manuaal, 4' op het pedaal) en weegt zoveel vloerpijpjes als hij koren heeft, uit de naam ("IV", "4-5f.", anders 4): een Mixtuur IV op c' trekt 0,12, een 8'-prestant op dezelfde toets 0,35.
 - **De schuif "Maximale winddaling" was boven 10 % dood.** Een vaste klem in de mengloop hield de afwijking die de pijpen zien op −10 %, terwijl balg en meter wél dieper gingen: schuif op 20 %, meter op 80 %, klank op 8 cent. De klem volgt nu de ingestelde daling (bij 5 % blijft alles zoals gemeten). En de hint eronder rekende met de volle daling, terwijl "vol werk" per definitie de hélft is: hij toonde 2× te veel cent. Nu "bij een vol werk zakt een prestant zo'n 2 cent, een fluit of mixtuur 4 cent, 0,4 dB zachter" bij 5 %.
 - **De voorkeuze "Hollands" zette per ongeluk de grote balg.** Balggrootte bepaalt sinds 0.7.51 ook hoeveel vol werk de balg aankan; de knop "Ook op de schuiven" zette Hollands op 100 % en maakte het pleno daarmee statisch vlakker dan Neutraal. Omgedraaid, zoals het hoort: spaanbalgen zijn de kleine, nerveuze balg (50 %, daling 6 %), de magazijnbalg met ventilator de grote, rustige (100 %, daling 3 %).
 - **De pedaalreferentie stond op de verkeerde toetsen.** "Vol werk" voor het pedaal werd op c–c' gerekend terwijl het pedaal in C–c wordt bespeeld: één Subbas-C op een eigen pedaalbalg zakte al bijna maximaal. Nu twee noten in het groot octaaf.
@@ -333,7 +333,7 @@ Na 0.7.50 luidde de klacht: "ik mis nog iets waardoor je dat Hollandse levendige
 
 **Bediening.** In het blok Windmodel staat per groep nu **Karakter**: *Hollands* (spaanbalgen, lange kanalen), *Neutraal* (magazijnbalg met ventilator: alles half zo diep, kort kanaal) of *Eigen* met vier regelaars — Windstoot, Kanaal, Doffer, Verschil per pijp — en de schakelaar "Tongwerken blijven in toonhoogte staan". De drie bestaande schuiven (balggrootte, demping, maximale daling) houden hun betekenis; de knop "Ook op de schuiven" zet ze op de waarden van het karakter. Onder de balgmeter staat nu per lade een balk met de druk van dit moment en een streepje voor de diepste dip van de laatste halve seconde — een schrik van 50 ms valt anders tussen twee schermverversingen — plus wat dat een prestant en een fluit in cent doet. Opgeslagen orgels van 0.7.50 laden met hun eigen balggrootte, demping en daling en krijgen het Hollandse karakter. De standaard maximale daling voor nieuwe groepen is 5 % (was 10 %). Alles in de zeven talen.
 
-**Gemeten** (Friesach, test-API, Hollands karakter, standaardschuiven): één 8'-register met een vierklank: lade 99,99 % — het orgel ademt niet op één register. Het pleno van het Schwellwerk (15 registers, vierklank): balg 97,5 %. Een 32'+16'-C in het pedaal onder een liggend 2'-akkoord, pedaal op de balg van het manuaal: de lade van het manuaal dipt 6,0 % binnen 50 ms en staat na een seconde weer op 100,0 %; loslaten geeft een opstoot tot 101,8 %; de meter houdt de dip vast. Neutraal dipt 2,7 % in dezelfde situatie; model uit is exact vlak. Nergens dieper dan 8 % kortstondig of 5 % statisch — de grens waarboven organisten van "shaky wind" spreken.
+**Gemeten** (testset, test-API, Hollands karakter, standaardschuiven): één 8'-register met een vierklank: lade 99,99 % — het orgel ademt niet op één register. Het pleno van het Schwellwerk (15 registers, vierklank): balg 97,5 %. Een 32'+16'-C in het pedaal onder een liggend 2'-akkoord, pedaal op de balg van het manuaal: de lade van het manuaal dipt 6,0 % binnen 50 ms en staat na een seconde weer op 100,0 %; loslaten geeft een opstoot tot 101,8 %; de meter houdt de dip vast. Neutraal dipt 2,7 % in dezelfde situatie; model uit is exact vlak. Nergens dieper dan 8 % kortstondig of 5 % statisch — de grens waarboven organisten van "shaky wind" spreken.
 
 **Goedkoper dan voorheen.** Pas 1 van de mengloop stapte tot nu toe elke sample 32 balgen en 32 tremulanten, ook voor divisies die niet bestaan; nu alleen de echte divisies en de actieve balgen. Bij een stil orgel zakte die pas van 0,95 % naar 0,44 % van de buffertijd. Per stem kost de wind nu twee vermenigvuldig-optellingen per frame in plaats van een 64-bits vermenigvuldiging met een tabel van een halve megabyte per blok; de telling van het verbruik zit in de bestaande voorbereidingslus (één HashMap-lookup per stem per callback minder).
 
@@ -347,7 +347,7 @@ Verificatie: 23 nieuwe unittests op balg, lade en pijpprofielen (kalibratie van 
 
 Drie klachten over het windmodel, alle drie terecht: het was niet duidelijk wat het deed, je hoorde er nauwelijks iets van, en een gewijzigde windgroep bij een klavier kwam niet terug in het overzicht. Alle drie opgelost.
 
-**Je hoort het nu.** De winddaling stuurde de toonhoogte aan met 30 cent per eenheid druk. Bij de standaardinstelling (10 % daling) was dat 3 cent — precies op de grens van wat een mens kan horen, en dus in de praktijk niets. Dat is nu 120 cent per eenheid, oftewel zo'n 12 cent bij een vol werk, en het volume volgt de druk recht evenredig in plaats van via een wortel. Gemeten met Friesach, tien registers van het Hauptwerk en een akkoord van zeven tonen (70 klinkende pijpen): de druk zakt naar 91,3 %, goed voor 10,4 cent lager en bijna 1 dB zachter.
+**Je hoort het nu.** De winddaling stuurde de toonhoogte aan met 30 cent per eenheid druk. Bij de standaardinstelling (10 % daling) was dat 3 cent — precies op de grens van wat een mens kan horen, en dus in de praktijk niets. Dat is nu 120 cent per eenheid, oftewel zo'n 12 cent bij een vol werk, en het volume volgt de druk recht evenredig in plaats van via een wortel. Gemeten met de testset, tien registers van het Hauptwerk en een akkoord van zeven tonen (70 klinkende pijpen): de druk zakt naar 91,3 %, goed voor 10,4 cent lager en bijna 1 dB zachter.
 
 **En de balg gedraagt zich als een balg.** Onder de motorkap zat een eerste-orde filter, terwijl de regelaar "Demping" beloofde het naschommelen te regelen — een eerste-orde filter kán niet naschommelen, dus die regelaar deed nooit waar hij voor stond. Er staat nu een echte balg: een massa (het gewicht erop) op een veer (de lucht eronder). Zet je een akkoord neer, dan zakt de wind in en veert daarna terug; slap gedempt schommelt hij hoorbaar na, strak gedempt zakt hij alleen rustig in. Daar bovenop een lichte turbulentie die meeschaalt met de daling, zodat een stil orgel ook echt stil staat.
 
@@ -365,7 +365,7 @@ Verificatie: zeven nieuwe unittests op het model zelf (inzakking hoorbaar maar n
 
 Tot deze versie deed JM-Orgue al zijn rekenwerk voor het geluid op één kern, terwijl een moderne pc er acht of meer heeft. Dat was de echte grens achter de polyfonie: het getal in de instelling kon nog zo hoog staan, één kern kwam niet verder.
 
-Gemeten op een i9-10885H (WASAPI, 48 kHz, 480 frames per callback) met Friesach en alle 44 registers getrokken, bij 1.024 gelijktijdig klinkende pijpen:
+Gemeten op een i9-10885H (WASAPI, 48 kHz, 480 frames per callback) met de testset en alle 44 registers getrokken, bij 1.024 gelijktijdig klinkende pijpen:
 
 | Rekenkernen | Belasting van de buffertijd |
 |---|---|
@@ -388,7 +388,7 @@ Verificatie: 204 tests, waaronder vier die met 200 echte stemmen aantonen dat ve
 
 ### De drie getallen uit de Hauptwerk-tabel
 
-**Polyfonie tot 32.768.** Het plafond stond op 4.096 en gaat naar 32.768, hetzelfde getal dat Hauptwerk Advanced noemt. Maar een plafond is geen belofte, en daarover moet ik eerlijk zijn: wat een pc werkelijk haalt bepaalt de rekentijd, niet dit getal. Gemeten op een i9-10885H (WASAPI, 48 kHz, 480 frames per callback, Friesach met alle 44 registers getrokken):
+**Polyfonie tot 32.768.** Het plafond stond op 4.096 en gaat naar 32.768, hetzelfde getal dat Hauptwerk Advanced noemt. Maar een plafond is geen belofte, en daarover moet ik eerlijk zijn: wat een pc werkelijk haalt bepaalt de rekentijd, niet dit getal. Gemeten op een i9-10885H (WASAPI, 48 kHz, 480 frames per callback, de testset met alle 44 registers getrokken):
 
 | Klinkende stemmen | Belasting van de buffertijd |
 |---|---|
@@ -709,7 +709,7 @@ de geluidskaart bij de klavieren en volledige vertaling NL/EN/FR/DE (0.7.37).
 
 ### Nieuw — release-fase-uitlijning voor natte samplesets (onderzoek fase B)
 
-- 🎼 **Release-samples starten nu fase-uitgelijnd op het klinkende signaal**, zoals GrandOrgue dat doet. Bij het laden wordt per release-sample een uitlijningstabel gebouwd (16×16 amplitude×helling → startpositie); elke spelende stem onthoudt zijn laatste twee golfvorm-waarden, en bij het loslaten begint de release op de positie die daarop aansluit — in plaats van altijd op het begin. Dit haalt de fase-tik weg die je op sets als Friesach bij élke losgelaten toets kon horen, zowel bij losse noten als bij het wegtrekken van registers
+- 🎼 **Release-samples starten nu fase-uitgelijnd op het klinkende signaal**, zoals GrandOrgue dat doet. Bij het laden wordt per release-sample een uitlijningstabel gebouwd (16×16 amplitude×helling → startpositie); elke spelende stem onthoudt zijn laatste twee golfvorm-waarden, en bij het loslaten begint de release op de positie die daarop aansluit — in plaats van altijd op het begin. Dit haalt de fase-tik weg die je op sets als de testset bij élke losgelaten toets kon horen, zowel bij losse noten als bij het wegtrekken van registers
 
 ## [0.6.10] - 2026-07-24
 
@@ -743,9 +743,9 @@ de geluidskaart bij de klavieren en volledige vertaling NL/EN/FR/DE (0.7.37).
 
 - 🎛️ **Het ingeleerde toetsbereik filtert nu ook**: pistons/setzerknoppen die MIDI-noten sturen op hetzélfde kanaal als een klavier (maar buiten het ingeleerde laagste-hoogste-bereik) klinken niet meer als orgelnoten en zijn gewoon inleerbaar als preset-knop. Leer wel eerst het klavierbereik in (met de nieuwe popup), anders is er geen bereik om op te filteren
 
-### Opgelost — Friesach: kraken en vastlopen bij vol werk loslaten
+### Opgelost — de testset: kraken en vastlopen bij vol werk loslaten
 
-- 🌊 **Release-staarten begrensd tot een budget (160 tegelijk).** Bij het loslaten van vol werk op een natte GO-set startte per pijp × register een extra release-stem (de opgenomen kerkakoestiek): 200+ nieuwe stemmen in één klap, ruim 600 totaal — de mixer verzoop, het kraakte en de afbouw duurde heel lang. Boven het budget maakt de stilste bestaande staart nu versneld plaats; eigen droge sets (Puttershoek) hebben geen release-samples en vallen zoals voorheen direct terug naar 0
+- 🌊 **Release-staarten begrensd tot een budget (160 tegelijk).** Bij het loslaten van vol werk op een natte GO-set startte per pijp × register een extra release-stem (de opgenomen kerkakoestiek): 200+ nieuwe stemmen in één klap, ruim 600 totaal — de mixer verzoop, het kraakte en de afbouw duurde heel lang. Boven het budget maakt de stilste bestaande staart nu versneld plaats; eigen droge sets hebben geen release-samples en vallen zoals voorheen direct terug naar 0
 
 ## [0.6.8] - 2026-07-23
 
@@ -756,7 +756,7 @@ de geluidskaart bij de klavieren en volledige vertaling NL/EN/FR/DE (0.7.37).
 
 ### Opgelost — haperen/tikken bij veel registers op grote samplesets
 
-- 🚿 **De logstorm per toetsaanslag is gedempt**: elke noot schreef 1 + (aantal klinkende registers) regels naar console én logbestand — bij vol werk op Friesach honderden regels per seconde, die de MIDI-verwerking lieten stotteren precies op de drukke momenten. Per-noot-logging staat nu standaard uit (alleen nog op trace-niveau voor diagnose)
+- 🚿 **De logstorm per toetsaanslag is gedempt**: elke noot schreef 1 + (aantal klinkende registers) regels naar console én logbestand — bij vol werk op de testset honderden regels per seconde, die de MIDI-verwerking lieten stotteren precies op de drukke momenten. Per-noot-logging staat nu standaard uit (alleen nog op trace-niveau voor diagnose)
 - ⚙️ **Achtergrond-sampleladers draaien onder normale prioriteit**: het decoderen van volledige samples (vol werk aanslaan/loslaten op een natte set) verdrong de audio-verwerking van de CPU — een bekende bron van tikken. De audio-thread heeft nu altijd voorrang; samples laden hooguit iets langzamer bij, wat de preload-buffers opvangen
 
 ## [0.6.7] - 2026-07-23
@@ -836,14 +836,14 @@ Grote onderhoudsronde: 53 van de 63 bevindingen uit de code-audit van 18 juli ve
 
 ### Opgelost — zwelkasten uit de orgeldefinitie werken nu
 
-- 🎚️ **GO-/Hauptwerk-zwelkasten worden herkend**: moderne orgelbestanden zetten de windlade-koppeling op de rank in plaats van op het register, waardoor de zwelkast-detectie (windlade → Enclosure) nooit aansloeg. Friesach's Schwellwerk heeft nu gewoon zijn zweltrede in de app, precies zoals de orgeldefinitie voorschrijft
+- 🎚️ **GO-/Hauptwerk-zwelkasten worden herkend**: moderne orgelbestanden zetten de windlade-koppeling op de rank in plaats van op het register, waardoor de zwelkast-detectie (windlade → Enclosure) nooit aansloeg. de testset's Schwellwerk heeft nu gewoon zijn zweltrede in de app, precies zoals de orgeldefinitie voorschrijft
 
 ### Verbeterd — klankkwaliteit GO-sets
 
 - 🌊 **Fase-uitgelijnde loops óók in de eerste seconden van elke noot**: de anti-tik-optimalisatie van looppunten draaide alleen op de volledige samples, niet op de preload-buffers waar elke noot zijn eerste ~2 seconden op speelt. Nu overal; en een loop die door de stilte-trim beschadigd raakte wordt herkend i.p.v. stilletjes verschoven
 - 🎼 **Vloeiender interpolatie (4-punts Hermite i.p.v. lineair)**: een 48kHz-set op een 44,1kHz-apparaat (en elke tremulant-/temperament-verstemming) klinkt merkbaar schoner op heldere registers — minder aliasing-ruis
 - ⚡ **Drie parallelle sample-laders i.p.v. één**: na het loslaten van een vol akkoord op een natte set worden de release-staarten drie keer zo snel bijgeladen
-- 🎛️ **Limiter verfijnd** (plafond -0,26 dB, gedoseerde attack van 1,5 ms): één piek trekt niet langer het hele orgel hoorbaar omlaag. Crescendo-meting op Friesach: gelijkmatig stijgend van 1 register tot vol werk, geen "wegzakken" meer
+- 🎛️ **Limiter verfijnd** (plafond -0,26 dB, gedoseerde attack van 1,5 ms): één piek trekt niet langer het hele orgel hoorbaar omlaag. Crescendo-meting op de testset: gelijkmatig stijgend van 1 register tot vol werk, geen "wegzakken" meer
 
 ### Gewijzigd — standaardinstellingen voor externe samplesets
 
@@ -891,7 +891,7 @@ opnieuw werk dat in werkelijkheid constant is — vier HashMap-opzoekingen plus
 `powf`/`sin`/`cos`. Bij een volle registratie (honderden gelijktijdige voices
 op 44,1 kHz) liep dat op tot tientallen miljoenen bewerkingen per seconde op
 één kern, waardoor de render-thread de buffer-deadline miste → buffer-underruns
-→ hoorbaar gekraak. Gemeten op Friesach: 13 registers + een akkoord zaten al op
+→ hoorbaar gekraak. Gemeten op de testset: 13 registers + een akkoord zaten al op
 ~50–70% van één kern; ná de fix voegt hetzelfde spel vrijwel niets meer toe
 boven de rusttoestand.
 
@@ -979,7 +979,7 @@ WASAPI-endpoints exclusief — waardoor de app met zijn eigen draaiende stream
 - 📊 **Laad-voortgang bij het openen van een orgel**: de voortgangsbalk bleef altijd op 0% staan, waardoor een grote (koude) GrandOrgue-set eruitzag als een vastgelopen app — de balk loopt nu echt mee met het aantal geladen samples
 - 💾 **Instellingen naast Hauptwerk-orgels**: het `.jm-settings.json`-bestand naast het orgel werd bij Hauptwerk-orgels (en `.Organ`-bestanden met hoofdletter) nooit geschreven of teruggelezen (het orgelbestand werd als map behandeld); ook de console-afbeelding werd daardoor niet gevonden
 - 🎹 **Registreren tijdens het spelen werkt nu overal direct**: een register bijtrekken laat ingedrukte toetsen meteen meeklinken (ook via actieve koppels en melodie-/baskoppels) en wegtrekken laat pijpen direct zwijgen — nu ook bij setzer-/preset-oproepen en het generaal-crescendo, niet alleen bij losse registerklikken
-- 🔇 **Tikken in loops verholpen** (o.a. Puttershoek): drie oorzaken gefixt — (1) één sample stilte per loop-omloop wanneer het looppunt op het buffereinde lag (alle preload-buffers en fallback-loops), (2) een hoorbare positiesprong op het moment dat de volledige sample de preload-buffer overneemt (aanloop-trim werd niet gecompenseerd), (3) de FFT-resampler-vertraging werd niet gecompenseerd waardoor 44,1 kHz-sets in de tijd verschoven t.o.v. hun looppunten
+- 🔇 **Tikken in loops verholpen**: drie oorzaken gefixt — (1) één sample stilte per loop-omloop wanneer het looppunt op het buffereinde lag (alle preload-buffers en fallback-loops), (2) een hoorbare positiesprong op het moment dat de volledige sample de preload-buffer overneemt (aanloop-trim werd niet gecompenseerd), (3) de FFT-resampler-vertraging werd niet gecompenseerd waardoor 44,1 kHz-sets in de tijd verschoven t.o.v. hun looppunten
 - ✂️ **Kniptool bewaart looppunten**: stilte wegknippen gooide de smpl-loop-chunk weg en liet looppunten verschuiven; loops worden nu meegeschoven en teruggeschreven
 - ⚡ **Minder aanslagvertraging**: resampler-delay-compensatie (44,1 kHz-sets spreken enkele ms eerder aan) en een strakkere aanslag-envelope (~2 ms i.p.v. ~4 ms)
 - 🚦 Eén `ReleaseStop`-audiocommando per weggetrokken register i.p.v. een NoteOff per pijp — een preset-wissel die veel registers wegtrekt kan de command-queue niet meer verstoppen

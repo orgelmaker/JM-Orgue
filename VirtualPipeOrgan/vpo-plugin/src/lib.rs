@@ -122,8 +122,8 @@ impl Default for JmOrgue {
 impl Plugin for JmOrgue {
     const NAME: &'static str = "JM-Orgue";
     const VENDOR: &'static str = "JM-Orgue";
-    const URL: &'static str = "https://github.com/3bm/virtual-pipe-organ";
-    const EMAIL: &'static str = "orgelmaker@live.nl";
+    const URL: &'static str = "https://github.com/orgelmaker/JM-Orgue";
+    const EMAIL: &'static str = "";
     const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 
     const AUDIO_IO_LAYOUTS: &'static [AudioIOLayout] = &[AudioIOLayout {

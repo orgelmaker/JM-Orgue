@@ -33,6 +33,8 @@
     "empty_hint": "Verwenden Sie die Schaltflächen oben rechts, um eine Orgel zu laden.",
     "stops_count": "{count} Register",
     "online_title": "Zum Download verfügbar",
+    "elders_title": "Weitere Samplesets",
+    "elders_hint": "JM-Orgue liest Hauptwerk- und GrandOrgue-Sets direkt ein. Diese Hersteller bieten frei nutzbare Sets an.",
     "downloading": "Wird heruntergeladen…",
     "unpacking": "Wird entpackt…",
     "download_size": "Herunterladen (± {mb} MB)",

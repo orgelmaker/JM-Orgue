@@ -1,5 +1,5 @@
 {
-  "_uitleg": "Manifest van online beschikbare samplesets. De bibliotheek in de app haalt dit bestand op via raw.githubusercontent.com (master) en toont per set een downloadkaart. zip_url moet een GitHub-URL zijn (de app weigert andere hosts). 'versie' verhogen bij een nieuwe zip; 'map_naam' is de mapnaam die de app aanmaakt.",
+  "_uitleg": "Manifest van online beschikbare samplesets. De bibliotheek in de app haalt dit bestand op via raw.githubusercontent.com (master) en toont per set een downloadkaart. zip_url moet een GitHub-URL zijn (de app weigert andere hosts). 'versie' verhogen bij een nieuwe zip; 'map_naam' is de mapnaam die de app aanmaakt. Optioneel veld 'let_op': een waarschuwing die de app onder de beschrijving toont, bijvoorbeeld wanneer een set nog niet op zijn best is.",
   "samplesets": [
     {
       "id": "batz-witte-puttershoek",
@@ -9,7 +9,8 @@
       "zip_url": "https://github.com/orgelmaker/JM-Orgue/releases/download/sampleset-batz-witte-puttershoek/JM-Orgue-Sampleset-Batz-Witte-Puttershoek-v1.zip",
       "zip_mb": 107,
       "uitgepakt_mb": 211,
-      "map_naam": "Bätz-Witte Puttershoek"
+      "map_naam": "Bätz-Witte Puttershoek",
+      "let_op": "Deze opname stamt uit de eerste fase van de software, toen hij nog JM-Rec heette. De set speelt, maar klinkt nog niet zoals het kan: de opnamen zijn later niet opnieuw bewerkt. Zie de bibliotheek voor betere sets."
     }
   ]
 }

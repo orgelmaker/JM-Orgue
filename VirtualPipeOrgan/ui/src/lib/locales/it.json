@@ -33,6 +33,8 @@
     "empty_hint": "Usa i pulsanti in alto a destra per caricare un organo.",
     "stops_count": "{count} registri",
     "online_title": "Disponibili per il download",
+    "elders_title": "Altri set di campioni",
+    "elders_hint": "JM-Orgue legge direttamente i set Hauptwerk e GrandOrgue. Questi autori offrono set liberamente utilizzabili.",
     "downloading": "Download in corso…",
     "unpacking": "Estrazione…",
     "download_size": "Scarica (± {mb} MB)",
