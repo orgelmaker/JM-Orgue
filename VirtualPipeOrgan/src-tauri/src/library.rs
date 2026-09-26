@@ -494,8 +494,26 @@ impl Default for OrganLibrary {
 /// een botsing; settings onder een forward-slash-key verhuizen alleen mee als
 /// er onder de genormaliseerde key nog niets staat.
 fn normalize_library(lib: &mut OrganLibrary) {
-    let norm = |s: &str| s.replace('/', "\\");
-    let key = |s: &str| norm(s).to_lowercase();
+    // Bibliotheken die op Linux of macOS met een oudere versie zijn
+    // weggeschreven staan vol backslashes: die versie zette élk pad om, ook
+    // waar dat niet mocht. Zulke entries wijzen nergens naar. Eén keer
+    // terugdraaien, en alleen wanneer het teruggedraaide pad ook werkelijk
+    // bestaat — een backslash mág immers in een Unix-bestandsnaam staan.
+    if std::path::MAIN_SEPARATOR != '\\' {
+        for o in lib.organs.iter_mut() {
+            let hersteld = o.id.replace('\\', "/");
+            if hersteld != o.id && Path::new(&hersteld).exists() {
+                let oude = std::mem::replace(&mut o.id, hersteld.clone());
+                o.source_path = o.source_path.replace('\\', "/");
+                if let Some(v) = lib.settings.remove(&oude) {
+                    lib.settings.entry(hersteld).or_insert(v);
+                }
+            }
+        }
+    }
+
+    let norm = pad_notatie;
+    let key = pad_sleutel;
 
     let organs = std::mem::take(&mut lib.organs);
     let before = organs.len();
@@ -689,8 +707,37 @@ pub fn image_dimensions(path: &Path) -> Option<(u32, u32)> {
 /// (`resolve_path`-normalisatie) terwijl de rest van de bibliotheek backslashes
 /// gebruikt; gemengd werkt wel, maar leest en vergelijkt slecht.
 fn tidy_path(p: &Path) -> String {
-    let s = p.to_string_lossy().to_string();
-    if std::path::MAIN_SEPARATOR == '\\' { s.replace('/', "\\") } else { s }
+    pad_notatie(&p.to_string_lossy())
+}
+
+/// Pad in de notatie van dít besturingssysteem.
+///
+/// Op Windows accepteert het bestandssysteem beide scheidingstekens, dus daar
+/// trekken we alles naar backslash: bibliotheek-ids, instellingen-sleutels en
+/// afbeeldingspaden krijgen zo één vorm en botsen niet.
+///
+/// Op Linux en macOS mag dat juist NIET. De backslash is daar een gewoon teken
+/// in een bestandsnaam, dus `/home/orgel/Orgels` zou `\home\orgel\Orgels`
+/// worden: één naamcomponent die niet bestaat. Dat maakte de app op die
+/// platformen onbruikbaar — hij startte, opende een venster en kon geen enkel
+/// orgel laden.
+pub fn pad_notatie(s: &str) -> String {
+    if std::path::MAIN_SEPARATOR == '\\' {
+        s.replace('/', "\\")
+    } else {
+        s.to_string()
+    }
+}
+
+/// Vergelijk-sleutel voor een pad.
+///
+/// Notatie gelijkgetrokken, en op Windows ook hoofdletterongevoelig omdat het
+/// bestandssysteem dat daar is. Op Linux zijn `Orgels` en `orgels` écht twee
+/// verschillende mappen; daar kleinmaken zou twee bibliotheek-entries tot één
+/// samenvouwen en er dus één laten verdwijnen.
+pub fn pad_sleutel(s: &str) -> String {
+    let p = pad_notatie(s);
+    if cfg!(windows) { p.to_lowercase() } else { p }
 }
 
 /// Heeft dit pad een afbeeldingsextensie die we ondersteunen?
@@ -957,13 +1004,35 @@ mod library_tests {
         normalize_library(&mut lib);
 
         assert_eq!(lib.organs.len(), 2, "duplicaat samengevoegd, unieke blijft");
-        assert!(lib.organs.iter().all(|o| !o.id.contains('/')), "alle ids op backslash-vorm");
+        // Alleen op Windows worden ids naar backslash getrokken. Op Linux en
+        // macOS is de backslash een gewoon teken in een bestandsnaam, dus
+        // blijft het pad daar staan zoals het binnenkwam.
+        if cfg!(windows) {
+            assert!(lib.organs.iter().all(|o| !o.id.contains('/')), "alle ids op backslash-vorm");
+        }
         assert_eq!(lib.settings.len(), 1);
         assert_eq!(
             lib.settings.get(r"C:\Orgels\Batz").and_then(|s| s.master_volume_db),
             Some(-3.0),
             "settings van de UI-variant winnen"
         );
+    }
+
+    /// De kern van de platformfout: op Windows één notatie, elders het pad
+    /// ongemoeid laten. Anders wordt `/home/orgel/Orgels` één naamcomponent
+    /// die niet bestaat, en kan de app daar geen enkel orgel openen.
+    #[test]
+    fn pad_notatie_laat_unix_paden_met_rust() {
+        if cfg!(windows) {
+            assert_eq!(pad_notatie("C:/Orgels/Batz"), r"C:\Orgels\Batz");
+            assert_eq!(pad_sleutel("C:/Orgels/BATZ"), r"c:\orgels\batz");
+        } else {
+            assert_eq!(pad_notatie("/home/orgel/Orgels"), "/home/orgel/Orgels");
+            // Geen kleinmaken buiten Windows: daar zijn dit twee mappen.
+            assert_ne!(pad_sleutel("/home/orgel/Orgels"), pad_sleutel("/home/orgel/orgels"));
+        }
+        // Een pad zonder scheidingsteken blijft overal gelijk.
+        assert_eq!(pad_notatie("Batz"), "Batz");
     }
 
     // ---- Afbeelding-zoektocht v2 ----

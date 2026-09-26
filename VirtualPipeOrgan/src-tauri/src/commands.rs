@@ -419,9 +419,9 @@ fn saved_settings_for(state: &AppState, organ_id: &str) -> Option<OrganSettings>
     let from_lib = {
         let lib = state.organ_library.read();
         lib.settings.get(organ_id).cloned().or_else(|| {
-            let want = organ_id.replace('/', "\\").to_lowercase();
+            let want = crate::library::pad_sleutel(organ_id);
             lib.settings.iter()
-                .find(|(k, _)| k.replace('/', "\\").to_lowercase() == want)
+                .find(|(k, _)| crate::library::pad_sleutel(k) == want)
                 .map(|(_, v)| v.clone())
         })
     };
@@ -1815,8 +1815,10 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
 
     // Normaliseer de pad-notatie (test-API/scripts leveren soms forward
     // slashes): orgel-id, bibliotheek en per-orgel-settings zien zo altijd
-    // dezelfde vorm — voorkomt dubbele bibliotheek-entries.
-    let path = &path.replace('/', "\\");
+    // dezelfde vorm — voorkomt dubbele bibliotheek-entries. ALLEEN op Windows:
+    // op Linux en macOS is de backslash een gewoon teken in een bestandsnaam
+    // en maakt omzetten van het pad een naam die niet bestaat.
+    let path = &crate::library::pad_notatie(path);
     info!("Loading organ from: {}", path);
 
     let odf_path = Path::new(path);
@@ -6193,8 +6195,8 @@ pub fn do_load_samples_from_directory(state: &AppState, directory: &str) -> Resu
 /// Variant ZONDER gate — zie do_load_organ_locked (re-entrante lock = deadlock).
 pub fn do_load_samples_from_directory_locked(state: &AppState, directory: &str) -> Result<OrganInfoDto, String> {
     // Normaliseer de pad-notatie (zie do_load_organ) — voorkomt dubbele
-    // bibliotheek-entries en gesplitste per-orgel-settings.
-    let directory = &directory.replace('/', "\\");
+    // bibliotheek-entries en gesplitste per-orgel-settings. Alleen op Windows.
+    let directory = &crate::library::pad_notatie(directory);
     use std::collections::HashMap;
     use std::sync::Arc;
     use rayon::prelude::*;
@@ -6587,7 +6589,7 @@ pub fn do_load_samples_from_directory_locked(state: &AppState, directory: &str) 
 /// Anders bevriest elk venster dat de bibliotheek leest tijdens die scan — en
 /// bij de eerste start na een upgrade heeft élke entry nog image_searched=None.
 fn add_or_refresh_library_entry(state: &AppState, organ_info: &OrganInfoDto, source_path: &str, source_type: &str) {
-    let norm = |s: &str| s.replace('/', "\\").to_lowercase();
+    let norm = crate::library::pad_sleutel;
     let key = norm(source_path);
 
     // 1) Korte read-lock: bestaat de entry al, en moet er gezocht worden?
@@ -7041,7 +7043,7 @@ fn bibliotheek_identiteit_licht(source_path: &str, source_type: &str) -> Option<
 /// de entry staan; er wordt nooit iets gewist. Geeft het aantal gewijzigde
 /// entries terug (0 = niets veranderd, niets opgeslagen).
 fn ververs_bibliotheek_namen(bibliotheek: &parking_lot::RwLock<library::OrganLibrary>, app_data_dir: &Path) -> usize {
-    let norm = |s: &str| s.replace('/', "\\").to_lowercase();
+    let norm = crate::library::pad_sleutel;
     // Snapshot onder een korte read-lock; het lezen van schijf gebeurt zonder lock.
     let entries: Vec<(String, String, String, String, String)> = {
         let lib = bibliotheek.read();
@@ -7642,7 +7644,7 @@ fn afbeeldingsbron_leesbaar(source_path: &str, source_type: &str) -> bool {
 /// bibliotheek, en élk extra registervenster, de hele sampleset opnieuw.
 #[tauri::command]
 pub fn get_organ_image(state: State<AppState>, id: String) -> Option<String> {
-    let norm = |s: &str| s.replace('/', "\\").to_lowercase();
+    let norm = crate::library::pad_sleutel;
     let key = norm(&id);
 
     let (pad, source_path, source_type, manual, al_gezocht, in_lib) = {
@@ -7701,7 +7703,7 @@ pub fn get_organ_image(state: State<AppState>, id: String) -> Option<String> {
 /// bron (USB, Downloads) verdwijnt.
 #[tauri::command]
 pub fn set_organ_image(state: State<AppState>, id: String, path: Option<String>) -> Result<OrganLibraryEntry, String> {
-    let norm = |s: &str| s.replace('/', "\\").to_lowercase();
+    let norm = crate::library::pad_sleutel;
     let key = norm(&id);
     let map = organ_images_dir(&state);
 
