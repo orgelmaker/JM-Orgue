@@ -94,7 +94,15 @@ mee, wat zoeken een stuk korter maakt.
 
 ## Licentie
 
-**Alle rechten voorbehouden.** De broncode staat hier uitsluitend ter inzage.
-Gebruiken, kopiëren, wijzigen of verspreiden mag niet zonder voorafgaande
-schriftelijke toestemming. Zie [LICENSE](LICENSE); een verzoek om toestemming
-doe je via een issue.
+**Het programma mag je vrij gebruiken en doorgeven.** Installeren op zoveel
+computers als je wilt, aan anderen geven, op een website zetten: dat mag,
+zolang je de officiële installer ongewijzigd doorgeeft, er geen geld voor
+vraagt en de licentie meegaat.
+
+**De broncode staat hier uitsluitend ter inzage.** Kopiëren, wijzigen of in
+andere software opnemen mag niet zonder schriftelijke toestemming, en de app
+verkopen evenmin.
+
+Samplesets vallen hier niet onder; daarvoor gelden de voorwaarden van wie ze
+gemaakt heeft. Zie [LICENSE](LICENSE) voor de volledige tekst; een verzoek om
+toestemming doe je via een issue.

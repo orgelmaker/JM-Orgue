@@ -567,7 +567,7 @@
     "feedback_page_failed": "No se puede abrir la página de comentarios: {error}",
     "title": "Acerca de y comentarios",
     "version": "versión {version}",
-    "copyright": "© Martijn van der Kolk, todos los derechos reservados. El código no puede utilizarse sin permiso.",
+    "copyright": "© Martijn van der Kolk. Puede usar el programa libremente y transmitirlo sin modificar; el código fuente se publica solo para consulta.",
     "send_feedback": "Enviar comentarios…",
     "send_feedback_title": "Envía un mensaje que llega directamente al autor (por correo electrónico)",
     "github": "Por GitHub (issues)",

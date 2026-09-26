@@ -5,6 +5,40 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.57] - 2026-09-26
+
+### Het programma mag vrij worden doorgegeven
+
+De licentie stond op alle rechten voorbehouden, ook voor het programma zelf.
+Dat is nu gesplitst.
+
+**Wat mag.** JM-Orgue gebruiken en installeren op zoveel computers als u wilt,
+thuis of in een kerk, particulier of in een organisatie. En het doorgeven: aan
+anderen geven, op een website zetten, op een USB-stick meenemen, in een
+kerkelijke of muzikale kring verspreiden. Daar is geen toestemming voor nodig
+en het kost niets.
+
+Drie voorwaarden horen erbij. U geeft de officiële installer ongewijzigd door,
+u vraagt er geen geld voor, en de licentie gaat mee met de naam van de auteur
+intact.
+
+**Wat niet mag.** Verkopen, verhuren of tegen betaling aanbieden als onderdeel
+van iets anders. De installer uitpakken, na-bouwen of terugvertalen. En de
+broncode kopiëren, wijzigen of in andere software opnemen — die staat hier nog
+steeds uitsluitend ter inzage.
+
+Er staat nu ook bij dat samplesets níet onder deze licentie vallen. Daarvoor
+gelden de voorwaarden van wie ze gemaakt heeft.
+
+De regel onder Over in de app is meegegaan, in alle zeven talen.
+
+### De bibliotheek lijnt weer uit
+
+De tussenkoppen in de orgelbibliotheek stonden links buiten de kaarten die
+eronder horen: de koppen op nul, het kaartenraster op een marge. Dat viel pas
+op toen er een blok bij kwam dat altijd zichtbaar is. Koppen, uitleg en
+verwijzingen staan nu op dezelfde lijn als de kaarten.
+
 ## [0.7.56] - 2026-09-26
 
 ### Er is nu ook een installer voor Linux

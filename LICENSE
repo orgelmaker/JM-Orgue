@@ -1,22 +1,44 @@
 JM-Orgue — Licentie / License
 
-Copyright (c) 2025-2026 Martijn van der Kolk. Alle rechten voorbehouden.
+Copyright (c) 2025-2026 Martijn van der Kolk.
 
 == Nederlands ==
 
-Deze software en de bijbehorende broncode ("de Software") zijn eigendom van
-Martijn van der Kolk. De broncode is uitsluitend openbaar gemaakt ter inzage.
+"De Software" is het programma JM-Orgue zoals de auteur het uitgeeft: de
+officiële installers en alles wat daarin zit. "De broncode" is de programmatuur
+die in deze repository staat. Die is uitsluitend openbaar gemaakt ter inzage.
 
-Het is NIET toegestaan om zonder voorafgaande schriftelijke toestemming van
-de auteur:
-  1. de Software of delen ervan te gebruiken, uit te voeren of te installeren
-     anders dan via de officiële, door de auteur gepubliceerde installers;
-  2. de broncode of delen ervan te kopiëren, te wijzigen, te vertalen of er
-     afgeleide werken van te maken;
-  3. de Software of broncode te verspreiden, te verkopen, te verhuren, in
-     sublicentie te geven of anderszins aan derden ter beschikking te stellen;
-  4. de Software of broncode op te nemen in andere software of diensten,
+WAT MAG
+
+  1. De Software gebruiken, installeren en uitvoeren, zo vaak en op zoveel
+     computers als u wilt, thuis of in een kerk, particulier of in een
+     organisatie. Daar is geen toestemming voor nodig en het kost niets.
+
+  2. De Software vrij doorgeven en verspreiden: aan anderen geven, op een
+     website of in een forum plaatsen, op een USB-stick meenemen, in een
+     kerkelijke of muzikale kring verspreiden.
+
+     Daarvoor gelden drie voorwaarden:
+       a. u geeft de officiële installer ongewijzigd door, compleet en zoals
+          de auteur hem heeft uitgegeven;
+       b. u vraagt er geen geld voor en u vraagt geen vergoeding voor iets
+          waar de Software onderdeel van is;
+       c. deze licentie gaat mee, en u laat de naam van de auteur intact en
+          presenteert de Software niet als uw eigen werk.
+
+WAT NIET MAG, zonder voorafgaande schriftelijke toestemming van de auteur:
+
+  1. de Software verkopen, verhuren, in sublicentie geven, of tegen betaling
+     aanbieden als onderdeel van een product of dienst;
+  2. de Software of de installers wijzigen, uitpakken, na-bouwen of
+     terugvertalen naar broncode;
+  3. de broncode of delen ervan kopiëren, wijzigen, vertalen of er afgeleide
+     werken van maken;
+  4. de Software of de broncode opnemen in andere software of diensten,
      commercieel of niet-commercieel.
+
+Samplesets en opnamen vallen niet onder deze licentie. Daarvoor gelden de
+voorwaarden van wie ze gemaakt heeft.
 
 Verzoeken om toestemming kunnen worden gedaan via een issue op
 https://github.com/orgelmaker/JM-Orgue/issues
@@ -27,18 +49,41 @@ VOORTVLOEIT UIT HET GEBRUIK VAN DE SOFTWARE.
 
 == English ==
 
-This software and its source code ("the Software") are the property of
-Martijn van der Kolk. The source code is published for reference only.
+"The Software" means the JM-Orgue program as published by the author: the
+official installers and everything they contain. "The source code" means the
+code in this repository, which is published for reference only.
 
-Without prior written permission from the author, you may NOT:
-  1. use, run or install the Software or parts of it other than through the
-     official installers published by the author;
-  2. copy, modify, translate or create derivative works of the source code
+WHAT YOU MAY DO
+
+  1. Use, install and run the Software, as often and on as many computers as
+     you like, at home or in a church, privately or within an organisation.
+     No permission is needed and there is no charge.
+
+  2. Pass the Software on and distribute it freely: give it to others, put it
+     on a website or forum, carry it on a USB stick, share it within a church
+     or musical circle.
+
+     Three conditions apply:
+       a. you pass on the official installer unmodified, complete and as the
+          author published it;
+       b. you do not charge for it, and you do not charge for anything of
+          which the Software forms part;
+       c. this licence travels with it, you leave the author's name intact,
+          and you do not present the Software as your own work.
+
+WHAT YOU MAY NOT DO, without prior written permission from the author:
+
+  1. sell, rent or sublicense the Software, or offer it for payment as part
+     of a product or service;
+  2. modify, unpack, rebuild or reverse engineer the Software or its
+     installers;
+  3. copy, modify, translate or create derivative works of the source code
      or parts of it;
-  3. distribute, sell, rent, sublicense or otherwise make the Software or
-     source code available to third parties;
-  4. incorporate the Software or source code into other software or
+  4. incorporate the Software or the source code into other software or
      services, whether commercial or non-commercial.
+
+Sample sets and recordings are not covered by this licence; the terms of
+whoever created them apply.
 
 Requests for permission can be made by opening an issue at
 https://github.com/orgelmaker/JM-Orgue/issues

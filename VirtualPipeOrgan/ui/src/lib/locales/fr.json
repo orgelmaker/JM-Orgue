@@ -567,7 +567,7 @@
     "feedback_page_failed": "Impossible d'ouvrir la page de retour : {error}",
     "title": "À propos & retours",
     "version": "version {version}",
-    "copyright": "© Martijn van der Kolk, tous droits réservés. Le code ne peut pas être utilisé sans autorisation.",
+    "copyright": "© Martijn van der Kolk. Vous pouvez utiliser librement ce programme et le transmettre sans modification ; le code source est publié à titre de consultation.",
     "send_feedback": "Envoyer un retour…",
     "send_feedback_title": "Envoyer un message qui parvient directement (par e-mail) à l'auteur",
     "github": "Via GitHub (issues)",

@@ -567,7 +567,7 @@
     "feedback_page_failed": "Cannot open the feedback page: {error}",
     "title": "About & feedback",
     "version": "version {version}",
-    "copyright": "© Martijn van der Kolk, all rights reserved. The code may not be used without permission.",
+    "copyright": "© Martijn van der Kolk. You may use this program freely and pass it on unmodified; the source code is published for reference only.",
     "send_feedback": "Send feedback…",
     "send_feedback_title": "Send a message that reaches the author directly (by e-mail)",
     "github": "Via GitHub (issues)",

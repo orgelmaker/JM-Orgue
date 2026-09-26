@@ -567,7 +567,7 @@
     "feedback_page_failed": "Nie można otworzyć strony opinii: {error}",
     "title": "O programie i opinie",
     "version": "wersja {version}",
-    "copyright": "© Martijn van der Kolk, wszelkie prawa zastrzeżone. Kod nie może być używany bez zgody.",
+    "copyright": "© Martijn van der Kolk. Program można swobodnie używać i przekazywać dalej w niezmienionej postaci; kod źródłowy opublikowano wyłącznie do wglądu.",
     "send_feedback": "Wyślij opinię…",
     "send_feedback_title": "Wyślij wiadomość, która trafia bezpośrednio (e-mailem) do autora",
     "github": "Przez GitHub (issues)",
