@@ -11,7 +11,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.7.55"
+version = "0.7.56"
 edition = "2021"
 authors = ["Martijn van der Kolk"]
 # Alle rechten voorbehouden — zie ../LICENSE (geen gebruik zonder toestemming).

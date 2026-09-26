@@ -5,6 +5,77 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.56] - 2026-09-26
+
+### Er is nu ook een installer voor Linux
+
+De vraag was waarom die er niet was. Het antwoord bleek twee lagen te hebben,
+en de onderste was vervelender dan de bovenste.
+
+**De bovenste laag.** De bouwstraat had eenvoudigweg geen Linux-taak. Alleen
+Windows en macOS. Dat terwijl de app op Linux al bouwde, startte en geluid
+maakte — er is een aparte controle die dat elke keer aantoont. Er is nu een
+bouwtaak bij die een `.deb` en een `.AppImage` maakt en aan de release hangt.
+
+**De onderste laag, en die raakt ook macOS.** Drie plekken in de code zetten
+élke schuine streep in een pad onvoorwaardelijk om in een backslash. Op
+Windows mag dat: daar werken beide tekens en houdt één notatie de bibliotheek
+schoon. Op Linux en macOS is de backslash een gewoon teken in een bestandsnaam,
+dus `/home/orgel/Orgels` werd `\home\orgel\Orgels` — één naam die niet
+bestaat.
+
+Daardoor kon **de macOS-versie die bij elke release meeging geen enkel orgel
+openen**. Hij startte, opende een venster, maakte audio, en verder niets. De
+platformcontrole in de bouwstraat kon het niet zien: daar staat geen sampleset
+en is de bibliotheek leeg.
+
+Het zat op negen plekken: de twee laadwegen, de bibliotheek die bij élke start
+alle opgeslagen paden omzette (en dat ook terugschreef naar schijf), en zes
+vergelijk-sleutels. Bij die laatste zat nog een tweede fout: ze maakten alles
+klein, en op Linux zijn twee mappen die alleen in hoofdletters verschillen
+écht twee mappen — die vielen dus samen en één ervan verdween uit de
+bibliotheek.
+
+Het goede patroon stond al in dezelfde code, maar werd op één plek gebruikt.
+Daar zijn nu twee gedeelde hulpfuncties van gemaakt die overal worden
+aangeroepen. Een bibliotheek die op Linux of macOS met een oudere versie is
+weggeschreven wordt eenmalig hersteld, en alleen wanneer het herstelde pad ook
+werkelijk bestaat — een backslash mág immers in een Unix-bestandsnaam staan.
+
+De unittest die de fout vastlegde gold onbedoeld voor alle platformen. Die is
+nu platformbewust, met een nieuwe test ernaast op de hulpfuncties zelf.
+
+### Downloadlinks die blijven werken
+
+De installers dragen het versienummer in hun naam, dus een vaste link ernaartoe
+was na elke release dood. Naast de versienaam hangt er nu een kopie zonder
+versie aan elke release: `JM-Orgue-setup.exe`, `JM-Orgue.msi`, `JM-Orgue.dmg`,
+`JM-Orgue.deb` en `JM-Orgue.AppImage`. De zelf-updater raakt die niet; die
+blijft de versienamen gebruiken.
+
+### Een startpagina die vertelt wat dit is
+
+De oude was 27 regels en begon met "een app voor Windows", terwijl er al een
+macOS-versie meeging. Er staat nu wat het programma is, een downloadtabel per
+systeem met links die vanzelf naar de nieuwste versie wijzen, welke soorten
+samplesets werken en welke gesloten formaten niet, wat de app doet en wat je
+ervoor nodig hebt. De notatie staat er eerlijk bij als alfa.
+
+### De bibliotheek is eerlijker over de eigen sampleset
+
+De set die je vanuit de app kunt downloaden komt uit de tijd dat JM-Rec nog in
+zijn eerste fase zat. Hij speelt, maar klinkt niet zoals het kan. Dat staat er
+nu bij, zowel op de downloadkaart als op de kaart van een al geïnstalleerde
+set. Onderaan de bibliotheek staan twee verwijzingen naar makers die vrij te
+gebruiken sets aanbieden.
+
+### Opgeruimd
+
+Interne stukken staan niet meer in de publieke broncode: plannen, rapporten,
+onderzoeken, de code-audit, het archief en het marketingmateriaal. Wat blijft
+is ontwikkeldocumentatie. Het e-mailadres is overal weg, ook uit de licentie
+en uit de plug-in; verzoeken lopen via de issues.
+
 ## [0.7.55] - 2026-09-23
 
 ### De tremulant van een Hauptwerk-set komt nu mee
