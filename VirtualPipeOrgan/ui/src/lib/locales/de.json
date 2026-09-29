@@ -576,6 +576,8 @@
     "feedback_page_failed": "Feedback-Seite kann nicht geöffnet werden: {error}",
     "title": "Über & Feedback",
     "version": "Version {version}",
+    "running_from": "Diese Kopie läuft aus:",
+    "not_installed_copy": "Achtung: Dies ist nicht die vom Installationsprogramm angelegte Kopie. Eine Aktualisierung schreibt immer in den Installationsordner, sodass Ihre Verknüpfung danach weiterhin diese ältere Kopie startet. Die Installation liegt hier:",
     "copyright": "© Martijn van der Kolk. Das Programm dürfen Sie frei verwenden und unverändert weitergeben; der Quellcode ist nur zur Einsicht veröffentlicht.",
     "send_feedback": "Feedback senden…",
     "send_feedback_title": "Eine Nachricht senden, die direkt (per E-Mail) beim Autor ankommt",

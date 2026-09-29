@@ -1076,6 +1076,59 @@ pub fn disconnect_midi(state: State<AppState>) -> Result<(), String> {
     Ok(())
 }
 
+/// Waar draait deze kopie vandaan, en is dat de geïnstalleerde?
+///
+/// Bedoeld voor één hardnekkige verwarring bij het bijwerken: een update van de
+/// Windows-installer schrijft ALTIJD naar de map van de installatie voor de
+/// huidige gebruiker (%LOCALAPPDATA%\JM-Orgue). Start je de app vanaf een
+/// snelkoppeling die naar een ándere kopie wijst — een oudere installatie voor
+/// de hele computer, of een map die iemand ooit heeft gekopieerd — dan lijkt
+/// het bijwerken te lukken (de nieuwe versie start zelfs even op), maar bij de
+/// volgende start staat het oude versienummer er weer. Met deze gegevens is dat
+/// in één oogopslag te zien in Algemene Instellingen.
+#[derive(serde::Serialize)]
+pub struct InstallatieInfo {
+    /// Volledig pad van het draaiende programma.
+    pub pad: String,
+    /// Pad waar de installer voor deze gebruiker naartoe schrijft (alleen Windows).
+    pub installatie_pad: Option<String>,
+    /// Draait deze kopie op die plek? None wanneer we het niet kunnen bepalen.
+    pub is_installatie: Option<bool>,
+}
+
+#[tauri::command]
+pub fn installatie_info() -> InstallatieInfo {
+    let pad = std::env::current_exe()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default();
+
+    #[cfg(target_os = "windows")]
+    {
+        // De NSIS-installer van deze app installeert per gebruiker in
+        // %LOCALAPPDATA%\JM-Orgue (zie bundle-instellingen); dat is ook waar de
+        // updater naartoe schrijft.
+        let installatie_pad = std::env::var("LOCALAPPDATA").ok().map(|l| {
+            std::path::Path::new(&l)
+                .join("JM-Orgue")
+                .join("vpo-app.exe")
+                .to_string_lossy()
+                .to_string()
+        });
+        let is_installatie = installatie_pad.as_ref().map(|verwacht| {
+            // Windows-paden vergelijken zonder op hoofdletters te struikelen.
+            pad.to_lowercase() == verwacht.to_lowercase()
+        });
+        return InstallatieInfo { pad, installatie_pad, is_installatie };
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        // Op Linux en macOS is er geen vaste installatieplek om tegen af te
+        // zetten; het pad alleen zegt genoeg.
+        InstallatieInfo { pad, installatie_pad: None, is_installatie: None }
+    }
+}
+
 /// Open een https-URL in de standaardbrowser van de gebruiker (feedback-knop,
 /// release-pagina bij een update). Bewust via rundll32 FileProtocolHandler:
 /// geen shell-parsing van de URL (cmd /C start zou &-tekens interpreteren) en

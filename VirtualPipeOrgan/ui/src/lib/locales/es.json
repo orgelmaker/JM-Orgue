@@ -576,6 +576,8 @@
     "feedback_page_failed": "No se puede abrir la página de comentarios: {error}",
     "title": "Acerca de y comentarios",
     "version": "versión {version}",
+    "running_from": "Esta copia se ejecuta desde:",
+    "not_installed_copy": "Atención: esta no es la copia que dejó el instalador. La actualización siempre escribe en la carpeta de instalación, de modo que tras actualizar su acceso directo sigue abriendo esta copia antigua. La instalación está aquí:",
     "copyright": "© Martijn van der Kolk. Puede usar el programa libremente y transmitirlo sin modificar; el código fuente se publica solo para consulta.",
     "send_feedback": "Enviar comentarios…",
     "send_feedback_title": "Envía un mensaje que llega directamente al autor (por correo electrónico)",

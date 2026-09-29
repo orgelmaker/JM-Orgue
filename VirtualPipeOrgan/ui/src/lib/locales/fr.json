@@ -576,6 +576,8 @@
     "feedback_page_failed": "Impossible d'ouvrir la page de retour : {error}",
     "title": "À propos & retours",
     "version": "version {version}",
+    "running_from": "Cette copie s’exécute depuis :",
+    "not_installed_copy": "Attention : ce n’est pas la copie installée par le programme d’installation. La mise à jour écrit toujours dans le dossier d’installation, donc après une mise à jour votre raccourci lance encore cette ancienne copie. L’installation se trouve ici :",
     "copyright": "© Martijn van der Kolk. Vous pouvez utiliser librement ce programme et le transmettre sans modification ; le code source est publié à titre de consultation.",
     "send_feedback": "Envoyer un retour…",
     "send_feedback_title": "Envoyer un message qui parvient directement (par e-mail) à l'auteur",

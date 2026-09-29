@@ -576,6 +576,8 @@
     "feedback_page_failed": "Cannot open the feedback page: {error}",
     "title": "About & feedback",
     "version": "version {version}",
+    "running_from": "This copy is running from:",
+    "not_installed_copy": "Note: this is not the copy the installer put in place. Updating always writes to the installation folder, so after an update your shortcut still starts this older copy. The installation is here:",
     "copyright": "© Martijn van der Kolk. You may use this program freely and pass it on unmodified; the source code is published for reference only.",
     "send_feedback": "Send feedback…",
     "send_feedback_title": "Send a message that reaches the author directly (by e-mail)",

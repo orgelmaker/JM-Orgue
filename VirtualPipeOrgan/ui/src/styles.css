@@ -1210,6 +1210,20 @@ input[type="range"]::-webkit-slider-thumb:hover {
   color: var(--text);
 }
 
+/* Waarschuwing in de instellingen, bijvoorbeeld wanneer de draaiende kopie
+   niet de geïnstalleerde is (zie Over & feedback). */
+.settings-waarschuwing {
+  margin: 0 0 0.5rem;
+  padding: 0.4rem 0.6rem;
+  border-left: 3px solid var(--warning, #ff9800);
+  background: color-mix(in srgb, var(--warning, #ff9800) 12%, transparent);
+  border-radius: 0 3px 3px 0;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  color: var(--text);
+  word-break: break-all;
+}
+
 /* Korte terugmelding van "Passend maken"; verdwijnt vanzelf. Zwevend, niet in
    de werkbalk: stond hij ertussen, dan brak de werkbalk bij een smal venster
    anders af zodra de melding verscheen — en dan klopte de maat die net was

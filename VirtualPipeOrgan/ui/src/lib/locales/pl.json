@@ -576,6 +576,8 @@
     "feedback_page_failed": "Nie można otworzyć strony opinii: {error}",
     "title": "O programie i opinie",
     "version": "wersja {version}",
+    "running_from": "Ta kopia działa z:",
+    "not_installed_copy": "Uwaga: to nie jest kopia utworzona przez instalator. Aktualizacja zawsze zapisuje do folderu instalacji, więc po niej skrót nadal uruchamia tę starą kopię. Instalacja znajduje się tutaj:",
     "copyright": "© Martijn van der Kolk. Program można swobodnie używać i przekazywać dalej w niezmienionej postaci; kod źródłowy opublikowano wyłącznie do wglądu.",
     "send_feedback": "Wyślij opinię…",
     "send_feedback_title": "Wyślij wiadomość, która trafia bezpośrednio (e-mailem) do autora",

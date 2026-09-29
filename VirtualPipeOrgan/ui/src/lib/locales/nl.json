@@ -576,6 +576,8 @@
     "feedback_page_failed": "Kan de feedbackpagina niet openen: {error}",
     "title": "Over & feedback",
     "version": "versie {version}",
+    "running_from": "Deze kopie draait vanaf:",
+    "not_installed_copy": "Let op: dit is niet de kopie die de installer heeft neergezet. Bijwerken schrijft altijd naar de installatiemap, dus na een update start uw snelkoppeling nog steeds deze oude kopie. De installatie staat hier:",
     "copyright": "© Martijn van der Kolk. Het programma mag u vrij gebruiken en ongewijzigd doorgeven; de broncode staat alleen ter inzage.",
     "send_feedback": "Feedback sturen…",
     "send_feedback_title": "Stuur een bericht dat rechtstreeks (per e-mail) bij de maker binnenkomt",

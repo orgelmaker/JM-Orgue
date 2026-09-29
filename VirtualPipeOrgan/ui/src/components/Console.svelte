@@ -326,10 +326,17 @@
   // ===== Over & feedback (GitHub) =====
   let appVersion = '';
   let manualUpdateResult = null; // null | 'checking' | 'uptodate' | 'failed' | { version, url }
+  // Waar draait deze kopie vandaan? Zie commands::installatie_info: wijst de
+  // snelkoppeling naar een andere kopie dan de installatie, dan lijkt het
+  // bijwerken te lukken maar staat er de volgende keer weer de oude versie.
+  let installatieInfo = null;
   async function loadAppVersion() {
     try {
       const { getVersion } = await import('@tauri-apps/api/app');
       appVersion = await getVersion();
+    } catch (e) {}
+    try {
+      installatieInfo = await invoke('installatie_info');
     } catch (e) {}
   }
   async function openFeedbackPage() {
@@ -7325,6 +7332,23 @@
               <p class="settings-hint" style="margin: 0 0 0.5rem;">
                 JM-Orgue {appVersion ? $t('about.version').replace('{version}', appVersion) : ''} — {$t('about.copyright')}
               </p>
+              {#if installatieInfo}
+                <!-- Wélke kopie draait hier? Een update schrijft altijd naar de
+                     installatiemap; wijst je snelkoppeling naar een andere kopie,
+                     dan lijkt het bijwerken te lukken en staat er de volgende
+                     keer toch weer het oude versienummer. -->
+                <p class="settings-hint" style="margin: 0 0 0.5rem; word-break: break-all;">
+                  {$t('about.running_from')} <code>{installatieInfo.pad}</code>
+                </p>
+                {#if installatieInfo.is_installatie === false}
+                  <p class="settings-waarschuwing">
+                    {$t('about.not_installed_copy')}
+                    {#if installatieInfo.installatie_pad}
+                      <br /><code>{installatieInfo.installatie_pad}</code>
+                    {/if}
+                  </p>
+                {/if}
+              {/if}
               <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
                 <button class="btn btn-secondary btn-sm" on:click={() => { fbkOpen = true; fbkStatus = null; }} title={$t('about.send_feedback_title')}>
                   {$t('about.send_feedback')}

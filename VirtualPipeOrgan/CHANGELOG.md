@@ -5,6 +5,47 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.60] - 2026-09-29
+
+### Op Linux werd nooit een update aangeboden
+
+De bouwtaak voor Linux maakt wel degelijk een handtekening bij de AppImage —
+in het logboek van 0.7.59 staat letterlijk "Finished 3 updater signatures" —
+maar die kwam nooit op de release terecht. De uploadregel noemde `*.AppImage`,
+en die vangt `*.AppImage.sig` niet. Windows en macOS noemden hun
+handtekeningen wél apart.
+
+Zonder die handtekening kon het script dat `latest.json` samenstelt er niets
+mee, en dat script kende Linux sowieso niet: het koos alleen de Windows- en
+macOS-bestanden. Het gevolg was dat `latest.json` geen `linux-x86_64` had, dat
+de updater daar zijn platform niet vond, en dat er dus niets gemeld werd. Wat
+er overbleef was de terugvalroute: een balk met een knop naar de
+downloadpagina, maar geen bijwerken met één klik.
+
+De handtekening gaat nu mee, wordt net als de andere met minisign gecontroleerd
+vóórdat `latest.json` ontstaat, en er komt een `linux-x86_64` in het manifest.
+
+**Eén grens blijft, en die is van Tauri zelf:** automatisch bijwerken kan op
+Linux alleen bij de AppImage — de updater vervangt het bestand waar de app uit
+draait. Wie met de `.deb` installeert houdt de melding met de downloadknop.
+
+### "Deze kopie draait vanaf …" in Algemene Instellingen
+
+Bij een melding dat het bijwerken op Windows wél lijkt te lukken maar het oude
+versienummer blijft staan, is er meestal maar één oorzaak: er staan twee kopieën
+op de computer. Een update schrijft altijd naar de installatiemap van de
+huidige gebruiker. Wijst uw snelkoppeling naar een ándere kopie — een oudere
+installatie voor de hele computer, of een map die ooit is gekopieerd — dan
+start die snelkoppeling daarna gewoon weer de oude.
+
+Onder Over & feedback staat nu het volledige pad van de draaiende kopie, en als
+dat niet de geïnstalleerde is een waarschuwing met beide paden erbij. Daarmee is
+in één oogopslag te zien wat er aan de hand is.
+
+Ter controle is de Windows-route zelf nagelopen op een echte installatie: van
+0.7.56 naar 0.7.59, dezelfde map, register bijgewerkt, app opnieuw opgestart.
+Daar mankeert niets aan.
+
 ## [0.7.59] - 2026-09-29
 
 ### De kolommenweergave is nu rechttoe rechtaan
