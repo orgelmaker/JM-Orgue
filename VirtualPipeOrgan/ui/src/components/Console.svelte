@@ -3000,15 +3000,56 @@
     return Math.max(1, n);
   }
 
-  // Breedteverdeling in verticale modus. Alle werken hebben dezelfde hoogte
-  // beschikbaar, dus het aantal kolommen dat een werk nodig heeft loopt recht
-  // evenredig met het aantal knoppen: een pedaal van twintig hoort twee keer
-  // zo breed te zijn als een chamade van tien. Een groeifactor, geen harde
-  // minimumbreedte — die laatste zou bij een schatting die er net naast zit
-  // overloop afdwingen in plaats van hem te voorkomen.
-  function groeiVoor(d) {
-    return knopAantalVoor(d);
+  // ===== Breedte van een werk in de kolommenweergave =====
+  // Een werk is precies zo breed als het aan kolommen nodig heeft, en een
+  // kolom is precies één knop breed. Liet je de werken de rij opvullen, dan
+  // rekte de kolom van een smal werk mee en werden díe knoppen breder dan de
+  // rest — dat oogt willekeurig. Wat overblijft gaat nu als gelijke ruimte
+  // tussen de werken (justify-content: space-evenly in styles.css).
+  const GRID_GAP = 6.4;      // .stops-grid column-gap 0.4rem
+  const GRID_PAD = 16;       // .stops-grid padding 0.5rem links + rechts
+  const DIV_RAND = 4;        // .division border 2px links + rechts
+  // Vaste hoogte boven de kolommenband, alleen als eerste schatting tot de
+  // band zelf gemeten is: containerpadding 24 + rand 4 + divisiekop ~29 +
+  // gridpadding 16.
+  const BAND_SCHATTING = 73;
+
+  let divisionsH = 0;        // hoogte van de container (bind:clientHeight)
+  let bandHoogte = 0;        // gemeten hoogte van een kolommenband
+
+  // De bandhoogte hangt aan de containerhoogte en de divisiekop, niet aan het
+  // aantal kolommen — meten leidt dus niet tot een kringetje.
+  async function meetBand() {
+    await tick();
+    const g = divisionsEl?.querySelector('.stops-grid');
+    if (g && g.clientHeight && g.clientHeight !== bandHoogte) bandHoogte = g.clientHeight;
   }
+  $: bandPeiling = `${divisionsH}|${stopHeight}|${stopSize}|${mainLayout}|${selectedDivisions.length}`;
+  $: if (divisionsEl && bandPeiling) meetBand();
+
+  // Hoeveel knoppen passen er onder elkaar in één kolom?
+  $: bandRijen = (() => {
+    const h = bandHoogte || Math.max(0, divisionsH - BAND_SCHATTING);
+    return Math.max(1, Math.floor((h + GRID_GAP) / (stopHeight + GRID_GAP)));
+  })();
+
+  // Als tabel, niet als functie-aanroep in de markup: Svelte volgt een
+  // functie-aanroep daar niet, en dan verspringt de breedte niet mee.
+  $: divisieStijlen = (() => {
+    const m = {};
+    // Deze drie worden binnen knopAantalVoor gelezen; hier noemen zodat Svelte
+    // ze als afhankelijkheid ziet.
+    void couplerPlacement; void visibleCouplers; void tremLfoEnabled;
+    if (!displayOrgan) return m;
+    for (const naam of selectedDivisions) {
+      const d = displayOrgan.divisions.find(x => x.name === naam);
+      if (!d) continue;
+      const k = Math.max(1, Math.ceil(knopAantalVoor(d) / bandRijen));
+      const vast = (k - 1) * GRID_GAP + GRID_PAD + DIV_RAND;
+      m[naam] = `flex: 0 0 auto; width: calc(${k} * var(--stop-w, 100px) + ${vast}px)`;
+    }
+    return m;
+  })();
 
   function toonFitMelding(tekst) {
     fitMelding = tekst;
@@ -4938,16 +4979,14 @@
              verticale modus) de ingestelde knopgrootte kan gebruiken;
              --stop-size-n is hetzelfde getal zonder eenheid (CSS-calc kan niet
              door een lengte delen) voor de vensterbreedte-schaling in styles.css -->
-        <div class="divisions-container" bind:this={divisionsEl} class:divisions-vertical={mainLayout === 'vertical'} style="--stop-min-width: {stopSize}px; --stop-size-n: {stopSize}; --stop-h: {stopHeight}px">
+        <div class="divisions-container" bind:this={divisionsEl} bind:clientHeight={divisionsH} class:divisions-vertical={mainLayout === 'vertical'} style="--stop-min-width: {stopSize}px; --stop-size-n: {stopSize}; --stop-h: {stopHeight}px">
           {#each selectedDivisions.map(name => displayOrgan.divisions.find(d => d.name === name)).filter(Boolean) as division}
             {@const tremDivIdx = displayOrgan.divisions.findIndex(d => d.name === division.name)}
-            <!-- In verticale modus krijgt een werk precies zoveel breedte als
-                 het aan kolommen nodig heeft: anders krijgt een pedaal van 20
-                 evenveel ruimte als een chamade van 10, en loopt de eerste
-                 over terwijl de tweede ruimte overhoudt. -->
+            <!-- In de kolommenweergave is een werk precies zo breed als het
+                 aan kolommen nodig heeft, en is elke kolom één knop breed. -->
             <div
               class="division"
-              style={mainLayout === 'vertical' ? `flex-grow: ${groeiVoor(division)}` : ''}>
+              style={mainLayout === 'vertical' ? (divisieStijlen[division.name] || '') : ''}>
               <div class="division-header division-header-compact">
                 <div class="division-name">{division.name}</div>
                 {#if isSwellEnabled(division.name)}

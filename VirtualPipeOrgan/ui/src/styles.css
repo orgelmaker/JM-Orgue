@@ -1249,7 +1249,10 @@ input[type="range"]::-webkit-slider-thumb:hover {
   display: block;                        /* multi-column i.p.v. grid */
   columns: var(--stop-w, 100px);         /* kolombreedte = effectieve knopmaat */
   column-gap: 0.4rem;
-  column-fill: auto;                     /* eerst kolom 1 helemaal vullen, dan pas kolom 2 */
+  /* Gelijk verdelen over de kolommen. Met "auto" werd eerst kolom 1 helemaal
+     volgemaakt en bleef de laatste kolom half leeg staan; twintig registers in
+     twee kolommen staan nu tien-tien in plaats van elf-negen. */
+  column-fill: balance;
   flex: 1 1 auto;                        /* vult de divisie onder de kop */
   min-height: 0;
   overflow-x: auto;                      /* meer kolommen dan breedte → horizontaal scrollen */
@@ -1404,12 +1407,17 @@ input[type="range"]::-webkit-slider-thumb:hover {
   overflow-x: auto;   /* veel divisies → container scrollt horizontaal */
   overflow-y: hidden; /* hoogte is de grens; verticaal scrollen gebeurt niet */
   gap: 0.75rem;
+  /* Elk werk is precies zo breed als zijn kolommen; wat overblijft gaat als
+     gelijke ruimte tússen de werken in plaats van in bredere knoppen. */
+  justify-content: space-evenly;
 }
 
 .divisions-vertical .division {
-  flex: 1 1 0;
-  /* Minstens één kolom breed (knop + padding), anders knijpen divisies elkaar weg */
-  min-width: calc(var(--stop-w, 100px) + 1.5rem);
+  /* De breedte wordt per werk gezet (Console.svelte): een heel aantal
+     kolommen van de ingestelde knopmaat. Niet laten rekken — anders wordt de
+     knop van een smal werk breder dan die van een breed werk. */
+  flex: 0 0 auto;
+  min-width: calc(var(--stop-w, 100px) + 1.25rem);
   display: flex;
   flex-direction: column;
 }

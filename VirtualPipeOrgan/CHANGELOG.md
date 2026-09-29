@@ -5,6 +5,30 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.59] - 2026-09-29
+
+### De kolommenweergave is nu rechttoe rechtaan
+
+Bij een set met veel werken oogde de verdeling willekeurig: het ene werk had
+bredere registerknoppen dan het andere, en onderin bleef ruimte leeg. Dat kwam
+door twee dingen, en geen van beide was opzet.
+
+**De knoppen van een smal werk werden breder.** Elk werk kreeg een stuk van de
+breedte naar rato van het aantal registers, en een kolommenband rékt zijn
+kolommen op tot de band vol is. Een werk dat net niet genoeg ruimte kreeg voor
+een tweede kolom stopte die ruimte dus in bredere knoppen — vandaar dat de
+chamade van tien registers forsere knoppen had dan het hoofdwerk van dertien.
+
+Nu is een kolom precies één knop breed en is een werk precies zo breed als het
+aan kolommen nodig heeft. Alle registerknoppen op het scherm zijn even breed.
+Wat er aan ruimte overblijft gaat als gelijke tussenruimte tússen de werken,
+niet in de knoppen.
+
+**De laatste kolom bleef half leeg.** De kolommen werden één voor één
+volgemaakt: bij twintig registers in twee kolommen stond er elf in de eerste en
+negen in de tweede, met een gat onderin. Ze worden nu gelijk verdeeld — bij
+twintig registers in drie kolommen dus zeven, zeven en zes.
+
 ## [0.7.58] - 2026-09-29
 
 ### Een grote sampleset past nu op een klein scherm
