@@ -76,6 +76,12 @@ pick() { grep -E "$1" assets.txt | grep -v '\.sig$' | head -1 || true; }
 NSIS="$(pick '_x64-setup\.exe$')"
 MSI="$(pick '_x64_[A-Za-z-]+\.msi$')"
 MAC="$(pick '\.app\.tar\.gz$')"
+# Linux: de updater van Tauri kan alléén een AppImage vervangen (hij schrijft
+# het bestand terug waar het draait). Wie met de .deb installeert krijgt de
+# terugvalroute in de app: een melding met een knop naar de downloadpagina.
+# Let op de _amd64: de kopie met vaste naam (JM-Orgue.AppImage) heeft geen
+# handtekening en hoort hier dus niet uit te komen.
+APPIMAGE="$(pick '_amd64\.AppImage$')"
 
 if [ -z "$NSIS" ] || [ -z "$MSI" ]; then
   echo "FOUT: de Windows-installers staan niet (allebei) op release $TAG." >&2
@@ -131,6 +137,9 @@ echo "Publieke sleutel uit tauri.conf.json op $TAG: $(head -1 minisign.pub)"
 TE_CONTROLEREN=("$NSIS" "$MSI")
 if [ -n "$MAC" ] && [ -s "sigs/$MAC.sig" ]; then
   TE_CONTROLEREN+=("$MAC")
+fi
+if [ -n "$APPIMAGE" ] && [ -s "sigs/$APPIMAGE.sig" ]; then
+  TE_CONTROLEREN+=("$APPIMAGE")
 fi
 mkdir -p pak
 for f in "${TE_CONTROLEREN[@]}"; do
@@ -189,10 +198,19 @@ PUB="$(gh release view "$TAG" --repo "$REPO" --json publishedAt --jq .publishedA
     plat darwin-aarch64 "$MAC"
     plat darwin-x86_64  "$MAC"
   fi
+  # Linux: alleen de AppImage. Ontbreekt deze sleutel, dan meldt de plug-in op
+  # Linux "platform not found" en ziet niemand daar ooit een update — dat was
+  # tot en met 0.7.59 het geval, want de .AppImage.sig werd niet geüpload.
+  if [ -n "$APPIMAGE" ] && [ -s "sigs/$APPIMAGE.sig" ]; then
+    plat linux-x86_64 "$APPIMAGE"
+  fi
 } | jq -s 'add' > platforms.json
 
 if [ -z "$MAC" ] || [ ! -s "sigs/${MAC:-geen}.sig" ]; then
-  echo "LET OP: geen macOS-updatebestand (.app.tar.gz + .sig) op de release; latest.json wordt Windows-only."
+  echo "LET OP: geen macOS-updatebestand (.app.tar.gz + .sig) op de release."
+fi
+if [ -z "$APPIMAGE" ] || [ ! -s "sigs/${APPIMAGE:-geen}.sig" ]; then
+  echo "LET OP: geen ondertekende AppImage op de release; Linux krijgt geen automatische update."
 fi
 
 jq -n --arg version  "$VERSION" \

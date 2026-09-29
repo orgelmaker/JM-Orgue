@@ -322,6 +322,11 @@ jobs:
 
       # tauri.conf.json staat op targets "all"; op Linux levert dat .deb,
       # .rpm en .AppImage. Zonder --features asio (Windows-only).
+      #
+      # De .AppImage.sig MOET mee naar de release: zonder die handtekening kan
+      # build-latest-json.sh geen linux-x86_64 in latest.json zetten, en dan
+      # ziet de updater op Linux nooit een update. Tot 0.7.59 werd hij wel
+      # gemaakt maar niet geüpload (de glob *.AppImage vangt *.AppImage.sig niet).
       - name: Build installers
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -341,6 +346,7 @@ jobs:
           files: |
             VirtualPipeOrgan/target/release/bundle/deb/*.deb
             VirtualPipeOrgan/target/release/bundle/appimage/*.AppImage
+            VirtualPipeOrgan/target/release/bundle/appimage/*.AppImage.sig
             VirtualPipeOrgan/target/release/bundle/deb/JM-Orgue.deb
             VirtualPipeOrgan/target/release/bundle/appimage/JM-Orgue.AppImage
 
