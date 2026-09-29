@@ -32,15 +32,18 @@ na elke stap wordt gekeken of er ergens nog een schuifbalk zit. Past het echt
 niet, dan zegt hij hoeveel registers buiten beeld blijven in plaats van te
 doen alsof.
 
-Twee dingen zaten dat meten aanvankelijk in de weg, en allebei waren ze ouder
-dan deze knop. De registerknop had een overgang op *alle* eigenschappen, dus
-ook op zijn maten: na een wijziging was de knop een tiende seconde onderweg en
-werd steeds de oude maat gemeten. De overgang loopt nu alleen nog over kleur en
-schaduw, waar hij voor bedoeld was. En het orgelscherm mocht breder worden dan
-het venster — een flexibele kolom zonder ondergrens groeit mee met zijn inhoud —
-waardoor de laatste divisie zonder schuifbalk buiten beeld viel en een meting
-altijd "past" zei. Ook los van deze knop verdween er dus stilletjes een werk uit
-beeld bij een sampleset met veel werken.
+Drie dingen zaten dat meten in de weg. De registerknop had een overgang op
+*alle* eigenschappen, dus ook op zijn maten: na een wijziging was de knop een
+tiende seconde onderweg en werd steeds de oude maat gemeten. De overgang loopt
+nu alleen nog over kleur en schaduw, waar hij voor bedoeld was. Het orgelscherm
+mocht breder worden dan het venster — een flexibele kolom zonder ondergrens
+groeit mee met zijn inhoud — waardoor de laatste divisie zonder schuifbalk
+buiten beeld viel en een meting altijd "past" zei; dat laatste is ook los van
+deze knop een echte fout, want zo verdween er stilletjes een werk uit beeld bij
+een sampleset met veel werken. En de terugmelding stond in de werkbalk, zodat
+die bij een smal venster anders afbrak zodra de melding verscheen — waarna de
+zojuist uitgerekende maat niet meer klopte. De melding zweeft nu boven het
+scherm.
 
 **Hoofdbalk en statusbalk kunnen uit.** Dat scheelt zo'n negentig pixels
 hoogte. Losse registerschermen konden dat al; het hoofdvenster nu ook. In de
