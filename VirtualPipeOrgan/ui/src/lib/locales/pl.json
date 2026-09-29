@@ -527,7 +527,16 @@
     "couplers_to_bar": "Pokaż sprzęgła na osobnym pasku",
     "couplers_to_division": "Pokaż sprzęgła jako przyciski przy manuale",
     "size_smaller": "Mniejsze",
-    "size_larger": "Większe"
+    "size_larger": "Większe",
+    "height_title": "Wysokość przycisków rejestrów",
+    "height_smaller": "Niżej",
+    "height_larger": "Wyżej",
+    "fit": "Dopasuj",
+    "fit_title": "Dobierz wielkość przycisków i układ tak, aby wszystkie rejestry były widoczne naraz",
+    "fit_done": "Wszystko mieści się na ekranie",
+    "fit_short": "Poza ekranem jest jeszcze {n} rejestrów — pomoże większe okno",
+    "div_order_reset": "Przywróć kolejność",
+    "div_order_reset_title": "Powrót do kolejności organów i ponowne pokazanie wszystkich sekcji"
   },
   "sampleset": {
     "loops_confirm": "Wykryć pętle i zapisać je w plikach WAV? Oryginały trafią najpierw do folderu „_loopbackup”."

@@ -527,7 +527,16 @@
     "couplers_to_bar": "Show couplers in their own bar",
     "couplers_to_division": "Show couplers as knobs within the division",
     "size_smaller": "Smaller",
-    "size_larger": "Larger"
+    "size_larger": "Larger",
+    "height_title": "Stop knob height",
+    "height_smaller": "Lower",
+    "height_larger": "Taller",
+    "fit": "Fit",
+    "fit_title": "Choose knob size and layout so that every stop is on screen at once",
+    "fit_done": "Everything fits",
+    "fit_short": "{n} stops still off screen — a larger window would help",
+    "div_order_reset": "Reset order",
+    "div_order_reset_title": "Back to the organ’s own order, showing every division again"
   },
   "sampleset": {
     "loops_confirm": "Detect loops and write them into the WAV files? The originals are backed up to a \"_loopbackup\" folder first."

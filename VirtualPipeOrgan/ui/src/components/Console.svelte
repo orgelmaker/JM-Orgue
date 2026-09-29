@@ -551,7 +551,20 @@
   // Layout state for main view
   let mainLayout = 'horizontal';
   let stopSize = 100; // min-breedte registerknop in px (instelbaar)
+  // Hoogte van een registerknop, los van de breedte. Op een klein scherm is de
+  // hoogte de schaarse richting, terwijl de breedte nodig blijft om lange
+  // registernamen leesbaar te houden. 56 = de oude vaste waarde uit styles.css.
+  let stopHeight = 56;
+  const STOP_HEIGHT_MIN = 28;
+  const STOP_HEIGHT_MAX = 80;
+  const STOP_HEIGHT_STAP = 7;
+  // Onder deze hoogte passen naam en voetmaat niet meer onder elkaar; dan
+  // zetten we ze naast elkaar (klasse stops-flat).
+  const STOP_FLAT_ONDER = 40;
   let knobShape = 'rect'; // 'rect' | 'round' — vorm van de registerknoppen (per orgel)
+  // Hoofdbalk + statusbalk van het HOOFDvenster (extra schermen regelen dit
+  // zelf via PanelApp/showHeader). Per orgel persistent.
+  let showMainChrome = true;
 
   // MP3-recorder status (poll vanuit backend).
   let recorderStatus = { recording: false, seconds: 0, path: null, frames_dropped: 0, error: null };
@@ -2004,10 +2017,12 @@
   }
   // Balkgroepen: per klavier (in divisievolgorde) de zichtbare koppels,
   // unison eerst, dan super/sub, dan de rest.
-  $: couplerBarGroups = buildCouplerGroups(displayOrgan, visibleCouplers, couplerPlacement);
-  function buildCouplerGroups(org, vis, placement) {
+  $: couplerBarGroups = buildCouplerGroups(displayOrgan, visibleCouplers, couplerPlacement, selectedDivisions);
+  function buildCouplerGroups(org, vis, placement, schermvolgorde) {
     if (placement !== 'bar' || !org?.couplers?.length) return [];
-    const order = (org.divisions || []).map(d => d.name);
+    // De koppelbalk volgt de volgorde waarin de werken op het scherm staan;
+    // heb je niets verschoven, dan is dat gewoon de orgelvolgorde.
+    const order = (schermvolgorde?.length ? schermvolgorde : (org.divisions || []).map(d => d.name));
     const groups = new Map();
     for (const c of org.couplers) {
       if (vis[c.id] !== true) continue;
@@ -2110,8 +2125,25 @@
     }
     const ss = parseInt(readOrganUiPref('jm-orgue-stop-size'), 10);
     if (ss >= 70 && ss <= 220) stopSize = ss;
+    const sh = parseInt(readOrganUiPref('jm-orgue-stop-height'), 10);
+    stopHeight = (sh >= STOP_HEIGHT_MIN && sh <= STOP_HEIGHT_MAX) ? sh : 56;
     // Vorm van de registerknoppen (rechthoekig/rond)
     knobShape = readOrganUiPref('jm-orgue-knob-shape') === 'round' ? 'round' : 'rect';
+    // Hoofdbalk + statusbalk van het hoofdvenster (in een extra scherm regelt
+    // PanelApp dat zelf via zijn panel-state).
+    if (!secondary) {
+      showMainChrome = readOrganUiPref('jm-orgue-main-chrome') !== '0';
+      dispatch('setMainChrome', showMainChrome);
+      // Ook hier de werkvolgorde terugzetten: het reset-blok hierboven kijkt
+      // naar de divisieNAMEN, en twee orgels kunnen dezelfde namen hebben.
+      // Deze functie hangt wél aan organInfo.id, dus hij mist die wissel niet.
+      if (displayOrgan) {
+        const bewaard = leesDivisieVolgorde();
+        selectedDivisions = bewaard.length
+          ? pasDivisieVolgordeToe(bewaard)
+          : displayOrgan.divisions.map(d => d.name);
+      }
+    }
   }
 
   async function pollDivisionVolumes() {
@@ -2723,6 +2755,8 @@
     if (!organInfo) return;
     const ss = parseInt(readOrganUiPref('jm-orgue-stop-size'), 10);
     if (ss >= 70 && ss <= 220 && ss !== stopSize) stopSize = ss;
+    const sh = parseInt(readOrganUiPref('jm-orgue-stop-height'), 10);
+    if (sh >= STOP_HEIGHT_MIN && sh <= STOP_HEIGHT_MAX && sh !== stopHeight) stopHeight = sh;
     const ks = readOrganUiPref('jm-orgue-knob-shape') === 'round' ? 'round' : 'rect';
     if (ks !== knobShape) knobShape = ks;
     try {
@@ -2817,8 +2851,16 @@
     const divs = displayOrgan?.divisions || [];
     const stop_order = {};
     for (const d of divs) stop_order[d.name] = (d.stops || []).map(s => s.id);
+    // De telefoon toont de werken in dezelfde volgorde als de speeltafel. De
+    // remote-vinkjes blijven puur een zichtbaarheidsfilter; alleen de volgorde
+    // komt van het orgelscherm. Bijvangst: de volgorde wordt hiermee bewaard in
+    // .jm-settings.json (commands.rs slaat remote_layout al op) en is van
+    // buitenaf te controleren via GET /remote/layout.
+    const schermvolgorde = selectedDivisions.length
+      ? [...selectedDivisions, ...divs.map(d => d.name).filter(n => !selectedDivisions.includes(n))]
+      : divs.map(d => d.name);
     const layout = {
-      divisions: divs.map(d => d.name).filter(n => isRemoteDivisionOn(n)),
+      divisions: schermvolgorde.filter(n => isRemoteDivisionOn(n)),
       visible_couplers: (displayOrgan?.couplers || []).filter(c => isCouplerVisible(c.id)).map(c => c.id),
       coupler_placement: couplerPlacement,
       stop_order,
@@ -2923,6 +2965,169 @@
   function adjustStopSize(delta) {
     stopSize = Math.max(70, Math.min(220, stopSize + delta));
     localStorage.setItem(organUiKey('jm-orgue-stop-size'), String(stopSize));
+  }
+
+  // Registerknop-hoogte aanpassen; per orgel persistent, net als de breedte.
+  function adjustStopHeight(delta) {
+    stopHeight = Math.max(STOP_HEIGHT_MIN, Math.min(STOP_HEIGHT_MAX, stopHeight + delta));
+    localStorage.setItem(organUiKey('jm-orgue-stop-height'), String(stopHeight));
+  }
+
+  // Hoofdbalk + statusbalk van het hoofdvenster aan/uit. Levert ~90px hoogte —
+  // op een klein scherm het verschil tussen wel en niet passen. Extra schermen
+  // hebben dit al langer (PanelApp, showHeader).
+  function toggleMainChrome() {
+    showMainChrome = !showMainChrome;
+    localStorage.setItem(organUiKey('jm-orgue-main-chrome'), showMainChrome ? '1' : '0');
+    dispatch('setMainChrome', showMainChrome);
+  }
+
+  // ===== Passend maken =====
+  let divisionsEl = null;
+  let fitMelding = '';
+  let fitMeldingTimer = null;
+
+  // Aantal knoppen in één divisie: registers + tremulant + koppels die bij het
+  // klavier staan. Exact wat .stops-grid rendert.
+  function knopAantalVoor(d) {
+    if (!d) return 1;
+    let n = d.stops.length;
+    if (d.stops.some(s => s.has_tremulant) || tremLfoEnabled[d.name]) n += 1;
+    if (couplerPlacement === 'division') {
+      n += (displayOrgan?.couplers || []).filter(
+        c => c.display_in_division === d.name && isCouplerVisible(c.id)).length;
+    }
+    return Math.max(1, n);
+  }
+
+  // Breedteverdeling in verticale modus. Alle werken hebben dezelfde hoogte
+  // beschikbaar, dus het aantal kolommen dat een werk nodig heeft loopt recht
+  // evenredig met het aantal knoppen: een pedaal van twintig hoort twee keer
+  // zo breed te zijn als een chamade van tien. Een groeifactor, geen harde
+  // minimumbreedte — die laatste zou bij een schatting die er net naast zit
+  // overloop afdwingen in plaats van hem te voorkomen.
+  function groeiVoor(d) {
+    return knopAantalVoor(d);
+  }
+
+  function toonFitMelding(tekst) {
+    fitMelding = tekst;
+    clearTimeout(fitMeldingTimer);
+    fitMeldingTimer = setTimeout(() => { fitMelding = ''; }, 4000);
+  }
+
+  // Past alles echt in beeld? We METEN het in plaats van het te voorspellen:
+  // de CSS is de waarheid, en een rekenmodel ernaast loopt er vroeg of laat
+  // naast (de kolombreedte van een multi-column band bijvoorbeeld hangt af van
+  // de langste registernaam). Een scrollbalk, waar dan ook, betekent niet past.
+  function pastEcht() {
+    if (!divisionsEl) return true;
+    const marge = 1; // alleen afrondingsruis bij niet-hele pixels toestaan
+    if (divisionsEl.scrollWidth > divisionsEl.clientWidth + marge) return false;
+    if (divisionsEl.scrollHeight > divisionsEl.clientHeight + marge) return false;
+    for (const g of divisionsEl.querySelectorAll('.stops-grid')) {
+      if (g.scrollWidth > g.clientWidth + marge) return false;
+      if (g.scrollHeight > g.clientHeight + marge) return false;
+      // Staat een band al opzij geschoven, dan valt er per definitie iets
+      // buiten beeld — en dan kloppen de metingen hieronder ook niet meer.
+      if (g.scrollLeft > 0 || g.scrollTop > 0) return false;
+      // Een kolommenband kan overlopen zonder dat scrollWidth meegroeit; kijk
+      // daarom ook of er knoppen buiten hun eigen band vallen.
+      const gr = g.getBoundingClientRect();
+      for (const k of g.querySelectorAll('.stop-knob')) {
+        const r = k.getBoundingClientRect();
+        if (r.right > gr.right + marge || r.bottom > gr.bottom + marge
+          || r.left < gr.left - marge || r.top < gr.top - marge) return false;
+      }
+    }
+    return true;
+  }
+
+  // Hoeveel registerknoppen staan er buiten beeld? Alleen voor de melding als
+  // zelfs de kleinste stand niet genoeg is.
+  function knoppenBuitenBeeld() {
+    if (!divisionsEl) return 0;
+    const c = divisionsEl.getBoundingClientRect();
+    let n = 0;
+    for (const g of divisionsEl.querySelectorAll('.stops-grid')) {
+      // Tellen tegen de band waarin de knop zit én tegen de container: een
+      // knop die uit zijn eigen kolommenband is geschoven is net zo goed
+      // onzichtbaar als een knop die buiten het scherm valt.
+      const gr = g.getBoundingClientRect();
+      for (const k of g.querySelectorAll('.stop-knob')) {
+        const r = k.getBoundingClientRect();
+        const buitenBand = r.right > gr.right + 2 || r.bottom > gr.bottom + 2;
+        const buitenScherm = r.right > c.right + 2 || r.bottom > c.bottom + 2
+          || r.left < c.left - 2 || r.top < c.top - 2;
+        if (buitenBand || buitenScherm) n++;
+      }
+    }
+    return n;
+  }
+
+  // Ladder van knopmaten, van rustig naar compact. Groter dan de gewone maat
+  // (100 breed, 56 hoog) hoeft niet: we zoeken de rustigste stand die past.
+  const FIT_LADDER = (() => {
+    const l = [];
+    for (const w of [100, 85, 70]) for (const h of [56, 49, 42, 35, 28]) l.push({ w, h });
+    return l.sort((a, b) => (b.w * b.h) - (a.w * a.h));
+  })();
+
+  let fitBezig = false;
+  async function passendMaken() {
+    if (!divisionsEl || !displayOrgan || fitBezig) return;
+    fitBezig = true;
+    try {
+      // Staat hij al goed? Dan niets veranderen — ook niet als de gebruiker
+      // zelf een grotere maat heeft gekozen.
+      await tick();
+      if (pastEcht()) { toonFitMelding($t('toolbar.fit_done')); return; }
+      // Huidige indeling eerst: niet omschakelen als het zo ook kan.
+      const indelingen = mainLayout === 'vertical' ? ['vertical', 'horizontal'] : ['horizontal', 'vertical'];
+      // Past niets, dan willen we niet in de laatst geprobeerde stand blijven
+      // hangen (dat is toevallig de slechtste), maar in de stand waarin de
+      // minste registers buiten beeld vallen.
+      let minst = null;
+      for (const layout of indelingen) {
+        if (layout !== mainLayout) toggleMainLayout();
+        for (const { w, h } of FIT_LADDER) {
+          stopSize = w;
+          stopHeight = h;
+          await tick();
+          if (pastEcht()) {
+            bewaarKnopMaat();
+            toonFitMelding($t('toolbar.fit_done'));
+            return;
+          }
+          const buiten = knoppenBuitenBeeld();
+          if (!minst || buiten < minst.buiten) minst = { layout, w, h, buiten };
+        }
+      }
+      if (minst) {
+        if (minst.layout !== mainLayout) toggleMainLayout();
+        stopSize = minst.w;
+        stopHeight = minst.h;
+        await tick();
+      }
+      bewaarKnopMaat();
+      const buitenBeeld = knoppenBuitenBeeld();
+      toonFitMelding(buitenBeeld > 0
+        ? $t('toolbar.fit_short').replace('{n}', buitenBeeld)
+        : $t('toolbar.fit_done'));
+    } finally {
+      fitBezig = false;
+    }
+  }
+
+  // De knophoogte gaat als gewone inline-stijl mee, niet alleen als CSS-
+  // variabele: WebView2 loste `min-height: var(--stop-h)` niet opnieuw op als
+  // alleen die variabele veranderde, waardoor de knop op 56px bleef staan.
+  // Bij ronde knoppen niet: die ontlenen hun hoogte aan de breedte (1:1).
+  $: knopHoogteStijl = knobShape === 'round' ? '' : `height:${stopHeight}px;min-height:${stopHeight}px;`;
+
+  function bewaarKnopMaat() {
+    localStorage.setItem(organUiKey('jm-orgue-stop-size'), String(stopSize));
+    localStorage.setItem(organUiKey('jm-orgue-stop-height'), String(stopHeight));
   }
 
   // Vorm van de registerknoppen (rechthoekig ↔ rond); per orgel persistent.
@@ -3546,12 +3751,15 @@
   }
 
   // Auto-shrink font for long names
+  // Lange namen moeten krimpen om op de knop te passen. Als FACTOR, niet als
+  // vaste rem-waarde: anders overrulet dit de lettergrootte die de gebruiker
+  // in Sfeer & Layout heeft gekozen. styles.css rekent er --stop-font-size mee.
   function stopNameStyle(name) {
     const len = name.length;
     if (len <= 12) return '';
-    if (len <= 16) return 'font-size: 0.68rem;';
-    if (len <= 20) return 'font-size: 0.6rem;';
-    return 'font-size: 0.52rem;';
+    if (len <= 16) return '--name-fit: 0.85;';
+    if (len <= 20) return '--name-fit: 0.75;';
+    return '--name-fit: 0.65;';
   }
 
   const demoOrgan = {
@@ -4130,6 +4338,11 @@
     if (names && names !== prevDivisionNames) {
       prevDivisionNames = names;
       selectedDivisions = displayOrgan.divisions.map(d => d.name);
+      if (!secondary && organInfo?.id) {
+        // Eigen volgorde/keuze van het HOOFDvenster bij dít orgel terugzetten.
+        const bewaard = leesDivisieVolgorde();
+        if (bewaard.length) selectedDivisions = pasDivisieVolgordeToe(bewaard);
+      }
       if (secondary && organInfo?.id) {
         // Divisiekeuze + layout van dít scherm bij dít orgel terugzetten
         // (per-scherm-state; zie lib/panelState.js).
@@ -4180,9 +4393,116 @@
     } else {
       selectedDivisions = [...selectedDivisions, name];
     }
-    // Per-scherm onthouden (alleen extra vensters; het hoofdvenster toont
-    // standaard alles en bewaart geen divisiekeuze).
-    if (secondary) savePanelState(organInfo?.id, panelNumber, { divisions: selectedDivisions });
+    bewaarDivisieKeuze();
+  }
+
+  // ===== Volgorde en keuze van de werken (0.7.58) =====
+  // Hetzelfde model als de registervolgorde binnen een divisie (stopOrder):
+  // per orgel in localStorage, bij het laden gefilterd op wat dit orgel echt
+  // heeft, en onbekende werken achteraan. selectedDivisions ís de
+  // schermvolgorde (zie de {#each} in de divisions-container), dus die array
+  // bewaren we rechtstreeks — hij bevat zowel de volgorde als de keuze.
+  //
+  // Let op: displayOrgan.divisions blijft ONGEMOEID in orgelvolgorde. Daar
+  // hangen indexen aan (tremulant-actiecodes, windgroepen, zwelkoppelingen,
+  // uitgangskanalen); alleen de presentatie verschuift.
+  function leesDivisieVolgorde() {
+    try {
+      const raw = readOrganUiPref('jm-orgue-division-order');
+      const lijst = raw ? JSON.parse(raw) : null;
+      return Array.isArray(lijst) ? lijst.filter(n => typeof n === 'string') : [];
+    } catch (e) { return []; }
+  }
+
+  function pasDivisieVolgordeToe(bewaard) {
+    const bestaat = displayOrgan.divisions.map(d => d.name);
+    const geldig = bewaard.filter(n => bestaat.includes(n));
+    if (!geldig.length) return bestaat;
+    // Werken die na een herimport zijn bijgekomen horen achteraan, niet weg.
+    return [...geldig, ...bestaat.filter(n => !geldig.includes(n))];
+  }
+
+  function bewaarDivisieKeuze() {
+    if (secondary) {
+      // Per scherm onthouden (lib/panelState.js).
+      savePanelState(organInfo?.id, panelNumber, { divisions: selectedDivisions });
+    } else if (organInfo?.id) {
+      localStorage.setItem(organUiKey('jm-orgue-division-order'), JSON.stringify(selectedDivisions));
+      publishRemoteLayout();
+    }
+  }
+
+  function herstelDivisieVolgorde() {
+    if (secondary || !organInfo?.id) return;
+    localStorage.removeItem(organUiKey('jm-orgue-division-order'));
+    selectedDivisions = displayOrgan.divisions.map(d => d.name);
+    publishRemoteLayout();
+  }
+
+  // Staat er een eigen volgorde/keuze? Dan pas tonen we de herstelknop.
+  $: eigenDivisieVolgorde = !secondary && !!displayOrgan
+    && selectedDivisions.join(',') !== displayOrgan.divisions.map(d => d.name).join(',');
+
+  // De knoppenrij toont wat je ziet: eerst de zichtbare werken in
+  // schermvolgorde, daarna de uitgezette.
+  $: divisieKnoppen = displayOrgan
+    ? [...selectedDivisions.filter(n => displayOrgan.divisions.some(d => d.name === n)),
+       ...displayOrgan.divisions.map(d => d.name).filter(n => !selectedDivisions.includes(n))]
+    : [];
+
+  // Slepen om de werken van volgorde te wisselen. Zelfde pointer-aanpak als de
+  // registerknoppen: native drag-and-drop toont in WebView2 een verbodsteken.
+  let divDrag = null; // { fromIdx, startX, startY, active, overIdx }
+  let divDragJustEnded = false;
+
+  function divPointerDown(e, idx) {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    divDrag = { fromIdx: idx, startX: e.clientX, startY: e.clientY, active: false, overIdx: idx };
+    window.addEventListener('pointermove', divPointerMove);
+    window.addEventListener('pointerup', divPointerUp);
+    window.addEventListener('pointercancel', divPointerUp);
+  }
+
+  function divPointerMove(e) {
+    if (!divDrag) return;
+    if (!divDrag.active) {
+      if (Math.abs(e.clientX - divDrag.startX) < KNOB_DRAG_THRESHOLD_PX
+        && Math.abs(e.clientY - divDrag.startY) < KNOB_DRAG_THRESHOLD_PX) return;
+      divDrag.active = true;
+    }
+    const el = document.elementFromPoint(e.clientX, e.clientY);
+    const doel = el && el.closest('[data-div-idx]');
+    if (doel) {
+      const idx = parseInt(doel.getAttribute('data-div-idx'), 10);
+      if (!isNaN(idx)) divDrag.overIdx = idx;
+    }
+    divDrag = divDrag;
+  }
+
+  function divPointerUp(e) {
+    window.removeEventListener('pointermove', divPointerMove);
+    window.removeEventListener('pointerup', divPointerUp);
+    window.removeEventListener('pointercancel', divPointerUp);
+    const d = divDrag;
+    divDrag = null;
+    if (!d || !d.active || e.type === 'pointercancel') return;
+    // Na een sleep mag de klik eronder het werk niet ook nog uitzetten.
+    divDragJustEnded = true;
+    setTimeout(() => { divDragJustEnded = false; }, 0);
+    if (d.overIdx === d.fromIdx) return;
+    verplaatsDivisie(d.fromIdx, d.overIdx);
+  }
+
+  // Herschikken gebeurt op de GETOONDE lijst (divisieKnoppen), zodat de
+  // indexen altijd kloppen met wat de gebruiker ziet. Uitgezette werken staan
+  // daar achteraan; een werk dat je daar naartoe sleept blijft gewoon uit.
+  function verplaatsDivisie(fromIdx, toIdx) {
+    const lijst = [...divisieKnoppen];
+    if (fromIdx < 0 || fromIdx >= lijst.length || toIdx < 0 || toIdx >= lijst.length) return;
+    const [naam] = lijst.splice(fromIdx, 1);
+    lijst.splice(toIdx, 0, naam);
+    selectedDivisions = lijst.filter(n => selectedDivisions.includes(n));
+    bewaarDivisieKeuze();
   }
 </script>
 
@@ -4403,22 +4723,55 @@
     <!-- ========== ORGEL VIEW ========== -->
     {#if activeView === 'orgel'}
       <div class="orgel-view">
+        {#if fitMelding}
+          <!-- Zwevend, zodat het tonen van de melding de indeling niet verandert. -->
+          <div class="fit-melding">{fitMelding}</div>
+        {/if}
         <!-- Toolbar -->
         <div class="panel-toolbar">
-          <div class="panel-config">
-            {#each displayOrgan.divisions as div}
+          <!-- Werken in schermvolgorde; slepen wisselt ze om, klikken zet ze
+               aan of uit. -->
+          <div class="panel-config" class:div-dragging={!!(divDrag && divDrag.active)}>
+            {#each divisieKnoppen as naam, divIdx (naam)}
               <button
                 class="panel-div-btn"
-                class:selected={selectedDivisions.includes(div.name)}
-                on:click={() => toggleDivision(div.name)}
-              >{div.name}</button>
+                class:selected={selectedDivisions.includes(naam)}
+                class:dragging={!!(divDrag && divDrag.active && divDrag.fromIdx === divIdx)}
+                class:drag-target={!!(divDrag && divDrag.active && divDrag.overIdx === divIdx && divDrag.fromIdx !== divIdx)}
+                data-div-idx={divIdx}
+                on:pointerdown={(e) => divPointerDown(e, divIdx)}
+                on:click={() => { if (divDragJustEnded) return; toggleDivision(naam); }}
+              >{naam}</button>
             {/each}
+            {#if eigenDivisieVolgorde}
+              <button
+                class="panel-div-reset"
+                on:click={herstelDivisieVolgorde}
+                title={$t('toolbar.div_order_reset_title')}
+              >{$t('toolbar.div_order_reset')}</button>
+            {/if}
           </div>
           <div class="panel-toolbar-right">
-            <div class="stop-size-control" title={$t('toolbar.size_title')}>
-              <button class="btn btn-ghost btn-sm stop-size-btn" on:click={() => adjustStopSize(-15)} aria-label={$t('toolbar.size_smaller')}>−</button>
+            <button
+              class="btn btn-ghost btn-sm panel-layout-btn"
+              on:click={passendMaken}
+              title={$t('toolbar.fit_title')}
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>
+              </svg>
+              {$t('toolbar.fit')}
+            </button>
+            <!-- Breedte en hoogte in één vakje: het zijn twee maten van
+                 dezelfde knop, en op een klein scherm is hoogte de schaarse. -->
+            <div class="stop-size-control">
+              <button class="btn btn-ghost btn-sm stop-size-btn" on:click={() => adjustStopSize(-15)} title={$t('toolbar.size_title')} aria-label={$t('toolbar.size_smaller')}>−</button>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="6" width="18" height="12" rx="2"/></svg>
-              <button class="btn btn-ghost btn-sm stop-size-btn" on:click={() => adjustStopSize(15)} aria-label={$t('toolbar.size_larger')}>+</button>
+              <button class="btn btn-ghost btn-sm stop-size-btn" on:click={() => adjustStopSize(15)} title={$t('toolbar.size_title')} aria-label={$t('toolbar.size_larger')}>+</button>
+              <span class="stop-size-scheiding"></span>
+              <button class="btn btn-ghost btn-sm stop-size-btn" on:click={() => adjustStopHeight(-STOP_HEIGHT_STAP)} title={$t('toolbar.height_title')} aria-label={$t('toolbar.height_smaller')}>−</button>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="3" width="12" height="18" rx="2"/></svg>
+              <button class="btn btn-ghost btn-sm stop-size-btn" on:click={() => adjustStopHeight(STOP_HEIGHT_STAP)} title={$t('toolbar.height_title')} aria-label={$t('toolbar.height_larger')}>+</button>
             </div>
             <button
               class="btn btn-ghost btn-sm panel-layout-btn"
@@ -4478,6 +4831,24 @@
               >
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <polyline points="6 9 12 15 18 9"/>
+                </svg>
+                {$t('toolbar.bar')}
+              </button>
+            {/if}
+            {#if !secondary}
+              <!-- Hoofdbalk + statusbalk van het hoofdvenster aan/uit: ~90px
+                   extra hoogte voor de registers op een klein scherm. -->
+              <button
+                class="btn btn-ghost btn-sm panel-layout-btn"
+                on:click={toggleMainChrome}
+                title={$t('toolbar.bar_title')}
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  {#if showMainChrome}
+                    <polyline points="18 15 12 9 6 15"/>
+                  {:else}
+                    <polyline points="6 9 12 15 18 9"/>
+                  {/if}
                 </svg>
                 {$t('toolbar.bar')}
               </button>
@@ -4567,10 +4938,16 @@
              verticale modus) de ingestelde knopgrootte kan gebruiken;
              --stop-size-n is hetzelfde getal zonder eenheid (CSS-calc kan niet
              door een lengte delen) voor de vensterbreedte-schaling in styles.css -->
-        <div class="divisions-container" class:divisions-vertical={mainLayout === 'vertical'} style="--stop-min-width: {stopSize}px; --stop-size-n: {stopSize}">
+        <div class="divisions-container" bind:this={divisionsEl} class:divisions-vertical={mainLayout === 'vertical'} style="--stop-min-width: {stopSize}px; --stop-size-n: {stopSize}; --stop-h: {stopHeight}px">
           {#each selectedDivisions.map(name => displayOrgan.divisions.find(d => d.name === name)).filter(Boolean) as division}
             {@const tremDivIdx = displayOrgan.divisions.findIndex(d => d.name === division.name)}
-            <div class="division">
+            <!-- In verticale modus krijgt een werk precies zoveel breedte als
+                 het aan kolommen nodig heeft: anders krijgt een pedaal van 20
+                 evenveel ruimte als een chamade van 10, en loopt de eerste
+                 over terwijl de tweede ruimte overhoudt. -->
+            <div
+              class="division"
+              style={mainLayout === 'vertical' ? `flex-grow: ${groeiVoor(division)}` : ''}>
               <div class="division-header division-header-compact">
                 <div class="division-name">{division.name}</div>
                 {#if isSwellEnabled(division.name)}
@@ -4593,13 +4970,15 @@
                 class="stops-grid"
                 class:stops-vertical={mainLayout === 'vertical'}
                 class:knobs-round={knobShape === 'round'}
+                class:stops-flat={stopHeight < STOP_FLAT_ONDER}
                 class:knob-dragging={!!(knobDrag && knobDrag.active && knobDrag.mode === 'reorder' && knobDrag.div === division.name)}
-                style="--stop-min-width: {stopSize}px; --stop-size-n: {stopSize}"
+                style="--stop-min-width: {stopSize}px; --stop-size-n: {stopSize}; --stop-h: {stopHeight}px"
               >
                 {#each division.stops as stop, stopIdx}
                   {@const name = cleanStopName(stop)}
                   <button
                     class="stop-knob {getStopClass(stop)}"
+                    style={knopHoogteStijl}
                     class:engaged={stop.drawn}
                     class:has-midi={stopMidiBindings[stop.midi_action_code] > 0}
                     class:dragging={!!(knobDrag && knobDrag.active && knobDrag.mode === 'reorder' && knobDrag.div === division.name && knobDrag.fromIdx === stopIdx)}
@@ -4609,6 +4988,7 @@
                     on:pointerdown={(e) => knobPointerDown(e, division.name, stopIdx)}
                     on:click={() => { if (knobDragJustEnded) return; dispatch('toggleStop', stop.id); }}
                     use:midiLearn={{ onTrigger: () => showStopContextMenuAt(stop.midi_action_code) }}
+                    title="{name}{stop.pitch ? ' ' + stop.pitch : ''}"
                     aria-label="{stop.name} {stop.pitch || ''} — {stop.drawn ? $t('stops.drawn') : $t('stops.not_drawn')}"
                     aria-pressed={stop.drawn}
                   >
@@ -4621,6 +5001,7 @@
                 {#if division.stops.some(s => s.has_tremulant) || tremLfoEnabled[division.name]}
                   <button
                     class="stop-knob tremulant"
+                    style={knopHoogteStijl}
                     class:engaged={tremActive[division.name] === true}
                     class:has-midi={tremDivIdx >= 0 && tremLfoMidiBindings[ACTION_TREM_LFO_BASE + tremDivIdx] > 0}
                     on:click={() => setTremActive(division, tremActive[division.name] !== true)}
@@ -4636,6 +5017,7 @@
                   {#each displayOrgan.couplers.filter(c => couplerPlacement === 'division' && c.display_in_division === division.name && isCouplerVisible(c.id)) as coupler}
                     <button
                       class="stop-knob coupler coupler-knob"
+                      style={knopHoogteStijl}
                       class:engaged={coupler.active}
                       class:has-midi={couplerMidiBindings[coupler.midi_action_code] > 0}
                       on:click={() => dispatch('toggleCoupler', coupler.id)}

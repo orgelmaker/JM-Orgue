@@ -527,7 +527,16 @@
     "couplers_to_bar": "Mostra le unioni in una barra propria",
     "couplers_to_division": "Mostra le unioni come pomelli accanto al manuale",
     "size_smaller": "Più piccoli",
-    "size_larger": "Più grandi"
+    "size_larger": "Più grandi",
+    "height_title": "Altezza dei pulsanti dei registri",
+    "height_smaller": "Più basso",
+    "height_larger": "Più alto",
+    "fit": "Adatta",
+    "fit_title": "Scegliere dimensione dei pulsanti e disposizione per vedere tutti i registri insieme",
+    "fit_done": "C’è tutto sullo schermo",
+    "fit_short": "Ancora {n} registri fuori schermo: una finestra più grande aiuterebbe",
+    "div_order_reset": "Ordine originale",
+    "div_order_reset_title": "Tornare all’ordine dell’organo e mostrare di nuovo tutte le divisioni"
   },
   "sampleset": {
     "loops_confirm": "Rilevare i loop e scriverli nei file WAV? Gli originali vengono prima copiati in una cartella \"_loopbackup\"."

@@ -59,6 +59,9 @@
   // UI state
   let showOrganBrowser = true;
   let activeView = 'orgel';
+  // Hoofdbalk + statusbalk zichtbaar? Console beheert de stand (per orgel) en
+  // meldt hem hier; zie de knop "Balk" op het orgelscherm.
+  let showMainChrome = true;
 
   // Opstart-splash: dekt de eerste seconden af zodat het startscherm in één
   // keer compleet in beeld komt — inclusief de update-balk, die anders ná de
@@ -1604,20 +1607,26 @@
   </div>
 {/if}
 <div id="app">
-  <Header
-    organName={organInfo?.name}
-    organLoaded={!showOrganBrowser && organInfo}
-    showTabs={!showOrganBrowser}
-    {status}
-    {activeView}
-    {audioProfiles}
-    {audioProfileSwitching}
-    on:startAudio={startAudio}
-    on:stopAudio={stopAudio}
-    on:closeOrgan={closeOrgan}
-    on:setView={(e) => setView(e.detail)}
-    on:toggleAudioProfile={() => switchAudioProfile()}
-  />
+  <!-- Hoofdbalk en statusbalk kunnen uit (knop "Balk" op het orgelscherm): dat
+       scheelt ~90px hoogte, en bij een grote sampleset op een klein scherm is
+       dat precies wat de registers nodig hebben. In de bibliotheek en de
+       instellingen blijft de balk altijd staan — anders kom je er niet meer uit. -->
+  {#if showMainChrome || showOrganBrowser || activeView !== 'orgel'}
+    <Header
+      organName={organInfo?.name}
+      organLoaded={!showOrganBrowser && organInfo}
+      showTabs={!showOrganBrowser}
+      {status}
+      {activeView}
+      {audioProfiles}
+      {audioProfileSwitching}
+      on:startAudio={startAudio}
+      on:stopAudio={stopAudio}
+      on:closeOrgan={closeOrgan}
+      on:setView={(e) => setView(e.detail)}
+      on:toggleAudioProfile={() => switchAudioProfile()}
+    />
+  {/if}
 
   {#if updateInfo}
     <!-- Update-melding: wegklikken onthoudt déze versie; een volgende release
@@ -1724,6 +1733,7 @@
       on:setTremulant={(e) => setTremulant(e.detail.division, e.detail.active)}
       on:setMidiMapping={(e) => setMidiMapping(e.detail.division, e.detail.channel, e.detail.transpose)}
       on:refreshMidiMappings={() => { refreshMidiMappings(); scheduleAutoSave(); }}
+      on:setMainChrome={(e) => { showMainChrome = e.detail; }}
       on:learnMidiChannel={(e) => learnMidiChannel(e.detail)}
       on:learnKeyboardRange={(e) => learnKeyboardRange(e.detail.division, e.detail.firstSampleNote)}
       on:selectAudioDevice={(e) => handleSelectAudioDevice(e.detail)}
@@ -1750,10 +1760,12 @@
     />
   </div>
 
-  <StatusBar
-    {status}
-    {error}
-  />
+  {#if showMainChrome || showOrganBrowser || activeView !== 'orgel'}
+    <StatusBar
+      {status}
+      {error}
+    />
+  {/if}
 </div>
 {/if}
 

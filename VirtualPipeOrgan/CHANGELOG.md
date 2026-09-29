@@ -5,6 +5,73 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.58] - 2026-09-29
+
+### Een grote sampleset past nu op een klein scherm
+
+Bij een set met bijna negentig registers over zes werken bleef op een 15-inch
+scherm een flink deel van de registers onzichtbaar. Dat had één hoofdoorzaak en
+twee bijkomende.
+
+**De knop kon wel smaller, maar niet lager.** De maatknop in de werkbalk zette
+alleen de breedte; de hoogte stond vast op 56 pixels. Op een klein scherm is de
+hoogte juist de schaarse richting — en een rij was daardoor altijd even hoog,
+wat je ook instelde. Er staat nu een tweede maatknop naast, voor de hoogte.
+Onder de veertig pixels gaan naam en voetmaat naast elkaar staan in plaats van
+onder elkaar, zodat een lage rij leesbaar blijft.
+
+**De werken deelden de breedte gelijk.** In de kolommenweergave kreeg een werk
+met twintig registers evenveel ruimte als een werk met tien: de eerste liep
+over, de tweede hield ruimte over. Elk werk krijgt nu precies zoveel breedte
+als het aan kolommen nodig heeft.
+
+**Nieuwe knop "Passend".** Die zoekt zelf de rustigste knopmaat waarbij alles
+tegelijk in beeld staat, schakelt zo nodig over naar de kolommenweergave, en
+laat de instelling met rust als het al goed staat. Hij rékent niet maar méét:
+na elke stap wordt gekeken of er ergens nog een schuifbalk zit. Past het echt
+niet, dan zegt hij hoeveel registers buiten beeld blijven in plaats van te
+doen alsof.
+
+Twee dingen zaten dat meten aanvankelijk in de weg, en allebei waren ze ouder
+dan deze knop. De registerknop had een overgang op *alle* eigenschappen, dus
+ook op zijn maten: na een wijziging was de knop een tiende seconde onderweg en
+werd steeds de oude maat gemeten. De overgang loopt nu alleen nog over kleur en
+schaduw, waar hij voor bedoeld was. En het orgelscherm mocht breder worden dan
+het venster — een flexibele kolom zonder ondergrens groeit mee met zijn inhoud —
+waardoor de laatste divisie zonder schuifbalk buiten beeld viel en een meting
+altijd "past" zei. Ook los van deze knop verdween er dus stilletjes een werk uit
+beeld bij een sampleset met veel werken.
+
+**Hoofdbalk en statusbalk kunnen uit.** Dat scheelt zo'n negentig pixels
+hoogte. Losse registerschermen konden dat al; het hoofdvenster nu ook. In de
+bibliotheek en de instellingen blijft de balk staan — anders kom je er niet
+meer uit.
+
+Verder: een registernaam die niet past wordt nu aan het eind afgekapt met een
+beletselteken in plaats van aan beide kanten te worden afgesneden, en de
+volledige naam staat in de tooltip. De krimp voor lange namen werkt voortaan
+als factor, waardoor de lettergrootte uit Sfeer & Layout ook voor die namen
+geldt. Bij een smal venster breekt de werkbalk af naar een tweede regel in
+plaats van de laatste knoppen buiten beeld te duwen.
+
+### De volgorde van de werken blijft staan
+
+Op het hoofdscherm was de volgorde van de werken niet te onthouden. Sterker
+nog, hij was alleen te veranderen als neveneffect: een werk uitzetten en weer
+aanzetten zette het achteraan. Na een herstart stond alles weer zoals het
+orgel het aanlevert.
+
+Nu sleep je de werkknoppen in de werkbalk op volgorde, en die volgorde blijft
+staan — per orgel, net als de volgorde van de registers binnen een werk. Ook
+welke werken je toont blijft bewaard. De knoppenrij staat in dezelfde volgorde
+als het scherm, met de uitgezette werken achteraan, en er komt een knop
+"Volgorde terug" bij zodra je zelf iets hebt verschoven. Komt er na een
+herimport een werk bij dat nog niet in de bewaarde volgorde staat, dan
+verschijnt het achteraan in plaats van te verdwijnen.
+
+De koppelbalk en de afstandsbediening volgen dezelfde volgorde, zodat de
+telefoon laat zien wat de speeltafel laat zien.
+
 ## [0.7.57] - 2026-09-26
 
 ### Het programma mag vrij worden doorgegeven

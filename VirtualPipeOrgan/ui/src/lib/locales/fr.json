@@ -527,7 +527,16 @@
     "couplers_to_bar": "Afficher les accouplements dans une barre séparée",
     "couplers_to_division": "Afficher les accouplements comme boutons dans le clavier",
     "size_smaller": "Plus petit",
-    "size_larger": "Plus grand"
+    "size_larger": "Plus grand",
+    "height_title": "Hauteur des boutons de registre",
+    "height_smaller": "Plus bas",
+    "height_larger": "Plus haut",
+    "fit": "Ajuster",
+    "fit_title": "Choisir la taille des boutons et la disposition pour voir tous les jeux à la fois",
+    "fit_done": "Tout tient à l’écran",
+    "fit_short": "Encore {n} jeux hors écran — une fenêtre plus grande aiderait",
+    "div_order_reset": "Ordre d’origine",
+    "div_order_reset_title": "Revenir à l’ordre de l’orgue et réafficher tous les claviers"
   },
   "sampleset": {
     "loops_confirm": "Détecter les boucles et les écrire dans les fichiers WAV ? Les originaux sont d'abord sauvegardés dans un dossier \"_loopbackup\"."

@@ -153,10 +153,12 @@
     min-height: var(--touch-target) !important;
   }
 
-  /* Registerknoppen */
+  /* Registerknoppen. Géén eigen min-height meer: de gewone regel hierboven
+     volgt al --stop-h, en de standaardwaarde (56px) ligt ruim boven de
+     aanraakrichtlijn. Zette je hem hier nóg eens met !important, dan bleef de
+     knop op een aanraakscherm op 56px staan en deed de hoogteknop daar niets. */
   .stop-knob {
-    min-height: var(--touch-target-lg) !important;
-    min-width: var(--touch-target-lg) !important;
+    min-width: var(--touch-target) !important;
     font-size: 0.85rem !important;
   }
 
@@ -673,6 +675,7 @@ input[type="range"]::-webkit-slider-thumb:hover {
 
 .console {
   flex: 1;
+  min-width: 0; /* zelfde reden als bij .orgel-view */
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -1042,6 +1045,11 @@ input[type="range"]::-webkit-slider-thumb:hover {
 
 .orgel-view {
   flex: 1;
+  position: relative; /* anker voor de zwevende "passend"-melding */
+  /* Zonder min-width:0 kan een flex-item in een rij niet smaller worden dan
+     zijn eigen inhoud: bij veel werken groeide het orgelscherm dan buiten het
+     venster en viel de laatste divisie weg zonder schuifbalk. */
+  min-width: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -1052,6 +1060,10 @@ input[type="range"]::-webkit-slider-thumb:hover {
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
+  row-gap: 0.3rem;
+  /* Bij een smal venster past de knoppenrij niet naast de werken. Afbreken naar
+     een tweede regel in plaats van de laatste knoppen buiten beeld duwen. */
+  flex-wrap: wrap;
   padding: 0.4rem 1rem;
   background: var(--bg-panel);
   border-bottom: 1px solid var(--accent-soft);
@@ -1061,7 +1073,17 @@ input[type="range"]::-webkit-slider-thumb:hover {
 .panel-toolbar-right {
   display: flex;
   align-items: center;
+  /* Mag smaller worden dan zijn inhoud, zodat flex-wrap hieronder de knoppen
+     op een tweede regel zet in plaats van ze buiten beeld te duwen. De knoppen
+     zelf krimpen niet mee — anders wordt hun tekst onleesbaar. */
+  min-width: 0;
   gap: 0.5rem;
+  flex-shrink: 1;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.panel-toolbar-right > * {
   flex-shrink: 0;
 }
 
@@ -1076,6 +1098,14 @@ input[type="range"]::-webkit-slider-thumb:hover {
   padding: 0.2rem 0.4rem;
   font-weight: 700;
   line-height: 1;
+}
+
+/* Scheiding tussen de breedte- en de hoogteknoppen binnen hetzelfde vakje. */
+.stop-size-scheiding {
+  width: 1px;
+  height: 14px;
+  margin: 0 0.15rem;
+  background: var(--accent-soft-2);
 }
 
 .panel-toolbar-label {
@@ -1142,6 +1172,62 @@ input[type="range"]::-webkit-slider-thumb:hover {
   border-color: var(--gold-border);
   color: var(--text);
   font-weight: 600;
+}
+
+/* Slepen om de werken van volgorde te wisselen. Zelfde beeldtaal als het
+   slepen van registerknoppen: het gesleepte werk vervaagt, het doel krijgt een
+   gestippelde rand als invoegteken. */
+.panel-div-btn.dragging {
+  opacity: 0.45;
+}
+
+.panel-div-btn.drag-target {
+  outline: 2px dashed var(--gold-border);
+  outline-offset: 1px;
+}
+
+.panel-config.div-dragging,
+.panel-config.div-dragging .panel-div-btn {
+  cursor: grabbing;
+}
+
+/* Terug naar de volgorde van het orgel; staat er alleen als je zelf iets
+   verschoven of uitgezet hebt. */
+.panel-div-reset {
+  font-size: 0.7rem;
+  line-height: 1;
+  padding: 0.2rem 0.45rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.panel-div-reset:hover {
+  border-color: var(--gold-border);
+  color: var(--text);
+}
+
+/* Korte terugmelding van "Passend maken"; verdwijnt vanzelf. Zwevend, niet in
+   de werkbalk: stond hij ertussen, dan brak de werkbalk bij een smal venster
+   anders af zodra de melding verscheen — en dan klopte de maat die net was
+   uitgerekend niet meer. */
+.fit-melding {
+  position: absolute;
+  top: 0.35rem;
+  right: 0.75rem;
+  z-index: 20;
+  pointer-events: none;
+  padding: 0.25rem 0.6rem;
+  border: 1px solid var(--gold-border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel);
+  box-shadow: 0 2px 8px var(--gold-shadow);
+  font-size: 0.72rem;
+  color: var(--text);
+  white-space: nowrap;
 }
 
 .panel-actions {
@@ -1282,6 +1368,11 @@ input[type="range"]::-webkit-slider-thumb:hover {
 
 .divisions-container {
   flex: 1;
+  /* Zonder min-width:0 groeit deze flex-kolom mee met zijn eigen inhoud en
+     schuift hij onder .orgel-view (overflow:hidden) uit beeld: de laatste
+     divisie verdween dan zonder scrollbalk, en "Passend maken" mat een
+     container die net zo breed was als zijn inhoud en dus altijd "past" zei. */
+  min-width: 0;
   overflow-y: auto;
   padding: 0.75rem;
   display: flex;
@@ -1400,14 +1491,28 @@ input[type="range"]::-webkit-slider-thumb:hover {
   align-items: center;
   justify-content: center;
   width: 100%;
-  min-height: 56px;
+  /* De hoogte staat los van de breedte: op een klein scherm is de hoogte de
+     schaarse richting, terwijl de breedte nodig blijft om lange registernamen
+     leesbaar te houden. --stop-h komt inline uit Console.svelte; 56px is de
+     oude vaste waarde en blijft de standaard. */
+  min-height: var(--stop-h, 56px);
+  /* Rand rondom het porseleinen plaatje; schaalt mee met de knophoogte, zodat
+     een lage knop geen dikke zwarte lijst krijgt. Op 56px komt dit uit op de
+     oude 8 bij 6. */
+  --plaat-x: clamp(3px, calc(var(--stop-h, 56px) * 0.143), 8px);
+  --plaat-y: clamp(2px, calc(var(--stop-h, 56px) * 0.107), 6px);
   padding: 0.25rem 0.4rem;
   border: none;
   border-radius: 5px;
   background: var(--bg-control);
   color: var(--text);
   cursor: pointer;
-  transition: all var(--transition-fast);
+  /* Bewust niet "all": een overgang op de hoogte betekent dat de knop na een
+     maatwijziging een tiende seconde onderweg is, en dat "Passend maken" dan
+     de oude maat meet in plaats van de nieuwe. Kleur en schaduw mogen wel
+     lopen — dat is waar de overgang voor bedoeld was. */
+  transition: background-color var(--transition-fast), box-shadow var(--transition-fast),
+              transform var(--transition-fast), color var(--transition-fast);
   position: relative;
   overflow: hidden;
   box-shadow: 0 2px 4px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.05);
@@ -1451,19 +1556,24 @@ input[type="range"]::-webkit-slider-thumb:hover {
   cursor: grabbing;
 }
 
-/* Porselein plaatje in het midden */
+/* Porselein plaatje in het midden. De rand eromheen schaalt mee met de
+   knophoogte: op de gewone maat (56px) is hij 8 bij 6 zoals altijd, maar bij
+   een lage knop werd die dikke zwarte lijst de helft van de knop — en hij at
+   ook de ruimte op waar de registernaam had moeten staan. */
 .stop-knob::before {
   content: '';
   position: absolute;
-  left: 8px;
-  right: 8px;
-  top: 6px;
-  bottom: 6px;
+  left: var(--plaat-x);
+  right: var(--plaat-x);
+  top: var(--plaat-y);
+  bottom: var(--plaat-y);
   background: var(--stop-porcelain);
   border-radius: 3px;
   border: 1px solid var(--stop-porcelain-border);
   box-shadow: inset 0 1px 2px rgba(0,0,0,0.06);
-  transition: all var(--transition-fast);
+  /* Zie .stop-knob: geen overgang op de maten, anders meet "Passend maken"
+     een plaatje dat nog onderweg is. */
+  transition: background-color var(--transition-fast), border-color var(--transition-fast);
 }
 
 .stop-knob:hover {
@@ -1606,11 +1716,19 @@ input[type="range"]::-webkit-slider-thumb:hover {
 
 .stop-name {
   font-family: var(--stop-font-family);
-  font-size: var(--stop-font-size);
+  /* --name-fit is de krimpfactor voor lange namen (zie stopNameStyle in
+     Console.svelte). Als factor i.p.v. een vaste rem-waarde, anders overrulet
+     hij de gekozen lettergrootte uit Sfeer & Layout. */
+  font-size: calc(var(--stop-font-size) * var(--name-fit, 1));
   font-weight: var(--stop-font-weight);
   text-align: center;
   line-height: 1.2;
   white-space: nowrap;
+  /* Past de naam er echt niet op, dan liever een beletselteken aan het eind
+     dan een naam die aan béide kanten is afgesneden. */
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
   position: relative;
   z-index: 1;
   color: var(--text-on-stop);
@@ -1620,10 +1738,43 @@ input[type="range"]::-webkit-slider-thumb:hover {
   font-family: var(--stop-font-family);
   font-size: calc(var(--stop-font-size) - 0.05rem);
   font-weight: 600;
+  /* Zonder eigen regelhoogte erfde de voetmaat 1.5 van body: 6px hoogte per
+     knop weg, en bij een lage knop is dat precies wat je niet kunt missen. */
+  line-height: 1.15;
   color: var(--text-on-stop-secondary);
   margin-top: 1px;
   position: relative;
   z-index: 1;
+}
+
+/* Lage knoppen: naam en voetmaat naast elkaar i.p.v. onder elkaar. Zo blijft
+   een rij van 30px leesbaar. Wordt aangezet zodra de ingestelde hoogte onder
+   STOP_FLAT_ONDER (Console.svelte) zakt. */
+.stops-grid.stops-flat:not(.knobs-round) .stop-knob {
+  flex-direction: row;
+  gap: 0.3rem;
+  /* Binnen het porseleinen plaatje blijven, anders loopt de naam over de
+     zwarte rand heen — bij een lage knop valt dat meteen op. */
+  padding: 0.15rem calc(var(--plaat-x) + 2px);
+  /* Niet centreren: past de regel niet, dan moet het begin van de naam
+     zichtbaar blijven en het eind afvallen — niet allebei de uiteinden. */
+  justify-content: flex-start;
+}
+
+.stops-grid.stops-flat:not(.knobs-round) .stop-name {
+  /* De naam levert ruimte in, de voetmaat niet: die is kort en juist de
+     informatie die je op een volle speeltafel snel nodig hebt.
+     Links uitlijnen is hier geen smaak maar noodzaak: bij text-align:center
+     knipt de browser een te lange naam aan BEIDE kanten af en verschijnt er
+     geen beletselteken. Nu staat het afkappen netjes aan het eind. */
+  min-width: 0;
+  flex: 1 1 auto;
+  text-align: left;
+}
+
+.stops-grid.stops-flat:not(.knobs-round) .stop-pitch {
+  margin-top: 0;
+  flex: 0 0 auto;
 }
 
 /* ============================================

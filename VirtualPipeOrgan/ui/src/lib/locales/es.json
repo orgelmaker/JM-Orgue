@@ -527,7 +527,16 @@
     "couplers_to_bar": "Mostrar los acoplamientos en una barra propia",
     "couplers_to_division": "Mostrar los acoplamientos como botones junto al teclado",
     "size_smaller": "Más pequeño",
-    "size_larger": "Más grande"
+    "size_larger": "Más grande",
+    "height_title": "Altura de los botones de registro",
+    "height_smaller": "Más bajo",
+    "height_larger": "Más alto",
+    "fit": "Ajustar",
+    "fit_title": "Elegir el tamaño de botón y la disposición para ver todos los registros a la vez",
+    "fit_done": "Todo cabe en pantalla",
+    "fit_short": "Quedan {n} registros fuera de pantalla: una ventana mayor ayudaría",
+    "div_order_reset": "Orden original",
+    "div_order_reset_title": "Volver al orden del órgano y mostrar de nuevo todas las divisiones"
   },
   "sampleset": {
     "loops_confirm": "¿Detectar los bucles y escribirlos en los archivos WAV? Primero se hace una copia de seguridad de los originales en una carpeta «_loopbackup»."

@@ -527,7 +527,16 @@
     "couplers_to_bar": "Koppeln in eigener Leiste anzeigen",
     "couplers_to_division": "Koppeln als Knöpfe im Werk anzeigen",
     "size_smaller": "Kleiner",
-    "size_larger": "Größer"
+    "size_larger": "Größer",
+    "height_title": "Registerknopf-Höhe",
+    "height_smaller": "Niedriger",
+    "height_larger": "Höher",
+    "fit": "Einpassen",
+    "fit_title": "Knopfgröße und Anordnung so wählen, dass alle Register gleichzeitig sichtbar sind",
+    "fit_done": "Alles ist sichtbar",
+    "fit_short": "Noch {n} Register außerhalb des Bildes — ein größeres Fenster hilft",
+    "div_order_reset": "Reihenfolge zurück",
+    "div_order_reset_title": "Zurück zur Reihenfolge der Orgel, alle Werke wieder anzeigen"
   },
   "sampleset": {
     "loops_confirm": "Loops erkennen und in die WAV-Dateien schreiben? Die Originale werden zuerst in einen \"_loopbackup\"-Ordner gesichert."

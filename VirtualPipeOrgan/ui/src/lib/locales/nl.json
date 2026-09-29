@@ -527,7 +527,16 @@
     "couplers_to_bar": "Koppels in een eigen balk tonen",
     "couplers_to_division": "Koppels als knop bij het klavier tonen",
     "size_smaller": "Kleiner",
-    "size_larger": "Groter"
+    "size_larger": "Groter",
+    "height_title": "Registerknop-hoogte",
+    "height_smaller": "Lager",
+    "height_larger": "Hoger",
+    "fit": "Passend",
+    "fit_title": "Knopmaat en indeling zo kiezen dat alle registers tegelijk in beeld staan",
+    "fit_done": "Alles staat in beeld",
+    "fit_short": "Nog {n} registers buiten beeld — een groter venster helpt",
+    "div_order_reset": "Volgorde terug",
+    "div_order_reset_title": "Terug naar de volgorde van het orgel, en alle werken weer tonen"
   },
   "sampleset": {
     "loops_confirm": "Loops detecteren en in de WAV-bestanden schrijven? De originelen worden eerst geback-upt naar een \"_loopbackup\"-map."
