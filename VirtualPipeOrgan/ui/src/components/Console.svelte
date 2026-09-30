@@ -3038,10 +3038,23 @@
   $: bandPeiling = `${divisionsH}|${stopHeight}|${stopSize}|${mainLayout}|${selectedDivisions.length}`;
   $: if (divisionsEl && bandPeiling) meetBand();
 
+  // Ronde knoppen staan verder uit elkaar (.stops-grid.knobs-round: column-gap
+  // 0.85rem) en zijn even hoog als breed. Rekende de breedte hier met de gap
+  // en hoogte van de rechthoekige knop, dan paste er één kolom minder in dan
+  // berekend en rekte de overgebleven kolom op tot een reuzencirkel.
+  const GRID_GAP_ROND = 13.6;
+  $: kolomGap = knobShape === 'round' ? GRID_GAP_ROND : GRID_GAP;
+
+  // Breedte van het venster, voor de effectieve knopmaat (--stop-w in
+  // styles.css): de gekozen maat, maar evenredig kleiner onder 1400px.
+  let vensterBreedte = typeof window !== 'undefined' ? window.innerWidth : 1400;
+  $: knopBreedte = Math.min(stopSize, stopSize * vensterBreedte / 1400);
+  $: knopHoogteEcht = knobShape === 'round' ? knopBreedte : stopHeight;
+
   // Hoeveel knoppen passen er onder elkaar in één kolom?
   $: bandRijen = (() => {
     const h = bandHoogte || Math.max(0, divisionsH - BAND_SCHATTING);
-    return Math.max(1, Math.floor((h + GRID_GAP) / (stopHeight + GRID_GAP)));
+    return Math.max(1, Math.floor((h + GRID_GAP) / (knopHoogteEcht + GRID_GAP)));
   })();
 
   // Als tabel, niet als functie-aanroep in de markup: Svelte volgt een
@@ -3056,7 +3069,9 @@
       const d = displayOrgan.divisions.find(x => x.name === naam);
       if (!d) continue;
       const k = Math.max(1, Math.ceil(knopAantalVoor(d) / bandRijen));
-      const vast = (k - 1) * GRID_GAP + GRID_PAD + DIV_RAND;
+      // +1px speling: zit de breedte precies op de grens, dan kan een
+      // afrondingsverschil de browser één kolom minder laten kiezen.
+      const vast = (k - 1) * kolomGap + GRID_PAD + DIV_RAND + 1;
       m[naam] = `flex: 0 0 auto; width: calc(${k} * var(--stop-w, 100px) + ${vast}px)`;
     }
     return m;
@@ -4447,7 +4462,14 @@
     remoteLayoutReady = false;
     // Secundaire vensters laden alleen de UI-state (geen backend-pushes).
     loadAudioSettingsForOrgan(!secondary);
-    loadUiPrefsForOrgan();
+    // NIET hier synchroon: Svelte draait de $:-blokken één keer per ronde, in
+    // een volgorde die het bij het compileren bepaalt. Wat een functie hier
+    // toewijst (knobShape, stopHeight, …) ziet het daarbij niet, dus blokken
+    // die eerder in de ronde al liepen (knopHoogteStijl, bandRijen) bleven op
+    // de oude waarde staan terwijl de markup de nieuwe al kreeg. Gevolg bij
+    // elke start met ronde knoppen: ronde vorm + vaste rechthoek-hoogte = ovaal.
+    // Na de huidige ronde laden = alles rekent netjes opnieuw.
+    tick().then(loadUiPrefsForOrgan);
   }
 
   // Bibliotheek laden zodra het startscherm getoond wordt. Alleen in het
@@ -4576,6 +4598,8 @@
     bewaarDivisieKeuze();
   }
 </script>
+
+<svelte:window bind:innerWidth={vensterBreedte} />
 
 <main class="console">
   {#if loading}

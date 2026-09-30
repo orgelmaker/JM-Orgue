@@ -5,6 +5,27 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.62] - 2026-09-30
+
+### Ronde registerknoppen starten niet meer als ovaal
+
+Wie ronde registerknoppen had gekozen, zag ze bij elke start eerst als ovalen.
+Pas na een klik op **Recht** of **Rond** werden het weer cirkels. Bij het
+laden van de voorkeuren van een orgel kreeg de knop wel de ronde vorm, maar
+hield hij nog de vaste hoogte van de rechthoekige knop. Die voorkeuren worden
+nu geladen nadat het scherm klaar is met bijwerken, zodat vorm en maat
+meteen bij elkaar passen.
+
+### Ronde knoppen in de kolommenweergave
+
+In de weergave waarin de werken naast elkaar staan, konden ronde knoppen
+uitgroeien tot enkele reuzencirkels. De breedte van een werk werd berekend met
+de tussenruimte en de hoogte van de rechthoekige knop. Ronde knoppen staan
+verder uit elkaar en zijn even hoog als breed, dus paste er een kolom minder
+in dan berekend, en de kolom die overbleef rekte uit tot de volle breedte. De
+berekening houdt nu rekening met de vorm. **Passend** werkt daardoor ook met
+ronde knoppen.
+
 ## [0.7.61] - 2026-09-30
 
 ### Speeltafelmodus: volledig scherm met alleen de registers
