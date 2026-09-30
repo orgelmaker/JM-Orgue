@@ -512,6 +512,8 @@
     "shape_title_round": "Pomelli tondi (registri a tirante)",
     "bar": "Barra",
     "bar_title": "Mostra la barra principale (schede, cambio profilo, avvio/arresto audio)",
+    "fullscreen": "Schermo intero",
+    "fullscreen_title": "Modalità consolle: schermo intero con solo i registri e la barra delle combinazioni (F11). Esc la disattiva.",
     "new_screen": "Nuovo schermo",
     "rec_audio_running": "Registrazione audio in corso — {t} · Fai clic per fermarla",
     "rec_audio_start": "Avvia la registrazione MP3 (quello che senti) in Documenti\\JM-Orgue-opnames",
@@ -537,6 +539,12 @@
     "fit_short": "Ancora {n} registri fuori schermo: una finestra più grande aiuterebbe",
     "div_order_reset": "Ordine originale",
     "div_order_reset_title": "Tornare all’ordine dell’organo e mostrare di nuovo tutte le divisioni"
+  },
+  "speeltafel": {
+    "show_bars": "Barre",
+    "hide_bars": "Nascondi barre",
+    "exit_fullscreen": "Esci da schermo intero",
+    "shutdown": "Spegni"
   },
   "sampleset": {
     "loops_confirm": "Rilevare i loop e scriverli nei file WAV? Gli originali vengono prima copiati in una cartella \"_loopbackup\"."
@@ -1007,7 +1015,8 @@
   },
   "errors": {
     "autostart_failed": "Modifica dell'avvio automatico non riuscita: {error}",
-    "shutdown_failed": "Spegnimento non riuscito: {error}"
+    "shutdown_failed": "Spegnimento non riuscito: {error}",
+    "closed_format": "Questo sample set conserva le registrazioni nel formato .hbw proprio di Hauptwerk ({n} su {total}). Quel formato è chiuso e può essere riprodotto solo da Hauptwerk stesso; per questo JM-Orgue non può aprire questo sample set."
   },
   "update": {
     "new_version_prefix": "Nuova versione",

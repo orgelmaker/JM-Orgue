@@ -512,6 +512,8 @@
     "shape_title_round": "Okrągłe przyciski głosów (manubria)",
     "bar": "Pasek",
     "bar_title": "Pokaż pasek główny (zakładki, zmiana profilu, start/stop audio)",
+    "fullscreen": "Pełny ekran",
+    "fullscreen_title": "Tryb kontuaru: pełny ekran tylko z rejestrami i pasekiem kombinacji (F11). Esc go wyłącza.",
     "new_screen": "Nowy ekran",
     "rec_audio_running": "Nagrywanie audio — {t} · Kliknij, aby zatrzymać",
     "rec_audio_start": "Rozpocznij nagrywanie MP3 (to, co słyszysz) w folderze Dokumenty\\JM-Orgue-opnames",
@@ -537,6 +539,12 @@
     "fit_short": "Poza ekranem jest jeszcze {n} rejestrów — pomoże większe okno",
     "div_order_reset": "Przywróć kolejność",
     "div_order_reset_title": "Powrót do kolejności organów i ponowne pokazanie wszystkich sekcji"
+  },
+  "speeltafel": {
+    "show_bars": "Paski",
+    "hide_bars": "Ukryj paski",
+    "exit_fullscreen": "Wyjdź z pełnego ekranu",
+    "shutdown": "Wyłącz"
   },
   "sampleset": {
     "loops_confirm": "Wykryć pętle i zapisać je w plikach WAV? Oryginały trafią najpierw do folderu „_loopbackup”."
@@ -1007,7 +1015,8 @@
   },
   "errors": {
     "autostart_failed": "Zmiana autostartu nie powiodła się: {error}",
-    "shutdown_failed": "Wyłączanie nie powiodło się: {error}"
+    "shutdown_failed": "Wyłączanie nie powiodło się: {error}",
+    "closed_format": "Ten sampleset przechowuje nagrania we własnym formacie .hbw programu Hauptwerk ({n} z {total}). Ten format jest zamknięty i może go odtwarzać tylko sam Hauptwerk, dlatego JM-Orgue nie może otworzyć tego samplesetu."
   },
   "update": {
     "new_version_prefix": "Nowa wersja",

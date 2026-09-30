@@ -30,6 +30,10 @@
   // Secundair + hoofdbalk verborgen: toon in de werkbalk een knop om de balk
   // (Header met tabs/profielwissel/start-stop) weer zichtbaar te maken.
   export let showPanelHeaderToggle = false;
+  // Speeltafelmodus (0.7.61): App beheert het volledige scherm en geeft hier
+  // door of hij aan staat en of de balken tijdelijk zichtbaar zijn.
+  export let speeltafelModus = false;
+  export let balkenZichtbaar = false;
   let supportedSampleRates = [];
 
   async function loadSupportedSampleRates() {
@@ -3406,14 +3410,33 @@
   }
   let onlineSets = [];
   let alleOnlineSets = [];
+
+  // Tekst uit het samplesets-manifest (samplesets.json op GitHub) in de
+  // gekozen taal. De Nederlandse tekst staat in het veld zelf — oudere
+  // app-versies lezen alleen dat — en vertalingen onder `vertalingen.<taal>`.
+  // Terugval: Engels, dan Nederlands, net als lib/i18n.js.
+  // `taal` gaat als argument mee zodat Svelte de markup opnieuw rendert bij
+  // een taalwissel (een functie-aanroep zelf volgt hij niet).
+  function manifestTekst(s, veld, taal) {
+    if (!s) return '';
+    if (taal && taal !== 'nl') {
+      const v = s.vertalingen?.[taal]?.[veld] || s.vertalingen?.en?.[veld];
+      if (v) return v;
+    }
+    return s[veld] || '';
+  }
+
   // Waarschuwing bij een geïnstalleerde set, gezocht op naam of mapnaam.
   $: letOpPerSet = Object.fromEntries(
     (alleOnlineSets || [])
       .filter(s => s.let_op)
-      .flatMap(s => [
-        [String(s.naam || '').toLowerCase(), s.let_op],
-        [String(s.map_naam || s.naam || '').toLowerCase(), s.let_op],
-      ])
+      .flatMap(s => {
+        const tekst = manifestTekst(s, 'let_op', $locale);
+        return [
+          [String(s.naam || '').toLowerCase(), tekst],
+          [String(s.map_naam || s.naam || '').toLowerCase(), tekst],
+        ];
+      })
   );
   // LET OP: een functie-aanroep in de markup wordt door Svelte niet gevolgd —
   // het manifest komt ná de eerste render binnen, dus dan zou de waarschuwing
@@ -4736,10 +4759,10 @@
                   {/if}
                 </div>
                 {#if s.beschrijving}
-                  <div class="library-card-meta">{s.beschrijving}</div>
+                  <div class="library-card-meta">{manifestTekst(s, 'beschrijving', $locale)}</div>
                 {/if}
                 {#if s.let_op}
-                  <div class="library-card-warn">{s.let_op}</div>
+                  <div class="library-card-warn">{manifestTekst(s, 'let_op', $locale)}</div>
                 {/if}
               </div>
             </div>
@@ -4770,13 +4793,55 @@
 
     <!-- ========== ORGEL VIEW ========== -->
     {#if activeView === 'orgel'}
-      <div class="orgel-view">
+      <div class="orgel-view" class:speeltafel-modus={speeltafelModus && !secondary}>
         {#if fitMelding}
           <!-- Zwevend, zodat het tonen van de melding de indeling niet verandert. -->
           <div class="fit-melding">{fitMelding}</div>
         {/if}
-        <!-- Toolbar -->
-        <div class="panel-toolbar">
+        {#if speeltafelModus && !secondary}
+          <!-- Speeltafelmodus: alleen deze smalle strook boven de registers.
+               Zichtbaar en niet op zweven, want op een aanraakscherm bestaat
+               zweven niet. De balken die "Balken" terughaalt liggen als laag
+               ónder deze strook, zodat hij altijd bereikbaar blijft. -->
+          <div class="speeltafel-strook">
+            <button
+              class="speeltafel-knop"
+              class:actief={balkenZichtbaar}
+              on:click={() => dispatch('toggleBalken')}
+              title={balkenZichtbaar ? $t('speeltafel.hide_bars') : $t('speeltafel.show_bars')}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                {#if balkenZichtbaar}
+                  <polyline points="18 15 12 9 6 15"/>
+                {:else}
+                  <polyline points="6 9 12 15 18 9"/>
+                {/if}
+              </svg>
+              {balkenZichtbaar ? $t('speeltafel.hide_bars') : $t('speeltafel.show_bars')}
+            </button>
+            <button class="speeltafel-knop" on:click={() => dispatch('toggleSpeeltafel')} title={$t('speeltafel.exit_fullscreen')}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7"/>
+              </svg>
+              {$t('speeltafel.exit_fullscreen')}
+            </button>
+            <button
+              class="speeltafel-knop speeltafel-uit"
+              on:click={() => dispatch('shutdownRequest')}
+              title={$t('toolbar.shutdown_title')}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M18.36 6.64a9 9 0 1 1-12.73 0"/>
+                <line x1="12" y1="2" x2="12" y2="12"/>
+              </svg>
+              {$t('speeltafel.shutdown')}
+            </button>
+          </div>
+        {/if}
+        <!-- Toolbar. In de speeltafelmodus weg tot "Balken" wordt gedrukt; dan
+             ligt hij als laag over de registers (styles.css). -->
+        <div class="panel-toolbar"
+             class:speeltafel-verborgen={speeltafelModus && !secondary && !balkenZichtbaar}>
           <!-- Werken in schermvolgorde; slepen wisselt ze om, klikken zet ze
                aan of uit. -->
           <div class="panel-config" class:div-dragging={!!(divDrag && divDrag.active)}>
@@ -4899,6 +4964,23 @@
                   {/if}
                 </svg>
                 {$t('toolbar.bar')}
+              </button>
+              <!-- Speeltafelmodus: volledig scherm, alleen registers + setzer.
+                   Ook met F11; Escape zet hem weer uit. -->
+              <button
+                class="btn btn-ghost btn-sm panel-layout-btn"
+                class:active={speeltafelModus}
+                on:click={() => dispatch('toggleSpeeltafel')}
+                title={$t('toolbar.fullscreen_title')}
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  {#if speeltafelModus}
+                    <path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7"/>
+                  {:else}
+                    <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>
+                  {/if}
+                </svg>
+                {$t('toolbar.fullscreen')}
               </button>
             {/if}
             <button class="btn btn-ghost btn-sm panel-add-btn" on:click={() => openExtraWindow()}>

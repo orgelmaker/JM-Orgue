@@ -1210,6 +1210,89 @@ input[type="range"]::-webkit-slider-thumb:hover {
   color: var(--text);
 }
 
+/* ============================================
+   SPEELTAFELMODUS (0.7.61) — volledig scherm, alleen registers + setzer.
+   Bovenin één smalle strook; de balken die "Balken" terughaalt liggen als laag
+   óver de registers, zodat de indeling eronder (en de maat van "Passend")
+   niet verspringt. De strook zelf blijft er altijd boven liggen.
+   ============================================ */
+:root {
+  --strook-h: 30px;
+  --hoofdbalk-h: 56px;          /* .header height */
+}
+
+.speeltafel-strook {
+  flex-shrink: 0;
+  height: var(--strook-h);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.35rem;
+  padding: 0 0.75rem;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--accent-soft);
+  position: relative;
+  z-index: 70;                  /* boven de balken-laag */
+}
+
+.speeltafel-knop {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  height: calc(var(--strook-h) - 6px);
+  padding: 0 0.65rem;
+  border: 1px solid var(--accent-soft-2);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  cursor: pointer;
+  transition: background-color var(--transition-fast), color var(--transition-fast);
+}
+
+.speeltafel-knop:hover,
+.speeltafel-knop.actief {
+  border-color: var(--gold-border);
+  color: var(--text);
+  background: var(--accent-soft);
+}
+
+.speeltafel-knop.speeltafel-uit {
+  color: var(--error, #c44030);
+}
+
+/* Werkbalk weg in de speeltafelmodus, tot "Balken" wordt gedrukt. */
+.panel-toolbar.speeltafel-verborgen {
+  display: none;
+}
+
+/* "Balken" open: hoofdbalk en werkbalk als laag bovenop, onder de strook.
+   position:fixed haalt ze uit de gewone opbouw, dus de werken verschuiven niet. */
+#app.balken-open .header {
+  position: fixed;
+  top: var(--strook-h);
+  left: 0;
+  right: 0;
+  z-index: 60;
+  box-shadow: 0 4px 12px var(--gold-shadow);
+}
+
+#app.balken-open .orgel-view.speeltafel-modus .panel-toolbar {
+  position: fixed;
+  top: calc(var(--strook-h) + var(--hoofdbalk-h));
+  left: 0;
+  right: 0;
+  z-index: 59;
+  box-shadow: 0 6px 14px var(--gold-shadow);
+}
+
+/* Aanraakschermen: een knop onder de 44px mist u makkelijk. De strook groeit
+   dan mee; de balken-laag rekent met dezelfde variabele. */
+@media (pointer: coarse) {
+  :root { --strook-h: 44px; }
+  .speeltafel-knop { font-size: 0.82rem; }
+}
+
 /* Waarschuwing in de instellingen, bijvoorbeeld wanneer de draaiende kopie
    niet de geïnstalleerde is (zie Over & feedback). */
 .settings-waarschuwing {

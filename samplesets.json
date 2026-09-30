@@ -1,5 +1,5 @@
 {
-  "_uitleg": "Manifest van online beschikbare samplesets. De bibliotheek in de app haalt dit bestand op via raw.githubusercontent.com (master) en toont per set een downloadkaart. zip_url moet een GitHub-URL zijn (de app weigert andere hosts). 'versie' verhogen bij een nieuwe zip; 'map_naam' is de mapnaam die de app aanmaakt. Optioneel veld 'let_op': een waarschuwing die de app onder de beschrijving toont, bijvoorbeeld wanneer een set nog niet op zijn best is.",
+  "_uitleg": "Manifest van online beschikbare samplesets. De bibliotheek in de app haalt dit bestand op via raw.githubusercontent.com (master) en toont per set een downloadkaart. zip_url moet een GitHub-URL zijn (de app weigert andere hosts). 'versie' verhogen bij een nieuwe zip; 'map_naam' is de mapnaam die de app aanmaakt. Optioneel veld 'let_op': een waarschuwing die de app onder de beschrijving toont, bijvoorbeeld wanneer een set nog niet op zijn best is. 'beschrijving' en 'let_op' zijn Nederlands; vertalingen staan onder 'vertalingen.<taal>' (en, de, fr, es, it, pl). Ontbreekt een taal, dan toont de app Engels en anders Nederlands. De Nederlandse velden NIET weghalen: oudere app-versies lezen alleen die.",
   "samplesets": [
     {
       "id": "batz-witte-puttershoek",
@@ -10,7 +10,33 @@
       "zip_mb": 107,
       "uitgepakt_mb": 211,
       "map_naam": "Bätz-Witte Puttershoek",
-      "let_op": "Deze opname komt uit de tijd dat JM-Rec nog in zijn eerste fase zat. De set speelt, maar klinkt nog niet zoals het kan: de opnamen zijn later niet opnieuw bewerkt. Onderaan deze pagina staat waar u betere sets vindt."
+      "let_op": "Deze opname komt uit de tijd dat JM-Rec nog in zijn eerste fase zat. De set speelt, maar klinkt nog niet zoals het kan: de opnamen zijn later niet opnieuw bewerkt. Onderaan deze pagina staat waar u betere sets vindt.",
+      "vertalingen": {
+        "en": {
+          "beschrijving": "Self-recorded sample set of the Bätz-Witte organ in Puttershoek — 20 stops, Hoofdwerk/Nevenwerk/Pedaal.",
+          "let_op": "This recording dates from the first phase of JM-Rec. The set plays, but does not yet sound as good as it could: the recordings were never re-edited afterwards. At the bottom of this page you will find where to get better sets."
+        },
+        "de": {
+          "beschrijving": "Selbst aufgenommenes Sampleset der Bätz-Witte-Orgel in Puttershoek — 20 Register, Hoofdwerk/Nevenwerk/Pedaal.",
+          "let_op": "Diese Aufnahme stammt aus der ersten Phase von JM-Rec. Das Set spielt, klingt aber noch nicht so gut, wie es könnte: Die Aufnahmen wurden später nicht mehr nachbearbeitet. Ganz unten auf dieser Seite steht, wo Sie bessere Sets finden."
+        },
+        "fr": {
+          "beschrijving": "Échantillonnage enregistré par nos soins de l’orgue Bätz-Witte de Puttershoek — 20 jeux, Hoofdwerk/Nevenwerk/Pedaal.",
+          "let_op": "Cet enregistrement date de la première phase de JM-Rec. Le jeu d’échantillons fonctionne, mais ne sonne pas encore aussi bien qu’il le pourrait : les prises n’ont jamais été retravaillées. Vous trouverez en bas de cette page où obtenir de meilleurs jeux."
+        },
+        "es": {
+          "beschrijving": "Sampleset grabado por nosotros del órgano Bätz-Witte de Puttershoek — 20 registros, Hoofdwerk/Nevenwerk/Pedaal.",
+          "let_op": "Esta grabación es de la primera fase de JM-Rec. El sampleset funciona, pero todavía no suena tan bien como podría: las tomas no se volvieron a editar después. Al final de esta página encontrará dónde conseguir mejores samplesets."
+        },
+        "it": {
+          "beschrijving": "Sample set registrato da noi dell’organo Bätz-Witte di Puttershoek — 20 registri, Hoofdwerk/Nevenwerk/Pedaal.",
+          "let_op": "Questa registrazione risale alla prima fase di JM-Rec. Il sample set funziona, ma non suona ancora come potrebbe: le registrazioni non sono mai state rielaborate. In fondo a questa pagina trova dove procurarsi sample set migliori."
+        },
+        "pl": {
+          "beschrijving": "Własnoręcznie nagrany sampleset organów Bätz-Witte w Puttershoek — 20 głosów, Hoofdwerk/Nevenwerk/Pedaal.",
+          "let_op": "To nagranie pochodzi z pierwszej fazy JM-Rec. Sampleset działa, ale nie brzmi jeszcze tak dobrze, jak mógłby: nagrań później nie opracowano ponownie. Na dole tej strony znajdziesz, gdzie szukać lepszych samplesetów."
+        }
+      }
     }
   ]
 }

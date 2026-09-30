@@ -5,6 +5,58 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.61] - 2026-09-30
+
+### Speeltafelmodus: volledig scherm met alleen de registers
+
+Op een vaste speeltafel wil je niets anders zien dan de registers. Met de knop
+**Volledig scherm** in de werkbalk — of **F11** — vult de app het hele scherm:
+geen titelbalk, geen Windows-taakbalk, geen hoofdbalk, werkbalk of statusbalk.
+Wat overblijft zijn de werken met hun registerknoppen, de koppelbalk en de
+setzerbalk.
+
+Bovenin staat één smalle strook met drie knoppen:
+
+- **Balken** haalt de hoofdbalk en de werkbalk tijdelijk terug. Ze schuiven
+  óver de registers heen in plaats van ertussen, zodat de indeling eronder niet
+  verspringt. Nog een keer drukken en ze zijn weer weg.
+- **Volledig scherm uit** zet het venster terug op de maat en plek van
+  daarvoor.
+- **Afsluiten** doet hetzelfde als de knop in de werkbalk: bevestigen, opslaan
+  en de computer uitzetten.
+
+Het is een zichtbare strook en geen verborgen rand waar je met de muis naartoe
+moet: op een aanraakscherm bestaat zweven niet. Op een aanraakscherm wordt de
+strook vanzelf hoog genoeg om met de vinger te raken.
+
+**Escape** zet volledig scherm uit; pas een tweede Escape gaat naar de
+bibliotheek, zodat de organist nooit met één verkeerde toets midden in het spel
+daar belandt. In de bibliotheek en de instellingen staan de balken er gewoon —
+anders kom je er niet meer uit.
+
+De app onthoudt de modus: stond hij aan bij het afsluiten, dan start hij er de
+volgende keer weer in, op het scherm waar het venster stond. Het schermvullende
+formaat wordt nooit als vensterstand bewaard; wie volledig scherm uitzet komt
+terug op de eigen maat.
+
+### Vertalingen bijgewerkt
+
+Drie teksten gingen nog in elke taal in het Nederlands de deur uit:
+
+- **De beschrijving en de kanttekening bij de downloadbare sampleset** in de
+  bibliotheek. Die staan in het manifest op GitHub, niet in de app, en hebben
+  nu vertalingen in alle zeven talen. De Nederlandse velden blijven staan,
+  zodat oudere versies van de app ze ook nog kunnen lezen.
+- **"Samples laden"** tijdens het laden van een orgel. Die tekst kwam
+  kant-en-klaar uit het binnenwerk van de app.
+- **De uitleg bij een gesloten Hauptwerk-set** (opnamen in het .hbw-formaat,
+  dat alleen Hauptwerk zelf kan afspelen). Die melding draagt nu een code die de
+  app herkent en in de gekozen taal toont.
+
+De rest van de interface en de pagina van de afstandsbediening waren al volledig
+vertaald; dat is bij deze ronde nog eens nagelopen. Technische foutdetails uit
+het binnenwerk (bestand niet gevonden, leesfout) blijven Nederlands.
+
 ## [0.7.60] - 2026-09-29
 
 ### Op Linux werd nooit een update aangeboden

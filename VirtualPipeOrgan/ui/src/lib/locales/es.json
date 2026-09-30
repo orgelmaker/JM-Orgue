@@ -512,6 +512,8 @@
     "shape_title_round": "Botones de registro redondos (tiradores)",
     "bar": "Barra",
     "bar_title": "Mostrar la barra principal (pestañas, cambio de perfil, inicio/parada del audio)",
+    "fullscreen": "Pantalla completa",
+    "fullscreen_title": "Modo consola: pantalla completa solo con los registros y la barra de combinaciones (F11). Esc lo desactiva.",
     "new_screen": "Nueva pantalla",
     "rec_audio_running": "Grabación de audio en curso — {t} · Pulsa para detenerla",
     "rec_audio_start": "Iniciar la grabación MP3 (lo que oyes) en Documentos\\JM-Orgue-opnames",
@@ -537,6 +539,12 @@
     "fit_short": "Quedan {n} registros fuera de pantalla: una ventana mayor ayudaría",
     "div_order_reset": "Orden original",
     "div_order_reset_title": "Volver al orden del órgano y mostrar de nuevo todas las divisiones"
+  },
+  "speeltafel": {
+    "show_bars": "Barras",
+    "hide_bars": "Ocultar barras",
+    "exit_fullscreen": "Salir de pantalla completa",
+    "shutdown": "Apagar"
   },
   "sampleset": {
     "loops_confirm": "¿Detectar los bucles y escribirlos en los archivos WAV? Primero se hace una copia de seguridad de los originales en una carpeta «_loopbackup»."
@@ -1007,7 +1015,8 @@
   },
   "errors": {
     "autostart_failed": "No se ha podido cambiar el inicio automático: {error}",
-    "shutdown_failed": "No se ha podido apagar: {error}"
+    "shutdown_failed": "No se ha podido apagar: {error}",
+    "closed_format": "Este sampleset guarda sus grabaciones en el formato .hbw propio de Hauptwerk ({n} de {total}). Ese formato es cerrado y solo Hauptwerk puede reproducirlo, por lo que JM-Orgue no puede abrir este sampleset."
   },
   "update": {
     "new_version_prefix": "Nueva versión",

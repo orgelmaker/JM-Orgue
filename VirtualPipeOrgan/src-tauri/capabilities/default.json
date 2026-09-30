@@ -13,6 +13,8 @@
     "core:window:allow-set-size",
     "core:window:allow-maximize",
     "core:window:allow-unmaximize",
+    "core:window:allow-set-fullscreen",
+    "core:window:allow-is-fullscreen",
     "core:window:allow-available-monitors",
     "core:webview:allow-create-webview-window",
     "dialog:default",

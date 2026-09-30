@@ -63,6 +63,52 @@
   // meldt hem hier; zie de knop "Balk" op het orgelscherm.
   let showMainChrome = true;
 
+  // Meldingen uit de Rust-kant zijn Nederlands. De meeste zijn technisch detail
+  // (bestand niet gevonden, leesfout); een paar zijn echte uitleg voor de
+  // gebruiker. Die dragen een code tussen [haken] en worden hier in de gekozen
+  // taal gezet. Onbekende meldingen komen ongewijzigd door.
+  function vertaalFout(e) {
+    const s = String(e?.message ?? e ?? '');
+    const gesloten = s.match(/\[gesloten-formaat (\d+)\/(\d+)\]/);
+    if (gesloten) {
+      return tx('errors.closed_format').replace('{n}', gesloten[1]).replace('{total}', gesloten[2]);
+    }
+    return s;
+  }
+
+  // ===== Speeltafelmodus (0.7.61) =====
+  // Volledig scherm met alleen de registers en de setzerbalk, zoals Sweelinq
+  // dat heeft. App is eigenaar omdat App ook het venster, Escape en de
+  // vensterstand beheert; Console krijgt beide standen als prop.
+  //   speeltafelModus  venster op volledig scherm, balken weg
+  //   balkenZichtbaar  daarbinnen tijdelijk hoofdbalk + werkbalk als laag erover
+  const SPEELTAFEL_KEY = 'jm-orgue-speeltafel-modus';
+  let speeltafelModus = false;
+  let balkenZichtbaar = false;
+
+  async function zetSpeeltafelModus(aan) {
+    try {
+      const { getCurrentWindow } = await import('@tauri-apps/api/window');
+      await getCurrentWindow().setFullscreen(aan);
+    } catch (e) {
+      console.warn('Volledig scherm wisselen mislukte:', e);
+      return;
+    }
+    speeltafelModus = aan;
+    balkenZichtbaar = false;
+    try { localStorage.setItem(SPEELTAFEL_KEY, aan ? '1' : '0'); } catch (e) {}
+    // Uit volledig scherm: de gewone vensterstand opnieuw zetten. Windows zet
+    // hem meestal zelf terug, maar niet altijd op het juiste formaat.
+    if (!aan) setTimeout(() => { restoreMainGeometry(); }, 150);
+  }
+
+  function wisselSpeeltafelModus() { zetSpeeltafelModus(!speeltafelModus); }
+
+  // In de speeltafelmodus zijn de balken alleen op het orgelscherm weg; in de
+  // bibliotheek en de instellingen staan ze er gewoon — anders kom je er niet
+  // meer uit.
+  $: speeltafelActief = speeltafelModus && !showOrganBrowser && activeView === 'orgel';
+
   // Opstart-splash: dekt de eerste seconden af zodat het startscherm in één
   // keer compleet in beeld komt — inclusief de update-balk, die anders ná de
   // bibliotheek inplofte en alles naar beneden duwde. Alleen het hoofdvenster.
@@ -263,6 +309,11 @@
         // gezette maat overschrijven. Eén keer verifiëren en zonodig opnieuw.
         setTimeout(async () => {
           try {
+            // Intussen volledig scherm (speeltafelmodus wordt direct na dit
+            // herstel aangezet)? Dan het formaat NIET terugzetten: dat trok
+            // het schermvullende venster terug naar de oude maat, zonder
+            // titelbalk en half over de taakbalk.
+            if (speeltafelModus || await w.isFullscreen()) return;
             const cur = await w.innerSize();
             if (Math.abs(cur.width - st.pw) > 4 || Math.abs(cur.height - st.ph) > 4) await apply();
           } catch (e) {}
@@ -279,6 +330,10 @@
       const { getCurrentWindow } = await import('@tauri-apps/api/window');
       const w = getCurrentWindow();
       if (await w.isMinimized()) return; // Windows meldt dan -32000,-32000
+      // Volledig scherm is geen vensterstand: bewaar je die, dan staat het
+      // venster na het uitzetten op schermvullend formaat in plaats van op de
+      // maat die de gebruiker had gekozen.
+      if (speeltafelModus || await w.isFullscreen()) return;
       const prev = (() => { try { return JSON.parse(localStorage.getItem(MAIN_GEOM_KEY) || '{}') || {}; } catch (e) { return {}; } })();
       if (await w.isMaximized()) {
         // Ook het monitor-anker vastleggen: de outerPosition van het
@@ -334,6 +389,12 @@
     // en opende dus altijd op de standaardpositie).
     await restoreMainGeometry();
     initMainGeometryTracking();
+    // Stond de speeltafelmodus aan bij het afsluiten, dan starten we er weer
+    // in — ná de vensterstand, zodat volledig scherm op het juiste scherm
+    // opent (de speeltafel-pc heeft er soms meer dan één).
+    try {
+      if (localStorage.getItem(SPEELTAFEL_KEY) === '1') await zetSpeeltafelModus(true);
+    } catch (e) {}
 
     // Update-check meteen bij de start (was: 3 s uitgesteld "ná de drukke
     // opstart"). Die vertraging kan vervallen omdat dit één fetch is op de
@@ -485,7 +546,9 @@
         const p = event.payload || {};
         if (loading && p.total > 0) {
           loadingProgress = Math.min(100, Math.round((p.loaded / p.total) * 100));
-          loadingMessage = `${p.message || tx('status.loading_samples')} (${p.loaded}/${p.total})`;
+          // p.message niet tonen: Rust stuurt daar altijd het Nederlandse
+          // "Samples laden", en dat stond dan in élke taal in beeld.
+          loadingMessage = `${tx('status.loading_samples')} (${p.loaded}/${p.total})`;
         }
       });
     } catch (e) { /* niet in Tauri context */ }
@@ -671,10 +734,21 @@
     if (event.key === 'F1') { event.preventDefault(); setView('orgel'); return; }
     if (event.key === 'F2') { event.preventDefault(); setView('orgel-instellingen'); return; }
     if (event.key === 'F3') { event.preventDefault(); setView('algemene-instellingen'); return; }
+    // F11: volledig scherm aan/uit, zoals in elke browser.
+    if (event.key === 'F11') { event.preventDefault(); wisselSpeeltafelModus(); return; }
     // Escape gaat altijd naar de bibliotheek, óók zonder geladen orgel: dat is
     // de vluchtroute als je in de instellingen bent beland. Zonder orgel ook de
     // weergave terugzetten, anders opent het orgel dat je zo kiest meteen in de
     // instellingen in plaats van aan de klavieren.
+    // In de speeltafelmodus zet de EERSTE Escape alleen volledig scherm uit,
+    // zoals je dat overal gewend bent; pas een tweede gaat naar de bibliotheek.
+    // Anders belandt de organist met één verkeerde toets midden in het spel in
+    // de bibliotheek.
+    if (event.key === 'Escape' && speeltafelModus) {
+      event.preventDefault();
+      zetSpeeltafelModus(false);
+      return;
+    }
     if (event.key === 'Escape') {
       event.preventDefault();
       if (!organInfo) activeView = 'orgel';
@@ -734,7 +808,7 @@
 
       midiDevices = await invoke('get_midi_devices');
     } catch (e) {
-      error = e.toString();
+      error = vertaalFout(e);
     }
   }
 
@@ -1048,7 +1122,7 @@
       return res.player_rebuilt ? 'failed-rebuilt' : 'failed-intact';
     } catch (e) {
       // Catastrofaal (geen fallback meer beschikbaar): backend-melding tonen.
-      error = e.toString();
+      error = vertaalFout(e);
       return 'failed-intact';
     }
   }
@@ -1196,7 +1270,7 @@
     try {
       await invoke('start_audio', { deviceName: selectedAudioDevice });
     } catch (e) {
-      error = e.toString();
+      error = vertaalFout(e);
     }
   }
 
@@ -1204,7 +1278,7 @@
     try {
       await invoke('stop_audio');
     } catch (e) {
-      error = e.toString();
+      error = vertaalFout(e);
     }
   }
 
@@ -1213,7 +1287,7 @@
       await invoke('connect_midi', { deviceName });
       selectedMidiDevice = deviceName;
     } catch (e) {
-      error = e.toString();
+      error = vertaalFout(e);
     }
   }
 
@@ -1263,7 +1337,7 @@
       // (met hun eigen divisiekeuze en vensterpositie).
       try { await tick(); await consoleComponent?.restorePanels?.(); } catch (e) {}
     } catch (e) {
-      error = e.toString();
+      error = vertaalFout(e);
     } finally {
       loading = false;
     }
@@ -1292,7 +1366,7 @@
       // Extra registerschermen die bij dít orgel open stonden heropenen.
       try { await tick(); await consoleComponent?.restorePanels?.(); } catch (e) {}
     } catch (e) {
-      error = e.toString();
+      error = vertaalFout(e);
     } finally {
       loading = false;
     }
@@ -1319,7 +1393,7 @@
       // Refresh organ info
       organInfo = await invoke('get_organ_info');
     } catch (e) {
-      error = e.toString();
+      error = vertaalFout(e);
     }
   }
 
@@ -1328,7 +1402,7 @@
       await invoke('toggle_coupler', { couplerId });
       organInfo = await invoke('get_organ_info');
     } catch (e) {
-      error = e.toString();
+      error = vertaalFout(e);
     }
   }
 
@@ -1340,7 +1414,7 @@
       organInfo = await invoke('get_organ_info');
       lastOrganInfoJson = null;
     } catch (e) {
-      error = e.toString();
+      error = vertaalFout(e);
     }
   }
 
@@ -1526,7 +1600,7 @@
       // en de klavieren moesten elke sessie opnieuw ingeleerd worden.
       scheduleAutoSave();
     } catch (e) {
-      error = e.toString();
+      error = vertaalFout(e);
     }
   }
 
@@ -1541,7 +1615,7 @@
         scheduleAutoSave();
       }
     } catch (e) {
-      error = e.toString();
+      error = vertaalFout(e);
     }
   }
 
@@ -1561,7 +1635,7 @@
         consoleComponent.onLearnComplete();
       }
     } catch (e) {
-      error = e.toString();
+      error = vertaalFout(e);
       // Also notify on error
       if (consoleComponent) {
         consoleComponent.onLearnComplete();
@@ -1606,12 +1680,14 @@
     <div class="loading-text">{audioStarting ? $t('splash.audio_starting') : $t('splash.starting')}</div>
   </div>
 {/if}
-<div id="app">
+<div id="app" class:speeltafel={speeltafelActief} class:balken-open={speeltafelActief && balkenZichtbaar}>
   <!-- Hoofdbalk en statusbalk kunnen uit (knop "Balk" op het orgelscherm): dat
        scheelt ~90px hoogte, en bij een grote sampleset op een klein scherm is
        dat precies wat de registers nodig hebben. In de bibliotheek en de
-       instellingen blijft de balk altijd staan — anders kom je er niet meer uit. -->
-  {#if showMainChrome || showOrganBrowser || activeView !== 'orgel'}
+       instellingen blijft de balk altijd staan — anders kom je er niet meer uit.
+       In de speeltafelmodus is de hoofdbalk weg tot "Balken" wordt gedrukt, en
+       ligt hij dan als laag óver de registers (styles.css, #app.balken-open). -->
+  {#if speeltafelActief ? balkenZichtbaar : (showMainChrome || showOrganBrowser || activeView !== 'orgel')}
     <Header
       organName={organInfo?.name}
       organLoaded={!showOrganBrowser && organInfo}
@@ -1734,6 +1810,10 @@
       on:setMidiMapping={(e) => setMidiMapping(e.detail.division, e.detail.channel, e.detail.transpose)}
       on:refreshMidiMappings={() => { refreshMidiMappings(); scheduleAutoSave(); }}
       on:setMainChrome={(e) => { showMainChrome = e.detail; }}
+      speeltafelModus={speeltafelActief}
+      {balkenZichtbaar}
+      on:toggleSpeeltafel={wisselSpeeltafelModus}
+      on:toggleBalken={() => { balkenZichtbaar = !balkenZichtbaar; }}
       on:learnMidiChannel={(e) => learnMidiChannel(e.detail)}
       on:learnKeyboardRange={(e) => learnKeyboardRange(e.detail.division, e.detail.firstSampleNote)}
       on:selectAudioDevice={(e) => handleSelectAudioDevice(e.detail)}
@@ -1760,7 +1840,9 @@
     />
   </div>
 
-  {#if showMainChrome || showOrganBrowser || activeView !== 'orgel'}
+  <!-- In de speeltafelmodus nooit: onderaan staat de setzerbalk, en die moet
+       vrij blijven. De audiobediening zit in de hoofdbalk (Balken). -->
+  {#if !speeltafelActief && (showMainChrome || showOrganBrowser || activeView !== 'orgel')}
     <StatusBar
       {status}
       {error}

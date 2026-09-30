@@ -225,12 +225,18 @@ fn build_definition(
             .filter(|(_, f)| f.to_lowercase().ends_with(".hbw"))
             .count();
         if hbw * 2 > sample_file.len() {
+            // De code tussen [haken] laat de app deze uitleg in de gekozen
+            // taal tonen (App.svelte: vertaalFout). De Nederlandse zin erachter
+            // blijft staan voor het logboek en voor oudere app-versies.
             return Err(OdfError::ParseError {
                 line: 0,
                 message: format!(
-                    "deze set bewaart zijn opnamen in Hauptwerks eigen \
-                     .hbw-formaat ({} van de {}); dat formaat is gesloten en \
-                     kan alleen door Hauptwerk zelf worden afgespeeld",
+                    "[gesloten-formaat {}/{}] deze set bewaart zijn opnamen in \
+                     Hauptwerks eigen .hbw-formaat ({} van de {}); dat formaat \
+                     is gesloten en kan alleen door Hauptwerk zelf worden \
+                     afgespeeld",
+                    hbw,
+                    sample_file.len(),
                     hbw,
                     sample_file.len()
                 ),
@@ -1485,6 +1491,9 @@ mod tests {
         .expect_err("een set zonder afspeelbare opnamen hoort geweigerd te worden");
         let melding = err.to_string();
         assert!(melding.contains(".hbw"), "onverwachte fout: {melding}");
+        // De code waarmee de app deze uitleg vertaalt (App.svelte: vertaalFout).
+        // Verdwijnt hij, dan krijgt iedereen de Nederlandse zin te zien.
+        assert!(melding.contains("[gesloten-formaat "), "vertaalcode ontbreekt: {melding}");
 
         // Dezelfde set met gewone WAV-opnamen komt gewoon binnen.
         assert!(!mini_definition().stops.is_empty());

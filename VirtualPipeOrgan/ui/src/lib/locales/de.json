@@ -512,6 +512,8 @@
     "shape_title_round": "Runde Registerknöpfe (Züge)",
     "bar": "Leiste",
     "bar_title": "Hauptleiste anzeigen (Reiter, Profilwechsel, Audio Start/Stopp)",
+    "fullscreen": "Vollbild",
+    "fullscreen_title": "Spieltischmodus: Vollbild nur mit den Registern und der Setzerleiste (F11). Escape schaltet ihn wieder aus.",
     "new_screen": "Neuer Bildschirm",
     "rec_audio_running": "Audioaufnahme läuft — {t} · Klicken zum Stoppen",
     "rec_audio_start": "MP3-Aufnahme (was Sie hören) starten in Dokumente\\JM-Orgue-opnames",
@@ -537,6 +539,12 @@
     "fit_short": "Noch {n} Register außerhalb des Bildes — ein größeres Fenster hilft",
     "div_order_reset": "Reihenfolge zurück",
     "div_order_reset_title": "Zurück zur Reihenfolge der Orgel, alle Werke wieder anzeigen"
+  },
+  "speeltafel": {
+    "show_bars": "Leisten",
+    "hide_bars": "Leisten weg",
+    "exit_fullscreen": "Vollbild beenden",
+    "shutdown": "Herunterfahren"
   },
   "sampleset": {
     "loops_confirm": "Loops erkennen und in die WAV-Dateien schreiben? Die Originale werden zuerst in einen \"_loopbackup\"-Ordner gesichert."
@@ -1007,7 +1015,8 @@
   },
   "errors": {
     "autostart_failed": "Autostart ändern fehlgeschlagen: {error}",
-    "shutdown_failed": "Herunterfahren fehlgeschlagen: {error}"
+    "shutdown_failed": "Herunterfahren fehlgeschlagen: {error}",
+    "closed_format": "Dieses Set speichert seine Aufnahmen im eigenen .hbw-Format von Hauptwerk ({n} von {total}). Dieses Format ist geschlossen und kann nur von Hauptwerk selbst abgespielt werden; JM-Orgue kann dieses Set daher nicht öffnen."
   },
   "update": {
     "new_version_prefix": "Neue Version",

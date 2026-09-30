@@ -512,6 +512,8 @@
     "shape_title_round": "Tirants ronds (à tirer)",
     "bar": "Barre",
     "bar_title": "Afficher la barre principale (onglets, profil, audio marche/arrêt)",
+    "fullscreen": "Plein écran",
+    "fullscreen_title": "Mode console : plein écran avec uniquement les jeux et la barre des combinaisons (F11). Échap le désactive.",
     "new_screen": "Nouvel écran",
     "rec_audio_running": "Enregistrement audio — {t} · Cliquer pour arrêter",
     "rec_audio_start": "Démarrer l'enregistrement MP3 (ce que vous entendez) dans Documents\\JM-Orgue-opnames",
@@ -537,6 +539,12 @@
     "fit_short": "Encore {n} jeux hors écran — une fenêtre plus grande aiderait",
     "div_order_reset": "Ordre d’origine",
     "div_order_reset_title": "Revenir à l’ordre de l’orgue et réafficher tous les claviers"
+  },
+  "speeltafel": {
+    "show_bars": "Barres",
+    "hide_bars": "Masquer les barres",
+    "exit_fullscreen": "Quitter le plein écran",
+    "shutdown": "Éteindre"
   },
   "sampleset": {
     "loops_confirm": "Détecter les boucles et les écrire dans les fichiers WAV ? Les originaux sont d'abord sauvegardés dans un dossier \"_loopbackup\"."
@@ -1007,7 +1015,8 @@
   },
   "errors": {
     "autostart_failed": "Échec de la modification du démarrage automatique : {error}",
-    "shutdown_failed": "Échec de l'arrêt : {error}"
+    "shutdown_failed": "Échec de l'arrêt : {error}",
+    "closed_format": "Ce jeu enregistre ses échantillons dans le format .hbw propre à Hauptwerk ({n} sur {total}). Ce format est fermé et ne peut être lu que par Hauptwerk lui-même ; JM-Orgue ne peut donc pas ouvrir ce jeu."
   },
   "update": {
     "new_version_prefix": "Nouvelle version",

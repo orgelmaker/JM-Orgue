@@ -512,6 +512,8 @@
     "shape_title_round": "Ronde registerknoppen (trekregisters)",
     "bar": "Balk",
     "bar_title": "Hoofdbalk tonen (tabbladen, profielwissel, audio start/stop)",
+    "fullscreen": "Volledig scherm",
+    "fullscreen_title": "Speeltafelmodus: volledig scherm met alleen de registers en de setzerbalk (F11). Escape zet hem weer uit.",
     "new_screen": "Nieuw scherm",
     "rec_audio_running": "Audio-opname loopt — {t} · Klik om te stoppen",
     "rec_audio_start": "MP3-opname (wat je hoort) starten in Documenten\\JM-Orgue-opnames",
@@ -537,6 +539,12 @@
     "fit_short": "Nog {n} registers buiten beeld — een groter venster helpt",
     "div_order_reset": "Volgorde terug",
     "div_order_reset_title": "Terug naar de volgorde van het orgel, en alle werken weer tonen"
+  },
+  "speeltafel": {
+    "show_bars": "Balken",
+    "hide_bars": "Balken weg",
+    "exit_fullscreen": "Volledig scherm uit",
+    "shutdown": "Afsluiten"
   },
   "sampleset": {
     "loops_confirm": "Loops detecteren en in de WAV-bestanden schrijven? De originelen worden eerst geback-upt naar een \"_loopbackup\"-map."
@@ -1007,7 +1015,8 @@
   },
   "errors": {
     "autostart_failed": "Autostart wijzigen mislukt: {error}",
-    "shutdown_failed": "Afsluiten mislukt: {error}"
+    "shutdown_failed": "Afsluiten mislukt: {error}",
+    "closed_format": "Deze set bewaart zijn opnamen in het eigen .hbw-formaat van Hauptwerk ({n} van de {total}). Dat formaat is gesloten en kan alleen door Hauptwerk zelf worden afgespeeld; JM-Orgue kan deze set daarom niet openen."
   },
   "update": {
     "new_version_prefix": "Nieuwe versie",
