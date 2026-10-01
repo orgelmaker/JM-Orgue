@@ -6,6 +6,7 @@
 
 mod audio;
 mod commands;
+mod crescendo_voorstel;
 mod feedback;
 mod library;
 mod silence;
@@ -429,6 +430,7 @@ fn main() {
             commands::get_crescendo_claims,
             commands::cancel_pedal_learn,
             commands::get_crescendo_state,
+            commands::crescendo_voorstel,
             commands::learn_crescendo_pedal,
             commands::clear_crescendo_binding,
             commands::set_crescendo_invert,

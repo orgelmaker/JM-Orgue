@@ -38,6 +38,7 @@
 //!   POST /crescendo/config        - body {"stages":[[id..]..],"enabled":bool,"num_stages"?:n}
 //!   POST /crescendo/binding       - body {"channel","cc","min"?,"max"?,"invert"?} | {"clear":true}
 //!   POST /crescendo/stage?stage=N - trap zetten zoals een UI-klik
+//!   POST /crescendo/voorstel?stages=N - droog: voorstel voor de trappen (body: opties, optioneel)
 //!   GET  /swell                   - per divisie {division,index,position,binding,min_db,cutoff}
 //!   POST /swell/binding           - body {"division","channel","cc","min"?,"max"?,"invert"?} | {"division","clear":true}
 //!   POST /audio/test_signal       - ?channel=<n>&kind=0|1&level_db=<dB>; zonder channel = uit
@@ -494,6 +495,7 @@ fn route_test_only(
         (tiny_http::Method::Post, "/crescendo/config") => handle_crescendo_config(state, body),
         (tiny_http::Method::Post, "/crescendo/binding") => handle_crescendo_binding(state, body),
         (tiny_http::Method::Post, "/crescendo/stage") => handle_crescendo_stage(state, query),
+        (tiny_http::Method::Post, "/crescendo/voorstel") => handle_crescendo_voorstel(state, query, body),
         (tiny_http::Method::Get, "/swell") => Ok(handle_swell_get(state)),
         (tiny_http::Method::Post, "/swell/binding") => handle_swell_binding(state, body),
         // Luidspreker-testsignaal (0.7.47): ?channel=<n>&kind=0|1, zonder
@@ -1417,6 +1419,31 @@ fn handle_crescendo_binding(state: &AppState, body: &str) -> Result<Value, (u16,
 }
 
 /// POST /crescendo/stage?stage=N — trap zetten zoals een UI-klik.
+/// POST /crescendo/voorstel?stages=N — droog (0.7.67): het voorstel voor de
+/// trappen, met leesbare namen, zonder het toe te passen of te bewaren. Body
+/// (optioneel): {"koppels":true,"octaafkoppels":false,"kleur":true,"tutti_extra":true}.
+fn handle_crescendo_voorstel(state: &AppState, query: &str, body: &str) -> Result<Value, (u16, String)> {
+    let n: usize = parse_query(query, "stages").unwrap_or(20);
+    let opties: crate::crescendo_voorstel::VoorstelOpties = if body.trim().is_empty() {
+        Default::default()
+    } else {
+        serde_json::from_str(body).map_err(|e| (400u16, format!("Ongeldige opties: {}", e)))?
+    };
+    let trappen = crate::commands::crescendo_voorstel_inner(state, n, opties).map_err(|e| (409u16, e))?;
+    let mut namen = serde_json::Map::new();
+    if let Some(info) = state.loaded_organ_info.read().as_ref() {
+        for d in &info.divisions {
+            for s in &d.stops {
+                namen.insert(s.id.clone(), json!(format!("{}: {} {}", d.name, s.name, s.pitch).trim().to_string()));
+            }
+        }
+        for c in info.couplers.iter().flatten() {
+            namen.insert(c.id.clone(), json!(format!("koppel {} -> {} ({})", c.source_division, c.destination_division, c.coupler_type)));
+        }
+    }
+    Ok(json!({ "stages": trappen, "namen": namen }))
+}
+
 fn handle_crescendo_stage(state: &AppState, query: &str) -> Result<Value, (u16, String)> {
     let stage: u8 = parse_query(query, "stage").ok_or((400u16, "Parameter 'stage' ontbreekt".to_string()))?;
     crate::commands::set_crescendo_stage_inner(state, stage).map_err(|e| (409u16, e))?;
@@ -2014,7 +2041,7 @@ mod tests {
             internal_stop_id: 0,
             first_midi_note: 36,
             last_midi_note: 96,
-            is_reed: false, koren: None, mengwerk: false, wind_voet: 8.0,
+            is_reed: false, koren: None, mengwerk: false, wind_voet: 8.0, percussief: false,
         };
         let coupler = |id: &str, kind: &str, div: &str| CouplerDto {
             id: id.to_string(),
@@ -2026,6 +2053,7 @@ mod tests {
             midi_action_code: 60,
             coupler_type: kind.to_string(),
             pitch_offset: 0,
+            speciaal: false,
         };
         OrganInfoDto {
             id: r"C:\Orgels\Test\organ.organ".to_string(),
@@ -2042,6 +2070,7 @@ mod tests {
                     has_tremulant: false,
                     tremulant_kind: None,
                     has_swell: false,
+                    is_pedal: false,
                 },
                 DivisionDto {
                     name: "Pedaal".to_string(),
@@ -2050,6 +2079,7 @@ mod tests {
                     has_tremulant: true,
                     tremulant_kind: Some("synth".to_string()),
                     has_swell: false,
+                    is_pedal: false,
                 },
             ],
             couplers: Some(vec![

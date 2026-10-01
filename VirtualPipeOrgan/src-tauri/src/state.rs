@@ -4849,6 +4849,7 @@ mod coupler_route_tests {
             midi_action_code: 0,
             coupler_type: ctype.to_string(),
             pitch_offset: offset,
+            speciaal: false,
         }
     }
 
@@ -4980,7 +4981,7 @@ mod crescendo_tests {
         StopDto {
             id: id.to_string(), name: id.to_string(), pitch: "8".to_string(), drawn: false,
             color: None, has_tremulant: false, midi_action_code: 0, internal_stop_id: n,
-            first_midi_note: 36, last_midi_note: 96, is_reed: false, koren: None, mengwerk: false, wind_voet: 8.0,
+            first_midi_note: 36, last_midi_note: 96, is_reed: false, koren: None, mengwerk: false, wind_voet: 8.0, percussief: false,
         }
     }
 
@@ -4991,12 +4992,12 @@ mod crescendo_tests {
             divisions: vec![DivisionDto {
                 name: "Hoofdwerk".into(), display_name: "Hoofdwerk".into(),
                 stops: vec![stop("a", 1), stop("b", 2), stop("c", 3)],
-                has_tremulant: false, tremulant_kind: None, has_swell: false,
+                has_tremulant: false, tremulant_kind: None, has_swell: false, is_pedal: false,
             }],
             couplers: Some(vec![CouplerDto {
                 id: "real_coupler_1".into(), name: "II/I".into(), source_division: "Hoofdwerk".into(),
                 destination_division: "Hoofdwerk".into(), active: false, display_in_division: "Hoofdwerk".into(),
-                midi_action_code: 0, coupler_type: "unison".into(), pitch_offset: 0,
+                midi_action_code: 0, coupler_type: "unison".into(), pitch_offset: 0, speciaal: false,
             }]),
             retune_pipes: 0, retune_total: 0, perspectives: Vec::new(), layered_stops: 0,
             release_pipes: 0,

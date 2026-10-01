@@ -2698,6 +2698,22 @@ input[type="range"]::-webkit-slider-thumb:hover {
 }
 .cresc-step-h:hover { color: var(--text); }
 .cresc-step-h.active { background: var(--gold-border); color: var(--bg-dark); }
+
+/* Opties voor Auto-fill van het crescendo (0.7.67): klein, in twee kolommen. */
+.cresc-opties {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+  gap: 0.15rem 0.6rem;
+  margin: -0.2rem 0 0.5rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+.cresc-opties label {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  cursor: pointer;
+}
 .cresc-div-name {
   position: sticky;
   left: 0;

@@ -856,48 +856,52 @@
     return displayOrgan.divisions.flatMap(d => d.stops.map(s => s.id));
   }
 
-  // Voethoogte (in voet) uit een pitch-string halen, bv. "8'", "16'", "2 2/3'", "4st".
-  function pitchFeet(s) {
-    const p = (s.pitch || '').toString();
-    // Mengwerk zonder voetmaat: klinkt hoog, dus ná de 2'-registers en niet
-    // tussen de 8'-registers (de oude terugval).
-    if (s.mengwerk && !p.trim()) return 1;
-    const m = p.match(/(\d+)(?:\s+(\d+)\/(\d+))?/);
-    if (!m) return 8; // onbekend → behandel als 8'
-    let feet = parseInt(m[1], 10) || 8;
-    if (m[2] && m[3]) feet += parseInt(m[2], 10) / parseInt(m[3], 10);
-    return feet;
+  // ---- Crescendo automatisch vullen (0.7.67) ----
+  // Het voorstel komt uit de backend (crescendo_voorstel.rs): van de zachtste
+  // 8' per manuaal en een zachte 16' in het pedaal, via principalen, 2' en
+  // mengwerken naar de tongwerken, met koppels op een vaste plek en zonder
+  // tremulanten, zwevingen en effectregisters. Onafhankelijk van hoe de
+  // registers op het scherm gesorteerd zijn.
+  const CRESC_OPTIES_STANDAARD = { koppels: true, octaafkoppels: false, kleur: true, tutti_extra: true };
+  let crescOpties = { ...CRESC_OPTIES_STANDAARD };
+  // De matrix van vóór de laatste Auto-fill, voor "Ongedaan maken" (alleen
+  // in het geheugen van dit venster).
+  let crescVorige = null;
+
+  function leesCrescOpties() {
+    try {
+      const opgeslagen = JSON.parse(readOrganUiPref('jm-orgue-cresc-opties') || 'null');
+      crescOpties = { ...CRESC_OPTIES_STANDAARD, ...(opgeslagen && typeof opgeslagen === 'object' ? opgeslagen : {}) };
+    } catch (e) {
+      crescOpties = { ...CRESC_OPTIES_STANDAARD };
+    }
   }
-  // Familie-rang voor een musicale opbouw: grondstemmen eerst, tongwerken laatst.
-  function crescFamily(s) {
-    const n = (s.name || '').toLowerCase();
-    if (s.is_reed || n.includes('trompet') || n.includes('hobo') || n.includes('bazuin') || n.includes('fagot') || n.includes('schalmei') || n.includes('kromhoorn') || n.includes('trumpet') || n.includes('clairon') || n.includes('dulciaan')) return 4; // tongwerken
-    if (n.includes('mixtuur') || n.includes('cymbel') || n.includes('scherp') || n.includes('sesquialter') || n.includes('cornet') || n.includes('mixture')) return 3; // vulstemmen
-    if (n.includes('prestant') || n.includes('principaal') || n.includes('principal') || n.includes('octaaf') || n.includes('octave') || n.includes('diapason') || n.includes('quint') || n.includes('nasard') || n.includes('terts') || n.includes('tierce')) return 2; // principalen + mutaties
-    return 1; // fluiten/gedekt/strijkers (grondtoon)
+  function zetCrescOptie(naam, aan) {
+    crescOpties = { ...crescOpties, [naam]: aan };
+    try { localStorage.setItem(organUiKey('jm-orgue-cresc-opties'), JSON.stringify(crescOpties)); } catch (e) {}
   }
 
-  function autoFillCrescendo() {
+  async function autoFillCrescendo() {
     if (!displayOrgan) return;
-    // Musicale opbouw: per familie (grondtoon → principalen → vulstemmen → tongwerken),
-    // binnen elke familie van laag (grote voet) naar hoog. Zo komt het crescendo geleidelijk
-    // op: eerst zachte grondstemmen, dan de principaalkoor, dan mixturen, tongwerken als laatst.
-    const all = [];
-    for (const div of displayOrgan.divisions) {
-      for (const stop of div.stops) all.push(stop);
+    // Eigen werk niet ongevraagd wegvegen. window.confirm is in Tauri een
+    // Promise (dialoog-plugin), dus await.
+    const heeftInhoud = crescendoStages.some(trap => Array.isArray(trap) && trap.length > 0);
+    if (heeftInhoud && !(await window.confirm($t('crescendo.autofill_confirm')))) return;
+    try {
+      const voorstel = await invoke('crescendo_voorstel', { numStages: crescendoNumStages, opties: crescOpties });
+      if (!Array.isArray(voorstel)) return;
+      crescVorige = crescendoStages.map(trap => Array.isArray(trap) ? [...trap] : []);
+      crescendoStages = voorstel;
+      saveCrescendo();
+    } catch (e) {
+      console.error('Crescendovoorstel mislukt:', e);
     }
-    all.sort((a, b) => {
-      const fa = crescFamily(a), fb = crescFamily(b);
-      if (fa !== fb) return fa - fb;
-      return pitchFeet(b) - pitchFeet(a); // grote voet (laag) eerst
-    });
-    const orderedIds = all.map(s => s.id);
+  }
 
-    crescendoStages = [];
-    for (let i = 0; i < crescendoNumStages; i++) {
-      const count = Math.ceil(((i + 1) / crescendoNumStages) * orderedIds.length);
-      crescendoStages.push(orderedIds.slice(0, count)); // cumulatief, monotoon
-    }
+  function crescOngedaan() {
+    if (!crescVorige) return;
+    crescendoStages = crescVorige;
+    crescVorige = null;
     saveCrescendo();
   }
 
@@ -2164,6 +2168,10 @@
     }
     // Vorm van de registerknoppen (rechthoekig/rond)
     knobShape = readOrganUiPref('jm-orgue-knob-shape') === 'round' ? 'round' : 'rect';
+    // Opties voor Auto-fill van het crescendo (per orgel); Ongedaan maken
+    // geldt alleen binnen hetzelfde orgel.
+    leesCrescOpties();
+    crescVorige = null;
     // Hoofdbalk + statusbalk van het hoofdvenster (in een extra scherm regelt
     // PanelApp dat zelf via zijn panel-state).
     if (!secondary) {
@@ -5833,9 +5841,33 @@
                     <button class="btn btn-secondary btn-sm" style="flex:1;" on:click={autoFillCrescendo} title={$t('crescendo.autofill_title')}>
                       {$t('crescendo.autofill')}
                     </button>
+                    {#if crescVorige}
+                      <button class="btn btn-ghost btn-sm" on:click={crescOngedaan} title={$t('crescendo.undo_title')}>
+                        {$t('crescendo.undo')}
+                      </button>
+                    {/if}
                     <button class="btn btn-ghost btn-sm" on:click={clearCrescendo} title={$t('crescendo.clear_title')}>
                       {$t('settings.crescendo_clear')}
                     </button>
+                  </div>
+                  <!-- Opties voor Auto-fill (0.7.67), per orgel onthouden. -->
+                  <div class="cresc-opties">
+                    <label title={$t('crescendo.opt_couplers_title')}>
+                      <input type="checkbox" checked={crescOpties.koppels} on:change={(e) => zetCrescOptie('koppels', e.target.checked)} />
+                      {$t('crescendo.opt_couplers')}
+                    </label>
+                    <label title={$t('crescendo.opt_colour_title')}>
+                      <input type="checkbox" checked={crescOpties.kleur} on:change={(e) => zetCrescOptie('kleur', e.target.checked)} />
+                      {$t('crescendo.opt_colour')}
+                    </label>
+                    <label title={$t('crescendo.opt_tutti_title')}>
+                      <input type="checkbox" checked={crescOpties.tutti_extra} on:change={(e) => zetCrescOptie('tutti_extra', e.target.checked)} />
+                      {$t('crescendo.opt_tutti')}
+                    </label>
+                    <label title={$t('crescendo.opt_octave_title')}>
+                      <input type="checkbox" checked={crescOpties.octaafkoppels} on:change={(e) => zetCrescOptie('octaafkoppels', e.target.checked)} />
+                      {$t('crescendo.opt_octave')}
+                    </label>
                   </div>
                   <!-- Stage indicator -->
                   <div class="crescendo-bar">

@@ -360,6 +360,10 @@ pub struct CouplerDef {
     pub destination_manual: u32,
     pub destination_keyshift: i32,
     pub unison_off: bool,
+    /// GrandOrgue `CouplerType=Melody` of `Bass`: koppelt alleen de hoogste
+    /// of laagste noot. Werkt anders dan een gewone koppel (0.7.67: nooit in
+    /// een voorstel voor de crescendowalze).
+    pub melodie_of_bas: bool,
 }
 
 /// Parser for GrandOrgue ODF files
@@ -1222,6 +1226,9 @@ impl OdfParser {
                         destination_manual: self.parse_u32(section, "DestinationManual").unwrap_or(0),
                         destination_keyshift: self.parse_i32(section, "DestinationKeyshift").unwrap_or(0),
                         unison_off: section.get("UnisonOff").map(|v| v == "Y").unwrap_or(false),
+                        melodie_of_bas: section.get("CouplerType")
+                            .map(|v| matches!(v.trim().to_lowercase().as_str(), "melody" | "bass"))
+                            .unwrap_or(false),
                     });
                 }
             }

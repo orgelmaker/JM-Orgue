@@ -696,6 +696,7 @@ fn build_definition(
             destination_manual: dest_manual,
             destination_keyshift: offset,
             unison_off: false,
+            melodie_of_bas: false,
         });
         manual_coupler_refs.entry(src_manual).or_default().push(coupler_num);
         coupler_num += 1;

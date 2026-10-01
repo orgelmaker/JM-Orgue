@@ -5,6 +5,50 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.67] - 2026-10-01
+
+### Crescendo automatisch vullen: van zacht naar vol, met koppels
+
+**Auto-fill** in de crescendo-editor (Orgel-instellingen) stelt de trappen nu
+op zoals een orgelbouwer een walze opbouwt:
+
+1. eerst per klavier het zachtste 8'-register en in het pedaal een zachte
+   16', met de manuaalkoppels en de zwelwerk-pedaalkoppel;
+2. dan de zachte 8'-registers, de 4' en de principalen, met de hoofdwerk-
+   pedaalkoppel;
+3. dan 2' en aliquoten, de manuaal-16' en de mixturen;
+4. daarna de kleurregisters en de tongwerken: eerst de zachte (Hobo,
+   Kromhoorn), dan de trompetten, dan 4' en 16';
+5. in de laatste trap 32'-tongen en chamades.
+
+Manualen en pedaal groeien daarbij samen. De stappen zijn half verdeeld op
+aantal registers en half op geschatte sterkte: geen trappen waar je niets
+hoort, en geen grote sprong bij de luide registers. Tremulanten, zwevingen
+(Voix céleste, Unda maris), Vox humana en effectregisters (Zimbelstern,
+klokken) komen er nooit in. Twee helften van een register (Bas/Discant)
+komen in dezelfde trap.
+
+Het hoofdmanuaal herkent de app aan de naam (Hoofdwerk, Hauptwerk, Great,
+Grand-Orgue …), anders is het het grootste manuaal zonder zwelkast. Koppels
+gaan alleen naar het hoofdmanuaal en naar het pedaal, nooit twee wegen naar
+hetzelfde klavier. Bijzondere koppels uit een sampleset (Unison Off, melodie-
+en baskoppels) worden nooit aangezet; een Unison Off zou het klavier
+stilzetten.
+
+Naast de knop staan vier opties, die per orgel worden onthouden:
+
+- **Koppels meenemen** (standaard aan);
+- **Kleurregisters** (Sesquialter, Cornet, Terts), laat in de opbouw
+  (standaard aan);
+- **32'-tongen en chamades**, alleen in de laatste trap (standaard aan);
+- **Octaafkoppels in het tutti** (standaard uit, want het kost veel
+  stemmen).
+
+Staat er al iets in de trappen, dan vraagt Auto-fill eerst of het vervangen
+mag. Daarna verschijnt **Ongedaan maken**, waarmee de vorige tabel
+terugkomt. De volgorde hangt niet meer af van hoe je de registers op het
+scherm hebt gesorteerd.
+
 ## [0.7.66] - 2026-10-01
 
 ### Mengwerken tonen het aantal koren

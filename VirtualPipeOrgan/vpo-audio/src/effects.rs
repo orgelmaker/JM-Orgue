@@ -586,8 +586,11 @@ fn bevat(naam: &str, woorden: &[&str]) -> bool {
 /// vult die alleen aan. Volgorde: tongwerk → mixtuur → gedekt → fluit →
 /// strijker → principaal (de terugval, want die is het veiligste midden).
 pub fn familie_van_naam(naam: &str, tongwerk: bool) -> PijpFamilie {
-    let n = naam.to_lowercase();
+    // ß als ss: "Subbaß" en "Octavbaß" vielen anders buiten elke lijst en
+    // werden principaal.
+    let n = naam.to_lowercase().replace('ß', "ss");
     if tongwerk || bevat(&n, &["regaal", "regal", "vox humana", "kromhoorn", "krumhorn", "cromorne",
+        "englischhorn", "englisch horn", "english horn", "cor anglais", "engels hoorn",
         "trompet", "trumpet", "trompette", "hobo", "oboe", "hautbois", "fagot", "basson", "bassoon",
         "dulciaan", "dulzian", "dulcian", "bazuin", "posaune", "bombard", "clairon", "clarion",
         "schalmei", "chalumeau", "trombone", "tuba", "klarinet", "clarinet", "sordun", "ranket",

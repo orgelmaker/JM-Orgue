@@ -71,6 +71,12 @@ pub struct CouplerDto {
     pub coupler_type: String,
     /// Pitch offset in semitones: 0=unison, +12=super, -12=sub
     pub pitch_offset: i32,
+    /// Koppel met een bijzondere werking uit de sampleset: GrandOrgue
+    /// UnisonOff, of CouplerType Melody/Bass. In de DTO heten die gewoon
+    /// "unison"; het crescendovoorstel (0.7.67) mag ze nooit aanzetten (een
+    /// Unison Off zet het klavier stil).
+    #[serde(skip_serializing)]
+    pub speciaal: bool,
 }
 
 /// Organ info for frontend
@@ -139,6 +145,11 @@ pub struct DivisionDto {
     /// enables the swell box (expression) for it by default.
     #[serde(default)]
     pub has_swell: bool,
+    /// Het pedaal (0.7.67). GrandOrgue/Hauptwerk: manuaal 0; eigen sets: de
+    /// naam. Vervangt de naamregel bij het maken van koppels en is nodig voor
+    /// het crescendovoorstel.
+    #[serde(default)]
+    pub is_pedal: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -178,6 +189,10 @@ pub struct StopDto {
     /// windverbruik hangt wel van de voetmaat af.
     #[serde(skip_serializing)]
     pub wind_voet: f32,
+    /// GrandOrgue Percussive=Y (klok, Zimbelstern …): nooit in een
+    /// crescendovoorstel (0.7.67).
+    #[serde(skip_serializing)]
+    pub percussief: bool,
 }
 
 /// Division volume info for frontend
@@ -2767,6 +2782,7 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
                     koren,
                     mengwerk,
                     wind_voet: if stop.sounding_harmonic > 0 { 64.0 / stop.sounding_harmonic as f32 } else { 8.0 },
+                    percussief: stop.percussive,
                     drawn: false,
                     color: Some(color.to_string()),
                     // Echte tremulant-opnamen van dit register (gevuld in het
@@ -2814,6 +2830,7 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
             tremulant_kind: tremulant_kind.map(str::to_string),
             // Division sits in a swell box (its windchest references an Enclosure).
             has_swell: enclosed_divs.contains(&manual.name),
+            is_pedal: manual.number == 0,
         });
     }
 
@@ -3611,6 +3628,29 @@ pub struct CrescendoConfigDto {
     /// Pedaalbinding (channel, cc, min, max, invert) — zodat andere vensters
     /// een elders ingeleerde trede zien zonder extra IPC.
     pub binding: Option<(u8, u8, u8, u8, bool)>,
+}
+
+/// Voorstel voor de crescendotrappen (0.7.67): van zacht naar vol, met
+/// koppels. Puur een voorstel; de frontend vraagt bevestiging en bewaart het
+/// via set_crescendo_config. Zie crescendo_voorstel.rs.
+#[tauri::command]
+pub fn crescendo_voorstel(
+    state: State<AppState>,
+    num_stages: usize,
+    opties: Option<crate::crescendo_voorstel::VoorstelOpties>,
+) -> Result<Vec<Vec<String>>, String> {
+    crescendo_voorstel_inner(&state, num_stages, opties.unwrap_or_default())
+}
+
+pub fn crescendo_voorstel_inner(
+    state: &AppState,
+    num_stages: usize,
+    opties: crate::crescendo_voorstel::VoorstelOpties,
+) -> Result<Vec<Vec<String>>, String> {
+    let info = state.loaded_organ_info.read();
+    let info = info.as_ref().ok_or_else(|| "Geen orgel geladen".to_string())?;
+    let (divisies, koppels) = crate::crescendo_voorstel::uit_orgel(info);
+    Ok(crate::crescendo_voorstel::stel_voor(&divisies, &koppels, num_stages.clamp(1, 255), &opties))
 }
 
 /// Get current crescendo config
@@ -6135,6 +6175,7 @@ fn build_couplers_from_definition(definition: &OrganDefinition) -> Vec<CouplerDt
                 midi_action_code: action_code,
                 coupler_type: coupler_type.into(),
                 pitch_offset: offset,
+                speciaal: cdef.unison_off || cdef.melodie_of_bas,
             });
             action_code = action_code.saturating_add(1);
         }
@@ -6147,11 +6188,11 @@ fn generate_couplers(divisions: &[DivisionDto]) -> Vec<CouplerDto> {
     let mut couplers = Vec::new();
     let mut action_code: u8 = 100;
 
-    // Detect pedal division
-    let pedal_idx = divisions.iter().position(|d| {
+    // Het pedaal: het veld is_pedal, en anders (oude DTO's) de naam.
+    let pedal_idx = divisions.iter().position(|d| d.is_pedal).or_else(|| divisions.iter().position(|d| {
         let lower = d.name.to_lowercase();
         lower.contains("pedal") || lower.contains("pedaal")
-    });
+    }));
 
     // Manual (non-pedal) divisions
     let manual_indices: Vec<usize> = (0..divisions.len())
@@ -6176,6 +6217,7 @@ fn generate_couplers(divisions: &[DivisionDto]) -> Vec<CouplerDto> {
                 midi_action_code: action_code,
                 coupler_type: "unison".into(),
                 pitch_offset: 0,
+                speciaal: false,
             });
             action_code = action_code.saturating_add(1);
         }
@@ -6200,6 +6242,7 @@ fn generate_couplers(divisions: &[DivisionDto]) -> Vec<CouplerDto> {
                 midi_action_code: action_code,
                 coupler_type: "unison".into(),
                 pitch_offset: 0,
+                speciaal: false,
             });
             action_code = action_code.saturating_add(1);
         }
@@ -6224,6 +6267,7 @@ fn generate_couplers(divisions: &[DivisionDto]) -> Vec<CouplerDto> {
                 midi_action_code: action_code,
                 coupler_type: "super".into(),
                 pitch_offset: 12,
+                speciaal: false,
             });
             action_code = action_code.saturating_add(1);
         }
@@ -6248,6 +6292,7 @@ fn generate_couplers(divisions: &[DivisionDto]) -> Vec<CouplerDto> {
                 midi_action_code: action_code,
                 coupler_type: "sub".into(),
                 pitch_offset: -12,
+                speciaal: false,
             });
             action_code = action_code.saturating_add(1);
         }
@@ -6268,6 +6313,7 @@ fn generate_couplers(divisions: &[DivisionDto]) -> Vec<CouplerDto> {
             midi_action_code: action_code,
             coupler_type: "super".into(),
             pitch_offset: 12,
+            speciaal: false,
         });
         action_code = action_code.saturating_add(1);
         // Sub 16'
@@ -6281,6 +6327,7 @@ fn generate_couplers(divisions: &[DivisionDto]) -> Vec<CouplerDto> {
             midi_action_code: action_code,
             coupler_type: "sub".into(),
             pitch_offset: -12,
+            speciaal: false,
         });
         action_code = action_code.saturating_add(1);
     }
@@ -6298,6 +6345,7 @@ fn generate_couplers(divisions: &[DivisionDto]) -> Vec<CouplerDto> {
             midi_action_code: action_code,
             coupler_type: "ta".into(),
             pitch_offset: 0,
+            speciaal: false,
         });
         action_code = action_code.saturating_add(1);
     }
@@ -6316,6 +6364,7 @@ fn generate_couplers(divisions: &[DivisionDto]) -> Vec<CouplerDto> {
             midi_action_code: action_code,
             coupler_type: "melody".into(),
             pitch_offset: 0,
+            speciaal: false,
         });
         action_code = action_code.saturating_add(1);
     }
@@ -6336,6 +6385,7 @@ fn generate_couplers(divisions: &[DivisionDto]) -> Vec<CouplerDto> {
                 midi_action_code: action_code,
                 coupler_type: "bass".into(),
                 pitch_offset: 0,
+                speciaal: false,
             });
             action_code = action_code.saturating_add(1);
         }
@@ -6685,6 +6735,7 @@ pub fn do_load_samples_from_directory_locked(state: &AppState, directory: &str) 
                 koren,
                 mengwerk,
                 wind_voet: if stop.pitch_feet > 0.01 { stop.pitch_feet } else { 8.0 },
+                percussief: false,
                 drawn: false,
                 color: Some(color.to_string()),
                 has_tremulant: any_trem,
@@ -6713,6 +6764,7 @@ pub fn do_load_samples_from_directory_locked(state: &AppState, directory: &str) 
             // Echte opnamen (`_trem`-map), geen ODF-tremulant.
             tremulant_kind: if div_has_trem { Some("samples".to_string()) } else { None },
             has_swell: false, // custom sample folders carry no enclosure info
+            is_pedal: { let l = division.name.to_lowercase(); l.contains("pedaal") || l.contains("pedal") },
         });
     }
 
@@ -8754,7 +8806,7 @@ mod tremulant_kind_tests {
         StopDto {
             id: id.to_string(), name: id.to_string(), pitch: "8".to_string(), drawn: false,
             color: None, has_tremulant: trem, midi_action_code: 0, internal_stop_id: 1,
-            first_midi_note: 36, last_midi_note: 96, is_reed: false, koren: None, mengwerk: false, wind_voet: 8.0,
+            first_midi_note: 36, last_midi_note: 96, is_reed: false, koren: None, mengwerk: false, wind_voet: 8.0, percussief: false,
         }
     }
 
@@ -8763,7 +8815,7 @@ mod tremulant_kind_tests {
             name: naam.to_string(), display_name: naam.to_string(),
             stops: vec![stop("Prestant_8", stop_trem)],
             has_tremulant: kind.is_some() || stop_trem,
-            tremulant_kind: kind.map(str::to_string), has_swell: false,
+            tremulant_kind: kind.map(str::to_string), has_swell: false, is_pedal: false,
         }
     }
 
