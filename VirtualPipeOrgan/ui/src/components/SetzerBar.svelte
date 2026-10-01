@@ -1,8 +1,9 @@
 <script>
-  import { onMount, onDestroy, createEventDispatcher } from 'svelte';
+  import { onMount, onDestroy, createEventDispatcher, tick } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
   import { midiLearn } from '../lib/midiLearn.js';
-  import { t, tx } from '../lib/i18n.js';
+  import { t, tx, locale } from '../lib/i18n.js';
+  import VolumeRegelaar from './VolumeRegelaar.svelte';
 
   // Dispatcher voor acties die de parent afhandelt (externalAction: tremulant/EQ/
   // crescendo/afsluiten). Zonder deze dispatcher gaf handleMidiAction een stille
@@ -11,6 +12,9 @@
 
   export let organInfo = null;
   export let initialPresets = null; // Presets from library restore
+  // Hoofdvolume (dB) voor de schuif rechts in de balk; wijzigingen gaan als
+  // event 'volumeChange' naar de Console (0.7.65).
+  export let volume = -6;
 
   // Setzer state (-1 = geen preset actief)
   let currentPreset = -1;
@@ -108,6 +112,50 @@
     } catch (e) {}
   }
 
+  // ---- Volumeschuif: vol of compact (0.7.65) ----
+  // De balk loopt niet om en .orgel-view knipt af wat niet past, dus een schuif
+  // helemaal rechts zou op een smal scherm als eerste stil verdwijnen. We METEN
+  // of hij past (de les van Passend in 0.7.58: niet rekenen): loopt de balk in
+  // de volle stand over, dan wordt het een compacte knop met uitklapschuif.
+  // Terug naar vol pas als er weer 8px meer ruimte is dan de volle stand
+  // nodig had, zodat hij niet heen en weer springt.
+  let balkEl;
+  let volCompact = false;
+  let nodigVol = 0;
+  let balkObserver = null;
+  // De balk is een (onzichtbaar) horizontaal schuifvlak, dus scrollWidth is
+  // de breedte die de inhoud nodig heeft en clientWidth wat er is.
+  async function meetBalk() {
+    await tick();
+    if (!balkEl) return;
+    if (!volCompact) {
+      if (balkEl.scrollWidth > balkEl.clientWidth + 1) {
+        nodigVol = balkEl.scrollWidth;
+        volCompact = true;
+      }
+    } else if (nodigVol && balkEl.clientWidth >= nodigVol + 8) {
+      volCompact = false;
+      await tick();
+      if (balkEl && balkEl.scrollWidth > balkEl.clientWidth + 1) {
+        nodigVol = balkEl.scrollWidth;
+        volCompact = true;
+      }
+    }
+  }
+  // De inhoud wordt breder met het aantal crescendotrappen en met de taal;
+  // de ResizeObserver ziet alleen de balk zelf. Bij een andere inhoud opnieuw
+  // beginnen in de volle stand en meten.
+  let vorigeInhoud = '';
+  $: {
+    const inhoud = `${crescTotal}|${$locale}`;
+    if (inhoud !== vorigeInhoud) {
+      vorigeInhoud = inhoud;
+      volCompact = false;
+      nodigVol = 0;
+      meetBalk();
+    }
+  }
+
   // Crescendo-pedaal (continue CC) inleren — direct vanaf de indicator (rechtermuis/long-press).
   // Via de tweefasen-popup van de Console (laagste → hoogste stand, met bereik/inversie);
   // het oude één-fase-pad (learn_crescendo_pedal) leerde zonder bereik en wiste stil de zwelbinding.
@@ -137,9 +185,15 @@
     crescPollInterval = setInterval(pollCrescendoState, 100);
     // Close context menu on click elsewhere
     window.addEventListener('click', closeContextMenu);
+    try {
+      balkObserver = new ResizeObserver(() => meetBalk());
+      if (balkEl) balkObserver.observe(balkEl);
+    } catch (e) {}
+    meetBalk();
   });
 
   onDestroy(() => {
+    if (balkObserver) balkObserver.disconnect();
     if (pollInterval) clearInterval(pollInterval);
     if (crescPollInterval) clearInterval(crescPollInterval);
     window.removeEventListener('click', closeContextMenu);
@@ -408,7 +462,7 @@
   }
 </script>
 
-<div class="setzer-bar">
+<div class="setzer-bar" bind:this={balkEl}>
   <!-- SET button -->
   <button
     class="setzer-btn set-btn"
@@ -520,6 +574,13 @@
       <span class="cresc-value">{crescStage}/{crescTotal}</span>
     </div>
   {/if}
+
+  <!-- Hoofdvolume, helemaal rechts. -->
+  <VolumeRegelaar
+    {volume}
+    compact={volCompact}
+    on:change={(e) => dispatch('volumeChange', e.detail)}
+  />
 </div>
 
 <!-- Context menu for MIDI learn -->
@@ -546,6 +607,18 @@
     border-top: 1px solid var(--setzer-border);
     flex-shrink: 0;
     min-height: 44px;
+    /* Past niet alles (smal extra scherm, aanraakscherm), dan knipte
+       .orgel-view de rechterkant stil af, en daarmee juist het laatste
+       onderdeel. Nu kan de balk horizontaal schuiven (vegen, of shift +
+       scrollwiel), zonder zichtbare schuifbalk zodat hij niet hoger wordt, en
+       blijft de compacte volumeknop rechts in beeld (position: sticky in
+       VolumeRegelaar). */
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+  }
+  .setzer-bar::-webkit-scrollbar {
+    display: none;
   }
 
   .setzer-btn {

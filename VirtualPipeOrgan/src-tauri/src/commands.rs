@@ -3244,16 +3244,27 @@ pub fn stop_note_all_stops(state: State<AppState>, note: u8) -> Result<(), Strin
     Ok(())
 }
 
-/// Hoofdvolume zetten (kern van set_master_volume; ook voor de afstandsbediening).
-pub fn set_master_volume_inner(state: &AppState, db: f32) {
+/// Hoofdvolume zetten: de enige kern voor de schuiven in de app (instellingen
+/// en setzerbalk, in elk venster), de afstandsbediening en de test-API.
+/// Begrenst op het schuifbereik (-40..+6 dB) en meldt de nieuwe waarde aan
+/// ALLE vensters (`jm-orgue:master-volume` {db, bron}), zodat elke schuif
+/// meeloopt. `bron` is het venster-label (of "remote"/"test"); het venster dat
+/// de wijziging zelf deed, negeert het event.
+pub fn set_master_volume_inner(state: &AppState, db: f32, bron: &str) -> f32 {
+    let db = if db.is_finite() { db.clamp(-40.0, 6.0) } else { -6.0 };
     state.send_audio_command(AudioCommand::SetMasterGain(db));
     // Onthoud voor per-orgel opslag (save_current_organ_settings leest dit veld).
     *state.master_volume_db.write() = Some(db);
+    if let Some(h) = state.app_handle.read().as_ref() {
+        use tauri::Emitter;
+        let _ = h.emit("jm-orgue:master-volume", serde_json::json!({ "db": db, "bron": bron }));
+    }
+    db
 }
 
 #[tauri::command]
-pub fn set_master_volume(state: State<AppState>, db: f32) -> Result<(), String> {
-    set_master_volume_inner(&state, db);
+pub fn set_master_volume(window: tauri::Window, state: State<AppState>, db: f32) -> Result<(), String> {
+    set_master_volume_inner(&state, db, window.label());
     Ok(())
 }
 
@@ -7548,7 +7559,14 @@ pub fn do_save_organ_settings(state: &AppState, presets: HashMap<String, PresetD
 #[tauri::command]
 pub fn get_organ_settings(state: State<AppState>) -> Option<OrganSettings> {
     let organ_id = state.current_organ_id.read().clone()?;
-    let settings = lees_opgeslagen_instellingen(&state, &organ_id)?;
+    let mut settings = lees_opgeslagen_instellingen(&state, &organ_id)?;
+    // Het volume zoals het NU staat, niet zoals het laatst bewaard is: een
+    // extra scherm dat opengaat na een nog niet bewaarde wijziging toonde
+    // anders een verouderd getal. Bij het laden zijn beide gelijk (de
+    // runtime-waarde komt dan uit dezelfde instellingen).
+    if let Some(db) = *state.master_volume_db.read() {
+        settings.master_volume_db = Some(db);
+    }
     Some(instellingen_voor_frontend(&state, settings))
 }
 

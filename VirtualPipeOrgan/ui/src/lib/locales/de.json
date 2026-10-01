@@ -382,7 +382,11 @@
     "preset": "Preset {n}",
     "preset_number": "Preset-Nummer",
     "cresc_off": "(aus)",
-    "cresc_label": "Cresc"
+    "cresc_label": "Cresc",
+    "volume": "Lautstärke",
+    "volume_title": "Gesamtlautstärke — Doppelklick = zurück auf {db} dB, Mausrad = 1 dB pro Schritt",
+    "volume_reset": "Zurück auf {db} dB",
+    "volume_open": "Lautstärkeregler öffnen"
   },
   "status_bar": {
     "audio_running": "Audio läuft",

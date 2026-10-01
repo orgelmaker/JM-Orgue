@@ -382,7 +382,11 @@
     "preset": "Preset {n}",
     "preset_number": "Preset number",
     "cresc_off": "(off)",
-    "cresc_label": "Cresc"
+    "cresc_label": "Cresc",
+    "volume": "Volume",
+    "volume_title": "Master volume — double-click = back to {db} dB, mouse wheel = 1 dB per step",
+    "volume_reset": "Back to {db} dB",
+    "volume_open": "Open volume slider"
   },
   "status_bar": {
     "audio_running": "Audio running",

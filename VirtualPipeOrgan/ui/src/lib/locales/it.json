@@ -382,7 +382,11 @@
     "preset": "Combinazione {n}",
     "preset_number": "Numero della combinazione",
     "cresc_off": "(disattivato)",
-    "cresc_label": "Cresc"
+    "cresc_label": "Cresc",
+    "volume": "Volume",
+    "volume_title": "Volume generale — doppio clic = torna a {db} dB, rotellina = 1 dB per scatto",
+    "volume_reset": "Torna a {db} dB",
+    "volume_open": "Apri il cursore del volume"
   },
   "status_bar": {
     "audio_running": "Audio attivo",

@@ -2445,8 +2445,15 @@
     }
   }
 
+  // Volume gewijzigd door de gebruiker (schuif in de instellingen of in de
+  // setzerbalk): naar de backend én laten bewaren. Het laden van een orgel
+  // stuurt bewaren: false, anders schreef de autosave een half herstelde stand weg.
   function onVolumeChange() {
-    dispatch('volumeChange', volume);
+    dispatch('volumeChange', { db: volume, bewaren: true });
+  }
+  function onSetzerVolume(db) {
+    volume = db;
+    onVolumeChange();
   }
 
   function onReverbChange() {
@@ -2506,7 +2513,7 @@
       // sliderwaarde van het vorige orgel, anders lekt diens volume dit orgel in
       // én wordt het bij de eerste autosave als instelling van dít orgel bewaard.
       volume = (s && typeof s.master_volume_db === 'number') ? s.master_volume_db : -6;
-      if (pushToBackend) dispatch('volumeChange', volume);
+      if (pushToBackend) dispatch('volumeChange', { db: volume, bewaren: false });
       // Temperament: zoek de opgeslagen stemming terug in de lijst (op naam, anders op cents).
       if (s && s.temperament) {
         const t = s.temperament;
@@ -2922,17 +2929,23 @@
     // registerscherm gestart/gestopt worden en moet hier zichtbaar blijven.
     recorderPoll = setInterval(() => { pollRecorder(); pollMidiRec(); }, 500);
     sharedPrefsInterval = setInterval(refreshSharedPrefs, 1000);
+    // Hoofdvolume gewijzigd, waar dan ook (een ander venster, de
+    // afstandsbediening, de test-API): de schuiven in DIT venster volgen,
+    // zonder echo naar de backend (die heeft de waarde al). Een wijziging
+    // uit dit venster zelf negeren: die staat hier al, en tijdens het slepen
+    // zou een late echo de duim terugzetten.
+    (async () => {
+      try {
+        const { getCurrentWindow } = await import('@tauri-apps/api/window');
+        const eigenLabel = getCurrentWindow().label;
+        unlistenRemoteVol = await listen('jm-orgue:master-volume', (e) => {
+          const p = e.payload || {};
+          if (p.bron === eigenLabel) return;
+          if (typeof p.db === 'number' && p.db !== volume) volume = p.db;
+        });
+      } catch (e) {}
+    })();
     if (!secondary) {
-      // Volume-event van de afstandsbediening: slider volgt zonder echo naar de
-      // backend (die heeft master_volume_db al; dispatch('volumeChange') niet nodig).
-      (async () => {
-        try {
-          unlistenRemoteVol = await listen('jm-orgue:remote-master-volume', (e) => {
-            const db = e.payload && e.payload.db;
-            if (typeof db === 'number') volume = db;
-          });
-        } catch (e) {}
-      })();
       refreshRemote();
     }
   });
@@ -5225,6 +5238,8 @@
         <SetzerBar
           organInfo={displayOrgan}
           consumeMidiTriggers={!secondary}
+          {volume}
+          on:volumeChange={(e) => onSetzerVolume(e.detail)}
           on:externalAction={(e) => handleExternalAction(e.detail.actionCode)}
           on:learnCrescendo={() => learnPedalFlow('crescendo')}
         />

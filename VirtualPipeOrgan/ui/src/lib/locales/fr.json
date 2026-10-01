@@ -382,7 +382,11 @@
     "preset": "Préréglage {n}",
     "preset_number": "Numéro de préréglage",
     "cresc_off": "(désactivé)",
-    "cresc_label": "Cresc"
+    "cresc_label": "Cresc",
+    "volume": "Volume",
+    "volume_title": "Volume général — double-clic = retour à {db} dB, molette = 1 dB par cran",
+    "volume_reset": "Revenir à {db} dB",
+    "volume_open": "Ouvrir le curseur de volume"
   },
   "status_bar": {
     "audio_running": "Audio actif",

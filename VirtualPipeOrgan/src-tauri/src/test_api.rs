@@ -584,19 +584,15 @@ fn handle_action(state: &AppState, code_str: &str) -> Result<Value, (u16, String
     Ok(json!({ "code": code, "queued": true }))
 }
 
-/// POST /master?db=<f32> — geclamped op het sliderbereik (−40..6 dB) en het
-/// hoofdvenster krijgt een event zodat zijn slider meespringt.
+/// POST /master?db=<f32> — via de kern: geclamped op het sliderbereik
+/// (−40..6 dB) en alle vensters krijgen het event, zodat elke schuif
+/// meespringt en het hoofdvenster de wijziging bewaart (bron "remote").
 fn handle_master(state: &AppState, query: &str) -> Result<Value, (u16, String)> {
     let db: f32 = parse_query(query, "db").ok_or((400u16, "Parameter 'db' ontbreekt".to_string()))?;
     if !db.is_finite() {
         return Err((400u16, "Parameter 'db' is geen getal".to_string()));
     }
-    let db = db.clamp(-40.0, 6.0);
-    crate::commands::set_master_volume_inner(state, db);
-    if let Some(h) = state.app_handle.read().as_ref() {
-        use tauri::Emitter;
-        let _ = h.emit("jm-orgue:remote-master-volume", json!({ "db": db }));
-    }
+    let db = crate::commands::set_master_volume_inner(state, db, "remote");
     Ok(json!({ "db": db }))
 }
 
@@ -1600,8 +1596,8 @@ fn handle_midi_player_status(state: &AppState) -> Value {
 
 fn handle_set_master(state: &AppState, query: &str) -> Result<Value, (u16, String)> {
     let db: f32 = parse_query(query, "db").ok_or((400u16, "Parameter 'db' ontbreekt".to_string()))?;
-    state.send_audio_command(AudioCommand::SetMasterGain(db));
-    *state.master_volume_db.write() = Some(db);
+    // Via de kern, zodat de schuiven in de app meelopen (bron "test").
+    let db = crate::commands::set_master_volume_inner(state, db, "test");
     Ok(json!({ "ok": true, "db": db }))
 }
 

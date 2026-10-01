@@ -16,6 +16,7 @@
   import StatusBar from './StatusBar.svelte';
   import { loadPanelState, savePanelState } from '../lib/panelState.js';
   import { leesVensterstand, pasVensterstandToe, zetVolledigScherm } from '../lib/vensterStand.js';
+  import { isTekstveld } from '../lib/toetsen.js';
   import { loadAudioProfiles, deriveProfileFromOutput } from '../lib/audioProfiles.js';
   import { pickDevice } from '../lib/audioDevices.js';
 
@@ -413,7 +414,7 @@
   // met de focus. Escape zet hier alleen volledig scherm uit en doet verder
   // niets (de bibliotheek is van het hoofdvenster).
   function handleKeyDown(event) {
-    if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') return;
+    if (isTekstveld(event.target)) return;
     if (event.key === 'F1') { event.preventDefault(); setView('orgel'); }
     else if (event.key === 'F2') { event.preventDefault(); setView('orgel-instellingen'); }
     else if (event.key === 'F3') { event.preventDefault(); setView('algemene-instellingen'); }
@@ -552,7 +553,11 @@
       on:clearAudioProfile={(e) => emitToMain('jm-orgue:clear-audio-profile', { kind: e.detail })}
       on:switchAudioProfile={(e) => emitToMain('jm-orgue:switch-profile', { kind: e.detail ?? null })}
       on:connectMidi={(e) => connectMidi(e.detail)}
-      on:volumeChange={(e) => invoke('set_master_volume', { db: e.detail }).catch(() => {})}
+      on:volumeChange={(e) => {
+        invoke('set_master_volume', { db: e.detail.db }).catch(() => {});
+        // Bewaren doet het hoofdvenster (één schrijver), via zijn autosave.
+        if (e.detail.bewaren) emitToMain('jm-orgue:settings-changed', { scope: 'volume' });
+      }}
       on:reverbChange={(e) => invoke('set_reverb_mix', { mix: e.detail }).catch(() => {})}
       on:shutdownRequest={requestShutdown}
       on:shutdownLearn={learnShutdownAction}

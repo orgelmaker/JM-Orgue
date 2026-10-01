@@ -382,7 +382,11 @@
     "preset": "Preset {n}",
     "preset_number": "Preset nummer",
     "cresc_off": "(uit)",
-    "cresc_label": "Cresc"
+    "cresc_label": "Cresc",
+    "volume": "Volume",
+    "volume_title": "Hoofdvolume — dubbelklik = terug naar {db} dB, scrollwiel = 1 dB per stap",
+    "volume_reset": "Terug naar {db} dB",
+    "volume_open": "Volumeschuif openen"
   },
   "status_bar": {
     "audio_running": "Audio actief",

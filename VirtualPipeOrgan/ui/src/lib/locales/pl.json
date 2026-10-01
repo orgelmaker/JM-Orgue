@@ -382,7 +382,11 @@
     "preset": "Kombinacja {n}",
     "preset_number": "Numer kombinacji",
     "cresc_off": "(wył.)",
-    "cresc_label": "Cresc"
+    "cresc_label": "Cresc",
+    "volume": "Głośność",
+    "volume_title": "Głośność główna — dwuklik = powrót do {db} dB, kółko myszy = 1 dB na krok",
+    "volume_reset": "Powrót do {db} dB",
+    "volume_open": "Otwórz suwak głośności"
   },
   "status_bar": {
     "audio_running": "Audio działa",

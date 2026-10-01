@@ -11,6 +11,7 @@
   import { t, tx } from './lib/i18n.js';
   import { loadAudioProfiles, profileMatchesOutput, deriveProfileFromOutput as deriveProfile, AUDIO_PROFILES_KEY } from './lib/audioProfiles.js';
   import { pickDevice } from './lib/audioDevices.js';
+  import { isTekstveld } from './lib/toetsen.js';
 
   // Venstertype uit de URL-hash: extra registerscherm (#panel&n=N) of
   // notatievenster (#notation&file=...); anders het hoofdvenster.
@@ -630,6 +631,11 @@
       }));
       // Instellingen gewijzigd in een paneel: lijsten verversen + autosaven
       // (zelfde route als Console's eigen refreshMidiMappings-event).
+      // Volume gewijzigd op de afstandsbediening: ook die wijziging bewaren
+      // (de schuiven in de vensters volgen al via hetzelfde event).
+      panelUnlisteners.push(await listen('jm-orgue:master-volume', (e) => {
+        if (e?.payload?.bron === 'remote') scheduleAutoSave();
+      }));
       panelUnlisteners.push(await listen('jm-orgue:settings-changed', (e) => {
         try { refreshMidiMappings(); } catch (err) {}
         if (e?.payload?.scope === 'persist') persistOrganSettings();
@@ -727,8 +733,8 @@
   }
 
   function handleKeyDown(event) {
-    // Ignore if typing in input
-    if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') return;
+    // Niet tijdens het typen in een tekstveld (wel bij een schuif of vinkje).
+    if (isTekstveld(event.target)) return;
 
     // Global function keys (always handled)
     if (event.key === 'F1') { event.preventDefault(); setView('orgel'); return; }
@@ -1418,8 +1424,11 @@
     }
   }
 
-  function handleVolumeChange(db) {
+  // { db, bewaren }: bewaren = een wijziging door de gebruiker (niet het
+  // terugzetten bij het laden van een orgel), die meteen wordt weggeschreven.
+  function handleVolumeChange({ db, bewaren }) {
     invoke('set_master_volume', { db });
+    if (bewaren) scheduleAutoSave();
   }
 
   function handleReverbChange(mix) {

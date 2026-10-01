@@ -382,7 +382,11 @@
     "preset": "Combinación {n}",
     "preset_number": "Número de combinación",
     "cresc_off": "(desact.)",
-    "cresc_label": "Cresc"
+    "cresc_label": "Cresc",
+    "volume": "Volumen",
+    "volume_title": "Volumen general — doble clic = volver a {db} dB, rueda del ratón = 1 dB por paso",
+    "volume_reset": "Volver a {db} dB",
+    "volume_open": "Abrir el control de volumen"
   },
   "status_bar": {
     "audio_running": "Audio activo",
