@@ -82,6 +82,56 @@ pub fn base_pipe(pipe_num: u32) -> u32 {
 }
 
 #[cfg(test)]
+mod glij_gain_tests {
+    use super::*;
+
+    fn k_bij(sr: f32) -> f32 { 1.0 - (-1.0 / (0.015 * sr)).exp() }
+
+    #[test]
+    fn stilstaand_volume_blijft_exact_gelijk() {
+        let mut nu = 0.5f32;
+        for _ in 0..10_000 {
+            assert_eq!(glij_gain(&mut nu, 0.5, k_bij(48_000.0)), 0.5);
+        }
+    }
+
+    #[test]
+    fn sprong_loopt_glad_en_zonder_doorschieten() {
+        // -6 dB naar +6 dB in één klik op de baan.
+        let van = 10f32.powf(-6.0 / 20.0);
+        let naar = 10f32.powf(6.0 / 20.0);
+        let k = k_bij(48_000.0);
+        let mut nu = van;
+        let mut vorige = van;
+        let mut grootste_stap = 0.0f32;
+        let mut n = 0;
+        while nu != naar {
+            let g = glij_gain(&mut nu, naar, k);
+            assert!(g <= naar, "schiet door: {g}");
+            assert!(g >= vorige, "loopt terug");
+            grootste_stap = grootste_stap.max(g - vorige);
+            vorige = g;
+            n += 1;
+            assert!(n < 48_000, "komt niet aan");
+        }
+        // Grootste stap per sample: een fractie van de sprong (geen tik).
+        assert!(grootste_stap < (naar - van) * 0.002, "stap {grootste_stap}");
+        // Na 5 tijdconstanten (75 ms) vrijwel op het doel; helemaal binnen 1 s.
+        let mut nu = van;
+        for _ in 0..(0.075 * 48_000.0) as usize { glij_gain(&mut nu, naar, k); }
+        assert!((naar - nu) / (naar - van) < 0.01);
+    }
+
+    #[test]
+    fn omlaag_naar_stilte_komt_op_nul() {
+        let k = k_bij(44_100.0);
+        let mut nu = 1.0f32;
+        for _ in 0..44_100 { glij_gain(&mut nu, 0.0, k); }
+        assert_eq!(nu, 0.0);
+    }
+}
+
+#[cfg(test)]
 mod layer_key_tests {
     use super::*;
 
@@ -269,6 +319,22 @@ pub(crate) fn meng_stemmen_blok(
         }
         voice.c_dev_cur = dev_cur;
     }
+}
+
+/// Eén stap van het glijdende hoofdvolume (0.7.65): `nu` schuift met
+/// factor `k` per frame op naar `doel`. Zodra het verschil verwaarloosbaar is
+/// staat hij precies op het doel, zodat een stilstaand volume identiek klinkt
+/// aan zonder glijden.
+#[inline]
+pub(crate) fn glij_gain(nu: &mut f32, doel: f32, k: f32) -> f32 {
+    if *nu != doel {
+        let volgende = *nu + (doel - *nu) * k;
+        // Op het doel zetten als het verschil verwaarloosbaar is (1e-5 is
+        // -0,0001 dB), of als de stap kleiner wordt dan wat een f32 rond deze
+        // waarde nog kan uitdrukken: dan zou hij er net onder blijven hangen.
+        *nu = if volgende == *nu || (doel - volgende).abs() < 1e-5 { doel } else { volgende };
+    }
+    *nu
 }
 
 /// Telt de deel-opteltabellen van de stukken 1.. op bij die van stuk 0.
@@ -3689,6 +3755,14 @@ fn run_audio_thread(
     let mut lade_hold = [1.0f32; 32];
     let mut lade_hold_t = [0u32; 32];
 
+    // Hoofdvolume glijdt per frame naar zijn doel (tijdconstante ~15 ms) in
+    // plaats van per callback te springen (0.7.65). Een klik op de baan van de
+    // volumeschuif (-6 naar +6 dB in één keer) gaf anders een hoorbare tik; de
+    // limiter vangt alleen de piek, niet de sprong. Staat het volume stil, dan
+    // staat dit precies op het doel en klinkt het identiek aan voorheen.
+    let mut master_gain_nu: f32 = -1.0; // < 0: eerste callback neemt het doel over
+    let master_glij_k: f32 = 1.0 - (-1.0 / (0.015 * sample_rate.max(1) as f32)).exp();
+
     let sample_format = supported.sample_format();
     // Blokbuffers voor de stem-major mengloop (zie render): per frame in het
     // blok de wind/trem-modulatie en de divisie-sommen. Eén keer op de heap,
@@ -4882,7 +4956,8 @@ fn run_audio_thread(
             // routing). Dat scheelt zes heap-allocaties per callback; op ASIO4ALL
             // (zeer hoge callback-frequentie) is dat merkbaar minder allocatie-
             // jitter op de audio-thread — precies wat gekraak veroorzaakt.
-            let gain = *master_gain_clone.read() * *master_expression_clone.read();
+            let gain_doel = *master_gain_clone.read() * *master_expression_clone.read();
+            if master_gain_nu < 0.0 { master_gain_nu = gain_doel; }
             let div_gains = division_gains_clone.read();
             let div_pans = division_pans_clone.read();
             let out_chans_lock = output_channels_clone.read();
@@ -5272,6 +5347,8 @@ fn run_audio_thread(
                         let frame = &mut data[(fi + f) * channels..(fi + f + 1) * channels];
                         let div_l = &blk_div_l[f];
                         let div_r = &blk_div_r[f];
+                        // Hoofdvolume voor dit frame (zie master_glij_k).
+                        let gain = glij_gain(&mut master_gain_nu, gain_doel, master_glij_k);
                         // Reset frame
                         for s in frame.iter_mut() { *s = 0.0; }
 

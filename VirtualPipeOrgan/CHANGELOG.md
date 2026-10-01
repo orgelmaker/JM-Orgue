@@ -5,6 +5,59 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.65] - 2026-10-01
+
+### Volumeschuif in de setzerbalk
+
+Rechts in de setzerbalk staat nu een schuif voor het hoofdvolume. Die balk
+blijft ook in de speeltafelmodus (volledig scherm) zichtbaar, dus het volume
+is voortaan aan de speeltafel zelf te regelen. Tot nu toe kon dat alleen in
+Orgel-instellingen > Master of op de afstandsbediening.
+
+Het is hetzelfde volume als op die twee plekken: per orgel, van -40 tot +6 dB,
+standaard -6 dB.
+
+- **Dubbelklik** (of dubbeltik) op de schuif of de waarde zet hem terug op
+  -6 dB.
+- **Scrollwiel** boven de schuif: 1 dB per klik.
+- **Pijltjestoetsen** als de schuif de focus heeft: 1 dB per stap.
+
+Past de schuif niet in de balk (smal extra scherm, aanraakscherm, veel
+crescendotrappen), dan wordt het een compacte knop met de waarde erop. Een tik
+opent de schuif erboven, met een knop om terug te gaan naar -6 dB. Of de schuif
+past, wordt gemeten, niet geschat.
+
+### Alle schuiven lopen gelijk, en het volume wordt meteen bewaard
+
+- Verander je het volume ergens (hoofdscherm, extra scherm, instellingen of
+  afstandsbediening), dan lopen alle schuiven in alle vensters mee. Een extra
+  scherm volgde een wijziging van de afstandsbediening tot nu toe niet, en een
+  nieuw geopend extra scherm toonde soms nog de laatst bewaarde waarde in
+  plaats van de huidige.
+- Een volumewijziging wordt nu meteen bewaard. Tot nu toe kwam het volume pas
+  in de instellingen van het orgel bij de volgende registratiewijziging of bij
+  het afsluiten, en bij een stroomstoring was de nieuwe stand weg.
+
+### Geen tik meer bij een sprong in het volume
+
+Het hoofdvolume glijdt nu in ongeveer 15 ms naar de nieuwe waarde in plaats
+van in één keer te springen. Een klik ver op de baan van de schuif (van -6 naar
++6 dB) gaf anders een hoorbare tik. Staat het volume stil, dan klinkt alles
+precies als voorheen.
+
+### F11 en Escape werken ook als een schuif de focus heeft
+
+Na één tik op een schuif of een vinkje deden F11, Escape en F1 tot F3 niets
+meer, tot je ergens anders klikte. Die toetsen wijken nu alleen nog voor echte
+tekstvelden.
+
+### Setzerbalk op een smal scherm
+
+Paste de setzerbalk niet in de breedte, dan viel de rechterkant (geheugenbanken,
+crescendo-aanduiding) stil buiten beeld. Nu kun je de balk opzij vegen, of
+shift + scrollwiel gebruiken. De volumeknop blijft daarbij altijd rechts in
+beeld.
+
 ## [0.7.64] - 2026-10-01
 
 ### Volledig scherm ook voor de extra registerschermen
