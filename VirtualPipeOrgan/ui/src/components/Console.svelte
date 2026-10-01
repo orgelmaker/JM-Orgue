@@ -7,6 +7,7 @@
   import { t, tx, locale, setLocale, AVAILABLE_LOCALES, LOCALE_LABELS } from '../lib/i18n.js';
   import SetzerBar from './SetzerBar.svelte';
   import { loadPanelState, savePanelState } from '../lib/panelState.js';
+  import { pasVensterstandToe } from '../lib/vensterStand.js';
   import { midiLearn } from '../lib/midiLearn.js';
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
@@ -3236,7 +3237,7 @@
   // Het hoofdvenster is de enige schrijver van de lijst "open schermen"
   // (jm-orgue-panels-open-<orgelhash>); elk scherm bewaart zelf zijn
   // divisiekeuze + positie/grootte onder jm-orgue-panel-state-<nr>-<orgelhash>
-  // (zie RegisterPanel). Zo heeft elke sleutel één schrijver en zijn er geen races.
+  // (zie PanelApp). Zo heeft elke sleutel één schrijver en zijn er geen races.
   function panelsOpenKey() { return organUiKey('jm-orgue-panels-open'); }
   function savePanelsOpenList() {
     try {
@@ -3348,38 +3349,16 @@
         x: (!hasPhysical && st && typeof st.x === 'number') ? st.x : 100 + (offset * 30),
         y: (!hasPhysical && st && typeof st.y === 'number') ? st.y : 100 + (offset * 30),
       });
-      if (hasPhysical || (st && st.maximized)) {
+      if (hasPhysical || (st && (st.maximized || st.fullscreen))) {
+        // Eerst de gewone stand (dan staat het venster op het juiste scherm),
+        // daarna pas volledig scherm als dit scherm dat zo had. Het paneel
+        // leest zijn werkelijke stand zelf af met isFullscreen(); het
+        // hoofdvenster schrijft de panel-state niet (één schrijver).
         webview.once('tauri://created', async () => {
           try {
-            const { PhysicalPosition, PhysicalSize } = await import('@tauri-apps/api/dpi');
-            if (st.maximized) {
-              // Eerst op het scherm van de maximalisatie zetten (anker uit de
-              // maximized-save of de windowed-terugvalpositie), dán maximaliseren
-              // — maximize() pakt het scherm waar het venster op dat moment staat.
-              const ax = (typeof st.mpx === 'number') ? st.mpx : (typeof st.px === 'number' ? st.px : null);
-              const ay = (typeof st.mpy === 'number') ? st.mpy : (typeof st.py === 'number' ? st.py : null);
-              if (ax !== null && ay !== null && ax > -30000 && ay > -30000) {
-                await webview.setPosition(new PhysicalPosition(ax + 64, ay + 64));
-              }
-              await webview.maximize();
-              return;
-            }
-            if (st.px > -30000 && st.py > -30000) {
-              await webview.setPosition(new PhysicalPosition(st.px, st.py));
-            }
-            if (st.pw >= 200 && st.ph >= 150) {
-              const apply = () => webview.setSize(new PhysicalSize(Math.min(st.pw, 16000), Math.min(st.ph, 16000)));
-              await apply();
-              // Cross-DPI-controle (zie App.svelte): asynchrone herschaling bij
-              // verhuizing naar een anders-geschaald scherm kan de maat
-              // overschrijven — één keer verifiëren en zonodig opnieuw zetten.
-              setTimeout(async () => {
-                try {
-                  const cur = await webview.innerSize();
-                  if (Math.abs(cur.width - st.pw) > 4 || Math.abs(cur.height - st.ph) > 4) await apply();
-                } catch (e) {}
-              }, 250);
-            }
+            await pasVensterstandToe(webview, st, {
+              minW: 200, minH: 150, volledigScherm: st.fullscreen === true,
+            });
           } catch (e) { /* venster blijft dan op de beginschatting staan */ }
         });
       }
@@ -4847,12 +4826,12 @@
 
     <!-- ========== ORGEL VIEW ========== -->
     {#if activeView === 'orgel'}
-      <div class="orgel-view" class:speeltafel-modus={speeltafelModus && !secondary}>
+      <div class="orgel-view" class:speeltafel-modus={speeltafelModus}>
         {#if fitMelding}
           <!-- Zwevend, zodat het tonen van de melding de indeling niet verandert. -->
           <div class="fit-melding">{fitMelding}</div>
         {/if}
-        {#if speeltafelModus && !secondary}
+        {#if speeltafelModus}
           <!-- Speeltafelmodus: alleen deze smalle strook boven de registers.
                Zichtbaar en niet op zweven, want op een aanraakscherm bestaat
                zweven niet. De balken die "Balken" terughaalt liggen als laag
@@ -4895,7 +4874,7 @@
         <!-- Toolbar. In de speeltafelmodus weg tot "Balken" wordt gedrukt; dan
              ligt hij als laag over de registers (styles.css). -->
         <div class="panel-toolbar"
-             class:speeltafel-verborgen={speeltafelModus && !secondary && !balkenZichtbaar}>
+             class:speeltafel-verborgen={speeltafelModus && !balkenZichtbaar}>
           <!-- Werken in schermvolgorde; slepen wisselt ze om, klikken zet ze
                aan of uit. -->
           <div class="panel-config" class:div-dragging={!!(divDrag && divDrag.active)}>
@@ -5019,24 +4998,25 @@
                 </svg>
                 {$t('toolbar.bar')}
               </button>
-              <!-- Speeltafelmodus: volledig scherm, alleen registers + setzer.
-                   Ook met F11; Escape zet hem weer uit. -->
-              <button
-                class="btn btn-ghost btn-sm panel-layout-btn"
-                class:active={speeltafelModus}
-                on:click={() => dispatch('toggleSpeeltafel')}
-                title={$t('toolbar.fullscreen_title')}
-              >
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  {#if speeltafelModus}
-                    <path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7"/>
-                  {:else}
-                    <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>
-                  {/if}
-                </svg>
-                {$t('toolbar.fullscreen')}
-              </button>
             {/if}
+            <!-- Speeltafelmodus: volledig scherm, alleen registers + setzer.
+                 Ook met F11; Escape zet hem weer uit. Sinds 0.7.64 ook op extra
+                 schermen, elk scherm apart (PanelApp is daar de eigenaar). -->
+            <button
+              class="btn btn-ghost btn-sm panel-layout-btn"
+              class:active={speeltafelModus}
+              on:click={() => dispatch('toggleSpeeltafel')}
+              title={$t('toolbar.fullscreen_title')}
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                {#if speeltafelModus}
+                  <path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7"/>
+                {:else}
+                  <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>
+                {/if}
+              </svg>
+              {$t('toolbar.fullscreen')}
+            </button>
             <button class="btn btn-ghost btn-sm panel-add-btn" on:click={() => openExtraWindow()}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <rect x="2" y="3" width="20" height="14" rx="2"/>

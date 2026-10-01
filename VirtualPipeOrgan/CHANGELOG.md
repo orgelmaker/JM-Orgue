@@ -5,6 +5,42 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.64] - 2026-10-01
+
+### Volledig scherm ook voor de extra registerschermen
+
+De speeltafelmodus uit 0.7.61 werkt nu ook op elk extra registerscherm: met
+de knop **Volledig scherm** in de werkbalk van dat scherm, of met **F11**
+terwijl dat scherm actief is. Het scherm vult dan de monitor waar het op
+staat, met alleen de registers en de setzerbalk, en bovenin dezelfde smalle
+strook als op het hoofdscherm: **Balken**, **Volledig scherm uit** en
+**Afsluiten**.
+
+- Elk scherm gaat apart aan en uit. Op een speeltafel met meerdere monitoren
+  zet je elk scherm één keer op volledig scherm; dat wordt per scherm (en per
+  orgel) onthouden, en na een herstart komt elk scherm er vanzelf weer zo op.
+- **Escape** zet op een extra scherm alleen volledig scherm uit.
+- **Balken** haalt de werkbalk van dat scherm terug, als laag over de
+  registers. Staat op dat scherm ook de hoofdbalk aan, dan komt die mee.
+- In de instellingen staat de hoofdbalk er op volledig scherm altijd, ook als
+  hij op dat scherm normaal uit staat. Zonder titelbalk is dat de weg terug.
+- **Afsluiten** stelt eerst dezelfde vraag als op het hoofdscherm, en die
+  vraag verschijnt vóór het scherm op volledig scherm.
+
+Bij het herstarten zet het programma een scherm eerst op zijn eigen monitor
+en pas daarna op volledig scherm. Is die monitor er niet (uitgezet, of bij het
+opstarten van de speeltafel nog niet actief), dan opent het scherm als gewoon
+venster in plaats van schermvullend over het hoofdscherm. De wens blijft
+bewaard voor de volgende keer.
+
+Volledig scherm wordt nooit als vensterstand bewaard: wie het uitzet, krijgt
+het scherm terug op precies de plek en maat van daarvoor. Dat was in 0.7.61
+bij het hoofdscherm al zo; dezelfde bescherming zit nu ook in het opslaan,
+het sluiten en het herstellen van extra schermen.
+
+Getest op Windows. Op macOS en Linux is volledig scherm voor meerdere vensters
+tegelijk niet nagelopen.
+
 ## [0.7.63] - 2026-10-01
 
 ### Elk scherm zijn eigen knopmaat

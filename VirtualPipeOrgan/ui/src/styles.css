@@ -1286,6 +1286,12 @@ input[type="range"]::-webkit-slider-thumb:hover {
   box-shadow: 0 6px 14px var(--gold-shadow);
 }
 
+/* Extra scherm zonder hoofdbalk (PanelApp, 0.7.64): de werkbalk direct onder
+   de strook, anders hangt er een lege band van een hoofdbalk hoog tussen. */
+#app.balken-open.zonder-hoofdbalk .orgel-view.speeltafel-modus .panel-toolbar {
+  top: var(--strook-h);
+}
+
 /* Aanraakschermen: een knop onder de 44px mist u makkelijk. De strook groeit
    dan mee; de balken-laag rekent met dezelfde variabele. */
 @media (pointer: coarse) {

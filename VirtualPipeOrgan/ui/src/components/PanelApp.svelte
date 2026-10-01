@@ -15,6 +15,7 @@
   import Console from './Console.svelte';
   import StatusBar from './StatusBar.svelte';
   import { loadPanelState, savePanelState } from '../lib/panelState.js';
+  import { leesVensterstand, pasVensterstandToe, zetVolledigScherm } from '../lib/vensterStand.js';
   import { loadAudioProfiles, deriveProfileFromOutput } from '../lib/audioProfiles.js';
   import { pickDevice } from '../lib/audioDevices.js';
 
@@ -164,6 +165,60 @@
     savePanelState(organInfo?.id, panelNumber, { showHeader: v });
   }
 
+  // ---- Volledig scherm (speeltafelmodus) voor dit scherm, 0.7.64 ----
+  // Zoals het hoofdvenster: alleen de registers en de setzerbalk, met bovenin
+  // de strook Balken / Volledig scherm uit / Afsluiten. Elk scherm apart.
+  //   volScherm        de WERKELIJKE stand, afgelezen met isFullscreen(); bij
+  //                    het herstarten zet het hoofdvenster het scherm namelijk
+  //                    zelf op volledig scherm (Console.openExtraWindow)
+  //   fullscreen       in de panel-state: de WENS, alleen hier geschreven, bij
+  //                    een wissel door de gebruiker
+  let volScherm = false;
+  let balkenZichtbaar = false;
+  // Alleen op het orgelscherm; in de instellingen en de bibliotheek staan de
+  // balken er gewoon, anders kom je er zonder titelbalk niet meer uit.
+  $: speeltafelActief = volScherm && !showOrganBrowser && activeView === 'orgel';
+
+  async function zetVolScherm(aan) {
+    try {
+      const { getCurrentWindow } = await import('@tauri-apps/api/window');
+      const w = getCurrentWindow();
+      if (!(await zetVolledigScherm(w, aan))) return;
+      volScherm = aan;
+      balkenZichtbaar = false;
+      savePanelState(organInfo?.id, panelNumber, { fullscreen: aan });
+      if (!aan) {
+        // Windows zet de vorige stand meestal zelf terug, maar niet altijd op
+        // het juiste formaat (zie App.svelte). Alleen bij een gewoon venster
+        // en alleen als het afwijkt: een gemaximaliseerd venster opnieuw
+        // positioneren zou het maximaliseren kunnen opheffen.
+        setTimeout(async () => {
+          try {
+            const st = loadPanelState(organInfo?.id, panelNumber);
+            if (!st || st.maximized || typeof st.px !== 'number') return;
+            const pos = await w.outerPosition();
+            const size = await w.innerSize();
+            if (Math.abs(pos.x - st.px) > 4 || Math.abs(pos.y - st.py) > 4
+                || Math.abs(size.width - st.pw) > 4 || Math.abs(size.height - st.ph) > 4) {
+              await pasVensterstandToe(w, st);
+            }
+          } catch (e) {}
+        }, 150);
+      }
+    } catch (e) { /* niet in Tauri */ }
+  }
+
+  async function leesVolScherm() {
+    try {
+      const { getCurrentWindow } = await import('@tauri-apps/api/window');
+      const nu = await getCurrentWindow().isFullscreen();
+      if (nu !== volScherm) {
+        volScherm = nu;
+        if (!nu) balkenZichtbaar = false;
+      }
+    } catch (e) {}
+  }
+
   // ---- Venstergeometrie bewaren (zoals het oude RegisterPanel) ----
   let geomTimer = null;
   let unlistenMoved = null;
@@ -187,7 +242,11 @@
         geomTimer = setTimeout(saveGeometry, 300);
       };
       unlistenMoved = await w.onMoved(schedule);
-      unlistenResized = await w.onResized(schedule);
+      // Volledig scherm aan of uit (door de knop, F11 of het hoofdvenster bij
+      // het herstarten) komt altijd met een formaatwijziging: dan ook de
+      // werkelijke stand opnieuw aflezen.
+      unlistenResized = await w.onResized(() => { leesVolScherm(); schedule(); });
+      leesVolScherm();
       pollMonitors();
       setInterval(pollMonitors, 3000);
       unlistenPanelsClosing = await listen('jm-orgue:panels-closing', () => {
@@ -234,26 +293,13 @@
         return;
       }
       const { getCurrentWindow } = await import('@tauri-apps/api/window');
-      const w = getCurrentWindow();
-      // Geminimaliseerd venster meldt op Windows -32000,-32000 — niet bewaren.
-      if (await w.isMinimized()) return;
-      // FYSIEKE pixels (0.7.21): eenduidig over meerdere beeldschermen met
-      // verschillende schaal; logische coördinaten misplaatsten scherm 3.
-      const pos = await w.outerPosition();
-      const size = await w.innerSize();
-      if (pos.x < -30000 || pos.y < -30000) return;
-      if (await w.isMaximized()) {
-        // Zelfde patroon als het hoofdvenster: alleen de vlag + het monitor-
-        // anker; px/py/pw/ph blijven de windowed-terugvalstand.
-        savePanelState(organInfo?.id, panelNumber, {
-          maximized: true, mpx: pos.x, mpy: pos.y,
-        });
-        return;
-      }
-      savePanelState(organInfo?.id, panelNumber, {
-        px: pos.x, py: pos.y, pw: size.width, ph: size.height,
-        maximized: false,
-      });
+      // FYSIEKE pixels (0.7.21). null = niets bewaren: geminimaliseerd (Windows
+      // meldt dan -32000,-32000), buiten beeld, of VOLLEDIG SCHERM — dat is geen
+      // vensterstand; bewaren liet het venster na het uitzetten schermvullend
+      // staan (valkuil 0.7.61). Geldt ook voor het bewaren bij sluiten.
+      if (volScherm) return;
+      const stand = await leesVensterstand(getCurrentWindow());
+      if (stand) savePanelState(organInfo?.id, panelNumber, stand);
     } catch (e) {}
   }
 
@@ -363,11 +409,16 @@
   }
 
   // F1/F2/F3-tabwissel, zoals in het hoofdvenster (alleen zinvol met balk aan).
+  // F11 en Escape gelden alleen voor DIT scherm: toetsen gaan naar het venster
+  // met de focus. Escape zet hier alleen volledig scherm uit en doet verder
+  // niets (de bibliotheek is van het hoofdvenster).
   function handleKeyDown(event) {
     if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') return;
     if (event.key === 'F1') { event.preventDefault(); setView('orgel'); }
     else if (event.key === 'F2') { event.preventDefault(); setView('orgel-instellingen'); }
     else if (event.key === 'F3') { event.preventDefault(); setView('algemene-instellingen'); }
+    else if (event.key === 'F11') { event.preventDefault(); zetVolScherm(!volScherm); }
+    else if (event.key === 'Escape' && volScherm) { event.preventDefault(); zetVolScherm(false); }
   }
 
   // Apparaatlijsten pas (ver)laden wanneer de instellingen zichtbaar worden.
@@ -419,8 +470,17 @@
   });
 </script>
 
-<div id="app">
-  {#if showHeader}
+<!-- Speeltafelmodus: zelfde klassen als het hoofdvenster (styles.css).
+     zonder-hoofdbalk: met "Balken" open komt de werkbalk dan direct onder de
+     strook, niet een hoofdbalk lager. -->
+<div id="app"
+     class:speeltafel={speeltafelActief}
+     class:balken-open={speeltafelActief && balkenZichtbaar}
+     class:zonder-hoofdbalk={!showHeader}>
+  <!-- Hoofdbalk: op volledig scherm alleen via "Balken" (en alleen als hij op
+       dit scherm aan staat). Buiten het orgelscherm staat hij er op volledig
+       scherm altijd: zonder titelbalk is dat de enige weg terug. -->
+  {#if speeltafelActief ? (balkenZichtbaar && showHeader) : (showHeader || volScherm)}
     <Header
       organName={organInfo?.name}
       organLoaded={!showOrganBrowser && organInfo}
@@ -501,10 +561,14 @@
       on:setAutoLoadLastOrgan={(e) => setAutoLoadLastOrgan(e.detail)}
       on:persistSettings={() => emitToMain('jm-orgue:settings-changed', { scope: 'persist' })}
       on:showHeaderRequest={() => setShowHeader(true)}
+      speeltafelModus={speeltafelActief}
+      {balkenZichtbaar}
+      on:toggleSpeeltafel={() => zetVolScherm(!volScherm)}
+      on:toggleBalken={() => { balkenZichtbaar = !balkenZichtbaar; }}
     />
   </div>
 
-  {#if showHeader}
+  {#if showHeader && !speeltafelActief}
     <StatusBar {status} {error} />
   {/if}
 </div>
