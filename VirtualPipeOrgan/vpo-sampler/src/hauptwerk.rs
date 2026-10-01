@@ -138,14 +138,22 @@ fn build_definition(
             rank_name.entry(rid).or_insert_with(|| n.clone());
         }
     }
-    // rank_id -> base pitch harmonic (from its first pipe), for footage display
-    let mut rank_harmonic: HashMap<u32, u32> = HashMap::new();
+    // rank_id -> grondtoon-harmonische van de LAAGSTE toets, voor de voetmaat
+    // onder de knop. Was: de eerste pijp in bestandsvolgorde. Bij een gewone
+    // rang maakt dat niets uit (alle pijpen hebben dezelfde), maar bij een
+    // repeterend mengwerk verschilt hij per toets en werd het willekeurig;
+    // de voetmaat van een mengwerk is die op de laagste toets (0.7.66).
+    let mut rank_harmonic: HashMap<u32, (u32, u32)> = HashMap::new(); // (toets, harmonische)
     for p in &pipes {
         if let (Some(rid), Some(h)) = (
             p.get_u32("RankID"),
             p.get_u32("Pitch_Tempered_RankBasePitch64ftHarmonicNum"),
         ) {
-            rank_harmonic.entry(rid).or_insert(h);
+            let toets = p.get_u32("NormalMIDINoteNumber").unwrap_or(u32::MAX);
+            let e = rank_harmonic.entry(rid).or_insert((toets, h));
+            if toets < e.0 {
+                *e = (toets, h);
+            }
         }
     }
     // pipe_id -> toonhoogte-metadata (hertemperen): toets, harmonisch,
@@ -416,7 +424,7 @@ fn build_definition(
             // Bourdon 8 kan een 16'-rang een octaaf hoger aanspreken; dan
             // stond er "Bourdon 8" met "16'" eronder.
             if harmonic == 0 {
-                if let Some(h) = rank_harmonic.get(&rank_id) {
+                if let Some((_, h)) = rank_harmonic.get(&rank_id) {
                     harmonic = *h;
                     klinkend = klinkende_harmonische(*h, inc);
                 }

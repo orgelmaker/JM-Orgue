@@ -312,7 +312,8 @@
   "stops": {
     "tremulant": "Trémulant",
     "drawn": "tiré",
-    "not_drawn": "repoussé"
+    "not_drawn": "repoussé",
+    "ranks_format": "{r}"
   },
   "couplers": {
     "extra_title": "Accouplements en plus",

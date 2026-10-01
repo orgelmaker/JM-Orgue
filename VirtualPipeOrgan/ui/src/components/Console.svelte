@@ -8,6 +8,7 @@
   import SetzerBar from './SetzerBar.svelte';
   import { loadPanelState, savePanelState } from '../lib/panelState.js';
   import { pasVensterstandToe } from '../lib/vensterStand.js';
+  import { registerRegel, korenTekst } from '../lib/registerRegel.js';
   import { midiLearn } from '../lib/midiLearn.js';
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
@@ -207,7 +208,7 @@
     let i = 0;
     for (const d of (organInfo?.divisions || [])) {
       for (const s of (d.stops || [])) {
-        list.push({ id: s.id, name: `${d.name} — ${s.name} ${s.pitch || ''}`.trim(), auto: (fbBaseNote + i) & 0x7F, learned: fbLearnedNotes[s.id] });
+        list.push({ id: s.id, name: `${d.name} — ${s.name}${registerRegel(s, rangsFmt) ? ' ' + registerRegel(s, rangsFmt) : ''}`, auto: (fbBaseNote + i) & 0x7F, learned: fbLearnedNotes[s.id] });
         i++;
       }
     }
@@ -858,6 +859,9 @@
   // Voethoogte (in voet) uit een pitch-string halen, bv. "8'", "16'", "2 2/3'", "4st".
   function pitchFeet(s) {
     const p = (s.pitch || '').toString();
+    // Mengwerk zonder voetmaat: klinkt hoog, dus ná de 2'-registers en niet
+    // tussen de 8'-registers (de oude terugval).
+    if (s.mengwerk && !p.trim()) return 1;
     const m = p.match(/(\d+)(?:\s+(\d+)\/(\d+))?/);
     if (!m) return 8; // onbekend → behandel als 8'
     let feet = parseInt(m[1], 10) || 8;
@@ -4068,7 +4072,7 @@
     if (code >= 150) {
       for (const d of displayOrgan?.divisions || []) {
         const s = (d.stops || []).find(s => s.midi_action_code === code);
-        if (s) return _t('bindings.stop_label').replace('{name}', `${s.name}${s.pitch ? ' ' + s.pitch : ''}`).replace('{division}', d.display_name || d.name);
+        if (s) return _t('bindings.stop_label').replace('{name}', `${s.name}${metRegel(s)}`).replace('{division}', d.display_name || d.name);
       }
       return _t('bindings.stop_code').replace('{code}', String(code));
     }
@@ -4110,7 +4114,7 @@
     for (const d of displayOrgan?.divisions || []) {
       for (const s of d.stops || []) {
         if (s.midi_action_code) {
-          registers.push({ code: s.midi_action_code, label: `${s.name}${s.pitch ? ' ' + s.pitch : ''} (${d.display_name || d.name})` });
+          registers.push({ code: s.midi_action_code, label: `${s.name}${metRegel(s)} (${d.display_name || d.name})` });
         }
       }
     }
@@ -4225,6 +4229,7 @@
 
   function sortByPitch(divName, stops) {
     const pitchVal = (s) => {
+      if (s.mengwerk && !(s.pitch || '').trim()) return 1; // mengwerk: hoog
       const m = s.pitch?.match(/(\d+)/);
       return m ? parseInt(m[1]) : 8;
     };
@@ -4423,18 +4428,34 @@
   // Apply stop order to displayOrgan.
   // `stopOrder` is passed as an argument so Svelte tracks it as a dependency
   // (sortStops reads it internally; Svelte only tracks directly-referenced vars).
-  function buildDisplayOrgan(organ, _order) {
+  // regel: wat er onder de naam staat (voetmaat, of bij een mengwerk het
+  // aantal koren in de schrijfwijze van de gekozen taal, 0.7.66). Hier één keer
+  // uitgerekend, zodat de knoppen, de crescendotabel, de sorteerlijst en het
+  // intonatiepaneel allemaal hetzelfde tonen en meewisselen met de taal.
+  function buildDisplayOrgan(organ, _order, fmt) {
     const base = organ || demoOrgan;
     if (!base) return base;
     return {
       ...base,
       divisions: base.divisions.map(d => ({
         ...d,
-        stops: sortStops(d.stops, d.name),
+        // regelKort: in de platte stand (naam en regel naast elkaar) bij een
+        // mengwerk alleen het aantal; "1-8 st. 8'" drukte de naam daar weg.
+        stops: sortStops(d.stops, d.name).map(s => ({
+          ...s,
+          regel: registerRegel(s, fmt),
+          regelKort: s.mengwerk && s.koren ? korenTekst(s.koren, fmt) : registerRegel(s, fmt),
+        })),
       })),
     };
   }
-  $: displayOrgan = buildDisplayOrgan(organInfo, stopOrder);
+  $: rangsFmt = $t('stops.ranks_format');
+  $: displayOrgan = buildDisplayOrgan(organInfo, stopOrder, rangsFmt);
+  // " 4 st." / " 8'" achter een naam in een lijst, of niets.
+  function metRegel(s) {
+    const r = registerRegel(s, rangsFmt);
+    return r ? ' ' + r : '';
+  }
 
   // Reset selectedDivisions whenever the organ (divisions) changes
   let prevDivisionNames = '';
@@ -5163,13 +5184,13 @@
                     on:pointerdown={(e) => knobPointerDown(e, division.name, stopIdx)}
                     on:click={() => { if (knobDragJustEnded) return; dispatch('toggleStop', stop.id); }}
                     use:midiLearn={{ onTrigger: () => showStopContextMenuAt(stop.midi_action_code) }}
-                    title="{name}{stop.pitch ? ' ' + stop.pitch : ''}"
-                    aria-label="{stop.name} {stop.pitch || ''} — {stop.drawn ? $t('stops.drawn') : $t('stops.not_drawn')}"
+                    title="{name}{stop.regel ? ' ' + stop.regel : ''}"
+                    aria-label="{stop.name} {stop.regel || ''} — {stop.drawn ? $t('stops.drawn') : $t('stops.not_drawn')}"
                     aria-pressed={stop.drawn}
                   >
                     <span class="stop-name" style="{stopNameStyle(name)}">{name}</span>
-                    {#if stop.pitch || stop.pitch_feet}
-                      <span class="stop-pitch">{stop.pitch || formatPitch(stop.pitch_feet)}</span>
+                    {#if stop.regel || stop.pitch_feet}
+                      <span class="stop-pitch">{(stopHeight < STOP_FLAT_ONDER ? stop.regelKort : stop.regel) || formatPitch(stop.pitch_feet)}</span>
                     {/if}
                   </button>
                 {/each}
@@ -5884,8 +5905,8 @@
                             </tr>
                             {#each div.stops as stop}
                               <tr>
-                                <td class="cresc-stop-name" title="{stop.name}{stop.pitch ? ' ' + stop.pitch : ''}">
-                                  {stop.name}{stop.pitch ? ' ' + stop.pitch : ''}
+                                <td class="cresc-stop-name" title="{stop.name}{stop.regel ? ' ' + stop.regel : ''}">
+                                  {stop.name}{stop.regel ? ' ' + stop.regel : ''}
                                 </td>
                                 {#each Array(crescendoNumStages) as _, s}
                                   <td class="cresc-cell" class:colactive={s + 1 === crescendoStage}>
@@ -6007,7 +6028,7 @@
                           <span class="sort-handle">&#x2630;</span>
                           <span class="sort-color" style="background: {stop.color || '#999'}"></span>
                           <span class="sort-name">{stop.name}</span>
-                          <span class="sort-pitch">{stop.pitch || ''}</span>
+                          <span class="sort-pitch">{stop.regel || ''}</span>
                           <button class="btn btn-ghost btn-xs" title={$t('sorting.move_up')} disabled={idx === 0}
                             on:click|stopPropagation={() => moveStop(division.name, idx, -1)}>▲</button>
                           <button class="btn btn-ghost btn-xs" title={$t('sorting.move_down')} disabled={idx === division.stops.length - 1}

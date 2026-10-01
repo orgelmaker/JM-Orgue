@@ -312,7 +312,8 @@
   "stops": {
     "tremulant": "Tremolo",
     "drawn": "inserito",
-    "not_drawn": "disinserito"
+    "not_drawn": "disinserito",
+    "ranks_format": "{r}"
   },
   "couplers": {
     "extra_title": "Unioni in più",

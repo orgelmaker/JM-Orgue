@@ -312,7 +312,8 @@
   "stops": {
     "tremulant": "Tremulant",
     "drawn": "gezogen",
-    "not_drawn": "abgestoßen"
+    "not_drawn": "abgestoßen",
+    "ranks_format": "{n}fach"
   },
   "couplers": {
     "extra_title": "Zusätzliche Koppeln",

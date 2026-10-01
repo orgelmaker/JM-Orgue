@@ -591,12 +591,14 @@ pub fn familie_van_naam(naam: &str, tongwerk: bool) -> PijpFamilie {
         "trompet", "trumpet", "trompette", "hobo", "oboe", "hautbois", "fagot", "basson", "bassoon",
         "dulciaan", "dulzian", "dulcian", "bazuin", "posaune", "bombard", "clairon", "clarion",
         "schalmei", "chalumeau", "trombone", "tuba", "klarinet", "clarinet", "sordun", "ranket",
-        "rankett", "musette", "puzon", "tr\u{0105}ba", "tr\u{0105}bka", "obój"]) {
+        "rankett", "musette", "puzon", "kornett", "cornett", "tr\u{0105}ba", "tr\u{0105}bka", "obój"]) {
         return PijpFamilie::Tongwerk;
     }
     if bevat(&n, &["mixtuur", "mixture", "mixtur", "scherp", "scharf", "cimbel", "cymbel", "cymbal",
-        "zimbel", "sesquialter", "cornet", "terzian", "tertiaan", "ruispijp", "rauschpfeife",
-        "rauschquint", "fourniture", "plein jeu", "plein-jeu", "pleinjeu", "acuta", "sharp", "mikstura"]) {
+        "zimbel", "sesquialter", "sexquialter", "cornet", "kornet", "terzian", "tertiaan", "ruispijp",
+        "ruijspijp", "rauschpfeife", "rauschquint", "fourniture", "plein jeu", "plein-jeu", "pleinjeu",
+        "acuta", "sharp", "mikstura", "hintersatz", "akkoord", "accoord", "ripieno", "lleno",
+        "carillon", "carillion", "cymba\u{0142}"]) {
         return PijpFamilie::Mixtuur;
     }
     if bevat(&n, &["gedekt", "gedackt", "gedact", "gedeckt", "bourdon", "bordun", "bordone", "holpijp",

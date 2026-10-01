@@ -1421,6 +1421,14 @@ impl OrganDefinition {
             }
         }
     }
+
+    /// Een voetmaat uit de tabel van harmonic_to_footage (octaven en de
+    /// gangbare aliquoten). Een andere harmonische bij een mengwerk is meestal
+    /// toeval (een pijp halverwege een repetering) en hoort niet onder de
+    /// knop (0.7.66).
+    pub fn is_standard_harmonic(harmonic: u32) -> bool {
+        matches!(harmonic, 0 | 1 | 2 | 3 | 4 | 6 | 8 | 12 | 16 | 24 | 32 | 40 | 48 | 64 | 80 | 96 | 128)
+    }
 }
 
 // ============================================================================

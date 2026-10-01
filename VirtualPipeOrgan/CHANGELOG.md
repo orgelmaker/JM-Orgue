@@ -5,6 +5,43 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.66] - 2026-10-01
+
+### Mengwerken tonen het aantal koren
+
+Onder de naam van een mengwerk (Mixtuur, Scherp, Cymbel, Sesquialter, Cornet,
+Plein-jeu …) staat nu het aantal koren, zoals organisten dat schrijven:
+**"4 st."** of **"4-6 st."**. Tot nu toe stond daar een voetmaat, vaak 8', en
+die zegt bij een mengwerk niets.
+
+- De schrijfwijze volgt de taal: Nederlands "4 st.", Duits "4fach", Engels,
+  Frans, Spaans, Italiaans en Pools met Romeinse cijfers ("IV").
+- Het aantal komt uit wat de bouwer of producent zelf schreef: de
+  registernaam. Daar staat het in allerlei vormen in ("IV Rks", "III",
+  "2 fach", "4-5f.", "4st", "4 sterk", "IV rangs"); die worden allemaal
+  herkend. Het aantal gaat daarbij uit de naam, zodat het er niet dubbel
+  staat: "Mixtur major 4-5f. 2 2/3'" wordt **Mixtur major** met eronder
+  **4-5 st. 2 2/3'**.
+- Bij eigen opnamen met JM-Rec komt het aantal uit het bestand dat JM-Rec naast
+  de orgeldefinitie schrijft. Daar stond bij een Mixtuur en Cornet tot nu toe
+  8', omdat de export van de definitie het aantal kwijtraakte.
+- Staat er geen aantal in de naam, dan blijft de voetmaat staan. Bij
+  Hauptwerk-sets is dat nu de voetmaat van de laagste toets (zo noteer je een
+  mengwerk ook), in plaats van die van een willekeurige pijp, en een
+  toevalswaarde van halverwege een repetering (zoals 0.19') wordt niet meer
+  getoond.
+- Een los Romeins cijfer telt alleen bij een mengwerk. Zo blijven namen als
+  "Prestant II" of "Voix céleste II" en Italiaanse intervalnamen ("Ottava XV")
+  gewoon staan.
+- In de platte stand van de knoppen (naam en regel naast elkaar) staat bij een
+  mengwerk alleen het aantal, zodat de naam leesbaar blijft.
+- De afstandsbediening toont het aantal ook, in de taal van de telefoon.
+- Bij sorteren op voetmaat komen mengwerken na de 2'-registers in plaats van
+  tussen de 8'-registers.
+
+Het windmodel gebruikt hetzelfde aantal voor het windverbruik van een
+mengwerk. "Mixtur 2 fach" telde daar tot nu toe als vier koren.
+
 ## [0.7.65] - 2026-10-01
 
 ### Volumeschuif in de setzerbalk

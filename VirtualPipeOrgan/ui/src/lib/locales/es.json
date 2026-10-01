@@ -312,7 +312,8 @@
   "stops": {
     "tremulant": "Trémolo",
     "drawn": "activado",
-    "not_drawn": "desactivado"
+    "not_drawn": "desactivado",
+    "ranks_format": "{r}"
   },
   "couplers": {
     "extra_title": "Acoplamientos adicionales",

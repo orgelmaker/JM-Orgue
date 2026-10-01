@@ -1,6 +1,6 @@
 //! Tauri commands - API between frontend and backend
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tauri::State;
 use serde::{Serialize, Deserialize};
 use tracing::{info, warn};
@@ -9,7 +9,8 @@ use crate::audio::AudioCommand;
 use crate::state::AppState;
 use crate::library::{self, OrganLibraryEntry, OrganSettings, PresetBindingSaved, SwellBindingSaved, CrescendoBindingSaved, DivisionTremulantSaved, MidiMappingSaved, PresetData};
 use vpo_sampler::{OrganDefinition, clean_stop_name, strip_pitch_from_name,
-                  gedeeld_voorvoegsel, strip_voorvoegsel, clean_division_name};
+                  gedeeld_voorvoegsel, strip_voorvoegsel, clean_division_name,
+                  splits_koren, Koren};
 
 /// Audio device info for frontend
 #[derive(Debug, Serialize)]
@@ -160,6 +161,23 @@ pub struct StopDto {
     /// Whether this is a reed (tongwerk) stop — for T.A. coupler
     #[serde(skip_serializing)]
     pub is_reed: bool,
+    /// Aantal koren van een mengwerk (0.7.66), uit de naam of het
+    /// JM-Rec-manifest. De UI zet het per taal onder de naam ("4 st.",
+    /// "4fach", "IV"); `pitch` blijft alleen de voetmaat, want die wordt op
+    /// meerdere plekken als getal gelezen.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub koren: Option<Koren>,
+    /// Hoort tot de mengwerkfamilie (Mixtuur, Scherp, Cornet …), ook als het
+    /// aantal koren onbekend is. De UI sorteert zo'n register zonder voetmaat
+    /// hoog en toont in de platte stand alleen het aantal; een register dat
+    /// geen mengwerk is maar wel "2 st." in de naam heeft, houdt zijn voetmaat.
+    #[serde(default)]
+    pub mengwerk: bool,
+    /// Voetmaat uit de set voor het windmodel, los van wat er onder de knop
+    /// staat: bij een mengwerk met alleen een aantal is `pitch` leeg, maar het
+    /// windverbruik hangt wel van de voetmaat af.
+    #[serde(skip_serializing)]
+    pub wind_voet: f32,
 }
 
 /// Division volume info for frontend
@@ -1689,6 +1707,216 @@ struct JmRecManifest {
     plaats: String,
     #[serde(default)]
     bouwer: String,
+    /// Klavieren met hun registers, als losse JSON-waarden: in oudere
+    /// manifesten zijn het kale namen, en een registerlijst die niet in het
+    /// verwachte formaat staat mag de naamregel (kerk, bouwer, plaats) nooit
+    /// laten mislukken.
+    #[serde(default)]
+    keyboards: Vec<serde_json::Value>,
+    #[serde(default)]
+    pedal_registers: Vec<serde_json::Value>,
+}
+
+/// Aantal koren per (klaviermap, registermap) uit het JM-Rec-manifest
+/// (0.7.66). De JM-Rec-export schrijft een mengwerk als HarmonicNumber=8 in de
+/// .organ (dan stond er "Mixtuur 8'"); het manifest ernaast heeft het echte
+/// aantal ("6st"). JM-Rec maakt registernamen alleen binnen één klavier
+/// uniek, dus de sleutel is (klavier, register) in kleine letters. Daarnaast
+/// ("", register) voor een registernaam die in het hele manifest maar één
+/// keer voorkomt: dan maakt het klavier niet uit.
+type ManifestKoren = std::collections::HashMap<(String, String), Koren>;
+
+fn jm_rec_koren_van(m: &JmRecManifest) -> ManifestKoren {
+    // (klavier, register, aantal of niets)
+    let mut alle: Vec<(String, String, Option<Koren>)> = Vec::new();
+    let mut lees = |klavier: &str, registers: &[serde_json::Value]| {
+        for r in registers {
+            let naam = r.get("name").and_then(|v| v.as_str()).unwrap_or("").trim().to_lowercase();
+            if naam.is_empty() {
+                continue;
+            }
+            let foot = r.get("foot").and_then(|v| v.as_str()).unwrap_or("");
+            // Het voetveld is nooit een registernaam: een Romeins aantal of
+            // "4f" telt hier dus gewoon mee.
+            let koren = splits_koren(&format!("Register {}", foot.trim()), true).koren;
+            alle.push((klavier.trim().to_lowercase(), naam, koren));
+        }
+    };
+    for kb in &m.keyboards {
+        let klavier = kb.get("name").and_then(|v| v.as_str()).unwrap_or("");
+        if let Some(regs) = kb.get("registers").and_then(|v| v.as_array()) {
+            lees(klavier, regs);
+        }
+    }
+    lees("pedaal", &m.pedal_registers);
+
+    let mut uit = ManifestKoren::new();
+    for (klavier, register, koren) in &alle {
+        if let Some(k) = koren {
+            uit.insert((klavier.clone(), register.clone()), *k);
+            if alle.iter().filter(|(_, r, _)| r == register).count() == 1 {
+                uit.insert((String::new(), register.clone()), *k);
+            }
+        }
+    }
+    uit
+}
+
+/// Het aantal koren voor een register uit de manifestkaart, op basis van het
+/// pad van een van zijn opnamen. JM-Rec zet de opnamen in klavier/register/,
+/// maar soms een niveau dieper: per microfoon een submap, of bij een bas/
+/// discant-splitsing register/register_bas/. Daarom de voorouders aflopen.
+fn manifest_koren_voor_pad(pad: &Path, kaart: &ManifestKoren) -> Option<Koren> {
+    if kaart.is_empty() {
+        return None;
+    }
+    let tekst = pad.to_string_lossy().replace('\\', "/").to_lowercase();
+    let delen: Vec<&str> = tekst.split('/').filter(|d| !d.is_empty()).collect();
+    if delen.len() < 2 {
+        return None;
+    }
+    let zonder_helft = |d: &str| -> String {
+        for staart in ["_bas", "_bass", "_dis", "_disc", "_discant", "_disk", "_treble"] {
+            if let Some(kop) = d.strip_suffix(staart) {
+                return kop.to_string();
+            }
+        }
+        d.to_string()
+    };
+    // De bestandsnaam zelf (laatste deel) overslaan.
+    for i in (1..delen.len() - 1).rev() {
+        if let Some(k) = kaart.get(&(delen[i - 1].to_string(), zonder_helft(delen[i]))) {
+            return Some(*k);
+        }
+    }
+    for i in (0..delen.len() - 1).rev() {
+        if let Some(k) = kaart.get(&(String::new(), zonder_helft(delen[i]))) {
+            return Some(*k);
+        }
+    }
+    None
+}
+
+/// Naam, regel (voetmaat) en aantal koren van een GrandOrgue/Hauptwerk-
+/// register (0.7.66). `schoon` is de naam zonder divisieaanduiding,
+/// `harmonic` de klinkende harmonische uit de set, `manifest` het aantal uit
+/// het JM-Rec-manifest. De divisieaanduiding staat al boven de kolom en de
+/// voetmaat al onder de knop: allebei niet nog een keer in de naam.
+fn registerweergave(schoon: &str, mengwerk: bool, harmonic: u32, manifest: Option<Koren>)
+    -> (String, String, Option<Koren>)
+{
+    let van_set = OrganDefinition::harmonic_to_footage(harmonic);
+    let splitsing = splits_koren(schoon, mengwerk);
+    if let Some(k) = splitsing.koren {
+        // Voetmaat: met voetteken uit de naam ("… 2 2/3'"). Anders die van de
+        // set, als hij KAAL achter de naam stond ("Mixtur 4fach 2" → naam
+        // "Mixtur", 2') of als het register geen mengwerk is ("Prestant 2 st."
+        // houdt zijn 8'). Bij een mengwerk zonder voetmaat in de naam is die
+        // van de set geen betrouwbare aanduiding: dan niets.
+        let naam = strip_pitch_from_name(&splitsing.naam, &van_set);
+        let pitch = match splitsing.voetmaat {
+            Some(v) => v,
+            None if naam != splitsing.naam || !mengwerk => van_set,
+            None => String::new(),
+        };
+        return (naam, pitch, Some(k));
+    }
+    if let Some(k) = manifest {
+        // Bij een mengwerk schrijft JM-Rec HarmonicNumber=8 als terugval: die
+        // 8' is dan geen voetmaat. Een andere waarde (Sesquialter "2 2/3 2st")
+        // of een register dat geen mengwerk is, houdt zijn voetmaat.
+        let pitch = if mengwerk && harmonic == 8 { String::new() } else { van_set };
+        return (strip_pitch_from_name(schoon, &pitch), pitch, Some(k));
+    }
+    // Mengwerk zonder aantal: de voetmaat uit de set, maar geen toevalswaarde
+    // van halverwege een repetering.
+    let pitch = if mengwerk && !OrganDefinition::is_standard_harmonic(harmonic) { String::new() } else { van_set };
+    (strip_pitch_from_name(schoon, &pitch), pitch, None)
+}
+
+#[cfg(test)]
+mod registerweergave_tests {
+    use super::*;
+    fn k(min: u8, max: u8) -> Option<Koren> { Some(Koren { min, max }) }
+
+    #[test]
+    fn voetmaat_en_aantal_uit_naam_en_set() {
+        // Voetmaat met voetteken in de naam.
+        assert_eq!(registerweergave("Mixtur major 4-5f. 2 2/3'", true, 8, None),
+            ("Mixtur major".into(), "2 2/3'".into(), k(4, 5)));
+        // Kale voetmaat achter het aantal: die van de set, en weg uit de naam.
+        assert_eq!(registerweergave("Mixtur 4fach 2", true, 32, None),
+            ("Mixtur".into(), "2'".into(), k(4, 4)));
+        assert_eq!(registerweergave("Sesquialter II 2 2/3", true, 24, None),
+            ("Sesquialter".into(), "2 2/3'".into(), k(2, 2)));
+        // Mengwerk met aantal en zonder voetmaat in de naam: alleen het aantal.
+        assert_eq!(registerweergave("Mixtur IV", true, 32, None),
+            ("Mixtur".into(), String::new(), k(4, 4)));
+        // Geen mengwerk, wel een markering: de voetmaat van de set blijft.
+        assert_eq!(registerweergave("Prestant 2 st.", false, 8, None),
+            ("Prestant".into(), "8'".into(), k(2, 2)));
+    }
+
+    #[test]
+    fn manifest_en_zonder_aantal() {
+        assert_eq!(registerweergave("Mixtuur", true, 8, k(6, 6)),
+            ("Mixtuur".into(), String::new(), k(6, 6)));
+        // Geen aantal, standaard voetmaat: blijft zoals het was.
+        assert_eq!(registerweergave("Mixtuur", true, 32, None),
+            ("Mixtuur".into(), "2'".into(), None));
+        // Toevalswaarde van halverwege een repetering: geen voetmaat.
+        assert_eq!(registerweergave("Cymbel", true, 336, None),
+            ("Cymbel".into(), String::new(), None));
+        // Gewoon register: ongewijzigd, voetmaat uit de naam gehaald.
+        assert_eq!(registerweergave("Gedekt 8", false, 8, None),
+            ("Gedekt".into(), "8'".into(), None));
+        // Manifest met een echte voetmaat in de set (geen JM-Rec-terugval 8').
+        assert_eq!(registerweergave("Sesquialter", true, 24, k(2, 2)),
+            ("Sesquialter".into(), "2 2/3'".into(), k(2, 2)));
+    }
+
+    fn manifest(json: &str) -> JmRecManifest {
+        serde_json::from_str(json).expect("manifest moet altijd te lezen zijn")
+    }
+
+    #[test]
+    fn manifest_oud_formaat_houdt_de_naam() {
+        // Kale klaviernamen (oudere JM-Rec): de naamregel mag niet wegvallen.
+        let m = manifest(r#"{"kerk":"St. Jan","bouwer":"B","keyboards":["Hoofdwerk"]}"#);
+        assert_eq!(m.kerk, "St. Jan");
+        assert!(jm_rec_koren_van(&m).is_empty());
+    }
+
+    #[test]
+    fn manifest_per_klavier_en_submappen() {
+        let m = manifest(r#"{
+            "keyboards": [
+                {"name": "Hoofdwerk", "registers": [{"name": "Mixtuur", "foot": "4-6st"}, {"name": "Cornet", "foot": "IV"}]},
+                {"name": "Rugwerk", "registers": [{"name": "Mixtuur", "foot": "3st"}]}
+            ],
+            "pedal_registers": [{"name": "Mixtuur", "foot": ""}]
+        }"#);
+        let kaart = jm_rec_koren_van(&m);
+        let pad = |p: &str| manifest_koren_voor_pad(Path::new(p), &kaart);
+        // Zelfde naam op twee klavieren: elk zijn eigen aantal.
+        assert_eq!(pad(r"Hoofdwerk\Mixtuur\036-c.wav"), Some(Koren { min: 4, max: 6 }));
+        assert_eq!(pad("D:/Sets/X/Rugwerk/Mixtuur/036-c.wav"), Some(Koren { min: 3, max: 3 }));
+        // Het pedaal heeft geen aantal: niet dat van een manuaal lenen.
+        assert_eq!(pad(r"Pedaal\Mixtuur\036-c.wav"), None);
+        // Microfoon-submap en bas/discant-map.
+        assert_eq!(pad(r"Hoofdwerk\Mixtuur\Front\036-c.wav"), Some(Koren { min: 4, max: 6 }));
+        assert_eq!(pad(r"Hoofdwerk\Mixtuur\Mixtuur_bas\036-c.wav"), Some(Koren { min: 4, max: 6 }));
+        // Romeins in het voetveld telt ook; de naam staat maar op één klavier.
+        assert_eq!(pad(r"Elders\Cornet\060-c.wav"), Some(Koren { min: 4, max: 4 }));
+    }
+}
+
+/// Het pad van de eerste opname van een register (voor de manifestkaart).
+fn eerste_pijppad(stop: &vpo_sampler::StopDef) -> Option<PathBuf> {
+    stop.pipes.iter().find_map(|p| match p {
+        vpo_sampler::PipeDef::Sample { path, .. } => Some(path.clone()),
+        _ => None,
+    })
 }
 
 /// Lees `<stem>.jm-rec.json` naast een orgelbestand (None als het er niet is
@@ -1718,13 +1946,18 @@ fn jm_rec_naam(kerk: &str, bouwer: &str, plaats: &str) -> Option<String> {
 /// projectmap waarvan de gebruiker (nog) geen .organ exporteerde, die dus via
 /// de mapscan geladen wordt. Zonder dit zou zo'n set als mapcode ("PuttBätz")
 /// in de bibliotheek komen.
-fn jm_rec_identity_for_dir(dir: &Path) -> Option<(String, String, String)> {
+/// Het JM-Rec-manifest (`*.jm-rec.json`) in een projectmap, als die er is.
+fn jm_rec_manifest_in_dir(dir: &Path) -> Option<JmRecManifest> {
     let manifest = std::fs::read_dir(dir).ok()?.flatten().map(|e| e.path()).find(|p| {
         p.file_name()
             .map(|n| n.to_string_lossy().to_lowercase().ends_with(".jm-rec.json"))
             .unwrap_or(false)
     })?;
-    let m: JmRecManifest = serde_json::from_str(&std::fs::read_to_string(&manifest).ok()?).ok()?;
+    serde_json::from_str(&std::fs::read_to_string(&manifest).ok()?).ok()
+}
+
+fn jm_rec_identity_for_dir(dir: &Path) -> Option<(String, String, String)> {
+    let m = jm_rec_manifest_in_dir(dir)?;
     let naam = jm_rec_naam(&m.kerk, &m.bouwer, &m.plaats)?;
     Some((naam, m.bouwer.trim().to_string(), m.plaats.trim().to_string()))
 }
@@ -2471,6 +2704,8 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
     let mut skipped_noise = 0usize;
     let mut rank_summary: Vec<RankSummary> = Vec::new();
 
+    // Aantallen koren uit het JM-Rec-manifest naast de orgeldefinitie (0.7.66).
+    let manifest_koren = read_jm_rec_manifest(odf_path).map(|m| jm_rec_koren_van(&m)).unwrap_or_default();
     for manual in &definition.manuals {
         let mut stops: Vec<StopDto> = Vec::new();
 
@@ -2496,8 +2731,26 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
                     continue;
                 }
                 rank_summary.push(rank_summary_of(stop, format!("{}_{}", manual.number, stop.id)));
-                let pitch = OrganDefinition::harmonic_to_footage(stop.sounding_harmonic);
                 let color = get_stop_color(&stop.name);
+
+                // Naam en de regel eronder. De divisieaanduiding staat al boven
+                // de kolom en de voetmaat al onder de knop: allebei niet nog een
+                // keer in de naam. Bij een mengwerk komt onder de knop het
+                // aantal koren (0.7.66): uit de naam, anders uit het
+                // JM-Rec-manifest.
+                let zonder_voorvoegsel = match &voorvoegsel {
+                    Some(v) => strip_voorvoegsel(&stop.name, v),
+                    None => stop.name.clone(),
+                };
+                let schoon = clean_stop_name(&zonder_voorvoegsel);
+                let mengwerk = vpo_audio::familie_van_naam(&schoon, is_reed_stop(&stop.name))
+                    == vpo_audio::PijpFamilie::Mixtuur;
+                let (name, pitch, koren) = registerweergave(
+                    &schoon,
+                    mengwerk,
+                    stop.sounding_harmonic,
+                    eerste_pijppad(stop).and_then(|p| manifest_koren_voor_pad(&p, &manifest_koren)),
+                );
 
                 // MIDI range. Hauptwerk sets the stop's own first note directly.
                 // For GrandOrgue, a stop can start partway up the keyboard (bass/
@@ -2509,20 +2762,11 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
 
                 stops.push(StopDto {
                     id: format!("{}_{}", manual.number, stop.id),
-                    // De divisieaanduiding staat al boven de kolom, en het
-                    // voettal staat al onder de knop. Allebei niet nog een
-                    // keer in de naam.
-                    name: {
-                        let zonder_voorvoegsel = match &voorvoegsel {
-                            Some(v) => strip_voorvoegsel(&stop.name, v),
-                            None => stop.name.clone(),
-                        };
-                        strip_pitch_from_name(
-                            &clean_stop_name(&zonder_voorvoegsel),
-                            &pitch,
-                        )
-                    },
+                    name,
                     pitch,
+                    koren,
+                    mengwerk,
+                    wind_voet: if stop.sounding_harmonic > 0 { 64.0 / stop.sounding_harmonic as f32 } else { 8.0 },
                     drawn: false,
                     color: Some(color.to_string()),
                     // Echte tremulant-opnamen van dit register (gevuld in het
@@ -5743,37 +5987,6 @@ fn build_stop_division_map(divisions: &[DivisionDto]) -> std::collections::HashM
 /// verbruik van haar "pleno": alle registers op een vierklank een octaaf
 /// boven de laagste toets. Dat pleno is de referentie voor "vol werk", zodat
 /// een kistorgel en een domorgel bij hún pleno even ver inzakken.
-/// Aantal koren van een mixtuur uit de naam: "Mixtuur IV" → 4, "Scherp
-/// III-IV" → 4, "Mixtur major 4-5f." → 5, "Sesquialter II" → 2. Niets
-/// gevonden → 4 (de gewone mixtuur).
-fn koren_uit_naam(naam: &str) -> u8 {
-    let mut beste = 0u8;
-    for token in naam.split(|c: char| c.is_whitespace() || c == '(' || c == ')' || c == ',' || c == '.') {
-        let t = token.trim_matches(|c: char| !c.is_alphanumeric() && c != '-');
-        if t.is_empty() { continue; }
-        // Romeins: alleen I/V/X, hooguit vier tekens, evt. "III-IV".
-        for deel in t.split('-') {
-            let u = deel.to_uppercase();
-            if !u.is_empty() && u.len() <= 4 && u.chars().all(|c| c == 'I' || c == 'V' || c == 'X') {
-                let v = match u.as_str() {
-                    "I" => 1, "II" => 2, "III" => 3, "IV" => 4, "V" => 5, "VI" => 6, "VII" => 7, "VIII" => 8, _ => 0,
-                };
-                beste = beste.max(v);
-            }
-        }
-        // Arabisch met "f" (Duits/Nederlands): "4f", "4-5f", "5F".
-        let u = t.to_uppercase();
-        if u.ends_with('F') {
-            for deel in u.trim_end_matches('F').split('-') {
-                if let Ok(v) = deel.parse::<u8>() {
-                    if v <= 12 { beste = beste.max(v); }
-                }
-            }
-        }
-    }
-    if beste == 0 { 4 } else { beste }
-}
-
 fn build_stop_wind_profiles(divisions: &[DivisionDto])
     -> (std::collections::HashMap<u32, vpo_audio::StopWindProfiel>, [f32; 32])
 {
@@ -5790,14 +6003,18 @@ fn build_stop_wind_profiles(divisions: &[DivisionDto])
         let (intervallen, gewicht): ([i32; 4], f32) = if pedaal { ([0, 5, 7, 12], 0.5) } else { ([12, 16, 19, 24], 1.0) };
         for stop in &division.stops {
             let familie = vpo_audio::familie_van_naam(&stop.name, stop.is_reed);
-            let mut voet = vpo_audio::voet_uit_pitch(&stop.pitch);
-            let mut koren = 1u8;
+            let mut voet = if stop.pitch.trim().is_empty() { stop.wind_voet } else { vpo_audio::voet_uit_pitch(&stop.pitch) };
+            // Het aantal koren staat sinds 0.7.66 in een eigen veld (uit de
+            // naam of het JM-Rec-manifest gehaald, niet meer uit de naam die nu
+            // zonder aantal is).
+            let mut koren = stop.koren.map(|k| k.max).unwrap_or(1);
             if familie == vpo_audio::PijpFamilie::Mixtuur {
-                // Sets zonder voetmaat (GrandOrgue zonder HarmonicNumber, dus
-                // ook Friesach) geven "8'" terug; een mixtuur klinkt op de
-                // hoogste koorpijp, niet op 8'.
+                // Sets zonder voetmaat (GrandOrgue zonder HarmonicNumber, of een
+                // mengwerk zonder bruikbare voetmaat) geven "8'" of niets terug;
+                // een mixtuur klinkt op de hoogste koorpijp, niet op 8'.
                 if voet > 4.0 { voet = if pedaal { 4.0 } else { 2.0 }; }
-                koren = koren_uit_naam(&stop.name);
+                // Niets bekend → 4, de gewone mixtuur.
+                if stop.koren.is_none() { koren = 4; }
             }
             let profiel = vpo_audio::StopWindProfiel { familie, voet, koren };
             map.insert(stop.internal_stop_id, profiel);
@@ -5812,22 +6029,6 @@ fn build_stop_wind_profiles(divisions: &[DivisionDto])
         }
     }
     (map, pleno)
-}
-
-#[cfg(test)]
-mod windprofiel_tests {
-    use super::koren_uit_naam;
-
-    #[test]
-    fn koren_uit_de_naam() {
-        assert_eq!(koren_uit_naam("Mixtuur IV"), 4);
-        assert_eq!(koren_uit_naam("Scherp III-IV"), 4);
-        assert_eq!(koren_uit_naam("HW Mixtur major 4-5f. 2 2/3'"), 5);
-        assert_eq!(koren_uit_naam("SW Plein Jeu 4-5f. 2'"), 5);
-        assert_eq!(koren_uit_naam("Sesquialter II"), 2);
-        assert_eq!(koren_uit_naam("Cornet V"), 5);
-        assert_eq!(koren_uit_naam("Mixtuur"), 4);
-    }
 }
 
 /// Detect reed (tongwerk) stops by name
@@ -6328,6 +6529,9 @@ pub fn do_load_samples_from_directory_locked(state: &AppState, directory: &str) 
         }
         None => (organ_name, "Custom Samples".to_string(), directory.to_string()),
     };
+    // Aantallen koren uit hetzelfde manifest (0.7.66), voor mengwerken waarvan
+    // de mapnaam geen aantal draagt.
+    let dir_manifest_koren: Option<ManifestKoren> = jm_rec_manifest_in_dir(path).map(|m| jm_rec_koren_van(&m));
 
     info!("Scanning directory for samples: {}", directory);
 
@@ -6445,11 +6649,42 @@ pub fn do_load_samples_from_directory_locked(state: &AppState, directory: &str) 
                   stop.name, internal_stop_id, stop_first_note, stop_last_note, any_trem, layers.len());
 
             let reed = matches!(stop.family, vpo_sampler::custom_organ::StopFamily::Reed) || is_reed_stop(&stop.name);
+            // Aantal koren (0.7.66): uit het label van de mapnaam ("Mixtuur_4st"),
+            // anders uit de naam zelf ("Mixtuur IV").
+            let mengwerk = matches!(stop.family, vpo_sampler::custom_organ::StopFamily::Mixture)
+                || vpo_audio::familie_van_naam(&stop.name, reed) == vpo_audio::PijpFamilie::Mixtuur;
+            let label_koren = stop.pitch_label.as_deref()
+                .and_then(|l| splits_koren(&format!("Register {}", l), false).koren);
+            let splitsing = splits_koren(&stop.name, mengwerk);
+            let (naam, pitch, koren) = if let Some(k) = label_koren {
+                (stop.name.clone(), String::new(), Some(k))
+            } else if let Some(k) = splitsing.koren {
+                // Geen mengwerk ("Prestant 2 st."): de eigen voetmaat blijft staan.
+                let pitch = match splitsing.voetmaat {
+                    Some(v) => v,
+                    None if !mengwerk && stop.pitch_feet > 0.01 => format!("{}'", stop.pitch_feet as u32),
+                    None => String::new(),
+                };
+                (splitsing.naam, pitch, Some(k))
+            } else if let Some(k) = dir_manifest_koren.as_ref()
+                .and_then(|kaart| stop.pipes.first().and_then(|p| manifest_koren_voor_pad(&p.sample_path, kaart))) {
+                // JM-Rec-projectmap zonder .organ: de mapnaam komt uit de
+                // weergavenaam, het aantal alleen uit het manifest.
+                (stop.name.clone(), String::new(), Some(k))
+            } else if stop.pitch_feet > 0.01 {
+                (stop.name.clone(), format!("{}'", stop.pitch_feet as u32), None)
+            } else {
+                // Een label dat geen aantal is (of meer dan 12 koren): toon het
+                // label zelf, nooit "0'".
+                (stop.name.clone(), stop.pitch_label.clone().unwrap_or_default(), None)
+            };
             stops.push(StopDto {
                 id: format!("{}_{}", div_idx, internal_stop_id),
-                name: stop.name.clone(),
-                pitch: stop.pitch_label.clone()
-                    .unwrap_or_else(|| format!("{}'", stop.pitch_feet as u32)),
+                name: naam,
+                pitch,
+                koren,
+                mengwerk,
+                wind_voet: if stop.pitch_feet > 0.01 { stop.pitch_feet } else { 8.0 },
                 drawn: false,
                 color: Some(color.to_string()),
                 has_tremulant: any_trem,
@@ -8519,7 +8754,7 @@ mod tremulant_kind_tests {
         StopDto {
             id: id.to_string(), name: id.to_string(), pitch: "8".to_string(), drawn: false,
             color: None, has_tremulant: trem, midi_action_code: 0, internal_stop_id: 1,
-            first_midi_note: 36, last_midi_note: 96, is_reed: false,
+            first_midi_note: 36, last_midi_note: 96, is_reed: false, koren: None, mengwerk: false, wind_voet: 8.0,
         }
     }
 

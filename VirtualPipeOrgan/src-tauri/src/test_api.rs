@@ -855,6 +855,9 @@ fn remote_organ_dto_inner(
                 "id": s.id,
                 "name": strip_pitch_suffix(&s.name, &s.pitch),
                 "pitch": s.pitch,
+                // Aantal koren van een mengwerk (0.7.66); de pagina maakt het
+                // op in de taal van de telefoon.
+                "koren": s.koren,
                 "color": s.color,
                 "drawn": s.drawn,
             })).collect::<Vec<_>>(),
@@ -2011,7 +2014,7 @@ mod tests {
             internal_stop_id: 0,
             first_midi_note: 36,
             last_midi_note: 96,
-            is_reed: false,
+            is_reed: false, koren: None, mengwerk: false, wind_voet: 8.0,
         };
         let coupler = |id: &str, kind: &str, div: &str| CouplerDto {
             id: id.to_string(),
@@ -2088,6 +2091,18 @@ mod tests {
         // Voettal niet dubbel: "Prestant 8'" + pitch "8'" → "Prestant".
         assert_eq!(v["divisions"][0]["stops"][0]["name"], json!("Prestant"));
         assert_eq!(v["divisions"][0]["stops"][1]["name"], json!("Octaaf"));
+    }
+
+    #[test]
+    fn remote_organ_dto_geeft_koren_door() {
+        // Mengwerk (0.7.66): de pagina maakt het aantal zelf op in de taal van
+        // de telefoon, dus het moet als getal mee; een gewoon register niet.
+        let mut o = testorgel();
+        o.divisions[0].stops[0].koren = Some(vpo_sampler::Koren { min: 4, max: 6 });
+        let trems = std::collections::HashMap::new();
+        let v = remote_organ_dto_inner(&o, None, &trems, 0);
+        assert_eq!(v["divisions"][0]["stops"][0]["koren"], json!({ "min": 4, "max": 6 }));
+        assert!(v["divisions"][0]["stops"][1]["koren"].is_null());
     }
 
     #[test]

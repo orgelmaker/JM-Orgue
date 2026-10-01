@@ -312,7 +312,8 @@
   "stops": {
     "tremulant": "Tremulant",
     "drawn": "włączony",
-    "not_drawn": "wyłączony"
+    "not_drawn": "wyłączony",
+    "ranks_format": "{r}"
   },
   "couplers": {
     "extra_title": "Dodatkowe kopuły",

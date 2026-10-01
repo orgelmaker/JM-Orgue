@@ -196,7 +196,7 @@
             >
               <span class="stop-item-div">{stop._division}</span>
               <span class="stop-item-name">{stop.name}</span>
-              <span class="stop-item-pitch">{stop.pitch}</span>
+              <span class="stop-item-pitch">{stop.regel ?? stop.pitch}</span>
               {#if stopHasAnyVoicing(stop)}
                 <span class="edit-dot" title={$t('voicing.has_edits')}>●</span>
               {/if}
@@ -209,7 +209,7 @@
       <div class="editor">
         {#if selectedStop}
           <div class="editor-title">
-            {selectedStop._division} · {selectedStop.name} {selectedStop.pitch}
+            {selectedStop._division} · {selectedStop.name} {selectedStop.regel ?? selectedStop.pitch}
           </div>
 
           <!-- Pijp keuze -->

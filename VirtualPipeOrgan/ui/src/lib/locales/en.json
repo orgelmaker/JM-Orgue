@@ -312,7 +312,8 @@
   "stops": {
     "tremulant": "Tremulant",
     "drawn": "engaged",
-    "not_drawn": "disengaged"
+    "not_drawn": "disengaged",
+    "ranks_format": "{r}"
   },
   "couplers": {
     "extra_title": "Extra couplers",

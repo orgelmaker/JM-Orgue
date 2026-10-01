@@ -12,6 +12,7 @@ pub(crate) mod hauptwerk_compact;
 pub mod streaming;
 pub mod custom_organ;
 pub mod perspective;
+pub mod registernaam;
 
 pub use loader::{
     SampleData, SampleError, PreloadBuffer, PreloadSegment, WavMarkers, ReleaseAlignTable,
@@ -28,3 +29,4 @@ pub use hauptwerk::{load_hauptwerk, is_hauptwerk_path, clean_stop_name, strip_pi
 pub use streaming::*;
 pub use custom_organ::*;
 pub use perspective::*;
+pub use registernaam::{splits_koren, Koren, KorenSplitsing};

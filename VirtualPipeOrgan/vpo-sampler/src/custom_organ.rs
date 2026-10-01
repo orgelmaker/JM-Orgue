@@ -355,7 +355,7 @@ impl CustomOrgan {
                     next_rank_id += layers.len() as u32;
 
                     writeln!(out, "[Stop{:03}]", sid).unwrap();
-                    writeln!(out, "Name={}", stop.name).unwrap();
+                    writeln!(out, "Name={}", stop.exportnaam()).unwrap();
                     writeln!(out, "NumberOfRanks={}", layers.len()).unwrap();
                     for (i, rid) in rank_ids.iter().enumerate() {
                         writeln!(out, "Rank{:03}={:03}", i + 1, rid).unwrap();
@@ -436,7 +436,7 @@ impl CustomOrgan {
                 let first_pipe_key = stop_first.saturating_sub(div_first) + 1;
 
                 writeln!(out, "[Stop{:03}]", sid).unwrap();
-                writeln!(out, "Name={}", stop.name).unwrap();
+                writeln!(out, "Name={}", stop.exportnaam()).unwrap();
                 writeln!(out, "NumberOfLogicalPipes={}", span).unwrap();
                 writeln!(out, "NumberOfAccessiblePipes={}", span).unwrap();
                 writeln!(out, "FirstAccessiblePipeLogicalKeyNumber={}", first_pipe_key).unwrap();
@@ -498,6 +498,17 @@ impl CustomDivision {
 }
 
 impl CustomStop {
+    /// De naam voor de .organ-export: mét het aantal koren ("Mixtuur 4st"),
+    /// zodat een herimport het terugvindt. De voetmaat van een mengwerk is
+    /// dan onbekend (HarmonicNumber=8); zonder het aantal in de naam stond
+    /// er na herimport "Mixtuur 8'" (0.7.66).
+    pub fn exportnaam(&self) -> String {
+        match &self.pitch_label {
+            Some(label) => format!("{} {}", self.name, label),
+            None => self.name.clone(),
+        }
+    }
+
     /// Add a pipe to this stop
     pub fn add_pipe(&mut self, midi_note: u8, sample_path: PathBuf) {
         self.pipes.push(CustomPipe {
@@ -659,8 +670,10 @@ fn parse_stop_info(dir_name: &str) -> (String, f32, StopFamily, Option<String>) 
 /// Split a normalized stop name into (name, pitch_feet, pitch_label).
 ///
 /// Recognises a trailing footage number, optionally followed by a "sterk"/rank
-/// marker ("st" or "sterk"). For rank stops the returned label is "Nst" and the
-/// numeric value is kept in `pitch_feet` for sorting/harmonic purposes.
+/// marker ("st" or "sterk"). For rank stops the returned label is "Nst" and
+/// `pitch_feet` is 0 (unknown): het getal is het aantal koren, geen voetmaat.
+/// Vroeger werd het óók de voetmaat, waardoor de export van "Mixtuur_4st"
+/// HarmonicNumber=16 (4') schreef.
 fn parse_pitch_and_name(normalized: &str) -> (String, f32, Option<String>) {
     let s = normalized.trim();
     if s.is_empty() {
@@ -702,6 +715,7 @@ fn parse_pitch_and_name(normalized: &str) -> (String, f32, Option<String>) {
     let feet: f32 = num_str.parse().unwrap_or(8.0);
     let name: String = chars[..digit_start].iter().collect::<String>().trim().to_string();
     let label = if is_ranks { Some(format!("{}st", num_str)) } else { None };
+    let feet = if is_ranks { 0.0 } else { feet };
 
     (name, feet, label)
 }
@@ -1562,7 +1576,8 @@ mod tests {
         // "4st" (4 sterk / ranks) must be preserved as a label, not turned into feet.
         let (name, pitch, fam, label) = parse_stop_info("Cornet_4st");
         assert_eq!(name, "Cornet");
-        assert_eq!(pitch, 4.0);
+        // Het getal is het aantal koren, geen voetmaat.
+        assert_eq!(pitch, 0.0);
         assert_eq!(label, Some("4st".to_string()));
         assert_eq!(fam, StopFamily::Mixture);
 

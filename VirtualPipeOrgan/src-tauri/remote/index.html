@@ -97,6 +97,23 @@
   var lang = ((navigator.language || 'en').slice(0, 2).toLowerCase());
   if (!STR[lang]) lang = 'en';
   var T = STR[lang];
+  // Aantal koren van een mengwerk zoals organisten het in die taal schrijven
+  // (zelfde regel als de app, zie ui/src/lib/registerRegel.js): {n} = 4 of
+  // 4-6, {r} = IV of IV-VI.
+  var KOREN_FMT = { nl: '{n} st.', de: '{n}fach' }[lang] || '{r}';
+  var ROMEINS = ['', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII'];
+  function rom(n) { return ROMEINS[n] || String(n); }
+  function regel(s) {
+    var k = '';
+    if (s.koren && s.koren.min) {
+      var een = s.koren.min === s.koren.max;
+      var n = een ? String(s.koren.min) : s.koren.min + '-' + s.koren.max;
+      var r = een ? rom(s.koren.min) : rom(s.koren.min) + '-' + rom(s.koren.max);
+      k = KOREN_FMT.replace('{n}', n).replace('{r}', r);
+    }
+    var p = (s.pitch || '').trim();
+    return [k, p].filter(Boolean).join(' ');
+  }
   // Documenttaal meelopen met de gekozen taal (stond hard op 'nl'): schermlezers,
   // woordafbreking en het vertaalaanbod van de browser gaan hierop af.
   document.documentElement.lang = lang;
@@ -224,7 +241,8 @@
       (div.stops || []).forEach(function (s) {
         var b = el('button', 'stop');
         b.appendChild(el('span', 'nm', s.name));
-        if (s.pitch) b.appendChild(el('span', 'pitch', s.pitch));
+        var rg = regel(s);
+        if (rg) b.appendChild(el('span', 'pitch', rg));
         if (s.color) b.style.borderLeftColor = s.color;
         if (s.drawn) b.classList.add('on');
         b.addEventListener('click', function () { toggleBtn(b, 'stops/' + esc(s.id) + '/toggle'); });

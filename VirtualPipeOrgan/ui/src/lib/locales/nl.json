@@ -312,7 +312,8 @@
   "stops": {
     "tremulant": "Tremulant",
     "drawn": "ingeschakeld",
-    "not_drawn": "uitgeschakeld"
+    "not_drawn": "uitgeschakeld",
+    "ranks_format": "{n} st."
   },
   "couplers": {
     "extra_title": "Koppels erbij",
