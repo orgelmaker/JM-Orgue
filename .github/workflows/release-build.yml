@@ -363,7 +363,11 @@ jobs:
   # workflows slaat "Re-run failed jobs" de downstream-taak vaker over. Gaat het
   # tóch mis, dan is er de handmatige noodknop: Actions -> updater-json.
   publish-updater-json:
-    needs: [build-windows, build-macos]
+    # Ook op build-linux wachten: zonder dat werd latest.json soms gemaakt
+    # vóórdat de AppImage en zijn .sig op de release stonden, en dan ontbrak
+    # linux-x86_64 (0.7.66). Mislukt de Linux-build, dan gaat dit door
+    # (!cancelled()) en komt alleen Linux niet in latest.json.
+    needs: [build-windows, build-macos, build-linux]
     if: ${{ !cancelled() && github.event_name == 'release' && needs.build-windows.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
