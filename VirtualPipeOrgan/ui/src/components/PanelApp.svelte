@@ -5,7 +5,8 @@
   // consumptie blijven uit (het hoofdvenster doet die), vensterbeheer-acties
   // (orgel laden/sluiten, profielwissel, nieuw scherm, afsluiten) worden als
   // Tauri-event naar het hoofdvenster doorgestuurd, en divisiekeuze/layout/
-  // hoofdbalk-zichtbaarheid worden per scherm × orgel bewaard (panel-state).
+  // hoofdbalk-zichtbaarheid/knopmaat worden per scherm × orgel bewaard
+  // (panel-state).
   import { onMount, onDestroy } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
   import { tx } from '../lib/i18n.js';

@@ -1,5 +1,6 @@
 // Per-scherm-toestand van extra vensters (divisiekeuze, vensterpositie/-grootte,
-// layout, hoofdbalk aan/uit), bewaard per scherm × orgel in localStorage.
+// layout, hoofdbalk aan/uit, knopmaat stopSize/stopHeight sinds 0.7.63),
+// bewaard per scherm × orgel in localStorage.
 //
 // Sleutel: `jm-orgue-panel-state-<nr>-<orgelhash>` — zelfde hash-schema als de
 // organUiKey's in App/Console. Single-writer-afspraak: alléén het venster met

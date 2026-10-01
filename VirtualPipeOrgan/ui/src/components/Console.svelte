@@ -569,6 +569,8 @@
   const STOP_HEIGHT_MIN = 28;
   const STOP_HEIGHT_MAX = 80;
   const STOP_HEIGHT_STAP = 7;
+  const geldigeBreedte = (n) => Number.isInteger(n) && n >= 70 && n <= 220;
+  const geldigeHoogte = (n) => Number.isInteger(n) && n >= STOP_HEIGHT_MIN && n <= STOP_HEIGHT_MAX;
   // Onder deze hoogte passen naam en voetmaat niet meer onder elkaar; dan
   // zetten we ze naast elkaar (klasse stops-flat).
   const STOP_FLAT_ONDER = 40;
@@ -2129,15 +2131,32 @@
     couplerPlacement = readOrganUiPref('jm-orgue-coupler-placement') === 'division' ? 'division' : 'bar';
     // Layout (main-layout is exclusief van het hoofdvenster; secundaire
     // vensters laden hun layout per scherm uit de panel-state — zie de
-    // divisie-reset-reactive) + knopgrootte (gedeeld, puur UI, per orgel)
+    // divisie-reset-reactive)
     if (!secondary) {
       const ml = readOrganUiPref('jm-orgue-main-layout');
       if (ml === 'horizontal' || ml === 'vertical') mainLayout = ml;
     }
+    // Knopmaat (breedte + hoogte): per SCHERM en per orgel. Het hoofdvenster
+    // leest zijn per-orgel-sleutels, een extra scherm zijn eigen panel-state.
+    // Heeft een extra scherm nog geen eigen maat (eerste keer geopend, of van
+    // vóór 0.7.63, toen alle schermen één maat deelden), dan neemt het die van
+    // het hoofdscherm over en legt hem meteen vast; daarna staan ze los.
+    // Hoort hier en NIET in het divisienamen-$:-blok: deze functie loopt via
+    // tick() (zie de orgelwissel), anders komen de ovale knoppen terug.
     const ss = parseInt(readOrganUiPref('jm-orgue-stop-size'), 10);
-    if (ss >= 70 && ss <= 220) stopSize = ss;
     const sh = parseInt(readOrganUiPref('jm-orgue-stop-height'), 10);
-    stopHeight = (sh >= STOP_HEIGHT_MIN && sh <= STOP_HEIGHT_MAX) ? sh : 56;
+    // Niets bewaard = 100, niet de breedte van het vorige orgel laten staan.
+    const hoofdBreedte = geldigeBreedte(ss) ? ss : 100;
+    const hoofdHoogte = geldigeHoogte(sh) ? sh : 56;
+    if (secondary) {
+      const st = loadPanelState(organInfo.id, panelNumber) || {};
+      stopSize = geldigeBreedte(st.stopSize) ? st.stopSize : hoofdBreedte;
+      stopHeight = geldigeHoogte(st.stopHeight) ? st.stopHeight : hoofdHoogte;
+      if (st.stopSize !== stopSize || st.stopHeight !== stopHeight) bewaarKnopMaat();
+    } else {
+      stopSize = hoofdBreedte;
+      stopHeight = hoofdHoogte;
+    }
     // Vorm van de registerknoppen (rechthoekig/rond)
     knobShape = readOrganUiPref('jm-orgue-knob-shape') === 'round' ? 'round' : 'rect';
     // Hoofdbalk + statusbalk van het hoofdvenster (in een extra scherm regelt
@@ -2756,18 +2775,17 @@
     }
   }
 
-  // Gedeelde per-orgel-prefs (knopgrootte, knopvorm, zwel-/koppel-zichtbaarheid,
+  // Gedeelde per-orgel-prefs (knopvorm, zwel-/koppel-zichtbaarheid,
   // registervolgorde) van andere vensters volgen. Storage-events zijn tussen
   // WebView2-vensters onbetrouwbaar → 1s-poll met verander-guards zodat een
   // ongewijzigde waarde geen re-render triggert. Draait in ALLE vensters:
   // zo pikt ook het hoofdvenster wijzigingen uit een extra scherm op.
+  // De knopmaat hoort hier sinds 0.7.63 niet meer bij: die is per scherm
+  // (zie bewaarKnopMaat), anders nam elk scherm binnen een seconde de maat
+  // van het andere over — ook die van "Passend" in een klein extra scherm.
   let sharedPrefsInterval = null;
   function refreshSharedPrefs() {
     if (!organInfo) return;
-    const ss = parseInt(readOrganUiPref('jm-orgue-stop-size'), 10);
-    if (ss >= 70 && ss <= 220 && ss !== stopSize) stopSize = ss;
-    const sh = parseInt(readOrganUiPref('jm-orgue-stop-height'), 10);
-    if (sh >= STOP_HEIGHT_MIN && sh <= STOP_HEIGHT_MAX && sh !== stopHeight) stopHeight = sh;
     const ks = readOrganUiPref('jm-orgue-knob-shape') === 'round' ? 'round' : 'rect';
     if (ks !== knobShape) knobShape = ks;
     try {
@@ -2972,16 +2990,17 @@
     }
   }
 
-  // Registerknop-grootte aanpassen (min-breedte in px); per orgel persistent.
+  // Registerknop-grootte aanpassen (min-breedte in px); per scherm en per
+  // orgel persistent (bewaarKnopMaat).
   function adjustStopSize(delta) {
     stopSize = Math.max(70, Math.min(220, stopSize + delta));
-    localStorage.setItem(organUiKey('jm-orgue-stop-size'), String(stopSize));
+    bewaarKnopMaat();
   }
 
-  // Registerknop-hoogte aanpassen; per orgel persistent, net als de breedte.
+  // Registerknop-hoogte aanpassen; per scherm en per orgel, net als de breedte.
   function adjustStopHeight(delta) {
     stopHeight = Math.max(STOP_HEIGHT_MIN, Math.min(STOP_HEIGHT_MAX, stopHeight + delta));
-    localStorage.setItem(organUiKey('jm-orgue-stop-height'), String(stopHeight));
+    bewaarKnopMaat();
   }
 
   // Hoofdbalk + statusbalk van het hoofdvenster aan/uit. Levert ~90px hoogte —
@@ -3192,13 +3211,21 @@
   // Bij ronde knoppen niet: die ontlenen hun hoogte aan de breedte (1:1).
   $: knopHoogteStijl = knobShape === 'round' ? '' : `height:${stopHeight}px;min-height:${stopHeight}px;`;
 
+  // Knopmaat bewaren voor DIT scherm. Het hoofdvenster schrijft zijn
+  // per-orgel-sleutels, een extra scherm zijn eigen panel-state: elke sleutel
+  // heeft één schrijver, en + / − / Passend in het ene scherm laat de andere
+  // schermen ongemoeid.
   function bewaarKnopMaat() {
-    localStorage.setItem(organUiKey('jm-orgue-stop-size'), String(stopSize));
-    localStorage.setItem(organUiKey('jm-orgue-stop-height'), String(stopHeight));
+    if (secondary) {
+      savePanelState(organInfo?.id, panelNumber, { stopSize, stopHeight });
+    } else {
+      localStorage.setItem(organUiKey('jm-orgue-stop-size'), String(stopSize));
+      localStorage.setItem(organUiKey('jm-orgue-stop-height'), String(stopHeight));
+    }
   }
 
-  // Vorm van de registerknoppen (rechthoekig ↔ rond); per orgel persistent.
-  // Extra schermen volgen via hun refreshSettings-poll (RegisterPanel).
+  // Vorm van de registerknoppen (rechthoekig ↔ rond); per orgel persistent en
+  // gedeeld door alle schermen: de andere vensters volgen via refreshSharedPrefs.
   function toggleKnobShape() {
     knobShape = knobShape === 'round' ? 'rect' : 'round';
     localStorage.setItem(organUiKey('jm-orgue-knob-shape'), knobShape);
@@ -4431,7 +4458,10 @@
       }
       if (secondary && organInfo?.id) {
         // Divisiekeuze + layout van dít scherm bij dít orgel terugzetten
-        // (per-scherm-state; zie lib/panelState.js).
+        // (per-scherm-state; zie lib/panelState.js). De knopmaat van dit
+        // scherm NIET hier lezen maar in loadUiPrefsForOrgan: knopHoogteStijl
+        // en bandRijen draaien eerder in dezelfde ronde en zouden de oude
+        // hoogte houden (ovale knoppen, 0.7.62).
         const st = loadPanelState(organInfo.id, panelNumber);
         if (st && Array.isArray(st.divisions) && st.divisions.length > 0) {
           const valid = st.divisions.filter(n => displayOrgan.divisions.some(d => d.name === n));

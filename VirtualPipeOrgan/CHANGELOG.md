@@ -5,6 +5,28 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.63] - 2026-10-01
+
+### Elk scherm zijn eigen knopmaat
+
+De knoppen − en + voor de breedte en de hoogte van de registerknoppen, en
+**Passend**, werken nu per scherm. Tot nu toe deelden het hoofdscherm en alle
+extra registerschermen één knopmaat per orgel: maakte je de knoppen in een
+klein extra scherm passend, dan werden ze binnen een seconde ook in het
+hoofdscherm zo klein, en andersom. Nu onthoudt elk scherm zijn eigen maat, per
+orgel.
+
+Na de update houdt elk scherm de maat die het had. Een extra scherm dat voor
+het eerst opengaat, begint met de maat van het hoofdscherm. De vorm van de
+knoppen (rond of rechthoekig) blijft voor alle schermen van een orgel gelijk.
+
+Hiermee vervalt bewust het meelopen van de knopgrootte tussen schermen dat in
+0.7.0 was ingevoerd.
+
+Kleine bijvangst: een orgel waarvoor nog geen knopbreedte is bewaard, begint
+nu op de standaardbreedte in plaats van op de breedte van het orgel dat
+daarvoor open stond.
+
 ## [0.7.62] - 2026-09-30
 
 ### Ronde registerknoppen starten niet meer als ovaal
