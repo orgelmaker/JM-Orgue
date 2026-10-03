@@ -5,6 +5,16 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.75] - 2026-10-03
+
+### Afdrukken: alles na de eerste pagina kwam niet mee
+
+Bij het afdrukken van een partituur van meer dan een pagina (klavar of
+notenschrift) verdween alles na de eerste pagina: de schermindeling klemde
+het document op een vensterhoogte, zodat de afdruk op "1 pagina" bleef staan.
+Nu loopt het document bij het afdrukken gewoon door en krijgt elke pagina
+haar eigen vel.
+
 ## [0.7.74] - 2026-10-03
 
 ### Geen hangende pijpen meer bij tutti met koppels

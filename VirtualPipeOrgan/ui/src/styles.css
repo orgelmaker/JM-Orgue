@@ -3176,3 +3176,14 @@ input[type="range"]::-webkit-slider-thumb:hover {
 .coupler-bar-btn.has-midi {
   box-shadow: 0 2px 4px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.05), 0 0 0 1px var(--midi-indicator);
 }
+
+/* Afdrukken (0.7.75): de schermindeling klemt het document op één
+   vensterhoogte (html/body overflow hidden, #app 100vh). Bij het afdrukken
+   van een partituur die meer dan één pagina beslaat verdween daardoor alles
+   na de eerste pagina — gezien bij een klavar-blad van twee systemen in
+   één kolom ("Totaal: 1 pagina"). In print mag het document gewoon doorlopen;
+   de paginascheiding komt van de secties zelf (break-after: page). */
+@media print {
+  html, body { height: auto !important; overflow: visible !important; }
+  #app { height: auto !important; display: block !important; background: #fff !important; }
+}
