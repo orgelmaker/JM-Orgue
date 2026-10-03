@@ -5,6 +5,32 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.69] - 2026-10-03
+
+### Registertinten: tongwerken rood, vulstemmen blauw
+
+Nieuw in **Sfeer & Layout**: **Registertinten**, standaard uit. Aan: de
+letters van elke registerknop (naam en voetmaat) krijgen de kleur van hun
+groep, naar Engels gebruik: tongwerken rood, vulstemmen (mengwerken en
+aliquoten zoals Quint en Terts) blauw, grondstemmen (alle andere labialen,
+ook 4' en 2') in de gewone letterkleur. Het porseleinen plaatje en het gele
+plaatje van een getrokken register blijven zoals ze zijn; op dat gele plaatje
+wordt de tint zo nodig iets donkerder zodat hij leesbaar blijft, en op een
+donker actief-vlak (sfeer Modern) houden getrokken registers hun gewone
+letters.
+De drie kleuren zijn aan te passen, horen bij de sfeer en gaan mee in eigen
+sferen en de export. Koppels, tremulanten en effectregisters krijgen geen
+tint. De instelling geldt voor alle schermen.
+
+De groep wordt in de app bepaald uit de voetmaat, het aantal koren, de
+mengwerkvlag en een meertalige naamherkenning (Nederlands, Duits, Frans,
+Engels, Pools). Daarbij zijn enkele namen rechtgezet: een Dulciana telt niet
+meer als tongwerk (ook niet voor de T.A.-koppel), de Engelse tongwerken
+Cornopean, Tromba, Ophicleide en Horn worden herkend, en een Kornett met
+meerdere koren is een mengwerk. De sorteerlijst (Sorteren op familie) en de
+gekleurde rand op de afstandsbediening gebruiken nu dezelfde, meertalige
+indeling in plaats van een Nederlandse naamlijst.
+
 ## [0.7.68] - 2026-10-03
 
 ### De sfeer staat er meteen

@@ -42,6 +42,13 @@
      telefoon is een volledige cirkel te smal voor de registernaam). */
   body.round button.stop, body.round button.coupler { border-radius: 999px; }
   button.trem { border-left-color: #8a6; }
+  /* Gekleurde rand per pijpfamilie (0.7.69), dezelfde kleuren als vroeger. */
+  button.stop[data-familie="principaal"] { border-left-color: #e8e8e0; }
+  button.stop[data-familie="fluit"], button.stop[data-familie="gedekt"] { border-left-color: #f5deb3; }
+  button.stop[data-familie="strijker"] { border-left-color: #90c090; }
+  button.stop[data-familie="mixtuur"] { border-left-color: #b8b8d0; }
+  button.stop[data-familie="tongwerk"] { border-left-color: #d47070; }
+  button.stop[data-groep="overig"] { border-left-color: #88b8c8; }
   button.coupler { display: flex; flex-direction: column; justify-content: center; align-items: center; font-size: 15px; }
   .cgroup { margin-bottom: 10px; }
   .cgroup .ctitle { display: block; font-size: 13px; color: #aaa; margin: 0 2px 5px; }
@@ -243,7 +250,8 @@
         b.appendChild(el('span', 'nm', s.name));
         var rg = regel(s);
         if (rg) b.appendChild(el('span', 'pitch', rg));
-        if (s.color) b.style.borderLeftColor = s.color;
+        if (s.familie) b.dataset.familie = s.familie;
+        if (s.groep) b.dataset.groep = s.groep;
         if (s.drawn) b.classList.add('on');
         b.addEventListener('click', function () { toggleBtn(b, 'stops/' + esc(s.id) + '/toggle'); });
         stopBtns[s.id] = b;

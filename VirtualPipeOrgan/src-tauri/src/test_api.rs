@@ -860,7 +860,10 @@ fn remote_organ_dto_inner(
                 // Aantal koren van een mengwerk (0.7.66); de pagina maakt het
                 // op in de taal van de telefoon.
                 "koren": s.koren,
-                "color": s.color,
+                // Familie voor de gekleurde rand (0.7.69; voorheen een kleur
+                // uit een Nederlandse naamlijst).
+                "familie": s.familie,
+                "groep": s.groep,
                 "drawn": s.drawn,
             })).collect::<Vec<_>>(),
         }))
@@ -2035,7 +2038,7 @@ mod tests {
             name: name.to_string(),
             pitch: pitch.to_string(),
             drawn: false,
-            color: None,
+            groep: "grond", familie: "principaal",
             has_tremulant: trem,
             midi_action_code: 150,
             internal_stop_id: 0,

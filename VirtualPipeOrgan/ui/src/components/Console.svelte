@@ -3823,17 +3823,10 @@
     }
   }
 
-  function getStopClass(stop) {
-    const name = stop.name.toLowerCase();
-    if (name.includes('trompet') || name.includes('hobo') || name.includes('bazuin') || name.includes('schalmei')) return 'reed';
-    if (name.includes('fluit') || name.includes('gedekt') || name.includes('bourdon') || name.includes('gedackt') || name.includes('rörflöjt')) return 'flute';
-    if (name.includes('viola') || name.includes('gamba') || name.includes('celeste') || name.includes('salicional') || name.includes('voix')) return 'string';
-    if (name.includes('mixtuur') || name.includes('cymbel') || name.includes('sesquialter')) return 'mixture';
-    if (name.includes('koppel') || name.includes('coupler')) return 'coupler';
-    if (name.includes('tremulant')) return 'tremulant';
-    if (name.includes('subbas')) return 'pedal';
-    return '';
-  }
+  // De registergroep (grond/vul/tong/overig) en de pijpfamilie komen sinds
+  // 0.7.69 uit de backend (StopDto.groep/familie, meertalig); de oude
+  // Nederlandse naamlijst getStopClass is weg. Het demo-orgel heeft geen
+  // groep en krijgt 'overig' (geen tint).
 
   function formatPitch(feet) {
     if (!feet || feet === 0) return '';
@@ -4253,16 +4246,10 @@
   }
 
   function sortByFamily(divName, stops) {
-    const familyOrder = (s) => {
-      const n = s.name.toLowerCase();
-      if (n.includes('prestant') || n.includes('principaal') || n.includes('octaaf') || n.includes('diapason')) return 0;
-      if (n.includes('fluit') || n.includes('gedekt') || n.includes('bourdon') || n.includes('holpijp')) return 1;
-      if (n.includes('viola') || n.includes('gamba') || n.includes('salicional') || n.includes('celeste')) return 2;
-      if (n.includes('mixtuur') || n.includes('cymbel') || n.includes('sesquialter') || n.includes('cornet')) return 3;
-      if (n.includes('trompet') || n.includes('hobo') || n.includes('bazuin') || n.includes('fagot') || n.includes('schalmei')) return 4;
-      if (n.includes('tremulant') || n.includes('koppel')) return 5;
-      return 2;
-    };
+    // Op de pijpfamilie uit de backend (0.7.69, meertalig): principalen,
+    // fluiten en gedekten, strijkers, mengwerken, tongwerken, overig.
+    const RANG = { principaal: 0, fluit: 1, gedekt: 1, strijker: 2, mixtuur: 3, tongwerk: 4 };
+    const familyOrder = (s) => (s.groep === 'overig' ? 5 : (RANG[s.familie] ?? 2));
     stopOrder[divName] = [...stops].sort((a, b) => familyOrder(a) - familyOrder(b)).map(s => s.id);
     stopOrder = stopOrder;
     saveStopOrder();
@@ -5187,7 +5174,7 @@
                 {#each division.stops as stop, stopIdx}
                   {@const name = cleanStopName(stop)}
                   <button
-                    class="stop-knob {getStopClass(stop)}"
+                    class="stop-knob groep-{stop.groep || 'overig'}"
                     style={knopHoogteStijl}
                     class:engaged={stop.drawn}
                     class:has-midi={stopMidiBindings[stop.midi_action_code] > 0}
@@ -6064,7 +6051,7 @@
                           on:pointerdown={(e) => sortPointerDown(e, division.name, idx)}
                         >
                           <span class="sort-handle">&#x2630;</span>
-                          <span class="sort-color" style="background: {stop.color || '#999'}"></span>
+                          <span class="sort-color familie-{stop.familie || 'principaal'} groep-{stop.groep || 'grond'}"></span>
                           <span class="sort-name">{stop.name}</span>
                           <span class="sort-pitch">{stop.regel || ''}</span>
                           <button class="btn btn-ghost btn-xs" title={$t('sorting.move_up')} disabled={idx === 0}

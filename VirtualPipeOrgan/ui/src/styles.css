@@ -36,6 +36,15 @@
   --stop-porcelain-border: #c8b898;
   --stop-active: #e8c820;
   --stop-active-border: #c8a810;
+  /* Registertinten (0.7.69), alleen actief met :root[data-stop-tinten="1"];
+     de -actief-varianten (op het gele plaatje) rekent lib/sfeer.js uit op
+     contrast. */
+  --stop-tint-grond: #1a1200;
+  --stop-tint-vul: #1f4e8c;
+  --stop-tint-tong: #a61c1c;
+  --stop-tint-grond-actief: #1a1200;
+  --stop-tint-vul-actief: #1f4e8c;
+  --stop-tint-tong-actief: #a61c1c;
 
   /* === Bladgoud / sieraccent === */
   --gold-border: #d4af37;
@@ -1721,29 +1730,23 @@ input[type="range"]::-webkit-slider-thumb:hover {
   color: var(--stop-active-text-secondary);
 }
 
-/* Stop family - geen aparte kleuren meer, alles zwart met porselein */
-.stop-knob.flute::before,
-.stop-knob.string::before,
-.stop-knob.reed::before,
-.stop-knob.mixture::before,
-.stop-knob.coupler::before,
-.stop-knob.tremulant::before,
-.stop-knob.pedal::before {
-  /* Zelfde porselein stijl voor alle families */
-  background: var(--stop-porcelain);
-  border-color: var(--stop-porcelain-border);
-}
-
-.stop-knob.engaged.flute::before,
-.stop-knob.engaged.string::before,
-.stop-knob.engaged.reed::before,
-.stop-knob.engaged.mixture::before,
-.stop-knob.engaged.coupler::before,
-.stop-knob.engaged.tremulant::before,
-.stop-knob.engaged.pedal::before {
-  background: var(--stop-active);
-  border-color: var(--stop-active-border);
-}
+/* Registertinten (0.7.69): optioneel via Sfeer & Layout, alleen de letters
+   (naam en voetmaat), zoals de gekleurde gravure op Engelse trekkers. Het
+   plaatje blijft porselein en het gele plaatje van een getrokken register
+   blijft geel; daar geldt de -actief-tint (op contrast berekend).
+   groep-overig (koppel, tremulant, effect) krijgt geen tint. */
+:root[data-stop-tinten="1"] .stop-knob.groep-grond .stop-name,
+:root[data-stop-tinten="1"] .stop-knob.groep-grond .stop-pitch { color: var(--stop-tint-grond); }
+:root[data-stop-tinten="1"] .stop-knob.groep-vul .stop-name,
+:root[data-stop-tinten="1"] .stop-knob.groep-vul .stop-pitch { color: var(--stop-tint-vul); }
+:root[data-stop-tinten="1"] .stop-knob.groep-tong .stop-name,
+:root[data-stop-tinten="1"] .stop-knob.groep-tong .stop-pitch { color: var(--stop-tint-tong); }
+:root[data-stop-tinten="1"] .stop-knob.engaged.groep-grond .stop-name,
+:root[data-stop-tinten="1"] .stop-knob.engaged.groep-grond .stop-pitch { color: var(--stop-tint-grond-actief); }
+:root[data-stop-tinten="1"] .stop-knob.engaged.groep-vul .stop-name,
+:root[data-stop-tinten="1"] .stop-knob.engaged.groep-vul .stop-pitch { color: var(--stop-tint-vul-actief); }
+:root[data-stop-tinten="1"] .stop-knob.engaged.groep-tong .stop-name,
+:root[data-stop-tinten="1"] .stop-knob.engaged.groep-tong .stop-pitch { color: var(--stop-tint-tong-actief); }
 
 /* Coupler buttons - same size as regular stops */
 .stop-knob.coupler-knob {
@@ -2543,7 +2546,14 @@ input[type="range"]::-webkit-slider-thumb:hover {
   height: 10px;
   border-radius: 2px;
   flex-shrink: 0;
+  background: #e8e8e0;
 }
+/* Bolletje per pijpfamilie (0.7.69; dezelfde kleuren als de oude lijst). */
+.sort-color.familie-fluit, .sort-color.familie-gedekt { background: #f5deb3; }
+.sort-color.familie-strijker { background: #90c090; }
+.sort-color.familie-mixtuur { background: #b8b8d0; }
+.sort-color.familie-tongwerk { background: #d47070; }
+.sort-color.groep-overig { background: #88b8c8; }
 .sort-name {
   flex: 1;
   white-space: nowrap;

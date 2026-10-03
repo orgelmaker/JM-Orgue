@@ -4980,7 +4980,7 @@ mod crescendo_tests {
     fn stop(id: &str, n: u32) -> StopDto {
         StopDto {
             id: id.to_string(), name: id.to_string(), pitch: "8".to_string(), drawn: false,
-            color: None, has_tremulant: false, midi_action_code: 0, internal_stop_id: n,
+            groep: "grond", familie: "principaal", has_tremulant: false, midi_action_code: 0, internal_stop_id: n,
             first_midi_note: 36, last_midi_note: 96, is_reed: false, koren: None, mengwerk: false, wind_voet: 8.0, percussief: false,
         }
     }

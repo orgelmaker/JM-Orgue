@@ -36,6 +36,10 @@ export const PRESETS = {
       'stop-porcelain-border': '#c8b898',
       'stop-active': '#e8c820',
       'stop-active-border': '#c8a810',
+      // Registertinten (0.7.69): letters per groep, alleen met de schakelaar aan.
+      'stop-tint-grond': '#1a1200',
+      'stop-tint-vul': '#1f4e8c',
+      'stop-tint-tong': '#a61c1c',
       'gold-border': '#d4af37',
       'success': '#4caf50',
       'warning': '#ff9800',
@@ -79,6 +83,10 @@ export const PRESETS = {
       'stop-porcelain-border': '#a89070',
       'stop-active': '#e8a830',
       'stop-active-border': '#b88820',
+      // Registertinten (0.7.69): letters per groep, alleen met de schakelaar aan.
+      'stop-tint-grond': '#2a1f10',
+      'stop-tint-vul': '#1f4e8c',
+      'stop-tint-tong': '#a61c1c',
       'gold-border': '#c89548',
       'success': '#7bc878',
       'warning': '#e8a040',
@@ -122,6 +130,10 @@ export const PRESETS = {
       'stop-porcelain-border': '#cbd5e1',
       'stop-active': '#3b82f6',
       'stop-active-border': '#1d4ed8',
+      // Registertinten (0.7.69): letters per groep, alleen met de schakelaar aan.
+      'stop-tint-grond': '#0f172a',
+      'stop-tint-vul': '#1f4e8c',
+      'stop-tint-tong': '#a61c1c',
       'gold-border': '#3b82f6',
       'success': '#10b981',
       'warning': '#f59e0b',
@@ -165,6 +177,10 @@ export const PRESETS = {
       'stop-porcelain-border': '#a89878',
       'stop-active': '#c8a810',
       'stop-active-border': '#a08808',
+      // Registertinten (0.7.69): letters per groep, alleen met de schakelaar aan.
+      'stop-tint-grond': '#1a1200',
+      'stop-tint-vul': '#1f4e8c',
+      'stop-tint-tong': '#a61c1c',
       'gold-border': '#a08828',
       'success': '#66bb6a',
       'warning': '#ffa726',
@@ -208,6 +224,10 @@ export const PRESETS = {
       'stop-porcelain-border': '#a88858',
       'stop-active': '#e8a838',
       'stop-active-border': '#a87820',
+      // Registertinten (0.7.69): letters per groep, alleen met de schakelaar aan.
+      'stop-tint-grond': '#2a1808',
+      'stop-tint-vul': '#1f4e8c',
+      'stop-tint-tong': '#a61c1c',
       'gold-border': '#d4a050',
       'success': '#80c060',
       'warning': '#e89030',
@@ -234,6 +254,9 @@ export const SFEER_SLEUTELS = {
   textures: 'jm-orgue-textures',
   activePreset: 'jm-orgue-active-preset',
   userPresets: 'jm-orgue-user-presets',
+  // Schakelaar voor de registertinten (0.7.69); apart van colors, anders zou
+  // elk preset hem resetten.
+  stopTinten: 'jm-orgue-stop-tinten',
 };
 
 function leesJson(sleutel) {
@@ -260,12 +283,17 @@ export function leesSfeer() {
   let activePresetKey = 'basis';
   try { activePresetKey = localStorage.getItem(SFEER_SLEUTELS.activePreset) || 'basis'; } catch (e) {}
   const userPresets = obj(leesJson(SFEER_SLEUTELS.userPresets));
-  return { colors, font, textures, activePresetKey, userPresets };
+  let stopTinten = false;
+  try { stopTinten = localStorage.getItem(SFEER_SLEUTELS.stopTinten) === '1'; } catch (e) {}
+  return { colors, font, textures, activePresetKey, userPresets, stopTinten };
 }
 
 /** Zet de tokens op :root en de achtergrond op body. */
-export function pasSfeerToe({ colors, font, textures }) {
+export function pasSfeerToe({ colors, font, textures, stopTinten }) {
   const root = document.documentElement;
+
+  // Registertinten aan/uit (styles.css kijkt naar :root[data-stop-tinten]).
+  root.dataset.stopTinten = stopTinten ? '1' : '0';
 
   // Achtergrond textuur
   if (textures.background) {
@@ -324,6 +352,18 @@ export function pasSfeerToe({ colors, font, textures }) {
     root.style.setProperty('--scrollbar-thumb-hover', colors['primary']);
   }
 
+  // Registertinten: op het porseleinen plaatje en op het (gele) plaatje van
+  // een getrokken register wordt de tint zo nodig donkerder of lichter
+  // gemaakt tot hij leesbaar is (4,5:1); lukt dat niet (Modern: donkerblauw
+  // vlak), dan de gewone tekstkleur. Berekend, dus ook juist bij eigen
+  // kleuren.
+  for (const g of ['grond', 'vul', 'tong']) {
+    const tint = colors['stop-tint-' + g];
+    if (typeof tint !== 'string') continue;
+    root.style.setProperty(`--stop-tint-${g}`, leesbaar(tint, colors['stop-porcelain'], colors['text-on-stop']));
+    root.style.setProperty(`--stop-tint-${g}-actief`, leesbaar(tint, colors['stop-active'], colors['stop-active-text']));
+  }
+
   // Font tokens
   root.style.setProperty('--stop-font-family', `'${font.family}', serif`);
   root.style.setProperty('--stop-font-size', font.size);
@@ -336,7 +376,7 @@ let laatsteVingerafdruk = null;
 
 function vingerafdruk() {
   try {
-    return [SFEER_SLEUTELS.colors, SFEER_SLEUTELS.font, SFEER_SLEUTELS.textures]
+    return [SFEER_SLEUTELS.colors, SFEER_SLEUTELS.font, SFEER_SLEUTELS.textures, SFEER_SLEUTELS.stopTinten]
       .map(k => localStorage.getItem(k) || '')
       .join('\u0000');
   } catch (e) {
@@ -366,6 +406,42 @@ function hexToRgba(hex, alpha) {
   const g = parseInt(h.slice(3, 5), 16);
   const b = parseInt(h.slice(5, 7), 16);
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+/** Relatieve luminantie (WCAG) van een #rrggbb-kleur; 0 bij ongeldige invoer. */
+function luminantie(hex) {
+  if (typeof hex !== 'string' || !hex.startsWith('#')) return 0;
+  const h = hex.length === 4
+    ? '#' + hex[1] + hex[1] + hex[2] + hex[2] + hex[3] + hex[3]
+    : hex;
+  const kanaal = (i) => {
+    const c = parseInt(h.slice(i, i + 2), 16) / 255;
+    return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  };
+  return 0.2126 * kanaal(1) + 0.7152 * kanaal(3) + 0.0722 * kanaal(5);
+}
+
+/** Contrastverhouding (WCAG) tussen twee kleuren, 1..21. */
+function contrast(a, b) {
+  const la = luminantie(a), lb = luminantie(b);
+  const [hoog, laag] = la >= lb ? [la, lb] : [lb, la];
+  return (hoog + 0.05) / (laag + 0.05);
+}
+
+/**
+ * Maak een tint leesbaar op een achtergrond: zolang het contrast onder 4,5
+ * blijft, stapsgewijs donkerder (lichte achtergrond) of lichter (donkere
+ * achtergrond). Lukt dat niet binnen twaalf stappen, dan de terugvalkleur.
+ */
+function leesbaar(tint, achtergrond, terugval) {
+  if (typeof tint !== 'string' || typeof achtergrond !== 'string') return tint;
+  const stap = luminantie(achtergrond) > 0.3 ? -6 : 6;
+  let k = tint;
+  for (let i = 0; i < 12; i++) {
+    if (contrast(k, achtergrond) >= 4.5) return k;
+    k = adjustLightness(k, stap);
+  }
+  return contrast(k, achtergrond) >= 4.5 ? k : (typeof terugval === 'string' ? terugval : tint);
 }
 
 function adjustLightness(hex, percent) {

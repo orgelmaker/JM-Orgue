@@ -118,8 +118,16 @@
   let font = { ...PRESETS.basis.font };
   let textures = { background: null };
   let activePresetKey = 'basis';
-  let userPresets = {};      // { naam: { colors, font, texture } }
+  let userPresets = {};      // { naam: { colors, font, texture, stopTinten } }
   let newPresetName = '';
+  // Registertinten (0.7.69): optioneel, standaard uit; de drie tokens staan
+  // niet in TOKEN_GROUPS maar in hun eigen blok met de schakelaar.
+  let stopTinten = false;
+  const TINT_TOKENS = [
+    { key: 'stop-tint-grond', labelKey: 'colors.stop_tint_grond' },
+    { key: 'stop-tint-vul', labelKey: 'colors.stop_tint_vul' },
+    { key: 'stop-tint-tong', labelKey: 'colors.stop_tint_tong' },
+  ];
 
   onMount(() => {
     const s = leesSfeer();
@@ -128,6 +136,7 @@
     textures = s.textures;
     activePresetKey = s.activePresetKey;
     userPresets = s.userPresets;
+    stopTinten = s.stopTinten;
     applyStyles();
   });
 
@@ -148,7 +157,13 @@
     localStorage.setItem('jm-orgue-textures', JSON.stringify(textures));
     localStorage.setItem('jm-orgue-font', JSON.stringify(font));
     localStorage.setItem('jm-orgue-active-preset', activePresetKey);
+    localStorage.setItem('jm-orgue-stop-tinten', stopTinten ? '1' : '0');
     applyStyles();
+  }
+
+  function setStopTinten(aan) {
+    stopTinten = !!aan;
+    saveSettings();
   }
 
   function saveUserPresets() {
@@ -170,6 +185,9 @@
     colors = { ...PRESETS.basis.colors, ...preset.colors };
     font = { ...PRESETS.basis.font, ...preset.font };
     textures = { background: preset.texture || null };
+    // Ingebouwde presets laten de tintschakelaar met rust; een eigen sfeer
+    // bewaart hem (zie saveAsUserPreset).
+    if (typeof preset.stopTinten === 'boolean') stopTinten = preset.stopTinten;
     activePresetKey = key;
     saveSettings();
   }
@@ -183,6 +201,7 @@
       colors: { ...colors },
       font: { ...font },
       texture: textures.background,
+      stopTinten,
     };
     userPresets = userPresets;
     activePresetKey = key;
@@ -200,7 +219,7 @@
   }
 
   function exportCurrentAsJson() {
-    const blob = new Blob([JSON.stringify({ colors, font, texture: textures.background }, null, 2)], { type: 'application/json' });
+    const blob = new Blob([JSON.stringify({ colors, font, texture: textures.background, stopTinten }, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -411,6 +430,34 @@
   </div>
 
   <!-- ============================================================ -->
+  <!-- REGISTERTINTEN (0.7.69) — optioneel, alleen de letters        -->
+  <!-- ============================================================ -->
+  <div class="settings-section">
+    <div class="section-title">{$t('settings.stop_tints_section')}</div>
+    <label class="tint-toggle">
+      <input type="checkbox" checked={stopTinten} on:change={(e) => setStopTinten(e.currentTarget.checked)} />
+      <span>{$t('settings.stop_tints_enable')}</span>
+    </label>
+    <p class="tint-hint">{$t('settings.stop_tints_hint')}</p>
+    {#each TINT_TOKENS as token}
+      <div class="color-row" class:tint-uit={!stopTinten}>
+        <div class="color-info">
+          <span class="color-label">{$t(token.labelKey)}</span>
+        </div>
+        <div class="color-input-wrapper">
+          <input
+            type="color"
+            value={colors[token.key] || '#000000'}
+            disabled={!stopTinten}
+            on:input={(e) => handleColor(token.key, e.target.value)}
+          />
+          <span class="color-value">{colors[token.key] || ''}</span>
+        </div>
+      </div>
+    {/each}
+  </div>
+
+  <!-- ============================================================ -->
   <!-- KLEUREN — alle tokens per groep                              -->
   <!-- ============================================================ -->
   {#each TOKEN_GROUPS as group}
@@ -467,6 +514,25 @@
     font-size: 0.85rem;
     color: var(--text-secondary);
   }
+
+  /* Registertinten */
+  .tint-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    font-size: 0.85rem;
+    color: var(--text);
+    cursor: pointer;
+    margin-bottom: 0.35rem;
+  }
+  .tint-toggle input { accent-color: var(--primary); }
+  .tint-hint {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin: 0 0 0.6rem;
+    line-height: 1.4;
+  }
+  .color-row.tint-uit { opacity: 0.55; }
 
   .settings-section {
     margin-bottom: 2rem;

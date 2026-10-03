@@ -158,7 +158,12 @@ pub struct StopDto {
     pub name: String,
     pub pitch: String,
     pub drawn: bool,
-    pub color: Option<String>,
+    /// Registergroep voor de registertinten (0.7.69): "grond", "vul", "tong"
+    /// of "overig" (koppel, tremulant, effect, percussie).
+    pub groep: &'static str,
+    /// Pijpfamilie ("principaal", "fluit", "gedekt", "strijker", "mixtuur",
+    /// "tongwerk") voor de sorteerlijst en de afstandsbediening.
+    pub familie: &'static str,
     /// Whether this stop has tremulant samples available
     pub has_tremulant: bool,
     /// MIDI action code for this stop (for MIDI learn, 150+)
@@ -2746,7 +2751,6 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
                     continue;
                 }
                 rank_summary.push(rank_summary_of(stop, format!("{}_{}", manual.number, stop.id)));
-                let color = get_stop_color(&stop.name);
 
                 // Naam en de regel eronder. De divisieaanduiding staat al boven
                 // de kolom en de voetmaat al onder de knop: allebei niet nog een
@@ -2775,16 +2779,20 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
                 let first_midi = stop_first_midi(&definition, stop) as u8;
                 let last_midi = first_midi.saturating_add(stop.number_of_pipes.saturating_sub(1) as u8);
 
+                let wind_voet = if stop.sounding_harmonic > 0 { 64.0 / stop.sounding_harmonic as f32 } else { 8.0 };
+                let (groep, familie) = groep_en_familie(&name, &pitch, wind_voet, mengwerk, koren.as_ref(),
+                    is_reed_stop(&stop.name), stop.percussive, manual.number == 0);
                 stops.push(StopDto {
                     id: format!("{}_{}", manual.number, stop.id),
                     name,
                     pitch,
                     koren,
                     mengwerk,
-                    wind_voet: if stop.sounding_harmonic > 0 { 64.0 / stop.sounding_harmonic as f32 } else { 8.0 },
+                    wind_voet,
                     percussief: stop.percussive,
                     drawn: false,
-                    color: Some(color.to_string()),
+                    groep,
+                    familie,
                     // Echte tremulant-opnamen van dit register (gevuld in het
                     // laadblok). Stond hier hard op false — daardoor stuurde
                     // set_tremulant nooit een SetTremulant en was ook het
@@ -6074,8 +6082,13 @@ fn build_stop_wind_profiles(divisions: &[DivisionDto])
 /// Detect reed (tongwerk) stops by name
 fn is_reed_stop(name: &str) -> bool {
     let lower = name.to_lowercase();
+    // "Dulciana" en "Dulcet" (strijkers) bevatten "dulcian": geen tongwerk.
+    if lower.contains("dulciana") || lower.contains("dulcet") { return false; }
     // Dutch, German, French, English reed stop names
     lower.contains("trompet") || lower.contains("trumpet") ||
+    lower.contains("cornopean") || lower.contains("tromba") || lower.contains("ophicleide") ||
+    lower.contains("euphonium") || lower.contains("bassetto") || lower.contains("zink") ||
+    lower.contains("schalmey") ||
     lower.contains("bazuin") || lower.contains("posaune") ||
     lower.contains("hobo") || lower.contains("oboe") || lower.contains("hautbois") ||
     lower.contains("schalmei") || lower.contains("chalumeau") ||
@@ -6090,30 +6103,22 @@ fn is_reed_stop(name: &str) -> bool {
     lower.contains("serpent") || lower.contains("musette")
 }
 
-fn get_stop_color(name: &str) -> &'static str {
-    let lower = name.to_lowercase();
-
-    if lower.contains("trompet") || lower.contains("bazuin") || lower.contains("hobo") ||
-       lower.contains("schalmei") || lower.contains("cromorne") {
-        "#d47070"
-    } else if lower.contains("fluit") || lower.contains("gedekt") || lower.contains("gedackt") ||
-              lower.contains("bourdon") || lower.contains("holpijp") || lower.contains("rörflöjt") {
-        "#f5deb3"
-    } else if lower.contains("viola") || lower.contains("gamba") || lower.contains("celeste") ||
-              lower.contains("salicional") || lower.contains("voix") || lower.contains("aeoline") {
-        "#90c090"
-    } else if lower.contains("mixtuur") || lower.contains("cymbel") || lower.contains("sesquialter") ||
-              lower.contains("cornet") || lower.contains("scherp") {
-        "#b8b8d0"
-    } else if lower.contains("koppel") || lower.contains("coupler") {
-        "#c8a0c8"
-    } else if lower.contains("tremulant") {
-        "#88b8c8"
-    } else if lower.contains("subbas") || lower.contains("bourdon 16") {
-        "#a89070"
-    } else {
-        "#e8e8e0"
-    }
+/// Registergroep (registertinten) en pijpfamilie (sorteerlijst,
+/// afstandsbediening) van één register, als sleutels voor de UI (0.7.69).
+/// Verving get_stop_color, dat alleen Nederlandse namen kende.
+fn groep_en_familie(naam: &str, pitch: &str, wind_voet: f32, mengwerk: bool, koren: Option<&Koren>,
+                    reed: bool, percussief: bool, pedaal: bool) -> (&'static str, &'static str) {
+    use vpo_audio::{familie_van_naam, groep_voor_register, PijpFamilie, RegisterGroep};
+    let groep = groep_voor_register(naam, pitch, wind_voet, mengwerk, koren.map(|k| k.max), reed, percussief, pedaal);
+    let familie = if mengwerk { PijpFamilie::Mixtuur } else { familie_van_naam(naam, reed) };
+    // De familie volgt de groep waar die slimmer is: een Kornett 5fach is
+    // een mengwerk, een pedaal-Cornet 4' een tongwerk.
+    let familie = match (groep, familie) {
+        (RegisterGroep::Tongwerk, _) => PijpFamilie::Tongwerk,
+        (RegisterGroep::Vulstem, PijpFamilie::Tongwerk) => PijpFamilie::Mixtuur,
+        (_, f) => f,
+    };
+    (groep.sleutel(), familie.sleutel())
 }
 
 fn roman_numeral(n: usize) -> &'static str {
@@ -6693,8 +6698,6 @@ pub fn do_load_samples_from_directory_locked(state: &AppState, directory: &str) 
                 }).collect(),
             });
 
-            let color = get_stop_color(&stop.name);
-
             info!("Stop '{}': internal_id={}, MIDI range {}-{}, trem={}, posities={}",
                   stop.name, internal_stop_id, stop_first_note, stop_last_note, any_trem, layers.len());
 
@@ -6728,16 +6731,23 @@ pub fn do_load_samples_from_directory_locked(state: &AppState, directory: &str) 
                 // label zelf, nooit "0'".
                 (stop.name.clone(), stop.pitch_label.clone().unwrap_or_default(), None)
             };
+            let wind_voet = if stop.pitch_feet > 0.01 { stop.pitch_feet } else { 8.0 };
+            let pedaal = { let l = division.name.to_lowercase(); l.contains("pedaal") || l.contains("pedal") };
+            // De tekst onder de knop is uit pitch_feet afgeleid en kapt een
+            // gebroken maat af ("2 2/3" -> "2'"); dan beslist de voet zelf.
+            let pitch_voor_groep = if (stop.pitch_feet - stop.pitch_feet.round()).abs() > 0.01 { "" } else { pitch.as_str() };
+            let (groep, familie) = groep_en_familie(&naam, pitch_voor_groep, wind_voet, mengwerk, koren.as_ref(), reed, false, pedaal);
             stops.push(StopDto {
                 id: format!("{}_{}", div_idx, internal_stop_id),
                 name: naam,
                 pitch,
                 koren,
                 mengwerk,
-                wind_voet: if stop.pitch_feet > 0.01 { stop.pitch_feet } else { 8.0 },
+                wind_voet,
                 percussief: false,
                 drawn: false,
-                color: Some(color.to_string()),
+                groep,
+                familie,
                 has_tremulant: any_trem,
                 midi_action_code: stop_action_code,
                 internal_stop_id,
@@ -8805,7 +8815,7 @@ mod tremulant_kind_tests {
     fn stop(id: &str, trem: bool) -> StopDto {
         StopDto {
             id: id.to_string(), name: id.to_string(), pitch: "8".to_string(), drawn: false,
-            color: None, has_tremulant: trem, midi_action_code: 0, internal_stop_id: 1,
+            groep: "grond", familie: "principaal", has_tremulant: trem, midi_action_code: 0, internal_stop_id: 1,
             first_midi_note: 36, last_midi_note: 96, is_reed: false, koren: None, mengwerk: false, wind_voet: 8.0, percussief: false,
         }
     }

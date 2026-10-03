@@ -581,6 +581,11 @@ fn bevat(naam: &str, woorden: &[&str]) -> bool {
     woorden.iter().any(|w| naam.contains(w))
 }
 
+/// Komt `w` als los woord voor (gescheiden door spaties, cijfers of tekens)?
+fn woord(naam: &str, w: &str) -> bool {
+    naam.split(|c: char| !c.is_alphabetic()).any(|t| t == w)
+}
+
 /// Familie uit de registernaam (Nederlands, Duits, Frans, Engels, Pools).
 /// `tongwerk` komt van de bestaande tongwerkdetectie (is_reed); de lijst hier
 /// vult die alleen aan. Volgorde: tongwerk → mixtuur → gedekt → fluit →
@@ -589,18 +594,26 @@ pub fn familie_van_naam(naam: &str, tongwerk: bool) -> PijpFamilie {
     // ß als ss: "Subbaß" en "Octavbaß" vielen anders buiten elke lijst en
     // werden principaal.
     let n = naam.to_lowercase().replace('ß', "ss");
-    if tongwerk || bevat(&n, &["regaal", "regal", "vox humana", "kromhoorn", "krumhorn", "cromorne",
+    // "Dulciana" en "Dulcet" zijn strijkers, maar bevatten "dulcian": nooit
+    // een tongwerk, ook niet als de set dat beweert.
+    let strijker_lookalike = bevat(&n, &["dulciana", "dulcet"]);
+    if !strijker_lookalike && (tongwerk || bevat(&n, &["regaal", "regal", "vox humana", "kromhoorn", "krumhorn", "krummhorn", "cromorne",
         "englischhorn", "englisch horn", "english horn", "cor anglais", "engels hoorn",
         "trompet", "trumpet", "trompette", "hobo", "oboe", "hautbois", "fagot", "basson", "bassoon",
         "dulciaan", "dulzian", "dulcian", "bazuin", "posaune", "bombard", "clairon", "clarion",
-        "schalmei", "chalumeau", "trombone", "tuba", "klarinet", "clarinet", "sordun", "ranket",
-        "rankett", "musette", "puzon", "kornett", "cornett", "tr\u{0105}ba", "tr\u{0105}bka", "obój"]) {
+        "schalm", "chalumeau", "trombone", "tuba", "klarinet", "clarinet", "sordun", "ranket",
+        "rankett", "musette", "puzon", "kornett", "cornett", "tr\u{0105}ba", "tr\u{0105}bka", "obój",
+        // Engelse en Duitse tongwerken (0.7.69). "horn" alleen als los woord:
+        // Gemshorn, Nachthorn en Waldhorn zijn labialen.
+        "cornopean", "tromba", "ophicleide", "euphonium", "basset", "zink",
+        "clarin", "clarín", "bajoncillo", "chirim", "orlos", "dulzaina", "voz humana"])
+        || (woord(&n, "horn") && !bevat(&n, &["diapason", "princip", "prinzip", "flöte", "flute", "fluit"]))) {
         return PijpFamilie::Tongwerk;
     }
     if bevat(&n, &["mixtuur", "mixture", "mixtur", "scherp", "scharf", "cimbel", "cymbel", "cymbal",
         "zimbel", "sesquialter", "sexquialter", "cornet", "kornet", "terzian", "tertiaan", "ruispijp",
         "ruijspijp", "rauschpfeife", "rauschquint", "fourniture", "plein jeu", "plein-jeu", "pleinjeu",
-        "acuta", "sharp", "mikstura", "hintersatz", "akkoord", "accoord", "ripieno", "lleno",
+        "acuta", "sharp", "mikstura", "hintersatz", "tertian", "furniture", "akkoord", "accoord", "ripieno", "lleno",
         "carillon", "carillion", "cymba\u{0142}"]) {
         return PijpFamilie::Mixtuur;
     }
@@ -614,12 +627,168 @@ pub fn familie_van_naam(naam: &str, tongwerk: bool) -> PijpFamilie {
         "blockfl", "traverso", "piccolo", "octavin", "hohlfl"]) {
         return PijpFamilie::Fluit;
     }
-    if bevat(&n, &["viola", "viool", "gamba", "gambe", "salicionaal", "salicional", "salicet", "celeste",
+    if bevat(&n, &["viola", "viool", "gamba", "gambe", "salicionaal", "salicional", "salicet", "celeste", "dulcet",
         "céleste", "unda maris", "vox angelica", "aeoline", "dolce", "dulciana", "fugara", "voix",
         "violon", "cello", "erzähler", "gemshoorn", "gemshorn"]) {
         return PijpFamilie::Strijker;
     }
     PijpFamilie::Principaal
+}
+
+impl PijpFamilie {
+    /// Sleutel voor de UI (sorteerlijst, afstandsbediening).
+    pub fn sleutel(self) -> &'static str {
+        match self {
+            Self::Principaal => "principaal", Self::Fluit => "fluit", Self::Gedekt => "gedekt",
+            Self::Strijker => "strijker", Self::Mixtuur => "mixtuur", Self::Tongwerk => "tongwerk",
+        }
+    }
+}
+
+/// Effectregister (Zimbelstern, klokken, nachtegaal, slagwerk): nooit in een
+/// crescendo en geen registertint. Tremulanten staan hier bewust niet in.
+pub fn is_effect(naam: &str) -> bool {
+    let n = naam.to_lowercase();
+    bevat(&n, &["zimbelstern", "zimbelster", "cymbelstern", "cymbelster", "cimbelster", "glocken",
+        "glockenspiel", "klokken", "chimes", "campan", "nachtigall", "nachtegaal", "vogel", "rossignol",
+        "usignolo", "pauke", "timpani", "tamboer", "tambour", "trommel", "harfe", "celesta", "triangel",
+        "kuckuck", "cuckoo"])
+        // "harp" alleen als los woord: "Sharp Mixture" is een mengwerk.
+        || woord(&n, "harp")
+}
+
+/// Voetmaat uit "16'", "2 2/3'", "4/5'", "1/2'", "3.2'". None = onbekend.
+pub fn voet_uit_tekst(tekst: &str) -> Option<f32> {
+    let t: String = tekst.chars().filter(|c| !matches!(c, '\'' | '\u{2019}' | '\u{2032}')).collect();
+    let mut som = 0.0f32;
+    let mut gevonden = false;
+    for deel in t.split_whitespace() {
+        if let Some((a, b)) = deel.split_once('/') {
+            let (a, b) = (a.parse::<f32>().ok()?, b.parse::<f32>().ok()?);
+            if b <= 0.0 { return None; }
+            som += a / b;
+            gevonden = true;
+        } else if let Ok(v) = deel.replace(',', ".").parse::<f32>() {
+            som += v;
+            gevonden = true;
+        } else {
+            return None;
+        }
+    }
+    if gevonden && som > 0.0 { Some(som) } else { None }
+}
+
+/// Getal achter de naam als voetmaat ("Octave 4", "Quinte 2 2/3"), als het
+/// een geloofwaardige maat is (0,2..64).
+pub fn getal_achter_naam(naam: &str) -> Option<f32> {
+    let woorden: Vec<&str> = naam.split_whitespace().collect();
+    for aantal in [2usize, 1] {
+        if woorden.len() > aantal {
+            if let Some(v) = voet_uit_tekst(&woorden[woorden.len() - aantal..].join(" ")) {
+                if (0.2..=64.0).contains(&v) { return Some(v); }
+            }
+        }
+    }
+    None
+}
+
+/// Voetmaat uit de naam, voor sets zonder voetmaten (alles 8'): eerst een
+/// getal achter de naam ("Octave 4", "Quinte 2 2/3"), anders de gangbare
+/// betekenis van de naam.
+pub fn voet_uit_naam(naam: &str, pedaal: bool) -> f32 {
+    if let Some(v) = getal_achter_naam(naam) { return v; }
+    let n = naam.to_lowercase();
+    if bevat(&n, &["superoctav", "superoktav", "superoctaaf", "doublette", "woudfluit", "waldfl", "flageolet", "piccolo"]) { return 2.0; }
+    if bevat(&n, &["terts", "tierce", "terz"]) { return 1.6; }
+    if bevat(&n, &["quintade", "quintatön", "quintaton"]) { return if pedaal { 16.0 } else { 8.0 }; }
+    if bevat(&n, &["quint", "nasard", "nazard"]) { return if pedaal { 10.667 } else { 2.667 }; }
+    if bevat(&n, &["octaaf", "octave", "oktav", "ottava"]) { return if pedaal { 8.0 } else { 4.0 }; }
+    if bevat(&n, &["subbas", "subbaß", "untersatz", "contrabas", "kontrabass", "violon"]) { return 16.0; }
+    if bevat(&n, &["prestant", "praestant", "principa", "prinzipal"]) { return if pedaal { 16.0 } else { 8.0 }; }
+    8.0
+}
+
+/// Aliquoot: een voetmaat die geen hele octaafmaat is (2 2/3', 1 3/5',
+/// 1 1/3', 10 2/3', 4/5' …). Afstand tot het dichtstbijzijnde octaaf in
+/// log2; 3 % tolerantie vangt afgeronde 2,66 en 1,33 en laat 2,05 en 7,9
+/// (afwijkende maar hele maten) met rust.
+pub fn is_aliquoot(voet: f32) -> bool {
+    if !(0.2..=64.0).contains(&voet) { return false; }
+    let l = voet.log2();
+    (l - l.round()).abs() > 0.045
+}
+
+/// Groep van een register voor de registertinten (0.7.69).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RegisterGroep {
+    /// Labialen zonder aliquoot, inclusief octaafstemmen en strijkers.
+    Grondstem,
+    /// Mengwerken en aliquoten.
+    Vulstem,
+    Tongwerk,
+    /// Koppel, tremulant, effect, percussie.
+    Overig,
+}
+
+impl RegisterGroep {
+    pub fn sleutel(self) -> &'static str {
+        match self {
+            Self::Grondstem => "grond", Self::Vulstem => "vul", Self::Tongwerk => "tong", Self::Overig => "overig",
+        }
+    }
+}
+
+/// Groepsbepaling uit naam, voetmaat (tekst, anders de voet uit de set,
+/// anders de naam), mengwerkvlag, aantal koren en de tongwerkvlag van de set.
+/// Volgorde: effecten/tremulant/percussie → koppels (maar niet de
+/// Koppelfluit) → cornet (manuaal 8' = mixtuur, pedaal of 4'/2' = tongwerk)
+/// → tongwerk (nooit bij meer dan één koor: Kornett 5fach) → mengwerk of
+/// aliquoot → aliquoot op naam → grondstem.
+pub fn groep_voor_register(naam: &str, pitch: &str, wind_voet: f32, mengwerk: bool, koren: Option<u8>,
+                           tongwerk: bool, percussief: bool, pedaal: bool) -> RegisterGroep {
+    let n = naam.to_lowercase().replace('ß', "ss");
+    if percussief || is_effect(&n) || bevat(&n, &["tremulant", "tremolo"]) { return RegisterGroep::Overig; }
+    let familie = familie_van_naam(naam, tongwerk);
+    // Een koppel als register ("Koppel II-I"): zonder voetmaat. Niet de
+    // Koppelfluit (gedekt) en niet de Copula (een labiaal met voetmaat).
+    if bevat(&n, &["koppel", "coupler"])
+        && !matches!(familie, PijpFamilie::Gedekt | PijpFamilie::Fluit)
+        && pitch.trim().is_empty() && getal_achter_naam(naam).is_none() {
+        return RegisterGroep::Overig;
+    }
+    let aantal = koren.unwrap_or(0);
+    let meerkorig = aantal >= 2;
+    // Voetmaat: de tekst onder de knop, maar een 8' kan de standaard zijn die
+    // GrandOrgue zonder HarmonicNumber invult (en registerweergave dan als
+    // "8'" doorgeeft). Dan telt een getal achter de naam, dan de voet uit de
+    // set (als die niet ook 8 is), dan de gangbare betekenis van de naam.
+    let voet = match voet_uit_tekst(pitch) {
+        Some(v) if (v - 8.0).abs() > 0.01 => v,
+        _ => getal_achter_naam(naam)
+            .or_else(|| if wind_voet > 0.01 && (wind_voet - 8.0).abs() > 0.01 { Some(wind_voet) } else { None })
+            .unwrap_or_else(|| voet_uit_naam(naam, pedaal)),
+    };
+    // Cornet/Kornett zonder koren: op een manuaal (8') een cornet-mixtuur, in
+    // het pedaal of op 4'/2' een tongwerk. De mengwerkvlag telt hier niet:
+    // die is op de aanroepplekken uit dezelfde naam afgeleid.
+    let cornet = bevat(&n, &["kornet", "cornet"]);
+    if cornet && !meerkorig {
+        return if pedaal || voet <= 4.1 { RegisterGroep::Tongwerk } else { RegisterGroep::Vulstem };
+    }
+    if familie == PijpFamilie::Tongwerk {
+        // Een cornet met koren (Kornett 5fach) of een tongwerknaam met drie of
+        // meer koren is een mengwerk; "Trompet 2 st." blijft een tongwerk.
+        return if meerkorig && (cornet || aantal >= 3) { RegisterGroep::Vulstem } else { RegisterGroep::Tongwerk };
+    }
+    if mengwerk || familie == PijpFamilie::Mixtuur || is_aliquoot(voet) { return RegisterGroep::Vulstem; }
+    // Sets zonder voetmaat: aliquoten op naam (NL, DE, FR, EN, PL).
+    if bevat(&n, &["nasard", "nazard", "nasat", "larigot", "terts", "tierce", "terz", "tertia", "tercj",
+        "septi", "twelfth", "seventeenth", "nineteenth"])
+        || woord(&n, "none") || woord(&n, "nona")
+        || ((n.contains("quint") || n.contains("kwint")) && !bevat(&n, &["quintad", "quintat", "quintviol"])) {
+        return RegisterGroep::Vulstem;
+    }
+    RegisterGroep::Grondstem
 }
 
 /// Voetmaat uit de toonhoogtetekst van een register: "16'" → 16, "2 2/3'" →
@@ -1355,6 +1524,139 @@ mod pijpprofiel_tests {
         assert_eq!(familie_van_naam("Prestant 8'", false), Principaal);
         assert_eq!(familie_van_naam("Octaaf 4'", false), Principaal);
         assert_eq!(familie_van_naam("Quint 2 2/3'", false), Principaal);
+    }
+
+    #[test]
+    fn dulciana_en_engelse_tongwerken() {
+        use PijpFamilie::*;
+        assert_eq!(familie_van_naam("Dulciana 8'", false), Strijker);
+        assert_eq!(familie_van_naam("Dulciana 8'", true), Strijker);
+        assert_eq!(familie_van_naam("Dulcet 4'", false), Strijker);
+        assert_eq!(familie_van_naam("Dulciaan 8'", false), Tongwerk);
+        assert_eq!(familie_van_naam("Cornopean 8'", false), Tongwerk);
+        assert_eq!(familie_van_naam("Tromba 8'", false), Tongwerk);
+        assert_eq!(familie_van_naam("Ophicleide 16'", false), Tongwerk);
+        assert_eq!(familie_van_naam("Horn 8'", false), Tongwerk);
+        assert_eq!(familie_van_naam("French Horn 8'", false), Tongwerk);
+        assert_eq!(familie_van_naam("Corno di Bassetto 8'", false), Tongwerk);
+        assert_eq!(familie_van_naam("Gemshorn 8'", false), Strijker);
+        assert_eq!(familie_van_naam("Nachthorn 4'", false), Gedekt);
+        assert_eq!(familie_van_naam("Schalmey 4'", false), Tongwerk);
+        assert_eq!(familie_van_naam("Zink 2'", false), Tongwerk);
+        assert_eq!(familie_van_naam("Horn Diapason 8'", false), Principaal);
+        assert_eq!(familie_van_naam("Hornflöte 8'", false), Fluit);
+        assert_eq!(familie_van_naam("Clarín 8'", false), Tongwerk);
+        assert_eq!(familie_van_naam("Bajoncillo 4'", false), Tongwerk);
+        assert_eq!(familie_van_naam("Tertian II", false), Mixtuur);
+        assert_eq!(familie_van_naam("Furniture IV", false), Mixtuur);
+        assert!(is_effect("Sharp Mixture III") == false);
+        assert!(is_effect("Harp"));
+        assert!(is_effect("Harfe"));
+        assert!(is_effect("Zimbelster"));
+    }
+
+    #[test]
+    fn aliquoot_op_voetmaat() {
+        for v in [2.667f32, 1.6, 1.333, 1.143, 0.889, 0.8, 10.667, 5.333] { assert!(is_aliquoot(v), "{v}"); }
+        for v in [2.05f32, 7.9, 3.9, 1.0, 0.5, 16.0, 32.0, 2.0, 0.0, 100.0] { assert!(!is_aliquoot(v), "{v}"); }
+    }
+
+    #[test]
+    fn registergroep_uit_naam_en_voet() {
+        use RegisterGroep::*;
+        let g = |naam: &str, pitch: &str| groep_voor_register(naam, pitch, 8.0, false, None, false, false, false);
+        assert_eq!(g("Prestant", "8'"), Grondstem);
+        assert_eq!(g("Open Diapason", "8'"), Grondstem);
+        assert_eq!(g("Stopped Diapason", "8'"), Grondstem);
+        assert_eq!(g("Clarabella", "8'"), Grondstem);
+        assert_eq!(g("Octaaf", "4'"), Grondstem);
+        assert_eq!(g("Fifteenth", "2'"), Grondstem);
+        assert_eq!(g("Viola di Gamba", "8'"), Grondstem);
+        assert_eq!(g("Vox celeste", "8'"), Grondstem);
+        assert_eq!(g("Dulciana", "8'"), Grondstem);
+        assert_eq!(g("Koppelfluit", "4'"), Grondstem);
+        assert_eq!(g("Quintadeen", "8'"), Grondstem);
+        assert_eq!(g("Subbas", "16'"), Grondstem);
+        assert_eq!(g("Quint", "2 2/3'"), Vulstem);
+        assert_eq!(g("Twelfth", "2 2/3'"), Vulstem);
+        assert_eq!(g("Terts", "1 3/5'"), Vulstem);
+        assert_eq!(g("Tierce", "1 3/5'"), Vulstem);
+        assert_eq!(g("Larigot", "1 1/3'"), Vulstem);
+        assert_eq!(g("Nasard", "2 2/3'"), Vulstem);
+        assert_eq!(g("Cornet", "8'"), Vulstem);
+        assert_eq!(g("Terzcymbel", ""), Vulstem);
+        assert_eq!(g("Trompet", "8'"), Tongwerk);
+        assert_eq!(g("Cornopean", "8'"), Tongwerk);
+        assert_eq!(g("Tromba", "8'"), Tongwerk);
+        assert_eq!(g("Kromhoorn", "8'"), Tongwerk);
+        assert_eq!(g("Vox humana", "8'"), Tongwerk);
+        assert_eq!(g("Clarion", "4'"), Tongwerk);
+        assert_eq!(g("Tremulant", ""), Overig);
+        assert_eq!(g("Zimbelstern", ""), Overig);
+        assert_eq!(g("Nachtegaal", ""), Overig);
+        assert_eq!(g("Koppel II-I", ""), Overig);
+        assert_eq!(g("Copula major", "8'"), Grondstem);
+        assert_eq!(g("Koppel", "8'"), Grondstem);
+        assert_eq!(g("Horn Diapason", "8'"), Grondstem);
+        assert_eq!(g("Harp", ""), Overig);
+        assert_eq!(g("Clarín", "8'"), Tongwerk);
+        assert_eq!(g("Bajoncillo", "4'"), Tongwerk);
+        assert_eq!(g("Nona", "8/9'"), Vulstem);
+        assert_eq!(g("None", ""), Vulstem);
+        assert_eq!(g("Kwinta", "2 2/3'"), Vulstem);
+        assert_eq!(g("Tertia", ""), Vulstem);
+        assert_eq!(g("Septième", "1 1/7'"), Vulstem);
+    }
+
+    #[test]
+    fn registergroep_koren_pedaal_en_terugval() {
+        use RegisterGroep::*;
+        // Meer dan één koor is nooit een tongwerk (Kornett 5fach), maar een
+        // dubbelkorige prestant blijft een grondstem.
+        assert_eq!(groep_voor_register("Kornett", "", 8.0, false, Some(5), false, false, false), Vulstem);
+        assert_eq!(groep_voor_register("Cornett", "", 8.0, false, Some(3), false, false, false), Vulstem);
+        assert_eq!(groep_voor_register("Mixtuur", "", 8.0, true, Some(4), false, false, false), Vulstem);
+        assert_eq!(groep_voor_register("Dulciana Mixture", "", 8.0, true, Some(3), false, false, false), Vulstem);
+        assert_eq!(groep_voor_register("Prestant", "8'", 8.0, false, Some(2), false, false, false), Grondstem);
+        // Een echt tongwerk met een korenlabel ("Trompet 2 st.") blijft tongwerk.
+        assert_eq!(groep_voor_register("Trompet", "8'", 8.0, false, Some(2), true, false, false), Tongwerk);
+        assert_eq!(groep_voor_register("Sharp Mixture", "", 8.0, true, Some(3), false, false, false), Vulstem);
+        assert_eq!(groep_voor_register("Tertian", "", 8.0, true, Some(2), false, false, false), Vulstem);
+        // Zoals de aanroepplekken het doen: mengwerk = (familie == Mixtuur), dus
+        // voor Cornet altijd true; de cornet-regel moet daar doorheen kijken.
+        assert_eq!(groep_voor_register("Cornet", "4'", 4.0, true, None, false, false, true), Tongwerk);
+        assert_eq!(groep_voor_register("Cornet", "8'", 8.0, true, None, false, false, false), Vulstem);
+        assert_eq!(groep_voor_register("Cornet", "", 8.0, true, Some(5), false, false, false), Vulstem);
+        // GrandOrgue zonder HarmonicNumber: de tekst is "8'", de naam beslist.
+        assert_eq!(groep_voor_register("Flute 2 2/3", "8'", 8.0, false, None, false, false, false), Vulstem);
+        assert_eq!(groep_voor_register("Sifflöte 1 1/3", "8'", 8.0, false, None, false, false, false), Vulstem);
+        assert_eq!(groep_voor_register("Quinte 2 2/3", "8'", 8.0, false, None, false, false, false), Vulstem);
+        assert_eq!(groep_voor_register("Octave 4", "8'", 8.0, false, None, false, false, false), Grondstem);
+        assert_eq!(groep_voor_register("Principal", "8'", 8.0, false, None, false, false, false), Grondstem);
+        assert_eq!(groep_voor_register("Flute", "8'", 2.667, false, None, false, false, false), Vulstem);
+        // Cornet 8' op een manuaal is een cornet-mixtuur, Cornet 4'/2' in het
+        // pedaal een tongwerk.
+        assert_eq!(groep_voor_register("Kornett", "8'", 8.0, false, None, false, false, false), Vulstem);
+        assert_eq!(groep_voor_register("Cornet", "4'", 4.0, false, None, false, false, true), Tongwerk);
+        assert_eq!(groep_voor_register("Cornett", "2'", 2.0, false, None, false, false, true), Tongwerk);
+        // Pedaalquint 10 2/3'.
+        assert_eq!(groep_voor_register("Quint", "10 2/3'", 10.667, false, None, false, false, true), Vulstem);
+        // Zonder tekst: de voet uit de set wint van de naam, behalve de
+        // GrandOrgue-standaard 8'; dan beslist de naam.
+        assert_eq!(groep_voor_register("Quint", "", 2.667, false, None, false, false, false), Vulstem);
+        assert_eq!(groep_voor_register("Nasard", "", 8.0, false, None, false, false, false), Vulstem);
+        assert_eq!(groep_voor_register("Quinte 2 2/3", "", 8.0, false, None, false, false, false), Vulstem);
+        assert_eq!(groep_voor_register("Octave 4", "", 8.0, false, None, false, false, false), Grondstem);
+        // De tekst wint van de voet uit de set.
+        assert_eq!(groep_voor_register("Quint", "2 2/3'", 8.0, false, None, false, false, false), Vulstem);
+        // Tongwerk volgens de set, zonder herkenbare naam.
+        assert_eq!(groep_voor_register("Bajoncillo", "4'", 4.0, false, None, true, false, false), Tongwerk);
+        // Een Dulciana blijft grondstem, ook als de set 'tongwerk' zegt.
+        assert_eq!(groep_voor_register("Dulciana", "8'", 8.0, false, None, true, false, false), Grondstem);
+        // Percussief uit de set.
+        assert_eq!(groep_voor_register("Carillon", "", 8.0, false, None, false, true, false), Overig);
+        assert_eq!(RegisterGroep::Vulstem.sleutel(), "vul");
+        assert_eq!(PijpFamilie::Gedekt.sleutel(), "gedekt");
     }
 
     #[test]

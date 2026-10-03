@@ -23,7 +23,7 @@
 //!    geschatte luidheid in dB: geen dode trappen bij zachte registers en
 //!    geen sprongen bij de luide.
 
-use vpo_audio::{familie_van_naam, PijpFamilie};
+use vpo_audio::{familie_van_naam, is_effect, voet_uit_naam, voet_uit_tekst, PijpFamilie};
 use vpo_sampler::Koren;
 
 #[derive(Debug, Clone)]
@@ -83,49 +83,8 @@ fn bevat(n: &str, woorden: &[&str]) -> bool {
     woorden.iter().any(|w| n.contains(w))
 }
 
-/// Voetmaat uit "16'", "2 2/3'", "4/5'", "1/2'", "3.2'". None = onbekend.
-fn voet_uit_tekst(tekst: &str) -> Option<f32> {
-    let t: String = tekst.chars().filter(|c| !matches!(c, '\'' | '\u{2019}' | '\u{2032}')).collect();
-    let mut som = 0.0f32;
-    let mut gevonden = false;
-    for deel in t.split_whitespace() {
-        if let Some((a, b)) = deel.split_once('/') {
-            let (a, b) = (a.parse::<f32>().ok()?, b.parse::<f32>().ok()?);
-            if b <= 0.0 { return None; }
-            som += a / b;
-            gevonden = true;
-        } else if let Ok(v) = deel.replace(',', ".").parse::<f32>() {
-            som += v;
-            gevonden = true;
-        } else {
-            return None;
-        }
-    }
-    if gevonden && som > 0.0 { Some(som) } else { None }
-}
-
-/// Voetmaat uit de naam, voor sets zonder voetmaten (alles 8'): eerst een
-/// getal achter de naam ("Octave 4", "Quinte 2 2/3"), anders de gangbare
-/// betekenis van de naam.
-fn voet_uit_naam(naam: &str, pedaal: bool) -> f32 {
-    let woorden: Vec<&str> = naam.split_whitespace().collect();
-    for aantal in [2usize, 1] {
-        if woorden.len() > aantal {
-            if let Some(v) = voet_uit_tekst(&woorden[woorden.len() - aantal..].join(" ")) {
-                if (0.2..=64.0).contains(&v) { return v; }
-            }
-        }
-    }
-    let n = naam.to_lowercase();
-    if bevat(&n, &["superoctav", "superoktav", "superoctaaf", "doublette", "woudfluit", "waldfl", "flageolet", "piccolo"]) { return 2.0; }
-    if bevat(&n, &["terts", "tierce", "terz"]) { return 1.6; }
-    if bevat(&n, &["quintade", "quintatön", "quintaton"]) { return if pedaal { 16.0 } else { 8.0 }; }
-    if bevat(&n, &["quint", "nasard", "nazard"]) { return if pedaal { 10.667 } else { 2.667 }; }
-    if bevat(&n, &["octaaf", "octave", "oktav", "ottava"]) { return if pedaal { 8.0 } else { 4.0 }; }
-    if bevat(&n, &["subbas", "subbaß", "untersatz", "contrabas", "kontrabass", "violon"]) { return 16.0; }
-    if bevat(&n, &["prestant", "praestant", "principa", "prinzipal"]) { return if pedaal { 16.0 } else { 8.0 }; }
-    8.0
-}
+// voet_uit_tekst en voet_uit_naam staan sinds 0.7.69 in vpo-audio (effects.rs),
+// gedeeld met de registergroepen.
 
 /// Twee helften van één register ("Mixtuur (Bas)" + "Mixtuur (Disc)",
 /// "Cornet D") horen samen: zelfde plek in de walze.
@@ -167,9 +126,7 @@ fn classificeer(r: &VoorstelRegister, pedaal: bool, hoofd: bool, voet_onbekend: 
     //    Volgorde is belangrijk: "Zimbelstern" is geen Cymbel en "Carillon"
     //    is alleen een effect als het percussief is.
     if r.percussief { return None; }
-    if bevat(&n, &["zimbelstern", "cymbelstern", "cymbelster", "cimbelster", "glocken", "glockenspiel",
-        "klokken", "chimes", "campan", "nachtigall", "vogel", "rossignol", "usignolo", "pauke", "timpani",
-        "tamboer", "tambour", "trommel", "harp", "celesta", "triangel", "kuckuck", "cuckoo"]) { return None; }
+    if is_effect(&n) { return None; }
     if bevat(&n, &["tremulant", "tremolo"]) { return None; }
     if bevat(&n, &["celeste", "céleste", "coelestis", "celestis", "unda maris", "vox angelica",
         "schwebung", "zweving", "bifara", "piffaro"]) { return None; }
