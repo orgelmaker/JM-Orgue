@@ -47,6 +47,9 @@ pub struct KlavarNote {
     /// Rastereenheden, einde exclusief en ONGEKORT (klavar is polyfoon).
     pub start: u64,
     pub end: u64,
+    /// Het einde waarop stopteken en stippen zijn bepaald: `end`, of de
+    /// inzet waarop de noot legato is afgekapt. De renderer zet de "v" hier.
+    pub end_cut: u64,
     /// Rechts, links of pedaal; de renderer leidt de stokrichting eraf.
     pub hand: KlavarHand,
     /// Stopteken "v" op het einde.
@@ -195,6 +198,7 @@ fn stop_en_stippen(alle: &mut [KlavarNote], groep: &[usize], speling: u64, measu
                 eind = m.start;
             }
         }
+        alle[i].end_cut = eind;
         // Stopteken: volgt er na het (afgekapte) einde binnen de speling een
         // inzet van dezelfde groep? Inzetten tíjdens de noot tellen niet mee:
         // die zijn de doorklinkstippen.
@@ -224,7 +228,7 @@ pub fn klavar_model(qs: &QuantizedScore, handen: &[(KlavarHand, Option<u8>)], le
         for n in &st.notes {
             let hand = hand_van_noot(balk, n.hand, n.midi);
             let noot = KlavarNote {
-                id: n.id, layer_id: st.layer_id, midi: n.midi, start: n.start, end: n.end, hand,
+                id: n.id, layer_id: st.layer_id, midi: n.midi, start: n.start, end: n.end, end_cut: n.end, hand,
                 stop: false, dots: Vec::new(), bar_crossings: Vec::new(), beam: None, label: None,
             };
             if hand == KlavarHand::Pedal { pedal.push(noot); } else { manual.push(noot); }
@@ -484,6 +488,7 @@ mod tests {
         let n = noot(&m.manual, 60, 0);
         assert!(n.dots.is_empty(), "overlap van één zestiende is legato, geen stip");
         assert!(!n.stop);
+        assert_eq!((n.end, n.end_cut), (5, 4), "het afgekapte einde gaat mee naar de renderer");
     }
 
     #[test]

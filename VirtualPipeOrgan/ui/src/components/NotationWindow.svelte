@@ -11,9 +11,10 @@
   //
   // De omzetting MIDI → MusicXML zit in de Rust-backend; renderen doet
   // OpenSheetMusicDisplay (BSD-3, gebundeld — geen externe software).
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount, onDestroy, tick } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
   import { OpenSheetMusicDisplay } from 'opensheetmusicdisplay';
+  import KlavarSheet from './KlavarSheet.svelte';
   import { t, tx } from '../lib/i18n.js';
   import { pasSfeerToeAlsGewijzigd } from '../lib/sfeer.js';
 
@@ -31,6 +32,34 @@
   let error = null;
   let xml = null;
   let lastGeneration = 0; // laatste gerenderde generation (dedup)
+
+  // Weergave (0.7.71): notenschrift (OSMD) of klavar (eigen SVG, KlavarSheet).
+  // Globaal onthouden; localStorage is per origin gedeeld, dus ook een nieuw
+  // notatievenster ziet de keuze. Beide weergaven lezen dezelfde Score en
+  // dezelfde kwantisatie (notation.rs::quantize_score).
+  let viewMode = 'staff';
+  try { if (localStorage.getItem('jm-orgue-notation-view') === 'klavar') viewMode = 'klavar'; } catch (e) {}
+  let klavarModel = null;
+  let lastKlavarGeneration = 0;
+  let osmdHost;           // inner div waar OSMD in tekent (blijft gemount, ook in klavar)
+  function setViewMode(mode) {
+    if (mode === viewMode) return;
+    viewMode = mode;
+    try { localStorage.setItem('jm-orgue-notation-view', mode); } catch (e) {}
+    noteBoxes = [];       // geen oude kaders van de selectie-overlay
+    lastGeneration = 0;
+    lastKlavarGeneration = 0;
+    doRender();
+  }
+  // Tijdens het opnemen in klavar het blad meelaten scrollen met de nieuwste noot.
+  function scrollNaarNieuwsteNoot() {
+    if (!recording || !container) return;
+    let nieuwste = null;
+    for (const e of flatEvents) if (nieuwste == null || e.id > nieuwste) nieuwste = e.id;
+    if (nieuwste == null) return;
+    const el = container.querySelector(`[data-id="${nieuwste}"]`);
+    if (el && el.scrollIntoView) el.scrollIntoView({ block: 'end' });
+  }
 
   // File-modus opties (blijven werken zoals in 0.7.0)
   let bpm = 90;
@@ -204,25 +233,44 @@
       if (isLive) {
         // Alleen tijdens live-modus: score verversen + MusicXML ophalen.
         score = await invoke('notation_get_score', { scoreId });
+        if (viewMode === 'klavar') {
+          if (score.generation === lastKlavarGeneration && klavarModel) return;
+          lastKlavarGeneration = score.generation;
+          klavarModel = await invoke('notation_get_klavar_model', { scoreId });
+          // MusicXML alleen voor Opslaan; een lege score geeft hier een fout
+          // en dat is in klavar geen rode balk waard.
+          try { xml = await invoke('notation_get_musicxml', { scoreId }); } catch (e) { xml = null; }
+          error = null;
+          await tick();
+          scrollNaarNieuwsteNoot();
+          return;
+        }
         if (score.generation === lastGeneration && xml) return;
         lastGeneration = score.generation;
         xml = await invoke('notation_get_musicxml', { scoreId });
       } else {
-        // File-modus: bestand → MusicXML (bestaande weg).
+        // File-modus: bestand → MusicXML of klavar-model (zelfde balkindeling).
         const staves = (divisions.length > 0 && staffConfig.length > 0)
-          ? staffConfig.map(s => ({ name: s.name || null, divisions: s.divisions, bass_clef: s.bass }))
+          ? staffConfig.map(s => {
+              const [hand, split] = handVoorKeuze(s.hand, s.split);
+              return { name: s.name || null, divisions: s.divisions, bass_clef: s.bass, klavar_hand: hand, klavar_split: split };
+            })
           : null;
-        xml = await invoke('convert_midi_to_musicxml', {
-          path: filePath,
-          options: {
-            bpm: Number(bpm) || 90, beats_per_bar: Number(beatsPerBar) || 4,
-            quantize: Number(quantize) || 4, key_fifths: Number(keyFifths) || 0,
-            title, staves, tolerance_pct: Number(tolerancePct),
-          },
-        });
+        const options = {
+          bpm: Number(bpm) || 90, beats_per_bar: Number(beatsPerBar) || 4,
+          quantize: Number(quantize) || 4, key_fifths: Number(keyFifths) || 0,
+          title, staves, tolerance_pct: Number(tolerancePct),
+        };
+        if (viewMode === 'klavar') {
+          klavarModel = await invoke('convert_midi_to_klavar_model', { path: filePath, options });
+          try { xml = await invoke('convert_midi_to_musicxml', { path: filePath, options }); } catch (e) { xml = null; }
+          error = null;
+          return;
+        }
+        xml = await invoke('convert_midi_to_musicxml', { path: filePath, options });
       }
       if (!osmd) {
-        osmd = new OpenSheetMusicDisplay(container, {
+        osmd = new OpenSheetMusicDisplay(osmdHost, {
           autoResize: true, backend: 'svg', drawTitle: true,
         });
       }
@@ -341,7 +389,7 @@
   // Shift+klik voegt toe aan de selectie; gewone klik vervangt. De cursor volgt
   // de klik zodat pijltjes vanaf daar verder navigeren.
   function handleSheetClick(e) {
-    if (!isLive) return;
+    if (!isLive || viewMode === 'klavar') return;
     if (dragConsumedClick) return; // net een noot versleept — geen selectie-klik
     const rect = container.getBoundingClientRect();
     const px = e.clientX - rect.left + container.scrollLeft;
@@ -382,7 +430,7 @@
       divisions = (info?.divisions || []).map(d => d.name);
     } catch (e) { divisions = []; }
     if (divisions.length > 0 && staffConfig.length === 0) {
-      staffConfig = divisions.map(name => ({ name, divisions: [name], bass: isPedalName(name) }));
+      staffConfig = divisions.map(name => ({ name, divisions: [name], bass: isPedalName(name), hand: 'auto', split: 60 }));
     }
   }
   function toggleStaffDivision(staffIdx, divName) {
@@ -394,7 +442,7 @@
     scheduleRender();
   }
   function addStaff() {
-    staffConfig = [...staffConfig, { name: tx('notation.staff_n').replace('{n}', staffConfig.length + 1), divisions: [], bass: false }];
+    staffConfig = [...staffConfig, { name: tx('notation.staff_n').replace('{n}', staffConfig.length + 1), divisions: [], bass: false, hand: 'auto', split: 60 }];
   }
   function removeStaff(staffIdx) { staffConfig = staffConfig.filter((_, i) => i !== staffIdx); scheduleRender(); }
   function setStaffBass(staffIdx, v) { staffConfig[staffIdx].bass = v; staffConfig = staffConfig; scheduleRender(); }
@@ -413,12 +461,14 @@
         name: l.name,
         bass: l.bass_clef === true || (l.bass_clef == null && isPedalName(l.name)),
         divisions: [...(l.divisions || [])],
+        hand: layerHandKeuze(l),
+        split: l.klavar_split ?? 60,
       })),
     };
-    if (wizard.staves.length === 0) wizard.staves = [{ name: tx('notation.staff_n').replace('{n}', 1), bass: false, divisions: [] }];
+    if (wizard.staves.length === 0) wizard.staves = [{ name: tx('notation.staff_n').replace('{n}', 1), bass: false, divisions: [], hand: 'auto', split: 60 }];
   }
   function wizardAddStaff() {
-    wizard.staves = [...wizard.staves, { name: tx('notation.staff_n').replace('{n}', wizard.staves.length + 1), bass: false, divisions: [] }];
+    wizard.staves = [...wizard.staves, { name: tx('notation.staff_n').replace('{n}', wizard.staves.length + 1), bass: false, divisions: [], hand: 'auto', split: 60 }];
   }
   function wizardRemoveStaff(i) {
     wizard.staves = wizard.staves.filter((_, idx) => idx !== i);
@@ -433,7 +483,10 @@
     try {
       await invoke('notation_configure_layers', {
         scoreId,
-        layers: wizard.staves.map(s => ({ name: s.name || tx('notation.staff'), bass_clef: !!s.bass, divisions: s.divisions })),
+        layers: wizard.staves.map(s => {
+          const [hand, split] = handVoorKeuze(s.hand, s.split);
+          return { name: s.name || tx('notation.staff'), bass_clef: !!s.bass, divisions: s.divisions, klavar_hand: hand, klavar_split: split };
+        }),
       });
       score = await invoke('notation_get_score', { scoreId });
       wizard = null;
@@ -495,17 +548,21 @@
     if (lid == null || !notes.length) return;
     const at = opts.at != null ? opts.at : stepPosUs;
     const dur = stepDurUs;
+    // opts.advance (klavar, 0.7.71): plaatsing op een aangeklikte tijd die
+    // de invoercursor meeneemt — in tegenstelling tot opts.at zonder advance,
+    // dat het zojuist geplaatste akkoord uitbreidt.
+    const vers = opts.at == null || opts.advance;
     // Cursor DIRECT opschuiven (vóór de await): bij snel typen lazen
     // opeenvolgende inserts anders dezelfde positie en stapelden de noten
     // als een cluster op één tel (gezien bij de eerste visuele test).
-    if (opts.at == null) stepPosUs = at + dur;
+    if (vers) stepPosUs = at + dur;
     try {
       const res = await invoke('notation_insert_notes', {
         scoreId, layerId: lid, notes,
         startUs: Math.round(at), durUs: dur,
       });
       const ids = Array.isArray(res) ? (res[1] || []) : [];
-      if (opts.at != null) {
+      if (!vers) {
         // Toevoeging aan het zojuist geplaatste akkoord (Shift+letter).
         stepLastIds = [...stepLastIds, ...ids];
         stepLastChordNotes = [...stepLastChordNotes, ...notes];
@@ -516,9 +573,84 @@
       }
       stepLastMidi = notes[notes.length - 1];
     } catch (e) {
-      if (opts.at == null) stepPosUs = at; // mislukt → cursor terug
+      if (vers) stepPosUs = at; // mislukt → cursor terug
       alert(String(e));
     }
+  }
+
+  // ---- Klavar (0.7.71): events uit KlavarSheet, handen per balk en per noot ----
+  function onKlavarSelect(e) {
+    const { id, shift } = e.detail;
+    if (shift) {
+      const next = new Set(selectionIds);
+      next.has(id) ? next.delete(id) : next.add(id);
+      selectionIds = next;
+    } else {
+      selectionIds = new Set([id]);
+    }
+    const idx = flatEvents.findIndex(ev => ev.id === id);
+    if (idx >= 0) cursorIndex = idx;
+  }
+  async function onKlavarDrag(e) {
+    const { id, semitones } = e.detail;
+    selectionIds = new Set([id]);
+    try { await invoke('notation_transpose', { scoreId, eventIds: [id], semitones }); } catch (e2) {}
+  }
+  // Klik op een lege plek in stapinvoer: de klik-y is de tijd, de x de toets;
+  // op de pedaalbalk gaat de noot naar de pedaallaag, anders naar de armed laag.
+  function onKlavarStepClick(e) {
+    const { midi, staff, gridTime } = e.detail;
+    const q = Number(score?.quantize) || 4;
+    const gridUs = (60e6 / (Number(bpm) || 90)) / q;
+    const at = Math.round(gridTime * gridUs);
+    let layerId = null;
+    const legend = klavarModel?.legend || [];
+    if (staff === 'pedal') {
+      const l = legend.find(x => x.hand === 'pedal' && x.layer_id != null);
+      layerId = l ? l.layer_id : null;
+    } else {
+      // Op de manuaalbalk nooit in de pedaallaag plaatsen, ook als die armed is.
+      const armed = legend.find(x => x.layer_id === stepTargetLayerId());
+      if (armed && armed.hand === 'pedal') {
+        const l = legend.find(x => x.hand !== 'pedal' && x.layer_id != null);
+        layerId = l ? l.layer_id : null;
+      }
+    }
+    stepInsert([midi], layerId, { at, advance: true });
+  }
+  // Hand per noot (Alt+←/→ en de knoppen ← L / R →); alleen links of rechts.
+  async function setHandsSelection(hand) {
+    const ids = selectedIdsOrCursor();
+    if (!ids.length) return;
+    try { await invoke('notation_set_hands', { scoreId, eventIds: ids, hand }); } catch (e) { alert(String(e)); }
+  }
+  // Keuze per balk: auto / right / left / pedal / rl (R+L met splitspunt).
+  // Codering naar de backend: R+L = hand right + split_midi (0.7.70).
+  const SPLIT_OPTIES = [[48, 'c'], [53, 'f'], [60, "c'"], [65, "f'"], [72, "c''"]];
+  function handVoorKeuze(keuze, split) {
+    if (keuze === 'rl') return ['right', split ?? 60];
+    if (keuze === 'right' || keuze === 'left' || keuze === 'pedal') return [keuze, null];
+    return [null, null];
+  }
+  function layerHandKeuze(layer) {
+    if (layer.klavar_split != null) return 'rl';
+    return layer.klavar_hand || 'auto';
+  }
+  // Wat de standaardregel voor deze balk heeft gekozen (uit de legenda van het
+  // model); `model` als argument zodat de markup meeverandert met het model.
+  function autoHandLabel(layer, model, _vertaal) {
+    const l = (model?.legend || []).find(x => x.layer_id === layer.id);
+    if (!l) return '';
+    if (l.hand === 'pedal') return tx('notation.klavar_pedal_label');
+    if (l.split_midi != null) return 'R+L';
+    return l.hand === 'left' ? 'L' : 'R';
+  }
+  async function setLayerHand(layer, keuze, split = null) {
+    const [hand, splitMidi] = handVoorKeuze(keuze, split ?? layer.klavar_split ?? 60);
+    try {
+      await invoke('notation_set_layer_hand', { scoreId, layerId: layer.id, hand, splitMidi });
+      score = await invoke('notation_get_score', { scoreId });
+    } catch (e) { alert(String(e)); }
   }
   function stepCommitChord() {
     const notes = Array.from(stepChord);
@@ -572,7 +704,7 @@
     try {
       const gsheet = osmd?.GraphicSheet || osmd?.graphic;
       const measureList = gsheet?.MeasureList;
-      const svg = container?.querySelector('svg');
+      const svg = osmdHost?.querySelector('svg');
       if (!measureList || !svg) return null;
       const partLayers = nonEmptyPartLayers();
       const svgRect = svg.getBoundingClientRect();
@@ -815,7 +947,7 @@
     return oct * 7 + deg;
   }
   function handleSheetMouseDown(e) {
-    if (!isLive || stepMode || noteBoxes.length === 0) return;
+    if (!isLive || viewMode === 'klavar' || stepMode || noteBoxes.length === 0) return;
     const rect = container.getBoundingClientRect();
     const px = e.clientX - rect.left + container.scrollLeft;
     const py = e.clientY - rect.top + container.scrollTop;
@@ -855,7 +987,12 @@
   function setZoom(z) {
     osmdZoom = Math.max(0.5, Math.min(2, Math.round(z * 10) / 10));
     if (osmd) {
-      try { osmd.Zoom = osmdZoom; osmd.render(); if (isLive) buildNoteBoxes(); } catch (e) {}
+      try {
+        // Ook in klavar bijhouden, anders loopt OSMD achter bij terugschakelen
+        // (en rekent het verticaal slepen met de verkeerde schaal).
+        osmd.Zoom = osmdZoom;
+        if (viewMode !== 'klavar') { osmd.render(); if (isLive) buildNoteBoxes(); }
+      } catch (e) {}
     }
   }
 
@@ -950,7 +1087,7 @@
     if (!evs.length) return;
     const minStart = Math.min(...evs.map(e => e.start_us));
     notationClipboard = { events: evs.map(e => ({
-      midi: e.midi, channel: e.channel ?? 0,
+      midi: e.midi, channel: e.channel ?? 0, hand: e.hand ?? null,
       rel_start: e.start_us - minStart, dur: Math.max(1000, e.end_us - e.start_us),
     })) };
   }
@@ -971,7 +1108,7 @@
     const gridUs = (60e6 / (Number(bpm) || 90)) / (Number(score?.quantize) || 4);
     const snapped = Math.round(baseUs / gridUs) * gridUs;
     const notes = notationClipboard.events.map(e => ({
-      midi: e.midi, channel: e.channel ?? 0,
+      midi: e.midi, channel: e.channel ?? 0, hand: e.hand ?? null,
       start_us: Math.round(snapped + e.rel_start),
       end_us: Math.round(snapped + e.rel_start + e.dur),
     }));
@@ -1007,6 +1144,9 @@
     }
     // N = stapinvoer aan/uit (MuseScore).
     if (e.key.toLowerCase() === 'n' && !e.ctrlKey && !e.metaKey && !e.shiftKey) { setStepMode(!stepMode); e.preventDefault(); return; }
+    // Alt+←/→ = geselecteerde noten naar de linker-/rechterhand (klavar, 0.7.71).
+    if (e.altKey && e.key === 'ArrowLeft') { setHandsSelection('left'); e.preventDefault(); return; }
+    if (e.altKey && e.key === 'ArrowRight') { setHandsSelection('right'); e.preventDefault(); return; }
     // Shift+←/→ = selectie één rastereenheid verschuiven in de tijd (0.7.27).
     if (e.key === 'ArrowRight' && e.shiftKey) { shiftSelection(+1); e.preventDefault(); return; }
     if (e.key === 'ArrowLeft' && e.shiftKey) { shiftSelection(-1); e.preventDefault(); return; }
@@ -1050,7 +1190,7 @@
   // tientallen keren herberekent.
   let resizeTimer = null;
   function handleResize() {
-    if (!isLive) return;
+    if (!isLive || viewMode === 'klavar') return;
     if (resizeTimer) clearTimeout(resizeTimer);
     resizeTimer = setTimeout(() => { buildNoteBoxes(); }, 200);
   }
@@ -1102,6 +1242,20 @@
               <option value={false}>𝄞 {$t('notation.clef_treble')}</option>
               <option value={true}>𝄢 {$t('notation.clef_bass')}</option>
             </select>
+            {#if viewMode === 'klavar'}
+              <select class="layer-hand" bind:value={st.hand} title={$t('notation.hand_title')}>
+                <option value="auto">{$t('notation.hand')}: {$t('notation.hand_auto')}</option>
+                <option value="right">{$t('notation.hand_right')}</option>
+                <option value="left">{$t('notation.hand_left')}</option>
+                <option value="pedal">{$t('notation.hand_pedal')}</option>
+                <option value="rl">{$t('notation.hand_split')}</option>
+              </select>
+              {#if st.hand === 'rl'}
+                <select class="layer-split" bind:value={st.split} title={$t('notation.hand_split_title')}>
+                  {#each SPLIT_OPTIES as [m, naam]}<option value={m}>{naam}</option>{/each}
+                </select>
+              {/if}
+            {/if}
             <span class="wizard-divs">
               {#each divisions as div}
                 <label class="wizard-div">
@@ -1186,11 +1340,13 @@
         <button class="btn btn-ghost btn-sm" on:click={() => stepAlterLast(1)} disabled={!stepLastIds.length} title={$t('notation.step_sharp_title')}>♯</button>
         <button class="btn btn-ghost btn-sm" on:click={() => stepAlterLast(-1)} disabled={!stepLastIds.length} title={$t('notation.step_flat_title')}>♭</button>
       {/if}
-      <label>{$t('notation.key_signature')}
-        <select value={keyFifths} on:change={(e) => setKeyLive(e.currentTarget.value)}>
-          {#each keyChoices as k}<option value={k.v}>{k.label}</option>{/each}
-        </select>
-      </label>
+      {#if viewMode !== 'klavar'}
+        <label>{$t('notation.key_signature')}
+          <select value={keyFifths} on:change={(e) => setKeyLive(e.currentTarget.value)}>
+            {#each keyChoices as k}<option value={k.v}>{k.label}</option>{/each}
+          </select>
+        </label>
+      {/if}
       <label>{$t('notation.meter')}
         <select value={beatsPerBar} on:change={(e) => setMeterLive(e.currentTarget.value)}>
           <option value={2}>2/4</option><option value={3}>3/4</option>
@@ -1215,6 +1371,10 @@
       <button class="btn btn-ghost btn-sm" on:click={() => transposeSelection(+1)} title={$t('notation.semitone_up_title')}>+½</button>
       <button class="btn btn-ghost btn-sm" on:click={() => transposeSelection(-12)} title={$t('notation.octave_down_title')}>−8va</button>
       <button class="btn btn-ghost btn-sm" on:click={() => transposeSelection(+12)} title={$t('notation.octave_up_title')}>+8va</button>
+      {#if viewMode === 'klavar'}
+        <button class="btn btn-ghost btn-sm" on:click={() => setHandsSelection('left')} title={$t('notation.to_left_hand_title')}>{$t('notation.to_left_hand')}</button>
+        <button class="btn btn-ghost btn-sm" on:click={() => setHandsSelection('right')} title={$t('notation.to_right_hand_title')}>{$t('notation.to_right_hand')}</button>
+      {/if}
       <button class="btn btn-ghost btn-sm" on:click={() => changeDuration('halve')} title={$t('notation.halve_duration_title')}>÷2</button>
       <button class="btn btn-ghost btn-sm" on:click={() => changeDuration('double')} title={$t('notation.double_duration_title')}>×2</button>
       <button class="btn btn-ghost btn-sm" on:click={() => changeDuration('dot')} title={$t('notation.dot_toggle_title')}>• {$t('notation.dot')}</button>
@@ -1222,13 +1382,17 @@
       <button class="btn btn-ghost btn-sm" on:click={pasteClipboard} disabled={clipboardCount === 0} title={$t('notation.paste_title')}>{$t('notation.paste')}{clipboardCount ? ` (${clipboardCount})` : ''}</button>
       <button class="btn btn-ghost btn-sm" on:click={doUndo} title={$t('notation.undo_title')}>↶</button>
       <button class="btn btn-ghost btn-sm" on:click={doRedo} title={$t('notation.redo_title')}>↷</button>
+      <span class="view-switch" role="group" aria-label={$t('notation.view')}>
+        <button class="btn btn-ghost btn-sm" class:active={viewMode === 'staff'} aria-pressed={viewMode === 'staff'} on:click={() => setViewMode('staff')} title={$t('notation.view_staff_title')}>{$t('notation.view_staff')}</button>
+        <button class="btn btn-ghost btn-sm" class:active={viewMode === 'klavar'} aria-pressed={viewMode === 'klavar'} on:click={() => setViewMode('klavar')} title={$t('notation.view_klavar_title')}>{$t('notation.view_klavar')}</button>
+      </span>
       <button class="btn btn-ghost btn-sm" on:click={() => setZoom(osmdZoom - 0.1)} title={$t('notation.zoom_out')}>−</button>
       <span class="zoom-pct">{Math.round(osmdZoom * 100)}%</span>
       <button class="btn btn-ghost btn-sm" on:click={() => setZoom(osmdZoom + 0.1)} title={$t('notation.zoom_in')}>+</button>
       <button class="btn btn-ghost btn-sm" on:click={openMidiFile} title={$t('notation.open_import_title')}>{$t('notation.open')}</button>
       <button class="btn btn-ghost btn-sm" on:click={saveMidiAs} title={$t('notation.save_as_midi_title')}>{$t('notation.save_as_midi')}</button>
-      <button class="btn btn-primary btn-sm" on:click={printScore} disabled={!xml}>{$t('notation.print_pdf')}</button>
-      <button class="btn btn-ghost btn-sm" on:click={saveMusicXml} disabled={!xml}>{$t('actions.save')}</button>
+      <button class="btn btn-primary btn-sm" on:click={printScore} disabled={viewMode === 'klavar' ? !(klavarModel && scoreHasEvents) : !xml}>{$t('notation.print_pdf')}</button>
+      <button class="btn btn-ghost btn-sm" on:click={saveMusicXml} disabled={!xml}>{$t('notation.save_as_musicxml')}</button>
     {:else}
       <label>{$t('notation.tempo')}
         <input type="number" min="20" max="300" bind:value={bpm} on:change={scheduleRender} />
@@ -1244,11 +1408,13 @@
           {#each gridChoices as g}<option value={g.v}>{g.label}</option>{/each}
         </select>
       </label>
-      <label>{$t('notation.key_signature')}
-        <select bind:value={keyFifths} on:change={scheduleRender}>
-          {#each keyChoices as k}<option value={k.v}>{k.label}</option>{/each}
-        </select>
-      </label>
+      {#if viewMode !== 'klavar'}
+        <label>{$t('notation.key_signature')}
+          <select bind:value={keyFifths} on:change={scheduleRender}>
+            {#each keyChoices as k}<option value={k.v}>{k.label}</option>{/each}
+          </select>
+        </label>
+      {/if}
       <label class="tolerance-slider" title={$t('notation.tolerance_title')}>
         {$t('notation.rhythm')}
         <input type="range" min="0" max="100" step="5" bind:value={tolerancePct} on:change={scheduleRender} />
@@ -1258,9 +1424,13 @@
         <input type="text" bind:value={title} on:change={scheduleRender} />
       </label>
       <span class="notation-spacer"></span>
+      <span class="view-switch" role="group" aria-label={$t('notation.view')}>
+        <button class="btn btn-ghost btn-sm" class:active={viewMode === 'staff'} aria-pressed={viewMode === 'staff'} on:click={() => setViewMode('staff')} title={$t('notation.view_staff_title')}>{$t('notation.view_staff')}</button>
+        <button class="btn btn-ghost btn-sm" class:active={viewMode === 'klavar'} aria-pressed={viewMode === 'klavar'} on:click={() => setViewMode('klavar')} title={$t('notation.view_klavar_title')}>{$t('notation.view_klavar')}</button>
+      </span>
       <button class="btn btn-ghost btn-sm" on:click={openOtherFile}>{$t('notation.open')}</button>
       <button class="btn btn-ghost btn-sm" on:click={saveMusicXml} disabled={!xml}>{$t('notation.save_as_musicxml')}</button>
-      <button class="btn btn-primary btn-sm" on:click={printScore} disabled={!xml}>{$t('notation.print_pdf')}</button>
+      <button class="btn btn-primary btn-sm" on:click={printScore} disabled={viewMode === 'klavar' ? !klavarModel : !xml}>{$t('notation.print_pdf')}</button>
     {/if}
   </div>
 
@@ -1311,6 +1481,21 @@
               {/each}
             </span>
           {/if}
+          {#if viewMode === 'klavar'}
+            <!-- Hand van deze balk in klavar (0.7.71): auto volgt de standaardregel. -->
+            <select class="layer-hand" value={layerHandKeuze(layer)} on:change={(e) => setLayerHand(layer, e.currentTarget.value)} title={$t('notation.hand_title')}>
+              <option value="auto">{$t('notation.hand')}: {$t('notation.hand_auto')} ({autoHandLabel(layer, klavarModel, $t)})</option>
+              <option value="right">{$t('notation.hand_right')}</option>
+              <option value="left">{$t('notation.hand_left')}</option>
+              <option value="pedal">{$t('notation.hand_pedal')}</option>
+              <option value="rl">{$t('notation.hand_split')}</option>
+            </select>
+            {#if layerHandKeuze(layer) === 'rl'}
+              <select class="layer-split" value={layer.klavar_split ?? 60} on:change={(e) => setLayerHand(layer, 'rl', Number(e.currentTarget.value))} title={$t('notation.hand_split_title')}>
+                {#each SPLIT_OPTIES as [m, naam]}<option value={m}>{naam}</option>{/each}
+              </select>
+            {/if}
+          {/if}
         </div>
       {/each}
       <button class="btn btn-ghost btn-sm layer-add" on:click={addLayer} title={$t('notation.new_staff_title')}>{$t('notation.add_staff')}</button>
@@ -1350,6 +1535,20 @@
           <label class="notation-staff-div notation-staff-bass" title={$t('notation.bass_clef')}>
             <input type="checkbox" checked={st.bass} on:change={(e) => setStaffBass(i, e.currentTarget.checked)} />𝄢
           </label>
+          {#if viewMode === 'klavar'}
+            <select class="layer-hand" bind:value={st.hand} on:change={scheduleRender} title={$t('notation.hand_title')}>
+              <option value="auto">{$t('notation.hand')}: {$t('notation.hand_auto')}</option>
+              <option value="right">{$t('notation.hand_right')}</option>
+              <option value="left">{$t('notation.hand_left')}</option>
+              <option value="pedal">{$t('notation.hand_pedal')}</option>
+              <option value="rl">{$t('notation.hand_split')}</option>
+            </select>
+            {#if st.hand === 'rl'}
+              <select class="layer-split" bind:value={st.split} on:change={scheduleRender} title={$t('notation.hand_split_title')}>
+                {#each SPLIT_OPTIES as [m, naam]}<option value={m}>{naam}</option>{/each}
+              </select>
+            {/if}
+          {/if}
           {#if staffConfig.length > 1}
             <button class="notation-staff-remove" on:click={() => removeStaff(i)} aria-label={$t('notation.remove_staff')}>×</button>
           {/if}
@@ -1362,8 +1561,26 @@
   {#if error}<div class="notation-error">{error}</div>{/if}
   {#if converting}<div class="notation-busy">{$t('notation.busy')}</div>{/if}
 
-  <div class="notation-sheet" class:clickable={isLive} bind:this={container} on:click={handleSheetClick} on:mousedown={handleSheetMouseDown}>
-    {#if isLive}
+  <div class="notation-sheet" class:clickable={isLive && viewMode === 'staff'} bind:this={container} on:click={handleSheetClick} on:mousedown={handleSheetMouseDown}>
+    <!-- OSMD tekent in zijn eigen host; die blijft gemount (OSMD houdt de
+         containerreferentie) en wordt in klavar met visibility verborgen,
+         niet met display:none — OSMD meet de breedte bij render/autoResize. -->
+    <div class="osmd-host" class:verborgen={viewMode === 'klavar'} bind:this={osmdHost}></div>
+    {#if viewMode === 'klavar'}
+      <KlavarSheet
+        model={klavarModel}
+        {selectionIds}
+        cursorId={cursorEvent?.id ?? null}
+        zoom={osmdZoom}
+        {stepMode}
+        {recording}
+        live={isLive}
+        on:select={onKlavarSelect}
+        on:drag={onKlavarDrag}
+        on:stepclick={onKlavarStepClick}
+      />
+    {/if}
+    {#if isLive && viewMode === 'staff'}
       <!-- Selectie-overlay: absolute-position markering per geselecteerde noot
            (OSMD zelf blijft ongemuteerd; selectie wijzigen vergt geen re-render). -->
       <div class="notation-selection-overlay">
@@ -1376,7 +1593,9 @@
   </div>
 
   <div class="notation-hint">
-    {#if isLive}
+    {#if viewMode === 'klavar' && isLive}
+      {$t('notation.hint_klavar')}
+    {:else if isLive}
       {$t('notation.hint_live')}
     {:else}
       {$t('notation.hint_file')}
@@ -1527,6 +1746,16 @@
   .notation-busy { padding: 0.35rem 0.75rem; background: #f4ecd4; color: #6b5b1e; font-size: 0.8rem; }
   .notation-sheet { flex: 1; overflow-y: auto; padding: 1rem 1.5rem; background: #fff; position: relative; }
   .notation-sheet.clickable { cursor: pointer; }
+  .osmd-host { display: block; }
+  .osmd-host.verborgen { visibility: hidden; position: absolute; inset: 0; overflow: hidden; }
+  .view-switch { display: inline-flex; gap: 0.15rem; }
+  .view-switch .btn.active {
+    border-color: var(--gold-border, #d4af37);
+    background: var(--bg-darkest, #e8e0d0);
+    color: var(--primary, #b8960b);
+    box-shadow: 0 0 0 1px var(--gold-border, #d4af37);
+  }
+  .layer-hand, .layer-split { font-size: 0.75rem; margin-left: 0.25rem; }
   /* Overlay ligt over de SVG maar vangt zelf geen klikken (die gaan naar de
      sheet-handler). Verankerd op de content-oorsprong (top/left:0, 0×0 met
      zichtbare overflow) zodat de markeringen — die in content-coördinaten staan —
@@ -1542,7 +1771,9 @@
   .notation-hint { padding: 0.4rem 0.75rem; font-size: 0.75rem; color: #666; background: #f4f4f0; border-top: 1px solid #ddd; flex-shrink: 0; }
 
   @media print {
-    .notation-toolbar, .notation-layers, .notation-cursor, .notation-staves, .notation-hint, .notation-busy, .notation-error {
+    @page { size: A4 portrait; margin: 12mm; }
+    .notation-toolbar, .notation-layers, .notation-cursor, .notation-staves, .notation-hint, .notation-busy, .notation-error, .notation-alpha,
+    .notation-selection-overlay, .osmd-host.verborgen {
       display: none !important;
     }
     .notation-window { height: auto; }

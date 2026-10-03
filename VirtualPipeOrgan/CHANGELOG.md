@@ -5,6 +5,31 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.71] - 2026-10-03
+
+### Noteren in klavar
+
+Het notatievenster toont dezelfde partituur nu ook als **klavar**. Naast de
+zoomknoppen staat de keuze **Notenschrift | Klavar**; de app onthoudt wat u
+koos. In klavar leest u van boven naar beneden: de lijnen zijn de zwarte
+toetsen (twee gestreepte lijnen bij cis' en dis', drie doorgetrokken bij fis,
+gis en ais), een open bolletje is een witte toets, een dicht bolletje een
+zwarte. Een stokje naar rechts is de rechterhand, naar links de linkerhand;
+het pedaal staat op een eigen, smallere balk links. Een noot klinkt tot de
+volgende van dezelfde hand; een **v** is het stopteken, een stip betekent dat
+een noot nog doorklinkt. Sleutels, toonsoort en voortekens bestaan in klavar
+niet.
+
+Per balk kiest u **R**, **L**, **Ped.** of **R+L** met een splitspunt
+(standaard: één manuaal krijgt R+L vanaf c', bij meer manualen het eerste
+rechts en de rest links); een geselecteerde noot zet u met **← L** en
+**R →** of Alt+pijl naar de andere hand. Opnemen, aanklikken, slepen naar een
+andere toets, transponeren, stapinvoer (klik op de tijd en de toets),
+afspelen en ongedaan maken werken zoals in notenschrift. **Afdrukken / PDF**
+zet klavar staand op A4 in kolommen en breekt nooit midden in een maat;
+**Opslaan als MusicXML** blijft dezelfde partituur. Een aangehouden toets
+verschijnt tijdens het opnemen pas bij het loslaten.
+
 ## [0.7.70] - 2026-10-03
 
 ### Intern: voorbereiding klavar

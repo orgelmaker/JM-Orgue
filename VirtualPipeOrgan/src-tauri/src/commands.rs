@@ -4601,15 +4601,22 @@ pub fn notation_configure_layers(state: State<AppState>, app: tauri::AppHandle, 
     Ok(gen)
 }
 
-/// Divisie-routering van één balk wijzigen (LayerBar-chips). Geen notatie-
-/// wijziging → geen undo/generation-bump.
+/// Divisie-routering van één balk wijzigen (LayerBar-chips). Geen undo, maar
+/// sinds 0.7.71 wél een generation-bump + score-changed: de pedaalbalk en de
+/// legenda van klavar hangen van de routering af.
 #[tauri::command]
-pub fn notation_set_layer_divisions(state: State<AppState>, score_id: u32, layer_id: u32, divisions: Vec<String>) -> Result<(), String> {
-    with_score_mut(&state, score_id, |sc| {
+pub fn notation_set_layer_divisions(state: State<AppState>, app: tauri::AppHandle, score_id: u32, layer_id: u32, divisions: Vec<String>) -> Result<(), String> {
+    let gen = with_score_mut(&state, score_id, |sc| {
+        let mut veranderd = false;
         if let Some(l) = sc.layers.iter_mut().find(|l| l.id == layer_id) {
             l.divisions = divisions;
+            veranderd = true;
         }
-    })
+        if veranderd { sc.bump_gen(); }
+        sc.generation
+    })?;
+    tauri::async_runtime::spawn(emit_score_changed(app, score_id, gen));
+    Ok(())
 }
 
 /// Selectie in de tijd verschuiven (µs, mag negatief; klemt op 0). De UI stuurt
