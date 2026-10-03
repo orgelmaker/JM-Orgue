@@ -12,7 +12,7 @@
   // Elke noot kent haar event-ID (data-id); er is geen OSMD-correlatie nodig.
   import { createEventDispatcher, onDestroy } from 'svelte';
   import { t } from '../lib/i18n.js';
-  import { MAAT, PX_PER_MM, splitSystems, layoutSystem, paginate, hitTest, gridTimeAtY, staffAtX, nearestKey, nuLijnY, openNoten } from '../lib/klavarLayout.js';
+  import { MAAT, PX_PER_MM, splitSystems, layoutSystem, paginate, hitTest, gridTimeAtY, staffAtX, nearestKey, nuLijnY, openNoten, pasBereikToe } from '../lib/klavarLayout.js';
 
   export let model = null;
   export let selectionIds = new Set();
@@ -25,15 +25,18 @@
   // toetsen die nu ingedrukt zijn [{ layerId, midi, start }].
   export let nowGrid = null;
   export let openNotes = [];
+  // Vast bereik (0.7.73): { manual: [lo, hi], pedal: [lo, hi] } of null (automatisch).
+  export let bereik = null;
 
   const dispatch = createEventDispatcher();
 
   // Tijdens het inspelen loopt het papier twee maten vóór op de nu-lijn.
   // `extraMaten` is een getal: Svelte herrekent de lay-out alleen als het
   // verandert (eens per maat), niet bij elke stap van de nu-lijn.
-  $: extraMaten = model && nowGrid != null && model.measure_len > 0
+  $: extraMaten = model && recording && nowGrid != null && model.measure_len > 0
     ? Math.max(0, Math.floor(nowGrid / model.measure_len) + 2 - model.num_measures) : 0;
-  $: effModel = model && extraMaten ? { ...model, num_measures: model.num_measures + extraMaten } : model;
+  $: basisModel = model && bereik ? pasBereikToe(model, bereik) : model;
+  $: effModel = basisModel && extraMaten ? { ...basisModel, num_measures: basisModel.num_measures + extraMaten } : basisModel;
   $: layouts = effModel ? splitSystems(effModel).map(s => layoutSystem(effModel, s, { verbergLaatsteStop: recording })) : [];
   $: paginas = paginate(layouts);
   $: kpx = PX_PER_MM * zoom;

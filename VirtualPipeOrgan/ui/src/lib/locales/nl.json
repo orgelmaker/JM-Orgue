@@ -814,7 +814,7 @@
     "view_klavar": "Klavar",
     "view_staff_title": "Gewoon notenschrift met notenbalken",
     "view_klavar_title": "Klavar: de lijnen zijn de zwarte toetsen, de tijd loopt van boven naar beneden",
-    "hint_klavar": "Klavar: lezen van boven naar beneden; open bolletje = witte toets, dicht bolletje = zwarte toets; stok naar rechts = rechterhand, naar links = linkerhand; het pedaal op de smalle balk links. Een noot klinkt tot de volgende van dezelfde hand; v = stopteken, stip = klinkt nog door. Per balk R / L / Ped. / R+L, per noot Alt+←/→. Een aangehouden toets verschijnt pas bij het loslaten.",
+    "hint_klavar": "Klavar: lezen van boven naar beneden; open bolletje = witte toets, dicht bolletje = zwarte toets; stok naar rechts = rechterhand, naar links = linkerhand; het pedaal op de smalle balk links. Een noot klinkt tot de volgende van dezelfde hand; v = stopteken, stip = klinkt nog door. Per balk R / L / Ped. / R+L, per noot Alt+←/→. Tijdens het inspelen en afspelen loopt een rode lijn mee; ingedrukte toetsen staan er grijs. K wisselt de weergave.",
     "klavar_legend": "Balken",
     "klavar_pedal_label": "Ped.",
     "hand": "Hand",
@@ -836,7 +836,11 @@
     "svg_save_failed": "SVG opslaan mislukt: {error}",
     "key_mode": "Toongeslacht",
     "key_major": "majeur",
-    "key_minor": "mineur"
+    "key_minor": "mineur",
+    "klavar_range": "Bereik",
+    "klavar_range_auto": "automatisch",
+    "klavar_range_keyboard": "klavier",
+    "klavar_range_title": "Breedte van de balken: automatisch rond de gespeelde noten, of het hele klavier van het orgel (alle pagina's even breed)"
   },
   "temperaments": {
     "name_prompt": "Naam voor deze stemming:"

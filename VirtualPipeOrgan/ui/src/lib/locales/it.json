@@ -814,7 +814,7 @@
     "view_klavar": "Klavar",
     "view_staff_title": "Notazione tradizionale su pentagramma",
     "view_klavar_title": "Klavar: le linee sono i tasti neri, il tempo scorre dall'alto in basso",
-    "hint_klavar": "Klavar: si legge dall'alto in basso; testa vuota = tasto bianco, testa piena = tasto nero; gambo a destra = mano destra, a sinistra = mano sinistra; il pedale sul rigo stretto a sinistra. Una nota dura fino alla successiva della stessa mano; v = segno di stop, punto = ancora in suono. Per rigo R / L / Ped. / R+L, per nota Alt+←/→. Un tasto tenuto appare solo al rilascio.",
+    "hint_klavar": "Klavar: si legge dall'alto in basso; testa vuota = tasto bianco, testa piena = tasto nero; gambo a destra = mano destra, a sinistra = mano sinistra; il pedale sul rigo stretto a sinistra. Una nota dura fino alla successiva della stessa mano; v = segno di stop, punto = ancora in suono. Per rigo R / L / Ped. / R+L, per nota Alt+←/→. Durante la registrazione e la riproduzione una linea rossa segue la musica; i tasti tenuti appaiono in grigio. K cambia la vista.",
     "klavar_legend": "Righi",
     "klavar_pedal_label": "Ped.",
     "hand": "Mano",
@@ -836,7 +836,11 @@
     "svg_save_failed": "Salvataggio SVG non riuscito: {error}",
     "key_mode": "Modo",
     "key_major": "maggiore",
-    "key_minor": "minore"
+    "key_minor": "minore",
+    "klavar_range": "Estensione",
+    "klavar_range_auto": "automatica",
+    "klavar_range_keyboard": "tastiera",
+    "klavar_range_title": "Larghezza dei righi: automatica attorno alle note suonate, oppure l'intera tastiera dell'organo (tutte le pagine ugualmente larghe)"
   },
   "temperaments": {
     "name_prompt": "Nome di questo temperamento:"

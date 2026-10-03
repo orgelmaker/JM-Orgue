@@ -814,7 +814,7 @@
     "view_klavar": "Klavar",
     "view_staff_title": "Notación tradicional en pentagrama",
     "view_klavar_title": "Klavar: las líneas son las teclas negras, el tiempo corre de arriba abajo",
-    "hint_klavar": "Klavar: se lee de arriba abajo; cabeza vacía = tecla blanca, cabeza llena = tecla negra; plica a la derecha = mano derecha, a la izquierda = mano izquierda; el pedal en el pentagrama estrecho de la izquierda. Una nota suena hasta la siguiente de la misma mano; v = signo de parada, punto = sigue sonando. Por pentagrama R / L / Ped. / R+L, por nota Alt+←/→. Una tecla mantenida aparece al soltarla.",
+    "hint_klavar": "Klavar: se lee de arriba abajo; cabeza vacía = tecla blanca, cabeza llena = tecla negra; plica a la derecha = mano derecha, a la izquierda = mano izquierda; el pedal en el pentagrama estrecho de la izquierda. Una nota suena hasta la siguiente de la misma mano; v = signo de parada, punto = sigue sonando. Por pentagrama R / L / Ped. / R+L, por nota Alt+←/→. Durante la grabación y la reproducción una línea roja sigue la música; las teclas mantenidas se ven en gris. K cambia la vista.",
     "klavar_legend": "Pentagramas",
     "klavar_pedal_label": "Ped.",
     "hand": "Mano",
@@ -836,7 +836,11 @@
     "svg_save_failed": "Error al guardar el SVG: {error}",
     "key_mode": "Modo",
     "key_major": "mayor",
-    "key_minor": "menor"
+    "key_minor": "menor",
+    "klavar_range": "Ámbito",
+    "klavar_range_auto": "automático",
+    "klavar_range_keyboard": "teclado",
+    "klavar_range_title": "Anchura de los pentagramas: automática alrededor de las notas tocadas, o todo el teclado del órgano (todas las páginas igual de anchas)"
   },
   "temperaments": {
     "name_prompt": "Nombre de este temperamento:"

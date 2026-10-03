@@ -5,6 +5,19 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.73] - 2026-10-03
+
+### Klavar: meelopen bij afspelen, vast bereik en sneltoets K
+
+Bij **Afspelen** loopt in klavar dezelfde rode tijdlijn mee als bij het
+inspelen en schuift het blad vanzelf door; in notenschrift volgt het blad de
+noot die klinkt. Met **Bereik: klavier** krijgen de balken de breedte van het
+hele klavier van het geladen orgel, zodat alle pagina's even breed zijn en
+het blad tijdens het inspelen niet verspringt (standaard blijft automatisch,
+rond de gespeelde noten). De toets **K** wisselt tussen notenschrift en
+klavar. De handknoppen L en R staan uit zolang alleen pedaalnoten zijn
+gekozen: het pedaal heeft geen hand.
+
 ## [0.7.72] - 2026-10-03
 
 ### Klavar: balken, manuaalnamen, toonsoort en SVG

@@ -4,7 +4,7 @@
 // (ui/package.json is "type": "module", vandaar .mjs) en in CI.
 import {
   MAAT, balkGeometrie, xOfMidi, nearestKey, isZwart, splitSystems, paginate, layoutSystem, hitTest, gridTimeAtY, staffAtX,
-  nuLijnY, openNoten,
+  nuLijnY, openNoten, pasBereikToe,
 } from '../ui/src/lib/klavarLayout.js';
 
 let fouten = 0;
@@ -189,6 +189,21 @@ function noot(midi, start, end, hand = 'right', extra = {}) {
   check(o55 && o55.hand === 'left' && o55.stokX1 < o55.cx, 'toets onder het splitspunt krijgt de linkerhand');
   check(o43 && o43.hand === 'pedal' && dicht(o43.cx, xOfMidi(43, lay0.pedaal)) && dicht(o43.yStok, lay0.top + (3 / 4) * MAAT.kwart), 'pedaaltoets op de pedaalbalk op het inzetmoment');
   check(openNoten(layoutSystem(m, sys[1]), m, [{ layerId: 1, midi: 62, start: 20 }]).length === 1, 'toets in het tweede systeem staat daar');
+}
+
+// ---- vast bereik (0.7.73) ----
+{
+  const m = model([noot(60, 0, 4)], { pedal: { midi_min: 36, midi_max: 59, notes: [] } });
+  check(pasBereikToe(m, null) === m && pasBereikToe(null, { manual: [36, 96] }) === null, 'zonder bereik of model: ongewijzigd');
+  const b = pasBereikToe(m, { manual: [36, 96], pedal: [36, 67] });
+  check(b.manual.midi_min === 36 && b.manual.midi_max === 96 && b.pedal.midi_min === 36 && b.pedal.midi_max === 67, 'klavierbereik verbreedt beide balken');
+  check(m.manual.midi_min === 48 && m.manual.midi_max === 83, 'het oorspronkelijke model blijft onaangeroerd');
+  const smal = pasBereikToe(m, { manual: [60, 72], pedal: null });
+  check(smal.manual.midi_min === 48 && smal.manual.midi_max === 83 && smal.pedal === m.pedal, 'een smaller bereik maakt de balk nooit smaller; null-paar laat de balk staan');
+  const zonderPedaal = pasBereikToe(model([noot(60, 0, 4)]), { manual: [36, 96], pedal: [36, 67] });
+  check(zonderPedaal.pedal === null && zonderPedaal.manual.midi_min === 36, 'zonder pedaalbalk blijft pedal null');
+  const lay = layoutSystem(b, splitSystems(b, 1)[0]);
+  check(lay.manuaal.min === 36 && lay.manuaal.max === 96 && lay.pedaal.min === 36, 'de lay-out neemt het verbrede bereik over');
 }
 
 // ---- pedaalbalk links, staffAtX ----

@@ -41,6 +41,45 @@
   try { if (localStorage.getItem('jm-orgue-notation-view') === 'klavar') viewMode = 'klavar'; } catch (e) {}
   let klavarModel = null;
   let lastKlavarGeneration = 0;
+  // Vast bereik (0.7.73): 'auto' = rond de gespeelde noten (altijd c'–b'),
+  // 'klavier' = het hele klavier van het geladen orgel (uit de registers),
+  // zodat alle pagina's even breed zijn. Globaal onthouden, net als de weergave.
+  let klavarBereik = 'auto';
+  try { if (localStorage.getItem('jm-orgue-klavar-bereik') === 'klavier') klavarBereik = 'klavier'; } catch (e) {}
+  let klavierBereik = null;   // { manual: [lo, hi], pedal: [lo, hi] } uit get_organ_info
+  $: bereikVoorSheet = klavarBereik === 'klavier' ? (klavierBereik || { manual: [36, 96], pedal: [36, 67] }) : null;
+  function setKlavarBereik(v) {
+    klavarBereik = v === 'klavier' ? 'klavier' : 'auto';
+    try { localStorage.setItem('jm-orgue-klavar-bereik', klavarBereik); } catch (e) {}
+  }
+  // Klavieromvang per balk uit de registers: de laagste eerste en hoogste
+  // laatste toets van alle registers van de manualen c.q. het pedaal.
+  function klavierBereikUit(info) {
+    const divs = info?.divisions || [];
+    const ped = divs.filter(d => isPedalName(d.name || '') || isPedalName(d.display_name || ''));
+    const man = divs.filter(d => !ped.includes(d));
+    // Per divisie: laagste eerste toets + de MODALE registerbreedte. De
+    // laatste toets van een register is eerste + aantal pijpen − 1, en een
+    // uitgebouwde unit-rang (73 pijpen op 61 toetsen, voor de octaafkoppels)
+    // zou het klavier anders een octaaf oprekken.
+    const bereik = (ds, lo0, hi0) => {
+      let lo = 127, hi = 0;
+      for (const d of ds) {
+        const tel = new Map(); let dlo = 127;
+        for (const s of d.stops || []) {
+          const a = Number(s.first_midi_note), b = Number(s.last_midi_note);
+          if (!(a >= 0 && b > a)) continue;
+          dlo = Math.min(dlo, a);
+          const w = b - a + 1; tel.set(w, (tel.get(w) || 0) + 1);
+        }
+        if (!tel.size) continue;
+        const w = [...tel.entries()].sort((x, y) => y[1] - x[1] || y[0] - x[0])[0][0];
+        lo = Math.min(lo, dlo); hi = Math.max(hi, dlo + w - 1);
+      }
+      return lo <= hi ? [Math.max(lo0, lo), Math.min(hi0, hi)] : null;
+    };
+    return { manual: bereik(man, 21, 108), pedal: bereik(ped, 24, 72) };
+  }
   let osmdHost;           // inner div waar OSMD in tekent (blijft gemount, ook in klavar)
   function setViewMode(mode) {
     if (mode === viewMode) return;
@@ -60,8 +99,15 @@
   // noot (OSMD kent geen tussenstand).
   let nowGrid = null;        // opnametijd in rastereenheden (breuk), null = geen klok
   let openNotes = [];        // [{ layerId, midi, channel, start }] ingedrukte toetsen
-  let recOriginPerf = null;  // performance.now() van opnametijd 0
+  let recOriginPerf = null;  // performance.now() van opnametijd 0 (in wandklok ÷ snelheid)
   let volgTimer = null;
+  let volgBron = null;       // 'opname' | 'afspelen' (0.7.73: ook de afspeelpositie volgt)
+  // Afspeelsnelheid van de MIDI-speler (schuif in het MIDI-paneel, blijft
+  // staan bij het afspelen van de partituur): geschat uit twee polls, zodat de
+  // nu-lijn tussen de polls niet op 1× loopt en elke poll verspringt.
+  let volgSnelheid = 1;
+  let volgVorige = null;     // { ms, perf } van de vorige poll
+  let volgPauze = false;     // speler gepauzeerd: lijn blijft staan
   function rasterPerSeconde() {
     const bpm = Number(klavarModel?.bpm) || Number(score?.bpm) || 90;
     const q = Number(klavarModel?.q) || Number(score?.quantize) || 4;
@@ -69,34 +115,43 @@
   }
   function syncOpnameKlok(us) {
     if (!Number.isFinite(us)) return;
-    recOriginPerf = performance.now() - us / 1000;
+    recOriginPerf = performance.now() - (us / 1000) / volgSnelheid;
   }
   function zonderToets(lijst, p) {
     return lijst.filter(o => !(o.layerId === p.layer && o.midi === p.midi && o.channel === p.channel));
   }
   function onNoteOpen(p) {
-    syncOpnameKlok(p.at_us);
+    // Tijdens afspelen (opnameknop staat dan uit; dit is de achtervang) wint
+    // de afspeelklok: anders trekken poll en toets de lijn heen en weer.
+    const afspelen = volgBron === 'afspelen' && playingScore;
+    if (!afspelen) syncOpnameKlok(p.at_us);
     openNotes = [...zonderToets(openNotes, p), { layerId: p.layer, midi: p.midi, channel: p.channel, start: Math.round((p.at_us / 1e6) * rasterPerSeconde()) }];
-    startVolgen();
+    if (!afspelen) startVolgen('opname');
   }
   function onNoteAdded(p) {
-    syncOpnameKlok(p.end_us);
+    if (!(volgBron === 'afspelen' && playingScore)) syncOpnameKlok(p.end_us);
     openNotes = zonderToets(openNotes, p);
   }
-  function startVolgen() {
-    if (volgTimer || !recording) return;
+  function startVolgen(bron) {
+    volgBron = bron;
+    if (volgTimer) return;
     volgTimer = setInterval(volgTick, 50);
   }
   function stopVolgen() {
     if (volgTimer) { clearInterval(volgTimer); volgTimer = null; }
+    volgBron = null;
     nowGrid = null;
     openNotes = [];
     recOriginPerf = null;
+    volgSnelheid = 1;
+    volgVorige = null;
+    volgPauze = false;
   }
   async function volgTick() {
-    if (!recording || recOriginPerf == null) { stopVolgen(); return; }
-    if (viewMode !== 'klavar') return;
-    nowGrid = ((performance.now() - recOriginPerf) / 1000) * rasterPerSeconde();
+    const bronWeg = !volgBron || (volgBron === 'opname' && !recording) || (volgBron === 'afspelen' && !playingScore);
+    if (bronWeg || recOriginPerf == null) { stopVolgen(); return; }
+    if (viewMode !== 'klavar' || volgPauze) return;
+    nowGrid = ((performance.now() - recOriginPerf) / 1000) * volgSnelheid * rasterPerSeconde();
     await tick();
     volgNuLijn();
   }
@@ -130,10 +185,26 @@
       if (!box) return;
       y = box.y; h = box.h;
     }
+    scrollNaarRect(y, h);
+  }
+  function scrollNaarRect(y, h) {
     const onder = y + h, zicht = container.clientHeight;
     if (onder > container.scrollTop + 0.85 * zicht || y < container.scrollTop) {
       container.scrollTop = Math.max(0, onder - 0.6 * zicht);
     }
+  }
+  // Afspelen in notenschrift (0.7.73): het blad volgt de noot die klinkt
+  // (de laatste inzet op of vóór de afspeelpositie, via de OSMD-kaders).
+  function scrollNaarNootBijTijd(us) {
+    if (!container || !noteBoxes.length) return;
+    let beste = null;
+    for (const l of score?.layers ?? []) for (const t of l.takes) {
+      if (!t.visible) continue;
+      for (const e of t.events) if (e.start_us <= us && (beste == null || e.start_us > beste.start_us)) beste = e;
+    }
+    if (!beste) return;
+    const box = noteBoxes.find(b => b.eventId === beste.id);
+    if (box) scrollNaarRect(box.y, box.h);
   }
 
   // File-modus opties (blijven werken zoals in 0.7.0)
@@ -166,6 +237,10 @@
   // aan de scroll-content van .notation-sheet.
   let noteBoxes = [];          // [{ eventId, midi, x, y, w, h, cx, cy }]
   $: selectedBoxes = noteBoxes.filter(b => selectionIds.has(b.eventId));
+  // Pedaalnoten hebben geen hand (0.7.73): L/R staan uit zolang alleen
+  // pedaalnoten zijn gekozen; de backend negeert de hand daar toch.
+  $: pedaalIds = new Set((klavarModel?.pedal?.notes ?? []).map(n => n.id).filter(id => id != null));
+  $: selectieAlleenPedaal = selectionIds.size > 0 && [...selectionIds].every(id => pedaalIds.has(id));
 
   // Dezelfde regel als notation.rs::is_pedal_name (0.7.70): "ped" aan een
   // woordbegin, met diakrieten gestript ("Pédale", "Pedał", "PED").
@@ -504,6 +579,7 @@
     try {
       const info = await invoke('get_organ_info');
       divisions = (info?.divisions || []).map(d => d.name);
+      klavierBereik = klavierBereikUit(info);
     } catch (e) { divisions = []; }
     if (divisions.length > 0 && staffConfig.length === 0) {
       staffConfig = divisions.map(name => ({ name, divisions: [name], bass: isPedalName(name), hand: 'auto', split: 60 }));
@@ -1088,30 +1164,60 @@
   // het orgel met de huidige registratie). Nogmaals klikken stopt.
   let playingScore = false;
   let playPollTimer = null;
+  let afspelenStarten = false;   // herintrede-guard: ▶ tweemaal vóór playingScore true
   async function togglePlayScore() {
     if (playingScore) {
       try { await invoke('midi_stop_playback'); } catch (e) {}
       playingScore = false;
       if (playPollTimer) { clearInterval(playPollTimer); playPollTimer = null; }
+      stopVolgen();
       return;
     }
+    if (afspelenStarten) return;
+    afspelenStarten = true;
     try {
       const { tempDir, join } = await import('@tauri-apps/api/path');
       const path = await join(await tempDir(), `jm-orgue-notatie-${scoreId}.mid`);
       await invoke('notation_export_midi', { scoreId, path });
       await invoke('midi_play_file', { path });
       playingScore = true;
-      // Einde detecteren zodat de knop terugspringt naar ▶.
-      playPollTimer = setInterval(async () => {
+      // Meelopen (0.7.73): de MIDI-export begint op tijd 0 van de score, dus
+      // de spelerpositie is de scoretijd. De klok wordt elke poll bijgesteld;
+      // in klavar loopt de nu-lijn, in notenschrift volgt het blad de noot.
+      syncOpnameKlok(0);
+      startVolgen('afspelen');
+      const gestart = performance.now();
+      // Einde detecteren zodat de knop terugspringt naar ▶ (de speler meldt
+      // vlak na de start soms nog "stopped": de eerste 600 ms negeren). De
+      // timer wist zichzelf via zijn eigen id, nooit via de gedeelde variabele.
+      if (playPollTimer) clearInterval(playPollTimer);
+      const timer = setInterval(async () => {
         try {
           const s = await invoke('midi_player_status');
+          if (s?.state === 'paused') { volgPauze = true; return; }
+          volgPauze = false;
           if (!s || s.state !== 'playing') {
+            if (performance.now() - gestart < 600) return;
             playingScore = false;
-            clearInterval(playPollTimer); playPollTimer = null;
+            clearInterval(timer);
+            if (playPollTimer === timer) playPollTimer = null;
+            stopVolgen();
+            return;
           }
+          // Snelheid schatten uit het verschil tussen twee polls (0,25×–4×).
+          const nu = performance.now();
+          if (volgVorige && nu - volgVorige.perf > 100) {
+            const f = (s.position_ms - volgVorige.ms) / (nu - volgVorige.perf);
+            if (f > 0) volgSnelheid = Math.min(4, Math.max(0.25, f));
+          }
+          volgVorige = { ms: s.position_ms, perf: nu };
+          syncOpnameKlok(s.position_ms * 1000);
+          if (viewMode !== 'klavar') scrollNaarNootBijTijd(s.position_ms * 1000);
         } catch (e) {}
-      }, 500);
+      }, 250);
+      playPollTimer = timer;
     } catch (e) { alert(tx('notation.play_failed').replace('{error}', e)); }
+    finally { afspelenStarten = false; }
   }
 
   // ---- Maatsoort + titel + MIDI-export (0.7.16) ----
@@ -1205,6 +1311,12 @@
 
   function handleKey(e) {
     if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT')) return;
+    // K wisselt de weergave (0.7.73), in beide standen.
+    if ((e.key === 'k' || e.key === 'K') && !e.ctrlKey && !e.altKey && !e.metaKey) {
+      setViewMode(viewMode === 'klavar' ? 'staff' : 'klavar');
+      e.preventDefault();
+      return;
+    }
     if (!isLive) return;
     // ---- Stapinvoer-sneltoetsen (MuseScore-conventies) ----
     if (stepMode) {
@@ -1289,23 +1401,25 @@
     if (!systemen.length || !klavarModel) return null;
     const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     const kop = 16;
+    // Maten in mm met twee decimalen (geen 110.92000000000002 in het bestand).
+    const mm = (v) => String(Math.round(v * 100) / 100);
     let breedte = 0, hoogte = kop;
     const delen = [];
     for (const svg of systemen) {
-      const [, , w, h] = (svg.getAttribute('viewBox') || '0 0 100 100').split(/\s+/).map(Number);
+      const [, , w, h] = (svg.getAttribute('viewBox') || '0 0 100 100').split(/\s+/).map(v => Math.round(Number(v) * 100) / 100);
       breedte = Math.max(breedte, w);
       // Zonder de opname-overlay (nu-lijn, aangehouden toetsen); de
       // Svelte-scope-klassen weglaten, de k-*-klassen blijven.
       const kloon = svg.cloneNode(true);
       kloon.querySelectorAll('.k-nu, .k-open').forEach(el => el.remove());
       const inhoud = kloon.innerHTML.replace(/\s+class="([^"]*)"/g, (m, c) => ' class="' + c.split(/\s+/).filter(k => !k.startsWith('svelte-')).join(' ') + '"');
-      delen.push(`<svg x="0" y="${hoogte}" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${inhoud}</svg>`);
+      delen.push(`<svg x="0" y="${mm(hoogte)}" width="${mm(w)}" height="${mm(h)}" viewBox="0 0 ${mm(w)} ${mm(h)}">${inhoud}</svg>`);
       hoogte += h;
     }
     const legenda = (klavarModel.legend || []).map(l => `${l.name} (${l.hand === 'pedal' ? tx('notation.klavar_pedal_label') : l.split_midi != null ? 'R+L' : l.hand === 'left' ? 'L' : 'R'})`).join(' · ');
     const tekst = `<text x="2" y="6" font-size="4.2" font-family="Georgia, serif" font-weight="bold">${esc(klavarModel.title)}</text>` +
       `<text x="2" y="11" font-size="2.6" font-family="Georgia, serif">${esc(tx('notation.klavar_tempo').replace('{bpm}', Math.round(klavarModel.bpm)))}   ${esc(tx('notation.klavar_legend'))}: ${esc(legenda)}</text>`;
-    return `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="${breedte}mm" height="${hoogte}mm" viewBox="0 0 ${breedte} ${hoogte}">\n<style>${KLAVAR_SVG_STIJL}</style>\n${tekst}\n${delen.join('\n')}\n</svg>\n`;
+    return `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="${mm(breedte)}mm" height="${mm(hoogte)}mm" viewBox="0 0 ${mm(breedte)} ${mm(hoogte)}">\n<style>${KLAVAR_SVG_STIJL}</style>\n${tekst}\n${delen.join('\n')}\n</svg>\n`;
   }
   async function saveKlavarSvg() {
     const svg = klavarAlsSvg();
@@ -1428,6 +1542,7 @@
       <button
         class="btn record-toggle"
         class:recording={recording || armedWaiting}
+        disabled={playingScore}
         on:click={toggleRecording}
         title={recording || armedWaiting ? $t('notation.record_stop_title') : $t('notation.record_start_title')}
       >
@@ -1508,8 +1623,8 @@
       <button class="btn btn-ghost btn-sm" on:click={() => transposeSelection(-12)} title={$t('notation.octave_down_title')}>−8va</button>
       <button class="btn btn-ghost btn-sm" on:click={() => transposeSelection(+12)} title={$t('notation.octave_up_title')}>+8va</button>
       {#if viewMode === 'klavar'}
-        <button class="btn btn-ghost btn-sm" on:click={() => setHandsSelection('left')} title={$t('notation.to_left_hand_title')}>{$t('notation.to_left_hand')}</button>
-        <button class="btn btn-ghost btn-sm" on:click={() => setHandsSelection('right')} title={$t('notation.to_right_hand_title')}>{$t('notation.to_right_hand')}</button>
+        <button class="btn btn-ghost btn-sm" on:click={() => setHandsSelection('left')} disabled={selectieAlleenPedaal} title={$t('notation.to_left_hand_title')}>{$t('notation.to_left_hand')}</button>
+        <button class="btn btn-ghost btn-sm" on:click={() => setHandsSelection('right')} disabled={selectieAlleenPedaal} title={$t('notation.to_right_hand_title')}>{$t('notation.to_right_hand')}</button>
       {/if}
       <button class="btn btn-ghost btn-sm" on:click={() => changeDuration('halve')} title={$t('notation.halve_duration_title')}>÷2</button>
       <button class="btn btn-ghost btn-sm" on:click={() => changeDuration('double')} title={$t('notation.double_duration_title')}>×2</button>
@@ -1519,12 +1634,20 @@
       <button class="btn btn-ghost btn-sm" on:click={doUndo} title={$t('notation.undo_title')}>↶</button>
       <button class="btn btn-ghost btn-sm" on:click={doRedo} title={$t('notation.redo_title')}>↷</button>
       <span class="view-switch" role="group" aria-label={$t('notation.view')}>
-        <button class="btn btn-ghost btn-sm" class:active={viewMode === 'staff'} aria-pressed={viewMode === 'staff'} on:click={() => setViewMode('staff')} title={$t('notation.view_staff_title')}>{$t('notation.view_staff')}</button>
-        <button class="btn btn-ghost btn-sm" class:active={viewMode === 'klavar'} aria-pressed={viewMode === 'klavar'} on:click={() => setViewMode('klavar')} title={$t('notation.view_klavar_title')}>{$t('notation.view_klavar')}</button>
+        <button class="btn btn-ghost btn-sm" class:active={viewMode === 'staff'} aria-pressed={viewMode === 'staff'} on:click={() => setViewMode('staff')} title={$t('notation.view_staff_title') + ' (K)'}>{$t('notation.view_staff')}</button>
+        <button class="btn btn-ghost btn-sm" class:active={viewMode === 'klavar'} aria-pressed={viewMode === 'klavar'} on:click={() => setViewMode('klavar')} title={$t('notation.view_klavar_title') + ' (K)'}>{$t('notation.view_klavar')}</button>
       </span>
       <button class="btn btn-ghost btn-sm" on:click={() => setZoom(osmdZoom - 0.1)} title={$t('notation.zoom_out')}>−</button>
       <span class="zoom-pct">{Math.round(osmdZoom * 100)}%</span>
       <button class="btn btn-ghost btn-sm" on:click={() => setZoom(osmdZoom + 0.1)} title={$t('notation.zoom_in')}>+</button>
+      {#if viewMode === 'klavar'}
+        <label class="klavar-bereik" title={$t('notation.klavar_range_title')}>{$t('notation.klavar_range')}
+          <select value={klavarBereik} on:change={(e) => setKlavarBereik(e.currentTarget.value)}>
+            <option value="auto">{$t('notation.klavar_range_auto')}</option>
+            <option value="klavier">{$t('notation.klavar_range_keyboard')}</option>
+          </select>
+        </label>
+      {/if}
       <button class="btn btn-ghost btn-sm" on:click={openMidiFile} title={$t('notation.open_import_title')}>{$t('notation.open')}</button>
       <button class="btn btn-ghost btn-sm" on:click={saveMidiAs} title={$t('notation.save_as_midi_title')}>{$t('notation.save_as_midi')}</button>
       <button class="btn btn-primary btn-sm" on:click={printScore} disabled={viewMode === 'klavar' ? !(klavarModel && scoreHasEvents) : !xml}>{$t('notation.print_pdf')}</button>
@@ -1566,9 +1689,17 @@
       </label>
       <span class="notation-spacer"></span>
       <span class="view-switch" role="group" aria-label={$t('notation.view')}>
-        <button class="btn btn-ghost btn-sm" class:active={viewMode === 'staff'} aria-pressed={viewMode === 'staff'} on:click={() => setViewMode('staff')} title={$t('notation.view_staff_title')}>{$t('notation.view_staff')}</button>
-        <button class="btn btn-ghost btn-sm" class:active={viewMode === 'klavar'} aria-pressed={viewMode === 'klavar'} on:click={() => setViewMode('klavar')} title={$t('notation.view_klavar_title')}>{$t('notation.view_klavar')}</button>
+        <button class="btn btn-ghost btn-sm" class:active={viewMode === 'staff'} aria-pressed={viewMode === 'staff'} on:click={() => setViewMode('staff')} title={$t('notation.view_staff_title') + ' (K)'}>{$t('notation.view_staff')}</button>
+        <button class="btn btn-ghost btn-sm" class:active={viewMode === 'klavar'} aria-pressed={viewMode === 'klavar'} on:click={() => setViewMode('klavar')} title={$t('notation.view_klavar_title') + ' (K)'}>{$t('notation.view_klavar')}</button>
       </span>
+      {#if viewMode === 'klavar'}
+        <label class="klavar-bereik" title={$t('notation.klavar_range_title')}>{$t('notation.klavar_range')}
+          <select value={klavarBereik} on:change={(e) => setKlavarBereik(e.currentTarget.value)}>
+            <option value="auto">{$t('notation.klavar_range_auto')}</option>
+            <option value="klavier">{$t('notation.klavar_range_keyboard')}</option>
+          </select>
+        </label>
+      {/if}
       <button class="btn btn-ghost btn-sm" on:click={openOtherFile}>{$t('notation.open')}</button>
       <button class="btn btn-ghost btn-sm" on:click={saveMusicXml} disabled={!xml}>{$t('notation.save_as_musicxml')}</button>
       {#if viewMode === 'klavar'}
@@ -1720,6 +1851,7 @@
         {recording}
         {nowGrid}
         {openNotes}
+        bereik={bereikVoorSheet}
         live={isLive}
         on:select={onKlavarSelect}
         on:drag={onKlavarDrag}

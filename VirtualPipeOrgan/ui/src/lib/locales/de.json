@@ -814,7 +814,7 @@
     "view_klavar": "Klavar",
     "view_staff_title": "Herkömmliche Notenschrift mit Notenlinien",
     "view_klavar_title": "Klavar: die Linien sind die schwarzen Tasten, die Zeit läuft von oben nach unten",
-    "hint_klavar": "Klavar: von oben nach unten lesen; offener Kopf = weiße Taste, voller Kopf = schwarze Taste; Hals nach rechts = rechte Hand, nach links = linke Hand; das Pedal auf dem schmalen System links. Ein Ton klingt bis zum nächsten derselben Hand; v = Stoppzeichen, Punkt = klingt noch. Je System R / L / Ped. / R+L, je Note Alt+←/→. Eine gehaltene Taste erscheint erst beim Loslassen.",
+    "hint_klavar": "Klavar: von oben nach unten lesen; offener Kopf = weiße Taste, voller Kopf = schwarze Taste; Hals nach rechts = rechte Hand, nach links = linke Hand; das Pedal auf dem schmalen System links. Ein Ton klingt bis zum nächsten derselben Hand; v = Stoppzeichen, Punkt = klingt noch. Je System R / L / Ped. / R+L, je Note Alt+←/→. Beim Einspielen und Abspielen läuft eine rote Linie mit; gehaltene Tasten erscheinen grau. K wechselt die Ansicht.",
     "klavar_legend": "Systeme",
     "klavar_pedal_label": "Ped.",
     "hand": "Hand",
@@ -836,7 +836,11 @@
     "svg_save_failed": "SVG speichern fehlgeschlagen: {error}",
     "key_mode": "Tongeschlecht",
     "key_major": "Dur",
-    "key_minor": "Moll"
+    "key_minor": "Moll",
+    "klavar_range": "Umfang",
+    "klavar_range_auto": "automatisch",
+    "klavar_range_keyboard": "Klaviatur",
+    "klavar_range_title": "Breite der Systeme: automatisch um die gespielten Noten, oder die ganze Klaviatur der Orgel (alle Seiten gleich breit)"
   },
   "temperaments": {
     "name_prompt": "Name für diese Stimmung:"

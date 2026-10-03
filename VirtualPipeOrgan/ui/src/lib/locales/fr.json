@@ -814,7 +814,7 @@
     "view_klavar": "Klavar",
     "view_staff_title": "Notation classique sur portée",
     "view_klavar_title": "Klavar : les lignes sont les touches noires, le temps s'écoule de haut en bas",
-    "hint_klavar": "Klavar : lecture de haut en bas ; tête vide = touche blanche, tête pleine = touche noire ; hampe à droite = main droite, à gauche = main gauche ; la pédale sur la portée étroite à gauche. Une note dure jusqu'à la suivante de la même main ; v = signe d'arrêt, point = note tenue. Par portée R / L / Péd. / R+L, par note Alt+←/→. Une touche maintenue n'apparaît qu'au relâchement.",
+    "hint_klavar": "Klavar : lecture de haut en bas ; tête vide = touche blanche, tête pleine = touche noire ; hampe à droite = main droite, à gauche = main gauche ; la pédale sur la portée étroite à gauche. Une note dure jusqu'à la suivante de la même main ; v = signe d'arrêt, point = note tenue. Par portée R / L / Péd. / R+L, par note Alt+←/→. Pendant l'enregistrement et la lecture, une ligne rouge suit la musique ; les touches maintenues apparaissent en gris. K change l'affichage.",
     "klavar_legend": "Portées",
     "klavar_pedal_label": "Péd.",
     "hand": "Main",
@@ -836,7 +836,11 @@
     "svg_save_failed": "Échec de l'enregistrement SVG : {error}",
     "key_mode": "Mode",
     "key_major": "majeur",
-    "key_minor": "mineur"
+    "key_minor": "mineur",
+    "klavar_range": "Étendue",
+    "klavar_range_auto": "automatique",
+    "klavar_range_keyboard": "clavier",
+    "klavar_range_title": "Largeur des portées : automatique autour des notes jouées, ou tout le clavier de l'orgue (toutes les pages de même largeur)"
   },
   "temperaments": {
     "name_prompt": "Nom de ce tempérament :"

@@ -421,6 +421,20 @@ export function openNoten(lay, model, open) {
   return out;
 }
 
+/**
+ * Vast bereik (0.7.73): verbreed de balken tot het klavier van het orgel,
+ * `bereik` = { manual: [lo, hi], pedal: [lo, hi] } (een ontbrekende balk of
+ * een null-paar blijft zoals hij is). Nooit smaller dan het automatische
+ * bereik, zodat een noot buiten het klavier (transpositie, koppel) toch een
+ * plek houdt.
+ */
+export function pasBereikToe(model, bereik) {
+  if (!model || !bereik) return model;
+  const breed = (staff, b) => (!staff || !b) ? staff
+    : { ...staff, midi_min: Math.min(staff.midi_min, b[0]), midi_max: Math.max(staff.midi_max, b[1]) };
+  return { ...model, manual: breed(model.manual, bereik.manual), pedal: breed(model.pedal, bereik.pedal) };
+}
+
 /** Welke balk ligt onder een x: 'pedal' of 'manual'. */
 export function staffAtX(layout, x) {
   if (!layout.pedaal) return 'manual';

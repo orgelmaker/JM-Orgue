@@ -814,7 +814,7 @@
     "view_klavar": "Klavar",
     "view_staff_title": "Zwykła notacja nutowa na pięciolinii",
     "view_klavar_title": "Klavar: linie to czarne klawisze, czas biegnie z góry na dół",
-    "hint_klavar": "Klavar: czytaj z góry na dół; pusta główka = biały klawisz, pełna główka = czarny klawisz; laska w prawo = prawa ręka, w lewo = lewa ręka; pedał na wąskiej pięciolinii z lewej. Nuta brzmi do następnej tej samej ręki; v = znak stopu, kropka = nadal brzmi. Na pięciolinię R / L / Ped. / R+L, na nutę Alt+←/→. Przytrzymany klawisz pojawia się dopiero po puszczeniu.",
+    "hint_klavar": "Klavar: czytaj z góry na dół; pusta główka = biały klawisz, pełna główka = czarny klawisz; laska w prawo = prawa ręka, w lewo = lewa ręka; pedał na wąskiej pięciolinii z lewej. Nuta brzmi do następnej tej samej ręki; v = znak stopu, kropka = nadal brzmi. Na pięciolinię R / L / Ped. / R+L, na nutę Alt+←/→. Podczas nagrywania i odtwarzania czerwona linia podąża za muzyką; przytrzymane klawisze są szare. K przełącza widok.",
     "klavar_legend": "Pięciolinie",
     "klavar_pedal_label": "Ped.",
     "hand": "Ręka",
@@ -836,7 +836,11 @@
     "svg_save_failed": "Zapis SVG nie powiódł się: {error}",
     "key_mode": "Tryb",
     "key_major": "dur",
-    "key_minor": "moll"
+    "key_minor": "moll",
+    "klavar_range": "Zakres",
+    "klavar_range_auto": "automatycznie",
+    "klavar_range_keyboard": "klawiatura",
+    "klavar_range_title": "Szerokość pięciolinii: automatycznie wokół zagranych nut albo cała klawiatura organów (wszystkie strony równie szerokie)"
   },
   "temperaments": {
     "name_prompt": "Nazwa tego stroju:"

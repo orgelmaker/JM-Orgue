@@ -814,7 +814,7 @@
     "view_klavar": "Klavar",
     "view_staff_title": "Conventional staff notation",
     "view_klavar_title": "Klavar: the lines are the black keys, time runs from top to bottom",
-    "hint_klavar": "Klavar: read from top to bottom; open head = white key, solid head = black key; stem to the right = right hand, to the left = left hand; the pedal on the narrow staff at the left. A note sounds until the next one in the same hand; v = stop sign, dot = still sounding. Per staff R / L / Ped. / R+L, per note Alt+←/→. A held key appears once it is released.",
+    "hint_klavar": "Klavar: read from top to bottom; open head = white key, solid head = black key; stem to the right = right hand, to the left = left hand; the pedal on the narrow staff at the left. A note sounds until the next one in the same hand; v = stop sign, dot = still sounding. Per staff R / L / Ped. / R+L, per note Alt+←/→. While recording and playing back a red line follows along; held keys show in grey. K switches the view.",
     "klavar_legend": "Staves",
     "klavar_pedal_label": "Ped.",
     "hand": "Hand",
@@ -836,7 +836,11 @@
     "svg_save_failed": "Saving SVG failed: {error}",
     "key_mode": "Mode",
     "key_major": "major",
-    "key_minor": "minor"
+    "key_minor": "minor",
+    "klavar_range": "Range",
+    "klavar_range_auto": "automatic",
+    "klavar_range_keyboard": "keyboard",
+    "klavar_range_title": "Width of the staves: automatic around the notes played, or the organ's whole keyboard (all pages equally wide)"
   },
   "temperaments": {
     "name_prompt": "Name for this temperament:"
