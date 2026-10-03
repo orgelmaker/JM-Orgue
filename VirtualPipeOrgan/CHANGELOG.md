@@ -5,6 +5,26 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.72] - 2026-10-03
+
+### Klavar: balken, manuaalnamen, toonsoort en SVG
+
+Achtsten en zestienden krijgen in klavar per tel één schuine balk door de
+stokuiteinden, zoals in de gedrukte uitgaven. Speelt u met beide manualen in
+dezelfde hand, dan staat bij een wissel van manuaal de naam van het manuaal
+naast de noot. Boven de eerste maat staat het toonsoortteken: een kop op de
+grondtoon in een cirkel (majeur) of een ruit (mineur); naast de toonsoort
+kiest u nu **majeur** of **mineur**, ook in notenschrift (daar komt het als
+toonaard in de MusicXML terecht). **Opslaan als SVG…** bewaart de
+klavar-tekening als bestand, met titel, tempo en legenda, te openen in een
+browser of tekenprogramma.
+
+Tijdens het inspelen loopt het blad nu mee. In klavar loopt een rode tijdlijn
+met de opname mee, ingedrukte toetsen staan er meteen in het grijs (en niet
+pas bij het loslaten) en het blad schuift vanzelf door; het papier loopt twee
+maten vooruit. In notenschrift springt het blad na elke noot naar de laatst
+gespeelde noot.
+
 ## [0.7.71] - 2026-10-03
 
 ### Noteren in klavar

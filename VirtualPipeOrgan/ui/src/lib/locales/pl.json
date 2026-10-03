@@ -829,7 +829,14 @@
     "to_right_hand": "R →",
     "to_left_hand_title": "Zaznaczone nuty do lewej ręki (Alt+←)",
     "to_right_hand_title": "Zaznaczone nuty do prawej ręki (Alt+→)",
-    "klavar_tempo": "Tempo {bpm}"
+    "klavar_tempo": "Tempo {bpm}",
+    "save_as_svg": "Zapisz jako SVG…",
+    "save_as_svg_title": "Zapisz rysunek klavar jako plik SVG (otwiera się w przeglądarce lub programie graficznym)",
+    "svg_saved": "Zapisano SVG: {path}",
+    "svg_save_failed": "Zapis SVG nie powiódł się: {error}",
+    "key_mode": "Tryb",
+    "key_major": "dur",
+    "key_minor": "moll"
   },
   "temperaments": {
     "name_prompt": "Nazwa tego stroju:"

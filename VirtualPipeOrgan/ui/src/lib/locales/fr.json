@@ -829,7 +829,14 @@
     "to_right_hand": "R →",
     "to_left_hand_title": "Notes sélectionnées vers la main gauche (Alt+←)",
     "to_right_hand_title": "Notes sélectionnées vers la main droite (Alt+→)",
-    "klavar_tempo": "Tempo {bpm}"
+    "klavar_tempo": "Tempo {bpm}",
+    "save_as_svg": "Enregistrer en SVG…",
+    "save_as_svg_title": "Enregistrer le dessin klavar en fichier SVG (s'ouvre dans un navigateur ou un logiciel de dessin)",
+    "svg_saved": "SVG enregistré : {path}",
+    "svg_save_failed": "Échec de l'enregistrement SVG : {error}",
+    "key_mode": "Mode",
+    "key_major": "majeur",
+    "key_minor": "mineur"
   },
   "temperaments": {
     "name_prompt": "Nom de ce tempérament :"

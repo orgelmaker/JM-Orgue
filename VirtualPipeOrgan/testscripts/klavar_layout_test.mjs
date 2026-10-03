@@ -4,6 +4,7 @@
 // (ui/package.json is "type": "module", vandaar .mjs) en in CI.
 import {
   MAAT, balkGeometrie, xOfMidi, nearestKey, isZwart, splitSystems, paginate, layoutSystem, hitTest, gridTimeAtY, staffAtX,
+  nuLijnY, openNoten,
 } from '../ui/src/lib/klavarLayout.js';
 
 let fouten = 0;
@@ -73,8 +74,8 @@ function noot(midi, start, end, hand = 'right', extra = {}) {
   const n62 = lay.noten.find(n => n.midi === 62);
   check(Math.abs(n60.stokX1 - n60.stokX0) <= MAAT.stokKort * MAAT.w + 1e-9 && n60.stokX1 <= n62.cx - 0.5 * MAAT.w + 1e-9,
     'verstrengeling: korte stokken, en nooit door de vreemde kop');
-  check(lay.stops.length === 1 && dicht(lay.stops[0].y, MAAT.randBoven + 3 * MAAT.kwart), 'stopteken op het einde (12 eenheden = 3 kwarten)');
-  check(lay.stippen.length === 1 && dicht(lay.stippen[0].y, MAAT.randBoven + 2.5 * MAAT.kwart), 'doorklinkstip op het rastermoment');
+  check(lay.stops.length === 1 && dicht(lay.stops[0].y, lay.top + 3 * MAAT.kwart), 'stopteken op het einde (12 eenheden = 3 kwarten)');
+  check(lay.stippen.length === 1 && dicht(lay.stippen[0].y, lay.top + 2.5 * MAAT.kwart), 'doorklinkstip op het rastermoment');
   check(lay.telnummers.length === 4 && lay.telstrepen.filter(t => t.gestreept).length === 3, 'eerste maat: telnummers en gestreepte telstrepen');
   const n64 = lay.noten.find(n => n.midi === 64);
   check(!n64.zwart && n64.cy > n64.yStok, 'witte kop hangt onder de stok');
@@ -90,7 +91,7 @@ function noot(midi, start, end, hand = 'right', extra = {}) {
   // Hit-test en klik-naar-tijd.
   const hit = hitTest(l2, l2.noten[0].cx + 0.3, l2.noten[0].cy, 1.5 * MAAT.w);
   check(hit && hit.midi === 60, 'hitTest vindt de dichtstbijzijnde kop');
-  check(gridTimeAtY(l2, MAAT.randBoven + 1.6 * MAAT.kwart) === 6, 'gridTimeAtY snapt op het raster (1,6 kwart → 6 zestienden)');
+  check(gridTimeAtY(l2, l2.top + 1.6 * MAAT.kwart) === 6, 'gridTimeAtY snapt op het raster (1,6 kwart → 6 zestienden)');
 }
 
 // ---- gekruiste handen op dezelfde inzet: stokken raken elkaar nooit ----
@@ -134,6 +135,60 @@ function noot(midi, start, end, hand = 'right', extra = {}) {
   const lay = layoutSystem(m, splitSystems(m, 1)[0]);
   const n = lay.noten[0];
   check(lay.stops.length === 1 && lay.stops[0].y - lay.stops[0].h >= n.yStok + MAAT.kop * MAAT.w - 1e-9, 'stopteken van een zestiende begint onder de kop');
+}
+
+// ---- balken, labels en toonsoortteken (0.7.72) ----
+{
+  const m = model([
+    noot(60, 0, 2, 'right', { id: 1, beam: 1, label: 'Hoofdwerk' }), noot(62, 2, 4, 'right', { id: 2, beam: 1 }),
+    noot(64, 4, 8, 'right', { id: 3, label: 'Zwelwerk' }),
+    noot(48, 0, 1, 'left', { id: 4, beam: 2 }), noot(50, 1, 2, 'left', { id: 5, beam: 2 }), noot(52, 2, 4, 'left', { id: 6, beam: 2 }),
+  ], { key_fifths: -1, minor: true, key_root: 2 });
+  const sys = splitSystems(m, 1);
+  const lay = layoutSystem(m, sys[0]);
+  check(lay.top > MAAT.randBoven, 'eerste systeem heeft ruimte voor het toonsoortteken');
+  check(lay.balken.length === 2, 'twee balken (rechts en links)');
+  const rechts = lay.balken.find(b => b.punten.length === 2), links = lay.balken.find(b => b.punten.length === 3);
+  check(rechts && links, 'balk rechts door twee stokuiteinden, links door drie');
+  const n60 = lay.noten.find(n => n.midi === 60);
+  check(rechts && Math.abs(rechts.punten[0].x - n60.stokX1) < 1e-9 && Math.abs(rechts.punten[0].y - n60.yStok) < 1e-9, 'balk begint op het stokuiteinde');
+  check(links && links.punten[0].y < links.punten[1].y && links.punten[1].y < links.punten[2].y, 'balkpunten in tijdvolgorde');
+  check(lay.labels.length === 2 && lay.labels[0].tekst === 'Hoofdwerk' && lay.labels[0].anchor === 'start' && lay.labels[0].x > n60.stokX1, 'label rechts van het stokuiteinde');
+  check(lay.toonsoort && lay.toonsoort.minor && Math.abs(lay.toonsoort.x - xOfMidi(62, lay.manuaal)) < 1e-9 && lay.toonsoort.y < lay.top, "toonsoortteken (ruit) op d' boven de eerste maat");
+  const lay2 = layoutSystem(m, sys[1]);
+  check(lay2.toonsoort === null && lay2.top === MAAT.randBoven, 'tweede systeem: geen toonsoortteken, gewone bovenrand');
+  check(gridTimeAtY(lay, lay.top + MAAT.kwart) === 4, 'gridTimeAtY rekent met de verschoven bovenrand');
+}
+
+// ---- inspelen: nu-lijn en aangehouden toetsen (0.7.72) ----
+{
+  const m = model([noot(60, 0, 4, 'right', { id: 1 })], {
+    num_measures: 2,
+    legend: [
+      { layer_id: 1, name: 'HW', hand: 'right', split_midi: null },
+      { layer_id: 2, name: 'RP', hand: 'right', split_midi: 60 },
+      { layer_id: 3, name: 'Ped', hand: 'pedal', split_midi: null },
+    ],
+    pedal: { midi_min: 36, midi_max: 67, notes: [] },
+  });
+  const sys = splitSystems(m, 1);
+  const lay0 = layoutSystem(m, sys[0]), lay1 = layoutSystem(m, sys[1]);
+  check(dicht(nuLijnY(lay0, 6.5), lay0.top + (6.5 / 4) * MAAT.kwart), 'nu-lijn op een breuk van het raster');
+  check(nuLijnY(lay0, 16) === null && dicht(nuLijnY(lay1, 16), lay1.top), 'nu-lijn op de maatgrens hoort bij het volgende systeem');
+  check(nuLijnY(lay0, null) === null && nuLijnY(lay0, -1) === null, 'geen nu-lijn zonder klok of vóór het begin');
+  const open = openNoten(lay0, m, [
+    { layerId: 1, midi: 64, start: 2 },     // HW rechts
+    { layerId: 2, midi: 55, start: 2 },     // RP onder het splitspunt → links
+    { layerId: 3, midi: 43, start: 3 },     // pedaal
+    { layerId: 1, midi: 90, start: 2 },     // buiten het manuaalbereik → wacht
+    { layerId: 1, midi: 62, start: 20 },    // in het tweede systeem
+  ]);
+  check(open.length === 3, 'drie aangehouden toetsen in dit systeem (buiten bereik en ander systeem vallen af)');
+  const o64 = open.find(o => o.midi === 64), o55 = open.find(o => o.midi === 55), o43 = open.find(o => o.midi === 43);
+  check(o64 && o64.hand === 'right' && o64.stokX1 > o64.cx && dicht(o64.cx, xOfMidi(64, lay0.manuaal)), 'HW-toets rechts met stok naar rechts');
+  check(o55 && o55.hand === 'left' && o55.stokX1 < o55.cx, 'toets onder het splitspunt krijgt de linkerhand');
+  check(o43 && o43.hand === 'pedal' && dicht(o43.cx, xOfMidi(43, lay0.pedaal)) && dicht(o43.yStok, lay0.top + (3 / 4) * MAAT.kwart), 'pedaaltoets op de pedaalbalk op het inzetmoment');
+  check(openNoten(layoutSystem(m, sys[1]), m, [{ layerId: 1, midi: 62, start: 20 }]).length === 1, 'toets in het tweede systeem staat daar');
 }
 
 // ---- pedaalbalk links, staffAtX ----

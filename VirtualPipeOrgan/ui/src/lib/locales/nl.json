@@ -829,7 +829,14 @@
     "to_right_hand": "R →",
     "to_left_hand_title": "Geselecteerde noten naar de linkerhand (Alt+←)",
     "to_right_hand_title": "Geselecteerde noten naar de rechterhand (Alt+→)",
-    "klavar_tempo": "Tempo {bpm}"
+    "klavar_tempo": "Tempo {bpm}",
+    "save_as_svg": "Opslaan als SVG…",
+    "save_as_svg_title": "De klavar-tekening als SVG-bestand opslaan (opent in een browser of tekenprogramma)",
+    "svg_saved": "SVG opgeslagen: {path}",
+    "svg_save_failed": "SVG opslaan mislukt: {error}",
+    "key_mode": "Toongeslacht",
+    "key_major": "majeur",
+    "key_minor": "mineur"
   },
   "temperaments": {
     "name_prompt": "Naam voor deze stemming:"

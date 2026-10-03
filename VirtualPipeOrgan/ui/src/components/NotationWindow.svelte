@@ -51,14 +51,89 @@
     lastKlavarGeneration = 0;
     doRender();
   }
-  // Tijdens het opnemen in klavar het blad meelaten scrollen met de nieuwste noot.
+  // ---- Meelopen tijdens het inspelen (0.7.72) ----
+  // De backend zet de opnametijd op de eerste toets en meldt elke toets met
+  // zijn tijdstip (note-open bij indrukken, note-added bij loslaten). Daaruit
+  // loopt hier een klok mee: in klavar tekent die een nu-lijn en de nog
+  // ingedrukte toetsen, en schuift het blad door zodra de lijn onderin komt.
+  // In notenschrift springt het blad na elke render naar de laatst gespeelde
+  // noot (OSMD kent geen tussenstand).
+  let nowGrid = null;        // opnametijd in rastereenheden (breuk), null = geen klok
+  let openNotes = [];        // [{ layerId, midi, channel, start }] ingedrukte toetsen
+  let recOriginPerf = null;  // performance.now() van opnametijd 0
+  let volgTimer = null;
+  function rasterPerSeconde() {
+    const bpm = Number(klavarModel?.bpm) || Number(score?.bpm) || 90;
+    const q = Number(klavarModel?.q) || Number(score?.quantize) || 4;
+    return (bpm / 60) * q;
+  }
+  function syncOpnameKlok(us) {
+    if (!Number.isFinite(us)) return;
+    recOriginPerf = performance.now() - us / 1000;
+  }
+  function zonderToets(lijst, p) {
+    return lijst.filter(o => !(o.layerId === p.layer && o.midi === p.midi && o.channel === p.channel));
+  }
+  function onNoteOpen(p) {
+    syncOpnameKlok(p.at_us);
+    openNotes = [...zonderToets(openNotes, p), { layerId: p.layer, midi: p.midi, channel: p.channel, start: Math.round((p.at_us / 1e6) * rasterPerSeconde()) }];
+    startVolgen();
+  }
+  function onNoteAdded(p) {
+    syncOpnameKlok(p.end_us);
+    openNotes = zonderToets(openNotes, p);
+  }
+  function startVolgen() {
+    if (volgTimer || !recording) return;
+    volgTimer = setInterval(volgTick, 50);
+  }
+  function stopVolgen() {
+    if (volgTimer) { clearInterval(volgTimer); volgTimer = null; }
+    nowGrid = null;
+    openNotes = [];
+    recOriginPerf = null;
+  }
+  async function volgTick() {
+    if (!recording || recOriginPerf == null) { stopVolgen(); return; }
+    if (viewMode !== 'klavar') return;
+    nowGrid = ((performance.now() - recOriginPerf) / 1000) * rasterPerSeconde();
+    await tick();
+    volgNuLijn();
+  }
+  // Houd de nu-lijn op zestig procent van het zichtbare blad: alleen omlaag,
+  // behalve als de lijn boven het beeld staat (een tweede take begint weer in
+  // maat 1 terwijl het blad nog onderaan staat).
+  function volgNuLijn() {
+    if (!container) return;
+    const el = container.querySelector('.k-nu');
+    if (!el) return;
+    const r = el.getBoundingClientRect(), c = container.getBoundingClientRect();
+    const y = r.top - c.top + container.scrollTop;
+    const gewenst = y - 0.6 * container.clientHeight;
+    if (gewenst > container.scrollTop || y < container.scrollTop) container.scrollTop = Math.max(0, gewenst);
+  }
+  // Na een render tijdens de opname: het blad naar de laatst gespeelde noot.
   function scrollNaarNieuwsteNoot() {
     if (!recording || !container) return;
     let nieuwste = null;
-    for (const e of flatEvents) if (nieuwste == null || e.id > nieuwste) nieuwste = e.id;
+    for (const l of score?.layers ?? []) for (const t of l.takes) for (const e of t.events) if (nieuwste == null || e.id > nieuwste) nieuwste = e.id;
     if (nieuwste == null) return;
-    const el = container.querySelector(`[data-id="${nieuwste}"]`);
-    if (el && el.scrollIntoView) el.scrollIntoView({ block: 'end' });
+    let y, h;
+    if (viewMode === 'klavar') {
+      if (nowGrid != null) return;   // de nu-lijn bepaalt het scrollen
+      const el = container.querySelector(`[data-id="${nieuwste}"]`);
+      if (!el) return;
+      const r = el.getBoundingClientRect(), c = container.getBoundingClientRect();
+      y = r.top - c.top + container.scrollTop; h = r.height;
+    } else {
+      const box = noteBoxes.find(b => b.eventId === nieuwste);
+      if (!box) return;
+      y = box.y; h = box.h;
+    }
+    const onder = y + h, zicht = container.clientHeight;
+    if (onder > container.scrollTop + 0.85 * zicht || y < container.scrollTop) {
+      container.scrollTop = Math.max(0, onder - 0.6 * zicht);
+    }
   }
 
   // File-modus opties (blijven werken zoals in 0.7.0)
@@ -66,6 +141,7 @@
   let beatsPerBar = 4;
   let quantize = 4;
   let keyFifths = 0;
+  let minor = false;   // toongeslacht (0.7.72): ruit i.p.v. cirkel in klavar, <mode> in MusicXML
   let title = '';
   let tolerancePct = 80; // "los ↔ strak"
 
@@ -259,7 +335,7 @@
         const options = {
           bpm: Number(bpm) || 90, beats_per_bar: Number(beatsPerBar) || 4,
           quantize: Number(quantize) || 4, key_fifths: Number(keyFifths) || 0,
-          title, staves, tolerance_pct: Number(tolerancePct),
+          title, staves, tolerance_pct: Number(tolerancePct), minor: !!minor,
         };
         if (viewMode === 'klavar') {
           klavarModel = await invoke('convert_midi_to_klavar_model', { path: filePath, options });
@@ -277,7 +353,7 @@
       if (xml) {
         await osmd.load(xml);
         osmd.render();
-        if (isLive) buildNoteBoxes();
+        if (isLive) { buildNoteBoxes(); scrollNaarNieuwsteNoot(); }
       }
       error = null;
     } catch (e) {
@@ -747,6 +823,7 @@
       score = await invoke('notation_get_score', { scoreId });
       syncMetronomeFromScore();
       beatsPerBar = score.beats_per_bar || 4;
+      minor = !!score.minor;
       title = score.title || '';
       await loadDivisions();      // divisienamen voor wizard + LayerBar-chips
       openWizardFromScore();      // balkindeling kiezen vóór het inspelen
@@ -755,7 +832,12 @@
       const { listen } = await import('@tauri-apps/api/event');
       unlisteners.push(await listen('jm-orgue:notation:note-added', (e) => {
         if (e?.payload?.score !== scoreId) return;
+        if (recording) onNoteAdded(e.payload);
         scheduleRender();
+      }));
+      unlisteners.push(await listen('jm-orgue:notation:note-open', (e) => {
+        if (e?.payload?.score !== scoreId || !recording) return;
+        onNoteOpen(e.payload);
       }));
       unlisteners.push(await listen('jm-orgue:notation:score-changed', (e) => {
         if (e?.payload?.score !== scoreId) return;
@@ -792,6 +874,7 @@
         if (recording) await invoke('notation_stop_recording');
         recording = false;
         armedWaiting = false;
+        stopVolgen();
         // De laatste openstaande notes hebben events geëmit; render zodat
         // ze zichtbaar worden.
         scheduleRender();
@@ -919,6 +1002,11 @@
     if (!isLive || scoreId == null) return;
     keyFifths = Number(v) || 0;
     try { await invoke('notation_set_key', { scoreId, keyFifths }); } catch (e) {}
+  }
+  async function setModeLive(isMinor) {
+    if (!isLive || scoreId == null) return;
+    minor = !!isMinor;
+    try { await invoke('notation_set_mode', { scoreId, minor }); } catch (e) {}
   }
   async function doUndo() { try { await invoke('notation_undo', { scoreId }); } catch (e) { alert(String(e)); } }
   async function doRedo() { try { await invoke('notation_redo', { scoreId }); } catch (e) { alert(String(e)); } }
@@ -1185,6 +1273,51 @@
   }
   function printScore() { window.print(); }
 
+  // Opslaan als SVG (0.7.72, klavar): de getekende systemen uit de DOM, onder
+  // elkaar in één SVG in mm, met de kop (titel, tempo, legenda) en de
+  // tekenstijlen ingebed, zodat het bestand op zichzelf staat.
+  const KLAVAR_SVG_STIJL = `
+    .k-lijn{stroke:#000} .k-tel{stroke:#000} .k-maat{stroke:#000}
+    .k-tekst{fill:#333;font-family:Georgia,'Times New Roman',serif}
+    .k-stok{stroke:#000} .k-kop{fill:#fff;stroke:#000} .k-kop.zwart{fill:#000}
+    .k-stop{fill:none;stroke:#000;stroke-linejoin:miter} .k-stip{fill:#000}
+    .k-balk{fill:none;stroke:#000;stroke-linejoin:round}
+    .k-label{fill:#333;font-family:Georgia,'Times New Roman',serif;font-style:italic}
+    .k-toonsoort{fill:none;stroke:#000}`;
+  function klavarAlsSvg() {
+    const systemen = Array.from(container?.querySelectorAll('svg.klavar-systeem') || []);
+    if (!systemen.length || !klavarModel) return null;
+    const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const kop = 16;
+    let breedte = 0, hoogte = kop;
+    const delen = [];
+    for (const svg of systemen) {
+      const [, , w, h] = (svg.getAttribute('viewBox') || '0 0 100 100').split(/\s+/).map(Number);
+      breedte = Math.max(breedte, w);
+      // Zonder de opname-overlay (nu-lijn, aangehouden toetsen); de
+      // Svelte-scope-klassen weglaten, de k-*-klassen blijven.
+      const kloon = svg.cloneNode(true);
+      kloon.querySelectorAll('.k-nu, .k-open').forEach(el => el.remove());
+      const inhoud = kloon.innerHTML.replace(/\s+class="([^"]*)"/g, (m, c) => ' class="' + c.split(/\s+/).filter(k => !k.startsWith('svelte-')).join(' ') + '"');
+      delen.push(`<svg x="0" y="${hoogte}" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${inhoud}</svg>`);
+      hoogte += h;
+    }
+    const legenda = (klavarModel.legend || []).map(l => `${l.name} (${l.hand === 'pedal' ? tx('notation.klavar_pedal_label') : l.split_midi != null ? 'R+L' : l.hand === 'left' ? 'L' : 'R'})`).join(' · ');
+    const tekst = `<text x="2" y="6" font-size="4.2" font-family="Georgia, serif" font-weight="bold">${esc(klavarModel.title)}</text>` +
+      `<text x="2" y="11" font-size="2.6" font-family="Georgia, serif">${esc(tx('notation.klavar_tempo').replace('{bpm}', Math.round(klavarModel.bpm)))}   ${esc(tx('notation.klavar_legend'))}: ${esc(legenda)}</text>`;
+    return `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="${breedte}mm" height="${hoogte}mm" viewBox="0 0 ${breedte} ${hoogte}">\n<style>${KLAVAR_SVG_STIJL}</style>\n${tekst}\n${delen.join('\n')}\n</svg>\n`;
+  }
+  async function saveKlavarSvg() {
+    const svg = klavarAlsSvg();
+    if (!svg) return;
+    try {
+      const { save } = await import('@tauri-apps/plugin-dialog');
+      const suggested = (filePath ? filePath.replace(/\.(mid|midi)$/i, '') : (score?.title || tx('notation.default_title'))) + '-klavar.svg';
+      const path = await save({ defaultPath: suggested, filters: [{ name: 'SVG', extensions: ['svg'] }] });
+      if (path) { await invoke('save_text_file', { path, text: svg }); alert(tx('notation.svg_saved').replace('{path}', path)); }
+    } catch (e) { alert(tx('notation.svg_save_failed').replace('{error}', e)); }
+  }
+
   // OSMD's autoResize re-rendert bij vensterwijziging; de noot-boxen (in pixels)
   // moeten dan opnieuw worden opgemeten. Debounce zodat een sleep-resize niet
   // tientallen keren herberekent.
@@ -1222,6 +1355,7 @@
     stopMetronome();
     if (metroAudioCtx) { try { metroAudioCtx.close(); } catch (e) {} metroAudioCtx = null; }
     for (const un of unlisteners) { try { un(); } catch (e) {} }
+    stopVolgen();
     // Live-opname + stapinvoer veilig stoppen bij sluiten.
     if (recording && scoreId != null) invoke('notation_stop_recording').catch(() => {});
     if (stepMode && scoreId != null) invoke('notation_set_step_input', { scoreId, enabled: false }).catch(() => {});
@@ -1340,13 +1474,15 @@
         <button class="btn btn-ghost btn-sm" on:click={() => stepAlterLast(1)} disabled={!stepLastIds.length} title={$t('notation.step_sharp_title')}>♯</button>
         <button class="btn btn-ghost btn-sm" on:click={() => stepAlterLast(-1)} disabled={!stepLastIds.length} title={$t('notation.step_flat_title')}>♭</button>
       {/if}
-      {#if viewMode !== 'klavar'}
-        <label>{$t('notation.key_signature')}
-          <select value={keyFifths} on:change={(e) => setKeyLive(e.currentTarget.value)}>
-            {#each keyChoices as k}<option value={k.v}>{k.label}</option>{/each}
-          </select>
-        </label>
-      {/if}
+      <label>{$t('notation.key_signature')}
+        <select value={keyFifths} on:change={(e) => setKeyLive(e.currentTarget.value)}>
+          {#each keyChoices as k}<option value={k.v}>{k.label}</option>{/each}
+        </select>
+        <select value={minor ? 'minor' : 'major'} on:change={(e) => setModeLive(e.currentTarget.value === 'minor')} title={$t('notation.key_mode')}>
+          <option value="major">{$t('notation.key_major')}</option>
+          <option value="minor">{$t('notation.key_minor')}</option>
+        </select>
+      </label>
       <label>{$t('notation.meter')}
         <select value={beatsPerBar} on:change={(e) => setMeterLive(e.currentTarget.value)}>
           <option value={2}>2/4</option><option value={3}>3/4</option>
@@ -1393,6 +1529,9 @@
       <button class="btn btn-ghost btn-sm" on:click={saveMidiAs} title={$t('notation.save_as_midi_title')}>{$t('notation.save_as_midi')}</button>
       <button class="btn btn-primary btn-sm" on:click={printScore} disabled={viewMode === 'klavar' ? !(klavarModel && scoreHasEvents) : !xml}>{$t('notation.print_pdf')}</button>
       <button class="btn btn-ghost btn-sm" on:click={saveMusicXml} disabled={!xml}>{$t('notation.save_as_musicxml')}</button>
+      {#if viewMode === 'klavar'}
+        <button class="btn btn-ghost btn-sm" on:click={saveKlavarSvg} disabled={!(klavarModel && scoreHasEvents)} title={$t('notation.save_as_svg_title')}>{$t('notation.save_as_svg')}</button>
+      {/if}
     {:else}
       <label>{$t('notation.tempo')}
         <input type="number" min="20" max="300" bind:value={bpm} on:change={scheduleRender} />
@@ -1408,13 +1547,15 @@
           {#each gridChoices as g}<option value={g.v}>{g.label}</option>{/each}
         </select>
       </label>
-      {#if viewMode !== 'klavar'}
-        <label>{$t('notation.key_signature')}
-          <select bind:value={keyFifths} on:change={scheduleRender}>
-            {#each keyChoices as k}<option value={k.v}>{k.label}</option>{/each}
-          </select>
-        </label>
-      {/if}
+      <label>{$t('notation.key_signature')}
+        <select bind:value={keyFifths} on:change={scheduleRender}>
+          {#each keyChoices as k}<option value={k.v}>{k.label}</option>{/each}
+        </select>
+        <select bind:value={minor} on:change={scheduleRender} title={$t('notation.key_mode')}>
+          <option value={false}>{$t('notation.key_major')}</option>
+          <option value={true}>{$t('notation.key_minor')}</option>
+        </select>
+      </label>
       <label class="tolerance-slider" title={$t('notation.tolerance_title')}>
         {$t('notation.rhythm')}
         <input type="range" min="0" max="100" step="5" bind:value={tolerancePct} on:change={scheduleRender} />
@@ -1430,6 +1571,9 @@
       </span>
       <button class="btn btn-ghost btn-sm" on:click={openOtherFile}>{$t('notation.open')}</button>
       <button class="btn btn-ghost btn-sm" on:click={saveMusicXml} disabled={!xml}>{$t('notation.save_as_musicxml')}</button>
+      {#if viewMode === 'klavar'}
+        <button class="btn btn-ghost btn-sm" on:click={saveKlavarSvg} disabled={!klavarModel} title={$t('notation.save_as_svg_title')}>{$t('notation.save_as_svg')}</button>
+      {/if}
       <button class="btn btn-primary btn-sm" on:click={printScore} disabled={viewMode === 'klavar' ? !klavarModel : !xml}>{$t('notation.print_pdf')}</button>
     {/if}
   </div>
@@ -1574,6 +1718,8 @@
         zoom={osmdZoom}
         {stepMode}
         {recording}
+        {nowGrid}
+        {openNotes}
         live={isLive}
         on:select={onKlavarSelect}
         on:drag={onKlavarDrag}

@@ -43,6 +43,9 @@ export const MAAT = {
   stip: 0.4,           // × w (bij 50 % zoom nog zichtbaar)
   akkoordUitsteek: 2,  // × w
   tekst: 2.4,          // lettergrootte (mm)
+  labelTekst: 2.0,     // manuaallabels
+  balk: 0.35,          // dikte van een balk × w
+  toonsoortRuimte: 6,  // extra ruimte boven de eerste maat voor het toonsoortteken
   // Papier (A4 staand, 12 mm marge) voor de paginering.
   paginaBreedte: 186,
   paginaHoogte: 273,   // 297 − 2 × 12
@@ -82,11 +85,11 @@ export function nearestKey(x, balk) {
 }
 
 /** y (mm) van een rastermoment t (relatief aan de systeemstart). */
-export function yOfGrid(t, q) { return MAAT.randBoven + (t / q) * MAAT.kwart; }
+export function yOfGrid(t, q, top = MAAT.randBoven) { return top + (t / q) * MAAT.kwart; }
 
 /** Rastermoment bij een y, gesnapt op het raster en geklemd op het systeem. */
 export function gridTimeAtY(layout, y) {
-  const t = Math.round(((y - MAAT.randBoven) / MAAT.kwart) * layout.q);
+  const t = Math.round(((y - layout.top) / MAAT.kwart) * layout.q);
   const max = layout.sys.bars * layout.measureLen;
   return layout.sys.t0 + Math.max(0, Math.min(max, t));
 }
@@ -138,14 +141,17 @@ export function layoutSystem(model, sys, opts = {}) {
   if (pedaal) x += pedaal.breedte + MAAT.tussen;
   const manuaal = balkGeometrie(model.manual.midi_min, model.manual.midi_max, w, x);
   const breedte = manuaal.x0 + manuaal.breedte + MAAT.randRechts;
-  const hoogte = MAAT.randBoven + (sys.bars * measureLen / q) * MAAT.kwart + MAAT.randOnder;
+  // Het eerste systeem heeft boven de eerste maat ruimte voor het toonsoortteken.
+  const top = sys.index === 0 ? MAAT.randBoven + MAAT.toonsoortRuimte : MAAT.randBoven;
+  const yg = (t) => yOfGrid(t, q, top);
+  const hoogte = top + (sys.bars * measureLen / q) * MAAT.kwart + MAAT.randOnder;
   const xLinks = pedaal ? pedaal.x0 : manuaal.x0;
   const xRechts = manuaal.x0 + manuaal.breedte;
 
   const lay = {
-    sys, q, measureLen, beats, w, breedte, hoogte, pedaal, manuaal, xLinks, xRechts,
+    sys, q, measureLen, beats, w, top, breedte, hoogte, pedaal, manuaal, xLinks, xRechts,
     lijnen: [], maatstrepen: [], telstrepen: [], telnummers: [], maatnummers: [],
-    noten: [], akkoordlijnen: [], stops: [], stippen: [],
+    noten: [], akkoordlijnen: [], stops: [], stippen: [], balken: [], labels: [], toonsoort: null,
   };
 
   // Lijnen van de balken (over de hele systeemhoogte).
@@ -155,7 +161,7 @@ export function layoutSystem(model, sys, opts = {}) {
   // Maatstrepen (ook aan het eind van het systeem) en maatnummers.
   for (let i = 0; i <= sys.bars; i++) {
     const t = i * measureLen;
-    const y = yOfGrid(t, q);
+    const y = yg(t);
     const globaal = sys.bar0 + i;
     const slot = globaal === model.num_measures;
     lay.maatstrepen.push({ y, dikte: slot ? MAAT.slotstreep : MAAT.maatstreep, x0: xLinks, x1: xRechts });
@@ -169,7 +175,7 @@ export function layoutSystem(model, sys, opts = {}) {
     const eerste = sys.bar0 + i === 0;
     for (let b = 0; b < beats; b++) {
       const t = i * measureLen + b * q;
-      const y = yOfGrid(t, q);
+      const y = yg(t);
       if (eerste) {
         lay.telnummers.push({ x: MAAT.randLinks - MAAT.stokLengte * w - 1.2, y: y + MAAT.tekst * 0.4, tekst: String(b + 1) });
         if (b > 0) lay.telstrepen.push({ y, x0: xLinks, x1: xRechts, gestreept: true });
@@ -209,7 +215,7 @@ export function layoutSystem(model, sys, opts = {}) {
       const dir = n.hand === 'right' ? 1 : -1;
       const cx = xOfMidi(n.midi, balk);
       if (inSysteem) {
-        const yStok = yOfGrid(n.start - sys.t0, q);
+        const yStok = yg(n.start - sys.t0);
         const zwart = isZwart(n.midi);
         const noot = {
           key: n.id != null ? String(n.id) : naam + '-' + i,
@@ -217,7 +223,7 @@ export function layoutSystem(model, sys, opts = {}) {
           start: n.start, end: n.end,
           cx, cy: zwart ? yStok - r : yStok + r, r, yStok, zwart, dir,
           stokX0: cx, stokX1: cx + dir * MAAT.stokLengte * balk.w,
-          inAkkoord: false,
+          inAkkoord: false, beam: n.beam ?? null, label: n.label ?? null,
         };
         lay.noten.push(noot);
         const g = naam + '/' + n.start + '/' + n.hand;
@@ -227,7 +233,7 @@ export function layoutSystem(model, sys, opts = {}) {
         for (const t of n.dots || []) {
           if (t >= sys.t0 && t < sys.t1) {
             // Op een maatstreep zou de stip óp de streep liggen: er net onder.
-            const y = yOfGrid(t - sys.t0, q) + (t % measureLen === 0 ? MAAT.stip * balk.w * 1.5 : 0);
+            const y = yg(t - sys.t0) + (t % measureLen === 0 ? MAAT.stip * balk.w * 1.5 : 0);
             lay.stippen.push({ x: cx, y, r: (MAAT.stip * balk.w) / 2, id: n.id });
           }
         }
@@ -237,7 +243,7 @@ export function layoutSystem(model, sys, opts = {}) {
         for (const t of n.dots || []) {
           if (t >= sys.t0 && t < sys.t1) {
             // Op een maatstreep zou de stip óp de streep liggen: er net onder.
-            const y = yOfGrid(t - sys.t0, q) + (t % measureLen === 0 ? MAAT.stip * balk.w * 1.5 : 0);
+            const y = yg(t - sys.t0) + (t % measureLen === 0 ? MAAT.stip * balk.w * 1.5 : 0);
             lay.stippen.push({ x: cx, y, r: (MAAT.stip * balk.w) / 2, id: n.id });
           }
         }
@@ -245,7 +251,7 @@ export function layoutSystem(model, sys, opts = {}) {
       // Stip onder de bovenste maatstreep als de noot de systeemgrens kruist
       // (tenzij daar al een stip van een inzet staat).
       if ((n.bar_crossings || []).includes(sys.t0) && n.start < sys.t0 && !(n.dots || []).includes(sys.t0)) {
-        lay.stippen.push({ x: cx, y: MAAT.randBoven + MAAT.stip * balk.w * 1.5, r: (MAAT.stip * balk.w) / 2, id: n.id });
+        lay.stippen.push({ x: cx, y: top + MAAT.stip * balk.w * 1.5, r: (MAAT.stip * balk.w) / 2, id: n.id });
       }
       // Stopteken op het (legato-afgekapte) einde, in het systeem waar dat
       // valt; bij een witte kop nooit in de kop zelf (een zestiende is korter
@@ -255,8 +261,8 @@ export function layoutSystem(model, sys, opts = {}) {
         const onderdruk = verbergLaatste && laatstePer.get(naam + '/' + n.hand) === n.start;
         if (!onderdruk) {
           const h = MAAT.stopH * balk.w;
-          let y = yOfGrid(eind - sys.t0, q);
-          if (inSysteem && !isZwart(n.midi)) y = Math.max(y, yOfGrid(n.start - sys.t0, q) + MAAT.kop * balk.w + h);
+          let y = yg(eind - sys.t0);
+          if (inSysteem && !isZwart(n.midi)) y = Math.max(y, yg(n.start - sys.t0) + MAAT.kop * balk.w + h);
           lay.stops.push({ x: cx, y, b: MAAT.stopB * balk.w, h, id: n.id });
         }
       }
@@ -315,7 +321,104 @@ export function layoutSystem(model, sys, opts = {}) {
     if (a.dir > 0) a.x1 = beperk(a.balk, a.start, a.hand, 1, a.x0, a.x1);
     else a.x0 = beperk(a.balk, a.start, a.hand, -1, a.x0, a.x1);
   }
+
+  // Uiteinde van de stok aan de handzijde per (balk, start, hand): de
+  // akkoordlijn als er een is, anders de stok van de buitenste noot.
+  const stokUiteinde = (n) => {
+    const a = lay.akkoordlijnen.find(l => l.balk === n.balk && l.start === n.start && l.hand === n.hand);
+    if (a) return n.dir > 0 ? a.x1 : a.x0;
+    let x = n.stokX1;
+    for (const m of lay.noten) {
+      if (m.balk === n.balk && m.start === n.start && m.hand === n.hand && !m.inAkkoord) {
+        x = n.dir > 0 ? Math.max(x, m.stokX1) : Math.min(x, m.stokX1);
+      }
+    }
+    return x;
+  };
+
+  // Balken (0.7.72): één schuine streep door de stokuiteinden van de noten
+  // met hetzelfde balknummer (model: per tel, per hand), in tijdvolgorde.
+  const perBalk = new Map();
+  for (const n of lay.noten) {
+    if (n.beam == null) continue;
+    const k = n.balk + '/' + n.hand + '/' + n.beam;
+    if (!perBalk.has(k)) perBalk.set(k, new Map());
+    const inz = perBalk.get(k);
+    if (!inz.has(n.start)) inz.set(n.start, { x: stokUiteinde(n), y: n.yStok });
+  }
+  for (const [k, inz] of perBalk) {
+    if (inz.size < 2) continue;
+    const balkW = k.startsWith('pedal') ? pedaal.w : manuaal.w;
+    const punten = [...inz.entries()].sort((a, b) => a[0] - b[0]).map(e => e[1]);
+    lay.balken.push({ punten, dikte: MAAT.balk * balkW });
+  }
+
+  // Manuaallabels (0.7.72): naast het stokuiteinde, aan de handzijde.
+  for (const n of lay.noten) {
+    if (!n.label) continue;
+    const balkW = n.balk === 'pedal' ? pedaal.w : manuaal.w;
+    const x = stokUiteinde(n) + n.dir * 0.5 * balkW;
+    lay.labels.push({ x, y: n.yStok - 0.3 * balkW, tekst: n.label, anchor: n.dir > 0 ? 'start' : 'end' });
+  }
+
+  // Toonsoortteken (0.7.72), alleen in het eerste systeem: een kop op de
+  // grondtoon (in het octaaf c'–b') in een cirkel (majeur) of ruit (mineur).
+  if (sys.index === 0 && model.key_root != null) {
+    const midi = 60 + (model.key_root % 12);
+    lay.toonsoort = {
+      x: xOfMidi(midi, manuaal), y: MAAT.randBoven + MAAT.toonsoortRuimte * 0.45,
+      r: (MAAT.kop * w) / 2, zwart: isZwart(midi), ring: 1.15 * w, minor: !!model.minor,
+    };
+  }
   return lay;
+}
+
+/**
+ * De y van de "nu"-lijn tijdens het inspelen (0.7.72) in dit systeem, of
+ * null als het tijdstip (rastereenheden, mag een breuk zijn) erbuiten valt.
+ */
+export function nuLijnY(lay, nowGrid) {
+  if (nowGrid == null || !Number.isFinite(nowGrid)) return null;
+  const t = nowGrid - lay.sys.t0;
+  if (t < 0 || t >= lay.sys.t1 - lay.sys.t0) return null;
+  return yOfGrid(t, lay.q, lay.top);
+}
+
+/**
+ * Aangehouden toetsen (note-on zonder note-off) tijdens het inspelen
+ * (0.7.72): kop en stok op het inzetmoment, zonder stopteken, zodat een noot
+ * er staat zodra hij klinkt en niet pas bij het loslaten. De balk en de hand
+ * volgen de legenda van de laag; een toets buiten het bereik van de balk
+ * wacht tot het loslaten (dan rekt het model het bereik op).
+ * `open` = [{ layerId, midi, channel, start }] met start in rastereenheden;
+ * de sleutel neemt het kanaal mee (dezelfde toets van twee manualen op één
+ * balk zijn twee aangehouden toetsen).
+ */
+export function openNoten(lay, model, open) {
+  const out = [];
+  if (!model || !open || !open.length) return out;
+  for (const o of open) {
+    const t = o.start - lay.sys.t0;
+    if (t < 0 || t >= lay.sys.t1 - lay.sys.t0) continue;
+    const leg = (model.legend || []).find(l => l.layer_id === o.layerId) || null;
+    const pedaal = leg?.hand === 'pedal';
+    const balk = pedaal ? lay.pedaal : lay.manuaal;
+    if (!balk || o.midi < balk.min || o.midi > balk.max) continue;
+    const hand = pedaal ? 'pedal'
+      : leg?.split_midi != null ? (o.midi < leg.split_midi ? 'left' : 'right')
+      : (leg?.hand === 'left' ? 'left' : 'right');
+    const dir = hand === 'right' ? 1 : -1;
+    const zwart = isZwart(o.midi);
+    const yStok = yOfGrid(t, lay.q, lay.top);
+    const r = (MAAT.kop * balk.w) / 2;
+    const cx = xOfMidi(o.midi, balk);
+    out.push({
+      key: o.layerId + '/' + (o.channel ?? '') + '/' + o.midi + '/' + o.start, midi: o.midi, hand,
+      cx, cy: zwart ? yStok - r : yStok + r, r, yStok, zwart,
+      stokX0: cx, stokX1: cx + dir * MAAT.stokLengte * balk.w,
+    });
+  }
+  return out;
 }
 
 /** Welke balk ligt onder een x: 'pedal' of 'manual'. */

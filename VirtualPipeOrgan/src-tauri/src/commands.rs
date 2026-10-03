@@ -4658,6 +4658,33 @@ pub fn notation_set_meter(state: State<AppState>, app: tauri::AppHandle, score_i
     Ok(gen)
 }
 
+/// Toongeslacht van een live-score (0.7.72): mineur geeft in klavar een ruit
+/// om de grondtoon en `<mode>minor</mode>` in de MusicXML. Via EditCommand (undo).
+#[tauri::command]
+pub fn notation_set_mode(state: State<AppState>, app: tauri::AppHandle, score_id: u32, minor: bool) -> Result<u64, String> {
+    let gen = with_score_mut(&state, score_id, |sc| {
+        let cmd = crate::notation::EditCommand::SetMode { old: sc.minor, new: minor };
+        if let Some(inv) = cmd.apply(sc) {
+            sc.push_undo(inv);
+        }
+        sc.generation
+    })?;
+    tauri::async_runtime::spawn(emit_score_changed(app, score_id, gen));
+    Ok(gen)
+}
+
+/// Sla een tekstbestand op dat de frontend heeft opgebouwd (0.7.72: de
+/// klavar-tekening als SVG). Doel gekozen via de save-dialoog.
+#[tauri::command]
+pub fn save_text_file(path: String, text: String) -> Result<(), String> {
+    if let Some(parent) = std::path::Path::new(&path).parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    std::fs::write(&path, text.as_bytes()).map_err(|e| format!("Kan niet schrijven: {}", e))?;
+    info!("Tekstbestand opgeslagen naar {}", path);
+    Ok(())
+}
+
 /// Titel van een live-score (boven de partituur + bestandsnaam-suggestie).
 #[tauri::command]
 pub fn notation_set_title(state: State<AppState>, app: tauri::AppHandle, score_id: u32, title: String) -> Result<u64, String> {

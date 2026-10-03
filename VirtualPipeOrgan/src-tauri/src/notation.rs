@@ -46,6 +46,10 @@ pub struct NotationOptions {
     /// 0 = losser (afwijkingen krijgen een fijner sub-raster). None = 100.
     #[serde(default)]
     pub tolerance_pct: Option<u8>,
+    /// Mineur (0.7.72): voor het toonsoortteken in klavar (ruit i.p.v. cirkel)
+    /// en `<mode>minor</mode>` in de MusicXML. None = majeur.
+    #[serde(default)]
+    pub minor: Option<bool>,
 }
 
 /// Door de gebruiker samengestelde notenbalk (notatievenster → backend).
@@ -486,7 +490,11 @@ pub fn render_musicxml(qs: &QuantizedScore, opts: &NotationOptions) -> Result<St
             if m == 0 {
                 xml.push_str("      <attributes>\n");
                 xml.push_str(&format!("        <divisions>{}</divisions>\n", q));
-                xml.push_str(&format!("        <key><fifths>{}</fifths></key>\n", opts.key_fifths.clamp(-7, 7)));
+                if opts.minor == Some(true) {
+                    xml.push_str(&format!("        <key><fifths>{}</fifths><mode>minor</mode></key>\n", opts.key_fifths.clamp(-7, 7)));
+                } else {
+                    xml.push_str(&format!("        <key><fifths>{}</fifths></key>\n", opts.key_fifths.clamp(-7, 7)));
+                }
                 xml.push_str(&format!("        <time><beats>{}</beats><beat-type>4</beat-type></time>\n", beats));
                 if staff.bass_clef {
                     xml.push_str("        <clef><sign>F</sign><line>4</line></clef>\n");
@@ -641,6 +649,9 @@ pub struct Score {
     pub title: String,
     /// Kwantisatie-tolerantie (0..=100) — schuif "los ↔ strak".
     pub tolerance_pct: u8,
+    /// Mineur (0.7.72): toonsoortteken in klavar en `<mode>` in de MusicXML.
+    #[serde(default)]
+    pub minor: bool,
     pub metronome: MetronomeCfg,
     /// Alleen armed = actief onder één laag tegelijk; None = geen opname.
     pub armed_layer: Option<u32>,
@@ -667,6 +678,7 @@ impl Score {
             bpm: 90.0, beats_per_bar: 4, quantize: 4, key_fifths: 0,
             title: String::from("Live opname"),
             tolerance_pct: 80,
+            minor: false,
             metronome: MetronomeCfg::default(),
             armed_layer: None,
             generation: 1,
@@ -790,6 +802,7 @@ pub fn options_from_score(score: &Score) -> NotationOptions {
         title: Some(score.title.clone()),
         staves: None,
         tolerance_pct: Some(score.tolerance_pct),
+        minor: Some(score.minor),
     }
 }
 
@@ -878,6 +891,8 @@ pub enum EditCommand {
     SetKey { old: i8, new: i8 },
     /// Wijzig maatsoort (tellen per maat, x/4).
     SetMeter { old: u8, new: u8 },
+    /// Wijzig het toongeslacht (majeur/mineur, 0.7.72).
+    SetMode { old: bool, new: bool },
     /// Hand en splitspunt van een balk in klavar (0.7.70).
     SetLayerHand { layer: u32, old: (Option<KlavarHand>, Option<u8>), new: (Option<KlavarHand>, Option<u8>) },
     /// Hand per noot in klavar (0.7.70): (event-id, nieuwe hand); undo bewaart de oude.
@@ -1003,6 +1018,12 @@ impl EditCommand {
                 score.bump_gen();
                 Some(EditCommand::SetMeter { old: new, new: old })
             }
+            EditCommand::SetMode { old, new } => {
+                if score.minor == new { return None; }
+                score.minor = new;
+                score.bump_gen();
+                Some(EditCommand::SetMode { old: new, new: old })
+            }
             EditCommand::SetLayerHand { layer, old: _, new } => {
                 let Some(l) = score.layers.iter_mut().find(|l| l.id == layer) else { return None };
                 let oud = (l.klavar_hand, l.klavar_split);
@@ -1089,7 +1110,7 @@ mod tests {
     use super::*;
 
     fn opts() -> NotationOptions {
-        NotationOptions { bpm: 60.0, beats_per_bar: 4, quantize: 4, key_fifths: 0, title: Some("Test".into()), staves: None, tolerance_pct: None }
+        NotationOptions { bpm: 60.0, beats_per_bar: 4, quantize: 4, key_fifths: 0, title: Some("Test".into()), staves: None, tolerance_pct: None, minor: None }
     }
 
     #[test]
@@ -1250,6 +1271,23 @@ mod tests {
     }
 
     #[test]
+    fn set_mode_undo_en_musicxml_mode() {
+        let mut sc = Score::new(1);
+        let inv = EditCommand::SetMode { old: false, new: true }.apply(&mut sc).expect("inverse");
+        assert!(sc.minor);
+        inv.apply(&mut sc);
+        assert!(!sc.minor);
+        assert!(EditCommand::SetMode { old: false, new: false }.apply(&mut sc).is_none());
+        // Mineur zet <mode>minor</mode>; majeur laat de XML zoals hij was.
+        let staves = vec![Staff { name: "T".into(), bass_clef: false, notes: vec![NoteEv::anoniem(60, 0.0, 1.0)], ..Default::default() }];
+        let mut o = opts();
+        o.minor = Some(true);
+        assert!(build_musicxml(&staves, &o).expect("xml").contains("<fifths>0</fifths><mode>minor</mode>"));
+        o.minor = None;
+        assert!(!build_musicxml(&staves, &o).expect("xml").contains("<mode>"));
+    }
+
+    #[test]
     fn set_layer_hand_undo() {
         let mut sc = Score::new(1);
         let l = sc.add_layer("Hoofdwerk".into(), None);
@@ -1320,7 +1358,7 @@ mod tests {
     }
 
     fn fixture_opts() -> NotationOptions {
-        NotationOptions { bpm: 60.0, beats_per_bar: 3, quantize: 4, key_fifths: -2, title: Some("Fixture 0.7.69".into()), staves: None, tolerance_pct: Some(80) }
+        NotationOptions { bpm: 60.0, beats_per_bar: 3, quantize: 4, key_fifths: -2, title: Some("Fixture 0.7.69".into()), staves: None, tolerance_pct: Some(80), minor: None }
     }
 
     /// Tweede fixture (0.7.70): de paden die de eerste niet raakt — sub-raster
@@ -1354,7 +1392,7 @@ mod tests {
     }
 
     fn fixture2_opts() -> NotationOptions {
-        NotationOptions { bpm: 72.5, beats_per_bar: 3, quantize: 4, key_fifths: 3, title: Some("A & B <C>".into()), staves: None, tolerance_pct: Some(60) }
+        NotationOptions { bpm: 72.5, beats_per_bar: 3, quantize: 4, key_fifths: 3, title: Some("A & B <C>".into()), staves: None, tolerance_pct: Some(60), minor: None }
     }
 
     const FIXTURE_PAD: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/src/testdata/notatie_0769.musicxml");

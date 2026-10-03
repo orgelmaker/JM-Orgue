@@ -12,7 +12,7 @@
   // Elke noot kent haar event-ID (data-id); er is geen OSMD-correlatie nodig.
   import { createEventDispatcher, onDestroy } from 'svelte';
   import { t } from '../lib/i18n.js';
-  import { MAAT, PX_PER_MM, splitSystems, layoutSystem, paginate, hitTest, gridTimeAtY, staffAtX, nearestKey } from '../lib/klavarLayout.js';
+  import { MAAT, PX_PER_MM, splitSystems, layoutSystem, paginate, hitTest, gridTimeAtY, staffAtX, nearestKey, nuLijnY, openNoten } from '../lib/klavarLayout.js';
 
   export let model = null;
   export let selectionIds = new Set();
@@ -21,10 +21,20 @@
   export let stepMode = false;
   export let recording = false;
   export let live = false;
+  // Inspelen (0.7.72): het opnametijdstip in rastereenheden (nu-lijn) en de
+  // toetsen die nu ingedrukt zijn [{ layerId, midi, start }].
+  export let nowGrid = null;
+  export let openNotes = [];
 
   const dispatch = createEventDispatcher();
 
-  $: layouts = model ? splitSystems(model).map(s => layoutSystem(model, s, { verbergLaatsteStop: recording })) : [];
+  // Tijdens het inspelen loopt het papier twee maten vóór op de nu-lijn.
+  // `extraMaten` is een getal: Svelte herrekent de lay-out alleen als het
+  // verandert (eens per maat), niet bij elke stap van de nu-lijn.
+  $: extraMaten = model && nowGrid != null && model.measure_len > 0
+    ? Math.max(0, Math.floor(nowGrid / model.measure_len) + 2 - model.num_measures) : 0;
+  $: effModel = model && extraMaten ? { ...model, num_measures: model.num_measures + extraMaten } : model;
+  $: layouts = effModel ? splitSystems(effModel).map(s => layoutSystem(effModel, s, { verbergLaatsteStop: recording })) : [];
   $: paginas = paginate(layouts);
   $: kpx = PX_PER_MM * zoom;
   // Lijnen nooit dunner dan één schermpixel.
@@ -143,6 +153,19 @@
                   {#each lay.maatnummers as n}
                     <text class="k-tekst k-maatnummer" x={n.x} y={n.y} font-size={MAAT.tekst * 0.85}>{n.tekst}</text>
                   {/each}
+                  <!-- Toonsoortteken boven de eerste maat (0.7.72) -->
+                  {#if lay.toonsoort}
+                    {#if lay.toonsoort.minor}
+                      <path class="k-toonsoort" d="M {lay.toonsoort.x} {lay.toonsoort.y - lay.toonsoort.ring} L {lay.toonsoort.x + lay.toonsoort.ring} {lay.toonsoort.y} L {lay.toonsoort.x} {lay.toonsoort.y + lay.toonsoort.ring} L {lay.toonsoort.x - lay.toonsoort.ring} {lay.toonsoort.y} Z" stroke-width={sw(MAAT.stok)} />
+                    {:else}
+                      <circle class="k-toonsoort" cx={lay.toonsoort.x} cy={lay.toonsoort.y} r={lay.toonsoort.ring} stroke-width={sw(MAAT.stok)} />
+                    {/if}
+                    <circle class="k-kop" class:zwart={lay.toonsoort.zwart} cx={lay.toonsoort.x} cy={lay.toonsoort.y} r={lay.toonsoort.r} stroke-width={sw(MAAT.kopLijn)} />
+                  {/if}
+                  <!-- Balken per tel (0.7.72) -->
+                  {#each lay.balken as b}
+                    <polyline class="k-balk" points={b.punten.map(p => p.x + ',' + p.y).join(' ')} stroke-width={sw(b.dikte)} />
+                  {/each}
                   <!-- Akkoordlijnen, stokken en koppen -->
                   {#each lay.akkoordlijnen as a}
                     <line class="k-stok" x1={a.x0} x2={a.x1} y1={a.y} y2={a.y} stroke-width={sw(MAAT.stok)} />
@@ -162,6 +185,23 @@
                   {#each lay.stippen as d}
                     <circle class="k-stip" cx={d.x} cy={d.y} r={d.r} />
                   {/each}
+                  <!-- Manuaallabels bij een wissel van laag (0.7.72) -->
+                  {#each lay.labels as l}
+                    <text class="k-label" x={l.x} y={l.y} text-anchor={l.anchor} font-size={MAAT.labelTekst}>{l.tekst}</text>
+                  {/each}
+                  <!-- Inspelen (0.7.72): aangehouden toetsen (grijs) en de nu-lijn -->
+                  {#each openNoten(lay, effModel, openNotes) as o (o.key)}
+                    <g class="k-noot k-open">
+                      <line class="k-stok" x1={o.stokX0} x2={o.stokX1} y1={o.yStok} y2={o.yStok} stroke-width={sw(MAAT.stok)} />
+                      <circle class="k-kop" class:zwart={o.zwart} cx={o.cx} cy={o.cy} r={o.r} stroke-width={sw(MAAT.kopLijn)} />
+                    </g>
+                  {/each}
+                  {#if nowGrid != null}
+                    {@const yNu = nuLijnY(lay, nowGrid)}
+                    {#if yNu != null}
+                      <line class="k-nu" x1={lay.xLinks - 1.5} x2={lay.xRechts + 1.5} y1={yNu} y2={yNu} stroke-width={sw(0.3)} />
+                    {/if}
+                  {/if}
                 </svg>
               {/each}
             </div>
@@ -204,6 +244,14 @@
   .k-kop.zwart { fill: #000; }
   .k-stop { fill: none; stroke: #000; stroke-linejoin: miter; }
   .k-stip { fill: #000; }
+  .k-balk { fill: none; stroke: #000; stroke-linejoin: round; stroke-linecap: butt; }
+  .k-label { fill: #333; font-family: Georgia, 'Times New Roman', serif; font-style: italic; }
+  .k-toonsoort { fill: none; stroke: #000; }
+  /* Inspelen: aangehouden toetsen grijs, de nu-lijn in het rood van de opnameknop. */
+  .k-open .k-kop { stroke: #888; }
+  .k-open .k-kop.zwart { fill: #888; }
+  .k-open .k-stok { stroke: #888; }
+  .k-nu { stroke: #c0392b; opacity: 0.85; }
   /* Selectie en cursor in het bestaande blauw van de selectie-overlay. */
   .k-noot.selected .k-kop { stroke: rgb(40, 110, 240); stroke-width: 0.45; }
   .k-noot.selected .k-kop.zwart { fill: rgb(40, 110, 240); }
@@ -211,6 +259,7 @@
   .k-noot.cursor .k-kop { filter: drop-shadow(0 0 0.6px rgba(40, 110, 240, 0.9)); }
 
   @media print {
+    .k-nu, .k-open { display: none; }
     .klavar-pagina { break-after: page; page-break-after: always; }
     .klavar-pagina:last-child { break-after: auto; page-break-after: auto; }
     .klavar-kop { display: block; }

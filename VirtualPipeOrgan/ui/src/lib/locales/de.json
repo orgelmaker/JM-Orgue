@@ -829,7 +829,14 @@
     "to_right_hand": "R →",
     "to_left_hand_title": "Ausgewählte Töne zur linken Hand (Alt+←)",
     "to_right_hand_title": "Ausgewählte Töne zur rechten Hand (Alt+→)",
-    "klavar_tempo": "Tempo {bpm}"
+    "klavar_tempo": "Tempo {bpm}",
+    "save_as_svg": "Als SVG speichern…",
+    "save_as_svg_title": "Die Klavar-Zeichnung als SVG-Datei speichern (öffnet in Browser oder Zeichenprogramm)",
+    "svg_saved": "SVG gespeichert: {path}",
+    "svg_save_failed": "SVG speichern fehlgeschlagen: {error}",
+    "key_mode": "Tongeschlecht",
+    "key_major": "Dur",
+    "key_minor": "Moll"
   },
   "temperaments": {
     "name_prompt": "Name für diese Stimmung:"

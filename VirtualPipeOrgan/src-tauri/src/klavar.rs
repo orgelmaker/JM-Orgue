@@ -24,6 +24,7 @@
 
 use crate::notation::{options_from_score, quantize_score, score_to_staves, KlavarHand, NotationOptions, QuantizedScore, Score, Staff};
 use serde::Serialize;
+use std::collections::{BTreeMap, HashMap};
 
 /// Eén regel in de legenda boven de balk: laagnaam en hand (ook lege lagen,
 /// zodat de toewijzing niet verspringt als een laag haar eerste noot krijgt).
@@ -43,6 +44,10 @@ pub struct KlavarLegend {
 pub struct KlavarNote {
     pub id: Option<u64>,
     pub layer_id: Option<u32>,
+    /// Balkindex in de invoer (legend[staff] hoort erbij); alleen intern,
+    /// voor de manuaallabels, die zo ook in bestandsmodus werken.
+    #[serde(skip)]
+    pub staff: usize,
     pub midi: u8,
     /// Rastereenheden, einde exclusief en ONGEKORT (klavar is polyfoon).
     pub start: u64,
@@ -60,9 +65,12 @@ pub struct KlavarNote {
     /// Maatstrepen (rastermomenten) die deze noot kruist, voor de stip onder
     /// de bovenste maatstreep van een systeem.
     pub bar_crossings: Vec<u64>,
-    /// Balkgroep per tel (0.7.72); nu altijd None.
+    /// Balkgroep (0.7.72): noten van één (balk, hand) die korter zijn dan een
+    /// tel en binnen één tel met minstens twee inzetten staan, delen een balk.
     pub beam: Option<u32>,
-    /// Manuaallabel bij een wissel van laag (0.7.72); nu altijd None.
+    /// Manuaallabel (0.7.72): de laagnaam bij de eerste noot van een hand en
+    /// bij elke wissel van laag binnen die hand (alleen bij meer dan één
+    /// manuaallaag).
     pub label: Option<String>,
 }
 
@@ -89,6 +97,11 @@ pub struct KlavarModel {
     pub measure_len: u64,
     /// Uit het langste ongekorte einde, minimaal 1.
     pub num_measures: u64,
+    /// Toonsoort (0.7.72): kwintenaantal, toongeslacht en de grondtoon als
+    /// pitch-class (0 = c) voor het toonsoortteken boven de eerste maat.
+    pub key_fifths: i8,
+    pub minor: bool,
+    pub key_root: u8,
     /// Alle lagen, ook lege.
     pub legend: Vec<KlavarLegend>,
     /// Eén manuaalbalk voor alle manuaallagen (hand via de stok).
@@ -217,10 +230,59 @@ fn stop_en_stippen(alle: &mut [KlavarNote], groep: &[usize], speling: u64, measu
     }
 }
 
+/// Balkgroepen (0.7.72) voor één groep (balk, hand): per tel de noten die
+/// korter zijn dan een tel; met minstens twee inzetten in die tel krijgen ze
+/// samen een balknummer. Nooit over een telgrens.
+fn balkgroepen(alle: &mut [KlavarNote], groep: &[usize], q: u64, teller: &mut u32) {
+    let mut per_tel: BTreeMap<u64, Vec<usize>> = BTreeMap::new();
+    for &i in groep {
+        let n = &alle[i];
+        if n.end_cut.saturating_sub(n.start) < q {
+            per_tel.entry(n.start / q).or_default().push(i);
+        }
+    }
+    for (_, idx) in per_tel {
+        let mut inzetten: Vec<u64> = idx.iter().map(|&i| alle[i].start).collect();
+        inzetten.sort_unstable();
+        inzetten.dedup();
+        if inzetten.len() < 2 { continue; }
+        *teller += 1;
+        for i in idx { alle[i].beam = Some(*teller); }
+    }
+}
+
+/// Manuaallabels (0.7.72) voor één groep (balk, hand): de balknaam bij de
+/// eerste noot en bij elke wissel van balk (laag of MIDI-balk). `groep` is op
+/// tijd gesorteerd; `namen` per balkindex. Twee balken op één inzet tellen
+/// niet als wissel: de "vorige balk" verandert alleen als de wissel op een
+/// nieuwe inzet is gezien, anders bleef een echte wissel erna ongelabeld.
+fn labels(alle: &mut [KlavarNote], groep: &[usize], namen: &HashMap<usize, String>) {
+    let mut vorige: Option<usize> = None;
+    let mut vorige_start: Option<u64> = None;
+    for &i in groep {
+        let balk = alle[i].staff;
+        let start = alle[i].start;
+        if vorige != Some(balk) && vorige_start != Some(start) {
+            if let Some(naam) = namen.get(&balk) {
+                alle[i].label = Some(naam.clone());
+            }
+            vorige = Some(balk);
+        }
+        vorige_start = Some(start);
+    }
+}
+
+/// Grondtoon van een toonsoort als pitch-class (0 = c): majeur via de
+/// kwintencirkel, mineur de parallelle (kleine terts lager).
+pub fn key_root(key_fifths: i8, minor: bool) -> u8 {
+    let majeur = (7 * key_fifths as i32).rem_euclid(12);
+    (if minor { majeur + 9 } else { majeur }).rem_euclid(12) as u8
+}
+
 /// Het klavar-model uit het gedeelde gekwantiseerde model. `handen` is de
 /// toewijzing per balkindex (uit `assign_hands` over ALLE balken), `legend`
 /// de legenda over alle lagen.
-pub fn klavar_model(qs: &QuantizedScore, handen: &[(KlavarHand, Option<u8>)], legend: Vec<KlavarLegend>, title: &str, generation: Option<u64>) -> KlavarModel {
+pub fn klavar_model(qs: &QuantizedScore, handen: &[(KlavarHand, Option<u8>)], legend: Vec<KlavarLegend>, title: &str, generation: Option<u64>, key_fifths: i8, minor: bool) -> KlavarModel {
     let mut manual: Vec<KlavarNote> = Vec::new();
     let mut pedal: Vec<KlavarNote> = Vec::new();
     for st in &qs.staves {
@@ -228,7 +290,7 @@ pub fn klavar_model(qs: &QuantizedScore, handen: &[(KlavarHand, Option<u8>)], le
         for n in &st.notes {
             let hand = hand_van_noot(balk, n.hand, n.midi);
             let noot = KlavarNote {
-                id: n.id, layer_id: st.layer_id, midi: n.midi, start: n.start, end: n.end, end_cut: n.end, hand,
+                id: n.id, layer_id: st.layer_id, staff: st.staff_index, midi: n.midi, start: n.start, end: n.end, end_cut: n.end, hand,
                 stop: false, dots: Vec::new(), bar_crossings: Vec::new(), beam: None, label: None,
             };
             if hand == KlavarHand::Pedal { pedal.push(noot); } else { manual.push(noot); }
@@ -250,6 +312,19 @@ pub fn klavar_model(qs: &QuantizedScore, handen: &[(KlavarHand, Option<u8>)], le
     let alle_pedaal: Vec<usize> = (0..pedal.len()).collect();
     stop_en_stippen(&mut pedal, &alle_pedaal, speling, qs.measure_len);
 
+    // Balken per tel en manuaallabels (0.7.72).
+    let mut balk_teller = 0u32;
+    balkgroepen(&mut manual, &rechts, qs.q, &mut balk_teller);
+    balkgroepen(&mut manual, &links, qs.q, &mut balk_teller);
+    balkgroepen(&mut pedal, &alle_pedaal, qs.q, &mut balk_teller);
+    // legend[i] hoort bij balk i (legenda() loopt over de balken in volgorde).
+    let manuaalbalken: Vec<(usize, &KlavarLegend)> = legend.iter().enumerate().filter(|(_, l)| l.hand != KlavarHand::Pedal).collect();
+    if manuaalbalken.len() > 1 {
+        let namen: HashMap<usize, String> = manuaalbalken.iter().map(|(i, l)| (*i, l.name.clone())).collect();
+        labels(&mut manual, &rechts, &namen);
+        labels(&mut manual, &links, &namen);
+    }
+
     let langste = manual.iter().chain(pedal.iter()).map(|n| n.end).max().unwrap_or(0);
     let num_measures = if qs.measure_len == 0 { 1 } else { ((langste + qs.measure_len - 1) / qs.measure_len).max(1) };
 
@@ -264,6 +339,9 @@ pub fn klavar_model(qs: &QuantizedScore, handen: &[(KlavarHand, Option<u8>)], le
         beats_per_bar: qs.beats_per_bar as u8,
         measure_len: qs.measure_len,
         num_measures,
+        key_fifths,
+        minor,
+        key_root: key_root(key_fifths, minor),
         legend,
         manual: KlavarStaff { midi_min: mmin, midi_max: mmax, notes: manual },
         pedal: if heeft_pedaal { Some(KlavarStaff { midi_min: pmin, midi_max: pmax, notes: pedal }) } else { None },
@@ -285,7 +363,7 @@ pub fn klavar_model_from_staves(staves: &[Staff], opts: &NotationOptions, genera
     let legend = legenda(staves, &handen);
     let qs = quantize_score(staves, opts);
     let title = opts.title.clone().unwrap_or_default();
-    klavar_model(&qs, &handen, legend, &title, generation)
+    klavar_model(&qs, &handen, legend, &title, generation, opts.key_fifths, opts.minor.unwrap_or(false))
 }
 
 /// Klavar-model uit een live Score.
@@ -300,7 +378,7 @@ mod tests {
     use crate::notation::{LayerEv, NoteEv};
 
     fn opts(beats: u8, q: u8) -> NotationOptions {
-        NotationOptions { bpm: 60.0, beats_per_bar: beats, quantize: q, key_fifths: 0, title: Some("T".into()), staves: None, tolerance_pct: Some(100) }
+        NotationOptions { bpm: 60.0, beats_per_bar: beats, quantize: q, key_fifths: 0, title: Some("T".into()), staves: None, tolerance_pct: Some(100), minor: None }
     }
 
     /// Balk met noten (midi, start s, eind s); bij 60 bpm en q=4 is één
@@ -405,7 +483,7 @@ mod tests {
     fn speling_heeft_tijdsvloer() {
         // 120 bpm, q=8: een eenheid is 62,5 ms; legato-overlap van 160 ms mag
         // geen stip en geen stopteken geven.
-        let o = NotationOptions { bpm: 120.0, beats_per_bar: 4, quantize: 8, key_fifths: 0, title: None, staves: None, tolerance_pct: Some(100) };
+        let o = NotationOptions { bpm: 120.0, beats_per_bar: 4, quantize: 8, key_fifths: 0, title: None, staves: None, tolerance_pct: Some(100), minor: None };
         let m = klavar_model_from_staves(&[balk("HW", false, Some(KlavarHand::Right), &[(60, 0.0, 1.16), (62, 1.0, 2.0)])], &o, None);
         let n = noot(&m.manual, 60, 0);
         assert!(n.dots.is_empty());
@@ -575,5 +653,94 @@ mod tests {
         assert_eq!(v["manual"]["notes"][0]["hand"], serde_json::json!("right"));
         assert_eq!(v["legend"][1]["hand"], serde_json::json!("pedal"));
         assert_eq!(v["manual"]["notes"][0]["layer_id"], serde_json::json!(sc.layers[0].id));
+        assert_eq!(v["key_root"], serde_json::json!(0));
+    }
+
+    #[test]
+    fn balkgroep_per_tel() {
+        // Vier zestienden in één tel: één balk; twee kwarten: geen; een
+        // achtste + twee zestienden: één balk; een groep stopt op de telgrens.
+        let m = model(&[balk("HW", false, Some(KlavarHand::Right), &[
+            (60, 0.0, 0.25), (62, 0.25, 0.5), (64, 0.5, 0.75), (65, 0.75, 1.0),
+            (67, 1.0, 2.0), (69, 2.0, 3.0),
+            (71, 3.0, 3.5), (72, 3.5, 3.75), (74, 3.75, 4.0),
+            (76, 4.0, 4.5), (77, 4.5, 5.0),
+        ])], 4, 4);
+        let b = |midi: u8, start: u64| noot(&m.manual, midi, start).beam;
+        assert!(b(60, 0).is_some() && b(60, 0) == b(62, 1) && b(62, 1) == b(64, 2) && b(64, 2) == b(65, 3));
+        assert_eq!(b(67, 4), None);
+        assert_eq!(b(69, 8), None);
+        assert!(b(71, 12).is_some() && b(71, 12) == b(72, 14) && b(72, 14) == b(74, 15));
+        assert_ne!(b(71, 12), b(60, 0));
+        assert!(b(76, 16).is_some() && b(76, 16) == b(77, 18) && b(76, 16) != b(71, 12), "nieuwe tel = nieuwe balk");
+    }
+
+    #[test]
+    fn label_bij_wissel_van_laag() {
+        let mut sc = Score::new(1);
+        let hw = sc.add_layer("Hoofdwerk".into(), None);
+        let zw = sc.add_layer("Zwelwerk".into(), None);
+        sc.layers[0].klavar_hand = Some(KlavarHand::Right);
+        sc.layers[1].klavar_hand = Some(KlavarHand::Right);
+        for (li, midi, start) in [(0usize, 60u8, 0u64), (0, 62, 500_000), (1, 64, 1_000_000), (1, 65, 1_500_000), (0, 67, 2_000_000)] {
+            let id = sc.new_event_id();
+            sc.layers[li].takes[0].events.push(LayerEv { id, midi, start_us: start, end_us: start + 400_000, channel: 0, locked: false, hand: None });
+        }
+        let m = klavar_model_from_score(&sc);
+        let lab = |midi: u8| noot(&m.manual, midi, match midi { 60 => 0, 62 => 3, 64 => 6, 65 => 9, _ => 12 }).label.clone();
+        assert_eq!(lab(60).as_deref(), Some("Hoofdwerk"));
+        assert_eq!(lab(62), None);
+        assert_eq!(lab(64).as_deref(), Some("Zwelwerk"));
+        assert_eq!(lab(65), None);
+        assert_eq!(lab(67).as_deref(), Some("Hoofdwerk"));
+        let _ = (hw, zw);
+        // Eén manuaallaag: geen labels.
+        let mut sc1 = Score::new(2);
+        sc1.add_layer("Hoofdwerk".into(), None);
+        let id = sc1.new_event_id();
+        sc1.layers[0].takes[0].events.push(LayerEv { id, midi: 60, start_us: 0, end_us: 400_000, channel: 0, locked: false, hand: None });
+        assert_eq!(klavar_model_from_score(&sc1).manual.notes[0].label, None);
+        // Twee lagen op één inzet zijn geen wissel; de echte wissel erna wél
+        // (HW 60@0, HW 62 + ZW 64 samen @3, ZW 65@6 → label op 65).
+        let mut sc2 = Score::new(3);
+        sc2.add_layer("Hoofdwerk".into(), None);
+        sc2.add_layer("Zwelwerk".into(), None);
+        sc2.layers[0].klavar_hand = Some(KlavarHand::Right);
+        sc2.layers[1].klavar_hand = Some(KlavarHand::Right);
+        for (li, midi, start) in [(0usize, 60u8, 0u64), (0, 62, 500_000), (1, 64, 500_000), (1, 65, 1_000_000)] {
+            let id = sc2.new_event_id();
+            sc2.layers[li].takes[0].events.push(LayerEv { id, midi, start_us: start, end_us: start + 400_000, channel: 0, locked: false, hand: None });
+        }
+        let m2 = klavar_model_from_score(&sc2);
+        assert_eq!(noot(&m2.manual, 60, 0).label.as_deref(), Some("Hoofdwerk"));
+        assert_eq!(noot(&m2.manual, 62, 3).label, None);
+        assert_eq!(noot(&m2.manual, 64, 3).label, None);
+        assert_eq!(noot(&m2.manual, 65, 6).label.as_deref(), Some("Zwelwerk"));
+        // Bestandsmodus: balken zonder layer_id krijgen de labels via de balkindex.
+        let m3 = model(&[
+            balk("Hoofdwerk", false, Some(KlavarHand::Right), &[(60, 0.0, 1.0), (62, 1.0, 2.0)]),
+            balk("Zwelwerk", false, Some(KlavarHand::Right), &[(64, 2.0, 3.0)]),
+        ], 4, 4);
+        assert_eq!(noot(&m3.manual, 60, 0).label.as_deref(), Some("Hoofdwerk"));
+        assert_eq!(noot(&m3.manual, 62, 4).label, None);
+        assert_eq!(noot(&m3.manual, 64, 8).label.as_deref(), Some("Zwelwerk"));
+    }
+
+    #[test]
+    fn toonsoort_grondtoon() {
+        assert_eq!(key_root(0, false), 0);   // C
+        assert_eq!(key_root(1, false), 7);   // G
+        assert_eq!(key_root(-1, false), 5);  // F
+        assert_eq!(key_root(2, false), 2);   // D
+        assert_eq!(key_root(-3, false), 3);  // Es
+        assert_eq!(key_root(0, true), 9);    // a
+        assert_eq!(key_root(-1, true), 2);   // d
+        assert_eq!(key_root(3, true), 6);    // fis
+        let mut sc = Score::new(1);
+        sc.add_layer("HW".into(), None);
+        sc.key_fifths = -1;
+        sc.minor = true;
+        let m = klavar_model_from_score(&sc);
+        assert_eq!((m.key_fifths, m.minor, m.key_root), (-1, true, 2));
     }
 }
