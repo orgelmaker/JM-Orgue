@@ -10,6 +10,7 @@
   import { pasVensterstandToe } from '../lib/vensterStand.js';
   import { registerRegel, korenTekst } from '../lib/registerRegel.js';
   import { midiLearn } from '../lib/midiLearn.js';
+  import { pasSfeerToeAlsGewijzigd } from '../lib/sfeer.js';
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
 
@@ -2796,7 +2797,7 @@
   }
 
   // Gedeelde per-orgel-prefs (knopvorm, zwel-/koppel-zichtbaarheid,
-  // registervolgorde) van andere vensters volgen. Storage-events zijn tussen
+  // registervolgorde) en de sfeer van andere vensters volgen. Storage-events zijn tussen
   // WebView2-vensters onbetrouwbaar → 1s-poll met verander-guards zodat een
   // ongewijzigde waarde geen re-render triggert. Draait in ALLE vensters:
   // zo pikt ook het hoofdvenster wijzigingen uit een extra scherm op.
@@ -2805,6 +2806,11 @@
   // van het andere over — ook die van "Passend" in een klein extra scherm.
   let sharedPrefsInterval = null;
   function refreshSharedPrefs() {
+    // Sfeer uit een ander venster (Sfeer & Layout kan in elk venster met de
+    // instellingenweergave staan; de andere vensters volgen via deze poll).
+    // Vóór de organInfo-guard, want ook zonder orgel moet een extra scherm de
+    // nieuwe kleuren krijgen.
+    pasSfeerToeAlsGewijzigd();
     if (!organInfo) return;
     const ks = readOrganUiPref('jm-orgue-knob-shape') === 'round' ? 'round' : 'rect';
     if (ks !== knobShape) knobShape = ks;

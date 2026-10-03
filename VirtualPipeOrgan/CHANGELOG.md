@@ -5,6 +5,19 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.68] - 2026-10-03
+
+### De sfeer staat er meteen
+
+De gekozen sfeer uit **Sfeer & Layout** (kleuren en lettertype) verschijnt
+nu meteen bij het starten, en ook op extra registerschermen en in het
+notatievenster. Tot nu toe stond elk venster op de standaardkleuren tot
+Algemene instellingen één keer was geopend; extra schermen kregen de eigen
+sfeer helemaal niet. Een wijziging komt binnen een seconde op de andere
+schermen aan, ook als u hem op een extra scherm maakt. Een extra scherm dat
+tot nu toe met het standaardlettertype was ingesteld, heeft na deze update
+misschien één keer **Passend** nodig.
+
 ## [0.7.67] - 2026-10-01
 
 ### Crescendo automatisch vullen: van zacht naar vol, met koppels

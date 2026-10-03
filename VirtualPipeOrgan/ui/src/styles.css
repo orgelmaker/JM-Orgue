@@ -41,9 +41,13 @@
   --gold-border: #d4af37;
   --gold-shadow: rgba(180, 150, 11, 0.3);
   --gold-gradient: linear-gradient(135deg, #d4af37 0%, #f0d060 30%, #d4af37 50%, #b8960b 100%);
-  --accent-soft: var(--accent-soft);   /* zachte rand/highlight */
+  /* Zachte rand/highlight: dezelfde waarden als lib/sfeer.js afleidt uit de
+     basis-gold-border (#d4af37); tot 0.7.68 stonden hier zelfverwijzingen,
+     dus ongeldig, en viel elke var(--accent-soft)-rand weg zolang de sfeer
+     nog niet was toegepast (in extra schermen: altijd). */
+  --accent-soft: rgba(212, 175, 55, 0.15);
   --accent-soft-2: rgba(180, 150, 11, 0.20);
-  --accent-soft-hover: var(--accent-soft-hover);
+  --accent-soft-hover: rgba(212, 175, 55, 0.08);
 
   /* === Status === */
   --success: #4caf50;
@@ -2048,10 +2052,11 @@ input[type="range"]::-webkit-slider-thumb:hover {
   transition: width var(--transition-normal);
 }
 
-/* Opstart-splash: vult de eerste seconden van het hoofdvenster. Bewust alleen
-   kleuren die statisch in :root staan — --accent-soft* wordt pas gezet zodra
-   Algemene Instellingen (LayoutSettings) een keer geopend is. z-index 2000 ligt
-   boven de overlays (kb-learn 900, feedback 60) en onder het contextmenu. */
+/* Opstart-splash: vult de eerste seconden van het hoofdvenster. Alleen
+   kleuren die ook statisch in :root staan: sinds 0.7.68 past App.svelte de
+   sfeer vóór de eerste render toe (lib/sfeer.js), maar de splash moet ook
+   kloppen als dat mislukt. z-index 2000 ligt boven de overlays (kb-learn 900,
+   feedback 60) en onder het contextmenu. */
 .boot-splash {
   position: fixed;
   inset: 0;

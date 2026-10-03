@@ -4,6 +4,22 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Virtual Pipe Organ</title>
+    <script>
+      // Sfeer-voorschot: de bewaarde achtergrond- en tekstkleuren zetten
+      // vóór de stylesheet en de module laden, zodat een donkere sfeer niet
+      // eerst in de standaardkleuren opflitst. lib/sfeer.js zet daarna de
+      // volledige set (zie App.svelte). Gewoon script, geen module: Vite
+      // laat dit staan.
+      try {
+        var c = JSON.parse(localStorage.getItem('jm-orgue-colors') || 'null');
+        if (c && typeof c === 'object') {
+          var s = document.documentElement.style;
+          ['bg-dark', 'bg-panel', 'bg-elevated', 'text'].forEach(function (k) {
+            if (typeof c[k] === 'string') s.setProperty('--' + k, c[k]);
+          });
+        }
+      } catch (e) {}
+    </script>
     <link rel="stylesheet" href="/src/styles.css" />
   </head>
   <body>

@@ -15,6 +15,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import { OpenSheetMusicDisplay } from 'opensheetmusicdisplay';
   import { t, tx } from '../lib/i18n.js';
+  import { pasSfeerToeAlsGewijzigd } from '../lib/sfeer.js';
 
   // URL-hash parsen: file-pad (file-modus) of live-vlag (live-modus).
   const isLive = /[&?]live=1/.test(window.location.hash);
@@ -1049,9 +1050,12 @@
     resizeTimer = setTimeout(() => { buildNoteBoxes(); }, 200);
   }
 
+  // Sfeer uit het hoofdvenster volgen (dit venster heeft geen Console-poll).
+  let sfeerTimer = null;
   onMount(async () => {
     window.addEventListener('keydown', handleKey);
     window.addEventListener('resize', handleResize);
+    sfeerTimer = setInterval(pasSfeerToeAlsGewijzigd, 1000);
     if (isLive) {
       await setupLive();
     } else {
@@ -1066,6 +1070,7 @@
     if (renderCeilingTimer) clearTimeout(renderCeilingTimer);
     if (resizeTimer) clearTimeout(resizeTimer);
     if (playPollTimer) clearInterval(playPollTimer);
+    if (sfeerTimer) clearInterval(sfeerTimer);
     if (playingScore) invoke('midi_stop_playback').catch(() => {});
     window.removeEventListener('mousemove', handleNoteDragMove);
     window.removeEventListener('mouseup', handleNoteDragUp);
@@ -1395,7 +1400,7 @@
     display: flex; align-items: center; flex-wrap: wrap; gap: 0.6rem;
     padding: 0.5rem 0.75rem;
     background: var(--bg-panel, #2a2a2a); color: var(--text, #eee);
-    border-bottom: 1px solid var(--accent-soft, #555);
+    border-bottom: 1px solid var(--text-muted, #555);
     flex-shrink: 0;
   }
   .notation-toolbar label { display: flex; align-items: center; gap: 0.3rem; font-size: 0.8rem; white-space: nowrap; }
@@ -1421,19 +1426,19 @@
     display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem;
     padding: 0.4rem 0.75rem;
     background: var(--bg-elevated, #333); color: var(--text, #eee);
-    border-bottom: 1px solid var(--accent-soft, #555);
+    border-bottom: 1px solid var(--text-muted, #555);
     font-size: 0.78rem; flex-shrink: 0;
   }
   .notation-staves-label { font-weight: 600; color: var(--text-muted, #aaa); }
   .notation-layer {
     display: flex; align-items: center; gap: 0.45rem;
     padding: 0.2rem 0.5rem;
-    border: 1px solid var(--accent-soft, #555); border-radius: 6px;
+    border: 1px solid var(--text-muted, #555); border-radius: 6px;
     background: var(--bg-panel, #2a2a2a);
   }
   .layer-arm {
-    width: 1.1rem; height: 1.1rem; border-radius: 50%; border: 1px solid #666;
-    background: transparent; color: #666; cursor: pointer; font-size: 0.9rem;
+    width: 1.1rem; height: 1.1rem; border-radius: 50%; border: 1px solid var(--text-muted, #666);
+    background: transparent; color: var(--text-muted, #666); cursor: pointer; font-size: 0.9rem;
     display: inline-flex; align-items: center; justify-content: center;
     padding: 0;
   }
@@ -1463,13 +1468,13 @@
     display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem;
     padding: 0.4rem 0.75rem;
     background: var(--bg-elevated, #333); color: var(--text, #eee);
-    border-bottom: 1px solid var(--accent-soft, #555);
+    border-bottom: 1px solid var(--text-muted, #555);
     font-size: 0.78rem; flex-shrink: 0;
   }
   .notation-staff-card {
     display: flex; align-items: center; gap: 0.45rem;
     padding: 0.2rem 0.45rem;
-    border: 1px solid var(--accent-soft, #555); border-radius: 6px;
+    border: 1px solid var(--text-muted, #555); border-radius: 6px;
     background: var(--bg-panel, #2a2a2a);
   }
   .notation-staff-name { width: 7.5rem; font-size: 0.78rem; }
@@ -1485,7 +1490,7 @@
   }
   .wizard-modal {
     background: var(--bg-panel, #2a2a2a); color: var(--text, #eee);
-    border: 1px solid var(--accent-soft, #555); border-radius: 8px;
+    border: 1px solid var(--text-muted, #555); border-radius: 8px;
     padding: 1rem 1.2rem; max-width: 46rem; width: calc(100% - 3rem);
     max-height: 80vh; overflow-y: auto;
   }
@@ -1494,7 +1499,7 @@
   .wizard-staff {
     display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem;
     padding: 0.35rem 0.5rem; margin-bottom: 0.4rem;
-    border: 1px solid var(--accent-soft, #555); border-radius: 6px;
+    border: 1px solid var(--text-muted, #555); border-radius: 6px;
   }
   .wizard-staff-name { width: 9rem; }
   .wizard-divs { display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem; }
@@ -1502,14 +1507,14 @@
   .wizard-remove { margin-left: auto; border: none; background: none; color: #cc6666; font-size: 1.1rem; cursor: pointer; }
   .wizard-actions { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.6rem; }
   .layer-divs {
-    border: 1px dashed var(--accent-soft, #666); border-radius: 5px;
+    border: 1px dashed var(--text-muted, #666); border-radius: 5px;
     background: transparent; color: var(--text-muted, #bbb);
     font-size: 0.72rem; padding: 0.1rem 0.4rem; cursor: pointer;
   }
   .layer-divs-edit {
     display: flex; align-items: center; flex-wrap: wrap; gap: 0.45rem;
     padding: 0.15rem 0.4rem;
-    border: 1px solid var(--accent-soft, #555); border-radius: 5px;
+    border: 1px solid var(--text-muted, #555); border-radius: 5px;
     background: var(--bg-elevated, #333);
   }
 

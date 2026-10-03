@@ -12,11 +12,18 @@
   import { loadAudioProfiles, profileMatchesOutput, deriveProfileFromOutput as deriveProfile, AUDIO_PROFILES_KEY } from './lib/audioProfiles.js';
   import { pickDevice } from './lib/audioDevices.js';
   import { isTekstveld } from './lib/toetsen.js';
+  import { pasSfeerToeAlsGewijzigd } from './lib/sfeer.js';
 
   // Venstertype uit de URL-hash: extra registerscherm (#panel&n=N) of
   // notatievenster (#notation&file=...); anders het hoofdvenster.
   const isPanel = window.location.hash.includes('panel');
   const isNotation = window.location.hash.includes('notation');
+
+  // Sfeer (kleuren, lettertype, textuur) vóór de eerste render, in ELK
+  // venstertype — dus ook in extra registerschermen en het notatievenster.
+  // Tot 0.7.67 gebeurde dit alleen in LayoutSettings.onMount, waardoor de
+  // eigen sfeer pas na het openen van Algemene instellingen verscheen.
+  pasSfeerToeAlsGewijzigd();
 
   // Sessie-bestand: laatst geopend orgel + open extra-vensters (per gebruiker).
   // Bewaard in localStorage zodat de app opent waar je gebleven was.
