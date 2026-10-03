@@ -5,6 +5,19 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.70] - 2026-10-03
+
+### Intern: voorbereiding klavar
+
+De omzetting van een opname naar noten is gesplitst in een gedeeld,
+gekwantiseerd model en de MusicXML-opbouw; het notenschrift verandert
+daardoor niet (vastgelegd in een regressietest die de uitvoer byte voor byte
+met die van 0.7.69 vergelijkt). Elke balk en elke noot kent nu een hand
+(rechts, links, pedaal) voor de klavar-weergave die in de volgende versie
+komt, nog zonder bediening. Een geïmporteerd MIDI-bestand volgt nu dezelfde
+balkindeling als het inspelen, ook als een balk is hernoemd, en een
+pedaalbalk wordt ook aan "Pédale" of "Pedał" herkend.
+
 ## [0.7.69] - 2026-10-03
 
 ### Registertinten: tongwerken rood, vulstemmen blauw

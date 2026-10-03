@@ -14,6 +14,7 @@ mod loop_tool;
 mod mengpool;
 mod midi_archive;
 mod notation;
+mod klavar;
 mod recorder;
 mod remote;
 mod retune;
@@ -467,10 +468,12 @@ fn main() {
             commands::midi_archive_open_dir,
             commands::midi_archive_flush,
             commands::convert_midi_to_musicxml,
+            commands::convert_midi_to_klavar_model,
             commands::save_musicxml,
             commands::notation_new_score,
             commands::notation_get_score,
             commands::notation_get_musicxml,
+            commands::notation_get_klavar_model,
             commands::notation_add_layer,
             commands::notation_add_take,
             commands::notation_arm_layer,
@@ -482,6 +485,8 @@ fn main() {
             commands::notation_set_tolerance,
             commands::notation_set_bpm,
             commands::notation_set_key,
+            commands::notation_set_layer_hand,
+            commands::notation_set_hands,
             commands::notation_set_metronome,
             commands::notation_configure_layers,
             commands::notation_set_layer_divisions,

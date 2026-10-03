@@ -4099,9 +4099,33 @@ pub fn convert_midi_to_musicxml(
     path: String,
     options: crate::notation::NotationOptions,
 ) -> Result<String, String> {
-    use crate::notation::{NoteEv, Staff};
+    let staves = staves_from_midi_file(&state, &path, &options)?;
+    crate::notation::build_musicxml(&staves, &options)
+}
 
-    let bytes = std::fs::read(&path).map_err(|e| format!("Kan MIDI-bestand niet lezen: {}", e))?;
+/// Klavar-model voor een MIDI-bestand (bestandsmodus van het notatievenster,
+/// 0.7.70): dezelfde balkindeling en kwantisatie als `convert_midi_to_musicxml`.
+#[tauri::command]
+pub fn convert_midi_to_klavar_model(
+    state: State<AppState>,
+    path: String,
+    options: crate::notation::NotationOptions,
+) -> Result<crate::klavar::KlavarModel, String> {
+    let staves = staves_from_midi_file(&state, &path, &options)?;
+    Ok(crate::klavar::klavar_model_from_staves(&staves, &options, None))
+}
+
+/// Balken uit een MIDI-bestand: noten per divisie via de kanaal→divisie-
+/// mapping (transpose → klinkende toonhoogte), dan de balkindeling uit de
+/// opties of één balk per divisie/kanaal.
+fn staves_from_midi_file(
+    state: &State<AppState>,
+    path: &str,
+    options: &crate::notation::NotationOptions,
+) -> Result<Vec<crate::notation::Staff>, String> {
+    use crate::notation::{is_pedal_name, NoteEv, Staff};
+
+    let bytes = std::fs::read(path).map_err(|e| format!("Kan MIDI-bestand niet lezen: {}", e))?;
     let raw = crate::notation::extract_notes(&bytes)?;
     if raw.is_empty() {
         return Err("Geen noten gevonden in het MIDI-bestand".into());
@@ -4116,8 +4140,7 @@ pub fn convert_midi_to_musicxml(
         let organ = state.loaded_organ_info.read();
         if let Some(ref o) = *organ {
             for d in &o.divisions {
-                let lname = d.name.to_lowercase();
-                is_pedal.insert(d.name.clone(), lname.contains("pedaal") || lname.contains("pedal"));
+                is_pedal.insert(d.name.clone(), is_pedal_name(&d.name));
                 group_names.push(d.name.clone());
             }
         }
@@ -4136,7 +4159,7 @@ pub fn convert_midi_to_musicxml(
             group_names.push(group.clone());
         }
         notes_of.entry(group).or_default()
-            .push(NoteEv { midi, start_sec: n.start_sec, end_sec: n.end_sec });
+            .push(NoteEv::anoniem(midi, n.start_sec, n.end_sec));
     }
 
     // Stap 2: balk-indeling. Met een door de gebruiker samengestelde indeling
@@ -4159,7 +4182,12 @@ pub fn convert_midi_to_musicxml(
                     Some(n) if !n.trim().is_empty() => n.clone(),
                     _ => spec.divisions.join(" + "),
                 };
-                staves.push(Staff { name, bass_clef: bass, notes });
+                let pedal = spec.divisions.iter().any(|d| *is_pedal.get(d).unwrap_or(&false));
+                staves.push(Staff {
+                    name, bass_clef: bass, notes, pedal,
+                    hand: spec.klavar_hand, split_midi: spec.klavar_split,
+                    ..Default::default()
+                });
             }
         }
         None => {
@@ -4168,13 +4196,15 @@ pub fn convert_midi_to_musicxml(
                 staves.push(Staff {
                     name: group.clone(),
                     bass_clef: *is_pedal.get(group).unwrap_or(&false),
+                    pedal: *is_pedal.get(group).unwrap_or(&false),
                     notes: notes.clone(),
+                    ..Default::default()
                 });
             }
         }
     }
 
-    crate::notation::build_musicxml(&staves, &options)
+    Ok(staves)
 }
 
 /// Sla MusicXML op (doel gekozen via de save-dialoog in de frontend).
@@ -4229,8 +4259,7 @@ pub fn notation_new_score(state: State<AppState>, app: tauri::AppHandle) -> Resu
         let organ = state.loaded_organ_info.read();
         if let Some(ref o) = *organ {
             for d in &o.divisions {
-                let lname = d.name.to_lowercase();
-                let bass = lname.contains("pedaal") || lname.contains("pedal");
+                let bass = crate::notation::is_pedal_name(&d.name);
                 sc.add_layer(d.name.clone(), Some(bass));
                 // Standaard-routering: elke balk krijgt zijn eigen divisie, zodat
                 // inspelen meteen per divisie op de juiste balk landt (0.7.14).
@@ -4262,6 +4291,16 @@ pub fn notation_get_musicxml(state: State<AppState>, score_id: u32) -> Result<St
     let scores = state.notation_scores.read();
     let sc = scores.get(&score_id).ok_or_else(|| format!("Score {} niet gevonden", score_id))?;
     crate::notation::build_musicxml_from_score(sc)
+}
+
+/// Klavar-model voor het gerenderde beeld (0.7.70): dezelfde kwantisatie als
+/// de MusicXML, maar polyfoon en met event-ID's. Een lege score geeft een
+/// leeg model, geen fout.
+#[tauri::command]
+pub fn notation_get_klavar_model(state: State<AppState>, score_id: u32) -> Result<crate::klavar::KlavarModel, String> {
+    let scores = state.notation_scores.read();
+    let sc = scores.get(&score_id).ok_or_else(|| format!("Score {} niet gevonden", score_id))?;
+    Ok(crate::klavar::klavar_model_from_score(sc))
 }
 
 /// Nieuwe laag toevoegen. Geeft de laag-ID terug.
@@ -4331,7 +4370,7 @@ pub fn notation_stop_recording(state: State<AppState>) -> Result<(), String> {
                         let end_us = end_us.max(start_us + 20_000);
                         take.events.push(crate::notation::LayerEv {
                             id: ev_id, midi: note, start_us, end_us,
-                            channel: ch, locked: false,
+                            channel: ch, locked: false, hand: None,
                         });
                         let _ = handle.emit("jm-orgue:notation:note-added", serde_json::json!({
                             "score": sid, "layer": lid, "take": tid,
@@ -4415,6 +4454,9 @@ pub struct PasteNote {
     pub end_us: u64,
     #[serde(default)]
     pub channel: u8,
+    /// Hand in klavar (0.7.70), zodat plakken de per-noot-hand niet verliest.
+    #[serde(default)]
+    pub hand: Option<crate::notation::KlavarHand>,
 }
 
 /// Plak noten in een laag (armed take, of de eerste zichtbare take). De backend
@@ -4436,7 +4478,7 @@ pub fn notation_paste(state: State<AppState>, app: tauri::AppHandle, score_id: u
             let start_us = n.start_us;
             let end_us = n.end_us.max(start_us + 1000);
             events.push((layer_id, take_id, crate::notation::LayerEv {
-                id, midi: n.midi, start_us, end_us, channel: n.channel, locked: true,
+                id, midi: n.midi, start_us, end_us, channel: n.channel, locked: true, hand: n.hand,
             }));
         }
         let cmd = crate::notation::EditCommand::InsertEvents { events };
@@ -4488,6 +4530,37 @@ pub fn notation_set_key(state: State<AppState>, app: tauri::AppHandle, score_id:
     Ok(gen)
 }
 
+/// Hand en splitspunt van een balk in klavar (0.7.70). JS: {scoreId, layerId,
+/// hand: "right"|"left"|"pedal"|null, splitMidi}. Gaat via EditCommand (undo).
+#[tauri::command]
+pub fn notation_set_layer_hand(state: State<AppState>, app: tauri::AppHandle, score_id: u32, layer_id: u32, hand: Option<crate::notation::KlavarHand>, split_midi: Option<u8>) -> Result<u64, String> {
+    let gen = with_score_mut(&state, score_id, |sc| {
+        let oud = sc.layers.iter().find(|l| l.id == layer_id).map(|l| (l.klavar_hand, l.klavar_split)).unwrap_or((None, None));
+        let cmd = crate::notation::EditCommand::SetLayerHand { layer: layer_id, old: oud, new: (hand, split_midi) };
+        if let Some(inv) = cmd.apply(sc) {
+            sc.push_undo(inv);
+        }
+        sc.generation
+    })?;
+    tauri::async_runtime::spawn(emit_score_changed(app, score_id, gen));
+    Ok(gen)
+}
+
+/// Hand per noot in klavar (0.7.70): JS {scoreId, eventIds, hand}; hand null
+/// = terug naar de balkregel. Gaat via EditCommand (undo).
+#[tauri::command]
+pub fn notation_set_hands(state: State<AppState>, app: tauri::AppHandle, score_id: u32, event_ids: Vec<u64>, hand: Option<crate::notation::KlavarHand>) -> Result<u64, String> {
+    let gen = with_score_mut(&state, score_id, |sc| {
+        let cmd = crate::notation::EditCommand::SetHands { items: event_ids.iter().map(|&id| (id, hand)).collect() };
+        if let Some(inv) = cmd.apply(sc) {
+            sc.push_undo(inv);
+        }
+        sc.generation
+    })?;
+    tauri::async_runtime::spawn(emit_score_changed(app, score_id, gen));
+    Ok(gen)
+}
+
 /// Eén balk-specificatie uit de wizard van het notatievenster.
 #[derive(serde::Deserialize)]
 pub struct LayerSpecDto {
@@ -4495,6 +4568,11 @@ pub struct LayerSpecDto {
     pub bass_clef: bool,
     #[serde(default)]
     pub divisions: Vec<String>,
+    /// Hand in klavar (0.7.70); None = standaardregel.
+    #[serde(default)]
+    pub klavar_hand: Option<crate::notation::KlavarHand>,
+    #[serde(default)]
+    pub klavar_split: Option<u8>,
 }
 
 /// Wizard: vervang de balkindeling van een nog lege score (aantal balken,
@@ -4510,7 +4588,11 @@ pub fn notation_configure_layers(state: State<AppState>, app: tauri::AppHandle, 
         sc.layers.clear();
         for spec in layers {
             sc.add_layer(spec.name, Some(spec.bass_clef));
-            if let Some(l) = sc.layers.last_mut() { l.divisions = spec.divisions; }
+            if let Some(l) = sc.layers.last_mut() {
+                l.divisions = spec.divisions;
+                l.klavar_hand = spec.klavar_hand;
+                l.klavar_split = spec.klavar_split;
+            }
         }
         sc.armed_layer = sc.layers.first().map(|l| l.id);
         Ok(sc.generation)
@@ -4622,7 +4704,7 @@ pub fn notation_insert_notes(state: State<AppState>, app: tauri::AppHandle, scor
             let id = sc.new_event_id();
             ids.push(id);
             events.push((layer_id, take_id, crate::notation::LayerEv {
-                id, midi: *midi, start_us, end_us: start_us + dur, channel: 0, locked: true,
+                id, midi: *midi, start_us, end_us: start_us + dur, channel: 0, locked: true, hand: None,
             }));
         }
         let cmd = crate::notation::EditCommand::InsertEvents { events };
@@ -4688,13 +4770,14 @@ pub fn notation_import_midi(
         let mut scores = state.notation_scores.write();
         let sc = scores.get_mut(&score_id).ok_or_else(|| format!("Score {} niet gevonden", score_id))?;
 
-        // Bepaal doelbalk voor elke divisie-naam (bestaande laag met die naam,
-        // anders eerste laag als fallback zodat er niets verloren gaat).
-        let mut division_to_layer: HashMap<String, u32> = HashMap::new();
-        for layer in &sc.layers {
-            division_to_layer.entry(layer.name.clone()).or_insert(layer.id);
-        }
-        let fallback_layer = sc.layers.first().map(|l| l.id).ok_or("Score heeft geen enkele laag")?;
+        // Divisie → laag: eerst de divisie-routering van de laag (dezelfde
+        // regel als het inspelen, 0.7.70), dan de laagnaam als terugval;
+        // anders de armed laag (zoals bij het inspelen), anders de eerste.
+        let division_to_layer = crate::notation::division_layer_map(sc);
+        let fallback_layer = sc.armed_layer
+            .filter(|id| sc.layers.iter().any(|l| l.id == *id))
+            .or_else(|| sc.layers.first().map(|l| l.id))
+            .ok_or("Score heeft geen enkele laag")?;
 
         // Doel-take per laag: bij expliciet `into_take` gaat álles daar naartoe
         // (op de laag waar die take bij hoort); anders per laag een nieuwe take
@@ -4751,7 +4834,7 @@ pub fn notation_import_midi(
                 if let Some(take) = layer.takes.iter_mut().find(|t| t.id == take_id) {
                     take.events.push(crate::notation::LayerEv {
                         id: ev_id, midi, start_us, end_us,
-                        channel: n.channel, locked: false,
+                        channel: n.channel, locked: false, hand: None,
                     });
                 }
             }

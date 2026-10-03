@@ -1,3 +1,5 @@
 # Shell-scripts houden LF: de bouwstraat (ubuntu-runner) voert ze uit en
 # struikelt over CRLF (`$'\r': command not found`).
 *.sh text eol=lf
+# Notatie-fixture: byte-vergelijking in een unittest, dus LF op elk platform.
+*.musicxml text eol=lf

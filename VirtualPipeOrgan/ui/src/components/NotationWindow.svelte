@@ -62,7 +62,12 @@
   let noteBoxes = [];          // [{ eventId, midi, x, y, w, h, cx, cy }]
   $: selectedBoxes = noteBoxes.filter(b => selectionIds.has(b.eventId));
 
-  function isPedalName(n) { const l = (n||'').toLowerCase(); return l.includes('pedaal')||l.includes('pedal'); }
+  // Dezelfde regel als notation.rs::is_pedal_name (0.7.70): "ped" aan een
+  // woordbegin, met diakrieten gestript ("Pédale", "Pedał", "PED").
+  function isPedalName(n) {
+    const plat = (n || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/ł/g, 'l');
+    return plat.split(/[^\p{L}\p{N}]+/u).some(w => w.startsWith('ped'));
+  }
 
   // ---- Metronoom + count-in (0.7.5) ----
   // Aparte WebAudio-klik in het notatievenster: géén orgelpijp en volledig buiten

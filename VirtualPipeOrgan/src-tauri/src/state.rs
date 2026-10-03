@@ -2397,7 +2397,7 @@ impl AppState {
                         if let Some(take) = layer.takes.iter_mut().find(|t| t.id == take_id) {
                             take.events.push(crate::notation::LayerEv {
                                 id: ev_id, midi: *note, start_us, end_us,
-                                channel: *channel, locked: false,
+                                channel: *channel, locked: false, hand: None,
                             });
                         }
                     }
