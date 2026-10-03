@@ -336,9 +336,8 @@ fn route_shared(
             Ok(json!({"ok": gezet}))
         }
         (tiny_http::Method::Post, "/panic") => {
-            state.send_audio_command(AudioCommand::AllNotesOff);
-            // Spooktoetsen mee opruimen (zie stop_audio in commands.rs).
-            state.held_notes.write().clear();
+            // Zelfde pad als de Stop-knop (0.7.74): vlag buiten de wachtrij om.
+            state.paniek();
             Ok(json!({"ok": true}))
         }
         (tiny_http::Method::Post, "/master") => handle_master(state, query),
@@ -683,6 +682,9 @@ fn handle_status(state: &AppState) -> Value {
         "render_peak": crate::audio::render_load().1,
         "render_overloads": crate::audio::render_overload_count(),
         "rt_drops": crate::state::rt_drop_count(),
+        "rt_backlog": crate::state::rt_backlog(),
+        "rt_backlog_peak": crate::state::rt_backlog_piek(),
+        "rt_noteon_weggelaten": crate::state::rt_noteon_weggelaten(),
         "stereo_samples": vpo_sampler::stereo_loading(),
         "peak_left": peaks.0,
         "peak_right": peaks.1,
@@ -1599,8 +1601,7 @@ fn handle_midi_player_play(state: &AppState, body: &str) -> Result<Value, (u16, 
 fn handle_midi_player_stop(state: &AppState) -> Value {
     if let Some(p) = state.midi_player.read().as_ref() {
         p.stop();
-        state.send_audio_command(AudioCommand::AllNotesOff);
-        state.held_notes.write().clear();
+        state.paniek();
     }
     json!({ "ok": true })
 }

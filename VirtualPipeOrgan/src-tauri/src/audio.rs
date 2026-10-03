@@ -85,6 +85,32 @@ pub fn base_pipe(pipe_num: u32) -> u32 {
 mod glij_gain_tests {
     use super::*;
 
+    #[test]
+    fn drain_mag_door_vloer_en_tijdbudget() {
+        let periode = 2_666_000u64; // 128 frames @ 48 kHz
+        let pct = |p: u64| periode / 100 * p;
+        // Onder de vloer altijd door, ook zonder tijd.
+        assert!(drain_mag_door(periode, periode, periode, 7, 8));
+        // Op de vloer (8 eenheden ≈ 1,6 % mengkost): vorige mengtijd 82 % laat
+        // nog net toe, 4 % verstreken erbij niet, 86 % niets.
+        assert!(drain_mag_door(0, periode, pct(82), 8, 8));
+        assert!(!drain_mag_door(pct(4), periode, pct(82), 8, 8));
+        assert!(!drain_mag_door(0, periode, pct(86), 8, 8));
+        // Vorige mengtijd 20 %, 40 % verstreken: 64 nieuwe eenheden (12,5 %)
+        // passen nog, 160 (31 %) niet — de nieuwe stemmen tellen mee.
+        assert!(drain_mag_door(pct(40), periode, pct(20), 64, 8));
+        assert!(!drain_mag_door(pct(40), periode, pct(20), 160, 8));
+        // Vanuit stilte: hooguit ~340 eenheden per callback.
+        assert!(drain_mag_door(pct(10), periode, 0, 330, 8));
+        assert!(!drain_mag_door(pct(10), periode, 0, 400, 8));
+        // De afvoer zelf nooit meer dan de helft van de periode.
+        assert!(!drain_mag_door(periode / 2, periode, 0, 8, 8));
+        assert!(drain_mag_door(periode / 2 - 1, periode, 0, 8, 8));
+        // Onbekende periode: alleen de vloer.
+        assert!(!drain_mag_door(0, 0, 0, 8, 8));
+    }
+
+
     fn k_bij(sr: f32) -> f32 { 1.0 - (-1.0 / (0.015 * sr)).exp() }
 
     #[test]
@@ -518,6 +544,10 @@ impl Testsignaal {
 /// underruns — de UI toont dit naast het stemmenaantal zodat de gebruiker de
 /// kap bewust kan kiezen.
 static RENDER_LOAD_PM: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+/// Paniekvlag (0.7.74): gezet door `AppState::paniek`, gelezen bovenaan de
+/// eerstvolgende callback → alle stemmen los en de wachtende notencommando's
+/// weg. Omzeilt de commando-wachtrij (die bij tutti seconden achter kan lopen).
+pub static PANIEK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 static RENDER_PEAK_PM: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 pub fn render_load() -> (f32, f32) {
     (RENDER_LOAD_PM.load(Ordering::Relaxed) as f32 / 1000.0,
@@ -1517,8 +1547,11 @@ fn remove_finished_voices(voices: &mut Vec<PlayingVoice>, gc: &mut GcSink) {
 /// stem de laatste houder van zijn sample, dan valt de Arc niet hier maar op
 /// de janitor-thread.
 #[inline]
-fn push_voice_capped(voices: &mut Vec<PlayingVoice>, v: PlayingVoice, sample_rate: u32, cap: usize, gc: &mut GcSink) {
+fn push_voice_capped(voices: &mut Vec<PlayingVoice>, v: PlayingVoice, sample_rate: u32, cap: usize, gc: &mut GcSink) -> bool {
     let cap = cap.clamp(MIN_LIVE_VOICES, MAX_LIVE_VOICES);
+    // Geeft terug of een one-shot-stem (staart) direct is verwijderd, zodat
+    // de staarttelling van de callback (0.7.74) kan meetellen.
+    let mut one_shot_weg = false;
     if voices.len() >= cap {
         // Een net gestarte stem (< 20 ms) is nooit slachtoffer — anders stal
         // een tutti-akkoord zijn eigen zojuist aangeslagen pijpen (hoorbaar
@@ -1530,6 +1563,7 @@ fn push_voice_capped(voices: &mut Vec<PlayingVoice>, v: PlayingVoice, sample_rat
             if voices.len() >= cap + 64 || (voices[i].releasing && voices[i].envelope < 0.01) {
                 // Harde noodgrens of al (bijna) stil: direct weg.
                 let stolen = voices.swap_remove(i);
+                one_shot_weg = stolen.one_shot;
                 gc.dispose_voice(stolen);
             } else {
                 // Hoorbaar klinkend: korte fade i.p.v. harde knip (klik,
@@ -1540,6 +1574,23 @@ fn push_voice_capped(voices: &mut Vec<PlayingVoice>, v: PlayingVoice, sample_rat
         }
     }
     voices.push(v);
+    one_shot_weg
+}
+
+/// Mag de commando-afvoer doorgaan? (0.7.74) Altijd tot de vloer (`vloer`
+/// eenheden); daarboven zolang de verstreken tijd plus de mengtijd van de
+/// vorige callback plus de geschatte mengkost van de in déze callback
+/// gestarte eenheden (periode/512 per eenheid: de één-stuk-meting van 0.7.49,
+/// ~1024 stemmen ≈ twee perioden) onder 85 % van de periode blijft, én de
+/// afvoer zelf niet meer dan de helft van de periode opeist. Vanuit stilte
+/// start één callback zo hooguit ~340 eenheden; een tutti van duizenden
+/// NoteOns is in enkele tientallen ms binnen. Puur, dus testbaar.
+pub(crate) fn drain_mag_door(elapsed_ns: u64, periode_ns: u64, prev_mix_ns: u64, spawns_done: usize, vloer: usize) -> bool {
+    if spawns_done < vloer { return true; }
+    if periode_ns == 0 { return false; }
+    let mengkost_nieuw = (spawns_done as u64).saturating_mul(periode_ns / 512);
+    elapsed_ns.saturating_add(prev_mix_ns).saturating_add(mengkost_nieuw) < periode_ns / 100 * 85
+        && elapsed_ns < periode_ns / 2
 }
 
 /// Slachtofferkeuze bij een volle kap, in oplopende hoorbaarheid (GrandOrgue-
@@ -1626,13 +1677,20 @@ fn scaled_release_params(note_ms: f32, midi_note: u8, release_secs: f32) -> (f32
 /// een slotakkoord na een staccato-passage vrijwel zonder nagalm.
 const MAX_RELEASE_VOICES: usize = 160;
 fn budget_release_voices(voices: &mut Vec<PlayingVoice>, sample_rate: u32, cap: usize) {
+    let count = voices.iter().filter(|v| v.one_shot).count();
+    budget_release_voices_met(voices, sample_rate, cap, count);
+}
+
+/// Als `budget_release_voices`, met het aantal one-shot-stemmen (staarten)
+/// meegegeven: de callback telt het één keer per ronde (0.7.74) in plaats van
+/// een O(stemmen)-scan bij elke stemstart.
+fn budget_release_voices_met(voices: &mut Vec<PlayingVoice>, sample_rate: u32, cap: usize, count: usize) {
     // Staartbudget groeit mee met de kap (minimaal het oude 160); daarnaast
     // een zachte limiet à la GrandOrgue: boven 80% van de kap maakt bij elke
     // nieuwe stem eerst onhoorbaar een staart plaats, zodat klinkende pijpen
     // pas als allerlaatste gestolen worden.
     let budget = (cap / 3).max(MAX_RELEASE_VOICES);
     let soft_limit = cap * 4 / 5;
-    let count = voices.iter().filter(|v| v.one_shot).count();
     if count < budget && voices.len() < soft_limit {
         return;
     }
@@ -3782,6 +3840,9 @@ fn run_audio_thread(
     let mut blk_trem_amp: Vec<[f32; 32]> = vec![[1.0; 32]; MIX_BLOCK];
     let mut overload_callbacks: u64 = 0;
     let mut last_overload_warn: Option<std::time::Instant> = None;
+    // Mengtijd van de vorige callback (ns): voorspeller voor het tijdbudget
+    // van de commando-afvoer (zie drain_mag_door).
+    let mut prev_mix_ns: u64 = 0;
     let mut render = move |data: &mut [f32]| {
             // Flush-to-zero / denormals-are-zero op de audio-thread. De reverb-,
             // EQ- en filter-staarten dalen door denormale float-waarden (< ~1e-38),
@@ -3799,6 +3860,15 @@ fn run_audio_thread(
             // voor de belastingsmeter.
             let live_cap = polyphony_target();
             let render_t0 = std::time::Instant::now();
+            let mut mix_ns_dit: u64 = 0;
+
+            // Paniek (0.7.74): alle stemmen los; de notencommando's die nog in
+            // de wachtrij staan worden hieronder weggegooid (de toetsen gelden
+            // als losgelaten), configuratie-commando's worden gewoon verwerkt.
+            let paniek_purge = PANIEK.swap(false, Ordering::Relaxed);
+            if paniek_purge {
+                for voice in voices_clone.write().iter_mut() { voice.release(); }
+            }
 
             // Aantal frames van DEZE callback = het werkbudget. De vaste kappen
             // (16 integraties, 256 commando's) waren bedacht voor 3-6 ms-buffers;
@@ -3816,15 +3886,17 @@ fn run_audio_thread(
             // write-lock. Óók de NoteOff zelf telt mee (één eenheid per bericht):
             // een slotakkoord loslaten stuurt een NoteOff per register per toets
             // — inclusief alle koppeldoelen — en elk daarvan doet minimaal een
-            // O(stemmen)-scan. frames/8 komt neer op een constante ~6000
-            // eenheden per seconde (onafhankelijk van de buffergrootte): een
-            // tutti-registratie van 300 stemmen klinkt dan binnen ~50 ms
-            // volledig — ruim binnen wat een echte registerlade doet, en per
-            // callback hooguit ~10 % van de rendertijd.
-            // De ondergrens van 8 is essentieel: het budget kan nooit 0 worden,
-            // dus élke callback verwerkt minstens één bericht en de queue kan
-            // niet vollopen (wat niet past blijft FIFO staan).
+            // O(stemmen)-scan. frames/8 is de VLOER: ~6000 eenheden per seconde
+            // (onafhankelijk van de buffergrootte), zodat de afvoer nooit
+            // uithongert. Daarbovenop mag de afvoer doorgaan zolang er tijd
+            // over is (drain_mag_door, 0.7.74): de verstreken tijd plus de
+            // mengtijd van de vorige callback moet onder 85 % van de periode
+            // blijven. Zo verwerkt een lichte callback een tutti-akkoord in
+            // één keer en een zware alleen de vloer. Wat niet past blijft FIFO
+            // in de wachtrij; loopt díe vol, dan bewaart de verzender het in
+            // volgorde (state.rs RtOverloop) — er gaat niets verloren.
             let spawn_budget = (frames_now / 8).max(8);
+            let periode_ns: u64 = if sample_rate > 0 { frames_now as u64 * 1_000_000_000 / sample_rate as u64 } else { 0 };
             // Afgeronde achtergrond-loads integreren: map-insert + O(V)-scan.
             let integrate_budget = (frames_now / 32).max(2);
 
@@ -3905,9 +3977,16 @@ fn run_audio_thread(
             // NoteOff vóór zijn NoteOn te liggen (hanger).
             let mut cmds_done = 0u32;
             let mut spawns_done = 0usize;
-            while cmds_done < 256 && spawns_done < spawn_budget {
+            // Staarttelling (one-shot-stemmen) één keer per callback (0.7.74)
+            // en daarna bijgehouden, in plaats van een O(stemmen)-scan bij
+            // élke stemstart in budget_release_voices.
+            let mut one_shot_count: usize = if command_rx_clone.is_empty() { 0 } else { voices_clone.read().iter().filter(|v| v.one_shot).count() };
+            while paniek_purge || (cmds_done < 1024 && drain_mag_door(render_t0.elapsed().as_nanos() as u64, periode_ns, prev_mix_ns, spawns_done, spawn_budget)) {
                 let Ok(cmd) = command_rx_clone.try_recv() else { break };
                 cmds_done += 1;
+                if paniek_purge && matches!(cmd, AudioCommand::NoteOn { .. } | AudioCommand::NoteOff { .. } | AudioCommand::ReleaseStop { .. }) {
+                    continue;
+                }
                 match cmd {
                     AudioCommand::NoteOn { stop_id, pipe_num, midi_note, velocity } => {
                         // Fan-out over de lagen van deze stop (gestapelde ranks
@@ -3992,7 +4071,12 @@ fn run_audio_thread(
                             voice.zet_wind(&pw, wind_div, hoorbaar);
                             if hoorbaar { stoot_nieuw += pw.verbruik; }
                             spawned_any = true;
-                            { let mut vl = voices_clone.write(); budget_release_voices(&mut vl, sample_rate, live_cap); push_voice_capped(&mut vl, voice, sample_rate, live_cap, &mut gc); }
+                            {
+                                let mut vl = voices_clone.write();
+                                budget_release_voices_met(&mut vl, sample_rate, live_cap, one_shot_count);
+                                one_shot_count += voice.one_shot as usize;
+                                if push_voice_capped(&mut vl, voice, sample_rate, live_cap, &mut gc) { one_shot_count = one_shot_count.saturating_sub(1); }
+                            }
                         } else {
                             // Preload-buffer (droog of tremulant — de sleutel
                             // draagt de stand al).
@@ -4028,7 +4112,12 @@ fn run_audio_thread(
                                     }
                                 }
 
-                                { let mut vl = voices_clone.write(); budget_release_voices(&mut vl, sample_rate, live_cap); push_voice_capped(&mut vl, voice, sample_rate, live_cap, &mut gc); }
+                                {
+                                let mut vl = voices_clone.write();
+                                budget_release_voices_met(&mut vl, sample_rate, live_cap, one_shot_count);
+                                one_shot_count += voice.one_shot as usize;
+                                if push_voice_capped(&mut vl, voice, sample_rate, live_cap, &mut gc) { one_shot_count = one_shot_count.saturating_sub(1); }
+                            }
                             }
                         }
                         } // for layer
@@ -4264,8 +4353,9 @@ fn run_audio_thread(
                         // gewoon FIFO door naar de volgende callback.
                         spawns_done += 1 + release_spawn_scratch.len();
                         for rv in release_spawn_scratch.drain(..) {
-                            budget_release_voices(&mut voices_lock, sample_rate, live_cap);
-                            push_voice_capped(&mut voices_lock, rv, sample_rate, live_cap, &mut gc);
+                            budget_release_voices_met(&mut voices_lock, sample_rate, live_cap, one_shot_count);
+                            one_shot_count += rv.one_shot as usize;
+                            if push_voice_capped(&mut voices_lock, rv, sample_rate, live_cap, &mut gc) { one_shot_count = one_shot_count.saturating_sub(1); }
                         }
                     }
                     AudioCommand::ReleaseStop { stop_id } => {
@@ -4397,8 +4487,9 @@ fn run_audio_thread(
                         // registers ineens) gratis door de callback glippen.
                         spawns_done += 1 + spawns.len();
                         for rv in spawns {
-                            budget_release_voices(&mut voices_lock, sample_rate, live_cap);
-                            push_voice_capped(&mut voices_lock, rv, sample_rate, live_cap, &mut gc);
+                            budget_release_voices_met(&mut voices_lock, sample_rate, live_cap, one_shot_count);
+                            one_shot_count += rv.one_shot as usize;
+                            if push_voice_capped(&mut voices_lock, rv, sample_rate, live_cap, &mut gc) { one_shot_count = one_shot_count.saturating_sub(1); }
                         }
                     }
                     AudioCommand::RegisterPercussiveStops(set) => {
@@ -5552,6 +5643,7 @@ fn run_audio_thread(
                         let prev = RENDER_PASS_PM[i].load(Ordering::Relaxed);
                         RENDER_PASS_PM[i].store((prev * 15 + pm) / 16, Ordering::Relaxed);
                     }
+                    mix_ns_dit = (ns_pass[0] + ns_pass[1] + ns_pass[2] + ns_pass[3]).min(u64::MAX as u128) as u64;
                 }
                 // Push naar recorder (try_send — audio mag niet blokkeren).
                 if let Some(rc) = rec_active {
@@ -5601,6 +5693,10 @@ fn run_audio_thread(
                 *pr = *pr * 0.95 + peak_r * 0.05;
             }
 
+            // Mengtijd van deze callback als voorspeller voor de afvoer van de
+            // volgende (zonder stemmen is hij 0: dan mag de afvoer vol gas).
+            prev_mix_ns = mix_ns_dit;
+
             // Belastingsmeter: rendertijd t.o.v. de buffertijd van deze callback.
             // (frames_now is bovenaan de callback bepaald — zie werkbudget.)
             if frames_now > 0 && sample_rate > 0 {
@@ -5618,13 +5714,20 @@ fn run_audio_thread(
                 if pm > 800 {
                     overload_callbacks += 1;
                     RENDER_OVERLOAD_COUNT.store(overload_callbacks, Ordering::Relaxed);
-                    if last_overload_warn.map_or(true, |t: std::time::Instant| t.elapsed().as_secs() >= 5) {
-                        // Concreet advies: de buffergrootte is de knop die het
-                        // vaakst helpt (128 frames geeft 4x meer tijd per callback
-                        // dan 32 en is voor een huisorgel ruim snel genoeg).
-                        warn!("Audio-render zwaar belast: {}% van de buffertijd bij {} frames ({:.2} ms), {} stemmen (kap {}); {} zware callbacks sinds start — zet de buffergrootte op ten minste 128 frames, verlaag de polyfonie of zet de galm uit",
-                            pm / 10, frames_now, frames_now as f64 * 1000.0 / sample_rate as f64,
-                            voice_count_clone.load(Ordering::Relaxed), live_cap, overload_callbacks);
+                    let stemmen = voice_count_clone.load(Ordering::Relaxed);
+                    // Geen advies bij een callback zonder stemmen: dat is de
+                    // laadcallback (duizenden map-inserts, geen klank), geen
+                    // speelbelasting. Het advies past bij de buffergrootte:
+                    // onder 128 frames is dát de knop, daarboven niet meer.
+                    if stemmen > 0 && last_overload_warn.map_or(true, |t: std::time::Instant| t.elapsed().as_secs() >= 5) {
+                        let advies = if frames_now < 128 {
+                            "zet de buffergrootte op ten minste 128 frames"
+                        } else {
+                            "verlaag de polyfonie, zet de galm uit of trek minder registers"
+                        };
+                        warn!("Audio-render zwaar belast: deze callback {}% van de buffertijd (gemiddeld {}%) bij {} frames ({:.2} ms), {} stemmen (kap {}); {} zware callbacks sinds start — {}",
+                            pm / 10, RENDER_LOAD_PM.load(Ordering::Relaxed) / 10, frames_now, frames_now as f64 * 1000.0 / sample_rate as f64,
+                            stemmen, live_cap, overload_callbacks, advies);
                         last_overload_warn = Some(std::time::Instant::now());
                     }
                 }

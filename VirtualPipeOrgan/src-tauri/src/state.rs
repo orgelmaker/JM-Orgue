@@ -12,22 +12,206 @@ use vpo_midi::{MidiInputManager, MidiMessage};
 use crate::audio::{AudioPlayer, AudioCommand, AudioOutputConfig, resolve_host};
 use crate::commands::{OrganInfoDto, CouplerDto};
 
-/// Teller van gedropte realtime audio-commando's (volle queue / consumer weg).
+/// Teller van weggelaten realtime audio-commando's. Sinds 0.7.74 alleen nog
+/// NoteOns boven de harde grens van de overloopbuffer (en zwelstanden die de
+/// nazending overneemt); tot 0.7.73 telde hij élk commando dat bij een volle
+/// queue verloren ging — inclusief NoteOff en ReleaseStop.
 static RT_DROP_COUNT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
-/// Realtime send voor het notenpad: non-blocking `try_send` op een gekloonde
-/// zender (dus BUITEN de player-read-lock). Bij een volle queue of ontbrekende
-/// consumer wordt het commando gedropt en periodiek (elke 50 drops) gewaarschuwd
-/// — een realtime-noot mag nooit tot 3s blokkeren en zo een audio-wissel ophouden.
-#[inline]
-fn rt_send(tx: &Sender<AudioCommand>, cmd: AudioCommand) {
-    if tx.try_send(cmd).is_err() {
-        let n = RT_DROP_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-        if n % 50 == 0 {
-            tracing::warn!("Realtime audio-commando's gedropt (queue vol of consumer weg): totaal {}", n);
+/// Overloopbuffer voor het realtime-notenpad (0.7.74).
+///
+/// Tot 0.7.73 deed `rt_send` een `try_send` en gooide het commando bij een
+/// volle queue WEG — ook NoteOff en ReleaseStop. Een gedropte NoteOff is een
+/// hanger: de stem houdt `note_on_count` 1 en klinkt door tot de paniekknop,
+/// en opnieuw aanslaan helpt niet (refcount 1→2→1). Bij tutti met koppels op
+/// een grote set stuurt één toets een commando per bereikbaar register
+/// (tientallen tot ~90), een akkoord dus honderden, terwijl de audiothread per
+/// callback een begrensd aantal stemstarts afhandelt: de queue van 4096 liep
+/// in een seconde vol (testermelding 0.7.72: 1700 drops in 0,35 s).
+///
+/// Nu: past het commando niet, dan gaat het in deze FIFO; zodra de buffer
+/// niet leeg is gaan ÁLLE volgende commando's erdoorheen, zodat een NoteOff
+/// zijn NoteOn nooit inhaalt. De MIDI-lus zendt elke ronde na (`nazend_rt`),
+/// en `send` zelf probeert eerst de achterstand kwijt te raken. Alleen boven
+/// `RT_OVERLOOP_GRENS` wordt iets weggelaten, en dan uitsluitend NoteOn
+/// (hangervrij: een latere NoteOff op een stille pijp is onschuldig);
+/// NoteOff, ReleaseStop en gains blijven altijd bewaard.
+pub(crate) struct RtOverloop {
+    binnen: parking_lot::Mutex<RtOverloopBinnen>,
+    piek: std::sync::atomic::AtomicUsize,
+    noteon_weggelaten: std::sync::atomic::AtomicU64,
+    episode: std::sync::atomic::AtomicBool,
+}
+
+/// Buffer plus de verrekenlijst van weggelaten NoteOns, onder één lock. Een
+/// NoteOn die boven de grens is weggelaten, laat hier (register, pijp) ×
+/// aantal achter; de bijbehorende NoteOff wordt dan óók weggelaten (die noot
+/// is nooit gestart, dus refcount-neutraal). Zonder die verrekening groeide
+/// de buffer bij een extreme passage onbegrensd met NoteOffs (meting:
+/// 194.494 commando's). Een ReleaseStop maakt alle pijpen van zijn register
+/// stil en wist de lijst voor dat register, anders zou een later geleverde
+/// NoteOn van dezelfde pijp zijn NoteOff kwijtraken (hanger).
+struct RtOverloopBinnen {
+    buf: std::collections::VecDeque<AudioCommand>,
+    weggelaten: std::collections::BTreeMap<(u32, u32), u32>,
+}
+
+impl RtOverloopBinnen {
+    /// Verrekent een binnenkomend commando met de weggelaten NoteOns.
+    /// `true` = dit commando vervalt (NoteOff van een nooit gestarte noot).
+    fn verrekent(&mut self, cmd: &AudioCommand) -> bool {
+        match cmd {
+            AudioCommand::NoteOff { stop_id, pipe_num } => {
+                if let Some(n) = self.weggelaten.get_mut(&(*stop_id, *pipe_num)) {
+                    *n -= 1;
+                    if *n == 0 { self.weggelaten.remove(&(*stop_id, *pipe_num)); }
+                    return true;
+                }
+                false
+            }
+            AudioCommand::ReleaseStop { stop_id } => {
+                self.weggelaten.retain(|k, _| k.0 != *stop_id);
+                false
+            }
+            AudioCommand::AllNotesOff => {
+                self.weggelaten.clear();
+                false
+            }
+            _ => false,
         }
     }
 }
+
+/// Harde grens van de overloopbuffer (commando's). Daarboven worden NoteOns
+/// weggelaten; ~144 B per commando, dus hooguit ~5 MB.
+pub(crate) const RT_OVERLOOP_GRENS: usize = 32_768;
+
+static RT_OVERLOOP: RtOverloop = RtOverloop::new();
+
+impl RtOverloop {
+    pub(crate) const fn new() -> Self {
+        Self {
+            binnen: parking_lot::Mutex::new(RtOverloopBinnen {
+                buf: std::collections::VecDeque::new(),
+                weggelaten: std::collections::BTreeMap::new(),
+            }),
+            piek: std::sync::atomic::AtomicUsize::new(0),
+            noteon_weggelaten: std::sync::atomic::AtomicU64::new(0),
+            episode: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
+
+    /// Achterstand FIFO naar de queue; stopt bij het eerste commando dat niet
+    /// past (dat blijft vooraan staan).
+    fn flush_locked(buf: &mut std::collections::VecDeque<AudioCommand>, tx: &Sender<AudioCommand>) {
+        while let Some(cmd) = buf.pop_front() {
+            if let Err(e) = tx.try_send(cmd) {
+                buf.push_front(e.into_inner());
+                break;
+            }
+        }
+    }
+
+    /// Verstuur in volgorde: eerst de achterstand, dan dit commando; wat niet
+    /// past wordt bewaard. `grens` is de harde buffergrens (zie `bewaar`).
+    pub(crate) fn send(&self, tx: &Sender<AudioCommand>, cmd: AudioCommand, grens: usize) {
+        let mut b = self.binnen.lock();
+        if b.verrekent(&cmd) { return; }
+        if !b.buf.is_empty() {
+            Self::flush_locked(&mut b.buf, tx);
+        }
+        if b.buf.is_empty() {
+            match tx.try_send(cmd) {
+                Ok(()) => self.episode_sluiten(),
+                Err(e) => self.bewaar(&mut b, e.into_inner(), grens),
+            }
+        } else {
+            self.bewaar(&mut b, cmd, grens);
+        }
+    }
+
+    /// Episode afsluiten zodra de buffer leeg is (één keer loggen, met de piek).
+    fn episode_sluiten(&self) {
+        use std::sync::atomic::Ordering::Relaxed;
+        if self.episode.swap(false, Relaxed) {
+            tracing::info!("Audio-wachtrij weer bij (piek achterstand {} commando's)", self.piek.load(Relaxed));
+        }
+    }
+
+    fn bewaar(&self, b: &mut RtOverloopBinnen, cmd: AudioCommand, grens: usize) {
+        use std::sync::atomic::Ordering::Relaxed;
+        if b.buf.len() >= grens {
+            if let AudioCommand::NoteOn { stop_id, pipe_num, .. } = cmd {
+                *b.weggelaten.entry((stop_id, pipe_num)).or_insert(0) += 1;
+                let n = self.noteon_weggelaten.fetch_add(1, Relaxed) + 1;
+                RT_DROP_COUNT.fetch_add(1, Relaxed);
+                if n == 1 || n % 1000 == 0 {
+                    tracing::warn!("Audio-overloopbuffer vol ({} commando's): NoteOn weggelaten (totaal {})", grens, n);
+                }
+                return;
+            }
+        }
+        if b.buf.is_empty() && !self.episode.swap(true, Relaxed) {
+            tracing::warn!("Audio-wachtrij vol: notencommando's worden in volgorde gebufferd en nagezonden (niets gaat verloren)");
+        }
+        b.buf.push_back(cmd);
+        self.piek.fetch_max(b.buf.len(), Relaxed);
+    }
+
+    /// Alsnog sturen wat niet paste (MIDI-lus, elke ronde).
+    pub(crate) fn nazend(&self, tx: &Sender<AudioCommand>) {
+        let mut b = self.binnen.lock();
+        if !b.buf.is_empty() { Self::flush_locked(&mut b.buf, tx); }
+        if b.buf.is_empty() { self.episode_sluiten(); }
+    }
+
+    /// Alles weg (orgelwissel: de stemmen bestaan niet meer).
+    pub(crate) fn leeg(&self) {
+        let mut b = self.binnen.lock();
+        b.buf.clear();
+        b.weggelaten.clear();
+        self.episode.store(false, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Alleen de notencommando's weg (paniek: alles is toch stil); gains en
+    /// configuratie blijven in volgorde staan.
+    pub(crate) fn leeg_noten(&self) {
+        let mut b = self.binnen.lock();
+        b.buf.retain(|c| !matches!(c, AudioCommand::NoteOn { .. } | AudioCommand::NoteOff { .. } | AudioCommand::ReleaseStop { .. }));
+        b.weggelaten.clear();
+        if b.buf.is_empty() { self.episode.store(false, std::sync::atomic::Ordering::Relaxed); }
+    }
+
+    pub(crate) fn len(&self) -> usize { self.binnen.lock().buf.len() }
+    pub(crate) fn piek(&self) -> usize { self.piek.load(std::sync::atomic::Ordering::Relaxed) }
+    pub(crate) fn noteon_weggelaten(&self) -> u64 { self.noteon_weggelaten.load(std::sync::atomic::Ordering::Relaxed) }
+}
+
+/// Realtime send voor het notenpad: non-blocking `try_send` op een gekloonde
+/// zender (dus BUITEN de player-read-lock); wat niet past gaat in volgorde
+/// naar de overloopbuffer (zie `RtOverloop`). Blokkeert nooit: een
+/// realtime-noot mag een audio-wissel niet ophouden.
+#[inline]
+fn rt_send(tx: &Sender<AudioCommand>, cmd: AudioCommand) {
+    RT_OVERLOOP.send(tx, cmd, RT_OVERLOOP_GRENS);
+}
+
+/// Achterstand van de overloopbuffer nazenden (MIDI-lus, elke ronde). Zonder
+/// speler blijft alles bewaard tot er weer een is; een orgelwissel wist via
+/// `rt_overloop_leeg`.
+fn nazend_rt(audio_player: &Arc<RwLock<Option<AudioPlayer>>>) {
+    if RT_OVERLOOP.len() == 0 { return; }
+    let Some(tx) = audio_player.read().as_ref().map(|p| p.command_sender()) else { return; };
+    RT_OVERLOOP.nazend(&tx);
+}
+
+/// Bij een orgelwissel: gebufferde noten van het oude orgel vervallen.
+pub(crate) fn rt_overloop_leeg() { RT_OVERLOOP.leeg(); }
+
+/// Achterstand van de overloopbuffer (status/test-API).
+pub fn rt_backlog() -> usize { RT_OVERLOOP.len() }
+pub fn rt_backlog_piek() -> usize { RT_OVERLOOP.piek() }
+pub fn rt_noteon_weggelaten() -> u64 { RT_OVERLOOP.noteon_weggelaten() }
 
 /// Na een setzer-oproep of General Cancel (die alle trede-claims tot
 /// handregistratie maakt) begint het generaal crescendo opnieuw vanaf de
@@ -2264,6 +2448,7 @@ impl AppState {
                 _ => {}
             }
             let _ = sel.ready_timeout(std::time::Duration::from_millis(2));
+            nazend_rt(&audio_player);
             nazend_zwel(&audio_player);
         }
 
@@ -2682,16 +2867,23 @@ impl AppState {
             let organ = loaded_organ_info.read();
             if let Some(ref o) = *organ {
                 if let Some(ref player) = *audio_player.read() {
+                    let tx = player.command_sender();
                     let mappings = midi_mappings.read();
                     let couplers = active_couplers.read();
                     let held = held_notes.read();
                     for removed_id in to_remove.iter().filter(|s| !is_coupler(s)) {
-                        Self::sync_stop_voices_inner(o, player, &mappings, &couplers, &held, removed_id, false);
+                        Self::sync_stop_voices_inner(o, &tx, &mappings, &couplers, &couplers, &held, removed_id, false);
                     }
+                    // Bijgetrokken registers met de OUDE koppellijst (0.7.74):
+                    // de koppelwissel hieronder stuurt al een NoteOn per nieuwe
+                    // route naar elk getrokken register van de doeldivisie.
+                    // Met de nieuwe lijst kreeg een register dat samen met
+                    // zijn koppel bijkwam dezelfde pijp twee keer (refcount 2,
+                    // één NoteOff bij loslaten → hanger).
                     for added_id in to_add.iter().filter(|s| !is_coupler(s)) {
-                        Self::sync_stop_voices_inner(o, player, &mappings, &couplers, &held, added_id, true);
+                        Self::sync_stop_voices_inner(o, &tx, &mappings, &couplers_before, &couplers, &held, added_id, true);
                     }
-                    Self::sync_coupler_voices_inner(o, player, &mappings, &held, &couplers_before, &couplers);
+                    Self::sync_coupler_voices_inner(o, &tx, &mappings, &held, &couplers_before, &couplers);
                 }
             }
         }
@@ -2816,6 +3008,11 @@ impl AppState {
                 }
             }
 
+            // Ook tijdens het inleren de achterstand nazenden (0.7.74): de
+            // hoofdlus draait dan niet, en gebufferde NoteOffs mogen niet tot
+            // de time-out van het inleren wachten.
+            nazend_rt(audio_player);
+            nazend_zwel(audio_player);
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
         let k = kiezer.noodkeuze(None);
@@ -2886,6 +3083,11 @@ impl AppState {
                 return last_val;
             }
 
+            // Ook tijdens het inleren de achterstand nazenden (0.7.74): de
+            // hoofdlus draait dan niet, en gebufferde NoteOffs mogen niet tot
+            // de time-out van het inleren wachten.
+            nazend_rt(audio_player);
+            nazend_zwel(audio_player);
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
         last_val
@@ -3562,8 +3764,7 @@ impl AppState {
         if self.midi_archive.archiving.load(std::sync::atomic::Ordering::Relaxed) {
             let _ = self.midi_archive_flush(std::time::Duration::from_millis(800));
         }
-        self.send_audio_command(AudioCommand::AllNotesOff);
-        self.held_notes.write().clear();
+        self.paniek();
         {
             let guard = self.audio_player.read();
             if let Some(p) = guard.as_ref() {
@@ -4019,6 +4220,24 @@ impl AppState {
         }
     }
 
+    /// Paniek (0.7.74): alles direct stil, buiten de commando-wachtrij om.
+    /// Tot 0.7.73 ging AllNotesOff als gewoon commando achter alles wat al in
+    /// de wachtrij stond (tot 4096 noten, dus seconden) en blokkeerde de
+    /// UI-thread tot 3 s als de wachtrij vol was. Nu: de audiothread leest de
+    /// vlag bovenaan de eerstvolgende callback, laat alle stemmen los en gooit
+    /// de nog wachtende notencommando's weg; de overloopbuffer verliest zijn
+    /// noten; het AllNotesOff-commando gaat daarna nog non-blocking mee (mag
+    /// mislukken: de vlag heeft het werk al gedaan). De toetsadministratie
+    /// gaat leeg, anders wekt de volgende trapwissel spooktoetsen weer op.
+    pub fn paniek(&self) {
+        RT_OVERLOOP.leeg_noten();
+        crate::audio::PANIEK.store(true, std::sync::atomic::Ordering::Relaxed);
+        if let Some(tx) = self.audio_player.read().as_ref().map(|p| p.command_sender()) {
+            let _ = tx.try_send(AudioCommand::AllNotesOff);
+        }
+        self.held_notes.write().clear();
+    }
+
     /// Get voice count
     pub fn voice_count(&self) -> usize {
         self.audio_player.read()
@@ -4151,21 +4370,26 @@ impl AppState {
     pub fn sync_stop_voices(&self, stop_id: &str, drawn: bool) {
         let organ = self.loaded_organ_info.read();
         let Some(ref o) = *organ else { return; };
-        let player_guard = self.audio_player.read();
-        let Some(ref player) = *player_guard else { return; };
+        let Some(tx) = self.audio_player.read().as_ref().map(|p| p.command_sender()) else { return; };
         let mappings = self.midi_mappings.read();
         let couplers = self.active_couplers.read();
         let held = self.held_notes.read();
-        Self::sync_stop_voices_inner(o, player, &mappings, &couplers, &held, stop_id, drawn);
+        Self::sync_stop_voices_inner(o, &tx, &mappings, &couplers, &couplers, &held, stop_id, drawn);
     }
 
     /// Kern van sync_stop_voices, ook aanroepbaar vanaf de MIDI-thread
     /// (crescendo-pedaal) waar de state via losse Arcs beschikbaar is.
+    /// `active_couplers` bepaalt de koppelroutes, `ta_couplers` de T.A.-stand
+    /// (Tongwerken Af). Bij een crescendotrap zijn dat verschillende lijsten
+    /// (0.7.74): routes uit de OUDE lijst (de koppelwissel dekt de nieuwe),
+    /// T.A. uit de NIEUWE lijst (een tongwerk dat samen met T.A. bijkomt mag
+    /// niet starten, en een tongwerk dat bijkomt terwijl T.A. wegvalt wél).
     pub(crate) fn sync_stop_voices_inner(
         o: &OrganInfoDto,
-        player: &AudioPlayer,
+        tx: &Sender<AudioCommand>,
         mappings: &[MidiChannelMapping],
         active_couplers: &[String],
+        ta_couplers: &[String],
         held: &[(u8, u8, u8)],
         stop_id: &str,
         drawn: bool,
@@ -4178,9 +4402,9 @@ impl AppState {
         let first = stop.first_midi_note as u32;
         let last = stop.last_midi_note as u32;
         if last < first { return; }
-        // Realtime pad (try_send): een trapwissel/preset mag de MIDI-thread niet
-        // tot 3 s per commando blokkeren bij een volle audio-queue (hangers).
-        let tx = player.command_sender();
+        // Realtime pad (rt_send): een trapwissel/preset mag de MIDI-thread niet
+        // tot 3 s per commando blokkeren; wat niet past gaat naar de
+        // overloopbuffer (0.7.74) en wordt in volgorde nagezonden.
 
         if !drawn {
             // Register weggetrokken: alle klinkende pijpen in één commando
@@ -4208,7 +4432,7 @@ impl AppState {
 
         // T.A. (Tongwerken Af) actief op deze divisie? Dan geen tongwerken starten.
         let ta_active = o.couplers.as_ref().map_or(false, |cl| cl.iter().any(|c| {
-            c.coupler_type == "ta" && active_couplers.contains(&c.id) && c.source_division == div_name
+            c.coupler_type == "ta" && ta_couplers.contains(&c.id) && c.source_division == div_name
         }));
 
         // 1) Directe route: ingedrukte toetsen op het eigen klavier van het register.
@@ -4264,7 +4488,7 @@ impl AppState {
     /// door de nog-actieve refcount gewoon staan.
     pub(crate) fn sync_coupler_voices_inner(
         o: &OrganInfoDto,
-        player: &AudioPlayer,
+        tx: &Sender<AudioCommand>,
         mappings: &[MidiChannelMapping],
         held: &[(u8, u8, u8)],
         old_couplers: &[String],
@@ -4272,7 +4496,6 @@ impl AppState {
     ) {
         if held.is_empty() || old_couplers == new_couplers { return; }
         let Some(ref coupler_list) = o.couplers else { return; };
-        let tx = player.command_sender();
 
         let route_key = |r: &ExpandedCouplerRoute| (
             r.source_division.clone(), r.destination_division.clone(), r.pitch_offset, r.gate_type.clone()
@@ -4346,11 +4569,10 @@ impl AppState {
     pub fn sync_coupler_voices(&self, old_couplers: &[String], new_couplers: &[String]) {
         let organ = self.loaded_organ_info.read();
         let Some(ref o) = *organ else { return; };
-        let player_guard = self.audio_player.read();
-        let Some(ref player) = *player_guard else { return; };
+        let Some(tx) = self.audio_player.read().as_ref().map(|p| p.command_sender()) else { return; };
         let mappings = self.midi_mappings.read();
         let held = self.held_notes.read();
-        Self::sync_coupler_voices_inner(o, player, &mappings, &held, old_couplers, new_couplers);
+        Self::sync_coupler_voices_inner(o, &tx, &mappings, &held, old_couplers, new_couplers);
     }
 
     /// Set a stop drawn state
@@ -4972,6 +5194,142 @@ mod recording_tests {
     }
 }
 
+
+#[cfg(test)]
+mod rt_overloop_tests {
+    use super::*;
+
+    fn aan(n: u32) -> AudioCommand { AudioCommand::NoteOn { stop_id: 1, pipe_num: n, midi_note: 60, velocity: 1.0 } }
+    fn uit(n: u32) -> AudioCommand { AudioCommand::NoteOff { stop_id: 1, pipe_num: n } }
+    fn sleutel(c: &AudioCommand) -> (char, u32) {
+        match c {
+            AudioCommand::NoteOn { pipe_num, .. } => ('A', *pipe_num),
+            AudioCommand::NoteOff { pipe_num, .. } => ('U', *pipe_num),
+            AudioCommand::ReleaseStop { stop_id } => ('R', *stop_id),
+            AudioCommand::SetMasterGain(_) => ('G', 0),
+            _ => ('?', 0),
+        }
+    }
+    /// Alles ophalen, afwisselend uit het kanaal en via nazending.
+    fn alles(ov: &RtOverloop, tx: &Sender<AudioCommand>, rx: &Receiver<AudioCommand>) -> Vec<(char, u32)> {
+        let mut uitkomst = Vec::new();
+        loop {
+            while let Ok(c) = rx.try_recv() { uitkomst.push(sleutel(&c)); }
+            if ov.len() == 0 { break; }
+            ov.nazend(tx);
+        }
+        uitkomst
+    }
+
+    #[test]
+    fn volle_wachtrij_buffert_alles_in_volgorde() {
+        let ov = RtOverloop::new();
+        let (tx, rx) = bounded::<AudioCommand>(2);
+        for n in 0..5 { ov.send(&tx, aan(n), 100); }
+        ov.send(&tx, uit(0), 100);
+        assert_eq!(rx.len(), 2, "de eerste twee passen in het kanaal");
+        assert_eq!(ov.len(), 4, "de rest wacht, inclusief de NoteOff");
+        // Er komt ruimte, maar de buffer is niet leeg: een nieuw commando komt
+        // achteraan, nooit vóór de achterstand.
+        let _ = rx.recv().unwrap();
+        ov.send(&tx, uit(1), 100);
+        let rest = alles(&ov, &tx, &rx);
+        assert_eq!(rest, vec![('A', 1), ('A', 2), ('A', 3), ('A', 4), ('U', 0), ('U', 1)]);
+        assert_eq!(ov.noteon_weggelaten(), 0);
+        assert!(ov.piek() >= 4);
+    }
+
+    #[test]
+    fn boven_de_grens_vervalt_alleen_noteon() {
+        let ov = RtOverloop::new();
+        let (tx, rx) = bounded::<AudioCommand>(1);
+        ov.send(&tx, aan(0), 3);           // in het kanaal
+        for n in 1..=3 { ov.send(&tx, aan(n), 3); } // buffer vol (3)
+        ov.send(&tx, aan(9), 3);           // weggelaten
+        ov.send(&tx, uit(0), 3);           // bewaard
+        ov.send(&tx, AudioCommand::ReleaseStop { stop_id: 7 }, 3); // bewaard
+        assert_eq!(ov.noteon_weggelaten(), 1);
+        assert_eq!(ov.len(), 5);
+        let rest = alles(&ov, &tx, &rx);
+        assert_eq!(rest, vec![('A', 0), ('A', 1), ('A', 2), ('A', 3), ('U', 0), ('R', 7)]);
+    }
+
+    #[test]
+    fn weggelaten_noteon_verrekent_zijn_noteoff() {
+        let ov = RtOverloop::new();
+        let (tx, rx) = bounded::<AudioCommand>(1);
+        ov.send(&tx, aan(0), 2);            // kanaal
+        ov.send(&tx, aan(1), 2);            // buffer 1
+        ov.send(&tx, aan(2), 2);            // buffer 2 = grens
+        ov.send(&tx, aan(9), 2);            // weggelaten
+        ov.send(&tx, aan(9), 2);            // nog eens weggelaten (zelfde pijp via twee routes)
+        assert_eq!(ov.noteon_weggelaten(), 2);
+        ov.send(&tx, uit(9), 2);            // verrekend: vervalt
+        ov.send(&tx, uit(9), 2);            // verrekend: vervalt
+        ov.send(&tx, uit(9), 2);            // derde NoteOff hoort bij géén weggelaten NoteOn: bewaard
+        ov.send(&tx, uit(1), 2);            // NoteOff van een gebufferde NoteOn: bewaard
+        assert_eq!(ov.len(), 4);
+        let rest = alles(&ov, &tx, &rx);
+        assert_eq!(rest, vec![('A', 0), ('A', 1), ('A', 2), ('U', 9), ('U', 1)]);
+        // ReleaseStop maakt het register stil en wist de verrekenlijst van
+        // dat register: een latere NoteOff voor die pijp blijft bewaard.
+        let (tx, rx) = bounded::<AudioCommand>(1);
+        ov.send(&tx, aan(0), 1);
+        ov.send(&tx, aan(1), 1);
+        ov.send(&tx, aan(5), 1);            // weggelaten
+        ov.send(&tx, AudioCommand::ReleaseStop { stop_id: 1 }, 1);
+        ov.send(&tx, uit(5), 1);            // bewaard
+        let rest = alles(&ov, &tx, &rx);
+        assert_eq!(rest, vec![('A', 0), ('A', 1), ('R', 1), ('U', 5)]);
+    }
+
+    #[test]
+    fn leeg_noten_bewaart_configuratie_in_volgorde() {
+        let ov = RtOverloop::new();
+        let (tx, _rx) = bounded::<AudioCommand>(1);
+        ov.send(&tx, aan(0), 100);
+        ov.send(&tx, aan(1), 100);
+        ov.send(&tx, AudioCommand::SetMasterGain(-6.0), 100);
+        ov.send(&tx, uit(1), 100);
+        ov.leeg_noten();
+        assert_eq!(ov.len(), 1);
+        ov.leeg();
+        assert_eq!(ov.len(), 0);
+    }
+
+    #[test]
+    fn zonder_ontvanger_bewaren_en_later_afleveren() {
+        let ov = RtOverloop::new();
+        let (tx_oud, rx_oud) = bounded::<AudioCommand>(4);
+        drop(rx_oud);
+        for n in 0..3 { ov.send(&tx_oud, aan(n), 100); }
+        ov.send(&tx_oud, uit(0), 100);
+        assert_eq!(ov.len(), 4, "zender zonder ontvanger: alles bewaard, niets gedropt");
+        let (tx, rx) = bounded::<AudioCommand>(8);
+        let rest = alles(&ov, &tx, &rx);
+        assert_eq!(rest, vec![('A', 0), ('A', 1), ('A', 2), ('U', 0)]);
+    }
+
+    #[test]
+    fn twee_zenders_houden_elk_hun_volgorde() {
+        let ov = std::sync::Arc::new(RtOverloop::new());
+        let (tx, rx) = bounded::<AudioCommand>(2);
+        let handles: Vec<_> = (0..2u32).map(|t| {
+            let ov = ov.clone(); let tx = tx.clone();
+            std::thread::spawn(move || {
+                for i in 0..500u32 { ov.send(&tx, aan(t * 100_000 + i), 1_000_000); }
+            })
+        }).collect();
+        for h in handles { h.join().unwrap(); }
+        let rest = alles(&ov, &tx, &rx);
+        for t in 0..2u32 {
+            let eigen: Vec<u32> = rest.iter().filter(|(_, n)| n / 100_000 == t).map(|(_, n)| *n).collect();
+            assert_eq!(eigen, (0..500u32).map(|i| t * 100_000 + i).collect::<Vec<_>>());
+        }
+        assert_eq!(rest.len(), 1000);
+    }
+}
+
 #[cfg(test)]
 mod crescendo_tests {
     use super::*;
@@ -5041,6 +5399,83 @@ mod crescendo_tests {
         fn sorted(v: &Arc<RwLock<Vec<String>>>) -> Vec<String> {
             let mut x = v.read().clone(); x.sort(); x
         }
+    }
+
+    fn organ_met_koppel() -> OrganInfoDto {
+        let mut o = organ();
+        let mut r = stop("r", 20);
+        r.drawn = true; // de DTO-vlag staat al op 'getrokken' als de sync draait
+        o.divisions = vec![
+            DivisionDto {
+                name: "Pedaal".into(), display_name: "Pedaal".into(), stops: vec![stop("p", 10)],
+                has_tremulant: false, tremulant_kind: None, has_swell: false, is_pedal: true,
+            },
+            DivisionDto {
+                name: "Hoofdwerk".into(), display_name: "Hoofdwerk".into(), stops: vec![r],
+                has_tremulant: false, tremulant_kind: None, has_swell: false, is_pedal: false,
+            },
+        ];
+        o.couplers = Some(vec![CouplerDto {
+            id: "k".into(), name: "I/P".into(), source_division: "Pedaal".into(),
+            destination_division: "Hoofdwerk".into(), active: false, display_in_division: "Pedaal".into(),
+            midi_action_code: 0, coupler_type: "unison".into(), pitch_offset: 0, speciaal: false,
+        }]);
+        o
+    }
+
+    /// 0.7.74: een trap die register r én koppel Pedaal→Hoofdwerk tegelijk
+    /// bijtrekt, start de pijp van r precies één keer. Met de NIEUWE koppellijst
+    /// in sync_stop_voices_inner (de fout tot 0.7.73) kwam hij twee keer:
+    /// refcount 2, één NoteOff bij loslaten → hanger zonder enige drop.
+    #[test]
+    fn trap_met_register_en_koppel_tegelijk_start_pijp_een_keer() {
+        let o = organ_met_koppel();
+        let (tx, rx) = bounded::<AudioCommand>(64);
+        let mappings = vec![
+            MidiChannelMapping { division: "Pedaal".into(), channel: Some(0), ..Default::default() },
+            MidiChannelMapping { division: "Hoofdwerk".into(), channel: Some(1), ..Default::default() },
+        ];
+        let held = vec![(0u8, 48u8, 100u8)];
+        let voor: Vec<String> = Vec::new();
+        let na = ids(&["k"]);
+        let tel = |rx: &Receiver<AudioCommand>| rx.try_iter().filter(|c| matches!(c, AudioCommand::NoteOn { stop_id: 20, .. })).count();
+        // Zoals apply_crescendo_stage_inner sinds 0.7.74: register met de OUDE lijst, dan de koppelwissel.
+        AppState::sync_stop_voices_inner(&o, &tx, &mappings, &voor, &na, &held, "r", true);
+        AppState::sync_coupler_voices_inner(&o, &tx, &mappings, &held, &voor, &na);
+        assert_eq!(tel(&rx), 1);
+        // Ter documentatie: met de nieuwe lijst als routelijst is het er twee.
+        AppState::sync_stop_voices_inner(&o, &tx, &mappings, &na, &na, &held, "r", true);
+        AppState::sync_coupler_voices_inner(&o, &tx, &mappings, &held, &voor, &na);
+        assert_eq!(tel(&rx), 2);
+        // Alleen het register bijtrekken terwijl de koppel al stond: ook één.
+        AppState::sync_stop_voices_inner(&o, &tx, &mappings, &na, &na, &held, "r", true);
+        AppState::sync_coupler_voices_inner(&o, &tx, &mappings, &held, &na, &na);
+        assert_eq!(tel(&rx), 1);
+    }
+
+    /// T.A. (Tongwerken Af) komt uit de NIEUWE lijst: een tongwerk dat samen
+    /// met T.A. bijkomt start niet; valt T.A. in dezelfde trap weg, dan wél.
+    #[test]
+    fn tongwerk_volgt_de_nieuwe_ta_stand() {
+        let mut o = organ_met_koppel();
+        o.divisions[1].stops[0].is_reed = true;
+        o.couplers.as_mut().unwrap().push(CouplerDto {
+            id: "ta1".into(), name: "T.A.".into(), source_division: "Hoofdwerk".into(),
+            destination_division: "Hoofdwerk".into(), active: false, display_in_division: "Hoofdwerk".into(),
+            midi_action_code: 0, coupler_type: "ta".into(), pitch_offset: 0, speciaal: false,
+        });
+        let (tx, rx) = bounded::<AudioCommand>(64);
+        let mappings = vec![MidiChannelMapping { division: "Hoofdwerk".into(), channel: Some(1), ..Default::default() }];
+        let held = vec![(1u8, 60u8, 100u8)];
+        let zonder: Vec<String> = Vec::new();
+        let met = ids(&["ta1"]);
+        let tel = |rx: &Receiver<AudioCommand>| rx.try_iter().filter(|c| matches!(c, AudioCommand::NoteOn { stop_id: 20, .. })).count();
+        // Tongwerk én T.A. tegelijk bij: niet starten.
+        AppState::sync_stop_voices_inner(&o, &tx, &mappings, &zonder, &met, &held, "r", true);
+        assert_eq!(tel(&rx), 0);
+        // Tongwerk bij terwijl T.A. wegvalt: wél starten.
+        AppState::sync_stop_voices_inner(&o, &tx, &mappings, &met, &zonder, &held, "r", true);
+        assert_eq!(tel(&rx), 1);
     }
 
     #[test]

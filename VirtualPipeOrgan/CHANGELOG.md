@@ -5,6 +5,22 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.74] - 2026-10-03
+
+### Geen hangende pijpen meer bij tutti met koppels
+
+Bij een grote surroundset met tutti en koppels stuurt elke toets tientallen
+tot honderden commando's naar de audio. Zodra de wachtrij daarvan vol was,
+gingen ook de loslaat-commando's verloren en bleven pijpen klinken tot de
+paniekknop. Nu gaat niets meer verloren: wat niet past wordt in volgorde
+nagezonden. De audiothread gebruikt bovendien de tijd die in een ronde over
+is om meer stemstarts af te handelen, en telt de nagalmstaarten niet meer bij
+elke stemstart opnieuw. De paniekknop (Stop) werkt direct, ook bij een volle
+wachtrij. Een crescendotrap die een register en een koppel tegelijk bijtrok,
+startte dezelfde pijp twee keer en liet hem daarna hangen; dat is verholpen.
+De waarschuwing over zware belasting geeft nu een advies dat bij de
+buffergrootte past en verschijnt niet meer tijdens het laden.
+
 ## [0.7.73] - 2026-10-03
 
 ### Klavar: meelopen bij afspelen, vast bereik en sneltoets K

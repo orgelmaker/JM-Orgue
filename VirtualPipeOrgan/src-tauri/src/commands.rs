@@ -755,8 +755,9 @@ pub fn set_perspective_enabled(state: State<AppState>, name: String, enabled: bo
 #[tauri::command]
 pub fn set_continuous_keyboard(state: State<AppState>, enabled: bool) -> Result<(), String> {
     crate::state::DOORLOPEND_KLAVIER.store(enabled, std::sync::atomic::Ordering::Relaxed);
-    state.send_audio_command(AudioCommand::AllNotesOff);
-    state.held_notes.write().clear();
+    // Paniek buiten de wachtrij om (0.7.74): anders zendt de overloopbuffer
+    // ná het AllNotesOff nog NoteOns na waarvan de toets al gewist is (hanger).
+    state.paniek();
     info!("Doorlopend klavier: {}", if enabled { "aan" } else { "uit" });
     Ok(())
 }
@@ -1011,12 +1012,10 @@ pub fn start_audio(_state: State<AppState>, device_name: Option<String>) -> Resu
 
 #[tauri::command]
 pub fn stop_audio(state: State<AppState>) -> Result<(), String> {
-    state.send_audio_command(AudioCommand::AllNotesOff);
-    // Ook de ingedrukte-toetsen-administratie wissen: een spooktoets die hier
-    // blijft staan wordt bij elke volgende crescendotrap/registerwissel opnieuw
-    // tot leven gewekt (sync start er stemmen voor die nooit meer een NoteOff
-    // krijgen — cumulatieve hangers).
-    state.held_notes.write().clear();
+    // Paniek buiten de wachtrij om (0.7.74); wist ook de
+    // ingedrukte-toetsen-administratie (spooktoetsen zouden bij de volgende
+    // trapwissel weer stemmen starten die nooit een NoteOff krijgen).
+    state.paniek();
     info!("Audio stopped (all notes off)");
     Ok(())
 }
@@ -1042,8 +1041,7 @@ pub async fn prepare_for_update(state: State<'_, AppState>) -> Result<(), String
                 info!("MIDI-archief vóór de update geschreven: {:?}", p);
             }
         }
-        st.send_audio_command(AudioCommand::AllNotesOff);
-        st.held_notes.write().clear();
+        st.paniek();
         let guard = st.audio_player.read();
         if let Some(p) = guard.as_ref() {
             p.shutdown_and_wait(std::time::Duration::from_millis(1500));
@@ -2889,6 +2887,10 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
     // crescendo-stops + koppels, zodat geen geluid of registratie van het vórige orgel
     // achterblijft (anders het symptoom "geluid is actief maar de knop niet"). De
     // "laatste stand" van dít orgel wordt hierna via restore_organ_settings hersteld.
+    // Eerst de overloopbuffer legen (0.7.74): anders zendt de MIDI-lus
+    // tussen het AllNotesOff en het legen nog oude NoteOns na die tegen de
+    // preload-map van het nieuwe orgel pijpen starten zonder NoteOff.
+    crate::state::rt_overloop_leeg();
     state.send_audio_command(AudioCommand::AllNotesOff);
     state.drawn_stops.write().clear();
     // Spooktoetsen van het vorige orgel wissen: die zouden anders bij elke
@@ -5608,11 +5610,11 @@ pub fn midi_play_file(state: State<AppState>, path: String) -> Result<(), String
 pub fn midi_stop_playback(state: State<AppState>) -> Result<(), String> {
     if let Some(p) = state.midi_player.read().as_ref() {
         p.stop();
-        // Stuur all-notes-off naar audio
-        state.send_audio_command(crate::audio::AudioCommand::AllNotesOff);
-        // Afgespeelde noten zitten óók in held_notes (speler loopt door de
-        // normale MIDI-verwerking): opruimen tegen spooktoetsen/hangers.
-        state.held_notes.write().clear();
+        // Paniek buiten de wachtrij om (0.7.74): de speler stuurt bij stoppen
+        // geen NoteOffs, en de overloopbuffer zou anders ná een gewoon
+        // AllNotesOff nog NoteOns nazenden zonder NoteOff (hangers). paniek()
+        // wist ook held_notes (afgespeelde noten lopen door de MIDI-lus).
+        state.paniek();
     }
     Ok(())
 }
@@ -5637,10 +5639,9 @@ pub fn midi_resume_playback(state: State<AppState>) -> Result<(), String> {
 pub fn midi_seek(state: State<AppState>, position_ms: u64) -> Result<(), String> {
     if let Some(p) = state.midi_player.read().as_ref() {
         p.seek_to(position_ms * 1000);
-        // Veiligheid: stop hangende noten op huidige positie
-        state.send_audio_command(crate::audio::AudioCommand::AllNotesOff);
-        // Zie midi_stop_playback: bijbehorende held_notes ook wissen.
-        state.held_notes.write().clear();
+        // Veiligheid: alles stil op de nieuwe positie, buiten de wachtrij om
+        // (zie midi_stop_playback).
+        state.paniek();
     }
     Ok(())
 }
@@ -6999,6 +7000,10 @@ pub fn do_load_samples_from_directory_locked(state: &AppState, directory: &str) 
     // crescendo-stops + koppels, zodat geen geluid of registratie van het vórige orgel
     // achterblijft (anders het symptoom "geluid is actief maar de knop niet"). De
     // "laatste stand" van dít orgel wordt hierna via restore_organ_settings hersteld.
+    // Eerst de overloopbuffer legen (0.7.74): anders zendt de MIDI-lus
+    // tussen het AllNotesOff en het legen nog oude NoteOns na die tegen de
+    // preload-map van het nieuwe orgel pijpen starten zonder NoteOff.
+    crate::state::rt_overloop_leeg();
     state.send_audio_command(AudioCommand::AllNotesOff);
     state.drawn_stops.write().clear();
     // Spooktoetsen van het vorige orgel wissen: die zouden anders bij elke
