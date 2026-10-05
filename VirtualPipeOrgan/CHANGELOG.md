@@ -5,6 +5,19 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.80] - 2026-10-05
+
+### Equalizer: sterkte, eigen presets, exporteren
+
+Met **Sterkte** schaalt u een correctie van 0 tot 100 % zonder de preset
+kwijt te raken; de grafiek toont de volle curve gestippeld en de werkelijke
+curve doorgetrokken, en de Auto-voorversterking rekent met de geschaalde
+banden. Eigen instellingen bewaart u met **Opslaan als eigen…** als eigen
+preset (ook een geïmporteerd bestand komt daar meteen bij) en exporteert u
+met **Exporteren…** als tekstbestand in het gangbare AutoEq/Equalizer
+APO-formaat of als JSON. Maximaal 32 banden per equalizer. Dit sluit de
+equalizer-reeks van 0.7.76 tot 0.7.80 af.
+
 ## [0.7.79] - 2026-10-05
 
 ### Equalizer als grafiek

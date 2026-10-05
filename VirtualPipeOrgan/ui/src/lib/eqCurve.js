@@ -158,3 +158,11 @@ export function autoPreampDb(bands, kanalen, sr) {
   }
   return piek > 0 ? -piek : 0;
 }
+
+// Sterkte (0.7.80): kopieën van de banden met de gain geschaald naar 0–100 %
+// (spiegel van commands::schaal_specs). 100 geeft dezelfde objecten terug.
+export function schaalBanden(bands, strength = 100) {
+  const f = Math.min(100, Math.max(0, Number.isFinite(Number(strength)) ? Number(strength) : 100)) / 100;
+  if (Math.abs(f - 1) < 1e-6) return bands || [];
+  return (bands || []).map((b) => ({ ...b, gain_db: (Number(b.gain_db) || 0) * f }));
+}

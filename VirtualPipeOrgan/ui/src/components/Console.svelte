@@ -9,6 +9,8 @@
   import EqBanden from './eq/EqBanden.svelte';
   import EqPresetKiezer from './eq/EqPresetKiezer.svelte';
   import { presetBijId, presetNaarBanden } from '../lib/eqPresets.js';
+  import { exportParametricEqTxt, exportEigenJson } from '../lib/eqImport.js';
+  import { autoPreampDb } from '../lib/eqCurve.js';
   import { loadPanelState, savePanelState } from '../lib/panelState.js';
   import { pasVensterstandToe } from '../lib/vensterStand.js';
   import { registerRegel, korenTekst } from '../lib/registerRegel.js';
@@ -1162,6 +1164,8 @@
   // Auto-waarde (−grootste versterking) van de huidige banden, ook in handmatige
   // stand: daartegen wordt de hand-instelling gewaarschuwd.
   let eqPreampAutoWaarde = 0;
+  // Sterkte 0–100 % (0.7.80): schaalt de banden vóór het sturen; de preset blijft.
+  let eqStrength = 100;
   // Eenheid van de steilheid: 'oct' (bandbreedte, zoals Sweelinq) of 'q' (AutoEq).
   let eqBwUnit = 'oct';
   try { if (localStorage.getItem('jm-orgue-eq-bw-unit') === 'q') eqBwUnit = 'q'; } catch (e) {}
@@ -1188,6 +1192,7 @@
         })),
         preampDb: eqPreampAuto ? null : Number(eqPreampDb) || 0,
         preampAuto: !!eqPreampAuto,
+        strength: eqStrength,
       });
       if (Array.isArray(res) && res.length === 2) {
         const [eff, autoW] = res;
@@ -1201,6 +1206,7 @@
   }
   function setEqPreampAuto(aan) { eqPreampAuto = !!aan; updateEq(); }
   function setEqPreampDb(v) { eqPreampDb = Math.max(-24, Math.min(6, Number(v) || 0)); eqPreampAuto = false; updateEq(); }
+  function setEqStrength(v) { eqStrength = Math.max(0, Math.min(100, Math.round(Number(v)))); if (!Number.isFinite(eqStrength)) eqStrength = 100; updateEq(); }
 
   function onEqBandChange() {
     eqBands = eqBands; // Svelte-reactiviteit na mutatie van een band-object
@@ -1237,6 +1243,7 @@
   }
 
   function addEqBand(detail = null) {
+    if (eqBands.length >= 32) return;
     eqBands = [...eqBands, nieuweEqBand(detail)];
     updateEq();
   }
@@ -1283,6 +1290,7 @@
   function kiesOutEqKind(kind) { outEqVolgActief = false; outEqKind = kind; outEqMelding = ''; }
   async function laadOutEq() {
     if (!outEqKind) return;
+    if (!eigenPresetsGeladen) { eigenPresetsGeladen = true; laadEigenPresets(); }
     try {
       const d = await invoke('get_output_eq', { kind: outEqKind });
       outEq = d; outEqBands = Array.isArray(d?.bands) ? d.bands : [];
@@ -1301,8 +1309,65 @@
       preampAuto: !!outEq.preamp_auto,
       presetId: outEq.preset_id ?? null,
       presetNaam: outEq.preset_naam ?? null,
+      strength: Number.isFinite(Number(outEq.strength)) ? Number(outEq.strength) : 100,
       ...extra,
     };
+  }
+  // ---- Eigen presets en exporteren (0.7.80) ----
+  let eigenPresets = [];
+  let eigenPresetsGeladen = false;
+  $: eigenVoorKiezer = (eigenPresets || []).map((p) => ({ id: p.id, naam: p.naam, banden: p.bands || [], preamp: p.preamp_db, preampAuto: p.preamp_auto !== false }));
+  async function laadEigenPresets() {
+    try { eigenPresets = await invoke('list_own_eq_presets'); } catch (e) { eigenPresets = []; }
+  }
+  async function bewaarEigenPreset(naam) {
+    if (!outEq) return;
+    try {
+      const p = await invoke('save_own_eq_preset', {
+        naam: String(naam || outEq.preset_naam || 'EQ').trim(),
+        bands: outEqPayload().bands,
+        preampDb: outEq.preamp_auto ? null : (Number(outEq.preamp_db) || 0),
+        preampAuto: !!outEq.preamp_auto,
+      });
+      await laadEigenPresets();
+      outEq = { ...outEq, preset_id: p.id, preset_naam: p.naam };
+      slaOutEqOp();
+      outEqMelding = tx('eq.preset_saved').replace('{name}', p.naam);
+    } catch (e) {
+      // Opslaan mislukt (bv. map niet schrijfbaar): de banden toch toepassen,
+      // anders toont de grafiek iets anders dan er klinkt (reviewbevinding).
+      outEqMelding = String(e);
+      slaOutEqOp();
+    }
+  }
+  async function verwijderEigenPreset(id) {
+    try {
+      eigenPresets = await invoke('delete_own_eq_preset', { id });
+      // Was dit de actieve preset: label en bewaarde id wissen (banden blijven).
+      if (outEq?.preset_id === id) { outEq = { ...outEq, preset_id: null, preset_naam: null }; slaOutEqOp(); }
+    } catch (e) { outEqMelding = String(e); }
+  }
+  async function exporteerOutEq() {
+    if (!outEq) return;
+    try {
+      const { save } = await import('@tauri-apps/plugin-dialog');
+      const basis = String(outEq.preset_naam || 'eq-preset').replace(/[\\/:*?"<>|]/g, '_');
+      const path = await save({
+        defaultPath: `${basis}.txt`,
+        filters: [{ name: 'AutoEq / Equalizer APO', extensions: ['txt'] }, { name: 'JSON', extensions: ['json'] }],
+      });
+      if (!path) return;
+      // De export bevat de ONGESCHAALDE banden (de preset); de voorversterking
+      // moet daar dan ook bij horen: bij Auto opnieuw uit die banden berekend
+      // (outEq.preamp_db hoort bij de geschaalde stand — reviewbevinding).
+      const preVol = outEq.preamp_auto ? autoPreampDb(outEqBands, Math.max(1, audioChannelCount || 2), sampleRate || 48000) : (Number(outEq.preamp_db) || 0);
+      const pre = outEq.preamp_auto ? null : preVol;
+      const r = /\.json$/i.test(path)
+        ? { tekst: exportEigenJson(outEqBands, pre, !!outEq.preamp_auto, outEq.preset_naam), overgeslagen: 0 }
+        : exportParametricEqTxt(outEqBands, preVol);
+      await invoke('save_text_file', { path, text: r.tekst });
+      outEqMelding = tx('eq.exported').replace('{path}', path) + (r.overgeslagen ? ' ' + tx('eq.export_skipped').replace('{n}', r.overgeslagen) : '');
+    } catch (e) { outEqMelding = String(e); }
   }
   // Voorvertoning tijdens slepen in de grafiek (0.7.79): alleen naar de
   // audiothread (persist: false), hooguit ~20/s; de definitieve stand komt bij
@@ -1332,8 +1397,16 @@
   function pasOutEqPresetToe(e) {
     const d = e.detail;
     outEqBands = d.banden.map((b) => ({ ...b }));
-    outEq = { ...outEq, enabled: true, preamp_auto: true, preset_id: d.id ?? null, preset_naam: d.naam ?? null };
+    // Gemeten/algemeen/import: Auto; een eigen preset krijgt zijn bewaarde stand terug.
+    const auto = d.bron !== 'eigen' || d.preampAuto !== false;
+    outEq = { ...outEq, enabled: true, preamp_auto: auto, preamp_db: auto ? outEq.preamp_db : (Number(d.preamp) || 0),
+              preset_id: d.id ?? null, preset_naam: d.naam ?? null };
     outEqMelding = d.melding || '';
+    if (d.bron === 'import') {
+      // Een geïmporteerd bestand meteen als eigen preset bewaren (dat slaat ook op).
+      bewaarEigenPreset(d.naam);
+      return;
+    }
     slaOutEqOp();
   }
   function outEqPreamp(e) {
@@ -2714,6 +2787,8 @@
         eqPreampDb = Number(e.preamp_db) || 0;
         eqPreampEffectief = eqPreampDb;
         eqPreampAutoWaarde = eqPreampDb; // neutraal tot updateEq de echte waarde geeft
+        eqStrength = Math.max(0, Math.min(100, Number(e.strength ?? 100)));
+        if (!Number.isFinite(eqStrength)) eqStrength = 100;
       } else {
         eqEnabled = false;
         eqBands = defaultEqBands();
@@ -2721,6 +2796,7 @@
         eqPreampDb = 0;
         eqPreampEffectief = 0;
         eqPreampAutoWaarde = 0;
+        eqStrength = 100;
       }
       if (pushToBackend) await updateEq();
 
@@ -5641,6 +5717,7 @@
                   </div>
                   <EqBanden bands={eqBands} channelCount={audioChannelCount} unit={eqBwUnit} sampleRate={sampleRate || 48000} enabled={eqEnabled}
                     preampDb={eqPreampDb} preampAuto={eqPreampAuto} preampEffectief={eqPreampEffectief} preampAutoWaarde={eqPreampAutoWaarde}
+                    strength={eqStrength} on:strength={(e) => setEqStrength(e.detail)}
                     on:change={onEqBandChange}
                     on:preamp={(e) => (e.detail.auto ? setEqPreampAuto(true) : (e.detail.db == null ? setEqPreampAuto(false) : setEqPreampDb(e.detail.db)))}
                     on:unit={(e) => setEqBwUnit(e.detail)}
@@ -7093,8 +7170,9 @@
                         {$t('midi.learn_short').replace('{count}', globalMidiBindings[ACTION_OUTPUT_EQ] || 0).replace('{max}', 4)}
                       {/if}
                     </button>
-                    <EqPresetKiezer naam={outEq.preset_naam} gewijzigd={outEqGewijzigd} algemeen={eqAlgemeneProfielen}
-                      on:apply={pasOutEqPresetToe} on:fout={(e) => (outEqMelding = e.detail)} />
+                    <EqPresetKiezer naam={outEq.preset_naam} gewijzigd={outEqGewijzigd} algemeen={eqAlgemeneProfielen} eigen={eigenVoorKiezer}
+                      on:apply={pasOutEqPresetToe} on:fout={(e) => (outEqMelding = e.detail)}
+                      on:saveown={(e) => bewaarEigenPreset(e.detail)} on:deleteown={(e) => verwijderEigenPreset(e.detail)} on:export={exporteerOutEq} />
                   {/if}
                 </div>
                 {#if outEq && audioProfiles?.active !== outEqKind}
@@ -7111,6 +7189,8 @@
                   <div style="margin-top:0.5rem; display:flex; flex-direction:column; gap:0.5rem;">
                     <EqBanden bands={outEqBands} channelCount={audioChannelCount} unit={eqBwUnit} sampleRate={sampleRate || 48000} enabled={outEq.enabled}
                       preampDb={outEq.preamp_db} preampAuto={outEq.preamp_auto} preampEffectief={outEq.preamp_db} preampAutoWaarde={outEq.preamp_auto_waarde}
+                      strength={Number.isFinite(Number(outEq.strength)) ? Number(outEq.strength) : 100}
+                      on:strength={(e) => { outEq.strength = e.detail; voorvertoonOutEq(); slaOutEqStraks(); }}
                       on:change={(e) => { outEqBands = outEqBands; if (e.detail?.live) voorvertoonOutEq(); else slaOutEqStraks(); }}
                       on:preamp={outEqPreamp}
                       on:unit={(e) => setEqBwUnit(e.detail)}

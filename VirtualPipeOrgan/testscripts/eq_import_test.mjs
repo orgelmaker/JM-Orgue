@@ -4,7 +4,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { parseParametricEqTxt, parseSwes, parseEigenJson, herkenEnParse, bwNaarQ } from '../ui/src/lib/eqImport.js';
+import { parseParametricEqTxt, parseSwes, parseEigenJson, herkenEnParse, bwNaarQ, exportParametricEqTxt, exportEigenJson } from '../ui/src/lib/eqImport.js';
 
 const hier = path.dirname(fileURLToPath(import.meta.url));
 let fouten = 0;
@@ -108,6 +108,24 @@ check('herken: swes-bytes zonder extensie', h4.banden.length === 1);
 let onb = false;
 try { herkenEnParse('x.dat', new TextEncoder().encode('zomaar tekst')); } catch (e) { onb = e.message === 'onbekend_formaat'; }
 check('onbekend → onbekend_formaat', onb);
+
+// Exporteren (0.7.80): rondreis tekst → banden → tekst → banden is gelijk.
+const uit = exportParametricEqTxt(r.banden, r.preamp);
+check('export txt: preamp-regel en 10 filters', uit.tekst.startsWith('Preamp: -6.2 dB\n') && (uit.tekst.match(/^Filter \d+: ON/gm) || []).length === 10 && uit.overgeslagen === 0);
+const terug = parseParametricEqTxt(uit.tekst);
+check('export txt: rondreis gelijk', terug.preamp === -6.2 && terug.banden.length === 10
+  && terug.banden.every((b, i) => b.band_type === r.banden[i].band_type && Math.abs(b.freq - r.banden[i].freq) < 0.05
+    && Math.abs(b.gain_db - r.banden[i].gain_db) < 0.05 && Math.abs(b.q - r.banden[i].q) < 0.005));
+const gemengd = exportParametricEqTxt([
+  { enabled: false, band_type: 'peak', freq: 100, gain_db: -2, q: 1 },
+  { enabled: true, band_type: 'lowpass', freq: 8000, gain_db: 0, q: 0.7 },
+  { enabled: true, band_type: 'highshelf', freq: 10000, gain_db: 1.5, bandwidth: 1.0, q: null },
+], 0);
+check('export txt: OFF-band, lowpass weggelaten, Q uit bandbreedte', /^Filter 1: OFF PK Fc 100 Hz/m.test(gemengd.tekst) && /^Filter 2: ON HSC Fc 10000 Hz Gain 1.5 dB Q 1.41/m.test(gemengd.tekst) && gemengd.overgeslagen === 1, gemengd.tekst);
+const jsonUit = exportEigenJson(s.banden, null, true, 'DT770');
+const jsonTerug = parseEigenJson(jsonUit);
+check('export json: rondreis 11 banden, naam, Auto', jsonTerug.banden.length === 11 && JSON.parse(jsonUit).naam === 'DT770' && jsonTerug.preampAuto === true
+  && jsonTerug.banden.every((b, i) => Math.abs(b.freq - s.banden[i].freq) < 1e-6 && Math.abs(b.q - s.banden[i].q) < 1e-6));
 
 console.log(fouten ? `${fouten} FOUTEN` : 'alles OK');
 process.exit(fouten ? 1 : 0);

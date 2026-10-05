@@ -1,9 +1,12 @@
 <script>
-  // Presetkiezer (0.7.77): knop met de huidige presetnaam, een uitklapper met
-  // zoekveld, de algemene profielen en de gemeten hoofdtelefoons (AutoEq,
-  // oratory1990), plus "Importeren…" voor AutoEq/Equalizer APO-tekst,
-  // Sweelinq .swes en eigen JSON. Meldt `apply` met { id, naam, banden,
-  // preamp, bron, melding } en `fout` met een vertaalde tekst.
+  // Presetkiezer (0.7.77, eigen presets en exporteren sinds 0.7.80): knop met
+  // de huidige presetnaam, een uitklapper met zoekveld, de algemene profielen,
+  // de eigen presets en de gemeten hoofdtelefoons (AutoEq, oratory1990), plus
+  // "Importeren…" (AutoEq/Equalizer APO-tekst, Sweelinq .swes, eigen JSON) en
+  // "Exporteren…". Meldt `apply` met { id, naam, banden, preamp, bron,
+  // melding }, `fout` met een vertaalde tekst, `saveown` met de gekozen naam,
+  // `deleteown` met een id en `export` zonder detail. Kent Tauri alleen voor
+  // de bestandsdialoog en het lezen van het bestand.
   import { createEventDispatcher, tick } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
   import { open as openDialog } from '@tauri-apps/plugin-dialog';
@@ -14,24 +17,29 @@
   export let naam = null;          // huidige presetnaam (of null)
   export let gewijzigd = false;    // banden wijken af van de preset
   export let algemeen = [];        // [{ id, label, banden, preamp }] — niet-gemeten profielen
+  export let eigen = [];           // [{ id, naam, banden, preamp }] — eigen presets (0.7.80)
 
   const dispatch = createEventDispatcher();
   let open = false;
   let zoektekst = '';
   let zoekveld;
   let bezig = false;
+  let nieuweNaam = '';
+  let naamVeldOpen = false;
+  let naamVeld;
+  let teVerwijderen = null;        // id waarvoor "Zeker?" staat
 
   $: resultaten = zoektekst.trim().length >= 2 ? zoekPresets(zoektekst, 60) : null;
   const merken = presetsPerMerk();
 
   async function toggle() {
     open = !open;
-    if (open) { zoektekst = ''; await tick(); zoekveld?.focus?.(); }
+    if (open) { zoektekst = ''; naamVeldOpen = false; teVerwijderen = null; await tick(); zoekveld?.focus?.(); }
   }
-  function sluit() { open = false; }
+  function sluit() { open = false; naamVeldOpen = false; teVerwijderen = null; }
   function buitenKlik(e) {
     if (!open) return;
-    if (!e.target.closest?.('.eq-preset-kiezer')) open = false;
+    if (!e.target.closest?.('.eq-preset-kiezer')) sluit();
   }
 
   function kiesGemeten(p) {
@@ -41,6 +49,27 @@
   function kiesAlgemeen(a) {
     dispatch('apply', { id: a.id, naam: a.label, banden: a.banden.map((b) => ({ ...b })), preamp: a.preamp ?? null, bron: 'algemeen', melding: '' });
     sluit();
+  }
+  function kiesEigen(p) {
+    dispatch('apply', { id: p.id, naam: p.naam, banden: (p.banden || []).map((b) => ({ ...b })), preamp: p.preamp ?? null, preampAuto: p.preampAuto !== false, bron: 'eigen', melding: '' });
+    sluit();
+  }
+  async function openNaamVeld() {
+    naamVeldOpen = true;
+    nieuweNaam = naam && !/^\(/.test(naam) ? naam : '';
+    await tick();
+    naamVeld?.focus?.();
+  }
+  function bewaar() {
+    const n = nieuweNaam.trim();
+    if (!n) return;
+    dispatch('saveown', n);
+    sluit();
+  }
+  function verwijder(p) {
+    if (teVerwijderen !== p.id) { teVerwijderen = p.id; return; }
+    teVerwijderen = null;
+    dispatch('deleteown', p.id);
   }
 
   function foutTekst(code) {
@@ -77,12 +106,13 @@
 
 <svelte:window on:click={buitenKlik} />
 
-<span class="eq-preset-kiezer" style="position:relative; display:inline-flex; gap:0.3rem; align-items:center;">
+<span class="eq-preset-kiezer" style="position:relative; display:inline-flex; gap:0.3rem; align-items:center; flex-wrap:wrap;">
   <button class="btn btn-secondary btn-sm" style="font-size:0.72rem; padding:0.15rem 0.5rem; max-width:16rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"
     on:click|stopPropagation={toggle} title={naam || $t('eq.preset_none')}>
     {$t('eq.preset')}: {naam || $t('eq.preset_none')}{gewijzigd ? ' ' + $t('eq.preset_modified') : ''} ▾
   </button>
   <button class="btn btn-ghost btn-sm" style="font-size:0.72rem; padding:0.15rem 0.5rem;" on:click|stopPropagation={importeer} disabled={bezig}>{$t('eq.import')}</button>
+  <button class="btn btn-ghost btn-sm" style="font-size:0.72rem; padding:0.15rem 0.5rem;" on:click|stopPropagation={() => dispatch('export')}>{$t('eq.export')}</button>
   {#if open}
     <div class="eq-preset-popover" on:click|stopPropagation on:keydown={(e) => { if (e.key === 'Escape') sluit(); }} role="dialog" tabindex="-1"
       style="position:absolute; top:calc(100% + 0.3rem); left:0; z-index:40; width:min(28rem, 92vw); max-height:24rem; overflow:auto; background:var(--bg-elevated); border:1px solid var(--accent-soft-2); border-radius:var(--radius-sm); box-shadow:0 6px 24px rgba(0,0,0,0.25); padding:0.5rem; font-size:0.78rem;">
@@ -99,6 +129,29 @@
           {/each}
         {/if}
       {:else}
+        <!-- Eigen presets (0.7.80) -->
+        <div class="eq-preset-kop">{$t('eq.preset_own')}</div>
+        {#if !eigen.length}
+          <div class="settings-hint" style="margin:0 0 0.3rem;">{$t('eq.preset_none_own')}</div>
+        {/if}
+        {#each eigen as p (p.id)}
+          <div style="display:flex; align-items:center; gap:0.2rem;">
+            <button class="eq-preset-regel" on:click={() => kiesEigen(p)}>
+              <span>{p.naam}</span><span class="eq-preset-info">{(p.banden || []).length}</span>
+            </button>
+            <button class="btn btn-ghost btn-sm" style="font-size:0.68rem; padding:0.05rem 0.4rem; white-space:nowrap;" on:click={() => verwijder(p)}
+              title={$t('eq.preset_delete')}>{teVerwijderen === p.id ? $t('eq.preset_delete_confirm') : '✕'}</button>
+          </div>
+        {/each}
+        {#if naamVeldOpen}
+          <form style="display:flex; gap:0.3rem; margin:0.3rem 0;" on:submit|preventDefault={bewaar}>
+            <input type="text" bind:this={naamVeld} bind:value={nieuweNaam} placeholder={$t('eq.preset_name')} maxlength="60"
+              style="flex:1; font-size:0.78rem; padding:0.25rem 0.4rem; background:var(--bg-darkest); border:1px solid var(--accent-soft-2); border-radius:var(--radius-sm); color:var(--text);" />
+            <button class="btn btn-secondary btn-sm" type="submit" style="font-size:0.72rem;" disabled={!nieuweNaam.trim()}>{$t('eq.preset_save_own').replace('…', '')}</button>
+          </form>
+        {:else}
+          <button class="btn btn-ghost btn-sm" style="font-size:0.72rem; margin:0.2rem 0 0.4rem;" on:click={openNaamVeld}>{$t('eq.preset_save_own')}</button>
+        {/if}
         {#if algemeen.length}
           <div class="eq-preset-kop">{$t('eq.preset_general')}</div>
           {#each algemeen as a (a.id)}

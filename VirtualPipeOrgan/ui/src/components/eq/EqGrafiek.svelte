@@ -7,7 +7,7 @@
   // seconde (live: true) en één definitieve bij loslaten (live: false).
   import { createEventDispatcher, onDestroy } from 'svelte';
   import { t } from '../../lib/i18n.js';
-  import { compositeCurve, bandDb, logFreqs, qToBw, bwToQ, EQ_MAX_BANDEN } from '../../lib/eqCurve.js';
+  import { compositeCurve, bandDb, logFreqs, qToBw, bwToQ, schaalBanden, EQ_MAX_BANDEN } from '../../lib/eqCurve.js';
 
   export let bands = [];
   export let selected = -1;
@@ -16,6 +16,7 @@
   export let enabled = true;
   export let channelView = null;   // null = "Alle", anders kanaalindex
   export let unit = 'oct';
+  export let strength = 100;       // sterkte 0–100 % (0.7.80): de doorgetrokken curve is geschaald
 
   const dispatch = createEventDispatcher();
   const ML = 36, MR = 12, MT = 10, MB = 22;
@@ -43,8 +44,12 @@
   $: yVan = (db) => MT + (1 - (Math.max(-bereik, Math.min(bereik, db)) + bereik) / (2 * bereik)) * binnenH;
   $: dbVan = (y) => -bereik + (1 - Math.max(0, Math.min(1, (y - MT) / binnenH))) * 2 * bereik;
 
-  // Curve zonder en met voorversterking (de tweede alleen als die ≠ 0).
-  $: curve = compositeCurve(bands, FREQS, sampleRate, channelView, 0);
+  // Curve (geschaald met de sterkte) zonder en met voorversterking (de tweede
+  // alleen als die ≠ 0); bij sterkte < 100 % de volle curve gestippeld erbij.
+  $: bandenGeschaald = schaalBanden(bands, strength);
+  $: curve = compositeCurve(bandenGeschaald, FREQS, sampleRate, channelView, 0);
+  $: curveVol = Number(strength) < 99.5 ? compositeCurve(bands, FREQS, sampleRate, channelView, 0) : null;
+  $: padVol = curveVol ? curveVol.map((v, i) => `${i ? 'L' : 'M'}${xVan(FREQS[i]).toFixed(1)},${yVan(v).toFixed(1)}`).join('') : '';
   $: curveMetPre = Math.abs(preampDb || 0) > 0.05 ? curve.map((v) => v + preampDb) : null;
   $: pad = curve.map((v, i) => `${i ? 'L' : 'M'}${xVan(FREQS[i]).toFixed(1)},${yVan(v).toFixed(1)}`).join('');
   $: padVul = pad + `L${xVan(20000).toFixed(1)},${yVan(0).toFixed(1)}L${xVan(20).toFixed(1)},${yVan(0).toFixed(1)}Z`;
@@ -213,6 +218,7 @@
     <rect class="eq-vlak" x={ML} y={MT} width={binnenB} height={binnenH} fill="transparent" on:pointerup={leegTik} />
     <!-- curve -->
     <path d={padVul} class="eq-vul" />
+    {#if padVol}<path d={padVol} class="eq-curve-vol" />{/if}
     <path d={pad} class="eq-curve" />
     {#if padPre}<path d={padPre} class="eq-curve-pre" />{/if}
     {#if padGekozen}<path d={padGekozen} class="eq-curve-band" />{/if}
@@ -250,6 +256,7 @@
   .eq-vul { fill: var(--primary); opacity: 0.18; }
   .eq-curve { fill: none; stroke: var(--primary); stroke-width: 2; }
   .eq-curve-pre { fill: none; stroke: var(--text-muted); stroke-width: 1; stroke-dasharray: 3 3; }
+  .eq-curve-vol { fill: none; stroke: var(--primary); stroke-width: 1; stroke-dasharray: 2 4; opacity: 0.6; }
   .eq-curve-band { fill: none; stroke: var(--led-blue, #4a90d9); stroke-width: 1; stroke-dasharray: 4 3; }
   .eq-punt { cursor: grab; }
   .eq-hit { fill: transparent; }

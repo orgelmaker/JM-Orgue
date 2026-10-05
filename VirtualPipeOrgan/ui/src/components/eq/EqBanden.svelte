@@ -22,8 +22,13 @@
   export let preampAutoWaarde = 0;
   export let sampleRate = 48000;
   export let enabled = true;
+  export let strength = 100;          // sterkte 0–100 % (0.7.80)
 
   const dispatch = createEventDispatcher();
+  function setStrength(v) {
+    const s = Math.max(0, Math.min(100, Math.round(Number(v))));
+    dispatch('strength', Number.isFinite(s) ? s : 100);
+  }
 
   let selected = 0;
   let channelView = null;
@@ -112,10 +117,19 @@
   {#if preampWaarschuwing}
     <div class="settings-hint" style="color:var(--warning, #b8860b);">{$t('eq.preamp_warn')}</div>
   {/if}
+  <!-- Sterkte (0.7.80): schaalt alle banden; de preset blijft. -->
+  <div class="swell-config-row" title={$t('eq.strength_title')}>
+    <span class="swell-config-label">{$t('eq.strength')}</span>
+    <input type="range" min="0" max="100" step="1" value={strength} on:input={(e) => setStrength(e.target.value)} />
+    <input type="number" min="0" max="100" step="1"
+      style="width:4.2rem; font-size:0.75rem; padding:0.1rem 0.25rem; background:var(--bg-elevated); border:1px solid var(--accent-soft-2); border-radius:var(--radius-sm); color:var(--text);"
+      value={Math.round(strength)} on:change={(e) => { setStrength(e.target.value); e.target.value = Math.round(Math.max(0, Math.min(100, Number(e.target.value) || 0))); }} />
+    <span class="swell-config-value" style="width:1.4rem;">%</span>
+  </div>
 </div>
 
 <!-- Grafiek (0.7.79) -->
-<EqGrafiek {bands} {selected} {sampleRate} {unit} {enabled} {channelView}
+<EqGrafiek {bands} {selected} {sampleRate} {unit} {enabled} {channelView} {strength}
   preampDb={preampAuto ? preampEffectief : preampDb}
   on:select={(e) => kies(e.detail)}
   on:change={(e) => gewijzigd(!!e.detail?.live)}

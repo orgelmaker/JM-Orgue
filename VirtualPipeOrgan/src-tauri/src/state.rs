@@ -312,6 +312,9 @@ pub struct OutputEqSaved {
     /// Naam voor in de knop (preset- of bestandsnaam).
     #[serde(default)]
     pub preset_naam: Option<String>,
+    /// Sterkte 0–100 % (0.7.80); None = 100.
+    #[serde(default)]
+    pub strength: Option<f32>,
     #[serde(default)]
     pub bands: Vec<crate::library::EqBandSaved>,
 }

@@ -5387,6 +5387,18 @@ fn eq_bands_to_specs(bands: &[EqBandDto]) -> Vec<vpo_audio::EqBandSpec> {
     }).collect()
 }
 
+/// Sterkte (0.7.80): 0–100 % schaalt de gain van elke band lineair in dB;
+/// None = 100 %. De banden in de opslag blijven ongeschaald (de preset).
+pub(crate) fn sterkte_factor(strength: Option<f32>) -> f32 {
+    strength.unwrap_or(100.0).clamp(0.0, 100.0) / 100.0
+}
+pub(crate) fn schaal_specs(specs: &mut [vpo_audio::EqBandSpec], strength: Option<f32>) {
+    let f = sterkte_factor(strength);
+    if (f - 1.0).abs() > 1e-6 {
+        for s in specs.iter_mut() { s.gain_db *= f; }
+    }
+}
+
 pub(crate) fn eq_saved_to_specs(bands: &[library::EqBandSaved]) -> Vec<vpo_audio::EqBandSpec> {
     bands.iter().map(|b| vpo_audio::EqBandSpec {
         enabled: b.enabled,
@@ -5427,13 +5439,14 @@ pub(crate) fn effectieve_preamp_db(state: &AppState, specs: &[vpo_audio::EqBandS
 /// ook in handmatige stand, zodat de UI kan waarschuwen als de hand hoger
 /// staat dan wat de banden verdragen.
 #[tauri::command]
-pub fn set_eq_bands(state: State<AppState>, enabled: bool, bands: Vec<EqBandDto>, preamp_db: Option<f32>, preamp_auto: Option<bool>) -> Result<(f32, f32), String> {
-    Ok(set_eq_bands_inner(&state, enabled, bands, preamp_db, preamp_auto))
+pub fn set_eq_bands(state: State<AppState>, enabled: bool, bands: Vec<EqBandDto>, preamp_db: Option<f32>, preamp_auto: Option<bool>, strength: Option<f32>) -> Result<(f32, f32), String> {
+    Ok(set_eq_bands_inner(&state, enabled, bands, preamp_db, preamp_auto, strength))
 }
 
 /// Kern van set_eq_bands, ook voor de test-API (JSON-body met een hele preset).
-pub(crate) fn set_eq_bands_inner(state: &AppState, enabled: bool, bands: Vec<EqBandDto>, preamp_db: Option<f32>, preamp_auto: Option<bool>) -> (f32, f32) {
-    let specs = eq_bands_to_specs(&bands);
+pub(crate) fn set_eq_bands_inner(state: &AppState, enabled: bool, bands: Vec<EqBandDto>, preamp_db: Option<f32>, preamp_auto: Option<bool>, strength: Option<f32>) -> (f32, f32) {
+    let mut specs = eq_bands_to_specs(&bands);
+    schaal_specs(&mut specs, strength);
     let auto = preamp_auto.unwrap_or(false);
     let eff = effectieve_preamp_db(&state, &specs, preamp_db, auto);
     let auto_waarde = if auto { eff } else {
@@ -5459,6 +5472,7 @@ pub(crate) fn set_eq_bands_inner(state: &AppState, enabled: bool, bands: Vec<EqB
         }).collect(),
         preamp_db: eff,
         preamp_auto: auto,
+        strength,
         ..Default::default()
     });
     (eff, auto_waarde)
@@ -5479,6 +5493,8 @@ pub struct OutputEqDto {
     pub preamp_auto_waarde: f32,
     /// Welke soort nu geldt ("speakers" | "headphones" | null).
     pub active: Option<String>,
+    /// Sterkte 0–100 % (0.7.80).
+    pub strength: f32,
 }
 
 fn output_eq_kind(kind: &str) -> Result<String, String> {
@@ -5489,7 +5505,8 @@ fn output_eq_kind(kind: &str) -> Result<String, String> {
 }
 
 fn output_eq_naar_dto(state: &AppState, cfg: &crate::state::OutputEqSaved, active: Option<String>) -> OutputEqDto {
-    let specs = eq_saved_to_specs(&cfg.bands);
+    let mut specs = eq_saved_to_specs(&cfg.bands);
+    schaal_specs(&mut specs, cfg.strength);
     let (sr, kanalen) = audio_samplerate_en_kanalen(state);
     OutputEqDto {
         enabled: cfg.enabled,
@@ -5503,6 +5520,7 @@ fn output_eq_naar_dto(state: &AppState, cfg: &crate::state::OutputEqSaved, activ
         }).collect(),
         preamp_auto_waarde: vpo_audio::auto_preamp_db(&specs, kanalen, sr),
         active,
+        strength: sterkte_factor(cfg.strength) * 100.0,
     }
 }
 
@@ -5515,7 +5533,8 @@ pub(crate) fn eq_uitgang_toepassen(state: &AppState) {
     let cfg = prefs.active_output_profile.as_ref().and_then(|k| prefs.output_eq.get(k)).cloned();
     match cfg {
         Some(c) => {
-            let specs = eq_saved_to_specs(&c.bands);
+            let mut specs = eq_saved_to_specs(&c.bands);
+            schaal_specs(&mut specs, c.strength);
             let eff = effectieve_preamp_db(state, &specs, Some(c.preamp_db), c.preamp_auto);
             // Badge (0.7.78): "aan" = ingeschakeld én er gebeurt iets (een
             // actieve band of een voorversterking ≠ 0).
@@ -5541,13 +5560,14 @@ pub(crate) fn get_output_eq_inner(state: &AppState, kind: &str) -> Result<Output
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn set_output_eq_inner(state: &AppState, kind: &str, enabled: bool, bands: Vec<EqBandDto>, preamp_db: Option<f32>,
                                   preamp_auto: Option<bool>, preset_id: Option<String>, preset_naam: Option<String>,
-                                  persist: bool) -> Result<OutputEqDto, String> {
+                                  strength: Option<f32>, persist: bool) -> Result<OutputEqDto, String> {
     let kind = output_eq_kind(kind)?;
     let auto = preamp_auto.unwrap_or(true);
-    let specs = eq_bands_to_specs(&bands);
+    let mut specs = eq_bands_to_specs(&bands);
+    schaal_specs(&mut specs, strength);
     let eff = effectieve_preamp_db(state, &specs, preamp_db, auto);
     let cfg = crate::state::OutputEqSaved {
-        enabled, preamp_db: eff, preamp_auto: auto, preset_id, preset_naam,
+        enabled, preamp_db: eff, preamp_auto: auto, preset_id, preset_naam, strength,
         bands: bands.into_iter().map(|b| library::EqBandSaved {
             enabled: b.enabled, band_type: b.band_type, freq: b.freq, gain_db: b.gain_db,
             bandwidth: b.bandwidth, q: b.q, channel: b.channel,
@@ -5596,8 +5616,8 @@ pub fn get_output_eq(state: State<AppState>, kind: String) -> Result<OutputEqDto
 #[allow(clippy::too_many_arguments)]
 pub fn set_output_eq(state: State<AppState>, kind: String, enabled: bool, bands: Vec<EqBandDto>, preamp_db: Option<f32>,
                      preamp_auto: Option<bool>, preset_id: Option<String>, preset_naam: Option<String>,
-                     persist: Option<bool>) -> Result<OutputEqDto, String> {
-    set_output_eq_inner(&state, &kind, enabled, bands, preamp_db, preamp_auto, preset_id, preset_naam, persist.unwrap_or(true))
+                     strength: Option<f32>, persist: Option<bool>) -> Result<OutputEqDto, String> {
+    set_output_eq_inner(&state, &kind, enabled, bands, preamp_db, preamp_auto, preset_id, preset_naam, strength, persist.unwrap_or(true))
 }
 
 /// De frontend meldt welk uitvoerprofiel actief is; de bijbehorende
@@ -5638,6 +5658,98 @@ pub fn toggle_output_eq(state: State<AppState>) -> Result<OutputEqDto, String> {
     toggle_output_eq_inner(&state)
 }
 
+// ---------- Eigen EQ-presets (0.7.80): <app_data_dir>/eq_presets_eigen.json ----------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OwnEqPreset {
+    pub id: String,
+    pub naam: String,
+    #[serde(default)]
+    pub preamp_db: f32,
+    #[serde(default = "dto_waar")]
+    pub preamp_auto: bool,
+    #[serde(default)]
+    pub bands: Vec<library::EqBandSaved>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct OwnEqPresetFile {
+    #[serde(default)]
+    presets: Vec<OwnEqPreset>,
+}
+
+fn eigen_presets_pad(state: &AppState) -> std::path::PathBuf { state.app_data_dir.join("eq_presets_eigen.json") }
+
+/// Ontbrekend bestand = lege lijst; een lees- of parsefout is een FOUT
+/// (reviewbevinding: anders zou de volgende save een onleesbaar bestand met
+/// alle eerdere presets stil overschrijven).
+fn lees_eigen_presets(state: &AppState) -> Result<Vec<OwnEqPreset>, String> {
+    let pad = eigen_presets_pad(state);
+    let s = match std::fs::read_to_string(&pad) {
+        Ok(s) => s,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(format!("Kan eigen presets niet lezen ({}): {}", pad.display(), e)),
+    };
+    serde_json::from_str::<OwnEqPresetFile>(&s).map(|f| f.presets)
+        .map_err(|e| format!("Eigen presets onleesbaar ({}): {}", pad.display(), e))
+}
+
+fn schrijf_eigen_presets(state: &AppState, presets: &[OwnEqPreset]) -> Result<(), String> {
+    let pad = eigen_presets_pad(state);
+    let json = serde_json::to_string_pretty(&OwnEqPresetFile { presets: presets.to_vec() }).map_err(|e| e.to_string())?;
+    let tmp = pad.with_extension("json.tmp");
+    std::fs::write(&tmp, json).and_then(|_| std::fs::rename(&tmp, &pad))
+        .map_err(|e| format!("Kan eigen presets niet opslaan: {}", e))
+}
+
+#[tauri::command]
+pub fn list_own_eq_presets(state: State<AppState>) -> Result<Vec<OwnEqPreset>, String> {
+    // De lijst mag leeg tonen bij een kapot bestand, maar de fout komt in het log;
+    // opslaan/verwijderen weigeren dan (zie lees_eigen_presets).
+    Ok(lees_eigen_presets(&state).unwrap_or_else(|e| { tracing::warn!("{}", e); Vec::new() }))
+}
+
+/// Huidige banden als eigen preset bewaren; naamconflict → " (2)", " (3)", …
+#[tauri::command]
+pub fn save_own_eq_preset(state: State<AppState>, naam: String, bands: Vec<EqBandDto>, preamp_db: Option<f32>, preamp_auto: Option<bool>) -> Result<OwnEqPreset, String> {
+    let basis = naam.trim();
+    if basis.is_empty() { return Err("Geef de preset een naam".to_string()); }
+    let mut presets = lees_eigen_presets(&state)?;
+    let mut naam = basis.to_string();
+    let mut n = 2;
+    while presets.iter().any(|p| p.naam == naam) { naam = format!("{} ({})", basis, n); n += 1; }
+    let id = format!("eigen/{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0));
+    let p = OwnEqPreset {
+        id, naam, preamp_db: preamp_db.unwrap_or(0.0), preamp_auto: preamp_auto.unwrap_or(true),
+        bands: bands.into_iter().map(|b| library::EqBandSaved {
+            enabled: b.enabled, band_type: b.band_type, freq: b.freq, gain_db: b.gain_db,
+            bandwidth: b.bandwidth, q: b.q, channel: b.channel,
+        }).collect(),
+    };
+    presets.push(p.clone());
+    schrijf_eigen_presets(&state, &presets)?;
+    info!("Eigen EQ-preset opgeslagen: {} ({} banden)", p.naam, p.bands.len());
+    Ok(p)
+}
+
+#[tauri::command]
+pub fn delete_own_eq_preset(state: State<AppState>, id: String) -> Result<Vec<OwnEqPreset>, String> {
+    let mut presets = lees_eigen_presets(&state)?;
+    presets.retain(|p| p.id != id);
+    schrijf_eigen_presets(&state, &presets)?;
+    Ok(presets)
+}
+
+#[tauri::command]
+pub fn rename_own_eq_preset(state: State<AppState>, id: String, naam: String) -> Result<Vec<OwnEqPreset>, String> {
+    let naam = naam.trim().to_string();
+    if naam.is_empty() { return Err("Geef de preset een naam".to_string()); }
+    let mut presets = lees_eigen_presets(&state)?;
+    if let Some(p) = presets.iter_mut().find(|p| p.id == id) { p.naam = naam; }
+    schrijf_eigen_presets(&state, &presets)?;
+    Ok(presets)
+}
+
 /// Respons van de huidige orgel-EQ in dB op een rij frequenties, puur uit de
 /// opgeslagen banden (0.7.76): nooit uit de draaiende ketens, die zijn van de
 /// audiothread. `channel` None = kanaal 0.
@@ -5646,7 +5758,8 @@ pub fn eq_response_db(state: State<AppState>, freqs: Vec<f32>, channel: Option<u
     let (sr, _) = audio_samplerate_en_kanalen(&state);
     let Some(eq) = state.eq_settings.read().clone() else { return Ok(vec![0.0; freqs.len()]); };
     if !eq.enabled { return Ok(vec![0.0; freqs.len()]); }
-    let specs = eq_saved_to_specs(&eq.bands);
+    let mut specs = eq_saved_to_specs(&eq.bands);
+    schaal_specs(&mut specs, eq.strength);
     let ch = channel.unwrap_or(0);
     let keten = vpo_audio::ChannelEq::build(&specs, ch, sr, eq.preamp_db);
     Ok(freqs.iter().map(|&f| keten.respons_db(f.clamp(1.0, sr as f32 * 0.5), sr)).collect())
@@ -5664,7 +5777,7 @@ pub fn set_parametric_eq(state: State<AppState>, enabled: bool, low_freq: f32, l
         EqBandDto { enabled: true, band_type: "peak".into(), freq: mid_freq, gain_db: mid_gain, bandwidth: bw, q: Some(q), channel: None },
         EqBandDto { enabled: true, band_type: "highshelf".into(), freq: high_freq, gain_db: high_gain, bandwidth: 1.0, q: None, channel: None },
     ];
-    set_eq_bands(state, enabled, bands, None, None).map(|_| ())
+    set_eq_bands(state, enabled, bands, None, None, None).map(|_| ())
 }
 
 /// Bewaar de volledige reverb-configuratie van het huidige orgel voor per-orgel opslag.

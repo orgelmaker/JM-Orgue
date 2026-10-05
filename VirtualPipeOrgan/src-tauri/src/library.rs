@@ -227,6 +227,10 @@ pub struct EqSettingsSaved {
     /// Gekozen preset (0.7.77); None = handmatig.
     #[serde(default)]
     pub preset_id: Option<String>,
+    /// Sterkte 0–100 % (0.7.80): schaalt alle bandgains vóór het sturen; de
+    /// banden zelf blijven de preset. None = 100 (oude bestanden onveranderd).
+    #[serde(default)]
+    pub strength: Option<f32>,
     #[serde(default)]
     pub low_freq: f32,
     #[serde(default)]

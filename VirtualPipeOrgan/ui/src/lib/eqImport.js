@@ -188,3 +188,39 @@ export function herkenEnParse(pad, bytes) {
   }
   return { naam: presetNaamUitPad(pad), ...r };
 }
+
+// --- Exporteren (0.7.80) ----------------------------------------------------
+// AutoEq / Equalizer APO-tekst: alleen peak (PK), lowshelf (LSC) en highshelf
+// (HSC) hebben daar een vorm; andere typen worden weggelaten en geteld.
+// Uitgeschakelde banden gaan als OFF mee. Terug-importeren geeft dezelfde
+// banden (rondreis-test in testscripts/eq_import_test.mjs).
+const TXT_TYPES = { peak: 'PK', lowshelf: 'LSC', highshelf: 'HSC' };
+export function exportParametricEqTxt(banden, preampDb = 0) {
+  const regels = [`Preamp: ${(Number(preampDb) || 0).toFixed(1)} dB`];
+  let n = 0, overgeslagen = 0;
+  for (const b of banden || []) {
+    const type = TXT_TYPES[b.band_type];
+    if (!type) { overgeslagen += 1; continue; }
+    n += 1;
+    const q = b.q != null ? Number(b.q) : bwNaarQ(Number(b.bandwidth) || 1);
+    regels.push(`Filter ${n}: ${b.enabled === false ? 'OFF' : 'ON'} ${type} Fc ${Number(b.freq).toFixed(Number.isInteger(Number(b.freq)) ? 0 : 1)} Hz Gain ${(Number(b.gain_db) || 0).toFixed(1)} dB Q ${q.toFixed(2)}`);
+  }
+  return { tekst: regels.join('\n') + '\n', overgeslagen };
+}
+
+// Eigen JSON: volledig (alle typen, kanalen, Q én bandbreedte).
+export function exportEigenJson(banden, preampDb = null, preampAuto = true, naam = null) {
+  const uit = {
+    jm_orgue_eq: 1,
+    naam: naam || null,
+    enabled: true,
+    preamp_db: preampDb == null ? null : Number(preampDb),
+    preamp_auto: !!preampAuto,
+    bands: (banden || []).map((b) => ({
+      enabled: b.enabled !== false, band_type: b.band_type, freq: Number(b.freq), gain_db: Number(b.gain_db) || 0,
+      bandwidth: Number(b.bandwidth) || qNaarBw(Number(b.q) || 1), q: b.q == null ? null : Number(b.q),
+      channel: b.channel == null ? null : Number(b.channel),
+    })),
+  };
+  return JSON.stringify(uit, null, 2) + '\n';
+}

@@ -6,7 +6,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { biquadCoeffs, magnitudeDb, compositeDb, autoPreampDb, qToBw, bwToQ, eqRaster, bandenVoorKanaal } from '../ui/src/lib/eqCurve.js';
+import { biquadCoeffs, magnitudeDb, compositeDb, autoPreampDb, qToBw, bwToQ, eqRaster, bandenVoorKanaal, schaalBanden } from '../ui/src/lib/eqCurve.js';
 
 const hier = path.dirname(fileURLToPath(import.meta.url));
 const fx = JSON.parse(readFileSync(path.join(hier, 'testdata', 'eq_curve_fixture.json'), 'utf8'));
@@ -48,6 +48,13 @@ check('autoPreampDb: band op kanaal 1 telt mee', Math.abs(autoPreampDb([{ enable
 check('bandenVoorKanaal: weergave Alle laat kanaalbanden weg, kanaal 1 neemt ze mee',
   bandenVoorKanaal([{ enabled: true, channel: null }, { enabled: true, channel: 1 }, { enabled: false, channel: null }], null).length === 1
   && bandenVoorKanaal([{ enabled: true, channel: null }, { enabled: true, channel: 1 }, { enabled: true, channel: 0 }], 1).length === 2);
+
+// Sterkte (0.7.80): 50 % halveert elke gain, de Auto-voorversterking rekent opnieuw, 0 % = vlak, 100 % = dezelfde objecten.
+const half = schaalBanden(K240, 50);
+check('schaalBanden 50 %: gains gehalveerd, bron ongemoeid', half.every((b, i) => Math.abs(b.gain_db - K240[i].gain_db / 2) < 1e-9) && K240[0].gain_db === 6.3);
+check('schaalBanden 50 %: Auto-preamp opnieuw (≈ helft)', Math.abs(autoPreampDb(half, 2, 48000) - pre / 2) < 0.6, `${autoPreampDb(half, 2, 48000).toFixed(3)} vs ${(pre / 2).toFixed(3)}`);
+check('schaalBanden 0 %: vlak', Math.abs(compositeDb(schaalBanden(K240, 0), 1000, 48000, 0, 0)) < 1e-9);
+check('schaalBanden 100 %: dezelfde array', schaalBanden(K240, 100) === K240);
 
 console.log(fouten ? `${fouten} FOUTEN` : 'alles OK');
 process.exit(fouten ? 1 : 0);

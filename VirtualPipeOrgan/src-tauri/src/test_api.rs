@@ -1826,6 +1826,7 @@ fn handle_set_eq(state: &AppState, query: &str) -> Result<Value, (u16, String)> 
     let preamp_raw: Option<String> = parse_query(query, "preamp");
     let preamp_auto = preamp_raw.as_deref() == Some("auto");
     let preamp_db: Option<f32> = preamp_raw.as_deref().and_then(|s| s.parse::<f32>().ok());
+    let strength: Option<f32> = parse_query(query, "strength");
     // Zelfde pad als de frontend: vrije banden (hier één band als test).
     let bands = vec![crate::library::EqBandSaved {
         enabled,
@@ -1836,7 +1837,8 @@ fn handle_set_eq(state: &AppState, query: &str) -> Result<Value, (u16, String)> 
         q,
         channel,
     }];
-    let specs = crate::commands::eq_saved_to_specs(&bands);
+    let mut specs = crate::commands::eq_saved_to_specs(&bands);
+    crate::commands::schaal_specs(&mut specs, strength);
     let eff = crate::commands::effectieve_preamp_db(state, &specs, preamp_db, preamp_auto);
     state.send_audio_command(AudioCommand::SetEqBands {
         enabled: true,
@@ -1844,7 +1846,7 @@ fn handle_set_eq(state: &AppState, query: &str) -> Result<Value, (u16, String)> 
         bands: specs,
     });
     *state.eq_settings.write() = Some(crate::library::EqSettingsSaved {
-        enabled: true, bands, preamp_db: eff, preamp_auto, ..Default::default()
+        enabled: true, bands, preamp_db: eff, preamp_auto, strength, ..Default::default()
     });
     Ok(json!({ "ok": true, "mid_gain": gain, "preamp_db": eff }))
 }
@@ -1858,7 +1860,8 @@ fn handle_eq_response(state: &AppState, query: &str) -> Result<Value, (u16, Stri
     let eq = state.eq_settings.read().clone();
     let (organ_db, enabled, preamp) = match eq {
         Some(e) if e.enabled => {
-            let specs = crate::commands::eq_saved_to_specs(&e.bands);
+            let mut specs = crate::commands::eq_saved_to_specs(&e.bands);
+            crate::commands::schaal_specs(&mut specs, e.strength);
             (vpo_audio::respons_db_van_banden(&specs, channel.unwrap_or(0), sr, e.preamp_db, freq), true, e.preamp_db)
         }
         _ => (0.0, false, 0.0),
@@ -1868,7 +1871,8 @@ fn handle_eq_response(state: &AppState, query: &str) -> Result<Value, (u16, Stri
     let uit = prefs.active_output_profile.as_ref().and_then(|k| prefs.output_eq.get(k));
     let (output_db, output_enabled) = match uit {
         Some(c) if c.enabled => {
-            let specs = crate::commands::eq_saved_to_specs(&c.bands);
+            let mut specs = crate::commands::eq_saved_to_specs(&c.bands);
+            crate::commands::schaal_specs(&mut specs, c.strength);
             (vpo_audio::respons_db_van_banden(&specs, channel.unwrap_or(0), sr, c.preamp_db, freq), true)
         }
         _ => (0.0, false),
@@ -1930,8 +1934,9 @@ fn handle_set_eq_bands_json(state: &AppState, body: &str) -> Result<Value, (u16,
     let enabled = v.get("enabled").and_then(|x| x.as_bool()).unwrap_or(true);
     let bands = banden_uit_json(&v)?;
     let (pre, auto) = preamp_uit_json(&v);
+    let strength = v.get("strength").and_then(|x| x.as_f64()).map(|x| x as f32);
     let n = bands.len();
-    let (eff, auto_w) = crate::commands::set_eq_bands_inner(state, enabled, bands, pre, auto);
+    let (eff, auto_w) = crate::commands::set_eq_bands_inner(state, enabled, bands, pre, auto, strength);
     Ok(json!({ "ok": true, "bands": n, "preamp_db": eff, "preamp_auto_waarde": auto_w }))
 }
 
@@ -1955,7 +1960,8 @@ fn handle_set_output_eq(state: &AppState, query: &str, body: &str) -> Result<Val
     let (pre, auto) = preamp_uit_json(&v);
     let preset_id = v.get("preset_id").and_then(|x| x.as_str()).map(|s| s.to_string());
     let preset_naam = v.get("preset_naam").and_then(|x| x.as_str()).map(|s| s.to_string());
-    let dto = crate::commands::set_output_eq_inner(state, &kind, enabled, bands, pre, auto, preset_id, preset_naam, true)
+    let strength = v.get("strength").and_then(|x| x.as_f64()).map(|x| x as f32);
+    let dto = crate::commands::set_output_eq_inner(state, &kind, enabled, bands, pre, auto, preset_id, preset_naam, strength, true)
         .map_err(|e| (400u16, e))?;
     serde_json::to_value(dto).map_err(|e| (500u16, e.to_string()))
 }
