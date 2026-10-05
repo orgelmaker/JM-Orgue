@@ -847,9 +847,8 @@
   },
   "eq": {
     "profile": "Profil d'écoute",
-    "profile_flat": "Neutre",
+    "profile_speakers": "Enceintes",
     "profile_headphones": "Casque",
-    "profile_small_speakers": "Petites enceintes",
     "band_peak": "Crête",
     "band_lowpass": "Passe-bas",
     "band_highpass": "Passe-haut",
@@ -865,7 +864,17 @@
     "gain": "Gain",
     "bandwidth": "Largeur de bande",
     "band_add": "+ Ajouter une bande",
-    "channel_note": "L'égaliseur agit par canal de sortie, après la réverbération — choisissez « Tous les canaux » ou un canal précis par bande."
+    "channel_note": "L'égaliseur agit par canal de sortie, après la réverbération — choisissez « Tous les canaux » ou un canal précis par bande.",
+    "preamp": "Préamplification",
+    "preamp_auto": "Auto",
+    "preamp_auto_title": "Retire exactement ce que les bandes ajoutent ensemble, pour qu'un grave relevé n'atteigne pas le limiteur",
+    "preamp_warn": "Au-dessus de la valeur Auto : les bandes peuvent saturer la sortie.",
+    "unit_oct": "oct",
+    "unit_q": "Q",
+    "unit_title": "Pente en largeur de bande (octaves) ou en Q",
+    "shelf_q": "Pente (Q)",
+    "fixed_slope": "pente fixe",
+    "fixed_slope_title": "Ce shelf a encore la pente fixe d'avant 0.7.76 ; cliquez pour rendre la pente réglable (Q 0,71 = défaut)"
   },
   "reverb": {
     "preset_small_chapel": "Petite chapelle",

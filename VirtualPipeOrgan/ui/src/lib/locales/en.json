@@ -847,9 +847,8 @@
   },
   "eq": {
     "profile": "Listening profile",
-    "profile_flat": "Neutral",
+    "profile_speakers": "Speakers",
     "profile_headphones": "Headphones",
-    "profile_small_speakers": "Small speakers",
     "band_peak": "Peak",
     "band_lowpass": "Low-pass",
     "band_highpass": "High-pass",
@@ -865,7 +864,17 @@
     "gain": "Gain",
     "bandwidth": "Bandwidth",
     "band_add": "+ Add band",
-    "channel_note": "EQ works per output channel, after the reverb — choose \"All channels\" or a specific channel per band."
+    "channel_note": "EQ works per output channel, after the reverb — choose \"All channels\" or a specific channel per band.",
+    "preamp": "Preamp",
+    "preamp_auto": "Auto",
+    "preamp_auto_title": "Removes exactly what the bands add together, so a boosted bass does not hit the limiter",
+    "preamp_warn": "Above the Auto value: the bands may drive the output into the limiter.",
+    "unit_oct": "oct",
+    "unit_q": "Q",
+    "unit_title": "Steepness as bandwidth (octaves) or Q",
+    "shelf_q": "Steepness (Q)",
+    "fixed_slope": "fixed slope",
+    "fixed_slope_title": "This shelf still has the fixed slope from before 0.7.76; click to make the steepness adjustable (Q 0.71 = default)"
   },
   "reverb": {
     "preset_small_chapel": "Small Chapel",

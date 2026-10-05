@@ -1138,11 +1138,46 @@
   // bandbreedte (octaven) en doelkanaal (null = alle uitgangskanalen).
   let eqEnabled = false;
   const defaultEqBands = () => ([
-    { enabled: true, band_type: 'lowshelf', freq: 200, gain_db: 0, bandwidth: 1.0, channel: null },
-    { enabled: true, band_type: 'peak', freq: 1000, gain_db: 0, bandwidth: 2.0, channel: null },
-    { enabled: true, band_type: 'highshelf', freq: 4000, gain_db: 0, bandwidth: 1.0, channel: null },
+    { enabled: true, band_type: 'lowshelf', freq: 200, gain_db: 0, bandwidth: 1.0, q: null, channel: null },
+    { enabled: true, band_type: 'peak', freq: 1000, gain_db: 0, bandwidth: 2.0, q: null, channel: null },
+    { enabled: true, band_type: 'highshelf', freq: 4000, gain_db: 0, bandwidth: 1.0, q: null, channel: null },
   ]);
   let eqBands = defaultEqBands();
+  // Voorversterking (0.7.76): Auto = −(grootste opgetelde versterking), zodat
+  // een opgehaald laag niet in de begrenzer loopt; de backend geeft de
+  // effectieve waarde terug. Oude orgelinstellingen laden met Auto uit en
+  // 0 dB en klinken dus onveranderd.
+  let eqPreampDb = 0;
+  let eqPreampAuto = true;
+  let eqPreampEffectief = 0;
+  // Auto-waarde (−grootste versterking) van de huidige banden, ook in handmatige
+  // stand: daartegen wordt de hand-instelling gewaarschuwd.
+  let eqPreampAutoWaarde = 0;
+  // Eenheid van de steilheid: 'oct' (bandbreedte, zoals Sweelinq) of 'q' (AutoEq).
+  let eqBwUnit = 'oct';
+  try { if (localStorage.getItem('jm-orgue-eq-bw-unit') === 'q') eqBwUnit = 'q'; } catch (e) {}
+  function setEqBwUnit(u) { eqBwUnit = u === 'q' ? 'q' : 'oct'; try { localStorage.setItem('jm-orgue-eq-bw-unit', eqBwUnit); } catch (e) {} }
+  // Q ↔ bandbreedte (analoge RBJ-benadering; identiek aan vpo_audio::q_naar_bandbreedte).
+  const qToBw = (q) => (2 / Math.LN2) * Math.asinh(1 / (2 * Math.max(0.05, q)));
+  const bwToQ = (bw) => 1 / (2 * Math.sinh(0.5 * Math.LN2 * Math.max(0.01, bw)));
+  // Steilheid van een band voor weergave: Q als die er is, anders uit de bandbreedte.
+  const bandQ = (b) => (b.q != null ? Number(b.q) : bwToQ(Number(b.bandwidth) || 1));
+  const isShelf = (b) => b.band_type === 'lowshelf' || b.band_type === 'highshelf';
+  function setBandQ(band, q) {
+    // Shelves: 0,3–2 (daarbuiten resoneert de kantel); overige: 0,05–20.
+    const lo = isShelf(band) ? 0.3 : 0.05;
+    const hi = isShelf(band) ? 2 : 20;
+    const qq = Math.max(lo, Math.min(hi, Number(q) || 0.7));
+    band.q = qq;
+    band.bandwidth = qToBw(qq);
+    onEqBandChange();
+  }
+  function setBandBw(band, bw) {
+    const b = Math.max(0.05, Math.min(8, Number(bw) || 1));
+    band.bandwidth = b;
+    band.q = bwToQ(b);
+    onEqBandChange();
+  }
 
   // Reactief ($t) zodat de labels de taalkeuze volgen; de markup leest `.label`.
   $: eqBandTypes = [
@@ -1163,7 +1198,7 @@
 
   async function updateEq() {
     try {
-      await invoke('set_eq_bands', {
+      const res = await invoke('set_eq_bands', {
         enabled: eqEnabled,
         bands: eqBands.map(b => ({
           enabled: !!b.enabled,
@@ -1171,13 +1206,24 @@
           freq: Number(b.freq) || 1000,
           gain_db: Number(b.gain_db) || 0,
           bandwidth: Number(b.bandwidth) || 1.0,
+          q: (b.q === null || b.q === undefined) ? null : Number(b.q),
           channel: (b.channel === null || b.channel === undefined) ? null : Number(b.channel),
         })),
+        preampDb: eqPreampAuto ? null : Number(eqPreampDb) || 0,
+        preampAuto: !!eqPreampAuto,
       });
+      if (Array.isArray(res) && res.length === 2) {
+        const [eff, autoW] = res;
+        eqPreampEffectief = Number(eff) || 0;
+        eqPreampAutoWaarde = Number(autoW) || 0;
+        if (eqPreampAuto) eqPreampDb = Math.round(eqPreampEffectief * 10) / 10;
+      }
     } catch (e) {
       console.error('Failed to set EQ:', e);
     }
   }
+  function setEqPreampAuto(aan) { eqPreampAuto = !!aan; updateEq(); }
+  function setEqPreampDb(v) { eqPreampDb = Math.max(-24, Math.min(6, Number(v) || 0)); eqPreampAuto = false; updateEq(); }
 
   function onEqBandChange() {
     eqBands = eqBands; // Svelte-reactiviteit na mutatie van een band-object
@@ -1186,28 +1232,23 @@
 
   // Luisterprofielen (0.7.47). Bewust GEEN correcties per koptelefoonmodel:
   // die zouden gemeten moeten zijn, en verzinnen we niet. Dit zijn eerlijke,
-  // algemeen omschreven correcties voor de drie situaties waarin een huisorgel
-  // meestal klinkt. Ze vullen de banden; daarna is alles nog met de hand bij
+  // algemeen omschreven correcties voor de twee situaties waarin een huisorgel
+  // meestal klinkt (sinds 0.7.76 alleen Hoofdtelefoon en Luidsprekers). Ze vullen de banden; daarna is alles nog met de hand bij
   // te stellen.
   $: eqProfielen = [
-    { id: 'flat', label: $t('eq.profile_flat'), bands: [
-      { enabled: true, band_type: 'lowshelf',  freq: 200,  gain_db: 0, bandwidth: 1.0, channel: null },
-      { enabled: true, band_type: 'peak',      freq: 1000, gain_db: 0, bandwidth: 2.0, channel: null },
-      { enabled: true, band_type: 'highshelf', freq: 4000, gain_db: 0, bandwidth: 1.0, channel: null },
-    ] },
-    // Koptelefoon: de 16' dreunt op een koptelefoon veel eerder dan in een kerk,
-    // en het bovenwerk wordt scherp omdat er geen ruimte tussen zit.
+    // Hoofdtelefoon: de 16' dreunt op een hoofdtelefoon veel eerder dan in een
+    // kerk, en het bovenwerk wordt scherp omdat er geen ruimte tussen zit.
     { id: 'headphones', label: $t('eq.profile_headphones'), bands: [
       { enabled: true, band_type: 'lowshelf',  freq: 120,  gain_db: -3.0, bandwidth: 1.0, channel: null },
       { enabled: true, band_type: 'peak',      freq: 3000, gain_db: -2.0, bandwidth: 1.5, channel: null },
       { enabled: true, band_type: 'highshelf', freq: 8000, gain_db:  1.5, bandwidth: 1.0, channel: null },
     ] },
-    // Kleine luidsprekers kunnen onder ~60 Hz toch niets; die energie kost
-    // alleen membraanslag en vervorming.
-    { id: 'small_speakers', label: $t('eq.profile_small_speakers'), bands: [
-      { enabled: true, band_type: 'highpass',  freq: 60,   gain_db:  0,   bandwidth: 1.0, channel: null },
-      { enabled: true, band_type: 'lowshelf',  freq: 200,  gain_db:  2.5, bandwidth: 1.0, channel: null },
-      { enabled: true, band_type: 'highshelf', freq: 6000, gain_db: -1.5, bandwidth: 1.0, channel: null },
+    // Luidsprekers: neutraal vertrekpunt (de kerkakoestiek zit al in de
+    // opname); per orgel en per kamer daarna met de hand bij te stellen.
+    { id: 'speakers', label: $t('eq.profile_speakers'), bands: [
+      { enabled: true, band_type: 'lowshelf',  freq: 200,  gain_db: 0, bandwidth: 1.0, channel: null },
+      { enabled: true, band_type: 'peak',      freq: 1000, gain_db: 0, bandwidth: 2.0, channel: null },
+      { enabled: true, band_type: 'highshelf', freq: 4000, gain_db: 0, bandwidth: 1.0, channel: null },
     ] },
   ];
   function pasEqProfielToe(id) {
@@ -1219,7 +1260,7 @@
   }
 
   function addEqBand() {
-    eqBands = [...eqBands, { enabled: true, band_type: 'peak', freq: 1000, gain_db: 0, bandwidth: 2.0, channel: null }];
+    eqBands = [...eqBands, { enabled: true, band_type: 'peak', freq: 1000, gain_db: 0, bandwidth: qToBw(1.0), q: 1.0, channel: null }];
     updateEq();
   }
 
@@ -2575,6 +2616,7 @@
             freq: b.freq ?? 1000,
             gain_db: b.gain_db ?? 0,
             bandwidth: b.bandwidth ?? 2.0,
+            q: (b.q === null || b.q === undefined) ? null : b.q,
             channel: (b.channel === null || b.channel === undefined) ? null : b.channel,
           }));
         } else {
@@ -2582,14 +2624,23 @@
           const q = Math.max(0.05, e.mid_q ?? 1);
           const bw = (2 / Math.LN2) * Math.asinh(1 / (2 * q));
           eqBands = [
-            { enabled: true, band_type: 'lowshelf', freq: e.low_freq ?? 200, gain_db: e.low_gain ?? 0, bandwidth: 1.0, channel: null },
-            { enabled: true, band_type: 'peak', freq: e.mid_freq ?? 1000, gain_db: e.mid_gain ?? 0, bandwidth: bw, channel: null },
-            { enabled: true, band_type: 'highshelf', freq: e.high_freq ?? 4000, gain_db: e.high_gain ?? 0, bandwidth: 1.0, channel: null },
+            { enabled: true, band_type: 'lowshelf', freq: e.low_freq ?? 200, gain_db: e.low_gain ?? 0, bandwidth: 1.0, q: null, channel: null },
+            { enabled: true, band_type: 'peak', freq: e.mid_freq ?? 1000, gain_db: e.mid_gain ?? 0, bandwidth: bw, q: null, channel: null },
+            { enabled: true, band_type: 'highshelf', freq: e.high_freq ?? 4000, gain_db: e.high_gain ?? 0, bandwidth: 1.0, q: null, channel: null },
           ];
         }
+        // Voorversterking (0.7.76): ontbreekt in oude bestanden → 0 dB, Auto uit.
+        eqPreampAuto = !!e.preamp_auto;
+        eqPreampDb = Number(e.preamp_db) || 0;
+        eqPreampEffectief = eqPreampDb;
+        eqPreampAutoWaarde = eqPreampDb; // neutraal tot updateEq de echte waarde geeft
       } else {
         eqEnabled = false;
         eqBands = defaultEqBands();
+        eqPreampAuto = true;
+        eqPreampDb = 0;
+        eqPreampEffectief = 0;
+        eqPreampAutoWaarde = 0;
       }
       if (pushToBackend) await updateEq();
 
@@ -5487,6 +5538,31 @@
                       <button class="btn btn-sm" on:click={() => pasEqProfielToe(prof.id)}>{prof.label}</button>
                     {/each}
                   </div>
+                  <!-- Voorversterking (0.7.76): Auto = −(grootste opgetelde versterking). -->
+                  <div class="swell-config-sliders" style="border:1px solid var(--accent-soft-2); border-radius:var(--radius-sm); padding:0.4rem 0.5rem;">
+                    <div class="swell-config-row">
+                      <span class="swell-config-label">{$t('eq.preamp')}</span>
+                      <input type="range" min="-24" max="6" step="0.1" value={eqPreampAuto ? eqPreampEffectief : eqPreampDb}
+                        disabled={eqPreampAuto} style="opacity:{eqPreampAuto ? 0.55 : 1};"
+                        on:input={(e) => setEqPreampDb(e.target.value)} />
+                      <input type="number" min="-24" max="6" step="0.1"
+                        style="width:4.2rem; font-size:0.75rem; padding:0.1rem 0.25rem; background:var(--bg-elevated); border:1px solid var(--accent-soft-2); border-radius:var(--radius-sm); color:{eqPreampAuto ? 'var(--text-muted)' : 'var(--text)'};"
+                        value={(eqPreampAuto ? eqPreampEffectief : eqPreampDb).toFixed(1)} disabled={eqPreampAuto}
+                        on:change={(e) => { setEqPreampDb(e.target.value); e.target.value = eqPreampDb.toFixed(1); }} />
+                      <span class="swell-config-value" style="width:1.4rem;">dB</span>
+                      <label class="swell-toggle" style="margin:0 0 0 0.4rem;" title={$t('eq.preamp_auto_title')}>
+                        <input type="checkbox" checked={eqPreampAuto} on:change={(e) => setEqPreampAuto(e.target.checked)} />
+                        <span class="swell-toggle-label">{$t('eq.preamp_auto')}</span>
+                      </label>
+                      <span class="eq-unit-switch" style="margin-left:auto; display:inline-flex; gap:0.15rem;" title={$t('eq.unit_title')}>
+                        <button class="btn btn-ghost btn-sm" class:active={eqBwUnit === 'oct'} style="font-size:0.7rem; padding:0.05rem 0.4rem;" on:click={() => setEqBwUnit('oct')}>{$t('eq.unit_oct')}</button>
+                        <button class="btn btn-ghost btn-sm" class:active={eqBwUnit === 'q'} style="font-size:0.7rem; padding:0.05rem 0.4rem;" on:click={() => setEqBwUnit('q')}>{$t('eq.unit_q')}</button>
+                      </span>
+                    </div>
+                    {#if !eqPreampAuto && eqPreampDb > eqPreampAutoWaarde + 0.05 && eqBands.some(b => b.enabled && b.gain_db > 0)}
+                      <div class="settings-hint" style="color:var(--warning, #b8860b);">{$t('eq.preamp_warn')}</div>
+                    {/if}
+                  </div>
                   {#each eqBands as band, bi (bi)}
                     <div style="border:1px solid var(--accent-soft-2); border-radius:var(--radius-sm); padding:0.4rem 0.5rem; opacity:{band.enabled ? 1 : 0.55};">
                       <div style="display:flex; align-items:center; gap:0.45rem; flex-wrap:wrap; margin-bottom:0.35rem;">
@@ -5496,7 +5572,9 @@
                         </label>
                         <select
                           style="font-size:0.75rem; padding:0.15rem 0.3rem; background:var(--bg-elevated); border:1px solid var(--accent-soft-2); border-radius:var(--radius-sm); color:var(--text);"
-                          bind:value={band.band_type} on:change={onEqBandChange} title={$t('eq.filter_type')}
+                          bind:value={band.band_type}
+                          on:change={(e) => { band.band_type = e.target.value; if (isShelf(band) && band.q != null) setBandQ(band, band.q); else onEqBandChange(); }}
+                          title={$t('eq.filter_type')}
                         >
                           {#each eqBandTypes as t}
                             <option value={t.value}>{t.label}</option>
@@ -5541,10 +5619,24 @@
                             <span class="swell-config-value">{band.gain_db > 0 ? '+' : ''}{Number(band.gain_db).toFixed(1)} dB</span>
                           </div>
                         {/if}
-                        {#if band.band_type !== 'lowshelf' && band.band_type !== 'highshelf'}
+                        {#if isShelf(band) && band.q == null}
+                          <div class="swell-config-row">
+                            <span class="swell-config-label">{$t('eq.shelf_q')}</span>
+                            <button class="btn btn-ghost btn-sm" style="font-size:0.72rem; padding:0.05rem 0.45rem;" on:click={() => setBandQ(band, 0.7071)} title={$t('eq.fixed_slope_title')}>{$t('eq.fixed_slope')}</button>
+                          </div>
+                        {:else if eqBwUnit === 'q' || isShelf(band)}
+                          <div class="swell-config-row">
+                            <span class="swell-config-label">{isShelf(band) ? $t('eq.shelf_q') : $t('eq.unit_q')}</span>
+                            <input type="range" min={isShelf(band) ? 0.3 : 0.1} max={isShelf(band) ? 2 : 10} step="0.01" value={bandQ(band)} on:input={(e) => setBandQ(band, e.target.value)} />
+                            <input type="number" min="0.05" max="20" step="0.01"
+                              style="width:4.2rem; font-size:0.75rem; padding:0.1rem 0.25rem; background:var(--bg-elevated); border:1px solid var(--accent-soft-2); border-radius:var(--radius-sm); color:var(--text);"
+                              value={bandQ(band).toFixed(2)} on:change={(e) => { setBandQ(band, e.target.value); e.target.value = bandQ(band).toFixed(2); }} />
+                            <span class="swell-config-value" style="width:1.4rem;">Q</span>
+                          </div>
+                        {:else}
                           <div class="swell-config-row">
                             <span class="swell-config-label">{$t('eq.bandwidth')}</span>
-                            <input type="range" min="0.1" max="4" step="0.05" bind:value={band.bandwidth} on:input={onEqBandChange} />
+                            <input type="range" min="0.1" max="4" step="0.05" value={Number(band.bandwidth)} on:input={(e) => setBandBw(band, e.target.value)} />
                             <span class="swell-config-value">{Number(band.bandwidth).toFixed(2)} oct</span>
                           </div>
                         {/if}

@@ -847,9 +847,8 @@
   },
   "eq": {
     "profile": "Perfil de escucha",
-    "profile_flat": "Neutro",
+    "profile_speakers": "Altavoces",
     "profile_headphones": "Auriculares",
-    "profile_small_speakers": "Altavoces pequeños",
     "band_peak": "Pico",
     "band_lowpass": "Paso bajo",
     "band_highpass": "Paso alto",
@@ -865,7 +864,17 @@
     "gain": "Ganancia",
     "bandwidth": "Ancho de banda",
     "band_add": "+ Añadir banda",
-    "channel_note": "El EQ actúa por canal de salida, después de la reverberación — elige «Todos los canales» o un canal concreto para cada banda."
+    "channel_note": "El EQ actúa por canal de salida, después de la reverberación — elige «Todos los canales» o un canal concreto para cada banda.",
+    "preamp": "Preamplificación",
+    "preamp_auto": "Auto",
+    "preamp_auto_title": "Quita exactamente lo que las bandas añaden en conjunto, para que un grave realzado no llegue al limitador",
+    "preamp_warn": "Por encima del valor Auto: las bandas pueden llevar la salida al limitador.",
+    "unit_oct": "oct",
+    "unit_q": "Q",
+    "unit_title": "Pendiente como ancho de banda (octavas) o Q",
+    "shelf_q": "Pendiente (Q)",
+    "fixed_slope": "pendiente fija",
+    "fixed_slope_title": "Este shelf aún tiene la pendiente fija de antes de 0.7.76; pulsa para hacer ajustable la pendiente (Q 0,71 = predeterminado)"
   },
   "reverb": {
     "preset_small_chapel": "Capilla pequeña",

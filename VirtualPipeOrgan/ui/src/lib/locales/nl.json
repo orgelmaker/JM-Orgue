@@ -847,9 +847,8 @@
   },
   "eq": {
     "profile": "Luisterprofiel",
-    "profile_flat": "Neutraal",
-    "profile_headphones": "Koptelefoon",
-    "profile_small_speakers": "Kleine luidsprekers",
+    "profile_speakers": "Luidsprekers",
+    "profile_headphones": "Hoofdtelefoon",
     "band_peak": "Piek",
     "band_lowpass": "Laagdoorlaat",
     "band_highpass": "Hoogdoorlaat",
@@ -865,7 +864,17 @@
     "gain": "Gain",
     "bandwidth": "Bandbreedte",
     "band_add": "+ Band toevoegen",
-    "channel_note": "EQ werkt per uitgangskanaal, na de galm — kies \"Alle kanalen\" of een specifiek kanaal per band."
+    "channel_note": "EQ werkt per uitgangskanaal, na de galm — kies \"Alle kanalen\" of een specifiek kanaal per band.",
+    "preamp": "Voorversterking",
+    "preamp_auto": "Auto",
+    "preamp_auto_title": "Neemt precies zoveel weg als de banden samen toevoegen, zodat een opgehaald laag niet in de begrenzer loopt",
+    "preamp_warn": "Hoger dan de Auto-waarde: de banden kunnen de uitgang begrenzen.",
+    "unit_oct": "oct",
+    "unit_q": "Q",
+    "unit_title": "Steilheid in bandbreedte (octaven) of Q",
+    "shelf_q": "Steilheid (Q)",
+    "fixed_slope": "vaste helling",
+    "fixed_slope_title": "Deze shelf heeft nog de vaste helling van vóór 0.7.76; klik om de steilheid instelbaar te maken (Q 0,71 = standaard)"
   },
   "reverb": {
     "preset_small_chapel": "Kleine Kapel",

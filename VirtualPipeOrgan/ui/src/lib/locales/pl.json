@@ -847,9 +847,8 @@
   },
   "eq": {
     "profile": "Profil odsłuchu",
-    "profile_flat": "Neutralny",
+    "profile_speakers": "Głośniki",
     "profile_headphones": "Słuchawki",
-    "profile_small_speakers": "Małe głośniki",
     "band_peak": "Dzwonowy",
     "band_lowpass": "Dolnoprzepustowy",
     "band_highpass": "Górnoprzepustowy",
@@ -865,7 +864,17 @@
     "gain": "Wzmocnienie",
     "bandwidth": "Szerokość pasma",
     "band_add": "+ Dodaj pasmo",
-    "channel_note": "Korektor działa osobno na każdym kanale wyjściowym, po pogłosie — dla każdego pasma wybierz „Wszystkie kanały” albo konkretny kanał."
+    "channel_note": "Korektor działa osobno na każdym kanale wyjściowym, po pogłosie — dla każdego pasma wybierz „Wszystkie kanały” albo konkretny kanał.",
+    "preamp": "Przedwzmocnienie",
+    "preamp_auto": "Auto",
+    "preamp_auto_title": "Odejmuje dokładnie tyle, ile pasma razem dodają, aby podbity bas nie trafiał w ogranicznik",
+    "preamp_warn": "Powyżej wartości Auto: pasma mogą wysterować wyjście do ogranicznika.",
+    "unit_oct": "okt",
+    "unit_q": "Q",
+    "unit_title": "Nachylenie jako szerokość pasma (oktawy) lub Q",
+    "shelf_q": "Nachylenie (Q)",
+    "fixed_slope": "stałe zbocze",
+    "fixed_slope_title": "Ten filtr półkowy ma jeszcze stałe zbocze sprzed 0.7.76; kliknij, aby nachylenie było regulowane (Q 0,71 = domyślnie)"
   },
   "reverb": {
     "preset_small_chapel": "Mała kaplica",

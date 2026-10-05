@@ -1092,10 +1092,51 @@ pub struct EqBandSpec {
     pub band_type: EqBandType,
     pub freq: f32,
     pub gain_db: f32,
-    /// Bandbreedte in octaven (RBJ-cookbook); bepaalt de Q van peak/band/pass-types.
+    /// Bandbreedte in octaven (RBJ-cookbook); bepaalt de Q van peak/band/pass-types
+    /// zolang `q` leeg is (oude banden: bit-identiek met 0.7.75).
     pub bandwidth_oct: f32,
+    /// Q (0.7.76): is dit gezet, dan rekent de biquad met `alpha = sin(w0)/(2Q)`
+    /// — ook voor de shelves, die zonder Q hun vaste helling houden. AutoEq-
+    /// presets geven Q; de UI schrijft Q en leidt de bandbreedte af.
+    pub q: Option<f32>,
     /// Fysiek uitgangskanaal (0-based); None = alle kanalen.
     pub channel: Option<u8>,
+}
+
+/// Grenzen van een band (klemmen in `from_band_spec`).
+pub const EQ_Q_MIN: f32 = 0.05;
+pub const EQ_Q_MAX: f32 = 20.0;
+/// Plafond op het aantal banden per keten (extra banden worden genegeerd).
+pub const EQ_MAX_BANDEN: usize = 32;
+
+/// Q → bandbreedte in octaven, analoge benadering (RBJ): BW = (2/ln2)·asinh(1/(2Q)).
+/// Voor weergave; identiek aan de JS-kant.
+pub fn q_naar_bandbreedte(q: f32) -> f32 {
+    let q = q.max(EQ_Q_MIN);
+    (2.0 / std::f32::consts::LN_2) * (1.0 / (2.0 * q)).asinh()
+}
+
+/// Bandbreedte in octaven → Q, analoge benadering: Q = 1 / (2·sinh(ln2/2·BW)).
+pub fn bandbreedte_naar_q(bw_oct: f32) -> f32 {
+    let bw = bw_oct.max(0.01);
+    1.0 / (2.0 * (0.5 * std::f32::consts::LN_2 * bw).sinh())
+}
+
+/// Exacte digitale conversie (cookbook, met de factor w0/sin(w0)): Q uit de
+/// bandbreedte zoals `from_band_spec` die zonder Q interpreteert.
+pub fn bandbreedte_naar_q_exact(bw_oct: f32, freq: f32, sample_rate: SampleRate) -> f32 {
+    let omega = 2.0 * PI * freq / sample_rate as f32;
+    let s = omega.sin();
+    if s.abs() < 1e-9 { return bandbreedte_naar_q(bw_oct); }
+    1.0 / (2.0 * (0.5 * std::f32::consts::LN_2 * bw_oct * omega / s).sinh())
+}
+
+/// Exacte digitale conversie: bandbreedte uit Q.
+pub fn q_naar_bandbreedte_exact(q: f32, freq: f32, sample_rate: SampleRate) -> f32 {
+    let omega = 2.0 * PI * freq / sample_rate as f32;
+    let s = omega.sin();
+    if s.abs() < 1e-9 { return q_naar_bandbreedte(q); }
+    (1.0 / (2.0 * q.max(EQ_Q_MIN))).asinh() * (2.0 / std::f32::consts::LN_2) * s / omega
 }
 
 impl BiquadFilter {
@@ -1109,7 +1150,12 @@ impl BiquadFilter {
         let sin_omega = omega.sin();
         let cos_omega = omega.cos();
         let ln2_2 = 0.5 * std::f32::consts::LN_2;
-        let alpha = sin_omega * (ln2_2 * bw * omega / sin_omega).sinh();
+        // Met Q (0.7.76): alpha = sin(w0)/(2Q); zonder Q de bandbreedte-route
+        // van 0.7.75, bit-identiek.
+        let alpha = match spec.q {
+            Some(q) => sin_omega / (2.0 * q.clamp(EQ_Q_MIN, EQ_Q_MAX)),
+            None => sin_omega * (ln2_2 * bw * omega / sin_omega).sinh(),
+        };
 
         match spec.band_type {
             EqBandType::Peak => {
@@ -1166,40 +1212,210 @@ impl BiquadFilter {
                     x1: 0.0, x2: 0.0, y1: 0.0, y2: 0.0,
                 }
             }
-            EqBandType::LowShelf => Self::low_shelf(freq, spec.gain_db, sample_rate),
-            EqBandType::HighShelf => Self::high_shelf(freq, spec.gain_db, sample_rate),
+            EqBandType::LowShelf => match spec.q {
+                Some(q) => Self::low_shelf_q(freq, spec.gain_db, q.clamp(EQ_Q_MIN, EQ_Q_MAX), sample_rate),
+                None => Self::low_shelf(freq, spec.gain_db, sample_rate),
+            },
+            EqBandType::HighShelf => match spec.q {
+                Some(q) => Self::high_shelf_q(freq, spec.gain_db, q.clamp(EQ_Q_MIN, EQ_Q_MAX), sample_rate),
+                None => Self::high_shelf(freq, spec.gain_db, sample_rate),
+            },
         }
+    }
+
+    /// Low-shelf met Q (RBJ-cookbook, alpha = sin(w0)/(2Q)); Q 0,7071 = de
+    /// cookbook-shelf met helling S = 1. AutoEq-presets geven shelves met Q 0,70.
+    pub fn low_shelf_q(cutoff_hz: f32, gain_db: f32, q: f32, sample_rate: SampleRate) -> Self {
+        let a = 10.0_f32.powf(gain_db / 40.0);
+        let omega = 2.0 * PI * cutoff_hz / sample_rate as f32;
+        let sin_omega = omega.sin();
+        let cos_omega = omega.cos();
+        let alpha = sin_omega / (2.0 * q);
+        let two_sqrt_a_alpha = 2.0 * a.sqrt() * alpha;
+        let b0 = a * ((a + 1.0) - (a - 1.0) * cos_omega + two_sqrt_a_alpha);
+        let b1 = 2.0 * a * ((a - 1.0) - (a + 1.0) * cos_omega);
+        let b2 = a * ((a + 1.0) - (a - 1.0) * cos_omega - two_sqrt_a_alpha);
+        let a0 = (a + 1.0) + (a - 1.0) * cos_omega + two_sqrt_a_alpha;
+        let a1 = -2.0 * ((a - 1.0) + (a + 1.0) * cos_omega);
+        let a2 = (a + 1.0) + (a - 1.0) * cos_omega - two_sqrt_a_alpha;
+        Self {
+            b0: b0 / a0, b1: b1 / a0, b2: b2 / a0,
+            a1: a1 / a0, a2: a2 / a0,
+            x1: 0.0, x2: 0.0, y1: 0.0, y2: 0.0,
+        }
+    }
+
+    /// High-shelf met Q (zie `low_shelf_q`).
+    pub fn high_shelf_q(cutoff_hz: f32, gain_db: f32, q: f32, sample_rate: SampleRate) -> Self {
+        let a = 10.0_f32.powf(gain_db / 40.0);
+        let omega = 2.0 * PI * cutoff_hz / sample_rate as f32;
+        let sin_omega = omega.sin();
+        let cos_omega = omega.cos();
+        let alpha = sin_omega / (2.0 * q);
+        let two_sqrt_a_alpha = 2.0 * a.sqrt() * alpha;
+        let b0 = a * ((a + 1.0) + (a - 1.0) * cos_omega + two_sqrt_a_alpha);
+        let b1 = -2.0 * a * ((a - 1.0) + (a + 1.0) * cos_omega);
+        let b2 = a * ((a + 1.0) + (a - 1.0) * cos_omega - two_sqrt_a_alpha);
+        let a0 = (a + 1.0) - (a - 1.0) * cos_omega + two_sqrt_a_alpha;
+        let a1 = 2.0 * ((a - 1.0) - (a + 1.0) * cos_omega);
+        let a2 = (a + 1.0) - (a - 1.0) * cos_omega - two_sqrt_a_alpha;
+        Self {
+            b0: b0 / a0, b1: b1 / a0, b2: b2 / a0,
+            a1: a1 / a0, a2: a2 / a0,
+            x1: 0.0, x2: 0.0, y1: 0.0, y2: 0.0,
+        }
+    }
+
+    /// Coëfficiënten overnemen, filterstaat behouden (0.7.76): schuiven
+    /// tijdens het spelen bouwt de keten niet opnieuw en geeft geen tik.
+    pub fn zet_coefficienten_van(&mut self, ander: &BiquadFilter) {
+        self.b0 = ander.b0; self.b1 = ander.b1; self.b2 = ander.b2;
+        self.a1 = ander.a1; self.a2 = ander.a2;
+    }
+
+    /// Analytische amplituderespons in dB op `freq` (|H(e^jw)|).
+    pub fn respons_db(&self, freq: f32, sample_rate: SampleRate) -> f32 {
+        let w = 2.0 * PI * freq / sample_rate as f32;
+        let (c1, s1) = (w.cos(), w.sin());
+        let (c2, s2) = ((2.0 * w).cos(), (2.0 * w).sin());
+        // H = (b0 + b1 e^-jw + b2 e^-2jw) / (1 + a1 e^-jw + a2 e^-2jw)
+        let nr = self.b0 + self.b1 * c1 + self.b2 * c2;
+        let ni = -(self.b1 * s1 + self.b2 * s2);
+        let dr = 1.0 + self.a1 * c1 + self.a2 * c2;
+        let di = -(self.a1 * s1 + self.a2 * s2);
+        let mag2 = (nr * nr + ni * ni) / (dr * dr + di * di).max(1e-30);
+        10.0 * mag2.max(1e-30).log10()
+    }
+
+    /// Polen binnen de eenheidscirkel (stabiliteitstest voor randwaarden).
+    pub fn is_stabiel(&self) -> bool {
+        self.a2.abs() < 1.0 && self.a1.abs() < 1.0 + self.a2
+            && self.b0.is_finite() && self.b1.is_finite() && self.b2.is_finite() && self.a1.is_finite() && self.a2.is_finite()
     }
 }
 
 /// Vrije multi-band EQ voor één audiokanaal: een serieschakeling van biquads,
-/// gebouwd uit de banden die op dit kanaal van toepassing zijn.
+/// gebouwd uit de banden die op dit kanaal van toepassing zijn, met een
+/// voorversterking (0.7.76) die vóór de keten wordt toegepast — ook op een
+/// kanaal zonder banden, anders zou een preset met kanaalspecifieke banden
+/// links en rechts een niveauverschil geven.
 pub struct ChannelEq {
     filters: Vec<BiquadFilter>,
+    /// Structuur van de keten (type per filter): is die gelijk, dan kan
+    /// `update` alleen coëfficiënten overschrijven (geen tik).
+    types: Vec<EqBandType>,
+    preamp: f32,
+}
+
+/// Banden die op kanaal `channel` van toepassing zijn, in volgorde, hooguit
+/// `EQ_MAX_BANDEN`.
+fn banden_voor_kanaal<'a>(bands: &'a [EqBandSpec], channel: u8) -> impl Iterator<Item = &'a EqBandSpec> + 'a {
+    bands.iter()
+        .filter(move |b| b.enabled && b.channel.map_or(true, |c| c == channel))
+        .take(EQ_MAX_BANDEN)
 }
 
 impl ChannelEq {
     /// Bouw de keten voor kanaal `channel` uit `bands` (banden met een ander
     /// expliciet kanaal worden overgeslagen; None = alle kanalen).
-    pub fn build(bands: &[EqBandSpec], channel: u8, sample_rate: SampleRate) -> Self {
-        let filters = bands.iter()
-            .filter(|b| b.enabled && b.channel.map_or(true, |c| c == channel))
-            .map(|b| BiquadFilter::from_band_spec(b, sample_rate))
-            .collect();
-        Self { filters }
+    pub fn build(bands: &[EqBandSpec], channel: u8, sample_rate: SampleRate, preamp_db: f32) -> Self {
+        let mut filters = Vec::new();
+        let mut types = Vec::new();
+        for b in banden_voor_kanaal(bands, channel) {
+            filters.push(BiquadFilter::from_band_spec(b, sample_rate));
+            types.push(b.band_type);
+        }
+        Self { filters, types, preamp: db_naar_factor(preamp_db) }
     }
 
+    /// Nieuwe banden op een bestaande keten: zelfde aantal en typen → alleen
+    /// coëfficiënten en voorversterking overschrijven (filterstaat blijft, geen
+    /// tik bij schuiven tijdens het spelen); anders opnieuw bouwen.
+    pub fn update(&mut self, bands: &[EqBandSpec], channel: u8, sample_rate: SampleRate, preamp_db: f32) {
+        // Zonder tussen-Vec (dit draait op de audiothread): twee keer over de
+        // iterator, eerst de structuur vergelijken, dan de coëfficiënten zetten.
+        let mut n = 0usize;
+        let mut zelfde = true;
+        for (i, b) in banden_voor_kanaal(bands, channel).enumerate() {
+            n += 1;
+            if self.types.get(i) != Some(&b.band_type) { zelfde = false; }
+        }
+        if zelfde && n == self.types.len() {
+            for (f, b) in self.filters.iter_mut().zip(banden_voor_kanaal(bands, channel)) {
+                f.zet_coefficienten_van(&BiquadFilter::from_band_spec(b, sample_rate));
+            }
+            self.preamp = db_naar_factor(preamp_db);
+        } else {
+            *self = Self::build(bands, channel, sample_rate, preamp_db);
+        }
+    }
+
+    /// Geen filters: alleen de voorversterking (kan nog steeds werk zijn).
     #[inline]
     pub fn is_empty(&self) -> bool { self.filters.is_empty() }
 
+    /// Doet deze keten niets (geen filters én voorversterking 0 dB)?
+    #[inline]
+    pub fn is_identity(&self) -> bool { self.filters.is_empty() && self.preamp == 1.0 }
+
+    pub fn preamp_db(&self) -> f32 { 20.0 * self.preamp.max(1e-9).log10() }
+
     #[inline]
     pub fn process(&mut self, input: f32) -> f32 {
-        let mut x = input;
+        let mut x = input * self.preamp;
         for f in &mut self.filters {
             x = f.process(x);
         }
         x
     }
+
+    /// Analytische respons van de hele keten (incl. voorversterking) in dB.
+    pub fn respons_db(&self, freq: f32, sample_rate: SampleRate) -> f32 {
+        self.filters.iter().map(|f| f.respons_db(freq, sample_rate)).sum::<f32>() + self.preamp_db()
+    }
+}
+
+#[inline]
+fn db_naar_factor(db: f32) -> f32 { 10.0_f32.powf(db.clamp(-60.0, 24.0) / 20.0) }
+
+/// Logaritmisch raster van 20 Hz tot 20 kHz (voor automatische voorversterking
+/// en curves): `n` punten.
+pub fn eq_raster(n: usize) -> Vec<f32> {
+    let n = n.max(2);
+    (0..n).map(|i| 20.0 * (1000.0_f32).powf(i as f32 / (n - 1) as f32)).collect()
+}
+
+/// Respons in dB van een bandenlijst op één kanaal, puur uit de specs (geen
+/// toegang tot de draaiende ketens nodig): voor de grafiek en de test-API.
+pub fn respons_db_van_banden(bands: &[EqBandSpec], channel: u8, sample_rate: SampleRate, preamp_db: f32, freq: f32) -> f32 {
+    ChannelEq::build(bands, channel, sample_rate, preamp_db).respons_db(freq, sample_rate)
+}
+
+/// Automatische voorversterking (0.7.76): −(grootste opgetelde versterking)
+/// over 20 Hz–20 kHz plus de centrumfrequenties van de banden, over alle
+/// kanalen die de banden raken, nooit positief. Zo loopt een preset met +6 dB
+/// laag niet in de begrenzer. `kanalen` = aantal fysieke uitgangskanalen
+/// (minstens 1).
+pub fn auto_preamp_db(bands: &[EqBandSpec], kanalen: usize, sample_rate: SampleRate) -> f32 {
+    let raster = eq_raster(480);
+    let f_max = sample_rate as f32 * 0.45;
+    let mut piek = 0.0f32;
+    for ch in 0..kanalen.max(1) {
+        let keten = ChannelEq::build(bands, ch as u8, sample_rate, 0.0);
+        if keten.is_empty() { continue; }
+        // Naast het raster ook het centrum van elke band: daar (of vlak
+        // ernaast) ligt het maximum van de som, en een smalle piek valt anders
+        // tussen twee rasterpunten (reviewbevinding: Q 10 → 1,2 dB te weinig,
+        // Q 20 → 3,5 dB). Zelfde klem als from_band_spec, dus ook banden boven
+        // 20 kHz bij 96 kHz tellen mee.
+        let centra = banden_voor_kanaal(bands, ch as u8).map(|b| b.freq.clamp(10.0, f_max));
+        for f in raster.iter().copied().chain(centra) {
+            let r = keten.respons_db(f, sample_rate);
+            if r.is_finite() && r > piek { piek = r; }
+        }
+    }
+    // Geen −0,0 bij enkel verzwakkingen (cosmetisch in API en UI).
+    if piek > 0.0 { -piek } else { 0.0 }
 }
 
 /// 3-band Parametric EQ (Low shelf + Mid peak + High shelf)
@@ -1237,6 +1453,210 @@ impl ParametricEq {
         self.low.reset();
         self.mid.reset();
         self.high.reset();
+    }
+}
+
+#[cfg(test)]
+mod eq_tests {
+    use super::*;
+
+    fn band(t: EqBandType, freq: f32, gain: f32, bw: f32, q: Option<f32>) -> EqBandSpec {
+        EqBandSpec { enabled: true, band_type: t, freq, gain_db: gain, bandwidth_oct: bw, q, channel: None }
+    }
+
+    /// Steady-state-meting: sinus door een keten, RMS na inzwaai (een piek
+    /// zou bij hoge frequenties tussen de samples vallen: 8 kHz bij 48 kHz
+    /// is maar zes samples per periode, tot 1,2 dB te laag).
+    fn meet_db(keten: &mut ChannelEq, freq: f32, sr: u32) -> f32 {
+        let n = (sr as usize) * 2;
+        let mut som = 0.0f64;
+        let mut tel = 0usize;
+        for i in 0..n {
+            let x = (2.0 * PI * freq * i as f32 / sr as f32).sin();
+            let y = keten.process(x);
+            if i > n / 2 { som += (y as f64) * (y as f64); tel += 1; }
+        }
+        let rms = (som / tel.max(1) as f64).sqrt() as f32;
+        20.0 * (rms * std::f32::consts::SQRT_2).max(1e-9).log10()
+    }
+
+    #[test]
+    fn oude_banden_bit_identiek() {
+        // Zonder Q moet from_band_spec exact de 0.7.75-coëfficiënten geven:
+        // peak via de bandbreedte-route, shelves met de vaste helling S = 0,9.
+        let sr = 48_000;
+        let p = BiquadFilter::from_band_spec(&band(EqBandType::Peak, 1000.0, 3.0, 2.0, None), sr);
+        let omega = 2.0 * PI * 1000.0 / sr as f32;
+        let alpha = omega.sin() * (0.5 * std::f32::consts::LN_2 * 2.0 * omega / omega.sin()).sinh();
+        let a = 10.0_f32.powf(3.0 / 40.0);
+        let a0 = 1.0 + alpha / a;
+        assert!((p.b0 - (1.0 + alpha * a) / a0).abs() < 1e-7);
+        assert!((p.a2 - (1.0 - alpha / a) / a0).abs() < 1e-7);
+        let s = BiquadFilter::from_band_spec(&band(EqBandType::LowShelf, 200.0, 2.5, 1.0, None), sr);
+        let r = BiquadFilter::low_shelf(200.0, 2.5, sr);
+        assert_eq!((s.b0, s.b1, s.b2, s.a1, s.a2), (r.b0, r.b1, r.b2, r.a1, r.a2));
+    }
+
+    #[test]
+    fn shelf_q_0707_is_s1() {
+        // Q = 1/√2 ↔ cookbook-shelf met S = 1: alpha = sin(w0)/2·sqrt((A+1/A)(1/S−1)+2) = sin(w0)/√2.
+        let sr = 48_000;
+        let (f, g) = (105.0, 6.3);
+        let s = BiquadFilter::low_shelf_q(f, g, std::f32::consts::FRAC_1_SQRT_2, sr);
+        let a = 10.0_f32.powf(g / 40.0);
+        let omega = 2.0 * PI * f / sr as f32;
+        let alpha = omega.sin() / 2.0 * ((a + 1.0 / a) * (1.0 / 1.0 - 1.0) + 2.0).sqrt();
+        let two = 2.0 * a.sqrt() * alpha;
+        let a0 = (a + 1.0) + (a - 1.0) * omega.cos() + two;
+        let b0 = a * ((a + 1.0) - (a - 1.0) * omega.cos() + two) / a0;
+        assert!((s.b0 - b0).abs() < 1e-6, "{} vs {}", s.b0, b0);
+    }
+
+    #[test]
+    fn steady_state_shelf_en_peak() {
+        let sr = 48_000;
+        let mut lage = ChannelEq::build(&[band(EqBandType::LowShelf, 105.0, 6.3, 1.0, Some(0.70))], 0, sr, 0.0);
+        assert!((meet_db(&mut lage, 20.0, sr) - 6.3).abs() < 0.25);
+        let mut lage2 = ChannelEq::build(&[band(EqBandType::LowShelf, 105.0, 6.3, 1.0, Some(0.70))], 0, sr, 0.0);
+        assert!((meet_db(&mut lage2, 105.0, sr) - 3.15).abs() < 0.3);
+        let mut lage3 = ChannelEq::build(&[band(EqBandType::LowShelf, 105.0, 6.3, 1.0, Some(0.70))], 0, sr, 0.0);
+        assert!(meet_db(&mut lage3, 4000.0, sr).abs() < 0.2);
+        let mut piek = ChannelEq::build(&[band(EqBandType::Peak, 204.0, -3.2, 1.0, Some(0.33))], 0, sr, 0.0);
+        assert!((meet_db(&mut piek, 204.0, sr) + 3.2).abs() < 0.2);
+    }
+
+    #[test]
+    fn respons_db_klopt_met_meting() {
+        let sr = 48_000;
+        let banden = [band(EqBandType::Peak, 1585.0, 5.4, 1.0, Some(3.15)), band(EqBandType::HighShelf, 10000.0, 1.8, 1.0, Some(0.70))];
+        for &f in &[50.0, 200.0, 1000.0, 1585.0, 3000.0, 8000.0] {
+            let mut keten = ChannelEq::build(&banden, 0, sr, 0.0);
+            let analytisch = keten.respons_db(f, sr);
+            let gemeten = meet_db(&mut keten, f, sr);
+            assert!((analytisch - gemeten).abs() < 0.15, "{} Hz: {} vs {}", f, analytisch, gemeten);
+        }
+    }
+
+    #[test]
+    fn conversie_rondreis_en_oude_benadering() {
+        for &(q, f, sr) in &[(1.0f32, 9285.0f32, 44_100u32), (2.68, 38.0, 48_000), (0.33, 204.0, 48_000), (10.0, 15000.0, 48_000)] {
+            let bw = q_naar_bandbreedte_exact(q, f, sr);
+            let terug = bandbreedte_naar_q_exact(bw, f, sr);
+            assert!((terug - q).abs() / q < 1e-4, "rondreis {} {} {}", q, f, sr);
+            let bwa = q_naar_bandbreedte(q);
+            assert!((bandbreedte_naar_q(bwa) - q).abs() / q < 1e-4);
+        }
+        // De analoge benadering wijkt bij 9285 Hz / 44,1 kHz meer dan 20 % af:
+        // daarom is Q vanaf 0.7.76 de eenheid in de engine.
+        let q_eff = bandbreedte_naar_q_exact(q_naar_bandbreedte(1.0), 9285.0, 44_100);
+        assert!((q_eff - 1.0).abs() > 0.2, "q_eff {}", q_eff);
+    }
+
+    #[test]
+    fn preamp_en_identiteit() {
+        let sr = 48_000;
+        let mut leeg = ChannelEq::build(&[], 0, sr, -6.2);
+        assert!(leeg.is_empty() && !leeg.is_identity());
+        let mut piek = 0.0f32;
+        for i in 0..4800 { piek = piek.max(leeg.process((2.0 * PI * 1000.0 * i as f32 / sr as f32).sin()).abs()); }
+        assert!((piek - 0.4898).abs() < 1e-3, "{}", piek);
+        let nul = ChannelEq::build(&[], 0, sr, 0.0);
+        assert!(nul.is_identity());
+        // Voorversterking geldt ook op een kanaal zonder banden (band op kanaal 0, keten voor kanaal 1).
+        let mut b = band(EqBandType::Peak, 1000.0, 6.0, 1.0, Some(1.0));
+        b.channel = Some(0);
+        let k1 = ChannelEq::build(&[b], 1, sr, -6.0);
+        assert!((k1.respons_db(1000.0, sr) + 6.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn auto_preamp_ziet_smalle_piek_tussen_rasterpunten() {
+        // Reviewbevinding 0.7.76: een piek met Q 10 precies tussen twee
+        // rasterpunten werd tot 1,2 dB te laag ingeschat. Nu telt het centrum mee.
+        let sr = 48_000;
+        let raster = eq_raster(480);
+        let f0 = (raster[240] * raster[241]).sqrt();
+        let piek = band(EqBandType::Peak, f0, 12.0, 1.0, Some(10.0));
+        let a = auto_preamp_db(&[piek], 2, sr);
+        assert!((a + 12.0).abs() < 0.1, "auto {a}");
+        let smal = band(EqBandType::Peak, f0, 12.0, 1.0, Some(20.0));
+        let a2 = auto_preamp_db(&[smal], 2, sr);
+        assert!((a2 + 12.0).abs() < 0.1, "auto Q20 {a2}");
+        // Boven 20 kHz (96 kHz) telt een piek ook mee.
+        let hoog = band(EqBandType::Peak, 30_000.0, 6.0, 1.0, Some(2.0));
+        let a3 = auto_preamp_db(&[hoog], 2, 96_000);
+        assert!((a3 + 6.0).abs() < 0.1, "auto 30 kHz {a3}");
+        // Alleen verzwakking: exact +0,0, geen −0,0.
+        let dip = band(EqBandType::Peak, 1000.0, -6.0, 1.0, Some(1.0));
+        assert_eq!(auto_preamp_db(&[dip], 2, sr).to_bits(), 0.0f32.to_bits());
+        assert_eq!(auto_preamp_db(&[], 2, sr).to_bits(), 0.0f32.to_bits());
+    }
+
+    #[test]
+    fn k240_keten_en_auto_preamp() {
+        // AutoEq oratory1990 "AKG K240 Studio" ParametricEQ.txt (Preamp −6,2 dB).
+        let sr = 48_000;
+        let b = [
+            band(EqBandType::LowShelf, 105.0, 6.3, 1.0, Some(0.70)),
+            band(EqBandType::Peak, 204.0, -3.2, 1.0, Some(0.33)),
+            band(EqBandType::Peak, 4207.0, 5.2, 1.0, Some(3.07)),
+            band(EqBandType::Peak, 1585.0, 5.4, 1.0, Some(3.15)),
+            band(EqBandType::Peak, 75.0, 2.9, 1.0, Some(1.48)),
+            band(EqBandType::HighShelf, 10000.0, 1.8, 1.0, Some(0.70)),
+            band(EqBandType::Peak, 6459.0, -2.3, 1.0, Some(2.56)),
+            band(EqBandType::Peak, 5428.0, 2.7, 1.0, Some(3.81)),
+            band(EqBandType::Peak, 2689.0, -1.7, 1.0, Some(4.63)),
+            band(EqBandType::Peak, 9322.0, -2.0, 1.0, Some(2.55)),
+        ];
+        let keten = ChannelEq::build(&b, 0, sr, 0.0);
+        for &f in &[20.0, 105.0, 204.0, 1585.0, 4207.0, 10000.0, 18000.0] {
+            let r = keten.respons_db(f, sr);
+            assert!(r.is_finite(), "{} Hz", f);
+            let som: f32 = b.iter().map(|x| BiquadFilter::from_band_spec(x, sr).respons_db(f, sr)).sum();
+            assert!((r - som).abs() < 1e-3);
+        }
+        let auto = auto_preamp_db(&b, 2, sr);
+        assert!(auto <= -5.5 && auto >= -7.5, "auto-preamp {}", auto);
+        assert!(auto_preamp_db(&[band(EqBandType::Peak, 1000.0, -3.0, 1.0, Some(1.0))], 2, sr).abs() < 1e-3, "alleen verzwakking → 0 dB");
+    }
+
+    #[test]
+    fn stabiel_bij_randwaarden() {
+        let sr = 48_000;
+        for &t in &[EqBandType::Peak, EqBandType::LowPass, EqBandType::HighPass, EqBandType::BandPass, EqBandType::LowShelf, EqBandType::HighShelf] {
+            for &f in &[10.0, 100.0, 21_600.0] {
+                for &q in &[0.05, 0.7, 20.0] {
+                    for &g in &[-24.0, 0.0, 24.0] {
+                        let bq = BiquadFilter::from_band_spec(&band(t, f, g, 1.0, Some(q)), sr);
+                        assert!(bq.is_stabiel(), "{:?} f={} q={} g={}", t, f, q, g);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn update_behoudt_staat_en_herbouwt_bij_andere_structuur() {
+        let sr = 48_000;
+        let a = [band(EqBandType::Peak, 1000.0, 3.0, 1.0, Some(1.0))];
+        let mut keten = ChannelEq::build(&a, 0, sr, 0.0);
+        for i in 0..1000 { keten.process((i as f32 * 0.1).sin()); }
+        let staat_voor = (keten.filters[0].x1, keten.filters[0].y1);
+        let a2 = [band(EqBandType::Peak, 1200.0, 4.0, 1.0, Some(1.2))];
+        keten.update(&a2, 0, sr, -1.0);
+        assert_eq!((keten.filters[0].x1, keten.filters[0].y1), staat_voor, "zelfde structuur: staat blijft");
+        assert!((keten.preamp_db() + 1.0).abs() < 1e-3);
+        let b = [band(EqBandType::Peak, 1200.0, 4.0, 1.0, Some(1.2)), band(EqBandType::HighShelf, 8000.0, 1.0, 1.0, Some(0.7))];
+        keten.update(&b, 0, sr, 0.0);
+        assert_eq!(keten.filters.len(), 2);
+        assert_eq!(keten.filters[0].x1, 0.0, "andere structuur: herbouwd");
+    }
+
+    #[test]
+    fn bandplafond() {
+        let sr = 48_000;
+        let veel: Vec<EqBandSpec> = (0..40).map(|i| band(EqBandType::Peak, 100.0 + i as f32 * 100.0, 1.0, 1.0, Some(1.0))).collect();
+        assert_eq!(ChannelEq::build(&veel, 0, sr, 0.0).filters.len(), EQ_MAX_BANDEN);
     }
 }
 

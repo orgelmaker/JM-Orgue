@@ -847,9 +847,8 @@
   },
   "eq": {
     "profile": "Hörprofil",
-    "profile_flat": "Neutral",
+    "profile_speakers": "Lautsprecher",
     "profile_headphones": "Kopfhörer",
-    "profile_small_speakers": "Kleine Lautsprecher",
     "band_peak": "Peak",
     "band_lowpass": "Tiefpass",
     "band_highpass": "Hochpass",
@@ -865,7 +864,17 @@
     "gain": "Gain",
     "bandwidth": "Bandbreite",
     "band_add": "+ Band hinzufügen",
-    "channel_note": "Der EQ wirkt pro Ausgangskanal, nach dem Hall — wählen Sie „Alle Kanäle“ oder einen bestimmten Kanal pro Band."
+    "channel_note": "Der EQ wirkt pro Ausgangskanal, nach dem Hall — wählen Sie „Alle Kanäle“ oder einen bestimmten Kanal pro Band.",
+    "preamp": "Vorverstärkung",
+    "preamp_auto": "Auto",
+    "preamp_auto_title": "Nimmt genau so viel weg, wie die Bänder zusammen hinzufügen, damit ein angehobener Bass nicht in den Begrenzer läuft",
+    "preamp_warn": "Höher als der Auto-Wert: die Bänder können den Ausgang begrenzen.",
+    "unit_oct": "Okt",
+    "unit_q": "Q",
+    "unit_title": "Steilheit als Bandbreite (Oktaven) oder Q",
+    "shelf_q": "Steilheit (Q)",
+    "fixed_slope": "feste Flanke",
+    "fixed_slope_title": "Dieses Shelf hat noch die feste Flanke von vor 0.7.76; klicken, um die Steilheit einstellbar zu machen (Q 0,71 = Standard)"
   },
   "reverb": {
     "preset_small_chapel": "Kleine Kapelle",

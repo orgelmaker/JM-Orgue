@@ -525,6 +525,8 @@ fn route_test_only(
         (tiny_http::Method::Get, "/settings/wind_group") => Ok(json!({ "groups": state.division_wind_groups.read().clone() })),
         (tiny_http::Method::Post, "/settings/wind_restore") => handle_wind_restore(state),
         (tiny_http::Method::Post, "/settings/eq") => handle_set_eq(state, query),
+        (tiny_http::Method::Get, "/audio/eq_response") => handle_eq_response(state, query),
+        (tiny_http::Method::Get, "/audio/eq_state") => Ok(handle_eq_state(state)),
         (tiny_http::Method::Post, "/settings/reverb") => handle_set_reverb(state, query),
         (tiny_http::Method::Post, "/settings/pan") => handle_set_pan(state, query),
         (tiny_http::Method::Post, "/settings/trem") => handle_set_trem(state, query),
@@ -1807,8 +1809,13 @@ fn handle_set_eq(state: &AppState, query: &str) -> Result<Value, (u16, String)> 
     let freq: f32 = parse_query(query, "freq").unwrap_or(1000.0);
     let band_type: String = parse_query(query, "type").unwrap_or_else(|| "peak".to_string());
     let bandwidth: f32 = parse_query(query, "bw").unwrap_or(1.0);
+    let q: Option<f32> = parse_query(query, "q");
     let channel: Option<u8> = parse_query(query, "channel");
     let enabled: bool = parse_query::<u8>(query, "enabled").map(|v| v != 0).unwrap_or(true);
+    // ?preamp=<dB>|auto (0.7.76); ontbreekt = 0 dB.
+    let preamp_raw: Option<String> = parse_query(query, "preamp");
+    let preamp_auto = preamp_raw.as_deref() == Some("auto");
+    let preamp_db: Option<f32> = preamp_raw.as_deref().and_then(|s| s.parse::<f32>().ok());
     // Zelfde pad als de frontend: vrije banden (hier één band als test).
     let bands = vec![crate::library::EqBandSaved {
         enabled,
@@ -1816,23 +1823,51 @@ fn handle_set_eq(state: &AppState, query: &str) -> Result<Value, (u16, String)> 
         freq,
         gain_db: gain,
         bandwidth,
+        q,
         channel,
     }];
+    let specs = crate::commands::eq_saved_to_specs(&bands);
+    let eff = crate::commands::effectieve_preamp_db(state, &specs, preamp_db, preamp_auto);
     state.send_audio_command(AudioCommand::SetEqBands {
         enabled: true,
-        bands: bands.iter().map(|b| vpo_audio::EqBandSpec {
-            enabled: b.enabled,
-            band_type: vpo_audio::EqBandType::from_str(&b.band_type),
-            freq: b.freq,
-            gain_db: b.gain_db,
-            bandwidth_oct: b.bandwidth,
-            channel: b.channel,
-        }).collect(),
+        preamp_db: eff,
+        bands: specs,
     });
     *state.eq_settings.write() = Some(crate::library::EqSettingsSaved {
-        enabled: true, bands, ..Default::default()
+        enabled: true, bands, preamp_db: eff, preamp_auto, ..Default::default()
     });
-    Ok(json!({ "ok": true, "mid_gain": gain }))
+    Ok(json!({ "ok": true, "mid_gain": gain, "preamp_db": eff }))
+}
+
+/// GET /audio/eq_response?freq=<Hz>[&channel=<n>] → respons van de orgel-EQ in
+/// dB, puur uit de opgeslagen banden (0.7.76).
+fn handle_eq_response(state: &AppState, query: &str) -> Result<Value, (u16, String)> {
+    let freq: f32 = parse_query(query, "freq").ok_or((400, "freq ontbreekt".to_string()))?;
+    let channel: Option<u8> = parse_query(query, "channel");
+    let (sr, _) = crate::commands::audio_samplerate_en_kanalen(state);
+    let eq = state.eq_settings.read().clone();
+    let (organ_db, enabled, preamp) = match eq {
+        Some(e) if e.enabled => {
+            let specs = crate::commands::eq_saved_to_specs(&e.bands);
+            (vpo_audio::respons_db_van_banden(&specs, channel.unwrap_or(0), sr, e.preamp_db, freq), true, e.preamp_db)
+        }
+        _ => (0.0, false, 0.0),
+    };
+    Ok(json!({ "freq": freq, "organ_db": organ_db, "total_db": organ_db, "enabled": enabled, "preamp_db": preamp, "sample_rate": sr }))
+}
+
+/// GET /audio/eq_state → de opgeslagen orgel-EQ (banden, voorversterking).
+fn handle_eq_state(state: &AppState) -> Value {
+    match state.eq_settings.read().clone() {
+        Some(e) => json!({
+            "enabled": e.enabled, "preamp_db": e.preamp_db, "preamp_auto": e.preamp_auto, "preset_id": e.preset_id,
+            "bands": e.bands.iter().map(|b| json!({
+                "enabled": b.enabled, "type": b.band_type, "freq": b.freq, "gain_db": b.gain_db,
+                "bandwidth": b.bandwidth, "q": b.q, "channel": b.channel,
+            })).collect::<Vec<_>>(),
+        }),
+        None => json!({ "enabled": false, "bands": [] }),
+    }
 }
 
 fn handle_set_reverb(state: &AppState, query: &str) -> Result<Value, (u16, String)> {

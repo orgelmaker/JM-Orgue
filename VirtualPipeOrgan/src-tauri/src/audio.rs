@@ -777,7 +777,7 @@ pub enum AudioCommand {
     /// Vrije multi-band EQ (GrandOrgue-stijl): banden met type/freq/gain/band-
     /// breedte en optioneel doelkanaal. Wordt per fysiek uitgangskanaal als
     /// biquad-keten toegepast op de volledige uitgangsmix (droog + galm).
-    SetEqBands { enabled: bool, bands: Vec<EqBandSpec> },
+    SetEqBands { enabled: bool, preamp_db: f32, bands: Vec<EqBandSpec> },
     /// Route a division naar een willekeurige set fysieke output-kanalen.
     /// Lege lijst = standaard (voorste paar 0/1). Opeenvolgende kanalen worden als
     /// stereo-paren (L,R) gevuld; een los laatste kanaal krijgt mono.
@@ -4962,14 +4962,22 @@ fn run_audio_thread(
                             info!("Division {} C/Cis spread: {}", division_index, enabled);
                         }
                     }
-                    AudioCommand::SetEqBands { enabled, bands } => {
+                    AudioCommand::SetEqBands { enabled, preamp_db, bands } => {
                         *eq_enabled_clone.write() = enabled;
-                        // Bouw per fysiek uitgangskanaal de biquad-keten opnieuw.
-                        let chains: Vec<ChannelEq> = (0..channels)
-                            .map(|ci| ChannelEq::build(&bands, ci as u8, sample_rate))
-                            .collect();
-                        *eq_channels_clone.write() = chains;
-                        info!("EQ: enabled={}, {} banden over {} kanalen", enabled, bands.len(), channels);
+                        // Per fysiek uitgangskanaal de keten bijwerken (0.7.76):
+                        // zelfde structuur → alleen coëfficiënten, filterstaat
+                        // blijft (geen tik bij schuiven); anders opnieuw bouwen.
+                        let mut chains = eq_channels_clone.write();
+                        if chains.len() == channels {
+                            for (ci, chain) in chains.iter_mut().enumerate() {
+                                chain.update(&bands, ci as u8, sample_rate, preamp_db);
+                            }
+                        } else {
+                            *chains = (0..channels)
+                                .map(|ci| ChannelEq::build(&bands, ci as u8, sample_rate, preamp_db))
+                                .collect();
+                        }
+                        info!("EQ: enabled={}, {} banden over {} kanalen, voorversterking {:.1} dB", enabled, bands.len(), channels, preamp_db);
                     }
                     AudioCommand::ClearSamples => {
                         // Grote maps naar de janitor-thread (zie LoadSamples).
@@ -5580,7 +5588,7 @@ fn run_audio_thread(
                         if eq_on {
                             for (ci, s) in frame.iter_mut().enumerate() {
                                 if let Some(chain) = eq_chains.get_mut(ci) {
-                                    if !chain.is_empty() {
+                                    if !chain.is_identity() {
                                         *s = chain.process(*s);
                                     }
                                 }

@@ -201,6 +201,9 @@ pub struct EqBandSaved {
     pub gain_db: f32,
     /// Bandbreedte in octaven
     pub bandwidth: f32,
+    /// Q (0.7.76); None = oude band, de bandbreedte-route (bit-identiek).
+    #[serde(default)]
+    pub q: Option<f32>,
     /// None = alle kanalen; anders 0-based fysiek uitgangskanaal
     pub channel: Option<u8>,
 }
@@ -214,6 +217,16 @@ pub struct EqSettingsSaved {
     pub enabled: bool,
     #[serde(default)]
     pub bands: Vec<EqBandSaved>,
+    /// Voorversterking in dB (0.7.76); ontbreekt in oude bestanden = 0 dB.
+    #[serde(default)]
+    pub preamp_db: f32,
+    /// Auto-stand: de voorversterking volgt −(grootste opgetelde versterking).
+    /// Oude bestanden: uit, zodat ze onveranderd klinken.
+    #[serde(default)]
+    pub preamp_auto: bool,
+    /// Gekozen preset (0.7.77); None = handmatig.
+    #[serde(default)]
+    pub preset_id: Option<String>,
     #[serde(default)]
     pub low_freq: f32,
     #[serde(default)]

@@ -5353,6 +5353,9 @@ pub struct EqBandDto {
     pub gain_db: f32,
     /// Bandbreedte in octaven
     pub bandwidth: f32,
+    /// Q (0.7.76); None = bandbreedte-route (oude banden, bit-identiek).
+    #[serde(default)]
+    pub q: Option<f32>,
     /// None = alle kanalen; anders 0-based fysiek uitgangskanaal
     pub channel: Option<u8>,
 }
@@ -5364,17 +5367,63 @@ fn eq_bands_to_specs(bands: &[EqBandDto]) -> Vec<vpo_audio::EqBandSpec> {
         freq: b.freq,
         gain_db: b.gain_db,
         bandwidth_oct: b.bandwidth,
+        q: b.q,
         channel: b.channel,
     }).collect()
 }
 
+pub(crate) fn eq_saved_to_specs(bands: &[library::EqBandSaved]) -> Vec<vpo_audio::EqBandSpec> {
+    bands.iter().map(|b| vpo_audio::EqBandSpec {
+        enabled: b.enabled,
+        band_type: vpo_audio::EqBandType::from_str(&b.band_type),
+        freq: b.freq,
+        gain_db: b.gain_db,
+        bandwidth_oct: b.bandwidth,
+        q: b.q,
+        channel: b.channel,
+    }).collect()
+}
+
+/// Samplerate en kanaaltal van de draaiende uitvoer (terugval 48 kHz / 2).
+pub(crate) fn audio_samplerate_en_kanalen(state: &AppState) -> (u32, usize) {
+    match state.audio_player.read().as_ref() {
+        Some(p) => (*p.sample_rate.read(), (*p.current_channels.read() as usize).max(1)),
+        None => (48_000, 2),
+    }
+}
+
+/// Effectieve voorversterking: Auto = −(grootste opgetelde versterking van
+/// de banden); anders de opgegeven waarde (ontbreekt = 0 dB, bit-identiek
+/// met 0.7.75).
+pub(crate) fn effectieve_preamp_db(state: &AppState, specs: &[vpo_audio::EqBandSpec], preamp_db: Option<f32>, preamp_auto: bool) -> f32 {
+    if preamp_auto {
+        let (sr, kanalen) = audio_samplerate_en_kanalen(state);
+        vpo_audio::auto_preamp_db(specs, kanalen, sr)
+    } else {
+        preamp_db.unwrap_or(0.0).clamp(-24.0, 6.0)
+    }
+}
+
 /// Vrije multi-band EQ (GrandOrgue-stijl): per band type, frequentie, gain,
-/// bandbreedte en doelkanaal (null = alle kanalen).
+/// bandbreedte of Q, en doelkanaal (null = alle kanalen). Sinds 0.7.76 met
+/// voorversterking: `preamp_auto` = volgt de banden; anders `preamp_db`
+/// (beide weggelaten = 0 dB, zoals vóór 0.7.76). Geeft `(effectief, auto)`
+/// terug: de toegepaste voorversterking én de Auto-waarde van deze banden,
+/// ook in handmatige stand, zodat de UI kan waarschuwen als de hand hoger
+/// staat dan wat de banden verdragen.
 #[tauri::command]
-pub fn set_eq_bands(state: State<AppState>, enabled: bool, bands: Vec<EqBandDto>) -> Result<(), String> {
+pub fn set_eq_bands(state: State<AppState>, enabled: bool, bands: Vec<EqBandDto>, preamp_db: Option<f32>, preamp_auto: Option<bool>) -> Result<(f32, f32), String> {
+    let specs = eq_bands_to_specs(&bands);
+    let auto = preamp_auto.unwrap_or(false);
+    let eff = effectieve_preamp_db(&state, &specs, preamp_db, auto);
+    let auto_waarde = if auto { eff } else {
+        let (sr, kanalen) = audio_samplerate_en_kanalen(&state);
+        vpo_audio::auto_preamp_db(&specs, kanalen, sr)
+    };
     state.send_audio_command(AudioCommand::SetEqBands {
         enabled,
-        bands: eq_bands_to_specs(&bands),
+        preamp_db: eff,
+        bands: specs,
     });
     // Onthoud voor per-orgel opslag (save_current_organ_settings leest dit veld).
     *state.eq_settings.write() = Some(library::EqSettingsSaved {
@@ -5385,25 +5434,43 @@ pub fn set_eq_bands(state: State<AppState>, enabled: bool, bands: Vec<EqBandDto>
             freq: b.freq,
             gain_db: b.gain_db,
             bandwidth: b.bandwidth,
+            q: b.q,
             channel: b.channel,
         }).collect(),
+        preamp_db: eff,
+        preamp_auto: auto,
         ..Default::default()
     });
-    Ok(())
+    Ok((eff, auto_waarde))
+}
+
+/// Respons van de huidige orgel-EQ in dB op een rij frequenties, puur uit de
+/// opgeslagen banden (0.7.76): nooit uit de draaiende ketens, die zijn van de
+/// audiothread. `channel` None = kanaal 0.
+#[tauri::command]
+pub fn eq_response_db(state: State<AppState>, freqs: Vec<f32>, channel: Option<u8>) -> Result<Vec<f32>, String> {
+    let (sr, _) = audio_samplerate_en_kanalen(&state);
+    let Some(eq) = state.eq_settings.read().clone() else { return Ok(vec![0.0; freqs.len()]); };
+    if !eq.enabled { return Ok(vec![0.0; freqs.len()]); }
+    let specs = eq_saved_to_specs(&eq.bands);
+    let ch = channel.unwrap_or(0);
+    let keten = vpo_audio::ChannelEq::build(&specs, ch, sr, eq.preamp_db);
+    Ok(freqs.iter().map(|&f| keten.respons_db(f.clamp(1.0, sr as f32 * 0.5), sr)).collect())
 }
 
 /// Legacy 3-band EQ (oude frontend/test-API): omgezet naar drie vrije banden.
 #[tauri::command]
 pub fn set_parametric_eq(state: State<AppState>, enabled: bool, low_freq: f32, low_gain: f32, mid_freq: f32, mid_gain: f32, mid_q: f32, high_freq: f32, high_gain: f32) -> Result<(), String> {
-    // Q → bandbreedte in octaven: BW ≈ (2/ln2) * asinh(1/(2Q)).
+    // Q is sinds 0.7.76 de eenheid in de engine; de bandbreedte (analoge
+    // benadering) blijft als afgeleide voor oudere lezers.
     let q = mid_q.max(0.05);
-    let bw = (2.0 / std::f32::consts::LN_2) * (1.0 / (2.0 * q)).asinh();
+    let bw = vpo_audio::q_naar_bandbreedte(q);
     let bands = vec![
-        EqBandDto { enabled: true, band_type: "lowshelf".into(), freq: low_freq, gain_db: low_gain, bandwidth: 1.0, channel: None },
-        EqBandDto { enabled: true, band_type: "peak".into(), freq: mid_freq, gain_db: mid_gain, bandwidth: bw, channel: None },
-        EqBandDto { enabled: true, band_type: "highshelf".into(), freq: high_freq, gain_db: high_gain, bandwidth: 1.0, channel: None },
+        EqBandDto { enabled: true, band_type: "lowshelf".into(), freq: low_freq, gain_db: low_gain, bandwidth: 1.0, q: None, channel: None },
+        EqBandDto { enabled: true, band_type: "peak".into(), freq: mid_freq, gain_db: mid_gain, bandwidth: bw, q: Some(q), channel: None },
+        EqBandDto { enabled: true, band_type: "highshelf".into(), freq: high_freq, gain_db: high_gain, bandwidth: 1.0, q: None, channel: None },
     ];
-    set_eq_bands(state, enabled, bands)
+    set_eq_bands(state, enabled, bands, None, None).map(|_| ())
 }
 
 /// Bewaar de volledige reverb-configuratie van het huidige orgel voor per-orgel opslag.

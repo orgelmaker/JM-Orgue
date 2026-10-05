@@ -527,6 +527,7 @@ fn main() {
             commands::query_audio_channel_count,
             commands::set_parametric_eq,
             commands::set_eq_bands,
+            commands::eq_response_db,
             commands::persist_reverb_config,
             commands::set_algorithmic_reverb,
             commands::set_reverb_type,

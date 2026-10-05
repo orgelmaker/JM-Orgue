@@ -5,6 +5,20 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.76] - 2026-10-05
+
+### Equalizer: steilheid per band, voorversterking
+
+Elke band van de equalizer heeft nu een instelbare steilheid (Q of
+bandbreedte in octaven, naar keuze), ook de shelf-banden, die tot nu toe een
+vaste helling hadden. Bovenaan staat een voorversterking met een Auto-stand
+die precies zoveel wegneemt als de banden samen toevoegen, zodat een
+opgehaald laag niet in de begrenzer loopt. Schuiven tijdens het spelen geeft
+geen tik meer: de filters houden hun toestand. Bestaande instellingen klinken
+onveranderd. De luisterprofielen zijn teruggebracht tot twee: Hoofdtelefoon
+en Luidsprekers. Dit is de eerste stap van de equalizer-reeks; de
+hoofdtelefoonpresets volgen in de volgende versie.
+
 ## [0.7.75] - 2026-10-03
 
 ### Afdrukken: alles na de eerste pagina kwam niet mee
