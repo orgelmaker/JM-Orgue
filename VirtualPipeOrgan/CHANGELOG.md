@@ -5,6 +5,27 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.88] - 2026-10-06
+
+### Teksten in de partituur
+- Op het tabblad **Teksten & tekens** zet u liedtekst onder de noten:
+  **Liedtekst typen** aan, klik een noot en typ; spatie of koppelteken gaat
+  naar de volgende noot van dezelfde balk en stem, spatie op een lege
+  lettergreep maakt een melisma, Backspace op leeg gaat terug, tot drie
+  strofen. De tekst staat onder de eerste noot van een akkoord.
+- Aanwijzingen boven of onder een balk op de tel van de cursor: tempo,
+  expressie, techniek, dynamiek (pp…ff als echte dynamiektekens), oefenletters
+  en vrije tekst, met presets; **Getrokken registers overnemen** maakt een
+  registratie-aanwijzing van de registers die nu getrokken zijn. Een
+  tempo-aanwijzing met een getal (♩ = 72) zet ook het afspeeltempo in de
+  MusicXML.
+- Titel, componist en ondertitel zijn ook op het tabblad te bewerken; de
+  lijst eronder toont alle teksten om ze te bewerken (dubbelklik of ✎), een
+  tel te verplaatsen (◄ ►) of te verwijderen (✕). Alles met Ongedaan maken.
+- Teksten gaan mee in het opgeslagen stuk en in de MusicXML-export
+  (`<lyric>`, `<direction>`); in klavar staan aanwijzingen als label naast
+  de balk. Stukken zonder teksten blijven byte voor byte gelijk.
+
 ## [0.7.87] - 2026-10-06
 
 ### Noten plaatsen met de muis

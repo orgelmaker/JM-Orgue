@@ -151,7 +151,7 @@ export function layoutSystem(model, sys, opts = {}) {
   const lay = {
     sys, q, measureLen, beats, w, top, breedte, hoogte, pedaal, manuaal, xLinks, xRechts,
     lijnen: [], maatstrepen: [], telstrepen: [], telnummers: [], maatnummers: [],
-    noten: [], akkoordlijnen: [], stops: [], stippen: [], balken: [], labels: [], toonsoort: null,
+    noten: [], akkoordlijnen: [], stops: [], stippen: [], balken: [], labels: [], teksten: [], toonsoort: null,
   };
 
   // Lijnen van de balken (over de hele systeemhoogte).
@@ -358,6 +358,14 @@ export function layoutSystem(model, sys, opts = {}) {
     lay.balken.push({ punten, dikte: MAAT.balk * balkW });
   }
 
+  // Aanwijzingen (0.7.88): rechts van de manuaalbalk op de rastertijd,
+  // voorbij de maatnummers; die van de pedaalbalk links ervan.
+  for (const tk of model.teksten || []) {
+    if (tk.start < sys.t0 || tk.start >= sys.t1) continue;
+    const y = yg(tk.start - sys.t0) + MAAT.tekst * 0.4;
+    if (tk.pedal && pedaal) lay.teksten.push({ x: pedaal.x0 - MAAT.stokLengte * wp - 1, y, tekst: tk.text, anchor: 'end' });
+    else lay.teksten.push({ x: xRechts + MAAT.stokLengte * w + 5, y, tekst: tk.text, anchor: 'start' });
+  }
   // Manuaallabels (0.7.72): naast het stokuiteinde, aan de handzijde.
   for (const n of lay.noten) {
     if (!n.label) continue;

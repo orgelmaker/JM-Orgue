@@ -100,12 +100,14 @@ pub struct NoteEv {
     pub hand: Option<KlavarHand>,
     /// Stem binnen de balk (0.7.86): 1..=4, zoals de lagen in Finale.
     pub voice: u8,
+    /// Liedtekst onder deze noot (0.7.88).
+    pub lyrics: Vec<Lyric>,
 }
 
 impl NoteEv {
     /// Noot zonder event-ID (bestandsmodus, tests).
     pub fn anoniem(midi: u8, start_sec: f64, end_sec: f64) -> Self {
-        NoteEv { midi, start_sec, end_sec, id: None, hand: None, voice: 1 }
+        NoteEv { midi, start_sec, end_sec, id: None, hand: None, voice: 1, lyrics: Vec::new() }
     }
 }
 
@@ -124,6 +126,8 @@ pub struct Staff {
     pub hand: Option<KlavarHand>,
     /// Splitspunt bij R+L: noten onder dit MIDI-nummer links, erop en erboven rechts.
     pub split_midi: Option<u8>,
+    /// Aanwijzingen op deze balk (0.7.88).
+    pub marks: Vec<StaffMark>,
 }
 
 /// Pedaalbalk op naam: "Pedaal", "Pedal", "Pédale", "Pedał", "PED" — "ped"
@@ -245,6 +249,8 @@ struct ChordNote {
     tie_stop: bool,
     /// Event-ID (0.7.86) voor de notemap; None in de bestandsmodus.
     id: Option<u64>,
+    /// Liedtekst (0.7.88), alleen op het eerste deel van een noot.
+    lyrics: Vec<Lyric>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -272,6 +278,8 @@ pub struct QNote {
     pub hand: Option<KlavarHand>,
     /// Stem (0.7.86).
     pub voice: u8,
+    /// Liedtekst (0.7.88).
+    pub lyrics: Vec<Lyric>,
 }
 
 /// Kwantiseer de noten van één balk naar rastereenheden (gesorteerd op inzet
@@ -297,7 +305,7 @@ pub(crate) fn quantize_notes(notes: &[NoteEv], bpm: f64, q: u8, _tolerance_pct: 
         let s = quantize_one(n.start_sec);
         let e = quantize_one(n.end_sec);
         let e = e.max(s + 1);
-        QNote { id: n.id, midi: n.midi, start: s, end: e, hand: n.hand, voice: n.voice }
+        QNote { id: n.id, midi: n.midi, start: s, end: e, hand: n.hand, voice: n.voice, lyrics: n.lyrics.clone() }
     }).collect();
     quantized.sort_by_key(|n| (n.start, n.voice, n.midi));
     quantized
@@ -369,7 +377,7 @@ pub(crate) fn cluster_akkoorden(notes: &mut [NoteEv], venster: f64) {
 /// zonder boog. Klavar slaat dit over (die tekent de noten zelf).
 fn group_chords(qnotes: &[QNote]) -> Vec<Chord> {
     #[derive(Clone)]
-    struct Actief { midi: u8, start: u64, end: u64, id: Option<u64> }
+    struct Actief { midi: u8, start: u64, end: u64, id: Option<u64>, lyrics: Vec<Lyric> }
     let mut noten: Vec<Actief> = Vec::new();
     for n in qnotes {
         let end = n.end.max(n.start + 1);
@@ -379,9 +387,10 @@ fn group_chords(qnotes: &[QNote]) -> Vec<Chord> {
         if let Some(a) = noten.iter_mut().find(|a| a.start == n.start && a.midi == n.midi) {
             // De noot die de getekende lengte bepaalt, levert ook het id (klik).
             if end > a.end { a.end = end; a.id = n.id; }
+            if a.lyrics.is_empty() { a.lyrics = n.lyrics.clone(); }
             continue;
         }
-        noten.push(Actief { midi: n.midi, start: n.start, end, id: n.id });
+        noten.push(Actief { midi: n.midi, start: n.start, end, id: n.id, lyrics: n.lyrics.clone() });
     }
     if noten.is_empty() { return Vec::new(); }
     let inzetten: Vec<(u8, u64)> = noten.iter().map(|a| (a.midi, a.start)).collect();
@@ -398,7 +407,7 @@ fn group_chords(qnotes: &[QNote]) -> Vec<Chord> {
         let (t0, t1) = (w[0], w[1]);
         let mut notes: Vec<ChordNote> = noten.iter()
             .filter(|a| a.start <= t0 && a.end > t0)
-            .map(|a| ChordNote { midi: a.midi, tie_stop: a.start < t0, tie_start: a.end > t1, id: a.id })
+            .map(|a| ChordNote { midi: a.midi, tie_stop: a.start < t0, tie_start: a.end > t1, id: a.id, lyrics: if a.start < t0 { Vec::new() } else { a.lyrics.clone() } })
             .collect();
         if notes.is_empty() { continue; }
         notes.sort_by_key(|n| n.midi);
@@ -483,6 +492,8 @@ pub struct QuantizedStaff {
     pub hand: Option<KlavarHand>,
     pub split_midi: Option<u8>,
     pub notes: Vec<QNote>,
+    /// Aanwijzingen (0.7.88), op absolute rastereenheid.
+    pub marks: Vec<QMark>,
 }
 
 /// Het gedeelde gekwantiseerde model (0.7.70): raster, maatsoort en tempo
@@ -542,7 +553,7 @@ pub fn quantize_score(staves: &[Staff], opts: &NotationOptions) -> QuantizedScor
     let bpm = if opts.bpm.is_finite() && opts.bpm >= 20.0 && opts.bpm <= 300.0 { opts.bpm } else { 90.0 };
     let tolerance = opts.tolerance_pct.unwrap_or(100);
     let venster = akkoord_venster_sec(bpm, q, tolerance);
-    let qstaves: Vec<QuantizedStaff> = staves.iter().enumerate()
+    let mut qstaves: Vec<QuantizedStaff> = staves.iter().enumerate()
         .map(|(i, st)| {
             // Akkoordclustering vóór het raster (0.7.82), ook voor klavar.
             let mut noten = st.notes.clone();
@@ -556,9 +567,15 @@ pub fn quantize_score(staves: &[Staff], opts: &NotationOptions) -> QuantizedScor
                 staff_index: i, name: st.name.clone(), layer_id: st.layer_id, pedal: st.pedal,
                 bass_clef: st.bass_clef, hand: st.hand, split_midi: st.split_midi,
                 notes: quantize_notes(&noten, bpm, q as u8, tolerance),
+                marks: st.marks.iter().map(|m| QMark {
+                    pos: ((m.start_sec.max(0.0)) * (bpm / 60.0) * q as f64).round() as u64,
+                    kind: m.kind, text: m.text.clone(), placement: m.placement,
+                }).collect(),
             }
         })
         .collect();
+    // Aanwijzingen op volgorde van inzet (schrijf_items leunt daarop).
+    for st in &mut qstaves { st.marks.sort_by_key(|m| m.pos); }
     QuantizedScore { q, beats_per_bar: beats, beat_unit, measure_len, bpm, staves: qstaves }
 }
 
@@ -604,7 +621,7 @@ pub fn render_musicxml(qs: &QuantizedScore, opts: &NotationOptions) -> Result<St
 
 /// Eén geschreven noot, akkoord of rust binnen een maat (0.7.83), met per
 /// noot (midi, tie_stop, tie_start, event-id).
-struct MaatItem { pos: u64, len: u64, type_name: &'static str, dotted: bool, hele_maat: bool, notes: Vec<(u8, bool, bool, Option<u64>)> }
+struct MaatItem { pos: u64, len: u64, type_name: &'static str, dotted: bool, hele_maat: bool, notes: Vec<(u8, bool, bool, Option<u64>)>, lyrics: Vec<Lyric> }
 
 /// De noten en rusten van één stem binnen één maat, uit de segmentlijst van
 /// die stem: delen binnen de maat, met overbindingen over maat- en
@@ -619,8 +636,23 @@ fn maat_items(segments: &[(u64, u64, Vec<ChordNote>)], m_start: u64, m_end: u64,
         let tie_from_prev = !notes.is_empty() && s < m_start;
         let tie_to_next = !notes.is_empty() && e > m_end;
         if notes.is_empty() && ps == m_start && pe == m_end {
-            items.push(MaatItem { pos: ps, len: measure_len, type_name: "", dotted: false, hele_maat: true, notes: Vec::new() });
+            items.push(MaatItem { pos: ps, len: measure_len, type_name: "", dotted: false, hele_maat: true, notes: Vec::new(), lyrics: Vec::new() });
             continue;
+        }
+        // Liedtekst (0.7.88): van de hoogste noot met tekst, alleen op het
+        // eerste deel van een nieuwe inzet (niet op een overbonden vervolg).
+        let mut lyrics_akkoord: Vec<Lyric> = Vec::new();
+        if !tie_from_prev {
+            // Per strofe de lettergreep van de hoogste noot die er een heeft:
+            // strofe 1 op de bovenste en strofe 2 op een lagere akkoordnoot
+            // komen allebei op het blad (reviewbevinding).
+            for cn in notes.iter().rev() {
+                if cn.tie_stop { continue; }
+                for l in &cn.lyrics {
+                    if !lyrics_akkoord.iter().any(|x| x.number == l.number) { lyrics_akkoord.push(l.clone()); }
+                }
+            }
+            lyrics_akkoord.sort_by_key(|l| l.number);
         }
         let parts = decompose(pe - ps, q);
         let mut pos = ps;
@@ -633,7 +665,8 @@ fn maat_items(segments: &[(u64, u64, Vec<ChordNote>)], m_start: u64, m_end: u64,
                 cn.tie_start || tie_to_next || !last_part,
                 cn.id,
             )).collect();
-            items.push(MaatItem { pos, len: *len, type_name, dotted: *dotted, hele_maat: false, notes: noten });
+            items.push(MaatItem { pos, len: *len, type_name, dotted: *dotted, hele_maat: false, notes: noten,
+                lyrics: if first_part { lyrics_akkoord.clone() } else { Vec::new() } });
             pos += len;
         }
     }
@@ -664,8 +697,18 @@ fn beams_voor(items: &[MaatItem], m_start: u64, tel: u64, q: u64) -> Vec<Option<
 
 /// Schrijft de items van één stem in één maat en vult de notemap.
 #[allow(clippy::too_many_arguments)]
-fn schrijf_items(xml: &mut String, items: &[MaatItem], beam: &[Option<&'static str>], voice: u8, stem_richting: Option<&str>, kleur: Option<&str>, key_fifths: i8, part: u16, measure: u32, m_start: u64, notemap: &mut Vec<NoteRef>) {
+fn schrijf_items(xml: &mut String, items: &[MaatItem], beam: &[Option<&'static str>], voice: u8, stem_richting: Option<&str>, kleur: Option<&str>, key_fifths: i8, part: u16, measure: u32, m_start: u64, notemap: &mut Vec<NoteRef>, marks: &[QMark]) {
+    // Aanwijzingen (0.7.88) vóór de noot op hun inzet; tussen twee inzetten
+    // met een (negatieve) offset t.o.v. de volgende inzet; na de laatste
+    // inzet t.o.v. het maateinde.
+    let mut mark_i = 0usize;
+    let m_end = m_start + items.iter().map(|it| it.pos + it.len).max().unwrap_or(m_start + 1) - m_start;
     for (ii, it) in items.iter().enumerate() {
+        while mark_i < marks.len() && marks[mark_i].pos <= it.pos {
+            let offset = marks[mark_i].pos as i64 - it.pos as i64;
+            xml.push_str(&direction_xml(&marks[mark_i], offset));
+            mark_i += 1;
+        }
         if it.hele_maat {
             xml.push_str(&format!(
                 "      <note><rest measure=\"yes\"/><duration>{}</duration><voice>{}</voice></note>\n",
@@ -705,9 +748,23 @@ fn schrijf_items(xml: &mut String, items: &[MaatItem], beam: &[Option<&'static s
                 if tie_start { xml.push_str("<tied type=\"start\"/>"); }
                 xml.push_str("</notations>");
             }
+            // Liedtekst alleen op de eerste noot van het akkoord (0.7.88).
+            if ni == 0 {
+                for l in &it.lyrics {
+                    let syl = match l.syllabic { Syllabic::Single => "single", Syllabic::Begin => "begin", Syllabic::Middle => "middle", Syllabic::End => "end" };
+                    xml.push_str(&format!("<lyric number=\"{}\" placement=\"below\"><syllabic>{}</syllabic><text>{}</text>{}</lyric>",
+                        l.number.clamp(1, 3), syl, xml_escape(&l.text), if l.extend { "<extend type=\"start\"/>" } else { "" }));
+                }
+            }
             xml.push_str("</note>\n");
             notemap.push(NoteRef { part, measure, voice, pos: it.pos - m_start, midi, id });
         }
+    }
+    // Aanwijzingen na de laatste inzet (in een slotrust): t.o.v. het maateinde.
+    while mark_i < marks.len() {
+        let offset = marks[mark_i].pos as i64 - m_end as i64;
+        xml.push_str(&direction_xml(&marks[mark_i], offset));
+        mark_i += 1;
     }
 }
 
@@ -743,6 +800,7 @@ pub fn render_musicxml_met_notemap(qs: &QuantizedScore, opts: &NotationOptions, 
     // gevraagde aantal maten (0.7.83: een leeg stuk toont lege balken).
     let total = quantized.iter()
         .flat_map(|(_, stemmen)| stemmen.iter().flat_map(|(_, cs)| cs.last().map(|c| c.end)))
+        .chain(qs.staves.iter().flat_map(|st| st.marks.iter().map(|mk| mk.pos + 1)))
         .max().unwrap_or(0);
     let min_measures = opts.min_measures.unwrap_or(0) as u64;
     let num_measures = ((total + measure_len - 1) / measure_len).max(min_measures).max(1);
@@ -848,16 +906,20 @@ pub fn render_musicxml_met_notemap(qs: &QuantizedScore, opts: &NotationOptions, 
                 if items.iter().any(|it| !it.notes.is_empty()) { per_stem_items.push((*v, items)); }
             }
             if per_stem_items.is_empty() {
-                per_stem_items.push((1, vec![MaatItem { pos: m_start, len: measure_len, type_name: "", dotted: false, hele_maat: true, notes: Vec::new() }]));
+                per_stem_items.push((1, vec![MaatItem { pos: m_start, len: measure_len, type_name: "", dotted: false, hele_maat: true, notes: Vec::new(), lyrics: Vec::new() }]));
             }
             let meerstemmig = per_stem_items.len() > 1;
+            // Aanwijzingen van deze maat (0.7.88), alleen bij de eerste stem.
+            let maat_marks: Vec<QMark> = staff.marks.iter().filter(|mk| mk.pos >= m_start && mk.pos < m_end)
+                .map(|mk| QMark { pos: mk.pos, kind: mk.kind, text: mk.text.clone(), placement: mk.placement }).collect();
             for (si, (v, items)) in per_stem_items.iter().enumerate() {
                 if si > 0 { xml.push_str(&format!("      <backup><duration>{}</duration></backup>\n", measure_len)); }
                 let beam = beams_voor(items, m_start, tel, q);
                 let stem_richting = if meerstemmig { Some(if v % 2 == 1 { "up" } else { "down" }) } else { None };
                 let kleur: Option<&str> = scherm.map(|s| if s.dim_andere && *v != actieve { DIM_KLEUR } else { STEM_KLEUREN[(*v - 1) as usize] })
                     .filter(|k| *k != STEM_KLEUREN[0]);
-                schrijf_items(&mut xml, items, &beam, *v, stem_richting, kleur, opts.key_fifths, idx as u16, m as u32, m_start, &mut notemap);
+                let marks_hier: &[QMark] = if si == 0 { &maat_marks } else { &[] };
+                schrijf_items(&mut xml, items, &beam, *v, stem_richting, kleur, opts.key_fifths, idx as u16, m as u32, m_start, &mut notemap, marks_hier);
             }
             xml.push_str("    </measure>\n");
         }
@@ -886,6 +948,99 @@ use std::collections::HashMap;
 fn waar() -> bool { true }
 fn een() -> u8 { 1 }
 
+/// Lettergreep-verbinding van liedtekst (MusicXML `<syllabic>`, 0.7.88).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Syllabic { #[default] Single, Begin, Middle, End }
+
+/// Eén lettergreep liedtekst onder een noot (0.7.88), per strofe 1..=3.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Lyric {
+    #[serde(default = "een")]
+    pub number: u8,
+    #[serde(default)]
+    pub text: String,
+    #[serde(default)]
+    pub syllabic: Syllabic,
+    /// Melisma: de lettergreep loopt door onder de volgende noten.
+    #[serde(default)]
+    pub extend: bool,
+}
+
+/// Soort aanwijzing (0.7.88).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TextKind { Tempo, Expressive, Technique, Registration, Dynamic, Rehearsal, #[default] Free }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Placement { #[default] Above, Below }
+
+/// Aanwijzing op een balk, op een tijdstip (niet aan een noot: noten
+/// verplaatsen laat de tekst staan).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TextMark {
+    pub id: u64,
+    pub layer_id: u32,
+    pub start_us: u64,
+    #[serde(default)]
+    pub kind: TextKind,
+    #[serde(default)]
+    pub text: String,
+    #[serde(default)]
+    pub placement: Placement,
+}
+
+/// Aanwijzing van een balk in de kwantiseerinvoer (bestandsmodus en live).
+#[derive(Debug, Clone, PartialEq)]
+pub struct StaffMark {
+    pub start_sec: f64,
+    pub kind: TextKind,
+    pub text: String,
+    pub placement: Placement,
+}
+
+/// Gekwantiseerde aanwijzing: absolute rastereenheid.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct QMark {
+    pub pos: u64,
+    pub kind: TextKind,
+    pub text: String,
+    pub placement: Placement,
+}
+
+/// Bekende dynamische tekens die MusicXML als `<dynamics>` kent.
+const DYNAMIEK: [&str; 12] = ["ppp", "pp", "p", "mp", "mf", "f", "ff", "fff", "sfz", "fp", "sf", "rf"];
+
+/// Eerste getal in een tekst ("♩ = 72", "Allegro 120") voor `<sound tempo>`.
+fn eerste_getal(t: &str) -> Option<u32> {
+    let mut cijfers = String::new();
+    for c in t.chars() {
+        if c.is_ascii_digit() { cijfers.push(c); }
+        else if !cijfers.is_empty() { break; }
+    }
+    cijfers.parse::<u32>().ok().filter(|n| (20..=400).contains(n))
+}
+
+/// `<direction>` voor een aanwijzing; `offset` in rastereenheden t.o.v. de
+/// huidige positie (0 = precies op de inzet).
+fn direction_xml(mark: &QMark, offset: i64) -> String {
+    let placement = match mark.placement { Placement::Above => "above", Placement::Below => "below" };
+    let tekst = mark.text.trim();
+    let inner = match mark.kind {
+        TextKind::Dynamic if DYNAMIEK.contains(&tekst) => format!("<dynamics><{}/></dynamics>", tekst),
+        TextKind::Rehearsal => format!("<rehearsal>{}</rehearsal>", xml_escape(tekst)),
+        _ => format!("<words>{}</words>", xml_escape(tekst)),
+    };
+    let mut uit = format!("      <direction placement=\"{}\"><direction-type>{}</direction-type>", placement, inner);
+    if offset != 0 { uit.push_str(&format!("<offset>{}</offset>", offset)); }
+    if mark.kind == TextKind::Tempo {
+        if let Some(n) = eerste_getal(tekst) { uit.push_str(&format!("<sound tempo=\"{}\"/>", n)); }
+    }
+    uit.push_str("</direction>\n");
+    uit
+}
+
 /// Bovengrens voor het minimale aantal maten (wizard, groei met de cursor en
 /// geladen bestanden): daarboven wordt renderen onwerkbaar.
 pub const MAX_MIN_MEASURES: u32 = 10_000;
@@ -907,6 +1062,9 @@ pub struct LayerEv {
     /// Stem binnen de balk (0.7.86): 1..=4; oudere bestanden hebben stem 1.
     #[serde(default = "een")]
     pub voice: u8,
+    /// Liedtekst onder deze noot (0.7.88), per strofe.
+    #[serde(default)]
+    pub lyrics: Vec<Lyric>,
     /// Hand in klavar (0.7.70); None = volgens de laag en het splitspunt.
     #[serde(default)]
     pub hand: Option<KlavarHand>,
@@ -985,6 +1143,10 @@ pub struct Score {
     /// UI verhoogt het zodra de invoercursor voorbij de laatste maat komt.
     #[serde(default)]
     pub min_measures: u32,
+    /// Aanwijzingen (0.7.88): tempo, expressie, techniek, registratie,
+    /// dynamiek, oefenletters, vrije tekst — per balk op een tijdstip.
+    #[serde(default)]
+    pub texts: Vec<TextMark>,
     #[serde(default)]
     pub metronome: MetronomeCfg,
     /// Alleen armed = actief onder één laag tegelijk; None = geen opname.
@@ -1000,6 +1162,8 @@ pub struct Score {
     next_layer_id: u32,
     #[serde(skip)]
     next_take_id: u32,
+    #[serde(skip)]
+    next_text_id: u64,
     /// Undo/redo-stapels (niet naar de UI; alleen counts worden geëxposeerd).
     #[serde(skip)]
     undo: Vec<EditCommand>,
@@ -1019,10 +1183,11 @@ impl Score {
             composer: String::new(),
             subtitle: String::new(),
             min_measures: 0,
+            texts: Vec::new(),
             metronome: MetronomeCfg::default(),
             armed_layer: None,
             generation: 1,
-            next_event_id: 1, next_layer_id: 1, next_take_id: 1,
+            next_event_id: 1, next_layer_id: 1, next_take_id: 1, next_text_id: 1,
             undo: Vec::new(), redo: Vec::new(),
         }
     }
@@ -1036,6 +1201,17 @@ impl Score {
         self.next_event_id = max_ev.saturating_add(1);
         self.next_layer_id = max_laag.saturating_add(1);
         self.next_take_id = max_take.saturating_add(1);
+        self.next_text_id = self.texts.iter().map(|t| t.id).max().unwrap_or(0).saturating_add(1);
+        // Dubbele tekst-id's en teksten van verdwenen balken opruimen.
+        let laag_ids: std::collections::HashSet<u32> = self.layers.iter().map(|l| l.id).collect();
+        let mut gezien_tekst: std::collections::HashSet<u64> = std::collections::HashSet::new();
+        self.texts.retain(|t| laag_ids.contains(&t.layer_id));
+        for t in &mut self.texts {
+            if !gezien_tekst.insert(t.id) { t.id = self.next_text_id; self.next_text_id = self.next_text_id.saturating_add(1); gezien_tekst.insert(t.id); }
+        }
+        // Invariant van AddText/EditText ook na laden: op inzet gesorteerd
+        // (schrijf_items leunt daarop).
+        self.texts.sort_by_key(|t| (t.start_us, t.id));
         // Dubbele ID's (alleen uit een bewerkt of beschadigd bestand) krijgen
         // een vers nummer: elk bewerkcommando leunt op "stabiel, uniek ID".
         let mut gezien_laag: std::collections::HashSet<u32> = std::collections::HashSet::new();
@@ -1072,6 +1248,7 @@ impl Score {
     pub fn undo_len(&self) -> usize { self.undo.len() }
     pub fn redo_len(&self) -> usize { self.redo.len() }
     pub fn new_event_id(&mut self) -> u64 { let id = self.next_event_id; self.next_event_id = self.next_event_id.saturating_add(1); id }
+    pub fn new_text_id(&mut self) -> u64 { let id = self.next_text_id.max(1); self.next_text_id = id.saturating_add(1); id }
     pub fn bump_gen(&mut self) { self.generation = self.generation.saturating_add(1); }
 
     /// Push undo-inverse; wist de redo-stack (nieuwe bewerking = redo-tak dood).
@@ -1148,6 +1325,7 @@ pub fn score_to_staves(score: &Score) -> Vec<Staff> {
                     id: Some(ev.id),
                     hand: ev.hand,
                     voice: ev.voice.clamp(1, 4),
+                    lyrics: ev.lyrics.clone(),
                 });
             }
         }
@@ -1156,6 +1334,9 @@ pub fn score_to_staves(score: &Score) -> Vec<Staff> {
         Staff {
             name: layer.name.clone(), bass_clef: bass, notes,
             layer_id: Some(layer.id), pedal, hand: layer.klavar_hand, split_midi: layer.klavar_split,
+            marks: score.texts.iter().filter(|t| t.layer_id == layer.id).map(|t| StaffMark {
+                start_sec: t.start_us as f64 / 1_000_000.0, kind: t.kind, text: t.text.clone(), placement: t.placement,
+            }).collect(),
         }
     }).collect()
 }
@@ -1346,15 +1527,21 @@ pub enum EditCommand {
     SetHands { items: Vec<(u64, Option<KlavarHand>)> },
     /// Stem per noot (0.7.86): (event-id, stem 1..=4); undo bewaart de oude.
     SetVoice { items: Vec<(u64, u8)> },
+    /// Liedtekst van één noot en strofe (0.7.88); None = weg.
+    SetLyric { id: u64, number: u8, old: Option<Lyric>, new: Option<Lyric> },
+    /// Aanwijzing toevoegen / verwijderen / wijzigen (0.7.88).
+    AddText { mark: TextMark },
+    RemoveText { mark: TextMark },
+    EditText { id: u64, old: TextMark, new: TextMark },
     /// Voeg een take toe (met inverse: verwijder die take).
     /// Voor de undo bewaren we ID + laag; content is leeg bij add.
     AddTake { layer: u32, take_id: u32 },
     /// Verwijder een laag met alle takes (undo herstelt de complete laag).
-    RemoveLayer { snapshot: Layer, position: usize },
+    RemoveLayer { snapshot: Layer, position: usize, texts: Vec<TextMark> },
     /// Undo-inverse van AddTake: verwijderde take terugzetten op dezelfde plek.
     RestoreTake { layer: u32, index: usize, take: Take },
     /// Undo-inverse van RemoveLayer: laag terugzetten op dezelfde plek.
-    RestoreLayer { snapshot: Layer, position: usize },
+    RestoreLayer { snapshot: Layer, position: usize, texts: Vec<TextMark> },
 }
 
 impl EditCommand {
@@ -1541,6 +1728,43 @@ impl EditCommand {
                 score.bump_gen();
                 Some(EditCommand::SetVoice { items: old })
             }
+            EditCommand::SetLyric { id, number, old, new } => {
+                let number = number.clamp(1, 3);
+                let Some((li, ti, ei)) = score.locate(id) else { return None; };
+                let ev = &mut score.layers[li].takes[ti].events[ei];
+                let huidig = ev.lyrics.iter().find(|l| l.number == number).cloned();
+                let nieuw = new.map(|mut l| { l.number = number; l });
+                if huidig == nieuw { return None; }
+                ev.lyrics.retain(|l| l.number != number);
+                if let Some(l) = nieuw.clone() { if !l.text.is_empty() || l.extend { ev.lyrics.push(l); } }
+                ev.lyrics.sort_by_key(|l| l.number);
+                score.bump_gen();
+                let _ = old;
+                Some(EditCommand::SetLyric { id, number, old: nieuw, new: huidig })
+            }
+            EditCommand::AddText { mark } => {
+                if score.texts.iter().any(|t| t.id == mark.id) { return None; }
+                score.texts.push(mark.clone());
+                score.texts.sort_by_key(|t| (t.start_us, t.id));
+                score.bump_gen();
+                Some(EditCommand::RemoveText { mark })
+            }
+            EditCommand::RemoveText { mark } => {
+                let Some(pos) = score.texts.iter().position(|t| t.id == mark.id) else { return None; };
+                let weg = score.texts.remove(pos);
+                score.bump_gen();
+                Some(EditCommand::AddText { mark: weg })
+            }
+            EditCommand::EditText { id, old, new } => {
+                let Some(t) = score.texts.iter_mut().find(|t| t.id == id) else { return None; };
+                if *t == new { return None; }
+                let vorige = t.clone();
+                *t = TextMark { id, ..new.clone() };
+                score.texts.sort_by_key(|t| (t.start_us, t.id));
+                score.bump_gen();
+                let _ = old;
+                Some(EditCommand::EditText { id, old: new, new: vorige })
+            }
             EditCommand::AddTake { layer, take_id } => {
                 // "Inverse" van add = de zojuist toegevoegde take verwijderen.
                 if let Some(l) = score.layers.iter_mut().find(|l| l.id == layer) {
@@ -1565,34 +1789,32 @@ impl EditCommand {
                 }
                 None
             }
-            EditCommand::RemoveLayer { snapshot, position } => {
+            EditCommand::RemoveLayer { snapshot, position, texts: _ } => {
                 let idx = score.layers.iter().position(|l| l.id == snapshot.id);
                 if let Some(i) = idx {
                     let removed = score.layers.remove(i);
                     if score.armed_layer == Some(removed.id) {
                         score.armed_layer = score.layers.first().map(|l| l.id);
                     }
+                    // De aanwijzingen van de balk gaan mee (0.7.88): geen wezen
+                    // in de tekstenlijst, en undo zet ze terug.
+                    let (weg, blijft): (Vec<TextMark>, Vec<TextMark>) = score.texts.drain(..).partition(|t| t.layer_id == removed.id);
+                    score.texts = blijft;
                     score.bump_gen();
-                    Some(EditCommand::RestoreLayer { snapshot: removed, position: position.min(score.layers.len()) })
+                    Some(EditCommand::RestoreLayer { snapshot: removed, position: position.min(score.layers.len()), texts: weg })
                 } else {
                     None
                 }
             }
-            EditCommand::RestoreLayer { snapshot, position } => {
-                let snapshot_id = snapshot.id;
+            EditCommand::RestoreLayer { snapshot, position, texts } => {
                 let idx = position.min(score.layers.len());
                 score.layers.insert(idx, snapshot);
+                score.texts.extend(texts);
+                score.texts.sort_by_key(|t| (t.start_us, t.id));
                 score.bump_gen();
-                Some(EditCommand::RemoveLayer {
-                    snapshot: score.layers[idx].clone(),
-                    position: idx,
-                })
-                    .map(|inv| {
-                        // De inverse "RemoveLayer" die we teruggeven bevat een verse snapshot;
-                        // dat is redundant maar corrrect: bij redo verwijdert hij dezelfde laag opnieuw.
-                        let _ = snapshot_id; // silence unused warning in de release-build
-                        inv
-                    })
+                // De inverse bevat een verse snapshot: bij redo verwijdert hij
+                // dezelfde laag (met haar teksten) opnieuw.
+                Some(EditCommand::RemoveLayer { snapshot: score.layers[idx].clone(), position: idx, texts: Vec::new() })
             }
         }
     }
@@ -1753,8 +1975,8 @@ mod tests {
         let _ = lid;
         let take = &mut sc.layers[0].takes[0]; // add_layer maakt "Take 1"
         take.visible = true;
-        take.events.push(LayerEv { id: 1, midi: 36, start_us: 0, end_us: 500_000, channel: KANAAL_ONBEKEND, locked: true, voice: 1, hand: None });
-        take.events.push(LayerEv { id: 2, midi: 38, start_us: 500_000, end_us: 1_000_000, channel: 0, locked: false, voice: 1, hand: None });
+        take.events.push(LayerEv { id: 1, midi: 36, start_us: 0, end_us: 500_000, channel: KANAAL_ONBEKEND, locked: true, voice: 1, lyrics: Vec::new(), hand: None });
+        take.events.push(LayerEv { id: 2, midi: 38, start_us: 500_000, end_us: 1_000_000, channel: 0, locked: false, voice: 1, lyrics: Vec::new(), hand: None });
         let bytes = score_to_smf_bytes(&sc, &|_l| Some(2)).expect("smf");
         let smf = midly::Smf::parse(&bytes).expect("parse");
         let mut kanalen = Vec::new();
@@ -1819,8 +2041,8 @@ mod tests {
     #[test]
     fn quantize_notes_behoudt_ids() {
         let notes = vec![
-            NoteEv { midi: 60, start_sec: 0.0, end_sec: 1.0, id: Some(7), hand: Some(KlavarHand::Left), voice: 1 },
-            NoteEv { midi: 64, start_sec: 0.02, end_sec: 0.98, id: Some(8), hand: None, voice: 1 },
+            NoteEv { midi: 60, start_sec: 0.0, end_sec: 1.0, id: Some(7), hand: Some(KlavarHand::Left), voice: 1, lyrics: Vec::new() },
+            NoteEv { midi: 64, start_sec: 0.02, end_sec: 0.98, id: Some(8), hand: None, voice: 1, lyrics: Vec::new() },
         ];
         let q = quantize_notes(&notes, 60.0, 4, 100);
         assert_eq!(q.len(), 2);
@@ -1841,8 +2063,8 @@ mod tests {
         // kent één notenkop (de tweede valt weg in de dedup), klavar houdt
         // beide noten, met hun eigen ID.
         let notes = vec![
-            NoteEv { midi: 60, start_sec: 0.0, end_sec: 1.0, id: Some(1), hand: None, voice: 1 },
-            NoteEv { midi: 60, start_sec: 0.0, end_sec: 2.0, id: Some(2), hand: None, voice: 1 },
+            NoteEv { midi: 60, start_sec: 0.0, end_sec: 1.0, id: Some(1), hand: None, voice: 1, lyrics: Vec::new() },
+            NoteEv { midi: 60, start_sec: 0.0, end_sec: 2.0, id: Some(2), hand: None, voice: 1, lyrics: Vec::new() },
         ];
         let q = quantize_notes(&notes, 60.0, 4, 100);
         assert_eq!(q.len(), 2);
@@ -1871,7 +2093,7 @@ mod tests {
         sc.layers[1].divisions = vec!["Pedaal".into()];
         sc.layers[0].klavar_hand = Some(KlavarHand::Right);
         let id = sc.new_event_id();
-        sc.layers[0].takes[0].events.push(LayerEv { id, midi: 60, start_us: 0, end_us: 500_000, channel: 0, locked: false, voice: 1, hand: Some(KlavarHand::Left) });
+        sc.layers[0].takes[0].events.push(LayerEv { id, midi: 60, start_us: 0, end_us: 500_000, channel: 0, locked: false, voice: 1, lyrics: Vec::new(), hand: Some(KlavarHand::Left) });
         let staves = score_to_staves(&sc);
         assert_eq!(staves[0].layer_id, Some(hw));
         assert_eq!(staves[0].notes[0].id, Some(id));
@@ -1939,7 +2161,7 @@ mod tests {
         let mut sc = Score::new(1);
         sc.add_layer("Hoofdwerk".into(), None);
         let id = sc.new_event_id();
-        sc.layers[0].takes[0].events.push(LayerEv { id, midi: 60, start_us: 0, end_us: 1000, channel: 0, locked: false, voice: 1, hand: None });
+        sc.layers[0].takes[0].events.push(LayerEv { id, midi: 60, start_us: 0, end_us: 1000, channel: 0, locked: false, voice: 1, lyrics: Vec::new(), hand: None });
         let cmd = EditCommand::SetHands { items: vec![(id, Some(KlavarHand::Right)), (999, Some(KlavarHand::Left))] };
         let inv = cmd.apply(&mut sc).expect("inverse");
         assert_eq!(sc.layers[0].takes[0].events[0].hand, Some(KlavarHand::Right));
@@ -2133,8 +2355,8 @@ mod tests {
     #[test]
     fn inkorting_alleen_binnen_stem_en_notemap() {
         let staves = vec![Staff { name: "M".into(), bass_clef: false, notes: vec![
-            NoteEv { midi: 72, start_sec: 0.0, end_sec: 1.0, id: Some(1), hand: None, voice: 1 },
-            NoteEv { midi: 60, start_sec: 0.0, end_sec: 6.0, id: Some(2), hand: None, voice: 2 }], ..Default::default() }];
+            NoteEv { midi: 72, start_sec: 0.0, end_sec: 1.0, id: Some(1), hand: None, voice: 1, lyrics: Vec::new() },
+            NoteEv { midi: 60, start_sec: 0.0, end_sec: 6.0, id: Some(2), hand: None, voice: 2, lyrics: Vec::new() }], ..Default::default() }];
         let qs = quantize_score(&staves, &opts());
         let (xml, map) = render_musicxml_met_notemap(&qs, &opts(), None).expect("xml");
         // Stem 2 loopt over de maatstreep: twee delen met dezelfde id.
@@ -2168,7 +2390,7 @@ mod tests {
         let mut sc = Score::new(1);
         let l = sc.add_layer("M".into(), Some(false));
         let t = sc.layers[0].takes[0].id;
-        let ev = |id: u64, midi: u8, s: u64| LayerEv { id, midi, start_us: s, end_us: s + 500_000, channel: 0, locked: false, voice: 1, hand: None };
+        let ev = |id: u64, midi: u8, s: u64| LayerEv { id, midi, start_us: s, end_us: s + 500_000, channel: 0, locked: false, voice: 1, lyrics: Vec::new(), hand: None };
         EditCommand::InsertEvents { events: vec![(l, t, ev(1, 60, 0)), (l, t, ev(2, 64, 10_000)), (l, t, ev(3, 67, 0)), (l, t, ev(4, 62, 1_000_000))] }.apply(&mut sc);
         let inv = EditCommand::SetVoice { items: vec![(1, 2), (3, 2)] }.apply(&mut sc).expect("inverse");
         assert_eq!(sc.layers[0].takes[0].events[0].voice, 2);
@@ -2186,6 +2408,142 @@ mod tests {
         let mut items = verdeel_akkoord_in_stemmen(&[(1, 60, 120_000), (2, 64, 120_000), (3, 67, 130_000)], 125_000);
         items.sort();
         assert_eq!(items, vec![(1, 2), (2, 2), (3, 1)]);
+    }
+
+    fn lyric(number: u8, text: &str, syl: Syllabic, extend: bool) -> Lyric {
+        Lyric { number, text: text.into(), syllabic: syl, extend }
+    }
+
+    #[test]
+    fn lyric_syllabic_extend_en_akkoord() {
+        let mut a = NoteEv::anoniem(60, 0.0, 1.0); a.lyrics = vec![lyric(1, "Lof", Syllabic::Begin, false)];
+        let mut b = NoteEv::anoniem(62, 1.0, 2.0); b.lyrics = vec![lyric(1, "zij", Syllabic::End, true), lyric(2, "O", Syllabic::Single, false)];
+        // Akkoord op tel 3: de hoogste noot draagt de tekst; de laagste wordt geschreven.
+        let mut c1 = NoteEv::anoniem(64, 2.0, 3.0); c1.lyrics = vec![];
+        let mut c2 = NoteEv::anoniem(67, 2.0, 3.0); c2.lyrics = vec![lyric(1, "God", Syllabic::Single, false)];
+        // Overbonden noot over de maatstreep: de tekst alleen op het eerste deel.
+        let mut d = NoteEv::anoniem(65, 3.0, 5.0); d.lyrics = vec![lyric(1, "lang", Syllabic::Single, false)];
+        let staves = vec![Staff { name: "S".into(), bass_clef: false, notes: vec![a, b, c1, c2, d], ..Default::default() }];
+        let xml = build_musicxml(&staves, &opts()).expect("xml");
+        assert!(xml.contains("<lyric number=\"1\" placement=\"below\"><syllabic>begin</syllabic><text>Lof</text></lyric>"));
+        assert!(xml.contains("<syllabic>end</syllabic><text>zij</text><extend type=\"start\"/></lyric>"));
+        assert!(xml.contains("<lyric number=\"2\" placement=\"below\"><syllabic>single</syllabic><text>O</text></lyric>"));
+        // Akkoord: tekst in de eerste <note> (zonder <chord/>), niet in de tweede.
+        let i = xml.find("<text>God</text>").unwrap();
+        let noot = &xml[xml[..i].rfind("<note>").unwrap()..i];
+        assert!(!noot.contains("<chord/>"));
+        assert_eq!(xml.matches("<text>God</text>").count(), 1);
+        assert_eq!(xml.matches("<text>lang</text>").count(), 1);
+        // Volgorde in de noot: notations vóór lyric; lyric vóór </note>.
+        let j = xml.find("<text>lang</text>").unwrap();
+        let noot = &xml[xml[..j].rfind("<note>").unwrap()..xml[j..].find("</note>").unwrap() + j];
+        assert!(noot.find("<notations>").unwrap() < noot.find("<lyric").unwrap());
+    }
+
+    #[test]
+    fn direction_words_offset_dynamiek_tempo_rehearsal() {
+        let mark = |s: f64, kind: TextKind, text: &str, pl: Placement| StaffMark { start_sec: s, kind, text: text.into(), placement: pl };
+        let staves = vec![Staff { name: "S".into(), bass_clef: false,
+            notes: vec![NoteEv::anoniem(60, 0.0, 1.0), NoteEv::anoniem(62, 2.0, 3.0)],
+            marks: vec![
+                mark(0.0, TextKind::Tempo, "Andante ♩ = 72", Placement::Above),
+                mark(1.5, TextKind::Expressive, "dolce", Placement::Above),  // tussen de kwart en de rust: offset
+                mark(2.0, TextKind::Dynamic, "mf", Placement::Below),
+                mark(2.0, TextKind::Dynamic, "cresc.", Placement::Below),
+                mark(3.5, TextKind::Rehearsal, "A", Placement::Above),       // in de slotrust
+                mark(6.0, TextKind::Free, "a & b", Placement::Above),        // maat 2 zonder noten
+            ],
+            ..Default::default() }];
+        let xml = build_musicxml(&staves, &opts()).expect("xml");
+        // Tempo op de eerste inzet, zonder offset, met sound tempo.
+        assert!(xml.contains("<direction placement=\"above\"><direction-type><words>Andante ♩ = 72</words></direction-type><sound tempo=\"72\"/></direction>"));
+        // 1,5 s = 6 eenheden: tussen de rust (4..8) → geschreven vóór de rust-item? nee: vóór de noot op 8 met offset −2.
+        assert!(xml.contains("<words>dolce</words></direction-type><offset>-2</offset></direction>"));
+        // Bekende dynamiek als <dynamics>, onbekende als <words>.
+        assert!(xml.contains("<direction placement=\"below\"><direction-type><dynamics><mf/></dynamics></direction-type></direction>"));
+        assert!(xml.contains("<words>cresc.</words>"));
+        // Oefenletter in de slotrust: offset t.o.v. het maateinde (14 − 16 = −2).
+        assert!(xml.contains("<rehearsal>A</rehearsal></direction-type><offset>-2</offset>"));
+        // Maat 2 bestaat door de aanwijzing (24 eenheden → maat 2), escaping klopt.
+        assert!(xml.contains("<measure number=\"2\">"));
+        assert!(xml.contains("<words>a &amp; b</words>"));
+        // Volgorde: de direction staat vóór de noot op dezelfde inzet.
+        assert!(xml.find("<sound tempo=").unwrap() < xml.find("<pitch>").unwrap());
+        // Export zonder teksten blijft gelijk aan vroeger (geen <direction> met words).
+        let staves2 = vec![Staff { name: "S".into(), bass_clef: false, notes: vec![NoteEv::anoniem(60, 0.0, 1.0)], ..Default::default() }];
+        assert!(!build_musicxml(&staves2, &opts()).unwrap().contains("<words>"));
+    }
+
+    #[test]
+    fn tekst_commandos_undo() {
+        let mut sc = Score::new(1);
+        let l = sc.add_layer("S".into(), Some(false));
+        let t = sc.layers[0].takes[0].id;
+        let ev = LayerEv { id: 1, midi: 60, start_us: 0, end_us: 500_000, channel: 0, locked: false, voice: 1, lyrics: Vec::new(), hand: None };
+        EditCommand::InsertEvents { events: vec![(l, t, ev)] }.apply(&mut sc);
+        // Liedtekst zetten, wijzigen, weghalen — met undo.
+        let inv = EditCommand::SetLyric { id: 1, number: 1, old: None, new: Some(lyric(1, "Lof", Syllabic::Begin, false)) }.apply(&mut sc).expect("inverse");
+        assert_eq!(sc.layers[0].takes[0].events[0].lyrics[0].text, "Lof");
+        inv.apply(&mut sc);
+        assert!(sc.layers[0].takes[0].events[0].lyrics.is_empty());
+        EditCommand::SetLyric { id: 1, number: 2, old: None, new: Some(lyric(2, "O", Syllabic::Single, false)) }.apply(&mut sc);
+        EditCommand::SetLyric { id: 1, number: 1, old: None, new: Some(lyric(1, "Lof", Syllabic::Single, false)) }.apply(&mut sc);
+        assert_eq!(sc.layers[0].takes[0].events[0].lyrics.iter().map(|x| x.number).collect::<Vec<_>>(), vec![1, 2]);
+        assert!(EditCommand::SetLyric { id: 99, number: 1, old: None, new: None }.apply(&mut sc).is_none());
+        // Aanwijzing toevoegen, bewerken, verwijderen — met undo.
+        let id = sc.new_text_id();
+        let mark = TextMark { id, layer_id: l, start_us: 250_000, kind: TextKind::Tempo, text: "Allegro".into(), placement: Placement::Above };
+        let inv = EditCommand::AddText { mark: mark.clone() }.apply(&mut sc).expect("inverse");
+        assert_eq!(sc.texts.len(), 1);
+        assert!(EditCommand::AddText { mark: mark.clone() }.apply(&mut sc).is_none()); // dubbel id
+        let nieuw = TextMark { text: "Presto".into(), start_us: 750_000, ..mark.clone() };
+        let inv2 = EditCommand::EditText { id, old: mark.clone(), new: nieuw.clone() }.apply(&mut sc).expect("inverse");
+        assert_eq!(sc.texts[0].text, "Presto");
+        inv2.apply(&mut sc);
+        assert_eq!(sc.texts[0].text, "Allegro");
+        inv.apply(&mut sc);
+        assert!(sc.texts.is_empty());
+        // Teksten komen mee in de balken en de MusicXML van het stuk.
+        EditCommand::AddText { mark: nieuw }.apply(&mut sc);
+        let staves = score_to_staves(&sc);
+        assert_eq!(staves[0].marks.len(), 1);
+        assert!(build_musicxml_from_score(&sc).unwrap().contains("<words>Presto</words>"));
+        // Na het laden: tellers en teksten van verdwenen balken.
+        sc.texts.push(TextMark { id: 7, layer_id: 999, start_us: 0, kind: TextKind::Free, text: "weg".into(), placement: Placement::Above });
+        sc.herleid_na_laden();
+        assert_eq!(sc.texts.len(), 1);
+        assert!(sc.new_text_id() > sc.texts[0].id);
+    }
+
+    #[test]
+    fn lyric_strofes_uit_meerdere_akkoordnoten() {
+        let mut hoog = NoteEv::anoniem(67, 0.0, 1.0); hoog.lyrics = vec![lyric(1, "Lof", Syllabic::Single, false)];
+        let mut laag = NoteEv::anoniem(60, 0.0, 1.0); laag.lyrics = vec![lyric(2, "Eer", Syllabic::Single, false)];
+        let staves = vec![Staff { name: "M".into(), notes: vec![hoog, laag], ..Default::default() }];
+        let xml = build_musicxml(&staves, &opts()).unwrap();
+        assert!(xml.contains("<lyric number=\"1\" placement=\"below\"><syllabic>single</syllabic><text>Lof</text></lyric>"), "{}", xml);
+        assert!(xml.contains("<lyric number=\"2\" placement=\"below\"><syllabic>single</syllabic><text>Eer</text></lyric>"), "{}", xml);
+        assert_eq!(xml.matches("<lyric ").count(), 2);
+    }
+
+    #[test]
+    fn balk_verwijderen_neemt_teksten_mee_en_undo_zet_terug() {
+        let mut sc = Score::new(1);
+        let a = sc.add_layer("A".into(), Some(false));
+        let b = sc.add_layer("B".into(), Some(false));
+        let ta = sc.new_text_id();
+        let tb = sc.new_text_id();
+        sc.texts.push(TextMark { id: ta, layer_id: a, start_us: 0, kind: TextKind::Tempo, text: "Adagio".into(), placement: Placement::Above });
+        sc.texts.push(TextMark { id: tb, layer_id: b, start_us: 0, kind: TextKind::Free, text: "x".into(), placement: Placement::Above });
+        let snapshot = sc.layers[0].clone();
+        let inv = EditCommand::RemoveLayer { snapshot, position: 0, texts: Vec::new() }.apply(&mut sc).unwrap();
+        assert_eq!(sc.texts.len(), 1);
+        assert_eq!(sc.texts[0].id, tb);
+        let redo = inv.apply(&mut sc).unwrap();
+        assert_eq!(sc.texts.len(), 2);
+        assert!(sc.texts.iter().any(|t| t.id == ta && t.text == "Adagio"));
+        redo.apply(&mut sc);
+        assert_eq!(sc.texts.len(), 1);
     }
 
     #[test]
@@ -2263,7 +2621,7 @@ mod tests {
         let lid = sc.add_layer("M".into(), Some(false));
         sc.beats_per_bar = 6; sc.beat_unit = 8;
         let tid = sc.layers[0].takes[0].id;
-        let ev = LayerEv { id: 1, midi: 60, start_us: 0, end_us: 500_000, channel: 0, locked: false, voice: 1, hand: None };
+        let ev = LayerEv { id: 1, midi: 60, start_us: 0, end_us: 500_000, channel: 0, locked: false, voice: 1, lyrics: Vec::new(), hand: None };
         EditCommand::InsertEvents { events: vec![(lid, tid, ev)] }.apply(&mut sc);
         let bytes = score_to_smf_bytes(&sc, &|_| None).expect("smf");
         // FF 58 04 nn dd cc bb: nn=6, dd=3 (achtste).

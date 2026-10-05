@@ -273,6 +273,155 @@
     dragConsumedClick = true;
     setTimeout(() => { dragConsumedClick = false; }, 0);
   }
+
+  // ---- Teksten (0.7.88): liedtekst typen en aanwijzingen ----
+  let lyricMode = false;       // klik een noot → typen onder die noot
+  let lyricStrofe = 1;
+  let lyricEdit = null;        // { eventId, text, orig: { text, syllabic, extend } | null }
+  let lyricVorigeKoppel = false; // de lettergreep ervóór eindigt met "-"
+  let lyricInput = null;
+  function toggleLyricMode() { lyricMode = !lyricMode; if (!lyricMode) sluitLyricEdit(false); if (lyricMode && stepMode) setStepMode(false); }
+  function setStrofe(n) { lyricStrofe = Math.max(1, Math.min(3, Number(n) || 1)); if (lyricEdit) startLyricEdit(lyricEdit.eventId); }
+  function lyricVan(ev) { return (ev?.lyrics || []).find(l => Number(l.number) === lyricStrofe) || null; }
+  function huidigeLyric(eventId) { return lyricVan(flatEvents.find(x => x.id === eventId)); }
+  // De drager van de liedtekst is de hoogste noot van het akkoord (zelfde
+  // balk, stem en inzet), zoals buurNoot hem ook kiest.
+  function akkoordDrager(eventId) {
+    const ev = flatEvents.find(x => x.id === eventId);
+    if (!ev) return eventId;
+    const zelfde = flatEvents.filter(x => x._layerId === ev._layerId && (Number(x.voice) || 1) === (Number(ev.voice) || 1) && Math.abs(x.start_us - ev.start_us) < 2);
+    return zelfde.sort((a, b) => b.midi - a.midi)[0]?.id ?? eventId;
+  }
+  async function lyricFocus() { await tick(); lyricInput?.focus(); lyricInput?.select(); }
+  function openLyricOp(eventId) {
+    const l = huidigeLyric(eventId);
+    lyricEdit = { eventId, text: l ? l.text : '', orig: l ? { text: l.text, syllabic: l.syllabic || 'single', extend: !!l.extend } : null };
+    const vl = lyricVan(buurNoot(eventId, -1));
+    lyricVorigeKoppel = !!vl && (vl.syllabic === 'begin' || vl.syllabic === 'middle');
+    selectionIds = new Set([eventId]);
+    const idx = flatEvents.findIndex(ev => ev.id === eventId);
+    if (idx >= 0) cursorIndex = idx;
+  }
+  function startLyricEdit(eventId) {
+    openLyricOp(akkoordDrager(eventId));
+    lyricFocus();
+  }
+  // Volgende/vorige noot van dezelfde balk en stem op een andere inzet.
+  function buurNoot(eventId, richting) {
+    const ev = flatEvents.find(x => x.id === eventId);
+    if (!ev) return null;
+    const zelfde = flatEvents.filter(x => x._layerId === ev._layerId && (Number(x.voice) || 1) === (Number(ev.voice) || 1));
+    const kandidaten = richting > 0 ? zelfde.filter(x => x.start_us > ev.start_us + 1) : zelfde.filter(x => x.start_us < ev.start_us - 1);
+    if (!kandidaten.length) return null;
+    const doelStart = richting > 0 ? Math.min(...kandidaten.map(x => x.start_us)) : Math.max(...kandidaten.map(x => x.start_us));
+    const opInzet = kandidaten.filter(x => Math.abs(x.start_us - doelStart) < 2);
+    return opInzet.sort((a, b) => b.midi - a.midi)[0]; // de hoogste noot van het akkoord
+  }
+  // Slaat de lettergreep van de open editor op. `koppel` = er volgt een
+  // koppelteken. Ongewijzigde tekst wordt niet opnieuw opgeslagen (anders
+  // verliest "Hal-" zijn syllabic). Daarna de score vers ophalen: buurNoot en
+  // huidigeLyric lezen flatEvents, en de gewone render komt pas na 300 ms.
+  async function commitLyric(koppel) {
+    if (!lyricEdit) return;
+    const { eventId, text, orig } = lyricEdit;
+    const leeg = !text.trim();
+    if (!koppel && orig && text.trim() === orig.text) {
+      lyricVorigeKoppel = orig.syllabic === 'begin' || orig.syllabic === 'middle';
+      return;
+    }
+    let syllabic = 'single';
+    if (koppel) syllabic = lyricVorigeKoppel ? 'middle' : 'begin';
+    else syllabic = lyricVorigeKoppel ? 'end' : 'single';
+    try {
+      if (leeg) {
+        // Lege lettergreep: melisma — de vorige noot loopt door.
+        const vorige = buurNoot(eventId, -1);
+        const vl = lyricVan(vorige);
+        if (vorige && vl && !koppel && !vl.extend) await invoke('notation_set_lyric', { scoreId, eventId: vorige.id, number: lyricStrofe, text: vl.text, syllabic: vl.syllabic || 'single', extend: true });
+        if (orig) await invoke('notation_set_lyric', { scoreId, eventId, number: lyricStrofe, text: '', syllabic: 'single', extend: false });
+      } else {
+        await invoke('notation_set_lyric', { scoreId, eventId, number: lyricStrofe, text: text.trim(), syllabic, extend: false });
+      }
+      score = await invoke('notation_get_score', { scoreId });
+      await tick();
+    } catch (e) { alert(String(e)); }
+    lyricVorigeKoppel = koppel && !leeg;
+  }
+  async function lyricNaar(richting, koppel) {
+    if (!lyricEdit) return;
+    const mijn = lyricEdit;
+    const huidig = lyricEdit.eventId;
+    // Terug op een leeg veld = alleen navigeren (geen melisma op de noot ervoor).
+    if (!(richting < 0 && !lyricEdit.text.trim())) await commitLyric(koppel);
+    if (lyricEdit !== mijn) return; // ondertussen weggeklikt of een andere noot gekozen
+    const buur = buurNoot(huidig, richting);
+    if (buur) { openLyricOp(buur.id); await lyricFocus(); }
+    else sluitLyricEdit(false);
+  }
+  async function sluitLyricEdit(bewaar) {
+    if (!lyricEdit) return;
+    const mijn = lyricEdit; // een ondertussen gestarte editor niet wegvagen
+    if (bewaar) await commitLyric(false);
+    if (lyricEdit !== mijn) return;
+    lyricEdit = null;
+    lyricVorigeKoppel = false;
+  }
+  function onLyricKey(e) {
+    e.stopPropagation();
+    if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); lyricNaar(+1, false); }
+    else if (e.key === '-' && !e.ctrlKey) { e.preventDefault(); lyricNaar(+1, true); }
+    else if (e.key === 'Backspace' && !lyricEdit.text) { e.preventDefault(); lyricNaar(-1, false); }
+    else if (e.key === 'Escape') { e.preventDefault(); sluitLyricEdit(true); }
+    else if (e.key === 'Tab') { e.preventDefault(); lyricNaar(e.shiftKey ? -1 : +1, false); }
+  }
+  // Aanwijzingen op de cursor (stapinvoer: de invoercursor; anders de cursornoot).
+  function tekstDoel() {
+    const layerId = (stepMode ? stepTargetLayerId() : (cursorEvent?._layerId ?? score?.armed_layer ?? score?.layers?.[0]?.id)) ?? null;
+    const startUs = stepMode ? Math.round(stepPosUs) : (cursorEvent ? cursorEvent.start_us : 0);
+    return { layerId, startUs };
+  }
+  async function addTextAtCursor(kind, text, placement) {
+    const { layerId, startUs } = tekstDoel();
+    if (layerId == null) return;
+    try { await invoke('notation_add_text', { scoreId, layerId, startUs, kind, text, placement }); } catch (e) { alert(String(e)); }
+  }
+  async function editTextById(id, text) {
+    try { await invoke('notation_edit_text', { scoreId, id, text }); } catch (e) { alert(String(e)); }
+  }
+  async function removeTextById(id) {
+    try { await invoke('notation_remove_text', { scoreId, id }); } catch (e) { alert(String(e)); }
+  }
+  async function moveTextById(id, tellen) {
+    const m = (score?.texts || []).find(x => x.id === id);
+    if (!m) return;
+    const telUs = (60e6 / (Number(bpm) || 90)) * (4 / (Number(beatUnit) || 4));
+    const startUs = Math.max(0, Math.round(m.start_us + tellen * telUs));
+    try { await invoke('notation_edit_text', { scoreId, id, startUs }); } catch (e) { alert(String(e)); }
+  }
+  async function vulRegistratie() {
+    try {
+      const lijst = await invoke('get_drawn_stop_names');
+      if (!Array.isArray(lijst) || !lijst.length) return tx('notation.no_stops_drawn');
+      return lijst.map(([div, stops]) => `${div}: ${stops.join(', ')}`).join(' · ');
+    } catch (e) { return ''; }
+  }
+  function focusSelect(node) { node.focus(); node.select(); }
+  function laagNaam(layerId) { return score?.layers?.find(l => l.id === layerId)?.name ?? ''; }
+  function tijdTekst(startUs) {
+    const maatUs = maatDuurUs(bpm, beatsPerBar, beatUnit);
+    const m = Math.floor(startUs / maatUs + 1e-6);
+    const telUs = maatUs / (Number(beatsPerBar) || 4);
+    const b = Math.floor((startUs - m * maatUs) / telUs + 1e-6);
+    return tx('notation.measure_beat').replace('{m}', m + 1).replace('{b}', b + 1);
+  }
+  async function setHeaderLive(titel, componist, ondertitel) {
+    if (!isLive || scoreId == null) return;
+    try {
+      await invoke('notation_set_header', { scoreId, title: titel, composer: componist, subtitle: ondertitel });
+      score = await invoke('notation_get_score', { scoreId });
+      title = score.title || '';
+    } catch (e) { alert(String(e)); }
+  }
   let alleenActieveStem = false; // andere stemmen lichtgrijs (Shift+Alt+S)
   $: selectedBoxes = noteBoxes.filter(b => selectionIds.has(b.eventId));
   // Pedaalnoten hebben geen hand (0.7.73): L/R staan uit zolang alleen
@@ -650,6 +799,7 @@
     }
     if (!best) return;
     chordTekst = '';
+    if (lyricMode) { startLyricEdit(best.eventId); return; }
     if (e.shiftKey || e.ctrlKey || e.metaKey) {
       const next = new Set(selectionIds);
       next.has(best.eventId) ? next.delete(best.eventId) : next.add(best.eventId);
@@ -963,6 +1113,7 @@
     divEditLayerId = null; groeiLaatst = 0;
     stepAcc = null; stepTie = false; caret = null; notemap = [];
     gumActief = false; contextMenu = null; chordTekst = '';
+    lyricMode = false; lyricEdit = null; lyricVorigeKoppel = false;
   }
   function werkbalkUitScore() {
     groeiLaatst = 0;
@@ -1062,6 +1213,8 @@
   async function setStepMode(on) {
     stepMode = on;
     stepHeld = new Set(); stepChord = new Set();
+    // Stapinvoer en liedtekst typen sluiten elkaar uit (reviewbevinding).
+    if (on && lyricMode) { lyricMode = false; await sluitLyricEdit(true); }
     if (on) {
       if (recording || armedWaiting) await toggleRecording(); // opname stoppen
       stepInitPos();
@@ -2036,6 +2189,7 @@
     notationClipboard = { events: evs.map(e => ({
       midi: e.midi, channel: e.channel ?? 0, hand: e.hand ?? null, voice: Number(e.voice) || 0,
       rel_start: e.start_us - minStart, dur: Math.max(1000, e.end_us - e.start_us),
+      lyrics: Array.isArray(e.lyrics) ? e.lyrics.map(l => ({ ...l })) : [],
     })) };
   }
   async function pasteClipboard() {
@@ -2058,6 +2212,7 @@
       midi: e.midi, channel: e.channel ?? 0, hand: e.hand ?? null, voice: Number(e.voice) || 0,
       start_us: Math.round(snapped + e.rel_start),
       end_us: Math.round(snapped + e.rel_start + e.dur),
+      lyrics: e.lyrics ?? [],
     }));
     try { await invoke('notation_paste', { scoreId, layerId: targetLayerId, notes }); } catch (e) { alert(String(e)); }
   }
@@ -2327,6 +2482,10 @@
     toVoice: setSelectionVoice, splitChord: splitSelectionChord, toggleOnlyActive: toggleAlleenActieveStem,
   };
   const afspeelActies = { setMetronome: setMetronomeCfg, previewTempo: () => previewTempo(), setKlavarBereik };
+  const tekstActies = {
+    setHeader: setHeaderLive, toggleLyricMode, setStrofe, addText: addTextAtCursor, editText: editTextById,
+    removeText: removeTextById, moveText: moveTextById, vulRegistratie,
+  };
   const laagActies = { arm: armLayer, rename: renameLayer, move: moveLayer, remove: removeLayer, addTake, toggleTakeVisible, addLayer, setActiveVoice };
   function bevestigKnoppen(b) {
     const lijst = [{ label: tx('actions.cancel'), stijl: 'secondary', on: () => { bevestig = null; } }];
@@ -2385,7 +2544,8 @@
           gum={gumActief} previewOn={geluidBijInvoer}
           {viewMode} {selectieAlleenPedaal} {clipboardCount} acties={invoerActies} />
       {:else if actieveTab === 'texts'}
-        <TextsMarksTab />
+        <TextsMarksTab {title} composer={score?.composer ?? ''} subtitle={score?.subtitle ?? ''} {lyricMode} strofe={lyricStrofe}
+          texts={score?.texts ?? []} {laagNaam} {tijdTekst} acties={tekstActies} />
       {:else if actieveTab === 'staves'}
         <StavesVoicesTab layers={score?.layers ?? []} {divisions} {viewMode} {klavarModel} splitOpties={SPLIT_OPTIES}
           {layerHandKeuze} {autoHandLabel} maatsoort={beatsPerBar + '/' + beatUnit} {maatsoortKeuzes} {keyFifths} {minor}
@@ -2534,6 +2694,15 @@
           <div class="step-caret" style="left:{caret.x}px; top:{caret.y}px; height:{caret.h}px;"></div>
         {/if}
       </div>
+      {#if lyricEdit}
+        <!-- Liedtekst typen (0.7.88): invoerveld onder de noot; spatie/- naar de volgende. -->
+        {@const lb = noteBoxes.find(b => b.eventId === lyricEdit.eventId && b.first) || noteBoxes.find(b => b.eventId === lyricEdit.eventId)}
+        {#if lb}
+          <input class="lyric-editor" type="text" bind:value={lyricEdit.text} bind:this={lyricInput}
+            style="left:{lb.x - 10}px; top:{lb.y + lb.h + 6}px;" use:focusSelect
+            on:keydown={onLyricKey} on:blur={() => sluitLyricEdit(true)} on:click|stopPropagation on:mousedown|stopPropagation />
+        {/if}
+      {/if}
     {/if}
   </div>
 
@@ -2606,6 +2775,10 @@
   .notation-sheet { flex: 1; overflow-y: auto; padding: 1rem 1.5rem; background: #fff; position: relative; }
   .notation-sheet.clickable { cursor: pointer; }
   .notation-sheet.gum { cursor: not-allowed; }
+  .lyric-editor {
+    position: absolute; z-index: 6; width: 6rem; font-size: 0.85rem; padding: 0.1rem 0.25rem;
+    border: 1px solid #2a6fdb; border-radius: 3px; background: #fff; color: #222;
+  }
   .osmd-host { display: block; }
   .osmd-host.verborgen { visibility: hidden; position: absolute; inset: 0; overflow: hidden; }
   .view-switch { display: inline-flex; gap: 0.15rem; }

@@ -4438,7 +4438,7 @@ pub fn notation_stop_recording(state: State<AppState>) -> Result<(), String> {
                         let end_us = end_us.max(start_us + 20_000);
                         take.events.push(crate::notation::LayerEv {
                             id: ev_id, midi: note, start_us, end_us,
-                            channel: ch, locked: false, voice: stem, hand: None,
+                            channel: ch, locked: false, voice: stem, lyrics: Vec::new(), hand: None,
                         });
                         let _ = handle.emit("jm-orgue:notation:note-added", serde_json::json!({
                             "score": sid, "layer": lid, "take": tid,
@@ -4528,6 +4528,9 @@ pub struct PasteNote {
     /// Stem (0.7.86); 0 = de actieve stem van de doelbalk.
     #[serde(default)]
     pub voice: u8,
+    /// Liedtekst (0.7.88), zodat plakken de lettergrepen niet verliest.
+    #[serde(default)]
+    pub lyrics: Vec<crate::notation::Lyric>,
 }
 
 /// Plak noten in een laag (armed take, of de eerste zichtbare take). De backend
@@ -4553,6 +4556,7 @@ pub fn notation_paste(state: State<AppState>, app: tauri::AppHandle, score_id: u
             let voice = if n.voice >= 1 { n.voice.min(4) } else { stem };
             events.push((layer_id, take_id, crate::notation::LayerEv {
                 id, midi: n.midi, start_us, end_us, channel: n.channel, locked: true, voice, hand: n.hand,
+                lyrics: n.lyrics.clone(),
             }));
         }
         let cmd = crate::notation::EditCommand::InsertEvents { events };
@@ -4841,7 +4845,7 @@ pub fn notation_remove_layer(state: State<AppState>, app: tauri::AppHandle, scor
         if sc.layers.len() <= 1 { return Err("Minstens één balk is nodig".to_string()); }
         let Some(pos) = sc.layers.iter().position(|l| l.id == layer_id) else { return Err("Balk niet gevonden".to_string()); };
         let snapshot = sc.layers[pos].clone();
-        let cmd = crate::notation::EditCommand::RemoveLayer { snapshot, position: pos };
+        let cmd = crate::notation::EditCommand::RemoveLayer { snapshot, position: pos, texts: Vec::new() };
         if let Some(inv) = cmd.apply(sc) { sc.push_undo(inv); }
         Ok(sc.generation)
     })??;
@@ -5011,6 +5015,87 @@ pub fn notation_split_chord_to_voices(state: State<AppState>, app: tauri::AppHan
     Ok(gen)
 }
 
+/// Liedtekst van één noot en strofe (0.7.88); lege tekst zonder melisma = weg.
+#[tauri::command]
+pub fn notation_set_lyric(state: State<AppState>, app: tauri::AppHandle, score_id: u32, event_id: u64, number: u8, text: Option<String>, syllabic: Option<crate::notation::Syllabic>, extend: Option<bool>) -> Result<u64, String> {
+    let number = number.clamp(1, 3);
+    let gen = with_score_mut(&state, score_id, |sc| {
+        let tekst = text.unwrap_or_default().trim().to_string();
+        let nieuw = if tekst.is_empty() && !extend.unwrap_or(false) { None } else {
+            Some(crate::notation::Lyric { number, text: tekst, syllabic: syllabic.unwrap_or_default(), extend: extend.unwrap_or(false) })
+        };
+        let cmd = crate::notation::EditCommand::SetLyric { id: event_id, number, old: None, new: nieuw };
+        if let Some(inv) = cmd.apply(sc) { sc.push_undo(inv); }
+        sc.generation
+    })?;
+    tauri::async_runtime::spawn(emit_score_changed(app, score_id, gen));
+    Ok(gen)
+}
+
+/// Aanwijzing toevoegen (0.7.88); geeft het id terug.
+#[tauri::command]
+pub fn notation_add_text(state: State<AppState>, app: tauri::AppHandle, score_id: u32, layer_id: u32, start_us: u64, kind: crate::notation::TextKind, text: String, placement: crate::notation::Placement) -> Result<u64, String> {
+    let tekst = text.trim().to_string();
+    if tekst.is_empty() { return Err("De tekst is leeg".into()); }
+    let (gen, id) = with_score_mut(&state, score_id, |sc| {
+        if !sc.layers.iter().any(|l| l.id == layer_id) { return Err("Balk niet gevonden".to_string()); }
+        let id = sc.new_text_id();
+        let mark = crate::notation::TextMark { id, layer_id, start_us, kind, text: tekst, placement };
+        let cmd = crate::notation::EditCommand::AddText { mark };
+        if let Some(inv) = cmd.apply(sc) { sc.push_undo(inv); }
+        Ok((sc.generation, id))
+    })??;
+    tauri::async_runtime::spawn(emit_score_changed(app, score_id, gen));
+    Ok(id)
+}
+
+/// Aanwijzing wijzigen (0.7.88): tekst, soort, plaats en/of tijdstip.
+#[tauri::command]
+pub fn notation_edit_text(state: State<AppState>, app: tauri::AppHandle, score_id: u32, id: u64, text: Option<String>, kind: Option<crate::notation::TextKind>, placement: Option<crate::notation::Placement>, start_us: Option<u64>) -> Result<u64, String> {
+    let gen = with_score_mut(&state, score_id, |sc| {
+        let Some(oud) = sc.texts.iter().find(|t| t.id == id).cloned() else { return Err("Aanwijzing niet gevonden".to_string()); };
+        let mut nieuw = oud.clone();
+        if let Some(t) = text { let t = t.trim().to_string(); if t.is_empty() { return Err("De tekst is leeg".to_string()); } nieuw.text = t; }
+        if let Some(k) = kind { nieuw.kind = k; }
+        if let Some(p) = placement { nieuw.placement = p; }
+        if let Some(s) = start_us { nieuw.start_us = s; }
+        let cmd = crate::notation::EditCommand::EditText { id, old: oud, new: nieuw };
+        if let Some(inv) = cmd.apply(sc) { sc.push_undo(inv); }
+        Ok(sc.generation)
+    })??;
+    tauri::async_runtime::spawn(emit_score_changed(app, score_id, gen));
+    Ok(gen)
+}
+
+/// Aanwijzing verwijderen (0.7.88), met undo.
+#[tauri::command]
+pub fn notation_remove_text(state: State<AppState>, app: tauri::AppHandle, score_id: u32, id: u64) -> Result<u64, String> {
+    let gen = with_score_mut(&state, score_id, |sc| {
+        let Some(mark) = sc.texts.iter().find(|t| t.id == id).cloned() else { return Err("Aanwijzing niet gevonden".to_string()); };
+        let cmd = crate::notation::EditCommand::RemoveText { mark };
+        if let Some(inv) = cmd.apply(sc) { sc.push_undo(inv); }
+        Ok(sc.generation)
+    })??;
+    tauri::async_runtime::spawn(emit_score_changed(app, score_id, gen));
+    Ok(gen)
+}
+
+/// Getrokken registers per divisie (0.7.88): voor de registratie-aanwijzing
+/// "Hw: Prestant 8', Octaaf 4'". Alleen divisies met getrokken registers.
+#[tauri::command]
+pub fn get_drawn_stop_names(state: State<AppState>) -> Vec<(String, Vec<String>)> {
+    let organ = state.loaded_organ_info.read();
+    let drawn = state.drawn_stops.read();
+    let mut uit: Vec<(String, Vec<String>)> = Vec::new();
+    if let Some(ref o) = *organ {
+        for d in &o.divisions {
+            let namen: Vec<String> = d.stops.iter().filter(|s| drawn.contains(&s.id)).map(|s| s.name.clone()).collect();
+            if !namen.is_empty() { uit.push((d.name.clone(), namen)); }
+        }
+    }
+    uit
+}
+
 /// Stuk sluiten (0.7.83): weg uit het geheugen; een lopende opname of
 /// stapinvoer op dít stuk stopt mee (open noten vervallen).
 #[tauri::command]
@@ -5077,7 +5162,7 @@ pub fn notation_insert_notes(state: State<AppState>, app: tauri::AppHandle, scor
             let id = sc.new_event_id();
             ids.push(id);
             events.push((layer_id, take_id, crate::notation::LayerEv {
-                id, midi: *midi, start_us, end_us: start_us + dur, channel: crate::notation::KANAAL_ONBEKEND, locked: true, voice: stem, hand: None,
+                id, midi: *midi, start_us, end_us: start_us + dur, channel: crate::notation::KANAAL_ONBEKEND, locked: true, voice: stem, lyrics: Vec::new(), hand: None,
             }));
         }
         let cmd = crate::notation::EditCommand::InsertEvents { events };
@@ -5208,7 +5293,7 @@ pub fn notation_import_midi(
                 if let Some(take) = layer.takes.iter_mut().find(|t| t.id == take_id) {
                     take.events.push(crate::notation::LayerEv {
                         id: ev_id, midi, start_us, end_us,
-                        channel: n.channel, locked: false, voice: stem, hand: None,
+                        channel: n.channel, locked: false, voice: stem, lyrics: Vec::new(), hand: None,
                     });
                 }
             }

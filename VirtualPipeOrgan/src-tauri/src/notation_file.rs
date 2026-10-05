@@ -188,7 +188,7 @@ mod tests {
         let t1 = sc.layers[0].takes[0].id;
         let t2 = sc.add_take(m).unwrap();
         let tp = sc.layers[1].takes[0].id;
-        let ev = |id: u64, midi: u8, s: u64, e: u64, ch: u8, hand: Option<KlavarHand>| LayerEv { id, midi, start_us: s, end_us: e, channel: ch, locked: false, voice: 1, hand };
+        let ev = |id: u64, midi: u8, s: u64, e: u64, ch: u8, hand: Option<KlavarHand>| LayerEv { id, midi, start_us: s, end_us: e, channel: ch, locked: false, voice: 1, lyrics: Vec::new(), hand };
         EditCommand::InsertEvents { events: vec![
             (m, t1, ev(1, 60, 0, 400_000, 0, None)),
             (m, t1, ev(2, 64, 400_000, 800_000, 0, Some(KlavarHand::Left))),
@@ -197,6 +197,10 @@ mod tests {
         ] }.apply(&mut sc);
         sc.layers[0].takes[1].visible = false;
         sc.armed_layer = Some(p);
+        // Liedtekst en een aanwijzing (0.7.88).
+        sc.layers[0].takes[0].events[0].lyrics.push(crate::notation::Lyric { number: 1, text: "Lof".into(), syllabic: crate::notation::Syllabic::Begin, extend: false });
+        let tid = sc.new_text_id();
+        sc.texts.push(crate::notation::TextMark { id: tid, layer_id: m, start_us: 0, kind: crate::notation::TextKind::Tempo, text: "Andante".into(), placement: crate::notation::Placement::Above });
         sc
     }
 
@@ -224,6 +228,9 @@ mod tests {
         assert_eq!((sc2.beats_per_bar, sc2.beat_unit, sc2.key_fifths, sc2.minor), (6, 8, -2, true));
         assert_eq!(sc2.composer, "Anoniem");
         assert_eq!(sc2.armed_layer, Some(2));
+        assert_eq!(sc2.layers[0].takes[0].events[0].lyrics[0].text, "Lof");
+        assert_eq!(sc2.texts.len(), 1);
+        assert_eq!(sc2.texts[0].text, "Andante");
         // De MusicXML van het geladen stuk is gelijk aan die van vóór het opslaan.
         let x1 = crate::notation::build_musicxml_from_score(&sc).unwrap();
         let x2 = crate::notation::build_musicxml_from_score(&sc2).unwrap();
@@ -362,7 +369,14 @@ mod tests {
         assert_eq!(sc.layers.len(), 2);
         assert_eq!(sc.layers[0].takes[0].events.len(), 2);
         assert_eq!(ui.view_mode, "staff");
+        // Een v1-bestand kent geen liedtekst en aanwijzingen (0.7.88): die
+        // velden zijn leeg na het laden, en de rest is gelijk aan het voorbeeld.
+        assert!(sc.texts.is_empty());
+        assert!(sc.layers.iter().flat_map(|l| l.takes.iter()).flat_map(|t| t.events.iter()).all(|e| e.lyrics.is_empty()));
+        let mut v1 = voorbeeld();
+        v1.texts.clear();
+        for l in &mut v1.layers { for t in &mut l.takes { for e in &mut t.events { e.lyrics.clear(); } } }
         assert_eq!(crate::notation::build_musicxml_from_score(&sc).unwrap(),
-                   crate::notation::build_musicxml_from_score(&voorbeeld()).unwrap());
+                   crate::notation::build_musicxml_from_score(&v1).unwrap());
     }
 }

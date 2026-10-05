@@ -193,6 +193,10 @@
                   {#each lay.labels as l}
                     <text class="k-label" x={l.x} y={l.y} text-anchor={l.anchor} font-size={MAAT.labelTekst}>{l.tekst}</text>
                   {/each}
+                  <!-- Aanwijzingen (0.7.88) -->
+                  {#each lay.teksten as tk}
+                    <text class="k-label k-aanwijzing" x={tk.x} y={tk.y} text-anchor={tk.anchor} font-size={MAAT.labelTekst}>{tk.tekst}</text>
+                  {/each}
                   <!-- Inspelen (0.7.72): aangehouden toetsen (grijs) en de nu-lijn -->
                   {#each openNoten(lay, effModel, openNotes) as o (o.key)}
                     <g class="k-noot k-open">
