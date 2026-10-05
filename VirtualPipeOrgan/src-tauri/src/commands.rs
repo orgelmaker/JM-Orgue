@@ -4252,9 +4252,41 @@ async fn emit_score_changed(app: tauri::AppHandle, score_id: u32, generation: u6
     }));
 }
 
-/// Nieuwe (lege) Score aanmaken; geeft de score-ID terug.
+/// Wat de wizard "Nieuw stuk" in één keer vastlegt (0.7.83). Zonder spec
+/// maakt `notation_new_score` een stuk zoals vroeger: één balk per divisie.
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct NewScoreSpec {
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub composer: String,
+    #[serde(default)]
+    pub subtitle: String,
+    #[serde(default = "vier_u8")]
+    pub beats_per_bar: u8,
+    #[serde(default = "vier_u8")]
+    pub beat_unit: u8,
+    #[serde(default)]
+    pub key_fifths: i8,
+    #[serde(default)]
+    pub minor: bool,
+    #[serde(default = "negentig")]
+    pub bpm: f64,
+    #[serde(default)]
+    pub min_measures: u32,
+    #[serde(default = "vier_u8")]
+    pub quantize: u8,
+    #[serde(default)]
+    pub layers: Vec<LayerSpecDto>,
+}
+fn vier_u8() -> u8 { 4 }
+fn negentig() -> f64 { 90.0 }
+
+/// Nieuwe (lege) Score aanmaken; geeft de score-ID terug. Met `spec` (de
+/// wizard, 0.7.83) worden kop, maatsoort, toonsoort, tempo, raster, aantal
+/// maten en balken meteen gezet.
 #[tauri::command]
-pub fn notation_new_score(state: State<AppState>, app: tauri::AppHandle) -> Result<u32, String> {
+pub fn notation_new_score(state: State<AppState>, app: tauri::AppHandle, spec: Option<NewScoreSpec>) -> Result<u32, String> {
     let id = {
         let mut next = state.notation_next_id.write();
         let id = *next;
@@ -4262,9 +4294,31 @@ pub fn notation_new_score(state: State<AppState>, app: tauri::AppHandle) -> Resu
         id
     };
     let mut sc = crate::notation::Score::new(id);
+    if let Some(spec) = spec {
+        // Een leeg titelveld blijft leeg (geen "Live opname" op het blad).
+        sc.title = spec.title.trim().to_string();
+        sc.composer = spec.composer.trim().to_string();
+        sc.subtitle = spec.subtitle.trim().to_string();
+        sc.beats_per_bar = spec.beats_per_bar.clamp(1, 12);
+        sc.beat_unit = crate::notation::klem_beat_unit(spec.beat_unit);
+        sc.key_fifths = spec.key_fifths.clamp(-7, 7);
+        sc.minor = spec.minor;
+        if spec.bpm.is_finite() && (20.0..=300.0).contains(&spec.bpm) { sc.bpm = spec.bpm; }
+        sc.min_measures = spec.min_measures.min(10_000);
+        sc.quantize = spec.quantize.clamp(1, 8);
+        for l in spec.layers {
+            let naam = if l.name.trim().is_empty() { format!("Balk {}", sc.layers.len() + 1) } else { l.name.trim().to_string() };
+            sc.add_layer(naam, Some(l.bass_clef));
+            if let Some(laag) = sc.layers.last_mut() {
+                laag.divisions = l.divisions;
+                laag.klavar_hand = l.klavar_hand;
+                laag.klavar_split = l.klavar_split;
+            }
+        }
+    }
     // Startlagen: één laag per divisie in het geladen orgel (Pedaal → bas).
     // Zonder orgel: één generieke laag.
-    {
+    if sc.layers.is_empty() {
         let organ = state.loaded_organ_info.read();
         if let Some(ref o) = *organ {
             for d in &o.divisions {
@@ -4571,7 +4625,7 @@ pub fn notation_set_hands(state: State<AppState>, app: tauri::AppHandle, score_i
 }
 
 /// Eén balk-specificatie uit de wizard van het notatievenster.
-#[derive(serde::Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize)]
 pub struct LayerSpecDto {
     pub name: String,
     pub bass_clef: bool,
@@ -4655,9 +4709,10 @@ pub fn notation_shift_events(state: State<AppState>, app: tauri::AppHandle, scor
 
 /// Maatsoort (x/4) van een live-score wijzigen — met undo, zoals bpm/toonsoort.
 #[tauri::command]
-pub fn notation_set_meter(state: State<AppState>, app: tauri::AppHandle, score_id: u32, beats_per_bar: u8) -> Result<u64, String> {
+pub fn notation_set_meter(state: State<AppState>, app: tauri::AppHandle, score_id: u32, beats_per_bar: u8, beat_unit: Option<u8>) -> Result<u64, String> {
     let gen = with_score_mut(&state, score_id, |sc| {
-        let cmd = crate::notation::EditCommand::SetMeter { old: sc.beats_per_bar, new: beats_per_bar };
+        let unit = beat_unit.unwrap_or(sc.beat_unit);
+        let cmd = crate::notation::EditCommand::SetMeter { old: (sc.beats_per_bar, sc.beat_unit), new: (beats_per_bar, unit) };
         if let Some(inv) = cmd.apply(sc) {
             sc.push_undo(inv);
         }
@@ -4694,16 +4749,126 @@ pub fn save_text_file(path: String, text: String) -> Result<(), String> {
     Ok(())
 }
 
-/// Titel van een live-score (boven de partituur + bestandsnaam-suggestie).
+/// Titel van een live-score (boven de partituur + bestandsnaam-suggestie);
+/// sinds 0.7.83 een omweg via `notation_set_header` (undo-stap).
 #[tauri::command]
 pub fn notation_set_title(state: State<AppState>, app: tauri::AppHandle, score_id: u32, title: String) -> Result<u64, String> {
+    let (composer, subtitle) = {
+        let scores = state.notation_scores.read();
+        let sc = scores.get(&score_id).ok_or_else(|| format!("Score {} niet gevonden", score_id))?;
+        (sc.composer.clone(), sc.subtitle.clone())
+    };
+    notation_set_header(state, app, score_id, title, composer, subtitle)
+}
+
+/// Kop van het stuk (0.7.83): titel, componist, ondertitel — één undo-stap.
+#[tauri::command]
+pub fn notation_set_header(state: State<AppState>, app: tauri::AppHandle, score_id: u32, title: String, composer: String, subtitle: String) -> Result<u64, String> {
     let gen = with_score_mut(&state, score_id, |sc| {
-        sc.title = title;
-        sc.bump_gen();
+        let cmd = crate::notation::EditCommand::SetHeader {
+            old: (sc.title.clone(), sc.composer.clone(), sc.subtitle.clone()),
+            new: (title.trim().to_string(), composer.trim().to_string(), subtitle.trim().to_string()),
+        };
+        if let Some(inv) = cmd.apply(sc) { sc.push_undo(inv); }
         sc.generation
     })?;
     tauri::async_runtime::spawn(emit_score_changed(app, score_id, gen));
     Ok(gen)
+}
+
+/// Raster van een live-score (0.7.83, wizard "Stuk…"): rastereenheden per
+/// kwart (1, 2, 4, 8). Geen undo-stap, wel een nieuwe generation.
+#[tauri::command]
+pub fn notation_set_quantize(state: State<AppState>, app: tauri::AppHandle, score_id: u32, quantize: u8) -> Result<u64, String> {
+    let gen = with_score_mut(&state, score_id, |sc| {
+        let q = quantize.clamp(1, 8);
+        if sc.quantize != q { sc.quantize = q; sc.bump_gen(); }
+        sc.generation
+    })?;
+    tauri::async_runtime::spawn(emit_score_changed(app, score_id, gen));
+    Ok(gen)
+}
+
+/// Minimaal aantal maten op het blad (0.7.83). Geen undo-stap: de UI roept
+/// dit aan zodra de invoercursor voorbij de laatste maat komt, en de wizard.
+#[tauri::command]
+pub fn notation_set_min_measures(state: State<AppState>, app: tauri::AppHandle, score_id: u32, min_measures: u32) -> Result<u64, String> {
+    let gen = with_score_mut(&state, score_id, |sc| {
+        let n = min_measures.min(10_000);
+        if sc.min_measures != n { sc.min_measures = n; sc.bump_gen(); }
+        sc.generation
+    })?;
+    tauri::async_runtime::spawn(emit_score_changed(app, score_id, gen));
+    Ok(gen)
+}
+
+/// Balk hernoemen (0.7.83), met undo.
+#[tauri::command]
+pub fn notation_rename_layer(state: State<AppState>, app: tauri::AppHandle, score_id: u32, layer_id: u32, name: String) -> Result<u64, String> {
+    if name.trim().is_empty() { return Err("De naam van een balk mag niet leeg zijn".into()); }
+    let gen = with_score_mut(&state, score_id, |sc| {
+        let old = sc.layers.iter().find(|l| l.id == layer_id).map(|l| l.name.clone()).unwrap_or_default();
+        let cmd = crate::notation::EditCommand::SetLayerName { layer: layer_id, old, new: name };
+        if let Some(inv) = cmd.apply(sc) { sc.push_undo(inv); }
+        sc.generation
+    })?;
+    tauri::async_runtime::spawn(emit_score_changed(app, score_id, gen));
+    Ok(gen)
+}
+
+/// Balk verwijderen (0.7.83) via de bestaande `EditCommand::RemoveLayer`:
+/// undo zet de balk met al zijn takes terug. De laatste balk blijft staan.
+#[tauri::command]
+pub fn notation_remove_layer(state: State<AppState>, app: tauri::AppHandle, score_id: u32, layer_id: u32) -> Result<u64, String> {
+    // Tijdens een opname houdt de MIDI-thread open noten vast op (laag, take);
+    // een verdwenen laag zou die noten stil laten vallen. De UI stopt de
+    // opname eerst; dit is het vangnet.
+    if *state.notation_armed_score.read() == Some(score_id) {
+        return Err("Stop eerst de opname voordat u een balk verwijdert".into());
+    }
+    let gen = with_score_mut(&state, score_id, |sc| {
+        if sc.layers.len() <= 1 { return Err("Minstens één balk is nodig".to_string()); }
+        let Some(pos) = sc.layers.iter().position(|l| l.id == layer_id) else { return Err("Balk niet gevonden".to_string()); };
+        let snapshot = sc.layers[pos].clone();
+        let cmd = crate::notation::EditCommand::RemoveLayer { snapshot, position: pos };
+        if let Some(inv) = cmd.apply(sc) { sc.push_undo(inv); }
+        Ok(sc.generation)
+    })??;
+    tauri::async_runtime::spawn(emit_score_changed(app, score_id, gen));
+    Ok(gen)
+}
+
+/// Balk omhoog/omlaag in de volgorde (0.7.83): `delta` −1 of +1, met undo.
+#[tauri::command]
+pub fn notation_move_layer(state: State<AppState>, app: tauri::AppHandle, score_id: u32, layer_id: u32, delta: i32) -> Result<u64, String> {
+    let gen = with_score_mut(&state, score_id, |sc| {
+        let Some(from) = sc.layers.iter().position(|l| l.id == layer_id) else { return Err("Balk niet gevonden".to_string()); };
+        let to = (from as i64 + delta as i64).clamp(0, sc.layers.len() as i64 - 1) as usize;
+        let cmd = crate::notation::EditCommand::MoveLayer { from, to };
+        if let Some(inv) = cmd.apply(sc) { sc.push_undo(inv); }
+        Ok(sc.generation)
+    })??;
+    tauri::async_runtime::spawn(emit_score_changed(app, score_id, gen));
+    Ok(gen)
+}
+
+/// Stuk sluiten (0.7.83): weg uit het geheugen; een lopende opname of
+/// stapinvoer op dít stuk stopt mee (open noten vervallen).
+#[tauri::command]
+pub fn notation_close_score(state: State<AppState>, score_id: u32) -> Result<(), String> {
+    {
+        let mut armed = state.notation_armed_score.write();
+        if *armed == Some(score_id) {
+            *armed = None;
+            state.notation_open_notes.write().retain(|(sid, ..), _| *sid != score_id);
+        }
+    }
+    {
+        let mut step = state.notation_step_input.write();
+        if *step == Some(score_id) { *step = None; }
+    }
+    let verwijderd = state.notation_scores.write().remove(&score_id).is_some();
+    if verwijderd { Ok(()) } else { Err(format!("Score {} niet gevonden", score_id)) }
 }
 
 /// "Opslaan als MIDI…": exporteer de zichtbare takes als .mid-bestand.

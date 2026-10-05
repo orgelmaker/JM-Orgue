@@ -282,7 +282,7 @@ pub fn key_root(key_fifths: i8, minor: bool) -> u8 {
 /// Het klavar-model uit het gedeelde gekwantiseerde model. `handen` is de
 /// toewijzing per balkindex (uit `assign_hands` over ALLE balken), `legend`
 /// de legenda over alle lagen.
-pub fn klavar_model(qs: &QuantizedScore, handen: &[(KlavarHand, Option<u8>)], legend: Vec<KlavarLegend>, title: &str, generation: Option<u64>, key_fifths: i8, minor: bool) -> KlavarModel {
+pub fn klavar_model(qs: &QuantizedScore, handen: &[(KlavarHand, Option<u8>)], legend: Vec<KlavarLegend>, title: &str, generation: Option<u64>, key_fifths: i8, minor: bool, min_measures: u64) -> KlavarModel {
     let mut manual: Vec<KlavarNote> = Vec::new();
     let mut pedal: Vec<KlavarNote> = Vec::new();
     for st in &qs.staves {
@@ -312,11 +312,15 @@ pub fn klavar_model(qs: &QuantizedScore, handen: &[(KlavarHand, Option<u8>)], le
     let alle_pedaal: Vec<usize> = (0..pedal.len()).collect();
     stop_en_stippen(&mut pedal, &alle_pedaal, speling, qs.measure_len);
 
-    // Balken per tel en manuaallabels (0.7.72).
+    // Balken per tel en manuaallabels (0.7.72). De tel volgt de maatsoort
+    // (0.7.83): bij /4 een kwart, bij /2 een halve, en bij samengestelde
+    // achtstenmaten (6/8, 9/8, 12/8) een gepunteerde kwart — drie achtsten
+    // onder één balk, zoals het notenschrift ze ook groepeert.
+    let tel = beam_tel(qs);
     let mut balk_teller = 0u32;
-    balkgroepen(&mut manual, &rechts, qs.q, &mut balk_teller);
-    balkgroepen(&mut manual, &links, qs.q, &mut balk_teller);
-    balkgroepen(&mut pedal, &alle_pedaal, qs.q, &mut balk_teller);
+    balkgroepen(&mut manual, &rechts, tel, &mut balk_teller);
+    balkgroepen(&mut manual, &links, tel, &mut balk_teller);
+    balkgroepen(&mut pedal, &alle_pedaal, tel, &mut balk_teller);
     // legend[i] hoort bij balk i (legenda() loopt over de balken in volgorde).
     let manuaalbalken: Vec<(usize, &KlavarLegend)> = legend.iter().enumerate().filter(|(_, l)| l.hand != KlavarHand::Pedal).collect();
     if manuaalbalken.len() > 1 {
@@ -326,7 +330,8 @@ pub fn klavar_model(qs: &QuantizedScore, handen: &[(KlavarHand, Option<u8>)], le
     }
 
     let langste = manual.iter().chain(pedal.iter()).map(|n| n.end).max().unwrap_or(0);
-    let num_measures = if qs.measure_len == 0 { 1 } else { ((langste + qs.measure_len - 1) / qs.measure_len).max(1) };
+    // Minstens het gevraagde aantal maten (0.7.83), net als het notenschrift.
+    let num_measures = if qs.measure_len == 0 { 1 } else { ((langste + qs.measure_len - 1) / qs.measure_len).max(min_measures).max(1) };
 
     let heeft_pedaal = legend.iter().any(|l| l.hand == KlavarHand::Pedal) || !pedal.is_empty();
     let (mmin, mmax) = bereik_manuaal(&manual);
@@ -355,15 +360,23 @@ fn legenda(staves: &[Staff], handen: &[(KlavarHand, Option<u8>)]) -> Vec<KlavarL
     }).collect()
 }
 
+/// Tel voor de waardestrepen in rastereenheden (0.7.83): maatlengte gedeeld
+/// door het aantal tellen, en bij samengestelde achtstenmaten (tellen
+/// deelbaar door drie) drie achtsten.
+fn beam_tel(qs: &QuantizedScore) -> u64 {
+    crate::notation::beam_tel(qs.measure_len, qs.beats_per_bar, qs.beat_unit)
+}
+
 /// Klavar-model uit balken (bestandsmodus en live). Een partituur zonder
-/// noten geeft een leeg model (één maat), geen fout: het venster toont dan
-/// de lege balk waarop de noten tijdens het opnemen verschijnen.
+/// noten geeft een leeg model (één maat, of `min_measures` maten), geen fout:
+/// het venster toont dan de lege balk waarop de noten tijdens het opnemen
+/// verschijnen.
 pub fn klavar_model_from_staves(staves: &[Staff], opts: &NotationOptions, generation: Option<u64>) -> KlavarModel {
     let handen = assign_hands(staves);
     let legend = legenda(staves, &handen);
     let qs = quantize_score(staves, opts);
     let title = opts.title.clone().unwrap_or_default();
-    klavar_model(&qs, &handen, legend, &title, generation, opts.key_fifths, opts.minor.unwrap_or(false))
+    klavar_model(&qs, &handen, legend, &title, generation, opts.key_fifths, opts.minor.unwrap_or(false), opts.min_measures.unwrap_or(0) as u64)
 }
 
 /// Klavar-model uit een live Score.
@@ -378,7 +391,7 @@ mod tests {
     use crate::notation::{LayerEv, NoteEv};
 
     fn opts(beats: u8, q: u8) -> NotationOptions {
-        NotationOptions { bpm: 60.0, beats_per_bar: beats, quantize: q, key_fifths: 0, title: Some("T".into()), staves: None, tolerance_pct: Some(100), minor: None }
+        NotationOptions { bpm: 60.0, beats_per_bar: beats, quantize: q, key_fifths: 0, title: Some("T".into()), staves: None, tolerance_pct: Some(100), minor: None, beat_unit: None, min_measures: None, composer: None, subtitle: None }
     }
 
     /// Balk met noten (midi, start s, eind s); bij 60 bpm en q=4 is één
@@ -483,7 +496,7 @@ mod tests {
     fn speling_heeft_tijdsvloer() {
         // 120 bpm, q=8: een eenheid is 62,5 ms; legato-overlap van 160 ms mag
         // geen stip en geen stopteken geven.
-        let o = NotationOptions { bpm: 120.0, beats_per_bar: 4, quantize: 8, key_fifths: 0, title: None, staves: None, tolerance_pct: Some(100), minor: None };
+        let o = NotationOptions { bpm: 120.0, beats_per_bar: 4, quantize: 8, key_fifths: 0, title: None, staves: None, tolerance_pct: Some(100), minor: None, beat_unit: None, min_measures: None, composer: None, subtitle: None };
         let m = klavar_model_from_staves(&[balk("HW", false, Some(KlavarHand::Right), &[(60, 0.0, 1.16), (62, 1.0, 2.0)])], &o, None);
         let n = noot(&m.manual, 60, 0);
         assert!(n.dots.is_empty());
@@ -654,6 +667,40 @@ mod tests {
         assert_eq!(v["legend"][1]["hand"], serde_json::json!("pedal"));
         assert_eq!(v["manual"]["notes"][0]["layer_id"], serde_json::json!(sc.layers[0].id));
         assert_eq!(v["key_root"], serde_json::json!(0));
+    }
+
+    #[test]
+    fn min_measures_ook_in_klavar() {
+        let mut o = opts(4, 4);
+        o.min_measures = Some(8);
+        let m = klavar_model_from_staves(&[balk("M", false, None, &[])], &o, None);
+        assert_eq!(m.num_measures, 8);
+        // Inhoud langer dan het minimum wint.
+        o.min_measures = Some(2);
+        let m = klavar_model_from_staves(&[balk("M", false, None, &[(60, 0.0, 9.0)])], &o, None);
+        assert_eq!(m.num_measures, 3);
+    }
+
+    #[test]
+    fn waardestrepen_per_drie_in_zes_acht() {
+        // 6/8 bij q=2: zes achtsten (elk één eenheid) → twee balken van drie.
+        let mut o = opts(6, 2);
+        o.beat_unit = Some(8);
+        let noten: Vec<(u8, f64, f64)> = (0..6).map(|i| (60 + i as u8, i as f64 * 0.5, i as f64 * 0.5 + 0.5)).collect();
+        let m = klavar_model_from_staves(&[balk("M", false, Some(KlavarHand::Right), &noten)], &o, None);
+        let b = |i: u64| noot(&m.manual, 60 + i as u8, i).beam;
+        assert!(b(0).is_some());
+        assert_eq!(b(0), b(1)); assert_eq!(b(1), b(2));
+        assert_eq!(b(3), b(4)); assert_eq!(b(4), b(5));
+        assert_ne!(b(2), b(3));
+        // 3/2 bij q=4: vier achtsten (elk twee eenheden) in één halve tel → één balk.
+        let mut o = opts(3, 4);
+        o.beat_unit = Some(2);
+        let noten: Vec<(u8, f64, f64)> = (0..4).map(|i| (60 + i as u8, i as f64 * 0.5, i as f64 * 0.5 + 0.5)).collect();
+        let m = klavar_model_from_staves(&[balk("M", false, Some(KlavarHand::Right), &noten)], &o, None);
+        let b = |i: u64| noot(&m.manual, 60 + i as u8, i * 2).beam;
+        assert!(b(0).is_some());
+        assert_eq!(b(0), b(3));
     }
 
     #[test]

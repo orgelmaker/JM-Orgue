@@ -5,6 +5,30 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.83] - 2026-10-05
+
+### Nieuw stuk, maatsoorten en een leesbaarder blad
+- Met **Nieuw…** (Ctrl+N) begint u een nieuw stuk: titel, componist,
+  ondertitel, maatsoort (nu ook 6/8, 2/2 en 3/2), toonsoort, tempo, raster
+  en het aantal maten waarmee u start; de maten groeien vanzelf mee zodra de
+  invoercursor voorbij de laatste maat komt. Dezelfde wizard verschijnt bij
+  het openen van het notatievenster; met **Stuk…** past u het lopende stuk
+  aan.
+- Een leeg stuk toont lege notenbalken met hele-maatrusten, zodat u meteen
+  noten kunt plaatsen; ook lege balken staan op het blad.
+- Balken kunt u hernoemen (dubbelklik op de naam), verplaatsen (▲▼) en
+  verwijderen (✕, met bevestiging als er noten op staan) — alles met
+  Ongedaan maken. "+ Balk" vraagt niet meer om een naam.
+- Achtsten en zestienden krijgen waardestrepen, de manualen een accolade, de
+  componist en de ondertitel staan op het blad en een lege maat is één
+  hele-maatrust, in elke maatsoort. In klavar volgen de telstrepen én de
+  waardestrepen de maatsoort (bij 6/8 drie achtsten onder één balk), en ook
+  daar staan de gevraagde maten alvast op het blad.
+- De metronoom en de tempotest tikken per tel van de maatsoort: bij 6/8 een
+  achtste, bij 2/2 een halve.
+- MIDI-export schrijft de maatsoort met de juiste noemer; MusicXML-fixtures
+  bewust herschreven (accolade, hele-maatrusten, lege balken).
+
 ## [0.7.82] - 2026-10-05
 
 ### Akkoorden kloppen nu

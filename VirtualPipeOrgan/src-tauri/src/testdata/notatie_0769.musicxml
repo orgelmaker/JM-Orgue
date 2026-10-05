@@ -3,8 +3,10 @@
 <score-partwise version="3.1">
   <work><work-title>Fixture 0.7.69</work-title></work>
   <part-list>
+    <part-group type="start" number="1"><group-symbol>brace</group-symbol><group-barline>yes</group-barline></part-group>
     <score-part id="P1"><part-name>Hoofdwerk</part-name></score-part>
     <score-part id="P2"><part-name>Zwelwerk</part-name></score-part>
+    <part-group type="stop" number="1"/>
     <score-part id="P3"><part-name>Pedaal</part-name></score-part>
   </part-list>
   <part id="P1">
@@ -16,9 +18,9 @@
         <clef><sign>G</sign><line>2</line></clef>
       </attributes>
       <direction placement="above"><direction-type><metronome><beat-unit>quarter</beat-unit><per-minute>60</per-minute></metronome></direction-type><sound tempo="60"/></direction>
-      <note><pitch><step>C</step><octave>4</octave></pitch><duration>2</duration><tie type="start"/><voice>1</voice><type>eighth</type><notations><tied type="start"/></notations></note>
+      <note><pitch><step>C</step><octave>4</octave></pitch><duration>2</duration><tie type="start"/><voice>1</voice><type>eighth</type><beam number="1">begin</beam><notations><tied type="start"/></notations></note>
       <note><chord/><pitch><step>E</step><octave>4</octave></pitch><duration>2</duration><tie type="start"/><voice>1</voice><type>eighth</type><notations><tied type="start"/></notations></note>
-      <note><pitch><step>C</step><octave>4</octave></pitch><duration>2</duration><tie type="stop"/><voice>1</voice><type>eighth</type><notations><tied type="stop"/></notations></note>
+      <note><pitch><step>C</step><octave>4</octave></pitch><duration>2</duration><tie type="stop"/><voice>1</voice><type>eighth</type><beam number="1">end</beam><notations><tied type="stop"/></notations></note>
       <note><chord/><pitch><step>E</step><octave>4</octave></pitch><duration>2</duration><tie type="stop"/><voice>1</voice><type>eighth</type><notations><tied type="stop"/></notations></note>
       <note><chord/><pitch><step>G</step><octave>4</octave></pitch><duration>2</duration><tie type="start"/><voice>1</voice><type>eighth</type><notations><tied type="start"/></notations></note>
       <note><pitch><step>G</step><octave>4</octave></pitch><duration>2</duration><tie type="stop"/><voice>1</voice><type>eighth</type><notations><tied type="stop"/></notations></note>
@@ -47,8 +49,8 @@
       </attributes>
       <direction placement="above"><direction-type><metronome><beat-unit>quarter</beat-unit><per-minute>60</per-minute></metronome></direction-type><sound tempo="60"/></direction>
       <note><rest/><duration>4</duration><voice>1</voice><type>quarter</type></note>
-      <note><pitch><step>C</step><octave>5</octave></pitch><duration>3</duration><voice>1</voice><type>eighth</type><dot/></note>
-      <note><pitch><step>B</step><alter>-1</alter><octave>4</octave></pitch><duration>1</duration><voice>1</voice><type>16th</type></note>
+      <note><pitch><step>C</step><octave>5</octave></pitch><duration>3</duration><voice>1</voice><type>eighth</type><dot/><beam number="1">begin</beam></note>
+      <note><pitch><step>B</step><alter>-1</alter><octave>4</octave></pitch><duration>1</duration><voice>1</voice><type>16th</type><beam number="1">end</beam></note>
       <note><pitch><step>A</step><alter>-1</alter><octave>4</octave></pitch><duration>4</duration><tie type="start"/><voice>1</voice><type>quarter</type><notations><tied type="start"/></notations></note>
     </measure>
     <measure number="2">
@@ -56,7 +58,7 @@
       <note><rest/><duration>8</duration><voice>1</voice><type>half</type></note>
     </measure>
     <measure number="3">
-      <note><rest/><duration>12</duration><voice>1</voice><type>half</type><dot/></note>
+      <note><rest measure="yes"/><duration>12</duration><voice>1</voice></note>
     </measure>
   </part>
   <part id="P3">

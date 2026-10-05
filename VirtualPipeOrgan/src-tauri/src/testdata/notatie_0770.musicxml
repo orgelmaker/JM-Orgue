@@ -3,8 +3,11 @@
 <score-partwise version="3.1">
   <work><work-title>A &amp; B &lt;C&gt;</work-title></work>
   <part-list>
+    <part-group type="start" number="1"><group-symbol>brace</group-symbol><group-barline>yes</group-barline></part-group>
     <score-part id="P1"><part-name>Hoofdwerk &amp; Positief</part-name></score-part>
-    <score-part id="P2"><part-name>Pedaal</part-name></score-part>
+    <score-part id="P2"><part-name>Leeg</part-name></score-part>
+    <part-group type="stop" number="1"/>
+    <score-part id="P3"><part-name>Pedaal</part-name></score-part>
   </part-list>
   <part id="P1">
     <measure number="1">
@@ -48,6 +51,30 @@
         <divisions>4</divisions>
         <key><fifths>3</fifths></key>
         <time><beats>3</beats><beat-type>4</beat-type></time>
+        <clef><sign>G</sign><line>2</line></clef>
+      </attributes>
+      <direction placement="above"><direction-type><metronome><beat-unit>quarter</beat-unit><per-minute>73</per-minute></metronome></direction-type><sound tempo="73"/></direction>
+      <note><rest measure="yes"/><duration>12</duration><voice>1</voice></note>
+    </measure>
+    <measure number="2">
+      <note><rest measure="yes"/><duration>12</duration><voice>1</voice></note>
+    </measure>
+    <measure number="3">
+      <note><rest measure="yes"/><duration>12</duration><voice>1</voice></note>
+    </measure>
+    <measure number="4">
+      <note><rest measure="yes"/><duration>12</duration><voice>1</voice></note>
+    </measure>
+    <measure number="5">
+      <note><rest measure="yes"/><duration>12</duration><voice>1</voice></note>
+    </measure>
+  </part>
+  <part id="P3">
+    <measure number="1">
+      <attributes>
+        <divisions>4</divisions>
+        <key><fifths>3</fifths></key>
+        <time><beats>3</beats><beat-type>4</beat-type></time>
         <clef><sign>F</sign><line>4</line></clef>
       </attributes>
       <direction placement="above"><direction-type><metronome><beat-unit>quarter</beat-unit><per-minute>73</per-minute></metronome></direction-type><sound tempo="73"/></direction>
@@ -60,13 +87,13 @@
       <note><rest/><duration>1</duration><voice>1</voice><type>16th</type></note>
     </measure>
     <measure number="3">
-      <note><rest/><duration>12</duration><voice>1</voice><type>half</type><dot/></note>
+      <note><rest measure="yes"/><duration>12</duration><voice>1</voice></note>
     </measure>
     <measure number="4">
-      <note><rest/><duration>12</duration><voice>1</voice><type>half</type><dot/></note>
+      <note><rest measure="yes"/><duration>12</duration><voice>1</voice></note>
     </measure>
     <measure number="5">
-      <note><rest/><duration>12</duration><voice>1</voice><type>half</type><dot/></note>
+      <note><rest measure="yes"/><duration>12</duration><voice>1</voice></note>
     </measure>
   </part>
 </score-partwise>

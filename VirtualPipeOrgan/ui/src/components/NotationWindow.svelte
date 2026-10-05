@@ -15,6 +15,8 @@
   import { invoke } from '@tauri-apps/api/core';
   import { OpenSheetMusicDisplay } from 'opensheetmusicdisplay';
   import KlavarSheet from './KlavarSheet.svelte';
+  import NewScoreWizard from './NewScoreWizard.svelte';
+  import { MAATSOORTEN, splitsMaatsoort, maatDuurUs } from '../lib/notatieKeuzes.js';
   import { t, tx } from '../lib/i18n.js';
   import { pasSfeerToeAlsGewijzigd } from '../lib/sfeer.js';
 
@@ -31,6 +33,9 @@
   let converting = false;
   let error = null;
   let xml = null;
+  // Rendertijd van OSMD (0.7.83): in de console, en in de statusregel met ?debug.
+  let renderMs = 0, renderMaten = 0;
+  const debugVlag = typeof location !== 'undefined' && /[?&]debug/.test(location.search);
   let lastGeneration = 0; // laatste gerenderde generation (dedup)
 
   // Weergave (0.7.71): notenschrift (OSMD) of klavar (eigen SVG, KlavarSheet).
@@ -210,6 +215,7 @@
   // File-modus opties (blijven werken zoals in 0.7.0)
   let bpm = 90;
   let beatsPerBar = 4;
+  let beatUnit = 4;      // noemer van de maatsoort (0.7.83)
   let quantize = 4;
   let keyFifths = 0;
   let minor = false;   // toongeslacht (0.7.72): ruit i.p.v. cirkel in klavar, <mode> in MusicXML
@@ -289,7 +295,8 @@
   function metroSchedulerTick() {
     if (!metroAudioCtx) return;
     const ctx = metroAudioCtx;
-    const beatDur = 60 / (Number(bpm) || 90);
+    // Tik per tel van de maatsoort (0.7.83): bij /8 een achtste, bij /2 een halve.
+    const beatDur = (60 / (Number(bpm) || 90)) * (4 / (Number(score?.beat_unit) || Number(beatUnit) || 4));
     const beatsPer = Number(score?.beats_per_bar) || Number(beatsPerBar) || 4;
     while (metroNextTime < ctx.currentTime + METRO_LOOKAHEAD) {
       const downbeat = (metroBeat % beatsPer) === 0;
@@ -324,12 +331,13 @@
   }
   // BPM-voorbeeld: laat één maat tikken zonder op te nemen, zodat de speler het
   // tempo hoort. Loopt niet door en raakt de opname niet.
-  function previewTempo() {
+  function previewTempo(bpmKeuze = null, tellenKeuze = null, noemerKeuze = null) {
     if (recording || armedWaiting) return;
     ensureMetroCtx();
     const ctx = metroAudioCtx;
-    const beatDur = 60 / (Number(bpm) || 90);
-    const beatsPer = Number(score?.beats_per_bar) || Number(beatsPerBar) || 4;
+    const noemer = Number(noemerKeuze) || Number(score?.beat_unit) || Number(beatUnit) || 4;
+    const beatDur = (60 / (Number(bpmKeuze ?? bpm) || 90)) * (4 / noemer);
+    const beatsPer = Number(tellenKeuze) || Number(score?.beats_per_bar) || Number(beatsPerBar) || 4;
     let t = ctx.currentTime + 0.08;
     for (let i = 0; i < beatsPer; i++) {
       scheduleClick(t, i === 0);
@@ -384,6 +392,8 @@
       if (isLive) {
         // Alleen tijdens live-modus: score verversen + MusicXML ophalen.
         score = await invoke('notation_get_score', { scoreId });
+        // Maatsoort in de werkbalk volgt de score (ook na undo/redo).
+        beatsPerBar = score.beats_per_bar || 4; beatUnit = score.beat_unit || 4;
         if (viewMode === 'klavar') {
           if (score.generation === lastKlavarGeneration && klavarModel) return;
           lastKlavarGeneration = score.generation;
@@ -424,10 +434,21 @@
         osmd = new OpenSheetMusicDisplay(osmdHost, {
           autoResize: true, backend: 'svg', drawTitle: true,
         });
+        // Lege maten blijven losse maten (geen "7" als meermaatsrust): daar
+        // moet je noten in kunnen plaatsen. De waardestrepen schrijft de
+        // MusicXML zelf, per tel van de maatsoort (OSMD's autoBeam kent 6/8
+        // niet).
+        try { osmd.EngravingRules.RenderMultipleRestMeasures = false; } catch (e) {}
       }
       if (xml) {
-        await osmd.load(xml);
+        const t0 = performance.now();
+        // Tweede argument = terugvaltitel; zonder titel géén "Untitled Score".
+        await osmd.load(xml, '');
         osmd.render();
+        renderMs = Math.round(performance.now() - t0);
+        const parts = (xml.match(/<part id=/g) || []).length || 1;
+        renderMaten = Math.round((xml.match(/<measure /g) || []).length / parts);
+        console.debug(`[notatie] OSMD load+render ${renderMs} ms, ${renderMaten} maten, ${parts} balken`);
         if (isLive) { buildNoteBoxes(); scrollNaarNieuwsteNoot(); }
       }
       error = null;
@@ -447,12 +468,11 @@
     if (!f || !(f > 0)) return null;
     return Math.round(69 + 12 * Math.log2(f / 440));
   }
-  // Lagen in dezelfde volgorde als build_musicxml de parts nummert: elke laag
-  // met minstens één noot in een zichtbare take, op laag-volgorde. OSMD-balkindex
-  // s hoort bij partLayers[s].
+  // Lagen in dezelfde volgorde als render_musicxml de parts nummert: sinds
+  // 0.7.83 álle lagen (een lege laag is een part met hele-maatrusten), dus
+  // OSMD-balkindex s hoort bij score.layers[s].
   function nonEmptyPartLayers() {
-    return (score?.layers ?? []).filter(l =>
-      l.takes.some(t => t.visible && t.events.length > 0));
+    return score?.layers ?? [];
   }
   function buildNoteBoxes() {
     noteBoxes = [];
@@ -599,51 +619,111 @@
   function removeStaff(staffIdx) { staffConfig = staffConfig.filter((_, i) => i !== staffIdx); scheduleRender(); }
   function setStaffBass(staffIdx, v) { staffConfig[staffIdx].bass = v; staffConfig = staffConfig; scheduleRender(); }
 
-  // ---- Wizard: balkindeling + divisie-routering (0.7.14) ----
-  // Bij het openen van het live-venster: kies aantal balken, naam, sleutel en
-  // welke divisies tijdens het inspelen naar welke balk routeren. Zolang de
-  // partituur leeg is kan de indeling volledig vervangen worden; daarna zijn
-  // alleen de divisie-chips per balk nog aanpasbaar (LayerBar).
-  let wizard = null; // { staves: [{name, bass, divisions: []}] } of null
+  // ---- Wizard "Nieuw stuk" (0.7.83; balkindeling sinds 0.7.14) ----
+  // mode 'new': bij het openen van het venster en via Nieuw (Ctrl+N) — het
+  // oude stuk gaat dicht en er komt een vers stuk met kop, maatsoort,
+  // toonsoort, tempo, raster, aantal maten en balken. mode 'edit' (knop
+  // Stuk…): dezelfde velden op het lopende stuk; de balkindeling alleen
+  // zolang er geen noten zijn (daarna via de LayerBar).
+  let wizard = null;         // { mode: 'new'|'edit', initial } of null
   let divEditLayerId = null; // LayerBar: balk waarvan de divisie-chips openstaan
+  let bevestig = null;       // eigen bevestigingsvraag { tekst, ok } (window.confirm werkt niet in Tauri)
 
-  function openWizardFromScore() {
-    wizard = {
-      staves: (score?.layers ?? []).map(l => ({
-        name: l.name,
-        bass: l.bass_clef === true || (l.bass_clef == null && isPedalName(l.name)),
-        divisions: [...(l.divisions || [])],
-        hand: layerHandKeuze(l),
-        split: l.klavar_split ?? 60,
-      })),
+  function wizardStaves() {
+    const st = (score?.layers ?? []).map(l => ({
+      name: l.name,
+      bass: l.bass_clef === true || (l.bass_clef == null && isPedalName(l.name)),
+      divisions: [...(l.divisions || [])],
+      hand: layerHandKeuze(l),
+      split: l.klavar_split ?? 60,
+    }));
+    return st.length ? st : [{ name: tx('notation.staff_n').replace('{n}', 1), bass: false, divisions: [], hand: 'auto', split: 60 }];
+  }
+  function wizardInitial(mode) {
+    return {
+      title: mode === 'new' ? '' : (score?.title ?? ''),
+      composer: score?.composer ?? '', subtitle: score?.subtitle ?? '',
+      beats: Number(score?.beats_per_bar) || 4, unit: Number(score?.beat_unit) || 4,
+      keyFifths: Number(score?.key_fifths) || 0, minor: !!score?.minor,
+      bpm: Number(score?.bpm) || 90, quantize: Number(score?.quantize) || 4,
+      minMeasures: mode === 'new' ? 8 : (Number(score?.min_measures) || 0),
+      staves: wizardStaves(),
     };
-    if (wizard.staves.length === 0) wizard.staves = [{ name: tx('notation.staff_n').replace('{n}', 1), bass: false, divisions: [], hand: 'auto', split: 60 }];
   }
-  function wizardAddStaff() {
-    wizard.staves = [...wizard.staves, { name: tx('notation.staff_n').replace('{n}', wizard.staves.length + 1), bass: false, divisions: [], hand: 'auto', split: 60 }];
+  function openWizardFromScore() { wizard = { mode: 'edit', initial: wizardInitial('edit') }; }
+  function openNewWizard() {
+    if (!isLive || wizard || bevestig) return;
+    if (scoreHasEvents) {
+      bevestig = { tekst: tx('notation.new_confirm'), ok: () => { wizard = { mode: 'new', initial: wizardInitial('new') }; } };
+      return;
+    }
+    wizard = { mode: 'new', initial: wizardInitial('new') };
   }
-  function wizardRemoveStaff(i) {
-    wizard.staves = wizard.staves.filter((_, idx) => idx !== i);
+  function laagSpecs(staves) {
+    return staves.map(s => {
+      const [hand, split] = handVoorKeuze(s.hand, s.split);
+      return { name: s.name || tx('notation.staff'), bass_clef: !!s.bass, divisions: s.divisions, klavar_hand: hand, klavar_split: split };
+    });
   }
-  function wizardToggleDivision(i, div) {
-    const st = wizard.staves[i];
-    st.divisions = st.divisions.includes(div) ? st.divisions.filter(d => d !== div) : [...st.divisions, div];
-    wizard.staves = wizard.staves;
+  // Alle venster-eigen toestand terug naar nul na een nieuw stuk.
+  function resetLokaleState() {
+    selectionIds = new Set(); cursorIndex = 0; noteBoxes = []; xml = null; klavarModel = null;
+    lastGeneration = 0; lastKlavarGeneration = 0; error = null;
+    notationClipboard = { events: [] };
+    stepPosUs = 0; stepHeld = new Set(); stepChord = new Set(); stepChordDivisie = new Map();
+    stepLastIds = []; stepLastChordNotes = []; stepLastPos = null; stepLastUndoCount = 0; stepLastGroepen = null;
+    divEditLayerId = null; renameLayerId = null; groeiLaatst = 0;
   }
-  async function wizardApply() {
-    if (!wizard || wizard.staves.length === 0) return;
+  function werkbalkUitScore() {
+    groeiLaatst = 0;
+    syncMetronomeFromScore();
+    beatsPerBar = score.beats_per_bar || 4; beatUnit = score.beat_unit || 4;
+    bpm = score.bpm || 90; keyFifths = score.key_fifths || 0; minor = !!score.minor; title = score.title || '';
+    if (score.tolerance_pct != null) tolerancePct = score.tolerance_pct;
+  }
+  async function onWizardApply(e) {
+    const { stuk, staves } = e.detail;
+    if (!wizard) return;
+    const mode = wizard.mode;
     try {
-      await invoke('notation_configure_layers', {
-        scoreId,
-        layers: wizard.staves.map(s => {
-          const [hand, split] = handVoorKeuze(s.hand, s.split);
-          return { name: s.name || tx('notation.staff'), bass_clef: !!s.bass, divisions: s.divisions, klavar_hand: hand, klavar_split: split };
-        }),
-      });
-      score = await invoke('notation_get_score', { scoreId });
+      if (mode === 'new') {
+        if (recording || armedWaiting) await toggleRecording();
+        if (stepMode) await setStepMode(false);
+        if (playingScore) await togglePlayScore();
+        const oud = scoreId;
+        const spec = {
+          title: stuk.title, composer: stuk.composer, subtitle: stuk.subtitle,
+          beats_per_bar: stuk.beats, beat_unit: stuk.unit, key_fifths: stuk.keyFifths, minor: !!stuk.minor,
+          bpm: stuk.bpm, min_measures: stuk.minMeasures, quantize: stuk.quantize, layers: laagSpecs(staves),
+        };
+        scoreId = await invoke('notation_new_score', { spec });
+        if (oud != null) { try { await invoke('notation_close_score', { scoreId: oud }); } catch (e2) {} }
+        resetLokaleState();
+        score = await invoke('notation_get_score', { scoreId });
+      } else {
+        // Lopend stuk: kop, maatsoort, toonsoort, tempo, raster, maten; de
+        // balken alleen zolang het stuk leeg is.
+        const sc = score;
+        if (stuk.title !== sc.title || stuk.composer !== (sc.composer ?? '') || stuk.subtitle !== (sc.subtitle ?? ''))
+          await invoke('notation_set_header', { scoreId, title: stuk.title, composer: stuk.composer, subtitle: stuk.subtitle });
+        if (stuk.beats !== sc.beats_per_bar || stuk.unit !== (sc.beat_unit ?? 4))
+          await invoke('notation_set_meter', { scoreId, beatsPerBar: stuk.beats, beatUnit: stuk.unit });
+        if (stuk.keyFifths !== sc.key_fifths) await invoke('notation_set_key', { scoreId, keyFifths: stuk.keyFifths });
+        if (!!stuk.minor !== !!sc.minor) await invoke('notation_set_mode', { scoreId, minor: !!stuk.minor });
+        if (stuk.bpm !== sc.bpm) await invoke('notation_set_bpm', { scoreId, bpm: stuk.bpm });
+        if (stuk.quantize !== sc.quantize) await invoke('notation_set_quantize', { scoreId, quantize: stuk.quantize });
+        if (stuk.minMeasures !== (sc.min_measures ?? 0)) await invoke('notation_set_min_measures', { scoreId, minMeasures: stuk.minMeasures });
+        // Balken alleen herbouwen als de indeling echt veranderde: herbouwen
+        // geeft nieuwe laag-ID's en zet de armed balk terug op de eerste.
+        const nieuweIndeling = JSON.stringify(laagSpecs(staves));
+        if (!scoreHasEvents && nieuweIndeling !== JSON.stringify(laagSpecs(wizardStaves())))
+          await invoke('notation_configure_layers', { scoreId, layers: laagSpecs(staves) });
+        score = await invoke('notation_get_score', { scoreId });
+      }
+      werkbalkUitScore();
       wizard = null;
       scheduleRender();
-    } catch (e) { alert(String(e)); }
+    } catch (e2) { alert(String(e2)); }
   }
   $: scoreHasEvents = (score?.layers ?? []).some(l => l.takes.some(t => t.events.length > 0));
   async function setLayerDivisions(layerId, divs) {
@@ -730,10 +810,35 @@
         if (!opts.behoudGroepen) stepLastGroepen = null;
       }
       stepLastMidi = notes[notes.length - 1];
+      groeiMatenNaarCursor();
     } catch (e) {
       if (vers) stepPosUs = at; // mislukt → cursor terug
       alert(String(e));
     }
+  }
+  // Maten groeien mee met de invoercursor (0.7.83): staat hij voorbij de
+  // laatste maat, dan vraagt het venster er één bij (geen undo-stap).
+  let groeiBezig = false, groeiNogEens = false, groeiLaatst = 0;
+  async function groeiMatenNaarCursor() {
+    if (!isLive || scoreId == null || !score) return;
+    // Een verzoek dat binnenkomt terwijl er een loopt wordt niet weggegooid
+    // maar na afloop opnieuw bekeken (toetsherhaling op de rust-toets).
+    if (groeiBezig) { groeiNogEens = true; return; }
+    groeiBezig = true;
+    try {
+      do {
+        groeiNogEens = false;
+        const maatUs = maatDuurUs(bpm, beatsPerBar, beatUnit);
+        const inhoud = flatEvents.length ? Math.ceil(Math.max(...flatEvents.map(e => e.end_us)) / maatUs) : 0;
+        const huidig = Math.max(Number(score?.min_measures) || 0, inhoud, groeiLaatst, 1);
+        const nodig = Math.floor(stepPosUs / maatUs + 1e-6) + 1;
+        if (nodig > huidig) {
+          groeiLaatst = nodig;
+          await invoke('notation_set_min_measures', { scoreId, minMeasures: nodig });
+        }
+      } while (groeiNogEens);
+    } catch (e) {}
+    finally { groeiBezig = false; }
   }
 
   // ---- Klavar (0.7.71): events uit KlavarSheet, handen per balk en per noot ----
@@ -847,7 +952,7 @@
     if (stepLastGroepen) stepPlaatsGroepen(stepLastGroepen);
     else if (stepLastChordNotes.length) stepInsert([...stepLastChordNotes]);
   }
-  function stepRest() { if (stepMode) stepPosUs += stepDurUs; }
+  function stepRest() { if (stepMode) { stepPosUs += stepDurUs; groeiMatenNaarCursor(); } }
   // Letter-invoer (A–G): dichtstbijzijnde toonhoogte bij de vorige noot.
   const LETTER_PC = { c: 0, d: 2, e: 4, f: 5, g: 7, a: 9, b: 11 };
   function nearestMidiForLetter(letter) {
@@ -942,10 +1047,11 @@
       score = await invoke('notation_get_score', { scoreId });
       syncMetronomeFromScore();
       beatsPerBar = score.beats_per_bar || 4;
+      beatUnit = score.beat_unit || 4;
       minor = !!score.minor;
       title = score.title || '';
       await loadDivisions();      // divisienamen voor wizard + LayerBar-chips
-      openWizardFromScore();      // balkindeling kiezen vóór het inspelen
+      wizard = { mode: 'new', initial: wizardInitial('new') }; // nieuw stuk kiezen vóór het inspelen
       lastGeneration = 0;
       // Event-listeners voor live updates + edit-emits.
       const { listen } = await import('@tauri-apps/api/event');
@@ -1027,12 +1133,46 @@
   }
   async function addLayer() {
     try {
-      const name = window.prompt(tx('notation.new_staff_prompt'), tx('notation.staff_n').replace('{n}', (score?.layers?.length ?? 0) + 1));
-      if (!name) return;
+      // Geen window.prompt (werkt niet in Tauri): "Balk n", daarna hernoemen
+      // met een dubbelklik op de naam (0.7.83).
+      const name = tx('notation.staff_n').replace('{n}', (score?.layers?.length ?? 0) + 1);
       await invoke('notation_add_layer', { scoreId, name, bassClef: null });
       score = await invoke('notation_get_score', { scoreId });
       scheduleRender();
     } catch (e) { error = String(e); }
+  }
+  // Balk hernoemen (dubbelklik), verplaatsen (▲▼) en verwijderen (✕) — 0.7.83.
+  let renameLayerId = null;
+  function focusSelect(node) { node.focus(); node.select(); }
+  async function commitRename(layerId, naam) {
+    if (renameLayerId !== layerId) return;
+    renameLayerId = null;
+    const n = (naam || '').trim();
+    const laag = score?.layers?.find(l => l.id === layerId);
+    if (!n || !laag || n === laag.name) return;
+    try {
+      await invoke('notation_rename_layer', { scoreId, layerId, name: n });
+      score = await invoke('notation_get_score', { scoreId });
+    } catch (e) { alert(String(e)); }
+  }
+  async function moveLayer(layerId, delta) {
+    try {
+      await invoke('notation_move_layer', { scoreId, layerId, delta });
+      score = await invoke('notation_get_score', { scoreId });
+    } catch (e) { alert(String(e)); }
+  }
+  async function removeLayerNow(layerId) {
+    try {
+      // Open noten van een opname hangen aan (laag, take): opname eerst stoppen.
+      if (recording || armedWaiting) await toggleRecording();
+      await invoke('notation_remove_layer', { scoreId, layerId });
+      score = await invoke('notation_get_score', { scoreId });
+    } catch (e) { alert(String(e)); }
+  }
+  function removeLayer(layer) {
+    const heeftNoten = layer.takes.some(t => t.events.length > 0);
+    if (!heeftNoten) { removeLayerNow(layer.id); return; }
+    bevestig = { tekst: tx('notation.remove_staff_confirm').replace('{name}', layer.name), ok: () => removeLayerNow(layer.id) };
   }
   async function addTake(layerId) {
     try {
@@ -1264,10 +1404,12 @@
   }
 
   // ---- Maatsoort + titel + MIDI-export (0.7.16) ----
+  $: maatsoortKeuzes = MAATSOORTEN.includes(beatsPerBar + '/' + beatUnit) ? MAATSOORTEN : [...MAATSOORTEN, beatsPerBar + '/' + beatUnit];
   async function setMeterLive(v) {
     if (!isLive || scoreId == null) return;
-    beatsPerBar = Number(v) || 4;
-    try { await invoke('notation_set_meter', { scoreId, beatsPerBar }); } catch (e) {}
+    const [b, u] = splitsMaatsoort(v);
+    beatsPerBar = b; beatUnit = u;
+    try { await invoke('notation_set_meter', { scoreId, beatsPerBar: b, beatUnit: u }); } catch (e) {}
   }
   async function setTitleLive(v) {
     if (!isLive || scoreId == null) return;
@@ -1354,6 +1496,13 @@
 
   function handleKey(e) {
     if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT')) return;
+    // Modaal open: alleen Escape (sluiten), verder geen sneltoetsen op de partituur.
+    if (wizard || bevestig) {
+      if (e.key === 'Escape') { wizard = null; bevestig = null; e.preventDefault(); }
+      return;
+    }
+    // Nieuw stuk (0.7.83), in beide standen.
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'n') { openNewWizard(); e.preventDefault(); return; }
     // K wisselt de weergave (0.7.73), in beide standen.
     if ((e.key === 'k' || e.key === 'K') && !e.ctrlKey && !e.altKey && !e.metaKey) {
       setViewMode(viewMode === 'klavar' ? 'staff' : 'klavar');
@@ -1521,55 +1670,23 @@
 
 <div class="notation-window">
   {#if isLive && wizard}
-    <!-- Wizard: balkindeling + divisie-routering, vóór het inspelen. -->
-    <div class="wizard-overlay">
-      <div class="wizard-modal">
-        <h3>{$t('notation.wizard_title')}</h3>
-        <p class="wizard-hint">{$t('notation.wizard_hint')}</p>
-        {#each wizard.staves as st, i}
-          <div class="wizard-staff">
-            <input class="wizard-staff-name" type="text" bind:value={st.name} title={$t('notation.staff_name_title')} />
-            <select bind:value={st.bass} title={$t('notation.clef')}>
-              <option value={false}>𝄞 {$t('notation.clef_treble')}</option>
-              <option value={true}>𝄢 {$t('notation.clef_bass')}</option>
-            </select>
-            {#if viewMode === 'klavar'}
-              <select class="layer-hand" bind:value={st.hand} title={$t('notation.hand_title')}>
-                <option value="auto">{$t('notation.hand')}: {$t('notation.hand_auto')}</option>
-                <option value="right">{$t('notation.hand_right')}</option>
-                <option value="left">{$t('notation.hand_left')}</option>
-                <option value="pedal">{$t('notation.hand_pedal')}</option>
-                <option value="rl">{$t('notation.hand_split')}</option>
-              </select>
-              {#if st.hand === 'rl'}
-                <select class="layer-split" bind:value={st.split} title={$t('notation.hand_split_title')}>
-                  {#each SPLIT_OPTIES as [m, naam]}<option value={m}>{naam}</option>{/each}
-                </select>
-              {/if}
-            {/if}
-            <span class="wizard-divs">
-              {#each divisions as div}
-                <label class="wizard-div">
-                  <input type="checkbox" checked={st.divisions.includes(div)} on:change={() => wizardToggleDivision(i, div)} />
-                  {div}
-                </label>
-              {/each}
-              {#if divisions.length === 0}<span class="wizard-hint">{$t('notation.no_organ_routing_later')}</span>{/if}
-            </span>
-            {#if wizard.staves.length > 1}
-              <button class="wizard-remove" on:click={() => wizardRemoveStaff(i)} title={$t('notation.remove_staff')} aria-label={$t('notation.remove_staff')}>×</button>
-            {/if}
-          </div>
-        {/each}
+    <!-- {#key}: elke opening een verse instantie, ook als `wizard` wordt vervangen. -->
+    {#key wizard}
+      <NewScoreWizard mode={wizard.mode} initial={wizard.initial} {divisions} hasNotes={scoreHasEvents}
+        showHand={viewMode === 'klavar'} splitOpties={SPLIT_OPTIES} {keyChoices} {gridChoices}
+        on:apply={onWizardApply} on:close={() => wizard = null}
+        on:previewTempo={(e) => previewTempo(e.detail.bpm, e.detail.beats, e.detail.unit)} />
+    {/key}
+  {/if}
+  {#if bevestig}
+    <!-- Eigen bevestigingsvraag: window.confirm geeft in Tauri een Promise. -->
+    <div class="wizard-overlay" role="dialog" aria-modal="true">
+      <div class="wizard-modal bevestig-modal">
+        <p>{bevestig.tekst}</p>
         <div class="wizard-actions">
-          <button class="btn btn-ghost btn-sm" on:click={wizardAddStaff}>{$t('notation.add_staff')}</button>
           <span class="notation-spacer"></span>
-          {#if scoreHasEvents}
-            <span class="wizard-hint">{$t('notation.wizard_has_notes')}</span>
-            <button class="btn btn-secondary btn-sm" on:click={() => wizard = null}>{$t('actions.close')}</button>
-          {:else}
-            <button class="btn btn-primary btn-sm" on:click={wizardApply}>{$t('notation.wizard_start')}</button>
-          {/if}
+          <button class="btn btn-secondary btn-sm" on:click={() => bevestig = null}>{$t('actions.cancel')}</button>
+          <button class="btn btn-primary btn-sm" on:click={() => { const ok = bevestig.ok; bevestig = null; ok(); }}>{$t('notation.confirm_continue')}</button>
         </div>
       </div>
     </div>
@@ -1599,7 +1716,7 @@
       <label>{$t('notation.tempo')}
         <input type="number" min="20" max="300" value={bpm} on:change={(e) => setBpmLive(e.currentTarget.value)} />
       </label>
-      <button class="btn btn-ghost btn-sm" on:click={previewTempo} title={$t('notation.tempo_test_title')}>♪ {$t('notation.tempo_test')}</button>
+      <button class="btn btn-ghost btn-sm" on:click={() => previewTempo()} title={$t('notation.tempo_test_title')}>♪ {$t('notation.tempo_test')}</button>
       <label class="metro-toggle" title={$t('notation.metronome_title')}>
         <input type="checkbox" checked={metroOn} on:change={(e) => setMetronomeCfg(e.currentTarget.checked, countInBeats)} />
         {$t('notation.metronome')}
@@ -1642,9 +1759,8 @@
         </select>
       </label>
       <label>{$t('notation.meter')}
-        <select value={beatsPerBar} on:change={(e) => setMeterLive(e.currentTarget.value)}>
-          <option value={2}>2/4</option><option value={3}>3/4</option>
-          <option value={4}>4/4</option><option value={6}>6/4</option>
+        <select value={beatsPerBar + '/' + beatUnit} on:change={(e) => setMeterLive(e.currentTarget.value)}>
+          {#each maatsoortKeuzes as m}<option value={m}>{m}</option>{/each}
         </select>
       </label>
       <label class="notation-title-field">{$t('notation.title')}
@@ -1691,6 +1807,7 @@
           </select>
         </label>
       {/if}
+      <button class="btn btn-ghost btn-sm" on:click={openNewWizard} title={$t('notation.new_title')}>{$t('notation.new')}</button>
       <button class="btn btn-ghost btn-sm" on:click={openMidiFile} title={$t('notation.open_import_title')}>{$t('notation.open')}</button>
       <button class="btn btn-ghost btn-sm" on:click={saveMidiAs} title={$t('notation.save_as_midi_title')}>{$t('notation.save_as_midi')}</button>
       <button class="btn btn-primary btn-sm" on:click={printScore} disabled={viewMode === 'klavar' ? !(klavarModel && scoreHasEvents) : !xml}>{$t('notation.print_pdf')}</button>
@@ -1756,7 +1873,7 @@
     <!-- LayerBar: per laag armed-bol + naam + Take-vinkjes + "+ Take". -->
     <div class="notation-layers">
       <span class="notation-staves-label">{$t('notation.staves_label')}</span>
-      {#each score.layers as layer}
+      {#each score.layers as layer, i (layer.id)}
         <div class="notation-layer">
           <button
             class="layer-arm"
@@ -1764,7 +1881,18 @@
             on:click={() => armLayer(layer.id)}
             title={score.armed_layer === layer.id ? $t('notation.layer_armed_title') : $t('notation.layer_arm_title')}
           >●</button>
-          <span class="layer-name">{layer.name}</span>
+          {#if renameLayerId === layer.id}
+            <input class="layer-rename" type="text" value={layer.name} use:focusSelect
+              on:keydown={(e) => { if (e.key === 'Enter') commitRename(layer.id, e.currentTarget.value); else if (e.key === 'Escape') renameLayerId = null; }}
+              on:blur={(e) => commitRename(layer.id, e.currentTarget.value)} />
+          {:else}
+            <span class="layer-name" on:dblclick={() => renameLayerId = layer.id} title={$t('notation.rename_staff_title')}>{layer.name}</span>
+          {/if}
+          <span class="layer-tools">
+            <button class="layer-tool" on:click={() => moveLayer(layer.id, -1)} disabled={i === 0} title={$t('notation.move_up')}>▲</button>
+            <button class="layer-tool" on:click={() => moveLayer(layer.id, +1)} disabled={i === score.layers.length - 1} title={$t('notation.move_down')}>▼</button>
+            <button class="layer-tool layer-tool-remove" on:click={() => removeLayer(layer)} disabled={score.layers.length <= 1} title={$t('notation.remove_staff')}>✕</button>
+          </span>
           <span class="layer-takes">
             {#each layer.takes as take}
               <label class="take-chip" title={$t('notation.take_visible_title')}>
@@ -1835,6 +1963,7 @@
       {:else}
         <span class="cursor-empty">{$t('notation.empty_score')}</span>
       {/if}
+      {#if debugVlag}<span class="render-ms">OSMD {renderMs} ms · {renderMaten} m.</span>{/if}
     </div>
   {/if}
 
@@ -2051,6 +2180,19 @@
   .wizard-div { display: flex; align-items: center; gap: 0.25rem; font-size: 0.8rem; white-space: nowrap; cursor: pointer; }
   .wizard-remove { margin-left: auto; border: none; background: none; color: #cc6666; font-size: 1.1rem; cursor: pointer; }
   .wizard-actions { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.6rem; }
+  .layer-tools { display: inline-flex; gap: 0.1rem; }
+  .layer-tool {
+    border: none; background: transparent; color: var(--text-muted, #aaa);
+    font-size: 0.7rem; padding: 0 0.2rem; cursor: pointer; line-height: 1.4;
+  }
+  .layer-tool:hover:not(:disabled) { color: var(--text, #eee); }
+  .layer-tool:disabled { opacity: 0.3; cursor: default; }
+  .layer-tool-remove:hover:not(:disabled) { color: #ff7070; }
+  .layer-rename { width: 8rem; font-size: 0.78rem; }
+  .layer-name { cursor: text; }
+  .bevestig-modal { max-width: 28rem; }
+  .bevestig-modal p { margin: 0.2rem 0 0.6rem; font-size: 0.9rem; }
+  .render-ms { margin-left: auto; font-size: 0.72rem; opacity: 0.7; }
   .layer-divs {
     border: 1px dashed var(--text-muted, #666); border-radius: 5px;
     background: transparent; color: var(--text-muted, #bbb);

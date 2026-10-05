@@ -174,7 +174,8 @@ export function layoutSystem(model, sys, opts = {}) {
   for (let i = 0; i < sys.bars; i++) {
     const eerste = sys.bar0 + i === 0;
     for (let b = 0; b < beats; b++) {
-      const t = i * measureLen + b * q;
+      // Telstreep per tel van de maatsoort (0.7.83: bij 6/8 per achtste).
+      const t = i * measureLen + b * (measureLen / beats);
       const y = yg(t);
       if (eerste) {
         lay.telnummers.push({ x: MAAT.randLinks - MAAT.stokLengte * w - 1.2, y: y + MAAT.tekst * 0.4, tekst: String(b + 1) });

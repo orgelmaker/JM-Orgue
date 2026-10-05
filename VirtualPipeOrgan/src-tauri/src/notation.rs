@@ -50,6 +50,18 @@ pub struct NotationOptions {
     /// en `<mode>minor</mode>` in de MusicXML. None = majeur.
     #[serde(default)]
     pub minor: Option<bool>,
+    /// Noemer van de maatsoort (0.7.83): 2, 4 of 8. None = 4.
+    #[serde(default)]
+    pub beat_unit: Option<u8>,
+    /// Minimaal aantal maten op het blad (0.7.83); None/0 = alleen de inhoud.
+    #[serde(default)]
+    pub min_measures: Option<u32>,
+    /// Componist (`<creator type="composer">`) en ondertitel
+    /// (`<movement-title>`) op het blad (0.7.83).
+    #[serde(default)]
+    pub composer: Option<String>,
+    #[serde(default)]
+    pub subtitle: Option<String>,
 }
 
 /// Door de gebruiker samengestelde notenbalk (notatievenster → backend).
@@ -477,24 +489,53 @@ pub struct QuantizedStaff {
 pub struct QuantizedScore {
     pub q: u64,
     pub beats_per_bar: u64,
+    /// Noemer van de maatsoort: 2, 4 of 8 (0.7.83).
+    pub beat_unit: u64,
     pub measure_len: u64,
     pub bpm: f64,
-    /// Alleen balken met noten, in balkvolgorde (de UI leunt daarop voor de
-    /// OSMD-klikcorrelatie: part n = n-de niet-lege balk).
+    /// Alle balken in balkvolgorde, ook lege (sinds 0.7.83: een lege balk
+    /// wordt een part met hele-maatrusten; de UI koppelt OSMD-balk n aan laag n).
     pub staves: Vec<QuantizedStaff>,
 }
 
-/// Kwantiseer alle balken. Een partituur zonder noten geeft een leeg model;
-/// het notenschrift maakt daar een fout van (`render_musicxml`), klavar een
-/// lege balk.
+/// Noemer van de maatsoort geklemd op 2, 4 of 8 (0.7.83).
+pub fn klem_beat_unit(unit: u8) -> u8 {
+    match unit { 2 => 2, 8 => 8, _ => 4 }
+}
+
+/// Raster (eenheden per kwart) en maatlengte in rastereenheden voor een
+/// maatsoort (0.7.83): `measure_len = beats × (q × 4 / beat_unit)`. Bij /8 is
+/// het raster minstens een achtste (q ≥ 2), anders past een tel niet op het
+/// raster; de UI biedt bij /8 ook geen kwart aan.
+pub fn raster_en_maatlengte(quantize: u8, beats_per_bar: u8, beat_unit: u8) -> (u64, u64) {
+    let unit = klem_beat_unit(beat_unit) as u64;
+    let mut q = quantize.clamp(1, 8) as u64;
+    if unit == 8 && q < 2 { q = 2; }
+    let beats = beats_per_bar.clamp(1, 12) as u64;
+    (q, beats * (q * 4 / unit))
+}
+
+/// Tel voor de waardestrepen in rastereenheden (0.7.83): de maatlengte
+/// gedeeld door het aantal tellen — bij /4 een kwart, bij /2 een halve — en
+/// bij samengestelde achtstenmaten (6/8, 9/8, 12/8: tellen deelbaar door
+/// drie) drie achtsten. Gedeeld door het notenschrift en klavar.
+pub fn beam_tel(measure_len: u64, beats: u64, beat_unit: u64) -> u64 {
+    let beats = beats.max(1);
+    let tel = (measure_len / beats).max(1);
+    if beat_unit == 8 && beats % 3 == 0 { tel * 3 } else { tel }
+}
+
+/// Kwantiseer alle balken, ook lege (0.7.83: een leeg stuk toont lege
+/// notenbalken). Zonder balken geeft het notenschrift een fout
+/// (`render_musicxml`), klavar een lege balk.
 pub fn quantize_score(staves: &[Staff], opts: &NotationOptions) -> QuantizedScore {
-    let q = opts.quantize.clamp(1, 8) as u64;
+    let beat_unit = klem_beat_unit(opts.beat_unit.unwrap_or(4)) as u64;
+    let (q, measure_len) = raster_en_maatlengte(opts.quantize, opts.beats_per_bar, beat_unit as u8);
     let beats = opts.beats_per_bar.clamp(1, 12) as u64;
     let bpm = if opts.bpm.is_finite() && opts.bpm >= 20.0 && opts.bpm <= 300.0 { opts.bpm } else { 90.0 };
     let tolerance = opts.tolerance_pct.unwrap_or(100);
     let venster = akkoord_venster_sec(bpm, q, tolerance);
     let qstaves: Vec<QuantizedStaff> = staves.iter().enumerate()
-        .filter(|(_, st)| !st.notes.is_empty())
         .map(|(i, st)| {
             // Akkoordclustering vóór het raster (0.7.82), ook voor klavar.
             let mut noten = st.notes.clone();
@@ -502,11 +543,11 @@ pub fn quantize_score(staves: &[Staff], opts: &NotationOptions) -> QuantizedScor
             QuantizedStaff {
                 staff_index: i, name: st.name.clone(), layer_id: st.layer_id, pedal: st.pedal,
                 bass_clef: st.bass_clef, hand: st.hand, split_midi: st.split_midi,
-                notes: quantize_notes(&noten, bpm, opts.quantize.clamp(1, 8), tolerance),
+                notes: quantize_notes(&noten, bpm, q as u8, tolerance),
             }
         })
         .collect();
-    QuantizedScore { q, beats_per_bar: beats, measure_len: beats * q, bpm, staves: qstaves }
+    QuantizedScore { q, beats_per_bar: beats, beat_unit, measure_len, bpm, staves: qstaves }
 }
 
 /// Bouw een partwise MusicXML-document uit de (per balk toegewezen) noten.
@@ -527,31 +568,71 @@ pub fn render_musicxml(qs: &QuantizedScore, opts: &NotationOptions) -> Result<St
         .map(|st| (st, group_chords(&st.notes)))
         .collect();
     if quantized.is_empty() {
-        return Err("Geen noten gevonden in de opname".into());
+        return Err("Geen notenbalken in de partituur".into());
     }
 
-    // Totale lengte: langste balk, afgerond op hele maten.
+    // Totale lengte: langste balk, afgerond op hele maten; minstens het
+    // gevraagde aantal maten (0.7.83: een leeg stuk toont lege balken).
     let total = quantized.iter()
         .flat_map(|(_, cs)| cs.last().map(|c| c.end))
         .max().unwrap_or(0);
-    let num_measures = ((total + measure_len - 1) / measure_len).max(1);
+    let min_measures = opts.min_measures.unwrap_or(0) as u64;
+    let num_measures = ((total + measure_len - 1) / measure_len).max(min_measures).max(1);
+
+    let schoon = |v: &Option<String>| v.as_deref().map(str::trim).filter(|t| !t.is_empty()).map(str::to_string);
+    let title = schoon(&opts.title);
+    let subtitle = schoon(&opts.subtitle);
+    let composer = schoon(&opts.composer);
 
     let mut xml = String::with_capacity(64 * 1024);
     xml.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
     xml.push_str("<!DOCTYPE score-partwise PUBLIC \"-//Recordare//DTD MusicXML 3.1 Partwise//EN\" \"http://www.musicxml.org/dtds/partwise.dtd\">\n");
     xml.push_str("<score-partwise version=\"3.1\">\n");
-    if let Some(t) = &opts.title {
-        if !t.trim().is_empty() {
-            xml.push_str(&format!("  <work><work-title>{}</work-title></work>\n", xml_escape(t)));
-        }
+    if let Some(t) = &title {
+        xml.push_str(&format!("  <work><work-title>{}</work-title></work>\n", xml_escape(t)));
+    }
+    // Ondertitel als movement-title: lezers (OSMD, MuseScore, Finale) zetten
+    // die onder de werktitel.
+    if let Some(st) = &subtitle {
+        xml.push_str(&format!("  <movement-title>{}</movement-title>\n", xml_escape(st)));
+    }
+    if let Some(c) = &composer {
+        xml.push_str(&format!("  <identification><creator type=\"composer\">{}</creator></identification>\n", xml_escape(c)));
     }
     xml.push_str("  <part-list>\n");
-    for (idx, (staff, _)) in quantized.iter().enumerate() {
+    // Accolade om aaneengesloten manuaalbalken (minstens twee); de pedaalbalk
+    // staat los — het orgelsjabloon van Finale (0.7.83).
+    let is_ped: Vec<bool> = quantized.iter().map(|(st, _)| st.pedal || is_pedal_name(&st.name)).collect();
+    let score_part = |xml: &mut String, idx: usize| {
         xml.push_str(&format!(
             "    <score-part id=\"P{}\"><part-name>{}</part-name></score-part>\n",
-            idx + 1, xml_escape(&staff.name)));
+            idx + 1, xml_escape(&quantized[idx].0.name)));
+    };
+    let mut groep = 0u32;
+    let mut i = 0usize;
+    while i < quantized.len() {
+        if is_ped[i] {
+            score_part(&mut xml, i);
+            i += 1;
+            continue;
+        }
+        let mut j = i;
+        while j < quantized.len() && !is_ped[j] { j += 1; }
+        if j - i >= 2 {
+            groep += 1;
+            xml.push_str(&format!("    <part-group type=\"start\" number=\"{}\"><group-symbol>brace</group-symbol><group-barline>yes</group-barline></part-group>\n", groep));
+            for k in i..j { score_part(&mut xml, k); }
+            xml.push_str(&format!("    <part-group type=\"stop\" number=\"{}\"/>\n", groep));
+        } else {
+            score_part(&mut xml, i);
+        }
+        i = j;
     }
     xml.push_str("  </part-list>\n");
+
+    /// Eén geschreven noot, akkoord of rust binnen een maat (0.7.83), met per
+    /// noot (midi, tie_stop, tie_start).
+    struct MaatItem { pos: u64, len: u64, type_name: &'static str, dotted: bool, hele_maat: bool, notes: Vec<(u8, bool, bool)> }
 
     for (idx, (staff, chords)) in quantized.iter().enumerate() {
         xml.push_str(&format!("  <part id=\"P{}\">\n", idx + 1));
@@ -579,7 +660,7 @@ pub fn render_musicxml(qs: &QuantizedScore, opts: &NotationOptions) -> Result<St
                 } else {
                     xml.push_str(&format!("        <key><fifths>{}</fifths></key>\n", opts.key_fifths.clamp(-7, 7)));
                 }
-                xml.push_str(&format!("        <time><beats>{}</beats><beat-type>4</beat-type></time>\n", beats));
+                xml.push_str(&format!("        <time><beats>{}</beats><beat-type>{}</beat-type></time>\n", beats, qs.beat_unit));
                 if staff.bass_clef {
                     xml.push_str("        <clef><sign>F</sign><line>4</line></clef>\n");
                 } else {
@@ -589,6 +670,9 @@ pub fn render_musicxml(qs: &QuantizedScore, opts: &NotationOptions) -> Result<St
                 xml.push_str(&format!("      <direction placement=\"above\"><direction-type><metronome><beat-unit>quarter</beat-unit><per-minute>{}</per-minute></metronome></direction-type><sound tempo=\"{}\"/></direction>\n", bpm.round() as u64, bpm.round() as u64));
             }
 
+            // Eerst de noten en rusten van deze maat verzamelen, dan pas
+            // schrijven: de waardestrepen (0.7.83) hangen van de buren af.
+            let mut items: Vec<MaatItem> = Vec::new();
             for &(s, e, ref notes) in segments.iter() {
                 // Deel dat binnen deze maat valt.
                 let ps = s.max(m_start);
@@ -596,50 +680,90 @@ pub fn render_musicxml(qs: &QuantizedScore, opts: &NotationOptions) -> Result<St
                 if pe <= ps { continue; }
                 let tie_from_prev = !notes.is_empty() && s < m_start;
                 let tie_to_next = !notes.is_empty() && e > m_end;
-
+                // Een rust over de hele maat is één hele-maatrust (0.7.83), in
+                // elke maatsoort — ook de lege balken van een nieuw stuk.
+                if notes.is_empty() && ps == m_start && pe == m_end {
+                    items.push(MaatItem { pos: ps, len: measure_len, type_name: "", dotted: false, hele_maat: true, notes: Vec::new() });
+                    continue;
+                }
                 // Binnen de maat ontleden in notenwaarden; delen van dezelfde
                 // noot binnen de maat ook onderling overbinden.
                 let parts = decompose(pe - ps, q);
-                let mut part_start = ps;
+                let mut pos = ps;
                 for (pi, (len, type_name, dotted)) in parts.iter().enumerate() {
                     let first_part = pi == 0;
                     let last_part = pi == parts.len() - 1;
-                    if notes.is_empty() {
-                        xml.push_str(&format!(
-                            "      <note><rest/><duration>{}</duration><voice>1</voice><type>{}</type>{}</note>\n",
-                            len, type_name, if *dotted { "<dot/>" } else { "" }));
-                    } else {
-                        for (ni, cn) in notes.iter().enumerate() {
-                            // Overbinding: over de maatstreep, tussen de delen
-                            // binnen de maat, én over segmentgrenzen (0.7.82:
-                            // een noot die langer klinkt dan de rest van het
-                            // akkoord wordt doorgebonden, niet afgekapt).
-                            let tie_start = cn.tie_start || tie_to_next || !last_part;
-                            let tie_stop = cn.tie_stop || tie_from_prev || !first_part;
-                            let midi = cn.midi;
-                            let (step, alter, octave) = spell(midi, opts.key_fifths);
-                            xml.push_str("      <note>");
-                            if ni > 0 { xml.push_str("<chord/>"); }
-                            xml.push_str(&format!("<pitch><step>{}</step>", step));
-                            if alter != 0 { xml.push_str(&format!("<alter>{}</alter>", alter)); }
-                            xml.push_str(&format!("<octave>{}</octave></pitch>", octave));
-                            xml.push_str(&format!("<duration>{}</duration>", len));
-                            if tie_stop { xml.push_str("<tie type=\"stop\"/>"); }
-                            if tie_start { xml.push_str("<tie type=\"start\"/>"); }
-                            xml.push_str("<voice>1</voice>");
-                            xml.push_str(&format!("<type>{}</type>", type_name));
-                            if *dotted { xml.push_str("<dot/>"); }
-                            if tie_stop || tie_start {
-                                xml.push_str("<notations>");
-                                if tie_stop { xml.push_str("<tied type=\"stop\"/>"); }
-                                if tie_start { xml.push_str("<tied type=\"start\"/>"); }
-                                xml.push_str("</notations>");
-                            }
-                            xml.push_str("</note>\n");
-                        }
+                    // Overbinding: over de maatstreep, tussen de delen binnen
+                    // de maat, én over segmentgrenzen (0.7.82: een noot die
+                    // langer klinkt dan de rest van het akkoord wordt
+                    // doorgebonden, niet afgekapt).
+                    let noten: Vec<(u8, bool, bool)> = notes.iter().map(|cn| (
+                        cn.midi,
+                        cn.tie_stop || tie_from_prev || !first_part,
+                        cn.tie_start || tie_to_next || !last_part,
+                    )).collect();
+                    items.push(MaatItem { pos, len: *len, type_name, dotted: *dotted, hele_maat: false, notes: noten });
+                    pos += len;
+                }
+            }
+
+            // Waardestrepen (0.7.83): aaneengesloten noten korter dan een kwart
+            // binnen dezelfde tel (`beam_tel`). Een rust of een langere noot
+            // breekt de groep; één losse korte noot houdt haar vlag.
+            let tel = beam_tel(measure_len, beats, qs.beat_unit);
+            let kort = |it: &MaatItem| !it.notes.is_empty() && it.len < q;
+            let mut beam: Vec<Option<&str>> = vec![None; items.len()];
+            let mut i = 0;
+            while i < items.len() {
+                if !kort(&items[i]) { i += 1; continue; }
+                let groep = (items[i].pos - m_start) / tel;
+                let mut j = i;
+                while j + 1 < items.len() && kort(&items[j + 1]) && (items[j + 1].pos - m_start) / tel == groep { j += 1; }
+                if j > i {
+                    beam[i] = Some("begin");
+                    for k in i + 1..j { beam[k] = Some("continue"); }
+                    beam[j] = Some("end");
+                }
+                i = j + 1;
+            }
+
+            for (ii, it) in items.iter().enumerate() {
+                if it.hele_maat {
+                    xml.push_str(&format!(
+                        "      <note><rest measure=\"yes\"/><duration>{}</duration><voice>1</voice></note>\n",
+                        it.len));
+                    continue;
+                }
+                if it.notes.is_empty() {
+                    xml.push_str(&format!(
+                        "      <note><rest/><duration>{}</duration><voice>1</voice><type>{}</type>{}</note>\n",
+                        it.len, it.type_name, if it.dotted { "<dot/>" } else { "" }));
+                    continue;
+                }
+                for (ni, &(midi, tie_stop, tie_start)) in it.notes.iter().enumerate() {
+                    let (step, alter, octave) = spell(midi, opts.key_fifths);
+                    xml.push_str("      <note>");
+                    if ni > 0 { xml.push_str("<chord/>"); }
+                    xml.push_str(&format!("<pitch><step>{}</step>", step));
+                    if alter != 0 { xml.push_str(&format!("<alter>{}</alter>", alter)); }
+                    xml.push_str(&format!("<octave>{}</octave></pitch>", octave));
+                    xml.push_str(&format!("<duration>{}</duration>", it.len));
+                    if tie_stop { xml.push_str("<tie type=\"stop\"/>"); }
+                    if tie_start { xml.push_str("<tie type=\"start\"/>"); }
+                    xml.push_str("<voice>1</voice>");
+                    xml.push_str(&format!("<type>{}</type>", it.type_name));
+                    if it.dotted { xml.push_str("<dot/>"); }
+                    // De waardestreep staat op de eerste noot van een akkoord.
+                    if ni == 0 {
+                        if let Some(b) = beam[ii] { xml.push_str(&format!("<beam number=\"1\">{}</beam>", b)); }
                     }
-                    part_start += len;
-                    let _ = part_start;
+                    if tie_stop || tie_start {
+                        xml.push_str("<notations>");
+                        if tie_stop { xml.push_str("<tied type=\"stop\"/>"); }
+                        if tie_start { xml.push_str("<tied type=\"start\"/>"); }
+                        xml.push_str("</notations>");
+                    }
+                    xml.push_str("</note>\n");
                 }
             }
             xml.push_str("    </measure>\n");
@@ -741,6 +865,18 @@ pub struct Score {
     /// Mineur (0.7.72): toonsoortteken in klavar en `<mode>` in de MusicXML.
     #[serde(default)]
     pub minor: bool,
+    /// Noemer van de maatsoort (0.7.83): 2, 4 of 8.
+    #[serde(default)]
+    pub beat_unit: u8,
+    /// Componist en ondertitel op het blad (0.7.83).
+    #[serde(default)]
+    pub composer: String,
+    #[serde(default)]
+    pub subtitle: String,
+    /// Minimaal aantal maten op het blad (0.7.83); 0 = alleen de inhoud. De
+    /// UI verhoogt het zodra de invoercursor voorbij de laatste maat komt.
+    #[serde(default)]
+    pub min_measures: u32,
     pub metronome: MetronomeCfg,
     /// Alleen armed = actief onder één laag tegelijk; None = geen opname.
     pub armed_layer: Option<u32>,
@@ -768,6 +904,10 @@ impl Score {
             title: String::from("Live opname"),
             tolerance_pct: 80,
             minor: false,
+            beat_unit: 4,
+            composer: String::new(),
+            subtitle: String::new(),
+            min_measures: 0,
             metronome: MetronomeCfg::default(),
             armed_layer: None,
             generation: 1,
@@ -892,6 +1032,10 @@ pub fn options_from_score(score: &Score) -> NotationOptions {
         staves: None,
         tolerance_pct: Some(score.tolerance_pct),
         minor: Some(score.minor),
+        beat_unit: Some(score.beat_unit),
+        min_measures: Some(score.min_measures),
+        composer: Some(score.composer.clone()),
+        subtitle: Some(score.subtitle.clone()),
     }
 }
 
@@ -922,8 +1066,9 @@ pub fn score_to_smf_bytes(score: &Score, kanaal_voor_laag: &dyn Fn(&Layer) -> Op
     let mut smf = Smf::new(Header::new(Format::Parallel, Timing::Metrical(u15::new(PPQ as u16))));
     let mut t0: Vec<TrackEvent> = Vec::new();
     t0.push(TrackEvent { delta: u28::new(0), kind: TrackEventKind::Meta(MetaMessage::Tempo(u24::new(us_per_qn))) });
-    // Maatsoort x/4 (noemer als macht van 2: 2 → kwartnoot).
-    t0.push(TrackEvent { delta: u28::new(0), kind: TrackEventKind::Meta(MetaMessage::TimeSignature(score.beats_per_bar.clamp(1, 12), 2, 24, 8)) });
+    // Maatsoort (noemer als macht van 2: 1 → halve, 2 → kwart, 3 → achtste).
+    let noemer_log2 = match klem_beat_unit(score.beat_unit) { 2 => 1, 8 => 3, _ => 2 };
+    t0.push(TrackEvent { delta: u28::new(0), kind: TrackEventKind::Meta(MetaMessage::TimeSignature(score.beats_per_bar.clamp(1, 12), noemer_log2, 24, 8)) });
     t0.push(TrackEvent { delta: u28::new(0), kind: TrackEventKind::Meta(MetaMessage::EndOfTrack) });
     smf.tracks.push(t0);
 
@@ -990,8 +1135,14 @@ pub enum EditCommand {
     SetBpm { old: f64, new: f64 },
     /// Wijzig toonsoort.
     SetKey { old: i8, new: i8 },
-    /// Wijzig maatsoort (tellen per maat, x/4).
-    SetMeter { old: u8, new: u8 },
+    /// Wijzig maatsoort: (tellen per maat, noemer 2/4/8) — 0.7.83.
+    SetMeter { old: (u8, u8), new: (u8, u8) },
+    /// Balk hernoemen (0.7.83).
+    SetLayerName { layer: u32, old: String, new: String },
+    /// Balk verplaatsen in de volgorde (0.7.83): van index `from` naar `to`.
+    MoveLayer { from: usize, to: usize },
+    /// Kop van het stuk (0.7.83): (titel, componist, ondertitel).
+    SetHeader { old: (String, String, String), new: (String, String, String) },
     /// Wijzig het toongeslacht (majeur/mineur, 0.7.72).
     SetMode { old: bool, new: bool },
     /// Hand en splitspunt van een balk in klavar (0.7.70).
@@ -1115,9 +1266,37 @@ impl EditCommand {
                 Some(EditCommand::SetKey { old: new, new: old })
             }
             EditCommand::SetMeter { old, new } => {
-                score.beats_per_bar = new.clamp(1, 12);
+                let new = (new.0.clamp(1, 12), klem_beat_unit(new.1));
+                if new == (score.beats_per_bar, score.beat_unit) { return None; }
+                score.beats_per_bar = new.0;
+                score.beat_unit = new.1;
                 score.bump_gen();
                 Some(EditCommand::SetMeter { old: new, new: old })
+            }
+            EditCommand::SetLayerName { layer, old, new } => {
+                let l = score.layers.iter_mut().find(|l| l.id == layer)?;
+                let new = new.trim().to_string();
+                if new.is_empty() || l.name == new { return None; }
+                l.name = new.clone();
+                score.bump_gen();
+                Some(EditCommand::SetLayerName { layer, old: new, new: old })
+            }
+            EditCommand::MoveLayer { from, to } => {
+                let n = score.layers.len();
+                if from >= n || to >= n || from == to { return None; }
+                let l = score.layers.remove(from);
+                score.layers.insert(to, l);
+                score.bump_gen();
+                Some(EditCommand::MoveLayer { from: to, to: from })
+            }
+            EditCommand::SetHeader { old, new } => {
+                let huidig = (score.title.clone(), score.composer.clone(), score.subtitle.clone());
+                if huidig == new { return None; }
+                score.title = new.0;
+                score.composer = new.1;
+                score.subtitle = new.2;
+                score.bump_gen();
+                Some(EditCommand::SetHeader { old: huidig, new: old })
             }
             EditCommand::SetMode { old, new } => {
                 if score.minor == new { return None; }
@@ -1211,7 +1390,7 @@ mod tests {
     use super::*;
 
     fn opts() -> NotationOptions {
-        NotationOptions { bpm: 60.0, beats_per_bar: 4, quantize: 4, key_fifths: 0, title: Some("Test".into()), staves: None, tolerance_pct: None, minor: None }
+        NotationOptions { bpm: 60.0, beats_per_bar: 4, quantize: 4, key_fifths: 0, title: Some("Test".into()), staves: None, tolerance_pct: None, minor: None, beat_unit: None, min_measures: None, composer: None, subtitle: None }
     }
 
     #[test]
@@ -1556,9 +1735,211 @@ mod tests {
     }
 
     #[test]
-    fn lege_opname_geeft_fout() {
+    fn lege_balk_geeft_lege_maat_en_zonder_balken_fout() {
+        // 0.7.83: een leeg stuk toont lege notenbalken (één maat met een
+        // hele-maatrust); alleen zónder balken is er niets te tekenen.
         let staves = vec![Staff { name: "X".into(), bass_clef: false, notes: vec![], ..Default::default() }];
-        assert!(build_musicxml(&staves, &opts()).is_err());
+        let xml = build_musicxml(&staves, &opts()).expect("xml");
+        assert_eq!(xml.matches("<measure number=").count(), 1);
+        assert!(xml.contains("<rest measure=\"yes\"/><duration>16</duration>"));
+        assert!(build_musicxml(&[], &opts()).is_err());
+    }
+
+    #[test]
+    fn lege_score_rendert_min_measures() {
+        let staves = vec![
+            Staff { name: "Hoofdwerk".into(), bass_clef: false, notes: vec![], ..Default::default() },
+            Staff { name: "Positief".into(), bass_clef: false, notes: vec![], ..Default::default() },
+            Staff { name: "Pedaal".into(), bass_clef: true, notes: vec![], pedal: true, ..Default::default() },
+        ];
+        let mut o = opts();
+        o.min_measures = Some(8);
+        let xml = build_musicxml(&staves, &o).expect("xml");
+        assert_eq!(xml.matches("<part id=").count(), 3);
+        assert_eq!(xml.matches("<measure number=\"8\">").count(), 3);
+        assert!(!xml.contains("<measure number=\"9\">"));
+        assert_eq!(xml.matches("<rest measure=\"yes\"/>").count(), 24);
+        // Accolade om de twee manualen, pedaal erbuiten.
+        assert!(xml.contains("<part-group type=\"start\" number=\"1\"><group-symbol>brace</group-symbol>"));
+        let start = xml.find("<part-group type=\"start\"").unwrap();
+        let stop = xml.find("<part-group type=\"stop\"").unwrap();
+        let p2 = xml.find("<score-part id=\"P2\"").unwrap();
+        let p3 = xml.find("<score-part id=\"P3\"").unwrap();
+        assert!(start < p2 && p2 < stop && stop < p3);
+    }
+
+    #[test]
+    fn part_group_alleen_bij_twee_manualen() {
+        // Eén manuaal + pedaal: geen accolade.
+        let staves = vec![
+            Staff { name: "Manuaal".into(), bass_clef: false, notes: vec![NoteEv::anoniem(60, 0.0, 1.0)], ..Default::default() },
+            Staff { name: "Pedaal".into(), bass_clef: true, notes: vec![], pedal: true, ..Default::default() },
+        ];
+        let xml = build_musicxml(&staves, &opts()).expect("xml");
+        assert!(!xml.contains("<part-group"));
+        // Pedaal in het midden: de manualen eromheen vormen géén groep.
+        let staves = vec![
+            Staff { name: "A".into(), bass_clef: false, notes: vec![], ..Default::default() },
+            Staff { name: "Pedaal".into(), bass_clef: true, notes: vec![], pedal: true, ..Default::default() },
+            Staff { name: "B".into(), bass_clef: false, notes: vec![], ..Default::default() },
+        ];
+        let xml = build_musicxml(&staves, &opts()).expect("xml");
+        assert!(!xml.contains("<part-group"));
+    }
+
+    #[test]
+    fn hele_maat_rust_in_drie_kwarts() {
+        // Een lege maat tussen noten wordt één hele-maatrust, geen gepunteerde halve.
+        let staves = vec![Staff { name: "T".into(), bass_clef: false,
+            notes: vec![NoteEv::anoniem(60, 0.0, 1.0), NoteEv::anoniem(60, 6.0, 7.0)], ..Default::default() }];
+        let mut o = opts();
+        o.beats_per_bar = 3;
+        let xml = build_musicxml(&staves, &o).expect("xml");
+        let m2 = xml.find("<measure number=\"2\">").unwrap();
+        let m3 = xml.find("<measure number=\"3\">").unwrap();
+        let maat2 = &xml[m2..m3];
+        assert!(maat2.contains("<rest measure=\"yes\"/><duration>12</duration>"));
+        assert!(!maat2.contains("<type>"));
+    }
+
+    #[test]
+    fn zes_acht_measure_len_en_drie_halve() {
+        assert_eq!(raster_en_maatlengte(4, 6, 8), (4, 12));
+        assert_eq!(raster_en_maatlengte(4, 3, 2), (4, 24));
+        assert_eq!(raster_en_maatlengte(2, 4, 4), (2, 8));
+        // /8 eist minstens een achtste als raster.
+        assert_eq!(raster_en_maatlengte(1, 6, 8), (2, 6));
+        // Onbekende noemer → 4.
+        assert_eq!(klem_beat_unit(3), 4);
+        let staves = vec![Staff { name: "T".into(), bass_clef: false,
+            notes: vec![NoteEv::anoniem(60, 0.0, 0.5), NoteEv::anoniem(62, 0.5, 1.0), NoteEv::anoniem(64, 1.0, 1.5)], ..Default::default() }];
+        let mut o = opts();
+        o.beats_per_bar = 6; o.beat_unit = Some(8); o.quantize = 2;
+        let xml = build_musicxml(&staves, &o).expect("xml");
+        assert!(xml.contains("<time><beats>6</beats><beat-type>8</beat-type></time>"));
+        assert!(xml.contains("<divisions>2</divisions>"));
+        // Drie achtsten (1,5 s bij 60 bpm) vullen de eerste maat van 6/8.
+        assert_eq!(xml.matches("<type>eighth</type>").count(), 3);
+        assert_eq!(xml.matches("<measure number=").count(), 1);
+    }
+
+    #[test]
+    fn waardestrepen_per_tel() {
+        // 4/4: twee achtsten in één tel krijgen begin/end; een losse achtste
+        // en een achtste na een rust houden hun vlag.
+        let staves = vec![Staff { name: "T".into(), bass_clef: false,
+            notes: vec![NoteEv::anoniem(60, 0.0, 0.5), NoteEv::anoniem(62, 0.5, 1.0), NoteEv::anoniem(64, 1.0, 1.5), NoteEv::anoniem(65, 2.0, 2.5)],
+            ..Default::default() }];
+        let xml = build_musicxml(&staves, &opts()).expect("xml");
+        assert_eq!(xml.matches("<beam number=\"1\">begin</beam>").count(), 1);
+        assert_eq!(xml.matches("<beam number=\"1\">end</beam>").count(), 1);
+        assert!(!xml.contains(">continue</beam>"));
+        // 6/8 bij q=2: zes achtsten → twee groepen van drie.
+        let mut o = opts();
+        o.beats_per_bar = 6; o.beat_unit = Some(8); o.quantize = 2;
+        let staves = vec![Staff { name: "T".into(), bass_clef: false,
+            notes: (0..6).map(|i| NoteEv::anoniem(60 + i as u8, i as f64 * 0.5, i as f64 * 0.5 + 0.5)).collect(),
+            ..Default::default() }];
+        let xml = build_musicxml(&staves, &o).expect("xml");
+        assert_eq!(xml.matches(">begin</beam>").count(), 2);
+        assert_eq!(xml.matches(">continue</beam>").count(), 2);
+        assert_eq!(xml.matches(">end</beam>").count(), 2);
+        assert_eq!(beam_tel(6, 6, 8), 3);
+        assert_eq!(beam_tel(24, 3, 2), 8);
+        assert_eq!(beam_tel(16, 4, 4), 4);
+        // Een akkoord van achtsten: de streep alleen op de eerste noot.
+        let staves = vec![Staff { name: "T".into(), bass_clef: false,
+            notes: vec![NoteEv::anoniem(60, 0.0, 0.5), NoteEv::anoniem(64, 0.0, 0.5), NoteEv::anoniem(62, 0.5, 1.0)],
+            ..Default::default() }];
+        let xml = build_musicxml(&staves, &opts()).expect("xml");
+        assert_eq!(xml.matches("<beam").count(), 2);
+        // Kwarten krijgen nooit een streep.
+        let staves = vec![Staff { name: "T".into(), bass_clef: false,
+            notes: vec![NoteEv::anoniem(60, 0.0, 1.0), NoteEv::anoniem(62, 1.0, 2.0)], ..Default::default() }];
+        assert!(!build_musicxml(&staves, &opts()).expect("xml").contains("<beam"));
+    }
+
+    #[test]
+    fn header_in_identification() {
+        let staves = vec![Staff { name: "T".into(), bass_clef: false, notes: vec![], ..Default::default() }];
+        let mut o = opts();
+        o.title = Some("Trio <3>".into());
+        o.composer = Some("J. S. Bach & zonen".into());
+        o.subtitle = Some("  BWV 525  ".into());
+        let xml = build_musicxml(&staves, &o).expect("xml");
+        assert!(xml.contains("<work><work-title>Trio &lt;3&gt;</work-title></work>"));
+        assert!(xml.contains("<movement-title>BWV 525</movement-title>"));
+        assert!(xml.contains("<identification><creator type=\"composer\">J. S. Bach &amp; zonen</creator></identification>"));
+        // Volgorde volgens het schema: work, movement-title, identification, part-list.
+        let w = xml.find("<work>").unwrap(); let m = xml.find("<movement-title>").unwrap();
+        let i = xml.find("<identification>").unwrap(); let p = xml.find("<part-list>").unwrap();
+        assert!(w < m && m < i && i < p);
+        // Lege velden blijven weg.
+        o.composer = Some("  ".into()); o.subtitle = None;
+        let xml = build_musicxml(&staves, &o).expect("xml");
+        assert!(!xml.contains("<identification>") && !xml.contains("<movement-title>"));
+    }
+
+    #[test]
+    fn set_meter_undo_met_noemer() {
+        let mut sc = Score::new(1);
+        let inv = EditCommand::SetMeter { old: (4, 4), new: (6, 8) }.apply(&mut sc).expect("inverse");
+        assert_eq!((sc.beats_per_bar, sc.beat_unit), (6, 8));
+        inv.apply(&mut sc);
+        assert_eq!((sc.beats_per_bar, sc.beat_unit), (4, 4));
+        assert!(EditCommand::SetMeter { old: (4, 4), new: (4, 4) }.apply(&mut sc).is_none());
+        // Onbekende noemer klemt op 4 en de maatlengte volgt de score-opties.
+        EditCommand::SetMeter { old: (4, 4), new: (3, 5) }.apply(&mut sc);
+        assert_eq!(sc.beat_unit, 4);
+        let qs = quantize_score(&score_to_staves(&sc), &options_from_score(&sc));
+        assert_eq!(qs.measure_len, 12);
+    }
+
+    #[test]
+    fn rename_en_move_layer_undo() {
+        let mut sc = Score::new(1);
+        let a = sc.add_layer("A".into(), Some(false));
+        let b = sc.add_layer("B".into(), Some(false));
+        let c = sc.add_layer("Pedaal".into(), Some(true));
+        let inv = EditCommand::SetLayerName { layer: b, old: "B".into(), new: "  Positief ".into() }.apply(&mut sc).expect("inverse");
+        assert_eq!(sc.layers[1].name, "Positief");
+        inv.apply(&mut sc);
+        assert_eq!(sc.layers[1].name, "B");
+        assert!(EditCommand::SetLayerName { layer: b, old: "B".into(), new: "   ".into() }.apply(&mut sc).is_none());
+        assert!(EditCommand::SetLayerName { layer: 999, old: "x".into(), new: "y".into() }.apply(&mut sc).is_none());
+        let inv = EditCommand::MoveLayer { from: 2, to: 0 }.apply(&mut sc).expect("inverse");
+        assert_eq!(sc.layers.iter().map(|l| l.id).collect::<Vec<_>>(), vec![c, a, b]);
+        inv.apply(&mut sc);
+        assert_eq!(sc.layers.iter().map(|l| l.id).collect::<Vec<_>>(), vec![a, b, c]);
+        assert!(EditCommand::MoveLayer { from: 1, to: 1 }.apply(&mut sc).is_none());
+        assert!(EditCommand::MoveLayer { from: 0, to: 3 }.apply(&mut sc).is_none());
+    }
+
+    #[test]
+    fn set_header_undo() {
+        let mut sc = Score::new(1);
+        let oud = (sc.title.clone(), String::new(), String::new());
+        let nieuw = ("Toccata".to_string(), "Buxtehude".to_string(), "BuxWV 155".to_string());
+        let inv = EditCommand::SetHeader { old: oud.clone(), new: nieuw.clone() }.apply(&mut sc).expect("inverse");
+        assert_eq!((sc.title.as_str(), sc.composer.as_str(), sc.subtitle.as_str()), ("Toccata", "Buxtehude", "BuxWV 155"));
+        inv.apply(&mut sc);
+        assert_eq!(sc.title, oud.0);
+        assert!(sc.composer.is_empty());
+        assert!(EditCommand::SetHeader { old: oud.clone(), new: oud.clone() }.apply(&mut sc).is_none());
+    }
+
+    #[test]
+    fn midi_export_maatsoort_noemer() {
+        let mut sc = Score::new(1);
+        let lid = sc.add_layer("M".into(), Some(false));
+        sc.beats_per_bar = 6; sc.beat_unit = 8;
+        let tid = sc.layers[0].takes[0].id;
+        let ev = LayerEv { id: 1, midi: 60, start_us: 0, end_us: 500_000, channel: 0, locked: false, hand: None };
+        EditCommand::InsertEvents { events: vec![(lid, tid, ev)] }.apply(&mut sc);
+        let bytes = score_to_smf_bytes(&sc, &|_| None).expect("smf");
+        // FF 58 04 nn dd cc bb: nn=6, dd=3 (achtste).
+        let pos = bytes.windows(4).position(|w| w == [0xFF, 0x58, 0x04, 0x06]).expect("time signature");
+        assert_eq!(bytes[pos + 4], 3);
     }
 
     // ---- Regressie-fixture (0.7.70): de MusicXML-uitvoer van vóór het
@@ -1599,7 +1980,7 @@ mod tests {
     }
 
     fn fixture_opts() -> NotationOptions {
-        NotationOptions { bpm: 60.0, beats_per_bar: 3, quantize: 4, key_fifths: -2, title: Some("Fixture 0.7.69".into()), staves: None, tolerance_pct: Some(80), minor: None }
+        NotationOptions { bpm: 60.0, beats_per_bar: 3, quantize: 4, key_fifths: -2, title: Some("Fixture 0.7.69".into()), staves: None, tolerance_pct: Some(80), minor: None, beat_unit: None, min_measures: None, composer: None, subtitle: None }
     }
 
     /// Tweede fixture (0.7.70): de paden die de eerste niet raakt — sub-raster
@@ -1633,11 +2014,42 @@ mod tests {
     }
 
     fn fixture2_opts() -> NotationOptions {
-        NotationOptions { bpm: 72.5, beats_per_bar: 3, quantize: 4, key_fifths: 3, title: Some("A & B <C>".into()), staves: None, tolerance_pct: Some(60), minor: None }
+        NotationOptions { bpm: 72.5, beats_per_bar: 3, quantize: 4, key_fifths: 3, title: Some("A & B <C>".into()), staves: None, tolerance_pct: Some(60), minor: None, beat_unit: None, min_measures: None, composer: None, subtitle: None }
     }
 
     const FIXTURE_PAD: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/src/testdata/notatie_0769.musicxml");
     const FIXTURE2_PAD: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/src/testdata/notatie_0770.musicxml");
+    const FIXTURE3_PAD: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/src/testdata/notatie_0783.musicxml");
+
+    /// Derde fixture (0.7.83): 6/8 met achtsten over een maatstreep, twee
+    /// manualen in een accolade plus pedaal, een lege balk, componist en
+    /// ondertitel, minimaal vier maten (de inhoud vult er twee).
+    fn fixture3_staves() -> Vec<Staff> {
+        vec![
+            Staff {
+                name: "Hoofdwerk".into(), bass_clef: false,
+                notes: vec![
+                    NoteEv::anoniem(67, 0.0, 0.5), NoteEv::anoniem(69, 0.5, 1.0), NoteEv::anoniem(71, 1.0, 1.5),
+                    NoteEv::anoniem(72, 1.5, 3.5),
+                ],
+                ..Default::default()
+            },
+            Staff { name: "Positief".into(), bass_clef: false, notes: vec![], ..Default::default() },
+            Staff {
+                name: "Pedaal".into(), bass_clef: true, pedal: true,
+                notes: vec![NoteEv::anoniem(43, 0.0, 1.5), NoteEv::anoniem(38, 1.5, 3.0)],
+                ..Default::default()
+            },
+        ]
+    }
+
+    fn fixture3_opts() -> NotationOptions {
+        NotationOptions {
+            bpm: 60.0, beats_per_bar: 6, quantize: 2, key_fifths: 1, title: Some("Fixture 0.7.83".into()),
+            staves: None, tolerance_pct: Some(80), minor: None,
+            beat_unit: Some(8), min_measures: Some(4), composer: Some("Anoniem".into()), subtitle: Some("Pastorale".into()),
+        }
+    }
 
     /// Schrijft de fixtures opnieuw, maar ALLEEN met JM_SCHRIJF_FIXTURE=1: de
     /// referentie is de uitvoer van een oudere versie en mag nooit stilzwijgend
@@ -1653,6 +2065,20 @@ mod tests {
         std::fs::write(FIXTURE_PAD, xml.as_bytes()).expect("fixture schrijven");
         let xml2 = build_musicxml(&fixture2_staves(), &fixture2_opts()).expect("xml");
         std::fs::write(FIXTURE2_PAD, xml2.as_bytes()).expect("fixture 2 schrijven");
+        let xml3 = build_musicxml(&fixture3_staves(), &fixture3_opts()).expect("xml");
+        std::fs::write(FIXTURE3_PAD, xml3.as_bytes()).expect("fixture 3 schrijven");
+    }
+
+    #[test]
+    fn musicxml_gelijk_aan_fixture3() {
+        let verwacht = include_str!("testdata/notatie_0783.musicxml").replace("\r\n", "\n");
+        let xml = build_musicxml(&fixture3_staves(), &fixture3_opts()).expect("xml").replace("\r\n", "\n");
+        assert!(!verwacht.is_empty(), "fixture 3 ontbreekt: eerst schrijf_fixture_musicxml draaien");
+        assert_eq!(xml, verwacht);
+        assert!(xml.contains("<beat-type>8</beat-type>"));
+        assert_eq!(xml.matches("<measure number=\"4\">").count(), 3);
+        assert!(xml.contains("<creator type=\"composer\">Anoniem</creator>"));
+        assert!(xml.contains("<movement-title>Pastorale</movement-title>"));
     }
 
     #[test]
@@ -1669,9 +2095,11 @@ mod tests {
         let xml = build_musicxml(&fixture2_staves(), &fixture2_opts()).expect("xml").replace("\r\n", "\n");
         assert!(!verwacht.is_empty(), "fixture 2 ontbreekt: eerst schrijf_fixture_musicxml draaien");
         assert_eq!(xml, verwacht);
-        // De lege balk tussen de gevulde telt niet mee als part.
-        assert!(xml.contains("<score-part id=\"P2\"><part-name>Pedaal</part-name>"));
-        assert!(!xml.contains("Leeg"));
+        // De lege balk tussen de gevulde is sinds 0.7.83 een part met
+        // hele-maatrusten; de pedaalbalk schuift door naar P3.
+        assert!(xml.contains("<score-part id=\"P2\"><part-name>Leeg</part-name>"));
+        assert!(xml.contains("<score-part id=\"P3\"><part-name>Pedaal</part-name>"));
+        assert!(xml.contains("<part-group type=\"start\" number=\"1\">"));
         assert!(xml.contains("A &amp; B &lt;C&gt;"));
     }
 }
