@@ -747,7 +747,7 @@
     "count_in_title": "Número de pulsos que se cuentan antes de empezar a grabar",
     "count_in_off": "desact.",
     "step_input": "Paso a paso",
-    "step_input_title": "Entrada paso a paso: toca una tecla o un acorde en el teclado — o haz clic en el pentagrama — y la nota se coloca en el cursor de entrada con la figura elegida",
+    "step_input_title": "Entrada paso a paso: toque una tecla o un acorde, escriba A–G o haga clic en el pentagrama; la nota cae en el compás, tiempo y altura del clic (Mayús+clic = nota del acorde)",
     "note_value": "Figura",
     "note_value_key": "Figura (tecla {key})",
     "dot": "puntillo",
@@ -898,7 +898,7 @@
     "tie": "Ligadura",
     "tie_title": "Ligadura: volver a colocar la misma altura prolonga la nota anterior (se mantiene)",
     "eraser": "Goma",
-    "eraser_title": "Eliminar las notas seleccionadas; en entrada paso a paso sin selección, la última entrada",
+    "eraser_title": "Goma (activar/desactivar): haga clic en una nota para borrar solo esa; Esc desactiva la goma",
     "caret_label": "Entrada:",
     "measure_beat": "compás {m}, tiempo {b}",
     "voices_later": "Las voces por pentagrama llegan en una versión posterior.",
@@ -913,7 +913,12 @@
     "split_chord_title": "La nota más alta de cada ataque a la voz 1, el resto a la voz 2",
     "only_active_voice": "Solo la voz activa",
     "only_active_voice_title": "Mostrar las otras voces en gris claro (V)",
-    "voices_hint": "Voces 1 y 3 plicas hacia arriba, 2 y 4 hacia abajo; cada voz con su color en pantalla, negro en papel."
+    "voices_hint": "Voces 1 y 3 plicas hacia arriba, 2 y 4 hacia abajo; cada voz con su color en pantalla, negro en papel.",
+    "sound_on_entry": "Sonido al introducir",
+    "sound_on_entry_title": "Hacer sonar la nota colocada 150 ms en los registros de la división del pentagrama (no durante la grabación)",
+    "ctx_edit": "Editar",
+    "ctx_remove_from_chord": "Quitar la nota del acorde",
+    "chord_status": "Acorde: {notes} ({n} notas) — Supr, ÷2/×2, A la voz o clic derecho"
   },
   "temperaments": {
     "name_prompt": "Nombre de este temperamento:"

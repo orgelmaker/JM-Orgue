@@ -12,6 +12,7 @@
   export let stepMode = false;
   export let caretTekst = '';
   export let debugTekst = '';
+  export let extra = '';       // bv. het akkoord na een dubbelklik
 </script>
 
 <div class="status" class:counting={armedWaiting}>
@@ -19,6 +20,8 @@
     <span>{$t('notation.count_in_prefix')} <b>{countInRemaining}</b> {countInRemaining === 1 ? $t('notation.count_in_suffix_one') : $t('notation.count_in_suffix_many')}</span>
   {:else if stepMode && caretTekst}
     <span><b>{$t('notation.caret_label')}</b> {caretTekst}</span>
+  {:else if extra}
+    <span>{extra}</span>
   {:else if aantalNoten > 0}
     {#if selectieAantal > 1}
       <span><b>{selectieAantal}</b> {$t('notation.selected_many')}</span>

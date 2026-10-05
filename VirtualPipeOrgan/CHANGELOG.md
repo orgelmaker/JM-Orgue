@@ -5,6 +5,28 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.87] - 2026-10-06
+
+### Noten plaatsen met de muis
+- In het notenschrift komt een noot in stapinvoer nu op de plek waar u
+  klikt: maat, tel en toonhoogte, in de actieve stem van die balk; de
+  invoercursor springt erachter. De plek volgt de gekozen nootwaarde (een
+  kwart komt op de tel, een achtste op de halve tel) of een inzet die er al
+  staat. Shift+klik voegt een noot toe aan het akkoord op die tel. Ook bij
+  een andere zoom klopt de plek nu.
+- Ctrl+klik breidt de selectie uit; dubbelklik selecteert een heel akkoord
+  (de statusregel toont de noten); de **gum** in het palet is nu een
+  schakelaar: klik op een noot om alleen die noot weg te halen (Esc zet hem
+  uit). Met Shift ingedrukt sleept u een noot horizontaal in de tijd, per
+  rastereenheid; met Alt verticaal in halve tonen.
+- De rechter muisknop opent een menu met de bewerkingen: duur, transpositie,
+  Naar stem, Akkoord splitsen, Noot uit akkoord verwijderen, Verwijderen.
+- Een geplaatste noot klinkt kort op de getrokken registers van de divisie
+  van de balk (schakelaar **Geluid bij invoer** op het tabblad Invoer; niet
+  tijdens een opname, en niet bij invoer vanaf het klavier, dat klinkt al).
+- Klavar: Shift+klik voegt een akkoordnoot toe op de aangeklikte tijd,
+  Ctrl+klik breidt de selectie uit en de gum werkt er ook.
+
 ## [0.7.86] - 2026-10-06
 
 ### Meerdere stemmen per balk

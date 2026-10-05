@@ -10,6 +10,8 @@
   export let tie = false;
   export let kanHerhaal = false;
   export let kanAlterLast = false;
+  export let gum = false;
+  export let previewOn = true;
   export let viewMode = 'staff';
   export let selectieAlleenPedaal = false;
   export let clipboardCount = 0;
@@ -22,7 +24,11 @@
     <input type="checkbox" checked={stepMode} on:change={(e) => doe('setStepMode', e.currentTarget.checked)} />
     <span>{$t('notation.step_input')} <kbd>N</kbd></span>
   </label>
-  <NotePalette {stepQuarters} {stepDotted} {acc} {tie} {kanHerhaal} {kanAlterLast} {stepMode} {acties} />
+  <NotePalette {stepQuarters} {stepDotted} {acc} {tie} {kanHerhaal} {kanAlterLast} {gum} {stepMode} {acties} />
+  <label class="schakelaar" title={$t('notation.sound_on_entry_title')}>
+    <input type="checkbox" checked={previewOn} on:change={() => doe('togglePreview')} />
+    <span>{$t('notation.sound_on_entry')}</span>
+  </label>
 </div>
 <div class="tab-rij">
   <span class="kopje">{$t('notation.selection_section')}</span>

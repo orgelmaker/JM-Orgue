@@ -3438,7 +3438,7 @@ pub fn stop_note(state: State<AppState>, stop_id: String, note: u8) -> Result<()
 
 /// Play a note for all drawn stops
 #[tauri::command]
-pub fn play_note_all_stops(state: State<AppState>, note: u8, velocity: f32) -> Result<(), String> {
+pub fn play_note_all_stops(state: State<AppState>, note: u8, velocity: f32, only_division: Option<String>) -> Result<(), String> {
     let organ = state.loaded_organ_info.read();
     let definition = state.organ_definition.read();
     let drawn_stops = state.drawn_stops.read();
@@ -3447,6 +3447,8 @@ pub fn play_note_all_stops(state: State<AppState>, note: u8, velocity: f32) -> R
 
     if let (Some(ref o), Some(ref def)) = (&*organ, &*definition) {
         for division in &o.divisions {
+            // 0.7.87: alleen de getrokken registers van één divisie (geluid bij invoer).
+            if let Some(d) = &only_division { if &division.name != d { continue; } }
             for stop in &division.stops {
                 if drawn_stops.contains(&stop.id) {
                     // Get stop definition for pipe range info
@@ -3490,13 +3492,15 @@ pub fn play_note_all_stops(state: State<AppState>, note: u8, velocity: f32) -> R
 
 /// Stop a note for all drawn stops
 #[tauri::command]
-pub fn stop_note_all_stops(state: State<AppState>, note: u8) -> Result<(), String> {
+pub fn stop_note_all_stops(state: State<AppState>, note: u8, only_division: Option<String>) -> Result<(), String> {
     let organ = state.loaded_organ_info.read();
     let definition = state.organ_definition.read();
     let drawn_stops = state.drawn_stops.read();
 
     if let (Some(ref o), Some(ref def)) = (&*organ, &*definition) {
         for division in &o.divisions {
+            // 0.7.87: alleen de getrokken registers van één divisie (geluid bij invoer).
+            if let Some(d) = &only_division { if &division.name != d { continue; } }
             for stop in &division.stops {
                 if drawn_stops.contains(&stop.id) {
                     // Get manual's first MIDI note

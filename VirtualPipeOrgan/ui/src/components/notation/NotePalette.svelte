@@ -9,6 +9,7 @@
   export let tie = false;
   export let kanHerhaal = false;
   export let kanAlterLast = false;
+  export let gum = false;
   export let stepMode = false;
   export let acties = {};
   const WAARDEN = [[4, '𝅝', '7'], [2, '𝅗𝅥', '6'], [1, '♩', '5'], [0.5, '♪', '4'], [0.25, '𝅘𝅥𝅯', '3'], [0.125, '𝅘𝅥𝅰', '2']];
@@ -32,7 +33,7 @@
   <button class="pk" class:active={acc === 'nat'} on:click={() => doe('setAcc', acc === 'nat' ? null : 'nat')} title={$t('notation.acc_natural_title')}>♮</button>
   <button class="pk" class:active={tie} on:click={() => doe('toggleTie')} title={$t('notation.tie_title')}>{$t('notation.tie')}</button>
   <span class="scheiding"></span>
-  <button class="pk gum" on:click={() => doe('gum')} title={$t('notation.eraser_title')}>{$t('notation.eraser')}</button>
+  <button class="pk gum" class:active={gum} on:click={() => doe('gum')} title={$t('notation.eraser_title')}>{$t('notation.eraser')}</button>
 </div>
 
 <style>

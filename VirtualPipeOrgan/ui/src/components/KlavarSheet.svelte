@@ -19,6 +19,7 @@
   export let cursorId = null;
   export let zoom = 1;
   export let stepMode = false;
+  export let gum = false;      // kleverige gum (0.7.87): klik = verwijderen, ook in stapinvoer
   export let recording = false;
   export let live = false;
   // Inspelen (0.7.72): het opnametijdstip in rastereenheden (nu-lijn) en de
@@ -100,15 +101,15 @@
     if (!live || dragConsumedClick) return;
     const p = svgPunt(svg, e);
     if (!p) return;
-    if (stepMode) {
+    if (stepMode && !gum) {
       const staff = staffAtX(lay, p.x);
       const midi = nearestKey(p.x, balkVoor(lay, staff));
-      dispatch('stepclick', { midi, staff, gridTime: gridTimeAtY(lay, p.y) });
+      dispatch('stepclick', { midi, staff, gridTime: gridTimeAtY(lay, p.y), shift: e.shiftKey });
       return;
     }
     const hit = hitTest(lay, p.x, p.y, 1.5 * MAAT.w);
     if (!hit || hit.id == null) return;
-    dispatch('select', { id: hit.id, shift: e.shiftKey });
+    dispatch('select', { id: hit.id, shift: e.shiftKey || e.ctrlKey || e.metaKey });
   }
 </script>
 

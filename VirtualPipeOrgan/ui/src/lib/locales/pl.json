@@ -747,7 +747,7 @@
     "count_in_title": "Liczba miar odliczanych przed rozpoczęciem nagrywania",
     "count_in_off": "wył.",
     "step_input": "Tryb krokowy",
-    "step_input_title": "Tryb krokowy: zagraj klawisz albo akord na manuale — lub kliknij na pięciolinii — a nuta pojawi się na kursorze z wybraną wartością",
+    "step_input_title": "Wprowadzanie krokowe: zagraj klawisz lub akord, wpisz A–G albo kliknij pięciolinię — nuta trafia na klikniętym takcie, mierze i wysokości (Shift+klik = nuta akordu)",
     "note_value": "Wartość nuty",
     "note_value_key": "Wartość nuty (klawisz {key})",
     "dot": "kropka",
@@ -898,7 +898,7 @@
     "tie": "Łuk",
     "tie_title": "Łuk: ponowne wstawienie tej samej wysokości przedłuża poprzednią nutę (pozostaje włączony)",
     "eraser": "Gumka",
-    "eraser_title": "Usuń zaznaczone nuty; przy wprowadzaniu krokowym bez zaznaczenia – ostatni wpis",
+    "eraser_title": "Gumka (wł./wył.): kliknij nutę, aby usunąć tylko ją; Esc wyłącza gumkę",
     "caret_label": "Wprowadzanie:",
     "measure_beat": "takt {m}, miara {b}",
     "voices_later": "Głosy na pięciolinii pojawią się w późniejszej wersji.",
@@ -913,7 +913,12 @@
     "split_chord_title": "Najwyższa nuta każdego ataku do głosu 1, reszta do głosu 2",
     "only_active_voice": "Tylko aktywny głos",
     "only_active_voice_title": "Pozostałe głosy na jasnoszaro (V)",
-    "voices_hint": "Głosy 1 i 3 laski w górę, 2 i 4 w dół; każdy głos ma swój kolor na ekranie, czarny na papierze."
+    "voices_hint": "Głosy 1 i 3 laski w górę, 2 i 4 w dół; każdy głos ma swój kolor na ekranie, czarny na papierze.",
+    "sound_on_entry": "Dźwięk przy wprowadzaniu",
+    "sound_on_entry_title": "Odtwórz wstawioną nutę przez 150 ms na rejestrach sekcji tej pięciolinii (nie podczas nagrywania)",
+    "ctx_edit": "Edycja",
+    "ctx_remove_from_chord": "Usuń nutę z akordu",
+    "chord_status": "Akord: {notes} ({n} nut) — Delete, ÷2/×2, Do głosu lub prawy klik"
   },
   "temperaments": {
     "name_prompt": "Nazwa tego stroju:"

@@ -747,7 +747,7 @@
     "count_in_title": "Nombre de temps de décompte avant le début de l'enregistrement",
     "count_in_off": "non",
     "step_input": "Saisie pas à pas",
-    "step_input_title": "Saisie pas à pas : jouez une touche ou un accord au clavier — ou cliquez sur la portée — et la note est placée au curseur de saisie avec la valeur choisie",
+    "step_input_title": "Saisie pas à pas : jouez une touche ou un accord, tapez A–G ou cliquez sur la portée — la note se place sur la mesure, le temps et la hauteur du clic (Maj+clic = note d’accord)",
     "note_value": "Valeur de note",
     "note_value_key": "Valeur de note (touche {key})",
     "dot": "point",
@@ -898,7 +898,7 @@
     "tie": "Liaison",
     "tie_title": "Liaison : replacer la même hauteur prolonge la note précédente (reste actif)",
     "eraser": "Gomme",
-    "eraser_title": "Supprimer les notes sélectionnées ; en saisie pas à pas sans sélection, la dernière entrée",
+    "eraser_title": "Gomme (marche/arrêt) : cliquez sur une note pour ne supprimer que celle-ci ; Échap désactive la gomme",
     "caret_label": "Saisie :",
     "measure_beat": "mesure {m}, temps {b}",
     "voices_later": "Les voix par portée arrivent dans une version ultérieure.",
@@ -913,7 +913,12 @@
     "split_chord_title": "Note la plus haute de chaque attaque vers la voix 1, le reste vers la voix 2",
     "only_active_voice": "Voix active seule",
     "only_active_voice_title": "Afficher les autres voix en gris clair (V)",
-    "voices_hint": "Voix 1 et 3 hampes vers le haut, 2 et 4 vers le bas ; chaque voix a sa couleur à l’écran, noir sur papier."
+    "voices_hint": "Voix 1 et 3 hampes vers le haut, 2 et 4 vers le bas ; chaque voix a sa couleur à l’écran, noir sur papier.",
+    "sound_on_entry": "Son à la saisie",
+    "sound_on_entry_title": "Faire sonner la note placée 150 ms sur les jeux de la division de la portée (pas pendant l’enregistrement)",
+    "ctx_edit": "Modifier",
+    "ctx_remove_from_chord": "Retirer la note de l’accord",
+    "chord_status": "Accord : {notes} ({n} notes) — Suppr, ÷2/×2, Vers la voix ou clic droit"
   },
   "temperaments": {
     "name_prompt": "Nom de ce tempérament :"

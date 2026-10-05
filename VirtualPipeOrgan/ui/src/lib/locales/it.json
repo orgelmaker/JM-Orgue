@@ -747,7 +747,7 @@
     "count_in_title": "Numero di movimenti da contare prima che inizi la registrazione",
     "count_in_off": "nessuno",
     "step_input": "Passo-passo",
-    "step_input_title": "Inserimento passo-passo: suona un tasto o un accordo sul manuale — oppure fai clic sul rigo — e la nota viene posta sul cursore con il valore scelto",
+    "step_input_title": "Inserimento passo passo: suona un tasto o un accordo, digita A–G o fai clic sul rigo — la nota va su battuta, tempo e altezza del clic (Maiusc+clic = nota dell’accordo)",
     "note_value": "Valore della nota",
     "note_value_key": "Valore della nota (tasto {key})",
     "dot": "punto",
@@ -898,7 +898,7 @@
     "tie": "Legatura",
     "tie_title": "Legatura di valore: inserire di nuovo la stessa altezza prolunga la nota precedente (resta attivo)",
     "eraser": "Gomma",
-    "eraser_title": "Elimina le note selezionate; nell’inserimento passo passo senza selezione, l’ultimo inserimento",
+    "eraser_title": "Gomma (on/off): fai clic su una nota per eliminare solo quella; Esc disattiva la gomma",
     "caret_label": "Inserimento:",
     "measure_beat": "battuta {m}, tempo {b}",
     "voices_later": "Le voci per rigo arrivano in una versione successiva.",
@@ -913,7 +913,12 @@
     "split_chord_title": "Nota più alta per attacco alla voce 1, il resto alla voce 2",
     "only_active_voice": "Solo voce attiva",
     "only_active_voice_title": "Mostra le altre voci in grigio chiaro (V)",
-    "voices_hint": "Voci 1 e 3 gambi in su, 2 e 4 in giù; ogni voce ha il suo colore sullo schermo, nero su carta."
+    "voices_hint": "Voci 1 e 3 gambi in su, 2 e 4 in giù; ogni voce ha il suo colore sullo schermo, nero su carta.",
+    "sound_on_entry": "Suono all’inserimento",
+    "sound_on_entry_title": "Far suonare la nota inserita per 150 ms sui registri della divisione del rigo (non durante la registrazione)",
+    "ctx_edit": "Modifica",
+    "ctx_remove_from_chord": "Rimuovi nota dall’accordo",
+    "chord_status": "Accordo: {notes} ({n} note) — Canc, ÷2/×2, Alla voce o clic destro"
   },
   "temperaments": {
     "name_prompt": "Nome di questo temperamento:"

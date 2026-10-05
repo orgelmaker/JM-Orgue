@@ -747,7 +747,7 @@
     "count_in_title": "Number of beats to count in before recording starts",
     "count_in_off": "off",
     "step_input": "Step input",
-    "step_input_title": "Step input: play a key or chord on the keyboard — or click on the staff — and the note is placed at the input cursor with the chosen value",
+    "step_input_title": "Step input: play a key or chord on the keyboard, type A–G, or click on the staff — the note lands on the clicked bar, beat and pitch (Shift+click = chord note)",
     "note_value": "Note value",
     "note_value_key": "Note value (key {key})",
     "dot": "dot",
@@ -898,7 +898,7 @@
     "tie": "Tie",
     "tie_title": "Tie: placing the same pitch again extends the previous note (stays on)",
     "eraser": "Eraser",
-    "eraser_title": "Delete the selected notes; in step input without a selection, the last entry",
+    "eraser_title": "Eraser (on/off): click a note to delete just that note; Esc switches the eraser off",
     "caret_label": "Input:",
     "measure_beat": "bar {m}, beat {b}",
     "voices_later": "Voices per staff arrive in a later version.",
@@ -913,7 +913,12 @@
     "split_chord_title": "Highest note per onset to voice 1, the rest to voice 2",
     "only_active_voice": "Active voice only",
     "only_active_voice_title": "Show the other voices in light grey (V)",
-    "voices_hint": "Voices 1 and 3 stem up, 2 and 4 stem down; each voice has its own colour on screen, black on paper."
+    "voices_hint": "Voices 1 and 3 stem up, 2 and 4 stem down; each voice has its own colour on screen, black on paper.",
+    "sound_on_entry": "Sound on entry",
+    "sound_on_entry_title": "Play a placed note for 150 ms on the stops of the staff’s division (not while recording)",
+    "ctx_edit": "Edit",
+    "ctx_remove_from_chord": "Remove note from chord",
+    "chord_status": "Chord: {notes} ({n} notes) — Delete, ÷2/×2, To voice or right-click"
   },
   "temperaments": {
     "name_prompt": "Name for this temperament:"

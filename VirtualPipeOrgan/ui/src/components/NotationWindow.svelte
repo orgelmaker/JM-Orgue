@@ -26,6 +26,8 @@
   import StatusLine from './notation/StatusLine.svelte';
   import HelpDialog from './notation/HelpDialog.svelte';
   import ConfirmDialog from './notation/ConfirmDialog.svelte';
+  import ContextMenu from './notation/ContextMenu.svelte';
+  import { xToGridTime, gridTimeToX, celBreedte, snapGridTime } from '../lib/sheetGeometry.js';
   import { MAATSOORTEN, splitsMaatsoort, maatDuurUs, notemapSleutel, rasterPositie } from '../lib/notatieKeuzes.js';
   import { t, tx } from '../lib/i18n.js';
   import { pasSfeerToeAlsGewijzigd } from '../lib/sfeer.js';
@@ -254,6 +256,23 @@
   let noteBoxes = [];          // [{ eventId, midi, x, y, w, h, cx, cy }]
   let notemap = [];            // NoteRef[] van de laatste schermrender (0.7.86): exacte klik-correlatie
   let notatieQ = 4;            // effectief raster van die render (bij /8 minstens 2)
+  // Muisinvoer (0.7.87)
+  let gumActief = false;       // kleverige gum: klik op een kop verwijdert die noot
+  let contextMenu = null;      // { x, y, items } van het rechtsklikmenu
+  let chordTekst = '';         // statusregel na dubbelklik op een akkoord
+  let geluidBijInvoer = true;  // geplaatste noot kort laten klinken
+  try { if (localStorage.getItem('jm-orgue-notation-preview') === '0') geluidBijInvoer = false; } catch (e) {}
+  function toggleGeluidBijInvoer() {
+    geluidBijInvoer = !geluidBijInvoer;
+    try { localStorage.setItem('jm-orgue-notation-preview', geluidBijInvoer ? '1' : '0'); } catch (e) {}
+  }
+  function toggleGum() { gumActief = !gumActief; }
+  // Het menu sluit op mousedown; de click die erop volgt mag niets doen.
+  function sluitContextMenu() {
+    contextMenu = null;
+    dragConsumedClick = true;
+    setTimeout(() => { dragConsumedClick = false; }, 0);
+  }
   let alleenActieveStem = false; // andere stemmen lichtgrijs (Shift+Alt+S)
   $: selectedBoxes = noteBoxes.filter(b => selectionIds.has(b.eventId));
   // Pedaalnoten hebben geen hand (0.7.73): L/R staan uit zolang alleen
@@ -607,28 +626,31 @@
   // de klik zodat pijltjes vanaf daar verder navigeren.
   function handleSheetClick(e) {
     if (!isLive || viewMode === 'klavar') return;
-    if (dragConsumedClick) return; // net een noot versleept — geen selectie-klik
+    if (dragConsumedClick) return; // net een noot versleept, of het menu net gesloten — geen klik
     const rect = container.getBoundingClientRect();
     const px = e.clientX - rect.left + container.scrollLeft;
     const py = e.clientY - rect.top + container.scrollTop;
-    // Stapinvoer: klik plaatst een stamtoon op de invoercursor van de
-    // aangeklikte balk (geen selectie-wijziging in deze modus).
-    if (stepMode) {
-      const hit = sheetPointToPitch(px, py);
-      if (hit) stepInsert([hit.midi], hit.layerId);
+    const best = noteBoxes.length ? nootOnderPunt(px, py, 40) : null;
+    // Gum (kleverig): klik op een kop verwijdert alleen die noot.
+    if (gumActief) {
+      // Eén noot per klik (niet nog eens bij een dubbelklik); de box meteen weg
+      // zodat een trage render hem niet nog eens kan raken.
+      if (best && e.detail <= 1) { noteBoxes = noteBoxes.filter(b => b.eventId !== best.eventId); deleteEvents([best.eventId]); }
       return;
     }
-    if (noteBoxes.length === 0) return;
-    let best = null, bestDist = Infinity;
-    for (const b of noteBoxes) {
-      // Binnen de bounding box telt als 0; anders afstand tot het centrum.
-      const inside = px >= b.x && px <= b.x + b.w && py >= b.y && py <= b.y + b.h;
-      const d = inside ? 0 : Math.hypot(px - b.cx, py - b.cy);
-      if (d < bestDist) { bestDist = d; best = b; }
+    // Stapinvoer: klik plaatst op de aangeklikte maat, tel en toonhoogte in
+    // de actieve stem van die balk; Shift+klik voegt toe aan het akkoord op
+    // die tel (cursor blijft staan), anders springt de cursor erachter.
+    if (stepMode) {
+      const hit = sheetPointToPlace(px, py);
+      if (!hit) return;
+      if (e.shiftKey) stepInsert([hit.midi], hit.layerId, { at: hit.atUs });
+      else stepInsert([hit.midi], hit.layerId, { at: hit.atUs, advance: true });
+      return;
     }
-    const threshold = 40; // px — ruim genoeg om net-naast te klikken
-    if (!best || bestDist > threshold) return;
-    if (e.shiftKey) {
+    if (!best) return;
+    chordTekst = '';
+    if (e.shiftKey || e.ctrlKey || e.metaKey) {
       const next = new Set(selectionIds);
       next.has(best.eventId) ? next.delete(best.eventId) : next.add(best.eventId);
       selectionIds = next;
@@ -638,6 +660,47 @@
     // Cursor gelijktrekken met de aangeklikte noot.
     const idx = flatEvents.findIndex(ev => ev.id === best.eventId);
     if (idx >= 0) cursorIndex = idx;
+  }
+  // Dubbelklik = het hele akkoord (zelfde balk, maat, stem en inzet).
+  function handleSheetDblClick(e) {
+    if (!isLive || viewMode === 'klavar' || stepMode || gumActief) return;
+    const rect = container.getBoundingClientRect();
+    const px = e.clientX - rect.left + container.scrollLeft;
+    const py = e.clientY - rect.top + container.scrollTop;
+    const best = nootOnderPunt(px, py, 40);
+    if (best) selecteerAkkoord(best.eventId);
+  }
+  // Rechtsklik op een noot: menu met de bewerkingen op de selectie.
+  function handleSheetContext(e) {
+    if (!isLive || viewMode === 'klavar') return;
+    const rect = container.getBoundingClientRect();
+    const px = e.clientX - rect.left + container.scrollLeft;
+    const py = e.clientY - rect.top + container.scrollTop;
+    const best = nootOnderPunt(px, py, 40);
+    if (!best) { contextMenu = null; return; }
+    if (!selectionIds.has(best.eventId)) {
+      selectionIds = new Set([best.eventId]);
+      const idx = flatEvents.findIndex(ev => ev.id === best.eventId);
+      if (idx >= 0) cursorIndex = idx;
+    }
+    const nootId = best.eventId;
+    contextMenu = { x: e.clientX, y: e.clientY, items: [
+      { kop: true, label: tx('notation.ctx_edit') },
+      { label: '÷2', on: () => changeDuration('halve') },
+      { label: '×2', on: () => changeDuration('double') },
+      { label: '• ' + tx('notation.dot'), on: () => changeDuration('dot') },
+      { label: '−½', on: () => transposeSelection(-1) },
+      { label: '+½', on: () => transposeSelection(+1) },
+      { label: '−8va', on: () => transposeSelection(-12) },
+      { label: '+8va', on: () => transposeSelection(+12) },
+      { scheiding: true },
+      { kop: true, label: tx('notation.voices') },
+      ...[1, 2, 3, 4].map(v => ({ label: tx('notation.to_voice') + ' ' + v, on: () => setSelectionVoice(v) })),
+      { label: tx('notation.split_chord'), on: splitSelectionChord },
+      { scheiding: true },
+      { label: tx('notation.ctx_remove_from_chord'), on: () => deleteEvents([nootId]), disabled: akkoordIds(nootId).length < 2 },
+      { label: tx('actions.delete'), on: deleteSelection },
+    ] };
   }
 
   // ---- File-modus initieel: divisies + balk-indeling ----
@@ -899,6 +962,7 @@
     stepLastIds = []; stepLastChordNotes = []; stepLastPos = null; stepLastEndUs = null; stepLastUndoCount = 0; stepLastGroepen = null;
     divEditLayerId = null; groeiLaatst = 0;
     stepAcc = null; stepTie = false; caret = null; notemap = [];
+    gumActief = false; contextMenu = null; chordTekst = '';
   }
   function werkbalkUitScore() {
     groeiLaatst = 0;
@@ -1023,17 +1087,23 @@
     // opts.advance (klavar, 0.7.71): plaatsing op een aangeklikte tijd die
     // de invoercursor meeneemt — in tegenstelling tot opts.at zonder advance,
     // dat het zojuist geplaatste akkoord uitbreidt.
-    const vers = opts.at == null || opts.advance;
+    // Uitbreiden van het laatste akkoord alleen op dezelfde inzet (Shift+letter,
+    // tweede balk); een Shift+klik elders is een verse plaatsing die de cursor
+    // laat staan (reviewbevinding 0.7.87).
+    const zelfdeInzet = opts.at != null && stepLastPos != null && Math.abs(opts.at - stepLastPos) < 1;
+    const vers = opts.at == null || opts.advance || !zelfdeInzet;
+    const schuif = opts.at == null || opts.advance;
     // Cursor DIRECT opschuiven (vóór de await): bij snel typen lazen
     // opeenvolgende inserts anders dezelfde positie en stapelden de noten
     // als een cluster op één tel (gezien bij de eerste visuele test).
-    if (vers) stepPosUs = at + dur;
+    if (schuif) stepPosUs = at + dur;
     try {
       const res = await invoke('notation_insert_notes', {
         scoreId, layerId: lid, notes,
         startUs: Math.round(at), durUs: dur,
       });
       const ids = Array.isArray(res) ? (res[1] || []) : [];
+      if (!opts.stil) for (const m of notes) klinkKort(m, lid);
       if (!vers) {
         // Toevoeging aan het zojuist geplaatste akkoord (Shift+letter, tweede balk).
         stepLastIds = [...stepLastIds, ...ids];
@@ -1053,7 +1123,7 @@
       stepCaretMidi = diatonicToMidi(nearestDiatonicIndex(stepLastMidi));
       groeiMatenNaarCursor();
     } catch (e) {
-      if (vers) stepPosUs = at; // mislukt → cursor terug
+      if (schuif) stepPosUs = at; // mislukt → cursor terug
       alert(String(e));
     }
   }
@@ -1170,9 +1240,13 @@
       const offX = svgRect.left - sheetRect.left + container.scrollLeft;
       const offY = svgRect.top - sheetRect.top + container.scrollTop;
       // VexFlow-coördinaten zijn ongezoomd (OSMD schaalt via de viewBox):
-      // schermpixels = coördinaat × zoom.
+      // schermpixels = coördinaat × zoom. De x volgt dezelfde inzet-ankers
+      // als een klik (sheetGeometry), zodat caret en klik samenvallen.
       const z = osmdZoom || 1;
-      caret = { x: offX + (x0 + Math.max(0, Math.min(1, frac)) * (x1 - x0)) * z, y: offY + yTop * z - 10, h: (yBot - yTop) * z + 20 };
+      const q = notatieQ || Number(score?.quantize) || 4;
+      const maatLen = Math.max(1, Math.round((Number(beatsPerBar) || 4) * q * 4 / (Number(beatUnit) || 4)));
+      const xs = gridTimeToX(inzettenVanMaat(gm, q), x0, x1, Math.max(0, Math.min(1, frac)) * maatLen, maatLen);
+      caret = { x: offX + xs * z, y: offY + yTop * z - 10, h: (yBot - yTop) * z + 20 };
     } catch (e) { caret = null; }
   }
   $: if (isLive) { void [stepMode, stepPosUs, viewMode, score, osmdZoom, noteBoxes]; herberekenCaret(); }
@@ -1204,6 +1278,7 @@
   // ---- Klavar (0.7.71): events uit KlavarSheet, handen per balk en per noot ----
   function onKlavarSelect(e) {
     const { id, shift } = e.detail;
+    if (gumActief) { deleteEvents([id]); return; }
     if (shift) {
       const next = new Set(selectionIds);
       next.has(id) ? next.delete(id) : next.add(id);
@@ -1239,7 +1314,9 @@
         layerId = l ? l.layer_id : null;
       }
     }
-    stepInsert([midi], layerId, { at, advance: true });
+    // Shift+klik: noot toevoegen aan het akkoord op die tijd (cursor blijft).
+    if (e.detail.shift) stepInsert([midi], layerId, { at });
+    else stepInsert([midi], layerId, { at, advance: true });
   }
   // Hand per noot (Alt+←/→ en de knoppen ← L / R →); alleen links of rechts.
   async function setHandsSelection(hand) {
@@ -1302,8 +1379,8 @@
     const at = stepPosUs;
     let eerste = true;
     for (const [lid, groep] of lijst) {
-      if (eerste) await stepInsert(groep, lid, { behoudGroepen: true });
-      else await stepInsert(groep, lid, { at });
+      if (eerste) await stepInsert(groep, lid, { behoudGroepen: true, stil: true });
+      else await stepInsert(groep, lid, { at, stil: true });
       eerste = false;
     }
     stepLastGroepen = lijst.length > 1 ? lijst.map(([lid, g]) => [lid, [...g]]) : null;
@@ -1361,18 +1438,26 @@
   function diatonicToMidi(di) {
     return 12 * Math.floor(di / 7) + DEG_TO_SEMI[((di % 7) + 7) % 7];
   }
-  function sheetPointToPitch(px, py) {
+  // Klikpunt → balk, toonhoogte én rastertijd (0.7.87). VexFlow-coördinaten
+  // zijn ongezoomd; het klikpunt wordt eerst door de zoom gedeeld. De tel
+  // komt uit de getekende inzetten van de maat (lineair ertussen, zie
+  // sheetGeometry.xToGridTime). Geeft { midi, layerId, atUs, measure, grid }
+  // of null.
+  function sheetPointToPlace(px, py) {
     try {
       const gsheet = osmd?.GraphicSheet || osmd?.graphic;
       const measureList = gsheet?.MeasureList;
       const svg = osmdHost?.querySelector('svg');
       if (!measureList || !svg) return null;
       const partLayers = nonEmptyPartLayers();
+      const z = osmdZoom || 1;
       const svgRect = svg.getBoundingClientRect();
       const sheetRect = container.getBoundingClientRect();
-      // Klikpunt (content-coördinaten) → SVG-coördinaten.
-      const sx = px - (svgRect.left - sheetRect.left + container.scrollLeft);
-      const sy = py - (svgRect.top - sheetRect.top + container.scrollTop);
+      const sx = (px - (svgRect.left - sheetRect.left + container.scrollLeft)) / z;
+      const sy = (py - (svgRect.top - sheetRect.top + container.scrollTop)) / z;
+      const q = notatieQ || Number(score?.quantize) || 4;
+      const maatLen = Math.max(1, Math.round((Number(beatsPerBar) || 4) * q * 4 / (Number(beatUnit) || 4)));
+      const gridUs = (60e6 / (Number(bpm) || 90)) / q;
       for (let m = 0; m < measureList.length; m++) {
         const row = measureList[m];
         if (!row) continue;
@@ -1381,10 +1466,10 @@
           const stave = gm && gm.getVFStave && gm.getVFStave();
           if (!stave || !stave.getYForLine) continue;
           const x0 = stave.getX ? stave.getX() : stave.x;
-          const w = stave.getWidth ? stave.getWidth() : stave.width;
+          const wd = stave.getWidth ? stave.getWidth() : stave.width;
           const yTop = stave.getYForLine(0), yBot = stave.getYForLine(4);
           const margin = 30; // ook net boven/onder de balk (hulplijn-gebied)
-          if (sx >= x0 && sx <= x0 + w && sy >= yTop - margin && sy <= yBot + margin) {
+          if (sx >= x0 && sx <= x0 + wd && sy >= yTop - margin && sy <= yBot + margin) {
             const spacing = (yBot - yTop) / 4;
             const stepsFromTop = Math.round(((sy - yTop) / spacing) * 2);
             const layer = partLayers[s];
@@ -1392,12 +1477,83 @@
             const bass = layer.bass_clef === true || (layer.bass_clef == null && isPedalName(layer.name));
             const refDi = bass ? 33 : 45; // bovenste lijn: A3 (bas) / F5 (viool)
             const midi = Math.max(0, Math.min(127, diatonicToMidi(refDi - stepsFromTop)));
-            return { midi, layerId: layer.id };
+            // Tel: inzetten van deze maat (OSMD-eenheden × 10 = ongezoomde px).
+            const nx0 = stave.getNoteStartX ? stave.getNoteStartX() : x0;
+            const nx1 = stave.getNoteEndX ? stave.getNoteEndX() : x0 + wd;
+            const entries = inzettenVanMaat(gm, q);
+            let grid = xToGridTime(entries, nx0, nx1, sx, maatLen);
+            // Stapinvoer: op het raster van de gekozen nootwaarde of op een
+            // bestaande inzet, zodat een kwart "ergens op tel 3" ook op tel 3 komt.
+            if (stepMode) grid = snapGridTime(grid, entries, Math.round(stepQuarters * q), maatLen);
+            const atUs = Math.round((m * maatLen + grid) * gridUs);
+            return { midi, layerId: layer.id, atUs, measure: m, grid, celPx: celBreedte(nx0, nx1, maatLen) * z };
           }
         }
       }
     } catch (e) {}
     return null;
+  }
+  function sheetPointToPitch(px, py) {
+    const p = sheetPointToPlace(px, py);
+    return p ? { midi: p.midi, layerId: p.layerId } : null;
+  }
+  // Getekende inzetten van een maat (OSMD-eenheden × 10 = ongezoomde px).
+  // Rusten doen niet mee: een hele-maatrust staat in het midden van de maat
+  // op tijd 0 en zou het hele linkerdeel op tel 1 leggen (reviewbevinding).
+  function inzettenVanMaat(gm, q) {
+    const entries = [];
+    for (const se of (gm?.staffEntries || [])) {
+      try {
+        const gves = se.graphicalVoiceEntries || [];
+        const alleenRust = gves.length === 0 || gves.every(g => (g.notes || []).every(n => !n.sourceNote || (n.sourceNote.isRest && n.sourceNote.isRest())));
+        if (alleenRust) continue;
+        const ax = se.PositionAndShape?.AbsolutePosition?.x;
+        const rt = se.relInMeasureTimestamp ?? se.sourceStaffEntry?.Timestamp;
+        const rv = rt?.RealValue != null ? rt.RealValue : (rt ? rt.Numerator / rt.Denominator : null);
+        if (ax != null && rv != null) entries.push({ x: ax * 10, t: rasterPositie(rv, q) });
+      } catch (e) {}
+    }
+    return entries;
+  }
+  // Dichtstbijzijnde getekende noot bij een punt (content-coördinaten).
+  function nootOnderPunt(px, py, drempel) {
+    let best = null, bestDist = Infinity;
+    for (const b of noteBoxes) {
+      const inside = px >= b.x && px <= b.x + b.w && py >= b.y && py <= b.y + b.h;
+      const d = inside ? 0 : Math.hypot(px - b.cx, py - b.cy);
+      if (d < bestDist) { bestDist = d; best = b; }
+    }
+    return best && bestDist <= drempel ? best : null;
+  }
+  async function deleteEvents(ids) {
+    if (!ids.length) return;
+    try { await invoke('notation_delete_events', { scoreId, eventIds: ids }); selectionIds = new Set(); } catch (e) { alert(String(e)); }
+  }
+  // Alle noten van hetzelfde akkoord (balk, maat, stem, positie) uit de notemap.
+  function akkoordIds(eventId) {
+    const ref = notemap.find(r => r.id === eventId);
+    if (!ref) return [eventId];
+    const ids = new Set(notemap.filter(r => r.part === ref.part && r.measure === ref.measure && r.voice === ref.voice && r.pos === ref.pos && r.id != null).map(r => r.id));
+    ids.add(eventId);
+    return [...ids];
+  }
+  function selecteerAkkoord(eventId) {
+    const ids = akkoordIds(eventId);
+    selectionIds = new Set(ids);
+    const evs = flatEvents.filter(ev => ids.includes(ev.id)).sort((a, b) => a.midi - b.midi);
+    chordTekst = tx('notation.chord_status').replace('{notes}', evs.map(ev => noteName(ev.midi)).join(' ')).replace('{n}', String(evs.length));
+    const idx = flatEvents.findIndex(ev => ev.id === eventId);
+    if (idx >= 0) cursorIndex = idx;
+  }
+  // Geluid bij invoer (0.7.87): de geplaatste noot 150 ms laten klinken op de
+  // getrokken registers van de divisie van de balk — niet via de MIDI-lus,
+  // dus geen opname of stapinvoer-echo.
+  function klinkKort(midi, layerId) {
+    if (!geluidBijInvoer || recording || armedWaiting) return;
+    const laag = score?.layers?.find(l => l.id === layerId);
+    const onlyDivision = laag && laag.divisions && laag.divisions.length ? laag.divisions[0] : null;
+    invoke('play_note_all_stops', { note: midi, velocity: 0.8, onlyDivision }).catch(() => {});
+    setTimeout(() => { invoke('stop_note_all_stops', { note: midi, onlyDivision }).catch(() => {}); }, 150);
   }
 
   // ---- Live-modus initieel + event-listeners ----
@@ -1672,7 +1828,7 @@
     return oct * 7 + deg;
   }
   function handleSheetMouseDown(e) {
-    if (!isLive || viewMode === 'klavar' || stepMode || noteBoxes.length === 0) return;
+    if (!isLive || viewMode === 'klavar' || stepMode || gumActief || dragConsumedClick || noteBoxes.length === 0) return;
     const rect = container.getBoundingClientRect();
     const px = e.clientX - rect.left + container.scrollLeft;
     const py = e.clientY - rect.top + container.scrollTop;
@@ -1683,12 +1839,27 @@
       if (d < bestDist) { bestDist = d; best = b; }
     }
     if (!best || bestDist > 12) return; // alleen op/vlakbij een noot beginnen
-    noteDrag = { id: best.eventId, startY: e.clientY, origMidi: best.midi, moved: false };
+    if (e.button !== 0) return;
+    // Celbreedte van de maat van deze noot (voor Shift+slepen in de tijd).
+    let celPx = null;
+    try {
+      const ref = notemap.find(r => r.id === best.eventId);
+      const gm = ref ? (osmd?.GraphicSheet || osmd?.graphic)?.MeasureList?.[ref.measure]?.[ref.part] : null;
+      const stave = gm && gm.getVFStave && gm.getVFStave();
+      if (stave) {
+        const q = notatieQ || Number(score?.quantize) || 4;
+        const maatLen = Math.max(1, Math.round((Number(beatsPerBar) || 4) * q * 4 / (Number(beatUnit) || 4)));
+        const nx0 = stave.getNoteStartX ? stave.getNoteStartX() : stave.getX();
+        const nx1 = stave.getNoteEndX ? stave.getNoteEndX() : stave.getX() + stave.getWidth();
+        celPx = celBreedte(nx0, nx1, maatLen) * (osmdZoom || 1);
+      }
+    } catch (e2) { celPx = null; }
+    noteDrag = { id: best.eventId, startX: e.clientX, startY: e.clientY, origMidi: best.midi, moved: false, celPx };
     window.addEventListener('mousemove', handleNoteDragMove);
     window.addEventListener('mouseup', handleNoteDragUp);
   }
   function handleNoteDragMove(e) {
-    if (noteDrag && Math.abs(e.clientY - noteDrag.startY) > 5) noteDrag.moved = true;
+    if (noteDrag && (Math.abs(e.clientY - noteDrag.startY) > 5 || Math.abs(e.clientX - noteDrag.startX) > 5)) noteDrag.moved = true;
   }
   async function handleNoteDragUp(e) {
     window.removeEventListener('mousemove', handleNoteDragMove);
@@ -1698,13 +1869,28 @@
     // De click ná de mouseup mag geen selectie-wijziging meer doen.
     dragConsumedClick = true;
     setTimeout(() => { dragConsumedClick = false; }, 0);
-    const steps = -Math.round((e.clientY - d.startY) / (5 * (osmdZoom || 1)));
+    const dx = e.clientX - d.startX, dy = e.clientY - d.startY;
+    const ids = selectionIds.has(d.id) && selectionIds.size > 1 ? Array.from(selectionIds) : [d.id];
+    // Shift + overwegend horizontaal: verschuiven in de tijd, per rastercel (0.7.87).
+    if (e.shiftKey && Math.abs(dx) >= Math.abs(dy) && d.celPx) {
+      const cellen = Math.round(dx / d.celPx);
+      if (!cellen) return;
+      const q = notatieQ || Number(score?.quantize) || 4;
+      const gridUs = (60e6 / (Number(bpm) || 90)) / q;
+      selectionIds = new Set(ids);
+      try { await invoke('notation_shift_events', { scoreId, eventIds: ids, deltaUs: Math.round(cellen * gridUs) }); } catch (e2) {}
+      return;
+    }
+    const steps = -Math.round(dy / (5 * (osmdZoom || 1)));
     if (!steps) return;
-    const to = Math.max(0, Math.min(127, diatonicToMidi(nearestDiatonicIndex(d.origMidi) + steps)));
+    // Alt + verticaal: chromatisch (halve tonen); anders diatonisch.
+    const to = e.altKey
+      ? Math.max(0, Math.min(127, d.origMidi + steps))
+      : Math.max(0, Math.min(127, diatonicToMidi(nearestDiatonicIndex(d.origMidi) + steps)));
     const delta = Math.max(-24, Math.min(24, to - d.origMidi));
     if (!delta) return;
-    selectionIds = new Set([d.id]);
-    try { await invoke('notation_transpose', { scoreId, eventIds: [d.id], semitones: delta }); } catch (e2) {}
+    selectionIds = new Set(ids);
+    try { await invoke('notation_transpose', { scoreId, eventIds: ids, semitones: delta }); } catch (e2) {}
   }
 
   // Zoom (OSMD.Zoom): knoppen −/+ in de toolbar; noot-boxen daarna hermeten.
@@ -1879,8 +2065,8 @@
   function handleKey(e) {
     if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT')) return;
     // Modaal open: alleen Escape (sluiten), verder geen sneltoetsen op de partituur.
-    if (wizard || bevestig || herstel || hulpOpen) {
-      if (e.key === 'Escape' && !herstel) { wizard = null; bevestig = null; hulpOpen = false; e.preventDefault(); }
+    if (wizard || bevestig || herstel || hulpOpen || contextMenu) {
+      if (e.key === 'Escape' && !herstel) { wizard = null; bevestig = null; hulpOpen = false; contextMenu = null; e.preventDefault(); }
       return;
     }
     // Nieuw stuk (0.7.83), opslaan/openen (0.7.84), in beide standen.
@@ -1908,6 +2094,7 @@
         e.preventDefault(); return;
       }
     }
+    if (e.key === 'Escape' && gumActief) { gumActief = false; e.preventDefault(); return; }
     // V = alleen de actieve stem in kleur (Shift+Alt+S botst met de Windows-indelingswissel).
     if ((e.key === 'v' || e.key === 'V') && !e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey) { toggleAlleenActieveStem(); e.preventDefault(); return; }
     // ---- Stapinvoer-sneltoetsen (MuseScore-conventies) ----
@@ -2129,7 +2316,8 @@
   const invoerActies = {
     setStepMode, setQuarters: (q) => { stepQuarters = q; }, toggleDot: () => { stepDotted = !stepDotted; },
     rest: stepRest, repeat: () => { if (stepLastChordNotes.length) stepRepeatLast(); },
-    setAcc: (a) => { stepAcc = a; }, toggleTie: () => { stepTie = !stepTie; }, gum: stepGum, alterLast: stepAlterLast,
+    setAcc: (a) => { stepAcc = a; }, toggleTie: () => { stepTie = !stepTie; }, gum: toggleGum, alterLast: stepAlterLast,
+    togglePreview: toggleGeluidBijInvoer,
     moveCursor, deleteSelection, transpose: transposeSelection, setHands: setHandsSelection,
     changeDuration, copy: copySelection, paste: pasteClipboard,
   };
@@ -2177,6 +2365,9 @@
   {#if hulpOpen}
     <HelpDialog on:close={() => hulpOpen = false} />
   {/if}
+  {#if contextMenu}
+    <ContextMenu x={contextMenu.x} y={contextMenu.y} items={contextMenu.items} on:close={sluitContextMenu} />
+  {/if}
   <!-- Het notatievenster is nog niet nagelopen; dat hoort de gebruiker te
        weten vóór hij op het resultaat vertrouwt. -->
   <div class="notation-alpha" role="note">
@@ -2191,6 +2382,7 @@
     <div class="tab-inhoud">
       {#if actieveTab === 'input'}
         <InputTab {stepMode} {stepQuarters} {stepDotted} acc={stepAcc} tie={stepTie} kanHerhaal={stepLastChordNotes.length > 0} kanAlterLast={stepLastIds.length > 0}
+          gum={gumActief} previewOn={geluidBijInvoer}
           {viewMode} {selectieAlleenPedaal} {clipboardCount} acties={invoerActies} />
       {:else if actieveTab === 'texts'}
         <TextsMarksTab />
@@ -2261,7 +2453,7 @@
     <LayerBar layers={score.layers} armedLayer={score.armed_layer} {recording} acties={laagActies} />
     <StatusLine {armedWaiting} {countInRemaining} aantalNoten={flatEvents.length} selectieAantal={selectionIds.size}
       cursorNaam={cursorEvent ? noteName(cursorEvent.midi) : ''} {cursorIndex} cursorLaag={cursorEvent?._layer ?? ''}
-      {stepMode} {caretTekst} debugTekst={debugVlag ? `OSMD ${renderMs} ms · ${renderMaten} m.` : ''} />
+      {stepMode} {caretTekst} extra={chordTekst} debugTekst={debugVlag ? `OSMD ${renderMs} ms · ${renderMaten} m.` : ''} />
   {/if}
 
   {#if !isLive && divisions.length > 0}
@@ -2305,7 +2497,8 @@
   {#if error}<div class="notation-error">{error}</div>{/if}
   {#if converting}<div class="notation-busy">{$t('notation.busy')}</div>{/if}
 
-  <div class="notation-sheet" class:clickable={isLive && viewMode === 'staff'} bind:this={container} on:click={handleSheetClick} on:mousedown={handleSheetMouseDown}>
+  <div class="notation-sheet" class:clickable={isLive && viewMode === 'staff'} class:gum={gumActief} bind:this={container}
+    on:click={handleSheetClick} on:mousedown={handleSheetMouseDown} on:dblclick={handleSheetDblClick} on:contextmenu|preventDefault={handleSheetContext}>
     <!-- OSMD tekent in zijn eigen host; die blijft gemount (OSMD houdt de
          containerreferentie) en wordt in klavar met visibility verborgen,
          niet met display:none — OSMD meet de breedte bij render/autoResize. -->
@@ -2317,6 +2510,7 @@
         cursorId={cursorEvent?.id ?? null}
         zoom={osmdZoom}
         {stepMode}
+        gum={gumActief}
         {recording}
         {nowGrid}
         {openNotes}
@@ -2411,6 +2605,7 @@
   .notation-busy { padding: 0.35rem 0.75rem; background: #f4ecd4; color: #6b5b1e; font-size: 0.8rem; }
   .notation-sheet { flex: 1; overflow-y: auto; padding: 1rem 1.5rem; background: #fff; position: relative; }
   .notation-sheet.clickable { cursor: pointer; }
+  .notation-sheet.gum { cursor: not-allowed; }
   .osmd-host { display: block; }
   .osmd-host.verborgen { visibility: hidden; position: absolute; inset: 0; overflow: hidden; }
   .view-switch { display: inline-flex; gap: 0.15rem; }

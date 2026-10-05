@@ -747,7 +747,7 @@
     "count_in_title": "Aantal tellen voortellen vóór de opname begint",
     "count_in_off": "uit",
     "step_input": "Stapinvoer",
-    "step_input_title": "Stapinvoer: speel een toets of akkoord op het klavier — of klik op de balk — en de noot komt op de invoercursor met de gekozen waarde",
+    "step_input_title": "Stapinvoer: speel een toets of akkoord op het klavier, typ A–G, of klik op de balk — de noot komt op de aangeklikte maat, tel en toonhoogte (Shift+klik = akkoordnoot)",
     "note_value": "Nootwaarde",
     "note_value_key": "Nootwaarde (toets {key})",
     "dot": "punt",
@@ -898,7 +898,7 @@
     "tie": "Boog",
     "tie_title": "Overbinden: dezelfde toon opnieuw plaatsen verlengt de vorige noot (blijft aan)",
     "eraser": "Gum",
-    "eraser_title": "Geselecteerde noten verwijderen; in stapinvoer zonder selectie de laatste plaatsing",
+    "eraser_title": "Gum (aan/uit): klik op een noot om alleen die noot te verwijderen; Esc zet de gum uit",
     "caret_label": "Invoer:",
     "measure_beat": "maat {m}, tel {b}",
     "voices_later": "Stemmen per balk komen in een volgende versie.",
@@ -913,7 +913,12 @@
     "split_chord_title": "Hoogste noot per inzet naar stem 1, de rest naar stem 2",
     "only_active_voice": "Alleen actieve stem",
     "only_active_voice_title": "Andere stemmen lichtgrijs tonen (V)",
-    "voices_hint": "Stem 1 en 3: stokken omhoog, 2 en 4 omlaag; elke stem een eigen kleur op het scherm, zwart op papier."
+    "voices_hint": "Stem 1 en 3: stokken omhoog, 2 en 4 omlaag; elke stem een eigen kleur op het scherm, zwart op papier.",
+    "sound_on_entry": "Geluid bij invoer",
+    "sound_on_entry_title": "Een geplaatste noot 150 ms laten klinken op de registers van de divisie van de balk (niet tijdens opname)",
+    "ctx_edit": "Bewerken",
+    "ctx_remove_from_chord": "Noot uit akkoord verwijderen",
+    "chord_status": "Akkoord: {notes} ({n} noten) — Delete, ÷2/×2, Naar stem of rechtsklik"
   },
   "temperaments": {
     "name_prompt": "Naam voor deze stemming:"

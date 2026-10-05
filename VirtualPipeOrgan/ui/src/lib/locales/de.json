@@ -747,7 +747,7 @@
     "count_in_title": "Anzahl Schläge, die vor Aufnahmebeginn eingezählt werden",
     "count_in_off": "aus",
     "step_input": "Schritteingabe",
-    "step_input_title": "Schritteingabe: Taste oder Akkord auf dem Manual spielen — oder auf die Notenzeile klicken — und die Note wird mit dem gewählten Wert am Eingabecursor platziert",
+    "step_input_title": "Schritteingabe: Taste oder Akkord spielen, A–G tippen oder auf die Notenzeile klicken — die Note landet auf Takt, Schlag und Tonhöhe des Klicks (Umschalt+Klick = Akkordnote)",
     "note_value": "Notenwert",
     "note_value_key": "Notenwert (Taste {key})",
     "dot": "Punkt",
@@ -898,7 +898,7 @@
     "tie": "Bogen",
     "tie_title": "Überbinden: dieselbe Tonhöhe erneut setzen verlängert die vorige Note (bleibt an)",
     "eraser": "Radierer",
-    "eraser_title": "Ausgewählte Noten löschen; in der Schritteingabe ohne Auswahl die letzte Eingabe",
+    "eraser_title": "Radierer (an/aus): auf eine Note klicken, um nur diese zu löschen; Esc schaltet ihn aus",
     "caret_label": "Eingabe:",
     "measure_beat": "Takt {m}, Schlag {b}",
     "voices_later": "Stimmen pro Notenzeile kommen in einer späteren Version.",
@@ -913,7 +913,12 @@
     "split_chord_title": "Höchste Note je Einsatz in Stimme 1, der Rest in Stimme 2",
     "only_active_voice": "Nur aktive Stimme",
     "only_active_voice_title": "Andere Stimmen hellgrau zeigen (V)",
-    "voices_hint": "Stimme 1 und 3 Hälse nach oben, 2 und 4 nach unten; jede Stimme eine eigene Farbe am Bildschirm, schwarz auf Papier."
+    "voices_hint": "Stimme 1 und 3 Hälse nach oben, 2 und 4 nach unten; jede Stimme eine eigene Farbe am Bildschirm, schwarz auf Papier.",
+    "sound_on_entry": "Ton bei Eingabe",
+    "sound_on_entry_title": "Eine gesetzte Note 150 ms auf den Registern der Abteilung der Notenzeile erklingen lassen (nicht während der Aufnahme)",
+    "ctx_edit": "Bearbeiten",
+    "ctx_remove_from_chord": "Note aus Akkord entfernen",
+    "chord_status": "Akkord: {notes} ({n} Noten) — Entf, ÷2/×2, In Stimme oder Rechtsklick"
   },
   "temperaments": {
     "name_prompt": "Name für diese Stimmung:"
