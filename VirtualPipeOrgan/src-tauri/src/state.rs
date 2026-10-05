@@ -292,6 +292,32 @@ pub struct MidiDeviceInfo {
     pub is_output: bool,
 }
 
+/// Uitgangscorrectie van één profielsoort (0.7.77), in `audio_config.json`.
+/// Hoort bij de uitgang (hoofdtelefoon/luidsprekers), niet bij het orgel.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct OutputEqSaved {
+    #[serde(default)]
+    pub enabled: bool,
+    /// Toegepaste (effectieve) voorversterking in dB.
+    #[serde(default)]
+    pub preamp_db: f32,
+    /// Auto-stand (standaard aan: een preset met +6 dB laag mag niet in de
+    /// begrenzer lopen).
+    #[serde(default = "serde_waar")]
+    pub preamp_auto: bool,
+    /// Gekozen preset (bv. "autoeq/oratory1990/over-ear/AKG K240 Studio");
+    /// None = handmatig of geïmporteerd.
+    #[serde(default)]
+    pub preset_id: Option<String>,
+    /// Naam voor in de knop (preset- of bestandsnaam).
+    #[serde(default)]
+    pub preset_naam: Option<String>,
+    #[serde(default)]
+    pub bands: Vec<crate::library::EqBandSaved>,
+}
+
+fn serde_waar() -> bool { true }
+
 /// App-wide audio output preferences, persisted to `audio_config.json`.
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct AudioPrefs {
@@ -326,6 +352,14 @@ pub struct AudioPrefs {
     /// Toegangstoken van de afstandsbediening; None = nog nooit aangemaakt.
     #[serde(default)]
     pub remote_token: Option<String>,
+    /// Uitgangscorrectie per profielsoort ("speakers" | "headphones"), 0.7.77.
+    #[serde(default)]
+    pub output_eq: std::collections::HashMap<String, OutputEqSaved>,
+    /// Welke correctie nu geldt; volgt het actieve uitvoerprofiel van de
+    /// frontend (set_active_output_profile). None = nog nooit gezet → geen
+    /// correctie.
+    #[serde(default)]
+    pub active_output_profile: Option<String>,
 }
 
 /// Load audio preferences from `<app_data_dir>/audio_config.json` (defaults if absent).
@@ -343,7 +377,12 @@ pub fn load_audio_prefs(app_data_dir: &std::path::Path) -> AudioPrefs {
 pub fn save_audio_prefs(app_data_dir: &std::path::Path, prefs: &AudioPrefs) {
     let path = app_data_dir.join("audio_config.json");
     if let Ok(json) = serde_json::to_string_pretty(prefs) {
-        if let Err(e) = std::fs::write(&path, json) {
+        // Atomair (0.7.77): eerst een tijdelijk bestand, dan hernoemen. Een
+        // onderbroken write (crash, stroomuitval, scanner-lock) laat zo nooit
+        // een afgekapt bestand achter, want load_audio_prefs valt bij
+        // onleesbare JSON stil terug op de standaardwaarden.
+        let tmp = app_data_dir.join("audio_config.json.tmp");
+        if let Err(e) = std::fs::write(&tmp, json).and_then(|_| std::fs::rename(&tmp, &path)) {
             tracing::warn!("Failed to save audio_config.json: {}", e);
         }
     }
@@ -3880,6 +3919,9 @@ impl AppState {
         });
 
         let outcome = |switched: bool, player_rebuilt: bool, message: Option<String>, state: &Self| {
+            // Nieuwe audiothread = lege ketens: de uitgangscorrectie (0.7.77)
+            // meteen terugzetten, ook zonder frontend (Rust is de eigenaar).
+            if player_rebuilt { crate::commands::eq_uitgang_toepassen(state); }
             let (actual_host, actual_device) = state.audio_player.read().as_ref()
                 .map(|p| (p.current_host.read().clone(), p.current_device.read().clone()))
                 .unwrap_or_default();

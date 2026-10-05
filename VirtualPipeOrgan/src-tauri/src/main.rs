@@ -158,6 +158,9 @@ fn main() {
             info!("App data directory: {:?}", app_data_dir);
 
             let state = AppState::new(app_data_dir);
+            // Uitgangscorrectie (0.7.77) van de laatst actieve profielsoort
+            // meteen op de verse audiothread, nog vóór de frontend er is.
+            commands::eq_uitgang_toepassen(&state);
             // AppHandle voor frontend-events (laad-voortgang tijdens organ-load).
             *state.app_handle.write() = Some(app.handle().clone());
 
@@ -528,6 +531,10 @@ fn main() {
             commands::set_parametric_eq,
             commands::set_eq_bands,
             commands::eq_response_db,
+            commands::get_output_eq,
+            commands::set_output_eq,
+            commands::set_active_output_profile,
+            commands::read_eq_file,
             commands::persist_reverb_config,
             commands::set_algorithmic_reverb,
             commands::set_reverb_type,

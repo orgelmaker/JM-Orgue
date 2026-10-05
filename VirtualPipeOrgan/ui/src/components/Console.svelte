@@ -6,6 +6,9 @@
   import MidiPlayer from './MidiPlayer.svelte';
   import { t, tx, locale, setLocale, AVAILABLE_LOCALES, LOCALE_LABELS } from '../lib/i18n.js';
   import SetzerBar from './SetzerBar.svelte';
+  import EqBanden from './eq/EqBanden.svelte';
+  import EqPresetKiezer from './eq/EqPresetKiezer.svelte';
+  import { presetBijId, presetNaarBanden } from '../lib/eqPresets.js';
   import { loadPanelState, savePanelState } from '../lib/panelState.js';
   import { pasVensterstandToe } from '../lib/vensterStand.js';
   import { registerRegel, korenTekst } from '../lib/registerRegel.js';
@@ -1158,40 +1161,8 @@
   try { if (localStorage.getItem('jm-orgue-eq-bw-unit') === 'q') eqBwUnit = 'q'; } catch (e) {}
   function setEqBwUnit(u) { eqBwUnit = u === 'q' ? 'q' : 'oct'; try { localStorage.setItem('jm-orgue-eq-bw-unit', eqBwUnit); } catch (e) {} }
   // Q ↔ bandbreedte (analoge RBJ-benadering; identiek aan vpo_audio::q_naar_bandbreedte).
+  // De bandbewerking zelf zit sinds 0.7.77 in eq/EqBanden.svelte.
   const qToBw = (q) => (2 / Math.LN2) * Math.asinh(1 / (2 * Math.max(0.05, q)));
-  const bwToQ = (bw) => 1 / (2 * Math.sinh(0.5 * Math.LN2 * Math.max(0.01, bw)));
-  // Steilheid van een band voor weergave: Q als die er is, anders uit de bandbreedte.
-  const bandQ = (b) => (b.q != null ? Number(b.q) : bwToQ(Number(b.bandwidth) || 1));
-  const isShelf = (b) => b.band_type === 'lowshelf' || b.band_type === 'highshelf';
-  function setBandQ(band, q) {
-    // Shelves: 0,3–2 (daarbuiten resoneert de kantel); overige: 0,05–20.
-    const lo = isShelf(band) ? 0.3 : 0.05;
-    const hi = isShelf(band) ? 2 : 20;
-    const qq = Math.max(lo, Math.min(hi, Number(q) || 0.7));
-    band.q = qq;
-    band.bandwidth = qToBw(qq);
-    onEqBandChange();
-  }
-  function setBandBw(band, bw) {
-    const b = Math.max(0.05, Math.min(8, Number(bw) || 1));
-    band.bandwidth = b;
-    band.q = bwToQ(b);
-    onEqBandChange();
-  }
-
-  // Reactief ($t) zodat de labels de taalkeuze volgen; de markup leest `.label`.
-  $: eqBandTypes = [
-    { value: 'peak', label: $t('eq.band_peak') },
-    { value: 'lowpass', label: $t('eq.band_lowpass') },
-    { value: 'highpass', label: $t('eq.band_highpass') },
-    { value: 'bandpass', label: $t('eq.band_bandpass') },
-    { value: 'lowshelf', label: $t('eq.band_lowshelf') },
-    { value: 'highshelf', label: $t('eq.band_highshelf') },
-  ];
-
-  // Log-schaal voor de frequentie-slider: 0..300 ↔ 20 Hz .. 20 kHz.
-  const freqToSlider = (f) => Math.round(100 * Math.log10(Math.max(20, Math.min(20000, f)) / 20));
-  const sliderToFreq = (v) => Math.round(20 * Math.pow(10, v / 100));
 
   // EQ wordt per orgel opgeslagen in de backend (.jm-settings.json) en bij load geladen
   // via loadAudioSettingsForOrgan() — niet meer in een globale localStorage-key.
@@ -1267,6 +1238,86 @@
   function removeEqBand(idx) {
     eqBands = eqBands.filter((_, i) => i !== idx);
     updateEq();
+  }
+  const nieuweEqBand = () => ({ enabled: true, band_type: 'peak', freq: 1000, gain_db: 0, bandwidth: qToBw(1.0), q: 1.0, channel: null });
+
+  // ---- Uitgangscorrectie per uitvoerprofiel (0.7.77) ----
+  // Hoort bij de uitgang (hoofdtelefoon/luidsprekers), niet bij het orgel.
+  // Rust is de eigenaar (audio_config.json) en volgt het actieve profiel; dit
+  // venster bewerkt de soort `outEqKind` en haalt de stand op via get_output_eq.
+  let outEqKind = 'speakers';
+  let outEqVolgActief = true;     // tot de gebruiker zelf een soort kiest
+  let outEq = null;               // OutputEqDto van outEqKind
+  let outEqBands = [];
+  let outEqMelding = '';
+  let outEqLadenVoor = '';
+  $: if (outEqVolgActief && audioProfiles?.active && audioProfiles.active !== outEqKind) outEqKind = audioProfiles.active;
+  $: outEqSleutel = `${outEqKind}|${audioStatusKey}`;
+  $: if (outEqSleutel !== outEqLadenVoor) { outEqLadenVoor = outEqSleutel; laadOutEq(); }
+  // "(gewijzigd)": banden wijken af van de gekozen gemeten preset.
+  $: outEqGewijzigd = !!(outEq?.preset_id && !bandenGelijkAanPreset(outEqBands, presetBijId(outEq.preset_id)));
+  $: eqAlgemeneProfielen = eqProfielen.map((p) => ({ id: 'algemeen/' + p.id, label: p.label, banden: p.bands, preamp: null }));
+
+  function bandenGelijkAanPreset(banden, preset) {
+    if (!preset) return true;
+    const ref = presetNaarBanden(preset);
+    if (ref.length !== banden.length) return false;
+    return ref.every((r, i) => {
+      const b = banden[i];
+      return b && b.enabled && b.band_type === r.band_type && Math.abs(Number(b.freq) - r.freq) < 0.5
+        && Math.abs(Number(b.gain_db) - r.gain_db) < 0.05 && b.q != null && Math.abs(Number(b.q) - r.q) < 0.005 && b.channel == null;
+    });
+  }
+  function kiesOutEqKind(kind) { outEqVolgActief = false; outEqKind = kind; outEqMelding = ''; }
+  async function laadOutEq() {
+    if (!outEqKind) return;
+    try {
+      const d = await invoke('get_output_eq', { kind: outEqKind });
+      outEq = d; outEqBands = Array.isArray(d?.bands) ? d.bands : [];
+    } catch (e) { console.error('get_output_eq:', e); }
+  }
+  async function slaOutEqOp(extra = {}) {
+    if (!outEq) return;
+    if (outEqSaveTimer) { clearTimeout(outEqSaveTimer); outEqSaveTimer = null; }
+    try {
+      const d = await invoke('set_output_eq', {
+        kind: outEqKind,
+        enabled: !!outEq.enabled,
+        bands: outEqBands.map((b) => ({
+          enabled: !!b.enabled, band_type: b.band_type, freq: Number(b.freq) || 1000, gain_db: Number(b.gain_db) || 0,
+          bandwidth: Number(b.bandwidth) || 1.0, q: (b.q === null || b.q === undefined) ? null : Number(b.q),
+          channel: (b.channel === null || b.channel === undefined) ? null : Number(b.channel),
+        })),
+        preampDb: outEq.preamp_auto ? null : (Number(outEq.preamp_db) || 0),
+        preampAuto: !!outEq.preamp_auto,
+        presetId: outEq.preset_id ?? null,
+        presetNaam: outEq.preset_naam ?? null,
+        ...extra,
+      });
+      // Alleen de scalaire velden overnemen (effectieve voorversterking,
+      // Auto-waarde); de banden blijven de lokale lijst, anders zet een
+      // oudere respons een schuif even terug.
+      outEq = d;
+    } catch (e) { console.error('set_output_eq:', e); }
+  }
+  function pasOutEqPresetToe(e) {
+    const d = e.detail;
+    outEqBands = d.banden.map((b) => ({ ...b }));
+    outEq = { ...outEq, enabled: true, preamp_auto: true, preset_id: d.id ?? null, preset_naam: d.naam ?? null };
+    outEqMelding = d.melding || '';
+    slaOutEqOp();
+  }
+  function outEqPreamp(e) {
+    if (e.detail.auto) outEq.preamp_auto = true;
+    else { outEq.preamp_auto = false; if (e.detail.db != null) outEq.preamp_db = e.detail.db; }
+    slaOutEqOp();
+  }
+  // Sliderbewegingen: niet elke stap een schrijfactie naar audio_config.json
+  // (zelfde patroon als bewaarWindStraks); de laatste stand gaat na 150 ms.
+  let outEqSaveTimer = null;
+  function slaOutEqStraks() {
+    if (outEqSaveTimer) clearTimeout(outEqSaveTimer);
+    outEqSaveTimer = setTimeout(() => { outEqSaveTimer = null; slaOutEqOp(); }, 150);
   }
 
   let reverbIrLoaded = false;
@@ -5509,7 +5560,8 @@
 
             <!-- Parametric EQ -->
             <div class="settings-block">
-              <h3 class="settings-block-title">{$t('settings.equalizer')}</h3>
+              <h3 class="settings-block-title">{$t('settings.equalizer_organ')}</h3>
+              <p class="settings-hint" style="margin:0 0 0.4rem;">{$t('settings.equalizer_organ_hint')}</p>
               <div style="display:flex; align-items:center; gap:0.5rem;">
                 <label class="swell-toggle">
                   <input type="checkbox" bind:checked={eqEnabled} on:change={updateEq} />
@@ -5538,117 +5590,13 @@
                       <button class="btn btn-sm" on:click={() => pasEqProfielToe(prof.id)}>{prof.label}</button>
                     {/each}
                   </div>
-                  <!-- Voorversterking (0.7.76): Auto = −(grootste opgetelde versterking). -->
-                  <div class="swell-config-sliders" style="border:1px solid var(--accent-soft-2); border-radius:var(--radius-sm); padding:0.4rem 0.5rem;">
-                    <div class="swell-config-row">
-                      <span class="swell-config-label">{$t('eq.preamp')}</span>
-                      <input type="range" min="-24" max="6" step="0.1" value={eqPreampAuto ? eqPreampEffectief : eqPreampDb}
-                        disabled={eqPreampAuto} style="opacity:{eqPreampAuto ? 0.55 : 1};"
-                        on:input={(e) => setEqPreampDb(e.target.value)} />
-                      <input type="number" min="-24" max="6" step="0.1"
-                        style="width:4.2rem; font-size:0.75rem; padding:0.1rem 0.25rem; background:var(--bg-elevated); border:1px solid var(--accent-soft-2); border-radius:var(--radius-sm); color:{eqPreampAuto ? 'var(--text-muted)' : 'var(--text)'};"
-                        value={(eqPreampAuto ? eqPreampEffectief : eqPreampDb).toFixed(1)} disabled={eqPreampAuto}
-                        on:change={(e) => { setEqPreampDb(e.target.value); e.target.value = eqPreampDb.toFixed(1); }} />
-                      <span class="swell-config-value" style="width:1.4rem;">dB</span>
-                      <label class="swell-toggle" style="margin:0 0 0 0.4rem;" title={$t('eq.preamp_auto_title')}>
-                        <input type="checkbox" checked={eqPreampAuto} on:change={(e) => setEqPreampAuto(e.target.checked)} />
-                        <span class="swell-toggle-label">{$t('eq.preamp_auto')}</span>
-                      </label>
-                      <span class="eq-unit-switch" style="margin-left:auto; display:inline-flex; gap:0.15rem;" title={$t('eq.unit_title')}>
-                        <button class="btn btn-ghost btn-sm" class:active={eqBwUnit === 'oct'} style="font-size:0.7rem; padding:0.05rem 0.4rem;" on:click={() => setEqBwUnit('oct')}>{$t('eq.unit_oct')}</button>
-                        <button class="btn btn-ghost btn-sm" class:active={eqBwUnit === 'q'} style="font-size:0.7rem; padding:0.05rem 0.4rem;" on:click={() => setEqBwUnit('q')}>{$t('eq.unit_q')}</button>
-                      </span>
-                    </div>
-                    {#if !eqPreampAuto && eqPreampDb > eqPreampAutoWaarde + 0.05 && eqBands.some(b => b.enabled && b.gain_db > 0)}
-                      <div class="settings-hint" style="color:var(--warning, #b8860b);">{$t('eq.preamp_warn')}</div>
-                    {/if}
-                  </div>
-                  {#each eqBands as band, bi (bi)}
-                    <div style="border:1px solid var(--accent-soft-2); border-radius:var(--radius-sm); padding:0.4rem 0.5rem; opacity:{band.enabled ? 1 : 0.55};">
-                      <div style="display:flex; align-items:center; gap:0.45rem; flex-wrap:wrap; margin-bottom:0.35rem;">
-                        <label class="swell-toggle" style="margin:0;" title={$t('eq.band_toggle_title')}>
-                          <input type="checkbox" bind:checked={band.enabled} on:change={onEqBandChange} />
-                          <span class="swell-toggle-label">{$t('eq.band_n').replace('{n}', bi + 1)}</span>
-                        </label>
-                        <select
-                          style="font-size:0.75rem; padding:0.15rem 0.3rem; background:var(--bg-elevated); border:1px solid var(--accent-soft-2); border-radius:var(--radius-sm); color:var(--text);"
-                          bind:value={band.band_type}
-                          on:change={(e) => { band.band_type = e.target.value; if (isShelf(band) && band.q != null) setBandQ(band, band.q); else onEqBandChange(); }}
-                          title={$t('eq.filter_type')}
-                        >
-                          {#each eqBandTypes as t}
-                            <option value={t.value}>{t.label}</option>
-                          {/each}
-                        </select>
-                        <select
-                          style="font-size:0.75rem; padding:0.15rem 0.3rem; background:var(--bg-elevated); border:1px solid var(--accent-soft-2); border-radius:var(--radius-sm); color:var(--text);"
-                          value={band.channel === null || band.channel === undefined ? 'all' : String(band.channel)}
-                          on:change={(e) => { band.channel = e.target.value === 'all' ? null : parseInt(e.target.value, 10); onEqBandChange(); }}
-                          title={$t('settings.eq_channel_hint')}
-                        >
-                          <option value="all">{$t('settings.eq_all_channels')}</option>
-                          {#each Array(Math.max(2, audioChannelCount)) as _, ch}
-                            <option value={String(ch)}>{$t('settings.channel_n').replace('{n}', ch + 1)}</option>
-                          {/each}
-                        </select>
-                        <button
-                          class="btn btn-ghost btn-sm"
-                          style="margin-left:auto; font-size:0.75rem; padding:0.1rem 0.45rem;"
-                          on:click={() => removeEqBand(bi)}
-                          title={$t('eq.band_remove')}
-                        >✕</button>
-                      </div>
-                      <div class="swell-config-sliders">
-                        <div class="swell-config-row">
-                          <span class="swell-config-label">{$t('eq.frequency')}</span>
-                          <input type="range" min="0" max="300" step="1"
-                            value={freqToSlider(band.freq)}
-                            on:input={(e) => { band.freq = sliderToFreq(parseInt(e.target.value, 10)); onEqBandChange(); }}
-                          />
-                          <input type="number" min="20" max="20000" step="1"
-                            style="width:4.6rem; font-size:0.75rem; padding:0.1rem 0.25rem; background:var(--bg-elevated); border:1px solid var(--accent-soft-2); border-radius:var(--radius-sm); color:var(--text);"
-                            value={band.freq}
-                            on:change={(e) => { band.freq = Math.max(20, Math.min(20000, parseFloat(e.target.value) || 1000)); onEqBandChange(); }}
-                          />
-                          <span class="swell-config-value" style="width:1.4rem;">Hz</span>
-                        </div>
-                        {#if band.band_type === 'peak' || band.band_type === 'lowshelf' || band.band_type === 'highshelf'}
-                          <div class="swell-config-row">
-                            <span class="swell-config-label">{$t('eq.gain')}</span>
-                            <input type="range" min="-24" max="24" step="0.5" bind:value={band.gain_db} on:input={onEqBandChange} />
-                            <span class="swell-config-value">{band.gain_db > 0 ? '+' : ''}{Number(band.gain_db).toFixed(1)} dB</span>
-                          </div>
-                        {/if}
-                        {#if isShelf(band) && band.q == null}
-                          <div class="swell-config-row">
-                            <span class="swell-config-label">{$t('eq.shelf_q')}</span>
-                            <button class="btn btn-ghost btn-sm" style="font-size:0.72rem; padding:0.05rem 0.45rem;" on:click={() => setBandQ(band, 0.7071)} title={$t('eq.fixed_slope_title')}>{$t('eq.fixed_slope')}</button>
-                          </div>
-                        {:else if eqBwUnit === 'q' || isShelf(band)}
-                          <div class="swell-config-row">
-                            <span class="swell-config-label">{isShelf(band) ? $t('eq.shelf_q') : $t('eq.unit_q')}</span>
-                            <input type="range" min={isShelf(band) ? 0.3 : 0.1} max={isShelf(band) ? 2 : 10} step="0.01" value={bandQ(band)} on:input={(e) => setBandQ(band, e.target.value)} />
-                            <input type="number" min="0.05" max="20" step="0.01"
-                              style="width:4.2rem; font-size:0.75rem; padding:0.1rem 0.25rem; background:var(--bg-elevated); border:1px solid var(--accent-soft-2); border-radius:var(--radius-sm); color:var(--text);"
-                              value={bandQ(band).toFixed(2)} on:change={(e) => { setBandQ(band, e.target.value); e.target.value = bandQ(band).toFixed(2); }} />
-                            <span class="swell-config-value" style="width:1.4rem;">Q</span>
-                          </div>
-                        {:else}
-                          <div class="swell-config-row">
-                            <span class="swell-config-label">{$t('eq.bandwidth')}</span>
-                            <input type="range" min="0.1" max="4" step="0.05" value={Number(band.bandwidth)} on:input={(e) => setBandBw(band, e.target.value)} />
-                            <span class="swell-config-value">{Number(band.bandwidth).toFixed(2)} oct</span>
-                          </div>
-                        {/if}
-                      </div>
-                    </div>
-                  {/each}
-                  <div style="display:flex; gap:0.4rem;">
-                    <button class="btn btn-secondary btn-sm" on:click={addEqBand}>{$t('eq.band_add')}</button>
-                    <span style="font-size:0.7rem; color:var(--text-muted); align-self:center;">
-                      {$t('eq.channel_note')}
-                    </span>
-                  </div>
+                  <EqBanden bands={eqBands} channelCount={audioChannelCount} unit={eqBwUnit}
+                    preampDb={eqPreampDb} preampAuto={eqPreampAuto} preampEffectief={eqPreampEffectief} preampAutoWaarde={eqPreampAutoWaarde}
+                    on:change={onEqBandChange}
+                    on:preamp={(e) => (e.detail.auto ? setEqPreampAuto(true) : (e.detail.db == null ? setEqPreampAuto(false) : setEqPreampDb(e.detail.db)))}
+                    on:unit={(e) => setEqBwUnit(e.detail)}
+                    on:add={addEqBand}
+                    on:remove={(e) => removeEqBand(e.detail)} />
                 </div>
               {/if}
             </div>
@@ -7063,6 +7011,52 @@
                 </div>
               </div>
 
+              <!-- Uitgangscorrectie per uitvoerprofiel (0.7.77): hoofdtelefoon/luidsprekers -->
+              <div style="margin-top: 0.85rem; padding-top: 0.75rem; border-top: var(--border-subtle);">
+                <h4 style="margin: 0 0 0.35rem; font-size: 0.85rem;">{$t('eq.output_title')}</h4>
+                <p style="margin: 0 0 0.5rem; font-size: 0.7rem; color: var(--text-muted); line-height: 1.4;">
+                  {$t('eq.output_hint')}
+                </p>
+                <div style="display:flex; align-items:center; gap:0.4rem; flex-wrap:wrap; margin-bottom:0.4rem;">
+                  <span class="audio-select-label">{$t('eq.output_edit')}</span>
+                  <span class="eq-unit-switch" style="display:inline-flex; gap:0.15rem;">
+                    {#each [['speakers', $t('settings.audio_profile_speakers')], ['headphones', $t('settings.audio_profile_headphones')]] as [kind, label]}
+                      <button class="btn btn-ghost btn-sm" class:active={outEqKind === kind} style="font-size:0.72rem; padding:0.1rem 0.5rem;"
+                        on:click={() => kiesOutEqKind(kind)}>{label}{audioProfiles?.active === kind ? ' ●' : ''}</button>
+                    {/each}
+                  </span>
+                  {#if outEq}
+                    <label class="swell-toggle" style="margin:0 0 0 0.4rem;">
+                      <input type="checkbox" checked={outEq.enabled} on:change={(e) => { outEq.enabled = e.target.checked; slaOutEqOp(); }} />
+                      <span class="swell-toggle-label">{$t('settings.eq_enabled')}</span>
+                    </label>
+                    <EqPresetKiezer naam={outEq.preset_naam} gewijzigd={outEqGewijzigd} algemeen={eqAlgemeneProfielen}
+                      on:apply={pasOutEqPresetToe} on:fout={(e) => (outEqMelding = e.detail)} />
+                  {/if}
+                </div>
+                {#if outEq && audioProfiles?.active !== outEqKind}
+                  <div class="settings-hint" style="color:var(--warning, #b8860b); display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;">
+                    {$t('eq.output_not_active')}
+                    <button class="btn btn-secondary btn-sm" style="font-size:0.7rem; padding:0.15rem 0.5rem;"
+                      on:click={() => dispatch('switchAudioProfile', outEqKind)}>{$t('eq.output_activate')}</button>
+                  </div>
+                {/if}
+                {#if outEqMelding}
+                  <div class="settings-hint">{outEqMelding}</div>
+                {/if}
+                {#if outEq && outEq.enabled}
+                  <div style="margin-top:0.5rem; display:flex; flex-direction:column; gap:0.5rem;">
+                    <EqBanden bands={outEqBands} channelCount={audioChannelCount} unit={eqBwUnit}
+                      preampDb={outEq.preamp_db} preampAuto={outEq.preamp_auto} preampEffectief={outEq.preamp_db} preampAutoWaarde={outEq.preamp_auto_waarde}
+                      on:change={() => { outEqBands = outEqBands; slaOutEqStraks(); }}
+                      on:preamp={outEqPreamp}
+                      on:unit={(e) => setEqBwUnit(e.detail)}
+                      on:add={() => { outEqBands = [...outEqBands, nieuweEqBand()]; slaOutEqOp(); }}
+                      on:remove={(e) => { outEqBands = outEqBands.filter((_, i) => i !== e.detail); slaOutEqOp(); }} />
+                  </div>
+                {/if}
+              </div>
+
               <!-- Automatisch starten bij Windows -->
               <div style="margin-top: 0.85rem; padding-top: 0.75rem; border-top: var(--border-subtle);">
                 <label class="swell-toggle" title={$t('general.autostart_title')}>
@@ -7601,6 +7595,7 @@
               <p class="settings-hint" style="margin: 0 0 0.5rem;">
                 JM-Orgue {appVersion ? $t('about.version').replace('{version}', appVersion) : ''} — {$t('about.copyright')}
               </p>
+              <p class="settings-hint" style="margin: 0 0 0.5rem;">{$t('about.eq_presets_license')}</p>
               {#if installatieInfo}
                 <!-- Wélke kopie draait hier? Een update schrijft altijd naar de
                      installatiemap; wijst je snelkoppeling naar een andere kopie,

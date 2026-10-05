@@ -5,6 +5,24 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.77] - 2026-10-05
+
+### Hoofdtelefoonpresets en correctie per uitvoerprofiel
+
+De equalizer heeft nu ingebouwde presets voor ruim vijfhonderd hoofdtelefoons,
+gebaseerd op metingen (oratory1990, via het AutoEq-project, MIT-licentie). De
+correctie voor uw hoofdtelefoon of luidsprekers hoort bij de uitgang, niet bij
+het orgel: ze staat daarom als nieuw blok bij Algemene instellingen →
+Audio-uitvoer, geldt voor elk orgel en wisselt mee met het uitvoerprofiel
+(Speakers / Hoofdtelefoon). Kies **Preset** en zoek op merk of type; de banden
+en de voorversterking worden ingevuld. Een preset corrigeert de frequentiegang
+van de hoofdtelefoon, niet uw smaak: elke band blijft daarna instelbaar. Met
+**Importeren…** leest u ook presetbestanden in het AutoEq/Equalizer
+APO-tekstformaat en presets van andere orgelprogramma's in. De equalizer per
+orgel blijft bestaan als **Klankkleur van dit orgel**. Na een wissel van
+audio-apparaat staat de correctie meteen weer goed, ook zonder dat het venster
+iets hoeft te doen.
+
 ## [0.7.76] - 2026-10-05
 
 ### Equalizer: steilheid per band, voorversterking

@@ -3025,6 +3025,7 @@ fn fill_live_registration_flags(state: &AppState, mut organ_info: OrganInfoDto) 
 /// de nieuwe audio-thread op alle defaults staan (auditbevinding 18).
 pub fn apply_dsp_after_backend_reload(state: &AppState) {
     let n = apply_saved_output_channels_inner(state);
+    eq_uitgang_toepassen(state);
     if let Some(db) = *state.master_volume_db.read() {
         state.send_audio_command(AudioCommand::SetMasterGain(db));
     }
@@ -5346,19 +5347,27 @@ pub fn set_division_pan(state: State<AppState>, division: String, pan: f32) -> R
 /// Wire-DTO voor één EQ-band (frontend ↔ backend).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EqBandDto {
+    #[serde(default = "dto_waar")]
     pub enabled: bool,
     /// "peak" | "lowpass" | "highpass" | "bandpass" | "lowshelf" | "highshelf"
+    #[serde(alias = "type")]
     pub band_type: String,
     pub freq: f32,
+    #[serde(default)]
     pub gain_db: f32,
-    /// Bandbreedte in octaven
+    /// Bandbreedte in octaven (ontbreekt in een test-API-body = 1 octaaf)
+    #[serde(default = "dto_een")]
     pub bandwidth: f32,
     /// Q (0.7.76); None = bandbreedte-route (oude banden, bit-identiek).
     #[serde(default)]
     pub q: Option<f32>,
     /// None = alle kanalen; anders 0-based fysiek uitgangskanaal
+    #[serde(default)]
     pub channel: Option<u8>,
 }
+
+fn dto_waar() -> bool { true }
+fn dto_een() -> f32 { 1.0 }
 
 fn eq_bands_to_specs(bands: &[EqBandDto]) -> Vec<vpo_audio::EqBandSpec> {
     bands.iter().map(|b| vpo_audio::EqBandSpec {
@@ -5413,6 +5422,11 @@ pub(crate) fn effectieve_preamp_db(state: &AppState, specs: &[vpo_audio::EqBandS
 /// staat dan wat de banden verdragen.
 #[tauri::command]
 pub fn set_eq_bands(state: State<AppState>, enabled: bool, bands: Vec<EqBandDto>, preamp_db: Option<f32>, preamp_auto: Option<bool>) -> Result<(f32, f32), String> {
+    Ok(set_eq_bands_inner(&state, enabled, bands, preamp_db, preamp_auto))
+}
+
+/// Kern van set_eq_bands, ook voor de test-API (JSON-body met een hele preset).
+pub(crate) fn set_eq_bands_inner(state: &AppState, enabled: bool, bands: Vec<EqBandDto>, preamp_db: Option<f32>, preamp_auto: Option<bool>) -> (f32, f32) {
     let specs = eq_bands_to_specs(&bands);
     let auto = preamp_auto.unwrap_or(false);
     let eff = effectieve_preamp_db(&state, &specs, preamp_db, auto);
@@ -5441,7 +5455,144 @@ pub fn set_eq_bands(state: State<AppState>, enabled: bool, bands: Vec<EqBandDto>
         preamp_auto: auto,
         ..Default::default()
     });
-    Ok((eff, auto_waarde))
+    (eff, auto_waarde)
+}
+
+// ---------- Uitgangscorrectie per uitvoerprofiel (0.7.77) ----------
+
+/// Wire-DTO van de uitgangscorrectie van één profielsoort.
+#[derive(Debug, Clone, Serialize)]
+pub struct OutputEqDto {
+    pub enabled: bool,
+    pub preamp_db: f32,
+    pub preamp_auto: bool,
+    pub preset_id: Option<String>,
+    pub preset_naam: Option<String>,
+    pub bands: Vec<EqBandDto>,
+    /// Auto-waarde van deze banden, ook in handmatige stand (waarschuwing).
+    pub preamp_auto_waarde: f32,
+    /// Welke soort nu geldt ("speakers" | "headphones" | null).
+    pub active: Option<String>,
+}
+
+fn output_eq_kind(kind: &str) -> Result<String, String> {
+    match kind {
+        "speakers" | "headphones" => Ok(kind.to_string()),
+        _ => Err(format!("Onbekende profielsoort: {}", kind)),
+    }
+}
+
+fn output_eq_naar_dto(state: &AppState, cfg: &crate::state::OutputEqSaved, active: Option<String>) -> OutputEqDto {
+    let specs = eq_saved_to_specs(&cfg.bands);
+    let (sr, kanalen) = audio_samplerate_en_kanalen(state);
+    OutputEqDto {
+        enabled: cfg.enabled,
+        preamp_db: cfg.preamp_db,
+        preamp_auto: cfg.preamp_auto,
+        preset_id: cfg.preset_id.clone(),
+        preset_naam: cfg.preset_naam.clone(),
+        bands: cfg.bands.iter().map(|b| EqBandDto {
+            enabled: b.enabled, band_type: b.band_type.clone(), freq: b.freq, gain_db: b.gain_db,
+            bandwidth: b.bandwidth, q: b.q, channel: b.channel,
+        }).collect(),
+        preamp_auto_waarde: vpo_audio::auto_preamp_db(&specs, kanalen, sr),
+        active,
+    }
+}
+
+/// Stuur de uitgangscorrectie van de actieve profielsoort naar de audiothread
+/// (of een lege, uitgeschakelde keten als er geen soort actief is). Bij de
+/// start, na elke audio-herbouw (SwitchOutcome met player_rebuilt) en na elke
+/// wijziging. Rust is de eigenaar: werkt ook zonder frontend.
+pub(crate) fn eq_uitgang_toepassen(state: &AppState) {
+    let prefs = crate::state::load_audio_prefs(&state.app_data_dir);
+    let cfg = prefs.active_output_profile.as_ref().and_then(|k| prefs.output_eq.get(k)).cloned();
+    match cfg {
+        Some(c) => {
+            let specs = eq_saved_to_specs(&c.bands);
+            let eff = effectieve_preamp_db(state, &specs, Some(c.preamp_db), c.preamp_auto);
+            state.send_audio_command(AudioCommand::SetOutputEq { enabled: c.enabled, preamp_db: eff, bands: specs });
+        }
+        None => state.send_audio_command(AudioCommand::SetOutputEq { enabled: false, preamp_db: 0.0, bands: Vec::new() }),
+    }
+}
+
+pub(crate) fn get_output_eq_inner(state: &AppState, kind: &str) -> Result<OutputEqDto, String> {
+    let kind = output_eq_kind(kind)?;
+    let prefs = crate::state::load_audio_prefs(&state.app_data_dir);
+    let cfg = prefs.output_eq.get(&kind).cloned()
+        .unwrap_or_else(|| crate::state::OutputEqSaved { preamp_auto: true, ..Default::default() });
+    Ok(output_eq_naar_dto(state, &cfg, prefs.active_output_profile.clone()))
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn set_output_eq_inner(state: &AppState, kind: &str, enabled: bool, bands: Vec<EqBandDto>, preamp_db: Option<f32>,
+                                  preamp_auto: Option<bool>, preset_id: Option<String>, preset_naam: Option<String>) -> Result<OutputEqDto, String> {
+    let kind = output_eq_kind(kind)?;
+    let auto = preamp_auto.unwrap_or(true);
+    let specs = eq_bands_to_specs(&bands);
+    let eff = effectieve_preamp_db(state, &specs, preamp_db, auto);
+    let cfg = crate::state::OutputEqSaved {
+        enabled, preamp_db: eff, preamp_auto: auto, preset_id, preset_naam,
+        bands: bands.into_iter().map(|b| library::EqBandSaved {
+            enabled: b.enabled, band_type: b.band_type, freq: b.freq, gain_db: b.gain_db,
+            bandwidth: b.bandwidth, q: b.q, channel: b.channel,
+        }).collect(),
+    };
+    let mut prefs = crate::state::load_audio_prefs(&state.app_data_dir);
+    prefs.output_eq.insert(kind.clone(), cfg.clone());
+    crate::state::save_audio_prefs(&state.app_data_dir, &prefs);
+    let actief = prefs.active_output_profile.as_deref() == Some(kind.as_str());
+    if actief { eq_uitgang_toepassen(state); }
+    info!("Uitgangscorrectie {}: enabled={}, {} banden, voorversterking {:.1} dB{}", kind, enabled, cfg.bands.len(), eff,
+          if actief { " (actief)" } else { "" });
+    Ok(output_eq_naar_dto(state, &cfg, prefs.active_output_profile.clone()))
+}
+
+pub(crate) fn set_active_output_profile_inner(state: &AppState, kind: Option<String>) -> Result<(), String> {
+    let kind = match kind { Some(k) => Some(output_eq_kind(&k)?), None => None };
+    let mut prefs = crate::state::load_audio_prefs(&state.app_data_dir);
+    if prefs.active_output_profile != kind {
+        prefs.active_output_profile = kind.clone();
+        crate::state::save_audio_prefs(&state.app_data_dir, &prefs);
+        info!("Uitgangscorrectie volgt profielsoort: {}", kind.as_deref().unwrap_or("geen"));
+    }
+    eq_uitgang_toepassen(state);
+    Ok(())
+}
+
+/// Uitgangscorrectie van een profielsoort ophalen (`kind` = "speakers" | "headphones").
+#[tauri::command]
+pub fn get_output_eq(state: State<AppState>, kind: String) -> Result<OutputEqDto, String> {
+    get_output_eq_inner(&state, &kind)
+}
+
+/// Uitgangscorrectie van een profielsoort opslaan (audio_config.json) en, als
+/// die soort actief is, direct toepassen. Geeft de opgeslagen stand terug
+/// (incl. effectieve voorversterking en Auto-waarde).
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub fn set_output_eq(state: State<AppState>, kind: String, enabled: bool, bands: Vec<EqBandDto>, preamp_db: Option<f32>,
+                     preamp_auto: Option<bool>, preset_id: Option<String>, preset_naam: Option<String>) -> Result<OutputEqDto, String> {
+    set_output_eq_inner(&state, &kind, enabled, bands, preamp_db, preamp_auto, preset_id, preset_naam)
+}
+
+/// De frontend meldt welk uitvoerprofiel actief is; de bijbehorende
+/// uitgangscorrectie gaat naar de audiothread. `kind` null = geen correctie.
+#[tauri::command]
+pub fn set_active_output_profile(state: State<AppState>, kind: Option<String>) -> Result<(), String> {
+    set_active_output_profile_inner(&state, kind)
+}
+
+/// Leest een presetbestand (AutoEq/Equalizer APO-tekst, Sweelinq .swes of
+/// eigen JSON) als bytes voor de parser in de frontend; plafond 1 MB.
+#[tauri::command]
+pub fn read_eq_file(path: String) -> Result<Vec<u8>, String> {
+    let meta = std::fs::metadata(&path).map_err(|e| format!("{}: {}", path, e))?;
+    if meta.len() > 1_000_000 {
+        return Err("Bestand groter dan 1 MB: dit is geen EQ-preset".to_string());
+    }
+    std::fs::read(&path).map_err(|e| format!("{}: {}", path, e))
 }
 
 /// Respons van de huidige orgel-EQ in dB op een rij frequenties, puur uit de

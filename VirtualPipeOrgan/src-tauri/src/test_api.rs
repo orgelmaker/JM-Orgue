@@ -527,6 +527,10 @@ fn route_test_only(
         (tiny_http::Method::Post, "/settings/eq") => handle_set_eq(state, query),
         (tiny_http::Method::Get, "/audio/eq_response") => handle_eq_response(state, query),
         (tiny_http::Method::Get, "/audio/eq_state") => Ok(handle_eq_state(state)),
+        (tiny_http::Method::Post, "/settings/eq_bands") => handle_set_eq_bands_json(state, body),
+        (tiny_http::Method::Get, "/settings/output_eq") => handle_get_output_eq(state, query),
+        (tiny_http::Method::Post, "/settings/output_eq") => handle_set_output_eq(state, query, body),
+        (tiny_http::Method::Post, "/settings/output_eq/activate") => handle_activate_output_eq(state, query),
         (tiny_http::Method::Post, "/settings/reverb") => handle_set_reverb(state, query),
         (tiny_http::Method::Post, "/settings/pan") => handle_set_pan(state, query),
         (tiny_http::Method::Post, "/settings/trem") => handle_set_trem(state, query),
@@ -1853,12 +1857,26 @@ fn handle_eq_response(state: &AppState, query: &str) -> Result<Value, (u16, Stri
         }
         _ => (0.0, false, 0.0),
     };
-    Ok(json!({ "freq": freq, "organ_db": organ_db, "total_db": organ_db, "enabled": enabled, "preamp_db": preamp, "sample_rate": sr }))
+    // Uitgangscorrectie (0.7.77) van de actieve profielsoort, uit de opslag.
+    let prefs = crate::state::load_audio_prefs(&state.app_data_dir);
+    let uit = prefs.active_output_profile.as_ref().and_then(|k| prefs.output_eq.get(k));
+    let (output_db, output_enabled) = match uit {
+        Some(c) if c.enabled => {
+            let specs = crate::commands::eq_saved_to_specs(&c.bands);
+            (vpo_audio::respons_db_van_banden(&specs, channel.unwrap_or(0), sr, c.preamp_db, freq), true)
+        }
+        _ => (0.0, false),
+    };
+    Ok(json!({
+        "freq": freq, "organ_db": organ_db, "output_db": output_db, "total_db": organ_db + output_db,
+        "enabled": enabled, "output_enabled": output_enabled, "output_profile": prefs.active_output_profile,
+        "preamp_db": preamp, "sample_rate": sr,
+    }))
 }
 
 /// GET /audio/eq_state → de opgeslagen orgel-EQ (banden, voorversterking).
 fn handle_eq_state(state: &AppState) -> Value {
-    match state.eq_settings.read().clone() {
+    let mut v = match state.eq_settings.read().clone() {
         Some(e) => json!({
             "enabled": e.enabled, "preamp_db": e.preamp_db, "preamp_auto": e.preamp_auto, "preset_id": e.preset_id,
             "bands": e.bands.iter().map(|b| json!({
@@ -1867,7 +1885,80 @@ fn handle_eq_state(state: &AppState) -> Value {
             })).collect::<Vec<_>>(),
         }),
         None => json!({ "enabled": false, "bands": [] }),
+    };
+    // Uitgangscorrectie (0.7.77): welke soort geldt en wat erin staat.
+    let prefs = crate::state::load_audio_prefs(&state.app_data_dir);
+    let uit = prefs.active_output_profile.as_ref().and_then(|k| prefs.output_eq.get(k)).map(|c| json!({
+        "enabled": c.enabled, "preamp_db": c.preamp_db, "preamp_auto": c.preamp_auto,
+        "preset_id": c.preset_id, "preset_naam": c.preset_naam, "bands": c.bands.len(),
+    }));
+    if let Value::Object(ref mut m) = v {
+        m.insert("output_profile".into(), json!(prefs.active_output_profile));
+        m.insert("output".into(), uit.unwrap_or(Value::Null));
     }
+    v
+}
+
+/// Banden uit een JSON-body: {"bands":[{band_type|type, freq, gain_db, q?, bandwidth?, channel?, enabled?}]}.
+fn banden_uit_json(v: &Value) -> Result<Vec<crate::commands::EqBandDto>, (u16, String)> {
+    let arr = v.get("bands").cloned().unwrap_or(Value::Array(Vec::new()));
+    serde_json::from_value(arr).map_err(|e| (400u16, format!("bands: {}", e)))
+}
+
+/// "preamp_db": <dB> | "auto"  (of "preamp_auto": bool); ontbreekt = 0 dB.
+fn preamp_uit_json(v: &Value) -> (Option<f32>, Option<bool>) {
+    match v.get("preamp_db") {
+        Some(Value::String(s)) if s == "auto" => (None, Some(true)),
+        Some(Value::Number(n)) => (n.as_f64().map(|x| x as f32), Some(false)),
+        _ => match v.get("preamp_auto") {
+            Some(Value::Bool(b)) => (None, Some(*b)),
+            _ => (None, None),
+        },
+    }
+}
+
+/// POST /settings/eq_bands  body {"enabled":true,"preamp_db":-6.2|"auto","bands":[…]}
+/// → de orgel-EQ in één keer (een hele preset).
+fn handle_set_eq_bands_json(state: &AppState, body: &str) -> Result<Value, (u16, String)> {
+    let v: Value = serde_json::from_str(body).map_err(|e| (400u16, format!("Ongeldige JSON: {}", e)))?;
+    let enabled = v.get("enabled").and_then(|x| x.as_bool()).unwrap_or(true);
+    let bands = banden_uit_json(&v)?;
+    let (pre, auto) = preamp_uit_json(&v);
+    let n = bands.len();
+    let (eff, auto_w) = crate::commands::set_eq_bands_inner(state, enabled, bands, pre, auto);
+    Ok(json!({ "ok": true, "bands": n, "preamp_db": eff, "preamp_auto_waarde": auto_w }))
+}
+
+/// GET /settings/output_eq?profile=speakers|headphones (ontbreekt = actieve soort).
+fn handle_get_output_eq(state: &AppState, query: &str) -> Result<Value, (u16, String)> {
+    let prefs = crate::state::load_audio_prefs(&state.app_data_dir);
+    let kind: Option<String> = parse_query(query, "profile");
+    let kind = kind.or_else(|| prefs.active_output_profile.clone())
+        .ok_or((404u16, "geen profielsoort actief; geef ?profile=speakers|headphones".to_string()))?;
+    let dto = crate::commands::get_output_eq_inner(state, &kind).map_err(|e| (400u16, e))?;
+    serde_json::to_value(dto).map_err(|e| (500u16, e.to_string()))
+}
+
+/// POST /settings/output_eq?profile=…  body zoals /settings/eq_bands, plus
+/// optioneel "preset_id" en "preset_naam".
+fn handle_set_output_eq(state: &AppState, query: &str, body: &str) -> Result<Value, (u16, String)> {
+    let kind: String = parse_query(query, "profile").ok_or((400u16, "profile ontbreekt".to_string()))?;
+    let v: Value = serde_json::from_str(body).map_err(|e| (400u16, format!("Ongeldige JSON: {}", e)))?;
+    let enabled = v.get("enabled").and_then(|x| x.as_bool()).unwrap_or(true);
+    let bands = banden_uit_json(&v)?;
+    let (pre, auto) = preamp_uit_json(&v);
+    let preset_id = v.get("preset_id").and_then(|x| x.as_str()).map(|s| s.to_string());
+    let preset_naam = v.get("preset_naam").and_then(|x| x.as_str()).map(|s| s.to_string());
+    let dto = crate::commands::set_output_eq_inner(state, &kind, enabled, bands, pre, auto, preset_id, preset_naam)
+        .map_err(|e| (400u16, e))?;
+    serde_json::to_value(dto).map_err(|e| (500u16, e.to_string()))
+}
+
+/// POST /settings/output_eq/activate?profile=speakers|headphones|none
+fn handle_activate_output_eq(state: &AppState, query: &str) -> Result<Value, (u16, String)> {
+    let kind: Option<String> = parse_query::<String>(query, "profile").filter(|k| k != "none");
+    crate::commands::set_active_output_profile_inner(state, kind.clone()).map_err(|e| (400u16, e))?;
+    Ok(json!({ "ok": true, "active": kind }))
 }
 
 fn handle_set_reverb(state: &AppState, query: &str) -> Result<Value, (u16, String)> {

@@ -860,6 +860,15 @@
   // Telt op bij elke geslaagde audio-herbouw; Console herlaadt dan de per-orgel
   // DSP op de verse audio-thread (auditbevinding 20).
   let audioEpoch = 0;
+  // Uitgangscorrectie (0.7.77): Rust volgt het actieve uitvoerprofiel. Elke
+  // verandering van `audioProfiles.active` (start, migratie, wissel, wissen)
+  // gaat één keer naar set_active_output_profile; Rust past de bijbehorende
+  // correctie toe (en herstelt haar zelf na elke audio-herbouw).
+  let outEqKindGemeld;
+  $: if (audioProfiles.active !== outEqKindGemeld) {
+    outEqKindGemeld = audioProfiles.active;
+    invoke('set_active_output_profile', { kind: audioProfiles.active ?? null }).catch((e) => console.warn('set_active_output_profile:', e));
+  }
 
   function persistAudioProfiles() {
     localStorage.setItem(AUDIO_PROFILES_KEY, JSON.stringify(audioProfiles));

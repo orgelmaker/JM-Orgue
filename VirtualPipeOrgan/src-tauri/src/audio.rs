@@ -778,6 +778,10 @@ pub enum AudioCommand {
     /// breedte en optioneel doelkanaal. Wordt per fysiek uitgangskanaal als
     /// biquad-keten toegepast op de volledige uitgangsmix (droog + galm).
     SetEqBands { enabled: bool, preamp_db: f32, bands: Vec<EqBandSpec> },
+    /// Uitgangscorrectie (0.7.77): hoofdtelefoon/luidsprekers, een tweede
+    /// keten ná de orgel-EQ en vóór de limiter. Hoort bij de uitgang, niet
+    /// bij het orgel.
+    SetOutputEq { enabled: bool, preamp_db: f32, bands: Vec<EqBandSpec> },
     /// Route a division naar een willekeurige set fysieke output-kanalen.
     /// Lege lijst = standaard (voorste paar 0/1). Opeenvolgende kanalen worden als
     /// stereo-paren (L,R) gevuld; een los laatste kanaal krijgt mono.
@@ -3560,6 +3564,9 @@ fn run_audio_thread(
     // uit de actuele bandenlijst (kanaal None = alle kanalen).
     let eq_enabled: Arc<RwLock<bool>> = Arc::new(RwLock::new(false));
     let eq_channels: Arc<RwLock<Vec<ChannelEq>>> = Arc::new(RwLock::new(Vec::new()));
+    // Uitgangscorrectie (0.7.77): zelfde opzet, tweede keten na de orgel-EQ.
+    let uit_eq_aan: Arc<RwLock<bool>> = Arc::new(RwLock::new(false));
+    let uit_eq_ketens: Arc<RwLock<Vec<ChannelEq>>> = Arc::new(RwLock::new(Vec::new()));
     // Stop-ids die one-shot afspelen (ODF Percussive: klok e.d.)
     let percussive_stops: Arc<RwLock<std::collections::HashSet<u32>>> = Arc::new(RwLock::new(Default::default()));
     // Per-pipe voicing: (stop_id, pipe_num) → (volume_db, pitch_cents)
@@ -3718,6 +3725,8 @@ fn run_audio_thread(
     let use_algo_reverb_clone = use_algorithmic_reverb.clone();
     let eq_enabled_clone = eq_enabled.clone();
     let eq_channels_clone = eq_channels.clone();
+    let uit_eq_aan_clone = uit_eq_aan.clone();
+    let uit_eq_ketens_clone = uit_eq_ketens.clone();
     let voicing_clone = pipe_voicing.clone();
     let odf_voicing_clone = odf_voicing.clone();
     let odf_retune_clone = odf_retune.clone();
@@ -4979,6 +4988,20 @@ fn run_audio_thread(
                         }
                         info!("EQ: enabled={}, {} banden over {} kanalen, voorversterking {:.1} dB", enabled, bands.len(), channels, preamp_db);
                     }
+                    AudioCommand::SetOutputEq { enabled, preamp_db, bands } => {
+                        *uit_eq_aan_clone.write() = enabled;
+                        let mut chains = uit_eq_ketens_clone.write();
+                        if chains.len() == channels {
+                            for (ci, chain) in chains.iter_mut().enumerate() {
+                                chain.update(&bands, ci as u8, sample_rate, preamp_db);
+                            }
+                        } else {
+                            *chains = (0..channels)
+                                .map(|ci| ChannelEq::build(&bands, ci as u8, sample_rate, preamp_db))
+                                .collect();
+                        }
+                        info!("Uitgangscorrectie: enabled={}, {} banden over {} kanalen, voorversterking {:.1} dB", enabled, bands.len(), channels, preamp_db);
+                    }
                     AudioCommand::ClearSamples => {
                         // Grote maps naar de janitor-thread (zie LoadSamples).
                         {
@@ -5104,6 +5127,8 @@ fn run_audio_thread(
                 let mut conv_lock = reverb_clone.write();
                 let eq_on = *eq_enabled_clone.read();
                 let mut eq_chains = eq_channels_clone.write();
+                let uit_eq_on = *uit_eq_aan_clone.read();
+                let mut uit_eq_ketens = uit_eq_ketens_clone.write();
 
                 // Galm-bypass-overgang: zodra de mix naar 0 gaat wordt het
                 // galmblok in de frame-lus overgeslagen (rekenwerk besparen),
@@ -5588,6 +5613,17 @@ fn run_audio_thread(
                         if eq_on {
                             for (ci, s) in frame.iter_mut().enumerate() {
                                 if let Some(chain) = eq_chains.get_mut(ci) {
+                                    if !chain.is_identity() {
+                                        *s = chain.process(*s);
+                                    }
+                                }
+                            }
+                        }
+                        // Uitgangscorrectie (0.7.77): hoofdtelefoon/luidsprekers,
+                        // ná de orgel-EQ, vóór de limiter.
+                        if uit_eq_on {
+                            for (ci, s) in frame.iter_mut().enumerate() {
+                                if let Some(chain) = uit_eq_ketens.get_mut(ci) {
                                     if !chain.is_identity() {
                                         *s = chain.process(*s);
                                     }
