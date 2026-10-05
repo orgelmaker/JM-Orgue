@@ -668,6 +668,7 @@
   let stepPosUs = 0;         // invoercursor (µs)
   let stepHeld = new Set();  // nu ingedrukte toetsen
   let stepChord = new Set(); // verzameld akkoord van deze aanslag
+  let stepChordDivisie = new Map(); // midi → divisienaam (0.7.82: routering per balk)
   $: stepDurUs = Math.round((60e6 / (Number(bpm) || 90)) * stepQuarters * (stepDotted ? 1.5 : 1));
 
   function stepTargetLayerId() {
@@ -693,6 +694,8 @@
   let stepLastIds = [];        // event-ids van de laatste plaatsing
   let stepLastChordNotes = []; // midi's van de laatste plaatsing
   let stepLastPos = null;      // starttijd van de laatste plaatsing
+  let stepLastUndoCount = 0;   // backend-commando's van de laatste plaatsing (Backspace neemt ze alle terug)
+  let stepLastGroepen = null;  // [[laagId, noten]] van de laatste meerlaagse aanslag (R herhaalt per balk)
   let stepLastMidi = 60;       // referentie voor letter-invoer (dichtstbijzijnde octaaf)
 
   async function stepInsert(notes, layerId = null, opts = {}) {
@@ -715,13 +718,16 @@
       });
       const ids = Array.isArray(res) ? (res[1] || []) : [];
       if (!vers) {
-        // Toevoeging aan het zojuist geplaatste akkoord (Shift+letter).
+        // Toevoeging aan het zojuist geplaatste akkoord (Shift+letter, tweede balk).
         stepLastIds = [...stepLastIds, ...ids];
         stepLastChordNotes = [...stepLastChordNotes, ...notes];
+        stepLastUndoCount += 1;
       } else {
         stepLastIds = ids;
         stepLastChordNotes = [...notes];
         stepLastPos = at;
+        stepLastUndoCount = 1;
+        if (!opts.behoudGroepen) stepLastGroepen = null;
       }
       stepLastMidi = notes[notes.length - 1];
     } catch (e) {
@@ -804,10 +810,42 @@
       score = await invoke('notation_get_score', { scoreId });
     } catch (e) { alert(String(e)); }
   }
+  // Akkoord afsluiten: per doelbalk invoegen (0.7.82). Een noot waarvan de
+  // divisie door een laag wordt gerouteerd gaat naar díe laag, de rest naar
+  // de armed laag; alle groepen op dezelfde tel, de cursor schuift één keer.
   function stepCommitChord() {
     const notes = Array.from(stepChord);
+    const divisies = stepChordDivisie;
     stepChord = new Set();
-    if (notes.length) stepInsert(notes);
+    stepChordDivisie = new Map();
+    if (!notes.length) return;
+    const standaard = stepTargetLayerId();
+    const groepen = new Map();
+    for (const m of notes) {
+      const d = divisies.get(m);
+      const laag = d ? (score?.layers || []).find((l) => (l.divisions || []).includes(d)) : null;
+      const lid = laag ? laag.id : standaard;
+      if (!groepen.has(lid)) groepen.set(lid, []);
+      groepen.get(lid).push(m);
+    }
+    stepPlaatsGroepen([...groepen]);
+  }
+  // Groepen per balk sequentieel plaatsen: de eerste schuift de cursor, de
+  // volgende komen op dezelfde tel; Backspace telt alle commando's mee en R
+  // herhaalt dezelfde indeling (reviewbevindingen 0.7.82).
+  async function stepPlaatsGroepen(lijst) {
+    const at = stepPosUs;
+    let eerste = true;
+    for (const [lid, groep] of lijst) {
+      if (eerste) await stepInsert(groep, lid, { behoudGroepen: true });
+      else await stepInsert(groep, lid, { at });
+      eerste = false;
+    }
+    stepLastGroepen = lijst.length > 1 ? lijst.map(([lid, g]) => [lid, [...g]]) : null;
+  }
+  function stepRepeatLast() {
+    if (stepLastGroepen) stepPlaatsGroepen(stepLastGroepen);
+    else if (stepLastChordNotes.length) stepInsert([...stepLastChordNotes]);
   }
   function stepRest() { if (stepMode) stepPosUs += stepDurUs; }
   // Letter-invoer (A–G): dichtstbijzijnde toonhoogte bij de vorige noot.
@@ -829,17 +867,22 @@
     try {
       await invoke('notation_transpose', { scoreId, eventIds: stepLastIds, semitones: semi });
       stepLastChordNotes = stepLastChordNotes.map(n => Math.max(0, Math.min(127, n + semi)));
+      if (stepLastGroepen) stepLastGroepen = stepLastGroepen.map(([lid, g]) => [lid, g.map(n => Math.max(0, Math.min(127, n + semi)))]);
       stepLastMidi = Math.max(0, Math.min(127, stepLastMidi + semi));
     } catch (e) {}
   }
   // Backspace: laatste plaatsing terugnemen (undo) en de cursor terugzetten.
   async function stepUndoLast() {
     if (stepLastPos == null) return;
-    await doUndo();
+    const n = Math.max(1, stepLastUndoCount);
+    for (let i = 0; i < n; i++) await doUndo();
     stepPosUs = stepLastPos;
-    stepLastIds = []; stepLastChordNotes = []; stepLastPos = null;
+    stepLastIds = []; stepLastChordNotes = []; stepLastPos = null; stepLastUndoCount = 0; stepLastGroepen = null;
   }
-  function onStepNoteOn(midi) { stepHeld.add(midi); stepChord.add(midi); }
+  function onStepNoteOn(midi, divisie = null) {
+    stepHeld.add(midi); stepChord.add(midi);
+    if (divisie) stepChordDivisie.set(midi, divisie);
+  }
   function onStepNoteOff(midi) {
     stepHeld.delete(midi);
     if (stepHeld.size === 0) stepCommitChord();
@@ -922,7 +965,7 @@
       // Stapinvoer: gespeelde toetsen op de invoercursor plaatsen.
       unlisteners.push(await listen('jm-orgue:notation:step-note-on', (e) => {
         if (e?.payload?.score !== scoreId || !stepMode) return;
-        onStepNoteOn(e.payload.midi);
+        onStepNoteOn(e.payload.midi, e.payload.division || null);
       }));
       unlisteners.push(await listen('jm-orgue:notation:step-note-off', (e) => {
         if (e?.payload?.score !== scoreId || !stepMode) return;
@@ -1332,7 +1375,7 @@
         }
         e.preventDefault(); return;
       }
-      if (k === 'r' && stepLastChordNotes.length) { stepInsert([...stepLastChordNotes]); e.preventDefault(); return; }
+      if (k === 'r' && stepLastChordNotes.length) { stepRepeatLast(); e.preventDefault(); return; }
       if (e.key === '0') { stepRest(); e.preventDefault(); return; }
       const DUR_KEYS = { '2': 0.125, '3': 0.25, '4': 0.5, '5': 1, '6': 2, '7': 4 };
       if (DUR_KEYS[e.key] !== undefined) { stepQuarters = DUR_KEYS[e.key]; e.preventDefault(); return; }
@@ -1584,7 +1627,7 @@
           <input type="checkbox" bind:checked={stepDotted} />{$t('notation.dot')}
         </label>
         <button class="btn btn-ghost btn-sm" on:click={stepRest} title={$t('notation.rest_title')}>𝄽</button>
-        <button class="btn btn-ghost btn-sm" on:click={() => stepLastChordNotes.length && stepInsert([...stepLastChordNotes])}
+        <button class="btn btn-ghost btn-sm" on:click={() => stepLastChordNotes.length && stepRepeatLast()}
           disabled={!stepLastChordNotes.length} title={$t('notation.repeat_last_title')}>R</button>
         <button class="btn btn-ghost btn-sm" on:click={() => stepAlterLast(1)} disabled={!stepLastIds.length} title={$t('notation.step_sharp_title')}>♯</button>
         <button class="btn btn-ghost btn-sm" on:click={() => stepAlterLast(-1)} disabled={!stepLastIds.length} title={$t('notation.step_flat_title')}>♭</button>

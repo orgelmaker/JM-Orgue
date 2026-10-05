@@ -2328,7 +2328,7 @@ impl AppState {
                         &notation_open_notes, &notation_start_time, &app_handle_notation,
                         &midi_mappings);
                     Self::emit_step_input_event(&msg, &notation_step_input,
-                        &notation_armed_score, &app_handle_notation);
+                        &notation_armed_score, &app_handle_notation, &midi_mappings);
 
                     // Check for preset triggers first
                     let gate_nu_ms = preset_cc_gate.klok_ms();
@@ -2391,7 +2391,7 @@ impl AppState {
                     &notation_open_notes, &notation_start_time, &app_handle_notation,
                     &midi_mappings);
                 Self::emit_step_input_event(&msg, &notation_step_input,
-                    &notation_armed_score, &app_handle_notation);
+                    &notation_armed_score, &app_handle_notation, &midi_mappings);
                 // Forward CC messages to learn-tap channel (non-blocking; drop if full)
                 if matches!(msg, MidiMessage::ControlChange { .. }) {
                     let _ = ble_learn_tx.try_send(msg.clone());
@@ -2659,6 +2659,7 @@ impl AppState {
         notation_step_input: &Arc<RwLock<Option<u32>>>,
         notation_armed_score: &Arc<RwLock<Option<u32>>>,
         app_handle: &Arc<RwLock<Option<tauri::AppHandle>>>,
+        midi_mappings: &Arc<RwLock<Vec<MidiChannelMapping>>>,
     ) {
         use tauri::Emitter;
         let Some(score_id) = *notation_step_input.read() else { return };
@@ -2671,9 +2672,15 @@ impl AppState {
                 ("jm-orgue:notation:step-note-off", *channel, *note),
             _ => return,
         };
+        // Divisie meesturen (0.7.82), zelfde opzoektabel als de live-opname:
+        // de stapinvoer zet een pedaalnoot dan op de pedaalbalk.
+        let division = {
+            let maps = midi_mappings.read();
+            maps.iter().find(|m| m.accepts(channel, note)).map(|m| m.division.clone())
+        };
         if let Some(handle) = app_handle.read().as_ref() {
             let _ = handle.emit(event, serde_json::json!({
-                "score": score_id, "midi": note, "channel": channel,
+                "score": score_id, "midi": note, "channel": channel, "division": division,
             }));
         }
     }

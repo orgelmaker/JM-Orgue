@@ -16,9 +16,12 @@
         <clef><sign>G</sign><line>2</line></clef>
       </attributes>
       <direction placement="above"><direction-type><metronome><beat-unit>quarter</beat-unit><per-minute>60</per-minute></metronome></direction-type><sound tempo="60"/></direction>
-      <note><pitch><step>C</step><octave>4</octave></pitch><duration>2</duration><voice>1</voice><type>eighth</type></note>
-      <note><chord/><pitch><step>E</step><octave>4</octave></pitch><duration>2</duration><voice>1</voice><type>eighth</type></note>
-      <note><pitch><step>G</step><octave>4</octave></pitch><duration>4</duration><voice>1</voice><type>quarter</type></note>
+      <note><pitch><step>C</step><octave>4</octave></pitch><duration>2</duration><tie type="start"/><voice>1</voice><type>eighth</type><notations><tied type="start"/></notations></note>
+      <note><chord/><pitch><step>E</step><octave>4</octave></pitch><duration>2</duration><tie type="start"/><voice>1</voice><type>eighth</type><notations><tied type="start"/></notations></note>
+      <note><pitch><step>C</step><octave>4</octave></pitch><duration>2</duration><tie type="stop"/><voice>1</voice><type>eighth</type><notations><tied type="stop"/></notations></note>
+      <note><chord/><pitch><step>E</step><octave>4</octave></pitch><duration>2</duration><tie type="stop"/><voice>1</voice><type>eighth</type><notations><tied type="stop"/></notations></note>
+      <note><chord/><pitch><step>G</step><octave>4</octave></pitch><duration>2</duration><tie type="start"/><voice>1</voice><type>eighth</type><notations><tied type="start"/></notations></note>
+      <note><pitch><step>G</step><octave>4</octave></pitch><duration>2</duration><tie type="stop"/><voice>1</voice><type>eighth</type><notations><tied type="stop"/></notations></note>
       <note><rest/><duration>2</duration><voice>1</voice><type>eighth</type></note>
       <note><pitch><step>D</step><alter>-1</alter><octave>4</octave></pitch><duration>1</duration><voice>1</voice><type>16th</type></note>
       <note><rest/><duration>3</duration><voice>1</voice><type>eighth</type><dot/></note>

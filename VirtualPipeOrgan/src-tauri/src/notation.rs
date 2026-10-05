@@ -222,11 +222,25 @@ pub fn extract_notes(bytes: &[u8]) -> Result<Vec<RawNote>, String> {
 
 // ---- Kwantisatie ----
 
+/// Eén noot in een akkoordsegment (0.7.82): `tie_stop` = vervolg van dezelfde
+/// toon uit het vorige segment, `tie_start` = loopt door in het volgende.
+#[derive(Debug, Clone, PartialEq)]
+struct ChordNote {
+    midi: u8,
+    tie_start: bool,
+    tie_stop: bool,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 struct Chord {
-    start: u64,        // in rastereenheden
-    end: u64,          // exclusief
-    notes: Vec<u8>,    // MIDI-noten (gesorteerd)
+    start: u64,            // in rastereenheden
+    end: u64,              // exclusief
+    notes: Vec<ChordNote>, // gesorteerd op toonhoogte
+}
+
+#[cfg(test)]
+impl Chord {
+    fn midis(&self) -> Vec<u8> { self.notes.iter().map(|n| n.midi).collect() }
 }
 
 /// Eén gekwantiseerde noot (0.7.70): alleen het raster toegepast, verder
@@ -251,27 +265,15 @@ pub struct QNote {
 /// - 0   = losser: noten die verder van het raster af zitten dan de tolerantie
 ///   worden op een fijner sub-raster (halveringen, tot 8× fijner) neergezet.
 /// Dit vermijdt onhoorbare drift zonder de partituur onleesbaar te maken.
-pub(crate) fn quantize_notes(notes: &[NoteEv], bpm: f64, q: u8, tolerance_pct: u8) -> Vec<QNote> {
+pub(crate) fn quantize_notes(notes: &[NoteEv], bpm: f64, q: u8, _tolerance_pct: u8) -> Vec<QNote> {
     let grid_per_sec = (bpm / 60.0) * q as f64;
-    // Bij 100% tolerantie mag een noot maximaal 0,5 rastereenheid afwijken en
-    // wordt hij toch gekwantiseerd — dat is precies het huidige gedrag.
-    // Bij 0% tolerantie is de drempel klein (0,05) → bijna elke afwijking
-    // duwt de noot naar een fijner sub-raster.
-    let tol = (tolerance_pct.min(100) as f64 / 100.0) * 0.45 + 0.05;
+    // Sinds 0.7.82 gewoon afronden op het raster. Het sub-raster van vroeger
+    // (de "tolerantie") maakte van akkoordspreiding losse zestienden; die
+    // spreiding wordt nu vóóraf geclusterd (cluster_akkoorden) en de schuif
+    // "Akkoord-speling" bepaalt dát venster.
     let quantize_one = |t: f64| -> u64 {
         if t <= 0.0 { return 0; }
-        let base = t * grid_per_sec;
-        let rounded = base.round();
-        let mut diff = (base - rounded).abs();
-        if diff <= tol { return rounded.max(0.0) as u64; }
-        // Verfijn: sub-raster 1/2, 1/4, 1/8 van de rastereenheid.
-        for sub in [2.0_f64, 4.0, 8.0] {
-            let r = (base * sub).round() / sub;
-            diff = (base - r).abs();
-            if diff <= tol { return r.max(0.0).round() as u64; }
-        }
-        // Uiterste ondergrens: naar het 1/8-sub-raster.
-        ((base * 8.0).round() / 8.0).max(0.0).round() as u64
+        (t * grid_per_sec).round().max(0.0) as u64
     };
     let mut quantized: Vec<QNote> = notes.iter().map(|n| {
         let s = quantize_one(n.start_sec);
@@ -283,30 +285,106 @@ pub(crate) fn quantize_notes(notes: &[NoteEv], bpm: f64, q: u8, tolerance_pct: u
     quantized
 }
 
-/// Akkoordgroepering voor het notenschrift: gelijke inzetten worden één
-/// akkoord (dezelfde toon twee keer: de eerste wint, het tweede ID valt
-/// weg), akkoordduur = de langste noot, en de v1-inkorting tot de volgende
-/// inzet (één stem per balk). Klavar slaat dit over.
-fn group_chords(qnotes: &[QNote]) -> Vec<Chord> {
-    // Groepeer per gelijke start; akkoordduur = langste noot van de groep.
-    let mut chords: Vec<Chord> = Vec::new();
-    for n in qnotes {
-        match chords.last_mut() {
-            Some(c) if c.start == n.start => {
-                if !c.notes.contains(&n.midi) { c.notes.push(n.midi); }
-                if n.end > c.end { c.end = n.end; }
+/// Venster (seconden) waarbinnen inzetten en loslaten als één akkoord
+/// gelden: minstens 40 ms, hoogstens een halve rastereenheid; de schuif
+/// "Akkoord-speling" (0..=100) kiest daartussen.
+pub(crate) fn akkoord_venster_sec(bpm: f64, q: u64, tolerance_pct: u8) -> f64 {
+    let cel = 60.0 / bpm / q.max(1) as f64;
+    (tolerance_pct.min(100) as f64 / 100.0 * 0.5 * cel).max(0.040)
+}
+
+/// Akkoordclustering (0.7.82): noten die binnen `venster` ná de inzet van een
+/// cluster beginnen, krijgen de inzet van die cluster (de vroegste); binnen
+/// een cluster krijgen einden die binnen `venster` van elkaar liggen hetzelfde
+/// einde (het laatste). Een orgelakkoord wordt met 20–80 ms spreiding
+/// aangeslagen én losgelaten; zonder dit viel het bij een rastergrens uiteen
+/// in zestiende-fragmenten. Een bewust vroeger losgelaten noot (verder dan het
+/// venster) blijft korter, een gebroken akkoord blijft gebroken.
+pub(crate) fn cluster_akkoorden(notes: &mut [NoteEv], venster: f64) {
+    if notes.len() < 2 { return; }
+    notes.sort_by(|a, b| a.start_sec.partial_cmp(&b.start_sec).unwrap_or(std::cmp::Ordering::Equal));
+    let mut i = 0;
+    while i < notes.len() {
+        let inzet = notes[i].start_sec;
+        let mut j = i + 1;
+        while j < notes.len() && notes[j].start_sec - inzet <= venster { j += 1; }
+        for n in &mut notes[i..j] {
+            n.start_sec = inzet;
+            if n.end_sec < inzet + 0.001 { n.end_sec = inzet + 0.001; }
+        }
+        let mut idx: Vec<usize> = (i..j).collect();
+        idx.sort_by(|&a, &b| notes[a].end_sec.partial_cmp(&notes[b].end_sec).unwrap_or(std::cmp::Ordering::Equal));
+        let mut k = 0;
+        while k < idx.len() {
+            let eerste = notes[idx[k]].end_sec;
+            let mut l = k + 1;
+            while l < idx.len() && notes[idx[l]].end_sec - eerste <= venster { l += 1; }
+            let laatste = notes[idx[l - 1]].end_sec;
+            for &m in &idx[k..l] { notes[m].end_sec = laatste; }
+            k = l;
+        }
+        i = j;
+    }
+    // Tweede pas (reviewbevinding): gewoon vingerlegato laat een noot 30–100 ms
+    // ná de VOLGENDE inzet los. Zonder dit rondde dat einde op de volgende
+    // rastereenheid en maakte group_chords er een gebonden 32ste-fragment van.
+    // Loslaten binnen het venster ná een latere inzet = op die inzet; een noot
+    // die minstens het venster langer doorligt blijft doorgebonden.
+    let mut inzetten: Vec<f64> = notes.iter().map(|n| n.start_sec).collect();
+    inzetten.dedup();
+    for n in notes.iter_mut() {
+        for &k in &inzetten {
+            if k > n.start_sec && k < n.end_sec && n.end_sec - k <= venster {
+                n.end_sec = k;
+                break;
             }
-            _ => chords.push(Chord { start: n.start, end: n.end, notes: vec![n.midi] }),
         }
     }
-    // Eén stem per balk: vorige akkoord inkorten tot de volgende inzet.
-    for i in 1..chords.len() {
-        if chords[i - 1].end > chords[i].start {
-            chords[i - 1].end = chords[i].start;
+}
+
+/// Akkoordgroepering voor het notenschrift (0.7.82). Dezelfde toon twee keer
+/// op één inzet: de eerste wint (ID-dedup). Daarna segmenten tussen álle
+/// grenzen (inzetten én einden): elk segment is één akkoord met één duur; een
+/// noot die het segment overleeft loopt door in het volgende segment en wordt
+/// overgebonden (`tie_start`/`tie_stop`) in plaats van afgekapt. Een herinzet
+/// van dezelfde toon wint van het doorlopen: de oudere noot eindigt daar
+/// zonder boog. Klavar slaat dit over (die tekent de noten zelf).
+fn group_chords(qnotes: &[QNote]) -> Vec<Chord> {
+    #[derive(Clone)]
+    struct Actief { midi: u8, start: u64, end: u64 }
+    let mut noten: Vec<Actief> = Vec::new();
+    for n in qnotes {
+        let end = n.end.max(n.start + 1);
+        // Dezelfde toon twee keer op één inzet (overdub, twee lagen op één
+        // balk): één notenkop, met het langste einde — wat klinkt is de
+        // vereniging van beide (reviewbevinding).
+        if let Some(a) = noten.iter_mut().find(|a| a.start == n.start && a.midi == n.midi) {
+            a.end = a.end.max(end);
+            continue;
+        }
+        noten.push(Actief { midi: n.midi, start: n.start, end });
+    }
+    if noten.is_empty() { return Vec::new(); }
+    let inzetten: Vec<(u8, u64)> = noten.iter().map(|a| (a.midi, a.start)).collect();
+    for a in noten.iter_mut() {
+        for &(m, s) in &inzetten {
+            if m == a.midi && s > a.start && s < a.end { a.end = s; }
         }
     }
-    for c in chords.iter_mut() {
-        c.notes.sort_unstable();
+    let mut grenzen: Vec<u64> = noten.iter().flat_map(|a| [a.start, a.end]).collect();
+    grenzen.sort_unstable();
+    grenzen.dedup();
+    let mut chords: Vec<Chord> = Vec::new();
+    for w in grenzen.windows(2) {
+        let (t0, t1) = (w[0], w[1]);
+        let mut notes: Vec<ChordNote> = noten.iter()
+            .filter(|a| a.start <= t0 && a.end > t0)
+            .map(|a| ChordNote { midi: a.midi, tie_stop: a.start < t0, tie_start: a.end > t1 })
+            .collect();
+        if notes.is_empty() { continue; }
+        notes.sort_by_key(|n| n.midi);
+        notes.dedup_by_key(|n| n.midi);
+        chords.push(Chord { start: t0, end: t1, notes });
     }
     chords
 }
@@ -414,12 +492,18 @@ pub fn quantize_score(staves: &[Staff], opts: &NotationOptions) -> QuantizedScor
     let beats = opts.beats_per_bar.clamp(1, 12) as u64;
     let bpm = if opts.bpm.is_finite() && opts.bpm >= 20.0 && opts.bpm <= 300.0 { opts.bpm } else { 90.0 };
     let tolerance = opts.tolerance_pct.unwrap_or(100);
+    let venster = akkoord_venster_sec(bpm, q, tolerance);
     let qstaves: Vec<QuantizedStaff> = staves.iter().enumerate()
         .filter(|(_, st)| !st.notes.is_empty())
-        .map(|(i, st)| QuantizedStaff {
-            staff_index: i, name: st.name.clone(), layer_id: st.layer_id, pedal: st.pedal,
-            bass_clef: st.bass_clef, hand: st.hand, split_midi: st.split_midi,
-            notes: quantize_notes(&st.notes, bpm, opts.quantize.clamp(1, 8), tolerance),
+        .map(|(i, st)| {
+            // Akkoordclustering vóór het raster (0.7.82), ook voor klavar.
+            let mut noten = st.notes.clone();
+            cluster_akkoorden(&mut noten, venster);
+            QuantizedStaff {
+                staff_index: i, name: st.name.clone(), layer_id: st.layer_id, pedal: st.pedal,
+                bass_clef: st.bass_clef, hand: st.hand, split_midi: st.split_midi,
+                notes: quantize_notes(&noten, bpm, opts.quantize.clamp(1, 8), tolerance),
+            }
         })
         .collect();
     QuantizedScore { q, beats_per_bar: beats, measure_len: beats * q, bpm, staves: qstaves }
@@ -473,7 +557,7 @@ pub fn render_musicxml(qs: &QuantizedScore, opts: &NotationOptions) -> Result<St
         xml.push_str(&format!("  <part id=\"P{}\">\n", idx + 1));
 
         // Segmentlijst opbouwen: (start, end, notes-of-leeg=rust)
-        let mut segments: Vec<(u64, u64, Vec<u8>)> = Vec::new();
+        let mut segments: Vec<(u64, u64, Vec<ChordNote>)> = Vec::new();
         let mut cursor: u64 = 0;
         for c in chords {
             if c.start > cursor { segments.push((cursor, c.start, Vec::new())); }
@@ -525,9 +609,14 @@ pub fn render_musicxml(qs: &QuantizedScore, opts: &NotationOptions) -> Result<St
                             "      <note><rest/><duration>{}</duration><voice>1</voice><type>{}</type>{}</note>\n",
                             len, type_name, if *dotted { "<dot/>" } else { "" }));
                     } else {
-                        let tie_start = tie_to_next || !last_part;
-                        let tie_stop = tie_from_prev || !first_part;
-                        for (ni, &midi) in notes.iter().enumerate() {
+                        for (ni, cn) in notes.iter().enumerate() {
+                            // Overbinding: over de maatstreep, tussen de delen
+                            // binnen de maat, én over segmentgrenzen (0.7.82:
+                            // een noot die langer klinkt dan de rest van het
+                            // akkoord wordt doorgebonden, niet afgekapt).
+                            let tie_start = cn.tie_start || tie_to_next || !last_part;
+                            let tie_stop = cn.tie_stop || tie_from_prev || !first_part;
+                            let midi = cn.midi;
                             let (step, alter, octave) = spell(midi, opts.key_fifths);
                             xml.push_str("      <note>");
                             if ni > 0 { xml.push_str("<chord/>"); }
@@ -814,7 +903,15 @@ pub fn build_musicxml_from_score(score: &Score) -> Result<String, String> {
 /// Exporteer de zichtbare takes van een Score als Standard MIDI File (format 1,
 /// 480 ppq): track 0 = tempo + maatsoort, daarna één track per balk met noten
 /// (originele MIDI-kanalen behouden; note-off vóór note-on bij gelijke tick).
-pub fn score_to_smf_bytes(score: &Score) -> Result<Vec<u8>, String> {
+/// Kanaal van een event zonder bronkanaal (stapinvoer, muisklik): bij de
+/// MIDI-export wordt dan het ingeleerde kanaal van de laag gebruikt.
+pub const KANAAL_ONBEKEND: u8 = 0xFF;
+
+/// `kanaal_voor_laag`: ingeleerd MIDI-kanaal van de eerste divisie van een
+/// laag (0.7.82); events zonder bronkanaal (KANAAL_ONBEKEND: stapinvoer/klik)
+/// gaan daarheen, zodat een getypte pedaalnoot bij afspelen op het pedaal
+/// klinkt; opgenomen events houden hun eigen kanaal.
+pub fn score_to_smf_bytes(score: &Score, kanaal_voor_laag: &dyn Fn(&Layer) -> Option<u8>) -> Result<Vec<u8>, String> {
     use midly::{Smf, Header, Format, Timing, TrackEvent, TrackEventKind, MetaMessage, MidiMessage};
     use midly::num::{u4, u7, u15, u24, u28};
     const PPQ: u64 = 480;
@@ -833,10 +930,14 @@ pub fn score_to_smf_bytes(score: &Score) -> Result<Vec<u8>, String> {
     for layer in &score.layers {
         // (tick, soort 0=off/1=on, midi, kanaal) — off vóór on bij gelijke tick.
         let mut evs: Vec<(u64, u8, u8, u8)> = Vec::new();
+        let laag_kanaal = kanaal_voor_laag(layer).unwrap_or(0) & 0x0F;
         for take in layer.takes.iter().filter(|t| t.visible) {
             for e in &take.events {
-                evs.push((to_ticks(e.start_us), 1, e.midi & 0x7F, e.channel & 0x0F));
-                evs.push((to_ticks(e.end_us.max(e.start_us + 1000)), 0, e.midi & 0x7F, e.channel & 0x0F));
+                // KANAAL_ONBEKEND (stapinvoer/klik) → laagkanaal; een opgenomen
+                // kanaal 0 is een gewoon kanaal en blijft staan (reviewbevinding).
+                let ch = if e.channel > 0x0F { laag_kanaal } else { e.channel };
+                evs.push((to_ticks(e.start_us), 1, e.midi & 0x7F, ch));
+                evs.push((to_ticks(e.end_us.max(e.start_us + 1000)), 0, e.midi & 0x7F, ch));
             }
         }
         if evs.is_empty() { continue; }
@@ -1138,12 +1239,151 @@ mod tests {
             NoteEv::anoniem(67, 0.5, 1.5),   // G4 → nieuwe inzet, kort C/E in
         ];
         let chords = group_chords(&quantize_notes(&notes, 60.0, 4, 100));
-        assert_eq!(chords.len(), 2);
-        assert_eq!(chords[0].notes, vec![60, 64]);
-        assert_eq!(chords[0].start, 0);
-        assert_eq!(chords[0].end, 2); // ingekort tot de inzet van G4 (0,5 s = 2 eenheden)
-        assert_eq!(chords[1].notes, vec![67]);
-        assert_eq!(chords[1].end, 6);
+        // 0.7.82: C/E lopen dóór onder G (doorgebonden), niet afgekapt.
+        assert_eq!(chords.len(), 3);
+        assert_eq!(chords[0].midis(), vec![60, 64]);
+        assert_eq!((chords[0].start, chords[0].end), (0, 2));
+        assert!(chords[0].notes.iter().all(|n| n.tie_start && !n.tie_stop));
+        assert_eq!(chords[1].midis(), vec![60, 64, 67]);
+        assert_eq!((chords[1].start, chords[1].end), (2, 4));
+        assert!(chords[1].notes.iter().filter(|n| n.midi != 67).all(|n| n.tie_stop && !n.tie_start));
+        let g = chords[1].notes.iter().find(|n| n.midi == 67).unwrap();
+        assert!(!g.tie_stop && g.tie_start);
+        assert_eq!(chords[2].midis(), vec![67]);
+        assert_eq!((chords[2].start, chords[2].end), (4, 6));
+        assert!(chords[2].notes[0].tie_stop && !chords[2].notes[0].tie_start);
+    }
+
+    fn staf(notes: Vec<NoteEv>) -> Vec<Staff> {
+        vec![Staff { name: "Test".into(), bass_clef: false, notes, ..Default::default() }]
+    }
+    fn akkoorden(notes: Vec<NoteEv>, tol: Option<u8>) -> Vec<Chord> {
+        let mut o = opts();
+        o.tolerance_pct = tol;
+        let qs = quantize_score(&staf(notes), &o);
+        group_chords(&qs.staves[0].notes)
+    }
+
+    #[test]
+    fn venster_grenzen() {
+        // 60 bpm, q 4: cel 0,25 s → 0 % = 40 ms, 100 % = halve cel.
+        assert!((akkoord_venster_sec(60.0, 4, 0) - 0.040).abs() < 1e-9);
+        assert!((akkoord_venster_sec(60.0, 4, 100) - 0.125).abs() < 1e-9);
+        assert!((akkoord_venster_sec(60.0, 4, 50) - 0.0625).abs() < 1e-9);
+    }
+
+    #[test]
+    fn akkoord_over_celgrens() {
+        // Twee noten 30 ms uit elkaar rond de celgrens (0,125 s): één akkoord.
+        let c = akkoorden(vec![NoteEv::anoniem(60, 0.11, 1.0), NoteEv::anoniem(64, 0.14, 1.0)], Some(100));
+        assert_eq!(c.len(), 1);
+        assert_eq!(c[0].midis(), vec![60, 64]);
+        assert_eq!((c[0].start, c[0].end), (0, 4));
+    }
+
+    #[test]
+    fn gebroken_akkoord_blijft_gebroken() {
+        // 0,2 s uit elkaar (0,8 cel > venster van een halve cel): twee inzetten.
+        let c = akkoorden(vec![NoteEv::anoniem(60, 0.0, 1.0), NoteEv::anoniem(64, 0.2, 1.0)], Some(100));
+        assert_eq!(c.len(), 2);
+        assert_eq!(c[0].midis(), vec![60]);
+        assert_eq!(c[1].midis(), vec![60, 64]);
+    }
+
+    #[test]
+    fn aangehouden_bas_wordt_doorgebonden() {
+        // Bas vier tellen onder vier kwartakkoorden: vier keer de bas, overgebonden.
+        let mut notes = vec![NoteEv::anoniem(36, 0.0, 4.0)];
+        for k in 0..4 {
+            notes.push(NoteEv::anoniem(60, k as f64, k as f64 + 1.0));
+            notes.push(NoteEv::anoniem(64, k as f64, k as f64 + 1.0));
+        }
+        let c = akkoorden(notes, Some(80));
+        assert_eq!(c.len(), 4);
+        for (k, ch) in c.iter().enumerate() {
+            assert_eq!(ch.midis(), vec![36, 60, 64]);
+            let bas = &ch.notes[0];
+            assert_eq!(bas.tie_stop, k > 0);
+            assert_eq!(bas.tie_start, k < 3);
+            assert!(ch.notes[1..].iter().all(|n| !n.tie_start && !n.tie_stop));
+        }
+        // En in de MusicXML: nergens een rust, de bas 4× met tie.
+        let xml = build_musicxml(&staf(vec![NoteEv::anoniem(36, 0.0, 4.0), NoteEv::anoniem(60, 0.0, 1.0),
+            NoteEv::anoniem(60, 1.0, 2.0), NoteEv::anoniem(60, 2.0, 3.0), NoteEv::anoniem(60, 3.0, 4.0)]), &opts()).unwrap();
+        assert_eq!(xml.matches("<tie type=\"start\"/>").count(), 3);
+        assert_eq!(xml.matches("<tie type=\"stop\"/>").count(), 3);
+    }
+
+    #[test]
+    fn kortste_noot_bepaalt_akkoordduur() {
+        let c = akkoorden(vec![NoteEv::anoniem(60, 0.0, 1.0), NoteEv::anoniem(64, 0.0, 2.0)], Some(100));
+        assert_eq!(c.len(), 2);
+        assert_eq!((c[0].start, c[0].end), (0, 4));
+        assert_eq!((c[1].start, c[1].end), (4, 8));
+        assert_eq!(c[1].midis(), vec![64]);
+        assert!(c[0].notes[1].tie_start && c[1].notes[0].tie_stop);
+    }
+
+    #[test]
+    fn herinzet_wint_van_tie() {
+        // Dezelfde toon opnieuw aangeslagen terwijl hij nog klinkt: geen boog.
+        let c = akkoorden(vec![NoteEv::anoniem(60, 0.0, 2.0), NoteEv::anoniem(60, 1.0, 2.0)], Some(100));
+        assert_eq!(c.len(), 2);
+        assert!(!c[0].notes[0].tie_start);
+        assert!(!c[1].notes[0].tie_stop);
+    }
+
+    #[test]
+    fn legato_overlap_geeft_geen_fragment() {
+        // 120 bpm, q 8 (cel 62,5 ms): 60 wordt 40 ms ná de inzet van 62 losgelaten
+        // (vingerlegato) → twee losse noten, geen fragment, geen boog.
+        let mut o = opts();
+        o.bpm = 120.0; o.quantize = 8; o.tolerance_pct = Some(100);
+        let qs = quantize_score(&staf(vec![NoteEv::anoniem(60, 0.0, 0.29), NoteEv::anoniem(62, 0.25, 0.50)]), &o);
+        let c = group_chords(&qs.staves[0].notes);
+        assert_eq!(c.len(), 2, "{:?}", c);
+        assert_eq!((c[0].start, c[0].end, c[0].midis()), (0, 4, vec![60]));
+        assert_eq!((c[1].start, c[1].end, c[1].midis()), (4, 8, vec![62]));
+        assert!(c.iter().all(|ch| ch.notes.iter().all(|n| !n.tie_start && !n.tie_stop)));
+        // Negatieve controle: 150 ms overlap (≥ cel + venster) blijft liggen en bindt door.
+        let qs2 = quantize_score(&staf(vec![NoteEv::anoniem(60, 0.0, 0.40), NoteEv::anoniem(62, 0.25, 0.50)]), &o);
+        let c2 = group_chords(&qs2.staves[0].notes);
+        assert_eq!(c2.len(), 3);
+        assert!(c2[0].notes[0].tie_start);
+    }
+
+    #[test]
+    fn midi_export_kanaal_per_laag() {
+        let mut sc = Score::new(1);
+        sc.add_layer("Pedaal".into(), Some(true));
+        let lid = sc.layers[0].id;
+        sc.layers[0].divisions = vec!["Pedaal".into()];
+        let _ = lid;
+        let take = &mut sc.layers[0].takes[0]; // add_layer maakt "Take 1"
+        take.visible = true;
+        take.events.push(LayerEv { id: 1, midi: 36, start_us: 0, end_us: 500_000, channel: KANAAL_ONBEKEND, locked: true, hand: None });
+        take.events.push(LayerEv { id: 2, midi: 38, start_us: 500_000, end_us: 1_000_000, channel: 0, locked: false, hand: None });
+        let bytes = score_to_smf_bytes(&sc, &|_l| Some(2)).expect("smf");
+        let smf = midly::Smf::parse(&bytes).expect("parse");
+        let mut kanalen = Vec::new();
+        for ev in &smf.tracks[1] {
+            if let midly::TrackEventKind::Midi { channel, message: midly::MidiMessage::NoteOn { key, .. } } = ev.kind {
+                kanalen.push((key.as_int(), channel.as_int()));
+            }
+        }
+        assert_eq!(kanalen, vec![(36, 2), (38, 0)]);
+    }
+
+    #[test]
+    fn release_spreiding_geeft_geen_fragment() {
+        // Loslaten 40 ms uit elkaar: één akkoord zonder overbinding.
+        let c = akkoorden(vec![NoteEv::anoniem(60, 0.0, 1.0), NoteEv::anoniem(64, 0.0, 0.96)], Some(100));
+        assert_eq!(c.len(), 1);
+        assert!(c[0].notes.iter().all(|n| !n.tie_start && !n.tie_stop));
+        // Bewust vroeg losgelaten (0,3 s eerder): blijft korter, de rest bindt door.
+        let c2 = akkoorden(vec![NoteEv::anoniem(60, 0.0, 1.0), NoteEv::anoniem(64, 0.0, 0.7)], Some(100));
+        assert_eq!(c2.len(), 2);
+        assert_eq!(c2[1].midis(), vec![60]);
     }
 
     #[test]
@@ -1216,7 +1456,8 @@ mod tests {
         assert_eq!(q.len(), 2);
         let chords = group_chords(&q);
         assert_eq!(chords.len(), 1);
-        assert_eq!(chords[0].notes, vec![60]);
+        assert_eq!(chords[0].midis(), vec![60]);
+        // Eén notenkop met het langste einde (wat klinkt is de vereniging).
         assert_eq!(chords[0].end, 8);
     }
 

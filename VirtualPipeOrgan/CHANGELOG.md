@@ -5,6 +5,20 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.82] - 2026-10-05
+
+### Akkoorden kloppen nu
+
+Noten die bijna tegelijk worden aangeslagen vormen in het notenschrift
+voortaan één akkoord, ook als er net een rastergrens tussen ligt; hetzelfde
+geldt voor het loslaten. Een noot die langer wordt vastgehouden dan de andere
+noten van het akkoord (een liggend akkoord onder een melodie) wordt niet meer
+afgekapt maar doorgebonden. De schuif naast de maatsoort heet nu
+**Akkoord-speling** en bepaalt hoe ver noten uit elkaar mogen liggen om één
+akkoord te zijn. Bij stapinvoer gaat een pedaalnoot nu naar de pedaalbalk en
+klinkt hij bij afspelen op het pedaal. Bestaande opnamen kunnen op
+randposities iets anders afronden dan voorheen.
+
 ## [0.7.81] - 2026-10-05
 
 ### Luidsprekerpresets

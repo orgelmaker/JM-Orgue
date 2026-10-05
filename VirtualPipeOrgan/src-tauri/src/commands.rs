@@ -4712,7 +4712,12 @@ pub fn notation_export_midi(state: State<AppState>, score_id: u32, path: String)
     let bytes = {
         let scores = state.notation_scores.read();
         let sc = scores.get(&score_id).ok_or_else(|| format!("Score {} niet gevonden", score_id))?;
-        crate::notation::score_to_smf_bytes(sc)?
+        // Kanaal 0 (stapinvoer/klik) → ingeleerd kanaal van de eerste divisie van de laag (0.7.82).
+        let maps = state.midi_mappings.read().clone();
+        let kanaal = |laag: &crate::notation::Layer| -> Option<u8> {
+            laag.divisions.iter().find_map(|d| maps.iter().find(|m| &m.division == d).and_then(|m| m.channel))
+        };
+        crate::notation::score_to_smf_bytes(sc, &kanaal)?
     };
     std::fs::write(&path, bytes).map_err(|e| format!("MIDI-bestand opslaan mislukt: {}", e))
 }
@@ -4747,7 +4752,7 @@ pub fn notation_insert_notes(state: State<AppState>, app: tauri::AppHandle, scor
             let id = sc.new_event_id();
             ids.push(id);
             events.push((layer_id, take_id, crate::notation::LayerEv {
-                id, midi: *midi, start_us, end_us: start_us + dur, channel: 0, locked: true, hand: None,
+                id, midi: *midi, start_us, end_us: start_us + dur, channel: crate::notation::KANAAL_ONBEKEND, locked: true, hand: None,
             }));
         }
         let cmd = crate::notation::EditCommand::InsertEvents { events };
