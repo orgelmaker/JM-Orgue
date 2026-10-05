@@ -5540,7 +5540,8 @@ pub(crate) fn get_output_eq_inner(state: &AppState, kind: &str) -> Result<Output
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn set_output_eq_inner(state: &AppState, kind: &str, enabled: bool, bands: Vec<EqBandDto>, preamp_db: Option<f32>,
-                                  preamp_auto: Option<bool>, preset_id: Option<String>, preset_naam: Option<String>) -> Result<OutputEqDto, String> {
+                                  preamp_auto: Option<bool>, preset_id: Option<String>, preset_naam: Option<String>,
+                                  persist: bool) -> Result<OutputEqDto, String> {
     let kind = output_eq_kind(kind)?;
     let auto = preamp_auto.unwrap_or(true);
     let specs = eq_bands_to_specs(&bands);
@@ -5553,6 +5554,14 @@ pub(crate) fn set_output_eq_inner(state: &AppState, kind: &str, enabled: bool, b
         }).collect(),
     };
     let mut prefs = crate::state::load_audio_prefs(&state.app_data_dir);
+    if !persist {
+        // Voorvertoning tijdens slepen in de grafiek (0.7.79): alleen naar de
+        // audiothread als deze soort actief is; niets op schijf, badge ongemoeid.
+        if prefs.active_output_profile.as_deref() == Some(kind.as_str()) {
+            state.send_audio_command(AudioCommand::SetOutputEq { enabled: cfg.enabled, preamp_db: eff, bands: specs });
+        }
+        return Ok(output_eq_naar_dto(state, &cfg, prefs.active_output_profile.clone()));
+    }
     prefs.output_eq.insert(kind.clone(), cfg.clone());
     crate::state::save_audio_prefs(&state.app_data_dir, &prefs);
     let actief = prefs.active_output_profile.as_deref() == Some(kind.as_str());
@@ -5586,8 +5595,9 @@ pub fn get_output_eq(state: State<AppState>, kind: String) -> Result<OutputEqDto
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub fn set_output_eq(state: State<AppState>, kind: String, enabled: bool, bands: Vec<EqBandDto>, preamp_db: Option<f32>,
-                     preamp_auto: Option<bool>, preset_id: Option<String>, preset_naam: Option<String>) -> Result<OutputEqDto, String> {
-    set_output_eq_inner(&state, &kind, enabled, bands, preamp_db, preamp_auto, preset_id, preset_naam)
+                     preamp_auto: Option<bool>, preset_id: Option<String>, preset_naam: Option<String>,
+                     persist: Option<bool>) -> Result<OutputEqDto, String> {
+    set_output_eq_inner(&state, &kind, enabled, bands, preamp_db, preamp_auto, preset_id, preset_naam, persist.unwrap_or(true))
 }
 
 /// De frontend meldt welk uitvoerprofiel actief is; de bijbehorende

@@ -852,6 +852,11 @@
   "eq": {
     "profile": "Profilo di ascolto",
     "profile_speakers": "Altoparlanti",
+    "graph_help": "Trascina un punto: sinistra/destra = frequenza, su/giù = guadagno. Maiusc+trascina o rotella = larghezza, Ctrl+rotella = guadagno. Doppio clic su uno spazio vuoto = nuova banda, su un punto = guadagno 0. Tasti: frecce, [ ], 1–9, Canc.",
+    "view_channel": "Vista",
+    "view_all": "Tutti i canali",
+    "max_bands": "Massimo 32 bande",
+    "aria_band": "Banda {n}: {info}",
     "output_learn_title": "Apprendi MIDI: correzione on/off ({n}/4)",
     "badge_title": "Correzione attiva: {name}",
     "badge_own": "impostazione propria",

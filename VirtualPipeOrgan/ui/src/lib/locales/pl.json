@@ -852,6 +852,11 @@
   "eq": {
     "profile": "Profil odsłuchu",
     "profile_speakers": "Głośniki",
+    "graph_help": "Przeciągnij punkt: lewo/prawo = częstotliwość, góra/dół = wzmocnienie. Shift+przeciąganie lub kółko = szerokość, Ctrl+kółko = wzmocnienie. Dwuklik w pustym miejscu = nowe pasmo, na punkcie = wzmocnienie 0. Klawisze: strzałki, [ ], 1–9, Delete.",
+    "view_channel": "Widok",
+    "view_all": "Wszystkie kanały",
+    "max_bands": "Maksymalnie 32 pasma",
+    "aria_band": "Pasmo {n}: {info}",
     "output_learn_title": "Ucz MIDI: korekcja wł./wył. ({n}/4)",
     "badge_title": "Korekcja aktywna: {name}",
     "badge_own": "własne ustawienie",

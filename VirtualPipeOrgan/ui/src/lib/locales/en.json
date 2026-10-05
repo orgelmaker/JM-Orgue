@@ -852,6 +852,11 @@
   "eq": {
     "profile": "Listening profile",
     "profile_speakers": "Speakers",
+    "graph_help": "Drag a point: left/right = frequency, up/down = gain. Shift+drag or mouse wheel = width, Ctrl+wheel = gain. Double-click empty space = new band, a point = gain 0. Keys: arrows, [ ], 1–9, Delete.",
+    "view_channel": "View",
+    "view_all": "All channels",
+    "max_bands": "Maximum of 32 bands",
+    "aria_band": "Band {n}: {info}",
     "output_learn_title": "MIDI learn: correction on/off ({n}/4)",
     "badge_title": "Correction active: {name}",
     "badge_own": "custom setting",

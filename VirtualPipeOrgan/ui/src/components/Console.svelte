@@ -1236,8 +1236,8 @@
     updateEq();
   }
 
-  function addEqBand() {
-    eqBands = [...eqBands, { enabled: true, band_type: 'peak', freq: 1000, gain_db: 0, bandwidth: qToBw(1.0), q: 1.0, channel: null }];
+  function addEqBand(detail = null) {
+    eqBands = [...eqBands, nieuweEqBand(detail)];
     updateEq();
   }
 
@@ -1245,7 +1245,13 @@
     eqBands = eqBands.filter((_, i) => i !== idx);
     updateEq();
   }
-  const nieuweEqBand = () => ({ enabled: true, band_type: 'peak', freq: 1000, gain_db: 0, bandwidth: qToBw(1.0), q: 1.0, channel: null });
+  // Nieuwe peak-band (Q 1 ≈ 1,4 octaaf); uit de grafiek komt de plek mee (0.7.79).
+  const nieuweEqBand = (detail = null) => ({
+    enabled: true, band_type: 'peak',
+    freq: Math.max(20, Math.min(20000, Number(detail?.freq) || 1000)),
+    gain_db: Math.max(-24, Math.min(24, Number(detail?.gain_db) || 0)),
+    bandwidth: qToBw(1.0), q: 1.0, channel: null,
+  });
 
   // ---- Uitgangscorrectie per uitvoerprofiel (0.7.77) ----
   // Hoort bij de uitgang (hoofdtelefoon/luidsprekers), niet bij het orgel.
@@ -1282,24 +1288,40 @@
       outEq = d; outEqBands = Array.isArray(d?.bands) ? d.bands : [];
     } catch (e) { console.error('get_output_eq:', e); }
   }
+  function outEqPayload(extra = {}) {
+    return {
+      kind: outEqKind,
+      enabled: !!outEq.enabled,
+      bands: outEqBands.map((b) => ({
+        enabled: !!b.enabled, band_type: b.band_type, freq: Number(b.freq) || 1000, gain_db: Number(b.gain_db) || 0,
+        bandwidth: Number(b.bandwidth) || 1.0, q: (b.q === null || b.q === undefined) ? null : Number(b.q),
+        channel: (b.channel === null || b.channel === undefined) ? null : Number(b.channel),
+      })),
+      preampDb: outEq.preamp_auto ? null : (Number(outEq.preamp_db) || 0),
+      preampAuto: !!outEq.preamp_auto,
+      presetId: outEq.preset_id ?? null,
+      presetNaam: outEq.preset_naam ?? null,
+      ...extra,
+    };
+  }
+  // Voorvertoning tijdens slepen in de grafiek (0.7.79): alleen naar de
+  // audiothread (persist: false), hooguit ~20/s; de definitieve stand komt bij
+  // loslaten via slaOutEqStraks/slaOutEqOp.
+  let outEqVoorvertoningBezig = false;
+  async function voorvertoonOutEq() {
+    if (!outEq || outEqVoorvertoningBezig) return;
+    outEqVoorvertoningBezig = true;
+    try {
+      const d = await invoke('set_output_eq', outEqPayload({ persist: false }));
+      if (d && outEq) outEq = { ...outEq, preamp_db: d.preamp_db, preamp_auto_waarde: d.preamp_auto_waarde };
+    } catch (e) { console.warn('voorvertoning:', e); }
+    finally { outEqVoorvertoningBezig = false; }
+  }
   async function slaOutEqOp(extra = {}) {
     if (!outEq) return;
     if (outEqSaveTimer) { clearTimeout(outEqSaveTimer); outEqSaveTimer = null; }
     try {
-      const d = await invoke('set_output_eq', {
-        kind: outEqKind,
-        enabled: !!outEq.enabled,
-        bands: outEqBands.map((b) => ({
-          enabled: !!b.enabled, band_type: b.band_type, freq: Number(b.freq) || 1000, gain_db: Number(b.gain_db) || 0,
-          bandwidth: Number(b.bandwidth) || 1.0, q: (b.q === null || b.q === undefined) ? null : Number(b.q),
-          channel: (b.channel === null || b.channel === undefined) ? null : Number(b.channel),
-        })),
-        preampDb: outEq.preamp_auto ? null : (Number(outEq.preamp_db) || 0),
-        preampAuto: !!outEq.preamp_auto,
-        presetId: outEq.preset_id ?? null,
-        presetNaam: outEq.preset_naam ?? null,
-        ...extra,
-      });
+      const d = await invoke('set_output_eq', outEqPayload(extra));
       // Alleen de scalaire velden overnemen (effectieve voorversterking,
       // Auto-waarde); de banden blijven de lokale lijst, anders zet een
       // oudere respons een schuif even terug.
@@ -5617,12 +5639,12 @@
                       <button class="btn btn-sm" on:click={() => pasEqProfielToe(prof.id)}>{prof.label}</button>
                     {/each}
                   </div>
-                  <EqBanden bands={eqBands} channelCount={audioChannelCount} unit={eqBwUnit}
+                  <EqBanden bands={eqBands} channelCount={audioChannelCount} unit={eqBwUnit} sampleRate={sampleRate || 48000} enabled={eqEnabled}
                     preampDb={eqPreampDb} preampAuto={eqPreampAuto} preampEffectief={eqPreampEffectief} preampAutoWaarde={eqPreampAutoWaarde}
                     on:change={onEqBandChange}
                     on:preamp={(e) => (e.detail.auto ? setEqPreampAuto(true) : (e.detail.db == null ? setEqPreampAuto(false) : setEqPreampDb(e.detail.db)))}
                     on:unit={(e) => setEqBwUnit(e.detail)}
-                    on:add={addEqBand}
+                    on:add={(e) => addEqBand(e.detail)}
                     on:remove={(e) => removeEqBand(e.detail)} />
                 </div>
               {/if}
@@ -7087,12 +7109,12 @@
                 {/if}
                 {#if outEq && outEq.enabled}
                   <div style="margin-top:0.5rem; display:flex; flex-direction:column; gap:0.5rem;">
-                    <EqBanden bands={outEqBands} channelCount={audioChannelCount} unit={eqBwUnit}
+                    <EqBanden bands={outEqBands} channelCount={audioChannelCount} unit={eqBwUnit} sampleRate={sampleRate || 48000} enabled={outEq.enabled}
                       preampDb={outEq.preamp_db} preampAuto={outEq.preamp_auto} preampEffectief={outEq.preamp_db} preampAutoWaarde={outEq.preamp_auto_waarde}
-                      on:change={() => { outEqBands = outEqBands; slaOutEqStraks(); }}
+                      on:change={(e) => { outEqBands = outEqBands; if (e.detail?.live) voorvertoonOutEq(); else slaOutEqStraks(); }}
                       on:preamp={outEqPreamp}
                       on:unit={(e) => setEqBwUnit(e.detail)}
-                      on:add={() => { outEqBands = [...outEqBands, nieuweEqBand()]; slaOutEqOp(); }}
+                      on:add={(e) => { outEqBands = [...outEqBands, nieuweEqBand(e.detail)]; slaOutEqOp(); }}
                       on:remove={(e) => { outEqBands = outEqBands.filter((_, i) => i !== e.detail); slaOutEqOp(); }} />
                   </div>
                 {/if}

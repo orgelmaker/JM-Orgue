@@ -5,6 +5,22 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.79] - 2026-10-05
+
+### Equalizer als grafiek
+
+Beide equalizers (Klankkleur van dit orgel en de correctie voor hoofdtelefoon
+of luidsprekers) tonen nu de samengestelde curve van 20 Hz tot 20 kHz met
+genummerde punten die u kunt slepen: links/rechts is frequentie, op/neer is
+gain, Shift+slepen of het muiswiel is de breedte. Dubbelklik op een leeg stuk
+maakt een nieuwe band op die plek, dubbelklik op een punt zet de gain op nul.
+Onder de grafiek staan de banden als knoppen en bewerkt u de gekozen band in
+één kaart in plaats van een lange lijst; het toetsenbord doet alles ook
+(pijltjes, [ ], 1–9, Delete). Tijdens het slepen hoort u de wijziging direct,
+zonder tik. De grafiek rekent met precies dezelfde filters als de audio; dat
+wordt in de bouwstraat gecontroleerd tegen de Rust-code, en de gerapporteerde
+respons is daarvoor nauwkeuriger gemaakt.
+
 ## [0.7.78] - 2026-10-05
 
 ### EQ-badge, MIDI-schakelaar en een bewijs door de keten

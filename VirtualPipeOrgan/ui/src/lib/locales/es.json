@@ -852,6 +852,11 @@
   "eq": {
     "profile": "Perfil de escucha",
     "profile_speakers": "Altavoces",
+    "graph_help": "Arrastre un punto: izquierda/derecha = frecuencia, arriba/abajo = ganancia. Mayús+arrastrar o rueda = anchura, Ctrl+rueda = ganancia. Doble clic en un hueco = nueva banda, en un punto = ganancia 0. Teclas: flechas, [ ], 1–9, Supr.",
+    "view_channel": "Vista",
+    "view_all": "Todos los canales",
+    "max_bands": "Máximo 32 bandas",
+    "aria_band": "Banda {n}: {info}",
     "output_learn_title": "Aprender MIDI: corrección on/off ({n}/4)",
     "badge_title": "Corrección activa: {name}",
     "badge_own": "ajuste propio",

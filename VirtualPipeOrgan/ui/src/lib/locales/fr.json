@@ -852,6 +852,11 @@
   "eq": {
     "profile": "Profil d'écoute",
     "profile_speakers": "Enceintes",
+    "graph_help": "Glissez un point : gauche/droite = fréquence, haut/bas = gain. Maj+glisser ou molette = largeur, Ctrl+molette = gain. Double-clic sur un espace vide = nouvelle bande, sur un point = gain 0. Touches : flèches, [ ], 1–9, Suppr.",
+    "view_channel": "Affichage",
+    "view_all": "Tous les canaux",
+    "max_bands": "32 bandes au maximum",
+    "aria_band": "Bande {n} : {info}",
     "output_learn_title": "Apprentissage MIDI : correction on/off ({n}/4)",
     "badge_title": "Correction active : {name}",
     "badge_own": "réglage personnel",

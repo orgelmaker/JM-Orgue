@@ -852,6 +852,11 @@
   "eq": {
     "profile": "Hörprofil",
     "profile_speakers": "Lautsprecher",
+    "graph_help": "Punkt ziehen: links/rechts = Frequenz, auf/ab = Gain. Umschalt+Ziehen oder Mausrad = Breite, Strg+Rad = Gain. Doppelklick auf eine freie Stelle = neues Band, auf einen Punkt = Gain 0. Tasten: Pfeile, [ ], 1–9, Entf.",
+    "view_channel": "Ansicht",
+    "view_all": "Alle Kanäle",
+    "max_bands": "Höchstens 32 Bänder",
+    "aria_band": "Band {n}: {info}",
     "output_learn_title": "MIDI-Taste lernen: Korrektur ein/aus ({n}/4)",
     "badge_title": "Korrektur aktiv: {name}",
     "badge_own": "eigene Einstellung",

@@ -852,6 +852,11 @@
   "eq": {
     "profile": "Luisterprofiel",
     "profile_speakers": "Luidsprekers",
+    "graph_help": "Sleep een punt: links/rechts = frequentie, op/neer = gain. Shift+slepen of muiswiel = breedte, Ctrl+wiel = gain. Dubbelklik op een leeg stuk = nieuwe band, op een punt = gain 0. Toetsen: pijltjes, [ ], 1–9, Delete.",
+    "view_channel": "Weergave",
+    "view_all": "Alle kanalen",
+    "max_bands": "Maximaal 32 banden",
+    "aria_band": "Band {n}: {info}",
     "output_learn_title": "MIDI-knop inleren: correctie aan/uit ({n}/4)",
     "badge_title": "Correctie actief: {name}",
     "badge_own": "eigen instelling",

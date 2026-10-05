@@ -1275,16 +1275,21 @@ impl BiquadFilter {
 
     /// Analytische amplituderespons in dB op `freq` (|H(e^jw)|).
     pub fn respons_db(&self, freq: f32, sample_rate: SampleRate) -> f32 {
-        let w = 2.0 * PI * freq / sample_rate as f32;
+        // In f64 (0.7.79): de teller en noemer heffen elkaar bij smalle pieken
+        // en lage frequenties bijna op; in f32 gaf dat tot 0,08 dB fout in de
+        // gerapporteerde respons (de grafiek in JS rekent in f64 en moet
+        // hetzelfde laten zien). Het audiopad zelf verandert hier niet.
+        let w = 2.0 * std::f64::consts::PI * freq as f64 / sample_rate as f64;
         let (c1, s1) = (w.cos(), w.sin());
         let (c2, s2) = ((2.0 * w).cos(), (2.0 * w).sin());
+        let (b0, b1, b2, a1, a2) = (self.b0 as f64, self.b1 as f64, self.b2 as f64, self.a1 as f64, self.a2 as f64);
         // H = (b0 + b1 e^-jw + b2 e^-2jw) / (1 + a1 e^-jw + a2 e^-2jw)
-        let nr = self.b0 + self.b1 * c1 + self.b2 * c2;
-        let ni = -(self.b1 * s1 + self.b2 * s2);
-        let dr = 1.0 + self.a1 * c1 + self.a2 * c2;
-        let di = -(self.a1 * s1 + self.a2 * s2);
+        let nr = b0 + b1 * c1 + b2 * c2;
+        let ni = -(b1 * s1 + b2 * s2);
+        let dr = 1.0 + a1 * c1 + a2 * c2;
+        let di = -(a1 * s1 + a2 * s2);
         let mag2 = (nr * nr + ni * ni) / (dr * dr + di * di).max(1e-30);
-        10.0 * mag2.max(1e-30).log10()
+        (10.0 * mag2.max(1e-30).log10()) as f32
     }
 
     /// Polen binnen de eenheidscirkel (stabiliteitstest voor randwaarden).
@@ -1567,6 +1572,74 @@ mod eq_tests {
         b.channel = Some(0);
         let k1 = ChannelEq::build(&[b], 1, sr, -6.0);
         assert!((k1.respons_db(1000.0, sr) + 6.0).abs() < 1e-3);
+    }
+
+    /// Schrijft testscripts/testdata/eq_curve_fixture.json: per band de
+    /// genormaliseerde coëfficiënten en |H| in dB op 32 log-frequenties, bij
+    /// 44,1 en 48 kHz, plus de K240-keten met Auto-voorversterking. De JS-
+    /// spiegel (ui/src/lib/eqCurve.js) wordt daartegen getest in
+    /// testscripts/eq_curve_test.mjs. Eenmalig draaien en committen:
+    ///   cargo test -p vpo-audio schrijf_fixture_eq_curve -- --ignored
+    #[test]
+    #[ignore]
+    fn schrijf_fixture_eq_curve() {
+        fn js(v: f32) -> String { if v.is_finite() { format!("{:?}", v) } else { "null".to_string() } }
+        fn type_naam(t: EqBandType) -> &'static str {
+            match t { EqBandType::Peak => "peak", EqBandType::LowPass => "lowpass", EqBandType::HighPass => "highpass",
+                      EqBandType::BandPass => "bandpass", EqBandType::LowShelf => "lowshelf", EqBandType::HighShelf => "highshelf" }
+        }
+        let freqs: Vec<f32> = (0..32).map(|i| 20.0 * (1000.0_f32).powf(i as f32 / 31.0)).collect();
+        let banden = [
+            band(EqBandType::Peak, 1000.0, 6.0, 1.0, Some(1.0)),
+            band(EqBandType::Peak, 1000.0, -8.0, 1.5, None),
+            band(EqBandType::Peak, 4207.0, 5.2, 1.0, Some(3.07)),
+            band(EqBandType::Peak, 60.0, 12.0, 1.0, Some(10.0)),
+            band(EqBandType::LowPass, 8000.0, 0.0, 1.0, None),
+            band(EqBandType::HighPass, 40.0, 0.0, 0.7, None),
+            band(EqBandType::BandPass, 500.0, 0.0, 2.0, None),
+            band(EqBandType::LowShelf, 105.0, 6.3, 1.0, Some(0.70)),
+            band(EqBandType::LowShelf, 200.0, -3.0, 1.0, None),
+            band(EqBandType::HighShelf, 10000.0, 1.8, 1.0, Some(0.70)),
+            band(EqBandType::HighShelf, 4000.0, 4.0, 1.0, None),
+            band(EqBandType::HighShelf, 18000.0, -6.0, 1.0, Some(2.0)),
+        ];
+        let mut uit = String::from("{\n  \"freqs\": [");
+        uit += &freqs.iter().map(|f| js(*f)).collect::<Vec<_>>().join(", ");
+        uit += "],\n  \"banden\": [\n";
+        let mut eerste = true;
+        for sr in [44_100u32, 48_000u32] {
+            for b in &banden {
+                let f = BiquadFilter::from_band_spec(b, sr);
+                if !eerste { uit += ",\n"; }
+                eerste = false;
+                uit += &format!(
+                    "    {{\"type\": \"{}\", \"freq\": {}, \"gain_db\": {}, \"bandwidth\": {}, \"q\": {}, \"sr\": {}, \"coeffs\": [{}, {}, {}, {}, {}], \"db\": [{}]}}",
+                    type_naam(b.band_type), js(b.freq), js(b.gain_db), js(b.bandwidth_oct),
+                    b.q.map(js).unwrap_or_else(|| "null".to_string()), sr,
+                    js(f.b0), js(f.b1), js(f.b2), js(f.a1), js(f.a2),
+                    freqs.iter().map(|x| js(f.respons_db(*x, sr))).collect::<Vec<_>>().join(", "));
+            }
+        }
+        // K240-keten (AutoEq oratory1990) als samengestelde curve + Auto-preamp.
+        let k240 = [
+            band(EqBandType::LowShelf, 105.0, 6.3, 1.0, Some(0.70)),
+            band(EqBandType::Peak, 204.0, -3.2, 1.0, Some(0.33)),
+            band(EqBandType::Peak, 4207.0, 5.2, 1.0, Some(3.07)),
+            band(EqBandType::Peak, 1585.0, 5.4, 1.0, Some(3.15)),
+            band(EqBandType::Peak, 75.0, 2.9, 1.0, Some(1.48)),
+            band(EqBandType::HighShelf, 10000.0, 1.8, 1.0, Some(0.70)),
+            band(EqBandType::Peak, 6459.0, -2.3, 1.0, Some(2.56)),
+            band(EqBandType::Peak, 5428.0, 2.7, 1.0, Some(3.81)),
+            band(EqBandType::Peak, 2689.0, -1.7, 1.0, Some(4.63)),
+            band(EqBandType::Peak, 9322.0, -2.0, 1.0, Some(2.55)),
+        ];
+        let sr = 48_000u32;
+        let pre = auto_preamp_db(&k240, 2, sr);
+        let keten: Vec<String> = freqs.iter().map(|x| js(respons_db_van_banden(&k240, 0, sr, pre, *x))).collect();
+        uit += &format!("\n  ],\n  \"k240\": {{\"sr\": {}, \"auto_preamp_db\": {}, \"db_met_preamp\": [{}]}}\n}}\n", sr, js(pre), keten.join(", "));
+        let pad = concat!(env!("CARGO_MANIFEST_DIR"), "/../testscripts/testdata/eq_curve_fixture.json");
+        std::fs::write(pad, uit).expect("fixture schrijven");
+        println!("fixture geschreven: {}", pad);
     }
 
     #[test]

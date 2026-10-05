@@ -1955,7 +1955,7 @@ fn handle_set_output_eq(state: &AppState, query: &str, body: &str) -> Result<Val
     let (pre, auto) = preamp_uit_json(&v);
     let preset_id = v.get("preset_id").and_then(|x| x.as_str()).map(|s| s.to_string());
     let preset_naam = v.get("preset_naam").and_then(|x| x.as_str()).map(|s| s.to_string());
-    let dto = crate::commands::set_output_eq_inner(state, &kind, enabled, bands, pre, auto, preset_id, preset_naam)
+    let dto = crate::commands::set_output_eq_inner(state, &kind, enabled, bands, pre, auto, preset_id, preset_naam, true)
         .map_err(|e| (400u16, e))?;
     serde_json::to_value(dto).map_err(|e| (500u16, e.to_string()))
 }

@@ -1,11 +1,17 @@
 <script>
-  // Bandenlijst van een equalizer (0.7.77): gedeeld door "Klankkleur van dit
-  // orgel" en de uitgangscorrectie per uitvoerprofiel. De component muteert de
-  // bandobjecten in `bands` en meldt dat met `change`; de eigenaar doet dan
-  // zelf `bands = bands` en stuurt alles naar de backend. Voorversterking en
-  // eenheid komen als props binnen en gaan als events (`preamp`, `unit`) terug.
+  // Equalizerpaneel (0.7.77, grafiek sinds 0.7.79): voorversterking, de
+  // grafiek met sleepbare punten, een strook met bandknoppen en één
+  // detailkaart voor de gekozen band. Gedeeld door "Klankkleur van dit orgel"
+  // en de uitgangscorrectie per uitvoerprofiel. De component muteert de
+  // bandobjecten in `bands` en meldt dat met `change` (detail { live }:
+  // true = tijdens slepen, alleen naar de audio; false = definitief);
+  // de eigenaar doet dan zelf `bands = bands` en stuurt alles naar de
+  // backend. Voorversterking en eenheid komen als props binnen en gaan als
+  // events (`preamp`, `unit`) terug; `add` draagt optioneel { freq, gain_db }.
   import { createEventDispatcher } from 'svelte';
   import { t } from '../../lib/i18n.js';
+  import EqGrafiek from './EqGrafiek.svelte';
+  import { qToBw, bwToQ, EQ_MAX_BANDEN } from '../../lib/eqCurve.js';
 
   export let bands = [];
   export let channelCount = 2;
@@ -14,19 +20,24 @@
   export let preampAuto = true;
   export let preampEffectief = 0;
   export let preampAutoWaarde = 0;
+  export let sampleRate = 48000;
+  export let enabled = true;
 
   const dispatch = createEventDispatcher();
 
-  // Q ↔ bandbreedte (analoge RBJ-benadering; identiek aan vpo_audio::q_naar_bandbreedte).
-  const qToBw = (q) => (2 / Math.LN2) * Math.asinh(1 / (2 * Math.max(0.05, q)));
-  const bwToQ = (bw) => 1 / (2 * Math.sinh(0.5 * Math.LN2 * Math.max(0.01, bw)));
+  let selected = 0;
+  let channelView = null;
+  $: if (bands && selected >= bands.length) selected = Math.max(0, bands.length - 1);
+  $: band = bands && bands.length ? bands[selected] : null;
+  $: heeftKanaalbanden = (bands || []).some((b) => b.channel != null);
+  $: if (!heeftKanaalbanden && channelView != null) channelView = null;
+
   const bandQ = (b) => (b.q != null ? Number(b.q) : bwToQ(Number(b.bandwidth) || 1));
   const isShelf = (b) => b.band_type === 'lowshelf' || b.band_type === 'highshelf';
   const heeftGain = (b) => b.band_type === 'peak' || isShelf(b);
-
-  // Log-schaal voor de frequentie-slider: 0..300 ↔ 20 Hz .. 20 kHz.
   const freqToSlider = (f) => Math.round(100 * Math.log10(Math.max(20, Math.min(20000, f)) / 20));
   const sliderToFreq = (v) => Math.round(20 * Math.pow(10, v / 100));
+  const fmtF = (f) => (f >= 1000 ? `${(f / 1000).toFixed(f >= 10000 ? 0 : 1)}k` : `${Math.round(f)}`);
 
   $: bandTypes = [
     { value: 'peak', label: $t('eq.band_peak') },
@@ -37,26 +48,26 @@
     { value: 'highshelf', label: $t('eq.band_highshelf') },
   ];
 
-  const gewijzigd = () => dispatch('change');
+  const gewijzigd = (live = false) => { bands = bands; dispatch('change', { live }); };
 
-  function setBandQ(band, q) {
+  function setBandQ(b, q) {
     // Shelves: 0,3–2 (daarbuiten resoneert de kantel); overige: 0,05–20.
-    const lo = isShelf(band) ? 0.3 : 0.05;
-    const hi = isShelf(band) ? 2 : 20;
+    const lo = isShelf(b) ? 0.3 : 0.05;
+    const hi = isShelf(b) ? 2 : 20;
     const qq = Math.max(lo, Math.min(hi, Number(q) || 0.7));
-    band.q = qq;
-    band.bandwidth = qToBw(qq);
+    b.q = qq;
+    b.bandwidth = qToBw(qq);
     gewijzigd();
   }
-  function setBandBw(band, bw) {
-    const b = Math.max(0.05, Math.min(8, Number(bw) || 1));
-    band.bandwidth = b;
-    band.q = bwToQ(b);
+  function setBandBw(b, bw) {
+    const v = Math.max(0.05, Math.min(8, Number(bw) || 1));
+    b.bandwidth = v;
+    b.q = bwToQ(v);
     gewijzigd();
   }
-  function typeGewijzigd(band, value) {
-    band.band_type = value;
-    if (isShelf(band) && band.q != null) setBandQ(band, band.q);
+  function typeGewijzigd(b, value) {
+    b.band_type = value;
+    if (isShelf(b) && b.q != null) setBandQ(b, b.q);
     else gewijzigd();
   }
   function setPreampDb(v) {
@@ -64,8 +75,15 @@
     dispatch('preamp', { db, auto: false });
     return db;
   }
+  function kies(i) { selected = i; }
+  function voegToe(detail) {
+    if ((bands || []).length >= EQ_MAX_BANDEN) return;
+    dispatch('add', detail || null);
+    // De nieuwe band komt achteraan; selecteer hem zodra de eigenaar hem heeft toegevoegd.
+    selected = (bands || []).length;
+  }
   $: preampToon = preampAuto ? preampEffectief : preampDb;
-  $: preampWaarschuwing = !preampAuto && preampDb > preampAutoWaarde + 0.05 && bands.some((b) => b.enabled && b.gain_db > 0);
+  $: preampWaarschuwing = !preampAuto && preampDb > preampAutoWaarde + 0.05 && (bands || []).some((b) => b.enabled && b.gain_db > 0);
 </script>
 
 <!-- Voorversterking: Auto = −(grootste opgetelde versterking). -->
@@ -96,12 +114,49 @@
   {/if}
 </div>
 
-{#each bands as band, bi (bi)}
+<!-- Grafiek (0.7.79) -->
+<EqGrafiek {bands} {selected} {sampleRate} {unit} {enabled} {channelView}
+  preampDb={preampAuto ? preampEffectief : preampDb}
+  on:select={(e) => kies(e.detail)}
+  on:change={(e) => gewijzigd(!!e.detail?.live)}
+  on:add={(e) => voegToe(e.detail)}
+  on:remove={(e) => dispatch('remove', e.detail)} />
+<div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
+  <span style="margin:0; flex:1; min-width:12rem; font-size:0.68rem; color:var(--text-muted); line-height:1.35;">{$t('eq.graph_help')}</span>
+  {#if heeftKanaalbanden}
+    <label style="display:inline-flex; align-items:center; gap:0.3rem; font-size:0.72rem; color:var(--text-muted);">
+      {$t('eq.view_channel')}
+      <select style="font-size:0.72rem; padding:0.1rem 0.3rem; background:var(--bg-elevated); border:1px solid var(--accent-soft-2); border-radius:var(--radius-sm); color:var(--text);"
+        value={channelView == null ? 'all' : String(channelView)}
+        on:change={(e) => { channelView = e.target.value === 'all' ? null : parseInt(e.target.value, 10); }}>
+        <option value="all">{$t('eq.view_all')}</option>
+        {#each Array(Math.max(2, channelCount)) as _, ch}
+          <option value={String(ch)}>{$t('settings.channel_n').replace('{n}', ch + 1)}</option>
+        {/each}
+      </select>
+    </label>
+  {/if}
+</div>
+
+<!-- Bandstrook -->
+<div class="eq-chips">
+  {#each bands as b, i (i)}
+    <button class="eq-chip" class:gekozen={i === selected} class:bandUit={!b.enabled} on:click={() => kies(i)} title={$t('eq.band_n').replace('{n}', i + 1)}>
+      <span class="eq-chip-nr">{i + 1}</span>
+      <span class="eq-chip-f">{fmtF(Number(b.freq) || 0)}</span>
+    </button>
+  {/each}
+  <button class="eq-chip eq-chip-plus" on:click={() => voegToe(null)} disabled={(bands || []).length >= EQ_MAX_BANDEN}
+    title={(bands || []).length >= EQ_MAX_BANDEN ? $t('eq.max_bands') : $t('eq.band_add')}>+</button>
+</div>
+
+<!-- Detailkaart van de gekozen band -->
+{#if band}
   <div style="border:1px solid var(--accent-soft-2); border-radius:var(--radius-sm); padding:0.4rem 0.5rem; opacity:{band.enabled ? 1 : 0.55};">
     <div style="display:flex; align-items:center; gap:0.45rem; flex-wrap:wrap; margin-bottom:0.35rem;">
       <label class="swell-toggle" style="margin:0;" title={$t('eq.band_toggle_title')}>
         <input type="checkbox" checked={band.enabled} on:change={(e) => { band.enabled = e.target.checked; gewijzigd(); }} />
-        <span class="swell-toggle-label">{$t('eq.band_n').replace('{n}', bi + 1)}</span>
+        <span class="swell-toggle-label">{$t('eq.band_n').replace('{n}', selected + 1)}</span>
       </label>
       <select
         style="font-size:0.75rem; padding:0.15rem 0.3rem; background:var(--bg-elevated); border:1px solid var(--accent-soft-2); border-radius:var(--radius-sm); color:var(--text);"
@@ -127,7 +182,7 @@
       <button
         class="btn btn-ghost btn-sm"
         style="margin-left:auto; font-size:0.75rem; padding:0.1rem 0.45rem;"
-        on:click={() => dispatch('remove', bi)}
+        on:click={() => dispatch('remove', selected)}
         title={$t('eq.band_remove')}
       >✕</button>
     </div>
@@ -175,10 +230,24 @@
       {/if}
     </div>
   </div>
-{/each}
-<div style="display:flex; gap:0.4rem;">
-  <button class="btn btn-secondary btn-sm" on:click={() => dispatch('add')}>{$t('eq.band_add')}</button>
-  <span style="font-size:0.7rem; color:var(--text-muted); align-self:center;">
-    {$t('eq.channel_note')}
-  </span>
-</div>
+{/if}
+<span style="font-size:0.7rem; color:var(--text-muted);">{$t('eq.channel_note')}</span>
+
+<style>
+  .eq-chips { display: flex; gap: 0.3rem; overflow-x: auto; padding: 0.1rem 0; }
+  .eq-chip {
+    flex: 0 0 auto; min-width: 2.2rem; min-height: 2.2rem; padding: 0.15rem 0.35rem;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0;
+    border: 1px solid var(--accent-soft-2); border-radius: var(--radius-sm); background: var(--bg-elevated); color: var(--text);
+    font: inherit; font-size: 0.72rem; line-height: 1.1; cursor: pointer;
+  }
+  .eq-chip.gekozen { background: var(--primary); color: var(--bg-darkest); border-color: var(--gold-border); }
+  .eq-chip.bandUit { border-style: dashed; opacity: 0.6; }
+  .eq-chip:disabled { opacity: 0.4; cursor: default; }
+  .eq-chip-nr { font-weight: 700; }
+  .eq-chip-f { font-size: 0.62rem; opacity: 0.8; }
+  .eq-chip-plus { font-size: 1rem; font-weight: 700; min-width: 2rem; }
+  @media (pointer: coarse) {
+    .eq-chip { min-width: 2.75rem; min-height: 2.75rem; }
+  }
+</style>
