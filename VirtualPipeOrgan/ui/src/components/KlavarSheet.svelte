@@ -171,12 +171,12 @@
                   {/each}
                   <!-- Akkoordlijnen, stokken en koppen -->
                   {#each lay.akkoordlijnen as a}
-                    <line class="k-stok" x1={a.x0} x2={a.x1} y1={a.y} y2={a.y} stroke-width={sw(MAAT.stok)} />
+                    <line class="k-stok k-v{a.voice || 1}" x1={a.x0} x2={a.x1} y1={a.y} y2={a.y} stroke-width={sw(MAAT.stok)} />
                   {/each}
                   {#each lay.noten as n (n.key)}
                     <g class="k-noot" data-id={n.id} class:selected={n.id != null && selectionIds.has(n.id)} class:cursor={n.id != null && n.id === cursorId}>
                       {#if !n.inAkkoord}
-                        <line class="k-stok" x1={n.stokX0} x2={n.stokX1} y1={n.yStok} y2={n.yStok} stroke-width={sw(MAAT.stok)} />
+                        <line class="k-stok k-v{n.voice || 1}" x1={n.stokX0} x2={n.stokX1} y1={n.yStok} y2={n.yStok} stroke-width={sw(MAAT.stok)} />
                       {/if}
                       <circle class="k-kop" class:zwart={n.zwart} cx={n.cx} cy={n.cy} r={n.r} stroke-width={sw(MAAT.kopLijn)} />
                     </g>
@@ -243,6 +243,11 @@
   .k-maat { stroke: #000; }
   .k-tekst { fill: #333; font-family: Georgia, 'Times New Roman', serif; }
   .k-stok { stroke: #000; stroke-linecap: butt; }
+  /* Stemkleuren (0.7.86), alleen op het scherm. */
+  .k-stok.k-v2 { stroke: #2a6fdb; }
+  .k-stok.k-v3 { stroke: #2e8b57; }
+  .k-stok.k-v4 { stroke: #e07b00; }
+  @media print { .k-stok.k-v2, .k-stok.k-v3, .k-stok.k-v4 { stroke: #000; } }
   .k-kop { fill: #fff; stroke: #000; }
   .k-kop.zwart { fill: #000; }
   .k-stop { fill: none; stroke: #000; stroke-linejoin: miter; }

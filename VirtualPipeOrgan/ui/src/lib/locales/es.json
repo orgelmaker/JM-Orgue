@@ -885,7 +885,7 @@
     "unsaved_marker": "Cambios sin guardar",
     "help_title": "Ayuda",
     "help_shortcuts_title": "Atajos",
-    "help_shortcuts": "Ctrl+N nuevo · Ctrl+O abrir · Ctrl+S guardar · Ctrl+Mayús+S guardar como · Ctrl+1..4 pestañas · K pentagrama/klavar · N entrada paso a paso\nEntrada paso a paso: A–G nota (Mayús = acorde) · Intro coloca en el cursor · ↑/↓ cursor un grado (Mayús = octava, Alt = última nota sostenido/bemol) · 2–7 valor · Alt+2–7 duración de la última nota · . puntillo · 0 silencio · R repetir · Retroceso deshacer · Esc fin\nSelección: ←/→ nota · ↑/↓ transportar (Mayús = octava) · Mayús+←/→ desplazar · Supr · [ ÷2 · ] ×2 · . puntillo · Ctrl+C/V · Ctrl+Z/Y · Alt+←/→ mano (klavar)",
+    "help_shortcuts": "Ctrl+N nuevo · Ctrl+O abrir · Ctrl+S guardar · Ctrl+Mayús+S guardar como · Ctrl+1..4 pestañas · K pentagrama/klavar · V solo voz activa · Mayús+Alt+1..4 voz · N entrada paso a paso\nEntrada paso a paso: A–G nota (Mayús = acorde) · Intro coloca en el cursor · ↑/↓ cursor un grado (Mayús = octava, Alt = última nota sostenido/bemol) · 2–7 valor · Alt+2–7 duración de la última nota · . puntillo · 0 silencio · R repetir · Retroceso deshacer · Esc fin\nSelección: ←/→ nota · ↑/↓ transportar (Mayús = octava) · Mayús+←/→ desplazar · Supr · [ ÷2 · ] ×2 · . puntillo · Ctrl+C/V · Ctrl+Z/Y · Alt+←/→ mano (klavar)",
     "tab_input": "Entrada",
     "tab_texts": "Textos y signos",
     "tab_staves": "Pentagramas y voces",
@@ -903,7 +903,17 @@
     "measure_beat": "compás {m}, tiempo {b}",
     "voices_later": "Las voces por pentagrama llegan en una versión posterior.",
     "grid_title": "Valor más fino de la cuadrícula",
-    "selection_section": "Selección:"
+    "selection_section": "Selección:",
+    "voice": "Voz",
+    "voices": "Voces",
+    "voice_button_title": "Voz activa {n} de este pentagrama (Mayús+Alt+{n}); negrita = contiene notas",
+    "to_voice": "A la voz",
+    "to_voice_title": "Mover las notas seleccionadas a la voz {n} (Mayús+Alt+↑/↓: voz anterior/siguiente)",
+    "split_chord": "Dividir acorde",
+    "split_chord_title": "La nota más alta de cada ataque a la voz 1, el resto a la voz 2",
+    "only_active_voice": "Solo la voz activa",
+    "only_active_voice_title": "Mostrar las otras voces en gris claro (V)",
+    "voices_hint": "Voces 1 y 3 plicas hacia arriba, 2 y 4 hacia abajo; cada voz con su color en pantalla, negro en papel."
   },
   "temperaments": {
     "name_prompt": "Nombre de este temperamento:"

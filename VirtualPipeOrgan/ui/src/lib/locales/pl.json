@@ -885,7 +885,7 @@
     "unsaved_marker": "Niezapisane zmiany",
     "help_title": "Pomoc",
     "help_shortcuts_title": "Skróty klawiszowe",
-    "help_shortcuts": "Ctrl+N nowy · Ctrl+O otwórz · Ctrl+S zapisz · Ctrl+Shift+S zapisz jako · Ctrl+1..4 karty · K nuty/klavar · N wprowadzanie krokowe\nWprowadzanie krokowe: A–G nuta (Shift = akord) · Enter wstawia przy kursorze · ↑/↓ kursor o stopień (Shift = oktawa, Alt = ostatnia nuta krzyżyk/bemol) · 2–7 wartość · Alt+2–7 długość ostatniej nuty · . kropka · 0 pauza · R powtórz · Backspace cofnij · Esc koniec\nZaznaczenie: ←/→ nuta · ↑/↓ transpozycja (Shift = oktawa) · Shift+←/→ przesuń · Delete · [ ÷2 · ] ×2 · . kropka · Ctrl+C/V · Ctrl+Z/Y · Alt+←/→ ręka (klavar)",
+    "help_shortcuts": "Ctrl+N nowy · Ctrl+O otwórz · Ctrl+S zapisz · Ctrl+Shift+S zapisz jako · Ctrl+1..4 karty · K nuty/klavar · V tylko aktywny głos · Shift+Alt+1..4 głos · N wprowadzanie krokowe\nWprowadzanie krokowe: A–G nuta (Shift = akord) · Enter wstawia przy kursorze · ↑/↓ kursor o stopień (Shift = oktawa, Alt = ostatnia nuta krzyżyk/bemol) · 2–7 wartość · Alt+2–7 długość ostatniej nuty · . kropka · 0 pauza · R powtórz · Backspace cofnij · Esc koniec\nZaznaczenie: ←/→ nuta · ↑/↓ transpozycja (Shift = oktawa) · Shift+←/→ przesuń · Delete · [ ÷2 · ] ×2 · . kropka · Ctrl+C/V · Ctrl+Z/Y · Alt+←/→ ręka (klavar)",
     "tab_input": "Wprowadzanie",
     "tab_texts": "Teksty i znaki",
     "tab_staves": "Pięciolinie i głosy",
@@ -903,7 +903,17 @@
     "measure_beat": "takt {m}, miara {b}",
     "voices_later": "Głosy na pięciolinii pojawią się w późniejszej wersji.",
     "grid_title": "Najdrobniejsza wartość siatki",
-    "selection_section": "Zaznaczenie:"
+    "selection_section": "Zaznaczenie:",
+    "voice": "Głos",
+    "voices": "Głosy",
+    "voice_button_title": "Aktywny głos {n} tej pięciolinii (Shift+Alt+{n}); pogrubiony = zawiera nuty",
+    "to_voice": "Do głosu",
+    "to_voice_title": "Przenieś zaznaczone nuty do głosu {n} (Shift+Alt+↑/↓: poprzedni/następny głos)",
+    "split_chord": "Podziel akord",
+    "split_chord_title": "Najwyższa nuta każdego ataku do głosu 1, reszta do głosu 2",
+    "only_active_voice": "Tylko aktywny głos",
+    "only_active_voice_title": "Pozostałe głosy na jasnoszaro (V)",
+    "voices_hint": "Głosy 1 i 3 laski w górę, 2 i 4 w dół; każdy głos ma swój kolor na ekranie, czarny na papierze."
   },
   "temperaments": {
     "name_prompt": "Nazwa tego stroju:"

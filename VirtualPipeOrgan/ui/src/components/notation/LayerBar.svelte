@@ -10,6 +10,12 @@
   let renameLayerId = null;
   function doe(naam, ...args) { const f = acties[naam]; if (typeof f === 'function') f(...args); }
   function focusSelect(node) { node.focus(); node.select(); }
+  // Stemmen met noten in de zichtbare takes (gevulde knop).
+  function stemmenMetNoten(layer) {
+    const s = new Set();
+    for (const t of layer.takes || []) { if (!t.visible) continue; for (const e of t.events) s.add(Number(e.voice) || 1); }
+    return s;
+  }
   function commitRename(layerId, naam) {
     if (renameLayerId !== layerId) return;
     renameLayerId = null;
@@ -31,6 +37,12 @@
         <span class="naam" role="button" tabindex="0" on:dblclick={() => renameLayerId = layer.id}
           on:keydown={(e) => { if (e.key === 'F2') renameLayerId = layer.id; }} title={$t('notation.rename_staff_title')}>{layer.name}</span>
       {/if}
+      <span class="stemmen" role="group" aria-label={$t('notation.voices')}>
+        {#each [1, 2, 3, 4] as v}
+          <button class="stem stem-{v}" class:actief={(Number(layer.active_voice) || 1) === v} class:gevuld={stemmenMetNoten(layer).has(v)}
+            on:click={() => doe('setActiveVoice', layer.id, v)} title={$t('notation.voice_button_title').replaceAll('{n}', String(v))}>{v}</button>
+        {/each}
+      </span>
       <span class="tools">
         <button class="tool" on:click={() => doe('move', layer.id, -1)} disabled={i === 0} title={$t('notation.move_up')}>▲</button>
         <button class="tool" on:click={() => doe('move', layer.id, +1)} disabled={i === layers.length - 1} title={$t('notation.move_down')}>▼</button>
@@ -73,6 +85,17 @@
   .arm.armed { background: #cc3030; color: #fff; border-color: #ff5050; }
   .naam { font-weight: 600; cursor: text; }
   .hernoem { width: 8rem; font-size: 0.78rem; }
+  .stemmen { display: inline-flex; gap: 0.1rem; }
+  .stem {
+    width: 1.35rem; height: 1.35rem; padding: 0; border-radius: 4px; cursor: pointer;
+    border: 1px solid var(--text-muted, #666); background: transparent; color: var(--text-muted, #999);
+    font-size: 0.7rem; line-height: 1;
+  }
+  .stem.gevuld { color: var(--text, #eee); font-weight: 700; }
+  .stem.actief { background: var(--text, #eee); color: var(--bg-panel, #2a2a2a); border-color: var(--text, #eee); }
+  .stem-2.actief { background: #2a6fdb; color: #fff; border-color: #2a6fdb; }
+  .stem-3.actief { background: #2e8b57; color: #fff; border-color: #2e8b57; }
+  .stem-4.actief { background: #e07b00; color: #fff; border-color: #e07b00; }
   .tools { display: inline-flex; gap: 0.1rem; }
   .tool { border: none; background: transparent; color: var(--text-muted, #aaa); font-size: 0.7rem; padding: 0 0.2rem; cursor: pointer; line-height: 1.4; }
   .tool:hover:not(:disabled) { color: var(--text, #eee); }

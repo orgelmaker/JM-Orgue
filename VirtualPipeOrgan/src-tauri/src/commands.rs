@@ -4429,11 +4429,12 @@ pub fn notation_stop_recording(state: State<AppState>) -> Result<(), String> {
             if let Some(sc) = scores.get_mut(&sid) {
                 let ev_id = sc.new_event_id();
                 if let Some(layer) = sc.layers.iter_mut().find(|l| l.id == lid) {
+                    let stem = layer.active_voice;
                     if let Some(take) = layer.takes.iter_mut().find(|t| t.id == tid) {
                         let end_us = end_us.max(start_us + 20_000);
                         take.events.push(crate::notation::LayerEv {
                             id: ev_id, midi: note, start_us, end_us,
-                            channel: ch, locked: false, hand: None,
+                            channel: ch, locked: false, voice: stem, hand: None,
                         });
                         let _ = handle.emit("jm-orgue:notation:note-added", serde_json::json!({
                             "score": sid, "layer": lid, "take": tid,
@@ -4520,6 +4521,9 @@ pub struct PasteNote {
     /// Hand in klavar (0.7.70), zodat plakken de per-noot-hand niet verliest.
     #[serde(default)]
     pub hand: Option<crate::notation::KlavarHand>,
+    /// Stem (0.7.86); 0 = de actieve stem van de doelbalk.
+    #[serde(default)]
+    pub voice: u8,
 }
 
 /// Plak noten in een laag (armed take, of de eerste zichtbare take). De backend
@@ -4535,13 +4539,16 @@ pub fn notation_paste(state: State<AppState>, app: tauri::AppHandle, score_id: u
                 .or_else(|| l.takes.first().map(|t| t.id))
         });
         let take_id = match take_id { Some(t) => t, None => return sc.generation };
+        let stem = sc.layers.iter().find(|l| l.id == layer_id).map(|l| l.active_voice).unwrap_or(1);
         let mut events = Vec::with_capacity(notes.len());
         for n in notes.iter() {
             let id = sc.new_event_id();
             let start_us = n.start_us;
             let end_us = n.end_us.max(start_us + 1000);
+            // Plakken behoudt de stem van de bron; zonder stem de actieve stem.
+            let voice = if n.voice >= 1 { n.voice.min(4) } else { stem };
             events.push((layer_id, take_id, crate::notation::LayerEv {
-                id, midi: n.midi, start_us, end_us, channel: n.channel, locked: true, hand: n.hand,
+                id, midi: n.midi, start_us, end_us, channel: n.channel, locked: true, voice, hand: n.hand,
             }));
         }
         let cmd = crate::notation::EditCommand::InsertEvents { events };
@@ -4928,6 +4935,78 @@ pub fn paths_exist(paths: Vec<String>) -> Vec<bool> {
     paths.iter().map(|p| std::path::Path::new(p).is_file()).collect()
 }
 
+/// Notatie voor het scherm (0.7.86): MusicXML met stemkleuren plus de
+/// notemap (part, maat, stem, positie, toon → event-id) waarmee het venster
+/// elke OSMD-noot exact aan zijn event koppelt. `dim_other`: andere stemmen
+/// dan de actieve lichtgrijs. De export (`notation_get_musicxml`) blijft kleurloos.
+#[derive(serde::Serialize)]
+pub struct NotationDto {
+    pub xml: String,
+    pub notemap: Vec<crate::notation::NoteRef>,
+    /// Effectief raster (eenheden per kwart) waarin `NoteRef.pos` staat — bij
+    /// /8 minstens 2, dus niet altijd gelijk aan `Score.quantize`.
+    pub q: u8,
+}
+
+#[tauri::command]
+pub fn notation_get_notation(state: State<AppState>, score_id: u32, dim_other: Option<bool>) -> Result<NotationDto, String> {
+    let scores = state.notation_scores.read();
+    let sc = scores.get(&score_id).ok_or_else(|| format!("Score {} niet gevonden", score_id))?;
+    let (xml, notemap) = crate::notation::build_notation_from_score(sc, dim_other.unwrap_or(false))?;
+    let (q, _) = crate::notation::raster_en_maatlengte(sc.quantize, sc.beats_per_bar, sc.beat_unit);
+    Ok(NotationDto { xml, notemap, q: q as u8 })
+}
+
+/// Stem van geselecteerde noten (0.7.86), met undo.
+#[tauri::command]
+pub fn notation_set_voice(state: State<AppState>, app: tauri::AppHandle, score_id: u32, event_ids: Vec<u64>, voice: u8) -> Result<u64, String> {
+    if !(1..=4).contains(&voice) { return Err("Stem moet 1 tot 4 zijn".into()); }
+    let gen = with_score_mut(&state, score_id, |sc| {
+        let cmd = crate::notation::EditCommand::SetVoice { items: event_ids.iter().map(|&id| (id, voice)).collect() };
+        if let Some(inv) = cmd.apply(sc) { sc.push_undo(inv); }
+        sc.generation
+    })?;
+    tauri::async_runtime::spawn(emit_score_changed(app, score_id, gen));
+    Ok(gen)
+}
+
+/// Actieve stem van een balk (0.7.86): doel van opname, stapinvoer, klik en
+/// plakken. Geen undo-stap en geen nieuwe generation (UI-toestand die wel
+/// in het bestand meegaat).
+#[tauri::command]
+pub fn notation_set_active_voice(state: State<AppState>, score_id: u32, layer_id: u32, voice: u8) -> Result<(), String> {
+    if !(1..=4).contains(&voice) { return Err("Stem moet 1 tot 4 zijn".into()); }
+    with_score_mut(&state, score_id, |sc| {
+        if let Some(l) = sc.layers.iter_mut().find(|l| l.id == layer_id) { l.active_voice = voice; }
+    })
+}
+
+/// "Akkoord splitsen in stemmen" (0.7.86): per inzet de hoogste noot naar
+/// stem 1, de rest naar stem 2 — één undo-stap.
+#[tauri::command]
+pub fn notation_split_chord_to_voices(state: State<AppState>, app: tauri::AppHandle, score_id: u32, event_ids: Vec<u64>) -> Result<u64, String> {
+    if event_ids.is_empty() { return Err("Niets geselecteerd".into()); }
+    let gen = with_score_mut(&state, score_id, |sc| {
+        let mut noten: Vec<(u64, u8, u64)> = Vec::new();
+        for &id in &event_ids {
+            if let Some((li, ti, ei)) = sc.locate(id) {
+                let e = &sc.layers[li].takes[ti].events[ei];
+                noten.push((e.id, e.midi, e.start_us));
+            }
+        }
+        // Hetzelfde akkoordvenster als het blad: effectief raster en de schuif.
+        let (q_eff, _) = crate::notation::raster_en_maatlengte(sc.quantize, sc.beats_per_bar, sc.beat_unit);
+        let bpm = if sc.bpm.is_finite() && sc.bpm >= 20.0 && sc.bpm <= 300.0 { sc.bpm } else { 90.0 };
+        let venster_us = (crate::notation::akkoord_venster_sec(bpm, q_eff, sc.tolerance_pct) * 1_000_000.0).round() as u64;
+        let items = crate::notation::verdeel_akkoord_in_stemmen(&noten, venster_us);
+        let cmd = crate::notation::EditCommand::SetVoice { items };
+        if let Some(inv) = cmd.apply(sc) { sc.push_undo(inv); }
+        sc.generation
+    })?;
+    tauri::async_runtime::spawn(emit_score_changed(app, score_id, gen));
+    Ok(gen)
+}
+
 /// Stuk sluiten (0.7.83): weg uit het geheugen; een lopende opname of
 /// stapinvoer op dít stuk stopt mee (open noten vervallen).
 #[tauri::command]
@@ -4986,6 +5065,7 @@ pub fn notation_insert_notes(state: State<AppState>, app: tauri::AppHandle, scor
                 .or_else(|| l.takes.first().map(|t| t.id))
         });
         let take_id = match take_id { Some(t) => t, None => return (sc.generation, Vec::new()) };
+        let stem = sc.layers.iter().find(|l| l.id == layer_id).map(|l| l.active_voice).unwrap_or(1);
         let dur = dur_us.max(1000);
         let mut events = Vec::with_capacity(notes.len());
         let mut ids = Vec::with_capacity(notes.len());
@@ -4993,7 +5073,7 @@ pub fn notation_insert_notes(state: State<AppState>, app: tauri::AppHandle, scor
             let id = sc.new_event_id();
             ids.push(id);
             events.push((layer_id, take_id, crate::notation::LayerEv {
-                id, midi: *midi, start_us, end_us: start_us + dur, channel: crate::notation::KANAAL_ONBEKEND, locked: true, hand: None,
+                id, midi: *midi, start_us, end_us: start_us + dur, channel: crate::notation::KANAAL_ONBEKEND, locked: true, voice: stem, hand: None,
             }));
         }
         let cmd = crate::notation::EditCommand::InsertEvents { events };
@@ -5120,10 +5200,11 @@ pub fn notation_import_midi(
             let start_us = (n.start_sec * 1_000_000.0) as u64;
             let end_us = ((n.end_sec * 1_000_000.0) as u64).max(start_us + 20_000);
             if let Some(layer) = sc.layers.iter_mut().find(|l| l.id == target_layer) {
+                let stem = layer.active_voice;
                 if let Some(take) = layer.takes.iter_mut().find(|t| t.id == take_id) {
                     take.events.push(crate::notation::LayerEv {
                         id: ev_id, midi, start_us, end_us,
-                        channel: n.channel, locked: false, hand: None,
+                        channel: n.channel, locked: false, voice: stem, hand: None,
                     });
                 }
             }

@@ -18,6 +18,7 @@
   export let tolerancePct = 80;
   export let keyChoices = [];
   export let gridChoices = [];
+  export let onlyActive = false;
   export let acties = {};
   function doe(naam, ...args) { const f = acties[naam]; if (typeof f === 'function') f(...args); }
   // Schuif lokaal binden: het etiket loopt mee tijdens het slepen, de score
@@ -84,7 +85,19 @@
       {/if}
     </div>
   {/each}
-  <span class="hint">{$t('notation.voices_later')}</span>
+</div>
+<div class="tab-rij stemmen-rij">
+  <span class="kopje">{$t('notation.voices')}:</span>
+  <span class="kopje">{$t('notation.to_voice')}</span>
+  {#each [1, 2, 3, 4] as v}
+    <button class="btn btn-ghost btn-sm" on:click={() => doe('toVoice', v)} title={$t('notation.to_voice_title').replace('{n}', v)}>{v}</button>
+  {/each}
+  <button class="btn btn-ghost btn-sm" on:click={() => doe('splitChord')} title={$t('notation.split_chord_title')}>{$t('notation.split_chord')}</button>
+  <label class="schakelaar" title={$t('notation.only_active_voice_title')}>
+    <input type="checkbox" checked={onlyActive} on:change={() => doe('toggleOnlyActive')} />
+    {$t('notation.only_active_voice')}
+  </label>
+  <span class="hint">{$t('notation.voices_hint')}</span>
 </div>
 
 <style>
@@ -103,5 +116,8 @@
   .divs { display: flex; align-items: center; flex-wrap: wrap; gap: 0.4rem; }
   .div { display: flex; align-items: center; gap: 0.2rem; white-space: nowrap; cursor: pointer; }
   .hint { font-size: 0.72rem; color: var(--text-muted, #aaa); }
+  .stemmen-rij { margin-top: 0.4rem; }
+  .kopje { font-size: 0.75rem; color: var(--text-muted, #aaa); }
+  .schakelaar { cursor: pointer; }
   .layer-hand, .layer-split { font-size: 0.75rem; }
 </style>

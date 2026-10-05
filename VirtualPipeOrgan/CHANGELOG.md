@@ -5,6 +5,28 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.86] - 2026-10-06
+
+### Meerdere stemmen per balk
+- Elke notenbalk heeft nu vier **stemmen**, zoals de lagen in Finale. Kies
+  per balk de actieve stem met de knoppen 1–4 in de lagenbalk (of
+  Shift+Alt+1..4); opnemen, stapinvoer, klikken en plakken gaan naar die
+  stem, en de andere stemmen blijven staan. Vet = de stem bevat noten.
+- Stem 1 en 3 krijgen stokken omhoog, 2 en 4 omlaag; elke stem heeft een
+  eigen kleur op het scherm (zwart op papier en in de export). Een
+  aangehouden noot in de ene stem wordt niet meer ingekort door de andere;
+  akkoorden worden per stem gegroepeerd.
+- Op het tabblad Balken & stemmen: **Naar stem 1–4** voor de selectie
+  (Shift+Alt+↑/↓), **Akkoord splitsen** (hoogste noot naar stem 1, de rest
+  naar stem 2) en **Alleen actieve stem** (toets V, andere stemmen
+  lichtgrijs).
+- Klikken op een noot is nu exact: het blad draagt per noot een sleutel
+  (balk, maat, stem, positie, toon), zodat ook gelijke tonen in twee stemmen
+  elk hun eigen noot selecteren.
+- In een opgeslagen MusicXML komen de stemmen in Finale en MuseScore als
+  lagen terecht (`<voice>`, `<backup>`, `<stem>`); opgeslagen stukken van
+  vóór deze versie laden met alles in stem 1.
+
 ## [0.7.85] - 2026-10-06
 
 ### Nieuw ingedeeld notatievenster

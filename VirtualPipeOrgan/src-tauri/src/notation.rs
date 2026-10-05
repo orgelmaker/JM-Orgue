@@ -98,12 +98,14 @@ pub struct NoteEv {
     pub id: Option<u64>,
     /// Per-noot-hand (klavar); wint van het splitspunt en de laaghand.
     pub hand: Option<KlavarHand>,
+    /// Stem binnen de balk (0.7.86): 1..=4, zoals de lagen in Finale.
+    pub voice: u8,
 }
 
 impl NoteEv {
     /// Noot zonder event-ID (bestandsmodus, tests).
     pub fn anoniem(midi: u8, start_sec: f64, end_sec: f64) -> Self {
-        NoteEv { midi, start_sec, end_sec, id: None, hand: None }
+        NoteEv { midi, start_sec, end_sec, id: None, hand: None, voice: 1 }
     }
 }
 
@@ -241,6 +243,8 @@ struct ChordNote {
     midi: u8,
     tie_start: bool,
     tie_stop: bool,
+    /// Event-ID (0.7.86) voor de notemap; None in de bestandsmodus.
+    id: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -266,6 +270,8 @@ pub struct QNote {
     /// Exclusief; minimaal start + 1.
     pub end: u64,
     pub hand: Option<KlavarHand>,
+    /// Stem (0.7.86).
+    pub voice: u8,
 }
 
 /// Kwantiseer de noten van één balk naar rastereenheden (gesorteerd op inzet
@@ -291,9 +297,9 @@ pub(crate) fn quantize_notes(notes: &[NoteEv], bpm: f64, q: u8, _tolerance_pct: 
         let s = quantize_one(n.start_sec);
         let e = quantize_one(n.end_sec);
         let e = e.max(s + 1);
-        QNote { id: n.id, midi: n.midi, start: s, end: e, hand: n.hand }
+        QNote { id: n.id, midi: n.midi, start: s, end: e, hand: n.hand, voice: n.voice }
     }).collect();
-    quantized.sort_by_key(|n| (n.start, n.midi));
+    quantized.sort_by_key(|n| (n.start, n.voice, n.midi));
     quantized
 }
 
@@ -363,7 +369,7 @@ pub(crate) fn cluster_akkoorden(notes: &mut [NoteEv], venster: f64) {
 /// zonder boog. Klavar slaat dit over (die tekent de noten zelf).
 fn group_chords(qnotes: &[QNote]) -> Vec<Chord> {
     #[derive(Clone)]
-    struct Actief { midi: u8, start: u64, end: u64 }
+    struct Actief { midi: u8, start: u64, end: u64, id: Option<u64> }
     let mut noten: Vec<Actief> = Vec::new();
     for n in qnotes {
         let end = n.end.max(n.start + 1);
@@ -371,10 +377,11 @@ fn group_chords(qnotes: &[QNote]) -> Vec<Chord> {
         // balk): één notenkop, met het langste einde — wat klinkt is de
         // vereniging van beide (reviewbevinding).
         if let Some(a) = noten.iter_mut().find(|a| a.start == n.start && a.midi == n.midi) {
-            a.end = a.end.max(end);
+            // De noot die de getekende lengte bepaalt, levert ook het id (klik).
+            if end > a.end { a.end = end; a.id = n.id; }
             continue;
         }
-        noten.push(Actief { midi: n.midi, start: n.start, end });
+        noten.push(Actief { midi: n.midi, start: n.start, end, id: n.id });
     }
     if noten.is_empty() { return Vec::new(); }
     let inzetten: Vec<(u8, u64)> = noten.iter().map(|a| (a.midi, a.start)).collect();
@@ -391,7 +398,7 @@ fn group_chords(qnotes: &[QNote]) -> Vec<Chord> {
         let (t0, t1) = (w[0], w[1]);
         let mut notes: Vec<ChordNote> = noten.iter()
             .filter(|a| a.start <= t0 && a.end > t0)
-            .map(|a| ChordNote { midi: a.midi, tie_stop: a.start < t0, tie_start: a.end > t1 })
+            .map(|a| ChordNote { midi: a.midi, tie_stop: a.start < t0, tie_start: a.end > t1, id: a.id })
             .collect();
         if notes.is_empty() { continue; }
         notes.sort_by_key(|n| n.midi);
@@ -539,7 +546,12 @@ pub fn quantize_score(staves: &[Staff], opts: &NotationOptions) -> QuantizedScor
         .map(|(i, st)| {
             // Akkoordclustering vóór het raster (0.7.82), ook voor klavar.
             let mut noten = st.notes.clone();
-            cluster_akkoorden(&mut noten, venster);
+            // Akkoorden clusteren per stem (0.7.86): een liggende noot in
+            // stem 2 hoort niet bij de inzetten van stem 1.
+            noten.sort_by_key(|n| n.voice);
+            for groep in noten.chunk_by_mut(|a, b| a.voice == b.voice) {
+                cluster_akkoorden(groep, venster);
+            }
             QuantizedStaff {
                 staff_index: i, name: st.name.clone(), layer_id: st.layer_id, pedal: st.pedal,
                 bass_clef: st.bass_clef, hand: st.hand, split_midi: st.split_midi,
@@ -558,14 +570,170 @@ pub fn build_musicxml(staves: &[Staff], opts: &NotationOptions) -> Result<String
 /// MusicXML uit het gedeelde model: akkoorden, één stem per balk, rusten en
 /// overbindingen (het notenschrift van 0.7.0, byte voor byte; zie de
 /// fixture-test).
+/// Kleuren per stem op het scherm (0.7.86): stem 1 zwart, 2 blauw, 3 groen,
+/// 4 oranje; de exportvariant blijft kleurloos.
+pub const STEM_KLEUREN: [&str; 4] = ["#000000", "#2a6fdb", "#2e8b57", "#e07b00"];
+const DIM_KLEUR: &str = "#bbbbbb";
+
+/// Schermopties (0.7.86): per balk (in balkvolgorde) de actieve stem; met
+/// `dim_andere` worden de andere stemmen lichtgrijs. `None` = exportvariant.
+#[derive(Debug, Clone, Default)]
+pub struct SchermOpties {
+    pub actieve_stem: Vec<u8>,
+    pub dim_andere: bool,
+}
+
+/// Eén geschreven noot op het blad (0.7.86): part, maat, stem, positie in
+/// rastereenheden binnen de maat, toon en event-ID — de sleutel waarmee het
+/// venster een OSMD-noot exact aan zijn event koppelt. Delen van een
+/// overgebonden noot dragen dezelfde id.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct NoteRef {
+    pub part: u16,
+    pub measure: u32,
+    pub voice: u8,
+    pub pos: u64,
+    pub midi: u8,
+    pub id: Option<u64>,
+}
+
+/// MusicXML voor export en fixtures: één variant, zonder kleuren.
 pub fn render_musicxml(qs: &QuantizedScore, opts: &NotationOptions) -> Result<String, String> {
+    render_musicxml_met_notemap(qs, opts, None).map(|(xml, _)| xml)
+}
+
+/// Eén geschreven noot, akkoord of rust binnen een maat (0.7.83), met per
+/// noot (midi, tie_stop, tie_start, event-id).
+struct MaatItem { pos: u64, len: u64, type_name: &'static str, dotted: bool, hele_maat: bool, notes: Vec<(u8, bool, bool, Option<u64>)> }
+
+/// De noten en rusten van één stem binnen één maat, uit de segmentlijst van
+/// die stem: delen binnen de maat, met overbindingen over maat- en
+/// segmentgrenzen (0.7.82), en één hele-maatrust voor een lege maat.
+fn maat_items(segments: &[(u64, u64, Vec<ChordNote>)], m_start: u64, m_end: u64, measure_len: u64, q: u64) -> Vec<MaatItem> {
+    let mut items: Vec<MaatItem> = Vec::new();
+    for (s, e, notes) in segments.iter() {
+        let (s, e) = (*s, *e);
+        let ps = s.max(m_start);
+        let pe = e.min(m_end);
+        if pe <= ps { continue; }
+        let tie_from_prev = !notes.is_empty() && s < m_start;
+        let tie_to_next = !notes.is_empty() && e > m_end;
+        if notes.is_empty() && ps == m_start && pe == m_end {
+            items.push(MaatItem { pos: ps, len: measure_len, type_name: "", dotted: false, hele_maat: true, notes: Vec::new() });
+            continue;
+        }
+        let parts = decompose(pe - ps, q);
+        let mut pos = ps;
+        for (pi, (len, type_name, dotted)) in parts.iter().enumerate() {
+            let first_part = pi == 0;
+            let last_part = pi == parts.len() - 1;
+            let noten: Vec<(u8, bool, bool, Option<u64>)> = notes.iter().map(|cn| (
+                cn.midi,
+                cn.tie_stop || tie_from_prev || !first_part,
+                cn.tie_start || tie_to_next || !last_part,
+                cn.id,
+            )).collect();
+            items.push(MaatItem { pos, len: *len, type_name, dotted: *dotted, hele_maat: false, notes: noten });
+            pos += len;
+        }
+    }
+    items
+}
+
+/// Waardestrepen (0.7.83): aaneengesloten noten korter dan een kwart binnen
+/// dezelfde tel (`beam_tel`). Een rust of een langere noot breekt de groep;
+/// één losse korte noot houdt haar vlag.
+fn beams_voor(items: &[MaatItem], m_start: u64, tel: u64, q: u64) -> Vec<Option<&'static str>> {
+    let kort = |it: &MaatItem| !it.notes.is_empty() && it.len < q;
+    let mut beam: Vec<Option<&'static str>> = vec![None; items.len()];
+    let mut i = 0;
+    while i < items.len() {
+        if !kort(&items[i]) { i += 1; continue; }
+        let groep = (items[i].pos - m_start) / tel;
+        let mut j = i;
+        while j + 1 < items.len() && kort(&items[j + 1]) && (items[j + 1].pos - m_start) / tel == groep { j += 1; }
+        if j > i {
+            beam[i] = Some("begin");
+            for k in i + 1..j { beam[k] = Some("continue"); }
+            beam[j] = Some("end");
+        }
+        i = j + 1;
+    }
+    beam
+}
+
+/// Schrijft de items van één stem in één maat en vult de notemap.
+#[allow(clippy::too_many_arguments)]
+fn schrijf_items(xml: &mut String, items: &[MaatItem], beam: &[Option<&'static str>], voice: u8, stem_richting: Option<&str>, kleur: Option<&str>, key_fifths: i8, part: u16, measure: u32, m_start: u64, notemap: &mut Vec<NoteRef>) {
+    for (ii, it) in items.iter().enumerate() {
+        if it.hele_maat {
+            xml.push_str(&format!(
+                "      <note><rest measure=\"yes\"/><duration>{}</duration><voice>{}</voice></note>\n",
+                it.len, voice));
+            continue;
+        }
+        if it.notes.is_empty() {
+            xml.push_str(&format!(
+                "      <note><rest/><duration>{}</duration><voice>{}</voice><type>{}</type>{}</note>\n",
+                it.len, voice, it.type_name, if it.dotted { "<dot/>" } else { "" }));
+            continue;
+        }
+        for (ni, &(midi, tie_stop, tie_start, id)) in it.notes.iter().enumerate() {
+            let (step, alter, octave) = spell(midi, key_fifths);
+            xml.push_str("      <note>");
+            if ni > 0 { xml.push_str("<chord/>"); }
+            xml.push_str(&format!("<pitch><step>{}</step>", step));
+            if alter != 0 { xml.push_str(&format!("<alter>{}</alter>", alter)); }
+            xml.push_str(&format!("<octave>{}</octave></pitch>", octave));
+            xml.push_str(&format!("<duration>{}</duration>", it.len));
+            if tie_stop { xml.push_str("<tie type=\"stop\"/>"); }
+            if tie_start { xml.push_str("<tie type=\"start\"/>"); }
+            xml.push_str(&format!("<voice>{}</voice>", voice));
+            xml.push_str(&format!("<type>{}</type>", it.type_name));
+            if it.dotted { xml.push_str("<dot/>"); }
+            // Stokrichting alleen in een meerstemmige maat (1 en 3 omhoog, 2 en 4 omlaag).
+            if let Some(r) = stem_richting { xml.push_str(&format!("<stem>{}</stem>", r)); }
+            // Schermvariant: kleur per stem (OSMD leest `notehead color`).
+            if let Some(k) = kleur { xml.push_str(&format!("<notehead color=\"{}\">normal</notehead>", k)); }
+            // De waardestreep staat op de eerste noot van een akkoord.
+            if ni == 0 {
+                if let Some(b) = beam[ii] { xml.push_str(&format!("<beam number=\"1\">{}</beam>", b)); }
+            }
+            if tie_stop || tie_start {
+                xml.push_str("<notations>");
+                if tie_stop { xml.push_str("<tied type=\"stop\"/>"); }
+                if tie_start { xml.push_str("<tied type=\"start\"/>"); }
+                xml.push_str("</notations>");
+            }
+            xml.push_str("</note>\n");
+            notemap.push(NoteRef { part, measure, voice, pos: it.pos - m_start, midi, id });
+        }
+    }
+}
+
+/// MusicXML uit het gedeelde model, per balk per stem (0.7.86): akkoorden
+/// en overbindingen binnen de stem, elke stem vult de maat, `<backup>`
+/// tussen de stemmen, stokrichting alleen in een meerstemmige maat. Met
+/// `scherm` komen er stemkleuren in; de notemap koppelt elke noot aan haar
+/// event. Eénstemmige partituren geven byte voor byte de uitvoer van 0.7.83.
+pub fn render_musicxml_met_notemap(qs: &QuantizedScore, opts: &NotationOptions, scherm: Option<&SchermOpties>) -> Result<(String, Vec<NoteRef>), String> {
     let q = qs.q;
     let beats = qs.beats_per_bar;
     let bpm = qs.bpm;
     let measure_len = qs.measure_len;
 
-    let quantized: Vec<(&QuantizedStaff, Vec<Chord>)> = qs.staves.iter()
-        .map(|st| (st, group_chords(&st.notes)))
+    // Per balk: de aanwezige stemmen oplopend, per stem de akkoorden.
+    let quantized: Vec<(&QuantizedStaff, Vec<(u8, Vec<Chord>)>)> = qs.staves.iter()
+        .map(|st| {
+            let mut stemmen: Vec<u8> = st.notes.iter().map(|n| n.voice.clamp(1, 4)).collect();
+            stemmen.sort_unstable();
+            stemmen.dedup();
+            let per_stem: Vec<(u8, Vec<Chord>)> = stemmen.into_iter().map(|v| {
+                let noten: Vec<QNote> = st.notes.iter().filter(|n| n.voice.clamp(1, 4) == v).cloned().collect();
+                (v, group_chords(&noten))
+            }).collect();
+            (st, per_stem)
+        })
         .collect();
     if quantized.is_empty() {
         return Err("Geen notenbalken in de partituur".into());
@@ -574,7 +742,7 @@ pub fn render_musicxml(qs: &QuantizedScore, opts: &NotationOptions) -> Result<St
     // Totale lengte: langste balk, afgerond op hele maten; minstens het
     // gevraagde aantal maten (0.7.83: een leeg stuk toont lege balken).
     let total = quantized.iter()
-        .flat_map(|(_, cs)| cs.last().map(|c| c.end))
+        .flat_map(|(_, stemmen)| stemmen.iter().flat_map(|(_, cs)| cs.last().map(|c| c.end)))
         .max().unwrap_or(0);
     let min_measures = opts.min_measures.unwrap_or(0) as u64;
     let num_measures = ((total + measure_len - 1) / measure_len).max(min_measures).max(1);
@@ -630,23 +798,25 @@ pub fn render_musicxml(qs: &QuantizedScore, opts: &NotationOptions) -> Result<St
     }
     xml.push_str("  </part-list>\n");
 
-    /// Eén geschreven noot, akkoord of rust binnen een maat (0.7.83), met per
-    /// noot (midi, tie_stop, tie_start).
-    struct MaatItem { pos: u64, len: u64, type_name: &'static str, dotted: bool, hele_maat: bool, notes: Vec<(u8, bool, bool)> }
+    let tel = beam_tel(measure_len, beats, qs.beat_unit);
+    let mut notemap: Vec<NoteRef> = Vec::new();
 
-    for (idx, (staff, chords)) in quantized.iter().enumerate() {
+    for (idx, (staff, stemmen)) in quantized.iter().enumerate() {
         xml.push_str(&format!("  <part id=\"P{}\">\n", idx + 1));
-
-        // Segmentlijst opbouwen: (start, end, notes-of-leeg=rust)
-        let mut segments: Vec<(u64, u64, Vec<ChordNote>)> = Vec::new();
-        let mut cursor: u64 = 0;
-        for c in chords {
-            if c.start > cursor { segments.push((cursor, c.start, Vec::new())); }
-            segments.push((c.start, c.end, c.notes.clone()));
-            cursor = c.end;
-        }
         let staff_total = num_measures * measure_len;
-        if cursor < staff_total { segments.push((cursor, staff_total, Vec::new())); }
+        // Segmentlijst per stem: (start, end, notes-of-leeg=rust), de maat vullend.
+        let segs_per_stem: Vec<(u8, Vec<(u64, u64, Vec<ChordNote>)>)> = stemmen.iter().map(|(v, chords)| {
+            let mut segments: Vec<(u64, u64, Vec<ChordNote>)> = Vec::new();
+            let mut cursor: u64 = 0;
+            for c in chords {
+                if c.start > cursor { segments.push((cursor, c.start, Vec::new())); }
+                segments.push((c.start, c.end, c.notes.clone()));
+                cursor = c.end;
+            }
+            if cursor < staff_total { segments.push((cursor, staff_total, Vec::new())); }
+            (*v, segments)
+        }).collect();
+        let actieve = scherm.and_then(|s| s.actieve_stem.get(idx).copied()).unwrap_or(1).clamp(1, 4);
 
         for m in 0..num_measures {
             let m_start = m * measure_len;
@@ -670,108 +840,31 @@ pub fn render_musicxml(qs: &QuantizedScore, opts: &NotationOptions) -> Result<St
                 xml.push_str(&format!("      <direction placement=\"above\"><direction-type><metronome><beat-unit>quarter</beat-unit><per-minute>{}</per-minute></metronome></direction-type><sound tempo=\"{}\"/></direction>\n", bpm.round() as u64, bpm.round() as u64));
             }
 
-            // Eerst de noten en rusten van deze maat verzamelen, dan pas
-            // schrijven: de waardestrepen (0.7.83) hangen van de buren af.
-            let mut items: Vec<MaatItem> = Vec::new();
-            for &(s, e, ref notes) in segments.iter() {
-                // Deel dat binnen deze maat valt.
-                let ps = s.max(m_start);
-                let pe = e.min(m_end);
-                if pe <= ps { continue; }
-                let tie_from_prev = !notes.is_empty() && s < m_start;
-                let tie_to_next = !notes.is_empty() && e > m_end;
-                // Een rust over de hele maat is één hele-maatrust (0.7.83), in
-                // elke maatsoort — ook de lege balken van een nieuw stuk.
-                if notes.is_empty() && ps == m_start && pe == m_end {
-                    items.push(MaatItem { pos: ps, len: measure_len, type_name: "", dotted: false, hele_maat: true, notes: Vec::new() });
-                    continue;
-                }
-                // Binnen de maat ontleden in notenwaarden; delen van dezelfde
-                // noot binnen de maat ook onderling overbinden.
-                let parts = decompose(pe - ps, q);
-                let mut pos = ps;
-                for (pi, (len, type_name, dotted)) in parts.iter().enumerate() {
-                    let first_part = pi == 0;
-                    let last_part = pi == parts.len() - 1;
-                    // Overbinding: over de maatstreep, tussen de delen binnen
-                    // de maat, én over segmentgrenzen (0.7.82: een noot die
-                    // langer klinkt dan de rest van het akkoord wordt
-                    // doorgebonden, niet afgekapt).
-                    let noten: Vec<(u8, bool, bool)> = notes.iter().map(|cn| (
-                        cn.midi,
-                        cn.tie_stop || tie_from_prev || !first_part,
-                        cn.tie_start || tie_to_next || !last_part,
-                    )).collect();
-                    items.push(MaatItem { pos, len: *len, type_name, dotted: *dotted, hele_maat: false, notes: noten });
-                    pos += len;
-                }
+            // Alleen stemmen met noten in deze maat; zonder noten één
+            // hele-maatrust in stem 1 (zoals altijd).
+            let mut per_stem_items: Vec<(u8, Vec<MaatItem>)> = Vec::new();
+            for (v, segments) in &segs_per_stem {
+                let items = maat_items(segments, m_start, m_end, measure_len, q);
+                if items.iter().any(|it| !it.notes.is_empty()) { per_stem_items.push((*v, items)); }
             }
-
-            // Waardestrepen (0.7.83): aaneengesloten noten korter dan een kwart
-            // binnen dezelfde tel (`beam_tel`). Een rust of een langere noot
-            // breekt de groep; één losse korte noot houdt haar vlag.
-            let tel = beam_tel(measure_len, beats, qs.beat_unit);
-            let kort = |it: &MaatItem| !it.notes.is_empty() && it.len < q;
-            let mut beam: Vec<Option<&str>> = vec![None; items.len()];
-            let mut i = 0;
-            while i < items.len() {
-                if !kort(&items[i]) { i += 1; continue; }
-                let groep = (items[i].pos - m_start) / tel;
-                let mut j = i;
-                while j + 1 < items.len() && kort(&items[j + 1]) && (items[j + 1].pos - m_start) / tel == groep { j += 1; }
-                if j > i {
-                    beam[i] = Some("begin");
-                    for k in i + 1..j { beam[k] = Some("continue"); }
-                    beam[j] = Some("end");
-                }
-                i = j + 1;
+            if per_stem_items.is_empty() {
+                per_stem_items.push((1, vec![MaatItem { pos: m_start, len: measure_len, type_name: "", dotted: false, hele_maat: true, notes: Vec::new() }]));
             }
-
-            for (ii, it) in items.iter().enumerate() {
-                if it.hele_maat {
-                    xml.push_str(&format!(
-                        "      <note><rest measure=\"yes\"/><duration>{}</duration><voice>1</voice></note>\n",
-                        it.len));
-                    continue;
-                }
-                if it.notes.is_empty() {
-                    xml.push_str(&format!(
-                        "      <note><rest/><duration>{}</duration><voice>1</voice><type>{}</type>{}</note>\n",
-                        it.len, it.type_name, if it.dotted { "<dot/>" } else { "" }));
-                    continue;
-                }
-                for (ni, &(midi, tie_stop, tie_start)) in it.notes.iter().enumerate() {
-                    let (step, alter, octave) = spell(midi, opts.key_fifths);
-                    xml.push_str("      <note>");
-                    if ni > 0 { xml.push_str("<chord/>"); }
-                    xml.push_str(&format!("<pitch><step>{}</step>", step));
-                    if alter != 0 { xml.push_str(&format!("<alter>{}</alter>", alter)); }
-                    xml.push_str(&format!("<octave>{}</octave></pitch>", octave));
-                    xml.push_str(&format!("<duration>{}</duration>", it.len));
-                    if tie_stop { xml.push_str("<tie type=\"stop\"/>"); }
-                    if tie_start { xml.push_str("<tie type=\"start\"/>"); }
-                    xml.push_str("<voice>1</voice>");
-                    xml.push_str(&format!("<type>{}</type>", it.type_name));
-                    if it.dotted { xml.push_str("<dot/>"); }
-                    // De waardestreep staat op de eerste noot van een akkoord.
-                    if ni == 0 {
-                        if let Some(b) = beam[ii] { xml.push_str(&format!("<beam number=\"1\">{}</beam>", b)); }
-                    }
-                    if tie_stop || tie_start {
-                        xml.push_str("<notations>");
-                        if tie_stop { xml.push_str("<tied type=\"stop\"/>"); }
-                        if tie_start { xml.push_str("<tied type=\"start\"/>"); }
-                        xml.push_str("</notations>");
-                    }
-                    xml.push_str("</note>\n");
-                }
+            let meerstemmig = per_stem_items.len() > 1;
+            for (si, (v, items)) in per_stem_items.iter().enumerate() {
+                if si > 0 { xml.push_str(&format!("      <backup><duration>{}</duration></backup>\n", measure_len)); }
+                let beam = beams_voor(items, m_start, tel, q);
+                let stem_richting = if meerstemmig { Some(if v % 2 == 1 { "up" } else { "down" }) } else { None };
+                let kleur: Option<&str> = scherm.map(|s| if s.dim_andere && *v != actieve { DIM_KLEUR } else { STEM_KLEUREN[(*v - 1) as usize] })
+                    .filter(|k| *k != STEM_KLEUREN[0]);
+                schrijf_items(&mut xml, items, &beam, *v, stem_richting, kleur, opts.key_fifths, idx as u16, m as u32, m_start, &mut notemap);
             }
             xml.push_str("    </measure>\n");
         }
         xml.push_str("  </part>\n");
     }
     xml.push_str("</score-partwise>\n");
-    Ok(xml)
+    Ok((xml, notemap))
 }
 
 // =============================================================================
@@ -791,6 +884,7 @@ use serde::Serialize;
 use std::collections::HashMap;
 
 fn waar() -> bool { true }
+fn een() -> u8 { 1 }
 
 /// Bovengrens voor het minimale aantal maten (wizard, groei met de cursor en
 /// geladen bestanden): daarboven wordt renderen onwerkbaar.
@@ -810,6 +904,9 @@ pub struct LayerEv {
     pub channel: u8,
     /// Handmatig verplaatst/gecorrigeerd → niet opnieuw kwantiseren.
     pub locked: bool,
+    /// Stem binnen de balk (0.7.86): 1..=4; oudere bestanden hebben stem 1.
+    #[serde(default = "een")]
+    pub voice: u8,
     /// Hand in klavar (0.7.70); None = volgens de laag en het splitspunt.
     #[serde(default)]
     pub hand: Option<KlavarHand>,
@@ -848,6 +945,9 @@ pub struct Layer {
     /// Splitspunt bij R+L (MIDI-nummer); None = c' (60).
     #[serde(default)]
     pub klavar_split: Option<u8>,
+    /// Actieve stem (0.7.86): doel van opname, stapinvoer, klik en plakken.
+    #[serde(default = "een")]
+    pub active_voice: u8,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -998,6 +1098,7 @@ impl Score {
             divisions: Vec::new(),
             klavar_hand: None,
             klavar_split: None,
+            active_voice: 1,
         });
         self.bump_gen();
         id
@@ -1046,6 +1147,7 @@ pub fn score_to_staves(score: &Score) -> Vec<Staff> {
                     end_sec: ev.end_us as f64 / 1_000_000.0,
                     id: Some(ev.id),
                     hand: ev.hand,
+                    voice: ev.voice.clamp(1, 4),
                 });
             }
         }
@@ -1096,6 +1198,45 @@ pub fn options_from_score(score: &Score) -> NotationOptions {
 /// Bouw MusicXML uit een Score met de Score-eigen opties + tolerantie.
 pub fn build_musicxml_from_score(score: &Score) -> Result<String, String> {
     build_musicxml(&score_to_staves(score), &options_from_score(score))
+}
+
+/// Schermvariant (0.7.86): MusicXML met stemkleuren plus de notemap; de
+/// actieve stem per balk komt uit de lagen, `dim_andere` grijst de rest.
+pub fn build_notation_from_score(score: &Score, dim_andere: bool) -> Result<(String, Vec<NoteRef>), String> {
+    let staves = score_to_staves(score);
+    let opts = options_from_score(score);
+    let qs = quantize_score(&staves, &opts);
+    let scherm = SchermOpties { actieve_stem: score.layers.iter().map(|l| l.active_voice.clamp(1, 4)).collect(), dim_andere };
+    render_musicxml_met_notemap(&qs, &opts, Some(&scherm))
+}
+
+/// "Akkoord splitsen in stemmen" (0.7.86): per akkoord de hoogste noot naar
+/// stem 1, de rest naar stem 2. Een akkoord = inzetten binnen `venster_us`
+/// van de eerste noot van de groep — hetzelfde venster als de akkoord-
+/// clustering van het blad, zodat splitsen klopt met wat er staat. Invoer:
+/// (event-id, midi, start_us); uitvoer: (event-id, stem).
+pub fn verdeel_akkoord_in_stemmen(events: &[(u64, u8, u64)], venster_us: u64) -> Vec<(u64, u8)> {
+    let mut gesorteerd: Vec<(u64, u8, u64)> = events.to_vec();
+    gesorteerd.sort_by_key(|&(id, _, start)| (start, id));
+    let mut groepen: Vec<Vec<(u64, u8)>> = Vec::new();
+    let mut groep_start: u64 = 0;
+    for &(id, midi, start) in &gesorteerd {
+        if groepen.is_empty() || start.saturating_sub(groep_start) > venster_us {
+            groepen.push(Vec::new());
+            groep_start = start;
+        }
+        groepen.last_mut().expect("groep").push((id, midi));
+    }
+    let mut uit: Vec<(u64, u8)> = Vec::new();
+    for groep in groepen {
+        let hoogste = groep.iter().map(|&(_, m)| m).max().unwrap_or(0);
+        let mut eerste_hoogste = true;
+        for (id, midi) in groep {
+            if midi == hoogste && eerste_hoogste { uit.push((id, 1)); eerste_hoogste = false; }
+            else { uit.push((id, 2)); }
+        }
+    }
+    uit
 }
 
 /// Exporteer de zichtbare takes van een Score als Standard MIDI File (format 1,
@@ -1203,6 +1344,8 @@ pub enum EditCommand {
     SetLayerHand { layer: u32, old: (Option<KlavarHand>, Option<u8>), new: (Option<KlavarHand>, Option<u8>) },
     /// Hand per noot in klavar (0.7.70): (event-id, nieuwe hand); undo bewaart de oude.
     SetHands { items: Vec<(u64, Option<KlavarHand>)> },
+    /// Stem per noot (0.7.86): (event-id, stem 1..=4); undo bewaart de oude.
+    SetVoice { items: Vec<(u64, u8)> },
     /// Voeg een take toe (met inverse: verwijder die take).
     /// Voor de undo bewaren we ID + laag; content is leeg bij add.
     AddTake { layer: u32, take_id: u32 },
@@ -1381,6 +1524,22 @@ impl EditCommand {
                 if old.is_empty() { return None; }
                 score.bump_gen();
                 Some(EditCommand::SetHands { items: old })
+            }
+            EditCommand::SetVoice { items } => {
+                let mut old: Vec<(u64, u8)> = Vec::new();
+                for (id, voice) in items.into_iter() {
+                    let voice = voice.clamp(1, 4);
+                    if let Some((li, ti, ei)) = score.locate(id) {
+                        let ev = &mut score.layers[li].takes[ti].events[ei];
+                        if ev.voice != voice {
+                            old.push((id, ev.voice));
+                            ev.voice = voice;
+                        }
+                    }
+                }
+                if old.is_empty() { return None; }
+                score.bump_gen();
+                Some(EditCommand::SetVoice { items: old })
             }
             EditCommand::AddTake { layer, take_id } => {
                 // "Inverse" van add = de zojuist toegevoegde take verwijderen.
@@ -1594,8 +1753,8 @@ mod tests {
         let _ = lid;
         let take = &mut sc.layers[0].takes[0]; // add_layer maakt "Take 1"
         take.visible = true;
-        take.events.push(LayerEv { id: 1, midi: 36, start_us: 0, end_us: 500_000, channel: KANAAL_ONBEKEND, locked: true, hand: None });
-        take.events.push(LayerEv { id: 2, midi: 38, start_us: 500_000, end_us: 1_000_000, channel: 0, locked: false, hand: None });
+        take.events.push(LayerEv { id: 1, midi: 36, start_us: 0, end_us: 500_000, channel: KANAAL_ONBEKEND, locked: true, voice: 1, hand: None });
+        take.events.push(LayerEv { id: 2, midi: 38, start_us: 500_000, end_us: 1_000_000, channel: 0, locked: false, voice: 1, hand: None });
         let bytes = score_to_smf_bytes(&sc, &|_l| Some(2)).expect("smf");
         let smf = midly::Smf::parse(&bytes).expect("parse");
         let mut kanalen = Vec::new();
@@ -1660,8 +1819,8 @@ mod tests {
     #[test]
     fn quantize_notes_behoudt_ids() {
         let notes = vec![
-            NoteEv { midi: 60, start_sec: 0.0, end_sec: 1.0, id: Some(7), hand: Some(KlavarHand::Left) },
-            NoteEv { midi: 64, start_sec: 0.02, end_sec: 0.98, id: Some(8), hand: None },
+            NoteEv { midi: 60, start_sec: 0.0, end_sec: 1.0, id: Some(7), hand: Some(KlavarHand::Left), voice: 1 },
+            NoteEv { midi: 64, start_sec: 0.02, end_sec: 0.98, id: Some(8), hand: None, voice: 1 },
         ];
         let q = quantize_notes(&notes, 60.0, 4, 100);
         assert_eq!(q.len(), 2);
@@ -1682,8 +1841,8 @@ mod tests {
         // kent één notenkop (de tweede valt weg in de dedup), klavar houdt
         // beide noten, met hun eigen ID.
         let notes = vec![
-            NoteEv { midi: 60, start_sec: 0.0, end_sec: 1.0, id: Some(1), hand: None },
-            NoteEv { midi: 60, start_sec: 0.0, end_sec: 2.0, id: Some(2), hand: None },
+            NoteEv { midi: 60, start_sec: 0.0, end_sec: 1.0, id: Some(1), hand: None, voice: 1 },
+            NoteEv { midi: 60, start_sec: 0.0, end_sec: 2.0, id: Some(2), hand: None, voice: 1 },
         ];
         let q = quantize_notes(&notes, 60.0, 4, 100);
         assert_eq!(q.len(), 2);
@@ -1712,7 +1871,7 @@ mod tests {
         sc.layers[1].divisions = vec!["Pedaal".into()];
         sc.layers[0].klavar_hand = Some(KlavarHand::Right);
         let id = sc.new_event_id();
-        sc.layers[0].takes[0].events.push(LayerEv { id, midi: 60, start_us: 0, end_us: 500_000, channel: 0, locked: false, hand: Some(KlavarHand::Left) });
+        sc.layers[0].takes[0].events.push(LayerEv { id, midi: 60, start_us: 0, end_us: 500_000, channel: 0, locked: false, voice: 1, hand: Some(KlavarHand::Left) });
         let staves = score_to_staves(&sc);
         assert_eq!(staves[0].layer_id, Some(hw));
         assert_eq!(staves[0].notes[0].id, Some(id));
@@ -1780,7 +1939,7 @@ mod tests {
         let mut sc = Score::new(1);
         sc.add_layer("Hoofdwerk".into(), None);
         let id = sc.new_event_id();
-        sc.layers[0].takes[0].events.push(LayerEv { id, midi: 60, start_us: 0, end_us: 1000, channel: 0, locked: false, hand: None });
+        sc.layers[0].takes[0].events.push(LayerEv { id, midi: 60, start_us: 0, end_us: 1000, channel: 0, locked: false, voice: 1, hand: None });
         let cmd = EditCommand::SetHands { items: vec![(id, Some(KlavarHand::Right)), (999, Some(KlavarHand::Left))] };
         let inv = cmd.apply(&mut sc).expect("inverse");
         assert_eq!(sc.layers[0].takes[0].events[0].hand, Some(KlavarHand::Right));
@@ -1913,6 +2072,122 @@ mod tests {
         assert!(!build_musicxml(&staves, &opts()).expect("xml").contains("<beam"));
     }
 
+    fn noot_stem(midi: u8, s: f64, e: f64, stem: u8) -> NoteEv {
+        let mut n = NoteEv::anoniem(midi, s, e);
+        n.voice = stem;
+        n
+    }
+
+    #[test]
+    fn twee_stemmen_backup_en_voice() {
+        // 4/4, 60 bpm: vier kwarten in stem 1 boven een hele noot in stem 2.
+        let staves = vec![Staff { name: "M".into(), bass_clef: false, notes: vec![
+            noot_stem(72, 0.0, 1.0, 1), noot_stem(74, 1.0, 2.0, 1), noot_stem(76, 2.0, 3.0, 1), noot_stem(77, 3.0, 4.0, 1),
+            noot_stem(60, 0.0, 4.0, 2)], ..Default::default() }];
+        let xml = build_musicxml(&staves, &opts()).expect("xml");
+        assert_eq!(xml.matches("<voice>1</voice>").count(), 4);
+        assert_eq!(xml.matches("<voice>2</voice>").count(), 1);
+        assert_eq!(xml.matches("<backup><duration>16</duration></backup>").count(), 1);
+        assert_eq!(xml.matches("<stem>up</stem>").count(), 4);
+        assert_eq!(xml.matches("<stem>down</stem>").count(), 1);
+        assert!(xml.contains("<type>whole</type>"));
+        // De liggende noot in stem 2 wordt niet ingekort door stem 1: geen overbinding.
+        assert!(!xml.contains("<tie"));
+        // Export: geen kleuren.
+        assert!(!xml.contains("color="));
+    }
+
+    #[test]
+    fn een_stem_geen_stem_element_en_alleen_stem_2() {
+        let staves = vec![Staff { name: "M".into(), bass_clef: false, notes: vec![noot_stem(60, 0.0, 1.0, 1), noot_stem(62, 1.0, 2.0, 1)], ..Default::default() }];
+        let xml = build_musicxml(&staves, &opts()).expect("xml");
+        assert!(!xml.contains("<stem>") && !xml.contains("<backup>"));
+        // Maat 2 met alleen stem 2: alleen stem 2, zonder stemrichting; maat 1 leeg in stem 1.
+        let staves = vec![Staff { name: "M".into(), bass_clef: false, notes: vec![noot_stem(60, 4.0, 5.0, 2)], ..Default::default() }];
+        let xml = build_musicxml(&staves, &opts()).expect("xml");
+        let m2 = xml.find("<measure number=\"2\">").unwrap();
+        assert!(xml[m2..].contains("<voice>2</voice>"));
+        assert!(!xml[m2..].contains("<voice>1</voice>"));
+        assert!(!xml.contains("<stem>"));
+        assert!(xml[..m2].contains("<rest measure=\"yes\"/><duration>16</duration><voice>1</voice>"));
+    }
+
+    #[test]
+    fn backup_som_klopt_en_rusten_per_stem() {
+        // Stem 1: kwart op tel 1 en 3; stem 2: halve op tel 1. Elke stem vult de maat.
+        let staves = vec![Staff { name: "M".into(), bass_clef: false, notes: vec![
+            noot_stem(72, 0.0, 1.0, 1), noot_stem(74, 2.0, 3.0, 1), noot_stem(60, 0.0, 2.0, 2)], ..Default::default() }];
+        let xml = build_musicxml(&staves, &opts()).expect("xml");
+        let maat = &xml[xml.find("<measure number=\"1\">").unwrap()..xml.find("</measure>").unwrap()];
+        let mut som: HashMap<u8, u64> = HashMap::new();
+        for note in maat.split("<note>").skip(1) {
+            let dur: u64 = note.split("<duration>").nth(1).unwrap().split('<').next().unwrap().parse().unwrap();
+            let voice: u8 = note.split("<voice>").nth(1).unwrap().split('<').next().unwrap().parse().unwrap();
+            *som.entry(voice).or_insert(0) += dur;
+        }
+        assert_eq!(som.get(&1), Some(&16));
+        assert_eq!(som.get(&2), Some(&16));
+        assert_eq!(maat.matches("<rest/>").count(), 3);
+    }
+
+    #[test]
+    fn inkorting_alleen_binnen_stem_en_notemap() {
+        let staves = vec![Staff { name: "M".into(), bass_clef: false, notes: vec![
+            NoteEv { midi: 72, start_sec: 0.0, end_sec: 1.0, id: Some(1), hand: None, voice: 1 },
+            NoteEv { midi: 60, start_sec: 0.0, end_sec: 6.0, id: Some(2), hand: None, voice: 2 }], ..Default::default() }];
+        let qs = quantize_score(&staves, &opts());
+        let (xml, map) = render_musicxml_met_notemap(&qs, &opts(), None).expect("xml");
+        // Stem 2 loopt over de maatstreep: twee delen met dezelfde id.
+        let s2: Vec<&NoteRef> = map.iter().filter(|r| r.voice == 2).collect();
+        assert_eq!(s2.len(), 2);
+        assert!(s2.iter().all(|r| r.id == Some(2)));
+        assert_eq!((s2[0].measure, s2[0].pos), (0, 0));
+        assert_eq!((s2[1].measure, s2[1].pos), (1, 0));
+        assert_eq!(map.iter().filter(|r| r.voice == 1).count(), 1);
+        // Elke geschreven noot heeft een notemap-regel; de liggende noot is niet ingekort.
+        assert_eq!(xml.matches("<pitch>").count(), map.len());
+        assert!(xml.contains("<tie type=\"start\"/>"));
+    }
+
+    #[test]
+    fn schermvariant_kleurt_stemmen() {
+        let staves = vec![Staff { name: "M".into(), bass_clef: false, notes: vec![noot_stem(72, 0.0, 1.0, 1), noot_stem(60, 0.0, 1.0, 2)], ..Default::default() }];
+        let qs = quantize_score(&staves, &opts());
+        let scherm = SchermOpties { actieve_stem: vec![1], dim_andere: false };
+        let (xml, _) = render_musicxml_met_notemap(&qs, &opts(), Some(&scherm)).unwrap();
+        assert_eq!(xml.matches(&format!("<notehead color=\"{}\">", STEM_KLEUREN[1])).count(), 1);
+        assert!(!xml.contains(STEM_KLEUREN[0]));
+        let scherm = SchermOpties { actieve_stem: vec![2], dim_andere: true };
+        let (xml, _) = render_musicxml_met_notemap(&qs, &opts(), Some(&scherm)).unwrap();
+        assert!(xml.contains("<notehead color=\"#bbbbbb\">"));
+        assert_eq!(xml.matches("<notehead color=").count(), 2);
+    }
+
+    #[test]
+    fn set_voice_undo_en_verdeling() {
+        let mut sc = Score::new(1);
+        let l = sc.add_layer("M".into(), Some(false));
+        let t = sc.layers[0].takes[0].id;
+        let ev = |id: u64, midi: u8, s: u64| LayerEv { id, midi, start_us: s, end_us: s + 500_000, channel: 0, locked: false, voice: 1, hand: None };
+        EditCommand::InsertEvents { events: vec![(l, t, ev(1, 60, 0)), (l, t, ev(2, 64, 10_000)), (l, t, ev(3, 67, 0)), (l, t, ev(4, 62, 1_000_000))] }.apply(&mut sc);
+        let inv = EditCommand::SetVoice { items: vec![(1, 2), (3, 2)] }.apply(&mut sc).expect("inverse");
+        assert_eq!(sc.layers[0].takes[0].events[0].voice, 2);
+        inv.apply(&mut sc);
+        assert_eq!(sc.layers[0].takes[0].events[0].voice, 1);
+        assert!(EditCommand::SetVoice { items: vec![(1, 1)] }.apply(&mut sc).is_none());
+        // Stem buiten 1..=4 klemt.
+        EditCommand::SetVoice { items: vec![(1, 9)] }.apply(&mut sc);
+        assert_eq!(sc.layers[0].takes[0].events[0].voice, 4);
+        // Akkoord splitsen: hoogste noot per akkoord stem 1, de rest stem 2.
+        let mut items = verdeel_akkoord_in_stemmen(&[(1, 60, 0), (2, 64, 10_000), (3, 67, 0), (4, 62, 1_000_000)], 125_000);
+        items.sort();
+        assert_eq!(items, vec![(1, 2), (2, 2), (3, 1), (4, 1)]);
+        // Een gespreid akkoord rond een celgrens blijft één akkoord (reviewbevinding).
+        let mut items = verdeel_akkoord_in_stemmen(&[(1, 60, 120_000), (2, 64, 120_000), (3, 67, 130_000)], 125_000);
+        items.sort();
+        assert_eq!(items, vec![(1, 2), (2, 2), (3, 1)]);
+    }
+
     #[test]
     fn header_in_identification() {
         let staves = vec![Staff { name: "T".into(), bass_clef: false, notes: vec![], ..Default::default() }];
@@ -1988,7 +2263,7 @@ mod tests {
         let lid = sc.add_layer("M".into(), Some(false));
         sc.beats_per_bar = 6; sc.beat_unit = 8;
         let tid = sc.layers[0].takes[0].id;
-        let ev = LayerEv { id: 1, midi: 60, start_us: 0, end_us: 500_000, channel: 0, locked: false, hand: None };
+        let ev = LayerEv { id: 1, midi: 60, start_us: 0, end_us: 500_000, channel: 0, locked: false, voice: 1, hand: None };
         EditCommand::InsertEvents { events: vec![(lid, tid, ev)] }.apply(&mut sc);
         let bytes = score_to_smf_bytes(&sc, &|_| None).expect("smf");
         // FF 58 04 nn dd cc bb: nn=6, dd=3 (achtste).

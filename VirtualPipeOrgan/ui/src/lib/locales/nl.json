@@ -885,7 +885,7 @@
     "unsaved_marker": "Onopgeslagen wijzigingen",
     "help_title": "Hulp",
     "help_shortcuts_title": "Sneltoetsen",
-    "help_shortcuts": "Ctrl+N nieuw · Ctrl+O openen · Ctrl+S opslaan · Ctrl+Shift+S opslaan als · Ctrl+1..4 tabbladen · K notenschrift/klavar · N stapinvoer\nStapinvoer: A–G noot (Shift = akkoord) · Enter plaatst op de invoercursor · ↑/↓ invoercursor een toon (Shift = octaaf, Alt = laatste noot kruis/mol) · 2–7 waarde · Alt+2–7 duur laatste noot · . punt · 0 rust · R herhaal · Backspace terug · Esc stop\nSelectie: ←/→ noot · ↑/↓ transponeren (Shift = octaaf) · Shift+←/→ verschuiven · Delete · [ ÷2 · ] ×2 · . punt · Ctrl+C/V · Ctrl+Z/Y · Alt+←/→ hand (klavar)",
+    "help_shortcuts": "Ctrl+N nieuw · Ctrl+O openen · Ctrl+S opslaan · Ctrl+Shift+S opslaan als · Ctrl+1..4 tabbladen · K notenschrift/klavar · V alleen actieve stem · Shift+Alt+1..4 stem · N stapinvoer\nStapinvoer: A–G noot (Shift = akkoord) · Enter plaatst op de invoercursor · ↑/↓ invoercursor een toon (Shift = octaaf, Alt = laatste noot kruis/mol) · 2–7 waarde · Alt+2–7 duur laatste noot · . punt · 0 rust · R herhaal · Backspace terug · Esc stop\nSelectie: ←/→ noot · ↑/↓ transponeren (Shift = octaaf) · Shift+←/→ verschuiven · Delete · [ ÷2 · ] ×2 · . punt · Ctrl+C/V · Ctrl+Z/Y · Alt+←/→ hand (klavar)",
     "tab_input": "Invoer",
     "tab_texts": "Teksten & tekens",
     "tab_staves": "Balken & stemmen",
@@ -903,7 +903,17 @@
     "measure_beat": "maat {m}, tel {b}",
     "voices_later": "Stemmen per balk komen in een volgende versie.",
     "grid_title": "Fijnste notenwaarde van het raster",
-    "selection_section": "Selectie:"
+    "selection_section": "Selectie:",
+    "voice": "Stem",
+    "voices": "Stemmen",
+    "voice_button_title": "Actieve stem {n} van deze balk (Shift+Alt+{n}); vet = bevat noten",
+    "to_voice": "Naar stem",
+    "to_voice_title": "Geselecteerde noten naar stem {n} (Shift+Alt+↑/↓: vorige/volgende stem)",
+    "split_chord": "Akkoord splitsen",
+    "split_chord_title": "Hoogste noot per inzet naar stem 1, de rest naar stem 2",
+    "only_active_voice": "Alleen actieve stem",
+    "only_active_voice_title": "Andere stemmen lichtgrijs tonen (V)",
+    "voices_hint": "Stem 1 en 3: stokken omhoog, 2 en 4 omlaag; elke stem een eigen kleur op het scherm, zwart op papier."
   },
   "temperaments": {
     "name_prompt": "Naam voor deze stemming:"

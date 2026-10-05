@@ -885,7 +885,7 @@
     "unsaved_marker": "Modifications non enregistrées",
     "help_title": "Aide",
     "help_shortcuts_title": "Raccourcis",
-    "help_shortcuts": "Ctrl+N nouveau · Ctrl+O ouvrir · Ctrl+S enregistrer · Ctrl+Maj+S enregistrer sous · Ctrl+1..4 onglets · K portée/klavar · N saisie pas à pas\nSaisie pas à pas : A–G note (Maj = accord) · Entrée place au curseur de saisie · ↑/↓ curseur d’un degré (Maj = octave, Alt = dernière note dièse/bémol) · 2–7 valeur · Alt+2–7 durée de la dernière note · . point · 0 silence · R répéter · Retour arrière annuler · Échap fin\nSélection : ←/→ note · ↑/↓ transposer (Maj = octave) · Maj+←/→ déplacer · Suppr · [ ÷2 · ] ×2 · . point · Ctrl+C/V · Ctrl+Z/Y · Alt+←/→ main (klavar)",
+    "help_shortcuts": "Ctrl+N nouveau · Ctrl+O ouvrir · Ctrl+S enregistrer · Ctrl+Maj+S enregistrer sous · Ctrl+1..4 onglets · K portée/klavar · V voix active seule · Maj+Alt+1..4 voix · N saisie pas à pas\nSaisie pas à pas : A–G note (Maj = accord) · Entrée place au curseur de saisie · ↑/↓ curseur d’un degré (Maj = octave, Alt = dernière note dièse/bémol) · 2–7 valeur · Alt+2–7 durée de la dernière note · . point · 0 silence · R répéter · Retour arrière annuler · Échap fin\nSélection : ←/→ note · ↑/↓ transposer (Maj = octave) · Maj+←/→ déplacer · Suppr · [ ÷2 · ] ×2 · . point · Ctrl+C/V · Ctrl+Z/Y · Alt+←/→ main (klavar)",
     "tab_input": "Saisie",
     "tab_texts": "Textes & signes",
     "tab_staves": "Portées & voix",
@@ -903,7 +903,17 @@
     "measure_beat": "mesure {m}, temps {b}",
     "voices_later": "Les voix par portée arrivent dans une version ultérieure.",
     "grid_title": "Valeur de note la plus fine de la grille",
-    "selection_section": "Sélection :"
+    "selection_section": "Sélection :",
+    "voice": "Voix",
+    "voices": "Voix",
+    "voice_button_title": "Voix active {n} de cette portée (Maj+Alt+{n}) ; gras = contient des notes",
+    "to_voice": "Vers la voix",
+    "to_voice_title": "Déplacer les notes sélectionnées vers la voix {n} (Maj+Alt+↑/↓ : voix précédente/suivante)",
+    "split_chord": "Scinder l’accord",
+    "split_chord_title": "Note la plus haute de chaque attaque vers la voix 1, le reste vers la voix 2",
+    "only_active_voice": "Voix active seule",
+    "only_active_voice_title": "Afficher les autres voix en gris clair (V)",
+    "voices_hint": "Voix 1 et 3 hampes vers le haut, 2 et 4 vers le bas ; chaque voix a sa couleur à l’écran, noir sur papier."
   },
   "temperaments": {
     "name_prompt": "Nom de ce tempérament :"

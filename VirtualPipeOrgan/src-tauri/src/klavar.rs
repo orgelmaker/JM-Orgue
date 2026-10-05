@@ -57,6 +57,8 @@ pub struct KlavarNote {
     pub end_cut: u64,
     /// Rechts, links of pedaal; de renderer leidt de stokrichting eraf.
     pub hand: KlavarHand,
+    /// Stem (0.7.86), alleen voor de stokkleur op het scherm.
+    pub voice: u8,
     /// Stopteken "v" op het einde.
     pub stop: bool,
     /// Rastermomenten van latere inzetten van dezelfde (balk, hand) waarop
@@ -290,7 +292,7 @@ pub fn klavar_model(qs: &QuantizedScore, handen: &[(KlavarHand, Option<u8>)], le
         for n in &st.notes {
             let hand = hand_van_noot(balk, n.hand, n.midi);
             let noot = KlavarNote {
-                id: n.id, layer_id: st.layer_id, staff: st.staff_index, midi: n.midi, start: n.start, end: n.end, end_cut: n.end, hand,
+                id: n.id, layer_id: st.layer_id, staff: st.staff_index, midi: n.midi, start: n.start, end: n.end, end_cut: n.end, hand, voice: n.voice.clamp(1, 4),
                 stop: false, dots: Vec::new(), bar_crossings: Vec::new(), beam: None, label: None,
             };
             if hand == KlavarHand::Pedal { pedal.push(noot); } else { manual.push(noot); }
@@ -399,7 +401,7 @@ mod tests {
     fn balk(naam: &str, pedal: bool, hand: Option<KlavarHand>, noten: &[(u8, f64, f64)]) -> Staff {
         Staff {
             name: naam.into(), pedal, hand,
-            notes: noten.iter().enumerate().map(|(i, &(m, s, e))| NoteEv { midi: m, start_sec: s, end_sec: e, id: Some(i as u64 + 1), hand: None }).collect(),
+            notes: noten.iter().enumerate().map(|(i, &(m, s, e))| NoteEv { midi: m, start_sec: s, end_sec: e, id: Some(i as u64 + 1), hand: None, voice: 1 }).collect(),
             ..Default::default()
         }
     }
@@ -659,7 +661,7 @@ mod tests {
         sc.add_layer("Hoofdwerk".into(), None);
         sc.add_layer("Pedaal".into(), None);
         let id = sc.new_event_id();
-        sc.layers[0].takes[0].events.push(LayerEv { id, midi: 60, start_us: 0, end_us: 500_000, channel: 0, locked: false, hand: None });
+        sc.layers[0].takes[0].events.push(LayerEv { id, midi: 60, start_us: 0, end_us: 500_000, channel: 0, locked: false, voice: 1, hand: None });
         let v = serde_json::to_value(klavar_model_from_score(&sc)).expect("json");
         assert!(v.get("measure_len").is_some());
         assert_eq!(v["manual"]["notes"][0]["id"], serde_json::json!(id));
@@ -731,7 +733,7 @@ mod tests {
         sc.layers[1].klavar_hand = Some(KlavarHand::Right);
         for (li, midi, start) in [(0usize, 60u8, 0u64), (0, 62, 500_000), (1, 64, 1_000_000), (1, 65, 1_500_000), (0, 67, 2_000_000)] {
             let id = sc.new_event_id();
-            sc.layers[li].takes[0].events.push(LayerEv { id, midi, start_us: start, end_us: start + 400_000, channel: 0, locked: false, hand: None });
+            sc.layers[li].takes[0].events.push(LayerEv { id, midi, start_us: start, end_us: start + 400_000, channel: 0, locked: false, voice: 1, hand: None });
         }
         let m = klavar_model_from_score(&sc);
         let lab = |midi: u8| noot(&m.manual, midi, match midi { 60 => 0, 62 => 3, 64 => 6, 65 => 9, _ => 12 }).label.clone();
@@ -745,7 +747,7 @@ mod tests {
         let mut sc1 = Score::new(2);
         sc1.add_layer("Hoofdwerk".into(), None);
         let id = sc1.new_event_id();
-        sc1.layers[0].takes[0].events.push(LayerEv { id, midi: 60, start_us: 0, end_us: 400_000, channel: 0, locked: false, hand: None });
+        sc1.layers[0].takes[0].events.push(LayerEv { id, midi: 60, start_us: 0, end_us: 400_000, channel: 0, locked: false, voice: 1, hand: None });
         assert_eq!(klavar_model_from_score(&sc1).manual.notes[0].label, None);
         // Twee lagen op één inzet zijn geen wissel; de echte wissel erna wél
         // (HW 60@0, HW 62 + ZW 64 samen @3, ZW 65@6 → label op 65).
@@ -756,7 +758,7 @@ mod tests {
         sc2.layers[1].klavar_hand = Some(KlavarHand::Right);
         for (li, midi, start) in [(0usize, 60u8, 0u64), (0, 62, 500_000), (1, 64, 500_000), (1, 65, 1_000_000)] {
             let id = sc2.new_event_id();
-            sc2.layers[li].takes[0].events.push(LayerEv { id, midi, start_us: start, end_us: start + 400_000, channel: 0, locked: false, hand: None });
+            sc2.layers[li].takes[0].events.push(LayerEv { id, midi, start_us: start, end_us: start + 400_000, channel: 0, locked: false, voice: 1, hand: None });
         }
         let m2 = klavar_model_from_score(&sc2);
         assert_eq!(noot(&m2.manual, 60, 0).label.as_deref(), Some("Hoofdwerk"));

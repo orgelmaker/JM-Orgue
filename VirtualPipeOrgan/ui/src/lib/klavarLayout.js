@@ -225,9 +225,12 @@ export function layoutSystem(model, sys, opts = {}) {
           cx, cy: zwart ? yStok - r : yStok + r, r, yStok, zwart, dir,
           stokX0: cx, stokX1: cx + dir * MAAT.stokLengte * balk.w,
           inAkkoord: false, beam: n.beam ?? null, label: n.label ?? null,
+          voice: Number(n.voice) || 1,
         };
         lay.noten.push(noot);
-        const g = naam + '/' + n.start + '/' + n.hand;
+        // Per stem een eigen stok/akkoordlijn (0.7.86): een gesplitst akkoord
+        // houdt zijn kleur per stem.
+        const g = naam + '/' + n.start + '/' + n.hand + '/' + noot.voice;
         if (!groepen.has(g)) groepen.set(g, []);
         groepen.get(g).push(noot);
         // Doorklinkstippen in dit systeem.
@@ -275,7 +278,8 @@ export function layoutSystem(model, sys, opts = {}) {
   // korte stokken per kop.
   for (const [g, noten] of groepen) {
     if (noten.length < 2) continue;
-    const [naam, start, hand] = g.split('/');
+    const [naam, start, hand, stemTekst] = g.split('/');
+    const voice = Number(stemTekst) || 1;
     const xs = noten.map(n => n.cx);
     const xMin = Math.min(...xs), xMax = Math.max(...xs);
     const andere = lay.noten.filter(n => n.balk === naam && String(n.start) === start && n.hand !== hand
@@ -291,7 +295,7 @@ export function layoutSystem(model, sys, opts = {}) {
       y: noten[0].yStok,
       x0: dir > 0 ? xMin : xMin - MAAT.akkoordUitsteek * balkW,
       x1: dir > 0 ? xMax + MAAT.akkoordUitsteek * balkW : xMax,
-      balk: naam, start: Number(start), hand, dir,
+      balk: naam, start: Number(start), hand, dir, voice,
     });
   }
 
@@ -326,7 +330,7 @@ export function layoutSystem(model, sys, opts = {}) {
   // Uiteinde van de stok aan de handzijde per (balk, start, hand): de
   // akkoordlijn als er een is, anders de stok van de buitenste noot.
   const stokUiteinde = (n) => {
-    const a = lay.akkoordlijnen.find(l => l.balk === n.balk && l.start === n.start && l.hand === n.hand);
+    const a = lay.akkoordlijnen.find(l => l.balk === n.balk && l.start === n.start && l.hand === n.hand && l.voice === (n.voice || 1));
     if (a) return n.dir > 0 ? a.x1 : a.x0;
     let x = n.stokX1;
     for (const m of lay.noten) {

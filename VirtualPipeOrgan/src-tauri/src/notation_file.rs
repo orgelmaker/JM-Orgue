@@ -188,7 +188,7 @@ mod tests {
         let t1 = sc.layers[0].takes[0].id;
         let t2 = sc.add_take(m).unwrap();
         let tp = sc.layers[1].takes[0].id;
-        let ev = |id: u64, midi: u8, s: u64, e: u64, ch: u8, hand: Option<KlavarHand>| LayerEv { id, midi, start_us: s, end_us: e, channel: ch, locked: false, hand };
+        let ev = |id: u64, midi: u8, s: u64, e: u64, ch: u8, hand: Option<KlavarHand>| LayerEv { id, midi, start_us: s, end_us: e, channel: ch, locked: false, voice: 1, hand };
         EditCommand::InsertEvents { events: vec![
             (m, t1, ev(1, 60, 0, 400_000, 0, None)),
             (m, t1, ev(2, 64, 400_000, 800_000, 0, Some(KlavarHand::Left))),
@@ -255,6 +255,9 @@ mod tests {
         // Ontbrekende armed take → de laatste take van de laag.
         assert_eq!(sc.layers[0].armed_take, Some(1));
         assert_eq!(sc.layers[0].takes[0].events[0].hand, None);
+        // Zonder stem (bestand van vóór 0.7.86): stem 1, actieve stem 1.
+        assert_eq!(sc.layers[0].takes[0].events[0].voice, 1);
+        assert_eq!(sc.layers[0].active_voice, 1);
         assert_eq!(ui, UiPrefs::default());
         // Een onbekende noemer in een bestand klemt op 4; armed_layer naar een
         // niet-bestaande laag vervalt.

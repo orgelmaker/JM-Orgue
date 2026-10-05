@@ -885,7 +885,7 @@
     "unsaved_marker": "Modifiche non salvate",
     "help_title": "Aiuto",
     "help_shortcuts_title": "Scorciatoie",
-    "help_shortcuts": "Ctrl+N nuovo · Ctrl+O apri · Ctrl+S salva · Ctrl+Maiusc+S salva con nome · Ctrl+1..4 schede · K pentagramma/klavar · N inserimento passo passo\nInserimento passo passo: A–G nota (Maiusc = accordo) · Invio inserisce al cursore · ↑/↓ cursore di un grado (Maiusc = ottava, Alt = ultima nota diesis/bemolle) · 2–7 valore · Alt+2–7 durata dell’ultima nota · . punto · 0 pausa · R ripeti · Backspace annulla · Esc fine\nSelezione: ←/→ nota · ↑/↓ trasporre (Maiusc = ottava) · Maiusc+←/→ spostare · Canc · [ ÷2 · ] ×2 · . punto · Ctrl+C/V · Ctrl+Z/Y · Alt+←/→ mano (klavar)",
+    "help_shortcuts": "Ctrl+N nuovo · Ctrl+O apri · Ctrl+S salva · Ctrl+Maiusc+S salva con nome · Ctrl+1..4 schede · K pentagramma/klavar · V solo voce attiva · Maiusc+Alt+1..4 voce · N inserimento passo passo\nInserimento passo passo: A–G nota (Maiusc = accordo) · Invio inserisce al cursore · ↑/↓ cursore di un grado (Maiusc = ottava, Alt = ultima nota diesis/bemolle) · 2–7 valore · Alt+2–7 durata dell’ultima nota · . punto · 0 pausa · R ripeti · Backspace annulla · Esc fine\nSelezione: ←/→ nota · ↑/↓ trasporre (Maiusc = ottava) · Maiusc+←/→ spostare · Canc · [ ÷2 · ] ×2 · . punto · Ctrl+C/V · Ctrl+Z/Y · Alt+←/→ mano (klavar)",
     "tab_input": "Inserimento",
     "tab_texts": "Testi & segni",
     "tab_staves": "Righi & voci",
@@ -903,7 +903,17 @@
     "measure_beat": "battuta {m}, tempo {b}",
     "voices_later": "Le voci per rigo arrivano in una versione successiva.",
     "grid_title": "Valore più fine della griglia",
-    "selection_section": "Selezione:"
+    "selection_section": "Selezione:",
+    "voice": "Voce",
+    "voices": "Voci",
+    "voice_button_title": "Voce attiva {n} di questo rigo (Maiusc+Alt+{n}); grassetto = contiene note",
+    "to_voice": "Alla voce",
+    "to_voice_title": "Sposta le note selezionate alla voce {n} (Maiusc+Alt+↑/↓: voce precedente/successiva)",
+    "split_chord": "Dividi accordo",
+    "split_chord_title": "Nota più alta per attacco alla voce 1, il resto alla voce 2",
+    "only_active_voice": "Solo voce attiva",
+    "only_active_voice_title": "Mostra le altre voci in grigio chiaro (V)",
+    "voices_hint": "Voci 1 e 3 gambi in su, 2 e 4 in giù; ogni voce ha il suo colore sullo schermo, nero su carta."
   },
   "temperaments": {
     "name_prompt": "Nome di questo temperamento:"

@@ -26,7 +26,7 @@
   import StatusLine from './notation/StatusLine.svelte';
   import HelpDialog from './notation/HelpDialog.svelte';
   import ConfirmDialog from './notation/ConfirmDialog.svelte';
-  import { MAATSOORTEN, splitsMaatsoort, maatDuurUs } from '../lib/notatieKeuzes.js';
+  import { MAATSOORTEN, splitsMaatsoort, maatDuurUs, notemapSleutel, rasterPositie } from '../lib/notatieKeuzes.js';
   import { t, tx } from '../lib/i18n.js';
   import { pasSfeerToeAlsGewijzigd } from '../lib/sfeer.js';
 
@@ -252,6 +252,9 @@
   // noten (ties) die als meerdere noteheads renderen. Coördinaten zijn relatief
   // aan de scroll-content van .notation-sheet.
   let noteBoxes = [];          // [{ eventId, midi, x, y, w, h, cx, cy }]
+  let notemap = [];            // NoteRef[] van de laatste schermrender (0.7.86): exacte klik-correlatie
+  let notatieQ = 4;            // effectief raster van die render (bij /8 minstens 2)
+  let alleenActieveStem = false; // andere stemmen lichtgrijs (Shift+Alt+S)
   $: selectedBoxes = noteBoxes.filter(b => selectionIds.has(b.eventId));
   // Pedaalnoten hebben geen hand (0.7.73): L/R staan uit zolang alleen
   // pedaalnoten zijn gekozen; de backend negeert de hand daar toch.
@@ -419,7 +422,11 @@
         }
         if (score.generation === lastGeneration && xml) return;
         lastGeneration = score.generation;
-        xml = await invoke('notation_get_musicxml', { scoreId });
+        // Schermvariant (0.7.86): stemkleuren + notemap; de export blijft kleurloos.
+        const notatie = await invoke('notation_get_notation', { scoreId, dimOther: alleenActieveStem });
+        xml = notatie.xml;
+        notemap = Array.isArray(notatie.notemap) ? notatie.notemap : [];
+        notatieQ = Number(notatie.q) || Number(score?.quantize) || 4;
       } else {
         // File-modus: bestand → MusicXML of klavar-model (zelfde balkindeling).
         const staves = (divisions.length > 0 && staffConfig.length > 0)
@@ -444,6 +451,8 @@
       if (!osmd) {
         osmd = new OpenSheetMusicDisplay(osmdHost, {
           autoResize: true, backend: 'svg', drawTitle: true,
+          // Stemkleuren (0.7.86) komen als `notehead color` uit de MusicXML.
+          coloringEnabled: true, colorStemsLikeNoteheads: true,
         });
         // Lege maten blijven losse maten (geen "7" als meermaatsrust): daar
         // moet je noten in kunnen plaatsen. De waardestrepen schrijft de
@@ -511,6 +520,10 @@
         return evs;
       });
       const usedFirst = new Set(); // eventId → eerste notehead al gekoppeld (voor cx/cy-cursor)
+      // Exacte koppeling (0.7.86): (part, maat, stem, positie, toon) → event-id.
+      const index = new Map();
+      for (const r of notemap) index.set(notemapSleutel(r.part, r.measure, r.voice, r.pos, r.midi), r.id);
+      const q = notatieQ || Number(score?.quantize) || 4;
       for (let m = 0; m < measureList.length; m++) {
         const row = measureList[m];
         if (!row) continue;
@@ -531,7 +544,29 @@
                 if (!src || (src.isRest && src.isRest())) continue;
                 const midi = midiFromPitch(src.Pitch);
                 if (midi == null) continue;
-                // Match: zelfde midi in deze laag, tijdstip binnen [start,end];
+                let exactId = null;
+                if (index.size) {
+                  try {
+                    const voice = Number(src.ParentVoiceEntry?.ParentVoice?.VoiceId) || 1;
+                    const rt = se.relInMeasureTimestamp ?? se.sourceStaffEntry?.Timestamp;
+                    const rv = rt?.RealValue != null ? rt.RealValue : (rt ? rt.Numerator / rt.Denominator : 0);
+                    exactId = index.get(notemapSleutel(s, m, voice, rasterPositie(rv, q), midi)) ?? null;
+                  } catch (e) { exactId = null; }
+                }
+                if (exactId != null) {
+                  let g = null;
+                  try { g = gnote.getSVGGElement && gnote.getSVGGElement(); } catch (e) {}
+                  if (!g) continue;
+                  const r = g.getBoundingClientRect();
+                  if (!r || (r.width === 0 && r.height === 0)) continue;
+                  const x = r.left - sheetRect.left + sx;
+                  const y = r.top - sheetRect.top + sy;
+                  noteBoxes.push({ eventId: exactId, midi, x, y, w: r.width, h: r.height, cx: x + r.width / 2, cy: y + r.height / 2, first: !usedFirst.has(exactId) });
+                  usedFirst.add(exactId);
+                  continue;
+                }
+                // Terugval (bestandsmodus, oudere render): zelfde midi in deze
+                // laag, tijdstip binnen [start,end];
                 // anders dichtstbijzijnde start binnen ~1 tel.
                 let best = null, bestScore = Infinity;
                 for (const ev of layerEvents) {
@@ -863,7 +898,7 @@
     stepPosUs = 0; stepHeld = new Set(); stepChord = new Set(); stepChordDivisie = new Map();
     stepLastIds = []; stepLastChordNotes = []; stepLastPos = null; stepLastEndUs = null; stepLastUndoCount = 0; stepLastGroepen = null;
     divEditLayerId = null; groeiLaatst = 0;
-    stepAcc = null; stepTie = false; caret = null;
+    stepAcc = null; stepTie = false; caret = null; notemap = [];
   }
   function werkbalkUitScore() {
     groeiLaatst = 0;
@@ -1813,7 +1848,7 @@
     if (!evs.length) return;
     const minStart = Math.min(...evs.map(e => e.start_us));
     notationClipboard = { events: evs.map(e => ({
-      midi: e.midi, channel: e.channel ?? 0, hand: e.hand ?? null,
+      midi: e.midi, channel: e.channel ?? 0, hand: e.hand ?? null, voice: Number(e.voice) || 0,
       rel_start: e.start_us - minStart, dur: Math.max(1000, e.end_us - e.start_us),
     })) };
   }
@@ -1834,7 +1869,7 @@
     const gridUs = (60e6 / (Number(bpm) || 90)) / (Number(score?.quantize) || 4);
     const snapped = Math.round(baseUs / gridUs) * gridUs;
     const notes = notationClipboard.events.map(e => ({
-      midi: e.midi, channel: e.channel ?? 0, hand: e.hand ?? null,
+      midi: e.midi, channel: e.channel ?? 0, hand: e.hand ?? null, voice: Number(e.voice) || 0,
       start_us: Math.round(snapped + e.rel_start),
       end_us: Math.round(snapped + e.rel_start + e.dur),
     }));
@@ -1864,6 +1899,17 @@
       return;
     }
     if (!isLive) return;
+    // Stemmen (0.7.86): Shift+Alt+1..4 = actieve stem van de armed balk,
+    // Shift+Alt+↑/↓ = selectie naar vorige/volgende stem (V = alleen actieve stem).
+    if (e.shiftKey && e.altKey && !e.ctrlKey && !e.metaKey) {
+      if (/^Digit[1-4]$/.test(e.code)) { const lid = stepTargetLayerId(); if (lid != null) setActiveVoice(lid, Number(e.code.slice(5))); e.preventDefault(); return; }
+      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+        setSelectionVoice(Math.max(1, Math.min(4, stemVanSelectie() + (e.key === 'ArrowUp' ? -1 : 1))));
+        e.preventDefault(); return;
+      }
+    }
+    // V = alleen de actieve stem in kleur (Shift+Alt+S botst met de Windows-indelingswissel).
+    if ((e.key === 'v' || e.key === 'V') && !e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey) { toggleAlleenActieveStem(); e.preventDefault(); return; }
     // ---- Stapinvoer-sneltoetsen (MuseScore-conventies) ----
     if (stepMode) {
       const k = e.key.toLowerCase();
@@ -1939,10 +1985,13 @@
   async function saveMusicXml() {
     if (!xml) return;
     try {
+      // Live: de kleurloze exportvariant, niet de schermrender (0.7.86).
+      let exportXml = xml;
+      if (isLive && scoreId != null) { try { exportXml = await invoke('notation_get_musicxml', { scoreId }); } catch (e) {} }
       const { save } = await import('@tauri-apps/plugin-dialog');
       const suggested = (filePath ? filePath.replace(/\.(mid|midi)$/i, '') : (score?.title || tx('notation.default_musicxml_name'))) + '.musicxml';
       const path = await save({ defaultPath: suggested, filters: [{ name: 'MusicXML', extensions: ['musicxml', 'xml'] }] });
-      if (path) { await invoke('save_musicxml', { path, xml }); alert(tx('notation.musicxml_saved').replace('{path}', path)); }
+      if (path) { await invoke('save_musicxml', { path, xml: exportXml }); alert(tx('notation.musicxml_saved').replace('{path}', path)); }
     } catch (e) { alert(tx('notation.save_failed').replace('{error}', e)); }
   }
   function printScore() { window.print(); }
@@ -2037,6 +2086,38 @@
     if (stepMode && scoreId != null) invoke('notation_set_step_input', { scoreId, enabled: false }).catch(() => {});
   });
 
+  // ---- Stemmen per balk (0.7.86) ----
+  async function setActiveVoice(layerId, v) {
+    try {
+      await invoke('notation_set_active_voice', { scoreId, layerId, voice: v });
+      score = await invoke('notation_get_score', { scoreId });
+      if (alleenActieveStem) { lastGeneration = 0; scheduleRender(); }
+    } catch (e) { alert(String(e)); }
+  }
+  function toggleAlleenActieveStem() {
+    alleenActieveStem = !alleenActieveStem;
+    lastGeneration = 0;
+    scheduleRender();
+  }
+  async function setSelectionVoice(v) {
+    const ids = selectedIdsOrCursor();
+    if (!ids.length) return;
+    try { await invoke('notation_set_voice', { scoreId, eventIds: ids, voice: v }); } catch (e) { alert(String(e)); }
+  }
+  async function splitSelectionChord() {
+    const ids = selectedIdsOrCursor();
+    if (!ids.length) return;
+    try { await invoke('notation_split_chord_to_voices', { scoreId, eventIds: ids }); } catch (e) { alert(String(e)); }
+  }
+  // Stem van de selectie zelf (de cursor hoeft er niet in te liggen); bij
+  // gemengde stemmen de laagste.
+  function stemVanSelectie() {
+    const ids = selectedIdsOrCursor();
+    const stemmen = flatEvents.filter(ev => ids.includes(ev.id)).map(ev => Number(ev.voice) || 1);
+    if (stemmen.length) return Math.min(...stemmen);
+    return cursorEvent ? (Number(cursorEvent.voice) || 1) : 1;
+  }
+
   // ---- Acties voor de onderdelen (0.7.85): de logica blijft hier ----
   const kopActies = {
     nieuw: openNewWizard, openProject: () => openProject(), openRecent: (p) => openProject(p),
@@ -2055,9 +2136,10 @@
   const balkenActies = {
     setMeter: setMeterLive, setKey: setKeyLive, setMode: setModeLive, setQuantize: setQuantizeLive,
     setTolerance: setToleranceLive, addLayer, openWizard: openWizardFromScore, toggleLayerDivision, setLayerHand,
+    toVoice: setSelectionVoice, splitChord: splitSelectionChord, toggleOnlyActive: toggleAlleenActieveStem,
   };
   const afspeelActies = { setMetronome: setMetronomeCfg, previewTempo: () => previewTempo(), setKlavarBereik };
-  const laagActies = { arm: armLayer, rename: renameLayer, move: moveLayer, remove: removeLayer, addTake, toggleTakeVisible, addLayer };
+  const laagActies = { arm: armLayer, rename: renameLayer, move: moveLayer, remove: removeLayer, addTake, toggleTakeVisible, addLayer, setActiveVoice };
   function bevestigKnoppen(b) {
     const lijst = [{ label: tx('actions.cancel'), stijl: 'secondary', on: () => { bevestig = null; } }];
     if (b.opslaan) {
@@ -2115,7 +2197,7 @@
       {:else if actieveTab === 'staves'}
         <StavesVoicesTab layers={score?.layers ?? []} {divisions} {viewMode} {klavarModel} splitOpties={SPLIT_OPTIES}
           {layerHandKeuze} {autoHandLabel} maatsoort={beatsPerBar + '/' + beatUnit} {maatsoortKeuzes} {keyFifths} {minor}
-          quantize={Number(score?.quantize) || 4} {tolerancePct} {keyChoices} {gridChoices} acties={balkenActies} />
+          quantize={Number(score?.quantize) || 4} {tolerancePct} {keyChoices} {gridChoices} onlyActive={alleenActieveStem} acties={balkenActies} />
       {:else}
         <PlaybackTab {metroOn} {countInBeats} {viewMode} {klavarBereik} acties={afspeelActies} />
       {/if}
@@ -2355,6 +2437,9 @@
 
   @media print {
     @page { size: A4 portrait; margin: 12mm; }
+    /* Stemkleuren (0.7.86) alleen op het scherm: afdrukken in zwart. */
+    .osmd-host svg [fill]:not([fill="none"]) { fill: #000 !important; }
+    .osmd-host svg [stroke]:not([stroke="none"]) { stroke: #000 !important; }
     .notation-toolbar, .notation-staves, .notation-hint, .notation-busy, .notation-error, .notation-alpha,
     .tab-inhoud, .notation-selection-overlay, .osmd-host.verborgen {
       display: none !important;

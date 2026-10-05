@@ -2626,10 +2626,11 @@ impl AppState {
                     let Some(sc) = scores.get_mut(&score_id) else { return };
                     let ev_id = sc.new_event_id();
                     if let Some(layer) = sc.layers.iter_mut().find(|l| l.id == layer_id) {
+                        let stem = layer.active_voice; // 0.7.86: opnemen in de actieve stem
                         if let Some(take) = layer.takes.iter_mut().find(|t| t.id == take_id) {
                             take.events.push(crate::notation::LayerEv {
                                 id: ev_id, midi: *note, start_us, end_us,
-                                channel: *channel, locked: false, hand: None,
+                                channel: *channel, locked: false, voice: stem, hand: None,
                             });
                         }
                     }

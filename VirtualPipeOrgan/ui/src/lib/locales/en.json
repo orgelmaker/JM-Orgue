@@ -885,7 +885,7 @@
     "unsaved_marker": "Unsaved changes",
     "help_title": "Help",
     "help_shortcuts_title": "Shortcuts",
-    "help_shortcuts": "Ctrl+N new · Ctrl+O open · Ctrl+S save · Ctrl+Shift+S save as · Ctrl+1..4 tabs · K staff/klavar · N step input\nStep input: A–G note (Shift = chord) · Enter places at the input cursor · ↑/↓ input cursor one step (Shift = octave, Alt = last note sharp/flat) · 2–7 value · Alt+2–7 duration of the last note · . dot · 0 rest · R repeat · Backspace undo · Esc stop\nSelection: ←/→ note · ↑/↓ transpose (Shift = octave) · Shift+←/→ move · Delete · [ ÷2 · ] ×2 · . dot · Ctrl+C/V · Ctrl+Z/Y · Alt+←/→ hand (klavar)",
+    "help_shortcuts": "Ctrl+N new · Ctrl+O open · Ctrl+S save · Ctrl+Shift+S save as · Ctrl+1..4 tabs · K staff/klavar · V active voice only · Shift+Alt+1..4 voice · N step input\nStep input: A–G note (Shift = chord) · Enter places at the input cursor · ↑/↓ input cursor one step (Shift = octave, Alt = last note sharp/flat) · 2–7 value · Alt+2–7 duration of the last note · . dot · 0 rest · R repeat · Backspace undo · Esc stop\nSelection: ←/→ note · ↑/↓ transpose (Shift = octave) · Shift+←/→ move · Delete · [ ÷2 · ] ×2 · . dot · Ctrl+C/V · Ctrl+Z/Y · Alt+←/→ hand (klavar)",
     "tab_input": "Input",
     "tab_texts": "Texts & marks",
     "tab_staves": "Staves & voices",
@@ -903,7 +903,17 @@
     "measure_beat": "bar {m}, beat {b}",
     "voices_later": "Voices per staff arrive in a later version.",
     "grid_title": "Finest note value of the grid",
-    "selection_section": "Selection:"
+    "selection_section": "Selection:",
+    "voice": "Voice",
+    "voices": "Voices",
+    "voice_button_title": "Active voice {n} of this staff (Shift+Alt+{n}); bold = has notes",
+    "to_voice": "To voice",
+    "to_voice_title": "Move the selected notes to voice {n} (Shift+Alt+↑/↓: previous/next voice)",
+    "split_chord": "Split chord",
+    "split_chord_title": "Highest note per onset to voice 1, the rest to voice 2",
+    "only_active_voice": "Active voice only",
+    "only_active_voice_title": "Show the other voices in light grey (V)",
+    "voices_hint": "Voices 1 and 3 stem up, 2 and 4 stem down; each voice has its own colour on screen, black on paper."
   },
   "temperaments": {
     "name_prompt": "Name for this temperament:"

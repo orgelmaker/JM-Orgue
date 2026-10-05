@@ -885,7 +885,7 @@
     "unsaved_marker": "Ungespeicherte Änderungen",
     "help_title": "Hilfe",
     "help_shortcuts_title": "Tastenkürzel",
-    "help_shortcuts": "Strg+N neu · Strg+O öffnen · Strg+S speichern · Strg+Umschalt+S speichern unter · Strg+1..4 Registerkarten · K Noten/Klavar · N Schritteingabe\nSchritteingabe: A–G Note (Umschalt = Akkord) · Enter setzt am Eingabecursor · ↑/↓ Eingabecursor eine Stufe (Umschalt = Oktave, Alt = letzte Note Kreuz/B) · 2–7 Wert · Alt+2–7 Dauer der letzten Note · . Punkt · 0 Pause · R wiederholen · Rücktaste zurück · Esc Ende\nAuswahl: ←/→ Note · ↑/↓ transponieren (Umschalt = Oktave) · Umschalt+←/→ verschieben · Entf · [ ÷2 · ] ×2 · . Punkt · Strg+C/V · Strg+Z/Y · Alt+←/→ Hand (Klavar)",
+    "help_shortcuts": "Strg+N neu · Strg+O öffnen · Strg+S speichern · Strg+Umschalt+S speichern unter · Strg+1..4 Registerkarten · K Noten/Klavar · V nur aktive Stimme · Umschalt+Alt+1..4 Stimme · N Schritteingabe\nSchritteingabe: A–G Note (Umschalt = Akkord) · Enter setzt am Eingabecursor · ↑/↓ Eingabecursor eine Stufe (Umschalt = Oktave, Alt = letzte Note Kreuz/B) · 2–7 Wert · Alt+2–7 Dauer der letzten Note · . Punkt · 0 Pause · R wiederholen · Rücktaste zurück · Esc Ende\nAuswahl: ←/→ Note · ↑/↓ transponieren (Umschalt = Oktave) · Umschalt+←/→ verschieben · Entf · [ ÷2 · ] ×2 · . Punkt · Strg+C/V · Strg+Z/Y · Alt+←/→ Hand (Klavar)",
     "tab_input": "Eingabe",
     "tab_texts": "Texte & Zeichen",
     "tab_staves": "Notenzeilen & Stimmen",
@@ -903,7 +903,17 @@
     "measure_beat": "Takt {m}, Schlag {b}",
     "voices_later": "Stimmen pro Notenzeile kommen in einer späteren Version.",
     "grid_title": "Feinster Notenwert des Rasters",
-    "selection_section": "Auswahl:"
+    "selection_section": "Auswahl:",
+    "voice": "Stimme",
+    "voices": "Stimmen",
+    "voice_button_title": "Aktive Stimme {n} dieser Notenzeile (Umschalt+Alt+{n}); fett = enthält Noten",
+    "to_voice": "In Stimme",
+    "to_voice_title": "Ausgewählte Noten in Stimme {n} (Umschalt+Alt+↑/↓: vorige/nächste Stimme)",
+    "split_chord": "Akkord aufteilen",
+    "split_chord_title": "Höchste Note je Einsatz in Stimme 1, der Rest in Stimme 2",
+    "only_active_voice": "Nur aktive Stimme",
+    "only_active_voice_title": "Andere Stimmen hellgrau zeigen (V)",
+    "voices_hint": "Stimme 1 und 3 Hälse nach oben, 2 und 4 nach unten; jede Stimme eine eigene Farbe am Bildschirm, schwarz auf Papier."
   },
   "temperaments": {
     "name_prompt": "Name für diese Stimmung:"
