@@ -540,6 +540,7 @@ fn main() {
             commands::save_own_eq_preset,
             commands::delete_own_eq_preset,
             commands::rename_own_eq_preset,
+            commands::fetch_speaker_eq,
             commands::persist_reverb_config,
             commands::set_algorithmic_reverb,
             commands::set_reverb_type,

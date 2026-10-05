@@ -5,6 +5,20 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.81] - 2026-10-05
+
+### Luidsprekerpresets
+
+De presetkiezer van het profiel Speakers kent nu ruim duizend gemeten
+luidsprekers, waaronder de ADAM-, Genelec-, Neumann- en Kali-monitoren. De
+namen zitten in het programma; de correctie zelf wordt bij het kiezen per
+model opgehaald van spinorama.org (project van Pierre Aubert; metingen van
+Audio Science Review, Erin's Audio Corner, fabrikanten en anderen), zoals u
+hem ook zelf van die site zou halen. Zo'n preset corrigeert de luidspreker,
+niet de kamer: onder zo'n 300 Hz bepaalt de kamer het laag. Zonder
+internetverbinding blijft de catalogus zichtbaar maar lukt het ophalen niet;
+een eenmaal gekozen correctie blijft bewaard.
+
 ## [0.7.80] - 2026-10-05
 
 ### Equalizer: sterkte, eigen presets, exporteren

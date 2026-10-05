@@ -51,5 +51,15 @@ check('perMerk: AKG, Beyerdynamic, Sennheiser aanwezig', ['AKG', 'Beyerdynamic',
 check('perMerk: som = alle presets', merken.reduce((n, m) => n + m.presets.length, 0) === z.presets.length);
 check('bron-object', z.bron.commit === data.commit && z.bron.meter === 'oratory1990');
 
+// Luidsprekercatalogus (0.7.81): namen uit spinorama, vastgepind op een commit.
+const cat = JSON.parse(readFileSync(path.join(hier, '..', 'ui', 'src', 'assets', 'luidsprekers-catalogus.json'), 'utf8'));
+const lz = maakPresetZoeker({ ...cat, presets: cat.items });
+check('catalogus: ≥ 1000 luidsprekers, commit, bron', lz.presets.length >= 1000 && /^[0-9a-f]{40}$/.test(cat.commit) && cat.bron === 'spinorama', String(lz.presets.length));
+check('catalogus: ADAM A7V, T7V, Genelec 8030C, Neumann KH 120 II', ['Adam A7V', 'Adam T7V', 'Genelec 8030C', 'Neumann KH 120 II'].every((m) => lz.presets.some((p) => p.model === m)));
+check('catalogus: ids uniek en pad = model', new Set(lz.presets.map((p) => p.id)).size === lz.presets.length && lz.presets.every((p) => p.id === 'spinorama/' + p.pad && p.pad === p.model));
+check('catalogus: geen paden met / of ..', lz.presets.every((p) => !p.pad.includes('/') && !p.pad.includes('..') && p.pad.length <= 120));
+check("zoek('adam a7v') → Adam A7V", lz.zoek('adam a7v').some((p) => p.model === 'Adam A7V'));
+check('perMerk: Adam met 8 modellen', (lz.perMerk().find((m) => m.merk === 'Adam') || { presets: [] }).presets.length >= 6);
+
 console.log(fouten ? `${fouten} FOUTEN` : 'alles OK');
 process.exit(fouten ? 1 : 0);

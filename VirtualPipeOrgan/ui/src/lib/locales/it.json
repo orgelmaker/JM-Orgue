@@ -596,6 +596,7 @@
   "about": {
     "feedback_page_failed": "Impossibile aprire la pagina di feedback: {error}",
     "eq_presets_license": "Preset per cuffie: AutoEq (licenza MIT, © 2018–2022 Jaakko Pasanen), misure di oratory1990.",
+    "eq_speakers_license": "Catalogo altoparlanti: spinorama.org (Pierre Aubert, GPL-3); la correzione per modello viene scaricata alla scelta, non inclusa.",
     "title": "Informazioni e feedback",
     "version": "versione {version}",
     "running_from": "Questa copia viene eseguita da:",
@@ -852,6 +853,11 @@
   "eq": {
     "profile": "Profilo di ascolto",
     "profile_speakers": "Altoparlanti",
+    "preset_measured_speakers": "Altoparlanti, misurati (scaricati da spinorama.org)",
+    "fetching": "Scaricamento da spinorama.org…",
+    "fetched": "Scaricato da spinorama.org: {name} ({n} bande)",
+    "fetch_failed": "Scaricamento non riuscito: {error}",
+    "preset_credit_speakers": "I preset per altoparlanti vengono scaricati per modello da spinorama.org (progetto di Pierre Aubert, GPL-3; misure di ASR, Erin's Audio Corner, produttori e altri). Un preset del genere corregge l'altoparlante, non la stanza: sotto circa 300 Hz comanda la stanza.",
     "strength": "Intensità",
     "strength_title": "Scala tutte le bande da 0 a 100 %; il preset stesso resta salvato",
     "preset_own": "Preset personali",

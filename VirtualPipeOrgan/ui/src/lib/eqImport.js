@@ -48,8 +48,10 @@ export function maakBand(type, freq, gain, q, enabled = true) {
 // Voorbeeld:  Preamp: -6.2 dB
 //             Filter 1: ON LSC Fc 105 Hz Gain 6.3 dB Q 0.70
 //             Filter 3: ON PK Fc 4207 Hz Gain 5.2 dB BW Oct 0.5
-const RE_FILTER = /^Filter\s*\d*\s*:\s*(ON|OFF)\s+([A-Z]+)\s+Fc\s+(-?[\d.]+)\s*Hz(?:\s+Gain\s+(-?[\d.]+)\s*dB)?(?:\s+(Q|BW\s*Oct)\s+(-?[\d.]+))?/i;
-const RE_PREAMP = /^Preamp:\s*(-?[\d.]+)\s*dB/i;
+// Spinorama schrijft 'Filter  1: ON PK Fc    44 Hz Gain +2.98 dB Q 2.89' (dubbele
+// spaties, plusteken): daarom [-+]? en \s+ overal.
+const RE_FILTER = /^Filter\s*\d*\s*:\s*(ON|OFF)\s+([A-Z]+)\s+Fc\s+([-+]?[\d.]+)\s*Hz(?:\s+Gain\s+([-+]?[\d.]+)\s*dB)?(?:\s+(Q|BW\s*Oct)\s+([-+]?[\d.]+))?/i;
+const RE_PREAMP = /^Preamp:\s*([-+]?[\d.]+)\s*dB/i;
 
 export function parseParametricEqTxt(tekst) {
   const banden = [];

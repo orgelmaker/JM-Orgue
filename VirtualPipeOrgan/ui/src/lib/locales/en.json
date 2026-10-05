@@ -596,6 +596,7 @@
   "about": {
     "feedback_page_failed": "Cannot open the feedback page: {error}",
     "eq_presets_license": "Headphone presets: AutoEq (MIT licence, © 2018–2022 Jaakko Pasanen), measurements by oratory1990.",
+    "eq_speakers_license": "Speaker catalogue: spinorama.org (Pierre Aubert, GPL-3); the correction per model is fetched when chosen, not bundled.",
     "title": "About & feedback",
     "version": "version {version}",
     "running_from": "This copy is running from:",
@@ -852,6 +853,11 @@
   "eq": {
     "profile": "Listening profile",
     "profile_speakers": "Speakers",
+    "preset_measured_speakers": "Speakers, measured (fetched from spinorama.org)",
+    "fetching": "Fetching from spinorama.org…",
+    "fetched": "Fetched from spinorama.org: {name} ({n} bands)",
+    "fetch_failed": "Fetching failed: {error}",
+    "preset_credit_speakers": "Speaker presets are fetched per model from spinorama.org (project by Pierre Aubert, GPL-3; measurements by ASR, Erin's Audio Corner, manufacturers and others). Such a preset corrects the speaker itself, not your room: below about 300 Hz the room dominates.",
     "strength": "Strength",
     "strength_title": "Scales all bands from 0 to 100 %; the preset itself is kept",
     "preset_own": "Own presets",

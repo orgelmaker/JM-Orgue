@@ -12,12 +12,14 @@
   import { open as openDialog } from '@tauri-apps/plugin-dialog';
   import { t } from '../../lib/i18n.js';
   import { zoekPresets, presetsPerMerk, presetNaarBanden, presetSamenvatting, presetBron } from '../../lib/eqPresets.js';
+  import { zoekLuidsprekers, luidsprekersPerMerk, luidsprekerBron } from '../../lib/eqLuidsprekers.js';
   import { herkenEnParse } from '../../lib/eqImport.js';
 
   export let naam = null;          // huidige presetnaam (of null)
   export let gewijzigd = false;    // banden wijken af van de preset
   export let algemeen = [];        // [{ id, label, banden, preamp }] — niet-gemeten profielen
   export let eigen = [];           // [{ id, naam, banden, preamp }] — eigen presets (0.7.80)
+  export let soort = 'headphones'; // 'headphones' = AutoEq-hoofdtelefoons; 'speakers' = spinorama-luidsprekers (0.7.81)
 
   const dispatch = createEventDispatcher();
   let open = false;
@@ -29,8 +31,17 @@
   let naamVeld;
   let teVerwijderen = null;        // id waarvoor "Zeker?" staat
 
-  $: resultaten = zoektekst.trim().length >= 2 ? zoekPresets(zoektekst, 60) : null;
-  const merken = presetsPerMerk();
+  $: luidsprekers = soort === 'speakers';
+  $: resultaten = zoektekst.trim().length >= 2 ? (luidsprekers ? zoekLuidsprekers(zoektekst, 60) : zoekPresets(zoektekst, 60)) : null;
+  const merkenHoofdtelefoon = presetsPerMerk();
+  const merkenLuidsprekers = luidsprekersPerMerk();
+  $: merken = luidsprekers ? merkenLuidsprekers : merkenHoofdtelefoon;
+  // Een luidsprekerpreset wordt niet uit de bundel gelezen maar door de
+  // eigenaar opgehaald (fetch_speaker_eq) en geparseerd.
+  function kiesGemetenOfLuidspreker(p) {
+    if (luidsprekers) { dispatch('fetchspeaker', { id: p.id, naam: p.model, pad: p.pad }); sluit(); }
+    else kiesGemeten(p);
+  }
 
   async function toggle() {
     open = !open;
@@ -123,8 +134,8 @@
           <div class="settings-hint">{$t('eq.preset_none_found')}</div>
         {:else}
           {#each resultaten as p (p.id)}
-            <button class="eq-preset-regel" on:click={() => kiesGemeten(p)}>
-              <span>{p.model}</span><span class="eq-preset-info">{presetSamenvatting(p)}</span>
+            <button class="eq-preset-regel" on:click={() => kiesGemetenOfLuidspreker(p)}>
+              <span>{p.model}</span><span class="eq-preset-info">{luidsprekers ? '' : presetSamenvatting(p)}</span>
             </button>
           {/each}
         {/if}
@@ -160,21 +171,25 @@
             </button>
           {/each}
         {/if}
-        <div class="eq-preset-kop">{$t('eq.preset_measured')}</div>
+        <div class="eq-preset-kop">{luidsprekers ? $t('eq.preset_measured_speakers') : $t('eq.preset_measured')}</div>
         <div class="settings-hint" style="margin:0 0 0.3rem;">{$t('eq.preset_refine')}</div>
         {#each merken as m (m.merk)}
           <details>
             <summary style="cursor:pointer; padding:0.15rem 0.2rem;">{m.merk} <span class="eq-preset-info">({m.presets.length})</span></summary>
             {#each m.presets as p (p.id)}
-              <button class="eq-preset-regel" style="padding-left:1.2rem;" on:click={() => kiesGemeten(p)}>
-                <span>{p.model}</span><span class="eq-preset-info">{presetSamenvatting(p)}</span>
+              <button class="eq-preset-regel" style="padding-left:1.2rem;" on:click={() => kiesGemetenOfLuidspreker(p)}>
+                <span>{p.model}</span><span class="eq-preset-info">{luidsprekers ? '' : presetSamenvatting(p)}</span>
               </button>
             {/each}
           </details>
         {/each}
       {/if}
       <div class="settings-hint" style="margin-top:0.5rem; border-top:1px solid var(--accent-soft-2); padding-top:0.35rem;">
-        {$t('eq.preset_credit')}{presetBron.gegenereerd ? ` (${presetBron.gegenereerd})` : ''}
+        {#if luidsprekers}
+          {$t('eq.preset_credit_speakers')}{luidsprekerBron.gegenereerd ? ` (${luidsprekerBron.gegenereerd})` : ''}
+        {:else}
+          {$t('eq.preset_credit')}{presetBron.gegenereerd ? ` (${presetBron.gegenereerd})` : ''}
+        {/if}
       </div>
     </div>
   {/if}

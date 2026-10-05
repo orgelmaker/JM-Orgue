@@ -596,6 +596,7 @@
   "about": {
     "feedback_page_failed": "Impossible d'ouvrir la page de retour : {error}",
     "eq_presets_license": "Préréglages casque : AutoEq (licence MIT, © 2018–2022 Jaakko Pasanen), mesures par oratory1990.",
+    "eq_speakers_license": "Catalogue d'enceintes : spinorama.org (Pierre Aubert, GPL-3) ; la correction par modèle est récupérée au choix, pas incluse.",
     "title": "À propos & retours",
     "version": "version {version}",
     "running_from": "Cette copie s’exécute depuis :",
@@ -852,6 +853,11 @@
   "eq": {
     "profile": "Profil d'écoute",
     "profile_speakers": "Enceintes",
+    "preset_measured_speakers": "Enceintes, mesurées (récupérées sur spinorama.org)",
+    "fetching": "Récupération depuis spinorama.org…",
+    "fetched": "Récupéré depuis spinorama.org : {name} ({n} bandes)",
+    "fetch_failed": "Échec de la récupération : {error}",
+    "preset_credit_speakers": "Les préréglages d'enceintes sont récupérés par modèle sur spinorama.org (projet de Pierre Aubert, GPL-3 ; mesures d'ASR, Erin's Audio Corner, fabricants et autres). Un tel préréglage corrige l'enceinte, pas votre pièce : sous 300 Hz environ, c'est la pièce qui domine.",
     "strength": "Intensité",
     "strength_title": "Met toutes les bandes à l'échelle de 0 à 100 % ; le préréglage lui-même est conservé",
     "preset_own": "Préréglages personnels",

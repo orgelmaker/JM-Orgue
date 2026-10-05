@@ -27,3 +27,16 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+## Luidsprekercatalogus: spinorama
+
+De lijst met luidsprekernamen in `ui/src/assets/luidsprekers-catalogus.json`
+komt uit het spinorama-project van Pierre Aubert (https://github.com/pierreaubert/spinorama,
+https://www.spinorama.org), code onder GPL-3. De parametrische correctie per
+model (`datas/eq/<model>/iir-autoeq.txt`) wordt **niet** met JM-Orgue
+meegeleverd: de app haalt dat ene bestand op het moment van kiezen op van de in
+de catalogus vastgepinde commit, zoals een gebruiker het ook van de site zou
+downloaden. De onderliggende metingen komen van verschillende bronnen (Audio
+Science Review, Erin's Audio Corner, fabrikanten en anderen); per model staat
+de bron op spinorama.org. Zo'n preset corrigeert de luidspreker zelf, niet de
+kamer.

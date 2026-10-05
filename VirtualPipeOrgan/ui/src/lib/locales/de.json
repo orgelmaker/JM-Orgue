@@ -596,6 +596,7 @@
   "about": {
     "feedback_page_failed": "Feedback-Seite kann nicht geöffnet werden: {error}",
     "eq_presets_license": "Kopfhörer-Presets: AutoEq (MIT-Lizenz, © 2018–2022 Jaakko Pasanen), Messungen von oratory1990.",
+    "eq_speakers_license": "Lautsprecherkatalog: spinorama.org (Pierre Aubert, GPL-3); die Korrektur je Modell wird beim Auswählen geladen, nicht mitgeliefert.",
     "title": "Über & Feedback",
     "version": "Version {version}",
     "running_from": "Diese Kopie läuft aus:",
@@ -852,6 +853,11 @@
   "eq": {
     "profile": "Hörprofil",
     "profile_speakers": "Lautsprecher",
+    "preset_measured_speakers": "Lautsprecher, gemessen (von spinorama.org geladen)",
+    "fetching": "Laden von spinorama.org…",
+    "fetched": "Von spinorama.org geladen: {name} ({n} Bänder)",
+    "fetch_failed": "Laden fehlgeschlagen: {error}",
+    "preset_credit_speakers": "Lautsprecher-Presets werden je Modell von spinorama.org geladen (Projekt von Pierre Aubert, GPL-3; Messungen von ASR, Erin's Audio Corner, Herstellern und anderen). Ein solches Preset korrigiert den Lautsprecher selbst, nicht Ihren Raum: unter etwa 300 Hz bestimmt der Raum.",
     "strength": "Stärke",
     "strength_title": "Skaliert alle Bänder von 0 bis 100 %; das Preset selbst bleibt erhalten",
     "preset_own": "Eigene Presets",

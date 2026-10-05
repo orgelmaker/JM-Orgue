@@ -9,7 +9,8 @@
   import EqBanden from './eq/EqBanden.svelte';
   import EqPresetKiezer from './eq/EqPresetKiezer.svelte';
   import { presetBijId, presetNaarBanden } from '../lib/eqPresets.js';
-  import { exportParametricEqTxt, exportEigenJson } from '../lib/eqImport.js';
+  import { exportParametricEqTxt, exportEigenJson, parseParametricEqTxt } from '../lib/eqImport.js';
+  import { luidsprekerBron } from '../lib/eqLuidsprekers.js';
   import { autoPreampDb } from '../lib/eqCurve.js';
   import { loadPanelState, savePanelState } from '../lib/panelState.js';
   import { pasVensterstandToe } from '../lib/vensterStand.js';
@@ -1346,6 +1347,30 @@
       // Was dit de actieve preset: label en bewaarde id wissen (banden blijven).
       if (outEq?.preset_id === id) { outEq = { ...outEq, preset_id: null, preset_naam: null }; slaOutEqOp(); }
     } catch (e) { outEqMelding = String(e); }
+  }
+  // Luidsprekerpreset (0.7.81): naam uit de catalogus → tekst ophalen → parsen → toepassen.
+  async function haalLuidsprekerPresetOp(e) {
+    const d = e.detail;
+    if (!outEq || !d?.pad) return;
+    // Soort + audioprofiel op het moment van klikken: wisselt dat tijdens het
+    // ophalen (tot 15 s), dan niet op het verkeerde profiel toepassen.
+    const sleutel = outEqSleutel;
+    outEqMelding = tx('eq.fetching');
+    try {
+      const tekst = await invoke('fetch_speaker_eq', { pad: d.pad, commit: luidsprekerBron.commit });
+      if (outEqSleutel !== sleutel) return;
+      const r = parseParametricEqTxt(tekst);
+      pasOutEqPresetToe({ detail: {
+        id: d.id, naam: d.naam, banden: r.banden, preamp: r.preamp, bron: 'spinorama',
+        melding: tx('eq.fetched').replace('{name}', d.naam).replace('{n}', r.banden.length),
+      } });
+    } catch (err) {
+      if (outEqSleutel !== sleutel) return;
+      const code = err instanceof Error ? err.message : String(err);
+      const vertaalSleutel = `eq.import_err_${code}`;
+      const vertaald = tx(vertaalSleutel);
+      outEqMelding = tx('eq.fetch_failed').replace('{error}', vertaald === vertaalSleutel ? code : vertaald);
+    }
   }
   async function exporteerOutEq() {
     if (!outEq) return;
@@ -7170,8 +7195,8 @@
                         {$t('midi.learn_short').replace('{count}', globalMidiBindings[ACTION_OUTPUT_EQ] || 0).replace('{max}', 4)}
                       {/if}
                     </button>
-                    <EqPresetKiezer naam={outEq.preset_naam} gewijzigd={outEqGewijzigd} algemeen={eqAlgemeneProfielen} eigen={eigenVoorKiezer}
-                      on:apply={pasOutEqPresetToe} on:fout={(e) => (outEqMelding = e.detail)}
+                    <EqPresetKiezer naam={outEq.preset_naam} gewijzigd={outEqGewijzigd} algemeen={eqAlgemeneProfielen} eigen={eigenVoorKiezer} soort={outEqKind}
+                      on:apply={pasOutEqPresetToe} on:fout={(e) => (outEqMelding = e.detail)} on:fetchspeaker={haalLuidsprekerPresetOp}
                       on:saveown={(e) => bewaarEigenPreset(e.detail)} on:deleteown={(e) => verwijderEigenPreset(e.detail)} on:export={exporteerOutEq} />
                   {/if}
                 </div>
@@ -7739,6 +7764,7 @@
                 JM-Orgue {appVersion ? $t('about.version').replace('{version}', appVersion) : ''} — {$t('about.copyright')}
               </p>
               <p class="settings-hint" style="margin: 0 0 0.5rem;">{$t('about.eq_presets_license')}</p>
+              <p class="settings-hint" style="margin: 0 0 0.5rem;">{$t('about.eq_speakers_license')}</p>
               {#if installatieInfo}
                 <!-- Wélke kopie draait hier? Een update schrijft altijd naar de
                      installatiemap; wijst je snelkoppeling naar een andere kopie,

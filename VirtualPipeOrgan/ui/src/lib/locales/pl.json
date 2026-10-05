@@ -596,6 +596,7 @@
   "about": {
     "feedback_page_failed": "Nie można otworzyć strony opinii: {error}",
     "eq_presets_license": "Presety słuchawkowe: AutoEq (licencja MIT, © 2018–2022 Jaakko Pasanen), pomiary oratory1990.",
+    "eq_speakers_license": "Katalog głośników: spinorama.org (Pierre Aubert, GPL-3); korekcja dla modelu jest pobierana przy wyborze, nie dołączona.",
     "title": "O programie i opinie",
     "version": "wersja {version}",
     "running_from": "Ta kopia działa z:",
@@ -852,6 +853,11 @@
   "eq": {
     "profile": "Profil odsłuchu",
     "profile_speakers": "Głośniki",
+    "preset_measured_speakers": "Głośniki, zmierzone (pobierane ze spinorama.org)",
+    "fetching": "Pobieranie ze spinorama.org…",
+    "fetched": "Pobrano ze spinorama.org: {name} ({n} pasm)",
+    "fetch_failed": "Pobieranie nie powiodło się: {error}",
+    "preset_credit_speakers": "Presety głośników są pobierane dla każdego modelu ze spinorama.org (projekt Pierre'a Auberta, GPL-3; pomiary ASR, Erin's Audio Corner, producentów i innych). Taki preset koryguje głośnik, nie pokój: poniżej około 300 Hz decyduje pokój.",
     "strength": "Siła",
     "strength_title": "Skaluje wszystkie pasma od 0 do 100 %; sam preset zostaje zachowany",
     "preset_own": "Własne presety",

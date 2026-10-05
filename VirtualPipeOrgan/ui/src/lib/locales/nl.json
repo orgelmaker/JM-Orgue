@@ -596,6 +596,7 @@
   "about": {
     "feedback_page_failed": "Kan de feedbackpagina niet openen: {error}",
     "eq_presets_license": "Hoofdtelefoonpresets: AutoEq (MIT-licentie, © 2018–2022 Jaakko Pasanen), metingen door oratory1990.",
+    "eq_speakers_license": "Luidsprekercatalogus: spinorama.org (Pierre Aubert, GPL-3); de correctie per model wordt bij het kiezen opgehaald, niet meegeleverd.",
     "title": "Over & feedback",
     "version": "versie {version}",
     "running_from": "Deze kopie draait vanaf:",
@@ -852,6 +853,11 @@
   "eq": {
     "profile": "Luisterprofiel",
     "profile_speakers": "Luidsprekers",
+    "preset_measured_speakers": "Luidsprekers, gemeten (opgehaald van spinorama.org)",
+    "fetching": "Ophalen van spinorama.org…",
+    "fetched": "Opgehaald van spinorama.org: {name} ({n} banden)",
+    "fetch_failed": "Ophalen mislukt: {error}",
+    "preset_credit_speakers": "Luidsprekerpresets worden per model opgehaald van spinorama.org (project van Pierre Aubert, GPL-3; metingen van ASR, Erin's Audio Corner, fabrikanten en anderen). Zo'n preset corrigeert de luidspreker zelf, niet uw kamer: het laag onder zo'n 300 Hz bepaalt de kamer.",
     "strength": "Sterkte",
     "strength_title": "Schaalt alle banden van 0 tot 100 %; de preset zelf blijft bewaard",
     "preset_own": "Eigen presets",

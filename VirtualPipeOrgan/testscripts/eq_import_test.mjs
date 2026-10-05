@@ -109,6 +109,23 @@ let onb = false;
 try { herkenEnParse('x.dat', new TextEncoder().encode('zomaar tekst')); } catch (e) { onb = e.message === 'onbekend_formaat'; }
 check('onbekend → onbekend_formaat', onb);
 
+// Spinorama-formaat (0.7.81): kopregels, dubbele spaties, plusteken in de gain.
+const SPIN = `EQ for Adam A7V computed from Misc data
+Preference Score 4.55 with EQ 5.77
+Generated from http://github.com/pierreaubert/spinorama/generate_peqs.py v0.26
+Dated: 2024-09-14-16:59:25
+
+Preamp: -2.6 dB
+
+Filter  1: ON PK Fc    44 Hz Gain +2.98 dB Q 2.89
+Filter  2: ON PK Fc   102 Hz Gain -1.13 dB Q 0.76
+Filter  6: ON PK Fc  7308 Hz Gain -2.12 dB Q 0.46
+`;
+const sp = parseParametricEqTxt(SPIN);
+check('spinorama: 3 banden, preamp -2,6, kopregels genegeerd', sp.banden.length === 3 && sp.preamp === -2.6 && sp.overgeslagen === 0, `${sp.banden.length} ${sp.preamp} ${sp.overgeslagen}`);
+check('spinorama: +2.98 dB gelezen als positieve gain, Q 2.89', sp.banden[0].freq === 44 && Math.abs(sp.banden[0].gain_db - 2.98) < 1e-9 && Math.abs(sp.banden[0].q - 2.89) < 1e-9, JSON.stringify(sp.banden[0]));
+check('spinorama: negatieve gain en Q < 1', Math.abs(sp.banden[2].gain_db + 2.12) < 1e-9 && Math.abs(sp.banden[2].q - 0.46) < 1e-9);
+
 // Exporteren (0.7.80): rondreis tekst → banden → tekst → banden is gelijk.
 const uit = exportParametricEqTxt(r.banden, r.preamp);
 check('export txt: preamp-regel en 10 filters', uit.tekst.startsWith('Preamp: -6.2 dB\n') && (uit.tekst.match(/^Filter \d+: ON/gm) || []).length === 10 && uit.overgeslagen === 0);

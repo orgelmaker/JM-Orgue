@@ -5740,6 +5740,43 @@ pub fn delete_own_eq_preset(state: State<AppState>, id: String) -> Result<Vec<Ow
     Ok(presets)
 }
 
+/// Luidsprekerpreset (0.7.81) ophalen van het spinorama-project, vastgepind op
+/// de commit uit de gebundelde catalogus (ui/src/assets/luidsprekers-catalogus.json).
+/// Alleen dat ene bestand; plafond 64 kB; time-out 15 s. De tekst (Equalizer
+/// APO-formaat) gaat naar de parser in de frontend. De correctie wordt dus niet
+/// door JM-Orgue verspreid; de gebruiker haalt hem zelf op, net als via de site.
+#[tauri::command]
+pub async fn fetch_speaker_eq(pad: String, commit: String) -> Result<String, String> {
+    if commit.len() != 40 || !commit.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err("Ongeldige commit".to_string());
+    }
+    if pad.is_empty() || pad.len() > 120 || pad.contains("..") || pad.contains('/') || pad.contains('\\')
+        || pad.chars().any(|c| c.is_control()) {
+        return Err("Ongeldig pad".to_string());
+    }
+    let pad_enc: String = pad.bytes().map(|b| match b {
+        b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' => (b as char).to_string(),
+        _ => format!("%{:02X}", b),
+    }).collect();
+    let url = format!("https://raw.githubusercontent.com/pierreaubert/spinorama/{}/datas/eq/{}/iir-autoeq.txt", commit, pad_enc);
+    // Netwerk buiten de hoofdthread (zelfde patroon als download_sampleset):
+    // een hangende verbinding mag het venster niet tot 15 s bevriezen. De
+    // foutteksten zijn kaal (zonder "Ophalen mislukt:"), de UI zet het
+    // vertaalde voorvoegsel ervoor.
+    tokio::task::spawn_blocking(move || -> Result<String, String> {
+        use std::io::Read as _;
+        let resp = ureq::get(&url).timeout(std::time::Duration::from_secs(15)).call()
+            .map_err(|e| e.to_string())?;
+        let mut tekst = String::new();
+        resp.into_reader().take(64 * 1024).read_to_string(&mut tekst).map_err(|e| e.to_string())?;
+        if !tekst.contains("Filter") {
+            return Err("geen_filters".to_string());
+        }
+        info!("Luidsprekerpreset opgehaald: {} ({} tekens)", pad, tekst.len());
+        Ok(tekst)
+    }).await.map_err(|e| format!("afgebroken: {}", e))?
+}
+
 #[tauri::command]
 pub fn rename_own_eq_preset(state: State<AppState>, id: String, naam: String) -> Result<Vec<OwnEqPreset>, String> {
     let naam = naam.trim().to_string();

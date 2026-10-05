@@ -596,6 +596,7 @@
   "about": {
     "feedback_page_failed": "No se puede abrir la página de comentarios: {error}",
     "eq_presets_license": "Preajustes de auriculares: AutoEq (licencia MIT, © 2018–2022 Jaakko Pasanen), mediciones de oratory1990.",
+    "eq_speakers_license": "Catálogo de altavoces: spinorama.org (Pierre Aubert, GPL-3); la corrección por modelo se obtiene al elegir, no se incluye.",
     "title": "Acerca de y comentarios",
     "version": "versión {version}",
     "running_from": "Esta copia se ejecuta desde:",
@@ -852,6 +853,11 @@
   "eq": {
     "profile": "Perfil de escucha",
     "profile_speakers": "Altavoces",
+    "preset_measured_speakers": "Altavoces, medidos (obtenidos de spinorama.org)",
+    "fetching": "Obteniendo de spinorama.org…",
+    "fetched": "Obtenido de spinorama.org: {name} ({n} bandas)",
+    "fetch_failed": "Error al obtener: {error}",
+    "preset_credit_speakers": "Los preajustes de altavoces se obtienen por modelo de spinorama.org (proyecto de Pierre Aubert, GPL-3; mediciones de ASR, Erin's Audio Corner, fabricantes y otros). Un preajuste así corrige el altavoz, no su sala: por debajo de unos 300 Hz manda la sala.",
     "strength": "Intensidad",
     "strength_title": "Escala todas las bandas de 0 a 100 %; el preajuste en sí se conserva",
     "preset_own": "Preajustes propios",
