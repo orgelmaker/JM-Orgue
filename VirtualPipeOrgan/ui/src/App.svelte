@@ -1170,6 +1170,9 @@
         channels: s.channels,
         bufferFrames: s.buffer_frames,
         midiArchiving: s.midi_archiving,
+        // EQ-badge (0.7.78): uitgangscorrectie van het actieve profiel.
+        outputEqEnabled: !!s.output_eq_enabled,
+        outputEqName: s.output_eq_name ?? null,
         audioReady: s.audio_ready,
         renderFrames: s.render_frames,
         backendReloads: s.backend_reloads

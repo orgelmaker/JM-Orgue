@@ -642,6 +642,7 @@
     "crescendo_toggle": "General crescendo on/off",
     "shutdown": "Shut down computer",
     "audio_profile": "Speakers ↔ headphones",
+    "output_eq_toggle": "Headphone/speaker correction on/off",
     "learn_title": "Learn console buttons",
     "learn_desc": "Learn fixed console buttons (pistons): general cancel, SET, preset steps, memory levels, shut down computer, etc. The number buttons 0–9 are learned on the combination bar itself (right-click or hold for 3 s).",
     "hide_list": "Hide list",
@@ -851,6 +852,9 @@
   "eq": {
     "profile": "Listening profile",
     "profile_speakers": "Speakers",
+    "output_learn_title": "MIDI learn: correction on/off ({n}/4)",
+    "badge_title": "Correction active: {name}",
+    "badge_own": "custom setting",
     "output_title": "Correction for headphones or speakers",
     "output_hint": "Belongs to the output, not to the organ: applies to every organ and follows the output profile (Speakers / Headphones).",
     "output_edit": "Set up for",

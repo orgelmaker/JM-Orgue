@@ -642,6 +642,7 @@
     "crescendo_toggle": "Crescendo général marche/arrêt",
     "shutdown": "Éteindre l'ordinateur",
     "audio_profile": "Haut-parleurs ↔ casque",
+    "output_eq_toggle": "Correction casque/enceintes on/off",
     "learn_title": "Apprendre les boutons de console",
     "learn_desc": "Apprenez les boutons fixes de la console (pistons) : annulateur général, SET, pas de combinaison, niveaux de mémoire, arrêt de l'ordinateur, etc. Les boutons numériques 0–9 s'apprennent sur la barre du combinateur elle-même (clic droit ou maintenir 3 s).",
     "hide_list": "Masquer la liste",
@@ -851,6 +852,9 @@
   "eq": {
     "profile": "Profil d'écoute",
     "profile_speakers": "Enceintes",
+    "output_learn_title": "Apprentissage MIDI : correction on/off ({n}/4)",
+    "badge_title": "Correction active : {name}",
+    "badge_own": "réglage personnel",
     "output_title": "Correction pour casque ou enceintes",
     "output_hint": "Appartient à la sortie, pas à l'orgue : s'applique à chaque orgue et suit le profil de sortie (Enceintes / Casque).",
     "output_edit": "Régler pour",

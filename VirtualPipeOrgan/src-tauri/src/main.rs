@@ -535,6 +535,7 @@ fn main() {
             commands::set_output_eq,
             commands::set_active_output_profile,
             commands::read_eq_file,
+            commands::toggle_output_eq,
             commands::persist_reverb_config,
             commands::set_algorithmic_reverb,
             commands::set_reverb_type,

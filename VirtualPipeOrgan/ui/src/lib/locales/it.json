@@ -642,6 +642,7 @@
     "crescendo_toggle": "Crescendo generale attivo/disattivo",
     "shutdown": "Spegni il computer",
     "audio_profile": "Altoparlanti ↔ cuffie",
+    "output_eq_toggle": "Correzione cuffie/altoparlanti on/off",
     "learn_title": "Apprendi i pulsanti della consolle",
     "learn_desc": "Apprendi i pulsanti fissi della consolle (pistoncini): annullatore, SET, passi di combinazione, livelli di memoria, spegnimento del computer, ecc. I pulsanti numerici 0–9 si apprendono sulla barra delle combinazioni stessa (tasto destro o tenendo premuto 3 s).",
     "hide_list": "Nascondi elenco",
@@ -851,6 +852,9 @@
   "eq": {
     "profile": "Profilo di ascolto",
     "profile_speakers": "Altoparlanti",
+    "output_learn_title": "Apprendi MIDI: correzione on/off ({n}/4)",
+    "badge_title": "Correzione attiva: {name}",
+    "badge_own": "impostazione propria",
     "output_title": "Correzione per cuffie o altoparlanti",
     "output_hint": "Appartiene all'uscita, non all'organo: vale per ogni organo e segue il profilo di uscita (Altoparlanti / Cuffie).",
     "output_edit": "Imposta per",

@@ -470,6 +470,7 @@
   const ACTION_EQ_ENABLE = 40;
   const ACTION_CRESCENDO_ENABLE = 41;
   const ACTION_AUDIO_PROFILE = 43; // wissel speakers ↔ hoofdtelefoon
+  const ACTION_OUTPUT_EQ = 44;     // uitgangscorrectie (hoofdtelefoon/luidsprekers) aan/uit (0.7.78)
   let tremLfoMidiBindings = {}; // { actionCode: count }
   let globalMidiBindings = {};  // { actionCode: count } voor algemene toggles
   let globalLearningAction = null;
@@ -490,6 +491,10 @@
     } else if (actionCode === ACTION_AUDIO_PROFILE) {
       // Snelle wissel speakers ↔ hoofdtelefoon via MIDI (bv. een piston).
       dispatch('switchAudioProfile', null);
+    } else if (actionCode === ACTION_OUTPUT_EQ) {
+      // Uitgangscorrectie van het actieve profiel aan/uit; Rust slaat op en
+      // past toe, de badge volgt via de status-poll.
+      invoke('toggle_output_eq').then(async () => { await laadOutEq(); meldOutEqGewijzigd(); }).catch((e) => console.warn('toggle_output_eq:', e));
     } else if (actionCode === 42) {
       // Computer afsluiten — bubbel naar App.svelte zodat die bevestiging + opslag regelt
       dispatch('shutdownRequest');
@@ -520,6 +525,7 @@
     { code: 41, name: $t('pistons.crescendo_toggle') },
     { code: 42, name: $t('pistons.shutdown') },
     { code: 43, name: $t('pistons.audio_profile') },
+    { code: 44, name: $t('pistons.output_eq_toggle') },
   ];
   let showActionLearnList = false;
   $: actionBound = (() => {
@@ -1298,6 +1304,7 @@
       // Auto-waarde); de banden blijven de lokale lijst, anders zet een
       // oudere respons een schuif even terug.
       outEq = d;
+      meldOutEqGewijzigd();
     } catch (e) { console.error('set_output_eq:', e); }
   }
   function pasOutEqPresetToe(e) {
@@ -2947,6 +2954,17 @@
   let remotePortInput = 8766;
   let remoteBusy = false;
   let unlistenRemoteVol = null;
+  // Uitgangscorrectie gewijzigd in een ander venster of via MIDI (0.7.78):
+  // het blok hier opnieuw laden, anders schrijft een latere schuifbeweging
+  // een verouderd 'enabled' terug (reviewbevinding).
+  let unlistenOutEq = null;
+  let eigenVensterLabel = null;
+  async function meldOutEqGewijzigd() {
+    try {
+      const { emit } = await import('@tauri-apps/api/event');
+      await emit('jm-orgue:output-eq-changed', { bron: eigenVensterLabel, kind: outEqKind });
+    } catch (e) {}
+  }
   // De backend frist de kaartnamen één keer per proces op de achtergrond op en
   // meldt dat met 'jm-orgue:library-updated' (get_organ_library wacht daar niet
   // meer op). Promise<UnlistenFn|null>, één keer geregistreerd.
@@ -3063,6 +3081,13 @@
           if (p.bron === eigenLabel) return;
           if (typeof p.db === 'number' && p.db !== volume) volume = p.db;
         });
+        eigenVensterLabel = eigenLabel;
+        unlistenOutEq = await listen('jm-orgue:output-eq-changed', (e) => {
+          const p = e.payload || {};
+          if (p.bron === eigenLabel) return;
+          if (outEqSaveTimer) return; // eigen wijziging nog onderweg
+          laadOutEq();
+        });
       } catch (e) {}
     })();
     if (!secondary) {
@@ -3072,6 +3097,7 @@
 
   onDestroy(() => {
     window.removeEventListener('click', handleGlobalClick);
+    if (unlistenOutEq) { unlistenOutEq(); unlistenOutEq = null; }
     if (swellPollInterval) clearInterval(swellPollInterval);
     if (recorderPoll) clearInterval(recorderPoll);
     if (midiRecPoll) clearInterval(midiRecPoll);
@@ -4199,6 +4225,7 @@
       14: _t('bindings.setzer_minus_10'), 15: _t('bindings.setzer_plus_10'),
       40: _t('pistons.eq_toggle'), 41: _t('pistons.crescendo_toggle'), 42: _t('pistons.shutdown'),
       43: _t('pistons.audio_profile'),
+      44: _t('pistons.output_eq_toggle'),
     };
     if (vast[code] != null) return vast[code];
     if (code <= 9) return _t('bindings.setzer_button').replace('{n}', String(code));
@@ -7030,6 +7057,20 @@
                       <input type="checkbox" checked={outEq.enabled} on:change={(e) => { outEq.enabled = e.target.checked; slaOutEqOp(); }} />
                       <span class="swell-toggle-label">{$t('settings.eq_enabled')}</span>
                     </label>
+                    <button
+                      class="btn btn-ghost btn-sm"
+                      class:learning={globalLearningAction === ACTION_OUTPUT_EQ}
+                      on:click={() => learnGlobalAction(ACTION_OUTPUT_EQ)}
+                      disabled={globalLearningAction !== null && globalLearningAction !== ACTION_OUTPUT_EQ}
+                      title={$t('eq.output_learn_title').replace('{n}', globalMidiBindings[ACTION_OUTPUT_EQ] || 0)}
+                      style="font-size:0.7rem; padding:0.2rem 0.5rem; border:1px solid {globalMidiBindings[ACTION_OUTPUT_EQ] > 0 ? 'var(--midi-indicator)' : 'var(--accent-soft-2)'};"
+                    >
+                      {#if globalLearningAction === ACTION_OUTPUT_EQ}
+                        <span class="learning-indicator"></span>{$t('midi.learning_wait')}
+                      {:else}
+                        {$t('midi.learn_short').replace('{count}', globalMidiBindings[ACTION_OUTPUT_EQ] || 0).replace('{max}', 4)}
+                      {/if}
+                    </button>
                     <EqPresetKiezer naam={outEq.preset_naam} gewijzigd={outEqGewijzigd} algemeen={eqAlgemeneProfielen}
                       on:apply={pasOutEqPresetToe} on:fout={(e) => (outEqMelding = e.detail)} />
                   {/if}

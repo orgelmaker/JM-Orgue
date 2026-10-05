@@ -41,7 +41,8 @@
 //!   POST /crescendo/voorstel?stages=N - droog: voorstel voor de trappen (body: opties, optioneel)
 //!   GET  /swell                   - per divisie {division,index,position,binding,min_db,cutoff}
 //!   POST /swell/binding           - body {"division","channel","cc","min"?,"max"?,"invert"?} | {"division","clear":true}
-//!   POST /audio/test_signal       - ?channel=<n>&kind=0|1&level_db=<dB>; zonder channel = uit
+//!   POST /audio/test_signal       - ?channel=<n>&kind=0|1|2&level_db=<dB>[&freq=<Hz>]; zonder channel = uit;
+//!                                   soort 2 = sinus op `freq` DÓÓR de EQ-keten (0.7.78), voor eq_sweep.py
 //!   POST /audio/mix_chunks        - ?n=1..8: in hoeveel stukken de mengloop zijn stemmen verdeelt
 //!   POST /tremulant?division=<naam>&active=0|1 - tremulant van een divisie live
 //!        aan/uit (zelfde kern als het Tauri-commando set_tremulant) →
@@ -531,6 +532,8 @@ fn route_test_only(
         (tiny_http::Method::Get, "/settings/output_eq") => handle_get_output_eq(state, query),
         (tiny_http::Method::Post, "/settings/output_eq") => handle_set_output_eq(state, query, body),
         (tiny_http::Method::Post, "/settings/output_eq/activate") => handle_activate_output_eq(state, query),
+        (tiny_http::Method::Post, "/settings/output_eq/toggle") => crate::commands::toggle_output_eq_inner(state)
+            .map(|d| serde_json::to_value(d).unwrap_or(Value::Null)).map_err(|e| (400u16, e)),
         (tiny_http::Method::Post, "/settings/reverb") => handle_set_reverb(state, query),
         (tiny_http::Method::Post, "/settings/pan") => handle_set_pan(state, query),
         (tiny_http::Method::Post, "/settings/trem") => handle_set_trem(state, query),
@@ -674,6 +677,7 @@ fn handle_status(state: &AppState) -> Value {
     };
     let organ = state.loaded_organ_info.read();
     let drawn = state.drawn_stops.read();
+    let uit_eq_badge = state.output_eq_badge.read().clone();
 
     json!({
         "audio_running": audio.is_some(),
@@ -699,6 +703,7 @@ fn handle_status(state: &AppState) -> Value {
         "drawn_stop_count": drawn.len(),
         "midi_connected": *state.midi_connected.read(),
         "midi_archiving": state.midi_archive.archiving.load(std::sync::atomic::Ordering::Relaxed),
+        "output_eq": { "enabled": uit_eq_badge.0, "name": uit_eq_badge.1 },
         "audio_ready": state.audio_ready.load(std::sync::atomic::Ordering::Relaxed),
         "asio_restart_advice": state.asio_restart_advice.read().as_ref().map(|a| a.device.clone()),
         "backend_reloads": state.backend_reloads.load(std::sync::atomic::Ordering::Relaxed),
@@ -1499,6 +1504,7 @@ fn handle_mix_chunks(query: &str) -> Value {
 fn handle_test_signal(query: &str) -> Value {
     let kind: u8 = parse_query(query, "kind").unwrap_or(0);
     let level: f32 = parse_query(query, "level_db").unwrap_or(-12.0);
+    if let Some(f) = parse_query::<f32>(query, "freq") { crate::audio::set_test_signal_freq(f); }
     match parse_query::<u8>(query, "channel") {
         Some(ch) => {
             crate::audio::set_test_signal(Some(ch), kind, 10f32.powf(level.clamp(-60.0, 0.0) / 20.0));

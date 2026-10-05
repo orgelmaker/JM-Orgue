@@ -5,6 +5,20 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.78] - 2026-10-05
+
+### EQ-badge, MIDI-schakelaar en een bewijs door de keten
+
+De profielknop in de hoofdbalk (Speakers / Hoofdtelefoon) toont nu **EQ**
+zodra de correctie van het actieve profiel aanstaat, met de presetnaam als
+tekst bij de muis; ook op de extra registerschermen. De correctie is als
+consoleknop in te leren (MIDI-knop "correctie aan/uit" in het blok zelf en in
+de lijst met consoleknoppen). Voor het natrekken van de installatie kan een
+sinus op een gekozen frequentie nu dóór de hele keten lopen (beide equalizers
+en de begrenzer), zodat een meting met de niveaumeters bewijst dat de
+correctie werkelijk in het geluidspad zit; het meetscript
+testscripts/eq_sweep.py doet dat automatisch.
+
 ## [0.7.77] - 2026-10-05
 
 ### Hoofdtelefoonpresets en correctie per uitvoerprofiel

@@ -642,6 +642,7 @@
     "crescendo_toggle": "Generaal crescendo aan/uit",
     "shutdown": "Computer afsluiten",
     "audio_profile": "Speakers ↔ hoofdtelefoon",
+    "output_eq_toggle": "Hoofdtelefoon-/luidsprekercorrectie aan/uit",
     "learn_title": "Consoleknoppen inleren",
     "learn_desc": "Leer vaste consoleknoppen (pistons) in: afsteller, SET, preset-stappen, geheugenniveaus, computer afsluiten, enz. De cijferknoppen 0–9 leer je op de setzerbalk zelf (rechtermuisklik of 3 s ingedrukt houden).",
     "hide_list": "Verberg lijst",
@@ -851,6 +852,9 @@
   "eq": {
     "profile": "Luisterprofiel",
     "profile_speakers": "Luidsprekers",
+    "output_learn_title": "MIDI-knop inleren: correctie aan/uit ({n}/4)",
+    "badge_title": "Correctie actief: {name}",
+    "badge_own": "eigen instelling",
     "output_title": "Correctie voor hoofdtelefoon of luidsprekers",
     "output_hint": "Hoort bij de uitgang, niet bij het orgel: geldt voor elk orgel en wisselt mee met het uitvoerprofiel (Speakers / Hoofdtelefoon).",
     "output_edit": "Instellen voor",

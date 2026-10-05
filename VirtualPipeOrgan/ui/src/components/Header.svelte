@@ -112,6 +112,10 @@
           </svg>
         {/if}
         {profileLabel}
+        {#if status?.outputEqEnabled}
+          <!-- EQ-badge (0.7.78): de uitgangscorrectie van dit profiel staat aan. -->
+          <span class="eq-badge" title={$t('eq.badge_title').replace('{name}', status.outputEqName || $t('eq.badge_own'))}>EQ</span>
+        {/if}
       </button>
     {#if status.audioRunning}
       <button class="btn btn-secondary" on:click={() => dispatch('stopAudio')}>

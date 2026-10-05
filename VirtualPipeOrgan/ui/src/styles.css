@@ -787,6 +787,21 @@ input[type="range"]::-webkit-slider-thumb:hover {
   box-shadow: 0 0 0 1px var(--gold-border);
 }
 
+/* EQ-badge op de profielknop (0.7.78): uitgangscorrectie actief */
+.eq-badge {
+  display: inline-block;
+  margin-left: 0.35rem;
+  padding: 0 0.32rem;
+  border-radius: 999px;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  line-height: 1.5;
+  background: var(--primary);
+  color: var(--bg-darkest);
+  vertical-align: middle;
+}
+
 /* EQ: eenheidsknoppen oct/Q (0.7.76) — de gekozen stand is zichtbaar */
 .eq-unit-switch .btn.active {
   border-color: var(--gold-border);

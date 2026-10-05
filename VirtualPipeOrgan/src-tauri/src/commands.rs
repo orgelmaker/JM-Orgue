@@ -252,6 +252,10 @@ pub struct StatusDto {
     pub stereo_samples: bool,
     /// Automatisch MIDI-archief legt op dit moment een take vast.
     pub midi_archiving: bool,
+    /// Uitgangscorrectie (0.7.78): aan voor de actieve profielsoort, en de
+    /// presetnaam — voor de EQ-badge op de profielknop.
+    pub output_eq_enabled: bool,
+    pub output_eq_name: Option<String>,
     /// Audio-uitgang definitief (uitgestelde ASIO-wissel afgerond of niet
     /// nodig); de frontend wacht hierop met het autoladen van het laatste orgel.
     pub audio_ready: bool,
@@ -415,11 +419,13 @@ pub fn get_mix_cores() -> MixCoresDto {
 /// Waarom: wie zes of acht kanalen aansluit weet daarna nog niet welke stekker
 /// in welke kast zit. Dit stuurt geluid naar precies één uitgang.
 #[tauri::command]
-pub fn set_output_test_signal(channel: Option<u8>, kind: Option<u8>, level_db: Option<f32>) -> Result<(), String> {
+pub fn set_output_test_signal(channel: Option<u8>, kind: Option<u8>, level_db: Option<f32>, freq: Option<f32>) -> Result<(), String> {
     match channel {
         Some(ch) => {
             let db = level_db.unwrap_or(-20.0).clamp(-60.0, 0.0);
             let gain = 10f32.powf(db / 20.0);
+            // Soort 2 (0.7.78): sinus op `freq` dóór de EQ-keten.
+            if let Some(f) = freq { crate::audio::set_test_signal_freq(f); }
             crate::audio::set_test_signal(Some(ch), kind.unwrap_or(0), gain);
             info!("Testsignaal AAN op kanaal {} ({}, {:.0} dB)", ch + 1,
                 if kind.unwrap_or(0) == 1 { "sinus 440 Hz" } else { "roze ruis" }, db);
@@ -5511,9 +5517,16 @@ pub(crate) fn eq_uitgang_toepassen(state: &AppState) {
         Some(c) => {
             let specs = eq_saved_to_specs(&c.bands);
             let eff = effectieve_preamp_db(state, &specs, Some(c.preamp_db), c.preamp_auto);
+            // Badge (0.7.78): "aan" = ingeschakeld én er gebeurt iets (een
+            // actieve band of een voorversterking ≠ 0).
+            let actief = c.enabled && (c.bands.iter().any(|b| b.enabled) || eff.abs() > 0.05);
+            *state.output_eq_badge.write() = (actief, if actief { c.preset_naam.clone() } else { None });
             state.send_audio_command(AudioCommand::SetOutputEq { enabled: c.enabled, preamp_db: eff, bands: specs });
         }
-        None => state.send_audio_command(AudioCommand::SetOutputEq { enabled: false, preamp_db: 0.0, bands: Vec::new() }),
+        None => {
+            *state.output_eq_badge.write() = (false, None);
+            state.send_audio_command(AudioCommand::SetOutputEq { enabled: false, preamp_db: 0.0, bands: Vec::new() });
+        }
     }
 }
 
@@ -5593,6 +5606,26 @@ pub fn read_eq_file(path: String) -> Result<Vec<u8>, String> {
         return Err("Bestand groter dan 1 MB: dit is geen EQ-preset".to_string());
     }
     std::fs::read(&path).map_err(|e| format!("{}: {}", path, e))
+}
+
+/// MIDI-actie 44 (0.7.78): de uitgangscorrectie van de actieve profielsoort
+/// aan/uit. Opslaan, toepassen, en de nieuwe stand teruggeven.
+pub(crate) fn toggle_output_eq_inner(state: &AppState) -> Result<OutputEqDto, String> {
+    let mut prefs = crate::state::load_audio_prefs(&state.app_data_dir);
+    let kind = prefs.active_output_profile.clone().ok_or_else(|| "Geen uitvoerprofiel actief".to_string())?;
+    let mut cfg = prefs.output_eq.get(&kind).cloned()
+        .unwrap_or_else(|| crate::state::OutputEqSaved { preamp_auto: true, ..Default::default() });
+    cfg.enabled = !cfg.enabled;
+    prefs.output_eq.insert(kind.clone(), cfg.clone());
+    crate::state::save_audio_prefs(&state.app_data_dir, &prefs);
+    eq_uitgang_toepassen(state);
+    info!("Uitgangscorrectie {} via MIDI: {}", kind, if cfg.enabled { "aan" } else { "uit" });
+    Ok(output_eq_naar_dto(state, &cfg, Some(kind)))
+}
+
+#[tauri::command]
+pub fn toggle_output_eq(state: State<AppState>) -> Result<OutputEqDto, String> {
+    toggle_output_eq_inner(&state)
 }
 
 /// Respons van de huidige orgel-EQ in dB op een rij frequenties, puur uit de
@@ -5758,6 +5791,7 @@ pub fn get_status(state: State<AppState>) -> Result<StatusDto, String> {
         .map(|m| !m.connected_devices().is_empty())
         .unwrap_or(false);
     let peaks = state.peak_meters();
+    let uit_eq_badge = state.output_eq_badge.read().clone();
     // Alles uit ÉÉN read-guard halen en die direct laten vallen. De oude code
     // nam audio_player.read() twee keer binnen dezelfde struct-expressie
     // (audio_running + voice_count): met parking_lot's eerlijke RwLock blokkeert
@@ -5798,6 +5832,8 @@ pub fn get_status(state: State<AppState>) -> Result<StatusDto, String> {
         rt_drops: crate::state::rt_drop_count(),
         stereo_samples: vpo_sampler::stereo_loading(),
         midi_archiving: state.midi_archive.archiving.load(std::sync::atomic::Ordering::Relaxed),
+        output_eq_enabled: uit_eq_badge.0,
+        output_eq_name: uit_eq_badge.1,
         audio_ready: state.audio_ready.load(std::sync::atomic::Ordering::Relaxed),
         asio_restart_advice: state.asio_restart_advice.read().as_ref().map(|a| a.device.clone()),
         backend_reloads: state.backend_reloads.load(std::sync::atomic::Ordering::Relaxed),

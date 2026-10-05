@@ -114,6 +114,8 @@
         channels: s.channels,
         bufferFrames: s.buffer_frames,
         midiArchiving: s.midi_archiving,
+        outputEqEnabled: !!s.output_eq_enabled,
+        outputEqName: s.output_eq_name ?? null,
       };
       // Vangnet voor gemiste events: actief profiel afleiden uit wat er echt
       // speelt (zelfde logica als het hoofdvenster; niet tijdens een wissel).

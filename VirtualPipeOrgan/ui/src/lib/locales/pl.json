@@ -642,6 +642,7 @@
     "crescendo_toggle": "Crescendo generalne wł./wył.",
     "shutdown": "Wyłącz komputer",
     "audio_profile": "Głośniki ↔ słuchawki",
+    "output_eq_toggle": "Korekcja słuchawek/głośników wł./wył.",
     "learn_title": "Nauka przycisków kontuaru",
     "learn_desc": "Naucz stałych przycisków kontuaru (pistonów): kasownik, SET, kroki kombinacji, poziomy pamięci, wyłączenie komputera itd. Przycisków cyfrowych 0–9 uczysz na samym pasku kombinacji (prawy przycisk myszy lub 3 s przytrzymania).",
     "hide_list": "Ukryj listę",
@@ -851,6 +852,9 @@
   "eq": {
     "profile": "Profil odsłuchu",
     "profile_speakers": "Głośniki",
+    "output_learn_title": "Ucz MIDI: korekcja wł./wył. ({n}/4)",
+    "badge_title": "Korekcja aktywna: {name}",
+    "badge_own": "własne ustawienie",
     "output_title": "Korekcja dla słuchawek lub głośników",
     "output_hint": "Należy do wyjścia, nie do organów: obowiązuje dla każdych organów i zmienia się wraz z profilem wyjścia (Głośniki / Słuchawki).",
     "output_edit": "Ustaw dla",

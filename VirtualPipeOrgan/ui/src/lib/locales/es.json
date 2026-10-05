@@ -642,6 +642,7 @@
     "crescendo_toggle": "Crescendo general activado/desactivado",
     "shutdown": "Apagar el ordenador",
     "audio_profile": "Altavoces ↔ auriculares",
+    "output_eq_toggle": "Corrección de auriculares/altavoces on/off",
     "learn_title": "Aprender los botones de la consola",
     "learn_desc": "Aprende los pistones fijos de la consola: anulador general, SET, pasos de combinación, niveles de memoria, apagar el ordenador, etc. Los botones numéricos 0–9 se aprenden en la propia barra de combinaciones (clic derecho o manteniendo pulsado 3 s).",
     "hide_list": "Ocultar lista",
@@ -851,6 +852,9 @@
   "eq": {
     "profile": "Perfil de escucha",
     "profile_speakers": "Altavoces",
+    "output_learn_title": "Aprender MIDI: corrección on/off ({n}/4)",
+    "badge_title": "Corrección activa: {name}",
+    "badge_own": "ajuste propio",
     "output_title": "Corrección para auriculares o altavoces",
     "output_hint": "Pertenece a la salida, no al órgano: vale para todos los órganos y cambia con el perfil de salida (Altavoces / Auriculares).",
     "output_edit": "Ajustar para",

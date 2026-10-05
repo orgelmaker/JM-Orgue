@@ -1386,6 +1386,10 @@ pub struct AppState {
     /// Parametric-EQ-configuratie van het huidige orgel, runtime-spiegel voor per-orgel opslag.
     /// Door de frontend gezet via set_parametric_eq.
     pub eq_settings: Arc<RwLock<Option<EqSettingsSaved>>>,
+    /// Badge in de hoofdbalk (0.7.78): staat de uitgangscorrectie van de
+    /// actieve profielsoort aan, en hoe heet de preset. Gezet door
+    /// commands::eq_uitgang_toepassen (de enige plek die de keten stuurt).
+    pub output_eq_badge: Arc<RwLock<(bool, Option<String>)>>,
     /// Per-divisie DSP-spiegels (per divisienaam) voor per-orgel opslag. Gewist bij orgelwissel
     /// (reset_division_settings) → geen naam-collisie tussen orgels. Door de frontend gezet via
     /// set_division_pan / set_swell_config / set_tremulant_lfo.
@@ -1774,6 +1778,7 @@ impl AppState {
             temperament_settings: Arc::new(RwLock::new(None)),
             reverb_settings: Arc::new(RwLock::new(None)),
             eq_settings: Arc::new(RwLock::new(None)),
+            output_eq_badge: Arc::new(RwLock::new((false, None))),
             division_pans: Arc::new(RwLock::new(std::collections::HashMap::new())),
             division_swell_configs: Arc::new(RwLock::new(std::collections::HashMap::new())),
             division_tremulants: Arc::new(RwLock::new(std::collections::HashMap::new())),

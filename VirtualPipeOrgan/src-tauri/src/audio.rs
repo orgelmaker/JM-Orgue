@@ -479,6 +479,18 @@ static TEST_SIGNAL: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32:
 /// Niveau van het testsignaal als f32-bits (piek, 0..1).
 static TEST_SIGNAL_GAIN: std::sync::atomic::AtomicU32 =
     std::sync::atomic::AtomicU32::new(0);
+/// Frequentie (f32-bits) van de sinus dóór de EQ-keten (soort 2, 0.7.78);
+/// standaard 1 kHz (0x447A0000).
+static TEST_SIGNAL_FREQ: std::sync::atomic::AtomicU32 =
+    std::sync::atomic::AtomicU32::new(0x447A_0000);
+
+pub fn set_test_signal_freq(freq: f32) {
+    TEST_SIGNAL_FREQ.store(freq.clamp(10.0, 20_000.0).to_bits(), Ordering::Relaxed);
+}
+
+pub fn test_signal_freq() -> f32 {
+    f32::from_bits(TEST_SIGNAL_FREQ.load(Ordering::Relaxed))
+}
 
 /// Zet het testsignaal aan op `channel` of uit (`None`). `gain` is een piek
 /// 0..1; de render-lus klemt hem nog een keer.
@@ -486,7 +498,8 @@ pub fn set_test_signal(channel: Option<u8>, kind: u8, gain: f32) {
     match channel {
         Some(ch) => {
             TEST_SIGNAL_GAIN.store(gain.clamp(0.0, 1.0).to_bits(), Ordering::Relaxed);
-            TEST_SIGNAL.store((ch as u32 + 1) | ((kind.min(1) as u32) << 16), Ordering::Relaxed);
+            // Soort 2 (0.7.78) = sinus dóór de EQ-keten, zie de frame-lus.
+            TEST_SIGNAL.store((ch as u32 + 1) | ((kind.min(2) as u32) << 16), Ordering::Relaxed);
         }
         None => TEST_SIGNAL.store(0, Ordering::Relaxed),
     }
@@ -516,6 +529,14 @@ pub(crate) struct Testsignaal {
 impl Testsignaal {
     pub(crate) fn nieuw() -> Self {
         Testsignaal { rng: 0x2545_F491, ..Default::default() }
+    }
+
+    /// Sinus op `freq` Hz (soort 2: opgeteld vóór de EQ-keten, 0.7.78).
+    pub(crate) fn sinus(&mut self, freq: f32, sample_rate: u32) -> f32 {
+        let stap = freq * std::f32::consts::TAU / sample_rate.max(1) as f32;
+        self.fase += stap;
+        if self.fase >= std::f32::consts::TAU { self.fase -= std::f32::consts::TAU; }
+        self.fase.sin()
     }
 
     /// Eén sample. `kind` 0 = roze ruis, 1 = sinus 440 Hz.
@@ -5126,6 +5147,9 @@ fn run_audio_thread(
                 let mut fdn_lock = fdn_reverb_clone.write();
                 let mut conv_lock = reverb_clone.write();
                 let eq_on = *eq_enabled_clone.read();
+                // Testsignaal dóór de EQ (soort 2): één keer per callback lezen.
+                let testsig_door_eq = test_signal().filter(|t| t.1 == 2);
+                let testsig_freq = test_signal_freq();
                 let mut eq_chains = eq_channels_clone.write();
                 let uit_eq_on = *uit_eq_aan_clone.read();
                 let mut uit_eq_ketens = uit_eq_ketens_clone.write();
@@ -5608,6 +5632,16 @@ fn run_audio_thread(
                             }
                         }
 
+                        // Testsignaal DÓÓR de EQ (0.7.78, soort 2): een sinus op één
+                        // kanaal, opgeteld vóór de orgel-EQ. Zo bewijst een meting via
+                        // de piekmeters de hele keten (orgel-EQ, uitgangscorrectie,
+                        // limiter), niet alleen de berekende respons.
+                        if let Some((tch, _, gain)) = testsig_door_eq {
+                            if (tch as usize) < frame.len() {
+                                frame[tch as usize] += testsignaal.sinus(testsig_freq, sample_rate) * gain;
+                            }
+                        }
+
                         // Vrije multi-band EQ: per fysiek uitgangskanaal een eigen keten,
                         // toegepast op de volledige mix (droog + galm) van dat kanaal.
                         if eq_on {
@@ -5711,7 +5745,7 @@ fn run_audio_thread(
             // worden gewoon afgehandeld, zodat aan- en uitzetten geen
             // opgespaarde berichten achterlaat. Tijdens het uitzoeken van
             // luidsprekers speelt er toch niets.
-            if let Some((tch, kind, gain)) = test_signal() {
+            if let Some((tch, kind, gain)) = test_signal().filter(|t| t.1 != 2) {
                 let tch = tch as usize;
                 peak_l = 0.0;
                 peak_r = 0.0;

@@ -642,6 +642,7 @@
     "crescendo_toggle": "Generalcrescendo ein/aus",
     "shutdown": "Computer herunterfahren",
     "audio_profile": "Lautsprecher ↔ Kopfhörer",
+    "output_eq_toggle": "Kopfhörer-/Lautsprecherkorrektur ein/aus",
     "learn_title": "Spieltischtasten lernen",
     "learn_desc": "Lernen Sie feste Spieltischtasten (Pistons) ein: Absteller, SET, Kombinationsschritte, Speicherebenen, Computer herunterfahren usw. Die Zifferntasten 0–9 lernen Sie auf der Setzerleiste selbst (Rechtsklick oder 3 s gedrückt halten).",
     "hide_list": "Liste ausblenden",
@@ -851,6 +852,9 @@
   "eq": {
     "profile": "Hörprofil",
     "profile_speakers": "Lautsprecher",
+    "output_learn_title": "MIDI-Taste lernen: Korrektur ein/aus ({n}/4)",
+    "badge_title": "Korrektur aktiv: {name}",
+    "badge_own": "eigene Einstellung",
     "output_title": "Korrektur für Kopfhörer oder Lautsprecher",
     "output_hint": "Gehört zum Ausgang, nicht zur Orgel: gilt für jede Orgel und wechselt mit dem Ausgabeprofil (Lautsprecher / Kopfhörer).",
     "output_edit": "Einstellen für",
