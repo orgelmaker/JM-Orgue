@@ -5,6 +5,28 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.85] - 2026-10-06
+
+### Nieuw ingedeeld notatievenster
+- De werkbalk van het notatievenster is ingedeeld in een kopbalk (menu
+  **Bestand** met Nieuw, Openen, Recent, Opslaan, Opslaan als, MIDI
+  importeren, Exporteren en Afdrukken; titel, opnemen, afspelen, tempo,
+  ongedaan maken, weergave, zoom en hulp) en vier tabbladen: **Invoer**,
+  **Teksten & tekens**, **Balken & stemmen** en **Afspelen** (Ctrl+1..4).
+- Het invoerpalet staat altijd op het tabblad Invoer: alle notenwaarden van
+  hele tot 32e, punt, rust, herhaal, kruis/mol/herstellingsteken (blijven
+  aan tot u ze uitzet), overbinding en een gum.
+- Een zichtbare, knipperende invoercursor laat zien waar de volgende noot
+  komt; ↑/↓ kiezen de toon (Shift = octaaf), Enter plaatst, Alt+2–7 past de
+  duur van de laatst geplaatste noot aan. De statusregel toont maat, tel,
+  toon en balk van de invoercursor.
+- Divisies en de klavar-hand per balk staan op Balken & stemmen, samen met
+  maatsoort, toonsoort, raster en akkoord-speling; de lagenbalk houdt de
+  armed-bol, naam, volgorde en takes.
+- De lange hint onderaan is vervangen door een hulpvenster (?) met de
+  uitleg en alle sneltoetsen. Cijfertoetsen werken nu op de toetspositie,
+  dus ook op een Duitse of Franse indeling.
+
 ## [0.7.84] - 2026-10-06
 
 ### Partituren opslaan en openen

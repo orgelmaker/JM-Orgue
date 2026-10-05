@@ -16,6 +16,16 @@
   import { OpenSheetMusicDisplay } from 'opensheetmusicdisplay';
   import KlavarSheet from './KlavarSheet.svelte';
   import NewScoreWizard from './NewScoreWizard.svelte';
+  import NotationHeader from './notation/NotationHeader.svelte';
+  import NotationTabs from './notation/NotationTabs.svelte';
+  import InputTab from './notation/InputTab.svelte';
+  import TextsMarksTab from './notation/TextsMarksTab.svelte';
+  import StavesVoicesTab from './notation/StavesVoicesTab.svelte';
+  import PlaybackTab from './notation/PlaybackTab.svelte';
+  import LayerBar from './notation/LayerBar.svelte';
+  import StatusLine from './notation/StatusLine.svelte';
+  import HelpDialog from './notation/HelpDialog.svelte';
+  import ConfirmDialog from './notation/ConfirmDialog.svelte';
   import { MAATSOORTEN, splitsMaatsoort, maatDuurUs } from '../lib/notatieKeuzes.js';
   import { t, tx } from '../lib/i18n.js';
   import { pasSfeerToeAlsGewijzigd } from '../lib/sfeer.js';
@@ -832,7 +842,7 @@
   }
   function openWizardFromScore() { wizard = { mode: 'edit', initial: wizardInitial('edit') }; }
   function openNewWizard() {
-    if (!isLive || wizard || bevestig || herstel) return;
+    if (!isLive || wizard || bevestig || herstel || hulpOpen) return;
     if (isDirty() && !verwerpBevestigd) {
       vraagOpslaan(() => { verwerpBevestigd = true; wizard = { mode: 'new', initial: wizardInitial('new') }; });
       return;
@@ -851,8 +861,9 @@
     lastGeneration = 0; lastKlavarGeneration = 0; error = null;
     notationClipboard = { events: [] };
     stepPosUs = 0; stepHeld = new Set(); stepChord = new Set(); stepChordDivisie = new Map();
-    stepLastIds = []; stepLastChordNotes = []; stepLastPos = null; stepLastUndoCount = 0; stepLastGroepen = null;
-    divEditLayerId = null; renameLayerId = null; groeiLaatst = 0;
+    stepLastIds = []; stepLastChordNotes = []; stepLastPos = null; stepLastEndUs = null; stepLastUndoCount = 0; stepLastGroepen = null;
+    divEditLayerId = null; groeiLaatst = 0;
+    stepAcc = null; stepTie = false; caret = null;
   }
   function werkbalkUitScore() {
     groeiLaatst = 0;
@@ -955,6 +966,7 @@
     if (on) {
       if (recording || armedWaiting) await toggleRecording(); // opname stoppen
       stepInitPos();
+      stepCaretMidi = caretStartToon();
     }
     try { await invoke('notation_set_step_input', { scoreId, enabled: on }); } catch (e) {}
   }
@@ -964,6 +976,7 @@
   let stepLastChordNotes = []; // midi's van de laatste plaatsing
   let stepLastPos = null;      // starttijd van de laatste plaatsing
   let stepLastUndoCount = 0;   // backend-commando's van de laatste plaatsing (Backspace neemt ze alle terug)
+  let stepLastEndUs = null;    // einde van de laatste plaatsing: overbinden en Alt+cijfer werken alleen aansluitend
   let stepLastGroepen = null;  // [[laagId, noten]] van de laatste meerlaagse aanslag (R herhaalt per balk)
   let stepLastMidi = 60;       // referentie voor letter-invoer (dichtstbijzijnde octaaf)
 
@@ -995,16 +1008,139 @@
         stepLastIds = ids;
         stepLastChordNotes = [...notes];
         stepLastPos = at;
+        stepLastEndUs = at + dur;
         stepLastUndoCount = 1;
         if (!opts.behoudGroepen) stepLastGroepen = null;
       }
       stepLastMidi = notes[notes.length - 1];
+      // De caret blijft een stamtoon (het kleverige voorteken komt er bij het
+      // plaatsen pas bij); letters en Enter zetten hieronder de echte stam.
+      stepCaretMidi = diatonicToMidi(nearestDiatonicIndex(stepLastMidi));
       groeiMatenNaarCursor();
     } catch (e) {
       if (vers) stepPosUs = at; // mislukt → cursor terug
       alert(String(e));
     }
   }
+
+  // ---- Invoercursor en kleverige keuzes (0.7.85) ----
+  // De caret staat op stepPosUs in de armed balk; ↑/↓ kiest de toon
+  // (diatonisch, Shift = octaaf) en Enter plaatst met de paletwaarde. Het
+  // voorteken (♯ ♭ ♮) en de overbinding blijven aan tot ze worden uitgezet
+  // (Finale: gereedschap kiezen, dan plaatsen).
+  let stepCaretMidi = 60;
+  let stepAcc = null;          // 1 | -1 | 'nat' | null
+  let stepTie = false;
+  let caret = null;            // { x, y, h } in content-coördinaten van het blad
+  let actieveTab = 'input';
+  let hulpOpen = false;
+  function caretStartToon() {
+    const laag = score?.layers?.find(l => l.id === stepTargetLayerId());
+    const bas = !!laag && (laag.bass_clef === true || (laag.bass_clef == null && isPedalName(laag.name)));
+    return bas ? 48 : 60;
+  }
+  function caretStap(d) {
+    stepCaretMidi = Math.max(0, Math.min(127, diatonicToMidi(nearestDiatonicIndex(stepCaretMidi) + d)));
+  }
+  function caretOctaaf(d) { stepCaretMidi = Math.max(0, Math.min(127, stepCaretMidi + 12 * d)); }
+  function pasVoortekenToe(midi) {
+    if (stepAcc === 1) return Math.min(127, midi + 1);
+    if (stepAcc === -1) return Math.max(0, midi - 1);
+    return midi; // ♮ en geen keuze: de stamtoon zelf
+  }
+  async function stepPlaatsCaret() {
+    if (!stepMode) return;
+    const stam = stepCaretMidi;
+    await stepPlaatsMetTie([pasVoortekenToe(stam)]);
+    stepCaretMidi = stam;
+  }
+  // Overbinding (kleverig): dezelfde toon als de laatste plaatsing verlengt
+  // die noot in plaats van een nieuwe te zetten.
+  async function stepPlaatsMetTie(notes) {
+    // Alleen aansluitend: na een rust of een verplaatste cursor komt er een
+    // nieuwe noot, geen verlenging over de rust heen.
+    const aansluitend = stepLastEndUs != null && Math.abs(stepPosUs - stepLastEndUs) < 1;
+    const zelfde = stepTie && aansluitend && stepLastIds.length && stepLastPos != null
+      && notes.length === stepLastChordNotes.length && notes.every(n => stepLastChordNotes.includes(n));
+    if (zelfde) {
+      const nieuwEind = Math.round(stepPosUs + stepDurUs);
+      try {
+        await invoke('notation_set_durations', { scoreId, ends: stepLastIds.map(id => [id, nieuwEind]) });
+        stepPosUs = nieuwEind;
+        stepLastEndUs = nieuwEind;
+        stepLastUndoCount += 1;
+        groeiMatenNaarCursor();
+      } catch (e) { alert(String(e)); }
+      return;
+    }
+    await stepInsert(notes);
+  }
+  // Alt+cijfer: de duur van de laatst geplaatste noot (Finale); de cursor volgt.
+  async function stepZetLaatsteDuur(q) {
+    if (!stepLastIds.length || stepLastPos == null) return;
+    const dur = Math.round((60e6 / (Number(bpm) || 90)) * q * (stepDotted ? 1.5 : 1));
+    const nieuwEind = Math.round(stepLastPos + dur);
+    stepQuarters = q;
+    // Zelfde duur: de backend zet dan geen undo-stap, dus niet meetellen.
+    if (stepLastEndUs != null && Math.abs(nieuwEind - stepLastEndUs) < 1) { stepPosUs = nieuwEind; return; }
+    try {
+      await invoke('notation_set_durations', { scoreId, ends: stepLastIds.map(id => [id, nieuwEind]) });
+      stepLastUndoCount += 1;
+      stepLastEndUs = nieuwEind;
+      stepPosUs = nieuwEind;
+      groeiMatenNaarCursor();
+    } catch (e) { alert(String(e)); }
+  }
+  // Gum: de selectie weg; in stapinvoer zonder selectie de laatste plaatsing.
+  function stepGum() {
+    if (selectionIds.size || (!stepMode && cursorEvent)) deleteSelection();
+    else if (stepMode) stepUndoLast();
+  }
+  function caretOmschrijving(pos, midi, acc) {
+    const maatUs = maatDuurUs(bpm, beatsPerBar, beatUnit);
+    const m = Math.floor(pos / maatUs + 1e-6);
+    const telUs = maatUs / (Number(beatsPerBar) || 4);
+    const tel = Math.floor((pos - m * maatUs) / telUs + 1e-6);
+    const laag = score?.layers?.find(l => l.id === stepTargetLayerId());
+    const toon = noteName(pasVoortekenToe(midi));
+    void acc;
+    return tx('notation.measure_beat').replace('{m}', m + 1).replace('{b}', tel + 1) + ' · ' + toon + (laag ? ' · ' + laag.name : '') + ' · Enter';
+  }
+  $: caretTekst = stepMode && score ? caretOmschrijving(stepPosUs, stepCaretMidi, stepAcc) : '';
+  // Caretpositie uit de VexFlow-stave van de maat waarin de cursor staat:
+  // x lineair tussen het begin en het einde van de notenruimte.
+  function herberekenCaret() {
+    caret = null;
+    if (!isLive || !stepMode || viewMode !== 'staff' || !osmd || !container) return;
+    try {
+      const gsheet = osmd.GraphicSheet || osmd.graphic;
+      const measureList = gsheet?.MeasureList;
+      const svg = osmdHost?.querySelector('svg');
+      if (!measureList || !measureList.length || !svg) return;
+      const lid = stepTargetLayerId();
+      const sIdx = (score?.layers ?? []).findIndex(l => l.id === lid);
+      if (sIdx < 0) return;
+      const maatUs = maatDuurUs(bpm, beatsPerBar, beatUnit);
+      let m = Math.floor(stepPosUs / maatUs + 1e-6);
+      let frac = (stepPosUs - m * maatUs) / maatUs;
+      if (m >= measureList.length) { m = measureList.length - 1; frac = 1; }
+      const gm = measureList[m]?.[sIdx];
+      const stave = gm && gm.getVFStave && gm.getVFStave();
+      if (!stave || !stave.getYForLine) return;
+      const x0 = stave.getNoteStartX ? stave.getNoteStartX() : (stave.getX ? stave.getX() : stave.x);
+      const x1 = stave.getNoteEndX ? stave.getNoteEndX() : ((stave.getX ? stave.getX() : stave.x) + (stave.getWidth ? stave.getWidth() : stave.width));
+      const yTop = stave.getYForLine(0), yBot = stave.getYForLine(4);
+      const svgRect = svg.getBoundingClientRect();
+      const sheetRect = container.getBoundingClientRect();
+      const offX = svgRect.left - sheetRect.left + container.scrollLeft;
+      const offY = svgRect.top - sheetRect.top + container.scrollTop;
+      // VexFlow-coördinaten zijn ongezoomd (OSMD schaalt via de viewBox):
+      // schermpixels = coördinaat × zoom.
+      const z = osmdZoom || 1;
+      caret = { x: offX + (x0 + Math.max(0, Math.min(1, frac)) * (x1 - x0)) * z, y: offY + yTop * z - 10, h: (yBot - yTop) * z + 20 };
+    } catch (e) { caret = null; }
+  }
+  $: if (isLive) { void [stepMode, stepPosUs, viewMode, score, osmdZoom, noteBoxes]; herberekenCaret(); }
   // Maten groeien mee met de invoercursor (0.7.83): staat hij voorbij de
   // laatste maat, dan vraagt het venster er één bij (geen undo-stap).
   let groeiBezig = false, groeiNogEens = false, groeiLaatst = 0;
@@ -1160,6 +1296,7 @@
     if (!stepLastIds.length) return;
     try {
       await invoke('notation_transpose', { scoreId, eventIds: stepLastIds, semitones: semi });
+      stepLastUndoCount += 1; // ook deze stap neemt Backspace terug
       stepLastChordNotes = stepLastChordNotes.map(n => Math.max(0, Math.min(127, n + semi)));
       if (stepLastGroepen) stepLastGroepen = stepLastGroepen.map(([lid, g]) => [lid, g.map(n => Math.max(0, Math.min(127, n + semi)))]);
       stepLastMidi = Math.max(0, Math.min(127, stepLastMidi + semi));
@@ -1171,7 +1308,7 @@
     const n = Math.max(1, stepLastUndoCount);
     for (let i = 0; i < n; i++) await doUndo();
     stepPosUs = stepLastPos;
-    stepLastIds = []; stepLastChordNotes = []; stepLastPos = null; stepLastUndoCount = 0; stepLastGroepen = null;
+    stepLastIds = []; stepLastChordNotes = []; stepLastPos = null; stepLastEndUs = null; stepLastUndoCount = 0; stepLastGroepen = null;
   }
   function onStepNoteOn(midi, divisie = null) {
     stepHeld.add(midi); stepChord.add(midi);
@@ -1350,12 +1487,9 @@
       scheduleRender();
     } catch (e) { error = String(e); }
   }
-  // Balk hernoemen (dubbelklik), verplaatsen (▲▼) en verwijderen (✕) — 0.7.83.
-  let renameLayerId = null;
-  function focusSelect(node) { node.focus(); node.select(); }
-  async function commitRename(layerId, naam) {
-    if (renameLayerId !== layerId) return;
-    renameLayerId = null;
+  // Balk hernoemen (dubbelklik in de lagenbalk), verplaatsen (▲▼) en
+  // verwijderen (✕) — 0.7.83; de invoer zelf zit sinds 0.7.85 in LayerBar.
+  async function renameLayer(layerId, naam) {
     const n = (naam || '').trim();
     const laag = score?.layers?.find(l => l.id === layerId);
     if (!n || !laag || n === laag.name) return;
@@ -1614,6 +1748,10 @@
 
   // ---- Maatsoort + titel + MIDI-export (0.7.16) ----
   $: maatsoortKeuzes = MAATSOORTEN.includes(beatsPerBar + '/' + beatUnit) ? MAATSOORTEN : [...MAATSOORTEN, beatsPerBar + '/' + beatUnit];
+  async function setQuantizeLive(q) {
+    if (!isLive || scoreId == null) return;
+    try { await invoke('notation_set_quantize', { scoreId, quantize: Number(q) || 4 }); } catch (e) {}
+  }
   async function setMeterLive(v) {
     if (!isLive || scoreId == null) return;
     const [b, u] = splitsMaatsoort(v);
@@ -1706,14 +1844,19 @@
   function handleKey(e) {
     if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT')) return;
     // Modaal open: alleen Escape (sluiten), verder geen sneltoetsen op de partituur.
-    if (wizard || bevestig || herstel) {
-      if (e.key === 'Escape' && !herstel) { wizard = null; bevestig = null; e.preventDefault(); }
+    if (wizard || bevestig || herstel || hulpOpen) {
+      if (e.key === 'Escape' && !herstel) { wizard = null; bevestig = null; hulpOpen = false; e.preventDefault(); }
       return;
     }
     // Nieuw stuk (0.7.83), opslaan/openen (0.7.84), in beide standen.
     if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'n') { openNewWizard(); e.preventDefault(); return; }
     if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 's') { if (e.shiftKey) saveProjectAs(); else saveProject(); e.preventDefault(); return; }
     if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'o') { openProject(); e.preventDefault(); return; }
+    // Ctrl+1..4: tabbladen (0.7.85) — op e.code, onafhankelijk van de toetsenbordindeling.
+    if (isLive && (e.ctrlKey || e.metaKey) && !e.altKey && /^Digit[1-4]$/.test(e.code)) {
+      actieveTab = ['input', 'texts', 'staves', 'playback'][Number(e.code.slice(5)) - 1];
+      e.preventDefault(); return;
+    }
     // K wisselt de weergave (0.7.73), in beide standen.
     if ((e.key === 'k' || e.key === 'K') && !e.ctrlKey && !e.altKey && !e.metaKey) {
       setViewMode(viewMode === 'klavar' ? 'staff' : 'klavar');
@@ -1724,24 +1867,40 @@
     // ---- Stapinvoer-sneltoetsen (MuseScore-conventies) ----
     if (stepMode) {
       const k = e.key.toLowerCase();
+      const DUR_CODES = { Digit2: 0.125, Digit3: 0.25, Digit4: 0.5, Digit5: 1, Digit6: 2, Digit7: 4,
+        Numpad2: 0.125, Numpad3: 0.25, Numpad4: 0.5, Numpad5: 1, Numpad6: 2, Numpad7: 4 };
       if (e.key === 'Escape') { setStepMode(false); e.preventDefault(); return; }
-      // Letters A–G: noot plaatsen (dichtstbijzijnde octaaf); Shift+letter =
-      // toevoegen aan het zojuist geplaatste akkoord.
-      if (!e.ctrlKey && !e.metaKey && LETTER_PC[k] !== undefined) {
-        const m = nearestMidiForLetter(k);
-        if (m != null) {
-          if (e.shiftKey && stepLastPos != null) stepInsert([m], null, { at: stepLastPos });
-          else stepInsert([m]);
+      // Letters A–G: noot plaatsen (dichtstbijzijnde octaaf, met het kleverige
+      // voorteken); Shift+letter = toevoegen aan het zojuist geplaatste akkoord.
+      if (!e.ctrlKey && !e.metaKey && !e.altKey && LETTER_PC[k] !== undefined) {
+        const m0 = nearestMidiForLetter(k);
+        if (m0 != null) {
+          const m = pasVoortekenToe(m0);
+          if (e.shiftKey && stepLastPos != null) stepInsert([m], null, { at: stepLastPos }).then(() => { stepCaretMidi = m0; });
+          else stepPlaatsMetTie([m]).then(() => { stepCaretMidi = m0; });
         }
         e.preventDefault(); return;
       }
-      if (k === 'r' && stepLastChordNotes.length) { stepRepeatLast(); e.preventDefault(); return; }
-      if (e.key === '0') { stepRest(); e.preventDefault(); return; }
-      const DUR_KEYS = { '2': 0.125, '3': 0.25, '4': 0.5, '5': 1, '6': 2, '7': 4 };
-      if (DUR_KEYS[e.key] !== undefined) { stepQuarters = DUR_KEYS[e.key]; e.preventDefault(); return; }
+      // Enter plaatst op de toonhoogte van de invoercursor (0.7.85).
+      if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey && !e.altKey) { stepPlaatsCaret(); e.preventDefault(); return; }
+      if (k === 'r' && !e.ctrlKey && !e.metaKey && !e.altKey && stepLastChordNotes.length) { stepRepeatLast(); e.preventDefault(); return; }
+      // Numpad alleen als de toets echt een cijfer gaf (NumLock aan), anders is het een pijl/Insert.
+      const isCijfer = /^[0-9]$/.test(e.key);
+      if (e.code === 'Digit0' || (e.code === 'Numpad0' && isCijfer)) { stepRest(); e.preventDefault(); return; }
+      // Cijfer: paletwaarde; Alt+cijfer: duur van de laatst geplaatste noot (Finale).
+      if (DUR_CODES[e.code] !== undefined && (e.code.startsWith('Digit') || isCijfer) && !e.ctrlKey && !e.metaKey) {
+        if (e.altKey) stepZetLaatsteDuur(DUR_CODES[e.code]); else stepQuarters = DUR_CODES[e.code];
+        e.preventDefault(); return;
+      }
       if (e.key === '.') { stepDotted = !stepDotted; e.preventDefault(); return; }
-      if (e.key === 'ArrowUp' && !e.shiftKey) { stepAlterLast(e.ctrlKey ? 12 : 1); e.preventDefault(); return; }
-      if (e.key === 'ArrowDown' && !e.shiftKey) { stepAlterLast(e.ctrlKey ? -12 : -1); e.preventDefault(); return; }
+      // ↑/↓: invoercursor een toon (Shift: octaaf); Alt+↑/↓: laatste noot kruis/mol.
+      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+        const d = e.key === 'ArrowUp' ? 1 : -1;
+        if (e.altKey) stepAlterLast(e.ctrlKey ? 12 * d : d);
+        else if (e.shiftKey) caretOctaaf(d);
+        else caretStap(d);
+        e.preventDefault(); return;
+      }
       if (e.key === 'Backspace') { stepUndoLast(); e.preventDefault(); return; }
       // overige toetsen (Ctrl+Z e.d.) vallen door naar de gewone afhandeling
     }
@@ -1877,6 +2036,41 @@
     if (recording && scoreId != null) invoke('notation_stop_recording').catch(() => {});
     if (stepMode && scoreId != null) invoke('notation_set_step_input', { scoreId, enabled: false }).catch(() => {});
   });
+
+  // ---- Acties voor de onderdelen (0.7.85): de logica blijft hier ----
+  const kopActies = {
+    nieuw: openNewWizard, openProject: () => openProject(), openRecent: (p) => openProject(p),
+    save: () => saveProject(), saveAs: () => saveProjectAs(), importMidi: openMidiFile,
+    exportMusicXml: saveMusicXml, exportMidi: saveMidiAs, exportSvg: saveKlavarSvg, print: printScore,
+    toggleRecording, togglePlay: togglePlayScore, setBpm: setBpmLive, undo: doUndo, redo: doRedo,
+    setViewMode, zoom: (d) => setZoom(osmdZoom + d), help: () => { hulpOpen = true; }, setTitle: setTitleLive,
+  };
+  const invoerActies = {
+    setStepMode, setQuarters: (q) => { stepQuarters = q; }, toggleDot: () => { stepDotted = !stepDotted; },
+    rest: stepRest, repeat: () => { if (stepLastChordNotes.length) stepRepeatLast(); },
+    setAcc: (a) => { stepAcc = a; }, toggleTie: () => { stepTie = !stepTie; }, gum: stepGum, alterLast: stepAlterLast,
+    moveCursor, deleteSelection, transpose: transposeSelection, setHands: setHandsSelection,
+    changeDuration, copy: copySelection, paste: pasteClipboard,
+  };
+  const balkenActies = {
+    setMeter: setMeterLive, setKey: setKeyLive, setMode: setModeLive, setQuantize: setQuantizeLive,
+    setTolerance: setToleranceLive, addLayer, openWizard: openWizardFromScore, toggleLayerDivision, setLayerHand,
+  };
+  const afspeelActies = { setMetronome: setMetronomeCfg, previewTempo: () => previewTempo(), setKlavarBereik };
+  const laagActies = { arm: armLayer, rename: renameLayer, move: moveLayer, remove: removeLayer, addTake, toggleTakeVisible, addLayer };
+  function bevestigKnoppen(b) {
+    const lijst = [{ label: tx('actions.cancel'), stijl: 'secondary', on: () => { bevestig = null; } }];
+    if (b.opslaan) {
+      lijst.push({ label: b.okTekst, stijl: 'ghost', on: () => { const ok = b.ok; bevestig = null; ok(); } });
+      lijst.push({ label: tx('actions.save'), stijl: 'primary', on: () => { const f = b.opslaan; bevestig = null; f(); } });
+    } else {
+      lijst.push({ label: b.okTekst || tx('notation.confirm_continue'), stijl: 'primary', on: () => { const ok = b.ok; bevestig = null; ok(); } });
+    }
+    return lijst;
+  }
+  function herstelTekst(h) {
+    return tx('notation.autosave_found').replace('{title}', h[0].title || tx('notation.default_title')).replace('{date}', new Date(h[0].mtime_ms).toLocaleString());
+  }
 </script>
 
 <div class="notation-window">
@@ -1891,36 +2085,15 @@
     {/key}
   {/if}
   {#if bevestig}
-    <!-- Eigen bevestigingsvraag: window.confirm geeft in Tauri een Promise.
-         Met `opslaan` wordt het Opslaan / Niet opslaan / Annuleren (0.7.84). -->
-    <div class="wizard-overlay" role="dialog" aria-modal="true">
-      <div class="wizard-modal bevestig-modal">
-        <p>{bevestig.tekst}</p>
-        <div class="wizard-actions">
-          <span class="notation-spacer"></span>
-          <button class="btn btn-secondary btn-sm" on:click={() => bevestig = null}>{$t('actions.cancel')}</button>
-          {#if bevestig.opslaan}
-            <button class="btn btn-ghost btn-sm" on:click={() => { const ok = bevestig.ok; bevestig = null; ok(); }}>{bevestig.okTekst}</button>
-            <button class="btn btn-primary btn-sm" on:click={() => { const f = bevestig.opslaan; bevestig = null; f(); }}>{$t('actions.save')}</button>
-          {:else}
-            <button class="btn btn-primary btn-sm" on:click={() => { const ok = bevestig.ok; bevestig = null; ok(); }}>{bevestig.okTekst || $t('notation.confirm_continue')}</button>
-          {/if}
-        </div>
-      </div>
-    </div>
+    <ConfirmDialog tekst={bevestig.tekst} knoppen={bevestigKnoppen(bevestig)} on:cancel={() => bevestig = null} />
   {/if}
   {#if herstel}
-    <!-- Reservekopie van een vorige keer (0.7.84). -->
-    <div class="wizard-overlay" role="dialog" aria-modal="true">
-      <div class="wizard-modal bevestig-modal">
-        <p>{$t('notation.autosave_found').replace('{title}', herstel[0].title || $t('notation.default_title')).replace('{date}', new Date(herstel[0].mtime_ms).toLocaleString())}</p>
-        <div class="wizard-actions">
-          <span class="notation-spacer"></span>
-          <button class="btn btn-secondary btn-sm" on:click={verwijderHerstel}>{$t('notation.discard')}</button>
-          <button class="btn btn-primary btn-sm" on:click={herstelAutosave}>{$t('notation.restore')}</button>
-        </div>
-      </div>
-    </div>
+    <!-- Reservekopie van een vorige keer (0.7.84); Escape sluit niet: eerst kiezen. -->
+    <ConfirmDialog tekst={herstelTekst(herstel)}
+      knoppen={[{ label: $t('notation.discard'), stijl: 'secondary', on: verwijderHerstel }, { label: $t('notation.restore'), stijl: 'primary', on: herstelAutosave }]} />
+  {/if}
+  {#if hulpOpen}
+    <HelpDialog on:close={() => hulpOpen = false} />
   {/if}
   <!-- Het notatievenster is nog niet nagelopen; dat hoort de gebruiker te
        weten vóór hij op het resultaat vertrouwt. -->
@@ -1928,128 +2101,27 @@
     <span class="alpha-tag">{$t('notation.alpha_badge')}</span>
     <span>{$t('notation.alpha_notice')}</span>
   </div>
+  {#if isLive}
+    <NotationHeader {title} {dirty} {recording} {armedWaiting} {countInRemaining} {playingScore} {bpm} {viewMode}
+      zoom={osmdZoom} recent={recentLijst} kanExportXml={!!xml} kanExportSvg={!!(klavarModel && scoreHasEvents)}
+      kanPrint={viewMode === 'klavar' ? !!(klavarModel && scoreHasEvents) : !!xml} acties={kopActies} />
+    <NotationTabs tab={actieveTab} on:change={(e) => actieveTab = e.detail} />
+    <div class="tab-inhoud">
+      {#if actieveTab === 'input'}
+        <InputTab {stepMode} {stepQuarters} {stepDotted} acc={stepAcc} tie={stepTie} kanHerhaal={stepLastChordNotes.length > 0} kanAlterLast={stepLastIds.length > 0}
+          {viewMode} {selectieAlleenPedaal} {clipboardCount} acties={invoerActies} />
+      {:else if actieveTab === 'texts'}
+        <TextsMarksTab />
+      {:else if actieveTab === 'staves'}
+        <StavesVoicesTab layers={score?.layers ?? []} {divisions} {viewMode} {klavarModel} splitOpties={SPLIT_OPTIES}
+          {layerHandKeuze} {autoHandLabel} maatsoort={beatsPerBar + '/' + beatUnit} {maatsoortKeuzes} {keyFifths} {minor}
+          quantize={Number(score?.quantize) || 4} {tolerancePct} {keyChoices} {gridChoices} acties={balkenActies} />
+      {:else}
+        <PlaybackTab {metroOn} {countInBeats} {viewMode} {klavarBereik} acties={afspeelActies} />
+      {/if}
+    </div>
+  {:else}
   <div class="notation-toolbar">
-    {#if isLive}
-      <button
-        class="btn record-toggle"
-        class:recording={recording || armedWaiting}
-        disabled={playingScore}
-        on:click={toggleRecording}
-        title={recording || armedWaiting ? $t('notation.record_stop_title') : $t('notation.record_start_title')}
-      >
-        <span class="record-dot" class:on={recording || armedWaiting}></span>
-        {#if armedWaiting}{$t('notation.counting_in').replace('{n}', countInRemaining)}{:else if recording}{$t('midi_player.stop')}{:else}{$t('notation.record')}{/if}
-      </button>
-      <button class="btn btn-secondary btn-sm" on:click={togglePlayScore} disabled={recording || armedWaiting}
-        title={playingScore ? $t('notation.play_stop_title') : $t('notation.play_title')}>
-        {playingScore ? '◼ ' + $t('midi_player.stop') : '▶ ' + $t('notation.play')}
-      </button>
-      <label>{$t('notation.tempo')}
-        <input type="number" min="20" max="300" value={bpm} on:change={(e) => setBpmLive(e.currentTarget.value)} />
-      </label>
-      <button class="btn btn-ghost btn-sm" on:click={() => previewTempo()} title={$t('notation.tempo_test_title')}>♪ {$t('notation.tempo_test')}</button>
-      <label class="metro-toggle" title={$t('notation.metronome_title')}>
-        <input type="checkbox" checked={metroOn} on:change={(e) => setMetronomeCfg(e.currentTarget.checked, countInBeats)} />
-        {$t('notation.metronome')}
-      </label>
-      <label title={$t('notation.count_in_title')}>{$t('notation.count_in')}
-        <select value={countInBeats} on:change={(e) => setMetronomeCfg(metroOn, Number(e.currentTarget.value))}>
-          <option value={0}>{$t('notation.count_in_off')}</option>
-          <option value={1}>1</option>
-          <option value={2}>2</option>
-          <option value={4}>4</option>
-        </select>
-      </label>
-      <label class="metro-toggle" title={$t('notation.step_input_title')}>
-        <input type="checkbox" checked={stepMode} on:change={(e) => setStepMode(e.currentTarget.checked)} />
-        {$t('notation.step_input')}
-      </label>
-      {#if stepMode}
-        <span class="step-durs" role="group" aria-label={$t('notation.note_value')}>
-          {#each [[4, '𝅝', '7'], [2, '𝅗𝅥', '6'], [1, '♩', '5'], [0.5, '♪', '4'], [0.25, '𝅘𝅥𝅯', '3'], [0.125, '𝅘𝅥𝅰', '2']] as [q, sym, key]}
-            <button class="btn btn-ghost btn-sm step-dur" class:active={stepQuarters === q}
-              on:click={() => stepQuarters = q} title={$t('notation.note_value_key').replace('{key}', key)}>{sym}</button>
-          {/each}
-        </span>
-        <label title={$t('notation.dotted_title')} class="metro-toggle">
-          <input type="checkbox" bind:checked={stepDotted} />{$t('notation.dot')}
-        </label>
-        <button class="btn btn-ghost btn-sm" on:click={stepRest} title={$t('notation.rest_title')}>𝄽</button>
-        <button class="btn btn-ghost btn-sm" on:click={() => stepLastChordNotes.length && stepRepeatLast()}
-          disabled={!stepLastChordNotes.length} title={$t('notation.repeat_last_title')}>R</button>
-        <button class="btn btn-ghost btn-sm" on:click={() => stepAlterLast(1)} disabled={!stepLastIds.length} title={$t('notation.step_sharp_title')}>♯</button>
-        <button class="btn btn-ghost btn-sm" on:click={() => stepAlterLast(-1)} disabled={!stepLastIds.length} title={$t('notation.step_flat_title')}>♭</button>
-      {/if}
-      <label>{$t('notation.key_signature')}
-        <select value={keyFifths} on:change={(e) => setKeyLive(e.currentTarget.value)}>
-          {#each keyChoices as k}<option value={k.v}>{k.label}</option>{/each}
-        </select>
-        <select value={minor ? 'minor' : 'major'} on:change={(e) => setModeLive(e.currentTarget.value === 'minor')} title={$t('notation.key_mode')}>
-          <option value="major">{$t('notation.key_major')}</option>
-          <option value="minor">{$t('notation.key_minor')}</option>
-        </select>
-      </label>
-      <label>{$t('notation.meter')}
-        <select value={beatsPerBar + '/' + beatUnit} on:change={(e) => setMeterLive(e.currentTarget.value)}>
-          {#each maatsoortKeuzes as m}<option value={m}>{m}</option>{/each}
-        </select>
-      </label>
-      <label class="notation-title-field">{$t('notation.title')}
-        <input type="text" value={title} on:change={(e) => setTitleLive(e.currentTarget.value)} />
-      </label>
-      <label class="tolerance-slider" title={$t('notation.tolerance_title')}>
-        {$t('notation.rhythm')}
-        <input type="range" min="0" max="100" step="5"
-          bind:value={tolerancePct}
-          on:change={(e) => setToleranceLive(Number(e.currentTarget.value))} />
-        <span class="tolerance-value">{tolerancePct < 33 ? $t('notation.tol_loose') : tolerancePct > 66 ? $t('notation.tol_tight') : $t('notation.tol_medium')}</span>
-      </label>
-      <span class="notation-spacer"></span>
-      <button class="btn btn-ghost btn-sm" on:click={() => moveCursor(-1)} title={$t('notation.prev_note_title')}>◄</button>
-      <button class="btn btn-ghost btn-sm" on:click={() => moveCursor(+1)} title={$t('notation.next_note_title')}>►</button>
-      <button class="btn btn-ghost btn-sm" on:click={deleteSelection} title={$t('notation.delete_selection_title')}>{$t('actions.delete')}</button>
-      <button class="btn btn-ghost btn-sm" on:click={() => transposeSelection(-1)} title={$t('notation.semitone_down_title')}>−½</button>
-      <button class="btn btn-ghost btn-sm" on:click={() => transposeSelection(+1)} title={$t('notation.semitone_up_title')}>+½</button>
-      <button class="btn btn-ghost btn-sm" on:click={() => transposeSelection(-12)} title={$t('notation.octave_down_title')}>−8va</button>
-      <button class="btn btn-ghost btn-sm" on:click={() => transposeSelection(+12)} title={$t('notation.octave_up_title')}>+8va</button>
-      {#if viewMode === 'klavar'}
-        <button class="btn btn-ghost btn-sm" on:click={() => setHandsSelection('left')} disabled={selectieAlleenPedaal} title={$t('notation.to_left_hand_title')}>{$t('notation.to_left_hand')}</button>
-        <button class="btn btn-ghost btn-sm" on:click={() => setHandsSelection('right')} disabled={selectieAlleenPedaal} title={$t('notation.to_right_hand_title')}>{$t('notation.to_right_hand')}</button>
-      {/if}
-      <button class="btn btn-ghost btn-sm" on:click={() => changeDuration('halve')} title={$t('notation.halve_duration_title')}>÷2</button>
-      <button class="btn btn-ghost btn-sm" on:click={() => changeDuration('double')} title={$t('notation.double_duration_title')}>×2</button>
-      <button class="btn btn-ghost btn-sm" on:click={() => changeDuration('dot')} title={$t('notation.dot_toggle_title')}>• {$t('notation.dot')}</button>
-      <button class="btn btn-ghost btn-sm" on:click={copySelection} title={$t('notation.copy_title')}>{$t('notation.copy')}</button>
-      <button class="btn btn-ghost btn-sm" on:click={pasteClipboard} disabled={clipboardCount === 0} title={$t('notation.paste_title')}>{$t('notation.paste')}{clipboardCount ? ` (${clipboardCount})` : ''}</button>
-      <button class="btn btn-ghost btn-sm" on:click={doUndo} title={$t('notation.undo_title')}>↶</button>
-      <button class="btn btn-ghost btn-sm" on:click={doRedo} title={$t('notation.redo_title')}>↷</button>
-      <span class="view-switch" role="group" aria-label={$t('notation.view')}>
-        <button class="btn btn-ghost btn-sm" class:active={viewMode === 'staff'} aria-pressed={viewMode === 'staff'} on:click={() => setViewMode('staff')} title={$t('notation.view_staff_title') + ' (K)'}>{$t('notation.view_staff')}</button>
-        <button class="btn btn-ghost btn-sm" class:active={viewMode === 'klavar'} aria-pressed={viewMode === 'klavar'} on:click={() => setViewMode('klavar')} title={$t('notation.view_klavar_title') + ' (K)'}>{$t('notation.view_klavar')}</button>
-      </span>
-      <button class="btn btn-ghost btn-sm" on:click={() => setZoom(osmdZoom - 0.1)} title={$t('notation.zoom_out')}>−</button>
-      <span class="zoom-pct">{Math.round(osmdZoom * 100)}%</span>
-      <button class="btn btn-ghost btn-sm" on:click={() => setZoom(osmdZoom + 0.1)} title={$t('notation.zoom_in')}>+</button>
-      {#if viewMode === 'klavar'}
-        <label class="klavar-bereik" title={$t('notation.klavar_range_title')}>{$t('notation.klavar_range')}
-          <select value={klavarBereik} on:change={(e) => setKlavarBereik(e.currentTarget.value)}>
-            <option value="auto">{$t('notation.klavar_range_auto')}</option>
-            <option value="klavier">{$t('notation.klavar_range_keyboard')}</option>
-          </select>
-        </label>
-      {/if}
-      <button class="btn btn-ghost btn-sm" on:click={openNewWizard} title={$t('notation.new_title')}>{$t('notation.new')}</button>
-      <button class="btn btn-ghost btn-sm" on:click={() => openProject()} title={$t('notation.open_project_title')}>{$t('notation.open_project')}</button>
-      <button class="btn btn-ghost btn-sm" class:dirty-save={dirty} on:click={() => saveProject()} title={$t('notation.save_title')}>{$t('notation.save')}{dirty ? ' *' : ''}</button>
-      <button class="btn btn-ghost btn-sm" on:click={() => saveProjectAs()} title={$t('notation.save_as_title')}>{$t('notation.save_as')}</button>
-      <button class="btn btn-ghost btn-sm" on:click={openMidiFile} title={$t('notation.open_import_title')}>{$t('notation.import_midi')}</button>
-      <button class="btn btn-ghost btn-sm" on:click={saveMidiAs} title={$t('notation.save_as_midi_title')}>{$t('notation.save_as_midi')}</button>
-      <button class="btn btn-primary btn-sm" on:click={printScore} disabled={viewMode === 'klavar' ? !(klavarModel && scoreHasEvents) : !xml}>{$t('notation.print_pdf')}</button>
-      <button class="btn btn-ghost btn-sm" on:click={saveMusicXml} disabled={!xml}>{$t('notation.save_as_musicxml')}</button>
-      {#if viewMode === 'klavar'}
-        <button class="btn btn-ghost btn-sm" on:click={saveKlavarSvg} disabled={!(klavarModel && scoreHasEvents)} title={$t('notation.save_as_svg_title')}>{$t('notation.save_as_svg')}</button>
-      {/if}
-    {:else}
       <label>{$t('notation.tempo')}
         <input type="number" min="20" max="300" bind:value={bpm} on:change={scheduleRender} />
       </label>
@@ -2100,105 +2172,14 @@
         <button class="btn btn-ghost btn-sm" on:click={saveKlavarSvg} disabled={!klavarModel} title={$t('notation.save_as_svg_title')}>{$t('notation.save_as_svg')}</button>
       {/if}
       <button class="btn btn-primary btn-sm" on:click={printScore} disabled={viewMode === 'klavar' ? !klavarModel : !xml}>{$t('notation.print_pdf')}</button>
-    {/if}
   </div>
+  {/if}
 
   {#if isLive && score}
-    <!-- LayerBar: per laag armed-bol + naam + Take-vinkjes + "+ Take". -->
-    <div class="notation-layers">
-      <span class="notation-staves-label">{$t('notation.staves_label')}</span>
-      {#each score.layers as layer, i (layer.id)}
-        <div class="notation-layer">
-          <button
-            class="layer-arm"
-            class:armed={score.armed_layer === layer.id}
-            on:click={() => armLayer(layer.id)}
-            title={score.armed_layer === layer.id ? $t('notation.layer_armed_title') : $t('notation.layer_arm_title')}
-          >●</button>
-          {#if renameLayerId === layer.id}
-            <input class="layer-rename" type="text" value={layer.name} use:focusSelect
-              on:keydown={(e) => { if (e.key === 'Enter') commitRename(layer.id, e.currentTarget.value); else if (e.key === 'Escape') renameLayerId = null; }}
-              on:blur={(e) => commitRename(layer.id, e.currentTarget.value)} />
-          {:else}
-            <span class="layer-name" on:dblclick={() => renameLayerId = layer.id} title={$t('notation.rename_staff_title')}>{layer.name}</span>
-          {/if}
-          <span class="layer-tools">
-            <button class="layer-tool" on:click={() => moveLayer(layer.id, -1)} disabled={i === 0} title={$t('notation.move_up')}>▲</button>
-            <button class="layer-tool" on:click={() => moveLayer(layer.id, +1)} disabled={i === score.layers.length - 1} title={$t('notation.move_down')}>▼</button>
-            <button class="layer-tool layer-tool-remove" on:click={() => removeLayer(layer)} disabled={score.layers.length <= 1} title={$t('notation.remove_staff')}>✕</button>
-          </span>
-          <span class="layer-takes">
-            {#each layer.takes as take}
-              <label class="take-chip" title={$t('notation.take_visible_title')}>
-                <input
-                  type="checkbox"
-                  checked={take.visible}
-                  on:change={(e) => toggleTakeVisible(layer.id, take.id, e.currentTarget.checked)}
-                />
-                {take.name}
-                {#if layer.armed_take === take.id && score.armed_layer === layer.id && recording}
-                  <span class="take-live">•REC</span>
-                {/if}
-              </label>
-            {/each}
-            <button class="btn btn-ghost btn-sm take-add" on:click={() => addTake(layer.id)} title={$t('notation.new_take_title')}>+</button>
-          </span>
-          <!-- Divisie-routering van deze balk (klik om te wijzigen) -->
-          <button
-            class="layer-divs"
-            on:click={() => divEditLayerId = divEditLayerId === layer.id ? null : layer.id}
-            title={$t('notation.layer_divisions_title')}
-          >
-            {(layer.divisions && layer.divisions.length) ? layer.divisions.join(' + ') : $t('notation.no_division')} ▾
-          </button>
-          {#if divEditLayerId === layer.id}
-            <span class="layer-divs-edit">
-              {#each divisions as div}
-                <label class="wizard-div">
-                  <input type="checkbox" checked={(layer.divisions || []).includes(div)} on:change={() => toggleLayerDivision(layer, div)} />
-                  {div}
-                </label>
-              {/each}
-            </span>
-          {/if}
-          {#if viewMode === 'klavar'}
-            <!-- Hand van deze balk in klavar (0.7.71): auto volgt de standaardregel. -->
-            <select class="layer-hand" value={layerHandKeuze(layer)} on:change={(e) => setLayerHand(layer, e.currentTarget.value)} title={$t('notation.hand_title')}>
-              <option value="auto">{$t('notation.hand')}: {$t('notation.hand_auto')} ({autoHandLabel(layer, klavarModel, $t)})</option>
-              <option value="right">{$t('notation.hand_right')}</option>
-              <option value="left">{$t('notation.hand_left')}</option>
-              <option value="pedal">{$t('notation.hand_pedal')}</option>
-              <option value="rl">{$t('notation.hand_split')}</option>
-            </select>
-            {#if layerHandKeuze(layer) === 'rl'}
-              <select class="layer-split" value={layer.klavar_split ?? 60} on:change={(e) => setLayerHand(layer, 'rl', Number(e.currentTarget.value))} title={$t('notation.hand_split_title')}>
-                {#each SPLIT_OPTIES as [m, naam]}<option value={m}>{naam}</option>{/each}
-              </select>
-            {/if}
-          {/if}
-        </div>
-      {/each}
-      <button class="btn btn-ghost btn-sm layer-add" on:click={addLayer} title={$t('notation.new_staff_title')}>{$t('notation.add_staff')}</button>
-      <button class="btn btn-ghost btn-sm" on:click={openWizardFromScore} title={$t('notation.layout_title')}>{$t('notation.layout')}</button>
-    </div>
-
-    <!-- Selectie/cursor-indicator; klik in de bladmuziek selecteert een noot. -->
-    <div class="notation-cursor" class:counting={armedWaiting}>
-      {#if armedWaiting}
-        <span>{$t('notation.count_in_prefix')} <b>{countInRemaining}</b> {countInRemaining === 1 ? $t('notation.count_in_suffix_one') : $t('notation.count_in_suffix_many')}</span>
-      {:else if flatEvents.length > 0}
-        {#if selectionIds.size > 1}
-          <span><b>{selectionIds.size}</b> {$t('notation.selected_many')}</span>
-        {:else if cursorEvent}
-          <span>{$t('notation.selection_label')} <b>{noteName(cursorEvent.midi)}</b> {$t('notation.selection_detail').replace('{i}', cursorIndex + 1).replace('{total}', flatEvents.length).replace('{layer}', cursorEvent._layer)}</span>
-        {:else}
-          <span>{$t('notation.click_to_select')}</span>
-        {/if}
-      {:else}
-        <span class="cursor-empty">{$t('notation.empty_score')}</span>
-      {/if}
-      {#if debugVlag}<span class="render-ms">OSMD {renderMs} ms · {renderMaten} m.</span>{/if}
-    </div>
+    <LayerBar layers={score.layers} armedLayer={score.armed_layer} {recording} acties={laagActies} />
+    <StatusLine {armedWaiting} {countInRemaining} aantalNoten={flatEvents.length} selectieAantal={selectionIds.size}
+      cursorNaam={cursorEvent ? noteName(cursorEvent.midi) : ''} {cursorIndex} cursorLaag={cursorEvent?._layer ?? ''}
+      {stepMode} {caretTekst} debugTekst={debugVlag ? `OSMD ${renderMs} ms · ${renderMaten} m.` : ''} />
   {/if}
 
   {#if !isLive && divisions.length > 0}
@@ -2272,19 +2253,15 @@
           <div class="note-highlight"
             style="left:{b.x - 3}px; top:{b.y - 3}px; width:{b.w + 6}px; height:{b.h + 6}px;"></div>
         {/each}
+        {#if stepMode && caret}
+          <!-- Invoercursor (0.7.85): waar de volgende noot komt. -->
+          <div class="step-caret" style="left:{caret.x}px; top:{caret.y}px; height:{caret.h}px;"></div>
+        {/if}
       </div>
     {/if}
   </div>
 
-  <div class="notation-hint">
-    {#if viewMode === 'klavar' && isLive}
-      {$t('notation.hint_klavar')}
-    {:else if isLive}
-      {$t('notation.hint_live')}
-    {:else}
-      {$t('notation.hint_file')}
-    {/if}
-  </div>
+  {#if !isLive}<div class="notation-hint">{$t('notation.hint_file')}</div>{/if}
 </div>
 
 <style>
@@ -2317,60 +2294,7 @@
   .notation-spacer { flex: 1; }
   .tolerance-slider input[type="range"] { width: 8rem; }
   .tolerance-value { font-size: 0.72rem; color: var(--text-muted, #aaa); min-width: 3rem; text-align: center; }
-
-  .record-toggle {
-    display: inline-flex; align-items: center; gap: 0.35rem;
-    padding: 0.25rem 0.7rem; border: 1px solid #cc4444; border-radius: 6px;
-    background: transparent; color: #cc6666; font-weight: 600; cursor: pointer;
-  }
-  .record-toggle.recording { background: #7a2020; color: #fff; }
-  .record-dot {
-    width: 0.7rem; height: 0.7rem; border-radius: 50%; background: #cc4444; opacity: 0.5;
-  }
-  .record-dot.on { background: #ff4040; opacity: 1; animation: rec-pulse 1s infinite; }
-  @keyframes rec-pulse { 50% { opacity: 0.4; } }
-
-  .notation-layers {
-    display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem;
-    padding: 0.4rem 0.75rem;
-    background: var(--bg-elevated, #333); color: var(--text, #eee);
-    border-bottom: 1px solid var(--text-muted, #555);
-    font-size: 0.78rem; flex-shrink: 0;
-  }
   .notation-staves-label { font-weight: 600; color: var(--text-muted, #aaa); }
-  .notation-layer {
-    display: flex; align-items: center; gap: 0.45rem;
-    padding: 0.2rem 0.5rem;
-    border: 1px solid var(--text-muted, #555); border-radius: 6px;
-    background: var(--bg-panel, #2a2a2a);
-  }
-  .layer-arm {
-    width: 1.1rem; height: 1.1rem; border-radius: 50%; border: 1px solid var(--text-muted, #666);
-    background: transparent; color: var(--text-muted, #666); cursor: pointer; font-size: 0.9rem;
-    display: inline-flex; align-items: center; justify-content: center;
-    padding: 0;
-  }
-  .layer-arm.armed { background: #cc3030; color: #fff; border-color: #ff5050; }
-  .layer-name { font-weight: 600; }
-  .layer-takes { display: flex; align-items: center; gap: 0.35rem; }
-  .take-chip { display: flex; align-items: center; gap: 0.2rem; }
-  .take-live { color: #ff5050; font-weight: 700; font-size: 0.7rem; margin-left: 0.2rem; }
-  .take-add { padding: 0 0.35rem; }
-  .layer-add { margin-left: auto; }
-
-  .notation-cursor {
-    padding: 0.3rem 0.75rem;
-    background: #f4ecd4; color: #6b5b1e;
-    font-size: 0.78rem; border-bottom: 1px solid #ddd; flex-shrink: 0;
-  }
-  .notation-cursor.counting { background: #7a2020; color: #fff; font-weight: 600; }
-  .cursor-empty { color: #999; font-style: italic; }
-  .metro-toggle { cursor: pointer; }
-  .zoom-pct { font-size: 0.72rem; color: var(--text-muted, #aaa); min-width: 2.6rem; text-align: center; }
-  /* Stapinvoer: nootwaarde-palet */
-  .step-durs { display: inline-flex; gap: 0.15rem; }
-  .step-dur { font-size: 1.05rem; line-height: 1; padding: 0.15rem 0.4rem; }
-  .step-dur.active { background: var(--accent, #6a8); color: #fff; border-radius: 4px; }
 
   .notation-staves {
     display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem;
@@ -2390,56 +2314,17 @@
   .notation-staff-bass { font-size: 1.1rem; line-height: 1; }
   .notation-staff-remove { border: none; background: none; color: #cc6666; font-size: 1rem; cursor: pointer; padding: 0 0.2rem; }
 
-  /* Wizard: balkindeling + divisie-routering */
-  .wizard-overlay {
-    position: fixed; inset: 0; z-index: 50;
-    background: rgba(0, 0, 0, 0.55);
-    display: flex; align-items: center; justify-content: center;
+  .tab-inhoud {
+    padding: 0.4rem 0.75rem; min-width: 0;
+    background: var(--bg-elevated, #333); color: var(--text, #eee);
+    border-bottom: 1px solid var(--text-muted, #555); flex-shrink: 0;
   }
-  .wizard-modal {
-    background: var(--bg-panel, #2a2a2a); color: var(--text, #eee);
-    border: 1px solid var(--text-muted, #555); border-radius: 8px;
-    padding: 1rem 1.2rem; max-width: 46rem; width: calc(100% - 3rem);
-    max-height: 80vh; overflow-y: auto;
+  .step-caret {
+    position: absolute; width: 2px; background: #2a6fdb;
+    box-shadow: 0 0 0 1px rgba(42, 111, 219, 0.35);
+    animation: caret-knipper 1s steps(2) infinite;
   }
-  .wizard-modal h3 { margin: 0 0 0.4rem; }
-  .wizard-hint { font-size: 0.78rem; color: var(--text-muted, #aaa); margin: 0 0 0.6rem; }
-  .wizard-staff {
-    display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem;
-    padding: 0.35rem 0.5rem; margin-bottom: 0.4rem;
-    border: 1px solid var(--text-muted, #555); border-radius: 6px;
-  }
-  .wizard-staff-name { width: 9rem; }
-  .wizard-divs { display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem; }
-  .wizard-div { display: flex; align-items: center; gap: 0.25rem; font-size: 0.8rem; white-space: nowrap; cursor: pointer; }
-  .wizard-remove { margin-left: auto; border: none; background: none; color: #cc6666; font-size: 1.1rem; cursor: pointer; }
-  .wizard-actions { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.6rem; }
-  .layer-tools { display: inline-flex; gap: 0.1rem; }
-  .layer-tool {
-    border: none; background: transparent; color: var(--text-muted, #aaa);
-    font-size: 0.7rem; padding: 0 0.2rem; cursor: pointer; line-height: 1.4;
-  }
-  .layer-tool:hover:not(:disabled) { color: var(--text, #eee); }
-  .layer-tool:disabled { opacity: 0.3; cursor: default; }
-  .layer-tool-remove:hover:not(:disabled) { color: #ff7070; }
-  .layer-rename { width: 8rem; font-size: 0.78rem; }
-  .layer-name { cursor: text; }
-  .bevestig-modal { max-width: 28rem; }
-  .dirty-save { font-weight: 600; }
-  .bevestig-modal p { margin: 0.2rem 0 0.6rem; font-size: 0.9rem; }
-  .render-ms { margin-left: auto; font-size: 0.72rem; opacity: 0.7; }
-  .layer-divs {
-    border: 1px dashed var(--text-muted, #666); border-radius: 5px;
-    background: transparent; color: var(--text-muted, #bbb);
-    font-size: 0.72rem; padding: 0.1rem 0.4rem; cursor: pointer;
-  }
-  .layer-divs-edit {
-    display: flex; align-items: center; flex-wrap: wrap; gap: 0.45rem;
-    padding: 0.15rem 0.4rem;
-    border: 1px solid var(--text-muted, #555); border-radius: 5px;
-    background: var(--bg-elevated, #333);
-  }
-
+  @keyframes caret-knipper { 50% { opacity: 0.25; } }
   .notation-error { padding: 0.5rem 0.75rem; background: #7a2020; color: #fff; font-size: 0.85rem; }
   .notation-busy { padding: 0.35rem 0.75rem; background: #f4ecd4; color: #6b5b1e; font-size: 0.8rem; }
   .notation-sheet { flex: 1; overflow-y: auto; padding: 1rem 1.5rem; background: #fff; position: relative; }
@@ -2470,8 +2355,8 @@
 
   @media print {
     @page { size: A4 portrait; margin: 12mm; }
-    .notation-toolbar, .notation-layers, .notation-cursor, .notation-staves, .notation-hint, .notation-busy, .notation-error, .notation-alpha,
-    .notation-selection-overlay, .osmd-host.verborgen {
+    .notation-toolbar, .notation-staves, .notation-hint, .notation-busy, .notation-error, .notation-alpha,
+    .tab-inhoud, .notation-selection-overlay, .osmd-host.verborgen {
       display: none !important;
     }
     .notation-window { height: auto; }
