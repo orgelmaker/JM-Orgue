@@ -394,6 +394,7 @@
         score = await invoke('notation_get_score', { scoreId });
         // Maatsoort in de werkbalk volgt de score (ook na undo/redo).
         beatsPerBar = score.beats_per_bar || 4; beatUnit = score.beat_unit || 4;
+        scheduleAutosave();
         if (viewMode === 'klavar') {
           if (score.generation === lastKlavarGeneration && klavarModel) return;
           lastKlavarGeneration = score.generation;
@@ -619,6 +620,185 @@
   function removeStaff(staffIdx) { staffConfig = staffConfig.filter((_, i) => i !== staffIdx); scheduleRender(); }
   function setStaffBass(staffIdx, v) { staffConfig[staffIdx].bass = v; staffConfig = staffConfig; scheduleRender(); }
 
+  // ---- Partituurbestand .jmscore (0.7.84): opslaan, openen, reservekopie ----
+  let projectPath = null;       // pad van het geopende/opgeslagen stuk (null = nog nooit opgeslagen)
+  let savedGeneration = 0;      // generation op het moment van opslaan/laden (-1 = herstelde reservekopie)
+  let recentLijst = [];         // [{ path, title, date }] uit localStorage (max 8)
+  let autosaveTimer = null;
+  let laatsteAutosaveGen = 0;
+  let heeftAutosave = false;    // dit venster schreef een reservekopie voor het huidige stuk
+  let verwerpBevestigd = false; // "Niet opslaan" al gekozen voor dit stuk: niet nog eens vragen
+  let sluitToegestaan = false;  // de sluitvraag is beantwoord: onCloseRequested laat het venster door
+  let herstel = null;           // gevonden reservekopieën bij het openen [{ path, title, mtime_ms }]
+  $: dirty = isLive && !!score && score.generation !== savedGeneration;
+  // In functies NIET op `dirty` leunen: een $:-waarde loopt achter op een
+  // zojuist toegekende `score` (Svelte-val) — hier rechtstreeks rekenen.
+  function isDirty() { return isLive && !!score && score.generation !== savedGeneration; }
+  $: zetVenstertitel(dirty, title);
+  async function zetVenstertitel(vuil, titel) {
+    if (!isLive) return;
+    try {
+      const { getCurrentWindow } = await import('@tauri-apps/api/window');
+      await getCurrentWindow().setTitle(`${titel || tx('notation.default_title')}${vuil ? '*' : ''} — ${tx('notation.live_window_title')}`);
+    } catch (e) {}
+  }
+  function uiPrefs() { return { view_mode: viewMode, zoom: osmdZoom, klavar_bereik: klavarBereik }; }
+  function pasUiPrefsToe(ui) {
+    if (!ui) return;
+    if (ui.view_mode === 'staff' || ui.view_mode === 'klavar') setViewMode(ui.view_mode);
+    if (ui.zoom > 0) setZoom(ui.zoom);
+    if (ui.klavar_bereik === 'auto' || ui.klavar_bereik === 'klavier') setKlavarBereik(ui.klavar_bereik);
+  }
+  function leesRecent() {
+    try { const l = JSON.parse(localStorage.getItem('jm-orgue-notation-recent') || '[]'); return Array.isArray(l) ? l.slice(0, 8) : []; } catch (e) { return []; }
+  }
+  function voegRecentToe(path, titel) {
+    const l = leesRecent().filter(r => r && r.path !== path);
+    l.unshift({ path, title: titel || '', date: new Date().toISOString() });
+    try { localStorage.setItem('jm-orgue-notation-recent', JSON.stringify(l.slice(0, 8))); } catch (e) {}
+    recentLijst = l.slice(0, 8);
+  }
+  async function laadRecent() {
+    const l = leesRecent().filter(r => r && typeof r.path === 'string');
+    try {
+      const bestaat = await invoke('paths_exist', { paths: l.map(r => r.path) });
+      recentLijst = l.filter((_, i) => bestaat[i]);
+    } catch (e) { recentLijst = l; }
+  }
+  async function saveProject() {
+    if (!isLive || scoreId == null) return false;
+    if (!projectPath) return saveProjectAs();
+    return schrijfProject(projectPath);
+  }
+  async function saveProjectAs() {
+    if (!isLive || scoreId == null) return false;
+    try {
+      const { save } = await import('@tauri-apps/plugin-dialog');
+      const suggested = (score?.title || tx('notation.default_title')) + '.jmscore';
+      const path = await save({ defaultPath: projectPath || suggested, filters: [{ name: tx('notation.project_filter'), extensions: ['jmscore'] }] });
+      if (!path) return false;
+      return schrijfProject(path);
+    } catch (e) { alert(tx('notation.save_failed').replace('{error}', e)); return false; }
+  }
+  async function schrijfProject(path) {
+    try {
+      // De backend geeft de generation van wat er op schijf staat terug: een
+      // noot die tijdens het schrijven binnenkomt blijft zo "vuil".
+      const gen = await invoke('notation_save_project', { scoreId, path, ui: uiPrefs() });
+      projectPath = path;
+      savedGeneration = Number(gen) || 0;
+      verwerpBevestigd = false;
+      voegRecentToe(path, score?.title);
+      await verwijderAutosave();
+      score = await invoke('notation_get_score', { scoreId });
+      return true;
+    } catch (e) { alert(tx('notation.save_failed').replace('{error}', e)); return false; }
+  }
+  function openProject(pad = null) {
+    if (!isLive) return;
+    const doorgaan = () => kiesEnLaadProject(pad);
+    if (isDirty() && !verwerpBevestigd) vraagOpslaan(doorgaan); else doorgaan();
+  }
+  async function kiesEnLaadProject(pad) {
+    try {
+      let path = pad;
+      if (!path) {
+        const { open } = await import('@tauri-apps/plugin-dialog');
+        path = await open({ multiple: false, filters: [{ name: tx('notation.project_filter'), extensions: ['jmscore'] }] });
+        if (!path) return;
+      }
+      await laadProject(path, path);
+    } catch (e) { alert(tx('notation.open_project_failed').replace('{error}', e)); }
+  }
+  // Laadt een .jmscore (of reservekopie) als het lopende stuk. `bewaarPad` =
+  // pad voor Opslaan (null bij een reservekopie: die krijgt "Opslaan als").
+  async function laadProject(path, bewaarPad) {
+    annuleerAutosave();
+    if (recording || armedWaiting) await toggleRecording();
+    if (stepMode) await setStepMode(false);
+    if (playingScore) await togglePlayScore();
+    const oud = scoreId;
+    const oudeKopie = heeftAutosave;
+    const [nieuwId, ui] = await invoke('notation_load_project', { path });
+    scoreId = nieuwId;
+    heeftAutosave = false; verwerpBevestigd = false;
+    if (oud != null) {
+      if (oudeKopie) { try { await invoke('notation_delete_autosave', { scoreId: oud }); } catch (e) {} }
+      try { await invoke('notation_close_score', { scoreId: oud }); } catch (e) {}
+    }
+    resetLokaleState();
+    score = await invoke('notation_get_score', { scoreId });
+    werkbalkUitScore();
+    projectPath = bewaarPad;
+    savedGeneration = bewaarPad ? score.generation : -1;
+    laatsteAutosaveGen = 0;
+    if (bewaarPad) voegRecentToe(bewaarPad, score.title);
+    pasUiPrefsToe(ui);
+    wizard = null;
+    scheduleRender();
+  }
+  // Drie knoppen: Opslaan / Niet opslaan / Annuleren (eigen modaal).
+  function vraagOpslaan(daarna) {
+    bevestig = {
+      tekst: tx('notation.unsaved_question').replace('{title}', score?.title || tx('notation.default_title')),
+      opslaan: async () => { if (await saveProject()) daarna(); },
+      ok: daarna, okTekst: tx('notation.dont_save'),
+    };
+  }
+  // Reservekopie: 2 s na de laatste wijziging; weg bij opslaan en bij netjes
+  // sluiten. Niet tijdens een opname (de MIDI-thread deelt de score-lock;
+  // na Stop volgt de kopie vanzelf). De timer hoort bij één score-id.
+  function scheduleAutosave() {
+    if (!isDirty() || scoreId == null) return;
+    if (recording || armedWaiting) return;
+    if (score.generation === laatsteAutosaveGen) return;
+    annuleerAutosave();
+    const id = scoreId;
+    autosaveTimer = setTimeout(async () => {
+      autosaveTimer = null;
+      if (id !== scoreId || !isDirty()) return;
+      if (recording || armedWaiting) return;
+      try {
+        await invoke('notation_autosave', { scoreId: id, ui: uiPrefs() });
+        if (id === scoreId) { laatsteAutosaveGen = score?.generation ?? 0; heeftAutosave = true; }
+      } catch (e) {}
+    }, 2000);
+  }
+  function annuleerAutosave() {
+    if (autosaveTimer) { clearTimeout(autosaveTimer); autosaveTimer = null; }
+  }
+  // Alleen een kopie die dít venster schreef mag weg: score-id's beginnen
+  // weliswaar boven oude kopieën, maar dubbel gestikt houdt beter.
+  function verwijderAutosave() {
+    annuleerAutosave();
+    if (scoreId != null && heeftAutosave) {
+      heeftAutosave = false;
+      return invoke('notation_delete_autosave', { scoreId }).catch(() => {});
+    }
+    return Promise.resolve();
+  }
+  async function herstelAutosave() {
+    const k = herstel && herstel[0];
+    herstel = null;
+    if (!k) return;
+    try {
+      await laadProject(k.path, null);
+      // De oude kopie hoorde bij een vorig score-id; de nieuwe komt vanzelf.
+      await invoke('notation_delete_autosave', { path: k.path });
+    } catch (e) {
+      // Onleesbaar: melden en opruimen, anders komt de vraag elke keer terug.
+      alert(tx('notation.open_project_failed').replace('{error}', e));
+      try { await invoke('notation_delete_autosave', { path: k.path }); } catch (e2) {}
+      wizard = { mode: 'new', initial: wizardInitial('new') };
+    }
+  }
+  async function verwijderHerstel() {
+    const lijst = herstel || [];
+    herstel = null;
+    for (const k of lijst) { try { await invoke('notation_delete_autosave', { path: k.path }); } catch (e) {} }
+    wizard = { mode: 'new', initial: wizardInitial('new') };
+  }
+
   // ---- Wizard "Nieuw stuk" (0.7.83; balkindeling sinds 0.7.14) ----
   // mode 'new': bij het openen van het venster en via Nieuw (Ctrl+N) — het
   // oude stuk gaat dicht en er komt een vers stuk met kop, maatsoort,
@@ -652,9 +832,9 @@
   }
   function openWizardFromScore() { wizard = { mode: 'edit', initial: wizardInitial('edit') }; }
   function openNewWizard() {
-    if (!isLive || wizard || bevestig) return;
-    if (scoreHasEvents) {
-      bevestig = { tekst: tx('notation.new_confirm'), ok: () => { wizard = { mode: 'new', initial: wizardInitial('new') }; } };
+    if (!isLive || wizard || bevestig || herstel) return;
+    if (isDirty() && !verwerpBevestigd) {
+      vraagOpslaan(() => { verwerpBevestigd = true; wizard = { mode: 'new', initial: wizardInitial('new') }; });
       return;
     }
     wizard = { mode: 'new', initial: wizardInitial('new') };
@@ -687,19 +867,28 @@
     const mode = wizard.mode;
     try {
       if (mode === 'new') {
+        annuleerAutosave();
         if (recording || armedWaiting) await toggleRecording();
         if (stepMode) await setStepMode(false);
         if (playingScore) await togglePlayScore();
         const oud = scoreId;
+        const oudeKopie = heeftAutosave;
         const spec = {
           title: stuk.title, composer: stuk.composer, subtitle: stuk.subtitle,
           beats_per_bar: stuk.beats, beat_unit: stuk.unit, key_fifths: stuk.keyFifths, minor: !!stuk.minor,
           bpm: stuk.bpm, min_measures: stuk.minMeasures, quantize: stuk.quantize, layers: laagSpecs(staves),
         };
         scoreId = await invoke('notation_new_score', { spec });
-        if (oud != null) { try { await invoke('notation_close_score', { scoreId: oud }); } catch (e2) {} }
+        heeftAutosave = false; verwerpBevestigd = false;
+        if (oud != null) {
+          if (oudeKopie) { try { await invoke('notation_delete_autosave', { scoreId: oud }); } catch (e2) {} }
+          try { await invoke('notation_close_score', { scoreId: oud }); } catch (e2) {}
+        }
         resetLokaleState();
         score = await invoke('notation_get_score', { scoreId });
+        projectPath = null;
+        savedGeneration = score.generation;
+        laatsteAutosaveGen = 0;
       } else {
         // Lopend stuk: kop, maatsoort, toonsoort, tempo, raster, maten; de
         // balken alleen zolang het stuk leeg is.
@@ -1051,7 +1240,27 @@
       minor = !!score.minor;
       title = score.title || '';
       await loadDivisions();      // divisienamen voor wizard + LayerBar-chips
-      wizard = { mode: 'new', initial: wizardInitial('new') }; // nieuw stuk kiezen vóór het inspelen
+      savedGeneration = score.generation; // een vers stuk is schoon
+      await laadRecent();
+      // Een niet-opgeslagen stuk van een vorige keer? Eerst herstel aanbieden.
+      let kopieen = [];
+      try { kopieen = await invoke('notation_list_autosaves'); } catch (e) {}
+      if (Array.isArray(kopieen) && kopieen.length) herstel = kopieen;
+      else wizard = { mode: 'new', initial: wizardInitial('new') }; // nieuw stuk kiezen vóór het inspelen
+      // Sluiten met onopgeslagen wijzigingen: eerst vragen (eigen modaal).
+      try {
+        const { getCurrentWindow } = await import('@tauri-apps/api/window');
+        const venster = getCurrentWindow();
+        unlisteners.push(await venster.onCloseRequested(async (ev) => {
+          if (sluitToegestaan || !isDirty()) { await verwijderAutosave(); return; }
+          ev.preventDefault();
+          vraagOpslaan(async () => {
+            sluitToegestaan = true;
+            await verwijderAutosave();
+            try { await venster.close(); } catch (e2) {}
+          });
+        }));
+      } catch (e) {}
       lastGeneration = 0;
       // Event-listeners voor live updates + edit-emits.
       const { listen } = await import('@tauri-apps/api/event');
@@ -1497,12 +1706,14 @@
   function handleKey(e) {
     if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT')) return;
     // Modaal open: alleen Escape (sluiten), verder geen sneltoetsen op de partituur.
-    if (wizard || bevestig) {
-      if (e.key === 'Escape') { wizard = null; bevestig = null; e.preventDefault(); }
+    if (wizard || bevestig || herstel) {
+      if (e.key === 'Escape' && !herstel) { wizard = null; bevestig = null; e.preventDefault(); }
       return;
     }
-    // Nieuw stuk (0.7.83), in beide standen.
+    // Nieuw stuk (0.7.83), opslaan/openen (0.7.84), in beide standen.
     if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'n') { openNewWizard(); e.preventDefault(); return; }
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 's') { if (e.shiftKey) saveProjectAs(); else saveProject(); e.preventDefault(); return; }
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'o') { openProject(); e.preventDefault(); return; }
     // K wisselt de weergave (0.7.73), in beide standen.
     if ((e.key === 'k' || e.key === 'K') && !e.ctrlKey && !e.altKey && !e.metaKey) {
       setViewMode(viewMode === 'klavar' ? 'staff' : 'klavar');
@@ -1675,18 +1886,38 @@
       <NewScoreWizard mode={wizard.mode} initial={wizard.initial} {divisions} hasNotes={scoreHasEvents}
         showHand={viewMode === 'klavar'} splitOpties={SPLIT_OPTIES} {keyChoices} {gridChoices}
         on:apply={onWizardApply} on:close={() => wizard = null}
-        on:previewTempo={(e) => previewTempo(e.detail.bpm, e.detail.beats, e.detail.unit)} />
+        on:previewTempo={(e) => previewTempo(e.detail.bpm, e.detail.beats, e.detail.unit)}
+        recent={recentLijst} on:openProject={() => openProject()} on:openRecent={(e) => openProject(e.detail.path)} />
     {/key}
   {/if}
   {#if bevestig}
-    <!-- Eigen bevestigingsvraag: window.confirm geeft in Tauri een Promise. -->
+    <!-- Eigen bevestigingsvraag: window.confirm geeft in Tauri een Promise.
+         Met `opslaan` wordt het Opslaan / Niet opslaan / Annuleren (0.7.84). -->
     <div class="wizard-overlay" role="dialog" aria-modal="true">
       <div class="wizard-modal bevestig-modal">
         <p>{bevestig.tekst}</p>
         <div class="wizard-actions">
           <span class="notation-spacer"></span>
           <button class="btn btn-secondary btn-sm" on:click={() => bevestig = null}>{$t('actions.cancel')}</button>
-          <button class="btn btn-primary btn-sm" on:click={() => { const ok = bevestig.ok; bevestig = null; ok(); }}>{$t('notation.confirm_continue')}</button>
+          {#if bevestig.opslaan}
+            <button class="btn btn-ghost btn-sm" on:click={() => { const ok = bevestig.ok; bevestig = null; ok(); }}>{bevestig.okTekst}</button>
+            <button class="btn btn-primary btn-sm" on:click={() => { const f = bevestig.opslaan; bevestig = null; f(); }}>{$t('actions.save')}</button>
+          {:else}
+            <button class="btn btn-primary btn-sm" on:click={() => { const ok = bevestig.ok; bevestig = null; ok(); }}>{bevestig.okTekst || $t('notation.confirm_continue')}</button>
+          {/if}
+        </div>
+      </div>
+    </div>
+  {/if}
+  {#if herstel}
+    <!-- Reservekopie van een vorige keer (0.7.84). -->
+    <div class="wizard-overlay" role="dialog" aria-modal="true">
+      <div class="wizard-modal bevestig-modal">
+        <p>{$t('notation.autosave_found').replace('{title}', herstel[0].title || $t('notation.default_title')).replace('{date}', new Date(herstel[0].mtime_ms).toLocaleString())}</p>
+        <div class="wizard-actions">
+          <span class="notation-spacer"></span>
+          <button class="btn btn-secondary btn-sm" on:click={verwijderHerstel}>{$t('notation.discard')}</button>
+          <button class="btn btn-primary btn-sm" on:click={herstelAutosave}>{$t('notation.restore')}</button>
         </div>
       </div>
     </div>
@@ -1808,7 +2039,10 @@
         </label>
       {/if}
       <button class="btn btn-ghost btn-sm" on:click={openNewWizard} title={$t('notation.new_title')}>{$t('notation.new')}</button>
-      <button class="btn btn-ghost btn-sm" on:click={openMidiFile} title={$t('notation.open_import_title')}>{$t('notation.open')}</button>
+      <button class="btn btn-ghost btn-sm" on:click={() => openProject()} title={$t('notation.open_project_title')}>{$t('notation.open_project')}</button>
+      <button class="btn btn-ghost btn-sm" class:dirty-save={dirty} on:click={() => saveProject()} title={$t('notation.save_title')}>{$t('notation.save')}{dirty ? ' *' : ''}</button>
+      <button class="btn btn-ghost btn-sm" on:click={() => saveProjectAs()} title={$t('notation.save_as_title')}>{$t('notation.save_as')}</button>
+      <button class="btn btn-ghost btn-sm" on:click={openMidiFile} title={$t('notation.open_import_title')}>{$t('notation.import_midi')}</button>
       <button class="btn btn-ghost btn-sm" on:click={saveMidiAs} title={$t('notation.save_as_midi_title')}>{$t('notation.save_as_midi')}</button>
       <button class="btn btn-primary btn-sm" on:click={printScore} disabled={viewMode === 'klavar' ? !(klavarModel && scoreHasEvents) : !xml}>{$t('notation.print_pdf')}</button>
       <button class="btn btn-ghost btn-sm" on:click={saveMusicXml} disabled={!xml}>{$t('notation.save_as_musicxml')}</button>
@@ -2191,6 +2425,7 @@
   .layer-rename { width: 8rem; font-size: 0.78rem; }
   .layer-name { cursor: text; }
   .bevestig-modal { max-width: 28rem; }
+  .dirty-save { font-weight: 600; }
   .bevestig-modal p { margin: 0.2rem 0 0.6rem; font-size: 0.9rem; }
   .render-ms { margin-left: auto; font-size: 0.72rem; opacity: 0.7; }
   .layer-divs {

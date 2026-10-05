@@ -1,0 +1,114 @@
+{
+  "format": "jmscore",
+  "version": 1,
+  "app": "JM-Orgue 0.7.84",
+  "score": {
+    "id": 7,
+    "layers": [
+      {
+        "id": 1,
+        "name": "Manuaal",
+        "bass_clef": false,
+        "takes": [
+          {
+            "id": 1,
+            "name": "Take 1",
+            "visible": true,
+            "events": [
+              {
+                "id": 1,
+                "midi": 60,
+                "start_us": 0,
+                "end_us": 400000,
+                "channel": 0,
+                "locked": false,
+                "hand": null
+              },
+              {
+                "id": 2,
+                "midi": 64,
+                "start_us": 400000,
+                "end_us": 800000,
+                "channel": 0,
+                "locked": false,
+                "hand": "left"
+              }
+            ]
+          },
+          {
+            "id": 3,
+            "name": "Take 2",
+            "visible": false,
+            "events": [
+              {
+                "id": 5,
+                "midi": 67,
+                "start_us": 0,
+                "end_us": 1600000,
+                "channel": 1,
+                "locked": false,
+                "hand": null
+              }
+            ]
+          }
+        ],
+        "armed_take": 3,
+        "divisions": [
+          "Hauptwerk",
+          "Positief"
+        ],
+        "klavar_hand": "right",
+        "klavar_split": null
+      },
+      {
+        "id": 2,
+        "name": "Pedaal",
+        "bass_clef": true,
+        "takes": [
+          {
+            "id": 2,
+            "name": "Take 1",
+            "visible": true,
+            "events": [
+              {
+                "id": 9,
+                "midi": 43,
+                "start_us": 0,
+                "end_us": 1600000,
+                "channel": 2,
+                "locked": false,
+                "hand": null
+              }
+            ]
+          }
+        ],
+        "armed_take": 2,
+        "divisions": [],
+        "klavar_hand": null,
+        "klavar_split": 53
+      }
+    ],
+    "bpm": 72.0,
+    "beats_per_bar": 6,
+    "quantize": 2,
+    "key_fifths": -2,
+    "title": "Trio",
+    "tolerance_pct": 60,
+    "minor": true,
+    "beat_unit": 8,
+    "composer": "Anoniem",
+    "subtitle": "BWV 0",
+    "min_measures": 4,
+    "metronome": {
+      "click_on": true,
+      "count_in_beats": 2
+    },
+    "armed_layer": 2,
+    "generation": 5
+  },
+  "ui": {
+    "view_mode": "staff",
+    "zoom": 1.0,
+    "klavar_bereik": "auto"
+  }
+}

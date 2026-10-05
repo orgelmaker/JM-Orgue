@@ -863,7 +863,22 @@
     "wizard_next": "Weiter",
     "wizard_back": "Zurück",
     "wizard_apply": "Übernehmen",
-    "wizard_new_title": "Neues Stück"
+    "wizard_new_title": "Neues Stück",
+    "open_project": "Öffnen…",
+    "open_project_title": "Ein gespeichertes Stück öffnen (.jmscore, Strg+O)",
+    "save": "Speichern",
+    "save_title": "Stück als JM-Orgue-Partitur speichern (Strg+S)",
+    "save_as": "Speichern unter…",
+    "save_as_title": "Stück unter anderem Namen speichern (Strg+Umschalt+S)",
+    "import_midi": "MIDI importieren…",
+    "project_filter": "JM-Orgue-Partitur",
+    "open_project_failed": "Öffnen fehlgeschlagen: {error}",
+    "unsaved_question": "„{title}“ hat ungespeicherte Änderungen. Speichern?",
+    "dont_save": "Nicht speichern",
+    "recent_label": "Oder ein vorhandenes Stück öffnen:",
+    "autosave_found": "Es gibt ein ungespeichertes Stück „{title}“ vom {date}. Wiederherstellen?",
+    "restore": "Wiederherstellen",
+    "discard": "Löschen"
   },
   "temperaments": {
     "name_prompt": "Name für diese Stimmung:"

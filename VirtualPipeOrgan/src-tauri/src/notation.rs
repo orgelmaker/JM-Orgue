@@ -790,9 +790,15 @@ pub fn render_musicxml(qs: &QuantizedScore, opts: &NotationOptions) -> Result<St
 use serde::Serialize;
 use std::collections::HashMap;
 
+fn waar() -> bool { true }
+
+/// Bovengrens voor het minimale aantal maten (wizard, groei met de cursor en
+/// geladen bestanden): daarboven wordt renderen onwerkbaar.
+pub const MAX_MIN_MEASURES: u32 = 10_000;
+
 /// Eén afgeronde noot in een take (nieuwe naam voor NoteEv-instantie in de
 /// live-flow; NoteEv zelf blijft de "flat" struct voor de kwantiseerder).
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LayerEv {
     /// Stabiel ID voor selectie/edit (monotoon per Score).
     pub id: u64,
@@ -809,15 +815,16 @@ pub struct LayerEv {
     pub hand: Option<KlavarHand>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Take {
     pub id: u32,
     pub name: String,
+    #[serde(default = "waar")]
     pub visible: bool,
     pub events: Vec<LayerEv>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Layer {
     pub id: u32,
     pub name: String,
@@ -826,6 +833,7 @@ pub struct Layer {
     /// Volgorde: eerste take = eerste opname; nieuwe take = laatste.
     pub takes: Vec<Take>,
     /// Take waar nieuwe MIDI-events in geschreven worden (armed).
+    #[serde(default)]
     pub armed_take: Option<u32>,
     /// Divisienamen die tijdens het inspelen naar déze balk routeren (via de
     /// kanaal-inleer van die divisie). Leeg = geen routering; events zonder
@@ -842,7 +850,7 @@ pub struct Layer {
     pub klavar_split: Option<u8>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MetronomeCfg {
     pub click_on: bool,
     pub count_in_beats: u8,
@@ -851,7 +859,7 @@ impl Default for MetronomeCfg {
     fn default() -> Self { Self { click_on: false, count_in_beats: 0 } }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Score {
     pub id: u32,
     pub layers: Vec<Layer>,
@@ -877,10 +885,13 @@ pub struct Score {
     /// UI verhoogt het zodra de invoercursor voorbij de laatste maat komt.
     #[serde(default)]
     pub min_measures: u32,
+    #[serde(default)]
     pub metronome: MetronomeCfg,
     /// Alleen armed = actief onder één laag tegelijk; None = geen opname.
+    #[serde(default)]
     pub armed_layer: Option<u32>,
     /// Monotoon oplopende counter — de UI regenereert MusicXML zodra deze wijzigt.
+    #[serde(default)]
     pub generation: u64,
     /// Interne teller voor stabiele event-ID's; niet naar de UI.
     #[serde(skip)]
@@ -915,9 +926,52 @@ impl Score {
             undo: Vec::new(), redo: Vec::new(),
         }
     }
+    /// Na het laden uit een bestand (0.7.84): tellers herleiden uit de inhoud
+    /// zodat nieuwe ID's nooit botsen, undo/redo leeg, waarden geklemd, armed
+    /// laag en take geldig, generation vers.
+    pub fn herleid_na_laden(&mut self) {
+        let max_ev = self.layers.iter().flat_map(|l| l.takes.iter()).flat_map(|t| t.events.iter()).map(|e| e.id).max().unwrap_or(0);
+        let max_laag = self.layers.iter().map(|l| l.id).max().unwrap_or(0);
+        let max_take = self.layers.iter().flat_map(|l| l.takes.iter()).map(|t| t.id).max().unwrap_or(0);
+        self.next_event_id = max_ev.saturating_add(1);
+        self.next_layer_id = max_laag.saturating_add(1);
+        self.next_take_id = max_take.saturating_add(1);
+        // Dubbele ID's (alleen uit een bewerkt of beschadigd bestand) krijgen
+        // een vers nummer: elk bewerkcommando leunt op "stabiel, uniek ID".
+        let mut gezien_laag: std::collections::HashSet<u32> = std::collections::HashSet::new();
+        let mut gezien_take: std::collections::HashSet<u32> = std::collections::HashSet::new();
+        let mut gezien_ev: std::collections::HashSet<u64> = std::collections::HashSet::new();
+        for l in &mut self.layers {
+            if !gezien_laag.insert(l.id) { l.id = self.next_layer_id; self.next_layer_id = self.next_layer_id.saturating_add(1); gezien_laag.insert(l.id); }
+            for t in &mut l.takes {
+                if !gezien_take.insert(t.id) { t.id = self.next_take_id; self.next_take_id = self.next_take_id.saturating_add(1); gezien_take.insert(t.id); }
+                for e in &mut t.events {
+                    if !gezien_ev.insert(e.id) { e.id = self.next_event_id; self.next_event_id = self.next_event_id.saturating_add(1); gezien_ev.insert(e.id); }
+                }
+            }
+        }
+        self.undo.clear();
+        self.redo.clear();
+        self.generation = 1;
+        self.min_measures = self.min_measures.min(MAX_MIN_MEASURES);
+        self.beat_unit = klem_beat_unit(self.beat_unit);
+        self.beats_per_bar = self.beats_per_bar.clamp(1, 12);
+        self.quantize = self.quantize.clamp(1, 8);
+        self.key_fifths = self.key_fifths.clamp(-7, 7);
+        self.tolerance_pct = self.tolerance_pct.min(100);
+        if !self.bpm.is_finite() || !(20.0..=300.0).contains(&self.bpm) { self.bpm = 90.0; }
+        if self.armed_layer.map(|a| !self.layers.iter().any(|l| l.id == a)).unwrap_or(true) {
+            self.armed_layer = self.layers.first().map(|l| l.id);
+        }
+        for l in &mut self.layers {
+            if l.armed_take.map(|a| !l.takes.iter().any(|t| t.id == a)).unwrap_or(true) {
+                l.armed_take = l.takes.last().map(|t| t.id);
+            }
+        }
+    }
     pub fn undo_len(&self) -> usize { self.undo.len() }
     pub fn redo_len(&self) -> usize { self.redo.len() }
-    pub fn new_event_id(&mut self) -> u64 { let id = self.next_event_id; self.next_event_id += 1; id }
+    pub fn new_event_id(&mut self) -> u64 { let id = self.next_event_id; self.next_event_id = self.next_event_id.saturating_add(1); id }
     pub fn bump_gen(&mut self) { self.generation = self.generation.saturating_add(1); }
 
     /// Push undo-inverse; wist de redo-stack (nieuwe bewerking = redo-tak dood).
@@ -934,9 +988,9 @@ impl Score {
     pub fn pop_redo(&mut self) -> Option<EditCommand> { self.redo.pop() }
 
     pub fn add_layer(&mut self, name: String, bass_clef: Option<bool>) -> u32 {
-        let id = self.next_layer_id; self.next_layer_id += 1;
+        let id = self.next_layer_id; self.next_layer_id = self.next_layer_id.saturating_add(1);
         // Nieuwe laag krijgt automatisch een eerste (lege) take.
-        let take_id = self.next_take_id; self.next_take_id += 1;
+        let take_id = self.next_take_id; self.next_take_id = self.next_take_id.saturating_add(1);
         self.layers.push(Layer {
             id, name, bass_clef,
             takes: vec![Take { id: take_id, name: "Take 1".into(), visible: true, events: Vec::new() }],
@@ -950,7 +1004,7 @@ impl Score {
     }
 
     pub fn add_take(&mut self, layer_id: u32) -> Option<u32> {
-        let take_id = self.next_take_id; self.next_take_id += 1;
+        let take_id = self.next_take_id; self.next_take_id = self.next_take_id.saturating_add(1);
         let layer = self.layers.iter_mut().find(|l| l.id == layer_id)?;
         let name = format!("Take {}", layer.takes.len() + 1);
         layer.takes.push(Take { id: take_id, name, visible: true, events: Vec::new() });

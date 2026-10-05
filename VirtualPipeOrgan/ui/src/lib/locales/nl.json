@@ -863,7 +863,22 @@
     "wizard_next": "Verder",
     "wizard_back": "Terug",
     "wizard_apply": "Toepassen",
-    "wizard_new_title": "Nieuw stuk"
+    "wizard_new_title": "Nieuw stuk",
+    "open_project": "Openen…",
+    "open_project_title": "Een opgeslagen stuk openen (.jmscore, Ctrl+O)",
+    "save": "Opslaan",
+    "save_title": "Stuk opslaan als JM-Orgue partituur (Ctrl+S)",
+    "save_as": "Opslaan als…",
+    "save_as_title": "Stuk onder een andere naam opslaan (Ctrl+Shift+S)",
+    "import_midi": "MIDI importeren…",
+    "project_filter": "JM-Orgue partituur",
+    "open_project_failed": "Openen mislukt: {error}",
+    "unsaved_question": "\"{title}\" heeft onopgeslagen wijzigingen. Opslaan?",
+    "dont_save": "Niet opslaan",
+    "recent_label": "Of open een bestaand stuk:",
+    "autosave_found": "Er staat een niet-opgeslagen stuk \"{title}\" van {date}. Herstellen?",
+    "restore": "Herstellen",
+    "discard": "Verwijderen"
   },
   "temperaments": {
     "name_prompt": "Naam voor deze stemming:"

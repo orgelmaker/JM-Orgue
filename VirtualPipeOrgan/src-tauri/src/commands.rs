@@ -4304,7 +4304,7 @@ pub fn notation_new_score(state: State<AppState>, app: tauri::AppHandle, spec: O
         sc.key_fifths = spec.key_fifths.clamp(-7, 7);
         sc.minor = spec.minor;
         if spec.bpm.is_finite() && (20.0..=300.0).contains(&spec.bpm) { sc.bpm = spec.bpm; }
-        sc.min_measures = spec.min_measures.min(10_000);
+        sc.min_measures = spec.min_measures.min(crate::notation::MAX_MIN_MEASURES);
         sc.quantize = spec.quantize.clamp(1, 8);
         for l in spec.layers {
             let naam = if l.name.trim().is_empty() { format!("Balk {}", sc.layers.len() + 1) } else { l.name.trim().to_string() };
@@ -4794,7 +4794,7 @@ pub fn notation_set_quantize(state: State<AppState>, app: tauri::AppHandle, scor
 #[tauri::command]
 pub fn notation_set_min_measures(state: State<AppState>, app: tauri::AppHandle, score_id: u32, min_measures: u32) -> Result<u64, String> {
     let gen = with_score_mut(&state, score_id, |sc| {
-        let n = min_measures.min(10_000);
+        let n = min_measures.min(crate::notation::MAX_MIN_MEASURES);
         if sc.min_measures != n { sc.min_measures = n; sc.bump_gen(); }
         sc.generation
     })?;
@@ -4850,6 +4850,82 @@ pub fn notation_move_layer(state: State<AppState>, app: tauri::AppHandle, score_
     })??;
     tauri::async_runtime::spawn(emit_score_changed(app, score_id, gen));
     Ok(gen)
+}
+
+/// Partituur opslaan als .jmscore (0.7.84), met de weergavevoorkeuren.
+#[tauri::command]
+pub fn notation_save_project(state: State<AppState>, score_id: u32, path: String, ui: crate::notation_file::UiPrefs) -> Result<u64, String> {
+    // Kloon onder de lock, schrijf erbuiten: de MIDI-thread neemt dezelfde
+    // lock per noot tijdens een opname en mag niet op de schijf wachten.
+    let sc = {
+        let scores = state.notation_scores.read();
+        scores.get(&score_id).cloned().ok_or_else(|| format!("Score {} niet gevonden", score_id))?
+    };
+    crate::notation_file::save(&sc, &ui, std::path::Path::new(&path))?;
+    info!("Partituur opgeslagen naar {}", path);
+    // De generation van wat er op schijf staat: de UI rekent daarmee "vuil".
+    Ok(sc.generation)
+}
+
+/// Partituur openen (0.7.84): nieuwe score in het geheugen; geeft
+/// (score-id, weergavevoorkeuren). Het oude stuk sluit de UI zelf.
+#[tauri::command]
+pub fn notation_load_project(state: State<AppState>, app: tauri::AppHandle, path: String) -> Result<(u32, crate::notation_file::UiPrefs), String> {
+    let (mut sc, ui) = crate::notation_file::load(std::path::Path::new(&path))?;
+    let id = {
+        let mut next = state.notation_next_id.write();
+        let id = *next;
+        *next = next.saturating_add(1);
+        id
+    };
+    sc.id = id;
+    state.notation_scores.write().insert(id, sc);
+    *state.notation_app_handle.write() = Some(app.clone());
+    info!("Partituur geopend uit {}", path);
+    Ok((id, ui))
+}
+
+/// Reservekopie van een stuk (0.7.84): `<app-data>/notatie/autosave-<id>.jmscore`.
+#[tauri::command]
+pub fn notation_autosave(state: State<AppState>, score_id: u32, ui: crate::notation_file::UiPrefs) -> Result<String, String> {
+    let pad = crate::notation_file::autosave_pad(&state.app_data_dir, score_id);
+    let sc = {
+        let scores = state.notation_scores.read();
+        scores.get(&score_id).cloned().ok_or_else(|| format!("Score {} niet gevonden", score_id))?
+    };
+    crate::notation_file::save(&sc, &ui, &pad)?;
+    Ok(pad.to_string_lossy().to_string())
+}
+
+/// Gevonden reservekopieën, nieuwste eerst (0.7.84).
+#[tauri::command]
+pub fn notation_list_autosaves(state: State<AppState>) -> Vec<crate::notation_file::AutosaveInfo> {
+    crate::notation_file::list_autosaves(&state.app_data_dir)
+}
+
+/// Reservekopie verwijderen (0.7.84): op score-id of op pad, maar alleen
+/// binnen onze eigen map. Een al verdwenen bestand is geen fout.
+#[tauri::command]
+pub fn notation_delete_autosave(state: State<AppState>, score_id: Option<u32>, path: Option<String>) -> Result<(), String> {
+    let pad = match (score_id, path) {
+        (Some(id), _) => crate::notation_file::autosave_pad(&state.app_data_dir, id),
+        (None, Some(p)) => std::path::PathBuf::from(p),
+        _ => return Err("Geen reservekopie opgegeven".into()),
+    };
+    if !crate::notation_file::is_autosave_pad(&state.app_data_dir, &pad) {
+        return Err("Geen reservekopie van JM-Orgue".into());
+    }
+    match std::fs::remove_file(&pad) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(format!("Verwijderen mislukt ({}): {}", pad.display(), e)),
+    }
+}
+
+/// Bestaan deze bestanden nog? (recent-lijst van het notatievenster, 0.7.84)
+#[tauri::command]
+pub fn paths_exist(paths: Vec<String>) -> Vec<bool> {
+    paths.iter().map(|p| std::path::Path::new(p).is_file()).collect()
 }
 
 /// Stuk sluiten (0.7.83): weg uit het geheugen; een lopende opname of

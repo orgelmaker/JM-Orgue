@@ -863,7 +863,22 @@
     "wizard_next": "Avanti",
     "wizard_back": "Indietro",
     "wizard_apply": "Applica",
-    "wizard_new_title": "Nuovo brano"
+    "wizard_new_title": "Nuovo brano",
+    "open_project": "Apri…",
+    "open_project_title": "Apri un brano salvato (.jmscore, Ctrl+O)",
+    "save": "Salva",
+    "save_title": "Salva il brano come partitura JM-Orgue (Ctrl+S)",
+    "save_as": "Salva con nome…",
+    "save_as_title": "Salva il brano con un altro nome (Ctrl+Maiusc+S)",
+    "import_midi": "Importa MIDI…",
+    "project_filter": "Partitura JM-Orgue",
+    "open_project_failed": "Apertura non riuscita: {error}",
+    "unsaved_question": "\"{title}\" ha modifiche non salvate. Salvare?",
+    "dont_save": "Non salvare",
+    "recent_label": "Oppure apri un brano esistente:",
+    "autosave_found": "C’è un brano non salvato \"{title}\" del {date}. Ripristinarlo?",
+    "restore": "Ripristina",
+    "discard": "Elimina"
   },
   "temperaments": {
     "name_prompt": "Nome di questo temperamento:"

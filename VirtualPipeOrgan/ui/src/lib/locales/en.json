@@ -863,7 +863,22 @@
     "wizard_next": "Next",
     "wizard_back": "Back",
     "wizard_apply": "Apply",
-    "wizard_new_title": "New piece"
+    "wizard_new_title": "New piece",
+    "open_project": "Open…",
+    "open_project_title": "Open a saved piece (.jmscore, Ctrl+O)",
+    "save": "Save",
+    "save_title": "Save the piece as a JM-Orgue score (Ctrl+S)",
+    "save_as": "Save as…",
+    "save_as_title": "Save the piece under another name (Ctrl+Shift+S)",
+    "import_midi": "Import MIDI…",
+    "project_filter": "JM-Orgue score",
+    "open_project_failed": "Opening failed: {error}",
+    "unsaved_question": "\"{title}\" has unsaved changes. Save?",
+    "dont_save": "Don't save",
+    "recent_label": "Or open an existing piece:",
+    "autosave_found": "There is an unsaved piece \"{title}\" from {date}. Restore it?",
+    "restore": "Restore",
+    "discard": "Delete"
   },
   "temperaments": {
     "name_prompt": "Name for this temperament:"

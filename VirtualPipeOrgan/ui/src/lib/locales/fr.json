@@ -863,7 +863,22 @@
     "wizard_next": "Suivant",
     "wizard_back": "Retour",
     "wizard_apply": "Appliquer",
-    "wizard_new_title": "Nouvelle pièce"
+    "wizard_new_title": "Nouvelle pièce",
+    "open_project": "Ouvrir…",
+    "open_project_title": "Ouvrir une pièce enregistrée (.jmscore, Ctrl+O)",
+    "save": "Enregistrer",
+    "save_title": "Enregistrer la pièce comme partition JM-Orgue (Ctrl+S)",
+    "save_as": "Enregistrer sous…",
+    "save_as_title": "Enregistrer la pièce sous un autre nom (Ctrl+Maj+S)",
+    "import_midi": "Importer un MIDI…",
+    "project_filter": "Partition JM-Orgue",
+    "open_project_failed": "Ouverture impossible : {error}",
+    "unsaved_question": "« {title} » a des modifications non enregistrées. Enregistrer ?",
+    "dont_save": "Ne pas enregistrer",
+    "recent_label": "Ou ouvrir une pièce existante :",
+    "autosave_found": "Une pièce non enregistrée « {title} » du {date} existe. La restaurer ?",
+    "restore": "Restaurer",
+    "discard": "Supprimer"
   },
   "temperaments": {
     "name_prompt": "Nom de ce tempérament :"

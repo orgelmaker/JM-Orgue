@@ -14,6 +14,7 @@ mod loop_tool;
 mod mengpool;
 mod midi_archive;
 mod notation;
+mod notation_file;
 mod klavar;
 mod recorder;
 mod remote;
@@ -161,6 +162,13 @@ fn main() {
             // Uitgangscorrectie (0.7.77) van de laatst actieve profielsoort
             // meteen op de verse audiothread, nog vóór de frontend er is.
             commands::eq_uitgang_toepassen(&state);
+            // Score-id's beginnen boven de reservekopieën van een vorige sessie
+            // (0.7.84): anders zou een vers stuk dezelfde kopie-naam krijgen.
+            {
+                let hoogste = notation_file::hoogste_autosave_id(&state.app_data_dir);
+                let mut next = state.notation_next_id.write();
+                if *next <= hoogste { *next = hoogste.saturating_add(1); }
+            }
             // AppHandle voor frontend-events (laad-voortgang tijdens organ-load).
             *state.app_handle.write() = Some(app.handle().clone());
 
@@ -519,6 +527,12 @@ fn main() {
             commands::notation_undo,
             commands::notation_redo,
             commands::notation_import_midi,
+            commands::notation_save_project,
+            commands::notation_load_project,
+            commands::notation_autosave,
+            commands::notation_list_autosaves,
+            commands::notation_delete_autosave,
+            commands::paths_exist,
             commands::set_pipe_voicing,
             commands::get_pipe_voicings,
             commands::reset_pipe_voicing,

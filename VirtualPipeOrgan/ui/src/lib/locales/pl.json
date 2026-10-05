@@ -863,7 +863,22 @@
     "wizard_next": "Dalej",
     "wizard_back": "Wstecz",
     "wizard_apply": "Zastosuj",
-    "wizard_new_title": "Nowy utwór"
+    "wizard_new_title": "Nowy utwór",
+    "open_project": "Otwórz…",
+    "open_project_title": "Otwórz zapisany utwór (.jmscore, Ctrl+O)",
+    "save": "Zapisz",
+    "save_title": "Zapisz utwór jako partyturę JM-Orgue (Ctrl+S)",
+    "save_as": "Zapisz jako…",
+    "save_as_title": "Zapisz utwór pod inną nazwą (Ctrl+Shift+S)",
+    "import_midi": "Importuj MIDI…",
+    "project_filter": "Partytura JM-Orgue",
+    "open_project_failed": "Nie udało się otworzyć: {error}",
+    "unsaved_question": "„{title}” ma niezapisane zmiany. Zapisać?",
+    "dont_save": "Nie zapisuj",
+    "recent_label": "Albo otwórz istniejący utwór:",
+    "autosave_found": "Jest niezapisany utwór „{title}” z {date}. Przywrócić?",
+    "restore": "Przywróć",
+    "discard": "Usuń"
   },
   "temperaments": {
     "name_prompt": "Nazwa tego stroju:"

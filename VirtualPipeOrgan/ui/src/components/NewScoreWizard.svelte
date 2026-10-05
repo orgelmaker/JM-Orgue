@@ -21,6 +21,7 @@
   export let splitOpties = [];      // [[midi, naam]] voor R+L
   export let keyChoices = [];       // [{ v, label }]
   export let gridChoices = [];      // [{ v, label }]
+  export let recent = [];           // [{ path, title, date }] — recente .jmscore-bestanden (0.7.84)
   const dispatch = createEventDispatcher();
 
   let stap = 1;
@@ -171,6 +172,16 @@
       {/if}
     {/if}
 
+    {#if mode === 'new' && stap === 1}
+      <!-- Of een bestaand stuk openen (0.7.84). -->
+      <div class="wizard-recent">
+        <span class="wizard-hint inline">{$t('notation.recent_label')}</span>
+        <button class="btn btn-ghost btn-sm" on:click={() => dispatch('openProject')}>{$t('notation.open_project')}</button>
+        {#each recent as r (r.path)}
+          <button class="recent-link" on:click={() => dispatch('openRecent', { path: r.path })} title={r.path}>{r.title || r.path.split(/[\\/]/).pop()}</button>
+        {/each}
+      </div>
+    {/if}
     <div class="wizard-actions">
       {#if stap === 2}
         <button class="btn btn-ghost btn-sm" on:click={() => stap = 1}>‹ {$t('notation.wizard_back')}</button>
@@ -222,6 +233,8 @@
   .wizard-div { display: flex; align-items: center; gap: 0.25rem; font-size: 0.8rem; white-space: nowrap; cursor: pointer; }
   .wizard-remove { margin-left: auto; border: none; background: none; color: #cc6666; font-size: 1.1rem; cursor: pointer; }
   .wizard-actions { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.8rem; }
+  .wizard-recent { display: flex; align-items: center; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.9rem; padding-top: 0.6rem; border-top: 1px solid var(--text-muted, #555); }
+  .recent-link { border: none; background: transparent; color: var(--gold-border, #d4af37); cursor: pointer; text-decoration: underline; font-size: 0.8rem; padding: 0.1rem 0.3rem; }
   .notation-spacer { flex: 1; }
   .layer-hand, .layer-split { font-size: 0.75rem; }
 </style>

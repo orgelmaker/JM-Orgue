@@ -5,6 +5,25 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.84] - 2026-10-06
+
+### Partituren opslaan en openen
+- Een stuk kunt u nu bewaren als **JM-Orgue partituur** (`.jmscore`) en
+  later weer openen, met alle opnamen, balken, handen, routering, kop,
+  maatsoort, tempo en weergave. **Opslaan** (Ctrl+S), **Opslaan als…**
+  (Ctrl+Shift+S) en **Openen…** (Ctrl+O) staan in de werkbalk; de wizard
+  "Nieuw stuk" toont uw recente stukken.
+- Een sterretje in de venstertitel en achter Opslaan laat zien dat er
+  onopgeslagen wijzigingen zijn; bij sluiten, bij Nieuw en bij Openen wordt
+  gevraagd of u wilt bewaren (Opslaan / Niet opslaan / Annuleren).
+- Het venster bewaart tussendoor automatisch een reservekopie (niet tijdens
+  een opname; wel meteen na Stop) en biedt die na een onverwacht einde aan
+  bij de volgende keer Noteren (Herstellen / Verwijderen).
+- Het importeren van een MIDI-bestand als extra take heet nu **MIDI
+  importeren…**. Een bestand van een nieuwere JM-Orgue wordt geweigerd in
+  plaats van verkeerd gelezen; ontbrekende velden uit oudere bestanden
+  krijgen hun standaardwaarde.
+
 ## [0.7.83] - 2026-10-05
 
 ### Nieuw stuk, maatsoorten en een leesbaarder blad
