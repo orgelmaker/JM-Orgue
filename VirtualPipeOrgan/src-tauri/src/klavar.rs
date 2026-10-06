@@ -74,6 +74,8 @@ pub struct KlavarNote {
     /// bij elke wissel van laag binnen die hand (alleen bij meer dan één
     /// manuaallaag).
     pub label: Option<String>,
+    /// Fermate (0.7.89): de renderer zet het teken naast de kop.
+    pub fermata: bool,
 }
 
 /// Eén balk (manuaal of pedaal) met zijn bereik en noten.
@@ -112,6 +114,8 @@ pub struct KlavarModel {
     pub pedal: Option<KlavarStaff>,
     /// Aanwijzingen (0.7.88) als label naast de balk, op rastertijd.
     pub teksten: Vec<KlavarTekst>,
+    /// Maatstrepen, herhalingen en volta's (0.7.89), per maat (0-gebaseerd).
+    pub balken: Vec<crate::notation::BarAttr>,
 }
 
 /// Eén aanwijzing in klavar: rechts van de manuaalbalk (of links van de
@@ -295,7 +299,7 @@ pub fn key_root(key_fifths: i8, minor: bool) -> u8 {
 /// Het klavar-model uit het gedeelde gekwantiseerde model. `handen` is de
 /// toewijzing per balkindex (uit `assign_hands` over ALLE balken), `legend`
 /// de legenda over alle lagen.
-pub fn klavar_model(qs: &QuantizedScore, handen: &[(KlavarHand, Option<u8>)], legend: Vec<KlavarLegend>, title: &str, generation: Option<u64>, key_fifths: i8, minor: bool, min_measures: u64) -> KlavarModel {
+pub fn klavar_model(qs: &QuantizedScore, handen: &[(KlavarHand, Option<u8>)], legend: Vec<KlavarLegend>, title: &str, generation: Option<u64>, key_fifths: i8, minor: bool, min_measures: u64, bars: &[crate::notation::BarAttr]) -> KlavarModel {
     let mut manual: Vec<KlavarNote> = Vec::new();
     let mut pedal: Vec<KlavarNote> = Vec::new();
     for st in &qs.staves {
@@ -305,6 +309,7 @@ pub fn klavar_model(qs: &QuantizedScore, handen: &[(KlavarHand, Option<u8>)], le
             let noot = KlavarNote {
                 id: n.id, layer_id: st.layer_id, staff: st.staff_index, midi: n.midi, start: n.start, end: n.end, end_cut: n.end, hand, voice: n.voice.clamp(1, 4),
                 stop: false, dots: Vec::new(), bar_crossings: Vec::new(), beam: None, label: None,
+                fermata: n.articulations.contains(&crate::notation::Articulation::Fermata),
             };
             if hand == KlavarHand::Pedal { pedal.push(noot); } else { manual.push(noot); }
         }
@@ -368,6 +373,7 @@ pub fn klavar_model(qs: &QuantizedScore, handen: &[(KlavarHand, Option<u8>)], le
             let op_pedaal = handen.get(st.staff_index).map(|h| h.0 == KlavarHand::Pedal).unwrap_or(st.pedal);
             st.marks.iter().map(move |mk| KlavarTekst { start: mk.pos, text: mk.text.clone(), pedal: op_pedaal })
         }).collect(),
+        balken: bars.to_vec(),
         pedal: if heeft_pedaal { Some(KlavarStaff { midi_min: pmin, midi_max: pmax, notes: pedal }) } else { None },
     }
 }
@@ -395,7 +401,7 @@ pub fn klavar_model_from_staves(staves: &[Staff], opts: &NotationOptions, genera
     let legend = legenda(staves, &handen);
     let qs = quantize_score(staves, opts);
     let title = opts.title.clone().unwrap_or_default();
-    klavar_model(&qs, &handen, legend, &title, generation, opts.key_fifths, opts.minor.unwrap_or(false), opts.min_measures.unwrap_or(0) as u64)
+    klavar_model(&qs, &handen, legend, &title, generation, opts.key_fifths, opts.minor.unwrap_or(false), opts.min_measures.unwrap_or(0) as u64, opts.bars.as_deref().unwrap_or(&[]))
 }
 
 /// Klavar-model uit een live Score.
@@ -410,7 +416,7 @@ mod tests {
     use crate::notation::{LayerEv, NoteEv};
 
     fn opts(beats: u8, q: u8) -> NotationOptions {
-        NotationOptions { bpm: 60.0, beats_per_bar: beats, quantize: q, key_fifths: 0, title: Some("T".into()), staves: None, tolerance_pct: Some(100), minor: None, beat_unit: None, min_measures: None, composer: None, subtitle: None }
+        NotationOptions { bpm: 60.0, beats_per_bar: beats, quantize: q, key_fifths: 0, title: Some("T".into()), staves: None, tolerance_pct: Some(100), minor: None, beat_unit: None, min_measures: None, composer: None, subtitle: None, bars: None }
     }
 
     /// Balk met noten (midi, start s, eind s); bij 60 bpm en q=4 is één
@@ -418,7 +424,7 @@ mod tests {
     fn balk(naam: &str, pedal: bool, hand: Option<KlavarHand>, noten: &[(u8, f64, f64)]) -> Staff {
         Staff {
             name: naam.into(), pedal, hand,
-            notes: noten.iter().enumerate().map(|(i, &(m, s, e))| NoteEv { midi: m, start_sec: s, end_sec: e, id: Some(i as u64 + 1), hand: None, voice: 1, lyrics: Vec::new() }).collect(),
+            notes: noten.iter().enumerate().map(|(i, &(m, s, e))| NoteEv { midi: m, start_sec: s, end_sec: e, id: Some(i as u64 + 1), hand: None, voice: 1, lyrics: Vec::new(), articulations: Vec::new(), spelling: None }).collect(),
             ..Default::default()
         }
     }
@@ -515,7 +521,7 @@ mod tests {
     fn speling_heeft_tijdsvloer() {
         // 120 bpm, q=8: een eenheid is 62,5 ms; legato-overlap van 160 ms mag
         // geen stip en geen stopteken geven.
-        let o = NotationOptions { bpm: 120.0, beats_per_bar: 4, quantize: 8, key_fifths: 0, title: None, staves: None, tolerance_pct: Some(100), minor: None, beat_unit: None, min_measures: None, composer: None, subtitle: None };
+        let o = NotationOptions { bpm: 120.0, beats_per_bar: 4, quantize: 8, key_fifths: 0, title: None, staves: None, tolerance_pct: Some(100), minor: None, beat_unit: None, min_measures: None, composer: None, subtitle: None, bars: None };
         let m = klavar_model_from_staves(&[balk("HW", false, Some(KlavarHand::Right), &[(60, 0.0, 1.16), (62, 1.0, 2.0)])], &o, None);
         let n = noot(&m.manual, 60, 0);
         assert!(n.dots.is_empty());
@@ -678,7 +684,7 @@ mod tests {
         sc.add_layer("Hoofdwerk".into(), None);
         sc.add_layer("Pedaal".into(), None);
         let id = sc.new_event_id();
-        sc.layers[0].takes[0].events.push(LayerEv { id, midi: 60, start_us: 0, end_us: 500_000, channel: 0, locked: false, voice: 1, lyrics: Vec::new(), hand: None });
+        sc.layers[0].takes[0].events.push(LayerEv { id, midi: 60, start_us: 0, end_us: 500_000, channel: 0, locked: false, voice: 1, lyrics: Vec::new(), articulations: Vec::new(), spelling: None, hand: None });
         let v = serde_json::to_value(klavar_model_from_score(&sc)).expect("json");
         assert!(v.get("measure_len").is_some());
         assert_eq!(v["manual"]["notes"][0]["id"], serde_json::json!(id));
@@ -704,6 +710,18 @@ mod tests {
         let m = klavar_model_from_staves(&[st], &opts(4, 4), None);
         assert!(m.pedal.is_some());
         assert!(m.teksten[0].pedal, "aanwijzing hoort bij de balk waar de noten staan");
+    }
+
+    #[test]
+    fn fermate_en_maatstrepen_in_klavar() {
+        let mut st = balk("M", false, None, &[(60, 0.0, 1.0), (62, 1.0, 2.0)]);
+        st.notes[1].articulations.push(crate::notation::Articulation::Fermata);
+        let mut o = opts(4, 4);
+        o.bars = Some(vec![crate::notation::BarAttr { measure: 0, left: None, right: Some(crate::notation::BarStyle::Final), ending: None }]);
+        let m = klavar_model_from_staves(&[st], &o, None);
+        assert!(!m.manual.notes[0].fermata);
+        assert!(m.manual.notes[1].fermata);
+        assert_eq!(m.balken.len(), 1);
     }
 
     #[test]
@@ -768,7 +786,7 @@ mod tests {
         sc.layers[1].klavar_hand = Some(KlavarHand::Right);
         for (li, midi, start) in [(0usize, 60u8, 0u64), (0, 62, 500_000), (1, 64, 1_000_000), (1, 65, 1_500_000), (0, 67, 2_000_000)] {
             let id = sc.new_event_id();
-            sc.layers[li].takes[0].events.push(LayerEv { id, midi, start_us: start, end_us: start + 400_000, channel: 0, locked: false, voice: 1, lyrics: Vec::new(), hand: None });
+            sc.layers[li].takes[0].events.push(LayerEv { id, midi, start_us: start, end_us: start + 400_000, channel: 0, locked: false, voice: 1, lyrics: Vec::new(), articulations: Vec::new(), spelling: None, hand: None });
         }
         let m = klavar_model_from_score(&sc);
         let lab = |midi: u8| noot(&m.manual, midi, match midi { 60 => 0, 62 => 3, 64 => 6, 65 => 9, _ => 12 }).label.clone();
@@ -782,7 +800,7 @@ mod tests {
         let mut sc1 = Score::new(2);
         sc1.add_layer("Hoofdwerk".into(), None);
         let id = sc1.new_event_id();
-        sc1.layers[0].takes[0].events.push(LayerEv { id, midi: 60, start_us: 0, end_us: 400_000, channel: 0, locked: false, voice: 1, lyrics: Vec::new(), hand: None });
+        sc1.layers[0].takes[0].events.push(LayerEv { id, midi: 60, start_us: 0, end_us: 400_000, channel: 0, locked: false, voice: 1, lyrics: Vec::new(), articulations: Vec::new(), spelling: None, hand: None });
         assert_eq!(klavar_model_from_score(&sc1).manual.notes[0].label, None);
         // Twee lagen op één inzet zijn geen wissel; de echte wissel erna wél
         // (HW 60@0, HW 62 + ZW 64 samen @3, ZW 65@6 → label op 65).
@@ -793,7 +811,7 @@ mod tests {
         sc2.layers[1].klavar_hand = Some(KlavarHand::Right);
         for (li, midi, start) in [(0usize, 60u8, 0u64), (0, 62, 500_000), (1, 64, 500_000), (1, 65, 1_000_000)] {
             let id = sc2.new_event_id();
-            sc2.layers[li].takes[0].events.push(LayerEv { id, midi, start_us: start, end_us: start + 400_000, channel: 0, locked: false, voice: 1, lyrics: Vec::new(), hand: None });
+            sc2.layers[li].takes[0].events.push(LayerEv { id, midi, start_us: start, end_us: start + 400_000, channel: 0, locked: false, voice: 1, lyrics: Vec::new(), articulations: Vec::new(), spelling: None, hand: None });
         }
         let m2 = klavar_model_from_score(&sc2);
         assert_eq!(noot(&m2.manual, 60, 0).label.as_deref(), Some("Hoofdwerk"));

@@ -158,13 +158,31 @@ export function layoutSystem(model, sys, opts = {}) {
   for (const l of lijnen(manuaal, true)) lay.lijnen.push({ ...l, y0: 0, y1: hoogte });
   if (pedaal) for (const l of lijnen(pedaal, false)) lay.lijnen.push({ ...l, y0: 0, y1: hoogte });
 
-  // Maatstrepen (ook aan het eind van het systeem) en maatnummers.
+  // Maatstrepen (ook aan het eind van het systeem) en maatnummers; met de
+  // maattekens van 0.7.89: dubbel, slot, herhaling (dik + 𝄆/𝄇) en volta.
+  const balkAttr = (m) => (model.balken || []).find(b => b.measure === m);
   for (let i = 0; i <= sys.bars; i++) {
     const t = i * measureLen;
     const y = yg(t);
     const globaal = sys.bar0 + i;
     const slot = globaal === model.num_measures;
-    lay.maatstrepen.push({ y, dikte: slot ? MAAT.slotstreep : MAAT.maatstreep, x0: xLinks, x1: xRechts });
+    // Een grensstreep staat onderaan systeem A én bovenaan systeem B: de
+    // rechter decoraties (𝄇, dubbel, slot) alleen onderaan A, de linker
+    // (𝄆, volta) alleen bovenaan B.
+    const boven = i === 0 && sys.index > 0;
+    const onder = i === sys.bars && !slot;
+    const rechts = boven ? null : balkAttr(globaal - 1);
+    const links = onder ? null : balkAttr(globaal);
+    let dikte = slot ? MAAT.slotstreep : MAAT.maatstreep;
+    let dubbel = false;
+    let label = '';
+    if (rechts?.right === 'double') dubbel = true;
+    if (rechts?.right === 'final' || rechts?.right === 'repeat_end') dikte = MAAT.slotstreep;
+    if (rechts?.right === 'repeat_end') label += '𝄇';
+    if (links?.left === 'repeat_start') { dikte = MAAT.slotstreep; label += '𝄆'; }
+    if (links?.ending && links.ending !== balkAttr(globaal - 1)?.ending) label += ' ' + links.ending + '.';
+    lay.maatstrepen.push({ y, dikte, x0: xLinks, x1: xRechts, dubbel });
+    if (label.trim()) lay.teksten.push({ x: xLinks - 1, y: y + MAAT.tekst, tekst: label.trim(), anchor: 'end' });
     if (i < sys.bars) lay.maatnummers.push({ x: xRechts + MAAT.stokLengte * w + 1, y: y + MAAT.tekst, tekst: String(globaal + 1) });
   }
 
@@ -226,6 +244,7 @@ export function layoutSystem(model, sys, opts = {}) {
           stokX0: cx, stokX1: cx + dir * MAAT.stokLengte * balk.w,
           inAkkoord: false, beam: n.beam ?? null, label: n.label ?? null,
           voice: Number(n.voice) || 1,
+          fermata: !!n.fermata,
         };
         lay.noten.push(noot);
         // Per stem een eigen stok/akkoordlijn (0.7.86): een gesplitst akkoord

@@ -62,6 +62,9 @@ pub struct NotationOptions {
     pub composer: Option<String>,
     #[serde(default)]
     pub subtitle: Option<String>,
+    /// Maatstrepen, herhalingen en volta's (0.7.89); None = gewone strepen.
+    #[serde(default)]
+    pub bars: Option<Vec<BarAttr>>,
 }
 
 /// Door de gebruiker samengestelde notenbalk (notatievenster → backend).
@@ -102,12 +105,16 @@ pub struct NoteEv {
     pub voice: u8,
     /// Liedtekst onder deze noot (0.7.88).
     pub lyrics: Vec<Lyric>,
+    /// Articulaties en fermate (0.7.89).
+    pub articulations: Vec<Articulation>,
+    /// Enharmonische spelling (0.7.89); None = volgens de toonsoort.
+    pub spelling: Option<Spelling>,
 }
 
 impl NoteEv {
     /// Noot zonder event-ID (bestandsmodus, tests).
     pub fn anoniem(midi: u8, start_sec: f64, end_sec: f64) -> Self {
-        NoteEv { midi, start_sec, end_sec, id: None, hand: None, voice: 1, lyrics: Vec::new() }
+        NoteEv { midi, start_sec, end_sec, id: None, hand: None, voice: 1, lyrics: Vec::new(), articulations: Vec::new(), spelling: None }
     }
 }
 
@@ -128,6 +135,8 @@ pub struct Staff {
     pub split_midi: Option<u8>,
     /// Aanwijzingen op deze balk (0.7.88).
     pub marks: Vec<StaffMark>,
+    /// Bogen, haarspelden en octaveringen op deze balk (0.7.89).
+    pub spans: Vec<StaffSpan>,
 }
 
 /// Pedaalbalk op naam: "Pedaal", "Pedal", "Pédale", "Pedał", "PED" — "ped"
@@ -251,6 +260,9 @@ struct ChordNote {
     id: Option<u64>,
     /// Liedtekst (0.7.88), alleen op het eerste deel van een noot.
     lyrics: Vec<Lyric>,
+    /// Articulaties (0.7.89), alleen op het eerste deel; spelling op elk deel.
+    articulations: Vec<Articulation>,
+    spelling: Option<Spelling>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -280,6 +292,9 @@ pub struct QNote {
     pub voice: u8,
     /// Liedtekst (0.7.88).
     pub lyrics: Vec<Lyric>,
+    /// Articulaties (0.7.89) en spelling.
+    pub articulations: Vec<Articulation>,
+    pub spelling: Option<Spelling>,
 }
 
 /// Kwantiseer de noten van één balk naar rastereenheden (gesorteerd op inzet
@@ -305,7 +320,7 @@ pub(crate) fn quantize_notes(notes: &[NoteEv], bpm: f64, q: u8, _tolerance_pct: 
         let s = quantize_one(n.start_sec);
         let e = quantize_one(n.end_sec);
         let e = e.max(s + 1);
-        QNote { id: n.id, midi: n.midi, start: s, end: e, hand: n.hand, voice: n.voice, lyrics: n.lyrics.clone() }
+        QNote { id: n.id, midi: n.midi, start: s, end: e, hand: n.hand, voice: n.voice, lyrics: n.lyrics.clone(), articulations: n.articulations.clone(), spelling: n.spelling }
     }).collect();
     quantized.sort_by_key(|n| (n.start, n.voice, n.midi));
     quantized
@@ -377,7 +392,7 @@ pub(crate) fn cluster_akkoorden(notes: &mut [NoteEv], venster: f64) {
 /// zonder boog. Klavar slaat dit over (die tekent de noten zelf).
 fn group_chords(qnotes: &[QNote]) -> Vec<Chord> {
     #[derive(Clone)]
-    struct Actief { midi: u8, start: u64, end: u64, id: Option<u64>, lyrics: Vec<Lyric> }
+    struct Actief { midi: u8, start: u64, end: u64, id: Option<u64>, lyrics: Vec<Lyric>, articulations: Vec<Articulation>, spelling: Option<Spelling> }
     let mut noten: Vec<Actief> = Vec::new();
     for n in qnotes {
         let end = n.end.max(n.start + 1);
@@ -388,9 +403,11 @@ fn group_chords(qnotes: &[QNote]) -> Vec<Chord> {
             // De noot die de getekende lengte bepaalt, levert ook het id (klik).
             if end > a.end { a.end = end; a.id = n.id; }
             if a.lyrics.is_empty() { a.lyrics = n.lyrics.clone(); }
+            for x in &n.articulations { if !a.articulations.contains(x) { a.articulations.push(*x); } }
+            if a.spelling.is_none() { a.spelling = n.spelling; }
             continue;
         }
-        noten.push(Actief { midi: n.midi, start: n.start, end, id: n.id, lyrics: n.lyrics.clone() });
+        noten.push(Actief { midi: n.midi, start: n.start, end, id: n.id, lyrics: n.lyrics.clone(), articulations: n.articulations.clone(), spelling: n.spelling });
     }
     if noten.is_empty() { return Vec::new(); }
     let inzetten: Vec<(u8, u64)> = noten.iter().map(|a| (a.midi, a.start)).collect();
@@ -407,7 +424,8 @@ fn group_chords(qnotes: &[QNote]) -> Vec<Chord> {
         let (t0, t1) = (w[0], w[1]);
         let mut notes: Vec<ChordNote> = noten.iter()
             .filter(|a| a.start <= t0 && a.end > t0)
-            .map(|a| ChordNote { midi: a.midi, tie_stop: a.start < t0, tie_start: a.end > t1, id: a.id, lyrics: if a.start < t0 { Vec::new() } else { a.lyrics.clone() } })
+            .map(|a| ChordNote { midi: a.midi, tie_stop: a.start < t0, tie_start: a.end > t1, id: a.id, lyrics: if a.start < t0 { Vec::new() } else { a.lyrics.clone() },
+                articulations: if a.start < t0 { Vec::new() } else { a.articulations.clone() }, spelling: a.spelling })
             .collect();
         if notes.is_empty() { continue; }
         notes.sort_by_key(|n| n.midi);
@@ -473,6 +491,61 @@ fn spell(midi: u8, key_fifths: i8) -> (char, i8, i8) {
     (step, alter, octave)
 }
 
+fn pc_van_letter(step: char) -> Option<i16> {
+    match step { 'C' => Some(0), 'D' => Some(2), 'E' => Some(4), 'F' => Some(5), 'G' => Some(7), 'A' => Some(9), 'B' => Some(11), _ => None }
+}
+
+/// Spelling van een noot (0.7.89): een expliciete enharmoniek wint van de
+/// toonsoort, mits ze dezelfde toon geeft; `octaaf_shift` is het geschreven
+/// octaaf t.o.v. het klinkende (8va: −1, 8vb: +1). Geeft (letter, alteratie,
+/// octaaf, naam van het voorteken voor `<accidental>` — alleen bij expliciet).
+/// Past deze spelling bij deze toon? (0.7.89)
+pub fn spelling_past(sp: Spelling, midi: u8) -> bool {
+    pc_van_letter(sp.step).map_or(false, |pc| (-2..=2).contains(&sp.alter) && (pc + sp.alter as i16).rem_euclid(12) == (midi % 12) as i16)
+}
+
+fn spel_noot(midi: u8, key_fifths: i8, spelling: Option<Spelling>, octaaf_shift: i8) -> (char, i8, i8, Option<&'static str>) {
+    let (step, alter, octave) = spell(midi, key_fifths);
+    let mut uit = (step, alter, octave, None);
+    if let Some(sp) = spelling {
+        if spelling_past(sp, midi) {
+            let pc = pc_van_letter(sp.step).unwrap_or(0);
+            // Het octaaf waarin letter + alteratie precies deze toon is (Ces4 = B3).
+            let oct = ((midi as i16 - sp.alter as i16 - pc) / 12) - 1;
+            let naam = match sp.alter { -2 => "flat-flat", -1 => "flat", 0 => "natural", 1 => "sharp", _ => "double-sharp" };
+            uit = (sp.step, sp.alter, oct as i8, Some(naam));
+        }
+    }
+    (uit.0, uit.1, uit.2 + octaaf_shift, uit.3)
+}
+
+/// Mogelijke spellingen van een toon met alteratie −1..=1 (geen dubbele
+/// voortekens: die kiest niemand met één toets), op volgorde C..B.
+pub fn spellingen_voor(midi: u8) -> Vec<Spelling> {
+    let pc = (midi % 12) as i16;
+    let mut uit = Vec::new();
+    for step in ['C', 'D', 'E', 'F', 'G', 'A', 'B'] {
+        let p = pc_van_letter(step).unwrap_or(0);
+        for alter in [-1i8, 0, 1] {
+            if (p + alter as i16).rem_euclid(12) == pc { uit.push(Spelling { step, alter }); }
+        }
+    }
+    uit
+}
+
+/// Enharmonisch wisselen (0.7.89): de volgende spelling na `huidig` (None =
+/// de toonsoortspelling); None zodra de ronde weer bij de standaard komt.
+pub fn enharmonisch_wissel(midi: u8, key_fifths: i8, huidig: Option<Spelling>) -> Option<Spelling> {
+    let (step, alter, _) = spell(midi, key_fifths);
+    let standaard = Spelling { step, alter };
+    let lijst = spellingen_voor(midi);
+    if lijst.len() < 2 { return None; }
+    let nu = huidig.filter(|sp| spelling_past(*sp, midi)).unwrap_or(standaard);
+    let i = lijst.iter().position(|s| *s == nu).unwrap_or(0);
+    let volgende = lijst[(i + 1) % lijst.len()];
+    if volgende == standaard { None } else { Some(volgende) }
+}
+
 fn xml_escape(s: &str) -> String {
     s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
         .replace('"', "&quot;").replace('\'', "&apos;")
@@ -494,6 +567,8 @@ pub struct QuantizedStaff {
     pub notes: Vec<QNote>,
     /// Aanwijzingen (0.7.88), op absolute rastereenheid.
     pub marks: Vec<QMark>,
+    /// Bogen, haarspelden en octaveringen (0.7.89), op absolute rastereenheid.
+    pub spans: Vec<QSpan>,
 }
 
 /// Het gedeelde gekwantiseerde model (0.7.70): raster, maatsoort en tempo
@@ -563,10 +638,13 @@ pub fn quantize_score(staves: &[Staff], opts: &NotationOptions) -> QuantizedScor
             for groep in noten.chunk_by_mut(|a, b| a.voice == b.voice) {
                 cluster_akkoorden(groep, venster);
             }
+            let qn = quantize_notes(&noten, bpm, q as u8, tolerance);
+            let spans = spans_kwantiseren(&st.spans, &qn);
             QuantizedStaff {
                 staff_index: i, name: st.name.clone(), layer_id: st.layer_id, pedal: st.pedal,
                 bass_clef: st.bass_clef, hand: st.hand, split_midi: st.split_midi,
-                notes: quantize_notes(&noten, bpm, q as u8, tolerance),
+                notes: qn,
+                spans,
                 marks: st.marks.iter().map(|m| QMark {
                     pos: ((m.start_sec.max(0.0)) * (bpm / 60.0) * q as f64).round() as u64,
                     kind: m.kind, text: m.text.clone(), placement: m.placement,
@@ -621,7 +699,10 @@ pub fn render_musicxml(qs: &QuantizedScore, opts: &NotationOptions) -> Result<St
 
 /// Eén geschreven noot, akkoord of rust binnen een maat (0.7.83), met per
 /// noot (midi, tie_stop, tie_start, event-id).
-struct MaatItem { pos: u64, len: u64, type_name: &'static str, dotted: bool, hele_maat: bool, notes: Vec<(u8, bool, bool, Option<u64>)>, lyrics: Vec<Lyric> }
+struct MaatItem { pos: u64, len: u64, type_name: &'static str, dotted: bool, hele_maat: bool, notes: Vec<NootItem>, lyrics: Vec<Lyric>, articulations: Vec<Articulation> }
+
+/// Eén noot in een MaatItem (0.7.89): toon, overbindingen, event-id, spelling.
+struct NootItem { midi: u8, tie_stop: bool, tie_start: bool, id: Option<u64>, spelling: Option<Spelling> }
 
 /// De noten en rusten van één stem binnen één maat, uit de segmentlijst van
 /// die stem: delen binnen de maat, met overbindingen over maat- en
@@ -636,7 +717,7 @@ fn maat_items(segments: &[(u64, u64, Vec<ChordNote>)], m_start: u64, m_end: u64,
         let tie_from_prev = !notes.is_empty() && s < m_start;
         let tie_to_next = !notes.is_empty() && e > m_end;
         if notes.is_empty() && ps == m_start && pe == m_end {
-            items.push(MaatItem { pos: ps, len: measure_len, type_name: "", dotted: false, hele_maat: true, notes: Vec::new(), lyrics: Vec::new() });
+            items.push(MaatItem { pos: ps, len: measure_len, type_name: "", dotted: false, hele_maat: true, notes: Vec::new(), lyrics: Vec::new(), articulations: Vec::new() });
             continue;
         }
         // Liedtekst (0.7.88): van de hoogste noot met tekst, alleen op het
@@ -659,14 +740,21 @@ fn maat_items(segments: &[(u64, u64, Vec<ChordNote>)], m_start: u64, m_end: u64,
         for (pi, (len, type_name, dotted)) in parts.iter().enumerate() {
             let first_part = pi == 0;
             let last_part = pi == parts.len() - 1;
-            let noten: Vec<(u8, bool, bool, Option<u64>)> = notes.iter().map(|cn| (
-                cn.midi,
-                cn.tie_stop || tie_from_prev || !first_part,
-                cn.tie_start || tie_to_next || !last_part,
-                cn.id,
-            )).collect();
+            let noten: Vec<NootItem> = notes.iter().map(|cn| NootItem {
+                midi: cn.midi,
+                tie_stop: cn.tie_stop || tie_from_prev || !first_part,
+                tie_start: cn.tie_start || tie_to_next || !last_part,
+                id: cn.id,
+                spelling: cn.spelling,
+            }).collect();
+            // Articulaties (0.7.89): de vereniging over het akkoord, alleen op
+            // het eerste deel van een nieuwe inzet.
+            let mut art: Vec<Articulation> = Vec::new();
+            if first_part && !tie_from_prev {
+                for cn in notes.iter() { if cn.tie_stop { continue; } for a in &cn.articulations { if !art.contains(a) { art.push(*a); } } }
+            }
             items.push(MaatItem { pos, len: *len, type_name, dotted: *dotted, hele_maat: false, notes: noten,
-                lyrics: if first_part { lyrics_akkoord.clone() } else { Vec::new() } });
+                lyrics: if first_part { lyrics_akkoord.clone() } else { Vec::new() }, articulations: art });
             pos += len;
         }
     }
@@ -695,9 +783,115 @@ fn beams_voor(items: &[MaatItem], m_start: u64, tel: u64, q: u64) -> Vec<Option<
     beam
 }
 
+/// Bogen, haarspelden en octaveringen van één balk (0.7.89), klaar om te
+/// schrijven: per event-id wat er vóór de eerste geschreven noot van dat
+/// event komt (directions, boogbegin) en wat erna (stops), plus de
+/// octaafverschuiving per positiebereik voor de geschreven toonhoogte.
+#[derive(Default)]
+struct SpanInfo {
+    slur_start: HashMap<u64, Vec<u8>>,
+    slur_stop: HashMap<u64, Vec<u8>>,
+    dir_voor: HashMap<u64, String>,
+    dir_na: HashMap<u64, String>,
+    octaaf: Vec<(u64, u64, i8)>,
+}
+
+fn span_info_voor(spans: &[QSpan]) -> SpanInfo {
+    let mut info = SpanInfo::default();
+    for sp in spans {
+        match sp.kind {
+            SpanKind::Slur => {
+                info.slur_start.entry(sp.from_id).or_default().push(sp.number);
+                info.slur_stop.entry(sp.to_id).or_default().push(sp.number);
+            }
+            SpanKind::Crescendo | SpanKind::Diminuendo => {
+                let soort = if sp.kind == SpanKind::Crescendo { "crescendo" } else { "diminuendo" };
+                info.dir_voor.entry(sp.from_id).or_default().push_str(&format!("      <direction placement=\"below\"><direction-type><wedge type=\"{}\" number=\"{}\"/></direction-type></direction>\n", soort, sp.number));
+                info.dir_na.entry(sp.to_id).or_default().push_str(&format!("      <direction placement=\"below\"><direction-type><wedge type=\"stop\" number=\"{}\"/></direction-type></direction>\n", sp.number));
+            }
+            SpanKind::OctaveUp | SpanKind::OctaveDown => {
+                // MusicXML: 8va = type "down" (geschreven een octaaf lager dan
+                // klinkend), 8vb = type "up".
+                let (soort, plaats, shift) = if sp.kind == SpanKind::OctaveUp { ("down", "above", -1i8) } else { ("up", "below", 1i8) };
+                info.dir_voor.entry(sp.from_id).or_default().push_str(&format!("      <direction placement=\"{}\"><direction-type><octave-shift type=\"{}\" size=\"8\" number=\"{}\"/></direction-type></direction>\n", plaats, soort, sp.number));
+                info.dir_na.entry(sp.to_id).or_default().push_str(&format!("      <direction placement=\"{}\"><direction-type><octave-shift type=\"stop\" size=\"8\" number=\"{}\"/></direction-type></direction>\n", plaats, sp.number));
+                info.octaaf.push((sp.from_pos, sp.to_end, shift));
+            }
+        }
+    }
+    info
+}
+
+/// Bogen van een balk naar rastereenheden (0.7.89): van de inzet van de
+/// beginnoot tot het einde van de eindnoot (een boog aan een onbekende noot
+/// vervalt); overlappende bogen van dezelfde familie krijgen een eigen
+/// `number` (MusicXML 1..=6).
+fn spans_kwantiseren(spans: &[StaffSpan], noten: &[QNote]) -> Vec<QSpan> {
+    let vind = |id: u64| noten.iter().find(|n| n.id == Some(id));
+    let mut uit: Vec<QSpan> = Vec::new();
+    for sp in spans {
+        if sp.from_id == sp.to_id { continue; }
+        let (Some(a), Some(b)) = (vind(sp.from_id), vind(sp.to_id)) else { continue };
+        // Over twee stemmen zou de stop vóór de start in de XML komen (stem 1
+        // wordt eerst geschreven): zo'n boog (na Naar stem of Akkoord splitsen)
+        // wordt stil overgeslagen.
+        if a.voice.clamp(1, 4) != b.voice.clamp(1, 4) { continue; }
+        let (from, to) = if (a.start, a.midi) <= (b.start, b.midi) { (a, b) } else { (b, a) };
+        // Zelfde inkorting als group_chords: een herinzet van dezelfde toon kort
+        // de eindnoot in, en daar eindigt dan ook de octavering/haarspeld.
+        let to_end = noten.iter()
+            .filter(|n| n.midi == to.midi && n.voice.clamp(1, 4) == to.voice.clamp(1, 4) && n.start > to.start && n.start < to.end)
+            .map(|n| n.start).min().unwrap_or(to.end).max(to.start + 1);
+        uit.push(QSpan { kind: sp.kind, from_id: from.id.unwrap_or(0), to_id: to.id.unwrap_or(0), from_pos: from.start, to_pos: to.start, to_end, number: 1 });
+    }
+    uit.sort_by_key(|s| (s.from_pos, s.to_end));
+    let familie = |k: SpanKind| match k { SpanKind::Slur => 0, SpanKind::Crescendo | SpanKind::Diminuendo => 1, _ => 2 };
+    for i in 0..uit.len() {
+        let mut bezet = [false; 7];
+        for j in 0..i {
+            if familie(uit[j].kind) == familie(uit[i].kind) && uit[j].to_end > uit[i].from_pos && uit[j].from_pos < uit[i].to_end {
+                bezet[uit[j].number as usize] = true;
+            }
+        }
+        uit[i].number = (1..=6).find(|n| !bezet[*n]).unwrap_or(6) as u8;
+    }
+    uit
+}
+
+/// `<barline>` van maat `m` (0-gebaseerd) links of rechts (0.7.89): stijl,
+/// volta en herhaling. None als er niets te schrijven is.
+fn barline_xml(bars: &[BarAttr], m: u32, links: bool) -> Option<String> {
+    let bij = |i: i64| -> Option<&BarAttr> { if i < 0 { None } else { bars.iter().find(|b| b.measure as i64 == i) } };
+    let hier = bij(m as i64);
+    let ending = hier.and_then(|b| b.ending);
+    let mut inner = String::new();
+    if links {
+        let stijl = hier.and_then(|b| b.left);
+        if stijl == Some(BarStyle::RepeatStart) { inner.push_str("<bar-style>heavy-light</bar-style>"); }
+        let vorige = bij(m as i64 - 1).and_then(|b| b.ending);
+        if let Some(n) = ending { if vorige != Some(n) { inner.push_str(&format!("<ending number=\"{}\" type=\"start\"/>", n)); } }
+        if stijl == Some(BarStyle::RepeatStart) { inner.push_str("<repeat direction=\"forward\"/>"); }
+    } else {
+        let stijl = hier.and_then(|b| b.right);
+        match stijl {
+            Some(BarStyle::Double) => inner.push_str("<bar-style>light-light</bar-style>"),
+            Some(BarStyle::Final) | Some(BarStyle::RepeatEnd) => inner.push_str("<bar-style>light-heavy</bar-style>"),
+            _ => {}
+        }
+        let volgende = bij(m as i64 + 1).and_then(|b| b.ending);
+        if let Some(n) = ending {
+            if volgende != Some(n) {
+                inner.push_str(&format!("<ending number=\"{}\" type=\"{}\"/>", n, if stijl == Some(BarStyle::RepeatEnd) { "stop" } else { "discontinue" }));
+            }
+        }
+        if stijl == Some(BarStyle::RepeatEnd) { inner.push_str("<repeat direction=\"backward\"/>"); }
+    }
+    if inner.is_empty() { None } else { Some(format!("      <barline location=\"{}\">{}</barline>\n", if links { "left" } else { "right" }, inner)) }
+}
+
 /// Schrijft de items van één stem in één maat en vult de notemap.
 #[allow(clippy::too_many_arguments)]
-fn schrijf_items(xml: &mut String, items: &[MaatItem], beam: &[Option<&'static str>], voice: u8, stem_richting: Option<&str>, kleur: Option<&str>, key_fifths: i8, part: u16, measure: u32, m_start: u64, notemap: &mut Vec<NoteRef>, marks: &[QMark]) {
+fn schrijf_items(xml: &mut String, items: &[MaatItem], beam: &[Option<&'static str>], voice: u8, stem_richting: Option<&str>, kleur: Option<&str>, key_fifths: i8, part: u16, measure: u32, m_start: u64, notemap: &mut Vec<NoteRef>, marks: &[QMark], spans: &SpanInfo) {
     // Aanwijzingen (0.7.88) vóór de noot op hun inzet; tussen twee inzetten
     // met een (negatieve) offset t.o.v. de volgende inzet; na de laatste
     // inzet t.o.v. het maateinde.
@@ -721,8 +915,15 @@ fn schrijf_items(xml: &mut String, items: &[MaatItem], beam: &[Option<&'static s
                 it.len, voice, it.type_name, if it.dotted { "<dot/>" } else { "" }));
             continue;
         }
-        for (ni, &(midi, tie_stop, tie_start, id)) in it.notes.iter().enumerate() {
-            let (step, alter, octave) = spell(midi, key_fifths);
+        // Begin van een haarspeld of octavering (0.7.89) vóór het eerste
+        // geschreven deel van het event.
+        for nt in &it.notes {
+            if !nt.tie_stop { if let Some(id) = nt.id { if let Some(d) = spans.dir_voor.get(&id) { xml.push_str(d); } } }
+        }
+        let shift = spans.octaaf.iter().find(|(a, b, _)| it.pos >= *a && it.pos < *b).map(|x| x.2).unwrap_or(0);
+        for (ni, nt) in it.notes.iter().enumerate() {
+            let (midi, tie_stop, tie_start, id) = (nt.midi, nt.tie_stop, nt.tie_start, nt.id);
+            let (step, alter, octave, accidental) = spel_noot(midi, key_fifths, nt.spelling, shift);
             xml.push_str("      <note>");
             if ni > 0 { xml.push_str("<chord/>"); }
             xml.push_str(&format!("<pitch><step>{}</step>", step));
@@ -734,6 +935,8 @@ fn schrijf_items(xml: &mut String, items: &[MaatItem], beam: &[Option<&'static s
             xml.push_str(&format!("<voice>{}</voice>", voice));
             xml.push_str(&format!("<type>{}</type>", it.type_name));
             if it.dotted { xml.push_str("<dot/>"); }
+            // Voorteken alleen bij een expliciete spelling (0.7.89).
+            if let Some(acc) = accidental { xml.push_str(&format!("<accidental>{}</accidental>", acc)); }
             // Stokrichting alleen in een meerstemmige maat (1 en 3 omhoog, 2 en 4 omlaag).
             if let Some(r) = stem_richting { xml.push_str(&format!("<stem>{}</stem>", r)); }
             // Schermvariant: kleur per stem (OSMD leest `notehead color`).
@@ -742,12 +945,31 @@ fn schrijf_items(xml: &mut String, items: &[MaatItem], beam: &[Option<&'static s
             if ni == 0 {
                 if let Some(b) = beam[ii] { xml.push_str(&format!("<beam number=\"1\">{}</beam>", b)); }
             }
-            if tie_stop || tie_start {
-                xml.push_str("<notations>");
-                if tie_stop { xml.push_str("<tied type=\"stop\"/>"); }
-                if tie_start { xml.push_str("<tied type=\"start\"/>"); }
-                xml.push_str("</notations>");
+            // Notaties: overbindingen, bogen (eind vóór begin, op het eerste/
+            // laatste deel van het event), articulaties en fermate op de eerste
+            // akkoordnoot (0.7.89).
+            let mut notaties = String::new();
+            if tie_stop { notaties.push_str("<tied type=\"stop\"/>"); }
+            if tie_start { notaties.push_str("<tied type=\"start\"/>"); }
+            if let Some(eid) = id {
+                if !tie_start { if let Some(ns) = spans.slur_stop.get(&eid) { for n in ns { notaties.push_str(&format!("<slur type=\"stop\" number=\"{}\"/>", n)); } } }
+                if !tie_stop { if let Some(ns) = spans.slur_start.get(&eid) { for n in ns { notaties.push_str(&format!("<slur type=\"start\" number=\"{}\"/>", n)); } } }
             }
+            if ni == 0 && !it.articulations.is_empty() {
+                let mut art = String::new();
+                for a in &it.articulations {
+                    match a {
+                        Articulation::Staccato => art.push_str("<staccato/>"),
+                        Articulation::Tenuto => art.push_str("<tenuto/>"),
+                        Articulation::Accent => art.push_str("<accent/>"),
+                        Articulation::Breath => art.push_str("<breath-mark/>"),
+                        Articulation::Fermata => {}
+                    }
+                }
+                if !art.is_empty() { notaties.push_str(&format!("<articulations>{}</articulations>", art)); }
+                if it.articulations.contains(&Articulation::Fermata) { notaties.push_str("<fermata type=\"upright\"/>"); }
+            }
+            if !notaties.is_empty() { xml.push_str("<notations>"); xml.push_str(&notaties); xml.push_str("</notations>"); }
             // Liedtekst alleen op de eerste noot van het akkoord (0.7.88).
             if ni == 0 {
                 for l in &it.lyrics {
@@ -758,6 +980,10 @@ fn schrijf_items(xml: &mut String, items: &[MaatItem], beam: &[Option<&'static s
             }
             xml.push_str("</note>\n");
             notemap.push(NoteRef { part, measure, voice, pos: it.pos - m_start, midi, id });
+        }
+        // Einde van een haarspeld of octavering ná het laatste deel van het event.
+        for nt in &it.notes {
+            if !nt.tie_start { if let Some(id) = nt.id { if let Some(d) = spans.dir_na.get(&id) { xml.push_str(d); } } }
         }
     }
     // Aanwijzingen na de laatste inzet (in een slotrust): t.o.v. het maateinde.
@@ -875,6 +1101,8 @@ pub fn render_musicxml_met_notemap(qs: &QuantizedScore, opts: &NotationOptions, 
             (*v, segments)
         }).collect();
         let actieve = scherm.and_then(|s| s.actieve_stem.get(idx).copied()).unwrap_or(1).clamp(1, 4);
+        let span_info = span_info_voor(&staff.spans);
+        let bars: &[BarAttr] = opts.bars.as_deref().unwrap_or(&[]);
 
         for m in 0..num_measures {
             let m_start = m * measure_len;
@@ -898,6 +1126,8 @@ pub fn render_musicxml_met_notemap(qs: &QuantizedScore, opts: &NotationOptions, 
                 xml.push_str(&format!("      <direction placement=\"above\"><direction-type><metronome><beat-unit>quarter</beat-unit><per-minute>{}</per-minute></metronome></direction-type><sound tempo=\"{}\"/></direction>\n", bpm.round() as u64, bpm.round() as u64));
             }
 
+            // Maatstreep links (0.7.89): herhaling begin, volta begin.
+            if let Some(b) = barline_xml(bars, m as u32, true) { xml.push_str(&b); }
             // Alleen stemmen met noten in deze maat; zonder noten één
             // hele-maatrust in stem 1 (zoals altijd).
             let mut per_stem_items: Vec<(u8, Vec<MaatItem>)> = Vec::new();
@@ -906,7 +1136,7 @@ pub fn render_musicxml_met_notemap(qs: &QuantizedScore, opts: &NotationOptions, 
                 if items.iter().any(|it| !it.notes.is_empty()) { per_stem_items.push((*v, items)); }
             }
             if per_stem_items.is_empty() {
-                per_stem_items.push((1, vec![MaatItem { pos: m_start, len: measure_len, type_name: "", dotted: false, hele_maat: true, notes: Vec::new(), lyrics: Vec::new() }]));
+                per_stem_items.push((1, vec![MaatItem { pos: m_start, len: measure_len, type_name: "", dotted: false, hele_maat: true, notes: Vec::new(), lyrics: Vec::new(), articulations: Vec::new() }]));
             }
             let meerstemmig = per_stem_items.len() > 1;
             // Aanwijzingen van deze maat (0.7.88), alleen bij de eerste stem.
@@ -919,8 +1149,10 @@ pub fn render_musicxml_met_notemap(qs: &QuantizedScore, opts: &NotationOptions, 
                 let kleur: Option<&str> = scherm.map(|s| if s.dim_andere && *v != actieve { DIM_KLEUR } else { STEM_KLEUREN[(*v - 1) as usize] })
                     .filter(|k| *k != STEM_KLEUREN[0]);
                 let marks_hier: &[QMark] = if si == 0 { &maat_marks } else { &[] };
-                schrijf_items(&mut xml, items, &beam, *v, stem_richting, kleur, opts.key_fifths, idx as u16, m as u32, m_start, &mut notemap, marks_hier);
+                schrijf_items(&mut xml, items, &beam, *v, stem_richting, kleur, opts.key_fifths, idx as u16, m as u32, m_start, &mut notemap, marks_hier, &span_info);
             }
+            // Maatstreep rechts (0.7.89): dubbel, slot, herhaling eind, volta eind.
+            if let Some(b) = barline_xml(bars, m as u32, false) { xml.push_str(&b); }
             xml.push_str("    </measure>\n");
         }
         xml.push_str("  </part>\n");
@@ -1009,6 +1241,54 @@ pub struct QMark {
     pub placement: Placement,
 }
 
+/// Articulatie op een noot (0.7.89).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Articulation { Staccato, Tenuto, Accent, Fermata, Breath }
+
+/// Enharmonische spelling van een noot (0.7.89): letter C..B en alteratie
+/// −2..=2; alleen geldig als letter + alteratie dezelfde toon geeft.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Spelling { pub step: char, pub alter: i8 }
+
+/// Soort boog of lijn tussen twee noten (0.7.89).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SpanKind { Slur, Crescendo, Diminuendo, OctaveUp, OctaveDown }
+
+/// Boog, haarspeld of octaveringslijn van noot tot noot (verhuist mee met de
+/// noten; verdwijnt met een van beide).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Span { pub id: u64, pub layer_id: u32, pub kind: SpanKind, pub from_event: u64, pub to_event: u64 }
+
+/// Boog van een balk in de kwantiseerinvoer.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StaffSpan { pub kind: SpanKind, pub from_id: u64, pub to_id: u64 }
+
+/// Gekwantiseerde boog: posities in absolute rastereenheden, `number` voor
+/// overlappende bogen van dezelfde familie (MusicXML 1..=6).
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct QSpan { pub kind: SpanKind, pub from_id: u64, pub to_id: u64, pub from_pos: u64, pub to_pos: u64, pub to_end: u64, pub number: u8 }
+
+/// Maatstreepstijl (0.7.89).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BarStyle { Double, Final, RepeatStart, RepeatEnd }
+
+/// Maatstrepen en volta van één maat (`measure` 0-gebaseerd): `left` kent
+/// alleen de herhaling-begin, `right` dubbel/slot/herhaling-eind, `ending`
+/// het voltanummer (1e/2e maal) van de maat.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BarAttr {
+    pub measure: u32,
+    #[serde(default)]
+    pub left: Option<BarStyle>,
+    #[serde(default)]
+    pub right: Option<BarStyle>,
+    #[serde(default)]
+    pub ending: Option<u8>,
+}
+
 /// Bekende dynamische tekens die MusicXML als `<dynamics>` kent.
 const DYNAMIEK: [&str; 12] = ["ppp", "pp", "p", "mp", "mf", "f", "ff", "fff", "sfz", "fp", "sf", "rf"];
 
@@ -1065,6 +1345,12 @@ pub struct LayerEv {
     /// Liedtekst onder deze noot (0.7.88), per strofe.
     #[serde(default)]
     pub lyrics: Vec<Lyric>,
+    /// Articulaties en fermate (0.7.89).
+    #[serde(default)]
+    pub articulations: Vec<Articulation>,
+    /// Enharmonische spelling (0.7.89); None = volgens de toonsoort.
+    #[serde(default)]
+    pub spelling: Option<Spelling>,
     /// Hand in klavar (0.7.70); None = volgens de laag en het splitspunt.
     #[serde(default)]
     pub hand: Option<KlavarHand>,
@@ -1147,6 +1433,12 @@ pub struct Score {
     /// dynamiek, oefenletters, vrije tekst — per balk op een tijdstip.
     #[serde(default)]
     pub texts: Vec<TextMark>,
+    /// Bogen, haarspelden en octaveringen (0.7.89), aan noten gehangen.
+    #[serde(default)]
+    pub spans: Vec<Span>,
+    /// Maatstrepen, herhalingen en volta's (0.7.89).
+    #[serde(default)]
+    pub bars: Vec<BarAttr>,
     #[serde(default)]
     pub metronome: MetronomeCfg,
     /// Alleen armed = actief onder één laag tegelijk; None = geen opname.
@@ -1164,6 +1456,8 @@ pub struct Score {
     next_take_id: u32,
     #[serde(skip)]
     next_text_id: u64,
+    #[serde(skip)]
+    next_span_id: u64,
     /// Undo/redo-stapels (niet naar de UI; alleen counts worden geëxposeerd).
     #[serde(skip)]
     undo: Vec<EditCommand>,
@@ -1184,10 +1478,12 @@ impl Score {
             subtitle: String::new(),
             min_measures: 0,
             texts: Vec::new(),
+            spans: Vec::new(),
+            bars: Vec::new(),
             metronome: MetronomeCfg::default(),
             armed_layer: None,
             generation: 1,
-            next_event_id: 1, next_layer_id: 1, next_take_id: 1, next_text_id: 1,
+            next_event_id: 1, next_layer_id: 1, next_take_id: 1, next_text_id: 1, next_span_id: 1,
             undo: Vec::new(), redo: Vec::new(),
         }
     }
@@ -1226,6 +1522,19 @@ impl Score {
                 }
             }
         }
+        // Bogen (0.7.89): teller zaaien, wezen (noot of balk weg) en dubbele
+        // id's opruimen; maatstrepen uniek per maat en zonder lege regels.
+        self.next_span_id = self.spans.iter().map(|s| s.id).max().unwrap_or(0).saturating_add(1);
+        let ev_ids: std::collections::HashSet<u64> = self.layers.iter().flat_map(|l| l.takes.iter()).flat_map(|t| t.events.iter()).map(|e| e.id).collect();
+        let laag_ids2: std::collections::HashSet<u32> = self.layers.iter().map(|l| l.id).collect();
+        self.spans.retain(|s| laag_ids2.contains(&s.layer_id) && ev_ids.contains(&s.from_event) && ev_ids.contains(&s.to_event) && s.from_event != s.to_event);
+        let mut gezien_span: std::collections::HashSet<u64> = std::collections::HashSet::new();
+        for s in &mut self.spans {
+            if !gezien_span.insert(s.id) { s.id = self.next_span_id; self.next_span_id = self.next_span_id.saturating_add(1); gezien_span.insert(s.id); }
+        }
+        self.bars.sort_by_key(|b| b.measure);
+        self.bars.dedup_by_key(|b| b.measure);
+        self.bars.retain(|b| b.left.is_some() || b.right.is_some() || b.ending.is_some());
         self.undo.clear();
         self.redo.clear();
         self.generation = 1;
@@ -1249,6 +1558,7 @@ impl Score {
     pub fn redo_len(&self) -> usize { self.redo.len() }
     pub fn new_event_id(&mut self) -> u64 { let id = self.next_event_id; self.next_event_id = self.next_event_id.saturating_add(1); id }
     pub fn new_text_id(&mut self) -> u64 { let id = self.next_text_id.max(1); self.next_text_id = id.saturating_add(1); id }
+    pub fn new_span_id(&mut self) -> u64 { let id = self.next_span_id.max(1); self.next_span_id = id.saturating_add(1); id }
     pub fn bump_gen(&mut self) { self.generation = self.generation.saturating_add(1); }
 
     /// Push undo-inverse; wist de redo-stack (nieuwe bewerking = redo-tak dood).
@@ -1326,6 +1636,8 @@ pub fn score_to_staves(score: &Score) -> Vec<Staff> {
                     hand: ev.hand,
                     voice: ev.voice.clamp(1, 4),
                     lyrics: ev.lyrics.clone(),
+                    articulations: ev.articulations.clone(),
+                    spelling: ev.spelling,
                 });
             }
         }
@@ -1337,6 +1649,7 @@ pub fn score_to_staves(score: &Score) -> Vec<Staff> {
             marks: score.texts.iter().filter(|t| t.layer_id == layer.id).map(|t| StaffMark {
                 start_sec: t.start_us as f64 / 1_000_000.0, kind: t.kind, text: t.text.clone(), placement: t.placement,
             }).collect(),
+            spans: score.spans.iter().filter(|sp| sp.layer_id == layer.id).map(|sp| StaffSpan { kind: sp.kind, from_id: sp.from_event, to_id: sp.to_event }).collect(),
         }
     }).collect()
 }
@@ -1373,6 +1686,7 @@ pub fn options_from_score(score: &Score) -> NotationOptions {
         min_measures: Some(score.min_measures),
         composer: Some(score.composer.clone()),
         subtitle: Some(score.subtitle.clone()),
+        bars: Some(score.bars.clone()),
     }
 }
 
@@ -1431,6 +1745,12 @@ pub const KANAAL_ONBEKEND: u8 = 0xFF;
 /// laag (0.7.82); events zonder bronkanaal (KANAAL_ONBEKEND: stapinvoer/klik)
 /// gaan daarheen, zodat een getypte pedaalnoot bij afspelen op het pedaal
 /// klinkt; opgenomen events houden hun eigen kanaal.
+/// Einde van een noot bij de MIDI-export (0.7.89): staccato klinkt de helft.
+pub fn export_eind_us(e: &LayerEv) -> u64 {
+    let eind = e.end_us.max(e.start_us + 1000);
+    if e.articulations.contains(&Articulation::Staccato) { e.start_us + ((eind - e.start_us) / 2).max(1000) } else { eind }
+}
+
 pub fn score_to_smf_bytes(score: &Score, kanaal_voor_laag: &dyn Fn(&Layer) -> Option<u8>) -> Result<Vec<u8>, String> {
     use midly::{Smf, Header, Format, Timing, TrackEvent, TrackEventKind, MetaMessage, MidiMessage};
     use midly::num::{u4, u7, u15, u24, u28};
@@ -1458,7 +1778,7 @@ pub fn score_to_smf_bytes(score: &Score, kanaal_voor_laag: &dyn Fn(&Layer) -> Op
                 // kanaal 0 is een gewoon kanaal en blijft staan (reviewbevinding).
                 let ch = if e.channel > 0x0F { laag_kanaal } else { e.channel };
                 evs.push((to_ticks(e.start_us), 1, e.midi & 0x7F, ch));
-                evs.push((to_ticks(e.end_us.max(e.start_us + 1000)), 0, e.midi & 0x7F, ch));
+                evs.push((to_ticks(export_eind_us(e)), 0, e.midi & 0x7F, ch));
             }
         }
         if evs.is_empty() { continue; }
@@ -1533,15 +1853,26 @@ pub enum EditCommand {
     AddText { mark: TextMark },
     RemoveText { mark: TextMark },
     EditText { id: u64, old: TextMark, new: TextMark },
+    /// Articulaties per noot (0.7.89): (event-id, nieuwe lijst); undo bewaart de oude.
+    SetArticulations { items: Vec<(u64, Vec<Articulation>)> },
+    /// Enharmonische spelling per noot (0.7.89); None = volgens de toonsoort.
+    SetSpelling { items: Vec<(u64, Option<Spelling>)> },
+    /// Boog, haarspeld of octavering toevoegen / verwijderen (0.7.89).
+    AddSpan { span: Span },
+    RemoveSpan { span: Span },
+    /// Maatstrepen en volta van één maat (0.7.89); None = gewone maatstreep.
+    SetBar { measure: u32, old: Option<BarAttr>, new: Option<BarAttr> },
+    /// Meerdere commando's als één stap (0.7.89): undo draait ze omgekeerd terug.
+    Batch { cmds: Vec<EditCommand> },
     /// Voeg een take toe (met inverse: verwijder die take).
     /// Voor de undo bewaren we ID + laag; content is leeg bij add.
     AddTake { layer: u32, take_id: u32 },
     /// Verwijder een laag met alle takes (undo herstelt de complete laag).
-    RemoveLayer { snapshot: Layer, position: usize, texts: Vec<TextMark> },
+    RemoveLayer { snapshot: Layer, position: usize, texts: Vec<TextMark>, spans: Vec<Span> },
     /// Undo-inverse van AddTake: verwijderde take terugzetten op dezelfde plek.
     RestoreTake { layer: u32, index: usize, take: Take },
     /// Undo-inverse van RemoveLayer: laag terugzetten op dezelfde plek.
-    RestoreLayer { snapshot: Layer, position: usize, texts: Vec<TextMark> },
+    RestoreLayer { snapshot: Layer, position: usize, texts: Vec<TextMark>, spans: Vec<Span> },
 }
 
 impl EditCommand {
@@ -1560,9 +1891,17 @@ impl EditCommand {
                     }
                 }
                 if removed.is_empty() { return None; }
+                // Bogen aan een verwijderde noot gaan mee weg (0.7.89); undo
+                // zet eerst de noten en dan de bogen terug.
+                let weg_ids: std::collections::HashSet<u64> = removed.iter().map(|(_, _, e)| e.id).collect();
+                let (weg_spans, blijft): (Vec<Span>, Vec<Span>) = score.spans.drain(..).partition(|sp| weg_ids.contains(&sp.from_event) || weg_ids.contains(&sp.to_event));
+                score.spans = blijft;
                 score.bump_gen();
                 // Inverse van verwijderen = opnieuw invoegen (herstelt de noten).
-                Some(EditCommand::InsertEvents { events: removed })
+                if weg_spans.is_empty() { return Some(EditCommand::InsertEvents { events: removed }); }
+                let mut cmds = vec![EditCommand::InsertEvents { events: removed }];
+                cmds.extend(weg_spans.into_iter().map(|span| EditCommand::AddSpan { span }));
+                Some(EditCommand::Batch { cmds })
             }
             EditCommand::InsertEvents { events } => {
                 let mut inserted: Vec<(u32, u32, LayerEv)> = Vec::new();
@@ -1619,6 +1958,7 @@ impl EditCommand {
             }
             EditCommand::Transpose { ids, semitones } => {
                 let mut changed = 0usize;
+                let mut oude_spelling: Vec<(u64, Option<Spelling>)> = Vec::new();
                 for id in &ids {
                     if let Some((li, ti, ei)) = score.locate(*id) {
                         let ev = &mut score.layers[li].takes[ti].events[ei];
@@ -1627,12 +1967,18 @@ impl EditCommand {
                             ev.midi = new_midi;
                             ev.locked = true;
                             changed += 1;
+                            // Een expliciete spelling die niet meer bij de toon past gaat weg (0.7.89).
+                            if let Some(sp) = ev.spelling {
+                                if !spelling_past(sp, new_midi) { oude_spelling.push((*id, Some(sp))); ev.spelling = None; }
+                            }
                         }
                     }
                 }
                 if changed == 0 { return None; }
                 score.bump_gen();
-                Some(EditCommand::Transpose { ids, semitones: -semitones })
+                let terug = EditCommand::Transpose { ids, semitones: -semitones };
+                if oude_spelling.is_empty() { Some(terug) }
+                else { Some(EditCommand::Batch { cmds: vec![terug, EditCommand::SetSpelling { items: oude_spelling }] }) }
             }
             EditCommand::SetTolerance { old, new } => {
                 score.tolerance_pct = new.min(100);
@@ -1728,6 +2074,62 @@ impl EditCommand {
                 score.bump_gen();
                 Some(EditCommand::SetVoice { items: old })
             }
+            EditCommand::SetArticulations { items } => {
+                let mut old: Vec<(u64, Vec<Articulation>)> = Vec::new();
+                for (id, lijst) in items.into_iter() {
+                    let mut art: Vec<Articulation> = Vec::new();
+                    for a in lijst { if !art.contains(&a) { art.push(a); } }
+                    if let Some((li, ti, ei)) = score.locate(id) {
+                        let ev = &mut score.layers[li].takes[ti].events[ei];
+                        if ev.articulations != art { old.push((id, std::mem::replace(&mut ev.articulations, art))); }
+                    }
+                }
+                if old.is_empty() { return None; }
+                score.bump_gen();
+                Some(EditCommand::SetArticulations { items: old })
+            }
+            EditCommand::SetSpelling { items } => {
+                let mut old: Vec<(u64, Option<Spelling>)> = Vec::new();
+                for (id, sp) in items.into_iter() {
+                    if let Some((li, ti, ei)) = score.locate(id) {
+                        let ev = &mut score.layers[li].takes[ti].events[ei];
+                        if ev.spelling != sp { old.push((id, ev.spelling)); ev.spelling = sp; }
+                    }
+                }
+                if old.is_empty() { return None; }
+                score.bump_gen();
+                Some(EditCommand::SetSpelling { items: old })
+            }
+            EditCommand::AddSpan { span } => {
+                if score.spans.iter().any(|sp| sp.id == span.id) { return None; }
+                score.spans.push(span.clone());
+                score.spans.sort_by_key(|sp| sp.id);
+                score.bump_gen();
+                Some(EditCommand::RemoveSpan { span })
+            }
+            EditCommand::RemoveSpan { span } => {
+                let Some(pos) = score.spans.iter().position(|sp| sp.id == span.id) else { return None; };
+                let weg = score.spans.remove(pos);
+                score.bump_gen();
+                Some(EditCommand::AddSpan { span: weg })
+            }
+            EditCommand::SetBar { measure, old: _, new } => {
+                let huidig = score.bars.iter().find(|b| b.measure == measure).cloned();
+                let nieuw = new.filter(|b| b.left.is_some() || b.right.is_some() || b.ending.is_some()).map(|mut b| { b.measure = measure; b });
+                if huidig == nieuw { return None; }
+                score.bars.retain(|b| b.measure != measure);
+                if let Some(b) = nieuw.clone() { score.bars.push(b); }
+                score.bars.sort_by_key(|b| b.measure);
+                score.bump_gen();
+                Some(EditCommand::SetBar { measure, old: nieuw, new: huidig })
+            }
+            EditCommand::Batch { cmds } => {
+                let mut inv: Vec<EditCommand> = Vec::new();
+                for c in cmds { if let Some(i) = c.apply(score) { inv.push(i); } }
+                if inv.is_empty() { return None; }
+                inv.reverse();
+                Some(EditCommand::Batch { cmds: inv })
+            }
             EditCommand::SetLyric { id, number, old, new } => {
                 let number = number.clamp(1, 3);
                 let Some((li, ti, ei)) = score.locate(id) else { return None; };
@@ -1789,7 +2191,7 @@ impl EditCommand {
                 }
                 None
             }
-            EditCommand::RemoveLayer { snapshot, position, texts: _ } => {
+            EditCommand::RemoveLayer { snapshot, position, texts: _, spans: _ } => {
                 let idx = score.layers.iter().position(|l| l.id == snapshot.id);
                 if let Some(i) = idx {
                     let removed = score.layers.remove(i);
@@ -1800,21 +2202,26 @@ impl EditCommand {
                     // in de tekstenlijst, en undo zet ze terug.
                     let (weg, blijft): (Vec<TextMark>, Vec<TextMark>) = score.texts.drain(..).partition(|t| t.layer_id == removed.id);
                     score.texts = blijft;
+                    // Bogen van de balk ook (0.7.89).
+                    let (weg_spans, blijft_spans): (Vec<Span>, Vec<Span>) = score.spans.drain(..).partition(|sp| sp.layer_id == removed.id);
+                    score.spans = blijft_spans;
                     score.bump_gen();
-                    Some(EditCommand::RestoreLayer { snapshot: removed, position: position.min(score.layers.len()), texts: weg })
+                    Some(EditCommand::RestoreLayer { snapshot: removed, position: position.min(score.layers.len()), texts: weg, spans: weg_spans })
                 } else {
                     None
                 }
             }
-            EditCommand::RestoreLayer { snapshot, position, texts } => {
+            EditCommand::RestoreLayer { snapshot, position, texts, spans } => {
                 let idx = position.min(score.layers.len());
                 score.layers.insert(idx, snapshot);
                 score.texts.extend(texts);
                 score.texts.sort_by_key(|t| (t.start_us, t.id));
+                score.spans.extend(spans);
+                score.spans.sort_by_key(|sp| sp.id);
                 score.bump_gen();
                 // De inverse bevat een verse snapshot: bij redo verwijdert hij
-                // dezelfde laag (met haar teksten) opnieuw.
-                Some(EditCommand::RemoveLayer { snapshot: score.layers[idx].clone(), position: idx, texts: Vec::new() })
+                // dezelfde laag (met haar teksten en bogen) opnieuw.
+                Some(EditCommand::RemoveLayer { snapshot: score.layers[idx].clone(), position: idx, texts: Vec::new(), spans: Vec::new() })
             }
         }
     }
@@ -1825,7 +2232,7 @@ mod tests {
     use super::*;
 
     fn opts() -> NotationOptions {
-        NotationOptions { bpm: 60.0, beats_per_bar: 4, quantize: 4, key_fifths: 0, title: Some("Test".into()), staves: None, tolerance_pct: None, minor: None, beat_unit: None, min_measures: None, composer: None, subtitle: None }
+        NotationOptions { bpm: 60.0, beats_per_bar: 4, quantize: 4, key_fifths: 0, title: Some("Test".into()), staves: None, tolerance_pct: None, minor: None, beat_unit: None, min_measures: None, composer: None, subtitle: None, bars: None }
     }
 
     #[test]
@@ -1975,8 +2382,8 @@ mod tests {
         let _ = lid;
         let take = &mut sc.layers[0].takes[0]; // add_layer maakt "Take 1"
         take.visible = true;
-        take.events.push(LayerEv { id: 1, midi: 36, start_us: 0, end_us: 500_000, channel: KANAAL_ONBEKEND, locked: true, voice: 1, lyrics: Vec::new(), hand: None });
-        take.events.push(LayerEv { id: 2, midi: 38, start_us: 500_000, end_us: 1_000_000, channel: 0, locked: false, voice: 1, lyrics: Vec::new(), hand: None });
+        take.events.push(LayerEv { id: 1, midi: 36, start_us: 0, end_us: 500_000, channel: KANAAL_ONBEKEND, locked: true, voice: 1, lyrics: Vec::new(), articulations: Vec::new(), spelling: None, hand: None });
+        take.events.push(LayerEv { id: 2, midi: 38, start_us: 500_000, end_us: 1_000_000, channel: 0, locked: false, voice: 1, lyrics: Vec::new(), articulations: Vec::new(), spelling: None, hand: None });
         let bytes = score_to_smf_bytes(&sc, &|_l| Some(2)).expect("smf");
         let smf = midly::Smf::parse(&bytes).expect("parse");
         let mut kanalen = Vec::new();
@@ -2041,8 +2448,8 @@ mod tests {
     #[test]
     fn quantize_notes_behoudt_ids() {
         let notes = vec![
-            NoteEv { midi: 60, start_sec: 0.0, end_sec: 1.0, id: Some(7), hand: Some(KlavarHand::Left), voice: 1, lyrics: Vec::new() },
-            NoteEv { midi: 64, start_sec: 0.02, end_sec: 0.98, id: Some(8), hand: None, voice: 1, lyrics: Vec::new() },
+            NoteEv { midi: 60, start_sec: 0.0, end_sec: 1.0, id: Some(7), hand: Some(KlavarHand::Left), voice: 1, lyrics: Vec::new(), articulations: Vec::new(), spelling: None },
+            NoteEv { midi: 64, start_sec: 0.02, end_sec: 0.98, id: Some(8), hand: None, voice: 1, lyrics: Vec::new(), articulations: Vec::new(), spelling: None },
         ];
         let q = quantize_notes(&notes, 60.0, 4, 100);
         assert_eq!(q.len(), 2);
@@ -2063,8 +2470,8 @@ mod tests {
         // kent één notenkop (de tweede valt weg in de dedup), klavar houdt
         // beide noten, met hun eigen ID.
         let notes = vec![
-            NoteEv { midi: 60, start_sec: 0.0, end_sec: 1.0, id: Some(1), hand: None, voice: 1, lyrics: Vec::new() },
-            NoteEv { midi: 60, start_sec: 0.0, end_sec: 2.0, id: Some(2), hand: None, voice: 1, lyrics: Vec::new() },
+            NoteEv { midi: 60, start_sec: 0.0, end_sec: 1.0, id: Some(1), hand: None, voice: 1, lyrics: Vec::new(), articulations: Vec::new(), spelling: None },
+            NoteEv { midi: 60, start_sec: 0.0, end_sec: 2.0, id: Some(2), hand: None, voice: 1, lyrics: Vec::new(), articulations: Vec::new(), spelling: None },
         ];
         let q = quantize_notes(&notes, 60.0, 4, 100);
         assert_eq!(q.len(), 2);
@@ -2093,7 +2500,7 @@ mod tests {
         sc.layers[1].divisions = vec!["Pedaal".into()];
         sc.layers[0].klavar_hand = Some(KlavarHand::Right);
         let id = sc.new_event_id();
-        sc.layers[0].takes[0].events.push(LayerEv { id, midi: 60, start_us: 0, end_us: 500_000, channel: 0, locked: false, voice: 1, lyrics: Vec::new(), hand: Some(KlavarHand::Left) });
+        sc.layers[0].takes[0].events.push(LayerEv { id, midi: 60, start_us: 0, end_us: 500_000, channel: 0, locked: false, voice: 1, lyrics: Vec::new(), articulations: Vec::new(), spelling: None, hand: Some(KlavarHand::Left) });
         let staves = score_to_staves(&sc);
         assert_eq!(staves[0].layer_id, Some(hw));
         assert_eq!(staves[0].notes[0].id, Some(id));
@@ -2161,7 +2568,7 @@ mod tests {
         let mut sc = Score::new(1);
         sc.add_layer("Hoofdwerk".into(), None);
         let id = sc.new_event_id();
-        sc.layers[0].takes[0].events.push(LayerEv { id, midi: 60, start_us: 0, end_us: 1000, channel: 0, locked: false, voice: 1, lyrics: Vec::new(), hand: None });
+        sc.layers[0].takes[0].events.push(LayerEv { id, midi: 60, start_us: 0, end_us: 1000, channel: 0, locked: false, voice: 1, lyrics: Vec::new(), articulations: Vec::new(), spelling: None, hand: None });
         let cmd = EditCommand::SetHands { items: vec![(id, Some(KlavarHand::Right)), (999, Some(KlavarHand::Left))] };
         let inv = cmd.apply(&mut sc).expect("inverse");
         assert_eq!(sc.layers[0].takes[0].events[0].hand, Some(KlavarHand::Right));
@@ -2355,8 +2762,8 @@ mod tests {
     #[test]
     fn inkorting_alleen_binnen_stem_en_notemap() {
         let staves = vec![Staff { name: "M".into(), bass_clef: false, notes: vec![
-            NoteEv { midi: 72, start_sec: 0.0, end_sec: 1.0, id: Some(1), hand: None, voice: 1, lyrics: Vec::new() },
-            NoteEv { midi: 60, start_sec: 0.0, end_sec: 6.0, id: Some(2), hand: None, voice: 2, lyrics: Vec::new() }], ..Default::default() }];
+            NoteEv { midi: 72, start_sec: 0.0, end_sec: 1.0, id: Some(1), hand: None, voice: 1, lyrics: Vec::new(), articulations: Vec::new(), spelling: None },
+            NoteEv { midi: 60, start_sec: 0.0, end_sec: 6.0, id: Some(2), hand: None, voice: 2, lyrics: Vec::new(), articulations: Vec::new(), spelling: None }], ..Default::default() }];
         let qs = quantize_score(&staves, &opts());
         let (xml, map) = render_musicxml_met_notemap(&qs, &opts(), None).expect("xml");
         // Stem 2 loopt over de maatstreep: twee delen met dezelfde id.
@@ -2390,7 +2797,7 @@ mod tests {
         let mut sc = Score::new(1);
         let l = sc.add_layer("M".into(), Some(false));
         let t = sc.layers[0].takes[0].id;
-        let ev = |id: u64, midi: u8, s: u64| LayerEv { id, midi, start_us: s, end_us: s + 500_000, channel: 0, locked: false, voice: 1, lyrics: Vec::new(), hand: None };
+        let ev = |id: u64, midi: u8, s: u64| LayerEv { id, midi, start_us: s, end_us: s + 500_000, channel: 0, locked: false, voice: 1, lyrics: Vec::new(), articulations: Vec::new(), spelling: None, hand: None };
         EditCommand::InsertEvents { events: vec![(l, t, ev(1, 60, 0)), (l, t, ev(2, 64, 10_000)), (l, t, ev(3, 67, 0)), (l, t, ev(4, 62, 1_000_000))] }.apply(&mut sc);
         let inv = EditCommand::SetVoice { items: vec![(1, 2), (3, 2)] }.apply(&mut sc).expect("inverse");
         assert_eq!(sc.layers[0].takes[0].events[0].voice, 2);
@@ -2479,7 +2886,7 @@ mod tests {
         let mut sc = Score::new(1);
         let l = sc.add_layer("S".into(), Some(false));
         let t = sc.layers[0].takes[0].id;
-        let ev = LayerEv { id: 1, midi: 60, start_us: 0, end_us: 500_000, channel: 0, locked: false, voice: 1, lyrics: Vec::new(), hand: None };
+        let ev = LayerEv { id: 1, midi: 60, start_us: 0, end_us: 500_000, channel: 0, locked: false, voice: 1, lyrics: Vec::new(), articulations: Vec::new(), spelling: None, hand: None };
         EditCommand::InsertEvents { events: vec![(l, t, ev)] }.apply(&mut sc);
         // Liedtekst zetten, wijzigen, weghalen — met undo.
         let inv = EditCommand::SetLyric { id: 1, number: 1, old: None, new: Some(lyric(1, "Lof", Syllabic::Begin, false)) }.apply(&mut sc).expect("inverse");
@@ -2536,7 +2943,7 @@ mod tests {
         sc.texts.push(TextMark { id: ta, layer_id: a, start_us: 0, kind: TextKind::Tempo, text: "Adagio".into(), placement: Placement::Above });
         sc.texts.push(TextMark { id: tb, layer_id: b, start_us: 0, kind: TextKind::Free, text: "x".into(), placement: Placement::Above });
         let snapshot = sc.layers[0].clone();
-        let inv = EditCommand::RemoveLayer { snapshot, position: 0, texts: Vec::new() }.apply(&mut sc).unwrap();
+        let inv = EditCommand::RemoveLayer { snapshot, position: 0, texts: Vec::new(), spans: Vec::new() }.apply(&mut sc).unwrap();
         assert_eq!(sc.texts.len(), 1);
         assert_eq!(sc.texts[0].id, tb);
         let redo = inv.apply(&mut sc).unwrap();
@@ -2544,6 +2951,186 @@ mod tests {
         assert!(sc.texts.iter().any(|t| t.id == ta && t.text == "Adagio"));
         redo.apply(&mut sc);
         assert_eq!(sc.texts.len(), 1);
+    }
+
+    #[test]
+    fn articulaties_en_fermate_op_eerste_akkoordnoot() {
+        let mut a = NoteEv::anoniem(60, 0.0, 1.0); a.articulations = vec![Articulation::Staccato, Articulation::Fermata];
+        let mut b = NoteEv::anoniem(64, 0.0, 1.0); b.articulations = vec![Articulation::Accent];
+        let staves = vec![Staff { name: "M".into(), notes: vec![a, b], ..Default::default() }];
+        let xml = build_musicxml(&staves, &opts()).unwrap();
+        assert!(xml.contains("<notations><articulations><staccato/><accent/></articulations><fermata type=\"upright\"/></notations>"), "{}", xml);
+        assert_eq!(xml.matches("<articulations>").count(), 1);
+    }
+
+    #[test]
+    fn accidental_uit_spelling() {
+        let mut n = NoteEv::anoniem(70, 0.0, 1.0); n.spelling = Some(Spelling { step: 'B', alter: -1 }); // Bes in C
+        let mut c = NoteEv::anoniem(59, 1.0, 2.0); c.spelling = Some(Spelling { step: 'C', alter: -1 }); // Ces = B
+        let mut fout = NoteEv::anoniem(60, 2.0, 3.0); fout.spelling = Some(Spelling { step: 'D', alter: 0 }); // klopt niet → genegeerd
+        let staves = vec![Staff { name: "M".into(), notes: vec![n, c, fout], ..Default::default() }];
+        let xml = build_musicxml(&staves, &opts()).unwrap();
+        assert!(xml.contains("<pitch><step>B</step><alter>-1</alter><octave>4</octave></pitch><duration>4</duration><voice>1</voice><type>quarter</type><accidental>flat</accidental>"), "{}", xml);
+        assert!(xml.contains("<pitch><step>C</step><alter>-1</alter><octave>4</octave></pitch>"), "{}", xml);
+        assert!(xml.contains("<pitch><step>C</step><octave>4</octave></pitch><duration>4</duration><voice>1</voice><type>quarter</type></note>"), "{}", xml);
+        assert_eq!(xml.matches("<accidental>").count(), 2);
+    }
+
+    #[test]
+    fn boog_haarspeld_en_octavering() {
+        let noten: Vec<NoteEv> = [(72u8, 0.0f64), (74, 1.0), (76, 2.0), (77, 3.0)].iter().enumerate()
+            .map(|(i, &(m, st))| NoteEv { id: Some(i as u64 + 1), ..NoteEv::anoniem(m, st, st + 1.0) }).collect();
+        let st = Staff { name: "M".into(), notes: noten, spans: vec![
+            StaffSpan { kind: SpanKind::Slur, from_id: 1, to_id: 3 },
+            StaffSpan { kind: SpanKind::Slur, from_id: 3, to_id: 4 }, // deelt noot 3 → nummer 2
+            StaffSpan { kind: SpanKind::Crescendo, from_id: 1, to_id: 2 },
+            StaffSpan { kind: SpanKind::OctaveUp, from_id: 3, to_id: 4 },
+        ], ..Default::default() };
+        let xml = build_musicxml(&[st], &opts()).unwrap();
+        assert!(xml.contains("<slur type=\"start\" number=\"1\"/>"), "{}", xml);
+        assert!(xml.contains("<slur type=\"stop\" number=\"1\"/><slur type=\"start\" number=\"2\"/>"), "{}", xml);
+        assert!(xml.contains("<slur type=\"stop\" number=\"2\"/>"), "{}", xml);
+        assert!(xml.contains("<wedge type=\"crescendo\" number=\"1\"/>"), "{}", xml);
+        let i_stop = xml.find("<wedge type=\"stop\"").unwrap();
+        let i_noot2 = xml.find("<step>D</step>").unwrap();
+        assert!(i_stop > i_noot2, "haarspeld stopt ná de tweede noot");
+        // 8va: geschreven een octaaf lager (E5 → E4), octave-shift ervoor, stop erna.
+        assert!(xml.contains("<octave-shift type=\"down\" size=\"8\" number=\"1\"/>"), "{}", xml);
+        assert!(xml.contains("<pitch><step>E</step><octave>4</octave></pitch>"), "{}", xml);
+        assert!(xml.contains("<pitch><step>F</step><octave>4</octave></pitch>"), "{}", xml);
+        let i_oct_stop = xml.find("<octave-shift type=\"stop\"").unwrap();
+        assert!(i_oct_stop > xml.find("<step>F</step>").unwrap());
+    }
+
+    #[test]
+    fn maatstrepen_herhaling_en_volta() {
+        let mut o = opts(); o.min_measures = Some(4);
+        o.bars = Some(vec![
+            BarAttr { measure: 0, left: Some(BarStyle::RepeatStart), right: None, ending: None },
+            BarAttr { measure: 1, left: None, right: Some(BarStyle::RepeatEnd), ending: Some(1) },
+            BarAttr { measure: 2, left: None, right: Some(BarStyle::Double), ending: Some(2) },
+            BarAttr { measure: 3, left: None, right: Some(BarStyle::Final), ending: None },
+        ]);
+        let staves = vec![Staff { name: "M".into(), notes: vec![NoteEv::anoniem(60, 0.0, 1.0)], ..Default::default() }];
+        let xml = build_musicxml(&staves, &o).unwrap();
+        assert!(xml.contains("<barline location=\"left\"><bar-style>heavy-light</bar-style><repeat direction=\"forward\"/></barline>"), "{}", xml);
+        assert!(xml.contains("<barline location=\"left\"><ending number=\"1\" type=\"start\"/></barline>"), "{}", xml);
+        assert!(xml.contains("<barline location=\"right\"><bar-style>light-heavy</bar-style><ending number=\"1\" type=\"stop\"/><repeat direction=\"backward\"/></barline>"), "{}", xml);
+        assert!(xml.contains("<barline location=\"left\"><ending number=\"2\" type=\"start\"/></barline>"), "{}", xml);
+        assert!(xml.contains("<barline location=\"right\"><bar-style>light-light</bar-style><ending number=\"2\" type=\"discontinue\"/></barline>"), "{}", xml);
+        assert!(xml.contains("<barline location=\"right\"><bar-style>light-heavy</bar-style></barline>"), "{}", xml);
+    }
+
+    #[test]
+    fn boog_verdwijnt_met_noot_en_undo_zet_terug() {
+        let mut sc = Score::new(1);
+        let l = sc.add_layer("M".into(), Some(false));
+        let t = sc.layers[0].takes[0].id;
+        let ev = |id: u64, st: u64| LayerEv { id, midi: 60, start_us: st, end_us: st + 500_000, channel: 0, locked: false, voice: 1, lyrics: Vec::new(), articulations: Vec::new(), spelling: None, hand: None };
+        EditCommand::InsertEvents { events: vec![(l, t, ev(1, 0)), (l, t, ev(2, 500_000))] }.apply(&mut sc);
+        let sid = sc.new_span_id();
+        EditCommand::AddSpan { span: Span { id: sid, layer_id: l, kind: SpanKind::Slur, from_event: 1, to_event: 2 } }.apply(&mut sc);
+        assert_eq!(sc.spans.len(), 1);
+        let weg = sc.layers[0].takes[0].events[1].clone();
+        let inv = EditCommand::DeleteEvents { events: vec![(l, t, weg)] }.apply(&mut sc).unwrap();
+        assert!(sc.spans.is_empty());
+        let redo = inv.apply(&mut sc).unwrap();
+        assert_eq!(sc.spans.len(), 1);
+        assert_eq!(sc.layers[0].takes[0].events.len(), 2);
+        redo.apply(&mut sc);
+        assert!(sc.spans.is_empty());
+        assert_eq!(sc.layers[0].takes[0].events.len(), 1);
+    }
+
+    #[test]
+    fn staccato_klinkt_half_in_export() {
+        let mut e = LayerEv { id: 1, midi: 60, start_us: 1_000_000, end_us: 2_000_000, channel: 0, locked: false, voice: 1, lyrics: Vec::new(), articulations: Vec::new(), spelling: None, hand: None };
+        assert_eq!(export_eind_us(&e), 2_000_000);
+        e.articulations.push(Articulation::Staccato);
+        assert_eq!(export_eind_us(&e), 1_500_000);
+    }
+
+    #[test]
+    fn enharmonisch_wisselen_rond() {
+        // Cis in C: standaard kruis → mol → terug naar de standaard (None).
+        let a = enharmonisch_wissel(61, 0, None);
+        assert_eq!(a, Some(Spelling { step: 'D', alter: -1 }));
+        assert_eq!(enharmonisch_wissel(61, 0, a), None);
+        // E: stamtoon ↔ Fes.
+        assert_eq!(enharmonisch_wissel(64, 0, None), Some(Spelling { step: 'F', alter: -1 }));
+        // D heeft zonder dubbele voortekens maar één spelling.
+        assert_eq!(enharmonisch_wissel(62, 0, None), None);
+    }
+
+    #[test]
+    fn boog_over_twee_stemmen_wordt_overgeslagen() {
+        let mut a = NoteEv::anoniem(60, 0.0, 1.0); a.id = Some(1); a.voice = 2;
+        let mut b = NoteEv::anoniem(64, 1.0, 2.0); b.id = Some(2); b.voice = 1;
+        let st = Staff { name: "M".into(), notes: vec![a, b], spans: vec![StaffSpan { kind: SpanKind::Slur, from_id: 1, to_id: 2 }], ..Default::default() };
+        let xml = build_musicxml(&[st], &opts()).unwrap();
+        assert!(!xml.contains("<slur"), "{}", xml);
+    }
+
+    #[test]
+    fn octavering_eindigt_bij_herinzet_van_dezelfde_toon() {
+        let mut c = NoteEv::anoniem(72, 0.0, 1.0); c.id = Some(1);
+        let mut e1 = NoteEv::anoniem(76, 0.5, 2.0); e1.id = Some(2);
+        let mut e2 = NoteEv::anoniem(76, 1.0, 2.0); e2.id = Some(3);
+        let st = Staff { name: "M".into(), notes: vec![c, e1, e2], spans: vec![StaffSpan { kind: SpanKind::OctaveUp, from_id: 1, to_id: 2 }], ..Default::default() };
+        let xml = build_musicxml(&[st], &opts()).unwrap();
+        // e1 (ingekort tot de herinzet) staat een octaaf lager geschreven, e2 erna niet meer.
+        assert!(xml.contains("<pitch><step>E</step><octave>4</octave></pitch><duration>2</duration>"), "{}", xml);
+        assert!(xml.contains("<pitch><step>E</step><octave>5</octave></pitch><duration>4</duration>"), "{}", xml);
+        let i_stop = xml.find("<octave-shift type=\"stop\"").unwrap();
+        let i_e2 = xml.find("<pitch><step>E</step><octave>5</octave>").unwrap();
+        assert!(i_stop < i_e2, "de stop komt vóór de herinzet");
+    }
+
+    #[test]
+    fn transponeren_wist_onpassende_spelling_en_undo_zet_terug() {
+        let mut sc = Score::new(1);
+        let l = sc.add_layer("M".into(), Some(false));
+        let t = sc.layers[0].takes[0].id;
+        let ev = LayerEv { id: 1, midi: 64, start_us: 0, end_us: 500_000, channel: 0, locked: false, voice: 1, lyrics: Vec::new(), articulations: Vec::new(), spelling: Some(Spelling { step: 'F', alter: -1 }), hand: None };
+        EditCommand::InsertEvents { events: vec![(l, t, ev)] }.apply(&mut sc);
+        let inv = EditCommand::Transpose { ids: vec![1], semitones: 1 }.apply(&mut sc).unwrap();
+        assert_eq!(sc.layers[0].takes[0].events[0].midi, 65);
+        assert_eq!(sc.layers[0].takes[0].events[0].spelling, None);
+        inv.apply(&mut sc);
+        assert_eq!(sc.layers[0].takes[0].events[0].midi, 64);
+        assert_eq!(sc.layers[0].takes[0].events[0].spelling, Some(Spelling { step: 'F', alter: -1 }));
+        // Een niet-passende spelling telt bij het wisselen als de standaard.
+        assert_eq!(enharmonisch_wissel(65, 0, Some(Spelling { step: 'F', alter: -1 })), Some(Spelling { step: 'E', alter: 1 }));
+    }
+
+    #[test]
+    fn balk_verwijderen_neemt_bogen_mee() {
+        let mut sc = Score::new(1);
+        let l = sc.add_layer("M".into(), Some(false));
+        let t = sc.layers[0].takes[0].id;
+        let ev = |id: u64, st: u64| LayerEv { id, midi: 60, start_us: st, end_us: st + 500_000, channel: 0, locked: false, voice: 1, lyrics: Vec::new(), articulations: Vec::new(), spelling: None, hand: None };
+        EditCommand::InsertEvents { events: vec![(l, t, ev(1, 0)), (l, t, ev(2, 500_000))] }.apply(&mut sc);
+        let sid = sc.new_span_id();
+        EditCommand::AddSpan { span: Span { id: sid, layer_id: l, kind: SpanKind::Slur, from_event: 1, to_event: 2 } }.apply(&mut sc);
+        let snapshot = sc.layers[0].clone();
+        let inv = EditCommand::RemoveLayer { snapshot, position: 0, texts: Vec::new(), spans: Vec::new() }.apply(&mut sc).unwrap();
+        assert!(sc.spans.is_empty());
+        inv.apply(&mut sc);
+        assert_eq!(sc.spans.len(), 1);
+    }
+
+    #[test]
+    fn maatteken_undo_redo() {
+        let mut sc = Score::new(1);
+        let inv = EditCommand::SetBar { measure: 2, old: None, new: Some(BarAttr { measure: 2, left: None, right: Some(BarStyle::Final), ending: None }) }.apply(&mut sc).unwrap();
+        assert_eq!(sc.bars.len(), 1);
+        let redo = inv.apply(&mut sc).unwrap();
+        assert!(sc.bars.is_empty());
+        redo.apply(&mut sc);
+        assert_eq!(sc.bars[0].right, Some(BarStyle::Final));
+        // Alles leeg = regel weg.
+        assert!(EditCommand::SetBar { measure: 2, old: None, new: Some(BarAttr { measure: 2, left: None, right: None, ending: None }) }.apply(&mut sc).is_some());
+        assert!(sc.bars.is_empty());
     }
 
     #[test]
@@ -2621,7 +3208,7 @@ mod tests {
         let lid = sc.add_layer("M".into(), Some(false));
         sc.beats_per_bar = 6; sc.beat_unit = 8;
         let tid = sc.layers[0].takes[0].id;
-        let ev = LayerEv { id: 1, midi: 60, start_us: 0, end_us: 500_000, channel: 0, locked: false, voice: 1, lyrics: Vec::new(), hand: None };
+        let ev = LayerEv { id: 1, midi: 60, start_us: 0, end_us: 500_000, channel: 0, locked: false, voice: 1, lyrics: Vec::new(), articulations: Vec::new(), spelling: None, hand: None };
         EditCommand::InsertEvents { events: vec![(lid, tid, ev)] }.apply(&mut sc);
         let bytes = score_to_smf_bytes(&sc, &|_| None).expect("smf");
         // FF 58 04 nn dd cc bb: nn=6, dd=3 (achtste).
@@ -2667,7 +3254,7 @@ mod tests {
     }
 
     fn fixture_opts() -> NotationOptions {
-        NotationOptions { bpm: 60.0, beats_per_bar: 3, quantize: 4, key_fifths: -2, title: Some("Fixture 0.7.69".into()), staves: None, tolerance_pct: Some(80), minor: None, beat_unit: None, min_measures: None, composer: None, subtitle: None }
+        NotationOptions { bpm: 60.0, beats_per_bar: 3, quantize: 4, key_fifths: -2, title: Some("Fixture 0.7.69".into()), staves: None, tolerance_pct: Some(80), minor: None, beat_unit: None, min_measures: None, composer: None, subtitle: None, bars: None }
     }
 
     /// Tweede fixture (0.7.70): de paden die de eerste niet raakt — sub-raster
@@ -2701,7 +3288,7 @@ mod tests {
     }
 
     fn fixture2_opts() -> NotationOptions {
-        NotationOptions { bpm: 72.5, beats_per_bar: 3, quantize: 4, key_fifths: 3, title: Some("A & B <C>".into()), staves: None, tolerance_pct: Some(60), minor: None, beat_unit: None, min_measures: None, composer: None, subtitle: None }
+        NotationOptions { bpm: 72.5, beats_per_bar: 3, quantize: 4, key_fifths: 3, title: Some("A & B <C>".into()), staves: None, tolerance_pct: Some(60), minor: None, beat_unit: None, min_measures: None, composer: None, subtitle: None, bars: None }
     }
 
     const FIXTURE_PAD: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/src/testdata/notatie_0769.musicxml");
@@ -2734,7 +3321,7 @@ mod tests {
         NotationOptions {
             bpm: 60.0, beats_per_bar: 6, quantize: 2, key_fifths: 1, title: Some("Fixture 0.7.83".into()),
             staves: None, tolerance_pct: Some(80), minor: None,
-            beat_unit: Some(8), min_measures: Some(4), composer: Some("Anoniem".into()), subtitle: Some("Pastorale".into()),
+            beat_unit: Some(8), min_measures: Some(4), composer: Some("Anoniem".into()), subtitle: Some("Pastorale".into()), bars: None,
         }
     }
 

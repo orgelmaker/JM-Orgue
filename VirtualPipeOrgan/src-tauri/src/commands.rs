@@ -4438,7 +4438,7 @@ pub fn notation_stop_recording(state: State<AppState>) -> Result<(), String> {
                         let end_us = end_us.max(start_us + 20_000);
                         take.events.push(crate::notation::LayerEv {
                             id: ev_id, midi: note, start_us, end_us,
-                            channel: ch, locked: false, voice: stem, lyrics: Vec::new(), hand: None,
+                            channel: ch, locked: false, voice: stem, lyrics: Vec::new(), articulations: Vec::new(), spelling: None, hand: None,
                         });
                         let _ = handle.emit("jm-orgue:notation:note-added", serde_json::json!({
                             "score": sid, "layer": lid, "take": tid,
@@ -4531,6 +4531,11 @@ pub struct PasteNote {
     /// Liedtekst (0.7.88), zodat plakken de lettergrepen niet verliest.
     #[serde(default)]
     pub lyrics: Vec<crate::notation::Lyric>,
+    /// Tekens (0.7.89): articulaties en spelling gaan mee.
+    #[serde(default)]
+    pub articulations: Vec<crate::notation::Articulation>,
+    #[serde(default)]
+    pub spelling: Option<crate::notation::Spelling>,
 }
 
 /// Plak noten in een laag (armed take, of de eerste zichtbare take). De backend
@@ -4556,7 +4561,7 @@ pub fn notation_paste(state: State<AppState>, app: tauri::AppHandle, score_id: u
             let voice = if n.voice >= 1 { n.voice.min(4) } else { stem };
             events.push((layer_id, take_id, crate::notation::LayerEv {
                 id, midi: n.midi, start_us, end_us, channel: n.channel, locked: true, voice, hand: n.hand,
-                lyrics: n.lyrics.clone(),
+                lyrics: n.lyrics.clone(), articulations: n.articulations.clone(), spelling: n.spelling,
             }));
         }
         let cmd = crate::notation::EditCommand::InsertEvents { events };
@@ -4845,7 +4850,7 @@ pub fn notation_remove_layer(state: State<AppState>, app: tauri::AppHandle, scor
         if sc.layers.len() <= 1 { return Err("Minstens één balk is nodig".to_string()); }
         let Some(pos) = sc.layers.iter().position(|l| l.id == layer_id) else { return Err("Balk niet gevonden".to_string()); };
         let snapshot = sc.layers[pos].clone();
-        let cmd = crate::notation::EditCommand::RemoveLayer { snapshot, position: pos, texts: Vec::new() };
+        let cmd = crate::notation::EditCommand::RemoveLayer { snapshot, position: pos, texts: Vec::new(), spans: Vec::new() };
         if let Some(inv) = cmd.apply(sc) { sc.push_undo(inv); }
         Ok(sc.generation)
     })??;
@@ -5082,6 +5087,132 @@ pub fn notation_remove_text(state: State<AppState>, app: tauri::AppHandle, score
 
 /// Getrokken registers per divisie (0.7.88): voor de registratie-aanwijzing
 /// "Hw: Prestant 8', Octaaf 4'". Alleen divisies met getrokken registers.
+/// Articulatie aan/uit op noten (0.7.89): hebben ze hem allemaal, dan gaat
+/// hij eraf, anders komt hij erbij.
+#[tauri::command]
+pub fn notation_toggle_articulation(state: State<AppState>, app: tauri::AppHandle, score_id: u32, event_ids: Vec<u64>, articulation: crate::notation::Articulation) -> Result<u64, String> {
+    let gen = with_score_mut(&state, score_id, |sc| {
+        let mut huidige: Vec<(u64, Vec<crate::notation::Articulation>)> = Vec::new();
+        for id in &event_ids {
+            if let Some((li, ti, ei)) = sc.locate(*id) { huidige.push((*id, sc.layers[li].takes[ti].events[ei].articulations.clone())); }
+        }
+        if huidige.is_empty() { return sc.generation; }
+        let allemaal = huidige.iter().all(|(_, a)| a.contains(&articulation));
+        let items: Vec<(u64, Vec<crate::notation::Articulation>)> = huidige.into_iter().map(|(id, mut a)| {
+            if allemaal { a.retain(|x| *x != articulation); } else if !a.contains(&articulation) { a.push(articulation); }
+            (id, a)
+        }).collect();
+        let cmd = crate::notation::EditCommand::SetArticulations { items };
+        if let Some(inv) = cmd.apply(sc) { sc.push_undo(inv); }
+        sc.generation
+    })?;
+    tauri::async_runtime::spawn(emit_score_changed(app, score_id, gen));
+    Ok(gen)
+}
+
+/// Enharmonisch omspellen (0.7.89): kruis ↔ mol (E ↔ Fes enz.); na de ronde
+/// weer de spelling van de toonsoort.
+#[tauri::command]
+pub fn notation_toggle_spelling(state: State<AppState>, app: tauri::AppHandle, score_id: u32, event_ids: Vec<u64>) -> Result<u64, String> {
+    let gen = with_score_mut(&state, score_id, |sc| {
+        let key = sc.key_fifths;
+        let mut items: Vec<(u64, Option<crate::notation::Spelling>)> = Vec::new();
+        for id in &event_ids {
+            if let Some((li, ti, ei)) = sc.locate(*id) {
+                let ev = &sc.layers[li].takes[ti].events[ei];
+                items.push((*id, crate::notation::enharmonisch_wissel(ev.midi, key, ev.spelling)));
+            }
+        }
+        let cmd = crate::notation::EditCommand::SetSpelling { items };
+        if let Some(inv) = cmd.apply(sc) { sc.push_undo(inv); }
+        sc.generation
+    })?;
+    tauri::async_runtime::spawn(emit_score_changed(app, score_id, gen));
+    Ok(gen)
+}
+
+/// Boog, haarspeld of octavering over de gegeven noten (0.7.89): van de
+/// hoogste noot op de eerste inzet tot de hoogste op de laatste, op dezelfde
+/// balk. Bestaat precies die al, dan gaat hij weg.
+#[tauri::command]
+pub fn notation_toggle_span(state: State<AppState>, app: tauri::AppHandle, score_id: u32, event_ids: Vec<u64>, kind: crate::notation::SpanKind) -> Result<u64, String> {
+    let gen = with_score_mut(&state, score_id, |sc| {
+        // (start, id, laag, midi, stem)
+        let mut noten: Vec<(u64, u64, u32, u8, u8)> = Vec::new();
+        for id in &event_ids {
+            if let Some((li, ti, ei)) = sc.locate(*id) {
+                let e = &sc.layers[li].takes[ti].events[ei];
+                noten.push((e.start_us, e.id, sc.layers[li].id, e.midi, e.voice.clamp(1, 4)));
+            }
+        }
+        noten.sort();
+        noten.dedup_by_key(|n| n.1);
+        if noten.len() < 2 { return Err("Selecteer minstens twee noten".to_string()); }
+        let laag = noten[0].2;
+        if noten.iter().any(|n| n.2 != laag) { return Err("De noten moeten op dezelfde balk staan".to_string()); }
+        let stem = noten[0].4;
+        if noten.iter().any(|n| n.4 != stem) { return Err("De noten moeten in dezelfde stem staan".to_string()); }
+        let eerste = noten[0].0;
+        let laatste = noten[noten.len() - 1].0;
+        if eerste == laatste { return Err("Selecteer noten op twee verschillende inzetten".to_string()); }
+        let from = noten.iter().filter(|n| n.0 == eerste).max_by_key(|n| n.3).map(|n| n.1).unwrap_or(0);
+        let to = noten.iter().filter(|n| n.0 == laatste).max_by_key(|n| n.3).map(|n| n.1).unwrap_or(0);
+        let bestaand = sc.spans.iter().find(|s| s.kind == kind && s.from_event == from && s.to_event == to).cloned();
+        let cmd = match bestaand {
+            Some(span) => crate::notation::EditCommand::RemoveSpan { span },
+            None => {
+                let id = sc.new_span_id();
+                crate::notation::EditCommand::AddSpan { span: crate::notation::Span { id, layer_id: laag, kind, from_event: from, to_event: to } }
+            }
+        };
+        if let Some(inv) = cmd.apply(sc) { sc.push_undo(inv); }
+        Ok(sc.generation)
+    })??;
+    tauri::async_runtime::spawn(emit_score_changed(app, score_id, gen));
+    Ok(gen)
+}
+
+/// Alle bogen, haarspelden en octaveringen aan de gegeven noten weg (0.7.89).
+#[tauri::command]
+pub fn notation_remove_spans(state: State<AppState>, app: tauri::AppHandle, score_id: u32, event_ids: Vec<u64>) -> Result<u64, String> {
+    let gen = with_score_mut(&state, score_id, |sc| {
+        let set: std::collections::HashSet<u64> = event_ids.iter().copied().collect();
+        let weg: Vec<crate::notation::Span> = sc.spans.iter().filter(|s| set.contains(&s.from_event) || set.contains(&s.to_event)).cloned().collect();
+        if weg.is_empty() { return sc.generation; }
+        let cmd = crate::notation::EditCommand::Batch { cmds: weg.into_iter().map(|span| crate::notation::EditCommand::RemoveSpan { span }).collect() };
+        if let Some(inv) = cmd.apply(sc) { sc.push_undo(inv); }
+        sc.generation
+    })?;
+    tauri::async_runtime::spawn(emit_score_changed(app, score_id, gen));
+    Ok(gen)
+}
+
+/// Maatteken aan/uit op een maat (0.7.89): repeat_start, repeat_end, double,
+/// final, ending1, ending2.
+#[tauri::command]
+pub fn notation_toggle_bar(state: State<AppState>, app: tauri::AppHandle, score_id: u32, measure: u32, wat: String) -> Result<u64, String> {
+    use crate::notation::{BarAttr, BarStyle};
+    let gen = with_score_mut(&state, score_id, |sc| {
+        let huidig = sc.bars.iter().find(|b| b.measure == measure).cloned();
+        let mut b = huidig.clone().unwrap_or(BarAttr { measure, left: None, right: None, ending: None });
+        fn zet(slot: &mut Option<BarStyle>, stijl: BarStyle) { *slot = if *slot == Some(stijl) { None } else { Some(stijl) }; }
+        match wat.as_str() {
+            "repeat_start" => zet(&mut b.left, BarStyle::RepeatStart),
+            "repeat_end" => zet(&mut b.right, BarStyle::RepeatEnd),
+            "double" => zet(&mut b.right, BarStyle::Double),
+            "final" => zet(&mut b.right, BarStyle::Final),
+            "ending1" => b.ending = if b.ending == Some(1) { None } else { Some(1) },
+            "ending2" => b.ending = if b.ending == Some(2) { None } else { Some(2) },
+            _ => return Err(format!("Onbekend maatteken: {}", wat)),
+        }
+        let cmd = crate::notation::EditCommand::SetBar { measure, old: huidig, new: Some(b) };
+        if let Some(inv) = cmd.apply(sc) { sc.push_undo(inv); }
+        Ok(sc.generation)
+    })??;
+    tauri::async_runtime::spawn(emit_score_changed(app, score_id, gen));
+    Ok(gen)
+}
+
 #[tauri::command]
 pub fn get_drawn_stop_names(state: State<AppState>) -> Vec<(String, Vec<String>)> {
     let organ = state.loaded_organ_info.read();
@@ -5162,7 +5293,7 @@ pub fn notation_insert_notes(state: State<AppState>, app: tauri::AppHandle, scor
             let id = sc.new_event_id();
             ids.push(id);
             events.push((layer_id, take_id, crate::notation::LayerEv {
-                id, midi: *midi, start_us, end_us: start_us + dur, channel: crate::notation::KANAAL_ONBEKEND, locked: true, voice: stem, lyrics: Vec::new(), hand: None,
+                id, midi: *midi, start_us, end_us: start_us + dur, channel: crate::notation::KANAAL_ONBEKEND, locked: true, voice: stem, lyrics: Vec::new(), articulations: Vec::new(), spelling: None, hand: None,
             }));
         }
         let cmd = crate::notation::EditCommand::InsertEvents { events };
@@ -5293,7 +5424,7 @@ pub fn notation_import_midi(
                 if let Some(take) = layer.takes.iter_mut().find(|t| t.id == take_id) {
                     take.events.push(crate::notation::LayerEv {
                         id: ev_id, midi, start_us, end_us,
-                        channel: n.channel, locked: false, voice: stem, lyrics: Vec::new(), hand: None,
+                        channel: n.channel, locked: false, voice: stem, lyrics: Vec::new(), articulations: Vec::new(), spelling: None, hand: None,
                     });
                 }
             }

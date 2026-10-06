@@ -150,6 +150,9 @@
                   {/each}
                   {#each lay.maatstrepen as m}
                     <line class="k-maat" x1={m.x0} x2={m.x1} y1={m.y} y2={m.y} stroke-width={sw(m.dikte)} />
+                    {#if m.dubbel}
+                      <line class="k-maat" x1={m.x0} x2={m.x1} y1={m.y + m.dikte * 3} y2={m.y + m.dikte * 3} stroke-width={sw(m.dikte)} />
+                    {/if}
                   {/each}
                   {#each lay.telnummers as n}
                     <text class="k-tekst" x={n.x} y={n.y} text-anchor="end" font-size={MAAT.tekst}>{n.tekst}</text>
@@ -180,6 +183,9 @@
                         <line class="k-stok k-v{n.voice || 1}" x1={n.stokX0} x2={n.stokX1} y1={n.yStok} y2={n.yStok} stroke-width={sw(MAAT.stok)} />
                       {/if}
                       <circle class="k-kop" class:zwart={n.zwart} cx={n.cx} cy={n.cy} r={n.r} stroke-width={sw(MAAT.kopLijn)} />
+                      {#if n.fermata}
+                        <text class="k-label k-fermate" x={n.cx} y={n.cy - n.r * 1.4} text-anchor="middle" font-size={MAAT.labelTekst}>𝄐</text>
+                      {/if}
                     </g>
                   {/each}
                   <!-- Stoptekens en doorklinkstippen -->

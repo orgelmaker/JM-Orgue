@@ -12,7 +12,21 @@
   export let laagNaam = () => '';   // layer_id → naam
   export let tijdTekst = () => '';  // start_us → "maat m, tel b"
   export let acties = {};
+  // Tekens (0.7.89)
+  export let tekenSticky = null;    // teken dat op de muis zit (buiten stapinvoer)
+  export let stepTekens = new Set(); // kleverige articulaties in stapinvoer
+  export let stepMode = false;
+  export let selectieAantal = 0;
   function doe(naam, ...args) { const f = acties[naam]; if (typeof f === 'function') return f(...args); }
+  const TEKENS = [
+    { id: 'staccato', glyph: '•', toets: 'S' }, { id: 'tenuto', glyph: '–', toets: 'E' }, { id: 'accent', glyph: '>', toets: 'A' },
+    { id: 'fermata', glyph: '𝄐', toets: 'F' }, { id: 'breath', glyph: '’', toets: '' }, { id: 'spelling', glyph: '♯↔♭', toets: '9' },
+  ];
+  const BALKTEKENS = [
+    { id: 'repeat_start', glyph: '𝄆' }, { id: 'repeat_end', glyph: '𝄇' }, { id: 'ending1', glyph: '1.' },
+    { id: 'ending2', glyph: '2.' }, { id: 'double', glyph: '𝄁' }, { id: 'final', glyph: '𝄂' },
+  ];
+  $: tekenActief = (id) => tekenSticky === id || (stepMode && stepTekens.has(id));
 
   const SOORTEN = ['tempo', 'expressive', 'technique', 'registration', 'dynamic', 'rehearsal', 'free'];
   const PRESETS = {
@@ -78,6 +92,25 @@
   <button class="btn btn-primary btn-sm" on:click={plaatsen} disabled={!tekst.trim()} title={$t('notation.place_at_cursor_title')}>{$t('notation.place_at_cursor')}</button>
   <button class="btn btn-ghost btn-sm" on:click={registratie} title={$t('notation.take_registration_title')}>{$t('notation.take_registration')}</button>
 </div>
+<div class="tab-rij">
+  <span class="kopje">{$t('notation.signs_section')}</span>
+  {#each TEKENS as tk}
+    <button class="btn btn-sm teken" class:btn-primary={tekenActief(tk.id)} class:btn-ghost={!tekenActief(tk.id)} on:click={() => doe('teken', tk.id)}
+      title={$t('notation.sign_' + tk.id + '_title') + (tk.toets ? ' (' + tk.toets + ')' : '')}>{tk.glyph}</button>
+  {/each}
+  <span class="sep"></span>
+  <button class="btn btn-ghost btn-sm" on:click={() => doe('span', 'slur')} disabled={selectieAantal < 2} title={$t('notation.slur_title')}>{$t('notation.slur')}</button>
+  <button class="btn btn-ghost btn-sm" on:click={() => doe('span', 'crescendo')} disabled={selectieAantal < 2} title={$t('notation.cresc_title')}>cresc.</button>
+  <button class="btn btn-ghost btn-sm" on:click={() => doe('span', 'diminuendo')} disabled={selectieAantal < 2} title={$t('notation.dim_title')}>dim.</button>
+  <button class="btn btn-ghost btn-sm" on:click={() => doe('span', 'octaveup')} disabled={selectieAantal < 2} title={$t('notation.octave_line_up_title')}>8va</button>
+  <button class="btn btn-ghost btn-sm" on:click={() => doe('span', 'octavedown')} disabled={selectieAantal < 2} title={$t('notation.octave_line_down_title')}>8vb</button>
+  <button class="btn btn-ghost btn-sm" on:click={() => doe('spansWeg')} title={$t('notation.spans_remove_title')}>{$t('notation.spans_remove')}</button>
+  <span class="sep"></span>
+  {#each BALKTEKENS as bt}
+    <button class="btn btn-ghost btn-sm teken" on:click={() => doe('maatteken', bt.id)} title={$t('notation.bar_' + bt.id + '_title')}>{bt.glyph}</button>
+  {/each}
+  <span class="hint">{$t('notation.signs_hint')}</span>
+</div>
 <div class="lijst">
   <span class="kopje">{$t('notation.texts_list')}</span>
   {#if !texts.length}<span class="hint">{$t('notation.no_texts')}</span>{/if}
@@ -104,6 +137,8 @@
   .tab-rij + .tab-rij, .lijst { margin-top: 0.4rem; }
   .tab-rij label { display: flex; align-items: center; gap: 0.3rem; font-size: 0.8rem; white-space: nowrap; }
   .tab-rij label input[type="text"] { width: 10rem; }
+  .teken { min-width: 2rem; font-family: 'Segoe UI Symbol', 'Noto Music', inherit; }
+  .sep { width: 0.6rem; }
   .kopje { font-size: 0.75rem; color: var(--text-muted, #aaa); min-width: 5.5rem; }
   .hint { font-size: 0.72rem; color: var(--text-muted, #aaa); }
   .tekst { width: 14rem; }

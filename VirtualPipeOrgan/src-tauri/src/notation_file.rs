@@ -188,7 +188,7 @@ mod tests {
         let t1 = sc.layers[0].takes[0].id;
         let t2 = sc.add_take(m).unwrap();
         let tp = sc.layers[1].takes[0].id;
-        let ev = |id: u64, midi: u8, s: u64, e: u64, ch: u8, hand: Option<KlavarHand>| LayerEv { id, midi, start_us: s, end_us: e, channel: ch, locked: false, voice: 1, lyrics: Vec::new(), hand };
+        let ev = |id: u64, midi: u8, s: u64, e: u64, ch: u8, hand: Option<KlavarHand>| LayerEv { id, midi, start_us: s, end_us: e, channel: ch, locked: false, voice: 1, lyrics: Vec::new(), articulations: Vec::new(), spelling: None, hand };
         EditCommand::InsertEvents { events: vec![
             (m, t1, ev(1, 60, 0, 400_000, 0, None)),
             (m, t1, ev(2, 64, 400_000, 800_000, 0, Some(KlavarHand::Left))),
@@ -201,6 +201,12 @@ mod tests {
         sc.layers[0].takes[0].events[0].lyrics.push(crate::notation::Lyric { number: 1, text: "Lof".into(), syllabic: crate::notation::Syllabic::Begin, extend: false });
         let tid = sc.new_text_id();
         sc.texts.push(crate::notation::TextMark { id: tid, layer_id: m, start_us: 0, kind: crate::notation::TextKind::Tempo, text: "Andante".into(), placement: crate::notation::Placement::Above });
+        // Boog, articulatie, spelling en maatstreep (0.7.89).
+        let sid = sc.new_span_id();
+        sc.spans.push(crate::notation::Span { id: sid, layer_id: m, kind: crate::notation::SpanKind::Slur, from_event: 1, to_event: 2 });
+        sc.layers[0].takes[0].events[1].articulations.push(crate::notation::Articulation::Staccato);
+        sc.layers[0].takes[0].events[1].spelling = Some(crate::notation::Spelling { step: 'F', alter: -1 });
+        sc.bars.push(crate::notation::BarAttr { measure: 0, left: None, right: Some(crate::notation::BarStyle::Final), ending: None });
         sc
     }
 
@@ -231,6 +237,10 @@ mod tests {
         assert_eq!(sc2.layers[0].takes[0].events[0].lyrics[0].text, "Lof");
         assert_eq!(sc2.texts.len(), 1);
         assert_eq!(sc2.texts[0].text, "Andante");
+        assert_eq!(sc2.spans.len(), 1);
+        assert_eq!(sc2.layers[0].takes[0].events[1].articulations, vec![crate::notation::Articulation::Staccato]);
+        assert_eq!(sc2.layers[0].takes[0].events[1].spelling, Some(crate::notation::Spelling { step: 'F', alter: -1 }));
+        assert_eq!(sc2.bars.len(), 1);
         // De MusicXML van het geladen stuk is gelijk aan die van vóór het opslaan.
         let x1 = crate::notation::build_musicxml_from_score(&sc).unwrap();
         let x2 = crate::notation::build_musicxml_from_score(&sc2).unwrap();
@@ -375,6 +385,8 @@ mod tests {
         assert!(sc.layers.iter().flat_map(|l| l.takes.iter()).flat_map(|t| t.events.iter()).all(|e| e.lyrics.is_empty()));
         let mut v1 = voorbeeld();
         v1.texts.clear();
+        v1.spans.clear(); v1.bars.clear();
+        for l in &mut v1.layers { for t in &mut l.takes { for e in &mut t.events { e.articulations.clear(); e.spelling = None; } } }
         for l in &mut v1.layers { for t in &mut l.takes { for e in &mut t.events { e.lyrics.clear(); } } }
         assert_eq!(crate::notation::build_musicxml_from_score(&sc).unwrap(),
                    crate::notation::build_musicxml_from_score(&v1).unwrap());

@@ -5,6 +5,26 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.89] - 2026-10-06
+
+### Tekens: fermate, articulaties, bogen, haarspelden en herhalingen
+- Op het tabblad **Teksten & tekens** zet u staccato, tenuto, accent, fermate
+  en ademtekens op noten: selecteer eerst en klik het teken, of klik het
+  teken en dan de noten (Esc stopt). In stapinvoer blijft een teken aan voor
+  elke nieuwe noot. Sneltoetsen buiten stapinvoer: S, E, A, F.
+- Legatobogen (L), crescendo- en diminuendo-haarspelden (+ en −) en 8va/8vb
+  (8, Shift+8) over een selectie van minstens twee noten; nogmaals = weg.
+  Bogen hangen aan de noten: ze verhuizen mee en verdwijnen met de noot
+  (Ongedaan maken zet ze terug).
+- Herhalingstekens met 1e en 2e maal, dubbele streep en slotstreep op de
+  maat van de cursor.
+- Een noot enharmonisch omspellen (kruis ↔ mol, E ↔ Fes), sneltoets 9.
+- Alles gaat mee in het opgeslagen stuk en in de MusicXML (`<notations>`,
+  `<accidental>`, `<wedge>`, `<octave-shift>`, `<barline>`); een staccato
+  klinkt in de MIDI-export half zo lang. Klavar toont fermates en
+  maatstrepen (dubbel, slot, herhaling, volta). Stukken zonder tekens blijven
+  byte voor byte gelijk.
+
 ## [0.7.88] - 2026-10-06
 
 ### Teksten in de partituur

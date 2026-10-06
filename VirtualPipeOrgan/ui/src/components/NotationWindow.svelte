@@ -266,7 +266,7 @@
     geluidBijInvoer = !geluidBijInvoer;
     try { localStorage.setItem('jm-orgue-notation-preview', geluidBijInvoer ? '1' : '0'); } catch (e) {}
   }
-  function toggleGum() { gumActief = !gumActief; }
+  function toggleGum() { gumActief = !gumActief; if (gumActief) tekenSticky = null; }
   // Het menu sluit op mousedown; de click die erop volgt mag niets doen.
   function sluitContextMenu() {
     contextMenu = null;
@@ -373,6 +373,55 @@
     else if (e.key === 'Backspace' && !lyricEdit.text) { e.preventDefault(); lyricNaar(-1, false); }
     else if (e.key === 'Escape') { e.preventDefault(); sluitLyricEdit(true); }
     else if (e.key === 'Tab') { e.preventDefault(); lyricNaar(e.shiftKey ? -1 : +1, false); }
+  }
+  // ---- Tekens (0.7.89): articulaties, spelling, bogen, maatstrepen ----
+  let tekenSticky = null;          // teken op de muis: elke klik op een noot zet/haalt het
+  let stepTekens = new Set();      // kleverige articulaties voor elke geplaatste noot
+  const TEKEN_NAMEN = { staccato: 'Staccato', tenuto: 'Tenuto', accent: 'Accent', fermata: 'Fermate', breath: 'Ademteken', spelling: '♯↔♭' };
+  // Geeft true als de backend een stap heeft vastgelegd (generatie gewijzigd).
+  async function pasTekenToe(teken, ids) {
+    if (!ids.length) return false;
+    try {
+      const voor = score?.generation ?? 0;
+      const gen = teken === 'spelling'
+        ? await invoke('notation_toggle_spelling', { scoreId, eventIds: ids })
+        : await invoke('notation_toggle_articulation', { scoreId, eventIds: ids, articulation: teken });
+      return Number(gen) !== Number(voor);
+    } catch (e) { alert(String(e)); return false; }
+  }
+  // Knop of sneltoets: met een selectie meteen toepassen; in stapinvoer
+  // kleverig voor elke volgende noot; anders kleverig op de muis (Esc stopt).
+  function tekenKnop(teken) {
+    if (selectionIds.size > 0) { pasTekenToe(teken, Array.from(selectionIds)); return; }
+    if (stepMode) {
+      if (teken === 'spelling') { if (stepLastIds.length) pasTekenToe(teken, stepLastIds); return; }
+      const s = new Set(stepTekens);
+      s.has(teken) ? s.delete(teken) : s.add(teken);
+      stepTekens = s;
+      return;
+    }
+    tekenSticky = tekenSticky === teken ? null : teken;
+    if (tekenSticky) gumActief = false;
+  }
+  $: tekenTekst = tekenSticky ? tx('notation.sign_sticky').replace('{sign}', tx('notation.sign_' + tekenSticky)) : '';
+  async function spanKnop(kind) {
+    const ids = Array.from(selectionIds);
+    if (ids.length < 2) { alert(tx('notation.span_needs_two')); return; }
+    try { await invoke('notation_toggle_span', { scoreId, eventIds: ids, kind }); } catch (e) { alert(String(e)); }
+  }
+  async function spansWeg() {
+    const ids = selectedIdsOrCursor();
+    if (!ids.length) return;
+    try { await invoke('notation_remove_spans', { scoreId, eventIds: ids }); } catch (e) { alert(String(e)); }
+  }
+  // Maat van de cursor: in stapinvoer de invoercursor, anders de cursornoot.
+  function cursorMaat() {
+    const maatUs = maatDuurUs(bpm, beatsPerBar, beatUnit);
+    const us = stepMode ? stepPosUs : (cursorEvent ? cursorEvent.start_us : 0);
+    return Math.max(0, Math.floor(us / maatUs + 1e-6));
+  }
+  async function maatteken(wat) {
+    try { await invoke('notation_toggle_bar', { scoreId, measure: cursorMaat(), wat }); } catch (e) { alert(String(e)); }
   }
   // Aanwijzingen op de cursor (stapinvoer: de invoercursor; anders de cursornoot).
   function tekstDoel() {
@@ -800,6 +849,7 @@
     if (!best) return;
     chordTekst = '';
     if (lyricMode) { startLyricEdit(best.eventId); return; }
+    if (tekenSticky) { pasTekenToe(tekenSticky, [best.eventId]); return; }
     if (e.shiftKey || e.ctrlKey || e.metaKey) {
       const next = new Set(selectionIds);
       next.has(best.eventId) ? next.delete(best.eventId) : next.add(best.eventId);
@@ -847,6 +897,15 @@
       { kop: true, label: tx('notation.voices') },
       ...[1, 2, 3, 4].map(v => ({ label: tx('notation.to_voice') + ' ' + v, on: () => setSelectionVoice(v) })),
       { label: tx('notation.split_chord'), on: splitSelectionChord },
+      { scheiding: true },
+      { kop: true, label: tx('notation.signs_section') },
+      { label: '• ' + tx('notation.sign_staccato'), on: () => pasTekenToe('staccato', selectedIdsOrCursor()) },
+      { label: '– ' + tx('notation.sign_tenuto'), on: () => pasTekenToe('tenuto', selectedIdsOrCursor()) },
+      { label: '> ' + tx('notation.sign_accent'), on: () => pasTekenToe('accent', selectedIdsOrCursor()) },
+      { label: '𝄐 ' + tx('notation.sign_fermata'), on: () => pasTekenToe('fermata', selectedIdsOrCursor()) },
+      { label: '♯↔♭ ' + tx('notation.sign_spelling'), on: () => pasTekenToe('spelling', selectedIdsOrCursor()) },
+      { label: tx('notation.slur'), on: () => spanKnop('slur'), disabled: selectionIds.size < 2 },
+      { label: tx('notation.spans_remove'), on: spansWeg },
       { scheiding: true },
       { label: tx('notation.ctx_remove_from_chord'), on: () => deleteEvents([nootId]), disabled: akkoordIds(nootId).length < 2 },
       { label: tx('actions.delete'), on: deleteSelection },
@@ -1114,6 +1173,7 @@
     stepAcc = null; stepTie = false; caret = null; notemap = [];
     gumActief = false; contextMenu = null; chordTekst = '';
     lyricMode = false; lyricEdit = null; lyricVorigeKoppel = false;
+    tekenSticky = null; stepTekens = new Set();
   }
   function werkbalkUitScore() {
     groeiLaatst = 0;
@@ -1256,18 +1316,24 @@
         startUs: Math.round(at), durUs: dur,
       });
       const ids = Array.isArray(res) ? (res[1] || []) : [];
+      // Kleverige articulaties (0.7.89) op elke geplaatste noot; elke toggle
+      // is een eigen undo-stap, dus Backspace moet ze meetellen.
+      let tekenStappen = 0;
+      if (ids.length && stepTekens.size) {
+        for (const t of stepTekens) { if (await pasTekenToe(t, ids)) tekenStappen += 1; }
+      }
       if (!opts.stil) for (const m of notes) klinkKort(m, lid);
       if (!vers) {
         // Toevoeging aan het zojuist geplaatste akkoord (Shift+letter, tweede balk).
         stepLastIds = [...stepLastIds, ...ids];
         stepLastChordNotes = [...stepLastChordNotes, ...notes];
-        stepLastUndoCount += 1;
+        stepLastUndoCount += 1 + tekenStappen;
       } else {
         stepLastIds = ids;
         stepLastChordNotes = [...notes];
         stepLastPos = at;
         stepLastEndUs = at + dur;
-        stepLastUndoCount = 1;
+        stepLastUndoCount = 1 + tekenStappen;
         if (!opts.behoudGroepen) stepLastGroepen = null;
       }
       stepLastMidi = notes[notes.length - 1];
@@ -1432,6 +1498,7 @@
   function onKlavarSelect(e) {
     const { id, shift } = e.detail;
     if (gumActief) { deleteEvents([id]); return; }
+    if (tekenSticky) { pasTekenToe(tekenSticky, [id]); return; } // kleverig teken ook in klavar (0.7.89)
     if (shift) {
       const next = new Set(selectionIds);
       next.has(id) ? next.delete(id) : next.add(id);
@@ -2190,6 +2257,7 @@
       midi: e.midi, channel: e.channel ?? 0, hand: e.hand ?? null, voice: Number(e.voice) || 0,
       rel_start: e.start_us - minStart, dur: Math.max(1000, e.end_us - e.start_us),
       lyrics: Array.isArray(e.lyrics) ? e.lyrics.map(l => ({ ...l })) : [],
+      articulations: Array.isArray(e.articulations) ? [...e.articulations] : [], spelling: e.spelling ? { ...e.spelling } : null,
     })) };
   }
   async function pasteClipboard() {
@@ -2213,6 +2281,7 @@
       start_us: Math.round(snapped + e.rel_start),
       end_us: Math.round(snapped + e.rel_start + e.dur),
       lyrics: e.lyrics ?? [],
+      articulations: e.articulations ?? [], spelling: e.spelling ?? null,
     }));
     try { await invoke('notation_paste', { scoreId, layerId: targetLayerId, notes }); } catch (e) { alert(String(e)); }
   }
@@ -2249,6 +2318,7 @@
         e.preventDefault(); return;
       }
     }
+    if (e.key === 'Escape' && tekenSticky) { tekenSticky = null; e.preventDefault(); return; }
     if (e.key === 'Escape' && gumActief) { gumActief = false; e.preventDefault(); return; }
     // V = alleen de actieve stem in kleur (Shift+Alt+S botst met de Windows-indelingswissel).
     if ((e.key === 'v' || e.key === 'V') && !e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey) { toggleAlleenActieveStem(); e.preventDefault(); return; }
@@ -2294,6 +2364,21 @@
     }
     // N = stapinvoer aan/uit (MuseScore).
     if (e.key.toLowerCase() === 'n' && !e.ctrlKey && !e.metaKey && !e.shiftKey) { setStepMode(!stepMode); e.preventDefault(); return; }
+    // Tekens (0.7.89, Finale-metatools, alleen buiten stapinvoer — daar zijn
+    // A–G toonnamen): S staccato, E tenuto, A accent, F fermate, 9 = ♯↔♭,
+    // L legatoboog, + / − haarspeld, 8 = 8va (Shift+8 = 8vb).
+    if (!e.ctrlKey && !e.metaKey && !e.altKey) {
+      const kl = e.key.toLowerCase();
+      const TEKEN_TOETS = { s: 'staccato', e: 'tenuto', a: 'accent', f: 'fermata' };
+      if (!e.shiftKey && TEKEN_TOETS[kl]) { tekenKnop(TEKEN_TOETS[kl]); e.preventDefault(); return; }
+      if (e.code === 'Digit9' && !e.shiftKey) { tekenKnop('spelling'); e.preventDefault(); return; }
+      // Bogen alleen buiten stapinvoer (daar is 8 een duur en geeft een lege
+      // selectie anders een melding); de fysieke 8 wint van '-'/'_' (AZERTY).
+      if (!stepMode && kl === 'l' && !e.shiftKey) { spanKnop('slur'); e.preventDefault(); return; }
+      if (!stepMode && e.code === 'Digit8') { spanKnop(e.shiftKey ? 'octavedown' : 'octaveup'); e.preventDefault(); return; }
+      if (!stepMode && (e.key === '+' || e.key === '=')) { spanKnop('crescendo'); e.preventDefault(); return; }
+      if (!stepMode && (e.key === '-' || e.key === '_')) { spanKnop('diminuendo'); e.preventDefault(); return; }
+    }
     // Alt+←/→ = geselecteerde noten naar de linker-/rechterhand (klavar, 0.7.71).
     if (e.altKey && e.key === 'ArrowLeft') { setHandsSelection('left'); e.preventDefault(); return; }
     if (e.altKey && e.key === 'ArrowRight') { setHandsSelection('right'); e.preventDefault(); return; }
@@ -2485,6 +2570,7 @@
   const tekstActies = {
     setHeader: setHeaderLive, toggleLyricMode, setStrofe, addText: addTextAtCursor, editText: editTextById,
     removeText: removeTextById, moveText: moveTextById, vulRegistratie,
+    teken: tekenKnop, span: spanKnop, spansWeg, maatteken,
   };
   const laagActies = { arm: armLayer, rename: renameLayer, move: moveLayer, remove: removeLayer, addTake, toggleTakeVisible, addLayer, setActiveVoice };
   function bevestigKnoppen(b) {
@@ -2545,7 +2631,8 @@
           {viewMode} {selectieAlleenPedaal} {clipboardCount} acties={invoerActies} />
       {:else if actieveTab === 'texts'}
         <TextsMarksTab {title} composer={score?.composer ?? ''} subtitle={score?.subtitle ?? ''} {lyricMode} strofe={lyricStrofe}
-          texts={score?.texts ?? []} {laagNaam} {tijdTekst} acties={tekstActies} />
+          texts={score?.texts ?? []} {laagNaam} {tijdTekst} acties={tekstActies}
+          {tekenSticky} {stepTekens} {stepMode} selectieAantal={selectionIds.size} />
       {:else if actieveTab === 'staves'}
         <StavesVoicesTab layers={score?.layers ?? []} {divisions} {viewMode} {klavarModel} splitOpties={SPLIT_OPTIES}
           {layerHandKeuze} {autoHandLabel} maatsoort={beatsPerBar + '/' + beatUnit} {maatsoortKeuzes} {keyFifths} {minor}
@@ -2613,7 +2700,7 @@
     <LayerBar layers={score.layers} armedLayer={score.armed_layer} {recording} acties={laagActies} />
     <StatusLine {armedWaiting} {countInRemaining} aantalNoten={flatEvents.length} selectieAantal={selectionIds.size}
       cursorNaam={cursorEvent ? noteName(cursorEvent.midi) : ''} {cursorIndex} cursorLaag={cursorEvent?._layer ?? ''}
-      {stepMode} {caretTekst} extra={chordTekst} debugTekst={debugVlag ? `OSMD ${renderMs} ms · ${renderMaten} m.` : ''} />
+      {stepMode} {caretTekst} extra={tekenTekst || chordTekst} debugTekst={debugVlag ? `OSMD ${renderMs} ms · ${renderMaten} m.` : ''} />
   {/if}
 
   {#if !isLive && divisions.length > 0}
