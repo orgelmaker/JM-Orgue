@@ -5,6 +5,18 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.92] - 2026-10-06
+
+### Notatievenster: de alfa-melding is weg, een nieuw stuk begint bij de balken
+- De gele alfa-melding bovenin het notatievenster is weg: na de reeks
+  0.7.82–0.7.91 is het notenschrift nagelopen en doorgetest.
+- **Nieuw stuk** opent de wizard meteen op de pagina met de balken, met de
+  gebruikelijke orgelindeling klaar: een vioolsleutelbalk voor de
+  rechterhand en twee bassleutelbalken, voor de linkerhand en het pedaal.
+  Tijdens het inspelen voeden de manualen van het orgel de bovenste balk en
+  het pedaal de onderste; op die pagina past u dat per balk aan. Recente
+  stukken en **Openen…** staan nu op beide pagina's van de wizard.
+
 ## [0.7.91] - 2026-10-06
 
 ### Nazorg MusicXML openen

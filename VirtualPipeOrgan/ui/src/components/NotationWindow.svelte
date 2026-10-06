@@ -1157,6 +1157,21 @@
     }));
     return st.length ? st : [{ name: tx('notation.staff_n').replace('{n}', 1), bass: false, divisions: [], hand: 'auto', split: 60 }];
   }
+  // Standaardindeling voor een nieuw stuk (0.7.92): de gebruikelijke
+  // orgelpartituur — een vioolsleutelbalk voor de rechterhand, een
+  // bassleutelbalk voor de linkerhand en een bassleutelbalk voor het pedaal.
+  // Tijdens het inspelen voeden de manualen van het orgel de bovenste balk
+  // (een divisie wordt niet op hand gesplitst) en het pedaal de onderste; op
+  // de wizardpagina is dat per balk aan te passen.
+  function standaardBalken() {
+    const pedaal = divisions.filter(d => isPedalName(d));
+    const manualen = divisions.filter(d => !isPedalName(d));
+    return [
+      { name: tx('notation.staff_manual_r'), bass: false, divisions: manualen, hand: 'right', split: 60 },
+      { name: tx('notation.staff_manual_l'), bass: true, divisions: [], hand: 'left', split: 60 },
+      { name: tx('notation.staff_pedal'), bass: true, divisions: pedaal, hand: 'pedal', split: 60 },
+    ];
+  }
   function wizardInitial(mode) {
     return {
       title: mode === 'new' ? '' : (score?.title ?? ''),
@@ -1165,7 +1180,7 @@
       keyFifths: Number(score?.key_fifths) || 0, minor: !!score?.minor,
       bpm: Number(score?.bpm) || 90, quantize: Number(score?.quantize) || 4,
       minMeasures: mode === 'new' ? 8 : (Number(score?.min_measures) || 0),
-      staves: wizardStaves(),
+      staves: mode === 'new' ? standaardBalken() : wizardStaves(),
     };
   }
   function openWizardFromScore() { wizard = { mode: 'edit', initial: wizardInitial('edit') }; }
@@ -2634,12 +2649,6 @@
   {#if contextMenu}
     <ContextMenu x={contextMenu.x} y={contextMenu.y} items={contextMenu.items} on:close={sluitContextMenu} />
   {/if}
-  <!-- Het notatievenster is nog niet nagelopen; dat hoort de gebruiker te
-       weten vóór hij op het resultaat vertrouwt. -->
-  <div class="notation-alpha" role="note">
-    <span class="alpha-tag">{$t('notation.alpha_badge')}</span>
-    <span>{$t('notation.alpha_notice')}</span>
-  </div>
   {#if isLive}
     <NotationHeader {title} {dirty} {recording} {armedWaiting} {countInRemaining} {playingScore} {bpm} {viewMode}
       zoom={osmdZoom} recent={recentLijst} kanExportXml={!!xml} kanExportSvg={!!(klavarModel && scoreHasEvents)}
@@ -2819,21 +2828,6 @@
 
 <style>
   .notation-window { display: flex; flex-direction: column; height: 100vh; background: #fff; color: #222; }
-  .notation-alpha {
-    display: flex; align-items: center; gap: 0.5rem;
-    padding: 0.35rem 0.75rem;
-    background: color-mix(in srgb, var(--warning, #b8860b) 22%, var(--bg-panel, #2a2a2a));
-    color: var(--text, #eee);
-    border-bottom: 1px solid var(--warning, #b8860b);
-    font-size: 0.78rem;
-    flex-shrink: 0;
-  }
-  .notation-alpha .alpha-tag {
-    padding: 0 0.3rem; border-radius: 3px;
-    background: var(--warning, #b8860b); color: #fff;
-    font-size: 0.62rem; font-weight: 700; letter-spacing: 0.04em;
-    text-transform: uppercase; white-space: nowrap;
-  }
   .notation-toolbar {
     display: flex; align-items: center; flex-wrap: wrap; gap: 0.6rem;
     padding: 0.5rem 0.75rem;
@@ -2916,7 +2910,7 @@
     /* Stemkleuren (0.7.86) alleen op het scherm: afdrukken in zwart. */
     .osmd-host svg [fill]:not([fill="none"]) { fill: #000 !important; }
     .osmd-host svg [stroke]:not([stroke="none"]) { stroke: #000 !important; }
-    .notation-toolbar, .notation-staves, .notation-hint, .notation-busy, .notation-error, .notation-alpha,
+    .notation-toolbar, .notation-staves, .notation-hint, .notation-busy, .notation-error,
     .tab-inhoud, .notation-selection-overlay, .osmd-host.verborgen {
       display: none !important;
     }

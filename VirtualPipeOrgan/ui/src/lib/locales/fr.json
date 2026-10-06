@@ -685,8 +685,6 @@
     "error": "Erreur d'archive MIDI : {error}"
   },
   "notation": {
-    "alpha_badge": "Alpha",
-    "alpha_notice": "Alpha : la partition n'a pas encore été vérifiée. Hauteur, rythme et mesure peuvent différer de ce que vous avez joué.",
     "live_window_title": "JM-Orgue - Notation en direct",
     "open_failed": "Impossible d'ouvrir la fenêtre de notation.",
     "open_failed_error": "Impossible d'ouvrir la fenêtre de notation : {error}",
@@ -713,6 +711,9 @@
     "default_musicxml_name": "notation",
     "staff": "Portée",
     "staff_n": "Portée {n}",
+    "staff_manual_r": "Clavier D",
+    "staff_manual_l": "Clavier G",
+    "staff_pedal": "Pédale",
     "add_staff": "+ Portée",
     "new_staff_prompt": "Nom de la nouvelle portée ?",
     "new_staff_title": "Nouvelle portée",

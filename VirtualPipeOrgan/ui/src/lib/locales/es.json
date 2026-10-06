@@ -685,8 +685,6 @@
     "error": "Error del archivo MIDI: {error}"
   },
   "notation": {
-    "alpha_badge": "Alfa",
-    "alpha_notice": "Alfa: la partitura todavía no se ha revisado. La altura, el ritmo y los compases pueden diferir de lo que tocó.",
     "live_window_title": "JM-Orgue - Notación en directo",
     "open_failed": "No se ha podido abrir la ventana de notación.",
     "open_failed_error": "No se ha podido abrir la ventana de notación: {error}",
@@ -713,6 +711,9 @@
     "default_musicxml_name": "notacion",
     "staff": "Pentagrama",
     "staff_n": "Pentagrama {n}",
+    "staff_manual_r": "Manual D",
+    "staff_manual_l": "Manual I",
+    "staff_pedal": "Pedal",
     "add_staff": "+ Pentagrama",
     "new_staff_prompt": "¿Nombre del nuevo pentagrama?",
     "new_staff_title": "Nuevo pentagrama",

@@ -685,8 +685,6 @@
     "error": "MIDI archive error: {error}"
   },
   "notation": {
-    "alpha_badge": "Alpha",
-    "alpha_notice": "Alpha: this notation has not been checked yet. Pitch, rhythm and bar layout may differ from what you played.",
     "live_window_title": "JM-Orgue - Live notation",
     "open_failed": "Could not open the notation window.",
     "open_failed_error": "Could not open the notation window: {error}",
@@ -713,6 +711,9 @@
     "default_musicxml_name": "notation",
     "staff": "Staff",
     "staff_n": "Staff {n}",
+    "staff_manual_r": "Manual R",
+    "staff_manual_l": "Manual L",
+    "staff_pedal": "Pedal",
     "add_staff": "+ Staff",
     "new_staff_prompt": "Name of the new staff?",
     "new_staff_title": "New staff",

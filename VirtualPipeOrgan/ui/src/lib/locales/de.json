@@ -685,8 +685,6 @@
     "error": "MIDI-Archiv-Fehler: {error}"
   },
   "notation": {
-    "alpha_badge": "Alpha",
-    "alpha_notice": "Alpha: die Notation ist noch nicht überprüft. Tonhöhe, Rhythmus und Takteinteilung können von Ihrem Spiel abweichen.",
     "live_window_title": "JM-Orgue - Live-Notation",
     "open_failed": "Notationsfenster konnte nicht geöffnet werden.",
     "open_failed_error": "Notationsfenster konnte nicht geöffnet werden: {error}",
@@ -713,6 +711,9 @@
     "default_musicxml_name": "Notation",
     "staff": "Notenzeile",
     "staff_n": "Notenzeile {n}",
+    "staff_manual_r": "Manual R",
+    "staff_manual_l": "Manual L",
+    "staff_pedal": "Pedal",
     "add_staff": "+ Notenzeile",
     "new_staff_prompt": "Name der neuen Notenzeile?",
     "new_staff_title": "Neue Notenzeile",

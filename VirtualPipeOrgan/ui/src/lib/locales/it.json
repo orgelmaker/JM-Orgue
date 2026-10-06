@@ -685,8 +685,6 @@
     "error": "Errore dell'archivio MIDI: {error}"
   },
   "notation": {
-    "alpha_badge": "Alfa",
-    "alpha_notice": "Alfa: la notazione non è ancora stata verificata. Altezza, ritmo e battute possono differire da ciò che ha suonato.",
     "live_window_title": "JM-Orgue - Notazione dal vivo",
     "open_failed": "Impossibile aprire la finestra di notazione.",
     "open_failed_error": "Impossibile aprire la finestra di notazione: {error}",
@@ -713,6 +711,9 @@
     "default_musicxml_name": "notazione",
     "staff": "Rigo",
     "staff_n": "Rigo {n}",
+    "staff_manual_r": "Manuale D",
+    "staff_manual_l": "Manuale S",
+    "staff_pedal": "Pedale",
     "add_staff": "+ Rigo",
     "new_staff_prompt": "Nome del nuovo rigo?",
     "new_staff_title": "Nuovo rigo",

@@ -685,8 +685,6 @@
     "error": "MIDI-archief-fout: {error}"
   },
   "notation": {
-    "alpha_badge": "Alfa",
-    "alpha_notice": "Alfa: het notenschrift is nog niet nagelopen. Toonhoogte, ritme en maatindeling kunnen afwijken van wat u speelde.",
     "live_window_title": "JM-Orgue - Live noteren",
     "open_failed": "Notatievenster openen mislukt.",
     "open_failed_error": "Notatievenster openen mislukt: {error}",
@@ -713,6 +711,9 @@
     "default_musicxml_name": "notatie",
     "staff": "Balk",
     "staff_n": "Balk {n}",
+    "staff_manual_r": "Manuaal R",
+    "staff_manual_l": "Manuaal L",
+    "staff_pedal": "Pedaal",
     "add_staff": "+ Balk",
     "new_staff_prompt": "Naam van de nieuwe notenbalk?",
     "new_staff_title": "Nieuwe notenbalk",

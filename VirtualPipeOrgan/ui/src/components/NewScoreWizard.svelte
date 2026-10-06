@@ -24,7 +24,10 @@
   export let recent = [];           // [{ path, title, date }] — recente .jmscore-bestanden (0.7.84)
   const dispatch = createEventDispatcher();
 
-  let stap = 1;
+  // Een nieuw stuk opent op de balken (0.7.92): de standaardindeling
+  // (viool, bas, bas) staat er al, dus de eerste vraag is of die klopt.
+  // Bewerken van een lopend stuk begint bij het stuk zelf.
+  let stap = mode === 'new' ? 2 : 1;
   let stuk = { title: '', composer: '', subtitle: '', beats: 4, unit: 4, keyFifths: 0, minor: false, bpm: 90, quantize: 4, minMeasures: 8 };
   let staves = [];
   let maatsoort = '4/4';
@@ -172,8 +175,8 @@
       {/if}
     {/if}
 
-    {#if mode === 'new' && stap === 1}
-      <!-- Of een bestaand stuk openen (0.7.84). -->
+    {#if mode === 'new'}
+      <!-- Of een bestaand stuk openen (0.7.84); op beide pagina's. -->
       <div class="wizard-recent">
         <span class="wizard-hint inline">{$t('notation.recent_label')}</span>
         <button class="btn btn-ghost btn-sm" on:click={() => dispatch('openProject')}>{$t('notation.open_project')}</button>

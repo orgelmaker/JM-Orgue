@@ -685,8 +685,6 @@
     "error": "Błąd archiwum MIDI: {error}"
   },
   "notation": {
-    "alpha_badge": "Alfa",
-    "alpha_notice": "Alfa: zapis nutowy nie został jeszcze sprawdzony. Wysokość dźwięku, rytm i podział na takty mogą różnić się od tego, co zagrano.",
     "live_window_title": "JM-Orgue - Zapis nutowy na żywo",
     "open_failed": "Nie udało się otworzyć okna zapisu nutowego.",
     "open_failed_error": "Nie udało się otworzyć okna zapisu nutowego: {error}",
@@ -713,6 +711,9 @@
     "default_musicxml_name": "nuty",
     "staff": "Pięciolinia",
     "staff_n": "Pięciolinia {n}",
+    "staff_manual_r": "Manuał P",
+    "staff_manual_l": "Manuał L",
+    "staff_pedal": "Pedał",
     "add_staff": "+ Pięciolinia",
     "new_staff_prompt": "Nazwa nowej pięciolinii?",
     "new_staff_title": "Nowa pięciolinia",
