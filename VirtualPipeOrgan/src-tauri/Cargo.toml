@@ -51,6 +51,8 @@ qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 # Sampleset-downloads uit de bibliotheek: HTTP-client (rustls, klein) + zip-uitpakker.
 ureq = "2"
 zip = { version = "2", default-features = false, features = ["deflate"] }
+# MusicXML lezen (0.7.90): kleine DOM-parser, pure Rust.
+roxmltree = "0.20"
 # Alleen voor het driver-loos oplijsten van ASIO-drivernamen (registry-scan):
 # een échte cpal-enumeratie laadt/init't de driver, en ASIO4ALL claimt daarbij
 # de WASAPI-endpoints exclusief — dat doodt de lopende stream. Zelfde versie

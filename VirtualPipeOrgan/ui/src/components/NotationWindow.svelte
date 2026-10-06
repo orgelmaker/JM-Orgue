@@ -1027,16 +1027,36 @@
       await laadProject(path, path);
     } catch (e) { alert(tx('notation.open_project_failed').replace('{error}', e)); }
   }
+  // MusicXML openen (0.7.90): via dezelfde route als Openen, maar het stuk
+  // krijgt geen opslagpad (Opslaan = Opslaan als) en de lezer meldt wat hij
+  // heeft benaderd of overgeslagen.
+  function importMusicXml() {
+    if (!isLive) return;
+    const doorgaan = () => kiesEnImporteer();
+    if (isDirty() && !verwerpBevestigd) vraagOpslaan(doorgaan); else doorgaan();
+  }
+  async function kiesEnImporteer() {
+    try {
+      const { open } = await import('@tauri-apps/plugin-dialog');
+      const path = await open({ multiple: false, filters: [{ name: tx('notation.musicxml_filter'), extensions: ['musicxml', 'xml', 'mxl'] }] });
+      if (!path) return;
+      const warnings = await laadProject(path, null, 'notation_import_musicxml');
+      if (Array.isArray(warnings) && warnings.length) alert(tx('notation.import_warnings') + '\n\n• ' + warnings.join('\n• '));
+    } catch (e) { alert(tx('notation.open_project_failed').replace('{error}', e)); }
+  }
   // Laadt een .jmscore (of reservekopie) als het lopende stuk. `bewaarPad` =
   // pad voor Opslaan (null bij een reservekopie: die krijgt "Opslaan als").
-  async function laadProject(path, bewaarPad) {
+  // `cmd` = notation_load_project (geeft weergavevoorkeuren) of
+  // notation_import_musicxml (geeft waarschuwingen; die komen terug).
+  async function laadProject(path, bewaarPad, cmd = 'notation_load_project') {
     annuleerAutosave();
     if (recording || armedWaiting) await toggleRecording();
     if (stepMode) await setStepMode(false);
     if (playingScore) await togglePlayScore();
     const oud = scoreId;
     const oudeKopie = heeftAutosave;
-    const [nieuwId, ui] = await invoke('notation_load_project', { path });
+    const [nieuwId, extra] = await invoke(cmd, { path });
+    const ui = cmd === 'notation_load_project' ? extra : null;
     scoreId = nieuwId;
     heeftAutosave = false; verwerpBevestigd = false;
     if (oud != null) {
@@ -1050,9 +1070,10 @@
     savedGeneration = bewaarPad ? score.generation : -1;
     laatsteAutosaveGen = 0;
     if (bewaarPad) voegRecentToe(bewaarPad, score.title);
-    pasUiPrefsToe(ui);
+    if (ui) pasUiPrefsToe(ui);
     wizard = null;
     scheduleRender();
+    return cmd === 'notation_load_project' ? [] : (extra || []);
   }
   // Drie knoppen: Opslaan / Niet opslaan / Annuleren (eigen modaal).
   function vraagOpslaan(daarna) {
@@ -2547,7 +2568,7 @@
 
   // ---- Acties voor de onderdelen (0.7.85): de logica blijft hier ----
   const kopActies = {
-    nieuw: openNewWizard, openProject: () => openProject(), openRecent: (p) => openProject(p),
+    nieuw: openNewWizard, openProject: () => openProject(), openRecent: (p) => openProject(p), importMusicXml,
     save: () => saveProject(), saveAs: () => saveProjectAs(), importMidi: openMidiFile,
     exportMusicXml: saveMusicXml, exportMidi: saveMidiAs, exportSvg: saveKlavarSvg, print: printScore,
     toggleRecording, togglePlay: togglePlayScore, setBpm: setBpmLive, undo: doUndo, redo: doRedo,

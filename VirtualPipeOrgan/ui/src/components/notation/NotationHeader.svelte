@@ -40,6 +40,7 @@
       <div class="menu" role="menu">
         <button role="menuitem" on:click={() => doe('nieuw')}>{$t('notation.new')}<kbd>Ctrl+N</kbd></button>
         <button role="menuitem" on:click={() => doe('openProject')}>{$t('notation.open_project')}<kbd>Ctrl+O</kbd></button>
+        <button role="menuitem" on:click={() => doe('importMusicXml')}>{$t('notation.import_musicxml')}</button>
         {#if recent.length}
           <div class="menu-kop">{$t('notation.recent_menu')}</div>
           {#each recent.slice(0, 6) as r (r.path)}

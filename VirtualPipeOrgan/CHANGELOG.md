@@ -5,6 +5,22 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.90] - 2026-10-06
+
+### MusicXML-bestanden openen
+- Via **Bestand ▸ MusicXML openen…** leest het notatievenster partituren uit
+  Finale, MuseScore, Dorico en andere programma's (.musicxml, .xml en
+  gecomprimeerd .mxl): balken (een part met twee notenbalken wordt twee
+  balken), stemmen, noten en akkoorden, overbindingen, liedtekst,
+  aanwijzingen en dynamiek, articulaties, fermates, bogen, haarspelden,
+  8va/8vb en herhalingstekens met volta's. Maatsoort, toonsoort, tempo,
+  titel en componist komen mee.
+- Pagina-opmaak en lettertypen uit het andere programma worden niet
+  overgenomen; triolen worden op het raster benaderd, voorslagen en
+  stichnoten overgeslagen, en tempo-, maatsoort- en toonsoortwisselingen
+  onderweg genegeerd. Wat niet kon, meldt het venster na het openen.
+- De eigen MusicXML-export leest weer byte voor byte terug (rondreis-test).
+
 ## [0.7.89] - 2026-10-06
 
 ### Tekens: fermate, articulaties, bogen, haarspelden en herhalingen

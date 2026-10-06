@@ -977,7 +977,10 @@
     "sign_sticky": "{sign} — Note anklicken; Esc beendet",
     "span_needs_two": "Erst mindestens zwei Noten auswählen (Strg+Klick).",
     "octave_line_up_title": "8va: eine Oktave höher gespielt als notiert (8)",
-    "octave_line_down_title": "8vb: eine Oktave tiefer gespielt als notiert (Umschalt+8)"
+    "octave_line_down_title": "8vb: eine Oktave tiefer gespielt als notiert (Umschalt+8)",
+    "import_musicxml": "MusicXML öffnen…",
+    "musicxml_filter": "MusicXML-Partitur",
+    "import_warnings": "Die Partitur wurde geöffnet. Nicht alles konnte übernommen werden:"
   },
   "temperaments": {
     "name_prompt": "Name für diese Stimmung:"

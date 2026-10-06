@@ -977,7 +977,10 @@
     "sign_sticky": "{sign} — klik een noot; Esc stopt",
     "span_needs_two": "Selecteer eerst minstens twee noten (Ctrl+klik).",
     "octave_line_up_title": "8va: een octaaf hoger gespeeld dan geschreven (8)",
-    "octave_line_down_title": "8vb: een octaaf lager gespeeld dan geschreven (Shift+8)"
+    "octave_line_down_title": "8vb: een octaaf lager gespeeld dan geschreven (Shift+8)",
+    "import_musicxml": "MusicXML openen…",
+    "musicxml_filter": "MusicXML-partituur",
+    "import_warnings": "De partituur is geopend. Niet alles kon worden overgenomen:"
   },
   "temperaments": {
     "name_prompt": "Naam voor deze stemming:"

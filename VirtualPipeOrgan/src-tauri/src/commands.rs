@@ -4887,6 +4887,25 @@ pub fn notation_save_project(state: State<AppState>, score_id: u32, path: String
     Ok(sc.generation)
 }
 
+/// MusicXML of .mxl openen als nieuw stuk (0.7.90): (score-id, waarschuwingen).
+/// Het oude stuk sluit de UI zelf, net als bij Openen.
+#[tauri::command]
+pub fn notation_import_musicxml(state: State<AppState>, app: tauri::AppHandle, path: String) -> Result<(u32, Vec<String>), String> {
+    let r = crate::musicxml_in::read_musicxml_path(std::path::Path::new(&path))?;
+    let id = {
+        let mut next = state.notation_next_id.write();
+        let id = *next;
+        *next = next.saturating_add(1);
+        id
+    };
+    let mut sc = r.score;
+    sc.id = id;
+    state.notation_scores.write().insert(id, sc);
+    *state.notation_app_handle.write() = Some(app.clone());
+    info!("MusicXML geopend uit {} ({} waarschuwingen)", path, r.warnings.len());
+    Ok((id, r.warnings))
+}
+
 /// Partituur openen (0.7.84): nieuwe score in het geheugen; geeft
 /// (score-id, weergavevoorkeuren). Het oude stuk sluit de UI zelf.
 #[tauri::command]

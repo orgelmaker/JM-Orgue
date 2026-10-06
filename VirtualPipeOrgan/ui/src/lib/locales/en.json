@@ -977,7 +977,10 @@
     "sign_sticky": "{sign} — click a note; Esc stops",
     "span_needs_two": "Select at least two notes first (Ctrl+click).",
     "octave_line_up_title": "8va: played an octave higher than written (8)",
-    "octave_line_down_title": "8vb: played an octave lower than written (Shift+8)"
+    "octave_line_down_title": "8vb: played an octave lower than written (Shift+8)",
+    "import_musicxml": "Open MusicXML…",
+    "musicxml_filter": "MusicXML score",
+    "import_warnings": "The score has been opened. Not everything could be taken over:"
   },
   "temperaments": {
     "name_prompt": "Name for this temperament:"

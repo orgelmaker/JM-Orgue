@@ -15,6 +15,7 @@ mod mengpool;
 mod midi_archive;
 mod notation;
 mod notation_file;
+mod musicxml_in;
 mod klavar;
 mod recorder;
 mod remote;
@@ -543,6 +544,7 @@ fn main() {
             commands::notation_import_midi,
             commands::notation_save_project,
             commands::notation_load_project,
+            commands::notation_import_musicxml,
             commands::notation_autosave,
             commands::notation_list_autosaves,
             commands::notation_delete_autosave,

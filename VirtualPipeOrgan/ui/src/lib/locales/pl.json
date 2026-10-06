@@ -977,7 +977,10 @@
     "sign_sticky": "{sign} — kliknij nutę; Esc kończy",
     "span_needs_two": "Najpierw zaznacz co najmniej dwie nuty (Ctrl+klik).",
     "octave_line_up_title": "8va: grane oktawę wyżej niż zapisano (8)",
-    "octave_line_down_title": "8vb: grane oktawę niżej niż zapisano (Shift+8)"
+    "octave_line_down_title": "8vb: grane oktawę niżej niż zapisano (Shift+8)",
+    "import_musicxml": "Otwórz MusicXML…",
+    "musicxml_filter": "Partytura MusicXML",
+    "import_warnings": "Partytura została otwarta. Nie wszystko udało się przejąć:"
   },
   "temperaments": {
     "name_prompt": "Nazwa tego stroju:"

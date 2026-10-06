@@ -977,7 +977,10 @@
     "sign_sticky": "{sign} — fai clic su una nota; Esc ferma",
     "span_needs_two": "Seleziona prima almeno due note (Ctrl+clic).",
     "octave_line_up_title": "8va: suonato un’ottava sopra lo scritto (8)",
-    "octave_line_down_title": "8vb: suonato un’ottava sotto lo scritto (Maiusc+8)"
+    "octave_line_down_title": "8vb: suonato un’ottava sotto lo scritto (Maiusc+8)",
+    "import_musicxml": "Apri MusicXML…",
+    "musicxml_filter": "Partitura MusicXML",
+    "import_warnings": "La partitura è stata aperta. Non tutto è stato ripreso:"
   },
   "temperaments": {
     "name_prompt": "Nome di questo temperamento:"

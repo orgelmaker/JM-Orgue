@@ -977,7 +977,10 @@
     "sign_sticky": "{sign} — cliquez une note ; Échap arrête",
     "span_needs_two": "Sélectionnez d’abord au moins deux notes (Ctrl+clic).",
     "octave_line_up_title": "8va : joué une octave plus haut qu’écrit (8)",
-    "octave_line_down_title": "8vb : joué une octave plus bas qu’écrit (Maj+8)"
+    "octave_line_down_title": "8vb : joué une octave plus bas qu’écrit (Maj+8)",
+    "import_musicxml": "Ouvrir un MusicXML…",
+    "musicxml_filter": "Partition MusicXML",
+    "import_warnings": "La partition est ouverte. Tout n’a pas pu être repris :"
   },
   "temperaments": {
     "name_prompt": "Nom de ce tempérament :"
