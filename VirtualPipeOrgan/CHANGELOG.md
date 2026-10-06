@@ -5,6 +5,12 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.91] - 2026-10-06
+
+### Nazorg MusicXML openen
+- Een fermate of articulatie op de laatste noot van een overbinding (zoals
+  Finale en MuseScore die schrijven) komt nu mee op de samengevoegde noot.
+
 ## [0.7.90] - 2026-10-06
 
 ### MusicXML-bestanden openen

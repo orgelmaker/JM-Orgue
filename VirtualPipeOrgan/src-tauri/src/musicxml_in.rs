@@ -279,6 +279,10 @@ pub fn read_musicxml(text: &str) -> Result<ImportResult, String> {
                                 let lijst = &mut noten_per_laag[laag_index_basis + staff - 1].1;
                                 lijst[ix].end_q = lijst[ix].end_q.max(end_q);
                                 let vervolg_id = lijst[ix].id;
+                                // Fermate of articulatie op het vervolgdeel (Finale/MuseScore
+                                // zetten de fermate op de laatste overgebonden noot) hoort bij
+                                // het samengevoegde event (0.7.91).
+                                for a in lees_articulaties(el) { if !lijst[ix].articulations.contains(&a) { lijst[ix].articulations.push(a); } }
                                 if !tie_start { pending_ties.remove(&sleutel); }
                                 // Een boog die op dit vervolgdeel eindigt of begint hoort
                                 // bij het samengevoegde event (eigen export: slur-stop op
@@ -314,27 +318,7 @@ pub fn read_musicxml(text: &str) -> Result<ImportResult, String> {
                                 lyrics.push(Lyric { number, text, syllabic, extend });
                             }
                         }
-                        let mut articulations: Vec<Articulation> = Vec::new();
-                        let mut zet = |a: Articulation, lijst: &mut Vec<Articulation>| { if !lijst.contains(&a) { lijst.push(a); } };
-                        for nt in el.children().filter(|c| c.has_tag_name("notations")) {
-                            for c in nt.children().filter(|c| c.is_element()) {
-                                match c.tag_name().name() {
-                                    "articulations" => {
-                                        for a in c.children().filter(|a| a.is_element()) {
-                                            match a.tag_name().name() {
-                                                "staccato" | "staccatissimo" | "spiccato" => zet(Articulation::Staccato, &mut articulations),
-                                                "tenuto" | "detached-legato" => zet(Articulation::Tenuto, &mut articulations),
-                                                "accent" | "strong-accent" => zet(Articulation::Accent, &mut articulations),
-                                                "breath-mark" | "caesura" => zet(Articulation::Breath, &mut articulations),
-                                                _ => {}
-                                            }
-                                        }
-                                    }
-                                    "fermata" => zet(Articulation::Fermata, &mut articulations),
-                                    _ => {}
-                                }
-                            }
-                        }
+                        let articulations = lees_articulaties(el);
                         let spelling = if kind(el, "accidental").is_some() && (-2..=2).contains(&alter) { Some(Spelling { step, alter }) } else { None };
                         verwerk_slurs(el, staff, id, laag_van(staff), &mut pending_slurs, &mut spans, &mut sc);
                         let lijst = &mut noten_per_laag[laag_index_basis + staff - 1].1;
@@ -552,6 +536,32 @@ fn verwerk_slurs(el: Node, staff: usize, id: u64, laag_id: u32, pending: &mut Ha
     }
 }
 
+/// Articulaties en fermate van een <note>.
+fn lees_articulaties(el: Node) -> Vec<Articulation> {
+    let mut uit: Vec<Articulation> = Vec::new();
+    let mut zet = |a: Articulation| { if !uit.contains(&a) { uit.push(a); } };
+    for nt in el.children().filter(|c| c.has_tag_name("notations")) {
+        for c in nt.children().filter(|c| c.is_element()) {
+            match c.tag_name().name() {
+                "articulations" => {
+                    for a in c.children().filter(|a| a.is_element()) {
+                        match a.tag_name().name() {
+                            "staccato" | "staccatissimo" | "spiccato" => zet(Articulation::Staccato),
+                            "tenuto" | "detached-legato" => zet(Articulation::Tenuto),
+                            "accent" | "strong-accent" => zet(Articulation::Accent),
+                            "breath-mark" | "caesura" => zet(Articulation::Breath),
+                            _ => {}
+                        }
+                    }
+                }
+                "fermata" => zet(Articulation::Fermata),
+                _ => {}
+            }
+        }
+    }
+    uit
+}
+
 fn balk_attr(bars: &mut Vec<BarAttr>, m: u32) -> &mut BarAttr {
     if let Some(i) = bars.iter().position(|b| b.measure == m) { return &mut bars[i]; }
     bars.push(BarAttr { measure: m, left: None, right: None, ending: None });
@@ -638,7 +648,7 @@ mod tests {
             <note><pitch><step>C</step><octave>4</octave></pitch><duration>4</duration><voice>1</voice><notations><slur type="start" number="1"/></notations><lyric number="1"><syllabic>end</syllabic><text>a</text><elision>‿</elision><syllabic>single</syllabic><text>e</text></lyric></note>
             <note><pitch><step>D</step><octave>4</octave></pitch><duration>4</duration><voice>1</voice><notations><slur type="start" number="1"/><slur type="stop" number="1"/></notations></note>
             <note><pitch><step>E</step><octave>4</octave></pitch><duration>4</duration><voice>1</voice><tie type="start"/></note>
-            <note><pitch><step>E</step><octave>4</octave></pitch><duration>4</duration><voice>1</voice><tie type="stop"/><notations><slur type="stop" number="1"/></notations></note>
+            <note><pitch><step>E</step><octave>4</octave></pitch><duration>4</duration><voice>1</voice><tie type="stop"/><notations><slur type="stop" number="1"/><fermata/></notations></note>
             </measure></part></score-partwise>"#);
         let r = read_musicxml(&xml).unwrap();
         assert!((r.score.bpm - 90.0).abs() < 1e-6, "gepunteerde kwart = 60 → 90 kwarten");
@@ -651,6 +661,8 @@ mod tests {
         assert_eq!(r.score.spans.len(), 2, "{:?}", r.score.spans);
         assert!(r.score.spans.iter().any(|s| s.from_event == ev[0].id && s.to_event == ev[1].id));
         assert!(r.score.spans.iter().any(|s| s.from_event == ev[1].id && s.to_event == ev[2].id));
+        // De fermate op het overgebonden vervolgdeel hoort bij de samengevoegde noot.
+        assert_eq!(ev[2].articulations, vec![Articulation::Fermata]);
     }
 
     #[test]
