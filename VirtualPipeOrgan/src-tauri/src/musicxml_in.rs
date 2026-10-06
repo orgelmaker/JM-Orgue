@@ -155,6 +155,10 @@ pub fn read_musicxml(text: &str) -> Result<ImportResult, String> {
     let mut max_maten: usize = 0;
     let mut fijnste_q: u64 = 1;
     let mut eerste_divisions: Option<u64> = None;
+    // Triolen (0.7.93): exact gelezen als triool-achtste/-zestiende op het
+    // zesden-raster (dat kent quantize_notes); andere groepen benaderd.
+    let mut triool_exact_gezien = false;
+    let mut triool_benaderd = false;
     let mut bars: Vec<BarAttr> = Vec::new();
     // Per laag de gelezen noten; teksten en bogen met hun tijd in kwarten.
     let mut noten_per_laag: Vec<(u32, Vec<ImportEv>)> = Vec::new();
@@ -244,7 +248,13 @@ pub fn read_musicxml(text: &str) -> Result<ImportResult, String> {
                         laatste_start = Some(start_div);
                         if kind(el, "cue").is_some() { w.meld("Stichnoten (cue notes) zijn overgeslagen"); continue; }
                         if kind(el, "rest").is_some() { continue; }
-                        if kind(el, "time-modification").is_some() { w.meld("Triolen en andere onregelmatige groepen zijn op het raster benaderd"); }
+                        // Triolen (0.7.93): de duur blijft exact (derden); het
+                        // raster wordt afgeleid van de geschreven notenwaarde.
+                        let triool = kind(el, "time-modification").map(|tm| {
+                            let a = getal::<f64>(tm, "actual-notes").unwrap_or(3.0).max(1.0);
+                            let n = getal::<f64>(tm, "normal-notes").unwrap_or(2.0).max(1.0);
+                            a / n
+                        });
                         let Some(p) = kind(el, "pitch") else { continue; };
                         let step = tekst(p, "step").and_then(|s| s.chars().next()).unwrap_or('C');
                         let alter_f = getal::<f64>(p, "alter").unwrap_or(0.0);
@@ -268,7 +278,24 @@ pub fn read_musicxml(text: &str) -> Result<ImportResult, String> {
                         };
                         let start_q = maat_start_q + start_div / divisions;
                         let end_q = maat_start_q + (start_div + dur_div.max(1e-9)) / divisions;
-                        fijnste_q = fijnste_q.max(benodigde_q(dur_div / divisions)).max(benodigde_q(start_div / divisions));
+                        let dur_q = dur_div / divisions;
+                        let pos_q = start_div / divisions;
+                        match triool {
+                            Some(f) => {
+                                // Exact reproduceerbaar: 1/3 of 1/6 kwart op het zesden-raster.
+                                let zesden = dur_q * 6.0;
+                                let exact = ((zesden - 1.0).abs() < 1e-6 || (zesden - 2.0).abs() < 1e-6)
+                                    && (pos_q * 6.0 - (pos_q * 6.0).round()).abs() < 1e-6;
+                                if exact {
+                                    triool_exact_gezien = true;
+                                    fijnste_q = fijnste_q.max(benodigde_q(dur_q * f));
+                                } else {
+                                    triool_benaderd = true;
+                                    fijnste_q = fijnste_q.max(benodigde_q(dur_q)).max(benodigde_q(pos_q));
+                                }
+                            }
+                            None => { fijnste_q = fijnste_q.max(benodigde_q(dur_q)).max(benodigde_q(pos_q)); }
+                        }
                         let tie_start = el.children().any(|c| c.has_tag_name("tie") && c.attribute("type") == Some("start"))
                             || el.children().filter(|c| c.has_tag_name("notations")).flat_map(|n| n.children()).any(|c| c.has_tag_name("tied") && c.attribute("type") == Some("start"));
                         let tie_stop = el.children().any(|c| c.has_tag_name("tie") && c.attribute("type") == Some("stop"))
@@ -493,7 +520,17 @@ pub fn read_musicxml(text: &str) -> Result<ImportResult, String> {
         sc.beats_per_bar = b.clamp(1, 12); sc.beat_unit = klem_beat_unit(u);
     }
     if let Some((f, minor)) = toonsoort { sc.key_fifths = f.clamp(-7, 7); sc.minor = minor; }
-    let basis = eerste_divisions.filter(|d| [1u64, 2, 4, 8].contains(d)).unwrap_or(1);
+    // Alleen 3:2-triolen van achtsten en zestienden binnen een kwarttel
+    // komen exact terug; de rest (kwintolen, kwart-triolen, triolen in een
+    // achtstenmaat) staat op het raster benaderd, zoals vóór 0.7.93.
+    if triool_benaderd || (triool_exact_gezien && sc.beat_unit == 8) {
+        w.meld("Triolen en andere onregelmatige groepen zijn op het raster benaderd");
+    }
+    // Eigen export met triolen schrijft divisions = 3 × raster (0.7.93); een
+    // vreemd bestand met divisions 24 zónder triolen houdt het oude gedrag.
+    let basis = eerste_divisions
+        .map(|d| if triool_exact_gezien && d % 3 == 0 && [1u64, 2, 4, 8].contains(&(d / 3)) { d / 3 } else { d })
+        .filter(|d| [1u64, 2, 4, 8].contains(d)).unwrap_or(1);
     sc.quantize = basis.max(fijnste_q).clamp(1, 8) as u8;
     sc.min_measures = (max_maten as u32).min(MAX_MIN_MEASURES);
     sc.tolerance_pct = 100;
@@ -677,13 +714,43 @@ mod tests {
     }
 
     #[test]
-    fn import_timewise_weigert_en_triool_meldt() {
+    fn import_timewise_weigert_en_triool_blijft_exact() {
         assert!(read_musicxml(r#"<?xml version="1.0"?><score-timewise/>"#).unwrap_err().contains("timewise"));
-        let xml = format!(r#"{KOP}<part id="P1"><measure number="1">{ATTR}
-            <note><pitch><step>C</step><octave>4</octave></pitch><duration>3</duration><voice>1</voice><time-modification><actual-notes>3</actual-notes><normal-notes>2</normal-notes></time-modification></note>
+        // Drie triool-achtsten (divisions 12 → 4 per noot) blijven exacte derden
+        // van een kwart en het raster wordt achtsten, niet 32sten (0.7.93).
+        let xml = format!(r#"{KOP}<part id="P1"><measure number="1"><attributes><divisions>12</divisions><time><beats>4</beats><beat-type>4</beat-type></time></attributes>
+            <note><pitch><step>C</step><octave>4</octave></pitch><duration>4</duration><voice>1</voice><type>eighth</type><time-modification><actual-notes>3</actual-notes><normal-notes>2</normal-notes></time-modification></note>
+            <note><pitch><step>D</step><octave>4</octave></pitch><duration>4</duration><voice>1</voice><type>eighth</type><time-modification><actual-notes>3</actual-notes><normal-notes>2</normal-notes></time-modification></note>
+            <note><pitch><step>E</step><octave>4</octave></pitch><duration>4</duration><voice>1</voice><type>eighth</type><time-modification><actual-notes>3</actual-notes><normal-notes>2</normal-notes></time-modification></note>
+            <note><pitch><step>F</step><octave>4</octave></pitch><duration>36</duration><voice>1</voice><type>half</type><dot/></note>
             </measure></part></score-partwise>"#);
         let r = read_musicxml(&xml).unwrap();
-        assert!(r.warnings.iter().any(|w| w.contains("Triolen")));
+        assert!(!r.warnings.iter().any(|w| w.contains("Triolen")), "{:?}", r.warnings);
+        assert_eq!(r.score.quantize, 4, "divisions 12 = 3 × zestienden");
+        let ev = &r.score.layers[0].takes[0].events;
+        // 90 bpm: een kwart = 666 667 µs, een derde = 222 222 µs.
+        assert_eq!(ev[1].start_us, 222_222);
+        assert_eq!(ev[2].start_us, 444_444);
+        assert_eq!(ev[3].start_us, 666_667);
+        // Een vreemd bestand met divisions 24 zónder triolen houdt het oude
+        // raster (achtsten), en kwart-triolen (3 per halve) worden benaderd
+        // met de oude melding (reviewbevindingen 0.7.93).
+        let grof = format!(r#"{KOP}<part id="P1"><measure number="1"><attributes><divisions>24</divisions><time><beats>4</beats><beat-type>4</beat-type></time></attributes>
+            <note><pitch><step>C</step><octave>4</octave></pitch><duration>24</duration><voice>1</voice><type>quarter</type></note>
+            <note><pitch><step>D</step><octave>4</octave></pitch><duration>12</duration><voice>1</voice><type>eighth</type></note>
+            <note><pitch><step>E</step><octave>4</octave></pitch><duration>12</duration><voice>1</voice><type>eighth</type></note>
+            <note><pitch><step>F</step><octave>4</octave></pitch><duration>48</duration><voice>1</voice><type>half</type></note>
+            </measure></part></score-partwise>"#);
+        assert_eq!(read_musicxml(&grof).unwrap().score.quantize, 2);
+        let kwart = format!(r#"{KOP}<part id="P1"><measure number="1"><attributes><divisions>3</divisions><time><beats>4</beats><beat-type>4</beat-type></time></attributes>
+            <note><pitch><step>C</step><octave>4</octave></pitch><duration>2</duration><voice>1</voice><type>quarter</type><time-modification><actual-notes>3</actual-notes><normal-notes>2</normal-notes></time-modification></note>
+            <note><pitch><step>D</step><octave>4</octave></pitch><duration>2</duration><voice>1</voice><type>quarter</type><time-modification><actual-notes>3</actual-notes><normal-notes>2</normal-notes></time-modification></note>
+            <note><pitch><step>E</step><octave>4</octave></pitch><duration>2</duration><voice>1</voice><type>quarter</type><time-modification><actual-notes>3</actual-notes><normal-notes>2</normal-notes></time-modification></note>
+            <note><pitch><step>F</step><octave>4</octave></pitch><duration>6</duration><voice>1</voice><type>half</type></note>
+            </measure></part></score-partwise>"#);
+        let r2 = read_musicxml(&kwart).unwrap();
+        assert!(r2.warnings.iter().any(|w| w.contains("Triolen")), "{:?}", r2.warnings);
+        assert_eq!(r2.score.layers[0].takes[0].events[1].start_us, 444_444);
     }
 
     #[test]

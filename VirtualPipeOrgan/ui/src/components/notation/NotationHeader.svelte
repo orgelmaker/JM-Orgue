@@ -11,6 +11,7 @@
   export let countInRemaining = 0;
   export let playingScore = false;
   export let bpm = 90;
+  export let tolerancePct = 80;   // akkoordvenster 0..100 (0.7.93: schuif "Ritme")
   export let viewMode = 'staff';
   export let zoom = 1;
   export let recent = [];
@@ -79,6 +80,14 @@
   <label class="tempo">{$t('notation.tempo')}
     <input type="number" min="20" max="300" value={bpm} on:change={(e) => doe('setBpm', e.currentTarget.value)} />
   </label>
+  <!-- Ritme los ↔ strak (0.7.93, terug in de kopbalk): links los = ruim
+       akkoordvenster, rechts strak = alleen 40 ms. Opgeslagen als
+       tolerance_pct (0 = strak, 100 = los), dus omgekeerd getoond. -->
+  <label class="ritme" title={$t('notation.tolerance_title')}>{$t('notation.rhythm')}
+    <input type="range" min="0" max="100" step="5" value={100 - tolerancePct}
+      on:change={(e) => doe('setTolerance', 100 - Number(e.currentTarget.value))} />
+    <span class="ritme-waarde">{tolerancePct > 66 ? $t('notation.tol_loose') : tolerancePct < 33 ? $t('notation.tol_tight') : $t('notation.tol_medium')}</span>
+  </label>
   <button class="btn btn-ghost btn-sm" on:click={() => doe('undo')} title={$t('notation.undo_title')}>↶</button>
   <button class="btn btn-ghost btn-sm" on:click={() => doe('redo')} title={$t('notation.redo_title')}>↷</button>
 
@@ -97,6 +106,9 @@
 </div>
 
 <style>
+  .ritme { display: flex; align-items: center; gap: 0.3rem; font-size: 0.8rem; white-space: nowrap; }
+  .ritme input[type="range"] { width: 6.5rem; }
+  .ritme-waarde { font-size: 0.72rem; color: var(--text-muted, #aaa); min-width: 2.6rem; text-align: center; }
   .kop {
     display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem;
     padding: 0.4rem 0.75rem; min-width: 0;

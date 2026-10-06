@@ -47,11 +47,7 @@
       {#each gridChoices as g}<option value={g.v}>{g.label}</option>{/each}
     </select>
   </label>
-  <label class="tolerance-slider" title={$t('notation.tolerance_title')}>
-    {$t('notation.rhythm')}
-    <input type="range" min="0" max="100" step="5" bind:value={speling} on:change={() => doe('setTolerance', Number(speling))} />
-    <span class="tolerance-value">{speling < 33 ? $t('notation.tol_loose') : speling > 66 ? $t('notation.tol_tight') : $t('notation.tol_medium')}</span>
-  </label>
+  <!-- De ritmeschuif staat sinds 0.7.93 weer in de kopbalk (NotationHeader). -->
   <span class="notation-spacer"></span>
   <button class="btn btn-ghost btn-sm" on:click={() => doe('addLayer')} title={$t('notation.new_staff_title')}>{$t('notation.add_staff')}</button>
   <button class="btn btn-ghost btn-sm" on:click={() => doe('openWizard')} title={$t('notation.layout_title')}>{$t('notation.layout')}</button>

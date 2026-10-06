@@ -28,6 +28,9 @@
   import ConfirmDialog from './notation/ConfirmDialog.svelte';
   import ContextMenu from './notation/ContextMenu.svelte';
   import { xToGridTime, gridTimeToX, celBreedte, snapGridTime } from '../lib/sheetGeometry.js';
+  // notation.rs::FIJN (0.7.93): fijne rastereenheden per gebruikersrastereenheid.
+  // notatie.q en klavarModel.q zijn fijn; score.quantize is het gebruikersraster.
+  const FIJN = 3;
   import { MAATSOORTEN, splitsMaatsoort, maatDuurUs, notemapSleutel, rasterPositie } from '../lib/notatieKeuzes.js';
   import { t, tx } from '../lib/i18n.js';
   import { pasSfeerToeAlsGewijzigd } from '../lib/sfeer.js';
@@ -127,7 +130,7 @@
   let volgPauze = false;     // speler gepauzeerd: lijn blijft staan
   function rasterPerSeconde() {
     const bpm = Number(klavarModel?.bpm) || Number(score?.bpm) || 90;
-    const q = Number(klavarModel?.q) || Number(score?.quantize) || 4;
+    const q = Number(klavarModel?.q) || (Number(score?.quantize) || 4) * FIJN;
     return (bpm / 60) * q;
   }
   function syncOpnameKlok(us) {
@@ -1291,11 +1294,23 @@
   let stepMode = false;
   let stepQuarters = 1;      // nootwaarde in kwartnoten (4=heel … 0.125=32e)
   let stepDotted = false;
+  let stepTriplet = false;   // triool (0.7.93): drie in de tijd van twee
   let stepPosUs = 0;         // invoercursor (µs)
   let stepHeld = new Set();  // nu ingedrukte toetsen
   let stepChord = new Set(); // verzameld akkoord van deze aanslag
   let stepChordDivisie = new Map(); // midi → divisienaam (0.7.82: routering per balk)
-  $: stepDurUs = Math.round((60e6 / (Number(bpm) || 90)) * stepQuarters * (stepDotted ? 1.5 : 1));
+  // Eén formule voor het palet en Alt+cijfer (reviewbevinding 0.7.93).
+  function durUsVoor(quarters) {
+    return Math.round((60e6 / (Number(bpm) || 90)) * quarters * (stepDotted ? 1.5 : 1) * (stepTriplet ? 2 / 3 : 1));
+  }
+  $: stepDurUs = (bpm, stepDotted, stepTriplet, durUsVoor(stepQuarters));
+  // Triool alleen waar het blad hem kent (notation.rs quantize_notes):
+  // achtsten bij een raster van minstens achtsten, zestienden bij minstens
+  // zestienden, en niet in achtstenmaten.
+  $: trioolMogelijk = (Number(score?.beat_unit) || Number(beatUnit) || 4) !== 8 && (
+    (stepQuarters === 0.5 && (Number(score?.quantize) || 4) >= 2) ||
+    (stepQuarters === 0.25 && (Number(score?.quantize) || 4) >= 4));
+  $: if (!trioolMogelijk && stepTriplet) stepTriplet = false;
 
   function stepTargetLayerId() {
     return score?.armed_layer ?? score?.layers?.[0]?.id ?? null;
@@ -1438,7 +1453,7 @@
   // Alt+cijfer: de duur van de laatst geplaatste noot (Finale); de cursor volgt.
   async function stepZetLaatsteDuur(q) {
     if (!stepLastIds.length || stepLastPos == null) return;
-    const dur = Math.round((60e6 / (Number(bpm) || 90)) * q * (stepDotted ? 1.5 : 1));
+    const dur = durUsVoor(q);
     const nieuwEind = Math.round(stepLastPos + dur);
     stepQuarters = q;
     // Zelfde duur: de backend zet dan geen undo-stap, dus niet meetellen.
@@ -1554,9 +1569,20 @@
   // op de pedaalbalk gaat de noot naar de pedaallaag, anders naar de armed laag.
   function onKlavarStepClick(e) {
     const { midi, staff, gridTime } = e.detail;
-    const q = Number(score?.quantize) || 4;
+    // gridTime komt uit de klavar-lay-out en staat in fijne eenheden (model.q,
+    // 0.7.93: 3 per gebruikersrastereenheid). Net als op het blad snappen op
+    // de gekozen nootwaarde (triool: 2/3) of een bestaande inzet in de maat,
+    // anders valt een klik tussen de rasterlijnen en kiept de tel om naar
+    // een triool (reviewbevinding).
+    const q = Number(klavarModel?.q) || (Number(score?.quantize) || 4) * FIJN;
+    const maatLen = Math.max(1, Number(klavarModel?.measure_len) || q * 4);
+    const stap = Math.max(1, Math.round(stepQuarters * q * (stepDotted ? 1.5 : 1) * (stepTriplet ? 2 / 3 : 1)));
+    const m = Math.floor(gridTime / maatLen);
+    const noten = [...(klavarModel?.manual?.notes || []), ...(klavarModel?.pedal?.notes || [])];
+    const entries = noten.filter(n => n.start >= m * maatLen && n.start < (m + 1) * maatLen).map(n => ({ t: n.start - m * maatLen }));
+    const gt = m * maatLen + snapGridTime(gridTime - m * maatLen, entries, stap, maatLen);
     const gridUs = (60e6 / (Number(bpm) || 90)) / q;
-    const at = Math.round(gridTime * gridUs);
+    const at = Math.round(gt * gridUs);
     let layerId = null;
     const legend = klavarModel?.legend || [];
     if (staff === 'pedal') {
@@ -1740,7 +1766,9 @@
             let grid = xToGridTime(entries, nx0, nx1, sx, maatLen);
             // Stapinvoer: op het raster van de gekozen nootwaarde of op een
             // bestaande inzet, zodat een kwart "ergens op tel 3" ook op tel 3 komt.
-            if (stepMode) grid = snapGridTime(grid, entries, Math.round(stepQuarters * q), maatLen);
+            // Het raster is fijn (3 per gebruikerseenheid, 0.7.93), dus een
+            // triool-stap (2/3 van de waarde) is een heel aantal eenheden.
+            if (stepMode) grid = snapGridTime(grid, entries, Math.max(1, Math.round(stepQuarters * q * (stepTriplet ? 2 / 3 : 1))), maatLen);
             const atUs = Math.round((m * maatLen + grid) * gridUs);
             return { midi, layerId: layer.id, atUs, measure: m, grid, celPx: celBreedte(nx0, nx1, maatLen) * z };
           }
@@ -2129,10 +2157,11 @@
     const ids = selectionIds.has(d.id) && selectionIds.size > 1 ? Array.from(selectionIds) : [d.id];
     // Shift + overwegend horizontaal: verschuiven in de tijd, per rastercel (0.7.87).
     if (e.shiftKey && Math.abs(dx) >= Math.abs(dy) && d.celPx) {
-      const cellen = Math.round(dx / d.celPx);
+      // Eén cel = één gebruikersrastereenheid; celPx is per fijne eenheid (0.7.93).
+      const cellen = Math.round(dx / (d.celPx * FIJN));
       if (!cellen) return;
-      const q = notatieQ || Number(score?.quantize) || 4;
-      const gridUs = (60e6 / (Number(bpm) || 90)) / q;
+      const qFijn = notatieQ || (Number(score?.quantize) || 4) * FIJN;
+      const gridUs = (60e6 / (Number(bpm) || 90)) / qFijn * FIJN;
       selectionIds = new Set(ids);
       try { await invoke('notation_shift_events', { scoreId, eventIds: ids, deltaUs: Math.round(cellen * gridUs) }); } catch (e2) {}
       return;
@@ -2387,6 +2416,8 @@
         e.preventDefault(); return;
       }
       if (e.key === '.') { stepDotted = !stepDotted; e.preventDefault(); return; }
+      // T: triool aan/uit (0.7.93).
+      if (k === 't' && !e.ctrlKey && !e.metaKey && !e.altKey) { if (trioolMogelijk) stepTriplet = !stepTriplet; e.preventDefault(); return; }
       // ↑/↓: invoercursor een toon (Shift: octaaf); Alt+↑/↓: laatste noot kruis/mol.
       if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
         const d = e.key === 'ArrowUp' ? 1 : -1;
@@ -2588,9 +2619,11 @@
     exportMusicXml: saveMusicXml, exportMidi: saveMidiAs, exportSvg: saveKlavarSvg, print: printScore,
     toggleRecording, togglePlay: togglePlayScore, setBpm: setBpmLive, undo: doUndo, redo: doRedo,
     setViewMode, zoom: (d) => setZoom(osmdZoom + d), help: () => { hulpOpen = true; }, setTitle: setTitleLive,
+    setTolerance: setToleranceLive,
   };
   const invoerActies = {
     setStepMode, setQuarters: (q) => { stepQuarters = q; }, toggleDot: () => { stepDotted = !stepDotted; },
+    toggleTriplet: () => { if (trioolMogelijk) stepTriplet = !stepTriplet; },
     rest: stepRest, repeat: () => { if (stepLastChordNotes.length) stepRepeatLast(); },
     setAcc: (a) => { stepAcc = a; }, toggleTie: () => { stepTie = !stepTie; }, gum: toggleGum, alterLast: stepAlterLast,
     togglePreview: toggleGeluidBijInvoer,
@@ -2650,13 +2683,13 @@
     <ContextMenu x={contextMenu.x} y={contextMenu.y} items={contextMenu.items} on:close={sluitContextMenu} />
   {/if}
   {#if isLive}
-    <NotationHeader {title} {dirty} {recording} {armedWaiting} {countInRemaining} {playingScore} {bpm} {viewMode}
+    <NotationHeader {title} {dirty} {recording} {armedWaiting} {countInRemaining} {playingScore} {bpm} {tolerancePct} {viewMode}
       zoom={osmdZoom} recent={recentLijst} kanExportXml={!!xml} kanExportSvg={!!(klavarModel && scoreHasEvents)}
       kanPrint={viewMode === 'klavar' ? !!(klavarModel && scoreHasEvents) : !!xml} acties={kopActies} />
     <NotationTabs tab={actieveTab} on:change={(e) => actieveTab = e.detail} />
     <div class="tab-inhoud">
       {#if actieveTab === 'input'}
-        <InputTab {stepMode} {stepQuarters} {stepDotted} acc={stepAcc} tie={stepTie} kanHerhaal={stepLastChordNotes.length > 0} kanAlterLast={stepLastIds.length > 0}
+        <InputTab {stepMode} {stepQuarters} {stepDotted} {stepTriplet} {trioolMogelijk} acc={stepAcc} tie={stepTie} kanHerhaal={stepLastChordNotes.length > 0} kanAlterLast={stepLastIds.length > 0}
           gum={gumActief} previewOn={geluidBijInvoer}
           {viewMode} {selectieAlleenPedaal} {clipboardCount} acties={invoerActies} />
       {:else if actieveTab === 'texts'}
@@ -2698,8 +2731,10 @@
       </label>
       <label class="tolerance-slider" title={$t('notation.tolerance_title')}>
         {$t('notation.rhythm')}
-        <input type="range" min="0" max="100" step="5" bind:value={tolerancePct} on:change={scheduleRender} />
-        <span class="tolerance-value">{tolerancePct < 33 ? $t('notation.tol_loose') : tolerancePct > 66 ? $t('notation.tol_tight') : $t('notation.tol_medium')}</span>
+        <!-- Zelfde richting en etiket als de kopbalk (links los, rechts strak; opgeslagen omgekeerd). -->
+        <input type="range" min="0" max="100" step="5" value={100 - tolerancePct}
+          on:change={(e) => { tolerancePct = 100 - Number(e.currentTarget.value); scheduleRender(); }} />
+        <span class="tolerance-value">{tolerancePct > 66 ? $t('notation.tol_loose') : tolerancePct < 33 ? $t('notation.tol_tight') : $t('notation.tol_medium')}</span>
       </label>
       <label class="notation-title-field">{$t('notation.title')}
         <input type="text" bind:value={title} on:change={scheduleRender} />

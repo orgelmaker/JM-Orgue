@@ -116,6 +116,16 @@ pub struct KlavarModel {
     pub teksten: Vec<KlavarTekst>,
     /// Maatstrepen, herhalingen en volta's (0.7.89), per maat (0-gebaseerd).
     pub balken: Vec<crate::notation::BarAttr>,
+    /// Triooltellen (0.7.93): rastertijd van de tel en of hij op de pedaalbalk
+    /// staat; de renderer zet er een "3" bij.
+    pub triolen: Vec<KlavarTriool>,
+}
+
+/// Eén triooltel in klavar (0.7.93).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct KlavarTriool {
+    pub start: u64,
+    pub pedal: bool,
 }
 
 /// Eén aanwijzing in klavar: rechts van de manuaalbalk (of links van de
@@ -321,8 +331,12 @@ pub fn klavar_model(qs: &QuantizedScore, handen: &[(KlavarHand, Option<u8>)], le
     // Speling: een zestiende (q/4, minimaal één eenheid), met een vloer van
     // 150 ms organistenlegato, zodat ook bij 120 bpm en q=8 een legato-keten
     // geen valse stippen en stoptekens krijgt.
-    let vloer = (0.15 * qs.bpm / 60.0 * qs.q as f64).ceil() as u64;
-    let speling = (qs.q / 4).max(1).max(vloer);
+    // De vloer in gebruikersrastereenheden (en dan fijn, 0.7.93): een einde
+    // rondt op het gebruikersraster, dus de speling moet daarop passen.
+    let fijn = crate::notation::FIJN;
+    let vloer = (0.15 * qs.bpm / 60.0 * (qs.q / fijn) as f64).ceil() as u64 * fijn;
+    // Minstens één gebruikersrastereenheid.
+    let speling = (qs.q / 4).max(fijn).max(vloer);
     let rechts: Vec<usize> = manual.iter().enumerate().filter(|(_, n)| n.hand == KlavarHand::Right).map(|(i, _)| i).collect();
     let links: Vec<usize> = manual.iter().enumerate().filter(|(_, n)| n.hand == KlavarHand::Left).map(|(i, _)| i).collect();
     stop_en_stippen(&mut manual, &rechts, speling, qs.measure_len);
@@ -374,6 +388,16 @@ pub fn klavar_model(qs: &QuantizedScore, handen: &[(KlavarHand, Option<u8>)], le
             st.marks.iter().map(move |mk| KlavarTekst { start: mk.pos, text: mk.text.clone(), pedal: op_pedaal })
         }).collect(),
         balken: bars.to_vec(),
+        // Triooltellen (0.7.93) op de balk waar de noten van die balk staan.
+        triolen: {
+            let mut t: Vec<KlavarTriool> = qs.staves.iter().flat_map(|st| {
+                let op_pedaal = handen.get(st.staff_index).map(|h| h.0 == KlavarHand::Pedal).unwrap_or(st.pedal);
+                st.triolen.iter().map(move |(b, _)| KlavarTriool { start: b * qs.q, pedal: op_pedaal })
+            }).collect();
+            t.sort_by_key(|x| (x.start, x.pedal));
+            t.dedup();
+            t
+        },
         pedal: if heeft_pedaal { Some(KlavarStaff { midi_min: pmin, midi_max: pmax, notes: pedal }) } else { None },
     }
 }
@@ -433,7 +457,9 @@ mod tests {
         klavar_model_from_staves(staves, &opts(beats, q), None)
     }
 
+    /// `start` in gebruikersrastereenheden; het model rekent fijn (×FIJN, 0.7.93).
     fn noot<'a>(st: &'a KlavarStaff, midi: u8, start: u64) -> &'a KlavarNote {
+        let start = start * crate::notation::FIJN;
         st.notes.iter().find(|n| n.midi == midi && n.start == start).expect("noot")
     }
 
@@ -500,10 +526,10 @@ mod tests {
     fn dubbelslag_is_gedekt() {
         // Contactdender: een piepkorte noot op dezelfde inzet als de echte.
         let m = model(&[balk("HW", false, Some(KlavarHand::Right), &[(60, 1.0, 1.02), (60, 1.0, 2.0)])], 4, 4);
-        let kort: Vec<&KlavarNote> = m.manual.notes.iter().filter(|n| n.midi == 60 && n.end == 5).collect();
+        let kort: Vec<&KlavarNote> = m.manual.notes.iter().filter(|n| n.midi == 60 && n.end == 15).collect();
         assert_eq!(kort.len(), 1);
         assert!(!kort[0].stop && kort[0].dots.is_empty(), "de korte is gedekt");
-        assert!(noot(&m.manual, 60, 4).end == 8 || kort[0].end == 5);
+        assert!(noot(&m.manual, 60, 4).end == 24 || kort[0].end == 15);
     }
 
     #[test]
@@ -604,13 +630,13 @@ mod tests {
         let n = noot(&m.manual, 60, 0);
         assert!(n.dots.is_empty(), "overlap van één zestiende is legato, geen stip");
         assert!(!n.stop);
-        assert_eq!((n.end, n.end_cut), (5, 4), "het afgekapte einde gaat mee naar de renderer");
+        assert_eq!((n.end, n.end_cut), (15, 12), "het afgekapte einde gaat mee naar de renderer");
     }
 
     #[test]
     fn wel_doorklinkstip_bij_echte_overlap() {
         let m = model(&[balk("HW", false, Some(KlavarHand::Right), &[(48, 0.0, 4.0), (60, 0.0, 1.0), (62, 1.0, 2.0), (64, 2.0, 3.0)])], 4, 4);
-        assert_eq!(noot(&m.manual, 48, 0).dots, vec![4, 8]);
+        assert_eq!(noot(&m.manual, 48, 0).dots, vec![12, 24]);
         assert!(noot(&m.manual, 48, 0).stop, "laatste in de groep");
     }
 
@@ -630,7 +656,7 @@ mod tests {
     #[test]
     fn maatstreep_kruisingen() {
         let m = model(&[balk("HW", false, None, &[(60, 0.0, 2.5)])], 1, 4);
-        assert_eq!(noot(&m.manual, 60, 0).bar_crossings, vec![4, 8]);
+        assert_eq!(noot(&m.manual, 60, 0).bar_crossings, vec![12, 24]);
     }
 
     #[test]
@@ -700,7 +726,7 @@ mod tests {
         st.marks.push(crate::notation::StaffMark { start_sec: 2.0, kind: crate::notation::TextKind::Tempo, text: "rit.".into(), placement: crate::notation::Placement::Above });
         let m = klavar_model_from_staves(&[st], &opts(4, 4), None);
         assert_eq!(m.teksten.len(), 1);
-        assert_eq!((m.teksten[0].start, m.teksten[0].text.as_str(), m.teksten[0].pedal), (8, "rit.", false));
+        assert_eq!((m.teksten[0].start, m.teksten[0].text.as_str(), m.teksten[0].pedal), (24, "rit.", false));
     }
 
     #[test]

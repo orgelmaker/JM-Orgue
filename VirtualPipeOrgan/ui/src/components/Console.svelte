@@ -5358,7 +5358,7 @@
               <button
                 class="btn btn-ghost btn-sm"
                 on:click={openLiveNotation}
-                title="{$t('toolbar.notate_title')} — {$t('notation.alpha_notice')}"
+                title={$t('toolbar.notate_title')}
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <circle cx="7" cy="18" r="3"/>
@@ -5366,7 +5366,6 @@
                   <circle cx="15" cy="15" r="3"/>
                 </svg>
                 {$t('toolbar.notate')}
-                <span class="alpha-tag">{$t('notation.alpha_badge')}</span>
               </button>
             {/if}
             <button

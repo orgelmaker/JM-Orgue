@@ -385,6 +385,15 @@ export function layoutSystem(model, sys, opts = {}) {
     if (tk.pedal && pedaal) lay.teksten.push({ x: pedaal.x0 - MAAT.stokLengte * wp - 1, y, tekst: tk.text, anchor: 'end' });
     else lay.teksten.push({ x: xRechts + MAAT.stokLengte * w + 5, y, tekst: tk.text, anchor: 'start' });
   }
+  // Triooltellen (0.7.93): een "3" naast de balk halverwege de tel (op de
+  // telstart zou hij over het maatnummer vallen), aan dezelfde kant als de
+  // aanwijzingen maar dichter bij de balk.
+  for (const tr of model.triolen || []) {
+    if (tr.start < sys.t0 || tr.start >= sys.t1) continue;
+    const y = yg(tr.start + q / 2 - sys.t0) + MAAT.tekst * 0.4;
+    if (tr.pedal && pedaal) lay.teksten.push({ x: pedaal.x0 - MAAT.stokLengte * wp - 0.3, y, tekst: '3', anchor: 'end' });
+    else lay.teksten.push({ x: xRechts + MAAT.stokLengte * w + 1.2, y, tekst: '3', anchor: 'start' });
+  }
   // Manuaallabels (0.7.72): naast het stokuiteinde, aan de handzijde.
   for (const n of lay.noten) {
     if (!n.label) continue;

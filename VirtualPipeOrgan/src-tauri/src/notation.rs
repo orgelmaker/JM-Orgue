@@ -301,29 +301,99 @@ pub struct QNote {
 /// en toonhoogte, minimaal één eenheid lang). Geen akkoordgroepering en geen
 /// inkorting: dat doet `group_chords` voor het notenschrift.
 ///
-/// `tolerance_pct`: 0..=100 — schuif "los ↔ strak":
-/// - 100 = hard kwantiseren: elke noot naar het raster (huidig gedrag);
-/// - 0   = losser: noten die verder van het raster af zitten dan de tolerantie
-///   worden op een fijner sub-raster (halveringen, tot 8× fijner) neergezet.
-/// Dit vermijdt onhoorbare drift zonder de partituur onleesbaar te maken.
-pub(crate) fn quantize_notes(notes: &[NoteEv], bpm: f64, q: u8, _tolerance_pct: u8) -> Vec<QNote> {
-    let grid_per_sec = (bpm / 60.0) * q as f64;
-    // Sinds 0.7.82 gewoon afronden op het raster. Het sub-raster van vroeger
-    // (de "tolerantie") maakte van akkoordspreiding losse zestienden; die
-    // spreiding wordt nu vóóraf geclusterd (cluster_akkoorden) en de schuif
-    // "Akkoord-speling" bepaalt dát venster.
-    let quantize_one = |t: f64| -> u64 {
-        if t <= 0.0 { return 0; }
-        (t * grid_per_sec).round().max(0.0) as u64
+/// `q` is het fijne raster (eenheden per kwart, `FIJN` × gebruikersraster).
+/// Sinds 0.7.82 gewoon afronden op het raster. Het sub-raster van vroeger
+/// (de "tolerantie") maakte van akkoordspreiding losse zestienden; die
+/// spreiding wordt nu vóóraf geclusterd (cluster_akkoorden) en de schuif
+/// "Akkoord-speling" bepaalt dát venster.
+///
+/// Triolen (0.7.93): per tel (kwart) wordt gekozen tussen het binaire
+/// gebruikersraster, triool-achtsten (drie per kwart) en triool-zestienden
+/// (drie per achtste) — zoals Finale's "Mix Rhythms". Een triool-rooster wint
+/// alleen als het duidelijk beter past (kwart eenheid speling per punt) én
+/// minstens één inzet of einde op een plek valt die binair niet bestaat; met
+/// de hand ingevoerde triolen passen exact en winnen altijd. In achtstenmaten
+/// (6/8, 9/8) geen triolen. Geeft de noten en per triooltel (telindex,
+/// niveau 1 = achtsten, 2 = zestienden).
+pub(crate) fn quantize_notes(notes: &[NoteEv], bpm: f64, q: u64, beat_unit: u64) -> (Vec<QNote>, Vec<(u64, u8)>) {
+    let q = q.max(FIJN);
+    let fijn_per_sec = (bpm / 60.0) * q as f64;
+    let tijd = |t: f64| -> f64 { t.max(0.0) * fijn_per_sec };
+    let q_user = q / FIJN;
+    let tel = q as f64;
+    let mut roosters: Vec<(u8, u64)> = Vec::new();
+    if beat_unit != 8 {
+        if q_user >= 2 { roosters.push((1, q / 3)); }
+        if q_user >= 4 { roosters.push((2, q / 6)); }
+    }
+    // Per tel de inzetten en einden (relatief aan de telstart); een einde op
+    // een telgrens hoort bij de tel ervoor.
+    // Inzetten wegen vol, einden half: een organist laat los wanneer het
+    // uitkomt (iets vóór of ná de volgende inzet), de inzet is het ritme.
+    let tel_van = |x: f64, einde: bool| -> u64 { (((if einde { x - 1e-6 } else { x }).max(0.0)) / tel).floor() as u64 };
+    // Per tel: de punten (positie, gewicht) voor de pasfout, de inzetten en
+    // de duren van noten die binnen de tel beginnen en eindigen.
+    #[derive(Default)]
+    struct Tel { punten: Vec<(f64, f64)>, inzetten: Vec<f64>, duren: Vec<(f64, f64)> }
+    let mut tellen: HashMap<u64, Tel> = HashMap::new();
+    for n in notes {
+        let s = tijd(n.start_sec);
+        let e = tijd(n.end_sec).max(s);
+        let bs = tel_van(s, false);
+        let be = tel_van(e, true);
+        let t = tellen.entry(bs).or_default();
+        t.punten.push((s - bs as f64 * tel, 1.0));
+        t.inzetten.push(s - bs as f64 * tel);
+        if be == bs { t.duren.push((s - bs as f64 * tel, e - bs as f64 * tel)); }
+        tellen.entry(be).or_default().punten.push((e - be as f64 * tel, 0.5));
+    }
+    let fout = |p: &[(f64, f64)], stap: u64| -> f64 {
+        p.iter().map(|&(x, w)| w * (x - (x / stap as f64).round() * stap as f64).abs()).sum()
+    };
+    let snap_op = |x: f64, stap: u64| -> u64 { (x / stap as f64).round() as u64 * stap };
+    // Een triool-rooster wint alleen als (1) het minstens anderhalf keer zo
+    // goed past als het binaire raster, (2) de gewogen gemiddelde afwijking
+    // klein is (hooguit 30 % van een triool-stap) en (3) er ritmisch bewijs
+    // is: twee inzetten één of twee triool-stappen uit elkaar op een afstand
+    // die binair niet bestaat, of (alleen voor triool-achtsten, voor
+    // stapinvoer van één noot) een noot binnen de tel met precies zo'n duur.
+    // Zo vormen een laat aangeslagen akkoord of twee slordige achtsten geen
+    // triool, drie echte derden (ook met speling en kort losgelaten) wél.
+    let mut niveau: HashMap<u64, u8> = HashMap::new();
+    for (b, t) in &tellen {
+        let e_bin = fout(&t.punten, FIJN);
+        let gewicht: f64 = t.punten.iter().map(|&(_, w)| w).sum();
+        let mut beste: Option<(u8, f64)> = None;
+        for &(lvl, stap) in &roosters {
+            let f = fout(&t.punten, stap);
+            if !(f * 1.5 < e_bin && f <= 0.3 * stap as f64 * gewicht) { continue; }
+            let triool_afstand = |d: u64| (d == stap || d == 2 * stap) && d % FIJN != 0;
+            let mut inz: Vec<u64> = t.inzetten.iter().map(|&x| snap_op(x, stap)).collect();
+            inz.sort_unstable();
+            inz.dedup();
+            let mut bewijs = inz.windows(2).any(|w| triool_afstand(w[1] - w[0]));
+            if lvl == 1 && !bewijs {
+                bewijs = t.duren.iter().any(|&(s, e)| { let (a, z) = (snap_op(s, stap), snap_op(e, stap)); z > a && triool_afstand(z - a) });
+            }
+            if bewijs && beste.map(|(_, bf)| f < bf).unwrap_or(true) { beste = Some((lvl, f)); }
+        }
+        if let Some((lvl, _)) = beste { niveau.insert(*b, lvl); }
+    }
+    let stap_van = |b: u64| -> u64 { match niveau.get(&b) { Some(1) => q / 3, Some(2) => q / 6, _ => FIJN } };
+    let snap = |x: f64, einde: bool| -> u64 {
+        let stap = stap_van(tel_van(x, einde));
+        ((x / stap as f64).round() as u64) * stap
     };
     let mut quantized: Vec<QNote> = notes.iter().map(|n| {
-        let s = quantize_one(n.start_sec);
-        let e = quantize_one(n.end_sec);
-        let e = e.max(s + 1);
+        let s = snap(tijd(n.start_sec), false);
+        let mut e = snap(tijd(n.end_sec), true);
+        if e <= s { e = s + stap_van(s / q); }
         QNote { id: n.id, midi: n.midi, start: s, end: e, hand: n.hand, voice: n.voice, lyrics: n.lyrics.clone(), articulations: n.articulations.clone(), spelling: n.spelling }
     }).collect();
     quantized.sort_by_key(|n| (n.start, n.voice, n.midi));
-    quantized
+    let mut triolen: Vec<(u64, u8)> = niveau.into_iter().collect();
+    triolen.sort_unstable();
+    (quantized, triolen)
 }
 
 /// Venster (seconden) waarbinnen inzetten en loslaten als één akkoord
@@ -445,8 +515,11 @@ fn allowed_durations(q: u64) -> Vec<(u64, &'static str, bool)> {
         (q / 2, "eighth"), (q / 4, "16th"), (q / 8, "32nd"),
     ];
     let mut out: Vec<(u64, &'static str, bool)> = Vec::new();
+    // Op het fijne raster (q deelbaar door FIJN) alleen waarden op het
+    // gebruikersraster; een grof q (oude aanroepen, tests) blijft als vanouds.
+    let fijn = q % FIJN == 0;
     for (len, name) in base {
-        if len == 0 { continue; }
+        if len == 0 || (fijn && len % FIJN != 0) { continue; }
         let dotted = len + len / 2;
         if len >= 2 && len % 2 == 0 && dotted > len {
             out.push((dotted, name, true));
@@ -565,6 +638,9 @@ pub struct QuantizedStaff {
     pub hand: Option<KlavarHand>,
     pub split_midi: Option<u8>,
     pub notes: Vec<QNote>,
+    /// Triooltellen (0.7.93): (telindex, niveau 1 = triool-achtsten,
+    /// 2 = triool-zestienden), gesorteerd.
+    pub triolen: Vec<(u64, u8)>,
     /// Aanwijzingen (0.7.88), op absolute rastereenheid.
     pub marks: Vec<QMark>,
     /// Bogen, haarspelden en octaveringen (0.7.89), op absolute rastereenheid.
@@ -605,8 +681,18 @@ pub fn raster_en_maatlengte(quantize: u8, beats_per_bar: u8, beat_unit: u8) -> (
     let mut q = quantize.clamp(1, 8) as u64;
     if unit == 8 && q < 2 { q = 2; }
     let beats = beats_per_bar.clamp(1, 12) as u64;
+    // Fijn raster (0.7.93): drie eenheden per gebruikersrastereenheid, zodat
+    // triolen (drie in de tijd van twee) op hele eenheden vallen.
+    let q = q * FIJN;
     (q, beats * (q * 4 / unit))
 }
+
+/// Fijne rastereenheden per gebruikersrastereenheid (0.7.93). Een kwart op
+/// raster "zestienden" telt 4 × 3 = 12 eenheden: een zestiende is 3, een
+/// triool-achtste 4, een triool-zestiende 2. Zonder triolen schrijft de
+/// MusicXML weer in gebruikerseenheden (`deel`), zodat de uitvoer van vóór
+/// 0.7.93 byte voor byte gelijk blijft.
+pub const FIJN: u64 = 3;
 
 /// Tel voor de waardestrepen in rastereenheden (0.7.83): de maatlengte
 /// gedeeld door het aantal tellen — bij /4 een kwart, bij /2 een halve — en
@@ -627,7 +713,8 @@ pub fn quantize_score(staves: &[Staff], opts: &NotationOptions) -> QuantizedScor
     let beats = opts.beats_per_bar.clamp(1, 12) as u64;
     let bpm = if opts.bpm.is_finite() && opts.bpm >= 20.0 && opts.bpm <= 300.0 { opts.bpm } else { 90.0 };
     let tolerance = opts.tolerance_pct.unwrap_or(100);
-    let venster = akkoord_venster_sec(bpm, q, tolerance);
+    // Het akkoordvenster rekent in gebruikersrastereenheden.
+    let venster = akkoord_venster_sec(bpm, q / FIJN, tolerance);
     let mut qstaves: Vec<QuantizedStaff> = staves.iter().enumerate()
         .map(|(i, st)| {
             // Akkoordclustering vóór het raster (0.7.82), ook voor klavar.
@@ -638,17 +725,25 @@ pub fn quantize_score(staves: &[Staff], opts: &NotationOptions) -> QuantizedScor
             for groep in noten.chunk_by_mut(|a, b| a.voice == b.voice) {
                 cluster_akkoorden(groep, venster);
             }
-            let qn = quantize_notes(&noten, bpm, q as u8, tolerance);
+            let (qn, triolen) = quantize_notes(&noten, bpm, q, beat_unit);
             let spans = spans_kwantiseren(&st.spans, &qn);
+            // Aanwijzingen op dezelfde stap als de noten in hun tel (0.7.93):
+            // gebruikersraster, of de triool-stap in een triooltel — anders
+            // schuift een tekst bij het schrijven in gebruikerseenheden.
+            let niveau: HashMap<u64, u8> = triolen.iter().cloned().collect();
+            let marks = st.marks.iter().map(|m| {
+                let fijn = (m.start_sec.max(0.0)) * (bpm / 60.0) * q as f64;
+                let tel = (fijn / q as f64).floor() as u64;
+                let stap = match niveau.get(&tel) { Some(1) => q / 3, Some(2) => q / 6, _ => FIJN } as f64;
+                QMark { pos: ((fijn / stap).round() * stap) as u64, kind: m.kind, text: m.text.clone(), placement: m.placement }
+            }).collect();
             QuantizedStaff {
                 staff_index: i, name: st.name.clone(), layer_id: st.layer_id, pedal: st.pedal,
                 bass_clef: st.bass_clef, hand: st.hand, split_midi: st.split_midi,
                 notes: qn,
+                triolen,
                 spans,
-                marks: st.marks.iter().map(|m| QMark {
-                    pos: ((m.start_sec.max(0.0)) * (bpm / 60.0) * q as f64).round() as u64,
-                    kind: m.kind, text: m.text.clone(), placement: m.placement,
-                }).collect(),
+                marks,
             }
         })
         .collect();
@@ -699,7 +794,101 @@ pub fn render_musicxml(qs: &QuantizedScore, opts: &NotationOptions) -> Result<St
 
 /// Eén geschreven noot, akkoord of rust binnen een maat (0.7.83), met per
 /// noot (midi, tie_stop, tie_start, event-id).
-struct MaatItem { pos: u64, len: u64, type_name: &'static str, dotted: bool, hele_maat: bool, notes: Vec<NootItem>, lyrics: Vec<Lyric>, articulations: Vec<Articulation> }
+struct MaatItem { pos: u64, len: u64, type_name: &'static str, dotted: bool, hele_maat: bool, notes: Vec<NootItem>, lyrics: Vec<Lyric>, articulations: Vec<Articulation>,
+    /// Triool (0.7.93): `<time-modification>` 3:2, de groep (halve-telindex)
+    /// voor de haak, en of dit item de haak opent of sluit.
+    tuplet: bool, tgroep: Option<u64>, tstart: bool, tstop: bool }
+
+impl MaatItem {
+    fn hele_maat_rust(pos: u64, len: u64) -> MaatItem {
+        MaatItem { pos, len, type_name: "", dotted: false, hele_maat: true, notes: Vec::new(), lyrics: Vec::new(), articulations: Vec::new(), tuplet: false, tgroep: None, tstart: false, tstop: false }
+    }
+}
+
+/// Eén geschreven deel van een segment (0.7.93): positie, lengte, notenwaarde,
+/// punt, en bij een triool de groep (halve-telindex).
+struct Deel { pos: u64, len: u64, type_name: &'static str, dotted: bool, tuplet: bool, tgroep: Option<u64> }
+
+/// Knip een segment [ps, pe) in geschreven delen (0.7.93): binaire stukken
+/// lopen door over binaire tellen en worden ontleed als vanouds; in een
+/// triooltel (niveau 1: drie per kwart; niveau 2: drie per achtste, per halve
+/// tel een groep) komen triool-waarden met 3:2. Een noot die precies een
+/// hele tel (of bij niveau 2 een halve tel) vult, blijft een gewone kwart
+/// (achtste) zonder triool.
+fn knip_in_delen(ps: u64, pe: u64, q: u64, niveau: &HashMap<u64, u8>) -> Vec<Deel> {
+    let lvl = |b: u64| -> u8 { niveau.get(&b).copied().unwrap_or(0) };
+    let mut delen: Vec<Deel> = Vec::new();
+    let binair = |delen: &mut Vec<Deel>, a: u64, b: u64| {
+        let mut pos = a;
+        for (len, type_name, dotted) in decompose(b - a, q) {
+            delen.push(Deel { pos, len, type_name, dotted, tuplet: false, tgroep: None });
+            pos += len;
+        }
+    };
+    // Een triooltel die het segment van telgrens tot telgrens volledig bedekt
+    // telt als binair (een liggende halve onder triolen in een andere stem
+    // blijft één halve, reviewbevinding).
+    let bedekt = |pos: u64, b: u64| pos == b * q && pe >= (b + 1) * q;
+    let mut pos = ps;
+    while pos < pe {
+        let b = pos / q;
+        let n = if lvl(b) != 0 && bedekt(pos, b) { 0 } else { lvl(b) };
+        match n {
+            0 => {
+                // Doorlopen tot de volgende (niet volledig bedekte) triooltel
+                // of het einde.
+                let mut einde = pe;
+                let mut bb = b;
+                loop {
+                    let grens = (bb + 1) * q;
+                    if grens >= pe { break; }
+                    if lvl(bb + 1) != 0 && pe < (bb + 2) * q { einde = grens; break; }
+                    bb += 1;
+                }
+                binair(&mut delen, pos, einde);
+                pos = einde;
+            }
+            n => {
+                let tel_start = b * q;
+                let tel_eind = tel_start + q;
+                let einde = pe.min(tel_eind);
+                if n == 1 {
+                    let stap = q / 3;
+                    let mut p = pos;
+                    while p < einde {
+                        let rest = (einde - p) / stap;
+                        let (len, type_name) = if rest >= 2 { (2 * stap, "quarter") } else { (stap, "eighth") };
+                        delen.push(Deel { pos: p, len, type_name, dotted: false, tuplet: true, tgroep: Some(b * 2) });
+                        p += len;
+                    }
+                } else {
+                    let half = q / 2;
+                    let stap = q / 6;
+                    let mut p = pos;
+                    while p < einde {
+                        let h_start = (p / half) * half;
+                        let h_eind = h_start + half;
+                        let e2 = einde.min(h_eind);
+                        if p == h_start && e2 == h_eind {
+                            binair(&mut delen, p, e2);
+                        } else {
+                            let mut pp = p;
+                            while pp < e2 {
+                                let rest = (e2 - pp) / stap;
+                                let (len, type_name) = if rest >= 2 { (2 * stap, "eighth") } else { (stap, "16th") };
+                                delen.push(Deel { pos: pp, len, type_name, dotted: false, tuplet: true, tgroep: Some(h_start / half) });
+                                pp += len;
+                            }
+                        }
+                        p = e2;
+                    }
+                }
+                pos = einde;
+            }
+        }
+    }
+    delen
+}
 
 /// Eén noot in een MaatItem (0.7.89): toon, overbindingen, event-id, spelling.
 struct NootItem { midi: u8, tie_stop: bool, tie_start: bool, id: Option<u64>, spelling: Option<Spelling> }
@@ -707,7 +896,7 @@ struct NootItem { midi: u8, tie_stop: bool, tie_start: bool, id: Option<u64>, sp
 /// De noten en rusten van één stem binnen één maat, uit de segmentlijst van
 /// die stem: delen binnen de maat, met overbindingen over maat- en
 /// segmentgrenzen (0.7.82), en één hele-maatrust voor een lege maat.
-fn maat_items(segments: &[(u64, u64, Vec<ChordNote>)], m_start: u64, m_end: u64, measure_len: u64, q: u64) -> Vec<MaatItem> {
+fn maat_items(segments: &[(u64, u64, Vec<ChordNote>)], m_start: u64, m_end: u64, measure_len: u64, q: u64, niveau: &HashMap<u64, u8>) -> Vec<MaatItem> {
     let mut items: Vec<MaatItem> = Vec::new();
     for (s, e, notes) in segments.iter() {
         let (s, e) = (*s, *e);
@@ -717,7 +906,7 @@ fn maat_items(segments: &[(u64, u64, Vec<ChordNote>)], m_start: u64, m_end: u64,
         let tie_from_prev = !notes.is_empty() && s < m_start;
         let tie_to_next = !notes.is_empty() && e > m_end;
         if notes.is_empty() && ps == m_start && pe == m_end {
-            items.push(MaatItem { pos: ps, len: measure_len, type_name: "", dotted: false, hele_maat: true, notes: Vec::new(), lyrics: Vec::new(), articulations: Vec::new() });
+            items.push(MaatItem::hele_maat_rust(ps, measure_len));
             continue;
         }
         // Liedtekst (0.7.88): van de hoogste noot met tekst, alleen op het
@@ -735,9 +924,8 @@ fn maat_items(segments: &[(u64, u64, Vec<ChordNote>)], m_start: u64, m_end: u64,
             }
             lyrics_akkoord.sort_by_key(|l| l.number);
         }
-        let parts = decompose(pe - ps, q);
-        let mut pos = ps;
-        for (pi, (len, type_name, dotted)) in parts.iter().enumerate() {
+        let parts = knip_in_delen(ps, pe, q, niveau);
+        for (pi, d) in parts.iter().enumerate() {
             let first_part = pi == 0;
             let last_part = pi == parts.len() - 1;
             let noten: Vec<NootItem> = notes.iter().map(|cn| NootItem {
@@ -753,19 +941,30 @@ fn maat_items(segments: &[(u64, u64, Vec<ChordNote>)], m_start: u64, m_end: u64,
             if first_part && !tie_from_prev {
                 for cn in notes.iter() { if cn.tie_stop { continue; } for a in &cn.articulations { if !art.contains(a) { art.push(*a); } } }
             }
-            items.push(MaatItem { pos, len: *len, type_name, dotted: *dotted, hele_maat: false, notes: noten,
-                lyrics: if first_part { lyrics_akkoord.clone() } else { Vec::new() }, articulations: art });
-            pos += len;
+            items.push(MaatItem { pos: d.pos, len: d.len, type_name: d.type_name, dotted: d.dotted, hele_maat: false, notes: noten,
+                lyrics: if first_part { lyrics_akkoord.clone() } else { Vec::new() }, articulations: art,
+                tuplet: d.tuplet, tgroep: d.tgroep, tstart: false, tstop: false });
         }
     }
+    // Triool-haken (0.7.93): per groep opent het eerste item en sluit het
+    // laatste; rusten tellen mee.
+    let mut eerste: HashMap<u64, usize> = HashMap::new();
+    let mut laatste: HashMap<u64, usize> = HashMap::new();
+    for (i, it) in items.iter().enumerate() {
+        if let Some(g) = it.tgroep { eerste.entry(g).or_insert(i); laatste.insert(g, i); }
+    }
+    for (_, i) in eerste { items[i].tstart = true; }
+    for (_, i) in laatste { items[i].tstop = true; }
     items
 }
 
 /// Waardestrepen (0.7.83): aaneengesloten noten korter dan een kwart binnen
 /// dezelfde tel (`beam_tel`). Een rust of een langere noot breekt de groep;
 /// één losse korte noot houdt haar vlag.
-fn beams_voor(items: &[MaatItem], m_start: u64, tel: u64, q: u64) -> Vec<Option<&'static str>> {
-    let kort = |it: &MaatItem| !it.notes.is_empty() && it.len < q;
+fn beams_voor(items: &[MaatItem], m_start: u64, tel: u64, _q: u64) -> Vec<Option<&'static str>> {
+    // Op notenwaarde, niet op lengte (0.7.93): een triool-kwart is korter dan
+    // een kwart maar krijgt geen waardestreep.
+    let kort = |it: &MaatItem| !it.notes.is_empty() && matches!(it.type_name, "eighth" | "16th" | "32nd");
     let mut beam: Vec<Option<&'static str>> = vec![None; items.len()];
     let mut i = 0;
     while i < items.len() {
@@ -891,28 +1090,40 @@ fn barline_xml(bars: &[BarAttr], m: u32, links: bool) -> Option<String> {
 
 /// Schrijft de items van één stem in één maat en vult de notemap.
 #[allow(clippy::too_many_arguments)]
-fn schrijf_items(xml: &mut String, items: &[MaatItem], beam: &[Option<&'static str>], voice: u8, stem_richting: Option<&str>, kleur: Option<&str>, key_fifths: i8, part: u16, measure: u32, m_start: u64, notemap: &mut Vec<NoteRef>, marks: &[QMark], spans: &SpanInfo) {
+fn schrijf_items(xml: &mut String, items: &[MaatItem], beam: &[Option<&'static str>], voice: u8, stem_richting: Option<&str>, kleur: Option<&str>, key_fifths: i8, part: u16, measure: u32, m_start: u64, notemap: &mut Vec<NoteRef>, marks: &[QMark], spans: &SpanInfo, deel: u64) {
     // Aanwijzingen (0.7.88) vóór de noot op hun inzet; tussen twee inzetten
     // met een (negatieve) offset t.o.v. de volgende inzet; na de laatste
-    // inzet t.o.v. het maateinde.
+    // inzet t.o.v. het maateinde. `deel` (0.7.93): geschreven duren zijn
+    // fijne eenheden gedeeld door `deel` (FIJN zonder triolen, 1 mét).
+    let deel = deel.max(1);
     let mut mark_i = 0usize;
     let m_end = m_start + items.iter().map(|it| it.pos + it.len).max().unwrap_or(m_start + 1) - m_start;
+    const TM: &str = "<time-modification><actual-notes>3</actual-notes><normal-notes>2</normal-notes></time-modification>";
+    let haak = |it: &MaatItem| -> String {
+        let mut s = String::new();
+        if it.tstart { s.push_str("<tuplet type=\"start\" bracket=\"yes\"/>"); }
+        if it.tstop { s.push_str("<tuplet type=\"stop\"/>"); }
+        s
+    };
     for (ii, it) in items.iter().enumerate() {
         while mark_i < marks.len() && marks[mark_i].pos <= it.pos {
             let offset = marks[mark_i].pos as i64 - it.pos as i64;
-            xml.push_str(&direction_xml(&marks[mark_i], offset));
+            xml.push_str(&direction_xml(&marks[mark_i], offset / deel as i64));
             mark_i += 1;
         }
         if it.hele_maat {
             xml.push_str(&format!(
                 "      <note><rest measure=\"yes\"/><duration>{}</duration><voice>{}</voice></note>\n",
-                it.len, voice));
+                it.len / deel, voice));
             continue;
         }
         if it.notes.is_empty() {
+            let h = haak(it);
             xml.push_str(&format!(
-                "      <note><rest/><duration>{}</duration><voice>{}</voice><type>{}</type>{}</note>\n",
-                it.len, voice, it.type_name, if it.dotted { "<dot/>" } else { "" }));
+                "      <note><rest/><duration>{}</duration><voice>{}</voice><type>{}</type>{}{}{}</note>\n",
+                it.len / deel, voice, it.type_name, if it.dotted { "<dot/>" } else { "" },
+                if it.tuplet { TM } else { "" },
+                if h.is_empty() { String::new() } else { format!("<notations>{}</notations>", h) }));
             continue;
         }
         // Begin van een haarspeld of octavering (0.7.89) vóór het eerste
@@ -929,7 +1140,7 @@ fn schrijf_items(xml: &mut String, items: &[MaatItem], beam: &[Option<&'static s
             xml.push_str(&format!("<pitch><step>{}</step>", step));
             if alter != 0 { xml.push_str(&format!("<alter>{}</alter>", alter)); }
             xml.push_str(&format!("<octave>{}</octave></pitch>", octave));
-            xml.push_str(&format!("<duration>{}</duration>", it.len));
+            xml.push_str(&format!("<duration>{}</duration>", it.len / deel));
             if tie_stop { xml.push_str("<tie type=\"stop\"/>"); }
             if tie_start { xml.push_str("<tie type=\"start\"/>"); }
             xml.push_str(&format!("<voice>{}</voice>", voice));
@@ -937,6 +1148,8 @@ fn schrijf_items(xml: &mut String, items: &[MaatItem], beam: &[Option<&'static s
             if it.dotted { xml.push_str("<dot/>"); }
             // Voorteken alleen bij een expliciete spelling (0.7.89).
             if let Some(acc) = accidental { xml.push_str(&format!("<accidental>{}</accidental>", acc)); }
+            // Triool (0.7.93): 3 in de tijd van 2, op elke noot van het akkoord.
+            if it.tuplet { xml.push_str(TM); }
             // Stokrichting alleen in een meerstemmige maat (1 en 3 omhoog, 2 en 4 omlaag).
             if let Some(r) = stem_richting { xml.push_str(&format!("<stem>{}</stem>", r)); }
             // Schermvariant: kleur per stem (OSMD leest `notehead color`).
@@ -955,6 +1168,8 @@ fn schrijf_items(xml: &mut String, items: &[MaatItem], beam: &[Option<&'static s
                 if !tie_start { if let Some(ns) = spans.slur_stop.get(&eid) { for n in ns { notaties.push_str(&format!("<slur type=\"stop\" number=\"{}\"/>", n)); } } }
                 if !tie_stop { if let Some(ns) = spans.slur_start.get(&eid) { for n in ns { notaties.push_str(&format!("<slur type=\"start\" number=\"{}\"/>", n)); } } }
             }
+            // Triool-haak (0.7.93) op de eerste akkoordnoot.
+            if ni == 0 { notaties.push_str(&haak(it)); }
             if ni == 0 && !it.articulations.is_empty() {
                 let mut art = String::new();
                 for a in &it.articulations {
@@ -989,7 +1204,7 @@ fn schrijf_items(xml: &mut String, items: &[MaatItem], beam: &[Option<&'static s
     // Aanwijzingen na de laatste inzet (in een slotrust): t.o.v. het maateinde.
     while mark_i < marks.len() {
         let offset = marks[mark_i].pos as i64 - m_end as i64;
-        xml.push_str(&direction_xml(&marks[mark_i], offset));
+        xml.push_str(&direction_xml(&marks[mark_i], offset / deel as i64));
         mark_i += 1;
     }
 }
@@ -1084,10 +1299,15 @@ pub fn render_musicxml_met_notemap(qs: &QuantizedScore, opts: &NotationOptions, 
 
     let tel = beam_tel(measure_len, beats, qs.beat_unit);
     let mut notemap: Vec<NoteRef> = Vec::new();
+    // Zonder triolen in gebruikersrastereenheden schrijven (0.7.93): dan is
+    // de uitvoer byte voor byte die van vóór het fijne raster.
+    let heeft_triolen = qs.staves.iter().any(|st| !st.triolen.is_empty());
+    let deel = if heeft_triolen { 1 } else { FIJN };
 
     for (idx, (staff, stemmen)) in quantized.iter().enumerate() {
         xml.push_str(&format!("  <part id=\"P{}\">\n", idx + 1));
         let staff_total = num_measures * measure_len;
+        let niveau: HashMap<u64, u8> = staff.triolen.iter().cloned().collect();
         // Segmentlijst per stem: (start, end, notes-of-leeg=rust), de maat vullend.
         let segs_per_stem: Vec<(u8, Vec<(u64, u64, Vec<ChordNote>)>)> = stemmen.iter().map(|(v, chords)| {
             let mut segments: Vec<(u64, u64, Vec<ChordNote>)> = Vec::new();
@@ -1110,7 +1330,7 @@ pub fn render_musicxml_met_notemap(qs: &QuantizedScore, opts: &NotationOptions, 
             xml.push_str(&format!("    <measure number=\"{}\">\n", m + 1));
             if m == 0 {
                 xml.push_str("      <attributes>\n");
-                xml.push_str(&format!("        <divisions>{}</divisions>\n", q));
+                xml.push_str(&format!("        <divisions>{}</divisions>\n", q / deel));
                 if opts.minor == Some(true) {
                     xml.push_str(&format!("        <key><fifths>{}</fifths><mode>minor</mode></key>\n", opts.key_fifths.clamp(-7, 7)));
                 } else {
@@ -1132,24 +1352,24 @@ pub fn render_musicxml_met_notemap(qs: &QuantizedScore, opts: &NotationOptions, 
             // hele-maatrust in stem 1 (zoals altijd).
             let mut per_stem_items: Vec<(u8, Vec<MaatItem>)> = Vec::new();
             for (v, segments) in &segs_per_stem {
-                let items = maat_items(segments, m_start, m_end, measure_len, q);
+                let items = maat_items(segments, m_start, m_end, measure_len, q, &niveau);
                 if items.iter().any(|it| !it.notes.is_empty()) { per_stem_items.push((*v, items)); }
             }
             if per_stem_items.is_empty() {
-                per_stem_items.push((1, vec![MaatItem { pos: m_start, len: measure_len, type_name: "", dotted: false, hele_maat: true, notes: Vec::new(), lyrics: Vec::new(), articulations: Vec::new() }]));
+                per_stem_items.push((1, vec![MaatItem::hele_maat_rust(m_start, measure_len)]));
             }
             let meerstemmig = per_stem_items.len() > 1;
             // Aanwijzingen van deze maat (0.7.88), alleen bij de eerste stem.
             let maat_marks: Vec<QMark> = staff.marks.iter().filter(|mk| mk.pos >= m_start && mk.pos < m_end)
                 .map(|mk| QMark { pos: mk.pos, kind: mk.kind, text: mk.text.clone(), placement: mk.placement }).collect();
             for (si, (v, items)) in per_stem_items.iter().enumerate() {
-                if si > 0 { xml.push_str(&format!("      <backup><duration>{}</duration></backup>\n", measure_len)); }
+                if si > 0 { xml.push_str(&format!("      <backup><duration>{}</duration></backup>\n", measure_len / deel)); }
                 let beam = beams_voor(items, m_start, tel, q);
                 let stem_richting = if meerstemmig { Some(if v % 2 == 1 { "up" } else { "down" }) } else { None };
                 let kleur: Option<&str> = scherm.map(|s| if s.dim_andere && *v != actieve { DIM_KLEUR } else { STEM_KLEUREN[(*v - 1) as usize] })
                     .filter(|k| *k != STEM_KLEUREN[0]);
                 let marks_hier: &[QMark] = if si == 0 { &maat_marks } else { &[] };
-                schrijf_items(&mut xml, items, &beam, *v, stem_richting, kleur, opts.key_fifths, idx as u16, m as u32, m_start, &mut notemap, marks_hier, &span_info);
+                schrijf_items(&mut xml, items, &beam, *v, stem_richting, kleur, opts.key_fifths, idx as u16, m as u32, m_start, &mut notemap, marks_hier, &span_info, deel);
             }
             // Maatstreep rechts (0.7.89): dubbel, slot, herhaling eind, volta eind.
             if let Some(b) = barline_xml(bars, m as u32, false) { xml.push_str(&b); }
@@ -2259,19 +2479,20 @@ mod tests {
             NoteEv::anoniem(64, 0.02, 0.98), // E4 → zelfde inzet (akkoord)
             NoteEv::anoniem(67, 0.5, 1.5),   // G4 → nieuwe inzet, kort C/E in
         ];
-        let chords = group_chords(&quantize_notes(&notes, 60.0, 4, 100));
+        let chords = group_chords(&quantize_notes(&notes, 60.0, 12, 4).0);
         // 0.7.82: C/E lopen dóór onder G (doorgebonden), niet afgekapt.
+        // Posities in fijne eenheden (0.7.93): een achtste = 6.
         assert_eq!(chords.len(), 3);
         assert_eq!(chords[0].midis(), vec![60, 64]);
-        assert_eq!((chords[0].start, chords[0].end), (0, 2));
+        assert_eq!((chords[0].start, chords[0].end), (0, 6));
         assert!(chords[0].notes.iter().all(|n| n.tie_start && !n.tie_stop));
         assert_eq!(chords[1].midis(), vec![60, 64, 67]);
-        assert_eq!((chords[1].start, chords[1].end), (2, 4));
+        assert_eq!((chords[1].start, chords[1].end), (6, 12));
         assert!(chords[1].notes.iter().filter(|n| n.midi != 67).all(|n| n.tie_stop && !n.tie_start));
         let g = chords[1].notes.iter().find(|n| n.midi == 67).unwrap();
         assert!(!g.tie_stop && g.tie_start);
         assert_eq!(chords[2].midis(), vec![67]);
-        assert_eq!((chords[2].start, chords[2].end), (4, 6));
+        assert_eq!((chords[2].start, chords[2].end), (12, 18));
         assert!(chords[2].notes[0].tie_stop && !chords[2].notes[0].tie_start);
     }
 
@@ -2299,7 +2520,7 @@ mod tests {
         let c = akkoorden(vec![NoteEv::anoniem(60, 0.11, 1.0), NoteEv::anoniem(64, 0.14, 1.0)], Some(100));
         assert_eq!(c.len(), 1);
         assert_eq!(c[0].midis(), vec![60, 64]);
-        assert_eq!((c[0].start, c[0].end), (0, 4));
+        assert_eq!((c[0].start, c[0].end), (0, 12));
     }
 
     #[test]
@@ -2339,8 +2560,8 @@ mod tests {
     fn kortste_noot_bepaalt_akkoordduur() {
         let c = akkoorden(vec![NoteEv::anoniem(60, 0.0, 1.0), NoteEv::anoniem(64, 0.0, 2.0)], Some(100));
         assert_eq!(c.len(), 2);
-        assert_eq!((c[0].start, c[0].end), (0, 4));
-        assert_eq!((c[1].start, c[1].end), (4, 8));
+        assert_eq!((c[0].start, c[0].end), (0, 12));
+        assert_eq!((c[1].start, c[1].end), (12, 24));
         assert_eq!(c[1].midis(), vec![64]);
         assert!(c[0].notes[1].tie_start && c[1].notes[0].tie_stop);
     }
@@ -2363,8 +2584,8 @@ mod tests {
         let qs = quantize_score(&staf(vec![NoteEv::anoniem(60, 0.0, 0.29), NoteEv::anoniem(62, 0.25, 0.50)]), &o);
         let c = group_chords(&qs.staves[0].notes);
         assert_eq!(c.len(), 2, "{:?}", c);
-        assert_eq!((c[0].start, c[0].end, c[0].midis()), (0, 4, vec![60]));
-        assert_eq!((c[1].start, c[1].end, c[1].midis()), (4, 8, vec![62]));
+        assert_eq!((c[0].start, c[0].end, c[0].midis()), (0, 12, vec![60]));
+        assert_eq!((c[1].start, c[1].end, c[1].midis()), (12, 24, vec![62]));
         assert!(c.iter().all(|ch| ch.notes.iter().all(|n| !n.tie_start && !n.tie_stop)));
         // Negatieve controle: 150 ms overlap (≥ cel + venster) blijft liggen en bindt door.
         let qs2 = quantize_score(&staf(vec![NoteEv::anoniem(60, 0.0, 0.40), NoteEv::anoniem(62, 0.25, 0.50)]), &o);
@@ -2451,17 +2672,134 @@ mod tests {
             NoteEv { midi: 60, start_sec: 0.0, end_sec: 1.0, id: Some(7), hand: Some(KlavarHand::Left), voice: 1, lyrics: Vec::new(), articulations: Vec::new(), spelling: None },
             NoteEv { midi: 64, start_sec: 0.02, end_sec: 0.98, id: Some(8), hand: None, voice: 1, lyrics: Vec::new(), articulations: Vec::new(), spelling: None },
         ];
-        let q = quantize_notes(&notes, 60.0, 4, 100);
+        // Raster zestienden = 12 fijne eenheden per kwart (0.7.93).
+        let (q, triolen) = quantize_notes(&notes, 60.0, 12, 4);
         assert_eq!(q.len(), 2);
-        assert_eq!((q[0].id, q[0].midi, q[0].start, q[0].end, q[0].hand), (Some(7), 60, 0, 4, Some(KlavarHand::Left)));
-        assert_eq!((q[1].id, q[1].midi, q[1].start, q[1].end), (Some(8), 64, 0, 4));
+        assert!(triolen.is_empty());
+        assert_eq!((q[0].id, q[0].midi, q[0].start, q[0].end, q[0].hand), (Some(7), 60, 0, 12, Some(KlavarHand::Left)));
+        assert_eq!((q[1].id, q[1].midi, q[1].start, q[1].end), (Some(8), 64, 0, 12));
     }
 
     #[test]
     fn anonieme_noten_hebben_geen_id() {
-        let q = quantize_notes(&[NoteEv::anoniem(60, 0.0, 0.5)], 60.0, 4, 100);
+        let (q, _) = quantize_notes(&[NoteEv::anoniem(60, 0.0, 0.5)], 60.0, 12, 4);
         assert_eq!(q[0].id, None);
-        assert_eq!(q[0].end, 2);
+        assert_eq!(q[0].end, 6);
+    }
+
+    /// Triolen (0.7.93): drie exacte derden op één tel worden een triooltel;
+    /// een tel met gewone zestienden en wat speling blijft binair.
+    #[test]
+    fn triool_wordt_herkend_en_binair_blijft_binair() {
+        // 60 bpm, raster zestienden: een kwart = 1 s = 12 eenheden.
+        let notes = vec![
+            NoteEv::anoniem(60, 0.0, 1.0 / 3.0), NoteEv::anoniem(62, 1.0 / 3.0, 2.0 / 3.0), NoteEv::anoniem(64, 2.0 / 3.0, 1.0),
+            // tel 2: twee achtsten met 20 ms speling
+            NoteEv::anoniem(65, 1.02, 1.5), NoteEv::anoniem(67, 1.51, 2.0),
+            // tel 3: triool-zestienden op de tweede helft (0.5 + k/6), eerste helft een achtste
+            NoteEv::anoniem(60, 2.0, 2.5), NoteEv::anoniem(62, 2.5, 2.5 + 1.0 / 6.0), NoteEv::anoniem(64, 2.5 + 1.0 / 6.0, 2.5 + 2.0 / 6.0), NoteEv::anoniem(65, 2.5 + 2.0 / 6.0, 3.0),
+        ];
+        let (q, triolen) = quantize_notes(&notes, 60.0, 12, 4);
+        assert_eq!(triolen, vec![(0, 1), (2, 2)]);
+        let posities: Vec<(u64, u64)> = q.iter().map(|n| (n.start, n.end)).collect();
+        assert_eq!(posities, vec![(0, 4), (4, 8), (8, 12), (12, 18), (18, 24), (24, 30), (30, 32), (32, 34), (34, 36)]);
+        // In een achtstenmaat geen triolen: alles naar het binaire raster.
+        let (_, geen) = quantize_notes(&notes[..3], 60.0, 6, 8);
+        assert!(geen.is_empty());
+    }
+
+    /// Live gespeeld (90 bpm): een triool met ±15 ms speling op de inzetten en
+    /// 40 ms te vroeg losgelaten wordt herkend; een stapinvoer-patroon
+    /// triool-kwart + triool-achtste ook; een laat aangeslagen akkoord en twee
+    /// slordige achtsten niet.
+    #[test]
+    fn triool_live_en_patronen() {
+        let k = 60.0 / 90.0;
+        let d = k / 3.0;
+        let jit = [0.012, -0.011, 0.014];
+        let mut notes = vec![NoteEv::anoniem(60, 0.0, k - 0.04)];
+        for (i, m) in [62u8, 64, 65].iter().enumerate() {
+            let s = k + i as f64 * d + jit[i];
+            notes.push(NoteEv::anoniem(*m, s, s + d - 0.04));
+        }
+        // tel 3: triool-kwart + triool-achtste, exact (stapinvoer)
+        notes.push(NoteEv::anoniem(67, 2.0 * k, 2.0 * k + 2.0 * d));
+        notes.push(NoteEv::anoniem(69, 2.0 * k + 2.0 * d, 3.0 * k));
+        // tel 4: laat aangeslagen akkoord (100 ms) + tel 5: twee slordige achtsten
+        notes.push(NoteEv::anoniem(60, 3.0 * k + 0.1, 4.0 * k));
+        notes.push(NoteEv::anoniem(64, 3.0 * k + 0.1, 4.0 * k));
+        notes.push(NoteEv::anoniem(71, 4.0 * k + 0.09, 4.5 * k));
+        notes.push(NoteEv::anoniem(72, 4.5 * k + 0.1, 5.0 * k));
+        let (q, triolen) = quantize_notes(&notes, 90.0, 12, 4);
+        assert_eq!(triolen, vec![(1, 1), (2, 1)], "{:?}", q.iter().map(|n| (n.midi, n.start, n.end)).collect::<Vec<_>>());
+        let pos: Vec<(u8, u64, u64)> = q.iter().map(|n| (n.midi, n.start, n.end)).collect();
+        assert_eq!(&pos[1..4], &[(62, 12, 16), (64, 16, 20), (65, 20, 24)]);
+        assert_eq!(&pos[4..6], &[(67, 24, 32), (69, 32, 36)]);
+        // Binair: de late noten komen een zestiende (3 eenheden) later te staan.
+        assert_eq!((pos[6].1, pos[8].1, pos[9].1), (39, 51, 57));
+    }
+
+    /// Een triooltel komt in de MusicXML met 3:2 en een haak; zonder triolen
+    /// blijven de divisions het gebruikersraster.
+    #[test]
+    fn triool_in_musicxml_met_haak_en_divisions() {
+        let mut o = opts();
+        o.quantize = 4;
+        let st = staf(vec![NoteEv::anoniem(60, 0.0, 1.0 / 3.0), NoteEv::anoniem(62, 1.0 / 3.0, 2.0 / 3.0), NoteEv::anoniem(64, 2.0 / 3.0, 1.0), NoteEv::anoniem(65, 1.0, 2.0)]);
+        let xml = build_musicxml(&st, &o).unwrap();
+        assert!(xml.contains("<divisions>12</divisions>"), "{}", xml);
+        assert_eq!(xml.matches("<time-modification><actual-notes>3</actual-notes><normal-notes>2</normal-notes></time-modification>").count(), 3);
+        assert!(xml.contains("<duration>4</duration><voice>1</voice><type>eighth</type><time-modification>"));
+        assert_eq!(xml.matches("<tuplet type=\"start\" bracket=\"yes\"/>").count(), 1);
+        assert_eq!(xml.matches("<tuplet type=\"stop\"/>").count(), 1);
+        // De kwart erna: gewone kwart van 12 eenheden, en de drie triool-achtsten
+        // krijgen samen één waardestreep.
+        assert!(xml.contains("<duration>12</duration><voice>1</voice><type>quarter</type>"));
+        assert!(xml.contains("<beam number=\"1\">begin</beam>") && xml.contains("<beam number=\"1\">end</beam>"));
+        let zonder = build_musicxml(&staf(vec![NoteEv::anoniem(60, 0.0, 1.0)]), &o).unwrap();
+        assert!(zonder.contains("<divisions>4</divisions>"), "{}", zonder);
+    }
+
+    /// Een noot die een hele triooltel (of meer) van telgrens tot telgrens
+    /// bedekt blijft binair: een liggende halve onder triolen in een andere
+    /// stem wordt geen twee gebonden kwarten (reviewbevinding 0.7.93).
+    #[test]
+    fn knip_in_delen_bedekte_triooltel_blijft_binair() {
+        let niveau: HashMap<u64, u8> = [(1u64, 1u8)].into_iter().collect();
+        let d = |ps: u64, pe: u64| -> Vec<(u64, u64, &'static str, bool, bool)> {
+            knip_in_delen(ps, pe, 12, &niveau).iter().map(|x| (x.pos, x.len, x.type_name, x.dotted, x.tuplet)).collect()
+        };
+        assert_eq!(d(0, 24), vec![(0, 24, "half", false, false)]);
+        assert_eq!(d(12, 36), vec![(12, 24, "half", false, false)]);
+        // Gedeeltelijk in de triooltel: wél knippen.
+        assert_eq!(d(0, 20), vec![(0, 12, "quarter", false, false), (12, 8, "quarter", false, true)]);
+        assert_eq!(d(16, 48), vec![(16, 8, "quarter", false, true), (24, 24, "half", false, false)]);
+        let n0: HashMap<u64, u8> = [(0u64, 1u8)].into_iter().collect();
+        let x: Vec<(u64, u64, &str, bool)> = knip_in_delen(0, 18, 12, &n0).iter().map(|x| (x.pos, x.len, x.type_name, x.dotted)).collect();
+        assert_eq!(x, vec![(0, 18, "quarter", true)]);
+        // Twee stemmen: halve in stem 2 onder triool-achtsten in stem 1.
+        let mut o = opts();
+        o.quantize = 4;
+        let mut notes = vec![NoteEv::anoniem(48, 0.0, 2.0)];
+        notes[0].voice = 2;
+        notes.push(NoteEv::anoniem(60, 0.0, 1.0));
+        for (i, m) in [62u8, 64, 65].iter().enumerate() { notes.push(NoteEv::anoniem(*m, 1.0 + i as f64 / 3.0, 1.0 + (i + 1) as f64 / 3.0)); }
+        let xml = build_musicxml(&staf(notes), &o).unwrap();
+        assert!(xml.contains("<step>C</step><octave>3</octave></pitch><duration>24</duration><voice>2</voice><type>half</type>"), "{}", xml);
+        assert!(!xml.contains("<octave>3</octave></pitch><duration>24</duration><tie"), "{}", xml);
+    }
+
+    /// Aanwijzingen ronden op dezelfde stap als de noten: zonder triolen op
+    /// het gebruikersraster, zodat de uitvoer die van vóór 0.7.93 blijft.
+    #[test]
+    fn aanwijzing_rondt_op_gebruikersraster() {
+        let mut st = staf(vec![NoteEv::anoniem(60, 0.0, 0.5), NoteEv::anoniem(62, 0.5, 1.0), NoteEv::anoniem(64, 1.0, 2.0)]);
+        st[0].marks.push(StaffMark { start_sec: 0.6, kind: TextKind::Expressive, text: "dolce".into(), placement: Placement::Above });
+        let o = opts();
+        let xml = build_musicxml(&st, &o).unwrap();
+        assert!(xml.contains("<words>dolce</words></direction-type></direction>\n      <note><pitch><step>D</step>"), "{}", xml);
+        let qs = quantize_score(&st, &o);
+        assert_eq!(qs.staves[0].marks[0].pos, 6);
     }
 
     #[test]
@@ -2473,13 +2811,13 @@ mod tests {
             NoteEv { midi: 60, start_sec: 0.0, end_sec: 1.0, id: Some(1), hand: None, voice: 1, lyrics: Vec::new(), articulations: Vec::new(), spelling: None },
             NoteEv { midi: 60, start_sec: 0.0, end_sec: 2.0, id: Some(2), hand: None, voice: 1, lyrics: Vec::new(), articulations: Vec::new(), spelling: None },
         ];
-        let q = quantize_notes(&notes, 60.0, 4, 100);
+        let (q, _) = quantize_notes(&notes, 60.0, 12, 4);
         assert_eq!(q.len(), 2);
         let chords = group_chords(&q);
         assert_eq!(chords.len(), 1);
         assert_eq!(chords[0].midis(), vec![60]);
         // Eén notenkop met het langste einde (wat klinkt is de vereniging).
-        assert_eq!(chords[0].end, 8);
+        assert_eq!(chords[0].end, 24);
     }
 
     #[test]
@@ -2646,11 +2984,12 @@ mod tests {
 
     #[test]
     fn zes_acht_measure_len_en_drie_halve() {
-        assert_eq!(raster_en_maatlengte(4, 6, 8), (4, 12));
-        assert_eq!(raster_en_maatlengte(4, 3, 2), (4, 24));
-        assert_eq!(raster_en_maatlengte(2, 4, 4), (2, 8));
+        // Fijn raster (0.7.93): drie eenheden per gebruikersrastereenheid.
+        assert_eq!(raster_en_maatlengte(4, 6, 8), (12, 36));
+        assert_eq!(raster_en_maatlengte(4, 3, 2), (12, 72));
+        assert_eq!(raster_en_maatlengte(2, 4, 4), (6, 24));
         // /8 eist minstens een achtste als raster.
-        assert_eq!(raster_en_maatlengte(1, 6, 8), (2, 6));
+        assert_eq!(raster_en_maatlengte(1, 6, 8), (6, 18));
         // Onbekende noemer → 4.
         assert_eq!(klem_beat_unit(3), 4);
         let staves = vec![Staff { name: "T".into(), bass_clef: false,
@@ -2868,9 +3207,9 @@ mod tests {
         assert!(xml.contains("<words>dolce</words></direction-type><offset>-2</offset></direction>"));
         // Bekende dynamiek als <dynamics>, onbekende als <words>.
         assert!(xml.contains("<direction placement=\"below\"><direction-type><dynamics><mf/></dynamics></direction-type></direction>"));
-        assert!(xml.contains("<words>cresc.</words>"));
+        assert!(xml.contains("<words>cresc.</words>"), "{}", xml);
         // Oefenletter in de slotrust: offset t.o.v. het maateinde (14 − 16 = −2).
-        assert!(xml.contains("<rehearsal>A</rehearsal></direction-type><offset>-2</offset>"));
+        assert!(xml.contains("<rehearsal>A</rehearsal></direction-type><offset>-2</offset>"), "{}", xml);
         // Maat 2 bestaat door de aanwijzing (24 eenheden → maat 2), escaping klopt.
         assert!(xml.contains("<measure number=\"2\">"));
         assert!(xml.contains("<words>a &amp; b</words>"));
@@ -3166,7 +3505,7 @@ mod tests {
         EditCommand::SetMeter { old: (4, 4), new: (3, 5) }.apply(&mut sc);
         assert_eq!(sc.beat_unit, 4);
         let qs = quantize_score(&score_to_staves(&sc), &options_from_score(&sc));
-        assert_eq!(qs.measure_len, 12);
+        assert_eq!(qs.measure_len, 36);
     }
 
     #[test]

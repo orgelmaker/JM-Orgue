@@ -5,6 +5,37 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.93] - 2026-10-06
+
+### Triolen
+- Het notenschrift kent nu **triolen**: drie noten in de tijd van twee, als
+  achtsten (drie per kwart) of zestienden (drie per achtste), met de haak en
+  het cijfer 3 op het blad.
+- **Inspelen**: per tel kiest het programma zelf tussen het gewone raster en
+  een triool, zoals Finale's "Mix Rhythms". Een triool wint alleen als hij
+  duidelijk beter past dan het raster, dus een gewoon gespeelde tel blijft
+  gewoon. In achtstenmaten (6/8, 9/8) geen triolen.
+- **Stapinvoer en muisinvoer**: de knop **3** in het palet (sneltoets T)
+  maakt van een achtste of zestiende een triool; de invoercursor en het
+  klikraster (ook in klavar) volgen. Kwart-triolen (drie op een halve) kent
+  het blad nog niet; de knop staat dan uit.
+- **MusicXML**: triolen gaan mee naar Finale en MuseScore
+  (`time-modification` en `tuplet`); bij openen worden triolen van achtsten
+  en zestienden exact gelezen, andere groepen (kwintolen, kwart-triolen,
+  triolen in een achtstenmaat) blijven benaderd, met de bekende melding.
+- **Klavar** zet een 3 naast de balk bij een triooltel.
+- Onder de motorkap rekent het blad nu op een drie keer zo fijn raster;
+  partituren zonder triolen worden byte voor byte als voorheen geschreven.
+
+### Schuif Ritme weer in de kopbalk
+- De schuif heet weer **Ritme** (los ↔ strak) en staat weer in de kopbalk
+  naast Opname en Tempo, in plaats van op het tabblad Balken & stemmen. Hij
+  bepaalt hoe streng gelijktijdigheid wordt genomen: strak = alleen noten
+  binnen 40 ms vormen één akkoord, los = tot een halve rastereenheid. De
+  notenwaarden zelf volgen het raster.
+- De tip bij Bestand die nog naar de oude schuif verwees is bijgewerkt.
+- De knop **Noteren** op de speeltafel draagt geen alfa-aanduiding meer.
+
 ## [0.7.92] - 2026-10-06
 
 ### Notatievenster: de alfa-melding is weg, een nieuw stuk begint bij de balken

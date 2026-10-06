@@ -5,6 +5,8 @@
   import { t } from '../../lib/i18n.js';
   export let stepQuarters = 1;
   export let stepDotted = false;
+  export let stepTriplet = false;
+  export let trioolMogelijk = true;
   export let acc = null;        // 1 | -1 | 'nat' | null
   export let tie = false;
   export let kanHerhaal = false;
@@ -22,6 +24,8 @@
       title={$t('notation.note_value_key').replace('{key}', key)}>{sym}</button>
   {/each}
   <button class="pk" class:active={stepDotted} on:click={() => doe('toggleDot')} title={$t('notation.dotted_title')}>•</button>
+  <button class="pk" class:active={stepTriplet} disabled={!trioolMogelijk} on:click={() => doe('toggleTriplet')}
+    title={trioolMogelijk ? $t('notation.triplet_title') : $t('notation.triplet_unavailable')}>3</button>
   <span class="scheiding"></span>
   <button class="pk" on:click={() => doe('rest')} disabled={!stepMode} title={$t('notation.rest_title')}>𝄽</button>
   <button class="pk" on:click={() => doe('repeat')} disabled={!stepMode || !kanHerhaal} title={$t('notation.repeat_last_title')}>R</button>

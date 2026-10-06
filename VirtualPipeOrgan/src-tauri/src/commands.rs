@@ -5029,7 +5029,7 @@ pub fn notation_split_chord_to_voices(state: State<AppState>, app: tauri::AppHan
         // Hetzelfde akkoordvenster als het blad: effectief raster en de schuif.
         let (q_eff, _) = crate::notation::raster_en_maatlengte(sc.quantize, sc.beats_per_bar, sc.beat_unit);
         let bpm = if sc.bpm.is_finite() && sc.bpm >= 20.0 && sc.bpm <= 300.0 { sc.bpm } else { 90.0 };
-        let venster_us = (crate::notation::akkoord_venster_sec(bpm, q_eff, sc.tolerance_pct) * 1_000_000.0).round() as u64;
+        let venster_us = (crate::notation::akkoord_venster_sec(bpm, q_eff / crate::notation::FIJN, sc.tolerance_pct) * 1_000_000.0).round() as u64;
         let items = crate::notation::verdeel_akkoord_in_stemmen(&noten, venster_us);
         let cmd = crate::notation::EditCommand::SetVoice { items };
         if let Some(inv) = cmd.apply(sc) { sc.push_undo(inv); }
