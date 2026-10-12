@@ -720,6 +720,18 @@ pub enum SampleSource {
     },
 }
 
+/// Pre-geladen attack- en release-klikbuffers voor één register (0.7.99).
+/// Elk veld is None als die set die kant van de klik niet heeft.
+#[derive(Debug, Clone)]
+pub struct StopClickBuffers {
+    pub attack_l: Option<Arc<Vec<f32>>>,
+    pub attack_r: Option<Arc<Vec<f32>>>,
+    pub attack_rate: f64, // bron-SR / output-SR
+    pub release_l: Option<Arc<Vec<f32>>>,
+    pub release_r: Option<Arc<Vec<f32>>>,
+    pub release_rate: f64,
+}
+
 /// Audio command sent to the audio thread
 #[derive(Debug, Clone)]
 pub enum AudioCommand {
@@ -848,6 +860,12 @@ pub enum AudioCommand {
     SetBlowerActive(bool),
     /// Speelgoedregister aan of uit (0.7.98): per naam, bv. "Cymbelstern".
     SetToyActive { name: String, active: bool },
+    /// Register-klikgeluiden (0.7.99): per internal_stop_id een paar
+    /// (attack-sample, release-sample) + de bron-samplerate per paar.
+    RegisterStopClicks(Arc<HashMap<u32, StopClickBuffers>>),
+    /// Speel de registerklik voor deze stop af — attack bij aanzetten,
+    /// release bij uitzetten. Negeert onbekende stop_id's.
+    PlayStopClick { internal_stop_id: u32, is_attack: bool },
     /// Clear all samples
     ClearSamples,
     /// Shutdown
@@ -3800,6 +3818,9 @@ fn run_audio_thread(
     // de loader. De engine werkt stand-alone — niet via de voice-pool — en
     // wordt in de output-mix opgeteld ná alle registervoices, voor master_gain.
     let mut bg_engine = crate::background_sounds::BackgroundEngine::new();
+    // Register-klikbuffers (0.7.99): per internal_stop_id een paar
+    // (attack, release). Lege map = de sampleset heeft geen klikken.
+    let mut stop_click_buffers: Arc<HashMap<u32, StopClickBuffers>> = Arc::new(HashMap::new());
     let mut release_spawn_scratch: Vec<PlayingVoice> = Vec::with_capacity(32);
     // RAM-plafond op volledig geladen samples. Zonder plafond groeide het
     // geheugen tijdens lang spelen onbegrensd (elke gespeelde pijp + release
@@ -4215,6 +4236,34 @@ fn run_audio_thread(
                     AudioCommand::SetToyActive { name, active } => {
                         bg_engine.set_toy(&name, active);
                         info!("Speelgoedregister '{}': {}", name, if active { "aan" } else { "uit" });
+                    }
+                    AudioCommand::RegisterStopClicks(map) => {
+                        let n = map.len();
+                        stop_click_buffers = map;
+                        if n > 0 {
+                            info!("Registermechaniek: {} stops met klikgeluiden geladen", n);
+                        }
+                    }
+                    AudioCommand::PlayStopClick { internal_stop_id, is_attack } => {
+                        if let Some(buf) = stop_click_buffers.get(&internal_stop_id) {
+                            let (data_l, data_r, rate) = if is_attack {
+                                (buf.attack_l.clone(), buf.attack_r.clone(), buf.attack_rate)
+                            } else {
+                                (buf.release_l.clone(), buf.release_r.clone(), buf.release_rate)
+                            };
+                            if let Some(l) = data_l {
+                                bg_engine.fire_one_shot(crate::background_sounds::BackgroundVoice {
+                                    kind: vpo_sampler::grandorgue::BackgroundSoundKind::Ambient,
+                                    name: String::new(),
+                                    data_l: l,
+                                    data_r,
+                                    rate,
+                                    // Register-klik moet duidelijk hoorbaar zijn,
+                                    // maar niet overheersend; -6 dB voelt juist.
+                                    voice_gain: 10f32.powf(-6.0 / 20.0),
+                                });
+                            }
+                        }
                     }
                     AudioCommand::NoteOff { stop_id, pipe_num } => {
                         // Echte release-samples (opgenomen kerkakoestiek): staan

@@ -5,6 +5,26 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.99] - 2026-10-12
+
+### Registermechaniek: het klikken van registers
+- Sampleset-makers nemen vaak het klikken van registers op — het geluid
+  dat je hoort als een trekker aan of uit gaat. JM-Orgue speelt dat nu bij
+  elke registerwissel af: één klik bij aanzetten, een andere bij uitzetten.
+  Dat geeft het mechanische gevoel van een echt orgel.
+- Hauptwerk-import: de ranks "Stop action noises Attack/Release" worden
+  gekoppeld aan de registers via `ControllingSwitchID`. Nitra heeft voor
+  elk van zijn 30 registers een attack- en release-geluid.
+- Audio-engine: de BackgroundEngine krijgt een one-shot-lijst voor
+  eenmalige geluiden. Afspeelde one-shots ruimen zichzelf op na elke
+  buffer. Tot 32 tegelijk (preset-wissels met veel registers).
+- Volume volgt de bijgeluiden-schuif. Klikken worden standaard op −6 dB
+  gespeeld; afgebakende volume-tweaks komen later.
+- Nog niet in deze versie: GrandOrgue-import voor de ruisstops
+  "Stop attack noise {name}" / "Stop release noise {name}" (die zijn er
+  wel in de Friesach-testset); dat volgt in een vervolg.
+- Nieuwe test: `one_shot_speelt_eenmaal_en_wordt_opgeruimd`.
+
 ## [0.7.98] - 2026-10-12
 
 ### Speelgoedregisters: Cymbelstern, Vogelsang, Cuculus

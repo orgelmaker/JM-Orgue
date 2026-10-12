@@ -65,6 +65,10 @@ pub(crate) struct ActiveVoice {
 /// Beheert alle doorlopende achtergrondgeluiden. Leeft in de audio-thread.
 pub(crate) struct BackgroundEngine {
     voices: Vec<ActiveVoice>,
+    /// Eenmalige geluiden (0.7.99): register-klikken bij aan/uit, één keer
+    /// afspelen en dan weg. Verzameld na elke buffer: afgespeelde voices
+    /// worden eruit gegooid.
+    one_shots: Vec<ActiveVoice>,
     /// Multiplicatieve master voor alle bijgeluiden samen; wordt gevoed door
     /// de UI-schuif. 0.0 = helemaal uit, 1.0 = volledig; eventueel >1.0.
     pub global_gain: f32,
@@ -76,11 +80,30 @@ impl BackgroundEngine {
     pub fn new() -> Self {
         Self {
             voices: Vec::new(),
+            one_shots: Vec::new(),
             // Standaard een beetje zacht, zodat de blower niet overheerst
             // als een organist voor het eerst een set met motor-geluid laadt.
             global_gain: 0.3,
             blower_active: true,
         }
+    }
+
+    /// Speel een registermechaniek-klik eenmalig af (0.7.99). De voice wordt
+    /// toegevoegd aan de one-shot-lijst en vanzelf opgeruimd wanneer hij
+    /// doorlopen is. Geen fade-in: een klik hoort meteen te starten.
+    pub fn fire_one_shot(&mut self, voice: BackgroundVoice) {
+        // Max 32 tegelijk; bij een preset-wissel van 20 registers slaan we
+        // niets over, maar als de wachtrij ophoopt droppen we de oudste.
+        if self.one_shots.len() >= 32 {
+            self.one_shots.remove(0);
+        }
+        let voice_g = voice.voice_gain * self.global_gain;
+        self.one_shots.push(ActiveVoice {
+            target_gain: 1.0,
+            current_gain: voice_g, // meteen op volle gain, geen fade
+            voice,
+            pos: 0.0,
+        });
     }
 
     /// Vervang alle voices door de nieuwe set (orgelwissel of eerste load).
@@ -103,6 +126,7 @@ impl BackgroundEngine {
     /// Alle voices wissen (bv. bij orgel-ontladen).
     pub fn clear(&mut self) {
         self.voices.clear();
+        self.one_shots.clear();
     }
 
     /// Motor aan/uit zetten; blower-voices faden in of uit.
@@ -136,7 +160,7 @@ impl BackgroundEngine {
     /// Zijn er voices die geluid produceren? Zo niet, dan kan de audio-
     /// thread de mix-stap overslaan.
     pub fn is_actief(&self) -> bool {
-        !self.voices.is_empty() && self.global_gain > 1e-6
+        (!self.voices.is_empty() || !self.one_shots.is_empty()) && self.global_gain > 1e-6
     }
 
     /// Meng direct in de INTERLEAVED output van cpal: elk frame bestaat uit
@@ -155,13 +179,38 @@ impl BackgroundEngine {
             data[base] += l;
             if channels > 1 { data[base + 1] += r; }
         }
+        // Afgespeelde one-shots opruimen (0.7.99): pos is doorgaans ≥ len.
+        self.one_shots.retain(|v| v.pos < v.voice.data_l.len() as f64);
     }
 
-    /// Genereer één (L, R)-paar en schuif de voices één stap op.
+    /// Genereer één (L, R)-paar en schuif de voices één stap op. Mixt de
+    /// doorlopende voices én de actieve one-shots samen.
     fn volgende_sample(&mut self) -> (f32, f32) {
         let gg = self.global_gain;
         let mut out_l = 0.0f32;
         let mut out_r = 0.0f32;
+        // One-shots: eenmalig afspelen tot `pos >= len`. Opruiming daarvan
+        // gebeurt na elke buffer in `mix_interleaved`.
+        for v in &mut self.one_shots {
+            let len_l = v.voice.data_l.len();
+            if len_l == 0 { continue; }
+            let rate = v.voice.rate;
+            if v.pos < len_l as f64 {
+                let p = v.pos;
+                let p0 = p.floor() as usize;
+                if p0 >= len_l { v.pos = len_l as f64; continue; }
+                let p1 = (p0 + 1).min(len_l - 1);
+                let frac = (p - p.floor()) as f32;
+                let sl = v.voice.data_l[p0] * (1.0 - frac) + v.voice.data_l[p1] * frac;
+                let sr = match v.voice.data_r.as_ref() {
+                    Some(r) if r.len() > p1 => r[p0] * (1.0 - frac) + r[p1] * frac,
+                    _ => sl,
+                };
+                out_l += sl * v.current_gain;
+                out_r += sr * v.current_gain;
+                v.pos += rate;
+            }
+        }
         for v in &mut self.voices {
             let len_l = v.voice.data_l.len();
             if len_l == 0 { continue; }
@@ -300,6 +349,29 @@ mod tests {
         let mut r3 = vec![0.0; 20_000];
         e.mix_stereo(&mut l3, &mut r3);
         assert!(l3[19_999].abs() < 1e-3, "toy moest uit zijn: {}", l3[19_999]);
+    }
+
+    #[test]
+    fn one_shot_speelt_eenmaal_en_wordt_opgeruimd() {
+        let mut e = BackgroundEngine::new();
+        e.global_gain = 1.0;
+        e.fire_one_shot(BackgroundVoice {
+            kind: BackgroundSoundKind::Ambient,
+            name: "klik".into(),
+            data_l: Arc::new(vec![0.5; 100]),
+            data_r: None,
+            rate: 1.0,
+            voice_gain: 1.0,
+        });
+        // Eén buffer van 100 samples is net genoeg om de klik af te spelen.
+        let mut data = vec![0.0f32; 200]; // 100 frames × 2 ch
+        e.mix_interleaved(&mut data, 0, 100, 2);
+        // Er zou geluid moeten zijn in de eerste 100 frames.
+        assert!(data[0] > 0.1, "sample 0: {}", data[0]);
+        // Daarna is de one-shot op; nog een buffer mixen levert niets meer op.
+        let mut data2 = vec![0.0f32; 200];
+        e.mix_interleaved(&mut data2, 0, 100, 2);
+        assert!(data2.iter().all(|&s| s == 0.0), "one-shot moest opgeruimd zijn");
     }
 
     #[test]

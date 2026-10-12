@@ -938,6 +938,53 @@ pub fn get_listening_axis(state: State<AppState>) -> Vec<String> {
 // de audio-engine. Motor-knop en volumeschuif staan los van de registratie.
 // ========================================================================
 
+/// Laad de registermechaniek-WAV's (0.7.99) en stuur ze als klaar-om-te-
+/// spelen samples naar de audio-engine. Een lege map wist voorgaande klikken.
+fn laad_en_stuur_register_mechaniek(
+    state: &AppState,
+    clicks: &std::collections::HashMap<u32, vpo_sampler::grandorgue::StopActionClickDef>,
+) {
+    use crate::audio::StopClickBuffers;
+    let output_sr = state.audio_player.read().as_ref()
+        .map(|p| *p.sample_rate.read()).unwrap_or(48_000);
+    let mut buf_map: std::collections::HashMap<u32, StopClickBuffers> = std::collections::HashMap::new();
+    for (stop_id, def) in clicks {
+        let (attack_l, attack_r, attack_rate) = match def.attack.as_ref() {
+            Some(p) => match vpo_sampler::loader::load_wav(p) {
+                Ok(sd) => {
+                    let rate = (sd.sample_rate as f64 / output_sr as f64).max(0.01);
+                    (Some(std::sync::Arc::new(sd.data)),
+                     sd.right.map(std::sync::Arc::new), rate)
+                }
+                Err(e) => {
+                    warn!("Register-klik (attack) niet geladen voor stop {}: {} ({:?})", stop_id, e, p);
+                    (None, None, 1.0)
+                }
+            },
+            None => (None, None, 1.0),
+        };
+        let (release_l, release_r, release_rate) = match def.release.as_ref() {
+            Some(p) => match vpo_sampler::loader::load_wav(p) {
+                Ok(sd) => {
+                    let rate = (sd.sample_rate as f64 / output_sr as f64).max(0.01);
+                    (Some(std::sync::Arc::new(sd.data)),
+                     sd.right.map(std::sync::Arc::new), rate)
+                }
+                Err(e) => {
+                    warn!("Register-klik (release) niet geladen voor stop {}: {} ({:?})", stop_id, e, p);
+                    (None, None, 1.0)
+                }
+            },
+            None => (None, None, 1.0),
+        };
+        buf_map.insert(*stop_id, StopClickBuffers {
+            attack_l, attack_r, attack_rate,
+            release_l, release_r, release_rate,
+        });
+    }
+    state.send_audio_command(AudioCommand::RegisterStopClicks(std::sync::Arc::new(buf_map)));
+}
+
 /// Laad de bijgeluiden-WAV's van `defs` en stuur ze als loop-voices naar de
 /// audio-engine. Een lege `defs` wist voorgaande bijgeluiden (orgelwissel).
 fn laad_en_stuur_bijgeluiden(state: &AppState, defs: &[vpo_sampler::grandorgue::BackgroundSoundDef]) {
@@ -3167,6 +3214,10 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
             // Vec wist eerdere bijgeluiden uit (bij orgelwissel), dus altijd
             // sturen, ook wanneer er niets gevonden is.
             laad_en_stuur_bijgeluiden(state, &bg);
+            // Registermechaniek (0.7.99): klik-WAV's per stop vooruit laden
+            // in de audio-engine. Altijd sturen (ook leeg), zodat de klikken
+            // van een vorig orgel niet blijven liggen.
+            laad_en_stuur_register_mechaniek(state, &definition.stop_action_clicks);
             bg.into_iter().map(|b| BackgroundSoundDto {
                 kind: match b.kind {
                     vpo_sampler::grandorgue::BackgroundSoundKind::Blower => "blower".into(),
@@ -3549,7 +3600,7 @@ pub fn set_stop(state: State<AppState>, stop_id: String, active: bool) -> Result
 /// door de test-API en de afstandsbediening). Werkt de DTO-vlag, de drawn-set
 /// en de klinkende stemmen bij.
 pub fn toggle_stop_inner(state: &AppState, stop_id: &str) -> Result<bool, String> {
-    let drawn = {
+    let (drawn, internal_id) = {
         let mut organ = state.loaded_organ_info.write();
         let Some(ref mut o) = *organ else {
             return Err(format!("Stop not found: {}", stop_id));
@@ -3558,7 +3609,7 @@ pub fn toggle_stop_inner(state: &AppState, stop_id: &str) -> Result<bool, String
         for division in &mut o.divisions {
             if let Some(stop) = division.stops.iter_mut().find(|s| s.id == stop_id) {
                 stop.drawn = !stop.drawn;
-                found = Some(stop.drawn);
+                found = Some((stop.drawn, stop.internal_stop_id));
                 break;
             }
         }
@@ -3568,6 +3619,12 @@ pub fn toggle_stop_inner(state: &AppState, stop_id: &str) -> Result<bool, String
         }
     }; // organ-write-lock vrijgeven vóór sync (die neemt zelf read-locks)
 
+    // Registermechaniek (0.7.99): klik bij aan of uit. Negeert zichzelf stil
+    // wanneer de sampleset geen klik heeft voor deze stop.
+    state.send_audio_command(AudioCommand::PlayStopClick {
+        internal_stop_id: internal_id,
+        is_attack: drawn,
+    });
     state.set_stop_drawn(stop_id, drawn);
     // Handmatig omgezet → geen trede-claim meer (zie note_manual_change).
     state.note_manual_change(stop_id);

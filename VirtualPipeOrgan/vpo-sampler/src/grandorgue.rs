@@ -52,6 +52,21 @@ pub struct OrganDefinition {
     /// Hauptwerk vult het hier omdat zijn blower/ambient-pijpen op switches
     /// zitten en nooit via een Stop binnenkomen.
     pub extra_bijgeluiden: Vec<BackgroundSoundDef>,
+    /// Register-klikgeluiden (0.7.99): voor elke stop een optioneel attack-
+    /// (bij aanzetten) en release-geluid (bij uitzetten), met het stop-ID als
+    /// sleutel. Hauptwerk-sets hebben dit in de ranks "Stop action noises
+    /// Attack/Release" op pijpen met `ControllingPalletSwitchID` = de
+    /// `ControllingSwitchID` van die stop. Leeg = de set heeft geen
+    /// register-klikken.
+    pub stop_action_clicks: std::collections::HashMap<u32, StopActionClickDef>,
+}
+
+/// Pad naar het attack- en release-geluid van één registerschakelaar. Beide
+/// zijn optioneel: sommige sets leveren alleen attack-geluiden.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct StopActionClickDef {
+    pub attack: Option<std::path::PathBuf>,
+    pub release: Option<std::path::PathBuf>,
 }
 
 /// Een doorlopend achtergrondgeluid dat buiten de registratie om klinkt
@@ -558,6 +573,7 @@ impl OdfParser {
             tremulants,
             couplers,
             extra_bijgeluiden: Vec::new(),
+            stop_action_clicks: std::collections::HashMap::new(),
         })
     }
 

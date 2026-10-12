@@ -816,7 +816,65 @@ fn build_definition(
             &pipes, &pipes_by_rank, &sample_file, &pkg_dirs,
             &layers_of_pipe, &sample_of_layer, &extract_objects(xml, "Switch"), &rank_name,
         ),
+        stop_action_clicks: verzamel_hw_stop_action_clicks(
+            &pipes, &sample_file, &pkg_dirs,
+            &layers_of_pipe, &sample_of_layer, &stops, &rank_name,
+        ),
     })
+}
+
+/// Register-klikgeluiden uit een HW-definitie (0.7.99). Nitra heeft de ranks
+/// "Stop action noises Attack" (rank 81 etc.) en "Stop action noises
+/// Release" met per registerschakelaar één pijp. Deze helper verzamelt per
+/// Stop-id het attack- en release-pad.
+fn verzamel_hw_stop_action_clicks(
+    pipes: &[FieldMap],
+    sample_file: &std::collections::HashMap<u32, (u32, String)>,
+    pkg_dirs: &std::collections::HashMap<u32, std::path::PathBuf>,
+    layers_of_pipe: &std::collections::HashMap<u32, Vec<(u32, u32)>>,
+    sample_of_layer: &std::collections::HashMap<u32, u32>,
+    stops: &[FieldMap],
+    rank_name: &std::collections::HashMap<u32, String>,
+) -> std::collections::HashMap<u32, crate::grandorgue::StopActionClickDef> {
+    use crate::grandorgue::StopActionClickDef;
+    let resolve_sample = |sample_id: u32| -> Option<std::path::PathBuf> {
+        let (pkg, fname) = sample_file.get(&sample_id)?;
+        let dir = pkg_dirs.get(pkg)?;
+        Some(dir.join(fname.replace('\\', "/")))
+    };
+    // ControllingSwitchID → stop_id (voor de koppeling vanuit de pijp op de
+    // registerschakelaar terug naar de stop die we gaan tonen).
+    let mut switch_to_stop: std::collections::HashMap<u32, u32> = std::collections::HashMap::new();
+    for s in stops {
+        if let (Some(stop_id), Some(sw_id)) = (
+            s.get_u32("StopID"), s.get_u32("ControllingSwitchID")
+        ) {
+            switch_to_stop.insert(sw_id, stop_id);
+        }
+    }
+    let mut uit: std::collections::HashMap<u32, StopActionClickDef> = std::collections::HashMap::new();
+    for p in pipes {
+        let Some(sw_id) = p.get_u32("ControllingPalletSwitchID") else { continue };
+        let Some(stop_id) = switch_to_stop.get(&sw_id) else { continue };
+        let rid = p.get_u32("RankID").unwrap_or(0);
+        let rname = rank_name.get(&rid).map(|n| n.to_lowercase()).unwrap_or_default();
+        // De rank-naam zegt of het attack of release is.
+        let is_attack = rname.contains("stop action") && rname.contains("attack");
+        let is_release = rname.contains("stop action") && rname.contains("release");
+        if !is_attack && !is_release { continue; }
+        let Some(pid) = p.get_u32("PipeID") else { continue };
+        let Some(layers) = layers_of_pipe.get(&pid) else { continue };
+        let Some((_, lid)) = layers.first() else { continue };
+        let Some(sid) = sample_of_layer.get(lid) else { continue };
+        let Some(path) = resolve_sample(*sid) else { continue };
+        let e = uit.entry(*stop_id).or_insert_with(|| StopActionClickDef { attack: None, release: None });
+        if is_attack && e.attack.is_none() { e.attack = Some(path); }
+        else if is_release && e.release.is_none() { e.release = Some(path); }
+    }
+    if !uit.is_empty() {
+        info!("Hauptwerk register-klikken: {} stops met attack/release-mechaniek", uit.len());
+    }
+    uit
 }
 
 /// Pijpen op switches die geen klaviertoets zijn (0.7.97): dat zijn de
