@@ -5,6 +5,31 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.95] - 2026-10-12
+
+### Luisterpositie-schuif in de werkbalk
+- Een sampleset met meer opnameposities (bijvoorbeeld dichtbij, voor de kerk
+  en achter in de kerk) toont nu bovenaan het orgelscherm één schuif
+  **Luisterpositie** die soepel tussen die posities overblendt. Links staat
+  u bij het orgel, rechts helemaal achter in de kerk. Verborgen bij
+  samplesets met één positie.
+- Alle posities worden standaard geladen; geen vinkjes meer, geen herladen
+  om "ook de rear" aan te zetten. De oude vinkjes blijven in
+  Orgel-instellingen → Perspectieven staan als noodrem voor een krappe pc;
+  een uitgezette positie slaat de schuif over.
+- Mengregel: op een merkstreep klinkt precies één positie; tussen twee
+  buurposities een equal-power crossfade zodat het midden niet in volume
+  terugvalt. De dB-trim per positie in de instellingen blijft gewoon werken.
+- Posities op de as volgen de vaste volgorde dry → close → front → rear →
+  diffuse → micN; onbekende labels achter in documentvolgorde.
+- Per orgel onthouden (nieuw veld `listening_position` in de instellingen,
+  oudere bestanden lezen daar 0.0 = dichtbij, dus geen gedragsverschil voor
+  bestaande orgels).
+- Nieuwe tests voor de as-volgorde, de equal-power crossfade en de
+  merkstreep-regel (7 stuks).
+- Niet in deze release: MIDI-leren van de schuif als CC (komt later, net
+  als de koppeling tussen schuif en galmmix).
+
 ## [0.7.94] - 2026-10-12
 
 ### Hauptwerk: originele pijptoon van vervangen en hergestemde pijpen

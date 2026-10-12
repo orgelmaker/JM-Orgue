@@ -1992,6 +1992,27 @@
     try { laadAllePosities = await invoke('get_load_all_perspectives'); } catch (e) {}
   }
   $: if (organInfo?.id) haalLaadAllePosities();
+
+  // Luisterpositie-schuif (0.7.95, Sweelinq-stijl): één schuif die de geladen
+  // opnameposities overblendt. 0 = bij het orgel, 1 = achter in de kerk.
+  // Wordt per orgel bewaard. De as (de volgorde van posities op de schuif)
+  // komt van de backend en is dry → close → front → rear → diffuse → micN.
+  let luisterPos = 0;
+  let luisterAs = [];
+  async function haalLuisterPos() {
+    try {
+      luisterPos = await invoke('get_listening_position');
+      luisterAs = await invoke('get_listening_axis');
+    } catch (e) { luisterPos = 0; luisterAs = []; }
+  }
+  $: if (organInfo?.id) haalLuisterPos();
+  let luisterTimer = null;
+  function zetLuisterPos(v) {
+    luisterPos = Number(v);
+    invoke('set_listening_position', { pos: luisterPos }).catch(console.error);
+    clearTimeout(luisterTimer);
+    luisterTimer = setTimeout(() => dispatch('refreshMidiMappings'), 400);
+  }
   async function zetLaadAllePosities(on) {
     try {
       perspReloadHint = await invoke('set_load_all_perspectives', { enabled: on });
@@ -5185,6 +5206,22 @@
             {/if}
           </div>
           <div class="panel-toolbar-right">
+            <!-- Luisterpositie-schuif (0.7.95): verborgen bij één opnamepositie
+                 (dan valt er niets te mengen). Van "bij het orgel" (links) naar
+                 "achter in de kerk" (rechts); equal-power crossfade in de
+                 backend. De namen onder de schuif zijn de merkstreepjes. -->
+            {#if luisterAs.length >= 2}
+              <div class="luister-positie" title={$t('toolbar.listen_title')}>
+                <span class="luister-label">{$t('toolbar.listen_near')}</span>
+                <input
+                  type="range" min="0" max="1" step="0.01"
+                  value={luisterPos}
+                  on:input={(e) => zetLuisterPos(e.currentTarget.value)}
+                  aria-label={$t('toolbar.listen_title')}
+                />
+                <span class="luister-label">{$t('toolbar.listen_far')}</span>
+              </div>
+            {/if}
             <button
               class="btn btn-ghost btn-sm panel-layout-btn"
               on:click={passendMaken}

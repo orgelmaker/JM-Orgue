@@ -1450,6 +1450,13 @@ pub struct AppState {
     /// (0.7.47), zodat wisselen ogenblikkelijk is in plaats van een herlaad.
     /// Per orgel bewaard; geldt vanaf de volgende (her)load.
     pub load_all_perspectives: Arc<RwLock<bool>>,
+    /// Luisterpositie-schuif (0.7.95): een getal 0..1 dat tussen de geladen
+    /// opnameposities (dry → close → front → rear → diffuse, in die vaste
+    /// volgorde) overblendt. 0.0 = volledig op de eerste positie (dichtbij),
+    /// 1.0 = volledig op de laatste (verst). Equal-power crossfade tussen de
+    /// twee buurposities, alle andere stilgezet. Op een merkstreep klinkt
+    /// precies één positie. Zie `luisterpositie_toepassen`.
+    pub listening_position: Arc<RwLock<f32>>,
     /// Lagen per (niet-ruis-)stop van het geladen orgel — diagnose (/ranks,
     /// layered_stops), gevuld in beide laadroutes (ook custom sets, waar
     /// organ_definition None/verouderd is).
@@ -1798,6 +1805,7 @@ impl AppState {
             base_couplers: Arc::new(RwLock::new(Vec::new())),
             extra_coupler_ids: Arc::new(RwLock::new(Vec::new())),
             load_all_perspectives: Arc::new(RwLock::new(false)),
+            listening_position: Arc::new(RwLock::new(0.0)),
             rank_summary: Arc::new(RwLock::new(Vec::new())),
         }
     }

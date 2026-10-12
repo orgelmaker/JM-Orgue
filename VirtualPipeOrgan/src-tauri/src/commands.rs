@@ -542,7 +542,17 @@ where
                 p.enabled = s.enabled;
                 p.gain_db = s.gain_db.clamp(-40.0, 12.0);
             }
-            None => p.enabled = primary_seen[i],
+            // Nieuwe orgels (geen opgeslagen voorkeur): alle posities aan,
+            // zodat de luisterpositie-schuif (0.7.95) ze kan mengen. Vóór
+            // 0.7.95 stond alleen de PRIMAIRE positie aan en moest de
+            // gebruiker in Orgel-instellingen vinkjes bijzetten + herladen.
+            // De `primary_seen`-vlag speelt daardoor voor nieuwe orgels geen
+            // rol meer, maar blijft nog relevant voor zeldzame
+            // meer-dan-15-posities-sets (dan is `enabled` tegelijk `loaded`).
+            None => {
+                p.enabled = true;
+                let _ = primary_seen[i];
+            }
         }
     }
     out
@@ -713,9 +723,11 @@ pub fn do_set_perspective_enabled(state: &AppState, name: &str, enabled: bool) -
         // vroeg elke wijziging om een herlaad).
         (slot, gain_db, loaded, list.iter().any(|p| p.enabled && !p.loaded))
     };
+    let _ = (slot, gain_db);                // vallen door naar luisterpositie
     if loaded {
-        let g = if enabled { gain_db } else { PERSPECTIEF_STIL_DB };
-        state.send_audio_command(AudioCommand::SetPerspectiveGain { slot, gain_db: g });
+        // Vanaf 0.7.95 rekent de luisterpositie-schuif de slot-gains uit;
+        // een enable/disable schuift die as en moet de gains dus herbereken.
+        luisterpositie_toepassen(state);
     }
     sync_perspective_dto(state);
     info!("Opnamepositie '{}' {} ({}, herladen nodig: {})", name,
@@ -727,17 +739,15 @@ pub fn do_set_perspective_enabled(state: &AppState, name: &str, enabled: bool) -
 /// Kern: live volume van een perspectief (clamp -40..+12 dB), zonder herlaad.
 pub fn do_set_perspective_gain(state: &AppState, name: &str, gain_db: f32) -> Result<(), String> {
     let g = if gain_db.is_finite() { gain_db.clamp(-40.0, 12.0) } else { 0.0 };
-    let (slot, enabled) = {
+    {
         let mut list = state.perspectives.write();
         let p = list.iter_mut().find(|p| p.name == name)
             .ok_or_else(|| format!("Onbekend perspectief: {}", name))?;
         p.gain_db = g;
-        (p.slot, p.enabled)
-    };
-    // Een uitgeschakelde (maar geladen) positie blijft stil: het schuifje zet
-    // alleen de waarde klaar voor als hij weer aangaat.
-    let te_sturen = if enabled { g } else { PERSPECTIEF_STIL_DB };
-    state.send_audio_command(AudioCommand::SetPerspectiveGain { slot, gain_db: te_sturen });
+    }
+    // Trim-wijziging telt bovenop de crossfade: luisterpositie opnieuw
+    // toepassen om de effectieve slot-gain te sturen.
+    luisterpositie_toepassen(state);
     sync_perspective_dto(state);
     Ok(())
 }
@@ -791,6 +801,120 @@ pub fn set_load_all_perspectives(state: State<AppState>, enabled: bool) -> Resul
 #[tauri::command]
 pub fn get_load_all_perspectives(state: State<AppState>) -> bool {
     *state.load_all_perspectives.read()
+}
+
+// ========================================================================
+// Luisterpositie-schuif (0.7.95, Sweelinq-stijl)
+// ========================================================================
+
+/// Canonieke volgorde-sleutel voor een opnamepositie-label op de luisteras:
+/// dry → close → front → rear → diffuse → micN (nummer) → onbekend
+/// (`u8::MAX`, komt in doc-volgorde achteraan). Overeenkomend met de labels
+/// uit `perspective.rs::detect_perspective`.
+fn luister_as_rang(label: &str) -> u8 {
+    match label.to_lowercase().as_str() {
+        "dry" => 0,
+        "close" => 1,
+        "front" => 2,
+        "rear" => 3,
+        "diffuse" => 4,
+        s if s.starts_with("mic") => 5,
+        _ => u8::MAX,
+    }
+}
+
+/// Indexen in `perspectives` op de as, van dichtbij naar ver, alleen de
+/// geladen en ingeschakelde posities (de rest telt niet mee op de schuif).
+/// Micrangen worden onderling op het nummer gesorteerd; gelijke rangen
+/// behouden de documentvolgorde.
+fn luisteras_indices(persp: &[crate::state::PerspectiveRuntime]) -> Vec<usize> {
+    let mut v: Vec<(u8, u32, usize)> = persp.iter().enumerate()
+        .filter(|(_, p)| p.loaded && p.enabled)
+        .map(|(i, p)| {
+            let rang = luister_as_rang(&p.name);
+            // Micrangen op nummer sorteren: "mic1" vóór "mic10". Overige: 0.
+            let subrang = if rang == 5 {
+                p.name[3..].trim_start_matches(|c: char| !c.is_ascii_digit())
+                    .parse::<u32>().unwrap_or(0)
+            } else { 0 };
+            (rang, subrang, i)
+        })
+        .collect();
+    v.sort_by_key(|(r, s, i)| (*r, *s, *i));
+    v.into_iter().map(|(_, _, i)| i).collect()
+}
+
+/// Equal-power crossfade: lineaire gain voor een positie op index `idx` van de
+/// as (0..N-1), gegeven schuifwaarde `pos` ∈ [0, 1]. Op een merkstreep klinkt
+/// precies één positie (gain = 1); tussen twee buurposities verdeelt de
+/// crossfade sin²+cos²=1. Posities verder dan één segment van `pos`: gain 0.
+fn luister_gain_lineair(pos: f32, idx: usize, n: usize) -> f32 {
+    if n == 0 { return 0.0; }
+    if n == 1 { return 1.0; }
+    let p = pos.clamp(0.0, 1.0);
+    let x = p * (n - 1) as f32;             // positie op de as (0..N-1)
+    let d = (x - idx as f32).abs();
+    if d >= 1.0 { return 0.0; }              // niet-buurpositie
+    let t = 1.0 - d;                         // 1 = op merkstreep, 0 = op buur
+    (t * std::f32::consts::FRAC_PI_2).sin()
+}
+
+/// Stuur per slot de effectieve gain (crossfade × user-trim) naar de audio-
+/// thread, en zet niet-actieve posities op `PERSPECTIEF_STIL_DB`. Wordt vanaf
+/// elke plek aangeroepen die de slot-gain opnieuw moet toepassen: schuif,
+/// enable-toggle, trim-schuif, na een load.
+pub fn luisterpositie_toepassen(state: &AppState) {
+    let pos = state.listening_position.read().clamp(0.0, 1.0);
+    let persp_snapshot: Vec<_> = state.perspectives.read().iter().cloned().collect();
+    let as_idx = luisteras_indices(&persp_snapshot);
+    let n = as_idx.len();
+    // Alle slots eerst stilzetten; actieve posities overschrijven zometeen.
+    for p in &persp_snapshot {
+        state.send_audio_command(AudioCommand::SetPerspectiveGain {
+            slot: p.slot,
+            gain_db: PERSPECTIEF_STIL_DB,
+        });
+    }
+    for (i, &persp_i) in as_idx.iter().enumerate() {
+        let p = &persp_snapshot[persp_i];
+        let lineair = luister_gain_lineair(pos, i, n);
+        let crossfade_db = if lineair < 1e-6 {
+            PERSPECTIEF_STIL_DB
+        } else {
+            20.0 * lineair.log10()
+        };
+        // User-trim komt bovenop, in dB; sommeren = lineair × lineair in de
+        // audiothread, want slot-gain is één scalar.
+        let eff_db = p.gain_db + crossfade_db;
+        state.send_audio_command(AudioCommand::SetPerspectiveGain {
+            slot: p.slot,
+            gain_db: eff_db,
+        });
+    }
+}
+
+/// Zet de luisterpositie-schuif en pas de slot-gains onmiddellijk toe.
+/// `pos` wordt geklemd op [0, 1]. Werkt live, zonder herlaad.
+#[tauri::command]
+pub fn set_listening_position(state: State<AppState>, pos: f32) -> Result<(), String> {
+    let p = if pos.is_finite() { pos.clamp(0.0, 1.0) } else { 0.0 };
+    *state.listening_position.write() = p;
+    luisterpositie_toepassen(&state);
+    Ok(())
+}
+
+/// Huidige luisterpositie (0..1).
+#[tauri::command]
+pub fn get_listening_position(state: State<AppState>) -> f32 {
+    *state.listening_position.read()
+}
+
+/// Namen van de posities op de luisteras in canonieke volgorde: dichtbij
+/// eerst. De UI gebruikt dit voor de merkstreepjes onder de schuif.
+#[tauri::command]
+pub fn get_listening_axis(state: State<AppState>) -> Vec<String> {
+    let persp = state.perspectives.read();
+    luisteras_indices(&persp).into_iter().map(|i| persp[i].name.clone()).collect()
 }
 
 /// Live volume van een perspectief in dB.
@@ -2727,18 +2851,19 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
                 // Laadplan per stop (altijd sturen, ook leeg — vervangt de map
                 // van het vorige orgel) + live gains per perspectief-slot.
                 let _ = player.send_command(crate::audio::AudioCommand::RegisterRankLayout(Arc::new(rank_layout)));
-                for p in &persp_plan {
-                    // Geladen maar uitgeschakeld = stil. Zo kan het aanzetten
-                    // later ogenblikkelijk door alleen de gain te herstellen.
-                    let g = if p.enabled { p.gain_db } else { PERSPECTIEF_STIL_DB };
-                    let _ = player.send_command(crate::audio::AudioCommand::SetPerspectiveGain { slot: p.slot, gain_db: g });
-                }
             }
         }
         for p in persp_plan.iter_mut() {
             p.loaded = alles_laden || p.enabled;
         }
         persp = persp_plan;
+        // Perspectieven vast in state zetten, dan de luisterpositie-schuif
+        // (0.7.95) toepassen: dat stuurt per slot de equal-power-crossfade +
+        // user-trim als één SetPerspectiveGain. Doe dit NA het zetten van
+        // `state.perspectives` zodat `luisterpositie_toepassen` de lijst
+        // van zojuist ziet.
+        *state.perspectives.write() = persp.clone();
+        luisterpositie_toepassen(state);
     }
 
     // GrandOrgue past een tremulant via de WINDCHEST toe; de [Manual]-
@@ -2953,6 +3078,9 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
     // leeg — vervangt die van het vorige orgel).
     *state.perspectives.write() = persp;
     *state.rank_summary.write() = rank_summary;
+    // Luisterpositie (0.7.95) toepassen: equal-power crossfade + user-trim
+    // over de actieve posities. Zie `luisterpositie_toepassen`.
+    luisterpositie_toepassen(state);
 
     // Build stop→division map and register with audio thread
     let stop_div_map = build_stop_division_map(&organ_info.divisions);
@@ -7985,9 +8113,11 @@ pub fn do_load_samples_from_directory_locked(state: &AppState, directory: &str) 
         }
         state.send_audio_command(crate::audio::AudioCommand::RegisterRankLayout(Arc::new(rank_layout)));
         for p in persp.iter_mut() {
-            state.send_audio_command(crate::audio::AudioCommand::SetPerspectiveGain { slot: p.slot, gain_db: p.gain_db });
             p.loaded = p.enabled;
         }
+        // De slot-gains worden hieronder via `luisterpositie_toepassen` gezet,
+        // nadat `state.perspectives` is bijgewerkt (zodat de helper de nieuwe
+        // lijst ziet).
     }
 
     let stop_count: usize = divisions.iter().map(|d| d.stops.len()).sum();
@@ -8039,6 +8169,12 @@ pub fn do_load_samples_from_directory_locked(state: &AppState, directory: &str) 
     // Perspectieven + lagen-samenvatting van dít orgel (ná de reset).
     *state.perspectives.write() = persp;
     *state.rank_summary.write() = rank_summary;
+    // Luisterpositie (0.7.95) toepassen: equal-power crossfade over de
+    // actieve posities, user-trim bovenop. Komt vóór de settings-restore,
+    // dus bij een eerste load zonder opgeslagen keuze gebruikt dit de
+    // default (0.0 = dichtbij); zijn de settings erna gezet, dan roept
+    // `load_organ_from_settings_or_restore` dit opnieuw aan.
+    luisterpositie_toepassen(state);
 
     // Build stop→division map and register with audio thread
     let stop_div_map = build_stop_division_map(&organ_info.divisions);
@@ -8275,6 +8411,13 @@ fn restore_organ_settings(state: &AppState, organ_id: &str) {
     // Alle opnameposities in het geheugen houden (per orgel).
     *state.load_all_perspectives.write() = settings.load_all_perspectives;
 
+    // Luisterpositie-schuif (0.7.95): opgeslagen waarde terugzetten, of 0.0
+    // (dichtstbijzijnde opname) wanneer dit orgel nog geen keuze heeft (ook
+    // de upgrade-situatie vanaf 0.7.94 en eerder). De slot-gains worden
+    // na de registratie van `persp` in `state` ineens goed gezet via
+    // `luisterpositie_toepassen`.
+    *state.listening_position.write() = settings.listening_position.unwrap_or(0.0).clamp(0.0, 1.0);
+
     // Doorlopend klavier (per orgel).
     crate::state::DOORLOPEND_KLAVIER.store(
         settings.continuous_keyboard, std::sync::atomic::Ordering::Relaxed);
@@ -8446,6 +8589,14 @@ fn restore_organ_settings(state: &AppState, organ_id: &str) {
         state.set_remote_layout_mirror(settings.remote_layout.clone());
         info!("Restored remote layout");
     }
+
+    // Luisterpositie-schuif (0.7.95): opgeslagen waarde is al naar
+    // `state.listening_position` geschreven, hierboven. Nu is `state.perspectives`
+    // ook klaar en de slot-gains werden tijdens de load al toegepast met de
+    // DEFAULT (0.0); hier opnieuw toepassen zodat de écht opgeslagen schuif
+    // doorwerkt. Dit stuurt dezelfde SetPerspectiveGain-berichten voor élk slot,
+    // dus geen flikker: enkel een update van gain-waarden.
+    luisterpositie_toepassen(state);
 }
 
 // ============ Library Commands ============
@@ -8965,6 +9116,7 @@ pub fn do_save_organ_settings(state: &AppState, presets: HashMap<String, PresetD
         wind_group_configs,
         perspectives,
         load_all_perspectives: *state.load_all_perspectives.read(),
+        listening_position: Some(*state.listening_position.read()),
         extra_couplers: state.extra_coupler_ids.read().clone(),
         continuous_keyboard: crate::state::DOORLOPEND_KLAVIER.load(std::sync::atomic::Ordering::Relaxed),
         remote_layout,
@@ -9674,8 +9826,11 @@ mod perspective_plan_tests {
     }
 
     #[test]
-    fn zonder_opslag_alleen_primaire_labels_aan() {
-        // SJDL-vorm: front primair, rear/dry extra → alleen front aan.
+    fn zonder_opslag_alle_labels_aan() {
+        // Vanaf 0.7.95 (Sweelinq-stijl): zonder opgeslagen keuze staan ALLE
+        // posities standaard aan, zodat de luisterpositie-schuif ze kan mengen.
+        // Vóór 0.7.95 stond alleen de primaire positie aan en moest de
+        // organist in de instellingen vinkjes bijzetten + herladen.
         let obs = vec![
             ("front".to_string(), true, 56), ("rear".to_string(), false, 56), ("dry".to_string(), false, 56),
             ("front".to_string(), true, 30), ("rear".to_string(), false, 30), ("dry".to_string(), false, 30),
@@ -9683,7 +9838,7 @@ mod perspective_plan_tests {
         let plan = plan_perspectives_from(obs, &[]);
         let names: Vec<&str> = plan.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, vec!["front", "rear", "dry"]);
-        assert_eq!(plan.iter().map(|p| p.enabled).collect::<Vec<_>>(), vec![true, false, false]);
+        assert_eq!(plan.iter().map(|p| p.enabled).collect::<Vec<_>>(), vec![true, true, true]);
         assert_eq!(plan.iter().map(|p| p.slot).collect::<Vec<_>>(), vec![1, 2, 3]);
         assert_eq!(plan[0].pipe_count, 86);
         assert!(plan.iter().all(|p| !p.loaded && p.gain_db == 0.0));
@@ -9699,14 +9854,17 @@ mod perspective_plan_tests {
     }
 
     #[test]
-    fn extra_laag_label_zonder_primair_staat_standaard_uit() {
-        // GO-set met ongelabelde laag 0 en een "(rear)"-rank als extra laag:
-        // rear komt nergens als primair voor → standaard uit (anders dubbel).
+    fn extra_laag_label_zonder_primair_staat_sinds_0795_ook_aan() {
+        // Vóór 0.7.95 stond rear in deze situatie uit om dubbel klinken met
+        // de ongelabelde laag 0 te voorkomen. Vanaf 0.7.95 regelt de
+        // luisterpositie-schuif dat: op pos 0 (dichtbij) is alleen de eerste
+        // positie hoorbaar, dus rear zonder primair klinkt niet dubbel tenzij
+        // de organist naar achteren schuift. Echte ranks zonder label leveren
+        // geen waarneming en dus geen entry.
         let obs = vec![("rear".to_string(), false, 20)];
         let plan = plan_perspectives_from(obs, &[]);
         assert_eq!(plan.len(), 1);
-        assert!(!plan[0].enabled);
-        // Echte ranks zonder label leveren geen waarneming en dus geen entry.
+        assert!(plan[0].enabled);
         let empty = plan_perspectives_from(Vec::<(String, bool, usize)>::new(), &[]);
         assert!(empty.is_empty());
     }
@@ -9732,7 +9890,8 @@ mod perspective_plan_tests {
             tremulant_pipes: vec![],
         });
         let plan = plan_perspectives_custom(&organ, &[]);
-        assert_eq!(plan.iter().map(|p| (p.name.as_str(), p.enabled)).collect::<Vec<_>>(), vec![("Front", true), ("Rear", false)]);
+        // Vanaf 0.7.95: alle posities standaard aan (Sweelinq-stijl).
+        assert_eq!(plan.iter().map(|p| (p.name.as_str(), p.enabled)).collect::<Vec<_>>(), vec![("Front", true), ("Rear", true)]);
         // Stop zonder posities → geen labels.
         let plain = CustomOrgan::new("Plain");
         assert!(plan_perspectives_custom(&plain, &[]).is_empty());
@@ -10379,5 +10538,113 @@ mod afbeeldingsbron_tests {
         assert!(afbeeldingsbron_leesbaar(&go.to_string_lossy(), "organ_file"));
 
         let _ = std::fs::remove_dir_all(&d);
+    }
+}
+
+#[cfg(test)]
+mod luisterpositie_tests {
+    //! Testen voor de luisterpositie-schuif (0.7.95): canonieke volgorde van
+    //! opnameposities op de as, equal-power crossfade, en de merkstreep-regel.
+    use super::*;
+    use crate::state::PerspectiveRuntime;
+
+    fn p(name: &str, slot: u8, enabled: bool, loaded: bool) -> PerspectiveRuntime {
+        PerspectiveRuntime {
+            name: name.into(),
+            enabled, loaded, slot, gain_db: 0.0, pipe_count: 0,
+        }
+    }
+
+    #[test]
+    fn as_rang_volgt_sweelinq_route_van_dichtbij_naar_ver() {
+        // De as loopt van bij het orgel (dry/close) via front naar achter (rear/
+        // diffuse). Afwijkende labels (`micN`) komen daarna, onbekende achter
+        // alles.
+        assert!(luister_as_rang("dry") < luister_as_rang("close"));
+        assert!(luister_as_rang("close") < luister_as_rang("front"));
+        assert!(luister_as_rang("front") < luister_as_rang("rear"));
+        assert!(luister_as_rang("rear") < luister_as_rang("diffuse"));
+        assert!(luister_as_rang("diffuse") < luister_as_rang("mic1"));
+        assert!(luister_as_rang("mic1") < luister_as_rang("onbekend_label"));
+        // Hoofdletters tellen niet mee.
+        assert_eq!(luister_as_rang("Front"), luister_as_rang("front"));
+    }
+
+    #[test]
+    fn indices_sorteren_canoniek_en_slaan_uitgezette_positie_over() {
+        // Documentvolgorde close, rear, front — moet close, front, rear worden.
+        // Een uitgezette positie telt niet mee op de as.
+        let v = vec![
+            p("close", 1, true,  true),
+            p("rear",  2, false, true),  // uit → slaat de schuif over
+            p("front", 3, true,  true),
+            p("niet-geladen", 4, true, false), // niet geladen → telt niet
+        ];
+        let idx = luisteras_indices(&v);
+        let namen: Vec<&str> = idx.iter().map(|&i| v[i].name.as_str()).collect();
+        assert_eq!(namen, vec!["close", "front"]);
+    }
+
+    #[test]
+    fn merkstreep_speelt_een_positie_vol() {
+        // 3 posities, pos = 0.5 = de middelste streep: alleen die klinkt (1.0),
+        // de andere twee staan op lineaire gain 0.
+        let g0 = luister_gain_lineair(0.5, 0, 3);
+        let g1 = luister_gain_lineair(0.5, 1, 3);
+        let g2 = luister_gain_lineair(0.5, 2, 3);
+        assert!(g0.abs() < 1e-6, "{}", g0);
+        assert!((g1 - 1.0).abs() < 1e-6, "{}", g1);
+        assert!(g2.abs() < 1e-6, "{}", g2);
+    }
+
+    #[test]
+    fn eindpunten_zijn_identiek_aan_een_enkele_positie() {
+        // 2 posities, pos = 0.0 = alléén eerste; pos = 1.0 = alléén tweede.
+        assert!((luister_gain_lineair(0.0, 0, 2) - 1.0).abs() < 1e-6);
+        assert!(luister_gain_lineair(0.0, 1, 2).abs() < 1e-6);
+        assert!(luister_gain_lineair(1.0, 0, 2).abs() < 1e-6);
+        assert!((luister_gain_lineair(1.0, 1, 2) - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn equal_power_in_het_midden_blijft_op_vol_vermogen() {
+        // Bij een equal-power crossfade geldt g1² + g2² = 1.
+        for n in 2..=5 {
+            for k in 0..n-1 {
+                // Midden van segment [k, k+1] in de as [0, n-1].
+                let pos = (k as f32 + 0.5) / (n - 1) as f32;
+                let g_links = luister_gain_lineair(pos, k, n);
+                let g_rechts = luister_gain_lineair(pos, k + 1, n);
+                let som = g_links * g_links + g_rechts * g_rechts;
+                assert!((som - 1.0).abs() < 1e-5, "n={} k={} som={}", n, k, som);
+                // Alle andere posities op gain 0.
+                for i in 0..n {
+                    if i != k && i != k + 1 {
+                        assert!(luister_gain_lineair(pos, i, n).abs() < 1e-6,
+                            "n={} k={} i={} nog gain", n, k, i);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn een_positie_blijft_altijd_op_vol_vermogen() {
+        // Zonder keuze (één positie): elke schuifwaarde geeft volle gain.
+        for pos in [0.0, 0.25, 0.5, 0.75, 1.0] {
+            assert!((luister_gain_lineair(pos, 0, 1) - 1.0).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn mic_posities_sorteren_op_nummer() {
+        let v = vec![
+            p("mic10", 1, true, true),
+            p("mic2",  2, true, true),
+            p("mic1",  3, true, true),
+        ];
+        let idx = luisteras_indices(&v);
+        let namen: Vec<&str> = idx.iter().map(|&i| v[i].name.as_str()).collect();
+        assert_eq!(namen, vec!["mic1", "mic2", "mic10"]);
     }
 }

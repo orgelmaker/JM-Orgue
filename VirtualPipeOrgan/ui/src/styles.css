@@ -1129,6 +1129,25 @@ input[type="range"]::-webkit-slider-thumb:hover {
   gap: 0.15rem;
   color: var(--text-muted);
 }
+
+/* Luisterpositie-schuif (0.7.95): van "bij het orgel" naar "achter in de
+   kerk". Vrij smal om in de werkbalk te passen zonder de overige knoppen
+   weg te duwen. */
+.luister-positie {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+}
+.luister-positie input[type="range"] {
+  width: 7rem;
+  margin: 0;
+}
+.luister-label {
+  white-space: nowrap;
+  opacity: 0.85;
+}
 .stop-size-btn {
   min-width: 1.6rem;
   padding: 0.2rem 0.4rem;

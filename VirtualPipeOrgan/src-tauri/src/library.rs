@@ -475,6 +475,13 @@ pub struct OrganSettings {
     /// een herlaad — ten koste van geheugen (ruwweg maal het aantal posities).
     #[serde(default)]
     pub load_all_perspectives: bool,
+    /// Luisterpositie-schuif (0.7.95): 0..1 lineair over de as van geladen
+    /// posities (dry → close → front → rear → diffuse). Bewaard per orgel
+    /// zodat de volgende sessie met dezelfde balans begint. Ontbrekend in
+    /// oudere settings-bestanden = 0.0 (dichtstbijzijnde opname), identiek
+    /// aan het gedrag van vóór 0.7.95.
+    #[serde(default)]
+    pub listening_position: Option<f32>,
     /// Koppels die de sampleset zelf niet heeft en die de organist erbij heeft
     /// gezet (0.7.47): de id's uit de door de app afgeleide koppellijst.
     #[serde(default)]
