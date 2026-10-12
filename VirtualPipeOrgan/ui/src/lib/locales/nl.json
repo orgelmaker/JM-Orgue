@@ -1337,6 +1337,8 @@
     "blower": "motor:",
     "ambient": "ambient:",
     "volume": "Volume",
-    "motor_on": "Motor aan"
+    "motor_on": "Motor aan",
+    "key_action": "Toetsmechaniek (klikkend klavier)",
+    "key_action_reload": "Deze keuze geldt na het opnieuw laden van het orgel."
   }
 }

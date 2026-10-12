@@ -820,7 +820,72 @@ fn build_definition(
             &pipes, &sample_file, &pkg_dirs,
             &layers_of_pipe, &sample_of_layer, &stops, &rank_name,
         ),
+        keyboard_clicks: verzamel_hw_keyboard_clicks(
+            &pipes, &sample_file, &pkg_dirs,
+            &layers_of_pipe, &sample_of_layer, &ranks_xml,
+        ),
     })
+}
+
+/// Toetsmechaniek-geluiden (0.7.102): voor Hauptwerk-sets de ranks "{prefix}
+/// Key action noises Attack" met per toets één pijp. De prefix (bv. "P",
+/// "RP", "HW") komt uit de rank-naam en wordt in de koppel-stap gematcht
+/// aan de divisienaam. Alleen de PRIMAIRE (eerste perspectief) laag wordt
+/// bewaard: toetskliks hebben zelf geen perspectief nodig.
+fn verzamel_hw_keyboard_clicks(
+    pipes: &[FieldMap],
+    sample_file: &std::collections::HashMap<u32, (u32, String)>,
+    pkg_dirs: &std::collections::HashMap<u32, std::path::PathBuf>,
+    layers_of_pipe: &std::collections::HashMap<u32, Vec<(u32, u32)>>,
+    sample_of_layer: &std::collections::HashMap<u32, u32>,
+    ranks_xml: &[FieldMap],
+) -> std::collections::HashMap<(String, u8), std::path::PathBuf> {
+    // Rank-ID → prefix uit "{P/RP/HW …} Key action noises Attack …". Alleen
+    // echte attack-ranks tellen; releases laten we voorlopig buiten (0.7.102
+    // scope: alleen aanslag).
+    let mut rank_prefix: std::collections::HashMap<u32, String> = std::collections::HashMap::new();
+    for r in ranks_xml {
+        let Some(rid) = r.get_u32("RankID") else { continue };
+        let Some(name) = r.get("Name") else { continue };
+        let lower = name.to_lowercase();
+        if !(lower.contains("key action") && lower.contains("attack")) { continue; }
+        // Prefix = alles vóór "Key action". Spaties en volgnummer eraf; de
+        // Hauptwerk-conventie "01. P  Key action …" wordt zo "P".
+        let kop = lower.split("key action").next().unwrap_or("");
+        // Trailing/leading whitespace en nummering ("01. ") eraf.
+        let kop = kop.trim_start_matches(|c: char| c.is_ascii_digit() || c == '.' || c.is_whitespace());
+        let kop = kop.trim();
+        if kop.is_empty() { continue; }
+        rank_prefix.insert(rid, kop.to_uppercase());
+    }
+    let resolve_sample = |sample_id: u32| -> Option<std::path::PathBuf> {
+        let (pkg, fname) = sample_file.get(&sample_id)?;
+        let dir = pkg_dirs.get(pkg)?;
+        Some(dir.join(fname.replace('\\', "/")))
+    };
+    let mut uit: std::collections::HashMap<(String, u8), std::path::PathBuf> = std::collections::HashMap::new();
+    for p in pipes {
+        let Some(rid) = p.get_u32("RankID") else { continue };
+        let Some(prefix) = rank_prefix.get(&rid) else { continue };
+        let Some(note) = p.get_u32("NormalMIDINoteNumber") else { continue };
+        if note > 127 { continue; }
+        let Some(pid) = p.get_u32("PipeID") else { continue };
+        let Some(layers) = layers_of_pipe.get(&pid) else { continue };
+        let Some((_, lid)) = layers.first() else { continue };
+        let Some(sid) = sample_of_layer.get(lid) else { continue };
+        let Some(path) = resolve_sample(*sid) else { continue };
+        // Dedup: close/front/rear-perspectieven van dezelfde toets geven
+        // dezelfde ControllingPalletSwitchID; we pakken één exemplaar.
+        uit.entry((prefix.clone(), note as u8)).or_insert(path);
+    }
+    if !uit.is_empty() {
+        // Prefixen die we gevonden hebben, voor de logregel.
+        let mut prefixen: Vec<&String> = uit.keys().map(|(p, _)| p).collect();
+        prefixen.sort(); prefixen.dedup();
+        info!("Hauptwerk toetsmechaniek: {} toetsklikken op klavier-prefixen {:?}",
+              uit.len(), prefixen);
+    }
+    uit
 }
 
 /// Register-klikgeluiden uit een HW-definitie (0.7.99). Nitra heeft de ranks

@@ -1337,6 +1337,8 @@
     "blower": "blower:",
     "ambient": "ambient:",
     "volume": "Volume",
-    "motor_on": "Motor on"
+    "motor_on": "Motor on",
+    "key_action": "Key action noise (clicking keyboard)",
+    "key_action_reload": "This change takes effect after reloading the organ."
   }
 }

@@ -2057,6 +2057,21 @@
       dispatch('refreshMidiMappings');
     } catch (e) { console.error(e); }
   }
+
+  // Toetsmechaniek (0.7.102): aanslag-klik per toets, standaard uit.
+  let toetsmechaniekAan = false;
+  async function haalToetsmechaniek() {
+    try { toetsmechaniekAan = await invoke('get_toetsmechaniek_aan'); } catch (e) {}
+  }
+  $: if (organInfo?.id) haalToetsmechaniek();
+  let toetsmechHerladen = false;
+  async function zetToetsmechaniek(aan) {
+    toetsmechaniekAan = aan;
+    try {
+      toetsmechHerladen = await invoke('set_toetsmechaniek_aan', { aan });
+      dispatch('refreshMidiMappings');
+    } catch (e) { console.error(e); }
+  }
   async function zetLaadAllePosities(on) {
     try {
       perspReloadHint = await invoke('set_load_all_perspectives', { enabled: on });
@@ -6110,6 +6125,14 @@
                   <input type="checkbox" checked={motorAan} on:change={(e) => zetMotor(e.target.checked)} />
                   <span>{$t('background.motor_on')}</span>
                 </label>
+              {/if}
+              <label style="display: flex; align-items: center; gap: 0.4rem; margin-top: 0.4rem; font-size: 0.78rem;">
+                <input type="checkbox" checked={toetsmechaniekAan}
+                  on:change={(e) => zetToetsmechaniek(e.target.checked)} />
+                <span>{$t('background.key_action')}</span>
+              </label>
+              {#if toetsmechHerladen}
+                <p style="margin: 0.2rem 0 0; font-size: 0.68rem; color: var(--warning, #d9a441); line-height: 1.35;">{$t('background.key_action_reload')}</p>
               {/if}
             </div>
             {/if}

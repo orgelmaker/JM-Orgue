@@ -383,6 +383,9 @@ fn main() {
             // Speelgoedregisters (0.7.98): Cymbelstern e.d. als klikbare knoppen.
             commands::set_toy_active,
             commands::get_toys_active,
+            // Toetsmechaniek (0.7.102): aanslag-klik per klavier.
+            commands::set_toetsmechaniek_aan,
+            commands::get_toetsmechaniek_aan,
             commands::download_sampleset,
             commands::get_audio_devices,
             commands::list_audio_hosts,

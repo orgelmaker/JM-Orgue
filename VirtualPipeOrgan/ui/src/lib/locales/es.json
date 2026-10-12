@@ -1337,6 +1337,8 @@
     "blower": "soplador:",
     "ambient": "ambiente:",
     "volume": "Volumen",
-    "motor_on": "Motor encendido"
+    "motor_on": "Motor encendido",
+    "key_action": "Mecánica del teclado (clic de teclas)",
+    "key_action_reload": "Este cambio tiene efecto tras recargar el órgano."
   }
 }

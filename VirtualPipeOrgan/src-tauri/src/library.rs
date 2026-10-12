@@ -493,6 +493,9 @@ pub struct OrganSettings {
     /// (via `SetToyActive`), zodat de registratie herneemt.
     #[serde(default)]
     pub toys_active: std::collections::HashMap<String, bool>,
+    /// Toetsmechaniek aan voor dít orgel (0.7.102). Standaard false.
+    #[serde(default)]
+    pub toetsmechaniek_aan: Option<bool>,
     /// Koppels die de sampleset zelf niet heeft en die de organist erbij heeft
     /// gezet (0.7.47): de id's uit de door de app afgeleide koppellijst.
     #[serde(default)]

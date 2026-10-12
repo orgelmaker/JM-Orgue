@@ -5,6 +5,26 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.102] - 2026-10-12
+
+### Toetsmechaniek: het klikken van de klavieren
+- Hauptwerk-sampleset-makers nemen soms het aanslag-geluid van de klavieren
+  op: het klikken van elke individuele toets wanneer je hem indrukt. JM-Orgue
+  herkent dat nu bij het laden en kan het afspelen voor elke MIDI NoteOn,
+  per klavier. Dat geeft het mechanische karakter van een echt orgel.
+- **Standaard uit** vanwege het geheugen: per sampleset tientallen tot
+  honderden megabytes aan WAV's. Zet het aan in Orgel-instellingen →
+  Bijgeluiden → "Toetsmechaniek (klikkend klavier)"; de keuze wordt per
+  orgel onthouden en pas actief na het opnieuw laden.
+- Hauptwerk-import: ranks met "{P/RP/HW …} Key action noises Attack"
+  worden per toets gekoppeld; de klavier-prefix wordt automatisch gematcht
+  aan de divisienaam via de prefix in de stopnamen van dat klavier.
+- Alleen de aanslag-klik in deze versie; de release-klik bij loslaten
+  komt in een vervolg.
+- Nieuwe test: `klavier_prefix_komt_uit_stopnamen` controleert dat
+  Nitra's prefixen P/RP/HW correct worden gematcht aan Pedal, Rückpositiv
+  en Hauptwerk.
+
 ## [0.7.101] - 2026-10-12
 
 ### Registermechaniek nu ook op GrandOrgue-sets

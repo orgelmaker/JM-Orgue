@@ -732,6 +732,14 @@ pub struct StopClickBuffers {
     pub release_rate: f64,
 }
 
+/// Pre-geladen aanslag-klikbuffer voor één toets (0.7.102).
+#[derive(Debug, Clone)]
+pub struct KeyboardClickBuffer {
+    pub data_l: Arc<Vec<f32>>,
+    pub data_r: Option<Arc<Vec<f32>>>,
+    pub rate: f64,
+}
+
 /// Audio command sent to the audio thread
 #[derive(Debug, Clone)]
 pub enum AudioCommand {
@@ -866,6 +874,14 @@ pub enum AudioCommand {
     /// Speel de registerklik voor deze stop af — attack bij aanzetten,
     /// release bij uitzetten. Negeert onbekende stop_id's.
     PlayStopClick { internal_stop_id: u32, is_attack: bool },
+    /// Toetsmechaniek (0.7.102): per (divisienaam, midi_note) de aanslag-
+    /// klikbuffer. Lege map = sampleset heeft geen toetsmechaniek óf de
+    /// gebruiker heeft het uitgezet.
+    RegisterKeyboardClicks(Arc<HashMap<(String, u8), KeyboardClickBuffer>>),
+    /// Speel de aanslag-klik voor deze (divisie, toets) af. Negeert
+    /// onbekende sleutels. In 0.7.102 alleen de aanslag; de los-klik komt
+    /// in een vervolg.
+    PlayKeyboardClick { division: String, midi_note: u8 },
     /// Galm-multiplier gekoppeld aan de luisterpositie-schuif (0.7.100):
     /// vermenigvuldigt zich met de user-reverb-mix in de callback. 1.0 =
     /// user-mix onveranderd; <1 = minder galm (dichter bij het orgel).
@@ -3832,6 +3848,8 @@ fn run_audio_thread(
     // Register-klikbuffers (0.7.99): per internal_stop_id een paar
     // (attack, release). Lege map = de sampleset heeft geen klikken.
     let mut stop_click_buffers: Arc<HashMap<u32, StopClickBuffers>> = Arc::new(HashMap::new());
+    // Toetsmechaniek-buffers (0.7.102): per (divisienaam, midi_note) de klik.
+    let mut keyboard_click_buffers: Arc<HashMap<(String, u8), KeyboardClickBuffer>> = Arc::new(HashMap::new());
     let mut release_spawn_scratch: Vec<PlayingVoice> = Vec::with_capacity(32);
     // RAM-plafond op volledig geladen samples. Zonder plafond groeide het
     // geheugen tijdens lang spelen onbegrensd (elke gespeelde pijp + release
@@ -4253,6 +4271,27 @@ fn run_audio_thread(
                         stop_click_buffers = map;
                         if n > 0 {
                             info!("Registermechaniek: {} stops met klikgeluiden geladen", n);
+                        }
+                    }
+                    AudioCommand::RegisterKeyboardClicks(map) => {
+                        let n = map.len();
+                        keyboard_click_buffers = map;
+                        if n > 0 {
+                            info!("Toetsmechaniek: {} klikbuffers geladen", n);
+                        }
+                    }
+                    AudioCommand::PlayKeyboardClick { division, midi_note } => {
+                        if let Some(buf) = keyboard_click_buffers.get(&(division, midi_note)) {
+                            bg_engine.fire_one_shot(crate::background_sounds::BackgroundVoice {
+                                kind: vpo_sampler::grandorgue::BackgroundSoundKind::Ambient,
+                                name: String::new(),
+                                data_l: buf.data_l.clone(),
+                                data_r: buf.data_r.clone(),
+                                rate: buf.rate,
+                                // Aanslag-klik duidelijk hoorbaar maar niet
+                                // overheersend; -6 dB past bij de registerklik.
+                                voice_gain: 10f32.powf(-6.0 / 20.0),
+                            });
                         }
                     }
                     AudioCommand::PlayStopClick { internal_stop_id, is_attack } => {

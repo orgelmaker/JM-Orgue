@@ -699,6 +699,16 @@ pub(crate) fn doorlopend_klavier() -> bool {
     DOORLOPEND_KLAVIER.load(std::sync::atomic::Ordering::Relaxed)
 }
 
+/// Toetsmechaniek-vlag (0.7.102): hetzelfde patroon als DOORLOPEND_KLAVIER.
+/// De MIDI-handler leest hem zonder extra argument.
+pub static TOETSMECHANIEK_AAN: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+#[inline]
+pub fn toetsmechaniek_aan() -> bool {
+    TOETSMECHANIEK_AAN.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// Pijpnummer (1-based) voor een klinkende noot binnen het bereik van een
 /// register, of None als die pijp er niet is. Met `uitgebreid` wordt de noot
 /// per octaaf het bereik in gevouwen.
@@ -1468,6 +1478,15 @@ pub struct AppState {
     /// Vogelsang, Cuculus en soortgelijke). Standaard allemaal uit; de UI
     /// toont ze als knoppen in de werkbalk.
     pub toys_active: Arc<RwLock<std::collections::HashMap<String, bool>>>,
+    /// Toetsmechaniek (0.7.102): aan = de aanslag-klik van elk klavier wordt
+    /// afgespeeld bij elke MIDI NoteOn. Standaard uit vanwege het geheugen
+    /// (per sampleset tot tientallen megabytes aan WAV's). Als de gebruiker
+    /// hem aanzet laadt JM-Orgue de klikken bij de volgende orgellaad.
+    pub toetsmechaniek_aan: Arc<RwLock<bool>>,
+    /// Mapping van divisienaam ↔ klavier-prefix (bv. "Pedal" ↔ "P",
+    /// "Rückpositiv" ↔ "RP"), gevuld bij de orgellaad. De MIDI-handler
+    /// gebruikt dit om bij een NoteOn de juiste klik aan te roepen.
+    pub toetsmechaniek_prefix: Arc<RwLock<std::collections::HashMap<String, String>>>,
     /// Lagen per (niet-ruis-)stop van het geladen orgel — diagnose (/ranks,
     /// layered_stops), gevuld in beide laadroutes (ook custom sets, waar
     /// organ_definition None/verouderd is).
@@ -1820,6 +1839,8 @@ impl AppState {
             background_gain: Arc::new(RwLock::new(0.3)),
             blower_active: Arc::new(RwLock::new(true)),
             toys_active: Arc::new(RwLock::new(std::collections::HashMap::new())),
+            toetsmechaniek_aan: Arc::new(RwLock::new(false)),
+            toetsmechaniek_prefix: Arc::new(RwLock::new(std::collections::HashMap::new())),
             rank_summary: Arc::new(RwLock::new(Vec::new())),
         }
     }
@@ -3435,6 +3456,16 @@ impl AppState {
                     // Get transpose from mapping
                     let transpose = mapping.map_or(0, |m| m.transpose);
                     let transposed_note = mapping.map_or_else(|| (note as i16 + transpose as i16).clamp(0, 127) as u8, |m| m.speelnoot(note));
+
+                    // Toetsmechaniek (0.7.102): per divisie één aanslag-klik.
+                    // De audio-engine filtert zelf op basis van de preloaded
+                    // (divisie, note)-key. Hergebruikt de bestaande cmd_tx.
+                    if toetsmechaniek_aan() {
+                        let _ = cmd_tx.try_send(AudioCommand::PlayKeyboardClick {
+                            division: division.name.clone(),
+                            midi_note: transposed_note,
+                        });
+                    }
 
                     // Collect active T.A. divisions before playing stops
                     let ta_active = {

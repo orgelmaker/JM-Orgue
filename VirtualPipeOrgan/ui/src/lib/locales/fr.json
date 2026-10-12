@@ -1337,6 +1337,8 @@
     "blower": "soufflerie :",
     "ambient": "ambiance :",
     "volume": "Volume",
-    "motor_on": "Moteur en marche"
+    "motor_on": "Moteur en marche",
+    "key_action": "Mécanique du clavier (clic des touches)",
+    "key_action_reload": "Ce choix prend effet après le rechargement de l'orgue."
   }
 }

@@ -945,6 +945,75 @@ pub fn get_listening_axis(state: State<AppState>) -> Vec<String> {
 // de audio-engine. Motor-knop en volumeschuif staan los van de registratie.
 // ========================================================================
 
+/// Laad de toetsmechaniek-WAV's (0.7.102) als de voorkeur `toetsmechaniek_aan`
+/// aan staat; anders wissen we voorgaande klikken. Werkt per orgellaad.
+fn laad_en_stuur_toetsmechaniek(
+    state: &AppState,
+    definition: &vpo_sampler::OrganDefinition,
+) {
+    use crate::audio::KeyboardClickBuffer;
+    use std::sync::Arc;
+    // Prefix-mapping altijd bijwerken, ook als uit (anders raakt die muf bij
+    // het volgend orgel).
+    *state.toetsmechaniek_prefix.write() = definition.klavier_prefix_mapping();
+    let aan = *state.toetsmechaniek_aan.read();
+    if !aan {
+        state.send_audio_command(AudioCommand::RegisterKeyboardClicks(Arc::new(std::collections::HashMap::new())));
+        return;
+    }
+    let output_sr = state.audio_player.read().as_ref()
+        .map(|p| *p.sample_rate.read()).unwrap_or(48_000);
+    // prefix → divisie-naam uit de mapping; omgedraaid: divisie-naam ← prefix.
+    let prefix_mapping = definition.klavier_prefix_mapping();
+    let mut buf_map: std::collections::HashMap<(String, u8), KeyboardClickBuffer>
+        = std::collections::HashMap::new();
+    let mut geladen = 0usize;
+    let mut misgelopen = 0usize;
+    for ((prefix, note), path) in &definition.keyboard_clicks {
+        let Some(div) = prefix_mapping.get(prefix) else { misgelopen += 1; continue };
+        match vpo_sampler::loader::load_wav(path) {
+            Ok(sd) => {
+                let rate = (sd.sample_rate as f64 / output_sr as f64).max(0.01);
+                buf_map.insert(
+                    (div.clone(), *note),
+                    KeyboardClickBuffer {
+                        data_l: Arc::new(sd.data),
+                        data_r: sd.right.map(Arc::new),
+                        rate,
+                    });
+                geladen += 1;
+            }
+            Err(e) => {
+                warn!("Toetsklik niet geladen (prefix {} toets {}): {} ({:?})", prefix, note, e, path);
+                misgelopen += 1;
+            }
+        }
+    }
+    if geladen > 0 {
+        info!("Toetsmechaniek: {} klikken geladen ({} misgelopen)", geladen, misgelopen);
+    }
+    state.send_audio_command(AudioCommand::RegisterKeyboardClicks(Arc::new(buf_map)));
+}
+
+/// Toetsmechaniek aan/uit (0.7.102): werkt vanaf de volgende orgellaad
+/// (anders zouden we tientallen MB's moeten laden tijdens het spelen).
+#[tauri::command]
+pub fn set_toetsmechaniek_aan(state: State<AppState>, aan: bool) -> Result<bool, String> {
+    let huidige = *state.toetsmechaniek_aan.read();
+    *state.toetsmechaniek_aan.write() = aan;
+    // Globale atomic voor de MIDI-handler die hem zonder state-arg leest.
+    crate::state::TOETSMECHANIEK_AAN.store(aan, std::sync::atomic::Ordering::Relaxed);
+    let herladen_nodig = huidige != aan;
+    info!("Toetsmechaniek: {} (herladen nodig: {})",
+          if aan { "aan" } else { "uit" }, herladen_nodig);
+    Ok(herladen_nodig)
+}
+
+#[tauri::command]
+pub fn get_toetsmechaniek_aan(state: State<AppState>) -> bool {
+    *state.toetsmechaniek_aan.read()
+}
+
 /// Laad de registermechaniek-WAV's (0.7.99) en stuur ze als klaar-om-te-
 /// spelen samples naar de audio-engine. Een lege map wist voorgaande klikken.
 fn laad_en_stuur_register_mechaniek(
@@ -3231,6 +3300,9 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
             // in de audio-engine. Altijd sturen (ook leeg), zodat de klikken
             // van een vorig orgel niet blijven liggen.
             laad_en_stuur_register_mechaniek(state, &definition.stop_action_clicks);
+            // Toetsmechaniek (0.7.102): aanslag-klikken per klavier. Alleen
+            // laden wanneer de voorkeur aan staat.
+            laad_en_stuur_toetsmechaniek(state, &definition);
             bg.into_iter().map(|b| BackgroundSoundDto {
                 kind: match b.kind {
                     vpo_sampler::grandorgue::BackgroundSoundKind::Blower => "blower".into(),
@@ -8648,6 +8720,13 @@ fn restore_organ_settings(state: &AppState, organ_id: &str) {
         });
     }
 
+    // Toetsmechaniek (0.7.102) uit de opgeslagen settings terug. Vraagt
+    // geen herladen hier: de settings worden tijdens de load aangeroepen,
+    // dus `laad_en_stuur_toetsmechaniek` loopt eroverheen.
+    let toetsmech = settings.toetsmechaniek_aan.unwrap_or(false);
+    *state.toetsmechaniek_aan.write() = toetsmech;
+    crate::state::TOETSMECHANIEK_AAN.store(toetsmech, std::sync::atomic::Ordering::Relaxed);
+
     // Doorlopend klavier (per orgel).
     crate::state::DOORLOPEND_KLAVIER.store(
         settings.continuous_keyboard, std::sync::atomic::Ordering::Relaxed);
@@ -9350,6 +9429,7 @@ pub fn do_save_organ_settings(state: &AppState, presets: HashMap<String, PresetD
         background_gain: Some(*state.background_gain.read()),
         blower_active: Some(*state.blower_active.read()),
         toys_active: state.toys_active.read().clone(),
+        toetsmechaniek_aan: Some(*state.toetsmechaniek_aan.read()),
         extra_couplers: state.extra_coupler_ids.read().clone(),
         continuous_keyboard: crate::state::DOORLOPEND_KLAVIER.load(std::sync::atomic::Ordering::Relaxed),
         remote_layout,

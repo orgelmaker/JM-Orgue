@@ -1337,6 +1337,8 @@
     "blower": "Motor:",
     "ambient": "Ambient:",
     "volume": "Lautstärke",
-    "motor_on": "Motor an"
+    "motor_on": "Motor an",
+    "key_action": "Tastatur-Mechanik (klickende Tasten)",
+    "key_action_reload": "Diese Änderung wirkt nach erneutem Laden der Orgel."
   }
 }

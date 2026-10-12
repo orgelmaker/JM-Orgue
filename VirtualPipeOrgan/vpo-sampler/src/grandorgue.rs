@@ -59,6 +59,13 @@ pub struct OrganDefinition {
     /// `ControllingSwitchID` van die stop. Leeg = de set heeft geen
     /// register-klikken.
     pub stop_action_clicks: std::collections::HashMap<u32, StopActionClickDef>,
+    /// Toetsmechaniek (0.7.102): per klaviertoets een opgenomen aanslag-
+    /// geluid, zoals bij een echt mechanisch orgel klinkt wanneer je een
+    /// toets indrukt. Hauptwerk-sets hebben hier aparte ranks voor met namen
+    /// als "P Key action noises Attack" (Pedaal) en "HW Key action noises
+    /// Attack" (Hauptwerk). Gekoppeld aan het klavier via de prefix uit die
+    /// rank-naam ("P", "RP", "HW" …). Standaard uit vanwege het geheugen.
+    pub keyboard_clicks: std::collections::HashMap<(String, u8), std::path::PathBuf>,
 }
 
 /// Pad naar het attack- en release-geluid van één registerschakelaar. Beide
@@ -100,6 +107,35 @@ pub enum BackgroundSoundKind {
 }
 
 impl OrganDefinition {
+    /// Match klavier-prefixen uit toetsmechaniek-ranks aan divisienamen
+    /// (0.7.102). Hauptwerk-sets prefixen hun ranks met korte afkortingen
+    /// ("P", "RP", "HW"); de stops gebruiken dezelfde conventie
+    /// ("P Subbass 16'", "RP Copula maior 8'", …). Deze helper leest voor
+    /// elke speelbare stop de prefix uit haar naam en bouwt een mapping
+    /// prefix → divisienaam op. Bij meerdere prefixen voor dezelfde divisie
+    /// (sets die het inconsistent doen) wint de eerste. Hoofdletters tellen.
+    pub fn klavier_prefix_mapping(&self) -> std::collections::HashMap<String, String> {
+        let mut uit: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        // stop-id → division-naam opzoeken via manuals.
+        let mut id_naar_divisie: std::collections::HashMap<u32, String> = std::collections::HashMap::new();
+        for manual in &self.manuals {
+            for sid in &manual.stop_ids {
+                id_naar_divisie.insert(*sid, manual.name.clone());
+            }
+        }
+        for stop in &self.stops {
+            if stop.is_noise_or_mechanical() { continue; }
+            // Pak de eerste "token" uit de stopnaam vóór een spatie, als die
+            // hoofdletters-only is en kort (≤4 letters).
+            let eerste = stop.name.split_whitespace().next().unwrap_or("");
+            if eerste.is_empty() || eerste.len() > 4 { continue; }
+            if !eerste.chars().all(|c| c.is_ascii_uppercase()) { continue; }
+            let Some(div) = id_naar_divisie.get(&stop.id) else { continue };
+            uit.entry(eerste.to_string()).or_insert_with(|| div.clone());
+        }
+        uit
+    }
+
     /// Register-klikgeluiden uit de GrandOrgue-stops verzamelen (0.7.101).
     /// GO-sets modelleren het klikken van registers als eigen stops:
     /// "Stop attack noise {naam}" en "Stop release noise {naam}" (één pijp
@@ -628,6 +664,7 @@ impl OdfParser {
             couplers,
             extra_bijgeluiden: Vec::new(),
             stop_action_clicks: std::collections::HashMap::new(),
+            keyboard_clicks: std::collections::HashMap::new(),
         })
     }
 
@@ -1925,6 +1962,56 @@ mod tests {
         assert_eq!(mk("Prestant 8'").background_sound_kind(), None);
     }
 
+    /// Prefix-mapping voor toetsmechaniek (0.7.102): elke korte, uit alleen
+    /// hoofdletters bestaande eerste-token in een stopnaam wordt een prefix
+    /// die naar de divisienaam van die stop wijst (Nitra: "P"→"Pedal",
+    /// "RP"→"Rückpositiv", "HW"→"Hauptwerk").
+    #[test]
+    fn klavier_prefix_komt_uit_stopnamen() {
+        let mk = |id: u32, name: &str| StopDef {
+            id, name: name.into(), harmonic_number: 8, sounding_harmonic: 8,
+            pitch_correction: 0.0, pitch_tuning_cents: 0.0, number_of_pipes: 1,
+            first_accessible_pipe_logical_key: 1, windchest_group: 1,
+            amplitude_level: 100.0, gain_db: 0.0, percussive: false,
+            accepts_retuning: true, first_midi_note: None, pipes: Vec::new(),
+            layers: Vec::new(), primary_perspective: None,
+        };
+        let mk_man = |name: &str, ids: Vec<u32>| ManualDef {
+            number: 1, name: name.into(),
+            midi_input_number: 0,
+            number_of_logical_keys: 56,
+            number_of_accessible_keys: 56,
+            first_accessible_key_midi_note: 36,
+            stop_ids: ids,
+            coupler_ids: Vec::new(),
+            tremulant_ids: Vec::new(),
+        };
+        let def = OrganDefinition {
+            base_path: std::path::PathBuf::new(),
+            organ: OrganInfo::default(),
+            manuals: vec![
+                mk_man("Pedal", vec![1]),
+                mk_man("Rückpositiv", vec![2, 3]),
+                mk_man("Hauptwerk", vec![4]),
+            ],
+            stops: vec![
+                mk(1, "P Subbass 16"),
+                mk(2, "RP Copula maior 8"),
+                mk(3, "RP Flöte 4"),
+                mk(4, "HW Principal 8"),
+            ],
+            windchests: Vec::new(), enclosures: Vec::new(),
+            tremulants: Vec::new(), couplers: Vec::new(),
+            extra_bijgeluiden: Vec::new(),
+            stop_action_clicks: std::collections::HashMap::new(),
+            keyboard_clicks: std::collections::HashMap::new(),
+        };
+        let m = def.klavier_prefix_mapping();
+        assert_eq!(m.get("P"), Some(&"Pedal".to_string()));
+        assert_eq!(m.get("RP"), Some(&"Rückpositiv".to_string()));
+        assert_eq!(m.get("HW"), Some(&"Hauptwerk".to_string()));
+    }
+
     /// GO registermechaniek-matching (0.7.101): "Stop attack noise {naam}" +
     /// "Stop release noise {naam}" moet aan de echte stop gekoppeld worden,
     /// en bijgeluid-stops (Blower/Ambient) blijven buiten de koppeling.
@@ -1958,6 +2045,7 @@ mod tests {
             tremulants: Vec::new(), couplers: Vec::new(),
             extra_bijgeluiden: Vec::new(),
             stop_action_clicks: std::collections::HashMap::new(),
+            keyboard_clicks: std::collections::HashMap::new(),
         };
         def.verzamel_go_registermechaniek();
         // Prestant moet attack én release hebben gekregen.

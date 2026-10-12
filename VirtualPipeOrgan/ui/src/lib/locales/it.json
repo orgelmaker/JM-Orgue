@@ -1337,6 +1337,8 @@
     "blower": "soffiatore:",
     "ambient": "ambiente:",
     "volume": "Volume",
-    "motor_on": "Motore acceso"
+    "motor_on": "Motore acceso",
+    "key_action": "Meccanica della tastiera (clic dei tasti)",
+    "key_action_reload": "Questa modifica avrà effetto dopo aver ricaricato l'organo."
   }
 }
