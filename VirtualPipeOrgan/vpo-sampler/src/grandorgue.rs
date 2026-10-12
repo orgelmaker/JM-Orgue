@@ -65,7 +65,16 @@ pub struct OrganDefinition {
     /// als "P Key action noises Attack" (Pedaal) en "HW Key action noises
     /// Attack" (Hauptwerk). Gekoppeld aan het klavier via de prefix uit die
     /// rank-naam ("P", "RP", "HW" …). Standaard uit vanwege het geheugen.
-    pub keyboard_clicks: std::collections::HashMap<(String, u8), std::path::PathBuf>,
+    /// Per (klavier-prefix, toets) een optioneel attack- en release-geluid
+    /// (0.7.103).
+    pub keyboard_clicks: std::collections::HashMap<(String, u8), KeyboardClickPaths>,
+}
+
+/// Pad naar het aanslag- en loslaatgeluid van één toets (0.7.103).
+#[derive(Debug, Clone, Default)]
+pub struct KeyboardClickPaths {
+    pub attack: Option<std::path::PathBuf>,
+    pub release: Option<std::path::PathBuf>,
 }
 
 /// Pad naar het attack- en release-geluid van één registerschakelaar. Beide

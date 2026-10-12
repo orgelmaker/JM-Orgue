@@ -5,6 +5,19 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.103] - 2026-10-12
+
+### Toetsmechaniek: ook de loslaat-klik
+- Een echte orgelklaviatuur klikt niet alleen bij het aanslaan, ook bij het
+  loslaten. De toetsmechaniek uit 0.7.102 krijgt die loslaat-klik er nu bij
+  (de ranks "{prefix} Key action noises Release" bij Hauptwerk-sets).
+  Elke MIDI NoteOff speelt per klavier de loslaat-klik af, los van de
+  registratie — het is een mechanisch geluid, geen pijpklank.
+- Werkt alleen wanneer "Toetsmechaniek (klikkend klavier)" aan staat in
+  Orgel-instellingen → Bijgeluiden.
+- Op Nitra: 56 loslaat-klikken per klavier × 3 klavieren samen met de
+  aanslag-klikken van 0.7.102.
+
 ## [0.7.102] - 2026-10-12
 
 ### Toetsmechaniek: het klikken van de klavieren

@@ -732,12 +732,16 @@ pub struct StopClickBuffers {
     pub release_rate: f64,
 }
 
-/// Pre-geladen aanslag-klikbuffer voor één toets (0.7.102).
-#[derive(Debug, Clone)]
+/// Pre-geladen aanslag- en loslaatklik-buffers voor één toets (0.7.102/103).
+/// Elk veld is None als die set die kant van de klik niet heeft.
+#[derive(Debug, Clone, Default)]
 pub struct KeyboardClickBuffer {
-    pub data_l: Arc<Vec<f32>>,
-    pub data_r: Option<Arc<Vec<f32>>>,
-    pub rate: f64,
+    pub attack_l: Option<Arc<Vec<f32>>>,
+    pub attack_r: Option<Arc<Vec<f32>>>,
+    pub attack_rate: f64,
+    pub release_l: Option<Arc<Vec<f32>>>,
+    pub release_r: Option<Arc<Vec<f32>>>,
+    pub release_rate: f64,
 }
 
 /// Audio command sent to the audio thread
@@ -878,10 +882,9 @@ pub enum AudioCommand {
     /// klikbuffer. Lege map = sampleset heeft geen toetsmechaniek óf de
     /// gebruiker heeft het uitgezet.
     RegisterKeyboardClicks(Arc<HashMap<(String, u8), KeyboardClickBuffer>>),
-    /// Speel de aanslag-klik voor deze (divisie, toets) af. Negeert
-    /// onbekende sleutels. In 0.7.102 alleen de aanslag; de los-klik komt
-    /// in een vervolg.
-    PlayKeyboardClick { division: String, midi_note: u8 },
+    /// Speel de klik voor deze (divisie, toets) af — attack bij aanslag,
+    /// release bij loslaten (0.7.103). Negeert onbekende sleutels.
+    PlayKeyboardClick { division: String, midi_note: u8, is_attack: bool },
     /// Galm-multiplier gekoppeld aan de luisterpositie-schuif (0.7.100):
     /// vermenigvuldigt zich met de user-reverb-mix in de callback. 1.0 =
     /// user-mix onveranderd; <1 = minder galm (dichter bij het orgel).
@@ -4280,18 +4283,23 @@ fn run_audio_thread(
                             info!("Toetsmechaniek: {} klikbuffers geladen", n);
                         }
                     }
-                    AudioCommand::PlayKeyboardClick { division, midi_note } => {
+                    AudioCommand::PlayKeyboardClick { division, midi_note, is_attack } => {
                         if let Some(buf) = keyboard_click_buffers.get(&(division, midi_note)) {
-                            bg_engine.fire_one_shot(crate::background_sounds::BackgroundVoice {
-                                kind: vpo_sampler::grandorgue::BackgroundSoundKind::Ambient,
-                                name: String::new(),
-                                data_l: buf.data_l.clone(),
-                                data_r: buf.data_r.clone(),
-                                rate: buf.rate,
-                                // Aanslag-klik duidelijk hoorbaar maar niet
-                                // overheersend; -6 dB past bij de registerklik.
-                                voice_gain: 10f32.powf(-6.0 / 20.0),
-                            });
+                            let (data_l, data_r, rate) = if is_attack {
+                                (buf.attack_l.clone(), buf.attack_r.clone(), buf.attack_rate)
+                            } else {
+                                (buf.release_l.clone(), buf.release_r.clone(), buf.release_rate)
+                            };
+                            if let Some(l) = data_l {
+                                bg_engine.fire_one_shot(crate::background_sounds::BackgroundVoice {
+                                    kind: vpo_sampler::grandorgue::BackgroundSoundKind::Ambient,
+                                    name: String::new(),
+                                    data_l: l,
+                                    data_r,
+                                    rate,
+                                    voice_gain: 10f32.powf(-6.0 / 20.0),
+                                });
+                            }
                         }
                     }
                     AudioCommand::PlayStopClick { internal_stop_id, is_attack } => {

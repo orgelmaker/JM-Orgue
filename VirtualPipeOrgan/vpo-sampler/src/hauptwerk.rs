@@ -839,34 +839,37 @@ fn verzamel_hw_keyboard_clicks(
     layers_of_pipe: &std::collections::HashMap<u32, Vec<(u32, u32)>>,
     sample_of_layer: &std::collections::HashMap<u32, u32>,
     ranks_xml: &[FieldMap],
-) -> std::collections::HashMap<(String, u8), std::path::PathBuf> {
-    // Rank-ID → prefix uit "{P/RP/HW …} Key action noises Attack …". Alleen
-    // echte attack-ranks tellen; releases laten we voorlopig buiten (0.7.102
-    // scope: alleen aanslag).
-    let mut rank_prefix: std::collections::HashMap<u32, String> = std::collections::HashMap::new();
+) -> std::collections::HashMap<(String, u8), crate::grandorgue::KeyboardClickPaths> {
+    // Rank-ID → (prefix, is_attack). "{prefix} Key action noises Attack"
+    // levert attack per toets, "… Release" levert loslaat (0.7.103).
+    let mut rank_prefix: std::collections::HashMap<u32, (String, bool)> = std::collections::HashMap::new();
     for r in ranks_xml {
         let Some(rid) = r.get_u32("RankID") else { continue };
         let Some(name) = r.get("Name") else { continue };
         let lower = name.to_lowercase();
-        if !(lower.contains("key action") && lower.contains("attack")) { continue; }
+        if !lower.contains("key action") { continue; }
+        let is_attack = lower.contains("attack");
+        let is_release = lower.contains("release");
+        if !is_attack && !is_release { continue; }
         // Prefix = alles vóór "Key action". Spaties en volgnummer eraf; de
         // Hauptwerk-conventie "01. P  Key action …" wordt zo "P".
         let kop = lower.split("key action").next().unwrap_or("");
-        // Trailing/leading whitespace en nummering ("01. ") eraf.
         let kop = kop.trim_start_matches(|c: char| c.is_ascii_digit() || c == '.' || c.is_whitespace());
         let kop = kop.trim();
         if kop.is_empty() { continue; }
-        rank_prefix.insert(rid, kop.to_uppercase());
+        rank_prefix.insert(rid, (kop.to_uppercase(), is_attack));
     }
     let resolve_sample = |sample_id: u32| -> Option<std::path::PathBuf> {
         let (pkg, fname) = sample_file.get(&sample_id)?;
         let dir = pkg_dirs.get(pkg)?;
         Some(dir.join(fname.replace('\\', "/")))
     };
-    let mut uit: std::collections::HashMap<(String, u8), std::path::PathBuf> = std::collections::HashMap::new();
+    use crate::grandorgue::KeyboardClickPaths;
+    let mut uit: std::collections::HashMap<(String, u8), KeyboardClickPaths>
+        = std::collections::HashMap::new();
     for p in pipes {
         let Some(rid) = p.get_u32("RankID") else { continue };
-        let Some(prefix) = rank_prefix.get(&rid) else { continue };
+        let Some((prefix, is_attack)) = rank_prefix.get(&rid) else { continue };
         let Some(note) = p.get_u32("NormalMIDINoteNumber") else { continue };
         if note > 127 { continue; }
         let Some(pid) = p.get_u32("PipeID") else { continue };
@@ -876,14 +879,17 @@ fn verzamel_hw_keyboard_clicks(
         let Some(path) = resolve_sample(*sid) else { continue };
         // Dedup: close/front/rear-perspectieven van dezelfde toets geven
         // dezelfde ControllingPalletSwitchID; we pakken één exemplaar.
-        uit.entry((prefix.clone(), note as u8)).or_insert(path);
+        let e = uit.entry((prefix.clone(), note as u8)).or_default();
+        if *is_attack && e.attack.is_none() { e.attack = Some(path); }
+        else if !*is_attack && e.release.is_none() { e.release = Some(path); }
     }
     if !uit.is_empty() {
-        // Prefixen die we gevonden hebben, voor de logregel.
         let mut prefixen: Vec<&String> = uit.keys().map(|(p, _)| p).collect();
         prefixen.sort(); prefixen.dedup();
-        info!("Hauptwerk toetsmechaniek: {} toetsklikken op klavier-prefixen {:?}",
-              uit.len(), prefixen);
+        let a: usize = uit.values().filter(|v| v.attack.is_some()).count();
+        let r: usize = uit.values().filter(|v| v.release.is_some()).count();
+        info!("Hauptwerk toetsmechaniek: {} toetsen (attack: {}, release: {}) op klavier-prefixen {:?}",
+              uit.len(), a, r, prefixen);
     }
     uit
 }

@@ -3464,6 +3464,7 @@ impl AppState {
                         let _ = cmd_tx.try_send(AudioCommand::PlayKeyboardClick {
                             division: division.name.clone(),
                             midi_note: transposed_note,
+                            is_attack: true,
                         });
                     }
 
@@ -3616,6 +3617,17 @@ impl AppState {
 
                     let transpose = mapping.map_or(0, |m| m.transpose);
                     let transposed_note = mapping.map_or_else(|| (note as i16 + transpose as i16).clamp(0, 127) as u8, |m| m.speelnoot(note));
+
+                    // Toetsmechaniek loslaat-klik (0.7.103): per divisie één
+                    // klik bij NoteOff. Werkt ook wanneer alle registers uit
+                    // staan: het is een mechanisch geluid, geen pijpklank.
+                    if toetsmechaniek_aan() {
+                        let _ = cmd_tx.try_send(AudioCommand::PlayKeyboardClick {
+                            division: division.name.clone(),
+                            midi_note: transposed_note,
+                            is_attack: false,
+                        });
+                    }
 
                     for stop in &division.stops {
                         // Send NoteOff regardless of drawn state

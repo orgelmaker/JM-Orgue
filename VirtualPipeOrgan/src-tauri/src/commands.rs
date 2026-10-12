@@ -969,24 +969,36 @@ fn laad_en_stuur_toetsmechaniek(
         = std::collections::HashMap::new();
     let mut geladen = 0usize;
     let mut misgelopen = 0usize;
-    for ((prefix, note), path) in &definition.keyboard_clicks {
-        let Some(div) = prefix_mapping.get(prefix) else { misgelopen += 1; continue };
-        match vpo_sampler::loader::load_wav(path) {
+    let laad = |pad: &std::path::PathBuf| -> Option<(Arc<Vec<f32>>, Option<Arc<Vec<f32>>>, f64)> {
+        match vpo_sampler::loader::load_wav(pad) {
             Ok(sd) => {
                 let rate = (sd.sample_rate as f64 / output_sr as f64).max(0.01);
-                buf_map.insert(
-                    (div.clone(), *note),
-                    KeyboardClickBuffer {
-                        data_l: Arc::new(sd.data),
-                        data_r: sd.right.map(Arc::new),
-                        rate,
-                    });
-                geladen += 1;
+                Some((Arc::new(sd.data), sd.right.map(Arc::new), rate))
             }
             Err(e) => {
-                warn!("Toetsklik niet geladen (prefix {} toets {}): {} ({:?})", prefix, note, e, path);
-                misgelopen += 1;
+                warn!("Toetsklik niet geladen: {} ({:?})", e, pad);
+                None
             }
+        }
+    };
+    for ((prefix, note), paths) in &definition.keyboard_clicks {
+        let Some(div) = prefix_mapping.get(prefix) else { misgelopen += 1; continue };
+        let mut buf = KeyboardClickBuffer::default();
+        if let Some(p) = paths.attack.as_ref() {
+            if let Some((l, r, rate)) = laad(p) {
+                buf.attack_l = Some(l); buf.attack_r = r; buf.attack_rate = rate;
+            }
+        }
+        if let Some(p) = paths.release.as_ref() {
+            if let Some((l, r, rate)) = laad(p) {
+                buf.release_l = Some(l); buf.release_r = r; buf.release_rate = rate;
+            }
+        }
+        if buf.attack_l.is_some() || buf.release_l.is_some() {
+            buf_map.insert((div.clone(), *note), buf);
+            geladen += 1;
+        } else {
+            misgelopen += 1;
         }
     }
     if geladen > 0 {
