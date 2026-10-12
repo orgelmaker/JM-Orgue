@@ -812,7 +812,84 @@ fn build_definition(
         enclosures: enclosure_defs,
         tremulants: Vec::new(),
         couplers: coupler_defs,
+        extra_bijgeluiden: verzamel_hw_bijgeluiden(
+            &pipes, &pipes_by_rank, &sample_file, &pkg_dirs,
+            &layers_of_pipe, &sample_of_layer, &extract_objects(xml, "Switch"), &rank_name,
+        ),
     })
+}
+
+/// Pijpen op switches die geen klaviertoets zijn (0.7.97): dat zijn de
+/// NoiseSwitch (ambient), Blower/Motor-switch (blower), speelgoedregisters
+/// (Cymbelstern, Vogelsang — later) en soortgelijke. Zelfs sets die er
+/// een `Rank` "Noises" voor hebben, zetten die pijpen via Switch i.p.v.
+/// via een Stop. Deze helper haalt alleen blower en ambient eruit.
+fn verzamel_hw_bijgeluiden(
+    pipes: &[FieldMap],
+    _pipes_by_rank: &std::collections::HashMap<u32, std::collections::HashMap<u32, u32>>,
+    sample_file: &std::collections::HashMap<u32, (u32, String)>,
+    pkg_dirs: &std::collections::HashMap<u32, std::path::PathBuf>,
+    layers_of_pipe: &std::collections::HashMap<u32, Vec<(u32, u32)>>,
+    sample_of_layer: &std::collections::HashMap<u32, u32>,
+    switches: &[FieldMap],
+    rank_name: &std::collections::HashMap<u32, String>,
+) -> Vec<crate::grandorgue::BackgroundSoundDef> {
+    use crate::grandorgue::{BackgroundSoundDef, BackgroundSoundKind};
+    // Switch-naam en of hij standaard aan staat (dat is wat ambient/blower
+    // onderscheidt van speelgoedregisters: die laatste staan standaard uit).
+    let switch_info: std::collections::HashMap<u32, (String, bool)> = switches.iter()
+        .filter_map(|s| {
+            let id = s.get_u32("SwitchID")?;
+            let name = s.get("Name").cloned().unwrap_or_default();
+            let default_on = s.get("DefaultToEngaged").map(|v| v == "Y").unwrap_or(false);
+            Some((id, (name, default_on)))
+        }).collect();
+    let resolve_sample = |sample_id: u32| -> Option<std::path::PathBuf> {
+        let (pkg, fname) = sample_file.get(&sample_id)?;
+        let dir = pkg_dirs.get(pkg)?;
+        Some(dir.join(fname.replace('\\', "/")))
+    };
+    let mut uit = Vec::new();
+    // Deduplicatie per (kind, switch_id): sets hebben vaak dezelfde pijp
+    // in 3 posities (close/front/rear) via 3 ranks. We pakken één exemplaar.
+    let mut gezien: std::collections::HashSet<(BackgroundSoundKind, u32)> = std::collections::HashSet::new();
+    for p in pipes {
+        let Some(pid) = p.get_u32("PipeID") else { continue };
+        let Some(sw_id) = p.get_u32("ControllingPalletSwitchID") else { continue };
+        if sw_id == 0 { continue; }
+        let Some((sw_name, default_on)) = switch_info.get(&sw_id) else { continue };
+        // Alleen pijpen die bij orgellaad standaard aan staan: dat sluit de
+        // speelgoedregisters uit (Cymbelstern, Vogelsang etc).
+        if !default_on { continue; }
+        let sw_lower = sw_name.to_lowercase();
+        // Pijpen in een rank met "noises" in de naam zijn kandidaat; de
+        // switch bepaalt vervolgens of het blower of ambient is.
+        let rid = p.get_u32("RankID").unwrap_or(0);
+        let rname_lower = rank_name.get(&rid).map(|n| n.to_lowercase()).unwrap_or_default();
+        if !rname_lower.contains("noise") { continue; }
+        let kind = if sw_lower.contains("blower") || sw_lower.contains("motor")
+            || sw_lower.contains("soufflerie") {
+            BackgroundSoundKind::Blower
+        } else if sw_lower.contains("noise") || sw_lower.contains("ambient")
+            || sw_lower.contains("rausch") || sw_lower.contains("geräusch") {
+            BackgroundSoundKind::Ambient
+        } else {
+            continue;
+        };
+        if !gezien.insert((kind, sw_id)) { continue; }
+        // Loop de hoofdlaag van deze pijp op naar het WAV-pad.
+        let Some(layers) = layers_of_pipe.get(&pid) else { continue };
+        let Some((_num, lid)) = layers.first() else { continue };
+        let Some(sid) = sample_of_layer.get(lid) else { continue };
+        let Some(path) = resolve_sample(*sid) else { continue };
+        info!("Hauptwerk-bijgeluid gevonden: {:?} op switch '{}' → {:?}", kind, sw_name, path);
+        uit.push(BackgroundSoundDef {
+            kind,
+            name: sw_name.clone(),
+            path,
+        });
+    }
+    uit
 }
 
 /// Snelle check: is dit pad een Hauptwerk-orgeldefinitie?

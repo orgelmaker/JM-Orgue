@@ -554,7 +554,11 @@
     "fit_done": "C’è tutto sullo schermo",
     "fit_short": "Ancora {n} registri fuori schermo: una finestra più grande aiuterebbe",
     "div_order_reset": "Ordine originale",
-    "div_order_reset_title": "Tornare all’ordine dell’organo e mostrare di nuovo tutte le divisioni"
+    "div_order_reset_title": "Tornare all’ordine dell’organo e mostrare di nuovo tutte le divisioni",
+    "motor": "Motore",
+    "motor_on": "Motore acceso",
+    "motor_off": "Motore spento",
+    "motor_title": "Motore dell'organo acceso/spento"
   },
   "speeltafel": {
     "show_bars": "Barre",
@@ -1332,6 +1336,7 @@
     "desc": "Questo sample set contiene uno o più suoni continui (soffiatore e/o rumore ambientale).",
     "blower": "soffiatore:",
     "ambient": "ambiente:",
-    "coming_soon": "La riproduzione con pulsante Motore e cursore del volume arriverà in una versione successiva."
+    "volume": "Volume",
+    "motor_on": "Motore acceso"
   }
 }

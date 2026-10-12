@@ -554,7 +554,11 @@
     "fit_done": "Alles ist sichtbar",
     "fit_short": "Noch {n} Register außerhalb des Bildes — ein größeres Fenster hilft",
     "div_order_reset": "Reihenfolge zurück",
-    "div_order_reset_title": "Zurück zur Reihenfolge der Orgel, alle Werke wieder anzeigen"
+    "div_order_reset_title": "Zurück zur Reihenfolge der Orgel, alle Werke wieder anzeigen",
+    "motor": "Motor",
+    "motor_on": "Motor ist an",
+    "motor_off": "Motor ist aus",
+    "motor_title": "Orgelmotor ein oder aus"
   },
   "speeltafel": {
     "show_bars": "Leisten",
@@ -1332,6 +1336,7 @@
     "desc": "Dieses Sampleset enthält ein oder mehrere Dauergeräusche (Orgelmotor und/oder Raumklang).",
     "blower": "Motor:",
     "ambient": "Ambient:",
-    "coming_soon": "Wiedergabe mit Motor-Taste und Lautstärkeregler kommt in einer späteren Version."
+    "volume": "Lautstärke",
+    "motor_on": "Motor an"
   }
 }

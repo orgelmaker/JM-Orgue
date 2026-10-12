@@ -1148,6 +1148,11 @@ input[type="range"]::-webkit-slider-thumb:hover {
   white-space: nowrap;
   opacity: 0.85;
 }
+
+/* Motor-knop (0.7.97): aan geeft een subtiele highlight. */
+.panel-layout-btn.motor-aan {
+  color: var(--accent, #4a9eff);
+}
 .stop-size-btn {
   min-width: 1.6rem;
   padding: 0.2rem 0.4rem;

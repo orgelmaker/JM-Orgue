@@ -933,6 +933,76 @@ pub fn get_listening_axis(state: State<AppState>) -> Vec<String> {
     luisteras_indices(&persp).into_iter().map(|i| persp[i].name.clone()).collect()
 }
 
+// ========================================================================
+// Bijgeluiden-afspeel (0.7.97): laad WAV's en stuur ze als loop-voices naar
+// de audio-engine. Motor-knop en volumeschuif staan los van de registratie.
+// ========================================================================
+
+/// Laad de bijgeluiden-WAV's van `defs` en stuur ze als loop-voices naar de
+/// audio-engine. Een lege `defs` wist voorgaande bijgeluiden (orgelwissel).
+fn laad_en_stuur_bijgeluiden(state: &AppState, defs: &[vpo_sampler::grandorgue::BackgroundSoundDef]) {
+    let output_sr = state.audio_player.read().as_ref()
+        .map(|p| *p.sample_rate.read()).unwrap_or(48_000);
+    let mut voices: Vec<crate::background_sounds::BackgroundVoice> = Vec::new();
+    for d in defs {
+        match vpo_sampler::loader::load_wav(&d.path) {
+            Ok(sd) => {
+                let data_l = std::sync::Arc::new(sd.data);
+                let data_r = sd.right.map(std::sync::Arc::new);
+                let bron_sr = sd.sample_rate as f64;
+                let rate = (bron_sr / output_sr as f64).max(0.01);
+                voices.push(crate::background_sounds::BackgroundVoice {
+                    kind: d.kind,
+                    data_l,
+                    data_r,
+                    rate,
+                    // Blower en ambient opnamen zijn vaak behoorlijk zacht
+                    // bedoeld; -12 dB per voice houdt ze onder de registratie.
+                    voice_gain: 10f32.powf(-12.0 / 20.0),
+                });
+            }
+            Err(e) => {
+                warn!("Bijgeluid '{}' niet geladen: {} ({:?})", d.name, e, d.path);
+            }
+        }
+    }
+    // Altijd sturen, ook leeg — anders blijven de bijgeluiden van een
+    // vorig orgel doorlopen bij een wissel.
+    state.send_audio_command(AudioCommand::SetBackgroundVoices(voices));
+}
+
+/// Bijgeluiden-master-volume (0.7.97): lineaire gain op alle bijgeluiden
+/// samen. 0.0 = helemaal stil, 1.0 = volledig, max 4.0 (+12 dB) voor
+/// gebruikers die liever een duidelijke motor horen.
+#[tauri::command]
+pub fn set_background_gain(state: State<AppState>, gain_lineair: f32) -> Result<(), String> {
+    let g = if gain_lineair.is_finite() { gain_lineair.clamp(0.0, 4.0) } else { 0.3 };
+    *state.background_gain.write() = g;
+    state.send_audio_command(AudioCommand::SetBackgroundGain { gain_lineair: g });
+    Ok(())
+}
+
+/// Huidige bijgeluiden-master-volume (0..4, lineair).
+#[tauri::command]
+pub fn get_background_gain(state: State<AppState>) -> f32 {
+    *state.background_gain.read()
+}
+
+/// Motor-knop (0.7.97): true = blower-voices actief, false = fade uit.
+/// Ambient blijft altijd aan.
+#[tauri::command]
+pub fn set_blower_active(state: State<AppState>, active: bool) -> Result<(), String> {
+    *state.blower_active.write() = active;
+    state.send_audio_command(AudioCommand::SetBlowerActive(active));
+    Ok(())
+}
+
+/// Staat de motor aan?
+#[tauri::command]
+pub fn get_blower_active(state: State<AppState>) -> bool {
+    *state.blower_active.read()
+}
+
 /// Live volume van een perspectief in dB.
 #[tauri::command]
 pub fn set_perspective_gain(state: State<AppState>, name: String, gain_db: f32) -> Result<(), String> {
@@ -3072,6 +3142,10 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
                 info!("Bijgeluiden gevonden: {}", bg.iter()
                     .map(|b| format!("{:?} '{}'", b.kind, b.name)).collect::<Vec<_>>().join(", "));
             }
+            // Laad de WAV's en stuur ze naar de audio-engine (0.7.97). Lege
+            // Vec wist eerdere bijgeluiden uit (bij orgelwissel), dus altijd
+            // sturen, ook wanneer er niets gevonden is.
+            laad_en_stuur_bijgeluiden(state, &bg);
             bg.into_iter().map(|b| BackgroundSoundDto {
                 kind: match b.kind {
                     vpo_sampler::grandorgue::BackgroundSoundKind::Blower => "blower".into(),
@@ -8456,6 +8530,15 @@ fn restore_organ_settings(state: &AppState, organ_id: &str) {
     // `luisterpositie_toepassen`.
     *state.listening_position.write() = settings.listening_position.unwrap_or(0.0).clamp(0.0, 1.0);
 
+    // Bijgeluiden (0.7.97): opgeslagen master-volume en motor-stand terug.
+    // Wordt daarna meteen naar de audio-engine gestuurd.
+    let bg_gain = settings.background_gain.unwrap_or(0.3).clamp(0.0, 4.0);
+    *state.background_gain.write() = bg_gain;
+    state.send_audio_command(AudioCommand::SetBackgroundGain { gain_lineair: bg_gain });
+    let blower = settings.blower_active.unwrap_or(true);
+    *state.blower_active.write() = blower;
+    state.send_audio_command(AudioCommand::SetBlowerActive(blower));
+
     // Doorlopend klavier (per orgel).
     crate::state::DOORLOPEND_KLAVIER.store(
         settings.continuous_keyboard, std::sync::atomic::Ordering::Relaxed);
@@ -9155,6 +9238,8 @@ pub fn do_save_organ_settings(state: &AppState, presets: HashMap<String, PresetD
         perspectives,
         load_all_perspectives: *state.load_all_perspectives.read(),
         listening_position: Some(*state.listening_position.read()),
+        background_gain: Some(*state.background_gain.read()),
+        blower_active: Some(*state.blower_active.read()),
         extra_couplers: state.extra_coupler_ids.read().clone(),
         continuous_keyboard: crate::state::DOORLOPEND_KLAVIER.load(std::sync::atomic::Ordering::Relaxed),
         remote_layout,

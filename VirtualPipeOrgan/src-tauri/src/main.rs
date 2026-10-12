@@ -7,6 +7,7 @@
 mod audio;
 mod commands;
 mod crescendo_voorstel;
+mod background_sounds;
 mod feedback;
 mod library;
 mod silence;
@@ -374,6 +375,11 @@ fn main() {
             commands::set_listening_position,
             commands::get_listening_position,
             commands::get_listening_axis,
+            // Bijgeluiden-afspeel (0.7.97): motor-knop en volumeschuif.
+            commands::set_background_gain,
+            commands::get_background_gain,
+            commands::set_blower_active,
+            commands::get_blower_active,
             commands::download_sampleset,
             commands::get_audio_devices,
             commands::list_audio_hosts,

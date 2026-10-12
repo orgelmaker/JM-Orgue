@@ -2013,6 +2013,35 @@
     clearTimeout(luisterTimer);
     luisterTimer = setTimeout(() => dispatch('refreshMidiMappings'), 400);
   }
+
+  // Bijgeluiden (0.7.97): motor-knop in de werkbalk + volumeschuif in
+  // audio-instellingen. Bijgeluiden-lijst in organInfo zegt of de set er
+  // überhaupt heeft; staat die lijst leeg, dan verbergen we alles.
+  let bgGain = 0.3;
+  let motorAan = true;
+  async function haalBijgeluiden() {
+    try {
+      bgGain = await invoke('get_background_gain');
+      motorAan = await invoke('get_blower_active');
+    } catch (e) {}
+  }
+  $: if (organInfo?.id) haalBijgeluiden();
+  let bgTimer = null;
+  function zetBgGain(v) {
+    bgGain = Number(v);
+    invoke('set_background_gain', { gainLineair: bgGain }).catch(console.error);
+    clearTimeout(bgTimer);
+    bgTimer = setTimeout(() => dispatch('refreshMidiMappings'), 400);
+  }
+  async function zetMotor(aan) {
+    motorAan = aan;
+    try {
+      await invoke('set_blower_active', { active: aan });
+      dispatch('refreshMidiMappings');
+    } catch (e) { console.error(e); }
+  }
+  $: heeftBijgeluiden = (organInfo?.background_sounds?.length || 0) > 0;
+  $: heeftBlower = (organInfo?.background_sounds || []).some(b => b.kind === 'blower');
   async function zetLaadAllePosities(on) {
     try {
       perspReloadHint = await invoke('set_load_all_perspectives', { enabled: on });
@@ -5222,6 +5251,23 @@
                 <span class="luister-label">{$t('toolbar.listen_far')}</span>
               </div>
             {/if}
+            <!-- Motor-knop (0.7.97): aanwezig als de sampleset een blower-opname
+                 heeft; schakelt de orgelmotor in of uit met fade-in/uit. -->
+            {#if heeftBlower}
+              <button
+                class="btn btn-ghost btn-sm panel-layout-btn"
+                class:motor-aan={motorAan}
+                on:click={() => zetMotor(!motorAan)}
+                title={motorAan ? $t('toolbar.motor_on') : $t('toolbar.motor_off')}
+                aria-label={$t('toolbar.motor_title')}
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="12" r="4"/>
+                  <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+                </svg>
+                {$t('toolbar.motor')}
+              </button>
+            {/if}
             <button
               class="btn btn-ghost btn-sm panel-layout-btn"
               on:click={passendMaken}
@@ -6010,9 +6056,8 @@
             </div>
             {/if}
 
-            <!-- Bijgeluiden (0.7.96): inventarisatie uit de sampleset.
-                 Afspeel + motor-knop + schuif komt in 0.7.97. -->
-            {#if !secondary && (organInfo?.background_sounds?.length || 0) > 0}
+            <!-- Bijgeluiden (0.7.97): hoorbaar + motor-knop + volumeschuif. -->
+            {#if !secondary && heeftBijgeluiden}
             <div class="settings-block">
               <h3 class="settings-block-title">{$t('background.title')}</h3>
               <p class="settings-hint" style="margin: 0 0 0.4rem;">{$t('background.desc')}</p>
@@ -6026,7 +6071,21 @@
                   </li>
                 {/each}
               </ul>
-              <p class="settings-hint" style="margin: 0; opacity: 0.75;">{$t('background.coming_soon')}</p>
+              <label style="display: flex; align-items: center; gap: 0.5rem; margin-top: 0.4rem; font-size: 0.78rem;">
+                <span style="min-width: 5rem;">{$t('background.volume')}</span>
+                <input type="range" min="0" max="2" step="0.01" value={bgGain}
+                  on:input={(e) => zetBgGain(e.currentTarget.value)}
+                  style="flex: 1;" />
+                <span style="min-width: 3.5rem; text-align: right; opacity: 0.7;">
+                  {bgGain > 0.001 ? (20 * Math.log10(bgGain)).toFixed(1) + ' dB' : '−∞'}
+                </span>
+              </label>
+              {#if heeftBlower}
+                <label style="display: flex; align-items: center; gap: 0.4rem; margin-top: 0.4rem; font-size: 0.78rem;">
+                  <input type="checkbox" checked={motorAan} on:change={(e) => zetMotor(e.target.checked)} />
+                  <span>{$t('background.motor_on')}</span>
+                </label>
+              {/if}
             </div>
             {/if}
 

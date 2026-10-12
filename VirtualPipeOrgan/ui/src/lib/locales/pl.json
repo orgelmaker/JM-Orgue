@@ -554,7 +554,11 @@
     "fit_done": "Wszystko mieści się na ekranie",
     "fit_short": "Poza ekranem jest jeszcze {n} rejestrów — pomoże większe okno",
     "div_order_reset": "Przywróć kolejność",
-    "div_order_reset_title": "Powrót do kolejności organów i ponowne pokazanie wszystkich sekcji"
+    "div_order_reset_title": "Powrót do kolejności organów i ponowne pokazanie wszystkich sekcji",
+    "motor": "Silnik",
+    "motor_on": "Silnik włączony",
+    "motor_off": "Silnik wyłączony",
+    "motor_title": "Silnik organów wł./wył."
   },
   "speeltafel": {
     "show_bars": "Paski",
@@ -1332,6 +1336,7 @@
     "desc": "Ten sampleset zawiera jeden lub więcej ciągłych dźwięków w tle (dmuchawa i/lub szum pomieszczenia).",
     "blower": "dmuchawa:",
     "ambient": "tło:",
-    "coming_soon": "Odtwarzanie z przyciskiem Silnik i suwakiem głośności pojawi się w następnej wersji."
+    "volume": "Głośność",
+    "motor_on": "Silnik włączony"
   }
 }

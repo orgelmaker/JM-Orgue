@@ -554,7 +554,11 @@
     "fit_done": "Alles staat in beeld",
     "fit_short": "Nog {n} registers buiten beeld — een groter venster helpt",
     "div_order_reset": "Volgorde terug",
-    "div_order_reset_title": "Terug naar de volgorde van het orgel, en alle werken weer tonen"
+    "div_order_reset_title": "Terug naar de volgorde van het orgel, en alle werken weer tonen",
+    "motor": "Motor",
+    "motor_on": "Motor is aan",
+    "motor_off": "Motor is uit",
+    "motor_title": "Orgelmotor aan of uit"
   },
   "speeltafel": {
     "show_bars": "Balken",
@@ -1332,6 +1336,7 @@
     "desc": "Deze sampleset heeft een of meer doorlopende achtergrondgeluiden (de orgelmotor en/of ruimtegeluid).",
     "blower": "motor:",
     "ambient": "ambient:",
-    "coming_soon": "Afspelen met motor-knop en volumeschuif komt in een volgende versie."
+    "volume": "Volume",
+    "motor_on": "Motor aan"
   }
 }

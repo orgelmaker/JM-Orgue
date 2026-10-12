@@ -554,7 +554,11 @@
     "fit_done": "Everything fits",
     "fit_short": "{n} stops still off screen — a larger window would help",
     "div_order_reset": "Reset order",
-    "div_order_reset_title": "Back to the organ’s own order, showing every division again"
+    "div_order_reset_title": "Back to the organ’s own order, showing every division again",
+    "motor": "Motor",
+    "motor_on": "Motor is on",
+    "motor_off": "Motor is off",
+    "motor_title": "Organ motor on or off"
   },
   "speeltafel": {
     "show_bars": "Bars",
@@ -1332,6 +1336,7 @@
     "desc": "This sample set has one or more continuous background sounds (the organ blower and/or room ambience).",
     "blower": "blower:",
     "ambient": "ambient:",
-    "coming_soon": "Playback with motor button and volume slider is coming in a next release."
+    "volume": "Volume",
+    "motor_on": "Motor on"
   }
 }

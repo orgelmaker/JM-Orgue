@@ -554,7 +554,11 @@
     "fit_done": "Todo cabe en pantalla",
     "fit_short": "Quedan {n} registros fuera de pantalla: una ventana mayor ayudaría",
     "div_order_reset": "Orden original",
-    "div_order_reset_title": "Volver al orden del órgano y mostrar de nuevo todas las divisiones"
+    "div_order_reset_title": "Volver al orden del órgano y mostrar de nuevo todas las divisiones",
+    "motor": "Motor",
+    "motor_on": "Motor encendido",
+    "motor_off": "Motor apagado",
+    "motor_title": "Motor del órgano encendido/apagado"
   },
   "speeltafel": {
     "show_bars": "Barras",
@@ -1332,6 +1336,7 @@
     "desc": "Este sampleset tiene uno o varios sonidos continuos (soplador y/o sonido ambiente).",
     "blower": "soplador:",
     "ambient": "ambiente:",
-    "coming_soon": "La reproducción con botón Motor y control de volumen llegará en una próxima versión."
+    "volume": "Volumen",
+    "motor_on": "Motor encendido"
   }
 }

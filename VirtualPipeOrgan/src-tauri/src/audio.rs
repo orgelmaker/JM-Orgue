@@ -838,6 +838,14 @@ pub enum AudioCommand {
     /// Lineaire gain per perspectief-slot (live, geen herlaad). Slot 0 is
     /// altijd 1.0 en wordt genegeerd.
     SetPerspectiveGain { slot: u8, gain_db: f32 },
+    /// Doorlopende achtergrondgeluiden (0.7.97): vervang de set van loop-
+    /// voices (blower, ambient). Lege lijst = alles stilzetten.
+    SetBackgroundVoices(Vec<crate::background_sounds::BackgroundVoice>),
+    /// Bijgeluiden-master: lineaire gain op alle achtergrondgeluiden samen.
+    SetBackgroundGain { gain_lineair: f32 },
+    /// Motor-knop in de werkbalk: true = blower-voices actief, false =
+    /// fade uit. Ambient blijft altijd aan.
+    SetBlowerActive(bool),
     /// Clear all samples
     ClearSamples,
     /// Shutdown
@@ -3786,6 +3794,10 @@ fn run_audio_thread(
     // NoteOff (nooit krimpen; groeit hooguit één keer bij >32 lagen).
     let mut rank_layout: Arc<HashMap<u32, Vec<(u8, u8)>>> = Arc::new(HashMap::new());
     let mut persp_gain: [f32; MAX_LAYERS] = [1.0; MAX_LAYERS];
+    // Achtergrondgeluid-engine (0.7.97): leeg bij start; set_voices komt uit
+    // de loader. De engine werkt stand-alone — niet via de voice-pool — en
+    // wordt in de output-mix opgeteld ná alle registervoices, voor master_gain.
+    let mut bg_engine = crate::background_sounds::BackgroundEngine::new();
     let mut release_spawn_scratch: Vec<PlayingVoice> = Vec::with_capacity(32);
     // RAM-plafond op volledig geladen samples. Zonder plafond groeide het
     // geheugen tijdens lang spelen onbegrensd (elke gespeelde pijp + release
@@ -4185,6 +4197,18 @@ fn run_audio_thread(
                         if slot > 0 && (slot as usize) < MAX_LAYERS {
                             persp_gain[slot as usize] = 10f32.powf(gain_db / 20.0);
                         }
+                    }
+                    AudioCommand::SetBackgroundVoices(voices) => {
+                        let n = voices.len();
+                        bg_engine.set_voices(voices);
+                        info!("Achtergrondgeluiden: {} loop-voices actief", n);
+                    }
+                    AudioCommand::SetBackgroundGain { gain_lineair } => {
+                        bg_engine.set_global_gain(gain_lineair);
+                    }
+                    AudioCommand::SetBlowerActive(active) => {
+                        bg_engine.set_blower(active);
+                        info!("Motor: {}", if active { "aan" } else { "uit" });
                     }
                     AudioCommand::NoteOff { stop_id, pipe_num } => {
                         // Echte release-samples (opgenomen kerkakoestiek): staan
@@ -5709,6 +5733,12 @@ fn run_audio_thread(
                         }
                     }
                     ns_pass[2] += t_pas.elapsed().as_nanos();
+                    // Achtergrondgeluiden (0.7.97): direct na alle registervoices
+                    // en effecten erbovenop. Ze gaan buiten galm/limiter om; de
+                    // clamping-stap heeft het eindframe al afgevangen. Een lege
+                    // engine kost twee lees-vergelijkingen (is_actief), dus
+                    // geen meetbare belasting voor sets zonder bijgeluiden.
+                    bg_engine.mix_interleaved(data, fi, bn, channels);
                     fi += bn;
                 }
                 // Tijdmeting per pas wegschrijven (fase 1): promille van de

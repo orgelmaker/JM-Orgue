@@ -554,7 +554,11 @@
     "fit_done": "Tout tient à l’écran",
     "fit_short": "Encore {n} jeux hors écran — une fenêtre plus grande aiderait",
     "div_order_reset": "Ordre d’origine",
-    "div_order_reset_title": "Revenir à l’ordre de l’orgue et réafficher tous les claviers"
+    "div_order_reset_title": "Revenir à l’ordre de l’orgue et réafficher tous les claviers",
+    "motor": "Moteur",
+    "motor_on": "Moteur en marche",
+    "motor_off": "Moteur arrêté",
+    "motor_title": "Moteur de l'orgue marche/arrêt"
   },
   "speeltafel": {
     "show_bars": "Barres",
@@ -1332,6 +1336,7 @@
     "desc": "Cet échantillonnage comporte un ou plusieurs sons continus (soufflerie et/ou son d'ambiance).",
     "blower": "soufflerie :",
     "ambient": "ambiance :",
-    "coming_soon": "La lecture avec bouton Moteur et curseur de volume arrivera dans une prochaine version."
+    "volume": "Volume",
+    "motor_on": "Moteur en marche"
   }
 }

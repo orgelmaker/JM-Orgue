@@ -46,6 +46,12 @@ pub struct OrganDefinition {
     pub tremulants: Vec<TremulantDef>,
     /// Couplers
     pub couplers: Vec<CouplerDef>,
+    /// Doorlopende achtergrondgeluiden rechtstreeks door de importer gevuld
+    /// (0.7.97). GrandOrgue laat dit leeg omdat zijn blower/ambient als
+    /// Stop staan en via `verzamel_bijgeluiden` eruit worden gevist;
+    /// Hauptwerk vult het hier omdat zijn blower/ambient-pijpen op switches
+    /// zitten en nooit via een Stop binnenkomen.
+    pub extra_bijgeluiden: Vec<BackgroundSoundDef>,
 }
 
 /// Een doorlopend achtergrondgeluid dat buiten de registratie om klinkt
@@ -63,7 +69,7 @@ pub struct BackgroundSoundDef {
     pub path: PathBuf,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum BackgroundSoundKind {
     /// Orgelmotor (blaasbalg-aandrijving). Hoort bij de motor-knop in de
     /// werkbalk; staat standaard aan.
@@ -99,6 +105,9 @@ impl OrganDefinition {
                 uit.push(BackgroundSoundDef { kind, name: stop.name.clone(), path });
             }
         }
+        // Hauptwerk-pad (0.7.97): pijpen op switches zijn door de HW-importer
+        // in `extra_bijgeluiden` gezet.
+        uit.extend(self.extra_bijgeluiden.iter().cloned());
         uit
     }
 }
@@ -543,6 +552,7 @@ impl OdfParser {
             enclosures,
             tremulants,
             couplers,
+            extra_bijgeluiden: Vec::new(),
         })
     }
 

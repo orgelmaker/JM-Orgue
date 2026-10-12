@@ -482,6 +482,12 @@ pub struct OrganSettings {
     /// aan het gedrag van vóór 0.7.95.
     #[serde(default)]
     pub listening_position: Option<f32>,
+    /// Bijgeluiden-master (0.7.97): lineaire gain 0..4, standaard 0.3.
+    #[serde(default)]
+    pub background_gain: Option<f32>,
+    /// Motor-knop (0.7.97): true = blower aan. Standaard aan.
+    #[serde(default)]
+    pub blower_active: Option<bool>,
     /// Koppels die de sampleset zelf niet heeft en die de organist erbij heeft
     /// gezet (0.7.47): de id's uit de door de app afgeleide koppellijst.
     #[serde(default)]

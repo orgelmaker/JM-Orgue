@@ -1457,6 +1457,13 @@ pub struct AppState {
     /// twee buurposities, alle andere stilgezet. Op een merkstreep klinkt
     /// precies één positie. Zie `luisterpositie_toepassen`.
     pub listening_position: Arc<RwLock<f32>>,
+    /// Bijgeluiden-master (0.7.97): lineaire gain 0..4 die alle doorlopende
+    /// achtergrondgeluiden (blower, ambient) tegelijk schaalt. Bediend via
+    /// de schuif in de UI; standaard 0.3 (−10 dB).
+    pub background_gain: Arc<RwLock<f32>>,
+    /// Motor-knop (0.7.97): staat de blower aan? Standaard true (zoals de
+    /// Hauptwerk-knop "Blower"). Ambient volgt dit niet.
+    pub blower_active: Arc<RwLock<bool>>,
     /// Lagen per (niet-ruis-)stop van het geladen orgel — diagnose (/ranks,
     /// layered_stops), gevuld in beide laadroutes (ook custom sets, waar
     /// organ_definition None/verouderd is).
@@ -1806,6 +1813,8 @@ impl AppState {
             extra_coupler_ids: Arc::new(RwLock::new(Vec::new())),
             load_all_perspectives: Arc::new(RwLock::new(false)),
             listening_position: Arc::new(RwLock::new(0.0)),
+            background_gain: Arc::new(RwLock::new(0.3)),
+            blower_active: Arc::new(RwLock::new(true)),
             rank_summary: Arc::new(RwLock::new(Vec::new())),
         }
     }

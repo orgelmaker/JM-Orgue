@@ -5,6 +5,28 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.97] - 2026-10-12
+
+### Bijgeluiden hoorbaar: motor en ambient uit de sampleset
+- Doorlopende achtergrondgeluiden uit de sampleset — orgelmotor, blaasbalg
+  en ruimtegeluid — zijn nu hoorbaar. Zodra het orgel geladen is loopen
+  de bijbehorende WAV-bestanden continu in een eigen sub-engine, naast de
+  registratie. Volledig buiten de voice-pool om, dus geen risico op
+  stemdiefstal.
+- **Motor-knop** in de werkbalk (links van de layout-toggle), zichtbaar
+  als de set een blower-opname heeft. Fade in / fade uit van ongeveer 0,3
+  seconde, klikloos.
+- **Volumeschuif "Volume"** in Orgel-instellingen → Bijgeluiden, met de dB-
+  waarde eronder. Beide instellingen worden per orgel bewaard.
+- **Hauptwerk-import** herkent nu ook pijpen op switches (zonder Stop
+  eromheen), zoals in Grabowski's sets: NoiseSwitch wordt ambient,
+  Blower-switch wordt motor. Speelgoedregisters (Cymbelstern, Vogelsang,
+  Cuculus) blijven buiten omdat ze standaard uit staan.
+- Zeven lokalisaties bijgewerkt (background.volume, background.motor_on,
+  toolbar.motor en motor_title).
+- Vier nieuwe tests voor de BackgroundEngine: lege engine, fade in/uit,
+  loop wrap, ambient altijd aan, stereo-splitsing.
+
 ## [0.7.96] - 2026-10-12
 
 ### Bijgeluiden — eerste stap: inventarisatie bij het laden
