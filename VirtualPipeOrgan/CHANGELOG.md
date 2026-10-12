@@ -5,6 +5,32 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.94] - 2026-10-12
+
+### Hauptwerk: originele pijptoon van vervangen en hergestemde pijpen
+- Een Hauptwerk-sampleset kan voor een kapotte opname het bestand van een
+  buurtoon lenen en zet dan de originele pijptoon in de orgeldefinitie. Tot
+  nu toe luisterde JM-Orgue daar alleen naar bij een specifieke methodecode;
+  de bekende sets van Piotr Grabowski (**Nitra**, **Nowa Ruda**, en vele
+  andere) gebruiken een andere code voor hetzelfde veld, zodat die
+  "vervangen pijpen" bij ons op de verkeerde toon klonken. In Nitra ging
+  het bij de Copula maior 8' om 54 pijpen; in Nowa Ruda honderden. Vanaf
+  deze versie telt elke gevulde Hz-waarde en komt elke vervangen pijp op
+  de echte orgeltoon uit, net als in Hauptwerk — in élke stemming, ook de
+  stand "Origineel (zoals opgenomen)". Pijpen waar bestand en originele
+  toon exact gelijk zijn (het overgrote deel) klinken bit-identiek aan
+  vroeger.
+- Als in de instellingen "keep original tuning" (`BaseTuningDeviation`) is
+  opgegeven, trekt JM-Orgue nu bovendien naar de originele orgeltoon toe
+  (Hauptwerks "Original organ tuning"), niet naar de bestandstoon. Dat
+  maakt alleen uit voor sets die beide invullen; voor de rest verandert
+  er niets. Formule in `retune.rs` is bijgewerkt met tests.
+- Nieuwe tests: `pitchhz_bij_methodecode_1_wordt_opgepikt`,
+  `nitra_vervangen_pijp_keep_100`, `nitra_vervangen_pijp_keep_0`,
+  `zonder_origineel_valt_terug_op_oude_formule`.
+- Logregel bij het laden: "Hauptwerk originele pijptoon toegepast op N
+  pijpen".
+
 ## [0.7.93] - 2026-10-06
 
 ### Triolen

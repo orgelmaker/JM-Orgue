@@ -2239,6 +2239,11 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
         // voor retune::retune_cents + het attack-pad (voor de smpl-meting uit
         // de preload-buffer) + de HW-terugval (originele pijptoon).
         let mut retune_inputs: Vec<((u32, u32), PathBuf, crate::retune::PipePitchInput, Option<f32>)> = Vec::new();
+        // Hauptwerk "Original organ tuning" op pijpniveau (0.7.94): tellers
+        // voor de logregel over hoeveel pijpen een `origineel − bestandstoon`-
+        // correctie meekrijgen (vervangen of hergestemde opnamen).
+        let mut hw_origineel_toegepast: usize = 0;
+        let mut hw_origineel_verworpen: usize = 0;
         // Door de sampleset opgegeven crossfade-duur per release-key (ms):
         // GrandOrgue `ReleaseCrossfadeLength`, 1-3000 ms.
         let mut release_xfade: HashMap<(u32, u32), u32> = HashMap::new();
@@ -2408,8 +2413,35 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
                         let pipe_db = extra.amplitude_level.map(ampl_to_db).unwrap_or(0.0)
                             + extra.gain_db.unwrap_or(0.0);
                         let total_db = organ_db + wc_db + stop_db + pipe_db;
+                        // Hauptwerk-"Original organ tuning" op pijpniveau: als
+                        // het bestand bekend is én de originele orgeltoon, zet
+                        // de pijp op de originele toon door `origineel −
+                        // bestandstoon` aan de ODF-PitchTuning toe te voegen.
+                        // Voor de ~95 % van de pijpen waar origineel exact gelijk
+                        // is aan de bestandstoon is deze delta 0 en blijft het
+                        // sample bit-identiek klinken. Voor Hauptwerks truc
+                        // "pijp 79 ← bestand 77-f" wordt het de verschuiving
+                        // naar de echte orgeltoon (ongeveer +200 ct). In
+                        // hertemper-modus telt deze offset NIET mee: daar wordt
+                        // odf_retune_map gebruikt (audio.rs:5202), dat intern
+                        // zelf met `original_cents` werkt (retune.rs). Grens:
+                        // |delta| ≤ 600 ct (GO-plausibiliteitsgrens).
+                        let hw_origineel_delta = match (extra.original_pitch_cents, extra.sample_pitch_cents) {
+                            (Some(orig), Some(sample)) => {
+                                let d = orig - sample;
+                                if d.abs() <= crate::retune::MAX_PLAUSIBLE_DELTA_CENTS {
+                                    hw_origineel_toegepast += 1;
+                                    d
+                                } else {
+                                    hw_origineel_verworpen += 1;
+                                    0.0
+                                }
+                            }
+                            _ => 0.0,
+                        };
                         let total_cents = organ_cents + wc_cents + stop_cents
-                            + extra.pitch_tuning_cents.unwrap_or(0.0);
+                            + extra.pitch_tuning_cents.unwrap_or(0.0)
+                            + hw_origineel_delta;
                         if total_db.abs() > 0.01 || total_cents.abs() > 0.01 {
                             odf_voicings.insert((stop.id, pipe_num), (total_db, total_cents));
                         }
@@ -2432,6 +2464,7 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
                                     key_midi,
                                     harmonic: extra.harmonic_number.unwrap_or(owner.harmonic_number).max(1),
                                     measured_cents: odf_measured,
+                                    original_cents: extra.original_pitch_cents,
                                     pitch_correction_cents: definition.organ.pitch_correction_cents
                                         + owner_wc_pc
                                         + owner.pitch_correction
@@ -2627,6 +2660,12 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
             "Hertemperen: {} van {} pijpen met gemeten toonhoogte ({} onplausibel verworpen)",
             retune_pipes, retune_total, retune_rejected
         );
+        if hw_origineel_toegepast > 0 || hw_origineel_verworpen > 0 {
+            info!(
+                "Hauptwerk originele pijptoon toegepast op {} pijpen (vervangen/hergestemde opnamen; {} onplausibel verworpen)",
+                hw_origineel_toegepast, hw_origineel_verworpen
+            );
+        }
 
         // Fan-out naar per-key buffers (gedeelde Arc). Release-keys (gemarkeerd
         // met RELEASE_PIPE_FLAG) gaan mee in dezelfde preload-map: NoteOff zoekt

@@ -164,11 +164,20 @@ fn build_definition(
             let harmonic = p
                 .get_u32("Pitch_Tempered_RankBasePitch64ftHarmonicNum")
                 .filter(|h| *h > 0);
-            let original_cents = if p.get_u32("Pitch_OriginalOrgan_SpecificationMethodCode") == Some(2) {
-                p.get_f32("Pitch_OriginalOrgan_PitchHz").filter(|hz| *hz > 0.0).map(hz_to_cents)
-            } else {
-                None
-            };
+            // Pitch_OriginalOrgan_PitchHz = de toon van de pijp op het echte
+            // orgel (vóór samplen). Hauptwerk gebruikt het verschil
+            // (origineel − samplepitch) om vervangen of hergestemde pijpen op de
+            // originele pijptoon te zetten, ook in "Original organ tuning".
+            // Tot 0.7.93 lazen we het veld alleen bij SpecificationMethodCode 2;
+            // de sets van Piotr Grabowski (Nitra, Nowa Ruda — vele andere) gebruiken
+            // code 1 met de Hz-waarde gewoon gevuld, dus daar werd elke vervangen
+            // pijp op bestandstoon gespeeld (Copula maior g'' klonk als f''). Een
+            // Hz-waarde die er staat telt — ongeacht de methodecode. Een lege of
+            // 0-waarde laat de pijp op bestandstoon (de huidige terugval).
+            let original_cents = p
+                .get_f32("Pitch_OriginalOrgan_PitchHz")
+                .filter(|hz| *hz > 0.0)
+                .map(hz_to_cents);
             let keep_pct = if p.get_u32("Pitch_Tempered_BaseTuningSchemeCode") == Some(4) {
                 p.get_f32("Pitch_Tempered_BaseTuningDeviation")
             } else {
@@ -1583,6 +1592,32 @@ mod tests {
         let PipeDef::Sample { extra: em, .. } = &montre.pipes[0] else { panic!("sample") };
         assert_eq!(em.retune_keep_pct, Some(100.0));
         assert_eq!(em.harmonic_number, None);
+    }
+
+    /// Piotr Grabowski's sets (Nitra, Nowa Ruda, en vele andere) zetten de
+    /// originele pijptoon in Pitch_OriginalOrgan_PitchHz met
+    /// SpecificationMethodCode = 1 (niet 2). Tot 0.7.93 negeerden we die Hz-
+    /// waarde omdat we alleen op code 2 lazen; daardoor klonken vervangen
+    /// pijpen (bv. Copula maior g'' die op bestand `077-f.wav` wijst) op de
+    /// toon van het buurbestand. Vanaf 0.7.94 telt elke gevulde Hz-waarde.
+    #[test]
+    fn pitchhz_bij_methodecode_1_wordt_opgepikt() {
+        // Fixture: pijp 11 krijgt code 1 (i.p.v. code 2) met dezelfde Hz-waarde.
+        let xml = mini_xml().replace(
+            "<Pitch_OriginalOrgan_SpecificationMethodCode>2</Pitch_OriginalOrgan_SpecificationMethodCode>",
+            "<Pitch_OriginalOrgan_SpecificationMethodCode>1</Pitch_OriginalOrgan_SpecificationMethodCode>",
+        );
+        let mut pkg_dirs = HashMap::new();
+        pkg_dirs.insert(1u32, PathBuf::from("/pkg"));
+        let def = build_definition(&xml, PathBuf::from("/root"), &pkg_dirs).expect("build");
+        let bourdon = def.stops.iter().find(|s| s.name == "Bourdon 8").unwrap();
+        let PipeDef::Sample { extra, .. } = &bourdon.pipes[0] else { panic!("sample") };
+        // 65.8 Hz → 3610.39 ct, ook bij code 1.
+        assert!(
+            extra.original_pitch_cents.map(|c| (c - 3610.39).abs() < 0.05).unwrap_or(false),
+            "originele pijptoon bij methodecode 1 niet gelezen: {:?}",
+            extra.original_pitch_cents
+        );
     }
 
     #[test]

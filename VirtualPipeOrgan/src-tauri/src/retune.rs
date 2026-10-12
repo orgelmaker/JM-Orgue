@@ -1,14 +1,22 @@
 //! Hertemperen op gemeten pijptoonhoogte — pure rekenkern (geen I/O, geen
 //! state), zodat de formule los van de laadpijplijn te testen is.
 //!
-//! GrandOrgue-semantiek (GOSoundingPipe::GetAutoTuningPitchOffset):
+//! GrandOrgue-/Hauptwerk-semantiek (GOSoundingPipe::GetAutoTuningPitchOffset,
+//! Hauptwerk BaseTuningScheme):
 //!   target(key, h)   = 100·key + 1200·log2(h/8)              (cents, 6900 = a' 440 Hz)
-//!   retune(pijp)     = (target − gemeten)·(1 − keep%/100) + PitchCorrection-som
+//!   gespeeld         = target + keep%/100 · (origineel − target)
+//!   retune(pijp)     = gespeeld − gemeten + PitchCorrection-som
 //! waarbij "gemeten" de absolute samplepitch is uit (prioriteit): ODF
 //! MIDIKeyNumber/MIDIPitchFraction of Hauptwerk Pitch_ExactSamplePitch →
-//! smpl-chunk van de WAV (unity note + fractie) → Hauptwerk
-//! Pitch_OriginalOrgan_PitchHz. Zonder meting: `None` (de engine valt dan
-//! terug op de ODF-PitchTuning, zoals in "Origineel").
+//! smpl-chunk van de WAV (unity note + fractie). "Origineel" is de toon die de
+//! pijp op het echte orgel had (Hauptwerk Pitch_OriginalOrgan_PitchHz).
+//! Zonder originele toon: origineel = gemeten (identiek aan de GO-formule
+//! (target − gemeten)·(1 − keep%)). Zonder meting: `None` (de engine valt dan
+//! terug op de ODF-PitchTuning, zoals in "Origineel"-stand).
+//!
+//! Zonder dit onderscheid klonk bij keep% > 0 een vervangen pijp (Hauptwerks
+//! truc: `045-a.wav` toekennen aan toets 43 omdat `043-g.wav` kapot is) op de
+//! toon van het buurbestand in plaats van op de echte orgeltoon.
 //!
 //! PitchCorrection is een BEWUSTE, OPGETELDE afwijking (zwever van een
 //! celeste) — plusteken. In "Origineel" telt hij niet mee.
@@ -22,6 +30,13 @@ pub struct PipePitchInput {
     pub harmonic: u32,
     /// Absolute gemeten samplepitch in cents (6900 = a'), of None.
     pub measured_cents: Option<f32>,
+    /// Originele toon van de pijp op het echte orgel in cents (Hauptwerk
+    /// Pitch_OriginalOrgan_PitchHz). Bij keep% > 0 schuift de pijp (deels) naar
+    /// deze toon toe; bij een vervangen opname (bestand van een buurtoon) staat
+    /// hij een hele of halve toon van `measured_cents` af. Zonder waarde valt
+    /// hij samen met `measured_cents` en gedraagt de formule zich zoals de
+    /// oude GO-formule `(target − gemeten)·(1 − keep)`.
+    pub original_cents: Option<f32>,
     /// Gesommeerde PitchCorrection (Organ + Windchest + Stop/Rank + Pipe).
     pub pitch_correction_cents: f32,
     /// Hauptwerk BaseTuningDeviation: % van de originele afwijking dat
@@ -78,9 +93,16 @@ pub fn target_cents(key: u32, harmonic: u32) -> f32 {
 /// (plausibele) meting is. Vervangt in hertemper-modus de ODF-PitchTuning.
 pub fn retune_cents(inp: &PipePitchInput) -> Option<f32> {
     let measured = inp.measured_cents?;
+    let target = target_cents(inp.key_midi, inp.harmonic);
     let keep = inp.keep_pct.clamp(0.0, 100.0) / 100.0;
-    let r = (target_cents(inp.key_midi, inp.harmonic) - measured) * (1.0 - keep)
-        + inp.pitch_correction_cents;
+    // "gespeeld" is de toon waarop de pijp hoort te klinken na hertemperen:
+    // op de doel-toon, maar bij keep% > 0 trekt hij (deels) naar de originele
+    // orgeltoon. Zonder originele toon valt die samen met `measured`, waardoor
+    // `(gespeeld − measured) = (target − measured)·(1 − keep)` — identiek aan de
+    // oude GO-formule, dus bestaande tests blijven kloppen.
+    let origineel = inp.original_cents.unwrap_or(measured);
+    let gespeeld = target + keep * (origineel - target);
+    let r = gespeeld - measured + inp.pitch_correction_cents;
     if !r.is_finite() || (r - inp.original_pitch_tuning_cents).abs() > MAX_PLAUSIBLE_DELTA_CENTS {
         return None;
     }
@@ -96,9 +118,24 @@ mod tests {
             key_midi: key,
             harmonic: h,
             measured_cents: measured,
+            original_cents: None,
             pitch_correction_cents: pc,
             keep_pct: keep,
             original_pitch_tuning_cents: orig,
+        }
+    }
+
+    /// Zelfde als `inp()`, maar met een opgegeven originele orgeltoon
+    /// (Pitch_OriginalOrgan_PitchHz als cents).
+    fn inp_orig(key: u32, h: u32, measured: Option<f32>, original: f32, pc: f32, keep: f32) -> PipePitchInput {
+        PipePitchInput {
+            key_midi: key,
+            harmonic: h,
+            measured_cents: measured,
+            original_cents: Some(original),
+            pitch_correction_cents: pc,
+            keep_pct: keep,
+            original_pitch_tuning_cents: 0.0,
         }
     }
 
@@ -162,6 +199,40 @@ mod tests {
         assert_eq!(measured_from_smpl(None, Some(6.4)), None);
         assert_eq!(measured_from_smpl(Some(0), Some(6.4)), None);
         assert!((measured_from_smpl(Some(36), Some(0.0)).unwrap() - 3600.0).abs() < 1e-6);
+    }
+
+    /// Nitra RP Copula maior 8', pijp 79 (g''): bestandstoon 708,7 Hz
+    /// (`Pitch_ExactSamplePitch`), originele pijptoon 796,29 Hz
+    /// (`Pitch_OriginalOrgan_PitchHz`). In Hauptwerks "Original organ tuning"
+    /// (keep = 100 %) klinkt deze vervangen pijp op de originele orgeltoon:
+    /// retune = origineel − gemeten ≈ +200,7 ct.
+    #[test]
+    fn nitra_vervangen_pijp_keep_100() {
+        // target(79, 8) = 7900, measured = 7726.2, origineel = 7926.9
+        let r = retune_cents(&inp_orig(79, 8, Some(7726.2), 7926.9, 0.0, 100.0)).unwrap();
+        assert!((r - 200.7).abs() < 0.05, "{r}");
+    }
+
+    /// Zelfde pijp bij keep = 0 (volledig hertemperen, bv. gelijkzwevend):
+    /// hij speelt op de doel-toon, dus retune = target − gemeten ≈ +173,8 ct.
+    /// De originele orgeltoon doet dan niet mee.
+    #[test]
+    fn nitra_vervangen_pijp_keep_0() {
+        let r = retune_cents(&inp_orig(79, 8, Some(7726.2), 7926.9, 0.0, 0.0)).unwrap();
+        assert!((r - 173.8).abs() < 0.05, "{r}");
+    }
+
+    /// Zonder originele orgeltoon valt de formule samen met de GO-formule:
+    /// (target − measured)·(1 − keep). Een vervangen pijp zonder PitchHz-veld
+    /// klinkt dan nog altijd fout bij keep = 100, maar dat is dezelfde fout
+    /// als vóór de fix (en komt in de praktijk niet voor: Hauptwerk vraagt het
+    /// veld voor élke pijp).
+    #[test]
+    fn zonder_origineel_valt_terug_op_oude_formule() {
+        // target(79, 8) = 7900, measured = 7726.2, geen origineel, keep = 50.
+        // Oude formule: (7900 - 7726.2) · 0.5 = 86.9
+        let r = retune_cents(&inp(79, 8, Some(7726.2), 0.0, 50.0, 0.0)).unwrap();
+        assert!((r - 86.9).abs() < 0.05, "{r}");
     }
 
     /// (60, 0.0) wordt alléén geaccepteerd als de doeltoon exact 6000 is.
