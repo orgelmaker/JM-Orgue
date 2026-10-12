@@ -881,6 +881,13 @@ fn luister_gain_lineair(pos: f32, idx: usize, n: usize) -> f32 {
 /// enable-toggle, trim-schuif, na een load.
 pub fn luisterpositie_toepassen(state: &AppState) {
     let pos = state.listening_position.read().clamp(0.0, 1.0);
+    // Galm volgt de luisterpositie (0.7.100): aan de klaviatuur hoor je
+    // nauwelijks galm (de nagalm is pas boven in de kerk opgebouwd); verder
+    // naar achteren wint de galm aan terrein. Lineair van 0.2 bij pos=0 tot
+    // 1.0 bij pos=1 — multiplicatief op de user-reverb-mix. De organist die
+    // de galm hélemaal uitzet (reverb_mix=0) houdt daar niets van.
+    let reverb_factor = 0.2 + 0.8 * pos;
+    state.send_audio_command(AudioCommand::SetReverbPositionFactor(reverb_factor));
     let persp_snapshot: Vec<_> = state.perspectives.read().iter().cloned().collect();
     let as_idx = luisteras_indices(&persp_snapshot);
     let n = as_idx.len();

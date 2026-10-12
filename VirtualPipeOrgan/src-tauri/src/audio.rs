@@ -866,6 +866,12 @@ pub enum AudioCommand {
     /// Speel de registerklik voor deze stop af — attack bij aanzetten,
     /// release bij uitzetten. Negeert onbekende stop_id's.
     PlayStopClick { internal_stop_id: u32, is_attack: bool },
+    /// Galm-multiplier gekoppeld aan de luisterpositie-schuif (0.7.100):
+    /// vermenigvuldigt zich met de user-reverb-mix in de callback. 1.0 =
+    /// user-mix onveranderd; <1 = minder galm (dichter bij het orgel).
+    /// Deze stuurt `luisterpositie_toepassen` steeds mee: dichtbij → 0.2 ×
+    /// user-mix, achter in de kerk → 1.0 × user-mix.
+    SetReverbPositionFactor(f32),
     /// Clear all samples
     ClearSamples,
     /// Shutdown
@@ -3606,6 +3612,10 @@ fn run_audio_thread(
     // Convolution reverb (initialized when IR is loaded)
     let reverb: Arc<RwLock<Option<ConvolutionReverb>>> = Arc::new(RwLock::new(None));
     let reverb_mix: Arc<RwLock<f32>> = Arc::new(RwLock::new(0.0));
+    // Positiefactor op de galm (0.7.100): vermenigvuldigt zich met reverb_mix
+    // in de callback. 1.0 = user-mix onveranderd. De luisterpositie-schuif
+    // stuurt dit vanaf de UI-kant via SetReverbPositionFactor.
+    let reverb_pos_factor: Arc<RwLock<f32>> = Arc::new(RwLock::new(1.0));
     // Algorithmic FDN reverb
     let fdn_reverb: Arc<RwLock<FdnReverb>> = Arc::new(RwLock::new(FdnReverb::new(sample_rate)));
     let use_algorithmic_reverb: Arc<RwLock<bool>> = Arc::new(RwLock::new(false));
@@ -3770,6 +3780,7 @@ fn run_audio_thread(
     let temperament_clone = temperament_ratios.clone();
     let reverb_clone = reverb.clone();
     let reverb_mix_clone = reverb_mix.clone();
+    let reverb_pos_factor_clone = reverb_pos_factor.clone();
     let fdn_reverb_clone = fdn_reverb.clone();
     let use_algo_reverb_clone = use_algorithmic_reverb.clone();
     let eq_enabled_clone = eq_enabled.clone();
@@ -4643,6 +4654,9 @@ fn run_audio_thread(
                         }
                         info!("Reverb mix set to {:.2}", mix);
                     }
+                    AudioCommand::SetReverbPositionFactor(f) => {
+                        *reverb_pos_factor_clone.write() = f.clamp(0.0, 2.0);
+                    }
                     AudioCommand::LoadSamples(new_samples) => {
                         {
                             let mut samples_lock = samples_clone.write();
@@ -5222,7 +5236,7 @@ fn run_audio_thread(
 
                 // Galm + EQ: locks één keer per callback nemen (niet per sample).
                 let use_algo = *use_algo_reverb_clone.read();
-                let reverb_mix_now = *reverb_mix_clone.read();
+                let reverb_mix_now = *reverb_mix_clone.read() * *reverb_pos_factor_clone.read();
                 let mut fdn_lock = fdn_reverb_clone.write();
                 let mut conv_lock = reverb_clone.write();
                 let eq_on = *eq_enabled_clone.read();

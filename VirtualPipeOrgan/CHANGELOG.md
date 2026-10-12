@@ -5,6 +5,18 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.100] - 2026-10-12
+
+### Galm volgt de luisterpositie
+- Aan de klaviatuur hoor je bij een echt orgel nauwelijks nagalm: de pijpen
+  staan vlak voor je. Een paar meter verderop in het schip wordt de galm
+  pas opvallend; achter in de kerk overheerst hij. De luisterpositie-schuif
+  (0.7.95) regelt daarom nu mee aan de nagalm-mix: links staat de galm op
+  20 % van wat je in de audio-instellingen koos, rechts op 100 %. Een
+  organist die de galm uit heeft staan hoort hem nog steeds niet.
+- Werkt live via een eenvoudige vermenigvuldiger (`SetReverbPositionFactor`),
+  dus geen hoorbare sprong wanneer je de schuif beweegt.
+
 ## [0.7.99] - 2026-10-12
 
 ### Registermechaniek: het klikken van registers
