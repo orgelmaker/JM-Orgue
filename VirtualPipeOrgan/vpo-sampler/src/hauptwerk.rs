@@ -814,7 +814,11 @@ fn build_definition(
         couplers: coupler_defs,
         extra_bijgeluiden: verzamel_hw_bijgeluiden(
             &pipes, &pipes_by_rank, &sample_file, &pkg_dirs,
-            &layers_of_pipe, &sample_of_layer, &extract_objects(xml, "Switch"), &rank_name,
+            // `lees` i.p.v. extract_objects: bij een gecomprimeerde definitie
+            // staan de switches in de korte <o>-vorm. (De compacte lezer kent
+            // van Switch alleen het ID; naam en standaardstand ontbreken daar
+            // nog, dus bijgeluiden op compacte sets volgen later.)
+            &layers_of_pipe, &sample_of_layer, &lees("Switch"), &rank_name,
         ),
         stop_action_clicks: verzamel_hw_stop_action_clicks(
             &pipes, &sample_file, &pkg_dirs,

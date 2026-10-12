@@ -5,6 +5,24 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.8.2] - 2026-10-12
+
+### Geheugenrem rekent in buffers
+- De rem op "alles laden" uit 0.8.1 schatte het geheugen per pijp, maar een
+  pijp bestaat uit meerdere buffers: attack, tot drie releases en de
+  tremulantlaag. Gemeten op een grote surround-set: 4146 pijpen in één
+  positie = 20 168 buffers = 15,4 GB, ruim vier keer de oude schatting.
+  De rem telt nu de buffers zoals de laadroute ze straks laadt, met 0,79 MB
+  per buffer; op de testset met drie posities (± 9 GB geschat, 7,1 GB
+  gemeten) blijven alle posities aan, op de surround-set zou "alles laden"
+  op een pc met 32 GB tot één positie worden teruggebracht.
+- Gecomprimeerde Hauptwerk-definities: de switches worden nu via dezelfde
+  lezer opgehaald als de overige objecten. Omdat de compacte lezer van een
+  switch alleen het nummer kent, worden motor en speelgoedregisters op
+  zulke sets nog niet herkend; dat volgt wanneer er een set mét zulke
+  opnamen beschikbaar is (de surround-set op de testpc heeft ze niet: haar
+  map "blower" bevat alleen de afbeelding van de windindicator).
+
 ## [0.8.1] - 2026-10-12
 
 ### Nazorg na controle van 0.7.94 t/m 0.8.0

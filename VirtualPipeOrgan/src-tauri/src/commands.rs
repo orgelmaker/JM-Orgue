@@ -591,20 +591,48 @@ fn fysiek_geheugen_bytes() -> Option<u64> {
 #[cfg(not(windows))]
 fn fysiek_geheugen_bytes() -> Option<u64> { None }
 
-/// Schatting van de preload per pijp (bytes): het geladen deel van een
-/// opname, gemeten op grote sets (zie geheugenonderzoek: 0,79 MB per ingang).
-const PRELOAD_BYTES_PER_PIJP: u64 = 790_000;
+/// Preload per BUFFER (bytes): het geladen begin van één opname, gemeten op
+/// grote sets (0,79 MB per ingang; zie geheugenonderzoek). Een pijp heeft
+/// meerdere buffers: attack, tot drie releases en de tremulantlaag. Op een
+/// surround-set van 4146 pijpen waren dat 20 168 buffers = 15,4 GB — ruim
+/// vier keer het aantal pijpen. De rem rekent daarom in buffers.
+const PRELOAD_BYTES_PER_BUFFER: u64 = 790_000;
+
+/// Aantal preload-buffers per perspectief-label: per pijp 1 (attack) +
+/// releases + tremulantlaag (+ diens releases). Zelfde telling als de
+/// laadroute, zodat de RAM-schatting klopt met wat er straks in het geheugen
+/// komt.
+fn preload_buffers_per_label(definition: &OrganDefinition) -> HashMap<String, usize> {
+    use vpo_sampler::PipeDef;
+    let mut uit: HashMap<String, usize> = HashMap::new();
+    for s in definition.stops.iter().filter(|s| !s.is_noise_or_mechanical()) {
+        for (_idx, persp, pipes) in s.all_layers() {
+            let Some(label) = persp else { continue };
+            let n: usize = pipes.iter().map(|p| match p {
+                PipeDef::Sample { extra, .. } => 1 + extra.releases.len()
+                    + extra.tremulant_attack.as_ref().map_or(0, |_| 1 + extra.tremulant_releases.len()),
+                PipeDef::Reference { .. } => 1,
+                PipeDef::Empty => 0,
+            }).sum();
+            *uit.entry(label.to_string()).or_insert(0) += n;
+        }
+    }
+    uit
+}
 
 /// RAM-rem (0.8.1) op "alles laden": past de schatting van álle ingeschakelde
 /// posities niet in de helft van het fysieke geheugen, dan blijft alleen de
 /// positie het dichtst bij het orgel aan (dry/close/front…). Alleen zonder
 /// opgeslagen voorkeur: wie zelf vinkjes heeft gezet, weet wat hij doet.
-/// Geeft true terug als er is ingegrepen (voor de logregel/UI).
-fn rem_op_geheugen(plan: &mut [PerspectiveRuntime], heeft_opslag: bool) -> bool {
+/// `buffers` = preload-buffers per label (zie `preload_buffers_per_label`);
+/// ontbreekt een label, dan telt het aantal pijpen. Geeft true terug als er
+/// is ingegrepen (voor de logregel/UI).
+fn rem_op_geheugen(plan: &mut [PerspectiveRuntime], heeft_opslag: bool, buffers: &HashMap<String, usize>) -> bool {
     if heeft_opslag || plan.len() < 2 { return false; }
     let Some(ram) = fysiek_geheugen_bytes() else { return false };
     let schatting: u64 = plan.iter().filter(|p| p.enabled)
-        .map(|p| p.pipe_count as u64 * PRELOAD_BYTES_PER_PIJP).sum();
+        .map(|p| buffers.get(&p.name).copied().unwrap_or(p.pipe_count) as u64 * PRELOAD_BYTES_PER_BUFFER)
+        .sum();
     if schatting * 2 <= ram { return false; }
     // Dichtstbijzijnde positie op de as houden; de rest uit.
     let dichtst = plan.iter().enumerate()
@@ -2864,7 +2892,7 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
         let mut persp_plan = plan_perspectives(&definition, &saved_persp);
         // RAM-rem (0.8.1): alles laden mag niet meer dan de helft van het
         // geheugen kosten; anders alleen de dichtstbijzijnde positie.
-        rem_op_geheugen(&mut persp_plan, !saved_persp.is_empty());
+        rem_op_geheugen(&mut persp_plan, !saved_persp.is_empty(), &preload_buffers_per_label(&definition));
         // "Alles laden" (0.7.47): ook de uitgeschakelde posities komen in het
         // geheugen, zodat wisselen ogenblikkelijk is in plaats van een herlaad.
         // Uitgeschakelde posities worden na het laden stilgezet (gain), niet
@@ -11156,9 +11184,10 @@ mod luisterpositie_tests {
         let mk = |name: &str, slot: u8, pipes: usize| PerspectiveRuntime {
             name: name.into(), enabled: true, gain_db: 0.0, loaded: false, slot, pipe_count: pipes,
         };
+        let geen = std::collections::HashMap::new();
         // Onrealistisch veel pijpen zodat de rem op élke pc afgaat.
         let mut plan = vec![mk("rear", 1, 50_000_000), mk("close", 2, 50_000_000), mk("front", 3, 50_000_000)];
-        let ingegrepen = rem_op_geheugen(&mut plan, false);
+        let ingegrepen = rem_op_geheugen(&mut plan, false, &geen);
         if fysiek_geheugen_bytes().is_some() {
             assert!(ingegrepen);
             assert_eq!(plan.iter().map(|p| (p.name.as_str(), p.enabled)).collect::<Vec<_>>(),
@@ -11166,12 +11195,21 @@ mod luisterpositie_tests {
         }
         // Met opgeslagen voorkeur: niets veranderen.
         let mut plan2 = vec![mk("rear", 1, 50_000_000), mk("close", 2, 50_000_000)];
-        assert!(!rem_op_geheugen(&mut plan2, true));
+        assert!(!rem_op_geheugen(&mut plan2, true, &geen));
         assert!(plan2.iter().all(|p| p.enabled));
         // Kleine set: niets veranderen.
         let mut plan3 = vec![mk("rear", 1, 500), mk("close", 2, 500)];
-        assert!(!rem_op_geheugen(&mut plan3, false));
+        assert!(!rem_op_geheugen(&mut plan3, false, &geen));
         assert!(plan3.iter().all(|p| p.enabled));
+        // De buffertelling wint van het pijpenaantal: 500 pijpen met elk
+        // 100 000 buffers is wél te groot.
+        let mut plan4 = vec![mk("rear", 1, 500), mk("close", 2, 500)];
+        let buffers: std::collections::HashMap<String, usize> =
+            [("rear".to_string(), 50_000_000usize), ("close".to_string(), 50_000_000usize)].into_iter().collect();
+        if fysiek_geheugen_bytes().is_some() {
+            assert!(rem_op_geheugen(&mut plan4, false, &buffers));
+            assert_eq!(plan4.iter().filter(|p| p.enabled).count(), 1);
+        }
     }
 
     #[test]
