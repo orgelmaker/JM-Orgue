@@ -558,7 +558,8 @@
     "motor": "Silnik",
     "motor_on": "Silnik włączony",
     "motor_off": "Silnik wyłączony",
-    "motor_title": "Silnik organów wł./wył."
+    "motor_title": "Silnik organów wł./wył.",
+    "midi_learn": "Nauka MIDI (następny CC zostanie powiązany)"
   },
   "speeltafel": {
     "show_bars": "Paski",

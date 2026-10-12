@@ -558,7 +558,8 @@
     "motor": "Motore",
     "motor_on": "Motore acceso",
     "motor_off": "Motore spento",
-    "motor_title": "Motore dell'organo acceso/spento"
+    "motor_title": "Motore dell'organo acceso/spento",
+    "midi_learn": "Apprendimento MIDI (il prossimo CC verrà collegato)"
   },
   "speeltafel": {
     "show_bars": "Barre",

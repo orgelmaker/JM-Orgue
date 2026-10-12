@@ -5,6 +5,21 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.104] - 2026-10-12
+
+### MIDI-leren voor luisterpositie en bijgeluiden
+- De luisterpositie-schuif (0.7.95) en de bijgeluiden-master (0.7.97)
+  krijgen nu een klein MIDI-leer-knopje ernaast. Druk op het pijltje, draai
+  aan een regelaar op uw speeltafel en de koppeling staat. De waarde van
+  0–127 wordt lineair naar het bereik van de schuif omgerekend.
+- Een geleerde koppeling wordt getoond als een stip; klik erop om opnieuw
+  te leren. Bindingen worden per orgel bewaard, zoals de zweltreden.
+- Nieuwe tauri-commands `misc_cc_learn`, `misc_cc_learn_cancel`,
+  `misc_cc_clear`, `misc_cc_get_bindings` en
+  `get_and_clear_misc_cc_pending`. De UI pollt de pending-map elke 150 ms
+  en past de schuiven aan via dezelfde setters als bij een handmatige
+  wijziging; zo loopt de luisterpositie-crossfade over het bestaande pad.
+
 ## [0.7.103] - 2026-10-12
 
 ### Toetsmechaniek: ook de loslaat-klik

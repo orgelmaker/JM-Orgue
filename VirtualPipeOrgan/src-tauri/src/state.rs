@@ -709,6 +709,64 @@ pub fn toetsmechaniek_aan() -> bool {
     TOETSMECHANIEK_AAN.load(std::sync::atomic::Ordering::Relaxed)
 }
 
+/// Doelen voor MIDI-leren van losse CC-regelaars (0.7.104): luisterpositie-
+/// schuif en bijgeluiden-master. Hergebruikt in `MiscCcBinding`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum MiscCcTarget {
+    /// De luisterpositie-schuif (0.7.95), 0..1.
+    ListeningPosition,
+    /// De bijgeluiden-master (0.7.97), 0..4 lineair.
+    BackgroundGain,
+}
+
+/// Gekoppelde (kanaal, CC-nummer) voor één van de losse regelaars.
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
+pub struct MiscCcBinding {
+    pub target: MiscCcTarget,
+    pub channel: u8,
+    pub cc: u8,
+}
+
+/// Globale spiegel van de misc CC-bindings zodat `handle_midi_message`
+/// (die zonder &AppState werkt) ze kan opzoeken. Wordt bij elke wijziging
+/// uit `AppState.misc_cc_bindings` gevuld.
+static MISC_CC_BINDINGS_CELL: std::sync::OnceLock<parking_lot::RwLock<Vec<MiscCcBinding>>>
+    = std::sync::OnceLock::new();
+pub fn MISC_CC_BINDINGS() -> &'static parking_lot::RwLock<Vec<MiscCcBinding>> {
+    MISC_CC_BINDINGS_CELL.get_or_init(|| parking_lot::RwLock::new(Vec::new()))
+}
+
+/// Globale "leer"-vlag: het volgende binnenkomende CC-bericht wordt gebonden
+/// aan dit doel. None = niet leren.
+static MISC_CC_LEARNING_CELL: std::sync::OnceLock<parking_lot::RwLock<Option<MiscCcTarget>>>
+    = std::sync::OnceLock::new();
+pub fn MISC_CC_LEARNING() -> &'static parking_lot::RwLock<Option<MiscCcTarget>> {
+    MISC_CC_LEARNING_CELL.get_or_init(|| parking_lot::RwLock::new(None))
+}
+
+/// Nog niet door de UI opgehaalde CC-waarden (0.7.104): de MIDI-handler schrijft
+/// nieuwe waarden hierheen; de UI leest ze periodiek via
+/// `get_and_clear_misc_cc_pending` en past ze toe (set_listening_position of
+/// set_background_gain). Zo gaat de luisterpositie-crossfade door hetzelfde
+/// pad als een handmatige UI-schuif, zonder dat de MIDI-thread AppState nodig
+/// heeft.
+static MISC_CC_PENDING_CELL: std::sync::OnceLock<parking_lot::RwLock<std::collections::HashMap<MiscCcTarget, f32>>>
+    = std::sync::OnceLock::new();
+pub fn MISC_CC_PENDING() -> &'static parking_lot::RwLock<std::collections::HashMap<MiscCcTarget, f32>> {
+    MISC_CC_PENDING_CELL.get_or_init(|| parking_lot::RwLock::new(std::collections::HashMap::new()))
+}
+
+/// Vertaal een MIDI CC-waarde (0..127) naar de doel-eenheid van `target`.
+/// `ListeningPosition` → 0..1 lineair; `BackgroundGain` → 0..4 lineair
+/// (zodat 127 ≈ +12 dB en 32 ≈ -12 dB voelbaar past).
+pub fn misc_cc_waarde_omzetten(target: MiscCcTarget, cc_val: u8) -> f32 {
+    let t = (cc_val as f32) / 127.0;
+    match target {
+        MiscCcTarget::ListeningPosition => t.clamp(0.0, 1.0),
+        MiscCcTarget::BackgroundGain => (t * 4.0).clamp(0.0, 4.0),
+    }
+}
+
 /// Pijpnummer (1-based) voor een klinkende noot binnen het bereik van een
 /// register, of None als die pijp er niet is. Met `uitgebreid` wordt de noot
 /// per octaaf het bereik in gevouwen.
@@ -1483,6 +1541,12 @@ pub struct AppState {
     /// (per sampleset tot tientallen megabytes aan WAV's). Als de gebruiker
     /// hem aanzet laadt JM-Orgue de klikken bij de volgende orgellaad.
     pub toetsmechaniek_aan: Arc<RwLock<bool>>,
+    /// MIDI-CC-bindingen voor luisterpositie en bijgeluiden (0.7.104). Per
+    /// orgel bewaard, zoals de zweltreden. Lege Vec = niets gebonden.
+    pub misc_cc_bindings: Arc<RwLock<Vec<MiscCcBinding>>>,
+    /// Welk doel wacht op de volgende binnenkomende CC om in te leren. None =
+    /// niet leren. Automatisch gewist na één succesvolle binding.
+    pub misc_cc_learning: Arc<RwLock<Option<MiscCcTarget>>>,
     /// Mapping van divisienaam ↔ klavier-prefix (bv. "Pedal" ↔ "P",
     /// "Rückpositiv" ↔ "RP"), gevuld bij de orgellaad. De MIDI-handler
     /// gebruikt dit om bij een NoteOn de juiste klik aan te roepen.
@@ -1840,6 +1904,8 @@ impl AppState {
             blower_active: Arc::new(RwLock::new(true)),
             toys_active: Arc::new(RwLock::new(std::collections::HashMap::new())),
             toetsmechaniek_aan: Arc::new(RwLock::new(false)),
+            misc_cc_bindings: Arc::new(RwLock::new(Vec::new())),
+            misc_cc_learning: Arc::new(RwLock::new(None)),
             toetsmechaniek_prefix: Arc::new(RwLock::new(std::collections::HashMap::new())),
             rank_summary: Arc::new(RwLock::new(Vec::new())),
         }
@@ -3681,6 +3747,28 @@ impl AppState {
                 }
             }
             MidiMessage::ControlChange { channel, controller, value } => {
+                // Misc CC-bindingen (0.7.104): luisterpositie-schuif en
+                // bijgeluiden-master. Komt vóór zwel/crescendo omdat deze
+                // bindings zich specifiek binden (anders dan de generieke
+                // zwel-CC's) en hun eigen trede-filter niet nodig hebben.
+                if let Some(doel) = { *MISC_CC_LEARNING().read() } {
+                    let mut lijst = MISC_CC_BINDINGS().write();
+                    lijst.retain(|b| b.target != doel);
+                    lijst.push(MiscCcBinding { target: doel, channel, cc: controller });
+                    *MISC_CC_LEARNING().write() = None;
+                    tracing::info!("MIDI-leren: {:?} gekoppeld aan kanaal {} CC{}",
+                        doel, channel + 1, controller);
+                }
+                // Toepassen op binnenkomende CC's; de UI leest MISC_CC_PENDING
+                // via periodieke poll en roept de echte setters aan, zodat de
+                // crossfade van de luisterpositie via dezelfde code loopt als
+                // bij een handmatige schuif.
+                for binding in MISC_CC_BINDINGS().read().iter() {
+                    if binding.channel == channel && binding.cc == controller {
+                        let v = misc_cc_waarde_omzetten(binding.target, value);
+                        MISC_CC_PENDING().write().insert(binding.target, v);
+                    }
+                }
                 // Demping voor een CC die als zwelkast is ingeleerd (0.7.45).
                 // Buiten de bindingenlus, want twee divisies op dezelfde trede
                 // mogen het filter niet twee keer laten doorstappen. De

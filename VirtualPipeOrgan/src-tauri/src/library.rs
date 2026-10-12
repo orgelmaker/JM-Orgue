@@ -496,6 +496,10 @@ pub struct OrganSettings {
     /// Toetsmechaniek aan voor dít orgel (0.7.102). Standaard false.
     #[serde(default)]
     pub toetsmechaniek_aan: Option<bool>,
+    /// MIDI-CC bindingen voor luisterpositie en bijgeluiden (0.7.104).
+    /// Standaard leeg.
+    #[serde(default)]
+    pub misc_cc_bindings: Vec<crate::state::MiscCcBinding>,
     /// Koppels die de sampleset zelf niet heeft en die de organist erbij heeft
     /// gezet (0.7.47): de id's uit de door de app afgeleide koppellijst.
     #[serde(default)]

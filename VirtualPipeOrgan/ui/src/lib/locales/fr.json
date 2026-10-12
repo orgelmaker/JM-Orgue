@@ -558,7 +558,8 @@
     "motor": "Moteur",
     "motor_on": "Moteur en marche",
     "motor_off": "Moteur arrêté",
-    "motor_title": "Moteur de l'orgue marche/arrêt"
+    "motor_title": "Moteur de l'orgue marche/arrêt",
+    "midi_learn": "Apprentissage MIDI (le prochain CC sera lié)"
   },
   "speeltafel": {
     "show_bars": "Barres",

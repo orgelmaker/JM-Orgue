@@ -2014,6 +2014,61 @@
     luisterTimer = setTimeout(() => dispatch('refreshMidiMappings'), 400);
   }
 
+  // MIDI-leren voor luisterpositie en bijgeluiden (0.7.104).
+  let miscCcBindings = []; // [{target, channel, cc}]
+  let miscLerenDoel = null; // 'listening_position' | 'background_gain' | null
+  async function haalMiscCc() {
+    try { miscCcBindings = await invoke('misc_cc_get_bindings'); } catch (e) { miscCcBindings = []; }
+  }
+  $: if (organInfo?.id) haalMiscCc();
+  async function leerMiscCc(doel) {
+    if (miscLerenDoel === doel) {
+      await invoke('misc_cc_learn_cancel');
+      miscLerenDoel = null;
+    } else {
+      await invoke('misc_cc_learn', { doel });
+      miscLerenDoel = doel;
+    }
+  }
+  async function wisMiscCc(doel) {
+    await invoke('misc_cc_clear', { doel });
+    await haalMiscCc();
+  }
+  function miscBindingTekst(doel) {
+    const b = miscCcBindings.find(x => {
+      const naam = x.target === 'ListeningPosition' ? 'listening_position' : 'background_gain';
+      return naam === doel;
+    });
+    return b ? `kanaal ${b.channel + 1} CC${b.cc}` : null;
+  }
+  // Periodiek de pending CC-wijzigingen oppikken en toepassen.
+  let miscPoll = null;
+  function startMiscPoll() {
+    if (miscPoll) return;
+    miscPoll = setInterval(async () => {
+      try {
+        const p = await invoke('get_and_clear_misc_cc_pending');
+        if (p.listening_position !== undefined) {
+          luisterPos = p.listening_position;
+          await invoke('set_listening_position', { pos: luisterPos });
+        }
+        if (p.background_gain !== undefined) {
+          bgGain = p.background_gain;
+          await invoke('set_background_gain', { gainLineair: bgGain });
+        }
+        // Als er geleerd werd en nu niet meer: haal nieuwe bindings op.
+        if (miscLerenDoel) {
+          const vers = await invoke('misc_cc_get_bindings');
+          if (JSON.stringify(vers) !== JSON.stringify(miscCcBindings)) {
+            miscCcBindings = vers;
+            miscLerenDoel = null;
+          }
+        }
+      } catch (e) {}
+    }, 150);
+  }
+  $: if (organInfo?.id) startMiscPoll();
+
   // Bijgeluiden (0.7.97): motor-knop in de werkbalk + volumeschuif in
   // audio-instellingen. Bijgeluiden-lijst in organInfo zegt of de set er
   // überhaupt heeft; staat die lijst leeg, dan verbergen we alles.
@@ -5279,6 +5334,13 @@
                   aria-label={$t('toolbar.listen_title')}
                 />
                 <span class="luister-label">{$t('toolbar.listen_far')}</span>
+                <button
+                  class="btn btn-ghost btn-sm"
+                  class:learning={miscLerenDoel === 'listening_position'}
+                  style="padding: 0.1rem 0.4rem; font-size: 0.7rem;"
+                  on:click={() => leerMiscCc('listening_position')}
+                  title={miscBindingTekst('listening_position') || $t('toolbar.midi_learn')}
+                >{miscLerenDoel === 'listening_position' ? '…' : (miscBindingTekst('listening_position') ? '●' : '↻')}</button>
               </div>
             {/if}
             <!-- Motor-knop (0.7.97): aanwezig als de sampleset een blower-opname
@@ -6119,6 +6181,13 @@
                 <span style="min-width: 3.5rem; text-align: right; opacity: 0.7;">
                   {bgGain > 0.001 ? (20 * Math.log10(bgGain)).toFixed(1) + ' dB' : '−∞'}
                 </span>
+                <button
+                  class="btn btn-ghost btn-sm"
+                  class:learning={miscLerenDoel === 'background_gain'}
+                  style="padding: 0.1rem 0.4rem; font-size: 0.7rem;"
+                  on:click={() => leerMiscCc('background_gain')}
+                  title={miscBindingTekst('background_gain') || $t('toolbar.midi_learn')}
+                >{miscLerenDoel === 'background_gain' ? '…' : (miscBindingTekst('background_gain') ? '●' : '↻')}</button>
               </label>
               {#if heeftBlower}
                 <label style="display: flex; align-items: center; gap: 0.4rem; margin-top: 0.4rem; font-size: 0.78rem;">

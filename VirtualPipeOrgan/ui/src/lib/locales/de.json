@@ -558,7 +558,8 @@
     "motor": "Motor",
     "motor_on": "Motor ist an",
     "motor_off": "Motor ist aus",
-    "motor_title": "Orgelmotor ein oder aus"
+    "motor_title": "Orgelmotor ein oder aus",
+    "midi_learn": "MIDI lernen (nächster CC wird gebunden)"
   },
   "speeltafel": {
     "show_bars": "Leisten",

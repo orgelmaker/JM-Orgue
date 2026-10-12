@@ -558,7 +558,8 @@
     "motor": "Motor",
     "motor_on": "Motor is on",
     "motor_off": "Motor is off",
-    "motor_title": "Organ motor on or off"
+    "motor_title": "Organ motor on or off",
+    "midi_learn": "MIDI learn (next CC will bind)"
   },
   "speeltafel": {
     "show_bars": "Bars",

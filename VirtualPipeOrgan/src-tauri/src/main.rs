@@ -386,6 +386,12 @@ fn main() {
             // Toetsmechaniek (0.7.102): aanslag-klik per klavier.
             commands::set_toetsmechaniek_aan,
             commands::get_toetsmechaniek_aan,
+            // MIDI-leren voor luisterpositie en bijgeluiden (0.7.104).
+            commands::misc_cc_learn,
+            commands::misc_cc_learn_cancel,
+            commands::misc_cc_clear,
+            commands::misc_cc_get_bindings,
+            commands::get_and_clear_misc_cc_pending,
             commands::download_sampleset,
             commands::get_audio_devices,
             commands::list_audio_hosts,

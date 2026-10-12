@@ -558,7 +558,8 @@
     "motor": "Motor",
     "motor_on": "Motor is aan",
     "motor_off": "Motor is uit",
-    "motor_title": "Orgelmotor aan of uit"
+    "motor_title": "Orgelmotor aan of uit",
+    "midi_learn": "MIDI leren (volgende CC bindt zich)"
   },
   "speeltafel": {
     "show_bars": "Balken",

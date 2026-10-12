@@ -1007,6 +1007,69 @@ fn laad_en_stuur_toetsmechaniek(
     state.send_audio_command(AudioCommand::RegisterKeyboardClicks(Arc::new(buf_map)));
 }
 
+// ========================================================================
+// MIDI-leren voor losse CC-regelaars (0.7.104): luisterpositie en
+// bijgeluiden-master.
+// ========================================================================
+
+/// Begin met leren: het eerstvolgende MIDI CC-bericht wordt gebonden aan
+/// dit doel. "listening_position" of "background_gain".
+#[tauri::command]
+pub fn misc_cc_learn(state: State<AppState>, doel: String) -> Result<(), String> {
+    let t = match doel.as_str() {
+        "listening_position" => crate::state::MiscCcTarget::ListeningPosition,
+        "background_gain" => crate::state::MiscCcTarget::BackgroundGain,
+        _ => return Err(format!("Onbekend doel: {}", doel)),
+    };
+    *crate::state::MISC_CC_LEARNING().write() = Some(t);
+    *state.misc_cc_learning.write() = Some(t);
+    info!("MIDI-leren: wachten op CC voor {:?}", t);
+    Ok(())
+}
+
+/// Stop met leren zonder iets te binden.
+#[tauri::command]
+pub fn misc_cc_learn_cancel(state: State<AppState>) -> Result<(), String> {
+    *crate::state::MISC_CC_LEARNING().write() = None;
+    *state.misc_cc_learning.write() = None;
+    Ok(())
+}
+
+/// Wis de binding voor een doel.
+#[tauri::command]
+pub fn misc_cc_clear(state: State<AppState>, doel: String) -> Result<(), String> {
+    let t = match doel.as_str() {
+        "listening_position" => crate::state::MiscCcTarget::ListeningPosition,
+        "background_gain" => crate::state::MiscCcTarget::BackgroundGain,
+        _ => return Err(format!("Onbekend doel: {}", doel)),
+    };
+    crate::state::MISC_CC_BINDINGS().write().retain(|b| b.target != t);
+    state.misc_cc_bindings.write().retain(|b| b.target != t);
+    Ok(())
+}
+
+/// Huidige bindingen voor de UI, als lijst `[{target, channel, cc}]`.
+#[tauri::command]
+pub fn misc_cc_get_bindings(_state: State<AppState>) -> Vec<crate::state::MiscCcBinding> {
+    crate::state::MISC_CC_BINDINGS().read().clone()
+}
+
+/// Haal openstaande CC-wijzigingen op en wis ze; de UI roept dit elke paar
+/// honderd ms aan en past de corresponderende schuif aan.
+#[tauri::command]
+pub fn get_and_clear_misc_cc_pending() -> std::collections::HashMap<String, f32> {
+    let mut m = crate::state::MISC_CC_PENDING().write();
+    let out = m.iter().map(|(k, v)| {
+        let s = match k {
+            crate::state::MiscCcTarget::ListeningPosition => "listening_position",
+            crate::state::MiscCcTarget::BackgroundGain => "background_gain",
+        };
+        (s.to_string(), *v)
+    }).collect();
+    m.clear();
+    out
+}
+
 /// Toetsmechaniek aan/uit (0.7.102): werkt vanaf de volgende orgellaad
 /// (anders zouden we tientallen MB's moeten laden tijdens het spelen).
 #[tauri::command]
@@ -8739,6 +8802,10 @@ fn restore_organ_settings(state: &AppState, organ_id: &str) {
     *state.toetsmechaniek_aan.write() = toetsmech;
     crate::state::TOETSMECHANIEK_AAN.store(toetsmech, std::sync::atomic::Ordering::Relaxed);
 
+    // Misc CC-bindingen (0.7.104): opgeslagen bindings naar beide spiegels.
+    *state.misc_cc_bindings.write() = settings.misc_cc_bindings.clone();
+    *crate::state::MISC_CC_BINDINGS().write() = settings.misc_cc_bindings.clone();
+
     // Doorlopend klavier (per orgel).
     crate::state::DOORLOPEND_KLAVIER.store(
         settings.continuous_keyboard, std::sync::atomic::Ordering::Relaxed);
@@ -9442,6 +9509,7 @@ pub fn do_save_organ_settings(state: &AppState, presets: HashMap<String, PresetD
         blower_active: Some(*state.blower_active.read()),
         toys_active: state.toys_active.read().clone(),
         toetsmechaniek_aan: Some(*state.toetsmechaniek_aan.read()),
+        misc_cc_bindings: crate::state::MISC_CC_BINDINGS().read().clone(),
         extra_couplers: state.extra_coupler_ids.read().clone(),
         continuous_keyboard: crate::state::DOORLOPEND_KLAVIER.load(std::sync::atomic::Ordering::Relaxed),
         remote_layout,
