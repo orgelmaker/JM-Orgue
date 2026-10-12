@@ -1464,6 +1464,10 @@ pub struct AppState {
     /// Motor-knop (0.7.97): staat de blower aan? Standaard true (zoals de
     /// Hauptwerk-knop "Blower"). Ambient volgt dit niet.
     pub blower_active: Arc<RwLock<bool>>,
+    /// Speelgoedregisters (0.7.98): per naam de aan/uit-stand (Cymbelstern,
+    /// Vogelsang, Cuculus en soortgelijke). Standaard allemaal uit; de UI
+    /// toont ze als knoppen in de werkbalk.
+    pub toys_active: Arc<RwLock<std::collections::HashMap<String, bool>>>,
     /// Lagen per (niet-ruis-)stop van het geladen orgel — diagnose (/ranks,
     /// layered_stops), gevuld in beide laadroutes (ook custom sets, waar
     /// organ_definition None/verouderd is).
@@ -1815,6 +1819,7 @@ impl AppState {
             listening_position: Arc::new(RwLock::new(0.0)),
             background_gain: Arc::new(RwLock::new(0.3)),
             blower_active: Arc::new(RwLock::new(true)),
+            toys_active: Arc::new(RwLock::new(std::collections::HashMap::new())),
             rank_summary: Arc::new(RwLock::new(Vec::new())),
         }
     }

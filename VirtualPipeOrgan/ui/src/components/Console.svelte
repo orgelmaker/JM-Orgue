@@ -2042,6 +2042,21 @@
   }
   $: heeftBijgeluiden = (organInfo?.background_sounds?.length || 0) > 0;
   $: heeftBlower = (organInfo?.background_sounds || []).some(b => b.kind === 'blower');
+  // Speelgoedregisters (0.7.98): aparte lijst zodat de werkbalk per toy een
+  // eigen knop kan tonen (Cymbelstern, Vogelsang, Cuculus).
+  $: speelgoed = (organInfo?.background_sounds || []).filter(b => b.kind === 'toy');
+  let toysAan = {};
+  async function haalToys() {
+    try { toysAan = await invoke('get_toys_active'); } catch (e) { toysAan = {}; }
+  }
+  $: if (organInfo?.id) haalToys();
+  async function zetToy(naam, aan) {
+    toysAan = { ...toysAan, [naam]: aan };
+    try {
+      await invoke('set_toy_active', { name: naam, active: aan });
+      dispatch('refreshMidiMappings');
+    } catch (e) { console.error(e); }
+  }
   async function zetLaadAllePosities(on) {
     try {
       perspReloadHint = await invoke('set_load_all_perspectives', { enabled: on });
@@ -5268,6 +5283,16 @@
                 {$t('toolbar.motor')}
               </button>
             {/if}
+            <!-- Speelgoedregisters (0.7.98): per klikbare switch een eigen
+                 knop. Cymbelstern, Vogelsang, Cuculus en soortgelijke. -->
+            {#each speelgoed as toy (toy.name)}
+              <button
+                class="btn btn-ghost btn-sm panel-layout-btn"
+                class:motor-aan={toysAan[toy.name]}
+                on:click={() => zetToy(toy.name, !toysAan[toy.name])}
+                title={toy.name}
+              >{toy.name}</button>
+            {/each}
             <button
               class="btn btn-ghost btn-sm panel-layout-btn"
               on:click={passendMaken}

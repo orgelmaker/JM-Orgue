@@ -380,6 +380,9 @@ fn main() {
             commands::get_background_gain,
             commands::set_blower_active,
             commands::get_blower_active,
+            // Speelgoedregisters (0.7.98): Cymbelstern e.d. als klikbare knoppen.
+            commands::set_toy_active,
+            commands::get_toys_active,
             commands::download_sampleset,
             commands::get_audio_devices,
             commands::list_audio_hosts,

@@ -77,6 +77,11 @@ pub enum BackgroundSoundKind {
     /// Ruimtegeluid, zacht geroezemoes of ventilatie. Altijd aan zolang het
     /// orgel geladen is.
     Ambient,
+    /// Speelgoedregister (0.7.98): Cymbelstern, Vogelsang, Cuculus en
+    /// soortgelijke effecten. Elke toy heeft een eigen klikbare knop in de
+    /// werkbalk; standaard uit. Hauptwerk-switches: `DefaultToEngaged=N` en
+    /// `Clickable=Y`, met de pijpen op een rank genoemd "noises".
+    Toy,
 }
 
 impl OrganDefinition {

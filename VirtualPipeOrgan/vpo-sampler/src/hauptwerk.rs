@@ -835,14 +835,16 @@ fn verzamel_hw_bijgeluiden(
     rank_name: &std::collections::HashMap<u32, String>,
 ) -> Vec<crate::grandorgue::BackgroundSoundDef> {
     use crate::grandorgue::{BackgroundSoundDef, BackgroundSoundKind};
-    // Switch-naam en of hij standaard aan staat (dat is wat ambient/blower
-    // onderscheidt van speelgoedregisters: die laatste staan standaard uit).
-    let switch_info: std::collections::HashMap<u32, (String, bool)> = switches.iter()
+    // Switch-naam, of hij standaard aan staat én of hij klikbaar is.
+    // Blower/ambient: default_on=Y en meestal niet klikbaar.
+    // Speelgoedregisters: default_on=N én klikbaar=Y (de organist drukt ze aan).
+    let switch_info: std::collections::HashMap<u32, (String, bool, bool)> = switches.iter()
         .filter_map(|s| {
             let id = s.get_u32("SwitchID")?;
             let name = s.get("Name").cloned().unwrap_or_default();
             let default_on = s.get("DefaultToEngaged").map(|v| v == "Y").unwrap_or(false);
-            Some((id, (name, default_on)))
+            let clickable = s.get("Clickable").map(|v| v == "Y").unwrap_or(false);
+            Some((id, (name, default_on, clickable)))
         }).collect();
     let resolve_sample = |sample_id: u32| -> Option<std::path::PathBuf> {
         let (pkg, fname) = sample_file.get(&sample_id)?;
@@ -857,22 +859,23 @@ fn verzamel_hw_bijgeluiden(
         let Some(pid) = p.get_u32("PipeID") else { continue };
         let Some(sw_id) = p.get_u32("ControllingPalletSwitchID") else { continue };
         if sw_id == 0 { continue; }
-        let Some((sw_name, default_on)) = switch_info.get(&sw_id) else { continue };
-        // Alleen pijpen die bij orgellaad standaard aan staan: dat sluit de
-        // speelgoedregisters uit (Cymbelstern, Vogelsang etc).
-        if !default_on { continue; }
+        let Some((sw_name, default_on, clickable)) = switch_info.get(&sw_id) else { continue };
         let sw_lower = sw_name.to_lowercase();
         // Pijpen in een rank met "noises" in de naam zijn kandidaat; de
-        // switch bepaalt vervolgens of het blower of ambient is.
+        // switch bepaalt vervolgens om welk soort het gaat.
         let rid = p.get_u32("RankID").unwrap_or(0);
         let rname_lower = rank_name.get(&rid).map(|n| n.to_lowercase()).unwrap_or_default();
         if !rname_lower.contains("noise") { continue; }
-        let kind = if sw_lower.contains("blower") || sw_lower.contains("motor")
-            || sw_lower.contains("soufflerie") {
+        let kind = if *default_on && (sw_lower.contains("blower") || sw_lower.contains("motor")
+            || sw_lower.contains("soufflerie")) {
             BackgroundSoundKind::Blower
-        } else if sw_lower.contains("noise") || sw_lower.contains("ambient")
-            || sw_lower.contains("rausch") || sw_lower.contains("geräusch") {
+        } else if *default_on && (sw_lower.contains("noise") || sw_lower.contains("ambient")
+            || sw_lower.contains("rausch") || sw_lower.contains("geräusch")) {
             BackgroundSoundKind::Ambient
+        } else if *clickable && !*default_on {
+            // Speelgoedregister: Cymbelstern, Vogelsang, Cuculus en
+            // soortgelijke effecten die de organist zelf aandrukt (0.7.98).
+            BackgroundSoundKind::Toy
         } else {
             continue;
         };

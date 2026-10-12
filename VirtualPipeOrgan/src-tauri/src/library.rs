@@ -488,6 +488,11 @@ pub struct OrganSettings {
     /// Motor-knop (0.7.97): true = blower aan. Standaard aan.
     #[serde(default)]
     pub blower_active: Option<bool>,
+    /// Speelgoedregisters (0.7.98): per naam de aan/uit-stand. Zodra een
+    /// orgel wordt geladen stuurt JM-Orgue deze stand naar de audio-engine
+    /// (via `SetToyActive`), zodat de registratie herneemt.
+    #[serde(default)]
+    pub toys_active: std::collections::HashMap<String, bool>,
     /// Koppels die de sampleset zelf niet heeft en die de organist erbij heeft
     /// gezet (0.7.47): de id's uit de door de app afgeleide koppellijst.
     #[serde(default)]

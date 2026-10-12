@@ -953,12 +953,18 @@ fn laad_en_stuur_bijgeluiden(state: &AppState, defs: &[vpo_sampler::grandorgue::
                 let rate = (bron_sr / output_sr as f64).max(0.01);
                 voices.push(crate::background_sounds::BackgroundVoice {
                     kind: d.kind,
+                    name: d.name.clone(),
                     data_l,
                     data_r,
                     rate,
                     // Blower en ambient opnamen zijn vaak behoorlijk zacht
                     // bedoeld; -12 dB per voice houdt ze onder de registratie.
-                    voice_gain: 10f32.powf(-12.0 / 20.0),
+                    // Speelgoedregisters daarentegen willen vaak behoorlijk
+                    // uitkomen (0 dB), zoals je ze in een kerk ook hoort.
+                    voice_gain: match d.kind {
+                        vpo_sampler::grandorgue::BackgroundSoundKind::Toy => 1.0,
+                        _ => 10f32.powf(-12.0 / 20.0),
+                    },
                 });
             }
             Err(e) => {
@@ -1001,6 +1007,21 @@ pub fn set_blower_active(state: State<AppState>, active: bool) -> Result<(), Str
 #[tauri::command]
 pub fn get_blower_active(state: State<AppState>) -> bool {
     *state.blower_active.read()
+}
+
+/// Speelgoedregister aan/uit (0.7.98): Cymbelstern, Vogelsang, Cuculus en
+/// soortgelijke. Werkt live, zonder herlaad. State wordt per orgel bewaard.
+#[tauri::command]
+pub fn set_toy_active(state: State<AppState>, name: String, active: bool) -> Result<(), String> {
+    state.toys_active.write().insert(name.clone(), active);
+    state.send_audio_command(AudioCommand::SetToyActive { name, active });
+    Ok(())
+}
+
+/// Aan/uit-staat van alle speelgoedregisters van dit orgel.
+#[tauri::command]
+pub fn get_toys_active(state: State<AppState>) -> std::collections::HashMap<String, bool> {
+    state.toys_active.read().clone()
 }
 
 /// Live volume van een perspectief in dB.
@@ -3150,6 +3171,7 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
                 kind: match b.kind {
                     vpo_sampler::grandorgue::BackgroundSoundKind::Blower => "blower".into(),
                     vpo_sampler::grandorgue::BackgroundSoundKind::Ambient => "ambient".into(),
+                    vpo_sampler::grandorgue::BackgroundSoundKind::Toy => "toy".into(),
                 },
                 name: b.name,
             }).collect()
@@ -8539,6 +8561,23 @@ fn restore_organ_settings(state: &AppState, organ_id: &str) {
     *state.blower_active.write() = blower;
     state.send_audio_command(AudioCommand::SetBlowerActive(blower));
 
+    // Speelgoedregisters (0.7.98): opgeslagen aan/uit-standen terugzetten.
+    // De audio-thread kreeg de SetBackgroundVoices al via load_organ; nu
+    // sturen we per toy de aan-stand opnieuw. Nieuwe orgels (lege map)
+    // doen niets, dus de UI start met alle speelgoedregisters uit.
+    {
+        let mut toys = state.toys_active.write();
+        toys.clear();
+        for (name, active) in settings.toys_active.iter() {
+            toys.insert(name.clone(), *active);
+        }
+    }
+    for (name, active) in settings.toys_active.iter() {
+        state.send_audio_command(AudioCommand::SetToyActive {
+            name: name.clone(), active: *active,
+        });
+    }
+
     // Doorlopend klavier (per orgel).
     crate::state::DOORLOPEND_KLAVIER.store(
         settings.continuous_keyboard, std::sync::atomic::Ordering::Relaxed);
@@ -9240,6 +9279,7 @@ pub fn do_save_organ_settings(state: &AppState, presets: HashMap<String, PresetD
         listening_position: Some(*state.listening_position.read()),
         background_gain: Some(*state.background_gain.read()),
         blower_active: Some(*state.blower_active.read()),
+        toys_active: state.toys_active.read().clone(),
         extra_couplers: state.extra_coupler_ids.read().clone(),
         continuous_keyboard: crate::state::DOORLOPEND_KLAVIER.load(std::sync::atomic::Ordering::Relaxed),
         remote_layout,

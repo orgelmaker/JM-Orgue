@@ -35,6 +35,9 @@ const FADE_FRAMES: f32 = 14_400.0;
 #[derive(Debug, Clone)]
 pub struct BackgroundVoice {
     pub kind: BackgroundSoundKind,
+    /// Vriendelijke naam uit de orgeldefinitie — voor speelgoedregisters
+    /// (0.7.98) de knop-tekst in de UI (Cymbelstern, Vogelsang, Cuculus).
+    pub name: String,
     /// Linkerkanaal (of mono).
     pub data_l: Arc<Vec<f32>>,
     /// Rechterkanaal bij stereo-opname; None = mono (dan L→beide).
@@ -83,9 +86,12 @@ impl BackgroundEngine {
     /// Vervang alle voices door de nieuwe set (orgelwissel of eerste load).
     pub fn set_voices(&mut self, nieuw: Vec<BackgroundVoice>) {
         self.voices = nieuw.into_iter().map(|v| ActiveVoice {
-            // Blower start uit als de motorknop uit staat.
             target_gain: match v.kind {
+                // Blower start uit als de motorknop uit staat.
                 BackgroundSoundKind::Blower if !self.blower_active => 0.0,
+                // Speelgoedregisters staan standaard uit: de organist drukt
+                // ze zelf aan via een knop in de werkbalk (0.7.98).
+                BackgroundSoundKind::Toy => 0.0,
                 _ => 1.0,
             },
             current_gain: 0.0, // begin stil, fade in
@@ -112,6 +118,19 @@ impl BackgroundEngine {
     /// Bijgeluiden-schuif.
     pub fn set_global_gain(&mut self, gain_lineair: f32) {
         self.global_gain = gain_lineair.clamp(0.0, 4.0);
+    }
+
+    /// Speelgoedregister aan of uit (0.7.98). Match op naam (case-insensitief);
+    /// zonder match verandert er niets.
+    pub fn set_toy(&mut self, name: &str, active: bool) {
+        let want = name.to_lowercase();
+        for v in &mut self.voices {
+            if matches!(v.voice.kind, BackgroundSoundKind::Toy)
+                && v.voice.name.to_lowercase() == want
+            {
+                v.target_gain = if active { 1.0 } else { 0.0 };
+            }
+        }
     }
 
     /// Zijn er voices die geluid produceren? Zo niet, dan kan de audio-
@@ -244,11 +263,67 @@ mod tests {
     fn maak_mono(len: usize, waarde: f32) -> BackgroundVoice {
         BackgroundVoice {
             kind: BackgroundSoundKind::Blower,
+            name: "test".into(),
             data_l: Arc::new(vec![waarde; len]),
             data_r: None,
             rate: 1.0,
             voice_gain: 1.0,
         }
+    }
+
+    fn maak_toy(len: usize, waarde: f32, name: &str) -> BackgroundVoice {
+        let mut v = maak_mono(len, waarde);
+        v.kind = BackgroundSoundKind::Toy;
+        v.name = name.into();
+        v
+    }
+
+    #[test]
+    fn speelgoed_begint_uit_en_gaat_aan_via_set_toy() {
+        let mut e = BackgroundEngine::new();
+        e.global_gain = 1.0;
+        e.set_voices(vec![maak_toy(1000, 1.0, "Cymbelstern")]);
+        // Zonder set_toy klinkt het register niet: target_gain is 0 bij start.
+        let mut l = vec![0.0; 20_000];
+        let mut r = vec![0.0; 20_000];
+        e.mix_stereo(&mut l, &mut r);
+        assert!(l[19_999].abs() < 1e-3, "toy moest stil blijven: {}", l[19_999]);
+        // Nu aanklikken.
+        e.set_toy("Cymbelstern", true);
+        let mut l2 = vec![0.0; 20_000];
+        let mut r2 = vec![0.0; 20_000];
+        e.mix_stereo(&mut l2, &mut r2);
+        assert!(l2[19_999] > 0.9, "toy moest doorlopen: {}", l2[19_999]);
+        // Uit → fade terug naar 0.
+        e.set_toy("Cymbelstern", false);
+        let mut l3 = vec![0.0; 20_000];
+        let mut r3 = vec![0.0; 20_000];
+        e.mix_stereo(&mut l3, &mut r3);
+        assert!(l3[19_999].abs() < 1e-3, "toy moest uit zijn: {}", l3[19_999]);
+    }
+
+    #[test]
+    fn set_toy_matcht_hoofdlettergevoelloos_en_laat_andere_voices_met_rust() {
+        let mut e = BackgroundEngine::new();
+        e.global_gain = 1.0;
+        e.set_voices(vec![
+            maak_toy(100, 1.0, "Vogelsang"),
+            maak_toy(100, 1.0, "Cymbelstern"),
+        ]);
+        // Alleen Vogelsang (met verschillende hoofdletters) aanklikken.
+        e.set_toy("vogelsang", true);
+        let mut l = vec![0.0; 20_000];
+        let mut r = vec![0.0; 20_000];
+        e.mix_stereo(&mut l, &mut r);
+        // Mix bevat alleen vogelsang: 1 van 2 voices actief, dus ongeveer 1.0
+        // (equal-gain mix). Cymbelstern moet 0 blijven.
+        assert!(l[19_999] > 0.9, "vogelsang moest doorlopen");
+        // Zet nu Cymbelstern aan: dan hoor je beide, mix wordt groter.
+        e.set_toy("Cymbelstern", true);
+        let mut l2 = vec![0.0; 20_000];
+        let mut r2 = vec![0.0; 20_000];
+        e.mix_stereo(&mut l2, &mut r2);
+        assert!(l2[19_999] > 1.8, "beide toys actief, mix groter: {}", l2[19_999]);
     }
 
     #[test]

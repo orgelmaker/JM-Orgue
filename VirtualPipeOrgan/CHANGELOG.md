@@ -5,6 +5,27 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.98] - 2026-10-12
+
+### Speelgoedregisters: Cymbelstern, Vogelsang, Cuculus
+- Een Hauptwerk-sampleset kan speelgoedregisters bevatten — klikbare
+  effecten die niet aan een toets zitten maar aan een eigen knop (het
+  rinkelen van een cymbelstern, een vogel die kwettert, de kuckuck van
+  een stokklok). JM-Orgue herkent ze nu bij het laden en toont ze als
+  klikbare knoppen in de werkbalk, elk met de naam uit de orgeldefinitie.
+- Hauptwerk-regel: pijpen in een rank met "noise" in de naam waarvan de
+  switch klikbaar is én standaard uit staat (`Clickable=Y`,
+  `DefaultToEngaged=N`). Nitra heeft er drie (Vogelsang, Cymbelstern,
+  Cuculus).
+- Hergebruikt de BackgroundEngine uit 0.7.97: klikloze fade in/uit,
+  loop-afspeel, buiten de registratie om. Standaardgain 0 dB zodat ze
+  goed hoorbaar zijn.
+- Standen worden per orgel bewaard (nieuw veld `toys_active` in de
+  per-orgel-instellingen); bij een orgellaad worden de laatst gezette
+  standen hersteld.
+- Nieuwe tests: `speelgoed_begint_uit_en_gaat_aan_via_set_toy`,
+  `set_toy_matcht_hoofdlettergevoelloos_en_laat_andere_voices_met_rust`.
+
 ## [0.7.97] - 2026-10-12
 
 ### Bijgeluiden hoorbaar: motor en ambient uit de sampleset

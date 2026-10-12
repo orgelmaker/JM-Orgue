@@ -846,6 +846,8 @@ pub enum AudioCommand {
     /// Motor-knop in de werkbalk: true = blower-voices actief, false =
     /// fade uit. Ambient blijft altijd aan.
     SetBlowerActive(bool),
+    /// Speelgoedregister aan of uit (0.7.98): per naam, bv. "Cymbelstern".
+    SetToyActive { name: String, active: bool },
     /// Clear all samples
     ClearSamples,
     /// Shutdown
@@ -4209,6 +4211,10 @@ fn run_audio_thread(
                     AudioCommand::SetBlowerActive(active) => {
                         bg_engine.set_blower(active);
                         info!("Motor: {}", if active { "aan" } else { "uit" });
+                    }
+                    AudioCommand::SetToyActive { name, active } => {
+                        bg_engine.set_toy(&name, active);
+                        info!("Speelgoedregister '{}': {}", name, if active { "aan" } else { "uit" });
                     }
                     AudioCommand::NoteOff { stop_id, pipe_num } => {
                         // Echte release-samples (opgenomen kerkakoestiek): staan
