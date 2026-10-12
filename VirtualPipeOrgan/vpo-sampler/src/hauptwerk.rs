@@ -990,13 +990,19 @@ fn verzamel_hw_bijgeluiden(
         if sw_id == 0 { continue; }
         let Some((sw_name, default_on, clickable)) = switch_info.get(&sw_id) else { continue };
         let sw_lower = sw_name.to_lowercase();
-        // Pijpen in een rank met "noises" in de naam zijn kandidaat; de
-        // switch bepaalt vervolgens om welk soort het gaat.
+        // Alleen pijpen in de kale "Noises"-rank zijn kandidaat. De ranks
+        // "Stop action noises …" en "Key action noises …" bevatten óók
+        // "noise" maar zijn register- en toetsmechaniek (0.7.99/0.7.102);
+        // die hier meenemen leverde in de rooktest 180 "speelgoedregisters"
+        // op — elke toets en elk register één (0.8.1).
         let rid = p.get_u32("RankID").unwrap_or(0);
         let rname_lower = rank_name.get(&rid).map(|n| n.to_lowercase()).unwrap_or_default();
-        if !rname_lower.contains("noise") { continue; }
-        let kind = if *default_on && (sw_lower.contains("blower") || sw_lower.contains("motor")
-            || sw_lower.contains("soufflerie")) {
+        if !rname_lower.contains("noise") || rname_lower.contains("action") { continue; }
+        // De blower-schakelaar zelf staat vaak standaard UIT en wordt bij het
+        // laden via een linkage ("Start blower on organ load") aangezet; de
+        // naam is hier dus leidend, niet DefaultToEngaged.
+        let kind = if sw_lower.contains("blower") || sw_lower.contains("motor")
+            || sw_lower.contains("soufflerie") {
             BackgroundSoundKind::Blower
         } else if *default_on && (sw_lower.contains("noise") || sw_lower.contains("ambient")
             || sw_lower.contains("rausch") || sw_lower.contains("geräusch")) {

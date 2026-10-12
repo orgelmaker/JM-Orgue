@@ -750,6 +750,14 @@ pub fn MISC_CC_LEARNING() -> &'static parking_lot::RwLock<Option<MiscCcTarget>> 
 /// set_background_gain). Zo gaat de luisterpositie-crossfade door hetzelfde
 /// pad als een handmatige UI-schuif, zonder dat de MIDI-thread AppState nodig
 /// heeft.
+/// Eerst geziene waarde per (kanaal, CC) tijdens het leren — het jitterfilter
+/// bindt pas bij ≥ 16 eenheden beweging (0.8.1).
+static MISC_CC_LEARN_SEEN_CELL: std::sync::OnceLock<parking_lot::RwLock<std::collections::HashMap<(u8, u8), u8>>>
+    = std::sync::OnceLock::new();
+pub fn MISC_CC_LEARN_SEEN() -> &'static parking_lot::RwLock<std::collections::HashMap<(u8, u8), u8>> {
+    MISC_CC_LEARN_SEEN_CELL.get_or_init(|| parking_lot::RwLock::new(std::collections::HashMap::new()))
+}
+
 static MISC_CC_PENDING_CELL: std::sync::OnceLock<parking_lot::RwLock<std::collections::HashMap<MiscCcTarget, f32>>>
     = std::sync::OnceLock::new();
 pub fn MISC_CC_PENDING() -> &'static parking_lot::RwLock<std::collections::HashMap<MiscCcTarget, f32>> {
@@ -3752,12 +3760,23 @@ impl AppState {
                 // bindings zich specifiek binden (anders dan de generieke
                 // zwel-CC's) en hun eigen trede-filter niet nodig hebben.
                 if let Some(doel) = { *MISC_CC_LEARNING().read() } {
-                    let mut lijst = MISC_CC_BINDINGS().write();
-                    lijst.retain(|b| b.target != doel);
-                    lijst.push(MiscCcBinding { target: doel, channel, cc: controller });
-                    *MISC_CC_LEARNING().write() = None;
-                    tracing::info!("MIDI-leren: {:?} gekoppeld aan kanaal {} CC{}",
-                        doel, channel + 1, controller);
+                    // Jitterfilter (0.8.1): een zweltrede die in rust ±2
+                    // wiebelt (zie 0.7.45) stuurt CC's zonder dat iemand
+                    // iets aanraakt; die mogen de binding niet kapen. Pas
+                    // binden als een CC ten minste 16 eenheden van zijn
+                    // eerst geziene waarde is weggelopen, of een knopwaarde
+                    // (0/127) stuurt.
+                    let eerst = *MISC_CC_LEARN_SEEN().write().entry((channel, controller)).or_insert(value);
+                    let beweging = (value as i16 - eerst as i16).unsigned_abs();
+                    if beweging >= 16 || value == 0 || value == 127 {
+                        let mut lijst = MISC_CC_BINDINGS().write();
+                        lijst.retain(|b| b.target != doel);
+                        lijst.push(MiscCcBinding { target: doel, channel, cc: controller });
+                        *MISC_CC_LEARNING().write() = None;
+                        MISC_CC_LEARN_SEEN().write().clear();
+                        tracing::info!("MIDI-leren: {:?} gekoppeld aan kanaal {} CC{}",
+                            doel, channel + 1, controller);
+                    }
                 }
                 // Toepassen op binnenkomende CC's; de UI leest MISC_CC_PENDING
                 // via periodieke poll en roept de echte setters aan, zodat de
@@ -5571,6 +5590,7 @@ mod crescendo_tests {
             retune_pipes: 0, retune_total: 0, perspectives: Vec::new(), layered_stops: 0,
             release_pipes: 0,
             background_sounds: Vec::new(),
+            key_click_count: 0,
         }
     }
 

@@ -5,6 +5,48 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.8.1] - 2026-10-12
+
+### Nazorg na controle van 0.7.94 t/m 0.8.0
+Een extra controleronde over het werk van vandaag, met een rooktest op een
+grote Hauptwerk-set met drie opnameposities. Zeven punten gevonden en
+verholpen:
+
+- **Speelgoedregisters liepen uit de hand.** De herkenning pakte álle
+  pijpen in de mechaniek-ranks mee, dus elke toets en elk register werd
+  een "speelgoedregister": 180 knoppen in de werkbalk en 180 loop-stemmen
+  in het geheugen. Nu tellen alleen de pijpen in de kale "Noises"-rank; de
+  ranks "Stop action …" en "Key action …" zijn mechaniek en blijven buiten.
+- **Blower werd gemist.** Zijn schakelaar staat standaard uit en wordt bij
+  het laden via een koppeling aangezet; de naam is nu leidend. De motor
+  klinkt weer.
+- **Galm van sets met één opnamepositie stond op 20 %.** De galmkoppeling
+  aan de luisterpositie (0.7.100) gold ook zonder schuif. Nu alleen bij
+  twee of meer posities, en zachter: 50 % bij het orgel tot 100 % achter
+  in de kerk.
+- **Polyfonie maal het aantal posities.** Voor elke geladen positie werd
+  een stem aangemaakt, ook voor stille. Nu krijgen alleen de hoorbare
+  positie(s) en hun directe buren een stem: hoogstens vier, hoe veel
+  posities een set ook heeft. Gemeten: 2 stemmen per noot op een set met
+  drie posities, voorheen 3.
+- **Dubbel geluid bij GrandOrgue-sets met een ongelabelde eerste laag.**
+  Een "(rear)"-rank als extra laag werd standaard aangezet en klonk over
+  de altijd-aan eerste laag heen. Zulke sets houden nu het oude gedrag
+  (uit, in de instellingen aan te zetten).
+- **Geen rem op het geheugen.** "Alles laden" kon op een krappe pc met
+  een grote surround-set het geheugen vol laden. Past de schatting niet
+  in de helft van het fysieke geheugen, dan blijft alleen de positie het
+  dichtst bij het orgel aan (met logregel; zelf aan te passen).
+- **Bijgeluiden konden de uitgang over ±1,0 duwen.** De mix kwam ná de
+  begrenzer; nu wordt de som begrensd.
+
+Verder: MIDI-leren negeert een wiebelende zweltrede (bindt pas bij 16
+eenheden beweging of een knopwaarde), oude bijgeluiden en klikbuffers
+worden buiten de audio-thread opgeruimd, het vinkje "Toetsmechaniek"
+verschijnt alleen bij sets die toetsklikken hebben, en de logregel over
+de originele pijptoon telt alleen pijpen met een echte correctie (bij de
+testset 84 in plaats van alle 1614).
+
 ## [0.8.0] - 2026-10-12
 
 ### Grote stap: akoestische mechaniek en een nieuwe luisterpositie

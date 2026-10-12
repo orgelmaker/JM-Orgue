@@ -117,6 +117,10 @@ pub struct OrganInfoDto {
     /// vullen deze lijst nog niet; GrandOrgue-sets wel.
     #[serde(default)]
     pub background_sounds: Vec<BackgroundSoundDto>,
+    /// Aantal toetsen met een opgenomen toetsklik (0.8.1): 0 = de set heeft
+    /// geen toetsmechaniek, dan verbergt de UI het vinkje.
+    #[serde(default)]
+    pub key_click_count: usize,
 }
 
 /// DTO voor één doorlopend achtergrondgeluid uit de sampleset (0.7.96).
@@ -552,26 +556,68 @@ where
     if !skipped.is_empty() {
         warn!("Meer dan 15 perspectieven: {:?} worden niet geladen", skipped);
     }
-    for (i, p) in out.iter_mut().enumerate() {
+    // Nieuwe orgels (geen opgeslagen voorkeur): alle posities aan, zodat de
+    // luisterpositie-schuif (0.7.95) ze kan mengen — MITS er ten minste één
+    // label als primaire laag voorkomt. Komt géén label als laag 0 voor (GO-
+    // set met een ongelabelde laag 0 en een "(rear)"-rank als extra laag),
+    // dan staat de ongelabelde laag 0 altijd op vol en zou een ingeschakelde
+    // rear er dubbel overheen klinken; die blijven dan uit zoals vóór 0.7.95
+    // (de gebruiker kan ze in de instellingen aanzetten).
+    let any_primary = primary_seen.iter().any(|&b| b);
+    for p in out.iter_mut() {
         match saved.iter().find(|s| s.name == p.name) {
             Some(s) => {
                 p.enabled = s.enabled;
                 p.gain_db = s.gain_db.clamp(-40.0, 12.0);
             }
-            // Nieuwe orgels (geen opgeslagen voorkeur): alle posities aan,
-            // zodat de luisterpositie-schuif (0.7.95) ze kan mengen. Vóór
-            // 0.7.95 stond alleen de PRIMAIRE positie aan en moest de
-            // gebruiker in Orgel-instellingen vinkjes bijzetten + herladen.
-            // De `primary_seen`-vlag speelt daardoor voor nieuwe orgels geen
-            // rol meer, maar blijft nog relevant voor zeldzame
-            // meer-dan-15-posities-sets (dan is `enabled` tegelijk `loaded`).
-            None => {
-                p.enabled = true;
-                let _ = primary_seen[i];
-            }
+            None => p.enabled = any_primary,
         }
     }
     out
+}
+
+/// Fysiek geheugen van deze pc in bytes (Windows: GlobalMemoryStatusEx).
+/// None op andere platforms of bij een mislukte aanroep → geen RAM-rem.
+#[cfg(windows)]
+fn fysiek_geheugen_bytes() -> Option<u64> {
+    use windows_sys::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
+    unsafe {
+        let mut st: MEMORYSTATUSEX = std::mem::zeroed();
+        st.dwLength = std::mem::size_of::<MEMORYSTATUSEX>() as u32;
+        if GlobalMemoryStatusEx(&mut st) == 0 { return None; }
+        Some(st.ullTotalPhys)
+    }
+}
+#[cfg(not(windows))]
+fn fysiek_geheugen_bytes() -> Option<u64> { None }
+
+/// Schatting van de preload per pijp (bytes): het geladen deel van een
+/// opname, gemeten op grote sets (zie geheugenonderzoek: 0,79 MB per ingang).
+const PRELOAD_BYTES_PER_PIJP: u64 = 790_000;
+
+/// RAM-rem (0.8.1) op "alles laden": past de schatting van álle ingeschakelde
+/// posities niet in de helft van het fysieke geheugen, dan blijft alleen de
+/// positie het dichtst bij het orgel aan (dry/close/front…). Alleen zonder
+/// opgeslagen voorkeur: wie zelf vinkjes heeft gezet, weet wat hij doet.
+/// Geeft true terug als er is ingegrepen (voor de logregel/UI).
+fn rem_op_geheugen(plan: &mut [PerspectiveRuntime], heeft_opslag: bool) -> bool {
+    if heeft_opslag || plan.len() < 2 { return false; }
+    let Some(ram) = fysiek_geheugen_bytes() else { return false };
+    let schatting: u64 = plan.iter().filter(|p| p.enabled)
+        .map(|p| p.pipe_count as u64 * PRELOAD_BYTES_PER_PIJP).sum();
+    if schatting * 2 <= ram { return false; }
+    // Dichtstbijzijnde positie op de as houden; de rest uit.
+    let dichtst = plan.iter().enumerate()
+        .min_by_key(|(i, p)| (luister_as_rang(&p.name), *i))
+        .map(|(i, _)| i);
+    for (i, p) in plan.iter_mut().enumerate() {
+        p.enabled = Some(i) == dichtst;
+    }
+    warn!(
+        "Perspectieven: schatting {} MB voor alle posities past niet in de helft van {} MB RAM — alleen de dichtstbijzijnde positie geladen (aan te passen in Orgel-instellingen)",
+        schatting / 1_000_000, ram / 1_000_000
+    );
+    true
 }
 
 /// Laadplan voor een GrandOrgue/Hauptwerk-definitie (niet-ruis-stops).
@@ -725,6 +771,9 @@ pub fn set_extra_couplers(state: State<AppState>, ids: Vec<String>) -> Result<()
 /// Ruim onder de hoorgrens; de samples blijven staan zodat aanzetten geen
 /// herlaad kost.
 pub const PERSPECTIEF_STIL_DB: f32 = -120.0;
+/// "Uit": de audio-thread maakt voor dit slot géén stem aan (gain exact 0).
+/// Zie `luisterpositie_toepassen` en de NoteOn-lus in audio.rs.
+pub const PERSPECTIEF_UIT_DB: f32 = -400.0;
 
 pub fn do_set_perspective_enabled(state: &AppState, name: &str, enabled: bool) -> Result<bool, String> {
     let (slot, gain_db, loaded, reload_needed) = {
@@ -881,39 +930,58 @@ fn luister_gain_lineair(pos: f32, idx: usize, n: usize) -> f32 {
 /// enable-toggle, trim-schuif, na een load.
 pub fn luisterpositie_toepassen(state: &AppState) {
     let pos = state.listening_position.read().clamp(0.0, 1.0);
-    // Galm volgt de luisterpositie (0.7.100): aan de klaviatuur hoor je
-    // nauwelijks galm (de nagalm is pas boven in de kerk opgebouwd); verder
-    // naar achteren wint de galm aan terrein. Lineair van 0.2 bij pos=0 tot
-    // 1.0 bij pos=1 — multiplicatief op de user-reverb-mix. De organist die
-    // de galm hélemaal uitzet (reverb_mix=0) houdt daar niets van.
-    let reverb_factor = 0.2 + 0.8 * pos;
-    state.send_audio_command(AudioCommand::SetReverbPositionFactor(reverb_factor));
     let persp_snapshot: Vec<_> = state.perspectives.read().iter().cloned().collect();
     let as_idx = luisteras_indices(&persp_snapshot);
     let n = as_idx.len();
-    // Alle slots eerst stilzetten; actieve posities overschrijven zometeen.
+    // Galm volgt de luisterpositie (0.7.100, bijgesteld 0.8.1): alleen als
+    // er écht iets te schuiven valt (≥ 2 posities). Een set met één positie
+    // hield anders stilletjes 20 % van zijn galm over, zonder zichtbare
+    // schuif om dat te herstellen. Verloop 0.5 (bij het orgel) → 1.0
+    // (achter in de kerk), multiplicatief op de user-reverb-mix; galm uit
+    // blijft uit.
+    let reverb_factor = if n >= 2 { 0.5 + 0.5 * pos } else { 1.0 };
+    state.send_audio_command(AudioCommand::SetReverbPositionFactor(reverb_factor));
+    // Posities buiten de as (uitgezet, niet geladen): UIT = gain exact 0,
+    // dus géén stem bij NoteOn.
     for p in &persp_snapshot {
         state.send_audio_command(AudioCommand::SetPerspectiveGain {
             slot: p.slot,
-            gain_db: PERSPECTIEF_STIL_DB,
+            gain_db: PERSPECTIEF_UIT_DB,
         });
     }
+    let (actief, buren) = luister_actief_en_buren(pos, n);
     for (i, &persp_i) in as_idx.iter().enumerate() {
         let p = &persp_snapshot[persp_i];
         let lineair = luister_gain_lineair(pos, i, n);
-        let crossfade_db = if lineair < 1e-6 {
+        let gain_db = if actief.contains(&i) && lineair >= 1e-6 {
+            // User-trim komt bovenop, in dB; sommeren = lineair × lineair in
+            // de audiothread, want slot-gain is één scalar.
+            p.gain_db + 20.0 * lineair.log10()
+        } else if buren.contains(&i) {
+            // Buurpositie: onhoorbaar maar mét stem, zodat een vastgehouden
+            // akkoord meteen meegaat zodra de schuif die kant op gaat.
             PERSPECTIEF_STIL_DB
         } else {
-            20.0 * lineair.log10()
+            PERSPECTIEF_UIT_DB
         };
-        // User-trim komt bovenop, in dB; sommeren = lineair × lineair in de
-        // audiothread, want slot-gain is één scalar.
-        let eff_db = p.gain_db + crossfade_db;
-        state.send_audio_command(AudioCommand::SetPerspectiveGain {
-            slot: p.slot,
-            gain_db: eff_db,
-        });
+        state.send_audio_command(AudioCommand::SetPerspectiveGain { slot: p.slot, gain_db });
     }
+}
+
+/// Welke as-indices zijn bij schuifwaarde `pos` actief (hoorbaar: hoogstens
+/// twee), en welke zijn hun directe buren (onhoorbaar maar mét stem)? Alle
+/// overige posities krijgen géén stem — dat begrenst de polyfonie op ten
+/// hoogste vier posities, hoe veel een set er ook heeft.
+fn luister_actief_en_buren(pos: f32, n: usize) -> (Vec<usize>, Vec<usize>) {
+    if n == 0 { return (Vec::new(), Vec::new()); }
+    if n == 1 { return (vec![0], Vec::new()); }
+    let actief: Vec<usize> = (0..n).filter(|&i| luister_gain_lineair(pos, i, n) >= 1e-6).collect();
+    let lo = actief.iter().copied().min().unwrap_or(0);
+    let hi = actief.iter().copied().max().unwrap_or(0);
+    let mut buren = Vec::new();
+    if lo > 0 { buren.push(lo - 1); }
+    if hi + 1 < n { buren.push(hi + 1); }
+    (actief, buren)
 }
 
 /// Zet de luisterpositie-schuif en pas de slot-gains onmiddellijk toe.
@@ -1036,6 +1104,9 @@ pub fn misc_cc_learn(state: State<AppState>, doel: String) -> Result<(), String>
         "background_gain" => crate::state::MiscCcTarget::BackgroundGain,
         _ => return Err(format!("Onbekend doel: {}", doel)),
     };
+    // Eerst-gezien-waarden wissen: het jitterfilter in de MIDI-handler
+    // begint dan met een schone lei (zie MISC_CC_LEARN_SEEN).
+    crate::state::MISC_CC_LEARN_SEEN().write().clear();
     *crate::state::MISC_CC_LEARNING().write() = Some(t);
     *state.misc_cc_learning.write() = Some(t);
     info!("MIDI-leren: wachten op CC voor {:?}", t);
@@ -2791,6 +2862,9 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
         // (laag zonder perspectief) worden altijd geladen.
         let saved_persp = perspective_prefs_for(state, path);
         let mut persp_plan = plan_perspectives(&definition, &saved_persp);
+        // RAM-rem (0.8.1): alles laden mag niet meer dan de helft van het
+        // geheugen kosten; anders alleen de dichtstbijzijnde positie.
+        rem_op_geheugen(&mut persp_plan, !saved_persp.is_empty());
         // "Alles laden" (0.7.47): ook de uitgeschakelde posities komen in het
         // geheugen, zodat wisselen ogenblikkelijk is in plaats van een herlaad.
         // Uitgeschakelde posities worden na het laden stilgezet (gain), niet
@@ -2880,7 +2954,10 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
                             (Some(orig), Some(sample)) => {
                                 let d = orig - sample;
                                 if d.abs() <= crate::retune::MAX_PLAUSIBLE_DELTA_CENTS {
-                                    hw_origineel_toegepast += 1;
+                                    // Alleen échte correcties tellen in het log;
+                                    // bij de meeste pijpen is origineel exact de
+                                    // bestandstoon (delta 0).
+                                    if d.abs() > 0.5 { hw_origineel_toegepast += 1; }
                                     d
                                 } else {
                                     hw_origineel_verworpen += 1;
@@ -3402,6 +3479,7 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
                 name: b.name,
             }).collect()
         },
+        key_click_count: definition.keyboard_clicks.len(),
     };
 
     // Koppels zoals de sampleset ze levert onthouden: vertrekpunt voor het
@@ -8504,6 +8582,7 @@ pub fn do_load_samples_from_directory_locked(state: &AppState, directory: &str) 
         // (0.7.96 is alleen de GrandOrgue-import; JM-Rec krijgt dit later
         // via een manifestveld).
         background_sounds: Vec::new(),
+        key_click_count: 0,
     };
 
     // Koppels zoals de sampleset ze levert onthouden: vertrekpunt voor het
@@ -10262,17 +10341,21 @@ mod perspective_plan_tests {
     }
 
     #[test]
-    fn extra_laag_label_zonder_primair_staat_sinds_0795_ook_aan() {
-        // Vóór 0.7.95 stond rear in deze situatie uit om dubbel klinken met
-        // de ongelabelde laag 0 te voorkomen. Vanaf 0.7.95 regelt de
-        // luisterpositie-schuif dat: op pos 0 (dichtbij) is alleen de eerste
-        // positie hoorbaar, dus rear zonder primair klinkt niet dubbel tenzij
-        // de organist naar achteren schuift. Echte ranks zonder label leveren
-        // geen waarneming en dus geen entry.
+    fn extra_laag_label_zonder_primair_staat_standaard_uit() {
+        // GO-set met ongelabelde laag 0 en een "(rear)"-rank als extra laag:
+        // laag 0 staat altijd op vol (geen slot), dus een ingeschakelde rear
+        // klinkt er dubbel overheen — en met één positie op de as zou de
+        // schuif hem ook nog op vol zetten. Daarom uit (0.8.1 herstelt de
+        // regel van vóór 0.7.95). Echte ranks zonder label leveren geen
+        // waarneming en dus geen entry.
         let obs = vec![("rear".to_string(), false, 20)];
         let plan = plan_perspectives_from(obs, &[]);
         assert_eq!(plan.len(), 1);
-        assert!(plan[0].enabled);
+        assert!(!plan[0].enabled);
+        // Zodra één label primair is (SJDL: front laag 0), gaan ze allemaal aan.
+        let obs2 = vec![("front".to_string(), true, 20), ("rear".to_string(), false, 20)];
+        let plan2 = plan_perspectives_from(obs2, &[]);
+        assert!(plan2.iter().all(|p| p.enabled));
         let empty = plan_perspectives_from(Vec::<(String, bool, usize)>::new(), &[]);
         assert!(empty.is_empty());
     }
@@ -11042,6 +11125,53 @@ mod luisterpositie_tests {
         for pos in [0.0, 0.25, 0.5, 0.75, 1.0] {
             assert!((luister_gain_lineair(pos, 0, 1) - 1.0).abs() < 1e-6);
         }
+    }
+
+    /// Actieve posities en hun buren (0.8.1): op een merkstreep is één
+    /// positie actief en zijn de twee buren "stil-met-stem"; ertussen zijn
+    /// er twee actieve en hoogstens twee buren. De rest krijgt geen stem.
+    #[test]
+    fn actief_en_buren_begrenzen_de_stemmen_op_vier_posities() {
+        // 5 posities, op merkstreep 2 (pos 0.5): actief [2], buren [1, 3].
+        let (a, b) = luister_actief_en_buren(0.5, 5);
+        assert_eq!(a, vec![2]);
+        assert_eq!(b, vec![1, 3]);
+        // Tussen 1 en 2 (pos 0.375): actief [1, 2], buren [0, 3].
+        let (a, b) = luister_actief_en_buren(0.375, 5);
+        assert_eq!(a, vec![1, 2]);
+        assert_eq!(b, vec![0, 3]);
+        // Eindpunt: actief [0], buur [1].
+        let (a, b) = luister_actief_en_buren(0.0, 5);
+        assert_eq!(a, vec![0]);
+        assert_eq!(b, vec![1]);
+        // Eén of geen positie.
+        assert_eq!(luister_actief_en_buren(0.7, 1), (vec![0], vec![]));
+        assert_eq!(luister_actief_en_buren(0.7, 0), (vec![], vec![]));
+    }
+
+    /// RAM-rem (0.8.1): zonder opslag en met een te grote schatting blijft
+    /// alleen de dichtstbijzijnde positie aan; met opslag grijpt hij niet in.
+    #[test]
+    fn ram_rem_houdt_alleen_dichtstbij_over() {
+        let mk = |name: &str, slot: u8, pipes: usize| PerspectiveRuntime {
+            name: name.into(), enabled: true, gain_db: 0.0, loaded: false, slot, pipe_count: pipes,
+        };
+        // Onrealistisch veel pijpen zodat de rem op élke pc afgaat.
+        let mut plan = vec![mk("rear", 1, 50_000_000), mk("close", 2, 50_000_000), mk("front", 3, 50_000_000)];
+        let ingegrepen = rem_op_geheugen(&mut plan, false);
+        if fysiek_geheugen_bytes().is_some() {
+            assert!(ingegrepen);
+            assert_eq!(plan.iter().map(|p| (p.name.as_str(), p.enabled)).collect::<Vec<_>>(),
+                vec![("rear", false), ("close", true), ("front", false)]);
+        }
+        // Met opgeslagen voorkeur: niets veranderen.
+        let mut plan2 = vec![mk("rear", 1, 50_000_000), mk("close", 2, 50_000_000)];
+        assert!(!rem_op_geheugen(&mut plan2, true));
+        assert!(plan2.iter().all(|p| p.enabled));
+        // Kleine set: niets veranderen.
+        let mut plan3 = vec![mk("rear", 1, 500), mk("close", 2, 500)];
+        assert!(!rem_op_geheugen(&mut plan3, false));
+        assert!(plan3.iter().all(|p| p.enabled));
     }
 
     #[test]

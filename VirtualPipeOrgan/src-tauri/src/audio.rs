@@ -4114,6 +4114,14 @@ fn run_audio_thread(
                         pw.verbruik /= n_hoorbaar;
                         let mut stoot_nieuw = 0.0f32;
                         for &(layer, slot) in layout {
+                        // Perspectief op "uit" (gain exact 0, zie
+                        // SetPerspectiveGain): geen stem aanmaken. Met alle
+                        // posities geladen (0.7.95) scheelt dat polyfonie ×
+                        // aantal posities; alleen de actieve twee en hun
+                        // buren krijgen een stem.
+                        if slot > 0 && persp_gain[(slot as usize) & (MAX_LAYERS - 1)] <= 0.0 {
+                            continue;
+                        }
                         // Staat de tremulant aan én bestaat er een trem-opname
                         // voor deze pijp, dan is de TREM-sleutel de speelsleutel:
                         // attack, achtergrond-load, full sample en release staan
@@ -4250,12 +4258,21 @@ fn run_audio_thread(
                     }
                     AudioCommand::SetPerspectiveGain { slot, gain_db } => {
                         if slot > 0 && (slot as usize) < MAX_LAYERS {
-                            persp_gain[slot as usize] = 10f32.powf(gain_db / 20.0);
+                            // ≤ −300 dB = "uit" (PERSPECTIEF_UIT_DB): exact 0,
+                            // zodat de NoteOn-lus voor dit slot géén stem
+                            // aanmaakt. −120 dB ("stil") blijft > 0: wél een
+                            // stem, onhoorbaar — voor de buurposities van de
+                            // luisterpositie, zodat een vastgehouden akkoord
+                            // het schuiven blijft volgen.
+                            persp_gain[slot as usize] = if gain_db <= -300.0 { 0.0 } else { 10f32.powf(gain_db / 20.0) };
                         }
                     }
                     AudioCommand::SetBackgroundVoices(voices) => {
                         let n = voices.len();
-                        bg_engine.set_voices(voices);
+                        // Oude voices (tientallen MB) via de janitor droppen,
+                        // niet in de callback.
+                        let oud = bg_engine.set_voices(voices);
+                        if !oud.is_empty() { gc.send_boxed(oud); }
                         info!("Achtergrondgeluiden: {} loop-voices actief", n);
                     }
                     AudioCommand::SetBackgroundGain { gain_lineair } => {
@@ -4271,14 +4288,16 @@ fn run_audio_thread(
                     }
                     AudioCommand::RegisterStopClicks(map) => {
                         let n = map.len();
-                        stop_click_buffers = map;
+                        let oud = std::mem::replace(&mut stop_click_buffers, map);
+                        gc.send_boxed(oud);
                         if n > 0 {
                             info!("Registermechaniek: {} stops met klikgeluiden geladen", n);
                         }
                     }
                     AudioCommand::RegisterKeyboardClicks(map) => {
                         let n = map.len();
-                        keyboard_click_buffers = map;
+                        let oud = std::mem::replace(&mut keyboard_click_buffers, map);
+                        gc.send_boxed(oud);
                         if n > 0 {
                             info!("Toetsmechaniek: {} klikbuffers geladen", n);
                         }

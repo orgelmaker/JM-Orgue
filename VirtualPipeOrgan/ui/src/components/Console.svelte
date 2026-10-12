@@ -2095,7 +2095,10 @@
       dispatch('refreshMidiMappings');
     } catch (e) { console.error(e); }
   }
-  $: heeftBijgeluiden = (organInfo?.background_sounds?.length || 0) > 0;
+  // Blok tonen bij bijgeluiden óf toetsklikken; het vinkje "Toetsmechaniek"
+  // alleen als de set toetsklikken heeft (0.8.1).
+  $: heeftToetsklikken = (organInfo?.key_click_count || 0) > 0;
+  $: heeftBijgeluiden = (organInfo?.background_sounds?.length || 0) > 0 || heeftToetsklikken;
   $: heeftBlower = (organInfo?.background_sounds || []).some(b => b.kind === 'blower');
   // Speelgoedregisters (0.7.98): aparte lijst zodat de werkbalk per toy een
   // eigen knop kan tonen (Cymbelstern, Vogelsang, Cuculus).
@@ -6195,13 +6198,15 @@
                   <span>{$t('background.motor_on')}</span>
                 </label>
               {/if}
-              <label style="display: flex; align-items: center; gap: 0.4rem; margin-top: 0.4rem; font-size: 0.78rem;">
-                <input type="checkbox" checked={toetsmechaniekAan}
-                  on:change={(e) => zetToetsmechaniek(e.target.checked)} />
-                <span>{$t('background.key_action')}</span>
-              </label>
-              {#if toetsmechHerladen}
-                <p style="margin: 0.2rem 0 0; font-size: 0.68rem; color: var(--warning, #d9a441); line-height: 1.35;">{$t('background.key_action_reload')}</p>
+              {#if heeftToetsklikken}
+                <label style="display: flex; align-items: center; gap: 0.4rem; margin-top: 0.4rem; font-size: 0.78rem;">
+                  <input type="checkbox" checked={toetsmechaniekAan}
+                    on:change={(e) => zetToetsmechaniek(e.target.checked)} />
+                  <span>{$t('background.key_action')}</span>
+                </label>
+                {#if toetsmechHerladen}
+                  <p style="margin: 0.2rem 0 0; font-size: 0.68rem; color: var(--warning, #d9a441); line-height: 1.35;">{$t('background.key_action_reload')}</p>
+                {/if}
               {/if}
             </div>
             {/if}

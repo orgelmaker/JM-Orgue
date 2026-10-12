@@ -107,7 +107,11 @@ impl BackgroundEngine {
     }
 
     /// Vervang alle voices door de nieuwe set (orgelwissel of eerste load).
-    pub fn set_voices(&mut self, nieuw: Vec<BackgroundVoice>) {
+    /// Geeft de OUDE voices terug zodat de aanroeper ze buiten de audio-
+    /// thread kan droppen (een blower-opname is tientallen MB; free() in de
+    /// callback is niet realtime-veilig — zelfde regel als LoadSamples).
+    pub fn set_voices(&mut self, nieuw: Vec<BackgroundVoice>) -> Vec<ActiveVoice> {
+        let oud = std::mem::take(&mut self.voices);
         self.voices = nieuw.into_iter().map(|v| ActiveVoice {
             target_gain: match v.kind {
                 // Blower start uit als de motorknop uit staat.
@@ -121,6 +125,7 @@ impl BackgroundEngine {
             voice: v,
             pos: 0.0,
         }).collect();
+        oud
     }
 
     /// Alle voices wissen (bv. bij orgel-ontladen).
@@ -176,8 +181,12 @@ impl BackgroundEngine {
             let base = (start_frame + i) * channels;
             if base + 1 >= data.len() { break; }
             let (l, r) = self.volgende_sample();
-            data[base] += l;
-            if channels > 1 { data[base + 1] += r; }
+            // De clamp van de hoofdketen zit vóór deze mix (per frame, in de
+            // callback); hier dus zelf begrenzen, anders kan een f32-uitgang
+            // (WASAPI/ASIO float) boven ±1.0 uitkomen — hoorbaar als harde
+            // clip of wrap bij sommige drivers.
+            data[base] = (data[base] + l).clamp(-1.0, 1.0);
+            if channels > 1 { data[base + 1] = (data[base + 1] + r).clamp(-1.0, 1.0); }
         }
         // Afgespeelde one-shots opruimen (0.7.99): pos is doorgaans ≥ len.
         self.one_shots.retain(|v| v.pos < v.voice.data_l.len() as f64);
