@@ -1326,5 +1326,12 @@
     "replaces_swell": "swell box {division}",
     "taken_over": "This pedal was already assigned to {what}; that assignment has been taken over. One pedal can only have one function.",
     "cc_required": "Enter a CC number as well — selecting only a channel does not create an assignment."
+  },
+  "background": {
+    "title": "Background sounds",
+    "desc": "This sample set has one or more continuous background sounds (the organ blower and/or room ambience).",
+    "blower": "blower:",
+    "ambient": "ambient:",
+    "coming_soon": "Playback with motor button and volume slider is coming in a next release."
   }
 }

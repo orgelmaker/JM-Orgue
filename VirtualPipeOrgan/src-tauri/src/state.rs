@@ -5425,6 +5425,7 @@ mod crescendo_tests {
             }]),
             retune_pipes: 0, retune_total: 0, perspectives: Vec::new(), layered_stops: 0,
             release_pipes: 0,
+            background_sounds: Vec::new(),
         }
     }
 

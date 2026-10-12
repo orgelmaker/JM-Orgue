@@ -1326,5 +1326,12 @@
     "replaces_swell": "caja expresiva {division}",
     "taken_over": "Este pedal ya estaba asignado a {what}; esa asignación se ha trasladado. Un pedal solo puede tener una función.",
     "cc_required": "Introduce también un número de CC — elegir solo un canal no crea ninguna asignación."
+  },
+  "background": {
+    "title": "Sonidos de fondo",
+    "desc": "Este sampleset tiene uno o varios sonidos continuos (soplador y/o sonido ambiente).",
+    "blower": "soplador:",
+    "ambient": "ambiente:",
+    "coming_soon": "La reproducción con botón Motor y control de volumen llegará en una próxima versión."
   }
 }

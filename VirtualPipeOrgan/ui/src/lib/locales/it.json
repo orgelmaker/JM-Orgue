@@ -1326,5 +1326,12 @@
     "replaces_swell": "cassa espressiva {division}",
     "taken_over": "Questa staffa era già abbinata a {what}; quell'abbinamento è stato trasferito. Un pedale può avere una sola funzione.",
     "cc_required": "Inserisci anche un numero CC — scegliere solo un canale non crea alcun abbinamento."
+  },
+  "background": {
+    "title": "Rumori di fondo",
+    "desc": "Questo sample set contiene uno o più suoni continui (soffiatore e/o rumore ambientale).",
+    "blower": "soffiatore:",
+    "ambient": "ambiente:",
+    "coming_soon": "La riproduzione con pulsante Motore e cursore del volume arriverà in una versione successiva."
   }
 }

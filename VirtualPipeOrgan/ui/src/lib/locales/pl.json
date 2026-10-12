@@ -1326,5 +1326,12 @@
     "replaces_swell": "szafa ekspresyjna {division}",
     "taken_over": "Ten pedał był już przypisany do {what}; to przypisanie zostało przejęte. Jeden pedał może mieć tylko jedną funkcję.",
     "cc_required": "Wpisz też numer CC — sam wybór kanału nie tworzy przypisania."
+  },
+  "background": {
+    "title": "Dźwięki tła",
+    "desc": "Ten sampleset zawiera jeden lub więcej ciągłych dźwięków w tle (dmuchawa i/lub szum pomieszczenia).",
+    "blower": "dmuchawa:",
+    "ambient": "tło:",
+    "coming_soon": "Odtwarzanie z przyciskiem Silnik i suwakiem głośności pojawi się w następnej wersji."
   }
 }

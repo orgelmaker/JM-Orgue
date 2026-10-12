@@ -48,6 +48,97 @@ pub struct OrganDefinition {
     pub couplers: Vec<CouplerDef>,
 }
 
+/// Een doorlopend achtergrondgeluid dat buiten de registratie om klinkt
+/// zodra het orgel aan staat (0.7.96). Gebruikt in de audio-engine om
+/// blower, motor en ambient-opnamen uit sampleset-makers in een loop af te
+/// spelen; de registratie blijft ongemoeid.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct BackgroundSoundDef {
+    /// Soort — bepaalt of het geluid door de motorknop wordt bediend
+    /// (`Blower`) of altijd aan is (`Ambient`).
+    pub kind: BackgroundSoundKind,
+    /// Mensvriendelijke naam uit de orgeldefinitie (voor logregel en de UI).
+    pub name: String,
+    /// Absoluut pad van het WAV-bestand dat geloopt moet worden.
+    pub path: PathBuf,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum BackgroundSoundKind {
+    /// Orgelmotor (blaasbalg-aandrijving). Hoort bij de motor-knop in de
+    /// werkbalk; staat standaard aan.
+    Blower,
+    /// Ruimtegeluid, zacht geroezemoes of ventilatie. Altijd aan zolang het
+    /// orgel geladen is.
+    Ambient,
+}
+
+impl OrganDefinition {
+    /// Doorlopende achtergrondgeluiden uit de orgeldefinitie halen (0.7.96):
+    /// bij GrandOrgue zijn blower, orgelmotor en ambient aparte stops met
+    /// `AcceptsRetuning=N` en een pijp die naar de WAV wijst. Deze stops
+    /// zitten óók in `self.stops` (daar al door `is_noise_or_mechanical` uit
+    /// elke registerlijst gefilterd); de audio-engine gebruikt het resultaat
+    /// hier om die bestanden in een loop af te spelen zonder dat ze als
+    /// register verschijnen. Hauptwerk gebruikt in plaats daarvan losse
+    /// `Pipe_SoundEngine01`-records op switches (buiten iedere Stop om);
+    /// die ondersteuning komt in een volgende versie.
+    pub fn verzamel_bijgeluiden(&self) -> Vec<BackgroundSoundDef> {
+        let mut uit = Vec::new();
+        for stop in &self.stops {
+            if !stop.is_noise_or_mechanical() { continue; }
+            let Some(kind) = stop.background_sound_kind() else { continue; };
+            // Pak de EERSTE Sample-pijp uit de hoofdlaag; achtergrondgeluiden
+            // zijn vrijwel altijd één pijp (één opname). Pijpen met Reference
+            // of Empty slaan we over.
+            let path = stop.pipes.iter().find_map(|p| match p {
+                PipeDef::Sample { path, .. } => Some(path.clone()),
+                _ => None,
+            });
+            if let Some(path) = path {
+                uit.push(BackgroundSoundDef { kind, name: stop.name.clone(), path });
+            }
+        }
+        uit
+    }
+}
+
+impl StopDef {
+    /// Herkent of deze (ruis-)stop een doorlopend achtergrondgeluid is dat
+    /// de audio-engine moet loopen (0.7.96). GrandOrgue-sets modelleren
+    /// blower, ambient en bellows als eigen stops met `AcceptsRetuning=N` en
+    /// een onmiddellijk herkenbare naam ("Blower", "Ambient noise",
+    /// "Bellows"). Hoort alleen aangeroepen te worden voor stops waarvoor
+    /// `is_noise_or_mechanical()` true geeft; anders is "action"/"noise" in
+    /// de naam gewoon een subrubriek en geen bijgeluid. Pijpen die aan een
+    /// toets of een registerschakelaar zitten (`Stop attack noise …`,
+    /// `Key action …`) blijven None en worden overgeslagen.
+    pub fn background_sound_kind(&self) -> Option<BackgroundSoundKind> {
+        let n = self.name.to_lowercase();
+        // Per-toets of per-register mechaniek is géén achtergrondgeluid —
+        // dat zijn one-shots die bij een aanslag of registratie horen en
+        // komen later aan de beurt.
+        if n.contains("key action") || n.contains("stop action")
+            || n.contains("stop attack") || n.contains("stop release")
+            || n.contains("key attack") || n.contains("key release")
+            || n.contains("klaviatur") || n.contains("tastatur")
+        {
+            return None;
+        }
+        if n.contains("blower") || n.contains("motor")
+            || n.contains("soufflerie") || n.contains("moteur")
+            || n.contains("bellows") {
+            return Some(BackgroundSoundKind::Blower);
+        }
+        if n.contains("ambient") || n.contains("ambience")
+            || n.contains("rausch") || n.contains("geräusch")
+            || n.contains("geraeusch") || n.contains("bruit") {
+            return Some(BackgroundSoundKind::Ambient);
+        }
+        None
+    }
+}
+
 /// General organ information from [Organ] section
 #[derive(Debug, Clone, Default)]
 pub struct OrganInfo {
@@ -1718,6 +1809,35 @@ mod tests {
         assert!(mk("Ambient noise", true).is_noise_or_mechanical());
         // Unpitched recording (AcceptsRetuning=N) is filtered regardless of name.
         assert!(mk("Whatever", false).is_noise_or_mechanical());
+    }
+
+    /// Bijgeluidendetectie (0.7.96): blower en ambient horen als doorlopend
+    /// achtergrondgeluid behandeld te worden; registratie- en toetsmechaniek
+    /// NIET (dat zijn one-shots voor 0.7.97/.98).
+    #[test]
+    fn bijgeluidenherkenning_scheidt_doorlopend_van_mechaniek() {
+        let mk = |n: &str| StopDef {
+            id: 1, name: n.into(), harmonic_number: 8, sounding_harmonic: 8,
+            pitch_correction: 0.0, pitch_tuning_cents: 0.0, number_of_pipes: 1,
+            first_accessible_pipe_logical_key: 1, windchest_group: 1,
+            amplitude_level: 100.0, gain_db: 0.0, percussive: false,
+            accepts_retuning: false, first_midi_note: None, pipes: Vec::new(),
+            layers: Vec::new(), primary_perspective: None,
+        };
+        use BackgroundSoundKind::*;
+        assert_eq!(mk("Blower").background_sound_kind(), Some(Blower));
+        assert_eq!(mk("Blower internal").background_sound_kind(), Some(Blower));
+        assert_eq!(mk("Soufflerie").background_sound_kind(), Some(Blower));
+        assert_eq!(mk("Bellows").background_sound_kind(), Some(Blower));
+        assert_eq!(mk("Ambient noise").background_sound_kind(), Some(Ambient));
+        assert_eq!(mk("Rauschen").background_sound_kind(), Some(Ambient));
+        // Toets- en registermechaniek is géén doorlopend achtergrondgeluid.
+        assert_eq!(mk("Stop attack noise Flet kryty 8'").background_sound_kind(), None);
+        assert_eq!(mk("Stop release noise Blower").background_sound_kind(), None);
+        assert_eq!(mk("Key action Manual 1").background_sound_kind(), None);
+        // "Prestant" is sowieso geen ruis en zou nooit hier komen (filter
+        // op is_noise_or_mechanical gaat ervoor), maar de helper geeft None.
+        assert_eq!(mk("Prestant 8'").background_sound_kind(), None);
     }
 
     /// Testhelper: schrijf een mini-ODF naar een uniek tempbestand, parse hem

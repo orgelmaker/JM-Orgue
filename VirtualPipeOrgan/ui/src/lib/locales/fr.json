@@ -1326,5 +1326,12 @@
     "replaces_swell": "boîte expressive {division}",
     "taken_over": "Cette pédale était déjà affectée à {what} ; cette affectation a été reprise. Une pédale ne peut avoir qu'une seule fonction.",
     "cc_required": "Saisissez aussi un numéro de CC — choisir uniquement un canal ne crée pas d'affectation."
+  },
+  "background": {
+    "title": "Bruits d'ambiance",
+    "desc": "Cet échantillonnage comporte un ou plusieurs sons continus (soufflerie et/ou son d'ambiance).",
+    "blower": "soufflerie :",
+    "ambient": "ambiance :",
+    "coming_soon": "La lecture avec bouton Moteur et curseur de volume arrivera dans une prochaine version."
   }
 }

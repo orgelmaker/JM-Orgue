@@ -1326,5 +1326,12 @@
     "replaces_swell": "Schwellkasten {division}",
     "taken_over": "Dieser Tritt war bereits {what} zugeordnet; diese Zuordnung wurde übernommen. Ein Tritt kann nur eine Funktion haben.",
     "cc_required": "Bitte auch eine CC-Nummer eingeben — nur einen Kanal zu wählen erzeugt keine Zuordnung."
+  },
+  "background": {
+    "title": "Hintergrundgeräusche",
+    "desc": "Dieses Sampleset enthält ein oder mehrere Dauergeräusche (Orgelmotor und/oder Raumklang).",
+    "blower": "Motor:",
+    "ambient": "Ambient:",
+    "coming_soon": "Wiedergabe mit Motor-Taste und Lautstärkeregler kommt in einer späteren Version."
   }
 }

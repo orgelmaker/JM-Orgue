@@ -110,6 +110,22 @@ pub struct OrganInfoDto {
     /// kunstmatige galm overheen (zie de nagalm-instellingen).
     #[serde(default)]
     pub release_pipes: usize,
+    /// Doorlopende achtergrondgeluiden (0.7.96): orgelmotor, blaasbalg en
+    /// ruimtegeluid uit de sampleset. In deze versie alleen inventarisatie
+    /// voor de UI; het continu afspelen (met motor-knop en volumeschuif)
+    /// komt in 0.7.97. Hauptwerk-sets (met pijpen op switches i.p.v. stops)
+    /// vullen deze lijst nog niet; GrandOrgue-sets wel.
+    #[serde(default)]
+    pub background_sounds: Vec<BackgroundSoundDto>,
+}
+
+/// DTO voor één doorlopend achtergrondgeluid uit de sampleset (0.7.96).
+#[derive(Debug, Clone, Serialize)]
+pub struct BackgroundSoundDto {
+    /// "blower" (motor/blaasbalg) of "ambient" (ruimtegeluid).
+    pub kind: String,
+    /// Mensvriendelijke naam uit de orgeldefinitie.
+    pub name: String,
 }
 
 /// Microfoonperspectief voor de frontend (Orgel-Instellingen → Perspectieven).
@@ -3046,6 +3062,24 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
         perspectives: perspective_dtos(&persp),
         layered_stops: rank_summary.iter().filter(|r| r.is_stacked()).count(),
         release_pipes,
+        // Bijgeluiden (0.7.96): inventarisatie uit de GrandOrgue-definitie.
+        // Alleen de kind + naam gaan naar de UI; het pad hoort niet thuis in
+        // een DTO (sampleset-interne info). Hauptwerk-sets geven nu een
+        // lege lijst — HW's blower/ambient zit op switches, niet in stops.
+        background_sounds: {
+            let bg = definition.verzamel_bijgeluiden();
+            if !bg.is_empty() {
+                info!("Bijgeluiden gevonden: {}", bg.iter()
+                    .map(|b| format!("{:?} '{}'", b.kind, b.name)).collect::<Vec<_>>().join(", "));
+            }
+            bg.into_iter().map(|b| BackgroundSoundDto {
+                kind: match b.kind {
+                    vpo_sampler::grandorgue::BackgroundSoundKind::Blower => "blower".into(),
+                    vpo_sampler::grandorgue::BackgroundSoundKind::Ambient => "ambient".into(),
+                },
+                name: b.name,
+            }).collect()
+        },
     };
 
     // Koppels zoals de sampleset ze levert onthouden: vertrekpunt voor het
@@ -8138,6 +8172,10 @@ pub fn do_load_samples_from_directory_locked(state: &AppState, directory: &str) 
         layered_stops: 0,
         // Eigen samplemappen kennen geen aparte release-opnamen.
         release_pipes: 0,
+        // Eigen samplemappen hebben nog geen bijgeluiden-ondersteuning
+        // (0.7.96 is alleen de GrandOrgue-import; JM-Rec krijgt dit later
+        // via een manifestveld).
+        background_sounds: Vec::new(),
     };
 
     // Koppels zoals de sampleset ze levert onthouden: vertrekpunt voor het

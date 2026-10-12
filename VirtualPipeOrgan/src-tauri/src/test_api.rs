@@ -2234,6 +2234,7 @@ mod tests {
             perspectives: Vec::new(),
             layered_stops: 0,
             release_pipes: 0,
+            background_sounds: Vec::new(),
         }
     }
 

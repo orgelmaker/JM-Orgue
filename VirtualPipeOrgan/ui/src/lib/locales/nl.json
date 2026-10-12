@@ -1326,5 +1326,12 @@
     "replaces_swell": "zwelkast {division}",
     "taken_over": "Deze trede was al gekoppeld aan {what}; die koppeling is overgenomen. Eén pedaal kan maar één functie hebben.",
     "cc_required": "Vul ook een CC-nummer in — alleen een kanaal kiezen maakt geen koppeling."
+  },
+  "background": {
+    "title": "Bijgeluiden",
+    "desc": "Deze sampleset heeft een of meer doorlopende achtergrondgeluiden (de orgelmotor en/of ruimtegeluid).",
+    "blower": "motor:",
+    "ambient": "ambient:",
+    "coming_soon": "Afspelen met motor-knop en volumeschuif komt in een volgende versie."
   }
 }

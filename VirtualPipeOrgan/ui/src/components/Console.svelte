@@ -6010,6 +6010,26 @@
             </div>
             {/if}
 
+            <!-- Bijgeluiden (0.7.96): inventarisatie uit de sampleset.
+                 Afspeel + motor-knop + schuif komt in 0.7.97. -->
+            {#if !secondary && (organInfo?.background_sounds?.length || 0) > 0}
+            <div class="settings-block">
+              <h3 class="settings-block-title">{$t('background.title')}</h3>
+              <p class="settings-hint" style="margin: 0 0 0.4rem;">{$t('background.desc')}</p>
+              <ul style="margin: 0.2rem 0 0.4rem; padding-left: 1.1rem; font-size: 0.78rem;">
+                {#each organInfo.background_sounds as b}
+                  <li>
+                    <span style="opacity: 0.75; margin-right: 0.3rem;">
+                      {b.kind === 'blower' ? $t('background.blower') : $t('background.ambient')}
+                    </span>
+                    <code>{b.name}</code>
+                  </li>
+                {/each}
+              </ul>
+              <p class="settings-hint" style="margin: 0; opacity: 0.75;">{$t('background.coming_soon')}</p>
+            </div>
+            {/if}
+
             <!-- Crescendo -->
             <div class="settings-block">
               <h3 class="settings-block-title">{$t('settings.crescendo')}</h3>

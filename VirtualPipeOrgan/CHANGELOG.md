@@ -5,6 +5,23 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.96] - 2026-10-12
+
+### Bijgeluiden — eerste stap: inventarisatie bij het laden
+- Een GrandOrgue-sampleset heeft meestal doorlopende achtergrondgeluiden
+  (orgelmotor, blaasbalg of ruimtegeluid). Deze versie herkent die bij het
+  laden en toont ze in Orgel-instellingen onder een nieuw blok
+  **Bijgeluiden**. Mechaniek per toets of per register (de "stop attack
+  noise …" en "key action …") valt daar bewust buiten; die zijn one-shots
+  voor een volgende stap.
+- Nog niet in deze versie: het continu afspelen, een motor-knop in de
+  werkbalk en een volumeschuif. Die komen in 0.7.97. De infrastructuur
+  (importherkenning, DTO en teksten in alle zeven talen) staat nu klaar.
+- Hauptwerk-sets vullen deze lijst nog niet: hun motor en ambient zitten
+  op switches i.p.v. in Stop-objecten, dat vraagt een andere parseerweg
+  (ook 0.7.97). Grabowski's Nitra bijvoorbeeld toont deze lijst nog leeg.
+- Nieuwe test: `bijgeluidenherkenning_scheidt_doorlopend_van_mechaniek`.
+
 ## [0.7.95] - 2026-10-12
 
 ### Luisterpositie-schuif in de werkbalk
