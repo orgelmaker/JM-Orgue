@@ -100,6 +100,60 @@ pub enum BackgroundSoundKind {
 }
 
 impl OrganDefinition {
+    /// Register-klikgeluiden uit de GrandOrgue-stops verzamelen (0.7.101).
+    /// GO-sets modelleren het klikken van registers als eigen stops:
+    /// "Stop attack noise {naam}" en "Stop release noise {naam}" (één pijp
+    /// per stop, AcceptsRetuning=N). Deze helper vult `stop_action_clicks`
+    /// door op basis van de resterende naam de echte stop te vinden en
+    /// zijn attack/release-pad eraan te koppelen. Hauptwerk-sets vullen
+    /// `stop_action_clicks` al in de importer; GO-sets doen het hier.
+    pub fn verzamel_go_registermechaniek(&mut self) {
+        use std::collections::HashMap;
+        // Naam → stop_id voor de speelbare registers.
+        let mut naam_naar_id: HashMap<String, u32> = HashMap::new();
+        for stop in &self.stops {
+            if stop.is_noise_or_mechanical() { continue; }
+            naam_naar_id.insert(stop.name.trim().to_string(), stop.id);
+        }
+        // Verzamel per echte stop_id het attack- en release-pad.
+        let mut nieuw: HashMap<u32, StopActionClickDef> = HashMap::new();
+        for stop in &self.stops {
+            if !stop.is_noise_or_mechanical() { continue; }
+            let lower = stop.name.to_lowercase();
+            let (is_attack, prefix_len) = if lower.starts_with("stop attack noise ") {
+                (true, "stop attack noise ".len())
+            } else if lower.starts_with("stop release noise ") {
+                (false, "stop release noise ".len())
+            } else { continue; };
+            // "Stop attack noise Blower" is géén registerklik maar het blower-
+            // bijgeluid (0.7.97 vangt dat al via background_sound_kind).
+            let doel_naam = stop.name[prefix_len..].trim();
+            if doel_naam.eq_ignore_ascii_case("blower")
+                || doel_naam.eq_ignore_ascii_case("ambient")
+                || doel_naam.eq_ignore_ascii_case("ambient noise")
+                || doel_naam.to_lowercase().starts_with("coupler")
+            {
+                continue;
+            }
+            let Some(&target_id) = naam_naar_id.get(doel_naam) else { continue };
+            let Some(path) = stop.pipes.iter().find_map(|p| match p {
+                PipeDef::Sample { path, .. } => Some(path.clone()),
+                _ => None,
+            }) else { continue };
+            let e = nieuw.entry(target_id).or_insert_with(|| StopActionClickDef {
+                attack: None, release: None,
+            });
+            if is_attack && e.attack.is_none() { e.attack = Some(path); }
+            else if !is_attack && e.release.is_none() { e.release = Some(path); }
+        }
+        if !nieuw.is_empty() {
+            // Niet overschrijven: Hauptwerk kan ze al hebben gezet.
+            for (k, v) in nieuw {
+                self.stop_action_clicks.entry(k).or_insert(v);
+            }
+        }
+    }
+
     /// Doorlopende achtergrondgeluiden uit de orgeldefinitie halen (0.7.96):
     /// bij GrandOrgue zijn blower, orgelmotor en ambient aparte stops met
     /// `AcceptsRetuning=N` en een pijp die naar de WAV wijst. Deze stops
@@ -1869,6 +1923,54 @@ mod tests {
         // "Prestant" is sowieso geen ruis en zou nooit hier komen (filter
         // op is_noise_or_mechanical gaat ervoor), maar de helper geeft None.
         assert_eq!(mk("Prestant 8'").background_sound_kind(), None);
+    }
+
+    /// GO registermechaniek-matching (0.7.101): "Stop attack noise {naam}" +
+    /// "Stop release noise {naam}" moet aan de echte stop gekoppeld worden,
+    /// en bijgeluid-stops (Blower/Ambient) blijven buiten de koppeling.
+    #[test]
+    fn go_registermechaniek_matcht_op_stopnaam() {
+        let mk_sample = |name: &str, id: u32, noise: bool, path: &str| StopDef {
+            id, name: name.into(), harmonic_number: 8, sounding_harmonic: 8,
+            pitch_correction: 0.0, pitch_tuning_cents: 0.0, number_of_pipes: 1,
+            first_accessible_pipe_logical_key: 1, windchest_group: 1,
+            amplitude_level: 100.0, gain_db: 0.0, percussive: false,
+            accepts_retuning: !noise, first_midi_note: None,
+            pipes: vec![PipeDef::Sample {
+                path: std::path::PathBuf::from(path),
+                extra: PipeExtra::default(),
+            }],
+            layers: Vec::new(), primary_perspective: None,
+        };
+        let mut def = OrganDefinition {
+            base_path: std::path::PathBuf::new(),
+            organ: OrganInfo::default(),
+            manuals: Vec::new(),
+            stops: vec![
+                mk_sample("Prestant 8'", 100, false, "prestant.wav"),
+                mk_sample("Bourdon 16'", 101, false, "bourdon.wav"),
+                mk_sample("Stop attack noise Prestant 8'", 200, true, "prestant_on.wav"),
+                mk_sample("Stop release noise Prestant 8'", 201, true, "prestant_off.wav"),
+                mk_sample("Stop attack noise Blower", 202, true, "blower_on.wav"),
+                mk_sample("Stop attack noise Coupler 1", 203, true, "coup1.wav"),
+            ],
+            windchests: Vec::new(), enclosures: Vec::new(),
+            tremulants: Vec::new(), couplers: Vec::new(),
+            extra_bijgeluiden: Vec::new(),
+            stop_action_clicks: std::collections::HashMap::new(),
+        };
+        def.verzamel_go_registermechaniek();
+        // Prestant moet attack én release hebben gekregen.
+        let p = def.stop_action_clicks.get(&100).expect("Prestant click");
+        assert!(p.attack.as_ref().unwrap().ends_with("prestant_on.wav"));
+        assert!(p.release.as_ref().unwrap().ends_with("prestant_off.wav"));
+        // Bourdon heeft geen klikken in deze fixture → geen entry.
+        assert!(!def.stop_action_clicks.contains_key(&101));
+        // Blower-stop is géén registerklik; staat niet in de map.
+        assert!(!def.stop_action_clicks.values().any(|c| c.attack.as_ref().map(|p| p.ends_with("blower_on.wav")).unwrap_or(false)));
+        // Coupler-klikken: ook (nog) niet, want couplers hebben andere id's
+        // dan stops en we willen hier geen vals-positive match op een stop.
+        assert!(!def.stop_action_clicks.values().any(|c| c.attack.as_ref().map(|p| p.ends_with("coup1.wav")).unwrap_or(false)));
     }
 
     /// Testhelper: schrijf een mini-ODF naar een uniek tempbestand, parse hem

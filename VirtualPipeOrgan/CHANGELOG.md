@@ -5,6 +5,22 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.7.101] - 2026-10-12
+
+### Registermechaniek nu ook op GrandOrgue-sets
+- 0.7.99 bracht het klikken van registers aan en uit, maar werkte alleen
+  op Hauptwerk-sets. GrandOrgue-sets (zoals de Friesach-testset en vele
+  andere) modelleren het mechaniekgeluid als eigen stops met namen als
+  `Stop attack noise P Untersatz 32'` en `Stop release noise P Untersatz
+  32'`. JM-Orgue koppelt die nu aan de echte stop met dezelfde naam en
+  speelt de klik automatisch af bij elke toggle.
+- Namen met prefix "Stop attack noise " / "Stop release noise " worden
+  gestript tot de bijhorende stop-naam; de pijp van de ruisstop is dan
+  het klikgeluid. Blower, ambient en koppel-klikken blijven buiten de
+  koppeling (die horen elders).
+- Nieuwe test: `go_registermechaniek_matcht_op_stopnaam` (6 fixture-stops,
+  controleert zowel de matches als de uitgezette uitzonderingen).
+
 ## [0.7.100] - 2026-10-12
 
 ### Galm volgt de luisterpositie

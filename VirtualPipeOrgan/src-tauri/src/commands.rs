@@ -2436,6 +2436,12 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
         manual.name = clean_division_name(&manual.name);
     }
 
+    // GrandOrgue registermechaniek (0.7.101): "Stop attack noise {naam}" en
+    // "Stop release noise {naam}" matchen aan hun echte stop en in
+    // `stop_action_clicks` zetten. Hauptwerk-sets vullen die map al in de
+    // importer; verzamel_go_registermechaniek overschrijft daar niets.
+    definition.verzamel_go_registermechaniek();
+
     info!("Parsed organ: {} by {}", definition.organ.church_name, definition.organ.organ_builder);
 
     // Divisions sitting in a swell box: een divisie is 'enclosed' wanneer de
