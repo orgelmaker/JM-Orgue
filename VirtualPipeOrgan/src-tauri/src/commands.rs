@@ -969,11 +969,26 @@ fn laad_en_stuur_toetsmechaniek(
         = std::collections::HashMap::new();
     let mut geladen = 0usize;
     let mut misgelopen = 0usize;
+    // Toetsklikken worden tot 300 ms afgekapt (0.7.105): bijna alle aanslag-
+    // en loslaat-opnamen zijn na die tijd uitgeklonken, en de RAM-besparing
+    // is factor 3 à 10 tegenover full-length opnamen. Als een set lange,
+    // galmrijke mechaniek-opnamen heeft (zeldzaam), eindigen die iets
+    // vroeger — nog altijd klikloos door de bestaande staartstop.
+    const MAX_KLIK_SECONDEN: f32 = 0.3;
     let laad = |pad: &std::path::PathBuf| -> Option<(Arc<Vec<f32>>, Option<Arc<Vec<f32>>>, f64)> {
         match vpo_sampler::loader::load_wav(pad) {
             Ok(sd) => {
                 let rate = (sd.sample_rate as f64 / output_sr as f64).max(0.01);
-                Some((Arc::new(sd.data), sd.right.map(Arc::new), rate))
+                let max_frames = (MAX_KLIK_SECONDEN * sd.sample_rate as f32) as usize;
+                let l = if sd.data.len() > max_frames {
+                    let mut v = sd.data; v.truncate(max_frames); v
+                } else { sd.data };
+                let r = sd.right.map(|r| {
+                    let mut rv = r;
+                    if rv.len() > max_frames { rv.truncate(max_frames); }
+                    Arc::new(rv)
+                });
+                Some((Arc::new(l), r, rate))
             }
             Err(e) => {
                 warn!("Toetsklik niet geladen: {} ({:?})", e, pad);

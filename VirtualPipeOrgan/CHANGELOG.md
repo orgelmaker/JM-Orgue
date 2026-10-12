@@ -5,6 +5,80 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.8.0] - 2026-10-12
+
+### Grote stap: akoestische mechaniek en een nieuwe luisterpositie
+Deze release bundelt een lange reeks werk sinds 0.7.93: een nieuwe
+luisterpositie-schuif die naar de rest van het geluid luistert, alle
+akoestische mechaniekgeluiden van een echt orgel (blaasbalg,
+ruimtegeluid, speelgoedregisters, register-klikken, klikkend klavier) en
+betere ondersteuning van sampleset-makers die vervangen of hergestemde
+pijpen in hun orgeldefinitie zetten.
+
+### Toonhoogte (eerder 0.7.94)
+- Hauptwerk-import leest `Pitch_OriginalOrgan_PitchHz` nu voor élke pijp
+  waar hij is gevuld, los van de methodecode. Vervangen pijpen (bv.
+  Grabowski's Nitra en Nowa Ruda) klinken daardoor op de juiste orgeltoon,
+  ook in de stand "Origineel". De hertemper-formule gebruikt die
+  originele toon om bij een gedeeltelijk behouden stemming naar de echte
+  pijptoon te trekken.
+
+### Luisterpositie (0.7.95 + 0.7.100)
+- Nieuwe schuif **Luisterpositie** in de werkbalk: links staat u bij het
+  orgel, rechts helemaal achter in de kerk. De opnameposities van de
+  sampleset (dry → close → front → rear → diffuse) worden met een
+  equal-power crossfade gemengd; op een merkstreep klinkt precies één
+  positie, in het midden een gelijke mix.
+- Alle opnameposities worden standaard geladen zodat er geen herladen
+  meer nodig is om een andere positie te kiezen. In Orgel-instellingen
+  blijven de aan/uit-vinkjes als noodrem voor een krappe pc.
+- De nagalm volgt de luisterpositie: op "bij orgel" nog 20 % van wat u
+  in de instellingen koos, achter in de kerk 100 %.
+
+### Bijgeluiden (0.7.96 + 0.7.97 + 0.7.98)
+- Doorlopende achtergrondgeluiden uit de sampleset — orgelmotor,
+  blaasbalg en ruimtegeluid — zijn hoorbaar. GrandOrgue-stops met
+  `AcceptsRetuning=N` en de Hauptwerk-switches NoiseSwitch en Blower
+  worden allebei herkend.
+- **Motor-knop** in de werkbalk met klikloze fade in en uit.
+- **Volumeschuif** voor alle bijgeluiden samen, in Orgel-instellingen.
+- **Speelgoedregisters** (Cymbelstern, Vogelsang, Cuculus en
+  soortgelijke) verschijnen als klikbare knoppen in de werkbalk.
+
+### Registermechaniek (0.7.99 + 0.7.101)
+- Het klikken van registers bij aanzetten en uitzetten wordt afgespeeld,
+  per registerwissel. Werkt voor Hauptwerk-sets (via
+  `ControllingSwitchID` op pijpen in de ranks "Stop action noises
+  Attack/Release") én voor GrandOrgue-sets (via de ruisstops
+  "Stop attack noise {naam}" / "Stop release noise {naam}" per register).
+
+### Toetsmechaniek (0.7.102 + 0.7.103 + 0.8.0)
+- Hauptwerk-sampleset-makers nemen soms het aanslag- en loslaatgeluid
+  van elke individuele toets op. JM-Orgue speelt dat nu per MIDI NoteOn
+  en NoteOff af, per klavier.
+- Standaard uit in Orgel-instellingen → Bijgeluiden → "Toetsmechaniek
+  (klikkend klavier)" wegens het geheugen; aanzetten vraagt een herladen.
+- Deze versie knipt de toetsklikken op maximaal 300 ms, zodat de
+  RAM-impact bescheiden blijft (factor 3 à 10 lichter dan ongeknipt).
+
+### MIDI-leren (0.7.104)
+- De luisterpositie-schuif en de bijgeluiden-master krijgen een klein
+  MIDI-leer-knopje ernaast. Druk op het pijltje, draai een regelaar op
+  uw speeltafel en de koppeling staat. Per orgel bewaard.
+
+### Onder de motorkap
+- Nieuwe audio-sub-engine `background_sounds.rs` met klikloze fade,
+  loop-wrap, lineaire interpolatie en één-shot-mixen voor klikken; mixt
+  direct in de cpal-output buiten master-gain en galm.
+- Hauptwerk-import ondersteunt pijpen op switches (buiten elke Stop om):
+  motor en ambient komen daarvoor binnen, speelgoedregisters en
+  mechaniek-ranks ook.
+- Testsuite: 361 tests groen (24 nieuwe sinds 0.7.93).
+
+### Nog niet in deze versie
+- GrandOrgue-toetsmechaniek: nog geen voorbeeldset in de werkmap, dus
+  nog geen import-regels. Komt wanneer een set erom vraagt.
+
 ## [0.7.104] - 2026-10-12
 
 ### MIDI-leren voor luisterpositie en bijgeluiden
