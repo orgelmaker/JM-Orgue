@@ -101,7 +101,7 @@ fn build_definition(
     let general = extract_objects(xml, "_General");
     let divisions = lees("Division");
     let stops = lees("Stop");
-    let stopranks = lees("StopRank");
+    let mut stopranks = lees("StopRank");
     let ranks_xml = lees("Rank");
     let pipes = lees("Pipe_SoundEngine01");
     let layers = lees("Pipe_SoundEngine01_Layer");
@@ -110,6 +110,14 @@ fn build_definition(
     let samples = lees("Sample");
     let enclosures_xml = lees("Enclosure");
     let enclosure_pipes = lees("EnclosurePipe");
+    // Definities zonder StopRank-objecten (0.8.3): de verbinding register →
+    // pijp zit dan in het schakelnetwerk. Daaruit synthetiseren we de
+    // StopRanks, zodat de rest van de importer ongewijzigd kan doorlopen.
+    if stopranks.is_empty() && !stops.is_empty() && !pipes.is_empty() {
+        stopranks = synth_stopranks_via_switches(
+            &stops, &pipes, &lees("SwitchLinkage"), &lees("DivisionInput"), &ranks_xml,
+        );
+    }
 
     info!(
         "Hauptwerk parse: {} divisions, {} stops, {} stopranks, {} pipes, {} samples, {} releases, {} enclosures",
@@ -829,6 +837,117 @@ fn build_definition(
             &layers_of_pipe, &sample_of_layer, &ranks_xml,
         ),
     })
+}
+
+/// Terugval voor definities zónder StopRank-objecten (0.8.3). De nieuwere
+/// sets van Grabowski (Nowa Ruda) bouwen de verbinding register → pijp als
+/// schakelnetwerk: elke pijp hangt aan een eigen pallet-schakelaar, die via
+/// SwitchLinkages wordt bediend — bron = de toets-schakelaar uit
+/// `DivisionInput`, voorwaarde = de register-schakelaar uit
+/// `Stop.ControllingSwitchID`, meestal met een of twee tussenliggende
+/// routing-schakelaars ("__RoutingSwPostStop", "__DelayStopPostPD…"). Deze
+/// functie loopt per pijp het netwerk achterstevoren af (breedte-eerst,
+/// hoogstens acht stappen), vindt het dichtstbijzijnde register en de toets
+/// uit dezelfde divisie, en synthetiseert per (register, rank) een StopRank-
+/// FieldMap met precies de velden die de importer verderop leest. Pijpen in
+/// ruis-/mechaniekranks ("noise") blijven buiten: die hangen weliswaar aan
+/// register- of toetsschakelaars, maar zijn geen klinkende lagen.
+fn synth_stopranks_via_switches(
+    stops: &[FieldMap],
+    pipes: &[FieldMap],
+    linkages: &[FieldMap],
+    division_inputs: &[FieldMap],
+    ranks_xml: &[FieldMap],
+) -> Vec<FieldMap> {
+    use std::collections::{HashSet, VecDeque};
+    // register-schakelaar → (stop_id, division_id)
+    let mut stop_by_switch: HashMap<u32, (u32, u32)> = HashMap::new();
+    for s in stops {
+        if let (Some(id), Some(sw)) = (s.get_u32("StopID"), s.get_u32("ControllingSwitchID")) {
+            stop_by_switch.insert(sw, (id, s.get_u32("DivisionID").unwrap_or(0)));
+        }
+    }
+    // toets-schakelaar → (division_id, noot)
+    let mut key_by_switch: HashMap<u32, (u32, u32)> = HashMap::new();
+    for d in division_inputs {
+        if let (Some(sw), Some(n)) = (d.get_u32("SwitchID"), d.get_u32("NormalMIDINoteNumber")) {
+            key_by_switch.insert(sw, (d.get_u32("DivisionID").unwrap_or(0), n));
+        }
+    }
+    // doel → [(bron, voorwaarde)]
+    let mut by_dest: HashMap<u32, Vec<(u32, Option<u32>)>> = HashMap::new();
+    for l in linkages {
+        if let (Some(src), Some(dst)) = (l.get_u32("SourceSwitchID"), l.get_u32("DestSwitchID")) {
+            by_dest.entry(dst).or_default().push((src, l.get_u32("ConditionSwitchID")));
+        }
+    }
+    let rank_name: HashMap<u32, String> = ranks_xml.iter()
+        .filter_map(|r| Some((r.get_u32("RankID")?, r.get("Name")?.clone())))
+        .collect();
+    // per (register, rank): (divisienoot, pijpnoot)
+    let mut groepen: HashMap<(u32, u32), Vec<(u32, u32)>> = HashMap::new();
+    let (mut zonder, mut dubbel) = (0usize, 0usize);
+    for p in pipes {
+        let (Some(pal), Some(rid), Some(note)) = (
+            p.get_u32("ControllingPalletSwitchID"), p.get_u32("RankID"), p.get_u32("NormalMIDINoteNumber"),
+        ) else { continue };
+        if pal == 0 { continue; }
+        if rank_name.get(&rid).map(|n| n.to_lowercase().contains("noise")).unwrap_or(false) {
+            continue;
+        }
+        let mut stop_hits: Vec<(u32, u32, usize)> = Vec::new(); // (stop, divisie, diepte)
+        let mut key_hits: Vec<(u32, u32, usize)> = Vec::new();  // (divisie, noot, diepte)
+        let mut seen: HashSet<u32> = HashSet::new();
+        let mut queue: VecDeque<(u32, usize)> = VecDeque::new();
+        queue.push_back((pal, 0));
+        seen.insert(pal);
+        while let Some((s, d)) = queue.pop_front() {
+            if let Some(&(sid, div)) = stop_by_switch.get(&s) { stop_hits.push((sid, div, d)); }
+            if let Some(&(div, n)) = key_by_switch.get(&s) { key_hits.push((div, n, d)); }
+            if d >= 8 { continue; }
+            if let Some(links) = by_dest.get(&s) {
+                for &(src, cond) in links {
+                    for nxt in std::iter::once(src).chain(cond) {
+                        if seen.insert(nxt) { queue.push_back((nxt, d + 1)); }
+                    }
+                }
+            }
+        }
+        stop_hits.sort_by_key(|h| h.2);
+        let Some(&(stop_id, stop_div, diepte)) = stop_hits.first() else { zonder += 1; continue };
+        if stop_hits.iter().any(|h| h.0 != stop_id && h.2 == diepte) { dubbel += 1; }
+        key_hits.sort_by_key(|h| h.2);
+        let div_note = key_hits.iter().find(|h| h.0 == stop_div).or(key_hits.first())
+            .map(|k| k.1).unwrap_or(note);
+        groepen.entry((stop_id, rid)).or_default().push((div_note, note));
+    }
+    let mut uit: Vec<FieldMap> = Vec::new();
+    for ((stop_id, rid), mut lijst) in groepen {
+        lijst.sort();
+        let first = lijst[0].0;
+        let last = lijst[lijst.len() - 1].0;
+        // Verschuiving divisienoot → pijpnoot: de meest voorkomende waarde
+        // (een 4'-register op een 8'-rang geeft +12).
+        let mut tel: HashMap<i32, usize> = HashMap::new();
+        for &(dn, pn) in &lijst { *tel.entry(pn as i32 - dn as i32).or_insert(0) += 1; }
+        let inc = tel.into_iter().max_by_key(|(k, v)| (*v, -*k)).map(|(k, _)| k).unwrap_or(0);
+        let mut m = FieldMap::new();
+        m.insert("StopID".into(), stop_id.to_string());
+        m.insert("RankID".into(), rid.to_string());
+        if let Some(n) = rank_name.get(&rid) { m.insert("Name".into(), n.clone()); }
+        m.insert("MIDINoteNumOfFirstMappedDivisionInputNode".into(), first.to_string());
+        m.insert("NumberOfMappedDivisionInputNodes".into(), (last - first + 1).to_string());
+        m.insert("MIDINoteNumIncrementFromDivisionToRank".into(), inc.to_string());
+        uit.push(m);
+    }
+    // Volgorde: per register de rangen oplopend — de eerste (laagste rank-id,
+    // bij Grabowski "close") wordt het primaire perspectief.
+    uit.sort_by_key(|m| (m.get_u32("StopID"), m.get_u32("RankID")));
+    info!(
+        "Hauptwerk: geen StopRank-objecten — {} register/rank-koppelingen afgeleid uit het schakelnetwerk ({} pijpen zonder register, {} met meer dan één)",
+        uit.len(), zonder, dubbel
+    );
+    uit
 }
 
 /// Toetsmechaniek-geluiden (0.7.102): voor Hauptwerk-sets de ranks "{prefix}
@@ -1837,6 +1956,61 @@ mod tests {
             "originele pijptoon bij methodecode 1 niet gelezen: {:?}",
             extra.original_pitch_cents
         );
+    }
+
+    /// Schakelnetwerk-terugval (0.8.3): een definitie zonder StopRank-objecten
+    /// waarin toets-schakelaar + register-schakelaar via een routing-
+    /// schakelaar de pallet van elke pijp bedienen (Nowa Ruda). Verwacht één
+    /// gesynthetiseerde StopRank per (register, rank); ruisranks blijven
+    /// buiten; een 4'-register op een 8'-rang krijgt verschuiving +12.
+    #[test]
+    fn stopranks_uit_schakelnetwerk() {
+        let fm = |kv: &[(&str, &str)]| -> FieldMap {
+            kv.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+        };
+        let stops = vec![
+            fm(&[("StopID", "1"), ("Name", "Gambe 16"), ("DivisionID", "1"), ("ControllingSwitchID", "23001")]),
+            fm(&[("StopID", "2"), ("Name", "Octave 4"), ("DivisionID", "1"), ("ControllingSwitchID", "23002")]),
+        ];
+        let division_inputs = vec![
+            fm(&[("DivisionID", "1"), ("SwitchID", "9001"), ("NormalMIDINoteNumber", "36")]),
+            fm(&[("DivisionID", "1"), ("SwitchID", "9002"), ("NormalMIDINoteNumber", "37")]),
+        ];
+        let ranks = vec![
+            fm(&[("RankID", "4"), ("Name", "001. P  Gambe 16 (close)")]),
+            fm(&[("RankID", "81"), ("Name", "019. Stop action noises Attack (close)")]),
+        ];
+        // Gambe: pijpen 36/37 op pallets 5001/5002 via routing 7001/7002.
+        // Octave 4: toets 36 stuurt pijp 48 van dezelfde rang (verschuiving 12).
+        // Ruisrank 81: pijp op de registerschakelaar zelf (registerklik).
+        let pipes = vec![
+            fm(&[("PipeID", "401"), ("RankID", "4"), ("NormalMIDINoteNumber", "36"), ("ControllingPalletSwitchID", "5001")]),
+            fm(&[("PipeID", "402"), ("RankID", "4"), ("NormalMIDINoteNumber", "37"), ("ControllingPalletSwitchID", "5002")]),
+            fm(&[("PipeID", "412"), ("RankID", "4"), ("NormalMIDINoteNumber", "48"), ("ControllingPalletSwitchID", "5012")]),
+            fm(&[("PipeID", "8101"), ("RankID", "81"), ("NormalMIDINoteNumber", "1"), ("ControllingPalletSwitchID", "23001")]),
+        ];
+        let linkages = vec![
+            fm(&[("SourceSwitchID", "9001"), ("DestSwitchID", "7001"), ("ConditionSwitchID", "23001")]),
+            fm(&[("SourceSwitchID", "7001"), ("DestSwitchID", "5001"), ("ConditionSwitchID", "120")]),
+            fm(&[("SourceSwitchID", "9002"), ("DestSwitchID", "7002"), ("ConditionSwitchID", "23001")]),
+            fm(&[("SourceSwitchID", "7002"), ("DestSwitchID", "5002"), ("ConditionSwitchID", "120")]),
+            fm(&[("SourceSwitchID", "9001"), ("DestSwitchID", "7012"), ("ConditionSwitchID", "23002")]),
+            fm(&[("SourceSwitchID", "7012"), ("DestSwitchID", "5012")]),
+        ];
+        let srs = synth_stopranks_via_switches(&stops, &pipes, &linkages, &division_inputs, &ranks);
+        assert_eq!(srs.len(), 2, "{srs:?}");
+        let g = &srs[0];
+        assert_eq!(g.get_u32("StopID"), Some(1));
+        assert_eq!(g.get_u32("RankID"), Some(4));
+        assert_eq!(g.get("Name").map(|s| s.as_str()), Some("001. P  Gambe 16 (close)"));
+        assert_eq!(g.get_u32("MIDINoteNumOfFirstMappedDivisionInputNode"), Some(36));
+        assert_eq!(g.get_u32("NumberOfMappedDivisionInputNodes"), Some(2));
+        assert_eq!(g.get_i32("MIDINoteNumIncrementFromDivisionToRank"), Some(0));
+        let o = &srs[1];
+        assert_eq!(o.get_u32("StopID"), Some(2));
+        assert_eq!(o.get_u32("MIDINoteNumOfFirstMappedDivisionInputNode"), Some(36));
+        assert_eq!(o.get_u32("NumberOfMappedDivisionInputNodes"), Some(1));
+        assert_eq!(o.get_i32("MIDINoteNumIncrementFromDivisionToRank"), Some(12));
     }
 
     #[test]

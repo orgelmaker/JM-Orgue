@@ -145,6 +145,36 @@ impl OrganDefinition {
         uit
     }
 
+    /// Divisienaam voor een klavier-prefix uit een toetsmechaniek-rank ("P",
+    /// "HW", "OW", "SW", "RP"). Eerst via de stopnamen (sets die hun stops met
+    /// dezelfde prefix benoemen, zoals Nitra: "RP Copula maior 8'"); anders
+    /// via de divisienamen zelf (0.8.3, Nowa Ruda: stops heten "Bordun 16"
+    /// zonder prefix): de prefix moet met de beginletter van de naam beginnen
+    /// en als deelrij in de naam voorkomen — "HW" in "Hauptwerk", "SW" in
+    /// "Schwellwerk", "RP" in "Rückpositiv", "P" in "Pedal". Bij meer
+    /// kandidaten wint voor "P" het pedaal, anders de eerste in orgelvolgorde.
+    pub fn divisie_voor_prefix(&self, prefix: &str) -> Option<String> {
+        if let Some(d) = self.klavier_prefix_mapping().get(prefix) {
+            return Some(d.clone());
+        }
+        let pl: Vec<char> = prefix.to_lowercase().chars().collect();
+        if pl.is_empty() { return None; }
+        let mut kandidaten: Vec<&str> = Vec::new();
+        for m in &self.manuals {
+            let naam = m.name.to_lowercase();
+            let mut it = naam.chars();
+            if it.next() != Some(pl[0]) { continue; }
+            let deelrij = pl[1..].iter().all(|&c| it.by_ref().any(|x| x == c));
+            if deelrij { kandidaten.push(&m.name); }
+        }
+        if kandidaten.len() > 1 && pl.len() == 1 && pl[0] == 'p' {
+            if let Some(ped) = kandidaten.iter().find(|n| n.to_lowercase().contains("ped")) {
+                return Some(ped.to_string());
+            }
+        }
+        kandidaten.first().map(|s| s.to_string())
+    }
+
     /// Register-klikgeluiden uit de GrandOrgue-stops verzamelen (0.7.101).
     /// GO-sets modelleren het klikken van registers als eigen stops:
     /// "Stop attack noise {naam}" en "Stop release noise {naam}" (één pijp
@@ -255,11 +285,13 @@ impl StopDef {
         }
         if n.contains("blower") || n.contains("motor")
             || n.contains("soufflerie") || n.contains("moteur")
-            || n.contains("bellows") {
+            || n.contains("bellows") || n.contains("gebläse") || n.contains("geblaese") {
             return Some(BackgroundSoundKind::Blower);
         }
+        // "rauschen" (niet "rausch"): Rauschquinte en Rauschpfeife zijn echte
+        // registers (0.8.3, Nowa Ruda).
         if n.contains("ambient") || n.contains("ambience")
-            || n.contains("rausch") || n.contains("geräusch")
+            || n.contains("rauschen") || n.contains("geräusch")
             || n.contains("geraeusch") || n.contains("bruit") {
             return Some(BackgroundSoundKind::Ambient);
         }
@@ -389,10 +421,14 @@ impl StopDef {
             return true;
         }
         let n = self.name.to_lowercase();
+        // "rauschen" en niet "rausch": Rauschquinte, Rauschpfeife en
+        // Rauschwerk zijn echte registers (gevonden met Nowa Ruda, 0.8.3 —
+        // de Rauschquinte 2 2/3 verdween daar van het scherm én liep als
+        // ambient-loop mee). "gebläse" = Duitse blower.
         const NOISE_MARKERS: &[&str] = &[
             "noise", "action", "blower", "bellows", "ambient", "ambience",
-            "motor", "rausch", "geräusch", "geraeusch", "bruit", "soufflerie",
-            "moteur",
+            "motor", "rauschen", "geräusch", "geraeusch", "gebläse", "geblaese",
+            "bruit", "soufflerie", "moteur",
         ];
         NOISE_MARKERS.iter().any(|m| n.contains(m))
     }
@@ -1938,6 +1974,11 @@ mod tests {
         assert!(mk("Key action Manual 1 Release", true).is_noise_or_mechanical());
         assert!(mk("Blower", true).is_noise_or_mechanical());
         assert!(mk("Ambient noise", true).is_noise_or_mechanical());
+        assert!(mk("Windrauschen", true).is_noise_or_mechanical());
+        assert!(mk("Gebläse", true).is_noise_or_mechanical());
+        // Echte registers met een verraderlijke naam blijven registers (0.8.3).
+        assert!(!mk("Rauschquinte 2 2/3 und 2", true).is_noise_or_mechanical());
+        assert!(!mk("Rauschpfeife II", true).is_noise_or_mechanical());
         // Unpitched recording (AcceptsRetuning=N) is filtered regardless of name.
         assert!(mk("Whatever", false).is_noise_or_mechanical());
     }
@@ -2019,6 +2060,52 @@ mod tests {
         assert_eq!(m.get("P"), Some(&"Pedal".to_string()));
         assert_eq!(m.get("RP"), Some(&"Rückpositiv".to_string()));
         assert_eq!(m.get("HW"), Some(&"Hauptwerk".to_string()));
+        assert_eq!(def.divisie_voor_prefix("HW").as_deref(), Some("Hauptwerk"));
+    }
+
+    /// Terugval op de divisienamen (0.8.3): stops zonder prefix (Nowa Ruda:
+    /// "Bordun 16", "Aeoline 8") geven geen mapping; de prefix wordt dan als
+    /// deelrij in de divisienaam gezocht. "P" kiest het pedaal boven een
+    /// Positiv.
+    #[test]
+    fn divisie_voor_prefix_valt_terug_op_divisienaam() {
+        let mk = |id: u32, name: &str| StopDef {
+            id, name: name.into(), harmonic_number: 8, sounding_harmonic: 8,
+            pitch_correction: 0.0, pitch_tuning_cents: 0.0, number_of_pipes: 1,
+            first_accessible_pipe_logical_key: 1, windchest_group: 1,
+            amplitude_level: 100.0, gain_db: 0.0, percussive: false,
+            accepts_retuning: true, first_midi_note: None, pipes: Vec::new(),
+            layers: Vec::new(), primary_perspective: None,
+        };
+        let mk_man = |name: &str, ids: Vec<u32>| ManualDef {
+            number: 1, name: name.into(), midi_input_number: 0,
+            number_of_logical_keys: 54, number_of_accessible_keys: 54,
+            first_accessible_key_midi_note: 36, stop_ids: ids,
+            coupler_ids: Vec::new(), tremulant_ids: Vec::new(),
+        };
+        let def = OrganDefinition {
+            base_path: std::path::PathBuf::new(),
+            organ: OrganInfo::default(),
+            manuals: vec![
+                mk_man("Positiv", vec![5]),
+                mk_man("Pedal", vec![1]),
+                mk_man("Hauptwerk", vec![2]),
+                mk_man("Oberwerk", vec![3]),
+                mk_man("Schwellwerk", vec![4]),
+            ],
+            stops: vec![mk(1, "Subbaß 16"), mk(2, "Bordun 16"), mk(3, "Aeoline 8"), mk(4, "Oboe 8"), mk(5, "Gedackt 8")],
+            windchests: Vec::new(), enclosures: Vec::new(),
+            tremulants: Vec::new(), couplers: Vec::new(),
+            extra_bijgeluiden: Vec::new(),
+            stop_action_clicks: std::collections::HashMap::new(),
+            keyboard_clicks: std::collections::HashMap::new(),
+        };
+        assert!(def.klavier_prefix_mapping().is_empty(), "geen prefixen in deze stopnamen");
+        assert_eq!(def.divisie_voor_prefix("P").as_deref(), Some("Pedal"));
+        assert_eq!(def.divisie_voor_prefix("HW").as_deref(), Some("Hauptwerk"));
+        assert_eq!(def.divisie_voor_prefix("OW").as_deref(), Some("Oberwerk"));
+        assert_eq!(def.divisie_voor_prefix("SW").as_deref(), Some("Schwellwerk"));
+        assert_eq!(def.divisie_voor_prefix("RP"), None);
     }
 
     /// GO registermechaniek-matching (0.7.101): "Stop attack noise {naam}" +

@@ -51,6 +51,15 @@ pub struct PipePitchInput {
 /// (verkeerde unity note, verkeerde HarmonicNumber); dan liever geen retune.
 pub const MAX_PLAUSIBLE_DELTA_CENTS: f32 = 600.0;
 
+/// Ruimere grens voor de Hauptwerk-correctie `origineel − bestandstoon`
+/// (0.8.3): daar zijn béide waarden expliciet door de maker opgegeven, geen
+/// smpl-chunk die een verkeerde unity note kan dragen. Een vervangen pijp
+/// kan best een halve octaaf verderop liggen: Nowa Ruda's Tuba 8' leent
+/// voor zijn hoogste toets het dis-bestand zes halve tonen lager (+604 ct),
+/// net buiten de GO-grens van 600. Meer dan een octaaf is ook hier
+/// onwaarschijnlijk en wordt als fout genegeerd.
+pub const HW_MAX_ORIGINEEL_DELTA_CENTS: f32 = 1300.0;
+
 /// Gemeten samplepitch uit de smpl-chunk: `100·unity + fractie`.
 /// None bij ontbrekende/ongeldige unity (buiten 1..=127) én bij de
 /// veelvoorkomende editor-default (60, 0.0) — dat is geen echte meting.

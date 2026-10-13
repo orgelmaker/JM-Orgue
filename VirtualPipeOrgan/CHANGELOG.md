@@ -5,6 +5,44 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.8.3] - 2026-10-13
+
+### Hauptwerk-sets met een schakelnetwerk laden nu (Nowa Ruda)
+- Nieuwere Hauptwerk-sets van dezelfde maker als de Nitra-demo (hier
+  getest met de Nowa Ruda-demo) bevatten géén StopRank-objecten meer: de
+  verbinding register → pijp loopt via een schakelnetwerk van ruim
+  tienduizend schakelaars en koppelingen, waarin toets én register samen
+  de pallet van elke pijp bedienen. JM-Orgue vond daardoor nul registers
+  en weigerde de set. De importer loopt dat netwerk nu per pijp terug
+  (hoogstens acht stappen), vindt register en toets, en bouwt daaruit
+  dezelfde register/rank-koppelingen die de rest van de import verwacht.
+  Een 4'-register op een 8'-rang krijgt daarbij vanzelf de juiste
+  verschuiving. Resultaat op de demo: 17 registers, 4 divisies, 3
+  opnameposities, 2502 pijpen, blower en ruimtegeluid, 50 registerklikken
+  en 189 toetsklikken.
+- **Toetsmechaniek zonder prefix in de registernamen.** Nitra noemt zijn
+  registers "RP Copula maior 8'", waaruit de koppeling van de toetsklik-
+  ranks ("RP Key action noises") aan het klavier werd afgeleid; Nowa Ruda
+  noemt ze "Bordun 16" zonder prefix. De koppeling valt nu terug op de
+  divisienaam zelf: "HW" past in "Hauptwerk", "SW" in "Schwellwerk", "P"
+  kiest het pedaal boven een Positiv.
+- **Toetsmechaniek na een herstart.** De voorkeur werd pas ná het laden
+  uit de instellingen hersteld, zodat het klikkende klavier na een
+  herstart van het programma stil bleef tot een handmatig herladen. De
+  laadroute leest de opgeslagen voorkeur nu direct.
+- **"Rauschquinte" is een register.** De ruisfilter zocht op "rausch" en
+  nam daardoor Rauschquinte, Rauschpfeife en Rauschwerk voor ruis aan: ze
+  verdwenen van het scherm en liepen sinds 0.7.97 zelfs als ambient-loop
+  mee. Nu geldt "rauschen" (en "Gebläse" voor de Duitse blower).
+- **Ruimere grens voor vervangen pijpen.** De plausibiliteitsgrens van
+  600 cent gold ook voor de expliciete Hauptwerk-correctie `origineel −
+  bestandstoon`; de hoogste toets van de Tuba 8' in Nowa Ruda leent een
+  bestand zes halve tonen lager (+604 cent) en bleef daardoor op de
+  verkeerde toon. Voor die expliciet opgegeven waarden geldt nu 1300 cent.
+- Nieuwe tests: `stopranks_uit_schakelnetwerk` en
+  `divisie_voor_prefix_valt_terug_op_divisienaam`; de ruisfiltertest kent
+  nu Rauschquinte, Rauschpfeife, Windrauschen en Gebläse.
+
 ## [0.8.2] - 2026-10-12
 
 ### Geheugenrem rekent in buffers

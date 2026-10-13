@@ -1046,21 +1046,32 @@ pub fn get_listening_axis(state: State<AppState>) -> Vec<String> {
 fn laad_en_stuur_toetsmechaniek(
     state: &AppState,
     definition: &vpo_sampler::OrganDefinition,
+    organ_id: &str,
 ) {
     use crate::audio::KeyboardClickBuffer;
     use std::sync::Arc;
     // Prefix-mapping altijd bijwerken, ook als uit (anders raakt die muf bij
     // het volgend orgel).
     *state.toetsmechaniek_prefix.write() = definition.klavier_prefix_mapping();
-    let aan = *state.toetsmechaniek_aan.read();
+    // Aan of uit? Bij een herlaad van HETZELFDE orgel geldt de runtime-stand
+    // (net omgezet in de instellingen); anders de opgeslagen voorkeur van dit
+    // orgel. Tot 0.8.3 keek dit alleen naar de runtime-stand, die pas ná de
+    // load uit de instellingen werd hersteld — na een herstart van de app
+    // bleef het klikkende klavier daardoor stil tot een handmatig herladen.
+    let zelfde = state.current_organ_id.read().as_deref() == Some(organ_id);
+    let aan = if zelfde {
+        *state.toetsmechaniek_aan.read()
+    } else {
+        saved_settings_for(state, organ_id).and_then(|s| s.toetsmechaniek_aan).unwrap_or(false)
+    };
+    *state.toetsmechaniek_aan.write() = aan;
+    crate::state::TOETSMECHANIEK_AAN.store(aan, std::sync::atomic::Ordering::Relaxed);
     if !aan {
         state.send_audio_command(AudioCommand::RegisterKeyboardClicks(Arc::new(std::collections::HashMap::new())));
         return;
     }
     let output_sr = state.audio_player.read().as_ref()
         .map(|p| *p.sample_rate.read()).unwrap_or(48_000);
-    // prefix → divisie-naam uit de mapping; omgedraaid: divisie-naam ← prefix.
-    let prefix_mapping = definition.klavier_prefix_mapping();
     let mut buf_map: std::collections::HashMap<(String, u8), KeyboardClickBuffer>
         = std::collections::HashMap::new();
     let mut geladen = 0usize;
@@ -1092,8 +1103,13 @@ fn laad_en_stuur_toetsmechaniek(
             }
         }
     };
+    // prefix → divisienaam: via de stopnamen, anders via de divisienaam zelf
+    // (0.8.3). Per prefix één keer opzoeken, niet per toets.
+    let mut prefix_naar_div: std::collections::HashMap<String, Option<String>> = std::collections::HashMap::new();
     for ((prefix, note), paths) in &definition.keyboard_clicks {
-        let Some(div) = prefix_mapping.get(prefix) else { misgelopen += 1; continue };
+        let div_opt = prefix_naar_div.entry(prefix.clone())
+            .or_insert_with(|| definition.divisie_voor_prefix(prefix));
+        let Some(div) = div_opt.clone() else { misgelopen += 1; continue };
         let mut buf = KeyboardClickBuffer::default();
         if let Some(p) = paths.attack.as_ref() {
             if let Some((l, r, rate)) = laad(p) {
@@ -1112,8 +1128,13 @@ fn laad_en_stuur_toetsmechaniek(
             misgelopen += 1;
         }
     }
-    if geladen > 0 {
-        info!("Toetsmechaniek: {} klikken geladen ({} misgelopen)", geladen, misgelopen);
+    if geladen > 0 || misgelopen > 0 {
+        let mut koppeling: Vec<String> = prefix_naar_div.iter()
+            .map(|(p, d)| format!("{}→{}", p, d.as_deref().unwrap_or("?")))
+            .collect();
+        koppeling.sort();
+        info!("Toetsmechaniek: {} toetsen geladen ({} misgelopen); prefix→klavier {:?}",
+              geladen, misgelopen, koppeling);
     }
     state.send_audio_command(AudioCommand::RegisterKeyboardClicks(Arc::new(buf_map)));
 }
@@ -2981,7 +3002,7 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
                         let hw_origineel_delta = match (extra.original_pitch_cents, extra.sample_pitch_cents) {
                             (Some(orig), Some(sample)) => {
                                 let d = orig - sample;
-                                if d.abs() <= crate::retune::MAX_PLAUSIBLE_DELTA_CENTS {
+                                if d.abs() <= crate::retune::HW_MAX_ORIGINEEL_DELTA_CENTS {
                                     // Alleen échte correcties tellen in het log;
                                     // bij de meeste pijpen is origineel exact de
                                     // bestandstoon (delta 0).
@@ -3497,7 +3518,7 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
             laad_en_stuur_register_mechaniek(state, &definition.stop_action_clicks);
             // Toetsmechaniek (0.7.102): aanslag-klikken per klavier. Alleen
             // laden wanneer de voorkeur aan staat.
-            laad_en_stuur_toetsmechaniek(state, &definition);
+            laad_en_stuur_toetsmechaniek(state, &definition, path);
             bg.into_iter().map(|b| BackgroundSoundDto {
                 kind: match b.kind {
                     vpo_sampler::grandorgue::BackgroundSoundKind::Blower => "blower".into(),
