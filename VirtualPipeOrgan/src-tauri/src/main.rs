@@ -10,6 +10,7 @@ mod crescendo_voorstel;
 mod background_sounds;
 mod feedback;
 mod library;
+mod library_online;
 mod silence;
 mod loop_tool;
 mod mengpool;
@@ -626,6 +627,10 @@ fn main() {
             commands::save_current_organ_settings,
             commands::get_organ_image,
             commands::set_organ_image,
+            commands::get_online_image_search_enabled,
+            commands::set_online_image_search_enabled,
+            commands::search_online_image,
+            commands::apply_online_image,
             commands::restore_preset_bindings,
             commands::restore_swell_bindings,
             commands::get_saved_presets,

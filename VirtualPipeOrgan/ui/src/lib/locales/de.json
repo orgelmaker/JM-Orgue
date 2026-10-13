@@ -44,7 +44,14 @@
     "choose_image_title": "Wählen Sie ein Foto der Orgel",
     "image_auto": "Bild automatisch suchen",
     "image_failed": "Bild konnte nicht gesetzt werden",
-    "open_button": "Orgelbibliothek öffnen"
+    "open_button": "Orgelbibliothek öffnen",
+    "online_search": "Online nach einem Foto suchen",
+    "online_search_title": "Online nach Orgelfotos suchen",
+    "online_search_hint": "Durchsucht Wikimedia Commons nach einem Foto der Orgel. Standardmäßig aus. Nur Name, Erbauer und Ort werden an den Server gesendet; niemals der Pfad zum Sampleset.",
+    "online_search_enable": "Online-Suche erlauben",
+    "online_busy": "Suche läuft…",
+    "online_none": "Nichts gefunden. Ergänzen Sie evtl. Name, Erbauer oder Ort im Bibliothekseintrag.",
+    "online_notice": "Zum Übernehmen auf ein Foto klicken. Quellenangabe und Lizenz werden unter der Karte gezeigt."
   },
   "settings": {
     "audio_output": "Audio-Ausgabe",
@@ -1346,5 +1353,8 @@
     "motor_on": "Motor an",
     "key_action": "Tastatur-Mechanik (klickende Tasten)",
     "key_action_reload": "Diese Änderung wirkt nach erneutem Laden der Orgel."
+  },
+  "common": {
+    "close": "Schließen"
   }
 }

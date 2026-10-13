@@ -8859,6 +8859,7 @@ fn add_or_refresh_library_entry(state: &AppState, organ_info: &OrganInfoDto, sou
                     // anders blijft dit orgel ook na het aankoppelen van de
                     // schijf voorgoed zonder foto.
                     image_searched: if bron_leesbaar { Some(library::IMAGE_SEARCH_VERSION) } else { None },
+                    image_credit: None,
                 });
                 changed = true;
             }
@@ -10006,6 +10007,109 @@ pub fn set_organ_image(state: State<AppState>, id: String, path: Option<String>)
     Ok(entry)
 }
 
+/// Online zoeken naar orgelfoto's (0.8.74): opt-in schakelaar.
+/// Standaardwaarde = uit, zodat we niet zonder toestemming naar externe
+/// servers gaan.
+#[tauri::command]
+pub fn get_online_image_search_enabled(state: State<AppState>) -> bool {
+    state.organ_library.read().online_image_search_enabled
+}
+
+#[tauri::command]
+pub fn set_online_image_search_enabled(state: State<AppState>, enabled: bool) -> Result<(), String> {
+    {
+        let mut lib = state.organ_library.write();
+        lib.online_image_search_enabled = enabled;
+    }
+    state.save_library();
+    info!("Online zoeken naar orgelfoto's: {}", if enabled { "aan" } else { "uit" });
+    Ok(())
+}
+
+/// Zoek bij Wikimedia Commons naar foto's voor dít orgel. Alleen de naam,
+/// bouwer en plaats uit de bibliotheek-entry gaan mee. Vereist dat de
+/// gebruiker [`set_online_image_search_enabled`] eerder aan heeft gezet;
+/// anders geven we een lege lijst terug (zodat de UI de knop onzichtbaar
+/// kan laten).
+#[tauri::command]
+pub async fn search_online_image(state: State<'_, AppState>, id: String)
+    -> Result<Vec<crate::library_online::OnlineImageHit>, String>
+{
+    let norm = crate::library::pad_sleutel;
+    let key = norm(&id);
+    let (toegestaan, naam, builder, location) = {
+        let lib = state.organ_library.read();
+        let toegestaan = lib.online_image_search_enabled;
+        let e = lib.organs.iter()
+            .find(|o| norm(&o.id) == key || norm(&o.source_path) == key)
+            .cloned();
+        match e {
+            Some(e) => (toegestaan, e.name, e.builder, e.location),
+            None => return Err(format!("Orgel niet in de bibliotheek: {}", id)),
+        }
+    };
+    if !toegestaan {
+        return Err("Online zoeken staat uit. Zet het aan in Instellingen.".to_string());
+    }
+    let term = crate::library_online::zoek_term(&naam, &builder, &location);
+    info!("Online zoeken naar orgelfoto: '{}'", term);
+    let hits = tokio::task::spawn_blocking(move || crate::library_online::zoek_commons(&term))
+        .await
+        .map_err(|e| format!("Zoektaak mislukt: {}", e))?;
+    Ok(hits)
+}
+
+/// Kies een online-treffer: download hem, bewaar in de app-datamap, en zet
+/// hem als handmatige afbeelding + attributie bij de bibliotheek-entry.
+#[tauri::command]
+pub async fn apply_online_image(
+    state: State<'_, AppState>,
+    id: String,
+    hit: crate::library_online::OnlineImageHit,
+) -> Result<OrganLibraryEntry, String>
+{
+    let norm = crate::library::pad_sleutel;
+    let key = norm(&id);
+    let toegestaan = state.organ_library.read().online_image_search_enabled;
+    if !toegestaan {
+        return Err("Online zoeken staat uit. Zet het aan in Instellingen.".to_string());
+    }
+    let map = organ_images_dir(&state);
+    let stem = image_copy_stem(&key);
+    let hit_c = hit.clone();
+    let doel = tokio::task::spawn_blocking(move || crate::library_online::download_naar(&map, &stem, &hit_c))
+        .await
+        .map_err(|e| format!("Downloadtaak mislukt: {}", e))??;
+    let credit = crate::library_online::ImageCredit {
+        source_url: hit.source_page.clone(),
+        source_name: hit.source_name.clone(),
+        author: hit.author.clone(),
+        license: hit.license.clone(),
+        title: Some(hit.title.clone()),
+    };
+    let (entry, oud) = {
+        let mut lib = state.organ_library.write();
+        let e = lib.organs.iter_mut()
+            .find(|o| norm(&o.id) == key || norm(&o.source_path) == key)
+            .ok_or_else(|| format!("Orgel niet in de bibliotheek: {}", id))?;
+        let oud = e.image_path.clone();
+        e.image_path = Some(doel.to_string_lossy().to_string());
+        e.image_manual = true;
+        e.image_searched = Some(library::IMAGE_SEARCH_VERSION);
+        e.image_credit = Some(credit);
+        (e.clone(), oud)
+    };
+    let eigen_map = organ_images_dir(&state);
+    if let Some(o) = oud {
+        if Path::new(&o).starts_with(&eigen_map) && Some(&o) != entry.image_path.as_ref() {
+            let _ = std::fs::remove_file(&o);
+        }
+    }
+    state.save_library();
+    info!("Online orgelfoto toegepast voor {}: {:?}", id, entry.image_path);
+    Ok(entry)
+}
+
 #[tauri::command]
 pub fn get_saved_presets(state: State<AppState>) -> HashMap<String, PresetData> {
     let organ_id = state.current_organ_id.read().clone();
@@ -11018,6 +11122,7 @@ mod bibliotheek_opfris_tests {
             image_path: None,
             image_manual: false,
             image_searched: None,
+            image_credit: None,
         }
     }
 
@@ -11040,6 +11145,7 @@ mod bibliotheek_opfris_tests {
         let lib = RwLock::new(OrganLibrary {
             organs: vec![entry(&p, "PuttBatz"), entry(&weg, "Oude naam")],
             settings: Default::default(),
+            online_image_search_enabled: false,
         });
         assert_eq!(ververs_bibliotheek_namen(&lib, &data), 1);
         {

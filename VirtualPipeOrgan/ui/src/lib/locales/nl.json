@@ -44,7 +44,14 @@
     "choose_image_title": "Kies een foto van het orgel",
     "image_auto": "Afbeelding automatisch zoeken",
     "image_failed": "Afbeelding kon niet worden ingesteld",
-    "open_button": "Open Orgel Bibliotheek"
+    "open_button": "Open Orgel Bibliotheek",
+    "online_search": "Online een foto zoeken",
+    "online_search_title": "Online zoeken naar orgelfoto’s",
+    "online_search_hint": "Zoekt bij Wikimedia Commons naar een foto van het orgel. Standaard uit. Alleen naam, bouwer en plaats worden naar de server gestuurd; nooit het pad naar de sampleset.",
+    "online_search_enable": "Online zoeken toestaan",
+    "online_busy": "Bezig met zoeken…",
+    "online_none": "Niets gevonden. Probeer eventueel de naam, bouwer of plaats in de bibliotheek-entry aan te vullen.",
+    "online_notice": "Klik een foto om hem over te nemen. De bronverwijzing en licentie worden onder de kaart getoond."
   },
   "settings": {
     "audio_output": "Audio Uitvoer",
@@ -1346,5 +1353,8 @@
     "motor_on": "Motor aan",
     "key_action": "Toetsmechaniek (klikkend klavier)",
     "key_action_reload": "Deze keuze geldt na het opnieuw laden van het orgel."
+  },
+  "common": {
+    "close": "Sluiten"
   }
 }

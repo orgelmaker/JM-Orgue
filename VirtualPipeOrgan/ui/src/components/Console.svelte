@@ -4147,6 +4147,7 @@
       }
       await libraryUpdatedListener;
       libraryOrgans = await invoke('get_organ_library');
+      laadOnlineInstelling();
       // Afbeelding per orgel; de backend gebruikt de opgeslagen afbeelding en
       // zoekt alleen als er nog nooit (met deze zoekversie) gezocht is.
       for (const organ of libraryOrgans) {
@@ -4169,6 +4170,44 @@
       meldOnlineSetsKlaar();
     }
   }
+
+  // Online zoeken naar orgelfoto (0.8.74): opt-in. Standaard uit.
+  let onlineImageSearchEnabled = false;
+  async function laadOnlineInstelling() {
+    try { onlineImageSearchEnabled = await invoke('get_online_image_search_enabled'); } catch (e) {}
+  }
+  async function toggleOnlineImageSearch(v) {
+    onlineImageSearchEnabled = v;
+    try { await invoke('set_online_image_search_enabled', { enabled: v }); } catch (e) { console.error(e); }
+  }
+  // Modale voorvertoning: hit-lijst, bezig-vlag, foutmelding.
+  let onlineZoekModal = null;      // { organ, hits, busy, error }
+  async function onlineZoeken(e, organ) {
+    e.stopPropagation();
+    onlineZoekModal = { organ, hits: [], busy: true, error: null };
+    try {
+      const hits = await invoke('search_online_image', { id: organ.id });
+      if (onlineZoekModal && onlineZoekModal.organ.id === organ.id) {
+        onlineZoekModal = { organ, hits, busy: false, error: hits.length === 0 ? tx('library.online_none') : null };
+      }
+    } catch (err) {
+      if (onlineZoekModal) onlineZoekModal = { organ, hits: [], busy: false, error: String(err) };
+    }
+  }
+  async function kiesOnlineHit(hit) {
+    const organ = onlineZoekModal.organ;
+    onlineZoekModal = { ...onlineZoekModal, busy: true };
+    try {
+      await invoke('apply_online_image', { id: organ.id, hit });
+      delete organImages[organ.id];
+      organImages = organImages;
+      onlineZoekModal = null;
+      await loadLibrary();
+    } catch (err) {
+      onlineZoekModal = { ...onlineZoekModal, busy: false, error: String(err) };
+    }
+  }
+  function sluitOnlineModal() { onlineZoekModal = null; }
 
   // Handmatig een foto van het orgel kiezen (bibliotheekkaart). De backend
   // kopieert het bestand naar de app-datamap en zet image_manual, zodat
@@ -5137,6 +5176,19 @@
                   </svg>
                 </button>
               {/if}
+              {#if onlineImageSearchEnabled}
+                <button
+                  class="library-card-btn"
+                  on:click={(e) => onlineZoeken(e, organ)}
+                  title={$t('library.online_search')}
+                  aria-label={$t('library.online_search')}
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"/>
+                    <path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+                  </svg>
+                </button>
+              {/if}
               <button
                 class="library-card-btn"
                 on:click={(e) => chooseOrganImage(e, organ)}
@@ -5181,6 +5233,18 @@
               <div class="library-card-meta">{$t('library.stops_count').replace('{count}', organ.stop_count)}</div>
               {#if letOpPerOrgel[organSleutel(organ)]}
                 <div class="library-card-warn">{letOpPerOrgel[organSleutel(organ)]}</div>
+              {/if}
+              {#if organ.image_credit}
+                <div class="library-card-credit">
+                  <a href={organ.image_credit.source_url} target="_blank" rel="noopener"
+                     on:click|stopPropagation>
+                    {organ.image_credit.source_name}
+                  </a>{#if organ.image_credit.author}
+                    · {organ.image_credit.author}
+                  {/if}{#if organ.image_credit.license}
+                    · {organ.image_credit.license}
+                  {/if}
+                </div>
               {/if}
             </div>
           </div>
@@ -5260,6 +5324,42 @@
         {/each}
       </div>
     </div>
+
+    <!-- Online zoek-modal (0.8.74): toont top-3 Wikimedia-treffers; klik om te
+         kiezen. Attributie wordt mee opgeslagen. -->
+    {#if onlineZoekModal}
+      <div class="online-image-modal" on:click|self={sluitOnlineModal} role="dialog" aria-modal="true">
+        <div class="online-image-inhoud">
+          <div class="online-image-kop">
+            <h3>{$t('library.online_search')}: {onlineZoekModal.organ.name}</h3>
+            <button class="online-image-sluit" on:click={sluitOnlineModal} aria-label={$t('common.close')}>&times;</button>
+          </div>
+          {#if onlineZoekModal.busy}
+            <div class="online-image-bezig">{$t('library.online_busy')}</div>
+          {:else if onlineZoekModal.error}
+            <div class="online-image-fout">{onlineZoekModal.error}</div>
+          {:else}
+            <div class="online-image-grid">
+              {#each onlineZoekModal.hits as hit, i (hit.full_url)}
+                <button class="online-image-hit" on:click={() => kiesOnlineHit(hit)}>
+                  <img src={hit.thumb_url} alt={hit.caption || hit.title} loading="lazy" />
+                  <div class="online-image-meta">
+                    <div class="online-image-src">{hit.source_name}</div>
+                    {#if hit.author}
+                      <div class="online-image-auteur">{hit.author}</div>
+                    {/if}
+                    {#if hit.license}
+                      <div class="online-image-licentie">{hit.license}</div>
+                    {/if}
+                  </div>
+                </button>
+              {/each}
+            </div>
+          {/if}
+          <p class="online-image-voet">{$t('library.online_notice')}</p>
+        </div>
+      </div>
+    {/if}
 
   {:else if displayOrgan}
 
@@ -8048,6 +8148,17 @@
                   {/each}
                 </div>
               {/if}
+            </div>
+
+            <!-- Online orgelfoto's: opt-in schakelaar (0.8.74). -->
+            <div class="settings-block">
+              <h3 class="settings-block-title">{$t('library.online_search_title')}</h3>
+              <p class="settings-hint" style="margin:0 0 0.5rem;">{$t('library.online_search_hint')}</p>
+              <label class="swell-toggle">
+                <input type="checkbox" checked={onlineImageSearchEnabled}
+                       on:change={(e) => toggleOnlineImageSearch(e.target.checked)} />
+                <span class="swell-toggle-label">{$t('library.online_search_enable')}</span>
+              </label>
             </div>
 
             <!-- Over & feedback: versie, GitHub-feedback en handmatige update-check -->

@@ -44,7 +44,14 @@
     "choose_image_title": "Choose a photo of the organ",
     "image_auto": "Find image automatically",
     "image_failed": "Could not set image",
-    "open_button": "Open Organ Library"
+    "open_button": "Open Organ Library",
+    "online_search": "Search a photo online",
+    "online_search_title": "Search online for organ photos",
+    "online_search_hint": "Looks on Wikimedia Commons for a photo of the organ. Off by default. Only name, builder and location are sent to the server; never the path to the sample set.",
+    "online_search_enable": "Allow online search",
+    "online_busy": "Searching…",
+    "online_none": "Nothing found. Consider filling in name, builder or location in the library entry.",
+    "online_notice": "Click a photo to use it. The source link and license are shown below the card."
   },
   "settings": {
     "audio_output": "Audio Output",
@@ -1346,5 +1353,8 @@
     "motor_on": "Motor on",
     "key_action": "Key action noise (clicking keyboard)",
     "key_action_reload": "This change takes effect after reloading the organ."
+  },
+  "common": {
+    "close": "Close"
   }
 }

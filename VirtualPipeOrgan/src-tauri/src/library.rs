@@ -38,6 +38,10 @@ pub struct OrganLibraryEntry {
     /// (en per extra registervenster) opnieuw diep gescand.
     #[serde(default)]
     pub image_searched: Option<u32>,
+    /// Bronverwijzing bij een online opgehaalde foto (0.8.74): Commons- of
+    /// Wikipedia-link, maker en licentie. De UI toont dit onder de kaart.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_credit: Option<crate::library_online::ImageCredit>,
 }
 
 /// Versie van het zoekalgoritme voor orgelafbeeldingen. Ophogen laat alle
@@ -519,6 +523,11 @@ pub struct OrganSettings {
 pub struct OrganLibrary {
     pub organs: Vec<OrganLibraryEntry>,
     pub settings: HashMap<String, OrganSettings>,
+    /// Opt-in: online zoeken naar orgelfoto's (0.8.74). Standaard uit.
+    /// Zet aan in Instellingen; pas dan wordt bij een handmatige
+    /// zoekactie Wikimedia Commons/Wikipedia bevraagd.
+    #[serde(default)]
+    pub online_image_search_enabled: bool,
 }
 
 impl Default for OrganLibrary {
@@ -526,6 +535,7 @@ impl Default for OrganLibrary {
         Self {
             organs: Vec::new(),
             settings: HashMap::new(),
+            online_image_search_enabled: false,
         }
     }
 }
@@ -1066,6 +1076,7 @@ mod library_tests {
             image_path: None,
             image_manual: false,
             image_searched: None,
+            image_credit: None,
         }
     }
 

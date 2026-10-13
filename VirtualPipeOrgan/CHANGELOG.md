@@ -5,6 +5,23 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.8.74] - 2026-10-13
+
+### Online zoeken naar orgelfoto’s (opt-in)
+- Nieuwe knop op elke bibliotheekkaart (wereldbol) om bij Wikimedia
+  Commons te zoeken naar een foto van het orgel. Toont top-3 miniaturen;
+  klik om er een te gebruiken. De bronverwijzing, maker en licentie
+  worden onder de kaart getoond én in de bibliotheek bewaard.
+- **Standaard uit.** Zet aan in Algemene Instellingen → "Online zoeken
+  naar orgelfoto’s". Pas dan verschijnt de knop op de kaarten en gaan er
+  verzoeken naar externe servers.
+- Alleen de orgelnaam, de bouwer en de plaatsnaam uit de bibliotheek
+  worden als zoekterm meegestuurd — nooit het pad naar de set.
+- Enkel vrij te gebruiken beelden (Wikimedia Commons, CC/PD), met een
+  minimumafmeting en formaatlimiet, lokaal bewaard in de app-datamap.
+- Nieuwe module `library_online.rs` met tests voor zoekterm, URL-encoding
+  en opschoning van maker/caption-tekst.
+
 ## [0.8.73] - 2026-10-13
 
 ### Pedaal-Cornet terug naar tongwerk, manuaal-Cornet 8' blijft mixtuur

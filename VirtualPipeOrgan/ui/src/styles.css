@@ -1531,6 +1531,100 @@ input[type="range"]::-webkit-slider-thumb:hover {
   color: var(--text-muted, #aaa);
 }
 
+/* Attributie onder een online opgehaalde orgelfoto (0.8.74). Houd het klein
+   en terughoudend: de bronverwijzing is een link, de rest grijze bijtekst. */
+.library-card-credit {
+  margin-top: 0.35rem;
+  font-size: 0.65rem;
+  line-height: 1.3;
+  color: var(--text-muted, #999);
+}
+.library-card-credit a {
+  color: var(--accent, #4a9eff);
+  text-decoration: none;
+}
+.library-card-credit a:hover { text-decoration: underline; }
+
+/* Online zoek-modal: donker achtergrondvlak + witte dialoog met drie thumbs. */
+.online-image-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 1rem;
+}
+.online-image-inhoud {
+  background: var(--panel-bg, #1e2229);
+  border: 1px solid var(--border, rgba(255,255,255,0.14));
+  border-radius: 6px;
+  padding: 1rem 1.1rem 0.9rem;
+  max-width: 900px;
+  width: 100%;
+  max-height: 90vh;
+  overflow: auto;
+  color: var(--text, #e4e6ea);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+}
+.online-image-kop {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.6rem;
+  margin-bottom: 0.6rem;
+}
+.online-image-kop h3 { margin: 0; font-size: 0.95rem; }
+.online-image-sluit {
+  background: none;
+  border: 0;
+  color: var(--text-muted, #aaa);
+  cursor: pointer;
+  font-size: 1.4rem;
+  line-height: 1;
+  padding: 0 0.3rem;
+}
+.online-image-bezig, .online-image-fout {
+  padding: 1.2rem;
+  text-align: center;
+  color: var(--text-muted, #aaa);
+}
+.online-image-fout { color: var(--warning, #ff9800); }
+.online-image-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.6rem;
+}
+.online-image-hit {
+  background: var(--panel-bg-elev, #262a33);
+  border: 1px solid var(--border, rgba(255,255,255,0.12));
+  border-radius: 4px;
+  padding: 0.5rem;
+  cursor: pointer;
+  color: inherit;
+  text-align: left;
+  transition: transform 0.1s, border-color 0.15s;
+}
+.online-image-hit:hover {
+  transform: translateY(-1px);
+  border-color: var(--accent, #4a9eff);
+}
+.online-image-hit img {
+  width: 100%;
+  height: 140px;
+  object-fit: cover;
+  border-radius: 3px;
+  background: #000;
+}
+.online-image-meta { font-size: 0.68rem; margin-top: 0.35rem; color: var(--text-muted, #aaa); }
+.online-image-src { font-weight: 600; color: var(--text, #e4e6ea); }
+.online-image-voet {
+  margin: 0.8rem 0 0;
+  font-size: 0.68rem;
+  color: var(--text-muted, #aaa);
+}
+
 /* Verwijzingen naar makers van vrij te gebruiken samplesets. */
 .library-links {
   display: flex;

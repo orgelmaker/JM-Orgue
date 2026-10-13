@@ -44,7 +44,14 @@
     "choose_image_title": "Choisissez une photo de l’orgue",
     "image_auto": "Rechercher l’image automatiquement",
     "image_failed": "Impossible de définir l’image",
-    "open_button": "Ouvrir la bibliothèque d'orgues"
+    "open_button": "Ouvrir la bibliothèque d'orgues",
+    "online_search": "Chercher une photo en ligne",
+    "online_search_title": "Chercher des photos d’orgue en ligne",
+    "online_search_hint": "Interroge Wikimedia Commons pour trouver une photo de l’orgue. Désactivé par défaut. Seuls le nom, le facteur et le lieu sont envoyés au serveur; jamais le chemin vers le jeu d’échantillons.",
+    "online_search_enable": "Autoriser la recherche en ligne",
+    "online_busy": "Recherche en cours…",
+    "online_none": "Rien trouvé. Complétez éventuellement le nom, le facteur ou le lieu dans la fiche.",
+    "online_notice": "Cliquez sur une photo pour l’appliquer. La source et la licence s’affichent sous la fiche."
   },
   "settings": {
     "audio_output": "Sortie Audio",
@@ -1346,5 +1353,8 @@
     "motor_on": "Moteur en marche",
     "key_action": "Mécanique du clavier (clic des touches)",
     "key_action_reload": "Ce choix prend effet après le rechargement de l'orgue."
+  },
+  "common": {
+    "close": "Fermer"
   }
 }

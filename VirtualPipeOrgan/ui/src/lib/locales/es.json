@@ -44,7 +44,14 @@
     "choose_image_title": "Elige una foto del órgano",
     "image_auto": "Buscar la imagen automáticamente",
     "image_failed": "No se ha podido establecer la imagen",
-    "open_button": "Abrir la biblioteca de órganos"
+    "open_button": "Abrir la biblioteca de órganos",
+    "online_search": "Buscar una foto en línea",
+    "online_search_title": "Buscar fotos de órganos en línea",
+    "online_search_hint": "Busca en Wikimedia Commons una foto del órgano. Desactivado por defecto. Solo se envían nombre, constructor y lugar al servidor; nunca la ruta al banco de muestras.",
+    "online_search_enable": "Permitir búsqueda en línea",
+    "online_busy": "Buscando…",
+    "online_none": "Nada encontrado. Pruebe a completar nombre, constructor o lugar en la ficha.",
+    "online_notice": "Haga clic en una foto para aplicarla. Fuente y licencia se muestran bajo la ficha."
   },
   "settings": {
     "audio_output": "Salida de audio",
@@ -1346,5 +1353,8 @@
     "motor_on": "Motor encendido",
     "key_action": "Mecánica del teclado (clic de teclas)",
     "key_action_reload": "Este cambio tiene efecto tras recargar el órgano."
+  },
+  "common": {
+    "close": "Cerrar"
   }
 }
