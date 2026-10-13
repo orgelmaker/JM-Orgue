@@ -2227,6 +2227,22 @@
     try { pitchOffsetCents = await invoke('get_pitch_offset_cents') ?? 0; } catch (e) {}
   }
   $: if (organInfo?.id) haalPitchOffset();
+
+  // Automatisch bijstemmen (0.8.85): standaard aan. Zet de retune-tabel aan
+  // los van het temperament, zodat samplesets zonder expliciete pitch-info in
+  // de ODF (Landau-demo, en vele vrije demo-sets) toch gelijkzwevend klinken.
+  // De vorige versie had retune standaard uit, waardoor zulke sets op bestands-
+  // toon gingen en overal vals waren. De oude "Origineel-stemming" blijft
+  // bereikbaar door dit vinkje uit te zetten.
+  let autoRetune = true;
+  async function haalAutoRetune() {
+    try { autoRetune = await invoke('get_auto_retune'); } catch (e) {}
+  }
+  $: if (organInfo?.id) haalAutoRetune();
+  function zetAutoRetune(aan) {
+    autoRetune = aan;
+    invoke('set_auto_retune', { on: aan }).catch(console.error);
+  }
   let pitchOffsetTimer = null;
   function zetPitchOffset(v) {
     pitchOffsetCents = Number(v);
@@ -7207,6 +7223,18 @@
                 <input type="checkbox" checked={doorlopendKlavier}
                   on:change={(e) => zetDoorlopendKlavier(e.target.checked)} />
                 <span class="swell-toggle-label">{$t('settings.continuous_keyboard')}</span>
+              </label>
+
+              <!-- Automatisch bijstemmen (0.8.85): elke pijp op zijn
+                   gelijkzwevende target brengen via de retune-tabel, los van
+                   het temperament. Standaard aan — zonder dit klinken sets
+                   zonder expliciete pitch-info in de ODF (Landau-demo e.d.)
+                   vals, want ze gaan dan op bestandstoon. Uitzetten voor
+                   bewuste "Origineel-stemming". -->
+              <label class="swell-toggle" style="margin-top:0.75rem;" title={$t('settings.auto_retune_title')}>
+                <input type="checkbox" checked={autoRetune}
+                  on:change={(e) => zetAutoRetune(e.target.checked)} />
+                <span class="swell-toggle-label">{$t('settings.auto_retune')}</span>
               </label>
 
               <!-- Toonhoogte-correctie (0.8.84): globale cents-offset. Voor

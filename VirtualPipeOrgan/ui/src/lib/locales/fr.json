@@ -315,7 +315,9 @@
     "pitch_offset": "Correction de hauteur",
     "pitch_offset_title": "Décaler tous les tuyaux de quelques cents vers le haut ou le bas — pour les samplesets dont le diapason n’est pas dans la définition de l’orgue. Un demi-ton = 100 cents.",
     "pitch_offset_reset": "Zéro",
-    "pitch_offset_reset_title": "Retour à 0 cent (aucune correction)."
+    "pitch_offset_reset_title": "Retour à 0 cent (aucune correction).",
+    "auto_retune": "Accorder automatiquement les tuyaux",
+    "auto_retune_title": "Amène chaque tuyau à sa cible tempérée égale via la table de réaccord. Activé par défaut. Désactivé = hauteur fichier (certains samplesets sans info de hauteur dans la définition sonneront alors faux)."
   },
   "perspectives": {
     "keep_loaded": "Garder toutes les positions en mémoire",

@@ -5,6 +5,30 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.8.85] - 2026-10-13
+
+### Pijpen automatisch bijstemmen (gelijkzwevend) — standaard aan
+- Dit is wat Piotr eigenlijk vroeg bij Landau: elke pijp op zijn
+  gelijkzwevende target brengen, niet een globale schuif. De 0.8.84-
+  slider blijft als fine-tune, maar is niet meer het hoofdantwoord.
+- De retune-pijplijn bestond al (sinds 0.7.38) en vult `measured_cents`
+  nu óók vanuit de WAV-smpl-chunk als de ODF geen expliciete pitch-
+  info bevat (Pitch_SpecificationMethodCode / Pitch_OriginalOrgan_PitchHz).
+  Alleen was de retune-vlag in de audio-engine standaard uit, waardoor
+  elke sampleset die geen "Origineel-stemming"-metadata heeft naar
+  bestandstoon ging — hoorbaar vals bij Landau en vele vrije demo-sets.
+- Nieuwe `AudioCommand::SetAutoRetune(bool)` zet `retune_on` los van
+  `SetTemperament`; standaard aan. In de callback nu
+  `retune_on_eff = retune_from_temp || auto_retune_on`.
+- Nieuwe toggle "Pijpen automatisch bijstemmen" in Algemene instellingen
+  → MIDI, bij Doorlopend klavier en Toonhoogte-correctie. Standaard aan.
+  Uitzetten geeft weer "Origineel-stemming" (bestandstoon). Per orgel
+  opgeslagen in `.jm-settings.json` via `auto_retune`.
+- Werking samen met doorlopend klavier: de bron-pijp wordt via retune
+  op haar target gezet; vervolgens brengt de halftonen-shift van
+  `pijp_voor_noot` de pijp naar de gevraagde noot. Zo is de vervanging
+  klopend ook bij afwijkende bron-samples.
+
 ## [0.8.84] - 2026-10-13
 
 ### Toonhoogte-correctie per orgel voor "valse" sets

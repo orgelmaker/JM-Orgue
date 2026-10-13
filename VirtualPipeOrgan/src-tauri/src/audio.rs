@@ -885,6 +885,10 @@ pub enum AudioCommand {
     /// Globale toonhoogte-correctie in cents (0.8.84). Werkt op elke pijp
     /// als extra factor 2^(cents/1200) op de afspeelsnelheid. Nul = uit.
     SetPitchOffsetCents(f32),
+    /// Automatisch bijstemmen (0.8.85): forceer retune aan, los van de
+    /// SetTemperament-retune-vlag. True = elke pijp naar zijn gelijkzwevende
+    /// target brengen via de retune-tabel. False = volg de SetTemperament-vlag.
+    SetAutoRetune(bool),
     /// Register-klikgeluiden (0.7.99): per internal_stop_id een paar
     /// (attack-sample, release-sample) + de bron-samplerate per paar.
     RegisterStopClicks(Arc<HashMap<u32, StopClickBuffers>>),
@@ -3610,6 +3614,10 @@ fn run_audio_thread(
     // met 2^(cents/1200). Op nul = 1.0 (geen effect). Werkt onafhankelijk van
     // temperament en voicing; vooral voor samplesets met een "valse" base-pitch.
     let pitch_offset_mul: Arc<RwLock<f64>> = Arc::new(RwLock::new(1.0));
+    // Auto-retune (0.8.85): forceert retune aan los van de temperament-vlag.
+    // Standaard true: samplesets zonder expliciete pitch-info in de ODF
+    // (Landau-demo) worden toch rechtgezet via smpl-chunk-metingen.
+    let auto_retune_on: Arc<RwLock<bool>> = Arc::new(RwLock::new(true));
     // Expressie-factor van het MIDI-volumepedaal (multiplicatief op master_gain).
     let master_expression: Arc<RwLock<f32>> = Arc::new(RwLock::new(1.0));
     // Per-division gain for swell boxes (max 32 divisions, default 1.0 = fully open)
@@ -3812,6 +3820,7 @@ fn run_audio_thread(
     let voices_clone = voices.clone();
     let master_gain_clone = master_gain.clone();
     let pitch_offset_mul_clone = pitch_offset_mul.clone();
+    let auto_retune_on_clone = auto_retune_on.clone();
     let master_expression_clone = master_expression.clone();
     let percussive_stops_clone = percussive_stops.clone();
     let division_gains_clone = division_gains.clone();
@@ -4322,6 +4331,10 @@ fn run_audio_thread(
                     AudioCommand::SetToyActive { name, active } => {
                         bg_engine.set_toy(&name, active);
                         info!("Speelgoedregister '{}': {}", name, if active { "aan" } else { "uit" });
+                    }
+                    AudioCommand::SetAutoRetune(on) => {
+                        *auto_retune_on_clone.write() = on;
+                        info!("Automatisch bijstemmen: {}", if on { "aan" } else { "uit" });
                     }
                     AudioCommand::SetPitchOffsetCents(cents) => {
                         let c = if cents.is_finite() { cents.clamp(-200.0, 200.0) } else { 0.0 };
@@ -5335,7 +5348,11 @@ fn run_audio_thread(
             // vaste arrays, dus geen allocatie op de audio-thread.
             let n_real_divs = stop_div_map.values().map(|&d| d as usize + 1).max().unwrap_or(0);
             let (wet_w_l, wet_w_r, wet_ch) = wet_channel_weights(&out_chans_lock, n_real_divs, channels);
-            let (temp_ratios, retune_on) = *temperament_clone.read();
+            let (temp_ratios, retune_from_temp) = *temperament_clone.read();
+            // Auto-retune (0.8.85): standaard aan. Alleen uit als expliciet
+            // gezet door de gebruiker. OR-combinatie met de temperament-vlag:
+            // Origineel-stemming + auto-retune uit = helemaal geen retune.
+            let retune_on = retune_from_temp || *auto_retune_on_clone.read();
             let mut peak_l = 0.0f32;
             let mut peak_r = 0.0f32;
 

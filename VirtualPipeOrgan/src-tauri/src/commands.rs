@@ -1401,6 +1401,24 @@ pub fn get_pitch_offset_cents(state: State<AppState>) -> f32 {
     *state.pitch_offset_cents.read()
 }
 
+/// Automatisch bijstemmen (0.8.85). Standaard aan: elke pijp wordt via de
+/// retune-tabel op zijn gelijkzwevende target gebracht, los van de
+/// temperament-vlag. Nodig voor samplesets zonder expliciete pitch-info in de
+/// ODF (Landau-demo); daar klonken anders veel pijpen vals omdat de WAV-
+/// smpl-chunk de enige meting was en de retune-vlag daar standaard uit stond.
+/// Alleen uitzetten als je bewust de bestandstoon wil horen.
+#[tauri::command]
+pub fn set_auto_retune(state: State<AppState>, on: bool) -> Result<(), String> {
+    *state.auto_retune.write() = on;
+    state.send_audio_command(AudioCommand::SetAutoRetune(on));
+    Ok(())
+}
+
+#[tauri::command]
+pub fn get_auto_retune(state: State<AppState>) -> bool {
+    *state.auto_retune.read()
+}
+
 /// Live volume van een perspectief in dB.
 #[tauri::command]
 pub fn set_perspective_gain(state: State<AppState>, name: String, gain_db: f32) -> Result<(), String> {
@@ -9049,6 +9067,13 @@ fn restore_organ_settings(state: &AppState, organ_id: &str) {
     *state.pitch_offset_cents.write() = po;
     state.send_audio_command(AudioCommand::SetPitchOffsetCents(po));
 
+    // Automatisch bijstemmen (0.8.85): opgeslagen stand terug. Default aan
+    // (ook voor orgels van vóór dit veld), want zonder is Landau-achtige
+    // sets vals.
+    let ar = settings.auto_retune.unwrap_or(true);
+    *state.auto_retune.write() = ar;
+    state.send_audio_command(AudioCommand::SetAutoRetune(ar));
+
     // Toetsmechaniek (0.7.102) uit de opgeslagen settings terug. Vraagt
     // geen herladen hier: de settings worden tijdens de load aangeroepen,
     // dus `laad_en_stuur_toetsmechaniek` loopt eroverheen.
@@ -9764,6 +9789,7 @@ pub fn do_save_organ_settings(state: &AppState, presets: HashMap<String, PresetD
         toys_active: std::collections::HashMap::new(), // 0.8.80: niet opslaan; effectregisters starten altijd uit.
         background_channels: state.background_channels.read().iter().cloned().collect(), // 0.8.82
         pitch_offset_cents: Some(*state.pitch_offset_cents.read()), // 0.8.84
+        auto_retune: Some(*state.auto_retune.read()), // 0.8.85
         toetsmechaniek_aan: Some(*state.toetsmechaniek_aan.read()),
         misc_cc_bindings: crate::state::MISC_CC_BINDINGS().read().clone(),
         extra_couplers: state.extra_coupler_ids.read().clone(),

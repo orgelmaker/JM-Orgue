@@ -315,7 +315,9 @@
     "pitch_offset": "Korekta wysokości",
     "pitch_offset_title": "Przesuń wszystkie piły o kilka centów w górę lub w dół — dla samplesetów z nietypową wysokością bazową, której nie ma w definicji organów. Półton = 100 centów.",
     "pitch_offset_reset": "Zero",
-    "pitch_offset_reset_title": "Powrót do 0 centów (bez korekty)."
+    "pitch_offset_reset_title": "Powrót do 0 centów (bez korekty).",
+    "auto_retune": "Automatycznie stroić piły",
+    "auto_retune_title": "Doprowadza każdą piłę do celu równomiernego poprzez tabelę strojenia. Domyślnie włączone. Wyłączone = wysokość pliku (niektóre samplesety bez wyraźnych informacji o wysokości w definicji organów będą brzmiały fałszywie)."
   },
   "perspectives": {
     "keep_loaded": "Trzymaj wszystkie pozycje w pamięci",

@@ -315,7 +315,9 @@
     "pitch_offset": "Corrección de afinación",
     "pitch_offset_title": "Desplazar todos los tubos unos pocos cents arriba o abajo — para samplesets con un diapasón no incluido en la definición del órgano. Un semitono = 100 cents.",
     "pitch_offset_reset": "Cero",
-    "pitch_offset_reset_title": "Volver a 0 cents (sin corrección)."
+    "pitch_offset_reset_title": "Volver a 0 cents (sin corrección).",
+    "auto_retune": "Afinar automáticamente los tubos",
+    "auto_retune_title": "Lleva cada tubo a su objetivo de temperamento igual mediante la tabla de reafinación. Activado por defecto. Desactivado = tono del archivo (algunos samplesets sin información de afinación clara en la definición sonarán desafinados)."
   },
   "perspectives": {
     "keep_loaded": "Mantener todas las posiciones en memoria",

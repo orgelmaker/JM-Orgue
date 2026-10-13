@@ -315,7 +315,9 @@
     "pitch_offset": "Pitch correction",
     "pitch_offset_title": "Shift all pipes a few cents up or down — for samplesets with a base pitch that is not in the organ definition. One semitone = 100 cents.",
     "pitch_offset_reset": "Zero",
-    "pitch_offset_reset_title": "Back to 0 cents (no correction)."
+    "pitch_offset_reset_title": "Back to 0 cents (no correction).",
+    "auto_retune": "Automatically retune pipes",
+    "auto_retune_title": "Brings each pipe to its equal-tempered target via the retune table. On by default. Off = file pitch (some samplesets without clear pitch info in the organ definition will then sound out of tune)."
   },
   "perspectives": {
     "keep_loaded": "Keep all positions in memory",

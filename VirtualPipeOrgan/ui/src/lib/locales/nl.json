@@ -315,7 +315,9 @@
     "pitch_offset": "Toonhoogte-correctie",
     "pitch_offset_title": "Alle pijpen samen een paar cent omhoog of omlaag — bedoeld voor samplesets met een afwijkende base-pitch die niet in de orgeldefinitie staat. Een halve toon = 100 cent.",
     "pitch_offset_reset": "Nul",
-    "pitch_offset_reset_title": "Terug naar 0 cent (geen correctie)."
+    "pitch_offset_reset_title": "Terug naar 0 cent (geen correctie).",
+    "auto_retune": "Pijpen automatisch bijstemmen",
+    "auto_retune_title": "Brengt elke pijp op zijn gelijkzwevende target via de retune-tabel. Standaard aan. Uit = bestandstoon (sommige samplesets zonder duidelijke pitch-info in de orgeldefinitie klinken dan vals)."
   },
   "perspectives": {
     "keep_loaded": "Alle posities in het geheugen houden",

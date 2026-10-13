@@ -315,7 +315,9 @@
     "pitch_offset": "Correzione intonazione",
     "pitch_offset_title": "Sposta tutte le canne di qualche cent verso l’alto o il basso — per samplesets con un’intonazione base assente dalla definizione dell’organo. Un semitono = 100 cent.",
     "pitch_offset_reset": "Zero",
-    "pitch_offset_reset_title": "Torna a 0 cent (nessuna correzione)."
+    "pitch_offset_reset_title": "Torna a 0 cent (nessuna correzione).",
+    "auto_retune": "Accordare automaticamente le canne",
+    "auto_retune_title": "Porta ogni canna al suo target equabile tramite la tabella di riaccordatura. Attivo per impostazione predefinita. Spento = altezza del file (alcuni samplesets senza info di altezza chiara nella definizione suoneranno stonati)."
   },
   "perspectives": {
     "keep_loaded": "Tenere tutte le posizioni in memoria",

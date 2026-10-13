@@ -507,6 +507,11 @@ pub struct OrganSettings {
     /// uit de ODF komt (Landau).
     #[serde(default)]
     pub pitch_offset_cents: Option<f32>,
+    /// Automatisch bijstemmen (0.8.85): elke pijp op zijn gelijkzwevende
+    /// target brengen via de retune-tabel. Standaard aan voor sets zonder
+    /// Pitch_OriginalOrgan_PitchHz in de ODF.
+    #[serde(default)]
+    pub auto_retune: Option<bool>,
     /// Toetsmechaniek aan voor dít orgel (0.7.102). Standaard false.
     #[serde(default)]
     pub toetsmechaniek_aan: Option<bool>,

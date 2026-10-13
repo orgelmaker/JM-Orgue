@@ -315,7 +315,9 @@
     "pitch_offset": "Tonhöhe-Korrektur",
     "pitch_offset_title": "Alle Pfeifen zusammen ein paar Cent nach oben oder unten verschieben — für Samplesets mit abweichender Grundstimmung, die nicht in der Orgeldefinition steht. Ein Halbton = 100 Cent.",
     "pitch_offset_reset": "Null",
-    "pitch_offset_reset_title": "Zurück auf 0 Cent (keine Korrektur)."
+    "pitch_offset_reset_title": "Zurück auf 0 Cent (keine Korrektur).",
+    "auto_retune": "Pfeifen automatisch nachstimmen",
+    "auto_retune_title": "Bringt jede Pfeife über die Retune-Tabelle auf ihr gleichstufiges Ziel. Standardmäßig an. Aus = Dateistimmung (manche Samplesets ohne klare Tonhöheninfo in der Orgeldefinition klingen dann verstimmt)."
   },
   "perspectives": {
     "keep_loaded": "Alle Positionen im Speicher halten",

@@ -385,6 +385,8 @@ fn main() {
             commands::get_background_channels,
             commands::set_pitch_offset_cents,
             commands::get_pitch_offset_cents,
+            commands::set_auto_retune,
+            commands::get_auto_retune,
             // Speelgoedregisters (0.7.98): Cymbelstern e.d. als klikbare knoppen.
             commands::set_toy_active,
             commands::get_toys_active,

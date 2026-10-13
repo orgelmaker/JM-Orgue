@@ -1569,6 +1569,13 @@ pub struct AppState {
     /// die niet in de ODF staat (Landau-demo gaf valse noten). Range −200..+200
     /// cent; nul is "geen correctie". Opgeslagen per orgel.
     pub pitch_offset_cents: Arc<RwLock<f32>>,
+    /// Automatisch bijstemmen (0.8.85): elke pijp op zijn gelijkzwevende
+    /// target brengen via de retune-tabel. Standaard aan: samplesets zonder
+    /// Pitch_OriginalOrgan_PitchHz/Pitch_SpecificationMethodCode in de ODF
+    /// (Landau-demo e.d.) klonken anders vals omdat de WAV-smpl-chunk de
+    /// enige meetreferentie was en de retune-vlag daar standaard uit stond.
+    /// Opgeslagen per orgel.
+    pub auto_retune: Arc<RwLock<bool>>,
     /// Toetsmechaniek (0.7.102): aan = de aanslag-klik van elk klavier wordt
     /// afgespeeld bij elke MIDI NoteOn. Standaard uit vanwege het geheugen
     /// (per sampleset tot tientallen megabytes aan WAV's). Als de gebruiker
@@ -1940,6 +1947,7 @@ impl AppState {
                 vec![0, 1], vec![0, 1], vec![0, 1], vec![0, 1],
             ])),
             pitch_offset_cents: Arc::new(RwLock::new(0.0)),
+            auto_retune: Arc::new(RwLock::new(true)),
             toetsmechaniek_aan: Arc::new(RwLock::new(false)),
             misc_cc_bindings: Arc::new(RwLock::new(Vec::new())),
             misc_cc_learning: Arc::new(RwLock::new(None)),
