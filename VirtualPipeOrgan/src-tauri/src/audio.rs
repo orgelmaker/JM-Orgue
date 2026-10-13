@@ -5443,8 +5443,16 @@ fn run_audio_thread(
                     // callback (zelfde orde als de bestaande lookups); okey
                     // maskeert de release-vlag, dus release- en tremulantlaag-
                     // voices volgen dezelfde correctie.
+                    // Tremulant-laag (0.8.87): eerst de eigen correctie onder
+                    // de TREM-sleutel (eigen opname, eigen stemming); pas als
+                    // die ontbreekt de correctie van de droge pijp. Voor een
+                    // droge voice is tkey == okey, dus geen extra lookup.
+                    let tkey = (okey.0, okey.1 | (voice.pipe_num & TREM_FLAG));
                     let odf_pitch_eff = if retune_on {
-                        odf_retune_map.get(&okey).copied().unwrap_or(odf_pitch)
+                        odf_retune_map.get(&tkey)
+                            .or_else(|| odf_retune_map.get(&okey))
+                            .copied()
+                            .unwrap_or(odf_pitch)
                     } else {
                         odf_pitch
                     };

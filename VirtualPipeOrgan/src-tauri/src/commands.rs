@@ -3140,6 +3140,34 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
                                 },
                                 extra.original_pitch_cents,
                             ));
+                            // Tremulant-opname van deze pijp (0.8.87): een
+                            // eigen hertemper-invoer onder de TREM-sleutel. De
+                            // tremmed-laag is bij Hauptwerk-sets een aparte
+                            // opname (AlternateRankID) met haar eigen stemming;
+                            // tot 0.8.86 erfde ze de correctie van de droge
+                            // pijp (`& !RELEASE_KEY_MASK` strips bit 30) en
+                            // klonk ze met tremulant aan vals. Zonder ODF-
+                            // meting valt de lus hieronder terug op de smpl-
+                            // chunk van het tremulant-bestand zelf.
+                            if let Some(trem) = &extra.tremulant_attack {
+                                retune_inputs.push((
+                                    (stop.id, pipe_num | crate::audio::TREM_FLAG),
+                                    trem.path.clone(),
+                                    crate::retune::PipePitchInput {
+                                        key_midi,
+                                        harmonic: extra.harmonic_number.unwrap_or(owner.harmonic_number).max(1),
+                                        measured_cents: None,
+                                        original_cents: extra.original_pitch_cents,
+                                        pitch_correction_cents: definition.organ.pitch_correction_cents
+                                            + owner_wc_pc
+                                            + owner.pitch_correction
+                                            + extra.pitch_correction_cents.unwrap_or(0.0),
+                                        keep_pct: extra.retune_keep_pct.unwrap_or(0.0),
+                                        original_pitch_tuning_cents: total_cents,
+                                    },
+                                    extra.original_pitch_cents,
+                                ));
+                            }
                         }
                         push_pipe_releases(
                             stop.id, pipe_num, path, attack_cue, attack_load_release,

@@ -5,6 +5,20 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.8.87] - 2026-10-13
+
+### Tremulantstemmen worden nu ook bijgestemd
+- Met de tremulant aan klonken registers op sommige sets vals, terwijl
+  dezelfde registers zonder tremulant zuiver waren. Oorzaak: de
+  tremulant-opname (bij Hauptwerk een aparte "tremmed"-rang met een
+  eigen stemming) erfde de hertemper-correctie van de dróge pijp — de
+  intonatiesleutel stript de tremulant-vlag. De tremulant-laag krijgt nu
+  een eigen hertemper-invoer, gemeten op haar eigen WAV-smpl-chunk, en
+  de audio-engine zoekt eerst die correctie op en pas daarna die van de
+  droge pijp. Op een demoset met drie opnameposities en tremulant-
+  rangen steeg het aantal bijgestemde pijpen daardoor van 2919 naar
+  alle 4335 geladen pijpen.
+
 ## [0.8.86] - 2026-10-13
 
 ### Motor en tremulantruis: geen "aan/uit/aan/uit" meer
