@@ -388,13 +388,7 @@ impl StopDef {
         // Speelgoed (0.8.4): een lopende ruisstop aan een eigen knop —
         // cimbelster, nachtegaal, koekoek, klokjes. Percussieve stops zijn
         // registerklikken, geen loops.
-        const TOY_MARKERS: &[&str] = &[
-            "zimbelstern", "cymbelstern", "cimbelstern", "cymbalstern", "zymbelstern",
-            "cymbal star", "cymbelster", "cimbelster", "nachtigall", "nightingale",
-            "rossignol", "usignolo", "vogel", "cuculus", "cuckoo", "kuckuck", "koekoek",
-            "carillon", "glocken", "bells", "trommel", "tambour", "pauke", "drum",
-        ];
-        if !self.percussive && TOY_MARKERS.iter().any(|m| rest.contains(m)) {
+        if !self.percussive && is_toy_naam(rest) {
             return Some(BackgroundSoundKind::Toy);
         }
         None
@@ -546,6 +540,26 @@ impl StopDef {
         ];
         NOISE_MARKERS.iter().any(|m| n.contains(m))
     }
+}
+
+/// Namen die een speelgoedregister aanduiden (cimbelster, nachtegaal, …).
+/// Shared met de Hauptwerk-importer (0.8.71): zonder deze lijst werden
+/// bijvoorbeeld combinatie-vastleg-knoppen op compacte sets als Toy
+/// opgevoerd.
+pub const TOY_MARKERS: &[&str] = &[
+    "zimbelstern", "cymbelstern", "cimbelstern", "cymbalstern", "zymbelstern",
+    "cymbal star", "cymbelster", "cimbelster", "nachtigall", "nightingale",
+    "rossignol", "usignolo", "vogel", "cuculus", "cuckoo", "kuckuck", "koekoek",
+    "carillon", "glocken", "bells", "trommel", "tambour", "pauke", "drum",
+    "stokklok", "stock klok",
+];
+
+/// `true` als de genormaliseerde naam een speelgoedregister aanduidt. Vereist
+/// een expliciete overeenkomst met [`TOY_MARKERS`]; schakelaars die alleen
+/// "clickable + default off" zijn (combinatie-druk, memory-advance, piston)
+/// vallen daarmee buiten.
+pub fn is_toy_naam(naam_lower: &str) -> bool {
+    TOY_MARKERS.iter().any(|m| naam_lower.contains(m))
 }
 
 /// Extra per-pijp informatie uit de ODF: inschaling, stemming, loops en

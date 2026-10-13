@@ -2423,9 +2423,12 @@ fn registerweergave(schoon: &str, mengwerk: bool, harmonic: u32, manifest: Optio
         let pitch = if mengwerk && harmonic == 8 { String::new() } else { van_set };
         return (strip_pitch_from_name(schoon, &pitch), pitch, Some(k));
     }
-    // Mengwerk zonder aantal: de voetmaat uit de set, maar geen toevalswaarde
-    // van halverwege een repetering.
-    let pitch = if mengwerk && !OrganDefinition::is_standard_harmonic(harmonic) { String::new() } else { van_set };
+    // Mengwerk zonder bekende sterkte (0.8.71): geen voetmaat tonen. Een
+    // kale "4'" bij een Mixtuur zonder koor-aanduiding is óf toeval (de
+    // laagste pijp van de rang is op 4') óf zelfs misleidend (klinkt
+    // helemaal niet op 4'). Alleen een niet-mengwerk krijgt de voetmaat uit
+    // de set.
+    let pitch = if mengwerk { String::new() } else { van_set };
     (strip_pitch_from_name(schoon, &pitch), pitch, None)
 }
 
@@ -2457,8 +2460,9 @@ mod registerweergave_tests {
         assert_eq!(registerweergave("Mixtuur", true, 8, k(6, 6)),
             ("Mixtuur".into(), String::new(), k(6, 6)));
         // Geen aantal, standaard voetmaat: blijft zoals het was.
+        // 0.8.71: een mengwerk zonder bekende sterkte toont geen voetmaat.
         assert_eq!(registerweergave("Mixtuur", true, 32, None),
-            ("Mixtuur".into(), "2'".into(), None));
+            ("Mixtuur".into(), String::new(), None));
         // Toevalswaarde van halverwege een repetering: geen voetmaat.
         assert_eq!(registerweergave("Cymbel", true, 336, None),
             ("Cymbel".into(), String::new(), None));

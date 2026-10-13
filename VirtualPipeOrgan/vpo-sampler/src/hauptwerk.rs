@@ -1301,17 +1301,21 @@ fn verzamel_hw_bijgeluiden(
             // "Tremulant Noise" / "Tremolo Recit Noise" (0.8.4): het
             // mechanische geluid van de tremulant; volgt de tremulantknop.
             BackgroundSoundKind::TremulantNoise
-        } else if *clickable && !*default_on {
-            // Speelgoedregister: Cymbelstern, Vogelsang, Cuculus en
-            // soortgelijke effecten die de organist zelf aandrukt (0.7.98).
+        } else if *clickable && !*default_on && crate::grandorgue::is_toy_naam(&sw_lower) {
+            // Speelgoedregister (0.8.71): klikbaar, standaard uit én de naam
+            // bevat een echte toy-marker (cymbelstern, nachtegaal, koekoek,
+            // …). Zonder die laatste eis gingen combinatie-vastleg-knoppen,
+            // pistons en memory-advance ook door als Toy — op compacte sets
+            // soms tientallen tegelijk.
             BackgroundSoundKind::Toy
         } else if !*default_on {
-            // Niet-klikbare hulpschakelaar (0.8.4): de knop die hem bedient
-            // bepaalt de naam ("Zimbelstern Noise" ← "26. Zimbelstern").
-            let knop = bron_van.get(&sw_id).and_then(|srcs| srcs.iter()
+            // Niet-klikbare hulpschakelaar: alleen een bedienende knop
+            // waarvan de naam een echte toy-marker bevat telt. ("Zimbelstern
+            // Noise" ← "26. Zimbelstern" blijft werken.)
+            let knop_hit = bron_van.get(&sw_id).and_then(|srcs| srcs.iter()
                 .filter_map(|s| switch_info.get(s))
-                .find(|(_, _, c)| *c));
-            match knop {
+                .find(|(n, _, c)| *c && crate::grandorgue::is_toy_naam(&n.to_lowercase())));
+            match knop_hit {
                 Some((knop_naam, _, _)) => {
                     naam = knop_naam
                         .trim_start_matches(|c: char| c.is_ascii_digit() || c == '.' || c.is_whitespace())

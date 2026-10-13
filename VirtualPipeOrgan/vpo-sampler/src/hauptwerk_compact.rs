@@ -239,6 +239,93 @@ fn kies_verwijzing(
 }
 
 /// Ziet deze waarde eruit als vrije tekst (een naam)?
+/// Dezelfde regel als `kies_verwijzing`, maar zonder minimumdekking: voor
+/// velden die maar bij een handvol objecten voorkomen (zoals
+/// `ControllingPalletSwitchID`, dat alleen bij pijpen op een eigen pallet
+/// gevuld is). Minstens één object moet het veld hebben en vrijwel alle
+/// waarden moeten raak zijn.
+fn kies_schaarse_verwijzing(
+    objs: &[FieldMap],
+    doelen: &HashSet<u32>,
+    uitsluiten: &[&str],
+    voorkeur: &[&str],
+) -> Option<String> {
+    if doelen.is_empty() { return None; }
+    let mut beste: Option<(String, f32, usize, usize)> = None;
+    for l in letters(objs) {
+        if uitsluiten.contains(&l.as_str()) { continue; }
+        let (goed, aanwezig) = dekking(objs, &l, |v| {
+            v.trim().parse::<u32>().map(|n| doelen.contains(&n)).unwrap_or(false)
+        });
+        if aanwezig == 0 { continue; }
+        let kwaliteit = goed as f32 / aanwezig as f32;
+        if kwaliteit < 0.95 { continue; }
+        let rang = voorkeur.iter().position(|p| *p == l).unwrap_or(usize::MAX);
+        let beter = match &beste {
+            None => true,
+            Some((_, k, a, r)) => {
+                kwaliteit > *k + 0.01
+                    || ((kwaliteit - *k).abs() <= 0.01 && (aanwezig > *a || (aanwezig == *a && rang < *r)))
+            }
+        };
+        if beter {
+            beste = Some((l, kwaliteit, aanwezig, rang));
+        }
+    }
+    beste.map(|(l, _, _, _)| l)
+}
+
+/// Y/N-letters die in de objecten voorkomen (het veld moet in minstens één
+/// object aanwezig zijn en vrijwel alleen "Y" of "N" bevatten).
+fn jn_letters(objs: &[FieldMap], uitsluiten: &[&str]) -> Vec<String> {
+    let mut uit = Vec::new();
+    for l in letters(objs) {
+        if uitsluiten.contains(&l.as_str()) {
+            continue;
+        }
+        let (goed, aanwezig) = dekking(objs, &l, |v| matches!(v.trim(), "Y" | "N"));
+        if aanwezig > 0 && goed * 10 >= aanwezig * 9 {
+            uit.push(l);
+        }
+    }
+    uit
+}
+
+/// Hoeveel keer de letter expliciet op "Y" staat.
+fn aantal_j(objs: &[FieldMap], letter: &str) -> usize {
+    objs.iter()
+        .filter(|o| o.get(letter).map(|v| v.trim() == "Y").unwrap_or(false))
+        .count()
+}
+
+/// De Y/N-letter met de kleinste resp. grootste expliciete Y-telling. In de
+/// Switch-tabel is dat `DefaultToEngaged` (zelden Y) tegenover `Clickable`
+/// (meestal Y voor de speelbare schakelaars). `voorkeur` kiest bij gelijkspel
+/// de alfabetisch laagste van de genoemde letters.
+fn kies_jn_grens(
+    objs: &[FieldMap],
+    kandidaten: &[String],
+    kleinste: bool,
+    voorkeur: &[&str],
+) -> Option<String> {
+    let mut beste: Option<(String, usize, usize)> = None;
+    for l in kandidaten {
+        let n = aantal_j(objs, l);
+        let rang = voorkeur.iter().position(|p| *p == l).unwrap_or(usize::MAX);
+        let beter = match &beste {
+            None => true,
+            Some((_, c, r)) => {
+                let hoofd = if kleinste { n < *c } else { n > *c };
+                hoofd || (n == *c && rang < *r)
+            }
+        };
+        if beter {
+            beste = Some((l.clone(), n, rang));
+        }
+    }
+    beste.map(|(l, _, _)| l)
+}
+
 fn is_tekst(v: &str) -> bool {
     let t = v.trim();
     !t.is_empty()
@@ -720,6 +807,63 @@ impl GecomprimeerdeOdf {
             ],
         );
 
+        // ── Switch: a = ID, naam, en de twee Y/N-vlaggen die we voor
+        //    bijgeluiden/speelgoed nodig hebben.
+        //
+        // In het Hauptwerk-schema volgen de Y/N-velden elkaar als `d`
+        // (Latching), `e` (DefaultToEngaged), `g`/`h` (AccessibleFor…),
+        // `i` (Clickable). De schema-volgorde dient alleen als tiebreaker:
+        // we kiezen `DefaultToEngaged` als de Y/N-letter met de kleinste
+        // Y-telling (echt bijna geen schakelaar staat standaard aan), en
+        // `Clickable` als de letter met de grootste Y-telling (de meeste
+        // speelbare schakelaars zijn klikbaar). `Latching` en de
+        // AccessibleFor-vlaggen hebben juist overwegend expliciete N's en
+        // vallen daardoor vanzelf buiten de keuze.
+        let sw = lijst("Switch");
+        let sw_naam = kies_tekst(sw, &["a"], &["b"]);
+        let sw_jn = jn_letters(sw, &["a"]);
+        // Alleen letters met OVERWEGEND expliciete Y meedoen (anders pakt
+        // "kleinste Y" een Latching-letter met 0 Y en 1000 N).
+        let sw_jn_j: Vec<String> = sw_jn
+            .iter()
+            .filter(|l| {
+                let (goed, aanwezig) = dekking(sw, l, |v| v.trim() == "Y");
+                aanwezig > 0 && goed * 2 > aanwezig
+            })
+            .cloned()
+            .collect();
+        let sw_default = kies_jn_grens(sw, &sw_jn_j, true, &["e", "f", "d", "g", "h", "i"]);
+        let sw_clickable_kandidaten: Vec<String> = sw_jn_j
+            .iter()
+            .filter(|l| sw_default.as_deref() != Some(l.as_str()))
+            .cloned()
+            .collect();
+        let sw_click = kies_jn_grens(sw, &sw_clickable_kandidaten, false, &["i", "h", "g", "f", "e", "d"]);
+        if let (Some(d), Some(c)) = (&sw_default, &sw_click) {
+            info!(
+                "Hauptwerk: Switch — letter '{}' is DefaultToEngaged, '{}' is Clickable",
+                d, c
+            );
+        }
+        zet(
+            "Switch",
+            vec![
+                (Some("a".into()), "SwitchID"),
+                (sw_naam, "Name"),
+                (sw_default.clone(), "DefaultToEngaged"),
+                (sw_click.clone(), "Clickable"),
+            ],
+        );
+        // Hauptwerk-standaardwaarden voor Switch: beide Y/N-vlaggen zijn N
+        // als het veld in de compacte vorm ontbreekt.
+        standaarden.insert(
+            "Switch".to_string(),
+            vec![
+                ("DefaultToEngaged", "N".to_string()),
+                ("Clickable", "N".to_string()),
+            ],
+        );
+
         // ── Stop: a = ID, naam, en de verwijzing naar de divisie ──
         let st = lijst("Stop");
         zet(
@@ -757,6 +901,16 @@ impl GecomprimeerdeOdf {
         let pp_voet = pp_rank
             .as_deref()
             .and_then(|r| kies_rangconstante(pp, r, 1, 512, &pp_uit, &["f"]));
+        // ControllingPalletSwitchID (0.8.6): een pijp die bij een eigen
+        // switch hangt (bijgeluid, speelgoed, schakelnetwerk-sets) draagt
+        // die SwitchID in het schema vlak na RankID. Weinig pijpen hebben
+        // hem — gewone orgelpijpen worden via StopRank aangestuurd — dus
+        // de helper die zonder minimumdekking werkt.
+        let pp_pallet = {
+            let mut uit: Vec<&str> = pp_uit.clone();
+            if let Some(l) = &pp_voet { uit.push(l.as_str()); }
+            kies_schaarse_verwijzing(pp, &switch_ids, &uit, &["c", "d"])
+        };
         zet(
             "Pipe_SoundEngine01",
             vec![
@@ -764,6 +918,7 @@ impl GecomprimeerdeOdf {
                 (pp_rank.clone(), "RankID"),
                 (pp_noot.clone(), "NormalMIDINoteNumber"),
                 (pp_voet.clone(), "Pitch_Tempered_RankBasePitch64ftHarmonicNum"),
+                (pp_pallet.clone(), "ControllingPalletSwitchID"),
             ],
         );
 
@@ -1330,6 +1485,63 @@ mod tests {
             o.insert("p".into(), "2".to_string());
         }
         assert_eq!(kies_alternatieve_rang(&sr, "d", &rangen), None);
+    }
+
+    /// Switch-herkenning in de compacte vorm (0.8.6): naam, DefaultToEngaged
+    /// en Clickable. In het schema volgen Y/N-letters in deze volgorde: d
+    /// (Latching, meestal Y), e (DefaultToEngaged, bijna altijd N), g/h
+    /// (AccessibleFor…, meestal N), i (Clickable, voor speelbare schakelaars Y).
+    /// DefaultToEngaged is daarmee de Y/N-letter met de kleinste Y-telling en
+    /// Clickable die met de grootste.
+    #[test]
+    fn switch_jn_vlaggen_komen_uit_de_telling() {
+        let mut xml = String::new();
+        xml.push_str(r#"<?xml version="1.0" encoding="UTF-8"?>"#);
+        xml.push_str(r#"<Hauptwerk FileFormat="Organ" FileFormatVersion="4.00">"#);
+        xml.push_str(r#"<ObjectList ObjectType="_General"><_General>"#);
+        xml.push_str("<Identification_Name>Test</Identification_Name>");
+        xml.push_str("<Control_FileIsCompacted_AlwaysSetThisToNIfEditingManually>Y</Control_FileIsCompacted_AlwaysSetThisToNIfEditingManually>");
+        xml.push_str("</_General></ObjectList>");
+        // Minimale Division zodat detecteer() niet terugvalt.
+        xml.push_str(r#"<ObjectList ObjectType="Division"><o><a>1</a><b>HW</b></o></ObjectList>"#);
+        // Twaalf schakelaars; e = DefaultToEngaged (2 maal Y), i = Clickable
+        // (10 maal Y), d = Latching (overwegend expliciet N) en g/h =
+        // AccessibleFor… (hier allemaal expliciet N). De schakelaars die
+        // niet-klikbaar en standaard uit zijn (sw11, sw12) laten e en i leeg.
+        xml.push_str(r#"<ObjectList ObjectType="Switch">"#);
+        for id in 1..=10u32 {
+            let e = if id <= 2 { "<e>Y</e>" } else { "" };
+            xml.push_str(&format!(
+                "<o><a>{id}</a><b>Stop {id}</b><d>N</d>{e}<g>N</g><h>N</h><i>Y</i></o>"
+            ));
+        }
+        // Blower (standaard aan) zonder i-vlag en zonder expliciete e: hier is
+        // het bijgeluiden-doel om op naam te vinden; de defaults moeten vullen.
+        xml.push_str(r#"<o><a>99</a><b>Blower</b><d>N</d><e>Y</e></o>"#);
+        xml.push_str(r#"<o><a>100</a><b>Zimbelstern Noise</b><d>N</d></o>"#);
+        xml.push_str("</ObjectList>");
+        xml.push_str("</Hauptwerk>");
+
+        let odf = GecomprimeerdeOdf::detecteer(&xml).expect("gecomprimeerd");
+        let objs = odf.objecten(&xml, "Switch");
+        assert_eq!(objs.len(), 12);
+
+        let eerste = &objs[0];
+        assert_eq!(eerste.get("SwitchID").map(|s| s.as_str()), Some("1"));
+        assert_eq!(eerste.get("Name").map(|s| s.as_str()), Some("Stop 1"));
+        assert_eq!(eerste.get("DefaultToEngaged").map(|s| s.as_str()), Some("Y"));
+        assert_eq!(eerste.get("Clickable").map(|s| s.as_str()), Some("Y"));
+
+        // Weggelaten Y/N-velden vallen terug op "N" (Hauptwerk-standaard).
+        let blower = objs.iter().find(|o| o.get("SwitchID").map(|s| s.as_str()) == Some("99")).unwrap();
+        assert_eq!(blower.get("Name").map(|s| s.as_str()), Some("Blower"));
+        assert_eq!(blower.get("DefaultToEngaged").map(|s| s.as_str()), Some("Y"));
+        assert_eq!(blower.get("Clickable").map(|s| s.as_str()), Some("N"), "weggelaten i → N");
+
+        let zimbel = objs.iter().find(|o| o.get("SwitchID").map(|s| s.as_str()) == Some("100")).unwrap();
+        assert_eq!(zimbel.get("Name").map(|s| s.as_str()), Some("Zimbelstern Noise"));
+        assert_eq!(zimbel.get("DefaultToEngaged").map(|s| s.as_str()), Some("N"), "weggelaten e → N");
+        assert_eq!(zimbel.get("Clickable").map(|s| s.as_str()), Some("N"));
     }
 
     #[test]

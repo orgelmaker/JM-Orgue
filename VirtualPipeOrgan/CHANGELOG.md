@@ -5,6 +5,35 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.8.71] - 2026-10-13
+
+### Compacte Hauptwerk-definities: schakelaarnamen eindelijk herkend
+- De compacte lezer leest nu de naam, de "standaard aan"-vlag en de
+  "klikbaar"-vlag van iedere schakelaar; ook `ControllingPalletSwitchID`
+  op de pijpen. Daarmee werken bijgeluiden (motor, ruimtegeluid,
+  tremulantruis, speelgoed) óók op compacte Hauptwerk-sets, net als op de
+  gewone. De twee Y/N-vlaggen worden robuust gekozen op basis van hun
+  "Y"-telling (`DefaultToEngaged` = de letter met weinig Y's,
+  `Clickable` = die met veel), ongeacht de schemapositie.
+- Nieuwe test: `switch_jn_vlaggen_komen_uit_de_telling` controleert de
+  keuze en de Hauptwerk-standaardwaarde (N) voor weggelaten velden.
+
+### Speelgoedregisters alleen tonen als de naam dat zegt
+- Op compacte sets gingen combinatie-vastleg-knoppen, memory-advance en
+  pistons ook door als speelgoed (klikbaar, standaard uit) — soms
+  tientallen tegelijk. De Hauptwerk-importer eist nu dat de switch-naam
+  (of de bedienende knop) een echte speelgoedmarker bevat, dezelfde lijst
+  die GrandOrgue al gebruikt (cymbelstern, nachtegaal, koekoek, carillon
+  …). Zonder match verschijnt er geen knop.
+
+### Mengwerk zonder bekende sterkte: geen voetmaat
+- Een mengwerk waarvan het aantal pijpenrijen niet uit de naam, het set-
+  bestand of een JM-Rec-manifest kan worden afgeleid, kreeg tot nu toe
+  toch een voetmaat uit de laagste rang (bv. "4'" bij een Mixtuur). Dat
+  nummer is óf toeval óf misleidend. Nu laat de UI de voetmaat leeg zodat
+  de organist weet dat de sterkte onbekend is. Een niet-mengwerk houdt
+  natuurlijk zijn voetmaat.
+
 ## [0.8.5] - 2026-10-13
 
 ### Tremulantruis per divisie
