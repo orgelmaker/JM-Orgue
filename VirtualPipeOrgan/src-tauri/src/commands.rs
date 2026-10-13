@@ -8774,9 +8774,13 @@ fn add_or_refresh_library_entry(state: &AppState, organ_info: &OrganInfoDto, sou
         let lib = state.organ_library.read();
         match lib.organs.iter().find(|o| norm(&o.source_path) == key) {
             Some(e) => {
+                // 0.8.73: bij een nieuwere zoekversie óók entries die al een
+                // afbeelding hebben opnieuw scannen — anders blijft iedereen
+                // de slechte paneelachtergrond van 0.8.72 houden. Handmatig
+                // gekozen afbeeldingen blijven altijd staan.
                 let bestand_weg = e.image_path.as_ref().map(|p| !Path::new(p).is_file()).unwrap_or(true);
                 let al_gezocht = e.image_searched == Some(library::IMAGE_SEARCH_VERSION);
-                (true, !e.image_manual && bestand_weg && !al_gezocht)
+                (true, !e.image_manual && !al_gezocht && (bestand_weg || e.image_searched.unwrap_or(0) < library::IMAGE_SEARCH_VERSION))
             }
             // Nieuw: afbeelding meteen zoeken (en het resultaat — ook "niets" —
             // vastleggen zodat de diepe scan niet elke keer herhaald wordt).

@@ -774,10 +774,11 @@ pub fn groep_voor_register(naam: &str, pitch: &str, wind_voet: f32, mengwerk: bo
     // die is op de aanroepplekken uit dezelfde naam afgeleid.
     let cornet = bevat(&n, &["kornet", "cornet"]);
     if cornet && !meerkorig {
-        // Pedaal-Cornet (5 1/3', 4') is altijd een labiale vulstem (0.8.72).
-        // Op een manuaal 4'/2' blijft een Cornet-tongwerk ("Corneta") wél
-        // tongwerk; manuaal 8' is een cornet-mixtuur (vulstem).
-        return if !pedaal && voet <= 4.1 { RegisterGroep::Tongwerk } else { RegisterGroep::Vulstem };
+        // Pedaal-Cornet is vaak een tongwerk (Spaans/Portugees orgel) en op
+        // het manuaal juist een cornet-mixtuur. Manuaal 4'/2' blijft ook
+        // tongwerk (Spaanse "Corneta"). 0.8.72 draaide dit kort om; 0.8.73
+        // zet de default-regel terug.
+        return if pedaal || voet <= 4.1 { RegisterGroep::Tongwerk } else { RegisterGroep::Vulstem };
     }
     if familie == PijpFamilie::Tongwerk {
         // Een cornet met koren (Kornett 5fach) of een tongwerknaam met drie of
@@ -2028,15 +2029,14 @@ mod pijpprofiel_tests {
         assert_eq!(familie_van_naam("Tompet 4'", false), Tongwerk);
     }
 
-    /// Een pedaal-Cornet is labiale vulstem, geen tongwerk (0.8.72). Alleen
-    /// een manuaal-Cornet van 4' of 2' blijft tongwerk (Spaanse "Corneta").
+    /// Een pedaal-Cornet is vaak tongwerk (Spaanse "Corneta" bass), een
+    /// manuaal-Cornet 8' is een cornet-mixtuur, een manuaal 4'/2' Cornet
+    /// weer tongwerk (0.8.73).
     #[test]
-    fn cornet_pedaal_is_vulstem_niet_tongwerk() {
+    fn cornet_regel_pedaal_tongwerk_manuaal_mixtuur() {
         use RegisterGroep::*;
-        // Pedaal, 5 1/3' Cornet zonder koren-aanduiding: vulstem.
-        assert_eq!(groep_voor_register("Cornet", "5 1/3'", 1.5, true, None, false, false, true), Vulstem);
-        // Pedaal 4' Cornet: ook vulstem.
-        assert_eq!(groep_voor_register("Cornet", "4'", 2.0, true, None, false, false, true), Vulstem);
+        // Pedaal, 5 1/3' Cornet zonder koren-aanduiding: default tongwerk.
+        assert_eq!(groep_voor_register("Cornet", "5 1/3'", 1.5, true, None, false, false, true), Tongwerk);
         // Manuaal 4' Cornet (Spaanse Corneta): tongwerk.
         assert_eq!(groep_voor_register("Corneta", "4'", 2.0, false, None, false, false, false), Tongwerk);
         // Manuaal 8' Cornet (Nederlandse Cornet-mixtuur): vulstem.
@@ -2141,8 +2141,8 @@ mod pijpprofiel_tests {
         assert_eq!(groep_voor_register("Tertian", "", 8.0, true, Some(2), false, false, false), Vulstem);
         // Zoals de aanroepplekken het doen: mengwerk = (familie == Mixtuur), dus
         // voor Cornet altijd true; de cornet-regel moet daar doorheen kijken.
-        // 0.8.72: pedaal-Cornet 4' is labiale vulstem, geen tongwerk.
-        assert_eq!(groep_voor_register("Cornet", "4'", 4.0, true, None, false, false, true), Vulstem);
+        // 0.8.73: pedaal-Cornet is default tongwerk (Spaanse "Corneta").
+        assert_eq!(groep_voor_register("Cornet", "4'", 4.0, true, None, false, false, true), Tongwerk);
         assert_eq!(groep_voor_register("Cornet", "8'", 8.0, true, None, false, false, false), Vulstem);
         assert_eq!(groep_voor_register("Cornet", "", 8.0, true, Some(5), false, false, false), Vulstem);
         // GrandOrgue zonder HarmonicNumber: de tekst is "8'", de naam beslist.
@@ -2152,12 +2152,12 @@ mod pijpprofiel_tests {
         assert_eq!(groep_voor_register("Octave 4", "8'", 8.0, false, None, false, false, false), Grondstem);
         assert_eq!(groep_voor_register("Principal", "8'", 8.0, false, None, false, false, false), Grondstem);
         assert_eq!(groep_voor_register("Flute", "8'", 2.667, false, None, false, false, false), Vulstem);
-        // Cornet 8' op een manuaal is een cornet-mixtuur; alleen een manuaal
-        // 4'/2' Cornet (Spaanse "Corneta") blijft tongwerk.
+        // Cornet 8' op een manuaal is een cornet-mixtuur, Cornet 4'/2' in het
+        // pedaal (en Spaanse "Corneta" op het manuaal) een tongwerk.
         assert_eq!(groep_voor_register("Kornett", "8'", 8.0, false, None, false, false, false), Vulstem);
-        // 0.8.72: pedaal-Cornet 4'/2' is labiale vulstem, geen tongwerk.
-        assert_eq!(groep_voor_register("Cornet", "4'", 4.0, false, None, false, false, true), Vulstem);
-        assert_eq!(groep_voor_register("Cornett", "2'", 2.0, false, None, false, false, true), Vulstem);
+        // 0.8.73: pedaal-Cornet 4'/2' is tongwerk (default), zoals vóór 0.8.72.
+        assert_eq!(groep_voor_register("Cornet", "4'", 4.0, false, None, false, false, true), Tongwerk);
+        assert_eq!(groep_voor_register("Cornett", "2'", 2.0, false, None, false, false, true), Tongwerk);
         // Pedaalquint 10 2/3'.
         assert_eq!(groep_voor_register("Quint", "10 2/3'", 10.667, false, None, false, false, true), Vulstem);
         // Zonder tekst: de voet uit de set wint van de naam, behalve de

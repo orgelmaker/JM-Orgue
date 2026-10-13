@@ -42,7 +42,7 @@ pub struct OrganLibraryEntry {
 
 /// Versie van het zoekalgoritme voor orgelafbeeldingen. Ophogen laat alle
 /// entries zonder handmatige keuze opnieuw zoeken (negatieve cache vervalt).
-pub const IMAGE_SEARCH_VERSION: u32 = 2;
+pub const IMAGE_SEARCH_VERSION: u32 = 4;
 
 /// Saved preset data (stops + couplers)
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -641,15 +641,19 @@ pub fn save_library(app_data_dir: &Path, library: &OrganLibrary) {
 pub const IMAGE_EXTENSIONS: [&str; 5] = ["jpg", "jpeg", "png", "bmp", "webp"];
 
 /// Bestandsnamen die zo goed als zeker de orgelfoto zijn (map van de set).
-const PREFERRED_NAMES: [&str; 13] = [
-    "image", "cover", "organ", "orgel", "orgue", "photo", "foto", "picture",
-    "front", "console", "church", "kerk", "main",
+/// Bestandsnamen die zo goed als zeker de orgelfoto zijn (0.8.73): meest
+/// specifieke eerst. "ph" is de Hauptwerk-conventie voor de orgelfoto in de
+/// pakketroot (PH.jpg); "organ"/"organinfo" is de officiële info-afbeelding.
+const PREFERRED_NAMES: [&str; 15] = [
+    "ph", "organinfo", "front", "foto", "photo", "picture",
+    "cover", "image", "organ", "orgel", "orgue",
+    "console", "church", "kerk", "main",
 ];
 
 /// Naamdelen die in de diepe scan op een orgel-/consolefoto wijzen.
-const NAME_HINTS: [&str; 14] = [
-    "console", "organ", "orgel", "orgue", "church", "kerk", "front", "main",
-    "background", "photo", "foto", "cover", "image", "picture",
+const NAME_HINTS: [&str; 11] = [
+    "organ", "orgel", "orgue", "church", "kerk", "front", "main",
+    "photo", "foto", "cover", "picture",
 ];
 
 /// Ondergrens waaronder een afbeelding zeker geen orgelfoto is maar een
@@ -897,11 +901,26 @@ fn scan_scored(roots: &[PathBuf]) -> Option<String> {
             Err(_) => continue,
         };
         let dir_name = dir.file_name().map(|s| s.to_string_lossy().to_lowercase()).unwrap_or_default();
-        let dir_bonus = if dir_name.contains("image") || dir_name.contains("console") || dir_name.contains("organinfo") {
-            4
-        } else {
-            0
-        };
+        // Dir-strafpunten (0.8.73): UI-/paneelmappen zitten vol met achter-
+        // grondbitmaps die groter zijn dan de orgelfoto maar niet die foto
+        // zijn. CrescendoProg, Jamb, Panel, SimpleJamb, Piston, Stop,
+        // ButtonSet, KeyboardKeys enz. verdienen een strafpunt zodat de
+        // echte orgelfoto in de pakketroot of in OrganInfo wint.
+        let ui_map = ["crescendo", "jamb", "simplejamb", "panel", "piston",
+            "button", "knob", "stopset", "stops", "keyboard", "key_action",
+            "keyaction", "stoprow", "coupler", "setzer", "memory", "label",
+            "slider", "toggle", "indicator", "enclosure", "numbers",
+            "settings", "setting", "number"].iter()
+            .any(|m| dir_name.contains(m));
+        let organinfo = dir_name == "info"
+            || dir_name == "organinfo"
+            || dir_name == "organ_info"
+            || dir_name.contains("organinfo");
+        let dir_bonus: i64 = if organinfo { 15 }
+            else if dir_name.contains("console") { 6 }
+            else if dir_name.contains("image") { 2 }
+            else if ui_map { -8 }
+            else { 0 };
         for e in rd.flatten() {
             entries += 1;
             if entries > SCAN_MAX_ENTRIES || probes > SCAN_MAX_PROBES {
@@ -976,6 +995,24 @@ pub fn find_organ_image(source_path: &str, source_type: &str) -> Option<String> 
     if is_file {
         if vpo_sampler::is_hauptwerk_path(src) {
             let pkgs = hauptwerk_package_dirs(src);
+            // Eerst de officiële infomap (0.8.73): pakket\Images\OrganInfo
+            // of \Images\Info bevat de orgelfoto. Grabowski-sets gebruiken
+            // "Info" (één niveau diep: Info \Background.png). Die winnen
+            // van elke panel-achtergrond ("CrescendoProg\…").
+            for pkg in &pkgs {
+                for sub in ["Images/OrganInfo", r"Images\OrganInfo",
+                            "Images/Organ_Info", r"Images\Organ_Info",
+                            "Images/Info", r"Images\Info",
+                            "Images/Info/0", r"Images\Info ",
+                            "Images/OrganInfo/0", r"Images\OrganInfo "] {
+                    let d = pkg.join(sub);
+                    if d.is_dir() {
+                        if let Some(p) = best_in_dir(&d) {
+                            return Some(p);
+                        }
+                    }
+                }
+            }
             for pkg in &pkgs {
                 if let Some(p) = best_in_dir(pkg) {
                     return Some(p);

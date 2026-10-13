@@ -5,6 +5,25 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.8.73] - 2026-10-13
+
+### Pedaal-Cornet terug naar tongwerk, manuaal-Cornet 8' blijft mixtuur
+- 0.8.72 draaide de Cornet-regel om; 0.8.73 zet hem terug. Een pedaal-
+  Cornet is vaak een tongwerk (Spaans/Portugees orgel, de "Corneta" bass),
+  een manuaal-Cornet 8' is een cornet-mixtuur (vulstem), en een
+  manuaal-Cornet 4'/2' blijft tongwerk (Spaanse "Corneta").
+
+### Bibliotheek vindt de orgelfoto beter
+- De diepe scan koos regelmatig een paneelachtergrond uit mappen als
+  `CrescendoProg`, `SimpleJamb`, `Panel…` enz. — groot genoeg, maar geen
+  orgelfoto. Nu krijgen die UI-mappen een strafpunt, en de officiële
+  Hauptwerk-infomap `Images\OrganInfo` wint vóór elke andere scan.
+- Namenlijst herzien: specifieke namen zoals `PH.jpg` (Hauptwerk-
+  pakketfoto), `Front`, `OrganInfo`, `Photo` en `Foto` krijgen voorrang,
+  en de generieke naamhint `background` (die bij elke knop in de set
+  terugkeerde) is uit de scoring. De zoektocht wordt opnieuw gedraaid
+  voor alle entries bij deze versie.
+
 ## [0.8.72] - 2026-10-13
 
 ### Pedaal-Cornet is géén tongwerk
