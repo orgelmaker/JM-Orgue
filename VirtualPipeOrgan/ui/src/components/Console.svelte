@@ -5583,6 +5583,27 @@
                 >{miscLerenDoel === 'listening_position' ? '…' : (miscBindingTekst('listening_position') ? '●' : '↻')}</button>
               </div>
             {/if}
+            <!-- Perspectief-knoppen (0.8.83): heeft de set meerdere
+                 opnameperspectieven, dan verschijnen hier compacte knoppen
+                 ("front", "rear", "dry", …). Een klik schakelt dat perspectief
+                 in of uit — zelfde effect als de vinkjes in Algemene
+                 instellingen → Perspectieven. Hoofdscherm alleen; voor
+                 Rotterdam en soortgelijke surround-sets scheelt dit een uitstap
+                 naar de instellingen tijdens het spelen. -->
+            {#if !secondary && perspectives.length >= 2}
+              <div class="persp-strook" title={$t('toolbar.perspective_title')}>
+                <span class="persp-strook-label">{$t('toolbar.perspective')}</span>
+                {#each perspectives as p (p.name)}
+                  <button
+                    class="btn btn-ghost btn-sm panel-layout-btn persp-knop"
+                    class:aan={p.enabled}
+                    on:click={() => setPerspectiveEnabled(p.name, !p.enabled)}
+                    title={p.name}
+                    aria-pressed={p.enabled}
+                  >{p.name}</button>
+                {/each}
+              </div>
+            {/if}
             <!-- Motor-knop (0.7.97): aanwezig als de sampleset een blower-opname
                  heeft; schakelt de orgelmotor in of uit met fade-in/uit.
                  (0.8.81) Alleen op het hoofdscherm, niet op extra register-

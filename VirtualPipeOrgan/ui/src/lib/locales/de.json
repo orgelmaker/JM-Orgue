@@ -578,7 +578,9 @@
     "toys_to_division": "Effektregister (Zimbelstern, Nachtigall …) als Registerknöpfe im obersten Werk zeigen",
     "toys_to_toolbar": "Effektregister zurück in die Werkzeugleiste",
     "motor_state_on": "ein",
-    "motor_state_off": "aus"
+    "motor_state_off": "aus",
+    "perspective": "Perspektive",
+    "perspective_title": "Welche Aufnahmeperspektiven klingen (klicken zum Ein- oder Ausschalten)."
   },
   "speeltafel": {
     "show_bars": "Leisten",

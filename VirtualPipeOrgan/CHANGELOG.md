@@ -5,6 +5,16 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.8.83] - 2026-10-13
+
+### Perspectief op het hoofdscherm
+- Bij samplesets met meerdere opnameperspectieven (close/front/rear/dry)
+  moest de organist naar Algemene instellingen → Perspectieven om een
+  perspectief te schakelen. Dat is nu een rijtje compacte knoppen in de
+  werkbalk van het hoofdscherm; één klik schakelt een perspectief aan
+  of uit, met directe mix (geen herlaad). De keuze blijft bewaard, net
+  als voor 0.8.83.
+
 ## [0.8.82] - 2026-10-13
 
 ### Audio-uitgangen per bijgeluid en effectregister

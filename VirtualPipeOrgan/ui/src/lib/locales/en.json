@@ -578,7 +578,9 @@
     "toys_to_division": "Show toy stops (Zimbelstern, nightingale …) as stop knobs in the top division",
     "toys_to_toolbar": "Move toy stops back to the toolbar",
     "motor_state_on": "on",
-    "motor_state_off": "off"
+    "motor_state_off": "off",
+    "perspective": "Perspective",
+    "perspective_title": "Which recording perspectives play (click to enable or disable one)."
   },
   "speeltafel": {
     "show_bars": "Bars",

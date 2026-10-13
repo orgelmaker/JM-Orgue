@@ -578,7 +578,9 @@
     "toys_to_division": "Mostrare i registri di effetto (cimbelstern, usignolo …) come tiranti nel manuale superiore",
     "toys_to_toolbar": "Riportare i registri di effetto nella barra degli strumenti",
     "motor_state_on": "on",
-    "motor_state_off": "off"
+    "motor_state_off": "off",
+    "perspective": "Prospettiva",
+    "perspective_title": "Quali prospettive di registrazione suonano (clic per attivare o disattivare)."
   },
   "speeltafel": {
     "show_bars": "Barre",

@@ -578,7 +578,9 @@
     "toys_to_division": "Mostrar los registros de efectos (cimbelstern, ruiseñor …) como tiradores en el teclado superior",
     "toys_to_toolbar": "Devolver los registros de efectos a la barra de herramientas",
     "motor_state_on": "on",
-    "motor_state_off": "off"
+    "motor_state_off": "off",
+    "perspective": "Perspectiva",
+    "perspective_title": "Qué perspectivas de grabación suenan (haga clic para activar o desactivar)."
   },
   "speeltafel": {
     "show_bars": "Barras",

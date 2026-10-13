@@ -1270,6 +1270,29 @@ input[type="range"]::-webkit-slider-thumb:hover {
   align-items: center !important;
 }
 
+/* Perspectief-knoppenstrook in de werkbalk (0.8.83): compacte knopjes voor
+   front/rear/dry/close/middle, met kleine labeltekst ernaast. Een actieve
+   knop krijgt accent-vulling, een inactieve blijft doorzichtig. */
+.persp-strook {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0 0.35rem;
+}
+.persp-strook-label {
+  font-size: 0.7rem;
+  color: var(--text-subtle);
+  margin-right: 0.1rem;
+}
+.persp-knop {
+  text-transform: capitalize;
+}
+.persp-knop.aan {
+  background: var(--accent-soft) !important;
+  color: var(--text) !important;
+  border-color: var(--accent) !important;
+}
+
 .panel-add-btn {
   font-size: 0.75rem !important;
   padding: 0.25rem 0.7rem !important;

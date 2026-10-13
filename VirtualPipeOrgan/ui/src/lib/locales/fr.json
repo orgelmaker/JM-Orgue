@@ -578,7 +578,9 @@
     "toys_to_division": "Afficher les jeux d’accessoires (cymbelstern, rossignol …) comme tirants dans le clavier supérieur",
     "toys_to_toolbar": "Remettre les jeux d’accessoires dans la barre d’outils",
     "motor_state_on": "marche",
-    "motor_state_off": "arrêt"
+    "motor_state_off": "arrêt",
+    "perspective": "Perspective",
+    "perspective_title": "Quelles perspectives de prise de son sont actives (cliquez pour les activer)."
   },
   "speeltafel": {
     "show_bars": "Barres",

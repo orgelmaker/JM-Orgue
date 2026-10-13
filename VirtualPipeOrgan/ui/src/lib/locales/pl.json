@@ -578,7 +578,9 @@
     "toys_to_division": "Pokaż głosy efektowe (cymbelstern, słowik …) jako przyciski rejestrów w górnym manuale",
     "toys_to_toolbar": "Przenieś głosy efektowe z powrotem na pasek narzędzi",
     "motor_state_on": "wł.",
-    "motor_state_off": "wył."
+    "motor_state_off": "wył.",
+    "perspective": "Perspektywa",
+    "perspective_title": "Które perspektywy nagraniowe grają (kliknij, aby włączyć lub wyłączyć)."
   },
   "speeltafel": {
     "show_bars": "Paski",

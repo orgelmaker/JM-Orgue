@@ -578,7 +578,9 @@
     "toys_to_division": "Speelgoedregisters (cimbelster, nachtegaal …) als registerknop in het bovenste werk tonen",
     "toys_to_toolbar": "Speelgoedregisters terug in de werkbalk",
     "motor_state_on": "aan",
-    "motor_state_off": "uit"
+    "motor_state_off": "uit",
+    "perspective": "Perspectief",
+    "perspective_title": "Welke opnameperspectieven klinken (klik om een perspectief in of uit te schakelen)."
   },
   "speeltafel": {
     "show_bars": "Balken",
