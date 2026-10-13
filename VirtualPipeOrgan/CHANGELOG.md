@@ -5,6 +5,33 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.8.86] - 2026-10-13
+
+### Motor en tremulantruis: geen "aan/uit/aan/uit" meer
+- Een motor- of tremulantruis-opname bestaat meestal uit een aanloop
+  (de motor die opstart), een steady-state-loop en een staart; de
+  loop-grenzen staan in de smpl-chunk van de WAV. JM-Orgue loopte het
+  héle bestand, zodat de aanloop en de staart elke cyclus opnieuw te
+  horen waren — het "aan/uit/aan/uit" uit de testronde. Bijgeluiden
+  volgen nu de loop-punten: eenmaal de aanloop, daarna rond tussen
+  loop-start en loop-einde, met een naadloos tweede steunpunt op de
+  wrap. Zonder (geldige) loop-punten blijft het hele bestand loopen.
+- Twee tests: loop-punten worden gevolgd; ongeldige loop-punten vallen
+  terug op het hele bestand.
+
+### Motor start uit
+- Bij het laden van een set met motor-opname staat de motor nu uit,
+  zoals op een echt orgel: de organist zet eerst de wind aan. Een
+  eerder opgeslagen stand wordt niet meer teruggezet (zelfde regel als
+  de effectregisters sinds 0.8.80). Sets zonder motor-opname klinken
+  gewoon — daar bestaat de sleutel niet.
+
+### Engine-standen overleven een apparaatwissel
+- Na een wissel van audio-apparaat startte de nieuwe audio-thread op
+  zijn defaults: motor weer aan, bijgeluid-routing weer front,
+  toonhoogte-correctie nul, automatisch bijstemmen op engine-default.
+  De state-spiegel gaat nu bij elke herstart mee.
+
 ## [0.8.85] - 2026-10-13
 
 ### Pijpen automatisch bijstemmen (gelijkzwevend) — standaard aan

@@ -1305,12 +1305,32 @@ fn laad_en_stuur_bijgeluiden(state: &AppState, defs: &[vpo_sampler::grandorgue::
                         vpo_sampler::grandorgue::BackgroundSoundKind::Toy => 1.0,
                         _ => 10f32.powf(-12.0 / 20.0),
                     },
+                    // Loopgebied uit de smpl-chunk (0.8.86): een motor-opname
+                    // is aanloop + loop + staart; alleen het loopgebied mag
+                    // rondlopen, anders start de motor elke cyclus opnieuw.
+                    loop_start: sd.loop_start.map(|v| v as usize),
+                    loop_end: sd.loop_end.map(|v| v as usize),
                 });
             }
             Err(e) => {
                 warn!("Bijgeluid '{}' niet geladen: {} ({:?})", d.name, e, d.path);
             }
         }
+    }
+    // Motor standaard UIT bij het laden (0.8.86), zoals op een echt orgel:
+    // de organist zet eerst de wind aan. Alleen als de set een motor-opname
+    // heeft — zonder blower-voice bestaat de sleutel niet en moet het orgel
+    // gewoon klinken (sinds 0.8.81 blokkeert motor-uit nieuwe noten). Vóór de
+    // voices sturen, zodat de blower-voice meteen met target 0 start.
+    let heeft_blower = voices.iter()
+        .any(|v| matches!(v.kind, vpo_sampler::grandorgue::BackgroundSoundKind::Blower));
+    let motor_aan = !heeft_blower;
+    *state.blower_active.write() = motor_aan;
+    state.send_audio_command(AudioCommand::SetBlowerActive(motor_aan));
+    let n_loops = voices.iter().filter(|v| v.loop_start.is_some() && v.loop_end.is_some()).count();
+    if !voices.is_empty() {
+        info!("Bijgeluiden: {} voices, {} met loop-punten; motor start {}",
+            voices.len(), n_loops, if motor_aan { "aan (geen motor-opname)" } else { "uit" });
     }
     // Altijd sturen, ook leeg — anders blijven de bijgeluiden van een
     // vorig orgel doorlopen bij een wissel.
@@ -3766,6 +3786,16 @@ pub fn apply_dsp_after_backend_reload(state: &AppState) {
             });
         }
     }
+    // Sinds 0.8.82-0.8.86 toegevoegde engine-standen: een nieuwe audio-
+    // thread start op zijn defaults, dus de state-spiegel moet opnieuw mee
+    // (anders is na een apparaatwissel de motor weer "aan", de routing weer
+    // front en het bijstemmen weer de engine-default).
+    state.send_audio_command(AudioCommand::SetBlowerActive(*state.blower_active.read()));
+    for (i, ch) in state.background_channels.read().iter().enumerate() {
+        state.send_audio_command(AudioCommand::SetBackgroundChannels { kind: i as u8, channels: ch.clone() });
+    }
+    state.send_audio_command(AudioCommand::SetPitchOffsetCents(*state.pitch_offset_cents.read()));
+    state.send_audio_command(AudioCommand::SetAutoRetune(*state.auto_retune.read()));
     if let Some(r) = state.reverb_settings.read().clone() {
         state.send_audio_command(AudioCommand::SetAlgorithmicReverb {
             preset: None, rt60: r.rt60, pre_delay_ms: r.pre_delay_ms,
@@ -9031,9 +9061,9 @@ fn restore_organ_settings(state: &AppState, organ_id: &str) {
     let bg_gain = settings.background_gain.unwrap_or(0.3).clamp(0.0, 4.0);
     *state.background_gain.write() = bg_gain;
     state.send_audio_command(AudioCommand::SetBackgroundGain { gain_lineair: bg_gain });
-    let blower = settings.blower_active.unwrap_or(true);
-    *state.blower_active.write() = blower;
-    state.send_audio_command(AudioCommand::SetBlowerActive(blower));
+    // Motor-stand wordt sinds 0.8.86 NIET meer hersteld: de motor start altijd
+    // uit bij een set met motor-opname (zie laad_en_stuur_bijgeluiden), net
+    // als de effectregisters sinds 0.8.80.
 
     // Effectregisters (0.8.80): starten altijd uit, ongeacht wat eerder is
     // opgeslagen. Een orgel dat met Cymbelstern of Cuculus "aan" wordt

@@ -47,6 +47,15 @@ pub struct BackgroundVoice {
     /// Lineaire gain voor DEZE voice (voor set-up: bv. per sampleset
     /// verschillend). Default 1.0.
     pub voice_gain: f32,
+    /// Loopgebied uit de smpl-chunk van de WAV, in bronframes (0.8.86).
+    /// Een motor- of tremulantruis-opname bestaat vaak uit een aanloop
+    /// (motor die opstart), een steady-state-loop en een staart; vóór 0.8.86
+    /// loopten we het hele bestand, zodat de aanloop en de staart elke
+    /// cyclus opnieuw te horen waren — "aan/uit/aan/uit". Nu spelen we van
+    /// het begin tot `loop_end` en daarna rond tussen `loop_start` en
+    /// `loop_end`. None of ongeldig = het hele bestand loopen (zoals vroeger).
+    pub loop_start: Option<usize>,
+    pub loop_end: Option<usize>,
 }
 
 /// Een BackgroundVoice klaar om af te spelen in de audio-thread, met de
@@ -60,6 +69,54 @@ pub(crate) struct ActiveVoice {
     /// Doelgain na toepassen van actief/uit (0.0 = uit). Multipliceert zich
     /// met `voice_gain` en `engine.global_gain`.
     pub target_gain: f32,
+}
+
+impl ActiveVoice {
+    /// (start, einde) van het loopgebied in bronframes: de smpl-loop als die
+    /// geldig is, anders het hele bestand.
+    #[inline]
+    fn loop_bereik(&self) -> (usize, usize) {
+        let len = self.voice.data_l.len();
+        match (self.voice.loop_start, self.voice.loop_end) {
+            (Some(ls), Some(le)) if le > ls + 1 && le <= len => (ls, le),
+            _ => (0, len),
+        }
+    }
+
+    /// Lineair geïnterpoleerd (L, R) op `pos`. Het tweede steunpunt wraps op
+    /// het loop-einde naar de loop-start, zodat de naad geen klik geeft.
+    /// Vereist `data_l` niet leeg.
+    #[inline]
+    fn lees(&self) -> (f32, f32) {
+        let len = self.voice.data_l.len();
+        let (ls, le) = self.loop_bereik();
+        let p = self.pos;
+        let p0 = (p.floor() as usize).min(len - 1);
+        let p1 = if p0 + 1 >= le { ls } else { p0 + 1 }.min(len - 1);
+        let frac = (p - p.floor()) as f32;
+        let sl = self.voice.data_l[p0] * (1.0 - frac) + self.voice.data_l[p1] * frac;
+        let sr = match self.voice.data_r.as_ref() {
+            Some(r) if !r.is_empty() => {
+                let r0 = p0.min(r.len() - 1);
+                let r1 = p1.min(r.len() - 1);
+                r[r0] * (1.0 - frac) + r[r1] * frac
+            }
+            _ => sl,
+        };
+        (sl, sr)
+    }
+
+    /// Schuif `rate` bronframes op; voorbij het loop-einde terug naar de
+    /// loop-start, met behoud van de fractie.
+    #[inline]
+    fn stap(&mut self) {
+        let (ls, le) = self.loop_bereik();
+        self.pos += self.voice.rate;
+        if self.pos >= le as f64 {
+            let span = (le - ls) as f64;
+            self.pos = ls as f64 + (self.pos - le as f64) % span;
+        }
+    }
 }
 
 /// Vier soorten achtergrondgeluiden; vaste volgorde voor de routing-array.
@@ -239,30 +296,13 @@ impl BackgroundEngine {
                 } else {
                     v.current_gain -= fade_step;
                 }
-                let rate = v.voice.rate;
                 if v.current_gain > 0.0 || effectief_doel > 0.0 {
-                    let p = v.pos;
-                    let p0 = p.floor() as usize % len_l;
-                    let p1 = (p0 + 1) % len_l;
-                    let frac = (p - p.floor()) as f32;
-                    let sl = v.voice.data_l[p0] * (1.0 - frac) + v.voice.data_l[p1] * frac;
-                    let sr = match v.voice.data_r.as_ref() {
-                        Some(r) if !r.is_empty() => {
-                            let len_r = r.len();
-                            let r0 = p0 % len_r;
-                            let r1 = (r0 + 1) % len_r;
-                            r[r0] * (1.0 - frac) + r[r1] * frac
-                        }
-                        _ => sl,
-                    };
+                    let (sl, sr) = v.lees();
                     let k = kind_index(v.voice.kind);
                     per_kind[k].0 += sl * v.current_gain;
                     per_kind[k].1 += sr * v.current_gain;
                 }
-                v.pos += rate;
-                if v.pos >= len_l as f64 {
-                    v.pos -= len_l as f64;
-                }
+                v.stap();
             }
 
             // One-shots: eenmalig; delen de routing van hun kind.
@@ -364,29 +404,12 @@ impl BackgroundEngine {
             } else {
                 v.current_gain -= fade_step;
             }
-            let rate = v.voice.rate;
             if v.current_gain > 0.0 || effectief_doel > 0.0 {
-                let p = v.pos;
-                let p0 = p.floor() as usize % len_l;
-                let p1 = (p0 + 1) % len_l;
-                let frac = (p - p.floor()) as f32;
-                let sl = v.voice.data_l[p0] * (1.0 - frac) + v.voice.data_l[p1] * frac;
-                let sr = match v.voice.data_r.as_ref() {
-                    Some(r) if !r.is_empty() => {
-                        let len_r = r.len();
-                        let r0 = p0 % len_r;
-                        let r1 = (r0 + 1) % len_r;
-                        r[r0] * (1.0 - frac) + r[r1] * frac
-                    }
-                    _ => sl,
-                };
+                let (sl, sr) = v.lees();
                 out_l += sl * v.current_gain;
                 out_r += sr * v.current_gain;
             }
-            v.pos += rate;
-            if v.pos >= len_l as f64 {
-                v.pos -= len_l as f64;
-            }
+            v.stap();
         }
         (out_l, out_r)
     }
@@ -401,8 +424,6 @@ impl BackgroundEngine {
         for v in &mut self.voices {
             let len_l = v.voice.data_l.len();
             if len_l == 0 { continue; }
-            let data_r = v.voice.data_r.as_ref();
-            let rate = v.voice.rate;
             let voice_g = v.voice.voice_gain * gg;
             let fade_step = voice_g / FADE_FRAMES.max(1.0);
             for i in 0..out_l.len() {
@@ -417,30 +438,13 @@ impl BackgroundEngine {
                 }
                 if v.current_gain <= 0.0 && effectief_doel <= 0.0 {
                     // Volledig uit en blijft uit — niets te mengen.
-                    v.pos = (v.pos + rate) % len_l as f64;
+                    v.stap();
                     continue;
                 }
-                // Lineaire interpolatie tussen pos0 en pos1 (mod len).
-                let p = v.pos;
-                let p0 = p.floor() as usize % len_l;
-                let p1 = (p0 + 1) % len_l;
-                let frac = (p - p.floor()) as f32;
-                let sl = v.voice.data_l[p0] * (1.0 - frac) + v.voice.data_l[p1] * frac;
-                let sr = match data_r {
-                    Some(r) if !r.is_empty() => {
-                        let len_r = r.len();
-                        let r0 = p0 % len_r;
-                        let r1 = (r0 + 1) % len_r;
-                        r[r0] * (1.0 - frac) + r[r1] * frac
-                    }
-                    _ => sl,
-                };
+                let (sl, sr) = v.lees();
                 out_l[i] += sl * v.current_gain;
                 out_r[i] += sr * v.current_gain;
-                v.pos += rate;
-                if v.pos >= len_l as f64 {
-                    v.pos -= len_l as f64;
-                }
+                v.stap();
             }
         }
     }
@@ -458,7 +462,57 @@ mod tests {
             data_r: None,
             rate: 1.0,
             voice_gain: 1.0,
+            loop_start: None,
+            loop_end: None,
         }
+    }
+
+    /// Loop-punten worden gevolgd (0.8.86): na het loop-einde speelt de voice
+    /// rond tussen start en einde, nooit meer de aanloop of de staart.
+    #[test]
+    fn loop_punten_worden_gevolgd() {
+        // Bestand van 100 frames: aanloop 0..10 = 1.0, loopgebied 10..60 = 0.5,
+        // staart 60..100 = -1.0.
+        let mut data = vec![1.0f32; 100];
+        for s in &mut data[10..60] { *s = 0.5; }
+        for s in &mut data[60..] { *s = -1.0; }
+        let mut v = maak_mono(100, 0.0);
+        v.data_l = Arc::new(data);
+        v.loop_start = Some(10);
+        v.loop_end = Some(60);
+        let mut e = BackgroundEngine::new();
+        e.global_gain = 1.0;
+        e.set_voices(vec![v]);
+        // Lang genoeg om de fade af te maken én meerdere loops te doorlopen.
+        let mut l = vec![0.0; 40_000];
+        let mut r = vec![0.0; 40_000];
+        e.mix_stereo(&mut l, &mut r);
+        // Na de fade-in zitten we allang in het loopgebied: alles 0.5, nooit
+        // de staart (-1.0) of de aanloop (1.0).
+        let staart = &l[20_000..];
+        assert!(staart.iter().all(|&s| (s - 0.5).abs() < 1e-3),
+            "loop moest op 0.5 blijven, min={} max={}",
+            staart.iter().cloned().fold(f32::MAX, f32::min),
+            staart.iter().cloned().fold(f32::MIN, f32::max));
+    }
+
+    /// Zonder (geldige) loop-punten loopt het hele bestand, zoals vóór 0.8.86.
+    #[test]
+    fn zonder_loop_punten_loopt_het_hele_bestand() {
+        let mut data = vec![0.5f32; 100];
+        for s in &mut data[60..] { *s = -1.0; }
+        let mut v = maak_mono(100, 0.0);
+        v.data_l = Arc::new(data);
+        v.loop_start = Some(80);
+        v.loop_end = Some(500); // voorbij het bestand → ongeldig → heel bestand
+        let mut e = BackgroundEngine::new();
+        e.global_gain = 1.0;
+        e.set_voices(vec![v]);
+        let mut l = vec![0.0; 40_000];
+        let mut r = vec![0.0; 40_000];
+        e.mix_stereo(&mut l, &mut r);
+        let staart = &l[20_000..];
+        assert!(staart.iter().any(|&s| s < -0.9), "staart (-1.0) moest nog meelopen");
     }
 
     fn maak_toy(len: usize, waarde: f32, name: &str) -> BackgroundVoice {
@@ -503,6 +557,8 @@ mod tests {
             data_r: None,
             rate: 1.0,
             voice_gain: 1.0,
+            loop_start: None,
+            loop_end: None,
         });
         // Eén buffer van 100 samples is net genoeg om de klik af te spelen.
         let mut data = vec![0.0f32; 200]; // 100 frames × 2 ch

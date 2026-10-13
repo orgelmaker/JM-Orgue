@@ -4385,6 +4385,8 @@ fn run_audio_thread(
                                     data_r,
                                     rate,
                                     voice_gain: 10f32.powf(-6.0 / 20.0),
+                                    loop_start: None,
+                                    loop_end: None,
                                 });
                             }
                         }
@@ -4406,6 +4408,8 @@ fn run_audio_thread(
                                     // Register-klik moet duidelijk hoorbaar zijn,
                                     // maar niet overheersend; -6 dB voelt juist.
                                     voice_gain: 10f32.powf(-6.0 / 20.0),
+                                    loop_start: None,
+                                    loop_end: None,
                                 });
                             }
                         }
