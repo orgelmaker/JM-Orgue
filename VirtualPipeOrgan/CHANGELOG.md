@@ -86,9 +86,9 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [0.8.3] - 2026-10-13
 
-### Hauptwerk-sets met een schakelnetwerk laden nu (Nowa Ruda)
-- Nieuwere Hauptwerk-sets van dezelfde maker als de Nitra-demo (hier
-  getest met de Nowa Ruda-demo) bevatten géén StopRank-objecten meer: de
+### Hauptwerk-sets met een schakelnetwerk laden nu
+- Nieuwere Hauptwerk-sets van een bekende maker (hier getest met een
+  demoset van vier werken) bevatten géén StopRank-objecten meer: de
   verbinding register → pijp loopt via een schakelnetwerk van ruim
   tienduizend schakelaars en koppelingen, waarin toets én register samen
   de pallet van elke pijp bedienen. JM-Orgue vond daardoor nul registers
@@ -99,10 +99,10 @@ versies volgen [Semantic Versioning](https://semver.org/).
   verschuiving. Resultaat op de demo: 17 registers, 4 divisies, 3
   opnameposities, 2502 pijpen, blower en ruimtegeluid, 50 registerklikken
   en 189 toetsklikken.
-- **Toetsmechaniek zonder prefix in de registernamen.** Nitra noemt zijn
-  registers "RP Copula maior 8'", waaruit de koppeling van de toetsklik-
-  ranks ("RP Key action noises") aan het klavier werd afgeleid; Nowa Ruda
-  noemt ze "Bordun 16" zonder prefix. De koppeling valt nu terug op de
+- **Toetsmechaniek zonder prefix in de registernamen.** De eerder geteste
+  demoset noemt zijn registers "RP Copula maior 8'", waaruit de koppeling
+  van de toetsklik-ranks ("RP Key action noises") aan het klavier werd
+  afgeleid; de nieuwe set noemt ze "Bordun 16" zonder prefix. De koppeling valt nu terug op de
   divisienaam zelf: "HW" past in "Hauptwerk", "SW" in "Schwellwerk", "P"
   kiest het pedaal boven een Positiv.
 - **Toetsmechaniek na een herstart.** De voorkeur werd pas ná het laden
@@ -115,7 +115,7 @@ versies volgen [Semantic Versioning](https://semver.org/).
   mee. Nu geldt "rauschen" (en "Gebläse" voor de Duitse blower).
 - **Ruimere grens voor vervangen pijpen.** De plausibiliteitsgrens van
   600 cent gold ook voor de expliciete Hauptwerk-correctie `origineel −
-  bestandstoon`; de hoogste toets van de Tuba 8' in Nowa Ruda leent een
+  bestandstoon`; de hoogste toets van een Tuba 8' in de geteste set leent een
   bestand zes halve tonen lager (+604 cent) en bleef daardoor op de
   verkeerde toon. Voor die expliciet opgegeven waarden geldt nu 1300 cent.
 - Nieuwe tests: `stopranks_uit_schakelnetwerk` en
@@ -194,8 +194,8 @@ pijpen in hun orgeldefinitie zetten.
 
 ### Toonhoogte (eerder 0.7.94)
 - Hauptwerk-import leest `Pitch_OriginalOrgan_PitchHz` nu voor élke pijp
-  waar hij is gevuld, los van de methodecode. Vervangen pijpen (bv.
-  Grabowski's Nitra en Nowa Ruda) klinken daardoor op de juiste orgeltoon,
+  waar hij is gevuld, los van de methodecode. Vervangen pijpen (zoals in
+  de demosets van een bekende maker) klinken daardoor op de juiste orgeltoon,
   ook in de stand "Origineel". De hertemper-formule gebruikt die
   originele toon om bij een gedeeltelijk behouden stemming naar de echte
   pijptoon te trekken.
@@ -281,8 +281,8 @@ pijpen in hun orgeldefinitie zetten.
   registratie — het is een mechanisch geluid, geen pijpklank.
 - Werkt alleen wanneer "Toetsmechaniek (klikkend klavier)" aan staat in
   Orgel-instellingen → Bijgeluiden.
-- Op Nitra: 56 loslaat-klikken per klavier × 3 klavieren samen met de
-  aanslag-klikken van 0.7.102.
+- Op de geteste demoset: 56 loslaat-klikken per klavier × 3 klavieren
+  samen met de aanslag-klikken van 0.7.102.
 
 ## [0.7.102] - 2026-10-12
 
@@ -300,15 +300,15 @@ pijpen in hun orgeldefinitie zetten.
   aan de divisienaam via de prefix in de stopnamen van dat klavier.
 - Alleen de aanslag-klik in deze versie; de release-klik bij loslaten
   komt in een vervolg.
-- Nieuwe test: `klavier_prefix_komt_uit_stopnamen` controleert dat
-  Nitra's prefixen P/RP/HW correct worden gematcht aan Pedal, Rückpositiv
-  en Hauptwerk.
+- Nieuwe test: `klavier_prefix_komt_uit_stopnamen` controleert dat de
+  prefixen P/RP/HW correct worden gematcht aan Pedal, Rückpositiv en
+  Hauptwerk.
 
 ## [0.7.101] - 2026-10-12
 
 ### Registermechaniek nu ook op GrandOrgue-sets
 - 0.7.99 bracht het klikken van registers aan en uit, maar werkte alleen
-  op Hauptwerk-sets. GrandOrgue-sets (zoals de Friesach-testset en vele
+  op Hauptwerk-sets. GrandOrgue-sets (zoals onze eigen testset en vele
   andere) modelleren het mechaniekgeluid als eigen stops met namen als
   `Stop attack noise P Untersatz 32'` en `Stop release noise P Untersatz
   32'`. JM-Orgue koppelt die nu aan de echte stop met dezelfde naam en
@@ -340,8 +340,8 @@ pijpen in hun orgeldefinitie zetten.
   elke registerwissel af: één klik bij aanzetten, een andere bij uitzetten.
   Dat geeft het mechanische gevoel van een echt orgel.
 - Hauptwerk-import: de ranks "Stop action noises Attack/Release" worden
-  gekoppeld aan de registers via `ControllingSwitchID`. Nitra heeft voor
-  elk van zijn 30 registers een attack- en release-geluid.
+  gekoppeld aan de registers via `ControllingSwitchID`. De geteste demoset
+  heeft voor elk van zijn 30 registers een attack- en release-geluid.
 - Audio-engine: de BackgroundEngine krijgt een one-shot-lijst voor
   eenmalige geluiden. Afspeelde one-shots ruimen zichzelf op na elke
   buffer. Tot 32 tegelijk (preset-wissels met veel registers).
@@ -349,7 +349,7 @@ pijpen in hun orgeldefinitie zetten.
   gespeeld; afgebakende volume-tweaks komen later.
 - Nog niet in deze versie: GrandOrgue-import voor de ruisstops
   "Stop attack noise {name}" / "Stop release noise {name}" (die zijn er
-  wel in de Friesach-testset); dat volgt in een vervolg.
+  wel in onze eigen testset); dat volgt in een vervolg.
 - Nieuwe test: `one_shot_speelt_eenmaal_en_wordt_opgeruimd`.
 
 ## [0.7.98] - 2026-10-12
@@ -362,8 +362,8 @@ pijpen in hun orgeldefinitie zetten.
   klikbare knoppen in de werkbalk, elk met de naam uit de orgeldefinitie.
 - Hauptwerk-regel: pijpen in een rank met "noise" in de naam waarvan de
   switch klikbaar is én standaard uit staat (`Clickable=Y`,
-  `DefaultToEngaged=N`). Nitra heeft er drie (Vogelsang, Cymbelstern,
-  Cuculus).
+  `DefaultToEngaged=N`). De geteste demoset heeft er drie (Vogelsang,
+  Cymbelstern, Cuculus).
 - Hergebruikt de BackgroundEngine uit 0.7.97: klikloze fade in/uit,
   loop-afspeel, buiten de registratie om. Standaardgain 0 dB zodat ze
   goed hoorbaar zijn.
@@ -387,7 +387,7 @@ pijpen in hun orgeldefinitie zetten.
 - **Volumeschuif "Volume"** in Orgel-instellingen → Bijgeluiden, met de dB-
   waarde eronder. Beide instellingen worden per orgel bewaard.
 - **Hauptwerk-import** herkent nu ook pijpen op switches (zonder Stop
-  eromheen), zoals in Grabowski's sets: NoiseSwitch wordt ambient,
+  eromheen), zoals in veel recente sets: NoiseSwitch wordt ambient,
   Blower-switch wordt motor. Speelgoedregisters (Cymbelstern, Vogelsang,
   Cuculus) blijven buiten omdat ze standaard uit staan.
 - Zeven lokalisaties bijgewerkt (background.volume, background.motor_on,
@@ -409,7 +409,7 @@ pijpen in hun orgeldefinitie zetten.
   (importherkenning, DTO en teksten in alle zeven talen) staat nu klaar.
 - Hauptwerk-sets vullen deze lijst nog niet: hun motor en ambient zitten
   op switches i.p.v. in Stop-objecten, dat vraagt een andere parseerweg
-  (ook 0.7.97). Grabowski's Nitra bijvoorbeeld toont deze lijst nog leeg.
+  (ook 0.7.97). De geteste Hauptwerk-demo toont deze lijst nog leeg.
 - Nieuwe test: `bijgeluidenherkenning_scheidt_doorlopend_van_mechaniek`.
 
 ## [0.7.95] - 2026-10-12
@@ -443,10 +443,10 @@ pijpen in hun orgeldefinitie zetten.
 - Een Hauptwerk-sampleset kan voor een kapotte opname het bestand van een
   buurtoon lenen en zet dan de originele pijptoon in de orgeldefinitie. Tot
   nu toe luisterde JM-Orgue daar alleen naar bij een specifieke methodecode;
-  de bekende sets van Piotr Grabowski (**Nitra**, **Nowa Ruda**, en vele
-  andere) gebruiken een andere code voor hetzelfde veld, zodat die
-  "vervangen pijpen" bij ons op de verkeerde toon klonken. In Nitra ging
-  het bij de Copula maior 8' om 54 pijpen; in Nowa Ruda honderden. Vanaf
+  de sets van een bekende maker gebruiken een andere code voor hetzelfde
+  veld, zodat die "vervangen pijpen" bij ons op de verkeerde toon klonken.
+  In de ene demoset ging het bij één register om 54 pijpen; in een andere
+  om honderden. Vanaf
   deze versie telt elke gevulde Hz-waarde en komt elke vervangen pijp op
   de echte orgeltoon uit, net als in Hauptwerk — in élke stemming, ook de
   stand "Origineel (zoals opgenomen)". Pijpen waar bestand en originele
@@ -458,7 +458,7 @@ pijpen in hun orgeldefinitie zetten.
   maakt alleen uit voor sets die beide invullen; voor de rest verandert
   er niets. Formule in `retune.rs` is bijgewerkt met tests.
 - Nieuwe tests: `pitchhz_bij_methodecode_1_wordt_opgepikt`,
-  `nitra_vervangen_pijp_keep_100`, `nitra_vervangen_pijp_keep_0`,
+  `vervangen_pijp_keep_100`, `vervangen_pijp_keep_0`,
   `zonder_origineel_valt_terug_op_oude_formule`.
 - Logregel bij het laden: "Hauptwerk originele pijptoon toegepast op N
   pijpen".
@@ -2287,7 +2287,7 @@ Grote onderhoudsronde: 53 van de 63 bevindingen uit de code-audit van 18 juli ve
 
 ### Opgelost — GrandOrgue-sets: kwaliteit en stabiliteit
 
-- 🎼 **Loop-naad-tikken op veel GO-sets verholpen**: de fase-uitlijning van looppunten draaide alleen in het standaard-WAV-pad; bestanden met een afwijkende fmt-header (o.a. álle Piotr Grabowski-sets) sloegen die optimalisatie over en hielden hoorbare tikken op de loop-naad. De juiste parser wordt nu vooraf gekozen (fmt-probe) en de loop-optimalisatie draait in álle paden
+- 🎼 **Loop-naad-tikken op veel GO-sets verholpen**: de fase-uitlijning van looppunten draaide alleen in het standaard-WAV-pad; bestanden met een afwijkende fmt-header (o.a. alle sets van een bekende maker) sloegen die optimalisatie over en hielden hoorbare tikken op de loop-naad. De juiste parser wordt nu vooraf gekozen (fmt-probe) en de loop-optimalisatie draait in álle paden
 - 🗝️ **Meerkorige registers worden nu op toets-positie gelegd** (RankFirstAccessibleKeyNumber gerespecteerd): gesplicede koren (geleende bas, repeterende kwint) komen op de juiste toetsen terecht, óók als de ranks niet netjes aansluitend in de ODF staan; een misvormde REF-regel schuift niet langer alle volgende pijpen een toets op. Écht gestapelde koren (zelfde toetsbereik dubbel) spelen nog één koor — dat staat nu expliciet met een waarschuwing in het log
 - 🔇 **Stille toetsen zijn nu traceerbaar**: een onopgeloste REF-verwijzing (de bekende stille-toetsen-oorzaak) logt voortaan precies welk register en welke pijp geen sample kreeg; een REF-keten met een cyclus crasht de app niet meer (dieptebegrenzer)
 - 🧟 **"Zombie"-stemmen verholpen**: bij een volle achtergrondlaad-wachtrij (tutti loslaten op een natte set) werden laadverzoeken stil gedropt en bleef een stem eindeloos zijn 2-seconden-attackfragment loopen. Wachtrij vergroot (64→1024), verzoeken worden per pijp ontdubbeld en een gedropt verzoek blokkeert een nieuwe poging niet meer

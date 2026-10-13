@@ -216,7 +216,7 @@ mod tests {
     /// (keep = 100 %) klinkt deze vervangen pijp op de originele orgeltoon:
     /// retune = origineel − gemeten ≈ +200,7 ct.
     #[test]
-    fn nitra_vervangen_pijp_keep_100() {
+    fn vervangen_pijp_keep_100() {
         // target(79, 8) = 7900, measured = 7726.2, origineel = 7926.9
         let r = retune_cents(&inp_orig(79, 8, Some(7726.2), 7926.9, 0.0, 100.0)).unwrap();
         assert!((r - 200.7).abs() < 0.05, "{r}");
@@ -226,7 +226,7 @@ mod tests {
     /// hij speelt op de doel-toon, dus retune = target − gemeten ≈ +173,8 ct.
     /// De originele orgeltoon doet dan niet mee.
     #[test]
-    fn nitra_vervangen_pijp_keep_0() {
+    fn vervangen_pijp_keep_0() {
         let r = retune_cents(&inp_orig(79, 8, Some(7726.2), 7926.9, 0.0, 0.0)).unwrap();
         assert!((r - 173.8).abs() < 0.05, "{r}");
     }
