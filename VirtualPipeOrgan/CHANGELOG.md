@@ -5,6 +5,15 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.8.77] - 2026-10-13
+
+### Divisienaam gebruikt nu `display_name`
+- De werkknop bovenaan en de divisie-header op het orgelscherm toonden
+  de interne naam. Voor de virtuele speelgoeddivisie (0.8.75) stond daar
+  "__toys__" in plaats van de vertaalde "Effectregisters". Beide plekken
+  tonen nu `display_name` als die er is, met de interne naam als
+  terugval.
+
 ## [0.8.76] - 2026-10-13
 
 ### Registerklik hoorbaar op het moment van de muisklik

@@ -5460,7 +5460,7 @@
                 data-div-idx={divIdx}
                 on:pointerdown={(e) => divPointerDown(e, divIdx)}
                 on:click={() => { if (divDragJustEnded) return; toggleDivision(naam); }}
-              >{naam}</button>
+              >{displayOrgan?.divisions?.find(d => d.name === naam)?.display_name || naam}</button>
             {/each}
             {#if eigenDivisieVolgorde}
               <button
@@ -5736,7 +5736,7 @@
               class="division"
               style={mainLayout === 'vertical' ? (divisieStijlen[division.name] || '') : ''}>
               <div class="division-header division-header-compact">
-                <div class="division-name">{division.name}</div>
+                <div class="division-name">{division.display_name || division.name}</div>
                 {#if isSwellEnabled(division.name)}
                   <div class="swell-leds">
                     {#each Array(10) as _, i}
