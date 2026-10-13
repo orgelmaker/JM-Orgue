@@ -5,6 +5,16 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.8.80] - 2026-10-13
+
+### Effectregisters starten altijd uit
+- Een eerder opgeslagen aan-stand werd bij een orgellaad teruggezet,
+  waardoor Cymbelstern of Cuculus bij het openen van het orgel direct
+  afspeelde. Nu starten alle effectregisters uit, ongeacht wat in de
+  instellingen staat; de stand wordt ook niet meer opgeslagen. Zet ze
+  tijdens het spelen aan met de knoppen in de divisie
+  "Effectregisters".
+
 ## [0.8.79] - 2026-10-13
 
 ### Effectregisters: aan/uit nu wél zichtbaar

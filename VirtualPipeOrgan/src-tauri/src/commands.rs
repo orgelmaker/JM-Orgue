@@ -8980,22 +8980,13 @@ fn restore_organ_settings(state: &AppState, organ_id: &str) {
     *state.blower_active.write() = blower;
     state.send_audio_command(AudioCommand::SetBlowerActive(blower));
 
-    // Speelgoedregisters (0.7.98): opgeslagen aan/uit-standen terugzetten.
-    // De audio-thread kreeg de SetBackgroundVoices al via load_organ; nu
-    // sturen we per toy de aan-stand opnieuw. Nieuwe orgels (lege map)
-    // doen niets, dus de UI start met alle speelgoedregisters uit.
-    {
-        let mut toys = state.toys_active.write();
-        toys.clear();
-        for (name, active) in settings.toys_active.iter() {
-            toys.insert(name.clone(), *active);
-        }
-    }
-    for (name, active) in settings.toys_active.iter() {
-        state.send_audio_command(AudioCommand::SetToyActive {
-            name: name.clone(), active: *active,
-        });
-    }
+    // Effectregisters (0.8.80): starten altijd uit, ongeacht wat eerder is
+    // opgeslagen. Een orgel dat met Cymbelstern of Cuculus "aan" wordt
+    // geladen, speelt die direct af — ongewenst gedrag na een reset of een
+    // app-herstart. De staat blijft wel bewaard op de sessie zelf (zodat
+    // tijdens het spelen een registratie-wissel een toy niet onbedoeld
+    // ongedaan maakt), maar is per orgel-laad leeg.
+    state.toys_active.write().clear();
 
     // Toetsmechaniek (0.7.102) uit de opgeslagen settings terug. Vraagt
     // geen herladen hier: de settings worden tijdens de load aangeroepen,
@@ -9709,7 +9700,7 @@ pub fn do_save_organ_settings(state: &AppState, presets: HashMap<String, PresetD
         listening_position: Some(*state.listening_position.read()),
         background_gain: Some(*state.background_gain.read()),
         blower_active: Some(*state.blower_active.read()),
-        toys_active: state.toys_active.read().clone(),
+        toys_active: std::collections::HashMap::new(), // 0.8.80: niet opslaan; effectregisters starten altijd uit.
         toetsmechaniek_aan: Some(*state.toetsmechaniek_aan.read()),
         misc_cc_bindings: crate::state::MISC_CC_BINDINGS().read().clone(),
         extra_couplers: state.extra_coupler_ids.read().clone(),
