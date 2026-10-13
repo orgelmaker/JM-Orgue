@@ -305,7 +305,13 @@
     "polyphony_default": "domyślnie",
     "audio_buffer_fast_pc": "tylko bardzo szybkie komputery",
     "audio_buffer_recommended": "zalecane",
-    "audio_buffer_hint": "Mniejszy = mniejsze opóźnienie, ale wątek audio musi w tym czasie wykonać całą pracę przy zmianie głosów albo crescenda. 128 ramek (2,7 ms) to właściwy wybór na niemal każdym komputerze; 32/48 tylko na bardzo szybkim komputerze bez pogłosu."
+    "audio_buffer_hint": "Mniejszy = mniejsze opóźnienie, ale wątek audio musi w tym czasie wykonać całą pracę przy zmianie głosów albo crescenda. 128 ramek (2,7 ms) to właściwy wybór na niemal każdym komputerze; 32/48 tylko na bardzo szybkim komputerze bez pogłosu.",
+    "background_channels_title": "Wyjście audio dźwięków tła",
+    "background_channels_hint": "Na których wyjściach grają dźwięki tła i rejestry efektów. Domyślnie 1-2 (przód L/P). Przy ustawieniach surround z sekcjami na 3-4 lub 5-6 wybierz te same wyjścia.",
+    "background_channels_blower": "Silnik",
+    "background_channels_ambient": "Tło akustyczne",
+    "background_channels_toys": "Rejestry efektów",
+    "background_channels_tremnoise": "Szum tremola"
   },
   "perspectives": {
     "keep_loaded": "Trzymaj wszystkie pozycje w pamięci",

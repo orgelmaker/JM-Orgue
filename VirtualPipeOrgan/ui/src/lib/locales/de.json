@@ -305,7 +305,13 @@
     "polyphony_default": "Standard",
     "audio_buffer_fast_pc": "nur für sehr schnelle PCs",
     "audio_buffer_recommended": "empfohlen",
-    "audio_buffer_hint": "Kleiner = weniger Latenz, aber der Audio-Thread muss die gesamte Arbeit eines Register- oder Crescendowechsels in dieser Zeit erledigen. 128 Frames (2,7 ms) ist für nahezu jeden PC die richtige Wahl; 32/48 nur auf einem sehr schnellen PC ohne Hall."
+    "audio_buffer_hint": "Kleiner = weniger Latenz, aber der Audio-Thread muss die gesamte Arbeit eines Register- oder Crescendowechsels in dieser Zeit erledigen. 128 Frames (2,7 ms) ist für nahezu jeden PC die richtige Wahl; 32/48 nur auf einem sehr schnellen PC ohne Hall.",
+    "background_channels_title": "Audioausgabe Hintergrundgeräusche",
+    "background_channels_hint": "Welche Ausgänge die Hintergrundgeräusche und Effektregister spielen. Standard 1-2 (vorne L/R). Bei Surround-Aufbauten mit Werken auf 3-4 oder 5-6 wählen Sie hier dieselben Ausgänge.",
+    "background_channels_blower": "Motor",
+    "background_channels_ambient": "Raumklang",
+    "background_channels_toys": "Effektregister",
+    "background_channels_tremnoise": "Tremulantgeräusch"
   },
   "perspectives": {
     "keep_loaded": "Alle Positionen im Speicher halten",

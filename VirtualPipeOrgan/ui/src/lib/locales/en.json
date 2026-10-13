@@ -305,7 +305,13 @@
     "polyphony_default": "default",
     "audio_buffer_fast_pc": "very fast PCs only",
     "audio_buffer_recommended": "recommended",
-    "audio_buffer_hint": "Smaller = less latency, but the audio thread has to do all the work of a stop or crescendo change within that time. 128 frames (2.7 ms) is the right choice on almost any PC; 32/48 only on a very fast PC without reverb."
+    "audio_buffer_hint": "Smaller = less latency, but the audio thread has to do all the work of a stop or crescendo change within that time. 128 frames (2.7 ms) is the right choice on almost any PC; 32/48 only on a very fast PC without reverb.",
+    "background_channels_title": "Background sounds audio output",
+    "background_channels_hint": "Which outputs play the background sounds and effect registers. Default is 1-2 (front L/R). On surround setups with divisions on 3-4 or 5-6, choose the same outputs here so you also hear them.",
+    "background_channels_blower": "Blower",
+    "background_channels_ambient": "Ambient",
+    "background_channels_toys": "Effect registers",
+    "background_channels_tremnoise": "Tremulant noise"
   },
   "perspectives": {
     "keep_loaded": "Keep all positions in memory",

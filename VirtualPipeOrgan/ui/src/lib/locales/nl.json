@@ -305,7 +305,13 @@
     "polyphony_default": "standaard",
     "audio_buffer_fast_pc": "alleen voor zeer snelle pc's",
     "audio_buffer_recommended": "aanbevolen",
-    "audio_buffer_hint": "Kleiner = minder vertraging, maar de audio-thread moet al het werk van een register- of crescendowissel in die tijd doen. 128 frames (2,7 ms) is voor vrijwel elke pc de goede keuze; 32/48 alleen op een zeer snelle pc zonder galm."
+    "audio_buffer_hint": "Kleiner = minder vertraging, maar de audio-thread moet al het werk van een register- of crescendowissel in die tijd doen. 128 frames (2,7 ms) is voor vrijwel elke pc de goede keuze; 32/48 alleen op een zeer snelle pc zonder galm.",
+    "background_channels_title": "Audio-uitgang bijgeluiden",
+    "background_channels_hint": "Op welke uitgangen klinken de bijgeluiden en effectregisters. Standaard 1-2 (front L/R). Op surround-opstellingen waar de divisies op 3-4 of 5-6 staan, kies hier dezelfde uitgangen zodat je ze óók hoort.",
+    "background_channels_blower": "Motor",
+    "background_channels_ambient": "Omgevingsruis",
+    "background_channels_toys": "Effectregisters",
+    "background_channels_tremnoise": "Tremulantruis"
   },
   "perspectives": {
     "keep_loaded": "Alle posities in het geheugen houden",

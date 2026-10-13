@@ -305,7 +305,13 @@
     "polyphony_default": "par défaut",
     "audio_buffer_fast_pc": "uniquement pour PC très rapides",
     "audio_buffer_recommended": "recommandé",
-    "audio_buffer_hint": "Plus petit = moins de latence, mais le thread audio doit effectuer tout le travail d'un changement de jeu ou de crescendo dans ce laps de temps. 128 frames (2,7 ms) convient à presque tous les PC ; 32/48 seulement sur un PC très rapide sans réverbération."
+    "audio_buffer_hint": "Plus petit = moins de latence, mais le thread audio doit effectuer tout le travail d'un changement de jeu ou de crescendo dans ce laps de temps. 128 frames (2,7 ms) convient à presque tous les PC ; 32/48 seulement sur un PC très rapide sans réverbération.",
+    "background_channels_title": "Sortie audio des sons d’ambiance",
+    "background_channels_hint": "Sur quelles sorties les sons d’ambiance et registres d’effets sont joués. 1-2 par défaut (avant G/D). Sur une installation surround avec les divisions sur 3-4 ou 5-6, choisissez les mêmes sorties ici.",
+    "background_channels_blower": "Soufflerie",
+    "background_channels_ambient": "Ambiance",
+    "background_channels_toys": "Registres d’effets",
+    "background_channels_tremnoise": "Bruit du tremolo"
   },
   "perspectives": {
     "keep_loaded": "Garder toutes les positions en mémoire",

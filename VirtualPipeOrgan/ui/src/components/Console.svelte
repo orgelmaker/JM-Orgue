@@ -2187,6 +2187,37 @@
     else dispatch('scanFolder', id);
   }
   function isChannelSelected(div, ch) { return getDivisionChannels(div).includes(ch); }
+
+  // Audio-uitgangen per bijgeluid-soort (0.8.82): 0=motor, 1=omgevingsruis,
+  // 2=effectregisters, 3=tremulantruis. Standaard [0,1] = front L/R.
+  // Op surround-opstellingen waar de divisies naar 3+4 of 5+6 gaan, kon
+  // de organist bijgeluiden en effectregisters niet horen — ze gingen hard
+  // naar 0/1. Deze schakels worden per orgel opgeslagen.
+  let backgroundChannels = [[0,1],[0,1],[0,1],[0,1]];
+  async function haalBackgroundChannels() {
+    try {
+      const arr = await invoke('get_background_channels');
+      if (Array.isArray(arr) && arr.length === 4) {
+        backgroundChannels = arr.map(x => Array.isArray(x) && x.length ? x : [0, 1]);
+      }
+    } catch (e) {}
+  }
+  $: if (organInfo?.id) haalBackgroundChannels();
+  function isBgChannelSelected(kind, ch) { return (backgroundChannels[kind] || [0,1]).includes(ch); }
+  function toggleBgChannel(kind, ch) {
+    let list = (backgroundChannels[kind] || [0,1]).slice();
+    if (list.includes(ch)) list = list.filter(x => x !== ch);
+    else { list.push(ch); list.sort((a, b) => a - b); }
+    if (list.length === 0) list = [0, 1];
+    backgroundChannels[kind] = list;
+    backgroundChannels = backgroundChannels;
+    invoke('set_background_channels', { kind, channels: list })
+      .then(() => dispatch('refreshMidiMappings'))
+      .catch((e) => console.error('set_background_channels:', e));
+  }
+  $: heeftAmbient = (organInfo?.background_sounds || []).some(b => b.kind === 'ambient');
+  $: heeftToys = (organInfo?.background_sounds || []).some(b => b.kind === 'toy');
+  $: heeftTremulantNoise = (organInfo?.background_sounds || []).some(b => b.kind === 'tremulant_noise');
   function toggleDivisionChannel(div, ch) {
     let list = getDivisionChannels(div).slice();
     if (list.includes(ch)) list = list.filter(x => x !== ch);
@@ -7102,6 +7133,36 @@
                   </div>
                 </div>
               {/each}
+
+              <!-- Audio-uitgangen per bijgeluid-soort (0.8.82). Alleen rijen
+                   voor soorten die in de set voorkomen. Zonder keuze = kanalen
+                   1-2 (front L/R), net als vroeger. -->
+              {#if audioChannelCount >= 2 && (heeftBlower || heeftAmbient || heeftToys || heeftTremulantNoise)}
+                <div class="midi-mapping-header" style="margin-top: 1.5rem;">
+                  <h3>{$t('settings.background_channels_title')}</h3>
+                </div>
+                <p class="settings-hint" style="margin: 0 0 0.4rem;">{$t('settings.background_channels_hint')}</p>
+                {#each [
+                  { kind: 0, show: heeftBlower, label: $t('settings.background_channels_blower') },
+                  { kind: 1, show: heeftAmbient, label: $t('settings.background_channels_ambient') },
+                  { kind: 2, show: heeftToys, label: $t('settings.background_channels_toys') },
+                  { kind: 3, show: heeftTremulantNoise, label: $t('settings.background_channels_tremnoise') },
+                ].filter(r => r.show) as row (row.kind)}
+                  <div class="swell-config-row">
+                    <span class="swell-config-label">{row.label}</span>
+                    <div style="display:flex; flex-wrap:wrap; gap:0.25rem; flex:1;">
+                      {#each Array(audioChannelCount) as _, ch}
+                        {@const on = isBgChannelSelected(row.kind, ch)}
+                        <label class="ch-chip" class:on title="{channelLabel(ch, audioChannelCount)}">
+                          <input type="checkbox" checked={on} on:change={() => toggleBgChannel(row.kind, ch)} />
+                          <span>{ch + 1}</span>
+                        </label>
+                      {/each}
+                    </div>
+                    <span class="swell-config-value">{audioChannelCount}ch</span>
+                  </div>
+                {/each}
+              {/if}
 
               <!-- Doorlopend klavier -->
               <label class="swell-toggle" style="margin-top:1rem;" title={$t('settings.continuous_keyboard_title')}>

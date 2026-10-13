@@ -1557,6 +1557,12 @@ pub struct AppState {
     /// Vogelsang, Cuculus en soortgelijke). Standaard allemaal uit; de UI
     /// toont ze als knoppen in de werkbalk.
     pub toys_active: Arc<RwLock<std::collections::HashMap<String, bool>>>,
+    /// Audio-uitgangskanalen per bijgeluid-soort (0.8.82). Index 0=motor,
+    /// 1=omgevingsruis, 2=effectregisters, 3=tremulantruis. Standaard [0,1]
+    /// (front L/R). Op surround-opstellingen waar de divisies naar 3+4 of
+    /// 5+6 gaan, kon de organist bijgeluiden en effectregisters niet horen —
+    /// ze gingen hard naar 0/1. Deze keuze wordt per orgel opgeslagen.
+    pub background_channels: Arc<RwLock<[Vec<u16>; 4]>>,
     /// Toetsmechaniek (0.7.102): aan = de aanslag-klik van elk klavier wordt
     /// afgespeeld bij elke MIDI NoteOn. Standaard uit vanwege het geheugen
     /// (per sampleset tot tientallen megabytes aan WAV's). Als de gebruiker
@@ -1924,6 +1930,9 @@ impl AppState {
             background_gain: Arc::new(RwLock::new(0.3)),
             blower_active: Arc::new(RwLock::new(true)),
             toys_active: Arc::new(RwLock::new(std::collections::HashMap::new())),
+            background_channels: Arc::new(RwLock::new([
+                vec![0, 1], vec![0, 1], vec![0, 1], vec![0, 1],
+            ])),
             toetsmechaniek_aan: Arc::new(RwLock::new(false)),
             misc_cc_bindings: Arc::new(RwLock::new(Vec::new())),
             misc_cc_learning: Arc::new(RwLock::new(None)),

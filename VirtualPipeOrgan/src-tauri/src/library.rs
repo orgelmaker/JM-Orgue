@@ -497,6 +497,11 @@ pub struct OrganSettings {
     /// (via `SetToyActive`), zodat de registratie herneemt.
     #[serde(default)]
     pub toys_active: std::collections::HashMap<String, bool>,
+    /// Audio-uitgangskanalen per bijgeluid-soort (0.8.82): index 0=motor,
+    /// 1=omgevingsruis, 2=effectregisters, 3=tremulantruis. Leeg = standaard
+    /// [0,1] (front L/R).
+    #[serde(default)]
+    pub background_channels: Vec<Vec<u16>>,
     /// Toetsmechaniek aan voor dít orgel (0.7.102). Standaard false.
     #[serde(default)]
     pub toetsmechaniek_aan: Option<bool>,

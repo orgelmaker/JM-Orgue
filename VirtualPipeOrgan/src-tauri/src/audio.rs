@@ -875,6 +875,9 @@ pub enum AudioCommand {
     SetBlowerActive(bool),
     /// Speelgoedregister aan of uit (0.7.98): per naam, bv. "Cymbelstern".
     SetToyActive { name: String, active: bool },
+    /// Audio-uitgangen per bijgeluid-soort (0.8.82): 0=Blower (motor),
+    /// 1=Ambient (omgevingsruis), 2=Toy (effectregisters), 3=TremulantNoise.
+    SetBackgroundChannels { kind: u8, channels: Vec<u16> },
     /// Register-klikgeluiden (0.7.99): per internal_stop_id een paar
     /// (attack-sample, release-sample) + de bron-samplerate per paar.
     RegisterStopClicks(Arc<HashMap<u32, StopClickBuffers>>),
@@ -4307,6 +4310,19 @@ fn run_audio_thread(
                     AudioCommand::SetToyActive { name, active } => {
                         bg_engine.set_toy(&name, active);
                         info!("Speelgoedregister '{}': {}", name, if active { "aan" } else { "uit" });
+                    }
+                    AudioCommand::SetBackgroundChannels { kind, channels } => {
+                        use vpo_sampler::grandorgue::BackgroundSoundKind as K;
+                        let k = match kind {
+                            0 => K::Blower,
+                            1 => K::Ambient,
+                            2 => K::Toy,
+                            3 => K::TremulantNoise,
+                            _ => continue,
+                        };
+                        let shown = channels.clone();
+                        bg_engine.set_channels_for_kind(k, channels);
+                        info!("Bijgeluid-routing {:?}: kanalen {:?}", k, shown);
                     }
                     AudioCommand::RegisterStopClicks(map) => {
                         let n = map.len();

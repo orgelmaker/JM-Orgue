@@ -62,6 +62,20 @@ pub(crate) struct ActiveVoice {
     pub target_gain: f32,
 }
 
+/// Vier soorten achtergrondgeluiden; vaste volgorde voor de routing-array.
+/// Zelfde volgorde als `BackgroundSoundKind`-indexer in `kind_index()`.
+pub const BG_KIND_COUNT: usize = 4;
+
+#[inline]
+pub(crate) fn kind_index(kind: BackgroundSoundKind) -> usize {
+    match kind {
+        BackgroundSoundKind::Blower => 0,
+        BackgroundSoundKind::Ambient => 1,
+        BackgroundSoundKind::Toy => 2,
+        BackgroundSoundKind::TremulantNoise => 3,
+    }
+}
+
 /// Beheert alle doorlopende achtergrondgeluiden. Leeft in de audio-thread.
 pub(crate) struct BackgroundEngine {
     voices: Vec<ActiveVoice>,
@@ -74,6 +88,15 @@ pub(crate) struct BackgroundEngine {
     pub global_gain: f32,
     /// Motor-knop: true = blower-voices actief, false = fade-uit.
     pub blower_active: bool,
+    /// Routing per soort (0.8.82): welke output-kanalen krijgen deze bijgeluid-
+    /// soort? Standaard [0, 1] = front L/R, net als voor 0.8.82. Op surround-
+    /// opstellingen waar de divisies naar 3+4 of 5+6 gaan, kon de organist
+    /// de bijgeluiden en effectregisters niet horen — die gingen hard naar 0/1.
+    /// Nu per soort instelbaar: Motor, Omgevingsruis, Effectregisters, Tremulantruis.
+    /// `one_shots` (registerklikken) blijven standaard op [0,1]; die horen bij
+    /// de divisie van hun register en zouden eigenlijk mee moeten, maar dat is
+    /// een aparte stap. Zonder opgegeven kanalen = front-paar.
+    pub channels_per_kind: [Vec<u16>; BG_KIND_COUNT],
 }
 
 impl BackgroundEngine {
@@ -85,7 +108,17 @@ impl BackgroundEngine {
             // als een organist voor het eerst een set met motor-geluid laadt.
             global_gain: 0.3,
             blower_active: true,
+            channels_per_kind: [
+                vec![0, 1], vec![0, 1], vec![0, 1], vec![0, 1],
+            ],
         }
+    }
+
+    /// Routing per soort instellen (0.8.82). `channels` leeg of ongeldig →
+    /// terug naar [0, 1].
+    pub fn set_channels_for_kind(&mut self, kind: BackgroundSoundKind, mut channels: Vec<u16>) {
+        if channels.is_empty() { channels = vec![0, 1]; }
+        self.channels_per_kind[kind_index(kind)] = channels;
     }
 
     /// Speel een registermechaniek-klik eenmalig af (0.7.99). De voice wordt
@@ -170,24 +203,122 @@ impl BackgroundEngine {
     }
 
     /// Meng direct in de INTERLEAVED output van cpal: elk frame bestaat uit
-    /// `channels` samples; kanaal 0 krijgt L en kanaal 1 krijgt R (de
-    /// gebruikelijke front-stereo-paring in surround). Bijgeluiden klinken
-    /// buiten alle divisies en de galm om; ze gaan rechtstreeks naar de
-    /// hoofduitgang en volgen de master-limiter niet. Overloopen de hoofduit-
-    /// gang + bijgeluid >1.0, dan clampt de clamping-stap aan het eind van
-    /// de callback (`frame.clamp(-1.0, 1.0)`) hem alsnog netjes.
+    /// `channels` samples. Voor elk voice-soort (motor / omgevingsruis /
+    /// effectregister / tremulantruis) gelden eigen uitgangskanalen
+    /// (`channels_per_kind`, standaard [0, 1] = front L/R). Zo kunnen
+    /// bijgeluiden en effectregisters op surround-opstellingen daar klinken
+    /// waar de organist ze wíl — meestal het front-paar, maar op een opstelling
+    /// met één monitor voor de speeltafel bijvoorbeeld kanaal 3+4.
+    /// Registerklikken (one_shots) delen de routing van hun eigen voice-kind
+    /// (Toy = effectregister-klik, enz.); dat voorkomt dat je ze alleen op
+    /// front hoort terwijl de effectregisters elders klinken.
+    /// Bijgeluiden lopen buiten de master-limiter om; de clamping-stap aan
+    /// het eind van de callback (`frame.clamp(-1.0, 1.0)`) begrenst wat we
+    /// hier bijtellen alsnog.
     pub fn mix_interleaved(&mut self, data: &mut [f32], start_frame: usize, frames: usize, channels: usize) {
         if !self.is_actief() || channels == 0 { return; }
+        let gg = self.global_gain;
+        // Lokale buffer om per kind L/R te verzamelen vóór we naar de output
+        // schrijven. Vier kinds × (L, R).
+        let max_chan = channels;
         for i in 0..frames {
             let base = (start_frame + i) * channels;
-            if base + 1 >= data.len() { break; }
-            let (l, r) = self.volgende_sample();
-            // De clamp van de hoofdketen zit vóór deze mix (per frame, in de
-            // callback); hier dus zelf begrenzen, anders kan een f32-uitgang
-            // (WASAPI/ASIO float) boven ±1.0 uitkomen — hoorbaar als harde
-            // clip of wrap bij sommige drivers.
-            data[base] = (data[base] + l).clamp(-1.0, 1.0);
-            if channels > 1 { data[base + 1] = (data[base + 1] + r).clamp(-1.0, 1.0); }
+            if base >= data.len() { break; }
+            let mut per_kind: [(f32, f32); BG_KIND_COUNT] = [(0.0, 0.0); BG_KIND_COUNT];
+
+            // Doorlopende voices.
+            for v in &mut self.voices {
+                let len_l = v.voice.data_l.len();
+                if len_l == 0 { continue; }
+                let effectief_doel = v.target_gain * v.voice.voice_gain * gg;
+                let fade_step = (v.voice.voice_gain * gg) / FADE_FRAMES.max(1.0);
+                if (v.current_gain - effectief_doel).abs() < fade_step {
+                    v.current_gain = effectief_doel;
+                } else if v.current_gain < effectief_doel {
+                    v.current_gain += fade_step;
+                } else {
+                    v.current_gain -= fade_step;
+                }
+                let rate = v.voice.rate;
+                if v.current_gain > 0.0 || effectief_doel > 0.0 {
+                    let p = v.pos;
+                    let p0 = p.floor() as usize % len_l;
+                    let p1 = (p0 + 1) % len_l;
+                    let frac = (p - p.floor()) as f32;
+                    let sl = v.voice.data_l[p0] * (1.0 - frac) + v.voice.data_l[p1] * frac;
+                    let sr = match v.voice.data_r.as_ref() {
+                        Some(r) if !r.is_empty() => {
+                            let len_r = r.len();
+                            let r0 = p0 % len_r;
+                            let r1 = (r0 + 1) % len_r;
+                            r[r0] * (1.0 - frac) + r[r1] * frac
+                        }
+                        _ => sl,
+                    };
+                    let k = kind_index(v.voice.kind);
+                    per_kind[k].0 += sl * v.current_gain;
+                    per_kind[k].1 += sr * v.current_gain;
+                }
+                v.pos += rate;
+                if v.pos >= len_l as f64 {
+                    v.pos -= len_l as f64;
+                }
+            }
+
+            // One-shots: eenmalig; delen de routing van hun kind.
+            for v in &mut self.one_shots {
+                let len_l = v.voice.data_l.len();
+                if len_l == 0 { continue; }
+                let rate = v.voice.rate;
+                if v.pos < len_l as f64 {
+                    let p = v.pos;
+                    let p0 = p.floor() as usize;
+                    if p0 >= len_l { v.pos = len_l as f64; continue; }
+                    let p1 = (p0 + 1).min(len_l - 1);
+                    let frac = (p - p.floor()) as f32;
+                    let sl = v.voice.data_l[p0] * (1.0 - frac) + v.voice.data_l[p1] * frac;
+                    let sr = match v.voice.data_r.as_ref() {
+                        Some(r) if r.len() > p1 => r[p0] * (1.0 - frac) + r[p1] * frac,
+                        _ => sl,
+                    };
+                    let k = kind_index(v.voice.kind);
+                    per_kind[k].0 += sl * v.current_gain;
+                    per_kind[k].1 += sr * v.current_gain;
+                    v.pos += rate;
+                }
+            }
+
+            // Schrijven: per kind naar z'n eigen kanalenlijst. 1 kanaal =
+            // mono-mix (L+R)/2; 2 of meer = eerste twee als stereo-paar en
+            // volgende als duplicaat van het stereo-signaal (zelden gebruikt).
+            for (k, (l, r)) in per_kind.iter().enumerate() {
+                if *l == 0.0 && *r == 0.0 { continue; }
+                let chans = &self.channels_per_kind[k];
+                if chans.is_empty() {
+                    // Mag niet voorkomen (set_channels_for_kind clampt), maar
+                    // zekerheidshalve naar [0, 1].
+                    let a = base;
+                    let b = base + 1;
+                    if a < data.len() { data[a] = (data[a] + *l).clamp(-1.0, 1.0); }
+                    if b < data.len() && max_chan > 1 { data[b] = (data[b] + *r).clamp(-1.0, 1.0); }
+                    continue;
+                }
+                if chans.len() == 1 {
+                    let c = chans[0] as usize;
+                    let a = base + c;
+                    if c < max_chan && a < data.len() {
+                        let m = (*l + *r) * 0.5;
+                        data[a] = (data[a] + m).clamp(-1.0, 1.0);
+                    }
+                } else {
+                    let c0 = chans[0] as usize;
+                    let c1 = chans[1] as usize;
+                    let a = base + c0;
+                    let b = base + c1;
+                    if c0 < max_chan && a < data.len() { data[a] = (data[a] + *l).clamp(-1.0, 1.0); }
+                    if c1 < max_chan && b < data.len() { data[b] = (data[b] + *r).clamp(-1.0, 1.0); }
+                }
+            }
         }
         // Afgespeelde one-shots opruimen (0.7.99): pos is doorgaans ≥ len.
         self.one_shots.retain(|v| v.pos < v.voice.data_l.len() as f64);

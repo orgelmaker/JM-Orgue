@@ -305,7 +305,13 @@
     "polyphony_default": "predeterminado",
     "audio_buffer_fast_pc": "solo para PC muy rápidos",
     "audio_buffer_recommended": "recomendado",
-    "audio_buffer_hint": "Más pequeño = menos retardo, pero el hilo de audio debe hacer en ese tiempo todo el trabajo de un cambio de registro o de crescendo. 128 frames (2,7 ms) es la opción acertada para casi cualquier PC; 32/48 solo en un PC muy rápido y sin reverberación."
+    "audio_buffer_hint": "Más pequeño = menos retardo, pero el hilo de audio debe hacer en ese tiempo todo el trabajo de un cambio de registro o de crescendo. 128 frames (2,7 ms) es la opción acertada para casi cualquier PC; 32/48 solo en un PC muy rápido y sin reverberación.",
+    "background_channels_title": "Salida de audio de sonidos de fondo",
+    "background_channels_hint": "En qué salidas suenan los sonidos de fondo y los registros de efectos. Por defecto 1-2 (frontal I/D). En instalaciones surround con las divisiones en 3-4 o 5-6, elija las mismas salidas aquí.",
+    "background_channels_blower": "Motor",
+    "background_channels_ambient": "Ambiente",
+    "background_channels_toys": "Registros de efectos",
+    "background_channels_tremnoise": "Ruido del trémolo"
   },
   "perspectives": {
     "keep_loaded": "Mantener todas las posiciones en memoria",

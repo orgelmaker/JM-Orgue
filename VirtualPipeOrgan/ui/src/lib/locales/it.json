@@ -305,7 +305,13 @@
     "polyphony_default": "predefinito",
     "audio_buffer_fast_pc": "solo per PC molto veloci",
     "audio_buffer_recommended": "consigliato",
-    "audio_buffer_hint": "Più piccolo = meno ritardo, ma il thread audio deve svolgere in quel tempo tutto il lavoro di un cambio di registro o di crescendo. 128 frame (2,7 ms) è la scelta giusta per quasi ogni PC; 32/48 solo su un PC molto veloce senza riverbero."
+    "audio_buffer_hint": "Più piccolo = meno ritardo, ma il thread audio deve svolgere in quel tempo tutto il lavoro di un cambio di registro o di crescendo. 128 frame (2,7 ms) è la scelta giusta per quasi ogni PC; 32/48 solo su un PC molto veloce senza riverbero.",
+    "background_channels_title": "Uscita audio suoni di sottofondo",
+    "background_channels_hint": "Su quali uscite vengono riprodotti i suoni di sottofondo e i registri di effetti. Predefinito 1-2 (fronte S/D). In impianti surround con i corpi sulle uscite 3-4 o 5-6, scegliere qui le stesse uscite.",
+    "background_channels_blower": "Motore",
+    "background_channels_ambient": "Ambiente",
+    "background_channels_toys": "Registri degli effetti",
+    "background_channels_tremnoise": "Rumore del tremolo"
   },
   "perspectives": {
     "keep_loaded": "Tenere tutte le posizioni in memoria",

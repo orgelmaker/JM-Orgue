@@ -5,6 +5,19 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.8.82] - 2026-10-13
+
+### Audio-uitgangen per bijgeluid en effectregister
+- Bijgeluiden (motor, omgevingsruis), effectregisters (Cymbelstern,
+  Vogelsang, Cuculus …) en tremulantruis gingen altijd naar kanalen 1-2
+  (front L/R), hard. Op surround-opstellingen met de werken op 3-4 of
+  5-6 hoorde de organist deze geluiden niet. Vanaf nu is per soort een
+  eigen uitgangs-selectie beschikbaar: Algemene instellingen → MIDI →
+  "Audio-uitgang bijgeluiden" (één rij per aanwezige soort). Standaard
+  blijft [1,2]; de keuze wordt per orgel opgeslagen. Registerklikken van
+  effectregisters delen de routing van de effectregister-soort, zodat
+  ze op dezelfde speaker klinken als de knop zelf.
+
 ## [0.8.81] - 2026-10-13
 
 ### Motor-sleutel: alleen hoofdscherm en echt uit

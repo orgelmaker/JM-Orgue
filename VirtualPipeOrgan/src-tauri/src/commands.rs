@@ -1364,6 +1364,25 @@ pub fn get_toys_active(state: State<AppState>) -> std::collections::HashMap<Stri
     state.toys_active.read().clone()
 }
 
+/// Audio-uitgangen per bijgeluid-soort (0.8.82). kind:
+/// 0=motor (blower), 1=omgevingsruis (ambient), 2=effectregisters (toy),
+/// 3=tremulantruis. `channels` is 0-gebaseerde kanaalindexen (meestal [0,1]
+/// voor front L/R; op surround-opstellingen kies je bv. [2,3]). Leeg of
+/// ongeldig valt terug op [0,1]. Wordt per orgel opgeslagen.
+#[tauri::command]
+pub fn set_background_channels(state: State<AppState>, kind: u8, channels: Vec<u16>) -> Result<(), String> {
+    if kind as usize >= 4 { return Err("Onbekend bijgeluid-soort".into()); }
+    let kept = if channels.is_empty() { vec![0, 1] } else { channels.clone() };
+    state.background_channels.write()[kind as usize] = kept.clone();
+    state.send_audio_command(AudioCommand::SetBackgroundChannels { kind, channels: kept });
+    Ok(())
+}
+
+#[tauri::command]
+pub fn get_background_channels(state: State<AppState>) -> [Vec<u16>; 4] {
+    state.background_channels.read().clone()
+}
+
 /// Live volume van een perspectief in dB.
 #[tauri::command]
 pub fn set_perspective_gain(state: State<AppState>, name: String, gain_db: f32) -> Result<(), String> {
@@ -8988,6 +9007,24 @@ fn restore_organ_settings(state: &AppState, organ_id: &str) {
     // ongedaan maakt), maar is per orgel-laad leeg.
     state.toys_active.write().clear();
 
+    // Audio-routing per bijgeluid-soort (0.8.82): opgeslagen kanalenlijst
+    // per orgel terug naar de state én naar de audio-engine. Alleen voor
+    // indexen 0..=3 (motor/omgeving/effect/trem); leeg of ongeldig valt
+    // terug op [0, 1] = front L/R.
+    {
+        let mut live = state.background_channels.write();
+        for i in 0..4usize {
+            let kept = settings
+                .background_channels
+                .get(i)
+                .cloned()
+                .filter(|v| !v.is_empty())
+                .unwrap_or_else(|| vec![0, 1]);
+            live[i] = kept.clone();
+            state.send_audio_command(AudioCommand::SetBackgroundChannels { kind: i as u8, channels: kept });
+        }
+    }
+
     // Toetsmechaniek (0.7.102) uit de opgeslagen settings terug. Vraagt
     // geen herladen hier: de settings worden tijdens de load aangeroepen,
     // dus `laad_en_stuur_toetsmechaniek` loopt eroverheen.
@@ -9701,6 +9738,7 @@ pub fn do_save_organ_settings(state: &AppState, presets: HashMap<String, PresetD
         background_gain: Some(*state.background_gain.read()),
         blower_active: Some(*state.blower_active.read()),
         toys_active: std::collections::HashMap::new(), // 0.8.80: niet opslaan; effectregisters starten altijd uit.
+        background_channels: state.background_channels.read().iter().cloned().collect(), // 0.8.82
         toetsmechaniek_aan: Some(*state.toetsmechaniek_aan.read()),
         misc_cc_bindings: crate::state::MISC_CC_BINDINGS().read().clone(),
         extra_couplers: state.extra_coupler_ids.read().clone(),
