@@ -53,7 +53,7 @@ pub(crate) struct RtOverloop {
 /// NoteOn van dezelfde pijp zijn NoteOff kwijtraken (hanger).
 struct RtOverloopBinnen {
     buf: std::collections::VecDeque<AudioCommand>,
-    weggelaten: std::collections::BTreeMap<(u32, u32), u32>,
+    weggelaten: std::collections::BTreeMap<(u32, u32, i8), u32>,
 }
 
 impl RtOverloopBinnen {
@@ -61,10 +61,10 @@ impl RtOverloopBinnen {
     /// `true` = dit commando vervalt (NoteOff van een nooit gestarte noot).
     fn verrekent(&mut self, cmd: &AudioCommand) -> bool {
         match cmd {
-            AudioCommand::NoteOff { stop_id, pipe_num } => {
-                if let Some(n) = self.weggelaten.get_mut(&(*stop_id, *pipe_num)) {
+            AudioCommand::NoteOff { stop_id, pipe_num, verschuiving } => {
+                if let Some(n) = self.weggelaten.get_mut(&(*stop_id, *pipe_num, *verschuiving)) {
                     *n -= 1;
-                    if *n == 0 { self.weggelaten.remove(&(*stop_id, *pipe_num)); }
+                    if *n == 0 { self.weggelaten.remove(&(*stop_id, *pipe_num, *verschuiving)); }
                     return true;
                 }
                 false
@@ -141,8 +141,8 @@ impl RtOverloop {
     fn bewaar(&self, b: &mut RtOverloopBinnen, cmd: AudioCommand, grens: usize) {
         use std::sync::atomic::Ordering::Relaxed;
         if b.buf.len() >= grens {
-            if let AudioCommand::NoteOn { stop_id, pipe_num, .. } = cmd {
-                *b.weggelaten.entry((stop_id, pipe_num)).or_insert(0) += 1;
+            if let AudioCommand::NoteOn { stop_id, pipe_num, verschuiving, .. } = cmd {
+                *b.weggelaten.entry((stop_id, pipe_num, verschuiving)).or_insert(0) += 1;
                 let n = self.noteon_weggelaten.fetch_add(1, Relaxed) + 1;
                 RT_DROP_COUNT.fetch_add(1, Relaxed);
                 if n == 1 || n % 1000 == 0 {
@@ -775,20 +775,33 @@ pub fn misc_cc_waarde_omzetten(target: MiscCcTarget, cc_val: u8) -> f32 {
     }
 }
 
-/// Pijpnummer (1-based) voor een klinkende noot binnen het bereik van een
-/// register, of None als die pijp er niet is. Met `uitgebreid` wordt de noot
-/// per octaaf het bereik in gevouwen.
+/// Grootste toonverschuiving (halve tonen) waarmee het doorlopende klavier
+/// een ontbrekende pijp nog aanvult. Twee octaven dekt elk gangbaar klavier
+/// (88 toetsen op een 56-toons set) en houdt de afspeelsnelheid binnen wat
+/// de interpolatie netjes aankan.
+pub(crate) const DOORLOPEND_MAX_VERSCHUIVING: i32 = 24;
+
+/// Pijpnummer (1-based) plus toonverschuiving (halve tonen) voor een
+/// klinkende noot. Binnen het bereik van het register is de verschuiving 0.
+/// Met `uitgebreid` (doorlopend klavier, 0.8.4) krijgt een toets buiten het
+/// bereik de DICHTSTBIJZIJNDE pijp, verschoven naar de echte toonhoogte: de
+/// hoogste pijp iets omhoog, de laagste iets omlaag. Tot 0.8.3 vouwde dit per
+/// octaaf terug, waardoor zo'n toets een octaaf te laag of te hoog klonk.
+/// Verder dan `DOORLOPEND_MAX_VERSCHUIVING` zwijgt de toets.
 ///
 /// NoteOn en NoteOff MOETEN hier hetzelfde uitkomen, anders blijft een noot
 /// hangen. Daarom één functie voor alle plekken in de notenroute.
-pub(crate) fn pijp_voor_noot(noot: u32, eerste: u32, laatste: u32, uitgebreid: bool) -> Option<u32> {
+pub(crate) fn pijp_voor_noot(noot: u32, eerste: u32, laatste: u32, uitgebreid: bool) -> Option<(u32, i8)> {
     if laatste < eerste { return None; }
-    let mut n = noot;
-    if uitgebreid {
-        while n < eerste { n += 12; }
-        while n > laatste { n = n.checked_sub(12)?; }
-    }
-    if n >= eerste && n <= laatste { Some(n - eerste + 1) } else { None }
+    if noot >= eerste && noot <= laatste { return Some((noot - eerste + 1, 0)); }
+    if !uitgebreid { return None; }
+    let (pijp, verschuiving) = if noot < eerste {
+        (1, noot as i32 - eerste as i32)
+    } else {
+        (laatste - eerste + 1, noot as i32 - laatste as i32)
+    };
+    if verschuiving.abs() > DOORLOPEND_MAX_VERSCHUIVING { return None; }
+    Some((pijp, verschuiving as i8))
 }
 
 /// Zwelstand 0..1 uit een ruwe CC-waarde en het ingestelde bereik (min/max
@@ -3565,7 +3578,7 @@ impl AppState {
 
                             // Check if the note is within this stop's range
                             let transposed_u32 = transposed_note as u32;
-                            if let Some(pipe_num) = pijp_voor_noot(transposed_u32, stop_first_midi, stop_last_midi, doorlopend_klavier()) {
+                            if let Some((pipe_num, verschuiving)) = pijp_voor_noot(transposed_u32, stop_first_midi, stop_last_midi, doorlopend_klavier()) {
                                 let vel_f = velocity as f32 / 127.0;
 
                                 tracing::trace!("Playing stop={} '{}', note={}, pipe={}, range={}-{}",
@@ -3577,6 +3590,7 @@ impl AppState {
                                     pipe_num,
                                     midi_note: transposed_note,
                                     velocity: vel_f,
+                                    verschuiving,
                                 });
                             }
                         }
@@ -3638,13 +3652,14 @@ impl AppState {
                                         let s_first = stop.first_midi_note as u32;
                                         let s_last = stop.last_midi_note as u32;
                                         let t = coupled_note as u32;
-                                        if let Some(pipe_num) = pijp_voor_noot(t, s_first, s_last, doorlopend_klavier()) {
+                                        if let Some((pipe_num, verschuiving)) = pijp_voor_noot(t, s_first, s_last, doorlopend_klavier()) {
                                             let vel_f = velocity as f32 / 127.0;
                                             rt_send(&cmd_tx, AudioCommand::NoteOn {
                                                 stop_id: stop.internal_stop_id,
                                                 pipe_num,
                                                 midi_note: coupled_note,
                                                 velocity: vel_f,
+                                                verschuiving,
                                             });
                                         }
                                     }
@@ -3709,11 +3724,12 @@ impl AppState {
                         let stop_last_midi = stop.last_midi_note as u32;
 
                         let transposed_u32 = transposed_note as u32;
-                        if let Some(pipe_num) = pijp_voor_noot(transposed_u32, stop_first_midi, stop_last_midi, doorlopend_klavier()) {
+                        if let Some((pipe_num, verschuiving)) = pijp_voor_noot(transposed_u32, stop_first_midi, stop_last_midi, doorlopend_klavier()) {
 
                             rt_send(&cmd_tx, AudioCommand::NoteOff {
                                 stop_id: stop.internal_stop_id,
                                 pipe_num,
+                                verschuiving,
                             });
                         }
                     }
@@ -3742,10 +3758,11 @@ impl AppState {
                                     let s_first = stop.first_midi_note as u32;
                                     let s_last = stop.last_midi_note as u32;
                                     let t = coupled_note as u32;
-                                    if let Some(pipe_num) = pijp_voor_noot(t, s_first, s_last, doorlopend_klavier()) {
+                                    if let Some((pipe_num, verschuiving)) = pijp_voor_noot(t, s_first, s_last, doorlopend_klavier()) {
                                         rt_send(&cmd_tx, AudioCommand::NoteOff {
                                             stop_id: stop.internal_stop_id,
                                             pipe_num,
+                                            verschuiving,
                                         });
                                     }
                                 }
@@ -4650,12 +4667,13 @@ impl AppState {
 
         let send_note_on = |note: u8, vel: u8| {
             let t = note as u32;
-            if let Some(pipe_num) = pijp_voor_noot(t, first, last, doorlopend_klavier()) {
+            if let Some((pipe_num, verschuiving)) = pijp_voor_noot(t, first, last, doorlopend_klavier()) {
                 rt_send(&tx, AudioCommand::NoteOn {
                     stop_id: stop.internal_stop_id,
                     pipe_num,
                     midi_note: note,
                     velocity: vel as f32 / 127.0,
+                    verschuiving,
                 });
             }
         };
@@ -4747,10 +4765,11 @@ impl AppState {
                 for stop in &dest_div.stops {
                     let s_first = stop.first_midi_note as u32;
                     let s_last = stop.last_midi_note as u32;
-                    if let Some(pipe_num) = pijp_voor_noot(t, s_first, s_last, doorlopend_klavier()) {
+                    if let Some((pipe_num, verschuiving)) = pijp_voor_noot(t, s_first, s_last, doorlopend_klavier()) {
                         rt_send(&tx, AudioCommand::NoteOff {
                             stop_id: stop.internal_stop_id,
                             pipe_num,
+                            verschuiving,
                         });
                     }
                 }
@@ -4781,12 +4800,13 @@ impl AppState {
                     if ta_active && stop.is_reed { continue; }
                     let s_first = stop.first_midi_note as u32;
                     let s_last = stop.last_midi_note as u32;
-                    if let Some(pipe_num) = pijp_voor_noot(t, s_first, s_last, doorlopend_klavier()) {
+                    if let Some((pipe_num, verschuiving)) = pijp_voor_noot(t, s_first, s_last, doorlopend_klavier()) {
                         rt_send(&tx, AudioCommand::NoteOn {
                             stop_id: stop.internal_stop_id,
                             pipe_num,
                             midi_note: t as u8,
                             velocity: vel as f32 / 127.0,
+                            verschuiving,
                         });
                     }
                 }
@@ -5429,8 +5449,8 @@ mod recording_tests {
 mod rt_overloop_tests {
     use super::*;
 
-    fn aan(n: u32) -> AudioCommand { AudioCommand::NoteOn { stop_id: 1, pipe_num: n, midi_note: 60, velocity: 1.0 } }
-    fn uit(n: u32) -> AudioCommand { AudioCommand::NoteOff { stop_id: 1, pipe_num: n } }
+    fn aan(n: u32) -> AudioCommand { AudioCommand::NoteOn { stop_id: 1, pipe_num: n, midi_note: 60, velocity: 1.0, verschuiving: 0 } }
+    fn uit(n: u32) -> AudioCommand { AudioCommand::NoteOff { stop_id: 1, pipe_num: n, verschuiving: 0 } }
     fn sleutel(c: &AudioCommand) -> (char, u32) {
         match c {
             AudioCommand::NoteOn { pipe_num, .. } => ('A', *pipe_num),
@@ -6416,7 +6436,7 @@ mod kort_octaaf_tests {
 
 #[cfg(test)]
 mod doorlopend_klavier_tests {
-    use super::pijp_voor_noot;
+    use super::{pijp_voor_noot, DOORLOPEND_MAX_VERSCHUIVING};
 
     // Een register van C2 (36) t/m G6 (91): 56 tonen, het gangbare bereik van
     // een historische sampleset.
@@ -6426,8 +6446,8 @@ mod doorlopend_klavier_tests {
     #[test]
     fn binnen_het_bereik_verandert_er_niets() {
         for n in EERSTE..=LAATSTE {
-            assert_eq!(pijp_voor_noot(n, EERSTE, LAATSTE, false), Some(n - EERSTE + 1));
-            assert_eq!(pijp_voor_noot(n, EERSTE, LAATSTE, true), Some(n - EERSTE + 1));
+            assert_eq!(pijp_voor_noot(n, EERSTE, LAATSTE, false), Some((n - EERSTE + 1, 0)));
+            assert_eq!(pijp_voor_noot(n, EERSTE, LAATSTE, true), Some((n - EERSTE + 1, 0)));
         }
     }
 
@@ -6438,26 +6458,37 @@ mod doorlopend_klavier_tests {
     }
 
     #[test]
-    fn aan_vouwt_per_octaaf_terug() {
-        // Vijf toetsen boven het bereik → een octaaf lager.
-        assert_eq!(pijp_voor_noot(96, EERSTE, LAATSTE, true), pijp_voor_noot(84, EERSTE, LAATSTE, true));
-        // Onder het bereik → een octaaf hoger.
-        assert_eq!(pijp_voor_noot(24, EERSTE, LAATSTE, true), pijp_voor_noot(36, EERSTE, LAATSTE, true));
-        // Ver erbuiten: net zo lang vouwen tot het past.
-        assert!(pijp_voor_noot(127, EERSTE, LAATSTE, true).is_some());
-        assert!(pijp_voor_noot(0, EERSTE, LAATSTE, true).is_some());
+    fn aan_neemt_de_dichtstbijzijnde_pijp_op_de_echte_toonhoogte() {
+        // Vijf toetsen boven het bereik → de hoogste pijp, vijf halve tonen
+        // omhoog verschoven (tot 0.8.3 klonk hier de pijp een octaaf lager).
+        assert_eq!(pijp_voor_noot(96, EERSTE, LAATSTE, true), Some((LAATSTE - EERSTE + 1, 5)));
+        // Een octaaf onder het bereik → de laagste pijp, een octaaf omlaag.
+        assert_eq!(pijp_voor_noot(24, EERSTE, LAATSTE, true), Some((1, -12)));
+        // Eén halve toon erbuiten: minimale verschuiving.
+        assert_eq!(pijp_voor_noot(92, EERSTE, LAATSTE, true), Some((56, 1)));
+        assert_eq!(pijp_voor_noot(35, EERSTE, LAATSTE, true), Some((1, -1)));
     }
 
     #[test]
-    fn de_gevouwen_pijp_houdt_dezelfde_toonnaam() {
-        // Vouwen mag alleen per heel octaaf: een gespeelde C moet een C blijven,
-        // anders klinkt er een verkeerde noot in plaats van een verkeerd octaaf.
+    fn de_verschuiving_klopt_met_de_gespeelde_toon() {
+        // Pijpnoot + verschuiving = gespeelde noot, voor elke toets die klinkt.
         for n in 0..=127u32 {
-            if let Some(pijp) = pijp_voor_noot(n, EERSTE, LAATSTE, true) {
-                let klinkend = EERSTE + pijp - 1;
-                assert_eq!(klinkend % 12, n % 12, "noot {} kwam uit op {}", n, klinkend);
+            if let Some((pijp, v)) = pijp_voor_noot(n, EERSTE, LAATSTE, true) {
+                let pijpnoot = (EERSTE + pijp - 1) as i32;
+                assert_eq!(pijpnoot + v as i32, n as i32, "toets {} → pijp {} met {}", n, pijp, v);
+                assert!(v.abs() as i32 <= DOORLOPEND_MAX_VERSCHUIVING);
             }
         }
+    }
+
+    #[test]
+    fn ver_buiten_het_bereik_zwijgt_de_toets() {
+        // Tot twee octaven verschuiven, daarboven stil (geen chipmunk-rate).
+        let grens = LAATSTE + DOORLOPEND_MAX_VERSCHUIVING as u32;
+        assert!(pijp_voor_noot(grens, EERSTE, LAATSTE, true).is_some());
+        assert_eq!(pijp_voor_noot(grens + 1, EERSTE, LAATSTE, true), None);
+        assert_eq!(pijp_voor_noot(127, EERSTE, LAATSTE, true), None);
+        assert_eq!(pijp_voor_noot(0, EERSTE, LAATSTE, true), None);
     }
 
     #[test]
@@ -6476,11 +6507,11 @@ mod doorlopend_klavier_tests {
 
     #[test]
     fn een_bereik_van_minder_dan_een_octaaf_loopt_niet_vast() {
-        // Een register van vijf tonen (60..64): vouwen komt dan vaak náást het
-        // bereik uit. Dat moet netjes None geven, geen eindeloze lus of paniek.
-        assert_eq!(pijp_voor_noot(60, 60, 64, true), Some(1));
-        assert_eq!(pijp_voor_noot(72, 60, 64, true), Some(1));  // een octaaf hoger
-        assert_eq!(pijp_voor_noot(67, 60, 64, true), None);     // valt tussen de octaven
+        // Een register van vijf tonen (60..64), zoals een losse discanthelft.
+        assert_eq!(pijp_voor_noot(60, 60, 64, true), Some((1, 0)));
+        assert_eq!(pijp_voor_noot(72, 60, 64, true), Some((5, 8)));
+        assert_eq!(pijp_voor_noot(67, 60, 64, true), Some((5, 3)));
+        assert_eq!(pijp_voor_noot(55, 60, 64, true), Some((1, -5)));
         for n in 0..=127u32 { let _ = pijp_voor_noot(n, 60, 64, true); }
     }
 }

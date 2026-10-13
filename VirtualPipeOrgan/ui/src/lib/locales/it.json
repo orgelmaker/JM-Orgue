@@ -262,7 +262,7 @@
     "autosave_hint": "Le impostazioni vengono salvate automaticamente nella cartella dell'organo e nell'app.",
     "midi_transpose_abbr": "Trasp",
     "continuous_keyboard": "Tastiera continua",
-    "continuous_keyboard_title": "I tasti fuori dall'estensione registrata di un registro suonano la canna un'ottava sopra o sotto invece di tacere. Una tastiera di 61 tasti suona così su un set di 56 note, come un organo con ottava acuta ripetuta.",
+    "continuous_keyboard_title": "I tasti fuori dall'estensione registrata di un registro suonano la canna più vicina, trasposta all'altezza giusta, invece di tacere. Così una tastiera di 61 tasti continua a suonare su un set di 56 note — fino a due ottave oltre l'estensione.",
     "short_octave": "Ottava corta",
     "short_octave_title": "Tastiera storica con l'ottava grave incompleta: il tasto che sembra mi suona do, fa diesis suona re e sol diesis suona mi. Lì mancano do diesis e re diesis.",
     "short_octave_needs_range": "Impara prima l'estensione della tastiera (o inserisci la nota più grave): senza il tasto più grave l'app non sa dove comincia l'ottava grave.",
@@ -559,7 +559,12 @@
     "motor_on": "Motore acceso",
     "motor_off": "Motore spento",
     "motor_title": "Motore dell'organo acceso/spento",
-    "midi_learn": "Apprendimento MIDI (il prossimo CC verrà collegato)"
+    "midi_learn": "Apprendimento MIDI (il prossimo CC verrà collegato)",
+    "toys": "Effetti",
+    "toys_to_division": "Mostrare i registri di effetto (cimbelstern, usignolo …) come tiranti nel manuale superiore",
+    "toys_to_toolbar": "Riportare i registri di effetto nella barra degli strumenti",
+    "motor_state_on": "on",
+    "motor_state_off": "off"
   },
   "speeltafel": {
     "show_bars": "Barre",

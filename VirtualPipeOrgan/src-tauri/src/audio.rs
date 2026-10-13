@@ -748,7 +748,10 @@ pub struct KeyboardClickBuffer {
 #[derive(Debug, Clone)]
 pub enum AudioCommand {
     /// Note on: (stop_id, pipe_num, midi_note, velocity)
-    NoteOn { stop_id: u32, pipe_num: u32, midi_note: u8, velocity: f32 },
+    /// `verschuiving`: halve tonen waarmee de pijp wordt verschoven (doorlopend
+    /// klavier, 0.8.4); 0 binnen het opgenomen bereik. Hoort bij de identiteit
+    /// van de stem: dezelfde pijp kan voor twee toetsen tegelijk klinken.
+    NoteOn { stop_id: u32, pipe_num: u32, midi_note: u8, velocity: f32, verschuiving: i8 },
     /// Toetsduur-afhankelijke releases (GrandOrgue MaxKeyPressTime, 0.7.26):
     /// per (stop, pijp) een oplopend gesorteerde lijst (max_ms, release-key-
     /// pipe_num); -1 = onbegrensd (default) en staat achteraan. NoteOff kiest
@@ -758,7 +761,7 @@ pub enum AudioCommand {
     /// niet loopen maar één keer uitklinken).
     RegisterPercussiveStops(std::collections::HashSet<u32>),
     /// Note off: (stop_id, pipe_num)
-    NoteOff { stop_id: u32, pipe_num: u32 },
+    NoteOff { stop_id: u32, pipe_num: u32, verschuiving: i8 },
     /// Laat ALLE klinkende pijpen van één register los (register weggetrokken
     /// tijdens het spelen). Eén commando i.p.v. een NoteOff per pijp: een
     /// preset-wissel die 20 registers wegtrekt zou anders >1000 berichten
@@ -965,6 +968,11 @@ pub(crate) struct PlayingVoice {
     /// (ii) het "onkoppelt"-effect waarbij één bron loslaten de pijp stilzet
     /// terwijl een andere bron nog vasthoudt.
     note_on_count: u32,
+    /// Toonverschuiving in halve tonen (doorlopend klavier, 0.8.4): de pijp
+    /// klinkt zoveel hoger of lager dan opgenomen. Onderdeel van de
+    /// stem-identiteit (zie NoteOn) en overgeërfd door release- en
+    /// crossfade-stemmen, anders zou de staart op de verkeerde toon klinken.
+    verschuiving: i8,
     /// Perspectief-gain-slot (0 = geen perspectief). Release- en crossfade-
     /// voices erven dit van de voice waaruit ze ontstaan, zodat de
     /// perspectief-gain niet wegvalt bij loslaten of een tremulant-wissel.
@@ -1017,6 +1025,7 @@ impl PlayingVoice {
             c_dev_a: 0.0,
             c_dev_cur: 0.0,
             note_on_count: 1,
+            verschuiving: 0,
             persp_slot: 0,
             pending_decay_frames: None,
             decay_end_age: None,
@@ -1055,6 +1064,7 @@ impl PlayingVoice {
             c_dev_a: 0.0,
             c_dev_cur: 0.0,
             note_on_count: 1,
+            verschuiving: 0,
             persp_slot: 0,
             pending_decay_frames: None,
             decay_end_age: None,
@@ -1131,6 +1141,7 @@ impl PlayingVoice {
             c_dev_a: 0.0,
             c_dev_cur: 0.0,
             note_on_count: 1,
+            verschuiving: 0,
             persp_slot: 0,
             pending_decay_frames: None,
             decay_end_age: None,
@@ -4085,7 +4096,7 @@ fn run_audio_thread(
                     continue;
                 }
                 match cmd {
-                    AudioCommand::NoteOn { stop_id, pipe_num, midi_note, velocity } => {
+                    AudioCommand::NoteOn { stop_id, pipe_num, midi_note, velocity, verschuiving } => {
                         // Fan-out over de lagen van deze stop (gestapelde ranks
                         // en ingeschakelde perspectieven, 0.7.38): één NoteOn
                         // → één voice per laag, elk onder zijn eigen laagsleutel.
@@ -4150,6 +4161,7 @@ fn run_audio_thread(
                             let mut voices_lock = voices_clone.write();
                             if let Some(v) = voices_lock.iter_mut().find(|v|
                                 v.stop_id == stop_id && v.pipe_num == key.1
+                                    && v.verschuiving == verschuiving
                                     && !v.releasing && !v.one_shot
                             ) {
                                 v.note_on_count = v.note_on_count.saturating_add(1);
@@ -4171,6 +4183,7 @@ fn run_audio_thread(
                             // Full sample available - instant playback
                             let mut voice = PlayingVoice::new_from_sample(sample.clone(), stop_id, key.1, midi_note, velocity);
                             voice.one_shot = one_shot;
+                            voice.verschuiving = verschuiving;
                             voice.persp_slot = slot;
                             let hoorbaar = persp_gain[(slot as usize) & (MAX_LAYERS - 1)] > 0.01;
                             voice.zet_wind(&pw, wind_div, hoorbaar);
@@ -4194,6 +4207,7 @@ fn run_audio_thread(
                                 // Start playing from preload buffer immediately
                                 let mut voice = PlayingVoice::new_from_preload(preload.clone(), stop_id, key.1, midi_note, velocity, sample_rate);
                                 voice.one_shot = one_shot;
+                                voice.verschuiving = verschuiving;
                                 voice.persp_slot = slot;
                                 let hoorbaar = persp_gain[(slot as usize) & (MAX_LAYERS - 1)] > 0.01;
                                 voice.zet_wind(&pw, wind_div, hoorbaar);
@@ -4342,7 +4356,7 @@ fn run_audio_thread(
                             }
                         }
                     }
-                    AudioCommand::NoteOff { stop_id, pipe_num } => {
+                    AudioCommand::NoteOff { stop_id, pipe_num, verschuiving } => {
                         // Echte release-samples (opgenomen kerkakoestiek): staan
                         // onder de gemarkeerde key. Gevonden → start een one-shot
                         // release-voice op het huidige niveau van de stervende
@@ -4360,6 +4374,7 @@ fn run_audio_thread(
                             // One-shot-voices (Percussive: klok) klinken uit en
                             // negeren note-off, zoals GrandOrgue dat doet.
                             if voice.stop_id == stop_id && base_pipe(voice.pipe_num) == pipe_num
+                                && voice.verschuiving == verschuiving
                                 && !voice.releasing && !voice.one_shot
                             {
                                 // Refcount: er is meer dan één bron actief op
@@ -4491,6 +4506,7 @@ fn run_audio_thread(
                                     // een rear-laag klinkt op rear-niveau (anders
                                     // een niveausprong bij loslaten).
                                     rv.persp_slot = voice.persp_slot;
+                                    rv.verschuiving = voice.verschuiving;
                                     rv.erf_wind(&*voice, true);
                                     if let Some(decay_ms) = stacc_decay {
                                         // Korte noot: staart actief afbouwen — de galm
@@ -4631,6 +4647,7 @@ fn run_audio_thread(
                                     rv.one_shot = true;
                                     // Perspectief-gain overerven (zie NoteOff).
                                     rv.persp_slot = voice.persp_slot;
+                                    rv.verschuiving = voice.verschuiving;
                                     rv.erf_wind(&*voice, true);
                                     if let Some(decay_ms) = stacc_decay {
                                         // Infade + afbouw gecombineerd — zie NoteOff.
@@ -4884,6 +4901,7 @@ fn run_audio_thread(
                                         // Perspectief-gain overerven: de trem-laag van
                                         // een rear-perspectief blijft op rear-niveau.
                                         nv.persp_slot = voice.persp_slot;
+                                        nv.verschuiving = voice.verschuiving;
                                         nv.erf_wind(&*voice, false);
                                         // Refcount meenemen: houdt een koppel de
                                         // pijp ook vast, dan mag de eerste NoteOff
@@ -5385,7 +5403,14 @@ fn run_audio_thread(
                     } else {
                         1.0
                     };
-                    voice.c_pitch_mul = temp * pitch_mul;
+                    // Doorlopend klavier (0.8.4): de dichtstbijzijnde pijp
+                    // verschoven naar de gespeelde toon.
+                    let schuif = if voice.verschuiving != 0 {
+                        2.0_f64.powf(voice.verschuiving as f64 / 12.0)
+                    } else {
+                        1.0
+                    };
+                    voice.c_pitch_mul = temp * pitch_mul * schuif;
 
                     voice.c_use_lfo_trem = !stops_with_trem.contains(&voice.stop_id);
                 }

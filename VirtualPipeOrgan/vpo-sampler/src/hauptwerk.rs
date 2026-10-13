@@ -811,6 +811,25 @@ fn build_definition(
         });
     }
 
+    // Klavier-afkortingen (0.8.4): Keyboard.ShortName → divisienaam, voor de
+    // koppeling van toetsmechaniek-ranks ("PO Key action noises …") aan het
+    // klavier wanneer de stopnamen die prefix niet dragen.
+    let klavier_afkortingen: HashMap<String, String> = {
+        let div_namen: HashMap<u32, String> = lees("Division").iter()
+            .filter_map(|d| Some((d.get_u32("DivisionID")?, clean_division_name(d.get("Name")?))))
+            .collect();
+        let mut m = HashMap::new();
+        for k in lees("Keyboard") {
+            let (Some(kort), Some(did)) = (k.get("ShortName"), k.get_u32("Hint_PrimaryAssociatedDivisionID")) else { continue };
+            let kort = kort.trim();
+            if kort.is_empty() { continue; }
+            if let Some(naam) = div_namen.get(&did) {
+                m.entry(kort.to_uppercase()).or_insert_with(|| naam.clone());
+            }
+        }
+        m
+    };
+
     Ok(OrganDefinition {
         base_path: root,
         organ,
@@ -826,7 +845,7 @@ fn build_definition(
             // staan de switches in de korte <o>-vorm. (De compacte lezer kent
             // van Switch alleen het ID; naam en standaardstand ontbreken daar
             // nog, dus bijgeluiden op compacte sets volgen later.)
-            &layers_of_pipe, &sample_of_layer, &lees("Switch"), &rank_name,
+            &layers_of_pipe, &sample_of_layer, &lees("Switch"), &lees("SwitchLinkage"), &rank_name,
         ),
         stop_action_clicks: verzamel_hw_stop_action_clicks(
             &pipes, &sample_file, &pkg_dirs,
@@ -836,6 +855,7 @@ fn build_definition(
             &pipes, &sample_file, &pkg_dirs,
             &layers_of_pipe, &sample_of_layer, &ranks_xml,
         ),
+        klavier_afkortingen,
     })
 }
 
@@ -943,9 +963,45 @@ fn synth_stopranks_via_switches(
     // Volgorde: per register de rangen oplopend — de eerste (laagste rank-id,
     // bij Grabowski "close") wordt het primaire perspectief.
     uit.sort_by_key(|m| (m.get_u32("StopID"), m.get_u32("RankID")));
+    // Tremmed rangen (0.8.4): een set met echte tremulant-opnamen heeft per
+    // positie een tweede rang "… (close, tremmed)" waarvan de pallets via
+    // "Tremulant N Trem" lopen; de droge rang loopt via "… NonTrem". De
+    // zoektocht hierboven vindt voor allebei hetzelfde register, en zonder
+    // koppeling werd de tremmed rang een tweede laag die altijd meeklonk —
+    // dubbel geluid zonder tremulant, en geen tremulant mét. Hier wordt hij
+    // de AlternateRankID van zijn droge tegenhanger (zelfde register, zelfde
+    // naam zonder "tremmed"), precies zoals een StopRank-object dat zou doen.
+    let sleutel = |naam: &str| -> String {
+        let l = naam.to_lowercase();
+        let l = l.trim_start_matches(|c: char| c.is_ascii_digit() || c == '.' || c.is_whitespace());
+        l.replace("tremmed", "").chars().filter(|c| c.is_alphanumeric()).collect()
+    };
+    let is_tremmed = |m: &FieldMap| m.get("Name").map(|n| n.to_lowercase().contains("tremmed")).unwrap_or(false);
+    let mut gekoppeld = 0usize;
+    let mut i = 0;
+    while i < uit.len() {
+        if !is_tremmed(&uit[i]) { i += 1; continue; }
+        let stop = uit[i].get_u32("StopID");
+        let rid = uit[i].get_u32("RankID").unwrap_or(0);
+        let k = uit[i].get("Name").map(|n| sleutel(n)).unwrap_or_default();
+        let droog = uit.iter().position(|m| {
+            m.get_u32("StopID") == stop
+                && m.get_u32("RankID") != Some(rid)
+                && !is_tremmed(m)
+                && m.get("Name").map(|n| sleutel(n) == k).unwrap_or(false)
+        });
+        match droog {
+            Some(j) => {
+                uit[j].insert("AlternateRankID".into(), rid.to_string());
+                uit.remove(i);
+                gekoppeld += 1;
+            }
+            None => { i += 1; }
+        }
+    }
     info!(
-        "Hauptwerk: geen StopRank-objecten — {} register/rank-koppelingen afgeleid uit het schakelnetwerk ({} pijpen zonder register, {} met meer dan één)",
-        uit.len(), zonder, dubbel
+        "Hauptwerk: geen StopRank-objecten — {} register/rank-koppelingen afgeleid uit het schakelnetwerk ({} pijpen zonder register, {} met meer dan één, {} tremmed rangen als tremulantlaag gekoppeld)",
+        uit.len(), zonder, dubbel, gekoppeld
     );
     uit
 }
@@ -1084,9 +1140,19 @@ fn verzamel_hw_bijgeluiden(
     layers_of_pipe: &std::collections::HashMap<u32, Vec<(u32, u32)>>,
     sample_of_layer: &std::collections::HashMap<u32, u32>,
     switches: &[FieldMap],
+    linkages: &[FieldMap],
     rank_name: &std::collections::HashMap<u32, String>,
 ) -> Vec<crate::grandorgue::BackgroundSoundDef> {
     use crate::grandorgue::{BackgroundSoundDef, BackgroundSoundKind};
+    // doel-schakelaar → bron-schakelaars (0.8.4): een ruispijp hangt vaak aan
+    // een niet-klikbare hulpschakelaar ("Zimbelstern Noise") die via één
+    // linkage aan de echte knop ("26. Zimbelstern") zit.
+    let mut bron_van: std::collections::HashMap<u32, Vec<u32>> = std::collections::HashMap::new();
+    for l in linkages {
+        if let (Some(src), Some(dst)) = (l.get_u32("SourceSwitchID"), l.get_u32("DestSwitchID")) {
+            bron_van.entry(dst).or_default().push(src);
+        }
+    }
     // Switch-naam, of hij standaard aan staat én of hij klikbaar is.
     // Blower/ambient: default_on=Y en meestal niet klikbaar.
     // Speelgoedregisters: default_on=N én klikbaar=Y (de organist drukt ze aan).
@@ -1124,16 +1190,42 @@ fn verzamel_hw_bijgeluiden(
         // De blower-schakelaar zelf staat vaak standaard UIT en wordt bij het
         // laden via een linkage ("Start blower on organ load") aangezet; de
         // naam is hier dus leidend, niet DefaultToEngaged.
+        // Naam zonder Hauptwerk-volgnummer ("96. Blower" → "Blower").
+        let mut naam = sw_name
+            .trim_start_matches(|c: char| c.is_ascii_digit() || c == '.' || c.is_whitespace())
+            .trim()
+            .to_string();
+        if naam.is_empty() { naam = sw_name.clone(); }
         let kind = if sw_lower.contains("blower") || sw_lower.contains("motor")
             || sw_lower.contains("soufflerie") {
             BackgroundSoundKind::Blower
         } else if *default_on && (sw_lower.contains("noise") || sw_lower.contains("ambient")
             || sw_lower.contains("rausch") || sw_lower.contains("geräusch")) {
             BackgroundSoundKind::Ambient
+        } else if sw_lower.contains("trem") {
+            // "Tremulant Noise" / "Tremolo Recit Noise" (0.8.4): het
+            // mechanische geluid van de tremulant; volgt de tremulantknop.
+            BackgroundSoundKind::TremulantNoise
         } else if *clickable && !*default_on {
             // Speelgoedregister: Cymbelstern, Vogelsang, Cuculus en
             // soortgelijke effecten die de organist zelf aandrukt (0.7.98).
             BackgroundSoundKind::Toy
+        } else if !*default_on {
+            // Niet-klikbare hulpschakelaar (0.8.4): de knop die hem bedient
+            // bepaalt de naam ("Zimbelstern Noise" ← "26. Zimbelstern").
+            let knop = bron_van.get(&sw_id).and_then(|srcs| srcs.iter()
+                .filter_map(|s| switch_info.get(s))
+                .find(|(_, _, c)| *c));
+            match knop {
+                Some((knop_naam, _, _)) => {
+                    naam = knop_naam
+                        .trim_start_matches(|c: char| c.is_ascii_digit() || c == '.' || c.is_whitespace())
+                        .trim()
+                        .to_string();
+                    BackgroundSoundKind::Toy
+                }
+                None => continue,
+            }
         } else {
             continue;
         };
@@ -1143,10 +1235,10 @@ fn verzamel_hw_bijgeluiden(
         let Some((_num, lid)) = layers.first() else { continue };
         let Some(sid) = sample_of_layer.get(lid) else { continue };
         let Some(path) = resolve_sample(*sid) else { continue };
-        info!("Hauptwerk-bijgeluid gevonden: {:?} op switch '{}' → {:?}", kind, sw_name, path);
+        info!("Hauptwerk-bijgeluid gevonden: {:?} '{}' op switch '{}' → {:?}", kind, naam, sw_name, path);
         uit.push(BackgroundSoundDef {
             kind,
-            name: sw_name.clone(),
+            name: naam,
             path,
         });
     }
@@ -2011,6 +2103,47 @@ mod tests {
         assert_eq!(o.get_u32("MIDINoteNumOfFirstMappedDivisionInputNode"), Some(36));
         assert_eq!(o.get_u32("NumberOfMappedDivisionInputNodes"), Some(1));
         assert_eq!(o.get_i32("MIDINoteNumIncrementFromDivisionToRank"), Some(12));
+    }
+
+    /// Tremmed rang in een schakelnetwerk-set (0.8.4): dezelfde toets en
+    /// hetzelfde register sturen de droge pallet via "NonTrem" en de tremmed
+    /// pallet via "Trem". De tremmed rang mag geen eigen laag worden maar
+    /// hoort als AlternateRankID aan de droge rang.
+    #[test]
+    fn tremmed_rang_wordt_tremulantlaag_in_schakelnetwerk() {
+        let fm = |kv: &[(&str, &str)]| -> FieldMap {
+            kv.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+        };
+        let stops = vec![
+            fm(&[("StopID", "42"), ("Name", "Konzertflöte 8"), ("DivisionID", "3"), ("ControllingSwitchID", "22042")]),
+        ];
+        let division_inputs = vec![
+            fm(&[("DivisionID", "3"), ("SwitchID", "9225"), ("NormalMIDINoteNumber", "60")]),
+        ];
+        let ranks = vec![
+            fm(&[("RankID", "42"), ("Name", "038. II  Konzertflöte 8 (close)")]),
+            fm(&[("RankID", "542"), ("Name", "053. II  Konzertflöte 8 (close, tremmed)")]),
+            fm(&[("RankID", "1042"), ("Name", "153. II  Konzertflöte 8 (front)")]),
+        ];
+        let pipes = vec![
+            fm(&[("PipeID", "4225"), ("RankID", "42"), ("NormalMIDINoteNumber", "60"), ("ControllingPalletSwitchID", "569920")]),
+            fm(&[("PipeID", "54225"), ("RankID", "542"), ("NormalMIDINoteNumber", "60"), ("ControllingPalletSwitchID", "569921")]),
+            fm(&[("PipeID", "104225"), ("RankID", "1042"), ("NormalMIDINoteNumber", "60"), ("ControllingPalletSwitchID", "569930")]),
+        ];
+        let linkages = vec![
+            fm(&[("SourceSwitchID", "9225"), ("DestSwitchID", "569919"), ("ConditionSwitchID", "22042")]),
+            fm(&[("SourceSwitchID", "569919"), ("DestSwitchID", "569920"), ("ConditionSwitchID", "711")]),
+            fm(&[("SourceSwitchID", "569919"), ("DestSwitchID", "569921"), ("ConditionSwitchID", "721")]),
+            fm(&[("SourceSwitchID", "569919"), ("DestSwitchID", "569930")]),
+        ];
+        let srs = synth_stopranks_via_switches(&stops, &pipes, &linkages, &division_inputs, &ranks);
+        // Twee lagen (close, front); de tremmed rang is geen eigen laag meer.
+        assert_eq!(srs.len(), 2, "{srs:?}");
+        let close = srs.iter().find(|m| m.get_u32("RankID") == Some(42)).expect("close-rang");
+        assert_eq!(close.get_u32("AlternateRankID"), Some(542));
+        let front = srs.iter().find(|m| m.get_u32("RankID") == Some(1042)).expect("front-rang");
+        assert_eq!(front.get_u32("AlternateRankID"), None);
+        assert!(srs.iter().all(|m| m.get_u32("RankID") != Some(542)));
     }
 
     #[test]

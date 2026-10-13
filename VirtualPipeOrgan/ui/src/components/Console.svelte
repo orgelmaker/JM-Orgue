@@ -2395,6 +2395,17 @@
     localStorage.setItem(organUiKey('jm-orgue-coupler-placement'), couplerPlacement);
     publishRemoteLayout();
   }
+  // Speelgoedregisters (0.8.4): in de werkbalk ('toolbar', standaard) of als
+  // registerknop in het bovenste werk op het scherm ('division'), zoals de
+  // koppels dat kunnen. Per orgel onthouden.
+  let toyPlacement = 'toolbar';
+  function toggleToyPlacement() {
+    toyPlacement = toyPlacement === 'toolbar' ? 'division' : 'toolbar';
+    localStorage.setItem(organUiKey('jm-orgue-toy-placement'), toyPlacement);
+  }
+  // Het werk dat de speelgoedknoppen draagt: het laatste op het scherm (het
+  // hoogste manuaal, waar een cimbelster of nachtegaal meestal hoort).
+  $: toyDivisionName = selectedDivisions.length > 0 ? selectedDivisions[selectedDivisions.length - 1] : null;
   // Balkgroepen: per klavier (in divisievolgorde) de zichtbare koppels,
   // unison eerst, dan super/sub, dan de rest.
   $: couplerBarGroups = buildCouplerGroups(displayOrgan, visibleCouplers, couplerPlacement, selectedDivisions);
@@ -2496,6 +2507,7 @@
     visibleCouplers = visibleCouplers;
     if (!secondary) localStorage.setItem(organUiKey('jm-orgue-visible-couplers'), JSON.stringify(visibleCouplers));
     couplerPlacement = readOrganUiPref('jm-orgue-coupler-placement') === 'division' ? 'division' : 'bar';
+    toyPlacement = readOrganUiPref('jm-orgue-toy-placement') === 'division' ? 'division' : 'toolbar';
     // Layout (main-layout is exclusief van het hoofdvenster; secundaire
     // vensters laden hun layout per scherm uit de panel-state — zie de
     // divisie-reset-reactive)
@@ -3194,6 +3206,8 @@
     } catch (e) {}
     const cp = readOrganUiPref('jm-orgue-coupler-placement') === 'division' ? 'division' : 'bar';
     if (cp !== couplerPlacement) couplerPlacement = cp;
+    const tp = readOrganUiPref('jm-orgue-toy-placement') === 'division' ? 'division' : 'toolbar';
+    if (tp !== toyPlacement) toyPlacement = tp;
     try {
       const so = localStorage.getItem(`jm-orgue-stop-order-${organInfo.id || 'default'}`) || '{}';
       if (so !== JSON.stringify(stopOrder)) stopOrder = JSON.parse(so);
@@ -5349,30 +5363,42 @@
             <!-- Motor-knop (0.7.97): aanwezig als de sampleset een blower-opname
                  heeft; schakelt de orgelmotor in of uit met fade-in/uit. -->
             {#if heeftBlower}
+              <!-- Als sleutelschakelaar (0.8.4): rond schild met een gleuf
+                   die van 0 naar I draait, een lampje en de stand in tekst. -->
               <button
-                class="btn btn-ghost btn-sm panel-layout-btn"
+                class="btn btn-ghost btn-sm panel-layout-btn motor-sleutel"
                 class:motor-aan={motorAan}
                 on:click={() => zetMotor(!motorAan)}
                 title={motorAan ? $t('toolbar.motor_on') : $t('toolbar.motor_off')}
                 aria-label={$t('toolbar.motor_title')}
+                aria-pressed={motorAan}
               >
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <circle cx="12" cy="12" r="4"/>
-                  <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
-                </svg>
-                {$t('toolbar.motor')}
+                <span class="sleutel-schild" aria-hidden="true">
+                  <span class="sleutel-merk sleutel-merk-0">0</span>
+                  <span class="sleutel-merk sleutel-merk-1">I</span>
+                  <span class="sleutel-gleuf"></span>
+                </span>
+                <span class="motor-tekst">
+                  <span>{$t('toolbar.motor')}</span>
+                  <small>{motorAan ? $t('toolbar.motor_state_on') : $t('toolbar.motor_state_off')}</small>
+                </span>
+                <span class="motor-lamp" aria-hidden="true"></span>
               </button>
             {/if}
             <!-- Speelgoedregisters (0.7.98): per klikbare switch een eigen
-                 knop. Cymbelstern, Vogelsang, Cuculus en soortgelijke. -->
-            {#each speelgoed as toy (toy.name)}
-              <button
-                class="btn btn-ghost btn-sm panel-layout-btn"
-                class:motor-aan={toysAan[toy.name]}
-                on:click={() => zetToy(toy.name, !toysAan[toy.name])}
-                title={toy.name}
-              >{toy.name}</button>
-            {/each}
+                 knop. Cymbelstern, Vogelsang, Cuculus en soortgelijke. Staan
+                 ze als registerknop in een werk (0.8.4), dan niet hier. -->
+            {#if toyPlacement !== 'division'}
+              {#each speelgoed as toy (toy.name)}
+                <button
+                  class="btn btn-ghost btn-sm panel-layout-btn"
+                  class:motor-aan={toysAan[toy.name]}
+                  on:click={() => zetToy(toy.name, !toysAan[toy.name])}
+                  title={toy.name}
+                  aria-pressed={!!toysAan[toy.name]}
+                >{toy.name}</button>
+              {/each}
+            {/if}
             <button
               class="btn btn-ghost btn-sm panel-layout-btn"
               on:click={passendMaken}
@@ -5441,6 +5467,18 @@
                   <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
                 </svg>
                 {$t('toolbar.couplers')}
+              </button>
+            {/if}
+            {#if speelgoed.length > 0}
+              <button
+                class="btn btn-ghost btn-sm panel-layout-btn"
+                on:click={toggleToyPlacement}
+                title={toyPlacement === 'toolbar' ? $t('toolbar.toys_to_division') : $t('toolbar.toys_to_toolbar')}
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round">
+                  <path d="M12 2.5l2.6 5.6 6.1.7-4.5 4.2 1.2 6L12 16l-5.4 3 1.2-6-4.5-4.2 6.1-.7z"/>
+                </svg>
+                {$t('toolbar.toys')}
               </button>
             {/if}
             {#if secondary && showPanelHeaderToggle}
@@ -5665,6 +5703,24 @@
                       {#each coupler.name.split('\n') as line}
                         <span class="coupler-line">{line}</span>
                       {/each}
+                    </button>
+                  {/each}
+                {/if}
+                <!-- Speelgoedregisters als registerknop (0.8.4): in het
+                     bovenste werk op het scherm, dezelfde maat als een
+                     koppelknop. -->
+                {#if toyPlacement === 'division' && division.name === toyDivisionName}
+                  {#each speelgoed as toy (toy.name)}
+                    <button
+                      class="stop-knob coupler coupler-knob toy-knob"
+                      style={knopHoogteStijl}
+                      class:engaged={!!toysAan[toy.name]}
+                      on:click={() => zetToy(toy.name, !toysAan[toy.name])}
+                      title={toy.name}
+                      aria-label="{toy.name} — {toysAan[toy.name] ? $t('stops.drawn') : $t('stops.not_drawn')}"
+                      aria-pressed={!!toysAan[toy.name]}
+                    >
+                      <span class="coupler-line">{toy.name}</span>
                     </button>
                   {/each}
                 {/if}

@@ -31,6 +31,17 @@ fn is_stereo_helft(rest: &str) -> bool {
 /// Canoniek label voor één token, of None als het geen perspectief is.
 fn canonical(token: &str) -> Option<String> {
     let t = token.trim().to_lowercase();
+    // "(close, tremmed)" / "(rear tremmed)" (0.8.4): de tremulant-opname van
+    // een positie draagt het label van die positie; het woord "tremmed" zegt
+    // alleen dat het de tremulant-variant is (zie AlternateRankID in de
+    // Hauptwerk-importer).
+    if let Some(kop) = t.strip_suffix("tremmed") {
+        let kop = kop.trim_end_matches([',', ' ', '-', '_']).trim();
+        if !kop.is_empty() {
+            return canonical(kop);
+        }
+        return None;
+    }
     // "front-L component" is het front-perspectief, alleen de linkerhelft
     // ervan; het label moet dus gewoon "front" zijn.
     for scheiding in ['-', ' ', '_'] {
@@ -46,6 +57,7 @@ fn canonical(token: &str) -> Option<String> {
         "front" | "frontal" | "vorne" => "front",
         "close" | "near" | "nah" | "proche" => "close",
         "dry" | "direct" => "dry",
+        "middle" | "mid" | "center" | "centre" | "mitte" | "milieu" => "middle",
         "rear" | "back" | "far" | "distant" | "fern" | "hinten" | "lointain" | "arrière" | "arriere" => "rear",
         "diffuse" | "ambient" | "ambience" | "room" | "wet" | "surround" | "hall" => "diffuse",
         _ => {
@@ -127,6 +139,18 @@ mod tests {
         assert_eq!(detect_perspective("PED  Soubasse 16 (rear)").as_deref(), Some("rear"));
         assert_eq!(detect_perspective("Bourdon 8 (dry)").as_deref(), Some("dry"));
         assert_eq!(detect_perspective("Bourdon 8 (Diffuse)").as_deref(), Some("diffuse"));
+    }
+
+    #[test]
+    fn test_middle_en_tremmed_labels() {
+        // Vier posities (0.8.4): close/front/middle/rear.
+        assert_eq!(detect_perspective("172. PO  Montre 8 (middle)").as_deref(), Some("middle"));
+        // De tremulant-variant van een positie houdt het label van die positie.
+        assert_eq!(detect_perspective("053. II  Konzertflöte 8 (close, tremmed)").as_deref(), Some("close"));
+        assert_eq!(detect_perspective("4 Gedekt 8 (rear tremmed)").as_deref(), Some("rear"));
+        // Alleen "tremmed" zegt niets over de positie.
+        assert_eq!(detect_perspective("02. GO  Montre 8 (tremmed)"), None);
+        assert_eq!(strip_perspective("053. II  Konzertflöte 8 (close, tremmed)"), "053. II  Konzertflöte 8");
     }
 
     #[test]

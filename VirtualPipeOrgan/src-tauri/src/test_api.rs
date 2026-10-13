@@ -1182,14 +1182,18 @@ fn handle_note_on(state: &AppState, note_str: &str, query: &str) -> Result<Value
         for div in &organ.divisions {
             for stop in &div.stops {
                 if &stop.id == drawn_id {
-                    if note >= stop.first_midi_note && note <= stop.last_midi_note {
-                        // Pijpnummers zijn 1-based in de audio engine (consistent met commands.rs en state.rs)
-                        let pipe_num = (note - stop.first_midi_note) as u32 + 1;
+                    // Zelfde pijpkeuze als de MIDI-route (doorlopend klavier incl.
+                    // verschuiving, 0.8.4); pijpnummers zijn 1-based.
+                    if let Some((pipe_num, verschuiving)) = crate::state::pijp_voor_noot(
+                        note as u32, stop.first_midi_note as u32, stop.last_midi_note as u32,
+                        crate::state::doorlopend_klavier(),
+                    ) {
                         state.send_audio_command(AudioCommand::NoteOn {
                             stop_id: stop.internal_stop_id,
                             pipe_num,
                             midi_note: note,
                             velocity: velocity as f32 / 127.0,
+                            verschuiving,
                         });
                         triggered += 1;
                     }
@@ -1220,12 +1224,14 @@ fn handle_note_off(state: &AppState, note_str: &str, _query: &str) -> Result<Val
         for div in &organ.divisions {
             for stop in &div.stops {
                 if &stop.id == drawn_id {
-                    if note >= stop.first_midi_note && note <= stop.last_midi_note {
-                        // Pijpnummers zijn 1-based in de audio engine (consistent met commands.rs en state.rs)
-                        let pipe_num = (note - stop.first_midi_note) as u32 + 1;
+                    if let Some((pipe_num, verschuiving)) = crate::state::pijp_voor_noot(
+                        note as u32, stop.first_midi_note as u32, stop.last_midi_note as u32,
+                        crate::state::doorlopend_klavier(),
+                    ) {
                         state.send_audio_command(AudioCommand::NoteOff {
                             stop_id: stop.internal_stop_id,
                             pipe_num,
+                            verschuiving,
                         });
                         released += 1;
                     }

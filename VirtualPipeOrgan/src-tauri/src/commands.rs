@@ -909,9 +909,12 @@ fn luister_as_rang(label: &str) -> u8 {
         "dry" => 0,
         "close" => 1,
         "front" => 2,
-        "rear" => 3,
-        "diffuse" => 4,
-        s if s.starts_with("mic") => 5,
+        // "middle" (0.8.4): een set met vier posities zet er een tussen
+        // front en rear.
+        "middle" => 3,
+        "rear" => 4,
+        "diffuse" => 5,
+        s if s.starts_with("mic") => 6,
         _ => u8::MAX,
     }
 }
@@ -926,7 +929,7 @@ fn luisteras_indices(persp: &[crate::state::PerspectiveRuntime]) -> Vec<usize> {
         .map(|(i, p)| {
             let rang = luister_as_rang(&p.name);
             // Micrangen op nummer sorteren: "mic1" vóór "mic10". Overige: 0.
-            let subrang = if rang == 5 {
+            let subrang = if rang == 6 {
                 p.name[3..].trim_start_matches(|c: char| !c.is_ascii_digit())
                     .parse::<u32>().unwrap_or(0)
             } else { 0 };
@@ -2720,6 +2723,10 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
     // `stop_action_clicks` zetten. Hauptwerk-sets vullen die map al in de
     // importer; verzamel_go_registermechaniek overschrijft daar niets.
     definition.verzamel_go_registermechaniek();
+    // GrandOrgue toetsmechaniek (0.8.4): "Key action {klavier} Attack/Release"
+    // als stops in het manual zelf; vult `keyboard_clicks` zoals de
+    // Hauptwerk-importer dat uit de "Key action noises"-ranks doet.
+    definition.verzamel_go_toetsmechaniek();
 
     info!("Parsed organ: {} by {}", definition.organ.church_name, definition.organ.organ_builder);
 
@@ -3524,6 +3531,7 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
                     vpo_sampler::grandorgue::BackgroundSoundKind::Blower => "blower".into(),
                     vpo_sampler::grandorgue::BackgroundSoundKind::Ambient => "ambient".into(),
                     vpo_sampler::grandorgue::BackgroundSoundKind::Toy => "toy".into(),
+                    vpo_sampler::grandorgue::BackgroundSoundKind::TremulantNoise => "tremulant_noise".into(),
                 },
                 name: b.name,
             }).collect()
@@ -4054,6 +4062,7 @@ pub fn play_note(state: State<AppState>, stop_id: String, note: u8, velocity: f3
         pipe_num,
         midi_note: note,
         velocity,
+        verschuiving: 0,
     });
 
     Ok(())
@@ -4086,6 +4095,7 @@ pub fn stop_note(state: State<AppState>, stop_id: String, note: u8) -> Result<()
         state.send_audio_command(AudioCommand::NoteOff {
             stop_id: internal_stop_id,
             pipe_num,
+            verschuiving: 0,
         });
     }
 
@@ -4137,6 +4147,7 @@ pub fn play_note_all_stops(state: State<AppState>, note: u8, velocity: f32, only
                         pipe_num,
                         midi_note: note,
                         velocity,
+                        verschuiving: 0,
                     });
                 }
             }
@@ -4172,6 +4183,7 @@ pub fn stop_note_all_stops(state: State<AppState>, note: u8, only_division: Opti
                         state.send_audio_command(AudioCommand::NoteOff {
                             stop_id: stop.internal_stop_id,
                             pipe_num,
+                            verschuiving: 0,
                         });
                     }
                 }
@@ -7143,6 +7155,14 @@ pub fn do_set_tremulant(state: &AppState, division_name: &str, active: bool) -> 
             // Spiegel voor de afstandsbediening (GET /state) — ook zonder
             // trem-samples: de Console-stand is dan tóch 'aan' via de LFO.
             state.tremulant_live.write().insert(division_name.to_string(), active);
+            // Tremulantruis (0.8.4): het mechanische geluid van de tremulant
+            // als eigen opname in de set; loopt zolang ergens een tremulant
+            // aan staat (los van de trem-opnamen van de registers).
+            let ergens_aan = state.tremulant_live.read().values().any(|&v| v);
+            for b in o.background_sounds.iter().filter(|b| b.kind == "tremulant_noise") {
+                info!("Tremulantruis '{}' {}", b.name, if ergens_aan { "aan" } else { "uit" });
+                state.send_audio_command(AudioCommand::SetToyActive { name: b.name.clone(), active: ergens_aan });
+            }
             let stop_ids: Vec<u32> = div.stops.iter()
                 .filter(|s| s.has_tremulant)
                 .map(|s| s.internal_stop_id)
@@ -11102,7 +11122,8 @@ mod luisterpositie_tests {
         // alles.
         assert!(luister_as_rang("dry") < luister_as_rang("close"));
         assert!(luister_as_rang("close") < luister_as_rang("front"));
-        assert!(luister_as_rang("front") < luister_as_rang("rear"));
+        assert!(luister_as_rang("front") < luister_as_rang("middle"));
+        assert!(luister_as_rang("middle") < luister_as_rang("rear"));
         assert!(luister_as_rang("rear") < luister_as_rang("diffuse"));
         assert!(luister_as_rang("diffuse") < luister_as_rang("mic1"));
         assert!(luister_as_rang("mic1") < luister_as_rang("onbekend_label"));

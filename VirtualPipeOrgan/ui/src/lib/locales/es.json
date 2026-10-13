@@ -262,7 +262,7 @@
     "autosave_hint": "Los ajustes se guardan automáticamente en la carpeta del órgano y en la aplicación.",
     "midi_transpose_abbr": "Transp",
     "continuous_keyboard": "Teclado continuo",
-    "continuous_keyboard_title": "Las teclas fuera del ámbito grabado de un registro suenan el tubo una octava más alta o más baja en vez de callar. Así un teclado de 61 teclas sigue sonando con un conjunto de 56 notas: como un órgano con octava aguda repetida.",
+    "continuous_keyboard_title": "Las teclas fuera del ámbito grabado de un registro suenan el tubo más cercano, desplazado a la altura correcta, en lugar de callar. Así un teclado de 61 teclas sigue sonando en un banco de 56 notas — hasta dos octavas fuera del ámbito.",
     "short_octave": "Octava corta",
     "short_octave_title": "Teclado histórico con la octava grave incompleta: la tecla que parece mi suena do, fa sostenido suena re y sol sostenido suena mi. Allí faltan do sostenido y re sostenido.",
     "short_octave_needs_range": "Aprende primero el ámbito del teclado (o introduce la nota más grave): sin la tecla más grave la aplicación no sabe dónde empieza la octava grave.",
@@ -559,7 +559,12 @@
     "motor_on": "Motor encendido",
     "motor_off": "Motor apagado",
     "motor_title": "Motor del órgano encendido/apagado",
-    "midi_learn": "Aprender MIDI (el próximo CC se vinculará)"
+    "midi_learn": "Aprender MIDI (el próximo CC se vinculará)",
+    "toys": "Efectos",
+    "toys_to_division": "Mostrar los registros de efectos (cimbelstern, ruiseñor …) como tiradores en el teclado superior",
+    "toys_to_toolbar": "Devolver los registros de efectos a la barra de herramientas",
+    "motor_state_on": "on",
+    "motor_state_off": "off"
   },
   "speeltafel": {
     "show_bars": "Barras",

@@ -262,7 +262,7 @@
     "autosave_hint": "Ustawienia są zapisywane automatycznie w folderze organów i w programie.",
     "midi_transpose_abbr": "Transp",
     "continuous_keyboard": "Ciągła klawiatura",
-    "continuous_keyboard_title": "Klawisze poza nagraną skalą głosu grają piszczałkę o oktawę wyżej lub niżej, zamiast milczeć. Klawiatura 61-klawiszowa gra więc dalej na zestawie 56 dźwięków — jak organy z powtarzaną górną oktawą.",
+    "continuous_keyboard_title": "Klawisze poza nagraną skalą głosu grają najbliższą piszczałkę, przesuniętą na właściwą wysokość, zamiast milczeć. Dzięki temu klawiatura o 61 klawiszach gra dalej na zestawie 56 dźwięków — do dwóch oktaw poza skalą.",
     "short_octave": "Krótka oktawa",
     "short_octave_title": "Historyczna klawiatura z niepełną najniższą oktawą: klawisz wyglądający jak E brzmi jako C, Fis jako D, a Gis jako E. Cis i Dis tam nie występują.",
     "short_octave_needs_range": "Najpierw naucz zakresu klawiatury (lub wpisz najniższy dźwięk): bez najniższego klawisza aplikacja nie wie, gdzie zaczyna się najniższa oktawa.",
@@ -559,7 +559,12 @@
     "motor_on": "Silnik włączony",
     "motor_off": "Silnik wyłączony",
     "motor_title": "Silnik organów wł./wył.",
-    "midi_learn": "Nauka MIDI (następny CC zostanie powiązany)"
+    "midi_learn": "Nauka MIDI (następny CC zostanie powiązany)",
+    "toys": "Efekty",
+    "toys_to_division": "Pokaż głosy efektowe (cymbelstern, słowik …) jako przyciski rejestrów w górnym manuale",
+    "toys_to_toolbar": "Przenieś głosy efektowe z powrotem na pasek narzędzi",
+    "motor_state_on": "wł.",
+    "motor_state_off": "wył."
   },
   "speeltafel": {
     "show_bars": "Paski",

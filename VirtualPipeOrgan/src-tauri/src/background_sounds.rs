@@ -117,8 +117,9 @@ impl BackgroundEngine {
                 // Blower start uit als de motorknop uit staat.
                 BackgroundSoundKind::Blower if !self.blower_active => 0.0,
                 // Speelgoedregisters staan standaard uit: de organist drukt
-                // ze zelf aan via een knop in de werkbalk (0.7.98).
-                BackgroundSoundKind::Toy => 0.0,
+                // ze zelf aan via een knop in de werkbalk (0.7.98). Tremulant-
+                // ruis (0.8.4) volgt de tremulantknop en start dus ook uit.
+                BackgroundSoundKind::Toy | BackgroundSoundKind::TremulantNoise => 0.0,
                 _ => 1.0,
             },
             current_gain: 0.0, // begin stil, fade in
@@ -154,7 +155,7 @@ impl BackgroundEngine {
     pub fn set_toy(&mut self, name: &str, active: bool) {
         let want = name.to_lowercase();
         for v in &mut self.voices {
-            if matches!(v.voice.kind, BackgroundSoundKind::Toy)
+            if matches!(v.voice.kind, BackgroundSoundKind::Toy | BackgroundSoundKind::TremulantNoise)
                 && v.voice.name.to_lowercase() == want
             {
                 v.target_gain = if active { 1.0 } else { 0.0 };

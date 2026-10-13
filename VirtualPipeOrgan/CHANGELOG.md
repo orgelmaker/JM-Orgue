@@ -5,6 +5,85 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.8.4] - 2026-10-13
+
+### Doorlopend klavier op de juiste toonhoogte
+- Een toets buiten het opgenomen bereik van een register speelt nu de
+  dichtstbijzijnde pijp, verschoven naar de echte toonhoogte: de hoogste
+  pijp een paar halve tonen omhoog, de laagste omlaag. Tot 0.8.3 vouwde
+  het doorlopende klavier zo'n toets per octaaf terug, waardoor hij een
+  octaaf te laag (of te hoog) klonk. De verschuiving reist mee door de
+  hele notenroute (direct, koppels, registratieherstel, overloopbuffer)
+  en wordt overgeërfd door de release-staart en de tremulantwissel, zodat
+  dezelfde pijp voor twee toetsen tegelijk kan klinken zonder dat de ene
+  NoteOff de andere afbreekt. Grens: twee octaven buiten het bereik.
+  Geldt ook voor registers met een kortere omvang dan het klavier, zoals
+  een zwevende stem die pas bij g begint.
+
+### Vier nieuwe demosets onderzocht (één ervan in Hauptwerk- én GrandOrgue-uitgave)
+- **Tremulant-opnamen in schakelnetwerk-sets.** Een set zonder StopRank-
+  objecten (0.8.3) kan per positie een tweede rang "… (close, tremmed)"
+  hebben, waarvan de pallets via de tremulantschakelaar lopen. De
+  terugval vond daarvoor hetzelfde register en maakte er een tweede laag
+  van: dubbel geluid zonder tremulant, en geen tremulant mét. De tremmed
+  rang wordt nu de tremulantlaag van zijn droge tegenhanger, precies
+  zoals een StopRank-object dat met AlternateRankID zou doen.
+- **Vierde luisterpositie "middle".** Een set met close/front/middle/rear
+  krijgt de middenpositie tussen front en rear op de luisterschuif; tot
+  nu toe werd dat label niet herkend en viel die laag buiten de as.
+- **Speelgoed achter een hulpschakelaar.** Een cimbelster waarvan de
+  ruispijp aan een niet-klikbare hulpschakelaar hangt ("Zimbelstern
+  Noise") die via één koppeling aan de echte knop zit, krijgt nu de knop
+  op de werkbalk, met de naam van die knop.
+- **Tremulantruis.** Het mechanische geluid van de tremulant zelf
+  ("Tremulant Noise", "Tremolo … Noise") loopt mee zolang ergens een
+  tremulant aan staat, in plaats van genegeerd te worden.
+- **Toetsmechaniek-prefix via de definitie.** De koppeling van de
+  toetsklik-ranks aan het klavier kent nu ook de afkortingen die de set
+  zelf opgeeft (Keyboard.ShortName), de divisienaam zelf en een Romeins
+  cijfer als laatste woord ("I" → "Manual I"). Daarmee landen de
+  toetsklikken van alle vier de sets op het goede klavier.
+- **GrandOrgue-uitgave: blower, ruimtegeluid, cimbelster en
+  toetsmechaniek.** De GrandOrgue-versie van zo'n set noemt zijn
+  doorlopende geluiden "Stop attack noise Blower" / "… Ambient noise" /
+  "… Zimbelstern" en zet het toetsmechaniek als stops "Key action
+  {klavier} Attack/Release" in het manual zelf. De blower en het
+  ruimtegeluid werden daardoor overgeslagen (het voorzetsel werd als
+  registerklik gelezen), de cimbelster kreeg geen knop en de toetsklikken
+  bestonden voor GrandOrgue-sets nog helemaal niet. Alle vier werken nu;
+  de knop op de werkbalk heet gewoon "Zimbelstern".
+
+### Speelgoedregisters als registerknop, motor als sleutelschakelaar
+- **Speelgoed in het werk.** Cimbelster, nachtegaal en soortgelijke
+  effectregisters stonden alleen als knopje in de werkbalk. Een nieuwe
+  werkbalkknop (ster) zet ze, net als de koppels, als registerknop in het
+  bovenste werk op het scherm — dezelfde maat en hetzelfde porselein als
+  een koppelknop, cursief zodat ze herkenbaar blijven. Per orgel
+  onthouden; de werkbalk toont ze dan niet meer dubbel.
+- **Motor als sleutelschakelaar.** De motorknop was een tandwieltje dat
+  alleen van kleur veranderde. Nu is het een sleutelschakelaar zoals op
+  een speeltafel: een rond metalen schild met een sleutelgleuf die van 0
+  naar I draait, een lampje dat groen oplicht en de stand ("aan"/"uit")
+  in tekst.
+
+### Rooktest
+- Vier demosets geladen en bespeeld via de test-API: een set met één
+  positie (Hauptwerk- én GrandOrgue-uitgave, 22 registers, 146
+  toetsklikken, blower/ruimtegeluid/tremulantruis/cimbelster), een
+  schakelnetwerk-set met drie posities (16 registers, 21 tremmed rangen
+  gekoppeld, 942 pijpen op originele toon, 204 toetsklikken op I/II/III/P,
+  twee stemmen per noot mét en zónder tremulant) en een set met vier
+  posities (11 registers, close/front/middle/rear, 246 toetsklikken, 1176
+  pijpen op originele toon). Doorlopend klavier: een toets onder én boven
+  het bereik van een zwevende stem klinkt als eigen stem naast de
+  gewone, en loslaten raakt alleen de eigen stem. Geen drops.
+
+### Tests
+- Sampler 89 (vier nieuw), app 364 (één nieuw): dichtstbijzijnde pijp met
+  verschuiving, tremmed rang in het schakelnetwerk, middle/tremmed-labels,
+  prefix-terugval, GrandOrgue-toetsmechaniek en -bijgeluiden met
+  voorzetsel.
+
 ## [0.8.3] - 2026-10-13
 
 ### Hauptwerk-sets met een schakelnetwerk laden nu (Nowa Ruda)

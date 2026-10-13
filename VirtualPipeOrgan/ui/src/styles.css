@@ -1153,6 +1153,92 @@ input[type="range"]::-webkit-slider-thumb:hover {
 .panel-layout-btn.motor-aan {
   color: var(--accent, #4a9eff);
 }
+
+/* Motor als sleutelschakelaar (0.8.4): een rond metalen schild met een
+   sleutelgleuf die van 0 (linksboven) naar I (rechtsboven) draait, een
+   lampje dat groen oplicht en de stand in tekst. Duidelijker dan het
+   tandwiel-icoontje: je ziet in één oogopslag of de wind er is. */
+.panel-layout-btn.motor-sleutel {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.15rem 0.6rem 0.15rem 0.3rem;
+  border: 1px solid var(--border, rgba(255,255,255,0.18));
+  border-radius: 999px;
+  color: var(--text-muted, #aaa);
+}
+.panel-layout-btn.motor-sleutel.motor-aan {
+  color: var(--text, #eee);
+  border-color: rgba(55, 211, 106, 0.55);
+}
+.sleutel-schild {
+  position: relative;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #dde1e6, #8b9199 58%, #565c63);
+  box-shadow: inset 0 1px 2px rgba(255,255,255,0.65), inset 0 -2px 3px rgba(0,0,0,0.45), 0 1px 2px rgba(0,0,0,0.5);
+  flex: 0 0 auto;
+}
+.sleutel-gleuf {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 4px;
+  height: 15px;
+  margin: -7.5px 0 0 -2px;
+  border-radius: 2px;
+  background: #1b1e22;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.18);
+  transform: rotate(-35deg);
+  transition: transform 0.25s ease;
+}
+.motor-aan .sleutel-gleuf {
+  transform: rotate(55deg);
+}
+.sleutel-merk {
+  position: absolute;
+  top: 1px;
+  font-size: 7px;
+  line-height: 1;
+  font-weight: 700;
+  color: rgba(0,0,0,0.65);
+  font-family: Arial, sans-serif;
+}
+.sleutel-merk-0 { left: 2px; }
+.sleutel-merk-1 { right: 3px; }
+.motor-tekst {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  line-height: 1.05;
+  text-align: left;
+}
+.motor-tekst small {
+  font-size: 0.58rem;
+  opacity: 0.75;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.motor-lamp {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #3a3f45;
+  box-shadow: inset 0 0 2px rgba(0,0,0,0.6);
+  flex: 0 0 auto;
+  transition: background 0.25s ease, box-shadow 0.25s ease;
+}
+.motor-aan .motor-lamp {
+  background: #37d36a;
+  box-shadow: 0 0 6px #37d36a;
+}
+
+/* Speelgoedregister als registerknop (0.8.4): zelfde maat en porselein
+   als een koppelknop, cursief zodat het geen register lijkt. */
+.stop-knob.toy-knob .coupler-line {
+  font-style: italic;
+}
 .stop-size-btn {
   min-width: 1.6rem;
   padding: 0.2rem 0.4rem;

@@ -262,7 +262,7 @@
     "autosave_hint": "Settings are saved automatically in the organ folder and in the app.",
     "midi_transpose_abbr": "Transp",
     "continuous_keyboard": "Continuous keyboard",
-    "continuous_keyboard_title": "Keys outside a stop's recorded range play the pipe an octave higher or lower instead of falling silent. A 61-key keyboard then plays on through a 56-note sample set — like an organ with a repeating top octave.",
+    "continuous_keyboard_title": "Keys outside a stop's recorded range play the nearest pipe, shifted to the correct pitch, instead of falling silent. A 61-key keyboard then plays on through a 56-note sample set — up to two octaves beyond the range.",
     "short_octave": "Short octave",
     "short_octave_title": "Historic keyboard with an incomplete bottom octave: the key that looks like E sounds C, F# sounds D and G# sounds E. C# and D# are missing there.",
     "short_octave_needs_range": "Learn the key range first (or fill in the lowest note): without the lowest key the app cannot tell where the bottom octave starts.",
@@ -559,7 +559,12 @@
     "motor_on": "Motor is on",
     "motor_off": "Motor is off",
     "motor_title": "Organ motor on or off",
-    "midi_learn": "MIDI learn (next CC will bind)"
+    "midi_learn": "MIDI learn (next CC will bind)",
+    "toys": "Toys",
+    "toys_to_division": "Show toy stops (Zimbelstern, nightingale …) as stop knobs in the top division",
+    "toys_to_toolbar": "Move toy stops back to the toolbar",
+    "motor_state_on": "on",
+    "motor_state_off": "off"
   },
   "speeltafel": {
     "show_bars": "Bars",

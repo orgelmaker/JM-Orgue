@@ -262,7 +262,7 @@
     "autosave_hint": "Einstellungen werden automatisch im Orgelordner und in der App gespeichert.",
     "midi_transpose_abbr": "Transp",
     "continuous_keyboard": "Durchgehende Klaviatur",
-    "continuous_keyboard_title": "Tasten außerhalb des aufgenommenen Umfangs eines Registers spielen die Pfeife eine Oktave höher oder tiefer, statt zu schweigen. Eine Klaviatur mit 61 Tasten spielt so auf einem Sampleset mit 56 Tönen durch — wie eine Orgel mit repetierender Oberoktave.",
+    "continuous_keyboard_title": "Tasten außerhalb des aufgenommenen Umfangs eines Registers spielen die nächstgelegene Pfeife, auf die richtige Tonhöhe verschoben, statt zu schweigen. So spielt eine 61-Tasten-Klaviatur auf einem 56-Töne-Sampleset weiter — bis zwei Oktaven über den Umfang hinaus.",
     "short_octave": "Kurze Oktave",
     "short_octave_title": "Historische Klaviatur mit unvollständiger unterster Oktave: Die Taste, die wie E aussieht, klingt als C, Fis als D und Gis als E. Cis und Dis fehlen dort.",
     "short_octave_needs_range": "Lernen Sie zuerst den Tastenumfang ein (oder tragen Sie die tiefste Note ein): ohne tiefste Taste weiß die App nicht, wo die unterste Oktave beginnt.",
@@ -559,7 +559,12 @@
     "motor_on": "Motor ist an",
     "motor_off": "Motor ist aus",
     "motor_title": "Orgelmotor ein oder aus",
-    "midi_learn": "MIDI lernen (nächster CC wird gebunden)"
+    "midi_learn": "MIDI lernen (nächster CC wird gebunden)",
+    "toys": "Effekte",
+    "toys_to_division": "Effektregister (Zimbelstern, Nachtigall …) als Registerknöpfe im obersten Werk zeigen",
+    "toys_to_toolbar": "Effektregister zurück in die Werkzeugleiste",
+    "motor_state_on": "ein",
+    "motor_state_off": "aus"
   },
   "speeltafel": {
     "show_bars": "Leisten",

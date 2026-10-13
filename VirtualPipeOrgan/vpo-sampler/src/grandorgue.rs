@@ -68,6 +68,10 @@ pub struct OrganDefinition {
     /// Per (klavier-prefix, toets) een optioneel attack- en release-geluid
     /// (0.7.103).
     pub keyboard_clicks: std::collections::HashMap<(String, u8), KeyboardClickPaths>,
+    /// Klavier-afkortingen uit de orgeldefinitie (0.8.4): Hauptwerk zet per
+    /// Keyboard een ShortName ("PO", "GO", "M1") met de divisie erbij. Prefix
+    /// (hoofdletters) → divisienaam; leeg bij GrandOrgue-sets.
+    pub klavier_afkortingen: std::collections::HashMap<String, String>,
 }
 
 /// Pad naar het aanslag- en loslaatgeluid van één toets (0.7.103).
@@ -113,6 +117,9 @@ pub enum BackgroundSoundKind {
     /// werkbalk; standaard uit. Hauptwerk-switches: `DefaultToEngaged=N` en
     /// `Clickable=Y`, met de pijpen op een rank genoemd "noises".
     Toy,
+    /// Mechanisch geluid van de tremulant zelf (0.8.4): loopt zolang een
+    /// tremulant aan staat; geen knop in de werkbalk.
+    TremulantNoise,
 }
 
 impl OrganDefinition {
@@ -156,6 +163,22 @@ impl OrganDefinition {
     pub fn divisie_voor_prefix(&self, prefix: &str) -> Option<String> {
         if let Some(d) = self.klavier_prefix_mapping().get(prefix) {
             return Some(d.clone());
+        }
+        // Afkortingen uit de definitie zelf (Keyboard.ShortName, 0.8.4).
+        if let Some(d) = self.klavier_afkortingen.get(&prefix.to_uppercase()) {
+            return Some(d.clone());
+        }
+        // De prefix ís de divisienaam (GrandOrgue-toetsmechaniek: "Key action
+        // Pedal Attack" staat in het manual Pedal zelf, 0.8.4).
+        if let Some(m) = self.manuals.iter().find(|m| m.name.eq_ignore_ascii_case(prefix)) {
+            return Some(m.name.clone());
+        }
+        // Laatste woord van de divisienaam: "I" → "Manual I", "II" → "Manual II"
+        // (sets die hun klavieren met Romeinse cijfers aanduiden, 0.8.4).
+        if let Some(m) = self.manuals.iter().find(|m| {
+            m.name.split_whitespace().last().map_or(false, |w| w.eq_ignore_ascii_case(prefix))
+        }) {
+            return Some(m.name.clone());
         }
         let pl: Vec<char> = prefix.to_lowercase().chars().collect();
         if pl.is_empty() { return None; }
@@ -229,6 +252,52 @@ impl OrganDefinition {
         }
     }
 
+    /// Toetsmechaniek uit GrandOrgue-stops (0.8.4). De GrandOrgue-uitgaven
+    /// van de Hauptwerk-sets zetten per klavier twee ruisstops in het manual
+    /// zelf: "Key action {klavier} Attack" (Percussive) en "Key action
+    /// {klavier} Release", met per toets één pijp waarvan de hoofdopname de
+    /// klik is. Vult `keyboard_clicks` onder de divisienaam als prefix (die
+    /// is bekend: het manual waarin de stop staat), zonder bestaande
+    /// Hauptwerk-sleutels te overschrijven.
+    pub fn verzamel_go_toetsmechaniek(&mut self) {
+        use std::collections::HashMap;
+        let mut nieuw: HashMap<(String, u8), KeyboardClickPaths> = HashMap::new();
+        for stop in &self.stops {
+            let lower = stop.name.to_lowercase();
+            let Some(rest) = lower.strip_prefix("key action ") else { continue };
+            let rest = rest.trim();
+            let (is_attack, klavier) = if let Some(k) = rest.strip_suffix(" attack") {
+                (true, k.trim())
+            } else if let Some(k) = rest.strip_suffix(" release") {
+                (false, k.trim())
+            } else {
+                continue;
+            };
+            let manual = self.manuals.iter().find(|m| m.stop_ids.contains(&stop.id));
+            let (prefix, eerste_toets) = match manual {
+                Some(m) => (
+                    m.name.to_uppercase(),
+                    m.first_accessible_key_midi_note + stop.first_accessible_pipe_logical_key.saturating_sub(1),
+                ),
+                None => (klavier.to_uppercase(), 36 + stop.first_accessible_pipe_logical_key.saturating_sub(1)),
+            };
+            for (i, pipe) in stop.pipes.iter().enumerate() {
+                let PipeDef::Sample { path, .. } = pipe else { continue };
+                let note = eerste_toets + i as u32;
+                if note > 127 { break; }
+                let e = nieuw.entry((prefix.clone(), note as u8)).or_default();
+                if is_attack {
+                    if e.attack.is_none() { e.attack = Some(path.clone()); }
+                } else if e.release.is_none() {
+                    e.release = Some(path.clone());
+                }
+            }
+        }
+        for (k, v) in nieuw {
+            self.keyboard_clicks.entry(k).or_insert(v);
+        }
+    }
+
     /// Doorlopende achtergrondgeluiden uit de orgeldefinitie halen (0.7.96):
     /// bij GrandOrgue zijn blower, orgelmotor en ambient aparte stops met
     /// `AcceptsRetuning=N` en een pijp die naar de WAV wijst. Deze stops
@@ -251,7 +320,7 @@ impl OrganDefinition {
                 _ => None,
             });
             if let Some(path) = path {
-                uit.push(BackgroundSoundDef { kind, name: stop.name.clone(), path });
+                uit.push(BackgroundSoundDef { kind, name: stop.bijgeluid_naam(), path });
             }
         }
         // Hauptwerk-pad (0.7.97): pijpen op switches zijn door de HW-importer
@@ -273,29 +342,64 @@ impl StopDef {
     /// `Key action …`) blijven None en worden overgeslagen.
     pub fn background_sound_kind(&self) -> Option<BackgroundSoundKind> {
         let n = self.name.to_lowercase();
-        // Per-toets of per-register mechaniek is géén achtergrondgeluid —
-        // dat zijn one-shots die bij een aanslag of registratie horen en
-        // komen later aan de beurt.
-        if n.contains("key action") || n.contains("stop action")
+        let n = n.trim();
+        // GrandOrgue-uitgaven van Hauptwerk-sets (0.8.4) noemen óók de
+        // doorlopende geluiden "Stop attack noise {naam}": "… Blower",
+        // "… Ambient noise", "… Zimbelstern". Alleen de attack-variant is een
+        // loop; "Stop release noise Blower" is het éénmalige uitlopen van de
+        // motor en blijft hier buiten.
+        let rest: &str = if let Some(r) = n.strip_prefix("stop attack noise ") {
+            r.trim()
+        } else if n.contains("key action") || n.contains("stop action")
             || n.contains("stop attack") || n.contains("stop release")
             || n.contains("key attack") || n.contains("key release")
             || n.contains("klaviatur") || n.contains("tastatur")
         {
+            // Per-toets of per-register mechaniek is géén achtergrondgeluid.
             return None;
+        } else {
+            n
+        };
+        if rest.contains("noise") && (rest.contains("tremolo") || rest.contains("tremulant")) {
+            return Some(BackgroundSoundKind::TremulantNoise);
         }
-        if n.contains("blower") || n.contains("motor")
-            || n.contains("soufflerie") || n.contains("moteur")
-            || n.contains("bellows") || n.contains("gebläse") || n.contains("geblaese") {
+        if rest.contains("blower") || rest.contains("motor")
+            || rest.contains("soufflerie") || rest.contains("moteur")
+            || rest.contains("bellows") || rest.contains("gebläse") || rest.contains("geblaese") {
             return Some(BackgroundSoundKind::Blower);
         }
         // "rauschen" (niet "rausch"): Rauschquinte en Rauschpfeife zijn echte
         // registers (0.8.3, Nowa Ruda).
-        if n.contains("ambient") || n.contains("ambience")
-            || n.contains("rauschen") || n.contains("geräusch")
-            || n.contains("geraeusch") || n.contains("bruit") {
+        if rest.contains("ambient") || rest.contains("ambience")
+            || rest.contains("rauschen") || rest.contains("geräusch")
+            || rest.contains("geraeusch") || rest.contains("bruit") {
             return Some(BackgroundSoundKind::Ambient);
         }
+        // Speelgoed (0.8.4): een lopende ruisstop aan een eigen knop —
+        // cimbelster, nachtegaal, koekoek, klokjes. Percussieve stops zijn
+        // registerklikken, geen loops.
+        const TOY_MARKERS: &[&str] = &[
+            "zimbelstern", "cymbelstern", "cimbelstern", "cymbalstern", "zymbelstern",
+            "cymbal star", "cymbelster", "cimbelster", "nachtigall", "nightingale",
+            "rossignol", "usignolo", "vogel", "cuculus", "cuckoo", "kuckuck", "koekoek",
+            "carillon", "glocken", "bells", "trommel", "tambour", "pauke", "drum",
+        ];
+        if !self.percussive && TOY_MARKERS.iter().any(|m| rest.contains(m)) {
+            return Some(BackgroundSoundKind::Toy);
+        }
         None
+    }
+
+    /// Weergavenaam van een bijgeluid (0.8.4): zonder het GrandOrgue-voorzetsel
+    /// "Stop attack noise" — op de werkbalk heet de knop "Zimbelstern".
+    pub fn bijgeluid_naam(&self) -> String {
+        let naam = self.name.trim();
+        let lower = naam.to_lowercase();
+        if let Some(r) = lower.strip_prefix("stop attack noise ") {
+            let kop = naam.len() - r.len();
+            return naam[kop..].trim().to_string();
+        }
+        naam.to_string()
     }
 }
 
@@ -710,6 +814,7 @@ impl OdfParser {
             extra_bijgeluiden: Vec::new(),
             stop_action_clicks: std::collections::HashMap::new(),
             keyboard_clicks: std::collections::HashMap::new(),
+            klavier_afkortingen: std::collections::HashMap::new(),
         })
     }
 
@@ -2006,6 +2111,15 @@ mod tests {
         // Toets- en registermechaniek is géén doorlopend achtergrondgeluid.
         assert_eq!(mk("Stop attack noise Flet kryty 8'").background_sound_kind(), None);
         assert_eq!(mk("Stop release noise Blower").background_sound_kind(), None);
+        // GrandOrgue-uitgave van een Hauptwerk-set (0.8.4): de loops heten
+        // "Stop attack noise {Blower|Ambient noise|Zimbelstern}".
+        assert_eq!(mk("Stop attack noise Blower").background_sound_kind(), Some(BackgroundSoundKind::Blower));
+        assert_eq!(mk("Stop attack noise Ambient noise").background_sound_kind(), Some(BackgroundSoundKind::Ambient));
+        assert_eq!(mk("Stop attack noise Zimbelstern").background_sound_kind(), Some(BackgroundSoundKind::Toy));
+        assert_eq!(mk("Stop attack noise Tremolo Noise").background_sound_kind(), Some(BackgroundSoundKind::TremulantNoise));
+        assert_eq!(mk("Stop attack noise Coupler 1").background_sound_kind(), None);
+        assert_eq!(mk("Stop attack noise Tremulant 1 Man").background_sound_kind(), None);
+        assert_eq!(mk("Stop attack noise Zimbelstern").bijgeluid_naam(), "Zimbelstern");
         assert_eq!(mk("Key action Manual 1").background_sound_kind(), None);
         // "Prestant" is sowieso geen ruis en zou nooit hier komen (filter
         // op is_noise_or_mechanical gaat ervoor), maar de helper geeft None.
@@ -2055,6 +2169,7 @@ mod tests {
             extra_bijgeluiden: Vec::new(),
             stop_action_clicks: std::collections::HashMap::new(),
             keyboard_clicks: std::collections::HashMap::new(),
+            klavier_afkortingen: std::collections::HashMap::new(),
         };
         let m = def.klavier_prefix_mapping();
         assert_eq!(m.get("P"), Some(&"Pedal".to_string()));
@@ -2099,6 +2214,7 @@ mod tests {
             extra_bijgeluiden: Vec::new(),
             stop_action_clicks: std::collections::HashMap::new(),
             keyboard_clicks: std::collections::HashMap::new(),
+            klavier_afkortingen: std::collections::HashMap::new(),
         };
         assert!(def.klavier_prefix_mapping().is_empty(), "geen prefixen in deze stopnamen");
         assert_eq!(def.divisie_voor_prefix("P").as_deref(), Some("Pedal"));
@@ -2106,6 +2222,85 @@ mod tests {
         assert_eq!(def.divisie_voor_prefix("OW").as_deref(), Some("Oberwerk"));
         assert_eq!(def.divisie_voor_prefix("SW").as_deref(), Some("Schwellwerk"));
         assert_eq!(def.divisie_voor_prefix("RP"), None);
+    }
+
+    /// Prefix → divisie (0.8.4): afkortingen uit de definitie, de divisienaam
+    /// zelf (GrandOrgue-toetsmechaniek) en Romeinse cijfers als laatste woord.
+    #[test]
+    fn divisie_voor_prefix_kent_afkortingen_namen_en_romeinse_cijfers() {
+        let mut def = OrganDefinition {
+            base_path: std::path::PathBuf::from("."),
+            organ: OrganInfo::default(),
+            manuals: vec![
+                ManualDef { number: 0, name: "Pedal".into(), midi_input_number: 1, number_of_logical_keys: 30, number_of_accessible_keys: 30, first_accessible_key_midi_note: 36, stop_ids: vec![], coupler_ids: vec![], tremulant_ids: vec![] },
+                ManualDef { number: 1, name: "Manual I".into(), midi_input_number: 2, number_of_logical_keys: 61, number_of_accessible_keys: 61, first_accessible_key_midi_note: 36, stop_ids: vec![], coupler_ids: vec![], tremulant_ids: vec![] },
+                ManualDef { number: 2, name: "Manual II".into(), midi_input_number: 3, number_of_logical_keys: 61, number_of_accessible_keys: 61, first_accessible_key_midi_note: 36, stop_ids: vec![], coupler_ids: vec![], tremulant_ids: vec![] },
+            ],
+            stops: Vec::new(),
+            windchests: Vec::new(),
+            enclosures: Vec::new(),
+            tremulants: Vec::new(),
+            couplers: Vec::new(),
+            extra_bijgeluiden: Vec::new(),
+            stop_action_clicks: std::collections::HashMap::new(),
+            keyboard_clicks: std::collections::HashMap::new(),
+            klavier_afkortingen: std::collections::HashMap::new(),
+        };
+        // Romeinse cijfers: laatste woord van de divisienaam.
+        assert_eq!(def.divisie_voor_prefix("I").as_deref(), Some("Manual I"));
+        assert_eq!(def.divisie_voor_prefix("II").as_deref(), Some("Manual II"));
+        // De divisienaam zelf (hoofdletters uit de GO-stopnaam).
+        assert_eq!(def.divisie_voor_prefix("PEDAL").as_deref(), Some("Pedal"));
+        assert_eq!(def.divisie_voor_prefix("MANUAL I").as_deref(), Some("Manual I"));
+        // Afkortingen uit de definitie (Keyboard.ShortName) winnen van de
+        // deelrij-terugval: "M2" zou anders nergens op passen.
+        assert_eq!(def.divisie_voor_prefix("M2"), None);
+        def.klavier_afkortingen.insert("M2".into(), "Manual II".into());
+        assert_eq!(def.divisie_voor_prefix("M2").as_deref(), Some("Manual II"));
+    }
+
+    /// GrandOrgue-toetsmechaniek (0.8.4): "Key action Pedal Attack/Release"
+    /// in het manual Pedal → keyboard_clicks onder prefix "PEDAL", per toets
+    /// vanaf de eerste toets van het manual.
+    #[test]
+    fn go_toetsmechaniek_uit_key_action_stops() {
+        let pijp = |p: &str| PipeDef::Sample { path: std::path::PathBuf::from(p), extra: PipeExtra::default() };
+        let mk = |id: u32, naam: &str, perc: bool, pijpen: Vec<PipeDef>| StopDef {
+            id, name: naam.into(), pitch_tuning_cents: 0.0, number_of_pipes: pijpen.len() as u32,
+            first_accessible_pipe_logical_key: 1, windchest_group: 1,
+            harmonic_number: 8, sounding_harmonic: 8, pitch_correction: 0.0,
+            amplitude_level: 100.0, gain_db: 0.0, percussive: perc,
+            accepts_retuning: false, first_midi_note: None, pipes: pijpen,
+            layers: Vec::new(), primary_perspective: None,
+        };
+        let mut def = OrganDefinition {
+            base_path: std::path::PathBuf::from("."),
+            organ: OrganInfo::default(),
+            manuals: vec![
+                ManualDef { number: 0, name: "Pedal".into(), midi_input_number: 1, number_of_logical_keys: 30, number_of_accessible_keys: 30, first_accessible_key_midi_note: 36, stop_ids: vec![100, 99], coupler_ids: vec![], tremulant_ids: vec![] },
+            ],
+            stops: vec![
+                mk(100, "Key action Pedal Attack", true, vec![pijp("TrakturaPed/A0/036-c.wav"), pijp("TrakturaPed/A0/037-c#.wav")]),
+                mk(99, "Key action Pedal Release", false, vec![pijp("TrakturaPed/R0/036-c.wav"), pijp("TrakturaPed/R0/037-c#.wav")]),
+            ],
+            windchests: Vec::new(),
+            enclosures: Vec::new(),
+            tremulants: Vec::new(),
+            couplers: Vec::new(),
+            extra_bijgeluiden: Vec::new(),
+            stop_action_clicks: std::collections::HashMap::new(),
+            keyboard_clicks: std::collections::HashMap::new(),
+            klavier_afkortingen: std::collections::HashMap::new(),
+        };
+        def.verzamel_go_toetsmechaniek();
+        assert_eq!(def.keyboard_clicks.len(), 2);
+        let k36 = def.keyboard_clicks.get(&("PEDAL".to_string(), 36)).expect("toets 36");
+        assert!(k36.attack.as_ref().unwrap().ends_with("TrakturaPed/A0/036-c.wav"));
+        assert!(k36.release.as_ref().unwrap().ends_with("TrakturaPed/R0/036-c.wav"));
+        let k37 = def.keyboard_clicks.get(&("PEDAL".to_string(), 37)).expect("toets 37");
+        assert!(k37.attack.as_ref().unwrap().ends_with("037-c#.wav"));
+        // De prefix komt via de divisienaam weer bij het pedaal uit.
+        assert_eq!(def.divisie_voor_prefix("PEDAL").as_deref(), Some("Pedal"));
     }
 
     /// GO registermechaniek-matching (0.7.101): "Stop attack noise {naam}" +
@@ -2142,6 +2337,7 @@ mod tests {
             extra_bijgeluiden: Vec::new(),
             stop_action_clicks: std::collections::HashMap::new(),
             keyboard_clicks: std::collections::HashMap::new(),
+            klavier_afkortingen: std::collections::HashMap::new(),
         };
         def.verzamel_go_registermechaniek();
         // Prestant moet attack én release hebben gekregen.
