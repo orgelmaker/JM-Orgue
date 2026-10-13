@@ -14,7 +14,13 @@ aan een echte speeltafel.
 [![platforms](https://img.shields.io/badge/platforms-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-6e40c9?style=for-the-badge)](#downloaden)
 [![licentie](https://img.shields.io/badge/licentie-vrij%20gebruiken%20%26%20doorgeven-8957e5?style=for-the-badge)](#licentie)
 
-<img src="assets/jm-orgue.png" alt="JM-Orgue aan het werk" width="820">
+<table>
+<tr>
+<td align="center" width="33%"><img src="assets/jm-orgue-rond.png" alt="Ronde orgelknoppen" width="100%"><br><sub>Ronde knoppen, licht thema</sub></td>
+<td align="center" width="33%"><img src="assets/jm-orgue-donker.png" alt="Donker gouden thema" width="100%"><br><sub>Donker thema met gouden koppen</sub></td>
+<td align="center" width="33%"><img src="assets/jm-orgue-blauw.png" alt="Blauw thema" width="100%"><br><sub>Blauw thema met vijf divisies</sub></td>
+</tr>
+</table>
 
 <sub>De speeltafel in de app: registers per divisie, koppels en crescendo bij de hand.</sub>
 
