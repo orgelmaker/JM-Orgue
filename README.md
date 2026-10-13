@@ -1,11 +1,24 @@
+<div align="center">
+
 # JM-Orgue
 
-Een virtueel pijporgel voor thuis. Sluit een orgelklavier op de computer aan,
-kies een sampleset en speel. JM-Orgue leest opnamen van echte orgels en geeft
-ze terug met registers, koppels, zwelkasten, tremulanten, galm en een
-generaal crescendo — zoals aan een echte speeltafel.
+**Een virtueel pijporgel voor thuis.**
 
-Voor **Windows, macOS en Linux**. Gebouwd met Tauri 2 en Svelte 4.
+Sluit een orgelklavier op de computer aan, kies een sampleset en speel.
+JM-Orgue leest opnamen van echte orgels en geeft ze terug met registers,
+koppels, zwelkasten, tremulanten, galm en een generaal crescendo — zoals
+aan een echte speeltafel.
+
+[![downloads](https://img.shields.io/github/downloads/orgelmaker/JM-Orgue/total.svg?label=downloads&color=1f6feb&style=for-the-badge&cacheSeconds=3600)](https://github.com/orgelmaker/JM-Orgue/releases)
+[![laatste versie](https://img.shields.io/github/v/release/orgelmaker/JM-Orgue?label=laatste%20versie&color=238636&style=for-the-badge)](https://github.com/orgelmaker/JM-Orgue/releases/latest)
+[![platforms](https://img.shields.io/badge/platforms-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-6e40c9?style=for-the-badge)](#downloaden)
+[![licentie](https://img.shields.io/badge/licentie-vrij%20gebruiken%20%26%20doorgeven-8957e5?style=for-the-badge)](#licentie)
+
+<img src="screenshots/02_orgel_registers.png" alt="JM-Orgue aan het werk" width="820">
+
+<sub>De speeltafel in de app: registers per divisie, koppels en crescendo bij de hand.</sub>
+
+</div>
 
 ---
 
@@ -14,23 +27,48 @@ Voor **Windows, macOS en Linux**. Gebouwd met Tauri 2 en Svelte 4.
 Deze links wijzen altijd naar de nieuwste versie. Ze blijven werken; je hoeft
 niet te zoeken welke de laatste is.
 
-| Systeem | Bestand | |
-|---|---|---|
-| Windows | [JM-Orgue-setup.exe](https://github.com/orgelmaker/JM-Orgue/releases/latest/download/JM-Orgue-setup.exe) | installeert voor jezelf, geen beheerdersrechten nodig |
-| Windows | [JM-Orgue.msi](https://github.com/orgelmaker/JM-Orgue/releases/latest/download/JM-Orgue.msi) | installeert voor de hele computer |
-| macOS | [JM-Orgue.dmg](https://github.com/orgelmaker/JM-Orgue/releases/latest/download/JM-Orgue.dmg) | universal, Intel en Apple Silicon |
-| Linux | [JM-Orgue.AppImage](https://github.com/orgelmaker/JM-Orgue/releases/latest/download/JM-Orgue.AppImage) | uitvoerbaar maken en starten |
-| Linux | [JM-Orgue.deb](https://github.com/orgelmaker/JM-Orgue/releases/latest/download/JM-Orgue.deb) | Debian, Ubuntu en verwanten |
+<table>
+<tr>
+<th align="left">Systeem</th>
+<th align="left">Bestand</th>
+<th align="left"></th>
+</tr>
+<tr>
+<td><b>Windows</b></td>
+<td><a href="https://github.com/orgelmaker/JM-Orgue/releases/latest/download/JM-Orgue-setup.exe">JM-Orgue-setup.exe</a></td>
+<td>installeert voor jezelf, geen beheerdersrechten nodig</td>
+</tr>
+<tr>
+<td><b>Windows</b></td>
+<td><a href="https://github.com/orgelmaker/JM-Orgue/releases/latest/download/JM-Orgue.msi">JM-Orgue.msi</a></td>
+<td>installeert voor de hele computer</td>
+</tr>
+<tr>
+<td><b>macOS</b></td>
+<td><a href="https://github.com/orgelmaker/JM-Orgue/releases/latest/download/JM-Orgue.dmg">JM-Orgue.dmg</a></td>
+<td>universal, Intel en Apple Silicon</td>
+</tr>
+<tr>
+<td><b>Linux</b></td>
+<td><a href="https://github.com/orgelmaker/JM-Orgue/releases/latest/download/JM-Orgue.AppImage">JM-Orgue.AppImage</a></td>
+<td>uitvoerbaar maken en starten</td>
+</tr>
+<tr>
+<td><b>Linux</b></td>
+<td><a href="https://github.com/orgelmaker/JM-Orgue/releases/latest/download/JM-Orgue.deb">JM-Orgue.deb</a></td>
+<td>Debian, Ubuntu en verwanten</td>
+</tr>
+</table>
 
 Alle versies met hun wijzigingen staan bij de
 [releases](https://github.com/orgelmaker/JM-Orgue/releases).
 
-**Bijwerken.** Op Windows meldt de app zelf dat er een nieuwe versie is en
-installeert die op verzoek, waarna hij opnieuw opstart. Op macOS en Linux haal
-je de nieuwe versie van deze pagina.
-
-**Eerste keer op macOS:** de app is niet ondertekend bij Apple. Open hem de
-eerste keer via rechtsklik → Openen.
+> **Bijwerken.** Op Windows meldt de app zelf dat er een nieuwe versie is en
+> installeert die op verzoek, waarna hij opnieuw opstart. Op macOS en Linux
+> haal je de nieuwe versie van deze pagina.
+>
+> **Eerste keer op macOS:** de app is niet ondertekend bij Apple. Open hem
+> de eerste keer via rechtsklik → Openen.
 
 ---
 
@@ -56,19 +94,54 @@ onderaan de orgelbibliotheek.
 
 ## Wat het doet
 
-- **Spelen** — registers, koppels, zwelkasten, tremulant en een generaal
-  crescendo, te bedienen met de muis, met een aanraakscherm of met de knoppen
-  van je eigen speeltafel via MIDI.
-- **Klinken** — galm en toonregeling per uitgang, keuze uit temperaturen,
-  een windmodel dat de druk laat meebewegen met wat je speelt, en
-  microfoonposities waartussen je live wisselt.
-- **Uitvoer** — ASIO of WASAPI op Windows, CoreAudio op macOS, ALSA op Linux.
-  Meerdere uitgangen tegelijk, met de divisies verdeeld over de kanalen.
-- **Opnemen** — MIDI en MP3, met een archief dat vanzelf meeschrijft.
-- **Noteren** — wat je speelt verschijnt als notenschrift in een eigen
-  venster. Dit onderdeel is nog alfa en niet nagelopen.
-- **Zeven talen** — Nederlands, Engels, Duits, Frans, Spaans, Italiaans en
-  Pools.
+<table>
+<tr>
+<td width="33%" valign="top">
+
+### Spelen
+Registers, koppels, zwelkasten, tremulant en een generaal crescendo, te
+bedienen met de muis, met een aanraakscherm of met de knoppen van je eigen
+speeltafel via MIDI.
+
+</td>
+<td width="33%" valign="top">
+
+### Klinken
+Galm en toonregeling per uitgang, keuze uit temperaturen, een windmodel
+dat de druk laat meebewegen met wat je speelt, en microfoonposities
+waartussen je live wisselt.
+
+</td>
+<td width="33%" valign="top">
+
+### Uitvoer
+ASIO of WASAPI op Windows, CoreAudio op macOS, ALSA op Linux. Meerdere
+uitgangen tegelijk, met de divisies verdeeld over de kanalen.
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+### Opnemen
+MIDI en MP3, met een archief dat vanzelf meeschrijft.
+
+</td>
+<td valign="top">
+
+### Noteren
+Wat je speelt verschijnt als notenschrift in een eigen venster. Dit
+onderdeel is nog alfa en niet nagelopen.
+
+</td>
+<td valign="top">
+
+### Zeven talen
+Nederlands, Engels, Duits, Frans, Spaans, Italiaans en Pools.
+
+</td>
+</tr>
+</table>
 
 ---
 
