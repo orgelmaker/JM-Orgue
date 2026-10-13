@@ -567,7 +567,7 @@
     "motor_off": "Motor is off",
     "motor_title": "Organ motor on or off",
     "midi_learn": "MIDI learn (next CC will bind)",
-    "toys": "Toys",
+    "toys": "Effect registers",
     "toys_to_division": "Show toy stops (Zimbelstern, nightingale …) as stop knobs in the top division",
     "toys_to_toolbar": "Move toy stops back to the toolbar",
     "motor_state_on": "on",

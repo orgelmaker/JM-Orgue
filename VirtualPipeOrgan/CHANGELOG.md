@@ -5,6 +5,20 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.8.76] - 2026-10-13
+
+### Registerklik hoorbaar op het moment van de muisklik
+- Het klikgeluid van een registerwissel kwam enkele milliseconden na de
+  klik, omdat het pas na de DTO-update + voice-synchronisatie van
+  `toggle_stop` werd verstuurd. Nu gaat het klikcommando parallel aan
+  `toggle_stop` naar de audio-engine (nieuwe lichte `play_stop_click_now`),
+  zodat de klik samenvalt met de muisklik.
+
+### "Effectregisters" per taal
+- De virtuele speelgoeddivisie (0.8.75) heet nu "Effectregisters" (en per
+  taal: Effect registers, Effektregister, Registres d’effets, Registros
+  de efectos, Registri degli effetti, Rejestry efektów).
+
 ## [0.8.75] - 2026-10-13
 
 ### Speelgoedregisters nu als eigen divisie

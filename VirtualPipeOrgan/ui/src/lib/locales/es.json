@@ -567,7 +567,7 @@
     "motor_off": "Motor apagado",
     "motor_title": "Motor del órgano encendido/apagado",
     "midi_learn": "Aprender MIDI (el próximo CC se vinculará)",
-    "toys": "Efectos",
+    "toys": "Registros de efectos",
     "toys_to_division": "Mostrar los registros de efectos (cimbelstern, ruiseñor …) como tiradores en el teclado superior",
     "toys_to_toolbar": "Devolver los registros de efectos a la barra de herramientas",
     "motor_state_on": "on",

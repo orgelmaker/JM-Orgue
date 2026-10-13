@@ -567,7 +567,7 @@
     "motor_off": "Silnik wyłączony",
     "motor_title": "Silnik organów wł./wył.",
     "midi_learn": "Nauka MIDI (następny CC zostanie powiązany)",
-    "toys": "Efekty",
+    "toys": "Rejestry efektów",
     "toys_to_division": "Pokaż głosy efektowe (cymbelstern, słowik …) jako przyciski rejestrów w górnym manuale",
     "toys_to_toolbar": "Przenieś głosy efektowe z powrotem na pasek narzędzi",
     "motor_state_on": "wł.",

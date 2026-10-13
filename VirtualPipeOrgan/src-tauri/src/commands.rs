@@ -3959,6 +3959,15 @@ pub fn toggle_stop(state: State<AppState>, stop_id: String) -> Result<bool, Stri
     toggle_stop_inner(&state, &stop_id)
 }
 
+/// Speel alvast de registerklik af, zonder op `toggle_stop` te wachten
+/// (0.8.76). De UI roept dit vlak voor `toggle_stop` aan zodat de klik
+/// hoorbaar is op het moment van de muisklik, niet pas na het DTO-rondje
+/// (dat per registratiewijziging een paar milliseconden lock + sync kost).
+#[tauri::command]
+pub fn play_stop_click_now(state: State<AppState>, internal_stop_id: u32, is_attack: bool) {
+    state.send_audio_command(AudioCommand::PlayStopClick { internal_stop_id, is_attack });
+}
+
 /// Set all drawn stops at once (for setzer/preset recall)
 /// Stops in the list become drawn=true, all others become drawn=false
 #[tauri::command]

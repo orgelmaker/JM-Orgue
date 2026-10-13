@@ -5775,7 +5775,14 @@
                     on:pointerdown={(e) => knobPointerDown(e, division.name, stopIdx)}
                     on:click={() => { if (knobDragJustEnded) return;
                       if (stop.__toy) { zetToy(stop.__toy_name, !toysAan[stop.__toy_name]); }
-                      else dispatch('toggleStop', stop.id);
+                      else {
+                        // 0.8.76: registerklik parallel aan toggle_stop versturen,
+                        // zodat hij hoorbaar is op het moment van de muisklik.
+                        if (stop.internal_stop_id) {
+                          invoke('play_stop_click_now', { internalStopId: stop.internal_stop_id, isAttack: !stop.drawn }).catch(() => {});
+                        }
+                        dispatch('toggleStop', stop.id);
+                      }
                     }}
                     use:midiLearn={{ onTrigger: () => showStopContextMenuAt(stop.midi_action_code) }}
                     title="{name}{stop.regel ? ' ' + stop.regel : ''}"

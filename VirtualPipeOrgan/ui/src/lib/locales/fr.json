@@ -567,7 +567,7 @@
     "motor_off": "Moteur arrêté",
     "motor_title": "Moteur de l'orgue marche/arrêt",
     "midi_learn": "Apprentissage MIDI (le prochain CC sera lié)",
-    "toys": "Accessoires",
+    "toys": "Registres d'effets",
     "toys_to_division": "Afficher les jeux d’accessoires (cymbelstern, rossignol …) comme tirants dans le clavier supérieur",
     "toys_to_toolbar": "Remettre les jeux d’accessoires dans la barre d’outils",
     "motor_state_on": "marche",

@@ -567,7 +567,7 @@
     "motor_off": "Motor ist aus",
     "motor_title": "Orgelmotor ein oder aus",
     "midi_learn": "MIDI lernen (nächster CC wird gebunden)",
-    "toys": "Effekte",
+    "toys": "Effektregister",
     "toys_to_division": "Effektregister (Zimbelstern, Nachtigall …) als Registerknöpfe im obersten Werk zeigen",
     "toys_to_toolbar": "Effektregister zurück in die Werkzeugleiste",
     "motor_state_on": "ein",

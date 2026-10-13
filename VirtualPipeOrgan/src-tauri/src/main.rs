@@ -625,6 +625,7 @@ fn main() {
             commands::get_organ_library,
             commands::remove_from_library,
             commands::save_current_organ_settings,
+            commands::play_stop_click_now,
             commands::get_organ_image,
             commands::set_organ_image,
             commands::get_online_image_search_enabled,
