@@ -311,7 +311,11 @@
     "background_channels_blower": "Blower",
     "background_channels_ambient": "Ambient",
     "background_channels_toys": "Effect registers",
-    "background_channels_tremnoise": "Tremulant noise"
+    "background_channels_tremnoise": "Tremulant noise",
+    "pitch_offset": "Pitch correction",
+    "pitch_offset_title": "Shift all pipes a few cents up or down — for samplesets with a base pitch that is not in the organ definition. One semitone = 100 cents.",
+    "pitch_offset_reset": "Zero",
+    "pitch_offset_reset_title": "Back to 0 cents (no correction)."
   },
   "perspectives": {
     "keep_loaded": "Keep all positions in memory",

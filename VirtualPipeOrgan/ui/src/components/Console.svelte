@@ -2218,6 +2218,23 @@
   $: heeftAmbient = (organInfo?.background_sounds || []).some(b => b.kind === 'ambient');
   $: heeftToys = (organInfo?.background_sounds || []).some(b => b.kind === 'toy');
   $: heeftTremulantNoise = (organInfo?.background_sounds || []).some(b => b.kind === 'tremulant_noise');
+
+  // Globale toonhoogte-correctie in cents (0.8.84): voor samplesets met een
+  // afwijkende base-pitch die niet in de ODF staat (Landau-demo klinkt vals
+  // zonder correctie). -200..+200 cent; nul = geen correctie. Per orgel.
+  let pitchOffsetCents = 0;
+  async function haalPitchOffset() {
+    try { pitchOffsetCents = await invoke('get_pitch_offset_cents') ?? 0; } catch (e) {}
+  }
+  $: if (organInfo?.id) haalPitchOffset();
+  let pitchOffsetTimer = null;
+  function zetPitchOffset(v) {
+    pitchOffsetCents = Number(v);
+    clearTimeout(pitchOffsetTimer);
+    pitchOffsetTimer = setTimeout(() => {
+      invoke('set_pitch_offset_cents', { cents: pitchOffsetCents }).catch(console.error);
+    }, 60);
+  }
   function toggleDivisionChannel(div, ch) {
     let list = getDivisionChannels(div).slice();
     if (list.includes(ch)) list = list.filter(x => x !== ch);
@@ -7191,6 +7208,27 @@
                   on:change={(e) => zetDoorlopendKlavier(e.target.checked)} />
                 <span class="swell-toggle-label">{$t('settings.continuous_keyboard')}</span>
               </label>
+
+              <!-- Toonhoogte-correctie (0.8.84): globale cents-offset. Voor
+                   samplesets met een afwijkende base-pitch die niet uit de
+                   ODF komt (bv. Landau-demo). Nul = geen correctie. -->
+              <div class="swell-config-row" style="margin-top:0.75rem;" title={$t('settings.pitch_offset_title')}>
+                <span class="swell-config-label">{$t('settings.pitch_offset')}</span>
+                <input
+                  type="range" min="-100" max="100" step="1"
+                  value={pitchOffsetCents}
+                  on:input={(e) => zetPitchOffset(e.target.value)}
+                  style="flex:1;"
+                />
+                <span class="swell-config-value" style="min-width:4.5rem; text-align:right;">
+                  {pitchOffsetCents > 0 ? '+' : ''}{pitchOffsetCents} ct
+                </span>
+                <button class="btn btn-ghost btn-xs" style="margin-left:0.4rem;"
+                        on:click={() => zetPitchOffset(0)}
+                        title={$t('settings.pitch_offset_reset_title')}>
+                  {$t('settings.pitch_offset_reset')}
+                </button>
+              </div>
 
               <!-- Koppels -->
               {#if displayOrgan.couplers && displayOrgan.couplers.length > 0}

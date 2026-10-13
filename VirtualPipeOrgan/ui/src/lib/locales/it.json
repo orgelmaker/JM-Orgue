@@ -311,7 +311,11 @@
     "background_channels_blower": "Motore",
     "background_channels_ambient": "Ambiente",
     "background_channels_toys": "Registri degli effetti",
-    "background_channels_tremnoise": "Rumore del tremolo"
+    "background_channels_tremnoise": "Rumore del tremolo",
+    "pitch_offset": "Correzione intonazione",
+    "pitch_offset_title": "Sposta tutte le canne di qualche cent verso l’alto o il basso — per samplesets con un’intonazione base assente dalla definizione dell’organo. Un semitono = 100 cent.",
+    "pitch_offset_reset": "Zero",
+    "pitch_offset_reset_title": "Torna a 0 cent (nessuna correzione)."
   },
   "perspectives": {
     "keep_loaded": "Tenere tutte le posizioni in memoria",

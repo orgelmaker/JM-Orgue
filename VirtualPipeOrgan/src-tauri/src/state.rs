@@ -1563,6 +1563,12 @@ pub struct AppState {
     /// 5+6 gaan, kon de organist bijgeluiden en effectregisters niet horen —
     /// ze gingen hard naar 0/1. Deze keuze wordt per orgel opgeslagen.
     pub background_channels: Arc<RwLock<[Vec<u16>; 4]>>,
+    /// Globale toonhoogte-correctie in cents (0.8.84): alle pijpen samen een
+    /// paar cent omhoog of omlaag. Werkt onafhankelijk van temperament en
+    /// voicing; vooral bedoeld voor samplesets met een afwijkende base-pitch
+    /// die niet in de ODF staat (Landau-demo gaf valse noten). Range −200..+200
+    /// cent; nul is "geen correctie". Opgeslagen per orgel.
+    pub pitch_offset_cents: Arc<RwLock<f32>>,
     /// Toetsmechaniek (0.7.102): aan = de aanslag-klik van elk klavier wordt
     /// afgespeeld bij elke MIDI NoteOn. Standaard uit vanwege het geheugen
     /// (per sampleset tot tientallen megabytes aan WAV's). Als de gebruiker
@@ -1933,6 +1939,7 @@ impl AppState {
             background_channels: Arc::new(RwLock::new([
                 vec![0, 1], vec![0, 1], vec![0, 1], vec![0, 1],
             ])),
+            pitch_offset_cents: Arc::new(RwLock::new(0.0)),
             toetsmechaniek_aan: Arc::new(RwLock::new(false)),
             misc_cc_bindings: Arc::new(RwLock::new(Vec::new())),
             misc_cc_learning: Arc::new(RwLock::new(None)),

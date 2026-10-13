@@ -311,7 +311,11 @@
     "background_channels_blower": "Motor",
     "background_channels_ambient": "Ambiente",
     "background_channels_toys": "Registros de efectos",
-    "background_channels_tremnoise": "Ruido del trémolo"
+    "background_channels_tremnoise": "Ruido del trémolo",
+    "pitch_offset": "Corrección de afinación",
+    "pitch_offset_title": "Desplazar todos los tubos unos pocos cents arriba o abajo — para samplesets con un diapasón no incluido en la definición del órgano. Un semitono = 100 cents.",
+    "pitch_offset_reset": "Cero",
+    "pitch_offset_reset_title": "Volver a 0 cents (sin corrección)."
   },
   "perspectives": {
     "keep_loaded": "Mantener todas las posiciones en memoria",

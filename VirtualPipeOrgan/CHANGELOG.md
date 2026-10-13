@@ -5,6 +5,23 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.8.84] - 2026-10-13
+
+### Toonhoogte-correctie per orgel voor "valse" sets
+- Een samplesetter die zijn opnamen op bv. 466 Hz of 415 Hz heeft gemaakt
+  maar de base-pitch niet in de orgeldefinitie heeft gezet, laat JM-Orgue
+  de samples op bestandstoon spelen: hoorbaar vals. Doorlopend-klavier
+  speelt de dichtstbijzijnde pijp af met een halftonen-shift; dat helpt
+  bij een afwezige pijp, maar niet bij een pijp die zelf fout gestemd
+  is.
+- Nieuwe schuif in Algemene instellingen → MIDI → "Toonhoogte-correctie"
+  (−100…+100 cent) verschuift alle pijpen samen. Werkt onafhankelijk
+  van temperament en voicing. Nul = geen correctie. Wordt per orgel
+  opgeslagen. Een halve toon = 100 cent.
+- Interne weg: `AudioCommand::SetPitchOffsetCents` zet `pitch_offset_mul`
+  = 2^(cents/1200) als extra factor op `voice.rate` in `MengBlok` zodat
+  elke klinkende én nieuwe noot direct meeschuift.
+
 ## [0.8.83] - 2026-10-13
 
 ### Perspectief op het hoofdscherm

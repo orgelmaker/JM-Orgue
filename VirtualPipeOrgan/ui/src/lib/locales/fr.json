@@ -311,7 +311,11 @@
     "background_channels_blower": "Soufflerie",
     "background_channels_ambient": "Ambiance",
     "background_channels_toys": "Registres d’effets",
-    "background_channels_tremnoise": "Bruit du tremolo"
+    "background_channels_tremnoise": "Bruit du tremolo",
+    "pitch_offset": "Correction de hauteur",
+    "pitch_offset_title": "Décaler tous les tuyaux de quelques cents vers le haut ou le bas — pour les samplesets dont le diapason n’est pas dans la définition de l’orgue. Un demi-ton = 100 cents.",
+    "pitch_offset_reset": "Zéro",
+    "pitch_offset_reset_title": "Retour à 0 cent (aucune correction)."
   },
   "perspectives": {
     "keep_loaded": "Garder toutes les positions en mémoire",

@@ -311,7 +311,11 @@
     "background_channels_blower": "Motor",
     "background_channels_ambient": "Raumklang",
     "background_channels_toys": "Effektregister",
-    "background_channels_tremnoise": "Tremulantgeräusch"
+    "background_channels_tremnoise": "Tremulantgeräusch",
+    "pitch_offset": "Tonhöhe-Korrektur",
+    "pitch_offset_title": "Alle Pfeifen zusammen ein paar Cent nach oben oder unten verschieben — für Samplesets mit abweichender Grundstimmung, die nicht in der Orgeldefinition steht. Ein Halbton = 100 Cent.",
+    "pitch_offset_reset": "Null",
+    "pitch_offset_reset_title": "Zurück auf 0 Cent (keine Korrektur)."
   },
   "perspectives": {
     "keep_loaded": "Alle Positionen im Speicher halten",

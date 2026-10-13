@@ -1383,6 +1383,24 @@ pub fn get_background_channels(state: State<AppState>) -> [Vec<u16>; 4] {
     state.background_channels.read().clone()
 }
 
+/// Globale toonhoogte-correctie in cents (0.8.84). Range -200..+200.
+/// Nul = geen correctie. Werkt op elke klinkende en komende noot door
+/// de voice.rate met 2^(cents/1200) te vermenigvuldigen. Vooral bedoeld
+/// voor samplesets met een afwijkende base-pitch die niet in de ODF staat
+/// (Landau-demo gaf valse noten die hiermee rechtgezet kunnen worden).
+#[tauri::command]
+pub fn set_pitch_offset_cents(state: State<AppState>, cents: f32) -> Result<(), String> {
+    let c = if cents.is_finite() { cents.clamp(-200.0, 200.0) } else { 0.0 };
+    *state.pitch_offset_cents.write() = c;
+    state.send_audio_command(AudioCommand::SetPitchOffsetCents(c));
+    Ok(())
+}
+
+#[tauri::command]
+pub fn get_pitch_offset_cents(state: State<AppState>) -> f32 {
+    *state.pitch_offset_cents.read()
+}
+
 /// Live volume van een perspectief in dB.
 #[tauri::command]
 pub fn set_perspective_gain(state: State<AppState>, name: String, gain_db: f32) -> Result<(), String> {
@@ -9025,6 +9043,12 @@ fn restore_organ_settings(state: &AppState, organ_id: &str) {
         }
     }
 
+    // Globale toonhoogte-correctie (0.8.84): opgeslagen cents terug naar de
+    // state én naar de audio-engine. 0 = geen correctie.
+    let po = settings.pitch_offset_cents.unwrap_or(0.0).clamp(-200.0, 200.0);
+    *state.pitch_offset_cents.write() = po;
+    state.send_audio_command(AudioCommand::SetPitchOffsetCents(po));
+
     // Toetsmechaniek (0.7.102) uit de opgeslagen settings terug. Vraagt
     // geen herladen hier: de settings worden tijdens de load aangeroepen,
     // dus `laad_en_stuur_toetsmechaniek` loopt eroverheen.
@@ -9739,6 +9763,7 @@ pub fn do_save_organ_settings(state: &AppState, presets: HashMap<String, PresetD
         blower_active: Some(*state.blower_active.read()),
         toys_active: std::collections::HashMap::new(), // 0.8.80: niet opslaan; effectregisters starten altijd uit.
         background_channels: state.background_channels.read().iter().cloned().collect(), // 0.8.82
+        pitch_offset_cents: Some(*state.pitch_offset_cents.read()), // 0.8.84
         toetsmechaniek_aan: Some(*state.toetsmechaniek_aan.read()),
         misc_cc_bindings: crate::state::MISC_CC_BINDINGS().read().clone(),
         extra_couplers: state.extra_coupler_ids.read().clone(),

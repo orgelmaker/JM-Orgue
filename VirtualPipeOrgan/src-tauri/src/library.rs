@@ -502,6 +502,11 @@ pub struct OrganSettings {
     /// [0,1] (front L/R).
     #[serde(default)]
     pub background_channels: Vec<Vec<u16>>,
+    /// Globale toonhoogte-correctie in cents (0.8.84): -200..+200. Nul =
+    /// geen correctie. Voor samplesets met afwijkende base-pitch die niet
+    /// uit de ODF komt (Landau).
+    #[serde(default)]
+    pub pitch_offset_cents: Option<f32>,
     /// Toetsmechaniek aan voor dít orgel (0.7.102). Standaard false.
     #[serde(default)]
     pub toetsmechaniek_aan: Option<bool>,

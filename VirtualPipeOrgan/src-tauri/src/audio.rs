@@ -247,6 +247,9 @@ pub(crate) struct MengBlok<'a> {
     pub ccis_strength: f32,
     pub ccis_falloff: f32,
     pub ccis_swap: bool,
+    /// Globale toonhoogte-correctie (0.8.84): elke voice.rate wordt met deze
+    /// factor vermenigvuldigd. Nul correctie = 1.0.
+    pub pitch_offset_mul: f64,
 }
 
 /// De stemmenlus van één blok: elke stem leest zijn hele blok en telt op bij
@@ -309,8 +312,9 @@ pub(crate) fn meng_stemmen_blok(
         } else {
             (0.0, 0.0)
         };
+        let po_mul = blok.pitch_offset_mul;
         for f in 0..bn {
-            let mut eff_rate = base_rate * pitch_mul;
+            let mut eff_rate = base_rate * pitch_mul * po_mul;
             let mut g = vgain;
             if in_range {
                 if wind_aan {
@@ -878,6 +882,9 @@ pub enum AudioCommand {
     /// Audio-uitgangen per bijgeluid-soort (0.8.82): 0=Blower (motor),
     /// 1=Ambient (omgevingsruis), 2=Toy (effectregisters), 3=TremulantNoise.
     SetBackgroundChannels { kind: u8, channels: Vec<u16> },
+    /// Globale toonhoogte-correctie in cents (0.8.84). Werkt op elke pijp
+    /// als extra factor 2^(cents/1200) op de afspeelsnelheid. Nul = uit.
+    SetPitchOffsetCents(f32),
     /// Register-klikgeluiden (0.7.99): per internal_stop_id een paar
     /// (attack-sample, release-sample) + de bron-samplerate per paar.
     RegisterStopClicks(Arc<HashMap<u32, StopClickBuffers>>),
@@ -3599,6 +3606,10 @@ fn run_audio_thread(
     let trem_active: Arc<RwLock<std::collections::HashSet<u32>>> = Arc::new(RwLock::new(std::collections::HashSet::new()));
     let voices: Arc<RwLock<Vec<PlayingVoice>>> = Arc::new(RwLock::new(Vec::new()));
     let master_gain: Arc<RwLock<f32>> = Arc::new(RwLock::new(0.5));
+    // Globale toonhoogte-correctie (0.8.84): elke voice.rate wordt vermenigvuldigd
+    // met 2^(cents/1200). Op nul = 1.0 (geen effect). Werkt onafhankelijk van
+    // temperament en voicing; vooral voor samplesets met een "valse" base-pitch.
+    let pitch_offset_mul: Arc<RwLock<f64>> = Arc::new(RwLock::new(1.0));
     // Expressie-factor van het MIDI-volumepedaal (multiplicatief op master_gain).
     let master_expression: Arc<RwLock<f32>> = Arc::new(RwLock::new(1.0));
     // Per-division gain for swell boxes (max 32 divisions, default 1.0 = fully open)
@@ -3800,6 +3811,7 @@ fn run_audio_thread(
     let trem_active_clone = trem_active.clone();
     let voices_clone = voices.clone();
     let master_gain_clone = master_gain.clone();
+    let pitch_offset_mul_clone = pitch_offset_mul.clone();
     let master_expression_clone = master_expression.clone();
     let percussive_stops_clone = percussive_stops.clone();
     let division_gains_clone = division_gains.clone();
@@ -4310,6 +4322,11 @@ fn run_audio_thread(
                     AudioCommand::SetToyActive { name, active } => {
                         bg_engine.set_toy(&name, active);
                         info!("Speelgoedregister '{}': {}", name, if active { "aan" } else { "uit" });
+                    }
+                    AudioCommand::SetPitchOffsetCents(cents) => {
+                        let c = if cents.is_finite() { cents.clamp(-200.0, 200.0) } else { 0.0 };
+                        *pitch_offset_mul_clone.write() = 2.0_f64.powf(c as f64 / 1200.0);
+                        info!("Globale toonhoogte-correctie: {:.2} cent", c);
                     }
                     AudioCommand::SetBackgroundChannels { kind, channels } => {
                         use vpo_sampler::grandorgue::BackgroundSoundKind as K;
@@ -5665,6 +5682,7 @@ fn run_audio_thread(
                         ccis_strength,
                         ccis_falloff,
                         ccis_swap,
+                        pitch_offset_mul: *pitch_offset_mul_clone.read(),
                     };
                     // Met pool: de werkers doen de stukken 1.., de audiothread
                     // stuk 0, en we keren pas terug als iedereen klaar is.
@@ -6541,6 +6559,7 @@ mod meng_verdeling_tests {
             bn, wind_dev, trem_rate, trem_amp,
             pan_cos, pan_sin, div_pans: pans, ccis_on: ccis, ccis_en,
             ccis_strength: 0.7, ccis_falloff: 0.6, ccis_swap: false,
+            pitch_offset_mul: 1.0,
         }
     }
 
