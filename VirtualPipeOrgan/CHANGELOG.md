@@ -5,6 +5,16 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.8.78] - 2026-10-13
+
+### Registerklik nu op pointerdown, niet op click
+- Het klikgeluid werd via `on:click` verstuurd, en dat vuurt pas als de
+  muisknop weer wordt losgelaten (100-200 ms na indrukken, en met een
+  korte wachttijd op dubbele klik). Nu wordt `play_stop_click_now` al bij
+  `pointerdown` verstuurd — hoorbaar op het moment van indrukken. De
+  echte toggle gebeurt nog steeds op `click`, zodat slepen of annuleren
+  blijft werken; de klik zelf heeft geen effect op de registratie.
+
 ## [0.8.77] - 2026-10-13
 
 ### Divisienaam gebruikt nu `display_name`

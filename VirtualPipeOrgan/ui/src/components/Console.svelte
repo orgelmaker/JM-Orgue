@@ -4793,6 +4793,12 @@
     const mode = (e.pointerType === 'mouse' && e.shiftKey) ? 'reorder' : 'paint';
     const organ = displayOrgan || organInfo || demoOrgan;
     const first = organ?.divisions?.find(d => d.name === divName)?.stops?.[idx];
+    // 0.8.78: registerklik al bij pointerdown versturen (100-200 ms eerder dan
+    // on:click, dat pas na pointerup komt). Geen echo-klik achteraf: on:click
+    // slaat `play_stop_click_now` nu over.
+    if (mode === 'paint' && first && !first.__toy && first.internal_stop_id) {
+      invoke('play_stop_click_now', { internalStopId: first.internal_stop_id, isAttack: !first.drawn }).catch(() => {});
+    }
     knobDrag = {
       div: divName, fromIdx: idx, startX: e.clientX, startY: e.clientY, active: false, overIdx: null,
       mode, target: first ? !first.drawn : true, firstId: first?.id ?? null, painted: new Set(),
@@ -5775,14 +5781,7 @@
                     on:pointerdown={(e) => knobPointerDown(e, division.name, stopIdx)}
                     on:click={() => { if (knobDragJustEnded) return;
                       if (stop.__toy) { zetToy(stop.__toy_name, !toysAan[stop.__toy_name]); }
-                      else {
-                        // 0.8.76: registerklik parallel aan toggle_stop versturen,
-                        // zodat hij hoorbaar is op het moment van de muisklik.
-                        if (stop.internal_stop_id) {
-                          invoke('play_stop_click_now', { internalStopId: stop.internal_stop_id, isAttack: !stop.drawn }).catch(() => {});
-                        }
-                        dispatch('toggleStop', stop.id);
-                      }
+                      else dispatch('toggleStop', stop.id);
                     }}
                     use:midiLearn={{ onTrigger: () => showStopContextMenuAt(stop.midi_action_code) }}
                     title="{name}{stop.regel ? ' ' + stop.regel : ''}"
