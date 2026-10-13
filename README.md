@@ -14,7 +14,7 @@ aan een echte speeltafel.
 [![platforms](https://img.shields.io/badge/platforms-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-6e40c9?style=for-the-badge)](#downloaden)
 [![licentie](https://img.shields.io/badge/licentie-vrij%20gebruiken%20%26%20doorgeven-8957e5?style=for-the-badge)](#licentie)
 
-<img src="screenshots/02_orgel_registers.png" alt="JM-Orgue aan het werk" width="820">
+<img src="assets/jm-orgue.png" alt="JM-Orgue aan het werk" width="820">
 
 <sub>De speeltafel in de app: registers per divisie, koppels en crescendo bij de hand.</sub>
 
