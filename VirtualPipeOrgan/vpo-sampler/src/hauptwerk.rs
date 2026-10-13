@@ -1267,7 +1267,11 @@ fn verzamel_hw_bijgeluiden(
     let mut uit = Vec::new();
     // Deduplicatie per (kind, switch_id): sets hebben vaak dezelfde pijp
     // in 3 posities (close/front/rear) via 3 ranks. We pakken één exemplaar.
-    let mut gezien: std::collections::HashSet<(BackgroundSoundKind, u32)> = std::collections::HashSet::new();
+    // Dedup op (kind, naam) i.p.v. (kind, switch_id): elke perspectief-rang
+    // ("Noises (close)", "Noises (front)", "Noises (rear)") heeft eigen
+    // __Duplicated-switches voor dezelfde speelgoedknop, dus zonder deze
+    // normalisatie verschijnt bv. "Vogelsang" bij Nitra drie keer (0.8.75).
+    let mut gezien: std::collections::HashSet<(BackgroundSoundKind, String)> = std::collections::HashSet::new();
     for p in pipes {
         let Some(pid) = p.get_u32("PipeID") else { continue };
         let Some(sw_id) = p.get_u32("ControllingPalletSwitchID") else { continue };
@@ -1328,7 +1332,7 @@ fn verzamel_hw_bijgeluiden(
         } else {
             continue;
         };
-        if !gezien.insert((kind, sw_id)) { continue; }
+        if !gezien.insert((kind, naam.to_lowercase())) { continue; }
         // Loop de hoofdlaag van deze pijp op naar het WAV-pad.
         let Some(layers) = layers_of_pipe.get(&pid) else { continue };
         let Some((_num, lid)) = layers.first() else { continue };

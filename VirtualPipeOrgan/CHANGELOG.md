@@ -5,6 +5,23 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.8.75] - 2026-10-13
+
+### Speelgoedregisters nu als eigen divisie
+- Speelgoed (cimbelster, nachtegaal, koekoek …) staat niet meer als
+  losse knoppen in de werkbalk of in het bovenste werk, maar als een
+  eigen virtuele divisie "Speelgoed" in de werken-rij. Daarmee is hij
+  net als elke andere divisie tonen of verbergen. De oude werkbalk-knop
+  (ster) is vervallen.
+
+### Dubbele speelgoedknoppen weg
+- Op sets met opnameperspectieven (close/front/rear) kwamen de speelgoed-
+  switches via elk perspectief door, waardoor Cimbelstern, Vogelsang en
+  Cuculus bijvoorbeeld op Nitra drie keer in de werkbalk stonden. De
+  deduplicatie in de Hauptwerk-importer groepeert nu op (soort, naam) in
+  plaats van (soort, schakelaar-ID), zodat elke speelgoedknop maar één
+  keer verschijnt — ongeacht hoeveel perspectieven de set heeft.
+
 ## [0.8.74] - 2026-10-13
 
 ### Online zoeken naar orgelfoto’s (opt-in)

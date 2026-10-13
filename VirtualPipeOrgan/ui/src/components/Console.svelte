@@ -4879,19 +4879,53 @@
   function buildDisplayOrgan(organ, _order, fmt) {
     const base = organ || demoOrgan;
     if (!base) return base;
-    return {
-      ...base,
-      divisions: base.divisions.map(d => ({
-        ...d,
-        // regelKort: in de platte stand (naam en regel naast elkaar) bij een
-        // mengwerk alleen het aantal; "1-8 st. 8'" drukte de naam daar weg.
-        stops: sortStops(d.stops, d.name).map(s => ({
-          ...s,
-          regel: registerRegel(s, fmt),
-          regelKort: s.mengwerk && s.koren ? korenTekst(s.koren, fmt) : registerRegel(s, fmt),
-        })),
+    const divs = base.divisions.map(d => ({
+      ...d,
+      // regelKort: in de platte stand (naam en regel naast elkaar) bij een
+      // mengwerk alleen het aantal; "1-8 st. 8'" drukte de naam daar weg.
+      stops: sortStops(d.stops, d.name).map(s => ({
+        ...s,
+        regel: registerRegel(s, fmt),
+        regelKort: s.mengwerk && s.koren ? korenTekst(s.koren, fmt) : registerRegel(s, fmt),
       })),
-    };
+    }));
+    // Speelgoed als eigen virtuele divisie (0.8.75): elke toy een knop
+    // met een eigen id ("__toy__NAAM"); de klik-handler herkent dat en
+    // schakelt via set_toy_active i.p.v. toggle_stop. Zo kan de divisie
+    // net als elke andere getoond of verborgen worden, en vervalt de
+    // werkbalk-strook met losse speelgoedknoppen.
+    const toys = (base.background_sounds || []).filter(b => b.kind === 'toy');
+    if (toys.length > 0) {
+      divs.push({
+        name: '__toys__',
+        display_name: $t('toolbar.toys'),
+        has_swell: false,
+        has_tremulant: false,
+        is_pedal: false,
+        __toy_division: true,
+        stops: toys.map((toy, i) => ({
+          id: '__toy__' + toy.name,
+          internal_stop_id: 900000 + i,
+          name: toy.name,
+          pitch: '',
+          regel: '',
+          regelKort: '',
+          drawn: !!(toysAan && toysAan[toy.name]),
+          groep: 'overig',
+          familie: 'effect',
+          first_midi_note: 0,
+          last_midi_note: 0,
+          mengwerk: false,
+          midi_action_code: 0,
+          has_tremulant: false,
+          is_reed: false,
+          __toy: true,
+          __toy_name: toy.name,
+        })),
+        tremulant_kind: null,
+      });
+    }
+    return { ...base, divisions: divs };
   }
   $: rangsFmt = $t('stops.ranks_format');
   $: displayOrgan = buildDisplayOrgan(organInfo, stopOrder, rangsFmt);
@@ -5485,20 +5519,9 @@
                 <span class="motor-lamp" aria-hidden="true"></span>
               </button>
             {/if}
-            <!-- Speelgoedregisters (0.7.98): per klikbare switch een eigen
-                 knop. Cymbelstern, Vogelsang, Cuculus en soortgelijke. Staan
-                 ze als registerknop in een werk (0.8.4), dan niet hier. -->
-            {#if toyPlacement !== 'division'}
-              {#each speelgoed as toy (toy.name)}
-                <button
-                  class="btn btn-ghost btn-sm panel-layout-btn"
-                  class:motor-aan={toysAan[toy.name]}
-                  on:click={() => zetToy(toy.name, !toysAan[toy.name])}
-                  title={toy.name}
-                  aria-pressed={!!toysAan[toy.name]}
-                >{toy.name}</button>
-              {/each}
-            {/if}
+            <!-- Speelgoedregisters (0.7.98 → 0.8.75): staan nu altijd als
+                 virtuele divisie in de werken-rij. De oude werkbalk-knoppen
+                 en de "ster"-schakelaar zijn vervallen. -->
             <button
               class="btn btn-ghost btn-sm panel-layout-btn"
               on:click={passendMaken}
@@ -5569,18 +5592,8 @@
                 {$t('toolbar.couplers')}
               </button>
             {/if}
-            {#if speelgoed.length > 0}
-              <button
-                class="btn btn-ghost btn-sm panel-layout-btn"
-                on:click={toggleToyPlacement}
-                title={toyPlacement === 'toolbar' ? $t('toolbar.toys_to_division') : $t('toolbar.toys_to_toolbar')}
-              >
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round">
-                  <path d="M12 2.5l2.6 5.6 6.1.7-4.5 4.2 1.2 6L12 16l-5.4 3 1.2-6-4.5-4.2 6.1-.7z"/>
-                </svg>
-                {$t('toolbar.toys')}
-              </button>
-            {/if}
+            <!-- (0.8.75) Speelgoed-plaatsing-knop vervallen: speelgoed is
+                 nu altijd een eigen divisie. -->
             {#if secondary && showPanelHeaderToggle}
               <!-- Hoofdbalk (tabs/profielwissel/start-stop) tonen op dit scherm -->
               <button
@@ -5760,7 +5773,10 @@
                     data-knob-div={division.name}
                     data-knob-idx={stopIdx}
                     on:pointerdown={(e) => knobPointerDown(e, division.name, stopIdx)}
-                    on:click={() => { if (knobDragJustEnded) return; dispatch('toggleStop', stop.id); }}
+                    on:click={() => { if (knobDragJustEnded) return;
+                      if (stop.__toy) { zetToy(stop.__toy_name, !toysAan[stop.__toy_name]); }
+                      else dispatch('toggleStop', stop.id);
+                    }}
                     use:midiLearn={{ onTrigger: () => showStopContextMenuAt(stop.midi_action_code) }}
                     title="{name}{stop.regel ? ' ' + stop.regel : ''}"
                     aria-label="{stop.name} {stop.regel || ''} — {stop.drawn ? $t('stops.drawn') : $t('stops.not_drawn')}"
@@ -5806,24 +5822,8 @@
                     </button>
                   {/each}
                 {/if}
-                <!-- Speelgoedregisters als registerknop (0.8.4): in het
-                     bovenste werk op het scherm, dezelfde maat als een
-                     koppelknop. -->
-                {#if toyPlacement === 'division' && division.name === toyDivisionName}
-                  {#each speelgoed as toy (toy.name)}
-                    <button
-                      class="stop-knob coupler coupler-knob toy-knob"
-                      style={knopHoogteStijl}
-                      class:engaged={!!toysAan[toy.name]}
-                      on:click={() => zetToy(toy.name, !toysAan[toy.name])}
-                      title={toy.name}
-                      aria-label="{toy.name} — {toysAan[toy.name] ? $t('stops.drawn') : $t('stops.not_drawn')}"
-                      aria-pressed={!!toysAan[toy.name]}
-                    >
-                      <span class="coupler-line">{toy.name}</span>
-                    </button>
-                  {/each}
-                {/if}
+                <!-- (0.8.75) In-divisie-plaatsing van speelgoed vervallen:
+                     speelgoed heeft nu een eigen virtuele divisie. -->
               </div>
             </div>
           {/each}
