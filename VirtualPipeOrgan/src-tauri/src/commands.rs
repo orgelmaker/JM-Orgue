@@ -7882,7 +7882,9 @@ fn is_reed_stop(name: &str) -> bool {
     // "Dulciana" en "Dulcet" (strijkers) bevatten "dulcian": geen tongwerk.
     if lower.contains("dulciana") || lower.contains("dulcet") { return false; }
     // Dutch, German, French, English reed stop names
-    lower.contains("trompet") || lower.contains("trumpet") ||
+    // "tompet(a)" (0.8.72): zeldzame typo bij een Spaanse Chamade — bv.
+    // Rotterdam's "CB Tompeta brillante" (zonder r). Blijft tongwerk.
+    lower.contains("trompet") || lower.contains("trumpet") || lower.contains("tompet") ||
     lower.contains("cornopean") || lower.contains("tromba") || lower.contains("ophicleide") ||
     lower.contains("euphonium") || lower.contains("bassetto") || lower.contains("zink") ||
     lower.contains("schalmey") ||

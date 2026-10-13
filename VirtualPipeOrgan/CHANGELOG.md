@@ -5,6 +5,20 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.8.72] - 2026-10-13
+
+### Pedaal-Cornet is géén tongwerk
+- Een pedaal-Cornet (5 1/3', 4') werd als tongwerk gekleurd. Dat is onjuist:
+  een pedaal-Cornet is een labiale vulstem (een cornet-mixtuur), ongeacht
+  de voetmaat. Alleen een manuaal-Cornet van 4' of 2' blijft tongwerk —
+  dat is de Spaanse "Corneta". De bijpassende tests zijn bijgewerkt.
+
+### Typo "Tompeta" wordt alsnog als tongwerk herkend
+- Sommige sampleset-makers schrijven de Chamade-register-naam zonder r:
+  "Tompeta brillante" in plaats van "Trompeta brillante". De tongwerk-
+  detectie zocht alleen op "trompet" en viel voor zo'n typo op Principaal
+  terug. Nu telt ook "tompet(a)".
+
 ## [0.8.71] - 2026-10-13
 
 ### Compacte Hauptwerk-definities: schakelaarnamen eindelijk herkend
