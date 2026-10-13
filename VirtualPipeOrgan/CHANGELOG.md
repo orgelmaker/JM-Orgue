@@ -5,6 +5,36 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.8.81] - 2026-10-13
+
+### Motor-sleutel: alleen hoofdscherm en echt uit
+- Op installaties met extra registerschermen stond de motor-sleutel op
+  elk scherm, waarbij elk scherm zijn eigen tekstje "aan/uit" liet zien
+  en bij een wissel niet synchroon liep. De sleutel staat nu uitsluitend
+  op het hoofdscherm, zodat er geen misverstand meer is over welke
+  stand geldt.
+- Belangrijker: met de motor uit klonk de orgel-wind-opname wel dempend
+  weg, maar als de organist een toets aansloeg speelden de pijpen
+  gewoon door. Dat was niet realistisch (en dat was ook de vraag van
+  Piotr). De audio-engine negeert nu elke nieuwe NoteOn zolang de motor
+  uit staat. Al klinkende noten doven af via hun eigen release — net
+  zoals bij een echt orgel waarvan de wind wegvalt.
+
+### "__toys__" niet meer zichtbaar in orgel-instellingen
+- Op het tabblad "Orgel-instellingen → MIDI" verscheen de virtuele
+  effectregister-divisie als "__toys__". Nu toont dat tabblad net als
+  de rest van de schermen de vertaalde naam ("Effectregisters").
+
+### Afbeelding verversen door de kaart ingedrukt te houden
+- Vond de automatische zoeker in de bibliotheek een nét niet-passende
+  foto, dan was er geen manier om haar opnieuw te laten zoeken zonder
+  eerst een handmatige keuze te maken en die weer terug te zetten.
+  Houd nu een bibliotheekkaart drie seconden ingedrukt om de foto
+  opnieuw te laten zoeken; de cache van die ene entry wordt gewist en
+  de zoeker start vers (inclusief Wikimedia-Commons-zoekopdracht als
+  die staat ingeschakeld). Een korte klik laadt het orgel zoals
+  voorheen.
+
 ## [0.8.80] - 2026-10-13
 
 ### Effectregisters starten altijd uit

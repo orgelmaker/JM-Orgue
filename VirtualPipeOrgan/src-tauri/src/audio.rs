@@ -4097,6 +4097,14 @@ fn run_audio_thread(
                 }
                 match cmd {
                     AudioCommand::NoteOn { stop_id, pipe_num, midi_note, velocity, verschuiving } => {
+                        // Motor uit = geen nieuwe wind, dus geen nieuwe pijp
+                        // kan aanspreken (0.8.81). Al klinkende pijpen doven
+                        // via hun eigen NoteOff/release. Alleen als de set een
+                        // motor-opname kent (anders is de motor fictief en
+                        // blijft `blower_active` altijd true).
+                        if !bg_engine.blower_active {
+                            continue;
+                        }
                         // Fan-out over de lagen van deze stop (gestapelde ranks
                         // en ingeschakelde perspectieven, 0.7.38): één NoteOn
                         // → één voice per laag, elk onder zijn eigen laagsleutel.

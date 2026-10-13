@@ -4245,6 +4245,51 @@
     }
   }
 
+  // Afbeelding verversen door 3 s op de kaart gedrukt te houden (0.8.81).
+  // Werkt ook bij een al automatisch gevonden foto: set_organ_image met
+  // path=null zet image_searched op None, dus de volgende scan zoekt
+  // opnieuw. Toont kort een hint over wat er gebeurt zodra de timer
+  // afgaat (anders is de klik "verdwenen"). Alleen in de bibliotheek,
+  // niet op panelen; de kaart-click (orgel laden) wordt vlak voor het
+  // vuren onderschept via een vlag die de kaart-handler bekijkt.
+  let imageRefreshTimers = {};
+  let imageRefreshFired = {};
+  const IMAGE_REFRESH_HOLD_MS = 3000;
+  function startRefreshImage(e, organ) {
+    // Alleen primaire muisknop of touch — rechter-klik niet.
+    if (e.button != null && e.button !== 0) return;
+    // Pointerdown op een actieknop (foto kiezen, verwijderen, …) is géén
+    // vast-houden-op-de-kaart.
+    const t = e.target;
+    if (t && t.closest && (t.closest('.library-card-btn') || t.closest('.library-card-pick')
+      || t.closest('.library-card-credit') || t.closest('a'))) {
+      return;
+    }
+    const id = organ.id;
+    imageRefreshFired[id] = false;
+    clearTimeout(imageRefreshTimers[id]);
+    imageRefreshTimers[id] = setTimeout(async () => {
+      imageRefreshFired[id] = true;
+      try {
+        await invoke('set_organ_image', { id, path: null });
+        delete organImages[id];
+        organImages = organImages;
+        await loadLibrary();
+      } catch (err) {
+        console.error('Afbeelding verversen mislukt:', err);
+      }
+    }, IMAGE_REFRESH_HOLD_MS);
+  }
+  function cancelRefreshImage(organ) {
+    clearTimeout(imageRefreshTimers[organ.id]);
+  }
+  function clickFiredByRefresh(organ) {
+    // Terug true: de kaart-click moet dit niet als "laden" interpreteren.
+    const was = !!imageRefreshFired[organ.id];
+    imageRefreshFired[organ.id] = false;
+    return was;
+  }
+
   async function removeFromLibrary(e, id) {
     e.stopPropagation();
     try {
@@ -5199,8 +5244,13 @@
         {#each libraryOrgans as organ}
           <div
             class="library-card"
-            on:click={() => loadLibraryOrgan(organ)}
+            on:click={() => { if (!clickFiredByRefresh(organ)) loadLibraryOrgan(organ); }}
             on:keypress={(e) => e.key === 'Enter' && loadLibraryOrgan(organ)}
+            on:pointerdown={(e) => startRefreshImage(e, organ)}
+            on:pointerup={() => cancelRefreshImage(organ)}
+            on:pointerleave={() => cancelRefreshImage(organ)}
+            on:pointercancel={() => cancelRefreshImage(organ)}
+            title={$t('library.refresh_hold_hint')}
             role="button"
             tabindex="0"
           >
@@ -5503,8 +5553,13 @@
               </div>
             {/if}
             <!-- Motor-knop (0.7.97): aanwezig als de sampleset een blower-opname
-                 heeft; schakelt de orgelmotor in of uit met fade-in/uit. -->
-            {#if heeftBlower}
+                 heeft; schakelt de orgelmotor in of uit met fade-in/uit.
+                 (0.8.81) Alleen op het hoofdscherm, niet op extra register-
+                 panelen: één sleutelschakelaar per orgel, zoals bij een echt
+                 orgel. Vanaf 0.8.81 negeert de audio-engine nieuwe toetsen
+                 als de motor uit staat (bestaande noten doven uit via hun
+                 eigen release) — dus zonder motor klinkt het orgel niet. -->
+            {#if heeftBlower && !secondary}
               <!-- Als sleutelschakelaar (0.8.4): rond schild met een gleuf
                    die van 0 naar I draait, een lampje en de stand in tekst. -->
               <button
@@ -6715,7 +6770,7 @@
                 {@const m = midiMapByDiv[division.name]}
                 <div class="midi-mapping-row">
                   <div class="midi-mapping-division">
-                    <span class="division-label">{division.name}</span>
+                    <span class="division-label">{division.display_name || division.name}</span>
                     {#if m && m.first_midi_note != null && m.last_midi_note != null}
                       <span class="division-range">({midiToNoteName(m.first_midi_note)} - {midiToNoteName(m.last_midi_note)})</span>
                     {/if}

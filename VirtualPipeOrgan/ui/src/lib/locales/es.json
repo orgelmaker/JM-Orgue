@@ -51,7 +51,8 @@
     "online_search_enable": "Permitir búsqueda en línea",
     "online_busy": "Buscando…",
     "online_none": "Nada encontrado. Pruebe a completar nombre, constructor o lugar en la ficha.",
-    "online_notice": "Haga clic en una foto para aplicarla. Fuente y licencia se muestran bajo la ficha."
+    "online_notice": "Haga clic en una foto para aplicarla. Fuente y licencia se muestran bajo la ficha.",
+    "refresh_hold_hint": "Haga clic para cargar el órgano. Mantenga pulsado 3 segundos para buscar una nueva foto."
   },
   "settings": {
     "audio_output": "Salida de audio",

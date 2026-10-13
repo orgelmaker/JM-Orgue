@@ -51,7 +51,8 @@
     "online_search_enable": "Allow online search",
     "online_busy": "Searching…",
     "online_none": "Nothing found. Consider filling in name, builder or location in the library entry.",
-    "online_notice": "Click a photo to use it. The source link and license are shown below the card."
+    "online_notice": "Click a photo to use it. The source link and license are shown below the card.",
+    "refresh_hold_hint": "Click to load the organ. Press and hold for 3 seconds to search for a new photo."
   },
   "settings": {
     "audio_output": "Audio Output",

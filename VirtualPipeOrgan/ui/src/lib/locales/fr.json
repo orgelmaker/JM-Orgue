@@ -51,7 +51,8 @@
     "online_search_enable": "Autoriser la recherche en ligne",
     "online_busy": "Recherche en cours…",
     "online_none": "Rien trouvé. Complétez éventuellement le nom, le facteur ou le lieu dans la fiche.",
-    "online_notice": "Cliquez sur une photo pour l’appliquer. La source et la licence s’affichent sous la fiche."
+    "online_notice": "Cliquez sur une photo pour l’appliquer. La source et la licence s’affichent sous la fiche.",
+    "refresh_hold_hint": "Cliquez pour charger l’orgue. Maintenez 3 secondes pour rechercher une nouvelle photo."
   },
   "settings": {
     "audio_output": "Sortie Audio",

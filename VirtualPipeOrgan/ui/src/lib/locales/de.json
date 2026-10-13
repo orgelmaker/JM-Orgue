@@ -51,7 +51,8 @@
     "online_search_enable": "Online-Suche erlauben",
     "online_busy": "Suche läuft…",
     "online_none": "Nichts gefunden. Ergänzen Sie evtl. Name, Erbauer oder Ort im Bibliothekseintrag.",
-    "online_notice": "Zum Übernehmen auf ein Foto klicken. Quellenangabe und Lizenz werden unter der Karte gezeigt."
+    "online_notice": "Zum Übernehmen auf ein Foto klicken. Quellenangabe und Lizenz werden unter der Karte gezeigt.",
+    "refresh_hold_hint": "Zum Laden klicken. 3 Sekunden gedrückt halten, um ein neues Foto zu suchen."
   },
   "settings": {
     "audio_output": "Audio-Ausgabe",

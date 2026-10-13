@@ -51,7 +51,8 @@
     "online_search_enable": "Zezwól na wyszukiwanie online",
     "online_busy": "Trwa wyszukiwanie…",
     "online_none": "Nic nie znaleziono. Spróbuj uzupełnić nazwę, budowniczego lub lokalizację we wpisie.",
-    "online_notice": "Kliknij zdjęcie, aby je zastosować. Źródło i licencja są pokazane pod kartą."
+    "online_notice": "Kliknij zdjęcie, aby je zastosować. Źródło i licencja są pokazane pod kartą.",
+    "refresh_hold_hint": "Kliknij, aby wczytać organy. Przytrzymaj 3 sekundy, aby wyszukać nową fotografię."
   },
   "settings": {
     "audio_output": "Wyjście audio",

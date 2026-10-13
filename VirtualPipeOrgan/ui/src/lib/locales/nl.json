@@ -51,7 +51,8 @@
     "online_search_enable": "Online zoeken toestaan",
     "online_busy": "Bezig met zoeken…",
     "online_none": "Niets gevonden. Probeer eventueel de naam, bouwer of plaats in de bibliotheek-entry aan te vullen.",
-    "online_notice": "Klik een foto om hem over te nemen. De bronverwijzing en licentie worden onder de kaart getoond."
+    "online_notice": "Klik een foto om hem over te nemen. De bronverwijzing en licentie worden onder de kaart getoond.",
+    "refresh_hold_hint": "Klik om het orgel te laden. Houd 3 seconden ingedrukt om de foto opnieuw te laten zoeken."
   },
   "settings": {
     "audio_output": "Audio Uitvoer",
