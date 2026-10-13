@@ -10173,34 +10173,84 @@ pub fn set_online_image_search_enabled(state: State<AppState>, enabled: bool) ->
     Ok(())
 }
 
-/// Zoek bij Wikimedia Commons naar foto's voor dít orgel. Alleen de naam,
-/// bouwer en plaats uit de bibliotheek-entry gaan mee. Vereist dat de
-/// gebruiker [`set_online_image_search_enabled`] eerder aan heeft gezet;
-/// anders geven we een lege lijst terug (zodat de UI de knop onzichtbaar
-/// kan laten).
+/// Zoek bij Wikimedia Commons naar foto's voor dít orgel. Sinds 0.8.88 wordt
+/// de zoekcontext uit álle beschikbare set-informatie opgebouwd: de
+/// bibliotheek-entry, de ODF-kop (kerk, plaats, bouwer, opmerkingen), het
+/// Hauptwerk info-HTML, readme-/info-bestanden naast de set en het JM-Rec-
+/// manifest. Daaruit komen tot vier zoektermen (kerk + plaats, naam + plaats,
+/// bouwer + plaats, oude combinatie); de treffers worden samengevoegd. Naar
+/// buiten gaan alleen die zoektermen — nooit paden of bestandsinhoud.
+/// Vereist dat de gebruiker [`set_online_image_search_enabled`] eerder aan
+/// heeft gezet.
 #[tauri::command]
 pub async fn search_online_image(state: State<'_, AppState>, id: String)
     -> Result<Vec<crate::library_online::OnlineImageHit>, String>
 {
+    use crate::library_online as lo;
     let norm = crate::library::pad_sleutel;
     let key = norm(&id);
-    let (toegestaan, naam, builder, location) = {
+    let (toegestaan, entry) = {
         let lib = state.organ_library.read();
         let toegestaan = lib.online_image_search_enabled;
         let e = lib.organs.iter()
             .find(|o| norm(&o.id) == key || norm(&o.source_path) == key)
             .cloned();
         match e {
-            Some(e) => (toegestaan, e.name, e.builder, e.location),
+            Some(e) => (toegestaan, e),
             None => return Err(format!("Orgel niet in de bibliotheek: {}", id)),
         }
     };
     if !toegestaan {
         return Err("Online zoeken staat uit. Zet het aan in Instellingen.".to_string());
     }
-    let term = crate::library_online::zoek_term(&naam, &builder, &location);
-    info!("Online zoeken naar orgelfoto: '{}'", term);
-    let hits = tokio::task::spawn_blocking(move || crate::library_online::zoek_commons(&term))
+
+    let mut ctx = lo::ZoekContext {
+        naam: entry.name.clone(),
+        bouwer: entry.builder.clone(),
+        plaats: entry.location.clone(),
+        ..Default::default()
+    };
+    let bron = Path::new(&entry.source_path);
+    let lower = entry.source_path.to_lowercase();
+    if lower.ends_with(".organ_hauptwerk_xml") {
+        let mut info_html: Option<PathBuf> = None;
+        if let Some(g) = lo::lees_hw_general_licht(bron) {
+            if ctx.plaats.trim().is_empty() { ctx.plaats = g.plaats.clone(); }
+            if ctx.bouwer.trim().is_empty() { ctx.bouwer = g.bouwer.clone(); }
+            ctx.kerk = g.naam.clone();
+            ctx.opmerkingen = g.opmerkingen.clone();
+            if let (Some(root), Some(pid)) = (vpo_sampler::hauptwerk::find_package_root(bron), g.pakket_id) {
+                if !g.info_bestand.is_empty() {
+                    if let Some(pkg) = vpo_sampler::hauptwerk::scan_package_dirs(&root).get(&pid) {
+                        let p = pkg.join(g.info_bestand.replace('\\', "/"));
+                        if p.is_file() { info_html = Some(p); }
+                    }
+                }
+            }
+        }
+        ctx.teksten = lo::teksten_uit_map(bron.parent(), info_html.as_deref());
+    } else if lower.ends_with(".organ") {
+        if let Some(info) = lees_organ_sectie_licht(bron) {
+            if ctx.plaats.trim().is_empty() { ctx.plaats = info.church_address.clone(); }
+            if ctx.bouwer.trim().is_empty() { ctx.bouwer = info.organ_builder.clone(); }
+            ctx.kerk = info.church_name.clone();
+            ctx.opmerkingen = info.organ_comments.clone();
+        }
+        ctx.teksten = lo::teksten_uit_map(bron.parent(), None);
+    } else {
+        // Mapscan: het JM-Rec-manifest is de enige harde bron; verder
+        // readme-/info-bestanden in de map.
+        if let Some(m) = jm_rec_manifest_in_dir(bron) {
+            if !m.kerk.trim().is_empty() { ctx.kerk = m.kerk.trim().to_string(); }
+            if !m.bouwer.trim().is_empty() { ctx.bouwer = m.bouwer.trim().to_string(); }
+            if !m.plaats.trim().is_empty() { ctx.plaats = m.plaats.trim().to_string(); }
+        }
+        ctx.teksten = lo::teksten_uit_map(Some(bron), None);
+    }
+
+    let termen = lo::zoek_termen(&ctx);
+    info!("Online zoeken naar orgelfoto: {:?} ({} tekstbron(nen))", termen, ctx.teksten.len());
+    let hits = tokio::task::spawn_blocking(move || lo::zoek_commons_meervoudig(&termen))
         .await
         .map_err(|e| format!("Zoektaak mislukt: {}", e))?;
     Ok(hits)

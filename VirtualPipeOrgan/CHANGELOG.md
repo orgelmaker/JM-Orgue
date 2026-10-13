@@ -5,6 +5,24 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.8.88] - 2026-10-13
+
+### Online zoeken doorzoekt de hele set voor kerk, plaats en bouwer
+- De fotozoeker (0.8.74) kende alleen naam, bouwer en plaats uit de
+  bibliotheek-entry. Bij een gescande map is dat "Custom Samples" met
+  het pad als plaats, en bij Hauptwerk- en GrandOrgue-sets staat de
+  kerknaam vaak alleen in de opmerkingen van de orgeldefinitie of in
+  het meegeleverde info-HTML. De zoeker leest nu lokaal alles mee: de
+  ODF-kop (kerk, plaats, bouwer, opmerkingen), het Hauptwerk info-HTML
+  uit het pakket, readme-/info-bestanden naast de set en het JM-Rec-
+  manifest. Een kerknaam wordt herkend aan kerkwoorden in ruim twintig
+  spellingen (kerk, church, Kirche, dom, cathedral, basilica, chapel,
+  St./Sint/Saint, …); de plaats is het eerste adresdeel zonder postcode.
+- Daaruit volgen tot vier zoekopdrachten — kerk + plaats, naam + plaats,
+  bouwer + plaats en de oude combinatie — waarvan de treffers worden
+  samengevoegd tot hoogstens zes. Naar buiten gaan alleen die
+  zoektermen; paden en bestandsinhoud blijven lokaal. Vijf tests.
+
 ## [0.8.87] - 2026-10-13
 
 ### Tremulantstemmen worden nu ook bijgestemd

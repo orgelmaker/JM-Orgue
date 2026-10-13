@@ -19,7 +19,7 @@ use tracing::{info, warn};
 /// User-agent zoals de Wikimedia-regels dat voorschrijven (geldige mail +
 /// contactpunt). Zonder deze header weigeren de API-eindpunten een deel van
 /// de verzoeken; met deze header blijven we een "nette" API-gebruiker.
-const USER_AGENT: &str = "JM-Orgue/0.8.74 (+https://github.com/orgelmaker/JM-Orgue)";
+const USER_AGENT: &str = "JM-Orgue/0.8.88 (+https://github.com/orgelmaker/JM-Orgue)";
 
 /// Maximaal aantal treffers dat we per zoekopdracht aan de UI tonen.
 pub const MAX_HITS: usize = 3;
@@ -97,14 +97,355 @@ pub fn zoek_term(name: &str, builder: &str, location: &str) -> String {
             delen.push(s);
         }
     }
-    let kern = delen.join(" ");
-    if kern.to_lowercase().contains("orgel")
-        || kern.to_lowercase().contains("organ")
-        || kern.to_lowercase().contains("orgue")
-    {
+    met_orgelwoord(delen.join(" "))
+}
+
+/// Zorg dat de zoekterm het woord orgel/organ/orgue bevat — anders vindt
+/// Commons vooral kerkgevels en plattegronden.
+fn met_orgelwoord(kern: String) -> String {
+    let l = kern.to_lowercase();
+    if l.contains("orgel") || l.contains("organ") || l.contains("orgue") {
         kern
     } else {
-        format!("{} orgel", kern)
+        format!("{} orgel", kern.trim())
+    }
+}
+
+/// Alles wat we over een set kunnen verzamelen om kerk, plaats en bouwer te
+/// vinden (0.8.88). De bibliotheek-entry alleen was te mager: een gescande
+/// map heet "Custom Samples" met het pad als plaats, en bij Hauptwerk- en
+/// GrandOrgue-sets staat de kerknaam vaak alleen in de ODF-opmerkingen of in
+/// het meegeleverde info-HTML. Alle tekst hierin is lokaal gelezen; naar
+/// buiten gaan alleen de afgeleide zoektermen (naam, kerk, plaats, bouwer).
+#[derive(Debug, Default, Clone)]
+pub struct ZoekContext {
+    /// Naam uit de bibliotheek-entry.
+    pub naam: String,
+    /// Bouwer uit de bibliotheek-entry ("Custom Samples" telt niet).
+    pub bouwer: String,
+    /// Plaats uit de bibliotheek-entry (ChurchAddress / OrganInfo_Location);
+    /// een pad telt niet.
+    pub plaats: String,
+    /// Kerknaam uit de ODF (ChurchName / Identification_Name) of het manifest.
+    pub kerk: String,
+    /// Opmerkingen uit de ODF (OrganComments / OrganInfo_Comments).
+    pub opmerkingen: String,
+    /// Platgeslagen tekst uit info-HTML, readme's en soortgelijke bestanden.
+    pub teksten: Vec<String>,
+}
+
+/// Woorden waaraan we een kerk-/gebouwnaam herkennen, in de talen die in
+/// samplesets voorkomen. Kleine letters; `contains`-match.
+const KERK_WOORDEN: &[&str] = &[
+    "kerk", "church", "kirche", "dom", "cathedral", "kathedraal", "cathédrale",
+    "catedral", "cattedrale", "basilica", "basiliek", "basilika", "basilique",
+    "église", "eglise", "iglesia", "chiesa", "kościół", "kosciol", "abbey",
+    "abdij", "abtei", "abbaye", "chapel", "kapel", "kapelle", "chapelle",
+    "cappella", "minster", "münster", "munster", "st.", "sint", "saint", "san ",
+    "santa", "sankt", "notre", "collegiale", "collégiale", "temple", "tempel",
+    "klooster", "kloster", "priory", "stift", "pfarrkirche", "stadtkirche",
+    "marienkirche", "jakobikirche", "nikolaikirche",
+];
+
+fn bevat_kerkwoord(s: &str) -> bool {
+    let l = s.to_lowercase();
+    KERK_WOORDEN.iter().any(|w| l.contains(w))
+}
+
+/// HTML naar platte tekst: scripts/stijlen weg, tags weg, een handvol
+/// entiteiten terug, witruimte samengevoegd.
+pub fn strip_html(s: &str) -> String {
+    fn knip_blok(s: &str, open: &str, sluit: &str) -> String {
+        let mut uit = String::with_capacity(s.len());
+        let mut rest = s;
+        loop {
+            // ASCII-lowercase houdt de byte-indexen gelijk aan het origineel
+            // (to_lowercase kan bij sommige tekens de lengte veranderen).
+            let l = rest.to_ascii_lowercase();
+            match l.find(open) {
+                Some(i) => {
+                    uit.push_str(&rest[..i]);
+                    match l[i..].find(sluit) {
+                        Some(j) => rest = &rest[i + j + sluit.len()..],
+                        None => { rest = ""; }
+                    }
+                }
+                None => { uit.push_str(rest); break; }
+            }
+        }
+        uit
+    }
+    let zonder = knip_blok(&knip_blok(s, "<script", "</script>"), "<style", "</style>");
+    let mut uit = String::with_capacity(zonder.len());
+    let mut in_tag = false;
+    for c in zonder.chars() {
+        match c {
+            '<' => { in_tag = true; uit.push(' '); }
+            '>' => { in_tag = false; }
+            _ if !in_tag => uit.push(c),
+            _ => {}
+        }
+    }
+    let uit = uit
+        .replace("&nbsp;", " ")
+        .replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&eacute;", "é")
+        .replace("&egrave;", "è")
+        .replace("&ouml;", "ö")
+        .replace("&auml;", "ä")
+        .replace("&uuml;", "ü")
+        .replace("&szlig;", "ß");
+    uit.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// De plaatsnaam uit een adres-/locatieveld: het stuk vóór de eerste komma,
+/// zonder postcode. Een pad (mapscan zonder manifest) levert niets op.
+fn plaats_kern(plaats: &str) -> String {
+    let p = plaats.trim();
+    if p.is_empty() || p.contains('\\') || p.contains('/') || p.contains(':') {
+        return String::new();
+    }
+    for deel in p.split(',') {
+        // Postcodes weg: cijfergroepen én de twee hoofdletters van een
+        // Nederlandse postcode ("3512 JE Utrecht" → "Utrecht").
+        let d: String = deel
+            .split_whitespace()
+            .filter(|w| !w.chars().all(|c| c.is_ascii_digit() || c == '-'))
+            .filter(|w| !(w.len() <= 2 && w.chars().all(|c| c.is_ascii_uppercase())))
+            .collect::<Vec<_>>()
+            .join(" ");
+        if d.chars().any(|c| c.is_alphabetic()) {
+            return d;
+        }
+    }
+    String::new()
+}
+
+/// Kortste zin of regel met een kerkwoord uit de verzamelde teksten.
+fn kerk_uit_tekst(teksten: &[String]) -> Option<String> {
+    let mut beste: Option<String> = None;
+    for t in teksten {
+        for zin in t.split(|c| matches!(c, '.' | '\n' | ';' | '|' | '!' | '?')) {
+            let z = zin.trim().trim_matches(|c: char| c == '"' || c == '\'' || c == '(' || c == ')');
+            if z.len() < 6 || z.len() > 90 || !bevat_kerkwoord(z) { continue; }
+            if beste.as_ref().map_or(true, |b| z.len() < b.len()) {
+                beste = Some(z.to_string());
+            }
+        }
+    }
+    beste
+}
+
+/// Tot vier zoektermen, de meest specifieke eerst: kerk + plaats, naam +
+/// plaats, bouwer + plaats, en als laatste de oude combinatie van 0.8.74.
+pub fn zoek_termen(ctx: &ZoekContext) -> Vec<String> {
+    let plaats = plaats_kern(&ctx.plaats);
+    let naam = ctx.naam.trim().to_string();
+    let bouwer = {
+        let b = ctx.bouwer.trim();
+        if b.is_empty() || b.eq_ignore_ascii_case("Custom Samples") { String::new() } else { b.to_string() }
+    };
+    let kerk = if bevat_kerkwoord(&ctx.kerk) {
+        ctx.kerk.trim().to_string()
+    } else if bevat_kerkwoord(&naam) {
+        naam.clone()
+    } else {
+        let mut bronnen = vec![ctx.opmerkingen.clone()];
+        bronnen.extend(ctx.teksten.iter().cloned());
+        kerk_uit_tekst(&bronnen).unwrap_or_default()
+    };
+
+    let mut termen: Vec<String> = Vec::new();
+    let mut voeg = |delen: &[&str]| {
+        let kern = delen.iter().map(|d| d.trim()).filter(|d| !d.is_empty())
+            .collect::<Vec<_>>().join(" ");
+        if kern.is_empty() { return; }
+        let t = met_orgelwoord(kern);
+        if !termen.iter().any(|x| x.eq_ignore_ascii_case(&t)) && termen.len() < 4 {
+            termen.push(t);
+        }
+    };
+    if !kerk.is_empty() { voeg(&[kerk.as_str(), plaats.as_str()]); }
+    if !naam.is_empty() && !naam.eq_ignore_ascii_case(&kerk) { voeg(&[naam.as_str(), plaats.as_str()]); }
+    if !bouwer.is_empty() { voeg(&[bouwer.as_str(), "orgel", plaats.as_str()]); }
+    // De combinatie van 0.8.74 als vangnet — met de plaatskern, niet het
+    // ruwe locatieveld (dat kan een pad zijn).
+    let oud = zoek_term(&naam, &bouwer, &plaats);
+    voeg(&[oud.as_str()]);
+    termen
+}
+
+/// Meerdere zoektermen na elkaar; treffers samengevoegd (uniek op URL),
+/// hoogstens 2 × [`MAX_HITS`] in totaal.
+pub fn zoek_commons_meervoudig(termen: &[String]) -> Vec<OnlineImageHit> {
+    let mut uit: Vec<OnlineImageHit> = Vec::new();
+    for t in termen {
+        for h in zoek_commons(t) {
+            if !uit.iter().any(|u| u.full_url == h.full_url) {
+                uit.push(h);
+            }
+        }
+        if uit.len() >= MAX_HITS * 2 { break; }
+    }
+    uit.truncate(MAX_HITS * 2);
+    uit
+}
+
+/// De `_General`-velden van een Hauptwerk-ODF, lichtgewicht: alleen de kop
+/// (eerste 64 KB) wordt gelezen, geen volledige parse. Ook in de
+/// "compacted" vorm blijft `_General` leesbaar.
+#[derive(Debug, Default, Clone)]
+pub struct HwGeneralLicht {
+    pub naam: String,
+    pub plaats: String,
+    pub bouwer: String,
+    pub opmerkingen: String,
+    pub info_bestand: String,
+    pub pakket_id: Option<u32>,
+}
+
+fn tag_waarde(txt: &str, tag: &str) -> String {
+    let open = format!("<{}>", tag);
+    let Some(i) = txt.find(&open) else { return String::new() };
+    let rest = &txt[i + open.len()..];
+    let Some(j) = rest.find('<') else { return String::new() };
+    strip_html(&rest[..j])
+}
+
+pub fn lees_hw_general_licht(path: &Path) -> Option<HwGeneralLicht> {
+    use std::io::Read;
+    let f = std::fs::File::open(path).ok()?;
+    let mut buf = Vec::new();
+    f.take(64 * 1024).read_to_end(&mut buf).ok()?;
+    let txt = String::from_utf8_lossy(&buf);
+    let g = HwGeneralLicht {
+        naam: tag_waarde(&txt, "Identification_Name"),
+        plaats: tag_waarde(&txt, "OrganInfo_Location"),
+        bouwer: tag_waarde(&txt, "OrganInfo_Builder"),
+        opmerkingen: tag_waarde(&txt, "OrganInfo_Comments"),
+        info_bestand: tag_waarde(&txt, "OrganInfo_InfoFilename"),
+        pakket_id: tag_waarde(&txt, "OrganInfo_InstallationPackageID").parse().ok(),
+    };
+    if g.naam.is_empty() && g.plaats.is_empty() && g.bouwer.is_empty() { None } else { Some(g) }
+}
+
+/// Platgeslagen tekst uit readme-/info-bestanden in een map (niet
+/// recursief) plus een eventueel expliciet info-bestand. Hoogstens zes
+/// bestanden van elk hoogstens 256 KB — het gaat om de kop van de tekst.
+pub fn teksten_uit_map(dir: Option<&Path>, extra: Option<&Path>) -> Vec<String> {
+    const MAX_BYTES: u64 = 256 * 1024;
+    fn lees(p: &Path) -> Option<String> {
+        use std::io::Read;
+        let f = std::fs::File::open(p).ok()?;
+        let mut buf = Vec::new();
+        f.take(MAX_BYTES).read_to_end(&mut buf).ok()?;
+        let s = String::from_utf8_lossy(&buf);
+        let platt = if p.extension().map_or(false, |e| {
+            let e = e.to_string_lossy().to_lowercase();
+            e == "html" || e == "htm"
+        }) { strip_html(&s) } else { s.split_whitespace().collect::<Vec<_>>().join(" ") };
+        if platt.trim().is_empty() { None } else { Some(platt) }
+    }
+    let mut uit = Vec::new();
+    if let Some(e) = extra {
+        if let Some(t) = lees(e) { uit.push(t); }
+    }
+    let Some(dir) = dir else { return uit };
+    let Ok(rd) = std::fs::read_dir(dir) else { return uit };
+    let mut kandidaten: Vec<PathBuf> = rd.flatten().map(|e| e.path()).filter(|p| {
+        if !p.is_file() { return false; }
+        let naam = p.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
+        let ext_ok = naam.ends_with(".txt") || naam.ends_with(".md") || naam.ends_with(".html") || naam.ends_with(".htm");
+        let naam_ok = ["readme", "info", "about", "history", "geschiedenis", "beschrijving", "description", "index", "orgel", "organ", "lies", "read"]
+            .iter().any(|w| naam.contains(w));
+        ext_ok && naam_ok
+    }).collect();
+    kandidaten.sort();
+    for p in kandidaten.into_iter().take(6) {
+        if extra.map_or(false, |e| e == p) { continue; }
+        if let Some(t) = lees(&p) { uit.push(t); }
+    }
+    uit
+}
+
+#[cfg(test)]
+mod tests_zoekcontext {
+    use super::*;
+
+    #[test]
+    fn kerk_en_plaats_gaan_voorop() {
+        let ctx = ZoekContext {
+            naam: "Grote Kerk".into(),
+            bouwer: "Bätz".into(),
+            plaats: "Utrecht, Netherlands".into(),
+            ..Default::default()
+        };
+        let t = zoek_termen(&ctx);
+        assert_eq!(t[0], "Grote Kerk Utrecht orgel");
+        assert!(t.iter().any(|x| x == "Bätz orgel Utrecht"), "{:?}", t);
+        assert!(t.len() <= 4);
+    }
+
+    #[test]
+    fn kerknaam_uit_info_html() {
+        let html = "<html><head><style>p{}</style></head><body><h1>Organ</h1>\
+            <p>Built in 1831 by Baetz for the St. Mary&#39;s Church in Landau.</p>\
+            <script>var x=1;</script></body></html>";
+        let plat = strip_html(html);
+        assert!(!plat.contains("var x"));
+        assert!(plat.contains("St. Mary's Church"));
+        let ctx = ZoekContext {
+            naam: "Demo set".into(),
+            plaats: "".into(),
+            teksten: vec![plat],
+            ..Default::default()
+        };
+        let t = zoek_termen(&ctx);
+        assert!(t[0].to_lowercase().contains("church"), "{:?}", t);
+    }
+
+    #[test]
+    fn mapscan_zonder_manifest_geeft_geen_pad_of_custom_samples_door() {
+        let ctx = ZoekContext {
+            naam: "Testorgel".into(),
+            bouwer: "Custom Samples".into(),
+            plaats: r"C:\Orgels\Testorgel".into(),
+            ..Default::default()
+        };
+        let t = zoek_termen(&ctx);
+        assert!(t.iter().all(|x| !x.contains("Custom") && !x.contains("C:\\")), "{:?}", t);
+        assert_eq!(t[0], "Testorgel");
+    }
+
+    #[test]
+    fn plaats_kern_laat_postcode_en_land_weg() {
+        assert_eq!(plaats_kern("3512 JE Utrecht, Netherlands"), "Utrecht");
+        assert_eq!(plaats_kern("Landau, Pfalz"), "Landau");
+        assert_eq!(plaats_kern(r"D:\Samplesets\X"), "");
+    }
+
+    #[test]
+    fn hw_general_licht_leest_de_kop() {
+        let dir = std::env::temp_dir().join(format!("jm_hw_general_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("t.Organ_Hauptwerk_xml");
+        std::fs::write(&p, "<Hauptwerk><ObjectList ObjectType=\"_General\"><_General>\
+            <Identification_Name>Demo Surround</Identification_Name>\
+            <OrganInfo_Location>Utrecht, Netherlands</OrganInfo_Location>\
+            <OrganInfo_Builder>Baetz</OrganInfo_Builder>\
+            <OrganInfo_InstallationPackageID>883</OrganInfo_InstallationPackageID>\
+            <OrganInfo_InfoFilename>html/index.html</OrganInfo_InfoFilename>\
+            </_General></ObjectList></Hauptwerk>").unwrap();
+        let g = lees_hw_general_licht(&p).unwrap();
+        assert_eq!(g.naam, "Demo Surround");
+        assert_eq!(g.plaats, "Utrecht, Netherlands");
+        assert_eq!(g.pakket_id, Some(883));
+        assert_eq!(g.info_bestand, "html/index.html");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
 

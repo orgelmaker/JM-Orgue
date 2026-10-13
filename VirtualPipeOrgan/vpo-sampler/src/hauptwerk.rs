@@ -1760,7 +1760,7 @@ pub fn find_package_root(odf_path: &Path) -> Option<PathBuf> {
 /// `OrganInstallationPackages/*/` for an `*InstallationPackageDefinition_Hauptwerk_xml`
 /// marker (handles both numeric "000690" and named "Puttershoek Herv. Gem"
 /// folders). Falls back to a sole subfolder.
-fn scan_package_dirs(root: &Path) -> HashMap<u32, PathBuf> {
+pub fn scan_package_dirs(root: &Path) -> HashMap<u32, PathBuf> {
     let mut map = HashMap::new();
     let base = root.join("OrganInstallationPackages");
     let entries: Vec<PathBuf> = match std::fs::read_dir(&base) {
