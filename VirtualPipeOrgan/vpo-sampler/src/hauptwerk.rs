@@ -830,6 +830,11 @@ fn build_definition(
         m
     };
 
+    // Tremulantruis per divisie (0.8.5): welke divisie hoort bij welke
+    // tremulant, zodat het mechanische geluid van de tremulant alleen
+    // meeloopt met de tremulant van zijn eigen werk.
+    let trem_koppeling = tremulant_divisies(&lees("Tremulant"), &divisions, &manuals, &stop_defs);
+
     Ok(OrganDefinition {
         base_path: root,
         organ,
@@ -846,6 +851,7 @@ fn build_definition(
             // van Switch alleen het ID; naam en standaardstand ontbreken daar
             // nog, dus bijgeluiden op compacte sets volgen later.)
             &layers_of_pipe, &sample_of_layer, &lees("Switch"), &lees("SwitchLinkage"), &rank_name,
+            &trem_koppeling,
         ),
         stop_action_clicks: verzamel_hw_stop_action_clicks(
             &pipes, &sample_file, &pkg_dirs,
@@ -1132,6 +1138,94 @@ fn verzamel_hw_stop_action_clicks(
 /// (Cymbelstern, Vogelsang — later) en soortgelijke. Zelfs sets die er
 /// een `Rank` "Noises" voor hebben, zetten die pijpen via Switch i.p.v.
 /// via een Stop. Deze helper haalt alleen blower en ambient eruit.
+/// Welke divisie bij welke tremulant hoort (0.8.5), afgeleid uit de
+/// Tremulant-objecten van de definitie. Hauptwerk legt die band niet vast;
+/// de naam doet het werk: "1. Tremulant II" → "Manual II", "Trémolo Récit
+/// expressif" → "Récit expressif". Heeft maar één werk tremulant-opnamen,
+/// dan is dat de terugval (`enige`).
+#[derive(Debug, Default, Clone)]
+pub struct TremulantKoppeling {
+    /// Bedienende schakelaar van de tremulant → divisienaam.
+    pub per_switch: HashMap<u32, String>,
+    /// TremulantID → divisienaam.
+    pub per_nummer: HashMap<u32, String>,
+    /// Het enige werk met tremulant-opnamen, als er precies één is.
+    pub enige: Option<String>,
+    /// Alle (opgeschoonde) divisienamen, voor naam-matching.
+    pub divisies: Vec<String>,
+}
+
+/// Lettertekens gelijkschakelen voor naam-matching: kleine letters, accenten
+/// weg ("Récit" ↔ "Recit"), ß → ss.
+fn naam_sleutel(s: &str) -> String {
+    s.to_lowercase().chars().map(|c| match c {
+        'é' | 'è' | 'ê' | 'ë' => 'e',
+        'á' | 'à' | 'â' | 'ä' | 'å' => 'a',
+        'ó' | 'ò' | 'ô' | 'ö' => 'o',
+        'ú' | 'ù' | 'û' | 'ü' => 'u',
+        'í' | 'ì' | 'î' | 'ï' => 'i',
+        'ç' => 'c',
+        'ß' => 's',
+        other => other,
+    }).collect()
+}
+
+/// Divisie waarvan de naam in `naam` voorkomt (hele naam, of het laatste
+/// woord — "II" in "Tremulant II"). Eerste treffer in orgelvolgorde.
+pub fn match_divisie(naam: &str, divisies: &[String]) -> Option<String> {
+    let n = naam_sleutel(naam);
+    let woorden: Vec<&str> = n.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).collect();
+    for d in divisies {
+        let ds = naam_sleutel(d);
+        if !ds.is_empty() && n.contains(&ds) { return Some(d.clone()); }
+    }
+    for d in divisies {
+        let ds = naam_sleutel(d);
+        let Some(laatste) = ds.split_whitespace().last() else { continue };
+        // Alleen een onderscheidend laatste woord (Romeins cijfer of getal),
+        // anders matcht "Noise" op een werk dat toevallig zo eindigt.
+        let onderscheidend = laatste.chars().all(|c| matches!(c, 'i' | 'v' | 'x')) || laatste.chars().all(|c| c.is_ascii_digit());
+        if onderscheidend && woorden.iter().any(|w| *w == laatste) { return Some(d.clone()); }
+    }
+    None
+}
+
+/// Eerste getal in een schakelaarnaam ("Tremulant 1 Noise" → 1).
+fn nummer_in_naam(naam: &str) -> Option<u32> {
+    naam.split(|c: char| !c.is_ascii_digit()).find(|s| !s.is_empty()).and_then(|s| s.parse().ok())
+}
+
+pub fn tremulant_divisies(
+    tremulants: &[FieldMap],
+    divisions: &[FieldMap],
+    manuals: &[ManualDef],
+    stops: &[StopDef],
+) -> TremulantKoppeling {
+    let divisies: Vec<String> = divisions.iter()
+        .filter_map(|d| d.get("Name").map(|n| clean_division_name(n)))
+        .filter(|n| !n.is_empty())
+        .collect();
+    // Werken met tremulant-opnamen (een stop met een trem-laag).
+    let trem_stops: std::collections::HashSet<u32> = stops.iter()
+        .filter(|s| s.pipes.iter().any(|p| matches!(p, PipeDef::Sample { extra, .. } if extra.tremulant_attack.is_some())))
+        .map(|s| s.id)
+        .collect();
+    let trem_divs: Vec<String> = manuals.iter()
+        .filter(|m| m.stop_ids.iter().any(|id| trem_stops.contains(id)))
+        .map(|m| m.name.clone())
+        .collect();
+    let enige = if trem_divs.len() == 1 { Some(trem_divs[0].clone()) } else { None };
+    let mut k = TremulantKoppeling { divisies, enige, ..Default::default() };
+    for tr in tremulants {
+        let naam = tr.get("Name").cloned().unwrap_or_default();
+        let div = match_divisie(&naam, &k.divisies).or_else(|| k.enige.clone());
+        let Some(div) = div else { continue };
+        if let Some(id) = tr.get_u32("TremulantID") { k.per_nummer.insert(id, div.clone()); }
+        if let Some(sw) = tr.get_u32("ControllingSwitchID") { k.per_switch.insert(sw, div); }
+    }
+    k
+}
+
 fn verzamel_hw_bijgeluiden(
     pipes: &[FieldMap],
     _pipes_by_rank: &std::collections::HashMap<u32, std::collections::HashMap<u32, u32>>,
@@ -1142,6 +1236,7 @@ fn verzamel_hw_bijgeluiden(
     switches: &[FieldMap],
     linkages: &[FieldMap],
     rank_name: &std::collections::HashMap<u32, String>,
+    trem: &TremulantKoppeling,
 ) -> Vec<crate::grandorgue::BackgroundSoundDef> {
     use crate::grandorgue::{BackgroundSoundDef, BackgroundSoundKind};
     // doel-schakelaar → bron-schakelaars (0.8.4): een ruispijp hangt vaak aan
@@ -1235,11 +1330,26 @@ fn verzamel_hw_bijgeluiden(
         let Some((_num, lid)) = layers.first() else { continue };
         let Some(sid) = sample_of_layer.get(lid) else { continue };
         let Some(path) = resolve_sample(*sid) else { continue };
-        info!("Hauptwerk-bijgeluid gevonden: {:?} '{}' op switch '{}' → {:?}", kind, naam, sw_name, path);
+        // Tremulantruis (0.8.5): de divisie van de tremulant die deze ruis
+        // bedient — via de schakelaar die de ruisschakelaar aanstuurt, het
+        // nummer in de naam ("Tremulant 1 Noise"), de divisienaam in de
+        // naam ("Tremolo Recit Noise") of, als maar één werk tremulant-
+        // opnamen heeft, dat werk. Zonder match volgt de ruis elke tremulant.
+        let division = if matches!(kind, BackgroundSoundKind::TremulantNoise) {
+            bron_van.get(&sw_id)
+                .and_then(|srcs| srcs.iter().find_map(|s| trem.per_switch.get(s).cloned()))
+                .or_else(|| nummer_in_naam(&sw_lower).and_then(|n| trem.per_nummer.get(&n).cloned()))
+                .or_else(|| match_divisie(sw_name, &trem.divisies))
+                .or_else(|| trem.enige.clone())
+        } else {
+            None
+        };
+        info!("Hauptwerk-bijgeluid gevonden: {:?} '{}' op switch '{}' (divisie {:?}) → {:?}", kind, naam, sw_name, division, path);
         uit.push(BackgroundSoundDef {
             kind,
             name: naam,
             path,
+            division,
         });
     }
     uit
@@ -2103,6 +2213,37 @@ mod tests {
         assert_eq!(o.get_u32("MIDINoteNumOfFirstMappedDivisionInputNode"), Some(36));
         assert_eq!(o.get_u32("NumberOfMappedDivisionInputNodes"), Some(1));
         assert_eq!(o.get_i32("MIDINoteNumIncrementFromDivisionToRank"), Some(12));
+    }
+
+    /// Tremulantruis per divisie (0.8.5): de divisie volgt uit de naam van
+    /// de tremulant, met het enige werk met trem-opnamen als terugval.
+    #[test]
+    fn tremulant_divisie_uit_naam() {
+        let divs = vec!["Pedal".to_string(), "Manual I".to_string(), "Manual II".to_string(), "Récit expressif".to_string()];
+        assert_eq!(match_divisie("1. Tremulant II", &divs).as_deref(), Some("Manual II"));
+        assert_eq!(match_divisie("2. Tremulant II Echo", &divs).as_deref(), Some("Manual II"));
+        assert_eq!(match_divisie("Trémolo Récit expressif", &divs).as_deref(), Some("Récit expressif"));
+        assert_eq!(match_divisie("Tremolo Recit Noise", &divs), None, "alleen een heel werk of een cijfer telt");
+        assert_eq!(match_divisie("Tremulant Noise", &divs), None);
+        assert_eq!(nummer_in_naam("Tremulant 3 Noise"), Some(3));
+        assert_eq!(nummer_in_naam("Tremulant Noise"), None);
+
+        let fm = |kv: &[(&str, &str)]| -> FieldMap {
+            kv.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+        };
+        let tremulants = vec![
+            fm(&[("TremulantID", "1"), ("Name", "1. Tremulant II"), ("ControllingSwitchID", "701")]),
+            fm(&[("TremulantID", "3"), ("Name", "3. Tremulant III"), ("ControllingSwitchID", "703")]),
+        ];
+        let divisions = vec![
+            fm(&[("DivisionID", "1"), ("Name", "1. Pedal")]),
+            fm(&[("DivisionID", "3"), ("Name", "3. Manual II")]),
+            fm(&[("DivisionID", "4"), ("Name", "4. Manual III")]),
+        ];
+        let k = tremulant_divisies(&tremulants, &divisions, &[], &[]);
+        assert_eq!(k.per_switch.get(&701).map(|s| s.as_str()), Some("Manual II"));
+        assert_eq!(k.per_nummer.get(&3).map(|s| s.as_str()), Some("Manual III"));
+        assert_eq!(k.enige, None);
     }
 
     /// Tremmed rang in een schakelnetwerk-set (0.8.4): dezelfde toets en

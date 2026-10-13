@@ -130,6 +130,10 @@ pub struct BackgroundSoundDto {
     pub kind: String,
     /// Mensvriendelijke naam uit de orgeldefinitie.
     pub name: String,
+    /// Tremulantruis (0.8.5): de divisie waarvan de tremulant deze ruis
+    /// bedient; None = volgt elke tremulant.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub division: Option<String>,
 }
 
 /// Microfoonperspectief voor de frontend (Orgel-Instellingen → Perspectieven).
@@ -3534,6 +3538,7 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
                     vpo_sampler::grandorgue::BackgroundSoundKind::TremulantNoise => "tremulant_noise".into(),
                 },
                 name: b.name,
+                division: b.division,
             }).collect()
         },
         key_click_count: definition.keyboard_clicks.len(),
@@ -7143,6 +7148,26 @@ pub fn set_tremulant(state: State<AppState>, division_name: String, active: bool
     do_set_tremulant(&state, &division_name, active).map(|_| ())
 }
 
+/// Tremulantruis (0.8.4, per divisie sinds 0.8.5): het mechanische geluid
+/// van de tremulant als eigen opname in de set. Een ruis met een bekende
+/// divisie volgt de tremulant van dát werk; een ruis zonder divisie loopt
+/// zolang ergens een tremulant aan staat. Wordt aangeroepen ná het bijwerken
+/// van `tremulant_live`, bij zowel de sample-tremulant als de synth-LFO.
+fn tremulantruis_bijwerken(state: &AppState, o: &OrganInfoDto, division_name: &str) {
+    let live = state.tremulant_live.read();
+    let ergens_aan = live.values().any(|&v| v);
+    for b in o.background_sounds.iter().filter(|b| b.kind == "tremulant_noise") {
+        let (betreft, aan) = match b.division.as_deref() {
+            Some(d) => (d == division_name, live.get(d).copied().unwrap_or(false)),
+            None => (true, ergens_aan),
+        };
+        if !betreft { continue; }
+        info!("Tremulantruis '{}' {} ({})", b.name, if aan { "aan" } else { "uit" },
+              b.division.as_deref().unwrap_or("volgt elke tremulant"));
+        state.send_audio_command(AudioCommand::SetToyActive { name: b.name.clone(), active: aan });
+    }
+}
+
 /// Kern van [`set_tremulant`], ook gebruikt door de test-API (POST /tremulant).
 /// Geeft het aantal registers terug waarvan de tremulant-OPNAMEN geschakeld
 /// zijn (0 = divisie bestaat, maar heeft geen trem-samples — dan doet alleen
@@ -7155,14 +7180,7 @@ pub fn do_set_tremulant(state: &AppState, division_name: &str, active: bool) -> 
             // Spiegel voor de afstandsbediening (GET /state) — ook zonder
             // trem-samples: de Console-stand is dan tóch 'aan' via de LFO.
             state.tremulant_live.write().insert(division_name.to_string(), active);
-            // Tremulantruis (0.8.4): het mechanische geluid van de tremulant
-            // als eigen opname in de set; loopt zolang ergens een tremulant
-            // aan staat (los van de trem-opnamen van de registers).
-            let ergens_aan = state.tremulant_live.read().values().any(|&v| v);
-            for b in o.background_sounds.iter().filter(|b| b.kind == "tremulant_noise") {
-                info!("Tremulantruis '{}' {}", b.name, if ergens_aan { "aan" } else { "uit" });
-                state.send_audio_command(AudioCommand::SetToyActive { name: b.name.clone(), active: ergens_aan });
-            }
+            tremulantruis_bijwerken(state, o, division_name);
             let stop_ids: Vec<u32> = div.stops.iter()
                 .filter(|s| s.has_tremulant)
                 .map(|s| s.internal_stop_id)
@@ -7506,6 +7524,7 @@ pub fn set_tremulant_lfo(state: State<AppState>, division: String, active: bool,
         if let Some(idx) = o.divisions.iter().position(|d| d.name == division) {
             // Spiegel voor de afstandsbediening (GET /state).
             state.tremulant_live.write().insert(division.clone(), active);
+            tremulantruis_bijwerken(&state, o, &division);
             state.send_audio_command(AudioCommand::SetTremulantLFO {
                 division_index: idx as u8,
                 active,

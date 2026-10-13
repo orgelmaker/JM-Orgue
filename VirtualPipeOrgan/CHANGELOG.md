@@ -5,6 +5,23 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.8.5] - 2026-10-13
+
+### Tremulantruis per divisie
+- Het mechanische geluid van de tremulant (0.8.4) liep mee zodra ergens
+  een tremulant aan stond, ook die van een ander werk. Nu hoort elke ruis
+  bij de divisie waarvan de tremulant hem bedient en volgt hij alleen die
+  tremulant — ook de nagebootste tremulant (synth-LFO) van dat werk.
+- De divisie volgt uit de orgeldefinitie, in deze volgorde: de schakelaar
+  die de ruisschakelaar aanstuurt (de tremulant zelf), het nummer in de
+  naam ("Tremulant 1 Noise" → tremulant 1), de divisienaam in de naam
+  ("Trémolo Récit expressif" → Récit expressif, "Tremulant II" → Manual
+  II) en, als maar één werk tremulant-opnamen heeft, dat werk. Zonder
+  match blijft het oude gedrag (volgt elke tremulant). Bij een
+  GrandOrgue-uitgave is het manual waarin de ruisstop staat de divisie.
+- Nieuwe test: `tremulant_divisie_uit_naam` (naam-matching met en zonder
+  accenten, Romeinse cijfers, nummer in de schakelaarnaam).
+
 ## [0.8.4] - 2026-10-13
 
 ### Doorlopend klavier op de juiste toonhoogte

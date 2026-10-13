@@ -100,6 +100,9 @@ pub struct BackgroundSoundDef {
     pub kind: BackgroundSoundKind,
     /// Mensvriendelijke naam uit de orgeldefinitie (voor logregel en de UI).
     pub name: String,
+    /// Divisie waarvan de tremulant deze ruis bedient (0.8.5, alleen
+    /// `TremulantNoise`); None = volgt elke tremulant.
+    pub division: Option<String>,
     /// Absoluut pad van het WAV-bestand dat geloopt moet worden.
     pub path: PathBuf,
 }
@@ -320,7 +323,14 @@ impl OrganDefinition {
                 _ => None,
             });
             if let Some(path) = path {
-                uit.push(BackgroundSoundDef { kind, name: stop.bijgeluid_naam(), path });
+                // Tremulantruis (0.8.5): het manual waarin de ruisstop staat
+                // is het werk waarvan de tremulant hem bedient.
+                let division = if matches!(kind, BackgroundSoundKind::TremulantNoise) {
+                    self.manuals.iter().find(|m| m.stop_ids.contains(&stop.id)).map(|m| m.name.clone())
+                } else {
+                    None
+                };
+                uit.push(BackgroundSoundDef { kind, name: stop.bijgeluid_naam(), path, division });
             }
         }
         // Hauptwerk-pad (0.7.97): pijpen op switches zijn door de HW-importer
