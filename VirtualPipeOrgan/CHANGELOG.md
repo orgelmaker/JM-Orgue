@@ -5,6 +5,19 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.8.79] - 2026-10-13
+
+### Effectregisters: aan/uit nu wél zichtbaar
+- De aan/uit-stand van de effectregisters bleef hangen op "uit", zelfs
+  nadat de knop geklikt was. Oorzaak: de `buildDisplayOrgan`-helper
+  gebruikte `toysAan` als closure-variabele, maar had hem niet als
+  afhankelijkheid, dus Svelte wist niet dat de displayOrgan opnieuw
+  gebouwd moest worden na een klik. `toysAan` is nu een parameter en de
+  reactive statement geeft hem mee — de knop wordt direct bijgewerkt.
+- De pseudo-interne stop-ID voor effectregisters staat op 0 (geen echte
+  registerklik-sample), zodat `play_stop_click_now` wordt overgeslagen
+  en er geen phantom-klik meer wordt gevuurd.
+
 ## [0.8.78] - 2026-10-13
 
 ### Registerklik nu op pointerdown, niet op click

@@ -4882,7 +4882,7 @@
   // aantal koren in de schrijfwijze van de gekozen taal, 0.7.66). Hier één keer
   // uitgerekend, zodat de knoppen, de crescendotabel, de sorteerlijst en het
   // intonatiepaneel allemaal hetzelfde tonen en meewisselen met de taal.
-  function buildDisplayOrgan(organ, _order, fmt) {
+  function buildDisplayOrgan(organ, _order, fmt, toysAanArg) {
     const base = organ || demoOrgan;
     if (!base) return base;
     const divs = base.divisions.map(d => ({
@@ -4911,12 +4911,14 @@
         __toy_division: true,
         stops: toys.map((toy, i) => ({
           id: '__toy__' + toy.name,
-          internal_stop_id: 900000 + i,
+          // Geen registerklik-sample voor effectregisters; 0 zorgt dat
+          // play_stop_click_now in de UI wordt overgeslagen (vereist > 0).
+          internal_stop_id: 0,
           name: toy.name,
           pitch: '',
           regel: '',
           regelKort: '',
-          drawn: !!(toysAan && toysAan[toy.name]),
+          drawn: !!(toysAanArg && toysAanArg[toy.name]),
           groep: 'overig',
           familie: 'effect',
           first_midi_note: 0,
@@ -4934,7 +4936,7 @@
     return { ...base, divisions: divs };
   }
   $: rangsFmt = $t('stops.ranks_format');
-  $: displayOrgan = buildDisplayOrgan(organInfo, stopOrder, rangsFmt);
+  $: displayOrgan = buildDisplayOrgan(organInfo, stopOrder, rangsFmt, toysAan);
   // " 4 st." / " 8'" achter een naam in een lijst, of niets.
   function metRegel(s) {
     const r = registerRegel(s, rangsFmt);
