@@ -1576,6 +1576,11 @@ pub struct AppState {
     /// enige meetreferentie was en de retune-vlag daar standaard uit stond.
     /// Opgeslagen per orgel.
     pub auto_retune: Arc<RwLock<bool>>,
+    /// Orgel-id waarvoor de bijgeluiden het laatst geladen zijn (0.8.89).
+    /// Zelfde id opnieuw = een herlaad (ASIO-wissel, noodherstel, opnieuw
+    /// openen) → de motor-stand blijft staan; een ander id = nieuw orgel →
+    /// motor start uit (0.8.86).
+    pub bijgeluiden_orgel_id: Arc<RwLock<Option<String>>>,
     /// Toetsmechaniek (0.7.102): aan = de aanslag-klik van elk klavier wordt
     /// afgespeeld bij elke MIDI NoteOn. Standaard uit vanwege het geheugen
     /// (per sampleset tot tientallen megabytes aan WAV's). Als de gebruiker
@@ -1948,6 +1953,7 @@ impl AppState {
             ])),
             pitch_offset_cents: Arc::new(RwLock::new(0.0)),
             auto_retune: Arc::new(RwLock::new(true)),
+            bijgeluiden_orgel_id: Arc::new(RwLock::new(None)),
             toetsmechaniek_aan: Arc::new(RwLock::new(false)),
             misc_cc_bindings: Arc::new(RwLock::new(Vec::new())),
             misc_cc_learning: Arc::new(RwLock::new(None)),

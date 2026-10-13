@@ -1280,7 +1280,7 @@ fn laad_en_stuur_register_mechaniek(
 
 /// Laad de bijgeluiden-WAV's van `defs` en stuur ze als loop-voices naar de
 /// audio-engine. Een lege `defs` wist voorgaande bijgeluiden (orgelwissel).
-fn laad_en_stuur_bijgeluiden(state: &AppState, defs: &[vpo_sampler::grandorgue::BackgroundSoundDef]) {
+fn laad_en_stuur_bijgeluiden(state: &AppState, defs: &[vpo_sampler::grandorgue::BackgroundSoundDef], organ_id: &str) {
     let output_sr = state.audio_player.read().as_ref()
         .map(|p| *p.sample_rate.read()).unwrap_or(48_000);
     let mut voices: Vec<crate::background_sounds::BackgroundVoice> = Vec::new();
@@ -1324,13 +1324,28 @@ fn laad_en_stuur_bijgeluiden(state: &AppState, defs: &[vpo_sampler::grandorgue::
     // voices sturen, zodat de blower-voice meteen met target 0 start.
     let heeft_blower = voices.iter()
         .any(|v| matches!(v.kind, vpo_sampler::grandorgue::BackgroundSoundKind::Blower));
-    let motor_aan = !heeft_blower;
+    // Herlaad van hetzelfde orgel (0.8.89: ASIO-wissel, noodherstel, opnieuw
+    // openen) → de motor-stand van de sessie blijft staan; anders stond het
+    // orgel na een apparaatwissel stil tot de sleutel weer werd omgezet.
+    let herlaad = {
+        let mut vorige = state.bijgeluiden_orgel_id.write();
+        let zelfde = vorige.as_deref() == Some(organ_id);
+        *vorige = Some(organ_id.to_string());
+        zelfde
+    };
+    let motor_aan = if !heeft_blower { true } else if herlaad { *state.blower_active.read() } else { false };
     *state.blower_active.write() = motor_aan;
     state.send_audio_command(AudioCommand::SetBlowerActive(motor_aan));
     let n_loops = voices.iter().filter(|v| v.loop_start.is_some() && v.loop_end.is_some()).count();
     if !voices.is_empty() {
         info!("Bijgeluiden: {} voices, {} met loop-punten; motor start {}",
-            voices.len(), n_loops, if motor_aan { "aan (geen motor-opname)" } else { "uit" });
+            voices.len(), n_loops,
+            match (heeft_blower, herlaad, motor_aan) {
+                (false, _, _) => "aan (geen motor-opname)",
+                (true, true, true) => "aan (herlaad, stand behouden)",
+                (true, true, false) => "uit (herlaad, stand behouden)",
+                (true, false, _) => "uit",
+            });
     }
     // Altijd sturen, ook leeg — anders blijven de bijgeluiden van een
     // vorig orgel doorlopen bij een wissel.
@@ -3629,7 +3644,7 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
             // Laad de WAV's en stuur ze naar de audio-engine (0.7.97). Lege
             // Vec wist eerdere bijgeluiden uit (bij orgelwissel), dus altijd
             // sturen, ook wanneer er niets gevonden is.
-            laad_en_stuur_bijgeluiden(state, &bg);
+            laad_en_stuur_bijgeluiden(state, &bg, path);
             // Registermechaniek (0.7.99): klik-WAV's per stop vooruit laden
             // in de audio-engine. Altijd sturen (ook leeg), zodat de klikken
             // van een vorig orgel niet blijven liggen.

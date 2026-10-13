@@ -5,6 +5,17 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.8.89] - 2026-10-13
+
+### Motor blijft aan bij een herlaad van hetzelfde orgel
+- Een wissel van audio-apparaat (of het noodherstel van de audio) laadt
+  het orgel opnieuw op de verse audio-thread; sinds 0.8.86 zette dat
+  ook de motor uit, zodat het orgel na zo'n wissel stil bleef tot de
+  sleutel weer werd omgezet. De motor start nu alleen uit bij een
+  nieuw orgel; bij een herlaad van hetzelfde orgel blijft de stand
+  staan. De bijgeluid-voices zelf werden bij zo'n herlaad al opnieuw
+  geladen (volledige orgel-herlaad), dus daar was niets mis.
+
 ## [0.8.88] - 2026-10-13
 
 ### Online zoeken doorzoekt de hele set voor kerk, plaats en bouwer
