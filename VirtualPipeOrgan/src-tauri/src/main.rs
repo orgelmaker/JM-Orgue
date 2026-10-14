@@ -386,6 +386,9 @@ fn main() {
             commands::set_pitch_offset_cents,
             commands::get_pitch_offset_cents,
             commands::set_auto_retune,
+            commands::take_setup_wizard_pending,
+            commands::set_setup_wizard_done,
+            commands::ui_log,
             commands::get_auto_retune,
             // Speelgoedregisters (0.7.98): Cymbelstern e.d. als klikbare knoppen.
             commands::set_toy_active,

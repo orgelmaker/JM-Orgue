@@ -567,14 +567,18 @@ fn ophalen_json(url: &str) -> Option<serde_json::Value> {
 /// terug. Weigert te grote bestanden en bestanden zonder bruikbare extensie.
 pub fn download_naar(dir: &Path, stem: &str, hit: &OnlineImageHit) -> Result<PathBuf, String> {
     std::fs::create_dir_all(dir).map_err(|e| format!("Kan map niet maken: {}", e))?;
-    let ext = Path::new(&hit.full_url)
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(|s| s.to_lowercase())
-        .unwrap_or_else(|| "jpg".into());
-    if !["jpg", "jpeg", "png", "webp"].contains(&ext.as_str()) {
-        return Err(format!("Onbekend afbeeldingsformaat: {}", ext));
+    // Extensie uit het URL-pad zónder querystring (Commons plakt
+    // "?utm_source=…&utm_content=original" achter de bestands-URL, waardoor
+    // de "extensie" voorheen "org&utm_campaign=…" werd), met de Commons-titel
+    // ("File:Orgel.jpg") als terugval.
+    fn ext_van(s: &str) -> Option<String> {
+        let kaal = s.split(['?', '#']).next().unwrap_or(s);
+        Path::new(kaal).extension().and_then(|e| e.to_str()).map(|e| e.to_lowercase())
     }
+    let ext = ext_van(&hit.full_url)
+        .filter(|e| ["jpg", "jpeg", "png", "webp"].contains(&e.as_str()))
+        .or_else(|| ext_van(&hit.title).filter(|e| ["jpg", "jpeg", "png", "webp"].contains(&e.as_str())))
+        .ok_or_else(|| format!("Onbekend afbeeldingsformaat: {}", hit.full_url))?;
     let doel = dir.join(format!("{}.{}", stem, ext));
     let resp = ureq::get(&hit.full_url)
         .set("User-Agent", USER_AGENT)

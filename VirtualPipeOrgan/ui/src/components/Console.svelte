@@ -120,6 +120,8 @@
     loopBusy = false;
   }
   export let activeView = 'orgel';
+  // Loopt de audio-stream? (uit de status-poll in App; voor de motor-melding)
+  export let audioRunning = false;
   export let audioDevices = [];
   export let audioHosts = [];
   export let selectedAudioHost = null;
@@ -2072,6 +2074,69 @@
   // Bijgeluiden (0.7.97): motor-knop in de werkbalk + volumeschuif in
   // audio-instellingen. Bijgeluiden-lijst in organInfo zegt of de set er
   // überhaupt heeft; staat die lijst leeg, dan verbergen we alles.
+  // Indeling-menu in de werkbalk (0.8.90) + onderwerpnavigatie in de
+  // instellingen: springt naar de sectiekop met dat id.
+  let indelingOpen = false;
+  // Instellingen als tabbladen (0.8.90): per scherm één onderwerp zichtbaar,
+  // "Alles" toont de oude volledige lijst. Keuze per scherm onthouden.
+  const INST_TABS_ORGEL = ['klank', 'crescendo', 'weergave', 'midi', 'alles'];
+  const INST_TABS_ALG = ['audio', 'sampleset', 'midi', 'pistons', 'weergave', 'over', 'alles'];
+  let instTabOrgel = INST_TABS_ORGEL.includes(localStorage.getItem('jm-orgue-inst-tab-orgel')) ? localStorage.getItem('jm-orgue-inst-tab-orgel') : 'klank';
+  let instTabAlg = INST_TABS_ALG.includes(localStorage.getItem('jm-orgue-inst-tab-alg')) ? localStorage.getItem('jm-orgue-inst-tab-alg') : 'audio';
+  function zetInstTabOrgel(tab) { instTabOrgel = tab; localStorage.setItem('jm-orgue-inst-tab-orgel', tab); }
+  function zetInstTabAlg(tab) { instTabAlg = tab; localStorage.setItem('jm-orgue-inst-tab-alg', tab); }
+
+  // Instelwizard (0.8.90): bij een orgel zonder opgeslagen instellingen
+  // (eerste laad) loopt de organist in vijf stappen door MIDI-kanaal per
+  // klavier, zwelkasten/crescendo en de uitgangskanalen voor het speaker- en
+  // het hoofdtelefoonprofiel. Alles hergebruikt de bestaande inleerflows; de
+  // wizard rijgt ze alleen aaneen. Later opnieuw te starten vanuit
+  // Orgel-instellingen → Routing. Alleen op het hoofdscherm.
+  let wizardOpen = false;
+  let wizardStap = 0;
+  const WIZARD_STAPPEN = 6;
+  // De vlag wordt in de backend pas ná het publiceren van het orgel gezet
+  // (restore_organ_settings loopt na loaded_organ_info), dus de eerste
+  // poll kan te vroeg zijn: enkele keren opnieuw vragen, tot 3 s na de laad.
+  let wizardCheckGen = 0;
+  // Pas tonen zodra het orgelscherm écht in beeld is: bij de autoload aan
+  // het begin staat de app nog op de bibliotheek, en daar hoort de wizard
+  // niet overheen. Zodra de organist het orgel opent, komt hij.
+  let wizardPending = false;
+  $: if (wizardPending && organInfo?.id && !showOrganBrowser && activeView === 'orgel' && !loading) {
+    wizardPending = false; wizardStap = 0; wizardOpen = true;
+    invoke('ui_log', { msg: 'wizard: geopend' }).catch(() => {});
+  }
+  async function checkSetupWizard() {
+    if (secondary) return;
+    const gen = ++wizardCheckGen;
+    for (const wacht of [0, 400, 800, 1500, 3000]) {
+      if (wacht) await new Promise(r => setTimeout(r, wacht));
+      if (gen !== wizardCheckGen) return;
+      try {
+        if (await invoke('take_setup_wizard_pending')) { wizardPending = true; invoke('ui_log', { msg: `wizard: vlag ontvangen (secondary=${secondary})` }).catch(() => {}); return; }
+      } catch (e) {}
+    }
+  }
+  $: if (organInfo?.id) checkSetupWizard();
+  function wizardStart() { wizardStap = 0; wizardOpen = true; }
+  function wizardSluit(klaar) {
+    wizardOpen = false;
+    if (klaar) {
+      invoke('set_setup_wizard_done').catch(() => {});
+      dispatch('persistSettings');
+    }
+  }
+  $: wizardDivisies = (displayOrgan?.divisions || []).filter(d => !d.__toy_division);
+  $: wizardProfielKind = wizardStap === 4 ? 'headphones' : 'speakers';
+  function wizardKanaalTekst(naam) {
+    const m = midiMapByDiv?.[naam];
+    return (m && m.channel != null) ? String(m.channel + 1) : $t('wizard.all_channels');
+  }
+  function scrollNaar(id) {
+    const el = document.getElementById(id);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
   let bgGain = 0.3;
   let motorAan = true;
   async function haalBijgeluiden() {
@@ -2570,7 +2635,8 @@
     }
     visibleCouplers = visibleCouplers;
     if (!secondary) localStorage.setItem(organUiKey('jm-orgue-visible-couplers'), JSON.stringify(visibleCouplers));
-    couplerPlacement = readOrganUiPref('jm-orgue-coupler-placement') === 'division' ? 'division' : 'bar';
+    // 0.8.90: standaard bij de registers; alleen een bewuste keuze 'bar' wint.
+    couplerPlacement = readOrganUiPref('jm-orgue-coupler-placement') === 'bar' ? 'bar' : 'division';
     toyPlacement = readOrganUiPref('jm-orgue-toy-placement') === 'division' ? 'division' : 'toolbar';
     // Layout (main-layout is exclusief van het hoofdvenster; secundaire
     // vensters laden hun layout per scherm uit de panel-state — zie de
@@ -3268,7 +3334,7 @@
       const vc = readOrganUiPref('jm-orgue-visible-couplers');
       if (vc && vc !== JSON.stringify(visibleCouplers)) visibleCouplers = JSON.parse(vc);
     } catch (e) {}
-    const cp = readOrganUiPref('jm-orgue-coupler-placement') === 'division' ? 'division' : 'bar';
+    const cp = readOrganUiPref('jm-orgue-coupler-placement') === 'bar' ? 'bar' : 'division';
     if (cp !== couplerPlacement) couplerPlacement = cp;
     const tp = readOrganUiPref('jm-orgue-toy-placement') === 'division' ? 'division' : 'toolbar';
     if (tp !== toyPlacement) toyPlacement = tp;
@@ -5237,7 +5303,7 @@
   }
 </script>
 
-<svelte:window bind:innerWidth={vensterBreedte} />
+<svelte:window bind:innerWidth={vensterBreedte} on:click={() => { indelingOpen = false; }} />
 
 <main class="console">
   {#if loading}
@@ -5332,7 +5398,6 @@
                   </svg>
                 </button>
               {/if}
-              {#if onlineImageSearchEnabled}
                 <button
                   class="library-card-btn"
                   on:click={(e) => onlineZoeken(e, organ)}
@@ -5344,7 +5409,6 @@
                     <path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
                   </svg>
                 </button>
-              {/if}
               <button
                 class="library-card-btn"
                 on:click={(e) => chooseOrganImage(e, organ)}
@@ -5547,6 +5611,21 @@
               </svg>
               {balkenZichtbaar ? $t('speeltafel.hide_bars') : $t('speeltafel.show_bars')}
             </button>
+            <!-- Motor-sleutel in volledig scherm (0.8.90): alleen zolang de
+                 werkbalk (met de echte sleutel) verborgen is — nooit twee
+                 sleutels op één scherm. -->
+            {#if !secondary && !balkenZichtbaar}
+              <button
+                class="speeltafel-knop speeltafel-motor"
+                class:actief={motorAan}
+                on:click={() => zetMotor(!motorAan)}
+                title={motorAan ? $t('toolbar.motor_on') : $t('toolbar.motor_off')}
+                aria-pressed={motorAan}
+              >
+                <span class="speeltafel-motor-lamp" aria-hidden="true"></span>
+                {$t('toolbar.motor')} {motorAan ? $t('toolbar.motor_state_on') : $t('toolbar.motor_state_off')}
+              </button>
+            {/if}
             <button class="speeltafel-knop" on:click={() => dispatch('toggleSpeeltafel')} title={$t('speeltafel.exit_fullscreen')}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7"/>
@@ -5644,7 +5723,7 @@
                  orgel. Vanaf 0.8.81 negeert de audio-engine nieuwe toetsen
                  als de motor uit staat (bestaande noten doven uit via hun
                  eigen release) — dus zonder motor klinkt het orgel niet. -->
-            {#if heeftBlower && !secondary}
+            {#if !secondary}
               <!-- Als sleutelschakelaar (0.8.4): rond schild met een gleuf
                    die van 0 naar I draait, een lampje en de stand in tekst. -->
               <button
@@ -5667,6 +5746,28 @@
                 <span class="motor-lamp" aria-hidden="true"></span>
               </button>
             {/if}
+            <!-- Indeling (0.8.90): alle indelingsopties achter één knop —
+                 Passend, maten, horizontaal/verticaal, knopvorm, koppel-
+                 plaatsing — zodat de dagelijkse bediening (luisterpositie,
+                 perspectief, motor) vooraan blijft en er ruimte is voor de
+                 registers. Klik buiten het menu of Escape sluit het. -->
+            <div class="indeling-wrap" role="group" on:click|stopPropagation on:keydown={(e) => { if (e.key === 'Escape') indelingOpen = false; }}>
+              <button
+                class="btn btn-ghost btn-sm panel-layout-btn"
+                class:aan={indelingOpen}
+                on:click={() => indelingOpen = !indelingOpen}
+                title={$t('toolbar.layout_menu_title')}
+                aria-expanded={indelingOpen}
+                aria-haspopup="menu"
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                  <line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="20" y2="17"/>
+                  <circle cx="9" cy="7" r="2" fill="currentColor"/><circle cx="15" cy="12" r="2" fill="currentColor"/><circle cx="7" cy="17" r="2" fill="currentColor"/>
+                </svg>
+                {$t('toolbar.layout_menu')}
+              </button>
+              {#if indelingOpen}
+                <div class="indeling-menu" role="menu">
             <!-- Speelgoedregisters (0.7.98 → 0.8.75): staan nu altijd als
                  virtuele divisie in de werken-rij. De oude werkbalk-knoppen
                  en de "ster"-schakelaar zijn vervallen. -->
@@ -5740,6 +5841,9 @@
                 {$t('toolbar.couplers')}
               </button>
             {/if}
+                </div>
+              {/if}
+            </div>
             <!-- (0.8.75) Speelgoed-plaatsing-knop vervallen: speelgoed is
                  nu altijd een eigen divisie. -->
             {#if secondary && showPanelHeaderToggle}
@@ -5875,6 +5979,14 @@
              verticale modus) de ingestelde knopgrootte kan gebruiken;
              --stop-size-n is hetzelfde getal zonder eenheid (CSS-calc kan niet
              door een lengte delen) voor de vensterbreedte-schaling in styles.css -->
+        <!-- Motor uit terwijl de audio loopt (0.8.90): het orgel geeft dan
+             geen geluid — zeg dat, met de handeling erbij. -->
+        {#if !secondary && !motorAan && audioRunning}
+          <div class="motor-uit-melding" role="status">
+            <span class="motor-uit-tekst">{$t('toolbar.motor_off_notice')}</span>
+            <button class="btn btn-sm motor-uit-knop" on:click={() => zetMotor(true)}>{$t('toolbar.motor_turn_on')}</button>
+          </div>
+        {/if}
         <div class="divisions-container" bind:this={divisionsEl} bind:clientHeight={divisionsH} class:divisions-vertical={mainLayout === 'vertical'} style="--stop-min-width: {stopSize}px; --stop-size-n: {stopSize}; --stop-h: {stopHeight}px">
           {#each selectedDivisions.map(name => displayOrgan.divisions.find(d => d.name === name)).filter(Boolean) as division}
             {@const tremDivIdx = displayOrgan.divisions.findIndex(d => d.name === division.name)}
@@ -6013,13 +6125,20 @@
     <!-- ========== INSTELLINGEN VIEW ========== -->
     {:else if activeView === 'orgel-instellingen' && displayOrgan}
       <div class="instellingen-view">
-        <div class="instellingen-columns">
+        <nav class="instellingen-nav" aria-label={$t('settings.nav_label')}>
+          <button class="instellingen-nav-knop" class:actief={instTabOrgel === 'klank'} on:click={() => zetInstTabOrgel('klank')}>{$t('settings.nav_klank')}</button>
+          <button class="instellingen-nav-knop" class:actief={instTabOrgel === 'crescendo'} on:click={() => zetInstTabOrgel('crescendo')}>{$t('settings.nav_crescendo')}</button>
+          <button class="instellingen-nav-knop" class:actief={instTabOrgel === 'weergave'} on:click={() => zetInstTabOrgel('weergave')}>{$t('settings.nav_registersortering')}</button>
+          <button class="instellingen-nav-knop" class:actief={instTabOrgel === 'midi'} on:click={() => zetInstTabOrgel('midi')}>{$t('settings.nav_routing')}</button>
+          <button class="instellingen-nav-knop" class:actief={instTabOrgel === 'alles'} on:click={() => zetInstTabOrgel('alles')}>{$t('settings.nav_alles')}</button>
+        </nav>
+        <div class="instellingen-columns" class:enkel={instTabOrgel !== 'alles'}>
 
           <!-- Kolom 1: Master, Reverb, EQ, Wind, Crescendo, Register Sort, Beheer -->
           <div class="instellingen-section">
             <!-- Master Volume, Reverb & Tuning -->
-            <div class="settings-block">
-              <h3 class="settings-block-title">{$t('settings.master')}</h3>
+            <div class="settings-block" class:inst-verborgen={instTabOrgel !== 'klank' && instTabOrgel !== 'alles'}>
+              <h3 class="settings-block-title" id="sec-settings-master">{$t('settings.master')}</h3>
               <div class="slider-control">
                 <div class="slider-header">
                   <span class="slider-label">{$t('settings.master_volume')}</span>
@@ -6100,7 +6219,7 @@
             </div>
 
             <!-- Reverb -->
-            <div class="settings-block">
+            <div class="settings-block" class:inst-verborgen={instTabOrgel !== 'klank' && instTabOrgel !== 'alles'}>
               <h3 class="settings-block-title">{$t('settings.reverb')}</h3>
               {#if natteSampleset}
                 <!-- De set heeft zijn eigen akoestiek; kunstmatige galm is hier
@@ -6200,7 +6319,7 @@
             </div>
 
             <!-- Parametric EQ -->
-            <div class="settings-block">
+            <div class="settings-block" class:inst-verborgen={instTabOrgel !== 'klank' && instTabOrgel !== 'alles'}>
               <h3 class="settings-block-title">{$t('settings.equalizer_organ')}</h3>
               <p class="settings-hint" style="margin:0 0 0.4rem;">{$t('settings.equalizer_organ_hint')}</p>
               <div style="display:flex; align-items:center; gap:0.5rem;">
@@ -6244,8 +6363,8 @@
             </div>
 
             <!-- Windmodel (per windgroep) -->
-            <div class="settings-block">
-              <h3 class="settings-block-title">{$t('settings.wind_system')}</h3>
+            <div class="settings-block" class:inst-verborgen={instTabOrgel !== 'klank' && instTabOrgel !== 'alles'}>
+              <h3 class="settings-block-title" id="sec-settings-wind_system">{$t('settings.wind_system')}</h3>
               <p style="margin:0 0 0.6rem; font-size:0.74rem; color:var(--text-muted); line-height:1.5;">
                 {$t('settings.wind_intro')}
               </p>
@@ -6415,8 +6534,8 @@
 
             <!-- Perspectieven en gestapelde ranks (0.7.38) -->
             {#if !secondary && ((organInfo?.perspectives?.length || 0) > 0 || (organInfo?.layered_stops || 0) > 0)}
-            <div class="settings-block">
-              <h3 class="settings-block-title">{$t('perspectives.title')}</h3>
+            <div class="settings-block" class:inst-verborgen={instTabOrgel !== 'klank' && instTabOrgel !== 'alles'}>
+              <h3 class="settings-block-title" id="sec-perspectives-title">{$t('perspectives.title')}</h3>
               {#if (organInfo?.layered_stops || 0) > 0}
                 <p class="settings-hint" style="margin: 0 0 0.4rem;">{$t('perspectives.stacked_note').replace('{n}', organInfo.layered_stops)}</p>
               {/if}
@@ -6467,8 +6586,8 @@
 
             <!-- Bijgeluiden (0.7.97): hoorbaar + motor-knop + volumeschuif. -->
             {#if !secondary && heeftBijgeluiden}
-            <div class="settings-block">
-              <h3 class="settings-block-title">{$t('background.title')}</h3>
+            <div class="settings-block" class:inst-verborgen={instTabOrgel !== 'klank' && instTabOrgel !== 'alles'}>
+              <h3 class="settings-block-title" id="sec-background-title">{$t('background.title')}</h3>
               <p class="settings-hint" style="margin: 0 0 0.4rem;">{$t('background.desc')}</p>
               <ul style="margin: 0.2rem 0 0.4rem; padding-left: 1.1rem; font-size: 0.78rem;">
                 {#each organInfo.background_sounds as b}
@@ -6516,8 +6635,8 @@
             {/if}
 
             <!-- Crescendo -->
-            <div class="settings-block">
-              <h3 class="settings-block-title">{$t('settings.crescendo')}</h3>
+            <div class="settings-block" class:inst-verborgen={instTabOrgel !== 'crescendo' && instTabOrgel !== 'alles'}>
+              <h3 class="settings-block-title" id="sec-settings-crescendo">{$t('settings.crescendo')}</h3>
               <div style="display:flex; align-items:center; gap:0.5rem;">
                 <label class="swell-toggle">
                   <input type="checkbox" checked={crescendoEnabled}
@@ -6759,8 +6878,8 @@
             </div>
 
             <!-- Register Sortering -->
-            <div class="settings-block">
-              <h3 class="settings-block-title">{$t('settings.register_sort')}</h3>
+            <div class="settings-block" class:inst-verborgen={instTabOrgel !== 'weergave' && instTabOrgel !== 'alles'}>
+              <h3 class="settings-block-title" id="sec-settings-register_sort">{$t('settings.register_sort')}</h3>
               {#if displayOrgan}
                 {#each displayOrgan.divisions as division}
                   <div class="sort-division">
@@ -6799,7 +6918,7 @@
             </div>
 
             <!-- Instellingen Export/Import -->
-            <div class="settings-block">
+            <div class="settings-block" class:inst-verborgen={instTabOrgel !== 'weergave' && instTabOrgel !== 'alles'}>
               <h3 class="settings-block-title">{$t('settings.export_import')}</h3>
               <div style="display: flex; flex-direction: column; gap: 0.4rem;">
                 <button class="btn btn-secondary btn-sm" on:click={exportSettings}>
@@ -6817,9 +6936,10 @@
 
           <!-- Kolom 2: MIDI Mapping + Layout -->
           <div class="instellingen-section">
-            <div class="midi-mapping-container">
+            <div class="midi-mapping-container" class:inst-verborgen={instTabOrgel !== 'midi' && instTabOrgel !== 'alles'}>
               <div class="midi-mapping-header">
-                <h3>{$t('settings.midi_mapping_title')}</h3>
+                <h3 id="sec-settings-midi_mapping_title">{$t('settings.midi_mapping_title')}</h3>
+                <button class="btn btn-ghost btn-sm" style="margin-left:auto;" on:click={wizardStart} title={$t('wizard.reopen_title')}>{$t('wizard.reopen')}</button>
                 <p>{$t('learn.hint_press_first')} <strong>{$t('learn.hint_lowest_key')}</strong>{$t('learn.hint_then')} <strong>{$t('learn.hint_highest_key')}</strong>.</p>
               </div>
 
@@ -7314,8 +7434,8 @@
             </div>
 
             <!-- ============ MIDI-koppelingen: overzicht + handmatig bewerken ============ -->
-            <div class="settings-block">
-              <h3 class="settings-block-title">{$t('bindings.editor_title')}</h3>
+            <div class="settings-block" class:inst-verborgen={instTabOrgel !== 'midi' && instTabOrgel !== 'alles'}>
+              <h3 class="settings-block-title" id="sec-bindings-editor_title">{$t('bindings.editor_title')}</h3>
               <p style="margin: 0 0 0.5rem; font-size: 0.7rem; color: var(--text-muted); line-height: 1.4;">
                 {$t('bindings.editor_intro')}
               </p>
@@ -7466,14 +7586,14 @@
         </div>
 
         <!-- MIDI Speler -->
-        <div style="margin-top: 1.5rem; max-width: 1200px;">
+        <div style="margin-top: 1.5rem; max-width: 1200px;" class:inst-verborgen={instTabOrgel !== 'midi' && instTabOrgel !== 'alles'}>
           <div class="settings-block" style="padding: 0;">
             <MidiPlayer />
           </div>
         </div>
 
         <!-- Pijp-voicing (volle breedte onderaan) -->
-        <div style="margin-top: 1.5rem; max-width: 1200px;">
+        <div style="margin-top: 1.5rem; max-width: 1200px;" class:inst-verborgen={instTabOrgel !== 'klank' && instTabOrgel !== 'alles'}>
           <div class="settings-block" style="padding: 0;">
             <VoicingPanel organ={displayOrgan} on:persistSettings={() => dispatch('persistSettings')} />
           </div>
@@ -7483,6 +7603,15 @@
     {:else if activeView === 'algemene-instellingen'}
       <!-- ============ ALGEMENE INSTELLINGEN ============ -->
       <div class="instellingen-view">
+        <nav class="instellingen-nav" aria-label={$t('settings.nav_label')}>
+          <button class="instellingen-nav-knop" class:actief={instTabAlg === 'audio'} on:click={() => zetInstTabAlg('audio')}>{$t('settings.nav_audio')}</button>
+          <button class="instellingen-nav-knop" class:actief={instTabAlg === 'sampleset'} on:click={() => zetInstTabAlg('sampleset')}>{$t('settings.nav_samplefix')}</button>
+          <button class="instellingen-nav-knop" class:actief={instTabAlg === 'midi'} on:click={() => zetInstTabAlg('midi')}>{$t('settings.nav_midi')}</button>
+          <button class="instellingen-nav-knop" class:actief={instTabAlg === 'pistons'} on:click={() => zetInstTabAlg('pistons')}>{$t('settings.nav_knoppen')}</button>
+          <button class="instellingen-nav-knop" class:actief={instTabAlg === 'weergave'} on:click={() => zetInstTabAlg('weergave')}>{$t('settings.nav_weergave')}</button>
+          <button class="instellingen-nav-knop" class:actief={instTabAlg === 'over'} on:click={() => zetInstTabAlg('over')}>{$t('settings.nav_update')}</button>
+          <button class="instellingen-nav-knop" class:actief={instTabAlg === 'alles'} on:click={() => zetInstTabAlg('alles')}>{$t('settings.nav_alles')}</button>
+        </nav>
         {#if !organInfo}
           <!-- Zonder geladen orgel is dit de weg terug naar het startscherm.
                Stond er al sinds 0.4.0, maar hing achter "!displayOrgan" — en dat
@@ -7494,12 +7623,12 @@
             </button>
           </div>
         {/if}
-        <div class="instellingen-columns">
+        <div class="instellingen-columns" class:enkel={instTabAlg !== 'alles'}>
           <!-- Kolom 1: Audio + MIDI devices -->
           <div class="instellingen-section">
             <!-- Audio Uitvoer -->
-            <div class="settings-block">
-              <h3 class="settings-block-title">{$t('settings.audio_output')}</h3>
+            <div class="settings-block" class:inst-verborgen={instTabAlg !== 'audio' && instTabAlg !== 'alles'}>
+              <h3 class="settings-block-title" id="sec-settings-audio_output">{$t('settings.audio_output')}</h3>
 
               <!-- Host / driver -->
               <div class="audio-select-row">
@@ -8047,8 +8176,8 @@
             </div>
 
             <!-- Sampleset: aanloop-stilte bijsnijden -->
-            <div class="settings-block">
-              <h3 class="settings-block-title">{$t('settings.sampleset_title')}</h3>
+            <div class="settings-block" class:inst-verborgen={instTabAlg !== 'sampleset' && instTabAlg !== 'alles'}>
+              <h3 class="settings-block-title" id="sec-settings-sampleset_title">{$t('settings.sampleset_title')}</h3>
               {#if !samplesetDir()}
                 <p style="font-size:0.75rem; color:var(--text-muted);">{$t('settings.sampleset_no_organ')}</p>
               {:else}
@@ -8095,8 +8224,8 @@
             </div>
 
             <!-- Sampleset: loops detecteren + inbakken -->
-            <div class="settings-block">
-              <h3 class="settings-block-title">{$t('settings.loops_title')}</h3>
+            <div class="settings-block" class:inst-verborgen={instTabAlg !== 'sampleset' && instTabAlg !== 'alles'}>
+              <h3 class="settings-block-title" id="sec-settings-loops_title">{$t('settings.loops_title')}</h3>
               {#if !samplesetDir()}
                 <p style="font-size:0.75rem; color:var(--text-muted);">{$t('settings.sampleset_no_organ')}</p>
               {:else}
@@ -8131,9 +8260,9 @@
             </div>
 
             <!-- MIDI Invoer -->
-            <div class="settings-block">
+            <div class="settings-block" class:inst-verborgen={instTabAlg !== 'midi' && instTabAlg !== 'alles'}>
               <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
-                <h3 class="settings-block-title" style="margin: 0;">{$t('settings.midi_input')}</h3>
+                <h3 class="settings-block-title" style="margin: 0;" id="sec-settings-midi_input">{$t('settings.midi_input')}</h3>
                 <button class="btn btn-ghost btn-sm" on:click={async () => { try { await invoke('refresh_midi_devices'); dispatch('refreshDevices'); } catch (e) {} }} title={$t('settings.midi_refresh')}>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M23 4v6h-6M1 20v-6h6"/>
@@ -8249,8 +8378,8 @@
             </div>
 
             <!-- Terugkoppeling: MIDI-uit naar de fysieke console (registerlampen/display) -->
-            <div class="settings-block">
-              <h3 class="settings-block-title">{$t('feedback.title')}</h3>
+            <div class="settings-block" class:inst-verborgen={instTabAlg !== 'midi' && instTabAlg !== 'alles'}>
+              <h3 class="settings-block-title" id="sec-feedback-title">{$t('feedback.title')}</h3>
               <p class="settings-hint" style="margin: 0 0 0.5rem;">
                 {$t('feedback.desc')}
               </p>
@@ -8332,8 +8461,8 @@
             </div>
 
             <!-- Consoleknoppen (pistons): vaste functies inleerbaar op één plek -->
-            <div class="settings-block">
-              <h3 class="settings-block-title">{$t('pistons.learn_title')}</h3>
+            <div class="settings-block" class:inst-verborgen={instTabAlg !== 'pistons' && instTabAlg !== 'alles'}>
+              <h3 class="settings-block-title" id="sec-pistons-learn_title">{$t('pistons.learn_title')}</h3>
               <p class="settings-hint" style="margin: 0 0 0.5rem;">
                 {$t('pistons.learn_desc')}
               </p>
@@ -8361,20 +8490,9 @@
               {/if}
             </div>
 
-            <!-- Online orgelfoto's: opt-in schakelaar (0.8.74). -->
-            <div class="settings-block">
-              <h3 class="settings-block-title">{$t('library.online_search_title')}</h3>
-              <p class="settings-hint" style="margin:0 0 0.5rem;">{$t('library.online_search_hint')}</p>
-              <label class="swell-toggle">
-                <input type="checkbox" checked={onlineImageSearchEnabled}
-                       on:change={(e) => toggleOnlineImageSearch(e.target.checked)} />
-                <span class="swell-toggle-label">{$t('library.online_search_enable')}</span>
-              </label>
-            </div>
-
             <!-- Over & feedback: versie, GitHub-feedback en handmatige update-check -->
-            <div class="settings-block">
-              <h3 class="settings-block-title">{$t('about.title')}</h3>
+            <div class="settings-block" class:inst-verborgen={instTabAlg !== 'over' && instTabAlg !== 'alles'}>
+              <h3 class="settings-block-title" id="sec-about-title">{$t('about.title')}</h3>
               <p class="settings-hint" style="margin: 0 0 0.5rem;">
                 JM-Orgue {appVersion ? $t('about.version').replace('{version}', appVersion) : ''} — {$t('about.copyright')}
               </p>
@@ -8464,8 +8582,123 @@
           </div>
 
           <!-- Kolom 2: Sfeer & Layout -->
-          <div class="instellingen-section">
+          <div class="instellingen-section" class:inst-verborgen={instTabAlg !== 'weergave' && instTabAlg !== 'alles'}>
             <LayoutSettings />
+          </div>
+        </div>
+      </div>
+    {/if}
+
+    <!-- Instelwizard (0.8.90) -->
+    {#if wizardOpen && !secondary}
+      <div class="wizard-overlay" role="dialog" aria-modal="true" aria-label={$t('wizard.title')}>
+        <div class="wizard">
+          <div class="wizard-kop">
+            <h3>{$t('wizard.title')}</h3>
+            <span class="wizard-teller">{wizardStap + 1} / {WIZARD_STAPPEN}</span>
+          </div>
+          <div class="wizard-stappen" aria-hidden="true">
+            {#each Array(WIZARD_STAPPEN) as _, i}
+              <span class="wizard-stip" class:actief={i === wizardStap} class:gedaan={i < wizardStap}></span>
+            {/each}
+          </div>
+
+          {#if wizardStap === 0}
+            <p class="wizard-tekst">{$t('wizard.intro')}</p>
+            <ul class="wizard-lijst">
+              <li>{$t('wizard.step_keyboards')}</li>
+              <li>{$t('wizard.step_swell')}</li>
+              <li>{$t('wizard.step_speakers')}</li>
+              <li>{$t('wizard.step_headphones')}</li>
+            </ul>
+            <p class="wizard-hint">{$t('wizard.reopen_hint')}</p>
+
+          {:else if wizardStap === 1}
+            <h4>{$t('wizard.step_keyboards')}</h4>
+            <p class="wizard-hint">{$t('wizard.step_keyboards_hint')}</p>
+            {#if !midiConnected}
+              <p class="wizard-waarschuwing">{$t('wizard.midi_not_connected')}</p>
+            {/if}
+            {#each wizardDivisies as d (d.name)}
+              <div class="wizard-rij">
+                <span class="wizard-naam">{d.display_name || d.name}</span>
+                <span class="wizard-status">{$t('settings.midi_channel')}: {wizardKanaalTekst(d.name)}</span>
+                <button class="btn btn-secondary btn-sm" class:learning={learningDivision === d.name}
+                        on:click={() => learnChannel(d.name)} disabled={!midiConnected || (learningDivision !== null && learningDivision !== d.name)}>
+                  {$t('wizard.learn')}
+                </button>
+              </div>
+            {/each}
+
+          {:else if wizardStap === 2}
+            <h4>{$t('wizard.step_swell')}</h4>
+            <p class="wizard-hint">{$t('wizard.step_swell_hint')}</p>
+            {#if !midiConnected}
+              <p class="wizard-waarschuwing">{$t('wizard.midi_not_connected')}</p>
+            {/if}
+            {#each wizardDivisies.filter(d => d.has_swell) as d (d.name)}
+              <div class="wizard-rij">
+                <span class="wizard-naam">{d.display_name || d.name}</span>
+                <span class="wizard-status">{swellBindings[d.name] ? $t('wizard.learned') : $t('wizard.not_learned')}</span>
+                <button class="btn btn-secondary btn-sm" on:click={() => learnSwellPedal(d.name)} disabled={!midiConnected}>{$t('wizard.learn')}</button>
+              </div>
+            {/each}
+            {#if wizardDivisies.filter(d => d.has_swell).length === 0}
+              <p class="wizard-hint">{$t('wizard.no_swell')}</p>
+            {/if}
+            <div class="wizard-rij">
+              <span class="wizard-naam">{$t('wizard.crescendo')}</span>
+              <span class="wizard-status">{crescendoBinding ? $t('wizard.learned') : $t('wizard.not_learned')}</span>
+              <button class="btn btn-secondary btn-sm" on:click={learnCrescendoPedal} disabled={!midiConnected}>{$t('wizard.learn')}</button>
+            </div>
+
+          {:else if wizardStap === 3 || wizardStap === 4}
+            <h4>{wizardStap === 3 ? $t('wizard.step_speakers') : $t('wizard.step_headphones')}</h4>
+            <p class="wizard-hint">{$t('wizard.outputs_hint')}</p>
+            {#if !audioProfiles?.[wizardProfielKind]}
+              <p class="wizard-tekst">{$t('wizard.no_profile')}</p>
+              <button class="btn btn-secondary btn-sm" on:click={() => dispatch('saveAudioProfile', wizardProfielKind)}>{$t('wizard.save_profile')}</button>
+            {:else if audioProfiles.active !== wizardProfielKind}
+              <p class="wizard-tekst">{audioProfiles[wizardProfielKind].host || '?'} · {audioProfiles[wizardProfielKind].device || $t('settings.default_device')}</p>
+              <button class="btn btn-secondary btn-sm" on:click={() => dispatch('switchAudioProfile', wizardProfielKind)}>{$t('wizard.activate_profile')}</button>
+            {:else}
+              <p class="wizard-tekst">{$t('wizard.profile_active')} — {audioChannelCount}ch</p>
+              {#each wizardDivisies as d (d.name)}
+                <div class="wizard-rij">
+                  <span class="wizard-naam">{d.display_name || d.name}</span>
+                  <div class="wizard-chips">
+                    {#each Array(audioChannelCount) as _, ch}
+                      <label class="ch-chip" class:on={isChannelSelected(d.name, ch)} title={channelLabel(ch, audioChannelCount)}>
+                        <input type="checkbox" checked={isChannelSelected(d.name, ch)} on:change={() => toggleDivisionChannel(d.name, ch)} />
+                        <span>{ch + 1}</span>
+                      </label>
+                    {/each}
+                  </div>
+                </div>
+              {/each}
+            {/if}
+
+          {:else}
+            <h4>{$t('wizard.done_title')}</h4>
+            <p class="wizard-tekst">{$t('wizard.done_text')}</p>
+          {/if}
+
+          <div class="wizard-knoppen">
+            <div>
+              {#if wizardStap === 0}
+                <button class="btn btn-ghost btn-sm" on:click={() => wizardSluit(true)}>{$t('wizard.skip')}</button>
+              {:else}
+                <button class="btn btn-ghost btn-sm" on:click={() => wizardStap -= 1}>{$t('wizard.back')}</button>
+              {/if}
+            </div>
+            <div>
+              <button class="btn btn-ghost btn-sm" on:click={() => wizardSluit(false)}>{$t('wizard.later')}</button>
+              {#if wizardStap < WIZARD_STAPPEN - 1}
+                <button class="btn btn-primary btn-sm" on:click={() => wizardStap += 1}>{wizardStap === 0 ? $t('wizard.start') : $t('wizard.next')}</button>
+              {:else}
+                <button class="btn btn-primary btn-sm" on:click={() => wizardSluit(true)}>{$t('wizard.finish')}</button>
+              {/if}
+            </div>
           </div>
         </div>
       </div>

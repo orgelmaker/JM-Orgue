@@ -5,6 +5,64 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.8.90] - 2026-10-14
+
+### Werkbalk: indelingsopties achter één knop "Indeling"
+- Passend, knopmaten (breedte/hoogte), werken naast of onder elkaar,
+  knopvorm en de plaats van de koppels staan nu in een uitklapmenu.
+  Luisterpositie, perspectief en motor-sleutel blijven direct bereikbaar;
+  er is meer ruimte voor de registers. Klik buiten het menu of Escape
+  sluit het.
+
+### Instellingen: onderwerpnavigatie bovenaan
+- Beide instellingenschermen hebben een plakkende balk met onderwerpen
+  (orgel: Klank, Wind, Perspectief, Bijgeluiden, Crescendo, Weergave,
+  MIDI, Koppelingen; algemeen: Audio, Sampleset, Loops, MIDI,
+  Terugkoppeling, Pistons, Online, Over). Een klik springt naar de
+  sectiekop, zodat je minder hoeft te scrollen.
+
+### Motor-sleutel is dé aan/uit; Stop-knop vervallen
+- De Start/Stop-knop in de hoofdbalk is weg: de motor-sleutel op het
+  orgelscherm is nu de enige aan/uit, ook voor sets zonder motor-opname
+  (dan is hij "virtueel": geen windgeruis, wel geen klank zonder motor).
+  Elke set start met de motor uit; een herlaad van hetzelfde orgel
+  behoudt de stand. "Start" verschijnt alleen nog als de audio niet
+  loopt (na een apparaatfout).
+- In volledig scherm staat de sleutel in de bovenstrook — alleen zolang
+  de werkbalk verborgen is, dus nooit twee sleutels op één scherm; extra
+  registerschermen hebben er geen.
+
+### Instelwizard bij een nieuw orgel
+- Laad je een orgel dat nog geen opgeslagen instellingen heeft, dan
+  start een wizard: MIDI-kanaal per klavier (speel een toets),
+  zwelkasten en generaal crescendo (trede inleren), uitgangskanalen per
+  klavier voor het speakerprofiel en voor het hoofdtelefoonprofiel. Elke
+  stap is over te slaan of later te doen; "Wizard" in Orgel-instellingen
+  → Routing start hem opnieuw. Orgels met bestaande instellingen krijgen
+  hem niet.
+
+### Instellingen als tabbladen
+- De onderwerpbalk is een tabbladenrij geworden: per tab zie je alleen
+  dat onderwerp, over de volle breedte; "Alles" geeft de oude complete
+  lijst. Orgel: Klank (incl. wind, perspectief, bijgeluiden), Crescendo,
+  Registersortering, Routing (MIDI, uitgangen, koppels, koppelingen,
+  MIDI-speler). Algemeen: Audio uitvoer, Sample fix (aanloop + loops),
+  MIDI (invoer + terugkoppeling), Knoppen inleren, Weergave, Update en
+  feedback. Keuze wordt per scherm onthouden.
+
+### Online fotozoeker: standaard beschikbaar, downloadfout verholpen
+- De opt-in-schakelaar is vervallen: de wereldbol-knop staat altijd op de
+  bibliotheekkaart. Er gaan nog steeds alleen zoektermen naar buiten.
+- Een gekozen foto kwam niet binnen ("Onbekend afbeeldingsformaat:
+  org&utm_campaign=…"): Commons plakt een querystring achter de
+  bestands-URL en de extensie werd daarachter gelezen. De extensie komt
+  nu uit het kale pad, met de Commons-titel als terugval.
+
+### Melding "Motor uit — zet aan om te spelen"
+- Loopt de audio maar staat de motor uit, dan toont het orgelscherm een
+  duidelijke melding met een knop om de motor aan te zetten. Zo is
+  direct duidelijk waarom het orgel geen geluid geeft.
+
 ## [0.8.89] - 2026-10-13
 
 ### Motor blijft aan bij een herlaad van hetzelfde orgel

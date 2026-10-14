@@ -1581,6 +1581,12 @@ pub struct AppState {
     /// openen) → de motor-stand blijft staan; een ander id = nieuw orgel →
     /// motor start uit (0.8.86).
     pub bijgeluiden_orgel_id: Arc<RwLock<Option<String>>>,
+    /// Instelwizard (0.8.90): `pending` = dit orgel had bij het laden nog
+    /// geen opgeslagen instellingen → de UI start de wizard (en wist de vlag
+    /// via take_setup_wizard_pending). `done` wordt met de orgelinstellingen
+    /// bewaard; orgels van vóór dit veld gelden als klaar.
+    pub setup_wizard_pending: Arc<RwLock<bool>>,
+    pub setup_wizard_done: Arc<RwLock<bool>>,
     /// Toetsmechaniek (0.7.102): aan = de aanslag-klik van elk klavier wordt
     /// afgespeeld bij elke MIDI NoteOn. Standaard uit vanwege het geheugen
     /// (per sampleset tot tientallen megabytes aan WAV's). Als de gebruiker
@@ -1954,6 +1960,8 @@ impl AppState {
             pitch_offset_cents: Arc::new(RwLock::new(0.0)),
             auto_retune: Arc::new(RwLock::new(true)),
             bijgeluiden_orgel_id: Arc::new(RwLock::new(None)),
+            setup_wizard_pending: Arc::new(RwLock::new(false)),
+            setup_wizard_done: Arc::new(RwLock::new(true)),
             toetsmechaniek_aan: Arc::new(RwLock::new(false)),
             misc_cc_bindings: Arc::new(RwLock::new(Vec::new())),
             misc_cc_learning: Arc::new(RwLock::new(None)),

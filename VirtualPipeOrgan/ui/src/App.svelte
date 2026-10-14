@@ -1799,6 +1799,7 @@
     <Console
       bind:this={consoleComponent}
       {organInfo}
+      audioRunning={status.audioRunning}
       {loading}
       {loadingProgress}
       {loadingMessage}

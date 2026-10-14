@@ -117,14 +117,10 @@
           <span class="eq-badge" title={$t('eq.badge_title').replace('{name}', status.outputEqName || $t('eq.badge_own'))}>EQ</span>
         {/if}
       </button>
-    {#if status.audioRunning}
-      <button class="btn btn-secondary" on:click={() => dispatch('stopAudio')}>
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-          <rect x="6" y="6" width="12" height="12" rx="1"/>
-        </svg>
-        {$t('header.stop')}
-      </button>
-    {:else}
+    <!-- Stop-knop vervallen (0.8.90): de motor-sleutel op het orgelscherm is
+         dé aan/uit. Start blijft alleen als de audio níet loopt (na een
+         apparaatfout). -->
+    {#if !status.audioRunning}
       <button class="btn btn-primary" on:click={() => dispatch('startAudio')}>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
           <polygon points="6,4 20,12 6,20"/>

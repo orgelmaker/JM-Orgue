@@ -512,6 +512,10 @@ pub struct OrganSettings {
     /// Pitch_OriginalOrgan_PitchHz in de ODF.
     #[serde(default)]
     pub auto_retune: Option<bool>,
+    /// Instelwizard doorlopen of overgeslagen (0.8.90). None (ouder
+    /// bestand) = klaar.
+    #[serde(default)]
+    pub setup_wizard_done: Option<bool>,
     /// Toetsmechaniek aan voor dít orgel (0.7.102). Standaard false.
     #[serde(default)]
     pub toetsmechaniek_aan: Option<bool>,

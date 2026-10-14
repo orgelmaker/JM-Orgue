@@ -3437,3 +3437,70 @@ input[type="range"]::-webkit-slider-thumb:hover {
   html, body { height: auto !important; overflow: visible !important; }
   #app { height: auto !important; display: block !important; background: #fff !important; }
 }
+
+/* Indeling-menu in de werkbalk (0.8.90) */
+.indeling-wrap { position: relative; }
+.indeling-wrap .panel-layout-btn.aan { background: var(--accent-soft); }
+.indeling-menu {
+  position: absolute; right: 0; top: calc(100% + 4px); z-index: 60;
+  display: flex; flex-direction: column; gap: 0.25rem; min-width: 15rem;
+  padding: 0.45rem; background: var(--bg-elevated, var(--bg-darkest));
+  border: 1px solid var(--accent-soft); border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+}
+.indeling-menu .panel-layout-btn { width: 100%; justify-content: flex-start; }
+.indeling-menu .stop-size-control { justify-content: flex-start; padding: 0.15rem 0.3rem; }
+
+/* Onderwerpnavigatie in de instellingen (0.8.90) */
+.instellingen-nav {
+  position: sticky; top: -1.25rem; z-index: 5;
+  display: flex; flex-wrap: wrap; gap: 0.3rem;
+  margin: -1.25rem -1.25rem 0.9rem; padding: 0.55rem 1.25rem;
+  background: var(--bg-dark, var(--bg-darkest)); border-bottom: 1px solid var(--accent-soft);
+}
+.instellingen-nav-knop {
+  font-size: 0.74rem; padding: 0.25rem 0.65rem; border-radius: 999px;
+  border: 1px solid var(--accent-soft); background: transparent; color: var(--text-secondary, var(--text));
+  cursor: pointer;
+}
+.instellingen-nav-knop:hover { background: var(--accent-soft); color: var(--text); }
+.settings-block-title[id], .midi-mapping-header h3[id] { scroll-margin-top: 3.2rem; }
+
+/* Motor uit terwijl de audio loopt (0.8.90) */
+.motor-uit-melding {
+  display: flex; align-items: center; gap: 0.75rem; flex-shrink: 0;
+  margin: 0.35rem 0.75rem 0; padding: 0.4rem 0.8rem; border-radius: 8px;
+  background: rgba(217, 164, 65, 0.14); border: 1px solid var(--warning, #d9a441);
+  color: var(--text); font-size: 0.85rem;
+}
+.motor-uit-knop { border: 1px solid var(--warning, #d9a441); }
+
+/* Instellingen als tabbladen (0.8.90) */
+.inst-verborgen { display: none !important; }
+.instellingen-columns.enkel { grid-template-columns: 1fr; max-width: 1200px; }
+.instellingen-nav-knop.actief { background: var(--accent-soft); color: var(--text); border-color: var(--accent, var(--accent-soft)); }
+/* Motor-sleutel in de speeltafelstrook (0.8.90) */
+.speeltafel-motor-lamp { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: #5a3a1a; margin-right: 0.35rem; vertical-align: middle; }
+.speeltafel-motor.actief .speeltafel-motor-lamp { background: #ffb347; box-shadow: 0 0 6px #ffb347; }
+
+/* Instelwizard (0.8.90) — onder de inleer-modals (kb-learn 900) */
+.wizard-overlay { position: fixed; inset: 0; z-index: 850; background: rgba(0,0,0,0.55); display: flex; align-items: center; justify-content: center; }
+.wizard { background: var(--bg-elevated, var(--bg-darkest)); border: 1px solid var(--accent-soft); border-radius: 12px; width: min(680px, 94vw); max-height: 88vh; overflow: auto; padding: 1.1rem 1.3rem; color: var(--text); box-shadow: 0 12px 40px rgba(0,0,0,0.5); }
+.wizard-kop { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; }
+.wizard-kop h3 { margin: 0; }
+.wizard-teller { font-size: 0.75rem; color: var(--text-muted); }
+.wizard-stappen { display: flex; gap: 0.35rem; margin: 0.6rem 0 0.9rem; }
+.wizard-stip { width: 10px; height: 10px; border-radius: 50%; background: var(--accent-soft); }
+.wizard-stip.gedaan { background: var(--accent, #c9a04a); opacity: 0.6; }
+.wizard-stip.actief { background: var(--accent, #c9a04a); }
+.wizard h4 { margin: 0.2rem 0 0.4rem; }
+.wizard-tekst { margin: 0.3rem 0 0.6rem; line-height: 1.45; }
+.wizard-hint { margin: 0 0 0.6rem; font-size: 0.78rem; color: var(--text-muted); line-height: 1.4; }
+.wizard-waarschuwing { margin: 0 0 0.6rem; font-size: 0.8rem; color: var(--warning, #d9a441); }
+.wizard-lijst { margin: 0 0 0.8rem 1.1rem; padding: 0; line-height: 1.6; }
+.wizard-rij { display: flex; align-items: center; gap: 0.6rem; padding: 0.4rem 0; border-bottom: 1px solid var(--accent-soft); flex-wrap: wrap; }
+.wizard-naam { min-width: 9rem; font-weight: 600; }
+.wizard-status { flex: 1; font-size: 0.8rem; color: var(--text-muted); }
+.wizard-chips { display: flex; flex-wrap: wrap; gap: 0.25rem; flex: 1; }
+.wizard-knoppen { display: flex; justify-content: space-between; gap: 0.5rem; margin-top: 1rem; }
+.wizard-knoppen > div { display: flex; gap: 0.4rem; }

@@ -1333,18 +1333,19 @@ fn laad_en_stuur_bijgeluiden(state: &AppState, defs: &[vpo_sampler::grandorgue::
         *vorige = Some(organ_id.to_string());
         zelfde
     };
-    let motor_aan = if !heeft_blower { true } else if herlaad { *state.blower_active.read() } else { false };
+    // 0.8.90: de sleutel is dé aan/uit, ook zonder motor-opname → altijd uit
+    // bij een nieuw orgel; alleen een herlaad behoudt de stand.
+    let motor_aan = if herlaad { *state.blower_active.read() } else { false };
     *state.blower_active.write() = motor_aan;
     state.send_audio_command(AudioCommand::SetBlowerActive(motor_aan));
     let n_loops = voices.iter().filter(|v| v.loop_start.is_some() && v.loop_end.is_some()).count();
-    if !voices.is_empty() {
+    {
         info!("Bijgeluiden: {} voices, {} met loop-punten; motor start {}",
             voices.len(), n_loops,
-            match (heeft_blower, herlaad, motor_aan) {
-                (false, _, _) => "aan (geen motor-opname)",
-                (true, true, true) => "aan (herlaad, stand behouden)",
-                (true, true, false) => "uit (herlaad, stand behouden)",
-                (true, false, _) => "uit",
+            match (herlaad, motor_aan) {
+                (true, true) => "aan (herlaad, stand behouden)",
+                (true, false) => "uit (herlaad, stand behouden)",
+                (false, _) => if heeft_blower { "uit" } else { "uit (geen motor-opname, sleutel virtueel)" },
             });
     }
     // Altijd sturen, ook leeg — anders blijven de bijgeluiden van een
@@ -1452,6 +1453,28 @@ pub fn set_auto_retune(state: State<AppState>, on: bool) -> Result<(), String> {
 #[tauri::command]
 pub fn get_auto_retune(state: State<AppState>) -> bool {
     *state.auto_retune.read()
+}
+
+/// Instelwizard (0.8.90): moet de UI de wizard starten voor het zojuist
+/// geladen orgel? Eénmalig: de vlag wordt bij het lezen gewist.
+#[tauri::command]
+pub fn take_setup_wizard_pending(state: State<AppState>) -> bool {
+    let mut p = state.setup_wizard_pending.write();
+    let was = *p;
+    *p = false;
+    info!("Instelwizard-vlag opgevraagd: {}", was);
+    was
+}
+
+/// Diagnoseregel vanuit de UI in het app-log (0.8.90).
+#[tauri::command]
+pub fn ui_log(msg: String) { info!("UI: {}", msg); }
+
+/// Wizard doorlopen of overgeslagen: bij de volgende opslag gaat dit mee.
+#[tauri::command]
+pub fn set_setup_wizard_done(state: State<AppState>) -> Result<(), String> {
+    *state.setup_wizard_done.write() = true;
+    Ok(())
 }
 
 /// Live volume van een perspectief in dB.
@@ -9084,10 +9107,18 @@ fn restore_organ_settings(state: &AppState, organ_id: &str) {
     // bij de load), dus hier niets extra's voor perspectieven.
     let settings = match saved_settings_for(state, organ_id) {
         Some(s) => s,
-        None => return,
+        None => {
+            // Nieuw orgel (0.8.90): de instelwizard aanbieden.
+            info!("Nieuw orgel zonder instellingen: instelwizard aangeboden");
+            *state.setup_wizard_pending.write() = true;
+            *state.setup_wizard_done.write() = false;
+            return;
+        }
     };
 
     info!("Restoring settings for organ: {}", organ_id);
+    *state.setup_wizard_pending.write() = false;
+    *state.setup_wizard_done.write() = settings.setup_wizard_done.unwrap_or(true);
 
     // Alle opnameposities in het geheugen houden (per orgel).
     *state.load_all_perspectives.write() = settings.load_all_perspectives;
@@ -9863,6 +9894,7 @@ pub fn do_save_organ_settings(state: &AppState, presets: HashMap<String, PresetD
         background_channels: state.background_channels.read().iter().cloned().collect(), // 0.8.82
         pitch_offset_cents: Some(*state.pitch_offset_cents.read()), // 0.8.84
         auto_retune: Some(*state.auto_retune.read()), // 0.8.85
+        setup_wizard_done: Some(*state.setup_wizard_done.read()), // 0.8.90
         toetsmechaniek_aan: Some(*state.toetsmechaniek_aan.read()),
         misc_cc_bindings: crate::state::MISC_CC_BINDINGS().read().clone(),
         extra_couplers: state.extra_coupler_ids.read().clone(),
@@ -10215,9 +10247,9 @@ pub async fn search_online_image(state: State<'_, AppState>, id: String)
             None => return Err(format!("Orgel niet in de bibliotheek: {}", id)),
         }
     };
-    if !toegestaan {
-        return Err("Online zoeken staat uit. Zet het aan in Instellingen.".to_string());
-    }
+    // 0.8.90: online zoeken is standaard beschikbaar (geen opt-in meer); de
+    // vlag blijft in de bibliotheek staan voor oudere bestanden maar telt niet.
+    let _ = toegestaan;
 
     let mut ctx = lo::ZoekContext {
         naam: entry.name.clone(),
@@ -10282,10 +10314,6 @@ pub async fn apply_online_image(
 {
     let norm = crate::library::pad_sleutel;
     let key = norm(&id);
-    let toegestaan = state.organ_library.read().online_image_search_enabled;
-    if !toegestaan {
-        return Err("Online zoeken staat uit. Zet het aan in Instellingen.".to_string());
-    }
     let map = organ_images_dir(&state);
     let stem = image_copy_stem(&key);
     let hit_c = hit.clone();
