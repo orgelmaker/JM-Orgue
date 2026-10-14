@@ -93,6 +93,28 @@ pub fn measured_from_smpl_for_target(unity: Option<u8>, frac_cents: Option<f32>,
     })
 }
 
+/// Zwevende stem (0.8.91)? Voix céleste, Unda maris, Schwebung, "zwevend"/"zw",
+/// Vox angelica, Voce umana, Piffaro/Fiffaro: bewust een paar cent hoger of
+/// lager gestemd dan de hoofdstem, zodat ze samen zweven. Bij het automatisch
+/// bijstemmen moet zo'n pijp zijn eigen afwijking houden (keep 100 %), anders
+/// wordt hij op de doeltoon getrokken en is de zweving weg. Hauptwerk zegt dit
+/// met BaseTuningSchemeCode 4, maar compacte definities en GrandOrgue-sets
+/// zonder PitchCorrection niet — dan is de naam het enige houvast.
+pub fn is_zwevend_naam(naam: &str) -> bool {
+    let l = naam.to_lowercase();
+    let woorden: Vec<&str> = l
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .collect();
+    if woorden.iter().any(|w| matches!(*w, "zw" | "zwevend" | "zwevende" | "zweving" | "celeste" | "céleste"
+        | "coelestis" | "celestis" | "coeleste" | "schwebung" | "schwebend" | "angelica" | "piffaro" | "fiffaro"
+        | "ondulante" | "ondamaris")) {
+        return true;
+    }
+    l.contains("unda maris") || l.contains("voce umana") || l.contains("vox humana celest")
+        || l.contains("celest") || l.contains("coelest")
+}
+
 /// Doeltoon van een pijp in de gelijkzwevende referentie (cents).
 pub fn target_cents(key: u32, harmonic: u32) -> f32 {
     100.0 * key as f32 + 1200.0 * (harmonic.max(1) as f32 / 8.0).log2()
@@ -121,6 +143,17 @@ pub fn retune_cents(inp: &PipePitchInput) -> Option<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn zwevende_namen_worden_herkend() {
+        for n in ["Voix céleste 8'", "Viola di Gamba zw", "Unda maris 8", "Schwebung 8'", "Vox angelica",
+                  "Voce umana 8'", "Gamba Celeste", "Fiffaro", "Vox coelestis 8'", "Salicional zwevend"] {
+            assert!(is_zwevend_naam(n), "{}", n);
+        }
+        for n in ["Viola di Gamba 8'", "Zwitserse fluit", "Prestant 8'", "Trompet 8'", "Salicionaal 8'"] {
+            assert!(!is_zwevend_naam(n), "{}", n);
+        }
+    }
 
     fn inp(key: u32, h: u32, measured: Option<f32>, pc: f32, keep: f32, orig: f32) -> PipePitchInput {
         PipePitchInput {

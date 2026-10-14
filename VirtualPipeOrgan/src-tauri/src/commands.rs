@@ -502,6 +502,13 @@ fn saved_settings_for(state: &AppState, organ_id: &str) -> Option<OrganSettings>
         .and_then(|p| std::fs::read_to_string(&p).ok())
         .and_then(|j| serde_json::from_str::<OrganSettings>(&j).ok())?;
     info!("Instellingen geïmporteerd uit .jm-settings.json naast het orgel (geen bibliotheek-entry)");
+    // 0.8.91: een orgel dat (opnieuw) in de bibliotheek komt met alleen een
+    // zijbestand zonder wizard-vlag geldt als nieuw → de instelwizard
+    // aanbieden, met de geïmporteerde waarden al ingevuld. Zonder dit bleef
+    // de wizard uit na "uit bibliotheek verwijderen" en opnieuw laden.
+    if from_file.setup_wizard_done != Some(true) {
+        *state.setup_wizard_pending.write() = true;
+    }
     state.organ_library.write().settings.insert(organ_id.to_string(), from_file.clone());
     state.save_library();
     Some(from_file)
@@ -2937,6 +2944,7 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
         // voor retune::retune_cents + het attack-pad (voor de smpl-meting uit
         // de preload-buffer) + de HW-terugval (originele pijptoon).
         let mut retune_inputs: Vec<((u32, u32), PathBuf, crate::retune::PipePitchInput, Option<f32>)> = Vec::new();
+        let mut zwevende_registers: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
         // Hauptwerk "Original organ tuning" op pijpniveau (0.7.94): tellers
         // voor de logregel over hoeveel pijpen een `origineel − bestandstoon`-
         // correctie meekrijgen (vervangen of hergestemde opnamen).
@@ -3161,6 +3169,15 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
                             let odf_measured = extra.sample_pitch_cents.or(extra
                                 .midi_key_number
                                 .map(|k| 100.0 * k as f32 + extra.midi_pitch_fraction.unwrap_or(0.0)));
+                            // Zwevende stem (0.8.91): eigen afwijking behouden
+                            // als de definitie niets zegt (keep 100 %).
+                            let zwevend = crate::retune::is_zwevend_naam(&stop.name)
+                                || (layer_idx > 0 && stop.layers.get(layer_idx as usize - 1)
+                                    .map_or(false, |l| crate::retune::is_zwevend_naam(&l.name)));
+                            if zwevend && extra.retune_keep_pct.is_none() {
+                                zwevende_registers.insert(stop.name.clone());
+                            }
+                            let keep_default = if zwevend { 100.0 } else { 0.0 };
                             retune_inputs.push((
                                 (stop.id, pipe_num),
                                 path.clone(),
@@ -3173,7 +3190,7 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
                                         + owner_wc_pc
                                         + owner.pitch_correction
                                         + extra.pitch_correction_cents.unwrap_or(0.0),
-                                    keep_pct: extra.retune_keep_pct.unwrap_or(0.0),
+                                    keep_pct: extra.retune_keep_pct.unwrap_or(keep_default),
                                     original_pitch_tuning_cents: total_cents,
                                 },
                                 extra.original_pitch_cents,
@@ -3200,7 +3217,7 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
                                             + owner_wc_pc
                                             + owner.pitch_correction
                                             + extra.pitch_correction_cents.unwrap_or(0.0),
-                                        keep_pct: extra.retune_keep_pct.unwrap_or(0.0),
+                                        keep_pct: extra.retune_keep_pct.unwrap_or(keep_default),
                                         original_pitch_tuning_cents: total_cents,
                                     },
                                     extra.original_pitch_cents,
@@ -3392,6 +3409,10 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
             "Hertemperen: {} van {} pijpen met gemeten toonhoogte ({} onplausibel verworpen)",
             retune_pipes, retune_total, retune_rejected
         );
+        if !zwevende_registers.is_empty() {
+            info!("Zwevende stemmen houden hun eigen stemming: {}",
+                zwevende_registers.iter().cloned().collect::<Vec<_>>().join(", "));
+        }
         if hw_origineel_toegepast > 0 || hw_origineel_verworpen > 0 {
             info!(
                 "Hauptwerk originele pijptoon toegepast op {} pijpen (vervangen/hergestemde opnamen; {} onplausibel verworpen)",
@@ -9117,8 +9138,10 @@ fn restore_organ_settings(state: &AppState, organ_id: &str) {
     };
 
     info!("Restoring settings for organ: {}", organ_id);
-    *state.setup_wizard_pending.write() = false;
-    *state.setup_wizard_done.write() = settings.setup_wizard_done.unwrap_or(true);
+    // Vlag laten staan als de zijbestand-import hem net gezet heeft (0.8.91).
+    let geimporteerd_zonder_vlag = *state.setup_wizard_pending.read() && settings.setup_wizard_done != Some(true);
+    *state.setup_wizard_pending.write() = geimporteerd_zonder_vlag;
+    *state.setup_wizard_done.write() = settings.setup_wizard_done.unwrap_or(!geimporteerd_zonder_vlag);
 
     // Alle opnameposities in het geheugen houden (per orgel).
     *state.load_all_perspectives.write() = settings.load_all_perspectives;

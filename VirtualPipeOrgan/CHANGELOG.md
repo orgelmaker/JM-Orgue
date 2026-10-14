@@ -5,6 +5,26 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.8.91] - 2026-10-14
+
+### Zwevende stemmen blijven zweven bij automatisch bijstemmen
+- Het automatisch bijstemmen (0.8.85) trok ook een Voix céleste, Unda
+  maris of een "zwevende" Viola di Gamba op de gelijkzwevende toon — de
+  bewuste afwijking van een paar cent was weg en de zweving verdween.
+  Hauptwerk markeert zulke rangen met "behoud afwijking", maar compacte
+  definities en GrandOrgue-sets zonder PitchCorrection doen dat niet.
+  Registers en rangen met een zwevings-naam (celeste/coelestis, unda
+  maris, Schwebung, zwevend of "zw", vox angelica, voce umana, piffaro/
+  fiffaro) houden nu hun eigen stemming (behoud 100 %); het log noemt
+  welke. Een expliciete waarde uit de definitie blijft voorgaan.
+
+### Wizard ook na "uit bibliotheek verwijderen"
+- Een orgel dat uit de bibliotheek was verwijderd en opnieuw werd geladen
+  kreeg de wizard niet: het zijbestand `.jm-settings.json` naast de set
+  werd stil geïmporteerd en telde als "bestaande instellingen". Een
+  import zonder wizard-vlag geldt nu als nieuw orgel; de wizard start
+  met de geïmporteerde waarden al ingevuld.
+
 ## [0.8.90] - 2026-10-14
 
 ### Werkbalk: indelingsopties achter één knop "Indeling"
