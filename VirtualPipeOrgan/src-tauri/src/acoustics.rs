@@ -281,6 +281,14 @@ pub fn sectie_nummer(naam: &str, prefix: &str) -> Option<u32> {
     rest.parse::<u32>().ok()
 }
 
+/// Pijpnummer (1 = eerste pijp van de stop) van een binding. De exporter
+/// (1.3/1.4) zet in `pipe_section` de stop-sectie ("Stop001") en het
+/// pijpnummer in `logical_pipe`; een `PipeNNN`-sectie gaat voor als die er is.
+pub fn pijp_nummer(b: &PipeBinding) -> Option<u32> {
+    sectie_nummer(&b.pipe_section, "Pipe")
+        .or_else(|| u32::try_from(b.logical_pipe).ok().filter(|&p| p >= 1))
+}
+
 /// Relatief pad binnen de orgelmap: geen absolute paden, geen `..`, en na
 /// het oplossen van symlinks nog steeds binnen de map (plan §2).
 pub fn veilig_pad(organ_dir: &Path, rel: &str) -> Result<PathBuf, String> {
@@ -393,7 +401,7 @@ pub fn valideer(cfg: &AcousticsConfig, odf_stops: &HashMap<u32, Vec<usize>>) -> 
     let mut onbekend_rank = 0usize;
     for b in &cfg.pipe_bindings {
         if !ranks.contains(&b.source_rank_id) { onbekend_rank += 1; }
-        let ok = match (sectie_nummer(&b.stop_section, "Stop"), sectie_nummer(&b.pipe_section, "Pipe")) {
+        let ok = match (sectie_nummer(&b.stop_section, "Stop"), pijp_nummer(b)) {
             (Some(s), Some(p)) if p >= 1 => odf_stops.get(&s)
                 .and_then(|lagen| lagen.get(b.layer_index as usize))
                 .map_or(false, |&n| (p as usize) <= n),
@@ -485,7 +493,7 @@ pub fn bouw_engine_kaart(cfg: &AcousticsConfig, stop_division: &HashMap<u32, u8>
     let mut stemmen: Vec<HashMap<u8, usize>> = vec![HashMap::new(); n];
     for b in &cfg.pipe_bindings {
         let Some(&slot) = slot_van_rank.get(b.source_rank_id.as_str()) else { continue };
-        let (Some(stop), Some(pipe)) = (sectie_nummer(&b.stop_section, "Stop"), sectie_nummer(&b.pipe_section, "Pipe")) else { continue };
+        let (Some(stop), Some(pipe)) = (sectie_nummer(&b.stop_section, "Stop"), pijp_nummer(b)) else { continue };
         if pipe == 0 { continue; }
         let key_pipe = if b.layer_index == 0 { pipe } else { crate::audio::layer_key(pipe, b.layer_index.min(255) as u8) };
         kaart.pipe_slots.insert((stop, key_pipe), slot);
@@ -633,6 +641,46 @@ mod tests {
         assert_eq!(v.bound_pipes, 1);
         assert_eq!(v.unbound_pipes, 1);
         assert!(v.errors.is_empty());
+    }
+
+    #[test]
+    fn exporter_bindingen_met_stop_als_pipe_section_en_logical_pipe() {
+        // Echte exporter-uitvoer (1.3/1.4): pipe_section == stop_section, pijp in logical_pipe.
+        let mut c = basis_cfg();
+        for (i, b) in c.pipe_bindings.iter_mut().enumerate() {
+            b.pipe_section = b.stop_section.clone();
+            b.logical_pipe = (i as u64) + 1;
+        }
+        let v = valideer(&c, &stops());
+        assert!(v.errors.is_empty(), "{:?}", v.errors);
+        assert_eq!(v.bound_pipes, 2);
+        let k = bouw_engine_kaart(&c, &HashMap::from([(1u32, 0u8), (2u32, 1u8)]));
+        assert_eq!(k.pipe_slots.get(&(2, 2)), Some(&0));
+    }
+
+    /// Echte exporter-uitvoer (voorbeeld bij de SWOP-importer), alleen als
+    /// het bestand op deze pc staat: moet zonder fouten inlezen en valideren.
+    #[test]
+    fn voorbeeldexport_van_de_importer_wordt_geaccepteerd() {
+        let pad = std::path::Path::new(r"C:\Users\orgel\Sweelinq\Organs\SWOP-Importer\Ontwikkelaar\voorbeeld-SW028-JM-ACOUSTICS.json");
+        let Ok(bytes) = std::fs::read(pad) else { return };
+        let mut cfg: AcousticsConfig = serde_json::from_slice(&bytes).expect("voorbeeld moet inlezen");
+        cfg.organ_dir = pad.parent().unwrap().to_path_buf();
+        // Stops/pijpen zoals de bijbehorende .organ ze zou hebben: per stop
+        // het hoogste logical_pipe uit de bindingen.
+        let mut stops: HashMap<u32, Vec<usize>> = HashMap::new();
+        for b in &cfg.pipe_bindings {
+            let st = sectie_nummer(&b.stop_section, "Stop").unwrap();
+            let e = stops.entry(st).or_insert_with(|| vec![0]);
+            e[0] = e[0].max(b.logical_pipe as usize);
+        }
+        let v = valideer(&cfg, &stops);
+        assert!(v.errors.is_empty(), "{:?}", v.errors);
+        assert_eq!(v.unbound_pipes, 0, "{:?}", v.warnings);
+        assert_eq!(v.bound_pipes, cfg.pipe_bindings.len());
+        let k = bouw_engine_kaart(&cfg, &HashMap::new());
+        assert_eq!(k.names.len(), cfg.enclosures.len());
+        assert!(!k.pipe_slots.is_empty());
     }
 
     #[test]
