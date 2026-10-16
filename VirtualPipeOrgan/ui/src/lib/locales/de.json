@@ -51,6 +51,8 @@
     "online_search_enable": "Online-Suche erlauben",
     "online_busy": "Suche läuft…",
     "online_none": "Nichts gefunden. Ergänzen Sie evtl. Name, Erbauer oder Ort im Bibliothekseintrag.",
+    "online_query_placeholder": "Selbst suchen: Kirche, Ort oder Orgelname…",
+    "online_query_search": "Suchen",
     "online_notice": "Zum Übernehmen auf ein Foto klicken. Quellenangabe und Lizenz werden unter der Karte gezeigt.",
     "refresh_hold_hint": "Zum Laden klicken. 3 Sekunden gedrückt halten, um ein neues Foto zu suchen."
   },
@@ -311,7 +313,7 @@
     "background_channels_title": "Audioausgabe Hintergrundgeräusche",
     "background_channels_hint": "Welche Ausgänge die Hintergrundgeräusche und Effektregister spielen. Standard 1-2 (vorne L/R). Bei Surround-Aufbauten mit Werken auf 3-4 oder 5-6 wählen Sie hier dieselben Ausgänge.",
     "background_channels_blower": "Motor",
-    "background_channels_ambient": "Raumklang",
+    "background_channels_ambient": "Raumgeräusch und Mechanikklicks",
     "background_channels_toys": "Effektregister",
     "background_channels_tremnoise": "Tremulantgeräusch",
     "pitch_offset": "Tonhöhe-Korrektur",

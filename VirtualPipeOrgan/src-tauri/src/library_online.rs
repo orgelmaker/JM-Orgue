@@ -102,7 +102,7 @@ pub fn zoek_term(name: &str, builder: &str, location: &str) -> String {
 
 /// Zorg dat de zoekterm het woord orgel/organ/orgue bevat — anders vindt
 /// Commons vooral kerkgevels en plattegronden.
-fn met_orgelwoord(kern: String) -> String {
+pub fn met_orgelwoord(kern: String) -> String {
     let l = kern.to_lowercase();
     if l.contains("orgel") || l.contains("organ") || l.contains("orgue") {
         kern

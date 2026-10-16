@@ -51,6 +51,8 @@
     "online_search_enable": "Autoriser la recherche en ligne",
     "online_busy": "Recherche en cours…",
     "online_none": "Rien trouvé. Complétez éventuellement le nom, le facteur ou le lieu dans la fiche.",
+    "online_query_placeholder": "Rechercher vous-même : église, ville ou nom de l'orgue…",
+    "online_query_search": "Rechercher",
     "online_notice": "Cliquez sur une photo pour l’appliquer. La source et la licence s’affichent sous la fiche.",
     "refresh_hold_hint": "Cliquez pour charger l’orgue. Maintenez 3 secondes pour rechercher une nouvelle photo."
   },
@@ -311,7 +313,7 @@
     "background_channels_title": "Sortie audio des sons d’ambiance",
     "background_channels_hint": "Sur quelles sorties les sons d’ambiance et registres d’effets sont joués. 1-2 par défaut (avant G/D). Sur une installation surround avec les divisions sur 3-4 ou 5-6, choisissez les mêmes sorties ici.",
     "background_channels_blower": "Soufflerie",
-    "background_channels_ambient": "Ambiance",
+    "background_channels_ambient": "Bruit ambiant et clics de mécanique",
     "background_channels_toys": "Registres d’effets",
     "background_channels_tremnoise": "Bruit du tremolo",
     "pitch_offset": "Correction de hauteur",

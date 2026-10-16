@@ -10298,7 +10298,7 @@ pub fn set_online_image_search_enabled(state: State<AppState>, enabled: bool) ->
 /// Vereist dat de gebruiker [`set_online_image_search_enabled`] eerder aan
 /// heeft gezet.
 #[tauri::command]
-pub async fn search_online_image(state: State<'_, AppState>, id: String)
+pub async fn search_online_image(state: State<'_, AppState>, id: String, query: Option<String>)
     -> Result<Vec<crate::library_online::OnlineImageHit>, String>
 {
     use crate::library_online as lo;
@@ -10363,7 +10363,11 @@ pub async fn search_online_image(state: State<'_, AppState>, id: String)
         ctx.teksten = lo::teksten_uit_map(Some(bron), None);
     }
 
-    let termen = lo::zoek_termen(&ctx);
+    // Eigen zoekterm (0.8.92): wint van de automatische termen uit de set.
+    let termen = match query.as_deref().map(str::trim).filter(|q| !q.is_empty()) {
+        Some(q) => vec![q.to_string(), lo::met_orgelwoord(q.to_string())],
+        None => lo::zoek_termen(&ctx),
+    };
     info!("Online zoeken naar orgelfoto: {:?} ({} tekstbron(nen))", termen, ctx.teksten.len());
     let hits = tokio::task::spawn_blocking(move || lo::zoek_commons_meervoudig(&termen))
         .await

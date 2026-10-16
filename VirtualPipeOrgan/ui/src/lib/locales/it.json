@@ -51,6 +51,8 @@
     "online_search_enable": "Consenti la ricerca online",
     "online_busy": "Ricerca in corso…",
     "online_none": "Nulla trovato. Prova a completare nome, costruttore o luogo nella scheda.",
+    "online_query_placeholder": "Cerca tu: chiesa, città o nome dell'organo…",
+    "online_query_search": "Cerca",
     "online_notice": "Clicca una foto per applicarla. Fonte e licenza vengono mostrate sotto la scheda.",
     "refresh_hold_hint": "Fare clic per caricare l’organo. Tenere premuto per 3 secondi per cercare una nuova foto."
   },
@@ -311,7 +313,7 @@
     "background_channels_title": "Uscita audio suoni di sottofondo",
     "background_channels_hint": "Su quali uscite vengono riprodotti i suoni di sottofondo e i registri di effetti. Predefinito 1-2 (fronte S/D). In impianti surround con i corpi sulle uscite 3-4 o 5-6, scegliere qui le stesse uscite.",
     "background_channels_blower": "Motore",
-    "background_channels_ambient": "Ambiente",
+    "background_channels_ambient": "Rumore ambientale e clic della meccanica",
     "background_channels_toys": "Registri degli effetti",
     "background_channels_tremnoise": "Rumore del tremolo",
     "pitch_offset": "Correzione intonazione",

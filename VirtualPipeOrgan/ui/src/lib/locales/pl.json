@@ -51,6 +51,8 @@
     "online_search_enable": "Zezwól na wyszukiwanie online",
     "online_busy": "Trwa wyszukiwanie…",
     "online_none": "Nic nie znaleziono. Spróbuj uzupełnić nazwę, budowniczego lub lokalizację we wpisie.",
+    "online_query_placeholder": "Szukaj samodzielnie: kościół, miejscowość lub nazwa organów…",
+    "online_query_search": "Szukaj",
     "online_notice": "Kliknij zdjęcie, aby je zastosować. Źródło i licencja są pokazane pod kartą.",
     "refresh_hold_hint": "Kliknij, aby wczytać organy. Przytrzymaj 3 sekundy, aby wyszukać nową fotografię."
   },
@@ -311,7 +313,7 @@
     "background_channels_title": "Wyjście audio dźwięków tła",
     "background_channels_hint": "Na których wyjściach grają dźwięki tła i rejestry efektów. Domyślnie 1-2 (przód L/P). Przy ustawieniach surround z sekcjami na 3-4 lub 5-6 wybierz te same wyjścia.",
     "background_channels_blower": "Silnik",
-    "background_channels_ambient": "Tło akustyczne",
+    "background_channels_ambient": "Szum otoczenia i kliknięcia mechaniki",
     "background_channels_toys": "Rejestry efektów",
     "background_channels_tremnoise": "Szum tremola",
     "pitch_offset": "Korekta wysokości",

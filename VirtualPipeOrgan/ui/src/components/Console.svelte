@@ -2286,6 +2286,8 @@
       .catch((e) => console.error('set_background_channels:', e));
   }
   $: heeftAmbient = (organInfo?.background_sounds || []).some(b => b.kind === 'ambient');
+  // Registerklikken spelen als one-shot met de routing van Omgevingsruis.
+  $: heeftRegisterKlikken = (organInfo?.stop_click_count || 0) > 0;
   $: heeftToys = (organInfo?.background_sounds || []).some(b => b.kind === 'toy');
   $: heeftTremulantNoise = (organInfo?.background_sounds || []).some(b => b.kind === 'tremulant_noise');
 
@@ -4339,6 +4341,22 @@
   }
   // Modale voorvertoning: hit-lijst, bezig-vlag, foutmelding.
   let onlineZoekModal = null;      // { organ, hits, busy, error }
+  let onlineZoekTerm = '';
+  // Zelf een zoekterm opgeven (0.8.92): wanneer de set te weinig gegevens
+  // heeft (naam/bouwer/plaats), zoekt dit rechtstreeks op wat je intypt.
+  async function onlineZoekenMetTerm() {
+    if (!onlineZoekModal || !onlineZoekTerm.trim()) return;
+    const organ = onlineZoekModal.organ;
+    onlineZoekModal = { organ, hits: [], busy: true, error: null };
+    try {
+      const hits = await invoke('search_online_image', { id: organ.id, query: onlineZoekTerm.trim() });
+      if (onlineZoekModal && onlineZoekModal.organ.id === organ.id) {
+        onlineZoekModal = { organ, hits, busy: false, error: hits.length === 0 ? tx('library.online_none') : null };
+      }
+    } catch (err) {
+      if (onlineZoekModal) onlineZoekModal = { organ, hits: [], busy: false, error: String(err) };
+    }
+  }
   async function onlineZoeken(e, organ) {
     e.stopPropagation();
     onlineZoekModal = { organ, hits: [], busy: true, error: null };
@@ -5581,6 +5599,10 @@
             <h3>{$t('library.online_search')}: {onlineZoekModal.organ.name}</h3>
             <button class="online-image-sluit" on:click={sluitOnlineModal} aria-label={$t('common.close')}>&times;</button>
           </div>
+          <form class="online-image-zoekbalk" on:submit|preventDefault={onlineZoekenMetTerm}>
+            <input type="text" bind:value={onlineZoekTerm} placeholder={$t('library.online_query_placeholder')} disabled={onlineZoekModal.busy} />
+            <button type="submit" class="btn btn-secondary btn-sm" disabled={onlineZoekModal.busy || !onlineZoekTerm.trim()}>{$t('library.online_query_search')}</button>
+          </form>
           {#if onlineZoekModal.busy}
             <div class="online-image-bezig">{$t('library.online_busy')}</div>
           {:else if onlineZoekModal.error}
@@ -7037,6 +7059,9 @@
 
               {#each displayOrgan.divisions as division, divIdx}
                 {@const m = midiMapByDiv[division.name]}
+                <!-- Effectregisters zijn geen klavier: hun uitgangen staan bij
+                     "Audio-uitgang bijgeluiden" (0.8.92). -->
+                {#if !division.__toy_division}
                 <div class="midi-mapping-row">
                   <div class="midi-mapping-division">
                     <span class="division-label">{division.display_name || division.name}</span>
@@ -7370,6 +7395,7 @@
                     {/if}
                   </div>
                 </div>
+                {/if}
               {/each}
 
               <!-- Audio-uitgangen per bijgeluid-soort (0.8.82). Alleen rijen
@@ -7382,7 +7408,7 @@
                 <p class="settings-hint" style="margin: 0 0 0.4rem;">{$t('settings.background_channels_hint')}</p>
                 {#each [
                   { kind: 0, show: heeftBlower, label: $t('settings.background_channels_blower') },
-                  { kind: 1, show: heeftAmbient, label: $t('settings.background_channels_ambient') },
+                  { kind: 1, show: heeftAmbient || (organInfo?.key_click_count || 0) > 0 || heeftRegisterKlikken, label: $t('settings.background_channels_ambient') },
                   { kind: 2, show: heeftToys, label: $t('settings.background_channels_toys') },
                   { kind: 3, show: heeftTremulantNoise, label: $t('settings.background_channels_tremnoise') },
                 ].filter(r => r.show) as row (row.kind)}
@@ -7390,7 +7416,7 @@
                     <span class="swell-config-label">{row.label}</span>
                     <div style="display:flex; flex-wrap:wrap; gap:0.25rem; flex:1;">
                       {#each Array(audioChannelCount) as _, ch}
-                        {@const on = isBgChannelSelected(row.kind, ch)}
+                        {@const on = (backgroundChannels[row.kind] || [0, 1]).includes(ch)}
                         <label class="ch-chip" class:on title="{channelLabel(ch, audioChannelCount)}">
                           <input type="checkbox" checked={on} on:change={() => toggleBgChannel(row.kind, ch)} />
                           <span>{ch + 1}</span>
@@ -8806,6 +8832,27 @@
                       {@const isOn = divChannels.includes(ch)}
                       <label class="ch-chip" class:on={isOn} title={channelLabel(ch, audioChannelCount)}>
                         <input type="checkbox" checked={isOn} on:change={() => toggleDivisionChannel(d.name, ch)} />
+                        <span>{ch + 1}</span>
+                      </label>
+                    {/each}
+                  </div>
+                </div>
+              {/each}
+              <!-- Bijgeluiden en effectregisters (0.8.92): zelfde schakels als
+                   onder "Audio-uitgang bijgeluiden". -->
+              {#each [
+                { kind: 0, show: heeftBlower, label: $t('settings.background_channels_blower') },
+                { kind: 1, show: heeftAmbient || (organInfo?.key_click_count || 0) > 0 || heeftRegisterKlikken, label: $t('settings.background_channels_ambient') },
+                { kind: 2, show: heeftToys, label: $t('settings.background_channels_toys') },
+                { kind: 3, show: heeftTremulantNoise, label: $t('settings.background_channels_tremnoise') },
+              ].filter(r => r.show) as row (row.kind)}
+                <div class="wizard-rij">
+                  <span class="wizard-naam">{row.label}</span>
+                  <div class="wizard-chips">
+                    {#each Array(audioChannelCount) as _, ch}
+                      {@const on = (backgroundChannels[row.kind] || [0, 1]).includes(ch)}
+                      <label class="ch-chip" class:on title={channelLabel(ch, audioChannelCount)}>
+                        <input type="checkbox" checked={on} on:change={() => toggleBgChannel(row.kind, ch)} />
                         <span>{ch + 1}</span>
                       </label>
                     {/each}

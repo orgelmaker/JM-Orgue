@@ -51,6 +51,8 @@
     "online_search_enable": "Permitir búsqueda en línea",
     "online_busy": "Buscando…",
     "online_none": "Nada encontrado. Pruebe a completar nombre, constructor o lugar en la ficha.",
+    "online_query_placeholder": "Buscar por su cuenta: iglesia, localidad o nombre del órgano…",
+    "online_query_search": "Buscar",
     "online_notice": "Haga clic en una foto para aplicarla. Fuente y licencia se muestran bajo la ficha.",
     "refresh_hold_hint": "Haga clic para cargar el órgano. Mantenga pulsado 3 segundos para buscar una nueva foto."
   },
@@ -311,7 +313,7 @@
     "background_channels_title": "Salida de audio de sonidos de fondo",
     "background_channels_hint": "En qué salidas suenan los sonidos de fondo y los registros de efectos. Por defecto 1-2 (frontal I/D). En instalaciones surround con las divisiones en 3-4 o 5-6, elija las mismas salidas aquí.",
     "background_channels_blower": "Motor",
-    "background_channels_ambient": "Ambiente",
+    "background_channels_ambient": "Ruido ambiente y clics de mecánica",
     "background_channels_toys": "Registros de efectos",
     "background_channels_tremnoise": "Ruido del trémolo",
     "pitch_offset": "Corrección de afinación",

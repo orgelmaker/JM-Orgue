@@ -3504,3 +3504,7 @@ input[type="range"]::-webkit-slider-thumb:hover {
 .wizard-chips { display: flex; flex-wrap: wrap; gap: 0.25rem; flex: 1; }
 .wizard-knoppen { display: flex; justify-content: space-between; gap: 0.5rem; margin-top: 1rem; }
 .wizard-knoppen > div { display: flex; gap: 0.4rem; }
+
+/* Zelf zoeken naar een orgelfoto (0.8.92) */
+.online-image-zoekbalk { display: flex; gap: 0.4rem; margin: 0.2rem 0 0.6rem; }
+.online-image-zoekbalk input { flex: 1; min-width: 0; padding: 0.35rem 0.5rem; border: 1px solid var(--border, #ccc); border-radius: 6px; background: var(--bg-input, #fff); color: inherit; font: inherit; }

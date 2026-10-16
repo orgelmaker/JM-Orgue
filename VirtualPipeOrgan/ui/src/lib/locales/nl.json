@@ -51,6 +51,8 @@
     "online_search_enable": "Online zoeken toestaan",
     "online_busy": "Bezig met zoeken…",
     "online_none": "Niets gevonden. Probeer eventueel de naam, bouwer of plaats in de bibliotheek-entry aan te vullen.",
+    "online_query_placeholder": "Zelf zoeken: kerk, plaats of orgelnaam…",
+    "online_query_search": "Zoek",
     "online_notice": "Klik een foto om hem over te nemen. De bronverwijzing en licentie worden onder de kaart getoond.",
     "refresh_hold_hint": "Klik om het orgel te laden. Houd 3 seconden ingedrukt om de foto opnieuw te laten zoeken."
   },
@@ -311,7 +313,7 @@
     "background_channels_title": "Audio-uitgang bijgeluiden",
     "background_channels_hint": "Op welke uitgangen klinken de bijgeluiden en effectregisters. Standaard 1-2 (front L/R). Op surround-opstellingen waar de divisies op 3-4 of 5-6 staan, kies hier dezelfde uitgangen zodat je ze óók hoort.",
     "background_channels_blower": "Motor",
-    "background_channels_ambient": "Omgevingsruis",
+    "background_channels_ambient": "Omgevingsruis en mechaniekklikken",
     "background_channels_toys": "Effectregisters",
     "background_channels_tremnoise": "Tremulantruis",
     "pitch_offset": "Toonhoogte-correctie",

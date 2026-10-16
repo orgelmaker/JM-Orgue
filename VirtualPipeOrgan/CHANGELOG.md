@@ -35,6 +35,21 @@ versies volgen [Semantic Versioning](https://semver.org/).
   verversten niet na een klik of na het inleren (functie-aanroep in de
   opmaak); ze volgen nu de werkelijke stand.
 
+### Uitgangen van bijgeluiden en effectregisters
+- De kanaalchips onder "Audio-uitgang bijgeluiden" (motor, omgevingsruis,
+  effectregisters, tremulantruis) verversten niet na een klik; ze volgen nu
+  de werkelijke stand. De rij Omgevingsruis heet nu "Omgevingsruis en
+  mechaniekklikken" en verschijnt ook bij sets met register- of
+  toetsmechaniek, omdat die klikken dezelfde uitgangen gebruiken.
+- Effectregisters stonden daarnaast ook als "klavier" bij Routing, met een
+  tweede, loze kanaalkeuze; die rij is weg.
+- De wizard (stappen Speakers en Hoofdtelefoon) toont dezelfde chips voor
+  bijgeluiden en effectregisters onder de klavieren.
+
+### Orgelfoto zelf zoeken
+- In het venster "Online zoeken" staat nu een zoekveld: typ kerk, plaats
+  of orgelnaam en zoek daarmee direct, voor sets met te weinig gegevens.
+
 ### Akoestische configuratie (JM-ACOUSTICS.json)
 - Een `.organ` kan via de sectie `[JMOrgueAcoustics]` naar een
   `JM-ACOUSTICS.json` naast de definitie verwijzen (neutraal contract

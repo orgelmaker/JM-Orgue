@@ -51,6 +51,8 @@
     "online_search_enable": "Allow online search",
     "online_busy": "Searching…",
     "online_none": "Nothing found. Consider filling in name, builder or location in the library entry.",
+    "online_query_placeholder": "Search yourself: church, town or organ name…",
+    "online_query_search": "Search",
     "online_notice": "Click a photo to use it. The source link and license are shown below the card.",
     "refresh_hold_hint": "Click to load the organ. Press and hold for 3 seconds to search for a new photo."
   },
@@ -311,7 +313,7 @@
     "background_channels_title": "Background sounds audio output",
     "background_channels_hint": "Which outputs play the background sounds and effect registers. Default is 1-2 (front L/R). On surround setups with divisions on 3-4 or 5-6, choose the same outputs here so you also hear them.",
     "background_channels_blower": "Blower",
-    "background_channels_ambient": "Ambient",
+    "background_channels_ambient": "Ambient noise and action clicks",
     "background_channels_toys": "Effect registers",
     "background_channels_tremnoise": "Tremulant noise",
     "pitch_offset": "Pitch correction",
