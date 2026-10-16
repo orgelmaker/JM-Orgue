@@ -5,6 +5,57 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.8.92] - 2026-10-16
+
+### Instelbare startbuffer en snellere achtergrondlader
+- De startbuffer per opname (het stuk van elke pijpopname dat vooraf in
+  het geheugen staat) lag vast op 2 s en is nu instelbaar in Algemene
+  instellingen → Audio uitvoer: 200 ms, 300 ms, 500 ms, 1 s of 2 s
+  (standaard blijft 2 s). Bij een grote surround-set zakt het geheugen
+  na laden met 200 ms van ruim 16 GB naar ruim 5 GB; de
+  geheugenrem voor meerdere luisterposities rekent met de gekozen
+  buffer en laat zo meer posities toe.
+- De achtergrondlader werkt nu met 3 tot 8 werkers (één minder dan het
+  aantal fysieke kernen, voorheen vast 3) en een eigen wachtrij in de
+  audio-thread: verzoeken gaan in deadline-volgorde door (de stem waarvan
+  de startbuffer het eerst opraakt gaat voor) en verzoeken van stemmen
+  die inmiddels weg zijn vervallen. Een verzoek dat bij een tutti niet in
+  de wachtrij paste wordt in een volgende callback alsnog ingestuurd; tot
+  nu toe bleef zo'n stem voorgoed op zijn startbuffer hangen.
+- Laadtellers (startbuffer-tekorten, wachtrij vol, laadlatentie) staan in
+  het log (hooguit 1× per 5 s) en in de test-API (`/status` → `loader`,
+  `POST /preload_ms`).
+
+### Instelwizard: apparaat per profiel en werkende kanaalkeuze
+- In de stappen Speakers en Hoofdtelefoon kies je nu zelf de driver en
+  het apparaat voor dat profiel en sla je het op; voorheen kon de wizard
+  alleen "de huidige uitgang" opslaan, zodat beide profielen hetzelfde
+  apparaat kregen.
+- De kanaalchips per klavier en de MIDI-kanaaltekst in de wizard
+  verversten niet na een klik of na het inleren (functie-aanroep in de
+  opmaak); ze volgen nu de werkelijke stand.
+
+### Akoestische configuratie (JM-ACOUSTICS.json)
+- Een `.organ` kan via de sectie `[JMOrgueAcoustics]` naar een
+  `JM-ACOUSTICS.json` naast de definitie verwijzen (neutraal contract
+  `jm-orgue.acoustics`, schema 1; de oudere identificatie
+  `jm-orgue.swop-acoustics` wordt als hetzelfde model gelezen). Het
+  bestand wordt gelezen en gevalideerd (schema, unieke ID's, verwijzingen,
+  relatieve paden binnen de orgelmap, bestandsgrootte, pijpbindingen tegen
+  de geladen definitie); bij een fout speelt het orgel gewoon met de
+  definitie en meldt Orgel-instellingen → Klank waarom.
+- Zwelkasten per rank: ranks die de configuratie in een kast plaatst
+  krijgen een eigen mengbus met eigen zweltrede (MIDI inleren bij de
+  klavierinstellingen), los van het klavier waarop ze gespeeld worden;
+  een gedeelde rank volgt zo bij koppels en overnames dezelfde kast.
+  Routing en wind volgen de divisie van die rank.
+- Impulsresponsen uit de set staan onder Klank en zijn met één knop als
+  galm te gebruiken; de kanaalrollen zijn niet bevestigd, dus de eerste
+  twee kanalen gelden als stereopaar. Een meerkanaals-IR werd voorheen
+  als één lange monostroom gelezen (vier keer te lange, valse galm).
+- Mengroutes, uitgangsbussen en effectovergangen worden nog niet
+  automatisch geactiveerd (plan-fasen D en E).
+
 ## [0.8.91] - 2026-10-14
 
 ### Zwevende stemmen blijven zweven bij automatisch bijstemmen

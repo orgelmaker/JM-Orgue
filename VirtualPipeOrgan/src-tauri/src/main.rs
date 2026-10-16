@@ -4,6 +4,7 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod acoustics;
 mod audio;
 mod commands;
 mod crescendo_voorstel;
@@ -367,6 +368,8 @@ fn main() {
             commands::set_continuous_keyboard,
             commands::get_continuous_keyboard,
             commands::set_stereo_samples,
+            commands::get_preload_ms,
+            commands::set_preload_ms,
             // Gestapelde ranks en microfoonperspectieven (0.7.38)
             commands::get_perspectives,
             commands::set_perspective_enabled,

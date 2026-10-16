@@ -243,6 +243,8 @@
     "polyphony_load": "Auslastung Audio-Thread: {load} % (Spitze {peak} %)",
     "stereo_samples": "Stereo-Samples in Stereo wiedergeben",
     "stereo_samples_hint": "An: Stereo-Aufnahmen behalten ihr Raumbild (mehr Speicher). Aus: Mono-Mischung wie bisher.",
+    "preload_ms": "Startpuffer je Aufnahme",
+    "preload_ms_hint": "Wie viel jeder Pfeifenaufnahme vorab im Speicher liegt. Kürzer = deutlich weniger Speicher und schnelleres Laden; der Rest wird beim Spielen nachgeladen. Hören Sie bei großen Akkorden eine kurze Wiederholung des Ansatzes, wählen Sie einen längeren Puffer.",
     "reload_hint": "Wirkt nach dem Neuladen der Orgel.",
     "channels_per_division": "Ausgänge",
     "channels_per_division_hint": "Wählen Sie, welche Ausgänge des gerade geöffneten Audioausgangs ({host}) dieses Werk nutzt — von 1 bis alle. Zwei aufeinanderfolgende Ausgänge bilden ein Stereopaar; ein einzelner Ausgang klingt mono. Die Anzahl folgt dem Gerät: ASIO liefert alle Ausgänge des Treibers, WASAPI die in Windows für dieses Gerät eingestellte Anzahl.",
@@ -1398,7 +1400,25 @@
   "common": {
     "close": "Schließen"
   },
+  "acoustics": {
+    "title": "Akustische Konfiguration",
+    "summary": "{enclosures} Schwellkästen · {ranks} Ranks ({bound} Pfeifen zugeordnet) · {irs} Impulsantworten · {mix} Mischrouten · {outputs} Ausgänge · {effects} Effektregister",
+    "not_active": "Die Schwellkästen je Rank sind angeschlossen; weisen Sie jedem Kasten in den Manualeinstellungen einen Tritt zu. Mischrouten und Ausgangsbusse werden noch nicht automatisch aktiviert; die normale Definition bleibt maßgebend.",
+    "error": "Konfiguration nicht geladen: {error}. Die Orgel spielt mit der normalen Definition.",
+    "ir_title": "Impulsantworten aus dem Set",
+    "use_ir": "Als Hall verwenden",
+    "ir_in_use": "In Gebrauch",
+    "ir_hint": "Die Kanalrollen dieser Aufnahmen sind nicht bestätigt: die ersten beiden Kanäle werden als Stereopaar verwendet.",
+    "warnings": "Hinweise",
+    "enclosures": "Schwellkästen je Rank",
+    "enclosures_hint": "Diese Schwellkästen stammen aus der akustischen Konfiguration des Sets und wirken je Rank, unabhängig vom Manual. Weisen Sie jedem Kasten einen Tritt zu.",
+    "ranks": "Ranks",
+    "pipes": "Pfeifen"
+  },
   "wizard": {
+    "device": "Gerät",
+    "outputs_device_hint": "Wählen Sie hier das Gerät für dieses Profil und speichern Sie es; danach wählen Sie je Manual die Ausgänge.",
+    "update_profile": "Profil aktualisieren",
     "title": "Orgel einrichten",
     "intro": "Diese Orgel ist neu. In wenigen Schritten verbinden Sie Manuale, Schwellkästen und Ausgänge Ihres Spieltischs. Alles lässt sich später ändern.",
     "step_keyboards": "MIDI-Kanal pro Manual",
@@ -1408,7 +1428,7 @@
     "step_speakers": "Ausgänge für Lautsprecher",
     "step_headphones": "Ausgänge für Kopfhörer",
     "outputs_hint": "Pro Manual die Ausgänge des Audio-Interfaces wählen. Das Profil muss aktiv sein, um Kanäle zu wählen.",
-    "no_profile": "Dieses Profil gibt es noch nicht. Zuerst in Allgemeine Einstellungen → Audioausgabe den richtigen Ausgang wählen und hier als Profil speichern.",
+    "no_profile": "Dieses Profil gibt es noch nicht. Wählen Sie oben das Gerät und speichern Sie es als Profil.",
     "save_profile": "Aktuellen Ausgang als dieses Profil speichern",
     "activate_profile": "Profil aktivieren",
     "profile_active": "Profil aktiv",

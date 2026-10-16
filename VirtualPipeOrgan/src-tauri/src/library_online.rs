@@ -19,7 +19,7 @@ use tracing::{info, warn};
 /// User-agent zoals de Wikimedia-regels dat voorschrijven (geldige mail +
 /// contactpunt). Zonder deze header weigeren de API-eindpunten een deel van
 /// de verzoeken; met deze header blijven we een "nette" API-gebruiker.
-const USER_AGENT: &str = "JM-Orgue/0.8.88 (+https://github.com/orgelmaker/JM-Orgue)";
+const USER_AGENT: &str = "JM-Orgue/0.8.92 (+https://github.com/orgelmaker/JM-Orgue)";
 
 /// Maximaal aantal treffers dat we per zoekopdracht aan de UI tonen.
 pub const MAX_HITS: usize = 3;

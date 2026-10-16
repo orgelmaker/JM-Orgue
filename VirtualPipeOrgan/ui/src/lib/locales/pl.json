@@ -243,6 +243,8 @@
     "polyphony_load": "Obciążenie wątku audio: {load}% (szczyt {peak}%)",
     "stereo_samples": "Odtwarzaj sample stereo w stereo",
     "stereo_samples_hint": "Włączone: nagrania stereo zachowują obraz przestrzenny (więcej pamięci). Wyłączone: miksowanie do mono jak dawniej.",
+    "preload_ms": "Bufor startowy na nagranie",
+    "preload_ms_hint": "Ile każdego nagrania piszczałki jest trzymane w pamięci z góry. Krócej = znacznie mniej pamięci i szybsze ładowanie; reszta dogrywa się podczas gry. Jeśli przy dużych akordach słychać krótkie powtórzenie ataku, wybierz dłuższy bufor.",
     "reload_hint": "Zadziała po ponownym wczytaniu organów.",
     "channels_per_division": "Wyjścia",
     "channels_per_division_hint": "Wybierz, z których wyjść aktualnie otwartego wyjścia audio ({host}) korzysta ten manuał — od jednego po wszystkie. Dwa kolejne wyjścia tworzą parę stereo; pojedyncze wyjście gra mono. Liczba zależy od urządzenia: ASIO udostępnia wszystkie wyjścia sterownika, WASAPI tyle, ile Windows ustawił dla tego urządzenia.",
@@ -1398,7 +1400,25 @@
   "common": {
     "close": "Zamknij"
   },
+  "acoustics": {
+    "title": "Konfiguracja akustyczna",
+    "summary": "{enclosures} szafy ekspresyjne · {ranks} głosy ({bound} piszczałek powiązanych) · {irs} odpowiedzi impulsowe · {mix} trasy miksu · {outputs} wyjścia · {effects} rejestry efektowe",
+    "not_active": "Szafy ekspresyjne per głos są podłączone; przypisz pedał do każdej szafy w ustawieniach klawiatur. Trasy miksu i szyny wyjściowe nie są jeszcze aktywowane automatycznie; zwykła definicja pozostaje nadrzędna.",
+    "error": "Konfiguracja nie została wczytana: {error}. Organy grają według zwykłej definicji.",
+    "ir_title": "Odpowiedzi impulsowe z zestawu",
+    "use_ir": "Użyj jako pogłosu",
+    "ir_in_use": "W użyciu",
+    "ir_hint": "Role kanałów tych nagrań nie są potwierdzone: pierwsze dwa kanały są używane jako para stereo.",
+    "warnings": "Uwagi",
+    "enclosures": "Szafy ekspresyjne per głos",
+    "enclosures_hint": "Te szafy ekspresyjne pochodzą z konfiguracji akustycznej zestawu i działają per głos, niezależnie od klawiatury. Przypisz pedał do każdej szafy.",
+    "ranks": "głosy",
+    "pipes": "piszczałek"
+  },
   "wizard": {
+    "device": "Urządzenie",
+    "outputs_device_hint": "Wybierz tutaj urządzenie dla tego profilu i zapisz je; następnie wybierz wyjścia dla każdej klawiatury.",
+    "update_profile": "Zaktualizuj profil",
     "title": "Konfiguracja organów",
     "intro": "Te organy są nowe. W kilku krokach połączysz klawiatury, żaluzje i wyjścia swojego kontuaru. Wszystko można później zmienić.",
     "step_keyboards": "Kanał MIDI na klawiaturę",
@@ -1408,7 +1428,7 @@
     "step_speakers": "Wyjścia dla głośników",
     "step_headphones": "Wyjścia dla słuchawek",
     "outputs_hint": "Wybierz dla każdej klawiatury wyjścia interfejsu audio. Profil musi być aktywny, aby wybrać kanały.",
-    "no_profile": "Ten profil jeszcze nie istnieje. Najpierw wybierz właściwe wyjście w Ustawienia ogólne → Wyjście audio i zapisz je tutaj jako profil.",
+    "no_profile": "Ten profil jeszcze nie istnieje. Wybierz urządzenie powyżej i zapisz je jako profil.",
     "save_profile": "Zapisz bieżące wyjście jako ten profil",
     "activate_profile": "Aktywuj profil",
     "profile_active": "Profil aktywny",

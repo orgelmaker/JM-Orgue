@@ -315,10 +315,15 @@ impl ConvolutionReverb {
             }
         };
 
-        // Convert to mono if stereo
-        let mono: Vec<f32> = if spec.channels == 2 {
-            samples.chunks(2)
-                .map(|chunk| (chunk[0] + chunk.get(1).unwrap_or(&0.0)) * 0.5)
+        // Mono-som van de eerste twee kanalen. Meerkanaals-IR (0.8.92): de
+        // verdere kanalen (bv. 4-kanaals opnamen uit een akoestische
+        // configuratie) hebben geen bevestigde rol en doen niet mee — eerder
+        // werd zo'n bestand als één lange mono-stroom gelezen, wat een
+        // vier keer te lange, valse galm gaf.
+        let nch = spec.channels.max(1) as usize;
+        let mono: Vec<f32> = if nch >= 2 {
+            samples.chunks(nch)
+                .map(|chunk| (chunk[0] + chunk.get(1).copied().unwrap_or(0.0)) * 0.5)
                 .collect()
         } else {
             samples

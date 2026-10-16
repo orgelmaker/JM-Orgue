@@ -810,6 +810,33 @@ pub fn load_wav_preload(path: &Path, preload_samples: usize) -> Result<PreloadBu
 /// Als `load_wav_preload`, maar met keuze van de uitsnede (attack of release-
 /// segment). Zie `PreloadSegment`.
 pub fn load_wav_preload_segment(path: &Path, preload_samples: usize, segment: PreloadSegment) -> Result<PreloadBuffer, SampleError> {
+    load_wav_preload_segment_len(path, PreloadLen::Frames(preload_samples), segment)
+}
+
+/// Lengte van de startbuffer: in bronframes, of in milliseconden — dan per
+/// bestand omgerekend met de eigen samplerate (0.8.92), zodat "200 ms"
+/// bij 44,1 en 48 kHz dezelfde speelduur oplevert.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PreloadLen {
+    Frames(usize),
+    Millis(u32),
+}
+
+impl PreloadLen {
+    pub fn frames(self, sample_rate: u32) -> usize {
+        match self {
+            PreloadLen::Frames(n) => n,
+            PreloadLen::Millis(ms) => (ms as u64 * sample_rate.max(1) as u64 / 1000) as usize,
+        }
+    }
+}
+
+/// Als `load_wav_preload_segment`, met de lengte in milliseconden (0.8.92).
+pub fn load_wav_preload_segment_ms(path: &Path, ms: u32, segment: PreloadSegment) -> Result<PreloadBuffer, SampleError> {
+    load_wav_preload_segment_len(path, PreloadLen::Millis(ms), segment)
+}
+
+fn load_wav_preload_segment_len(path: &Path, len: PreloadLen, segment: PreloadSegment) -> Result<PreloadBuffer, SampleError> {
     use std::io::BufReader;
 
     // Markers (loops + cue) uit de chunk-walk; bepaalt looppunten én — voor
@@ -939,7 +966,7 @@ pub fn load_wav_preload_segment(path: &Path, preload_samples: usize, segment: Pr
     }
 
     // Read preload portion
-    let frames_to_read = preload_samples.min(total_frames - seg_start);
+    let frames_to_read = len.frames(sample_rate).max(1).min(total_frames - seg_start);
     let bytes_to_read = frames_to_read * bytes_per_sample * channels as usize;
 
     let mut raw_data = vec![0u8; bytes_to_read];
@@ -1356,18 +1383,27 @@ pub fn load_audio(path: &Path) -> Result<SampleData, SampleError> {
 
 /// Load preload buffer for any audio format
 pub fn load_audio_preload(path: &Path, preload_samples: usize) -> Result<PreloadBuffer, SampleError> {
+    load_audio_preload_len(path, PreloadLen::Frames(preload_samples))
+}
+
+/// Als `load_audio_preload`, met de lengte in milliseconden (0.8.92).
+pub fn load_audio_preload_ms(path: &Path, ms: u32) -> Result<PreloadBuffer, SampleError> {
+    load_audio_preload_len(path, PreloadLen::Millis(ms))
+}
+
+fn load_audio_preload_len(path: &Path, len: PreloadLen) -> Result<PreloadBuffer, SampleError> {
     let ext = path.extension()
         .and_then(|e| e.to_str())
         .map(|e| e.to_lowercase())
         .unwrap_or_default();
 
     match ext.as_str() {
-        "wav" => load_wav_preload(path, preload_samples),
+        "wav" => load_wav_preload_segment_len(path, len, PreloadSegment::Full),
         "mp3" => {
             // For MP3, we need to load the entire file and take the first N samples
             // (MP3 doesn't support random access like WAV)
             let full_sample = load_mp3(path)?;
-            let attack_len = preload_samples.min(full_sample.data.len());
+            let attack_len = len.frames(full_sample.sample_rate as u32).min(full_sample.data.len());
             let raw_attack = full_sample.data[..attack_len].to_vec();
             let raw_right = full_sample.right.as_ref().map(|r| r[..attack_len].to_vec());
 

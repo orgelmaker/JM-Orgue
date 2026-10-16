@@ -243,6 +243,8 @@
     "polyphony_load": "Audio thread load: {load}% (peak {peak}%)",
     "stereo_samples": "Play stereo samples in stereo",
     "stereo_samples_hint": "On: stereo recordings keep their spatial image (more memory). Off: mix down to mono as before.",
+    "preload_ms": "Start buffer per recording",
+    "preload_ms_hint": "How much of each pipe recording is kept in memory up front. Shorter = far less memory and faster loading; the rest streams in while you play. If big chords show a brief repeat of the attack, choose a longer buffer.",
     "reload_hint": "Takes effect after reloading the organ.",
     "channels_per_division": "Outputs",
     "channels_per_division_hint": "Choose which outputs of the currently open audio output ({host}) this division uses — from 1 up to all. Two consecutive outputs form a stereo pair; a single output plays mono. The count follows the device: ASIO exposes all driver outputs, WASAPI the number Windows has configured for this device.",
@@ -1398,7 +1400,25 @@
   "common": {
     "close": "Close"
   },
+  "acoustics": {
+    "title": "Acoustic configuration",
+    "summary": "{enclosures} swell boxes · {ranks} ranks ({bound} pipes bound) · {irs} impulse responses · {mix} mix routes · {outputs} outputs · {effects} effect stops",
+    "not_active": "Swell boxes per rank are connected; assign a pedal to each box in the keyboard settings. Mix routes and output buses are not activated automatically yet; the regular definition stays in charge.",
+    "error": "Configuration not loaded: {error}. The organ plays with the regular definition.",
+    "ir_title": "Impulse responses from the set",
+    "use_ir": "Use as reverb",
+    "ir_in_use": "In use",
+    "ir_hint": "The channel roles of these recordings are unverified: the first two channels are used as a stereo pair.",
+    "warnings": "Notes",
+    "enclosures": "Swell boxes per rank",
+    "enclosures_hint": "These swell boxes come from the set's acoustic configuration and work per rank, independent of the keyboard. Assign a pedal to each box.",
+    "ranks": "ranks",
+    "pipes": "pipes"
+  },
   "wizard": {
+    "device": "Device",
+    "outputs_device_hint": "Choose the device for this profile and save it; then pick the outputs per keyboard.",
+    "update_profile": "Update profile",
     "title": "Set up organ",
     "intro": "This organ is new. In a few steps you connect the keyboards, swell boxes and outputs of your console. Everything can be changed later.",
     "step_keyboards": "MIDI channel per keyboard",
@@ -1408,7 +1428,7 @@
     "step_speakers": "Outputs for speakers",
     "step_headphones": "Outputs for headphones",
     "outputs_hint": "Choose the audio-interface outputs per keyboard. The profile must be active to pick channels.",
-    "no_profile": "This profile does not exist yet. First select the right output in General settings → Audio output, then save it here as the profile.",
+    "no_profile": "This profile does not exist yet. Choose the device above and save it as a profile.",
     "save_profile": "Save current output as this profile",
     "activate_profile": "Activate profile",
     "profile_active": "Profile active",

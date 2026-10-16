@@ -1971,6 +1971,15 @@
     try { await invoke('set_stereo_samples', { on }); stereoReloadHint = true; } catch (e) { console.error(e); }
     refreshAudioStatus();
   }
+  // Startbuffer per opname (0.8.92): hoeveel ms van elke pijpopname vooraf in
+  // het geheugen staat. Globale voorkeur; wordt actief bij de volgende load.
+  let preloadMs = 2000;
+  let preloadReloadHint = false;
+  const PRELOAD_KEUZES = [200, 300, 500, 1000, 2000];
+  invoke('get_preload_ms').then(v => { preloadMs = Number(v) || 2000; }).catch(() => {});
+  async function setPreloadMs(v) {
+    try { preloadMs = await invoke('set_preload_ms', { ms: Number(v) }); preloadReloadHint = true; } catch (e) { console.error(e); }
+  }
 
   // Perspectieven en gestapelde ranks (0.7.38): per orgel welke microfoon-
   // posities geladen worden (vraagt herladen) en hun live volume. De backend
@@ -2129,10 +2138,6 @@
   }
   $: wizardDivisies = (displayOrgan?.divisions || []).filter(d => !d.__toy_division);
   $: wizardProfielKind = wizardStap === 4 ? 'headphones' : 'speakers';
-  function wizardKanaalTekst(naam) {
-    const m = midiMapByDiv?.[naam];
-    return (m && m.channel != null) ? String(m.channel + 1) : $t('wizard.all_channels');
-  }
   function scrollNaar(id) {
     const el = document.getElementById(id);
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -2806,7 +2811,7 @@
       }
       let verdrongen = [];
       if (kind === 'zwel') {
-        const divisionIndex = Math.max(0, (organInfo?.divisions || []).findIndex(d => d.name === divisionName));
+        const divisionIndex = swellIndexFor(divisionName);
         verdrongen = await invoke('apply_learned_swell', {
           division: divisionName, divisionIndex,
           channel: first[0], ccNum: first[1],
@@ -2837,6 +2842,15 @@
         crescendoLearning = false;
       }
     }
+  }
+
+  // Zweltrede-index voor een divisie of een zwelkast uit de akoestische
+  // configuratie (0.8.92): kasten tellen vanaf 128 (enclosure:<id> → 128 + slot).
+  function swellIndexFor(name) {
+    const i = (organInfo?.divisions || []).findIndex(d => d.name === name);
+    if (i >= 0) return i;
+    const enc = (organInfo?.acoustics?.enclosures || []).find(e => e.swell_name === name);
+    return enc ? 128 + enc.slot : 0;
   }
 
   async function learnSwellPedal(divisionName) {
@@ -3284,6 +3298,19 @@
       }
     } catch (e) {
       console.error('Import failed:', e);
+    }
+  }
+
+  // IR uit de akoestische configuratie van de set als galm gebruiken (0.8.92).
+  async function useAcousticsIr(ir) {
+    try {
+      reverbType = 'convolution';
+      reverbIrPath = ir.path;
+      reverbIrName = ir.name;
+      await applyReverbToBackend();
+      persistReverbConfig();
+    } catch (e) {
+      console.error('IR uit de set niet te laden:', e);
     }
   }
 
@@ -6137,6 +6164,43 @@
           <!-- Kolom 1: Master, Reverb, EQ, Wind, Crescendo, Register Sort, Beheer -->
           <div class="instellingen-section">
             <!-- Master Volume, Reverb & Tuning -->
+            {#if organInfo?.acoustics}
+            <!-- Akoestische configuratie van de set (0.8.92): JM-ACOUSTICS.json -->
+            <div class="settings-block" class:inst-verborgen={instTabOrgel !== 'klank' && instTabOrgel !== 'alles'}>
+              <h3 class="settings-block-title" id="sec-settings-acoustics">{$t('acoustics.title')}</h3>
+              {#if organInfo.acoustics.error}
+                <p class="settings-hint" style="color: var(--warning, #d9a441);">{$t('acoustics.error').replace('{error}', organInfo.acoustics.error)}</p>
+              {:else}
+                <p class="settings-hint">{$t('acoustics.summary')
+                  .replace('{enclosures}', organInfo.acoustics.enclosures.length)
+                  .replace('{ranks}', organInfo.acoustics.ranks)
+                  .replace('{bound}', organInfo.acoustics.bound_pipes)
+                  .replace('{irs}', organInfo.acoustics.impulse_responses.length)
+                  .replace('{mix}', organInfo.acoustics.mix_groups)
+                  .replace('{outputs}', organInfo.acoustics.outputs)
+                  .replace('{effects}', organInfo.acoustics.effect_registers)}</p>
+                <p class="settings-hint">{$t('acoustics.not_active')}</p>
+                {#if organInfo.acoustics.impulse_responses.length}
+                  <div class="swell-config-row"><span class="swell-config-label">{$t('acoustics.ir_title')}</span></div>
+                  {#each organInfo.acoustics.impulse_responses as ir (ir.id)}
+                    <div class="swell-config-row">
+                      <span class="swell-config-label" title={ir.path}>{ir.name} · {ir.channels}ch · {ir.seconds.toFixed(1)} s</span>
+                      <button class="btn btn-secondary btn-sm" on:click={() => useAcousticsIr(ir)} disabled={!ir.exists}>
+                        {reverbType === 'convolution' && reverbIrPath === ir.path ? $t('acoustics.ir_in_use') : $t('acoustics.use_ir')}
+                      </button>
+                    </div>
+                  {/each}
+                  <p class="settings-hint">{$t('acoustics.ir_hint')}</p>
+                {/if}
+              {/if}
+              {#if organInfo.acoustics.warnings?.length}
+                <details>
+                  <summary class="settings-hint">{$t('acoustics.warnings')} ({organInfo.acoustics.warnings.length})</summary>
+                  {#each organInfo.acoustics.warnings as w}<p class="settings-hint">{w}</p>{/each}
+                </details>
+              {/if}
+            </div>
+            {/if}
             <div class="settings-block" class:inst-verborgen={instTabOrgel !== 'klank' && instTabOrgel !== 'alles'}>
               <h3 class="settings-block-title" id="sec-settings-master">{$t('settings.master')}</h3>
               <div class="slider-control">
@@ -7581,6 +7645,31 @@
                 <button class="btn btn-ghost btn-sm" on:click={refreshMidiBindingsFull} title={$t('bindings.reload_title')}>↻</button>
               </div>
             </div>
+            {#if organInfo?.acoustics?.valid && organInfo.acoustics.enclosures?.length}
+            <!-- Zwelkasten per rank uit de akoestische configuratie (0.8.92) -->
+            <div class="settings-block" class:inst-verborgen={instTabOrgel !== 'midi' && instTabOrgel !== 'alles'}>
+              <h3 class="settings-block-title" id="sec-settings-enclosures">{$t('acoustics.enclosures')}</h3>
+              <p class="settings-hint">{$t('acoustics.enclosures_hint')}</p>
+              {#each organInfo.acoustics.enclosures as enc (enc.id)}
+                <div class="swell-config-row">
+                  <span class="swell-config-label" title={enc.id}>{enc.name} · {enc.ranks} {$t('acoustics.ranks')} · {enc.pipes} {$t('acoustics.pipes')}</span>
+                  <button class="btn btn-secondary midi-learn-btn swell-learn-btn" class:learning={learningSwellDivision === enc.swell_name}
+                          on:click={() => learnSwellPedal(enc.swell_name)} disabled={learningSwellDivision !== null || crescendoLearning}>
+                    {#if learningSwellDivision === enc.swell_name}
+                      <span class="learning-indicator"></span>{$t('settings.midi_swell_learning')}
+                    {:else if swellBindings[enc.swell_name]}
+                      CC{swellBindings[enc.swell_name].cc_num}
+                    {:else}
+                      {$t('settings.midi_swell_learn')}
+                    {/if}
+                  </button>
+                  {#if swellBindings[enc.swell_name]}
+                    <button class="btn btn-ghost btn-sm" on:click={() => clearSwellBinding(enc.swell_name)} title={$t('settings.midi_swell_clear')}>{$t('settings.midi_swell_clear')}</button>
+                  {/if}
+                </div>
+              {/each}
+            </div>
+            {/if}
           </div>
 
         </div>
@@ -7799,6 +7888,20 @@
                 <span>{$t('settings.stereo_samples')}</span>
               </label>
               {#if stereoReloadHint}
+                <p style="margin: 0.2rem 0 0; font-size: 0.68rem; color: var(--warning, #d9a441); line-height: 1.35;">{$t('settings.reload_hint')}</p>
+              {/if}
+
+              <!-- Startbuffer per opname (0.8.92) -->
+              <div class="audio-select-row" style="margin-top: 0.7rem;" title={$t('settings.preload_ms_hint')}>
+                <label class="audio-select-label" for="preload-ms">{$t('settings.preload_ms')}</label>
+                <select id="preload-ms" class="temperament-select" on:change={(e) => setPreloadMs(e.target.value)}>
+                  {#each PRELOAD_KEUZES as ms}
+                    <option value={ms} selected={preloadMs === ms}>{ms >= 1000 ? (ms / 1000) + ' s' : ms + ' ms'}</option>
+                  {/each}
+                </select>
+              </div>
+              <p class="settings-hint" style="margin: 0.2rem 0 0;">{$t('settings.preload_ms_hint')}</p>
+              {#if preloadReloadHint}
                 <p style="margin: 0.2rem 0 0; font-size: 0.68rem; color: var(--warning, #d9a441); line-height: 1.35;">{$t('settings.reload_hint')}</p>
               {/if}
 
@@ -8622,7 +8725,7 @@
             {#each wizardDivisies as d (d.name)}
               <div class="wizard-rij">
                 <span class="wizard-naam">{d.display_name || d.name}</span>
-                <span class="wizard-status">{$t('settings.midi_channel')}: {wizardKanaalTekst(d.name)}</span>
+                <span class="wizard-status">{$t('settings.midi_channel')}: {(midiMapByDiv?.[d.name]?.channel != null) ? midiMapByDiv[d.name].channel + 1 : $t('wizard.all_channels')}</span>
                 <button class="btn btn-secondary btn-sm" class:learning={learningDivision === d.name}
                         on:click={() => learnChannel(d.name)} disabled={!midiConnected || (learningDivision !== null && learningDivision !== d.name)}>
                   {$t('wizard.learn')}
@@ -8655,21 +8758,44 @@
           {:else if wizardStap === 3 || wizardStap === 4}
             <h4>{wizardStap === 3 ? $t('wizard.step_speakers') : $t('wizard.step_headphones')}</h4>
             <p class="wizard-hint">{$t('wizard.outputs_hint')}</p>
+            <!-- Apparaat voor dit profiel (0.8.92): tot nu toe kon de wizard
+                 alleen de "huidige uitgang" opslaan, zodat speakers en
+                 hoofdtelefoon hetzelfde apparaat kregen. -->
+            <p class="wizard-hint">{$t('wizard.outputs_device_hint')}</p>
+            <div class="wizard-rij">
+              <span class="wizard-naam">{$t('settings.audio_host')}</span>
+              <select class="temperament-select" on:change={(e) => dispatch('selectAudioHost', e.target.value)}>
+                {#each audioHosts as h}<option value={h} selected={h === selectedAudioHost}>{prettyHost(h, $t)}</option>{/each}
+              </select>
+            </div>
+            <div class="wizard-rij">
+              <span class="wizard-naam">{$t('wizard.device')}</span>
+              <select class="temperament-select" on:change={(e) => dispatch('selectAudioDevice', e.target.value)}>
+                {#each audioDevices as dev}<option value={dev.name} selected={dev.name === selectedAudioDevice}>{deviceLabel(dev.name)}</option>{/each}
+              </select>
+              <button class="btn btn-secondary btn-sm" on:click={() => dispatch('saveAudioProfile', wizardProfielKind)}>
+                {audioProfiles?.[wizardProfielKind] ? $t('wizard.update_profile') : $t('wizard.save_profile')}
+              </button>
+            </div>
             {#if !audioProfiles?.[wizardProfielKind]}
               <p class="wizard-tekst">{$t('wizard.no_profile')}</p>
-              <button class="btn btn-secondary btn-sm" on:click={() => dispatch('saveAudioProfile', wizardProfielKind)}>{$t('wizard.save_profile')}</button>
             {:else if audioProfiles.active !== wizardProfielKind}
               <p class="wizard-tekst">{audioProfiles[wizardProfielKind].host || '?'} · {audioProfiles[wizardProfielKind].device || $t('settings.default_device')}</p>
               <button class="btn btn-secondary btn-sm" on:click={() => dispatch('switchAudioProfile', wizardProfielKind)}>{$t('wizard.activate_profile')}</button>
             {:else}
               <p class="wizard-tekst">{$t('wizard.profile_active')} — {audioChannelCount}ch</p>
+              <!-- Geen functie-aanroep in de markup (isChannelSelected): die
+                   ververst niet wanneer divisionOutputChannels wijzigt — de
+                   chips bleven daardoor op de oude stand staan. -->
               {#each wizardDivisies as d (d.name)}
+                {@const divChannels = Array.isArray(divisionOutputChannels[d.name]) ? divisionOutputChannels[d.name] : []}
                 <div class="wizard-rij">
                   <span class="wizard-naam">{d.display_name || d.name}</span>
                   <div class="wizard-chips">
                     {#each Array(audioChannelCount) as _, ch}
-                      <label class="ch-chip" class:on={isChannelSelected(d.name, ch)} title={channelLabel(ch, audioChannelCount)}>
-                        <input type="checkbox" checked={isChannelSelected(d.name, ch)} on:change={() => toggleDivisionChannel(d.name, ch)} />
+                      {@const isOn = divChannels.includes(ch)}
+                      <label class="ch-chip" class:on={isOn} title={channelLabel(ch, audioChannelCount)}>
+                        <input type="checkbox" checked={isOn} on:change={() => toggleDivisionChannel(d.name, ch)} />
                         <span>{ch + 1}</span>
                       </label>
                     {/each}

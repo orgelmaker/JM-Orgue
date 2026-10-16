@@ -243,6 +243,8 @@
     "polyphony_load": "Belasting audio-thread: {load}% (piek {peak}%)",
     "stereo_samples": "Stereo-samples in stereo afspelen",
     "stereo_samples_hint": "Aan: stereo-opnamen behouden hun ruimtebeeld (meer geheugen). Uit: mengen naar mono zoals vroeger.",
+    "preload_ms": "Startbuffer per opname",
+    "preload_ms_hint": "Hoeveel van elke pijpopname vooraf in het geheugen staat. Korter = veel minder geheugen en sneller laden; de rest wordt tijdens het spelen bijgeladen. Hoor je bij grote akkoorden een korte herhaling van de aanzet, kies dan een langere buffer.",
     "reload_hint": "Wordt actief na het opnieuw laden van het orgel.",
     "channels_per_division": "Uitgangen",
     "channels_per_division_hint": "Kies welke uitgangen van de nu geopende audio-uitgang ({host}) dit klavier gebruikt — 1 t/m alle. Twee opeenvolgende uitgangen vormen een stereopaar; een losse uitgang klinkt mono. Het aantal volgt het apparaat: ASIO geeft alle uitgangen van de driver, WASAPI het aantal dat Windows voor dit apparaat heeft ingesteld.",
@@ -1398,7 +1400,25 @@
   "common": {
     "close": "Sluiten"
   },
+  "acoustics": {
+    "title": "Akoestische configuratie",
+    "summary": "{enclosures} zwelkasten · {ranks} ranks ({bound} pijpen gekoppeld) · {irs} impulsresponsen · {mix} mengroutes · {outputs} uitgangen · {effects} effectregisters",
+    "not_active": "De zwelkasten per rank zijn aangesloten; koppel per kast een trede bij de klavierinstellingen. Mengroutes en uitgangsbussen worden nog niet automatisch geactiveerd; de gewone definitie blijft leidend.",
+    "error": "Configuratie niet geladen: {error}. Het orgel speelt met de gewone definitie.",
+    "ir_title": "Impulsresponsen uit de set",
+    "use_ir": "Gebruik als galm",
+    "ir_in_use": "In gebruik",
+    "ir_hint": "De kanaalrollen van deze opnamen zijn niet bevestigd: de eerste twee kanalen worden als stereopaar gebruikt.",
+    "warnings": "Opmerkingen",
+    "enclosures": "Zwelkasten per rank",
+    "enclosures_hint": "Deze zwelkasten komen uit de akoestische configuratie van de set en werken per rank, los van het klavier. Koppel per kast een trede.",
+    "ranks": "ranks",
+    "pipes": "pijpen"
+  },
   "wizard": {
+    "device": "Apparaat",
+    "outputs_device_hint": "Kies hier het apparaat voor dit profiel en sla het op; daarna kies je per klavier de uitgangen.",
+    "update_profile": "Profiel bijwerken",
     "title": "Orgel instellen",
     "intro": "Dit orgel is nieuw. In een paar stappen koppel je de klavieren, zwelkasten en uitgangen van je speeltafel. Alles kan later nog worden aangepast.",
     "step_keyboards": "MIDI-kanaal per klavier",
@@ -1408,7 +1428,7 @@
     "step_speakers": "Uitgangen voor speakers",
     "step_headphones": "Uitgangen voor hoofdtelefoon",
     "outputs_hint": "Kies per klavier de uitgangen van je audio-interface. Het profiel moet actief zijn om de kanalen te kiezen.",
-    "no_profile": "Dit profiel bestaat nog niet. Kies eerst de juiste uitgang in Algemene instellingen → Audio uitvoer en sla die hier op als profiel.",
+    "no_profile": "Dit profiel bestaat nog niet. Kies hierboven het apparaat en sla het op als profiel.",
     "save_profile": "Huidige uitgang opslaan als dit profiel",
     "activate_profile": "Profiel activeren",
     "profile_active": "Profiel actief",

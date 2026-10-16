@@ -243,6 +243,8 @@
     "polyphony_load": "Carga del hilo de audio: {load}% (pico {peak}%)",
     "stereo_samples": "Reproducir en estéreo las muestras estéreo",
     "stereo_samples_hint": "Activado: las grabaciones estéreo conservan su imagen espacial (más memoria). Desactivado: se mezclan a mono como antes.",
+    "preload_ms": "Búfer inicial por grabación",
+    "preload_ms_hint": "Cuánto de cada grabación de tubo se mantiene en memoria de antemano. Más corto = mucha menos memoria y carga más rápida; el resto se carga mientras toca. Si en acordes grandes oye una breve repetición del ataque, elija un búfer más largo.",
     "reload_hint": "Se aplica al volver a cargar el órgano.",
     "channels_per_division": "Salidas",
     "channels_per_division_hint": "Elige qué salidas de la salida de audio abierta ({host}) usa este teclado — desde 1 hasta todas. Dos salidas consecutivas forman un par estéreo; una salida suelta suena en mono. La cantidad depende del dispositivo: ASIO ofrece todas las salidas del controlador y WASAPI las que Windows tenga configuradas para este dispositivo.",
@@ -1398,7 +1400,25 @@
   "common": {
     "close": "Cerrar"
   },
+  "acoustics": {
+    "title": "Configuración acústica",
+    "summary": "{enclosures} cajas expresivas · {ranks} hileras ({bound} tubos vinculados) · {irs} respuestas al impulso · {mix} rutas de mezcla · {outputs} salidas · {effects} registros de efecto",
+    "not_active": "Las cajas expresivas por hilera están conectadas; asigne un pedal a cada caja en los ajustes de teclado. Las rutas de mezcla y los buses de salida aún no se activan automáticamente; la definición normal sigue mandando.",
+    "error": "Configuración no cargada: {error}. El órgano suena con la definición normal.",
+    "ir_title": "Respuestas al impulso del set",
+    "use_ir": "Usar como reverberación",
+    "ir_in_use": "En uso",
+    "ir_hint": "Los roles de canal de estas grabaciones no están confirmados: los dos primeros canales se usan como par estéreo.",
+    "warnings": "Observaciones",
+    "enclosures": "Cajas expresivas por hilera",
+    "enclosures_hint": "Estas cajas expresivas proceden de la configuración acústica del set y actúan por hilera, independientemente del teclado. Asigne un pedal a cada caja.",
+    "ranks": "hileras",
+    "pipes": "tubos"
+  },
   "wizard": {
+    "device": "Dispositivo",
+    "outputs_device_hint": "Elija aquí el dispositivo para este perfil y guárdelo; después elija las salidas por teclado.",
+    "update_profile": "Actualizar perfil",
     "title": "Configurar el órgano",
     "intro": "Este órgano es nuevo. En unos pasos conectará los teclados, las cajas expresivas y las salidas de su consola. Todo se puede cambiar después.",
     "step_keyboards": "Canal MIDI por teclado",
@@ -1408,7 +1428,7 @@
     "step_speakers": "Salidas para altavoces",
     "step_headphones": "Salidas para auriculares",
     "outputs_hint": "Elija por teclado las salidas de su interfaz de audio. El perfil debe estar activo para elegir canales.",
-    "no_profile": "Este perfil aún no existe. Elija primero la salida correcta en Ajustes generales → Salida de audio y guárdela aquí como perfil.",
+    "no_profile": "Este perfil aún no existe. Elija el dispositivo arriba y guárdelo como perfil.",
     "save_profile": "Guardar la salida actual como este perfil",
     "activate_profile": "Activar perfil",
     "profile_active": "Perfil activo",

@@ -363,6 +363,9 @@ pub struct AudioPrefs {
     /// correctie.
     #[serde(default)]
     pub active_output_profile: Option<String>,
+    /// Startbuffer per opname in ms (0.8.92); None = 2000 (oud gedrag).
+    #[serde(default)]
+    pub preload_ms: Option<u32>,
 }
 
 /// Load audio preferences from `<app_data_dir>/audio_config.json` (defaults if absent).
@@ -1606,6 +1609,8 @@ pub struct AppState {
     /// layered_stops), gevuld in beide laadroutes (ook custom sets, waar
     /// organ_definition None/verouderd is).
     pub rank_summary: Arc<RwLock<Vec<RankSummary>>>,
+    /// Akoestische configuratie van het geladen orgel (0.8.92); None = geen.
+    pub acoustics: Arc<RwLock<Option<Arc<crate::acoustics::AcousticsConfig>>>>,
 }
 
 /// Runtime-staat van één microfoonperspectief (zie AppState::perspectives).
@@ -1705,6 +1710,7 @@ impl AppState {
         };
         crate::audio::set_meng_stukken(mix_cores);
         vpo_sampler::set_stereo_loading(audio_prefs.stereo_samples.unwrap_or(true));
+        crate::audio::set_preload_ms(audio_prefs.preload_ms.unwrap_or(crate::audio::PRELOAD_MS_DEFAULT));
         let saved_cfg = AudioOutputConfig {
             host_name: audio_prefs.host.clone(),
             device_name: audio_prefs.device.clone(),
@@ -1967,6 +1973,7 @@ impl AppState {
             misc_cc_learning: Arc::new(RwLock::new(None)),
             toetsmechaniek_prefix: Arc::new(RwLock::new(std::collections::HashMap::new())),
             rank_summary: Arc::new(RwLock::new(Vec::new())),
+            acoustics: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -5649,6 +5656,7 @@ mod crescendo_tests {
             release_pipes: 0,
             background_sounds: Vec::new(),
             key_click_count: 0,
+            acoustics: None,
         }
     }
 

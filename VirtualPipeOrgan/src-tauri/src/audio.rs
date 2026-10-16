@@ -20,7 +20,98 @@ use vpo_audio::{ConvolutionReverb, OnePoleFilter, WindModel, WindLade, WindInste
 
 /// Preload buffer size in samples (~2s at 48kHz)
 /// Longer buffer = smoother loop while full sample loads in background
-pub const PRELOAD_SAMPLES: usize = 96000;
+/// Startbuffer per opname in milliseconden (0.8.92). Tot en met 0.8.91 lag
+/// dit vast op 96 000 bronframes (2 s bij 48 kHz). Korter = veel minder RAM en
+/// sneller laden — de attack-buffers zijn het grootste deel van het geheugen —
+/// maar de achtergrondlader moet de volledige opname dan binnen die tijd
+/// aanleveren; zie de laadtellers (`loader_stats`).
+pub const PRELOAD_MS_DEFAULT: u32 = 2000;
+pub const PRELOAD_MS_MIN: u32 = 100;
+pub const PRELOAD_MS_MAX: u32 = 4000;
+static PRELOAD_MS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(PRELOAD_MS_DEFAULT);
+pub fn preload_ms() -> u32 { PRELOAD_MS.load(Ordering::Relaxed) }
+pub fn set_preload_ms(ms: u32) {
+    PRELOAD_MS.store(ms.clamp(PRELOAD_MS_MIN, PRELOAD_MS_MAX), Ordering::Relaxed);
+}
+
+/// Laadtellers van de achtergrondlader (0.8.92): alleen atomaire optellingen
+/// in de callback en de werkers; de watchdog en de test-API lezen ze.
+/// `PRELOAD_UNDERRUNS` = klinkende stem die het einde van zijn startbuffer
+/// bereikte vóór de volledige opname er was (hoorbaar als herhaalde aanzet).
+static PRELOAD_UNDERRUNS: AtomicU64 = AtomicU64::new(0);
+static LOAD_REQUESTS: AtomicU64 = AtomicU64::new(0);
+static LOAD_QUEUE_FULL: AtomicU64 = AtomicU64::new(0);
+static LOAD_RETRIES: AtomicU64 = AtomicU64::new(0);
+static LOAD_DONE: AtomicU64 = AtomicU64::new(0);
+static LOAD_LATENCY_SUM_US: AtomicU64 = AtomicU64::new(0);
+static LOAD_LATENCY_MAX_US: AtomicU64 = AtomicU64::new(0);
+
+#[derive(Debug, Clone, Copy, serde::Serialize)]
+pub struct LoaderStats {
+    pub preload_ms: u32,
+    pub preload_underruns: u64,
+    pub release_edge_hits: u64,
+    pub requests: u64,
+    pub done: u64,
+    pub queue_full: u64,
+    pub retries: u64,
+    pub latency_avg_ms: f64,
+    pub latency_max_ms: f64,
+}
+
+pub fn loader_stats() -> LoaderStats {
+    let done = LOAD_DONE.load(Ordering::Relaxed);
+    let sum = LOAD_LATENCY_SUM_US.load(Ordering::Relaxed);
+    LoaderStats {
+        preload_ms: preload_ms(),
+        preload_underruns: PRELOAD_UNDERRUNS.load(Ordering::Relaxed),
+        release_edge_hits: RELEASE_PRELOAD_EDGE_HITS.load(Ordering::Relaxed),
+        requests: LOAD_REQUESTS.load(Ordering::Relaxed),
+        done,
+        queue_full: LOAD_QUEUE_FULL.load(Ordering::Relaxed),
+        retries: LOAD_RETRIES.load(Ordering::Relaxed),
+        latency_avg_ms: if done > 0 { sum as f64 / done as f64 / 1000.0 } else { 0.0 },
+        latency_max_ms: LOAD_LATENCY_MAX_US.load(Ordering::Relaxed) as f64 / 1000.0,
+    }
+}
+
+/// Bovengrens van de render-eigen laadwachtrij (0.8.92).
+const PENDING_LOADS_CAP: usize = 4096;
+/// Deadline-markering voor een vers verzoek (nog geen stand uit de pre-pass).
+const LOAD_DEADLINE_VERS: f64 = f64::MAX;
+
+/// Laadverzoek in de render-eigen wachtrij zetten (0.8.92). De pre-pass
+/// zet ze in deadline-volgorde door naar de werkers en laat verzoeken van
+/// stemmen die inmiddels weg zijn vervallen. false = wachtrij vol; de
+/// aanvrager laat `load_requested` dan op false staan, zodat de pre-pass
+/// van een volgende callback het opnieuw probeert.
+fn stuur_laadverzoek(pending: &mut std::collections::VecDeque<(f64, LoadRequest)>, req: LoadRequest) -> bool {
+    LOAD_REQUESTS.fetch_add(1, Ordering::Relaxed);
+    if pending.len() >= PENDING_LOADS_CAP {
+        LOAD_QUEUE_FULL.fetch_add(1, Ordering::Relaxed);
+        return false;
+    }
+    pending.push_back((LOAD_DEADLINE_VERS, req));
+    true
+}
+
+/// Zweltrede-index → mengbus (0.8.92): indices ≥ 128 zijn kastslots uit de
+/// akoestische configuratie (bus = basis + slot); None = onbekende kast.
+fn bus_index_voor(division_index: u8, enclosure_bus_base: usize, n_enclosure_buses: usize) -> Option<usize> {
+    if division_index >= crate::acoustics::ENCLOSURE_INDEX_BASE {
+        let slot = (division_index - crate::acoustics::ENCLOSURE_INDEX_BASE) as usize;
+        if slot < n_enclosure_buses { Some((enclosure_bus_base + slot).min(31)) } else { None }
+    } else {
+        Some(division_index as usize)
+    }
+}
+
+fn noteer_laadlatentie(requested_at: std::time::Instant) {
+    let us = requested_at.elapsed().as_micros() as u64;
+    LOAD_DONE.fetch_add(1, Ordering::Relaxed);
+    LOAD_LATENCY_SUM_US.fetch_add(us, Ordering::Relaxed);
+    LOAD_LATENCY_MAX_US.fetch_max(us, Ordering::Relaxed);
+}
 
 /// Bit-vlag op `pipe_num` die een key markeert als RELEASE-sample van die pijp
 /// (opgenomen kerkakoestiek, afgespeeld bij note-off). Release-buffers reizen zo
@@ -270,6 +361,9 @@ pub(crate) fn meng_stemmen_blok(
     for voice in deel.iter_mut() {
         let div_idx = voice.c_div;
         let in_range = div_idx < 32;
+        // Som naar de mengbus (kastbus of divisie); pan/wind/trem blijven
+        // van de divisie.
+        let bus_idx = if voice.c_bus < 32 { voice.c_bus } else { div_idx };
         // Effectieve afspeel-rate = basis (samplerate-correctie) ×
         // gecachte temperament+voicing-pitch × per-sample wind/trem.
         // next_sample() leest self.rate; we zetten hem per frame en
@@ -344,8 +438,8 @@ pub(crate) fn meng_stemmen_blok(
             let contribution_l = sl * g;
             let contribution_r = sr * g;
             if !in_range { continue; }
-            doel_l[f][div_idx] += contribution_l * pan_cos;
-            doel_r[f][div_idx] += contribution_r * pan_sin;
+            doel_l[f][bus_idx] += contribution_l * pan_cos;
+            doel_r[f][bus_idx] += contribution_r * pan_sin;
         }
         voice.c_dev_cur = dev_cur;
     }
@@ -810,6 +904,10 @@ pub enum AudioCommand {
     SetTremulantLFO { division_index: u8, active: bool, rate: f32, amp_depth: f32, pitch_depth: f32 },
     /// Register stop_id → division_index mapping (set when organ loads)
     RegisterStopDivisionMap(HashMap<u32, u8>),
+    /// Zwelkasten per rank uit de akoestische configuratie (0.8.92): pijp-
+    /// sleutel → kastslot, plus per slot de divisie waarvan de kastbus
+    /// routing en wind erft. Lege lijst = geen kasten (alles via divisies).
+    RegisterPipeEnclosures { kaart: Arc<HashMap<(u32, u32), u8>>, ouder: Vec<u8> },
     /// Windprofiel per stop (familie, voetmaat) plus per divisie het
     /// verbruik van haar pleno, de referentie voor "vol werk" (0.7.51).
     RegisterStopWindProfiles(Arc<HashMap<u32, StopWindProfiel>>, [f32; 32]),
@@ -943,6 +1041,8 @@ pub(crate) struct PlayingVoice {
     midi_note: u8,
     /// When using preload, track if we've requested full load
     load_requested: bool,
+    /// Startbuffer-rand al bereikt zonder volledige opname (eenmalig geteld).
+    preload_wrapped: bool,
     /// Laatste twee RUWE samplewaarden (voor envelope/gain) — voor de
     /// release-fase-uitlijning (GrandOrgue BLOCK_HISTORY=2).
     hist_last: f32,
@@ -958,6 +1058,9 @@ pub(crate) struct PlayingVoice {
     // gekraak. Nu gebeurt dat werk één keer per voice per callback.
     /// Divisie-index (0..31) van deze voice; 0 als niet gemapt.
     c_div: usize,
+    /// Mengbus (0.8.92): de divisie, of de kastbus wanneer de pijp in een
+    /// zwelkast uit de akoestische configuratie zit (zie RegisterPipeEnclosures).
+    c_bus: usize,
     /// Lineaire volume-factor uit de gestapelde voicing (gebruiker + ODF-intonatie).
     c_voicing_gain: f32,
     /// Rate-vermenigvuldiger uit temperament × voicing-toonhoogte.
@@ -1024,12 +1127,14 @@ impl PlayingVoice {
             pipe_num,
             midi_note,
             load_requested: false,
+            preload_wrapped: false,
             hist_last: 0.0,
             hist_prev: 0.0,
             age_samples: 0,
             // Placeholders; de pre-pass in de render-lus ververst deze elke
             // callback vóór de voice voor het eerst gemixt wordt.
             c_div: 0,
+            c_bus: 0,
             c_voicing_gain: 1.0,
             c_pitch_mul: 1.0,
             c_use_lfo_trem: true,
@@ -1063,12 +1168,14 @@ impl PlayingVoice {
             pipe_num,
             midi_note,
             load_requested: false,
+            preload_wrapped: false,
             hist_last: 0.0,
             hist_prev: 0.0,
             age_samples: 0,
             // Placeholders; de pre-pass in de render-lus ververst deze elke
             // callback vóór de voice voor het eerst gemixt wordt.
             c_div: 0,
+            c_bus: 0,
             c_voicing_gain: 1.0,
             c_pitch_mul: 1.0,
             c_use_lfo_trem: true,
@@ -1140,12 +1247,14 @@ impl PlayingVoice {
             pipe_num,
             midi_note,
             load_requested: false,
+            preload_wrapped: false,
             hist_last: 0.0,
             hist_prev: 0.0,
             age_samples: 0,
             // Placeholders; de pre-pass in de render-lus ververst deze elke
             // callback vóór de voice voor het eerst gemixt wordt.
             c_div: 0,
+            c_bus: 0,
             c_voicing_gain: 1.0,
             c_pitch_mul: 1.0,
             c_use_lfo_trem: true,
@@ -1287,6 +1396,7 @@ impl PlayingVoice {
         self.c_dev_a = if staart { 0.0 } else { van.c_dev_a };
         self.c_dev_cur = van.c_dev_cur;
         self.c_div = van.c_div;
+        self.c_bus = van.c_bus;
     }
 
     fn release_ms(&mut self, ms: f32, sample_rate: u32) {
@@ -1314,6 +1424,18 @@ impl PlayingVoice {
 
     fn is_finished(&self) -> bool {
         self.releasing && self.envelope < 0.0001
+    }
+
+    /// Resterende startbuffer in uitvoerframes (0.8.92): hoe lang deze stem
+    /// nog kan spelen vóór de volledige opname er moet zijn. None = speelt
+    /// al van de volledige opname of hoeft niet bijgeladen te worden.
+    fn preload_rest_frames(&self) -> Option<f64> {
+        match &self.source {
+            VoiceSampleSource::PreloadOnly { preload, needs_full_load } if *needs_full_load => {
+                Some((preload.attack_data.len() as f64 - self.position) / self.rate.max(1e-9))
+            }
+            _ => None,
+        }
     }
 
     fn needs_background_load(&self) -> Option<PathBuf> {
@@ -1442,15 +1564,23 @@ impl PlayingVoice {
                 // attack-buffer vallen — de vorige ¾-fallback liet de attack-
                 // transient periodiek terugkeren tot de full load klaar was.
                 let alen = preload.attack_data.len();
-                let (ls, le) = match (loop_start, loop_end) {
+                let (ls, le, volledige_loop) = match (loop_start, loop_end) {
                     // Volledige loop binnen de preload: exact gebruiken.
-                    (Some(a), Some(b)) if b > a && (b as usize) <= alen => (a as usize, b as usize),
+                    (Some(a), Some(b)) if b > a && (b as usize) <= alen => (a as usize, b as usize, true),
                     // Loop begint binnen de preload maar eindigt erbuiten: loop
                     // vanaf het echte startpunt tot het einde van de buffer —
                     // de attack blijft dan tenminste buiten het loopgebied.
-                    (Some(a), _) if (a as usize) + 1024 < alen => (a as usize, alen),
-                    _ => (alen / 4, alen),
+                    (Some(a), _) if (a as usize) + 1024 < alen => (a as usize, alen, false),
+                    _ => (alen / 4, alen, false),
                 };
+                // Startbuffer-tekort (0.8.92): een klinkende stem die de rand
+                // van zijn startbuffer bereikt vóór de volledige opname er is,
+                // herhaalt vanaf hier de aanzet — hoorbaar bij korte buffers.
+                // Eén telling per stem; watchdog en test-API lezen de stand.
+                if !volledige_loop && !no_loop && !self.preload_wrapped && self.position + self.rate >= le as f64 {
+                    self.preload_wrapped = true;
+                    PRELOAD_UNDERRUNS.fetch_add(1, Ordering::Relaxed);
+                }
                 let xfade = loop_xfade(le.saturating_sub(ls), ls);
                 read_voice_lr(&preload.attack_data, preload.attack_right.as_deref(), ls, le, xfade, &mut self.position, no_loop, &mut self.envelope)
             }
@@ -3436,7 +3566,7 @@ impl Drop for AudioPlayer {
 // afrondt zijn sample onder een hergebruikte (stop,pipe)-key van het NIEUWE
 // orgel registreert — dat gaf potentieel de verkeerde pijp of de verkeerde
 // samplerate na een snelle orgelwissel.
-type LoadRequest = ((u32, u32), PathBuf, u32, u64, Option<(u32, u32)>);
+type LoadRequest = ((u32, u32), PathBuf, u32, u64, Option<(u32, u32)>, std::time::Instant);
 
 /// Run the audio thread with cpal
 fn run_audio_thread(
@@ -3687,7 +3817,14 @@ fn run_audio_thread(
     // 1024 i.p.v. 64: een tutti-akkoord loslaten op een GO-set vraagt tientallen
     // release-loads tegelijk; bij een volle queue werden verzoeken STIL gedropt
     // en bleef de voice voorgoed op zijn 2s-attackloop hangen ("zombie").
-    let (load_tx, load_rx) = bounded::<LoadRequest>(1024);
+    // Werkers: 3 tot 8, één minder dan het aantal fysieke kernen (0.8.92): met
+    // korte startbuffers moet een tutti-akkoord (honderden opnamen tegelijk)
+    // binnen de buffertijd gedecodeerd zijn. Het kanaal naar de werkers is
+    // bewust kort (4 per werker): de volgorde wordt in de render-thread
+    // bepaald (deadline eerst, vervallen verzoeken weg — zie pending_loads),
+    // niet door een lange FIFO die al vol zat met werk voor dode stemmen.
+    let n_workers = crate::mengpool::fysieke_kernen().saturating_sub(1).clamp(3, 8);
+    let (load_tx, load_rx) = bounded::<LoadRequest>(n_workers * 4);
     // None = laden mislukt: de render-thread moet dan wél zijn in-flight-marker
     // opruimen, anders zou die pijp deze sessie nooit meer bijgeladen worden.
     let (loaded_tx, loaded_rx) = bounded::<((u32, u32), Option<SampleRef>, u64)>(256);
@@ -3727,7 +3864,8 @@ fn run_audio_thread(
     let decode_cache: Arc<parking_lot::Mutex<HashMap<PathBuf, (u64, std::sync::Weak<SampleData>)>>> =
         Arc::new(parking_lot::Mutex::new(HashMap::new()));
     let max_generation = Arc::new(AtomicU64::new(0));
-    for worker in 0..3 {
+    info!("Achtergrondlader: {} werkers, startbuffer {} ms", n_workers, preload_ms());
+    for worker in 0..n_workers {
         let loaded_tx_clone = loaded_tx.clone();
         let load_rx = load_rx.clone();
         let running_bg = running.clone();
@@ -3749,7 +3887,7 @@ fn run_audio_thread(
                 }
                 while running_bg.load(Ordering::Relaxed) {
                     match load_rx.recv_timeout(std::time::Duration::from_millis(100)) {
-                        Ok((key, path, target_rate, generation, odf_loop)) => {
+                        Ok((key, path, target_rate, generation, odf_loop, requested_at)) => {
                             let seen = max_generation.fetch_max(generation, Ordering::Relaxed).max(generation);
                             if generation < seen {
                                 continue; // verouderd verzoek van een vorig orgel
@@ -3760,6 +3898,7 @@ fn run_audio_thread(
                                     if *g == generation {
                                         if let Some(cached) = weak.upgrade() {
                                             let _ = loaded_tx_clone.send((key, Some(cached), generation));
+                                            noteer_laadlatentie(requested_at);
                                             continue;
                                         }
                                     }
@@ -3798,6 +3937,7 @@ fn run_audio_thread(
                                         cache.insert(path.clone(), (generation, Arc::downgrade(&sample)));
                                     }
                                     let _ = loaded_tx_clone.send((key, Some(sample), generation));
+                                    noteer_laadlatentie(requested_at);
                                 }
                                 Err(e) => {
                                     warn!("Failed to background load {:?}: {}", path, e);
@@ -3865,7 +4005,23 @@ fn run_audio_thread(
     // locks): welke keys al onderweg zijn (dedup — een tutti stuurt anders
     // hetzelfde bestand tientallen keren de queue in) en de huidige laad-
     // generatie (resultaten van vóór een orgelwissel worden genegeerd).
+    // Zwelkasten per rank (0.8.92): kastbussen liggen ná de divisies (index
+    // enclosure_bus_base + slot); bus_ouder geeft per bus de divisie voor
+    // routing en wind. Zonder kasten is bus_ouder de identiteit.
+    let mut pipe_enclosures: Arc<HashMap<(u32, u32), u8>> = Arc::new(HashMap::new());
+    let mut bus_ouder: [usize; 32] = std::array::from_fn(|i| i);
+    let mut enclosure_bus_base: usize = 0;
+    let mut n_enclosure_buses: usize = 0;
     let mut inflight_loads: std::collections::HashSet<(u32, u32)> = std::collections::HashSet::new();
+    // Laadverzoeken wachten eerst hier (0.8.92) en gaan in deadline-volgorde
+    // naar de werkers: de stem waarvan de startbuffer het eerst opraakt gaat
+    // voor. Verzoeken van stemmen die inmiddels weg zijn vervallen — een
+    // tutti vroeg anders honderden opnamen die niemand meer nodig had,
+    // terwijl klinkende stemmen op hun buffer-einde wachtten.
+    let mut pending_loads: std::collections::VecDeque<(f64, LoadRequest)> = std::collections::VecDeque::with_capacity(PENDING_LOADS_CAP);
+    // Per pijpsleutel de kleinste resterende startbuffer van de stemmen die
+    // de volledige opname nog nodig hebben (stand van de vorige pre-pass).
+    let mut gewenst: HashMap<(u32, u32), f64> = HashMap::with_capacity(2048);
     // Pijpen zonder sample waarvoor al één warn is gelogd (max 1 per pijp per orgel).
     let mut missing_sample_warned: std::collections::HashSet<(u32, u32)> = std::collections::HashSet::new();
     // Toetsduur-afhankelijke releases: (stop, pijp) → gesorteerde (max_ms, key).
@@ -4257,7 +4413,7 @@ fn run_audio_thread(
                                 } else {
                                     let path = preload.source_path.clone();
                                     let odf_lp = odf_loops_clone.read().get(&path).copied();
-                                    if load_tx_clone.try_send((key, path, sample_rate, load_generation, odf_lp)).is_ok() {
+                                    if stuur_laadverzoek(&mut pending_loads, (key, path, sample_rate, load_generation, odf_lp, std::time::Instant::now())) {
                                         inflight_loads.insert(key);
                                         voice.mark_load_requested();
                                     }
@@ -4552,7 +4708,7 @@ fn run_audio_thread(
                                             let odf_lp = odf_loops_clone.read().get(&path).copied();
                                             if inflight_loads.contains(&release_key) {
                                                 v.mark_load_requested();
-                                            } else if load_tx_clone.try_send((release_key, path, sample_rate, load_generation, odf_lp)).is_ok() {
+                                            } else if stuur_laadverzoek(&mut pending_loads, (release_key, path, sample_rate, load_generation, odf_lp, std::time::Instant::now())) {
                                                 inflight_loads.insert(release_key);
                                                 v.mark_load_requested();
                                             }
@@ -4695,7 +4851,7 @@ fn run_audio_thread(
                                             let odf_lp = odf_loops_clone.read().get(&path).copied();
                                             if inflight_loads.contains(&release_key) {
                                                 v.mark_load_requested();
-                                            } else if load_tx_clone.try_send((release_key, path, sample_rate, load_generation, odf_lp)).is_ok() {
+                                            } else if stuur_laadverzoek(&mut pending_loads, (release_key, path, sample_rate, load_generation, odf_lp, std::time::Instant::now())) {
                                                 inflight_loads.insert(release_key);
                                                 v.mark_load_requested();
                                             }
@@ -4828,6 +4984,7 @@ fn run_audio_thread(
                         // het vorige orgel mogen hun (hergebruikte) keys niet vullen.
                         load_generation += 1;
                         inflight_loads.clear();
+                        pending_loads.clear();
                         // Vooraf reserveren: insert tijdens het spelen (NoteOn →
                         // inflight_loads, achtergrond-load → samples) mag in de
                         // callback geen rehash-allocatie veroorzaken.
@@ -4869,6 +5026,7 @@ fn run_audio_thread(
                         // Nieuwe laad-generatie (zie LoadSamples).
                         load_generation += 1;
                         inflight_loads.clear();
+                        pending_loads.clear();
                         // Zie LoadSamples: reserveren zodat de callback niet rehasht.
                         inflight_loads.reserve(buffers.len().min(8192));
                         missing_sample_warned.clear();
@@ -4970,7 +5128,7 @@ fn run_audio_thread(
                                             let odf_lp = odf_loops_clone.read().get(&path).copied();
                                             if inflight_loads.contains(&key) {
                                                 nv.mark_load_requested();
-                                            } else if load_tx_clone.try_send((key, path, sample_rate, load_generation, odf_lp)).is_ok() {
+                                            } else if stuur_laadverzoek(&mut pending_loads, (key, path, sample_rate, load_generation, odf_lp, std::time::Instant::now())) {
                                                 inflight_loads.insert(key);
                                                 nv.mark_load_requested();
                                             }
@@ -5025,6 +5183,8 @@ fn run_audio_thread(
                         spawns_done += 1 + spawned_count;
                     }
                     AudioCommand::SetDivisionGain { division_index, gain } => {
+                        // Index ≥ 128 = zwelkast uit de akoestische configuratie (0.8.92).
+                        let division_index = bus_index_voor(division_index, enclosure_bus_base, n_enclosure_buses).map_or(255u8, |i| i as u8);
                         // Alleen de DOELstand; de render-lus loopt er per blok
                         // gesmootheerd naartoe en leidt volume + cutoff daaruit af.
                         let mut gains = division_gains_clone.write();
@@ -5033,6 +5193,7 @@ fn run_audio_thread(
                         }
                     }
                     AudioCommand::SetSwellConfig { division_index, min_db, filter_cutoff_closed } => {
+                        let division_index = bus_index_voor(division_index, enclosure_bus_base, n_enclosure_buses).map_or(255u8, |i| i as u8);
                         let mut configs = swell_configs_clone.write();
                         if (division_index as usize) < configs.len() {
                             configs[division_index as usize] = (min_db, filter_cutoff_closed);
@@ -5133,6 +5294,12 @@ fn run_audio_thread(
                     }
                     AudioCommand::RegisterStopDivisionMap(map) => {
                         *stop_to_division_clone.write() = map;
+                        // Kasten van het vorige orgel weg; het nieuwe orgel
+                        // registreert de zijne hierna opnieuw.
+                        pipe_enclosures = Arc::new(HashMap::new());
+                        bus_ouder = std::array::from_fn(|i| i);
+                        n_enclosure_buses = 0;
+                        enclosure_bus_base = 0;
                         // Reset all division gains to 1.0 (fully open) — inclusief
                         // de gesmoothede stand en de zwelfilters (die bleven anders
                         // op de cutoff van het vórige orgel staan: doffe divisie).
@@ -5160,6 +5327,18 @@ fn run_audio_thread(
                         *output_channels_clone.write() = vec![Vec::new(); 32];
                         *ccis_enabled_clone.write() = vec![false; 32];
                         info!("Registered stop→division map ({} entries); gains, tremulant, routing + C/Cis reset", stop_to_division_clone.read().len());
+                    }
+                    AudioCommand::RegisterPipeEnclosures { kaart, ouder } => {
+                        let n_div = stop_to_division_clone.read().values().map(|&d| d as usize + 1).max().unwrap_or(0);
+                        n_enclosure_buses = ouder.len().min(32usize.saturating_sub(n_div));
+                        enclosure_bus_base = n_div;
+                        bus_ouder = std::array::from_fn(|i| i);
+                        for (slot, &d) in ouder.iter().enumerate().take(n_enclosure_buses) {
+                            bus_ouder[n_div + slot] = (d as usize).min(31);
+                        }
+                        pipe_enclosures = if n_enclosure_buses > 0 { kaart } else { Arc::new(HashMap::new()) };
+                        info!("Zwelkasten per rank: {} kast(en) op bussen {}..{}, {} pijpsleutels",
+                              n_enclosure_buses, enclosure_bus_base, enclosure_bus_base + n_enclosure_buses, pipe_enclosures.len());
                     }
                     AudioCommand::SetTemperament { note_offsets, fine_tune, retune } => {
                         let mut ratios = [0.0f64; 12];
@@ -5282,6 +5461,7 @@ fn run_audio_thread(
                         // Nieuwe laad-generatie (zie LoadSamples).
                         load_generation += 1;
                         inflight_loads.clear();
+                        pending_loads.clear();
                         missing_sample_warned.clear();
                         // Vers orgel = verse limiter-staat (geen ingehouden gain
                         // van een luide passage op het vorige orgel).
@@ -5417,8 +5597,68 @@ fn run_audio_thread(
                 // voice per callback (~6 ms), dus honderden malen minder vaak.
                 // Voicing/temperament-wijzigingen worden zo de volgende callback
                 // (onhoorbaar snel) opgepakt — live bijregelen blijft dus werken.
+                //
+                // Laadverzoeken doorzetten (0.8.92): `gewenst` is de stand van
+                // de vorige callback. Vervallen verzoeken (stem weg) eruit,
+                // verse verzoeken (nog zonder stand) één ronde laten staan,
+                // sorteren op resterende startbuffer en zoveel doorsturen als
+                // het werkerskanaal aankan — geen alloc, geen wachten.
+                if !pending_loads.is_empty() {
+                    pending_loads.retain_mut(|(dl, req)| match gewenst.get(&req.0) {
+                        Some(&rest) => { *dl = rest; true }
+                        None if *dl == LOAD_DEADLINE_VERS => { *dl = LOAD_DEADLINE_VERS / 2.0; true }
+                        None => { inflight_loads.remove(&req.0); false }
+                    });
+                    pending_loads.make_contiguous().sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+                    while let Some((dl, req)) = pending_loads.pop_front() {
+                        if let Err(e) = load_tx_clone.try_send(req) {
+                            pending_loads.push_front((dl, e.into_inner()));
+                            break;
+                        }
+                    }
+                }
+                gewenst.clear();
+                let mut herhaal_budget = 8usize;
                 for voice in voices_lock.iter_mut() {
+                    if let Some(rest) = voice.preload_rest_frames() {
+                        let e = gewenst.entry((voice.stop_id, voice.pipe_num)).or_insert(f64::INFINITY);
+                        if rest < *e { *e = rest; }
+                    }
                     voice.c_div = stop_div_map.get(&voice.stop_id).copied().unwrap_or(0) as usize;
+                    // Mengbus (0.8.92): kastbus wanneer de pijp (ook haar
+                    // release- en tremulantlaag: release-bits gestript) in
+                    // een zwelkast uit de akoestische configuratie zit.
+                    voice.c_bus = if n_enclosure_buses == 0 { voice.c_div } else {
+                        match pipe_enclosures.get(&(voice.stop_id, voice.pipe_num & !RELEASE_KEY_MASK)) {
+                            Some(&slot) if (slot as usize) < n_enclosure_buses => (enclosure_bus_base + slot as usize).min(31),
+                            _ => voice.c_div,
+                        }
+                    };
+                    // Laadverzoek dat eerder niet in de wachtrij paste (vol bij
+                    // een tutti) alsnog insturen — hooguit 8 per callback (0.8.92).
+                    // Tot 0.8.91 bleef zo'n stem voorgoed op zijn startbuffer
+                    // hangen zolang er geen nieuwe NoteOn op die pijp kwam.
+                    if herhaal_budget > 0 {
+                        if let Some(path) = voice.needs_background_load() {
+                            let key = (voice.stop_id, voice.pipe_num);
+                            if inflight_loads.contains(&key) {
+                                voice.mark_load_requested();
+                            } else {
+                                let odf_lp = odf_loops_clone.read().get(&path).copied();
+                                if stuur_laadverzoek(&mut pending_loads, (key, path, sample_rate, load_generation, odf_lp, std::time::Instant::now())) {
+                                    inflight_loads.insert(key);
+                                    voice.mark_load_requested();
+                                    herhaal_budget -= 1;
+                                    LOAD_RETRIES.fetch_add(1, Ordering::Relaxed);
+                                } else {
+                                    // Wachtrij vol: deze callback niet verder
+                                    // proberen (anders één try_send per stem per
+                                    // callback — bij 900 stemmen ~90 000/s).
+                                    herhaal_budget = 0;
+                                }
+                            }
+                        }
+                    }
                     // Gewogen windverbruik (0.7.51): alleen klinkende speelstemmen
                     // trekken wind. Release-staarten zijn one_shot met
                     // releasing=false tot het einde van de opname: die telden
@@ -5740,7 +5980,7 @@ fn run_audio_thread(
                     reduceer_deeltabellen(
                         &mut blk_div_l, &mut blk_div_r,
                         &blk_part_l, &blk_part_r,
-                        echte_stukken, n_real_divs.clamp(1, 32), bn,
+                        echte_stukken, (n_real_divs + n_enclosure_buses).clamp(1, 32), bn,
                     );
                     ns_pass[3] += t_pas.elapsed().as_nanos();
 
@@ -5773,6 +6013,8 @@ fn run_audio_thread(
                             // Kast (vrijwel) open → filter overslaan, maar wel
                             // 'primen' zodat het zonder sprong invalt zodra de
                             // trede weer sluit.
+                            // Kastbus: routing en wind van de ouderdivisie (0.8.92).
+                            let pidx = bus_ouder[idx];
                             let (lf, rf) = match swell_flt.get_mut(idx) {
                                 Some((fl, fr)) if swell_bypass[idx] => {
                                     fl.prime(l_raw);
@@ -5788,7 +6030,7 @@ fn run_audio_thread(
                             // divisie; bij volle druk overgeslagen maar geprimed,
                             // zodat het zonder sprong invalt.
                             let (lf, rf) = {
-                                let k = wind_tilt[idx];
+                                let k = wind_tilt[pidx];
                                 let (fl, fr) = &mut wind_flt[idx];
                                 if k <= 0.0 {
                                     fl.prime(lf);
@@ -5808,7 +6050,7 @@ fn run_audio_thread(
 
                             // Route naar kanalen: opeenvolgende kanalen vormen (L,R)-paren; een los
                             // laatste kanaal krijgt mono. Lege lijst = standaard voorste paar (0/1).
-                            match out_chans_lock.get(idx) {
+                            match out_chans_lock.get(pidx) {
                                 Some(list) if !list.is_empty() => {
                                     let mut i = 0;
                                     let mut routed = false;
@@ -6205,6 +6447,7 @@ fn run_audio_thread(
     // Laatst gemelde stand van de preload-rand-teller (release-staarten die op
     // de preload afliepen omdat de volledige WAV nog niet geladen was).
     let mut preload_edge_prev = RELEASE_PRELOAD_EDGE_HITS.load(Ordering::Relaxed);
+    let mut underrun_prev = PRELOAD_UNDERRUNS.load(Ordering::Relaxed);
     // Idem voor de tremulantwissels: de callback telt, deze thread meldt.
     let mut trem_switch_prev = TREMULANT_SWITCHES.load(Ordering::Relaxed);
     while running.load(Ordering::Relaxed) {
@@ -6350,6 +6593,14 @@ fn run_audio_thread(
                 info!("Release-staarten afgekapt op de preload-rand (volledige sample nog niet geladen): +{} (totaal {})",
                       hits - preload_edge_prev, hits);
                 preload_edge_prev = hits;
+            }
+            // Startbuffer-tekorten (0.8.92): idem, met de laderstand erbij.
+            let under = PRELOAD_UNDERRUNS.load(Ordering::Relaxed);
+            if under > underrun_prev {
+                let st = loader_stats();
+                warn!("Startbuffer-tekorten: +{} (totaal {}); lader: {} verzoeken, {} klaar, {} wachtrij vol, {} herhaald, latentie gem. {:.0} ms / max {:.0} ms",
+                      under - underrun_prev, under, st.requests, st.done, st.queue_full, st.retries, st.latency_avg_ms, st.latency_max_ms);
+                underrun_prev = under;
             }
             // Tremulantwissels: idem — geteld in de callback, hier gemeld.
             let trem_hits = TREMULANT_SWITCHES.load(Ordering::Relaxed);

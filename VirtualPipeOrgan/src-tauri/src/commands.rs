@@ -121,6 +121,9 @@ pub struct OrganInfoDto {
     /// geen toetsmechaniek, dan verbergt de UI het vinkje.
     #[serde(default)]
     pub key_click_count: usize,
+    /// Akoestische configuratie (0.8.92); None = het orgel heeft er geen.
+    #[serde(default)]
+    pub acoustics: Option<crate::acoustics::AcousticsSummaryDto>,
 }
 
 /// DTO voor één doorlopend achtergrondgeluid uit de sampleset (0.7.96).
@@ -474,6 +477,20 @@ pub fn set_stereo_samples(state: State<AppState>, on: bool) -> Result<(), String
     Ok(())
 }
 
+/// Startbuffer per opname in ms (0.8.92); actief bij de volgende orgel-load.
+#[tauri::command]
+pub fn get_preload_ms() -> u32 { crate::audio::preload_ms() }
+
+#[tauri::command]
+pub fn set_preload_ms(state: State<AppState>, ms: u32) -> Result<u32, String> {
+    crate::audio::set_preload_ms(ms);
+    let mut prefs = crate::state::load_audio_prefs(&state.app_data_dir);
+    prefs.preload_ms = Some(crate::audio::preload_ms());
+    crate::state::save_audio_prefs(&state.app_data_dir, &prefs);
+    info!("Startbuffer per opname: {} ms (actief na herladen van het orgel)", crate::audio::preload_ms());
+    Ok(crate::audio::preload_ms())
+}
+
 // ============ Gestapelde ranks en microfoonperspectieven (0.7.38) ============
 
 use crate::state::{PerspectiveRuntime, RankSummary, RankLayerSummary};
@@ -607,7 +624,13 @@ fn fysiek_geheugen_bytes() -> Option<u64> { None }
 /// meerdere buffers: attack, tot drie releases en de tremulantlaag. Op een
 /// surround-set van 4146 pijpen waren dat 20 168 buffers = 15,4 GB — ruim
 /// vier keer het aantal pijpen. De rem rekent daarom in buffers.
-const PRELOAD_BYTES_PER_BUFFER: u64 = 790_000;
+const PRELOAD_BYTES_PER_BUFFER_2000MS: u64 = 790_000;
+
+/// Idem, geschaald naar de ingestelde startbuffer (0.8.92), met een vaste
+/// ondergrens voor header en boekhouding per buffer.
+fn preload_bytes_per_buffer() -> u64 {
+    (PRELOAD_BYTES_PER_BUFFER_2000MS * crate::audio::preload_ms() as u64 / 2000).max(40_000)
+}
 
 /// Aantal preload-buffers per perspectief-label: per pijp 1 (attack) +
 /// releases + tremulantlaag (+ diens releases). Zelfde telling als de
@@ -642,7 +665,7 @@ fn rem_op_geheugen(plan: &mut [PerspectiveRuntime], heeft_opslag: bool, buffers:
     if heeft_opslag || plan.len() < 2 { return false; }
     let Some(ram) = fysiek_geheugen_bytes() else { return false };
     let schatting: u64 = plan.iter().filter(|p| p.enabled)
-        .map(|p| buffers.get(&p.name).copied().unwrap_or(p.pipe_count) as u64 * PRELOAD_BYTES_PER_BUFFER)
+        .map(|p| buffers.get(&p.name).copied().unwrap_or(p.pipe_count) as u64 * preload_bytes_per_buffer())
         .sum();
     if schatting * 2 <= ram { return false; }
     // Dichtstbijzijnde positie op de as houden; de rest uit.
@@ -2885,7 +2908,7 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
     // als de custom sample-mappen, do_load_samples_from_directory). We laden NIET
     // eager elke sample volledig in RAM — dat liet grote GrandOrgue-sets vastlopen
     // (honderden lange samples ineens → geheugendruk/swapping → app onresponsief).
-    // In plaats daarvan: alleen de attack (~PRELOAD_SAMPLES frames) per uniek
+    // In plaats daarvan: alleen de attack (de ingestelde startbuffer, audio::preload_ms) per uniek
     // bestand inlezen voor directe respons; de audio-thread streamt de volledige
     // sample op de achtergrond zodra een noot gespeeld wordt.
     // Hertemper-indicator voor de DTO: aantal pijpen met plausibele gemeten
@@ -2907,8 +2930,8 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
         use std::path::PathBuf;
         use std::sync::Arc;
         use rayon::prelude::*;
-        use vpo_sampler::{load_audio_preload, load_wav_preload_segment, PipeDef, PreloadBuffer, PreloadSegment};
-        use crate::audio::PRELOAD_SAMPLES;
+        use vpo_sampler::{load_audio_preload_ms, load_wav_preload_segment_ms, PipeDef, PreloadBuffer, PreloadSegment};
+        let preload_ms = crate::audio::preload_ms();
 
         /// Welke uitsnede van een bestand geladen moet worden — attacks en
         /// release-segmenten van hetzélfde bestand zijn verschillende buffers.
@@ -3306,10 +3329,10 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
                     emit_load_progress(state, n, progress_total, "Samples laden");
                 }
                 let result = match seg {
-                    SegKey::Attack => load_audio_preload(p, PRELOAD_SAMPLES),
-                    SegKey::Release { cue_override, require_cue } => load_wav_preload_segment(
+                    SegKey::Attack => load_audio_preload_ms(p, preload_ms),
+                    SegKey::Release { cue_override, require_cue } => load_wav_preload_segment_ms(
                         p,
-                        PRELOAD_SAMPLES,
+                        preload_ms,
                         PreloadSegment::Release { cue_override: *cue_override, require_cue: *require_cue },
                     ),
                 };
@@ -3657,9 +3680,16 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
     // en `location` is voortaan de PLAATS (ChurchAddress) i.p.v. RecordingDetails.
     let (display_name, display_builder, display_location) =
         display_identity(odf_path, &definition.organ);
+    // Akoestische configuratie (0.8.92): optioneel JM-ACOUSTICS.json naast de
+    // definitie; gevalideerd tegen de geladen stops/pijpen.
+    let odf_stop_lagen: std::collections::HashMap<u32, Vec<usize>> = definition.stops.iter()
+        .map(|s| (s.id, s.all_layers().map(|(_, _, p)| p.len()).collect()))
+        .collect();
+    let (acoustics_cfg, acoustics_dto) = crate::acoustics::laad_voor_odf(std::path::Path::new(path), &odf_stop_lagen);
     let organ_info = OrganInfoDto {
         id: path.to_string(),
         name: display_name,
+        acoustics: acoustics_dto,
         builder: display_builder,
         location: display_location,
         year: if definition.organ.organ_build_date.is_empty() {
@@ -3746,7 +3776,16 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
 
     // Build stop→division map and register with audio thread
     let stop_div_map = build_stop_division_map(&organ_info.divisions);
+    // Zwelkasten per rank (0.8.92): ná de divisiekaart (die reset de kasten).
+    let kast_kaart = acoustics_cfg.as_ref().map(|c| crate::acoustics::bouw_engine_kaart(c, &stop_div_map));
     state.send_audio_command(AudioCommand::RegisterStopDivisionMap(stop_div_map));
+    *state.acoustics.write() = acoustics_cfg.map(std::sync::Arc::new);
+    if let Some(k) = kast_kaart {
+        if !k.names.is_empty() {
+            info!("Zwelkasten uit de akoestische configuratie: {}", k.names.join(", "));
+        }
+        state.send_audio_command(AudioCommand::RegisterPipeEnclosures { kaart: std::sync::Arc::new(k.pipe_slots), ouder: k.parent_division });
+    }
     let (wind_profielen, wind_pleno) = build_stop_wind_profiles(&organ_info.divisions);
     state.send_audio_command(AudioCommand::RegisterStopWindProfiles(std::sync::Arc::new(wind_profielen), wind_pleno));
     state.reset_division_gains(organ_info.divisions.len());
@@ -3947,6 +3986,7 @@ fn reset_organ_scoped_state(state: &AppState) {
         *state.swell_last_stash.write() = prev_id.filter(|_| !stash.is_empty()).map(|id| (id, stash));
     }
     state.set_swell_bindings_replace(Vec::new());
+    *state.acoustics.write() = None;
     *state.crescendo_binding.write() = None;
     // Crescendo-matrix + aan/uit zijn per orgel (stop-IDs verschillen); zonder
     // deze reset duwde een pedaalbeweging in het venster tussen wissel en
@@ -7878,7 +7918,9 @@ pub fn set_num_wind_groups(state: State<AppState>, count: u8) -> Result<(), Stri
 pub fn set_swell_config(state: State<AppState>, division: String, min_db: f32, filter_cutoff: f32) -> Result<(), String> {
     let organ = state.loaded_organ_info.read();
     if let Some(ref o) = *organ {
-        if let Some(idx) = o.divisions.iter().position(|d| d.name == division) {
+        if let Some(idx) = o.divisions.iter().position(|d| d.name == division)
+            .or_else(|| crate::acoustics::enclosure_index_from_name(&division, o.acoustics.as_ref()).map(|i| i as usize))
+        {
             let mdb = min_db.clamp(-30.0, -5.0);
             let cutoff = filter_cutoff.clamp(200.0, 5000.0);
             state.send_audio_command(AudioCommand::SetSwellConfig {
@@ -7899,7 +7941,9 @@ pub fn set_swell_config(state: State<AppState>, division: String, min_db: f32, f
 pub fn learn_swell_pedal(state: State<AppState>, division: String) -> Result<Option<SwellBindingDto>, String> {
     let organ = state.loaded_organ_info.read();
     let division_index = match *organ {
-        Some(ref o) => o.divisions.iter().position(|d| d.name == division),
+        // Zwelkast uit de akoestische configuratie (0.8.92): enclosure:<id> → 128 + slot.
+        Some(ref o) => o.divisions.iter().position(|d| d.name == division)
+            .or_else(|| crate::acoustics::enclosure_index_from_name(&division, o.acoustics.as_ref()).map(|i| i as usize)),
         None => None,
     };
     drop(organ);
@@ -8500,8 +8544,8 @@ pub fn do_load_samples_from_directory_locked(state: &AppState, directory: &str) 
     use std::collections::HashMap;
     use std::sync::Arc;
     use rayon::prelude::*;
-    use vpo_sampler::{load_audio_preload, PreloadBuffer};
-    use crate::audio::PRELOAD_SAMPLES;
+    use vpo_sampler::{load_audio_preload_ms, PreloadBuffer};
+    let preload_ms = crate::audio::preload_ms();
 
     let path = Path::new(&directory);
     if !path.exists() {
@@ -8773,7 +8817,7 @@ pub fn do_load_samples_from_directory_locked(state: &AppState, directory: &str) 
             if n % 100 == 0 || n == progress_total {
                 emit_load_progress(state, n, progress_total, "Samples laden");
             }
-            match load_audio_preload(path, PRELOAD_SAMPLES) {
+            match load_audio_preload_ms(path, preload_ms) {
                 Ok(preload) => Some((*key, Arc::new(preload))),
                 Err(e) => {
                     warn!("Failed to preload {:?}: {}", path, e);
@@ -8858,6 +8902,7 @@ pub fn do_load_samples_from_directory_locked(state: &AppState, directory: &str) 
         // via een manifestveld).
         background_sounds: Vec::new(),
         key_click_count: 0,
+        acoustics: None,
     };
 
     // Koppels zoals de sampleset ze levert onthouden: vertrekpunt voor het

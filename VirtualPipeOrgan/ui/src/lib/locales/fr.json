@@ -243,6 +243,8 @@
     "polyphony_load": "Charge du thread audio : {load} % (pic {peak} %)",
     "stereo_samples": "Lire les échantillons stéréo en stéréo",
     "stereo_samples_hint": "Activé : les enregistrements stéréo gardent leur image spatiale (plus de mémoire). Désactivé : mixage mono comme avant.",
+    "preload_ms": "Tampon de départ par enregistrement",
+    "preload_ms_hint": "Quelle part de chaque enregistrement de tuyau est gardée en mémoire au départ. Plus court = beaucoup moins de mémoire et chargement plus rapide ; le reste se charge pendant le jeu. Si les grands accords laissent entendre une brève répétition de l'attaque, choisissez un tampon plus long.",
     "reload_hint": "Prend effet après le rechargement de l'orgue.",
     "channels_per_division": "Sorties",
     "channels_per_division_hint": "Choisissez quelles sorties de la sortie audio actuellement ouverte ({host}) ce clavier utilise — de 1 à toutes. Deux sorties consécutives forment une paire stéréo ; une sortie seule joue en mono. Le nombre suit l'appareil : ASIO expose toutes les sorties du pilote, WASAPI le nombre configuré dans Windows pour cet appareil.",
@@ -1398,7 +1400,25 @@
   "common": {
     "close": "Fermer"
   },
+  "acoustics": {
+    "title": "Configuration acoustique",
+    "summary": "{enclosures} boîtes expressives · {ranks} rangs ({bound} tuyaux liés) · {irs} réponses impulsionnelles · {mix} routes de mixage · {outputs} sorties · {effects} jeux d'effet",
+    "not_active": "Les boîtes expressives par rang sont connectées ; affectez une pédale à chaque boîte dans les réglages des claviers. Les routes de mixage et les bus de sortie ne sont pas encore activés automatiquement ; la définition normale reste maîtresse.",
+    "error": "Configuration non chargée : {error}. L'orgue joue avec la définition normale.",
+    "ir_title": "Réponses impulsionnelles du jeu d'échantillons",
+    "use_ir": "Utiliser comme réverbération",
+    "ir_in_use": "En service",
+    "ir_hint": "Les rôles des canaux de ces enregistrements ne sont pas confirmés : les deux premiers canaux servent de paire stéréo.",
+    "warnings": "Remarques",
+    "enclosures": "Boîtes expressives par rang",
+    "enclosures_hint": "Ces boîtes expressives proviennent de la configuration acoustique du jeu d'échantillons et agissent par rang, indépendamment du clavier. Affectez une pédale à chaque boîte.",
+    "ranks": "rangs",
+    "pipes": "tuyaux"
+  },
   "wizard": {
+    "device": "Appareil",
+    "outputs_device_hint": "Choisissez ici l'appareil pour ce profil et enregistrez-le ; ensuite choisissez les sorties par clavier.",
+    "update_profile": "Mettre à jour le profil",
     "title": "Configurer l’orgue",
     "intro": "Cet orgue est nouveau. En quelques étapes, reliez les claviers, les boîtes expressives et les sorties de votre console. Tout reste modifiable ensuite.",
     "step_keyboards": "Canal MIDI par clavier",
@@ -1408,7 +1428,7 @@
     "step_speakers": "Sorties pour les enceintes",
     "step_headphones": "Sorties pour le casque",
     "outputs_hint": "Choisissez par clavier les sorties de votre interface audio. Le profil doit être actif pour choisir les canaux.",
-    "no_profile": "Ce profil n’existe pas encore. Choisissez d’abord la bonne sortie dans Réglages généraux → Sortie audio, puis enregistrez-la ici comme profil.",
+    "no_profile": "Ce profil n'existe pas encore. Choisissez l'appareil ci-dessus et enregistrez-le comme profil.",
     "save_profile": "Enregistrer la sortie actuelle comme ce profil",
     "activate_profile": "Activer le profil",
     "profile_active": "Profil actif",

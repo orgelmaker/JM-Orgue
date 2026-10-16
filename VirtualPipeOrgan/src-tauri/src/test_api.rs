@@ -479,6 +479,33 @@ fn route_test_only(
             vpo_sampler::set_stereo_loading(on);
             Ok(json!({"stereo_samples": vpo_sampler::stereo_loading()}))
         }
+        // Startbuffer per opname (0.8.92), body {"ms": 200}; geldt bij de
+        // volgende /load_organ. Niet persistent (alleen voor proeven).
+        // Zwelstand zetten (0.8.92, alleen voor proeven): body {"index": 0, "gain": 0.0}.
+        // index ≥ 128 = zwelkast uit de akoestische configuratie (128 + slot).
+        (tiny_http::Method::Post, "/swell") => {
+            let v: serde_json::Value = serde_json::from_str(body).unwrap_or_default();
+            let index = v.get("index").and_then(|x| x.as_u64()).unwrap_or(0) as u8;
+            let gain = v.get("gain").and_then(|x| x.as_f64()).unwrap_or(1.0) as f32;
+            state.set_division_gain(index, gain.clamp(0.0, 1.0));
+            Ok(json!({"index": index, "gain": gain}))
+        }
+        // Motor aan/uit (0.8.92, proeven): body {"on": true}. Zonder motor
+        // negeert de engine NoteOns (0.8.81), en in een vers proces start hij uit.
+        (tiny_http::Method::Post, "/motor") => {
+            let v: serde_json::Value = serde_json::from_str(body).unwrap_or_default();
+            let on = v.get("on").and_then(|x| x.as_bool()).unwrap_or(true);
+            *state.blower_active.write() = on;
+            state.send_audio_command(crate::audio::AudioCommand::SetBlowerActive(on));
+            Ok(json!({"motor": on}))
+        }
+        (tiny_http::Method::Post, "/preload_ms") => {
+            let v: serde_json::Value = serde_json::from_str(body).unwrap_or_default();
+            if let Some(ms) = v.get("ms").and_then(|x| x.as_u64()) {
+                crate::audio::set_preload_ms(ms as u32);
+            }
+            Ok(json!({"preload_ms": crate::audio::preload_ms()}))
+        }
         (tiny_http::Method::Post, "/record/start") => handle_record_start(state, body),
         (tiny_http::Method::Post, "/record/stop") => handle_record_stop(state),
         // MIDI-opname (events) — los van de MP3-opname hierboven. Voor self-testing van
@@ -696,6 +723,8 @@ fn handle_status(state: &AppState) -> Value {
         "rt_backlog_peak": crate::state::rt_backlog_piek(),
         "rt_noteon_weggelaten": crate::state::rt_noteon_weggelaten(),
         "stereo_samples": vpo_sampler::stereo_loading(),
+        // Achtergrondlader (0.8.92): startbuffer, tekorten en latenties.
+        "loader": serde_json::to_value(crate::audio::loader_stats()).unwrap_or(serde_json::Value::Null),
         "peak_left": peaks.0,
         "peak_right": peaks.1,
         "organ_loaded": organ.is_some(),
@@ -2242,6 +2271,7 @@ mod tests {
             release_pipes: 0,
             background_sounds: Vec::new(),
             key_click_count: 0,
+            acoustics: None,
         }
     }
 

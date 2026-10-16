@@ -243,6 +243,8 @@
     "polyphony_load": "Carico del thread audio: {load}% (picco {peak}%)",
     "stereo_samples": "Riproduci in stereo i campioni stereo",
     "stereo_samples_hint": "Attivo: le riprese stereo mantengono la loro immagine spaziale (più memoria). Disattivo: mix in mono come prima.",
+    "preload_ms": "Buffer iniziale per registrazione",
+    "preload_ms_hint": "Quanta parte di ogni registrazione di canna resta in memoria in anticipo. Più breve = molta meno memoria e caricamento più rapido; il resto viene caricato mentre suoni. Se negli accordi grandi senti una breve ripetizione dell'attacco, scegli un buffer più lungo.",
     "reload_hint": "Diventa attivo dopo aver ricaricato l'organo.",
     "channels_per_division": "Uscite",
     "channels_per_division_hint": "Scegli quali uscite dell'uscita audio ora aperta ({host}) usa questo manuale — da 1 fino a tutte. Due uscite consecutive formano una coppia stereo; una singola uscita suona in mono. Il numero segue il dispositivo: ASIO offre tutte le uscite del driver, WASAPI il numero che Windows ha configurato per questo dispositivo.",
@@ -1398,7 +1400,25 @@
   "common": {
     "close": "Chiudi"
   },
+  "acoustics": {
+    "title": "Configurazione acustica",
+    "summary": "{enclosures} casse espressive · {ranks} file ({bound} canne collegate) · {irs} risposte all'impulso · {mix} rotte di missaggio · {outputs} uscite · {effects} registri d'effetto",
+    "not_active": "Le casse espressive per fila sono collegate; assegna un pedale a ogni cassa nelle impostazioni delle tastiere. Rotte di missaggio e bus di uscita non vengono ancora attivati automaticamente; la definizione normale resta al comando.",
+    "error": "Configurazione non caricata: {error}. L'organo suona con la definizione normale.",
+    "ir_title": "Risposte all'impulso del set",
+    "use_ir": "Usa come riverbero",
+    "ir_in_use": "In uso",
+    "ir_hint": "I ruoli dei canali di queste registrazioni non sono confermati: i primi due canali vengono usati come coppia stereo.",
+    "warnings": "Note",
+    "enclosures": "Casse espressive per fila",
+    "enclosures_hint": "Queste casse espressive provengono dalla configurazione acustica del set e agiscono per fila, indipendentemente dalla tastiera. Assegna un pedale a ogni cassa.",
+    "ranks": "file",
+    "pipes": "canne"
+  },
   "wizard": {
+    "device": "Dispositivo",
+    "outputs_device_hint": "Scegli qui il dispositivo per questo profilo e salvalo; poi scegli le uscite per tastiera.",
+    "update_profile": "Aggiorna profilo",
     "title": "Configura l’organo",
     "intro": "Questo organo è nuovo. In pochi passaggi colleghi tastiere, casse espressive e uscite della tua consolle. Tutto può essere modificato in seguito.",
     "step_keyboards": "Canale MIDI per tastiera",
@@ -1408,7 +1428,7 @@
     "step_speakers": "Uscite per gli altoparlanti",
     "step_headphones": "Uscite per le cuffie",
     "outputs_hint": "Scegli per tastiera le uscite della tua interfaccia audio. Il profilo deve essere attivo per scegliere i canali.",
-    "no_profile": "Questo profilo non esiste ancora. Scegli prima l’uscita giusta in Impostazioni generali → Uscita audio e salvala qui come profilo.",
+    "no_profile": "Questo profilo non esiste ancora. Scegli il dispositivo qui sopra e salvalo come profilo.",
     "save_profile": "Salva l’uscita attuale come questo profilo",
     "activate_profile": "Attiva profilo",
     "profile_active": "Profilo attivo",
