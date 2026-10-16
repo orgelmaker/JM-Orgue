@@ -5,7 +5,9 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
-## [0.8.92] - 2026-10-16
+## [0.8.93] - 2026-10-16
+
+(0.8.92 waren lokale testbouwen; dit is de eerste uitgebrachte versie met onderstaande wijzigingen.)
 
 ### Instelbare startbuffer en snellere achtergrondlader
 - De startbuffer per opname (het stuk van elke pijpopname dat vooraf in
@@ -53,8 +55,8 @@ versies volgen [Semantic Versioning](https://semver.org/).
 ### Akoestische configuratie (JM-ACOUSTICS.json)
 - Een `.organ` kan via de sectie `[JMOrgueAcoustics]` naar een
   `JM-ACOUSTICS.json` naast de definitie verwijzen (neutraal contract
-  `jm-orgue.acoustics`, schema 1; de oudere identificatie
-  `jm-orgue.swop-acoustics` wordt als hetzelfde model gelezen). Het
+  `jm-orgue.acoustics`, schema 1; een oudere exporter-identificatie wordt
+  als hetzelfde model gelezen). Het
   bestand wordt gelezen en gevalideerd (schema, unieke ID's, verwijzingen,
   relatieve paden binnen de orgelmap, bestandsgrootte, pijpbindingen tegen
   de geladen definitie); bij een fout speelt het orgel gewoon met de

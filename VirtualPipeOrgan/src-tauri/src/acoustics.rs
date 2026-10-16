@@ -5,8 +5,8 @@
 //! effectschakelaars met aparte aan-/uitopnamen.
 //!
 //! Neutraal contract: `format = "jm-orgue.acoustics"`, `schema_version = 1`.
-//! De oudere identificatie `"jm-orgue.swop-acoustics"` (exporter 1.3/1.4)
-//! wordt als hetzelfde model gelezen (adapter). Hier: lezen, valideren en
+//! Een oudere exporter-identificatie wordt via een adapter als hetzelfde
+//! model gelezen. Hier: lezen, valideren en
 //! samenvatten. Geen DSP-activering zonder bekend modelprofiel: de
 //! zwelkasten per rank worden wél aangesloten (kastidentiteit op de
 //! pijpbinding, eigen trede per kast), de ruimtelijke routes nog niet.
@@ -22,7 +22,7 @@ use tracing::{info, warn};
 /// Bovengrens voor het JSON-bestand (plan §2).
 pub const MAX_JSON_BYTES: u64 = 64 * 1024 * 1024;
 pub const FORMAT_NEUTRAL: &str = "jm-orgue.acoustics";
-pub const FORMAT_LEGACY_SWOP: &str = "jm-orgue.swop-acoustics";
+pub const FORMAT_LEGACY: &str = "jm-orgue.swop-acoustics";
 pub const SCHEMA_VERSION: u32 = 1;
 /// Zwelkast-indices in `SetDivisionGain`/`SwellBinding` vanaf hier zijn
 /// kastslots (index − 128) in plaats van divisies. De engine vertaalt ze naar
@@ -336,7 +336,7 @@ fn check_ref(waarde: &Option<String>, bekend: &HashSet<String>, wat: &str, error
 pub fn valideer(cfg: &AcousticsConfig, odf_stops: &HashMap<u32, Vec<usize>>) -> Validatie {
     let mut v = Validatie::default();
     let e = &mut v.errors;
-    if cfg.format != FORMAT_NEUTRAL && cfg.format != FORMAT_LEGACY_SWOP {
+    if cfg.format != FORMAT_NEUTRAL && cfg.format != FORMAT_LEGACY {
         e.push(format!("onbekend formaat '{}' (verwacht {})", cfg.format, FORMAT_NEUTRAL));
     }
     if cfg.schema_version != SCHEMA_VERSION {
@@ -591,7 +591,7 @@ mod tests {
     use super::*;
 
     fn basis_cfg() -> AcousticsConfig {
-        let mut c = AcousticsConfig { format: FORMAT_LEGACY_SWOP.into(), schema_version: 1, ..Default::default() };
+        let mut c = AcousticsConfig { format: FORMAT_LEGACY.into(), schema_version: 1, ..Default::default() };
         c.enclosures.push(Enclosure { id: "14000".into(), name: "Pos".into(), ..Default::default() });
         c.ranks.push(Rank { id: "11000".into(), name: "GO - Principal 16".into(), enclosure_id: None, ..Default::default() });
         c.ranks.push(Rank { id: "11001".into(), name: "Pos - Bourdon 8".into(), enclosure_id: Some("14000".into()), ..Default::default() });
@@ -605,7 +605,7 @@ mod tests {
     fn sectie_uit_odf_wordt_gelezen() {
         let txt = "[Organ]\nChurchName=X\n\n[JMOrgueAcoustics]\nFormat=jm-orgue.swop-acoustics\nSchemaVersion=1\nConfigurationFile=JM-ACOUSTICS.json\nActivation=ExportOnly\n";
         let r = AcousticsRef::from_odf_text(txt).unwrap();
-        assert_eq!(r.format, FORMAT_LEGACY_SWOP);
+        assert_eq!(r.format, FORMAT_LEGACY);
         assert_eq!(r.schema_version, 1);
         assert_eq!(r.configuration_file, "JM-ACOUSTICS.json");
         assert!(AcousticsRef::from_odf_text("[Organ]\nChurchName=X\n").is_none());
@@ -658,11 +658,12 @@ mod tests {
         assert_eq!(k.pipe_slots.get(&(2, 2)), Some(&0));
     }
 
-    /// Echte exporter-uitvoer (voorbeeld bij de SWOP-importer), alleen als
-    /// het bestand op deze pc staat: moet zonder fouten inlezen en valideren.
+    /// Echte exporter-uitvoer: pad in de omgevingsvariabele
+    /// JM_ACOUSTICS_VOORBEELD; zonder die variabele slaat de test over.
     #[test]
-    fn voorbeeldexport_van_de_importer_wordt_geaccepteerd() {
-        let pad = std::path::Path::new(r"C:\Users\orgel\Sweelinq\Organs\SWOP-Importer\Ontwikkelaar\voorbeeld-SW028-JM-ACOUSTICS.json");
+    fn voorbeeldexport_van_de_exporter_wordt_geaccepteerd() {
+        let Ok(pad) = std::env::var("JM_ACOUSTICS_VOORBEELD") else { return };
+        let pad = std::path::Path::new(&pad);
         let Ok(bytes) = std::fs::read(pad) else { return };
         let mut cfg: AcousticsConfig = serde_json::from_slice(&bytes).expect("voorbeeld moet inlezen");
         cfg.organ_dir = pad.parent().unwrap().to_path_buf();
