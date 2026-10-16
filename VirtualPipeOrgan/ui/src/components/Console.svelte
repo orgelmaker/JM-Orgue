@@ -8746,7 +8746,17 @@
                 <button class="btn btn-secondary btn-sm" on:click={() => learnSwellPedal(d.name)} disabled={!midiConnected}>{$t('wizard.learn')}</button>
               </div>
             {/each}
-            {#if wizardDivisies.filter(d => d.has_swell).length === 0}
+            <!-- Zwelkasten per rank uit de akoestische configuratie (0.8.92):
+                 een geconverteerde set heeft geen klassieke kast per klavier. -->
+            {#each (organInfo?.acoustics?.valid ? organInfo.acoustics.enclosures : []) as enc (enc.id)}
+              <div class="wizard-rij">
+                <span class="wizard-naam">{enc.name}</span>
+                <span class="wizard-status">{swellBindings[enc.swell_name] ? $t('wizard.learned') + ' (CC' + swellBindings[enc.swell_name].cc_num + ')' : $t('wizard.not_learned')}</span>
+                <button class="btn btn-secondary btn-sm" class:learning={learningSwellDivision === enc.swell_name}
+                        on:click={() => learnSwellPedal(enc.swell_name)} disabled={!midiConnected || learningSwellDivision !== null}>{$t('wizard.learn')}</button>
+              </div>
+            {/each}
+            {#if wizardDivisies.filter(d => d.has_swell).length === 0 && !(organInfo?.acoustics?.valid && organInfo.acoustics.enclosures?.length)}
               <p class="wizard-hint">{$t('wizard.no_swell')}</p>
             {/if}
             <div class="wizard-rij">
