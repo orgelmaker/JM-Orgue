@@ -5,7 +5,7 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
-## [Onuitgebracht]
+## [0.8.95] - 2026-10-17
 
 ### MP3-opname met bijgeluiden
 - De MP3-opname bevat nu ook de motor, het omgevingsgeluid, de
