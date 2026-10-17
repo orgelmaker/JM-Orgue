@@ -85,8 +85,8 @@
   }
 
   // ===== Speeltafelmodus (0.7.61) =====
-  // Volledig scherm met alleen de registers en de setzerbalk, zoals Sweelinq
-  // dat heeft. App is eigenaar omdat App ook het venster, Escape en de
+  // Volledig scherm met alleen de registers en de setzerbalk.
+  // App is eigenaar omdat App ook het venster, Escape en de
   // vensterstand beheert; Console krijgt beide standen als prop.
   //   speeltafelModus  venster op volledig scherm, balken weg
   //   balkenZichtbaar  daarbinnen tijdelijk hoofdbalk + werkbalk als laag erover

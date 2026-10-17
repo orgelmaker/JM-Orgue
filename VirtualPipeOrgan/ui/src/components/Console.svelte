@@ -1169,7 +1169,7 @@
   let eqPreampAutoWaarde = 0;
   // Sterkte 0–100 % (0.7.80): schaalt de banden vóór het sturen; de preset blijft.
   let eqStrength = 100;
-  // Eenheid van de steilheid: 'oct' (bandbreedte, zoals Sweelinq) of 'q' (AutoEq).
+  // Eenheid van de steilheid: 'oct' (bandbreedte in octaven) of 'q' (AutoEq).
   let eqBwUnit = 'oct';
   try { if (localStorage.getItem('jm-orgue-eq-bw-unit') === 'q') eqBwUnit = 'q'; } catch (e) {}
   function setEqBwUnit(u) { eqBwUnit = u === 'q' ? 'q' : 'oct'; try { localStorage.setItem('jm-orgue-eq-bw-unit', eqBwUnit); } catch (e) {} }
@@ -2004,7 +2004,7 @@
   }
   $: if (organInfo?.id) haalLaadAllePosities();
 
-  // Luisterpositie-schuif (0.7.95, Sweelinq-stijl): één schuif die de geladen
+  // Luisterpositie-schuif (0.7.95): één schuif die de geladen
   // opnameposities overblendt. 0 = bij het orgel, 1 = achter in de kerk.
   // Wordt per orgel bewaard. De as (de volgorde van posities op de schuif)
   // komt van de backend en is dry → close → front → rear → diffuse → micN.

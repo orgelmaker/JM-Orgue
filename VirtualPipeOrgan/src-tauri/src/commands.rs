@@ -935,7 +935,7 @@ pub fn get_load_all_perspectives(state: State<AppState>) -> bool {
 }
 
 // ========================================================================
-// Luisterpositie-schuif (0.7.95, Sweelinq-stijl)
+// Luisterpositie-schuif (0.7.95)
 // ========================================================================
 
 /// Canonieke volgorde-sleutel voor een opnamepositie-label op de luisteras:
@@ -7117,7 +7117,7 @@ pub fn set_active_output_profile(state: State<AppState>, kind: Option<String>) -
     set_active_output_profile_inner(&state, kind)
 }
 
-/// Leest een presetbestand (AutoEq/Equalizer APO-tekst, Sweelinq .swes of
+/// Leest een presetbestand (AutoEq/Equalizer APO-tekst, .swes-preset of
 /// eigen JSON) als bytes voor de parser in de frontend; plafond 1 MB.
 #[tauri::command]
 pub fn read_eq_file(path: String) -> Result<Vec<u8>, String> {
@@ -10870,7 +10870,7 @@ mod perspective_plan_tests {
 
     #[test]
     fn zonder_opslag_alle_labels_aan() {
-        // Vanaf 0.7.95 (Sweelinq-stijl): zonder opgeslagen keuze staan ALLE
+        // Vanaf 0.7.95: zonder opgeslagen keuze staan ALLE
         // posities standaard aan, zodat de luisterpositie-schuif ze kan mengen.
         // Vóór 0.7.95 stond alleen de primaire positie aan en moest de
         // organist in de instellingen vinkjes bijzetten + herladen.
@@ -10937,7 +10937,7 @@ mod perspective_plan_tests {
             tremulant_pipes: vec![],
         });
         let plan = plan_perspectives_custom(&organ, &[]);
-        // Vanaf 0.7.95: alle posities standaard aan (Sweelinq-stijl).
+        // Vanaf 0.7.95: alle posities standaard aan.
         assert_eq!(plan.iter().map(|p| (p.name.as_str(), p.enabled)).collect::<Vec<_>>(), vec![("Front", true), ("Rear", true)]);
         // Stop zonder posities → geen labels.
         let plain = CustomOrgan::new("Plain");
@@ -11605,7 +11605,7 @@ mod luisterpositie_tests {
     }
 
     #[test]
-    fn as_rang_volgt_sweelinq_route_van_dichtbij_naar_ver() {
+    fn as_rang_volgt_route_van_dichtbij_naar_ver() {
         // De as loopt van bij het orgel (dry/close) via front naar achter (rear/
         // diffuse). Afwijkende labels (`micN`) komen daarna, onbekende achter
         // alles.

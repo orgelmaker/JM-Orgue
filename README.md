@@ -96,9 +96,9 @@ JM-Orgue leest drie soorten:
 - **Hauptwerk** (`.Organ_Hauptwerk_xml`) — ook rechtstreeks, inclusief
   microfoonposities, zwelkasten, release-opnamen en tremulant-opnamen.
 
-Gesloten formaten werken niet: Hauptwerks eigen `.hbw`, `.pkg` en `.iwh`, en
-Sweelinqs `.swop`. Zo'n set wordt geweigerd met een melding, niet met een
-orgel zonder geluid.
+Gesloten formaten werken niet, zoals Hauptwerks eigen `.hbw`, `.pkg` en
+`.iwh`. Zo'n set wordt geweigerd met een melding, niet met een orgel zonder
+geluid.
 
 Waar je vrij te gebruiken sets vindt, staat in
 [docs/SAMPLE_SETS.md](VirtualPipeOrgan/docs/SAMPLE_SETS.md) en in de app zelf,

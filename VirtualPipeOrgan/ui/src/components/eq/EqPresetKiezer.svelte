@@ -2,7 +2,7 @@
   // Presetkiezer (0.7.77, eigen presets en exporteren sinds 0.7.80): knop met
   // de huidige presetnaam, een uitklapper met zoekveld, de algemene profielen,
   // de eigen presets en de gemeten hoofdtelefoons (AutoEq, oratory1990), plus
-  // "Importeren…" (AutoEq/Equalizer APO-tekst, Sweelinq .swes, eigen JSON) en
+  // "Importeren…" (AutoEq/Equalizer APO-tekst, .swes-preset, eigen JSON) en
   // "Exporteren…". Meldt `apply` met { id, naam, banden, preamp, bron,
   // melding }, `fout` met een vertaalde tekst, `saveown` met de gekozen naam,
   // `deleteown` met een id en `export` zonder detail. Kent Tauri alleen voor

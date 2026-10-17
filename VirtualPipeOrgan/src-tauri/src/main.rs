@@ -375,7 +375,7 @@ fn main() {
             commands::set_perspective_enabled,
             commands::set_perspective_gain,
             // Luisterpositie-schuif (0.7.95): equal-power crossfade over de
-            // actieve posities, zoals Sweelinq. Zie commands.rs.
+            // actieve posities. Zie commands.rs.
             commands::set_listening_position,
             commands::get_listening_position,
             commands::get_listening_axis,

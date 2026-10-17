@@ -2251,7 +2251,7 @@ Bewust nog niet gedaan (staat in het plan): bij een doorlopend klavier krijgt ee
 
 ### Levende wind: het Hollandse windmodel
 
-Na 0.7.50 luidde de klacht: "ik mis nog iets waardoor je dat Hollandse levendige effect krijgt." Vier onderzoekslenzen (orgelbouw en akoestiek, wat Hauptwerk, Sweelinq en Organteq doen en wat samplesets meegeven, onze eigen code, en de luisteraar), drie onafhankelijke ontwerpen, een jury van drie en een volledigheidscriticus kwamen op hetzelfde uit — en dat is nu gebouwd. Het plan met de goudwaarden staat in `PLAN_windmodel_levend.md`.
+Na 0.7.50 luidde de klacht: "ik mis nog iets waardoor je dat Hollandse levendige effect krijgt." Vier onderzoekslenzen (orgelbouw en akoestiek, wat andere orgelsoftware doet en wat samplesets meegeven, onze eigen code, en de luisteraar), drie onafhankelijke ontwerpen, een jury van drie en een volledigheidscriticus kwamen op hetzelfde uit — en dat is nu gebouwd. Het plan met de goudwaarden staat in `PLAN_windmodel_levend.md`.
 
 **Waar het in zat.** Levende wind is niet dat het hele orgel meezakt (dat deed 0.7.50, en het oor hoort dat als een pitch-bend). Het is dat pijpen op dezelfde wind elkaar iets aandoen:
 
@@ -2344,9 +2344,9 @@ Eén waarschuwing daarbij, uit de meting op deze pc: onder **WASAPI in gedeelde 
 
 ## [0.7.47] - 2026-09-21
 
-### Zeven punten uit de vergelijking met Hauptwerk en Sweelinq
+### Zeven punten uit de vergelijking met andere orgelsoftware
 
-Na het naast elkaar leggen van de editietabel van Hauptwerk en de release notes van Sweelinq stond er een lijstje met wat zij hebben en wij niet. Op één na is dat lijstje nu leeg.
+Na het naast elkaar leggen van wat andere orgelsoftware biedt stond er een lijstje met wat zij hebben en wij niet. Op één na is dat lijstje nu leeg.
 
 **Testsignaal per uitgang.** Wie zes of acht kanalen aansluit, weet daarna nog niet welke stekker in welke kast zit. In Algemene instellingen → Audio staat nu een rij kanaalknoppen: klik er een aan en er komt roze ruis (of een sinus van 440 Hz) uit precies dat kanaal. Nog een keer klikken zet hem uit, en hij gaat vanzelf uit zodra je het scherm verlaat.
 

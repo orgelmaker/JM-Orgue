@@ -9,7 +9,7 @@
 
 ## 🎹 Wat is JM-Orgue?
 
-JM-Orgue is een professionele virtuele pijporgel-applicatie die het opneemt tegen Hauptwerk, Sweelinq, GrandOrgue en Organteq — maar dan **gratis, open en in het Nederlands**.
+JM-Orgue is een professionele virtuele pijporgel-applicatie die het opneemt tegen Hauptwerk, GrandOrgue en Organteq — maar dan **gratis, open en in het Nederlands**.
 
 > **Status: Sneak Preview**
 > De grootste update tot nu toe is in de maak. Release later in 2026.
@@ -85,20 +85,20 @@ JM-Orgue is een professionele virtuele pijporgel-applicatie die het opneemt tege
 
 ## 🆚 Vergelijking met de concurrentie
 
-| Feature | JM-Orgue | Hauptwerk | Sweelinq | GrandOrgue |
-|---------|----------|-----------|----------|------------|
-| Prijs | **Gratis** | $599+ | €11/mnd | Gratis |
-| BLE MIDI direct | ✅ | ❌ | ❌ | ❌ |
-| Algoritmische galm | ✅ | ❌ | ❌ | ❌ |
-| 3-band Parametric EQ | ✅ | ❌ | ❌ | ❌ |
-| Disk streaming | ✅ | ❌ | onbekend | ❌ |
-| MP3 samples | ✅ | ❌ | ❌ | ❌ |
-| Drag & drop registers | ✅ | ❌ | ❌ | ❌ |
-| Tongwerken Af | ✅ | sampleset-afh. | ❌ | ❌ |
-| Sfeer-systeem (thema's) | ✅ | ❌ | ❌ | ❌ |
-| Geen dongle / abo | ✅ | iLok | Abo | ✅ |
-| Nederlands | ✅ | ❌ | ✅ | ❌ |
-| 52 stemmingen | ✅ | ✅ | beperkt | ✅ |
+| Feature | JM-Orgue | Hauptwerk | GrandOrgue |
+|---------|----------|-----------|------------|
+| Prijs | **Gratis** | $599+ | Gratis |
+| BLE MIDI direct | ✅ | ❌ | ❌ |
+| Algoritmische galm | ✅ | ❌ | ❌ |
+| 3-band Parametric EQ | ✅ | ❌ | ❌ |
+| Disk streaming | ✅ | ❌ | ❌ |
+| MP3 samples | ✅ | ❌ | ❌ |
+| Drag & drop registers | ✅ | ❌ | ❌ |
+| Tongwerken Af | ✅ | sampleset-afh. | ❌ |
+| Sfeer-systeem (thema's) | ✅ | ❌ | ❌ |
+| Geen dongle / abo | ✅ | iLok | ✅ |
+| Nederlands | ✅ | ❌ | ❌ |
+| 52 stemmingen | ✅ | ✅ | ✅ |
 
 ## 🚀 Installatie
 

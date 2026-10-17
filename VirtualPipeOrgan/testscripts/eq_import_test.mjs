@@ -1,5 +1,5 @@
 // Controle van de EQ-presetimport (0.7.77): AutoEq/Equalizer APO-tekst,
-// Sweelinq .swes (echt bestand als fixture + zelfgebouwde bytes) en eigen JSON.
+// .swes-preset (echt bestand als fixture + zelfgebouwde bytes) en eigen JSON.
 // Draait in CI (tests.yml) en lokaal: node testscripts/eq_import_test.mjs
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -60,7 +60,7 @@ let gooide = false;
 try { parseParametricEqTxt('hallo'); } catch (e) { gooide = e.message === 'geen_filters'; }
 check('geen filters → geen_filters', gooide);
 
-// Sweelinq .swes: het echte bestand (fixture) …
+// .swes-preset: het echte bestand (fixture) …
 const swes = new Uint8Array(readFileSync(path.join(hier, 'testdata', 'preset_dt770.swes')));
 const s = parseSwes(swes);
 check('swes: 11 peaks', s.banden.length === 11 && s.banden.every((b) => b.band_type === 'peak'), String(s.banden.length));

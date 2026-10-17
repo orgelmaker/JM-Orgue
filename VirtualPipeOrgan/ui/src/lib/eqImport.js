@@ -1,5 +1,5 @@
-// Import van EQ-presets (0.7.77): AutoEq / Equalizer APO-tekst, Sweelinq
-// `.swes` en ons eigen JSON-formaat. Pure functies, zonder DOM of Tauri, zodat
+// Import van EQ-presets (0.7.77): AutoEq / Equalizer APO-tekst, `.swes`-
+// presets en ons eigen JSON-formaat. Pure functies, zonder DOM of Tauri, zodat
 // ze in node te testen zijn (testscripts/eq_import_test.mjs).
 //
 // Alle parsers leveren { banden, preamp, overgeslagen, kanaalregels, aan }:
@@ -80,7 +80,7 @@ export function parseParametricEqTxt(tekst) {
   return { banden, preamp, overgeslagen, kanaalregels, aan: true };
 }
 
-// --- Sweelinq .swes ---------------------------------------------------------
+// --- .swes-preset ----------------------------------------------------------------
 // Protobuf-achtig: herhaald veld 1 (length-delimited) = band { 2: f32
 // frequentie, 3: f32 gain dB, 4: f32 Q, 5: varint aan }, daarna veld 2 varint
 // = EQ aan. Structuur afgeleid uit één voorbeeldbestand; onbekende velden
@@ -165,7 +165,7 @@ export function parseEigenJson(tekst) {
   return { banden, preamp, overgeslagen, kanaalregels: 0, aan: bron.enabled !== false, preampAuto: bron.preamp_auto };
 }
 
-// Naam voor in de knop: bestandsnaam zonder map, extensie en het Sweelinq-
+// Naam voor in de knop: bestandsnaam zonder map, extensie en het
 // voorvoegsel "preset ".
 export function presetNaamUitPad(pad) {
   const base = String(pad || '').split(/[\\/]/).pop() || '';
