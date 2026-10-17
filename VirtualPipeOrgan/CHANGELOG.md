@@ -5,7 +5,7 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
-## [Onuitgebracht]
+## [0.8.96] - 2026-10-17
 
 ### Bijwerkmelding pas als de release klaar is
 - Direct na het publiceren van een nieuwe versie bestaat de release al,
