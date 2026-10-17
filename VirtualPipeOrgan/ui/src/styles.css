@@ -1675,6 +1675,20 @@ input[type="range"]::-webkit-slider-thumb:hover {
   box-shadow: var(--shadow-lg);
   border-color: var(--accent);
 }
+/* Handleiding (0.8.96): rechts in de rij en in het goud van de werkkoppen,
+   zodat hij opvalt tussen de links naar de samplesetmakers; de tekstkleur
+   is die van de werkkoppen, dus leesbaar in elk thema. */
+.library-link.library-link-handleiding {
+  margin-left: auto;
+  background: var(--gold-gradient);
+  border-color: var(--gold-border);
+  color: var(--text-on-division);
+}
+.library-link.library-link-handleiding:hover {
+  filter: brightness(1.06);
+  border-color: var(--gold-border);
+}
+.library-link.library-link-handleiding .library-link-url { color: var(--text-on-division-badge); opacity: 0.75; }
 .library-link-naam { font-weight: 600; font-size: 0.85rem; }
 .library-link-url { font-size: 0.75rem; color: var(--text-muted); }
 .organ-browser-hint {
