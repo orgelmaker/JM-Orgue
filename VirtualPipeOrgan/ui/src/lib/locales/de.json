@@ -24,6 +24,8 @@
   },
   "library": {
     "title": "Orgel-Bibliothek",
+    "manual": "Handbuch",
+    "manual_title": "Das Handbuch (PDF) in Ihrer Sprache öffnen",
     "open_organ_file": ".organ",
     "scan_folder": "JM-Rec-Import",
     "export": "Exportieren",

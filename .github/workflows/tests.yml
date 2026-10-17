@@ -89,6 +89,7 @@ jobs:
           node testscripts/eq_presets_test.mjs
           node testscripts/eq_curve_test.mjs
           node testscripts/notemap_test.mjs
+          node testscripts/update_klaar_test.mjs
           node testscripts/sheet_time_test.mjs
 
       - name: Rust-tests (zonder ASIO)

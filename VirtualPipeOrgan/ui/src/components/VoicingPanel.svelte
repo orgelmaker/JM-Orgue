@@ -22,8 +22,10 @@
   let livePitch = 0;
   let saveTimer = null;
 
-  $: divisions = organ?.divisions ?? [];
-  $: stops = (organ?.divisions ?? [])
+  // Effectregisters (virtuele divisie in de UI) hebben geen pijpen om te
+  // intoneren; vroeger stond hier de interne naam "__toys__" (0.8.96).
+  $: divisions = (organ?.divisions ?? []).filter(d => !d.__toy_division);
+  $: stops = divisions
         .filter(d => !selectedDivision || d.name === selectedDivision)
         .flatMap(d => (d.stops || []).map(s => ({ ...s, _division: d.name })));
 

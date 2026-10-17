@@ -4035,6 +4035,14 @@
     { naam: 'Piotr Grabowski', url: 'https://piotrgrabowski.pl/instruments/', toon: 'piotrgrabowski.pl' },
     { naam: 'Sonus Paradisi', url: 'https://www.sonusparadisi.cz/en/blog/category/free-stuff/', toon: 'sonusparadisi.cz' },
   ];
+  // Handleiding (0.8.96): de PDF in de taal van het programma, rechtstreeks
+  // uit de repository; onbekende taal → Engels.
+  const HANDLEIDING_TALEN = ['nl', 'en', 'fr', 'de', 'pl', 'it', 'es'];
+  function handleidingUrl(taal) {
+    const l = HANDLEIDING_TALEN.includes(taal) ? taal : 'en';
+    return `https://github.com/orgelmaker/JM-Orgue/raw/master/VirtualPipeOrgan/docs/handleiding/JM-Orgue-handleiding.${l}.pdf`;
+  }
+
   async function openExterneLink(url) {
     try { await invoke('open_external_url', { url }); } catch (e) { console.error(e); }
   }
@@ -5603,6 +5611,14 @@
             <span class="library-link-url">{bron.toon}</span>
           </button>
         {/each}
+        <button class="library-link library-link-handleiding" on:click={() => openExterneLink(handleidingUrl($locale))} title={$t('library.manual_title')}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+          </svg>
+          <span class="library-link-naam">{$t('library.manual')}</span>
+          <span class="library-link-url">PDF</span>
+        </button>
       </div>
     </div>
 

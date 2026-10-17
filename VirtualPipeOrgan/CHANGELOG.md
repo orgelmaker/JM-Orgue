@@ -5,6 +5,23 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [Onuitgebracht]
+
+### Bijwerkmelding pas als de release klaar is
+- Direct na het publiceren van een nieuwe versie bestaat de release al,
+  maar worden de installers nog gebouwd. De app meldde de nieuwe versie
+  dan al, met een bijwerk- of downloadknop die nog niets kon. De melding
+  verschijnt nu pas als alle installers klaar staan.
+
+### Handleiding vanuit de bibliotheek
+- Onderaan de bibliotheek, naast de samplesetmakers, staat een knop
+  Handleiding: die opent de PDF in de taal van het programma.
+
+### Kleine verbeteringen
+- Bij het intoneren per pijp stond de virtuele divisie met
+  effectregisters in de lijst, met een interne naam. Effectregisters
+  hebben geen pijpen en staan daar niet meer.
+
 ## [0.8.95] - 2026-10-17
 
 ### MP3-opname met bijgeluiden

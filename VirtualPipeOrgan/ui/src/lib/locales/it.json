@@ -24,6 +24,8 @@
   },
   "library": {
     "title": "Libreria organi",
+    "manual": "Manuale",
+    "manual_title": "Apri il manuale (PDF) nella tua lingua",
     "open_organ_file": ".organ",
     "scan_folder": "Importa JM-Rec",
     "export": "Esporta",

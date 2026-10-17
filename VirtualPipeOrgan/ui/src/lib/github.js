@@ -39,6 +39,12 @@ export function compareVersions(a, b) {
 // valt hierop terug als dat niets oplevert — bijvoorbeeld op macOS, vlak na
 // het publiceren van een release (installers nog niet klaar), of zonder
 // latest.json. De melding biedt dan alleen de downloadpagina.
+/** Een release is klaar als hij geen concept is en latest.json al bevat. */
+export function releaseKlaar(rel) {
+  if (!rel || rel.draft || rel.prerelease) return false;
+  return (rel.assets || []).some(a => a && a.name === 'latest.json' && (a.state ?? 'uploaded') === 'uploaded');
+}
+
 export async function checkForUpdate(currentVersion) {
   if (GITHUB_REPO.startsWith('INVULLEN')) return null; // nog niet gekoppeld
   // fetch() gooit zelf bij een netwerkfout (TypeError: Failed to fetch).
@@ -53,5 +59,10 @@ export async function checkForUpdate(currentVersion) {
   const rel = await res.json();
   const latest = String(rel.tag_name || '').replace(/^v/, '');
   if (!latest || compareVersions(latest, currentVersion) <= 0) return null;
+  // Pas melden als de release echt klaar is (0.8.96): direct na het
+  // publiceren bestaat de tag al, maar bouwt CI nog minutenlang de
+  // installers. latest.json komt er als allerlaatste bij, als alle
+  // platformen klaar zijn — tot dan geen melding en geen downloadknop.
+  if (!releaseKlaar(rel)) return null;
   return { version: latest, url: rel.html_url || githubRepoUrl() + '/releases' };
 }
