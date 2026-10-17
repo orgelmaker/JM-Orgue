@@ -297,6 +297,14 @@ impl BackgroundEngine {
     /// het eind van de callback (`frame.clamp(-1.0, 1.0)`) begrenst wat we
     /// hier bijtellen alsnog.
     pub fn mix_interleaved(&mut self, data: &mut [f32], start_frame: usize, frames: usize, channels: usize) {
+        self.mix_interleaved_met_opname(data, start_frame, frames, channels, None);
+    }
+
+    /// Als `mix_interleaved`, en telt daarbij de stereo-som van alle soorten
+    /// op bij `opname` (interleaved L/R, één paar per frame vanaf frame 0 van
+    /// dit blok). Zo staan motor en klikken ook in de MP3-opname (0.8.95).
+    pub fn mix_interleaved_met_opname(&mut self, data: &mut [f32], start_frame: usize, frames: usize, channels: usize,
+                                      mut opname: Option<&mut [f32]>) {
         if !self.is_actief() || channels == 0 { return; }
         let mut piek = 0.0f32;
         let gg = self.global_gain;
@@ -358,6 +366,13 @@ impl BackgroundEngine {
             // Schrijven: per kind naar z'n eigen kanalenlijst. 1 kanaal =
             // mono-mix (L+R)/2; 2 of meer = eerste twee als stereo-paar en
             // volgende als duplicaat van het stereo-signaal (zelden gebruikt).
+            if let Some(rec) = opname.as_deref_mut() {
+                let (sl, sr) = per_kind.iter().fold((0.0f32, 0.0f32), |(a, b), (l, r)| (a + l, b + r));
+                if 2 * i + 1 < rec.len() {
+                    rec[2 * i] = (rec[2 * i] + sl).clamp(-1.0, 1.0);
+                    rec[2 * i + 1] = (rec[2 * i + 1] + sr).clamp(-1.0, 1.0);
+                }
+            }
             for (k, (l, r)) in per_kind.iter().enumerate() {
                 if *l == 0.0 && *r == 0.0 { continue; }
                 piek = piek.max(l.abs()).max(r.abs());

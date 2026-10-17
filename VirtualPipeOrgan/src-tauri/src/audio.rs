@@ -5830,6 +5830,9 @@ fn run_audio_thread(
                 while fi < n_frames {
                     let bn = (n_frames - fi).min(MIX_BLOCK);
                     let t_pas = std::time::Instant::now();
+                    // Begin van dit blok in de opnamebuffer: de bijgeluiden
+                    // worden er na de pijpen bij opgeteld (0.8.95).
+                    let rec_begin = rec_buf.len();
 
                     // ── Zwelkast per blok: doelstand → gesmoothede stand → volume + filter ──
                     // Eén exp per blok + per gewijzigde divisie één powf en één
@@ -6222,7 +6225,10 @@ fn run_audio_thread(
                     // clamping-stap heeft het eindframe al afgevangen. Een lege
                     // engine kost twee lees-vergelijkingen (is_actief), dus
                     // geen meetbare belasting voor sets zonder bijgeluiden.
-                    bg_engine.mix_interleaved(data, fi, bn, channels);
+                    // Ook in de MP3-opname (0.8.95): tot nu toe tapte de recorder
+                    // vóór deze stap, zodat motor en klikken ontbraken.
+                    let rec_blok = if rec_active.is_some() { Some(&mut rec_buf[rec_begin..]) } else { None };
+                    bg_engine.mix_interleaved_met_opname(data, fi, bn, channels, rec_blok);
                     fi += bn;
                 }
                 // Tijdmeting per pas wegschrijven (fase 1): promille van de

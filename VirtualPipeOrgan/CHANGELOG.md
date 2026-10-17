@@ -5,6 +5,16 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [Onuitgebracht]
+
+### MP3-opname met bijgeluiden
+- De MP3-opname bevat nu ook de motor, het omgevingsgeluid, de
+  effectregisters en de toets- en registerklikken, met hun eigen
+  volumes. Tot nu toe nam de recorder alleen de pijpen op.
+- Een orgel zonder opgeslagen instellingen begint met de eigen volumes
+  voor motor, toetsen en registers op 0 dB, in plaats van de stand van
+  het vorige orgel over te nemen.
+
 ## [0.8.94] - 2026-10-17
 
 ### Zwelkast per stem blijft gekoppeld

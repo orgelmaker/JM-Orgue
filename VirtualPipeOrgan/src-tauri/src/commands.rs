@@ -9205,6 +9205,9 @@ fn restore_organ_settings(state: &AppState, organ_id: &str) {
             info!("Nieuw orgel zonder instellingen: instelwizard aangeboden");
             *state.setup_wizard_pending.write() = true;
             *state.setup_wizard_done.write() = false;
+            // Eigen volumes neutraal (0.8.95): niet die van het vorige orgel.
+            *state.mechanics_gains.write() = [1.0; 3];
+            state.send_audio_command(AudioCommand::SetMechanicsGains { motor: 1.0, keys: 1.0, stops: 1.0 });
             return;
         }
     };
