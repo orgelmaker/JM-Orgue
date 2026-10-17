@@ -1,0 +1,37 @@
+  @page { size: A4; margin: 18mm 16mm 18mm 16mm; }
+  :root { --goud: #b8960c; --donker: #2b2216; --zacht: #6d5f4a; --kader: #e3d9c4; --bg: #fbf8f1; }
+  * { box-sizing: border-box; }
+  body { font-family: "Segoe UI", system-ui, Arial, sans-serif; color: var(--donker); line-height: 1.5; font-size: 10.5pt; margin: 0; background: #fff; counter-reset: afb; }
+  main { max-width: 190mm; margin: 0 auto; padding: 0 4mm; }
+  h1 { font-family: Georgia, "Times New Roman", serif; font-size: 30pt; margin: 0 0 4pt; letter-spacing: .01em; }
+  h2 { font-family: Georgia, serif; font-size: 17pt; border-bottom: 2px solid var(--goud); padding-bottom: 3pt; margin: 26pt 0 8pt; break-after: avoid; }
+  h3 { font-size: 12pt; margin: 16pt 0 4pt; color: var(--donker); break-after: avoid; }
+  p, ul, ol { margin: 0 0 7pt; }
+  ul, ol { padding-left: 18pt; }
+  li { margin-bottom: 2pt; }
+  .titel { padding: 26pt 0 14pt; border-bottom: 3px solid var(--goud); margin-bottom: 16pt; }
+  .onder { color: var(--zacht); font-size: 11.5pt; }
+  nav.inhoud { background: var(--bg); border: 1px solid var(--kader); border-radius: 8px; padding: 10pt 14pt; margin: 0 0 12pt; break-inside: avoid; }
+  nav.inhoud ol { columns: 2; column-gap: 24pt; margin: 4pt 0 0; }
+  nav.inhoud a { color: var(--donker); text-decoration: none; }
+  figure { margin: 6pt 0 9pt; break-inside: avoid; text-align: center; }
+  figure img { max-width: 86%; border: 1px solid var(--kader); border-radius: 6px; }
+  .duo figure img { max-width: 100%; }
+  figcaption { font-size: 9pt; color: var(--zacht); margin-top: 3pt; text-align: left; }
+  figcaption::before { counter-increment: afb; content: var(--afb) counter(afb) ". "; font-weight: 600; color: var(--donker); }
+  html[lang="nl"] { --afb: "Afbeelding "; }
+  html[lang="en"], html[lang="fr"] { --afb: "Figure "; }
+  html[lang="de"] { --afb: "Abbildung "; }
+  html[lang="pl"] { --afb: "Rysunek "; }
+  html[lang="it"], html[lang="es"] { --afb: "Figura "; }
+  .duo { display: grid; grid-template-columns: 1fr 1fr; gap: 8pt; margin: 8pt 0 12pt; }
+  .duo figure { margin: 0; }
+  .tip, .let-op { border-left: 4px solid var(--goud); background: var(--bg); padding: 6pt 10pt; border-radius: 0 6px 6px 0; margin: 8pt 0 10pt; break-inside: avoid; }
+  .let-op { border-left-color: #b34a2a; }
+  .tip b:first-child, .let-op b:first-child { text-transform: uppercase; font-size: 8.5pt; letter-spacing: .06em; color: var(--zacht); }
+  kbd { font-family: Consolas, monospace; background: #f1ead9; border: 1px solid var(--kader); border-bottom-width: 2px; border-radius: 4px; padding: 0 4pt; font-size: 9.5pt; }
+  table { border-collapse: collapse; width: 100%; margin: 6pt 0 10pt; font-size: 9.5pt; break-inside: avoid; }
+  th, td { border: 1px solid var(--kader); padding: 4pt 7pt; text-align: left; vertical-align: top; }
+  th { background: var(--bg); }
+  .klein { font-size: 9pt; color: var(--zacht); }
+  .voet { margin-top: 30pt; padding-top: 8pt; border-top: 1px solid var(--kader); font-size: 8.5pt; color: var(--zacht); }

@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JM-Orgue user guide</title>
+<link rel="stylesheet" href="handleiding.css">
+</head>
+<body>
+<main>
+
+<header class="titel">
+  <h1>JM-Orgue</h1>
+  <div class="onder">User guide for version 0.8.93 &middot; October 2026</div>
+</header>
+
+<p>JM-Orgue is a virtual pipe organ for Windows, macOS and Linux. It plays Hauptwerk and GrandOrgue sample sets directly, including large surround sets, and you play it with a MIDI keyboard, an organ console or the mouse. This guide walks through the program using screenshots of version 0.8.93.</p>
+<p class="klein">&copy; Martijn van der Kolk. The screenshots were made with demo organs and own test sets; network addresses, access tokens and user folders have been made unreadable.</p>
+
+<nav class="inhoud">
+  <b>Contents</b>
+  <ol>
+    <li><a href="#start">Getting started</a></li>
+    <li><a href="#bibliotheek">The library</a></li>
+    <li><a href="#bespelen">Loading and playing an organ</a></li>
+    <li><a href="#werkbalk">The toolbar</a></li>
+    <li><a href="#posities">Several listening positions</a></li>
+    <li><a href="#wizard">The setup wizard for a new organ</a></li>
+    <li><a href="#orgelinst">Organ Settings</a></li>
+    <li><a href="#algemeen">App Settings</a></li>
+    <li><a href="#akoestiek">Acoustic configuration of a set</a></li>
+    <li><a href="#tips">Keyboard shortcuts and tips</a></li>
+    <li><a href="#problemen">Troubleshooting and feedback</a></li>
+  </ol>
+</nav>
+
+<!-- ============================================================ -->
+<h2 id="start">1. Getting started</h2>
+
+<h3>Installing</h3>
+<p>Download the installer of the latest release from the project's release page (for Windows <code>JM-Orgue_&lt;version&gt;_x64-setup.exe</code>) and run it. The installation is per user and needs no administrator rights. There is also an MSI package for Windows, a DMG for macOS and an AppImage or deb for Linux.</p>
+<p>The program itself is free to use. The sample sets are not included: you get those from their makers. The start page of the library lists a few makers who offer sets free of charge.</p>
+
+<h3>Updating</h3>
+<p>JM-Orgue checks by itself whether a new version is available. If there is one, a notice appears at the top. Choose <b>Update now</b>: the program downloads the update, checks its signature, installs it and restarts. If you only want to download first, choose <b>Download</b>. You can also check by hand via App Settings &rarr; Update and feedback &rarr; <b>Check for updates</b>.</p>
+
+<h3>The three main screens</h3>
+<p>At the top are three tabs: <b>Organ</b> (playing), <b>Organ Settings</b> (everything that belongs to the loaded organ) and <b>App Settings</b> (everything that applies to the whole program). <kbd>F1</kbd>, <kbd>F2</kbd> and <kbd>F3</kbd> switch between them directly. The cross next to the organ name closes the organ and takes you back to the library.</p>
+
+<!-- ============================================================ -->
+<h2 id="bibliotheek">2. The library</h2>
+<p>After starting you see the organ library: one card per organ with photo, name, builder, place and number of stops. Click a card to load the organ.</p>
+<figure><img src="afbeeldingen/en/03_bibliotheek.jpg" alt="Organ library"><figcaption>The library with demo organs. At the top right are the buttons to add organs and to go to the settings; at the top left the language choice (NL, EN, FR, DE, PL, IT, ES).</figcaption></figure>
+
+<h3>Adding an organ</h3>
+<ul>
+  <li><b>.organ</b>: choose an organ definition (GrandOrgue <code>.organ</code> or a Hauptwerk definition). You choose the definition file, not the loose folder of samples: only the definition knows the stops, couplers, tremulants and any extra recording positions.</li>
+  <li><b>JM-Rec import</b>: import a sample set made with JM-Rec.</li>
+  <li><b>Export</b>: turns a folder of samples into an organ definition (<code>.organ</code>), which you can then load with the <b>.organ</b> button.</li>
+</ul>
+
+<h3>Card buttons: photo, search, remove</h3>
+<p>If you point at a card, three buttons appear at the top right of the photo: <b>search a photo online</b> (globe), <b>choose an image yourself</b> (camera) and <b>remove from library</b> (cross). Removing only takes the card out of the library; the files on your disk stay where they are. If you hold a card pressed for 3 seconds, the program searches the photo again.</p>
+<p><b>Searching online</b> shows a few freely usable photos from Wikimedia Commons, based on the name, builder and place stored in the set. Click a photo to adopt it; the source and licence appear under the card. If the set holds too little to find anything, type a search term yourself (church, town or organ name) in the field at the top of the window and choose <b>Search</b>.</p>
+<figure><img src="afbeeldingen/en/04_online_zoeken.jpg" alt="Search a photo online"><figcaption>The &ldquo;Search a photo online&rdquo; window with the field for your own search term and the photos found, with their source and licence.</figcaption></figure>
+
+<!-- ============================================================ -->
+<h2 id="bespelen">3. Loading and playing an organ</h2>
+
+<h3>Loading</h3>
+<p>When loading, JM-Orgue reads the beginning of every pipe recording into memory; the rest is loaded while you play. A large surround set can therefore take a moment; the progress bar shows how far it is.</p>
+<figure><img src="afbeeldingen/en/05_laden.jpg" alt="Loading screen"><figcaption>The loading screen with the progress of reading the samples.</figcaption></figure>
+
+<h3>The blower</h3>
+<p>After loading, the <b>organ blower is off</b>, and without the blower nothing sounds. Switch it on with <b>Blower on</b> in the yellow bar or with the blower button in the toolbar. As soon as the blower is on, the bar disappears. With the blower on, the blower sound of the set (if it has one) runs along.</p>
+<figure><img src="afbeeldingen/en/06_orgelscherm_motor_uit.jpg" alt="Organ screen with blower off"><figcaption>The organ screen right after loading: blower off, all stops pushed in.</figcaption></figure>
+
+<h3>Stops, couplers and tremulants</h3>
+<p>Every division has its own box with its stops. Click a stop knob to draw it; drawn stops turn yellow. The colour of the name shows the family: reeds, for instance, are red, mixtures and quints blue. Each box also holds the <b>tremulant</b> and the <b>couplers</b> (for example &ldquo;Hauptwerk + Schwellwerk&rdquo;). A green bar on the right in the header of a division shows the position of the swell box.</p>
+<figure><img src="afbeeldingen/en/07_orgelscherm_registers.jpg" alt="Organ screen with drawn stops"><figcaption>Blower on, a few stops drawn and the coupler Hauptwerk + Schwellwerk on. The setter bar at the bottom.</figcaption></figure>
+
+<h3>The setter bar</h3>
+<p>At the bottom is the setter bar, with the controls of an organ console:</p>
+<table>
+  <tr><th style="width:26%">Item</th><th>How it works</th></tr>
+  <tr><td><b>SET</b> and <b>0&ndash;9</b></td><td>Press SET and then a digit to store the current registration; press just the digit to recall it. A small dot at a digit means a registration is stored there.</td></tr>
+  <tr><td><b>&minus;1 / +1</b>, <b>&minus;10 / +10</b></td><td>Step to the previous or next registration, or ten further.</td></tr>
+  <tr><td><b>G.C.</b></td><td>General Cancel: all stops off.</td></tr>
+  <tr><td><b>M 1&ndash;8</b></td><td>Memory levels: eight separate banks of registrations.</td></tr>
+  <tr><td><b>Cresc</b></td><td>The general crescendo (see chapter 7). The bar shows the current step.</td></tr>
+  <tr><td>Volume slider</td><td>Master volume. Double-clicking resets it to the default; with the scroll wheel you change it in steps of 1 dB.</td></tr>
+</table>
+<p class="klein">Every button of the setter bar can be linked to a button on your own console: right-click (or hold for 3 seconds) and then press the button on your console.</p>
+
+<!-- ============================================================ -->
+<h2 id="werkbalk">4. The toolbar</h2>
+<p>Above the stops is the toolbar. On the left are the divisions (Pedal, Hauptwerk, &hellip;) as buttons: with them you show or hide a division. On the right are the functions below.</p>
+<table>
+  <tr><th style="width:24%">Button</th><th>What it does</th></tr>
+  <tr><td><b>Blower</b></td><td>Organ blower on or off.</td></tr>
+  <tr><td><b>Layout</b></td><td>Opens the layout menu (see below).</td></tr>
+  <tr><td><b>Bar</b></td><td>Shows or hides the main bar with the tabs and the profile button.</td></tr>
+  <tr><td><b>Full screen</b></td><td>Console mode: only the stops and the setter bar (<kbd>F11</kbd>).</td></tr>
+  <tr><td><b>New screen</b></td><td>Opens an extra window with the same stops, for example for a second monitor or a second keyboard.</td></tr>
+  <tr><td><b>MP3</b></td><td>Records what you hear. The recording goes to Documents\JM-Orgue-opnames. Click the red counter to stop; the program then tells you where the file is.</td></tr>
+  <tr><td><b>MIDI</b></td><td>Records what you play (notes only) as a .mid file. Click the blue counter to stop and choose where to save it.</td></tr>
+  <tr><td><b>Notate</b></td><td>Opens the notation window: notes appear while you play, with layers, overdub and editing. An existing MIDI file can be opened there too.</td></tr>
+  <tr><td><b>Shut down PC</b></td><td>Closes the software <i>and the computer</i>, after a confirmation; the last state is saved first. Right-click or hold for 3 seconds links the button to a button on your console.</td></tr>
+</table>
+
+<h3>The layout menu</h3>
+<p>With <b>Layout</b> you adapt the display to your screen: <b>Fit</b> measures the button size so that all stops fit in view, the minus/plus buttons change the width and the height of the buttons, and you further choose divisions below or beside each other (vertical), round instead of rectangular buttons and the place of the couplers (in the division or in a bar of their own). The choice is remembered per organ.</p>
+<figure><img src="afbeeldingen/en/08_indeling_menu.jpg" alt="Layout menu"><figcaption>The Layout menu in the toolbar.</figcaption></figure>
+
+<h3>Full screen (console mode)</h3>
+<p>In this mode the title bar, the Windows taskbar and the main bar disappear: you see only the stops and the setter bar. At the top is a narrow strip with four buttons: <b>Bars</b> (bring the main bar back temporarily), <b>Blower</b> (on or off), <b>Exit full screen</b> and <b>Shut down PC</b> (close the software and the computer). <kbd>F11</kbd> switches the mode on and off; <kbd>Esc</kbd> turns it off.</p>
+<figure><img src="afbeeldingen/en/09_volledig_scherm.jpg" alt="Full screen"><figcaption>Console mode: stops, setter bar and at the top the strip with the four buttons.</figcaption></figure>
+
+<h3>A second screen</h3>
+<p><b>New screen</b> opens a window of its own that you can drag to another monitor, or leave small beside the main window. It has its own layout settings: if the buttons are too small, choose <b>Layout</b> and set the button width and height, or choose divisions below or beside each other.</p>
+<figure><img src="afbeeldingen/en/43_nieuw_scherm.jpg" alt="Second screen"><figcaption>An extra screen with readable stops, here in a window of 1000 &times; 900 pixels.</figcaption></figure>
+
+<!-- ============================================================ -->
+<h2 id="posities">5. Several listening positions</h2>
+<p>Some sample sets were recorded at several places in the church, for example close, in front, halfway and at the back. Such a set shows the <b>Perspective</b> buttons in the toolbar, one for each position. Click a position to switch it on or off; you can let more than one sound at the same time. To the right of them is the <b>listening position</b>: the slider between &ldquo;at organ&rdquo; and &ldquo;in the back&rdquo; blends smoothly between the recorded positions.</p>
+<figure><img src="afbeeldingen/en/50_nancy_orgelscherm.jpg" alt="Organ screen with perspectives"><figcaption>A set with four recording positions (Close, Front, Middle, Rear) and the listening-position slider.</figcaption></figure>
+<div class="tip"><b>Tip</b> Every position takes memory and processing power. If not everything fits in your computer's memory, the program loads only the position closest to the organ the first time. In Organ Settings you find the block &ldquo;Perspectives and stacked ranks&rdquo;: there you choose which positions are loaded, set the volume per position and, with &ldquo;Keep all positions in memory&rdquo;, switch between positions instantly. A new choice of loaded positions takes effect after the organ is reloaded.</div>
+
+<!-- ============================================================ -->
+<h2 id="wizard">6. The setup wizard for a new organ</h2>
+<p>If you load an organ for the first time, the setup wizard &ldquo;Set up organ&rdquo; starts automatically. In six steps it goes through everything you have to connect for your own console. Everything can be changed later, and you can start the wizard again via Organ Settings &rarr; Routing &rarr; <b>Wizard</b>. <b>Later</b> closes the wizard and asks again the next time you open the organ; <b>Skip</b> (step 1) skips it altogether.</p>
+<div class="duo">
+  <figure><img src="afbeeldingen/en/20_wizard_1.jpg" alt="Wizard step 1"><figcaption>Step 1: what the wizard does.</figcaption></figure>
+  <figure><img src="afbeeldingen/en/20_wizard_2.jpg" alt="Wizard step 2"><figcaption>Step 2: the MIDI channel per keyboard.</figcaption></figure>
+</div>
+<ol>
+  <li><b>Start</b>: an overview of the steps.</li>
+  <li><b>MIDI channel per keyboard</b>: for each keyboard choose <b>Learn</b> and play a key on that keyboard. The program remembers the channel. The buttons only work when a MIDI device is connected (App Settings &rarr; MIDI); otherwise a warning is shown.</li>
+  <li><b>Swell boxes and crescendo</b>: choose <b>Learn</b> and move the pedal fully closed and fully open. The same goes for the general crescendo. If a set has swell boxes per rank (chapter 9), they appear here too.</li>
+  <li><b>Outputs for speakers</b>: choose the driver and the device, save them as the &ldquo;Speakers&rdquo; profile and choose per keyboard which outputs of your audio interface it sounds on. Below that are the same choices for the blower sound, the ambient noise and action clicks, the effect stops and the tremulant noise, as far as the set has them.</li>
+  <li><b>Outputs for headphones</b>: the same for the second profile, for example a headphone output. From then on you switch between the two profiles with the <b>Speakers</b> button at the top right.</li>
+  <li><b>Done</b>: the settings have been saved with this organ.</li>
+</ol>
+<div class="duo">
+  <figure><img src="afbeeldingen/en/20_wizard_3.jpg" alt="Wizard step 3"><figcaption>Step 3: learning swell boxes and crescendo.</figcaption></figure>
+  <figure><img src="afbeeldingen/en/20_wizard_4.jpg" alt="Wizard step 4"><figcaption>Step 4: driver, device, channels per keyboard and background sounds for the speakers.</figcaption></figure>
+  <figure><img src="afbeeldingen/en/20_wizard_5.jpg" alt="Wizard step 5"><figcaption>Step 5: the same for the headphones.</figcaption></figure>
+  <figure><img src="afbeeldingen/en/20_wizard_6.jpg" alt="Wizard step 6"><figcaption>Step 6: done.</figcaption></figure>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="orgelinst">7. Organ Settings</h2>
+<p>All settings that belong to the loaded organ are stored with that organ. At the top are five tabs: <b>Sound</b>, <b>Crescendo</b>, <b>Stop order</b>, <b>Routing</b> and <b>All</b>; the last one puts all blocks below each other.</p>
+
+<h3>Sound</h3>
+<p>The first block holds the master settings:</p>
+<ul>
+  <li><b>Volume</b>: the master volume of this organ.</li>
+  <li><b>Temperament</b>: &ldquo;Original&rdquo; plays the pipes as they were recorded. Other temperaments (equal and historical temperaments) retune the pipes based on the measured pitch of each recording. Below the choice you see how many pipes have a measured pitch. With <b>Custom temperament&hellip;</b> you set the deviation per note in cents yourself.</li>
+  <li><b>Fine tuning</b>: everything together higher or lower, in cents.</li>
+</ul>
+<p><b>Reverb</b> controls the reverberation. If the set already has the church acoustics in its recordings, that is stated (with a button <b>Back to the recording (reverb off)</b> to switch the extra reverb off): extra reverb is then a matter of taste. You choose between <b>Algorithmic</b> (a calculated reverb with RT60, delay, damping and room size, also as a preset) and <b>Impulse Response</b> with an impulse response (IR) of your own. With <b>Mix</b> you determine how much reverb you hear.</p>
+<figure><img src="afbeeldingen/en/10_klank_1.jpg" alt="Sound tab, upper part"><figcaption>Sound, at the top: master (volume, temperament, fine tuning) and reverb.</figcaption></figure>
+<p><b>Tone colour of this organ</b> is a tone control of its own per organ; the correction for your headphones or speakers is separate, in the app settings. The <b>wind model</b> lets the organ breathe: a chord with many stops lowers the wind pressure, as in a real organ, and flutes and reeds react to it differently. You choose the number of wind groups (which divisions share the same bellows) and, per group, the bellows size, the damping, the maximum pressure drop and the character of the wind.</p>
+<figure><img src="afbeeldingen/en/10_klank_2.jpg" alt="Sound tab, tone colour and wind model"><figcaption>Sound, further down: tone colour of this organ and the wind model per wind group.</figcaption></figure>
+<p><b>Background sounds</b> shows the continuous sounds the set contains, such as the blower and room noise. You set the volume, switch the <b>Blower</b> on or off and can enable the <b>key action noise</b> (clicking keyboard). The key action is off by default because it takes a lot of memory and requires reloading the organ.</p>
+<figure><img src="afbeeldingen/en/10_klank_3.jpg" alt="Sound tab, background sounds"><figcaption>Sound: wind groups and the Background sounds block with the volume, the blower and the key action.</figcaption></figure>
+<p>At the bottom is the <b>pipe voicing</b>: choose a stop on the left and adjust the volume and tuning of each individual pipe.</p>
+<figure><img src="afbeeldingen/en/10_klank_4.jpg" alt="Sound tab, pipe voicing"><figcaption>Sound, at the bottom: the pipe voicing. Choose a stop on the left to voice its pipes.</figcaption></figure>
+
+<h3>Crescendo</h3>
+<p>The <b>general crescendo</b> draws more stops step by step as you move a crescendo pedal. You decide yourself which stops go in which step:</p>
+<ul>
+  <li><b>Enabled</b> switches the crescendo on; <b>Steps</b> is the number of steps.</li>
+  <li><b>Auto-fill</b> fills in a proposal that suits the stops of this organ. With the options below you decide whether couplers take part, whether colour stops (sesquialtera, cornet, tierce), 32&prime; reeds and chamades take part and whether the octave couplers only come in at the tutti. <b>Clear</b> empties the matrix.</li>
+  <li>In the matrix, a click on a cell switches that stop on or off in that step; <kbd>Shift</kbd>+click sets it for all steps from that step on.</li>
+  <li><b>Learn pedal</b> links your crescendo pedal; at the bottom you can also enter channel and CC number by hand.</li>
+</ul>
+<figure><img src="afbeeldingen/en/11_crescendo.jpg" alt="Crescendo tab"><figcaption>The crescendo matrix: stops in the rows, steps in the columns.</figcaption></figure>
+
+<h3>Stop order</h3>
+<p>Here you decide the order of the stops in each division. Drag a stop by its handle to move it. For each stop you see the pitch and the family (the colour of the name). With the arrows you change the order step by step, and <b>Reset</b> restores the order of the set.</p>
+<figure><img src="afbeeldingen/en/12_registersortering.jpg" alt="Stop order tab"><figcaption>The stops per division, in the order in which they appear on the organ screen.</figcaption></figure>
+
+<h3>Routing</h3>
+<p>This tab connects your organ to your equipment. At the top there is a block per keyboard:</p>
+<ul>
+  <li><b>Channel</b>: the MIDI channel the keyboard listens to (&ldquo;All&rdquo; = every channel). <b>Learn</b> determines channel and range by playing the lowest and then the highest key.</li>
+  <li><b>Transp</b>: transpose in semitones. <b>Range</b>: lowest and highest key. <b>Short octave</b>: for sets with a short bass octave.</li>
+  <li><b>Swell box</b>: switches on the swell box of this keyboard; buttons then appear to learn the pedal, to set the minimum volume and the cut-off frequency of a closed box.</li>
+  <li><b>Wind supply</b>: which wind group the keyboard belongs to.</li>
+  <li><b>Pan</b> and <b>Outputs</b>: the place in the stereo image and the output channels of your audio interface the keyboard sounds on. Two consecutive outputs form a stereo pair; a single channel sounds mono.</li>
+  <li><b>C/Cis</b>: spreads the pipes over two sides, like the C and C-sharp chests of a real organ; the global strength and fall-off are in the block above it.</li>
+  <li><b>Tremulant LFO</b>: if the set has no real tremulant recordings, the program calculates the tremulant. You set speed, amplitude and pitch here.</li>
+</ul>
+<figure><img src="afbeeldingen/en/13_routing_boven.jpg" alt="Routing tab, top"><figcaption>Routing, at the top: the Wizard button, the C/Cis spread and the first keyboard with channel, range, pan, outputs and tremulant.</figcaption></figure>
+<figure><img src="afbeeldingen/en/15_routing_zwelkast.jpg" alt="Routing with swell box"><figcaption>A keyboard with the swell box on: learn pedal, manual channel and CC, minimum volume and cut-off frequency.</figcaption></figure>
+
+<p>Below that is <b>Background sounds audio output</b>: for each kind of sound you choose which outputs it uses. <b>Blower</b> is the blower sound; <b>Ambient noise and action clicks</b> applies to the room noise and the clicks of stops and keys; sets with effect stops (cymbelstern, nightingale and the like) and tremulant noise get a row of their own. This matters mostly with a set-up of more than two outputs, where the keyboards sound on other channels than the default 1&ndash;2. Directly below:</p>
+<ul>
+  <li><b>Continuous keyboard</b>: keys outside the recorded range of a stop play the nearest pipe, shifted to the right pitch, instead of staying silent. A 61-note keyboard thus keeps playing on a set with fewer notes.</li>
+  <li><b>Automatically retune pipes</b>: retunes the pipes based on their measured pitch, while keeping deliberately floating stops. On by default.</li>
+  <li><b>Pitch correction</b>: everything together higher or lower in cents (<b>Zero</b> resets it).</li>
+</ul>
+<figure><img src="afbeeldingen/en/16_routing_bijgeluiden.jpg" alt="Routing: background sounds"><figcaption>Background sounds audio output with the chips per output channel, continuous keyboard and pitch correction.</figcaption></figure>
+<p>Further down are <b>Couplers</b> (switch on or off, with a MIDI button per coupler) and <b>Extra couplers</b>: couplers that are not in the sample set but follow from the keyboard layout; tick what you want and they appear straight away on the coupler bar. <b>MIDI bindings</b> is one list of all MIDI bindings of this organ, which you can adjust, remove or add by hand there. At the bottom, <b>Open .mid</b> lets the organ play a MIDI file.</p>
+<figure><img src="afbeeldingen/en/14_routing_onder.jpg" alt="Routing: couplers and MIDI"><figcaption>Routing, at the bottom: extra couplers, MIDI bindings and Play MIDI.</figcaption></figure>
+
+<!-- ============================================================ -->
+<h2 id="algemeen">8. App Settings</h2>
+<p>These settings apply to the whole program. The tabs are <b>Audio output</b>, <b>Sample fix</b>, <b>MIDI</b>, <b>Learn buttons</b>, <b>Display</b> and <b>Update and feedback</b>.</p>
+
+<h3>Audio output</h3>
+<ul>
+  <li><b>Audio driver</b> and device: for the lowest latency choose ASIO (for example the driver of your audio interface); WASAPI works with the standard Windows sound card. The &ldquo;Current&rdquo; line below shows what is playing now.</li>
+  <li><b>Test signal</b>: click a channel number to send sound to exactly that output, so you hear which plug belongs to which loudspeaker.</li>
+  <li><b>Polyphony</b> and <b>Calculation cores for mixing</b>: the maximum number of sounding pipes and the number of processor cores the mixing work is spread over. The default choice fits your computer; the load meter shows the effect.</li>
+  <li><b>Play stereo samples in stereo</b>: keeps the stereo image of stereo recordings. Off means a mono mix and halves the memory use of such sets.</li>
+  <li><b>Start buffer per recording</b> (new in this version): how much of each pipe recording is in memory straight away: 200 ms, 300 ms, 500 ms, 1 s or 2 s (default). A shorter buffer saves a lot of memory and loading time; the rest is loaded while you play. The choice takes effect after the organ is reloaded.</li>
+  <li><b>Buffer size</b>: smaller means less latency but is harder on your computer. <b>Apply</b> activates the choice.</li>
+</ul>
+<div class="tip"><b>Tip</b> If you hear a short repeat of the attack of a pipe in big chords, choose a longer start buffer. If you do not hear that but have little memory, 500 ms or 1 s is a good choice. A fast drive (SSD) makes short buffers possible.</div>
+<figure><img src="afbeeldingen/en/30_audio_1.jpg" alt="Audio output, top"><figcaption>Audio output, at the top: driver, device, test signal, polyphony, calculation cores, stereo samples, start buffer and buffer size.</figcaption></figure>
+<p><b>Output profiles</b> store two complete output settings, for example loudspeakers via ASIO and headphones via WASAPI, including the channel choice per keyboard. Choose the output you want, click <b>Save current selection</b> at Speakers or Headphones, and then switch with the <b>Speakers</b> button at the top right or with a learned MIDI button. The profile that is active now is marked.</p>
+<p><b>Correction for headphones or speakers</b> applies a tone correction to the output itself (not to the organ): choose which profile it applies to, switch it on and choose a preset from the AutoEq list, or import or export a correction of your own.</p>
+<p>Below that are the options to start the program automatically with Windows, to load the last opened organ automatically, to let the cross on an extra screen close the whole software and to restore the last registration. The <b>Automatic MIDI archive</b> records in the background everything you play, as a .mid file per session: it starts at the first note and stops after a silence.</p>
+<figure><img src="afbeeldingen/en/30_audio_2.jpg" alt="Audio output, middle"><figcaption>Audio output, further down: output profiles, correction for headphones or speakers, start-up options, MIDI archive and remote control. The folder and the network address in this image have deliberately been replaced by a placeholder.</figcaption></figure>
+<p>With <b>Network remote control (tablet/phone)</b> you control the organ from a tablet or phone on the same wi-fi network. The program shows an address and a QR code to scan, and you choose which parts and which divisions appear on the external screen. The first time, Windows Firewall asks whether JM-Orgue may receive connections: choose &ldquo;Allow access&rdquo; for private networks.</p>
+<div class="let-op"><b>Note</b> The address contains an access token and works only within your own network, without encryption. Do not share the address or QR code; with <b>New token</b> you withdraw the access of a device that scanned it earlier.</div>
+<p>At the bottom is the <b>sample rate</b>. It follows the sound card itself: under ASIO you set it in the driver's panel, under WASAPI in the Windows sound settings.</p>
+<figure><img src="afbeeldingen/en/30_audio_3.jpg" alt="Audio output, bottom"><figcaption>Audio output, at the bottom: the remote control with parts and divisions on the external screen, and the sample rate. The QR code and the address are covered here.</figcaption></figure>
+
+<h3>Sample fix</h3>
+<p>Two tools to tidy up the samples of the loaded organ. <b>Leading silence</b> finds and cuts silence at the start of the samples (you set the silence threshold in dB and the lead-in you want to keep yourself); <b>Loops</b> finds a good sustain loop, bakes in a crossfade for a seamless transition and writes the loop points into the file, with the option to do this only for files without a loop. With <b>Scan</b> you first look at what would change. The originals are first kept in a folder <code>_backup</code> before the files are overwritten.</p>
+<figure><img src="afbeeldingen/en/31_samplefix.jpg" alt="Sample fix"><figcaption>Sample fix: leading silence and loops, each with Scan and a button to apply.</figcaption></figure>
+
+<h3>MIDI</h3>
+<p><b>MIDI Input</b> shows the connected MIDI devices (with <b>Refresh devices</b> you search again); under <b>Bluetooth MIDI</b> you search for wireless devices with <b>Scan</b>. <b>Feedback (MIDI out)</b> makes your console light up with the registration: choose the protocol (stop lamps via Note On/Off, a Hauptwerk text display or a Johannus/Content console), the MIDI output, the channel and the base note. Each stop then automatically gets a note number from the base note, or you learn the real console button per stop with <b>Learn per stop&hellip;</b>.</p>
+<figure><img src="afbeeldingen/en/32_midi.jpg" alt="MIDI"><figcaption>MIDI input, Bluetooth MIDI and the feedback to the console.</figcaption></figure>
+
+<h3>Learn buttons</h3>
+<p>Here you learn the fixed console buttons (pistons): tuner, SET, preset steps, memory levels and shutting down the computer. The digit buttons 0&ndash;9 you learn on the setter bar itself (right-click or hold for 3 seconds).</p>
+<figure><img src="afbeeldingen/en/33_knoppen_inleren.jpg" alt="Learn buttons"><figcaption>Learning console buttons.</figcaption></figure>
+
+<h3>Display</h3>
+<p>Choose the language of the program (Nederlands, English, Fran&ccedil;ais, Deutsch, Polski, Italiano and Espa&ntilde;ol) and the look: five ready-made colour presets (Basic, Classic wood, Modern minimal, Night and Evening), or put together your own colours, give them a name and export them. Below that you adjust the font, size and weight of the stop text, and the background.</p>
+<figure><img src="afbeeldingen/en/34_weergave.jpg" alt="Display"><figcaption>Appearance &amp; Layout: language, presets and font for the stops.</figcaption></figure>
+
+<h3>Update and feedback</h3>
+<p>Here you find the version number, the credits for the headphone presets and loudspeaker data used, and the buttons <b>Send feedback&hellip;</b>, <b>Via GitHub (issues)</b> and <b>Check for updates</b>.</p>
+<figure><img src="afbeeldingen/en/35_update_feedback.jpg" alt="Update and feedback"><figcaption>About &amp; feedback.</figcaption></figure>
+
+<!-- ============================================================ -->
+<h2 id="akoestiek">9. Acoustic configuration of a set</h2>
+<p>An organ definition can refer to an extra file, <code>JM-ACOUSTICS.json</code>, that describes the acoustics of the set: swell boxes attached to a rank instead of to a keyboard, impulse responses for the reverb, mixing routes and outputs. If your set has such a file, you recognise it by an extra block in Organ Settings &rarr; Sound.</p>
+<ul>
+  <li>The program reads the file and checks it: the file size, whether all references are correct, whether the paths stay inside the organ folder and whether the pipe bindings fit the loaded definition. If something is wrong, the organ simply plays with the regular definition and the block says why the configuration was not loaded.</li>
+  <li><b>Swell boxes per rank</b>: ranks that the file puts in a box get a swell box and swell pedal of their own, independent of the keyboard they are played on. A rank used by two divisions thus always follows the same box. You learn the pedal under Routing (<b>Learn pedal</b>) or in the wizard.</li>
+  <li><b>Impulse responses</b> from the set are listed under the block, with channels and duration. With <b>Use as reverb</b> you adopt one as convolution reverb. The role of the channels in such recordings is not defined; the program uses the first two as a stereo pair.</li>
+  <li>Mixing routes, output buses and effect transitions from the file are for now not applied automatically; the regular definition remains in charge.</li>
+</ul>
+<figure><img src="afbeeldingen/en/60_akoestiek_klank.jpg" alt="Sound with acoustic configuration"><figcaption>The &ldquo;Acoustic configuration&rdquo; block at the top of Sound, with a summary and a button per impulse response. The images in this chapter were made with a temporary test file for a demo organ.</figcaption></figure>
+<div class="duo">
+  <figure><img src="afbeeldingen/en/61_akoestiek_zwelkasten_routing.jpg" alt="Swell boxes per rank in Routing"><figcaption>Routing, at the bottom: the Swell boxes per rank block with a &ldquo;Learn pedal&rdquo; button per box.</figcaption></figure>
+  <figure><img src="afbeeldingen/en/62_akoestiek_wizard_zwelkasten.jpg" alt="Wizard with swell box per rank"><figcaption>The wizard shows the box under the swell boxes and the crescendo.</figcaption></figure>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="tips">10. Keyboard shortcuts and tips</h2>
+<table>
+  <tr><th style="width:22%">Key</th><th>Function</th></tr>
+  <tr><td><kbd>F1</kbd> <kbd>F2</kbd> <kbd>F3</kbd></td><td>Organ, Organ Settings and App Settings.</td></tr>
+  <tr><td><kbd>F11</kbd></td><td>Full screen (console mode) on or off.</td></tr>
+  <tr><td><kbd>Esc</kbd></td><td>Full screen off.</td></tr>
+  <tr><td>Right-click or hold 3 s</td><td>On a button of the setter bar: link that button to a console button (MIDI learn).</td></tr>
+  <tr><td>Double-click on the volume</td><td>Master volume back to the default value.</td></tr>
+  <tr><td>Card held for 3 s</td><td>In the library: search the photo of that card again.</td></tr>
+</table>
+<ul>
+  <li>All settings are stored with each organ, also when you close the organ or quit the program.</li>
+  <li>For a fixed console: switch on <b>Start automatically with Windows</b> and <b>Load last opened organ automatically</b>, and use console mode.</li>
+  <li>With a set-up of more than two outputs: choose the outputs per keyboard under Routing, and then the same outputs for the background sounds.</li>
+</ul>
+
+<!-- ============================================================ -->
+<h2 id="problemen">11. Troubleshooting and feedback</h2>
+<table>
+  <tr><th style="width:30%">Problem</th><th>What you can try</th></tr>
+  <tr><td>No sound</td><td>Is the blower on? Does it say &ldquo;Audio active&rdquo; at the bottom? Is the right device set under Audio output, and do the outputs per keyboard match your audio interface? Use the test signal to hear the outputs.</td></tr>
+  <tr><td>The keyboard does not react</td><td>At the bottom it says &ldquo;MIDI not connected&rdquo; as long as there is no MIDI device. Check App Settings &rarr; MIDI and the MIDI channel per keyboard under Routing.</td></tr>
+  <tr><td>The organ sounds out of tune</td><td>Check that <b>Automatically retune pipes</b> is on, and under Sound choose the temperament &ldquo;Original&rdquo; or the temperament you want.</td></tr>
+  <tr><td>Crackling or stuttering</td><td>Lower the polyphony, draw fewer stops, switch the reverb off or choose a larger buffer. A short start buffer needs a fast drive; otherwise choose a longer one.</td></tr>
+  <tr><td>Too little memory</td><td>Choose a shorter start buffer, switch stereo samples off, or switch off listening positions you do not use.</td></tr>
+  <tr><td>Background sounds or effect stops are not heard on the right speaker</td><td>Under Routing, at &ldquo;Background sounds audio output&rdquo;, choose the same outputs as for the keyboards.</td></tr>
+</table>
+<p><b>Send feedback&hellip;</b> (App Settings &rarr; Update and feedback) creates a message with your report and the log files of the last sessions, so the developer can see what happened. You can also post your report on the project page on GitHub.</p>
+
+</main>
+</body>
+</html>

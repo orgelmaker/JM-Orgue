@@ -78,6 +78,14 @@ Alle versies met hun wijzigingen staan bij de
 
 ---
 
+## Handleiding
+
+Een volledige handleiding met schermafdrukken, in zeven talen (Nederlands, English,
+Français, Deutsch, Polski, Italiano, Español):
+[VirtualPipeOrgan/docs/handleiding](VirtualPipeOrgan/docs/handleiding/README.md).
+
+---
+
 ## Samplesets
 
 JM-Orgue leest drie soorten:

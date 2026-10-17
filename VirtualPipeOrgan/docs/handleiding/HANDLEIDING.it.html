@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Manuale di JM-Orgue</title>
+<link rel="stylesheet" href="handleiding.css">
+</head>
+<body>
+<main>
+
+<header class="titel">
+  <h1>JM-Orgue</h1>
+  <div class="onder">Manuale per la versione 0.8.93 &middot; ottobre 2026</div>
+</header>
+
+<p>JM-Orgue è un organo a canne virtuale per Windows, macOS e Linux. Riproduce direttamente i set di campioni Hauptwerk e GrandOrgue, compresi i grandi set surround, e si suona con una tastiera MIDI, una consolle o il mouse. Questo manuale guida attraverso il programma con schermate della versione 0.8.93.</p>
+<p class="klein">&copy; Martijn van der Kolk. Le schermate sono state realizzate con organi dimostrativi e propri set di prova; indirizzi di rete, token di accesso e cartelle utente sono stati resi illeggibili.</p>
+
+<nav class="inhoud">
+  <b>Indice</b>
+  <ol>
+    <li><a href="#start">Per iniziare</a></li>
+    <li><a href="#bibliotheek">La libreria</a></li>
+    <li><a href="#bespelen">Caricare e suonare un organo</a></li>
+    <li><a href="#werkbalk">La barra degli strumenti</a></li>
+    <li><a href="#posities">Più posizioni di ascolto</a></li>
+    <li><a href="#wizard">La procedura guidata per un organo nuovo</a></li>
+    <li><a href="#orgelinst">Impostazioni organo</a></li>
+    <li><a href="#algemeen">Impostazioni generali</a></li>
+    <li><a href="#akoestiek">Configurazione acustica di un set</a></li>
+    <li><a href="#tips">Scorciatoie da tastiera e consigli</a></li>
+    <li><a href="#problemen">Risoluzione dei problemi e feedback</a></li>
+  </ol>
+</nav>
+
+<!-- ============================================================ -->
+<h2 id="start">1. Per iniziare</h2>
+
+<h3>Installazione</h3>
+<p>Scarica il programma di installazione dell'ultima versione dalla pagina delle release del progetto (per Windows <code>JM-Orgue_&lt;versione&gt;_x64-setup.exe</code>) ed eseguilo. L'installazione è per un solo utente e non richiede diritti di amministratore. Per Windows esiste anche un pacchetto MSI, per macOS un DMG e per Linux un AppImage o un deb.</p>
+<p>Il programma può essere usato liberamente. I set di campioni non sono inclusi: li ottieni dai rispettivi autori. Nella pagina iniziale della libreria sono indicati alcuni autori che offrono set gratuiti.</p>
+
+<h3>Aggiornamento</h3>
+<p>JM-Orgue controlla da solo se esiste una nuova versione. In tal caso in alto compare un avviso. Scegli <b>Aggiorna ora</b>: il programma scarica l'aggiornamento, ne verifica la firma, lo installa e si riavvia. Se vuoi prima solo scaricare, scegli <b>Scarica</b>. Puoi anche controllare a mano in Impostazioni generali &rarr; Aggiornamento e feedback &rarr; <b>Cerca aggiornamenti</b>.</p>
+
+<h3>Le tre schermate principali</h3>
+<p>In alto ci sono tre schede: <b>Organo</b> (si suona), <b>Impostazioni organo</b> (tutto ciò che riguarda l'organo caricato) e <b>Impostazioni generali</b> (tutto ciò che riguarda il programma nel suo insieme). I tasti <kbd>F1</kbd>, <kbd>F2</kbd> e <kbd>F3</kbd> passano direttamente dall'una all'altra. La freccia accanto al nome dell'organo chiude l'organo e torna alla libreria.</p>
+
+<!-- ============================================================ -->
+<h2 id="bibliotheek">2. La libreria</h2>
+<p>All'avvio vedi la libreria degli organi: una scheda per organo con foto, nome, costruttore, località e numero di registri. Fai clic su una scheda per caricare l'organo.</p>
+<figure><img src="afbeeldingen/it/03_bibliotheek.jpg" alt="La libreria degli organi"><figcaption>La libreria con organi dimostrativi. In alto a destra ci sono i pulsanti per aggiungere organi e passare alle impostazioni; in alto a sinistra la scelta della lingua (NL, EN, FR, DE, PL, IT, ES).</figcaption></figure>
+
+<h3>Aggiungere organi</h3>
+<ul>
+  <li><b>.organ</b>: scegli la definizione dell'organo (GrandOrgue <code>.organ</code> o definizione Hauptwerk). Si sceglie il file di definizione, non la sola cartella dei campioni: solo la definizione conosce registri, unioni, tremoli ed eventuali posizioni di registrazione aggiuntive.</li>
+  <li><b>JM-Rec import</b>: importa un set di campioni creato con JM-Rec.</li>
+  <li><b>Esporta</b>: crea da una cartella di campioni una definizione d'organo (<code>.organ</code>), che poi carichi con il pulsante <b>.organ</b>.</li>
+</ul>
+
+<h3>Pulsanti della scheda: foto, ricerca, rimozione</h3>
+<p>Quando passi il mouse su una scheda, in alto a destra della foto compaiono tre pulsanti: <b>cerca la foto online</b> (globo), <b>scegli tu la foto</b> (macchina fotografica) e <b>rimuovi dalla libreria</b> (croce). La rimozione toglie solo la scheda dalla libreria; i file sul disco restano. Se tieni premuta una scheda per 3 secondi, il programma cerca di nuovo la foto.</p>
+<p>La <b>ricerca online</b> mostra alcune foto liberamente utilizzabili di Wikimedia Commons, in base al nome, al costruttore e alla località registrati nel set. Fai clic su una foto per adottarla; fonte e licenza compaiono sotto la scheda. Se il set contiene troppo pochi dati per trovare qualcosa, scrivi tu stesso un termine (chiesa, località o nome dell'organo) nel campo in alto nella finestra e scegli <b>Cerca</b>.</p>
+<figure><img src="afbeeldingen/it/04_online_zoeken.jpg" alt="Cerca la foto online"><figcaption>La finestra &laquo;Cerca la foto online&raquo; con il campo per un termine personale e le foto trovate con fonte e licenza.</figcaption></figure>
+
+<!-- ============================================================ -->
+<h2 id="bespelen">3. Caricare e suonare un organo</h2>
+
+<h3>Caricamento</h3>
+<p>Durante il caricamento JM-Orgue legge in memoria l'inizio di ogni registrazione di canna; il resto viene letto durante l'esecuzione. Un grande set surround può quindi richiedere un po' di tempo; la barra di avanzamento mostra a che punto è il caricamento.</p>
+<figure><img src="afbeeldingen/it/05_laden.jpg" alt="Schermata di caricamento"><figcaption>La schermata di caricamento con l'avanzamento della lettura dei campioni.</figcaption></figure>
+
+<h3>Il motore</h3>
+<p>Dopo il caricamento <b>il motore dell'organo è spento</b> e senza motore non si sente nulla. Accendilo con il pulsante <b>Motore</b> nella barra gialla o con il pulsante del motore nella barra degli strumenti. Appena il motore gira, la barra scompare. A motore acceso si sente anche il suono del motore del set (se lo contiene).</p>
+<figure><img src="afbeeldingen/it/06_orgelscherm_motor_uit.jpg" alt="Schermata dell'organo con il motore spento"><figcaption>La schermata dell'organo subito dopo il caricamento: motore spento, tutti i registri rientrati.</figcaption></figure>
+
+<h3>Registri, unioni e tremoli</h3>
+<p>Ogni manuale ha il proprio riquadro di registri. Fai clic su un pomello per estrarre il registro; i registri estratti diventano gialli. Il colore del nome indica la famiglia: le ance, per esempio, sono rosse, le misture e le quinte blu. In ogni riquadro ci sono anche il <b>tremolo</b> e le <b>unioni</b> (per esempio &laquo;Hauptwerk + Schwellwerk&raquo;). La barra verde a destra nell'intestazione del manuale mostra la posizione della cassa espressiva.</p>
+<figure><img src="afbeeldingen/it/07_orgelscherm_registers.jpg" alt="Schermata dell'organo con registri estratti"><figcaption>Motore acceso, alcuni registri estratti e l'unione Hauptwerk + Schwellwerk inserita. In basso la barra del combinatore.</figcaption></figure>
+
+<h3>La barra del combinatore</h3>
+<p>In basso c'è la barra del combinatore (setzer) con i comandi della consolle:</p>
+<table>
+  <tr><th style="width:26%">Elemento</th><th>Funzione</th></tr>
+  <tr><td><b>SET</b> e <b>0&ndash;9</b></td><td>Premi SET e poi una cifra per memorizzare la registrazione attuale; la cifra da sola la richiama. Un puntino accanto alla cifra indica che lì è memorizzata una registrazione.</td></tr>
+  <tr><td><b>&minus;1 / +1</b>, <b>&minus;10 / +10</b></td><td>Passa alla registrazione precedente o successiva, oppure di dieci avanti o indietro.</td></tr>
+  <tr><td><b>G.C.</b></td><td>General Cancel: tutti i registri spenti.</td></tr>
+  <tr><td><b>M 1&ndash;8</b></td><td>Livelli di memoria: otto banchi separati di registrazioni.</td></tr>
+  <tr><td><b>Cresc</b></td><td>Crescendo generale (vedi capitolo 7). La barra mostra il gradino attuale.</td></tr>
+  <tr><td>Cursore del volume</td><td>Volume principale. Un doppio clic ripristina il valore predefinito; con la rotella del mouse cambia di 1 dB alla volta.</td></tr>
+</table>
+<p class="klein">Ogni pulsante della barra del combinatore può essere collegato a un pulsante della tua consolle: fai clic con il tasto destro (o tieni premuto 3 secondi) e poi premi il pulsante sulla consolle.</p>
+
+<!-- ============================================================ -->
+<h2 id="werkbalk">4. La barra degli strumenti</h2>
+<p>Sopra i registri c'è la barra degli strumenti. A sinistra i manuali (Pedale, Hauptwerk, &hellip;) sono pulsanti: con essi mostri o nascondi il manuale. A destra ci sono le funzioni seguenti.</p>
+<table>
+  <tr><th style="width:24%">Pulsante</th><th>Cosa fa</th></tr>
+  <tr><td><b>Motore</b></td><td>Accende o spegne il motore dell'organo.</td></tr>
+  <tr><td><b>Disposizione</b></td><td>Apre il menu della disposizione (vedi sotto).</td></tr>
+  <tr><td><b>Barra</b></td><td>Mostra o nasconde la barra principale con le schede e il pulsante del profilo.</td></tr>
+  <tr><td><b>Schermo intero</b></td><td>Modalità consolle: solo registri e barra del combinatore (<kbd>F11</kbd>).</td></tr>
+  <tr><td><b>Nuovo schermo</b></td><td>Apre una finestra aggiuntiva con gli stessi registri, per esempio per un secondo monitor o un secondo manuale.</td></tr>
+  <tr><td><b>MP3</b></td><td>Registra ciò che senti. La registrazione va in Documenti\JM-Orgue-opnames. Fai clic sul contatore rosso per fermare; il programma dice poi dove si trova il file.</td></tr>
+  <tr><td><b>MIDI</b></td><td>Registra ciò che suoni (solo le note) come file .mid. Fai clic sul contatore blu per fermare e scegli dove salvare.</td></tr>
+  <tr><td><b>Notazione</b></td><td>Apre la finestra di notazione: le note compaiono mentre suoni, con livelli, sovraincisione e modifica. Qui si può anche aprire un file MIDI esistente.</td></tr>
+  <tr><td><b>Spegni il PC</b></td><td>Chiude il software <i>e il computer</i>, dopo conferma; prima viene salvato l'ultimo stato. Con il tasto destro o tenendo premuto 3 secondi si collega il pulsante a un pulsante della consolle.</td></tr>
+</table>
+
+<h3>Il menu della disposizione</h3>
+<p>Con <b>Disposizione</b> adatti l'aspetto allo schermo: <b>Adatta</b> sceglie la dimensione dei pomelli in modo che tutti i registri stiano sullo schermo, i pulsanti meno/più cambiano larghezza e altezza dei pomelli, e inoltre scegli se disporre i manuali uno sotto l'altro o affiancati (verticale), pomelli tondi invece che rettangolari e dove mettere le unioni (nel manuale o in una barra propria). La scelta viene ricordata per ogni organo.</p>
+<figure><img src="afbeeldingen/it/08_indeling_menu.jpg" alt="Il menu della disposizione"><figcaption>Il menu Disposizione nella barra degli strumenti.</figcaption></figure>
+
+<h3>Schermo intero (modalità consolle)</h3>
+<p>In questa modalità scompaiono la barra del titolo, la barra delle applicazioni di Windows e la barra principale: vedi solo i registri e la barra del combinatore. In alto c'è una stretta striscia con quattro pulsanti: <b>Barre</b> (riporta temporaneamente la barra principale), <b>Motore</b> (acceso o spento), <b>Esci da schermo intero</b> e <b>Spegni</b> (chiude software e computer). <kbd>F11</kbd> attiva e disattiva questa modalità; <kbd>Esc</kbd> la disattiva.</p>
+<figure><img src="afbeeldingen/it/09_volledig_scherm.jpg" alt="Schermo intero"><figcaption>Modalità consolle: registri, barra del combinatore e in alto la striscia con i quattro pulsanti.</figcaption></figure>
+
+<h3>Un secondo schermo</h3>
+<p><b>Nuovo schermo</b> apre una finestra separata che puoi trascinare su un altro monitor o lasciare piccola accanto alla finestra principale. Ha una propria disposizione: se i pomelli sono troppo piccoli, scegli <b>Disposizione</b> e imposta larghezza e altezza dei pomelli oppure scegli i manuali uno sotto l'altro o affiancati.</p>
+<figure><img src="afbeeldingen/it/43_nieuw_scherm.jpg" alt="Un secondo schermo"><figcaption>Uno schermo aggiuntivo con registri leggibili, qui in una finestra di 1000 &times; 900 pixel.</figcaption></figure>
+
+<!-- ============================================================ -->
+<h2 id="posities">5. Più posizioni di ascolto</h2>
+<p>Alcuni set di campioni sono registrati in più punti della chiesa, per esempio vicino, davanti, a metà e dietro. Un set così mostra nella barra degli strumenti i pulsanti <b>Prospettiva</b>, uno per posizione. Fai clic su una posizione per attivarla o disattivarla; ne possono suonare più insieme. Alla loro destra c'è la <b>posizione di ascolto</b>: un cursore tra &laquo;alla consolle&raquo; e &laquo;in fondo&raquo; che mescola in modo continuo le posizioni registrate.</p>
+<figure><img src="afbeeldingen/it/50_nancy_orgelscherm.jpg" alt="Schermata dell'organo con prospettive"><figcaption>Un set con quattro posizioni di registrazione (Close, Front, Middle, Rear) e il cursore della posizione di ascolto.</figcaption></figure>
+<div class="tip"><b>Suggerimento</b> Ogni posizione occupa memoria e potenza di calcolo. Se tutto non sta nella memoria del computer, la prima volta il programma carica solo la posizione più vicina all'organo. Nelle Impostazioni organo trovi il blocco &laquo;Prospettive e voci multiple&raquo;: lì scegli quali posizioni caricare, regoli il volume di ciascuna e, con &laquo;Tieni tutte le posizioni in memoria&raquo;, passi da una posizione all'altra all'istante. Una nuova scelta delle posizioni caricate ha effetto dopo aver ricaricato l'organo.</div>
+
+<!-- ============================================================ -->
+<h2 id="wizard">6. La procedura guidata per un organo nuovo</h2>
+<p>Quando carichi un organo per la prima volta, si avvia da sola la procedura guidata &laquo;Configurazione dell'organo&raquo;. In sei passi percorre tutto ciò che va collegato alla tua consolle. Puoi cambiare tutto in seguito e puoi riavviare la procedura in Impostazioni organo &rarr; Instradamento &rarr; <b>Procedura guidata</b>. <b>Più tardi</b> chiude la procedura e la riproporrà alla prossima apertura; <b>Salta</b> (passo 1) la salta del tutto.</p>
+<div class="duo">
+  <figure><img src="afbeeldingen/it/20_wizard_1.jpg" alt="Procedura guidata, passo 1"><figcaption>Passo 1: cosa fa la procedura.</figcaption></figure>
+  <figure><img src="afbeeldingen/it/20_wizard_2.jpg" alt="Procedura guidata, passo 2"><figcaption>Passo 2: canale MIDI per manuale.</figcaption></figure>
+</div>
+<ol>
+  <li><b>Inizio</b>: panoramica dei passi.</li>
+  <li><b>Canale MIDI per manuale</b>: per ogni manuale scegli <b>Apprendi</b> e suona un tasto su quel manuale. Il programma ricorda il canale. I pulsanti funzionano solo se è collegato un dispositivo MIDI (Impostazioni generali &rarr; MIDI); altrimenti compare un avviso.</li>
+  <li><b>Casse espressive e crescendo</b>: scegli <b>Apprendi</b> e muovi il pedale da completamente chiuso a completamente aperto. Lo stesso vale per il crescendo generale. Se il set ha casse espressive per voce (capitolo 9), compaiono anche qui.</li>
+  <li><b>Uscite per gli altoparlanti</b>: scegli driver e dispositivo, salvali come profilo &laquo;Altoparlanti&raquo; e scegli per ogni manuale le uscite dell'interfaccia audio su cui deve suonare. Sotto ci sono le stesse scelte per il suono del motore, il rumore ambientale e i clic della meccanica, i registri degli effetti e il rumore del tremolo, se il set li ha.</li>
+  <li><b>Uscite per le cuffie</b>: lo stesso per il secondo profilo, per esempio l'uscita cuffie. Da quel momento passi da un profilo all'altro con il pulsante <b>Altoparlanti</b> in alto a destra.</li>
+  <li><b>Fatto</b>: le impostazioni sono state salvate per questo organo.</li>
+</ol>
+<div class="duo">
+  <figure><img src="afbeeldingen/it/20_wizard_3.jpg" alt="Procedura guidata, passo 3"><figcaption>Passo 3: apprendimento di casse espressive e crescendo.</figcaption></figure>
+  <figure><img src="afbeeldingen/it/20_wizard_4.jpg" alt="Procedura guidata, passo 4"><figcaption>Passo 4: driver, dispositivo, canali per manuale e rumori di fondo per gli altoparlanti.</figcaption></figure>
+  <figure><img src="afbeeldingen/it/20_wizard_5.jpg" alt="Procedura guidata, passo 5"><figcaption>Passo 5: lo stesso per le cuffie.</figcaption></figure>
+  <figure><img src="afbeeldingen/it/20_wizard_6.jpg" alt="Procedura guidata, passo 6"><figcaption>Passo 6: fatto.</figcaption></figure>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="orgelinst">7. Impostazioni organo</h2>
+<p>Tutte le impostazioni dell'organo caricato vengono memorizzate con quell'organo. In alto ci sono cinque schede: <b>Suono</b>, <b>Crescendo</b>, <b>Ordine dei registri</b>, <b>Instradamento</b> e <b>Tutto</b>; l'ultima dispone tutti i blocchi uno sotto l'altro.</p>
+
+<h3>Suono</h3>
+<p>Il primo blocco contiene le impostazioni principali:</p>
+<ul>
+  <li><b>Volume</b>: il volume principale di questo organo.</li>
+  <li><b>Temperamento</b>: &laquo;Originale&raquo; suona le canne come sono state registrate. Gli altri temperamenti (equabile e temperamenti storici) accordano le canne in base all'altezza misurata di ogni registrazione. Sotto la scelta vedi quante canne hanno un'altezza misurata. Con <b>Temperamento personale...</b> imposti tu stesso lo scarto in cent per ogni nota.</li>
+  <li><b>Accordatura</b>: tutto insieme più alto o più basso, in cent.</li>
+</ul>
+<p>Il <b>riverbero</b> regola il riverbero. Se il set ha già l'acustica della chiesa nelle registrazioni, viene segnalato (con il pulsante <b>Torna alla registrazione (riverbero spento)</b> per disattivare il riverbero aggiuntivo): un riverbero aggiuntivo è allora questione di gusto. Scegli tra <b>Algoritmico</b> (riverbero calcolato con RT60, ritardo, smorzamento e dimensione della sala, anche come preset) e <b>A convoluzione (IR)</b> con una propria risposta all'impulso (IR). Con <b>Mix</b> decidi quanto riverbero si sente.</p>
+<figure><img src="afbeeldingen/it/10_klank_1.jpg" alt="Scheda Suono, parte alta"><figcaption>Suono, in alto: impostazioni principali (volume, temperamento, accordatura) e riverbero.</figcaption></figure>
+<p>Il <b>timbro di questo organo</b> è una regolazione del timbro separata per ogni organo; la correzione per cuffie o altoparlanti è distinta, nelle impostazioni generali. Il <b>modello del vento</b> fa &laquo;respirare&raquo; l'organo: un accordo con molti registri abbassa la pressione del vento, come in un organo vero, e flauti e ance reagiscono in modo diverso. Scegli il numero di gruppi di vento (quali manuali condividono gli stessi mantici) e, per ogni gruppo, dimensione del mantice, smorzamento, caduta massima di pressione e carattere del vento.</p>
+<figure><img src="afbeeldingen/it/10_klank_2.jpg" alt="Scheda Suono, timbro e modello del vento"><figcaption>Suono, più sotto: timbro di questo organo e modello del vento per ogni gruppo.</figcaption></figure>
+<p><b>Rumori</b> mostra i suoni continui contenuti nel set, come il motore e il rumore della sala. Imposti il volume, accendi o spegni il <b>motore</b> e puoi attivare la <b>meccanica della tastiera</b> (tasti che scattano). La meccanica della tastiera è disattivata per impostazione predefinita, perché occupa molta memoria e richiede di ricaricare l'organo.</p>
+<figure><img src="afbeeldingen/it/10_klank_3.jpg" alt="Scheda Suono, rumori"><figcaption>Suono: gruppi di vento e blocco Rumori con volume, motore e meccanica della tastiera.</figcaption></figure>
+<p>In fondo c'è l'<b>intonazione delle canne</b>: scegli a sinistra un registro e regola volume e accordatura di ogni canna singolarmente.</p>
+<figure><img src="afbeeldingen/it/10_klank_4.jpg" alt="Scheda Suono, intonazione delle canne"><figcaption>Suono, in fondo: intonazione delle canne. Scegli a sinistra un registro per intonarne le canne.</figcaption></figure>
+
+<h3>Crescendo</h3>
+<p>Il <b>crescendo generale</b> estrae passo dopo passo sempre più registri quando muovi il pedale del crescendo. Decidi tu quali registri entrano a quale gradino:</p>
+<ul>
+  <li><b>Attivo</b> accende il crescendo; <b>Gradini</b> è il numero di gradini.</li>
+  <li><b>Riempimento automatico</b> inserisce una proposta adatta ai registri di questo organo. Con le opzioni sotto decidi se entrano le unioni, se entrano i registri di colore (sesquialtera, cornetto, terza), le ance da 32&prime; e le ance in chamade, e se le unioni d'ottava entrano solo nel tutti. <b>Cancella</b> svuota la matrice.</li>
+  <li>Nella matrice, un clic su una casella attiva o disattiva quel registro in quel gradino; <kbd>Shift</kbd>+clic lo imposta per tutti i gradini da quello in poi.</li>
+  <li><b>Apprendi pedale</b> collega il tuo pedale del crescendo; in fondo puoi anche inserire a mano canale e numero CC.</li>
+</ul>
+<figure><img src="afbeeldingen/it/11_crescendo.jpg" alt="Scheda Crescendo"><figcaption>La matrice del crescendo: registri nelle righe, gradini nelle colonne.</figcaption></figure>
+
+<h3>Ordine dei registri</h3>
+<p>Qui decidi l'ordine dei registri in ogni manuale. Trascina un registro per la maniglia per spostarlo. Accanto a ogni registro vedi la lunghezza in piedi e la famiglia (colore del nome). Con le frecce cambi l'ordine passo per passo e <b>Ripristina</b> riporta l'ordine del set.</p>
+<figure><img src="afbeeldingen/it/12_registersortering.jpg" alt="Scheda Ordine dei registri"><figcaption>I registri di ogni manuale, nell'ordine in cui compaiono nella schermata dell'organo.</figcaption></figure>
+
+<h3>Instradamento</h3>
+<p>Questa scheda collega l'organo al tuo hardware. In alto c'è un blocco per ogni manuale:</p>
+<ul>
+  <li><b>Canale</b>: il canale MIDI su cui il manuale ascolta (&laquo;Tutti&raquo; = ogni canale). <b>Apprendi</b> fissa canale ed estensione quando suoni prima il tasto più basso e poi il più alto.</li>
+  <li><b>Trasp</b>: trasposizione in semitoni. <b>Estensione</b>: tasto più basso e più alto. <b>Ottava corta</b>: per set con ottava di bassi corta.</li>
+  <li><b>Cassa espressiva</b>: attiva la cassa espressiva di quel manuale; compaiono allora i pulsanti per apprendere il pedale e le impostazioni di volume minimo e frequenza di taglio a cassa chiusa.</li>
+  <li><b>Alimentazione del vento</b>: a quale gruppo di vento appartiene il manuale.</li>
+  <li><b>Panorama</b> e <b>Uscite</b>: posizione nell'immagine stereo e canali di uscita dell'interfaccia audio su cui suona il manuale. Due uscite consecutive formano una coppia stereo; un singolo canale suona in mono.</li>
+  <li><b>C/Cis</b>: divide le canne su due lati, come i somieri Do e Do diesis in un organo vero; forza e caduta globali sono nel blocco sopra.</li>
+  <li><b>LFO del tremolo</b>: se il set non ha vere registrazioni del tremolo, il programma lo calcola. Velocità, ampiezza e altezza si regolano qui.</li>
+</ul>
+<figure><img src="afbeeldingen/it/13_routing_boven.jpg" alt="Scheda Instradamento, parte alta"><figcaption>Instradamento, in alto: pulsante Procedura guidata, divisione C/Cis e primo manuale con canale, estensione, panorama, uscite e tremolo.</figcaption></figure>
+<figure><img src="afbeeldingen/it/15_routing_zwelkast.jpg" alt="Instradamento con cassa espressiva"><figcaption>Un manuale con la cassa espressiva attivata: apprendimento del pedale, canale e CC manuali, volume minimo e frequenza di taglio.</figcaption></figure>
+
+<p>Più sotto c'è l'<b>Uscita audio dei rumori</b>: per ogni tipo di suono scegli da quali uscite viene riprodotto. <b>Motore</b> è il suono del motore; <b>Rumore ambientale e clic della meccanica</b> riguarda il rumore della sala e i clic di registri e tasti; i set con registri degli effetti (cimbalstern, usignolo e simili) e rumore del tremolo hanno una riga propria. Conta soprattutto con più di due uscite, quando i manuali suonano su canali diversi da 1&ndash;2. Subito sotto:</p>
+<ul>
+  <li><b>Tastiera continua</b>: i tasti fuori dall'estensione registrata di un registro suonano la canna più vicina, trasposta all'altezza giusta, invece di tacere. Una tastiera da 61 tasti continua così a suonare su un set con meno note.</li>
+  <li><b>Accordare automaticamente le canne</b>: accorda le canne in base all'altezza misurata, conservando i registri volutamente ondeggianti. Attivo per impostazione predefinita.</li>
+  <li><b>Correzione d'altezza</b>: tutto insieme più alto o più basso in cent (<b>Zero</b> ripristina il valore).</li>
+</ul>
+<figure><img src="afbeeldingen/it/16_routing_bijgeluiden.jpg" alt="Instradamento: rumori"><figcaption>Uscita audio dei rumori con pulsanti per ogni canale di uscita, tastiera continua e correzione d'altezza.</figcaption></figure>
+<p>Più in basso ci sono le <b>Unioni</b> (attivazione e disattivazione, con un pulsante MIDI per ogni unione) e le <b>unioni aggiuntive</b>: unioni che non sono nel set di campioni ma che derivano dalla disposizione dei manuali; seleziona ciò che vuoi aggiungere e compare subito nella barra delle unioni. Le <b>Assegnazioni MIDI</b> sono un unico elenco di tutte le assegnazioni MIDI di questo organo, che puoi modificare, eliminare o aggiungere a mano. In fondo, <b>Apri .mid</b> permette di riprodurre un file MIDI sull'organo.</p>
+<figure><img src="afbeeldingen/it/14_routing_onder.jpg" alt="Instradamento: unioni e MIDI"><figcaption>Instradamento, in fondo: unioni aggiuntive, assegnazioni MIDI e riproduzione MIDI.</figcaption></figure>
+
+<!-- ============================================================ -->
+<h2 id="algemeen">8. Impostazioni generali</h2>
+<p>Queste impostazioni valgono per il programma nel suo insieme. Le schede sono <b>Uscita audio</b>, <b>Correzione dei campioni</b>, <b>MIDI</b>, <b>Apprendi pulsanti</b>, <b>Visualizzazione</b> e <b>Aggiornamento e feedback</b>.</p>
+
+<h3>Uscita audio</h3>
+<ul>
+  <li><b>Driver audio</b> e dispositivo: per la latenza minima scegli ASIO (per esempio il driver della tua interfaccia audio); WASAPI funziona con la normale scheda audio di Windows. La riga &laquo;Attualmente&raquo; qui sotto mostra cosa sta suonando in questo momento.</li>
+  <li><b>Segnale di prova</b>: fai clic sul numero di un canale per inviare un suono esattamente su quell'uscita e sentire quale presa appartiene a quale altoparlante.</li>
+  <li><b>Polifonia</b> e <b>Core di calcolo per il missaggio</b>: il numero massimo di canne che suonano insieme e il numero di core del processore su cui si distribuisce il lavoro di missaggio. La scelta predefinita è adatta al tuo computer; l'indicatore di carico mostra l'effetto.</li>
+  <li><b>Riproduci i campioni stereo in stereo</b>: mantiene l'immagine stereo delle registrazioni stereo. Disattivato significa mix mono e dimezza l'uso di memoria di tali set.</li>
+  <li><b>Buffer iniziale per registrazione</b> (novità di questa versione): quanto di ogni registrazione di canna è subito in memoria: 200 ms, 300 ms, 500 ms, 1 s o 2 s (predefinito). Un buffer più breve fa risparmiare molta memoria e tempo di caricamento; il resto viene letto durante l'esecuzione. La scelta vale dopo aver ricaricato l'organo.</li>
+  <li><b>Dimensione del buffer</b>: più piccola significa latenza minore, ma carica di più il computer. <b>Applica</b> attiva la scelta.</li>
+</ul>
+<div class="tip"><b>Suggerimento</b> Se negli accordi grandi senti un breve ripetersi dell'attacco di una canna, scegli un buffer iniziale più lungo. Se non lo senti e hai poca memoria, 500 ms o 1 s sono una buona scelta. Un disco veloce (SSD) permette buffer brevi.</div>
+<figure><img src="afbeeldingen/it/30_audio_1.jpg" alt="Uscita audio, parte alta"><figcaption>Uscita audio, in alto: driver, dispositivo, segnale di prova, polifonia, core di calcolo, campioni stereo, buffer iniziale e dimensione del buffer.</figcaption></figure>
+<p>I <b>profili di uscita</b> memorizzano due impostazioni complete di uscita, per esempio altoparlanti tramite ASIO e cuffie tramite WASAPI, con la scelta dei canali per ogni manuale. Scegli l'uscita desiderata, fai clic su <b>Salva la scelta attuale</b> accanto a Altoparlanti o Cuffie, poi passa dall'una all'altra con il pulsante <b>Altoparlanti</b> in alto a destra o con un pulsante MIDI appreso. Il profilo attivo è evidenziato.</p>
+<p>La <b>correzione per cuffie o altoparlanti</b> applica una correzione del timbro alla sola uscita (non all'organo): scegli per quale profilo vale, attivala e scegli un preset dall'elenco AutoEq oppure importa o esporta una correzione tua.</p>
+<p>Più sotto ci sono le opzioni per avviare automaticamente il programma con Windows, caricare automaticamente l'ultimo organo aperto, chiudere tutto il software con la croce sullo schermo aggiuntivo e ripristinare l'ultima registrazione. L'<b>archivio MIDI automatico</b> salva in background tutto ciò che suoni come file .mid per sessione: inizia con la prima nota e termina dopo un silenzio.</p>
+<figure><img src="afbeeldingen/it/30_audio_2.jpg" alt="Uscita audio, parte centrale"><figcaption>Uscita audio, più sotto: profili di uscita, correzione per cuffie o altoparlanti, opzioni di avvio, archivio MIDI e controllo remoto. In questa immagine cartella e indirizzo di rete sono stati sostituiti di proposito da un'indicazione.</figcaption></figure>
+<p>Con il <b>controllo remoto in rete (tablet/telefono)</b> comandi l'organo da un tablet o telefono sulla stessa rete Wi-Fi. Il programma mostra un indirizzo e un codice QR da scansionare, e tu scegli quali elementi e quali manuali compaiono sullo schermo esterno. La prima volta il Firewall di Windows chiede se JM-Orgue può ricevere connessioni: scegli &laquo;Consenti accesso&raquo; per le reti private.</p>
+<div class="let-op"><b>Attenzione</b> L'indirizzo contiene un token di accesso e funziona solo nella tua rete, senza cifratura. Non condividere l'indirizzo né il codice QR; con <b>Nuovo token</b> revochi l'accesso a un dispositivo che li aveva scansionati.</div>
+<p>In fondo c'è la <b>frequenza di campionamento</b>. Dipende dalla scheda audio stessa: con ASIO la imposti nel pannello del driver, con WASAPI nelle impostazioni audio di Windows.</p>
+<figure><img src="afbeeldingen/it/30_audio_3.jpg" alt="Uscita audio, parte bassa"><figcaption>Uscita audio, in fondo: controllo remoto con elementi e manuali sullo schermo esterno e frequenza di campionamento. Codice QR e indirizzo sono qui oscurati.</figcaption></figure>
+
+<h3>Correzione dei campioni</h3>
+<p>Due strumenti per mettere in ordine i campioni dell'organo caricato. <b>Silenzio prima dell'attacco</b> trova e toglie il silenzio all'inizio dei campioni (soglia del silenzio in dB e inizio da conservare si impostano da sé); <b>Loop</b> trova un buon loop di sostegno, vi inserisce una dissolvenza incrociata per una transizione dolce e salva i punti di loop nel file, con l'opzione di farlo solo per i file senza loop. Con <b>Scansiona</b> controlli prima cosa cambierebbe. Gli originali vengono prima conservati in una cartella <code>_backup</code>, prima che i file vengano sovrascritti.</p>
+<figure><img src="afbeeldingen/it/31_samplefix.jpg" alt="Correzione dei campioni"><figcaption>Correzione dei campioni: silenzio prima dell'attacco e loop, ciascuno con il pulsante Scansiona e il pulsante di applicazione.</figcaption></figure>
+
+<h3>MIDI</h3>
+<p><b>Ingresso MIDI</b> mostra i dispositivi MIDI collegati (con <b>Aggiorna dispositivi</b> cerchi di nuovo); in <b>Bluetooth MIDI</b> cerchi dispositivi wireless con <b>Scansiona</b>. Il <b>ritorno di segnalazione (MIDI out)</b> fa illuminare la tua consolle in base alla registrazione: scegli il protocollo (luci dei registri tramite Note On/Off, display di testo Hauptwerk o consolle Johannus/Content), l'uscita MIDI, il canale e la nota di base. Ogni registro riceve poi automaticamente un numero di nota a partire dalla nota di base, oppure apprendi un vero pulsante della consolle per ogni registro con <b>Apprendi per ogni voce&hellip;</b>.</p>
+<figure><img src="afbeeldingen/it/32_midi.jpg" alt="MIDI"><figcaption>Ingresso MIDI, Bluetooth MIDI e ritorno di segnalazione alla consolle.</figcaption></figure>
+
+<h3>Apprendi pulsanti</h3>
+<p>Qui apprendi i pulsanti fissi della consolle (pistoni): accordatore, SET, passi dei preset, livelli di memoria e spegnimento del computer. I pulsanti delle cifre 0&ndash;9 si apprendono sulla barra del combinatore stessa (tasto destro o pressione di 3 secondi).</p>
+<figure><img src="afbeeldingen/it/33_knoppen_inleren.jpg" alt="Apprendi pulsanti"><figcaption>Apprendimento dei pulsanti della consolle.</figcaption></figure>
+
+<h3>Visualizzazione</h3>
+<p>Scegli la lingua del programma (Nederlands, English, Fran&ccedil;ais, Deutsch, Polski, Italiano ed Espa&ntilde;ol) e l'aspetto: cinque preset di colori pronti (Base, Legno classico, Moderno minimalista, Notte e Sera) oppure imposta colori tuoi, dai loro un nome ed esportali. Più sotto regoli stile, dimensione e spessore del carattere dei registri e lo sfondo.</p>
+<figure><img src="afbeeldingen/it/34_weergave.jpg" alt="Visualizzazione"><figcaption>Aspetto e disposizione: lingua, preset e carattere dei registri.</figcaption></figure>
+
+<h3>Aggiornamento e feedback</h3>
+<p>Qui trovi il numero di versione, le informazioni sulle fonti dei preset per cuffie e dei dati degli altoparlanti utilizzati, e i pulsanti <b>Invia feedback&hellip;</b>, <b>Tramite GitHub (issues)</b> e <b>Cerca aggiornamenti</b>.</p>
+<figure><img src="afbeeldingen/it/35_update_feedback.jpg" alt="Aggiornamento e feedback"><figcaption>Informazioni sul programma e feedback.</figcaption></figure>
+
+<!-- ============================================================ -->
+<h2 id="akoestiek">9. Configurazione acustica di un set</h2>
+<p>La definizione di un organo può rimandare a un file aggiuntivo, <code>JM-ACOUSTICS.json</code>, che descrive l'acustica del set: casse espressive assegnate a una voce anziché a un manuale, risposte all'impulso per il riverbero, percorsi di missaggio e uscite. Se il tuo set ha un file così, lo riconosci da un blocco aggiuntivo in Impostazioni organo &rarr; Suono.</p>
+<ul>
+  <li>Il programma legge il file e lo controlla: dimensione del file, validità di tutti i riferimenti, percorsi che restano nella cartella dell'organo e collegamenti delle canne che corrispondono alla definizione caricata. Se qualcosa non va, l'organo suona semplicemente secondo la definizione normale e il blocco indica perché la configurazione non è stata letta.</li>
+  <li><b>Casse espressive per voce</b>: le voci che il file colloca in una cassa ricevono una propria cassa espressiva e un proprio pedale d'espressione, indipendentemente dal manuale su cui suonano. Una voce usata da due manuali segue così sempre la stessa cassa. Il pedale si apprende in Instradamento (<b>Apprendi pedale</b>) o nella procedura guidata.</li>
+  <li>Le <b>risposte all'impulso</b> del set sono elencate sotto il blocco, con canali e durata. Con <b>Usa come riverbero</b> adotti una come riverbero a convoluzione. Il ruolo dei canali in tali registrazioni non è definito; il programma tratta i primi due come una coppia stereo.</li>
+  <li>I percorsi di missaggio, i bus di uscita e le transizioni degli effetti del file non vengono per ora applicati automaticamente; resta determinante la definizione normale.</li>
+</ul>
+<figure><img src="afbeeldingen/it/60_akoestiek_klank.jpg" alt="Suono con configurazione acustica"><figcaption>Il blocco &laquo;Configurazione acustica&raquo; in alto in Suono, con il riepilogo e un pulsante per ogni risposta all'impulso. Le immagini di questo capitolo sono state realizzate con un file di prova temporaneo su un organo dimostrativo.</figcaption></figure>
+<div class="duo">
+  <figure><img src="afbeeldingen/it/61_akoestiek_zwelkasten_routing.jpg" alt="Casse espressive per voce in Instradamento"><figcaption>Instradamento, in fondo: il blocco Casse espressive per voce con il pulsante &laquo;Apprendi pedale&raquo; per ogni cassa.</figcaption></figure>
+  <figure><img src="afbeeldingen/it/62_akoestiek_wizard_zwelkasten.jpg" alt="Procedura guidata con cassa espressiva per voce"><figcaption>La procedura guidata mostra la cassa sotto casse espressive e crescendo.</figcaption></figure>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="tips">10. Scorciatoie da tastiera e consigli</h2>
+<table>
+  <tr><th style="width:22%">Tasto</th><th>Funzione</th></tr>
+  <tr><td><kbd>F1</kbd> <kbd>F2</kbd> <kbd>F3</kbd></td><td>Organo, Impostazioni organo e Impostazioni generali.</td></tr>
+  <tr><td><kbd>F11</kbd></td><td>Schermo intero (modalità consolle) acceso o spento.</td></tr>
+  <tr><td><kbd>Esc</kbd></td><td>Uscire dallo schermo intero.</td></tr>
+  <tr><td>Tasto destro o 3 s di pressione</td><td>Su un pulsante della barra del combinatore: collega quel pulsante a un pulsante della consolle (apprendimento MIDI).</td></tr>
+  <tr><td>Doppio clic sul volume</td><td>Il volume principale torna al valore predefinito.</td></tr>
+  <tr><td>Scheda premuta 3 s</td><td>Nella libreria: cerca di nuovo la foto di quella scheda.</td></tr>
+</table>
+<ul>
+  <li>Tutte le impostazioni vengono memorizzate per ogni organo, anche quando chiudi l'organo o il programma.</li>
+  <li>Per una consolle fissa: attiva <b>Avvio automatico con Windows</b> e <b>Carica automaticamente l'ultimo organo aperto</b> e usa la modalità consolle.</li>
+  <li>Con più di due uscite: scegli in Instradamento le uscite di ogni manuale e poi le stesse uscite per i rumori.</li>
+</ul>
+
+<!-- ============================================================ -->
+<h2 id="problemen">11. Risoluzione dei problemi e feedback</h2>
+<table>
+  <tr><th style="width:30%">Problema</th><th>Cosa puoi provare</th></tr>
+  <tr><td>Nessun suono</td><td>Il motore gira? In basso c'è &laquo;Audio attivo&raquo;? In Uscita audio è impostato il dispositivo giusto e le uscite dei manuali corrispondono alla tua interfaccia audio? Usa il segnale di prova per sentire le uscite.</td></tr>
+  <tr><td>La tastiera non reagisce</td><td>In basso compare &laquo;MIDI non connesso&raquo; finché non c'è un dispositivo MIDI. Controlla Impostazioni generali &rarr; MIDI e il canale MIDI del manuale in Instradamento.</td></tr>
+  <tr><td>L'organo suona stonato</td><td>Controlla che l'accordatura automatica delle canne sia attiva e scegli in Suono il temperamento &laquo;Originale&raquo; o quello desiderato.</td></tr>
+  <tr><td>Scricchiolii o interruzioni</td><td>Riduci la polifonia, estrai meno registri, disattiva il riverbero o scegli un buffer più grande. Un buffer iniziale breve richiede un disco veloce; altrimenti scegline uno più lungo.</td></tr>
+  <tr><td>Memoria insufficiente</td><td>Scegli un buffer iniziale più breve, disattiva i campioni stereo oppure le posizioni di ascolto che non usi.</td></tr>
+  <tr><td>Rumori o registri degli effetti non si sentono nell'altoparlante giusto</td><td>In Instradamento, in &laquo;Uscita audio dei rumori&raquo;, scegli le stesse uscite dei manuali.</td></tr>
+</table>
+<p><b>Invia feedback&hellip;</b> (Impostazioni generali &rarr; Aggiornamento e feedback) prepara un messaggio con la tua segnalazione e i file di registro delle ultime sessioni, così lo sviluppatore può vedere cosa è successo. Puoi anche pubblicare la segnalazione nella pagina del progetto su GitHub.</p>
+
+</main>
+</body>
+</html>

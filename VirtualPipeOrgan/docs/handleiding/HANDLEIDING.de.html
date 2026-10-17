@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JM-Orgue Handbuch</title>
+<link rel="stylesheet" href="handleiding.css">
+</head>
+<body>
+<main>
+
+<header class="titel">
+  <h1>JM-Orgue</h1>
+  <div class="onder">Handbuch f&uuml;r Version 0.8.93 &middot; Oktober 2026</div>
+</header>
+
+<p>JM-Orgue ist eine virtuelle Pfeifenorgel f&uuml;r Windows, macOS und Linux. Das Programm spielt Hauptwerk- und GrandOrgue-Sample-Sets direkt ab, auch gro&szlig;e Surround-Sets, und wird mit einer MIDI-Tastatur, einem Orgelspieltisch oder der Maus gespielt. Dieses Handbuch f&uuml;hrt anhand von Bildschirmfotos der Version 0.8.93 durch das Programm.</p>
+<p class="klein">&copy; Martijn van der Kolk. Die Bildschirmfotos wurden mit Demo-Orgeln und eigenen Testsets erstellt; Netzwerkadressen, Zugriffstoken und Benutzerordner sind unkenntlich gemacht.</p>
+
+<nav class="inhoud">
+  <b>Inhalt</b>
+  <ol>
+    <li><a href="#start">Erste Schritte</a></li>
+    <li><a href="#bibliotheek">Die Bibliothek</a></li>
+    <li><a href="#bespelen">Eine Orgel laden und spielen</a></li>
+    <li><a href="#werkbalk">Die Werkzeugleiste</a></li>
+    <li><a href="#posities">Mehrere H&ouml;rpositionen</a></li>
+    <li><a href="#wizard">Der Assistent f&uuml;r eine neue Orgel</a></li>
+    <li><a href="#orgelinst">Orgel-Einstellungen</a></li>
+    <li><a href="#algemeen">Allgemeine Einstellungen</a></li>
+    <li><a href="#akoestiek">Akustische Konfiguration eines Sets</a></li>
+    <li><a href="#tips">Tastenk&uuml;rzel und Tipps</a></li>
+    <li><a href="#problemen">Probleml&ouml;sung und Feedback</a></li>
+  </ol>
+</nav>
+
+<!-- ============================================================ -->
+<h2 id="start">1. Erste Schritte</h2>
+
+<h3>Installieren</h3>
+<p>Laden Sie das Installationsprogramm der neuesten Version von der Release-Seite des Projekts herunter (f&uuml;r Windows <code>JM-Orgue_&lt;Version&gt;_x64-setup.exe</code>) und starten Sie es. Die Installation erfolgt pro Benutzer und braucht keine Administratorrechte. F&uuml;r Windows gibt es auch ein MSI-Paket, f&uuml;r macOS ein DMG und f&uuml;r Linux ein AppImage oder deb.</p>
+<p>Das Programm selbst darf frei genutzt werden. Die Sample-Sets sind nicht enthalten: Sie erhalten sie bei den jeweiligen Herstellern. Auf der Startseite der Bibliothek stehen einige Hersteller, die Sets kostenlos anbieten.</p>
+
+<h3>Aktualisieren</h3>
+<p>JM-Orgue pr&uuml;ft selbst, ob es eine neue Version gibt. Falls ja, erscheint oben eine Meldung. W&auml;hlen Sie <b>Jetzt aktualisieren</b>: Das Programm l&auml;dt das Update herunter, pr&uuml;ft die Signatur, installiert es und startet neu. Wenn Sie zuerst nur herunterladen m&ouml;chten, w&auml;hlen Sie <b>Herunterladen</b>. Von Hand suchen k&ouml;nnen Sie unter Allgemeine Einstellungen &rarr; Update und Feedback &rarr; <b>Auf Updates pr&uuml;fen</b>.</p>
+
+<h3>Die drei Hauptbildschirme</h3>
+<p>Oben stehen drei Reiter: <b>Orgel</b> (Spielen), <b>Orgel-Einstellungen</b> (alles, was zur geladenen Orgel geh&ouml;rt) und <b>Allgemeine Einstellungen</b> (alles, was f&uuml;r das ganze Programm gilt). Mit <kbd>F1</kbd>, <kbd>F2</kbd> und <kbd>F3</kbd> wechseln Sie direkt zwischen ihnen. Das Kreuz neben dem Orgelnamen schlie&szlig;t die Orgel und bringt Sie zur Bibliothek zur&uuml;ck.</p>
+
+<!-- ============================================================ -->
+<h2 id="bibliotheek">2. Die Bibliothek</h2>
+<p>Nach dem Start sehen Sie die Orgel-Bibliothek: eine Karte pro Orgel mit Foto, Name, Erbauer, Ort und Anzahl der Register. Klicken Sie auf eine Karte, um die Orgel zu laden.</p>
+<figure><img src="afbeeldingen/de/03_bibliotheek.jpg" alt="Orgel-Bibliothek"><figcaption>Die Bibliothek mit Demo-Orgeln. Oben rechts stehen die Schaltfl&auml;chen zum Hinzuf&uuml;gen von Orgeln und f&uuml;r die Einstellungen; oben links die Sprachauswahl (NL, EN, FR, DE, PL, IT, ES).</figcaption></figure>
+
+<h3>Eine Orgel hinzuf&uuml;gen</h3>
+<ul>
+  <li><b>.organ</b>: W&auml;hlen Sie eine Orgeldefinition (GrandOrgue <code>.organ</code> oder eine Hauptwerk-Definition). Sie w&auml;hlen die Definitionsdatei, nicht den losen Sample-Ordner: Nur die Definition kennt Register, Koppeln, Tremulanten und eventuelle zus&auml;tzliche Aufnahmepositionen.</li>
+  <li><b>JM-Rec import</b>: importiert ein mit JM-Rec erstelltes Sample-Set.</li>
+  <li><b>Exportieren</b>: macht aus einem Ordner mit Samples eine Orgeldefinition (<code>.organ</code>), die Sie danach mit der Schaltfl&auml;che <b>.organ</b> laden k&ouml;nnen.</li>
+</ul>
+
+<h3>Kartenschaltfl&auml;chen: Foto, Suche, Entfernen</h3>
+<p>Wenn Sie auf eine Karte zeigen, erscheinen oben rechts im Foto drei Schaltfl&auml;chen: <b>Online nach einem Foto suchen</b> (Globus), <b>Bild selbst w&auml;hlen</b> (Kamera) und <b>Aus Bibliothek entfernen</b> (Kreuz). Entfernen nimmt nur die Karte aus der Bibliothek; die Dateien auf Ihrer Festplatte bleiben erhalten. Wenn Sie eine Karte 3 Sekunden gedr&uuml;ckt halten, sucht das Programm das Foto erneut.</p>
+<p>Die <b>Online-Suche</b> zeigt einige frei verwendbare Fotos von Wikimedia Commons, anhand von Name, Erbauer und Ort aus dem Set. Klicken Sie auf ein Foto, um es zu &uuml;bernehmen; Quelle und Lizenz erscheinen unter der Karte. Enth&auml;lt das Set zu wenig, um etwas zu finden, geben Sie selbst einen Suchbegriff ein (Kirche, Ort oder Orgelname), und zwar im Feld oben im Fenster, und w&auml;hlen Sie <b>Suchen</b>.</p>
+<figure><img src="afbeeldingen/de/04_online_zoeken.jpg" alt="Online nach einem Foto suchen"><figcaption>Das Fenster &bdquo;Online nach einem Foto suchen&ldquo; mit dem Feld f&uuml;r einen eigenen Suchbegriff und den gefundenen Fotos samt Quelle und Lizenz.</figcaption></figure>
+
+<!-- ============================================================ -->
+<h2 id="bespelen">3. Eine Orgel laden und spielen</h2>
+
+<h3>Laden</h3>
+<p>Beim Laden liest JM-Orgue von jeder Pfeifenaufnahme den Anfang in den Speicher; der Rest wird w&auml;hrend des Spielens nachgeladen. Ein gro&szlig;es Surround-Set kann daher einen Moment dauern; der Fortschrittsbalken zeigt, wie weit es ist.</p>
+<figure><img src="afbeeldingen/de/05_laden.jpg" alt="Ladebildschirm"><figcaption>Der Ladebildschirm mit dem Fortschritt beim Einlesen der Samples.</figcaption></figure>
+
+<h3>Der Motor</h3>
+<p>Nach dem Laden ist der <b>Orgelmotor aus</b>, und ohne Motor klingt nichts. Schalten Sie ihn mit <b>Motor ein</b> in der gelben Leiste oder mit der Motor-Schaltfl&auml;che in der Werkzeugleiste ein. Sobald der Motor l&auml;uft, verschwindet die Leiste. Bei laufendem Motor l&auml;uft auch das Motorger&auml;usch des Sets mit (wenn das Set eines enth&auml;lt).</p>
+<figure><img src="afbeeldingen/de/06_orgelscherm_motor_uit.jpg" alt="Orgelbildschirm bei ausgeschaltetem Motor"><figcaption>Der Orgelbildschirm direkt nach dem Laden: Motor aus, alle Register eingeschoben.</figcaption></figure>
+
+<h3>Register, Koppeln und Tremulanten</h3>
+<p>Jedes Manual hat einen eigenen Kasten mit seinen Registern. Klicken Sie auf einen Registerknopf, um das Register zu ziehen; gezogene Register werden gelb. Die Farbe des Namens zeigt die Familie: Zungenstimmen sind zum Beispiel rot, Mixturen und Quinten blau. In jedem Kasten stehen auch der <b>Tremulant</b> und die <b>Koppeln</b> (zum Beispiel &bdquo;Hauptwerk + Schwellwerk&ldquo;). Ein gr&uuml;ner Balken rechts in der Kopfzeile eines Manuals zeigt die Stellung des Schwellkastens.</p>
+<figure><img src="afbeeldingen/de/07_orgelscherm_registers.jpg" alt="Orgelbildschirm mit gezogenen Registern"><figcaption>Motor ein, einige Register gezogen und die Koppel Hauptwerk + Schwellwerk an. Unten die Setzerleiste.</figcaption></figure>
+
+<h3>Die Setzerleiste</h3>
+<p>Unten steht die Setzerleiste mit den Bedienelementen eines Orgelspieltischs:</p>
+<table>
+  <tr><th style="width:26%">Element</th><th>Funktion</th></tr>
+  <tr><td><b>SET</b> und <b>0&ndash;9</b></td><td>Dr&uuml;cken Sie SET und danach eine Ziffer, um die aktuelle Registrierung zu speichern; nur die Ziffer ruft sie ab. Ein kleiner Punkt an einer Ziffer bedeutet, dass dort eine Registrierung gespeichert ist.</td></tr>
+  <tr><td><b>&minus;1 / +1</b>, <b>&minus;10 / +10</b></td><td>Springt zur vorherigen oder n&auml;chsten Registrierung oder zehn weiter.</td></tr>
+  <tr><td><b>G.C.</b></td><td>General Cancel: alle Register aus.</td></tr>
+  <tr><td><b>M 1&ndash;8</b></td><td>Speicherebenen: acht getrennte B&auml;nke mit Registrierungen.</td></tr>
+  <tr><td><b>Cresc</b></td><td>Das Generalcrescendo (siehe Kapitel 7). Der Balken zeigt die aktuelle Stufe.</td></tr>
+  <tr><td>Lautst&auml;rkeregler</td><td>Gesamtlautst&auml;rke. Ein Doppelklick setzt sie auf den Standardwert zur&uuml;ck; mit dem Mausrad &auml;ndern Sie sie in Schritten von 1 dB.</td></tr>
+</table>
+<p class="klein">Jede Schaltfl&auml;che der Setzerleiste kann mit einer Taste Ihres eigenen Spieltischs verbunden werden: Rechtsklick (oder 3 Sekunden gedr&uuml;ckt halten) und danach die Taste am Spieltisch dr&uuml;cken.</p>
+
+<!-- ============================================================ -->
+<h2 id="werkbalk">4. Die Werkzeugleiste</h2>
+<p>&Uuml;ber den Registern steht die Werkzeugleiste. Links stehen die Manuale (Pedal, Hauptwerk, &hellip;) als Schaltfl&auml;chen: Damit blenden Sie ein Manual ein oder aus. Rechts stehen die folgenden Funktionen.</p>
+<table>
+  <tr><th style="width:24%">Schaltfl&auml;che</th><th>Funktion</th></tr>
+  <tr><td><b>Motor</b></td><td>Orgelmotor ein oder aus.</td></tr>
+  <tr><td><b>Anordnung</b></td><td>&Ouml;ffnet das Anordnungsmen&uuml; (siehe unten).</td></tr>
+  <tr><td><b>Leiste</b></td><td>Zeigt oder verbirgt die Hauptleiste mit den Reitern und der Profilschaltfl&auml;che.</td></tr>
+  <tr><td><b>Vollbild</b></td><td>Spieltischmodus: nur die Register und die Setzerleiste (<kbd>F11</kbd>).</td></tr>
+  <tr><td><b>Neuer Bildschirm</b></td><td>&Ouml;ffnet ein zus&auml;tzliches Fenster mit denselben Registern, zum Beispiel f&uuml;r einen zweiten Monitor oder eine zweite Tastatur.</td></tr>
+  <tr><td><b>MP3</b></td><td>Nimmt auf, was Sie h&ouml;ren. Die Aufnahme landet in Dokumente\JM-Orgue-opnames. Klicken Sie auf den roten Z&auml;hler, um zu stoppen; danach meldet das Programm, wo die Datei liegt.</td></tr>
+  <tr><td><b>MIDI</b></td><td>Nimmt auf, was Sie spielen (nur Noten), als .mid-Datei. Klicken Sie auf den blauen Z&auml;hler, um zu stoppen, und w&auml;hlen Sie den Speicherort.</td></tr>
+  <tr><td><b>Notieren</b></td><td>&Ouml;ffnet das Notationsfenster: Noten erscheinen, w&auml;hrend Sie spielen, mit Ebenen, Overdub und Bearbeitung. Auch eine vorhandene MIDI-Datei l&auml;sst sich dort &ouml;ffnen.</td></tr>
+  <tr><td><b>PC herunterfahren</b></td><td>Beendet die Software <i>und den Computer</i>, nach einer Best&auml;tigung; der letzte Zustand wird vorher gespeichert. Rechtsklick oder 3 Sekunden gedr&uuml;ckt halten verbindet die Schaltfl&auml;che mit einer Taste Ihres Spieltischs.</td></tr>
+</table>
+
+<h3>Das Anordnungsmen&uuml;</h3>
+<p>Mit <b>Anordnung</b> passen Sie die Darstellung an Ihren Bildschirm an: <b>Einpassen</b> misst die Kn&ouml;pfgr&ouml;&szlig;e so, dass alle Register ins Bild passen, die Minus/Plus-Schaltfl&auml;chen &auml;ndern Breite und H&ouml;he der Kn&ouml;pfe, und au&szlig;erdem w&auml;hlen Sie Manuale untereinander oder nebeneinander (vertikal), runde statt rechteckiger Kn&ouml;pfe und die Position der Koppeln (im Manual oder in einer eigenen Leiste). Die Auswahl wird pro Orgel gemerkt.</p>
+<figure><img src="afbeeldingen/de/08_indeling_menu.jpg" alt="Anordnungsmen&uuml;"><figcaption>Das Men&uuml; Anordnung in der Werkzeugleiste.</figcaption></figure>
+
+<h3>Vollbild (Spieltischmodus)</h3>
+<p>In diesem Modus verschwinden die Titelleiste, die Windows-Taskleiste und die Hauptleiste: Sie sehen nur die Register und die Setzerleiste. Oben steht ein schmaler Streifen mit vier Schaltfl&auml;chen: <b>Leisten</b> (die Hauptleiste vor&uuml;bergehend zur&uuml;ckholen), <b>Motor ein</b> (ein oder aus), <b>Vollbild beenden</b> und <b>PC herunterfahren</b> (Software und Computer beenden). <kbd>F11</kbd> schaltet den Modus ein und aus; <kbd>Esc</kbd> schaltet ihn aus.</p>
+<figure><img src="afbeeldingen/de/09_volledig_scherm.jpg" alt="Vollbild"><figcaption>Der Spieltischmodus: Register, Setzerleiste und oben der Streifen mit den vier Schaltfl&auml;chen.</figcaption></figure>
+
+<h3>Ein zweiter Bildschirm</h3>
+<p><b>Neuer Bildschirm</b> &ouml;ffnet ein eigenes Fenster, das Sie auf einen anderen Monitor ziehen oder klein neben dem Hauptfenster stehen lassen k&ouml;nnen. Es hat eigene Anordnungseinstellungen: Sind die Kn&ouml;pfe zu klein, w&auml;hlen Sie <b>Anordnung</b> und stellen Sie Knopfbreite und Knopfh&ouml;he ein, oder w&auml;hlen Sie Manuale untereinander oder nebeneinander.</p>
+<figure><img src="afbeeldingen/de/43_nieuw_scherm.jpg" alt="Zweiter Bildschirm"><figcaption>Ein zus&auml;tzlicher Bildschirm mit gut lesbaren Registern, hier in einem Fenster von 1000 &times; 900 Pixeln.</figcaption></figure>
+
+<!-- ============================================================ -->
+<h2 id="posities">5. Mehrere H&ouml;rpositionen</h2>
+<p>Manche Sample-Sets wurden an mehreren Stellen in der Kirche aufgenommen, zum Beispiel nah, vorn, in der Mitte und hinten. Ein solches Set zeigt in der Werkzeugleiste die Schaltfl&auml;chen <b>Perspektive</b>, eine pro Position. Klicken Sie auf eine Position, um sie ein- oder auszuschalten; es k&ouml;nnen mehrere gleichzeitig klingen. Rechts davon steht die <b>H&ouml;rposition</b>: Der Regler zwischen &bdquo;nah&ldquo; und &bdquo;hinten&ldquo; blendet stufenlos zwischen den aufgenommenen Positionen &uuml;ber.</p>
+<figure><img src="afbeeldingen/de/50_nancy_orgelscherm.jpg" alt="Orgelbildschirm mit Perspektiven"><figcaption>Ein Set mit vier Aufnahmepositionen (Close, Front, Middle, Rear) und dem H&ouml;rpositionsregler.</figcaption></figure>
+<div class="tip"><b>Tipp</b> Jede Position braucht Speicher und Rechenleistung. Passt nicht alles in den Speicher Ihres Computers, l&auml;dt das Programm beim ersten Mal nur die Position, die der Orgel am n&auml;chsten liegt. In den Orgel-Einstellungen finden Sie den Block &bdquo;Perspektiven und gestapelte Reihen&ldquo;: Dort w&auml;hlen Sie, welche Positionen geladen werden, stellen die Lautst&auml;rke pro Position ein und k&ouml;nnen mit &bdquo;Alle Positionen im Speicher halten&ldquo; sofort zwischen Positionen wechseln. Eine neue Auswahl geladener Positionen wirkt nach dem erneuten Laden der Orgel.</div>
+
+<!-- ============================================================ -->
+<h2 id="wizard">6. Der Assistent f&uuml;r eine neue Orgel</h2>
+<p>Wenn Sie eine Orgel zum ersten Mal laden, startet automatisch der Assistent &bdquo;Orgel einrichten&ldquo;. In sechs Schritten geht er alles durch, was Sie mit Ihrem eigenen Spieltisch verbinden m&uuml;ssen. Alles l&auml;sst sich sp&auml;ter &auml;ndern, und Sie k&ouml;nnen den Assistenten erneut starten &uuml;ber Orgel-Einstellungen &rarr; Routing &rarr; <b>Assistent</b>. <b>Sp&auml;ter</b> schlie&szlig;t den Assistenten und fragt beim n&auml;chsten &Ouml;ffnen erneut; <b>&Uuml;berspringen</b> (Schritt 1) &uuml;berspringt ihn ganz.</p>
+<div class="duo">
+  <figure><img src="afbeeldingen/de/20_wizard_1.jpg" alt="Assistent, Schritt 1"><figcaption>Schritt 1: was der Assistent tut.</figcaption></figure>
+  <figure><img src="afbeeldingen/de/20_wizard_2.jpg" alt="Assistent, Schritt 2"><figcaption>Schritt 2: der MIDI-Kanal pro Manual.</figcaption></figure>
+</div>
+<ol>
+  <li><b>Start</b>: eine &Uuml;bersicht der Schritte.</li>
+  <li><b>MIDI-Kanal pro Manual</b>: W&auml;hlen Sie bei jedem Manual <b>Anlernen</b> und spielen Sie eine Taste auf diesem Manual. Das Programm merkt sich den Kanal. Die Schaltfl&auml;chen funktionieren nur, wenn ein MIDI-Ger&auml;t verbunden ist (Allgemeine Einstellungen &rarr; MIDI); sonst erscheint eine Warnung.</li>
+  <li><b>Schwellk&auml;sten und Crescendo</b>: W&auml;hlen Sie <b>Anlernen</b> und bewegen Sie das Pedal ganz zu und ganz auf. Dasselbe gilt f&uuml;r das Generalcrescendo. Hat ein Set Schwellk&auml;sten je Rank (Kapitel 9), erscheinen sie hier ebenfalls.</li>
+  <li><b>Ausg&auml;nge f&uuml;r Lautsprecher</b>: W&auml;hlen Sie Treiber und Ger&auml;t, speichern Sie sie als Profil &bdquo;Lautsprecher&ldquo; und w&auml;hlen Sie pro Manual, auf welchen Ausg&auml;ngen Ihres Audio-Interfaces es klingt. Darunter stehen dieselben Auswahlm&ouml;glichkeiten f&uuml;r das Motorger&auml;usch, die Raum- und Mechanikger&auml;usche, die Effektregister und das Tremulantger&auml;usch, soweit das Set sie hat.</li>
+  <li><b>Ausg&auml;nge f&uuml;r Kopfh&ouml;rer</b>: dasselbe f&uuml;r das zweite Profil, zum Beispiel einen Kopfh&ouml;rerausgang. Ab dann wechseln Sie mit der Schaltfl&auml;che <b>Lautsprecher</b> oben rechts zwischen den beiden Profilen.</li>
+  <li><b>Fertig</b>: Die Einstellungen sind bei dieser Orgel gespeichert.</li>
+</ol>
+<div class="duo">
+  <figure><img src="afbeeldingen/de/20_wizard_3.jpg" alt="Assistent, Schritt 3"><figcaption>Schritt 3: Schwellk&auml;sten und Crescendo anlernen.</figcaption></figure>
+  <figure><img src="afbeeldingen/de/20_wizard_4.jpg" alt="Assistent, Schritt 4"><figcaption>Schritt 4: Treiber, Ger&auml;t, Kan&auml;le pro Manual und Hintergrundger&auml;usche f&uuml;r die Lautsprecher.</figcaption></figure>
+  <figure><img src="afbeeldingen/de/20_wizard_5.jpg" alt="Assistent, Schritt 5"><figcaption>Schritt 5: dasselbe f&uuml;r die Kopfh&ouml;rer.</figcaption></figure>
+  <figure><img src="afbeeldingen/de/20_wizard_6.jpg" alt="Assistent, Schritt 6"><figcaption>Schritt 6: fertig.</figcaption></figure>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="orgelinst">7. Orgel-Einstellungen</h2>
+<p>Alle Einstellungen, die zur geladenen Orgel geh&ouml;ren, werden bei dieser Orgel gespeichert. Oben stehen f&uuml;nf Reiter: <b>Klang</b>, <b>Crescendo</b>, <b>Registerreihenfolge</b>, <b>Routing</b> und <b>Alle</b>; der letzte legt alle Bl&ouml;cke untereinander.</p>
+
+<h3>Klang</h3>
+<p>Der erste Block enth&auml;lt die Haupteinstellungen:</p>
+<ul>
+  <li><b>Lautst&auml;rke</b>: die Gesamtlautst&auml;rke dieser Orgel.</li>
+  <li><b>Stimmung</b>: &bdquo;Original&ldquo; spielt die Pfeifen, wie sie aufgenommen wurden. Andere Stimmungen (gleichschwebend und historische Temperaturen) stimmen die Pfeifen anhand der gemessenen Tonh&ouml;he jeder Aufnahme nach. Unter der Auswahl sehen Sie, wie viele Pfeifen eine gemessene Tonh&ouml;he haben. Mit <b>Eigene Stimmung&hellip;</b> stellen Sie die Abweichung pro Ton selbst in Cent ein.</li>
+  <li><b>Feinstimmung</b>: alles zusammen h&ouml;her oder tiefer, in Cent.</li>
+</ul>
+<p><b>Hall</b> regelt den Nachhall. Hat das Set die Kirchenakustik schon in den Aufnahmen, steht das dort (mit einer Schaltfl&auml;che <b>Zur&uuml;ck zur Aufnahme (Nachhall aus)</b>, um den zus&auml;tzlichen Nachhall auszuschalten): Zus&auml;tzlicher Hall ist dann Geschmackssache. Sie w&auml;hlen zwischen <b>Algorithmisch</b> (ein berechneter Hall mit RT60, Vorverz&ouml;gerung, D&auml;mpfung und Raumgr&ouml;&szlig;e, auch als Preset) und <b>Impulsantwort</b> mit einer eigenen Impulsantwort (IR). Mit <b>Mix</b> bestimmen Sie, wie viel Hall Sie h&ouml;ren.</p>
+<figure><img src="afbeeldingen/de/10_klank_1.jpg" alt="Reiter Klang, oberer Teil"><figcaption>Klang, oben: Haupteinstellungen (Lautst&auml;rke, Stimmung, Feinstimmung) und Hall.</figcaption></figure>
+<p><b>Klangfarbe dieser Orgel</b> ist eine eigene Klangregelung pro Orgel; die Korrektur f&uuml;r Ihre Kopfh&ouml;rer oder Lautsprecher ist getrennt, in den allgemeinen Einstellungen. Das <b>Windmodell</b> l&auml;sst die Orgel atmen: Ein Akkord mit vielen Registern senkt den Winddruck, wie bei einer echten Orgel, und Fl&ouml;ten und Zungenstimmen reagieren darauf unterschiedlich. Sie w&auml;hlen die Anzahl der Windgruppen (welche Manuale sich denselben Balg teilen) und pro Gruppe die Balggr&ouml;&szlig;e, die D&auml;mpfung, den maximalen Druckabfall und den Charakter des Windes.</p>
+<figure><img src="afbeeldingen/de/10_klank_2.jpg" alt="Reiter Klang, Klangfarbe und Windmodell"><figcaption>Klang, weiter unten: Klangfarbe dieser Orgel und das Windmodell pro Windgruppe.</figcaption></figure>
+<p><b>Nebenger&auml;usche</b> zeigt die durchlaufenden Ger&auml;usche des Sets, etwa Motor und Raumrauschen. Sie stellen die Lautst&auml;rke ein, schalten den <b>Motor</b> ein oder aus und k&ouml;nnen die <b>Tastatur-Mechanik</b> (klickende Tasten) aktivieren. Die Tastenmechanik ist standardm&auml;&szlig;ig aus, weil sie viel Speicher braucht und ein erneutes Laden der Orgel verlangt.</p>
+<figure><img src="afbeeldingen/de/10_klank_3.jpg" alt="Reiter Klang, Nebenger&auml;usche"><figcaption>Klang: Windgruppen und der Block Nebenger&auml;usche mit Lautst&auml;rke, Motor und Tastenmechanik.</figcaption></figure>
+<p>Unten steht die <b>Pfeifen-Intonation</b>: W&auml;hlen Sie links ein Register und passen Sie Lautst&auml;rke und Stimmung jeder einzelnen Pfeife an.</p>
+<figure><img src="afbeeldingen/de/10_klank_4.jpg" alt="Reiter Klang, Pfeifen-Intonation"><figcaption>Klang, unten: die Pfeifen-Intonation. W&auml;hlen Sie links ein Register, um seine Pfeifen zu intonieren.</figcaption></figure>
+
+<h3>Crescendo</h3>
+<p>Das <b>Generalcrescendo</b> zieht beim Bewegen eines Crescendotritts Schritt f&uuml;r Schritt mehr Register. Sie bestimmen selbst, welche Register in welche Stufe kommen:</p>
+<ul>
+  <li><b>Aktiviert</b> schaltet das Crescendo ein; <b>Stufen</b> ist die Anzahl der Stufen.</li>
+  <li><b>Auto-F&uuml;llen</b> tr&auml;gt einen Vorschlag ein, der zu den Registern dieser Orgel passt. Mit den Optionen darunter bestimmen Sie, ob Koppeln mitmachen, ob Farbregister (Sesquialtera, Cornet, Terz), 32&prime;-Zungen und Chamaden mitmachen und ob die Oktavkoppeln erst im Tutti kommen. <b>L&ouml;schen</b> leert die Matrix.</li>
+  <li>In der Matrix schaltet ein Klick auf ein Feld das Register in dieser Stufe ein oder aus; <kbd>Umschalt</kbd>+Klick setzt es f&uuml;r alle Stufen ab dieser Stufe.</li>
+  <li><b>Pedal lernen</b> verbindet Ihren Crescendotritt; unten k&ouml;nnen Sie Kanal und CC-Nummer auch von Hand eintragen.</li>
+</ul>
+<figure><img src="afbeeldingen/de/11_crescendo.jpg" alt="Reiter Crescendo"><figcaption>Die Crescendo-Matrix: Register in den Zeilen, Stufen in den Spalten.</figcaption></figure>
+
+<h3>Registerreihenfolge</h3>
+<p>Hier bestimmen Sie die Reihenfolge der Register in jedem Manual. Ziehen Sie ein Register am Griff, um es zu verschieben. Pro Register sehen Sie Fu&szlig;lage und Familie (die Farbe des Namens). Mit den Pfeilen &auml;ndern Sie die Reihenfolge Schritt f&uuml;r Schritt, und <b>Zur&uuml;cksetzen</b> stellt die Reihenfolge des Sets wieder her.</p>
+<figure><img src="afbeeldingen/de/12_registersortering.jpg" alt="Reiter Registerreihenfolge"><figcaption>Die Register pro Manual, in der Reihenfolge, in der sie auf dem Orgelbildschirm stehen.</figcaption></figure>
+
+<h3>Routing</h3>
+<p>Dieser Reiter verbindet Ihre Orgel mit Ihrer Ausr&uuml;stung. Oben steht pro Manual ein Block:</p>
+<ul>
+  <li><b>Kanal</b>: der MIDI-Kanal, auf den das Manual h&ouml;rt (&bdquo;Alle&ldquo; = jeder Kanal). <b>Lernen</b> bestimmt Kanal und Bereich, indem Sie zuerst die tiefste und dann die h&ouml;chste Taste spielen.</li>
+  <li><b>Transp</b>: in Halbt&ouml;nen transponieren. <b>Bereich</b>: tiefste und h&ouml;chste Taste. <b>Kurze Oktave</b>: f&uuml;r Sets mit kurzer Bassoktave.</li>
+  <li><b>Schwellkasten</b>: schaltet den Schwellkasten dieses Manuals ein; es erscheinen dann Schaltfl&auml;chen, um den Tritt anzulernen, die Mindestlautst&auml;rke und die Grenzfrequenz eines geschlossenen Kastens einzustellen.</li>
+  <li><b>Windversorgung</b>: zu welcher Windgruppe das Manual geh&ouml;rt.</li>
+  <li><b>Panorama</b> und <b>Ausg&auml;nge</b>: der Platz im Stereobild und die Ausgangskan&auml;le Ihres Audio-Interfaces, auf denen das Manual klingt. Zwei aufeinanderfolgende Ausg&auml;nge bilden ein Stereopaar; ein einzelner Kanal klingt mono.</li>
+  <li><b>C/Cis</b>: verteilt die Pfeifen auf zwei Seiten, wie die C- und Cis-Laden einer echten Orgel; die globale St&auml;rke und der Abfall stehen im Block dar&uuml;ber.</li>
+  <li><b>Tremulant LFO</b>: Hat das Set keine echten Tremulantaufnahmen, berechnet das Programm den Tremulanten. Geschwindigkeit, Amplitude und Tonh&ouml;he stellen Sie hier ein.</li>
+</ul>
+<figure><img src="afbeeldingen/de/13_routing_boven.jpg" alt="Reiter Routing, oben"><figcaption>Routing, oben: die Schaltfl&auml;che Assistent, die C/Cis-Verteilung und das erste Manual mit Kanal, Bereich, Panorama, Ausg&auml;ngen und Tremulant.</figcaption></figure>
+<figure><img src="afbeeldingen/de/15_routing_zwelkast.jpg" alt="Routing mit Schwellkasten"><figcaption>Ein Manual mit eingeschaltetem Schwellkasten: Pedal lernen, manueller Kanal und CC, Mindestlautst&auml;rke und Grenzfrequenz.</figcaption></figure>
+
+<p>Darunter steht <b>Audioausgabe Hintergrundger&auml;usche</b>: F&uuml;r jede Ger&auml;uschart w&auml;hlen Sie, welche Ausg&auml;nge sie nutzt. <b>Motor</b> ist das Motorger&auml;usch; <b>Umgebungsger&auml;usch und Mechanikklicks</b> gilt f&uuml;r das Raumrauschen und die Klicks von Registern und Tasten; Sets mit Effektregistern (Zimbelstern, Nachtigall und dergleichen) und Tremulantger&auml;usch bekommen eine eigene Zeile. Das ist vor allem bei mehr als zwei Ausg&auml;ngen wichtig, wenn die Manuale auf anderen Kan&auml;len klingen als dem Standard 1&ndash;2. Direkt darunter:</p>
+<ul>
+  <li><b>Durchgehende Klaviatur</b>: Tasten au&szlig;erhalb des aufgenommenen Bereichs eines Registers spielen die n&auml;chstgelegene Pfeife, auf die richtige Tonh&ouml;he verschoben, statt zu schweigen. So spielt eine Tastatur mit 61 Tasten auf einem Set mit weniger T&ouml;nen weiter.</li>
+  <li><b>Pfeifen automatisch nachstimmen</b>: stimmt die Pfeifen anhand ihrer gemessenen Tonh&ouml;he nach und beh&auml;lt dabei absichtlich schwebende Register. Standardm&auml;&szlig;ig an.</li>
+  <li><b>Tonh&ouml;he-Korrektur</b>: alles zusammen h&ouml;her oder tiefer in Cent (<b>Null</b> setzt sie zur&uuml;ck).</li>
+</ul>
+<figure><img src="afbeeldingen/de/16_routing_bijgeluiden.jpg" alt="Routing: Hintergrundger&auml;usche"><figcaption>Audioausgabe Hintergrundger&auml;usche mit den Schaltern pro Ausgangskanal, durchgehende Klaviatur und Tonh&ouml;he-Korrektur.</figcaption></figure>
+<p>Weiter unten stehen <b>Koppeln</b> (ein- oder ausschalten, mit einer MIDI-Taste pro Koppel) und <b>Zus&auml;tzliche Koppeln</b>: Koppeln, die nicht im Sample-Set stehen, sich aber aus der Klaviaturaufteilung ergeben; haken Sie an, was Sie zus&auml;tzlich wollen, und sie erscheinen sofort in der Koppelleiste. <b>MIDI-Zuordnungen</b> ist eine einzige Liste aller MIDI-Zuordnungen dieser Orgel, die Sie dort von Hand &auml;ndern, entfernen oder hinzuf&uuml;gen k&ouml;nnen. Ganz unten l&auml;sst <b>.mid &ouml;ffnen</b> die Orgel eine MIDI-Datei abspielen.</p>
+<figure><img src="afbeeldingen/de/14_routing_onder.jpg" alt="Routing: Koppeln und MIDI"><figcaption>Routing, unten: zus&auml;tzliche Koppeln, MIDI-Zuordnungen und MIDI abspielen.</figcaption></figure>
+
+<!-- ============================================================ -->
+<h2 id="algemeen">8. Allgemeine Einstellungen</h2>
+<p>Diese Einstellungen gelten f&uuml;r das ganze Programm. Die Reiter sind <b>Audioausgabe</b>, <b>Sample-Fix</b>, <b>MIDI</b>, <b>Tasten anlernen</b>, <b>Darstellung</b> und <b>Update und Feedback</b>.</p>
+
+<h3>Audioausgabe</h3>
+<ul>
+  <li><b>Audio-Treiber</b> und Ger&auml;t: F&uuml;r die geringste Latenz w&auml;hlen Sie ASIO (zum Beispiel den Treiber Ihres Audio-Interfaces); WASAPI arbeitet mit der Standard-Windows-Soundkarte. Die Zeile &bdquo;Aktuell&ldquo; darunter zeigt, was gerade klingt.</li>
+  <li><b>Testsignal</b>: Klicken Sie auf eine Kanalnummer, um Ton genau auf diesen Ausgang zu schicken, damit Sie h&ouml;ren, welcher Stecker zu welchem Lautsprecher geh&ouml;rt.</li>
+  <li><b>Polyphonie</b> und <b>Rechenkerne f&uuml;rs Mischen</b>: die maximale Zahl gleichzeitig klingender Pfeifen und die Zahl der Prozessorkerne, auf die die Mischarbeit verteilt wird. Die Standardwahl passt zu Ihrem Computer; die Lastanzeige zeigt die Wirkung.</li>
+  <li><b>Stereo-Samples in Stereo wiedergeben</b>: beh&auml;lt das Stereobild von Stereoaufnahmen. Aus bedeutet einen Mono-Mix und halbiert den Speicherbedarf solcher Sets.</li>
+  <li><b>Startpuffer je Aufnahme</b> (neu in dieser Version): wie viel jeder Pfeifenaufnahme sofort im Speicher liegt: 200 ms, 300 ms, 500 ms, 1 s oder 2 s (Standard). Ein k&uuml;rzerer Puffer spart viel Speicher und Ladezeit; der Rest wird w&auml;hrend des Spielens nachgeladen. Die Wahl wirkt nach dem erneuten Laden der Orgel.</li>
+  <li><b>Puffergr&ouml;&szlig;e</b>: kleiner bedeutet weniger Latenz, belastet Ihren Computer aber mehr. <b>Anwenden</b> aktiviert die Wahl.</li>
+</ul>
+<div class="tip"><b>Tipp</b> H&ouml;ren Sie bei gro&szlig;en Akkorden eine kurze Wiederholung des Ansatzes einer Pfeife, w&auml;hlen Sie einen l&auml;ngeren Startpuffer. H&ouml;ren Sie das nicht, haben aber wenig Speicher, sind 500 ms oder 1 s eine gute Wahl. Eine schnelle Festplatte (SSD) macht kurze Puffer m&ouml;glich.</div>
+<figure><img src="afbeeldingen/de/30_audio_1.jpg" alt="Audioausgabe, oben"><figcaption>Audioausgabe, oben: Treiber, Ger&auml;t, Testsignal, Polyphonie, Rechenkerne, Stereo-Samples, Startpuffer und Puffergr&ouml;&szlig;e.</figcaption></figure>
+<p><b>Ausgabeprofile</b> speichern zwei vollst&auml;ndige Ausgabeeinstellungen, zum Beispiel Lautsprecher &uuml;ber ASIO und Kopfh&ouml;rer &uuml;ber WASAPI, einschlie&szlig;lich der Kanalwahl pro Manual. W&auml;hlen Sie den gew&uuml;nschten Ausgang, klicken Sie bei Lautsprecher oder Kopfh&ouml;rer auf <b>Aktuelle Auswahl speichern</b>, und wechseln Sie danach mit der Schaltfl&auml;che <b>Lautsprecher</b> oben rechts oder mit einer angelernten MIDI-Taste. Das aktive Profil ist markiert.</p>
+<p>Die <b>Korrektur f&uuml;r Kopfh&ouml;rer oder Lautsprecher</b> wendet eine Klangkorrektur auf den Ausgang selbst an (nicht auf die Orgel): W&auml;hlen Sie, f&uuml;r welches Profil sie gilt, schalten Sie sie ein und w&auml;hlen Sie ein Preset aus der AutoEq-Liste, oder importieren bzw. exportieren Sie eine eigene Korrektur.</p>
+<p>Darunter stehen die Optionen, das Programm automatisch mit Windows zu starten, die zuletzt ge&ouml;ffnete Orgel automatisch zu laden, das Kreuz auf einem zus&auml;tzlichen Bildschirm die ganze Software beenden zu lassen und die letzte Registrierung wiederherzustellen. Das <b>Automatische MIDI-Archiv</b> zeichnet im Hintergrund alles auf, was Sie spielen, als .mid-Datei pro Sitzung: Es startet bei der ersten Note und stoppt nach einer Stille.</p>
+<figure><img src="afbeeldingen/de/30_audio_2.jpg" alt="Audioausgabe, Mitte"><figcaption>Audioausgabe, weiter unten: Ausgabeprofile, Korrektur f&uuml;r Kopfh&ouml;rer oder Lautsprecher, Starteinstellungen, MIDI-Archiv und Fernbedienung. Der Ordner und die Netzwerkadresse wurden in diesem Bild absichtlich durch einen Platzhalter ersetzt.</figcaption></figure>
+<p>Mit der <b>Fernbedienung im Netzwerk (Tablet/Telefon)</b> bedienen Sie die Orgel von einem Tablet oder Telefon im selben WLAN. Das Programm zeigt eine Adresse und einen QR-Code zum Scannen, und Sie w&auml;hlen, welche Teile und welche Manuale auf dem externen Bildschirm erscheinen. Beim ersten Mal fragt die Windows-Firewall, ob JM-Orgue Verbindungen empfangen darf: W&auml;hlen Sie &bdquo;Zugriff zulassen&ldquo; f&uuml;r private Netzwerke.</p>
+<div class="let-op"><b>Achtung</b> Die Adresse enth&auml;lt ein Zugriffstoken und funktioniert nur innerhalb Ihres eigenen Netzwerks, ohne Verschl&uuml;sselung. Geben Sie Adresse und QR-Code nicht weiter; mit <b>Neues Token</b> entziehen Sie einem Ger&auml;t, das sie fr&uuml;her gescannt hat, den Zugriff.</div>
+<p>Unten steht die <b>Abtastrate</b>. Sie folgt der Soundkarte selbst: Unter ASIO stellen Sie sie im Panel des Treibers ein, unter WASAPI in den Windows-Soundeinstellungen.</p>
+<figure><img src="afbeeldingen/de/30_audio_3.jpg" alt="Audioausgabe, unten"><figcaption>Audioausgabe, unten: die Fernbedienung mit Teilen und Manualen auf dem externen Bildschirm sowie die Abtastrate. QR-Code und Adresse sind hier abgedeckt.</figcaption></figure>
+
+<h3>Sample-Fix</h3>
+<p>Zwei Werkzeuge, um die Samples der geladenen Orgel aufzur&auml;umen. <b>Anfangsstille</b> findet und schneidet Stille am Anfang der Samples weg (die Stille-Schwelle in dB und den zu behaltenden Vorlauf stellen Sie selbst ein); <b>Loops</b> findet eine gute Sustain-Schleife, bindet einen Crossfade f&uuml;r einen nahtlosen &Uuml;bergang ein und schreibt die Schleifenpunkte in die Datei, wahlweise nur f&uuml;r Dateien ohne Schleife. Mit <b>Scannen</b> sehen Sie zuerst, was sich &auml;ndern w&uuml;rde. Die Originale werden zuerst in einem Ordner <code>_backup</code> gesichert, bevor die Dateien &uuml;berschrieben werden.</p>
+<figure><img src="afbeeldingen/de/31_samplefix.jpg" alt="Sample-Fix"><figcaption>Sample-Fix: Anfangsstille und Loops, jeweils mit Scannen und einer Schaltfl&auml;che zum Anwenden.</figcaption></figure>
+
+<h3>MIDI</h3>
+<p><b>MIDI-Eingang</b> zeigt die angeschlossenen MIDI-Ger&auml;te (mit <b>Ger&auml;te aktualisieren</b> suchen Sie erneut); unter <b>Bluetooth MIDI</b> suchen Sie mit <b>Scannen</b> nach drahtlosen Ger&auml;ten. Die <b>R&uuml;ckmeldung (MIDI-Out)</b> l&auml;sst Ihren Spieltisch mit der Registrierung mitleuchten: W&auml;hlen Sie das Protokoll (Registerlampen &uuml;ber Note On/Off, ein Hauptwerk-Textdisplay oder einen Johannus-/Content-Spieltisch), den MIDI-Ausgang, den Kanal und die Basisnote. Jedes Register erh&auml;lt dann automatisch eine Notennummer ab der Basisnote, oder Sie lernen mit <b>Pro Register lernen&hellip;</b> die echte Spieltischtaste pro Register an.</p>
+<figure><img src="afbeeldingen/de/32_midi.jpg" alt="MIDI"><figcaption>MIDI-Eingang, Bluetooth MIDI und die R&uuml;ckmeldung an den Spieltisch.</figcaption></figure>
+
+<h3>Tasten anlernen</h3>
+<p>Hier lernen Sie die festen Spieltischtasten (Pistons) an: Stimmer, SET, Preset-Schritte, Speicherebenen und Computer herunterfahren. Die Zifferntasten 0&ndash;9 lernen Sie auf der Setzerleiste selbst an (Rechtsklick oder 3 Sekunden gedr&uuml;ckt halten).</p>
+<figure><img src="afbeeldingen/de/33_knoppen_inleren.jpg" alt="Tasten anlernen"><figcaption>Spieltischtasten anlernen.</figcaption></figure>
+
+<h3>Darstellung</h3>
+<p>W&auml;hlen Sie die Sprache des Programms (Nederlands, English, Fran&ccedil;ais, Deutsch, Polski, Italiano und Espa&ntilde;ol) und das Erscheinungsbild: f&uuml;nf fertige Farbpresets (Standard, Klassisches Holz, Modern minimalistisch, Nacht und Abend), oder stellen Sie eigene Farben zusammen, geben Sie ihnen einen Namen und exportieren Sie sie. Darunter passen Sie Schriftart, Gr&ouml;&szlig;e und St&auml;rke des Registertexts an, au&szlig;erdem den Hintergrund.</p>
+<figure><img src="afbeeldingen/de/34_weergave.jpg" alt="Darstellung"><figcaption>Erscheinungsbild und Anordnung: Sprache, Presets und Schriftart der Register.</figcaption></figure>
+
+<h3>Update und Feedback</h3>
+<p>Hier finden Sie die Versionsnummer, die Quellenangaben zu den verwendeten Kopfh&ouml;rer-Presets und Lautsprecherdaten und die Schaltfl&auml;chen <b>Feedback senden&hellip;</b>, <b>&Uuml;ber GitHub (Issues)</b> und <b>Auf Updates pr&uuml;fen</b>.</p>
+<figure><img src="afbeeldingen/de/35_update_feedback.jpg" alt="Update und Feedback"><figcaption>&Uuml;ber &amp; Feedback.</figcaption></figure>
+
+<!-- ============================================================ -->
+<h2 id="akoestiek">9. Akustische Konfiguration eines Sets</h2>
+<p>Eine Orgeldefinition kann auf eine zus&auml;tzliche Datei verweisen, <code>JM-ACOUSTICS.json</code>, die die Akustik des Sets beschreibt: Schwellk&auml;sten, die an einem Rank statt an einem Manual h&auml;ngen, Impulsantworten f&uuml;r den Hall, Mischrouten und Ausg&auml;nge. Hat Ihr Set eine solche Datei, erkennen Sie das an einem zus&auml;tzlichen Block unter Orgel-Einstellungen &rarr; Klang.</p>
+<ul>
+  <li>Das Programm liest die Datei und pr&uuml;ft sie: die Dateigr&ouml;&szlig;e, ob alle Verweise stimmen, ob die Pfade im Orgelordner bleiben und ob die Pfeifenzuordnungen zur geladenen Definition passen. Stimmt etwas nicht, spielt die Orgel einfach mit der normalen Definition, und der Block nennt den Grund, warum die Konfiguration nicht geladen wurde.</li>
+  <li><b>Schwellk&auml;sten je Rank</b>: Ranks, die die Datei in einen Kasten stellt, erhalten einen eigenen Schwellkasten mit eigenem Schwelltritt, unabh&auml;ngig vom Manual, auf dem sie gespielt werden. Ein Rank, den zwei Manuale nutzen, folgt so immer demselben Kasten. Den Tritt lernen Sie unter Routing (<b>Pedal lernen</b>) oder im Assistenten an.</li>
+  <li><b>Impulsantworten</b> aus dem Set stehen unter dem Block, mit Kan&auml;len und Dauer. Mit <b>Als Hall verwenden</b> &uuml;bernehmen Sie eine als Faltungshall. Die Rolle der Kan&auml;le in solchen Aufnahmen ist nicht festgelegt; das Programm nutzt die ersten beiden als Stereopaar.</li>
+  <li>Mischrouten, Ausgangsbusse und Effekt&uuml;berg&auml;nge aus der Datei werden vorerst nicht automatisch angewendet; die normale Definition bleibt ma&szlig;gebend.</li>
+</ul>
+<figure><img src="afbeeldingen/de/60_akoestiek_klank.jpg" alt="Klang mit akustischer Konfiguration"><figcaption>Der Block &bdquo;Akustische Konfiguration&ldquo; oben in Klang, mit einer Zusammenfassung und einer Schaltfl&auml;che pro Impulsantwort. Die Bilder in diesem Kapitel entstanden mit einer tempor&auml;ren Testdatei bei einer Demo-Orgel.</figcaption></figure>
+<div class="duo">
+  <figure><img src="afbeeldingen/de/61_akoestiek_zwelkasten_routing.jpg" alt="Schwellk&auml;sten je Rank im Routing"><figcaption>Routing, unten: der Block Schwellk&auml;sten je Rank mit einer Schaltfl&auml;che &bdquo;Pedal lernen&ldquo; pro Kasten.</figcaption></figure>
+  <figure><img src="afbeeldingen/de/62_akoestiek_wizard_zwelkasten.jpg" alt="Assistent mit Schwellkasten je Rank"><figcaption>Der Assistent zeigt den Kasten unter den Schwellk&auml;sten und dem Crescendo.</figcaption></figure>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="tips">10. Tastenk&uuml;rzel und Tipps</h2>
+<table>
+  <tr><th style="width:22%">Taste</th><th>Funktion</th></tr>
+  <tr><td><kbd>F1</kbd> <kbd>F2</kbd> <kbd>F3</kbd></td><td>Orgel, Orgel-Einstellungen und Allgemeine Einstellungen.</td></tr>
+  <tr><td><kbd>F11</kbd></td><td>Vollbild (Spieltischmodus) ein oder aus.</td></tr>
+  <tr><td><kbd>Esc</kbd></td><td>Vollbild beenden.</td></tr>
+  <tr><td>Rechtsklick oder 3 s gedr&uuml;ckt halten</td><td>Auf einer Schaltfl&auml;che der Setzerleiste: diese Schaltfl&auml;che mit einer Spieltischtaste verbinden (MIDI anlernen).</td></tr>
+  <tr><td>Doppelklick auf die Lautst&auml;rke</td><td>Gesamtlautst&auml;rke zur&uuml;ck auf den Standardwert.</td></tr>
+  <tr><td>Karte 3 s gedr&uuml;ckt halten</td><td>In der Bibliothek: das Foto dieser Karte erneut suchen.</td></tr>
+</table>
+<ul>
+  <li>Alle Einstellungen werden bei jeder Orgel gespeichert, auch wenn Sie die Orgel schlie&szlig;en oder das Programm beenden.</li>
+  <li>F&uuml;r einen festen Spieltisch: Schalten Sie <b>Automatisch mit Windows starten</b> und <b>Zuletzt ge&ouml;ffnete Orgel automatisch laden</b> ein und nutzen Sie den Spieltischmodus.</li>
+  <li>Bei mehr als zwei Ausg&auml;ngen: W&auml;hlen Sie die Ausg&auml;nge pro Manual unter Routing und danach dieselben Ausg&auml;nge f&uuml;r die Hintergrundger&auml;usche.</li>
+</ul>
+
+<!-- ============================================================ -->
+<h2 id="problemen">11. Probleml&ouml;sung und Feedback</h2>
+<table>
+  <tr><th style="width:30%">Problem</th><th>Was Sie versuchen k&ouml;nnen</th></tr>
+  <tr><td>Kein Ton</td><td>L&auml;uft der Motor? Steht unten &bdquo;Audio aktiv&ldquo;? Ist unter Audioausgabe das richtige Ger&auml;t eingestellt, und passen die Ausg&auml;nge pro Manual zu Ihrem Audio-Interface? Nutzen Sie das Testsignal, um die Ausg&auml;nge zu h&ouml;ren.</td></tr>
+  <tr><td>Die Tastatur reagiert nicht</td><td>Unten steht &bdquo;MIDI nicht verbunden&ldquo;, solange es kein MIDI-Ger&auml;t gibt. Pr&uuml;fen Sie Allgemeine Einstellungen &rarr; MIDI und den MIDI-Kanal pro Manual unter Routing.</td></tr>
+  <tr><td>Die Orgel klingt verstimmt</td><td>Pr&uuml;fen Sie, ob <b>Pfeifen automatisch nachstimmen</b> an ist, und w&auml;hlen Sie unter Klang die Stimmung &bdquo;Original&ldquo; oder die gew&uuml;nschte Temperatur.</td></tr>
+  <tr><td>Knacken oder Stottern</td><td>Verringern Sie die Polyphonie, ziehen Sie weniger Register, schalten Sie den Hall aus oder w&auml;hlen Sie einen gr&ouml;&szlig;eren Puffer. Ein kurzer Startpuffer braucht eine schnelle Festplatte; w&auml;hlen Sie sonst einen l&auml;ngeren.</td></tr>
+  <tr><td>Zu wenig Speicher</td><td>W&auml;hlen Sie einen k&uuml;rzeren Startpuffer, schalten Sie Stereo-Samples aus oder H&ouml;rpositionen, die Sie nicht nutzen.</td></tr>
+  <tr><td>Hintergrundger&auml;usche oder Effektregister sind nicht auf dem richtigen Lautsprecher zu h&ouml;ren</td><td>W&auml;hlen Sie unter Routing bei &bdquo;Audioausgabe Hintergrundger&auml;usche&ldquo; dieselben Ausg&auml;nge wie f&uuml;r die Manuale.</td></tr>
+</table>
+<p><b>Feedback senden&hellip;</b> (Allgemeine Einstellungen &rarr; Update und Feedback) erstellt eine Nachricht mit Ihrer Meldung und den Logdateien der letzten Sitzungen, damit der Entwickler sehen kann, was passiert ist. Sie k&ouml;nnen Ihre Meldung auch auf der Projektseite bei GitHub einstellen.</p>
+
+</main>
+</body>
+</html>

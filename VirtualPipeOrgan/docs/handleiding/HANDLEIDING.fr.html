@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Manuel JM-Orgue</title>
+<link rel="stylesheet" href="handleiding.css">
+</head>
+<body>
+<main>
+
+<header class="titel">
+  <h1>JM-Orgue</h1>
+  <div class="onder">Manuel de la version 0.8.93 &middot; octobre 2026</div>
+</header>
+
+<p>JM-Orgue est un orgue &agrave; tuyaux virtuel pour Windows, macOS et Linux. Le programme joue directement les jeux d&rsquo;&eacute;chantillons Hauptwerk et GrandOrgue, y compris les grands jeux surround, et se joue avec un clavier MIDI, une console d&rsquo;orgue ou la souris. Ce manuel parcourt le programme &agrave; l&rsquo;aide de captures d&rsquo;&eacute;cran de la version 0.8.93.</p>
+<p class="klein">&copy; Martijn van der Kolk. Les captures d&rsquo;&eacute;cran ont &eacute;t&eacute; r&eacute;alis&eacute;es avec des orgues de d&eacute;monstration et des jeux de test personnels&nbsp;; les adresses r&eacute;seau, les jetons d&rsquo;acc&egrave;s et les dossiers d&rsquo;utilisateur ont &eacute;t&eacute; rendus illisibles.</p>
+
+<nav class="inhoud">
+  <b>Sommaire</b>
+  <ol>
+    <li><a href="#start">Pour commencer</a></li>
+    <li><a href="#bibliotheek">La biblioth&egrave;que</a></li>
+    <li><a href="#bespelen">Charger et jouer un orgue</a></li>
+    <li><a href="#werkbalk">La barre d&rsquo;outils</a></li>
+    <li><a href="#posities">Plusieurs positions d&rsquo;&eacute;coute</a></li>
+    <li><a href="#wizard">L&rsquo;assistant pour un nouvel orgue</a></li>
+    <li><a href="#orgelinst">Param&egrave;tres d&rsquo;orgue</a></li>
+    <li><a href="#algemeen">Param&egrave;tres g&eacute;n&eacute;raux</a></li>
+    <li><a href="#akoestiek">Configuration acoustique d&rsquo;un jeu</a></li>
+    <li><a href="#tips">Raccourcis clavier et conseils</a></li>
+    <li><a href="#problemen">D&eacute;pannage et retours</a></li>
+  </ol>
+</nav>
+
+<!-- ============================================================ -->
+<h2 id="start">1. Pour commencer</h2>
+
+<h3>Installer</h3>
+<p>T&eacute;l&eacute;chargez le programme d&rsquo;installation de la derni&egrave;re version sur la page des versions du projet (pour Windows <code>JM-Orgue_&lt;version&gt;_x64-setup.exe</code>) et lancez-le. L&rsquo;installation se fait par utilisateur et ne demande pas de droits d&rsquo;administrateur. Il existe aussi un paquet MSI pour Windows, un DMG pour macOS et un AppImage ou deb pour Linux.</p>
+<p>Le programme lui-m&ecirc;me est libre d&rsquo;utilisation. Les jeux d&rsquo;&eacute;chantillons ne sont pas fournis&nbsp;: vous les obtenez aupr&egrave;s de leurs auteurs. La page d&rsquo;accueil de la biblioth&egrave;que mentionne quelques auteurs qui proposent des jeux gratuitement.</p>
+
+<h3>Mettre &agrave; jour</h3>
+<p>JM-Orgue v&eacute;rifie lui-m&ecirc;me si une nouvelle version existe. Si c&rsquo;est le cas, un message appara&icirc;t en haut. Choisissez <b>Mettre &agrave; jour</b>&nbsp;: le programme t&eacute;l&eacute;charge la mise &agrave; jour, v&eacute;rifie la signature, installe et red&eacute;marre. Si vous voulez d&rsquo;abord seulement t&eacute;l&eacute;charger, choisissez <b>T&eacute;l&eacute;charger</b>. Vous pouvez aussi v&eacute;rifier &agrave; la main via Param&egrave;tres g&eacute;n&eacute;raux &rarr; Mise &agrave; jour et retour &rarr; <b>V&eacute;rifier les mises &agrave; jour</b>.</p>
+
+<h3>Les trois &eacute;crans principaux</h3>
+<p>En haut se trouvent trois onglets&nbsp;: <b>Orgue</b> (jouer), <b>Param&egrave;tres d&rsquo;orgue</b> (tout ce qui concerne l&rsquo;orgue charg&eacute;) et <b>Param&egrave;tres g&eacute;n&eacute;raux</b> (tout ce qui concerne l&rsquo;ensemble du programme). <kbd>F1</kbd>, <kbd>F2</kbd> et <kbd>F3</kbd> permettent de passer directement de l&rsquo;un &agrave; l&rsquo;autre. La croix &agrave; c&ocirc;t&eacute; du nom de l&rsquo;orgue ferme l&rsquo;orgue et vous ram&egrave;ne &agrave; la biblioth&egrave;que.</p>
+
+<!-- ============================================================ -->
+<h2 id="bibliotheek">2. La biblioth&egrave;que</h2>
+<p>Au d&eacute;marrage, vous voyez la biblioth&egrave;que d&rsquo;orgues&nbsp;: une carte par orgue avec photo, nom, facteur, lieu et nombre de jeux. Cliquez sur une carte pour charger l&rsquo;orgue.</p>
+<figure><img src="afbeeldingen/fr/03_bibliotheek.jpg" alt="Biblioth&egrave;que d&rsquo;orgues"><figcaption>La biblioth&egrave;que avec des orgues de d&eacute;monstration. En haut &agrave; droite, les boutons pour ajouter des orgues et acc&eacute;der aux param&egrave;tres&nbsp;; en haut &agrave; gauche, le choix de la langue (NL, EN, FR, DE, PL, IT, ES).</figcaption></figure>
+
+<h3>Ajouter un orgue</h3>
+<ul>
+  <li><b>.organ</b>&nbsp;: choisissez une d&eacute;finition d&rsquo;orgue (GrandOrgue <code>.organ</code> ou d&eacute;finition Hauptwerk). Vous choisissez le fichier de d&eacute;finition, et non le dossier d&rsquo;&eacute;chantillons&nbsp;: seule la d&eacute;finition conna&icirc;t les jeux, accouplements, tr&eacute;mulants et &eacute;ventuelles positions d&rsquo;enregistrement suppl&eacute;mentaires.</li>
+  <li><b>JM-Rec import</b>&nbsp;: importe un jeu d&rsquo;&eacute;chantillons cr&eacute;&eacute; avec JM-Rec.</li>
+  <li><b>Exporter</b>&nbsp;: transforme un dossier d&rsquo;&eacute;chantillons en d&eacute;finition d&rsquo;orgue (<code>.organ</code>), que vous pouvez ensuite charger avec le bouton <b>.organ</b>.</li>
+</ul>
+
+<h3>Boutons de la carte&nbsp;: photo, recherche, suppression</h3>
+<p>Lorsque vous pointez une carte, trois boutons apparaissent en haut &agrave; droite de la photo&nbsp;: <b>chercher une photo en ligne</b> (globe), <b>choisir soi-m&ecirc;me une image</b> (appareil photo) et <b>retirer de la biblioth&egrave;que</b> (croix). Retirer ne fait que supprimer la carte de la biblioth&egrave;que&nbsp;; les fichiers restent sur votre disque. Si vous maintenez une carte enfonc&eacute;e 3 secondes, le programme cherche de nouveau la photo.</p>
+<p>La <b>recherche en ligne</b> affiche quelques photos librement utilisables de Wikimedia Commons, d&rsquo;apr&egrave;s le nom, le facteur et le lieu indiqu&eacute;s dans le jeu. Cliquez sur une photo pour la reprendre&nbsp;; la source et la licence s&rsquo;affichent sous la carte. Si le jeu contient trop peu d&rsquo;informations pour trouver quelque chose, saisissez vous-m&ecirc;me un terme de recherche (&eacute;glise, ville ou nom de l&rsquo;orgue) dans le champ en haut de la fen&ecirc;tre et choisissez <b>Rechercher</b>.</p>
+<figure><img src="afbeeldingen/fr/04_online_zoeken.jpg" alt="Chercher une photo en ligne"><figcaption>La fen&ecirc;tre &laquo;&nbsp;Chercher une photo en ligne&nbsp;&raquo; avec le champ pour un terme de recherche personnel et les photos trouv&eacute;es, avec leur source et leur licence.</figcaption></figure>
+
+<!-- ============================================================ -->
+<h2 id="bespelen">3. Charger et jouer un orgue</h2>
+
+<h3>Chargement</h3>
+<p>Au chargement, JM-Orgue lit en m&eacute;moire le d&eacute;but de chaque enregistrement de tuyau&nbsp;; le reste est charg&eacute; pendant que vous jouez. Un grand jeu surround peut donc prendre un moment&nbsp;; la barre de progression indique o&ugrave; l&rsquo;on en est.</p>
+<figure><img src="afbeeldingen/fr/05_laden.jpg" alt="&Eacute;cran de chargement"><figcaption>L&rsquo;&eacute;cran de chargement avec la progression de la lecture des &eacute;chantillons.</figcaption></figure>
+
+<h3>La soufflerie</h3>
+<p>Apr&egrave;s le chargement, la <b>soufflerie de l&rsquo;orgue est arr&ecirc;t&eacute;e</b>, et sans soufflerie rien ne sonne. Mettez-la en marche avec <b>Soufflerie</b> dans la barre jaune ou avec le bouton de soufflerie de la barre d&rsquo;outils. D&egrave;s que la soufflerie est en marche, la barre dispara&icirc;t. Avec la soufflerie en marche, le bruit de soufflerie du jeu (s&rsquo;il en contient un) se fait entendre aussi.</p>
+<figure><img src="afbeeldingen/fr/06_orgelscherm_motor_uit.jpg" alt="&Eacute;cran d&rsquo;orgue, soufflerie arr&ecirc;t&eacute;e"><figcaption>L&rsquo;&eacute;cran d&rsquo;orgue juste apr&egrave;s le chargement&nbsp;: soufflerie arr&ecirc;t&eacute;e, tous les jeux repouss&eacute;s.</figcaption></figure>
+
+<h3>Jeux, accouplements et tr&eacute;mulants</h3>
+<p>Chaque clavier a son propre cadre avec ses jeux. Cliquez sur un bouton de jeu pour le tirer&nbsp;; les jeux tir&eacute;s deviennent jaunes. La couleur du nom indique la famille&nbsp;: les anches sont par exemple en rouge, les mixtures et quintes en bleu. Chaque cadre contient aussi le <b>tr&eacute;mulant</b> et les <b>accouplements</b> (par exemple &laquo;&nbsp;Hauptwerk + Schwellwerk&nbsp;&raquo;). Une barre verte &agrave; droite de l&rsquo;en-t&ecirc;te d&rsquo;un clavier indique la position de la bo&icirc;te expressive.</p>
+<figure><img src="afbeeldingen/fr/07_orgelscherm_registers.jpg" alt="&Eacute;cran d&rsquo;orgue avec des jeux tir&eacute;s"><figcaption>Soufflerie en marche, quelques jeux tir&eacute;s et l&rsquo;accouplement Hauptwerk + Schwellwerk enclench&eacute;. En bas, la barre du setzer.</figcaption></figure>
+
+<h3>La barre du setzer</h3>
+<p>En bas se trouve la barre du setzer, avec les commandes d&rsquo;une console d&rsquo;orgue&nbsp;:</p>
+<table>
+  <tr><th style="width:26%">&Eacute;l&eacute;ment</th><th>Fonctionnement</th></tr>
+  <tr><td><b>SET</b> et <b>0&ndash;9</b></td><td>Appuyez sur SET puis sur un chiffre pour m&eacute;moriser la registration actuelle&nbsp;; appuyez seulement sur le chiffre pour la rappeler. Un petit point sur un chiffre indique qu&rsquo;une registration y est enregistr&eacute;e.</td></tr>
+  <tr><td><b>&minus;1 / +1</b>, <b>&minus;10 / +10</b></td><td>Passe &agrave; la registration pr&eacute;c&eacute;dente ou suivante, ou avance de dix.</td></tr>
+  <tr><td><b>G.C.</b></td><td>General Cancel&nbsp;: tous les jeux rentr&eacute;s.</td></tr>
+  <tr><td><b>M 1&ndash;8</b></td><td>Niveaux de m&eacute;moire&nbsp;: huit banques de registrations distinctes.</td></tr>
+  <tr><td><b>Cresc</b></td><td>Le crescendo g&eacute;n&eacute;ral (voir le chapitre 7). La barre indique le cran actuel.</td></tr>
+  <tr><td>Curseur de volume</td><td>Volume principal. Un double-clic le remet &agrave; la valeur par d&eacute;faut&nbsp;; la molette le modifie par pas de 1 dB.</td></tr>
+</table>
+<p class="klein">Chaque bouton de la barre du setzer peut &ecirc;tre associ&eacute; &agrave; un bouton de votre propre console&nbsp;: faites un clic droit (ou maintenez 3 secondes), puis appuyez sur le bouton de votre console.</p>
+
+<!-- ============================================================ -->
+<h2 id="werkbalk">4. La barre d&rsquo;outils</h2>
+<p>Au-dessus des jeux se trouve la barre d&rsquo;outils. &Agrave; gauche, les claviers (P&eacute;dale, Hauptwerk, &hellip;) sont des boutons&nbsp;: ils permettent d&rsquo;afficher ou de masquer un clavier. &Agrave; droite se trouvent les fonctions ci-dessous.</p>
+<table>
+  <tr><th style="width:24%">Bouton</th><th>Fonction</th></tr>
+  <tr><td><b>Soufflerie</b></td><td>Met la soufflerie en marche ou l&rsquo;arr&ecirc;te.</td></tr>
+  <tr><td><b>Disposition</b></td><td>Ouvre le menu de disposition (voir ci-dessous).</td></tr>
+  <tr><td><b>Barre</b></td><td>Affiche ou masque la barre principale avec les onglets et le bouton de profil.</td></tr>
+  <tr><td><b>Plein &eacute;cran</b></td><td>Mode console&nbsp;: seulement les jeux et la barre du setzer (<kbd>F11</kbd>).</td></tr>
+  <tr><td><b>Nouvel &eacute;cran</b></td><td>Ouvre une fen&ecirc;tre suppl&eacute;mentaire avec les m&ecirc;mes jeux, par exemple pour un deuxi&egrave;me moniteur ou un deuxi&egrave;me clavier.</td></tr>
+  <tr><td><b>MP3</b></td><td>Enregistre ce que vous entendez. L&rsquo;enregistrement va dans Documents\JM-Orgue-opnames. Cliquez sur le compteur rouge pour arr&ecirc;ter&nbsp;; le programme indique ensuite o&ugrave; se trouve le fichier.</td></tr>
+  <tr><td><b>MIDI</b></td><td>Enregistre ce que vous jouez (notes uniquement) dans un fichier .mid. Cliquez sur le compteur bleu pour arr&ecirc;ter et choisissez o&ugrave; l&rsquo;enregistrer.</td></tr>
+  <tr><td><b>Noter</b></td><td>Ouvre la fen&ecirc;tre de notation&nbsp;: les notes apparaissent pendant que vous jouez, avec couches, overdub et &eacute;dition. Un fichier MIDI existant peut aussi y &ecirc;tre ouvert.</td></tr>
+  <tr><td><b>&Eacute;teindre le PC</b></td><td>Ferme le logiciel <i>et l&rsquo;ordinateur</i>, apr&egrave;s confirmation&nbsp;; le dernier &eacute;tat est d&rsquo;abord enregistr&eacute;. Un clic droit ou 3 secondes de pression associe le bouton &agrave; un bouton de votre console.</td></tr>
+</table>
+
+<h3>Le menu de disposition</h3>
+<p>Avec <b>Disposition</b>, vous adaptez l&rsquo;affichage &agrave; votre &eacute;cran&nbsp;: <b>Ajuster</b> calcule la taille des boutons pour que tous les jeux tiennent &agrave; l&rsquo;&eacute;cran, les boutons moins/plus modifient la largeur et la hauteur des boutons, et vous choisissez en outre les claviers l&rsquo;un sous l&rsquo;autre ou c&ocirc;te &agrave; c&ocirc;te (vertical), des boutons ronds plut&ocirc;t que rectangulaires et l&rsquo;emplacement des accouplements (dans le clavier ou dans une barre &agrave; part). Le choix est m&eacute;moris&eacute; par orgue.</p>
+<figure><img src="afbeeldingen/fr/08_indeling_menu.jpg" alt="Menu de disposition"><figcaption>Le menu Disposition dans la barre d&rsquo;outils.</figcaption></figure>
+
+<h3>Plein &eacute;cran (mode console)</h3>
+<p>Dans ce mode, la barre de titre, la barre des t&acirc;ches de Windows et la barre principale disparaissent&nbsp;: vous ne voyez que les jeux et la barre du setzer. En haut, une &eacute;troite bande comporte quatre boutons&nbsp;: <b>Barres</b> (rappeler temporairement la barre principale), <b>Soufflerie</b> (marche ou arr&ecirc;t), <b>Quitter le plein &eacute;cran</b> et <b>&Eacute;teindre le PC</b> (fermer le logiciel et l&rsquo;ordinateur). <kbd>F11</kbd> active et d&eacute;sactive le mode&nbsp;; <kbd>&Eacute;chap</kbd> le d&eacute;sactive.</p>
+<figure><img src="afbeeldingen/fr/09_volledig_scherm.jpg" alt="Plein &eacute;cran"><figcaption>Le mode console&nbsp;: jeux, barre du setzer et, en haut, la bande avec les quatre boutons.</figcaption></figure>
+
+<h3>Un deuxi&egrave;me &eacute;cran</h3>
+<p><b>Nouvel &eacute;cran</b> ouvre une fen&ecirc;tre &agrave; part que vous pouvez faire glisser vers un autre moniteur ou laisser en petit format &agrave; c&ocirc;t&eacute; de la fen&ecirc;tre principale. Elle a ses propres r&eacute;glages de disposition&nbsp;: si les boutons sont trop petits, choisissez <b>Disposition</b> et r&eacute;glez la largeur et la hauteur des boutons, ou choisissez les claviers l&rsquo;un sous l&rsquo;autre ou c&ocirc;te &agrave; c&ocirc;te.</p>
+<figure><img src="afbeeldingen/fr/43_nieuw_scherm.jpg" alt="Deuxi&egrave;me &eacute;cran"><figcaption>Un &eacute;cran suppl&eacute;mentaire avec des jeux lisibles, ici dans une fen&ecirc;tre de 1000 &times; 900 pixels.</figcaption></figure>
+
+<!-- ============================================================ -->
+<h2 id="posities">5. Plusieurs positions d&rsquo;&eacute;coute</h2>
+<p>Certains jeux d&rsquo;&eacute;chantillons ont &eacute;t&eacute; enregistr&eacute;s &agrave; plusieurs endroits de l&rsquo;&eacute;glise, par exemple tout pr&egrave;s, devant, &agrave; mi-distance et au fond. Un tel jeu affiche dans la barre d&rsquo;outils les boutons <b>Perspective</b>, un par position. Cliquez sur une position pour l&rsquo;activer ou la d&eacute;sactiver&nbsp;; vous pouvez en faire sonner plusieurs &agrave; la fois. &Agrave; droite se trouve la <b>position d&rsquo;&eacute;coute</b>&nbsp;: le curseur entre &laquo;&nbsp;console&nbsp;&raquo; et &laquo;&nbsp;au fond&nbsp;&raquo; fait un fondu encha&icirc;n&eacute; progressif entre les positions enregistr&eacute;es.</p>
+<figure><img src="afbeeldingen/fr/50_nancy_orgelscherm.jpg" alt="&Eacute;cran d&rsquo;orgue avec perspectives"><figcaption>Un jeu avec quatre positions d&rsquo;enregistrement (Close, Front, Middle, Rear) et le curseur de position d&rsquo;&eacute;coute.</figcaption></figure>
+<div class="tip"><b>Conseil</b> Chaque position demande de la m&eacute;moire et de la puissance de calcul. Si tout ne tient pas dans la m&eacute;moire de votre ordinateur, le programme ne charge, la premi&egrave;re fois, que la position la plus proche de l&rsquo;orgue. Dans les Param&egrave;tres d&rsquo;orgue se trouve le bloc &laquo;&nbsp;Perspectives et rangs superpos&eacute;s&nbsp;&raquo;&nbsp;: vous y choisissez les positions &agrave; charger, r&eacute;glez le volume par position et, avec &laquo;&nbsp;Garder toutes les positions en m&eacute;moire&nbsp;&raquo;, passez instantan&eacute;ment d&rsquo;une position &agrave; l&rsquo;autre. Un nouveau choix de positions charg&eacute;es ne prend effet qu&rsquo;apr&egrave;s le rechargement de l&rsquo;orgue.</div>
+
+<!-- ============================================================ -->
+<h2 id="wizard">6. L&rsquo;assistant pour un nouvel orgue</h2>
+<p>Quand vous chargez un orgue pour la premi&egrave;re fois, l&rsquo;assistant &laquo;&nbsp;Configurer l&rsquo;orgue&nbsp;&raquo; d&eacute;marre automatiquement. En six &eacute;tapes, il passe en revue tout ce que vous devez relier &agrave; votre propre console. Tout peut &ecirc;tre modifi&eacute; plus tard, et vous pouvez relancer l&rsquo;assistant via Param&egrave;tres d&rsquo;orgue &rarr; Routage &rarr; <b>Assistant</b>. <b>Plus tard</b> ferme l&rsquo;assistant et le propose &agrave; nouveau &agrave; la prochaine ouverture&nbsp;; <b>Ignorer</b> (&eacute;tape 1) l&rsquo;ignore compl&egrave;tement.</p>
+<div class="duo">
+  <figure><img src="afbeeldingen/fr/20_wizard_1.jpg" alt="Assistant, &eacute;tape 1"><figcaption>&Eacute;tape 1&nbsp;: ce que fait l&rsquo;assistant.</figcaption></figure>
+  <figure><img src="afbeeldingen/fr/20_wizard_2.jpg" alt="Assistant, &eacute;tape 2"><figcaption>&Eacute;tape 2&nbsp;: le canal MIDI par clavier.</figcaption></figure>
+</div>
+<ol>
+  <li><b>D&eacute;marrer</b>&nbsp;: un aper&ccedil;u des &eacute;tapes.</li>
+  <li><b>Canal MIDI par clavier</b>&nbsp;: pour chaque clavier, choisissez <b>Apprendre</b> et jouez une touche de ce clavier. Le programme retient le canal. Les boutons ne fonctionnent que si un appareil MIDI est connect&eacute; (Param&egrave;tres g&eacute;n&eacute;raux &rarr; MIDI)&nbsp;; sinon un avertissement s&rsquo;affiche.</li>
+  <li><b>Bo&icirc;tes expressives et crescendo</b>&nbsp;: choisissez <b>Apprendre</b> et d&eacute;placez la p&eacute;dale compl&egrave;tement ferm&eacute;e puis compl&egrave;tement ouverte. Il en va de m&ecirc;me pour le crescendo g&eacute;n&eacute;ral. Si un jeu a des bo&icirc;tes expressives par rang (chapitre 9), elles apparaissent aussi ici.</li>
+  <li><b>Sorties pour les enceintes</b>&nbsp;: choisissez le pilote et l&rsquo;appareil, enregistrez-les comme profil &laquo;&nbsp;Enceintes&nbsp;&raquo; et choisissez pour chaque clavier les sorties de votre interface audio sur lesquelles il sonne. En dessous figurent les m&ecirc;mes choix pour le bruit de soufflerie, le bruit d&rsquo;ambiance et les clics de m&eacute;canique, les jeux d&rsquo;effet et le bruit de tr&eacute;mulant, dans la mesure o&ugrave; le jeu les contient.</li>
+  <li><b>Sorties pour le casque</b>&nbsp;: la m&ecirc;me chose pour le second profil, par exemple une sortie casque. D&egrave;s lors, vous basculez entre les deux profils avec le bouton <b>Enceintes</b> en haut &agrave; droite.</li>
+  <li><b>Termin&eacute;</b>&nbsp;: les r&eacute;glages sont enregistr&eacute;s avec cet orgue.</li>
+</ol>
+<div class="duo">
+  <figure><img src="afbeeldingen/fr/20_wizard_3.jpg" alt="Assistant, &eacute;tape 3"><figcaption>&Eacute;tape 3&nbsp;: apprendre les bo&icirc;tes expressives et le crescendo.</figcaption></figure>
+  <figure><img src="afbeeldingen/fr/20_wizard_4.jpg" alt="Assistant, &eacute;tape 4"><figcaption>&Eacute;tape 4&nbsp;: pilote, appareil, canaux par clavier et bruits pour les enceintes.</figcaption></figure>
+  <figure><img src="afbeeldingen/fr/20_wizard_5.jpg" alt="Assistant, &eacute;tape 5"><figcaption>&Eacute;tape 5&nbsp;: la m&ecirc;me chose pour le casque.</figcaption></figure>
+  <figure><img src="afbeeldingen/fr/20_wizard_6.jpg" alt="Assistant, &eacute;tape 6"><figcaption>&Eacute;tape 6&nbsp;: termin&eacute;.</figcaption></figure>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="orgelinst">7. Param&egrave;tres d&rsquo;orgue</h2>
+<p>Tous les r&eacute;glages propres &agrave; l&rsquo;orgue charg&eacute; sont enregistr&eacute;s avec cet orgue. En haut se trouvent cinq onglets&nbsp;: <b>Son</b>, <b>Crescendo</b>, <b>Ordre des jeux</b>, <b>Routage</b> et <b>Tout</b>&nbsp;; ce dernier place tous les blocs les uns sous les autres.</p>
+
+<h3>Son</h3>
+<p>Le premier bloc contient les r&eacute;glages principaux&nbsp;:</p>
+<ul>
+  <li><b>Volume</b>&nbsp;: le volume principal de cet orgue.</li>
+  <li><b>Temp&eacute;rament</b>&nbsp;: &laquo;&nbsp;Original&nbsp;&raquo; joue les tuyaux tels qu&rsquo;ils ont &eacute;t&eacute; enregistr&eacute;s. Les autres temp&eacute;raments (&eacute;gal et temp&eacute;raments historiques) r&eacute;accordent les tuyaux d&rsquo;apr&egrave;s la hauteur mesur&eacute;e de chaque enregistrement. Sous le choix, vous voyez combien de tuyaux ont une hauteur mesur&eacute;e. Avec <b>Temp&eacute;rament personnalis&eacute;&hellip;</b>, vous r&eacute;glez vous-m&ecirc;me l&rsquo;&eacute;cart par note en cents.</li>
+  <li><b>Accord fin</b>&nbsp;: l&rsquo;ensemble plus haut ou plus bas, en cents.</li>
+</ul>
+<p><b>R&eacute;verb&eacute;ration</b> r&egrave;gle la r&eacute;verb&eacute;ration. Si le jeu a d&eacute;j&agrave; l&rsquo;acoustique de l&rsquo;&eacute;glise dans ses enregistrements, cela est indiqu&eacute; (avec un bouton <b>Revenir &agrave; l&rsquo;enregistrement (r&eacute;verb&eacute;ration coup&eacute;e)</b> pour couper la r&eacute;verb&eacute;ration suppl&eacute;mentaire)&nbsp;: une r&eacute;verb&eacute;ration suppl&eacute;mentaire est alors une question de go&ucirc;t. Vous choisissez entre <b>Algorithmique</b> (une r&eacute;verb&eacute;ration calcul&eacute;e avec RT60, d&eacute;lai, amortissement et taille de la salle, aussi sous forme de pr&eacute;r&eacute;glage) et <b>R&eacute;ponse Impulsionnelle</b> avec une r&eacute;ponse impulsionnelle (IR) personnelle. Avec <b>Mix</b>, vous d&eacute;terminez la quantit&eacute; de r&eacute;verb&eacute;ration entendue.</p>
+<figure><img src="afbeeldingen/fr/10_klank_1.jpg" alt="Onglet Son, partie haute"><figcaption>Son, en haut&nbsp;: r&eacute;glages principaux (volume, temp&eacute;rament, accord fin) et r&eacute;verb&eacute;ration.</figcaption></figure>
+<p><b>Timbre de cet orgue</b> est une correction de timbre propre &agrave; chaque orgue&nbsp;; la correction pour votre casque ou vos enceintes est distincte, dans les param&egrave;tres g&eacute;n&eacute;raux. Le <b>mod&egrave;le de vent</b> fait respirer l&rsquo;orgue&nbsp;: un accord avec beaucoup de jeux fait baisser la pression du vent, comme dans un vrai orgue, et les fl&ucirc;tes et les anches y r&eacute;agissent diff&eacute;remment. Vous choisissez le nombre de groupes de vent (quels claviers partagent le m&ecirc;me soufflet) et, par groupe, la taille du soufflet, l&rsquo;amortissement, la baisse de pression maximale et le caract&egrave;re du vent.</p>
+<figure><img src="afbeeldingen/fr/10_klank_2.jpg" alt="Onglet Son, timbre et mod&egrave;le de vent"><figcaption>Son, plus bas&nbsp;: timbre de cet orgue et mod&egrave;le de vent par groupe de vent.</figcaption></figure>
+<p><b>Bruits</b> montre les sons continus que contient le jeu, comme la soufflerie et le bruit de la salle. Vous r&eacute;glez le volume, mettez la <b>soufflerie</b> en marche ou l&rsquo;arr&ecirc;tez, et pouvez activer la <b>m&eacute;canique du clavier</b> (clic des touches). La m&eacute;canique du clavier est d&eacute;sactiv&eacute;e par d&eacute;faut car elle consomme beaucoup de m&eacute;moire et demande de recharger l&rsquo;orgue.</p>
+<figure><img src="afbeeldingen/fr/10_klank_3.jpg" alt="Onglet Son, bruits"><figcaption>Son&nbsp;: groupes de vent et bloc Bruits avec le volume, la soufflerie et la m&eacute;canique du clavier.</figcaption></figure>
+<p>En bas se trouve l&rsquo;<b>harmonisation des tuyaux</b>&nbsp;: choisissez un jeu &agrave; gauche et r&eacute;glez le volume et l&rsquo;accord de chaque tuyau individuellement.</p>
+<figure><img src="afbeeldingen/fr/10_klank_4.jpg" alt="Onglet Son, harmonisation des tuyaux"><figcaption>Son, en bas&nbsp;: l&rsquo;harmonisation des tuyaux. Choisissez un jeu &agrave; gauche pour harmoniser ses tuyaux.</figcaption></figure>
+
+<h3>Crescendo</h3>
+<p>Le <b>crescendo g&eacute;n&eacute;ral</b> tire pas &agrave; pas davantage de jeux lorsque vous d&eacute;placez une p&eacute;dale de crescendo. Vous d&eacute;cidez vous-m&ecirc;me quels jeux entrent dans quel cran&nbsp;:</p>
+<ul>
+  <li><b>Activ&eacute;</b> met le crescendo en marche&nbsp;; <b>&Eacute;tapes</b> est le nombre de crans.</li>
+  <li><b>Remplissage auto</b> propose un r&eacute;glage adapt&eacute; aux jeux de cet orgue. Avec les options en dessous, vous d&eacute;cidez si les accouplements sont inclus, si les jeux de couleur (sesquialtera, cornet, tierce), les anches de 32&prime; et les chamades sont inclus et si les accouplements d&rsquo;octave n&rsquo;interviennent qu&rsquo;au tutti. <b>Effacer</b> vide la matrice.</li>
+  <li>Dans la matrice, un clic sur une case tire ou rentre ce jeu dans ce cran&nbsp;; <kbd>Maj</kbd>+clic l&rsquo;applique &agrave; tous les crans &agrave; partir de celui-ci.</li>
+  <li><b>Apprendre p&eacute;dale</b> associe votre p&eacute;dale de crescendo&nbsp;; en bas, vous pouvez aussi saisir &agrave; la main le canal et le num&eacute;ro de CC.</li>
+</ul>
+<figure><img src="afbeeldingen/fr/11_crescendo.jpg" alt="Onglet Crescendo"><figcaption>La matrice du crescendo&nbsp;: les jeux en lignes, les crans en colonnes.</figcaption></figure>
+
+<h3>Ordre des jeux</h3>
+<p>Vous d&eacute;terminez ici l&rsquo;ordre des jeux dans chaque clavier. Faites glisser un jeu par sa poign&eacute;e pour le d&eacute;placer. Pour chaque jeu, vous voyez la hauteur et la famille (la couleur du nom). Avec les fl&egrave;ches, vous modifiez l&rsquo;ordre pas &agrave; pas, et <b>R&eacute;initialiser</b> r&eacute;tablit l&rsquo;ordre du jeu d&rsquo;&eacute;chantillons.</p>
+<figure><img src="afbeeldingen/fr/12_registersortering.jpg" alt="Onglet Ordre des jeux"><figcaption>Les jeux par clavier, dans l&rsquo;ordre o&ugrave; ils apparaissent sur l&rsquo;&eacute;cran d&rsquo;orgue.</figcaption></figure>
+
+<h3>Routage</h3>
+<p>Cet onglet relie votre orgue &agrave; votre mat&eacute;riel. En haut, il y a un bloc par clavier&nbsp;:</p>
+<ul>
+  <li><b>Canal</b>&nbsp;: le canal MIDI &eacute;cout&eacute; par le clavier (&laquo;&nbsp;Tous&nbsp;&raquo; = tous les canaux). <b>Apprendre</b> d&eacute;termine le canal et la plage en jouant d&rsquo;abord la touche la plus grave, puis la plus aigu&euml;.</li>
+  <li><b>Transp</b>&nbsp;: transposer en demi-tons. <b>Plage</b>&nbsp;: touche la plus grave et la plus aigu&euml;. <b>Octave courte</b>&nbsp;: pour les jeux &agrave; octave de basse courte.</li>
+  <li><b>Bo&icirc;te expressive</b>&nbsp;: active la bo&icirc;te expressive de ce clavier&nbsp;; des boutons apparaissent alors pour apprendre la p&eacute;dale, r&eacute;gler le volume minimal et la fr&eacute;quence de coupure d&rsquo;une bo&icirc;te ferm&eacute;e.</li>
+  <li><b>Alimentation en air</b>&nbsp;: &agrave; quel groupe de vent le clavier appartient.</li>
+  <li><b>Panoramique</b> et <b>Sorties</b>&nbsp;: la place dans l&rsquo;image st&eacute;r&eacute;o et les canaux de sortie de votre interface audio sur lesquels le clavier sonne. Deux sorties cons&eacute;cutives forment une paire st&eacute;r&eacute;o&nbsp;; un canal isol&eacute; sonne en mono.</li>
+  <li><b>C/Cis</b>&nbsp;: r&eacute;partit les tuyaux sur deux c&ocirc;t&eacute;s, comme les sommiers C et Cis d&rsquo;un vrai orgue&nbsp;; la force et la d&eacute;croissance globales se r&egrave;glent dans le bloc au-dessus.</li>
+  <li><b>Tr&eacute;mulant LFO</b>&nbsp;: si le jeu n&rsquo;a pas de vrais enregistrements de tr&eacute;mulant, le programme calcule le tr&eacute;mulant. Vous r&egrave;glez ici la vitesse, l&rsquo;amplitude et la hauteur.</li>
+</ul>
+<figure><img src="afbeeldingen/fr/13_routing_boven.jpg" alt="Onglet Routage, haut"><figcaption>Routage, en haut&nbsp;: le bouton Assistant, la r&eacute;partition C/Cis et le premier clavier avec canal, plage, panoramique, sorties et tr&eacute;mulant.</figcaption></figure>
+<figure><img src="afbeeldingen/fr/15_routing_zwelkast.jpg" alt="Routage avec bo&icirc;te expressive"><figcaption>Un clavier avec la bo&icirc;te expressive activ&eacute;e&nbsp;: apprendre la p&eacute;dale, canal et CC manuels, volume minimal et fr&eacute;quence de coupure.</figcaption></figure>
+
+<p>En dessous se trouve <b>Sortie audio des sons d&rsquo;ambiance</b>&nbsp;: pour chaque type de son, vous choisissez les sorties utilis&eacute;es. <b>Soufflerie</b> est le bruit de soufflerie&nbsp;; <b>Ambiance et clics de m&eacute;canique</b> concerne le bruit de la salle et les clics des jeux et des touches&nbsp;; les jeux avec des jeux d&rsquo;effet (cymbalestern, rossignol et autres) et du bruit de tr&eacute;mulant ont chacun leur propre ligne. Cela importe surtout avec plus de deux sorties, lorsque les claviers sonnent sur d&rsquo;autres canaux que 1&ndash;2 par d&eacute;faut. Juste en dessous&nbsp;:</p>
+<ul>
+  <li><b>Clavier continu</b>&nbsp;: les touches hors de l&rsquo;&eacute;tendue enregistr&eacute;e d&rsquo;un jeu jouent le tuyau le plus proche, d&eacute;cal&eacute; &agrave; la bonne hauteur, au lieu de rester muettes. Un clavier de 61 touches continue ainsi &agrave; jouer sur un jeu qui a moins de notes.</li>
+  <li><b>Accorder automatiquement les tuyaux</b>&nbsp;: r&eacute;accorde les tuyaux d&rsquo;apr&egrave;s leur hauteur mesur&eacute;e, en conservant les jeux volontairement ondulants. Activ&eacute; par d&eacute;faut.</li>
+  <li><b>Correction de hauteur</b>&nbsp;: l&rsquo;ensemble plus haut ou plus bas en cents (<b>Z&eacute;ro</b> la remet &agrave; z&eacute;ro).</li>
+</ul>
+<figure><img src="afbeeldingen/fr/16_routing_bijgeluiden.jpg" alt="Routage&nbsp;: sons d&rsquo;ambiance"><figcaption>Sortie audio des sons d&rsquo;ambiance avec les pastilles par canal de sortie, clavier continu et correction de hauteur.</figcaption></figure>
+<p>Plus bas se trouvent les <b>Accouplements</b> (activer ou d&eacute;sactiver, avec un bouton MIDI par accouplement) et <b>Accouplements en plus</b>&nbsp;: des accouplements qui ne sont pas dans le jeu d&rsquo;&eacute;chantillons mais d&eacute;coulent de la disposition des claviers&nbsp;; cochez ce que vous voulez et ils apparaissent aussit&ocirc;t dans la barre des accouplements. <b>Affectations MIDI</b> est une liste unique de toutes les affectations MIDI de cet orgue, que vous pouvez y modifier, supprimer ou ajouter &agrave; la main. En bas, <b>Ouvrir .mid</b> fait jouer un fichier MIDI par l&rsquo;orgue.</p>
+<figure><img src="afbeeldingen/fr/14_routing_onder.jpg" alt="Routage&nbsp;: accouplements et MIDI"><figcaption>Routage, en bas&nbsp;: accouplements en plus, affectations MIDI et lecture MIDI.</figcaption></figure>
+
+<!-- ============================================================ -->
+<h2 id="algemeen">8. Param&egrave;tres g&eacute;n&eacute;raux</h2>
+<p>Ces r&eacute;glages valent pour l&rsquo;ensemble du programme. Les onglets sont <b>Sortie audio</b>, <b>Correction d&rsquo;&eacute;chantillons</b>, <b>MIDI</b>, <b>Apprendre les boutons</b>, <b>Affichage</b> et <b>Mise &agrave; jour et retour</b>.</p>
+
+<h3>Sortie audio</h3>
+<ul>
+  <li><b>Pilote audio</b> et appareil&nbsp;: pour la latence la plus faible, choisissez ASIO (par exemple le pilote de votre interface audio)&nbsp;; WASAPI fonctionne avec la carte son Windows standard. La ligne &laquo;&nbsp;Actuel&nbsp;&raquo; en dessous indique ce qui joue en ce moment.</li>
+  <li><b>Signal de test</b>&nbsp;: cliquez sur un num&eacute;ro de canal pour envoyer le son &agrave; cette sortie pr&eacute;cise, afin d&rsquo;entendre quelle fiche correspond &agrave; quelle enceinte.</li>
+  <li><b>Polyphonie</b> et <b>C&oelig;urs de calcul pour le mixage</b>&nbsp;: le nombre maximal de tuyaux sonnant en m&ecirc;me temps et le nombre de c&oelig;urs de processeur sur lesquels le mixage est r&eacute;parti. Le choix par d&eacute;faut convient &agrave; votre ordinateur&nbsp;; l&rsquo;indicateur de charge montre l&rsquo;effet.</li>
+  <li><b>Lire les &eacute;chantillons st&eacute;r&eacute;o en st&eacute;r&eacute;o</b>&nbsp;: conserve l&rsquo;image st&eacute;r&eacute;o des enregistrements st&eacute;r&eacute;o. D&eacute;sactiv&eacute;, c&rsquo;est un mixage mono qui divise par deux l&rsquo;usage de m&eacute;moire de ces jeux.</li>
+  <li><b>Tampon de d&eacute;part par enregistrement</b> (nouveau dans cette version)&nbsp;: la part de chaque enregistrement de tuyau qui est tout de suite en m&eacute;moire&nbsp;: 200 ms, 300 ms, 500 ms, 1 s ou 2 s (par d&eacute;faut). Un tampon plus court &eacute;conomise beaucoup de m&eacute;moire et de temps de chargement&nbsp;; le reste est charg&eacute; pendant que vous jouez. Le choix prend effet apr&egrave;s le rechargement de l&rsquo;orgue.</li>
+  <li><b>Taille de buffer</b>&nbsp;: plus petit signifie moins de latence mais plus de charge pour votre ordinateur. <b>Appliquer</b> active le choix.</li>
+</ul>
+<div class="tip"><b>Conseil</b> Si vous entendez une courte r&eacute;p&eacute;tition de l&rsquo;attaque d&rsquo;un tuyau dans les grands accords, choisissez un tampon de d&eacute;part plus long. Si ce n&rsquo;est pas le cas mais que vous manquez de m&eacute;moire, 500 ms ou 1 s est un bon choix. Un disque rapide (SSD) permet des tampons courts.</div>
+<figure><img src="afbeeldingen/fr/30_audio_1.jpg" alt="Sortie audio, haut"><figcaption>Sortie audio, en haut&nbsp;: pilote, appareil, signal de test, polyphonie, c&oelig;urs de calcul, &eacute;chantillons st&eacute;r&eacute;o, tampon de d&eacute;part et taille de buffer.</figcaption></figure>
+<p>Les <b>profils de sortie</b> m&eacute;morisent deux r&eacute;glages de sortie complets, par exemple des enceintes via ASIO et un casque via WASAPI, y compris le choix des canaux par clavier. Choisissez la sortie voulue, cliquez sur <b>Enregistrer la s&eacute;lection actuelle</b> pour Enceintes ou Casque, puis basculez avec le bouton <b>Enceintes</b> en haut &agrave; droite ou avec un bouton MIDI appris. Le profil actif est marqu&eacute;.</p>
+<p>La <b>correction pour casque ou enceintes</b> applique une correction de timbre &agrave; la sortie elle-m&ecirc;me (et non &agrave; l&rsquo;orgue)&nbsp;: choisissez pour quel profil elle vaut, activez-la et choisissez un pr&eacute;r&eacute;glage dans la liste AutoEq, ou importez ou exportez une correction personnelle.</p>
+<p>En dessous se trouvent les options pour d&eacute;marrer automatiquement le programme avec Windows, charger automatiquement le dernier orgue ouvert, laisser la croix d&rsquo;un &eacute;cran suppl&eacute;mentaire fermer tout le logiciel et restaurer la derni&egrave;re registration. L&rsquo;<b>archive MIDI automatique</b> enregistre en arri&egrave;re-plan tout ce que vous jouez, sous forme d&rsquo;un fichier .mid par session&nbsp;: elle d&eacute;marre &agrave; la premi&egrave;re note et s&rsquo;arr&ecirc;te apr&egrave;s un silence.</p>
+<figure><img src="afbeeldingen/fr/30_audio_2.jpg" alt="Sortie audio, milieu"><figcaption>Sortie audio, plus bas&nbsp;: profils de sortie, correction pour casque ou enceintes, options de d&eacute;marrage, archive MIDI et t&eacute;l&eacute;commande. Le dossier et l&rsquo;adresse r&eacute;seau ont volontairement &eacute;t&eacute; remplac&eacute;s par une indication.</figcaption></figure>
+<p>Avec la <b>t&eacute;l&eacute;commande sur le r&eacute;seau (tablette/t&eacute;l&eacute;phone)</b>, vous commandez l&rsquo;orgue depuis une tablette ou un t&eacute;l&eacute;phone du m&ecirc;me r&eacute;seau wi-fi. Le programme affiche une adresse et un code QR &agrave; scanner, et vous choisissez quels &eacute;l&eacute;ments et quels claviers apparaissent sur l&rsquo;&eacute;cran externe. La premi&egrave;re fois, le pare-feu Windows demande si JM-Orgue peut recevoir des connexions&nbsp;: choisissez &laquo;&nbsp;Autoriser l&rsquo;acc&egrave;s&nbsp;&raquo; pour les r&eacute;seaux priv&eacute;s.</p>
+<div class="let-op"><b>Attention</b> L&rsquo;adresse contient un jeton d&rsquo;acc&egrave;s et ne fonctionne qu&rsquo;au sein de votre propre r&eacute;seau, sans chiffrement. Ne partagez ni l&rsquo;adresse ni le code QR&nbsp;; avec <b>Nouveau jeton</b>, vous retirez l&rsquo;acc&egrave;s d&rsquo;un appareil qui l&rsquo;avait scann&eacute; auparavant.</div>
+<p>En bas se trouve le <b>taux d&rsquo;&eacute;chantillonnage</b>. Il suit la carte son elle-m&ecirc;me&nbsp;: sous ASIO, vous le r&eacute;glez dans le panneau du pilote, sous WASAPI dans les param&egrave;tres sonores de Windows.</p>
+<figure><img src="afbeeldingen/fr/30_audio_3.jpg" alt="Sortie audio, bas"><figcaption>Sortie audio, en bas&nbsp;: la t&eacute;l&eacute;commande avec les &eacute;l&eacute;ments et claviers de l&rsquo;&eacute;cran externe, et le taux d&rsquo;&eacute;chantillonnage. Le code QR et l&rsquo;adresse sont masqu&eacute;s ici.</figcaption></figure>
+
+<h3>Correction d&rsquo;&eacute;chantillons</h3>
+<p>Deux outils pour nettoyer les &eacute;chantillons de l&rsquo;orgue charg&eacute;. <b>Silence initial</b> trouve et coupe le silence au d&eacute;but des &eacute;chantillons (vous r&eacute;glez vous-m&ecirc;me le seuil de silence en dB et l&rsquo;amorce &agrave; conserver)&nbsp;; <b>Boucles</b> trouve une bonne boucle de maintien, int&egrave;gre un fondu encha&icirc;n&eacute; pour une transition sans coupure et &eacute;crit les points de boucle dans le fichier, avec l&rsquo;option de ne le faire que pour les fichiers sans boucle. Avec <b>Analyser</b>, vous regardez d&rsquo;abord ce qui changerait. Les originaux sont d&rsquo;abord conserv&eacute;s dans un dossier <code>_backup</code> avant que les fichiers soient &eacute;cras&eacute;s.</p>
+<figure><img src="afbeeldingen/fr/31_samplefix.jpg" alt="Correction d&rsquo;&eacute;chantillons"><figcaption>Correction d&rsquo;&eacute;chantillons&nbsp;: silence initial et boucles, chacun avec Analyser et un bouton pour appliquer.</figcaption></figure>
+
+<h3>MIDI</h3>
+<p><b>Entr&eacute;e MIDI</b> montre les appareils MIDI connect&eacute;s (avec <b>Actualiser les p&eacute;riph&eacute;riques</b>, vous cherchez &agrave; nouveau)&nbsp;; sous <b>MIDI Bluetooth</b>, vous cherchez les appareils sans fil avec <b>Analyser</b>. Le <b>retour d&rsquo;information (sortie MIDI)</b> fait s&rsquo;allumer votre console selon la registration&nbsp;: choisissez le protocole (voyants de jeux via Note On/Off, un afficheur de texte Hauptwerk ou une console Johannus/Content), la sortie MIDI, le canal et la note de base. Chaque jeu re&ccedil;oit alors automatiquement un num&eacute;ro de note &agrave; partir de la note de base, ou vous apprenez le vrai bouton de la console jeu par jeu avec <b>Apprendre par jeu&hellip;</b>.</p>
+<figure><img src="afbeeldingen/fr/32_midi.jpg" alt="MIDI"><figcaption>Entr&eacute;e MIDI, MIDI Bluetooth et le retour vers la console.</figcaption></figure>
+
+<h3>Apprendre les boutons</h3>
+<p>Ici, vous apprenez les boutons fixes de la console (pistons)&nbsp;: accordeur, SET, pas de combinaison, niveaux de m&eacute;moire et arr&ecirc;t de l&rsquo;ordinateur. Les boutons chiffr&eacute;s 0&ndash;9 s&rsquo;apprennent sur la barre du setzer elle-m&ecirc;me (clic droit ou maintien de 3 secondes).</p>
+<figure><img src="afbeeldingen/fr/33_knoppen_inleren.jpg" alt="Apprendre les boutons"><figcaption>Apprentissage des boutons de la console.</figcaption></figure>
+
+<h3>Affichage</h3>
+<p>Choisissez la langue du programme (Nederlands, English, Fran&ccedil;ais, Deutsch, Polski, Italiano et Espa&ntilde;ol) et l&rsquo;apparence&nbsp;: cinq pr&eacute;r&eacute;glages de couleurs pr&ecirc;ts &agrave; l&rsquo;emploi (Base, Bois classique, Moderne minimaliste, Nuit et Soir), ou composez vos propres couleurs, donnez-leur un nom et exportez-les. En dessous, vous r&eacute;glez la police, la taille et l&rsquo;&eacute;paisseur du texte des jeux, ainsi que l&rsquo;arri&egrave;re-plan.</p>
+<figure><img src="afbeeldingen/fr/34_weergave.jpg" alt="Affichage"><figcaption>Apparence et disposition&nbsp;: langue, pr&eacute;r&eacute;glages et police des jeux.</figcaption></figure>
+
+<h3>Mise &agrave; jour et retour</h3>
+<p>Vous y trouvez le num&eacute;ro de version, les mentions des pr&eacute;r&eacute;glages de casque et des donn&eacute;es d&rsquo;enceintes utilis&eacute;s, ainsi que les boutons <b>Envoyer un retour&hellip;</b>, <b>Via GitHub (issues)</b> et <b>V&eacute;rifier les mises &agrave; jour</b>.</p>
+<figure><img src="afbeeldingen/fr/35_update_feedback.jpg" alt="Mise &agrave; jour et retour"><figcaption>&Agrave; propos et retours.</figcaption></figure>
+
+<!-- ============================================================ -->
+<h2 id="akoestiek">9. Configuration acoustique d&rsquo;un jeu</h2>
+<p>Une d&eacute;finition d&rsquo;orgue peut renvoyer &agrave; un fichier suppl&eacute;mentaire, <code>JM-ACOUSTICS.json</code>, qui d&eacute;crit l&rsquo;acoustique du jeu&nbsp;: des bo&icirc;tes expressives rattach&eacute;es &agrave; un rang plut&ocirc;t qu&rsquo;&agrave; un clavier, des r&eacute;ponses impulsionnelles pour la r&eacute;verb&eacute;ration, des routes de mixage et des sorties. Si votre jeu a un tel fichier, vous le reconnaissez &agrave; un bloc suppl&eacute;mentaire dans Param&egrave;tres d&rsquo;orgue &rarr; Son.</p>
+<ul>
+  <li>Le programme lit le fichier et le v&eacute;rifie&nbsp;: la taille du fichier, l&rsquo;exactitude de toutes les r&eacute;f&eacute;rences, le fait que les chemins restent dans le dossier de l&rsquo;orgue et que les liaisons de tuyaux correspondent &agrave; la d&eacute;finition charg&eacute;e. En cas de probl&egrave;me, l&rsquo;orgue joue simplement avec la d&eacute;finition ordinaire et le bloc indique pourquoi la configuration n&rsquo;a pas &eacute;t&eacute; charg&eacute;e.</li>
+  <li><b>Bo&icirc;tes expressives par rang</b>&nbsp;: les rangs que le fichier place dans une bo&icirc;te re&ccedil;oivent leur propre bo&icirc;te expressive et leur propre p&eacute;dale, ind&eacute;pendamment du clavier sur lequel ils sont jou&eacute;s. Un rang utilis&eacute; par deux claviers suit ainsi toujours la m&ecirc;me bo&icirc;te. Vous apprenez la p&eacute;dale sous Routage (<b>Apprendre p&eacute;dale</b>) ou dans l&rsquo;assistant.</li>
+  <li>Les <b>r&eacute;ponses impulsionnelles</b> du jeu figurent sous le bloc, avec canaux et dur&eacute;e. Avec <b>Utiliser comme r&eacute;verb&eacute;ration</b>, vous en reprenez une comme r&eacute;verb&eacute;ration par convolution. Le r&ocirc;le des canaux dans de tels enregistrements n&rsquo;est pas d&eacute;fini&nbsp;; le programme utilise les deux premiers comme paire st&eacute;r&eacute;o.</li>
+  <li>Les routes de mixage, bus de sortie et transitions d&rsquo;effets du fichier ne sont pour l&rsquo;instant pas appliqu&eacute;s automatiquement&nbsp;; la d&eacute;finition ordinaire reste prioritaire.</li>
+</ul>
+<figure><img src="afbeeldingen/fr/60_akoestiek_klank.jpg" alt="Son avec configuration acoustique"><figcaption>Le bloc &laquo;&nbsp;Configuration acoustique&nbsp;&raquo; en haut de Son, avec un r&eacute;sum&eacute; et un bouton par r&eacute;ponse impulsionnelle. Les images de ce chapitre ont &eacute;t&eacute; r&eacute;alis&eacute;es avec un fichier de test temporaire pour un orgue de d&eacute;monstration.</figcaption></figure>
+<div class="duo">
+  <figure><img src="afbeeldingen/fr/61_akoestiek_zwelkasten_routing.jpg" alt="Bo&icirc;tes expressives par rang dans Routage"><figcaption>Routage, en bas&nbsp;: le bloc Bo&icirc;tes expressives par rang avec un bouton &laquo;&nbsp;Apprendre p&eacute;dale&nbsp;&raquo; par bo&icirc;te.</figcaption></figure>
+  <figure><img src="afbeeldingen/fr/62_akoestiek_wizard_zwelkasten.jpg" alt="Assistant avec bo&icirc;te expressive par rang"><figcaption>L&rsquo;assistant montre la bo&icirc;te sous les bo&icirc;tes expressives et le crescendo.</figcaption></figure>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="tips">10. Raccourcis clavier et conseils</h2>
+<table>
+  <tr><th style="width:22%">Touche</th><th>Fonction</th></tr>
+  <tr><td><kbd>F1</kbd> <kbd>F2</kbd> <kbd>F3</kbd></td><td>Orgue, Param&egrave;tres d&rsquo;orgue et Param&egrave;tres g&eacute;n&eacute;raux.</td></tr>
+  <tr><td><kbd>F11</kbd></td><td>Plein &eacute;cran (mode console) activ&eacute; ou d&eacute;sactiv&eacute;.</td></tr>
+  <tr><td><kbd>&Eacute;chap</kbd></td><td>Quitter le plein &eacute;cran.</td></tr>
+  <tr><td>Clic droit ou 3 s de pression</td><td>Sur un bouton de la barre du setzer&nbsp;: associer ce bouton &agrave; un bouton de la console (apprentissage MIDI).</td></tr>
+  <tr><td>Double-clic sur le volume</td><td>Volume principal remis &agrave; la valeur par d&eacute;faut.</td></tr>
+  <tr><td>Carte maintenue 3 s</td><td>Dans la biblioth&egrave;que&nbsp;: chercher de nouveau la photo de cette carte.</td></tr>
+</table>
+<ul>
+  <li>Tous les r&eacute;glages sont enregistr&eacute;s avec chaque orgue, y compris quand vous fermez l&rsquo;orgue ou quittez le programme.</li>
+  <li>Pour une console fixe&nbsp;: activez <b>D&eacute;marrer automatiquement avec Windows</b> et <b>Charger automatiquement le dernier orgue ouvert</b>, et utilisez le mode console.</li>
+  <li>Avec plus de deux sorties&nbsp;: choisissez les sorties par clavier sous Routage, puis les m&ecirc;mes sorties pour les sons d&rsquo;ambiance.</li>
+</ul>
+
+<!-- ============================================================ -->
+<h2 id="problemen">11. D&eacute;pannage et retours</h2>
+<table>
+  <tr><th style="width:30%">Probl&egrave;me</th><th>Ce que vous pouvez essayer</th></tr>
+  <tr><td>Pas de son</td><td>La soufflerie est-elle en marche&nbsp;? Est-il indiqu&eacute; &laquo;&nbsp;Audio actif&nbsp;&raquo; en bas&nbsp;? Le bon appareil est-il r&eacute;gl&eacute; sous Sortie audio, et les sorties par clavier correspondent-elles &agrave; votre interface audio&nbsp;? Utilisez le signal de test pour entendre les sorties.</td></tr>
+  <tr><td>Le clavier ne r&eacute;agit pas</td><td>En bas, il est indiqu&eacute; &laquo;&nbsp;MIDI non connect&eacute;&nbsp;&raquo; tant qu&rsquo;aucun appareil MIDI n&rsquo;est pr&eacute;sent. V&eacute;rifiez Param&egrave;tres g&eacute;n&eacute;raux &rarr; MIDI et le canal MIDI par clavier sous Routage.</td></tr>
+  <tr><td>L&rsquo;orgue sonne faux</td><td>V&eacute;rifiez que <b>Accorder automatiquement les tuyaux</b> est activ&eacute;, et choisissez sous Son le temp&eacute;rament &laquo;&nbsp;Original&nbsp;&raquo; ou celui que vous souhaitez.</td></tr>
+  <tr><td>Craquements ou saccades</td><td>R&eacute;duisez la polyphonie, tirez moins de jeux, coupez la r&eacute;verb&eacute;ration ou choisissez un buffer plus grand. Un tampon de d&eacute;part court demande un disque rapide&nbsp;; sinon choisissez-en un plus long.</td></tr>
+  <tr><td>Pas assez de m&eacute;moire</td><td>Choisissez un tampon de d&eacute;part plus court, d&eacute;sactivez les &eacute;chantillons st&eacute;r&eacute;o ou les positions d&rsquo;&eacute;coute que vous n&rsquo;utilisez pas.</td></tr>
+  <tr><td>Les sons d&rsquo;ambiance ou les jeux d&rsquo;effet ne s&rsquo;entendent pas sur la bonne enceinte</td><td>Sous Routage, dans &laquo;&nbsp;Sortie audio des sons d&rsquo;ambiance&nbsp;&raquo;, choisissez les m&ecirc;mes sorties que pour les claviers.</td></tr>
+</table>
+<p><b>Envoyer un retour&hellip;</b> (Param&egrave;tres g&eacute;n&eacute;raux &rarr; Mise &agrave; jour et retour) cr&eacute;e un message avec votre signalement et les fichiers journaux des derni&egrave;res sessions, afin que le d&eacute;veloppeur puisse voir ce qui s&rsquo;est pass&eacute;. Vous pouvez aussi publier votre signalement sur la page du projet sur GitHub.</p>
+
+</main>
+</body>
+</html>

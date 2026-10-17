@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Instrukcja JM-Orgue</title>
+<link rel="stylesheet" href="handleiding.css">
+</head>
+<body>
+<main>
+
+<header class="titel">
+  <h1>JM-Orgue</h1>
+  <div class="onder">Instrukcja do wersji 0.8.93 &middot; pa&#378;dziernik 2026</div>
+</header>
+
+<p>JM-Orgue to wirtualne organy piszcza&#322;kowe dla system&oacute;w Windows, macOS i Linux. Program odtwarza bezpo&#347;rednio zestawy sampli Hauptwerk i GrandOrgue, tak&#380;e du&#380;e zestawy surround, a gra si&#281; na nim za pomoc&#261; klawiatury MIDI, sto&#322;u gry lub myszy. Ta instrukcja przeprowadza przez program na zrzutach ekranu wersji 0.8.93.</p>
+<p class="klein">&copy; Martijn van der Kolk. Zrzuty ekranu wykonano na organach demonstracyjnych i w&#322;asnych zestawach testowych; adresy sieciowe, tokeny dost&#281;pu i foldery u&#380;ytkownika zosta&#322;y zas&#322;oni&#281;te.</p>
+
+<nav class="inhoud">
+  <b>Spis tre&#347;ci</b>
+  <ol>
+    <li><a href="#start">Pierwsze kroki</a></li>
+    <li><a href="#bibliotheek">Biblioteka</a></li>
+    <li><a href="#bespelen">&#321;adowanie organ&oacute;w i gra</a></li>
+    <li><a href="#werkbalk">Pasek narz&#281;dzi</a></li>
+    <li><a href="#posities">Kilka pozycji s&#322;uchania</a></li>
+    <li><a href="#wizard">Kreator dla nowych organ&oacute;w</a></li>
+    <li><a href="#orgelinst">Ustawienia organ&oacute;w</a></li>
+    <li><a href="#algemeen">Ustawienia og&oacute;lne</a></li>
+    <li><a href="#akoestiek">Konfiguracja akustyczna zestawu</a></li>
+    <li><a href="#tips">Skr&oacute;ty klawiszowe i wskaz&oacute;wki</a></li>
+    <li><a href="#problemen">Rozwi&#261;zywanie problem&oacute;w i opinie</a></li>
+  </ol>
+</nav>
+
+<!-- ============================================================ -->
+<h2 id="start">1. Pierwsze kroki</h2>
+
+<h3>Instalacja</h3>
+<p>Pobierz instalator najnowszej wersji ze strony wyda&#324; projektu (dla Windows <code>JM-Orgue_&lt;wersja&gt;_x64-setup.exe</code>) i uruchom go. Instalacja jest wykonywana dla jednego u&#380;ytkownika i nie wymaga uprawnie&#324; administratora. Dla Windows istnieje te&#380; pakiet MSI, dla macOS DMG, a dla Linuksa AppImage lub deb.</p>
+<p>Sam program mo&#380;na swobodnie u&#380;ywa&#263;. Zestawy sampli nie s&#261; do&#322;&#261;czone: otrzymasz je od ich autor&oacute;w. Na stronie startowej biblioteki wymieniono kilku autor&oacute;w, kt&oacute;rzy udost&#281;pniaj&#261; zestawy za darmo.</p>
+
+<h3>Aktualizacja</h3>
+<p>JM-Orgue samodzielnie sprawdza, czy jest nowa wersja. Je&#347;li tak, u g&oacute;ry pojawia si&#281; komunikat. Wybierz <b>Aktualizuj teraz</b>: program pobierze aktualizacj&#281;, sprawdzi podpis, zainstaluje j&#261; i uruchomi si&#281; ponownie. Je&#347;li chcesz najpierw tylko pobra&#263;, wybierz <b>Pobierz</b>. Mo&#380;esz te&#380; sprawdzi&#263; r&#281;cznie w Ustawieniach og&oacute;lnych &rarr; Aktualizacja i opinie &rarr; <b>Sprawd&#378; aktualizacje</b>.</p>
+
+<h3>Trzy g&#322;&oacute;wne ekrany</h3>
+<p>U g&oacute;ry znajduj&#261; si&#281; trzy karty: <b>Organy</b> (gra), <b>Ustawienia organ&oacute;w</b> (wszystko, co dotyczy za&#322;adowanych organ&oacute;w) i <b>Ustawienia og&oacute;lne</b> (wszystko, co dotyczy ca&#322;ego programu). Klawisze <kbd>F1</kbd>, <kbd>F2</kbd> i <kbd>F3</kbd> prze&#322;&#261;czaj&#261; mi&#281;dzy nimi bezpo&#347;rednio. K&#322;ypa obok nazwy organ&oacute;w zamyka organy i wraca do biblioteki.</p>
+
+<!-- ============================================================ -->
+<h2 id="bibliotheek">2. Biblioteka</h2>
+<p>Po uruchomieniu widzisz bibliotek&#281; organ&oacute;w: jedna karta na organy ze zdj&#281;ciem, nazw&#261;, budowniczym, miejscowo&#347;ci&#261; i liczb&#261; rejestr&oacute;w. Kliknij kart&#281;, aby za&#322;adowa&#263; organy.</p>
+<figure><img src="afbeeldingen/pl/03_bibliotheek.jpg" alt="Biblioteka organ&oacute;w"><figcaption>Biblioteka z organami demonstracyjnymi. U g&oacute;ry po prawej znajduj&#261; si&#281; przyciski dodawania organ&oacute;w i przej&#347;cia do ustawie&#324;; u g&oacute;ry po lewej wyb&oacute;r j&#281;zyka (NL, EN, FR, DE, PL, IT, ES).</figcaption></figure>
+
+<h3>Dodawanie organ&oacute;w</h3>
+<ul>
+  <li><b>.organ</b>: wybierz definicj&#281; organ&oacute;w (GrandOrgue <code>.organ</code> lub definicja Hauptwerk). Wybierasz plik definicji, a nie sam folder z samplami: tylko definicja zna rejestry, sprz&#281;g&#322;a, tremulanty i ewentualne dodatkowe pozycje nagrania.</li>
+  <li><b>JM-Rec import</b>: importuje zestaw sampli utworzony w JM-Rec.</li>
+  <li><b>Eksportuj</b>: tworzy z folderu sampli definicj&#281; organ&oacute;w (<code>.organ</code>), kt&oacute;r&#261; potem za&#322;adujesz przyciskiem <b>.organ</b>.</li>
+</ul>
+
+<h3>Przyciski karty: zdj&#281;cie, wyszukiwanie, usuwanie</h3>
+<p>Gdy wska&#380;esz kart&#281;, w prawym g&oacute;rnym rogu zdj&#281;cia pojawiaj&#261; si&#281; trzy przyciski: <b>szukaj zdj&#281;cia online</b> (kula), <b>wybierz zdj&#281;cie samodzielnie</b> (aparat) i <b>usu&#324; z biblioteki</b> (krzy&#380;yk). Usuni&#281;cie tylko zdejmuje kart&#281; z biblioteki; pliki na dysku pozostaj&#261;. Je&#347;li przytrzymasz kart&#281; przez 3 sekundy, program wyszuka zdj&#281;cie ponownie.</p>
+<p><b>Wyszukiwanie online</b> pokazuje kilka swobodnie dost&#281;pnych zdj&#281;&#263; z Wikimedia Commons, na podstawie nazwy, budowniczego i miejscowo&#347;ci zapisanych w zestawie. Kliknij zdj&#281;cie, aby je przej&#261;&#263;; &#378;r&#243;d&#322;o i licencja pojawiaj&#261; si&#281; pod kart&#261;. Je&#347;li zestaw zawiera zbyt ma&#322;o danych, aby co&#347; znale&#378;&#263;, wpisz sam fraz&#281; (ko&#347;ci&#243;&#322;, miejscowo&#347;&#263; lub nazw&#281; organ&oacute;w) w polu u g&oacute;ry okna i wybierz <b>Szukaj</b>.</p>
+<figure><img src="afbeeldingen/pl/04_online_zoeken.jpg" alt="Szukaj zdj&#281;cia online"><figcaption>Okno &bdquo;Szukaj zdj&#281;cia online&rdquo; z polem na w&#322;asn&#261; fraz&#281; i znalezionymi zdj&#281;ciami wraz z &#378;r&oacute;d&#322;em i licencj&#261;.</figcaption></figure>
+
+<!-- ============================================================ -->
+<h2 id="bespelen">3. &#321;adowanie organ&oacute;w i gra</h2>
+
+<h3>&#321;adowanie</h3>
+<p>Podczas &#322;adowania JM-Orgue wczytuje do pami&#281;ci pocz&#261;tek ka&#380;dego nagrania piszcza&#322;ki; reszta jest doczytywana w trakcie gry. Du&#380;y zestaw surround mo&#380;e wi&#281;c chwil&#281; potrwa&#263;; pasek post&#281;pu pokazuje, jak daleko jest &#322;adowanie.</p>
+<figure><img src="afbeeldingen/pl/05_laden.jpg" alt="Ekran &#322;adowania"><figcaption>Ekran &#322;adowania z post&#281;pem wczytywania sampli.</figcaption></figure>
+
+<h3>Silnik</h3>
+<p>Po za&#322;adowaniu <b>silnik organ&oacute;w jest wy&#322;&#261;czony</b>, a bez silnika nic nie brzmi. W&#322;&#261;cz go przyciskiem <b>Silnik</b> w &#380;&oacute;&#322;tym pasku lub przyciskiem silnika na pasku narz&#281;dzi. Gdy tylko silnik pracuje, pasek znika. Przy w&#322;&#261;czonym silniku s&#322;ycha&#263; te&#380; d&#378;wi&#281;k silnika z zestawu (je&#347;li go zawiera).</p>
+<figure><img src="afbeeldingen/pl/06_orgelscherm_motor_uit.jpg" alt="Ekran organ&oacute;w z wy&#322;&#261;czonym silnikiem"><figcaption>Ekran organ&oacute;w tu&#380; po za&#322;adowaniu: silnik wy&#322;&#261;czony, wszystkie rejestry wci&#261;gni&#281;te.</figcaption></figure>
+
+<h3>Rejestry, sprz&#281;g&#322;a i tremulanty</h3>
+<p>Ka&#380;da klawiatura ma w&#322;asne pole z rejestrami. Kliknij przycisk rejestru, aby go wyci&#261;gn&#261;&#263;; wyci&#261;gni&#281;te rejestry staj&#261; si&#281; &#380;&oacute;&#322;te. Kolor nazwy wskazuje rodzin&#281;: j&#281;zyczkowe s&#261; na przyk&#322;ad czerwone, mikstury i kwinty niebieskie. W ka&#380;dym polu s&#261; te&#380; <b>tremulant</b> i <b>sprz&#281;g&#322;a</b> (na przyk&#322;ad &bdquo;Hauptwerk + Schwellwerk&rdquo;). Zielony pasek po prawej w nag&#322;&oacute;wku klawiatury pokazuje po&#322;o&#380;enie szafy ekspresyjnej.</p>
+<figure><img src="afbeeldingen/pl/07_orgelscherm_registers.jpg" alt="Ekran organ&oacute;w z wyci&#261;gni&#281;tymi rejestrami"><figcaption>Silnik w&#322;&#261;czony, kilka rejestr&oacute;w wyci&#261;gni&#281;tych i w&#322;&#261;czone sprz&#281;g&#322;o Hauptwerk + Schwellwerk. Na dole pasek setzera.</figcaption></figure>
+
+<h3>Pasek setzera</h3>
+<p>Na dole znajduje si&#281; pasek setzera z elementami obs&#322;ugi sto&#322;u gry:</p>
+<table>
+  <tr><th style="width:26%">Element</th><th>Dzia&#322;anie</th></tr>
+  <tr><td><b>SET</b> i <b>0&ndash;9</b></td><td>Naci&#347;nij SET, a potem cyfr&#281;, aby zapisa&#263; bie&#380;&#261;c&#261; rejestracj&#281;; sama cyfra przywo&#322;uje j&#261;. Ma&#322;a kropka przy cyfrze oznacza, &#380;e zapisano tam rejestracj&#281;.</td></tr>
+  <tr><td><b>&minus;1 / +1</b>, <b>&minus;10 / +10</b></td><td>Przechodzi do poprzedniej lub nast&#281;pnej rejestracji albo o dziesi&#281;&#263; dalej.</td></tr>
+  <tr><td><b>G.C.</b></td><td>General Cancel: wszystkie rejestry wy&#322;&#261;czone.</td></tr>
+  <tr><td><b>M 1&ndash;8</b></td><td>Poziomy pami&#281;ci: osiem osobnych bank&oacute;w rejestracji.</td></tr>
+  <tr><td><b>Cresc</b></td><td>Crescendo generalne (zob. rozdzia&#322; 7). Pasek pokazuje bie&#380;&#261;cy stopie&#324;.</td></tr>
+  <tr><td>Suwak g&#322;o&#347;no&#347;ci</td><td>G&#322;o&#347;no&#347;&#263; g&#322;&oacute;wna. Dwukrotne klikni&#281;cie przywraca warto&#347;&#263; domy&#347;ln&#261;; k&oacute;&#322;kiem myszy zmieniasz j&#261; co 1 dB.</td></tr>
+</table>
+<p class="klein">Ka&#380;dy przycisk paska setzera mo&#380;na powi&#261;za&#263; z przyciskiem na w&#322;asnym stole gry: kliknij prawym przyciskiem (lub przytrzymaj 3 sekundy), a potem naci&#347;nij przycisk na stole gry.</p>
+
+<!-- ============================================================ -->
+<h2 id="werkbalk">4. Pasek narz&#281;dzi</h2>
+<p>Nad rejestrami znajduje si&#281; pasek narz&#281;dzi. Po lewej klawiatury (Peda&#322;, Hauptwerk, &hellip;) s&#261; przyciskami: wy&#347;wietlasz lub ukrywasz nimi klawiatur&#281;. Po prawej s&#261; poni&#380;sze funkcje.</p>
+<table>
+  <tr><th style="width:24%">Przycisk</th><th>Co robi</th></tr>
+  <tr><td><b>Silnik</b></td><td>W&#322;&#261;cza lub wy&#322;&#261;cza silnik organ&oacute;w.</td></tr>
+  <tr><td><b>Uk&#322;ad</b></td><td>Otwiera menu uk&#322;adu (zob. ni&#380;ej).</td></tr>
+  <tr><td><b>Pasek</b></td><td>Pokazuje lub ukrywa g&#322;&oacute;wny pasek z kartami i przyciskiem profilu.</td></tr>
+  <tr><td><b>Pe&#322;ny ekran</b></td><td>Tryb sto&#322;u gry: tylko rejestry i pasek setzera (<kbd>F11</kbd>).</td></tr>
+  <tr><td><b>Nowy ekran</b></td><td>Otwiera dodatkowe okno z tymi samymi rejestrami, na przyk&#322;ad dla drugiego monitora lub drugiej klawiatury.</td></tr>
+  <tr><td><b>MP3</b></td><td>Nagrywa to, co s&#322;yszysz. Nagranie trafia do Dokumenty\JM-Orgue-opnames. Kliknij czerwony licznik, aby zatrzyma&#263;; program poda potem, gdzie jest plik.</td></tr>
+  <tr><td><b>MIDI</b></td><td>Nagrywa to, co grasz (tylko nuty), jako plik .mid. Kliknij niebieski licznik, aby zatrzyma&#263;, i wybierz miejsce zapisu.</td></tr>
+  <tr><td><b>Zapis nut</b></td><td>Otwiera okno notacji: nuty pojawiaj&#261; si&#281; w trakcie gry, z warstwami, overdubem i edycj&#261;. Mo&#380;na tam te&#380; otworzy&#263; istniej&#261;cy plik MIDI.</td></tr>
+  <tr><td><b>Wy&#322;&#261;cz PC</b></td><td>Zamyka oprogramowanie <i>i komputer</i>, po potwierdzeniu; ostatni stan zostaje wcze&#347;niej zapisany. Prawy przycisk lub przytrzymanie 3 sekundy wi&#261;&#380;e przycisk z przyciskiem na stole gry.</td></tr>
+</table>
+
+<h3>Menu uk&#322;adu</h3>
+<p>Przyciskiem <b>Uk&#322;ad</b> dostosowujesz wygl&#261;d do ekranu: <b>Dopasuj</b> dobiera rozmiar przycisk&oacute;w tak, by wszystkie rejestry zmie&#347;ci&#322;y si&#281; na ekranie, przyciski minus/plus zmieniaj&#261; szeroko&#347;&#263; i wysoko&#347;&#263; przycisk&oacute;w, a ponadto wybierasz klawiatury jedna pod drug&#261; lub obok siebie (pionowo), okr&#261;g&#322;e zamiast prostok&#261;tnych przycisk&oacute;w oraz miejsce sprz&#281;gie&#322; (w klawiaturze lub w osobnym pasku). Wyb&oacute;r jest zapami&#281;tywany dla ka&#380;dych organ&oacute;w.</p>
+<figure><img src="afbeeldingen/pl/08_indeling_menu.jpg" alt="Menu uk&#322;adu"><figcaption>Menu Uk&#322;ad na pasku narz&#281;dzi.</figcaption></figure>
+
+<h3>Pe&#322;ny ekran (tryb sto&#322;u gry)</h3>
+<p>W tym trybie znikaj&#261; pasek tytu&#322;u, pasek zada&#324; Windows i pasek g&#322;&oacute;wny: widzisz tylko rejestry i pasek setzera. U g&oacute;ry jest w&#261;ski pasek z czterema przyciskami: <b>Paski</b> (tymczasowe przywr&oacute;cenie paska g&#322;&oacute;wnego), <b>Silnik</b> (w&#322;&#261;czony lub wy&#322;&#261;czony), <b>Wyjd&#378; z pe&#322;nego ekranu</b> i <b>Wy&#322;&#261;cz PC</b> (zamkni&#281;cie oprogramowania i komputera). <kbd>F11</kbd> w&#322;&#261;cza i wy&#322;&#261;cza ten tryb; <kbd>Esc</kbd> go wy&#322;&#261;cza.</p>
+<figure><img src="afbeeldingen/pl/09_volledig_scherm.jpg" alt="Pe&#322;ny ekran"><figcaption>Tryb sto&#322;u gry: rejestry, pasek setzera i u g&#243;ry pasek z czterema przyciskami.</figcaption></figure>
+
+<h3>Drugi ekran</h3>
+<p><b>Nowy ekran</b> otwiera osobne okno, kt&oacute;re mo&#380;esz przeci&#261;gn&#261;&#263; na inny monitor albo zostawi&#263; ma&#322;e obok g&#322;&oacute;wnego okna. Ma w&#322;asne ustawienia uk&#322;adu: je&#347;li przyciski s&#261; za ma&#322;e, wybierz <b>Uk&#322;ad</b> i ustaw szeroko&#347;&#263; oraz wysoko&#347;&#263; przycisk&oacute;w albo wybierz klawiatury jedna pod drug&#261; lub obok siebie.</p>
+<figure><img src="afbeeldingen/pl/43_nieuw_scherm.jpg" alt="Drugi ekran"><figcaption>Dodatkowy ekran z czytelnymi rejestrami, tu w oknie 1000 &times; 900 pikseli.</figcaption></figure>
+
+<!-- ============================================================ -->
+<h2 id="posities">5. Kilka pozycji s&#322;uchania</h2>
+<p>Niekt&oacute;re zestawy sampli nagrano w kilku miejscach ko&#347;cio&#322;a, na przyk&#322;ad blisko, z przodu, w po&#322;owie i z ty&#322;u. Taki zestaw pokazuje na pasku narz&#281;dzi przyciski <b>Perspektywa</b>, po jednym na pozycj&#281;. Kliknij pozycj&#281;, aby j&#261; w&#322;&#261;czy&#263; lub wy&#322;&#261;czy&#263;; mo&#380;e brzmie&#263; kilka jednocze&#347;nie. Po ich prawej stronie jest <b>pozycja s&#322;uchania</b>: suwak mi&#281;dzy &bdquo;przy organach&rdquo; a &bdquo;w g&#322;&#281;bi&rdquo; p&#322;ynnie miksuje nagrane pozycje.</p>
+<figure><img src="afbeeldingen/pl/50_nancy_orgelscherm.jpg" alt="Ekran organ&oacute;w z perspektywami"><figcaption>Zestaw z czterema pozycjami nagrania (Close, Front, Middle, Rear) i suwakiem pozycji s&#322;uchania.</figcaption></figure>
+<div class="tip"><b>Wskaz&oacute;wka</b> Ka&#380;da pozycja zajmuje pami&#281;&#263; i moc obliczeniow&#261;. Je&#347;li wszystko nie mie&#347;ci si&#281; w pami&#281;ci komputera, program za pierwszym razem &#322;aduje tylko pozycj&#281; najbli&#380;sz&#261; organom. W Ustawieniach organ&oacute;w znajdziesz blok &bdquo;Perspektywy i g&#322;osy wielorz&#281;dowe&rdquo;: tam wybierasz, kt&oacute;re pozycje maj&#261; by&#263; &#322;adowane, ustawiasz g&#322;o&#347;no&#347;&#263; ka&#380;dej pozycji i za pomoc&#261; &bdquo;Trzymaj wszystkie pozycje w pami&#281;ci&rdquo; przechodzisz mi&#281;dzy pozycjami natychmiast. Nowy wyb&oacute;r za&#322;adowanych pozycji zadzia&#322;a po ponownym za&#322;adowaniu organ&oacute;w.</div>
+
+<!-- ============================================================ -->
+<h2 id="wizard">6. Kreator dla nowych organ&oacute;w</h2>
+<p>Gdy &#322;adujesz organy po raz pierwszy, automatycznie uruchamia si&#281; kreator &bdquo;Konfiguracja organ&oacute;w&rdquo;. W sze&#347;ciu krokach omawia wszystko, co trzeba po&#322;&#261;czy&#263; z w&#322;asnym sto&#322;em gry. Wszystko mo&#380;na p&oacute;&#378;niej zmieni&#263;, a kreator uruchomisz ponownie w Ustawieniach organ&oacute;w &rarr; Routing &rarr; <b>Kreator</b>. <b>P&oacute;&#378;niej</b> zamyka kreator i pyta ponownie przy nast&#281;pnym otwarciu; <b>Pomi&#324;</b> (krok 1) pomija go ca&#322;kowicie.</p>
+<div class="duo">
+  <figure><img src="afbeeldingen/pl/20_wizard_1.jpg" alt="Kreator, krok 1"><figcaption>Krok 1: co robi kreator.</figcaption></figure>
+  <figure><img src="afbeeldingen/pl/20_wizard_2.jpg" alt="Kreator, krok 2"><figcaption>Krok 2: kana&#322; MIDI na klawiatur&#281;.</figcaption></figure>
+</div>
+<ol>
+  <li><b>Start</b>: przegl&#261;d krok&oacute;w.</li>
+  <li><b>Kana&#322; MIDI na klawiatur&#281;</b>: przy ka&#380;dej klawiaturze wybierz <b>Ucz</b> i zagraj klawisz na tej klawiaturze. Program zapami&#281;ta kana&#322;. Przyciski dzia&#322;aj&#261; tylko wtedy, gdy pod&#322;&#261;czone jest urz&#261;dzenie MIDI (Ustawienia og&oacute;lne &rarr; MIDI); w przeciwnym razie pojawia si&#281; ostrze&#380;enie.</li>
+  <li><b>&#379;aluzje i crescendo</b>: wybierz <b>Ucz</b> i przesu&#324; peda&#322; ca&#322;kiem zamkni&#281;ty i ca&#322;kiem otwarty. To samo dotyczy crescenda generalnego. Je&#347;li zestaw ma szafy ekspresyjne per g&#322;os (rozdzia&#322; 9), te&#380; pojawi&#261; si&#281; tutaj.</li>
+  <li><b>Wyj&#347;cia dla g&#322;o&#347;nik&oacute;w</b>: wybierz sterownik i urz&#261;dzenie, zapisz je jako profil &bdquo;G&#322;o&#347;niki&rdquo; i wybierz dla ka&#380;dej klawiatury wyj&#347;cia interfejsu audio, na kt&oacute;rych ma brzmie&#263;. Ni&#380;ej s&#261; te same wybory dla d&#378;wi&#281;ku silnika, szumu otoczenia i klikni&#281;&#263; mechaniki, rejestr&oacute;w efektowych i szumu tremulanta, o ile zestaw je ma.</li>
+  <li><b>Wyj&#347;cia dla s&#322;uchawek</b>: to samo dla drugiego profilu, na przyk&#322;ad wyj&#347;cia s&#322;uchawkowego. Od tej chwili mi&#281;dzy obydwoma profilami prze&#322;&#261;czasz przyciskiem <b>G&#322;o&#347;niki</b> w prawym g&#243;rnym rogu.</li>
+  <li><b>Gotowe</b>: ustawienia zosta&#322;y zapisane przy tych organach.</li>
+</ol>
+<div class="duo">
+  <figure><img src="afbeeldingen/pl/20_wizard_3.jpg" alt="Kreator, krok 3"><figcaption>Krok 3: uczenie szaf ekspresyjnych i crescenda.</figcaption></figure>
+  <figure><img src="afbeeldingen/pl/20_wizard_4.jpg" alt="Kreator, krok 4"><figcaption>Krok 4: sterownik, urz&#261;dzenie, kana&#322;y na klawiatur&#281; i d&#378;wi&#281;ki t&#322;a dla g&#322;o&#347;nik&oacute;w.</figcaption></figure>
+  <figure><img src="afbeeldingen/pl/20_wizard_5.jpg" alt="Kreator, krok 5"><figcaption>Krok 5: to samo dla s&#322;uchawek.</figcaption></figure>
+  <figure><img src="afbeeldingen/pl/20_wizard_6.jpg" alt="Kreator, krok 6"><figcaption>Krok 6: gotowe.</figcaption></figure>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="orgelinst">7. Ustawienia organ&oacute;w</h2>
+<p>Wszystkie ustawienia dotycz&#261;ce za&#322;adowanych organ&oacute;w s&#261; zapisywane przy tych organach. U g&oacute;ry jest pi&#281;&#263; kart: <b>Brzmienie</b>, <b>Crescendo</b>, <b>Kolejno&#347;&#263; rejestr&oacute;w</b>, <b>Routing</b> i <b>Wszystko</b>; ostatnia uk&#322;ada wszystkie bloki jeden pod drugim.</p>
+
+<h3>Brzmienie</h3>
+<p>Pierwszy blok zawiera ustawienia g&#322;&oacute;wne:</p>
+<ul>
+  <li><b>G&#322;o&#347;no&#347;&#263;</b>: g&#322;o&#347;no&#347;&#263; g&#322;&oacute;wna tych organ&oacute;w.</li>
+  <li><b>Str&oacute;j</b>: &bdquo;Orygina&#322;&rdquo; gra piszcza&#322;ki tak, jak zosta&#322;y nagrane. Inne stroje (r&oacute;wnomierny i temperacje historyczne) dostrajaj&#261; piszcza&#322;ki na podstawie zmierzonej wysoko&#347;ci ka&#380;dego nagrania. Pod wyborem widzisz, ile piszcza&#322;ek ma zmierzon&#261; wysoko&#347;&#263;. Za pomoc&#261; <b>W&#322;asny str&oacute;j...</b> sam ustawiasz odchylenie dla ka&#380;dego d&#378;wi&#281;ku w centach.</li>
+  <li><b>Dostrojenie</b>: wszystko razem wy&#380;ej lub ni&#380;ej, w centach.</li>
+</ul>
+<p><b>Pog&#322;os</b> reguluje pog&#322;os. Je&#347;li zestaw ma ju&#380; akustyk&#281; ko&#347;cio&#322;a w nagraniach, jest to zaznaczone (z przyciskiem <b>Powr&oacute;t do nagrania (pog&#322;os wy&#322;&#261;czony)</b>, aby wy&#322;&#261;czy&#263; dodatkowy pog&#322;os): dodatkowy pog&#322;os jest wtedy kwesti&#261; gustu. Wybierasz mi&#281;dzy <b>Algorytmiczny</b> (obliczony pog&#322;os z RT60, op&oacute;&#378;nieniem, t&#322;umieniem i wielko&#347;ci&#261; pomieszczenia, tak&#380;e jako preset) a <b>Splotowy (IR)</b> z w&#322;asn&#261; odpowiedzi&#261; impulsow&#261; (IR). Za pomoc&#261; <b>Miks</b> okre&#347;lasz, ile pog&#322;osu s&#322;ycha&#263;.</p>
+<figure><img src="afbeeldingen/pl/10_klank_1.jpg" alt="Karta Brzmienie, g&oacute;rna cz&#281;&#347;&#263;"><figcaption>Brzmienie, u g&oacute;ry: ustawienia g&#322;&oacute;wne (g&#322;o&#347;no&#347;&#263;, str&oacute;j, dostrojenie) i pog&#322;os.</figcaption></figure>
+<p><b>Barwa tych organ&oacute;w</b> to osobna regulacja barwy dla ka&#380;dych organ&oacute;w; korekcja dla s&#322;uchawek lub g&#322;o&#347;nik&oacute;w jest oddzielna, w ustawieniach og&oacute;lnych. <b>Model powietrza</b> sprawia, &#380;e organy &bdquo;oddychaj&#261;&rdquo;: akord z wieloma rejestrami obni&#380;a ci&#347;nienie powietrza, jak w prawdziwych organach, a flety i j&#281;zyczkowe reaguj&#261; na to r&oacute;&#380;nie. Wybierasz liczb&#281; grup powietrza (kt&oacute;re klawiatury dziel&#261; te same miechy) oraz dla ka&#380;dej grupy wielko&#347;&#263; miecha, t&#322;umienie, maksymalny spadek ci&#347;nienia i charakter powietrza.</p>
+<figure><img src="afbeeldingen/pl/10_klank_2.jpg" alt="Karta Brzmienie, barwa i model powietrza"><figcaption>Brzmienie, ni&#380;ej: barwa tych organ&oacute;w i model powietrza dla ka&#380;dej grupy powietrza.</figcaption></figure>
+<p><b>D&#378;wi&#281;ki t&#322;a</b> pokazuje ci&#261;g&#322;e d&#378;wi&#281;ki zawarte w zestawie, takie jak silnik i szum pomieszczenia. Ustawiasz g&#322;o&#347;no&#347;&#263;, w&#322;&#261;czasz lub wy&#322;&#261;czasz <b>silnik</b> i mo&#380;esz w&#322;&#261;czy&#263; <b>mechanik&#281; klawiatury</b> (klikaj&#261;ce klawisze). Mechanika klawiatury jest domy&#347;lnie wy&#322;&#261;czona, bo zajmuje du&#380;o pami&#281;ci i wymaga ponownego za&#322;adowania organ&oacute;w.</p>
+<figure><img src="afbeeldingen/pl/10_klank_3.jpg" alt="Karta Brzmienie, d&#378;wi&#281;ki t&#322;a"><figcaption>Brzmienie: grupy powietrza i blok D&#378;wi&#281;ki t&#322;a z g&#322;o&#347;no&#347;ci&#261;, silnikiem i mechanik&#261; klawiatury.</figcaption></figure>
+<p>Na dole jest <b>intonacja piszcza&#322;ek</b>: wybierz po lewej rejestr i dostosuj g&#322;o&#347;no&#347;&#263; i str&oacute;j ka&#380;dej piszcza&#322;ki z osobna.</p>
+<figure><img src="afbeeldingen/pl/10_klank_4.jpg" alt="Karta Brzmienie, intonacja piszcza&#322;ek"><figcaption>Brzmienie, na dole: intonacja piszcza&#322;ek. Wybierz po lewej rejestr, aby zaintonowa&#263; jego piszcza&#322;ki.</figcaption></figure>
+
+<h3>Crescendo</h3>
+<p><b>Crescendo generalne</b> wyci&#261;ga krok po kroku coraz wi&#281;cej rejestr&oacute;w, gdy poruszasz peda&#322;em crescenda. Sam decydujesz, kt&oacute;re rejestry wchodz&#261; w kt&oacute;ry stopie&#324;:</p>
+<ul>
+  <li><b>W&#322;&#261;czone</b> w&#322;&#261;cza crescendo; <b>Stopnie</b> to liczba stopni.</li>
+  <li><b>Auto-wype&#322;nienie</b> wpisuje propozycj&#281; dopasowan&#261; do rejestr&oacute;w tych organ&oacute;w. Za pomoc&#261; opcji poni&#380;ej decydujesz, czy sprz&#281;g&#322;a si&#281; w&#322;&#261;czaj&#261;, czy rejestry barwne (sesquialtera, kornet, tercja), j&#281;zyczkowe 32&prime; i szamady si&#281; w&#322;&#261;czaj&#261; oraz czy sprz&#281;g&#322;a oktawowe wchodz&#261; dopiero w tutti. <b>Wyczy&#347;&#263;</b> opr&oacute;&#380;nia macierz.</li>
+  <li>W macierzy klikni&#281;cie pola w&#322;&#261;cza lub wy&#322;&#261;cza dany rejestr w tym stopniu; <kbd>Shift</kbd>+klikni&#281;cie ustawia go dla wszystkich stopni od tego stopnia.</li>
+  <li><b>Nauka pedalu</b> wi&#261;&#380;e twoje peda&#322; crescenda; na dole mo&#380;esz te&#380; r&#281;cznie wpisa&#263; kana&#322; i numer CC.</li>
+</ul>
+<figure><img src="afbeeldingen/pl/11_crescendo.jpg" alt="Karta Crescendo"><figcaption>Macierz crescenda: rejestry w wierszach, stopnie w kolumnach.</figcaption></figure>
+
+<h3>Kolejno&#347;&#263; rejestr&oacute;w</h3>
+<p>Tu okre&#347;lasz kolejno&#347;&#263; rejestr&oacute;w w ka&#380;dej klawiaturze. Przeci&#261;gnij rejestr za uchwyt, aby go przesun&#261;&#263;. Przy ka&#380;dym rejestrze widzisz stopaż i rodzin&#281; (kolor nazwy). Strza&#322;kami zmieniasz kolejno&#347;&#263; krok po kroku, a <b>Reset</b> przywraca kolejno&#347;&#263; zestawu.</p>
+<figure><img src="afbeeldingen/pl/12_registersortering.jpg" alt="Karta Kolejno&#347;&#263; rejestr&oacute;w"><figcaption>Rejestry w ka&#380;dej klawiaturze, w kolejno&#347;ci, w jakiej pojawiaj&#261; si&#281; na ekranie organ&oacute;w.</figcaption></figure>
+
+<h3>Routing</h3>
+<p>Ta karta &#322;&#261;czy organy z twoim sprz&#281;tem. U g&oacute;ry jest blok dla ka&#380;dej klawiatury:</p>
+<ul>
+  <li><b>Kana&#322;</b>: kana&#322; MIDI, kt&oacute;rego klawiatura nas&#322;uchuje (&bdquo;Wszystkie&rdquo; = ka&#380;dy kana&#322;). <b>Nauka</b> ustala kana&#322; i zakres, gdy zagrasz najpierw najni&#380;szy, a potem najwy&#380;szy klawisz.</li>
+  <li><b>Transp</b>: transpozycja w p&oacute;&#322;tonach. <b>Zakres</b>: najni&#380;szy i najwy&#380;szy klawisz. <b>Kr&oacute;tka oktawa</b>: dla zestaw&oacute;w z kr&oacute;tk&#261; oktaw&#261; basow&#261;.</li>
+  <li><b>Szafa ekspresyjna</b>: w&#322;&#261;cza szaf&#281; ekspresyjn&#261; tej klawiatury; pojawiaj&#261; si&#281; wtedy przyciski do nauki peda&#322;u, ustawienia minimalnej g&#322;o&#347;no&#347;ci i cz&#281;stotliwo&#347;ci odci&#281;cia zamkni&#281;tej szafy.</li>
+  <li><b>Zasilanie powietrzem</b>: do kt&oacute;rej grupy powietrza nale&#380;y klawiatura.</li>
+  <li><b>Panorama</b> i <b>Wyj&#347;cia</b>: miejsce w obrazie stereo i kana&#322;y wyj&#347;ciowe interfejsu audio, na kt&oacute;rych brzmi klawiatura. Dwa kolejne wyj&#347;cia tworz&#261; par&#281; stereo; pojedynczy kana&#322; brzmi mono.</li>
+  <li><b>C/Cis</b>: rozdziela piszcza&#322;ki na dwie strony, jak wiatrownice C i Cis w prawdziwych organach; globalna si&#322;a i spadek s&#261; w bloku powy&#380;ej.</li>
+  <li><b>LFO tremulanta</b>: je&#347;li zestaw nie ma prawdziwych nagra&#324; tremulanta, program go oblicza. Pr&#281;dko&#347;&#263;, amplitud&#281; i wysoko&#347;&#263; ustawiasz tutaj.</li>
+</ul>
+<figure><img src="afbeeldingen/pl/13_routing_boven.jpg" alt="Karta Routing, g&oacute;ra"><figcaption>Routing, u g&oacute;ry: przycisk Kreator, rozdzia&#322; C/Cis i pierwsza klawiatura z kana&#322;em, zakresem, panoram&#261;, wyj&#347;ciami i tremulantem.</figcaption></figure>
+<figure><img src="afbeeldingen/pl/15_routing_zwelkast.jpg" alt="Routing z szaf&#261; ekspresyjn&#261;"><figcaption>Klawiatura z w&#322;&#261;czon&#261; szaf&#261; ekspresyjn&#261;: nauka peda&#322;u, r&#281;czny kana&#322; i CC, minimalna g&#322;o&#347;no&#347;&#263; i cz&#281;stotliwo&#347;&#263; odci&#281;cia.</figcaption></figure>
+
+<p>Ni&#380;ej jest <b>Wyj&#347;cie audio d&#378;wi&#281;k&oacute;w t&#322;a</b>: dla ka&#380;dego rodzaju d&#378;wi&#281;ku wybierasz, z kt&oacute;rych wyj&#347;&#263; korzysta. <b>Silnik</b> to d&#378;wi&#281;k silnika; <b>Szum otoczenia i klikni&#281;cia mechaniki</b> dotyczy szumu pomieszczenia oraz klikni&#281;&#263; rejestr&oacute;w i klawiszy; zestawy z rejestrami efektowymi (cymbelstern, s&#322;owik i tym podobne) i szumem tremulanta maj&#261; w&#322;asny wiersz. Ma to znaczenie przede wszystkim przy wi&#281;cej ni&#380; dw&oacute;ch wyj&#347;ciach, gdy klawiatury brzmi&#261; na innych kana&#322;ach ni&#380; domy&#347;lne 1&ndash;2. Bezpo&#347;rednio pod spodem:</p>
+<ul>
+  <li><b>Ci&#261;g&#322;a klawiatura</b>: klawisze poza nagranym zakresem rejestru graj&#261; najbli&#380;sz&#261; piszcza&#322;k&#281;, przesuni&#281;t&#261; na w&#322;a&#347;ciw&#261; wysoko&#347;&#263;, zamiast milcze&#263;. Klawiatura 61-klawiszowa gra wi&#281;c dalej na zestawie z mniejsz&#261; liczb&#261; d&#378;wi&#281;k&oacute;w.</li>
+  <li><b>Automatycznie stroi&#263; pi&#322;y</b> (tak brzmi ta etykieta w programie; chodzi o piszcza&#322;ki): dostraja piszcza&#322;ki na podstawie ich zmierzonej wysoko&#347;ci, zachowuj&#261;c celowo falowane rejestry. Domy&#347;lnie w&#322;&#261;czone.</li>
+  <li><b>Korekta wysoko&#347;ci</b>: wszystko razem wy&#380;ej lub ni&#380;ej w centach (<b>Zero</b> przywraca warto&#347;&#263;).</li>
+</ul>
+<figure><img src="afbeeldingen/pl/16_routing_bijgeluiden.jpg" alt="Routing: d&#378;wi&#281;ki t&#322;a"><figcaption>Wyj&#347;cie audio d&#378;wi&#281;k&oacute;w t&#322;a z przyciskami dla ka&#380;dego kana&#322;u wyj&#347;ciowego, ci&#261;g&#322;a klawiatura i korekta wysoko&#347;ci.</figcaption></figure>
+<p>Dalej w d&oacute;&#322; znajduj&#261; si&#281; <b>Sprz&#281;g&#322;a</b> (w&#322;&#261;czanie i wy&#322;&#261;czanie, z przyciskiem MIDI przy ka&#380;dym sprz&#281;gle) oraz &bdquo;Dodatkowe kopu&#322;y&rdquo; (tak ten blok nazywa si&#281; w programie; chodzi o <b>dodatkowe sprz&#281;g&#322;a</b>): sprz&#281;g&#322;a, kt&oacute;rych nie ma w zestawie sampli, ale kt&oacute;re wynikaj&#261; z uk&#322;adu klawiatur; zaznacz, co chcesz doda&#263;, a pojawi&#261; si&#281; od razu na pasku sprz&#281;gie&#322;. <b>Przypisania MIDI</b> to jedna lista wszystkich przypisa&#324; MIDI tych organ&oacute;w, kt&oacute;re mo&#380;esz tam r&#281;cznie zmienia&#263;, usuwa&#263; lub dodawa&#263;. Na dole <b>Otw&oacute;rz .mid</b> pozwala odtworzy&#263; plik MIDI na organach.</p>
+<figure><img src="afbeeldingen/pl/14_routing_onder.jpg" alt="Routing: sprz&#281;g&#322;a i MIDI"><figcaption>Routing, na dole: dodatkowe sprz&#281;g&#322;a, przypisania MIDI i odtwarzanie MIDI.</figcaption></figure>
+
+<!-- ============================================================ -->
+<h2 id="algemeen">8. Ustawienia og&oacute;lne</h2>
+<p>Te ustawienia dotycz&#261; ca&#322;ego programu. Karty to <b>Wyj&#347;cie audio</b>, <b>Korekta sampli</b>, <b>MIDI</b>, <b>Ucz przyciski</b>, <b>Widok</b> i <b>Aktualizacja i opinie</b>.</p>
+
+<h3>Wyj&#347;cie audio</h3>
+<ul>
+  <li><b>Sterownik audio</b> i urz&#261;dzenie: dla najmniejszego op&oacute;&#378;nienia wybierz ASIO (na przyk&#322;ad sterownik twojego interfejsu audio); WASAPI dzia&#322;a ze standardow&#261; kart&#261; d&#378;wi&#281;kow&#261; Windows. Wiersz &bdquo;Aktualnie&rdquo; ni&#380;ej pokazuje, co teraz gra.</li>
+  <li><b>Sygna&#322; testowy</b>: kliknij numer kana&#322;u, aby wys&#322;a&#263; d&#378;wi&#281;k dok&#322;adnie na to wyj&#347;cie i us&#322;ysze&#263;, kt&oacute;ra wtyczka nale&#380;y do kt&oacute;rego g&#322;o&#347;nika.</li>
+  <li><b>Polifonia</b> i <b>Rdzenie obliczeniowe do miksowania</b>: maksymalna liczba jednocze&#347;nie brzmi&#261;cych piszcza&#322;ek i liczba rdzeni procesora, na kt&oacute;re rozk&#322;ada si&#281; praca miksowania. Wyb&oacute;r domy&#347;lny pasuje do twojego komputera; miernik obci&#261;&#380;enia pokazuje efekt.</li>
+  <li><b>Odtwarzaj sample stereo w stereo</b>: zachowuje obraz stereo nagra&#324; stereo. Wy&#322;&#261;czone oznacza miks mono i zmniejsza o po&#322;ow&#281; zu&#380;ycie pami&#281;ci takich zestaw&oacute;w.</li>
+  <li><b>Bufor startowy na nagranie</b> (nowo&#347;&#263; w tej wersji): ile ka&#380;dego nagrania piszcza&#322;ki jest od razu w pami&#281;ci: 200 ms, 300 ms, 500 ms, 1 s lub 2 s (domy&#347;lnie). Kr&oacute;tszy bufor oszcz&#281;dza du&#380;o pami&#281;ci i czasu &#322;adowania; reszta jest doczytywana w trakcie gry. Wyb&oacute;r dzia&#322;a po ponownym za&#322;adowaniu organ&oacute;w.</li>
+  <li><b>Rozmiar bufora</b>: mniejszy oznacza mniejsze op&oacute;&#378;nienie, ale bardziej obci&#261;&#380;a komputer. <b>Zastosuj</b> aktywuje wyb&oacute;r.</li>
+</ul>
+<div class="tip"><b>Wskaz&oacute;wka</b> Je&#347;li w du&#380;ych akordach s&#322;yszysz kr&oacute;tkie powt&oacute;rzenie ataku piszcza&#322;ki, wybierz d&#322;u&#380;szy bufor startowy. Je&#347;li tego nie s&#322;ycha&#263;, a masz ma&#322;o pami&#281;ci, dobrym wyborem jest 500 ms lub 1 s. Szybki dysk (SSD) umo&#380;liwia kr&oacute;tkie bufory.</div>
+<figure><img src="afbeeldingen/pl/30_audio_1.jpg" alt="Wyj&#347;cie audio, g&oacute;ra"><figcaption>Wyj&#347;cie audio, u g&oacute;ry: sterownik, urz&#261;dzenie, sygna&#322; testowy, polifonia, rdzenie obliczeniowe, sample stereo, bufor startowy i rozmiar bufora.</figcaption></figure>
+<p><b>Profile wyj&#347;cia</b> zapami&#281;tuj&#261; dwa kompletne ustawienia wyj&#347;cia, na przyk&#322;ad g&#322;o&#347;niki przez ASIO i s&#322;uchawki przez WASAPI, wraz z wyborem kana&#322;&oacute;w dla ka&#380;dej klawiatury. Wybierz &#380;&#261;dane wyj&#347;cie, kliknij <b>Zapisz bie&#380;&#261;cy wyb&oacute;r</b> przy G&#322;o&#347;nikach lub S&#322;uchawkach, a potem prze&#322;&#261;czaj przyciskiem <b>G&#322;o&#347;niki</b> w prawym g&oacute;rnym rogu lub nauczonym przyciskiem MIDI. Aktywny profil jest zaznaczony.</p>
+<p><b>Korekcja dla s&#322;uchawek lub g&#322;o&#347;nik&oacute;w</b> stosuje korekcj&#281; barwy do samego wyj&#347;cia (a nie do organ&oacute;w): wybierz, dla kt&oacute;rego profilu obowi&#261;zuje, w&#322;&#261;cz j&#261; i wybierz preset z listy AutoEq albo zaimportuj lub wyeksportuj w&#322;asn&#261; korekcj&#281;.</p>
+<p>Ni&#380;ej s&#261; opcje automatycznego uruchamiania programu z Windows, automatycznego &#322;adowania ostatnio otwartych organ&oacute;w, zamykania ca&#322;ego oprogramowania krzy&#380;ykiem na dodatkowym ekranie oraz przywracania ostatniej rejestracji. <b>Automatyczne archiwum MIDI</b> zapisuje w tle wszystko, co grasz, jako plik .mid na sesj&#281;: zaczyna od pierwszej nuty i ko&#324;czy po ciszy.</p>
+<figure><img src="afbeeldingen/pl/30_audio_2.jpg" alt="Wyj&#347;cie audio, &#347;rodek"><figcaption>Wyj&#347;cie audio, ni&#380;ej: profile wyj&#347;cia, korekcja dla s&#322;uchawek lub g&#322;o&#347;nik&oacute;w, opcje startu, archiwum MIDI i zdalne sterowanie. Folder i adres sieciowy zosta&#322;y na tym obrazie celowo zast&#261;pione oznaczeniem.</figcaption></figure>
+<p>Za pomoc&#261; <b>Zdalne sterowanie w sieci (tablet/telefon)</b> sterujesz organami z tabletu lub telefonu w tej samej sieci Wi-Fi. Program pokazuje adres i kod QR do zeskanowania, a ty wybierasz, kt&oacute;re elementy i kt&oacute;re klawiatury pojawiaj&#261; si&#281; na ekranie zewn&#281;trznym. Za pierwszym razem Zapora Windows pyta, czy JM-Orgue mo&#380;e odbiera&#263; po&#322;&#261;czenia: wybierz &bdquo;Zezw&oacute;l na dost&#281;p&rdquo; dla sieci prywatnych.</p>
+<div class="let-op"><b>Uwaga</b> Adres zawiera token dost&#281;pu i dzia&#322;a tylko w twojej w&#322;asnej sieci, bez szyfrowania. Nie udost&#281;pniaj adresu ani kodu QR; za pomoc&#261; <b>Nowy token</b> odbierasz dost&#281;p urz&#261;dzeniu, kt&oacute;re wcze&#347;niej je zeskanowa&#322;o.</div>
+<p>Na dole jest <b>cz&#281;stotliwo&#347;&#263; pr&oacute;bkowania</b>. Wynika ona z samej karty d&#378;wi&#281;kowej: w ASIO ustawiasz j&#261; w panelu sterownika, w WASAPI w ustawieniach d&#378;wi&#281;ku Windows.</p>
+<figure><img src="afbeeldingen/pl/30_audio_3.jpg" alt="Wyj&#347;cie audio, d&oacute;&#322;"><figcaption>Wyj&#347;cie audio, na dole: zdalne sterowanie z elementami i klawiaturami na ekranie zewn&#281;trznym oraz cz&#281;stotliwo&#347;&#263; pr&oacute;bkowania. Kod QR i adres s&#261; tu zas&#322;oni&#281;te.</figcaption></figure>
+
+<h3>Korekta sampli</h3>
+<p>Dwa narz&#281;dzia do porz&#261;dkowania sampli za&#322;adowanych organ&oacute;w. <b>Cisza przed atakiem</b> znajduje i wycina cisz&#281; na pocz&#261;tku sampli (pr&oacute;g ciszy w dB i zachowywany pocz&#261;tek ustawiasz sam); <b>P&#281;tle</b> znajduje dobr&#261; p&#281;tl&#281; podtrzymania, wpisuje crossfade dla p&#322;ynnego przej&#347;cia i zapisuje punkty p&#281;tli w pliku, z opcj&#261; zrobienia tego tylko dla plik&oacute;w bez p&#281;tli. Przyciskiem <b>Skanuj</b> najpierw sprawdzasz, co by si&#281; zmieni&#322;o. Orygina&#322;y s&#261; najpierw przechowywane w folderze <code>_backup</code>, zanim pliki zostan&#261; nadpisane.</p>
+<figure><img src="afbeeldingen/pl/31_samplefix.jpg" alt="Korekta sampli"><figcaption>Korekta sampli: cisza przed atakiem i p&#281;tle, ka&#380;de z przyciskiem Skanuj i przyciskiem zastosowania.</figcaption></figure>
+
+<h3>MIDI</h3>
+<p><b>Wej&#347;cie MIDI</b> pokazuje pod&#322;&#261;czone urz&#261;dzenia MIDI (przyciskiem <b>Od&#347;wie&#380; urz&#261;dzenia</b> szukasz ponownie); w <b>Bluetooth MIDI</b> szukasz urz&#261;dze&#324; bezprzewodowych przyciskiem <b>Skanuj</b>. <b>Sygnalizacja zwrotna (MIDI out)</b> sprawia, &#380;e tw&oacute;j st&oacute;&#322; gry &#347;wieci zgodnie z rejestracj&#261;: wybierz protok&oacute;&#322; (lampki rejestr&oacute;w przez Note On/Off, wy&#347;wietlacz tekstowy Hauptwerk lub st&oacute;&#322; Johannus/Content), wyj&#347;cie MIDI, kana&#322; i nut&#281; bazow&#261;. Ka&#380;dy rejestr dostaje wtedy automatycznie numer nuty od nuty bazowej albo uczysz prawdziwy przycisk sto&#322;u gry dla ka&#380;dego rejestru za pomoc&#261; <b>Nauka dla ka&#380;dego g&#322;osu&hellip;</b>.</p>
+<figure><img src="afbeeldingen/pl/32_midi.jpg" alt="MIDI"><figcaption>Wej&#347;cie MIDI, Bluetooth MIDI i sygnalizacja zwrotna do sto&#322;u gry.</figcaption></figure>
+
+<h3>Ucz przyciski</h3>
+<p>Tu uczysz sta&#322;e przyciski sto&#322;u gry (pistony): stroik, SET, kroki preset&oacute;w, poziomy pami&#281;ci i wy&#322;&#261;czanie komputera. Przyciski cyfr 0&ndash;9 uczysz na samym pasku setzera (prawy przycisk lub przytrzymanie 3 sekundy).</p>
+<figure><img src="afbeeldingen/pl/33_knoppen_inleren.jpg" alt="Ucz przyciski"><figcaption>Uczenie przycisk&oacute;w sto&#322;u gry.</figcaption></figure>
+
+<h3>Widok</h3>
+<p>Wybierz j&#281;zyk programu (Nederlands, English, Fran&ccedil;ais, Deutsch, Polski, Italiano i Espa&ntilde;ol) oraz wygl&#261;d: pi&#281;&#263; gotowych preset&oacute;w kolor&oacute;w (Podstawowy, Klasyczne drewno, Nowoczesny minimalistyczny, Noc i Wiecz&oacute;r) albo zestaw w&#322;asne kolory, nadaj im nazw&#281; i wyeksportuj. Ni&#380;ej dostosowujesz kr&oacute;j, rozmiar i grubo&#347;&#263; pisma rejestr&oacute;w oraz t&#322;o.</p>
+<figure><img src="afbeeldingen/pl/34_weergave.jpg" alt="Widok"><figcaption>Wygl&#261;d i uk&#322;ad: j&#281;zyk, presety i czcionka rejestr&oacute;w.</figcaption></figure>
+
+<h3>Aktualizacja i opinie</h3>
+<p>Znajdziesz tu numer wersji, informacje o &#378;r&oacute;d&#322;ach u&#380;ytych preset&oacute;w s&#322;uchawek i danych g&#322;o&#347;nik&oacute;w oraz przyciski <b>Wy&#347;lij opini&#281;&hellip;</b>, <b>Przez GitHub (issues)</b> i <b>Sprawd&#378; aktualizacje</b>.</p>
+<figure><img src="afbeeldingen/pl/35_update_feedback.jpg" alt="Aktualizacja i opinie"><figcaption>O programie i opinie.</figcaption></figure>
+
+<!-- ============================================================ -->
+<h2 id="akoestiek">9. Konfiguracja akustyczna zestawu</h2>
+<p>Definicja organ&oacute;w mo&#380;e odwo&#322;ywa&#263; si&#281; do dodatkowego pliku, <code>JM-ACOUSTICS.json</code>, opisuj&#261;cego akustyk&#281; zestawu: szafy ekspresyjne przypisane do g&#322;osu zamiast do klawiatury, odpowiedzi impulsowe dla pog&#322;osu, trasy miksowania i wyj&#347;cia. Je&#347;li tw&oacute;j zestaw ma taki plik, poznasz to po dodatkowym bloku w Ustawieniach organ&oacute;w &rarr; Brzmienie.</p>
+<ul>
+  <li>Program wczytuje plik i go sprawdza: rozmiar pliku, czy wszystkie odwo&#322;ania s&#261; poprawne, czy &#347;cie&#380;ki pozostaj&#261; w folderze organ&oacute;w i czy powi&#261;zania piszcza&#322;ek pasuj&#261; do za&#322;adowanej definicji. Je&#347;li co&#347; jest nie tak, organy po prostu graj&#261; wed&#322;ug zwyk&#322;ej definicji, a blok podaje, dlaczego konfiguracji nie wczytano.</li>
+  <li><b>Szafy ekspresyjne per g&#322;os</b>: g&#322;osy, kt&oacute;re plik umieszcza w szafie, dostaj&#261; w&#322;asn&#261; szaf&#281; ekspresyjn&#261; i w&#322;asny peda&#322; ekspresji, niezale&#380;nie od klawiatury, na kt&oacute;rej graj&#261;. G&#322;os u&#380;ywany przez dwie klawiatury zawsze pod&#261;&#380;a wi&#281;c za t&#261; sam&#261; szaf&#261;. Peda&#322; uczysz w Routing (<b>Nauka pedalu</b>) lub w kreatorze.</li>
+  <li><b>Odpowiedzi impulsowe</b> z zestawu s&#261; wymienione pod blokiem, z kana&#322;ami i czasem trwania. Przyciskiem <b>U&#380;yj jako pog&#322;osu</b> przejmujesz jedn&#261; jako pog&#322;os splotowy. Rola kana&#322;&oacute;w w takich nagraniach nie jest okre&#347;lona; program traktuje dwa pierwsze jako par&#281; stereo.</li>
+  <li>Trasy miksowania, szyny wyj&#347;ciowe i przej&#347;cia efekt&oacute;w z pliku nie s&#261; na razie stosowane automatycznie; nadrz&#281;dna pozostaje zwyk&#322;a definicja.</li>
+</ul>
+<figure><img src="afbeeldingen/pl/60_akoestiek_klank.jpg" alt="Brzmienie z konfiguracj&#261; akustyczn&#261;"><figcaption>Blok &bdquo;Konfiguracja akustyczna&rdquo; u g&oacute;ry Brzmienia, z podsumowaniem i przyciskiem dla ka&#380;dej odpowiedzi impulsowej. Obrazy w tym rozdziale wykonano z tymczasowym plikiem testowym przy organach demonstracyjnych.</figcaption></figure>
+<div class="duo">
+  <figure><img src="afbeeldingen/pl/61_akoestiek_zwelkasten_routing.jpg" alt="Szafy ekspresyjne per g&#322;os w Routing"><figcaption>Routing, na dole: blok Szafy ekspresyjne per g&#322;os z przyciskiem &bdquo;Nauka pedalu&rdquo; dla ka&#380;dej szafy.</figcaption></figure>
+  <figure><img src="afbeeldingen/pl/62_akoestiek_wizard_zwelkasten.jpg" alt="Kreator z szaf&#261; ekspresyjn&#261; per g&#322;os"><figcaption>Kreator pokazuje szaf&#281; pod &#380;aluzjami i crescendem.</figcaption></figure>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="tips">10. Skr&oacute;ty klawiszowe i wskaz&oacute;wki</h2>
+<table>
+  <tr><th style="width:22%">Klawisz</th><th>Funkcja</th></tr>
+  <tr><td><kbd>F1</kbd> <kbd>F2</kbd> <kbd>F3</kbd></td><td>Organy, Ustawienia organ&oacute;w i Ustawienia og&oacute;lne.</td></tr>
+  <tr><td><kbd>F11</kbd></td><td>Pe&#322;ny ekran (tryb sto&#322;u gry) w&#322;&#261;czony lub wy&#322;&#261;czony.</td></tr>
+  <tr><td><kbd>Esc</kbd></td><td>Wyj&#347;cie z pe&#322;nego ekranu.</td></tr>
+  <tr><td>Prawy przycisk lub 3 s przytrzymania</td><td>Na przycisku paska setzera: powi&#261;zanie tego przycisku z przyciskiem sto&#322;u gry (nauka MIDI).</td></tr>
+  <tr><td>Dwukrotne klikni&#281;cie g&#322;o&#347;no&#347;ci</td><td>G&#322;o&#347;no&#347;&#263; g&#322;&oacute;wna wraca do warto&#347;ci domy&#347;lnej.</td></tr>
+  <tr><td>Karta przytrzymana 3 s</td><td>W bibliotece: ponowne wyszukanie zdj&#281;cia tej karty.</td></tr>
+</table>
+<ul>
+  <li>Wszystkie ustawienia s&#261; zapisywane przy ka&#380;dych organach, tak&#380;e gdy zamkniesz organy lub program.</li>
+  <li>Dla sta&#322;ego sto&#322;u gry: w&#322;&#261;cz <b>Automatyczne uruchamianie z Windows</b> i <b>Automatyczne &#322;adowanie ostatnio otwartych organ&oacute;w</b> i u&#380;ywaj trybu sto&#322;u gry.</li>
+  <li>Przy wi&#281;cej ni&#380; dw&oacute;ch wyj&#347;ciach: wybierz wyj&#347;cia dla ka&#380;dej klawiatury w Routing, a potem te same wyj&#347;cia dla d&#378;wi&#281;k&oacute;w t&#322;a.</li>
+</ul>
+
+<!-- ============================================================ -->
+<h2 id="problemen">11. Rozwi&#261;zywanie problem&oacute;w i opinie</h2>
+<table>
+  <tr><th style="width:30%">Problem</th><th>Co mo&#380;esz spr&oacute;bowa&#263;</th></tr>
+  <tr><td>Brak d&#378;wi&#281;ku</td><td>Czy silnik pracuje? Czy na dole jest &bdquo;Audio aktywne&rdquo;? Czy w Wyj&#347;ciu audio ustawiono w&#322;a&#347;ciwe urz&#261;dzenie i czy wyj&#347;cia dla klawiatur pasuj&#261; do twojego interfejsu audio? U&#380;yj sygna&#322;u testowego, aby us&#322;ysze&#263; wyj&#347;cia.</td></tr>
+  <tr><td>Klawiatura nie reaguje</td><td>Na dole jest &bdquo;MIDI niepo&#322;&#261;czone&rdquo;, dop&oacute;ki nie ma urz&#261;dzenia MIDI. Sprawd&#378; Ustawienia og&oacute;lne &rarr; MIDI i kana&#322; MIDI dla klawiatury w Routing.</td></tr>
+  <tr><td>Organy brzmi&#261; fa&#322;szywie</td><td>Sprawd&#378;, czy w&#322;&#261;czone jest automatyczne strojenie piszcza&#322;ek, i wybierz w Brzmieniu str&oacute;j &bdquo;Orygina&#322;&rdquo; lub &#380;&#261;dan&#261; temperacj&#281;.</td></tr>
+  <tr><td>Trzaski lub zacinanie</td><td>Zmniejsz polifoni&#281;, wyci&#261;gaj mniej rejestr&oacute;w, wy&#322;&#261;cz pog&#322;os lub wybierz wi&#281;kszy bufor. Kr&oacute;tki bufor startowy wymaga szybkiego dysku; w przeciwnym razie wybierz d&#322;u&#380;szy.</td></tr>
+  <tr><td>Za ma&#322;o pami&#281;ci</td><td>Wybierz kr&oacute;tszy bufor startowy, wy&#322;&#261;cz sample stereo albo pozycje s&#322;uchania, kt&oacute;rych nie u&#380;ywasz.</td></tr>
+  <tr><td>D&#378;wi&#281;ki t&#322;a lub rejestry efektowe nie s&#261; s&#322;yszalne na w&#322;a&#347;ciwym g&#322;o&#347;niku</td><td>W Routing, w &bdquo;Wyj&#347;cie audio d&#378;wi&#281;k&oacute;w t&#322;a&rdquo;, wybierz te same wyj&#347;cia co dla klawiatur.</td></tr>
+</table>
+<p><b>Wy&#347;lij opini&#281;&hellip;</b> (Ustawienia og&oacute;lne &rarr; Aktualizacja i opinie) tworzy wiadomo&#347;&#263; z twoim zg&#322;oszeniem i plikami dziennika z ostatnich sesji, aby programista m&oacute;g&#322; zobaczy&#263;, co si&#281; sta&#322;o. Zg&#322;oszenie mo&#380;esz te&#380; opublikowa&#263; na stronie projektu na GitHubie.</p>
+
+</main>
+</body>
+</html>
