@@ -1395,6 +1395,11 @@
     "blower": "soplador:",
     "ambient": "ambiente:",
     "volume": "Volumen",
+    "volume_total": "Total",
+    "motor_volume": "Motor",
+    "key_action_volume": "Teclas",
+    "stop_action_volume": "Registros",
+    "volume_split_hint": "Volumen por tipo, además del total.",
     "motor_on": "Motor encendido",
     "key_action": "Mecánica del teclado (clic de teclas)",
     "key_action_reload": "Este cambio tiene efecto tras recargar el órgano."

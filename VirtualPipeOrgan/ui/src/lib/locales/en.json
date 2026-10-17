@@ -1395,6 +1395,11 @@
     "blower": "blower:",
     "ambient": "ambient:",
     "volume": "Volume",
+    "volume_total": "Total",
+    "motor_volume": "Motor",
+    "key_action_volume": "Keys",
+    "stop_action_volume": "Stops",
+    "volume_split_hint": "Volume per kind, on top of the total.",
     "motor_on": "Motor on",
     "key_action": "Key action noise (clicking keyboard)",
     "key_action_reload": "This change takes effect after reloading the organ."

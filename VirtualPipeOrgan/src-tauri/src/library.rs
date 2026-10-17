@@ -489,6 +489,10 @@ pub struct OrganSettings {
     /// Bijgeluiden-master (0.7.97): lineaire gain 0..4, standaard 0.3.
     #[serde(default)]
     pub background_gain: Option<f32>,
+    /// Eigen volumes (0.8.94), lineair en relatief t.o.v. `background_gain`:
+    /// [motor, toetsmechaniek, registerklikken]. None = alle drie 1.0.
+    #[serde(default)]
+    pub mechanics_gains: Option<[f32; 3]>,
     /// Motor-knop (0.7.97): true = blower aan. Standaard aan.
     #[serde(default)]
     pub blower_active: Option<bool>,

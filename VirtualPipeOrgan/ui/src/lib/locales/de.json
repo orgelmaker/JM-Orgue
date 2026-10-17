@@ -1395,6 +1395,11 @@
     "blower": "Motor:",
     "ambient": "Ambient:",
     "volume": "Lautstärke",
+    "volume_total": "Gesamt",
+    "motor_volume": "Motor",
+    "key_action_volume": "Tasten",
+    "stop_action_volume": "Register",
+    "volume_split_hint": "Lautstärke je Art, zusätzlich zur Gesamtlautstärke.",
     "motor_on": "Motor an",
     "key_action": "Tastatur-Mechanik (klickende Tasten)",
     "key_action_reload": "Diese Änderung wirkt nach erneutem Laden der Orgel."

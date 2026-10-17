@@ -119,6 +119,15 @@ impl ActiveVoice {
     }
 }
 
+/// Hoogste uitgangsniveau van de bijgeluiden sinds de laatste uitlezing
+/// (f32-bits). De piekmeters van de speler meten vóór de bijgeluiden.
+pub static BG_PIEK: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// Lees en wis de bijgeluidenpiek.
+pub fn neem_bg_piek() -> f32 {
+    f32::from_bits(BG_PIEK.swap(0, std::sync::atomic::Ordering::Relaxed))
+}
+
 /// Vier soorten achtergrondgeluiden; vaste volgorde voor de routing-array.
 /// Zelfde volgorde als `BackgroundSoundKind`-indexer in `kind_index()`.
 pub const BG_KIND_COUNT: usize = 4;
@@ -145,6 +154,9 @@ pub(crate) struct BackgroundEngine {
     pub global_gain: f32,
     /// Motor-knop: true = blower-voices actief, false = fade-uit.
     pub blower_active: bool,
+    /// Eigen volume voor de motor (0.8.94), bovenop `global_gain`: zo kan de
+    /// motor zachter of harder dan toets- en registergeluid. 1.0 = neutraal.
+    pub motor_gain: f32,
     /// Routing per soort (0.8.82): welke output-kanalen krijgen deze bijgeluid-
     /// soort? Standaard [0, 1] = front L/R, net als voor 0.8.82. Op surround-
     /// opstellingen waar de divisies naar 3+4 of 5+6 gaan, kon de organist
@@ -165,6 +177,7 @@ impl BackgroundEngine {
             // als een organist voor het eerst een set met motor-geluid laadt.
             global_gain: 0.3,
             blower_active: true,
+            motor_gain: 1.0,
             channels_per_kind: [
                 vec![0, 1], vec![0, 1], vec![0, 1], vec![0, 1],
             ],
@@ -240,6 +253,17 @@ impl BackgroundEngine {
         self.global_gain = gain_lineair.clamp(0.0, 4.0);
     }
 
+    /// Motorvolume (0.8.94), relatief t.o.v. de bijgeluiden-schuif.
+    pub fn set_motor_gain(&mut self, gain_lineair: f32) {
+        self.motor_gain = if gain_lineair.is_finite() { gain_lineair.clamp(0.0, 4.0) } else { 1.0 };
+    }
+
+    /// Extra gain per soort: alleen de motor heeft een eigen schuif.
+    #[inline]
+    fn soort_gain(motor_gain: f32, kind: BackgroundSoundKind) -> f32 {
+        if matches!(kind, BackgroundSoundKind::Blower) { motor_gain } else { 1.0 }
+    }
+
     /// Speelgoedregister aan of uit (0.7.98). Match op naam (case-insensitief);
     /// zonder match verandert er niets.
     pub fn set_toy(&mut self, name: &str, active: bool) {
@@ -274,7 +298,9 @@ impl BackgroundEngine {
     /// hier bijtellen alsnog.
     pub fn mix_interleaved(&mut self, data: &mut [f32], start_frame: usize, frames: usize, channels: usize) {
         if !self.is_actief() || channels == 0 { return; }
+        let mut piek = 0.0f32;
         let gg = self.global_gain;
+        let mg = self.motor_gain;
         // Lokale buffer om per kind L/R te verzamelen vóór we naar de output
         // schrijven. Vier kinds × (L, R).
         let max_chan = channels;
@@ -287,8 +313,9 @@ impl BackgroundEngine {
             for v in &mut self.voices {
                 let len_l = v.voice.data_l.len();
                 if len_l == 0 { continue; }
-                let effectief_doel = v.target_gain * v.voice.voice_gain * gg;
-                let fade_step = (v.voice.voice_gain * gg) / FADE_FRAMES.max(1.0);
+                let vg = v.voice.voice_gain * gg * Self::soort_gain(mg, v.voice.kind);
+                let effectief_doel = v.target_gain * vg;
+                let fade_step = vg / FADE_FRAMES.max(1.0);
                 if (v.current_gain - effectief_doel).abs() < fade_step {
                     v.current_gain = effectief_doel;
                 } else if v.current_gain < effectief_doel {
@@ -333,6 +360,7 @@ impl BackgroundEngine {
             // volgende als duplicaat van het stereo-signaal (zelden gebruikt).
             for (k, (l, r)) in per_kind.iter().enumerate() {
                 if *l == 0.0 && *r == 0.0 { continue; }
+                piek = piek.max(l.abs()).max(r.abs());
                 let chans = &self.channels_per_kind[k];
                 if chans.is_empty() {
                     // Mag niet voorkomen (set_channels_for_kind clampt), maar
@@ -362,12 +390,16 @@ impl BackgroundEngine {
         }
         // Afgespeelde one-shots opruimen (0.7.99): pos is doorgaans ≥ len.
         self.one_shots.retain(|v| v.pos < v.voice.data_l.len() as f64);
+        // Piek van de bijgeluiden sinds de laatste uitlezing (test-API, 0.8.94):
+        // positieve f32-bitpatronen zijn monotoon, dus fetch_max op de bits.
+        BG_PIEK.fetch_max(piek.to_bits(), std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Genereer één (L, R)-paar en schuif de voices één stap op. Mixt de
     /// doorlopende voices én de actieve one-shots samen.
     fn volgende_sample(&mut self) -> (f32, f32) {
         let gg = self.global_gain;
+        let mg = self.motor_gain;
         let mut out_l = 0.0f32;
         let mut out_r = 0.0f32;
         // One-shots: eenmalig afspelen tot `pos >= len`. Opruiming daarvan
@@ -395,8 +427,9 @@ impl BackgroundEngine {
         for v in &mut self.voices {
             let len_l = v.voice.data_l.len();
             if len_l == 0 { continue; }
-            let effectief_doel = v.target_gain * v.voice.voice_gain * gg;
-            let fade_step = (v.voice.voice_gain * gg) / FADE_FRAMES.max(1.0);
+            let vg = v.voice.voice_gain * gg * Self::soort_gain(mg, v.voice.kind);
+            let effectief_doel = v.target_gain * vg;
+            let fade_step = vg / FADE_FRAMES.max(1.0);
             if (v.current_gain - effectief_doel).abs() < fade_step {
                 v.current_gain = effectief_doel;
             } else if v.current_gain < effectief_doel {
@@ -421,10 +454,11 @@ impl BackgroundEngine {
         if !self.is_actief() { return; }
         debug_assert_eq!(out_l.len(), out_r.len());
         let gg = self.global_gain;
+        let mg = self.motor_gain;
         for v in &mut self.voices {
             let len_l = v.voice.data_l.len();
             if len_l == 0 { continue; }
-            let voice_g = v.voice.voice_gain * gg;
+            let voice_g = v.voice.voice_gain * gg * Self::soort_gain(mg, v.voice.kind);
             let fade_step = voice_g / FADE_FRAMES.max(1.0);
             for i in 0..out_l.len() {
                 // Fade naar target_gain * voice_g (effectieve target in audio).
@@ -469,6 +503,26 @@ mod tests {
 
     /// Loop-punten worden gevolgd (0.8.86): na het loop-einde speelt de voice
     /// rond tussen start en einde, nooit meer de aanloop of de staart.
+    /// Motorvolume (0.8.94) werkt alleen op de motor, niet op ander bijgeluid.
+    #[test]
+    fn motorvolume_alleen_op_de_motor() {
+        let niveau = |kind: BackgroundSoundKind, motor_gain: f32| {
+            let mut v = maak_mono(1000, 0.5);
+            v.kind = kind;
+            let mut e = BackgroundEngine::new();
+            e.global_gain = 1.0;
+            e.set_motor_gain(motor_gain);
+            e.set_voices(vec![v]);
+            let mut l = vec![0.0; 30_000];
+            let mut r = vec![0.0; 30_000];
+            e.mix_stereo(&mut l, &mut r);
+            l[29_000]
+        };
+        assert!((niveau(BackgroundSoundKind::Blower, 1.0) - 0.5).abs() < 1e-3);
+        assert!((niveau(BackgroundSoundKind::Blower, 0.25) - 0.125).abs() < 1e-3);
+        assert!((niveau(BackgroundSoundKind::Ambient, 0.25) - 0.5).abs() < 1e-3);
+    }
+
     #[test]
     fn loop_punten_worden_gevolgd() {
         // Bestand van 100 frames: aanloop 0..10 = 1.0, loopgebied 10..60 = 0.5,

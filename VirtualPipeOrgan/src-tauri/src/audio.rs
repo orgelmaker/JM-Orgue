@@ -972,6 +972,9 @@ pub enum AudioCommand {
     SetBackgroundVoices(Vec<crate::background_sounds::BackgroundVoice>),
     /// Bijgeluiden-master: lineaire gain op alle achtergrondgeluiden samen.
     SetBackgroundGain { gain_lineair: f32 },
+    /// Eigen volumes (0.8.94), lineair en relatief t.o.v. de bijgeluiden-
+    /// schuif: motor, toetsmechaniek (toetsklikken) en registerklikken.
+    SetMechanicsGains { motor: f32, keys: f32, stops: f32 },
     /// Motor-knop in de werkbalk: true = blower-voices actief, false =
     /// fade uit. Ambient blijft altijd aan.
     SetBlowerActive(bool),
@@ -4044,6 +4047,9 @@ fn run_audio_thread(
     let mut stop_click_buffers: Arc<HashMap<u32, StopClickBuffers>> = Arc::new(HashMap::new());
     // Toetsmechaniek-buffers (0.7.102): per (divisienaam, midi_note) de klik.
     let mut keyboard_click_buffers: Arc<HashMap<(String, u8), KeyboardClickBuffer>> = Arc::new(HashMap::new());
+    // Eigen volumes voor toetsklikken en registerklikken (0.8.94).
+    let mut key_click_gain: f32 = 1.0;
+    let mut stop_click_gain: f32 = 1.0;
     let mut release_spawn_scratch: Vec<PlayingVoice> = Vec::with_capacity(32);
     // RAM-plafond op volledig geladen samples. Zonder plafond groeide het
     // geheugen tijdens lang spelen onbegrensd (elke gespeelde pijp + release
@@ -4480,6 +4486,11 @@ fn run_audio_thread(
                     AudioCommand::SetBackgroundGain { gain_lineair } => {
                         bg_engine.set_global_gain(gain_lineair);
                     }
+                    AudioCommand::SetMechanicsGains { motor, keys, stops } => {
+                        bg_engine.set_motor_gain(motor);
+                        key_click_gain = if keys.is_finite() { keys.clamp(0.0, 4.0) } else { 1.0 };
+                        stop_click_gain = if stops.is_finite() { stops.clamp(0.0, 4.0) } else { 1.0 };
+                    }
                     AudioCommand::SetBlowerActive(active) => {
                         bg_engine.set_blower(active);
                         info!("Motor: {}", if active { "aan" } else { "uit" });
@@ -4540,7 +4551,7 @@ fn run_audio_thread(
                                     data_l: l,
                                     data_r,
                                     rate,
-                                    voice_gain: 10f32.powf(-6.0 / 20.0),
+                                    voice_gain: 10f32.powf(-6.0 / 20.0) * key_click_gain,
                                     loop_start: None,
                                     loop_end: None,
                                 });
@@ -4563,7 +4574,7 @@ fn run_audio_thread(
                                     rate,
                                     // Register-klik moet duidelijk hoorbaar zijn,
                                     // maar niet overheersend; -6 dB voelt juist.
-                                    voice_gain: 10f32.powf(-6.0 / 20.0),
+                                    voice_gain: 10f32.powf(-6.0 / 20.0) * stop_click_gain,
                                     loop_start: None,
                                     loop_end: None,
                                 });

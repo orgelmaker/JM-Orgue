@@ -1553,6 +1553,8 @@ pub struct AppState {
     /// achtergrondgeluiden (blower, ambient) tegelijk schaalt. Bediend via
     /// de schuif in de UI; standaard 0.3 (−10 dB).
     pub background_gain: Arc<RwLock<f32>>,
+    /// Eigen volumes (0.8.94): [motor, toetsmechaniek, registerklikken], lineair.
+    pub mechanics_gains: Arc<RwLock<[f32; 3]>>,
     /// Motor-knop (0.7.97): staat de blower aan? Standaard true (zoals de
     /// Hauptwerk-knop "Blower"). Ambient volgt dit niet.
     pub blower_active: Arc<RwLock<bool>>,
@@ -1958,6 +1960,7 @@ impl AppState {
             load_all_perspectives: Arc::new(RwLock::new(false)),
             listening_position: Arc::new(RwLock::new(0.0)),
             background_gain: Arc::new(RwLock::new(0.3)),
+            mechanics_gains: Arc::new(RwLock::new([1.0; 3])),
             blower_active: Arc::new(RwLock::new(true)),
             toys_active: Arc::new(RwLock::new(std::collections::HashMap::new())),
             background_channels: Arc::new(RwLock::new([
@@ -5656,6 +5659,7 @@ mod crescendo_tests {
             release_pipes: 0,
             background_sounds: Vec::new(),
             key_click_count: 0,
+            stop_click_count: 0,
             acoustics: None,
         }
     }

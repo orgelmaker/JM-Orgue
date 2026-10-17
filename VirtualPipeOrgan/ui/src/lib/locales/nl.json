@@ -1395,6 +1395,11 @@
     "blower": "motor:",
     "ambient": "ambient:",
     "volume": "Volume",
+    "volume_total": "Totaal",
+    "motor_volume": "Motor",
+    "key_action_volume": "Toetsen",
+    "stop_action_volume": "Registers",
+    "volume_split_hint": "Volume per soort, bovenop het totaal.",
     "motor_on": "Motor aan",
     "key_action": "Toetsmechaniek (klikkend klavier)",
     "key_action_reload": "Deze keuze geldt na het opnieuw laden van het orgel."

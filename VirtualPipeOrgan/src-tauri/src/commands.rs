@@ -121,6 +121,10 @@ pub struct OrganInfoDto {
     /// geen toetsmechaniek, dan verbergt de UI het vinkje.
     #[serde(default)]
     pub key_click_count: usize,
+    /// Aantal registers met een opgenomen registerklik (0.8.94); 0 = de UI
+    /// verbergt de schuif en de uitgangsrij voor registerklikken.
+    #[serde(default)]
+    pub stop_click_count: usize,
     /// Akoestische configuratie (0.8.92); None = het orgel heeft er geen.
     #[serde(default)]
     pub acoustics: Option<crate::acoustics::AcousticsSummaryDto>,
@@ -1398,6 +1402,27 @@ pub fn set_background_gain(state: State<AppState>, gain_lineair: f32) -> Result<
 #[tauri::command]
 pub fn get_background_gain(state: State<AppState>) -> f32 {
     *state.background_gain.read()
+}
+
+/// Eigen volumes (0.8.94) voor motor, toetsmechaniek en registerklikken,
+/// lineair 0..4 en relatief t.o.v. de bijgeluiden-schuif. Zo kan een motor
+/// die in de opname veel luider staat dan de toetsklikken apart zachter.
+pub fn set_mechanics_gains_inner(state: &AppState, motor: f32, keys: f32, stops: f32) -> [f32; 3] {
+    let schoon = |g: f32| if g.is_finite() { g.clamp(0.0, 4.0) } else { 1.0 };
+    let mg = [schoon(motor), schoon(keys), schoon(stops)];
+    *state.mechanics_gains.write() = mg;
+    state.send_audio_command(AudioCommand::SetMechanicsGains { motor: mg[0], keys: mg[1], stops: mg[2] });
+    mg
+}
+
+#[tauri::command]
+pub fn set_mechanics_gains(state: State<AppState>, motor: f32, keys: f32, stops: f32) -> [f32; 3] {
+    set_mechanics_gains_inner(&state, motor, keys, stops)
+}
+
+#[tauri::command]
+pub fn get_mechanics_gains(state: State<AppState>) -> [f32; 3] {
+    *state.mechanics_gains.read()
 }
 
 /// Motor-knop (0.7.97): true = blower-voices actief, false = fade uit.
@@ -3738,6 +3763,7 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
             }).collect()
         },
         key_click_count: definition.keyboard_clicks.len(),
+        stop_click_count: definition.stop_action_clicks.len(),
     };
 
     // Koppels zoals de sampleset ze levert onthouden: vertrekpunt voor het
@@ -8902,6 +8928,7 @@ pub fn do_load_samples_from_directory_locked(state: &AppState, directory: &str) 
         // via een manifestveld).
         background_sounds: Vec::new(),
         key_click_count: 0,
+        stop_click_count: 0,
         acoustics: None,
     };
 
@@ -9203,6 +9230,10 @@ fn restore_organ_settings(state: &AppState, organ_id: &str) {
     let bg_gain = settings.background_gain.unwrap_or(0.3).clamp(0.0, 4.0);
     *state.background_gain.write() = bg_gain;
     state.send_audio_command(AudioCommand::SetBackgroundGain { gain_lineair: bg_gain });
+    // Eigen volumes voor motor, toetsmechaniek en registerklikken (0.8.94).
+    let mg = settings.mechanics_gains.unwrap_or([1.0; 3]).map(|g| if g.is_finite() { g.clamp(0.0, 4.0) } else { 1.0 });
+    *state.mechanics_gains.write() = mg;
+    state.send_audio_command(AudioCommand::SetMechanicsGains { motor: mg[0], keys: mg[1], stops: mg[2] });
     // Motor-stand wordt sinds 0.8.86 NIET meer hersteld: de motor start altijd
     // uit bij een set met motor-opname (zie laad_en_stuur_bijgeluiden), net
     // als de effectregisters sinds 0.8.80.
@@ -9957,6 +9988,7 @@ pub fn do_save_organ_settings(state: &AppState, presets: HashMap<String, PresetD
         load_all_perspectives: *state.load_all_perspectives.read(),
         listening_position: Some(*state.listening_position.read()),
         background_gain: Some(*state.background_gain.read()),
+        mechanics_gains: Some(*state.mechanics_gains.read()),
         blower_active: Some(*state.blower_active.read()),
         toys_active: std::collections::HashMap::new(), // 0.8.80: niet opslaan; effectregisters starten altijd uit.
         background_channels: state.background_channels.read().iter().cloned().collect(), // 0.8.82
@@ -10457,16 +10489,26 @@ pub fn restore_swell_bindings(state: State<AppState>, bindings: Vec<SwellBinding
 /// klavier aan. Zonder geladen orgel blijft de opgeslagen index gelden.
 fn swell_bindings_from_saved(state: &AppState, saved: &[SwellBindingSaved]) -> Vec<crate::state::SwellBinding> {
     use crate::state::SwellBinding;
-    let division_names: Option<Vec<String>> = state.loaded_organ_info.read().as_ref()
-        .map(|o| o.divisions.iter().map(|d| d.name.clone()).collect());
+    let (division_names, acoustics) = {
+        let organ = state.loaded_organ_info.read();
+        (organ.as_ref().map(|o| o.divisions.iter().map(|d| d.name.clone()).collect::<Vec<String>>()),
+         organ.as_ref().and_then(|o| o.acoustics.clone()))
+    };
     saved.iter().filter_map(|b| {
         let division_index = match &division_names {
             Some(names) => match names.iter().position(|n| *n == b.division_name) {
                 Some(i) => i as u8,
-                None => {
-                    warn!("Zwelbinding voor '{}' overgeslagen: divisie bestaat niet in dit orgel", b.division_name);
-                    return None;
-                }
+                // Zwelkast uit de akoestische configuratie (0.8.94): de koppeling
+                // heet enclosure:<id> en hoort bij kastslot 128 + slot. Zonder
+                // deze tak viel elke ingeleerde kastpedaal weg bij herladen of
+                // herstarten, en veranderde de pedaal het volume niet meer.
+                None => match crate::acoustics::enclosure_index_from_name(&b.division_name, acoustics.as_ref()) {
+                    Some(i) => i,
+                    None => {
+                        warn!("Zwelbinding voor '{}' overgeslagen: divisie of zwelkast bestaat niet in dit orgel", b.division_name);
+                        return None;
+                    }
+                },
             },
             None => b.division_index,
         };

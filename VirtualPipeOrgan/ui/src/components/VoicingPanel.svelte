@@ -27,12 +27,18 @@
         .filter(d => !selectedDivision || d.name === selectedDivision)
         .flatMap(d => (d.stops || []).map(s => ({ ...s, _division: d.name })));
 
-  $: if (selectedStop) {
-    const key = `${selectedStop.internal_stop_id}-${selectedPipeMidi}`;
-    const v = voicings[key];
+  // De schuiven volgen de opgeslagen voicing ALLEEN bij een andere keuze
+  // (register of pijp) en na het laden. Vroeger hing dit blok ook aan
+  // `voicings`: elke schuifbeweging schreef voicings, waarna dit blok de
+  // schuif meteen terugzette op de oude waarde (bij een echte muissleep lopen
+  // de microtaken tussen de event-handlers door) — de schuif "werkte niet".
+  function syncLive() {
+    if (!selectedStop) return;
+    const v = voicings[`${selectedStop.internal_stop_id}-${selectedPipeMidi}`];
     liveVolume = v ? v.volume_db : 0;
     livePitch = v ? v.pitch_cents : 0;
   }
+  $: selectedStop, selectedPipeMidi, syncLive();
 
   onMount(async () => {
     await loadVoicings();
@@ -71,6 +77,7 @@
         voicings[`${stop_id}-${first + pipe_num - 1}`] = { volume_db, pitch_cents };
       }
       voicings = voicings;
+      syncLive();
     } catch (e) {
       console.warn('Kon voicings niet laden:', e);
     }
@@ -144,13 +151,14 @@
     queueSave();
   }
 
-  function pipeHasVoicing(stop, midi) {
-    return !!voicings[`${stop.internal_stop_id}-${midi}`];
+  // `v` = voicings, als argument zodat de markering in de markup meeleeft.
+  function pipeHasVoicing(stop, midi, v = voicings) {
+    return !!v[`${stop.internal_stop_id}-${midi}`];
   }
 
-  function stopHasAnyVoicing(stop) {
+  function stopHasAnyVoicing(stop, v = voicings) {
     if (!stop) return false;
-    return Object.keys(voicings).some(k => k.startsWith(`${stop.internal_stop_id}-`));
+    return Object.keys(v).some(k => k.startsWith(`${stop.internal_stop_id}-`));
   }
 
   $: pipeRange = selectedStop
@@ -191,13 +199,13 @@
               type="button"
               class="stop-item"
               class:selected={selectedStop && selectedStop.id === stop.id}
-              class:has-edits={stopHasAnyVoicing(stop)}
+              class:has-edits={stopHasAnyVoicing(stop, voicings)}
               on:click={() => selectStop(stop)}
             >
               <span class="stop-item-div">{stop._division}</span>
               <span class="stop-item-name">{stop.name}</span>
               <span class="stop-item-pitch">{stop.regel ?? stop.pitch}</span>
-              {#if stopHasAnyVoicing(stop)}
+              {#if stopHasAnyVoicing(stop, voicings)}
                 <span class="edit-dot" title={$t('voicing.has_edits')}>●</span>
               {/if}
             </button>
@@ -219,7 +227,7 @@
                 type="button"
                 class="pipe-btn"
                 class:selected={midi === selectedPipeMidi}
-                class:has-voicing={pipeHasVoicing(selectedStop, midi)}
+                class:has-voicing={pipeHasVoicing(selectedStop, midi, voicings)}
                 on:click={() => selectedPipeMidi = midi}
                 title={midiToName(midi)}
               >
@@ -234,8 +242,8 @@
             <input
               type="range"
               min="-12" max="12" step="0.1"
-              bind:value={liveVolume}
-              on:input={applyLive}
+              value={liveVolume}
+              on:input={(e) => { liveVolume = Number(e.currentTarget.value); applyLive(); }}
             />
             <span class="slider-value">{liveVolume.toFixed(1)} dB</span>
           </div>
@@ -246,8 +254,8 @@
             <input
               type="range"
               min="-50" max="50" step="0.5"
-              bind:value={livePitch}
-              on:input={applyLive}
+              value={livePitch}
+              on:input={(e) => { livePitch = Number(e.currentTarget.value); applyLive(); }}
             />
             <span class="slider-value">{livePitch >= 0 ? '+' : ''}{livePitch.toFixed(1)} ¢</span>
           </div>

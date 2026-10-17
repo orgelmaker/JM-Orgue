@@ -726,6 +726,9 @@ fn handle_status(state: &AppState) -> Value {
         // Achtergrondlader (0.8.92): startbuffer, tekorten en latenties.
         "loader": serde_json::to_value(crate::audio::loader_stats()).unwrap_or(serde_json::Value::Null),
         "peak_left": peaks.0,
+        // Bijgeluiden (motor, toets- en registerklikken) worden ná de
+        // pijpen gemengd; hun piek sinds de vorige /status apart (0.8.94).
+        "background_peak": crate::background_sounds::neem_bg_piek(),
         "peak_right": peaks.1,
         "organ_loaded": organ.is_some(),
         "organ_name": organ.as_ref().map(|o| o.name.clone()),
@@ -1557,7 +1560,8 @@ fn handle_swell_binding(state: &AppState, body: &str) -> Result<Value, (u16, Str
     let division = v.get("division").and_then(|x| x.as_str())
         .ok_or((400u16, "Veld 'division' ontbreekt".to_string()))?.to_string();
     let idx = state.loaded_organ_info.read().as_ref()
-        .and_then(|o| o.divisions.iter().position(|d| d.name == division))
+        .and_then(|o| o.divisions.iter().position(|d| d.name == division)
+            .or_else(|| crate::acoustics::enclosure_index_from_name(&division, o.acoustics.as_ref()).map(|i| i as usize)))
         .ok_or((404u16, format!("Divisie onbekend: {}", division)))?;
     if v.get("clear").and_then(|x| x.as_bool()).unwrap_or(false) {
         state.clear_swell_binding(&division);
@@ -2271,6 +2275,7 @@ mod tests {
             release_pipes: 0,
             background_sounds: Vec::new(),
             key_click_count: 0,
+            stop_click_count: 0,
             acoustics: None,
         }
     }

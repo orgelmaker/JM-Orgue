@@ -2147,12 +2147,25 @@
   }
   let bgGain = 0.3;
   let motorAan = true;
+  // Eigen volumes (0.8.94): [motor, toetsmechaniek, registerklikken], lineair,
+  // bovenop bgGain. Zo kan een luide motoropname zachter dan de toetsklikken.
+  let mechGains = [1, 1, 1];
   async function haalBijgeluiden() {
     try {
       bgGain = await invoke('get_background_gain');
       motorAan = await invoke('get_blower_active');
+      mechGains = await invoke('get_mechanics_gains');
     } catch (e) {}
   }
+  let mechTimer = null;
+  function zetMechGain(i, v) {
+    mechGains[i] = Number(v);
+    mechGains = mechGains;
+    invoke('set_mechanics_gains', { motor: mechGains[0], keys: mechGains[1], stops: mechGains[2] }).catch(console.error);
+    clearTimeout(mechTimer);
+    mechTimer = setTimeout(() => dispatch('refreshMidiMappings'), 400);
+  }
+  const gainDb = (g) => (g > 0.001 ? (20 * Math.log10(g)).toFixed(1) + ' dB' : '−∞');
   $: if (organInfo?.id) haalBijgeluiden();
   let bgTimer = null;
   function zetBgGain(v) {
@@ -6689,7 +6702,7 @@
                 {/each}
               </ul>
               <label style="display: flex; align-items: center; gap: 0.5rem; margin-top: 0.4rem; font-size: 0.78rem;">
-                <span style="min-width: 5rem;">{$t('background.volume')}</span>
+                <span style="min-width: 5rem;">{$t('background.volume_total')}</span>
                 <input type="range" min="0" max="2" step="0.01" value={bgGain}
                   on:input={(e) => zetBgGain(e.currentTarget.value)}
                   style="flex: 1;" />
@@ -6704,6 +6717,25 @@
                   title={miscBindingTekst('background_gain') || $t('toolbar.midi_learn')}
                 >{miscLerenDoel === 'background_gain' ? '…' : (miscBindingTekst('background_gain') ? '●' : '↻')}</button>
               </label>
+              {#if heeftBlower || heeftToetsklikken || heeftRegisterKlikken}
+                <p class="settings-hint" style="margin: 0.5rem 0 0.1rem;">{$t('background.volume_split_hint')}</p>
+                {#each [
+                  { i: 0, show: heeftBlower, label: $t('background.motor_volume') },
+                  { i: 1, show: heeftToetsklikken, label: $t('background.key_action_volume') },
+                  { i: 2, show: heeftRegisterKlikken, label: $t('background.stop_action_volume') },
+                ] as rij (rij.i)}
+                  {#if rij.show}
+                    <label class="mech-gain-rij" style="display: flex; align-items: center; gap: 0.5rem; margin-top: 0.25rem; font-size: 0.78rem;">
+                      <span style="min-width: 5rem;">{rij.label}</span>
+                      <input type="range" min="0" max="2" step="0.01" value={mechGains[rij.i]}
+                        on:input={(e) => zetMechGain(rij.i, e.currentTarget.value)}
+                        on:dblclick={() => zetMechGain(rij.i, 1)}
+                        style="flex: 1;" />
+                      <span style="min-width: 3.5rem; text-align: right; opacity: 0.7;">{gainDb(mechGains[rij.i])}</span>
+                    </label>
+                  {/if}
+                {/each}
+              {/if}
               {#if heeftBlower}
                 <label style="display: flex; align-items: center; gap: 0.4rem; margin-top: 0.4rem; font-size: 0.78rem;">
                   <input type="checkbox" checked={motorAan} on:change={(e) => zetMotor(e.target.checked)} />

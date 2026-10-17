@@ -1395,6 +1395,11 @@
     "blower": "soufflerie :",
     "ambient": "ambiance :",
     "volume": "Volume",
+    "volume_total": "Total",
+    "motor_volume": "Moteur",
+    "key_action_volume": "Touches",
+    "stop_action_volume": "Jeux",
+    "volume_split_hint": "Volume par type, en plus du total.",
     "motor_on": "Moteur en marche",
     "key_action": "Mécanique du clavier (clic des touches)",
     "key_action_reload": "Ce choix prend effet après le rechargement de l'orgue."

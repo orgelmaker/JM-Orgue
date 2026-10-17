@@ -1395,6 +1395,11 @@
     "blower": "soffiatore:",
     "ambient": "ambiente:",
     "volume": "Volume",
+    "volume_total": "Totale",
+    "motor_volume": "Motore",
+    "key_action_volume": "Tasti",
+    "stop_action_volume": "Registri",
+    "volume_split_hint": "Volume per tipo, oltre al totale.",
     "motor_on": "Motore acceso",
     "key_action": "Meccanica della tastiera (clic dei tasti)",
     "key_action_reload": "Questa modifica avrà effetto dopo aver ricaricato l'organo."

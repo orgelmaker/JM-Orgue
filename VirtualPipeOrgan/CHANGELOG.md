@@ -5,6 +5,44 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.8.94] - 2026-10-17
+
+### Zwelkast per stem blijft gekoppeld
+- Een pedaal die je aan een zwelkast uit de akoestische configuratie hebt
+  gekoppeld (zwelkast per stem, via de wizard of Routing), viel bij het
+  herladen van het orgel of het herstarten van de app weg: de pedaal
+  veranderde het volume dan niet meer. De koppeling wordt nu bij elk laden
+  teruggezet; gemeten ruim 20 dB demping bij een gesloten kast, ook na een
+  herstart, terwijl registers buiten de kast gelijk blijven.
+
+### Pijpintonatie: schuiven werken weer
+- De schuiven voor volume en toonhoogte per pijp sprongen bij slepen met
+  de muis meteen terug naar de oude waarde. Ze volgen nu de muis, de
+  waarde blijft bewaard en de pijp en het register krijgen direct hun
+  markering.
+
+### Eigen volume voor motor, toetsen en registers
+- In Orgel-instellingen → Klank → Bijgeluiden staan onder het totaal drie
+  extra schuiven: Motor, Toetsen (toetsmechaniek) en Registers
+  (registerklikken). Zo zet je een luide motoropname zachter zonder de
+  toets- en registergeluiden mee te verlagen, of andersom. Per orgel
+  bewaard; dubbelklik zet een schuif terug op 0 dB.
+- De regel voor registerklikken bij de uitgangen van de bijgeluiden
+  verscheen nooit, omdat het aantal registerklikken niet werd
+  doorgegeven; dat is hersteld.
+
+### Kleine verbeteringen
+- Het menu Indeling klapt naar rechts uit als de knop dicht bij de
+  linkerrand staat, zodat het op een smal tweede scherm niet meer wordt
+  afgeknipt.
+- Enter op een knop van een bibliotheekkaart (online zoeken, foto,
+  verwijderen) laadde ook het orgel; nu alleen Enter op de kaart zelf.
+- Het venster voor online zoeken naar een orgelfoto gebruikt de kleuren
+  van het thema: geen donkere tekst meer op een donkere achtergrond.
+- Test-API: `/status` geeft ook de piek van de bijgeluiden
+  (`background_peak`), en `/swell/binding` kent de zwelkasten uit de
+  akoestische configuratie.
+
 ## [0.8.93] - 2026-10-16
 
 (0.8.92 waren lokale testbouwen; dit is de eerste uitgebrachte versie met onderstaande wijzigingen.)
@@ -14,7 +52,7 @@ versies volgen [Semantic Versioning](https://semver.org/).
   het geheugen staat) lag vast op 2 s en is nu instelbaar in Algemene
   instellingen → Audio uitvoer: 200 ms, 300 ms, 500 ms, 1 s of 2 s
   (standaard blijft 2 s). Bij een grote surround-set zakt het geheugen
-  na laden met 200 ms van ruim 16 GB naar ruim 5 GB; de
+  na laden met 200 ms van ruim 16 GB naar ruim 1,5 GB; de
   geheugenrem voor meerdere luisterposities rekent met de gekozen
   buffer en laat zo meer posities toe.
 - De achtergrondlader werkt nu met 3 tot 8 werkers (één minder dan het

@@ -1395,6 +1395,11 @@
     "blower": "dmuchawa:",
     "ambient": "tło:",
     "volume": "Głośność",
+    "volume_total": "Łącznie",
+    "motor_volume": "Silnik",
+    "key_action_volume": "Klawisze",
+    "stop_action_volume": "Rejestry",
+    "volume_split_hint": "Głośność dla każdego rodzaju, oprócz łącznej.",
     "motor_on": "Silnik włączony",
     "key_action": "Mechanika klawiatury (klikające klawisze)",
     "key_action_reload": "Ta zmiana zacznie działać po ponownym załadowaniu organów."
