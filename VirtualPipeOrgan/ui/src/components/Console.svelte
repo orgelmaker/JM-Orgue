@@ -2086,6 +2086,9 @@
   // Indeling-menu in de werkbalk (0.8.90) + onderwerpnavigatie in de
   // instellingen: springt naar de sectiekop met dat id.
   let indelingOpen = false;
+  // Menu links uitlijnen wanneer de knop dicht bij de linkerrand staat (extra
+  // scherm): rechts uitgelijnd viel het menu voor de helft buiten het venster.
+  let indelingLinks = false;
   // Instellingen als tabbladen (0.8.90): per scherm één onderwerp zichtbaar,
   // "Alles" toont de oude volledige lijst. Keuze per scherm onthouden.
   const INST_TABS_ORGEL = ['klank', 'crescendo', 'weergave', 'midi', 'alles'];
@@ -5420,7 +5423,7 @@
           <div
             class="library-card"
             on:click={() => { if (!clickFiredByRefresh(organ)) loadLibraryOrgan(organ); }}
-            on:keypress={(e) => e.key === 'Enter' && loadLibraryOrgan(organ)}
+            on:keypress={(e) => e.key === 'Enter' && e.target === e.currentTarget && loadLibraryOrgan(organ)}
             on:pointerdown={(e) => startRefreshImage(e, organ)}
             on:pointerup={() => cancelRefreshImage(organ)}
             on:pointerleave={() => cancelRefreshImage(organ)}
@@ -5539,7 +5542,7 @@
               class="library-card"
               class:library-card-busy={onlineBusy === s.id}
               on:click={() => downloadOnlineSet(s)}
-              on:keypress={(e) => e.key === 'Enter' && downloadOnlineSet(s)}
+              on:keypress={(e) => e.key === 'Enter' && e.target === e.currentTarget && downloadOnlineSet(s)}
               role="button"
               tabindex="0"
             >
@@ -5804,7 +5807,7 @@
               <button
                 class="btn btn-ghost btn-sm panel-layout-btn"
                 class:aan={indelingOpen}
-                on:click={() => indelingOpen = !indelingOpen}
+                on:click={(e) => { indelingLinks = e.currentTarget.getBoundingClientRect().left < 260; indelingOpen = !indelingOpen; }}
                 title={$t('toolbar.layout_menu_title')}
                 aria-expanded={indelingOpen}
                 aria-haspopup="menu"
@@ -5816,7 +5819,7 @@
                 {$t('toolbar.layout_menu')}
               </button>
               {#if indelingOpen}
-                <div class="indeling-menu" role="menu">
+                <div class="indeling-menu" class:links={indelingLinks} role="menu">
             <!-- Speelgoedregisters (0.7.98 → 0.8.75): staan nu altijd als
                  virtuele divisie in de werken-rij. De oude werkbalk-knoppen
                  en de "ster"-schakelaar zijn vervallen. -->

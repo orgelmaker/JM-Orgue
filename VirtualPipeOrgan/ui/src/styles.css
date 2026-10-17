@@ -1580,8 +1580,8 @@ input[type="range"]::-webkit-slider-thumb:hover {
   padding: 1rem;
 }
 .online-image-inhoud {
-  background: var(--panel-bg, #1e2229);
-  border: 1px solid var(--border, rgba(255,255,255,0.14));
+  background: var(--bg-panel, #1e2229);
+  border: 1px solid var(--accent-soft-2, rgba(255,255,255,0.14));
   border-radius: 6px;
   padding: 1rem 1.1rem 0.9rem;
   max-width: 900px;
@@ -1589,7 +1589,7 @@ input[type="range"]::-webkit-slider-thumb:hover {
   max-height: 90vh;
   overflow: auto;
   color: var(--text, #e4e6ea);
-  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  box-shadow: var(--shadow-lg, 0 8px 32px rgba(0,0,0,0.5));
 }
 .online-image-kop {
   display: flex;
@@ -1620,8 +1620,8 @@ input[type="range"]::-webkit-slider-thumb:hover {
   gap: 0.6rem;
 }
 .online-image-hit {
-  background: var(--panel-bg-elev, #262a33);
-  border: 1px solid var(--border, rgba(255,255,255,0.12));
+  background: var(--bg-elevated, #262a33);
+  border: 1px solid var(--accent-soft-2, rgba(255,255,255,0.12));
   border-radius: 4px;
   padding: 0.5rem;
   cursor: pointer;
@@ -3448,6 +3448,7 @@ input[type="range"]::-webkit-slider-thumb:hover {
   border: 1px solid var(--accent-soft); border-radius: 8px;
   box-shadow: 0 8px 24px rgba(0,0,0,0.35);
 }
+.indeling-menu.links { right: auto; left: 0; }
 .indeling-menu .panel-layout-btn { width: 100%; justify-content: flex-start; }
 .indeling-menu .stop-size-control { justify-content: flex-start; padding: 0.15rem 0.3rem; }
 
