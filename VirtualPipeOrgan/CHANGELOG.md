@@ -51,12 +51,20 @@ versies volgen [Semantic Versioning](https://semver.org/).
   Tot nu toe klonken alle ooit-gekoppelde noten door tot je ze losliet.
 - Wie een oude "Melodie Hoofdwerk" (naar zichzelf) had bijgeschakeld,
   vinkt in Routing → Koppels erbij het nieuwe paar aan.
+- De NoteOn/NoteOff-telling per pijp blijft ook in balans bij dezelfde
+  toets op twee kanalen van één klavier, een dubbele NoteOff van de
+  controller, een NoteOff na een paniekstop, en een binnenstem die wordt
+  losgelaten terwijl de andere hand diezelfde noot direct speelt.
 
 ### T.A. (Tongwerken Af) werkt direct
 - T.A. deed pas iets bij de volgende aanslag. Aanzetten laat nu de
   klinkende tongwerken van die divisie meteen los; uitzetten laat de
   getrokken tongwerken weer klinken op de ingedrukte toetsen — direct en
   via de actieve koppels.
+- Een tongwerk dat onder T.A. wordt getrokken klonk via een koppel vanaf
+  een ander klavier tóch; nu via geen enkele route. Een crescendotrap die
+  T.A. uitzet en tegelijk een tongwerk bijtrekt, start dat tongwerk één
+  keer (was twee keer: hanger bij loslaten).
 
 ### Extra koppel meteen zichtbaar
 - Een koppel die je onder Routing → Koppels erbij aanvinkt, verschijnt nu

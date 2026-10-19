@@ -961,6 +961,24 @@ pub(crate) fn markeer_registerhelften(stops: &mut [crate::commands::StopDto], is
     }
 }
 
+/// Toetsen van het bronklavier die via een koppelroute meeklinken (0.9.12):
+/// bij een gewone koppel elke ingedrukte toets (per kanaal, zoals de MIDI-
+/// route ze ook per bericht start en stopt); bij een solo-koppel (melodie/
+/// bas) alleen het uiterste, en per noot één keer — twee kanalen op één
+/// divisie met dezelfde toets zijn één pijp, en de NoteOff-kant stuurt ook
+/// maar één NoteOff voor die noot. Zo blijft de refcount per pijp in balans.
+pub(crate) fn bron_noten_voor_route(gate: &str, held: &[(u8, u8, u8)], src_mapping: Option<&MidiChannelMapping>) -> Vec<(u8, u8)> {
+    let op_bron: Vec<(u8, u8)> = held.iter()
+        .filter(|&&(ch, n, _)| src_mapping.map_or(false, |m| m.accepts(ch, n)))
+        .map(|&(_, n, v)| (n, v))
+        .collect();
+    match gate {
+        "melody" => op_bron.iter().copied().max_by_key(|&(n, _)| n).into_iter().collect(),
+        "bass" => op_bron.iter().copied().min_by_key(|&(n, _)| n).into_iter().collect(),
+        _ => op_bron,
+    }
+}
+
 /// Zwelstand 0..1 uit een ruwe CC-waarde en het ingestelde bereik (min/max
 /// worden geordend als vangnet; invert spiegelt). Eén implementatie voor de
 /// MIDI-thread, het herstel na herlaad en de tests.
@@ -3267,8 +3285,14 @@ impl AppState {
                     // Met de nieuwe lijst kreeg een register dat samen met
                     // zijn koppel bijkwam dezelfde pijp twee keer (refcount 2,
                     // één NoteOff bij loslaten → hanger).
+                    // T.A. telt hier als aan zodra hij in de oude óf de nieuwe
+                    // lijst staat (0.9.12): een tongwerk dat bijkomt terwijl
+                    // T.A. in dezelfde trap wegvalt, startte anders hier én in
+                    // stap 3 van de koppelwissel (refcount 2 → hanger). Die
+                    // stap start het nu precies één keer.
+                    let ta_unie: Vec<String> = couplers_before.iter().chain(couplers.iter()).cloned().collect();
                     for added_id in to_add.iter().filter(|s| !is_coupler(s)) {
-                        Self::sync_stop_voices_inner(o, &tx, &mappings, &couplers_before, &couplers, &held, added_id, true);
+                        Self::sync_stop_voices_inner(o, &tx, &mappings, &couplers_before, &ta_unie, &held, added_id, true);
                     }
                     Self::sync_coupler_voices_inner(o, &tx, &mappings, &held, &couplers_before, &couplers);
                 }
@@ -3821,8 +3845,10 @@ impl AppState {
                             if route.gate_type == "melody" || route.gate_type == "bass" {
                                 let held = held_notes.read();
                                 let src_m = mappings.iter().find(|m| m.division == route.source_division);
+                                // Dezelfde noot op een ander kanaal van dit klavier telt
+                                // als uiterste: één pijp, één NoteOn.
                                 let anderen = held.iter()
-                                    .filter(|&&(ch, n, _)| n != note && src_m.map_or(false, |m| m.accepts(ch, n)))
+                                    .filter(|&&(ch, n, _)| !(ch == channel && n == note) && src_m.map_or(false, |m| m.accepts(ch, n)))
                                     .map(|&(_, n, _)| n);
                                 let melodie = route.gate_type == "melody";
                                 let uiterste = if melodie { anderen.max() } else { anderen.min() };
@@ -3882,11 +3908,15 @@ impl AppState {
                 }
             }
             MidiMessage::NoteOff { channel, note, .. } => {
-                // Remove from held notes
-                {
+                // Remove from held notes. Onthoud of de toets ingedrukt stónd: een
+                // dubbele NoteOff (sommige controllers) of een NoteOff na paniek()
+                // mag bij een solo-koppel geen overname starten.
+                let was_held = {
                     let mut held = held_notes.write();
+                    let was = held.iter().any(|&(ch, n, _)| ch == channel && n == note);
                     held.retain(|&(ch, n, _)| !(ch == channel && n == note));
-                }
+                    was
+                };
 
                 let organ = loaded_organ_info.read();
                 let definition = organ_definition.read();
@@ -3968,6 +3998,31 @@ impl AppState {
                             let src_note = src_mapping.map_or(note, |m| m.speelnoot(note));
                             let coupled_note = (src_note as i32 + route.pitch_offset).clamp(0, 127) as u8;
                             if let Some(dest_div) = o.divisions.iter().find(|d| d.name == route.destination_division) {
+                                // Solo-koppel (melodie/bas, 0.9.12): alleen de solo-noot heeft
+                                // een openstaande NoteOn. Een binnenstem loslaten stuurt dus
+                                // géén NoteOff (die zou een direct gespeelde noot op de
+                                // doeldivisie wegtrekken), en een toets die niet ingedrukt
+                                // stond (dubbele NoteOff, na paniek) ook niet. Dezelfde noot
+                                // op een ander kanaal houdt de solo vast (>= / <=). Was dit
+                                // wél de solo-noot, dan neemt het volgende uiterste het over —
+                                // zoals een echte melodiekoppel de bovenstem blijft volgen.
+                                let solo = route.gate_type == "melody" || route.gate_type == "bass";
+                                let melodie = route.gate_type == "melody";
+                                let (loslaten, volgende) = if solo {
+                                    let held = held_notes.read();
+                                    let op_bron = |ch: u8, n: u8| src_mapping.map_or(false, |m| m.accepts(ch, n));
+                                    let nog_uiterste = held.iter().any(|&(ch, n, _)|
+                                        op_bron(ch, n) && if melodie { n >= note } else { n <= note });
+                                    let volgende = if melodie {
+                                        held.iter().filter(|&&(ch, n, _)| op_bron(ch, n) && n < note).max_by_key(|&&(_, n, _)| n)
+                                    } else {
+                                        held.iter().filter(|&&(ch, n, _)| op_bron(ch, n) && n > note).min_by_key(|&&(_, n, _)| n)
+                                    }.map(|&(_, n, v)| (n, v));
+                                    (was_held && !nog_uiterste, volgende)
+                                } else {
+                                    (true, None)
+                                };
+                                if !loslaten { continue; }
                                 for stop in &dest_div.stops {
                                     let t = coupled_note as u32;
                                     if let Some((pipe_num, verschuiving)) = pijp_voor_register(t, stop) {
@@ -3978,36 +4033,21 @@ impl AppState {
                                         });
                                     }
                                 }
-                                // Melodie-/baskoppel (0.9.12): was dit de solo-toets, dan
-                                // neemt het volgende uiterste van het bronklavier het over —
-                                // zoals een echte melodiekoppel de bovenstem blijft volgen.
-                                if route.gate_type == "melody" || route.gate_type == "bass" {
-                                    let melodie = route.gate_type == "melody";
-                                    let held = held_notes.read();
-                                    let op_bron = |ch: u8, n: u8| src_mapping.map_or(false, |m| m.accepts(ch, n));
-                                    let was_uiterste = !held.iter().any(|&(ch, n, _)|
-                                        op_bron(ch, n) && if melodie { n > note } else { n < note });
-                                    let volgende = if melodie {
-                                        held.iter().filter(|&&(ch, n, _)| op_bron(ch, n) && n < note).max_by_key(|&&(_, n, _)| n)
-                                    } else {
-                                        held.iter().filter(|&&(ch, n, _)| op_bron(ch, n) && n > note).min_by_key(|&&(_, n, _)| n)
-                                    };
-                                    if let (true, Some(&(_, nn, vel))) = (was_uiterste, volgende) {
-                                        let n_note = src_mapping.map_or(nn, |m| m.speelnoot(nn));
-                                        let tn = (n_note as i32 + route.pitch_offset).clamp(0, 127) as u32;
-                                        let dest_ta = ta_divisions.contains(&dest_div.name);
-                                        for stop in &dest_div.stops {
-                                            if !stops.contains(&stop.id) { continue; }
-                                            if dest_ta && stop.is_reed { continue; }
-                                            if let Some((pipe_num, verschuiving)) = pijp_voor_register(tn, stop) {
-                                                rt_send(&cmd_tx, AudioCommand::NoteOn {
-                                                    stop_id: stop.internal_stop_id,
-                                                    pipe_num,
-                                                    midi_note: tn as u8,
-                                                    velocity: vel as f32 / 127.0,
-                                                    verschuiving,
-                                                });
-                                            }
+                                if let Some((nn, vel)) = volgende {
+                                    let n_note = src_mapping.map_or(nn, |m| m.speelnoot(nn));
+                                    let tn = (n_note as i32 + route.pitch_offset).clamp(0, 127) as u32;
+                                    let dest_ta = ta_divisions.contains(&dest_div.name);
+                                    for stop in &dest_div.stops {
+                                        if !stops.contains(&stop.id) { continue; }
+                                        if dest_ta && stop.is_reed { continue; }
+                                        if let Some((pipe_num, verschuiving)) = pijp_voor_register(tn, stop) {
+                                            rt_send(&cmd_tx, AudioCommand::NoteOn {
+                                                stop_id: stop.internal_stop_id,
+                                                pipe_num,
+                                                midi_note: tn as u8,
+                                                velocity: vel as f32 / 127.0,
+                                                verschuiving,
+                                            });
                                         }
                                     }
                                 }
@@ -4910,6 +4950,16 @@ impl AppState {
 
         if held.is_empty() { return; }
 
+        // T.A. (Tongwerken Af) actief op deze divisie? Dan klinkt een tongwerk
+        // via geen enkele route — ook niet via een koppel. Tot 0.9.12 gold de
+        // regel alleen voor de directe route: een onder T.A. getrokken tongwerk
+        // klonk via het pedaalkoppel tóch, en startte bij T.A.-uit nog eens
+        // (refcount 2 → hanger).
+        let ta_active = o.couplers.as_ref().map_or(false, |cl| cl.iter().any(|c| {
+            c.coupler_type == "ta" && ta_couplers.contains(&c.id) && c.source_division == div_name
+        }));
+        if ta_active && stop.is_reed { return; }
+
         let send_note_on = |note: u8, vel: u8| {
             let t = note as u32;
             if let Some((pipe_num, verschuiving)) = pijp_voor_register(t, stop) {
@@ -4923,13 +4973,8 @@ impl AppState {
             }
         };
 
-        // T.A. (Tongwerken Af) actief op deze divisie? Dan geen tongwerken starten.
-        let ta_active = o.couplers.as_ref().map_or(false, |cl| cl.iter().any(|c| {
-            c.coupler_type == "ta" && ta_couplers.contains(&c.id) && c.source_division == div_name
-        }));
-
         // 1) Directe route: ingedrukte toetsen op het eigen klavier van het register.
-        if !(ta_active && stop.is_reed) {
+        {
             let mapping = mappings.iter().find(|m| m.division == div_name);
             for &(ch, note, vel) in held {
                 let accepts = mapping.map_or(false, |m| m.accepts(ch, note));
@@ -4943,21 +4988,12 @@ impl AppState {
         // 2) Koppel-routes: actieve koppels met de divisie van dit register als
         // bestemming spelen hun bronklavier-toetsen ook door dit register —
         // transitief uitgevouwen (Pedaal→HW + HW→NW telt ook als Pedaal→NW).
+        // Solo-koppel (melodie/bas): alleen het uiterste, per noot één keer.
         if let Some(cl) = o.couplers.as_ref() {
             for route in Self::expand_coupler_routes(cl, active_couplers) {
                 if route.destination_division != div_name { continue; }
                 let src_mapping = mappings.iter().find(|m| m.division == route.source_division);
-                let src_notes: Vec<(u8, u8)> = held.iter()
-                    .filter(|&&(ch, n, _)| src_mapping.map_or(false, |m| m.accepts(ch, n)))
-                    .map(|&(_, n, v)| (n, v))
-                    .collect();
-                for &(note, vel) in &src_notes {
-                    // Melody/bass-poort (eerste schakel): alleen de hoogste
-                    // resp. laagste toets van het bronklavier.
-                    if route.gate_type == "melody"
-                        && src_notes.iter().map(|&(n, _)| n).max() != Some(note) { continue; }
-                    if route.gate_type == "bass"
-                        && src_notes.iter().map(|&(n, _)| n).min() != Some(note) { continue; }
+                for (note, vel) in bron_noten_voor_route(&route.gate_type, held, src_mapping) {
                     let src_note = src_mapping.map_or(note, |m| m.speelnoot(note));
                     let coupled = (src_note as i32 + route.pitch_offset).clamp(0, 127) as u8;
                     send_note_on(coupled, vel);
@@ -4998,13 +5034,13 @@ impl AppState {
         let old_keys: std::collections::HashSet<_> = old_routes.iter().map(route_key).collect();
         let new_keys: std::collections::HashSet<_> = new_routes.iter().map(route_key).collect();
 
-        // 1) Weggevallen routes → NoteOff (geen melody/bass-filter: de gekoppelde
-        //    noot kan klinken terwijl hij inmiddels niet meer de hoogste/laagste is).
+        // 1) Weggevallen routes → NoteOff. Bij een solo-koppel alleen de solo-
+        //    noot (de enige met een openstaande NoteOn; een NoteOff op een
+        //    binnenstem zou een direct gespeelde noot wegtrekken).
         for route in old_routes.iter().filter(|r| !new_keys.contains(&route_key(r))) {
             let src_mapping = mappings.iter().find(|m| m.division == route.source_division);
             let Some(dest_div) = o.divisions.iter().find(|d| d.name == route.destination_division) else { continue; };
-            for &(ch, note, _v) in held {
-                if !src_mapping.map_or(false, |m| m.accepts(ch, note)) { continue; }
+            for (note, _v) in bron_noten_voor_route(&route.gate_type, held, src_mapping) {
                 let src_note = src_mapping.map_or(note, |m| m.speelnoot(note));
                 let t = (src_note as i32 + route.pitch_offset).clamp(0, 127) as u32;
                 for stop in &dest_div.stops {
@@ -5023,20 +5059,13 @@ impl AppState {
         //    en T.A.-regel, zoals sync_stop_voices_inner).
         for route in new_routes.iter().filter(|r| !old_keys.contains(&route_key(r))) {
             let src_mapping = mappings.iter().find(|m| m.division == route.source_division);
-            let src_notes: Vec<(u8, u8)> = held.iter()
-                .filter(|&&(ch, n, _)| src_mapping.map_or(false, |m| m.accepts(ch, n)))
-                .map(|&(_, n, v)| (n, v))
-                .collect();
+            let src_notes = bron_noten_voor_route(&route.gate_type, held, src_mapping);
             if src_notes.is_empty() { continue; }
             let Some(dest_div) = o.divisions.iter().find(|d| d.name == route.destination_division) else { continue; };
             let ta_active = coupler_list.iter().any(|c| {
                 c.coupler_type == "ta" && new_couplers.contains(&c.id) && c.source_division == dest_div.name
             });
             for &(note, vel) in &src_notes {
-                if route.gate_type == "melody"
-                    && src_notes.iter().map(|&(n, _)| n).max() != Some(note) { continue; }
-                if route.gate_type == "bass"
-                    && src_notes.iter().map(|&(n, _)| n).min() != Some(note) { continue; }
                 let src_note = src_mapping.map_or(note, |m| m.speelnoot(note));
                 let t = (src_note as i32 + route.pitch_offset).clamp(0, 127) as u32;
                 for stop in dest_div.stops.iter().filter(|s| s.drawn) {
@@ -6027,6 +6056,45 @@ mod crescendo_tests {
         // Zonder ingedrukte toetsen gebeurt er niets.
         AppState::sync_coupler_voices_inner(&o, &tx, &mappings, &[], &zonder, &met);
         assert_eq!(rx.try_iter().count(), 0);
+    }
+
+    /// 0.9.12: een tongwerk dat onder T.A. wordt getrokken klinkt via géén
+    /// route — ook niet via het pedaalkoppel. Bij T.A.-uit start het precies
+    /// één keer (direct + koppel), zodat het pedaal-loslaten het weer uitzet.
+    #[test]
+    fn tongwerk_onder_ta_klinkt_ook_niet_via_koppel() {
+        let mut o = organ_met_koppel();
+        o.divisions[1].stops[0].is_reed = true;
+        o.couplers.as_mut().unwrap().push(CouplerDto {
+            id: "ta1".into(), name: "T.A.".into(), source_division: "Hoofdwerk".into(),
+            destination_division: "Hoofdwerk".into(), active: false, display_in_division: "Hoofdwerk".into(),
+            midi_action_code: 0, coupler_type: "ta".into(), pitch_offset: 0, speciaal: false,
+        });
+        let (tx, rx) = bounded::<AudioCommand>(64);
+        let mappings = vec![
+            MidiChannelMapping { division: "Pedaal".into(), channel: Some(0), ..Default::default() },
+            MidiChannelMapping { division: "Hoofdwerk".into(), channel: Some(1), ..Default::default() },
+        ];
+        let held = vec![(0u8, 48u8, 100u8)]; // alleen een pedaaltoets
+        let beide = ids(&["k", "ta1"]);
+        let alleen_k = ids(&["k"]);
+        let tel = |rx: &Receiver<AudioCommand>| rx.try_iter().filter(|c| matches!(c, AudioCommand::NoteOn { stop_id: 20, .. })).count();
+        AppState::sync_stop_voices_inner(&o, &tx, &mappings, &beide, &beide, &held, "r", true);
+        assert_eq!(tel(&rx), 0, "onder T.A. ook niet via het koppel");
+        AppState::sync_coupler_voices_inner(&o, &tx, &mappings, &held, &beide, &alleen_k);
+        assert_eq!(tel(&rx), 1, "T.A. uit: precies één keer via het koppel");
+    }
+
+    /// 0.9.12: bronnoten per route — solo-koppel alleen het uiterste en per
+    /// noot één keer (twee kanalen op één klavier met dezelfde toets).
+    #[test]
+    fn bron_noten_solo_een_per_noot() {
+        let m = MidiChannelMapping { division: "Hoofdwerk".into(), channel: None, ..Default::default() };
+        let held = vec![(1u8, 60u8, 100u8), (2u8, 60u8, 90u8), (1u8, 67u8, 80u8)];
+        assert_eq!(bron_noten_voor_route("melody", &held, Some(&m)), vec![(67, 80)]);
+        assert_eq!(bron_noten_voor_route("bass", &held, Some(&m)), vec![(60, 100)]);
+        assert_eq!(bron_noten_voor_route("unison", &held, Some(&m)).len(), 3);
+        assert!(bron_noten_voor_route("melody", &held, None).is_empty());
     }
 
     #[test]
