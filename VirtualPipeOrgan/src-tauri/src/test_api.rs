@@ -344,7 +344,7 @@ fn route_shared(
         (tiny_http::Method::Post, "/master") => handle_master(state, query),
         (tiny_http::Method::Post, p) if p.starts_with("/stops/") && p.ends_with("/toggle") => {
             let stop_id = url_decode(&p["/stops/".len()..p.len() - "/toggle".len()]);
-            crate::commands::toggle_stop_inner(state, &stop_id)
+            crate::commands::toggle_stop_inner(state, &stop_id, true)
                 .map(|active| json!({ "stop_id": stop_id, "active": active }))
                 .map_err(|e| (404u16, e))
         }

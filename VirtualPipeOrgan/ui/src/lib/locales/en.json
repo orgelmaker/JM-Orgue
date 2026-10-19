@@ -26,7 +26,7 @@
     "title": "Organ Library",
     "manual": "Manual",
     "manual_title": "Open the manual (PDF) in your language",
-    "open_organ_file": ".organ",
+    "open_organ_file": "Open organ…",
     "scan_folder": "JM-Rec import",
     "export": "Export",
     "app_settings_button": "App Settings",
@@ -345,7 +345,8 @@
     "nav_routing": "Routing",
     "nav_samplefix": "Sample fix",
     "nav_knoppen": "Learn buttons",
-    "nav_update": "Update and feedback"
+    "nav_update": "Update and feedback",
+    "midi_learn_division": "Learn MIDI channel for this keyboard"
   },
   "perspectives": {
     "keep_loaded": "Keep all positions in memory",
@@ -360,7 +361,8 @@
     "stacked_note": "{n} stops consist of several ranks (e.g. mixtures); those always sound in full.",
     "reload_hint": "The choice of loaded perspectives takes effect after reloading the organ.",
     "reload_now": "Reload organ",
-    "none": "This organ has a single perspective."
+    "none": "This organ has a single perspective.",
+    "mixer_title": "Mixer per position"
   },
   "stops": {
     "tremulant": "Tremulant",

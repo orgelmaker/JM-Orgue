@@ -3523,3 +3523,31 @@ input[type="range"]::-webkit-slider-thumb:hover {
 /* Zelf zoeken naar een orgelfoto (0.8.92) */
 .online-image-zoekbalk { display: flex; gap: 0.4rem; margin: 0.2rem 0 0.6rem; }
 .online-image-zoekbalk input { flex: 1; min-width: 0; padding: 0.35rem 0.5rem; border: 1px solid var(--border, #ccc); border-radius: 6px; background: var(--bg-input, #fff); color: inherit; font: inherit; }
+
+/* Mini-mixer voor perspectieven (0.8.98): compacte popover onder de knop in
+   de werkbalk; sliders per positie. */
+.persp-strook { position: relative; }
+.persp-mixer-knop svg { display: block; }
+.persp-mixer-popover {
+  position: absolute; top: 100%; right: 0; margin-top: 0.3rem;
+  background: var(--bg-panel); border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md); box-shadow: var(--shadow-lg);
+  padding: 0.6rem 0.75rem; z-index: 50; min-width: 240px;
+}
+.persp-mixer-kop { font-size: 0.78rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.4rem; }
+.persp-mixer-rij { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.25rem; font-size: 0.78rem; }
+.persp-mixer-naam { min-width: 4.5rem; }
+.persp-mixer-rij input[type="range"] { flex: 1; }
+.persp-mixer-pct { min-width: 2.6rem; text-align: right; opacity: 0.75; font-variant-numeric: tabular-nums; }
+
+/* MIDI-leren knopje bij de klaviernaam (0.8.98): klein, dezelfde kleur als de
+   koptekst; blauw als het "learning" wacht. */
+.division-name { display: inline-flex; align-items: center; gap: 0.4rem; }
+.division-midi-learn-btn {
+  background: transparent; border: none; padding: 2px 4px; border-radius: 4px;
+  color: var(--text-on-division-badge, var(--text-secondary)); opacity: 0.6;
+  cursor: pointer; display: inline-flex; align-items: center;
+}
+.division-midi-learn-btn:hover:not(:disabled) { opacity: 1; background: rgba(0,0,0,0.06); }
+.division-midi-learn-btn:disabled { opacity: 0.25; cursor: default; }
+.division-midi-learn-btn.learning { color: var(--primary); opacity: 1; }

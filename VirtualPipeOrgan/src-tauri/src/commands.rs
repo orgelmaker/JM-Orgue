@@ -1367,9 +1367,15 @@ fn laad_en_stuur_bijgeluiden(state: &AppState, defs: &[vpo_sampler::grandorgue::
         *vorige = Some(organ_id.to_string());
         zelfde
     };
-    // 0.8.90: de sleutel is dé aan/uit, ook zonder motor-opname → altijd uit
-    // bij een nieuw orgel; alleen een herlaad behoudt de stand.
-    let motor_aan = if herlaad { *state.blower_active.read() } else { false };
+    // 0.8.98: motor standaard AAN bij een nieuw orgel met een blower-opname
+    // (Piotr-feedback: "there is blower switch, but I hear nothing"). Als de
+    // set GEEN blower-opname heeft, blijft de sleutel virtueel en start uit.
+    // Herlaad behoudt de stand van de organist.
+    let motor_aan = if herlaad {
+        *state.blower_active.read()
+    } else {
+        heeft_blower
+    };
     *state.blower_active.write() = motor_aan;
     state.send_audio_command(AudioCommand::SetBlowerActive(motor_aan));
     let n_loops = voices.iter().filter(|v| v.loop_start.is_some() && v.loop_end.is_some()).count();
@@ -1392,7 +1398,7 @@ fn laad_en_stuur_bijgeluiden(state: &AppState, defs: &[vpo_sampler::grandorgue::
 /// gebruikers die liever een duidelijke motor horen.
 #[tauri::command]
 pub fn set_background_gain(state: State<AppState>, gain_lineair: f32) -> Result<(), String> {
-    let g = if gain_lineair.is_finite() { gain_lineair.clamp(0.0, 4.0) } else { 0.3 };
+    let g = if gain_lineair.is_finite() { gain_lineair.clamp(0.0, 4.0) } else { 1.0 };
     *state.background_gain.write() = g;
     state.send_audio_command(AudioCommand::SetBackgroundGain { gain_lineair: g });
     Ok(())
@@ -4156,7 +4162,7 @@ pub fn set_stop(state: State<AppState>, stop_id: String, active: bool) -> Result
 /// Register omschakelen (kern van het Tauri-commando toggle_stop; ook gebruikt
 /// door de test-API en de afstandsbediening). Werkt de DTO-vlag, de drawn-set
 /// en de klinkende stemmen bij.
-pub fn toggle_stop_inner(state: &AppState, stop_id: &str) -> Result<bool, String> {
+pub fn toggle_stop_inner(state: &AppState, stop_id: &str, play_click: bool) -> Result<bool, String> {
     let (drawn, internal_id) = {
         let mut organ = state.loaded_organ_info.write();
         let Some(ref mut o) = *organ else {
@@ -4178,10 +4184,15 @@ pub fn toggle_stop_inner(state: &AppState, stop_id: &str) -> Result<bool, String
 
     // Registermechaniek (0.7.99): klik bij aan of uit. Negeert zichzelf stil
     // wanneer de sampleset geen klik heeft voor deze stop.
-    state.send_audio_command(AudioCommand::PlayStopClick {
-        internal_stop_id: internal_id,
-        is_attack: drawn,
-    });
+    // 0.8.98: play_click=false als de UI de klik al vroeger heeft gespeeld
+    // (play_stop_click_now bij pointerdown), anders klinkt elke registerwissel
+    // dubbel met ~60 ms vertraging.
+    if play_click {
+        state.send_audio_command(AudioCommand::PlayStopClick {
+            internal_stop_id: internal_id,
+            is_attack: drawn,
+        });
+    }
     state.set_stop_drawn(stop_id, drawn);
     // Handmatig omgezet → geen trede-claim meer (zie note_manual_change).
     state.note_manual_change(stop_id);
@@ -4193,8 +4204,8 @@ pub fn toggle_stop_inner(state: &AppState, stop_id: &str) -> Result<bool, String
 }
 
 #[tauri::command]
-pub fn toggle_stop(state: State<AppState>, stop_id: String) -> Result<bool, String> {
-    toggle_stop_inner(&state, &stop_id)
+pub fn toggle_stop(state: State<AppState>, stop_id: String, play_click: Option<bool>) -> Result<bool, String> {
+    toggle_stop_inner(&state, &stop_id, play_click.unwrap_or(true))
 }
 
 /// Speel alvast de registerklik af, zonder op `toggle_stop` te wachten
@@ -9230,7 +9241,7 @@ fn restore_organ_settings(state: &AppState, organ_id: &str) {
 
     // Bijgeluiden (0.7.97): opgeslagen master-volume en motor-stand terug.
     // Wordt daarna meteen naar de audio-engine gestuurd.
-    let bg_gain = settings.background_gain.unwrap_or(0.3).clamp(0.0, 4.0);
+    let bg_gain = settings.background_gain.unwrap_or(1.0).clamp(0.0, 4.0);
     *state.background_gain.write() = bg_gain;
     state.send_audio_command(AudioCommand::SetBackgroundGain { gain_lineair: bg_gain });
     // Eigen volumes voor motor, toetsmechaniek en registerklikken (0.8.94).
@@ -9254,6 +9265,11 @@ fn restore_organ_settings(state: &AppState, organ_id: &str) {
     // indexen 0..=3 (motor/omgeving/effect/trem); leeg of ongeldig valt
     // terug op [0, 1] = front L/R.
     {
+        // 0.8.98 (Piotr-feedback): zonder opgeslagen keuze volgen de bijgeluiden
+        // de kanalen van het eerste klavier — op een surround-opstelling
+        // meestal het hoofdwerk, waar de motor en het omgevingsgeluid thuishoren.
+        let default_bg: Vec<u16> = state.division_output_channels.read()
+            .iter().find(|c| !c.is_empty()).cloned().unwrap_or_else(|| vec![0, 1]);
         let mut live = state.background_channels.write();
         for i in 0..4usize {
             let kept = settings
@@ -9261,7 +9277,7 @@ fn restore_organ_settings(state: &AppState, organ_id: &str) {
                 .get(i)
                 .cloned()
                 .filter(|v| !v.is_empty())
-                .unwrap_or_else(|| vec![0, 1]);
+                .unwrap_or_else(|| default_bg.clone());
             live[i] = kept.clone();
             state.send_audio_command(AudioCommand::SetBackgroundChannels { kind: i as u8, channels: kept });
         }

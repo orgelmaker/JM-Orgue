@@ -24,6 +24,12 @@ pub enum MidiError {
     ConnectionError(String),
 }
 
+/// Herken MMSYSERR_ALLOCATED en vergelijkbare "device bezet"-fouten (0.8.98).
+fn lijkt_bezet(e: &MidiError) -> bool {
+    let s = e.to_string().to_lowercase();
+    s.contains("mmsyserr_allocated") || s.contains("in use") || s.contains("already allocated")
+}
+
 /// Information about a MIDI device
 #[derive(Debug, Clone)]
 pub struct MidiDeviceInfo {
@@ -73,8 +79,37 @@ impl MidiInputManager {
         let port = ports.iter()
             .find(|p| self.midi_in.port_name(p).ok().as_deref() == Some(device_name))
             .ok_or_else(|| MidiError::DeviceNotFound(device_name.to_string()))?;
-        
-        self.connect_port(port.clone())
+        // Bestaande verbindingen eerst sluiten (0.8.98): anders claimt Windows
+        // de poort opnieuw en komt die als MMSYSERR_ALLOCATED terug —
+        // Piotr's melding "could not create Windows MM MIDI input port".
+        if !self.connections.is_empty() {
+            info!("Sluit {} bestaande MIDI-verbinding(en) voor herverbinden", self.connections.len());
+            self.connections.clear();
+            // Windows zelf laat de poort pas na een handvol ms vrij.
+            std::thread::sleep(std::time::Duration::from_millis(80));
+        }
+        self.connect_port_met_retry(port.clone(), device_name)
+    }
+
+    /// `connect_port` met één nette herpoging (0.8.98). MMSYSERR_ALLOCATED (code
+    /// 4 van winmm) betekent dat de poort nog bezet is — soms door onszelf na
+    /// een eerdere sessie, soms door een ander programma. Twee pogingen met
+    /// 150 ms ertussen vangen de eerste af; voor de tweede geven we een
+    /// begrijpelijke melding terug.
+    fn connect_port_met_retry(&mut self, port: MidiInputPort, device_name: &str) -> Result<(), MidiError> {
+        match self.connect_port(port.clone()) {
+            Ok(()) => Ok(()),
+            Err(e) if lijkt_bezet(&e) => {
+                warn!("MIDI-poort bezet, één herpoging na 150 ms: {}", e);
+                std::thread::sleep(std::time::Duration::from_millis(150));
+                self.connect_port(port).map_err(|e2| {
+                    if lijkt_bezet(&e2) { MidiError::ConnectionError(format!(
+                        "'{}' is in gebruik door een ander programma. Sluit dat programma en probeer opnieuw, of herstart Windows.",
+                        device_name)) } else { e2 }
+                })
+            }
+            Err(e) => Err(e),
+        }
     }
     
     /// Connect to a port
@@ -126,9 +161,9 @@ impl MidiInputManager {
 
         for port in ports {
             let name = self.midi_in.port_name(&port).unwrap_or_else(|_| "?".to_string());
-            match self.connect_port(port) {
+            match self.connect_port_met_retry(port, &name) {
                 Ok(()) => connected += 1,
-                Err(e) => warn!("Failed to connect to {}: {}", name, e),
+                Err(e) => warn!("Verbinden met {} mislukt: {}", name, e),
             }
         }
 

@@ -5,6 +5,44 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.8.98] - 2026-10-19
+
+### Dubbele registerklik weg
+- Een sampleset met eigen registerklik-opnamen (schakelnetwerk) liet elke
+  wissel twee keer klinken: eenmaal bij pointerdown en nog eens vanuit de
+  backend. Nu geeft de UI door dat de klik al is gespeeld.
+
+### MIDI-apparaat soms "in gebruik"
+- Bij verbinden met een MIDI-ingang kreeg je soms de melding
+  "MMSYSERR_ALLOCATED" of "could not create Windows MM MIDI input port".
+  De app ruimt nu eerst eventuele oude verbindingen op, doet één
+  herpoging na een paar milliseconden en toont, als het dan nog niet
+  lukt, een nette melding: "'<device>' is in gebruik door een ander
+  programma. Sluit dat programma en probeer opnieuw, of herstart
+  Windows."
+
+### Bijgeluiden standaard aan
+- Motor en omgevingsruis stonden standaard uit bij een nieuw orgel; nu
+  staan ze meteen aan zodra de set een opname heeft. Het totaalvolume
+  begint op 100 % en wordt getoond als percentage. De bijgeluiden volgen
+  standaard de uitgangskanalen van het eerste klavier (hoofdwerk), zodat
+  motor en ruis op dezelfde speakers klinken als het orgel.
+
+### Mini-mixer voor opnameposities
+- Nieuw knopje bij de perspectief-knoppen in de werkbalk. Klik en je
+  krijgt een kleine mixer met een schuif per positie. De bestaande
+  luisterpositie-schuif blijft; alle posities worden nu standaard
+  geladen zodat de schuif direct kan mengen.
+
+### MIDI-kanaal leren vanuit het orgelscherm
+- Naast elke klaviernaam staat een klein klokje; één klik vraagt om de
+  laagste en de hoogste toets, net als in Routing.
+
+### Kleine verbetering
+- Knop onderaan de bibliotheek heet nu "Open orgel…" (in elke taal), zodat
+  duidelijk is dat je er zowel GrandOrgue- als Hauptwerk-definities mee
+  opent.
+
 ## [0.8.97] - 2026-10-19
 
 ### QR-code voor tablet of telefoon

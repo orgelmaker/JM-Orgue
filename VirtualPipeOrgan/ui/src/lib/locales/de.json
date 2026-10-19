@@ -26,7 +26,7 @@
     "title": "Orgel-Bibliothek",
     "manual": "Handbuch",
     "manual_title": "Das Handbuch (PDF) in Ihrer Sprache öffnen",
-    "open_organ_file": ".organ",
+    "open_organ_file": "Orgel öffnen…",
     "scan_folder": "JM-Rec-Import",
     "export": "Exportieren",
     "app_settings_button": "Allgemeine Einstellungen",
@@ -345,7 +345,8 @@
     "nav_routing": "Routing",
     "nav_samplefix": "Sample-Fix",
     "nav_knoppen": "Tasten anlernen",
-    "nav_update": "Update und Feedback"
+    "nav_update": "Update und Feedback",
+    "midi_learn_division": "MIDI-Kanal für dieses Klavier lernen"
   },
   "perspectives": {
     "keep_loaded": "Alle Positionen im Speicher halten",
@@ -360,7 +361,8 @@
     "stacked_note": "{n} Register bestehen aus mehreren Reihen (z. B. Mixturen); diese klingen immer vollständig.",
     "reload_hint": "Die Auswahl der geladenen Perspektiven wirkt nach dem Neuladen der Orgel.",
     "reload_now": "Orgel neu laden",
-    "none": "Diese Orgel hat nur eine Perspektive."
+    "none": "Diese Orgel hat nur eine Perspektive.",
+    "mixer_title": "Mixer pro Position"
   },
   "stops": {
     "tremulant": "Tremulant",

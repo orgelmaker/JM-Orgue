@@ -173,9 +173,9 @@ impl BackgroundEngine {
         Self {
             voices: Vec::new(),
             one_shots: Vec::new(),
-            // Standaard een beetje zacht, zodat de blower niet overheerst
-            // als een organist voor het eerst een set met motor-geluid laadt.
-            global_gain: 0.3,
+            // 0.8.98: standaard 100 % (was 0.3 = -10 dB); gebruikers hoorden de
+            // bijgeluiden anders amper, en de UI toont nu een percentage.
+            global_gain: 1.0,
             blower_active: true,
             motor_gain: 1.0,
             channels_per_kind: [

@@ -309,7 +309,7 @@
   // ---- Console-events: globale acties direct, vensterbeheer via events ----
   async function toggleStop(stopId) {
     try {
-      await invoke('toggle_stop', { stopId });
+      await invoke('toggle_stop', { stopId, playClick: false });
       await pollOrganInfo(true);
     } catch (e) { error = e.toString(); }
   }

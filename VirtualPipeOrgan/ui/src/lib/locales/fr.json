@@ -26,7 +26,7 @@
     "title": "Bibliothèque d'orgues",
     "manual": "Manuel",
     "manual_title": "Ouvrir le manuel (PDF) dans votre langue",
-    "open_organ_file": ".organ",
+    "open_organ_file": "Ouvrir orgue…",
     "scan_folder": "Import JM-Rec",
     "export": "Exporter",
     "app_settings_button": "Paramètres généraux",
@@ -345,7 +345,8 @@
     "nav_routing": "Routage",
     "nav_samplefix": "Correction d’échantillons",
     "nav_knoppen": "Apprendre les boutons",
-    "nav_update": "Mise à jour et retour"
+    "nav_update": "Mise à jour et retour",
+    "midi_learn_division": "Apprendre le canal MIDI pour ce clavier"
   },
   "perspectives": {
     "keep_loaded": "Garder toutes les positions en mémoire",
@@ -360,7 +361,8 @@
     "stacked_note": "{n} jeux sont composés de plusieurs rangs (p. ex. mixtures) ; ils sonnent toujours au complet.",
     "reload_hint": "Le choix des perspectives chargées prend effet après le rechargement de l'orgue.",
     "reload_now": "Recharger l'orgue",
-    "none": "Cet orgue n'a qu'une seule perspective."
+    "none": "Cet orgue n'a qu'une seule perspective.",
+    "mixer_title": "Mélangeur par position"
   },
   "stops": {
     "tremulant": "Trémulant",

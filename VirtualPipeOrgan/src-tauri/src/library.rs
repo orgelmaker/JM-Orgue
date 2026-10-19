@@ -477,7 +477,7 @@ pub struct OrganSettings {
     /// Alle opnameposities in het geheugen houden, ook de uitgeschakelde
     /// (0.7.47). Dan is wisselen tussen posities ogenblikkelijk in plaats van
     /// een herlaad — ten koste van geheugen (ruwweg maal het aantal posities).
-    #[serde(default)]
+    #[serde(default = "default_true")]
     pub load_all_perspectives: bool,
     /// Luisterpositie-schuif (0.7.95): 0..1 lineair over de as van geladen
     /// posities (dry → close → front → rear → diffuse). Bewaard per orgel

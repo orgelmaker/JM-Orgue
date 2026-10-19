@@ -1414,7 +1414,7 @@
 
   async function toggleStop(stopId) {
     try {
-      await invoke('toggle_stop', { stopId });
+      await invoke('toggle_stop', { stopId, playClick: false });
       // Refresh organ info
       organInfo = await invoke('get_organ_info');
     } catch (e) {

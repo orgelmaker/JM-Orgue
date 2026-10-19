@@ -26,7 +26,7 @@
     "title": "Biblioteka organów",
     "manual": "Instrukcja",
     "manual_title": "Otwórz instrukcję (PDF) w swoim języku",
-    "open_organ_file": ".organ",
+    "open_organ_file": "Otwórz organy…",
     "scan_folder": "Import JM-Rec",
     "export": "Eksportuj",
     "app_settings_button": "Ustawienia ogólne",
@@ -345,7 +345,8 @@
     "nav_routing": "Routing",
     "nav_samplefix": "Korekta sampli",
     "nav_knoppen": "Ucz przyciski",
-    "nav_update": "Aktualizacja i opinie"
+    "nav_update": "Aktualizacja i opinie",
+    "midi_learn_division": "Naucz kanału MIDI dla tego klawiatury"
   },
   "perspectives": {
     "keep_loaded": "Trzymaj wszystkie pozycje w pamięci",
@@ -360,7 +361,8 @@
     "stacked_note": "{n} głosów składa się z kilku rzędów (np. mikstury); one zawsze brzmią w całości.",
     "reload_hint": "Wybór wczytanych perspektyw zadziała po ponownym wczytaniu organów.",
     "reload_now": "Wczytaj organy ponownie",
-    "none": "Te organy mają jedną perspektywę."
+    "none": "Te organy mają jedną perspektywę.",
+    "mixer_title": "Mikser pozycji"
   },
   "stops": {
     "tremulant": "Tremulant",

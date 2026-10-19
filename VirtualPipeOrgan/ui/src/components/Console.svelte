@@ -2145,7 +2145,7 @@
     const el = document.getElementById(id);
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
-  let bgGain = 0.3;
+  let bgGain = 1.0;
   let motorAan = true;
   // Eigen volumes (0.8.94): [motor, toetsmechaniek, registerklikken], lineair,
   // bovenop bgGain. Zo kan een luide motoropname zachter dan de toetsklikken.
@@ -2257,6 +2257,8 @@
   }
 
   let perspGainTimer = null;
+  // 0.8.98 (Piotr-feedback): kleine mixer bij de perspectief-knoppen in de werkbalk
+  let perspMixerOpen = false;
   function setPerspectiveGain(name, v) {
     const gainDb = Number(v);
     perspectives = perspectives.map(p => p.name === name ? { ...p, gain_db: gainDb } : p);
@@ -5795,6 +5797,36 @@
                     aria-pressed={p.enabled}
                   >{p.name}</button>
                 {/each}
+                <!-- Mini-mixer (0.8.98): aparte knop opent een popover met de
+                     volumes per perspectief; voorheen moest je naar
+                     Instellingen → Klank. -->
+                <button class="btn btn-ghost btn-sm panel-layout-btn persp-mixer-knop"
+                        class:aan={perspMixerOpen}
+                        on:click={() => perspMixerOpen = !perspMixerOpen}
+                        title={$t('perspectives.mixer_title')}
+                        aria-expanded={perspMixerOpen}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/>
+                    <line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/>
+                    <line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/>
+                    <line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/>
+                  </svg>
+                </button>
+                {#if perspMixerOpen}
+                  <div class="persp-mixer-popover" role="dialog" aria-label={$t('perspectives.mixer_title')}>
+                    <div class="persp-mixer-kop">{$t('perspectives.mixer_title')}</div>
+                    {#each perspectives as p (p.name)}
+                      {@const pct = Math.max(0, Math.min(200, Math.round(100 * Math.pow(10, (p.gain_db || 0) / 20))))}
+                      <label class="persp-mixer-rij">
+                        <span class="persp-mixer-naam">{p.name}</span>
+                        <input type="range" min="0" max="200" step="1" value={pct}
+                               on:input={(e) => setPerspectiveGain(p.name, e.currentTarget.valueAsNumber > 0 ? 20 * Math.log10(e.currentTarget.valueAsNumber / 100) : -60)}
+                               on:dblclick={() => setPerspectiveGain(p.name, 0)} />
+                        <span class="persp-mixer-pct">{pct}%</span>
+                      </label>
+                    {/each}
+                  </div>
+                {/if}
               </div>
             {/if}
             <!-- Motor-knop (0.7.97): aanwezig als de sampleset een blower-opname
@@ -6077,7 +6109,22 @@
               class="division"
               style={mainLayout === 'vertical' ? (divisieStijlen[division.name] || '') : ''}>
               <div class="division-header division-header-compact">
-                <div class="division-name">{division.display_name || division.name}</div>
+                <div class="division-name">
+                  <!-- 0.8.98 (Piotr-feedback): klein MIDI-leren-knopje naast de klaviernaam,
+                       zodat de organist zonder naar Routing te gaan het kanaal kan koppelen. -->
+                  <button type="button" class="division-midi-learn-btn"
+                          class:learning={learningDivision === division.name}
+                          on:click|stopPropagation={() => learnChannel(division.name)}
+                          disabled={!midiConnected || (learningDivision !== null && learningDivision !== division.name)}
+                          title={$t('settings.midi_learn_division')}
+                          aria-label={$t('settings.midi_learn_division')}>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4">
+                      <circle cx="12" cy="12" r="9"/>
+                      <path d="M12 7v5l3 2"/>
+                    </svg>
+                  </button>
+                  <span>{division.display_name || division.name}</span>
+                </div>
                 {#if isSwellEnabled(division.name)}
                   <div class="swell-leds">
                     {#each Array(10) as _, i}
@@ -6721,10 +6768,9 @@
                 <span style="min-width: 5rem;">{$t('background.volume_total')}</span>
                 <input type="range" min="0" max="2" step="0.01" value={bgGain}
                   on:input={(e) => zetBgGain(e.currentTarget.value)}
+                  on:dblclick={() => zetBgGain(1)}
                   style="flex: 1;" />
-                <span style="min-width: 3.5rem; text-align: right; opacity: 0.7;">
-                  {bgGain > 0.001 ? (20 * Math.log10(bgGain)).toFixed(1) + ' dB' : '−∞'}
-                </span>
+                <span style="min-width: 3.5rem; text-align: right; opacity: 0.7;">{Math.round(bgGain * 100)}%</span>
                 <button
                   class="btn btn-ghost btn-sm"
                   class:learning={miscLerenDoel === 'background_gain'}
@@ -6747,7 +6793,7 @@
                         on:input={(e) => zetMechGain(rij.i, e.currentTarget.value)}
                         on:dblclick={() => zetMechGain(rij.i, 1)}
                         style="flex: 1;" />
-                      <span style="min-width: 3.5rem; text-align: right; opacity: 0.7;">{gainDb(mechGains[rij.i])}</span>
+                      <span style="min-width: 3.5rem; text-align: right; opacity: 0.7;">{Math.round(mechGains[rij.i] * 100)}%</span>
                     </label>
                   {/if}
                 {/each}

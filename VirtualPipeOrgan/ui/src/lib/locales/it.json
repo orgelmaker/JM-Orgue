@@ -26,7 +26,7 @@
     "title": "Libreria organi",
     "manual": "Manuale",
     "manual_title": "Apri il manuale (PDF) nella tua lingua",
-    "open_organ_file": ".organ",
+    "open_organ_file": "Apri organo…",
     "scan_folder": "Importa JM-Rec",
     "export": "Esporta",
     "app_settings_button": "Impostazioni generali",
@@ -345,7 +345,8 @@
     "nav_routing": "Instradamento",
     "nav_samplefix": "Correzione campioni",
     "nav_knoppen": "Apprendi pulsanti",
-    "nav_update": "Aggiornamento e feedback"
+    "nav_update": "Aggiornamento e feedback",
+    "midi_learn_division": "Apprendi canale MIDI per questa tastiera"
   },
   "perspectives": {
     "keep_loaded": "Tenere tutte le posizioni in memoria",
@@ -360,7 +361,8 @@
     "stacked_note": "{n} registri sono composti da più rank (ad es. i ripieni); questi suonano sempre per intero.",
     "reload_hint": "La scelta delle prospettive caricate diventa attiva dopo aver ricaricato l'organo.",
     "reload_now": "Ricarica l'organo",
-    "none": "Questo organo ha una sola prospettiva."
+    "none": "Questo organo ha una sola prospettiva.",
+    "mixer_title": "Mixer per posizione"
   },
   "stops": {
     "tremulant": "Tremolo",

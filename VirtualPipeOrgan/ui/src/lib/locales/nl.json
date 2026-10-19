@@ -26,7 +26,7 @@
     "title": "Orgel Bibliotheek",
     "manual": "Handleiding",
     "manual_title": "De handleiding (PDF) in je eigen taal openen",
-    "open_organ_file": ".organ",
+    "open_organ_file": "Open orgel…",
     "scan_folder": "JM-Rec import",
     "export": "Exporteer",
     "app_settings_button": "Algemene Instellingen",
@@ -345,7 +345,8 @@
     "nav_routing": "Routing",
     "nav_samplefix": "Sample fix",
     "nav_knoppen": "Knoppen inleren",
-    "nav_update": "Update en feedback"
+    "nav_update": "Update en feedback",
+    "midi_learn_division": "MIDI-kanaal leren voor dit klavier"
   },
   "perspectives": {
     "keep_loaded": "Alle posities in het geheugen houden",
@@ -360,7 +361,8 @@
     "stacked_note": "{n} registers bestaan uit meerdere ranks (bv. mixturen); die klinken altijd volledig.",
     "reload_hint": "De keuze van geladen perspectieven wordt actief na het opnieuw laden van het orgel.",
     "reload_now": "Orgel opnieuw laden",
-    "none": "Dit orgel heeft één perspectief."
+    "none": "Dit orgel heeft één perspectief.",
+    "mixer_title": "Mixer per positie"
   },
   "stops": {
     "tremulant": "Tremulant",
