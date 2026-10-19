@@ -35,8 +35,9 @@ versies volgen [Semantic Versioning](https://semver.org/).
   geladen zodat de schuif direct kan mengen.
 
 ### MIDI-kanaal leren vanuit het orgelscherm
-- Naast elke klaviernaam staat een klein klokje; één klik vraagt om de
-  laagste en de hoogste toets, net als in Routing.
+- Rechtsklik op een klaviernaam — of raak die 2 seconden aan op een
+  aanraakscherm — vraagt om de laagste en de hoogste toets, net als in
+  Routing. Geen extra knop in beeld.
 
 ### Kleine verbetering
 - Knop onderaan de bibliotheek heet nu "Open orgel…" (in elke taal), zodat
