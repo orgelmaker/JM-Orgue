@@ -89,17 +89,8 @@ fn bevat(n: &str, woorden: &[&str]) -> bool {
 /// Twee helften van één register ("Mixtuur (Bas)" + "Mixtuur (Disc)",
 /// "Cornet D") horen samen: zelfde plek in de walze.
 fn zonder_helft(naam: &str) -> String {
-    let mut woorden: Vec<String> = naam.to_lowercase().split_whitespace().map(|w| w.to_string()).collect();
-    while woorden.len() > 1 {
-        let laatste = woorden.last().unwrap().trim_matches(|c| c == '(' || c == ')' || c == '.').to_string();
-        if matches!(laatste.as_str(), "bas" | "bass" | "basse" | "b" | "disc" | "disk" | "discant" | "diskant"
-            | "desc" | "dessus" | "treble" | "d") {
-            woorden.pop();
-        } else {
-            break;
-        }
-    }
-    woorden.join(" ")
+    // Eén herkenning voor walze én doorlopend klavier (0.9.12).
+    crate::state::naam_zonder_helft(naam).0
 }
 
 #[derive(Debug, Clone)]

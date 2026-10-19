@@ -276,7 +276,7 @@
     "autosave_hint": "Los ajustes se guardan automáticamente en la carpeta del órgano y en la aplicación.",
     "midi_transpose_abbr": "Transp",
     "continuous_keyboard": "Teclado continuo",
-    "continuous_keyboard_title": "Las teclas fuera del ámbito grabado de un registro suenan el tubo más cercano, desplazado a la altura correcta, en lugar de callar. Así un teclado de 61 teclas sigue sonando en un banco de 56 notas — hasta dos octavas fuera del ámbito.",
+    "continuous_keyboard_title": "Las teclas fuera del ámbito grabado de un registro suenan el tubo más cercano, desplazado a la altura correcta, en lugar de callar. Así un teclado de 61 teclas sigue sonando en un banco de 56 notas — hasta dos octavas fuera del ámbito. Las mitades de bajo y tiple de un registro partido no continúan más allá de su punto de división; el tiple sí en el agudo, el bajo sí en el grave.",
     "short_octave": "Octava corta",
     "short_octave_title": "Teclado histórico con la octava grave incompleta: la tecla que parece mi suena do, fa sostenido suena re y sol sostenido suena mi. Allí faltan do sostenido y re sostenido.",
     "short_octave_needs_range": "Aprende primero el ámbito del teclado (o introduce la nota más grave): sin la tecla más grave la aplicación no sabe dónde empieza la octava grave.",

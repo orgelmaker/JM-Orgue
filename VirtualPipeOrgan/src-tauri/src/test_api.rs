@@ -1216,10 +1216,7 @@ fn handle_note_on(state: &AppState, note_str: &str, query: &str) -> Result<Value
                 if &stop.id == drawn_id {
                     // Zelfde pijpkeuze als de MIDI-route (doorlopend klavier incl.
                     // verschuiving, 0.8.4); pijpnummers zijn 1-based.
-                    if let Some((pipe_num, verschuiving)) = crate::state::pijp_voor_noot(
-                        note as u32, stop.first_midi_note as u32, stop.last_midi_note as u32,
-                        crate::state::doorlopend_klavier(),
-                    ) {
+                    if let Some((pipe_num, verschuiving)) = crate::state::pijp_voor_register(note as u32, stop) {
                         state.send_audio_command(AudioCommand::NoteOn {
                             stop_id: stop.internal_stop_id,
                             pipe_num,
@@ -1256,10 +1253,7 @@ fn handle_note_off(state: &AppState, note_str: &str, _query: &str) -> Result<Val
         for div in &organ.divisions {
             for stop in &div.stops {
                 if &stop.id == drawn_id {
-                    if let Some((pipe_num, verschuiving)) = crate::state::pijp_voor_noot(
-                        note as u32, stop.first_midi_note as u32, stop.last_midi_note as u32,
-                        crate::state::doorlopend_klavier(),
-                    ) {
+                    if let Some((pipe_num, verschuiving)) = crate::state::pijp_voor_register(note as u32, stop) {
                         state.send_audio_command(AudioCommand::NoteOff {
                             stop_id: stop.internal_stop_id,
                             pipe_num,
@@ -2223,6 +2217,7 @@ mod tests {
             first_midi_note: 36,
             last_midi_note: 96,
             is_reed: false, koren: None, mengwerk: false, wind_voet: 8.0, percussief: false,
+            doorloop_onder: 0, doorloop_boven: 127,
         };
         let coupler = |id: &str, kind: &str, div: &str| CouplerDto {
             id: id.to_string(),

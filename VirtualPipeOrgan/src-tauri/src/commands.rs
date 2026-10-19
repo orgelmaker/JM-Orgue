@@ -229,6 +229,16 @@ pub struct StopDto {
     /// crescendovoorstel (0.7.67).
     #[serde(skip_serializing)]
     pub percussief: bool,
+    /// Doorlopend klavier (0.9.12): laagste toets tot waar dit register ónder
+    /// zijn laagste pijp mag worden doorgetrokken. 0 = vrij; een discanthelft
+    /// krijgt haar eigen eerste toets (daar begint de bashelft). Gezet door
+    /// `state::markeer_registerhelften`; intern.
+    #[serde(skip_serializing)]
+    pub doorloop_onder: u8,
+    /// … en de hoogste toets bóven zijn hoogste pijp. 127 = vrij; een bashelft
+    /// krijgt de toets vlak onder haar discanthelft.
+    #[serde(skip_serializing)]
+    pub doorloop_boven: u8,
 }
 
 /// Division volume info for frontend
@@ -3654,6 +3664,8 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
                     first_midi_note: first_midi,
                     last_midi_note: last_midi,
                     is_reed: is_reed_stop(&stop.name),
+                    doorloop_onder: 0,
+                    doorloop_boven: 127,
                 });
                 stop_action_code = stop_action_code.saturating_add(1);
             }
@@ -3664,6 +3676,9 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
         } else {
             format!("{} ({})", manual.name, roman_numeral(manual.number as usize))
         };
+
+        // Bas-/discanthelften: niet doortrekken over het deelpunt (0.9.12).
+        crate::state::markeer_registerhelften(&mut stops, manual.number == 0);
 
         // Tremulant van deze divisie: een ODF-verwijzing (manual óf windchest)
         // en/of registers met echte trem-opnamen.
@@ -4294,170 +4309,93 @@ pub fn set_drawn_stops_inner(state: &AppState, stop_ids: Vec<String>) -> Result<
     Ok(())
 }
 
-/// Play a note for a specific stop
+/// Play a note for a specific stop (UI-klavier). Dezelfde pijpkeuze als de
+/// MIDI-route (0.9.12): bereik van het register, doorlopend klavier en de
+/// grenzen van bas-/discanthelften — tot nu toe rekende dit op de eerste
+/// toets van het manuaal, waardoor een discanthelft (vanaf c') twee octaven
+/// te hoog of helemaal niet klonk.
 #[tauri::command]
 pub fn play_note(state: State<AppState>, stop_id: String, note: u8, velocity: f32) -> Result<(), String> {
-    // Parse stop_id (format: "manual_stopid")
-    let parts: Vec<&str> = stop_id.split('_').collect();
-    if parts.len() != 2 {
-        return Err(format!("Invalid stop_id format: {}", stop_id));
-    }
-
-    let internal_stop_id: u32 = parts[1].parse()
-        .map_err(|_| format!("Invalid stop ID: {}", parts[1]))?;
-
-    let definition = state.organ_definition.read();
-
-    // Get manual's first MIDI note
-    let manual_first_midi = definition.as_ref()
-        .and_then(|def| def.manuals.iter()
-            .find(|m| m.stop_ids.contains(&internal_stop_id))
-            .map(|m| m.first_accessible_key_midi_note))
-        .unwrap_or(36);
-
-    // Calculate pipe number (1-based)
-    let pipe_num = if note as u32 >= manual_first_midi {
-        (note as u32) - manual_first_midi + 1
-    } else {
-        return Ok(()); // Note below range
+    let organ = state.loaded_organ_info.read();
+    let Some(stop) = organ.as_ref().and_then(|o| o.divisions.iter().flat_map(|d| d.stops.iter()).find(|s| s.id == stop_id)) else {
+        return Err(format!("Onbekend register: {}", stop_id));
     };
-
-    info!("play_note: stop={}, note={}, manual_first_midi={}, pipe_num={}", internal_stop_id, note, manual_first_midi, pipe_num);
-
-    state.send_audio_command(AudioCommand::NoteOn {
-        stop_id: internal_stop_id,
-        pipe_num,
-        midi_note: note,
-        velocity,
-        verschuiving: 0,
-    });
-
-    Ok(())
-}
-
-/// Stop a note for a specific stop
-#[tauri::command]
-pub fn stop_note(state: State<AppState>, stop_id: String, note: u8) -> Result<(), String> {
-    let parts: Vec<&str> = stop_id.split('_').collect();
-    if parts.len() != 2 {
-        return Err(format!("Invalid stop_id format: {}", stop_id));
-    }
-
-    let internal_stop_id: u32 = parts[1].parse()
-        .map_err(|_| format!("Invalid stop ID: {}", parts[1]))?;
-
-    let definition = state.organ_definition.read();
-
-    // Get manual's first MIDI note
-    let manual_first_midi = definition.as_ref()
-        .and_then(|def| def.manuals.iter()
-            .find(|m| m.stop_ids.contains(&internal_stop_id))
-            .map(|m| m.first_accessible_key_midi_note))
-        .unwrap_or(36);
-
-    // Calculate pipe number (1-based)
-    if note as u32 >= manual_first_midi {
-        let pipe_num = (note as u32) - manual_first_midi + 1;
-
-        state.send_audio_command(AudioCommand::NoteOff {
-            stop_id: internal_stop_id,
+    if let Some((pipe_num, verschuiving)) = crate::state::pijp_voor_register(note as u32, stop) {
+        state.send_audio_command(AudioCommand::NoteOn {
+            stop_id: stop.internal_stop_id,
             pipe_num,
-            verschuiving: 0,
+            midi_note: note,
+            velocity,
+            verschuiving,
         });
     }
-
     Ok(())
 }
 
-/// Play a note for all drawn stops
+/// Stop a note for a specific stop (UI-klavier).
+#[tauri::command]
+pub fn stop_note(state: State<AppState>, stop_id: String, note: u8) -> Result<(), String> {
+    let organ = state.loaded_organ_info.read();
+    let Some(stop) = organ.as_ref().and_then(|o| o.divisions.iter().flat_map(|d| d.stops.iter()).find(|s| s.id == stop_id)) else {
+        return Err(format!("Onbekend register: {}", stop_id));
+    };
+    if let Some((pipe_num, verschuiving)) = crate::state::pijp_voor_register(note as u32, stop) {
+        state.send_audio_command(AudioCommand::NoteOff {
+            stop_id: stop.internal_stop_id,
+            pipe_num,
+            verschuiving,
+        });
+    }
+    Ok(())
+}
+
+/// Play a note for all drawn stops (UI-klavier, notatievoorbeeld).
 #[tauri::command]
 pub fn play_note_all_stops(state: State<AppState>, note: u8, velocity: f32, only_division: Option<String>) -> Result<(), String> {
     let organ = state.loaded_organ_info.read();
-    let definition = state.organ_definition.read();
     let drawn_stops = state.drawn_stops.read();
-
     info!("play_note_all_stops: note={}, velocity={}, drawn_stops={:?}", note, velocity, *drawn_stops);
-
-    if let (Some(ref o), Some(ref def)) = (&*organ, &*definition) {
+    if let Some(ref o) = *organ {
         for division in &o.divisions {
             // 0.7.87: alleen de getrokken registers van één divisie (geluid bij invoer).
             if let Some(d) = &only_division { if &division.name != d { continue; } }
             for stop in &division.stops {
-                if drawn_stops.contains(&stop.id) {
-                    // Get stop definition for pipe range info
-                    let stop_def = def.get_stop(stop.internal_stop_id);
-
-                    // Get manual's first MIDI note (usually 36 for manuals, lower for pedals)
-                    let manual_first_midi = def.manuals.iter()
-                        .find(|m| m.stop_ids.contains(&stop.internal_stop_id))
-                        .map(|m| m.first_accessible_key_midi_note)
-                        .unwrap_or(36);
-
-                    // Calculate pipe number (1-based): pipe 1 = first MIDI note of the manual
-                    let pipe_num = if note as u32 >= manual_first_midi {
-                        (note as u32) - manual_first_midi + 1
-                    } else {
-                        continue; // Note is below this stop's range
-                    };
-
-                    // Check if pipe exists
-                    let num_pipes = stop_def.map(|s| s.number_of_pipes).unwrap_or(61);
-                    if pipe_num > num_pipes {
-                        continue; // Note is above this stop's range
-                    }
-
-                    info!("Triggering stop {} (internal_id={}), note={}, manual_first_midi={}, pipe_num={}",
-                          stop.id, stop.internal_stop_id, note, manual_first_midi, pipe_num);
-
+                if !drawn_stops.contains(&stop.id) { continue; }
+                if let Some((pipe_num, verschuiving)) = crate::state::pijp_voor_register(note as u32, stop) {
                     state.send_audio_command(AudioCommand::NoteOn {
                         stop_id: stop.internal_stop_id,
                         pipe_num,
                         midi_note: note,
                         velocity,
-                        verschuiving: 0,
+                        verschuiving,
                     });
                 }
             }
         }
     }
-
     Ok(())
 }
 
-/// Stop a note for all drawn stops
+/// Stop a note for all drawn stops (UI-klavier, notatievoorbeeld).
 #[tauri::command]
 pub fn stop_note_all_stops(state: State<AppState>, note: u8, only_division: Option<String>) -> Result<(), String> {
     let organ = state.loaded_organ_info.read();
-    let definition = state.organ_definition.read();
     let drawn_stops = state.drawn_stops.read();
-
-    if let (Some(ref o), Some(ref def)) = (&*organ, &*definition) {
+    if let Some(ref o) = *organ {
         for division in &o.divisions {
-            // 0.7.87: alleen de getrokken registers van één divisie (geluid bij invoer).
             if let Some(d) = &only_division { if &division.name != d { continue; } }
             for stop in &division.stops {
-                if drawn_stops.contains(&stop.id) {
-                    // Get manual's first MIDI note
-                    let manual_first_midi = def.manuals.iter()
-                        .find(|m| m.stop_ids.contains(&stop.internal_stop_id))
-                        .map(|m| m.first_accessible_key_midi_note)
-                        .unwrap_or(36);
-
-                    // Calculate pipe number (1-based)
-                    if note as u32 >= manual_first_midi {
-                        let pipe_num = (note as u32) - manual_first_midi + 1;
-
-                        state.send_audio_command(AudioCommand::NoteOff {
-                            stop_id: stop.internal_stop_id,
-                            pipe_num,
-                            verschuiving: 0,
-                        });
-                    }
+                if !drawn_stops.contains(&stop.id) { continue; }
+                if let Some((pipe_num, verschuiving)) = crate::state::pijp_voor_register(note as u32, stop) {
+                    state.send_audio_command(AudioCommand::NoteOff {
+                        stop_id: stop.internal_stop_id,
+                        pipe_num,
+                        verschuiving,
+                    });
                 }
             }
         }
     }
-
     Ok(())
 }
 
@@ -8416,23 +8354,30 @@ fn generate_couplers(divisions: &[DivisionDto]) -> Vec<CouplerDto> {
         action_code = action_code.saturating_add(1);
     }
 
-    // Melody couplers: only highest held note coupled (per manual)
-    for &man_idx in &manual_indices {
-        let name = &divisions[man_idx].name;
-        let lower = name.to_lowercase().replace(' ', "_");
-        couplers.push(CouplerDto {
-            id: format!("melody_{}", lower),
-            name: format!("Melodie\n{}", name),
-            source_division: name.clone(),
-            destination_division: name.clone(),
-            active: false,
-            display_in_division: name.clone(),
-            midi_action_code: action_code,
-            coupler_type: "melody".into(),
-            pitch_offset: 0,
-            speciaal: false,
-        });
-        action_code = action_code.saturating_add(1);
+    // Melodiekoppels (solo): de hoogste ingedrukte toets van het ene klavier
+    // klinkt mee op de registers van het andere. Tot 0.9.12 koppelde dit een
+    // klavier aan zichzelf — dat voegde niets toe, die toets klonk daar al.
+    for &src_idx in &manual_indices {
+        for &dest_idx in &manual_indices {
+            if src_idx == dest_idx { continue; }
+            let src_name = &divisions[src_idx].name;
+            let dest_name = &divisions[dest_idx].name;
+            couplers.push(CouplerDto {
+                id: format!("melody_{}_{}",
+                    dest_name.to_lowercase().replace(' ', "_"),
+                    src_name.to_lowercase().replace(' ', "_")),
+                name: format!("Melodie {}\n+\n{}", src_name, dest_name),
+                source_division: src_name.clone(),
+                destination_division: dest_name.clone(),
+                active: false,
+                display_in_division: src_name.clone(),
+                midi_action_code: action_code,
+                coupler_type: "melody".into(),
+                pitch_offset: 0,
+                speciaal: false,
+            });
+            action_code = action_code.saturating_add(1);
+        }
     }
 
     // Bass couplers: only lowest held note coupled (per manual → pedal)
@@ -8815,6 +8760,8 @@ pub fn do_load_samples_from_directory_locked(state: &AppState, directory: &str) 
                 first_midi_note: stop_first_note,
                 last_midi_note: stop_last_note,
                 is_reed: reed,
+                doorloop_onder: 0,
+                doorloop_boven: 127,
             });
             stop_action_code = stop_action_code.saturating_add(1);
         }
@@ -8827,6 +8774,9 @@ pub fn do_load_samples_from_directory_locked(state: &AppState, directory: &str) 
         };
 
         let div_has_trem = stops.iter().any(|s| s.has_tremulant);
+        // Bas-/discanthelften: niet doortrekken over het deelpunt (0.9.12).
+        let pedaal_divisie = { let l = division.name.to_lowercase(); l.contains("pedaal") || l.contains("pedal") };
+        crate::state::markeer_registerhelften(&mut stops, pedaal_divisie);
         divisions.push(DivisionDto {
             name: division.name.clone(),
             display_name,
@@ -11183,6 +11133,7 @@ mod tremulant_kind_tests {
             id: id.to_string(), name: id.to_string(), pitch: "8".to_string(), drawn: false,
             groep: "grond", familie: "principaal", has_tremulant: trem, midi_action_code: 0, internal_stop_id: 1,
             first_midi_note: 36, last_midi_note: 96, is_reed: false, koren: None, mengwerk: false, wind_voet: 8.0, percussief: false,
+            doorloop_onder: 0, doorloop_boven: 127,
         }
     }
 
@@ -11193,6 +11144,30 @@ mod tremulant_kind_tests {
             has_tremulant: kind.is_some() || stop_trem,
             tremulant_kind: kind.map(str::to_string), has_swell: false, is_pedal: false,
         }
+    }
+
+    /// 0.9.12: een melodiekoppel koppelt naar een ÁNDER klavier (solo-koppel);
+    /// een baskoppel van elk manuaal naar het pedaal; T.A. per divisie.
+    #[test]
+    fn melodiekoppels_gaan_naar_een_ander_klavier() {
+        use super::{generate_couplers, CouplerDto};
+        let mut ped = divisie("Pedaal", None, false);
+        ped.is_pedal = true;
+        let divs = vec![ped, divisie("Hoofdwerk", None, false), divisie("Nevenwerk", None, false)];
+        let k = generate_couplers(&divs);
+        let melodie: Vec<&CouplerDto> = k.iter().filter(|c| c.coupler_type == "melody").collect();
+        assert_eq!(melodie.len(), 2);
+        assert!(melodie.iter().all(|c| c.source_division != c.destination_division));
+        assert!(melodie.iter().all(|c| !c.source_division.contains("Pedaal") && !c.destination_division.contains("Pedaal")));
+        assert!(melodie.iter().any(|c| c.id == "melody_nevenwerk_hoofdwerk" && c.source_division == "Hoofdwerk" && c.destination_division == "Nevenwerk"));
+        let bas: Vec<&CouplerDto> = k.iter().filter(|c| c.coupler_type == "bass").collect();
+        assert_eq!(bas.len(), 2);
+        assert!(bas.iter().all(|c| c.destination_division == "Pedaal"));
+        assert_eq!(k.iter().filter(|c| c.coupler_type == "ta").count(), 3);
+        // Actiecodes uniek.
+        let mut codes: Vec<u8> = k.iter().map(|c| c.midi_action_code).collect();
+        codes.sort(); codes.dedup();
+        assert_eq!(codes.len(), k.len());
     }
 
     fn opgeslagen(div: &str, enabled: bool) -> DivisionTremulantSaved {

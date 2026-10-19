@@ -276,7 +276,7 @@
     "autosave_hint": "Settings are saved automatically in the organ folder and in the app.",
     "midi_transpose_abbr": "Transp",
     "continuous_keyboard": "Continuous keyboard",
-    "continuous_keyboard_title": "Keys outside a stop's recorded range play the nearest pipe, shifted to the correct pitch, instead of falling silent. A 61-key keyboard then plays on through a 56-note sample set — up to two octaves beyond the range.",
+    "continuous_keyboard_title": "Keys outside a stop's recorded range play the nearest pipe, shifted to the correct pitch, instead of falling silent. A 61-key keyboard then plays on through a 56-note sample set — up to two octaves beyond the range. Bass and treble halves of a divided stop do not continue across their split point; the treble still does at the top, the bass at the bottom.",
     "short_octave": "Short octave",
     "short_octave_title": "Historic keyboard with an incomplete bottom octave: the key that looks like E sounds C, F# sounds D and G# sounds E. C# and D# are missing there.",
     "short_octave_needs_range": "Learn the key range first (or fill in the lowest note): without the lowest key the app cannot tell where the bottom octave starts.",

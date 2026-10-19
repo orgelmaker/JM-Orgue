@@ -276,7 +276,7 @@
     "autosave_hint": "Le impostazioni vengono salvate automaticamente nella cartella dell'organo e nell'app.",
     "midi_transpose_abbr": "Trasp",
     "continuous_keyboard": "Tastiera continua",
-    "continuous_keyboard_title": "I tasti fuori dall'estensione registrata di un registro suonano la canna più vicina, trasposta all'altezza giusta, invece di tacere. Così una tastiera di 61 tasti continua a suonare su un set di 56 note — fino a due ottave oltre l'estensione.",
+    "continuous_keyboard_title": "I tasti fuori dall'estensione registrata di un registro suonano la canna più vicina, trasposta all'altezza giusta, invece di tacere. Così una tastiera di 61 tasti continua a suonare su un set di 56 note — fino a due ottave oltre l'estensione. Le metà basso e soprano di un registro spezzato non proseguono oltre il punto di divisione; il soprano continua in alto, il basso in basso.",
     "short_octave": "Ottava corta",
     "short_octave_title": "Tastiera storica con l'ottava grave incompleta: il tasto che sembra mi suona do, fa diesis suona re e sol diesis suona mi. Lì mancano do diesis e re diesis.",
     "short_octave_needs_range": "Impara prima l'estensione della tastiera (o inserisci la nota più grave): senza il tasto più grave l'app non sa dove comincia l'ottava grave.",

@@ -276,7 +276,7 @@
     "autosave_hint": "Instellingen worden automatisch opgeslagen in de orgelmap en in de app.",
     "midi_transpose_abbr": "Transp",
     "continuous_keyboard": "Doorlopend klavier",
-    "continuous_keyboard_title": "Toetsen buiten het opgenomen bereik van een register spelen de dichtstbijzijnde pijp, verschoven naar de juiste toonhoogte, in plaats van te zwijgen. Zo speelt een klavier van 61 toetsen door op een sampleset van 56 tonen — tot twee octaven buiten het bereik.",
+    "continuous_keyboard_title": "Toetsen buiten het opgenomen bereik van een register spelen de dichtstbijzijnde pijp, verschoven naar de juiste toonhoogte, in plaats van te zwijgen. Zo speelt een klavier van 61 toetsen door op een sampleset van 56 tonen — tot twee octaven buiten het bereik. Bas- en discanthelften van een gedeeld register lopen niet door over hun deelpunt; de discant wel bovenin, de bas wel onderin.",
     "short_octave": "Kort octaaf",
     "short_octave_title": "Historische klaviatuur met een onvolledige onderste octaaf: de toets die eruitziet als E klinkt als C, Fis als D en Gis als E. Cis en Dis ontbreken daar.",
     "short_octave_needs_range": "Leer eerst het toetsbereik in (of vul de laagste noot in): zonder laagste toets weet de app niet waar de onderste octaaf begint.",

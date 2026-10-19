@@ -276,7 +276,7 @@
     "autosave_hint": "Les paramètres sont enregistrés automatiquement dans le dossier de l'orgue et dans l'application.",
     "midi_transpose_abbr": "Transp",
     "continuous_keyboard": "Clavier continu",
-    "continuous_keyboard_title": "Les touches hors de l'étendue enregistrée d'un jeu font sonner le tuyau le plus proche, transposé à la bonne hauteur, au lieu de rester muettes. Un clavier de 61 touches joue ainsi sur une banque de 56 notes — jusqu'à deux octaves au-delà de l'étendue.",
+    "continuous_keyboard_title": "Les touches hors de l'étendue enregistrée d'un jeu font sonner le tuyau le plus proche, transposé à la bonne hauteur, au lieu de rester muettes. Un clavier de 61 touches joue ainsi sur une banque de 56 notes — jusqu'à deux octaves au-delà de l'étendue. Les moitiés basse et dessus d’un jeu coupé ne se prolongent pas au-delà de leur point de coupure ; le dessus continue dans l’aigu, la basse dans le grave.",
     "short_octave": "Octave courte",
     "short_octave_title": "Clavier historique à octave grave incomplète : la touche qui ressemble à mi sonne do, fa dièse sonne ré et sol dièse sonne mi. Do dièse et ré dièse y manquent.",
     "short_octave_needs_range": "Apprenez d'abord l'étendue du clavier (ou saisissez la note la plus grave) : sans touche la plus grave, l'application ne sait pas où commence l'octave grave.",

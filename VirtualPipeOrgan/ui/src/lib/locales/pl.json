@@ -276,7 +276,7 @@
     "autosave_hint": "Ustawienia są zapisywane automatycznie w folderze organów i w programie.",
     "midi_transpose_abbr": "Transp",
     "continuous_keyboard": "Ciągła klawiatura",
-    "continuous_keyboard_title": "Klawisze poza nagraną skalą głosu grają najbliższą piszczałkę, przesuniętą na właściwą wysokość, zamiast milczeć. Dzięki temu klawiatura o 61 klawiszach gra dalej na zestawie 56 dźwięków — do dwóch oktaw poza skalą.",
+    "continuous_keyboard_title": "Klawisze poza nagraną skalą głosu grają najbliższą piszczałkę, przesuniętą na właściwą wysokość, zamiast milczeć. Dzięki temu klawiatura o 61 klawiszach gra dalej na zestawie 56 dźwięków — do dwóch oktaw poza skalą. Połówki basowa i dyszkantowa rejestru dzielonego nie są rozszerzane poza punkt podziału; dyszkant nadal u góry, bas u dołu.",
     "short_octave": "Krótka oktawa",
     "short_octave_title": "Historyczna klawiatura z niepełną najniższą oktawą: klawisz wyglądający jak E brzmi jako C, Fis jako D, a Gis jako E. Cis i Dis tam nie występują.",
     "short_octave_needs_range": "Najpierw naucz zakresu klawiatury (lub wpisz najniższy dźwięk): bez najniższego klawisza aplikacja nie wie, gdzie zaczyna się najniższa oktawa.",

@@ -5,6 +5,70 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.9.12] - 2026-10-19
+
+### Doorlopend klavier stopt op het deelpunt van bas en discant
+- Een gedeeld register (Trompet 8 B/D, Cornet D, Mixtuur Bas …) bestaat
+  uit twee halve registers die elkaar op het deelpunt raken. Het
+  doorlopende klavier trok tot nu toe élk register aan beide kanten
+  door — dus ook de bashelft bóven het deelpunt en de discanthelft
+  erónder: een discant-Cornet klonk opeens in de bas, en met beide
+  helften getrokken klonken rond het deelpunt twee pijpen tegelijk. Nu
+  loopt een bashelft niet naar boven door en een discanthelft niet naar
+  beneden; aan de uiteinden van het klavier (discant bovenin, bas
+  onderin) wél, net als een heel register.
+- Herkenning op de naam (Bas/Disc/B/D/dessus/treble/Diskant …, dezelfde
+  lijst als de crescendo-walze) én op het paar: twee registers met
+  dezelfde naam en voetmaat waarvan de een boven de ander begint. Een
+  zwevende stem die pas bij g begint loopt zoals sinds 0.8.4 aan beide
+  kanten door.
+- Eén pijpkeuze voor de hele notenroute (`pijp_voor_register`): NoteOn,
+  NoteOff, koppels, registratieherstel en test-API komen altijd op
+  dezelfde pijp uit. Tooltip van de instelling uitgebreid in zeven talen.
+
+- Ook zonder aanduiding: een register dat op of boven c' begint terwijl
+  de rest van het klavier lager begint (Cornet, Sesquialter — in vier van
+  de tien geteste sets zonder "D") is een discant; een register dat laag
+  begint en rond b/c' eindigt een bas. Het pedaal blijft erbuiten: "Sub
+  Bass" en "Principal Bass" zijn hele registers. Zit er een gat tussen de
+  helften, dan vult de bashelft dat gat. Herkent ook ß, Italiaans en
+  Spaans (Bassi/Soprani, Bajos/Tiples, MI/MD) en Frans vooraan ("Basse
+  de Trompette", "Dessus de Cornet").
+- Het UI-klavier (computertoetsen) en het notatievoorbeeld kiezen de pijp
+  nu via dezelfde route als MIDI. Tot nu toe rekenden ze vanaf de eerste
+  toets van het manuaal, waardoor een discanthelft vanaf c' twee octaven
+  te hoog of helemaal niet klonk.
+
+### Melodie- en baskoppel als echte solo-koppel
+- De gegenereerde melodiekoppels koppelden een klavier aan zichzelf en
+  deden dus niets hoorbaars. Nu koppelt "Melodie Hoofdwerk + Nevenwerk"
+  de hoogste ingedrukte toets van het Hoofdwerk naar de registers van
+  het Nevenwerk (per klavierpaar). De baskoppel speelt de laagste toets
+  van een manuaal op het pedaal.
+- Solo-gedrag: wordt een hogere toets ingedrukt, dan zwijgt de vorige
+  solo-noot op het gekoppelde klavier; laat je de hoogste los, dan neemt
+  de volgende toets het over. Voor de baskoppel hetzelfde met de laagste.
+  Tot nu toe klonken alle ooit-gekoppelde noten door tot je ze losliet.
+- Wie een oude "Melodie Hoofdwerk" (naar zichzelf) had bijgeschakeld,
+  vinkt in Routing → Koppels erbij het nieuwe paar aan.
+
+### T.A. (Tongwerken Af) werkt direct
+- T.A. deed pas iets bij de volgende aanslag. Aanzetten laat nu de
+  klinkende tongwerken van die divisie meteen los; uitzetten laat de
+  getrokken tongwerken weer klinken op de ingedrukte toetsen — direct en
+  via de actieve koppels.
+
+### Extra koppel meteen zichtbaar
+- Een koppel die je onder Routing → Koppels erbij aanvinkt, verschijnt nu
+  ook meteen op de koppelbalk; tot nu toe moest je hem daarna nog apart
+  zichtbaar maken.
+
+### Tests
+- Veertien nieuwe tests: richting per kant, helft uit de naam (28 namen
+  in zeven talen), deelpunt bij benoemde en onbenoemde paren, gat tussen
+  de helften, bereikregel voor bas en discant, pedaal, zwevende stem,
+  losse discanthelft, melodiekoppels per paar, T.A. live.
+
 ## [0.9.11] - 2026-10-19
 
 ### Tremulantknop op het extra scherm werkt weer

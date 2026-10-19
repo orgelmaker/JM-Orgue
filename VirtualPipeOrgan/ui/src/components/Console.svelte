@@ -2247,6 +2247,15 @@
     try {
       await invoke('set_extra_couplers', { ids });
       await haalExtraKoppels();
+      // Bijgeschakeld = meteen op de koppelbalk (0.9.12): zonder dit stond
+      // zo'n koppel wel in de lijst, maar bleef hij onzichtbaar tot je hem
+      // ook nog onder "koppels zichtbaar" aanzette.
+      if (aan && visibleCouplers[id] !== true) {
+        visibleCouplers[id] = true;
+        visibleCouplers = visibleCouplers;
+        localStorage.setItem(organUiKey('jm-orgue-visible-couplers'), JSON.stringify(visibleCouplers));
+        publishRemoteLayout();
+      }
       dispatch('refreshMidiMappings');
     } catch (e) { console.error('Extra koppel zetten mislukt:', e); }
   }

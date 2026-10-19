@@ -786,25 +786,179 @@ pub(crate) const DOORLOPEND_MAX_VERSCHUIVING: i32 = 24;
 
 /// Pijpnummer (1-based) plus toonverschuiving (halve tonen) voor een
 /// klinkende noot. Binnen het bereik van het register is de verschuiving 0.
-/// Met `uitgebreid` (doorlopend klavier, 0.8.4) krijgt een toets buiten het
-/// bereik de DICHTSTBIJZIJNDE pijp, verschoven naar de echte toonhoogte: de
-/// hoogste pijp iets omhoog, de laagste iets omlaag. Tot 0.8.3 vouwde dit per
-/// octaaf terug, waardoor zo'n toets een octaaf te laag of te hoog klonk.
-/// Verder dan `DOORLOPEND_MAX_VERSCHUIVING` zwijgt de toets.
+/// Buiten het bereik (doorlopend klavier, 0.8.4) krijgt een toets de
+/// DICHTSTBIJZIJNDE pijp, verschoven naar de echte toonhoogte: de hoogste
+/// pijp iets omhoog, de laagste iets omlaag. Tot 0.8.3 vouwde dit per octaaf
+/// terug, waardoor zo'n toets een octaaf te laag of te hoog klonk. Verder dan
+/// `DOORLOPEND_MAX_VERSCHUIVING` zwijgt de toets.
 ///
-/// NoteOn en NoteOff MOETEN hier hetzelfde uitkomen, anders blijft een noot
-/// hangen. Daarom één functie voor alle plekken in de notenroute.
-pub(crate) fn pijp_voor_noot(noot: u32, eerste: u32, laatste: u32, uitgebreid: bool) -> Option<(u32, i8)> {
+/// `onder`/`boven` (0.9.12) begrenzen hoe ver het doorlopend klavier dit
+/// register mag doortrekken: een bashelft niet voorbij haar deelpunt naar
+/// boven, een discanthelft niet eronder — daar klinkt de andere helft al.
+/// Met `onder = eerste` en `boven = laatste` is er geen uitbreiding (de
+/// schakelaar uit); met 0 en 127 loopt het register vrij door zoals tot 0.9.11.
+pub(crate) fn pijp_voor_noot_richting(noot: u32, eerste: u32, laatste: u32, onder: u32, boven: u32) -> Option<(u32, i8)> {
     if laatste < eerste { return None; }
     if noot >= eerste && noot <= laatste { return Some((noot - eerste + 1, 0)); }
-    if !uitgebreid { return None; }
     let (pijp, verschuiving) = if noot < eerste {
+        if noot < onder { return None; }
         (1, noot as i32 - eerste as i32)
     } else {
+        if noot > boven { return None; }
         (laatste - eerste + 1, noot as i32 - laatste as i32)
     };
     if verschuiving.abs() > DOORLOPEND_MAX_VERSCHUIVING { return None; }
     Some((pijp, verschuiving as i8))
+}
+
+/// Testwrapper: één schakelaar voor beide kanten, zoals vóór 0.9.12.
+#[cfg(test)]
+pub(crate) fn pijp_voor_noot(noot: u32, eerste: u32, laatste: u32, uitgebreid: bool) -> Option<(u32, i8)> {
+    if uitgebreid { pijp_voor_noot_richting(noot, eerste, laatste, 0, 127) }
+    else { pijp_voor_noot_richting(noot, eerste, laatste, eerste, laatste) }
+}
+
+/// Pijpkeuze voor een register uit de orgel-DTO: bereik, de stand van het
+/// doorlopende klavier en de grenzen van het register (0.9.12).
+///
+/// NoteOn en NoteOff MOETEN hier hetzelfde uitkomen, anders blijft een noot
+/// hangen. Daarom gaat élke plek in de notenroute hierlangs: NoteOn, NoteOff,
+/// koppels, registratieherstel, het UI-klavier en de test-API.
+#[inline]
+pub(crate) fn pijp_voor_register(noot: u32, stop: &crate::commands::StopDto) -> Option<(u32, i8)> {
+    let (eerste, laatste) = (stop.first_midi_note as u32, stop.last_midi_note as u32);
+    if doorlopend_klavier() {
+        pijp_voor_noot_richting(noot, eerste, laatste, stop.doorloop_onder as u32, stop.doorloop_boven as u32)
+    } else {
+        pijp_voor_noot_richting(noot, eerste, laatste, eerste, laatste)
+    }
+}
+
+/// Welke helft van een gedeeld register een naam aanduidt (0.9.12).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Registerhelft { Bas, Discant }
+
+/// De helft-aanduidingen die samplesets gebruiken, als los woord (kleine
+/// letters, haakjes/punten al weggehaald). Nederlands, Duits (ook ß), Frans,
+/// Engels, Italiaans, Spaans (MI/MD = mano izquierda/derecha), Pools.
+fn helftwoord(w: &str) -> Option<Registerhelft> {
+    match w {
+        "bas" | "bass" | "ba\u{df}" | "basse" | "bassi" | "bajos" | "bajo" | "baixos" | "b" | "mi"
+            => Some(Registerhelft::Bas),
+        "disc" | "disk" | "dis" | "discant" | "diskant" | "dyszkant" | "desc" | "dessus" | "treble"
+        | "soprani" | "soprano" | "tiples" | "tiple" | "d" | "md"
+            => Some(Registerhelft::Discant),
+        _ => None,
+    }
+}
+
+/// Een los voetmaat-woord: "8", "8'", "2/3", "16′". Breuken met spatie komen
+/// als twee woorden en worden woord voor woord herkend.
+fn is_voetmaat(w: &str) -> bool {
+    let kern: String = w.chars().filter(|c| !matches!(c, '\'' | '\u{2032}' | '\u{2019}' | '"' | '\u{2033}')).collect();
+    !kern.is_empty()
+        && kern.chars().any(|c| c.is_ascii_digit())
+        && kern.chars().all(|c| c.is_ascii_digit() || matches!(c, '/' | '.' | ','))
+}
+
+/// Registernaam zonder helft-aanduiding (in kleine letters) plus de helft
+/// zelf: "Trompet (Bas)" → ("trompet", Some(Bas)), "Cornet V D" →
+/// ("cornet v", Some(Discant)), "Prestant" → ("prestant", None).
+///
+/// Achteraan: één of meer helft-woorden, eventueel met een voetmaat erbij
+/// ("Vox humana 8 Bass" en "Vox humana Desc." geven dezelfde basis; "Cornet D
+/// 8" ook). Vooraan (Frans): "Basse de Trompette", "Dessus de Cornet". Staan
+/// er bas- én discantwoorden ("Trompet B D"), dan is het één register over het
+/// hele klavier: geen helft. "Subbas" blijft één woord en dus geen helft;
+/// "B/D" is één woord en dus ook niet. Een voetmaat zonder helft-woord blijft
+/// in de basis staan ("prestant 8" ≠ "prestant 4" — de crescendo-walze
+/// groepeert op dezelfde sleutel).
+pub(crate) fn naam_zonder_helft(naam: &str) -> (String, Option<Registerhelft>) {
+    let trim = |w: &str| w.trim_matches(|c| matches!(c, '(' | ')' | '[' | ']' | '.' | ',' | ';' | ':' | '"' | '\'' | '\u{2019}')).to_string();
+    let mut woorden: Vec<String> = naam.to_lowercase().split_whitespace().map(|w| w.to_string()).collect();
+    let (mut bas, mut discant) = (false, false);
+    loop {
+        if woorden.len() <= 1 { break; }
+        let laatste = trim(woorden.last().unwrap());
+        if let Some(h) = helftwoord(&laatste) {
+            match h { Registerhelft::Bas => bas = true, Registerhelft::Discant => discant = true }
+            woorden.pop();
+            // Voetmaat vlak vóór het helft-woord hoort niet bij de sleutel.
+            while woorden.len() > 1 && is_voetmaat(&trim(woorden.last().unwrap())) { woorden.pop(); }
+            continue;
+        }
+        // Voetmaat áchter een helft-woord ("Cornet D 8"): alleen dan overslaan.
+        if is_voetmaat(&laatste) && woorden.len() >= 3 && helftwoord(&trim(&woorden[woorden.len() - 2])).is_some() {
+            woorden.pop();
+            continue;
+        }
+        break;
+    }
+    if woorden.len() >= 3 && woorden[1] == "de" {
+        match helftwoord(&trim(&woorden[0])) {
+            Some(Registerhelft::Bas) => { bas = true; woorden.drain(0..2); }
+            Some(Registerhelft::Discant) => { discant = true; woorden.drain(0..2); }
+            None => {}
+        }
+    }
+    let helft = match (bas, discant) {
+        (true, false) => Some(Registerhelft::Bas),
+        (false, true) => Some(Registerhelft::Discant),
+        _ => None,
+    };
+    (woorden.join(" "), helft)
+}
+
+/// Zet per register van één divisie tot waar het doorlopende klavier het
+/// onder en boven zijn bereik mag doortrekken (0.9.12). Drie signalen:
+///  * de naam: een bashelft ("… (Bas)", "… B", "Basse de …") loopt niet naar
+///    boven door, een discanthelft ("… (Disc)", "… D", "… dessus") niet naar
+///    beneden — ook zonder de andere helft in de set (een losse "Cornet V D"
+///    hoort in de bas te zwijgen);
+///  * het paar: twee registers met dezelfde naam en voetmaat waarvan het ene
+///    boven het andere begint, zijn elkaars helften — ook zonder aanduiding.
+///    Zit er een gat tussen (bas tot a, discant vanaf c'), dan vult de
+///    bashelft dat gat; de discant blijft bij haar eerste toets;
+///  * het bereik, zonder aanduiding en zonder partner: een register dat op of
+///    boven c' begint terwijl een ander register lager begint, is een discant
+///    (Cornet, Sesquialter — in vier van de tien geteste sets zonder "D");
+///    een register dat laag begint en rond b/c' eindigt terwijl een ander
+///    register hoger doorloopt, is een bas. Dezelfde drempels als de
+///    eigen-set-importer (`custom_organ::detect_bass_treble`).
+/// Het pedaal kent geen gedeelde registers: "Sub Bass", "Principal Bass" zijn
+/// hele registers en blijven vrij doorlopen. Een zwevende stem die pas bij g
+/// begint raakt dit ook niet: die loopt aan beide kanten door (0.8.4).
+pub(crate) fn markeer_registerhelften(stops: &mut [crate::commands::StopDto], is_pedal: bool) {
+    for s in stops.iter_mut() { s.doorloop_onder = 0; s.doorloop_boven = 127; }
+    if is_pedal || stops.is_empty() { return; }
+    let sleutels: Vec<(String, Option<Registerhelft>)> = stops.iter().map(|s| {
+        let (basis, helft) = naam_zonder_helft(&s.name);
+        (format!("{}|{}", basis, s.pitch.trim().to_lowercase()), helft)
+    }).collect();
+    let bereik: Vec<(u8, u8)> = stops.iter().map(|s| (s.first_midi_note, s.last_midi_note)).collect();
+    let laagste_eerste = bereik.iter().map(|b| b.0).min().unwrap_or(0);
+    let hoogste_laatste = bereik.iter().map(|b| b.1).max().unwrap_or(127);
+    for i in 0..stops.len() {
+        let (fi, li) = bereik[i];
+        match sleutels[i].1 {
+            Some(Registerhelft::Bas) => stops[i].doorloop_boven = li,
+            Some(Registerhelft::Discant) => stops[i].doorloop_onder = fi,
+            None => {
+                if fi >= 58 && laagste_eerste < fi { stops[i].doorloop_onder = fi; }
+                if fi < 48 && li <= 62 && hoogste_laatste > li { stops[i].doorloop_boven = li; }
+            }
+        }
+    }
+    for i in 0..stops.len() {
+        for j in 0..stops.len() {
+            if i == j || sleutels[i].0 != sleutels[j].0 { continue; }
+            let ((fi, li), (fj, lj)) = (bereik[i], bereik[j]);
+            if fj > fi && lj > li {
+                stops[i].doorloop_boven = fj.saturating_sub(1).max(li);
+                stops[j].doorloop_onder = fj;
+            }
+        }
+    }
 }
 
 /// Zwelstand 0..1 uit een ruwe CC-waarde en het ingestelde bereik (min/max
@@ -3626,7 +3780,7 @@ impl AppState {
 
                             // Check if the note is within this stop's range
                             let transposed_u32 = transposed_note as u32;
-                            if let Some((pipe_num, verschuiving)) = pijp_voor_noot(transposed_u32, stop_first_midi, stop_last_midi, doorlopend_klavier()) {
+                            if let Some((pipe_num, verschuiving)) = pijp_voor_register(transposed_u32, stop) {
                                 let vel_f = velocity as f32 / 127.0;
 
                                 tracing::trace!("Playing stop={} '{}', note={}, pipe={}, range={}-{}",
@@ -3657,26 +3811,25 @@ impl AppState {
                             .collect();
 
                         for route in Self::expand_coupler_routes(coupler_list, &couplers) {
-                            // Melody coupler: only couple if this is the highest held note on the source division
-                            if route.gate_type == "melody" {
+                            // Melodie-/baskoppel (solo): alleen de hoogste resp. laagste
+                            // ingedrukte toets van het bronklavier koppelt. Is deze toets
+                            // het nieuwe uiterste, dan gaat de gekoppelde stem van het
+                            // vorige uiterste uit (0.9.12) — anders klonken er twee
+                            // solo-noten tegelijk. Bij loslaten neemt het volgende
+                            // uiterste het weer over (zie NoteOff).
+                            let mut vorig_uiterste: Option<u8> = None;
+                            if route.gate_type == "melody" || route.gate_type == "bass" {
                                 let held = held_notes.read();
-                                let src_mapping_m = mappings.iter().find(|m| m.division == route.source_division);
-                                let highest = held.iter()
-                                    .filter(|&&(ch, n, _)| src_mapping_m.map_or(false, |m| m.accepts(ch, n)))
-                                    .map(|&(_, n, _)| n)
-                                    .max();
-                                if highest != Some(note) { continue; }
-                            }
-
-                            // Bass coupler: only couple if this is the lowest held note on the source division
-                            if route.gate_type == "bass" {
-                                let held = held_notes.read();
-                                let src_mapping_b = mappings.iter().find(|m| m.division == route.source_division);
-                                let lowest = held.iter()
-                                    .filter(|&&(ch, n, _)| src_mapping_b.map_or(false, |m| m.accepts(ch, n)))
-                                    .map(|&(_, n, _)| n)
-                                    .min();
-                                if lowest != Some(note) { continue; }
+                                let src_m = mappings.iter().find(|m| m.division == route.source_division);
+                                let anderen = held.iter()
+                                    .filter(|&&(ch, n, _)| n != note && src_m.map_or(false, |m| m.accepts(ch, n)))
+                                    .map(|&(_, n, _)| n);
+                                let melodie = route.gate_type == "melody";
+                                let uiterste = if melodie { anderen.max() } else { anderen.min() };
+                                match uiterste {
+                                    Some(u) if (melodie && u >= note) || (!melodie && u <= note) => continue,
+                                    other => vorig_uiterste = other,
+                                }
                             }
 
                             // Check if source division accepts this MIDI channel
@@ -3693,14 +3846,25 @@ impl AppState {
                             // Play through destination division's drawn stops
                             if let Some(dest_div) = o.divisions.iter().find(|d| d.name == route.destination_division) {
                                 let dest_ta = ta_divisions.contains(&dest_div.name);
+                                // Vorige solo-noot van deze route loslaten (alle registers:
+                                // NoteOff op een stille pijp is onschuldig).
+                                if let Some(u) = vorig_uiterste {
+                                    let u_note = src_mapping.map_or(u, |m| m.speelnoot(u));
+                                    let tu = (u_note as i32 + route.pitch_offset).clamp(0, 127) as u32;
+                                    for stop in &dest_div.stops {
+                                        if let Some((pipe_num, verschuiving)) = pijp_voor_register(tu, stop) {
+                                            rt_send(&cmd_tx, AudioCommand::NoteOff {
+                                                stop_id: stop.internal_stop_id, pipe_num, verschuiving,
+                                            });
+                                        }
+                                    }
+                                }
                                 for stop in &dest_div.stops {
                                     if stops.contains(&stop.id) {
                                         // T.A. op de doeldivisie: geen tongwerken meekoppelen
                                         if dest_ta && stop.is_reed { continue; }
-                                        let s_first = stop.first_midi_note as u32;
-                                        let s_last = stop.last_midi_note as u32;
                                         let t = coupled_note as u32;
-                                        if let Some((pipe_num, verschuiving)) = pijp_voor_noot(t, s_first, s_last, doorlopend_klavier()) {
+                                        if let Some((pipe_num, verschuiving)) = pijp_voor_register(t, stop) {
                                             let vel_f = velocity as f32 / 127.0;
                                             rt_send(&cmd_tx, AudioCommand::NoteOn {
                                                 stop_id: stop.internal_stop_id,
@@ -3768,11 +3932,8 @@ impl AppState {
 
                     for stop in &division.stops {
                         // Send NoteOff regardless of drawn state
-                        let stop_first_midi = stop.first_midi_note as u32;
-                        let stop_last_midi = stop.last_midi_note as u32;
-
                         let transposed_u32 = transposed_note as u32;
-                        if let Some((pipe_num, verschuiving)) = pijp_voor_noot(transposed_u32, stop_first_midi, stop_last_midi, doorlopend_klavier()) {
+                        if let Some((pipe_num, verschuiving)) = pijp_voor_register(transposed_u32, stop) {
 
                             rt_send(&cmd_tx, AudioCommand::NoteOff {
                                 stop_id: stop.internal_stop_id,
@@ -3792,6 +3953,11 @@ impl AppState {
                 let couplers = active_couplers.read();
                 if !couplers.is_empty() {
                     if let Some(ref coupler_list) = o.couplers {
+                        let stops = drawn_stops.read();
+                        let ta_divisions: Vec<String> = coupler_list.iter()
+                            .filter(|c| c.coupler_type == "ta" && couplers.contains(&c.id))
+                            .map(|c| c.source_division.clone())
+                            .collect();
                         for route in Self::expand_coupler_routes(coupler_list, &couplers) {
                             let src_mapping = mappings.iter().find(|m| m.division == route.source_division);
                             let src_accepts = match src_mapping {
@@ -3803,15 +3969,46 @@ impl AppState {
                             let coupled_note = (src_note as i32 + route.pitch_offset).clamp(0, 127) as u8;
                             if let Some(dest_div) = o.divisions.iter().find(|d| d.name == route.destination_division) {
                                 for stop in &dest_div.stops {
-                                    let s_first = stop.first_midi_note as u32;
-                                    let s_last = stop.last_midi_note as u32;
                                     let t = coupled_note as u32;
-                                    if let Some((pipe_num, verschuiving)) = pijp_voor_noot(t, s_first, s_last, doorlopend_klavier()) {
+                                    if let Some((pipe_num, verschuiving)) = pijp_voor_register(t, stop) {
                                         rt_send(&cmd_tx, AudioCommand::NoteOff {
                                             stop_id: stop.internal_stop_id,
                                             pipe_num,
                                             verschuiving,
                                         });
+                                    }
+                                }
+                                // Melodie-/baskoppel (0.9.12): was dit de solo-toets, dan
+                                // neemt het volgende uiterste van het bronklavier het over —
+                                // zoals een echte melodiekoppel de bovenstem blijft volgen.
+                                if route.gate_type == "melody" || route.gate_type == "bass" {
+                                    let melodie = route.gate_type == "melody";
+                                    let held = held_notes.read();
+                                    let op_bron = |ch: u8, n: u8| src_mapping.map_or(false, |m| m.accepts(ch, n));
+                                    let was_uiterste = !held.iter().any(|&(ch, n, _)|
+                                        op_bron(ch, n) && if melodie { n > note } else { n < note });
+                                    let volgende = if melodie {
+                                        held.iter().filter(|&&(ch, n, _)| op_bron(ch, n) && n < note).max_by_key(|&&(_, n, _)| n)
+                                    } else {
+                                        held.iter().filter(|&&(ch, n, _)| op_bron(ch, n) && n > note).min_by_key(|&&(_, n, _)| n)
+                                    };
+                                    if let (true, Some(&(_, nn, vel))) = (was_uiterste, volgende) {
+                                        let n_note = src_mapping.map_or(nn, |m| m.speelnoot(nn));
+                                        let tn = (n_note as i32 + route.pitch_offset).clamp(0, 127) as u32;
+                                        let dest_ta = ta_divisions.contains(&dest_div.name);
+                                        for stop in &dest_div.stops {
+                                            if !stops.contains(&stop.id) { continue; }
+                                            if dest_ta && stop.is_reed { continue; }
+                                            if let Some((pipe_num, verschuiving)) = pijp_voor_register(tn, stop) {
+                                                rt_send(&cmd_tx, AudioCommand::NoteOn {
+                                                    stop_id: stop.internal_stop_id,
+                                                    pipe_num,
+                                                    midi_note: tn as u8,
+                                                    velocity: vel as f32 / 127.0,
+                                                    verschuiving,
+                                                });
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -4715,7 +4912,7 @@ impl AppState {
 
         let send_note_on = |note: u8, vel: u8| {
             let t = note as u32;
-            if let Some((pipe_num, verschuiving)) = pijp_voor_noot(t, first, last, doorlopend_klavier()) {
+            if let Some((pipe_num, verschuiving)) = pijp_voor_register(t, stop) {
                 rt_send(&tx, AudioCommand::NoteOn {
                     stop_id: stop.internal_stop_id,
                     pipe_num,
@@ -4811,9 +5008,7 @@ impl AppState {
                 let src_note = src_mapping.map_or(note, |m| m.speelnoot(note));
                 let t = (src_note as i32 + route.pitch_offset).clamp(0, 127) as u32;
                 for stop in &dest_div.stops {
-                    let s_first = stop.first_midi_note as u32;
-                    let s_last = stop.last_midi_note as u32;
-                    if let Some((pipe_num, verschuiving)) = pijp_voor_noot(t, s_first, s_last, doorlopend_klavier()) {
+                    if let Some((pipe_num, verschuiving)) = pijp_voor_register(t, stop) {
                         rt_send(&tx, AudioCommand::NoteOff {
                             stop_id: stop.internal_stop_id,
                             pipe_num,
@@ -4846,9 +5041,7 @@ impl AppState {
                 let t = (src_note as i32 + route.pitch_offset).clamp(0, 127) as u32;
                 for stop in dest_div.stops.iter().filter(|s| s.drawn) {
                     if ta_active && stop.is_reed { continue; }
-                    let s_first = stop.first_midi_note as u32;
-                    let s_last = stop.last_midi_note as u32;
-                    if let Some((pipe_num, verschuiving)) = pijp_voor_noot(t, s_first, s_last, doorlopend_klavier()) {
+                    if let Some((pipe_num, verschuiving)) = pijp_voor_register(t, stop) {
                         rt_send(&tx, AudioCommand::NoteOn {
                             stop_id: stop.internal_stop_id,
                             pipe_num,
@@ -4856,6 +5049,36 @@ impl AppState {
                             velocity: vel as f32 / 127.0,
                             verschuiving,
                         });
+                    }
+                }
+            }
+        }
+
+        // 3) T.A. (Tongwerken Af) gewisseld terwijl toetsen zijn ingedrukt
+        //    (0.9.12). Tot nu toe deed de schakelaar pas iets bij de volgende
+        //    aanslag. Aan → de klinkende tongwerken van die divisie meteen
+        //    loslaten; uit → de getrokken tongwerken weer laten klinken op de
+        //    ingedrukte toetsen, direct én via de koppels die in beide standen
+        //    bestonden (de nieuwe routes zijn in stap 2 al gestart, de oude in
+        //    stap 1 al losgelaten).
+        let ta_divs = |lijst: &[String]| -> Vec<String> {
+            coupler_list.iter()
+                .filter(|c| c.coupler_type == "ta" && lijst.contains(&c.id))
+                .map(|c| c.source_division.clone())
+                .collect()
+        };
+        let (ta_oud, ta_nieuw) = (ta_divs(old_couplers), ta_divs(new_couplers));
+        if ta_oud != ta_nieuw {
+            let onveranderd: Vec<String> = old_couplers.iter()
+                .filter(|c| new_couplers.contains(c)).cloned().collect();
+            for div in &o.divisions {
+                let (was, wordt) = (ta_oud.contains(&div.name), ta_nieuw.contains(&div.name));
+                if was == wordt { continue; }
+                for stop in div.stops.iter().filter(|s| s.drawn && s.is_reed) {
+                    if wordt {
+                        rt_send(&tx, AudioCommand::ReleaseStop { stop_id: stop.internal_stop_id });
+                    } else {
+                        Self::sync_stop_voices_inner(o, tx, mappings, &onveranderd, new_couplers, held, &stop.id, true);
                     }
                 }
             }
@@ -5638,6 +5861,7 @@ mod crescendo_tests {
             id: id.to_string(), name: id.to_string(), pitch: "8".to_string(), drawn: false,
             groep: "grond", familie: "principaal", has_tremulant: false, midi_action_code: 0, internal_stop_id: n,
             first_midi_note: 36, last_midi_note: 96, is_reed: false, koren: None, mengwerk: false, wind_voet: 8.0, percussief: false,
+            doorloop_onder: 0, doorloop_boven: 127,
         }
     }
 
@@ -5778,6 +6002,31 @@ mod crescendo_tests {
         // Tongwerk bij terwijl T.A. wegvalt: wél starten.
         AppState::sync_stop_voices_inner(&o, &tx, &mappings, &met, &zonder, &held, "r", true);
         assert_eq!(tel(&rx), 1);
+    }
+
+    /// 0.9.12: T.A. wisselen terwijl een toets is ingedrukt werkt meteen —
+    /// aan laat het klinkende tongwerk los, uit start het weer.
+    #[test]
+    fn ta_wissel_met_ingedrukte_toets_schakelt_tongwerk_live() {
+        let mut o = organ_met_koppel();
+        o.divisions[1].stops[0].is_reed = true; // "r" (stop_id 20) op Hoofdwerk, getrokken
+        o.couplers.as_mut().unwrap().push(CouplerDto {
+            id: "ta1".into(), name: "T.A.".into(), source_division: "Hoofdwerk".into(),
+            destination_division: "Hoofdwerk".into(), active: false, display_in_division: "Hoofdwerk".into(),
+            midi_action_code: 0, coupler_type: "ta".into(), pitch_offset: 0, speciaal: false,
+        });
+        let (tx, rx) = bounded::<AudioCommand>(64);
+        let mappings = vec![MidiChannelMapping { division: "Hoofdwerk".into(), channel: Some(1), ..Default::default() }];
+        let held = vec![(1u8, 60u8, 100u8)];
+        let zonder: Vec<String> = Vec::new();
+        let met = ids(&["ta1"]);
+        AppState::sync_coupler_voices_inner(&o, &tx, &mappings, &held, &zonder, &met);
+        assert_eq!(rx.try_iter().filter(|c| matches!(c, AudioCommand::ReleaseStop { stop_id: 20 })).count(), 1, "T.A. aan: tongwerk los");
+        AppState::sync_coupler_voices_inner(&o, &tx, &mappings, &held, &met, &zonder);
+        assert_eq!(rx.try_iter().filter(|c| matches!(c, AudioCommand::NoteOn { stop_id: 20, .. })).count(), 1, "T.A. uit: tongwerk weer aan");
+        // Zonder ingedrukte toetsen gebeurt er niets.
+        AppState::sync_coupler_voices_inner(&o, &tx, &mappings, &[], &zonder, &met);
+        assert_eq!(rx.try_iter().count(), 0);
     }
 
     #[test]
@@ -6486,7 +6735,8 @@ mod kort_octaaf_tests {
 
 #[cfg(test)]
 mod doorlopend_klavier_tests {
-    use super::{pijp_voor_noot, DOORLOPEND_MAX_VERSCHUIVING};
+    use super::{pijp_voor_noot, pijp_voor_noot_richting, naam_zonder_helft, markeer_registerhelften, Registerhelft, DOORLOPEND_MAX_VERSCHUIVING};
+    use crate::commands::StopDto;
 
     // Een register van C2 (36) t/m G6 (91): 56 tonen, het gangbare bereik van
     // een historische sampleset.
@@ -6563,5 +6813,165 @@ mod doorlopend_klavier_tests {
         assert_eq!(pijp_voor_noot(67, 60, 64, true), Some((5, 3)));
         assert_eq!(pijp_voor_noot(55, 60, 64, true), Some((1, -5)));
         for n in 0..=127u32 { let _ = pijp_voor_noot(n, 60, 64, true); }
+    }
+
+    // ---- 0.9.12: bas- en discanthelften stoppen op het deelpunt ----
+
+    fn dto(name: &str, pitch: &str, eerste: u8, laatste: u8) -> StopDto {
+        StopDto {
+            id: name.to_string(), name: name.to_string(), pitch: pitch.to_string(), drawn: false,
+            groep: "grond", familie: "principaal", has_tremulant: false, midi_action_code: 0, internal_stop_id: 1,
+            first_midi_note: eerste, last_midi_note: laatste, is_reed: false, koren: None, mengwerk: false,
+            wind_voet: 8.0, percussief: false, doorloop_onder: 0, doorloop_boven: 127,
+        }
+    }
+    fn grenzen(s: &StopDto) -> (u8, u8) { (s.doorloop_onder, s.doorloop_boven) }
+
+    #[test]
+    fn richting_per_kant() {
+        // Bashelft C2..B3 (36..59), grens boven = 59: boven het deelpunt stil, onderin door.
+        assert_eq!(pijp_voor_noot_richting(60, 36, 59, 0, 59), None);
+        assert_eq!(pijp_voor_noot_richting(72, 36, 59, 0, 59), None);
+        assert_eq!(pijp_voor_noot_richting(35, 36, 59, 0, 59), Some((1, -1)));
+        // Discanthelft c4..g6 (60..91), grens onder = 60: onder het deelpunt stil, bovenin door.
+        assert_eq!(pijp_voor_noot_richting(59, 60, 91, 60, 127), None);
+        assert_eq!(pijp_voor_noot_richting(48, 60, 91, 60, 127), None);
+        assert_eq!(pijp_voor_noot_richting(96, 60, 91, 60, 127), Some((32, 5)));
+        // Binnen het bereik spelen de grenzen geen rol.
+        assert_eq!(pijp_voor_noot_richting(70, 60, 91, 60, 91), Some((11, 0)));
+        assert_eq!(pijp_voor_noot_richting(36, 36, 59, 36, 59), Some((1, 0)));
+        // Vrij (0..127) = het oude gedrag; eigen bereik als grens = schakelaar uit.
+        for n in 0..=127u32 {
+            assert_eq!(pijp_voor_noot_richting(n, EERSTE, LAATSTE, 0, 127), pijp_voor_noot(n, EERSTE, LAATSTE, true));
+            assert_eq!(pijp_voor_noot_richting(n, EERSTE, LAATSTE, EERSTE, LAATSTE), pijp_voor_noot(n, EERSTE, LAATSTE, false));
+        }
+    }
+
+    #[test]
+    fn helft_uit_de_naam() {
+        use Registerhelft::*;
+        let gevallen: &[(&str, &str, Option<Registerhelft>)] = &[
+            ("Trompet (Bas)", "trompet", Some(Bas)),
+            ("Trompet (Disc)", "trompet", Some(Discant)),
+            ("Trompet B", "trompet", Some(Bas)),
+            ("Trompet D", "trompet", Some(Discant)),
+            ("Cornet V D", "cornet v", Some(Discant)),
+            ("Mixtuur IV (Bas)", "mixtuur iv", Some(Bas)),
+            ("Flûte dessus", "flûte", Some(Discant)),
+            ("Trompette basse", "trompette", Some(Bas)),
+            ("Posaune Diskant", "posaune", Some(Discant)),
+            ("Trompete 8 Baß", "trompete", Some(Bas)),
+            ("Oboe Treble", "oboe", Some(Discant)),
+            ("Sesquialter disc.", "sesquialter", Some(Discant)),
+            ("Vox humana 8 Bass", "vox humana", Some(Bas)),
+            ("Vox humana Desc.", "vox humana", Some(Discant)),
+            ("Cornet D 8", "cornet", Some(Discant)),
+            ("Principale Bassi", "principale", Some(Bas)),
+            ("Trompeta real Tiples", "trompeta real", Some(Discant)),
+            ("Cornet MD", "cornet", Some(Discant)),
+            ("Basse de Trompette", "trompette", Some(Bas)),
+            ("Dessus de Cornet", "cornet", Some(Discant)),
+            ("Trompet B D", "trompet", None),
+            ("Prestant", "prestant", None),
+            ("Prestant 8", "prestant 8", None),
+            ("Subbas", "subbas", None),
+            ("Bourdon", "bourdon", None),
+            ("Mixtuur B/D", "mixtuur b/d", None),
+            ("Bass Flute", "bass flute", None),
+            ("B", "b", None),
+        ];
+        for (naam, basis, helft) in gevallen {
+            assert_eq!(naam_zonder_helft(naam), (basis.to_string(), *helft), "{}", naam);
+        }
+    }
+
+    #[test]
+    fn bas_en_discant_lopen_niet_door_op_het_deelpunt() {
+        let mut stops = vec![
+            dto("Trompet (Bas)", "8", 36, 59),
+            dto("Trompet (Disc)", "8", 60, 96),
+            dto("Prestant", "8", 36, 96),
+        ];
+        markeer_registerhelften(&mut stops, false);
+        assert_eq!(grenzen(&stops[0]), (0, 59), "bashelft: onderin door, niet over het deelpunt");
+        assert_eq!(grenzen(&stops[1]), (60, 127), "discanthelft: bovenin door, niet onder het deelpunt");
+        assert_eq!(grenzen(&stops[2]), (0, 127), "heel register: beide kanten");
+    }
+
+    #[test]
+    fn helften_zonder_aanduiding_herkend_aan_het_paar() {
+        let mut stops = vec![dto("Trompet", "8", 36, 59), dto("Trompet", "8", 60, 96), dto("Trompet", "4", 36, 96)];
+        markeer_registerhelften(&mut stops, false);
+        assert_eq!(grenzen(&stops[0]), (0, 59));
+        assert_eq!(grenzen(&stops[1]), (60, 127));
+        // Andere voetmaat is een ander register: ongemoeid.
+        assert_eq!(grenzen(&stops[2]), (0, 127));
+    }
+
+    #[test]
+    fn gat_tussen_de_helften_valt_aan_de_bas_toe() {
+        // Bas tot a (57), discant vanaf c' (60): a# en b klinken via de bas, niet dubbel.
+        let mut stops = vec![dto("Trompet (Bas)", "8", 36, 57), dto("Trompet (Disc)", "8", 60, 96)];
+        markeer_registerhelften(&mut stops, false);
+        assert_eq!(grenzen(&stops[0]), (0, 59));
+        assert_eq!(grenzen(&stops[1]), (60, 127));
+        assert_eq!(pijp_voor_noot_richting(58, 36, 57, 0, 59), Some((22, 1)));
+        assert_eq!(pijp_voor_noot_richting(59, 36, 57, 0, 59), Some((22, 2)));
+        assert_eq!(pijp_voor_noot_richting(60, 36, 57, 0, 59), None);
+        assert_eq!(pijp_voor_noot_richting(59, 60, 96, 60, 127), None);
+    }
+
+    #[test]
+    fn zwevende_stem_vanaf_g_blijft_aan_beide_kanten_doorlopen() {
+        // 0.8.4: korter bereik, geen helft, geen partner, begint onder c' → vrij.
+        let mut stops = vec![dto("Vox Coelestis", "8", 55, 91), dto("Prestant", "8", 36, 91)];
+        markeer_registerhelften(&mut stops, false);
+        assert_eq!(grenzen(&stops[0]), (0, 127));
+        assert_eq!(grenzen(&stops[1]), (0, 127));
+    }
+
+    #[test]
+    fn losse_discanthelft_zonder_partner_zwijgt_in_de_bas() {
+        let mut stops = vec![dto("Cornet V D", "", 60, 96)];
+        markeer_registerhelften(&mut stops, false);
+        assert_eq!(grenzen(&stops[0]), (60, 127));
+    }
+
+    #[test]
+    fn discant_zonder_aanduiding_herkend_aan_het_bereik() {
+        // "RW Cornet" 60..91 naast registers vanaf 36: discant, ook zonder "D".
+        let mut stops = vec![dto("Cornet", "", 60, 91), dto("Prestant", "8", 36, 91)];
+        markeer_registerhelften(&mut stops, false);
+        assert_eq!(grenzen(&stops[0]), (60, 127));
+        assert_eq!(grenzen(&stops[1]), (0, 127));
+        // Alleen: het klavierbereik is onbekend → vrij.
+        let mut alleen = vec![dto("Cornet", "", 60, 91)];
+        markeer_registerhelften(&mut alleen, false);
+        assert_eq!(grenzen(&alleen[0]), (0, 127));
+    }
+
+    #[test]
+    fn bas_zonder_aanduiding_herkend_aan_het_bereik() {
+        let mut stops = vec![dto("Fagot", "16", 36, 59), dto("Prestant", "8", 36, 91)];
+        markeer_registerhelften(&mut stops, false);
+        assert_eq!(grenzen(&stops[0]), (0, 59));
+        assert_eq!(grenzen(&stops[1]), (0, 127));
+    }
+
+    #[test]
+    fn pedaal_kent_geen_helften() {
+        // "Sub Bass" en "Choral Bass" eindigen op Bass maar zijn hele registers;
+        // een korte pedaalset (30 toetsen) moet bovenin blijven doorlopen.
+        let mut stops = vec![dto("Sub Bass", "16", 36, 65), dto("Choral Bass", "4", 36, 65), dto("Posaune", "16", 36, 67)];
+        markeer_registerhelften(&mut stops, true);
+        for s in &stops { assert_eq!(grenzen(s), (0, 127), "{}", s.name); }
+    }
+
+    #[test]
+    fn grenzen_worden_opnieuw_gezet_bij_herhaald_markeren() {
+        let mut stops = vec![dto("Prestant", "8", 36, 96)];
+        stops[0].doorloop_onder = 40;
+        markeer_registerhelften(&mut stops, false);
+        assert_eq!(grenzen(&stops[0]), (0, 127));
     }
 }
