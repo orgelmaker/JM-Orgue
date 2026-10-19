@@ -620,7 +620,9 @@
     "layout_menu": "Disposición",
     "layout_menu_title": "Opciones de disposición: ajustar, tamaño de los tiradores, teclados en paralelo o apilados, forma de los tiradores, lugar de los acoplamientos",
     "motor_off_notice": "Motor apagado — enciéndalo para tocar",
-    "motor_turn_on": "Motor"
+    "motor_turn_on": "Motor",
+    "show_motor_key": "Mostrar la llave del motor",
+    "show_motor_key_title": "Mostrar también la llave del motor en la barra de herramientas de esta pantalla adicional"
   },
   "speeltafel": {
     "show_bars": "Barras",

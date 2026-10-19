@@ -620,7 +620,9 @@
     "layout_menu": "Layout",
     "layout_menu_title": "Layout options: fit to screen, knob sizes, divisions side by side or stacked, knob shape, coupler placement",
     "motor_off_notice": "Blower off — switch it on to play",
-    "motor_turn_on": "Blower on"
+    "motor_turn_on": "Blower on",
+    "show_motor_key": "Show motor key",
+    "show_motor_key_title": "Also show the motor key in the toolbar of this extra screen"
   },
   "speeltafel": {
     "show_bars": "Bars",

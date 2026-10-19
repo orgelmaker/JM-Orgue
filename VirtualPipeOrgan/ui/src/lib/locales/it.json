@@ -620,7 +620,9 @@
     "layout_menu": "Disposizione",
     "layout_menu_title": "Opzioni di disposizione: adatta, dimensioni dei registri, corpi affiancati o sovrapposti, forma dei registri, posizione delle unioni",
     "motor_off_notice": "Motore spento — accenderlo per suonare",
-    "motor_turn_on": "Motore"
+    "motor_turn_on": "Motore",
+    "show_motor_key": "Mostra la chiave del motore",
+    "show_motor_key_title": "Mostra la chiave del motore anche nella barra degli strumenti di questo schermo aggiuntivo"
   },
   "speeltafel": {
     "show_bars": "Barre",

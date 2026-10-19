@@ -39,6 +39,11 @@
   // Secundair + hoofdbalk verborgen: toon in de werkbalk een knop om de balk
   // (Header met tabs/profielwissel/start-stop) weer zichtbaar te maken.
   export let showPanelHeaderToggle = false;
+  // Motorsleutel op dit extra scherm tonen (0.9.1): standaard uit op panelen —
+  // echte orgels hebben één sleutel — maar altijd aan te zetten via het
+  // indelingsmenu, zodat het geluid ook bedienbaar is als het hoofdscherm
+  // niet binnen handbereik ligt. Hoofdvenster toont de sleutel altijd.
+  export let showMotorKey = false;
   // Speeltafelmodus (0.7.61): App beheert het volledige scherm en geeft hier
   // door of hij aan staat en of de balken tijdelijk zichtbaar zijn.
   export let speeltafelModus = false;
@@ -2179,6 +2184,11 @@
     try {
       await invoke('set_blower_active', { active: aan });
       dispatch('refreshMidiMappings');
+      // Alle vensters bijtikken (0.9.11): het hoofdscherm en elk extra scherm
+      // houden `motorAan` lokaal, en zonder dit event bleef het andere scherm
+      // op zijn oude stand hangen tot de volgende organ-info-ronde.
+      const { emit } = await import('@tauri-apps/api/event');
+      emit('jm-orgue:blower-changed', { active: aan }).catch(() => {});
     } catch (e) { console.error(e); }
   }
   // Blok tonen bij bijgeluiden óf toetsklikken; het vinkje "Toetsmechaniek"
@@ -2482,6 +2492,13 @@
     if (division.stops.some(s => s.has_tremulant)) {
       dispatch('setTremulant', { division: division.name, active: val });
     }
+    // Alle vensters bijtikken (0.9.11): het hoofdscherm en elk extra scherm
+    // houden `tremActive` lokaal, dus zonder dit event bleef de tremulant-
+    // knop op het andere scherm hangen op zijn oude stand.
+    try {
+      const { emit } = await import('@tauri-apps/api/event');
+      emit('jm-orgue:tremulant-changed', { division: division.name, active: val }).catch(() => {});
+    } catch (e) {}
     // Bij UITzetten altijd het stop-commando sturen, ook als de beschikbaarheid
     // net is uitgezet (anders blijft de LFO-tremulant in de backend doorlopen).
     // Bij AANzetten alleen als de tremulant beschikbaar is.
@@ -3406,6 +3423,8 @@
   let remotePortInput = 8766;
   let remoteBusy = false;
   let unlistenRemoteVol = null;
+  let unlistenBlower = null;
+  let unlistenTrem = null;
   // Uitgangscorrectie gewijzigd in een ander venster of via MIDI (0.7.78):
   // het blok hier opnieuw laden, anders schrijft een latere schuifbeweging
   // een verouderd 'enabled' terug (reviewbevinding).
@@ -3540,6 +3559,22 @@
           if (outEqSaveTimer) return; // eigen wijziging nog onderweg
           laadOutEq();
         });
+        // Motor-stand gewijzigd op een ander scherm (0.9.11): DIT venster
+        // volgt zonder zelf opnieuw de backend te schakelen.
+        unlistenBlower = await listen('jm-orgue:blower-changed', (e) => {
+          const p = e.payload || {};
+          if (typeof p.active === 'boolean' && p.active !== motorAan) motorAan = p.active;
+        });
+        // Tremulant-stand gewijzigd op een ander scherm (0.9.11): zelfde
+        // route — alleen de lokale knop-stand bijwerken, niet opnieuw naar
+        // de backend sturen (die weet het al en zou een echo-loop maken).
+        unlistenTrem = await listen('jm-orgue:tremulant-changed', (e) => {
+          const p = e.payload || {};
+          if (p.division && typeof p.active === 'boolean' && tremActive[p.division] !== p.active) {
+            tremActive[p.division] = p.active;
+            tremActive = tremActive;
+          }
+        });
       } catch (e) {}
     })();
     if (!secondary) {
@@ -3557,6 +3592,8 @@
     if (crescLivePoll) clearInterval(crescLivePoll);
     if (sharedPrefsInterval) clearInterval(sharedPrefsInterval);
     if (unlistenRemoteVol) unlistenRemoteVol();
+    if (unlistenBlower) { unlistenBlower(); unlistenBlower = null; }
+    if (unlistenTrem) { unlistenTrem(); unlistenTrem = null; }
     if (libraryUpdatedListener) libraryUpdatedListener.then(un => { if (un) un(); });
   });
 
@@ -5829,14 +5866,16 @@
                 {/if}
               </div>
             {/if}
-            <!-- Motor-knop (0.7.97): aanwezig als de sampleset een blower-opname
-                 heeft; schakelt de orgelmotor in of uit met fade-in/uit.
-                 (0.8.81) Alleen op het hoofdscherm, niet op extra register-
-                 panelen: één sleutelschakelaar per orgel, zoals bij een echt
-                 orgel. Vanaf 0.8.81 negeert de audio-engine nieuwe toetsen
-                 als de motor uit staat (bestaande noten doven uit via hun
-                 eigen release) — dus zonder motor klinkt het orgel niet. -->
-            {#if !secondary}
+            <!-- Motor-knop (0.7.97): schakelt de orgelmotor in of uit met
+                 fade-in/uit. Op het hoofdscherm staat de sleutel altijd; op
+                 een extra scherm standaard niet (één sleutel per orgel,
+                 zoals in het echt), maar via het indelingsmenu altijd aan te
+                 zetten (0.9.1) — zonder de sleutel is het geluid niet
+                 bedienbaar als het hoofdscherm buiten bereik ligt. Vanaf
+                 0.8.81 negeert de audio-engine nieuwe toetsen als de motor
+                 uit staat (bestaande noten doven uit via hun eigen
+                 release) — dus zonder motor klinkt het orgel niet. -->
+            {#if !secondary || showMotorKey}
               <!-- Als sleutelschakelaar (0.8.4): rond schild met een gleuf
                    die van 0 naar I draait, een lampje en de stand in tekst. -->
               <button
@@ -5952,6 +5991,26 @@
                   <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
                 </svg>
                 {$t('toolbar.couplers')}
+              </button>
+            {/if}
+            {#if secondary}
+              <!-- Motorsleutel op dit extra scherm tonen (0.9.1). Altijd aan
+                   te zetten; standaard uit — een echt orgel heeft één
+                   sleutel — maar handig als het paneel het enige scherm is
+                   dat binnen handbereik ligt. -->
+              <button
+                class="btn btn-ghost btn-sm panel-layout-btn"
+                class:aan={showMotorKey}
+                on:click={() => dispatch('toggleShowMotorKey', !showMotorKey)}
+                title={$t('toolbar.show_motor_key_title')}
+                aria-pressed={showMotorKey}
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                  <circle cx="8" cy="14" r="4"/>
+                  <path d="M12 10l8-8"/>
+                  <path d="M17 5l3 3"/>
+                </svg>
+                {$t('toolbar.show_motor_key')}
               </button>
             {/if}
                 </div>

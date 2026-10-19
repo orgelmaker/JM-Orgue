@@ -620,7 +620,9 @@
     "layout_menu": "Disposition",
     "layout_menu_title": "Options de disposition : ajuster, taille des tirants, claviers côte à côte ou superposés, forme des tirants, place des accouplements",
     "motor_off_notice": "Soufflerie arrêtée — mettez-la en marche pour jouer",
-    "motor_turn_on": "Soufflerie"
+    "motor_turn_on": "Soufflerie",
+    "show_motor_key": "Afficher la clé du moteur",
+    "show_motor_key_title": "Afficher aussi la clé du moteur dans la barre d'outils de cet écran supplémentaire"
   },
   "speeltafel": {
     "show_bars": "Barres",

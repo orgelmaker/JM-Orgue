@@ -620,7 +620,9 @@
     "layout_menu": "Indeling",
     "layout_menu_title": "Indelingsopties: passend maken, knopmaten, werken naast of onder elkaar, knopvorm, plaats van de koppels",
     "motor_off_notice": "Motor uit — zet aan om te spelen",
-    "motor_turn_on": "Motor aan"
+    "motor_turn_on": "Motor aan",
+    "show_motor_key": "Motorsleutel tonen",
+    "show_motor_key_title": "Toon de motorsleutel ook in de werkbalk van dit extra scherm"
   },
   "speeltafel": {
     "show_bars": "Balken",

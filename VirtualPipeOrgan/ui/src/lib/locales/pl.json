@@ -620,7 +620,9 @@
     "layout_menu": "Układ",
     "layout_menu_title": "Opcje układu: dopasuj, rozmiar gałek, sekcje obok siebie lub pod sobą, kształt gałek, miejsce połączeń",
     "motor_off_notice": "Silnik wyłączony — włącz, aby grać",
-    "motor_turn_on": "Silnik"
+    "motor_turn_on": "Silnik",
+    "show_motor_key": "Pokaż kluczyk silnika",
+    "show_motor_key_title": "Pokaż kluczyk silnika także na pasku narzędzi tego dodatkowego ekranu"
   },
   "speeltafel": {
     "show_bars": "Paski",

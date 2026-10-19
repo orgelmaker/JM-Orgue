@@ -620,7 +620,9 @@
     "layout_menu": "Anordnung",
     "layout_menu_title": "Anordnungsoptionen: einpassen, Knopfgrößen, Werke neben- oder untereinander, Knopfform, Platz der Koppeln",
     "motor_off_notice": "Motor aus — einschalten, um zu spielen",
-    "motor_turn_on": "Motor ein"
+    "motor_turn_on": "Motor ein",
+    "show_motor_key": "Motorsleutel anzeigen",
+    "show_motor_key_title": "Die Motorsleutel auch in der Werkzeugleiste dieses zusätzlichen Bildschirms anzeigen"
   },
   "speeltafel": {
     "show_bars": "Leisten",

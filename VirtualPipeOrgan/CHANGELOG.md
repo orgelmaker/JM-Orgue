@@ -5,6 +5,24 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.9.11] - 2026-10-19
+
+### Tremulantknop op het extra scherm werkt weer
+- Op een extra registerscherm reageerde de tremulantknop niet: de klik
+  zette de stand lokaal, maar het paneel vroeg de motor-engine daarna
+  niet om een verse stand terug. Het paneel haalt die nu op én meldt
+  de wijziging aan het hoofdscherm, zodat beide schermen in sync
+  blijven.
+
+### Motorsleutel per scherm aan te zetten
+- De motorsleutel stond alleen op het hoofdscherm — bedoeld als één
+  sleutel per orgel, zoals in het echt. Maar zonder motor klinkt het
+  orgel niet, en op een opstelling waar het hoofdscherm buiten
+  handbereik hangt is dat lastig. In het indelingsmenu van een extra
+  scherm staat nu een knop "Motorsleutel tonen", per orgel per scherm
+  te onthouden; standaard uit. Het hoofdscherm toont de sleutel
+  altijd.
+
 ## [0.8.98] - 2026-10-19
 
 ### Dubbele registerklik weg

@@ -44,6 +44,10 @@
   // Hoofdbalk aan/uit — per scherm × orgel bewaard; default UIT zodat
   // bestaande gebruikers het vertrouwde compacte scherm houden.
   let showHeader = false;
+  // Motorsleutel in de werkbalk van dit paneel (0.9.1). Altijd te wisselen
+  // via de knop in het indelingsmenu. Bewaren in panelState per orgel ×
+  // scherm, zodat elk paneel zijn eigen keuze onthoudt.
+  let showMotorKey = false;
 
   // Audio-instellingen-spiegels voor de Algemene Instellingen-weergave.
   let audioHosts = [];
@@ -84,6 +88,7 @@
         // Per-scherm-state van dít orgel: hoofdbalk-zichtbaarheid.
         const st = loadPanelState(organInfo.id, panelNumber);
         showHeader = st?.showHeader === true;
+        showMotorKey = st?.showMotorKey === true;
         refreshMidiMappings();
       }
       if (organInfo) showOrganBrowser = false;
@@ -322,8 +327,16 @@
   }
 
   async function setTremulant(divisionName, active) {
-    try { await invoke('set_tremulant', { divisionName, active }); }
-    catch (e) { console.error('Failed to set tremulant:', e); }
+    try {
+      await invoke('set_tremulant', { divisionName, active });
+      // Net als toggleStop: trek de verse organ-info binnen zodat de knop
+      // in dit extra scherm meteen in de nieuwe stand komt — zonder dit
+      // bleef de tremulant hangen op het paneel (0.9.01).
+      await pollOrganInfo(true);
+      // Ook het hoofdvenster bijtikken: zijn Console heeft eigen tremulant-
+      // state en moet weten dat de stand gewijzigd is.
+      emitToMain('jm-orgue:tremulant-changed', { division: divisionName, active });
+    } catch (e) { console.error('Failed to set tremulant:', e); }
   }
 
   async function setMidiMapping(division, channel, transpose) {
@@ -508,6 +521,7 @@
       secondary
       {panelNumber}
       showPanelHeaderToggle={!showHeader}
+      {showMotorKey}
       {organInfo}
       loading={false}
       loadingProgress={0}
@@ -543,6 +557,7 @@
       on:loadOrgan={(e) => emitToMain('jm-orgue:load-organ', { kind: 'organ', path: e.detail })}
       on:scanFolder={(e) => emitToMain('jm-orgue:load-organ', { kind: 'folder', path: e.detail })}
       on:setTremulant={(e) => setTremulant(e.detail.division, e.detail.active)}
+      on:toggleShowMotorKey={(e) => { showMotorKey = e.detail === true; savePanelState(organInfo?.id, panelNumber, { showMotorKey }); }}
       on:setMidiMapping={(e) => setMidiMapping(e.detail.division, e.detail.channel, e.detail.transpose)}
       on:refreshMidiMappings={() => { refreshMidiMappings(); emitToMain('jm-orgue:settings-changed', { scope: 'midi' }); }}
       on:learnMidiChannel={(e) => learnMidiChannel(e.detail)}
