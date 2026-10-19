@@ -11,10 +11,10 @@
 
 <header class="titel">
   <h1>JM-Orgue</h1>
-  <div class="onder">Handbuch f&uuml;r Version 0.8.93 &middot; Oktober 2026</div>
+  <div class="onder">Handbuch f&uuml;r Version 0.8.98 &middot; Oktober 2026</div>
 </header>
 
-<p>JM-Orgue ist eine virtuelle Pfeifenorgel f&uuml;r Windows, macOS und Linux. Das Programm spielt Hauptwerk- und GrandOrgue-Sample-Sets direkt ab, auch gro&szlig;e Surround-Sets, und wird mit einer MIDI-Tastatur, einem Orgelspieltisch oder der Maus gespielt. Dieses Handbuch f&uuml;hrt anhand von Bildschirmfotos der Version 0.8.93 durch das Programm.</p>
+<p>JM-Orgue ist eine virtuelle Pfeifenorgel f&uuml;r Windows, macOS und Linux. Das Programm spielt Hauptwerk- und GrandOrgue-Sample-Sets direkt ab, auch gro&szlig;e Surround-Sets, und wird mit einer MIDI-Tastatur, einem Orgelspieltisch oder der Maus gespielt. Dieses Handbuch f&uuml;hrt anhand von Bildschirmfotos der Version 0.8.98 durch das Programm.</p>
 <p class="klein">&copy; Martijn van der Kolk. Die Bildschirmfotos wurden mit Demo-Orgeln und eigenen Testsets erstellt; Netzwerkadressen, Zugriffstoken und Benutzerordner sind unkenntlich gemacht.</p>
 
 <nav class="inhoud">
@@ -72,7 +72,7 @@
 <figure><img src="afbeeldingen/de/05_laden.jpg" alt="Ladebildschirm"><figcaption>Der Ladebildschirm mit dem Fortschritt beim Einlesen der Samples.</figcaption></figure>
 
 <h3>Der Motor</h3>
-<p>Nach dem Laden ist der <b>Orgelmotor aus</b>, und ohne Motor klingt nichts. Schalten Sie ihn mit <b>Motor ein</b> in der gelben Leiste oder mit der Motor-Schaltfl&auml;che in der Werkzeugleiste ein. Sobald der Motor l&auml;uft, verschwindet die Leiste. Bei laufendem Motor l&auml;uft auch das Motorger&auml;usch des Sets mit (wenn das Set eines enth&auml;lt).</p>
+<p>Nach dem Laden ist der <b>Orgelmotor standardm&auml;&szlig;ig an</b>, sobald das Set eine Motoraufnahme enth&auml;lt, und ein leiser Wind ist sofort zu h&ouml;ren. Soll in Stille ge&uuml;bt werden, schalten Sie den Knopf <b>Motor</b> in der Werkzeugleiste aus; die gelbe Leiste erscheint erst, wenn wirklich kein Motor l&auml;uft. Welche Nebenger&auml;usche standardm&auml;&szlig;ig an sind und wie laut, regeln Sie in der Werkzeugleiste mit dem kleinen Mischer neben der Nebenger&auml;usch-Schaltfl&auml;che.</p>
 <figure><img src="afbeeldingen/de/06_orgelscherm_motor_uit.jpg" alt="Orgelbildschirm bei ausgeschaltetem Motor"><figcaption>Der Orgelbildschirm direkt nach dem Laden: Motor aus, alle Register eingeschoben.</figcaption></figure>
 
 <h3>Register, Koppeln und Tremulanten</h3>
@@ -91,6 +91,8 @@
   <tr><td>Lautst&auml;rkeregler</td><td>Gesamtlautst&auml;rke. Ein Doppelklick setzt sie auf den Standardwert zur&uuml;ck; mit dem Mausrad &auml;ndern Sie sie in Schritten von 1 dB.</td></tr>
 </table>
 <p class="klein">Jede Schaltfl&auml;che der Setzerleiste kann mit einer Taste Ihres eigenen Spieltischs verbunden werden: Rechtsklick (oder 3 Sekunden gedr&uuml;ckt halten) und danach die Taste am Spieltisch dr&uuml;cken.</p>
+<h3>MIDI-Kanal pro Manual lernen</h3>
+<p>Sie m&uuml;ssen nicht erst in die Orgel-Einstellungen: rechtsklicken Sie auf den Namen eines Werks &uuml;ber den Registern &mdash; oder ber&uuml;hren Sie ihn 2 Sekunden lang auf einem Touchscreen &mdash; und das Programm fragt nach der tiefsten und h&ouml;chsten Taste dieses Manuals. So wird der Kanal eingestellt, ohne den Spieltisch zu verlassen.</p>
 
 <!-- ============================================================ -->
 <h2 id="werkbalk">4. Die Werkzeugleiste</h2>
@@ -124,7 +126,7 @@
 <h2 id="posities">5. Mehrere H&ouml;rpositionen</h2>
 <p>Manche Sample-Sets wurden an mehreren Stellen in der Kirche aufgenommen, zum Beispiel nah, vorn, in der Mitte und hinten. Ein solches Set zeigt in der Werkzeugleiste die Schaltfl&auml;chen <b>Perspektive</b>, eine pro Position. Klicken Sie auf eine Position, um sie ein- oder auszuschalten; es k&ouml;nnen mehrere gleichzeitig klingen. Rechts davon steht die <b>H&ouml;rposition</b>: Der Regler zwischen &bdquo;nah&ldquo; und &bdquo;hinten&ldquo; blendet stufenlos zwischen den aufgenommenen Positionen &uuml;ber.</p>
 <figure><img src="afbeeldingen/de/50_nancy_orgelscherm.jpg" alt="Orgelbildschirm mit Perspektiven"><figcaption>Ein Set mit vier Aufnahmepositionen (Close, Front, Middle, Rear) und dem H&ouml;rpositionsregler.</figcaption></figure>
-<div class="tip"><b>Tipp</b> Jede Position braucht Speicher und Rechenleistung. Passt nicht alles in den Speicher Ihres Computers, l&auml;dt das Programm beim ersten Mal nur die Position, die der Orgel am n&auml;chsten liegt. In den Orgel-Einstellungen finden Sie den Block &bdquo;Perspektiven und gestapelte Reihen&ldquo;: Dort w&auml;hlen Sie, welche Positionen geladen werden, stellen die Lautst&auml;rke pro Position ein und k&ouml;nnen mit &bdquo;Alle Positionen im Speicher halten&ldquo; sofort zwischen Positionen wechseln. Eine neue Auswahl geladener Positionen wirkt nach dem erneuten Laden der Orgel.</div>
+<div class="tip"><b>Tipp</b> Alle Aufnahmepositionen werden standardm&auml;&szlig;ig gleichzeitig geladen, sodass der H&ouml;rpositionsregler sie sofort weich mischen kann. Neben den Perspektiv-Schaltfl&auml;chen in der Werkzeugleiste gibt es eine Mischer-Schaltfl&auml;che: ein Klick zeigt einen kleinen Mischer mit einem Regler pro Position (0&ndash;200&nbsp;%). Auf einem Rechner mit wenig Speicher schalten Sie ungenutzte Positionen in den Orgel-Einstellungen unter &bdquo;Perspektiven und gestapelte Reihen&ldquo; aus; die Auswahl wirkt nach dem erneuten Laden der Orgel.</div>
 
 <!-- ============================================================ -->
 <h2 id="wizard">6. Der Assistent f&uuml;r eine neue Orgel</h2>

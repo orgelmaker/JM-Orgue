@@ -11,10 +11,10 @@
 
 <header class="titel">
   <h1>JM-Orgue</h1>
-  <div class="onder">User guide for version 0.8.93 &middot; October 2026</div>
+  <div class="onder">User guide for version 0.8.98 &middot; October 2026</div>
 </header>
 
-<p>JM-Orgue is a virtual pipe organ for Windows, macOS and Linux. It plays Hauptwerk and GrandOrgue sample sets directly, including large surround sets, and you play it with a MIDI keyboard, an organ console or the mouse. This guide walks through the program using screenshots of version 0.8.93.</p>
+<p>JM-Orgue is a virtual pipe organ for Windows, macOS and Linux. It plays Hauptwerk and GrandOrgue sample sets directly, including large surround sets, and you play it with a MIDI keyboard, an organ console or the mouse. This guide walks through the program using screenshots of version 0.8.98.</p>
 <p class="klein">&copy; Martijn van der Kolk. The screenshots were made with demo organs and own test sets; network addresses, access tokens and user folders have been made unreadable.</p>
 
 <nav class="inhoud">
@@ -72,7 +72,7 @@
 <figure><img src="afbeeldingen/en/05_laden.jpg" alt="Loading screen"><figcaption>The loading screen with the progress of reading the samples.</figcaption></figure>
 
 <h3>The blower</h3>
-<p>After loading, the <b>organ blower is off</b>, and without the blower nothing sounds. Switch it on with <b>Blower on</b> in the yellow bar or with the blower button in the toolbar. As soon as the blower is on, the bar disappears. With the blower on, the blower sound of the set (if it has one) runs along.</p>
+<p>After loading, the <b>organ blower is on by default</b> as soon as the set has a blower recording, and you hear a soft wind right away. To practise in silence without that wind sound, switch the <b>Blower</b> button in the toolbar off; the yellow bar only appears when the blower is truly off. Which background sounds are on by default and how loud, you adjust from the toolbar with the small mixer next to the background-sounds button.</p>
 <figure><img src="afbeeldingen/en/06_orgelscherm_motor_uit.jpg" alt="Organ screen with blower off"><figcaption>The organ screen right after loading: blower off, all stops pushed in.</figcaption></figure>
 
 <h3>Stops, couplers and tremulants</h3>
@@ -91,6 +91,8 @@
   <tr><td>Volume slider</td><td>Master volume. Double-clicking resets it to the default; with the scroll wheel you change it in steps of 1 dB.</td></tr>
 </table>
 <p class="klein">Every button of the setter bar can be linked to a button on your own console: right-click (or hold for 3 seconds) and then press the button on your console.</p>
+<h3>Learn the MIDI channel of a manual</h3>
+<p>You do not have to visit Organ Settings first: right-click the name of a division above the stops &mdash; or hold it for 2 seconds on a touch screen &mdash; and the program asks for the lowest and highest key of that manual. The channel is set without leaving the console.</p>
 
 <!-- ============================================================ -->
 <h2 id="werkbalk">4. The toolbar</h2>
@@ -124,7 +126,7 @@
 <h2 id="posities">5. Several listening positions</h2>
 <p>Some sample sets were recorded at several places in the church, for example close, in front, halfway and at the back. Such a set shows the <b>Perspective</b> buttons in the toolbar, one for each position. Click a position to switch it on or off; you can let more than one sound at the same time. To the right of them is the <b>listening position</b>: the slider between &ldquo;at organ&rdquo; and &ldquo;in the back&rdquo; blends smoothly between the recorded positions.</p>
 <figure><img src="afbeeldingen/en/50_nancy_orgelscherm.jpg" alt="Organ screen with perspectives"><figcaption>A set with four recording positions (Close, Front, Middle, Rear) and the listening-position slider.</figcaption></figure>
-<div class="tip"><b>Tip</b> Every position takes memory and processing power. If not everything fits in your computer's memory, the program loads only the position closest to the organ the first time. In Organ Settings you find the block &ldquo;Perspectives and stacked ranks&rdquo;: there you choose which positions are loaded, set the volume per position and, with &ldquo;Keep all positions in memory&rdquo;, switch between positions instantly. A new choice of loaded positions takes effect after the organ is reloaded.</div>
+<div class="tip"><b>Tip</b> All recording positions are loaded together by default, so the listening-position slider blends between them smoothly from the first touch. Next to the Perspective buttons in the toolbar is a mixer button: click it for a small mixer with a slider per position (0&ndash;200&nbsp;%). On a computer with little memory you can switch unused positions off under Organ Settings &rarr; &ldquo;Perspectives and stacked ranks&rdquo;; that choice takes effect after the organ is reloaded.</div>
 
 <!-- ============================================================ -->
 <h2 id="wizard">6. The setup wizard for a new organ</h2>

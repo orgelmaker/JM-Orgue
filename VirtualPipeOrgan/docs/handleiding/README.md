@@ -1,4 +1,4 @@
-# Handleiding JM-Orgue 0.8.93
+# Handleiding JM-Orgue 0.8.98
 
 De handleiding bestaat in alle zeven talen van het programma, met schermafdrukken in
 die taal. Open de PDF om te lezen of te printen.

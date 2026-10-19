@@ -11,10 +11,10 @@
 
 <header class="titel">
   <h1>JM-Orgue</h1>
-  <div class="onder">Manual para la versión 0.8.93 &middot; octubre de 2026</div>
+  <div class="onder">Manual para la versión 0.8.98 &middot; octubre de 2026</div>
 </header>
 
-<p>JM-Orgue es un órgano de tubos virtual para Windows, macOS y Linux. Reproduce directamente los sets de muestras de Hauptwerk y GrandOrgue, incluidos los grandes sets surround, y se toca con un teclado MIDI, una consola o el ratón. Este manual recorre el programa con capturas de pantalla de la versión 0.8.93.</p>
+<p>JM-Orgue es un órgano de tubos virtual para Windows, macOS y Linux. Reproduce directamente los sets de muestras de Hauptwerk y GrandOrgue, incluidos los grandes sets surround, y se toca con un teclado MIDI, una consola o el ratón. Este manual recorre el programa con capturas de pantalla de la versión 0.8.98.</p>
 <p class="klein">&copy; Martijn van der Kolk. Las capturas se han hecho con órganos de demostración y sets de prueba propios; las direcciones de red, los tokens de acceso y las carpetas de usuario se han vuelto ilegibles.</p>
 
 <nav class="inhoud">
@@ -72,7 +72,7 @@
 <figure><img src="afbeeldingen/es/05_laden.jpg" alt="Pantalla de carga"><figcaption>La pantalla de carga con el progreso de la lectura de muestras.</figcaption></figure>
 
 <h3>El motor</h3>
-<p>Tras la carga <b>el motor del órgano está apagado</b> y sin motor no suena nada. Enciéndelo con el botón <b>Motor</b> de la barra amarilla o con el botón del motor de la barra de herramientas. En cuanto el motor funciona, la barra desaparece. Con el motor encendido se oye también el sonido del motor del set (si lo contiene).</p>
+<p>Tras la carga <b>el motor del órgano está encendido por defecto</b> en cuanto el set contiene una grabación del motor, y se oye enseguida un ligero viento. Para practicar en silencio sin ese ruido de viento, apaga el botón <b>Motor</b> en la barra de herramientas; la barra amarilla solo aparece cuando el motor está realmente parado. Qué sonidos de fondo están activos por defecto y con qué volumen se ajusta desde la barra de herramientas con el pequeño mezclador junto al botón de sonidos de fondo.</p>
 <figure><img src="afbeeldingen/es/06_orgelscherm_motor_uit.jpg" alt="Pantalla del órgano con el motor apagado"><figcaption>La pantalla del órgano justo después de la carga: motor apagado, todos los registros recogidos.</figcaption></figure>
 
 <h3>Registros, acoplamientos y trémolos</h3>
@@ -91,6 +91,8 @@
   <tr><td>Deslizador de volumen</td><td>Volumen principal. Un doble clic restablece el valor predeterminado; con la rueda del ratón cambia de 1 dB en 1 dB.</td></tr>
 </table>
 <p class="klein">Cada botón de la barra del combinador se puede vincular a un botón de tu consola: haz clic con el botón derecho (o mantén pulsado 3 segundos) y luego pulsa el botón en la consola.</p>
+<h3>Aprender el canal MIDI de un teclado</h3>
+<p>No hace falta pasar primero por los Ajustes del órgano: haz clic derecho sobre el nombre de una división encima de los registros &mdash; o manténlo pulsado 2 segundos en una pantalla táctil &mdash; y el programa pide la nota más grave y la más aguda de ese teclado. El canal queda ajustado sin salir de la consola.</p>
 
 <!-- ============================================================ -->
 <h2 id="werkbalk">4. La barra de herramientas</h2>
@@ -124,7 +126,7 @@
 <h2 id="posities">5. Varias posiciones de escucha</h2>
 <p>Algunos sets de muestras están grabados en varios puntos de la iglesia, por ejemplo cerca, delante, en medio y detrás. Un set así muestra en la barra de herramientas botones de <b>Perspectiva</b>, uno por posición. Haz clic en una posición para activarla o desactivarla; pueden sonar varias a la vez. A su derecha está la <b>posición de escucha</b>: un deslizador entre «cerca» y «al fondo» que mezcla de forma continua las posiciones grabadas.</p>
 <figure><img src="afbeeldingen/es/50_nancy_orgelscherm.jpg" alt="Pantalla del órgano con perspectivas"><figcaption>Un set con cuatro posiciones de grabación (Close, Front, Middle, Rear) y el deslizador de la posición de escucha.</figcaption></figure>
-<div class="tip"><b>Consejo</b> Cada posición ocupa memoria y potencia de cálculo. Si todo no cabe en la memoria del ordenador, la primera vez el programa carga solo la posición más cercana al órgano. En los Ajustes del órgano encuentras el bloque «Perspectivas y voces múltiples»: ahí eliges qué posiciones cargar, ajustas el volumen de cada una y, con «Mantener todas las posiciones en memoria», cambias de posición al instante. Una nueva elección de las posiciones cargadas surte efecto tras volver a cargar el órgano.</div>
+<div class="tip"><b>Consejo</b> Todas las posiciones de grabación se cargan juntas por defecto, de modo que el deslizador de posición de escucha las mezcla con suavidad desde el primer gesto. Junto a los botones Perspectiva en la barra de herramientas hay un botón de mezclador: un clic abre un pequeño mezclador con un deslizador por posición (0&ndash;200&nbsp;%). En un ordenador con poca memoria puedes desactivar las posiciones no usadas en Ajustes del órgano &rarr; «Perspectivas y voces múltiples»; el cambio surte efecto tras volver a cargar el órgano.</div>
 
 <!-- ============================================================ -->
 <h2 id="wizard">6. El asistente para un órgano nuevo</h2>

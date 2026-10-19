@@ -11,10 +11,10 @@
 
 <header class="titel">
   <h1>JM-Orgue</h1>
-  <div class="onder">Manuale per la versione 0.8.93 &middot; ottobre 2026</div>
+  <div class="onder">Manuale per la versione 0.8.98 &middot; ottobre 2026</div>
 </header>
 
-<p>JM-Orgue è un organo a canne virtuale per Windows, macOS e Linux. Riproduce direttamente i set di campioni Hauptwerk e GrandOrgue, compresi i grandi set surround, e si suona con una tastiera MIDI, una consolle o il mouse. Questo manuale guida attraverso il programma con schermate della versione 0.8.93.</p>
+<p>JM-Orgue è un organo a canne virtuale per Windows, macOS e Linux. Riproduce direttamente i set di campioni Hauptwerk e GrandOrgue, compresi i grandi set surround, e si suona con una tastiera MIDI, una consolle o il mouse. Questo manuale guida attraverso il programma con schermate della versione 0.8.98.</p>
 <p class="klein">&copy; Martijn van der Kolk. Le schermate sono state realizzate con organi dimostrativi e propri set di prova; indirizzi di rete, token di accesso e cartelle utente sono stati resi illeggibili.</p>
 
 <nav class="inhoud">
@@ -72,7 +72,7 @@
 <figure><img src="afbeeldingen/it/05_laden.jpg" alt="Schermata di caricamento"><figcaption>La schermata di caricamento con l'avanzamento della lettura dei campioni.</figcaption></figure>
 
 <h3>Il motore</h3>
-<p>Dopo il caricamento <b>il motore dell'organo è spento</b> e senza motore non si sente nulla. Accendilo con il pulsante <b>Motore</b> nella barra gialla o con il pulsante del motore nella barra degli strumenti. Appena il motore gira, la barra scompare. A motore acceso si sente anche il suono del motore del set (se lo contiene).</p>
+<p>Dopo il caricamento <b>il motore dell'organo è acceso per impostazione predefinita</b> non appena il set contiene una registrazione del motore, e si sente subito un leggero fruscio d'aria. Per esercitarsi in silenzio senza quel rumore d'aria, spegni il pulsante <b>Motore</b> nella barra degli strumenti; la barra gialla appare solo quando il motore è davvero fermo. Quali rumori di sfondo sono attivi di default e con quale volume lo regoli dalla barra degli strumenti con il piccolo mixer accanto al pulsante dei rumori di sfondo.</p>
 <figure><img src="afbeeldingen/it/06_orgelscherm_motor_uit.jpg" alt="Schermata dell'organo con il motore spento"><figcaption>La schermata dell'organo subito dopo il caricamento: motore spento, tutti i registri rientrati.</figcaption></figure>
 
 <h3>Registri, unioni e tremoli</h3>
@@ -91,6 +91,8 @@
   <tr><td>Cursore del volume</td><td>Volume principale. Un doppio clic ripristina il valore predefinito; con la rotella del mouse cambia di 1 dB alla volta.</td></tr>
 </table>
 <p class="klein">Ogni pulsante della barra del combinatore può essere collegato a un pulsante della tua consolle: fai clic con il tasto destro (o tieni premuto 3 secondi) e poi premi il pulsante sulla consolle.</p>
+<h3>Imparare il canale MIDI di un manuale</h3>
+<p>Non devi passare prima dalle Impostazioni organo: fai clic destro sul nome di una divisione sopra i registri &mdash; o tienilo premuto per 2 secondi su uno schermo touch &mdash; e il programma chiede la nota pi&ugrave; grave e la pi&ugrave; acuta di quel manuale. Il canale viene impostato senza lasciare la consolle.</p>
 
 <!-- ============================================================ -->
 <h2 id="werkbalk">4. La barra degli strumenti</h2>
@@ -124,7 +126,7 @@
 <h2 id="posities">5. Più posizioni di ascolto</h2>
 <p>Alcuni set di campioni sono registrati in più punti della chiesa, per esempio vicino, davanti, a metà e dietro. Un set così mostra nella barra degli strumenti i pulsanti <b>Prospettiva</b>, uno per posizione. Fai clic su una posizione per attivarla o disattivarla; ne possono suonare più insieme. Alla loro destra c'è la <b>posizione di ascolto</b>: un cursore tra &laquo;alla consolle&raquo; e &laquo;in fondo&raquo; che mescola in modo continuo le posizioni registrate.</p>
 <figure><img src="afbeeldingen/it/50_nancy_orgelscherm.jpg" alt="Schermata dell'organo con prospettive"><figcaption>Un set con quattro posizioni di registrazione (Close, Front, Middle, Rear) e il cursore della posizione di ascolto.</figcaption></figure>
-<div class="tip"><b>Suggerimento</b> Ogni posizione occupa memoria e potenza di calcolo. Se tutto non sta nella memoria del computer, la prima volta il programma carica solo la posizione più vicina all'organo. Nelle Impostazioni organo trovi il blocco &laquo;Prospettive e voci multiple&raquo;: lì scegli quali posizioni caricare, regoli il volume di ciascuna e, con &laquo;Tieni tutte le posizioni in memoria&raquo;, passi da una posizione all'altra all'istante. Una nuova scelta delle posizioni caricate ha effetto dopo aver ricaricato l'organo.</div>
+<div class="tip"><b>Suggerimento</b> Tutte le posizioni di registrazione vengono caricate insieme per impostazione predefinita, cos&igrave; il cursore della posizione di ascolto le mescola dolcemente fin dal primo tocco. Accanto ai pulsanti Prospettiva nella barra degli strumenti c'&egrave; un pulsante del mixer: un clic apre un piccolo mixer con un cursore per posizione (0&ndash;200&nbsp;%). Su un computer con poca memoria puoi disattivare le posizioni non usate in Impostazioni organo &rarr; &laquo;Prospettive e voci multiple&raquo;; la scelta ha effetto dopo aver ricaricato l'organo.</div>
 
 <!-- ============================================================ -->
 <h2 id="wizard">6. La procedura guidata per un organo nuovo</h2>

@@ -11,10 +11,10 @@
 
 <header class="titel">
   <h1>JM-Orgue</h1>
-  <div class="onder">Handleiding voor versie 0.8.93 &middot; oktober 2026</div>
+  <div class="onder">Handleiding voor versie 0.8.98 &middot; oktober 2026</div>
 </header>
 
-<p>JM-Orgue is een virtueel pijporgel voor Windows, macOS en Linux. Het programma speelt Hauptwerk- en GrandOrgue-samplesets rechtstreeks af, ook grote surround-sets, en je bespeelt het met een MIDI-klavier, een orgelconsole of de muis. Deze handleiding loopt het programma door aan de hand van schermafbeeldingen van versie 0.8.93.</p>
+<p>JM-Orgue is een virtueel pijporgel voor Windows, macOS en Linux. Het programma speelt Hauptwerk- en GrandOrgue-samplesets rechtstreeks af, ook grote surround-sets, en je bespeelt het met een MIDI-klavier, een orgelconsole of de muis. Deze handleiding loopt het programma door aan de hand van schermafbeeldingen van versie 0.8.98.</p>
 
 <p class="klein">&copy; Martijn van der Kolk. De schermafbeeldingen zijn gemaakt met demo-orgels en eigen testsets; netwerkadressen, toegangstoken en gebruikersmappen zijn onleesbaar gemaakt.</p>
 
@@ -74,7 +74,7 @@
 <figure><img src="afbeeldingen/nl/05_laden.jpg" alt="Laadscherm"><figcaption>Het laadscherm met de voortgang van het inlezen van de samples.</figcaption></figure>
 
 <h3>De motor</h3>
-<p>Na het laden staat de <b>orgelmotor uit</b>, en zonder motor klinkt er niets. Zet hem aan met <b>Motor aan</b> in de gele balk of met de motorknop in de werkbalk. Zodra de motor aan staat verdwijnt de balk. Is de motor aan, dan loopt ook het motorgeluid van de set mee (als de set dat bevat).</p>
+<p>Na het laden staat de <b>orgelmotor standaard aan</b> zodra de set een motoropname heeft, en je hoort meteen een lichte wind. Wil je in stilte oefenen zonder dat windgeluid, zet de knop <b>Motor</b> in de werkbalk dan uit; de gele balk verschijnt pas als er echt geen motor loopt. Welke bijgeluiden standaard aan staan en hoe hard, regel je in de werkbalk met de kleine mixer bij de bijgeluiden-knop.</p>
 <figure><img src="afbeeldingen/nl/06_orgelscherm_motor_uit.jpg" alt="Orgelscherm met motor uit"><figcaption>Het orgelscherm direct na het laden: motor uit, alle registers ingedrukt.</figcaption></figure>
 
 <h3>Registers, koppels en tremulanten</h3>
@@ -93,6 +93,8 @@
   <tr><td>Volumeschuif</td><td>Hoofdvolume. Dubbelklikken zet het terug op de standaardwaarde; met het scrollwiel verander je het in stappen van 1 dB.</td></tr>
 </table>
 <p class="klein">Elke knop van de setzerbalk kun je aan een knop op je eigen console koppelen: klik met de rechtermuisknop (of houd 3 seconden ingedrukt) en druk daarna op de knop op je console.</p>
+<h3>MIDI-kanaal per klavier leren</h3>
+<p>Hoef je niet eerst naar de Orgel-instellingen: rechtsklik op de naam van een werk boven de registers &mdash; of raak die 2 seconden aan op een aanraakscherm &mdash; en het programma vraagt om de laagste en de hoogste toets van dat klavier. Zo stel je het kanaal in zonder de speeltafel te verlaten.</p>
 
 <!-- ============================================================ -->
 <h2 id="werkbalk">4. De werkbalk</h2>
@@ -126,7 +128,7 @@
 <h2 id="posities">5. Meerdere luisterposities</h2>
 <p>Sommige samplesets zijn op meerdere plaatsen in de kerk opgenomen, bijvoorbeeld dichtbij, vooraan, halverwege en achterin. Zo'n set toont in de werkbalk de knoppen <b>Perspectief</b> met een knop per positie. Klik op een positie om hem in of uit te schakelen; je kunt er meer dan een tegelijk laten klinken. Rechts daarvan staat de <b>luisterpositie</b>: de schuif tussen &ldquo;bij orgel&rdquo; en &ldquo;achter in de kerk&rdquo; mengt vloeiend tussen de opgenomen posities.</p>
 <figure><img src="afbeeldingen/nl/50_nancy_orgelscherm.jpg" alt="Orgelscherm met perspectieven"><figcaption>Een set met vier opnameposities (Close, Front, Middle, Rear) en de luisterpositie-schuif.</figcaption></figure>
-<div class="tip"><b>Tip</b> Elke positie vraagt geheugen en rekenkracht. Past niet alles in het geheugen van je computer, dan laadt het programma bij het eerste gebruik alleen de positie die het dichtst bij het orgel ligt. In de Orgel-instellingen staat het blok &ldquo;Perspectieven en gestapelde ranks&rdquo;: daar kies je welke posities worden geladen, stel je per positie het volume in en kun je met &ldquo;Alle posities in het geheugen houden&rdquo; ogenblikkelijk tussen posities wisselen. Een nieuwe keuze van geladen posities werkt na het opnieuw laden van het orgel.</div>
+<div class="tip"><b>Tip</b> Alle opnameposities worden standaard tegelijk geladen, zodat de luisterpositie-schuif ze meteen vloeiend mengt. Naast de perspectief-knoppen in de werkbalk staat een mixerknop: klik erop voor een kleine mixer met een schuif per positie (0&ndash;200&nbsp;%). Op een computer met weinig geheugen zet je in de Orgel-instellingen onder &ldquo;Perspectieven en gestapelde ranks&rdquo; posities uit die je niet gebruikt; die keuze werkt na het opnieuw laden van het orgel.</div>
 
 <!-- ============================================================ -->
 <h2 id="wizard">6. De instelwizard voor een nieuw orgel</h2>
