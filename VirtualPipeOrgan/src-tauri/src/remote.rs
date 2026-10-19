@@ -110,6 +110,11 @@ pub struct RemoteStatusDto {
     pub port: u16,
     pub token: String,
     pub urls: Vec<String>,
+    /// Eén QR per adres (0.8.97): als er meerdere netwerkadressen zijn
+    /// (VPN, VirtualBox, Hyper-V naast de echte wifi), kan de organist de
+    /// werkende scannen in plaats van alleen de eerste.
+    pub qrs: Vec<Option<String>>,
+    /// Behouden als compatibiliteitsveld (eerste QR), voor oudere UI's.
     pub qr_svg: Option<String>,
     pub error: Option<String>,
 }
@@ -156,13 +161,15 @@ pub fn status_inner(state: &AppState) -> RemoteStatusDto {
     let port = prefs.remote_port.unwrap_or(DEFAULT_PORT);
     let running = state.remote_api.lock().is_some();
     let urls: Vec<String> = lan_ips().iter().map(|ip| remote_url(ip, port, &token)).collect();
-    let qr = urls.first().and_then(|u| qr_svg(u));
+    let qrs: Vec<Option<String>> = urls.iter().map(|u| qr_svg(u)).collect();
+    let qr = qrs.first().cloned().flatten();
     RemoteStatusDto {
         enabled: prefs.remote_enabled.unwrap_or(false),
         running,
         port,
         token,
         urls,
+        qrs,
         qr_svg: qr,
         error: state.remote_last_error.read().clone(),
     }

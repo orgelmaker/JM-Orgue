@@ -1371,6 +1371,8 @@
     "new_token": "Nieuw token",
     "new_token_confirm": "Nieuw token maken? Eerder gescande QR-codes en opgeslagen adressen werken daarna niet meer.",
     "url_label": "Adres voor tablet/telefoon (of scan de QR-code):",
+    "multi_hint": "Meerdere netwerkadressen gevonden. Scan op je tablet of telefoon de QR die het eerst werkt.",
+    "help_unreachable": "Werkt het scannen niet? Zorg dat tablet en pc op hetzelfde wifi-netwerk zitten (geen gast-netwerk) en controleer in Windows dat het netwerk op \"Privé\" staat.",
     "no_lan_ip": "Geen netwerkadres gevonden — is deze pc verbonden met wifi of een netwerkkabel?",
     "running": "Actief",
     "stopped": "Niet actief",

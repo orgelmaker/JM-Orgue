@@ -1371,6 +1371,8 @@
     "new_token": "Nuovo token",
     "new_token_confirm": "Creare un nuovo token? I codici QR già scansionati e gli indirizzi salvati smetteranno di funzionare.",
     "url_label": "Indirizzo per tablet/telefono (oppure scansiona il codice QR):",
+    "multi_hint": "Sono stati trovati più indirizzi di rete. Sul tablet o telefono scansiona il QR che funziona per primo.",
+    "help_unreachable": "La connessione non funziona? Verifica che tablet e PC siano sulla stessa rete Wi-Fi (non una rete ospiti) e che Windows contrassegni la rete come «Privata».",
     "no_lan_ip": "Nessun indirizzo di rete trovato — questo PC è collegato al Wi-Fi o a un cavo di rete?",
     "running": "Attivo",
     "stopped": "Non attivo",

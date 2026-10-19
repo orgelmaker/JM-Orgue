@@ -3400,7 +3400,7 @@
   // ===== Afstandsbediening in het netwerk (0.7.38) =====
   // Instellingenblok (Algemene Instellingen): schakelaar, poort, URL('s), QR,
   // nieuw token. Alleen het hoofdvenster laadt/pollt dit (niet in PanelApp).
-  let remote = { enabled: false, running: false, port: 8766, token: '', urls: [], qr_svg: null, error: null };
+  let remote = { enabled: false, running: false, port: 8766, token: '', urls: [], qrs: [], qr_svg: null, error: null };
   let remotePortInput = 8766;
   let remoteBusy = false;
   let unlistenRemoteVol = null;
@@ -8255,16 +8255,24 @@
                 </div>
                 {#if remote.enabled && remote.running}
                   <div style="margin-top:0.4rem; font-size:0.8rem; color:var(--text-secondary);">{$t('remote.url_label')}</div>
-                  {#each remote.urls as u}
-                    <div style="font-family:'JetBrains Mono',monospace; font-size:0.85rem; user-select:text;">{u}</div>
-                  {/each}
+                  {#if remote.urls.length > 1}
+                    <p style="margin:0.2rem 0 0.3rem; font-size:0.75rem; color:var(--text-muted);">{$t('remote.multi_hint')}</p>
+                  {/if}
                   {#if remote.urls.length === 0}
                     <p style="margin:0.2rem 0 0; font-size:0.75rem; color:var(--text-muted);">{$t('remote.no_lan_ip')}</p>
                   {/if}
-                  {#if remote.qr_svg}
-                    <!-- {@html} is veilig: de SVG komt uit de eigen qrcode-crate, niet uit gebruikersinvoer. -->
-                    <div style="background:#fff; padding:8px; width:196px; border-radius:6px; margin-top:0.4rem;">{@html remote.qr_svg}</div>
-                  {/if}
+                  <!-- Per adres een eigen QR; de tablet scant de werkende (0.8.97). {@html} is veilig: de SVG komt uit de eigen qrcode-crate, niet uit gebruikersinvoer. -->
+                  <div style="display:flex; flex-wrap:wrap; gap:0.8rem; margin-top:0.4rem;">
+                    {#each remote.urls as u, i}
+                      <div style="display:flex; flex-direction:column; align-items:center; max-width:220px;">
+                        {#if (remote.qrs ? remote.qrs[i] : null) || (i === 0 && remote.qr_svg)}
+                          <div style="background:#fff; padding:8px; width:196px; border-radius:6px;">{@html (remote.qrs ? remote.qrs[i] : null) || remote.qr_svg}</div>
+                        {/if}
+                        <div style="font-family:'JetBrains Mono',monospace; font-size:0.78rem; user-select:text; margin-top:0.3rem; text-align:center; word-break:break-all;">{u}</div>
+                      </div>
+                    {/each}
+                  </div>
+                  <p style="margin:0.5rem 0 0; font-size:0.72rem; color:var(--text-muted);">{$t('remote.help_unreachable')}</p>
                 {/if}
                 {#if remote.error}
                   <p style="margin:0.3rem 0 0; font-size:0.75rem; color:var(--error);">{remote.error}</p>

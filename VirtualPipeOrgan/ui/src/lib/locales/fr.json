@@ -1371,6 +1371,8 @@
     "new_token": "Nouveau jeton",
     "new_token_confirm": "Créer un nouveau jeton ? Les codes QR déjà scannés et les adresses enregistrées ne fonctionneront plus.",
     "url_label": "Adresse pour tablette/téléphone (ou scannez le code QR) :",
+    "multi_hint": "Plusieurs adresses réseau ont été trouvées. Sur votre tablette ou téléphone, scannez le code QR qui fonctionne en premier.",
+    "help_unreachable": "La connexion échoue ? Vérifiez que la tablette et le PC sont sur le même réseau Wi-Fi (pas un réseau invité) et que Windows marque le réseau comme « Privé ».",
     "no_lan_ip": "Aucune adresse réseau trouvée — ce PC est-il connecté au Wi-Fi ou par câble réseau ?",
     "running": "Actif",
     "stopped": "Inactif",

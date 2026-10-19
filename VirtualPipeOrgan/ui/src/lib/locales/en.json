@@ -1371,6 +1371,8 @@
     "new_token": "New token",
     "new_token_confirm": "Create a new token? Previously scanned QR codes and saved addresses will stop working.",
     "url_label": "Address for tablet/phone (or scan the QR code):",
+    "multi_hint": "Multiple network addresses were found. On your tablet or phone, scan the QR that works first.",
+    "help_unreachable": "Can't connect? Make sure the tablet and PC are on the same Wi-Fi network (not a guest network) and that Windows marks the network as \"Private\".",
     "no_lan_ip": "No network address found — is this PC connected to Wi-Fi or a network cable?",
     "running": "Running",
     "stopped": "Not running",

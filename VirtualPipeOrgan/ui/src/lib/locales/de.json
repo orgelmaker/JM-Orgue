@@ -1371,6 +1371,8 @@
     "new_token": "Neues Token",
     "new_token_confirm": "Neues Token erstellen? Bereits gescannte QR-Codes und gespeicherte Adressen funktionieren danach nicht mehr.",
     "url_label": "Adresse für Tablet/Telefon (oder QR-Code scannen):",
+    "multi_hint": "Mehrere Netzwerkadressen gefunden. Scannen Sie auf Ihrem Tablet oder Telefon den QR-Code, der zuerst funktioniert.",
+    "help_unreachable": "Verbindung klappt nicht? Stellen Sie sicher, dass Tablet und PC im gleichen WLAN sind (kein Gast-Netzwerk) und dass Windows das Netzwerk als „Privat\" markiert.",
     "no_lan_ip": "Keine Netzwerkadresse gefunden — ist dieser PC mit WLAN oder einem Netzwerkkabel verbunden?",
     "running": "Aktiv",
     "stopped": "Nicht aktiv",

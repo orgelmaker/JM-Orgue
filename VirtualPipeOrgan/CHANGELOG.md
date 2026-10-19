@@ -5,6 +5,18 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.8.97] - 2026-10-19
+
+### QR-code voor tablet of telefoon
+- Pc's met meerdere netwerkadressen (VPN, VirtualBox, Hyper-V naast de wifi)
+  lieten slechts één QR-code zien, van het eerste adres. Als dat een
+  virtueel adres was, kon de tablet er niet bij en kwam de melding
+  `ERR_ADDRESS_UNREACHABLE`. De app toont nu een QR per gevonden adres,
+  met een hint erbij als er meerdere zijn.
+- Onder de QR's staat een korte uitleg: zorg dat tablet en pc op hetzelfde
+  wifi-netwerk zitten (geen gast-netwerk) en dat Windows het netwerk als
+  "Privé" markeert.
+
 ## [0.8.96] - 2026-10-17
 
 ### Bijwerkmelding pas als de release klaar is

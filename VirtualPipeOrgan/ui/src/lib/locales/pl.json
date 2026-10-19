@@ -1371,6 +1371,8 @@
     "new_token": "Nowy token",
     "new_token_confirm": "Utworzyć nowy token? Wcześniej zeskanowane kody QR i zapisane adresy przestaną działać.",
     "url_label": "Adres dla tabletu lub telefonu (albo zeskanuj kod QR):",
+    "multi_hint": "Znaleziono kilka adresów sieciowych. Na tablecie lub telefonie zeskanuj kod QR, który zadziała pierwszy.",
+    "help_unreachable": "Nie można się połączyć? Upewnij się, że tablet i komputer są w tej samej sieci Wi-Fi (nie w sieci gościnnej) i że Windows oznacza sieć jako „Prywatna\".",
     "no_lan_ip": "Nie znaleziono adresu sieciowego — czy ten komputer jest połączony z Wi-Fi albo kablem sieciowym?",
     "running": "Aktywne",
     "stopped": "Nieaktywne",

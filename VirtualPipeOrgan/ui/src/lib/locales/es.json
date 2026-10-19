@@ -1371,6 +1371,8 @@
     "new_token": "Nuevo token",
     "new_token_confirm": "¿Crear un token nuevo? Los códigos QR escaneados antes y las direcciones guardadas dejarán de funcionar.",
     "url_label": "Dirección para la tableta o el teléfono (o escanea el código QR):",
+    "multi_hint": "Se encontraron varias direcciones de red. En tu tableta o teléfono, escanea el QR que funcione primero.",
+    "help_unreachable": "¿No puedes conectar? Comprueba que la tableta y el PC estén en la misma red Wi-Fi (no una red de invitados) y que Windows marque la red como «Privada».",
     "no_lan_ip": "No se ha encontrado ninguna dirección de red — ¿está este PC conectado por wifi o por cable?",
     "running": "Activo",
     "stopped": "Inactivo",
