@@ -3540,14 +3540,7 @@ input[type="range"]::-webkit-slider-thumb:hover {
 .persp-mixer-rij input[type="range"] { flex: 1; }
 .persp-mixer-pct { min-width: 2.6rem; text-align: right; opacity: 0.75; font-variant-numeric: tabular-nums; }
 
-/* MIDI-leren knopje bij de klaviernaam (0.8.98): klein, dezelfde kleur als de
-   koptekst; blauw als het "learning" wacht. */
-.division-name { display: inline-flex; align-items: center; gap: 0.4rem; }
-.division-midi-learn-btn {
-  background: transparent; border: none; padding: 2px 4px; border-radius: 4px;
-  color: var(--text-on-division-badge, var(--text-secondary)); opacity: 0.6;
-  cursor: pointer; display: inline-flex; align-items: center;
-}
-.division-midi-learn-btn:hover:not(:disabled) { opacity: 1; background: rgba(0,0,0,0.06); }
-.division-midi-learn-btn:disabled { opacity: 0.25; cursor: default; }
-.division-midi-learn-btn.learning { color: var(--primary); opacity: 1; }
+/* Klaviernaam als MIDI-learn-doel (0.8.98): subtiele cursor om aan te geven
+   dat je rechtsklik of lang indrukken kunt gebruiken. */
+.division-header-compact { cursor: context-menu; }
+.division-header-compact.learning { outline: 2px solid var(--primary); outline-offset: 2px; }

@@ -6108,23 +6108,14 @@
             <div
               class="division"
               style={mainLayout === 'vertical' ? (divisieStijlen[division.name] || '') : ''}>
-              <div class="division-header division-header-compact">
-                <div class="division-name">
-                  <!-- 0.8.98 (Piotr-feedback): klein MIDI-leren-knopje naast de klaviernaam,
-                       zodat de organist zonder naar Routing te gaan het kanaal kan koppelen. -->
-                  <button type="button" class="division-midi-learn-btn"
-                          class:learning={learningDivision === division.name}
-                          on:click|stopPropagation={() => learnChannel(division.name)}
-                          disabled={!midiConnected || (learningDivision !== null && learningDivision !== division.name)}
-                          title={$t('settings.midi_learn_division')}
-                          aria-label={$t('settings.midi_learn_division')}>
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4">
-                      <circle cx="12" cy="12" r="9"/>
-                      <path d="M12 7v5l3 2"/>
-                    </svg>
-                  </button>
-                  <span>{division.display_name || division.name}</span>
-                </div>
+              <!-- 0.8.98 (Piotr-feedback): MIDI-kanaal leren via rechtsklik of
+                   2 seconden vasthouden op de klaviernaam, zonder extra knopje.
+                   use:midiLearn verzorgt beide gebaren uniform. -->
+              <div class="division-header division-header-compact"
+                   use:midiLearn={{ pressDelayMs: 2000, onTrigger: () => learnChannel(division.name) }}
+                   title={$t('settings.midi_learn_division')}
+                   class:learning={learningDivision === division.name}>
+                <div class="division-name">{division.display_name || division.name}</div>
                 {#if isSwellEnabled(division.name)}
                   <div class="swell-leds">
                     {#each Array(10) as _, i}
