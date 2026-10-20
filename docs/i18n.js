@@ -53,7 +53,7 @@ const DICT = {
     faq_q5: "Werkt het op mijn aanraakscherm?",
     faq_a5: "Ja. Alle knoppen zijn met de vinger bedienbaar; MIDI-leren gaat met rechtsklik of twee seconden vasthouden, zodat u geen muis nodig heeft. Een extra scherm (bijvoorbeeld een tweede monitor of een tablet) kan als los registerscherm dienen.",
     foot_issues: "Vragen / problemen", foot_license: "Licentie",
-    foot_tag: "Vrij te gebruiken en door te geven. Niet door Hauptwerk Virtual Instruments, Milan Digital Audio of Johan de Heer gesponsord of goedgekeurd.",
+    foot_tag: "Vrij te gebruiken en door te geven.",
   },
   en: {
     tagline: "A virtual pipe organ for home.",
@@ -105,7 +105,7 @@ const DICT = {
     faq_q5: "Does it work on my touch screen?",
     faq_a5: "Yes. Every button works with a finger; MIDI learn is right-click or hold 2 s, so no mouse needed. A second screen (monitor or tablet) can serve as a separate stop console.",
     foot_issues: "Questions / issues", foot_license: "License",
-    foot_tag: "Free to use and share. Not endorsed by, nor affiliated with, Hauptwerk Virtual Instruments, Milan Digital Audio or Johan de Heer.",
+    foot_tag: "Free to use and share.",
   },
   de: {
     tagline: "Eine virtuelle Pfeifenorgel für zuhause.",
@@ -157,7 +157,7 @@ const DICT = {
     faq_q5: "Funktioniert es auf meinem Touchscreen?",
     faq_a5: "Ja. Alle Tasten lassen sich mit dem Finger bedienen; MIDI-Lernen per Rechtsklick oder 2 s halten, keine Maus nötig. Ein zweiter Bildschirm (Monitor oder Tablet) kann als separate Registertafel dienen.",
     foot_issues: "Fragen / Probleme", foot_license: "Lizenz",
-    foot_tag: "Frei zu nutzen und weiterzugeben. Nicht gesponsert von oder verbunden mit Hauptwerk Virtual Instruments, Milan Digital Audio oder Johan de Heer.",
+    foot_tag: "Frei zu nutzen und weiterzugeben.",
   },
   fr: {
     tagline: "Un orgue à tuyaux virtuel pour la maison.",
@@ -209,7 +209,7 @@ const DICT = {
     faq_q5: "Est-ce que ça marche sur mon écran tactile ?",
     faq_a5: "Oui. Tous les boutons se manipulent au doigt ; MIDI learn au clic droit ou en maintenant 2 s, pas besoin de souris. Un second écran (moniteur ou tablette) peut servir de console séparée.",
     foot_issues: "Questions / problèmes", foot_license: "Licence",
-    foot_tag: "Libre d'utilisation et de partage. Sans sponsor ni affiliation avec Hauptwerk Virtual Instruments, Milan Digital Audio ou Johan de Heer.",
+    foot_tag: "Libre d'utilisation et de partage.",
   },
   it: {
     tagline: "Un organo a canne virtuale per casa.",
@@ -261,7 +261,7 @@ const DICT = {
     faq_q5: "Funziona sul mio schermo touch?",
     faq_a5: "Sì. Tutti i pulsanti sono usabili col dito; MIDI learn con clic destro o tenendo premuto 2 s, senza mouse. Un secondo schermo (monitor o tablet) può servire come consolle separata.",
     foot_issues: "Domande / problemi", foot_license: "Licenza",
-    foot_tag: "Libero da usare e condividere. Non sponsorizzato né affiliato a Hauptwerk Virtual Instruments, Milan Digital Audio o Johan de Heer.",
+    foot_tag: "Libero da usare e condividere.",
   },
   es: {
     tagline: "Un órgano de tubos virtual para casa.",
@@ -313,7 +313,7 @@ const DICT = {
     faq_q5: "¿Funciona en mi pantalla táctil?",
     faq_a5: "Sí. Todos los botones responden al dedo; MIDI learn con clic derecho o manteniendo 2 s, sin ratón. Una segunda pantalla (monitor o tableta) puede servir como panel de registros aparte.",
     foot_issues: "Preguntas / problemas", foot_license: "Licencia",
-    foot_tag: "Libre de usar y compartir. Sin patrocinio ni afiliación con Hauptwerk Virtual Instruments, Milan Digital Audio o Johan de Heer.",
+    foot_tag: "Libre de usar y compartir.",
   },
   pl: {
     tagline: "Wirtualne organy piszczałkowe do domu.",
@@ -365,7 +365,7 @@ const DICT = {
     faq_q5: "Czy to działa na moim ekranie dotykowym?",
     faq_a5: "Tak. Wszystkie przyciski obsługuje się palcem; MIDI learn prawym przyciskiem lub przytrzymaniem 2 s, bez myszy. Drugi ekran (monitor lub tablet) może pełnić rolę osobnego panelu rejestrów.",
     foot_issues: "Pytania / problemy", foot_license: "Licencja",
-    foot_tag: "Wolno używać i dzielić się. Bez sponsoringu ani powiązania z Hauptwerk Virtual Instruments, Milan Digital Audio ani Johanem de Heer.",
+    foot_tag: "Wolno używać i dzielić się.",
   },
 };
 

@@ -73,10 +73,20 @@ code { background: rgba(255,255,255,0.07); padding: 0.05em 0.35em; border-radius
   text-align: center;
 }
 .hero-inner { max-width: 820px; margin: 0 auto; }
-.hero-logo {
-  width: 128px; height: 128px; margin: 0 auto 0.75rem;
-  border-radius: 50%;
-  box-shadow: 0 0 0 3px var(--gold), 0 10px 40px rgba(0,0,0,0.55);
+.hero-shot {
+  margin: 2.2rem auto 0;
+  max-width: 1000px;
+}
+.hero-shot img {
+  width: 100%;
+  height: auto;
+  display: block;
+  border-radius: 10px;
+  border: 1px solid rgba(212,175,55,0.45);
+  box-shadow:
+    0 0 0 1px rgba(0,0,0,0.4),
+    0 25px 60px -15px rgba(0,0,0,0.75),
+    0 0 0 2px rgba(212,175,55,0.12);
 }
 .hero h1 {
   font-size: 3.4rem; letter-spacing: -0.02em;
