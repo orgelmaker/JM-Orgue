@@ -9,9 +9,10 @@ JM-Orgue leest opnamen van echte orgels en geeft ze terug met registers,
 koppels, zwelkasten, tremulanten, galm en een generaal crescendo — zoals
 aan een echte speeltafel.
 
-[![downloads](https://img.shields.io/github/downloads/orgelmaker/JM-Orgue/total.svg?label=downloads&color=1f6feb&style=for-the-badge&cacheSeconds=3600)](https://github.com/orgelmaker/JM-Orgue/releases)
 [![laatste versie](https://img.shields.io/github/v/release/orgelmaker/JM-Orgue?label=laatste%20versie&color=238636&style=for-the-badge)](https://github.com/orgelmaker/JM-Orgue/releases/latest)
+[![downloads](https://img.shields.io/github/downloads/orgelmaker/JM-Orgue/total.svg?label=downloads&color=1f6feb&style=for-the-badge&cacheSeconds=3600)](https://github.com/orgelmaker/JM-Orgue/releases)
 [![platforms](https://img.shields.io/badge/platforms-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-6e40c9?style=for-the-badge)](#downloaden)
+[![talen](https://img.shields.io/badge/talen-NL%20EN%20DE%20FR%20IT%20ES%20PL-ff8c00?style=for-the-badge)](#)
 [![licentie](https://img.shields.io/badge/licentie-vrij%20gebruiken%20%26%20doorgeven-8957e5?style=for-the-badge)](#licentie)
 
 <table>
@@ -25,6 +26,26 @@ aan een echte speeltafel.
 <sub>De speeltafel in de app: registers per divisie, koppels en crescendo bij de hand.</sub>
 
 </div>
+
+---
+
+## Waarom JM-Orgue
+
+| | JM-Orgue | Hauptwerk Advanced | Sweelinq |
+|---|:---:|:---:|:---:|
+| **Prijs** | **€ 0** | $599 of $29,99/mnd | abonnement |
+| **DRM / dongle** | **geen** | iLok-dongle (90-dagenregel) | account |
+| **Doorgeven aan vrienden** | **mag** | nee | nee |
+| **Windows · macOS · Linux** | **✅ alle drie** | Windows · macOS | Windows · macOS |
+| **Taal van de speeltafel** | **7 talen** | 1 taal | 1 taal |
+| **Hauptwerk-samplesets** | **✅** | ✅ | ✅ |
+| **GrandOrgue-samplesets** | **✅** | ❌ | ❌ |
+| **Convolutie-galm, windmodel, perspectieven** | ✅ | ✅ | ✅ |
+| **Afstandsbediening op telefoon of tablet** | **✅** | — | — |
+| **Live-notatie: speel en zie de noten** | **✅** | — | — |
+| **Hoofdtelefooncorrectie (522 modellen)** | **✅ AutoEq** | — | — |
+
+<sub>Vergelijking op basis van <a href="https://www.hauptwerk.com/pricing/">hauptwerk.com/pricing</a> en openbare Sweelinq-aankondigingen. JM-Orgue blijft gratis en zonder dongle.</sub>
 
 ---
 
@@ -67,7 +88,11 @@ niet te zoeken welke de laatste is.
 </table>
 
 Alle versies met hun wijzigingen staan bij de
-[releases](https://github.com/orgelmaker/JM-Orgue/releases).
+[releases](https://github.com/orgelmaker/JM-Orgue/releases); de meest recente
+is [v0.9.12](https://github.com/orgelmaker/JM-Orgue/releases/tag/v0.9.12) —
+beter solo-gedrag van melodie- en baskoppel, T.A. werkt direct, bas- en
+discanthelften blijven op het deelpunt en de zweltrede leer je nu in vanaf
+het orgelscherm.
 
 > **Bijwerken.** Op Windows meldt de app zelf dat er een nieuwe versie is en
 > installeert die op verzoek, waarna hij opnieuw opstart. Op macOS en Linux
@@ -144,14 +169,38 @@ MIDI en MP3, met een archief dat vanzelf meeschrijft.
 <td valign="top">
 
 ### Noteren
-Wat je speelt verschijnt als notenschrift in een eigen venster. Dit
-onderdeel is nog alfa en niet nagelopen.
+Wat je speelt verschijnt als notenschrift in een eigen venster — ook
+als klavar-notatie. Dit onderdeel is nog alfa.
 
 </td>
 <td valign="top">
 
 ### Zeven talen
 Nederlands, Engels, Duits, Frans, Spaans, Italiaans en Pools.
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+### Afstandsbediening
+Een QR-code in de app opent een tablet of telefoon in het eigen wifi-net
+als tweede registreerscherm, zonder iets te installeren.
+
+</td>
+<td valign="top">
+
+### Hoofdtelefoon-EQ
+Automatische correctie voor 522 koptelefoonmodellen (AutoEq-presets),
+plus een eigen EQ per uitgang.
+
+</td>
+<td valign="top">
+
+### MIDI-leren overal
+Rechtsklik of 2 seconden vasthouden op een knop koppelt hem aan een
+knop of pedaal op je eigen speeltafel. Werkt op registers, koppels,
+zweltreden en de setzerbalk.
 
 </td>
 </tr>
