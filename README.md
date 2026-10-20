@@ -9,11 +9,11 @@ JM-Orgue leest opnamen van echte orgels en geeft ze terug met registers,
 koppels, zwelkasten, tremulanten, galm en een generaal crescendo — zoals
 aan een echte speeltafel.
 
-[![laatste versie](https://img.shields.io/github/v/release/orgelmaker/JM-Orgue?label=laatste%20versie&color=238636&style=for-the-badge)](https://github.com/orgelmaker/JM-Orgue/releases/latest)
-[![downloads](https://img.shields.io/github/downloads/orgelmaker/JM-Orgue/total.svg?label=downloads&color=1f6feb&style=for-the-badge&cacheSeconds=3600)](https://github.com/orgelmaker/JM-Orgue/releases)
-[![platforms](https://img.shields.io/badge/platforms-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-6e40c9?style=for-the-badge)](#downloaden)
-[![talen](https://img.shields.io/badge/talen-NL%20EN%20DE%20FR%20IT%20ES%20PL-ff8c00?style=for-the-badge)](#)
-[![licentie](https://img.shields.io/badge/licentie-vrij%20gebruiken%20%26%20doorgeven-8957e5?style=for-the-badge)](#licentie)
+[![laatste versie](https://img.shields.io/github/v/release/orgelmaker/JM-Orgue?label=laatste%20versie&color=8b7209&style=for-the-badge&labelColor=5e4a0c)](https://github.com/orgelmaker/JM-Orgue/releases/latest)
+[![downloads](https://img.shields.io/github/downloads/orgelmaker/JM-Orgue/total.svg?label=downloads&color=b8960b&style=for-the-badge&labelColor=5e4a0c&cacheSeconds=3600)](https://github.com/orgelmaker/JM-Orgue/releases)
+[![platforms](https://img.shields.io/badge/platforms-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-8b7209?style=for-the-badge&labelColor=5e4a0c)](#downloaden)
+[![talen](https://img.shields.io/badge/talen-NL%20EN%20DE%20FR%20IT%20ES%20PL-d4af37?style=for-the-badge&labelColor=5e4a0c)](#)
+[![licentie](https://img.shields.io/badge/licentie-vrij%20gebruiken%20%26%20doorgeven-8b7209?style=for-the-badge&labelColor=5e4a0c)](#licentie)
 
 <table>
 <tr>
