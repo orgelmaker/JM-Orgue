@@ -443,7 +443,10 @@
     "volume": "Volumen",
     "volume_title": "Volumen general — doble clic = volver a {db} dB, rueda del ratón = 1 dB por paso",
     "volume_reset": "Volver a {db} dB",
-    "volume_open": "Abrir el control de volumen"
+    "volume_open": "Abrir el control de volumen",
+    "aria_toolbar": "Barra del combinador",
+    "aria_mode_active": "activo",
+    "aria_has_data": "guardado"
   },
   "status_bar": {
     "audio_running": "Audio activo",
@@ -1058,7 +1061,10 @@
     "import_warnings": "La partitura se ha abierto. No todo pudo incorporarse:"
   },
   "temperaments": {
-    "name_prompt": "Nombre de este temperamento:"
+    "name_prompt": "Nombre de este temperamento:",
+    "scala_load": "Cargar archivo Scala…",
+    "scala_load_hint": "Añade un temperamento microtonal o histórico desde un archivo .scl (formato Huygens-Fokker)",
+    "scala_load_failed": "Carga del archivo Scala fallida"
   },
   "eq": {
     "profile": "Perfil de escucha",
@@ -1466,5 +1472,9 @@
     "reopen_title": "Volver a ejecutar el asistente",
     "reopen_hint": "También puede hacerlo más tarde: Ajustes del órgano → Enrutamiento → Asistente.",
     "midi_not_connected": "Ningún dispositivo MIDI conectado — conecte primero la consola (Ajustes generales → MIDI)."
+  },
+  "a11y": {
+    "registers": "registros",
+    "swell_pedal": "Pedal de expresión"
   }
 }

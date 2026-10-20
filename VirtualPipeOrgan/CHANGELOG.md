@@ -5,6 +5,37 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.9.14] - 2026-10-20
+
+### Scala-bestand (.scl) laden als eigen stemming
+- Nieuwe knop "Scala-bestand laden…" naast "Eigen stemming" bij
+  Instellingen → Klank → Stemming. Scala is het wereldwijde formaat
+  voor historische en microtonale stemmingen (Huygens-Fokker-stichting,
+  Manuel Op de Coul); bijna elke moderne stem-toepassing kan ze lezen
+  of exporteren. Vanaf nu ook JM-Orgue.
+- Ondersteunt breuken (3/2, 81/64), cent-waarden en gemengde regels,
+  met commentaren (!) en lege regels. Alleen 12 toonhoogten per octaaf
+  (geweigerd met nette melding bij 24 of 31). A wordt automatisch als
+  referentie-noot gezet, in lijn met de bestaande stemmingen. Een
+  tweede keer dezelfde naam laden vervangt het bestaande item in
+  plaats van er een duplicaat bij te zetten.
+- Zelf-testende parser (`ui/src/lib/scala.js`): zes testgevallen voor
+  cent/ratio-regels, komma-decimaal, commentaar, aantal-check en
+  rotte breuken.
+
+### Toegankelijkheid eerste ronde
+- Zichtbare focus-ring (goudkleur) wanneer je met Tab door de app
+  loopt — op registers, setzerbalk, zweltrede-leds en elke knop.
+  Alleen bij toetsenbord-navigatie zichtbaar; muisgebruikers merken
+  er niets van.
+- Screen reader kan nu de speeltafel voorlezen: elk werk is een
+  `group` met zijn naam en het aantal registers; de zweltrede-leds
+  een `group` met de huidige stand in procent; elk register houdt zijn
+  bestaande `aria-pressed` ja/nee.
+- Setzerbalk krijgt `role="toolbar"` en elke knop een `aria-label` met
+  preset-nummer, geheugen-niveau of "SET-modus actief" — plus
+  `aria-pressed` zodat de screen reader de huidige stand voorleest.
+
 ## [0.9.13] - 2026-10-20
 
 ### Computertoetsenbord bereikt het hele klavier

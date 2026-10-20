@@ -443,7 +443,10 @@
     "volume": "Volume",
     "volume_title": "Hoofdvolume — dubbelklik = terug naar {db} dB, scrollwiel = 1 dB per stap",
     "volume_reset": "Terug naar {db} dB",
-    "volume_open": "Volumeschuif openen"
+    "volume_open": "Volumeschuif openen",
+    "aria_toolbar": "Setzerbalk",
+    "aria_mode_active": "actief",
+    "aria_has_data": "bezet"
   },
   "status_bar": {
     "audio_running": "Audio actief",
@@ -1058,7 +1061,10 @@
     "import_warnings": "De partituur is geopend. Niet alles kon worden overgenomen:"
   },
   "temperaments": {
-    "name_prompt": "Naam voor deze stemming:"
+    "name_prompt": "Naam voor deze stemming:",
+    "scala_load": "Scala-bestand laden…",
+    "scala_load_hint": "Een microtonale/historische stemming uit een .scl-bestand (Huygens-Fokker-formaat) toevoegen",
+    "scala_load_failed": "Scala-bestand laden mislukt"
   },
   "eq": {
     "profile": "Luisterprofiel",
@@ -1466,5 +1472,9 @@
     "reopen_title": "De instelwizard opnieuw doorlopen",
     "reopen_hint": "Je kunt dit ook later doen: Orgel-instellingen → Routing → Wizard.",
     "midi_not_connected": "Geen MIDI-apparaat verbonden — sluit eerst de speeltafel aan (Algemene instellingen → MIDI)."
+  },
+  "a11y": {
+    "registers": "registers",
+    "swell_pedal": "Zweltrede"
   }
 }

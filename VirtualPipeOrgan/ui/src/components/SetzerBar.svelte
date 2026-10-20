@@ -462,7 +462,7 @@
   }
 </script>
 
-<div class="setzer-bar" bind:this={balkEl}>
+<div class="setzer-bar" bind:this={balkEl} role="toolbar" aria-label={$t('setzer.aria_toolbar') || 'Setzerbalk'}>
   <!-- SET button -->
   <button
     class="setzer-btn set-btn"
@@ -470,6 +470,8 @@
     on:click={toggleSetMode}
     use:midiLearn={{ onTrigger: () => showContextMenuAt(ACTION_SET) }}
     title="{$t('setzer.set')} · {$t('setzer.midi_learn_hint')}"
+    aria-pressed={setMode}
+    aria-label="{$t('setzer.set')}{setMode ? ' (' + ($t('setzer.aria_mode_active') || 'actief') + ')' : ''}"
   >SET</button>
 
   <!-- Digit buttons 0-9 -->
@@ -484,6 +486,8 @@
         on:click={() => digitPressed(d)}
         use:midiLearn={{ onTrigger: () => showContextMenuAt(d) }}
         title="{$t('setzer.preset').replace('{n}', currentBank * 10 + d)} · {$t('setzer.midi_learn_hint')}"
+        aria-label="{$t('setzer.preset').replace('{n}', currentBank * 10 + d)}{dataFlags[d] ? ' (' + ($t('setzer.aria_has_data') || 'bezet') + ')' : ''}"
+        aria-pressed={d === activeDigit && !setMode}
       >{d}</button>
     {/each}
   </div>
@@ -549,6 +553,8 @@
         on:click={() => switchMemoryLevel(level)}
         use:midiLearn={{ onTrigger: () => showContextMenuAt(ACTION_M_BASE + level - 1) }}
         title={$t('setzer.memory').replace('{n}', level)}
+        aria-label={$t('setzer.memory').replace('{n}', level)}
+        aria-pressed={memoryLevel === level}
       >{level}</button>
     {/each}
   </div>

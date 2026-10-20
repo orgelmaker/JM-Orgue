@@ -443,7 +443,10 @@
     "volume": "Głośność",
     "volume_title": "Głośność główna — dwuklik = powrót do {db} dB, kółko myszy = 1 dB na krok",
     "volume_reset": "Powrót do {db} dB",
-    "volume_open": "Otwórz suwak głośności"
+    "volume_open": "Otwórz suwak głośności",
+    "aria_toolbar": "Pasek setzera",
+    "aria_mode_active": "aktywny",
+    "aria_has_data": "zapisany"
   },
   "status_bar": {
     "audio_running": "Audio działa",
@@ -1058,7 +1061,10 @@
     "import_warnings": "Partytura została otwarta. Nie wszystko udało się przejąć:"
   },
   "temperaments": {
-    "name_prompt": "Nazwa tego stroju:"
+    "name_prompt": "Nazwa tego stroju:",
+    "scala_load": "Wczytaj plik Scala…",
+    "scala_load_hint": "Dodaj strój mikrotonalny lub historyczny z pliku .scl (format Huygens-Fokker)",
+    "scala_load_failed": "Wczytywanie pliku Scala nie powiodło się"
   },
   "eq": {
     "profile": "Profil odsłuchu",
@@ -1466,5 +1472,9 @@
     "reopen_title": "Uruchom kreator konfiguracji ponownie",
     "reopen_hint": "Można to zrobić też później: Ustawienia organów → Routing → Kreator.",
     "midi_not_connected": "Brak podłączonego urządzenia MIDI — najpierw podłącz kontuar (Ustawienia ogólne → MIDI)."
+  },
+  "a11y": {
+    "registers": "rejestry",
+    "swell_pedal": "Pedał żaluzji"
   }
 }

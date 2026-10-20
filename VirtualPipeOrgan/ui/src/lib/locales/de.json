@@ -443,7 +443,10 @@
     "volume": "Lautstärke",
     "volume_title": "Gesamtlautstärke — Doppelklick = zurück auf {db} dB, Mausrad = 1 dB pro Schritt",
     "volume_reset": "Zurück auf {db} dB",
-    "volume_open": "Lautstärkeregler öffnen"
+    "volume_open": "Lautstärkeregler öffnen",
+    "aria_toolbar": "Setzerleiste",
+    "aria_mode_active": "aktiv",
+    "aria_has_data": "belegt"
   },
   "status_bar": {
     "audio_running": "Audio läuft",
@@ -1058,7 +1061,10 @@
     "import_warnings": "Die Partitur wurde geöffnet. Nicht alles konnte übernommen werden:"
   },
   "temperaments": {
-    "name_prompt": "Name für diese Stimmung:"
+    "name_prompt": "Name für diese Stimmung:",
+    "scala_load": "Scala-Datei laden…",
+    "scala_load_hint": "Eine mikrotonale oder historische Stimmung aus einer .scl-Datei (Huygens-Fokker-Format) hinzufügen",
+    "scala_load_failed": "Laden der Scala-Datei fehlgeschlagen"
   },
   "eq": {
     "profile": "Hörprofil",
@@ -1466,5 +1472,9 @@
     "reopen_title": "Den Einrichtungsassistenten erneut durchlaufen",
     "reopen_hint": "Auch später möglich: Orgeleinstellungen → Routing → Assistent.",
     "midi_not_connected": "Kein MIDI-Gerät verbunden — zuerst den Spieltisch anschließen (Allgemeine Einstellungen → MIDI)."
+  },
+  "a11y": {
+    "registers": "Register",
+    "swell_pedal": "Schwelltritt"
   }
 }

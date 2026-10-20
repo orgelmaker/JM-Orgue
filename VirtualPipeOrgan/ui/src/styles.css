@@ -318,6 +318,22 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* Toegankelijkheid (0.9.14): zichtbare focus-indicator wanneer je met Tab
+   door de app loopt. :focus-visible toont de ring alleen bij toetsenbord-
+   navigatie, niet na een muisklik, zodat de UI er voor andere gebruikers
+   onveranderd uitziet. De kleur volgt de JM-Orgue-huisstijl (bladgoud). */
+:focus-visible {
+  outline: 2px solid var(--primary-hover, #d4af37);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+.stop-knob:focus-visible,
+.setzer-btn:focus-visible,
+.swell-led:focus-visible {
+  outline-offset: 3px;
+  box-shadow: 0 0 0 4px rgba(212, 175, 55, 0.25);
+}
+
 #app {
   display: flex;
   flex-direction: column;

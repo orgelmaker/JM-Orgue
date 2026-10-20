@@ -836,6 +836,11 @@
       }
     }
   } catch (e) {}
+  // Scala-stemmingen (.scl) uit vorige sessies terugplaatsen (0.9.14).
+  try {
+    const scalas = JSON.parse(localStorage.getItem('jm-orgue-scala-temperaments') || '[]');
+    for (const s of scalas) temperaments.push(s);
+  } catch (e) {}
 
   function saveCustomTemperament() {
     const name = prompt(tx('temperaments.name_prompt'));
@@ -852,6 +857,51 @@
     localStorage.setItem('jm-orgue-custom-temperaments', JSON.stringify(customs));
     onTemperamentChange();
     showCustomTemperament = false;
+  }
+
+  // Scala-bestand (.scl) inlezen en als eigen stemming toevoegen (0.9.14).
+  // Standaard microtoon-/historische-stemmingen-formaat van Huygens-Fokker;
+  // elke moderne stem-toepassing exporteert ze zo. We ondersteunen alleen
+  // 12 toonhoogten per octaaf en zetten de A-noot als referentie, net als
+  // de bestaande tabellen.
+  async function laadScalaStemming() {
+    try {
+      const inp = document.createElement('input');
+      inp.type = 'file';
+      inp.accept = '.scl,text/plain,text/x-scala';
+      inp.style.display = 'none';
+      document.body.appendChild(inp);
+      const kiezen = new Promise((r) => { inp.addEventListener('change', () => r(inp.files?.[0] ?? null), { once: true }); });
+      inp.click();
+      const bestand = await kiezen;
+      inp.remove();
+      if (!bestand) return;
+      const bron = await bestand.text();
+      const { parseScala } = await import('../lib/scala.js');
+      const gelezen = parseScala(bron, bestand.name.replace(/\.scl$/i, ''));
+      const naam = gelezen.name || bestand.name.replace(/\.scl$/i, '');
+      // Dubbel toevoegen voorkomen: dezelfde naam vervangt het eerdere item.
+      const bestaand = temperaments.findIndex((t) => t.category === 'scala' && t.name === naam);
+      const nieuw = {
+        name: naam, nameDutch: naam, category: 'scala',
+        period: 'Scala-bestand (.scl)', year: null, modernUse: true,
+        description: `Ingelezen uit ${bestand.name}. Scala-stemming (Huygens-Fokker-formaat).`,
+        cents: gelezen.cents,
+      };
+      if (bestaand >= 0) {
+        temperaments[bestaand] = nieuw;
+        selectedTemperament = bestaand;
+      } else {
+        temperaments.push(nieuw);
+        selectedTemperament = temperaments.length - 1;
+      }
+      const scalas = temperaments.filter((t) => t.category === 'scala');
+      localStorage.setItem('jm-orgue-scala-temperaments', JSON.stringify(scalas));
+      await onTemperamentChange();
+    } catch (e) {
+      console.error('Scala laden mislukt:', e);
+      alert((tx('temperaments.scala_load_failed') || 'Scala-bestand laden mislukt') + ':\n' + (e?.message || e));
+    }
   }
 
   function applyCustomCents() {
@@ -6175,6 +6225,8 @@
                  aan kolommen nodig heeft, en is elke kolom één knop breed. -->
             <div
               class="division"
+              role="group"
+              aria-label="{division.display_name || division.name} — {division.stops.length} {$t('a11y.registers') || 'registers'}"
               style={mainLayout === 'vertical' ? (divisieStijlen[division.name] || '') : ''}>
               <!-- 0.8.98 (Piotr-feedback): MIDI-kanaal leren via rechtsklik of
                    2 seconden vasthouden op de klaviernaam, zonder extra knopje.
@@ -6195,7 +6247,9 @@
                        class:learning={learningSwellDivision === division.name}
                        on:touchstart|stopPropagation
                        use:midiLearn={{ pressDelayMs: 2000, onTrigger: () => learnSwellPedal(division.name) }}
-                       title={$t('settings.midi_swell_learn_hint')}>
+                       title={$t('settings.midi_swell_learn_hint')}
+                       role="group"
+                       aria-label="{$t('a11y.swell_pedal') || 'Zweltrede'} {division.display_name || division.name}: {Math.round((divisionVolumes[division.name] ?? 1.0) * 100)}%">
                     {#each Array(10) as _, i}
                       <span
                         class="swell-led"
@@ -6204,6 +6258,8 @@
                         on:keypress={(e) => e.key === 'Enter' && setSwellLevel(division.name, (i + 1) / 10)}
                         role="button"
                         tabindex="0"
+                        aria-label="{$t('a11y.swell_pedal') || 'Zweltrede'} {division.display_name || division.name} {(i + 1) * 10}%"
+                        aria-pressed={i < Math.round((divisionVolumes[division.name] ?? 1.0) * 10)}
                         title="{(i + 1) * 10}%"
                       ></span>
                     {/each}
@@ -6431,6 +6487,14 @@
               <button class="btn btn-secondary btn-sm" style="margin-top: 0.3rem;"
                 on:click={() => { showCustomTemperament = !showCustomTemperament; if (showCustomTemperament) customCents = [...(temperaments[selectedTemperament]?.cents || [0,0,0,0,0,0,0,0,0,0,0,0])]; }}>
                 {showCustomTemperament ? $t('settings.temperament_custom_close') : $t('tuning.custom_open')}
+              </button>
+              <!-- Scala-bestand (.scl) laden als eigen stemming (0.9.14).
+                   Wereldwijde standaard voor historische en microtonale
+                   stemmingen; GrandOrgue kent dit niet, wij nu wel. -->
+              <button class="btn btn-secondary btn-sm" style="margin-top: 0.3rem; margin-left: 0.3rem;"
+                on:click={laadScalaStemming}
+                title={$t('temperaments.scala_load_hint')}>
+                {$t('temperaments.scala_load')}
               </button>
               {#if showCustomTemperament}
                 <div class="custom-temperament-grid">

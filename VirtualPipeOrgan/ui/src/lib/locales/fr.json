@@ -443,7 +443,10 @@
     "volume": "Volume",
     "volume_title": "Volume général — double-clic = retour à {db} dB, molette = 1 dB par cran",
     "volume_reset": "Revenir à {db} dB",
-    "volume_open": "Ouvrir le curseur de volume"
+    "volume_open": "Ouvrir le curseur de volume",
+    "aria_toolbar": "Combinateur",
+    "aria_mode_active": "actif",
+    "aria_has_data": "enregistré"
   },
   "status_bar": {
     "audio_running": "Audio actif",
@@ -1058,7 +1061,10 @@
     "import_warnings": "La partition est ouverte. Tout n’a pas pu être repris :"
   },
   "temperaments": {
-    "name_prompt": "Nom de ce tempérament :"
+    "name_prompt": "Nom de ce tempérament :",
+    "scala_load": "Charger un fichier Scala…",
+    "scala_load_hint": "Ajouter un tempérament microtonal ou historique depuis un fichier .scl (format Huygens-Fokker)",
+    "scala_load_failed": "Chargement du fichier Scala échoué"
   },
   "eq": {
     "profile": "Profil d'écoute",
@@ -1466,5 +1472,9 @@
     "reopen_title": "Relancer l’assistant de configuration",
     "reopen_hint": "Possible aussi plus tard : Réglages de l’orgue → Routage → Assistant.",
     "midi_not_connected": "Aucun appareil MIDI connecté — branchez d’abord la console (Réglages généraux → MIDI)."
+  },
+  "a11y": {
+    "registers": "jeux",
+    "swell_pedal": "Pédale d'expression"
   }
 }

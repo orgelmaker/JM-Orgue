@@ -443,7 +443,10 @@
     "volume": "Volume",
     "volume_title": "Master volume — double-click = back to {db} dB, mouse wheel = 1 dB per step",
     "volume_reset": "Back to {db} dB",
-    "volume_open": "Open volume slider"
+    "volume_open": "Open volume slider",
+    "aria_toolbar": "Combinator bar",
+    "aria_mode_active": "active",
+    "aria_has_data": "stored"
   },
   "status_bar": {
     "audio_running": "Audio running",
@@ -1058,7 +1061,10 @@
     "import_warnings": "The score has been opened. Not everything could be taken over:"
   },
   "temperaments": {
-    "name_prompt": "Name for this temperament:"
+    "name_prompt": "Name for this temperament:",
+    "scala_load": "Load Scala file…",
+    "scala_load_hint": "Add a microtonal/historical tuning from a .scl file (Huygens-Fokker format)",
+    "scala_load_failed": "Loading Scala file failed"
   },
   "eq": {
     "profile": "Listening profile",
@@ -1466,5 +1472,9 @@
     "reopen_title": "Run the setup wizard again",
     "reopen_hint": "You can also do this later: Organ settings → Routing → Wizard.",
     "midi_not_connected": "No MIDI device connected — connect the console first (General settings → MIDI)."
+  },
+  "a11y": {
+    "registers": "stops",
+    "swell_pedal": "Swell pedal"
   }
 }
