@@ -11,10 +11,10 @@
 
 <header class="titel">
   <h1>JM-Orgue</h1>
-  <div class="onder">Manual para la versión 0.8.98 &middot; octubre de 2026</div>
+  <div class="onder">Manual para la versión 0.9.14 &middot; octubre de 2026</div>
 </header>
 
-<p>JM-Orgue es un órgano de tubos virtual para Windows, macOS y Linux. Reproduce directamente los sets de muestras de Hauptwerk y GrandOrgue, incluidos los grandes sets surround, y se toca con un teclado MIDI, una consola o el ratón. Este manual recorre el programa con capturas de pantalla de la versión 0.8.98.</p>
+<p>JM-Orgue es un órgano de tubos virtual para Windows, macOS y Linux. Reproduce directamente los sets de muestras de Hauptwerk y GrandOrgue, incluidos los grandes sets surround, y se toca con un teclado MIDI, una consola o el ratón. Este manual recorre el programa con capturas de pantalla de la versión 0.9.14.</p>
 <p class="klein">&copy; Martijn van der Kolk. Las capturas se han hecho con órganos de demostración y sets de prueba propios; las direcciones de red, los tokens de acceso y las carpetas de usuario se han vuelto ilegibles.</p>
 
 <nav class="inhoud">
@@ -158,7 +158,7 @@
 <p>El primer bloque contiene los ajustes principales:</p>
 <ul>
   <li><b>Volumen</b>: el volumen principal de este órgano.</li>
-  <li><b>Temperamento</b>: «Original» toca los tubos tal como fueron grabados. Los demás temperamentos (igual y temperamentos históricos) afinan los tubos según la altura medida de cada grabación. Bajo la elección ves cuántos tubos tienen una altura medida. Con <b>Temperamento propio...</b> ajustas tú mismo la desviación en cents para cada nota.</li>
+  <li><b>Temperamento</b>: «Original» toca los tubos tal como fueron grabados. Los demás temperamentos (igual y temperamentos históricos) afinan los tubos según la altura medida de cada grabación. Bajo la elección ves cuántos tubos tienen una altura medida. Con <b>Temperamento propio...</b> ajustas tú mismo la desviación en cents para cada nota. Con <b>Cargar archivo Scala…</b> lees un archivo .scl (el formato mundial para temperamentos microtonales e históricos de la Fundación Huygens-Fokker); el temperamento cargado aparece en la lista y se guarda para sesiones posteriores.</li>
   <li><b>Afinación</b>: todo junto más alto o más bajo, en cents.</li>
 </ul>
 <p>La <b>reverberación</b> regula la reverberación. Si el set ya lleva la acústica de la iglesia en las grabaciones, se indica (con el botón <b>Volver a la grabación (reverberación apagada)</b> para desactivar la reverberación adicional): una reverberación adicional es entonces cuestión de gusto. Eliges entre <b>Algorítmica</b> (reverberación calculada con RT60, retardo, amortiguación y tamaño de la sala, también como preset) y <b>De convolución (IR)</b> con una respuesta al impulso (IR) propia. Con <b>Mezcla</b> decides cuánta reverberación se oye.</p>
@@ -189,7 +189,7 @@
 <ul>
   <li><b>Canal</b>: el canal MIDI por el que escucha el teclado («Todos» = cualquier canal). <b>Aprender</b> fija el canal y el rango cuando tocas primero la tecla más grave y luego la más aguda.</li>
   <li><b>Transp</b>: transposición en semitonos. <b>Rango</b>: tecla más grave y más aguda. <b>Octava corta</b>: para sets con octava grave corta.</li>
-  <li><b>Caja expresiva</b>: activa la caja expresiva de ese teclado; aparecen entonces los botones para aprender el pedal y los ajustes de volumen mínimo y frecuencia de corte con la caja cerrada.</li>
+  <li><b>Caja expresiva</b>: activa la caja expresiva de ese teclado; aparecen entonces los botones para aprender el pedal y los ajustes de volumen mínimo y frecuencia de corte con la caja cerrada. El pedal también se aprende directamente desde la pantalla del órgano: clic derecho sobre la tira de LED verdes junto al nombre del teclado — o manténla pulsada 2 segundos en una pantalla táctil — y aparece el mismo cuadro «pedal cerrado / pedal abierto».</li>
   <li><b>Suministro de viento</b>: a qué grupo de viento pertenece el teclado.</li>
   <li><b>Panorama</b> y <b>Salidas</b>: posición en la imagen estéreo y canales de salida de la interfaz de audio por los que suena el teclado. Dos salidas consecutivas forman un par estéreo; un solo canal suena en mono.</li>
   <li><b>C/Cis</b>: reparte los tubos en dos lados, como los secretos de Do y Do sostenido en un órgano real; la fuerza y la caída globales están en el bloque de arriba.</li>
@@ -200,7 +200,7 @@
 
 <p>Más abajo está la <b>Salida de audio de los ruidos</b>: para cada tipo de sonido eliges por qué salidas suena. <b>Motor</b> es el sonido del motor; <b>Ruido ambiente y clics de la mecánica</b> se refiere al ruido de la sala y a los clics de registros y teclas; los sets con registros de efectos (cimbalstern, ruiseñor y similares) y ruido del trémolo tienen una fila propia. Importa sobre todo con más de dos salidas, cuando los teclados suenan por canales distintos de 1&ndash;2. Justo debajo:</p>
 <ul>
-  <li><b>Teclado continuo</b>: las teclas fuera del rango grabado de un registro tocan el tubo más cercano, transpuesto a la altura correcta, en lugar de callar. Un teclado de 61 teclas sigue así tocando en un set con menos notas.</li>
+  <li><b>Teclado continuo</b>: las teclas fuera del rango grabado de un registro tocan el tubo más cercano, transpuesto a la altura correcta, en lugar de callar. Un teclado de 61 teclas sigue así tocando en un set con menos notas. Las mitades de bajo y tiple de un registro partido (Trompeta 8 B/D, Corneta D, Lleno Bajo…) se detienen en el punto de división — el tiple sigue en el agudo, el bajo en el grave, pero nunca se superponen.</li>
   <li><b>Afinar automáticamente los tubos</b>: afina los tubos según su altura medida, conservando los registros deliberadamente ondulantes. Activado de forma predeterminada.</li>
   <li><b>Corrección de altura</b>: todo junto más alto o más bajo en cents (<b>Cero</b> restablece el valor).</li>
 </ul>

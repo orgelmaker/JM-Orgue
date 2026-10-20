@@ -11,10 +11,10 @@
 
 <header class="titel">
   <h1>JM-Orgue</h1>
-  <div class="onder">User guide for version 0.8.98 &middot; October 2026</div>
+  <div class="onder">User guide for version 0.9.14 &middot; October 2026</div>
 </header>
 
-<p>JM-Orgue is a virtual pipe organ for Windows, macOS and Linux. It plays Hauptwerk and GrandOrgue sample sets directly, including large surround sets, and you play it with a MIDI keyboard, an organ console or the mouse. This guide walks through the program using screenshots of version 0.8.98.</p>
+<p>JM-Orgue is a virtual pipe organ for Windows, macOS and Linux. It plays Hauptwerk and GrandOrgue sample sets directly, including large surround sets, and you play it with a MIDI keyboard, an organ console or the mouse. This guide walks through the program using screenshots of version 0.9.14.</p>
 <p class="klein">&copy; Martijn van der Kolk. The screenshots were made with demo organs and own test sets; network addresses, access tokens and user folders have been made unreadable.</p>
 
 <nav class="inhoud">
@@ -158,7 +158,7 @@
 <p>The first block holds the master settings:</p>
 <ul>
   <li><b>Volume</b>: the master volume of this organ.</li>
-  <li><b>Temperament</b>: &ldquo;Original&rdquo; plays the pipes as they were recorded. Other temperaments (equal and historical temperaments) retune the pipes based on the measured pitch of each recording. Below the choice you see how many pipes have a measured pitch. With <b>Custom temperament&hellip;</b> you set the deviation per note in cents yourself.</li>
+  <li><b>Temperament</b>: &ldquo;Original&rdquo; plays the pipes as they were recorded. Other temperaments (equal and historical temperaments) retune the pipes based on the measured pitch of each recording. Below the choice you see how many pipes have a measured pitch. With <b>Custom temperament&hellip;</b> you set the deviation per note in cents yourself. <b>Load Scala file&hellip;</b> reads a .scl file (the worldwide format for microtonal and historical temperaments from the Huygens-Fokker Foundation); the loaded temperament appears in the list and is kept for later sessions.</li>
   <li><b>Fine tuning</b>: everything together higher or lower, in cents.</li>
 </ul>
 <p><b>Reverb</b> controls the reverberation. If the set already has the church acoustics in its recordings, that is stated (with a button <b>Back to the recording (reverb off)</b> to switch the extra reverb off): extra reverb is then a matter of taste. You choose between <b>Algorithmic</b> (a calculated reverb with RT60, delay, damping and room size, also as a preset) and <b>Impulse Response</b> with an impulse response (IR) of your own. With <b>Mix</b> you determine how much reverb you hear.</p>
@@ -189,7 +189,7 @@
 <ul>
   <li><b>Channel</b>: the MIDI channel the keyboard listens to (&ldquo;All&rdquo; = every channel). <b>Learn</b> determines channel and range by playing the lowest and then the highest key.</li>
   <li><b>Transp</b>: transpose in semitones. <b>Range</b>: lowest and highest key. <b>Short octave</b>: for sets with a short bass octave.</li>
-  <li><b>Swell box</b>: switches on the swell box of this keyboard; buttons then appear to learn the pedal, to set the minimum volume and the cut-off frequency of a closed box.</li>
+  <li><b>Swell box</b>: switches on the swell box of this keyboard; buttons then appear to learn the pedal, to set the minimum volume and the cut-off frequency of a closed box. The pedal can also be learned straight from the organ screen: right-click the green LED strip next to the manual name &mdash; or hold it for 2 seconds on a touch screen &mdash; and the same &ldquo;pedal closed / pedal open&rdquo; dialog opens.</li>
   <li><b>Wind supply</b>: which wind group the keyboard belongs to.</li>
   <li><b>Pan</b> and <b>Outputs</b>: the place in the stereo image and the output channels of your audio interface the keyboard sounds on. Two consecutive outputs form a stereo pair; a single channel sounds mono.</li>
   <li><b>C/Cis</b>: spreads the pipes over two sides, like the C and C-sharp chests of a real organ; the global strength and fall-off are in the block above it.</li>
@@ -200,7 +200,7 @@
 
 <p>Below that is <b>Background sounds audio output</b>: for each kind of sound you choose which outputs it uses. <b>Blower</b> is the blower sound; <b>Ambient noise and action clicks</b> applies to the room noise and the clicks of stops and keys; sets with effect stops (cymbelstern, nightingale and the like) and tremulant noise get a row of their own. This matters mostly with a set-up of more than two outputs, where the keyboards sound on other channels than the default 1&ndash;2. Directly below:</p>
 <ul>
-  <li><b>Continuous keyboard</b>: keys outside the recorded range of a stop play the nearest pipe, shifted to the right pitch, instead of staying silent. A 61-note keyboard thus keeps playing on a set with fewer notes.</li>
+  <li><b>Continuous keyboard</b>: keys outside the recorded range of a stop play the nearest pipe, shifted to the right pitch, instead of staying silent. A 61-note keyboard thus keeps playing on a set with fewer notes. Bass and treble halves of a divided stop (Trompet 8 B/D, Cornet D, Mixtuur Bas &hellip;) stop at the split point &mdash; the treble carries on at the top, the bass at the bottom, but they never overlap.</li>
   <li><b>Automatically retune pipes</b>: retunes the pipes based on their measured pitch, while keeping deliberately floating stops. On by default.</li>
   <li><b>Pitch correction</b>: everything together higher or lower in cents (<b>Zero</b> resets it).</li>
 </ul>

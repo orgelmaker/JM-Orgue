@@ -11,10 +11,10 @@
 
 <header class="titel">
   <h1>JM-Orgue</h1>
-  <div class="onder">Manuale per la versione 0.8.98 &middot; ottobre 2026</div>
+  <div class="onder">Manuale per la versione 0.9.14 &middot; ottobre 2026</div>
 </header>
 
-<p>JM-Orgue è un organo a canne virtuale per Windows, macOS e Linux. Riproduce direttamente i set di campioni Hauptwerk e GrandOrgue, compresi i grandi set surround, e si suona con una tastiera MIDI, una consolle o il mouse. Questo manuale guida attraverso il programma con schermate della versione 0.8.98.</p>
+<p>JM-Orgue è un organo a canne virtuale per Windows, macOS e Linux. Riproduce direttamente i set di campioni Hauptwerk e GrandOrgue, compresi i grandi set surround, e si suona con una tastiera MIDI, una consolle o il mouse. Questo manuale guida attraverso il programma con schermate della versione 0.9.14.</p>
 <p class="klein">&copy; Martijn van der Kolk. Le schermate sono state realizzate con organi dimostrativi e propri set di prova; indirizzi di rete, token di accesso e cartelle utente sono stati resi illeggibili.</p>
 
 <nav class="inhoud">
@@ -158,7 +158,7 @@
 <p>Il primo blocco contiene le impostazioni principali:</p>
 <ul>
   <li><b>Volume</b>: il volume principale di questo organo.</li>
-  <li><b>Temperamento</b>: &laquo;Originale&raquo; suona le canne come sono state registrate. Gli altri temperamenti (equabile e temperamenti storici) accordano le canne in base all'altezza misurata di ogni registrazione. Sotto la scelta vedi quante canne hanno un'altezza misurata. Con <b>Temperamento personale...</b> imposti tu stesso lo scarto in cent per ogni nota.</li>
+  <li><b>Temperamento</b>: &laquo;Originale&raquo; suona le canne come sono state registrate. Gli altri temperamenti (equabile e temperamenti storici) accordano le canne in base all'altezza misurata di ogni registrazione. Sotto la scelta vedi quante canne hanno un'altezza misurata. Con <b>Temperamento personale...</b> imposti tu stesso lo scarto in cent per ogni nota. Con <b>Carica file Scala…</b> leggi un file .scl (il formato mondiale per temperamenti microtonali e storici della Fondazione Huygens-Fokker); il temperamento caricato compare nella lista e viene conservato per le sessioni successive.</li>
   <li><b>Accordatura</b>: tutto insieme più alto o più basso, in cent.</li>
 </ul>
 <p>Il <b>riverbero</b> regola il riverbero. Se il set ha già l'acustica della chiesa nelle registrazioni, viene segnalato (con il pulsante <b>Torna alla registrazione (riverbero spento)</b> per disattivare il riverbero aggiuntivo): un riverbero aggiuntivo è allora questione di gusto. Scegli tra <b>Algoritmico</b> (riverbero calcolato con RT60, ritardo, smorzamento e dimensione della sala, anche come preset) e <b>A convoluzione (IR)</b> con una propria risposta all'impulso (IR). Con <b>Mix</b> decidi quanto riverbero si sente.</p>
@@ -189,7 +189,7 @@
 <ul>
   <li><b>Canale</b>: il canale MIDI su cui il manuale ascolta (&laquo;Tutti&raquo; = ogni canale). <b>Apprendi</b> fissa canale ed estensione quando suoni prima il tasto più basso e poi il più alto.</li>
   <li><b>Trasp</b>: trasposizione in semitoni. <b>Estensione</b>: tasto più basso e più alto. <b>Ottava corta</b>: per set con ottava di bassi corta.</li>
-  <li><b>Cassa espressiva</b>: attiva la cassa espressiva di quel manuale; compaiono allora i pulsanti per apprendere il pedale e le impostazioni di volume minimo e frequenza di taglio a cassa chiusa.</li>
+  <li><b>Cassa espressiva</b>: attiva la cassa espressiva di quel manuale; compaiono allora i pulsanti per apprendere il pedale e le impostazioni di volume minimo e frequenza di taglio a cassa chiusa. Il pedale si impara anche direttamente dalla schermata dell'organo: fai clic destro sulla striscia di LED verdi accanto al nome del manuale — o tienila premuta 2 secondi su uno schermo touch — e appare la stessa finestra «pedale chiuso / pedale aperto».</li>
   <li><b>Alimentazione del vento</b>: a quale gruppo di vento appartiene il manuale.</li>
   <li><b>Panorama</b> e <b>Uscite</b>: posizione nell'immagine stereo e canali di uscita dell'interfaccia audio su cui suona il manuale. Due uscite consecutive formano una coppia stereo; un singolo canale suona in mono.</li>
   <li><b>C/Cis</b>: divide le canne su due lati, come i somieri Do e Do diesis in un organo vero; forza e caduta globali sono nel blocco sopra.</li>
@@ -200,7 +200,7 @@
 
 <p>Più sotto c'è l'<b>Uscita audio dei rumori</b>: per ogni tipo di suono scegli da quali uscite viene riprodotto. <b>Motore</b> è il suono del motore; <b>Rumore ambientale e clic della meccanica</b> riguarda il rumore della sala e i clic di registri e tasti; i set con registri degli effetti (cimbalstern, usignolo e simili) e rumore del tremolo hanno una riga propria. Conta soprattutto con più di due uscite, quando i manuali suonano su canali diversi da 1&ndash;2. Subito sotto:</p>
 <ul>
-  <li><b>Tastiera continua</b>: i tasti fuori dall'estensione registrata di un registro suonano la canna più vicina, trasposta all'altezza giusta, invece di tacere. Una tastiera da 61 tasti continua così a suonare su un set con meno note.</li>
+  <li><b>Tastiera continua</b>: i tasti fuori dall'estensione registrata di un registro suonano la canna più vicina, trasposta all'altezza giusta, invece di tacere. Una tastiera da 61 tasti continua così a suonare su un set con meno note. Le metà basso e soprano di un registro spezzato (Tromba 8 B/D, Cornetto D, Ripieno Basso…) si fermano al punto di divisione — il soprano continua in alto, il basso in basso, ma mai sovrapposti.</li>
   <li><b>Accordare automaticamente le canne</b>: accorda le canne in base all'altezza misurata, conservando i registri volutamente ondeggianti. Attivo per impostazione predefinita.</li>
   <li><b>Correzione d'altezza</b>: tutto insieme più alto o più basso in cent (<b>Zero</b> ripristina il valore).</li>
 </ul>

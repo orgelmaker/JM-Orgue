@@ -11,10 +11,10 @@
 
 <header class="titel">
   <h1>JM-Orgue</h1>
-  <div class="onder">Handleiding voor versie 0.8.98 &middot; oktober 2026</div>
+  <div class="onder">Handleiding voor versie 0.9.14 &middot; oktober 2026</div>
 </header>
 
-<p>JM-Orgue is een virtueel pijporgel voor Windows, macOS en Linux. Het programma speelt Hauptwerk- en GrandOrgue-samplesets rechtstreeks af, ook grote surround-sets, en je bespeelt het met een MIDI-klavier, een orgelconsole of de muis. Deze handleiding loopt het programma door aan de hand van schermafbeeldingen van versie 0.8.98.</p>
+<p>JM-Orgue is een virtueel pijporgel voor Windows, macOS en Linux. Het programma speelt Hauptwerk- en GrandOrgue-samplesets rechtstreeks af, ook grote surround-sets, en je bespeelt het met een MIDI-klavier, een orgelconsole of de muis. Deze handleiding loopt het programma door aan de hand van schermafbeeldingen van versie 0.9.14.</p>
 
 <p class="klein">&copy; Martijn van der Kolk. De schermafbeeldingen zijn gemaakt met demo-orgels en eigen testsets; netwerkadressen, toegangstoken en gebruikersmappen zijn onleesbaar gemaakt.</p>
 
@@ -160,7 +160,7 @@
 <p>Het eerste blok heeft de master-instellingen:</p>
 <ul>
   <li><b>Volume</b>: het hoofdvolume van dit orgel.</li>
-  <li><b>Stemming</b>: &ldquo;Origineel&rdquo; speelt de pijpen zoals ze zijn opgenomen. Andere stemmingen (gelijkzwevend en historische temperaturen) stemmen de pijpen bij op basis van de gemeten toonhoogte van elke opname. Onder de keuze staat hoeveel pijpen een gemeten toonhoogte hebben. Bij <b>Eigen stemming</b> geef je zelf per noot de afwijking in cents.</li>
+  <li><b>Stemming</b>: &ldquo;Origineel&rdquo; speelt de pijpen zoals ze zijn opgenomen. Andere stemmingen (gelijkzwevend en historische temperaturen) stemmen de pijpen bij op basis van de gemeten toonhoogte van elke opname. Onder de keuze staat hoeveel pijpen een gemeten toonhoogte hebben. Bij <b>Eigen stemming</b> geef je zelf per noot de afwijking in cents. Met <b>Scala-bestand laden&hellip;</b> lees je een .scl-bestand (het wereldwijde formaat voor microtonale en historische stemmingen van de Huygens-Fokker-stichting); de ingelezen stemming verschijnt in de lijst en wordt bewaard voor volgende sessies.</li>
   <li><b>Fijnstemming</b>: alles samen hoger of lager, in cents.</li>
 </ul>
 <p><b>Nagalm</b> regelt de galm. Heeft de set de akoestiek van de kerk al in de opnames, dan staat dat er (met een knop <b>Terug naar de opname</b> om de extra galm uit te zetten): extra galm is dan een kwestie van smaak. Je kiest tussen <b>Algoritmisch</b> (een berekende galm met RT60, vertraging, demping en ruimtegrootte, ook als preset) en <b>Convolutie</b> met een eigen impulsrespons (IR). Met <b>Mix</b> bepaal je hoeveel galm je hoort.</p>
@@ -191,7 +191,7 @@
 <ul>
   <li><b>Kanaal</b>: op welk MIDI-kanaal het klavier luistert (&ldquo;Alle&rdquo; = elk kanaal). <b>Leer</b> bepaalt kanaal en bereik door eerst de laagste en daarna de hoogste toets te spelen.</li>
   <li><b>Transp</b>: transponeren in halve tonen. <b>Bereik</b>: laagste en hoogste toets. <b>Kort octaaf</b>: voor sets met een kort basoctaaf.</li>
-  <li><b>Zwelkast</b>: zet de zwelkast van dit klavier aan; er verschijnen dan knoppen om de trede in te leren, het minimale volume en de afsnijfrequentie bij een gesloten kast in te stellen.</li>
+  <li><b>Zwelkast</b>: zet de zwelkast van dit klavier aan; er verschijnen dan knoppen om de trede in te leren, het minimale volume en de afsnijfrequentie bij een gesloten kast in te stellen. De trede valt ook rechtstreeks vanuit het orgelscherm in te leren: rechtsklik op de groene ledstrook naast de klaviernaam &mdash; of houd die 2 seconden vast op een aanraakscherm &mdash; en hetzelfde &ldquo;trede dicht / trede open&rdquo;-dialoog verschijnt.</li>
   <li><b>Windvoorziening</b>: tot welke windgroep het klavier hoort.</li>
   <li><b>Pan</b> en <b>Uitgangen</b>: de plaats in het stereobeeld en de uitgangskanalen van je audio-interface waarop dit klavier klinkt. Twee opeenvolgende uitgangen vormen een stereopaar; een los kanaal klinkt mono.</li>
   <li><b>C/Cis</b>: verdeelt de pijpen over twee kanten, zoals de C- en Cis-lade van een echt orgel; de globale sterkte en afval staan in het blok erboven.</li>
@@ -202,7 +202,7 @@
 
 <p>Daaronder staat <b>Audio-uitgang bijgeluiden</b>: per soort geluid kies je welke uitgangen het gebruikt. <b>Motor</b> is het motorgeluid; <b>Omgevingsruis en mechaniekklikken</b> geldt voor de ruimteruis en de klikken van registers en toetsen; sets met effectregisters (cimbelster, nachtegaal en dergelijke) en tremulantruis krijgen een eigen rij. Dit is vooral van belang bij een opstelling met meer dan twee uitgangen, waar de klavieren op andere kanalen klinken dan de standaard 1&ndash;2. Direct daaronder:</p>
 <ul>
-  <li><b>Doorlopend klavier</b>: toetsen buiten het opgenomen bereik van een register spelen de dichtstbijzijnde pijp, verschoven naar de juiste toonhoogte, in plaats van te zwijgen. Zo speelt een klavier van 61 toetsen door op een set met minder tonen.</li>
+  <li><b>Doorlopend klavier</b>: toetsen buiten het opgenomen bereik van een register spelen de dichtstbijzijnde pijp, verschoven naar de juiste toonhoogte, in plaats van te zwijgen. Zo speelt een klavier van 61 toetsen door op een set met minder tonen. Bas- en discanthelften van een gedeeld register (Trompet 8 B/D, Cornet D, Mixtuur Bas &hellip;) stoppen op het deelpunt &mdash; de discant klinkt bovenin door, de bas onderin, maar niet over elkaar heen.</li>
   <li><b>Pijpen automatisch bijstemmen</b>: stemt de pijpen op basis van hun gemeten toonhoogte bij, met behoud van bewust zwevende stemmen. Staat standaard aan.</li>
   <li><b>Toonhoogte-correctie</b>: alles samen hoger of lager in cents (<b>Nul</b> zet het terug).</li>
 </ul>
