@@ -346,7 +346,8 @@
     "nav_samplefix": "Sample-Fix",
     "nav_knoppen": "Tasten anlernen",
     "nav_update": "Update und Feedback",
-    "midi_learn_division": "Rechtsklick oder 2 s halten: MIDI-Kanal lernen"
+    "midi_learn_division": "Rechtsklick oder 2 s halten: MIDI-Kanal lernen",
+    "midi_swell_learn_hint": "Rechtsklick oder 2 s halten: Schwelltritt lernen, ohne zu den Einstellungen zu wechseln"
   },
   "perspectives": {
     "keep_loaded": "Alle Positionen im Speicher halten",

@@ -346,7 +346,8 @@
     "nav_samplefix": "Correzione campioni",
     "nav_knoppen": "Apprendi pulsanti",
     "nav_update": "Aggiornamento e feedback",
-    "midi_learn_division": "Clic destro o pressione lunga 2 s: apprendi canale MIDI"
+    "midi_learn_division": "Clic destro o pressione lunga 2 s: apprendi canale MIDI",
+    "midi_swell_learn_hint": "Clic destro o tenere premuto 2 s: imparare la pedaliera d'espressione senza passare dalle Impostazioni"
   },
   "perspectives": {
     "keep_loaded": "Tenere tutte le posizioni in memoria",

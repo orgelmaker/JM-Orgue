@@ -346,7 +346,8 @@
     "nav_samplefix": "Sample fix",
     "nav_knoppen": "Knoppen inleren",
     "nav_update": "Update en feedback",
-    "midi_learn_division": "Rechtsklik of 2 sec vasthouden: MIDI-kanaal leren"
+    "midi_learn_division": "Rechtsklik of 2 sec vasthouden: MIDI-kanaal leren",
+    "midi_swell_learn_hint": "Rechtsklik of 2 sec vasthouden: zweltrede inleren zonder naar Instellingen"
   },
   "perspectives": {
     "keep_loaded": "Alle posities in het geheugen houden",

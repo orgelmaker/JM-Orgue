@@ -346,7 +346,8 @@
     "nav_samplefix": "Sample fix",
     "nav_knoppen": "Learn buttons",
     "nav_update": "Update and feedback",
-    "midi_learn_division": "Right-click or press and hold 2 s: learn MIDI channel"
+    "midi_learn_division": "Right-click or press and hold 2 s: learn MIDI channel",
+    "midi_swell_learn_hint": "Right-click or hold for 2 s: learn the swell pedal without going to Settings"
   },
   "perspectives": {
     "keep_loaded": "Keep all positions in memory",

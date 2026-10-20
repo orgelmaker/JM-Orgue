@@ -346,7 +346,8 @@
     "nav_samplefix": "Correction d’échantillons",
     "nav_knoppen": "Apprendre les boutons",
     "nav_update": "Mise à jour et retour",
-    "midi_learn_division": "Clic droit ou appui 2 s : apprendre le canal MIDI"
+    "midi_learn_division": "Clic droit ou appui 2 s : apprendre le canal MIDI",
+    "midi_swell_learn_hint": "Clic droit ou 2 s de pression : apprendre la pédale d'expression sans passer par les Paramètres"
   },
   "perspectives": {
     "keep_loaded": "Garder toutes les positions en mémoire",

@@ -346,7 +346,8 @@
     "nav_samplefix": "Korekta sampli",
     "nav_knoppen": "Ucz przyciski",
     "nav_update": "Aktualizacja i opinie",
-    "midi_learn_division": "Prawy klik lub przytrzymaj 2 s: naucz kanału MIDI"
+    "midi_learn_division": "Prawy klik lub przytrzymaj 2 s: naucz kanału MIDI",
+    "midi_swell_learn_hint": "Prawy przycisk lub 2 s przytrzymania: naucz pedał żaluzji bez przechodzenia do Ustawień"
   },
   "perspectives": {
     "keep_loaded": "Trzymaj wszystkie pozycje w pamięci",

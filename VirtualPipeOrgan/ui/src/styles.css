@@ -3216,6 +3216,17 @@ input[type="range"]::-webkit-slider-thumb:hover {
   align-items: center;
   margin-left: auto;
   padding-left: 0.5rem;
+  /* De ledstrook accepteert zelf rechtsklik/vasthouden voor zweltrede-leren
+     (0.9.12): een subtiel outline-kader bij het inleren laat zien dat deze
+     divisie wacht op het pedaal. */
+  border-radius: 2px;
+  transition: outline-color 0.15s ease;
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+}
+
+.swell-leds.learning {
+  outline-color: var(--primary);
 }
 
 .swell-led {

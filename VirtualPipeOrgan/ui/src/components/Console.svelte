@@ -6185,7 +6185,17 @@
                    class:learning={learningDivision === division.name}>
                 <div class="division-name">{division.display_name || division.name}</div>
                 {#if isSwellEnabled(division.name)}
-                  <div class="swell-leds">
+                  <!-- Zweltrede inleren vanuit het orgelscherm (0.9.12): rechtsklik
+                       op de ledstrook — of 2 seconden vasthouden op touch —
+                       opent dezelfde "trede dicht / trede open"-dialoog die
+                       vroeger alleen in Instellingen te vinden was. Touch wordt
+                       hier gestopt zodat de channel-leer op de klaviernaam niet
+                       óók afgaat. -->
+                  <div class="swell-leds"
+                       class:learning={learningSwellDivision === division.name}
+                       on:touchstart|stopPropagation
+                       use:midiLearn={{ pressDelayMs: 2000, onTrigger: () => learnSwellPedal(division.name) }}
+                       title={$t('settings.midi_swell_learn_hint')}>
                     {#each Array(10) as _, i}
                       <span
                         class="swell-led"
