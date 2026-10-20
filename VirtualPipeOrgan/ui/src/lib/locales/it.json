@@ -418,7 +418,9 @@
     "reset_pipe": "Reimposta questa canna",
     "reset_stop": "Reimposta tutto il registro",
     "hint_save": "Le modifiche vengono salvate in {file}.",
-    "has_edits": "Ha modifiche di intonazione"
+    "has_edits": "Ha modifiche di intonazione",
+    "apply_to_all": "Applica a tutte le canne",
+    "apply_to_all_title": "Imposta ogni canna di questo registro sui valori attuali di volume e intonazione, in un colpo solo."
   },
   "register_panel": {
     "no_organ": "Nessun organo caricato",

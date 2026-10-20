@@ -418,7 +418,9 @@
     "reset_pipe": "Diese Pfeife zurücksetzen",
     "reset_stop": "Ganzes Register zurücksetzen",
     "hint_save": "Änderungen werden in {file} gespeichert.",
-    "has_edits": "Hat Intonationsänderungen"
+    "has_edits": "Hat Intonationsänderungen",
+    "apply_to_all": "Auf alle Pfeifen anwenden",
+    "apply_to_all_title": "Jede Pfeife dieses Registers in einem Zug auf die aktuellen Volumen- und Stimmungswerte setzen."
   },
   "register_panel": {
     "no_organ": "Keine Orgel geladen",

@@ -418,7 +418,9 @@
     "reset_pipe": "Wyzeruj tę piszczałkę",
     "reset_stop": "Wyzeruj cały głos",
     "hint_save": "Zmiany są zapisywane w {file}.",
-    "has_edits": "Ma zmiany intonacji"
+    "has_edits": "Ma zmiany intonacji",
+    "apply_to_all": "Zastosuj do wszystkich piszczałek",
+    "apply_to_all_title": "Ustaw każdą piszczałkę tego rejestru na bieżące wartości głośności i strojenia, za jednym razem."
   },
   "register_panel": {
     "no_organ": "Nie wczytano organów",

@@ -418,7 +418,9 @@
     "reset_pipe": "Réinitialiser ce tuyau",
     "reset_stop": "Réinitialiser tout le jeu",
     "hint_save": "Les changements sont enregistrés dans {file}.",
-    "has_edits": "Comporte des réglages d'harmonisation"
+    "has_edits": "Comporte des réglages d'harmonisation",
+    "apply_to_all": "Appliquer à tous les tuyaux",
+    "apply_to_all_title": "Mettre chaque tuyau de ce jeu sur les valeurs actuelles de volume et d’accord, en une fois."
   },
   "register_panel": {
     "no_organ": "Aucun orgue chargé",

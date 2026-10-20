@@ -1,9 +1,17 @@
 # Changelog
 
 Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
-
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
+
+## [0.9.16] - 2026-10-20
+
+### Voicing: hele register in één klap
+
+- Nieuwe knop **Pas toe op alle pijpen** in het voicing-paneel. Zet
+  elke pijp van het geselecteerde register in één keer op de huidige
+  volume- en stemmingsschuif, zodat een register-brede trim (bv.
+  "Prestant 8 overal 1 dB zachter") niet meer 61 keer handwerk vraagt.
 
 ## [0.9.15] - 2026-10-20
 

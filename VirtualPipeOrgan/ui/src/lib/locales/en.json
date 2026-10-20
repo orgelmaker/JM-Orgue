@@ -418,7 +418,9 @@
     "reset_pipe": "Reset this pipe",
     "reset_stop": "Reset entire stop",
     "hint_save": "Changes are saved in {file}.",
-    "has_edits": "Has voicing adjustments"
+    "has_edits": "Has voicing adjustments",
+    "apply_to_all": "Apply to all pipes",
+    "apply_to_all_title": "Set every pipe of this stop to the current volume and pitch slider values, in one go."
   },
   "register_panel": {
     "no_organ": "No organ loaded",

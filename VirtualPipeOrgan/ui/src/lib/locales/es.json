@@ -418,7 +418,9 @@
     "reset_pipe": "Restablecer este tubo",
     "reset_stop": "Restablecer todo el registro",
     "hint_save": "Los cambios se guardan en {file}.",
-    "has_edits": "Tiene ajustes de armonización"
+    "has_edits": "Tiene ajustes de armonización",
+    "apply_to_all": "Aplicar a todos los caños",
+    "apply_to_all_title": "Pon cada caño de este registro en los valores actuales de volumen y afinación de una sola vez."
   },
   "register_panel": {
     "no_organ": "No hay ningún órgano cargado",

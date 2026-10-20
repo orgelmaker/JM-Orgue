@@ -418,7 +418,9 @@
     "reset_pipe": "Reset deze pijp",
     "reset_stop": "Reset hele register",
     "hint_save": "Wijzigingen worden opgeslagen in {file}.",
-    "has_edits": "Heeft voicing-aanpassingen"
+    "has_edits": "Heeft voicing-aanpassingen",
+    "apply_to_all": "Pas toe op alle pijpen",
+    "apply_to_all_title": "Zet elke pijp van dit register op de huidige volume- en stemmingsschuif, in één klap."
   },
   "register_panel": {
     "no_organ": "Geen orgel geladen",

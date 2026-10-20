@@ -153,6 +153,32 @@
     queueSave();
   }
 
+  async function applyLiveToWholeStop() {
+    if (!selectedStop) return;
+    const stop_id = selectedStop.internal_stop_id;
+    const first = selectedStop.first_midi_note;
+    const last = selectedStop.last_midi_note;
+    const vdb = liveVolume;
+    const pct = livePitch;
+    for (let midi = first; midi <= last; midi++) {
+      const pipe_num = midi - first + 1;
+      const key = `${stop_id}-${midi}`;
+      if (vdb === 0 && pct === 0) {
+        delete voicings[key];
+      } else {
+        voicings[key] = { volume_db: vdb, pitch_cents: pct };
+      }
+      try {
+        await invoke('set_pipe_voicing', {
+          stopId: stop_id, pipeNum: pipe_num,
+          volumeDb: vdb, pitchCents: pct,
+        });
+      } catch (e) { console.warn('set_pipe_voicing failed:', e); }
+    }
+    voicings = voicings;
+    queueSave();
+  }
+
   // `v` = voicings, als argument zodat de markering in de markup meeleeft.
   function pipeHasVoicing(stop, midi, v = voicings) {
     return !!v[`${stop.internal_stop_id}-${midi}`];
@@ -268,6 +294,9 @@
             </button>
             <button class="btn btn-secondary btn-sm" on:click={resetCurrentStop}>
               {$t('voicing.reset_stop')}
+            </button>
+            <button class="btn btn-primary btn-sm" on:click={applyLiveToWholeStop} title={$t('voicing.apply_to_all_title')}>
+              {$t('voicing.apply_to_all')}
             </button>
           </div>
 
