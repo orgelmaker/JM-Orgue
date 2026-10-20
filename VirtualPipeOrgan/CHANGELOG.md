@@ -5,6 +5,38 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.9.13] - 2026-10-20
+
+### Computertoetsenbord bereikt het hele klavier
+- De letters Z t/m M en Q t/m I speelden al twee octaven; Shift verschuift
+  nu alle noten een octaaf omhoog, Alt een octaaf omlaag (combinaties
+  mogen). Zo haal je zonder MIDI-klavier ook de pedaalbas en de hoge
+  discant. Het losraken van een toets kiest de noot die was aangeslagen,
+  dus veranderen van modifier geeft geen hanger.
+
+### Waarschuwing als een orgel niet in het geheugen past
+- De app vergelijkt de preload-schatting van alle gekozen opnameposities
+  met het beschikbare RAM. Past het niet in de helft, dan staat na het
+  laden alleen de dichtstbijzijnde positie aan (bestaand gedrag), maar nu
+  met een nette melding bovenin die het aantal MB noemt en vertelt waar
+  je de keuze aanpast. Komt het dichtbij het plafond maar heb je zelf
+  vinkjes gezet, dan krijg je dezelfde ruimte-krap-melding zonder dat de
+  app iets wijzigt.
+
+### Test-API gedocumenteerd + /health
+- Nieuwe pagina `VirtualPipeOrgan/docs/TEST_API.md` beschrijft de hele
+  HTTP-API die het programma op poort 8765 kan openen voor rooktests,
+  dashboards en MCP-/AI-tools. Nieuwe `GET /health` levert één compacte
+  JSON-regel met de versie, het geladen orgel, de belastingmeter en de
+  MIDI-stand — handig voor monitoring zonder de hele `/status` op te
+  halen.
+
+### Marketing
+- README-vergelijking JM-Orgue naast Hauptwerk Advanced en Sweelinq
+  (prijs, dongle, platforms, taal, licentie); extra rij in de
+  functieoverzicht-tabel voor afstandsbediening, hoofdtelefoon-EQ en
+  MIDI-leren overal.
+
 ## [0.9.12] - 2026-10-19
 
 ### Doorlopend klavier stopt op het deelpunt van bas en discant

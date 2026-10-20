@@ -63,6 +63,17 @@
   let loadingProgress = 0;
   let loadingMessage = '';
   let error = null;
+  // Melding over geheugenruimte vlak na een orgellaad (0.9.13). De backend
+  // vult deze string via `rem_op_geheugen` wanneer alle gekozen posities
+  // samen niet (of nog net) in het RAM passen; de UI toont hem als een
+  // wegklikbare balk.
+  let geheugenWaarschuwing = null;
+  async function toonGeheugenWaarschuwing() {
+    try {
+      const melding = await invoke('get_memory_warning');
+      if (typeof melding === 'string' && melding.trim().length > 0) geheugenWaarschuwing = melding;
+    } catch (e) { /* oudere backend of andere command — geen banner */ }
+  }
 
   // UI state
   let showOrganBrowser = true;
@@ -132,8 +143,10 @@
   // Console component reference
   let consoleComponent;
 
-  // Keyboard state for playing notes
-  let pressedKeys = new Set();
+  // Toetsenbord: welke computertoets welke MIDI-noot stuurde — zonder deze
+  // cache (0.9.13) matcht een NoteOff met andere modifier-stand niet meer op
+  // de bijbehorende NoteOn en blijft de pijp hangen.
+  let pressedKeys = new Map();
 
   // Toetsenbord → MIDI-noten (vanaf C3 = 48)
   // Onderste octaaf wit:   z=C3, x=D3, c=E3, v=F3, b=G3, n=A3, m=B3
@@ -775,19 +788,29 @@
     const key = event.key.toLowerCase();
     const note = keyToNote[key];
 
-    if (note !== undefined && !pressedKeys.has(key)) {
-      pressedKeys.add(key);
-      playNote(note, 0.8);
+    // Oktaafverschuiving met modifiers (0.9.13): Shift = +12, Alt = -12, Shift+Alt = +24.
+    // Zo bereikt het computertoetsenbord ook de pedaalbas en de bovenste discant.
+    // Combinatie met Ctrl of Meta blijft onaangeroerd — die zijn vaak voor
+    // systeem- en IDE-sneltoetsen.
+    if (note !== undefined && !event.ctrlKey && !event.metaKey && !pressedKeys.has(key)) {
+      let octaafverschuiving = 0;
+      if (event.shiftKey) octaafverschuiving += 12;
+      if (event.altKey) octaafverschuiving -= 12;
+      const klinknoot = Math.max(0, Math.min(127, note + octaafverschuiving));
+      pressedKeys.set(key, klinknoot);
+      playNote(klinknoot, 0.8);
     }
   }
 
   function handleKeyUp(event) {
     const key = event.key.toLowerCase();
-    const note = keyToNote[key];
-
-    if (note !== undefined && pressedKeys.has(key)) {
+    if (pressedKeys.has(key)) {
+      // De klinkende noot opzoeken: Shift/Alt kunnen bij het loslaten anders
+      // staan dan bij het aanslaan. Zonder deze cache zou het loslaten geen
+      // overeenkomende NoteOff hebben → hanger.
+      const klinknoot = pressedKeys.get(key);
       pressedKeys.delete(key);
-      stopNote(note);
+      stopNote(klinknoot);
     }
   }
 
@@ -1358,6 +1381,7 @@
       // load tonen ("leeg") en leerde de gebruiker onnodig elke keer opnieuw in.
       try { await refreshMidiMappings(); } catch (e) {}
       saveSession({ lastOrgan: { kind: 'organ', path } });
+      await toonGeheugenWaarschuwing();
       // Extra registerschermen die bij dít orgel open stonden heropenen
       // (met hun eigen divisiekeuze en vensterpositie).
       try { await tick(); await consoleComponent?.restorePanels?.(); } catch (e) {}
@@ -1388,6 +1412,7 @@
       // Zie loadOrgan: herstelde MIDI-koppelingen ook in de UI tonen.
       try { await refreshMidiMappings(); } catch (e) {}
       saveSession({ lastOrgan: { kind: 'folder', path: directory } });
+      await toonGeheugenWaarschuwing();
       // Extra registerschermen die bij dít orgel open stonden heropenen.
       try { await tick(); await consoleComponent?.restorePanels?.(); } catch (e) {}
     } catch (e) {
@@ -1766,6 +1791,16 @@
         {/if}
         <button class="btn btn-ghost btn-sm" on:click={dismissUpdate} title={$t('update.dismiss_title')} aria-label={$t('actions.close')}>✕</button>
       {/if}
+    </div>
+  {/if}
+
+  {#if geheugenWaarschuwing}
+    <!-- Geheugen krap na laden (0.9.13): toont wat de app automatisch heeft
+         teruggeschakeld of hoe krap de keuze is. Wegklikken is genoeg; bij
+         een nieuwe laadbeurt vraagt de app opnieuw. -->
+    <div class="update-banner">
+      <span>{geheugenWaarschuwing}</span>
+      <button class="btn btn-ghost btn-sm" on:click={() => { geheugenWaarschuwing = null; }} title={$t('actions.close')} aria-label={$t('actions.close')}>✕</button>
     </div>
   {/if}
 

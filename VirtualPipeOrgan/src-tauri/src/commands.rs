@@ -668,19 +668,68 @@ fn preload_buffers_per_label(definition: &OrganDefinition) -> HashMap<String, us
     uit
 }
 
+/// Schatting van wat alle ingeschakelde posities in dit plan aan preload-RAM
+/// zouden kosten, in bytes (0.9.13). Gebruikt door `rem_op_geheugen` en door
+/// de nieuwe geheugen-waarschuwing in `bereken_geheugen_waarschuwing`.
+fn schatting_preload_bytes(plan: &[PerspectiveRuntime], buffers: &HashMap<String, usize>) -> u64 {
+    plan.iter().filter(|p| p.enabled)
+        .map(|p| buffers.get(&p.name).copied().unwrap_or(p.pipe_count) as u64 * preload_bytes_per_buffer())
+        .sum()
+}
+
+/// Laatste geheugen-waarschuwing van een orgellaadbeurt (0.9.13). De UI
+/// (`get_memory_warning`) leest die eenmalig uit zodat we vóór de laadbalk
+/// stoppen een nette melding kunnen tonen in plaats van alleen een stille
+/// `warn!`-regel in het log. Veilig vrij te laten tussen laadbeurten: elke
+/// start van een nieuwe laadbeurt schrijft hem opnieuw.
+pub(crate) static LAATSTE_GEHEUGEN_WAARSCHUWING: parking_lot::RwLock<Option<String>> =
+    parking_lot::RwLock::new(None);
+
+/// Vult `LAATSTE_GEHEUGEN_WAARSCHUWING` als de preload-schatting dicht bij of
+/// over het beschikbare RAM komt (0.9.13):
+/// - Ingrepen door `rem_op_geheugen` → beschrijft wat de app zelf heeft
+///   teruggeschakeld, zodat de organist dat niet achteraf zelf ziet in het log.
+/// - Niet ingegrepen (opgeslagen voorkeur) maar schatting > 75 % van RAM →
+///   nette "ruimte-krap"-melding; de keuze blijft staan, zonder actie.
+/// Boven het RAM wordt het een nadrukkelijke waarschuwing: zonder zal de
+/// laadbeurt bijna zeker vastlopen of de rest van Windows wegduwen.
+fn bereken_geheugen_waarschuwing(plan: &[PerspectiveRuntime], buffers: &HashMap<String, usize>, ingegrepen: bool) {
+    let mb = |n: u64| n / 1_000_000;
+    let schatting = schatting_preload_bytes(plan, buffers);
+    let ram = fysiek_geheugen_bytes();
+    let melding: Option<String> = match (ram, ingegrepen) {
+        (Some(ram), true) => Some(format!(
+            "Alle opnameposities samen zouden ongeveer {} MB geheugen vragen; deze computer heeft {} MB. Om vastlopen te voorkomen staat nu alleen de dichtstbijzijnde positie aan. In de Orgel-instellingen kies je zelf welke posities je wilt laden.",
+            mb(schatting), mb(ram),
+        )),
+        (Some(ram), false) if schatting * 4 > ram * 3 => Some(format!(
+            "Deze keuze van posities vraagt ongeveer {} MB geheugen van de {} MB die deze computer heeft. Dat kan tijdens het spelen krap worden; overweeg in de Orgel-instellingen een positie minder.",
+            mb(schatting), mb(ram),
+        )),
+        _ => None,
+    };
+    *LAATSTE_GEHEUGEN_WAARSCHUWING.write() = melding;
+}
+
+/// Haal (en wis) de laatste geheugen-waarschuwing op (0.9.13). De UI vraagt
+/// hem één keer op na een orgellaadbeurt.
+#[tauri::command]
+pub fn get_memory_warning() -> Option<String> {
+    LAATSTE_GEHEUGEN_WAARSCHUWING.write().take()
+}
+
 /// RAM-rem (0.8.1) op "alles laden": past de schatting van álle ingeschakelde
 /// posities niet in de helft van het fysieke geheugen, dan blijft alleen de
 /// positie het dichtst bij het orgel aan (dry/close/front…). Alleen zonder
-/// opgeslagen voorkeur: wie zelf vinkjes heeft gezet, weet wat hij doet.
+/// opgeslagen voorkeur: wie zelf vinkjes heeft gezet, weet wat hij doet (en
+/// krijgt daarvoor in de plaats een waarschuwing, zie `rem_op_geheugen_check`).
 /// `buffers` = preload-buffers per label (zie `preload_buffers_per_label`);
 /// ontbreekt een label, dan telt het aantal pijpen. Geeft true terug als er
 /// is ingegrepen (voor de logregel/UI).
 fn rem_op_geheugen(plan: &mut [PerspectiveRuntime], heeft_opslag: bool, buffers: &HashMap<String, usize>) -> bool {
     if heeft_opslag || plan.len() < 2 { return false; }
     let Some(ram) = fysiek_geheugen_bytes() else { return false };
-    let schatting: u64 = plan.iter().filter(|p| p.enabled)
-        .map(|p| buffers.get(&p.name).copied().unwrap_or(p.pipe_count) as u64 * preload_bytes_per_buffer())
-        .sum();
+    let schatting = schatting_preload_bytes(plan, buffers);
     if schatting * 2 <= ram { return false; }
     // Dichtstbijzijnde positie op de as houden; de rest uit.
     let dichtst = plan.iter().enumerate()
@@ -3111,9 +3160,14 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
         // (laag zonder perspectief) worden altijd geladen.
         let saved_persp = perspective_prefs_for(state, path);
         let mut persp_plan = plan_perspectives(&definition, &saved_persp);
+        let buffer_map = preload_buffers_per_label(&definition);
         // RAM-rem (0.8.1): alles laden mag niet meer dan de helft van het
-        // geheugen kosten; anders alleen de dichtstbijzijnde positie.
-        rem_op_geheugen(&mut persp_plan, !saved_persp.is_empty(), &preload_buffers_per_label(&definition));
+        // geheugen kosten; anders alleen de dichtstbijzijnde positie. Zet een
+        // mens-leesbare waarschuwing klaar voor de UI (0.9.13), ook als de
+        // organist zelf vinkjes heeft gezet maar de schatting dicht bij het
+        // RAM-plafond komt.
+        let ingegrepen = rem_op_geheugen(&mut persp_plan, !saved_persp.is_empty(), &buffer_map);
+        bereken_geheugen_waarschuwing(&persp_plan, &buffer_map, ingegrepen);
         // "Alles laden" (0.7.47): ook de uitgeschakelde posities komen in het
         // geheugen, zodat wisselen ogenblikkelijk is in plaats van een herlaad.
         // Uitgeschakelde posities worden na het laden stilgezet (gain), niet

@@ -382,6 +382,7 @@ fn main() {
             // Bijgeluiden-afspeel (0.7.97): motor-knop en volumeschuif.
             commands::set_background_gain,
             commands::get_background_gain,
+            commands::get_memory_warning,
             commands::set_mechanics_gains,
             commands::get_mechanics_gains,
             commands::set_blower_active,

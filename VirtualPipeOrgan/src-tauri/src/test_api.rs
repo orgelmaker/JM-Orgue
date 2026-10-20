@@ -319,6 +319,31 @@ fn route_shared(
         (tiny_http::Method::Get, "/status") => Ok(handle_status(state)),
         (tiny_http::Method::Get, "/organ") => Ok(handle_organ(state, scope)),
         (tiny_http::Method::Get, "/version") => Ok(json!({ "version": env!("CARGO_PKG_VERSION") })),
+        // Levensteken + beknopt JSON-overzicht voor dashboards, AI-agenten en
+        // monitoring (0.9.13). Alles komt uit bestaande velden; geen eigen pad
+        // in de audiostate. Status "ok" zodra de HTTP-poort antwoordt én de
+        // audiostate uitgelezen kan worden; onder zware belasting kan `audio`
+        // "overload" worden gemeld zonder dat de poort faalt.
+        (tiny_http::Method::Get, "/health") => Ok({
+            let organ = state.loaded_organ_info.read();
+            let organ_naam = organ.as_ref().map(|o| o.name.clone());
+            drop(organ);
+            let drawn = state.drawn_stops.read().len();
+            let voices = crate::audio::render_frames_now() as u64;
+            let piek = crate::audio::render_load();
+            let overload = crate::audio::render_overload_count();
+            json!({
+                "status": "ok",
+                "version": env!("CARGO_PKG_VERSION"),
+                "organ": organ_naam,
+                "drawn_stops": drawn,
+                "voice_frames_now": voices,
+                "render_load": piek.0,
+                "render_peak": piek.1,
+                "render_overloads": overload,
+                "midi_connected": *state.midi_connected.read(),
+            })
+        }),
         (tiny_http::Method::Get, "/state") => Ok(handle_remote_state(state, scope)),
         // Testhaak (0.7.43): zet de watchdog-vlag restart_needed op de lopende
         // player, zodat het audio-noodherstel (main.rs) binnen ~3 s afgaat —
