@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JM-Orgue — virtueel pijporgel voor thuis</title>
+<meta name="description" content="JM-Orgue speelt Hauptwerk- en GrandOrgue-samplesets rechtstreeks af, met registers, koppels, zwelkasten, tremulant, galm en een generaal crescendo. Gratis, geen dongle, Windows, macOS en Linux, zeven talen.">
+<meta property="og:title" content="JM-Orgue — virtueel pijporgel voor thuis">
+<meta property="og:description" content="Hauptwerk- en GrandOrgue-samplesets afspelen op uw eigen pc of Mac, met een echte speeltafel-ervaring. Gratis, geen dongle, zeven talen.">
+<meta property="og:type" content="website">
+<meta property="og:image" content="https://orgelmaker.github.io/JM-Orgue/assets/jm-orgue-donker.png">
+<meta property="og:url" content="https://orgelmaker.github.io/JM-Orgue/">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" type="image/png" href="assets/jm-orgue-rond.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- Taalkeuze; wordt door i18n.js met localStorage onthouden -->
+<nav class="langbar" aria-label="Language">
+  <button data-lang="nl" aria-label="Nederlands">NL</button>
+  <button data-lang="en" aria-label="English">EN</button>
+  <button data-lang="de" aria-label="Deutsch">DE</button>
+  <button data-lang="fr" aria-label="Français">FR</button>
+  <button data-lang="it" aria-label="Italiano">IT</button>
+  <button data-lang="es" aria-label="Español">ES</button>
+  <button data-lang="pl" aria-label="Polski">PL</button>
+</nav>
+
+<header class="hero">
+  <div class="hero-inner">
+    <img class="hero-logo" src="assets/jm-orgue-rond.png" alt="JM-Orgue">
+    <h1>JM-Orgue</h1>
+    <p class="hero-tagline" data-i18n="tagline">Een virtueel pijporgel voor thuis.</p>
+    <p class="hero-sub" data-i18n="sub">Sluit een orgelklavier aan, kies een sampleset en speel. JM-Orgue leest opnamen van echte orgels en geeft ze terug met registers, koppels, zwelkasten, tremulant, galm en een generaal crescendo.</p>
+    <div class="hero-cta">
+      <a class="btn btn-primary" href="#downloaden" data-i18n="cta_download">Downloaden</a>
+      <a class="btn btn-ghost" href="#handleiding" data-i18n="cta_manual">Handleiding</a>
+    </div>
+    <div class="hero-badges">
+      <span class="badge" data-i18n="badge_free">Gratis</span>
+      <span class="badge" data-i18n="badge_nodongle">Geen dongle</span>
+      <span class="badge" data-i18n="badge_platforms">Windows · macOS · Linux</span>
+      <span class="badge" data-i18n="badge_langs">7 talen</span>
+    </div>
+  </div>
+</header>
+
+<section class="shots" aria-labelledby="shots-h">
+  <h2 id="shots-h" class="sr-only" data-i18n="shots_h">Schermafbeeldingen</h2>
+  <figure>
+    <img src="assets/jm-orgue-rond.png" alt="" loading="lazy">
+    <figcaption data-i18n="shot_round">Ronde knoppen, licht thema</figcaption>
+  </figure>
+  <figure>
+    <img src="assets/jm-orgue-donker.png" alt="" loading="lazy">
+    <figcaption data-i18n="shot_dark">Donker thema met gouden koppen</figcaption>
+  </figure>
+  <figure>
+    <img src="assets/jm-orgue-blauw.png" alt="" loading="lazy">
+    <figcaption data-i18n="shot_blue">Blauw thema met vijf werken</figcaption>
+  </figure>
+</section>
+
+<section id="waarom" class="section" aria-labelledby="waarom-h">
+  <h2 id="waarom-h" data-i18n="why_h">Waarom JM-Orgue</h2>
+  <p data-i18n="why_lead">Vergelijkbare mogelijkheden als de bekende commerciële pakketten, maar gratis, zonder dongle en in uw eigen taal.</p>
+  <div class="compare-wrap">
+    <table class="compare" role="table">
+      <thead>
+        <tr>
+          <th></th>
+          <th>JM-Orgue</th>
+          <th>Hauptwerk Advanced</th>
+          <th>Sweelinq</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><th data-i18n="cmp_price">Prijs</th>                                  <td class="win">€ 0</td><td>$599 of $29,99/mnd</td><td data-i18n="cmp_subscription">abonnement</td></tr>
+        <tr><th data-i18n="cmp_dongle">DRM / dongle</th>                           <td class="win" data-i18n="cmp_no">geen</td><td data-i18n="cmp_ilok">iLok-dongle</td><td data-i18n="cmp_account">account</td></tr>
+        <tr><th data-i18n="cmp_sharing">Doorgeven aan vrienden</th>                 <td class="win" data-i18n="cmp_yes">mag</td><td data-i18n="cmp_no">nee</td><td data-i18n="cmp_no">nee</td></tr>
+        <tr><th data-i18n="cmp_platforms">Windows · macOS · Linux</th>              <td class="win">✓ ✓ ✓</td><td>✓ ✓ —</td><td>✓ ✓ —</td></tr>
+        <tr><th data-i18n="cmp_language">Taal van de speeltafel</th>                <td class="win" data-i18n="cmp_7lang">7 talen</td><td data-i18n="cmp_1lang">1 taal</td><td data-i18n="cmp_1lang">1 taal</td></tr>
+        <tr><th data-i18n="cmp_hw_sets">Hauptwerk-samplesets</th>                   <td>✓</td><td>✓</td><td>✓</td></tr>
+        <tr><th data-i18n="cmp_go_sets">GrandOrgue-samplesets</th>                  <td class="win">✓</td><td>—</td><td>—</td></tr>
+        <tr><th data-i18n="cmp_reverb">Convolutie-galm, windmodel, perspectieven</th><td>✓</td><td>✓</td><td>✓</td></tr>
+        <tr><th data-i18n="cmp_remote">Afstandsbediening op telefoon of tablet</th>  <td class="win">✓</td><td>—</td><td>—</td></tr>
+        <tr><th data-i18n="cmp_notation">Live notatie: spelen en de noten zien</th>  <td class="win">✓</td><td>—</td><td>—</td></tr>
+        <tr><th data-i18n="cmp_eq">Hoofdtelefoon-EQ (522 modellen, AutoEq)</th>     <td class="win">✓</td><td>—</td><td>—</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="footnote" data-i18n="why_foot">Vergelijking gebaseerd op openbare prijslijsten en release-aankondigingen. Elke sampleset heeft zijn eigen voorwaarden; die vallen niet onder de software-licentie.</p>
+</section>
+
+<section id="downloaden" class="section section-alt" aria-labelledby="dl-h">
+  <h2 id="dl-h" data-i18n="dl_h">Downloaden</h2>
+  <p data-i18n="dl_lead">De links hieronder wijzen altijd naar de nieuwste versie.</p>
+  <div class="dl-grid">
+    <a class="dl-card" href="https://github.com/orgelmaker/JM-Orgue/releases/latest/download/JM-Orgue-setup.exe">
+      <strong>Windows</strong>
+      <span>JM-Orgue-setup.exe</span>
+      <small data-i18n="dl_win_user">installeert voor uzelf, geen beheerder nodig</small>
+    </a>
+    <a class="dl-card" href="https://github.com/orgelmaker/JM-Orgue/releases/latest/download/JM-Orgue.msi">
+      <strong>Windows</strong>
+      <span>JM-Orgue.msi</span>
+      <small data-i18n="dl_win_all">installeert voor alle gebruikers</small>
+    </a>
+    <a class="dl-card" href="https://github.com/orgelmaker/JM-Orgue/releases/latest/download/JM-Orgue.dmg">
+      <strong>macOS</strong>
+      <span>JM-Orgue.dmg</span>
+      <small data-i18n="dl_mac">universal — Intel en Apple Silicon</small>
+    </a>
+    <a class="dl-card" href="https://github.com/orgelmaker/JM-Orgue/releases/latest/download/JM-Orgue.AppImage">
+      <strong>Linux</strong>
+      <span>JM-Orgue.AppImage</span>
+      <small data-i18n="dl_linux_appimage">uitvoerbaar maken en starten</small>
+    </a>
+    <a class="dl-card" href="https://github.com/orgelmaker/JM-Orgue/releases/latest/download/JM-Orgue.deb">
+      <strong>Linux</strong>
+      <span>JM-Orgue.deb</span>
+      <small data-i18n="dl_linux_deb">Debian, Ubuntu en verwanten</small>
+    </a>
+    <a class="dl-card dl-card-source" href="https://github.com/orgelmaker/JM-Orgue/releases">
+      <strong data-i18n="dl_all">Alle versies</strong>
+      <span data-i18n="dl_releases">GitHub releases</span>
+      <small data-i18n="dl_changelog">met wijzigingen per uitgave</small>
+    </a>
+  </div>
+  <p class="note" data-i18n="dl_update">In de app zelf meldt een nieuwe versie zich vanzelf en installeert op verzoek.</p>
+</section>
+
+<section class="section" aria-labelledby="feat-h">
+  <h2 id="feat-h" data-i18n="feat_h">Wat het doet</h2>
+  <div class="features">
+    <article><h3 data-i18n="f_play_h">Spelen</h3><p data-i18n="f_play_p">Registers, koppels, zwelkasten, tremulant en een generaal crescendo, te bedienen met de muis, een aanraakscherm of de knoppen van uw eigen speeltafel via MIDI.</p></article>
+    <article><h3 data-i18n="f_sound_h">Klinken</h3><p data-i18n="f_sound_p">Galm en toonregeling per uitgang, keuze uit zo'n vijftig temperamenten, een windmodel dat de druk laat meebewegen met wat u speelt, en microfoonposities waartussen u live wisselt.</p></article>
+    <article><h3 data-i18n="f_out_h">Uitvoer</h3><p data-i18n="f_out_p">ASIO of WASAPI op Windows, CoreAudio op macOS, ALSA op Linux. Meerdere uitgangen tegelijk, met de divisies verdeeld over de kanalen.</p></article>
+    <article><h3 data-i18n="f_rec_h">Opnemen</h3><p data-i18n="f_rec_p">MIDI en MP3, met een archief dat vanzelf meeschrijft. Zo kunt u uw spel teruglezen zonder er aan te hoeven denken.</p></article>
+    <article><h3 data-i18n="f_notate_h">Noteren</h3><p data-i18n="f_notate_p">Wat u speelt verschijnt als notenschrift in een eigen venster, met laag-voor-laag bewerken en export naar MIDI of PDF.</p></article>
+    <article><h3 data-i18n="f_remote_h">Afstandsbediening</h3><p data-i18n="f_remote_p">Een QR-code opent een tablet of telefoon in uw eigen wifi als tweede registreerscherm, zonder iets te installeren.</p></article>
+    <article><h3 data-i18n="f_eq_h">Hoofdtelefoon-EQ</h3><p data-i18n="f_eq_p">Automatische correctie voor 522 koptelefoonmodellen (AutoEq-presets), plus een eigen EQ per uitgang.</p></article>
+    <article><h3 data-i18n="f_midi_h">MIDI-leren overal</h3><p data-i18n="f_midi_p">Rechtsklik of twee seconden vasthouden op elke knop koppelt hem aan uw eigen speeltafel. Werkt op registers, koppels, zweltreden en de setzerbalk.</p></article>
+    <article><h3 data-i18n="f_lang_h">Zeven talen</h3><p data-i18n="f_lang_p">Nederlands, Engels, Duits, Frans, Italiaans, Spaans en Pools — in de speeltafel én de handleiding.</p></article>
+  </div>
+</section>
+
+<section id="handleiding" class="section section-alt" aria-labelledby="manual-h">
+  <h2 id="manual-h" data-i18n="man_h">Handleiding</h2>
+  <p data-i18n="man_lead">Een volledige handleiding met schermafbeeldingen, in zeven talen:</p>
+  <ul class="man-list">
+    <li><a href="https://github.com/orgelmaker/JM-Orgue/raw/master/VirtualPipeOrgan/docs/handleiding/JM-Orgue-handleiding.nl.pdf">Nederlands (PDF)</a></li>
+    <li><a href="https://github.com/orgelmaker/JM-Orgue/raw/master/VirtualPipeOrgan/docs/handleiding/JM-Orgue-handleiding.en.pdf">English (PDF)</a></li>
+    <li><a href="https://github.com/orgelmaker/JM-Orgue/raw/master/VirtualPipeOrgan/docs/handleiding/JM-Orgue-handleiding.de.pdf">Deutsch (PDF)</a></li>
+    <li><a href="https://github.com/orgelmaker/JM-Orgue/raw/master/VirtualPipeOrgan/docs/handleiding/JM-Orgue-handleiding.fr.pdf">Français (PDF)</a></li>
+    <li><a href="https://github.com/orgelmaker/JM-Orgue/raw/master/VirtualPipeOrgan/docs/handleiding/JM-Orgue-handleiding.it.pdf">Italiano (PDF)</a></li>
+    <li><a href="https://github.com/orgelmaker/JM-Orgue/raw/master/VirtualPipeOrgan/docs/handleiding/JM-Orgue-handleiding.es.pdf">Español (PDF)</a></li>
+    <li><a href="https://github.com/orgelmaker/JM-Orgue/raw/master/VirtualPipeOrgan/docs/handleiding/JM-Orgue-handleiding.pl.pdf">Polski (PDF)</a></li>
+  </ul>
+  <p data-i18n="man_app">In de app zelf opent u de handleiding via de knop <b>Handleiding</b> onderaan de bibliotheek, in de taal van de app.</p>
+</section>
+
+<section class="section" aria-labelledby="faq-h">
+  <h2 id="faq-h" data-i18n="faq_h">Veelgestelde vragen</h2>
+  <details>
+    <summary data-i18n="faq_q1">Welke samplesets werken?</summary>
+    <p data-i18n="faq_a1">JM-Orgue leest Hauptwerk-definities (<code>.Organ_Hauptwerk_xml</code>) en GrandOrgue-definities (<code>.organ</code>) rechtstreeks, plus een eigen map-per-register-formaat voor eigen opnamen. Gesloten varianten zoals <code>.hbw</code>, <code>.pkg</code> en <code>.iwh</code> werken niet; die worden geweigerd met een melding, nooit stil.</p>
+  </details>
+  <details>
+    <summary data-i18n="faq_q2">Hoeveel geheugen heb ik nodig?</summary>
+    <p data-i18n="faq_a2">Dat hangt af van de sampleset. Een eenvoudig orgel vraagt een paar gigabyte; een surround-set met meerdere opnameposities tientallen. JM-Orgue laadt niet alles ineens in (startbuffer per opname), en waarschuwt als uw keuze krap zit.</p>
+  </details>
+  <details>
+    <summary data-i18n="faq_q3">Mag ik de app aan vrienden geven?</summary>
+    <p data-i18n="faq_a3">Ja, zolang u de officiële installer ongewijzigd doorgeeft, er geen geld voor vraagt en de licentie meegaat. Samplesets vallen niet onder deze licentie — daarvoor gelden de voorwaarden van wie ze gemaakt heeft.</p>
+  </details>
+  <details>
+    <summary data-i18n="faq_q4">Heb ik ASIO nodig?</summary>
+    <p data-i18n="faq_a4">Op Windows is ASIO sneller en stabieler, maar niet verplicht. WASAPI werkt direct uit de doos. Op macOS werkt CoreAudio, op Linux ALSA — allemaal zonder extra te installeren.</p>
+  </details>
+  <details>
+    <summary data-i18n="faq_q5">Werkt het op mijn aanraakscherm?</summary>
+    <p data-i18n="faq_a5">Ja. Alle knoppen zijn met de vinger bedienbaar; MIDI-leren gaat met rechtsklik of twee seconden vasthouden, zodat u geen muis nodig heeft. Een extra scherm (bijvoorbeeld een tweede monitor of een tablet) kan als los registerscherm dienen.</p>
+  </details>
+</section>
+
+<footer>
+  <div class="foot-inner">
+    <p>
+      <a href="https://github.com/orgelmaker/JM-Orgue">github.com/orgelmaker/JM-Orgue</a>
+      · <a href="https://github.com/orgelmaker/JM-Orgue/issues" data-i18n="foot_issues">Vragen / problemen</a>
+      · <a href="https://github.com/orgelmaker/JM-Orgue/blob/master/LICENSE" data-i18n="foot_license">Licentie</a>
+    </p>
+    <p class="sub" data-i18n="foot_tag">Vrij te gebruiken en door te geven. Niet door Hauptwerk Virtual Instruments, Milan Digital Audio of Johan de Heer gesponsord of goedgekeurd.</p>
+  </div>
+</footer>
+
+<script src="i18n.js"></script>
+</body>
+</html>
