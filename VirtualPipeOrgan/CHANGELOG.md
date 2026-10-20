@@ -5,6 +5,20 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.9.15] - 2026-10-20
+
+### REST-API gepubliceerd onder /api/…
+- Elk endpoint van de HTTP-API bestaat nu óók onder een `/api/`-prefix,
+  als canoniek pad voor scripts, dashboards, stream-decks en MCP-/AI-
+  tools. Beide vormen werken: `/api/health` naast `/health`,
+  `/api/stops/{id}/toggle` naast `/stops/{id}/toggle`.
+- De API heeft twee ingangen: lokaal zonder token (test-API, loopback)
+  en over het netwerk met token (afstandsbediening, 0.0.0.0, token
+  verplicht in pad of header). Allebei bedienbaar via `/api/…`.
+- Documentatie uitgebreid: `VirtualPipeOrgan/docs/TEST_API.md` beschrijft
+  nu de hele API, de twee ingangen, token-rotatie en concrete Python-
+  rooktest.
+
 ## [0.9.14] - 2026-10-20
 
 ### Scala-bestand (.scl) laden als eigen stemming

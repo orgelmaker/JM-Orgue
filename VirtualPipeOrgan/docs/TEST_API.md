@@ -1,39 +1,79 @@
-# JM-Orgue test-API
+# JM-Orgue HTTP-API
 
-Een lichte HTTP-API op localhost waarmee scripts, dashboards, AI-agenten
-(bijvoorbeeld een MCP-tool) en de ingebouwde afstandsbediening in dezelfde
-app kunnen praten. De API is bedoeld voor:
+Een lichte HTTP-API waarmee scripts, dashboards, AI-agenten (bijvoorbeeld
+een MCP-tool), stream-deck en de ingebouwde afstandsbediening met de app
+kunnen praten. Bedoeld voor:
 
 - Rooktests van de app vanuit Python/shell/C.
 - Dashboards die de belasting of het geladen orgel willen tonen.
-- MCP-tools die een AI het orgel laten bedienen.
+- MCP-tools die een AI het orgel laten bedienen (bv. "trek Prestant 8 en
+  speel noot 60").
+- Stream-deck- of foot-switch-knoppen die registers of koppels wisselen.
 - De telefoon of tablet als tweede registreerscherm (QR-code in de app →
-  opent de "remote"-weergave).
+  opent de `/remote`-weergave).
 
-## Starten
+## Twee ingangen
 
-Standaard uit. Twee manieren om hem aan te zetten:
+### A. Lokaal, zonder token (test-API)
+
+Luistert op `http://127.0.0.1:8765`, alleen vanaf dezelfde computer. Alle
+endpoints beschikbaar. Zet aan met:
 
 ```bat
 rem Alleen deze keer:
 vpo-app.exe --test-api
 
-rem Via omgevingsvariabele:
+rem Of via een omgevingsvariabele (blijft aan):
 set JM_ORGUE_TEST_API=1
 vpo-app.exe
 ```
 
-De app luistert dan op `http://127.0.0.1:8765`. In de app zelf blijft alles
-hetzelfde — de API is een extra ingang.
+### B. Over het netwerk, met token (afstandsbediening)
 
-> **Veilig**: luistert alleen op loopback. Niet opengezet naar het netwerk;
-> de telefoon-als-registreerscherm loopt via een apart `/remote`-pad met een
-> wegwerp-token.
+Luistert op `0.0.0.0:<poort>`, bereikbaar vanaf elke machine in hetzelfde
+wifi-net. Zet aan via Algemene instellingen → **Afstandsbediening**, of
+API-matig:
+
+```
+POST /remote/enable?on=1&port=8766     # schakel aan, poort optioneel
+GET  /remote/status                     # geeft {addresses, port, token}
+POST /remote/new_token                  # roteer het token
+```
+
+Elk ander verzoek vereist een geldig token, pad-prefix óf header:
+
+```
+GET  /r/<token>/api/health
+GET  /api/health          + header "X-Remote-Token: <token>"
+```
+
+De endpoints onder scope B zijn een afgebakende whitelist (zie "Volledige
+endpoint-lijst" hieronder — de regels die zowel in Test als Remote
+beschikbaar zijn). Zware acties als een orgel laden of samplesets
+scannen blijven lokaal.
+
+## Alles ook via `/api/…`
+
+Vanaf 0.9.14 bestaat elk endpoint óók onder een `/api/`-prefix, als
+canoniek pad voor externe scripts. Beide vormen werken:
+
+```
+GET /api/health      # aanbevolen voor externe scripts/MCP
+GET /health          # werkt ook, blijft werken
+```
+
+Prefix is cosmetisch (bufferloos: gewoon pad-strippen); kan ook met het
+token-pad: `GET /r/<token>/api/status`.
+
+> **Veiligheid.** De lokale ingang (A) luistert alleen op loopback — wie
+> bij localhost kan, kan sowieso lokale programma's starten; verdere
+> authenticatie heeft geen zin. De netwerk-ingang (B) vereist altijd een
+> token en biedt een afgebakende whitelist, geen hele API.
 
 ## Snel checken dat de app leeft
 
 ```
-GET /health
+GET /api/health
 ```
 
 ```json

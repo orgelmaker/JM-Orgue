@@ -303,6 +303,15 @@ fn dispatch(
     if scope == ApiScope::Remote && method == tiny_http::Method::Get && (path_only == "/" || path_only == "/index.html") {
         return html_response(REMOTE_HTML);
     }
+    // /api/-prefix (0.9.14): externe scripts, dashboards en MCP-tools kennen
+    // de endpoints als /api/health, /api/status, enz. We strippen de prefix
+    // hier zodat de routing hetzelfde blijft; zonder prefix werken alle paden
+    // ook (achterwaartse compatibiliteit).
+    if path_only.starts_with("/api/") {
+        url_owned = url_owned.replacen("/api/", "/", 1);
+    } else if path_only == "/api" {
+        url_owned = "/".to_string() + url_owned.get(4..).unwrap_or("");
+    }
     route(state, log_path, scope, method, &url_owned, body)
 }
 
