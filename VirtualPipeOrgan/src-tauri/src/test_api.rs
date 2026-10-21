@@ -53,7 +53,8 @@
 //!        /settings/trem?division=..&rate=..&enabled=0|1 (enabled default 1)
 //!        /settings/temperament?name=..&fine=..&cents=c0,..,c11&retune=0|1 (retune default 0 = Origineel)
 //!   POST /temperament             - body: {"name":"..","cents":[12],"retune":bool,"fine":..} (zelfde als hierboven, JSON)
-//!   GET  /tuning                  - hertemperen: retune_pipes/retune_total (orgel) + retune/name/fine_tune (mirror)
+//!   GET  /tuning                  - hertemperen: retune_pipes/retune_total (orgel) + retune/auto_retune/effective_retune/name/fine_tune
+//!   POST /settings/auto_retune?on=0|1 - automatisch bijstemmen aan/uit (geeft /tuning terug)
 //!   POST /settings/wind?enabled=0|1[&karakter=0|1&reservoir=&damping=&sag=&stoot=&kanaal=&doffer=&verschil=&tongwerk=] - windmodel voor alle groepen (audio, niet bewaard)
 //!   POST /settings/wind_restore - de bewaarde windinstellingen van het orgel opnieuw naar de audio sturen
 //!   GET  /settings/wind_group - divisie→windgroep-toewijzing
@@ -578,6 +579,13 @@ fn route_test_only(
         // Per-orgel instellingen (self-testing van de persistentie-migratie, Onderdeel 1).
         (tiny_http::Method::Post, "/settings/master") => handle_set_master(state, query),
         (tiny_http::Method::Post, "/settings/temperament") => handle_set_temperament(state, query),
+        (tiny_http::Method::Post, "/settings/auto_retune") => {
+            let on = parse_query::<u8>(query, "on").map(|v| v != 0)
+                .ok_or((400, "on=0|1 ontbreekt".to_string()))?;
+            *state.auto_retune.write() = on;
+            state.send_audio_command(AudioCommand::SetAutoRetune(on));
+            Ok(handle_tuning(state))
+        }
         // Hertemperen op gemeten pijptoonhoogte (0.7.38): JSON-variant, status en windmodel.
         (tiny_http::Method::Post, "/temperament") => handle_set_temperament_json(state, body),
         (tiny_http::Method::Get, "/tuning") => Ok(handle_tuning(state)),
@@ -1772,10 +1780,15 @@ fn handle_tuning(state: &AppState) -> Value {
         .map(|o| (o.retune_pipes, o.retune_total))
         .unwrap_or((0, 0));
     let t = state.temperament_settings.read().clone();
+    let temp_retune = t.as_ref().and_then(|t| t.retune).unwrap_or(false);
+    let auto = *state.auto_retune.read();
     json!({
         "retune_pipes": retune_pipes,
         "retune_total": retune_total,
-        "retune": t.as_ref().and_then(|t| t.retune).unwrap_or(false),
+        "retune": temp_retune,
+        "auto_retune": auto,
+        // Zo rekent de render-lus: temperament-retune OF automatisch bijstemmen.
+        "effective_retune": temp_retune || auto,
         "name": t.as_ref().map(|t| t.name.clone()).unwrap_or_default(),
         "fine_tune": t.as_ref().map(|t| t.fine_tune_cents).unwrap_or(0.0),
         "cents": t.as_ref().and_then(|t| t.custom_cents).map(|c| c.to_vec()).unwrap_or_default(),

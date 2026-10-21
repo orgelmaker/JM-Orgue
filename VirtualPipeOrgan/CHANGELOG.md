@@ -4,6 +4,31 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.9.17] - 2026-10-21
+
+### Stemming: wat de orgeldefinitie opgeeft gaat voor
+- **Zwevende registers met een opgegeven afwijking** (Unda maris, Voix
+  céleste, Voce umana …) klinken bij bijstemmen nu op het temperament plus
+  de afwijking die de definitie noemt, in plaats van op de toonhoogte van
+  de opname. Tot nu toe raakte die opgave onderweg kwijt en besliste de
+  registernaam; daardoor bleef de opname-afwijking (vaak 40–55 cent) staan.
+  - Hauptwerk: stemmingscode 3 (afwijking in cents) en code 1 (precies op
+    het temperament) worden nu gelezen; code 4 (percentage) werkt als
+    voorheen. Andere codes blijven ongemoeid.
+  - GrandOrgue: een opgegeven PitchCorrection telt als opdracht, ook als
+    hij 0 is. PitchTuning (stand Origineel) en PitchCorrection (bijstemmen)
+    houden elk hun eigen betekenis; bij bijstemmen komt PitchCorrection niet
+    meer bovenop de opname-afwijking.
+  - Zegt de definitie niets, dan houdt een zwevend register zoals voorheen
+    zijn opgenomen zweving.
+- **Vervangen opnamen** blijven op hun originele pijptoon in de stand
+  Origineel, nu ook als de definitie de toonhoogte van de opname aan het
+  WAV-bestand overlaat.
+- Het logboek noemt bij elke stemmingswissel beide schakelaars
+  (temperament en automatisch bijstemmen) plus de effectieve stand.
+- Test-API: `POST /settings/auto_retune?on=0|1`; `GET /tuning` geeft ook
+  `auto_retune` en `effective_retune`.
+
 ## [0.9.16] - 2026-10-20
 
 ### Voicing: hele register in één klap

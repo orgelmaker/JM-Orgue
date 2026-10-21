@@ -3057,6 +3057,9 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
         // voor retune::retune_cents + het attack-pad (voor de smpl-meting uit
         // de preload-buffer) + de HW-terugval (originele pijptoon).
         let mut retune_inputs: Vec<((u32, u32), PathBuf, crate::retune::PipePitchInput, Option<f32>)> = Vec::new();
+        // Origineel-route voor pijpen waarvan de definitie de samplepitch aan
+        // de WAV overlaat: (sleutel, bestand, originele pijptoon, dB).
+        let mut origineel_na_wav: Vec<((u32, u32), PathBuf, f32, f32)> = Vec::new();
         let mut zwevende_registers: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
         // Hauptwerk "Original organ tuning" op pijpniveau (0.7.94): tellers
         // voor de logregel over hoeveel pijpen een `origineel − bestandstoon`-
@@ -3253,19 +3256,27 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
                         // odf_retune_map gebruikt (audio.rs:5202), dat intern
                         // zelf met `original_cents` werkt (retune.rs). Grens:
                         // |delta| ≤ 600 ct (GO-plausibiliteitsgrens).
-                        let hw_origineel_delta = match (extra.original_pitch_cents, extra.sample_pitch_cents) {
-                            (Some(orig), Some(sample)) => {
-                                let d = orig - sample;
-                                if d.abs() <= crate::retune::HW_MAX_ORIGINEEL_DELTA_CENTS {
+                        // Samplepitch volgens de gekozen methode: staat hij
+                        // niet in de definitie, dan beslist de smpl-chunk van
+                        // de WAV en volgt de correctie ná het laden.
+                        let odf_measured = crate::retune::odf_measured_cents(&extra);
+                        let hw_origineel_delta = match (extra.original_pitch_cents, odf_measured) {
+                            (Some(orig), Some(sample)) => match crate::retune::origineel_delta(orig, sample) {
+                                Some(d) => {
                                     // Alleen échte correcties tellen in het log;
                                     // bij de meeste pijpen is origineel exact de
                                     // bestandstoon (delta 0).
                                     if d.abs() > 0.5 { hw_origineel_toegepast += 1; }
                                     d
-                                } else {
+                                }
+                                None => {
                                     hw_origineel_verworpen += 1;
                                     0.0
                                 }
+                            },
+                            (Some(orig), None) => {
+                                origineel_na_wav.push(((stop.id, pipe_num), path.clone(), orig, total_db));
+                                0.0
                             }
                             _ => 0.0,
                         };
@@ -3284,33 +3295,26 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
                             let owner_wc_pc = windchest_voicing.get(&owner.windchest_group).map(|v| v.2).unwrap_or(0.0);
                             let key_midi = extra.key_midi_note
                                 .unwrap_or(stop_first_midi(&definition, owner) + owner_idx as u32);
-                            let odf_measured = extra.sample_pitch_cents.or(extra
-                                .midi_key_number
-                                .map(|k| 100.0 * k as f32 + extra.midi_pitch_fraction.unwrap_or(0.0)));
                             // Zwevende stem (0.8.91): eigen afwijking behouden
-                            // als de definitie niets zegt (keep 100 %).
+                            // als de definitie niets zegt (keep 100 %). Een
+                            // opgave in de definitie (HW-schemacode, GO-
+                            // PitchCorrection) gaat altijd voor.
                             let zwevend = crate::retune::is_zwevend_naam(&stop.name)
                                 || (layer_idx > 0 && stop.layers.get(layer_idx as usize - 1)
                                     .map_or(false, |l| crate::retune::is_zwevend_naam(&l.name)));
                             if zwevend && extra.retune_keep_pct.is_none() {
                                 zwevende_registers.insert(stop.name.clone());
                             }
-                            let keep_default = if zwevend { 100.0 } else { 0.0 };
+                            let hierarchie_pc = definition.organ.pitch_correction_cents
+                                + owner_wc_pc
+                                + owner.pitch_correction;
                             retune_inputs.push((
                                 (stop.id, pipe_num),
                                 path.clone(),
-                                crate::retune::PipePitchInput {
-                                    key_midi,
-                                    harmonic: extra.harmonic_number.unwrap_or(owner.harmonic_number).max(1),
-                                    measured_cents: odf_measured,
-                                    original_cents: extra.original_pitch_cents,
-                                    pitch_correction_cents: definition.organ.pitch_correction_cents
-                                        + owner_wc_pc
-                                        + owner.pitch_correction
-                                        + extra.pitch_correction_cents.unwrap_or(0.0),
-                                    keep_pct: extra.retune_keep_pct.unwrap_or(keep_default),
-                                    original_pitch_tuning_cents: total_cents,
-                                },
+                                crate::retune::pipe_pitch_input(
+                                    &extra, key_midi, owner.harmonic_number, hierarchie_pc,
+                                    zwevend, odf_measured, total_cents,
+                                ),
                                 extra.original_pitch_cents,
                             ));
                             // Tremulant-opname van deze pijp (0.8.87): een
@@ -3326,18 +3330,10 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
                                 retune_inputs.push((
                                     (stop.id, pipe_num | crate::audio::TREM_FLAG),
                                     trem.path.clone(),
-                                    crate::retune::PipePitchInput {
-                                        key_midi,
-                                        harmonic: extra.harmonic_number.unwrap_or(owner.harmonic_number).max(1),
-                                        measured_cents: None,
-                                        original_cents: extra.original_pitch_cents,
-                                        pitch_correction_cents: definition.organ.pitch_correction_cents
-                                            + owner_wc_pc
-                                            + owner.pitch_correction
-                                            + extra.pitch_correction_cents.unwrap_or(0.0),
-                                        keep_pct: extra.retune_keep_pct.unwrap_or(keep_default),
-                                        original_pitch_tuning_cents: total_cents,
-                                    },
+                                    crate::retune::pipe_pitch_input(
+                                        &extra, key_midi, owner.harmonic_number, hierarchie_pc,
+                                        zwevend, None, total_cents,
+                                    ),
                                     extra.original_pitch_cents,
                                 ));
                             }
@@ -3491,6 +3487,22 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
         // sampleveld > smpl-chunk van het attack-bestand > HW originele
         // pijptoon. Onplausibele metingen (> 600 ct t.o.v. PitchTuning, GO's
         // waarschuwingsgrens) vallen af — die pijp blijft op PitchTuning.
+        for (key, path, orig, total_db) in origineel_na_wav {
+            let gemeten = path_buffers
+                .get(&(path, SegKey::Attack))
+                .and_then(|b| crate::retune::measured_from_smpl(b.smpl_unity_note, b.smpl_pitch_fraction_cents));
+            let Some(sample) = gemeten else { continue };
+            match crate::retune::origineel_delta(orig, sample) {
+                Some(d) if d.abs() > 0.01 => {
+                    if d.abs() > 0.5 { hw_origineel_toegepast += 1; }
+                    let e = odf_voicings.entry(key).or_insert((total_db, 0.0));
+                    e.1 += d;
+                }
+                Some(_) => {}
+                None => hw_origineel_verworpen += 1,
+            }
+        }
+
         let mut odf_retune: HashMap<(u32, u32), f32> = HashMap::new();
         let mut retune_rejected = 0usize;
         for (key, path, mut inp, original_cents) in retune_inputs {

@@ -618,9 +618,11 @@ pub struct PipeExtra {
     /// Hauptwerk: gemeten toonhoogte van de originele pijp in cents
     /// (Pitch_OriginalOrgan_PitchHz) — terugval als sample/smpl ontbreken.
     pub original_pitch_cents: Option<f32>,
-    /// Hauptwerk Pitch_Tempered_BaseTuningDeviation: percentage van de
-    /// originele afwijking dat bij hertemperen behouden blijft (100 = niet
-    /// hertemperen).
+    /// Percentage van de opgenomen afwijking dat bij hertemperen behouden
+    /// blijft (100 = niet hertemperen). Some = de definitie zegt het zelf:
+    /// Hauptwerk BaseTuningSchemeCode 4 (Deviation), code 1/3 (0), of een
+    /// GrandOrgue-PitchCorrection (0). None = onbekend; dan beslist de
+    /// naamherkenning van zwevende stemmen.
     pub retune_keep_pct: Option<f32>,
 }
 
@@ -1281,6 +1283,8 @@ impl OdfParser {
     /// LET OP eenheden: `{key}Gain` is dB, `{key}AmplitudeLevel` is % en
     /// PitchTuning/PitchCorrection zijn cents (floats, bv. "4.79062").
     fn parse_pipe_extra(&self, section: &HashMap<String, String>, key: &str, primary: &str) -> PipeExtra {
+        let pc_declared = self.parse_f32(section, &format!("{}PitchCorrection", key)).is_some()
+            || self.parse_f32(section, "PitchCorrection").is_some();
         let (loop_start, loop_end) = self.parse_loops(section, key);
         let cue_point = self.parse_u32(section, &format!("{}CuePoint", key));
         let load_release = section
@@ -1386,7 +1390,15 @@ impl OdfParser {
             key_midi_note: None,
             sample_pitch_cents: None,
             original_pitch_cents: None,
-            retune_keep_pct: None,
+            // Een opgegeven PitchCorrection (op de pijp of op de rank/oude
+            // stop-sectie, óók 0) is een stemmingsopdracht: bij hertemperen
+            // hoort de pijp op doel + correctie, zoals GrandOrgue doet. Dat
+            // moet hier vastgelegd worden, vóór de rank-waarden in de pijp
+            // worden gevouwen (een neutrale rank vouwt niet, en dan is een
+            // expliciete 0 niet meer te onderscheiden van "niets opgegeven").
+            // Zonder opdracht beslist later de naamherkenning van zwevende
+            // stemmen (opgenomen zweving behouden).
+            retune_keep_pct: pc_declared.then_some(0.0),
         }
     }
 
@@ -2721,6 +2733,70 @@ Pipe002PitchTuning=-7.48608
         // Geen loops of releases opgegeven
         assert_eq!(e1.loop_start, None);
         assert!(e1.releases.is_empty());
+    }
+
+    /// Een opgegeven PitchCorrection is een stemmingsopdracht, óók als hij 0
+    /// is en de rank verder neutraal (dan vouwt de rank niets in de pijp en
+    /// was de opgave achteraf niet meer te zien). Rank 1: PitchTuning=15 en
+    /// PitchCorrection=15 (Cracow-patroon: twee waarden voor twee modi).
+    /// Rank 2: alleen PitchCorrection=0. Rank 3: niets → onbekend.
+    #[test]
+    fn opgegeven_pitchcorrection_blijft_zichtbaar_ook_bij_nul() {
+        let organ = parse_odf_str("pc_aanwezig", "[Organ]
+ChurchName=Testkerk
+NumberOfManuals=1
+NumberOfWindchestGroups=1
+[WindchestGroup001]
+Name=Main
+[Manual001]
+Name=Manuaal
+NumberOfStops=3
+Stop001=001
+Stop002=002
+Stop003=003
+[Stop001]
+Name=Unda maris 8'
+NumberOfRanks=1
+Rank001=001
+[Stop002]
+Name=Voix celeste 8'
+NumberOfRanks=1
+Rank001=002
+[Stop003]
+Name=Vox coelestis 8'
+NumberOfRanks=1
+Rank001=003
+[Rank001]
+Name=Unda maris 8'
+FirstMidiNoteNumber=48
+PitchTuning=15
+PitchCorrection=15
+NumberOfLogicalPipes=1
+Pipe001=samples\048-c.wav
+[Rank002]
+Name=Voix celeste 8'
+FirstMidiNoteNumber=48
+PitchCorrection=0
+NumberOfLogicalPipes=1
+Pipe001=samples\048-c.wav
+[Rank003]
+Name=Vox coelestis 8'
+FirstMidiNoteNumber=48
+NumberOfLogicalPipes=1
+Pipe001=samples\048-c.wav
+");
+        let extra = |id: u32| {
+            let PipeDef::Sample { extra, .. } = &organ.get_stop(id).expect("stop").pipes[0] else { panic!("sample") };
+            extra.clone()
+        };
+        let e1 = extra(1);
+        assert_eq!(e1.retune_keep_pct, Some(0.0));
+        assert!((e1.pitch_correction_cents.unwrap() - 15.0).abs() < 1e-6);
+        assert!((e1.pitch_tuning_cents.unwrap() - 15.0).abs() < 1e-6);
+        let e2 = extra(2);
+        assert_eq!(e2.retune_keep_pct, Some(0.0));
+        assert!(e2.pitch_correction_cents.unwrap_or(0.0).abs() < 1e-6);
+        assert_eq!(extra(3).retune_keep_pct, None);
     }
 
     #[test]

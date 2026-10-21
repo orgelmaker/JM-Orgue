@@ -4501,7 +4501,9 @@ fn run_audio_thread(
                     }
                     AudioCommand::SetAutoRetune(on) => {
                         *auto_retune_on_clone.write() = on;
-                        info!("Automatisch bijstemmen: {}", if on { "aan" } else { "uit" });
+                        let temp_retune = temperament_clone.read().1;
+                        info!("Automatisch bijstemmen: {} (temperament-retune={}, effectief hertemperen={})",
+                            if on { "aan" } else { "uit" }, temp_retune, temp_retune || on);
                     }
                     AudioCommand::SetPitchOffsetCents(cents) => {
                         let c = if cents.is_finite() { cents.clamp(-200.0, 200.0) } else { 0.0 };
@@ -5358,7 +5360,11 @@ fn run_audio_thread(
                             ratios[i] = 2.0_f64.powf(total_cents / 1200.0);
                         }
                         *temperament_clone.write() = (ratios, retune);
-                        info!("Temperament set: fine_tune={} cents, retune={}", fine_tune, retune);
+                        // retune=false is NIET "bijstemmen uit": de render-lus
+                        // combineert hem met automatisch bijstemmen (OR).
+                        let auto = *auto_retune_on_clone.read();
+                        info!("Temperament set: fine_tune={} cents, retune={}, auto_retune={}, effectief hertemperen={}",
+                            fine_tune, retune, auto, retune || auto);
                     }
                     AudioCommand::LoadImpulseResponse(rev) => {
                         // Kant-en-klaar aangeleverd; hier alleen inpluggen.

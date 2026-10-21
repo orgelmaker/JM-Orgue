@@ -115,6 +115,47 @@ pub fn is_zwevend_naam(naam: &str) -> bool {
         || l.contains("celest") || l.contains("coelest")
 }
 
+/// Samplepitch die de definitie zelf opgeeft (Hauptwerk Pitch_ExactSamplePitch
+/// of Pitch_NormalMIDINoteNumber, GrandOrgue MIDIKeyNumber/MIDIPitchFraction).
+/// None = de gekozen methode laat de WAV-smpl-chunk beslissen.
+pub fn odf_measured_cents(extra: &vpo_sampler::PipeExtra) -> Option<f32> {
+    extra.sample_pitch_cents.or(extra
+        .midi_key_number
+        .map(|k| 100.0 * k as f32 + extra.midi_pitch_fraction.unwrap_or(0.0)))
+}
+
+/// Hertemper-invoer voor één pijp. `hierarchie_pc` = PitchCorrection van
+/// orgel + windkast + eigenaar-stop; die van pijp/rank (en de Hauptwerk
+/// code-3-afwijking) zit in `extra`. Wat de definitie over het keep-
+/// percentage zegt gaat vóór de naamherkenning, ook een expliciete 0.
+pub fn pipe_pitch_input(
+    extra: &vpo_sampler::PipeExtra,
+    key_midi: u32,
+    owner_harmonic: u32,
+    hierarchie_pc: f32,
+    zwevende_naam: bool,
+    measured_cents: Option<f32>,
+    original_pitch_tuning_cents: f32,
+) -> PipePitchInput {
+    PipePitchInput {
+        key_midi,
+        harmonic: extra.harmonic_number.unwrap_or(owner_harmonic).max(1),
+        measured_cents,
+        original_cents: extra.original_pitch_cents,
+        pitch_correction_cents: hierarchie_pc + extra.pitch_correction_cents.unwrap_or(0.0),
+        keep_pct: extra.retune_keep_pct.unwrap_or(if zwevende_naam { 100.0 } else { 0.0 }),
+        original_pitch_tuning_cents,
+    }
+}
+
+/// Correctie voor de Origineel-route (zonder hertemperen): een vervangen of
+/// geleende opname naar de originele pijptoon (Hauptwerk "Original organ
+/// tuning"). None = onplausibel (meer dan een octaaf), dan geen correctie.
+pub fn origineel_delta(original_cents: f32, sample_cents: f32) -> Option<f32> {
+    let d = original_cents - sample_cents;
+    (d.is_finite() && d.abs() <= HW_MAX_ORIGINEEL_DELTA_CENTS).then_some(d)
+}
+
 /// Doeltoon van een pijp in de gelijkzwevende referentie (cents).
 pub fn target_cents(key: u32, harmonic: u32) -> f32 {
     100.0 * key as f32 + 1200.0 * (harmonic.max(1) as f32 / 8.0).log2()

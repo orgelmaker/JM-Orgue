@@ -186,12 +186,23 @@ fn build_definition(
                 .get_f32("Pitch_OriginalOrgan_PitchHz")
                 .filter(|hz| *hz > 0.0)
                 .map(hz_to_cents);
-            let keep_pct = if p.get_u32("Pitch_Tempered_BaseTuningSchemeCode") == Some(4) {
-                p.get_f32("Pitch_Tempered_BaseTuningDeviation")
-            } else {
-                None
+            // BaseTuningSchemeCode zegt hoe de pijp zich tot het temperament
+            // verhoudt; de Deviation heeft per code een andere eenheid.
+            //   1 = precies op het temperament (geen afwijking)
+            //   3 = op het temperament + Deviation in cents (bewuste zweving)
+            //   4 = Deviation = % van de originele afwijking dat blijft
+            // Code 1 en 3 zijn een expliciete opdracht: ze gaan vóór de
+            // naamherkenning van zwevende stemmen (anders hield Unda maris met
+            // code 3 / +13 ct de opname-afwijking i.p.v. +13 ct). Andere codes
+            // blijven onbekend (None).
+            let deviation = p.get_f32("Pitch_Tempered_BaseTuningDeviation");
+            let (keep_pct, tuning_offset_cents) = match p.get_u32("Pitch_Tempered_BaseTuningSchemeCode") {
+                Some(1) => (Some(0.0), None),
+                Some(3) => (Some(0.0), Some(deviation.unwrap_or(0.0))),
+                Some(4) => (deviation, None),
+                _ => (None, None),
             };
-            pipe_pitch.insert(pid, HwPipePitch { key, harmonic, original_cents, keep_pct });
+            pipe_pitch.insert(pid, HwPipePitch { key, harmonic, original_cents, keep_pct, tuning_offset_cents });
         }
     }
     // pipe_id -> lagen [(PipeLayerNumber, LayerID)], gesorteerd op laagnummer.
@@ -322,6 +333,9 @@ fn build_definition(
             extra.harmonic_number = pp.harmonic;
             extra.original_pitch_cents = pp.original_cents;
             extra.retune_keep_pct = pp.keep_pct;
+            // Zelfde betekenis als GO PitchCorrection: doelafwijking die
+            // alléén bij hertemperen meetelt.
+            extra.pitch_correction_cents = pp.tuning_offset_cents;
         }
         // Release-samples van de hoofdlaag. Sommige sets (Ledziny) laten de
         // release naar hetzelfde bestand als de attack wijzen (release zit in
@@ -1420,11 +1434,13 @@ struct HwPipePitch {
     key: u32,
     /// Pitch_Tempered_RankBasePitch64ftHarmonicNum (0/leeg → None → 8).
     harmonic: Option<u32>,
-    /// Pitch_OriginalOrgan_PitchHz (alleen bij SpecificationMethodCode 2).
+    /// Pitch_OriginalOrgan_PitchHz (elke methodecode, mits gevuld).
     original_cents: Option<f32>,
-    /// Pitch_Tempered_BaseTuningDeviation (alleen bij BaseTuningSchemeCode 4):
-    /// percentage van de originele afwijking dat behouden blijft.
+    /// Percentage van de originele afwijking dat bij hertemperen blijft:
+    /// code 4 = Deviation, code 1/3 = 0 (expliciet op het temperament).
     keep_pct: Option<f32>,
+    /// Code 3: bewuste doelafwijking in cents boven het temperament.
+    tuning_offset_cents: Option<f32>,
 }
 
 /// Extract every object of `object_type` from its `<ObjectList ObjectType="..">`
@@ -2166,6 +2182,41 @@ mod tests {
             "originele pijptoon bij methodecode 1 niet gelezen: {:?}",
             extra.original_pitch_cents
         );
+    }
+
+    /// BaseTuningSchemeCode: code 3 = temperament + Deviation in cents (bewuste
+    /// zweving, bv. Unda maris +13), code 1 = precies op het temperament. Beide
+    /// zijn een opgave van de definitie (keep 0), zodat een registernaam ze
+    /// niet meer naar "opname-afwijking behouden" kan omzetten. Code 4 blijft
+    /// een percentage, en een pijp zonder code blijft onbekend.
+    #[test]
+    fn stemmingscodes_1_3_4_hebben_elk_hun_eigen_betekenis() {
+        let xml = mini_xml().replace(
+            "<Pitch_OriginalOrgan_SpecificationMethodCode>2</Pitch_OriginalOrgan_SpecificationMethodCode>",
+            "<Pitch_Tempered_BaseTuningSchemeCode>3</Pitch_Tempered_BaseTuningSchemeCode>\
+             <Pitch_Tempered_BaseTuningDeviation>13</Pitch_Tempered_BaseTuningDeviation>\
+             <Pitch_OriginalOrgan_SpecificationMethodCode>2</Pitch_OriginalOrgan_SpecificationMethodCode>",
+        ).replace(
+            "<PipeID>12</PipeID><RankID>1</RankID><NormalMIDINoteNumber>37</NormalMIDINoteNumber>",
+            "<PipeID>12</PipeID><RankID>1</RankID><NormalMIDINoteNumber>37</NormalMIDINoteNumber>\
+             <Pitch_Tempered_BaseTuningSchemeCode>1</Pitch_Tempered_BaseTuningSchemeCode>",
+        );
+        let mut pkg_dirs = HashMap::new();
+        pkg_dirs.insert(1u32, PathBuf::from("/pkg"));
+        let def = build_definition(&xml, PathBuf::from("/root"), &pkg_dirs).expect("build");
+        let bourdon = def.stops.iter().find(|s| s.name == "Bourdon 8").unwrap();
+        let PipeDef::Sample { extra: e3, .. } = &bourdon.pipes[0] else { panic!("sample") };
+        assert_eq!(e3.retune_keep_pct, Some(0.0));
+        assert_eq!(e3.pitch_correction_cents, Some(13.0));
+        // De vervangen-opname-gegevens blijven los daarvan bestaan.
+        assert!(e3.original_pitch_cents.is_some() && e3.sample_pitch_cents.is_some());
+        let PipeDef::Sample { extra: e1, .. } = &bourdon.pipes[1] else { panic!("sample") };
+        assert_eq!(e1.retune_keep_pct, Some(0.0));
+        assert_eq!(e1.pitch_correction_cents, None);
+        let montre = def.stops.iter().find(|s| s.name == "Montre 8").unwrap();
+        let PipeDef::Sample { extra: e4, .. } = &montre.pipes[0] else { panic!("sample") };
+        assert_eq!(e4.retune_keep_pct, Some(100.0));
+        assert_eq!(e4.pitch_correction_cents, None);
     }
 
     /// Schakelnetwerk-terugval (0.8.3): een definitie zonder StopRank-objecten
