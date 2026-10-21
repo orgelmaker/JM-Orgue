@@ -170,6 +170,8 @@ code { background: rgba(255,255,255,0.07); padding: 0.05em 0.35em; border-radius
 .footnote { font-size: 0.82rem; color: var(--ink-mut); max-width: 760px; margin: 1rem auto 0; text-align: center; }
 
 /* ---- Downloadkaarten ---- */
+.dl-badges { text-align: center; margin: 0.5rem 0 1.2rem; display: flex; gap: 0.5rem; justify-content: center; flex-wrap: wrap; }
+.dl-badges img { height: 22px; }
 .dl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 0.9rem; max-width: 920px; margin: 0 auto; }
 .dl-card {
   background: var(--card); padding: 1.1rem 1.2rem;
