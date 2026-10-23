@@ -4,6 +4,15 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.9.21] - 2026-10-23
+
+### Mechaniek-opnamen verschijnen niet meer als register
+- Samplesets van Binauralpipes zetten de aanslag- en loslaatklikken van
+  elk klavier als "Traktur*-registers" ("TrakturI Attack", "TrakturP
+  Release"). Die horen bij de toetsmechaniek-klik aan/uit (0.7.102), niet
+  op de registerbalk. Ze worden nu overgeslagen, zoals andere mechaniek-
+  en ruis-opnamen al deden.
+
 ## [0.9.20] - 2026-10-23
 
 ### Duidelijke melding bij WavPack- of FLAC-samplesets

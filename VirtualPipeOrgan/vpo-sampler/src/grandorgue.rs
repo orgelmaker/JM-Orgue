@@ -533,12 +533,50 @@ impl StopDef {
         // Rauschwerk zijn echte registers (gevonden met Nowa Ruda, 0.8.3 —
         // de Rauschquinte 2 2/3 verdween daar van het scherm én liep als
         // ambient-loop mee). "gebläse" = Duitse blower.
-        const NOISE_MARKERS: &[&str] = &[
-            "noise", "action", "blower", "bellows", "ambient", "ambience",
-            "motor", "rauschen", "geräusch", "geraeusch", "gebläse", "geblaese",
-            "bruit", "soufflerie", "moteur",
-        ];
-        NOISE_MARKERS.iter().any(|m| n.contains(m))
+        naam_duidt_op_mechaniek_of_ruis(&n)
+    }
+}
+
+/// Pure naam-controle: duiden deze letters op een mechaniek- of ruis-opname
+/// in plaats van een echte register-knop? Gedeeld door de GO- en HW-importer.
+/// Hoofdletters mogen al in `naam_lower` zijn gewipt.
+pub fn naam_duidt_op_mechaniek_of_ruis(naam_lower: &str) -> bool {
+    const NOISE_MARKERS: &[&str] = &[
+        "noise", "action", "blower", "bellows", "ambient", "ambience",
+        "motor", "rauschen", "geräusch", "geraeusch", "gebläse", "geblaese",
+        "bruit", "soufflerie", "moteur",
+        // Toetsmechaniek-opnamen die door Binauralpipes als eigen "stop"
+        // worden gezet ("TrakturI Attack", "TrakturP Release"): die horen
+        // bij de klik aan/uit (0.7.102), niet in de registerlijst.
+        "traktur",
+    ];
+    NOISE_MARKERS.iter().any(|m| naam_lower.contains(m))
+}
+
+#[cfg(test)]
+mod noise_naam_tests {
+    use super::naam_duidt_op_mechaniek_of_ruis as mech;
+
+    #[test]
+    fn trakturen_zijn_mechaniek() {
+        assert!(mech("trakturp attack"));
+        assert!(mech("trakturi attack"));
+        assert!(mech("trakturii release"));
+    }
+
+    #[test]
+    fn echte_registers_niet() {
+        assert!(!mech("principal 8"));
+        assert!(!mech("rauschquinte 2 2/3"));
+        assert!(!mech("rauschpfeife"));
+        assert!(!mech("rauschwerk"));
+    }
+
+    #[test]
+    fn klassieke_ruis() {
+        assert!(mech("blower"));
+        assert!(mech("key action"));
+        assert!(mech("motor"));
     }
 }
 
@@ -3117,3 +3155,5 @@ Pipe001=REF:001:002:001
         let _ = fs::remove_dir_all(&dir);
     }
 }
+
+
