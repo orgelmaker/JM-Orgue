@@ -408,6 +408,52 @@ fn kies_getal(
         .or_else(|| kandidaten.into_iter().next())
 }
 
+/// De letter van de ActionEffectCode: elke aanwezige waarde is 1, 2 of 3, en
+/// er komt minstens één 2 of 3 voor (zonder effectgeluiden is er niets te
+/// onderscheiden en blijft het veld weg: dan is alles een gewone pijp).
+fn kies_effectcode(objs: &[FieldMap], uitsluiten: &[&str]) -> Option<String> {
+    letters(objs).into_iter()
+        .filter(|l| !uitsluiten.contains(&l.as_str()))
+        .find(|l| {
+            let (goed, aanwezig) = dekking(objs, l, |v| matches!(v.trim(), "1" | "2" | "3"));
+            let (effect, _) = dekking(objs, l, |v| matches!(v.trim(), "2" | "3"));
+            aanwezig > 0 && goed == aanwezig && effect > 0
+        })
+}
+
+/// Het ActionTypeCode naast een bekende effectcode-letter: een letter met
+/// precies twee waarden, "1" (pijp) en één andere die ook bij StopRanks met
+/// effect 2/3 voorkomt (geluid). Geeft (letter, geluidwaarde).
+fn kies_actietype(objs: &[FieldMap], effect_letter: &str) -> Option<(String, String)> {
+    letters(objs).into_iter()
+        .filter(|l| l != effect_letter && l != "a")
+        .find_map(|l| {
+            let waarden: HashSet<&str> = objs.iter().filter_map(|o| o.get(l.as_str()).map(|v| v.trim())).collect();
+            if waarden.len() != 2 || !waarden.contains("1") {
+                return None;
+            }
+            let x = waarden.into_iter().find(|v| *v != "1")?.to_string();
+            let bij_effect = objs.iter().any(|o| {
+                o.get(effect_letter).map_or(false, |v| matches!(v.trim(), "2" | "3"))
+                    && o.get(l.as_str()).map(|v| v.trim()) == Some(x.as_str())
+            });
+            bij_effect.then_some((l, x))
+        })
+}
+
+/// De letter met een octaafsprong: elke aanwezige waarde is een veelvoud van
+/// 12, niet 0, en ligt binnen drie octaven (koppels op 16', 4', 2' …).
+fn kies_octaafsprong(objs: &[FieldMap], uitsluiten: &[&str]) -> Option<String> {
+    letters(objs).into_iter()
+        .filter(|l| !uitsluiten.contains(&l.as_str()))
+        .find(|l| {
+            let (goed, aanwezig) = dekking(objs, l, |v| {
+                v.trim().parse::<i64>().map(|n| n != 0 && n % 12 == 0 && n.abs() <= 36).unwrap_or(false)
+            });
+            aanwezig > 0 && goed == aanwezig
+        })
+}
+
 /// De MIDI-noot van een pijp: binnen één rang is elke noot uniek, en de
 /// waarden liggen in het MIDI-bereik. Dat is een veel scherper kenmerk dan
 /// "een getal tussen 0 en 127", want dat zijn meerdere velden.
@@ -657,10 +703,20 @@ fn kies_toetsbereik(
     rank_letter: &str,
     noten_per_rang: &HashMap<u32, HashSet<u32>>,
 ) -> (Option<String>, Option<String>, Option<String>) {
+    // Een veld met overal dezelfde waarde is een vlag (ActionTypeCode = 1 …),
+    // geen toetsbereik; als kandidaat leverde het een verschuiving van +1 of
+    // "1 toets per StopRank" op.
+    let constant = |l: &str| -> bool {
+        let mut waarden = stopranks.iter().filter_map(|o| o.get(l).map(|v| v.trim()));
+        match waarden.next() {
+            Some(eerste) => waarden.all(|v| v == eerste),
+            None => true,
+        }
+    };
     let getal_kandidaten = |lo: i64, hi: i64| -> Vec<String> {
         letters(stopranks)
             .into_iter()
-            .filter(|l| l != rank_letter && l != "a")
+            .filter(|l| l != rank_letter && l != "a" && !constant(l))
             .filter(|l| {
                 let (goed, aanwezig) =
                     dekking(stopranks, l, |v| matches!(v.trim().parse::<i64>(), Ok(n) if (lo..=hi).contains(&n)));
@@ -668,22 +724,41 @@ fn kies_toetsbereik(
             })
             .collect()
     };
+    // Stap 1: een duidelijk aantal-veld (bij minstens de helft van de
+    // StopRanks, 2..128 toetsen, de grootste minstens 12) ligt meteen vast.
+    // Zonder aantal telt de score de hele rang mee, ook pijpen boven het
+    // klavier (uitgebouwd voor de superkoppel); dan scoorde "geen velden"
+    // altijd hoger dan het echte aantal, en viel de verschuiving van een
+    // transmissie ("Bourdon 8' uit Bourdon 16'") mee weg.
+    let aantal_vast = letters(stopranks)
+        .into_iter()
+        .filter(|l| l != rank_letter && l != "a")
+        .filter(|l| {
+            let (goed, aanwezig) =
+                dekking(stopranks, l, |v| matches!(v.trim().parse::<i64>(), Ok(n) if (2..=128).contains(&n)));
+            let grootste = stopranks.iter()
+                .filter_map(|o| o.get(l.as_str()).and_then(|v| v.trim().parse::<i64>().ok()))
+                .max().unwrap_or(0);
+            aanwezig * 2 >= stopranks.len() && goed == aanwezig && grootste >= 12
+        })
+        .max_by_key(|l| dekking(stopranks, l, |_| true).1);
     // `None` = het veld ontbreekt en de standaardwaarde geldt.
     let eerste_kand: Vec<Option<String>> = std::iter::once(None)
-        .chain(getal_kandidaten(12, 108).into_iter().map(Some))
+        .chain(getal_kandidaten(12, 108).into_iter().filter(|l| Some(l) != aantal_vast.as_ref()).map(Some))
         .collect();
-    let aantal_kand: Vec<Option<String>> = std::iter::once(None)
-        .chain(getal_kandidaten(1, 128).into_iter().map(Some))
-        .collect();
+    let aantal_kand: Vec<Option<String>> = match &aantal_vast {
+        Some(l) => vec![Some(l.clone())],
+        None => std::iter::once(None).chain(getal_kandidaten(1, 128).into_iter().map(Some)).collect(),
+    };
     let inc_kand: Vec<Option<String>> = std::iter::once(None)
-        .chain(getal_kandidaten(-48, 48).into_iter().map(Some))
+        .chain(getal_kandidaten(-48, 48).into_iter().filter(|l| Some(l) != aantal_vast.as_ref()).map(Some))
         .collect();
 
     let haal = |o: &FieldMap, l: &Option<String>| -> Option<i64> {
         l.as_ref().and_then(|l| o.get(l)).and_then(|v| v.trim().parse::<i64>().ok())
     };
 
-    let mut beste: Option<(i64, usize, Option<String>, Option<String>, Option<String>)> = None;
+    let mut beste: Option<(i64, usize, usize, Option<String>, Option<String>, Option<String>)> = None;
     for eerste in &eerste_kand {
         for aantal in &aantal_kand {
             if aantal.is_some() && aantal == eerste {
@@ -711,21 +786,24 @@ fn kies_toetsbereik(
                         }
                     }
                 }
-                // Bij gelijke dekking wint de eenvoudigste verklaring: geen
-                // octaafsprong en geen expliciete eerste toets.
+                // Bij gelijke dekking wint eerst de verklaring die meer velden
+                // van de definitie gebruikt (die landen óók op bestaande
+                // pijpen, maar zijn wat er staat), dan de eenvoudigste.
+                let velden = usize::from(eerste.is_some()) + usize::from(inc.is_some());
                 let eenvoud = usize::from(inc.is_none()) + usize::from(eerste.is_none());
                 let beter = match &beste {
                     None => true,
-                    Some((s0, e0, _, _, _)) => score > *s0 || (score == *s0 && eenvoud > *e0),
+                    Some((s0, v0, e0, _, _, _)) => score > *s0
+                        || (score == *s0 && (velden > *v0 || (velden == *v0 && eenvoud > *e0))),
                 };
                 if beter {
-                    beste = Some((score, eenvoud, eerste.clone(), aantal.clone(), inc.clone()));
+                    beste = Some((score, velden, eenvoud, eerste.clone(), aantal.clone(), inc.clone()));
                 }
             }
         }
     }
     match beste {
-        Some((_, _, e, a, i)) => (e, a, i),
+        Some((_, _, _, e, a, i)) => (e, a, i),
         None => (None, None, None),
     }
 }
@@ -958,10 +1036,33 @@ impl GecomprimeerdeOdf {
                 }
             }
         }
+        // Eerst de ActionEffectCode: de StopRanks van in-/uitschakelgeluiden
+        // hebben onzinwaarden in de toetsbereik-velden (eerste toets 0,
+        // verschuiving 58 …) en zouden de herkenning daarvan anders laten
+        // mislukken; dan klonk een transmissie ("Bourdon 8' uit Bourdon 16'")
+        // een octaaf te laag.
+        let sr_effect = {
+            let mut uit: Vec<&str> = vec!["a"];
+            uit.extend(sr_rank.as_deref());
+            kies_effectcode(sr, &uit)
+        };
+        // Het ActionTypeCode: bij alle klik-StopRanks dezelfde waarde (21), bij
+        // de pijpen 1. Een aanhoudend effect (motorgeluid: type 21, effect 1)
+        // heeft ook onzin in de toetsbereik-velden en telt daarvoor niet mee.
+        let sr_actietype = sr_effect.as_deref().and_then(|el| kies_actietype(sr, el));
+        let sr_gewoon: Vec<FieldMap> = sr.iter()
+            .filter(|o| sr_effect.as_ref().and_then(|l| o.get(l.as_str())).map_or(true, |v| v.trim() == "1"))
+            .filter(|o| sr_actietype.as_ref().map_or(true, |(l, x)| o.get(l.as_str()).map_or(true, |v| v.trim() != x)))
+            .cloned()
+            .collect();
         let (sr_eerste, sr_aantal, sr_inc) = match &sr_rank {
-            Some(rl) => kies_toetsbereik(sr, rl, &noten_per_rang),
+            Some(rl) => kies_toetsbereik(&sr_gewoon, rl, &noten_per_rang),
             None => (None, None, None),
         };
+        info!(
+            "Hauptwerk: StopRank-toetsbereik: eerste toets {:?}, aantal {:?}, verschuiving {:?} ({} van {} StopRanks zonder effectgeluid)",
+            sr_eerste, sr_aantal, sr_inc, sr_gewoon.len(), sr.len()
+        );
         let mut sr_uit: Vec<&str> = vec!["a"];
         for l in [&sr_rank, &sr_eerste, &sr_aantal, &sr_inc].into_iter().flatten() {
             sr_uit.push(l.as_str());
@@ -975,16 +1076,21 @@ impl GecomprimeerdeOdf {
         if let Some(l) = &sr_alt {
             info!("Hauptwerk: letter '{}' van StopRank is de tremulant-rang", l);
         }
+        let sr_naam = kies_tekst(sr, &sr_uit, &["b"]);
+        if let Some(l) = &sr_effect {
+            info!("Hauptwerk: letter '{}' van StopRank is de ActionEffectCode", l);
+        }
         zet(
             "StopRank",
             vec![
                 (Some("a".into()), "StopID"),
-                (kies_tekst(sr, &sr_uit, &["b"]), "Name"),
+                (sr_naam, "Name"),
                 (sr_rank.clone(), "RankID"),
                 (sr_eerste.clone(), "MIDINoteNumOfFirstMappedDivisionInputNode"),
                 (sr_aantal.clone(), "NumberOfMappedDivisionInputNodes"),
                 (sr_inc.clone(), "MIDINoteNumIncrementFromDivisionToRank"),
                 (sr_alt.clone(), "AlternateRankID"),
+                (sr_effect, "ActionEffectCode"),
             ],
         );
 
@@ -1084,11 +1190,43 @@ impl GecomprimeerdeOdf {
 
         // ── Koppels: klavier → divisie, met de schakelaar die hem aanzet ──
         let ka = lijst("KeyAction");
-        let ka_div = kies_verwijzing(ka, &div_ids, &["a"], &["c", "d"]);
+        // Een veld met overal dezelfde waarde kan niet naar verschillende
+        // divisies wijzen (bij een set met weinig koppels won anders een
+        // constante "1" het van de echte doeldivisie, en werd elke koppel
+        // "Pedaal → Pedaal").
+        let ka_constant: Vec<String> = letters(ka).into_iter().filter(|l| {
+            let mut waarden = ka.iter().filter_map(|o| o.get(l.as_str()).map(|v| v.trim()));
+            match waarden.next() { Some(eerste) => waarden.all(|v| v == eerste), None => true }
+        }).collect();
+        let ka_div = {
+            let mut uit: Vec<&str> = vec!["a"];
+            if div_ids.len() > 1 { uit.extend(ka_constant.iter().map(|s| s.as_str())); }
+            kies_verwijzing(ka, &div_ids, &uit, &["c", "d"])
+                .or_else(|| kies_schaarse_verwijzing(ka, &div_ids, &uit, &["d", "c"]))
+        };
         let mut ka_uit: Vec<&str> = vec!["a"];
         if let Some(l) = &ka_div {
             ka_uit.push(l.as_str());
         }
+        let ka_naam = kies_tekst(ka, &ka_uit, &["d", "e"]);
+        // De schakelaar staat alleen bij de echte koppels, niet bij de vaste
+        // klavier→divisie-verbindingen; bij een set met weinig koppels is dat
+        // een minderheid van de objecten, dus ook schaars zoeken.
+        let ka_schakelaar = kies_verwijzing(ka, &switch_ids, &ka_uit, &["e", "f"])
+            .or_else(|| {
+                let mut uit = ka_uit.clone();
+                uit.extend(ka_naam.as_deref());
+                kies_schaarse_verwijzing(ka, &switch_ids, &uit, &["e", "f"])
+            });
+        // Octaafverschuiving van een koppel (16'/4'): de letter waarvan elke
+        // waarde een veelvoud van 12 is, niet 0 en hoogstens drie octaven.
+        // Zonder dit klonken alle octaafkoppels van een compacte set op 8'.
+        let ka_transpositie = {
+            let mut uit = ka_uit.clone();
+            uit.extend(ka_naam.as_deref());
+            uit.extend(ka_schakelaar.as_deref());
+            kies_octaafsprong(ka, &uit)
+        };
         zet(
             "KeyAction",
             vec![
@@ -1097,8 +1235,9 @@ impl GecomprimeerdeOdf {
                     "SourceKeyboardID",
                 ),
                 (ka_div.clone(), "DestDivisionID"),
-                (kies_tekst(ka, &ka_uit, &["d", "e"]), "Name"),
-                (kies_verwijzing(ka, &switch_ids, &ka_uit, &["e", "f"]), "ConditionSwitchID"),
+                (ka_naam, "Name"),
+                (ka_schakelaar, "ConditionSwitchID"),
+                (ka_transpositie, "MIDINoteNumberIncrement"),
             ],
         );
 

@@ -17,9 +17,30 @@ versies volgen [Semantic Versioning](https://semver.org/).
 - Staat er een voetmaat met voetteken in de registernaam ("Contrabass 16'",
   "Quinta 5 1/3'"), dan toont de knop die voetmaat, ook als de definitie de
   rang anders noteert. Voorheen kon er "Contrabass 16'" met "8'" eronder
-  staan.
+  staan. Een klein verschil (historische schrijfwijze, "Quint 3'" voor een
+  kwint op 2 2/3') laat de precieze voetmaat staan.
 - Een registernaam die begint met het eigen interne nummer van het register
   ("2001_Contrabass") wordt zonder dat nummer getoond.
+- Een voetmaat die aan de naam vastzit ("Principal8") verdwijnt uit de naam;
+  hij staat al onder de knop.
+- Koppels op gelijke toon krijgen geen "8" meer achter de naam
+  ("Grt. Ped.8" → "Grt. Ped.").
+
+### Gecomprimeerde Hauptwerk-definities
+- **Octaafkoppels klinken op de juiste octaaf.** Bij gecomprimeerde
+  definities kwam de octaafverschuiving van koppels niet door, waardoor
+  16′- en 4′-koppels op gelijke toon klonken.
+- **Transmissies op de juiste hoogte.** Een register dat de pijpen van een
+  ander register een octaaf of kwint hoger aanspreekt (een pedaal-Bourdon 8′
+  uit de Bourdon 16′ van het manuaal) klonk op de hoogte van de bron.
+- **Koppels herkend bij sets met weinig koppels**, en op het juiste klavier.
+- **Geen klikgeluiden meer als register of als extra pijplaag.** Hulpregisters
+  voor het geluid van koppel- en tremulantschakelaars, het toetsgeluid en het
+  aan-/uitgeluid van registers worden niet meer als registerknop getoond en
+  klinken niet meer mee bij het spelen.
+- Een divisie zonder één speelbaar register en zonder koppels (bijvoorbeeld
+  een apart klavier waarop alleen het motorgeluid hangt) wordt niet meer als
+  lege klavierkolom getoond. Het motorgeluid blijft gewoon werken.
 
 ## [0.9.17] - 2026-10-21
 

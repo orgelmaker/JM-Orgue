@@ -398,12 +398,23 @@ fn build_definition(
         Some((path, extra))
     };
 
-    // stop_id -> its stopranks
+    // stop_id -> its stopranks. ActionEffectCode 2/3 = een eenmalig geluid
+    // bij in- of uitschakelen (register-, koppel-, tremulant- of toetsklik),
+    // geen pijplaag; anders klonk zo'n klik als extra laag mee bij het spelen
+    // en verschenen hulpregisters als "CouplerEffect_1006" als registerknop.
     let mut stopranks_by_stop: HashMap<u32, Vec<&FieldMap>> = HashMap::new();
+    let mut effect_stopranks = 0usize;
     for sr in &stopranks {
+        if sr.get_u32("ActionEffectCode").map_or(false, |c| c != 1) {
+            effect_stopranks += 1;
+            continue;
+        }
         if let Some(sid) = sr.get_u32("StopID") {
             stopranks_by_stop.entry(sid).or_default().push(sr);
         }
+    }
+    if effect_stopranks > 0 {
+        info!("Hauptwerk: {} StopRanks met een in-/uitschakelgeluid niet als pijplaag geladen", effect_stopranks);
     }
 
     // --- Build StopDefs (paired with their division id for grouping) ---
@@ -457,8 +468,15 @@ fn build_definition(
                 .or_else(|| rank_name.get(&rank_id).cloned())
                 .unwrap_or_else(|| format!("Rank {}", rank_id));
             let first_div = sr.get_u32("MIDINoteNumOfFirstMappedDivisionInputNode").unwrap_or(36);
-            let count = sr.get_u32("NumberOfMappedDivisionInputNodes").unwrap_or(0);
             let inc = sr.get_i32("MIDINoteNumIncrementFromDivisionToRank").unwrap_or(0);
+            // 0 (of afwezig) = niet aan een toetsbereik gebonden, zoals het
+            // motorgeluid: dan loopt de StopRank tot het eind van zijn rang.
+            let count = match sr.get_u32("NumberOfMappedDivisionInputNodes") {
+                Some(n) if n > 0 => n,
+                _ => rank_pipes.keys().max().map_or(0, |&hoogste| {
+                    (hoogste as i64 - inc as i64 - first_div as i64 + 1).max(0) as u32
+                }),
+            };
             // De voetmaat van de rang én die van wat je hoort. Een pedaal-
             // Bourdon 8 kan een 16'-rang een octaaf hoger aanspreken; dan
             // stond er "Bourdon 8" met "16'" eronder.
@@ -1714,6 +1732,25 @@ pub fn strip_pitch_from_name(name: &str, pitch: &str) -> String {
         if normaliseer_voettal(&staart) == doel {
             return woorden[..woorden.len() - aantal].join(" ");
         }
+    }
+    name.to_string()
+}
+
+/// Registernaam zonder een voettal dat direct aan het laatste woord vastzit
+/// ("Principal8", "Bourdon16'"): de voetmaat staat al onder de knop. Alleen
+/// echte voettallen en minstens drie letters ervoor, zodat "Cornet5" of
+/// "Quint3" blijven staan.
+pub fn zonder_vastgeplakte_voetmaat(name: &str) -> String {
+    let mut woorden: Vec<&str> = name.split_whitespace().collect();
+    let Some(laatste) = woorden.pop() else { return name.to_string() };
+    let kaal = laatste.trim_end_matches(['\'', '\u{2032}', '\u{2019}']);
+    let cijfers = kaal.chars().rev().take_while(|c| c.is_ascii_digit()).count();
+    let (kop, getal) = kaal.split_at(kaal.len() - cijfers);
+    if matches!(getal, "1" | "2" | "4" | "8" | "16" | "32" | "64")
+        && kop.chars().count() >= 3 && kop.chars().all(|c| c.is_alphabetic())
+    {
+        woorden.push(kop);
+        return woorden.join(" ");
     }
     name.to_string()
 }

@@ -272,3 +272,16 @@ fn toon_routes() {
             x.input.keep_pct, x.extra.pitch_correction_cents);
     }
 }
+
+/// Diagnose: `PITCH_KEYS="<pad naar odf>"` drukt per register het
+/// toetsbereik (laagste/hoogste getoonde toets) en het aantal pijpen af.
+#[test]
+#[ignore]
+fn toon_toetsen() {
+    let Ok(pad) = std::env::var("PITCH_KEYS") else { return };
+    let def = load_hauptwerk(Path::new(&pad)).expect("laden");
+    for s in &def.stops {
+        let n = s.pipes.iter().filter(|p| !matches!(p, PipeDef::Empty)).count();
+        println!("{:24} first_midi {:?} pijpen {} (slots {})", s.name, s.first_midi_note, n, s.pipes.len());
+    }
+}

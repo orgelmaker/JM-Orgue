@@ -8,7 +8,7 @@ use tracing::{info, warn};
 use crate::audio::AudioCommand;
 use crate::state::AppState;
 use crate::library::{self, OrganLibraryEntry, OrganSettings, PresetBindingSaved, SwellBindingSaved, CrescendoBindingSaved, DivisionTremulantSaved, MidiMappingSaved, PresetData};
-use vpo_sampler::{OrganDefinition, clean_stop_name, strip_pitch_from_name, voetmaat_uit_naam,
+use vpo_sampler::{OrganDefinition, clean_stop_name, strip_pitch_from_name, voetmaat_uit_naam, zonder_vastgeplakte_voetmaat,
                   gedeeld_voorvoegsel, strip_voorvoegsel, clean_division_name,
                   splits_koren, Koren};
 
@@ -2634,6 +2634,7 @@ fn registerweergave(schoon: &str, mengwerk: bool, harmonic: u32, manifest: Optio
     -> (String, String, Option<Koren>)
 {
     let van_set = OrganDefinition::harmonic_to_footage(harmonic);
+    let schoon = &zonder_vastgeplakte_voetmaat(schoon);
     let splitsing = splits_koren(schoon, mengwerk);
     if let Some(k) = splitsing.koren {
         // Voetmaat: met voetteken uit de naam ("… 2 2/3'"). Anders die van de
@@ -2733,9 +2734,26 @@ mod registerweergave_tests {
             ("Principal".into(), "8'".into(), None));
         assert_eq!(registerweergave("Gedekt 8", false, 8, None),
             ("Gedekt".into(), "8'".into(), None));
+        // Vastgeplakte voetmaat gaat altijd weg, ook als hij afwijkt.
+        assert_eq!(registerweergave("Bourdon8", false, 4, None),
+            ("Bourdon".into(), "16'".into(), None));
+        assert_eq!(registerweergave("Principal8", false, 8, None),
+            ("Principal".into(), "8'".into(), None));
+        assert_eq!(registerweergave("Cornet5", false, 8, None),
+            ("Cornet5".into(), "8'".into(), None));
         // Geen octaafverschil: historische schrijfwijze, de afgeleide blijft.
         assert_eq!(registerweergave("Quint 3'", false, 24, None),
             ("Quint 3'".into(), "2 2/3'".into(), None));
+    }
+
+    #[test]
+    fn unison_koppel_zonder_8() {
+        assert_eq!(zonder_unison_voetmaat("Grt. Ped.8"), "Grt. Ped.");
+        assert_eq!(zonder_unison_voetmaat("Sw. Grt.8"), "Sw. Grt.");
+        assert_eq!(zonder_unison_voetmaat("II/I 8'"), "II/I");
+        assert_eq!(zonder_unison_voetmaat("Koppel 18"), "Koppel 18");
+        assert_eq!(zonder_unison_voetmaat("I/P"), "I/P");
+        assert_eq!(zonder_unison_voetmaat("8"), "8");
     }
 
     #[test]
@@ -3810,6 +3828,16 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
                 manual.name
             );
         }
+        // Een divisie zonder één speelbaar register en zonder koppel van of
+        // naar haar is geen klavier om te tonen: bv. een apart "NOISES"-
+        // klavier waarop alleen het motorgeluid hangt (dat krijgt de
+        // motorknop). Een koppelklavier zonder eigen registers blijft staan.
+        if stops.is_empty() && !definition.couplers.iter().any(|c|
+            c.source_manual == manual.number || c.destination_manual == manual.number)
+        {
+            info!("Divisie '{}' overgeslagen: geen speelbare registers en geen koppels", manual.name);
+            continue;
+        }
         divisions.push(DivisionDto {
             name: manual.name.clone(),
             display_name,
@@ -3957,7 +3985,9 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
     // ODF-tremulantparameters als default voor de per-divisie LFO: rate uit
     // Period (ms), diepte uit AmpModDepth (%). Eventueel per orgel opgeslagen
     // gebruikersinstellingen overschrijven dit daarna via de normale restore.
-    for (div_idx, manual) in definition.manuals.iter().enumerate() {
+    for manual in &definition.manuals {
+        // Index in de getoonde divisielijst (lege divisies vallen daar weg).
+        let Some(div_idx) = organ_info.divisions.iter().position(|d| d.name == manual.name) else { continue };
         if let Some(tid) = manual_trem_ids(manual).first() {
             if let Some(trem) = definition.tremulants.iter().find(|t| t.number == *tid) {
                 if trem.wave {
@@ -8289,6 +8319,8 @@ fn build_couplers_from_definition(definition: &OrganDefinition) -> Vec<CouplerDt
             let suffix = if offset >= 12 { " 4'" } else if offset <= -12 { " 16'" } else { "" };
             let name = if is_generic {
                 format!("{}{}\n+\n{}", src_name, suffix, dest_name)
+            } else if offset == 0 {
+                zonder_unison_voetmaat(raw)
             } else {
                 raw.to_string()
             };
@@ -8308,6 +8340,19 @@ fn build_couplers_from_definition(definition: &OrganDefinition) -> Vec<CouplerDt
         }
     }
     couplers
+}
+
+/// Koppel op gelijke toon: een "8" of "8'" achter de naam zegt niets
+/// ("Grt. Ped.8" → "Grt. Ped."). Alleen een losstaande 8, geen "18".
+fn zonder_unison_voetmaat(naam: &str) -> String {
+    let n = naam.trim_end();
+    let zonder_teken = n.trim_end_matches(['\'', '\u{2032}', '\u{2019}']);
+    if let Some(kop) = zonder_teken.strip_suffix('8') {
+        if !kop.trim().is_empty() && !kop.ends_with(|c: char| c.is_ascii_digit()) {
+            return kop.trim_end().to_string();
+        }
+    }
+    n.to_string()
 }
 
 /// Generate couplers based on division structure
