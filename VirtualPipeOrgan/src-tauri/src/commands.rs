@@ -8,7 +8,7 @@ use tracing::{info, warn};
 use crate::audio::AudioCommand;
 use crate::state::AppState;
 use crate::library::{self, OrganLibraryEntry, OrganSettings, PresetBindingSaved, SwellBindingSaved, CrescendoBindingSaved, DivisionTremulantSaved, MidiMappingSaved, PresetData};
-use vpo_sampler::{OrganDefinition, clean_stop_name, strip_pitch_from_name,
+use vpo_sampler::{OrganDefinition, clean_stop_name, strip_pitch_from_name, voetmaat_uit_naam,
                   gedeeld_voorvoegsel, strip_voorvoegsel, clean_division_name,
                   splits_koren, Koren};
 
@@ -2661,8 +2661,38 @@ fn registerweergave(schoon: &str, mengwerk: bool, harmonic: u32, manifest: Optio
     // laagste pijp van de rang is op 4') óf zelfs misleidend (klinkt
     // helemaal niet op 4'). Alleen een niet-mengwerk krijgt de voetmaat uit
     // de set.
+    // Een voetmaat met voetteken in de naam wint van de afgeleide, behalve
+    // als ze maar een kleine afstand (hoogstens zo'n hele toon) verschillen:
+    // dat is een historische schrijfwijze voor dezelfde pijp ("Quint 3'"
+    // klinkt op 2 2/3'), en dan is de precieze voetmaat onder de knop juist
+    // nuttig. Bij een groter verschil noteert de definitie de rang anders dan
+    // de naam (een set die elke rang als 8' opgeeft gaf "Contrabass 16'" met
+    // "8'" eronder); dan geldt het label van de maker.
+    if !mengwerk {
+        if let Some((naam, voetmaat)) = voetmaat_uit_naam(schoon) {
+            if let (Some(a), Some(b)) = (voet_waarde(&voetmaat), voet_waarde(&van_set)) {
+                let afstand_cent = (1200.0 * (a / b).log2()).abs();
+                if afstand_cent < 1.0 || afstand_cent > 250.0 {
+                    return (naam, voetmaat, None);
+                }
+            }
+        }
+    }
     let pitch = if mengwerk { String::new() } else { van_set };
     (strip_pitch_from_name(schoon, &pitch), pitch, None)
+}
+
+/// "5 1/3'" → 5,333; None als het geen voetmaat is.
+fn voet_waarde(s: &str) -> Option<f64> {
+    let kaal = s.trim().trim_end_matches(['\'', '\u{2032}', '\u{2019}']);
+    let mut som = 0.0;
+    for deel in kaal.split_whitespace() {
+        som += match deel.split_once('/') {
+            Some((t, n)) => t.parse::<f64>().ok()? / n.parse::<f64>().ok().filter(|n| *n > 0.0)?,
+            None => deel.parse::<f64>().ok()?,
+        };
+    }
+    (som > 0.0).then_some(som)
 }
 
 #[cfg(test)]
@@ -2686,6 +2716,26 @@ mod registerweergave_tests {
         // Geen mengwerk, wel een markering: de voetmaat van de set blijft.
         assert_eq!(registerweergave("Prestant 2 st.", false, 8, None),
             ("Prestant".into(), "8'".into(), k(2, 2)));
+    }
+
+    /// Een definitie die elke rang als 8' noteert terwijl de naam "16'"
+    /// zegt: het label van de naam wint; een kale of ontbrekende voetmaat in
+    /// de naam laat de afgeleide staan.
+    #[test]
+    fn voetmaat_met_voetteken_in_naam_wint() {
+        assert_eq!(registerweergave("Contrabass 16'", false, 8, None),
+            ("Contrabass".into(), "16'".into(), None));
+        assert_eq!(registerweergave("Quinta 5 1/3'", false, 8, None),
+            ("Quinta".into(), "5 1/3'".into(), None));
+        assert_eq!(registerweergave("Subbaß 16 Fuß", false, 4, None),
+            ("Subbaß".into(), "16'".into(), None));
+        assert_eq!(registerweergave("Principal", false, 8, None),
+            ("Principal".into(), "8'".into(), None));
+        assert_eq!(registerweergave("Gedekt 8", false, 8, None),
+            ("Gedekt".into(), "8'".into(), None));
+        // Geen octaafverschil: historische schrijfwijze, de afgeleide blijft.
+        assert_eq!(registerweergave("Quint 3'", false, 24, None),
+            ("Quint 3'".into(), "2 2/3'".into(), None));
     }
 
     #[test]
@@ -3989,6 +4039,13 @@ fn fill_live_registration_flags(state: &AppState, mut organ_info: OrganInfoDto) 
                 s.drawn = drawn.contains(&s.id);
             }
         }
+    }
+    // restore_organ_settings kan de koppellijst al hebben uitgebreid met de
+    // bewaarde extra koppels (koppellijst_herbouwen); die lijst wint. Anders
+    // schreef deze functie de vooraf gebouwde lijst terug en waren de extra
+    // koppels na elke start weg, terwijl ze in de keuzelijst "aan" stonden.
+    if let Some(huidig) = state.loaded_organ_info.read().as_ref().and_then(|o| o.couplers.clone()) {
+        organ_info.couplers = Some(huidig);
     }
     let active = state.get_active_couplers();
     if let Some(ref mut couplers) = organ_info.couplers {

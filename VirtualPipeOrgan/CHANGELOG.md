@@ -4,6 +4,23 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.9.18] - 2026-10-23
+
+### Extra koppels blijven na herstart bruikbaar
+- Bijgeschakelde extra koppels (melodiekoppel, 16′- en 4′-koppels, …)
+  stonden na een herstart wel aangevinkt in de lijst, maar ontbraken op de
+  koppelbalk en deden niets tot je ze opnieuw aanzette. Bij het laden van
+  het orgel werd de herstelde koppellijst overschreven door de lijst van
+  vóór het herstel. Nu blijven ze staan en werken ze meteen.
+
+### Registernamen
+- Staat er een voetmaat met voetteken in de registernaam ("Contrabass 16'",
+  "Quinta 5 1/3'"), dan toont de knop die voetmaat, ook als de definitie de
+  rang anders noteert. Voorheen kon er "Contrabass 16'" met "8'" eronder
+  staan.
+- Een registernaam die begint met het eigen interne nummer van het register
+  ("2001_Contrabass") wordt zonder dat nummer getoond.
+
 ## [0.9.17] - 2026-10-21
 
 ### Stemming: wat de orgeldefinitie opgeeft gaat voor

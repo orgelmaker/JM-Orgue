@@ -29,4 +29,4 @@ pub use hauptwerk::{load_hauptwerk, is_hauptwerk_path, clean_stop_name, strip_pi
 pub use streaming::*;
 pub use custom_organ::*;
 pub use perspective::*;
-pub use registernaam::{splits_koren, Koren, KorenSplitsing};
+pub use registernaam::{splits_koren, voetmaat_uit_naam, Koren, KorenSplitsing};

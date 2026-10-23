@@ -419,7 +419,15 @@ fn build_definition(
         // (alleen als er écht perspectieven zijn — anders werd 'Trompet
         // Direct' ten onrechte 'Trompet'); de meldingen hieronder gebruiken
         // de ruwe naam.
-        let name = clean_stop_name(st.get("Name").map(|s| s.as_str()).unwrap_or(""));
+        // Sommige makers zetten het eigen StopID vóór de naam ("2001_Contrabass
+        // 16'" bij StopID 2001); in Hauptwerk zelf is die interne naam
+        // onzichtbaar. Alleen dát exacte voorvoegsel gaat eraf.
+        let ruwe_naam = st.get("Name").map(|s| s.as_str()).unwrap_or("");
+        let ruwe_naam = st.get("StopID")
+            .and_then(|id| ruwe_naam.strip_prefix(&format!("{}_", id.trim())))
+            .filter(|rest| !rest.trim().is_empty())
+            .unwrap_or(ruwe_naam);
+        let name = clean_stop_name(ruwe_naam);
 
         // Collect (division_note -> pipe + sample path + extra's) PER StopRank,
         // in documentvolgorde. StopRanks met disjuncte noten (splice, geleende
@@ -2217,6 +2225,20 @@ mod tests {
         let PipeDef::Sample { extra: e4, .. } = &montre.pipes[0] else { panic!("sample") };
         assert_eq!(e4.retune_keep_pct, Some(100.0));
         assert_eq!(e4.pitch_correction_cents, None);
+    }
+
+    /// Een maker die het eigen StopID vóór de naam zet ("1_Bourdon 8"): dat
+    /// voorvoegsel gaat eraf; een ander getal blijft staan.
+    #[test]
+    fn eigen_stopid_voor_de_naam_verdwijnt() {
+        let xml = mini_xml()
+            .replace("<StopID>1</StopID><Name>Bourdon 8</Name>", "<StopID>1</StopID><Name>1_Bourdon 8</Name>")
+            .replace("<StopID>2</StopID><Name>Montre 8</Name>", "<StopID>2</StopID><Name>7_Montre 8</Name>");
+        let mut pkg_dirs = HashMap::new();
+        pkg_dirs.insert(1u32, PathBuf::from("/pkg"));
+        let def = build_definition(&xml, PathBuf::from("/root"), &pkg_dirs).expect("build");
+        assert!(def.stops.iter().any(|s| s.name == "Bourdon 8"), "{:?}", def.stops.iter().map(|s| &s.name).collect::<Vec<_>>());
+        assert!(def.stops.iter().any(|s| s.name == "7_Montre 8"));
     }
 
     /// Schakelnetwerk-terugval (0.8.3): een definitie zonder StopRank-objecten

@@ -149,6 +149,15 @@ fn voetmaat_achteraan(woorden: &[&str]) -> Option<(usize, String)> {
     Some((n - begin, format!("{}'", delen.join(" "))))
 }
 
+/// Voetmaat die de naam zelf met voetteken of voetwoord opgeeft ("Contrabass
+/// 16'", "Quinta 5 1/3'", "Subbaß 16 Fuß"): (naam zonder voetmaat, voetmaat).
+/// None als er geen staat of er niets van de naam zou overblijven.
+pub fn voetmaat_uit_naam(naam: &str) -> Option<(String, String)> {
+    let woorden: Vec<&str> = naam.split_whitespace().collect();
+    let (n, v) = voetmaat_achteraan(&woorden)?;
+    (n < woorden.len()).then(|| (woorden[..woorden.len() - n].join(" "), v))
+}
+
 /// Haal het aantal koren uit een registernaam. `mengwerk`: hoort het register
 /// tot de mengwerkfamilie (alleen dan telt een kaal Romeins cijfer).
 pub fn splits_koren(naam: &str, mengwerk: bool) -> KorenSplitsing {
