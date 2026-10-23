@@ -2960,6 +2960,21 @@ fn tremulant_kind_voor_divisie(
 
 /// Stuur laad-voortgang naar de frontend (LoadingOverlay). Headless (test-API
 /// vóór Tauri-setup) is er geen AppHandle — dan stilletjes overslaan.
+
+/// Eén event per onbekende audio-container tijdens het laden (0.9.20): de UI
+/// toont dan een korte banner zodat de gebruiker weet dat de set WavPack of
+/// FLAC gebruikt in plaats van WAV, in plaats van alleen stille pijpen.
+fn emit_container_warning(state: &AppState, container: &str, count: usize) {
+    if let Some(app) = state.app_handle.read().as_ref() {
+        use tauri::Emitter;
+        let _ = app.emit("load-warning", serde_json::json!({
+            "kind": "container",
+            "container": container,
+            "count": count,
+        }));
+    }
+}
+
 fn emit_load_progress(state: &AppState, loaded: usize, total: usize, message: &str) {
     if let Some(app) = state.app_handle.read().as_ref() {
         use tauri::Emitter;
@@ -3483,6 +3498,12 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
         let progress_total = unique_loads.len();
         let progress_count = std::sync::atomic::AtomicUsize::new(0);
         emit_load_progress(state, 0, progress_total, "Samples laden");
+        // Gebruik één gedeelde teller per onbekend formaat (WavPack/FLAC/Ogg)
+        // zodat we één samenvatting kunnen loggen in plaats van N × "Failed to
+        // preload": een set van 4000 WavPack-samples spamde eerder het log en
+        // de gebruiker zag niet dat het aan het bestandsformaat lag.
+        let container_counts: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, (usize, PathBuf)>>> =
+            std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
         let mut path_buffers: HashMap<(PathBuf, SegKey), Arc<PreloadBuffer>> = unique_loads
             .par_iter()
             .filter_map(|entry| {
@@ -3504,14 +3525,44 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
                     Err(e) => {
                         // Same-file release zonder cue/loop is geen fout: dat
                         // bestand heeft simpelweg geen release-segment.
-                        if !matches!(seg, SegKey::Release { require_cue: true, .. }) {
-                            warn!("Failed to preload {:?}: {}", p, e);
+                        if matches!(seg, SegKey::Release { require_cue: true, .. }) {
+                            return None;
+                        }
+                        // Alternatieve audio-container? Dan één keer samen-
+                        // vatten per container-naam i.p.v. per bestand.
+                        let msg = e.to_string();
+                        let container = ["WavPack", "FLAC", "Ogg", "MP3", "CAF", "AIFF"]
+                            .iter()
+                            .find(|naam| msg.contains(**naam))
+                            .copied();
+                        match container {
+                            Some(naam) => {
+                                if let Ok(mut map) = container_counts.lock() {
+                                    let entry = map.entry(naam.to_string())
+                                        .or_insert_with(|| (0usize, p.clone()));
+                                    entry.0 += 1;
+                                }
+                            }
+                            None => {
+                                warn!("Failed to preload {:?}: {}", p, e);
+                            }
                         }
                         None
                     }
                 }
             })
             .collect();
+        // Samenvatting per container-formaat. WavPack-sets (veel Lars Palo-
+        // GrandOrgue-pakketten) geven één duidelijke melding, niet duizenden.
+        if let Ok(map) = container_counts.lock() {
+            for (naam, (aantal, voorbeeld)) in map.iter() {
+                warn!(
+                    "{} samples in {}-formaat overgeslagen (JM-Orgue leest alleen onverpakte WAV). Voorbeeld: {:?}",
+                    aantal, naam, voorbeeld
+                );
+                emit_container_warning(state, naam, *aantal);
+            }
+        }
 
         // ODF-looppunten: GrandOrgue-regel — heeft de ODF een loop, dan winnen
         // die van de smpl-chunk (override). Looppunten zijn bestandsframes; de

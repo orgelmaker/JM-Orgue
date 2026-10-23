@@ -379,6 +379,45 @@ fn wav_fmt_chunk_size(path: &Path) -> Option<u32> {
     }
 }
 
+
+/// Herken niet-WAV audio-formaten aan hun eigen magic-bytes zodat de lader
+/// in plaats van "Not a valid WAV file" een concrete formaatnaam teruggeeft.
+/// Zo kan de aanroeper in commands.rs één duidelijke melding per orgel-laad
+/// geven in plaats van N × "Failed to preload … Not a valid WAV file".
+pub fn detect_container(header: &[u8]) -> Option<&'static str> {
+    if header.len() >= 4 && &header[0..4] == b"wvpk" { return Some("WavPack"); }
+    if header.len() >= 4 && &header[0..4] == b"fLaC" { return Some("FLAC"); }
+    if header.len() >= 4 && &header[0..4] == b"OggS" { return Some("Ogg"); }
+    if header.len() >= 3 && &header[0..3] == b"ID3" { return Some("MP3"); }
+    if header.len() >= 2 && header[0] == 0xFF && (header[1] & 0xE0) == 0xE0 { return Some("MP3"); }
+    if header.len() >= 4 && &header[0..4] == b"caff" { return Some("CAF"); }
+    if header.len() >= 4 && &header[0..4] == b"FORM" { return Some("AIFF"); }
+    None
+}
+
+#[cfg(test)]
+mod detect_container_tests {
+    use super::detect_container;
+
+    #[test]
+    fn wavpack_herkend() {
+        let h: &[u8] = &[b'w', b'v', b'p', b'k', 0x84, 0xe1, 0, 0, 0x10, 4, 0, 0];
+        assert_eq!(detect_container(h), Some("WavPack"));
+    }
+
+    #[test]
+    fn echte_wav_niet_herkend_als_container() {
+        let h = b"RIFF....WAVEfmt ";
+        assert_eq!(detect_container(h), None);
+    }
+
+    #[test]
+    fn flac_en_ogg_herkend() {
+        assert_eq!(detect_container(b"fLaC....").unwrap(), "FLAC");
+        assert_eq!(detect_container(b"OggS....").unwrap(), "Ogg");
+    }
+}
+
 /// Load a WAV file
 pub fn load_wav(path: &Path) -> Result<SampleData, SampleError> {
     // First, try to read loop points from smpl chunk
@@ -867,7 +906,10 @@ fn load_wav_preload_segment_len(path: &Path, len: PreloadLen, segment: PreloadSe
         .map_err(|e| SampleError::FileError(format!("Failed to read header: {}", e)))?;
 
     if &header[0..4] != b"RIFF" || &header[8..12] != b"WAVE" {
-        return Err(SampleError::UnsupportedFormat("Not a valid WAV file".to_string()));
+        let soort = detect_container(&header).unwrap_or("onbekend");
+        return Err(SampleError::UnsupportedFormat(
+            format!("{} (geen WAV)", soort)
+        ));
     }
 
     // Find fmt and data chunks
@@ -1148,7 +1190,10 @@ pub fn load_wav_manual(path: &Path) -> Result<SampleData, SampleError> {
         .map_err(|e| SampleError::FileError(format!("Failed to read RIFF header: {}", e)))?;
 
     if &header[0..4] != b"RIFF" || &header[8..12] != b"WAVE" {
-        return Err(SampleError::UnsupportedFormat("Not a valid RIFF/WAVE file".to_string()));
+        let soort = detect_container(&header).unwrap_or("onbekend");
+        return Err(SampleError::UnsupportedFormat(
+            format!("{} (geen WAV)", soort)
+        ));
     }
 
     let mut sample_rate = 0u32;

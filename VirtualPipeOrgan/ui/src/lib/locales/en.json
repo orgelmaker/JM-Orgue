@@ -1478,5 +1478,9 @@
   "a11y": {
     "registers": "stops",
     "swell_pedal": "Swell pedal"
+  },
+  "load": {
+    "warn_wavpack": "This sample set uses WavPack compression. JM-Orgue only reads plain WAV; {n} files were skipped and those pipes stay silent.",
+    "warn_container": "This sample set uses {container} compression; JM-Orgue only reads plain WAV. {n} files skipped."
   }
 }

@@ -4,6 +4,23 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.9.20] - 2026-10-23
+
+### Duidelijke melding bij WavPack- of FLAC-samplesets
+- Een GrandOrgue-set die WavPack of FLAC gebruikt in plaats van onverpakte
+  WAV werd stil geladen: duizenden "Not a valid WAV file"-regels in het log
+  en pijpen die niet klonken, zonder uitleg. JM-Orgue meldt nu één keer per
+  set welk formaat is overgeslagen en hoeveel bestanden, als wegklikbare
+  balk ("Deze sampleset gebruikt WavPack-compressie. JM-Orgue leest alleen
+  onverpakte WAV; N bestanden overgeslagen"). WavPack-ondersteuning komt
+  nog niet, maar nu is in één oogopslag duidelijk waarom pijpen stil zijn.
+
+### Interne register-ID verdwijnt uit meer registernamen
+- Namen als "2119_TrompetDisc" worden nu altijd gestript naar
+  "TrompetDisc", ook wanneer het prefix niet exact overeenkomt met het
+  eigen interne ID van het register (zoals in sets van Augustine's V.O.).
+  Voorheen bleef het nummer soms voor de registerknop staan.
+
 ## [0.9.19] - 2026-10-23
 
 ### Sets zonder motor-opname klinken weer

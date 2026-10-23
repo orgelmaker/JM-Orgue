@@ -432,12 +432,15 @@ fn build_definition(
         // de ruwe naam.
         // Sommige makers zetten het eigen StopID vóór de naam ("2001_Contrabass
         // 16'" bij StopID 2001); in Hauptwerk zelf is die interne naam
-        // onzichtbaar. Alleen dát exacte voorvoegsel gaat eraf.
+        // onzichtbaar. In sommige sets (Augustine's Dreischor/Urk) is de
+        // interne prefix overgenomen van een naburig register en komt dus
+        // niet overeen met het eigen StopID ("2119_TrompetDisc" bij StopID
+        // 2121). Daarom strippen we 1-4 cijfers gevolgd door een
+        // underscore wanneer er na die prefix nog een letter of streep
+        // volgt — geen enkel echt registernaam begint met een reeks
+        // cijfers plus "_".
         let ruwe_naam = st.get("Name").map(|s| s.as_str()).unwrap_or("");
-        let ruwe_naam = st.get("StopID")
-            .and_then(|id| ruwe_naam.strip_prefix(&format!("{}_", id.trim())))
-            .filter(|rest| !rest.trim().is_empty())
-            .unwrap_or(ruwe_naam);
+        let ruwe_naam = strip_numeric_prefix(ruwe_naam);
         let name = clean_stop_name(ruwe_naam);
 
         // Collect (division_note -> pipe + sample path + extra's) PER StopRank,
@@ -1599,6 +1602,61 @@ const DIVISION_ABBREVIATIONS: &[&str] = &[
     "PO", "GW", "NW", "ECH", "BOM", "P", "M", "R", "G",
 ];
 
+
+/// Strip een vooraan geplakte 1-4-cijfer-interne-ID ("2001_", "123_", enz.)
+/// uit een registernaam. Geen enkele registernaam begint met een reeks
+/// cijfers gevolgd door een underscore; wanneer wel, is dat de interne
+/// identifier die de maker per abuis in de Name heeft gezet. De strip
+/// werkt alleen als er na de prefix nog iets staat dat niet alleen cijfers
+/// is — anders laten we de naam intact zodat we een echte "0", "12" of een
+/// toekomstig numeriek register nooit per ongeluk wegvagen.
+pub fn strip_numeric_prefix(naam: &str) -> &str {
+    let bytes = naam.as_bytes();
+    let mut einde_cijfers = 0;
+    while einde_cijfers < bytes.len() && einde_cijfers < 4 && bytes[einde_cijfers].is_ascii_digit() {
+        einde_cijfers += 1;
+    }
+    if einde_cijfers == 0 { return naam; }
+    if einde_cijfers >= bytes.len() { return naam; }
+    if bytes[einde_cijfers] != b'_' { return naam; }
+    let rest = &naam[einde_cijfers + 1..];
+    if rest.chars().all(|c| c.is_ascii_digit()) || rest.trim().is_empty() {
+        return naam;
+    }
+    rest
+}
+
+#[cfg(test)]
+mod numeric_prefix_tests {
+    use super::strip_numeric_prefix;
+
+    #[test]
+    fn standaard_augustine_patronen() {
+        assert_eq!(strip_numeric_prefix("2001_Subbas16"), "Subbas16");
+        assert_eq!(strip_numeric_prefix("2119_TrompetDisc"), "TrompetDisc");
+        assert_eq!(strip_numeric_prefix("1_Bourdon 8"), "Bourdon 8");
+    }
+
+    #[test]
+    fn naam_zonder_prefix_blijft_ongewijzigd() {
+        assert_eq!(strip_numeric_prefix("Principal 8"), "Principal 8");
+        assert_eq!(strip_numeric_prefix("Trompet"), "Trompet");
+        assert_eq!(strip_numeric_prefix("_Mystery"), "_Mystery");
+    }
+
+    #[test]
+    fn alleen_cijfers_na_underscore_blijft_staan() {
+        // Een onwaarschijnlijk register "12_34" — we laten hem met rust.
+        assert_eq!(strip_numeric_prefix("12_34"), "12_34");
+    }
+
+    #[test]
+    fn te_veel_cijfers_niet_als_prefix_zien() {
+        // 5+ cijfers lijkt eerder op een jaartal of code; laat ongemoeid.
+        assert_eq!(strip_numeric_prefix("12345_Montre"), "12345_Montre");
+    }
+}
+
 /// Clean a stop name: strip a leading division prefix like "P  ", "M  ",
 /// "PED  ", "GO  ", or "HW " / "SW " (known abbreviation + 1+ spaces; any other
 /// 1-4 letter token only when followed by 2+ spaces, to avoid false positives).
@@ -2268,14 +2326,19 @@ mod tests {
     /// voorvoegsel gaat eraf; een ander getal blijft staan.
     #[test]
     fn eigen_stopid_voor_de_naam_verdwijnt() {
+        // 0.9.20: elk 1-4-cijferig voorvoegsel met underscore gaat eraf,
+        // ook als het niet overeenkomt met het StopID. Bij Augustine's sets
+        // komen de prefixen uit een naburig register: "2119_TrompetDisc"
+        // bij StopID 2121. De test checkt beide varianten.
         let xml = mini_xml()
             .replace("<StopID>1</StopID><Name>Bourdon 8</Name>", "<StopID>1</StopID><Name>1_Bourdon 8</Name>")
             .replace("<StopID>2</StopID><Name>Montre 8</Name>", "<StopID>2</StopID><Name>7_Montre 8</Name>");
         let mut pkg_dirs = HashMap::new();
         pkg_dirs.insert(1u32, PathBuf::from("/pkg"));
         let def = build_definition(&xml, PathBuf::from("/root"), &pkg_dirs).expect("build");
-        assert!(def.stops.iter().any(|s| s.name == "Bourdon 8"), "{:?}", def.stops.iter().map(|s| &s.name).collect::<Vec<_>>());
-        assert!(def.stops.iter().any(|s| s.name == "7_Montre 8"));
+        let namen: Vec<_> = def.stops.iter().map(|s| s.name.clone()).collect();
+        assert!(namen.iter().any(|s| s == "Bourdon 8"), "{:?}", namen);
+        assert!(namen.iter().any(|s| s == "Montre 8"), "{:?}", namen);
     }
 
     /// Schakelnetwerk-terugval (0.8.3): een definitie zonder StopRank-objecten

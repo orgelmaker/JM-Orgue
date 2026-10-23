@@ -1478,5 +1478,9 @@
   "a11y": {
     "registers": "rejestry",
     "swell_pedal": "Pedał żaluzji"
+  },
+  "load": {
+    "warn_wavpack": "Ten sampleset używa kompresji WavPack. JM-Orgue czyta tylko nieskompresowany WAV; {n} plików pominięto i te piszczałki pozostają ciche.",
+    "warn_container": "Ten sampleset używa kompresji {container}; JM-Orgue czyta tylko nieskompresowany WAV. {n} plików pominięto."
   }
 }

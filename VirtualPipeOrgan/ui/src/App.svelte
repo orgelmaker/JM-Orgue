@@ -68,6 +68,9 @@
   // samen niet (of nog net) in het RAM passen; de UI toont hem als een
   // wegklikbare balk.
   let geheugenWaarschuwing = null;
+  // 0.9.20: samenvatting "N bestanden in WavPack/FLAC overgeslagen"
+  // wordt een niet-storende banner die uitlegt waarom pijpen stil blijven.
+  let formaatWaarschuwing = null;
   async function toonGeheugenWaarschuwing() {
     try {
       const melding = await invoke('get_memory_warning');
@@ -570,6 +573,13 @@
           // p.message niet tonen: Rust stuurt daar altijd het Nederlandse
           // "Samples laden", en dat stond dan in élke taal in beeld.
           loadingMessage = `${tx('status.loading_samples')} (${p.loaded}/${p.total})`;
+        }
+      });
+      // Container-formaat (WavPack e.d.): één banner per onbekend formaat.
+      await listen('load-warning', (event) => {
+        const w = event.payload || {};
+        if (w.kind === 'container' && w.container) {
+          formaatWaarschuwing = { container: w.container, count: w.count || 0 };
         }
       });
     } catch (e) { /* niet in Tauri context */ }
@@ -1791,6 +1801,21 @@
         {/if}
         <button class="btn btn-ghost btn-sm" on:click={dismissUpdate} title={$t('update.dismiss_title')} aria-label={$t('actions.close')}>✕</button>
       {/if}
+    </div>
+  {/if}
+
+  {#if formaatWaarschuwing}
+    <!-- Container-formaat niet gelezen (0.9.20): bijvoorbeeld een
+         WavPack-GrandOrgue-set, waarvan de .wav-bestanden in werkelijkheid
+         WavPack-ingepakt zijn. De pijpen klinken dan niet; één banner is
+         beter dan duizenden "Failed to preload"-regels in het log. -->
+    <div class="update-banner">
+      <span>{(formaatWaarschuwing.container === 'WavPack'
+        ? $t('load.warn_wavpack') || 'Deze sampleset gebruikt WavPack-compressie. JM-Orgue leest alleen onverpakte WAV; {n} bestanden zijn overgeslagen en die pijpen klinken niet.'
+        : $t('load.warn_container') || 'Deze sampleset gebruikt {container}; JM-Orgue leest alleen onverpakte WAV. {n} bestanden overgeslagen.')
+        .replace('{container}', formaatWaarschuwing.container)
+        .replace('{n}', formaatWaarschuwing.count)}</span>
+      <button class="btn btn-ghost btn-sm" on:click={() => { formaatWaarschuwing = null; }} title={$t('actions.close')} aria-label={$t('actions.close')}>✕</button>
     </div>
   {/if}
 

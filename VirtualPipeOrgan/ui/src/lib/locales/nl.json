@@ -1478,5 +1478,9 @@
   "a11y": {
     "registers": "registers",
     "swell_pedal": "Zweltrede"
+  },
+  "load": {
+    "warn_wavpack": "Deze sampleset gebruikt WavPack-compressie. JM-Orgue leest alleen onverpakte WAV; {n} bestanden zijn overgeslagen en die pijpen klinken niet.",
+    "warn_container": "Deze sampleset gebruikt {container}-compressie; JM-Orgue leest alleen onverpakte WAV. {n} bestanden overgeslagen."
   }
 }

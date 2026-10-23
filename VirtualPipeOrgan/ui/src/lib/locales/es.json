@@ -1478,5 +1478,9 @@
   "a11y": {
     "registers": "registros",
     "swell_pedal": "Pedal de expresión"
+  },
+  "load": {
+    "warn_wavpack": "Este sample set usa compresión WavPack. JM-Orgue solo lee WAV sin comprimir; {n} archivos se omitieron y esos tubos quedan en silencio.",
+    "warn_container": "Este sample set usa compresión {container}; JM-Orgue solo lee WAV sin comprimir. {n} archivos omitidos."
   }
 }

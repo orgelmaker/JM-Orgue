@@ -1478,5 +1478,9 @@
   "a11y": {
     "registers": "Register",
     "swell_pedal": "Schwelltritt"
+  },
+  "load": {
+    "warn_wavpack": "Dieses Sampleset nutzt WavPack-Komprimierung. JM-Orgue liest nur unkomprimiertes WAV; {n} Dateien wurden übersprungen und diese Pfeifen bleiben stumm.",
+    "warn_container": "Dieses Sampleset nutzt {container}-Komprimierung; JM-Orgue liest nur unkomprimiertes WAV. {n} Dateien übersprungen."
   }
 }
