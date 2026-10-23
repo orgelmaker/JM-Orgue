@@ -1,0 +1,22 @@
+JM-Orgue + JM-Rec are both out, and they work together.
+
+JM-Orgue is a virtual pipe organ for Windows, macOS and Linux: hook up a
+MIDI organ, pick a sampleset and play. Reads GrandOrgue and Hauptwerk
+samplesets, with stops, couplers, swell boxes, tremulant, reverb and a
+general crescendo. Seven languages, no dongle, no subscription — and
+you may share it with friends.
+
+JM-Rec is the recording wizard to sample an organ yourself. Pipe by pipe,
+keyboard by keyboard. Put a computer on the gallery, walk to the console
+with your phone, scan a QR code and control JM-Rec from the organ bench
+— record, pause, stop, next stop — no app to install. The result is a
+folder in the format JM-Orgue reads straight away. No converting, no
+renaming: you open the set in JM-Orgue and play.
+
+Two programs. One workflow. Both free.
+
+→ orgelmaker.github.io/JM-Orgue
+→ orgelmaker.github.io/JM-Rec
+
+#virtualpipeorgan #pipeorgan #churchorgan #organmusic #sampling
+#hauptwerk #grandorgue #vpo #opensource

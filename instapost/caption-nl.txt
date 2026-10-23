@@ -1,0 +1,22 @@
+JM-Orgue + JM-Rec zijn er allebei nu, en ze werken samen.
+
+JM-Orgue is een virtueel pijporgel voor Windows, macOS en Linux: sluit een
+orgelklavier aan, kies een sampleset en speel. Werkt met GrandOrgue- én
+Hauptwerk-samplesets, registers, koppels, zwelkasten, tremulant, galm en
+een generaal crescendo. Zeven talen, geen dongle, geen abonnement, en je
+mag het gewoon aan je vrienden geven.
+
+JM-Rec is de wizard om zélf een sampleset op te nemen. Pijp voor pijp,
+klavier voor klavier. Je zet een computer op het koor, loopt met je
+telefoon naar de orgelbank en bedient JM-Rec via een QR-code — opnemen,
+pauze, stop en volgende register, zonder app te installeren. Na afloop
+krijg je een map in het formaat dat JM-Orgue direct herkent. Geen omzetten,
+geen hernoemen: je opent de set in JM-Orgue en speelt.
+
+Twee programma's. Eén workflow. Allebei gratis.
+
+→ orgelmaker.github.io/JM-Orgue
+→ orgelmaker.github.io/JM-Rec
+
+#virtueelpijporgel #pijporgel #kerkorgel #orgelmuziek #samplen
+#virtualpipeorgan #hauptwerk #grandorgue #vpo #opensource
