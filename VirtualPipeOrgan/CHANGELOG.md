@@ -4,6 +4,14 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.9.19] - 2026-10-23
+
+### Sets zonder motor-opname klinken weer
+- Een orgel zonder motor-opname (veel GrandOrgue-sets) startte met de motor
+  uit en bleef na het laden helemaal stil: noten werden genegeerd zonder
+  melding. De motor start nu bij elk nieuw orgel aan; bij een herlaad van
+  hetzelfde orgel blijft de stand van de organist behouden.
+
 ## [0.9.18] - 2026-10-23
 
 ### Extra koppels blijven na herstart bruikbaar

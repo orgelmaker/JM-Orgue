@@ -1427,14 +1427,11 @@ fn laad_en_stuur_bijgeluiden(state: &AppState, defs: &[vpo_sampler::grandorgue::
         zelfde
     };
     // 0.8.98: motor standaard AAN bij een nieuw orgel met een blower-opname
-    // (Piotr-feedback: "there is blower switch, but I hear nothing"). Als de
-    // set GEEN blower-opname heeft, blijft de sleutel virtueel en start uit.
-    // Herlaad behoudt de stand van de organist.
-    let motor_aan = if herlaad {
-        *state.blower_active.read()
-    } else {
-        heeft_blower
-    };
+    // (Piotr-feedback: "there is blower switch, but I hear nothing"). 0.9.19:
+    // ook zonder blower-opname start de (virtuele) sleutel AAN — motor uit
+    // blokkeert nieuwe noten (0.8.81), dus een set zonder motor-opname klonk
+    // na het laden helemaal niet. Herlaad behoudt de stand van de organist.
+    let motor_aan = motor_start_aan(herlaad, *state.blower_active.read());
     *state.blower_active.write() = motor_aan;
     state.send_audio_command(AudioCommand::SetBlowerActive(motor_aan));
     let n_loops = voices.iter().filter(|v| v.loop_start.is_some() && v.loop_end.is_some()).count();
@@ -1444,12 +1441,19 @@ fn laad_en_stuur_bijgeluiden(state: &AppState, defs: &[vpo_sampler::grandorgue::
             match (herlaad, motor_aan) {
                 (true, true) => "aan (herlaad, stand behouden)",
                 (true, false) => "uit (herlaad, stand behouden)",
-                (false, _) => if heeft_blower { "uit" } else { "uit (geen motor-opname, sleutel virtueel)" },
+                (false, _) => if heeft_blower { "aan" } else { "aan (geen motor-opname, sleutel virtueel)" },
             });
     }
     // Altijd sturen, ook leeg — anders blijven de bijgeluiden van een
     // vorig orgel doorlopen bij een wissel.
     state.send_audio_command(AudioCommand::SetBackgroundVoices(voices));
+}
+
+/// Startstand van de motor bij het laden: een herlaad van hetzelfde orgel
+/// behoudt de stand van de sessie, een nieuw orgel start altijd aan (ook
+/// zonder blower-opname; met motor uit zou geen enkele noot klinken).
+pub(crate) fn motor_start_aan(herlaad: bool, huidige_stand: bool) -> bool {
+    if herlaad { huidige_stand } else { true }
 }
 
 /// Bijgeluiden-master-volume (0.7.97): lineaire gain op alle bijgeluiden
@@ -11915,5 +11919,24 @@ mod luisterpositie_tests {
         let idx = luisteras_indices(&v);
         let namen: Vec<&str> = idx.iter().map(|&i| v[i].name.as_str()).collect();
         assert_eq!(namen, vec!["mic1", "mic2", "mic10"]);
+    }
+}
+
+#[cfg(test)]
+mod motor_start_tests {
+    use super::motor_start_aan;
+
+    #[test]
+    fn nieuw_orgel_start_altijd_met_motor_aan() {
+        // Ook zonder blower-opname: motor uit blokkeert nieuwe noten (0.8.81),
+        // een set zonder motor-opname klonk daardoor niet (0.8.98 t/m 0.9.18).
+        assert!(motor_start_aan(false, false));
+        assert!(motor_start_aan(false, true));
+    }
+
+    #[test]
+    fn herlaad_behoudt_de_stand_van_de_organist() {
+        assert!(motor_start_aan(true, true));
+        assert!(!motor_start_aan(true, false));
     }
 }
