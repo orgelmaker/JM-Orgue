@@ -431,6 +431,14 @@ pub struct OrganInfo {
     /// Orgel-brede PitchCorrection in cents ([Organ] PitchCorrection, default
     /// 0.0) — alleen in hertemper-modus, gesommeerd over de hiërarchie.
     pub pitch_correction_cents: f32,
+    /// Hauptwerk AudioEngine_EnablePlayingAtOriginalOrganPitch = N (0.9.23): de
+    /// set heeft geen originele orgeltoonhoogte en MOET op zijn berekende
+    /// (getempereerde) doeltoon spelen — ook in "Origineel". Zonder dit speelde
+    /// een geleende opname (Cracow: f-klein leent de e-klein-opname) in de stand
+    /// "Origineel + bijstemmen uit" op de ruwe bestandstoon, dus e en f
+    /// identiek. Default false = gewoon gedrag: GrandOrgue en Hauptwerk-sets
+    /// mét originele toon spelen in "Origineel" op de opnametoon.
+    pub geen_originele_toonhoogte: bool,
 }
 
 /// Manual/keyboard definition from [ManualXXX] section
@@ -903,6 +911,9 @@ impl OdfParser {
             gain_db: self.parse_f32(section, "Gain").unwrap_or(0.0),
             pitch_tuning_cents: self.parse_f32(section, "PitchTuning").unwrap_or(0.0),
             pitch_correction_cents: self.parse_f32(section, "PitchCorrection").unwrap_or(0.0),
+            // GrandOrgue kent geen "play at original organ pitch"-vlag: in
+            // "Origineel" spelen GO-sets altijd op de opnametoon (false).
+            geen_originele_toonhoogte: false,
         })
     }
 

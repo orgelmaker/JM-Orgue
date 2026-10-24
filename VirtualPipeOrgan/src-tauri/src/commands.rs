@@ -3718,6 +3718,13 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
                 // Altijd sturen (ook leeg): vervangt de hertemper-tabel van het
                 // vorige orgel (botsende (stop_id, pipe_num)-keys!).
                 let _ = player.send_command(crate::audio::AudioCommand::RegisterOdfRetune(Arc::new(odf_retune)));
+                // Set zonder originele orgeltoonhoogte (0.9.23, Hauptwerk
+                // EnablePlayingAtOriginalOrganPitch = N): dwing effectief
+                // hertemperen af, ook in "Origineel + bijstemmen uit". Zonder dit
+                // speelt een geleende opname (Cracow: f-klein leent de e-klein-
+                // opname) op de ruwe bestandstoon en klinken e en f identiek.
+                *state.geen_originele_toonhoogte.write() = definition.organ.geen_originele_toonhoogte;
+                let _ = player.send_command(crate::audio::AudioCommand::SetForceTempered(definition.organ.geen_originele_toonhoogte));
                 // Ook de ODF-looppunten registreren: de achtergrond-full-sample-
                 // load gebruikt dan dezelfde loop als de preload (geen versprong
                 // op het upgrademoment bij WAVs zonder/met afwijkende smpl-chunk).
@@ -4177,6 +4184,7 @@ pub fn apply_dsp_after_backend_reload(state: &AppState) {
     }
     state.send_audio_command(AudioCommand::SetPitchOffsetCents(*state.pitch_offset_cents.read()));
     state.send_audio_command(AudioCommand::SetAutoRetune(*state.auto_retune.read()));
+    state.send_audio_command(AudioCommand::SetForceTempered(*state.geen_originele_toonhoogte.read()));
     if let Some(r) = state.reverb_settings.read().clone() {
         state.send_audio_command(AudioCommand::SetAlgorithmicReverb {
             preset: None, rt60: r.rt60, pre_delay_ms: r.pre_delay_ms,

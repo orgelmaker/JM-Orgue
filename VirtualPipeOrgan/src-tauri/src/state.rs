@@ -1753,6 +1753,10 @@ pub struct AppState {
     /// enige meetreferentie was en de retune-vlag daar standaard uit stond.
     /// Opgeslagen per orgel.
     pub auto_retune: Arc<RwLock<bool>>,
+    /// De geladen set heeft geen originele orgeltoonhoogte (Hauptwerk
+    /// EnablePlayingAtOriginalOrganPitch = N, 0.9.23): spiegel voor de audio-
+    /// engine, zodat een backend-herlaad de dwang opnieuw zet. Default false.
+    pub geen_originele_toonhoogte: Arc<RwLock<bool>>,
     /// Orgel-id waarvoor de bijgeluiden het laatst geladen zijn (0.8.89).
     /// Zelfde id opnieuw = een herlaad (ASIO-wissel, noodherstel, opnieuw
     /// openen) → de motor-stand blijft staan; een ander id = nieuw orgel →
@@ -2140,6 +2144,7 @@ impl AppState {
             ])),
             pitch_offset_cents: Arc::new(RwLock::new(0.0)),
             auto_retune: Arc::new(RwLock::new(true)),
+            geen_originele_toonhoogte: Arc::new(RwLock::new(false)),
             bijgeluiden_orgel_id: Arc::new(RwLock::new(None)),
             setup_wizard_pending: Arc::new(RwLock::new(false)),
             setup_wizard_done: Arc::new(RwLock::new(true)),

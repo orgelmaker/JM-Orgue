@@ -990,6 +990,10 @@ pub enum AudioCommand {
     /// SetTemperament-retune-vlag. True = elke pijp naar zijn gelijkzwevende
     /// target brengen via de retune-tabel. False = volg de SetTemperament-vlag.
     SetAutoRetune(bool),
+    /// Set zonder originele orgeltoonhoogte (Hauptwerk
+    /// EnablePlayingAtOriginalOrganPitch = N, 0.9.23): forceer de hertemper-
+    /// tabel ook in "Origineel", anders spelen geleende opnamen op bestandstoon.
+    SetForceTempered(bool),
     /// Register-klikgeluiden (0.7.99): per internal_stop_id een paar
     /// (attack-sample, release-sample) + de bron-samplerate per paar.
     RegisterStopClicks(Arc<HashMap<u32, StopClickBuffers>>),
@@ -3751,6 +3755,9 @@ fn run_audio_thread(
     // Standaard true: samplesets zonder expliciete pitch-info in de ODF
     // (Landau-demo) worden toch rechtgezet via smpl-chunk-metingen.
     let auto_retune_on: Arc<RwLock<bool>> = Arc::new(RwLock::new(true));
+    // Set zonder originele orgeltoonhoogte (0.9.23): dwingt effectief
+    // hertemperen af, ook als temperament-retune én auto-retune uit staan.
+    let force_tempered_on: Arc<RwLock<bool>> = Arc::new(RwLock::new(false));
     // Expressie-factor van het MIDI-volumepedaal (multiplicatief op master_gain).
     let master_expression: Arc<RwLock<f32>> = Arc::new(RwLock::new(1.0));
     // Per-division gain for swell boxes (max 32 divisions, default 1.0 = fully open)
@@ -3964,6 +3971,7 @@ fn run_audio_thread(
     let master_gain_clone = master_gain.clone();
     let pitch_offset_mul_clone = pitch_offset_mul.clone();
     let auto_retune_on_clone = auto_retune_on.clone();
+    let force_tempered_on_clone = force_tempered_on.clone();
     let master_expression_clone = master_expression.clone();
     let percussive_stops_clone = percussive_stops.clone();
     let division_gains_clone = division_gains.clone();
@@ -4498,6 +4506,12 @@ fn run_audio_thread(
                     AudioCommand::SetToyActive { name, active } => {
                         bg_engine.set_toy(&name, active);
                         info!("Speelgoedregister '{}': {}", name, if active { "aan" } else { "uit" });
+                    }
+                    AudioCommand::SetForceTempered(on) => {
+                        *force_tempered_on_clone.write() = on;
+                        if on {
+                            info!("Set zonder originele orgeltoonhoogte: effectief hertemperen afgedwongen (speelt op getempereerde doeltoon)");
+                        }
                     }
                     AudioCommand::SetAutoRetune(on) => {
                         *auto_retune_on_clone.write() = on;
@@ -5471,6 +5485,7 @@ fn run_audio_thread(
                         percussive_stops_clone.write().clear();
                         *odf_voicing_clone.write() = Arc::new(HashMap::new());
                         *odf_retune_clone.write() = Arc::new(HashMap::new());
+                        *force_tempered_on_clone.write() = false;
                         {
                             let old = std::mem::take(&mut *voices_clone.write());
                             gc.send_boxed(old);
@@ -5553,7 +5568,10 @@ fn run_audio_thread(
             // Auto-retune (0.8.85): standaard aan. Alleen uit als expliciet
             // gezet door de gebruiker. OR-combinatie met de temperament-vlag:
             // Origineel-stemming + auto-retune uit = helemaal geen retune.
-            let retune_on = retune_from_temp || *auto_retune_on_clone.read();
+            // 0.9.23: een set zonder originele orgeltoonhoogte (Hauptwerk
+            // EnablePlayingAtOriginalOrganPitch = N) heeft geen opnametoon om op
+            // terug te vallen en speelt altijd op de getempereerde doeltoon.
+            let retune_on = retune_from_temp || *auto_retune_on_clone.read() || *force_tempered_on_clone.read();
             let mut peak_l = 0.0f32;
             let mut peak_r = 0.0f32;
 

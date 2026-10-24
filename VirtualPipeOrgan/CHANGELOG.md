@@ -4,6 +4,20 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.9.23] - 2026-10-24
+
+### Toonhoogte: sets zonder originele orgeltoonhoogte spelen altijd op de doeltoon
+- Hauptwerk-sets die opgeven **niet** op de originele orgeltoonhoogte te spelen
+  (`AudioEngine_EnablePlayingAtOriginalOrganPitch = N`) en geen originele
+  toonhoogte per pijp leveren, speelden in de stand **Origineel met bijstemmen
+  uit** een geleende of vervangende opname op de ruwe bestandstoon. Twee toetsen
+  die dezelfde opname delen — de ene leent de opname van de andere — klonken
+  daardoor identiek in plaats van een halve toon uit elkaar. Zulke sets hebben
+  geen originele toon om op terug te vallen en spelen nu altijd op hun berekende
+  (getempereerde) doeltoon, los van de bijstemknop. De importer leest de vlag nu.
+- GrandOrgue-sets en Hauptwerk-sets mét een originele toonhoogte blijven in
+  "Origineel" ongewijzigd op hun opnametoon spelen.
+
 ## [0.9.22] - 2026-10-24
 
 ### Noteren: rechts, links en pedaal op drie MIDI-kanalen tegelijk

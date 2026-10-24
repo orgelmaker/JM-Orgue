@@ -835,6 +835,12 @@ fn build_definition(
         gain_db: 0.0,
         pitch_tuning_cents: 0.0,
         pitch_correction_cents: 0.0,
+        // AudioEngine_EnablePlayingAtOriginalOrganPitch = N: deze set levert
+        // geen originele orgeltoonhoogte en moet op de getempereerde doeltoon
+        // spelen, ook in "Origineel". Afwezig of Y = gewoon gedrag.
+        geen_originele_toonhoogte: getg("AudioEngine_EnablePlayingAtOriginalOrganPitch")
+            .trim()
+            .eq_ignore_ascii_case("N"),
     };
 
     let stop_defs: Vec<StopDef> = stop_entries.into_iter().map(|(_, s)| s).collect();
@@ -2159,6 +2165,29 @@ mod tests {
         let mut pkg_dirs = HashMap::new();
         pkg_dirs.insert(1u32, PathBuf::from("/pkg"));
         build_definition(&mini_xml(), PathBuf::from("/root"), &pkg_dirs).expect("build")
+    }
+
+    /// AudioEngine_EnablePlayingAtOriginalOrganPitch = N (0.9.23): de set heeft
+    /// geen originele orgeltoonhoogte en moet altijd op de getempereerde
+    /// doeltoon spelen (Cracow). Afwezig of Y = gewoon gedrag (false), zodat
+    /// GrandOrgue en gewone Hauptwerk-sets in "Origineel" op opnametoon blijven.
+    #[test]
+    fn enable_playing_at_original_pitch_vlag() {
+        let mut pkg = HashMap::new();
+        pkg.insert(1u32, PathBuf::from("/pkg"));
+        let bouw = |xml: &str| build_definition(xml, PathBuf::from("/root"), &pkg).expect("build");
+        let met = |waarde: &str| {
+            mini_xml().replace(
+                "<Identification_Name>Testorgel</Identification_Name>",
+                &format!("<Identification_Name>Testorgel</Identification_Name><AudioEngine_EnablePlayingAtOriginalOrganPitch>{waarde}</AudioEngine_EnablePlayingAtOriginalOrganPitch>"),
+            )
+        };
+        // Afwezig → false (Hauptwerk-standaard: speelt in Origineel op opnametoon).
+        assert!(!bouw(&mini_xml()).organ.geen_originele_toonhoogte);
+        // = N → true (geen originele toonhoogte, altijd getempereerd).
+        assert!(bouw(&met("N")).organ.geen_originele_toonhoogte);
+        // = Y → false.
+        assert!(!bouw(&met("Y")).organ.geen_originele_toonhoogte);
     }
 
     /// Hauptwerks eigen meegeleverde sets staan in het gesloten .hbw-formaat.
