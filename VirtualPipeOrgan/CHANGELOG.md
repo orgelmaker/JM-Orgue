@@ -4,6 +4,22 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.9.26] - 2026-10-24
+
+### MIDI: invoerapparaten onderscheiden, ook op hetzelfde kanaal
+- Je kunt nu per MIDI-invoerapparaat een vast kanaal kiezen (Instellingen →
+  MIDI-invoer). Klavieren die allemaal op kanaal 1 zenden, bedienen zo toch
+  verschillende werken, zonder dat je elke sessie handmatig kanalen hoeft te
+  herstellen. Staat een apparaat op "Standaard", dan verandert er niets.
+
+### Sfeer & Layout: vaste kleuren volgen nu de sfeer
+- De groene zwelkast-hover, de gele gloed om een actief register en enkele rode
+  foutmeldingen waren vaste kleuren. Ze volgen nu de gekozen sfeer.
+
+### MIDI leren: één-toets-inleerknoppen ook via Bluetooth
+- De inleerknoppen die op één toets reageren, zoals "Leer" per balk in het
+  notatievenster, luisteren nu ook naar een Bluetooth-MIDI-klavier.
+
 ## [0.9.25] - 2026-10-24
 
 ### Sfeer & Layout: duidelijkere kleurinstellingen

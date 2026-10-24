@@ -2,8 +2,9 @@
 
 use midir::{MidiInput, MidiInputConnection, MidiInputPort, MidiOutput, MidiOutputConnection, MidiOutputPort};
 use crossbeam_channel::{Sender, Receiver, bounded};
-use parking_lot::Mutex;
+use parking_lot::{Mutex, RwLock};
 use std::sync::Arc;
+use std::collections::HashMap;
 use thiserror::Error;
 use tracing::{info, warn, error, debug};
 
@@ -38,12 +39,28 @@ pub struct MidiDeviceInfo {
     pub is_output: bool,
 }
 
+/// Per-apparaat kanaaltoewijzing (0.9.26): voor een invoerapparaat dat eruit
+/// moet komen op een vast MIDI-kanaal, ongeacht op welk kanaal het zelf zendt.
+/// Zo bedienen twee klavieren die allebei op kanaal 1 zenden tóch verschillende
+/// werken. Staat een apparaat niet in de map, dan blijft zijn bericht
+/// ongewijzigd (het bestaande gedrag). Toegepast op het moment dat het bericht
+/// binnenkomt, vóór de gedeelde (gemengde) stroom.
+pub fn apply_device_channel(msg: MidiMessage, device: &str, map: &HashMap<String, u8>) -> MidiMessage {
+    match map.get(device) {
+        Some(&ch) => msg.with_channel(ch),
+        None => msg,
+    }
+}
+
 /// MIDI input manager
 pub struct MidiInputManager {
     midi_in: MidiInput,
     connections: Vec<MidiInputConnection<()>>,
     message_tx: Sender<MidiMessage>,
     message_rx: Receiver<MidiMessage>,
+    /// Apparaatnaam → afgedwongen MIDI-kanaal (0-15). Gedeeld met elke
+    /// verbindings-callback, zodat een wijziging meteen doorwerkt.
+    device_channels: Arc<RwLock<HashMap<String, u8>>>,
 }
 
 impl MidiInputManager {
@@ -59,7 +76,20 @@ impl MidiInputManager {
             connections: Vec::new(),
             message_tx,
             message_rx,
+            device_channels: Arc::new(RwLock::new(HashMap::new())),
         })
+    }
+
+    /// Stel de per-apparaat kanaaltoewijzing in (apparaatnaam → MIDI-kanaal
+    /// 0-15). Werkt direct door op bestaande verbindingen omdat de map gedeeld
+    /// is. Een lege map = alles ongewijzigd (standaardgedrag).
+    pub fn set_device_channels(&self, map: HashMap<String, u8>) {
+        *self.device_channels.write() = map;
+    }
+
+    /// De huidige per-apparaat kanaaltoewijzing.
+    pub fn device_channels(&self) -> HashMap<String, u8> {
+        self.device_channels.read().clone()
     }
     
     /// List available input devices
@@ -118,7 +148,12 @@ impl MidiInputManager {
             .unwrap_or_else(|_| "Unknown".to_string());
         
         let tx = self.message_tx.clone();
-        
+        // Per-apparaat kanaaltoewijzing (0.9.26): gedeelde map + de naam van dít
+        // apparaat, zodat de callback het binnenkomende bericht op het juiste
+        // kanaal kan zetten vóór het de gemengde stroom in gaat.
+        let dev_map = self.device_channels.clone();
+        let dev_name = port_name.clone();
+
         // We need a new MidiInput for each connection
         let mut midi_in = MidiInput::new("VPO MIDI Input")
             .map_err(|e| MidiError::OpenError(e.to_string()))?;
@@ -133,6 +168,7 @@ impl MidiInputManager {
             "vpo-input",
             move |_timestamp, data, _| {
                 if let Some(msg) = MidiMessage::parse(data) {
+                    let msg = apply_device_channel(msg, &dev_name, &dev_map.read());
                     let _ = tx.try_send(msg);
                 }
             },
@@ -249,5 +285,55 @@ impl MidiOutputManager {
     pub fn disconnect_all(&mut self) {
         self.connections.clear();
         info!("Disconnected all MIDI outputs");
+    }
+}
+
+#[cfg(test)]
+mod device_channel_tests {
+    use super::*;
+    use crate::MidiMessage;
+
+    #[test]
+    fn apparaat_zonder_toewijzing_blijft_ongewijzigd() {
+        let map = HashMap::new();
+        let m = apply_device_channel(MidiMessage::NoteOn { channel: 0, note: 60, velocity: 100 }, "Klavier A", &map);
+        assert!(matches!(m, MidiMessage::NoteOn { channel: 0, note: 60, .. }));
+    }
+
+    #[test]
+    fn apparaat_krijgt_zijn_toegewezen_kanaal() {
+        let mut map = HashMap::new();
+        map.insert("Klavier B".to_string(), 2u8);
+        let m = apply_device_channel(MidiMessage::NoteOn { channel: 0, note: 64, velocity: 90 }, "Klavier B", &map);
+        assert!(matches!(m, MidiMessage::NoteOn { channel: 2, note: 64, .. }));
+        // Niet in de map → ongewijzigd.
+        let m2 = apply_device_channel(MidiMessage::NoteOn { channel: 0, note: 64, velocity: 90 }, "Klavier A", &map);
+        assert!(matches!(m2, MidiMessage::NoteOn { channel: 0, .. }));
+    }
+
+    #[test]
+    fn twee_klavieren_op_kanaal_1_naar_verschillende_kanalen() {
+        let mut map = HashMap::new();
+        map.insert("Manuaal I".to_string(), 0u8);
+        map.insert("Manuaal II".to_string(), 1u8);
+        let a = apply_device_channel(MidiMessage::NoteOn { channel: 0, note: 60, velocity: 100 }, "Manuaal I", &map);
+        let b = apply_device_channel(MidiMessage::NoteOn { channel: 0, note: 60, velocity: 100 }, "Manuaal II", &map);
+        assert_eq!(a.channel(), Some(0));
+        assert_eq!(b.channel(), Some(1));
+    }
+
+    #[test]
+    fn controlechange_volgt_ook_de_toewijzing() {
+        let mut map = HashMap::new();
+        map.insert("Zwelpedaal".to_string(), 5u8);
+        let m = apply_device_channel(MidiMessage::ControlChange { channel: 0, controller: 11, value: 64 }, "Zwelpedaal", &map);
+        assert!(matches!(m, MidiMessage::ControlChange { channel: 5, controller: 11, .. }));
+    }
+
+    #[test]
+    fn systeembericht_blijft_ongemoeid() {
+        let mut map = HashMap::new();
+        map.insert("X".to_string(), 3u8);
+        assert!(matches!(apply_device_channel(MidiMessage::Clock, "X", &map), MidiMessage::Clock));
     }
 }

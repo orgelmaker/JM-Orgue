@@ -366,6 +366,12 @@ pub struct AudioPrefs {
     /// Startbuffer per opname in ms (0.8.92); None = 2000 (oud gedrag).
     #[serde(default)]
     pub preload_ms: Option<u32>,
+    /// Per MIDI-invoerapparaat een vast kanaal (0.9.26): apparaatnaam → kanaal
+    /// 0-15. Zo bedienen klavieren die fysiek op hetzelfde kanaal zenden toch
+    /// verschillende werken. Globale hardware-opstelling, niet per orgel. Leeg =
+    /// alles ongewijzigd (oud gedrag).
+    #[serde(default)]
+    pub midi_device_channels: std::collections::HashMap<String, u8>,
 }
 
 /// Load audio preferences from `<app_data_dir>/audio_config.json` (defaults if absent).
@@ -1352,6 +1358,9 @@ pub enum MidiCommand {
     ConnectAll(Sender<Result<usize, String>>),
     Disconnect,
     SetChannelMapping(Vec<MidiChannelMapping>),
+    /// Per-apparaat kanaaltoewijzing (0.9.26): apparaatnaam → kanaal 0-15. Wordt
+    /// toegepast op het moment dat een bericht van dat apparaat binnenkomt.
+    SetDeviceChannels(std::collections::HashMap<String, u8>),
     LearnChannel(String, Sender<Option<u8>>), // division name, returns learned channel (legacy)
     /// Learn keyboard range: first note (lowest), then second note (highest)
     /// Returns the learned channel, first note, last note, and calculated transpose
@@ -1500,6 +1509,9 @@ pub struct AppState {
     pub drawn_stops: Arc<RwLock<Vec<String>>>,
     /// MIDI channel mappings per division
     pub midi_mappings: Arc<RwLock<Vec<MidiChannelMapping>>>,
+    /// Spiegel van de per-apparaat kanaaltoewijzing (0.9.26) voor UI en opslag.
+    /// De audio/MIDI-thread houdt zijn eigen (gedeelde) kopie in de manager.
+    pub midi_device_channels: Arc<RwLock<std::collections::HashMap<String, u8>>>,
     /// MIDI bindings for presets
     pub preset_bindings: Arc<RwLock<Vec<MidiPresetBinding>>>,
     /// Channel to notify frontend of preset triggers
@@ -1961,6 +1973,7 @@ impl AppState {
         let loaded_organ_info = Arc::new(RwLock::new(None));
         let drawn_stops = Arc::new(RwLock::new(Vec::new()));
         let midi_mappings = Arc::new(RwLock::new(Vec::new()));
+        let midi_device_channels = Arc::new(RwLock::new(audio_prefs.midi_device_channels.clone()));
         let preset_bindings = Arc::new(RwLock::new(Vec::new()));
         let active_couplers = Arc::new(RwLock::new(Vec::new()));
         let division_gains = Arc::new(RwLock::new(vec![1.0; 32]));
@@ -2053,6 +2066,14 @@ impl AppState {
             );
         });
 
+        // Opgeslagen per-apparaat kanaaltoewijzing meteen doorzetten (0.9.26),
+        // zodat klavieren bij het opstarten op hun eigen kanaal uitkomen. De map
+        // is gedeeld met de verbindings-callbacks, dus ook een latere ConnectAll
+        // pakt hem op.
+        if !audio_prefs.midi_device_channels.is_empty() {
+            let _ = midi_tx.send(MidiCommand::SetDeviceChannels(audio_prefs.midi_device_channels.clone()));
+        }
+
         Self {
             audio_player: audio_player_arc,
             midi_tx,
@@ -2062,6 +2083,7 @@ impl AppState {
             loaded_organ_info,
             drawn_stops,
             midi_mappings,
+            midi_device_channels,
             preset_bindings,
             preset_trigger_tx,
             preset_trigger_rx,
@@ -2293,6 +2315,12 @@ impl AppState {
                         *midi_mappings.write() = mappings;
                         tracing::info!("MIDI channel mappings updated");
                     }
+                    MidiCommand::SetDeviceChannels(map) => {
+                        // Gedeeld met de verbindings-callbacks: werkt direct door
+                        // op reeds verbonden apparaten én op latere verbindingen.
+                        if let Some(ref mgr) = manager { mgr.set_device_channels(map); }
+                        tracing::info!("MIDI per-apparaat kanaaltoewijzing bijgewerkt");
+                    }
                     MidiCommand::LearnChannel(division, response_tx) => {
                         // Wait for next MIDI message and return its channel
                         // This waits up to 10 seconds for a note
@@ -2355,18 +2383,18 @@ impl AppState {
                     }
                     MidiCommand::LearnSingleNote(response_tx) => {
                         tracing::info!("Learning single note: press a key");
-                        if let Some(ref rx) = midi_receiver {
-                            while rx.try_recv().is_ok() {}
-                            let forward = |m: MidiMessage| Self::handle_midi_message(
-                                m, &audio_player, &organ_definition, &loaded_organ_info, &drawn_stops,
-                                &midi_mappings, &active_couplers, &swell_bindings, &division_gains, &held_notes,
-                                false,
-                            );
-                            let result = Self::wait_for_note_on(rx, std::time::Duration::from_secs(20), &forward);
-                            let _ = response_tx.send(result);
-                        } else {
-                            let _ = response_tx.send(None);
-                        }
+                        // 0.9.25: ook het BLE-/testkanaal telt mee (zie wait_for_note_on_dual).
+                        if let Some(rx) = midi_receiver.as_ref() { while rx.try_recv().is_ok() {} }
+                        while ble_message_rx.try_recv().is_ok() {}
+                        let forward = |m: MidiMessage| Self::handle_midi_message(
+                            m, &audio_player, &organ_definition, &loaded_organ_info, &drawn_stops,
+                            &midi_mappings, &active_couplers, &swell_bindings, &division_gains, &held_notes,
+                            false,
+                        );
+                        let result = Self::wait_for_note_on_dual(
+                            midi_receiver.as_ref(), &ble_message_rx, std::time::Duration::from_secs(20), &forward,
+                        );
+                        let _ = response_tx.send(result);
                     }
                     MidiCommand::LearnKeyboardRange(division, first_sample_note, response_tx) => {
                         // Learn keyboard range like the reference software:
@@ -3050,6 +3078,21 @@ impl AppState {
     /// Wait for a NoteOn message with velocity > 0
     /// Simple version: just detect NoteOn and add a small delay
     fn wait_for_note_on(rx: &Receiver<MidiMessage>, timeout: std::time::Duration, forward: &dyn Fn(MidiMessage)) -> Option<(u8, u8)> {
+        Self::wait_for_note_on_dual(Some(rx), &crossbeam_channel::never(), timeout, forward)
+    }
+
+    /// Als `wait_for_note_on`, maar luistert naast het USB-kanaal ook naar het
+    /// BLE-/testkanaal (0.9.25). Zo werken de één-toets-inleerknoppen (o.a.
+    /// "Leer" per balk in het notatievenster) ook met een Bluetooth-klavier,
+    /// net als de CC-leerfuncties al deden, en zijn ze met geïnjecteerde
+    /// noten te testen. Zonder USB-verbinding wacht hij nu de volle tijd in
+    /// plaats van meteen op te geven.
+    fn wait_for_note_on_dual(
+        usb_rx: Option<&Receiver<MidiMessage>>,
+        ble_rx: &Receiver<MidiMessage>,
+        timeout: std::time::Duration,
+        forward: &dyn Fn(MidiMessage),
+    ) -> Option<(u8, u8)> {
         let start = std::time::Instant::now();
 
         // NoteOffs (en NoteOn vel=0) DOORSTUREN naar de audio: releases van
@@ -3058,13 +3101,13 @@ impl AppState {
         let is_release = |m: &MidiMessage| matches!(m, MidiMessage::NoteOff { .. } | MidiMessage::NoteOn { velocity: 0, .. });
 
         while start.elapsed() < timeout {
-            match rx.recv_timeout(std::time::Duration::from_millis(100)) {
+            match Self::recv_any_midi(usb_rx, ble_rx, std::time::Duration::from_millis(100)) {
                 Ok(MidiMessage::NoteOn { channel, note, velocity }) if velocity > 0 => {
                     tracing::info!("Got NoteOn: channel={}, note={}, velocity={}", channel, note, velocity);
                     // Wait 500ms to allow the user to release the key and prepare for the next
                     std::thread::sleep(std::time::Duration::from_millis(500));
-                    // Drain pending messages, maar releases doorsturen
-                    while let Ok(m) = rx.try_recv() {
+                    // Drain pending messages (beide bronnen), maar releases doorsturen
+                    while let Ok(m) = Self::recv_any_midi(usb_rx, ble_rx, std::time::Duration::ZERO) {
                         if is_release(&m) { forward(m); }
                     }
                     return Some((channel, note));
@@ -3074,13 +3117,7 @@ impl AppState {
                     if is_release(&m) { forward(m); }
                     continue;
                 }
-                Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
-                    continue;
-                }
-                Err(_) => {
-                    // Channel disconnected
-                    return None;
-                }
+                Err(_) => continue, // time-out van deze ronde: opnieuw proberen tot `timeout`
             }
         }
         None
@@ -5223,6 +5260,26 @@ impl AppState {
         self.midi_mappings.read().clone()
     }
 
+    /// Per-apparaat kanaaltoewijzing instellen (0.9.26): apparaatnaam → kanaal
+    /// 0-15. Werkt direct door op de MIDI-thread en wordt globaal bewaard
+    /// (audio_config.json), want het is een hardware-opstelling, niet per orgel.
+    pub fn set_midi_device_channels(&self, map: std::collections::HashMap<String, u8>) {
+        let schoon: std::collections::HashMap<String, u8> =
+            map.into_iter().map(|(d, c)| (d, c & 0x0F)).collect();
+        *self.midi_device_channels.write() = schoon.clone();
+        let _ = self.midi_tx.send(MidiCommand::SetDeviceChannels(schoon));
+        let prefs = load_audio_prefs(&self.app_data_dir);
+        save_audio_prefs(&self.app_data_dir, &AudioPrefs {
+            midi_device_channels: self.midi_device_channels.read().clone(),
+            ..prefs
+        });
+    }
+
+    /// De huidige per-apparaat kanaaltoewijzing (voor de UI en opslag).
+    pub fn get_midi_device_channels(&self) -> std::collections::HashMap<String, u8> {
+        self.midi_device_channels.read().clone()
+    }
+
     /// Learn MIDI channel for a division (waits for next MIDI input)
     pub fn learn_midi_channel(&self, division: &str) -> Result<Option<u8>, String> {
         let (tx, rx) = bounded(1);
@@ -7052,5 +7109,49 @@ mod doorlopend_klavier_tests {
         stops[0].doorloop_onder = 40;
         markeer_registerhelften(&mut stops, false);
         assert_eq!(grenzen(&stops[0]), (0, 127));
+    }
+}
+
+#[cfg(test)]
+mod leer_een_toets_tests {
+    use super::*;
+    use crossbeam_channel::unbounded;
+    use std::time::Duration;
+
+    #[test]
+    fn noot_via_het_ble_kanaal_wordt_geleerd_zonder_usb() {
+        let (ble_tx, ble_rx) = unbounded::<MidiMessage>();
+        ble_tx.send(MidiMessage::NoteOn { channel: 2, note: 40, velocity: 90 }).unwrap();
+        let r = AppState::wait_for_note_on_dual(None, &ble_rx, Duration::from_secs(3), &|_| {});
+        assert_eq!(r, Some((2, 40)));
+    }
+
+    #[test]
+    fn usb_kanaal_werkt_nog_zoals_voorheen() {
+        let (usb_tx, usb_rx) = unbounded::<MidiMessage>();
+        usb_tx.send(MidiMessage::NoteOn { channel: 0, note: 60, velocity: 100 }).unwrap();
+        let r = AppState::wait_for_note_on(&usb_rx, Duration::from_secs(3), &|_| {});
+        assert_eq!(r, Some((0, 60)));
+    }
+
+    #[test]
+    fn noteoff_en_velocity_nul_tellen_niet_en_gaan_door_naar_de_audio() {
+        let (ble_tx, ble_rx) = unbounded::<MidiMessage>();
+        ble_tx.send(MidiMessage::NoteOff { channel: 1, note: 50, velocity: 0 }).unwrap();
+        ble_tx.send(MidiMessage::NoteOn { channel: 1, note: 51, velocity: 0 }).unwrap();
+        ble_tx.send(MidiMessage::NoteOn { channel: 1, note: 52, velocity: 80 }).unwrap();
+        let doorgestuurd = std::cell::RefCell::new(0usize);
+        let r = AppState::wait_for_note_on_dual(None, &ble_rx, Duration::from_secs(3), &|_| { *doorgestuurd.borrow_mut() += 1; });
+        assert_eq!(r, Some((1, 52)));
+        assert_eq!(*doorgestuurd.borrow(), 2, "beide releases horen bij de audio te komen");
+    }
+
+    #[test]
+    fn zonder_noot_geeft_hij_na_de_time_out_niets() {
+        let (_ble_tx, ble_rx) = unbounded::<MidiMessage>();
+        let t0 = std::time::Instant::now();
+        let r = AppState::wait_for_note_on_dual(None, &ble_rx, Duration::from_millis(300), &|_| {});
+        assert_eq!(r, None);
+        assert!(t0.elapsed() >= Duration::from_millis(300));
     }
 }

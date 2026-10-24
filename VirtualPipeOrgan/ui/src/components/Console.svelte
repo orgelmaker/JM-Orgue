@@ -134,6 +134,10 @@
   export let midiDevices = [];
   export let selectedAudioDevice = null;
   export let selectedMidiDevice = null;
+  // Per-apparaat kanaaltoewijzing (0.9.26): apparaatnaam → kanaal 0-15. Zo
+  // bedienen klavieren die fysiek op hetzelfde kanaal zenden toch verschillende
+  // werken. Leeg object = alles op standaard (ongewijzigd).
+  let deviceChannels = {};
   // Audio-uitvoerprofielen (speakers/hoofdtelefoon) — beheerd in App.svelte.
   export let audioProfiles = { speakers: null, headphones: null, active: null };
   // Telt op bij elke geslaagde audio-uitgang-herbouw: de per-orgel DSP moet dan
@@ -2444,8 +2448,24 @@
   let bleCountInterval = null;
 
   onMount(() => {
+    loadDeviceChannels();
     return () => { if (bleCountInterval) clearInterval(bleCountInterval); };
   });
+
+  // Per-apparaat kanaaltoewijzing laden/opslaan (0.9.26).
+  async function loadDeviceChannels() {
+    try { deviceChannels = (await invoke('get_midi_device_channels')) || {}; } catch (e) {}
+  }
+  async function setDeviceChannel(name, value) {
+    if (value === '' || value === null || value === undefined) {
+      delete deviceChannels[name];
+    } else {
+      deviceChannels[name] = Number(value);
+    }
+    deviceChannels = deviceChannels; // reactiviteit
+    try { await invoke('set_midi_device_channels', { channels: deviceChannels }); }
+    catch (e) { console.error('set_midi_device_channels', e); }
+  }
 
   // BLE-teller alleen pollen wanneer de Algemene Instellingen (met de
   // Bluetooth-sectie) zichtbaar zijn — elders is de waarde onzichtbaar.
@@ -7760,7 +7780,7 @@
                 {$t('bindings.editor_intro')}
               </p>
               {#if midiBindingsError}
-                <p style="color: #e07a6a; font-size: 0.72rem; margin: 0 0 0.4rem;">{midiBindingsError}</p>
+                <p style="color: var(--error); font-size: 0.72rem; margin: 0 0 0.4rem;">{midiBindingsError}</p>
               {/if}
               <div class="midi-bindings-wrap">
                 <table class="midi-bindings-table">
@@ -8578,7 +8598,7 @@
                       {/if}
                     {/if}
                     {#if samplesetScan.errors.length > 0}
-                      <div style="color:#d47070; margin-top:0.3rem;">{samplesetScan.errors.length} ⚠</div>
+                      <div style="color:var(--error); margin-top:0.3rem;">{samplesetScan.errors.length} ⚠</div>
                     {/if}
                   </div>
                 {/if}
@@ -8614,7 +8634,7 @@
                   <div style="margin-top:0.6rem; font-size:0.76rem;">
                     <div>{$t('settings.loops_wavs')}: {loopScan.files_scanned} · {$t('settings.loops_without_loop')}: <strong>{loopScan.files_without_loop}</strong> · {$t('settings.loops_loopable')}: <strong>{loopScan.files_loopable}</strong></div>
                     {#if loopScan.errors.length > 0}
-                      <div style="color:#d47070; margin-top:0.3rem;">{loopScan.errors.length} ⚠</div>
+                      <div style="color:var(--error); margin-top:0.3rem;">{loopScan.errors.length} ⚠</div>
                     {/if}
                   </div>
                 {/if}
@@ -8638,6 +8658,7 @@
                   {$t('settings.midi_refresh')}
                 </button>
               </div>
+              <p style="margin:0 0 0.5rem; font-size:0.8rem; color: var(--text-muted);">{$t('settings.midi_device_channel_hint')}</p>
               <div class="device-select">
                 {#each midiDevices.filter(d => d.is_input) as device}
                   <div
@@ -8677,6 +8698,17 @@
                         {:else}
                           {$t('midi.connect_hint')}
                         {/if}
+                      </div>
+                      <div class="device-channel" style="margin-top:0.3rem; font-size:0.8rem; color: var(--text-secondary);"
+                        role="group" on:click|stopPropagation={() => {}} on:keydown|stopPropagation={() => {}}>
+                        <label>{$t('settings.midi_device_channel')}:
+                          <select on:change={(e) => setDeviceChannel(device.name, e.currentTarget.value)}>
+                            <option value="" selected={deviceChannels[device.name] === undefined || deviceChannels[device.name] === null}>{$t('settings.midi_device_channel_default')}</option>
+                            {#each Array(16) as _, i}
+                              <option value={i} selected={deviceChannels[device.name] === i}>{i + 1}</option>
+                            {/each}
+                          </select>
+                        </label>
                       </div>
                     </div>
                   </div>

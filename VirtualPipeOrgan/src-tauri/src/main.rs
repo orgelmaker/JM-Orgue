@@ -433,6 +433,8 @@ fn main() {
             commands::disconnect_midi,
             commands::set_midi_mapping,
             commands::get_midi_mappings,
+            commands::set_midi_device_channels,
+            commands::get_midi_device_channels,
             commands::learn_midi_channel,
             commands::learn_keyboard_range,
             commands::learn_keyboard_note,

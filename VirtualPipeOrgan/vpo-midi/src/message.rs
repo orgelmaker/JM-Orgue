@@ -49,6 +49,25 @@ pub enum MidiMessage {
 }
 
 impl MidiMessage {
+    /// Dezelfde boodschap op een ander MIDI-kanaal (0.9.26). Kanaalgebonden
+    /// berichten (noot, CC, pitchbend, aftertouch, programmawissel) krijgen het
+    /// nieuwe kanaal (0-15); systeemberichten blijven ongewijzigd. Gebruikt om
+    /// per invoerapparaat een vast kanaal af te dwingen, zodat twee klavieren
+    /// die allebei op kanaal 1 zenden tóch verschillende werken bedienen.
+    pub fn with_channel(self, ch: u8) -> Self {
+        let ch = ch & 0x0F;
+        match self {
+            MidiMessage::NoteOn { note, velocity, .. } => MidiMessage::NoteOn { channel: ch, note, velocity },
+            MidiMessage::NoteOff { note, velocity, .. } => MidiMessage::NoteOff { channel: ch, note, velocity },
+            MidiMessage::ControlChange { controller, value, .. } => MidiMessage::ControlChange { channel: ch, controller, value },
+            MidiMessage::ProgramChange { program, .. } => MidiMessage::ProgramChange { channel: ch, program },
+            MidiMessage::PitchBend { value, .. } => MidiMessage::PitchBend { channel: ch, value },
+            MidiMessage::ChannelAftertouch { pressure, .. } => MidiMessage::ChannelAftertouch { channel: ch, pressure },
+            MidiMessage::PolyAftertouch { note, pressure, .. } => MidiMessage::PolyAftertouch { channel: ch, note, pressure },
+            other => other,
+        }
+    }
+
     /// Parse raw MIDI bytes into a message
     pub fn parse(data: &[u8]) -> Option<Self> {
         if data.is_empty() {

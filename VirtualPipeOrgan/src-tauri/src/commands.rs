@@ -2092,6 +2092,22 @@ pub fn learn_midi_channel(state: State<AppState>, division: String) -> Result<Op
     state.learn_midi_channel(&division)
 }
 
+/// Per MIDI-invoerapparaat een vast kanaal instellen (0.9.26): apparaatnaam →
+/// kanaal 0-15. Zo bedienen klavieren die fysiek op hetzelfde kanaal zenden toch
+/// verschillende werken. Globaal bewaard.
+#[tauri::command]
+pub fn set_midi_device_channels(state: State<AppState>, channels: std::collections::HashMap<String, u8>) -> Result<(), String> {
+    info!("MIDI per-apparaat kanaaltoewijzing: {} apparaten", channels.len());
+    state.set_midi_device_channels(channels);
+    Ok(())
+}
+
+/// De huidige per-apparaat kanaaltoewijzing (voor de instellingen-UI).
+#[tauri::command]
+pub fn get_midi_device_channels(state: State<AppState>) -> std::collections::HashMap<String, u8> {
+    state.get_midi_device_channels()
+}
+
 /// Result of learning a keyboard range
 #[derive(Debug, Clone, Serialize)]
 pub struct LearnedKeyboardRangeDto {
