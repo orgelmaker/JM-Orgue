@@ -1060,7 +1060,20 @@
     "octave_line_down_title": "8vb: eine Oktave tiefer gespielt als notiert (Umschalt+8)",
     "import_musicxml": "MusicXML öffnen…",
     "musicxml_filter": "MusicXML-Partitur",
-    "import_warnings": "Die Partitur wurde geöffnet. Nicht alles konnte übernommen werden:"
+    "import_warnings": "Die Partitur wurde geöffnet. Nicht alles konnte übernommen werden:",
+    "layer_channel": "Kanal",
+    "layer_channel_none": "keiner",
+    "layer_channel_title": "MIDI-Kanal, der direkt auf dieses System geht (hat Vorrang vor den Werken). Keiner = über die angekreuzten Werke, sonst als aktives System.",
+    "learn_channel": "Lernen",
+    "learn_channel_waiting": "Taste spielen…",
+    "learn_channel_title": "Eine Taste auf dem Manual spielen, das auf dieses System soll; der Kanal wird gemerkt",
+    "routing_label": "Aufnahme:",
+    "routing_channel": "Kan. {ch}",
+    "routing_no_channel": "kein Kanal gelernt",
+    "routing_armed_only": "nur als aktives System",
+    "routing_nothing": "fängt nichts",
+    "routing_warn_unbound": "System „{name}“ hat weder Kanal noch Werk und ist nicht aktiv: dort landet nichts",
+    "routing_warn_overlap": "„{a}“ und „{b}“ fangen beide Kanal {ch}; nur „{a}“ bekommt die Noten"
   },
   "temperaments": {
     "name_prompt": "Name für diese Stimmung:",

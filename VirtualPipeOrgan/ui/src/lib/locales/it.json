@@ -1060,7 +1060,20 @@
     "octave_line_down_title": "8vb: suonato un’ottava sotto lo scritto (Maiusc+8)",
     "import_musicxml": "Apri MusicXML…",
     "musicxml_filter": "Partitura MusicXML",
-    "import_warnings": "La partitura è stata aperta. Non tutto è stato ripreso:"
+    "import_warnings": "La partitura è stata aperta. Non tutto è stato ripreso:",
+    "layer_channel": "Canale",
+    "layer_channel_none": "nessuno",
+    "layer_channel_title": "Canale MIDI inviato direttamente a questo pentagramma (ha la precedenza sulle divisioni). Nessuno = tramite le divisioni spuntate, altrimenti come pentagramma attivo.",
+    "learn_channel": "Impara",
+    "learn_channel_waiting": "Suona un tasto…",
+    "learn_channel_title": "Suona un tasto sulla tastiera che deve finire su questo pentagramma; il canale viene memorizzato",
+    "routing_label": "Registrazione:",
+    "routing_channel": "can. {ch}",
+    "routing_no_channel": "nessun canale appreso",
+    "routing_armed_only": "solo come pentagramma attivo",
+    "routing_nothing": "non riceve nulla",
+    "routing_warn_unbound": "Il pentagramma “{name}” non ha canale né divisione e non è quello attivo: non vi arriverà nulla",
+    "routing_warn_overlap": "“{a}” e “{b}” ricevono entrambi il canale {ch}; solo “{a}” riceve le note"
   },
   "temperaments": {
     "name_prompt": "Nome di questo temperamento:",

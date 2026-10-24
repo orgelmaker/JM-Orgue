@@ -1612,6 +1612,12 @@ pub struct Layer {
     /// Actieve stem (0.7.86): doel van opname, stapinvoer, klik en plakken.
     #[serde(default = "een")]
     pub active_voice: u8,
+    /// Rechtstreeks MIDI-kanaal van deze balk (0.9.22, 0-15). Gaat bij het
+    /// inspelen vóór de divisie-routering: wie rechts, links en pedaal op
+    /// drie kanalen speelt, koppelt ze zo zonder eerst per werk een kanaal
+    /// in te leren. None = alleen via `divisions` of de armed laag.
+    #[serde(default)]
+    pub midi_channel: Option<u8>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1806,9 +1812,28 @@ impl Score {
             klavar_hand: None,
             klavar_split: None,
             active_voice: 1,
+            midi_channel: None,
         });
         self.bump_gen();
         id
+    }
+
+    /// Doelbalk voor een inkomende noot (0.9.22). Voorrang: een balk met
+    /// precies dit MIDI-kanaal, dan een balk waaraan de divisie van het
+    /// kanaal is toegewezen, dan de armed laag. Zo landen drie kanalen
+    /// (rechts/links/pedaal) tegelijk elk op hun eigen balk, en blijft een
+    /// score zonder enige koppeling werken zoals voorheen (alles op de
+    /// armed laag).
+    pub fn doellaag_voor(&self, channel: u8, division: Option<&str>) -> Option<u32> {
+        if let Some(l) = self.layers.iter().find(|l| l.midi_channel == Some(channel)) {
+            return Some(l.id);
+        }
+        if let Some(d) = division {
+            if let Some(l) = self.layers.iter().find(|l| l.divisions.iter().any(|x| x == d)) {
+                return Some(l.id);
+            }
+        }
+        self.armed_layer.filter(|lid| self.layers.iter().any(|l| l.id == *lid))
     }
 
     pub fn add_take(&mut self, layer_id: u32) -> Option<u32> {
@@ -3714,5 +3739,66 @@ mod tests {
         assert!(xml.contains("<score-part id=\"P3\"><part-name>Pedaal</part-name>"));
         assert!(xml.contains("<part-group type=\"start\" number=\"1\">"));
         assert!(xml.contains("A &amp; B &lt;C&gt;"));
+    }
+}
+
+#[cfg(test)]
+mod doellaag_tests {
+    use super::*;
+
+    fn score_met_drie_balken() -> Score {
+        let mut sc = Score::new(1);
+        sc.layers.clear();
+        sc.add_layer("Rechts".into(), Some(false));
+        sc.add_layer("Links".into(), Some(true));
+        sc.add_layer("Pedaal".into(), Some(true));
+        sc.armed_layer = sc.layers.first().map(|l| l.id);
+        sc
+    }
+
+    #[test]
+    fn kanaal_op_balk_gaat_voor_divisie_en_armed() {
+        let mut sc = score_met_drie_balken();
+        sc.layers[0].midi_channel = Some(0);
+        sc.layers[1].midi_channel = Some(1);
+        sc.layers[2].midi_channel = Some(2);
+        // Divisie zegt iets anders dan het kanaal: het kanaal wint.
+        sc.layers[0].divisions = vec!["Pedaal".into()];
+        let ids: Vec<u32> = sc.layers.iter().map(|l| l.id).collect();
+        assert_eq!(sc.doellaag_voor(0, Some("Pedaal")), Some(ids[0]));
+        assert_eq!(sc.doellaag_voor(1, None), Some(ids[1]));
+        assert_eq!(sc.doellaag_voor(2, Some("Hoofdwerk")), Some(ids[2]));
+    }
+
+    #[test]
+    fn zonder_kanaal_telt_de_divisie_en_daarna_armed() {
+        let mut sc = score_met_drie_balken();
+        sc.layers[2].divisions = vec!["Pedaal".into()];
+        let ids: Vec<u32> = sc.layers.iter().map(|l| l.id).collect();
+        assert_eq!(sc.doellaag_voor(5, Some("Pedaal")), Some(ids[2]));
+        // Onbekende divisie en geen kanaal: armed laag (de eerste).
+        assert_eq!(sc.doellaag_voor(5, Some("Zwelwerk")), Some(ids[0]));
+        assert_eq!(sc.doellaag_voor(9, None), Some(ids[0]));
+    }
+
+    #[test]
+    fn zelfde_noot_op_twee_kanalen_landt_op_twee_balken() {
+        let mut sc = score_met_drie_balken();
+        sc.layers[0].midi_channel = Some(0);
+        sc.layers[1].midi_channel = Some(1);
+        let a = sc.doellaag_voor(0, None);
+        let b = sc.doellaag_voor(1, None);
+        assert!(a.is_some() && b.is_some() && a != b);
+    }
+
+    #[test]
+    fn oude_scores_zonder_veld_lezen_als_geen_kanaal() {
+        let sc = score_met_drie_balken();
+        let json = serde_json::to_string(&sc).unwrap();
+        // Veld weghalen zoals een score van vóór 0.9.22.
+        let json = json.replace(",\"midi_channel\":null", "");
+        assert!(!json.contains("midi_channel"));
+        let terug: Score = serde_json::from_str(&json).unwrap();
+        assert!(terug.layers.iter().all(|l| l.midi_channel.is_none()));
     }
 }

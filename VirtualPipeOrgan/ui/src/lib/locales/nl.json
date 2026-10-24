@@ -1060,7 +1060,20 @@
     "octave_line_down_title": "8vb: een octaaf lager gespeeld dan geschreven (Shift+8)",
     "import_musicxml": "MusicXML openen…",
     "musicxml_filter": "MusicXML-partituur",
-    "import_warnings": "De partituur is geopend. Niet alles kon worden overgenomen:"
+    "import_warnings": "De partituur is geopend. Niet alles kon worden overgenomen:",
+    "layer_channel": "Kanaal",
+    "layer_channel_none": "geen",
+    "layer_channel_title": "MIDI-kanaal dat rechtstreeks naar deze balk gaat (gaat vóór de werken). Geen = via de aangevinkte werken, anders als actieve balk.",
+    "learn_channel": "Leer",
+    "learn_channel_waiting": "Speel een toets…",
+    "learn_channel_title": "Speel één toets op het klavier dat op deze balk moet komen; het kanaal wordt onthouden",
+    "routing_label": "Opname:",
+    "routing_channel": "kan. {ch}",
+    "routing_no_channel": "geen kanaal ingeleerd",
+    "routing_armed_only": "alleen als actieve balk",
+    "routing_nothing": "vangt niets",
+    "routing_warn_unbound": "Balk “{name}” heeft geen kanaal en geen werk en is niet de actieve balk: er komt niets op",
+    "routing_warn_overlap": "“{a}” en “{b}” vangen allebei kanaal {ch}; alleen “{a}” krijgt de noten"
   },
   "temperaments": {
     "name_prompt": "Naam voor deze stemming:",

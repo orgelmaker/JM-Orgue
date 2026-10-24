@@ -4,6 +4,28 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.9.22] - 2026-10-24
+
+### Noteren: rechts, links en pedaal op drie MIDI-kanalen tegelijk
+- Elke balk heeft nu een eigen **MIDI-kanaal** met een inleerknop ("Leer":
+  speel één toets). Een inkomende noot gaat eerst naar de balk met dat
+  kanaal, dan naar de balk waaraan het werk van dat kanaal is toegewezen,
+  en pas daarna naar de actieve balk. Wie rechts, links en pedaal op drie
+  kanalen speelt, krijgt ze zo tegelijk op drie balken, zonder eerst per
+  werk een kanaal te hoeven inleren. Instelbaar in de wizard "Nieuw stuk"
+  en op het tabblad Balken & stemmen.
+- Tijdens opnemen en stapinvoer toont de statusregel welke balk op welk
+  kanaal vangt ("Rechts ← kan. 1 · Links ← kan. 2 · Pedaal ← kan. 3"), met
+  een waarschuwing bij een balk die niets vangt of twee balken op hetzelfde
+  kanaal.
+- **Stapinvoer: dezelfde noot op twee kanalen was één noot.** Toetsen werden
+  alleen op toonhoogte bijgehouden; c' met rechts én links werd één c', en
+  het akkoord werd al vastgelegd zodra één van beide losliet. Nu tellen
+  kanaal én toonhoogte, en volgt de stapinvoer dezelfde balk-routering als
+  de live-opname.
+- MIDI-export gebruikt het balk-kanaal voor noten zonder bronkanaal
+  (stapinvoer, muisklik).
+
 ## [0.9.21] - 2026-10-23
 
 ### Mechaniek-opnamen verschijnen niet meer als register

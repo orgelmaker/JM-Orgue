@@ -1060,7 +1060,20 @@
     "octave_line_down_title": "8vb: played an octave lower than written (Shift+8)",
     "import_musicxml": "Open MusicXML…",
     "musicxml_filter": "MusicXML score",
-    "import_warnings": "The score has been opened. Not everything could be taken over:"
+    "import_warnings": "The score has been opened. Not everything could be taken over:",
+    "layer_channel": "Channel",
+    "layer_channel_none": "none",
+    "layer_channel_title": "MIDI channel routed straight to this staff (takes precedence over divisions). None = via the ticked divisions, otherwise as the armed staff.",
+    "learn_channel": "Learn",
+    "learn_channel_waiting": "Play a key…",
+    "learn_channel_title": "Play one key on the keyboard that should land on this staff; the channel is remembered",
+    "routing_label": "Recording:",
+    "routing_channel": "ch. {ch}",
+    "routing_no_channel": "no channel learned",
+    "routing_armed_only": "only as armed staff",
+    "routing_nothing": "catches nothing",
+    "routing_warn_unbound": "Staff “{name}” has no channel and no division and is not the armed staff: nothing will land on it",
+    "routing_warn_overlap": "“{a}” and “{b}” both catch channel {ch}; only “{a}” gets the notes"
   },
   "temperaments": {
     "name_prompt": "Name for this temperament:",

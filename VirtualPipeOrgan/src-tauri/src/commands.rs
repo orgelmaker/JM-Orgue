@@ -5398,6 +5398,7 @@ pub fn notation_new_score(state: State<AppState>, app: tauri::AppHandle, spec: O
                 laag.divisions = l.divisions;
                 laag.klavar_hand = l.klavar_hand;
                 laag.klavar_split = l.klavar_split;
+                laag.midi_channel = l.midi_channel;
             }
         }
     }
@@ -5737,6 +5738,9 @@ pub struct LayerSpecDto {
     pub klavar_hand: Option<crate::notation::KlavarHand>,
     #[serde(default)]
     pub klavar_split: Option<u8>,
+    /// Rechtstreeks MIDI-kanaal van de balk (0.9.22, 0-15).
+    #[serde(default)]
+    pub midi_channel: Option<u8>,
 }
 
 /// Wizard: vervang de balkindeling van een nog lege score (aantal balken,
@@ -5756,6 +5760,7 @@ pub fn notation_configure_layers(state: State<AppState>, app: tauri::AppHandle, 
                 l.divisions = spec.divisions;
                 l.klavar_hand = spec.klavar_hand;
                 l.klavar_split = spec.klavar_split;
+                l.midi_channel = spec.midi_channel;
             }
         }
         sc.armed_layer = sc.layers.first().map(|l| l.id);
@@ -5781,6 +5786,30 @@ pub fn notation_set_layer_divisions(state: State<AppState>, app: tauri::AppHandl
     })?;
     tauri::async_runtime::spawn(emit_score_changed(app, score_id, gen));
     Ok(())
+}
+
+/// MIDI-kanaal van één balk zetten of wissen (0.9.22). None = geen eigen
+/// kanaal; de balk vangt dan weer via de divisies of als armed laag.
+#[tauri::command]
+pub fn notation_set_layer_midi_channel(state: State<AppState>, app: tauri::AppHandle, score_id: u32, layer_id: u32, channel: Option<u8>) -> Result<(), String> {
+    if let Some(c) = channel { if c > 15 { return Err("MIDI-kanaal moet 1-16 zijn".into()); } }
+    let gen = with_score_mut(&state, score_id, |sc| {
+        if let Some(l) = sc.layers.iter_mut().find(|l| l.id == layer_id) {
+            l.midi_channel = channel;
+            sc.bump_gen();
+        }
+        sc.generation
+    })?;
+    tauri::async_runtime::spawn(emit_score_changed(app, score_id, gen));
+    Ok(())
+}
+
+/// Inleerknop per balk (0.9.22): wacht op één toetsaanslag en geeft het
+/// kanaal terug (0-15). Raakt de divisie-mapping niet aan; de UI zet het
+/// kanaal daarna met notation_set_layer_midi_channel.
+#[tauri::command]
+pub fn notation_learn_midi_channel(state: State<AppState>) -> Result<Option<u8>, String> {
+    Ok(state.learn_single_note()?.map(|(ch, _note)| ch))
 }
 
 /// Selectie in de tijd verschuiven (µs, mag negatief; klemt op 0). De UI stuurt
@@ -6355,7 +6384,8 @@ pub fn notation_export_midi(state: State<AppState>, score_id: u32, path: String)
         // Kanaal 0 (stapinvoer/klik) → ingeleerd kanaal van de eerste divisie van de laag (0.7.82).
         let maps = state.midi_mappings.read().clone();
         let kanaal = |laag: &crate::notation::Layer| -> Option<u8> {
-            laag.divisions.iter().find_map(|d| maps.iter().find(|m| &m.division == d).and_then(|m| m.channel))
+            // 0.9.22: eigen kanaal van de balk gaat voor.
+            laag.midi_channel.or_else(|| laag.divisions.iter().find_map(|d| maps.iter().find(|m| &m.division == d).and_then(|m| m.channel)))
         };
         crate::notation::score_to_smf_bytes(sc, &kanaal)?
     };

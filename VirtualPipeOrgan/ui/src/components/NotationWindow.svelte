@@ -13,6 +13,7 @@
   // OpenSheetMusicDisplay (BSD-3, gebundeld — geen externe software).
   import { onMount, onDestroy, tick } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
+  import { maakStapAkkoord, groepeerPerBalk, routeringOverzicht } from '../lib/stepChord.js';
   import { OpenSheetMusicDisplay } from 'opensheetmusicdisplay';
   import KlavarSheet from './KlavarSheet.svelte';
   import NewScoreWizard from './NewScoreWizard.svelte';
@@ -464,7 +465,7 @@
     const m = Math.floor(startUs / maatUs + 1e-6);
     const telUs = maatUs / (Number(beatsPerBar) || 4);
     const b = Math.floor((startUs - m * maatUs) / telUs + 1e-6);
-    return tx('notation.measure_beat').replace('{m}', m + 1).replace('{b}', b + 1);
+    return tx('notation.measure_beat').replace('{m}', m + 1).replaceAll('{b}', b + 1);
   }
   async function setHeaderLive(titel, componist, ondertitel) {
     if (!isLive || scoreId == null) return;
@@ -922,6 +923,7 @@
       divisions = (info?.divisions || []).map(d => d.name);
       klavierBereik = klavierBereikUit(info);
     } catch (e) { divisions = []; }
+    await laadMidiMappings();
     if (divisions.length > 0 && staffConfig.length === 0) {
       staffConfig = divisions.map(name => ({ name, divisions: [name], bass: isPedalName(name), hand: 'auto', split: 60 }));
     }
@@ -1157,8 +1159,9 @@
       divisions: [...(l.divisions || [])],
       hand: layerHandKeuze(l),
       split: l.klavar_split ?? 60,
+      channel: l.midi_channel ?? null,
     }));
-    return st.length ? st : [{ name: tx('notation.staff_n').replace('{n}', 1), bass: false, divisions: [], hand: 'auto', split: 60 }];
+    return st.length ? st : [{ name: tx('notation.staff_n').replace('{n}', 1), bass: false, divisions: [], hand: 'auto', split: 60, channel: null }];
   }
   // Standaardindeling voor een nieuw stuk (0.7.92): de gebruikelijke
   // orgelpartituur — een vioolsleutelbalk voor de rechterhand, een
@@ -1170,9 +1173,9 @@
     const pedaal = divisions.filter(d => isPedalName(d));
     const manualen = divisions.filter(d => !isPedalName(d));
     return [
-      { name: tx('notation.staff_manual_r'), bass: false, divisions: manualen, hand: 'right', split: 60 },
-      { name: tx('notation.staff_manual_l'), bass: true, divisions: [], hand: 'left', split: 60 },
-      { name: tx('notation.staff_pedal'), bass: true, divisions: pedaal, hand: 'pedal', split: 60 },
+      { name: tx('notation.staff_manual_r'), bass: false, divisions: manualen, hand: 'right', split: 60, channel: null },
+      { name: tx('notation.staff_manual_l'), bass: true, divisions: [], hand: 'left', split: 60, channel: null },
+      { name: tx('notation.staff_pedal'), bass: true, divisions: pedaal, hand: 'pedal', split: 60, channel: null },
     ];
   }
   function wizardInitial(mode) {
@@ -1187,6 +1190,56 @@
     };
   }
   function openWizardFromScore() { wizard = { mode: 'edit', initial: wizardInitial('edit') }; }
+
+  // ---- Kanaal per balk + routeringsoverzicht (0.9.22) ----
+  // Ingeleerde kanalen per werk (Instellingen → MIDI); nodig om te tonen op
+  // welk kanaal een balk via zijn divisies vangt.
+  let midiMappings = [];
+  async function laadMidiMappings() {
+    try { midiMappings = await invoke('get_midi_mappings') || []; } catch (e) { midiMappings = []; }
+  }
+  $: routering = routeringOverzicht(score?.layers ?? [], midiMappings, score?.armed_layer ?? null);
+  // Tekst voor de statusregel tijdens opnemen/stapinvoer: "Rechts ← kan. 1 · …".
+  function routeringTekst(r) {
+    return r.regels.map((x) => {
+      let bron;
+      if (x.bron === 'kanaal') bron = tx('notation.routing_channel').replaceAll('{ch}', x.kanaal + 1);
+      else if (x.bron === 'divisie') bron = x.divisies.map((d) => d.kanaal == null ? d.naam : `${d.naam} (${tx('notation.routing_channel').replaceAll('{ch}', d.kanaal + 1)})`).join(', ');
+      else if (x.bron === 'armed') bron = tx('notation.routing_armed_only');
+      else bron = tx('notation.routing_nothing');
+      return `${x.name} ← ${bron}`;
+    }).join(' · ');
+  }
+  function routeringWaarschuwingTekst(r) {
+    return r.waarschuwingen.map((w) => w.soort === 'overlap'
+      ? tx('notation.routing_warn_overlap').replaceAll('{a}', w.a).replaceAll('{b}', w.b).replaceAll('{ch}', w.kanaal + 1)
+      : (w.armed ? '' : tx('notation.routing_warn_unbound').replaceAll('{name}', w.name))
+    ).filter(Boolean).join(' · ');
+  }
+  async function setLayerChannel(layer, channel) {
+    const ch = (channel == null || channel === '' || channel === 'none') ? null : Number(channel);
+    try { await invoke('notation_set_layer_midi_channel', { scoreId, layerId: layer.id, channel: ch }); }
+    catch (e) { error = String(e); }
+  }
+  // Inleerknop: wacht op één toets (max. 20 s) en zet dat kanaal op de balk.
+  let leerKanaalBezig = null; // layer-id of 'wizard-<index>'
+  async function leerKanaalVoor(layer) {
+    if (leerKanaalBezig != null) return;
+    leerKanaalBezig = layer.id;
+    try {
+      const ch = await invoke('notation_learn_midi_channel');
+      if (ch != null) await setLayerChannel(layer, ch);
+    } catch (e) { error = String(e); }
+    finally { leerKanaalBezig = null; }
+  }
+  // Voor de wizard (nog geen balk in de score): geeft het kanaal terug.
+  async function leerKanaalLos() {
+    if (leerKanaalBezig != null) return null;
+    leerKanaalBezig = 'wizard';
+    try { return await invoke('notation_learn_midi_channel'); }
+    catch (e) { error = String(e); return null; }
+    finally { leerKanaalBezig = null; }
+  }
   function openNewWizard() {
     if (!isLive || wizard || bevestig || herstel || hulpOpen) return;
     if (isDirty() && !verwerpBevestigd) {
@@ -1198,7 +1251,8 @@
   function laagSpecs(staves) {
     return staves.map(s => {
       const [hand, split] = handVoorKeuze(s.hand, s.split);
-      return { name: s.name || tx('notation.staff'), bass_clef: !!s.bass, divisions: s.divisions, klavar_hand: hand, klavar_split: split };
+      const midi_channel = (s.channel == null || s.channel === '') ? null : Number(s.channel);
+      return { name: s.name || tx('notation.staff'), bass_clef: !!s.bass, divisions: s.divisions, klavar_hand: hand, klavar_split: split, midi_channel };
     });
   }
   // Alle venster-eigen toestand terug naar nul na een nieuw stuk.
@@ -1206,7 +1260,7 @@
     selectionIds = new Set(); cursorIndex = 0; noteBoxes = []; xml = null; klavarModel = null;
     lastGeneration = 0; lastKlavarGeneration = 0; error = null;
     notationClipboard = { events: [] };
-    stepPosUs = 0; stepHeld = new Set(); stepChord = new Set(); stepChordDivisie = new Map();
+    stepPosUs = 0; stapAkkoord.reset();
     stepLastIds = []; stepLastChordNotes = []; stepLastPos = null; stepLastEndUs = null; stepLastUndoCount = 0; stepLastGroepen = null;
     divEditLayerId = null; groeiLaatst = 0;
     stepAcc = null; stepTie = false; caret = null; notemap = [];
@@ -1296,9 +1350,10 @@
   let stepDotted = false;
   let stepTriplet = false;   // triool (0.7.93): drie in de tijd van twee
   let stepPosUs = 0;         // invoercursor (µs)
-  let stepHeld = new Set();  // nu ingedrukte toetsen
-  let stepChord = new Set(); // verzameld akkoord van deze aanslag
-  let stepChordDivisie = new Map(); // midi → divisienaam (0.7.82: routering per balk)
+  // Ingedrukte toetsen + akkoord van deze aanslag, gesleuteld op kanaal én
+  // noot (0.9.22, lib/stepChord.js): dezelfde noot op twee kanalen blijft
+  // twee noten en het akkoord wacht tot beide losgelaten zijn.
+  const stapAkkoord = maakStapAkkoord();
   // Eén formule voor het palet en Alt+cijfer (reviewbevinding 0.7.93).
   function durUsVoor(quarters) {
     return Math.round((60e6 / (Number(bpm) || 90)) * quarters * (stepDotted ? 1.5 : 1) * (stepTriplet ? 2 / 3 : 1));
@@ -1323,7 +1378,7 @@
   }
   async function setStepMode(on) {
     stepMode = on;
-    stepHeld = new Set(); stepChord = new Set();
+    stapAkkoord.reset();
     // Stapinvoer en liedtekst typen sluiten elkaar uit (reviewbevinding).
     if (on && lyricMode) { lyricMode = false; await sluitLyricEdit(true); }
     if (on) {
@@ -1479,7 +1534,7 @@
     const laag = score?.layers?.find(l => l.id === stepTargetLayerId());
     const toon = noteName(pasVoortekenToe(midi));
     void acc;
-    return tx('notation.measure_beat').replace('{m}', m + 1).replace('{b}', tel + 1) + ' · ' + toon + (laag ? ' · ' + laag.name : '') + ' · Enter';
+    return tx('notation.measure_beat').replace('{m}', m + 1).replaceAll('{b}', tel + 1) + ' · ' + toon + (laag ? ' · ' + laag.name : '') + ' · Enter';
   }
   $: caretTekst = stepMode && score ? caretOmschrijving(stepPosUs, stepCaretMidi, stepAcc) : '';
   // Caretpositie uit de VexFlow-stave van de maat waarin de cursor staat:
@@ -1637,22 +1692,12 @@
   // Akkoord afsluiten: per doelbalk invoegen (0.7.82). Een noot waarvan de
   // divisie door een laag wordt gerouteerd gaat naar díe laag, de rest naar
   // de armed laag; alle groepen op dezelfde tel, de cursor schuift één keer.
-  function stepCommitChord() {
-    const notes = Array.from(stepChord);
-    const divisies = stepChordDivisie;
-    stepChord = new Set();
-    stepChordDivisie = new Map();
+  function stepCommitChord(noten = null) {
+    const notes = noten ?? stapAkkoord.commit();
     if (!notes.length) return;
-    const standaard = stepTargetLayerId();
-    const groepen = new Map();
-    for (const m of notes) {
-      const d = divisies.get(m);
-      const laag = d ? (score?.layers || []).find((l) => (l.divisions || []).includes(d)) : null;
-      const lid = laag ? laag.id : standaard;
-      if (!groepen.has(lid)) groepen.set(lid, []);
-      groepen.get(lid).push(m);
-    }
-    stepPlaatsGroepen([...groepen]);
+    // Per balk: doelbalk van de backend (kanaal → divisie → armed), anders
+    // divisie, anders de armed/eerste balk.
+    stepPlaatsGroepen(groepeerPerBalk(notes, score?.layers || [], stepTargetLayerId()));
   }
   // Groepen per balk sequentieel plaatsen: de eerste schuift de cursor, de
   // volgende komen op dezelfde tel; Backspace telt alle commando's mee en R
@@ -1704,13 +1749,12 @@
     stepPosUs = stepLastPos;
     stepLastIds = []; stepLastChordNotes = []; stepLastPos = null; stepLastEndUs = null; stepLastUndoCount = 0; stepLastGroepen = null;
   }
-  function onStepNoteOn(midi, divisie = null) {
-    stepHeld.add(midi); stepChord.add(midi);
-    if (divisie) stepChordDivisie.set(midi, divisie);
+  function onStepNoteOn(midi, divisie = null, channel = null, layer = null) {
+    stapAkkoord.noteOn(midi, channel, divisie, layer);
   }
-  function onStepNoteOff(midi) {
-    stepHeld.delete(midi);
-    if (stepHeld.size === 0) stepCommitChord();
+  function onStepNoteOff(midi, channel = null) {
+    const noten = stapAkkoord.noteOff(midi, channel);
+    if (noten) stepCommitChord(noten);
   }
 
   // Muisklik → toonhoogte: vind de maat (VexFlow-stave) onder de klik en reken
@@ -1892,11 +1936,11 @@
       // Stapinvoer: gespeelde toetsen op de invoercursor plaatsen.
       unlisteners.push(await listen('jm-orgue:notation:step-note-on', (e) => {
         if (e?.payload?.score !== scoreId || !stepMode) return;
-        onStepNoteOn(e.payload.midi, e.payload.division || null);
+        onStepNoteOn(e.payload.midi, e.payload.division || null, e.payload.channel ?? null, e.payload.layer ?? null);
       }));
       unlisteners.push(await listen('jm-orgue:notation:step-note-off', (e) => {
         if (e?.payload?.score !== scoreId || !stepMode) return;
-        onStepNoteOff(e.payload.midi);
+        onStepNoteOff(e.payload.midi, e.payload.channel ?? null);
       }));
       // Eerste render (lege partituur → foutmelding "geen noten" is normaal).
       await doRender();
@@ -1990,7 +2034,7 @@
   function removeLayer(layer) {
     const heeftNoten = layer.takes.some(t => t.events.length > 0);
     if (!heeftNoten) { removeLayerNow(layer.id); return; }
-    bevestig = { tekst: tx('notation.remove_staff_confirm').replace('{name}', layer.name), ok: () => removeLayerNow(layer.id) };
+    bevestig = { tekst: tx('notation.remove_staff_confirm').replaceAll('{name}', layer.name), ok: () => removeLayerNow(layer.id) };
   }
   async function addTake(layerId) {
     try {
@@ -2633,6 +2677,7 @@
   const balkenActies = {
     setMeter: setMeterLive, setKey: setKeyLive, setMode: setModeLive, setQuantize: setQuantizeLive,
     setTolerance: setToleranceLive, addLayer, openWizard: openWizardFromScore, toggleLayerDivision, setLayerHand,
+    setLayerChannel, learnChannel: leerKanaalVoor, refreshMappings: laadMidiMappings,
     toVoice: setSelectionVoice, splitChord: splitSelectionChord, toggleOnlyActive: toggleAlleenActieveStem,
   };
   const afspeelActies = { setMetronome: setMetronomeCfg, previewTempo: () => previewTempo(), setKlavarBereik };
@@ -2663,7 +2708,7 @@
     {#key wizard}
       <NewScoreWizard mode={wizard.mode} initial={wizard.initial} {divisions} hasNotes={scoreHasEvents}
         showHand={viewMode === 'klavar'} splitOpties={SPLIT_OPTIES} {keyChoices} {gridChoices}
-        on:apply={onWizardApply} on:close={() => wizard = null}
+        on:apply={onWizardApply} on:close={() => wizard = null} leerKanaal={leerKanaalLos}
         on:previewTempo={(e) => previewTempo(e.detail.bpm, e.detail.beats, e.detail.unit)}
         recent={recentLijst} on:openProject={() => openProject()} on:openRecent={(e) => openProject(e.detail.path)} />
     {/key}
@@ -2699,7 +2744,8 @@
       {:else if actieveTab === 'staves'}
         <StavesVoicesTab layers={score?.layers ?? []} {divisions} {viewMode} {klavarModel} splitOpties={SPLIT_OPTIES}
           {layerHandKeuze} {autoHandLabel} maatsoort={beatsPerBar + '/' + beatUnit} {maatsoortKeuzes} {keyFifths} {minor}
-          quantize={Number(score?.quantize) || 4} {tolerancePct} {keyChoices} {gridChoices} onlyActive={alleenActieveStem} acties={balkenActies} />
+          quantize={Number(score?.quantize) || 4} {tolerancePct} {keyChoices} {gridChoices} onlyActive={alleenActieveStem} acties={balkenActies}
+          {routering} {leerKanaalBezig} />
       {:else}
         <PlaybackTab {metroOn} {countInBeats} {viewMode} {klavarBereik} acties={afspeelActies} />
       {/if}
@@ -2765,7 +2811,9 @@
     <LayerBar layers={score.layers} armedLayer={score.armed_layer} {recording} acties={laagActies} />
     <StatusLine {armedWaiting} {countInRemaining} aantalNoten={flatEvents.length} selectieAantal={selectionIds.size}
       cursorNaam={cursorEvent ? noteName(cursorEvent.midi) : ''} {cursorIndex} cursorLaag={cursorEvent?._layer ?? ''}
-      {stepMode} {caretTekst} extra={tekenTekst || chordTekst} debugTekst={debugVlag ? `OSMD ${renderMs} ms · ${renderMaten} m.` : ''} />
+      {stepMode} {caretTekst} extra={tekenTekst || chordTekst} debugTekst={debugVlag ? `OSMD ${renderMs} ms · ${renderMaten} m.` : ''}
+      routeringTekst={(recording || armedWaiting || stepMode) && (score?.layers?.length ?? 0) > 1 ? routeringTekst(routering) : ''}
+      routeringWaarschuwing={(recording || armedWaiting || stepMode) ? routeringWaarschuwingTekst(routering) : ''} />
   {/if}
 
   {#if !isLive && divisions.length > 0}

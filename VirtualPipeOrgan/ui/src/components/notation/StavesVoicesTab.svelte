@@ -20,6 +20,18 @@
   export let gridChoices = [];
   export let onlyActive = false;
   export let acties = {};
+  // 0.9.22: routeringsoverzicht { regels, waarschuwingen } en welke balk nu inleert.
+  export let routering = { regels: [], waarschuwingen: [] };
+  export let leerKanaalBezig = null;
+  const KANALEN = Array.from({ length: 16 }, (_, i) => i);
+  function regelVoor(layer) { return (routering.regels || []).find((r) => r.id === layer.id); }
+  function bronTekst(layer, t) {
+    const r = regelVoor(layer);
+    if (!r) return '';
+    if (r.bron === 'kanaal') return '';
+    if (r.bron === 'divisie') return r.divisies.map((d) => d.kanaal == null ? `${d.naam}: ${t('notation.routing_no_channel')}` : `${d.naam}: ${t('notation.routing_channel').replaceAll('{ch}', d.kanaal + 1)}`).join(', ');
+    return r.bron === 'armed' ? t('notation.routing_armed_only') : t('notation.routing_nothing');
+  }
   function doe(naam, ...args) { const f = acties[naam]; if (typeof f === 'function') f(...args); }
   // Schuif lokaal binden: het etiket loopt mee tijdens het slepen, de score
   // krijgt de waarde bij het loslaten.
@@ -56,6 +68,16 @@
   {#each layers as layer (layer.id)}
     <div class="balk">
       <span class="naam">{layer.name}</span>
+      <span class="kanaal" title={$t('notation.layer_channel_title')}>
+        <select value={layer.midi_channel == null ? 'none' : String(layer.midi_channel)} on:change={(e) => doe('setLayerChannel', layer, e.currentTarget.value)}>
+          <option value="none">{$t('notation.layer_channel')}: {$t('notation.layer_channel_none')}</option>
+          {#each KANALEN as k}<option value={String(k)}>{$t('notation.layer_channel')} {k + 1}</option>{/each}
+        </select>
+        <button class="btn btn-ghost btn-sm" disabled={leerKanaalBezig != null} on:click={() => doe('learnChannel', layer)} title={$t('notation.learn_channel_title')}>
+          {leerKanaalBezig === layer.id ? $t('notation.learn_channel_waiting') : $t('notation.learn_channel')}
+        </button>
+        {#if bronTekst(layer, $t)}<span class="bron">{bronTekst(layer, $t)}</span>{/if}
+      </span>
       <span class="divs" title={$t('notation.layer_divisions_title')}>
         {#each divisions as div}
           <label class="div">
@@ -81,6 +103,17 @@
       {/if}
     </div>
   {/each}
+  {#if (routering.waarschuwingen || []).length}
+    <div class="waarschuwingen">
+      {#each routering.waarschuwingen as w}
+        {#if w.soort === 'overlap'}
+          <span>⚠ {$t('notation.routing_warn_overlap').replaceAll('{a}', w.a).replaceAll('{b}', w.b).replaceAll('{ch}', w.kanaal + 1)}</span>
+        {:else if !w.armed}
+          <span>⚠ {$t('notation.routing_warn_unbound').replaceAll('{name}', w.name)}</span>
+        {/if}
+      {/each}
+    </div>
+  {/if}
 </div>
 <div class="tab-rij stemmen-rij">
   <span class="kopje">{$t('notation.voices')}:</span>
@@ -97,6 +130,10 @@
 </div>
 
 <style>
+  .kanaal { display: inline-flex; align-items: center; gap: 0.3rem; }
+  .kanaal .bron { font-size: 0.75rem; color: var(--text-muted, #aaa); }
+  .waarschuwingen { display: flex; flex-direction: column; gap: 0.2rem; padding: 0.3rem 0.5rem; font-size: 0.8rem; color: #e0a040; }
+
   .tab-rij { display: flex; align-items: center; flex-wrap: wrap; gap: 0.6rem; min-width: 0; }
   .tab-rij label { display: flex; align-items: center; gap: 0.3rem; font-size: 0.8rem; white-space: nowrap; }
   .notation-spacer { flex: 1; }

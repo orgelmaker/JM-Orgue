@@ -13,6 +13,9 @@
   export let caretTekst = '';
   export let debugTekst = '';
   export let extra = '';       // bv. het akkoord na een dubbelklik
+  // 0.9.22: welke balk op welk kanaal vangt (tijdens opnemen/stapinvoer) + waarschuwingen.
+  export let routeringTekst = '';
+  export let routeringWaarschuwing = '';
 </script>
 
 <div class="status" class:counting={armedWaiting}>
@@ -35,8 +38,16 @@
   {/if}
   {#if debugTekst}<span class="debug">{debugTekst}</span>{/if}
 </div>
+{#if routeringTekst || routeringWaarschuwing}
+  <div class="routering" class:waarschuwt={!!routeringWaarschuwing}>
+    {#if routeringTekst}<span><b>{$t('notation.routing_label')}</b> {routeringTekst}</span>{/if}
+    {#if routeringWaarschuwing}<span class="waarschuwing">⚠ {routeringWaarschuwing}</span>{/if}
+  </div>
+{/if}
 
 <style>
+  .routering { display: flex; flex-wrap: wrap; gap: 0.4rem 1rem; padding: 0.2rem 0.6rem; font-size: 0.8rem; color: var(--text-muted, #aaa); border-top: 1px solid var(--border, #333); }
+  .routering .waarschuwing { color: #e0a040; }
   .status {
     display: flex; align-items: center; gap: 0.6rem;
     padding: 0.3rem 0.75rem; min-width: 0;

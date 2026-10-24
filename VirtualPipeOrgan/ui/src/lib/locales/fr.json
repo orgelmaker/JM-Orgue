@@ -1060,7 +1060,20 @@
     "octave_line_down_title": "8vb : joué une octave plus bas qu’écrit (Maj+8)",
     "import_musicxml": "Ouvrir un MusicXML…",
     "musicxml_filter": "Partition MusicXML",
-    "import_warnings": "La partition est ouverte. Tout n’a pas pu être repris :"
+    "import_warnings": "La partition est ouverte. Tout n’a pas pu être repris :",
+    "layer_channel": "Canal",
+    "layer_channel_none": "aucun",
+    "layer_channel_title": "Canal MIDI dirigé directement vers cette portée (prioritaire sur les claviers). Aucun = via les claviers cochés, sinon comme portée active.",
+    "learn_channel": "Apprendre",
+    "learn_channel_waiting": "Jouez une touche…",
+    "learn_channel_title": "Jouez une touche sur le clavier qui doit aller sur cette portée ; le canal est mémorisé",
+    "routing_label": "Enregistrement :",
+    "routing_channel": "can. {ch}",
+    "routing_no_channel": "aucun canal appris",
+    "routing_armed_only": "seulement comme portée active",
+    "routing_nothing": "ne capte rien",
+    "routing_warn_unbound": "La portée « {name} » n’a ni canal ni clavier et n’est pas la portée active : rien n’y arrivera",
+    "routing_warn_overlap": "« {a} » et « {b} » captent tous deux le canal {ch} ; seule « {a} » reçoit les notes"
   },
   "temperaments": {
     "name_prompt": "Nom de ce tempérament :",

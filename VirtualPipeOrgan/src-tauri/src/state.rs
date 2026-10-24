@@ -2678,7 +2678,7 @@ impl AppState {
                         &notation_open_notes, &notation_start_time, &app_handle_notation,
                         &midi_mappings);
                     Self::emit_step_input_event(&msg, &notation_step_input,
-                        &notation_armed_score, &app_handle_notation, &midi_mappings);
+                        &notation_armed_score, &notation_scores, &app_handle_notation, &midi_mappings);
 
                     // Check for preset triggers first
                     let gate_nu_ms = preset_cc_gate.klok_ms();
@@ -2741,7 +2741,7 @@ impl AppState {
                     &notation_open_notes, &notation_start_time, &app_handle_notation,
                     &midi_mappings);
                 Self::emit_step_input_event(&msg, &notation_step_input,
-                    &notation_armed_score, &app_handle_notation, &midi_mappings);
+                    &notation_armed_score, &notation_scores, &app_handle_notation, &midi_mappings);
                 // Forward CC messages to learn-tap channel (non-blocking; drop if full)
                 if matches!(msg, MidiMessage::ControlChange { .. }) {
                     let _ = ble_learn_tx.try_send(msg.clone());
@@ -2929,9 +2929,10 @@ impl AppState {
             });
             let scores = notation_scores.read();
             let Some(sc) = scores.get(&score_id) else { return };
-            let layer = division.as_ref()
-                .and_then(|d| sc.layers.iter().find(|l| l.divisions.iter().any(|x| x == d)))
-                .or_else(|| sc.armed_layer.and_then(|lid| sc.layers.iter().find(|l| l.id == lid)));
+            // 0.9.22: eerst het kanaal van de balk, dan de divisie, dan armed.
+            let layer = chan_note
+                .and_then(|(ch, _)| sc.doellaag_voor(ch, division.as_deref()))
+                .and_then(|lid| sc.layers.iter().find(|l| l.id == lid));
             let Some(layer) = layer else { return };
             let Some(tid) = layer.armed_take.or_else(|| layer.takes.first().map(|t| t.id)) else { return };
             (layer.id, tid)
@@ -3009,6 +3010,7 @@ impl AppState {
         msg: &MidiMessage,
         notation_step_input: &Arc<RwLock<Option<u32>>>,
         notation_armed_score: &Arc<RwLock<Option<u32>>>,
+        notation_scores: &Arc<RwLock<std::collections::HashMap<u32, crate::notation::Score>>>,
         app_handle: &Arc<RwLock<Option<tauri::AppHandle>>>,
         midi_mappings: &Arc<RwLock<Vec<MidiChannelMapping>>>,
     ) {
@@ -3024,14 +3026,18 @@ impl AppState {
             _ => return,
         };
         // Divisie meesturen (0.7.82), zelfde opzoektabel als de live-opname:
-        // de stapinvoer zet een pedaalnoot dan op de pedaalbalk.
+        // de stapinvoer zet een pedaalnoot dan op de pedaalbalk. Sinds 0.9.22
+        // gaat ook de doelbalk mee (kanaal → divisie → armed), zodat de
+        // stapinvoer dezelfde routering volgt als de live-opname.
         let division = {
             let maps = midi_mappings.read();
             maps.iter().find(|m| m.accepts(channel, note)).map(|m| m.division.clone())
         };
+        let layer = notation_scores.read().get(&score_id)
+            .and_then(|sc| sc.doellaag_voor(channel, division.as_deref()));
         if let Some(handle) = app_handle.read().as_ref() {
             let _ = handle.emit(event, serde_json::json!({
-                "score": score_id, "midi": note, "channel": channel, "division": division,
+                "score": score_id, "midi": note, "channel": channel, "division": division, "layer": layer,
             }));
         }
     }

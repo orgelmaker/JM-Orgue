@@ -18,6 +18,18 @@
   export let divisions = [];        // divisienamen van het geladen orgel
   export let hasNotes = false;      // in 'edit': balken op slot
   export let showHand = false;      // klavar-weergave: hand per balk
+  // 0.9.22: inleerknop per balk — async () => kanaal (0-15) of null.
+  export let leerKanaal = null;
+  const KANALEN = Array.from({ length: 16 }, (_, i) => i);
+  let leerBezig = null; // index van de balk die inleert
+  async function leerVoor(i) {
+    if (typeof leerKanaal !== 'function' || leerBezig != null) return;
+    leerBezig = i;
+    try {
+      const ch = await leerKanaal();
+      if (ch != null) { staves[i].channel = Number(ch); staves = staves; }
+    } finally { leerBezig = null; }
+  }
   export let splitOpties = [];      // [[midi, naam]] voor R+L
   export let keyChoices = [];       // [{ v, label }]
   export let gridChoices = [];      // [{ v, label }]
@@ -45,7 +57,7 @@
   $: rasterKeuzes = stuk.unit === 8 ? gridChoices.filter(g => g.v >= 2) : gridChoices;
 
   function nieuweBalk(n) {
-    return { name: tx('notation.staff_n').replace('{n}', n), bass: false, divisions: [], hand: 'auto', split: 60 };
+    return { name: tx('notation.staff_n').replace('{n}', n), bass: false, divisions: [], hand: 'auto', split: 60, channel: null };
   }
   function kiesMaatsoort(v) {
     maatsoort = v;
@@ -156,6 +168,18 @@
               </select>
             {/if}
           {/if}
+          <span class="wizard-kanaal" title={$t('notation.layer_channel_title')}>
+            <select value={st.channel == null ? 'none' : String(st.channel)} disabled={lockStaves}
+              on:change={(e) => { st.channel = e.currentTarget.value === 'none' ? null : Number(e.currentTarget.value); staves = staves; }}>
+              <option value="none">{$t('notation.layer_channel')}: {$t('notation.layer_channel_none')}</option>
+              {#each KANALEN as k}<option value={String(k)}>{$t('notation.layer_channel')} {k + 1}</option>{/each}
+            </select>
+            {#if typeof leerKanaal === 'function'}
+              <button class="btn btn-ghost btn-sm" disabled={lockStaves || leerBezig != null} on:click={() => leerVoor(i)} title={$t('notation.learn_channel_title')}>
+                {leerBezig === i ? $t('notation.learn_channel_waiting') : $t('notation.learn_channel')}
+              </button>
+            {/if}
+          </span>
           <span class="wizard-divs">
             {#each divisions as div}
               <label class="wizard-div">
