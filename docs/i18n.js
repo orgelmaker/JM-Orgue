@@ -41,6 +41,12 @@ const DICT = {
     man_h: "Handleiding",
     man_lead: "Een volledige handleiding met schermafbeeldingen, in zeven talen:",
     man_app: "In de app zelf opent u de handleiding via de knop <b>Handleiding</b> onderaan de bibliotheek, in de taal van de app.",
+    vid_h: "Video-instructies",
+    vid_lead: "Twee korte films laten stap voor stap zien hoe u speelt en tegelijk de noten op het scherm ziet verschijnen. De uitleg staat in de ondertiteling, in de taal van deze pagina.",
+    vid_notes_h: "Noteren in notenschrift",
+    vid_notes_p: "Een stuk aanmaken, elke balk aan een MIDI-kanaal koppelen, live opnemen, stap voor stap invoeren, een noot bewerken en het resultaat exporteren of afdrukken.",
+    vid_klavar_h: "Noteren in klavar",
+    vid_klavar_p: "Klavar lezen en schrijven: opnemen met een meelopende rode lijn, de hand per balk kiezen en een noot naar de andere hand verplaatsen.",
     faq_h: "Veelgestelde vragen",
     faq_q1: "Welke samplesets werken?",
     faq_a1: "JM-Orgue leest Hauptwerk-definities (<code>.Organ_Hauptwerk_xml</code>) en GrandOrgue-definities (<code>.organ</code>) rechtstreeks, plus een eigen map-per-register-formaat voor eigen opnamen. Gesloten varianten zoals <code>.hbw</code>, <code>.pkg</code> en <code>.iwh</code> werken niet; die worden geweigerd met een melding, nooit stil.",
@@ -98,6 +104,12 @@ const DICT = {
     man_h: "User guide",
     man_lead: "A full user guide with screenshots, in seven languages:",
     man_app: "Inside the app, open the guide with the <b>User guide</b> button at the bottom of the library, in the app's language.",
+    vid_h: "Video tutorials",
+    vid_lead: "Two short films show, step by step, how you play and watch the notes appear on screen at the same time. The explanation is in the subtitles, in the language of this page.",
+    vid_notes_h: "Notation on staves",
+    vid_notes_p: "Create a piece, link each staff to a MIDI channel, record live, enter notes step by step, edit a note and export or print the result.",
+    vid_klavar_h: "Notation in klavar",
+    vid_klavar_p: "Read and write klavar: record with a red line that follows along, choose the hand per staff and move a note to the other hand.",
     faq_h: "Frequently asked questions",
     faq_q1: "Which sample sets work?",
     faq_a1: "JM-Orgue reads Hauptwerk definitions (<code>.Organ_Hauptwerk_xml</code>) and GrandOrgue definitions (<code>.organ</code>) directly, plus its own folder-per-stop format for home recordings. Closed variants such as <code>.hbw</code>, <code>.pkg</code> and <code>.iwh</code> don't work; the app rejects them with a message, never silently.",
@@ -155,6 +167,12 @@ const DICT = {
     man_h: "Handbuch",
     man_lead: "Ein vollständiges Handbuch mit Bildschirmfotos, in sieben Sprachen:",
     man_app: "In der App öffnen Sie das Handbuch mit der Schaltfläche <b>Handbuch</b> unten in der Bibliothek, in der Sprache der App.",
+    vid_h: "Videoanleitungen",
+    vid_lead: "Zwei kurze Filme zeigen Schritt für Schritt, wie Sie spielen und die Noten gleichzeitig auf dem Bildschirm erscheinen. Die Erklärung steht in den Untertiteln, in der Sprache dieser Seite.",
+    vid_notes_h: "Notieren in Notenschrift",
+    vid_notes_p: "Ein Stück anlegen, jede Zeile einem MIDI-Kanal zuordnen, live aufnehmen, Schritt für Schritt eingeben, eine Note bearbeiten und das Ergebnis exportieren oder drucken.",
+    vid_klavar_h: "Notieren in Klavar",
+    vid_klavar_p: "Klavar lesen und schreiben: mit mitlaufender roter Linie aufnehmen, die Hand pro Zeile wählen und eine Note in die andere Hand verschieben.",
     faq_h: "Häufige Fragen",
     faq_q1: "Welche Sample-Sets funktionieren?",
     faq_a1: "JM-Orgue liest Hauptwerk-Definitionen (<code>.Organ_Hauptwerk_xml</code>) und GrandOrgue-Definitionen (<code>.organ</code>) direkt, plus ein eigenes Ordner-pro-Register-Format für eigene Aufnahmen. Geschlossene Varianten wie <code>.hbw</code>, <code>.pkg</code> und <code>.iwh</code> werden mit Hinweis abgelehnt, nie still.",
@@ -212,6 +230,12 @@ const DICT = {
     man_h: "Manuel",
     man_lead: "Un manuel complet avec captures d'écran, en sept langues :",
     man_app: "Dans l'application, ouvrez le manuel avec le bouton <b>Manuel</b> en bas de la bibliothèque, dans la langue de l'application.",
+    vid_h: "Tutoriels vidéo",
+    vid_lead: "Deux courts films montrent pas à pas comment vous jouez tout en voyant les notes apparaître à l'écran. L'explication se trouve dans les sous-titres, dans la langue de cette page.",
+    vid_notes_h: "Noter sur portées",
+    vid_notes_p: "Créer une pièce, relier chaque portée à un canal MIDI, enregistrer en direct, saisir pas à pas, modifier une note et exporter ou imprimer le résultat.",
+    vid_klavar_h: "Noter en klavar",
+    vid_klavar_p: "Lire et écrire le klavar : enregistrer avec une ligne rouge qui suit le jeu, choisir la main par portée et déplacer une note vers l'autre main.",
     faq_h: "Questions fréquentes",
     faq_q1: "Quels jeux d'échantillons fonctionnent ?",
     faq_a1: "JM-Orgue lit directement les définitions Hauptwerk (<code>.Organ_Hauptwerk_xml</code>) et GrandOrgue (<code>.organ</code>), plus son propre format dossier-par-jeu. Les formats fermés comme <code>.hbw</code>, <code>.pkg</code> et <code>.iwh</code> sont refusés avec un message, jamais en silence.",
@@ -269,6 +293,12 @@ const DICT = {
     man_h: "Manuale",
     man_lead: "Un manuale completo con schermate, in sette lingue:",
     man_app: "Nell'app, apri il manuale col pulsante <b>Manuale</b> in fondo alla biblioteca, nella lingua dell'app.",
+    vid_h: "Video tutorial",
+    vid_lead: "Due brevi filmati mostrano passo dopo passo come suonare vedendo comparire le note sullo schermo. La spiegazione è nei sottotitoli, nella lingua di questa pagina.",
+    vid_notes_h: "Notazione su pentagramma",
+    vid_notes_p: "Creare un brano, collegare ogni rigo a un canale MIDI, registrare dal vivo, inserire passo dopo passo, modificare una nota ed esportare o stampare il risultato.",
+    vid_klavar_h: "Notazione in klavar",
+    vid_klavar_p: "Leggere e scrivere il klavar: registrare con una linea rossa che segue l'esecuzione, scegliere la mano per rigo e spostare una nota all'altra mano.",
     faq_h: "Domande frequenti",
     faq_q1: "Quali set di campioni funzionano?",
     faq_a1: "JM-Orgue legge direttamente le definizioni Hauptwerk (<code>.Organ_Hauptwerk_xml</code>) e GrandOrgue (<code>.organ</code>), oltre al proprio formato cartella-per-registro. I formati chiusi come <code>.hbw</code>, <code>.pkg</code> e <code>.iwh</code> vengono rifiutati con un messaggio, mai in silenzio.",
@@ -326,6 +356,12 @@ const DICT = {
     man_h: "Manual",
     man_lead: "Un manual completo con capturas, en siete idiomas:",
     man_app: "En la app, abre el manual con el botón <b>Manual</b> al pie de la biblioteca, en el idioma de la app.",
+    vid_h: "Vídeos tutoriales",
+    vid_lead: "Dos vídeos cortos muestran paso a paso cómo tocar viendo aparecer las notas en pantalla. La explicación está en los subtítulos, en el idioma de esta página.",
+    vid_notes_h: "Notación en pentagrama",
+    vid_notes_p: "Crear una pieza, vincular cada pentagrama a un canal MIDI, grabar en directo, introducir paso a paso, editar una nota y exportar o imprimir el resultado.",
+    vid_klavar_h: "Notación en klavar",
+    vid_klavar_p: "Leer y escribir klavar: grabar con una línea roja que avanza contigo, elegir la mano por pentagrama y mover una nota a la otra mano.",
     faq_h: "Preguntas frecuentes",
     faq_q1: "¿Qué sets de muestras funcionan?",
     faq_a1: "JM-Orgue lee directamente las definiciones de Hauptwerk (<code>.Organ_Hauptwerk_xml</code>) y GrandOrgue (<code>.organ</code>), además de su propio formato carpeta-por-registro. Variantes cerradas como <code>.hbw</code>, <code>.pkg</code> y <code>.iwh</code> no funcionan; la app las rechaza con un aviso, nunca en silencio.",
@@ -383,6 +419,12 @@ const DICT = {
     man_h: "Instrukcja",
     man_lead: "Pełna instrukcja ze zrzutami ekranu, w siedmiu językach:",
     man_app: "W aplikacji otwórz instrukcję przyciskiem <b>Instrukcja</b> na dole biblioteki, w języku aplikacji.",
+    vid_h: "Filmy instruktażowe",
+    vid_lead: "Dwa krótkie filmy pokazują krok po kroku, jak grać i jednocześnie widzieć nuty na ekranie. Objaśnienia są w napisach, w języku tej strony.",
+    vid_notes_h: "Zapis nutowy na pięciolinii",
+    vid_notes_p: "Utworzyć utwór, przypisać każdą pięciolinię do kanału MIDI, nagrywać na żywo, wprowadzać krok po kroku, edytować nutę i wyeksportować lub wydrukować wynik.",
+    vid_klavar_h: "Zapis w klavarze",
+    vid_klavar_p: "Czytać i pisać klavar: nagrywać z biegnącą czerwoną linią, wybrać rękę dla każdej pięciolinii i przenieść nutę do drugiej ręki.",
     faq_h: "Często zadawane pytania",
     faq_q1: "Jakie zestawy sampli działają?",
     faq_a1: "JM-Orgue wczytuje bezpośrednio definicje Hauptwerk (<code>.Organ_Hauptwerk_xml</code>) i GrandOrgue (<code>.organ</code>) oraz własny format folder-na-rejestr. Formaty zamknięte, takie jak <code>.hbw</code>, <code>.pkg</code> i <code>.iwh</code>, są odrzucane z komunikatem — nigdy po cichu.",
@@ -413,6 +455,42 @@ const INIT = (() => {
   return DICT[bro] ? bro : 'nl';
 })();
 
+// ---- Video-instructies ----
+// Nederlands krijgt de film met de Nederlandse app, alle andere talen die met de Engelse app.
+// De films hebben geen commentaarstem: de uitleg zit in de ondertitels, in de taal van de pagina.
+const VIDEO_TALEN = [['nl', 'Nederlands'], ['en', 'English'], ['de', 'Deutsch'], ['fr', 'Français'], ['it', 'Italiano'], ['es', 'Español'], ['pl', 'Polski']];
+
+function toonOndertitels(v, l) {
+  Array.from(v.textTracks).forEach((tt) => { tt.mode = tt.language === l ? 'showing' : 'disabled'; });
+}
+
+function zetVideos(l) {
+  const variant = l === 'nl' ? '' : '-en';
+  document.querySelectorAll('video[data-video]').forEach((v) => {
+    const basis = 'video/' + v.getAttribute('data-video') + variant;
+    if (v.dataset.basis !== basis) {
+      const markupKlopt = v.dataset.basis === undefined && variant === '';   // eerste keer, Nederlands: staat al zo in de pagina
+      v.dataset.basis = basis;
+      if (!markupKlopt) {
+        v.querySelectorAll('track').forEach((t) => t.remove());
+        v.poster = basis + '.jpg';
+        v.src = basis + '.mp4';
+        VIDEO_TALEN.forEach(([code, naam]) => {
+          const t = document.createElement('track');
+          t.kind = 'subtitles'; t.srclang = code; t.label = naam; t.src = basis + '.' + code + '.vtt';
+          v.appendChild(t);
+        });
+        v.load();
+      }
+    }
+    toonOndertitels(v, l);
+    if (!v.dataset.metaGekoppeld) {
+      v.dataset.metaGekoppeld = '1';
+      v.addEventListener('loadedmetadata', () => toonOndertitels(v, document.documentElement.lang));
+    }
+  });
+}
+
 function zetTaal(l) {
   const dict = DICT[l] || DICT.nl;
   document.documentElement.lang = l;
@@ -424,6 +502,7 @@ function zetTaal(l) {
   document.querySelectorAll('.langbar button').forEach((b) => {
     b.classList.toggle('active', b.getAttribute('data-lang') === l);
   });
+  zetVideos(l);
   try { localStorage.setItem('jm-orgue-site-lang', l); } catch (e) {}
 }
 

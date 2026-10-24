@@ -1,0 +1,69 @@
+WEBVTT
+
+1
+00:00:00.650 --> 00:00:03.150
+Notación en pentagrama
+
+2
+00:00:03.250 --> 00:00:07.783
+Abre la ventana de notación con el botón Notación.
+
+3
+00:00:07.883 --> 00:00:14.483
+Ponle un título a la pieza y elige compás, tonalidad y tempo.
+
+4
+00:00:14.583 --> 00:00:20.250
+La rejilla redondea tu interpretación: con corcheas la partitura queda tranquila.
+
+5
+00:00:20.350 --> 00:00:26.117
+En la segunda página están los pentagramas: uno por mano y uno para el pedal.
+
+6
+00:00:26.217 --> 00:00:34.250
+Asigna cada pentagrama a un canal MIDI: haz clic en Aprender y toca una tecla del teclado de esa mano.
+
+7
+00:00:34.350 --> 00:00:39.450
+Haz lo mismo con la mano izquierda y el pedal.
+
+8
+00:00:39.550 --> 00:00:44.683
+Ahora cada pentagrama tiene su propio canal. Haz clic en Crear la pieza.
+
+9
+00:00:44.783 --> 00:00:52.683
+Paso a paso: activa Paso a paso y toca las notas una a una; el cursor avanza solo.
+
+10
+00:00:52.783 --> 00:00:58.617
+Un acorde se toca simplemente pulsando todas sus teclas a la vez.
+
+11
+00:00:58.717 --> 00:01:06.017
+Deshacer (Ctrl+Z) revierte la entrada paso a paso.
+
+12
+00:01:06.117 --> 00:01:12.650
+O graba en directo: haz clic en Grabar y toca. Mano derecha, mano izquierda y pedal aparecen a la vez en sus pentagramas.
+
+13
+00:01:12.750 --> 00:01:18.883
+La línea bajo los pentagramas muestra qué pentagrama recoge qué canal.
+
+14
+00:01:18.983 --> 00:01:25.650
+Haz clic de nuevo en Grabar para detener: la pieza ya está, bien alineada con la rejilla.
+
+15
+00:01:25.750 --> 00:01:33.517
+Haz clic en una nota para elegirla y corrígela, por ejemplo un semitono más agudo y de nuevo más grave.
+
+16
+00:01:33.617 --> 00:01:39.650
+Guarda la pieza con Archivo, o expórtala como MusicXML, MIDI o PDF.
+
+17
+00:01:39.750 --> 00:01:43.950
+¿Notación klavar? Mira el vídeo Notación en klavar.

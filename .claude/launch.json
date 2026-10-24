@@ -7,6 +7,12 @@
       "runtimeArgs": ["node_modules/vite/bin/vite.js", "--port", "1420"],
       "port": 1420,
       "cwd": "VirtualPipeOrgan/ui"
+    },
+    {
+      "name": "docs-site",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "8088", "--directory", "docs"],
+      "port": 8088
     }
   ]
 }

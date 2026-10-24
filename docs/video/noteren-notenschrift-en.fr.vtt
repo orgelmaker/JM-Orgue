@@ -1,0 +1,69 @@
+WEBVTT
+
+1
+00:00:00.650 --> 00:00:03.150
+Noter sur portées
+
+2
+00:00:03.250 --> 00:00:07.783
+Ouvrez la fenêtre de notation avec le bouton Noter.
+
+3
+00:00:07.883 --> 00:00:14.183
+Donnez un titre à la pièce et choisissez la mesure, la tonalité et le tempo.
+
+4
+00:00:14.283 --> 00:00:19.950
+La grille arrondit votre jeu : les croches donnent une partition sobre.
+
+5
+00:00:20.050 --> 00:00:25.817
+La deuxième page contient les portées : une par main et une pour le pédalier.
+
+6
+00:00:25.917 --> 00:00:33.950
+Associez chaque portée à un canal MIDI : cliquez sur Apprendre et jouez une touche du clavier de cette main.
+
+7
+00:00:34.050 --> 00:00:39.150
+Faites de même pour la main gauche et le pédalier.
+
+8
+00:00:39.250 --> 00:00:44.383
+Chaque portée a maintenant son propre canal. Cliquez sur Créer la pièce.
+
+9
+00:00:44.483 --> 00:00:52.383
+Saisie pas à pas : activez la saisie pas à pas et jouez les notes une à une ; le curseur avance tout seul.
+
+10
+00:00:52.483 --> 00:00:58.283
+Pour un accord, appuyez simplement sur toutes les touches en même temps.
+
+11
+00:00:58.383 --> 00:01:05.617
+Annuler (Ctrl+Z) reprend la saisie pas à pas.
+
+12
+00:01:05.717 --> 00:01:12.250
+Ou enregistrez en direct : cliquez sur Enregistrer et jouez. Main droite, main gauche et pédalier arrivent en même temps sur leurs portées.
+
+13
+00:01:12.350 --> 00:01:18.517
+La ligne sous les portées indique quelle portée capte quel canal.
+
+14
+00:01:18.617 --> 00:01:25.283
+Cliquez à nouveau sur Enregistrer pour arrêter : la pièce est là, bien alignée sur la grille.
+
+15
+00:01:25.383 --> 00:01:33.150
+Cliquez sur une note pour la sélectionner et corrigez-la, par exemple un demi-ton plus haut puis de nouveau plus bas.
+
+16
+00:01:33.250 --> 00:01:39.283
+Enregistrez la pièce via Fichier, ou exportez-la en MusicXML, MIDI ou PDF.
+
+17
+00:01:39.383 --> 00:01:43.583
+La notation klavar ? Voir la vidéo Noter en klavar.
