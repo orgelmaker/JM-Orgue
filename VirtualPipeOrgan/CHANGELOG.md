@@ -4,6 +4,22 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.9.25] - 2026-10-24
+
+### Sfeer & Layout: duidelijkere kleurinstellingen
+- Alle kleuren voor registerknoppen staan nu bij elkaar in één groep
+  (buitenvlak, registerplaatje, registernaam en voetmaat, voor aan en uit), met
+  een korte uitleg per groep. De benamingen zijn concreter gemaakt en in alle
+  zeven talen doorgevoerd, bijvoorbeeld "Registernaam: aan/uit" en "Voetmaat:
+  aan/uit", en "Namen op klavierbalken", "JM-Orgue-logo", "Zwelkastindicator".
+- De lettergewichten heten nu Normaal, Medium, Halfvet en Vet (de waarden 400,
+  500, 600 en 700 blijven gelijk).
+- Twee kleurkiezers zonder zichtbaar effect zijn verborgen; bestaande
+  opgeslagen sferen blijven volledig werken.
+- Opgelost: na het verwijderen van een actieve eigen sfeer werd ten onrechte
+  "Basis" als actief getoond terwijl kleuren, lettertype en achtergrond bleven
+  staan. De status is nu "aangepast", het uiterlijk blijft behouden.
+
 ## [0.9.24] - 2026-10-24
 
 ### Toonhoogte: tremulant-opnamen volgen de toonhoogte uit de definitie

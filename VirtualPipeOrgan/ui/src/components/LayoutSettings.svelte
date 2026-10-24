@@ -16,8 +16,6 @@
         { key: 'bg-panel', labelKey: 'colors.bg_panel' },
         { key: 'bg-elevated', labelKey: 'colors.bg_elevated' },
         { key: 'bg-darkest', labelKey: 'colors.bg_darkest' },
-        { key: 'bg-control', labelKey: 'colors.bg_control' },
-        { key: 'bg-hover', labelKey: 'colors.bg_hover' },
       ],
     },
     {
@@ -26,29 +24,32 @@
         { key: 'text', labelKey: 'colors.text' },
         { key: 'text-secondary', labelKey: 'colors.text_secondary' },
         { key: 'text-muted', labelKey: 'colors.text_muted' },
-        { key: 'text-on-stop', labelKey: 'colors.text_on_stop' },
-        { key: 'text-on-stop-secondary', labelKey: 'colors.text_on_stop_secondary' },
-        { key: 'stop-active-text', labelKey: 'colors.stop_active_text' },
-        { key: 'stop-active-text-secondary', labelKey: 'colors.stop_active_text_secondary' },
         { key: 'text-on-division', labelKey: 'colors.text_on_division' },
         { key: 'text-on-primary', labelKey: 'colors.text_on_primary' },
       ],
     },
     {
       titleKey: 'settings.appearance_color_groups.registers',
+      hintKey: 'settings.appearance_register_colors_hint',
       tokens: [
+        { key: 'bg-control', labelKey: 'colors.bg_control' },
+        { key: 'bg-hover', labelKey: 'colors.bg_hover' },
         { key: 'stop-porcelain', labelKey: 'colors.stop_porcelain' },
         { key: 'stop-porcelain-border', labelKey: 'colors.stop_porcelain_border' },
+        { key: 'text-on-stop', labelKey: 'colors.text_on_stop' },
+        { key: 'text-on-stop-secondary', labelKey: 'colors.text_on_stop_secondary' },
         { key: 'stop-active', labelKey: 'colors.stop_active' },
         { key: 'stop-active-border', labelKey: 'colors.stop_active_border' },
+        { key: 'stop-active-text', labelKey: 'colors.stop_active_text' },
+        { key: 'stop-active-text-secondary', labelKey: 'colors.stop_active_text_secondary' },
       ],
     },
     {
       titleKey: 'settings.appearance_color_groups.accent',
+      hintKey: 'settings.appearance_accent_colors_hint',
       tokens: [
         { key: 'primary', labelKey: 'colors.primary' },
         { key: 'primary-hover', labelKey: 'colors.primary_hover' },
-        { key: 'primary-dark', labelKey: 'colors.primary_dark' },
         { key: 'gold-border', labelKey: 'colors.gold_border' },
       ],
     },
@@ -74,7 +75,6 @@
     {
       titleKey: 'settings.appearance_color_groups.misc',
       tokens: [
-        { key: 'meter-bar-bg', labelKey: 'colors.meter_bar_bg' },
         { key: 'scrollbar-thumb', labelKey: 'colors.scrollbar_thumb' },
         { key: 'menu-bg', labelKey: 'colors.menu_bg' },
         { key: 'menu-text', labelKey: 'colors.menu_text' },
@@ -213,7 +213,7 @@
   function deleteUserPreset(key) {
     delete userPresets[key];
     userPresets = userPresets;
-    if (activePresetKey === key) activePresetKey = 'basis';
+    if (activePresetKey === key) activePresetKey = 'aangepast';
     saveUserPresets();
     saveSettings();
   }
@@ -463,6 +463,9 @@
   {#each TOKEN_GROUPS as group}
     <div class="settings-section">
       <div class="section-title">{$t(group.titleKey)}</div>
+      {#if group.hintKey}
+        <p class="tint-hint">{$t(group.hintKey)}</p>
+      {/if}
       {#each group.tokens as token}
         <div class="color-row">
           <div class="color-info">
