@@ -3418,8 +3418,13 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
                                     (stop.id, pipe_num | crate::audio::TREM_FLAG),
                                     trem.path.clone(),
                                     crate::retune::pipe_pitch_input(
+                                        // De tremulantlaag is een eigen opname met
+                                        // een eigen toonhoogte: geef háár ODF-
+                                        // samplepitch door (0.9.24). Is die er niet,
+                                        // dan valt de lus hieronder terug op de
+                                        // smpl-chunk van het trem-bestand zelf.
                                         &extra, key_midi, owner.harmonic_number, hierarchie_pc,
-                                        zwevend, None, total_cents,
+                                        zwevend, trem.sample_pitch_cents, total_cents,
                                     ),
                                     extra.original_pitch_cents,
                                 ));

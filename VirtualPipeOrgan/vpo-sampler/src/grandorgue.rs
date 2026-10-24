@@ -700,6 +700,13 @@ pub struct AttackDef {
     pub cue_point: Option<u32>,
     /// `{attack}LoadRelease` (Y/N): release-segment uit dit bestand nemen.
     pub load_release: Option<bool>,
+    /// Absolute samplepitch van DEZE opname in cents (6900 = a' 440 Hz), uit de
+    /// ODF (Hauptwerk `Pitch_ExactSamplePitch`/`Pitch_NormalMIDINoteNumber` van
+    /// het tremulant-/vervangsample). De tremulantlaag is een eigen opname met
+    /// een eigen toonhoogte; zonder dit viel het hertemperen terug op de smpl-
+    /// chunk van de WAV, die van de ODF-opgave kan afwijken (0.9.24). None = de
+    /// ODF zegt niets → de smpl-chunk beslist (o.a. alle GrandOrgue-attacks).
+    pub sample_pitch_cents: Option<f32>,
 }
 
 /// Pipe definition - either a direct sample path or a reference
@@ -1374,6 +1381,9 @@ impl OdfParser {
                 load_release: section
                     .get(&format!("{}LoadRelease", akey))
                     .map(|v| v.trim().eq_ignore_ascii_case("y")),
+                // GrandOrgue geeft geen toonhoogte per losse attack op: de
+                // smpl-chunk van de WAV beslist (zoals voorheen).
+                sample_pitch_cents: None,
             };
             if is_trem == 1 {
                 if tremulant_attack.is_none() {
@@ -1393,6 +1403,7 @@ impl OdfParser {
                     loop_end,
                     cue_point,
                     load_release,
+                    sample_pitch_cents: None,
                 });
             } else {
                 warn!(

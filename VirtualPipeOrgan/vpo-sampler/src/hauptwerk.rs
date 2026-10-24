@@ -368,10 +368,8 @@ fn build_definition(
         // laag horen er ook bij: met tremulant aan klinkt bij loslaten de
         // tremulant-release (vroeger altijd de droge).
         if let Some((_, trem_layer)) = lyrs.iter().find(|(num, _)| *num > main_num) {
-            let trem_path = sample_of_layer
-                .get(trem_layer)
-                .and_then(|sid| resolve_sample(*sid));
-            if let Some(tp) = trem_path {
+            if let Some(&trem_sid) = sample_of_layer.get(trem_layer) {
+              if let Some(tp) = resolve_sample(trem_sid) {
                 if let Some(rels) = releases_by_layer.get(trem_layer) {
                     for (sid, max_ms) in rels {
                         if let Some(rpath) = resolve_sample(*sid) {
@@ -392,7 +390,16 @@ fn build_definition(
                         .tremulant_releases
                         .sort_by_key(|r| r.max_key_press_time_ms.map(i64::from).unwrap_or(i64::MAX));
                 }
-                extra.tremulant_attack = Some(AttackDef { path: tp, ..Default::default() });
+                extra.tremulant_attack = Some(AttackDef {
+                    path: tp,
+                    // De tremulantlaag is een EIGEN opname: gebruik háár eigen
+                    // ODF-samplepitch (Pitch_ExactSamplePitch), niet de WAV-
+                    // koptekst en niet die van de droge laag (0.9.24). Ontbreekt
+                    // de ODF-opgave, dan blijft het None en beslist de smpl-chunk.
+                    sample_pitch_cents: sample_pitch_cents.get(&trem_sid).copied(),
+                    ..Default::default()
+                });
+              }
             }
         }
         Some((path, extra))
@@ -2290,6 +2297,33 @@ mod tests {
         assert_eq!(em.harmonic_number, None);
     }
 
+    /// 0.9.24: de tremulant-opname draagt haar EIGEN ODF-samplepitch, niet die
+    /// van de droge laag en niet de WAV-koptekst. Zonder dit viel het
+    /// hertemperen van de tremulantvariant terug op de smpl-chunk van de WAV,
+    /// die van de ODF-opgave kan afwijken (Nitra: ODF 709 Hz, WAV 712 Hz).
+    #[test]
+    fn tremulant_attack_draagt_eigen_odf_samplepitch() {
+        // Geef de tremulant-opname van Bourdon (Sample 2, Bourdon/AT0) een eigen
+        // Pitch_ExactSamplePitch (70 Hz) die afwijkt van de droge (Sample 1 = 66 Hz).
+        let xml = mini_xml().replace(
+            "<Sample><SampleID>2</SampleID><InstallationPackageID>1</InstallationPackageID><SampleFilename>Bourdon/AT0/036-c.wav</SampleFilename></Sample>",
+            "<Sample><SampleID>2</SampleID><InstallationPackageID>1</InstallationPackageID><SampleFilename>Bourdon/AT0/036-c.wav</SampleFilename><Pitch_SpecificationMethodCode>4</Pitch_SpecificationMethodCode><Pitch_ExactSamplePitch>70</Pitch_ExactSamplePitch></Sample>",
+        );
+        assert!(xml.contains("<Pitch_ExactSamplePitch>70</Pitch_ExactSamplePitch>"), "testdata niet vervangen");
+        let mut pkg = HashMap::new();
+        pkg.insert(1u32, PathBuf::from("/pkg"));
+        let def = build_definition(&xml, PathBuf::from("/root"), &pkg).expect("build");
+        let bourdon = def.stops.iter().find(|s| s.name == "Bourdon 8").unwrap();
+        let PipeDef::Sample { extra, .. } = &bourdon.pipes[0] else { panic!("sample") };
+        let trem = extra.tremulant_attack.as_ref().expect("trem-attack ontbreekt");
+        let dry = extra.sample_pitch_cents.expect("droge samplepitch");
+        let tp = trem.sample_pitch_cents.expect("trem-samplepitch moet nu gevuld zijn");
+        // 66 Hz → 3615.64 ct (droog), 70 Hz → 3717.26 ct (trem): ~102 ct apart.
+        assert!((dry - hz_to_cents(66.0)).abs() < 0.05, "droog {dry}");
+        assert!((tp - hz_to_cents(70.0)).abs() < 0.05, "trem {tp}");
+        assert!((tp - dry).abs() > 1.0, "trem moet van droog verschillen: {tp} vs {dry}");
+    }
+
     /// Piotr Grabowski's sets (Nitra, Nowa Ruda, en vele andere) zetten de
     /// originele pijptoon in Pitch_OriginalOrgan_PitchHz met
     /// SpecificationMethodCode = 1 (niet 2). Tot 0.7.93 negeerden we die Hz-
@@ -2610,6 +2644,27 @@ mod tests {
                 }
             }
         }
+        // 0.9.24: tremulant-opnamen die hun EIGEN ODF-samplepitch dragen (niet
+        // meer de smpl-chunk van de WAV of de toon van de droge laag).
+        let mut trem_eigen = 0usize;
+        let mut trem_voorbeelden = 0usize;
+        for s in &def.stops {
+            for p in &s.pipes {
+                if let PipeDef::Sample { extra, .. } = p {
+                    if let Some(t) = &extra.tremulant_attack {
+                        if let Some(tc) = t.sample_pitch_cents {
+                            trem_eigen += 1;
+                            if trem_voorbeelden < 8 {
+                                trem_voorbeelden += 1;
+                                println!("    TREM-pitch: {} droog={:?} trem={:.2} ct  {:?}",
+                                    s.name, extra.sample_pitch_cents, tc, t.path.file_name());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        println!("Tremulant-opnamen met eigen ODF-samplepitch: {}", trem_eigen);
         println!("Samples on disk: ok={} missing={}", sample_ok, sample_missing);
         assert!(sample_missing == 0, "all resolved samples should exist on disk");
         assert!(!def.stops.is_empty());

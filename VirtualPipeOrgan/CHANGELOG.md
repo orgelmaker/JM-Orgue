@@ -4,6 +4,18 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.9.24] - 2026-10-24
+
+### Toonhoogte: tremulant-opnamen volgen de toonhoogte uit de definitie
+- De tremulantvariant van een pijp is een eigen opname. Bij het hertemperen
+  gebruikte die tot nu toe de toonhoogte uit de WAV-koptekst in plaats van de
+  waarde die de orgeldefinitie opgeeft. Voor opnamen waar die twee verschillen,
+  vooral geleende of vervangende tremulant-samples, klonk de noot met tremulant
+  aan daardoor vals ten opzichte van dezelfde noot zonder tremulant, in enkele
+  gevallen tot zo'n zeventig cent. De tremulantvariant gebruikt nu haar eigen
+  opgegeven toonhoogte, net als de droge opname. GrandOrgue-sets (zonder een
+  toonhoogte per opname) blijven ongewijzigd.
+
 ## [0.9.23] - 2026-10-24
 
 ### Toonhoogte: sets zonder originele orgeltoonhoogte spelen altijd op de doeltoon
