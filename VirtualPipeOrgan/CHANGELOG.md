@@ -4,6 +4,15 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.9.27] - 2026-10-26
+
+### Setzer: combinatie kopiëren
+- Je kunt nu een opgeslagen combinatie naar een andere kopiëren met de nieuwe
+  kopieerknop in de setzerbalk. Roep de combinatie op, druk op de kopieerknop,
+  kies met de blokknoppen (+10/−10) en een cijfer het doel, en de combinatie
+  wordt daarheen gekopieerd. Dit werkt ook over een blokgrens heen, bijvoorbeeld
+  van 9 naar 10. De live registratie blijft ongemoeid.
+
 ## [0.9.26] - 2026-10-24
 
 ### MIDI: invoerapparaten onderscheiden, ook op hetzelfde kanaal

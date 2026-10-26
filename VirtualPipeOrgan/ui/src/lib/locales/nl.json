@@ -437,6 +437,7 @@
     "set": "Registratie opslaan (SET)",
     "general_cancel": "General Cancel — alle registers uit",
     "memory": "Geheugen {n}",
+    "copy": "Combinatie kopiëren naar…",
     "prev_preset": "Vorige preset",
     "next_preset": "Volgende preset",
     "prev_bank": "Vorige bank",

@@ -437,6 +437,7 @@
     "set": "Guardar la registración (SET)",
     "general_cancel": "Anulador general — quita todos los registros",
     "memory": "Memoria {n}",
+    "copy": "Copiar la combinación a…",
     "prev_preset": "Combinación anterior",
     "next_preset": "Combinación siguiente",
     "prev_bank": "Banco anterior",

@@ -437,6 +437,7 @@
     "set": "Registrierung speichern (SET)",
     "general_cancel": "General Cancel — alle Register aus",
     "memory": "Speicher {n}",
+    "copy": "Kombination kopieren nach…",
     "prev_preset": "Vorheriges Preset",
     "next_preset": "Nächstes Preset",
     "prev_bank": "Vorherige Bank",

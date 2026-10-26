@@ -6392,6 +6392,7 @@
           on:volumeChange={(e) => onSetzerVolume(e.detail)}
           on:externalAction={(e) => handleExternalAction(e.detail.actionCode)}
           on:learnCrescendo={() => learnPedalFlow('crescendo')}
+          on:presetsChanged={() => dispatch('refreshMidiMappings')}
         />
       </div>
 

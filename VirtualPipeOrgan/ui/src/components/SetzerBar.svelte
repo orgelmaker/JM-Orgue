@@ -22,6 +22,13 @@
   let memoryLevel = 1; // 1-8 memory levels
   let presets = {}; // { [presetNum]: [stopId1, stopId2, ...] }
 
+  // Kopieer-modus (0.9.27): kopieer de huidige combinatie naar een andere, ook
+  // over een blokgrens heen (bv. 9 → 10). De gegevens worden rechtstreeks
+  // gekopieerd (geen oproep), zodat de live registratie ongemoeid blijft.
+  let copyMode = false;
+  let copySource = -1;
+  let copyBank = 0;
+
   // Export functions for App.svelte to read/write presets
   export function getPresets() {
     return presets;
@@ -284,6 +291,10 @@
 
   // Digit button pressed (0-9)
   function digitPressed(d) {
+    if (copyMode) {
+      copyToTarget(copyBank * 10 + d);
+      return;
+    }
     const presetNum = currentBank * 10 + d;
     if (setMode) {
       savePreset(presetNum);
@@ -294,6 +305,12 @@
 
   // Step through presets by delta
   function stepPreset(delta) {
+    if (copyMode) {
+      // In kopieer-modus kiezen +10/-10 het DOELblok, zonder iets op te roepen.
+      if (delta >= 10) copyBank = Math.min(99, copyBank + 1);
+      else if (delta <= -10) copyBank = Math.max(0, copyBank - 1);
+      return;
+    }
     const base = currentPreset >= 0 ? currentPreset : 0;
     const next = Math.max(0, Math.min(999, base + delta));
     loadPreset(next);
@@ -301,6 +318,7 @@
 
   // General Cancel - all stops off, all couplers off, reset
   async function generalCancel() {
+    if (copyMode) { copyMode = false; return; }
     try {
       await invoke('set_drawn_stops', { stopIds: [] });
       await invoke('set_active_couplers', { couplerIds: [] });
@@ -313,6 +331,39 @@
   // Toggle SET mode
   function toggleSetMode() {
     setMode = !setMode;
+    if (setMode) copyMode = false; // SET en KOP sluiten elkaar uit
+  }
+
+  function presetHasData(num) {
+    const p = presets[num];
+    if (!p) return false;
+    if (Array.isArray(p)) return p.length > 0;
+    return (p.stops && p.stops.length > 0) || (p.couplers && p.couplers.length > 0);
+  }
+
+  // KOP: kopieer-modus aan/uit. De bron is de nu geselecteerde combinatie.
+  function toggleCopyMode() {
+    if (copyMode) { copyMode = false; return; }
+    if (currentPreset < 0 || !presetHasData(currentPreset)) return; // niets te kopiëren
+    copySource = currentPreset;
+    copyBank = Math.floor(currentPreset / 10);
+    copyMode = true;
+    setMode = false;
+  }
+
+  // Kopieer de brongegevens rechtstreeks naar het doel (geen oproep, dus de live
+  // registratie blijft staan) en bewaar. Werkt ook over een blokgrens (9 → 10).
+  function copyToTarget(target) {
+    const src = presets[copySource];
+    if (src && target !== copySource) {
+      const stops = Array.isArray(src) ? src.slice() : (src.stops || []).slice();
+      const couplers = Array.isArray(src) ? [] : (src.couplers || []).slice();
+      presets[target] = { stops, couplers };
+      presets = presets; // reactiviteit
+      savePresetsToStorage();
+      dispatch('presetsChanged'); // → autosave naar de bibliotheek
+    }
+    copyMode = false;
   }
 
   // Reactive: which digit (0-9) is active in the current bank (-1 = geen)
@@ -474,6 +525,21 @@
     aria-label="{$t('setzer.set')}{setMode ? ' (' + ($t('setzer.aria_mode_active') || 'actief') + ')' : ''}"
   >SET</button>
 
+  <!-- KOP: kopieer de huidige combinatie naar een andere (ook over een blokgrens) -->
+  <button
+    class="setzer-btn kop-btn"
+    class:active={copyMode}
+    on:click={toggleCopyMode}
+    title={$t('setzer.copy')}
+    aria-pressed={copyMode}
+    aria-label={$t('setzer.copy')}
+  >
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+      <rect x="9" y="9" width="11" height="11" rx="2"/>
+      <path d="M5 15V5a2 2 0 0 1 2-2h10"/>
+    </svg>
+  </button>
+
   <!-- Digit buttons 0-9 -->
   <div class="setzer-digits">
     {#each [0,1,2,3,4,5,6,7,8,9] as d}
@@ -482,6 +548,7 @@
         class:active={d === activeDigit && !setMode}
         class:has-data={dataFlags[d]}
         class:set-mode={setMode}
+        class:copy-mode={copyMode}
         class:has-midi={midiBindings[d] > 0}
         on:click={() => digitPressed(d)}
         use:midiLearn={{ onTrigger: () => showContextMenuAt(d) }}
@@ -530,7 +597,7 @@
 
   <!-- Digital display -->
   <div class="setzer-display" title={$t('setzer.preset_number')}>
-    {currentPreset >= 0 ? String(currentPreset).padStart(3, '0') : '---'}
+    {copyMode ? '>' + String(copyBank * 10).padStart(3, '0') : (currentPreset >= 0 ? String(currentPreset).padStart(3, '0') : '---')}
   </div>
 
   <!-- General Cancel -->
@@ -708,6 +775,16 @@
   .digit-btn.set-mode {
     border-color: var(--primary);
     animation: pulse-gold 1.2s infinite;
+  }
+
+  /* Kopieer-modus (0.9.27): groene rand i.p.v. het goud van SET, zodat de
+     twee standen visueel te onderscheiden zijn. */
+  .digit-btn.copy-mode {
+    border-color: var(--led-green, #4ade80);
+  }
+  .kop-btn.active {
+    border-color: var(--led-green, #4ade80);
+    color: var(--led-green, #4ade80);
   }
 
   /* MIDI indicator */

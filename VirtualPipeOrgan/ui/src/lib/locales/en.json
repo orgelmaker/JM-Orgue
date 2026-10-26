@@ -437,6 +437,7 @@
     "set": "Save registration (SET)",
     "general_cancel": "General Cancel — all stops off",
     "memory": "Memory {n}",
+    "copy": "Copy combination to…",
     "prev_preset": "Previous preset",
     "next_preset": "Next preset",
     "prev_bank": "Previous bank",

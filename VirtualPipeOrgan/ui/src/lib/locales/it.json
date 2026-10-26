@@ -437,6 +437,7 @@
     "set": "Salva la registrazione (SET)",
     "general_cancel": "Annullatore generale — tutti i registri disinseriti",
     "memory": "Memoria {n}",
+    "copy": "Copia la combinazione in…",
     "prev_preset": "Combinazione precedente",
     "next_preset": "Combinazione successiva",
     "prev_bank": "Banco precedente",

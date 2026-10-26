@@ -437,6 +437,7 @@
     "set": "Enregistrer registration (SET)",
     "general_cancel": "Annulation Générale — tous les jeux éteints",
     "memory": "Mémoire {n}",
+    "copy": "Copier la combinaison vers…",
     "prev_preset": "Préréglage précédent",
     "next_preset": "Préréglage suivant",
     "prev_bank": "Banque précédente",
