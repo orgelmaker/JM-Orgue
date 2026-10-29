@@ -1192,6 +1192,7 @@
     "key_timeout_first": "Nessun tasto ricevuto (time-out di 20 s).",
     "key_timeout_second": "Nessun secondo tasto ricevuto (time-out di 20 s).",
     "key_channel_mismatch": "Il secondo tasto è arrivato sul canale MIDI {second} invece che su {first} — premi entrambi i tasti sullo stesso manuale.",
+    "key_range_too_small": "Il tasto più basso e quello più alto sono troppo vicini. Premi prima il tasto più basso della tastiera, poi il più alto, e riprova.",
     "key_result": "da {low} a {high} · canale MIDI {channel}",
     "hint_press_first": "Premi prima il",
     "hint_lowest_key": "tasto più grave",

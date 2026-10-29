@@ -1192,6 +1192,7 @@
     "key_timeout_first": "No key received (20 s time-out).",
     "key_timeout_second": "No second key received (20 s time-out).",
     "key_channel_mismatch": "The second key came in on MIDI channel {second} instead of {first} — press both keys on the same manual.",
+    "key_range_too_small": "The lowest and highest key are too close together. Press the lowest key of the keyboard first, then the highest, and try again.",
     "key_result": "{low} to {high} · MIDI channel {channel}",
     "hint_press_first": "First press the",
     "hint_lowest_key": "lowest key",

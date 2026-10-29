@@ -1192,6 +1192,7 @@
     "key_timeout_first": "Nie odebrano klawisza (limit 20 s).",
     "key_timeout_second": "Nie odebrano drugiego klawisza (limit 20 s).",
     "key_channel_mismatch": "Drugi klawisz przyszedł na kanale MIDI {second} zamiast {first} — naciśnij oba klawisze na tym samym manuale.",
+    "key_range_too_small": "Najniższy i najwyższy klawisz są zbyt blisko siebie. Naciśnij najpierw najniższy klawisz klawiatury, potem najwyższy, i spróbuj ponownie.",
     "key_result": "{low} do {high} · kanał MIDI {channel}",
     "hint_press_first": "Naciśnij najpierw",
     "hint_lowest_key": "najniższy klawisz",

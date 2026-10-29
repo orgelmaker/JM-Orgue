@@ -1192,6 +1192,7 @@
     "key_timeout_first": "Keine Taste empfangen (Zeitüberschreitung 20 s).",
     "key_timeout_second": "Keine zweite Taste empfangen (Zeitüberschreitung 20 s).",
     "key_channel_mismatch": "Die zweite Taste kam auf MIDI-Kanal {second} statt {first} — drücken Sie beide Tasten auf demselben Manual.",
+    "key_range_too_small": "Die tiefste und höchste Taste liegen zu dicht beieinander. Drücken Sie zuerst die tiefste Taste der Klaviatur, dann die höchste, und versuchen Sie es erneut.",
     "key_result": "{low} bis {high} · MIDI-Kanal {channel}",
     "hint_press_first": "Drücken Sie zuerst die",
     "hint_lowest_key": "tiefste Taste",

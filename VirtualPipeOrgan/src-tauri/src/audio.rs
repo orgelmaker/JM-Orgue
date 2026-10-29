@@ -1916,6 +1916,19 @@ fn scaled_release_params(note_ms: f32, midi_note: u8, release_secs: f32) -> (f32
 /// gespawnde staart — spawn 2 doodde spawn 1, spawn 3 doodde spawn 2 — en klonk
 /// een slotakkoord na een staccato-passage vrijwel zonder nagalm.
 const MAX_RELEASE_VOICES: usize = 160;
+/// Bovengrens van het staartbudget, LOS van de polyfonie-kap (0.9.28). Tot
+/// 0.9.27 groeide het budget mee met de kap (`cap/3`): wie de kap op het
+/// maximum (32768) zette, kreeg een staartbudget van ~10900 en dus feitelijk
+/// geen begrenzing meer — release-staarten van een natte set stapelden
+/// ongeremd op tot >2000 stemmen, de mix verzoop en het kraakte, terwijl de
+/// gebruiker dacht "zonder vol orgel" te spelen (het waren uitstervende
+/// staarten, geen registers). Het staartbudget hoort bij wat muzikaal
+/// hoorbaar is, niet bij hoeveel noten je tegelijk mág aanslaan: played-
+/// stemmen blijven volledig vrij tot de kap, maar uitstervende staarten
+/// blijven altijd begrensd. 512 verwerkt een volledige vol-werk-loslating van
+/// een grote set ruim en houdt de runaway tegen. Onder deze grens is het
+/// gedrag identiek aan voorheen (standaardkap 1024 → budget 341).
+const MAX_RELEASE_VOICE_BUDGET: usize = 512;
 fn budget_release_voices(voices: &mut Vec<PlayingVoice>, sample_rate: u32, cap: usize) {
     let count = voices.iter().filter(|v| v.one_shot).count();
     budget_release_voices_met(voices, sample_rate, cap, count);
@@ -1925,11 +1938,15 @@ fn budget_release_voices(voices: &mut Vec<PlayingVoice>, sample_rate: u32, cap: 
 /// meegegeven: de callback telt het één keer per ronde (0.7.74) in plaats van
 /// een O(stemmen)-scan bij elke stemstart.
 fn budget_release_voices_met(voices: &mut Vec<PlayingVoice>, sample_rate: u32, cap: usize, count: usize) {
-    // Staartbudget groeit mee met de kap (minimaal het oude 160); daarnaast
+    // Staartbudget schaalt met de kap (minimaal het oude 160), maar is sinds
+    // 0.9.28 afgetopt op een vaste bovengrens die LOSSTAAT van de kap: een
+    // zeer hoge kap (tot 32768) laat je veel noten tegelijk aanslaan zonder
+    // dat uitstervende release-staarten ongeremd mogen opstapelen. Daarnaast
     // een zachte limiet à la GrandOrgue: boven 80% van de kap maakt bij elke
     // nieuwe stem eerst onhoorbaar een staart plaats, zodat klinkende pijpen
-    // pas als allerlaatste gestolen worden.
-    let budget = (cap / 3).max(MAX_RELEASE_VOICES);
+    // pas als allerlaatste gestolen worden. Die klep blijft wél aan de kap
+    // gekoppeld — hij hoort vlak onder de harde kap te werken, bij elke kap.
+    let budget = (cap / 3).max(MAX_RELEASE_VOICES).min(MAX_RELEASE_VOICE_BUDGET);
     let soft_limit = cap * 4 / 5;
     if count < budget && voices.len() < soft_limit {
         return;
@@ -2589,6 +2606,30 @@ mod release_tests {
             .filter(|(_, v)| v.releasing).map(|(i, _)| i).collect();
         assert_eq!(slachtoffers.len(), 1, "verwacht precies één slachtoffer, kreeg {:?}", slachtoffers);
         assert_eq!(slachtoffers[0], budget - 1, "niet de OUDSTE staart gekozen");
+    }
+
+    /// Het staartbudget staat LOS van de kap (0.9.28): ook met de kap op het
+    /// maximum (32768) blijven release-staarten begrensd op
+    /// MAX_RELEASE_VOICE_BUDGET. Vóór de fix was het budget `cap/3` (~10900),
+    /// dus bleef er geen begrenzing over en stapelden natte release-staarten
+    /// ongeremd op tot gekraak. Played-stemmen (de kap zelf) blijven wél vrij.
+    #[test]
+    fn staartbudget_blijft_begrensd_bij_de_maximale_kap() {
+        let cap = MAX_LIVE_VOICES; // 32768
+        // Precies op de vaste bovengrens: onder de oude cap/3-formule (10922)
+        // zou dit niets stelen; onder de afgetopte grens moet de oudste wijken.
+        assert_eq!((cap / 3).max(MAX_RELEASE_VOICES).min(MAX_RELEASE_VOICE_BUDGET),
+                   MAX_RELEASE_VOICE_BUDGET, "budget niet afgetopt op de vaste grens");
+        let mut voices: Vec<PlayingVoice> =
+            (0..MAX_RELEASE_VOICE_BUDGET).map(|i| staart(48_000 + i as u64)).collect();
+
+        budget_release_voices(&mut voices, 48_000, cap);
+
+        let slachtoffers: Vec<usize> = voices.iter().enumerate()
+            .filter(|(_, v)| v.releasing).map(|(i, _)| i).collect();
+        assert_eq!(slachtoffers.len(), 1,
+                   "verwacht precies één onhoorbaar slachtoffer bij een volle staart-grens, kreeg {:?}", slachtoffers);
+        assert_eq!(slachtoffers[0], MAX_RELEASE_VOICE_BUDGET - 1, "niet de OUDSTE staart gekozen");
     }
 
     /// Ook een release die nog aan zijn uitgestelde staart-decay moet beginnen

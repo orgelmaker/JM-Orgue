@@ -4,6 +4,23 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.9.28] - 2026-10-29
+
+### Minder kraken bij een hoge polyfonie-instelling
+- Zet je de polyfonie-kap heel hoog, dan kon het geluid gaan kraken ook zonder
+  dat er veel registers getrokken waren. De oorzaak waren uitstervende release-
+  staarten (de nagalm per losgelaten toets) die zich op een natte set ongeremd
+  opstapelden: hun begrenzing liep mee met de kap en verdween dus bij een hoge
+  instelling. De begrenzing van die staarten staat nu los van de polyfonie-kap.
+  Je kunt dus veel noten tegelijk blijven aanslaan, terwijl de nagalm-staarten
+  altijd netjes begrensd blijven en het geluid helder blijft.
+
+### Klavier inleren: waarschuwing bij een te smal bereik
+- Druk je bij het inleren van een klavierbereik twee toetsen in die te dicht bij
+  elkaar liggen, dan waarschuwt de app nu in plaats van een bereik van slechts
+  een paar toetsen in te stellen (waardoor er maar enkele toetsen klinken). Druk
+  eerst de laagste toets van het klavier en daarna de hoogste.
+
 ## [0.9.27] - 2026-10-26
 
 ### Setzer: combinatie kopiëren

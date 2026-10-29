@@ -1192,6 +1192,7 @@
     "key_timeout_first": "No se ha recibido ninguna tecla (tiempo de espera de 20 s).",
     "key_timeout_second": "No se ha recibido la segunda tecla (tiempo de espera de 20 s).",
     "key_channel_mismatch": "La segunda tecla ha llegado por el canal MIDI {second} en lugar de {first} — pulsa las dos teclas en el mismo teclado.",
+    "key_range_too_small": "La tecla más grave y la más aguda están demasiado cerca. Pulsa primero la tecla más grave del teclado, luego la más aguda, e inténtalo de nuevo.",
     "key_result": "de {low} a {high} · canal MIDI {channel}",
     "hint_press_first": "Pulsa primero la",
     "hint_lowest_key": "tecla más grave",

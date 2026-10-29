@@ -1192,6 +1192,7 @@
     "key_timeout_first": "Aucune touche reçue (délai de 20 s dépassé).",
     "key_timeout_second": "Aucune seconde touche reçue (délai de 20 s dépassé).",
     "key_channel_mismatch": "La seconde touche est arrivée sur le canal MIDI {second} au lieu de {first} — appuyez les deux touches sur le même clavier.",
+    "key_range_too_small": "La touche la plus basse et la plus haute sont trop proches. Appuyez d'abord sur la touche la plus basse du clavier, puis sur la plus haute, et réessayez.",
     "key_result": "{low} à {high} · canal MIDI {channel}",
     "hint_press_first": "Appuyez d'abord sur la",
     "hint_lowest_key": "touche la plus basse",

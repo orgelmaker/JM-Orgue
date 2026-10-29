@@ -1192,6 +1192,7 @@
     "key_timeout_first": "Geen toets ontvangen (time-out van 20 s).",
     "key_timeout_second": "Geen tweede toets ontvangen (time-out van 20 s).",
     "key_channel_mismatch": "De tweede toets kwam op MIDI-kanaal {second} i.p.v. {first} — druk beide toetsen op hetzelfde klavier.",
+    "key_range_too_small": "De laagste en hoogste toets liggen te dicht bij elkaar. Druk eerst de laagste toets van het klavier, daarna de hoogste, en probeer het opnieuw.",
     "key_result": "{low} t/m {high} · MIDI-kanaal {channel}",
     "hint_press_first": "Druk eerst de",
     "hint_lowest_key": "laagste toets",

@@ -4360,6 +4360,10 @@
   // Stapsgewijs klavier-inleren met echte terugkoppeling (popup):
   // stap 1 laagste toets → groen zodra herkend → stap 2 hoogste toets → klaar.
   let kbLearnModal = null; // { division, step: 1|2|'klaar'|'fout', first, msg }
+  // Minimaal aantal halve tonen tussen de laagste en hoogste toets (0.9.28).
+  // Vangt de valkuil af waarbij twee toetsen vlak bij elkaar als volledig
+  // klavierbereik worden ingeleerd, waardoor maar een paar toetsen klinken.
+  const MIN_KEY_RANGE = 12;
   const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
   function noteName(n) { return NOTE_NAMES[n % 12] + (Math.floor(n / 12) - 1); }
 
@@ -4389,6 +4393,12 @@
       if (second[0] !== kbLearnModal.first.channel) {
         kbLearnModal = { ...kbLearnModal, step: 'fout',
           msg: tx('learn.key_channel_mismatch').replace('{second}', String(second[0] + 1)).replace('{first}', String(kbLearnModal.first.channel + 1)) };
+        return;
+      }
+      // Guard (0.9.28): een te smal bereik betekent bijna altijd dat niet de
+      // uiterste toetsen zijn ingedrukt; anders klinken maar een paar toetsen.
+      if (Math.abs(second[1] - kbLearnModal.first.note) < MIN_KEY_RANGE) {
+        kbLearnModal = { ...kbLearnModal, step: 'fout', msg: tx('learn.key_range_too_small') };
         return;
       }
       const res = await invoke('apply_learned_keyboard_range', {
