@@ -885,6 +885,30 @@ impl GecomprimeerdeOdf {
             ],
         );
 
+        // ── Keyboard: a = ID, de lange naam ("1. manual [lowest]"), de
+        //    afkorting ("1.man"), en de verwijzing naar de divisie die dit
+        //    klavier normaal speelt. De namen dragen de manuaalnummering; de
+        //    lijstvolgorde van de divisies klopt daar niet altijd mee (0.9.29).
+        //    Zonder dit schema kwamen de keyboardvelden bij een gecomprimeerde
+        //    set helemaal niet door (de ShortName-afkortingen evenmin).
+        let kb = lijst("Keyboard");
+        let kb_naam = kies_tekst(kb, &["a"], &["b", "c"]);
+        let mut kb_uit: Vec<&str> = vec!["a"];
+        if let Some(l) = &kb_naam {
+            kb_uit.push(l.as_str());
+        }
+        let kb_kort = kies_tekst(kb, &kb_uit, &["c", "b"]);
+        let kb_div = kies_verwijzing(kb, &div_ids, &["a"], &["d", "x", "e", "f"]);
+        zet(
+            "Keyboard",
+            vec![
+                (Some("a".into()), "Sys_ObjectID"),
+                (kb_naam, "Name"),
+                (kb_kort, "ShortName"),
+                (kb_div, "Hint_PrimaryAssociatedDivisionID"),
+            ],
+        );
+
         // ── Switch: a = ID, naam, en de twee Y/N-vlaggen die we voor
         //    bijgeluiden/speelgoed nodig hebben.
         //
@@ -1505,6 +1529,35 @@ mod tests {
         assert_eq!(veld(&smp, 0, "SampleID"), "790436");
         assert_eq!(veld(&smp, 0, "SampleFilename"), "BorstRe/Re_regal904/036.wav");
         assert_eq!(veld(&smp, 0, "InstallationPackageID"), "899");
+    }
+
+    /// Het Keyboard-schema (0.9.29) pakt bij een gecomprimeerde set de naam,
+    /// de afkorting en de geassocieerde divisie uit. Eerder kwamen die er niet
+    /// door (geen schema), waardoor de manuaalvolgorde en de klavier-
+    /// afkortingen op compacte sets niet werkten. Formaat als de Stralsund-demo.
+    #[test]
+    fn keyboard_schema_pakt_naam_en_divisie_uit() {
+        let mut xml = String::new();
+        xml.push_str(r#"<?xml version="1.0" encoding="UTF-8"?>"#);
+        xml.push_str(r#"<Hauptwerk FileFormat="Organ" FileFormatVersion="4.20014">"#);
+        xml.push_str("<ObjectList ObjectType=\"_General\"><_General>");
+        xml.push_str("<Identification_Name>Test</Identification_Name>");
+        xml.push_str("<Control_FileIsCompacted_AlwaysSetThisToNIfEditingManually>Y</Control_FileIsCompacted_AlwaysSetThisToNIfEditingManually>");
+        xml.push_str("</_General></ObjectList>");
+        xml.push_str(r#"<ObjectList ObjectType="Division"><o><a>2</a><b>GO</b></o><o><a>3</a><b>Positif</b></o></ObjectList>"#);
+        xml.push_str(r#"<ObjectList ObjectType="Keyboard">"#);
+        xml.push_str(r#"<o><a>2</a><d>2</d><x>2</x><g>N</g><b>1. manual [lowest]</b><c>1.man</c></o>"#);
+        xml.push_str(r#"<o><a>3</a><d>3</d><x>3</x><g>N</g><b>2. manual</b><c>2.man</c></o>"#);
+        xml.push_str("</ObjectList>");
+
+        let odf = GecomprimeerdeOdf::detecteer(&xml).expect("gecomprimeerd");
+        let kbd = odf.objecten(&xml, "Keyboard");
+        assert_eq!(veld(&kbd, 0, "Sys_ObjectID"), "2");
+        assert_eq!(veld(&kbd, 0, "Name"), "1. manual [lowest]");
+        assert_eq!(veld(&kbd, 0, "ShortName"), "1.man");
+        assert_eq!(veld(&kbd, 0, "Hint_PrimaryAssociatedDivisionID"), "2");
+        assert_eq!(veld(&kbd, 1, "Name"), "2. manual");
+        assert_eq!(veld(&kbd, 1, "Hint_PrimaryAssociatedDivisionID"), "3");
     }
 
     /// Een veld dat ontbreekt heeft zijn standaardwaarde, en die is voor de

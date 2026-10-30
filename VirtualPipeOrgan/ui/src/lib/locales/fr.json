@@ -1330,6 +1330,13 @@
   "sorting": {
     "by_pitch": "Hauteur (pieds)",
     "by_family": "Famille",
+    "original": "Origine",
+    "original_title": "Ordre d'origine du fichier d'orgue",
+    "group_title": "Groupe de couleur de ce jeu",
+    "group_auto": "Automatique",
+    "group_foundation": "Fond",
+    "group_mutation": "Mutation",
+    "group_reed": "Anche",
     "move_up": "Monter",
     "move_down": "Descendre"
   },

@@ -1330,6 +1330,13 @@
   "sorting": {
     "by_pitch": "Stopaż",
     "by_family": "Rodzina",
+    "original": "Oryginalna",
+    "original_title": "Oryginalna kolejność z pliku organów",
+    "group_title": "Grupa kolorów tego głosu",
+    "group_auto": "Automatycznie",
+    "group_foundation": "Pryncypały",
+    "group_mutation": "Alikwoty",
+    "group_reed": "Języczkowy",
     "move_up": "W górę",
     "move_down": "W dół"
   },

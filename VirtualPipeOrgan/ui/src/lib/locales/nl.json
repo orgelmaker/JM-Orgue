@@ -1330,6 +1330,13 @@
   "sorting": {
     "by_pitch": "Voetmaat",
     "by_family": "Familie",
+    "original": "Origineel",
+    "original_title": "Oorspronkelijke volgorde uit het orgelbestand",
+    "group_title": "Kleurgroep van dit register",
+    "group_auto": "Automatisch",
+    "group_foundation": "Grondstem",
+    "group_mutation": "Vulstem",
+    "group_reed": "Tongwerk",
     "move_up": "Omhoog",
     "move_down": "Omlaag"
   },

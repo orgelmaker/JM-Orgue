@@ -1330,6 +1330,13 @@
   "sorting": {
     "by_pitch": "Pitch",
     "by_family": "Family",
+    "original": "Original",
+    "original_title": "Original order from the organ file",
+    "group_title": "Colour group of this stop",
+    "group_auto": "Automatic",
+    "group_foundation": "Foundation",
+    "group_mutation": "Mutation",
+    "group_reed": "Reed",
     "move_up": "Move up",
     "move_down": "Move down"
   },

@@ -2045,7 +2045,10 @@ input[type="range"]::-webkit-slider-thumb:hover {
 
 .coupler-line {
   font-family: var(--stop-font-family);
-  font-size: 0.68rem;
+  /* Koppels volgen de registergrootte (0.9.29): minstens zo groot als de
+     registertekst en schaalt mee met Sfeer & Layout (was vast 0.68rem,
+     op een aanraakscherm te klein). */
+  font-size: var(--stop-font-size);
   font-weight: var(--stop-font-weight);
   text-align: center;
   line-height: 1.15;
@@ -2846,6 +2849,17 @@ input[type="range"]::-webkit-slider-thumb:hover {
   min-width: 25px;
   text-align: right;
 }
+/* Kleurgroep-override per register (0.9.29): compacte keuzelijst in de rij. */
+.sort-group-select {
+  font-size: 0.7rem;
+  padding: 1px 2px;
+  max-width: 7.5rem;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 1px solid var(--border, rgba(128,128,128,0.4));
+  border-radius: 4px;
+  flex-shrink: 0;
+}
 
 /* Crescendo bar */
 .crescendo-bar {
@@ -3435,7 +3449,7 @@ input[type="range"]::-webkit-slider-thumb:hover {
   gap: 0.3rem;
 }
 .coupler-bar-title {
-  font-size: 0.62rem;
+  font-size: calc(var(--stop-font-size) - 0.06rem);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--text-muted);
@@ -3445,7 +3459,8 @@ input[type="range"]::-webkit-slider-thumb:hover {
 .coupler-bar-btn {
   font-family: var(--stop-font-family);
   font-weight: var(--stop-font-weight);
-  font-size: 0.7rem;
+  /* Zelfde grootte als de registers (0.9.29), leesbaar op een aanraakscherm. */
+  font-size: var(--stop-font-size);
   line-height: 1.15;
   padding: 0.3rem 0.55rem;
   min-width: 4.2rem;

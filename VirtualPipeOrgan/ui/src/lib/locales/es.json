@@ -1330,6 +1330,13 @@
   "sorting": {
     "by_pitch": "Pies",
     "by_family": "Familia",
+    "original": "Original",
+    "original_title": "Orden original del archivo de órgano",
+    "group_title": "Grupo de color de este registro",
+    "group_auto": "Automático",
+    "group_foundation": "Fundamento",
+    "group_mutation": "Mutación",
+    "group_reed": "Lengüeta",
     "move_up": "Subir",
     "move_down": "Bajar"
   },

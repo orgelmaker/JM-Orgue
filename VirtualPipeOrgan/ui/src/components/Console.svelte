@@ -5036,6 +5036,35 @@
     tick().then(publishRemoteLayout);
   }
 
+  // Kleurgroep-override per register (0.9.29): de registertint (grond/vul/tong)
+  // komt uit de naam-heuristiek in de backend, die bij een enkele naam niet
+  // klopt — bijvoorbeeld een Violoncello die op dít orgel een tongwerk is, of
+  // een afwijkende Cornetto. Hiermee corrigeert de gebruiker de tint per
+  // register. Puur visueel: de klank en de windberekening veranderen niet.
+  // Per orgel bewaard, net als de registervolgorde.
+  let stopGroupOverride = {}; // { stopId: 'grond' | 'vul' | 'tong' }
+
+  function stopGroupKey() {
+    return `jm-orgue-stop-group-${(organInfo && organInfo.id) || 'default'}`;
+  }
+  function loadStopGroupOverride() {
+    if (!organInfo) { stopGroupOverride = {}; return; }
+    try {
+      const saved = localStorage.getItem(stopGroupKey());
+      stopGroupOverride = saved ? JSON.parse(saved) : {};
+    } catch (e) { stopGroupOverride = {}; }
+  }
+  function saveStopGroupOverride() {
+    if (!organInfo) return;
+    try { localStorage.setItem(stopGroupKey(), JSON.stringify(stopGroupOverride)); } catch (e) {}
+  }
+  function setStopGroup(stopId, groep) {
+    if (!groep || groep === 'auto') delete stopGroupOverride[stopId];
+    else stopGroupOverride[stopId] = groep;
+    stopGroupOverride = stopGroupOverride; // reactiviteit
+    saveStopGroupOverride();
+  }
+
   function sortStops(stops, divName) {
     const order = stopOrder[divName];
     if (!order || order.length === 0) return stops;
@@ -5245,7 +5274,7 @@
     reorderStop(d.div, d.fromIdx, d.overIdx);
   }
 
-  $: if (organInfo) loadStopOrder();
+  $: if (organInfo) { loadStopOrder(); loadStopGroupOverride(); }
 
   // Apply stop order to displayOrgan.
   // `stopOrder` is passed as an argument so Svelte tracks it as a dependency
@@ -6307,7 +6336,7 @@
                 {#each division.stops as stop, stopIdx}
                   {@const name = cleanStopName(stop)}
                   <button
-                    class="stop-knob groep-{stop.groep || 'overig'}"
+                    class="stop-knob groep-{stopGroupOverride[stop.id] || stop.groep || 'overig'}"
                     style={knopHoogteStijl}
                     class:engaged={stop.drawn}
                     class:has-midi={stopMidiBindings[stop.midi_action_code] > 0}
@@ -7235,7 +7264,7 @@
                       <div class="sort-presets">
                         <button class="btn btn-ghost btn-xs" on:click={() => sortByPitch(division.name, (organInfo || demoOrgan).divisions.find(d => d.name === division.name)?.stops || [])}>{$t('sorting.by_pitch')}</button>
                         <button class="btn btn-ghost btn-xs" on:click={() => sortByFamily(division.name, (organInfo || demoOrgan).divisions.find(d => d.name === division.name)?.stops || [])}>{$t('sorting.by_family')}</button>
-                        <button class="btn btn-ghost btn-xs" on:click={() => resetOrder(division.name)}>{$t('actions.reset')}</button>
+                        <button class="btn btn-ghost btn-xs" title={$t('sorting.original_title')} on:click={() => resetOrder(division.name)}>{$t('sorting.original')}</button>
                       </div>
                     </div>
                     <div class="sort-list">
@@ -7249,9 +7278,17 @@
                           on:pointerdown={(e) => sortPointerDown(e, division.name, idx)}
                         >
                           <span class="sort-handle">&#x2630;</span>
-                          <span class="sort-color familie-{stop.familie || 'principaal'} groep-{stop.groep || 'grond'}"></span>
+                          <span class="sort-color familie-{stop.familie || 'principaal'} groep-{stopGroupOverride[stop.id] || stop.groep || 'grond'}"></span>
                           <span class="sort-name">{stop.name}</span>
                           <span class="sort-pitch">{stop.regel || ''}</span>
+                          <select class="sort-group-select" title={$t('sorting.group_title')}
+                            on:pointerdown|stopPropagation
+                            on:change|stopPropagation={(e) => setStopGroup(stop.id, e.target.value)}>
+                            <option value="auto" selected={!stopGroupOverride[stop.id]}>{$t('sorting.group_auto')}</option>
+                            <option value="grond" selected={stopGroupOverride[stop.id] === 'grond'}>{$t('sorting.group_foundation')}</option>
+                            <option value="vul" selected={stopGroupOverride[stop.id] === 'vul'}>{$t('sorting.group_mutation')}</option>
+                            <option value="tong" selected={stopGroupOverride[stop.id] === 'tong'}>{$t('sorting.group_reed')}</option>
+                          </select>
                           <button class="btn btn-ghost btn-xs" title={$t('sorting.move_up')} disabled={idx === 0}
                             on:click|stopPropagation={() => moveStop(division.name, idx, -1)}>▲</button>
                           <button class="btn btn-ghost btn-xs" title={$t('sorting.move_down')} disabled={idx === division.stops.length - 1}

@@ -81,6 +81,115 @@ fn ensure_readable_xml(bytes: Vec<u8>) -> Result<String, OdfError> {
     Ok(text)
 }
 
+/// Het eerste gehele getal in een tekst, voor het manuaalnummer uit een
+/// keyboardnaam als "1. manual [lowest]" → 1, "2. manual" → 2.
+fn eerste_getal(s: &str) -> Option<u32> {
+    let mut cijfers = String::new();
+    for c in s.chars() {
+        if c.is_ascii_digit() {
+            cijfers.push(c);
+        } else if !cijfers.is_empty() {
+            break;
+        }
+    }
+    cijfers.parse().ok()
+}
+
+/// Leidt per divisie het manuaalnummer af uit de KEYBOARDS in plaats van uit de
+/// lijstvolgorde van de divisies (0.9.29). Sommige sets — met name compacte
+/// Sonus-Paradisi-demo's — zetten de divisies in een andere volgorde dan de
+/// fysieke manualen, terwijl de keyboards ("1. manual [lowest]", "2. manual",
+/// …) de juiste nummering wél dragen. Dan toonde JM-Orgue de manualen in de
+/// verkeerde volgorde (Recit I, Positif II, GO III i.p.v. andersom).
+///
+/// Geeft alleen `Some(division_id → manuaalnummer)` terug wanneer élke niet-
+/// pedaaldivisie een eigen, uniek manuaalnummer uit de keyboards krijgt; anders
+/// `None`, zodat de aanroeper terugvalt op de oude, volgorde-gebaseerde
+/// nummering (geen regressie op sets waar dat al klopte).
+///
+/// Koppeling keyboard → divisie: eerst `Hint_PrimaryAssociatedDivisionID`, dan
+/// gelijke ID's (keyboard-ID == divisie-ID, de Hauptwerk-conventie). Het
+/// manuaalnummer per keyboard komt uit de naam ("n. manual") wanneer álle
+/// niet-pedaalklavieren een eigen nummer dragen; anders uit de ID-volgorde.
+fn manual_numbers_from_keyboards(
+    keyboards: &[FieldMap],
+    divisions: &[FieldMap],
+) -> Option<HashMap<u32, u32>> {
+    let is_pedaal = |naam: &str| {
+        let l = naam.to_lowercase();
+        l.contains("pedal") || l.contains("pédale") || l.contains("pedale") || l.contains("ped")
+    };
+
+    // Niet-pedaaldivisies (de manualen die een nummer moeten krijgen).
+    let mut non_pedal_divs: Vec<u32> = Vec::new();
+    for d in divisions {
+        let Some(id) = d.get_u32("DivisionID") else { continue };
+        let naam = clean_division_name(d.get("Name").map(|s| s.as_str()).unwrap_or(""));
+        if !is_pedaal(&naam) {
+            non_pedal_divs.push(id);
+        }
+    }
+    if non_pedal_divs.is_empty() {
+        return None;
+    }
+
+    // Keyboards (zonder het pedaalklavier) met hun geassocieerde divisie en het
+    // nummer uit hun naam.
+    struct Kbd {
+        id: u32,
+        div: Option<u32>,
+        idx: Option<u32>,
+    }
+    let mut manual_kbds: Vec<Kbd> = Vec::new();
+    for k in keyboards {
+        let Some(id) = k.get_u32("Sys_ObjectID") else { continue };
+        let naam = k.get("Name").map(|s| s.as_str()).unwrap_or("");
+        if is_pedaal(naam) {
+            continue;
+        }
+        manual_kbds.push(Kbd {
+            id,
+            div: k.get_u32("Hint_PrimaryAssociatedDivisionID"),
+            idx: eerste_getal(naam),
+        });
+    }
+    if manual_kbds.is_empty() {
+        return None;
+    }
+
+    // Manuaalnummer per keyboard: uit de naam wanneer álle klavieren een eigen,
+    // uniek nummer hebben; anders oplopend op ID.
+    let alle_idx = manual_kbds.iter().all(|k| k.idx.is_some());
+    let unieke_idx = {
+        let s: std::collections::HashSet<u32> = manual_kbds.iter().filter_map(|k| k.idx).collect();
+        s.len() == manual_kbds.len()
+    };
+    let kbd_manual: HashMap<u32, u32> = if alle_idx && unieke_idx {
+        manual_kbds.iter().map(|k| (k.id, k.idx.unwrap())).collect()
+    } else {
+        let mut op_id: Vec<&Kbd> = manual_kbds.iter().collect();
+        op_id.sort_by_key(|k| k.id);
+        op_id.iter().enumerate().map(|(i, k)| (k.id, i as u32 + 1)).collect()
+    };
+
+    // Divisie → manuaalnummer, via de keyboard die deze divisie speelt.
+    let mut div_to_manual: HashMap<u32, u32> = HashMap::new();
+    for &div in &non_pedal_divs {
+        let kbd = manual_kbds
+            .iter()
+            .find(|k| k.div == Some(div))
+            .or_else(|| manual_kbds.iter().find(|k| k.id == div))?;
+        let nummer = *kbd_manual.get(&kbd.id)?;
+        div_to_manual.insert(div, nummer);
+    }
+    // Elke divisie een eigen manuaalnummer? Anders onbetrouwbaar → terugval.
+    let unieke: std::collections::HashSet<u32> = div_to_manual.values().copied().collect();
+    if unieke.len() != div_to_manual.len() {
+        return None;
+    }
+    Some(div_to_manual)
+}
+
 /// Vertaal de (leesbare) Hauptwerk-XML naar een [`OrganDefinition`]. Apart van
 /// [`load_hauptwerk`] zodat tests dit met een mini-XML-string en een nep-
 /// packagemap kunnen aanroepen zonder bestanden op schijf.
@@ -679,10 +788,18 @@ fn build_definition(
         }));
     }
 
-    // --- Build manuals (one per division), in division order; pedal => number 0 ---
+    // --- Build manuals (one per division); pedal => number 0 ---
+    // Het manuaalnummer komt bij voorkeur uit de KEYBOARDS (0.9.29): de
+    // lijstvolgorde van de divisies klopt niet altijd met de fysieke manualen
+    // (compacte SP-demo's zetten ze door elkaar). Lukt dat niet volledig, dan
+    // de oude, volgorde-gebaseerde nummering (geen regressie).
     let mut manuals: Vec<ManualDef> = Vec::new();
     let mut manual_counter = 1u32;
     let mut div_to_manual_number: HashMap<u32, u32> = HashMap::new();
+    let manual_uit_keyboards = manual_numbers_from_keyboards(&lees("Keyboard"), &divisions);
+    if let Some(m) = &manual_uit_keyboards {
+        info!("Hauptwerk: manuaalvolgorde uit de keyboards afgeleid ({} manualen)", m.len());
+    }
     for d in &divisions {
         let division_id = match d.get_u32("DivisionID") {
             Some(v) => v,
@@ -693,7 +810,15 @@ fn build_definition(
             let l = div_name.to_lowercase();
             l.contains("pedal") || l.contains("pédale") || l.contains("pedale") || l.contains("ped")
         };
-        let number = if is_pedal { 0 } else { let n = manual_counter; manual_counter += 1; n };
+        let number = if is_pedal {
+            0
+        } else if let Some(&n) = manual_uit_keyboards.as_ref().and_then(|m| m.get(&division_id)) {
+            n
+        } else {
+            let n = manual_counter;
+            manual_counter += 1;
+            n
+        };
 
         // Stops of this division.
         let stop_ids: Vec<u32> = stop_entries.iter()
@@ -2488,6 +2613,70 @@ mod tests {
         assert_eq!(k.per_switch.get(&701).map(|s| s.as_str()), Some("Manual II"));
         assert_eq!(k.per_nummer.get(&3).map(|s| s.as_str()), Some("Manual III"));
         assert_eq!(k.enige, None);
+    }
+
+    /// Manuaalnummers volgen de keyboards, niet de lijstvolgorde van de divisies
+    /// (0.9.29). Reproductie van de Stralsund-demo: divisies staan door elkaar,
+    /// de keyboards dragen "n. manual", en keyboard-ID == divisie-ID.
+    #[test]
+    fn manuaalnummers_volgen_de_keyboards_niet_de_divisielijst() {
+        let fm = |kv: &[(&str, &str)]| -> FieldMap {
+            kv.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+        };
+        let divisions = vec![
+            fm(&[("DivisionID", "4"), ("Name", "Recit")]),
+            fm(&[("DivisionID", "1"), ("Name", "Pedale")]),
+            fm(&[("DivisionID", "3"), ("Name", "Positif")]),
+            fm(&[("DivisionID", "2"), ("Name", "GO")]),
+        ];
+        let keyboards = vec![
+            fm(&[("Sys_ObjectID", "4"), ("Name", "3. manual"), ("Hint_PrimaryAssociatedDivisionID", "4")]),
+            fm(&[("Sys_ObjectID", "2"), ("Name", "1. manual [lowest]"), ("Hint_PrimaryAssociatedDivisionID", "2")]),
+            fm(&[("Sys_ObjectID", "1"), ("Name", "Pedal"), ("Hint_PrimaryAssociatedDivisionID", "1")]),
+            fm(&[("Sys_ObjectID", "3"), ("Name", "2. manual"), ("Hint_PrimaryAssociatedDivisionID", "3")]),
+        ];
+        let m = manual_numbers_from_keyboards(&keyboards, &divisions).expect("afleiding uit keyboards");
+        assert_eq!(m.get(&2), Some(&1), "divisie 2 (1. manual) hoort manuaal I");
+        assert_eq!(m.get(&3), Some(&2), "divisie 3 (2. manual) hoort manuaal II");
+        assert_eq!(m.get(&4), Some(&3), "divisie 4 (3. manual) hoort manuaal III");
+        assert!(!m.contains_key(&1), "pedaal krijgt geen manuaalnummer");
+    }
+
+    /// Zonder bruikbare keyboards (geen namen, geen koppeling) valt de
+    /// nummering terug op de oude volgorde-gebaseerde telling.
+    #[test]
+    fn manuaalnummering_valt_terug_zonder_keyboards() {
+        let fm = |kv: &[(&str, &str)]| -> FieldMap {
+            kv.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+        };
+        let divisions = vec![
+            fm(&[("DivisionID", "2"), ("Name", "GO")]),
+            fm(&[("DivisionID", "3"), ("Name", "Positif")]),
+        ];
+        assert!(manual_numbers_from_keyboards(&[], &divisions).is_none(), "zonder keyboards geen afleiding");
+    }
+
+    /// Koppeling via gelijke ID's wanneer Hint_PrimaryAssociatedDivisionID
+    /// ontbreekt, en nummering uit de ID-volgorde als de namen geen nummer dragen.
+    #[test]
+    fn manuaalnummers_via_gelijke_ids_en_idvolgorde() {
+        let fm = |kv: &[(&str, &str)]| -> FieldMap {
+            kv.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+        };
+        let divisions = vec![
+            fm(&[("DivisionID", "2"), ("Name", "Hauptwerk")]),
+            fm(&[("DivisionID", "3"), ("Name", "Schwellwerk")]),
+            fm(&[("DivisionID", "1"), ("Name", "Pedal")]),
+        ];
+        let keyboards = vec![
+            fm(&[("Sys_ObjectID", "3"), ("Name", "Great")]),
+            fm(&[("Sys_ObjectID", "2"), ("Name", "Swell")]),
+            fm(&[("Sys_ObjectID", "1"), ("Name", "Pedal")]),
+        ];
+        let m = manual_numbers_from_keyboards(&keyboards, &divisions).expect("afleiding via ID's");
+        assert_eq!(m.get(&2), Some(&1), "laagste klavier-ID = manuaal I");
+        assert_eq!(m.get(&3), Some(&2));
+        assert!(!m.contains_key(&1));
     }
 
     /// Tremmed rang in een schakelnetwerk-set (0.8.4): dezelfde toets en

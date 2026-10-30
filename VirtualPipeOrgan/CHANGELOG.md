@@ -4,6 +4,35 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.9.29] - 2026-10-30
+
+### Manuaalvolgorde volgt nu de klavieren
+- Bij sommige orgeldefinities stonden de manualen in de verkeerde volgorde op
+  het scherm (bijvoorbeeld I en II verwisseld), omdat JM-Orgue de volgorde uit
+  de divisielijst van het bestand nam. Dat klopt niet altijd met de fysieke
+  manualen. De volgorde en nummering komen nu uit de klavieren zelf ("1e
+  manuaal", "2e manuaal", …), zodat de werken op het juiste manuaal en in de
+  juiste volgorde staan. Lukt dat niet, dan blijft de oude volgorde behouden.
+
+### Koppels beter leesbaar
+- De koppelknoppen en de koppelbalk onderaan gebruiken nu dezelfde
+  lettergrootte als de registers (en schalen mee met Sfeer & Layout). Op een
+  aanraakscherm waren ze voorheen te klein.
+
+### Registerkleuren: betere herkenning en handmatig bij te stellen
+- Een cornet/cornetto op een aliquoot-voetmaat (zoals 2 2/3') op een manuaal
+  wordt nu als aliquoot/vulstem getoond in plaats van als tongwerk.
+- Nieuw: in de registersortering (Instellingen → Weergave) kun je per register
+  de kleurgroep handmatig kiezen (grondstem, vulstem of tongwerk) wanneer de
+  automatische herkenning op jouw orgel een enkel register anders inkleurt dan
+  gewenst. Dit is puur visueel; de klank verandert niet. Per orgel bewaard.
+
+### Registersortering duidelijker
+- De knop om naar de oorspronkelijke volgorde terug te keren heet nu
+  "Origineel" (met uitleg), zodat helder is dat hij de volgorde uit het
+  orgelbestand herstelt. De volledige registerlijst per werk staat, zoals
+  voorheen, in Instellingen → Weergave → Registersortering.
+
 ## [0.9.28] - 2026-10-29
 
 ### Minder kraken bij een hoge polyfonie-instelling

@@ -1330,6 +1330,13 @@
   "sorting": {
     "by_pitch": "Fußlage",
     "by_family": "Familie",
+    "original": "Original",
+    "original_title": "Ursprüngliche Reihenfolge aus der Orgeldatei",
+    "group_title": "Farbgruppe dieses Registers",
+    "group_auto": "Automatisch",
+    "group_foundation": "Grundstimme",
+    "group_mutation": "Aliquote",
+    "group_reed": "Zunge",
     "move_up": "Nach oben",
     "move_down": "Nach unten"
   },

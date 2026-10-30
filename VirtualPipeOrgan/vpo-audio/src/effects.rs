@@ -774,6 +774,15 @@ pub fn groep_voor_register(naam: &str, pitch: &str, wind_voet: f32, mengwerk: bo
     // die is op de aanroepplekken uit dezelfde naam afgeleid.
     let cornet = bevat(&n, &["kornet", "cornet"]);
     if cornet && !meerkorig {
+        // Een duidelijke aliquoot-voetmaat (2 2/3', 1 3/5', …) op een MANUAAL
+        // hoort bij een labiale cornet/cornetto-mutatie, niet bij een Spaanse
+        // Corneta-tong (die staat op een hele voetmaat, 8'/4'/2'). Zonder deze
+        // regel werd "Cornetto 2 2/3'" als tongwerk (rood) getekend i.p.v.
+        // mutatie/aliquoot (blauw). In het pedaal blijft een aliquoot-Cornet
+        // (bijv. 5 1/3') tongwerk, zoals voorheen. (0.9.29)
+        if is_aliquoot(voet) && !pedaal {
+            return RegisterGroep::Vulstem;
+        }
         // Pedaal-Cornet is vaak een tongwerk (Spaans/Portugees orgel) en op
         // het manuaal juist een cornet-mixtuur. Manuaal 4'/2' blijft ook
         // tongwerk (Spaanse "Corneta"). 0.8.72 draaide dit kort om; 0.8.73
@@ -2041,6 +2050,11 @@ mod pijpprofiel_tests {
         assert_eq!(groep_voor_register("Corneta", "4'", 2.0, false, None, false, false, false), Tongwerk);
         // Manuaal 8' Cornet (Nederlandse Cornet-mixtuur): vulstem.
         assert_eq!(groep_voor_register("Cornet", "8'", 8.0, true, None, false, false, false), Vulstem);
+        // Manuaal "Cornetto 2 2/3'" (aliquoot-mutatie, Giubiasco): vulstem/blauw,
+        // geen tongwerk (0.9.29).
+        assert_eq!(groep_voor_register("Cornetto", "2 2/3'", 2.667, false, None, false, false, false), Vulstem);
+        // Maar een pedaal-Cornet op een aliquoot-voet blijft tongwerk.
+        assert_eq!(groep_voor_register("Cornet", "5 1/3'", 5.333, true, None, false, false, true), Tongwerk);
     }
 
     #[test]

@@ -1330,6 +1330,13 @@
   "sorting": {
     "by_pitch": "Piede",
     "by_family": "Famiglia",
+    "original": "Originale",
+    "original_title": "Ordine originale dal file dell'organo",
+    "group_title": "Gruppo di colore di questo registro",
+    "group_auto": "Automatico",
+    "group_foundation": "Fondo",
+    "group_mutation": "Mutazione",
+    "group_reed": "Ancia",
     "move_up": "Su",
     "move_down": "Giù"
   },
