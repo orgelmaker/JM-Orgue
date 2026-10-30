@@ -4,6 +4,23 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.9.30] - 2026-10-30
+
+### Minder kraken bij zware registraties
+- Bij een bijna vol orgel (veel registers, koppels, surround) kon een enkele
+  audioberekening net over zijn tijd gaan en kraken, terwijl het gemiddelde
+  prima was. De oorzaak is het mengen van heel veel gelijktijdige stemmen. De
+  app schakelt nu, uitsluitend op de momenten dat een berekening dreigt uit te
+  lopen, over op een lichtere manier van tussenwaarden berekenen (ongeveer twee
+  keer zo licht per stem). Zodra de drukte voorbij is, gaat hij vanzelf terug
+  naar de volle kwaliteit. In normaal spel merk je er niets van; op de pieken
+  verdwijnt het kraken. Op een test met ~1100 gelijktijdige stemmen zakte de
+  belasting van rond of boven de limiet naar ruim eronder.
+- De waarschuwing in het logboek vertelt nu ook wáár de tijd heen gaat (mengen
+  van de stemmen versus de nabewerking zoals galm en klankcorrectie), en het
+  advies sluit daarop aan. Zo is beter te zien welke knop (minder registers,
+  grotere buffer, meer rekenkernen, of de galm) in een geval helpt.
+
 ## [0.9.29] - 2026-10-30
 
 ### Manuaalvolgorde volgt nu de klavieren

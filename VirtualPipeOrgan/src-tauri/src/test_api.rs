@@ -792,6 +792,7 @@ fn handle_status(state: &AppState) -> Value {
             "reduce": crate::audio::render_pass_load().3,
         },
         "mix_chunks": crate::audio::meng_stukken(),
+        "licht_interp_callbacks": crate::audio::licht_interp_callbacks(),
         "release_pipes": state.loaded_organ_info.read().as_ref().map(|o| o.release_pipes).unwrap_or(0),
     })
 }

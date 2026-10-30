@@ -341,6 +341,12 @@ pub(crate) struct MengBlok<'a> {
     /// Globale toonhoogte-correctie (0.8.84): elke voice.rate wordt met deze
     /// factor vermenigvuldigd. Nul correctie = 1.0.
     pub pitch_offset_mul: f64,
+    /// Lichte (lineaire) interpolatie i.p.v. 4-punts cubisch (0.9.30). Alleen
+    /// gezet wanneer de render-belasting een piek nadert: dan is lineair ~2×
+    /// lichter per stem en voorkomt het een underrun. Het kwaliteitsverschil is
+    /// minuscuul en treedt alleen op tijdens die pieken (waar anders gekraak
+    /// zou klinken); normaal spelen blijft volledig cubisch.
+    pub licht: bool,
 }
 
 /// De stemmenlus van één blok: elke stem leest zijn hele blok en telt op bij
@@ -425,7 +431,7 @@ pub(crate) fn meng_stemmen_blok(
                 }
             }
             voice.rate = eff_rate;
-            let (sl, sr) = voice.next_sample();
+            let (sl, sr) = voice.next_sample(blok.licht);
             voice.rate = base_rate;
 
             // Volume = gecachte voicing-gain × wind × per-sample trem-amplitude.
@@ -681,6 +687,14 @@ pub fn render_load() -> (f32, f32) {
 static RENDER_OVERLOAD_COUNT: AtomicU64 = AtomicU64::new(0);
 pub fn render_overload_count() -> u64 {
     RENDER_OVERLOAD_COUNT.load(Ordering::Relaxed)
+}
+
+/// Aantal callbacks dat op lichte (lineaire) interpolatie overschakelde omdat
+/// de vorige callback de 80%-grens overschreed (0.9.30). Een maat voor hoe vaak
+/// de dynamische ontlasting ingrijpt; zichtbaar in het log en de test-API.
+static LICHT_INTERP_CALLBACKS: AtomicU64 = AtomicU64::new(0);
+pub fn licht_interp_callbacks() -> u64 {
+    LICHT_INTERP_CALLBACKS.load(Ordering::Relaxed)
 }
 
 /// Rendertijd per pas van de mengloop, in tienduizendsten van de buffertijd
@@ -1487,7 +1501,7 @@ impl PlayingVoice {
         }
     }
 
-    fn next_sample(&mut self) -> (f32, f32) {
+    fn next_sample(&mut self, licht: bool) -> (f32, f32) {
         // Update envelope
         if self.envelope < self.target_envelope {
             self.envelope = (self.envelope + self.envelope_speed).min(self.target_envelope);
@@ -1563,7 +1577,7 @@ impl PlayingVoice {
                     _ => (len / 4, len),
                 };
                 let xfade = loop_xfade(le.saturating_sub(ls), ls);
-                read_voice_lr(&sample.data, sample.right.as_deref(), ls, le, xfade, &mut self.position, no_loop, &mut self.envelope)
+                read_voice_lr(&sample.data, sample.right.as_deref(), ls, le, xfade, &mut self.position, no_loop, &mut self.envelope, licht)
             }
             VoiceSampleSource::PreloadOnly { preload, .. } => {
                 // The preload holds only the attack chunk. Gebruik de ECHTE
@@ -1589,7 +1603,7 @@ impl PlayingVoice {
                     PRELOAD_UNDERRUNS.fetch_add(1, Ordering::Relaxed);
                 }
                 let xfade = loop_xfade(le.saturating_sub(ls), ls);
-                read_voice_lr(&preload.attack_data, preload.attack_right.as_deref(), ls, le, xfade, &mut self.position, no_loop, &mut self.envelope)
+                read_voice_lr(&preload.attack_data, preload.attack_right.as_deref(), ls, le, xfade, &mut self.position, no_loop, &mut self.envelope, licht)
             }
         };
 
@@ -2300,6 +2314,25 @@ fn hermite4(data: &[f32], i: usize, frac: f32) -> f32 {
     ((a * frac - b) * frac + c) * frac + x0
 }
 
+/// Lineaire (2-punts) interpolatie: ~2× lichter dan [`hermite4`], ingezet onder
+/// piekbelasting (zie `MengBlok::licht`, 0.9.30). Twee array-lezingen en één
+/// FMA i.p.v. vier lezingen en een cubische Horner-evaluatie.
+#[inline]
+fn linear2(data: &[f32], i: usize, frac: f32) -> f32 {
+    if frac == 0.0 {
+        return data[i];
+    }
+    let x0 = data[i];
+    let x1 = data[(i + 1).min(data.len() - 1)];
+    x0 + (x1 - x0) * frac
+}
+
+/// Interpoleer op positie `i`+`frac`: cubisch (standaard) of lineair (licht).
+#[inline]
+fn interp(data: &[f32], i: usize, frac: f32, licht: bool) -> f32 {
+    if licht { linear2(data, i, frac) } else { hermite4(data, i, frac) }
+}
+
 /// Read one interpolated sample from `data`, looping over `[ls, le)` with
 /// a crossfaded seam so there is no click at the loop wrap. During release the
 /// buffer plays out linearly to its end (no loop). `position` is wrapped in place;
@@ -2351,8 +2384,9 @@ fn read_voice(
     position: &mut f64,
     releasing: bool,
     envelope: &mut f32,
+    licht: bool,
 ) -> f32 {
-    read_voice_lr(data, None, ls, le, xfade, position, releasing, envelope).0
+    read_voice_lr(data, None, ls, le, xfade, position, releasing, envelope, licht).0
 }
 
 /// Read one interpolated sample from `data`, advancing/wrapping `position` within
@@ -2371,6 +2405,7 @@ fn read_voice_lr(
     position: &mut f64,
     releasing: bool,
     envelope: &mut f32,
+    licht: bool,
 ) -> (f32, f32) {
     let len = data.len();
     if len < 2 {
@@ -2386,8 +2421,8 @@ fn read_voice_lr(
             return (0.0, 0.0);
         }
         let frac = (*position - i as f64) as f32;
-        let l = hermite4(data, i, frac);
-        let r = match right { Some(rd) => hermite4(rd, i, frac), None => l };
+        let l = interp(data, i, frac, licht);
+        let r = match right { Some(rd) => interp(rd, i, frac, licht), None => l };
         return (l, r);
     }
 
@@ -2410,8 +2445,8 @@ fn read_voice_lr(
         return (0.0, 0.0);
     }
     let frac = (p - i as f64) as f32;
-    let pl = hermite4(data, i, frac);
-    let pr = match right { Some(rd) => hermite4(rd, i, frac), None => pl };
+    let pl = interp(data, i, frac, licht);
+    let pr = match right { Some(rd) => interp(rd, i, frac, licht), None => pl };
 
     // Seamless loop seam: within the last `xfade` samples before `le`, crossfade
     // the loop tail into the pre-loop region so the output reaches data[ls] exactly
@@ -2431,8 +2466,8 @@ fn read_voice_lr(
             let j = pre as usize;
             if j + 1 < len {
                 let pfrac = (pre - j as f64) as f32;
-                let bl = hermite4(data, j, pfrac);
-                let br = match right { Some(rd) => hermite4(rd, j, pfrac), None => bl };
+                let bl = interp(data, j, pfrac, licht);
+                let br = match right { Some(rd) => interp(rd, j, pfrac, licht), None => bl };
                 return (pl * w_primary + bl * w_blended, pr * w_primary + br * w_blended);
             }
         }
@@ -2443,7 +2478,40 @@ fn read_voice_lr(
 
 #[cfg(test)]
 mod loop_seam_tests {
-    use super::{read_voice, read_voice_lr, xfade_weights};
+    use super::{read_voice, read_voice_lr, xfade_weights, interp, linear2, hermite4};
+
+    /// Lichte interpolatie (0.9.30): lineair tussen de buren, gelijk aan cubisch
+    /// op een geheel punt, en `interp` kiest de juiste tak.
+    #[test]
+    fn lineaire_interpolatie_klopt_en_interp_kiest() {
+        let d = [0.0f32, 1.0, 0.0, -1.0];
+        // Op een geheel punt (frac 0) geven beide exact de sample.
+        assert_eq!(linear2(&d, 1, 0.0), 1.0);
+        assert_eq!(interp(&d, 1, 0.0, true), 1.0);
+        assert_eq!(interp(&d, 1, 0.0, false), 1.0);
+        // Halverwege 1→2 (1.0→0.0) is lineair precies 0,5.
+        assert!((linear2(&d, 1, 0.5) - 0.5).abs() < 1e-6);
+        // interp(licht=true) == linear2, interp(licht=false) == hermite4.
+        assert_eq!(interp(&d, 1, 0.5, true), linear2(&d, 1, 0.5));
+        assert_eq!(interp(&d, 1, 0.5, false), hermite4(&d, 1, 0.5));
+        // Lineair blijft tussen de twee buren (geen overshoot).
+        let v = linear2(&d, 1, 0.5);
+        assert!(v <= 1.0 && v >= 0.0);
+    }
+
+    /// De lichte tak van read_voice_lr geeft op een geheel punt hetzelfde als de
+    /// cubische — het overschakelen tussen callbacks kan dus geen sprong geven.
+    #[test]
+    fn read_voice_licht_en_cubisch_gelijk_op_geheel_punt() {
+        let data: Vec<f32> = (0..64).map(|i| ((i as f32) * 0.1).sin()).collect();
+        let (ls, le, xf) = (8usize, 56usize, 8usize);
+        let mut env = 1.0f32;
+        let mut p1 = 20.0f64;
+        let a = read_voice(&data, ls, le, xf, &mut p1, false, &mut env, false);
+        let mut p2 = 20.0f64;
+        let b = read_voice(&data, ls, le, xf, &mut p2, false, &mut env, true);
+        assert!((a - b).abs() < 1e-6, "cubisch {a} vs licht {b} op geheel punt");
+    }
 
     /// Sinustabel ≈ sin/cos en blijft equal-power over de hele fade.
     #[test]
@@ -2470,8 +2538,8 @@ mod loop_seam_tests {
         let mut pos_m = 0.0f64;
         let mut env_m = 1.0f32;
         for _ in 0..6000 {
-            let (a, b) = read_voice_lr(&l, Some(&r), ls, le, xfade, &mut pos, false, &mut env);
-            let m = read_voice(&l, ls, le, xfade, &mut pos_m, false, &mut env_m);
+            let (a, b) = read_voice_lr(&l, Some(&r), ls, le, xfade, &mut pos, false, &mut env, false);
+            let m = read_voice(&l, ls, le, xfade, &mut pos_m, false, &mut env_m, false);
             assert_eq!(a, m);
             assert!((b + 0.5 * a).abs() < 1e-6);
             pos += 1.0;
@@ -2496,7 +2564,7 @@ mod loop_seam_tests {
         let mut max_jump = 0.0f32;
         // Long enough to cross the seam several times.
         for _ in 0..20_000 {
-            let v = read_voice(&data, ls, le, xfade, &mut pos, false, &mut env);
+            let v = read_voice(&data, ls, le, xfade, &mut pos, false, &mut env, false);
             if let Some(p) = prev {
                 max_jump = max_jump.max((v - p).abs());
             }
@@ -2520,7 +2588,7 @@ mod loop_seam_tests {
         let mut prev: Option<f32> = None;
         let mut max_jump = 0.0f32;
         for _ in 0..30_000 {
-            let v = read_voice(&data, ls, le, xfade, &mut pos, false, &mut env);
+            let v = read_voice(&data, ls, le, xfade, &mut pos, false, &mut env, false);
             if let Some(p) = prev {
                 max_jump = max_jump.max((v - p).abs());
             }
@@ -2541,7 +2609,7 @@ mod loop_seam_tests {
         let mut prev: Option<f32> = None;
         let mut max_jump = 0.0f32;
         for _ in 0..20_000 {
-            let v = read_voice(&data, ls, le, 0, &mut pos, false, &mut env);
+            let v = read_voice(&data, ls, le, 0, &mut pos, false, &mut env, false);
             if let Some(p) = prev {
                 max_jump = max_jump.max((v - p).abs());
             }
@@ -2733,8 +2801,8 @@ mod release_tests {
         let fade_frames = (fade * 0.001 * sr as f32) as usize;
         let mut max_som = 0.0f32;
         for _ in 0..fade_frames {
-            let (a, _) = speel.next_sample();
-            let (b, _) = rel.next_sample();
+            let (a, _) = speel.next_sample(false);
+            let (b, _) = rel.next_sample(false);
             max_som = max_som.max(a + b);
         }
         assert!(max_som <= 1.02,
@@ -2745,7 +2813,7 @@ mod release_tests {
         let rest = (decay_ms * 0.001 * sr as f32) as usize + fade_frames;
         for _ in 0..rest {
             if rel.is_finished() { break; }
-            rel.next_sample();
+            rel.next_sample(false);
         }
         assert!(rel.is_finished(), "staart dooft niet uit (envelope {:.5})", rel.envelope);
     }
@@ -2773,8 +2841,8 @@ mod release_tests {
 
         let mut max_som = 0.0f32;
         for _ in 0..(fade * 0.001 * sr as f32) as usize {
-            let (a, _) = speel.next_sample();
-            let (b, _) = rel.next_sample();
+            let (a, _) = speel.next_sample(false);
+            let (b, _) = rel.next_sample(false);
             max_som = max_som.max(a + b);
         }
         assert!(max_som > 1.5, "verwachtte een niveaubult, kreeg {:.3}", max_som);
@@ -3145,7 +3213,7 @@ mod tremulant_crossfade_tests {
                             );
                             let mut laatste = 0.0f32;
                             for _ in 0..2_000 {
-                                laatste = nv.next_sample().0;
+                                laatste = nv.next_sample(false).0;
                             }
                             assert!(laatste > 0.0,
                                     "crossfade-stem bleef stil (bron {br} Hz, doel {dr} Hz, pos {pos})");
@@ -4186,6 +4254,11 @@ fn run_audio_thread(
     // Mengtijd van de vorige callback (ns): voorspeller voor het tijdbudget
     // van de commando-afvoer (zie drain_mag_door).
     let mut prev_mix_ns: u64 = 0;
+    // Hysterese-status voor de dynamische interpolatie (0.9.30): eenmaal op
+    // lichte interpolatie blijft hij dat tot de belasting ruim onder de grens
+    // zakt, zodat hij tijdens een zwaar stuk niet elke callback heen en weer
+    // klapt (dat middelde het voordeel juist weg).
+    let mut licht_vorig = false;
     let mut render = move |data: &mut [f32]| {
             // Flush-to-zero / denormals-are-zero op de audio-thread. De reverb-,
             // EQ- en filter-staarten dalen door denormale float-waarden (< ~1e-38),
@@ -5887,6 +5960,21 @@ fn run_audio_thread(
                 // De pool één keer per callback ophalen (één atomaire
                 // Arc-verhoging), niet per blok.
                 let pool = if stukken > 1 { mengpool() } else { None };
+                // Dynamische interpolatie (0.9.30): deed de VORIGE callback meer
+                // dan 80% van de buffertijd aan renderwerk, dan dreigt een
+                // underrun en schakelen we deze callback over op lichte
+                // (lineaire) interpolatie — ~2× lichter per stem. Normaal (ruim
+                // onder de grens) blijft alles 4-punts cubisch. Zo verdwijnen de
+                // piek-callbacks bij een bijna-vol surround-orgel zonder dat het
+                // normale spel aan kwaliteit inlevert.
+                // Hysterese: aanzetten boven 80% van de buffertijd, pas weer
+                // uit onder 60%. Zo blijft een zwaar stuk doorlopend op lichte
+                // interpolatie i.p.v. elke callback om te schakelen.
+                let grens = if licht_vorig { 60 } else { 80 };
+                let licht_interp = periode_ns > 0
+                    && prev_mix_ns.saturating_mul(100) > periode_ns.saturating_mul(grens);
+                licht_vorig = licht_interp;
+                if licht_interp { LICHT_INTERP_CALLBACKS.fetch_add(1, Ordering::Relaxed); }
                 // Tijdmeting per pas (fase 1). Opgeteld over alle blokken van
                 // deze callback; aan het eind omgerekend naar promille van de
                 // buffertijd.
@@ -6031,6 +6119,7 @@ fn run_audio_thread(
                         ccis_falloff,
                         ccis_swap,
                         pitch_offset_mul: *pitch_offset_mul_clone.read(),
+                        licht: licht_interp,
                     };
                     // Met pool: de werkers doen de stukken 1.., de audiothread
                     // stuk 0, en we keren pas terug als iedereen klaar is.
@@ -6383,14 +6472,25 @@ fn run_audio_thread(
                     // speelbelasting. Het advies past bij de buffergrootte:
                     // onder 128 frames is dát de knop, daarboven niet meer.
                     if stemmen > 0 && last_overload_warn.map_or(true, |t: std::time::Instant| t.elapsed().as_secs() >= 5) {
+                        // Uitsplitsing per pas (gemiddelde over 16 callbacks),
+                        // in % van de buffertijd: zo is in het log te zien waar
+                        // de tijd heen gaat — het mengen van de stemmen
+                        // (stemafhankelijk) of de serieele nabewerking (galm/EQ,
+                        // vrijwel vast). Dat stuurt het advies (0.9.30).
+                        let wind_pct = RENDER_PASS_PM[0].load(Ordering::Relaxed) / 100;
+                        let meng_pct = RENDER_PASS_PM[1].load(Ordering::Relaxed) / 100;
+                        let keten_pct = RENDER_PASS_PM[2].load(Ordering::Relaxed) / 100;
+                        let opt_pct = RENDER_PASS_PM[3].load(Ordering::Relaxed) / 100;
                         let advies = if frames_now < 128 {
                             "zet de buffergrootte op ten minste 128 frames"
+                        } else if keten_pct >= meng_pct {
+                            "de nabewerking (galm/EQ) overheerst — zet de galm uit of verlicht de uitgangscorrectie, of zet de buffer hoger"
                         } else {
-                            "verlaag de polyfonie, zet de galm uit of trek minder registers"
+                            "het mengen van de stemmen overheerst — trek minder registers, kies meer rekenkernen bij Audio-uitvoer, of zet de buffer hoger"
                         };
-                        warn!("Audio-render zwaar belast: deze callback {}% van de buffertijd (gemiddeld {}%) bij {} frames ({:.2} ms), {} stemmen (kap {}); {} zware callbacks sinds start — {}",
+                        warn!("Audio-render zwaar belast: deze callback {}% van de buffertijd (gemiddeld {}%) bij {} frames ({:.2} ms), {} stemmen (kap {}); verdeling: mengen {}%, nabewerking {}%, wind {}%, optellen {}%; lichte interpolatie: {}×; {} zware callbacks sinds start — {}",
                             pm / 10, RENDER_LOAD_PM.load(Ordering::Relaxed) / 10, frames_now, frames_now as f64 * 1000.0 / sample_rate as f64,
-                            stemmen, live_cap, overload_callbacks, advies);
+                            stemmen, live_cap, meng_pct, keten_pct, wind_pct, opt_pct, LICHT_INTERP_CALLBACKS.load(Ordering::Relaxed), overload_callbacks, advies);
                         last_overload_warn = Some(std::time::Instant::now());
                     }
                 }
@@ -6921,7 +7021,7 @@ mod meng_verdeling_tests {
             bn, wind_dev, trem_rate, trem_amp,
             pan_cos, pan_sin, div_pans: pans, ccis_on: ccis, ccis_en,
             ccis_strength: 0.7, ccis_falloff: 0.6, ccis_swap: false,
-            pitch_offset_mul: 1.0,
+            pitch_offset_mul: 1.0, licht: false,
         }
     }
 
