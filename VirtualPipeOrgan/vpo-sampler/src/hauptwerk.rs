@@ -1802,6 +1802,10 @@ mod numeric_prefix_tests {
         assert_eq!(crate::hauptwerk::clean_stop_name("4 Gedekt 8"), "4 Gedekt 8");
         // Twee spaties na een afkorting = divisieaanduiding (regressie 0.9.33).
         assert_eq!(crate::hauptwerk::clean_stop_name("B  2ème Trompette 8"), "2ème Trompette 8");
+        // Klavecimbel: voetmaat-streep-Romeins cijfer.
+        assert_eq!(crate::hauptwerk::clean_stop_name("8-I"), "I 8'");
+        assert_eq!(crate::hauptwerk::clean_stop_name("8-II"), "II 8'");
+        assert_eq!(crate::hauptwerk::clean_stop_name("4-Ventil"), "Ventil", "geen Romeins cijfer: oude regel");
     }
 
     #[test]
@@ -1823,7 +1827,13 @@ fn ruim_bestandsachtige_naam(raw: &str) -> String {
     let mut s: String = raw.replace('_', " ");
     // "1-Naam-1": nummer vooraan met streepje, gevolgd door een letter.
     let kop = s.chars().take_while(|c| c.is_ascii_digit()).count();
-    if (1..=3).contains(&kop) && s[kop..].starts_with('-') && s[kop + 1..].chars().next().map_or(false, |c| c.is_alphabetic()) {
+    let na_streep = s.get(kop + 1..).unwrap_or("");
+    let romeins = !na_streep.is_empty() && na_streep.len() <= 4 && na_streep.chars().all(|c| matches!(c, 'I' | 'V'));
+    if (1..=2).contains(&kop) && s[kop..].starts_with('-') && romeins && matches!(&s[..kop], "1" | "2" | "4" | "8" | "16" | "32") {
+        // Klavecimbel "8-I", "8-II": een Romeins cijfer is nooit een
+        // registernaam, dus het getal ervoor is de voetmaat → "I 8'".
+        s = format!("{} {}'", na_streep, &s[..kop]);
+    } else if (1..=3).contains(&kop) && s[kop..].starts_with('-') && s[kop + 1..].chars().next().map_or(false, |c| c.is_alphabetic()) {
         s = s[kop + 1..].to_string();
         let staart = s.chars().rev().take_while(|c| c.is_ascii_digit()).count();
         if staart > 0 && s[..s.len() - staart].ends_with('-') {

@@ -8,7 +8,7 @@ use tracing::{info, warn};
 use crate::audio::AudioCommand;
 use crate::state::AppState;
 use crate::library::{self, OrganLibraryEntry, OrganSettings, PresetBindingSaved, SwellBindingSaved, CrescendoBindingSaved, DivisionTremulantSaved, MidiMappingSaved, PresetData};
-use vpo_sampler::{OrganDefinition, clean_stop_name, strip_pitch_from_name, voetmaat_uit_naam, zonder_vastgeplakte_voetmaat,
+use vpo_sampler::{OrganDefinition, clean_stop_name, strip_pitch_from_name, voetmaat_uit_naam, kale_voetmaat_achteraan, alleen_voetmaat, zonder_vastgeplakte_voetmaat,
                   gedeeld_voorvoegsel, strip_voorvoegsel, clean_division_name,
                   splits_koren, Koren};
 
@@ -2702,7 +2702,14 @@ fn registerweergave(schoon: &str, mengwerk: bool, harmonic: u32, manifest: Optio
     // de naam (een set die elke rang als 8' opgeeft gaf "Contrabass 16'" met
     // "8'" eronder); dan geldt het label van de maker.
     if !mengwerk {
-        if let Some((naam, voetmaat)) = voetmaat_uit_naam(schoon) {
+        // Naam die alleen een voetmaat is (klavecimbel "4"): die voetmaat,
+        // niet de 8' die een set zonder opgave overal krijgt.
+        if let Some(v) = alleen_voetmaat(schoon) {
+            return (v.clone(), v, None);
+        }
+        // Kale voetmaat achter de naam ("FIFTEENTH 2") telt als die met
+        // voetteken, onder dezelfde afstandsregel.
+        if let Some((naam, voetmaat)) = voetmaat_uit_naam(schoon).or_else(|| kale_voetmaat_achteraan(schoon)) {
             if let (Some(a), Some(b)) = (voet_waarde(&voetmaat), voet_waarde(&van_set)) {
                 let afstand_cent = (1200.0 * (a / b).log2()).abs();
                 if afstand_cent < 1.0 || afstand_cent > 250.0 {
@@ -2749,6 +2756,36 @@ mod registerweergave_tests {
             ("Principal Disk.".to_string(), "8'".to_string(), None));
         assert_eq!(registerweergave("BOURDON 16FT TONE", false, 8, None),
             ("BOURDON TONE".into(), "16'".into(), None));
+    }
+
+    #[test]
+    fn kale_voetmaat_harmonium_en_klavecimbel() {
+        // Kale voetmaat achteraan, set geeft overal 8'.
+        assert_eq!(registerweergave("FIFTEENTH 2", false, 8, None),
+            ("FIFTEENTH".into(), "2'".into(), None));
+        assert_eq!(registerweergave("Nasard 2 2/3", false, 8, None),
+            ("Nasard".into(), "2 2/3'".into(), None));
+        // Klopt de kale voetmaat met de set, dan is het de bekende strip.
+        assert_eq!(registerweergave("Gedekt 8", false, 8, None),
+            ("Gedekt".into(), "8'".into(), None));
+        // Klein verschil (historische schrijfwijze): de set wint, zoals bij voetteken.
+        assert_eq!(registerweergave("Quint 3", false, 24, None),
+            ("Quint 3".into(), "2 2/3'".into(), None));
+        // Mengwerk: kaal getal is geen voetmaat.
+        assert_eq!(registerweergave("Mixtur 4", true, 8, None).1, "");
+        // Geen gangbare voetmaat → blijft staan.
+        assert_eq!(registerweergave("Trompet 3", false, 8, None),
+            ("Trompet 3".into(), "8'".into(), None));
+        // Harmonium: "P." = pieds; het registernummer vooraan blijft.
+        assert_eq!(registerweergave("2 BOURDON 16 P.", false, 8, None),
+            ("2 BOURDON".into(), "16'".into(), None));
+        assert_eq!(registerweergave("7 CROMORNE 32 P.", false, 8, None),
+            ("7 CROMORNE".into(), "32'".into(), None));
+        // Klavecimbel: naam is alleen een voetmaat.
+        assert_eq!(registerweergave("4", false, 8, None),
+            ("4'".into(), "4'".into(), None));
+        assert_eq!(registerweergave("I 8'", false, 8, None),
+            ("I".into(), "8'".into(), None));
     }
 
     #[test]
@@ -12110,3 +12147,4 @@ mod motor_start_tests {
         assert!(!motor_start_aan(true, false));
     }
 }
+

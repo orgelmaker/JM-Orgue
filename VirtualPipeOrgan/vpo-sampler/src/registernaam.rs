@@ -113,11 +113,13 @@ fn vast_merkteken(w: &str, mengwerk: bool) -> Option<Koren> {
 /// Voetmaat met voetteken of voetwoord aan het eind van de woorden: geeft het
 /// aantal woorden en de voetmaat als "2 2/3'".
 fn voetmaat_achteraan(woorden: &[&str]) -> Option<(usize, String)> {
+    // "P." (pieds) alleen mét punt: harmonium-namen als "Bourdon 16 P.".
     let is_voetwoord = |w: &str| {
-        matches!(
-            w.trim_end_matches('.').to_lowercase().as_str(),
-            "fuss" | "fuß" | "voet" | "ft" | "feet" | "pieds" | "pied"
-        )
+        w.eq_ignore_ascii_case("p.")
+            || matches!(
+                w.trim_end_matches('.').to_lowercase().as_str(),
+                "fuss" | "fuß" | "voet" | "ft" | "feet" | "pieds" | "pied"
+            )
     };
     let getal_of_breuk = |w: &str| {
         !w.is_empty()
@@ -196,6 +198,36 @@ pub fn voetmaat_uit_naam(naam: &str) -> Option<(String, String)> {
         let rest: Vec<&str> = woorden[..begin].iter().chain(&woorden[i + 1..]).copied().collect();
         (rest.join(" "), v)
     })
+}
+
+/// Gangbare voetmaten zonder voetteken. Alleen deze tellen als kale voetmaat:
+/// een ander getal achter een naam is eerder een nummer.
+const KALE_VOETMATEN: &[&str] = &[
+    "64", "32", "16", "10 2/3", "8", "5 1/3", "4", "3 1/5", "2 2/3", "2",
+    "1 3/5", "1 1/3", "1 1/7", "1", "4/5", "2/3", "1/2",
+];
+
+/// Kale voetmaat achteraan ("FIFTEENTH 2", "Nasard 2 2/3"): (naam zonder,
+/// voetmaat met voetteken). Alleen gangbare voetmaten en alleen als er een
+/// naam overblijft; voor mengwerken niet gebruiken ("Mixtur 4" = koren).
+pub fn kale_voetmaat_achteraan(naam: &str) -> Option<(String, String)> {
+    let woorden: Vec<&str> = naam.split_whitespace().collect();
+    for n in [2usize, 1] {
+        if woorden.len() > n {
+            let staart = woorden[woorden.len() - n..].join(" ");
+            if KALE_VOETMATEN.contains(&staart.as_str()) {
+                return Some((woorden[..woorden.len() - n].join(" "), format!("{}'", staart)));
+            }
+        }
+    }
+    None
+}
+
+/// Naam die alleen een voetmaat is ("4", "8'"), zoals bij klavecimbels: de
+/// voetmaat met voetteken.
+pub fn alleen_voetmaat(naam: &str) -> Option<String> {
+    let kaal = naam.trim().trim_end_matches(['\'', '\u{2032}', '\u{2019}']).trim();
+    KALE_VOETMATEN.contains(&kaal).then(|| format!("{}'", kaal))
 }
 
 /// Haal het aantal koren uit een registernaam. `mengwerk`: hoort het register
