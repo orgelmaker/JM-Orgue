@@ -1800,6 +1800,8 @@ mod numeric_prefix_tests {
         assert_eq!(crate::hauptwerk::clean_stop_name("2 2/3 Quint"), "2 2/3 Quint");
         assert_eq!(crate::hauptwerk::clean_stop_name("Cornet5"), "Cornet5");
         assert_eq!(crate::hauptwerk::clean_stop_name("4 Gedekt 8"), "4 Gedekt 8");
+        // Twee spaties na een afkorting = divisieaanduiding (regressie 0.9.33).
+        assert_eq!(crate::hauptwerk::clean_stop_name("B  2ème Trompette 8"), "2ème Trompette 8");
     }
 
     #[test]
@@ -1815,7 +1817,10 @@ mod numeric_prefix_tests {
 /// ("051 GT: Chimes") vallen weg, en een voettal dat midden in de naam aan een
 /// perspectiefwoord vastzit ("Subbass16 rear") verliest dat cijfer.
 fn ruim_bestandsachtige_naam(raw: &str) -> String {
-    let mut s: String = raw.replace('_', " ").split_whitespace().collect::<Vec<_>>().join(" ");
+    // Spaties NIET samenvoegen: twee spaties na een korte afkorting ("B  2ème
+    // Trompette") is precies het teken waaraan clean_stop_name de
+    // divisieaanduiding herkent (regressie in 0.9.33).
+    let mut s: String = raw.replace('_', " ");
     // "1-Naam-1": nummer vooraan met streepje, gevolgd door een letter.
     let kop = s.chars().take_while(|c| c.is_ascii_digit()).count();
     if (1..=3).contains(&kop) && s[kop..].starts_with('-') && s[kop + 1..].chars().next().map_or(false, |c| c.is_alphabetic()) {

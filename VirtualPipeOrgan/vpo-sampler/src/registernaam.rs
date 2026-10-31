@@ -188,9 +188,12 @@ pub fn voetmaat_uit_naam(naam: &str) -> Option<(String, String)> {
         k.len() < w.len() && !k.is_empty() && k.chars().all(|c| c.is_ascii_digit() || c == '/')
             && k.chars().next().map_or(false, |c| c.is_ascii_digit())
     })?;
-    (i > 0 && i + 1 < woorden.len()).then(|| {
-        let v = format!("{}'", woorden[i].trim_end_matches(voetteken));
-        let rest: Vec<&str> = woorden.iter().enumerate().filter(|(j, _)| *j != i).map(|(_, w)| *w).collect();
+    // Zelfde lezing als achteraan, zodat "Ters 1 3/5' Bas" de hele
+    // samengestelde voetmaat (1 3/5') pakt en niet alleen de breuk.
+    let (n, v) = voetmaat_achteraan(&woorden[..=i])?;
+    let begin = i + 1 - n;
+    (begin > 0 && i + 1 < woorden.len()).then(|| {
+        let rest: Vec<&str> = woorden[..begin].iter().chain(&woorden[i + 1..]).copied().collect();
         (rest.join(" "), v)
     })
 }

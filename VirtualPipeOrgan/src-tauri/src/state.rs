@@ -2162,7 +2162,7 @@ impl AppState {
             perspectives: Arc::new(RwLock::new(Vec::new())),
             base_couplers: Arc::new(RwLock::new(Vec::new())),
             extra_coupler_ids: Arc::new(RwLock::new(Vec::new())),
-            load_all_perspectives: Arc::new(RwLock::new(true)),
+            load_all_perspectives: Arc::new(RwLock::new(false)),
             listening_position: Arc::new(RwLock::new(0.0)),
             background_gain: Arc::new(RwLock::new(1.0)),
             mechanics_gains: Arc::new(RwLock::new([1.0; 3])),

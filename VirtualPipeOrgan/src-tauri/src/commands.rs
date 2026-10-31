@@ -745,6 +745,18 @@ fn rem_op_geheugen(plan: &mut [PerspectiveRuntime], heeft_opslag: bool, buffers:
     true
 }
 
+/// Mag "alle opnameposities laden" ook de UITGESCHAKELDE posities in het
+/// geheugen zetten (0.9.34)? Alleen als álle posities samen binnen de helft
+/// van het fysieke geheugen blijven — dezelfde grens als `rem_op_geheugen`.
+/// Zonder bekende RAM-grootte (niet-Windows) blijft het gedrag zoals het was.
+fn alle_posities_passen(plan: &[PerspectiveRuntime], buffers: &HashMap<String, usize>, ram: Option<u64>) -> bool {
+    let Some(ram) = ram else { return true };
+    let alles: Vec<PerspectiveRuntime> = plan.iter().cloned()
+        .map(|mut p| { p.enabled = true; p })
+        .collect();
+    schatting_preload_bytes(&alles, buffers) * 2 <= ram
+}
+
 /// Laadplan voor een GrandOrgue/Hauptwerk-definitie (niet-ruis-stops).
 fn plan_perspectives(definition: &OrganDefinition, saved: &[PerspectiveSaved]) -> Vec<PerspectiveRuntime> {
     use vpo_sampler::PipeDef;
@@ -2729,6 +2741,12 @@ mod registerweergave_tests {
         assert_eq!(registerweergave("OPEN DIAPASON 8FT", false, 8, None),
             ("OPEN DIAPASON".into(), "8'".into(), None));
         // Voetmaat midden in de naam, met een toelichting erachter.
+        // Samengestelde voetmaat midden in de naam: hele 1 3/5', niet alleen 3/5'
+        // (regressie 0.9.33).
+        assert_eq!(registerweergave("Ters 1 3/5' Bas", false, 8, None),
+            ("Ters Bas".to_string(), "1 3/5'".to_string(), None));
+        assert_eq!(registerweergave("Principal 8' Disk.", false, 8, None),
+            ("Principal Disk.".to_string(), "8'".to_string(), None));
         assert_eq!(registerweergave("BOURDON 16FT TONE", false, 8, None),
             ("BOURDON TONE".into(), "16'".into(), None));
     }
@@ -3290,7 +3308,19 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
         // geheugen, zodat wisselen ogenblikkelijk is in plaats van een herlaad.
         // Uitgeschakelde posities worden na het laden stilgezet (gain), niet
         // weggelaten.
-        let alles_laden = *state.load_all_perspectives.read();
+        // De keuze van DÍT orgel: `restore_organ_settings` zet de vlag in
+        // `state` pas ná de load, dus bij de eerste load na het opstarten
+        // stond daar nog de standaardwaarde (aan) of die van het vorige orgel
+        // → een orgel met "alleen front" laadde toch alle posities (0.9.34).
+        // Nieuw orgel zonder instellingen: uit (niet de stand van het vorige).
+        let alles_laden_keuze = saved_settings_for(state, path)
+            .map(|s| s.load_all_perspectives)
+            .unwrap_or(false);
+        let alles_laden = alles_laden_keuze
+            && alle_posities_passen(&persp_plan, &buffer_map, fysiek_geheugen_bytes());
+        if alles_laden_keuze && !alles_laden {
+            warn!("Alle opnameposities laden: past niet in de helft van het RAM — alleen de ingeschakelde posities geladen");
+        }
         let enabled_labels: HashSet<String> = persp_plan.iter()
             .filter(|p| alles_laden || p.enabled)
             .map(|p| p.name.clone())
@@ -9460,6 +9490,8 @@ fn restore_organ_settings(state: &AppState, organ_id: &str) {
             info!("Nieuw orgel zonder instellingen: instelwizard aangeboden");
             *state.setup_wizard_pending.write() = true;
             *state.setup_wizard_done.write() = false;
+            // Alleen de aangevinkte posities (0.9.34), niet de stand van het vorige orgel.
+            *state.load_all_perspectives.write() = false;
             // Eigen volumes neutraal (0.8.95): niet die van het vorige orgel.
             *state.mechanics_gains.write() = [1.0; 3];
             state.send_audio_command(AudioCommand::SetMechanicsGains { motor: 1.0, keys: 1.0, stops: 1.0 });
@@ -11148,6 +11180,21 @@ mod perspective_plan_tests {
         assert_eq!(plan.iter().map(|p| p.slot).collect::<Vec<_>>(), vec![1, 2, 3]);
         assert_eq!(plan[0].pipe_count, 86);
         assert!(plan.iter().all(|p| !p.loaded && p.gain_db == 0.0));
+    }
+
+    #[test]
+    fn alles_laden_alleen_als_alle_posities_in_half_ram_passen() {
+        // 0.9.34: "alle posities laden" haalde ook uitgeschakelde posities
+        // binnen, zonder geheugenrem. Telling in buffers, ook voor UIT-posities.
+        use super::{alle_posities_passen, preload_bytes_per_buffer};
+        let obs = vec![("front".to_string(), true, 100), ("rear".to_string(), false, 100)];
+        let plan = plan_perspectives_from(obs, &[saved("front", true, 0.0), saved("rear", false, 0.0)]);
+        let buffers: std::collections::HashMap<String, usize> =
+            [("front".to_string(), 1000), ("rear".to_string(), 1000)].into_iter().collect();
+        let alles = 2000 * preload_bytes_per_buffer();
+        assert!(alle_posities_passen(&plan, &buffers, Some(alles * 2)), "precies half RAM past");
+        assert!(!alle_posities_passen(&plan, &buffers, Some(alles * 2 - 1)), "uitgeschakelde rear telt mee");
+        assert!(alle_posities_passen(&plan, &buffers, None), "RAM onbekend: oud gedrag");
     }
 
     #[test]
