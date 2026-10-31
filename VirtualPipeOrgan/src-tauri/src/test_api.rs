@@ -329,6 +329,23 @@ fn route_shared(
         (tiny_http::Method::Get, "/status") => Ok(handle_status(state)),
         (tiny_http::Method::Get, "/organ") => Ok(handle_organ(state, scope)),
         (tiny_http::Method::Get, "/version") => Ok(json!({ "version": env!("CARGO_PKG_VERSION") })),
+        // Zwaarste callback sinds de vorige uitlezing (wordt daarna gewist):
+        // totaal + segmenten (fractie van de buffertijd), stemmen, stemstarts.
+        (tiny_http::Method::Get, "/perf/slechtste") => Ok({
+            let (totaal, seg, stemmen, starts, cmds) = crate::audio::neem_slechtste_callback();
+            let mut m = serde_json::Map::new();
+            for (i, naam) in crate::audio::SEG_NAMEN.iter().enumerate() {
+                m.insert(naam.to_string(), json!(seg[i]));
+            }
+            let locks = crate::audio::neem_slechtste_locks();
+            let mut lm = serde_json::Map::new();
+            for (i, naam) in crate::audio::LOCK_NAMEN.iter().enumerate() {
+                lm.insert(naam.to_string(), json!(locks[i] as f64 / 1e6)); // ms
+            }
+            let (me, mw, ge, gw, bl, gew) = crate::mengpool::neem_barriere_meting();
+            json!({ "totaal": totaal, "segmenten": m, "stemmen": stemmen, "stemstarts": starts, "commandos": cmds, "locks_ms": lm,
+                    "barriere": { "max_eigen_us": me, "max_wacht_us": mw, "gem_eigen_us": ge, "gem_wacht_us": gw, "blokken": bl, "gewekt": gew } })
+        }),
         // Levensteken + beknopt JSON-overzicht voor dashboards, AI-agenten en
         // monitoring (0.9.13). Alles komt uit bestaande velden; geen eigen pad
         // in de audiostate. Status "ok" zodra de HTTP-poort antwoordt én de
@@ -502,6 +519,12 @@ fn route_test_only(
         (tiny_http::Method::Post, "/sampleset/loop_apply") => handle_sampleset_loop_apply(body),
         (tiny_http::Method::Get, "/division_channels") => Ok(handle_division_channels(state)),
         (tiny_http::Method::Post, "/division_channels") => handle_set_division_channels(state, body),
+        // RAM-plafond voor volledig geladen samples (0.9.31), in MB.
+        (tiny_http::Method::Post, "/sample_cap") => {
+            let mb: usize = query.split('&').find_map(|kv| kv.strip_prefix("mb=")).and_then(|v| v.parse().ok()).unwrap_or(1500);
+            crate::audio::set_sample_cap_bytes(mb * 1_000_000);
+            Ok(json!({"sample_cap_mb": crate::audio::sample_cap_bytes() / 1_000_000}))
+        }
         (tiny_http::Method::Post, "/polyphony") => {
             let v: serde_json::Value = serde_json::from_str(body).unwrap_or_default();
             let n = v.get("voices").and_then(|x| x.as_u64()).unwrap_or(1024) as usize;
@@ -736,6 +759,22 @@ fn method_str(m: &tiny_http::Method) -> &'static str {
 
 // ============ Handlers ============
 
+/// Gemiddelde tijd per stap van een achtergrondlaadactie (ms) + MB per load.
+fn load_stappen_json() -> Value {
+    let (d, l, r, c, mb, rs) = crate::audio::load_stappen();
+    json!({ "decode": d, "loop": l, "resample": r, "cache": c, "mb_per_load": mb, "geresampled": rs })
+}
+
+/// Segmenttijden van de callback (gemiddelde + piek) als JSON-object.
+fn callback_segmenten_json() -> Value {
+    let s = crate::audio::callback_segmenten();
+    let mut m = serde_json::Map::new();
+    for (i, naam) in crate::audio::SEG_NAMEN.iter().enumerate() {
+        m.insert(naam.to_string(), json!({ "gem": s[i].0, "piek": s[i].1 }));
+    }
+    Value::Object(m)
+}
+
 fn handle_status(state: &AppState) -> Value {
     let audio = state.audio_player.read();
     let (sample_rate, voice_count, peaks, channels, audio_host, audio_device, buffer_frames) = match audio.as_ref() {
@@ -767,6 +806,7 @@ fn handle_status(state: &AppState) -> Value {
         "stereo_samples": vpo_sampler::stereo_loading(),
         // Achtergrondlader (0.8.92): startbuffer, tekorten en latenties.
         "loader": serde_json::to_value(crate::audio::loader_stats()).unwrap_or(serde_json::Value::Null),
+        "load_stappen_ms": load_stappen_json(),
         "peak_left": peaks.0,
         // Bijgeluiden (motor, toets- en registerklikken) worden ná de
         // pijpen gemengd; hun piek sinds de vorige /status apart (0.8.94).
@@ -793,6 +833,7 @@ fn handle_status(state: &AppState) -> Value {
         },
         "mix_chunks": crate::audio::meng_stukken(),
         "licht_interp_callbacks": crate::audio::licht_interp_callbacks(),
+        "callback_segmenten": callback_segmenten_json(),
         "release_pipes": state.loaded_organ_info.read().as_ref().map(|o| o.release_pipes).unwrap_or(0),
     })
 }

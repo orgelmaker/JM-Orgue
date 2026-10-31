@@ -1899,6 +1899,13 @@ impl AppState {
             }
         };
         crate::audio::set_meng_stukken(mix_cores);
+        // RAM-plafond voor volledig geladen samples afhankelijk van het
+        // geheugen van deze pc (0.9.31; was vast 1,5 GB).
+        let ram = crate::commands::fysiek_geheugen_bytes();
+        let cap = crate::audio::bepaal_sample_cap(ram);
+        crate::audio::set_sample_cap_bytes(cap);
+        tracing::info!("Sample-cache: plafond {} MB (fysiek geheugen {} MB)",
+            cap / 1_000_000, ram.map(|r| r / 1_000_000).unwrap_or(0));
         vpo_sampler::set_stereo_loading(audio_prefs.stereo_samples.unwrap_or(true));
         crate::audio::set_preload_ms(audio_prefs.preload_ms.unwrap_or(crate::audio::PRELOAD_MS_DEFAULT));
         let saved_cfg = AudioOutputConfig {

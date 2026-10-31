@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::thread;
 use std::path::PathBuf;
 use parking_lot::RwLock;
@@ -45,9 +45,28 @@ static LOAD_RETRIES: AtomicU64 = AtomicU64::new(0);
 static LOAD_DONE: AtomicU64 = AtomicU64::new(0);
 static LOAD_LATENCY_SUM_US: AtomicU64 = AtomicU64::new(0);
 static LOAD_LATENCY_MAX_US: AtomicU64 = AtomicU64::new(0);
+/// Volledige samples die wegens het RAM-plafond zijn uitgezet (0.9.31).
+static SAMPLE_EVICTIONS: AtomicU64 = AtomicU64::new(0);
+/// Tijd per stap van een achtergrondlaadactie (µs, opgeteld) en geladen MB.
+static LOAD_T_DECODE_US: AtomicU64 = AtomicU64::new(0);
+static LOAD_T_LOOP_US: AtomicU64 = AtomicU64::new(0);
+static LOAD_T_RESAMPLE_US: AtomicU64 = AtomicU64::new(0);
+static LOAD_T_CACHE_US: AtomicU64 = AtomicU64::new(0);
+static LOAD_BYTES: AtomicU64 = AtomicU64::new(0);
+static LOAD_RESAMPLED: AtomicU64 = AtomicU64::new(0);
+
+/// (decode, loop, resample, cache) gemiddeld in ms per load, MB per load, aantal geresampled.
+pub fn load_stappen() -> (f64, f64, f64, f64, f64, u64) {
+    let n = LOAD_DONE.load(Ordering::Relaxed).max(1) as f64;
+    let ms = |a: &AtomicU64| a.load(Ordering::Relaxed) as f64 / 1000.0 / n;
+    (ms(&LOAD_T_DECODE_US), ms(&LOAD_T_LOOP_US), ms(&LOAD_T_RESAMPLE_US), ms(&LOAD_T_CACHE_US),
+     LOAD_BYTES.load(Ordering::Relaxed) as f64 / 1e6 / n, LOAD_RESAMPLED.load(Ordering::Relaxed))
+}
 
 #[derive(Debug, Clone, Copy, serde::Serialize)]
 pub struct LoaderStats {
+    pub evictions: u64,
+    pub sample_cap_mb: u64,
     pub preload_ms: u32,
     pub preload_underruns: u64,
     pub release_edge_hits: u64,
@@ -63,6 +82,8 @@ pub fn loader_stats() -> LoaderStats {
     let done = LOAD_DONE.load(Ordering::Relaxed);
     let sum = LOAD_LATENCY_SUM_US.load(Ordering::Relaxed);
     LoaderStats {
+        evictions: SAMPLE_EVICTIONS.load(Ordering::Relaxed),
+        sample_cap_mb: (sample_cap_bytes() / 1_000_000) as u64,
         preload_ms: preload_ms(),
         preload_underruns: PRELOAD_UNDERRUNS.load(Ordering::Relaxed),
         release_edge_hits: RELEASE_PRELOAD_EDGE_HITS.load(Ordering::Relaxed),
@@ -77,6 +98,36 @@ pub fn loader_stats() -> LoaderStats {
 
 /// Bovengrens van de render-eigen laadwachtrij (0.8.92).
 const PENDING_LOADS_CAP: usize = 4096;
+
+/// RAM-plafond voor VOLLEDIG geladen samples (bovenop de preloads). Tot 0.9.30
+/// vast 1,5 GB: op een groot surround-orgel past een akkoord van ~1000 stemmen
+/// daar niet in, zodat elke akkoordwissel samples wegduwde die bij de volgende
+/// weer nodig waren — eindeloos herladen, laders die de CPU van het mengen
+/// opeten en preloads die opraken (hoorbaar). Nu standaard afgeleid van het
+/// fysieke geheugen (zie `bepaal_sample_cap`); 0 = nog niet bepaald.
+static SAMPLE_CAP_BYTES: AtomicUsize = AtomicUsize::new(0);
+const SAMPLE_CAP_MIN: usize = 1_500_000_000;
+
+/// Standaardplafond: 30% van het fysieke geheugen, minimaal 1,5 GB en
+/// hoogstens 16 GB. Op 8 GB RAM blijft het 1,5 GB (zoals voorheen); op 16 GB
+/// ~4,8 GB; op 32 GB ~9,6 GB.
+pub fn bepaal_sample_cap(ram_bytes: Option<u64>) -> usize {
+    match ram_bytes {
+        Some(ram) => ((ram as f64 * 0.30) as usize).clamp(SAMPLE_CAP_MIN, 16_000_000_000),
+        None => SAMPLE_CAP_MIN,
+    }
+}
+
+pub fn set_sample_cap_bytes(n: usize) {
+    SAMPLE_CAP_BYTES.store(n.max(200_000_000), Ordering::Relaxed);
+}
+
+pub fn sample_cap_bytes() -> usize {
+    match SAMPLE_CAP_BYTES.load(Ordering::Relaxed) {
+        0 => SAMPLE_CAP_MIN,
+        n => n,
+    }
+}
 /// Deadline-markering voor een vers verzoek (nog geen stand uit de pre-pass).
 const LOAD_DEADLINE_VERS: f64 = f64::MAX;
 
@@ -695,6 +746,76 @@ pub fn render_overload_count() -> u64 {
 static LICHT_INTERP_CALLBACKS: AtomicU64 = AtomicU64::new(0);
 pub fn licht_interp_callbacks() -> u64 {
     LICHT_INTERP_CALLBACKS.load(Ordering::Relaxed)
+}
+
+/// Segmenttijden van de hele callback, in tienduizendsten van de buffertijd
+/// (10.000 = 100%). De passen in `RENDER_PASS_PM` dekken alleen de bloklus; een
+/// groot deel van de callback (stemstarts, laden, voorrekenen, opruimen) bleef
+/// daardoor onzichtbaar. Segmenten: 0 laden/opruimwachtrij, 1 commando's
+/// (stemstarts en -stops), 2 voorrekenen per stem, 3 mengen+keten (bloklus),
+/// 4 afronden (uitgeklonken stemmen weg, meters).
+pub const SEG_NAMEN: [&str; 5] = ["laden", "commandos", "voorrekenen", "mengen", "afronden"];
+static SEG_EMA: [AtomicU32; 5] = [AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0)];
+static SEG_PIEK: [AtomicU32; 5] = [AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0)];
+/// De zwaarste callback sinds de laatste uitlezing: totaal, per segment, het
+/// aantal stemmen en het aantal stemstarts in die callback.
+static SLECHTSTE_TOTAAL: AtomicU32 = AtomicU32::new(0);
+static SLECHTSTE_SEG: [AtomicU32; 5] = [AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0)];
+static SLECHTSTE_STEMMEN: AtomicU32 = AtomicU32::new(0);
+static SLECHTSTE_STARTS: AtomicU32 = AtomicU32::new(0);
+static SLECHTSTE_CMDS: AtomicU32 = AtomicU32::new(0);
+
+/// Wachttijd per lock (en restposten) in het voorreken-segment van de
+/// zwaarste callback, in nanoseconden. Zo is te zien of de audio-thread op een
+/// lock staat te wachten die een andere thread vasthoudt.
+pub const LOCK_NAMEN: [&str; 35] = [
+    "master_gain", "division_gains", "division_pans", "output_channels", "ccis_enabled",
+    "ccis_params", "wind_groups", "swell_configs", "stop_to_division", "temperament",
+    "auto_retune", "voices", "swell_filters", "voicing", "odf_voicing", "odf_retune",
+    "wind_models", "trem_lfos", "stops_with_trem", "reverb_instelling", "fdn_reverb",
+    "conv_reverb", "eq_kanalen", "uit_eq", "voorrekenlus", "voor_locks",
+    "galm_overgang", "laadverzoeken", "stemmenlus", "wind_na", "rest_na",
+    "ld_filter", "ld_sort", "ld_verstuur", "ld_aantal",
+];
+static SLECHTSTE_LOCK: [AtomicU64; 35] = [const { AtomicU64::new(0) }; 35];
+
+/// Tijdt één expressie (typisch een lock-acquisitie) in `$arr[$slot]` (ns).
+macro_rules! getimed {
+    ($arr:ident, $slot:expr, $e:expr) => {{
+        let __t = std::time::Instant::now();
+        let __r = $e;
+        $arr[$slot] = __t.elapsed().as_nanos() as u64;
+        __r
+    }};
+}
+
+/// Lock-wachttijden (ns) van de zwaarste callback sinds de vorige uitlezing.
+pub fn neem_slechtste_locks() -> [u64; 35] {
+    let mut uit = [0u64; 35];
+    for i in 0..35 { uit[i] = SLECHTSTE_LOCK[i].swap(0, Ordering::Relaxed); }
+    uit
+}
+
+/// (gemiddelde, piek) per segment als fractie van de buffertijd.
+pub fn callback_segmenten() -> [(f32, f32); 5] {
+    let mut uit = [(0.0f32, 0.0f32); 5];
+    for i in 0..5 {
+        uit[i] = (SEG_EMA[i].load(Ordering::Relaxed) as f32 / 10_000.0,
+                  SEG_PIEK[i].load(Ordering::Relaxed) as f32 / 10_000.0);
+    }
+    uit
+}
+
+/// De zwaarste callback sinds de vorige aanroep, daarna gewist:
+/// (totaal, segmenten, stemmen, stemstarts, commando's), fracties van de buffertijd.
+pub fn neem_slechtste_callback() -> (f32, [f32; 5], u32, u32, u32) {
+    let totaal = SLECHTSTE_TOTAAL.swap(0, Ordering::Relaxed) as f32 / 10_000.0;
+    let mut seg = [0.0f32; 5];
+    for i in 0..5 { seg[i] = SLECHTSTE_SEG[i].swap(0, Ordering::Relaxed) as f32 / 10_000.0; }
+    (totaal, seg,
+     SLECHTSTE_STEMMEN.swap(0, Ordering::Relaxed),
+     SLECHTSTE_STARTS.swap(0, Ordering::Relaxed),
+     SLECHTSTE_CMDS.swap(0, Ordering::Relaxed))
 }
 
 /// Rendertijd per pas van de mengloop, in tienduizendsten van de buffertijd
@@ -3942,7 +4063,9 @@ fn run_audio_thread(
     // bewust kort (4 per werker): de volgorde wordt in de render-thread
     // bepaald (deadline eerst, vervallen verzoeken weg — zie pending_loads),
     // niet door een lange FIFO die al vol zat met werk voor dode stemmen.
-    let n_workers = crate::mengpool::fysieke_kernen().saturating_sub(1).clamp(3, 8);
+    let n_workers = std::env::var("JM_LAADWERKERS").ok().and_then(|v| v.parse::<usize>().ok())
+        .map(|n| n.clamp(1, 16))
+        .unwrap_or_else(|| crate::mengpool::fysieke_kernen().saturating_sub(1).clamp(3, 8));
     let (load_tx, load_rx) = bounded::<LoadRequest>(n_workers * 4);
     // None = laden mislukt: de render-thread moet dan wél zijn in-flight-marker
     // opruimen, anders zou die pijp deze sessie nooit meer bijgeladen worden.
@@ -4023,11 +4146,16 @@ fn run_audio_thread(
                                     }
                                 }
                             }
-                            match load_audio(&path) {
+                            let t_dec = std::time::Instant::now();
+                            let geladen = load_audio(&path);
+                            LOAD_T_DECODE_US.fetch_add(t_dec.elapsed().as_micros() as u64, Ordering::Relaxed);
+                            match geladen {
                                 Ok(mut sample_data) => {
+                                    LOAD_BYTES.fetch_add(sample_data.bytes() as u64, Ordering::Relaxed);
                                     // GO-regel: ODF-looppunten winnen van de smpl-chunk —
                                     // zelfde override als het preload-pad, anders verspringt
                                     // de loop op het preload→full-upgrademoment.
+                                    let t_loop = std::time::Instant::now();
                                     if let Some((ls, le)) = odf_loop {
                                         if le > ls {
                                             sample_data.loop_start = Some(ls as u64);
@@ -4035,8 +4163,11 @@ fn run_audio_thread(
                                             vpo_sampler::optimize_loop_points(&mut sample_data);
                                         }
                                     }
+                                    LOAD_T_LOOP_US.fetch_add(t_loop.elapsed().as_micros() as u64, Ordering::Relaxed);
                                     // Resample if needed
+                                    let t_rs = std::time::Instant::now();
                                     if sample_data.sample_rate != target_rate {
+                                        LOAD_RESAMPLED.fetch_add(1, Ordering::Relaxed);
                                         match resample(&sample_data, target_rate) {
                                             Ok(resampled) => sample_data = resampled,
                                             Err(e) => {
@@ -4048,13 +4179,16 @@ fn run_audio_thread(
                                             }
                                         }
                                     }
+                                    LOAD_T_RESAMPLE_US.fetch_add(t_rs.elapsed().as_micros() as u64, Ordering::Relaxed);
                                     let sample = Arc::new(sample_data);
+                                    let t_c = std::time::Instant::now();
                                     {
                                         // Verlopen generaties en dode verwijzingen opruimen.
                                         let mut cache = decode_cache.lock();
                                         cache.retain(|_, (g, w)| *g == generation && w.strong_count() > 0);
                                         cache.insert(path.clone(), (generation, Arc::downgrade(&sample)));
                                     }
+                                    LOAD_T_CACHE_US.fetch_add(t_c.elapsed().as_micros() as u64, Ordering::Relaxed);
                                     let _ = loaded_tx_clone.send((key, Some(sample), generation));
                                     noteer_laadlatentie(requested_at);
                                 }
@@ -4174,7 +4308,8 @@ fn run_audio_thread(
     // gekraak, en een orgelwissel daarna dropte al die GB's in één callback.
     // Eviction is altijd veilig: klinkende voices houden hun eigen Arc vast;
     // een geëvicte pijp start de volgende keer gewoon weer van zijn preload.
-    const SAMPLES_BYTES_CAP: usize = 1_500_000_000; // ~1,5 GB
+    // Sinds 0.9.31 instelbaar via `sample_cap_bytes()` (zie daar): 1,5 GB vast
+    // bleek op grote surround-sets veel te krap.
     let mut samples_bytes: usize = 0;
     let mut sample_fifo: std::collections::VecDeque<(u32, u32)> = std::collections::VecDeque::new();
     // Afvoerluik naar de janitor (zender + wachtrij voor wat de janitor even
@@ -4277,6 +4412,10 @@ fn run_audio_thread(
             let live_cap = polyphony_target();
             let render_t0 = std::time::Instant::now();
             let mut mix_ns_dit: u64 = 0;
+            // Segmentgrenzen voor de callback-meting (zie SEG_NAMEN), en de
+            // wachttijd per lock in het voorreken-segment (zie LOCK_NAMEN).
+            let mut seg_t = [render_t0; 6];
+            let mut lw = [0u64; 35];
 
             // Paniek (0.7.74): alle stemmen los; de notencommando's die nog in
             // de wachtrij staan worden hieronder weggegooid (de toetsen gelden
@@ -4370,16 +4509,19 @@ fn run_audio_thread(
             // deallocatie naar het moment dat die stem eindigt — óók dan via de
             // janitor (zie `GcSink::dispose_voice`).
             let mut evicted = 0;
-            while samples_bytes > SAMPLES_BYTES_CAP && evicted < 4 {
+            let sample_cap = sample_cap_bytes();
+            while samples_bytes > sample_cap && evicted < 4 {
                 let Some(old_key) = sample_fifo.pop_front() else { break; };
                 if let Some(old) = samples_clone.write().remove(&old_key) {
                     samples_bytes = samples_bytes
                         .saturating_sub(old.bytes());
                     gc.dispose_sample(old);
                     evicted += 1;
+                    SAMPLE_EVICTIONS.fetch_add(1, Ordering::Relaxed);
                 }
             }
 
+            seg_t[1] = std::time::Instant::now();
             // Process commands. Gecapt per callback: een tutti-akkoord op veel
             // registers (of een crescendo-trapwissel) levert in één klap honderden
             // NoteOn/ReleaseStop-commando's; die allemaal binnen één callback
@@ -5634,6 +5776,7 @@ fn run_audio_thread(
                     }
                 }
             }
+            seg_t[2] = std::time::Instant::now();
 
             if !running_clone.load(Ordering::Relaxed) {
                 data.fill(0.0);
@@ -5660,16 +5803,17 @@ fn run_audio_thread(
             // routing). Dat scheelt zes heap-allocaties per callback; op ASIO4ALL
             // (zeer hoge callback-frequentie) is dat merkbaar minder allocatie-
             // jitter op de audio-thread — precies wat gekraak veroorzaakt.
-            let gain_doel = *master_gain_clone.read() * *master_expression_clone.read();
+            lw[25] = seg_t[2].elapsed().as_nanos() as u64;
+            let gain_doel = getimed!(lw, 0, *master_gain_clone.read() * *master_expression_clone.read());
             if master_gain_nu < 0.0 { master_gain_nu = gain_doel; }
-            let div_gains = division_gains_clone.read();
-            let div_pans = division_pans_clone.read();
-            let out_chans_lock = output_channels_clone.read();
-            let ccis_en_lock = ccis_enabled_clone.read();
-            let (ccis_strength, ccis_falloff, ccis_swap) = *ccis_params_clone.read();
-            let wind_group_assignment = wind_groups_clone.read();
-            let swell_cfgs = swell_configs_clone.read();
-            let stop_div_map = stop_to_division_clone.read();
+            let div_gains = getimed!(lw, 1, division_gains_clone.read());
+            let div_pans = getimed!(lw, 2, division_pans_clone.read());
+            let out_chans_lock = getimed!(lw, 3, output_channels_clone.read());
+            let ccis_en_lock = getimed!(lw, 4, ccis_enabled_clone.read());
+            let (ccis_strength, ccis_falloff, ccis_swap) = getimed!(lw, 5, *ccis_params_clone.read());
+            let wind_group_assignment = getimed!(lw, 6, wind_groups_clone.read());
+            let swell_cfgs = getimed!(lw, 7, swell_configs_clone.read());
+            let stop_div_map = getimed!(lw, 8, stop_to_division_clone.read());
             // Galm-gewichten per kanaal: de galm moet over DEZELFDE kanalen
             // lopen als het droge signaal (testorgel-feedback: op het
             // hoofdtelefoonprofiel [0,1] klonk de galm door op de speaker-
@@ -5678,26 +5822,26 @@ fn run_audio_thread(
             // vaste arrays, dus geen allocatie op de audio-thread.
             let n_real_divs = stop_div_map.values().map(|&d| d as usize + 1).max().unwrap_or(0);
             let (wet_w_l, wet_w_r, wet_ch) = wet_channel_weights(&out_chans_lock, n_real_divs, channels);
-            let (temp_ratios, retune_from_temp) = *temperament_clone.read();
+            let (temp_ratios, retune_from_temp) = getimed!(lw, 9, *temperament_clone.read());
             // Auto-retune (0.8.85): standaard aan. Alleen uit als expliciet
             // gezet door de gebruiker. OR-combinatie met de temperament-vlag:
             // Origineel-stemming + auto-retune uit = helemaal geen retune.
             // 0.9.23: een set zonder originele orgeltoonhoogte (Hauptwerk
             // EnablePlayingAtOriginalOrganPitch = N) heeft geen opnametoon om op
             // terug te vallen en speelt altijd op de getempereerde doeltoon.
-            let retune_on = retune_from_temp || *auto_retune_on_clone.read() || *force_tempered_on_clone.read();
+            let retune_on = getimed!(lw, 10, retune_from_temp || *auto_retune_on_clone.read() || *force_tempered_on_clone.read());
             let mut peak_l = 0.0f32;
             let mut peak_r = 0.0f32;
 
             {
-                let mut voices_lock = voices_clone.write();
-                let mut swell_flt = swell_filters_clone.write();
-                let pipe_voicing_map = voicing_clone.read();
-                let odf_voicing_map = odf_voicing_clone.read();
-                let odf_retune_map = odf_retune_clone.read();
-                let mut wm = wind_models_clone.write();
-                let mut trem_lfo = trem_lfos_clone.write();
-                let stops_with_trem = stops_with_trem_clone.read();
+                let mut voices_lock = getimed!(lw, 11, voices_clone.write());
+                let mut swell_flt = getimed!(lw, 12, swell_filters_clone.write());
+                let pipe_voicing_map = getimed!(lw, 13, voicing_clone.read());
+                let odf_voicing_map = getimed!(lw, 14, odf_voicing_clone.read());
+                let odf_retune_map = getimed!(lw, 15, odf_retune_clone.read());
+                let mut wm = getimed!(lw, 16, wind_models_clone.write());
+                let mut trem_lfo = getimed!(lw, 17, trem_lfos_clone.write());
+                let stops_with_trem = getimed!(lw, 18, stops_with_trem_clone.read());
 
                 // De telling van het windverbruik zit sinds 0.7.51 in de
                 // pre-pass hieronder (één iteratie over de stemmen i.p.v. twee,
@@ -5710,17 +5854,18 @@ fn run_audio_thread(
                 let ccis_on = ccis_strength > 1e-4;
 
                 // Galm + EQ: locks één keer per callback nemen (niet per sample).
-                let use_algo = *use_algo_reverb_clone.read();
-                let reverb_mix_now = *reverb_mix_clone.read() * *reverb_pos_factor_clone.read();
-                let mut fdn_lock = fdn_reverb_clone.write();
-                let mut conv_lock = reverb_clone.write();
+                let (use_algo, reverb_mix_now) = getimed!(lw, 19, (*use_algo_reverb_clone.read(),
+                    *reverb_mix_clone.read() * *reverb_pos_factor_clone.read()));
+                let mut fdn_lock = getimed!(lw, 20, fdn_reverb_clone.write());
+                let mut conv_lock = getimed!(lw, 21, reverb_clone.write());
                 let eq_on = *eq_enabled_clone.read();
                 // Testsignaal dóór de EQ (soort 2): één keer per callback lezen.
                 let testsig_door_eq = test_signal().filter(|t| t.1 == 2);
                 let testsig_freq = test_signal_freq();
-                let mut eq_chains = eq_channels_clone.write();
+                let mut eq_chains = getimed!(lw, 22, eq_channels_clone.write());
                 let uit_eq_on = *uit_eq_aan_clone.read();
-                let mut uit_eq_ketens = uit_eq_ketens_clone.write();
+                let mut uit_eq_ketens = getimed!(lw, 23, uit_eq_ketens_clone.write());
+                let t_na_locks = std::time::Instant::now();
 
                 // Galm-bypass-overgang: zodra de mix naar 0 gaat wordt het
                 // galmblok in de frame-lus overgeslagen (rekenwerk besparen),
@@ -5735,6 +5880,8 @@ fn run_audio_thread(
                     }
                 }
                 reverb_was_audible = reverb_audible;
+                let t_g1 = std::time::Instant::now();
+                lw[26] = t_g1.saturating_duration_since(t_na_locks).as_nanos() as u64;
 
                 // ── Voorrekenen per voice (één keer per callback, niet per sample) ──
                 // De divisie-index, de gestapelde voicing (gebruiker + ODF-intonatie)
@@ -5758,14 +5905,46 @@ fn run_audio_thread(
                         None if *dl == LOAD_DEADLINE_VERS => { *dl = LOAD_DEADLINE_VERS / 2.0; true }
                         None => { inflight_loads.remove(&req.0); false }
                     });
-                    pending_loads.make_contiguous().sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
-                    while let Some((dl, req)) = pending_loads.pop_front() {
+                    let t_ld1 = std::time::Instant::now();
+                    lw[31] = t_ld1.saturating_duration_since(t_g1).as_nanos() as u64;
+                    lw[34] = pending_loads.len() as u64;
+                    // Alleen de k meest urgente verzoeken naar voren halen, met
+                    // k = de vrije plaatsen in het kanaal naar de laders
+                    // (0.9.31). Tot 0.9.30 werd de HELE wachtrij elke callback
+                    // stabiel gesorteerd: tijdens zwaar spel staan er 600-1100
+                    // verzoeken klaar, terwijl het kanaal (~28 plaatsen) vrijwel
+                    // altijd vol zit — dat kostte 4-11 ms per callback en de
+                    // stabiele sort alloceerde ook nog een hulpbuffer op de
+                    // audio-thread. Gemeten de hoofdoorzaak van de piek-
+                    // callbacks boven 100%. Nu: kanaal vol → niets doen; anders
+                    // select_nth_unstable (O(n), in-place, geen allocatie) plus
+                    // een sort van alleen die k stuks.
+                    let vrij = load_tx_clone.capacity().unwrap_or(usize::MAX)
+                        .saturating_sub(load_tx_clone.len());
+                    let k = vrij.min(pending_loads.len());
+                    if k > 0 {
+                        let urgentie = |a: &(f64, LoadRequest), b: &(f64, LoadRequest)| {
+                            a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal)
+                        };
+                        let rij = pending_loads.make_contiguous();
+                        if k < rij.len() {
+                            rij.select_nth_unstable_by(k - 1, urgentie);
+                        }
+                        rij[..k].sort_unstable_by(urgentie);
+                    }
+                    let t_ld2 = std::time::Instant::now();
+                    lw[32] = t_ld2.saturating_duration_since(t_ld1).as_nanos() as u64;
+                    for _ in 0..k {
+                        let Some((dl, req)) = pending_loads.pop_front() else { break };
                         if let Err(e) = load_tx_clone.try_send(req) {
                             pending_loads.push_front((dl, e.into_inner()));
                             break;
                         }
                     }
+                    lw[33] = t_ld2.elapsed().as_nanos() as u64;
                 }
+                let t_g2 = std::time::Instant::now();
+                lw[27] = t_g2.saturating_duration_since(t_g1).as_nanos() as u64;
                 gewenst.clear();
                 let mut herhaal_budget = 8usize;
                 for voice in voices_lock.iter_mut() {
@@ -5877,6 +6056,8 @@ fn run_audio_thread(
                 // Verbruik per windgroep, de referentie "vol werk" van die groep
                 // (het pleno van haar divisies × balggrootte), en de stoten die
                 // de commando's van deze callback opleverden.
+                let t_g3 = std::time::Instant::now();
+                lw[28] = t_g3.saturating_duration_since(t_g2).as_nanos() as u64;
                 let mut q_grp = [0.0f32; 32];
                 let mut q_ref = [0.0f32; 32];
                 let mut n_grp = [0u32; 32];
@@ -5929,6 +6110,8 @@ fn run_audio_thread(
                 // divisie live verpannen blijft direct hoorbaar. Alleen wanneer de
                 // C/Cis-spreiding voor een divisie aanstaat wijkt de pan per noot af
                 // en rekenen we cos/sin daar in de lus opnieuw uit.
+                let t_g4 = std::time::Instant::now();
+                lw[29] = t_g4.saturating_duration_since(t_g3).as_nanos() as u64;
                 let mut div_pan_cos = [0.0f32; 32];
                 let mut div_pan_sin = [0.0f32; 32];
                 for d in 0..32 {
@@ -5978,6 +6161,9 @@ fn run_audio_thread(
                 // Tijdmeting per pas (fase 1). Opgeteld over alle blokken van
                 // deze callback; aan het eind omgerekend naar promille van de
                 // buffertijd.
+                seg_t[3] = std::time::Instant::now();
+                lw[24] = seg_t[3].saturating_duration_since(t_na_locks).as_nanos() as u64;
+                lw[30] = seg_t[3].saturating_duration_since(t_g4).as_nanos() as u64;
                 let mut ns_pass = [0u128; 4];
                 let mut fi = 0usize;
                 while fi < n_frames {
@@ -6385,6 +6571,7 @@ fn run_audio_thread(
                     bg_engine.mix_interleaved_met_opname(data, fi, bn, channels, rec_blok);
                     fi += bn;
                 }
+                seg_t[4] = std::time::Instant::now();
                 // Tijdmeting per pas wegschrijven (fase 1): promille van de
                 // buffertijd, zelfde EMA-venster (16 callbacks) als de totale
                 // belastingsmeter zodat de getallen vergelijkbaar zijn.
@@ -6455,6 +6642,28 @@ fn run_audio_thread(
                 let budget = frames_now as f64 / sample_rate as f64;
                 let load = render_t0.elapsed().as_secs_f64() / budget;
                 let pm = (load * 1000.0).clamp(0.0, 9999.0) as u32;
+                // Segmentmeting: waar gaat de tijd van DEZE callback heen?
+                seg_t[5] = std::time::Instant::now();
+                let budget_ns = budget * 1e9;
+                let mut seg_tt = [0u32; 5];
+                for i in 0..5 {
+                    let ns = seg_t[i + 1].saturating_duration_since(seg_t[i]).as_nanos() as f64;
+                    let v = ((ns / budget_ns) * 10_000.0).clamp(0.0, 999_999.0) as u32;
+                    seg_tt[i] = v;
+                    let prev = SEG_EMA[i].load(Ordering::Relaxed);
+                    SEG_EMA[i].store((prev * 15 + v) / 16, Ordering::Relaxed);
+                    let piek = SEG_PIEK[i].load(Ordering::Relaxed);
+                    SEG_PIEK[i].store(v.max(piek.saturating_sub(piek / 200 + 1)), Ordering::Relaxed);
+                }
+                let totaal_tt = (load * 10_000.0).clamp(0.0, 999_999.0) as u32;
+                if totaal_tt > SLECHTSTE_TOTAAL.load(Ordering::Relaxed) {
+                    SLECHTSTE_TOTAAL.store(totaal_tt, Ordering::Relaxed);
+                    for i in 0..5 { SLECHTSTE_SEG[i].store(seg_tt[i], Ordering::Relaxed); }
+                    SLECHTSTE_STEMMEN.store(voice_count_clone.load(Ordering::Relaxed) as u32, Ordering::Relaxed);
+                    SLECHTSTE_STARTS.store(spawns_done as u32, Ordering::Relaxed);
+                    SLECHTSTE_CMDS.store(cmds_done, Ordering::Relaxed);
+                    for i in 0..35 { SLECHTSTE_LOCK[i].store(lw[i], Ordering::Relaxed); }
+                }
                 let prev = RENDER_LOAD_PM.load(Ordering::Relaxed);
                 // EMA met alpha 1/16: het venster is 16 CALLBACKS, niet een vaste
                 // tijd — bij 32 frames ≈ 11 ms, bij 512 frames ≈ 170 ms. Een
@@ -6488,9 +6697,19 @@ fn run_audio_thread(
                         } else {
                             "het mengen van de stemmen overheerst — trek minder registers, kies meer rekenkernen bij Audio-uitvoer, of zet de buffer hoger"
                         };
-                        warn!("Audio-render zwaar belast: deze callback {}% van de buffertijd (gemiddeld {}%) bij {} frames ({:.2} ms), {} stemmen (kap {}); verdeling: mengen {}%, nabewerking {}%, wind {}%, optellen {}%; lichte interpolatie: {}×; {} zware callbacks sinds start — {}",
+                        // Segmenten van DEZE (zware) callback (0.9.31): welk
+                        // deel liep uit — laden, stemstarts, voorrekenen of het
+                        // mengen zelf. Plus de laadstand: preload-tekorten
+                        // betekenen dat de laders achterlopen.
+                        let seg = |i: usize| seg_tt[i] / 100;
+                        let ls = loader_stats();
+                        warn!("Audio-render zwaar belast: deze callback {}% van de buffertijd (gemiddeld {}%) bij {} frames ({:.2} ms), {} stemmen (kap {}); deze callback: laden {}%, stemstarts {}%, voorrekenen {}%, mengen {}%; gemiddeld: mengen {}%, nabewerking {}%, wind {}%; lichte interpolatie: {}×; laders: {} aanvragen wachtend-gem. {:.0} ms, {} preload-tekorten, {} uitzettingen (plafond {} MB); {} zware callbacks sinds start — {}",
                             pm / 10, RENDER_LOAD_PM.load(Ordering::Relaxed) / 10, frames_now, frames_now as f64 * 1000.0 / sample_rate as f64,
-                            stemmen, live_cap, meng_pct, keten_pct, wind_pct, opt_pct, LICHT_INTERP_CALLBACKS.load(Ordering::Relaxed), overload_callbacks, advies);
+                            stemmen, live_cap, seg(0), seg(1), seg(2), seg(3), meng_pct, keten_pct, wind_pct,
+                            LICHT_INTERP_CALLBACKS.load(Ordering::Relaxed),
+                            pending_loads.len(), ls.latency_avg_ms, ls.preload_underruns, ls.evictions, ls.sample_cap_mb,
+                            overload_callbacks, advies);
+                        let _ = opt_pct;
                         last_overload_warn = Some(std::time::Instant::now());
                     }
                 }
@@ -7063,6 +7282,81 @@ mod meng_verdeling_tests {
         }
         reduceer_deeltabellen(&mut hoofd_l, &mut hoofd_r, &deel_l, &deel_r, stukken, 4, bn);
         (hoofd_l, hoofd_r)
+    }
+
+    /// Benchmark (handmatig, release): kosten van de mengkern per stem per
+    /// sample bij 1000 stemmen met elk een eigen stereo-buffer, tegenover het
+    /// kale minimum (alleen de stereo-interpolatie). `cargo test --release -p
+    /// vpo-app --bins bench_mengkern -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn bench_mengkern() {
+        let n = 1000usize;
+        let len = 48_000usize;
+        let maak = |zaad: usize| -> Arc<PreloadBuffer> {
+            let l: Vec<f32> = (0..len).map(|i| ((i as f32 * 0.013 + zaad as f32).sin()) * 0.5).collect();
+            let r: Vec<f32> = (0..len).map(|i| ((i as f32 * 0.011 + zaad as f32).cos()) * 0.5).collect();
+            Arc::new(PreloadBuffer {
+                attack_data: l, attack_right: Some(r), sample_rate: 48000, total_samples: len,
+                loop_start: Some(12_000), loop_end: Some(44_000),
+                source_path: std::path::PathBuf::from("bench.wav"), channels: 2, bits_per_sample: 24,
+                data_offset: 44, align_table: None, trim_start: 0, smpl_unity_note: None,
+                smpl_pitch_fraction_cents: None,
+            })
+        };
+        let bufs: Vec<_> = (0..n).map(maak).collect();
+        let mut voices: Vec<PlayingVoice> = (0..n).map(|i| {
+            let mut v = PlayingVoice::new_from_preload(bufs[i].clone(), i as u32, i as u32 + 1, 36 + (i % 48) as u8, 1.0, 48000);
+            v.c_div = i % 4;
+            v.c_pitch_mul = 1.0 + (i % 7) as f64 * 0.0013;
+            v.c_use_lfo_trem = i % 3 == 0;
+            v.c_voicing_gain = 0.8;
+            v.c_kp = [0.064, 0.046, 0.028, 0.0][i % 4];
+            v.c_kg = 2.0;
+            v.c_dev_a = 0.02;
+            v.position = (i * 37 % 20_000) as f64;
+            v
+        }).collect();
+        let bn = 480usize;
+        let wind_dev = vec![[-0.01f32; 32]; bn];
+        let trem_rate = vec![[1.0f64; 32]; bn];
+        let trem_amp = vec![[1.0f32; 32]; bn];
+        let pan_cos = [0.7071f32; 32];
+        let pan_sin = [0.7071f32; 32];
+        let pans = vec![0.0f32; 32];
+        let ccis_en = vec![false; 32];
+        let blok = blok_context(&wind_dev, &trem_rate, &trem_amp, &pan_cos, &pan_sin, &pans, &ccis_en, bn, false);
+        let mut dl = vec![[0.0f32; 32]; bn];
+        let mut dr = vec![[0.0f32; 32]; bn];
+        let rondes = 40;
+        // Opwarmen.
+        meng_stemmen_blok(&mut voices, &mut dl, &mut dr, &blok);
+        let t = std::time::Instant::now();
+        for _ in 0..rondes { meng_stemmen_blok(&mut voices, &mut dl, &mut dr, &blok); }
+        let ns_meng = t.elapsed().as_nanos() as f64 / (rondes * n * bn) as f64;
+
+        // Kaal minimum: alleen stereo-hermite op dezelfde buffers.
+        let mut pos: Vec<f64> = (0..n).map(|i| (i * 37 % 20_000) as f64).collect();
+        let mut som = 0.0f32;
+        let t = std::time::Instant::now();
+        for _ in 0..rondes {
+            for (i, b) in bufs.iter().enumerate() {
+                let r = b.attack_right.as_ref().unwrap();
+                let mut p = pos[i];
+                for _ in 0..bn {
+                    let k = p as usize;
+                    let fr = (p - k as f64) as f32;
+                    som += hermite4(&b.attack_data, k, fr) + hermite4(r, k, fr);
+                    p += 1.0013;
+                    if p >= 44_000.0 { p -= 32_000.0; }
+                }
+                pos[i] = p;
+            }
+        }
+        let ns_kaal = t.elapsed().as_nanos() as f64 / (rondes * n * bn) as f64;
+        println!("mengkern: {:.1} ns per stem-sample | kaal minimum (stereo-hermite): {:.1} ns | overhead {:.1}x  (som {})",
+            ns_meng, ns_kaal, ns_meng / ns_kaal, som);
+        println!("→ 1000 stemmen × 480 frames op 1 kern: {:.1} ms per blok (buffer = 10 ms)", ns_meng * (n * bn) as f64 / 1e6);
     }
 
     /// Grootste absolute verschil tussen twee tabellen, en het grootste

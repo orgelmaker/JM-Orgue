@@ -621,7 +621,7 @@ where
 /// Fysiek geheugen van deze pc in bytes (Windows: GlobalMemoryStatusEx).
 /// None op andere platforms of bij een mislukte aanroep → geen RAM-rem.
 #[cfg(windows)]
-fn fysiek_geheugen_bytes() -> Option<u64> {
+pub(crate) fn fysiek_geheugen_bytes() -> Option<u64> {
     use windows_sys::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
     unsafe {
         let mut st: MEMORYSTATUSEX = std::mem::zeroed();
@@ -631,7 +631,7 @@ fn fysiek_geheugen_bytes() -> Option<u64> {
     }
 }
 #[cfg(not(windows))]
-fn fysiek_geheugen_bytes() -> Option<u64> { None }
+pub(crate) fn fysiek_geheugen_bytes() -> Option<u64> { None }
 
 /// Preload per BUFFER (bytes): het geladen begin van één opname, gemeten op
 /// grote sets (0,79 MB per ingang; zie geheugenonderzoek). Een pijp heeft

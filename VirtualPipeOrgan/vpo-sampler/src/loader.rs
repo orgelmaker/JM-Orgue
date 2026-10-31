@@ -411,6 +411,103 @@ mod detect_container_tests {
         assert_eq!(detect_container(h), None);
     }
 
+    /// De snelle WAV-lezer (0.9.31) moet exact dezelfde samples opleveren als
+    /// de oude hound-route, voor elk ondersteund formaat, mono en stereo.
+    #[test]
+    fn snelle_wavlezer_is_bitidentiek_aan_hound() {
+        use hound::{SampleFormat, WavSpec, WavWriter};
+        let dir = std::env::temp_dir().join("jm_snelle_wav_test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let gevallen: &[(u16, u16, SampleFormat)] = &[
+            (1, 8, SampleFormat::Int), (2, 16, SampleFormat::Int), (1, 16, SampleFormat::Int),
+            (2, 24, SampleFormat::Int), (1, 24, SampleFormat::Int), (2, 32, SampleFormat::Int),
+            (2, 32, SampleFormat::Float), (1, 32, SampleFormat::Float),
+        ];
+        for &(ch, bits, fmt) in gevallen {
+            let p = dir.join(format!("t_{}_{}_{:?}.wav", ch, bits, fmt));
+            let spec = WavSpec { channels: ch, sample_rate: 48_000, bits_per_sample: bits, sample_format: fmt };
+            let mut w = WavWriter::create(&p, spec).unwrap();
+            let n = 1000usize;
+            for i in 0..n * ch as usize {
+                let x = ((i as f32) * 0.137).sin() * 0.9;
+                match (fmt, bits) {
+                    (SampleFormat::Float, _) => w.write_sample(x).unwrap(),
+                    (_, 8) => w.write_sample((x * 127.0) as i8).unwrap(),
+                    (_, 16) => w.write_sample((x * 32000.0) as i16).unwrap(),
+                    (_, 24) => w.write_sample((x * 8_000_000.0) as i32).unwrap(),
+                    _ => w.write_sample((x * 2_000_000_000.0) as i32).unwrap(),
+                }
+            }
+            w.finalize().unwrap();
+
+            // Oude route: hound per sample, dan splitsen.
+            let r = hound::WavReader::open(&p).unwrap();
+            let s = r.spec();
+            let max_val = (1i64 << (s.bits_per_sample - 1)) as f32;
+            let oud: Vec<f32> = match (s.sample_format, s.bits_per_sample) {
+                (SampleFormat::Float, _) => r.into_samples::<f32>().map(|x| x.unwrap()).collect(),
+                (_, 8) => r.into_samples::<i8>().map(|x| x.unwrap() as f32 / max_val).collect(),
+                (_, 16) => r.into_samples::<i16>().map(|x| x.unwrap() as f32 / max_val).collect(),
+                _ => r.into_samples::<i32>().map(|x| x.unwrap() as f32 / max_val).collect(),
+            };
+            let (ol, or) = super::split_channels(oud, s.channels);
+
+            let nieuw = super::load_wav_snel(&p).expect("snelle route moet dit formaat lezen");
+            assert_eq!(nieuw.data.len(), ol.len(), "{:?}", p);
+            assert!(nieuw.data.iter().zip(&ol).all(|(a, b)| a.to_bits() == b.to_bits()), "links verschilt: {:?}", p);
+            match (&nieuw.right, &or) {
+                (Some(a), Some(b)) => assert!(a.iter().zip(b).all(|(x, y)| x.to_bits() == y.to_bits()), "rechts verschilt: {:?}", p),
+                (None, None) => {}
+                _ => panic!("kanalen verschillen: {:?}", p),
+            }
+            assert_eq!(nieuw.sample_rate, 48_000);
+        }
+    }
+
+    /// Benchmark (handmatig): tijd per onderdeel van een volledige laadactie op
+    /// echte bestanden. `JM_BENCH_DIR=<map> cargo test --release -p vpo-sampler
+    /// bench_laadactie -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn bench_laadactie() {
+        let dir = std::env::var("JM_BENCH_DIR").expect("JM_BENCH_DIR");
+        let mut files = Vec::new();
+        fn zoek(d: &std::path::Path, uit: &mut Vec<std::path::PathBuf>) {
+            if let Ok(rd) = std::fs::read_dir(d) {
+                for e in rd.flatten() {
+                    let p = e.path();
+                    if p.is_dir() { zoek(&p, uit); } else if p.extension().map_or(false, |x| x.eq_ignore_ascii_case("wav")) { uit.push(p); }
+                }
+            }
+        }
+        zoek(std::path::Path::new(&dir), &mut files);
+        files.truncate(300);
+        let (mut t_lp, mut t_read, mut t_snel, mut t_opt, mut t_tot, mut bytes) = (0f64, 0f64, 0f64, 0f64, 0f64, 0usize);
+        for p in &files {
+            let t = std::time::Instant::now();
+            let _ = super::read_wav_loop_points(p);
+            t_lp += t.elapsed().as_secs_f64();
+            let t = std::time::Instant::now();
+            let b = std::fs::read(p).unwrap();
+            t_read += t.elapsed().as_secs_f64();
+            bytes += b.len();
+            let t = std::time::Instant::now();
+            let mut sd = super::load_wav_snel(p).unwrap();
+            t_snel += t.elapsed().as_secs_f64();
+            if let Some((s, e)) = super::read_wav_loop_points(p) { sd.loop_start = Some(s); sd.loop_end = Some(e); }
+            let t = std::time::Instant::now();
+            super::optimize_loop_points(&mut sd);
+            t_opt += t.elapsed().as_secs_f64();
+            let t = std::time::Instant::now();
+            let _ = super::load_wav(p).unwrap();
+            t_tot += t.elapsed().as_secs_f64();
+        }
+        let n = files.len() as f64 * 1e-3;
+        println!("{} bestanden, {:.2} MB/bestand", files.len(), bytes as f64 / files.len() as f64 / 1e6);
+        println!("loop-punten lezen {:.2} ms | fs::read {:.2} ms | snel (read+omzetten) {:.2} ms | loop-optimalisatie {:.2} ms | load_wav totaal {:.2} ms",
+            t_lp / n, t_read / n, t_snel / n, t_opt / n, t_tot / n);
+    }
+
     #[test]
     fn flac_en_ogg_herkend() {
         assert_eq!(detect_container(b"fLaC....").unwrap(), "FLAC");
@@ -418,10 +515,128 @@ mod detect_container_tests {
     }
 }
 
+/// Snelle volledige WAV-lezer (0.9.31): het bestand in één keer inlezen, de
+/// chunks uit de buffer halen en in één lus omzetten naar f32 én splitsen in
+/// links/rechts. De route via hound's per-sample-iterator (een `Result` per
+/// sample, daarna nog een kopie voor het splitsen) kostte ~26 ms per opname van
+/// 2,4 MB — de laders liepen daardoor tijdens zwaar spel een halve seconde
+/// achter (preload-tekorten) en bezetten intussen de CPU naast het mengen.
+///
+/// Zelfde schaal als hound (deling door 2^(bits-1); 8-bit unsigned rond 128),
+/// dus bit-identiek aan de oude route. `None` = formaat niet in dit snelle pad
+/// (de aanroeper valt dan terug op de bestaande cascade).
+fn load_wav_snel(path: &Path) -> Option<SampleData> {
+    let bytes = std::fs::read(path).ok()?;
+    if bytes.len() < 12 || &bytes[0..4] != b"RIFF" || &bytes[8..12] != b"WAVE" {
+        return None;
+    }
+    let le16 = |p: usize| u16::from_le_bytes([bytes[p], bytes[p + 1]]);
+    let le32 = |p: usize| u32::from_le_bytes([bytes[p], bytes[p + 1], bytes[p + 2], bytes[p + 3]]);
+    let (mut channels, mut rate, mut bits, mut float) = (0u16, 0u32, 0u16, false);
+    let mut fmt_gezien = false;
+    let mut data: Option<(usize, usize)> = None;
+    let mut pos = 12usize;
+    while pos + 8 <= bytes.len() {
+        let id = &bytes[pos..pos + 4];
+        let size = le32(pos + 4) as usize;
+        let body = pos + 8;
+        if id == b"fmt " {
+            if size < 16 || body + size > bytes.len() { return None; }
+            let audio_format = le16(body);
+            channels = le16(body + 2);
+            rate = le32(body + 4);
+            bits = le16(body + 14);
+            float = match audio_format {
+                1 => false,
+                3 => true,
+                0xFFFE if size >= 26 => le16(body + 24) == 3,
+                _ => return None,
+            };
+            fmt_gezien = true;
+        } else if id == b"data" {
+            // Een afgeknot bestand: neem wat er is (de rest wordt stilte, zoals
+            // de oude route met zijn leesfouten-teller deed).
+            data = Some((body, size));
+            break;
+        }
+        pos = body + size + (size & 1);
+    }
+    let (doff, dsize) = data?;
+    if !fmt_gezien || channels == 0 || rate == 0 {
+        return None;
+    }
+    let bps = bits as usize / 8;
+    if !matches!((float, bits), (true, 32) | (false, 8) | (false, 16) | (false, 24) | (false, 32)) {
+        return None;
+    }
+    let frame = bps * channels as usize;
+    let frames = dsize / frame;
+    let beschikbaar = (bytes.len().saturating_sub(doff)) / frame;
+    let n = frames.min(beschikbaar);
+    if n < frames {
+        warn!("{}: afgeknot bestand — {} van {} frames aanwezig, rest stilte", path.display(), n, frames);
+    }
+
+    // Eén sample (kanaal c van frame i) → f32, met hound's schaal.
+    let schaal = 1.0f32 / (1i64 << (bits - 1)) as f32;
+    let lees = |off: usize| -> f32 {
+        let b = &bytes[off..off + bps];
+        match (float, bits) {
+            (true, _) => f32::from_le_bytes([b[0], b[1], b[2], b[3]]),
+            (false, 8) => (b[0] as f32 - 128.0) / 128.0,
+            (false, 16) => i16::from_le_bytes([b[0], b[1]]) as f32 * schaal,
+            (false, 24) => ((((b[0] as i32) | ((b[1] as i32) << 8) | ((b[2] as i32) << 16)) << 8) >> 8) as f32 * schaal,
+            _ => i32::from_le_bytes([b[0], b[1], b[2], b[3]]) as f32 * schaal,
+        }
+    };
+
+    let tweede = channels >= 2;
+    let stereo = tweede && stereo_loading();
+    let mut links = vec![0.0f32; frames];
+    let mut rechts = if stereo { vec![0.0f32; frames] } else { Vec::new() };
+    let base = doff;
+    if stereo {
+        for i in 0..n {
+            let f = base + i * frame;
+            links[i] = lees(f);
+            rechts[i] = lees(f + bps);
+        }
+    } else if channels == 2 {
+        // Stereo-laden uit: (L+R)/2, zoals split_channels (bij >2 kanalen
+        // neemt die alleen kanaal 0 — zie de tak hieronder).
+        for i in 0..n {
+            let f = base + i * frame;
+            links[i] = (lees(f) + lees(f + bps)) * 0.5;
+        }
+    } else {
+        for i in 0..n {
+            links[i] = lees(base + i * frame);
+        }
+    }
+    Some(SampleData {
+        data: links,
+        right: if stereo { Some(rechts) } else { None },
+        sample_rate: rate,
+        channels,
+        loop_start: None,
+        loop_end: None,
+    })
+}
+
 /// Load a WAV file
 pub fn load_wav(path: &Path) -> Result<SampleData, SampleError> {
     // First, try to read loop points from smpl chunk
     let loop_points = read_wav_loop_points(path);
+
+    // Snelle route voor gangbare PCM/float-WAV's (0.9.31); anders de cascade.
+    if let Some(mut sd) = load_wav_snel(path) {
+        if let Some((s, e)) = loop_points {
+            sd.loop_start = Some(s);
+            sd.loop_end = Some(e);
+        }
+        optimize_loop_points(&mut sd);
+        return Ok(sd);
+    }
 
     // fmt-grootte die hound niet accepteert → direct de manual parser (die is
     // compleet voor 8/16/24/32-bit int + 32-bit float + extensible). Zo vervalt

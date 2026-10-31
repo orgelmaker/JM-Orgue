@@ -45,6 +45,27 @@ const SPIN_BUDGET: std::time::Duration = std::time::Duration::from_micros(2000);
 /// nooit langer dan dit te laten duren (vangnet, geen normale route).
 const PARK_DUUR: std::time::Duration = std::time::Duration::from_millis(20);
 
+/// Meting van de barrière (onderzoek 0.9.31), per blok: tijd van het eigen
+/// stuk van de audiothread en de wachttijd daarna op de werkers (µs, de
+/// grootste sinds de vorige uitlezing), plus hoe vaak er werkers geparkeerd
+/// waren en gewekt moesten worden.
+static MAX_EIGEN_US: AtomicU64 = AtomicU64::new(0);
+static MAX_WACHT_US: AtomicU64 = AtomicU64::new(0);
+static SOM_EIGEN_US: AtomicU64 = AtomicU64::new(0);
+static SOM_WACHT_US: AtomicU64 = AtomicU64::new(0);
+static BLOKKEN: AtomicU64 = AtomicU64::new(0);
+static GEWEKT: AtomicU64 = AtomicU64::new(0);
+
+/// (max eigen µs, max wacht µs, gem eigen µs, gem wacht µs, blokken, gewekte werkers) — en wissen.
+pub fn neem_barriere_meting() -> (u64, u64, f64, f64, u64, u64) {
+    let b = BLOKKEN.swap(0, Ordering::Relaxed).max(1);
+    let r = (MAX_EIGEN_US.swap(0, Ordering::Relaxed), MAX_WACHT_US.swap(0, Ordering::Relaxed),
+             SOM_EIGEN_US.swap(0, Ordering::Relaxed) as f64 / b as f64,
+             SOM_WACHT_US.swap(0, Ordering::Relaxed) as f64 / b as f64, b,
+             GEWEKT.swap(0, Ordering::Relaxed));
+    r
+}
+
 /// Eén opdracht voor één werker: welk stuk stemmen, waar het naartoe moet, en
 /// de (gedeelde, alleen-lezen) blokcontext.
 #[derive(Clone, Copy)]
@@ -207,14 +228,17 @@ impl MengPool {
         for w in 0..self.werkers.len() {
             if self.gedeeld.geparkeerd[w].load(Ordering::Acquire) {
                 self.werkers[w].thread().unpark();
+                GEWEKT.fetch_add(1, Ordering::Relaxed);
             }
         }
 
         // Ons eigen stuk, terwijl de werkers bezig zijn.
+        let t0 = std::time::Instant::now();
         if let Some((ptr, len)) = eigen {
             let deel = unsafe { std::slice::from_raw_parts_mut(ptr, len) };
             meng_stemmen_blok(deel, hoofd_l, hoofd_r, blok);
         }
+        let t1 = std::time::Instant::now();
 
         // Barrière: wachten tot alle werkers hun stuk gemeld hebben. Alleen
         // spinnen — dit duurt hooguit zo lang als één stuk mengen, en de
@@ -223,6 +247,13 @@ impl MengPool {
         while self.gedeeld.klaar.load(Ordering::Acquire) < doel {
             std::hint::spin_loop();
         }
+        let eigen_us = (t1 - t0).as_micros() as u64;
+        let wacht_us = t1.elapsed().as_micros() as u64;
+        MAX_EIGEN_US.fetch_max(eigen_us, Ordering::Relaxed);
+        MAX_WACHT_US.fetch_max(wacht_us, Ordering::Relaxed);
+        SOM_EIGEN_US.fetch_add(eigen_us, Ordering::Relaxed);
+        SOM_WACHT_US.fetch_add(wacht_us, Ordering::Relaxed);
+        BLOKKEN.fetch_add(1, Ordering::Relaxed);
     }
 }
 

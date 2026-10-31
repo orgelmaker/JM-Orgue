@@ -4,6 +4,30 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.9.31] - 2026-10-31
+
+### Minder kraken bij grote orgels — de echte oorzaken aangepakt
+Na een grondige meting op een groot surround-orgel (per onderdeel van elke
+audioberekening getimed, tijdens realistisch spel met akkoordwissels) bleken de
+kraakpieken vooral van het laden van opnamen tijdens het spelen te komen, niet
+van galm of klankcorrectie.
+
+- **Laadwachtrij niet meer elke keer volledig gesorteerd.** Tijdens zwaar spel
+  wachtten honderden opnamen op laden, en die lijst werd bij iedere
+  audioberekening helemaal opnieuw gesorteerd — dat kostte soms meer dan de hele
+  beschikbare tijd. Nu worden alleen de paar meest urgente eruit gepikt. Dit was
+  de grootste losse oorzaak van de pieken.
+- **Meer geheugen voor opnamen, afhankelijk van je computer.** Het geheugen voor
+  volledig geladen opnamen was vast 1,5 GB; bij een groot orgel werden opnamen
+  daardoor steeds weggegooid en meteen opnieuw geladen. Het plafond is nu 30% van
+  het werkgeheugen (op een computer met 32 GB ongeveer 9,6 GB, met 8 GB blijft het
+  1,5 GB).
+- **Opnamen sneller inlezen.** Het volledig inlezen van een opname gaat nu in één
+  keer in plaats van per meetpunt; het resultaat is exact hetzelfde.
+- **Betere uitleg in het logboek.** Bij een zware audioberekening staat nu welk
+  onderdeel uitliep (laden, aanslaan, voorbereiden of mengen) en hoe ver het
+  laden achterloopt.
+
 ## [0.9.30] - 2026-10-30
 
 ### Minder kraken bij zware registraties
