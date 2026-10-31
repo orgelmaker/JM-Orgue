@@ -2722,6 +2722,18 @@ mod registerweergave_tests {
     fn k(min: u8, max: u8) -> Option<Koren> { Some(Koren { min, max }) }
 
     #[test]
+    fn vastgeplakt_voetwoord_geeft_de_voetmaat_uit_de_naam() {
+        // Een set die elke rang als 8' opgeeft maar "16FT" in de naam schrijft.
+        assert_eq!(registerweergave("BOURDON 16FT", false, 8, None),
+            ("BOURDON".into(), "16'".into(), None));
+        assert_eq!(registerweergave("OPEN DIAPASON 8FT", false, 8, None),
+            ("OPEN DIAPASON".into(), "8'".into(), None));
+        // Voetmaat midden in de naam, met een toelichting erachter.
+        assert_eq!(registerweergave("BOURDON 16FT TONE", false, 8, None),
+            ("BOURDON TONE".into(), "16'".into(), None));
+    }
+
+    #[test]
     fn voetmaat_en_aantal_uit_naam_en_set() {
         // Voetmaat met voetteken in de naam.
         assert_eq!(registerweergave("Mixtur major 4-5f. 2 2/3'", true, 8, None),

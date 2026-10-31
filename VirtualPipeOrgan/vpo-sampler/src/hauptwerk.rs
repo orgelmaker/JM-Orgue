@@ -1789,10 +1789,72 @@ mod numeric_prefix_tests {
     }
 
     #[test]
+    fn bestandsachtige_registernamen_worden_opgeruimd() {
+        assert_eq!(crate::hauptwerk::clean_stop_name("1-P_Subbass16-1"), "Subbass16");
+        assert_eq!(crate::hauptwerk::clean_stop_name("P_Subbass16_rear"), "Subbass rear");
+        assert_eq!(crate::hauptwerk::clean_stop_name("1-Cello-1"), "Cello");
+        assert_eq!(crate::hauptwerk::clean_stop_name("051 GT: Chimes"), "Chimes");
+        assert_eq!(crate::hauptwerk::clean_stop_name("154 BO: Zimbelstern"), "Zimbelstern");
+        assert_eq!(crate::hauptwerk::clean_stop_name("Open_Diapason"), "Open Diapason");
+        // Geen valse treffers: voetmaten, breuken en klaviernummers blijven.
+        assert_eq!(crate::hauptwerk::clean_stop_name("2 2/3 Quint"), "2 2/3 Quint");
+        assert_eq!(crate::hauptwerk::clean_stop_name("Cornet5"), "Cornet5");
+        assert_eq!(crate::hauptwerk::clean_stop_name("4 Gedekt 8"), "4 Gedekt 8");
+    }
+
+    #[test]
     fn te_veel_cijfers_niet_als_prefix_zien() {
         // 5+ cijfers lijkt eerder op een jaartal of code; laat ongemoeid.
         assert_eq!(strip_numeric_prefix("12345_Montre"), "12345_Montre");
     }
+}
+
+/// Registernamen die als bestandsnaam zijn geschreven opruimen: underscores
+/// worden spaties, een klaviernummer met streepje ("1-Cello-1": nummer vooraan
+/// én lopend nummer achteraan) en een volgnummer voor een divisieaanduiding
+/// ("051 GT: Chimes") vallen weg, en een voettal dat midden in de naam aan een
+/// perspectiefwoord vastzit ("Subbass16 rear") verliest dat cijfer.
+fn ruim_bestandsachtige_naam(raw: &str) -> String {
+    let mut s: String = raw.replace('_', " ").split_whitespace().collect::<Vec<_>>().join(" ");
+    // "1-Naam-1": nummer vooraan met streepje, gevolgd door een letter.
+    let kop = s.chars().take_while(|c| c.is_ascii_digit()).count();
+    if (1..=3).contains(&kop) && s[kop..].starts_with('-') && s[kop + 1..].chars().next().map_or(false, |c| c.is_alphabetic()) {
+        s = s[kop + 1..].to_string();
+        let staart = s.chars().rev().take_while(|c| c.is_ascii_digit()).count();
+        if staart > 0 && s[..s.len() - staart].ends_with('-') {
+            s.truncate(s.len() - staart - 1);
+        }
+    } else if (2..=3).contains(&kop) && s[kop..].starts_with(' ') {
+        // "051 GT: Chimes": volgnummer voor een korte divisieaanduiding met dubbele punt.
+        let rest = s[kop..].trim_start();
+        let letters = rest.chars().take_while(|c| c.is_ascii_alphabetic()).count();
+        if (1..=6).contains(&letters) && rest[letters..].starts_with(':') {
+            s = rest.to_string();
+        }
+    }
+    // "Subbass16 rear": voettal vast aan de naam, direct voor een perspectiefwoord.
+    let woorden: Vec<&str> = s.split(' ').collect();
+    if woorden.len() >= 2 {
+        let mut nieuw: Vec<String> = Vec::with_capacity(woorden.len());
+        for (i, w) in woorden.iter().enumerate() {
+            let volgt_perspectief = woorden.get(i + 1).map_or(false, |n| {
+                matches!(n.to_lowercase().as_str(), "rear" | "front" | "close" | "surround" | "dry" | "wet" | "diffuse")
+            });
+            if volgt_perspectief {
+                let cijfers = w.chars().rev().take_while(|c| c.is_ascii_digit()).count();
+                let (kop, getal) = w.split_at(w.len() - cijfers);
+                if matches!(getal, "1" | "2" | "4" | "8" | "16" | "32" | "64")
+                    && kop.chars().count() >= 3 && kop.chars().all(|c| c.is_alphabetic())
+                {
+                    nieuw.push(kop.to_string());
+                    continue;
+                }
+            }
+            nieuw.push((*w).to_string());
+        }
+        s = nieuw.join(" ");
+    }
+    s
 }
 
 /// Clean a stop name: strip a leading division prefix like "P  ", "M  ",
@@ -1800,7 +1862,8 @@ mod numeric_prefix_tests {
 /// 1-4 letter token only when followed by 2+ spaces, to avoid false positives).
 /// Shared with the GrandOrgue route (German sets prefix register names too).
 pub fn clean_stop_name(raw: &str) -> String {
-    let s = raw.trim();
+    let ruim = ruim_bestandsachtige_naam(raw);
+    let s = ruim.trim();
     let bytes = s.as_bytes();
     // Count leading ASCII letters.
     let letters = bytes.iter().take_while(|b| b.is_ascii_alphabetic()).count();

@@ -459,6 +459,12 @@ pub struct ManualDef {
     pub tremulant_ids: Vec<u32>,
 }
 
+/// Waarde zonder inline commentaar: oude ODF's (formaat 1.x) schrijven
+/// `Stop001=001 ;Bourdon 16'` — het getal staat vóór de puntkomma.
+fn zonder_commentaar(v: &str) -> &str {
+    v.split(';').next().unwrap_or(v).trim()
+}
+
 /// Stop definition from [StopXXX] section
 #[derive(Debug, Clone)]
 pub struct StopDef {
@@ -936,7 +942,7 @@ impl OdfParser {
                 let mut stop_ids = Vec::new();
                 for s in 1..=num_stops {
                     if let Some(stop_ref) = section.get(&format!("Stop{:03}", s)) {
-                        if let Ok(id) = stop_ref.parse::<u32>() {
+                        if let Ok(id) = zonder_commentaar(stop_ref).parse::<u32>() {
                             stop_ids.push(id);
                         }
                     }
@@ -946,7 +952,7 @@ impl OdfParser {
                 let mut coupler_ids = Vec::new();
                 for c in 1..=num_couplers {
                     if let Some(coupler_ref) = section.get(&format!("Coupler{:03}", c)) {
-                        if let Ok(id) = coupler_ref.parse::<u32>() {
+                        if let Ok(id) = zonder_commentaar(coupler_ref).parse::<u32>() {
                             coupler_ids.push(id);
                         }
                     }
@@ -956,7 +962,7 @@ impl OdfParser {
                 let mut tremulant_ids = Vec::new();
                 for t in 1..=num_tremulants {
                     if let Some(trem_ref) = section.get(&format!("Tremulant{:03}", t)) {
-                        if let Ok(id) = trem_ref.parse::<u32>() {
+                        if let Ok(id) = zonder_commentaar(trem_ref).parse::<u32>() {
                             tremulant_ids.push(id);
                         }
                     }
@@ -1600,7 +1606,7 @@ impl OdfParser {
                 let mut tremulant_ids = Vec::new();
                 for t in 1..=num_tremulants {
                     if let Some(trem_ref) = section.get(&format!("Tremulant{:03}", t)) {
-                        if let Ok(id) = trem_ref.parse::<u32>() {
+                        if let Ok(id) = zonder_commentaar(trem_ref).parse::<u32>() {
                             tremulant_ids.push(id);
                         }
                     }
@@ -1713,17 +1719,17 @@ impl OdfParser {
 
     /// Parse a u32 from section
     fn parse_u32(&self, section: &HashMap<String, String>, key: &str) -> Option<u32> {
-        section.get(key).and_then(|v| v.parse().ok())
+        section.get(key).and_then(|v| zonder_commentaar(v).parse().ok())
     }
 
     /// Parse an i32 from section
     fn parse_i32(&self, section: &HashMap<String, String>, key: &str) -> Option<i32> {
-        section.get(key).and_then(|v| v.parse().ok())
+        section.get(key).and_then(|v| zonder_commentaar(v).parse().ok())
     }
 
     /// Parse a f32 from section
     fn parse_f32(&self, section: &HashMap<String, String>, key: &str) -> Option<f32> {
-        section.get(key).and_then(|v| v.parse().ok())
+        section.get(key).and_then(|v| zonder_commentaar(v).parse().ok())
     }
 }
 
@@ -2128,6 +2134,33 @@ pub fn panel_image_path(odf_path: &Path) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn oud_formaat_met_inline_commentaar_geeft_registers() {
+        // ODF-formaat 1.x: `Stop001=001 ;Bourdon 16'` — het getal vóór de puntkomma telt.
+        assert_eq!(zonder_commentaar("001 ;Bourdon 16'"), "001");
+        assert_eq!(zonder_commentaar("  12"), "12");
+        assert_eq!(zonder_commentaar("007;x").parse::<u32>().unwrap(), 7);
+        let dir = std::env::temp_dir().join(format!("jm_oud_odf_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let odf = [
+            "[Organ]", "ChurchName=Oud", "NumberOfManuals=1", "HasPedals=N", "",
+            "[Manual001]", "Name=GREAT", "NumberOfLogicalKeys=1", "NumberOfAccessibleKeys=1",
+            "FirstAccessibleKeyMIDINoteNumber=36", "NumberOfStops=1", "Stop001=101 ;Open Diapason 8'",
+            "NumberOfCouplers=0", "NumberOfTremulants=0", "",
+            "[Stop101]", "Name=Open Diapason 8'", "NumberOfLogicalPipes=1", "NumberOfAccessiblePipes=1",
+            "FirstAccessiblePipeLogicalPipeNumber=001", "FirstAccessiblePipeLogicalKeyNumber=001",
+            "Pipe001=./a.wav", "",
+        ]
+        .join("
+");
+        let pad = dir.join("oud.organ");
+        std::fs::write(&pad, odf).unwrap();
+        let def = OrganDefinition::load(&pad).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(def.manuals.len(), 1);
+        assert_eq!(def.manuals[0].stop_ids, vec![101]);
+    }
 
     #[test]
     fn test_harmonic_to_footage() {

@@ -149,13 +149,50 @@ fn voetmaat_achteraan(woorden: &[&str]) -> Option<(usize, String)> {
     Some((n - begin, format!("{}'", delen.join(" "))))
 }
 
+/// "BOURDON 16FT" → "BOURDON 16'": een voetwoord (ft, feet, fuss, fuß) dat direct
+/// aan het voettal vastzit wordt een voetteken.
+pub fn voetwoord_los(naam: &str) -> String {
+    naam.split_whitespace()
+        .map(|w| {
+            let l = w.trim_end_matches('.').to_lowercase();
+            for woord in ["feet", "fuss", "fuß", "ft"] {
+                if let Some(getal) = l.strip_suffix(woord) {
+                    let echt = !getal.is_empty()
+                        && getal.chars().next().map_or(false, |c| c.is_ascii_digit())
+                        && getal.chars().all(|c| c.is_ascii_digit() || c == '/');
+                    if echt {
+                        return format!("{}'", getal);
+                    }
+                }
+            }
+            w.to_string()
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 /// Voetmaat die de naam zelf met voetteken of voetwoord opgeeft ("Contrabass
 /// 16'", "Quinta 5 1/3'", "Subbaß 16 Fuß"): (naam zonder voetmaat, voetmaat).
 /// None als er geen staat of er niets van de naam zou overblijven.
 pub fn voetmaat_uit_naam(naam: &str) -> Option<(String, String)> {
+    let naam = voetwoord_los(naam);
     let woorden: Vec<&str> = naam.split_whitespace().collect();
-    let (n, v) = voetmaat_achteraan(&woorden)?;
-    (n < woorden.len()).then(|| (woorden[..woorden.len() - n].join(" "), v))
+    if let Some((n, v)) = voetmaat_achteraan(&woorden) {
+        return (n < woorden.len()).then(|| (woorden[..woorden.len() - n].join(" "), v));
+    }
+    // Voetmaat met voetteken midden in de naam, gevolgd door een toelichting
+    // ("BOURDON 16' TONE"): het woord met de voetmaat valt weg.
+    let voetteken = ['\'', '\u{2032}', '\u{2019}'];
+    let i = woorden.iter().position(|w| {
+        let k = w.trim_end_matches(voetteken);
+        k.len() < w.len() && !k.is_empty() && k.chars().all(|c| c.is_ascii_digit() || c == '/')
+            && k.chars().next().map_or(false, |c| c.is_ascii_digit())
+    })?;
+    (i > 0 && i + 1 < woorden.len()).then(|| {
+        let v = format!("{}'", woorden[i].trim_end_matches(voetteken));
+        let rest: Vec<&str> = woorden.iter().enumerate().filter(|(j, _)| *j != i).map(|(_, w)| *w).collect();
+        (rest.join(" "), v)
+    })
 }
 
 /// Haal het aantal koren uit een registernaam. `mengwerk`: hoort het register
