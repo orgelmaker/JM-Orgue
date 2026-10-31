@@ -88,11 +88,10 @@ niet te zoeken welke de laatste is.
 </table>
 
 Alle versies met hun wijzigingen staan bij de
-[releases](https://github.com/orgelmaker/JM-Orgue/releases); de meest recente
-is [v0.9.12](https://github.com/orgelmaker/JM-Orgue/releases/tag/v0.9.12) —
-beter solo-gedrag van melodie- en baskoppel, T.A. werkt direct, bas- en
-discanthelften blijven op het deelpunt en de zweltrede leer je nu in vanaf
-het orgelscherm.
+[releases](https://github.com/orgelmaker/JM-Orgue/releases); wat er in de
+nieuwste versie is veranderd lees je bij
+[de laatste release](https://github.com/orgelmaker/JM-Orgue/releases/latest)
+[![Nieuwste versie](https://img.shields.io/github/v/release/orgelmaker/JM-Orgue?style=flat-square&label=nieuwste&color=d4af37)](https://github.com/orgelmaker/JM-Orgue/releases/latest).
 
 > **Bijwerken.** Op Windows meldt de app zelf dat er een nieuwe versie is en
 > installeert die op verzoek, waarna hij opnieuw opstart. Op macOS en Linux
