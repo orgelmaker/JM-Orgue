@@ -386,7 +386,8 @@ mod tests {
     /// originele RIFF-header in het eerste en een staart in het laatste blok.
     fn stroom_met_wrapper() -> Vec<u8> {
         let frames = 300_000usize;
-        let samples: Vec<i32> = (0..frames * 2).map(|i| ((i as i32 * 7919) % 60000) - 30000).collect();
+        // In i64 rekenen: CI test in debug, daar is een i32-overloop een paniek.
+        let samples: Vec<i32> = (0..frames * 2).map(|i| ((i as i64 * 7919) % 60000) as i32 - 30000).collect();
         let mut wv = pakken(&samples, 2, 16);
         let offs: Vec<usize> = {
             let mut v = Vec::new();
