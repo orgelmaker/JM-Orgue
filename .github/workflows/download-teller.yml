@@ -1,0 +1,78 @@
+# Echte downloadteller voor de badges in README en op de website.
+#
+# shields.io's "github/downloads/total" telt alleen de 100 nieuwste releases
+# (één API-pagina). Met meer dan 100 releases duwt elke nieuwe release een
+# oude uit dat venster, waardoor het getal daalt terwijl er gewoon gedownload
+# wordt. Deze workflow telt alle releases (gepagineerd) op en schrijft het
+# totaal naar docs/downloads.json, dat GitHub Pages serveert. De badges lezen
+# dat bestand via shields.io's endpoint-badge.
+name: download-teller
+
+on:
+  release:
+    types: [published]
+  schedule:
+    - cron: '17 4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+
+concurrency:
+  group: download-teller
+  cancel-in-progress: false
+
+jobs:
+  tel:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: master
+
+      - name: Tel downloads over alle releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          totaal=$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" --paginate \
+            --jq '.[].assets[].download_count' | awk '{s+=$1} END {print s+0}')
+          releases=$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" --paginate --jq '.[].id' | wc -l)
+          echo "Totaal: $totaal downloads over $releases releases"
+          if [ "$releases" -eq 0 ] || [ "$totaal" -eq 0 ]; then
+            echo "Geen releases of 0 downloads gelezen: niets bijwerken"; exit 1
+          fi
+          # Nooit lager dan wat er al staat: een haperende API mag het getal
+          # niet laten zakken.
+          oud=$(jq -r '.message // "0" | tonumber? // 0' docs/downloads.json 2>/dev/null || echo 0)
+          if [ "$totaal" -lt "$oud" ]; then
+            echo "Nieuw totaal ($totaal) lager dan opgeslagen ($oud): niets bijwerken"; exit 0
+          fi
+          jq -n --argjson n "$totaal" \
+            '{schemaVersion: 1, label: "downloads", message: ($n|tostring), color: "d4af37"}' \
+            > docs/downloads.json
+          cat docs/downloads.json
+
+      - name: Commit als het getal veranderd is
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- docs/downloads.json; then
+            echo "Ongewijzigd"; exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/downloads.json
+          git commit -m "Downloadteller bijgewerkt"
+          # master kan intussen verder zijn: opnieuw proberen na rebase.
+          gepusht=0
+          for poging in 1 2 3; do
+            if git push origin HEAD:master; then gepusht=1; break; fi
+            git pull --rebase origin master
+          done
+          [ "$gepusht" = 1 ] || exit 1
+          # Een push met het workflow-token start niet altijd een Pages-build:
+          # expliciet aanvragen, zodat downloads.json echt online komt.
+          gh api -X POST "repos/${GITHUB_REPOSITORY}/pages/builds" || echo "Pages-build aanvragen mislukt (bouwt mogelijk al)"
+        env:
+          GH_TOKEN: ${{ github.token }}
