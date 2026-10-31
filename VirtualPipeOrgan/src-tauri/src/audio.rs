@@ -414,6 +414,136 @@ pub(crate) fn meng_stemmen_blok(
     doel_r: &mut [[f32; 32]],
     blok: &MengBlok<'_>,
 ) {
+    // Mengkern per blok (0.9.32). Per stem eerst de toonhoogte- en
+    // volumefactor per frame (wind/tremulant — dezelfde rekenstappen in
+    // dezelfde volgorde als vroeger), dan het lezen van het hele blok met een
+    // geometrie die één keer per blok bepaald wordt (`lees_blok`), en tot slot
+    // optellen in de mengbus. Vroeger bepaalde `next_sample` per sample
+    // opnieuw de bron, de looppunten, de lengtes en de crossfade-breedte: de
+    // kern had 2,6x overhead boven de kale interpolatie. Bit-identiek aan de
+    // oude route (`meng_stemmen_blok_oud`, zie de test ernaast).
+    let bn_tot = blok.bn;
+    let mut rates = [0.0f64; MAX_BLOK_FRAMES];
+    let mut gains = [0.0f32; MAX_BLOK_FRAMES];
+    let mut sl_buf = [0.0f32; MAX_BLOK_FRAMES];
+    let mut sr_buf = [0.0f32; MAX_BLOK_FRAMES];
+    let mut start = 0usize;
+    while start < bn_tot {
+        let bn = (bn_tot - start).min(MAX_BLOK_FRAMES);
+        for voice in deel.iter_mut() {
+            let div_idx = voice.c_div;
+            let in_range = div_idx < 32;
+            let bus_idx = if voice.c_bus < 32 { voice.c_bus } else { div_idx };
+            let base_rate = voice.rate;
+            let pitch_mul = voice.c_pitch_mul;
+            let use_lfo = voice.c_use_lfo_trem;
+            let vgain = voice.c_voicing_gain;
+            let kp = voice.c_kp;
+            let kg = voice.c_kg;
+            let dev_a = voice.c_dev_a;
+            let mut dev_cur = voice.c_dev_cur;
+            let wind_aan = in_range && (kp != 0.0 || kg != 0.0);
+            let (pan_cos, pan_sin) = if in_range && blok.ccis_on
+                && blok.ccis_en.get(div_idx).copied().unwrap_or(false)
+            {
+                let n = voice.midi_note as f32;
+                let norm = ((n - 36.0) / 60.0).clamp(0.0, 1.0);
+                let pitch_factor = (1.0 - blok.ccis_falloff * norm).clamp(0.0, 1.0);
+                let sep = (blok.ccis_strength * pitch_factor).clamp(0.0, 0.95);
+                let mut side = if voice.midi_note % 2 == 0 { -1.0 } else { 1.0 };
+                if blok.ccis_swap { side = -side; }
+                let note_pan = side * sep;
+                let base_pan = blok.div_pans.get(div_idx).copied().unwrap_or(0.0);
+                let total_pan = (base_pan + note_pan).clamp(-1.0, 1.0);
+                let angle = (total_pan + 1.0) * 0.25 * std::f32::consts::PI;
+                (angle.cos(), angle.sin())
+            } else if in_range {
+                (blok.pan_cos[div_idx], blok.pan_sin[div_idx])
+            } else {
+                (0.0, 0.0)
+            };
+            let po_mul = blok.pitch_offset_mul;
+
+            // Pas 1: afspeelsnelheid en volume per frame.
+            for k in 0..bn {
+                let f = start + k;
+                let mut eff_rate = base_rate * pitch_mul * po_mul;
+                let mut g = vgain;
+                if in_range {
+                    if wind_aan {
+                        dev_cur += dev_a * (blok.wind_dev[f][div_idx] - dev_cur);
+                        eff_rate *= (1.0 + kp * dev_cur) as f64;
+                        g *= (1.0 + kg * dev_cur).max(0.25);
+                    }
+                    if use_lfo {
+                        eff_rate *= blok.trem_rate[f][div_idx];
+                    }
+                }
+                if in_range && use_lfo {
+                    g *= blok.trem_amp[f][div_idx];
+                }
+                rates[k] = eff_rate;
+                gains[k] = g;
+            }
+            voice.c_dev_cur = dev_cur;
+
+            // Pas 2: het blok lezen.
+            match voice.lees_geom() {
+                Some(geom) => voice.lees_blok(&geom, &rates[..bn], &mut sl_buf[..bn], &mut sr_buf[..bn], blok.licht),
+                None => {
+                    for k in 0..bn {
+                        voice.rate = rates[k];
+                        let (a, b) = voice.next_sample(blok.licht);
+                        voice.rate = base_rate;
+                        sl_buf[k] = a;
+                        sr_buf[k] = b;
+                    }
+                }
+            }
+
+            // Pas 3: optellen in de mengbus.
+            if !in_range { continue; }
+            for k in 0..bn {
+                let g = gains[k];
+                doel_l[start + k][bus_idx] += (sl_buf[k] * g) * pan_cos;
+                doel_r[start + k][bus_idx] += (sr_buf[k] * g) * pan_sin;
+            }
+        }
+        start += bn;
+    }
+}
+
+/// Vooraf gereserveerde capaciteit (0.9.32). De stemmenlijst en de map met
+/// volledige samples begonnen leeg en groeiden door verdubbeling OP DE
+/// AUDIO-THREAD: bij het eerste zware akkoord na het laden van een orgel
+/// gebeurden in één callback meerdere herallocaties met een kopie van alle
+/// stemmen (honderden KB, nieuwe geheugenpagina's) — gemeten als één enorme
+/// stemstart-piek (80-140% van de buffertijd). Nu één keer vooraf.
+const SAMPLES_RESERVE: usize = 8192;
+fn stemmen_reserve() -> usize {
+    (polyphony_target() + 512).max(2048)
+}
+fn lege_stemmenlijst() -> Vec<PlayingVoice> {
+    Vec::with_capacity(stemmen_reserve())
+}
+fn lege_samplesmap() -> HashMap<(u32, u32), SampleRef> {
+    HashMap::with_capacity(SAMPLES_RESERVE)
+}
+
+/// Grootste blok dat de mengkern in één keer verwerkt (frames); de stack-
+/// buffers in `meng_stemmen_blok` zijn zo groot. Grotere blokken worden in
+/// stukken van deze maat gedaan.
+pub(crate) const MAX_BLOK_FRAMES: usize = 256;
+
+/// De mengkern van vóór 0.9.32 (per sample `next_sample`), alleen nog als
+/// referentie in de equivalentietest.
+#[cfg(test)]
+pub(crate) fn meng_stemmen_blok_oud(
+    deel: &mut [PlayingVoice],
+    doel_l: &mut [[f32; 32]],
+    doel_r: &mut [[f32; 32]],
+    blok: &MengBlok<'_>,
+) {
     let bn = blok.bn;
     for voice in deel.iter_mut() {
         let div_idx = voice.c_div;
@@ -1749,6 +1879,159 @@ impl PlayingVoice {
 
         (vl * self.envelope * preload_edge_fade, vr * self.envelope * preload_edge_fade)
     }
+
+    /// Leesgeometrie van de bron voor één blok (0.9.32). De bron wisselt alleen
+    /// in de commando- en laadfase, nooit tijdens het mengen, dus dit is over
+    /// een heel blok constant. `None` = deze stem gaat (dit blok) via de gewone
+    /// per-sample-route: een uitgestelde staart-decay kan halverwege het blok
+    /// van modus wisselen, en een one-shot op zijn preload heeft een randuitfade.
+    fn lees_geom(&self) -> Option<LeesGeom> {
+        if self.pending_decay_frames.is_some() {
+            return None;
+        }
+        let (loop_start, loop_end) = self.get_loop_points();
+        let g = match &self.source {
+            VoiceSampleSource::Full(sample) => {
+                let len = sample.data.len();
+                let (ls, le_raw) = match (loop_start, loop_end) {
+                    (Some(a), Some(b)) if b > a && (b as usize) <= len => (a as usize, b as usize),
+                    _ => (len / 4, len),
+                };
+                (false, len, len, ls, le_raw, true)
+            }
+            VoiceSampleSource::PreloadOnly { preload, .. } => {
+                if self.one_shot {
+                    return None;
+                }
+                let alen = preload.attack_data.len();
+                let (ls, le_raw, volledige) = match (loop_start, loop_end) {
+                    (Some(a), Some(b)) if b > a && (b as usize) <= alen => (a as usize, b as usize, true),
+                    (Some(a), _) if (a as usize) + 1024 < alen => (a as usize, alen, false),
+                    _ => (alen / 4, alen, false),
+                };
+                (true, alen, preload.total_samples, ls, le_raw, volledige)
+            }
+        };
+        let (preload, len, total_len, ls, le_raw, volledige_loop) = g;
+        if len < 2 || total_len == 0 {
+            return None;
+        }
+        // Precies als read_voice_lr: het loop-einde geklemd op len-1.
+        let le = le_raw.min(len - 1).max(ls + 1);
+        let loop_len = le.saturating_sub(ls);
+        let xfade = loop_xfade(le_raw.saturating_sub(ls), ls);
+        Some(LeesGeom {
+            preload, len, total_len, ls, le_raw, le, loop_len, xfade, volledige_loop,
+            naad: loop_len > xfade && ls >= xfade,
+        })
+    }
+
+    /// Eén blok samples lezen met de geometrie uit `lees_geom` (0.9.32).
+    /// Rekent exact hetzelfde als `next_sample` per sample (envelope, loop-wrap
+    /// met naad-crossfade, release/one-shot-einde, startbuffer-tekort,
+    /// historie en leeftijd), maar zonder per sample de bron, de looppunten,
+    /// de lengtes en de crossfade-breedte opnieuw te bepalen. `rates[f]` is de
+    /// effectieve afspeelsnelheid van frame f (wind/tremulant inbegrepen); de
+    /// basis-`rate` van de stem blijft ongemoeid. Bewezen gelijk aan de oude
+    /// route in `snelle_leesroute_is_bitidentiek`.
+    fn lees_blok(&mut self, g: &LeesGeom, rates: &[f64], uit_l: &mut [f32], uit_r: &mut [f32], licht: bool) {
+        let (data, right): (&[f32], Option<&[f32]>) = match &self.source {
+            VoiceSampleSource::Full(s) => (&s.data, s.right.as_deref()),
+            VoiceSampleSource::PreloadOnly { preload, .. } => (&preload.attack_data, preload.attack_right.as_deref()),
+        };
+        let len = g.len;
+        for (f, &rate) in rates.iter().enumerate() {
+            // Envelope (zelfde stappen als next_sample).
+            if self.envelope < self.target_envelope {
+                self.envelope = (self.envelope + self.envelope_speed).min(self.target_envelope);
+            } else if self.envelope > self.target_envelope {
+                self.envelope = (self.envelope - self.envelope_speed).max(self.target_envelope);
+            }
+            let no_loop = self.releasing || self.one_shot;
+            if g.preload && !g.volledige_loop && !no_loop && !self.preload_wrapped
+                && self.position + rate >= g.le_raw as f64
+            {
+                self.preload_wrapped = true;
+                PRELOAD_UNDERRUNS.fetch_add(1, Ordering::Relaxed);
+            }
+            let (vl, vr) = if no_loop {
+                // Uitspelen zonder loop (release / one-shot).
+                let i = self.position as usize;
+                if i >= len - 1 {
+                    self.envelope = 0.0;
+                    (0.0, 0.0)
+                } else {
+                    let frac = (self.position - i as f64) as f32;
+                    let l = interp(data, i, frac, licht);
+                    let r = match right { Some(rd) => interp(rd, i, frac, licht), None => l };
+                    (l, r)
+                }
+            } else {
+                if g.loop_len > 0 && self.position >= g.le as f64 {
+                    self.position = g.ls as f64 + ((self.position - g.le as f64) % g.loop_len as f64);
+                }
+                let p = self.position;
+                let i = p as usize;
+                if i >= len - 1 {
+                    self.position = g.ls as f64;
+                    (0.0, 0.0)
+                } else {
+                    let frac = (p - i as f64) as f32;
+                    let pl = interp(data, i, frac, licht);
+                    let pr = match right { Some(rd) => interp(rd, i, frac, licht), None => pl };
+                    let mut uit = (pl, pr);
+                    if g.naad {
+                        let dist = g.le as f64 - p;
+                        if dist > 0.0 && dist < g.xfade as f64 {
+                            let fade = (dist / g.xfade as f64) as f32;
+                            let (w_primary, w_blended) = xfade_weights(fade);
+                            let pre = g.ls as f64 - dist;
+                            let j = pre as usize;
+                            if j + 1 < len {
+                                let pfrac = (pre - j as f64) as f32;
+                                let bl = interp(data, j, pfrac, licht);
+                                let br = match right { Some(rd) => interp(rd, j, pfrac, licht), None => bl };
+                                uit = (pl * w_primary + bl * w_blended, pr * w_primary + br * w_blended);
+                            }
+                        }
+                    }
+                    uit
+                }
+            };
+            self.position += rate;
+            if self.one_shot && !self.releasing && self.position as usize + 1 >= g.total_len {
+                self.releasing = true;
+                self.target_envelope = 0.0;
+                self.envelope = 0.0;
+            }
+            self.hist_prev = self.hist_last;
+            self.hist_last = (vl + vr) * 0.5;
+            self.age_samples += 1;
+            uit_l[f] = vl * self.envelope;
+            uit_r[f] = vr * self.envelope;
+        }
+    }
+}
+
+/// Zie `PlayingVoice::lees_geom`.
+#[derive(Clone, Copy, Debug)]
+struct LeesGeom {
+    /// Bron is een preload (anders de volledige opname).
+    preload: bool,
+    /// Lengte van wat er werkelijk in het geheugen staat (frames).
+    len: usize,
+    /// Lengte van de hele opname (voor het one-shot-einde).
+    total_len: usize,
+    ls: usize,
+    /// Loop-einde vóór het klemmen (startbuffer-tekort, crossfade-breedte).
+    le_raw: usize,
+    /// Loop-einde geklemd op len-1, zoals read_voice_lr.
+    le: usize,
+    loop_len: usize,
+    xfade: usize,
+    volledige_loop: bool,
+    /// Naad-crossfade mogelijk (loop langer dan de crossfade en genoeg aanloop).
+    naad: bool,
 }
 
 /// Laat een net gestarte release-voice INFADEN naar `level` over `fade_ms` —
@@ -3970,12 +4253,12 @@ fn run_audio_thread(
 
     // Audio state (local to audio thread)
     // Fully loaded samples (legacy or after background load)
-    let samples: Arc<RwLock<HashMap<(u32, u32), SampleRef>>> = Arc::new(RwLock::new(HashMap::new()));
+    let samples: Arc<RwLock<HashMap<(u32, u32), SampleRef>>> = Arc::new(RwLock::new(lege_samplesmap()));
     // Preload buffers (attack portions for instant playback)
     let preloads: Arc<RwLock<HashMap<(u32, u32), Arc<PreloadBuffer>>>> = Arc::new(RwLock::new(HashMap::new()));
     // Set of stop IDs that currently have tremulant active
     let trem_active: Arc<RwLock<std::collections::HashSet<u32>>> = Arc::new(RwLock::new(std::collections::HashSet::new()));
-    let voices: Arc<RwLock<Vec<PlayingVoice>>> = Arc::new(RwLock::new(Vec::new()));
+    let voices: Arc<RwLock<Vec<PlayingVoice>>> = Arc::new(RwLock::new(lege_stemmenlijst()));
     let master_gain: Arc<RwLock<f32>> = Arc::new(RwLock::new(0.5));
     // Globale toonhoogte-correctie (0.8.84): elke voice.rate wordt vermenigvuldigd
     // met 2^(cents/1200). Op nul = 1.0 (geen effect). Werkt onafhankelijk van
@@ -4266,7 +4549,7 @@ fn run_audio_thread(
     let mut bus_ouder: [usize; 32] = std::array::from_fn(|i| i);
     let mut enclosure_bus_base: usize = 0;
     let mut n_enclosure_buses: usize = 0;
-    let mut inflight_loads: std::collections::HashSet<(u32, u32)> = std::collections::HashSet::new();
+    let mut inflight_loads: std::collections::HashSet<(u32, u32)> = std::collections::HashSet::with_capacity(PENDING_LOADS_CAP);
     // Laadverzoeken wachten eerst hier (0.8.92) en gaan in deadline-volgorde
     // naar de werkers: de stem waarvan de startbuffer het eerst opraakt gaat
     // voor. Verzoeken van stemmen die inmiddels weg zijn vervallen — een
@@ -4311,7 +4594,7 @@ fn run_audio_thread(
     // Sinds 0.9.31 instelbaar via `sample_cap_bytes()` (zie daar): 1,5 GB vast
     // bleek op grote surround-sets veel te krap.
     let mut samples_bytes: usize = 0;
-    let mut sample_fifo: std::collections::VecDeque<(u32, u32)> = std::collections::VecDeque::new();
+    let mut sample_fifo: std::collections::VecDeque<(u32, u32)> = std::collections::VecDeque::with_capacity(SAMPLES_RESERVE);
     // Afvoerluik naar de janitor (zender + wachtrij voor wat de janitor even
     // niet aankon, zie `GcSink`): alles wat de callback loslaat en groot kan
     // zijn — oude maps, stemmenlijsten, geëvicte samples én de bron van een
@@ -5243,7 +5526,7 @@ fn run_audio_thread(
                             // Oude map (kan GB's zijn na lang spelen) naar de
                             // janitor-thread — droppen in de callback stalde de
                             // audio-thread seconden lang.
-                            let old = std::mem::take(&mut *samples_lock);
+                            let old = std::mem::replace(&mut *samples_lock, lege_samplesmap());
                             gc.send_boxed(old);
                             samples_bytes = 0;
                             sample_fifo.clear();
@@ -5260,7 +5543,7 @@ fn run_audio_thread(
                         }
                         {
                             let mut voices_lock = voices_clone.write();
-                            let old = std::mem::take(&mut *voices_lock);
+                            let old = std::mem::replace(&mut *voices_lock, lege_stemmenlijst());
                             gc.send_boxed(old);
                         }
                         // Nieuwe laad-generatie: uitstaande achtergrond-loads van
@@ -5284,7 +5567,7 @@ fn run_audio_thread(
                         // het orgelwissel-pad — na uren spelen zaten hier GB's.
                         {
                             let mut samples_lock = samples_clone.write();
-                            let old = std::mem::take(&mut *samples_lock);
+                            let old = std::mem::replace(&mut *samples_lock, lege_samplesmap());
                             gc.send_boxed(old);
                             // Ruimte voor de volledige WAV's die straks per
                             // achtergrond-load IN de callback worden ingevoegd.
@@ -5303,7 +5586,7 @@ fn run_audio_thread(
                         }
                         {
                             let mut voices_lock = voices_clone.write();
-                            let old = std::mem::take(&mut *voices_lock);
+                            let old = std::mem::replace(&mut *voices_lock, lege_stemmenlijst());
                             gc.send_boxed(old);
                         }
                         // Nieuwe laad-generatie (zie LoadSamples).
@@ -5727,7 +6010,7 @@ fn run_audio_thread(
                     AudioCommand::ClearSamples => {
                         // Grote maps naar de janitor-thread (zie LoadSamples).
                         {
-                            let old = std::mem::take(&mut *samples_clone.write());
+                            let old = std::mem::replace(&mut *samples_clone.write(), lege_samplesmap());
                             gc.send_boxed(old);
                             samples_bytes = 0;
                             sample_fifo.clear();
@@ -5743,7 +6026,7 @@ fn run_audio_thread(
                         *odf_retune_clone.write() = Arc::new(HashMap::new());
                         *force_tempered_on_clone.write() = false;
                         {
-                            let old = std::mem::take(&mut *voices_clone.write());
+                            let old = std::mem::replace(&mut *voices_clone.write(), lege_stemmenlijst());
                             gc.send_boxed(old);
                         }
                         // Nieuwe laad-generatie (zie LoadSamples).
@@ -7284,6 +7567,155 @@ mod meng_verdeling_tests {
         (hoofd_l, hoofd_r)
     }
 
+    // ── Equivalentie snelle mengkern (0.9.32) ────────────────────────────
+
+    fn volledig(len: usize, stereo: bool, lus: Option<(u64, u64)>, zaad: f32) -> SampleRef {
+        Arc::new(vpo_sampler::SampleData {
+            data: (0..len).map(|i| ((i as f32) * 0.017 + zaad).sin() * 0.6).collect(),
+            right: if stereo { Some((0..len).map(|i| ((i as f32) * 0.021 + zaad).cos() * 0.5).collect()) } else { None },
+            sample_rate: 48000,
+            channels: if stereo { 2 } else { 1 },
+            loop_start: lus.map(|l| l.0),
+            loop_end: lus.map(|l| l.1),
+        })
+    }
+
+    fn preload(len: usize, totaal: usize, stereo: bool, lus: (Option<u64>, Option<u64>), zaad: f32) -> Arc<PreloadBuffer> {
+        Arc::new(PreloadBuffer {
+            attack_data: (0..len).map(|i| ((i as f32) * 0.019 + zaad).sin() * 0.6).collect(),
+            attack_right: if stereo { Some((0..len).map(|i| ((i as f32) * 0.023 + zaad).cos() * 0.5).collect()) } else { None },
+            sample_rate: 48000, total_samples: totaal, loop_start: lus.0, loop_end: lus.1,
+            source_path: std::path::PathBuf::from("eq.wav"), channels: if stereo { 2 } else { 1 },
+            bits_per_sample: 24, data_offset: 44, align_table: None, trim_start: 0,
+            smpl_unity_note: None, smpl_pitch_fraction_cents: None,
+        })
+    }
+
+    /// Alle scenario's van de leesroute, elk als bouwfunctie (de stem wordt
+    /// twee keer identiek gebouwd: één voor de oude, één voor de nieuwe route).
+    fn scenario(nr: usize) -> PlayingVoice {
+        let mut v = match nr {
+            // Volledig stereo, lange naad-crossfade, start vlak voor de naad.
+            0 => { let mut v = PlayingVoice::new_from_sample(volledig(20_000, true, Some((6_000, 18_000)), 0.3), 1, 1, 60, 1.0); v.position = 17_200.5; v }
+            // Volledig mono zonder looppunten (terugval ¼..einde).
+            1 => { let mut v = PlayingVoice::new_from_sample(volledig(9_000, false, None, 1.1), 1, 2, 61, 1.0); v.position = 8_700.25; v }
+            // Releasing: uitspelen tot het einde van de opname.
+            2 => { let mut v = PlayingVoice::new_from_sample(volledig(6_000, true, Some((1_000, 5_000)), 0.7), 1, 3, 62, 1.0);
+                   v.position = 5_500.0; v.releasing = true; v.target_envelope = 0.0; v.envelope_speed = 0.0007; v }
+            // One-shot (release-staart) die halverwege het blok zijn einde haalt.
+            3 => { let mut v = PlayingVoice::new_from_sample(volledig(4_000, true, None, 2.2), 1, 4, 63, 1.0);
+                   v.one_shot = true; v.position = 3_700.0; v }
+            // Preload met volledige loop binnen de buffer.
+            4 => { let mut v = PlayingVoice::new_from_preload(preload(12_000, 60_000, true, (Some(3_000), Some(11_000)), 0.4), 1, 5, 64, 1.0, 48000);
+                   v.position = 10_800.0; v }
+            // Preload: loop begint binnen, eindigt erbuiten → startbuffer-tekort.
+            5 => { let mut v = PlayingVoice::new_from_preload(preload(10_000, 80_000, false, (Some(2_000), Some(70_000)), 0.9), 1, 6, 65, 1.0, 48000);
+                   v.position = 9_600.0; v }
+            // Preload zonder looppunten (terugval).
+            6 => { let mut v = PlayingVoice::new_from_preload(preload(8_000, 50_000, true, (None, None), 1.7), 1, 7, 66, 1.0, 48000);
+                   v.position = 7_800.0; v }
+            // Infaden (crossfade_in) op een looping stem.
+            _ => { let mut v = PlayingVoice::new_from_sample(volledig(15_000, true, Some((4_000, 14_000)), 0.1), 1, 8, 67, 1.0);
+                   crossfade_in(&mut v, 0.8, 30.0, 48000); v.position = 13_500.0; v }
+        };
+        v.rate = 1.0;
+        v
+    }
+
+    #[test]
+    fn snelle_leesroute_is_bitidentiek() {
+        for nr in 0..8 {
+            for licht in [false, true] {
+                let mut oud = scenario(nr);
+                let mut nieuw = scenario(nr);
+                let geom = nieuw.lees_geom().expect("dit scenario hoort de snelle route te nemen");
+                let bn = 256usize;
+                for blok in 0..3 {
+                    let rates: Vec<f64> = (0..bn).map(|f| 1.0 + 0.013 * (((blok * bn + f) as f64) * 0.07).sin()).collect();
+                    let mut ul = vec![0.0f32; bn];
+                    let mut ur = vec![0.0f32; bn];
+                    nieuw.lees_blok(&geom, &rates, &mut ul, &mut ur, licht);
+                    for f in 0..bn {
+                        let basis = oud.rate;
+                        oud.rate = rates[f];
+                        let (a, b) = oud.next_sample(licht);
+                        oud.rate = basis;
+                        assert_eq!((a.to_bits(), b.to_bits()), (ul[f].to_bits(), ur[f].to_bits()),
+                            "scenario {} licht {} blok {} frame {}: oud ({}, {}) nieuw ({}, {})", nr, licht, blok, f, a, b, ul[f], ur[f]);
+                    }
+                }
+                assert_eq!(oud.position.to_bits(), nieuw.position.to_bits(), "positie, scenario {}", nr);
+                assert_eq!(oud.envelope.to_bits(), nieuw.envelope.to_bits(), "envelope, scenario {}", nr);
+                assert_eq!(oud.target_envelope.to_bits(), nieuw.target_envelope.to_bits(), "doel, scenario {}", nr);
+                assert_eq!(oud.releasing, nieuw.releasing, "releasing, scenario {}", nr);
+                assert_eq!(oud.preload_wrapped, nieuw.preload_wrapped, "preload_wrapped, scenario {}", nr);
+                assert_eq!((oud.hist_last.to_bits(), oud.hist_prev.to_bits()), (nieuw.hist_last.to_bits(), nieuw.hist_prev.to_bits()), "historie, scenario {}", nr);
+                assert_eq!(oud.age_samples, nieuw.age_samples, "leeftijd, scenario {}", nr);
+            }
+        }
+    }
+
+    /// De hele mengkern: nieuw (blok + geometrie) tegen oud (per sample), met
+    /// wind, tremulant, C/Cis-spreiding, gemengde bronnen en licht/cubisch.
+    #[test]
+    fn mengkern_nieuw_gelijk_aan_oud() {
+        let bn = 300usize; // > MAX_BLOK_FRAMES: ook het opknippen wordt getest
+        let wind_dev: Vec<[f32; 32]> = (0..bn).map(|f| [((f as f32) * 0.05).sin() * 0.04; 32]).collect();
+        let trem_rate: Vec<[f64; 32]> = (0..bn).map(|f| [1.0 + ((f as f64) * 0.11).sin() * 0.004; 32]).collect();
+        let trem_amp: Vec<[f32; 32]> = (0..bn).map(|f| [1.0 + ((f as f32) * 0.09).cos() * 0.05; 32]).collect();
+        let mut pan_cos = [0.0f32; 32];
+        let mut pan_sin = [0.0f32; 32];
+        for d in 0..32 {
+            let angle = (d as f32 / 31.0 + 1.0) * 0.25 * std::f32::consts::PI;
+            pan_cos[d] = angle.cos();
+            pan_sin[d] = angle.sin();
+        }
+        let pans: Vec<f32> = (0..32).map(|d| (d as f32 / 31.0) * 2.0 - 1.0).collect();
+        let ccis_en: Vec<bool> = (0..32).map(|d| d % 2 == 0).collect();
+        for licht in [false, true] {
+            let mut blok = blok_context(&wind_dev, &trem_rate, &trem_amp, &pan_cos, &pan_sin, &pans, &ccis_en, bn, true);
+            blok.licht = licht;
+            let bouw = || -> Vec<PlayingVoice> {
+                let mut vs: Vec<PlayingVoice> = stemmen(120);
+                for nr in 0..8 { vs.push(scenario(nr)); }
+                // Eén stem met een uitgestelde decay: die gaat via de oude route.
+                let mut uitgesteld = scenario(0);
+                crossfade_in_with_decay(&mut uitgesteld, 1.0, 20.0, 800.0, 48000);
+                vs.push(uitgesteld);
+                for (i, v) in vs.iter_mut().enumerate() {
+                    v.c_div = i % 4;
+                    v.c_kp = [0.064, 0.046, 0.028, 0.0][i % 4];
+                    v.c_kg = if i % 4 == 3 { 3.6 } else { 2.0 };
+                    v.c_dev_a = 0.01 + (i % 3) as f32 * 0.02;
+                    v.c_use_lfo_trem = i % 3 == 0;
+                    v.c_voicing_gain = 0.8 + (i % 5) as f32 * 0.05;
+                    v.c_pitch_mul = 1.0 + (i % 7) as f64 * 0.001;
+                }
+                vs
+            };
+            let mut oud = bouw();
+            let mut nieuw = bouw();
+            let (mut ol, mut or) = (vec![[0.0f32; 32]; bn], vec![[0.0f32; 32]; bn]);
+            let (mut nl, mut nr) = (vec![[0.0f32; 32]; bn], vec![[0.0f32; 32]; bn]);
+            for _ in 0..3 {
+                meng_stemmen_blok_oud(&mut oud, &mut ol, &mut or, &blok);
+                meng_stemmen_blok(&mut nieuw, &mut nl, &mut nr, &blok);
+            }
+            for f in 0..bn {
+                for d in 0..32 {
+                    assert_eq!(ol[f][d].to_bits(), nl[f][d].to_bits(), "L frame {} bus {} licht {}", f, d, licht);
+                    assert_eq!(or[f][d].to_bits(), nr[f][d].to_bits(), "R frame {} bus {} licht {}", f, d, licht);
+                }
+            }
+            for (a, b) in oud.iter().zip(nieuw.iter()) {
+                assert_eq!(a.position.to_bits(), b.position.to_bits());
+                assert_eq!(a.envelope.to_bits(), b.envelope.to_bits());
+                assert_eq!(a.c_dev_cur.to_bits(), b.c_dev_cur.to_bits());
+                assert_eq!(a.rate.to_bits(), b.rate.to_bits());
+            }
+        }
+    }
+
     /// Benchmark (handmatig, release): kosten van de mengkern per stem per
     /// sample bij 1000 stemmen met elk een eigen stereo-buffer, tegenover het
     /// kale minimum (alleen de stereo-interpolatie). `cargo test --release -p
@@ -7305,7 +7737,7 @@ mod meng_verdeling_tests {
             })
         };
         let bufs: Vec<_> = (0..n).map(maak).collect();
-        let mut voices: Vec<PlayingVoice> = (0..n).map(|i| {
+        let bouw = |bufs: &Vec<Arc<PreloadBuffer>>| -> Vec<PlayingVoice> { (0..n).map(|i| {
             let mut v = PlayingVoice::new_from_preload(bufs[i].clone(), i as u32, i as u32 + 1, 36 + (i % 48) as u8, 1.0, 48000);
             v.c_div = i % 4;
             v.c_pitch_mul = 1.0 + (i % 7) as f64 * 0.0013;
@@ -7316,7 +7748,9 @@ mod meng_verdeling_tests {
             v.c_dev_a = 0.02;
             v.position = (i * 37 % 20_000) as f64;
             v
-        }).collect();
+        }).collect() };
+        let mut voices = bouw(&bufs);
+        let mut voices_oud = bouw(&bufs);
         let bn = 480usize;
         let wind_dev = vec![[-0.01f32; 32]; bn];
         let trem_rate = vec![[1.0f64; 32]; bn];
@@ -7334,6 +7768,13 @@ mod meng_verdeling_tests {
         let t = std::time::Instant::now();
         for _ in 0..rondes { meng_stemmen_blok(&mut voices, &mut dl, &mut dr, &blok); }
         let ns_meng = t.elapsed().as_nanos() as f64 / (rondes * n * bn) as f64;
+
+        // Oude kern (per sample next_sample) ter vergelijking.
+        meng_stemmen_blok_oud(&mut voices_oud, &mut dl, &mut dr, &blok);
+        let t = std::time::Instant::now();
+        for _ in 0..rondes { meng_stemmen_blok_oud(&mut voices_oud, &mut dl, &mut dr, &blok); }
+        let ns_oud = t.elapsed().as_nanos() as f64 / (rondes * n * bn) as f64;
+        println!("OUDE kern: {:.1} ns per stem-sample  →  nieuwe kern {:.2}x zo snel", ns_oud, ns_oud / ns_meng);
 
         // Kaal minimum: alleen stereo-hermite op dezelfde buffers.
         let mut pos: Vec<f64> = (0..n).map(|i| (i * 37 % 20_000) as f64).collect();

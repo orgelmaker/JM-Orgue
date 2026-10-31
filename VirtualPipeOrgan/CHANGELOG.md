@@ -4,6 +4,25 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.9.32] - 2026-10-31
+
+### Mengen van de stemmen tot bijna twee keer zo licht — geen kraakpieken meer bij vol werk
+- **Nieuwe mengkern.** Voor elke klinkende pijp werd per meetpunt opnieuw
+  uitgezocht waar en hoe er gelezen moest worden (opname, looppunten, lengte,
+  overgang bij de loopnaad), ook al verandert dat binnen een audioblok niet. Dat
+  gebeurt nu één keer per blok. De klank is exact dezelfde (getest: identiek tot
+  op het laatste bit, voor alle soorten opnamen en loops), maar het mengen kost
+  bij ~1000 stemmen ongeveer 40% minder rekenwerk, in de praktijk nog meer.
+- **Geen geheugenschuiven meer midden in het spel.** De lijst met klinkende
+  stemmen en de lijst met geladen opnamen begonnen na het laden van een orgel
+  leeg en moesten tijdens het eerste grote akkoord groeien — met een flinke
+  hapering als gevolg. Ze krijgen nu vooraf genoeg ruimte.
+
+Gemeten op een groot surround-orgel (bijna alle registers en koppels, ~1100
+gelijktijdige stemmen, buffer van 10 ms): van 18–23 overschrijdingen per ~100
+meetmomenten in 0.9.31 naar **geen enkele**; de zwaarste audioberekening
+gebruikte 97% van de beschikbare tijd.
+
 ## [0.9.31] - 2026-10-31
 
 ### Minder kraken bij grote orgels — de echte oorzaken aangepakt
