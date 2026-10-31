@@ -219,7 +219,7 @@ pub struct WavMarkers {
 /// audiodata te decoderen). Loops worden per GrandOrgue-regels gevalideerd:
 /// start<einde, binnen het bestand, einde>0 — ongeldige records vervallen stil.
 pub fn read_wav_markers(path: &Path) -> Option<WavMarkers> {
-    let mut file = File::open(path).ok()?;
+    let mut file = crate::wavpack::open(path).ok()?;
     let mut header = [0u8; 12];
     file.read_exact(&mut header).ok()?;
 
@@ -357,9 +357,7 @@ pub fn read_wav_loop_points(path: &Path) -> Option<(u64, u64)> {
 /// warn-logregels per bestand, duizenden keren per orgel. Met deze probe
 /// kiezen we direct de juiste parser.
 fn wav_fmt_chunk_size(path: &Path) -> Option<u32> {
-    use std::io::BufReader;
-    let file = File::open(path).ok()?;
-    let mut reader = BufReader::new(file);
+    let mut reader = crate::wavpack::open(path).ok()?;
     let mut header = [0u8; 12];
     reader.read_exact(&mut header).ok()?;
     if &header[0..4] != b"RIFF" || &header[8..12] != b"WAVE" {
@@ -526,7 +524,9 @@ mod detect_container_tests {
 /// dus bit-identiek aan de oude route. `None` = formaat niet in dit snelle pad
 /// (de aanroeper valt dan terug op de bestaande cascade).
 fn load_wav_snel(path: &Path) -> Option<SampleData> {
-    let bytes = std::fs::read(path).ok()?;
+    // WavPack komt hier al als teruggezette WAV binnen (0.9.35).
+    let gedeeld = crate::wavpack::lees_bytes(path).ok()?;
+    let bytes: &[u8] = &gedeeld;
     if bytes.len() < 12 || &bytes[0..4] != b"RIFF" || &bytes[8..12] != b"WAVE" {
         return None;
     }
@@ -1091,7 +1091,6 @@ pub fn load_wav_preload_segment_ms(path: &Path, ms: u32, segment: PreloadSegment
 }
 
 fn load_wav_preload_segment_len(path: &Path, len: PreloadLen, segment: PreloadSegment) -> Result<PreloadBuffer, SampleError> {
-    use std::io::BufReader;
 
     // Markers (loops + cue) uit de chunk-walk; bepaalt looppunten én — voor
     // release-segmenten — het startframe.
@@ -1111,9 +1110,8 @@ fn load_wav_preload_segment_len(path: &Path, len: PreloadLen, segment: PreloadSe
         }
     };
 
-    let file = File::open(path)
+    let mut reader = crate::wavpack::open(path)
         .map_err(|e| SampleError::FileError(format!("{}: {}", path.display(), e)))?;
-    let mut reader = BufReader::new(file);
 
     // Read RIFF header
     let mut header = [0u8; 12];
@@ -1393,11 +1391,9 @@ pub fn load_mp3(path: &Path) -> Result<SampleData, SampleError> {
 /// Negeert strict-checks op fmt chunk size en leest direct de essentiële velden.
 /// Werkt voor PCM 8/16/24/32-bit Int en 32-bit Float WAV-bestanden.
 pub fn load_wav_manual(path: &Path) -> Result<SampleData, SampleError> {
-    use std::io::BufReader;
 
-    let file = File::open(path)
+    let mut reader = crate::wavpack::open(path)
         .map_err(|e| SampleError::FileError(format!("{}: {}", path.display(), e)))?;
-    let mut reader = BufReader::new(file);
 
     // RIFF header
     let mut header = [0u8; 12];
@@ -1635,7 +1631,8 @@ pub fn load_audio(path: &Path) -> Result<SampleData, SampleError> {
         .unwrap_or_default();
 
     match ext.as_str() {
-        "wav" => load_wav(path),
+        // WavPack (.wv) gaat via de WAV-route: de lader zet hem terug (0.9.35).
+        "wav" | "wv" => load_wav(path),
         "mp3" => load_mp3(path),
         _ => Err(SampleError::UnsupportedFormat(format!("Unknown extension: {}", ext))),
     }
@@ -1658,7 +1655,7 @@ fn load_audio_preload_len(path: &Path, len: PreloadLen) -> Result<PreloadBuffer,
         .unwrap_or_default();
 
     match ext.as_str() {
-        "wav" => load_wav_preload_segment_len(path, len, PreloadSegment::Full),
+        "wav" | "wv" => load_wav_preload_segment_len(path, len, PreloadSegment::Full),
         "mp3" => {
             // For MP3, we need to load the entire file and take the first N samples
             // (MP3 doesn't support random access like WAV)

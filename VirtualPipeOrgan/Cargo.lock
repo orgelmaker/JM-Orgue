@@ -2445,7 +2445,7 @@ dependencies = [
 
 [[package]]
 name = "jm-midimon"
-version = "0.9.34"
+version = "0.9.35"
 dependencies = [
  "chrono",
  "midir",
@@ -6135,7 +6135,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "vpo-app"
-version = "0.9.34"
+version = "0.9.35"
 dependencies = [
  "asio-sys",
  "base64 0.22.1",
@@ -6174,7 +6174,7 @@ dependencies = [
 
 [[package]]
 name = "vpo-audio"
-version = "0.9.34"
+version = "0.9.35"
 dependencies = [
  "bytemuck",
  "cpal",
@@ -6194,7 +6194,7 @@ dependencies = [
 
 [[package]]
 name = "vpo-core"
-version = "0.9.34"
+version = "0.9.35"
 dependencies = [
  "bincode",
  "serde",
@@ -6205,7 +6205,7 @@ dependencies = [
 
 [[package]]
 name = "vpo-midi"
-version = "0.9.34"
+version = "0.9.35"
 dependencies = [
  "btleplug",
  "crossbeam-channel",
@@ -6222,7 +6222,7 @@ dependencies = [
 
 [[package]]
 name = "vpo-plugin"
-version = "0.9.34"
+version = "0.9.35"
 dependencies = [
  "nih_plug",
  "parking_lot",
@@ -6234,7 +6234,7 @@ dependencies = [
 
 [[package]]
 name = "vpo-sampler"
-version = "0.9.34"
+version = "0.9.35"
 dependencies = [
  "bincode",
  "bytemuck",
@@ -6251,6 +6251,7 @@ dependencies = [
  "tracing-subscriber",
  "uuid 1.20.0",
  "vpo-core",
+ "wavicle",
 ]
 
 [[package]]
@@ -6421,6 +6422,12 @@ dependencies = [
  "wasm-bindgen-futures",
  "web-sys",
 ]
+
+[[package]]
+name = "wavicle"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e312eaf22b4a7e5b7bf038edb3a7e4703c7b86dfabaea49d17af85e55eb76ab"
 
 [[package]]
 name = "web-sys"

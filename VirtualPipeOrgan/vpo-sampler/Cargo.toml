@@ -12,6 +12,8 @@ rubato = { workspace = true }
 rayon = { workspace = true }
 bytemuck = { workspace = true }
 symphonia = { workspace = true }
+# WavPack-samples (0.9.35): pure Rust, MIT/Apache
+wavicle = "0.1"
 
 serde = { workspace = true }
 bincode = { workspace = true }
@@ -25,4 +27,5 @@ uuid = { version = "1.0", features = ["v4", "serde"] }
 serde_json = "1.0"
 
 [dev-dependencies]
+wavicle = { version = "0.1", features = ["encode"] }
 tracing-subscriber = { workspace = true }

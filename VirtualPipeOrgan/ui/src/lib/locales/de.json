@@ -1507,7 +1507,7 @@
     "swell_pedal": "Schwelltritt"
   },
   "load": {
-    "warn_wavpack": "Dieses Sampleset nutzt WavPack-Komprimierung. JM-Orgue liest nur unkomprimiertes WAV; {n} Dateien wurden übersprungen und diese Pfeifen bleiben stumm.",
+    "warn_wavpack": "{n} WavPack-Dateien konnten nicht gelesen werden (zum Beispiel Hybrid oder mehr als zwei Kanäle); diese Pfeifen bleiben stumm.",
     "warn_container": "Dieses Sampleset nutzt {container}-Komprimierung; JM-Orgue liest nur unkomprimiertes WAV. {n} Dateien übersprungen."
   }
 }

@@ -1507,7 +1507,7 @@
     "swell_pedal": "Pédale d'expression"
   },
   "load": {
-    "warn_wavpack": "Ce jeu d'échantillons utilise la compression WavPack. JM-Orgue ne lit que du WAV non compressé ; {n} fichiers ont été ignorés et ces tuyaux restent silencieux.",
+    "warn_wavpack": "{n} fichiers WavPack n'ont pas pu être lus (par exemple hybrides ou plus de deux canaux) ; ces tuyaux restent silencieux.",
     "warn_container": "Ce jeu d'échantillons utilise la compression {container} ; JM-Orgue ne lit que du WAV non compressé. {n} fichiers ignorés."
   }
 }

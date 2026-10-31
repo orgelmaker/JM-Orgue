@@ -1811,7 +1811,7 @@
          beter dan duizenden "Failed to preload"-regels in het log. -->
     <div class="update-banner">
       <span>{(formaatWaarschuwing.container === 'WavPack'
-        ? $t('load.warn_wavpack') || 'Deze sampleset gebruikt WavPack-compressie. JM-Orgue leest alleen onverpakte WAV; {n} bestanden zijn overgeslagen en die pijpen klinken niet.'
+        ? $t('load.warn_wavpack') || '{n} WavPack-bestanden konden niet worden gelezen (bijvoorbeeld hybride of meer dan twee kanalen); die pijpen klinken niet.'
         : $t('load.warn_container') || 'Deze sampleset gebruikt {container}; JM-Orgue leest alleen onverpakte WAV. {n} bestanden overgeslagen.')
         .replace('{container}', formaatWaarschuwing.container)
         .replace('{n}', formaatWaarschuwing.count)}</span>

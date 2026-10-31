@@ -13,6 +13,7 @@ pub mod streaming;
 pub mod custom_organ;
 pub mod perspective;
 pub mod registernaam;
+pub mod wavpack;
 
 pub use loader::{
     SampleData, SampleError, PreloadBuffer, PreloadSegment, WavMarkers, ReleaseAlignTable,

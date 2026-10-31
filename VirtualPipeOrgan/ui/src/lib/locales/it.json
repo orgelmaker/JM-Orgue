@@ -1507,7 +1507,7 @@
     "swell_pedal": "Pedale d'espressione"
   },
   "load": {
-    "warn_wavpack": "Questo set di campioni usa compressione WavPack. JM-Orgue legge solo WAV non compressi; {n} file sono stati saltati e quelle canne restano mute.",
+    "warn_wavpack": "Non è stato possibile leggere {n} file WavPack (ad esempio ibridi o con più di due canali); quelle canne restano mute.",
     "warn_container": "Questo set di campioni usa compressione {container}; JM-Orgue legge solo WAV non compressi. {n} file saltati."
   }
 }

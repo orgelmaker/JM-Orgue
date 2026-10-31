@@ -3615,12 +3615,13 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
                 }
             })
             .collect();
-        // Samenvatting per container-formaat. WavPack-sets (veel Lars Palo-
-        // GrandOrgue-pakketten) geven één duidelijke melding, niet duizenden.
+        // Samenvatting per container-formaat: één duidelijke melding, niet
+        // duizenden. WavPack wordt sinds 0.9.35 gelezen; alleen wat de decoder
+        // weigert (hybride, >2 kanalen) komt hier nog terecht.
         if let Ok(map) = container_counts.lock() {
             for (naam, (aantal, voorbeeld)) in map.iter() {
                 warn!(
-                    "{} samples in {}-formaat overgeslagen (JM-Orgue leest alleen onverpakte WAV). Voorbeeld: {:?}",
+                    "{} samples in {}-formaat niet gelezen en overgeslagen. Voorbeeld: {:?}",
                     aantal, naam, voorbeeld
                 );
                 emit_container_warning(state, naam, *aantal);
