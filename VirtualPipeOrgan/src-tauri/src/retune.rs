@@ -137,16 +137,30 @@ pub fn pipe_pitch_input(
     measured_cents: Option<f32>,
     original_pitch_tuning_cents: f32,
 ) -> PipePitchInput {
+    let harmonic = extra.harmonic_number.unwrap_or(owner_harmonic).max(1);
+    // Zwevend op naam: alleen een afwijking van een zweving houden. Wijkt de
+    // opname meer dan ZWEVING_MAX_CENTS af van de doeltoon, dan is het een
+    // geleende of andere noot (een halve toon ernaast) en geen zweving; die
+    // pijp gaat gewoon naar de doeltoon (0.9.40). Een keep-opgave uit de
+    // definitie zelf (Hauptwerk-schemacode, ook koortoon) blijft ongemoeid.
+    let zwevend = zwevende_naam && {
+        let opname = extra.original_pitch_cents.or(measured_cents);
+        opname.map_or(true, |o| (o - target_cents(key_midi, harmonic)).abs() <= ZWEVING_MAX_CENTS)
+    };
     PipePitchInput {
         key_midi,
-        harmonic: extra.harmonic_number.unwrap_or(owner_harmonic).max(1),
+        harmonic,
         measured_cents,
         original_cents: extra.original_pitch_cents,
         pitch_correction_cents: hierarchie_pc + extra.pitch_correction_cents.unwrap_or(0.0),
-        keep_pct: extra.retune_keep_pct.unwrap_or(if zwevende_naam { 100.0 } else { 0.0 }),
+        keep_pct: extra.retune_keep_pct.unwrap_or(if zwevend { 100.0 } else { 0.0 }),
         original_pitch_tuning_cents,
     }
 }
+
+/// Grootste afwijking die nog als zweving telt (zwevende stem herkend op de
+/// naam). Celestes zweven een paar tot hooguit enkele tientallen cent.
+pub const ZWEVING_MAX_CENTS: f32 = 50.0;
 
 /// Correctie voor de Origineel-route (zonder hertemperen): een vervangen of
 /// geleende opname naar de originele pijptoon (Hauptwerk "Original organ
@@ -228,6 +242,26 @@ mod tests {
     fn friesach_celeste() {
         let r = retune_cents(&inp(48, 8, Some(4824.974), 15.9313, 0.0, 0.0)).unwrap();
         assert!((r - -9.043).abs() < 0.01, "{r}");
+    }
+
+    /// Vox coelestis waarvan een pijp de opname van de buurtoon leent: die
+    /// "afwijking" van 100 ct is geen zweving en gaat naar de doeltoon; een
+    /// echte zweving (+12 ct) blijft. Een keep-opgave uit de definitie gaat voor.
+    #[test]
+    fn zweving_op_naam_alleen_binnen_grens() {
+        let extra = vpo_sampler::PipeExtra::default();
+        // Toets 61 (cis) speelt de c-opname (6000 ct): doel 6100.
+        let geleend = pipe_pitch_input(&extra, 61, 8, 0.0, true, Some(6000.0), 0.0);
+        assert_eq!(geleend.keep_pct, 0.0);
+        assert!((retune_cents(&geleend).unwrap() - 100.0).abs() < 0.01);
+        // Echte zweving: 12 ct boven de doeltoon blijft staan.
+        let zweving = pipe_pitch_input(&extra, 61, 8, 0.0, true, Some(6112.0), 0.0);
+        assert_eq!(zweving.keep_pct, 100.0);
+        assert!(retune_cents(&zweving).unwrap().abs() < 0.01);
+        // Definitie zegt zelf 100 % (bv. koortoon +102): ongemoeid.
+        let mut koortoon = vpo_sampler::PipeExtra::default();
+        koortoon.retune_keep_pct = Some(100.0);
+        assert_eq!(pipe_pitch_input(&koortoon, 61, 8, 0.0, true, Some(6202.0), 0.0).keep_pct, 100.0);
     }
 
     /// Friesach HW Principal 8' toets 60: smpl +6.4035 → −6.4035.
