@@ -50,6 +50,14 @@ pub fn load_hauptwerk(odf_path: &Path) -> Result<OrganDefinition, OdfError> {
     let bytes = std::fs::read(odf_path)?;
     let xml = ensure_readable_xml(bytes)?;
 
+    // Custom Organ Design Module: een regel-gebaseerde definitie met een
+    // eigen indeling (0.9.39). Mag zonder pakketroot binnenkomen: dan meldt
+    // die route welke samplepakketten ontbreken.
+    if crate::hauptwerk_codm::is_codm(&xml) {
+        info!("Hauptwerk Custom Organ (CODM) gedetecteerd");
+        return crate::hauptwerk_codm::laad_codm(odf_path, &xml);
+    }
+
     // Resolve the package root: the ancestor directory that contains
     // `OrganInstallationPackages` (the ODF may live in `OrganDefinitions/` or at
     // the package top level).
@@ -889,6 +897,7 @@ fn build_definition(
             destination_keyshift: offset,
             unison_off: false,
             melodie_of_bas: false,
+            melodie: false,
         });
         manual_coupler_refs.entry(src_manual).or_default().push(coupler_num);
         coupler_num += 1;
@@ -1555,7 +1564,7 @@ pub fn is_hauptwerk_path(path: &Path) -> bool {
         .file_name()
         .map(|f| f.to_string_lossy().to_lowercase())
         .unwrap_or_default();
-    if file.ends_with(".organ_hauptwerk_xml") {
+    if file.ends_with(".organ_hauptwerk_xml") || file.ends_with(".customorgan_hauptwerk_xml") {
         return true;
     }
     if file.ends_with(".organ") {
@@ -1568,9 +1577,9 @@ pub fn is_hauptwerk_path(path: &Path) -> bool {
 // XML scanning (dependency-free; the format is flat typed object lists)
 // ============================================================================
 
-type FieldMap = HashMap<String, String>;
+pub(crate) type FieldMap = HashMap<String, String>;
 
-trait FieldMapExt {
+pub(crate) trait FieldMapExt {
     fn get_u32(&self, key: &str) -> Option<u32>;
     fn get_i32(&self, key: &str) -> Option<i32>;
     /// Float (Hauptwerk schrijft ook exponentnotatie zoals "1e+2").
@@ -1613,7 +1622,7 @@ struct HwPipePitch {
 /// Extract every object of `object_type` from its `<ObjectList ObjectType="..">`
 /// as a flat field map. Object lists are not nested and each object body holds
 /// only flat `<field>value</field>` pairs.
-fn extract_objects(xml: &str, object_type: &str) -> Vec<FieldMap> {
+pub(crate) fn extract_objects(xml: &str, object_type: &str) -> Vec<FieldMap> {
     let mut out = Vec::new();
     let list_open = format!("<ObjectList ObjectType=\"{}\">", object_type);
     let list_start = match xml.find(&list_open) {
@@ -1908,7 +1917,7 @@ pub fn clean_stop_name(raw: &str) -> String {
 /// Een octaaf hoger is een twee keer zo hoge harmonische (16' → 8'), een
 /// kwint hoger anderhalf keer (8' → 5 1/3'). Zonder sprong verandert er
 /// niets.
-fn klinkende_harmonische(rang: u32, inc: i32) -> u32 {
+pub(crate) fn klinkende_harmonische(rang: u32, inc: i32) -> u32 {
     if rang == 0 || inc == 0 {
         return rang;
     }
@@ -2190,6 +2199,7 @@ mod tests {
         )));
         assert!(is_hauptwerk_path(Path::new("/x/y/foo.ORGAN_HAUPTWERK_XML")));
         assert!(is_hauptwerk_path(Path::new("kaal.organ_hauptwerk_xml")));
+        assert!(is_hauptwerk_path(Path::new("Les-Pitea.CustomOrgan_Hauptwerk_xml")));
         // Extensie werkt ook zonder "hauptwerk" ergens anders in het pad.
         assert!(is_hauptwerk_path(Path::new("C:/orgels/set1/Demo.Organ_Hauptwerk_xml")));
         // GrandOrgue-bestand blijft GrandOrgue, óók in een "Hauptwerk"-map.

@@ -1380,7 +1380,8 @@
   "errors": {
     "autostart_failed": "Échec de la modification du démarrage automatique : {error}",
     "shutdown_failed": "Échec de l'arrêt : {error}",
-    "closed_format": "Ce jeu enregistre ses échantillons dans le format .hbw propre à Hauptwerk ({n} sur {total}). Ce format est fermé et ne peut être lu que par Hauptwerk lui-même ; JM-Orgue ne peut donc pas ouvrir ce jeu."
+    "closed_format": "Ce jeu enregistre ses échantillons dans le format .hbw propre à Hauptwerk ({n} sur {total}). Ce format est fermé et ne peut être lu que par Hauptwerk lui-même ; JM-Orgue ne peut donc pas ouvrir ce jeu.",
+    "codm_packages": "Cette définition d'orgue a été créée avec le Custom Organ Design Module de Hauptwerk. JM-Orgue peut la lire, mais les échantillons manquent. Installez ces paquets d'échantillons dans le dossier OrganInstallationPackages à côté (ou au-dessus) de la définition : {packages}."
   },
   "update": {
     "new_version_prefix": "Nouvelle version",

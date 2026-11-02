@@ -1380,7 +1380,8 @@
   "errors": {
     "autostart_failed": "No se ha podido cambiar el inicio automático: {error}",
     "shutdown_failed": "No se ha podido apagar: {error}",
-    "closed_format": "Este sampleset guarda sus grabaciones en el formato .hbw propio de Hauptwerk ({n} de {total}). Ese formato es cerrado y solo Hauptwerk puede reproducirlo, por lo que JM-Orgue no puede abrir este sampleset."
+    "closed_format": "Este sampleset guarda sus grabaciones en el formato .hbw propio de Hauptwerk ({n} de {total}). Ese formato es cerrado y solo Hauptwerk puede reproducirlo, por lo que JM-Orgue no puede abrir este sampleset.",
+    "codm_packages": "Esta definición de órgano se creó con el Custom Organ Design Module de Hauptwerk. JM-Orgue puede leerla, pero faltan las muestras. Instale estos paquetes de muestras en la carpeta OrganInstallationPackages junto a (o por encima de) la definición: {packages}."
   },
   "update": {
     "new_version_prefix": "Nueva versión",

@@ -1380,7 +1380,8 @@
   "errors": {
     "autostart_failed": "Autostart wijzigen mislukt: {error}",
     "shutdown_failed": "Afsluiten mislukt: {error}",
-    "closed_format": "Deze set bewaart zijn opnamen in het eigen .hbw-formaat van Hauptwerk ({n} van de {total}). Dat formaat is gesloten en kan alleen door Hauptwerk zelf worden afgespeeld; JM-Orgue kan deze set daarom niet openen."
+    "closed_format": "Deze set bewaart zijn opnamen in het eigen .hbw-formaat van Hauptwerk ({n} van de {total}). Dat formaat is gesloten en kan alleen door Hauptwerk zelf worden afgespeeld; JM-Orgue kan deze set daarom niet openen.",
+    "codm_packages": "Deze orgeldefinitie is gemaakt met de Custom Organ Design Module van Hauptwerk. JM-Orgue kan hem lezen, maar de samples ontbreken. Installeer deze samplepakketten in de map OrganInstallationPackages naast (of boven) de definitie: {packages}."
   },
   "update": {
     "new_version_prefix": "Nieuwe versie",

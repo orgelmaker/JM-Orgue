@@ -95,6 +95,10 @@
     if (gesloten) {
       return tx('errors.closed_format').replace('{n}', gesloten[1]).replace('{total}', gesloten[2]);
     }
+    const codm = s.match(/\[codm-pakketten ([^\]]+)\]/);
+    if (codm) {
+      return tx('errors.codm_packages').replace('{packages}', codm[1]);
+    }
     return s;
   }
 
@@ -1151,7 +1155,7 @@
         // Orgel-definitiebestanden (GrandOrgue .organ én Hauptwerk
         // .Organ_Hauptwerk_xml) via loadOrgan; anders is het een sample-map.
         const idLower = res.organ_id.toLowerCase();
-        if (idLower.endsWith('.organ') || idLower.endsWith('.organ_hauptwerk_xml')) {
+        if (idLower.endsWith('.organ') || idLower.endsWith('_hauptwerk_xml')) {
           await loadOrgan(res.organ_id);
         } else {
           await loadFromFolder(res.organ_id);

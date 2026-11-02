@@ -2344,7 +2344,7 @@
     if (!id) return;
     perspReloadHint = false;
     const l = id.toLowerCase();
-    if (l.endsWith('.organ') || l.endsWith('.organ_hauptwerk_xml')) dispatch('loadOrgan', id);
+    if (l.endsWith('.organ') || l.endsWith('_hauptwerk_xml')) dispatch('loadOrgan', id);
     else dispatch('scanFolder', id);
   }
   function isChannelSelected(div, ch) { return getDivisionChannels(div).includes(ch); }
@@ -4116,7 +4116,7 @@
           name: tx('dialogs.organ_definition_filter'),
           // Hauptwerk-sets gebruiken *.Organ_Hauptwerk_xml; de backend routeert
           // beide via do_load_organ (is_organ_file_id).
-          extensions: ['organ', 'Organ_Hauptwerk_xml']
+          extensions: ['organ', 'Organ_Hauptwerk_xml', 'CustomOrgan_Hauptwerk_xml']
         }]
       });
       if (selected) {

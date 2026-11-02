@@ -2997,7 +2997,7 @@ pub fn display_identity(odf_path: &Path, organ: &vpo_sampler::OrganInfo) -> (Str
 /// do_load_samples_from_directory)? Gebruikt door alle herlaad-routes.
 pub fn is_organ_file_id(id: &str) -> bool {
     let l = id.to_lowercase();
-    l.ends_with(".organ") || l.ends_with(".organ_hauptwerk_xml")
+    l.ends_with(".organ") || l.ends_with(".organ_hauptwerk_xml") || l.ends_with(".customorgan_hauptwerk_xml")
 }
 
 /// Map waarin de per-orgel `.jm-settings.json` hoort: naast het orgelbestand
@@ -8499,7 +8499,11 @@ fn build_couplers_from_definition(definition: &OrganDefinition) -> Vec<CouplerDt
                 .map(|m| m.name.clone())
                 .unwrap_or_else(|| src_name.clone());
             let offset = cdef.destination_keyshift;
-            let coupler_type = if offset >= 12 { "super" }
+            // Melodie-/baskoppel uit de definitie (GrandOrgue CouplerType,
+            // CODM-koppelcode): de engine kiest dan alleen de hoogste of
+            // laagste noot. Anders bepaalt de toonsprong het soort.
+            let coupler_type = if cdef.melodie_of_bas { if cdef.melodie { "melody" } else { "bass" } }
+                else if offset >= 12 { "super" }
                 else if offset <= -12 { "sub" }
                 else { "unison" };
             // Many ODFs name couplers generically ("Coupler 1"); replace those with
@@ -9877,7 +9881,7 @@ fn bibliotheek_identiteit_licht(source_path: &str, source_type: &str) -> Option<
     if is_organ_file_id(source_path) {
         // Hauptwerk-XML valt hier bewust buiten: dat bestand is niet in één
         // sectie te lezen en de naamregel van 0.7.39 raakt het niet.
-        if source_path.to_lowercase().ends_with(".organ_hauptwerk_xml") {
+        if source_path.to_lowercase().ends_with("_hauptwerk_xml") {
             return None;
         }
         let info = lees_organ_sectie_licht(pad)?;
@@ -10683,7 +10687,7 @@ fn online_zoek_context(entry: &crate::library::OrganLibraryEntry) -> crate::libr
     };
     let bron = Path::new(&entry.source_path);
     let lower = entry.source_path.to_lowercase();
-    if lower.ends_with(".organ_hauptwerk_xml") {
+    if lower.ends_with("_hauptwerk_xml") {
         let mut info_html: Option<PathBuf> = None;
         if let Some(g) = lo::lees_hw_general_licht(bron) {
             if ctx.plaats.trim().is_empty() { ctx.plaats = g.plaats.clone(); }

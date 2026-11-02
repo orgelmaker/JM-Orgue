@@ -808,6 +808,9 @@ pub struct CouplerDef {
     /// of laagste noot. Werkt anders dan een gewone koppel (0.7.67: nooit in
     /// een voorstel voor de crescendowalze).
     pub melodie_of_bas: bool,
+    /// Bij `melodie_of_bas`: `true` = melodiekoppel (hoogste noot), `false` =
+    /// baskoppel (laagste noot).
+    pub melodie: bool,
 }
 
 /// Parser for GrandOrgue ODF files
@@ -1694,6 +1697,8 @@ impl OdfParser {
                         melodie_of_bas: section.get("CouplerType")
                             .map(|v| matches!(v.trim().to_lowercase().as_str(), "melody" | "bass"))
                             .unwrap_or(false),
+                        melodie: section.get("CouplerType")
+                            .is_some_and(|v| v.trim().eq_ignore_ascii_case("melody")),
                     });
                 }
             }

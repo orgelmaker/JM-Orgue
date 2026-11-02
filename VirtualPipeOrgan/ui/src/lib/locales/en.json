@@ -1380,7 +1380,8 @@
   "errors": {
     "autostart_failed": "Changing autostart failed: {error}",
     "shutdown_failed": "Shutdown failed: {error}",
-    "closed_format": "This set stores its recordings in Hauptwerk’s own .hbw format ({n} of {total}). That format is closed and can only be played by Hauptwerk itself, so JM-Orgue cannot open this set."
+    "closed_format": "This set stores its recordings in Hauptwerk’s own .hbw format ({n} of {total}). That format is closed and can only be played by Hauptwerk itself, so JM-Orgue cannot open this set.",
+    "codm_packages": "This organ definition was made with Hauptwerk's Custom Organ Design Module. JM-Orgue can read it, but the samples are missing. Install these sample packages in the OrganInstallationPackages folder next to (or above) the definition: {packages}."
   },
   "update": {
     "new_version_prefix": "New version",
