@@ -52,9 +52,12 @@
     "online_search_hint": "Durchsucht Wikimedia Commons nach einem Foto der Orgel. Standardmäßig aus. Nur Name, Erbauer und Ort werden an den Server gesendet; niemals der Pfad zum Sampleset.",
     "online_search_enable": "Online-Suche erlauben",
     "online_busy": "Suche läuft…",
-    "online_none": "Nichts gefunden. Ergänzen Sie evtl. Name, Erbauer oder Ort im Bibliothekseintrag.",
+    "online_none": "Nichts gefunden. Ergänzen oder korrigieren Sie oben Kirche, Ort oder Orgelbauer und suchen Sie erneut.",
     "online_query_placeholder": "Selbst suchen: Kirche, Ort oder Orgelname…",
     "online_query_search": "Suchen",
+    "online_field_church": "Kirche",
+    "online_field_place": "Ort",
+    "online_field_builder": "Orgelbauer",
     "online_notice": "Zum Übernehmen auf ein Foto klicken. Quellenangabe und Lizenz werden unter der Karte gezeigt.",
     "refresh_hold_hint": "Zum Laden klicken. 3 Sekunden gedrückt halten, um ein neues Foto zu suchen."
   },

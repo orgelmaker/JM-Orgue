@@ -10662,28 +10662,19 @@ pub fn set_online_image_search_enabled(state: State<AppState>, enabled: bool) ->
 /// buiten gaan alleen die zoektermen — nooit paden of bestandsinhoud.
 /// Vereist dat de gebruiker [`set_online_image_search_enabled`] eerder aan
 /// heeft gezet.
-#[tauri::command]
-pub async fn search_online_image(state: State<'_, AppState>, id: String, query: Option<String>)
-    -> Result<Vec<crate::library_online::OnlineImageHit>, String>
-{
-    use crate::library_online as lo;
+fn bibliotheek_entry(state: &AppState, id: &str) -> Result<crate::library::OrganLibraryEntry, String> {
     let norm = crate::library::pad_sleutel;
-    let key = norm(&id);
-    let (toegestaan, entry) = {
-        let lib = state.organ_library.read();
-        let toegestaan = lib.online_image_search_enabled;
-        let e = lib.organs.iter()
-            .find(|o| norm(&o.id) == key || norm(&o.source_path) == key)
-            .cloned();
-        match e {
-            Some(e) => (toegestaan, e),
-            None => return Err(format!("Orgel niet in de bibliotheek: {}", id)),
-        }
-    };
-    // 0.8.90: online zoeken is standaard beschikbaar (geen opt-in meer); de
-    // vlag blijft in de bibliotheek staan voor oudere bestanden maar telt niet.
-    let _ = toegestaan;
+    let key = norm(id);
+    state.organ_library.read().organs.iter()
+        .find(|o| norm(&o.id) == key || norm(&o.source_path) == key)
+        .cloned()
+        .ok_or_else(|| format!("Orgel niet in de bibliotheek: {}", id))
+}
 
+/// Wat de set zelf over kerk, plaats en bouwer zegt (ODF-kop, manifest,
+/// info-HTML en readme-teksten). Alleen lokaal gelezen.
+fn online_zoek_context(entry: &crate::library::OrganLibraryEntry) -> crate::library_online::ZoekContext {
+    use crate::library_online as lo;
     let mut ctx = lo::ZoekContext {
         naam: entry.name.clone(),
         bouwer: entry.builder.clone(),
@@ -10728,12 +10719,47 @@ pub async fn search_online_image(state: State<'_, AppState>, id: String, query: 
         ctx.teksten = lo::teksten_uit_map(Some(bron), None);
     }
 
+    ctx
+}
+
+/// De zoekvelden (kerk, plaats, bouwer) zoals ze uit de set af te leiden
+/// zijn; het zoekvenster toont ze bewerkbaar (0.9.38).
+#[tauri::command]
+pub async fn online_zoekvelden(state: State<'_, AppState>, id: String)
+    -> Result<crate::library_online::ZoekVelden, String>
+{
+    let entry = bibliotheek_entry(&state, &id)?;
+    tokio::task::spawn_blocking(move || crate::library_online::afgeleide_velden(&online_zoek_context(&entry)))
+        .await
+        .map_err(|e| format!("Zoektaak mislukt: {}", e))
+}
+
+#[tauri::command]
+pub async fn search_online_image(
+    state: State<'_, AppState>,
+    id: String,
+    query: Option<String>,
+    velden: Option<crate::library_online::ZoekVelden>,
+) -> Result<Vec<crate::library_online::OnlineImageHit>, String>
+{
+    use crate::library_online as lo;
+    let entry = bibliotheek_entry(&state, &id)?;
     // Eigen zoekterm (0.8.92): wint van de automatische termen uit de set.
     let termen = match query.as_deref().map(str::trim).filter(|q| !q.is_empty()) {
         Some(q) => vec![q.to_string(), lo::met_orgelwoord(q.to_string())],
-        None => lo::zoek_termen(&ctx),
+        None => match velden {
+            // Door de gebruiker bijgestuurde velden (0.9.38).
+            Some(v) => lo::zoek_termen_uit_velden(&entry.name, &v),
+            None => {
+                let ctx = tokio::task::spawn_blocking({
+                    let entry = entry.clone();
+                    move || online_zoek_context(&entry)
+                }).await.map_err(|e| format!("Zoektaak mislukt: {}", e))?;
+                lo::zoek_termen(&ctx)
+            }
+        },
     };
-    info!("Online zoeken naar orgelfoto: {:?} ({} tekstbron(nen))", termen, ctx.teksten.len());
+    info!("Online zoeken naar orgelfoto: {:?}", termen);
     let hits = tokio::task::spawn_blocking(move || lo::zoek_commons_meervoudig(&termen))
         .await
         .map_err(|e| format!("Zoektaak mislukt: {}", e))?;

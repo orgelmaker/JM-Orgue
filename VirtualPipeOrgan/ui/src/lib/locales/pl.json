@@ -52,9 +52,12 @@
     "online_search_hint": "Przeszukuje Wikimedia Commons w poszukiwaniu zdjęcia organów. Domyślnie wyłączone. Do serwera wysyłane są wyłącznie nazwa, budowniczy i lokalizacja; nigdy ścieżka do samplesetu.",
     "online_search_enable": "Zezwól na wyszukiwanie online",
     "online_busy": "Trwa wyszukiwanie…",
-    "online_none": "Nic nie znaleziono. Spróbuj uzupełnić nazwę, budowniczego lub lokalizację we wpisie.",
+    "online_none": "Nic nie znaleziono. Uzupełnij lub popraw powyżej kościół, miejscowość lub budowniczego i wyszukaj ponownie.",
     "online_query_placeholder": "Szukaj samodzielnie: kościół, miejscowość lub nazwa organów…",
     "online_query_search": "Szukaj",
+    "online_field_church": "Kościół",
+    "online_field_place": "Miejscowość",
+    "online_field_builder": "Budowniczy",
     "online_notice": "Kliknij zdjęcie, aby je zastosować. Źródło i licencja są pokazane pod kartą.",
     "refresh_hold_hint": "Kliknij, aby wczytać organy. Przytrzymaj 3 sekundy, aby wyszukać nową fotografię."
   },

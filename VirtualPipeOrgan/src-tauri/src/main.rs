@@ -650,6 +650,7 @@ fn main() {
             commands::get_online_image_search_enabled,
             commands::set_online_image_search_enabled,
             commands::search_online_image,
+            commands::online_zoekvelden,
             commands::apply_online_image,
             commands::restore_preset_bindings,
             commands::restore_swell_bindings,

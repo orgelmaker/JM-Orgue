@@ -52,9 +52,12 @@
     "online_search_hint": "Cerca su Wikimedia Commons una foto dell’organo. Disattivato per impostazione predefinita. Al server vengono inviati solo nome, costruttore e luogo; mai il percorso del sample set.",
     "online_search_enable": "Consenti la ricerca online",
     "online_busy": "Ricerca in corso…",
-    "online_none": "Nulla trovato. Prova a completare nome, costruttore o luogo nella scheda.",
+    "online_none": "Nessun risultato. Completate o correggete chiesa, luogo o organaro qui sopra e cercate di nuovo.",
     "online_query_placeholder": "Cerca tu: chiesa, città o nome dell'organo…",
     "online_query_search": "Cerca",
+    "online_field_church": "Chiesa",
+    "online_field_place": "Luogo",
+    "online_field_builder": "Organaro",
     "online_notice": "Clicca una foto per applicarla. Fonte e licenza vengono mostrate sotto la scheda.",
     "refresh_hold_hint": "Fare clic per caricare l’organo. Tenere premuto per 3 secondi per cercare una nuova foto."
   },

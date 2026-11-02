@@ -52,9 +52,12 @@
     "online_search_hint": "Interroge Wikimedia Commons pour trouver une photo de l’orgue. Désactivé par défaut. Seuls le nom, le facteur et le lieu sont envoyés au serveur; jamais le chemin vers le jeu d’échantillons.",
     "online_search_enable": "Autoriser la recherche en ligne",
     "online_busy": "Recherche en cours…",
-    "online_none": "Rien trouvé. Complétez éventuellement le nom, le facteur ou le lieu dans la fiche.",
+    "online_none": "Rien trouvé. Complétez ou corrigez l’église, le lieu ou le facteur ci-dessus et relancez la recherche.",
     "online_query_placeholder": "Rechercher vous-même : église, ville ou nom de l'orgue…",
     "online_query_search": "Rechercher",
+    "online_field_church": "Église",
+    "online_field_place": "Lieu",
+    "online_field_builder": "Facteur",
     "online_notice": "Cliquez sur une photo pour l’appliquer. La source et la licence s’affichent sous la fiche.",
     "refresh_hold_hint": "Cliquez pour charger l’orgue. Maintenez 3 secondes pour rechercher une nouvelle photo."
   },

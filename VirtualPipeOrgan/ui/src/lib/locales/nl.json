@@ -52,9 +52,12 @@
     "online_search_hint": "Zoekt bij Wikimedia Commons naar een foto van het orgel. Standaard uit. Alleen naam, bouwer en plaats worden naar de server gestuurd; nooit het pad naar de sampleset.",
     "online_search_enable": "Online zoeken toestaan",
     "online_busy": "Bezig met zoeken…",
-    "online_none": "Niets gevonden. Probeer eventueel de naam, bouwer of plaats in de bibliotheek-entry aan te vullen.",
+    "online_none": "Niets gevonden. Vul kerk, plaats of bouwer hierboven aan of verbeter ze, en zoek opnieuw.",
     "online_query_placeholder": "Zelf zoeken: kerk, plaats of orgelnaam…",
     "online_query_search": "Zoek",
+    "online_field_church": "Kerk",
+    "online_field_place": "Plaats",
+    "online_field_builder": "Bouwer",
     "online_notice": "Klik een foto om hem over te nemen. De bronverwijzing en licentie worden onder de kaart getoond.",
     "refresh_hold_hint": "Klik om het orgel te laden. Houd 3 seconden ingedrukt om de foto opnieuw te laten zoeken."
   },

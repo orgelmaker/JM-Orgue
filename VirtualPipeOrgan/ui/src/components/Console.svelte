@@ -4494,14 +4494,13 @@
   // Modale voorvertoning: hit-lijst, bezig-vlag, foutmelding.
   let onlineZoekModal = null;      // { organ, hits, busy, error }
   let onlineZoekTerm = '';
-  // Zelf een zoekterm opgeven (0.8.92): wanneer de set te weinig gegevens
-  // heeft (naam/bouwer/plaats), zoekt dit rechtstreeks op wat je intypt.
-  async function onlineZoekenMetTerm() {
-    if (!onlineZoekModal || !onlineZoekTerm.trim()) return;
-    const organ = onlineZoekModal.organ;
+  // Zoekvelden (0.9.38): kerk, plaats en bouwer zoals ze uit de definitie
+  // en de meegeleverde teksten komen, bewerkbaar in het zoekvenster.
+  let onlineVelden = { kerk: '', plaats: '', bouwer: '' };
+  async function zoekOnline(organ, args) {
     onlineZoekModal = { organ, hits: [], busy: true, error: null };
     try {
-      const hits = await invoke('search_online_image', { id: organ.id, query: onlineZoekTerm.trim() });
+      const hits = await invoke('search_online_image', { id: organ.id, ...args });
       if (onlineZoekModal && onlineZoekModal.organ.id === organ.id) {
         onlineZoekModal = { organ, hits, busy: false, error: hits.length === 0 ? tx('library.online_none') : null };
       }
@@ -4509,17 +4508,25 @@
       if (onlineZoekModal) onlineZoekModal = { organ, hits: [], busy: false, error: String(err) };
     }
   }
+  // Zelf een zoekterm opgeven (0.8.92): wanneer de set te weinig gegevens
+  // heeft (naam/bouwer/plaats), zoekt dit rechtstreeks op wat je intypt.
+  async function onlineZoekenMetTerm() {
+    if (!onlineZoekModal || !onlineZoekTerm.trim()) return;
+    await zoekOnline(onlineZoekModal.organ, { query: onlineZoekTerm.trim() });
+  }
+  async function onlineZoekenMetVelden() {
+    if (!onlineZoekModal) return;
+    await zoekOnline(onlineZoekModal.organ, { velden: { ...onlineVelden } });
+  }
   async function onlineZoeken(e, organ) {
     e.stopPropagation();
+    onlineVelden = { kerk: '', plaats: '', bouwer: '' };
     onlineZoekModal = { organ, hits: [], busy: true, error: null };
     try {
-      const hits = await invoke('search_online_image', { id: organ.id });
-      if (onlineZoekModal && onlineZoekModal.organ.id === organ.id) {
-        onlineZoekModal = { organ, hits, busy: false, error: hits.length === 0 ? tx('library.online_none') : null };
-      }
-    } catch (err) {
-      if (onlineZoekModal) onlineZoekModal = { organ, hits: [], busy: false, error: String(err) };
-    }
+      const v = await invoke('online_zoekvelden', { id: organ.id });
+      if (onlineZoekModal && onlineZoekModal.organ.id === organ.id) onlineVelden = v;
+    } catch (err) { console.error(err); }
+    await zoekOnline(organ, {});
   }
   async function kiesOnlineHit(hit) {
     const organ = onlineZoekModal.organ;
@@ -5788,6 +5795,12 @@
             <h3>{$t('library.online_search')}: {onlineZoekModal.organ.name}</h3>
             <button class="online-image-sluit" on:click={sluitOnlineModal} aria-label={$t('common.close')}>&times;</button>
           </div>
+          <form class="online-image-velden" on:submit|preventDefault={onlineZoekenMetVelden}>
+            <label><span>{$t('library.online_field_church')}</span><input type="text" bind:value={onlineVelden.kerk} disabled={onlineZoekModal.busy} /></label>
+            <label><span>{$t('library.online_field_place')}</span><input type="text" bind:value={onlineVelden.plaats} disabled={onlineZoekModal.busy} /></label>
+            <label><span>{$t('library.online_field_builder')}</span><input type="text" bind:value={onlineVelden.bouwer} disabled={onlineZoekModal.busy} /></label>
+            <button type="submit" class="btn btn-secondary btn-sm" disabled={onlineZoekModal.busy}>{$t('library.online_query_search')}</button>
+          </form>
           <form class="online-image-zoekbalk" on:submit|preventDefault={onlineZoekenMetTerm}>
             <input type="text" bind:value={onlineZoekTerm} placeholder={$t('library.online_query_placeholder')} disabled={onlineZoekModal.busy} />
             <button type="submit" class="btn btn-secondary btn-sm" disabled={onlineZoekModal.busy || !onlineZoekTerm.trim()}>{$t('library.online_query_search')}</button>

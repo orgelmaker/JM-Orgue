@@ -52,9 +52,12 @@
     "online_search_hint": "Busca en Wikimedia Commons una foto del órgano. Desactivado por defecto. Solo se envían nombre, constructor y lugar al servidor; nunca la ruta al banco de muestras.",
     "online_search_enable": "Permitir búsqueda en línea",
     "online_busy": "Buscando…",
-    "online_none": "Nada encontrado. Pruebe a completar nombre, constructor o lugar en la ficha.",
+    "online_none": "No se encontró nada. Complete o corrija la iglesia, el lugar o el organero arriba y vuelva a buscar.",
     "online_query_placeholder": "Buscar por su cuenta: iglesia, localidad o nombre del órgano…",
     "online_query_search": "Buscar",
+    "online_field_church": "Iglesia",
+    "online_field_place": "Lugar",
+    "online_field_builder": "Organero",
     "online_notice": "Haga clic en una foto para aplicarla. Fuente y licencia se muestran bajo la ficha.",
     "refresh_hold_hint": "Haga clic para cargar el órgano. Mantenga pulsado 3 segundos para buscar una nueva foto."
   },

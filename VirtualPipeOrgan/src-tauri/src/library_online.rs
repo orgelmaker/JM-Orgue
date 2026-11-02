@@ -137,19 +137,27 @@ pub struct ZoekContext {
 /// Woorden waaraan we een kerk-/gebouwnaam herkennen, in de talen die in
 /// samplesets voorkomen. Kleine letters; `contains`-match.
 const KERK_WOORDEN: &[&str] = &[
-    "kerk", "church", "kirche", "dom", "cathedral", "kathedraal", "cathédrale",
+    "kerk", "church", "kirche", "cathedral", "kathedraal", "cathédrale",
     "catedral", "cattedrale", "basilica", "basiliek", "basilika", "basilique",
     "église", "eglise", "iglesia", "chiesa", "kościół", "kosciol", "abbey",
     "abdij", "abtei", "abbaye", "chapel", "kapel", "kapelle", "chapelle",
-    "cappella", "minster", "münster", "munster", "st.", "sint", "saint", "san ",
-    "santa", "sankt", "notre", "collegiale", "collégiale", "temple", "tempel",
-    "klooster", "kloster", "priory", "stift", "pfarrkirche", "stadtkirche",
-    "marienkirche", "jakobikirche", "nikolaikirche",
+    "cappella", "minster", "münster", "munster", "collegiale", "collégiale",
+    "temple", "tempel", "klooster", "kloster", "priory", "stift", "katedr",
+    "kostol", "kostel", "templom", "kyrka", "kirke", "kirkko", "bazylika",
+    "museu", "museum", "musée",
+];
+
+/// Korte kerkwoorden die alleen als heel woord tellen: "Santa" wel,
+/// "Santanyi" niet; "Dom" wel, "Kingdom" niet.
+const KERK_HELE_WOORDEN: &[&str] = &[
+    "dom", "st", "st.", "sint", "saint", "san", "santa", "sankt", "notre", "seo", "sv.",
 ];
 
 fn bevat_kerkwoord(s: &str) -> bool {
     let l = s.to_lowercase();
     KERK_WOORDEN.iter().any(|w| l.contains(w))
+        || l.split(|c: char| c.is_whitespace() || c == '-' || c == ',' || c == '(' || c == ')')
+            .any(|w| KERK_HELE_WOORDEN.contains(&w.trim_matches(|c: char| c == '\'' || c == '"')))
 }
 
 /// HTML naar platte tekst: scripts/stijlen weg, tags weg, een handvol
@@ -206,7 +214,7 @@ pub fn strip_html(s: &str) -> String {
 /// zonder postcode. Een pad (mapscan zonder manifest) levert niets op.
 fn plaats_kern(plaats: &str) -> String {
     let p = plaats.trim();
-    if p.is_empty() || p.contains('\\') || p.contains('/') || p.contains(':') {
+    if p.is_empty() || p.contains('\\') || p.contains('/') || p.contains(':') || is_opvulling(p) {
         return String::new();
     }
     for deel in p.split(',') {
@@ -218,46 +226,214 @@ fn plaats_kern(plaats: &str) -> String {
             .filter(|w| !(w.len() <= 2 && w.chars().all(|c| c.is_ascii_uppercase())))
             .collect::<Vec<_>>()
             .join(" ");
-        if d.chars().any(|c| c.is_alphabetic()) {
+        // Straatnaam ("High Street", "Hoofdstraat 12") is geen plaats.
+        let laatste = d.split_whitespace().last().unwrap_or("").to_lowercase();
+        let straat = ["street", "road", "avenue", "lane", "straat", "laan", "gracht",
+            "strasse", "straße", "rue", "calle", "ulica"].iter()
+            .any(|w| laatste == *w || laatste.ends_with(&format!("-{w}")) || (laatste.len() > w.len() + 2 && laatste.ends_with(w) && w.len() >= 5));
+        if d.chars().any(|c| c.is_alphabetic()) && !straat {
             return d;
         }
     }
     String::new()
 }
 
-/// Kortste zin of regel met een kerkwoord uit de verzamelde teksten.
+/// Kerknaam uit de verzamelde teksten: de kortste reeks eigennamen waarin
+/// een kerkwoord staat ("Laurenskerk Rotterdam", "St. Mary's Church in
+/// Landau"). Een omschrijving ("neobaroque modern church organ") of een
+/// gewone zin ("The church was completed in 1525") levert niets op.
 fn kerk_uit_tekst(teksten: &[String]) -> Option<String> {
+    const VERBINDERS: &[&str] = &[
+        "of", "in", "de", "la", "le", "van", "der", "den", "des", "du", "di", "del",
+        "am", "an", "zu", "zum", "zur", "i", "y", "e", "and", "&",
+    ];
+    let hoofdletter = |w: &str| w.trim_start_matches(|c: char| !c.is_alphanumeric())
+        .chars().next().is_some_and(|c| c.is_uppercase());
     let mut beste: Option<String> = None;
     for t in teksten {
-        for zin in t.split(|c| matches!(c, '.' | '\n' | ';' | '|' | '!' | '?')) {
-            let z = zin.trim().trim_matches(|c: char| c == '"' || c == '\'' || c == '(' || c == ')');
-            if z.len() < 6 || z.len() > 90 || !bevat_kerkwoord(z) { continue; }
-            if beste.as_ref().map_or(true, |b| z.len() < b.len()) {
-                beste = Some(z.to_string());
+        for regel in t.split(|c| matches!(c, '\n' | ';' | '|' | '!' | '?' | ',' | ':' | '(' | ')')) {
+            let woorden: Vec<&str> = regel.split_whitespace().collect();
+            let mut i = 0;
+            while i < woorden.len() {
+                if !hoofdletter(woorden[i]) { i += 1; continue; }
+                // Reeks eigennamen, met verbindingswoordjes ertussen.
+                let mut j = i + 1;
+                while j < woorden.len() {
+                    let w = woorden[j];
+                    let vorige_eindigt = woorden[j - 1].ends_with('.') && !woorden[j - 1].eq_ignore_ascii_case("st.")
+                        && !woorden[j - 1].eq_ignore_ascii_case("sv.");
+                    if vorige_eindigt { break; }
+                    if hoofdletter(w) {
+                        j += 1;
+                    } else if VERBINDERS.contains(&w.to_lowercase().as_str())
+                        && woorden.get(j + 1).is_some_and(|n| hoofdletter(n)) {
+                        j += 2;
+                    } else {
+                        break;
+                    }
+                }
+                let kandidaat = woorden[i..j].join(" ");
+                let k = kandidaat.trim_matches(|c: char| !c.is_alphanumeric() && c != '\'' && c != ')');
+                if k.len() >= 6 && k.len() <= 70 && bevat_kerkwoord(k)
+                    && beste.as_ref().map_or(true, |b| k.len() < b.len())
+                {
+                    beste = Some(k.to_string());
+                }
+                i = j;
             }
         }
     }
     beste
 }
 
-/// Tot vier zoektermen, de meest specifieke eerst: kerk + plaats, naam +
-/// plaats, bouwer + plaats, en als laatste de oude combinatie van 0.8.74.
-pub fn zoek_termen(ctx: &ZoekContext) -> Vec<String> {
-    let plaats = plaats_kern(&ctx.plaats);
-    let naam = ctx.naam.trim().to_string();
+/// Kerk, plaats en bouwer zoals de zoektocht ze gebruikt (0.9.38). Worden in
+/// het zoekvenster als losse, bewerkbare velden getoond.
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ZoekVelden {
+    pub kerk: String,
+    pub plaats: String,
+    pub bouwer: String,
+}
+
+/// Opvulwaarden die geen echte plaats of bouwer zijn: placeholders van
+/// editors ("[Generated by Custom Organ Design Module]"), "N/A", "Unknown".
+fn is_opvulling(s: &str) -> bool {
+    let t = s.trim();
+    let l = t.to_lowercase();
+    t.is_empty()
+        || (t.starts_with('[') && t.ends_with(']'))
+        || l.contains("generated by")
+        || matches!(l.trim_matches(|c: char| !c.is_alphanumeric()),
+            "" | "n/a" | "na" | "unknown" | "onbekend" | "unbekannt" | "inconnu"
+            | "sconosciuto" | "desconocido" | "nieznany" | "none" | "tbd" | "custom samples")
+}
+
+/// Orgelnaam zonder setversie-ruis: haakjes, "demo", "extended", "surround",
+/// "wet and dry", versienummers. "Nancy (demo)" → "Nancy",
+/// "Rieger of Monor extend V2.0" → "Rieger of Monor".
+pub fn schone_naam(naam: &str) -> String {
+    let mut zonder = String::with_capacity(naam.len());
+    let mut diepte = 0i32;
+    for c in naam.chars() {
+        match c {
+            '(' | '[' => diepte += 1,
+            ')' | ']' => diepte = (diepte - 1).max(0),
+            _ if diepte == 0 => zonder.push(c),
+            _ => {}
+        }
+    }
+    const RUIS: &[&str] = &[
+        "demo", "extended", "extend", "extension", "version", "versie", "surround",
+        "wet", "dry", "and", "original", "virtual", "organs", "nl", "full", "lite",
+    ];
+    let woorden: Vec<&str> = zonder.split_whitespace()
+        .filter(|w| {
+            let kern = w.trim_matches(|c: char| !c.is_alphanumeric());
+            let l = kern.to_lowercase();
+            let versie = l.trim_start_matches('v').chars().all(|c| c.is_ascii_digit() || c == '.')
+                && l.chars().any(|c| c.is_ascii_digit());
+            !(kern.is_empty() || RUIS.contains(&l.as_str()) || versie)
+        })
+        .collect();
+    woorden.join(" ").trim_matches(|c: char| c == '-' || c == ',' || c == ':' || c.is_whitespace()).to_string()
+}
+
+/// "Rieger Organ of Franciscan Church of Esztergom" → "Franciscan Church of
+/// Esztergom": het gebouw staat na het eerste of/from/in, als daar een
+/// kerkwoord staat en ervoor niet.
+fn gebouw_uit_naam(s: &str) -> String {
+    let schoon = schone_naam(s);
+    let l = schoon.to_lowercase();
+    for scheider in [" of ", " from ", " in ", " van ", " aus "] {
+        if let Some(i) = l.find(scheider) {
+            let (voor, rest) = (&schoon[..i], &schoon[i + scheider.len()..]);
+            if bevat_kerkwoord(rest) && !bevat_kerkwoord(voor) {
+                return rest.trim().to_string();
+            }
+        }
+    }
+    schoon
+}
+
+/// Begint de naam als een kerknaam ("St Augustines", "Holy Spirit Budapest",
+/// "Sants Just i Pastor")?
+fn begint_als_kerknaam(s: &str) -> bool {
+    let l = s.trim().to_lowercase();
+    ["st ", "st.", "saint", "sankt", "sint ", "san ", "santa ", "sants ", "santo ", "holy ", "notre"]
+        .iter().any(|w| l.starts_with(w))
+}
+
+/// De velden die uit de set zelf af te leiden zijn: kerk uit ODF/manifest,
+/// naam, opmerkingen of info-teksten; plaatskern; bouwer zonder opvulling.
+pub fn afgeleide_velden(ctx: &ZoekContext) -> ZoekVelden {
+    let naam = ctx.naam.trim();
     let bouwer = {
-        let b = ctx.bouwer.trim();
-        if b.is_empty() || b.eq_ignore_ascii_case("Custom Samples") { String::new() } else { b.to_string() }
+        let b = ctx.bouwer.trim().trim_end_matches('?').trim();
+        if is_opvulling(b) { String::new() } else { b.to_string() }
     };
+    let mut plaats = plaats_kern(&ctx.plaats);
     let kerk = if bevat_kerkwoord(&ctx.kerk) {
-        ctx.kerk.trim().to_string()
-    } else if bevat_kerkwoord(&naam) {
-        naam.clone()
+        gebouw_uit_naam(&ctx.kerk)
+    } else if bevat_kerkwoord(naam) || begint_als_kerknaam(naam) {
+        gebouw_uit_naam(naam)
+    } else if bevat_kerkwoord(&plaats) {
+        // Locatieveld noemt het gebouw ("Cathédrale Notre-Dame-…"): dat is de
+        // kerk; een naam van één woord ("Nancy (demo)") is dan de plaats.
+        let k = std::mem::take(&mut plaats);
+        let n = schone_naam(naam);
+        if !n.is_empty() && !n.contains(' ') { plaats = n; }
+        k
     } else {
         let mut bronnen = vec![ctx.opmerkingen.clone()];
         bronnen.extend(ctx.teksten.iter().cloned());
         kerk_uit_tekst(&bronnen).unwrap_or_default()
     };
+    if plaats.is_empty() {
+        plaats = plaats_uit_naam(&kerk).or_else(|| plaats_uit_naam(naam)).unwrap_or_default();
+    }
+    ZoekVelden { kerk, plaats, bouwer }
+}
+
+/// Een plaats die in een naam verstopt zit: "Eule Organ of Szombathely
+/// (Hungary)" → "Szombathely", "Museu de la Música de Barcelona" →
+/// "Barcelona", "Angster Cistercian extended[Szekesfehervar Hungary]" →
+/// "Szekesfehervar". Alleen één woord met een hoofdletter, geen kerkwoord.
+fn plaats_uit_naam(s: &str) -> Option<String> {
+    let als_plaats = |w: &str| {
+        let w = w.trim_matches(|c: char| !c.is_alphanumeric() && c != '-');
+        (w.chars().next().is_some_and(|c| c.is_uppercase()) && w.chars().count() >= 3 && !bevat_kerkwoord(w))
+            .then(|| w.to_string())
+    };
+    let schoon = schone_naam(s);
+    let l = schoon.to_lowercase();
+    for scheider in [" of ", " from ", " in ", " de ", " di ", " van "] {
+        if let Some(i) = l.rfind(scheider) {
+            let rest = schoon[i + scheider.len()..].trim();
+            if !rest.contains(' ') {
+                if let Some(p) = als_plaats(rest) { return Some(p); }
+            }
+        }
+    }
+    // Plaats + land tussen rechte haken.
+    let i = s.find('[')?;
+    let j = s[i..].find(']')? + i;
+    let binnen: Vec<&str> = s[i + 1..j].split_whitespace().collect();
+    if binnen.len() >= 2 { als_plaats(binnen[0]) } else { None }
+}
+
+/// Tot vier zoektermen, de meest specifieke eerst: kerk + plaats, naam +
+/// plaats, bouwer + plaats, en als laatste de oude combinatie van 0.8.74.
+pub fn zoek_termen(ctx: &ZoekContext) -> Vec<String> {
+    zoek_termen_uit_velden(&ctx.naam, &afgeleide_velden(ctx))
+}
+
+/// Zoektermen uit de orgelnaam en (eventueel door de gebruiker bijgestuurde)
+/// velden.
+pub fn zoek_termen_uit_velden(naam: &str, v: &ZoekVelden) -> Vec<String> {
+    let naam = match schone_naam(naam) { n if n.is_empty() => naam.trim().to_string(), n => n };
+    let kerk = v.kerk.trim().to_string();
+    let plaats = v.plaats.trim().to_string();
+    let bouwer = v.bouwer.trim().to_string();
 
     let mut termen: Vec<String> = Vec::new();
     let mut voeg = |delen: &[&str]| {
@@ -375,6 +551,102 @@ pub fn teksten_uit_map(dir: Option<&Path>, extra: Option<&Path>) -> Vec<String> 
 #[cfg(test)]
 mod tests_zoekcontext {
     use super::*;
+
+    fn velden(naam: &str, kerk: &str, plaats: &str, bouwer: &str) -> ZoekVelden {
+        afgeleide_velden(&ZoekContext {
+            naam: naam.into(), kerk: kerk.into(), plaats: plaats.into(), bouwer: bouwer.into(),
+            ..Default::default()
+        })
+    }
+
+    #[test]
+    fn opvulling_en_setruis_vallen_weg() {
+        let v = velden("Les-Pitea-945", "", "[Generated by Custom Organ Design Module]", "");
+        assert_eq!((v.kerk.as_str(), v.plaats.as_str()), ("", ""));
+        assert_eq!(velden("Celesta", "", "", "N/A").bouwer, "");
+        assert_eq!(velden("Psaltery Organ", "", "", "Unknown").bouwer, "");
+        assert_eq!(velden("X", "", "", "Richter?").bouwer, "Richter");
+        assert_eq!(schone_naam("Nancy (demo)"), "Nancy");
+        assert_eq!(schone_naam("Rieger of Monor extend V2.0"), "Rieger of Monor");
+        assert_eq!(schone_naam("Lorris wet and dry"), "Lorris");
+        assert_eq!(schone_naam("Utrecht Surround v.2"), "Utrecht");
+        assert_eq!(schone_naam("Bätz-Witte Puttershoek"), "Bätz-Witte Puttershoek");
+    }
+
+    #[test]
+    fn kerk_uit_naam_zonder_orgel_ervoor() {
+        assert_eq!(velden("Rieger Organ of Franciscan Church of Esztergom demo", "Rieger Organ of Franciscan Church of Esztergom demo", "", "").kerk,
+            "Franciscan Church of Esztergom");
+        assert_eq!(velden("Angster Organ from Jak Abbey (Hungary)", "Angster Organ from Jak Abbey (Hungary)", "", "").kerk, "Jak Abbey");
+        assert_eq!(velden("Bureå Gravkapell (Original)", "Bureå Gravkapell (Original)", "Bureå", "").kerk, "Bureå Gravkapell");
+        assert_eq!(velden("St Augustines", "", "Neutral Bay", "").kerk, "St Augustines");
+        assert_eq!(velden("Holy Spirit Budapest", "", "", "").kerk, "Holy Spirit Budapest");
+    }
+
+    #[test]
+    fn gebouw_in_het_locatieveld_wordt_kerk() {
+        let v = velden("Nancy (demo)", "", "Cathédrale Notre-Dame-de-l'Annonciation", "Cavaillé-Coll");
+        assert_eq!(v.kerk, "Cathédrale Notre-Dame-de-l'Annonciation");
+        assert_eq!(v.plaats, "Nancy");
+        assert_eq!(velden("Nitra (demo)", "", "Katedrála sv. Emeráma", "").plaats, "Nitra");
+    }
+
+    #[test]
+    fn straat_is_geen_plaats_en_omschrijving_geen_kerk() {
+        assert_eq!(velden("St Stephen's Anglican", "", "High Street", "").plaats, "");
+        assert_eq!(velden("X", "", "Hoofdstraat 12, Zwolle", "").plaats, "Zwolle");
+        let ctx = ZoekContext {
+            naam: "Rotterdam Hoofdorgel Surround".into(),
+            plaats: "Rotterdam".into(),
+            opmerkingen: "A neobaroque modern church organ".into(),
+            teksten: vec!["Laurenskerk Rotterdam. The neobaroque modern church organ".into()],
+            ..Default::default()
+        };
+        assert_eq!(afgeleide_velden(&ctx).kerk, "Laurenskerk Rotterdam");
+        let ctx = ZoekContext {
+            naam: "Rotterdam Hoofdorgel Surround".into(),
+            teksten: vec!["The church was completed in 1525".into()],
+            ..Default::default()
+        };
+        assert_eq!(afgeleide_velden(&ctx).kerk, "");
+        let ctx = ZoekContext {
+            naam: "Demo set".into(),
+            teksten: vec!["Built in 1831 by Baetz for the St. Mary's Church in Landau. The restoration of the church was done after the World War".into()],
+            ..Default::default()
+        };
+        assert_eq!(afgeleide_velden(&ctx).kerk, "St. Mary's Church in Landau");
+        assert!(!bevat_kerkwoord("Santanyi") && !bevat_kerkwoord("Kingdom"));
+        assert!(bevat_kerkwoord("Santa Maria") && bevat_kerkwoord("Utrecht Dom") && bevat_kerkwoord("Domkerk"));
+    }
+
+    #[test]
+    fn plaats_uit_de_naam() {
+        assert_eq!(velden("Eule Organ of Szombathely (Hungary) dry demo version", "", "", "").plaats, "Szombathely");
+        assert_eq!(velden("Angster Cistercian extended[Szekesfehervar Hungary]", "", "", "").plaats, "Szekesfehervar");
+        assert_eq!(velden("Orgue Josep Bosca", "", "Museu de la Música de Barcelona", "").plaats, "Barcelona");
+        assert_eq!(velden("Bells from St. Andrew Church of Komarom", "Bells from St. Andrew Church of Komarom", "", "").plaats, "Komarom");
+        assert_eq!(velden("Angster Organ from Jak Abbey (Hungary)", "", "", "").plaats, "");
+        assert_eq!(velden("Hungarian Village Organs", "", "", "").plaats, "");
+    }
+
+    #[test]
+    fn bijgestuurde_velden_bepalen_de_termen() {
+        let ctx = ZoekContext {
+            naam: "Grote Kerk".into(),
+            bouwer: "Custom Samples".into(),
+            plaats: "Utrecht, Netherlands".into(),
+            ..Default::default()
+        };
+        let v = afgeleide_velden(&ctx);
+        assert_eq!(v, ZoekVelden { kerk: "Grote Kerk".into(), plaats: "Utrecht".into(), bouwer: String::new() });
+        // Ongewijzigd teruggestuurd = dezelfde termen als automatisch.
+        assert_eq!(zoek_termen_uit_velden(&ctx.naam, &v), zoek_termen(&ctx));
+        // Kerk zonder kerkwoord telt als de gebruiker hem zo intypt.
+        let eigen = ZoekVelden { kerk: "Laurens".into(), plaats: "Rotterdam".into(), bouwer: "Marcussen".into() };
+        let t = zoek_termen_uit_velden("Hoofdorgel", &eigen);
+        assert_eq!(t[0], "Laurens Rotterdam orgel");
+        assert!(t.iter().any(|x| x == "Marcussen orgel Rotterdam"), "{:?}", t);
+    }
 
     #[test]
     fn kerk_en_plaats_gaan_voorop() {

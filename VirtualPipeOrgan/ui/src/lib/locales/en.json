@@ -52,9 +52,12 @@
     "online_search_hint": "Looks on Wikimedia Commons for a photo of the organ. Off by default. Only name, builder and location are sent to the server; never the path to the sample set.",
     "online_search_enable": "Allow online search",
     "online_busy": "Searching…",
-    "online_none": "Nothing found. Consider filling in name, builder or location in the library entry.",
+    "online_none": "Nothing found. Fill in or correct the church, place or builder above and search again.",
     "online_query_placeholder": "Search yourself: church, town or organ name…",
     "online_query_search": "Search",
+    "online_field_church": "Church",
+    "online_field_place": "Place",
+    "online_field_builder": "Builder",
     "online_notice": "Click a photo to use it. The source link and license are shown below the card.",
     "refresh_hold_hint": "Click to load the organ. Press and hold for 3 seconds to search for a new photo."
   },
