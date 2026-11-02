@@ -1710,13 +1710,13 @@ impl PlayingVoice {
         }
     }
 
-    fn needs_background_load(&self) -> Option<PathBuf> {
+    fn needs_background_load(&self) -> Option<(PathBuf, Option<vpo_sampler::HarmShelf>)> {
         if self.load_requested {
             return None;
         }
         match &self.source {
             VoiceSampleSource::PreloadOnly { preload, needs_full_load } if *needs_full_load => {
-                Some(preload.source_path.clone())
+                Some((preload.source_path.clone(), preload.harm_shelf))
             }
             _ => None,
         }
@@ -3479,7 +3479,7 @@ mod janitor_tests {
             align_table: None,
             trim_start: 0,
             smpl_unity_note: None,
-            smpl_pitch_fraction_cents: None,
+            smpl_pitch_fraction_cents: None,            harm_shelf: None,
         });
         let zwak = Arc::downgrade(&pb);
         let mut v = PlayingVoice::new_from_preload(pb, 1, 100, 60, 1.0, 48_000);
@@ -3524,7 +3524,7 @@ mod tremulant_crossfade_tests {
             align_table: None,
             trim_start: trim,
             smpl_unity_note: None,
-            smpl_pitch_fraction_cents: None,
+            smpl_pitch_fraction_cents: None,            harm_shelf: None,
         })
     }
 
@@ -4099,7 +4099,7 @@ impl Drop for AudioPlayer {
 // afrondt zijn sample onder een hergebruikte (stop,pipe)-key van het NIEUWE
 // orgel registreert — dat gaf potentieel de verkeerde pijp of de verkeerde
 // samplerate na een snelle orgelwissel.
-type LoadRequest = ((u32, u32), PathBuf, u32, u64, Option<(u32, u32)>, std::time::Instant);
+type LoadRequest = ((u32, u32), PathBuf, u32, u64, Option<(u32, u32)>, Option<vpo_sampler::HarmShelf>, std::time::Instant);
 
 /// Run the audio thread with cpal
 fn run_audio_thread(
@@ -4425,12 +4425,16 @@ fn run_audio_thread(
                 }
                 while running_bg.load(Ordering::Relaxed) {
                     match load_rx.recv_timeout(std::time::Duration::from_millis(100)) {
-                        Ok((key, path, target_rate, generation, odf_loop, requested_at)) => {
+                        Ok((key, path, target_rate, generation, odf_loop, harm_shelf, requested_at)) => {
                             let seen = max_generation.fetch_max(generation, Ordering::Relaxed).max(generation);
                             if generation < seen {
                                 continue; // verouderd verzoek van een vorig orgel
                             }
-                            {
+                            // HarmonicShaping (0.9.41): een pijp met shaping krijgt zijn
+                            // EIGEN gefilterde kopie. De decode-cache deelt op pad; dat
+                            // zou de gefilterde en ongefilterde klank door elkaar halen,
+                            // dus geshaped laadt buiten de cache om (lezen én schrijven).
+                            if harm_shelf.is_none() {
                                 let cache = decode_cache.lock();
                                 if let Some((g, weak)) = cache.get(&path) {
                                     if *g == generation {
@@ -4476,6 +4480,19 @@ fn run_audio_thread(
                                         }
                                     }
                                     LOAD_T_RESAMPLE_US.fetch_add(t_rs.elapsed().as_micros() as u64, Ordering::Relaxed);
+                                    // HarmonicShaping op de volledige opname — zelfde
+                                    // filter (hoek in Hz) als op de startbuffer, zodat de
+                                    // klank op het upgrademoment gelijk is. Niet cachen:
+                                    // deze kopie is uniek voor deze geshapede pijp.
+                                    if let Some(shelf) = harm_shelf {
+                                        let rate = sample_data.sample_rate;
+                                        let rechts = sample_data.right.as_mut().map(|v| v.as_mut_slice());
+                                        shelf.apply(&mut sample_data.data, rechts, rate);
+                                        let sample = Arc::new(sample_data);
+                                        let _ = loaded_tx_clone.send((key, Some(sample), generation));
+                                        noteer_laadlatentie(requested_at);
+                                        continue;
+                                    }
                                     let sample = Arc::new(sample_data);
                                     let t_c = std::time::Instant::now();
                                     {
@@ -4979,7 +4996,7 @@ fn run_audio_thread(
                                 } else {
                                     let path = preload.source_path.clone();
                                     let odf_lp = odf_loops_clone.read().get(&path).copied();
-                                    if stuur_laadverzoek(&mut pending_loads, (key, path, sample_rate, load_generation, odf_lp, std::time::Instant::now())) {
+                                    if stuur_laadverzoek(&mut pending_loads, (key, path, sample_rate, load_generation, odf_lp, preload.harm_shelf, std::time::Instant::now())) {
                                         inflight_loads.insert(key);
                                         voice.mark_load_requested();
                                     }
@@ -5294,11 +5311,11 @@ fn run_audio_thread(
                                             v.position = align_pos as f64;
                                         }
                                         // Stream de volledige release-staart bij (met dedup).
-                                        if let Some(path) = v.needs_background_load() {
+                                        if let Some((path, shelf)) = v.needs_background_load() {
                                             let odf_lp = odf_loops_clone.read().get(&path).copied();
                                             if inflight_loads.contains(&release_key) {
                                                 v.mark_load_requested();
-                                            } else if stuur_laadverzoek(&mut pending_loads, (release_key, path, sample_rate, load_generation, odf_lp, std::time::Instant::now())) {
+                                            } else if stuur_laadverzoek(&mut pending_loads, (release_key, path, sample_rate, load_generation, odf_lp, shelf, std::time::Instant::now())) {
                                                 inflight_loads.insert(release_key);
                                                 v.mark_load_requested();
                                             }
@@ -5445,11 +5462,11 @@ fn run_audio_thread(
                                         if align_pos > 0 {
                                             v.position = align_pos as f64;
                                         }
-                                        if let Some(path) = v.needs_background_load() {
+                                        if let Some((path, shelf)) = v.needs_background_load() {
                                             let odf_lp = odf_loops_clone.read().get(&path).copied();
                                             if inflight_loads.contains(&release_key) {
                                                 v.mark_load_requested();
-                                            } else if stuur_laadverzoek(&mut pending_loads, (release_key, path, sample_rate, load_generation, odf_lp, std::time::Instant::now())) {
+                                            } else if stuur_laadverzoek(&mut pending_loads, (release_key, path, sample_rate, load_generation, odf_lp, shelf, std::time::Instant::now())) {
                                                 inflight_loads.insert(release_key);
                                                 v.mark_load_requested();
                                             }
@@ -5722,11 +5739,11 @@ fn run_audio_thread(
                                         // hem niet al loslaten.
                                         nv.note_on_count = voice.note_on_count;
                                         // Request background load for new voice (met dedup)
-                                        if let Some(path) = nv.needs_background_load() {
+                                        if let Some((path, shelf)) = nv.needs_background_load() {
                                             let odf_lp = odf_loops_clone.read().get(&path).copied();
                                             if inflight_loads.contains(&key) {
                                                 nv.mark_load_requested();
-                                            } else if stuur_laadverzoek(&mut pending_loads, (key, path, sample_rate, load_generation, odf_lp, std::time::Instant::now())) {
+                                            } else if stuur_laadverzoek(&mut pending_loads, (key, path, sample_rate, load_generation, odf_lp, shelf, std::time::Instant::now())) {
                                                 inflight_loads.insert(key);
                                                 nv.mark_load_requested();
                                             }
@@ -6282,13 +6299,13 @@ fn run_audio_thread(
                     // Tot 0.8.91 bleef zo'n stem voorgoed op zijn startbuffer
                     // hangen zolang er geen nieuwe NoteOn op die pijp kwam.
                     if herhaal_budget > 0 {
-                        if let Some(path) = voice.needs_background_load() {
+                        if let Some((path, shelf)) = voice.needs_background_load() {
                             let key = (voice.stop_id, voice.pipe_num);
                             if inflight_loads.contains(&key) {
                                 voice.mark_load_requested();
                             } else {
                                 let odf_lp = odf_loops_clone.read().get(&path).copied();
-                                if stuur_laadverzoek(&mut pending_loads, (key, path, sample_rate, load_generation, odf_lp, std::time::Instant::now())) {
+                                if stuur_laadverzoek(&mut pending_loads, (key, path, sample_rate, load_generation, odf_lp, shelf, std::time::Instant::now())) {
                                     inflight_loads.insert(key);
                                     voice.mark_load_requested();
                                     herhaal_budget -= 1;
@@ -7523,7 +7540,7 @@ mod meng_verdeling_tests {
             align_table: None,
             trim_start: 0,
             smpl_unity_note: None,
-            smpl_pitch_fraction_cents: None,
+            smpl_pitch_fraction_cents: None,            harm_shelf: None,
         })
     }
 
@@ -7619,7 +7636,7 @@ mod meng_verdeling_tests {
             sample_rate: 48000, total_samples: totaal, loop_start: lus.0, loop_end: lus.1,
             source_path: std::path::PathBuf::from("eq.wav"), channels: if stereo { 2 } else { 1 },
             bits_per_sample: 24, data_offset: 44, align_table: None, trim_start: 0,
-            smpl_unity_note: None, smpl_pitch_fraction_cents: None,
+            smpl_unity_note: None, smpl_pitch_fraction_cents: None, harm_shelf: None,
         })
     }
 
@@ -7765,7 +7782,7 @@ mod meng_verdeling_tests {
                 loop_start: Some(12_000), loop_end: Some(44_000),
                 source_path: std::path::PathBuf::from("bench.wav"), channels: 2, bits_per_sample: 24,
                 data_offset: 44, align_table: None, trim_start: 0, smpl_unity_note: None,
-                smpl_pitch_fraction_cents: None,
+                smpl_pitch_fraction_cents: None,                harm_shelf: None,
             })
         };
         let bufs: Vec<_> = (0..n).map(maak).collect();

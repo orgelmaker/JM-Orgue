@@ -30,6 +30,59 @@ pub enum SampleError {
     ResampleError(String),
 }
 
+/// HarmonicShaping (0.9.41): een high-shelf die de 3e en hogere boventonen van
+/// een pijp met een vast aantal dB bijstelt, één keer op de sampledata gelegd
+/// bij het laden (zoals Hauptwerk het doet — niet realtime). Les gebruikt dit
+/// in CODM-orgels om bijvoorbeeld van Oboe-opnamen een Vox Humana te maken
+/// (+14 dB op de hoge boventonen). `corner_hz` ligt tussen de 2e en 3e
+/// harmonische van de opgenomen grondtoon; onder de hoek blijft de klank gelijk.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct HarmShelf {
+    pub corner_hz: f32,
+    pub gain_db: f32,
+}
+
+impl HarmShelf {
+    /// Pas de high-shelf in-place toe op mono (`data`) en optioneel het
+    /// rechterkanaal, als causale biquad (RBJ, shelf-helling S = 1). Dezelfde
+    /// `corner_hz` geeft op elke samplerate dezelfde vorm in Hz, zodat de
+    /// startbuffer (bronrate) en de volledige opname (uitvoerrate) in de
+    /// ingezwongen toestand gelijk klinken — geen tik op het upgrademoment.
+    pub fn apply(&self, data: &mut [f32], right: Option<&mut [f32]>, sample_rate: u32) {
+        if self.gain_db.abs() < 0.01 || sample_rate == 0 {
+            return;
+        }
+        let a = 10f32.powf(self.gain_db / 40.0);
+        let w0 = (2.0 * std::f32::consts::PI * self.corner_hz / sample_rate as f32).min(0.49 * std::f32::consts::PI);
+        let (sw, cw) = w0.sin_cos();
+        let alpha = sw / 2.0 * std::f32::consts::SQRT_2; // S = 1
+        let two_sqrt_a_alpha = 2.0 * a.sqrt() * alpha;
+        let b0 = a * ((a + 1.0) + (a - 1.0) * cw + two_sqrt_a_alpha);
+        let b1 = -2.0 * a * ((a - 1.0) + (a + 1.0) * cw);
+        let b2 = a * ((a + 1.0) + (a - 1.0) * cw - two_sqrt_a_alpha);
+        let a0 = (a + 1.0) - (a - 1.0) * cw + two_sqrt_a_alpha;
+        let a1 = 2.0 * ((a - 1.0) - (a + 1.0) * cw);
+        let a2 = (a + 1.0) - (a - 1.0) * cw - two_sqrt_a_alpha;
+        let (b0, b1, b2, a1, a2) = (b0 / a0, b1 / a0, b2 / a0, a1 / a0, a2 / a0);
+        let filt = |buf: &mut [f32]| {
+            let (mut x1, mut x2, mut y1, mut y2) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
+            for s in buf.iter_mut() {
+                let x0 = *s;
+                let y0 = b0 * x0 + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
+                x2 = x1;
+                x1 = x0;
+                y2 = y1;
+                y1 = y0;
+                *s = y0;
+            }
+        };
+        filt(data);
+        if let Some(r) = right {
+            filt(r);
+        }
+    }
+}
+
 /// Loaded sample data
 #[derive(Debug, Clone)]
 pub struct SampleData {
@@ -1031,6 +1084,10 @@ pub struct PreloadBuffer {
     pub smpl_unity_note: Option<u8>,
     /// smpl-pitchfractie in cents boven de unity note (zie WavMarkers).
     pub smpl_pitch_fraction_cents: Option<f32>,
+    /// HarmonicShaping-filter dat op `attack_data` is toegepast (0.9.41); de
+    /// achtergrondlader legt hetzelfde filter op de volledige opname, zodat de
+    /// klank op het upgrademoment gelijk blijft. None = geen shaping.
+    pub harm_shelf: Option<HarmShelf>,
 }
 
 impl PreloadBuffer {
@@ -1365,6 +1422,7 @@ fn load_wav_preload_segment_len(path: &Path, len: PreloadLen, segment: PreloadSe
         align_table,
         smpl_unity_note: markers.unity_note,
         smpl_pitch_fraction_cents: markers.pitch_fraction_cents,
+        harm_shelf: None,
     })
 }
 
@@ -1691,6 +1749,7 @@ fn load_audio_preload_len(path: &Path, len: PreloadLen) -> Result<PreloadBuffer,
                 align_table: None,
                 smpl_unity_note: None,
                 smpl_pitch_fraction_cents: None,
+                harm_shelf: None,
             })
         }
         _ => Err(SampleError::UnsupportedFormat(format!("Unknown extension: {}", ext))),
@@ -1925,5 +1984,65 @@ mod loop_opt_tests {
             before,
             after
         );
+    }
+}
+
+#[cfg(test)]
+mod harm_shelf_tests {
+    use super::HarmShelf;
+    use std::f32::consts::PI;
+
+    fn sinus(freq: f32, sr: u32, n: usize) -> Vec<f32> {
+        (0..n).map(|i| (2.0 * PI * freq * i as f32 / sr as f32).sin()).collect()
+    }
+    fn rms(x: &[f32]) -> f32 {
+        // Tweede helft, zodat de inschakel-transient van het filter niet meetelt.
+        let h = &x[x.len() / 2..];
+        (h.iter().map(|v| v * v).sum::<f32>() / h.len() as f32).sqrt()
+    }
+    fn db(a: f32, b: f32) -> f32 { 20.0 * (a / b).log10() }
+
+    #[test]
+    fn high_shelf_tilt_boventonen_niet_de_grondtoon() {
+        let sr = 48_000;
+        // Hoek op 1000 Hz, +12 dB. Laag (300 Hz) blijft, hoog (4000 Hz) +~12 dB.
+        let shelf = HarmShelf { corner_hz: 1000.0, gain_db: 12.0 };
+        for (freq, verwacht, tol) in [(300.0, 0.0, 1.0), (4000.0, 12.0, 1.5)] {
+            let droog = sinus(freq, sr, 24_000);
+            let mut nat = droog.clone();
+            shelf.apply(&mut nat, None, sr);
+            let gemeten = db(rms(&nat), rms(&droog));
+            assert!((gemeten - verwacht).abs() < tol, "{freq} Hz: {gemeten:.1} dB, verwacht {verwacht}");
+        }
+    }
+
+    #[test]
+    fn nul_db_is_identiek() {
+        let mut x = sinus(2000.0, 48_000, 2000);
+        let ref_ = x.clone();
+        HarmShelf { corner_hz: 1000.0, gain_db: 0.0 }.apply(&mut x, None, 48_000);
+        assert_eq!(x, ref_);
+    }
+
+    #[test]
+    fn negatieve_shelf_dempt_hoog() {
+        let sr = 48_000;
+        let shelf = HarmShelf { corner_hz: 1000.0, gain_db: -10.0 };
+        let droog = sinus(5000.0, sr, 24_000);
+        let mut nat = droog.clone();
+        shelf.apply(&mut nat, None, sr);
+        assert!(db(rms(&nat), rms(&droog)) < -7.0);
+    }
+
+    #[test]
+    fn stereo_filtert_beide_kanalen() {
+        let sr = 48_000;
+        let shelf = HarmShelf { corner_hz: 1000.0, gain_db: 12.0 };
+        let l0 = sinus(4000.0, sr, 24_000);
+        let mut l = l0.clone();
+        let mut r = l0.clone();
+        shelf.apply(&mut l, Some(&mut r), sr);
+        assert_eq!(l, r, "beide kanalen hetzelfde gefilterd");
+        assert!(db(rms(&l), rms(&l0)) > 9.0);
     }
 }

@@ -107,6 +107,10 @@ pub struct CodmRank {
     pub niveau_db_96: f32,
     pub stemming_ct_36: f32,
     pub stemming_ct_96: f32,
+    /// HarmonicShaping: aanpassing (dB) van de 3e en hogere boventonen, bij
+    /// pijpnoot 36 en 96, lineair geprojecteerd over het klavier.
+    pub shaping_db_36: f32,
+    pub shaping_db_96: f32,
     pub zwelkast: Option<u32>,
     pub tremulant: Option<u32>,
 }
@@ -302,6 +306,8 @@ pub fn parse_codm(xml: &str) -> Result<CodmOrgel, OdfError> {
             niveau_db_96: f("Amp_PipeMIDINoteNum096_LevelAdjustDecibels"),
             stemming_ct_36: f("Pitch_PipeMIDINoteNum036_TuningAdjustPercentSemitones"),
             stemming_ct_96: f("Pitch_PipeMIDINoteNum096_TuningAdjustPercentSemitones"),
+            shaping_db_36: f("HarmonicShaping_PipeMIDINoteNum036_3rdAndUpperHarmLvlAdjDb"),
+            shaping_db_96: f("HarmonicShaping_PipeMIDINoteNum096_3rdAndUpperHarmLvlAdjDb"),
             zwelkast: r.get_u32("Encl_EnclosureCode").filter(|c| *c > 0),
             tremulant: r.get_u32("Trem_TremulantCode").filter(|c| *c > 0),
         }))
@@ -473,6 +479,14 @@ fn bouw_pijp(z: &mut SampleZoeker, r: &CodmRank, pijp_noot: u32) -> Option<PipeD
     if db != 0.0 { extra.gain_db = Some(db); }
     let ct = lineair(r.stemming_ct_36, r.stemming_ct_96, pijp_noot);
     if ct != 0.0 { extra.pitch_tuning_cents = Some(ct); }
+    // HarmonicShaping: 3e+ boventonen bijstellen. De hoek ligt tussen de 2e en
+    // 3e harmonische van de OPGENOMEN grondtoon (het filter werkt op de ruwe
+    // opname, vóór hertemperen), dus relatief aan `gekozen_noot`.
+    let shaping = lineair(r.shaping_db_36, r.shaping_db_96, pijp_noot);
+    if shaping.abs() >= 0.1 {
+        let f0 = 440.0 * 2f32.powf((gekozen_noot as f32 - 69.0) / 12.0);
+        extra.harm_shelf = Some(crate::loader::HarmShelf { corner_hz: f0 * 2.449, gain_db: shaping });
+    }
     if r.percussief {
         extra.percussive = Some(true);
     } else {
@@ -817,7 +831,7 @@ mod tests {
 <ObjectList ObjectType="enclosure"><Enclosure><EnclosureCode>220</EnclosureCode><Name>SWELL</Name></Enclosure></ObjectList>
 <ObjectList ObjectType="tremulant"><Tremulant><TremulantCode>1720</TremulantCode><Name>Tremulant: Swell</Name><FrequencyHz>5.2</FrequencyHz></Tremulant></ObjectList>
 <ObjectList ObjectType="rank">
-  <Rank><RankID>1</RankID><Name>Bourdon16</Name><NumberOfPipes>32</NumberOfPipes><MIDINoteNumberOfFirstPipe>36</MIDINoteNumberOfFirstPipe><IsPercussive>N</IsPercussive><Samples_InstallationPackageID>758</Samples_InstallationPackageID><Samples_MainSampleFileFolder>Bourdon16</Samples_MainSampleFileFolder><Samples_RelSampleFileFolderIfRelSamplesStoredInSeparateFiles>Bourdon16\rel</Samples_RelSampleFileFolderIfRelSamplesStoredInSeparateFiles><Samples_ShortNoteReleaseSampleFileFolderIfAny>Bourdon16\kort</Samples_ShortNoteReleaseSampleFileFolderIfAny><Samples_MaxNoteTimeMsForShortNoteReleaseSamplesIfAny>300</Samples_MaxNoteTimeMsForShortNoteReleaseSamplesIfAny><Samples_MIDINoteNumIncrementFromPipesToSamples>0</Samples_MIDINoteNumIncrementFromPipesToSamples><Pitch_RankBaseOutputPitch64ftHarmonicNum>4</Pitch_RankBaseOutputPitch64ftHarmonicNum><Encl_EnclosureCode></Encl_EnclosureCode><Trem_TremulantCode></Trem_TremulantCode></Rank>
+  <Rank><RankID>1</RankID><Name>Bourdon16</Name><NumberOfPipes>32</NumberOfPipes><MIDINoteNumberOfFirstPipe>36</MIDINoteNumberOfFirstPipe><IsPercussive>N</IsPercussive><Samples_InstallationPackageID>758</Samples_InstallationPackageID><Samples_MainSampleFileFolder>Bourdon16</Samples_MainSampleFileFolder><Samples_RelSampleFileFolderIfRelSamplesStoredInSeparateFiles>Bourdon16\rel</Samples_RelSampleFileFolderIfRelSamplesStoredInSeparateFiles><Samples_ShortNoteReleaseSampleFileFolderIfAny>Bourdon16\kort</Samples_ShortNoteReleaseSampleFileFolderIfAny><Samples_MaxNoteTimeMsForShortNoteReleaseSamplesIfAny>300</Samples_MaxNoteTimeMsForShortNoteReleaseSamplesIfAny><Samples_MIDINoteNumIncrementFromPipesToSamples>0</Samples_MIDINoteNumIncrementFromPipesToSamples><Pitch_RankBaseOutputPitch64ftHarmonicNum>4</Pitch_RankBaseOutputPitch64ftHarmonicNum><HarmonicShaping_PipeMIDINoteNum036_3rdAndUpperHarmLvlAdjDb>8</HarmonicShaping_PipeMIDINoteNum036_3rdAndUpperHarmLvlAdjDb><HarmonicShaping_PipeMIDINoteNum096_3rdAndUpperHarmLvlAdjDb>8</HarmonicShaping_PipeMIDINoteNum096_3rdAndUpperHarmLvlAdjDb><Encl_EnclosureCode></Encl_EnclosureCode><Trem_TremulantCode></Trem_TremulantCode></Rank>
   <Rank><RankID>2</RankID><Name>Chimes</Name><NumberOfPipes>37</NumberOfPipes><MIDINoteNumberOfFirstPipe>48</MIDINoteNumberOfFirstPipe><IsPercussive>Y</IsPercussive><Samples_InstallationPackageID>758</Samples_InstallationPackageID><Samples_MainSampleFileFolder>Chimes</Samples_MainSampleFileFolder><Samples_MIDINoteNumIncrementFromPipesToSamples>0</Samples_MIDINoteNumIncrementFromPipesToSamples><Pitch_RankBaseOutputPitch64ftHarmonicNum>8</Pitch_RankBaseOutputPitch64ftHarmonicNum><Encl_EnclosureCode>220</Encl_EnclosureCode><Trem_TremulantCode>1720</Trem_TremulantCode></Rank>
 </ObjectList>
 <ObjectList ObjectType="stop">
@@ -841,6 +855,7 @@ mod tests {
         assert_eq!(o.stops.iter().map(|s| s.divisie).collect::<Vec<_>>(), vec![1, 1, 3]);
         assert_eq!(o.stopranks.len(), 3);
         assert_eq!(o.ranks[&1].release_map, r"Bourdon16\rel");
+        assert_eq!((o.ranks[&1].shaping_db_36, o.ranks[&1].shaping_db_96), (8.0, 8.0));
         assert_eq!(o.ranks[&1].korte_release_ms, Some(300));
         assert_eq!(o.ranks[&2].zwelkast, Some(220));
         assert_eq!(o.koppels.len(), 2);
@@ -892,6 +907,11 @@ mod tests {
         assert_eq!(extra.releases.len(), 2);
         assert_eq!(extra.releases[0].max_key_press_time_ms, Some(300));
         assert_eq!(extra.releases[1].max_key_press_time_ms, None);
+        // HarmonicShaping: +8 dB high-shelf op de 3e+ boventonen, hoek tussen de
+        // 2e en 3e harmonische van de opnamegrondtoon (toets 36, C ≈ 65,4 Hz).
+        let shelf = extra.harm_shelf.expect("shaping gezet");
+        assert_eq!(shelf.gain_db, 8.0);
+        assert!((shelf.corner_hz - 65.41 * 2.449).abs() < 1.0, "{}", shelf.corner_hz);
 
         // Bourdon 8' leent dezelfde rang een octaaf hoger: 20 pijpen (48..67).
         let b8 = def.stops.iter().find(|s| s.id == 2002).unwrap();

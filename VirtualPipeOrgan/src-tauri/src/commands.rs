@@ -3209,6 +3209,11 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
         // kan streamen. pipe_num = pijp-index+1 (zoals de NoteOn-route verwacht:
         // midi_note - first_midi_note + 1).
         let mut load_tasks: Vec<((u32, u32), PathBuf)> = Vec::new();
+        // HarmonicShaping per pijp-laagsleutel (0.9.41): het high-shelf-filter
+        // dat op de aanslag, de releases én de tremulantlaag van deze pijp moet.
+        // De release-/trem-sleutels leiden terug naar deze sleutel door
+        // RELEASE_KEY_MASK weg te maskeren (zie de fan-out verderop).
+        let mut harm_shelves: HashMap<(u32, u32), vpo_sampler::HarmShelf> = HashMap::new();
         // Percussieve stops (one-shot: klok e.d.) en ODF-looppunten per bestand.
         // GrandOrgue-regel: zodra de ODF een loop opgeeft, winnen die van de
         // smpl-chunk in de WAV (override, geen fallback).
@@ -3548,6 +3553,9 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
                             &mut release_tasks, &mut release_meta, &mut release_xfade,
                         );
                         load_tasks.push(((stop.id, pipe_num), path.clone()));
+                        if let Some(shelf) = extra.harm_shelf {
+                            harm_shelves.insert((stop.id, pipe_num), shelf);
+                        }
                         // Tremulant-OPNAME van deze pijp (GrandOrgue
                         // `{key}Attack{jjj}IsTremulant=1`, Hauptwerk "tremmed"-laag):
                         // een gewone preload onder dezelfde sleutel + TREM_FLAG.
@@ -3795,12 +3803,34 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
         // met RELEASE_PIPE_FLAG) gaan mee in dezelfde preload-map: NoteOff zoekt
         // ze daar op en de background-load/upgrade werkt er ongewijzigd mee
         // (PreloadBuffer.trim_start = segment-start voor release-uitsneden).
+        // HarmonicShaping (0.9.41): een pijp met shaping krijgt zijn EIGEN
+        // gefilterde kopie (geen gedeelde Arc), want de gefilterde klank wijkt af
+        // van de gedeelde opname die andere pijpen zonder shaping gebruiken. De
+        // achtergrondlader legt hetzelfde filter op de volledige opname (de
+        // buffer draagt `harm_shelf` mee). Release-/trem-sleutels vinden hun
+        // shelf door RELEASE_KEY_MASK weg te maskeren.
+        let mut harm_geshaped = 0usize;
         let preload_buffers: HashMap<(u32, u32), Arc<PreloadBuffer>> = load_tasks
             .iter()
             .map(|(key, p)| (key, p.clone(), SegKey::Attack))
             .chain(release_tasks.iter().map(|(key, p, seg)| (key, p.clone(), *seg)))
-            .filter_map(|(key, p, seg)| path_buffers.get(&(p, seg)).map(|buf| (*key, buf.clone())))
+            .filter_map(|(key, p, seg)| path_buffers.get(&(p, seg)).map(|buf| {
+                let basis = (key.0, key.1 & !crate::audio::RELEASE_KEY_MASK);
+                match harm_shelves.get(&basis) {
+                    Some(shelf) => {
+                        let mut pb = (**buf).clone();
+                        shelf.apply(&mut pb.attack_data, pb.attack_right.as_mut().map(|v| v.as_mut_slice()), pb.sample_rate);
+                        pb.harm_shelf = Some(*shelf);
+                        harm_geshaped += 1;
+                        (*key, Arc::new(pb))
+                    }
+                    None => (*key, buf.clone()),
+                }
+            }))
             .collect();
+        if harm_geshaped > 0 {
+            info!("HarmonicShaping: {} pijp-samples met high-shelf op de boventonen", harm_geshaped);
+        }
         let release_count = preload_buffers.keys()
             .filter(|(_, pn)| pn & crate::audio::RELEASE_PIPE_FLAG != 0)
             .count();

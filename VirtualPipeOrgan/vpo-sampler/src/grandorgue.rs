@@ -676,6 +676,9 @@ pub struct PipeExtra {
     /// GrandOrgue-PitchCorrection (0). None = onbekend; dan beslist de
     /// naamherkenning van zwevende stemmen.
     pub retune_keep_pct: Option<f32>,
+    /// HarmonicShaping (0.9.41): high-shelf op de 3e+ boventonen, bij het laden
+    /// op de sampledata gelegd. None = geen shaping voor deze pijp.
+    pub harm_shelf: Option<crate::loader::HarmShelf>,
 }
 
 /// Eén release-sample van een pijp. `max_key_press_time_ms = None` of `-1`
@@ -1468,6 +1471,8 @@ impl OdfParser {
             // Zonder opdracht beslist later de naamherkenning van zwevende
             // stemmen (opgenomen zweving behouden).
             retune_keep_pct: pc_declared.then_some(0.0),
+            // GrandOrgue kent geen HarmonicShaping; alleen CODM vult dit.
+            harm_shelf: None,
         }
     }
 
