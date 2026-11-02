@@ -2070,6 +2070,19 @@ fn crossfade_in_with_decay(voice: &mut PlayingVoice, level: f32, fade_ms: f32, d
     voice.pending_decay_frames = Some((d * ratio).max(8.0) as u32);
 }
 
+/// De langste toetsduur-release (max_ms ≥ 0) van een pijp, voor als de
+/// standaard-release niet geladen is (0.9.40): een aanslagbestand zonder
+/// cue-marker levert geen eigen release-segment op.
+fn langste_getimede_release(
+    meta: &std::collections::HashMap<(u32, u32), Vec<(i32, u32)>>,
+    stop_id: u32,
+    vpipe: u32,
+) -> Option<u32> {
+    let zoek = |vp: u32| meta.get(&(stop_id, vp))
+        .and_then(|l| l.iter().rev().find(|(m, _)| *m >= 0).map(|(_, k)| *k));
+    zoek(vpipe).or_else(|| zoek(vpipe & !TREM_FLAG))
+}
+
 /// GrandOrgue's automatische release-crossfade-duur (ms) per MIDI-noot
 /// (`get_fader_length`): 184 ms onder noot 42, 6 ms boven noot 86, lineair
 /// ertussen; 46 ms wanneer de noot onbekend is.
@@ -5204,6 +5217,17 @@ fn run_audio_thread(
                                         rel_pre = preloads_clone.read().get(&release_key).cloned();
                                     }
                                     if rel_full.is_none() && rel_pre.is_none() {
+                                        // Standaard-release uit het aanslagbestand niet
+                                        // geladen (geen cue-marker): dan de langste
+                                        // getimede variant, zoals vóór 0.9.40.
+                                        if let Some(k) = langste_getimede_release(&release_meta, stop_id, vpipe) {
+                                            chosen_pipe = k;
+                                            release_key = (stop_id, k);
+                                            rel_full = samples_clone.read().get(&release_key).cloned();
+                                            rel_pre = preloads_clone.read().get(&release_key).cloned();
+                                        }
+                                    }
+                                    if rel_full.is_none() && rel_pre.is_none() {
                                         // Loslaten: het ventiel gaat dicht, de lade krijgt een
                                         // opstoot (0,4x de inzetstoot, Fisk's 'positive pulse').
                                         stoot_acc[voice.c_div.min(31)] -= 0.4 * voice.c_wind_flow;
@@ -5375,6 +5399,14 @@ fn run_audio_thread(
                                     release_key = (stop_id, pick(vpipe & !TREM_FLAG));
                                     rel_full = samples_clone.read().get(&release_key).cloned();
                                     rel_pre = preloads_clone.read().get(&release_key).cloned();
+                                }
+                                if rel_full.is_none() && rel_pre.is_none() {
+                                    // Zie NoteOff: langste getimede variant als vangnet.
+                                    if let Some(k) = langste_getimede_release(&release_meta, stop_id, vpipe) {
+                                        release_key = (stop_id, k);
+                                        rel_full = samples_clone.read().get(&release_key).cloned();
+                                        rel_pre = preloads_clone.read().get(&release_key).cloned();
+                                    }
                                 }
                                 if let Some(ms) = release_xfade.get(&release_key) {
                                     fade_ms = *ms as f32;

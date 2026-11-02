@@ -3283,11 +3283,20 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
                     None | Some(-1) => i64::MAX,
                     Some(t) => t as i64,
                 });
-                file_releases.truncate(8); // idx past in 3 bits + default
+                // Alleen releases mét toetsduurgrens (Palo-sets: 150/300/450/600
+                // ms; CODM korte/middellange release)? Dan is de release in het
+                // aanslagbestand zelf de onbegrensde standaard, zoals bij
+                // GrandOrgue (0.9.40). Tot nu toe werd de langste getimede
+                // release de standaard en klonk een lang aangehouden noot met
+                // de staart van een korte. Heeft het aanslagbestand geen
+                // cue-marker, dan valt de engine terug op die langste.
+                let alleen_getimed = !percussive && load_release.unwrap_or(true)
+                    && file_releases.iter().all(|r| matches!(r.max_key_press_time_ms, Some(t) if t >= 0));
+                file_releases.truncate(if alleen_getimed { 7 } else { 8 }); // idx past in 3 bits + default
                 let n = file_releases.len();
-                let mut meta: Vec<(i32, u32)> = Vec::with_capacity(n);
+                let mut meta: Vec<(i32, u32)> = Vec::with_capacity(n + 1);
                 for (idx, rel) in file_releases.iter().enumerate() {
-                    let kp = if idx + 1 == n {
+                    let kp = if idx + 1 == n && !alleen_getimed {
                         default_key.1 // default/langste → klassieke key
                     } else {
                         key_pipe | crate::audio::RELEASE_PIPE_FLAG | (((idx as u32) + 1) << 24)
@@ -3304,6 +3313,14 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
                         match rel.max_key_press_time_ms { None | Some(-1) => -1, Some(t) => t },
                         kp,
                     ));
+                }
+                if alleen_getimed {
+                    release_tasks.push((
+                        default_key,
+                        attack_path.clone(),
+                        SegKey::Release { cue_override: attack_cue, require_cue: true },
+                    ));
+                    meta.push((-1, default_key.1));
                 }
                 if meta.len() > 1 {
                     release_meta.push(((stop_id, key_pipe), meta));
