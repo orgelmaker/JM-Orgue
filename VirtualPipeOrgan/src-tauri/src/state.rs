@@ -275,6 +275,16 @@ pub fn rt_drop_count() -> u64 {
 /// `pitch_offset` halve tonen verschuiving. `gate_type` is het type van de
 /// eerste schakel ("melody"/"bass" filteren op de hoogste/laagste ingedrukte
 /// toets van het bronklavier; overige typen gedragen zich als unisono).
+/// Staat er een Unison Off-koppel aan voor deze divisie (0.9.39)? Dan speelt
+/// het eigen klavier de eigen registers niet op gelijke toon: de directe route
+/// zwijgt. Octaafkoppels op het eigen klavier en koppels van en naar andere
+/// klavieren blijven werken; de Unison Off-koppel maakt zelf geen route.
+pub(crate) fn unison_off_actief(coupler_list: Option<&Vec<CouplerDto>>, actief: &[String], divisie: &str) -> bool {
+    coupler_list.map_or(false, |cl| cl.iter().any(|c| {
+        c.coupler_type == "unison_off" && c.source_division == divisie && actief.contains(&c.id)
+    }))
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct ExpandedCouplerRoute {
     pub source_division: String,
@@ -3848,7 +3858,11 @@ impl AppState {
                         }
                     };
 
-                    for stop in &division.stops {
+                    // Unison Off: het eigen klavier speelt de eigen registers
+                    // niet op gelijke toon (de koppels hieronder wel).
+                    let unison_uit = unison_off_actief(o.couplers.as_ref(), &active_couplers.read(), &division.name);
+
+                    for stop in division.stops.iter().filter(|_| !unison_uit) {
                         if stops.contains(&stop.id) {
                             // T.A.: skip reed stops when Tongwerken Af is active
                             if ta_active && stop.is_reed { continue; }
@@ -4015,7 +4029,14 @@ impl AppState {
                         });
                     }
 
-                    for stop in &division.stops {
+                    // Unison Off: de directe route speelde niet, dus ook niet
+                    // loslaten — anders verliest een pijp die via de eigen
+                    // octaafkoppel van een andere toets klinkt zijn refcount.
+                    // Aan-/uitzetten tijdens het spelen regelt
+                    // sync_coupler_voices_inner (stap 4).
+                    let unison_uit = unison_off_actief(o.couplers.as_ref(), &active_couplers.read(), &division.name);
+
+                    for stop in division.stops.iter().filter(|_| !unison_uit) {
                         // Send NoteOff regardless of drawn state
                         let transposed_u32 = transposed_note as u32;
                         if let Some((pipe_num, verschuiving)) = pijp_voor_register(transposed_u32, stop) {
@@ -4893,7 +4914,7 @@ impl AppState {
         const MAX_ROUTES: usize = 64;
 
         let active_couplers: Vec<&CouplerDto> = coupler_list.iter()
-            .filter(|c| c.coupler_type != "ta" && active.contains(&c.id))
+            .filter(|c| c.coupler_type != "ta" && c.coupler_type != "unison_off" && active.contains(&c.id))
             .collect();
 
         let mut routes: Vec<ExpandedCouplerRoute> = Vec::new();
@@ -5028,8 +5049,9 @@ impl AppState {
             }
         };
 
-        // 1) Directe route: ingedrukte toetsen op het eigen klavier van het register.
-        {
+        // 1) Directe route: ingedrukte toetsen op het eigen klavier van het register
+        //    (niet bij Unison Off; zelfde stand als T.A.: de nieuwe lijst).
+        if !unison_off_actief(o.couplers.as_ref(), ta_couplers, div_name) {
             let mapping = mappings.iter().find(|m| m.division == div_name);
             for &(ch, note, vel) in held {
                 let accepts = mapping.map_or(false, |m| m.accepts(ch, note));
@@ -5163,6 +5185,46 @@ impl AppState {
                         rt_send(&tx, AudioCommand::ReleaseStop { stop_id: stop.internal_stop_id });
                     } else {
                         Self::sync_stop_voices_inner(o, tx, mappings, &onveranderd, new_couplers, held, &stop.id, true);
+                    }
+                }
+            }
+        }
+
+        // 4) Unison Off gewisseld terwijl toetsen zijn ingedrukt (0.9.39). Aan →
+        //    de directe route van die divisie loslaten (per pijp, zodat een pijp
+        //    die ook via een octaafkoppel klinkt blijft staan); uit → de
+        //    getrokken registers weer direct laten klinken. NoteOn en NoteOff
+        //    blijven zo in paren: het NoteOff-pad slaat de directe route over
+        //    zolang Unison Off aan staat.
+        for div in &o.divisions {
+            let was = unison_off_actief(Some(coupler_list), old_couplers, &div.name);
+            let wordt = unison_off_actief(Some(coupler_list), new_couplers, &div.name);
+            if was == wordt { continue; }
+            let Some(mapping) = mappings.iter().find(|m| m.division == div.name) else { continue; };
+            let ta_active = coupler_list.iter().any(|c| {
+                c.coupler_type == "ta" && new_couplers.contains(&c.id) && c.source_division == div.name
+            });
+            for &(ch, note, vel) in held {
+                if !mapping.accepts(ch, note) { continue; }
+                let t = mapping.speelnoot(note) as u32;
+                for stop in &div.stops {
+                    // Alleen wat via de directe route klinkt of ging klinken:
+                    // getrokken registers, onder T.A. zonder tongwerken.
+                    if !stop.drawn || (ta_active && stop.is_reed) { continue; }
+                    if wordt {
+                        if let Some((pipe_num, verschuiving)) = pijp_voor_register(t, stop) {
+                            rt_send(&tx, AudioCommand::NoteOff { stop_id: stop.internal_stop_id, pipe_num, verschuiving });
+                        }
+                    } else {
+                        if let Some((pipe_num, verschuiving)) = pijp_voor_register(t, stop) {
+                            rt_send(&tx, AudioCommand::NoteOn {
+                                stop_id: stop.internal_stop_id,
+                                pipe_num,
+                                midi_note: t as u8,
+                                velocity: vel as f32 / 127.0,
+                                verschuiving,
+                            });
+                        }
                     }
                 }
             }
@@ -6106,6 +6168,45 @@ mod crescendo_tests {
         // Tongwerk bij terwijl T.A. wegvalt: wél starten.
         AppState::sync_stop_voices_inner(&o, &tx, &mappings, &met, &zonder, &held, "r", true);
         assert_eq!(tel(&rx), 1);
+    }
+
+    /// 0.9.39: Unison Off zet de directe route uit, maakt zelf geen route en
+    /// schakelt live: aan laat de direct klinkende pijp los, uit start hem weer.
+    #[test]
+    fn unison_off_zet_de_directe_route_uit() {
+        let mut o = organ_met_koppel(); // "r" (stop_id 20) op Hoofdwerk, getrokken
+        o.couplers.as_mut().unwrap().push(CouplerDto {
+            id: "uo".into(), name: "Unison Off".into(), source_division: "Hoofdwerk".into(),
+            destination_division: "Hoofdwerk".into(), active: false, display_in_division: "Hoofdwerk".into(),
+            midi_action_code: 0, coupler_type: "unison_off".into(), pitch_offset: 0, speciaal: true,
+        });
+        let cl = o.couplers.clone().unwrap();
+        let zonder: Vec<String> = Vec::new();
+        let met = ids(&["uo"]);
+        // Geen route, ook niet transitief.
+        assert!(AppState::expand_coupler_routes(&cl, &met).is_empty());
+        assert!(unison_off_actief(Some(&cl), &met, "Hoofdwerk"));
+        assert!(!unison_off_actief(Some(&cl), &met, "Pedaal"));
+        assert!(!unison_off_actief(Some(&cl), &zonder, "Hoofdwerk"));
+
+        let (tx, rx) = bounded::<AudioCommand>(64);
+        let mappings = vec![MidiChannelMapping { division: "Hoofdwerk".into(), channel: Some(1), ..Default::default() }];
+        let held = vec![(1u8, 60u8, 100u8)];
+        let noot_aan = |rx: &Receiver<AudioCommand>| rx.try_iter().filter(|c| matches!(c, AudioCommand::NoteOn { stop_id: 20, .. })).count();
+        // Register trekken onder Unison Off: de directe route blijft stil.
+        AppState::sync_stop_voices_inner(&o, &tx, &mappings, &met, &met, &held, "r", true);
+        assert_eq!(noot_aan(&rx), 0);
+        AppState::sync_stop_voices_inner(&o, &tx, &mappings, &zonder, &zonder, &held, "r", true);
+        assert_eq!(noot_aan(&rx), 1);
+        // Live wisselen: aan → NoteOff per pijp (geen ReleaseStop), uit → NoteOn.
+        AppState::sync_coupler_voices_inner(&o, &tx, &mappings, &held, &zonder, &met);
+        let cmds: Vec<AudioCommand> = rx.try_iter().collect();
+        assert_eq!(cmds.iter().filter(|c| matches!(c, AudioCommand::NoteOff { stop_id: 20, .. })).count(), 1, "aan: directe pijp los");
+        assert!(!cmds.iter().any(|c| matches!(c, AudioCommand::ReleaseStop { .. })));
+        AppState::sync_coupler_voices_inner(&o, &tx, &mappings, &held, &met, &zonder);
+        assert_eq!(noot_aan(&rx), 1, "uit: directe pijp weer aan");
+        AppState::sync_coupler_voices_inner(&o, &tx, &mappings, &[], &zonder, &met);
+        assert_eq!(rx.try_iter().count(), 0);
     }
 
     /// 0.9.12: T.A. wisselen terwijl een toets is ingedrukt werkt meteen —

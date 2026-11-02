@@ -8502,7 +8502,10 @@ fn build_couplers_from_definition(definition: &OrganDefinition) -> Vec<CouplerDt
             // Melodie-/baskoppel uit de definitie (GrandOrgue CouplerType,
             // CODM-koppelcode): de engine kiest dan alleen de hoogste of
             // laagste noot. Anders bepaalt de toonsprong het soort.
-            let coupler_type = if cdef.melodie_of_bas { if cdef.melodie { "melody" } else { "bass" } }
+            // Unison Off (GrandOrgue UnisonOff=Y, CODM-code x1 op het eigen
+            // klavier): geen route, maar de directe route van de divisie uit.
+            let coupler_type = if cdef.unison_off { "unison_off" }
+                else if cdef.melodie_of_bas { if cdef.melodie { "melody" } else { "bass" } }
                 else if offset >= 12 { "super" }
                 else if offset <= -12 { "sub" }
                 else { "unison" };
