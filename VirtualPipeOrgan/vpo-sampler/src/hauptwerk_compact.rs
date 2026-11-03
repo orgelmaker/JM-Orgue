@@ -408,6 +408,40 @@ fn kies_getal(
         .or_else(|| kandidaten.into_iter().next())
 }
 
+/// De letters van `Pitch_SpecificationMethodCode` en `Pitch_ExactSamplePitch` van
+/// een Sample. Methodecode: elke aanwezige waarde is 1..4 en er komt minstens één
+/// 4 voor ("exacte frequentie"). Frequentie: een decimaal getal tussen 4 Hz en
+/// 30 kHz dat alleen staat bij samples met methode 4, en daar bij vrijwel allemaal.
+/// Zonder methode 4 is er geen exacte toonhoogte en blijven beide weg (de WAV
+/// beslist dan, zoals bij de lange vorm).
+fn kies_samplepitch(objs: &[FieldMap], uitsluiten: &[&str]) -> (Option<String>, Option<String>) {
+    let methode = letters(objs).into_iter()
+        .filter(|l| !uitsluiten.contains(&l.as_str()))
+        .filter(|l| {
+            let (goed, aanwezig) = dekking(objs, l, |v| matches!(v.trim(), "1" | "2" | "3" | "4"));
+            let (vier, _) = dekking(objs, l, |v| v.trim() == "4");
+            aanwezig > 0 && goed == aanwezig && vier > 0
+        })
+        .min_by_key(|l| if l == "d" { 0 } else { 1 });
+    let Some(m) = methode else { return (None, None) };
+    let met_vier: Vec<&FieldMap> = objs.iter().filter(|o| o.get(&m).map(|v| v.trim()) == Some("4")).collect();
+    let hz = letters(objs).into_iter()
+        .filter(|l| l != &m && !uitsluiten.contains(&l.as_str()))
+        .filter(|l| {
+            let mut bij_vier = 0usize;
+            for o in objs {
+                let Some(v) = o.get(l) else { continue };
+                let Ok(f) = v.trim().parse::<f64>() else { return false };
+                if !(4.0..=30_000.0).contains(&f) { return false; }
+                if o.get(&m).map(|x| x.trim()) != Some("4") { return false; }
+                bij_vier += 1;
+            }
+            bij_vier * 10 >= met_vier.len() * 9
+        })
+        .min_by_key(|l| if l == "g" { 0 } else { 1 });
+    (Some(m), hz)
+}
+
 /// De letter van de ActionEffectCode: elke aanwezige waarde is 1, 2 of 3, en
 /// er komt minstens één 2 of 3 voor (zonder effectgeluiden is er niets te
 /// onderscheiden en blijft het veld weg: dan is alles een gewone pijp).
@@ -1141,12 +1175,21 @@ impl GecomprimeerdeOdf {
         if let Some(l) = &sm_bestand {
             sm_uit.push(l.as_str());
         }
+        let sm_pakket = kies_getal(sm, 1, 999_999, &sm_uit, &["b"]);
+        if let Some(l) = &sm_pakket {
+            sm_uit.push(l.as_str());
+        }
+        // Exacte samplepitch (0.9.43): zonder deze twee velden kon een set waarvan
+        // de WAV's geen smpl-toonhoogte dragen niet worden bijgestemd.
+        let (sm_methode, sm_hz) = kies_samplepitch(sm, &sm_uit);
         zet(
             "Sample",
             vec![
                 (Some("a".into()), "SampleID"),
                 (sm_bestand.clone(), "SampleFilename"),
-                (kies_getal(sm, 1, 999_999, &sm_uit, &["b"]), "InstallationPackageID"),
+                (sm_pakket.clone(), "InstallationPackageID"),
+                (sm_methode, "Pitch_SpecificationMethodCode"),
+                (sm_hz, "Pitch_ExactSamplePitch"),
             ],
         );
 
@@ -1769,5 +1812,48 @@ mod diagnose {
             println!("{:32} ({:6} objecten)  {}", t, n,
                 paren.iter().map(|(l, v)| format!("{}={}", l, v)).collect::<Vec<_>>().join("  "));
         }
+    }
+}
+
+
+#[cfg(test)]
+mod samplepitch_tests {
+    use super::*;
+
+    fn o(paren: &[(&str, &str)]) -> FieldMap {
+        paren.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+    }
+
+    #[test]
+    fn methodecode_en_exacte_pitch_worden_herkend() {
+        // Zoals in een echte set: a=ID, b=pakket, c=bestand, d=methode 4, g=Hz.
+        let objs = vec![
+            o(&[("a", "1"), ("b", "1181"), ("c", "x/1.wav"), ("d", "4"), ("g", "6.559826e+1")]),
+            o(&[("a", "2"), ("b", "1181"), ("c", "x/2.wav"), ("d", "4"), ("g", "7.011208e+1")]),
+            o(&[("a", "3"), ("b", "1181"), ("c", "x/3.wav"), ("d", "4"), ("g", "1.34898e+2")]),
+        ];
+        assert_eq!(kies_samplepitch(&objs, &["a", "c", "b"]), (Some("d".into()), Some("g".into())));
+    }
+
+    #[test]
+    fn zonder_methode_vier_geen_pitchvelden() {
+        // Methode weggelaten (standaard: smpl-chunk) of alleen 1: niets toewijzen.
+        let objs = vec![
+            o(&[("a", "1"), ("b", "7"), ("c", "x/1.wav")]),
+            o(&[("a", "2"), ("b", "7"), ("c", "x/2.wav"), ("d", "1")]),
+        ];
+        assert_eq!(kies_samplepitch(&objs, &["a", "c", "b"]), (None, None));
+    }
+
+    #[test]
+    fn getal_dat_ook_zonder_methode_vier_voorkomt_is_geen_frequentie() {
+        let objs = vec![
+            o(&[("a", "1"), ("c", "x/1.wav"), ("d", "4"), ("g", "65.6"), ("h", "100")]),
+            o(&[("a", "2"), ("c", "x/2.wav"), ("d", "1"), ("h", "100")]),
+        ];
+        // h staat ook bij methode 1: dat is geen samplepitch.
+        let (m, hz) = kies_samplepitch(&objs, &["a", "c"]);
+        assert_eq!(m.as_deref(), Some("d"));
+        assert_eq!(hz.as_deref(), Some("g"));
     }
 }
