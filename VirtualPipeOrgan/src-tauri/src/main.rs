@@ -10,6 +10,7 @@ mod commands;
 mod crescendo_voorstel;
 mod background_sounds;
 mod feedback;
+mod import_pakketroot;
 mod library;
 mod library_online;
 mod silence;
@@ -454,6 +455,9 @@ fn main() {
             commands::set_crescendo_binding_manual,
             commands::set_midi_mapping_range,
             commands::load_organ,
+            commands::import_preflight,
+            commands::get_import_report,
+            commands::set_import_pakketroot,
             commands::get_organ_info,
             commands::set_stop,
             commands::set_drawn_stops,

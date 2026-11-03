@@ -2506,6 +2506,73 @@ pub async fn load_organ(state: State<'_, AppState>, path: String) -> Result<Orga
         .map_err(|e| format!("orgel-laadtaak mislukt: {}", e))?
 }
 
+/// Importverslag vooraf (geen orgel wordt vervangen): wat belooft de definitie,
+/// welke samplepakketten zijn er, en wat zou er laden? De UI toont dit vóór het
+/// laden wanneer een essentiële klankafhankelijkheid ontbreekt.
+#[tauri::command]
+pub async fn import_preflight(state: State<'_, AppState>, path: String) -> Result<vpo_sampler::ImportReport, String> {
+    let st = state.inner().clone();
+    tokio::task::spawn_blocking(move || preflight_verslag(&st, &path))
+        .await
+        .map_err(|e| format!("preflight mislukt: {}", e))
+}
+
+/// Verslag zonder iets te laden of te vervangen. Alleen Hauptwerk/CODM kent
+/// pakketafhankelijkheden; andere formaten (GrandOrgue, map) zijn altijd volledig.
+pub fn preflight_verslag(state: &AppState, path: &str) -> vpo_sampler::ImportReport {
+    let path = crate::library::pad_notatie(path);
+    let odf_path = Path::new(&path);
+    // Alleen CODM kent pakketafhankelijkheden die vooraf te controleren zijn;
+    // voor GrandOrgue en volledige Hauptwerk-ODF's zou een preflight de (soms
+    // 50 MB grote) definitie twee keer bouwen. Die geven hun verslag bij het laden.
+    let is_codm = vpo_sampler::is_hauptwerk_path(odf_path)
+        && std::fs::File::open(odf_path)
+            .and_then(|mut f| {
+                use std::io::Read;
+                let mut kop = vec![0u8; 4096];
+                let n = f.read(&mut kop)?;
+                kop.truncate(n);
+                Ok(vpo_sampler::hauptwerk_codm::is_codm(&String::from_utf8_lossy(&kop)))
+            })
+            .unwrap_or(false);
+    if !is_codm {
+        return vpo_sampler::ImportReport::uit_definitie("niet-gecontroleerd", "", &path, "", 0, 0, 0);
+    }
+    let root = crate::import_pakketroot::opgeslagen(&state.app_data_dir, &path);
+    vpo_sampler::load_hauptwerk_met_verslag(odf_path, root.as_deref()).1
+}
+
+/// Het verslag van de laatste import (opnieuw te openen).
+#[tauri::command]
+pub fn get_import_report(state: State<AppState>) -> Option<vpo_sampler::ImportReport> {
+    state.laatste_importverslag.read().clone()
+}
+
+/// Bewaar (of wis, bij `None`) een handmatig gekozen pakketmap voor dit orgel en
+/// geef het bijgewerkte verslag terug. De map wordt gecontroleerd; er worden
+/// geen bestanden gekopieerd of omgezet.
+#[tauri::command]
+pub async fn set_import_pakketroot(
+    state: State<'_, AppState>,
+    path: String,
+    root: Option<String>,
+) -> Result<vpo_sampler::ImportReport, String> {
+    let st = state.inner().clone();
+    tokio::task::spawn_blocking(move || {
+        let sleutel = crate::library::pad_notatie(&path);
+        match root {
+            Some(r) => {
+                let genormaliseerd = crate::import_pakketroot::normaliseer_keuze(Path::new(&r))?;
+                crate::import_pakketroot::bewaar(&st.app_data_dir, &sleutel, Some(&genormaliseerd));
+            }
+            None => crate::import_pakketroot::bewaar(&st.app_data_dir, &sleutel, None),
+        }
+        Ok(preflight_verslag(&st, &sleutel))
+    })
+    .await
+    .map_err(|e| format!("pakketmap instellen mislukt: {}", e))?
+}
+
 /// Herbruikbare load-organ logic die zowel vanuit Tauri commands als vanuit de test API
 /// kan worden aangeroepen. Neemt een `&AppState` (niet `State<AppState>`).
 /// GrandOrgue AmplitudeLevel (procent; 100 = neutraal, 0-1000) → dB.
@@ -3115,11 +3182,19 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
     // streaming-load + DTO + noise-filter below are shared with GrandOrgue.
     let mut definition = if vpo_sampler::is_hauptwerk_path(odf_path) {
         info!("Detected Hauptwerk organ definition");
-        vpo_sampler::load_hauptwerk(odf_path)
-            .map_err(|e| format!("Failed to parse Hauptwerk ODF: {}", e))?
+        // Een door de gebruiker gekozen pakketmap (per orgel onthouden) gaat voor.
+        let root = crate::import_pakketroot::opgeslagen(&state.app_data_dir, path);
+        let (res, verslag) = vpo_sampler::load_hauptwerk_met_verslag(odf_path, root.as_deref());
+        *state.laatste_importverslag.write() = Some(verslag);
+        res.map_err(|e| format!("Failed to parse Hauptwerk ODF: {}", e))?
     } else {
-        OrganDefinition::load(odf_path)
-            .map_err(|e| format!("Failed to parse ODF: {}", e))?
+        let d = OrganDefinition::load(odf_path)
+            .map_err(|e| format!("Failed to parse ODF: {}", e))?;
+        // GrandOrgue kent geen losse pakketten: wat de definitie bevat is geladen.
+        *state.laatste_importverslag.write() = Some(vpo_sampler::ImportReport::uit_definitie(
+            "grandorgue", "", path, &d.organ.church_name, d.stops.len(), d.manuals.len(), d.couplers.len(),
+        ));
+        d
     };
 
     // Tidy division/manual names (strip "N. " ordinals like "2. Hauptwerk"). The

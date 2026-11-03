@@ -9,6 +9,7 @@ pub mod pool;
 pub mod grandorgue;
 pub mod hauptwerk;
 pub mod hauptwerk_codm;
+pub mod import_report;
 pub(crate) mod hauptwerk_compact;
 pub mod streaming;
 pub mod custom_organ;
@@ -26,9 +27,10 @@ pub use loader::{
 pub use cache::*;
 pub use pool::*;
 pub use grandorgue::*;
-pub use hauptwerk::{load_hauptwerk, is_hauptwerk_path, clean_stop_name, strip_pitch_from_name, zonder_vastgeplakte_voetmaat,
+pub use hauptwerk::{load_hauptwerk, load_hauptwerk_met_verslag, is_hauptwerk_path, clean_stop_name, strip_pitch_from_name, zonder_vastgeplakte_voetmaat,
                    gedeeld_voorvoegsel, strip_voorvoegsel, clean_division_name, find_package_root};
 pub use streaming::*;
+pub use import_report::{ImportReport, Ernst, Melding, PakketRol, PakketStatus, Tellingen, OvergeslagenStop};
 pub use custom_organ::*;
 pub use perspective::*;
 pub use registernaam::{splits_koren, voetmaat_uit_naam, kale_voetmaat_achteraan, alleen_voetmaat, Koren, KorenSplitsing};

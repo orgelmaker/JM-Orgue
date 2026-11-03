@@ -16,6 +16,8 @@
 //!   POST /couplers/set            - body: {"ids":[..]} koppels in één keer zetten (tweede helft setzer)
 //!   GET  /logs?lines=N            - tail van logfile
 //!   POST /load_organ              - body: {"path":"..."} laad een .organ bestand
+//!   POST /import/preflight        - body: {"path":"..."} importverslag zonder te laden
+//!   GET  /import/report           - verslag van de laatste load
 //!   POST /load_directory          - body: {"path":"..."} scan + laad sample map
 //!   GET  /library                 - bekende orgels uit de library
 //!   GET  /version                 - JM-Orgue versie
@@ -510,6 +512,16 @@ fn route_test_only(
             serde_json::to_value(dto).map_err(|e| (500u16, e.to_string()))
         }
         (tiny_http::Method::Post, "/load_organ") => handle_load_organ(state, body),
+        // Importverslag (0.9.42): preflight zonder iets te laden of te vervangen,
+        // en het verslag van de laatste load.
+        (tiny_http::Method::Post, "/import/preflight") => {
+            let v: serde_json::Value = serde_json::from_str(body).map_err(|e| (400u16, e.to_string()))?;
+            let path = v.get("path").and_then(|x| x.as_str()).ok_or((400u16, "path ontbreekt".to_string()))?;
+            serde_json::to_value(crate::commands::preflight_verslag(state, path)).map_err(|e| (500u16, e.to_string()))
+        }
+        (tiny_http::Method::Get, "/import/report") => {
+            serde_json::to_value(state.laatste_importverslag.read().clone()).map_err(|e| (500u16, e.to_string()))
+        }
         (tiny_http::Method::Post, "/load_directory") => handle_load_directory(state, body),
         (tiny_http::Method::Post, "/audio_output") => handle_audio_output(state, body),
         (tiny_http::Method::Post, "/reverb") => handle_reverb(state, body),

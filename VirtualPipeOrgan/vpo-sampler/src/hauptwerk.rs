@@ -44,29 +44,59 @@ use crate::hauptwerk_compact::GecomprimeerdeOdf;
 
 /// Load a Hauptwerk organ definition and translate it to an [`OrganDefinition`].
 pub fn load_hauptwerk(odf_path: &Path) -> Result<OrganDefinition, OdfError> {
+    load_hauptwerk_met_verslag(odf_path, None).0
+}
+
+/// Als [`load_hauptwerk`], maar levert altijd een [`crate::import_report::ImportReport`]
+/// mee, ook als het laden mislukt. `pakketroot` = een handmatig gekozen map die
+/// `OrganInstallationPackages` bevat.
+pub fn load_hauptwerk_met_verslag(
+    odf_path: &Path,
+    pakketroot: Option<&Path>,
+) -> (Result<OrganDefinition, OdfError>, crate::import_report::ImportReport) {
+    use crate::import_report::{Ernst, ImportReport};
+    let bron = odf_path.to_string_lossy().to_string();
+    let mislukt = |e: OdfError| {
+        let mut v = ImportReport { formaat: "hauptwerk".into(), bron: bron.clone(), niet_speelbaar: true, onvolledig: true, ..Default::default() };
+        v.melding(Ernst::Fout, "bestand", e.to_string());
+        (Err(e), v)
+    };
     // Lees als bytes zodat we versleutelde/gecomprimeerde (binaire) sets — de
     // gangbare vorm bij commerciële Hauptwerk-distributie — met een duidelijke
     // melding kunnen weigeren i.p.v. een cryptische UTF-8/parse-fout.
-    let bytes = std::fs::read(odf_path)?;
-    let xml = ensure_readable_xml(bytes)?;
+    let bytes = match std::fs::read(odf_path) { Ok(b) => b, Err(e) => return mislukt(e.into()) };
+    let xml = match ensure_readable_xml(bytes) { Ok(x) => x, Err(e) => return mislukt(e) };
 
     // Custom Organ Design Module: een regel-gebaseerde definitie met een
     // eigen indeling (0.9.39). Mag zonder pakketroot binnenkomen: dan meldt
     // die route welke samplepakketten ontbreken.
     if crate::hauptwerk_codm::is_codm(&xml) {
         info!("Hauptwerk Custom Organ (CODM) gedetecteerd");
-        return crate::hauptwerk_codm::laad_codm(odf_path, &xml);
+        return crate::hauptwerk_codm::laad_codm_met_verslag(odf_path, &xml, pakketroot);
     }
 
     // Resolve the package root: the ancestor directory that contains
     // `OrganInstallationPackages` (the ODF may live in `OrganDefinitions/` or at
     // the package top level).
-    let root = find_package_root(odf_path).ok_or_else(|| {
-        OdfError::MissingField("OrganInstallationPackages directory".into())
-    })?;
+    let root = match pakketroot.map(|p| p.to_path_buf()).or_else(|| find_package_root(odf_path)) {
+        Some(r) => r,
+        None => return mislukt(OdfError::MissingField("OrganInstallationPackages directory".into())),
+    };
     let pkg_dirs = scan_package_dirs(&root);
+    let versie = crate::hauptwerk_codm::lees_kop(&xml).map(|k| k.versie).unwrap_or_default();
 
-    build_definition(&xml, root, &pkg_dirs)
+    match build_definition(&xml, root.clone(), &pkg_dirs) {
+        Ok(def) => {
+            let mut v = ImportReport::uit_definitie(
+                "hauptwerk", &versie, &bron, &def.organ.church_name,
+                def.stops.len(), def.manuals.len(), def.couplers.len(),
+            );
+            v.pakketroot = Some(root.to_string_lossy().to_string());
+            v.pakketroot_handmatig = pakketroot.is_some();
+            (Ok(def), v)
+        }
+        Err(e) => mislukt(e),
+    }
 }
 
 /// Foutmelding voor binaire/versleutelde Hauptwerk-bestanden.

@@ -1540,6 +1540,9 @@ pub struct AppState {
     pub organ_library: Arc<RwLock<OrganLibrary>>,
     /// App data directory for persistent storage
     pub app_data_dir: PathBuf,
+    /// Verslag van de laatste import (ook van een mislukte of gedeeltelijke):
+    /// de UI kan het opnieuw openen.
+    pub laatste_importverslag: Arc<RwLock<Option<vpo_sampler::ImportReport>>>,
     /// Currently loaded organ ID (for saving settings on close)
     pub current_organ_id: Arc<RwLock<Option<String>>>,
     /// Crescendo configuration: stages[i] = list of stop IDs that should be ON at stage i
@@ -2110,6 +2113,7 @@ impl AppState {
             held_notes,
             organ_library,
             app_data_dir,
+            laatste_importverslag: Arc::new(RwLock::new(None)),
             current_organ_id: Arc::new(RwLock::new(None)),
             crescendo_stages,
             crescendo_stage,

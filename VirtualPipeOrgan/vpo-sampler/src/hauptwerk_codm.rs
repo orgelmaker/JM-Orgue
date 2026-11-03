@@ -38,16 +38,71 @@ use crate::grandorgue::{
     CouplerDef, EnclosureDef, ManualDef, OdfError, OrganDefinition, OrganInfo, PipeDef,
     PipeExtra, PipeLayer, ReleaseDef, StopDef, TremulantDef, WindchestDef,
 };
+use crate::import_report::{Ernst, ImportReport, Melding, OvergeslagenStop, PakketRol, PakketStatus, Tellingen};
 use crate::hauptwerk::{
     clean_division_name, clean_stop_name, extract_objects, klinkende_harmonische, FieldMap,
     FieldMapExt,
 };
 
-/// Is dit (het begin van) een CODM-bestand?
-pub fn is_codm(xml: &str) -> bool {
-    let kop = &xml[..xml.len().min(1024)];
-    kop.contains("FileFormat=\"CustomOrgan\"")
+/// Wat de starttag van het rootelement over het bestand zegt.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CodmKop {
+    pub formaat: String,
+    pub versie: String,
 }
+
+/// Lees `FileFormat`/`FileFormatVersion` uit het rootelement `<Hauptwerk …>`.
+///
+/// Slaat BOM, witruimte, de XML-declaratie, commentaar en een doctype over en
+/// leest attributen met enkele of dubbele quotes, in willekeurige volgorde en
+/// met extra attributen ertussen. Geeft `None` als het rootelement geen
+/// `Hauptwerk` is.
+pub fn lees_kop(xml: &str) -> Option<CodmKop> {
+    let mut s = xml.trim_start_matches('\u{feff}');
+    loop {
+        s = s.trim_start();
+        if s.starts_with("<?") {
+            s = &s[s.find("?>")? + 2..];
+        } else if s.starts_with("<!--") {
+            s = &s[s.find("-->")? + 3..];
+        } else if s.starts_with("<!") {
+            s = &s[s.find('>')? + 1..];
+        } else {
+            break;
+        }
+    }
+    let s = s.strip_prefix('<')?;
+    let eind = s.find('>')?;
+    let tag = &s[..eind];
+    let naam_eind = tag.find(|c: char| c.is_whitespace()).unwrap_or(tag.len());
+    if !tag[..naam_eind].trim_end_matches('/').eq_ignore_ascii_case("Hauptwerk") {
+        return None;
+    }
+    let mut kop = CodmKop { formaat: String::new(), versie: String::new() };
+    let mut rest = &tag[naam_eind..];
+    while let Some(eq) = rest.find('=') {
+        let sleutel = rest[..eq].trim();
+        let na = rest[eq + 1..].trim_start();
+        let Some(q) = na.chars().next().filter(|c| *c == '"' || *c == '\'') else { break };
+        let Some(sluit) = na[1..].find(q) else { break };
+        let waarde = &na[1..1 + sluit];
+        if sleutel.eq_ignore_ascii_case("FileFormat") {
+            kop.formaat = waarde.trim().to_string();
+        } else if sleutel.eq_ignore_ascii_case("FileFormatVersion") {
+            kop.versie = waarde.trim().to_string();
+        }
+        rest = &na[1 + sluit + 1..];
+    }
+    Some(kop)
+}
+
+/// Is dit een CODM-bestand (`FileFormat="CustomOrgan"` op de root)?
+pub fn is_codm(xml: &str) -> bool {
+    lees_kop(xml).is_some_and(|k| k.formaat.eq_ignore_ascii_case("CustomOrgan"))
+}
+
+/// Versies waarvan de veldsemantiek aan echte bestanden getoetst is.
+pub const GETOETSTE_VERSIES: &[&str] = &["3.00"];
 
 // ============================================================================
 // Structuur (zonder samples)
@@ -113,6 +168,9 @@ pub struct CodmRank {
     pub shaping_db_96: f32,
     pub zwelkast: Option<u32>,
     pub tremulant: Option<u32>,
+    /// Pakket en map met de tremulant-golfvormen van de rang (leeg = geen).
+    pub trem_pakket: u32,
+    pub trem_map: String,
 }
 
 /// Soort koppel volgens de laatste "cijferpositie" van de CouplerCode.
@@ -161,12 +219,18 @@ pub struct CodmOrgel {
     pub tremulanten: Vec<CodmTremulant>,
     /// RequiredInstallationPackage: id → naam.
     pub pakketten: BTreeMap<u32, String>,
+    /// `FileFormatVersion` uit het rootelement ("" = ontbreekt).
+    pub versie: String,
+    /// Rol(len) per pakket-ID, afgeleid uit de velden die ernaar verwijzen.
+    pub pakket_rollen: BTreeMap<u32, std::collections::BTreeSet<PakketRol>>,
+    /// Bevindingen van de validatie (dubbele sleutels, ontbrekende verwijzingen, …).
+    pub meldingen: Vec<Melding>,
 }
 
 impl CodmOrgel {
     /// Pakketten waarin samples van de rangen staan.
     pub fn sample_pakketten(&self) -> Vec<u32> {
-        let set: std::collections::BTreeSet<u32> = self.ranks.values().map(|r| r.pakket).collect();
+        let set: std::collections::BTreeSet<u32> = self.ranks.values().map(|r| r.pakket).filter(|p| *p > 0).collect();
         set.into_iter().collect()
     }
 }
@@ -237,8 +301,31 @@ fn titel_als_kapitalen(s: &str) -> String {
 
 /// Lees de structuur van een CODM-bestand. Raakt geen samples aan.
 pub fn parse_codm(xml: &str) -> Result<CodmOrgel, OdfError> {
-    if !is_codm(xml) {
+    let Some(kop) = lees_kop(xml).filter(|k| k.formaat.eq_ignore_ascii_case("CustomOrgan")) else {
         return Err(OdfError::ParseError { line: 0, message: "geen CODM-orgeldefinitie (FileFormat=\"CustomOrgan\")".into() });
+    };
+    // Een half gelezen objectlijst mag nooit als volledig doorgaan: misvormde
+    // XML wordt met regel en kolom geweigerd.
+    if let Err(e) = roxmltree::Document::parse_with_options(
+        xml.trim_start_matches('\u{feff}'),
+        roxmltree::ParsingOptions { allow_dtd: true, ..Default::default() },
+    ) {
+        let pos = e.pos();
+        return Err(OdfError::ParseError {
+            line: pos.row as usize,
+            message: format!("CODM-definitie is geen geldige XML (regel {}, kolom {}): {}", pos.row, pos.col, e),
+        });
+    }
+    let mut meldingen: Vec<Melding> = Vec::new();
+    if !GETOETSTE_VERSIES.contains(&kop.versie.as_str()) {
+        meldingen.push(Melding::nieuw(
+            Ernst::Waarschuwing,
+            "bestand",
+            format!(
+                "FileFormatVersion {:?} is niet getoetst (alleen {}); velden kunnen anders werken dan verwacht",
+                kop.versie, GETOETSTE_VERSIES.join(", ")
+            ),
+        ));
     }
     let lees = |t: &str| extract_objects(xml, t);
     let general = lees("_General");
@@ -310,14 +397,24 @@ pub fn parse_codm(xml: &str) -> Result<CodmOrgel, OdfError> {
             shaping_db_96: f("HarmonicShaping_PipeMIDINoteNum096_3rdAndUpperHarmLvlAdjDb"),
             zwelkast: r.get_u32("Encl_EnclosureCode").filter(|c| *c > 0),
             tremulant: r.get_u32("Trem_TremulantCode").filter(|c| *c > 0),
+            trem_pakket: r.get_u32("Trem_SampleInstallationPackageID").unwrap_or(0),
+            trem_map: tekst(r, "Trem_WaveformSampleFileFolder"),
         }))
     }).collect();
     // RankID hoort uniek te zijn; komt er toch een dubbel voor (Pitea: 33),
     // dan wint de eerste.
     let mut ranks: BTreeMap<u32, CodmRank> = BTreeMap::new();
-    for (id, r) in alle_ranks {
+    for (volgnr, (id, r)) in alle_ranks.into_iter().enumerate() {
         if let Some(eerder) = ranks.get(&id) {
             warn!("CODM: RankID {} komt dubbel voor ('{}' en '{}'); de eerste wordt gebruikt", id, eerder.naam, r.naam);
+            meldingen.push(Melding::nieuw(
+                Ernst::Waarschuwing,
+                format!("rank {id}"),
+                format!(
+                    "RankID {id} komt dubbel voor: '{}' (rang nr. {} in het bestand) wordt genegeerd; '{}' (de eerste) wordt gebruikt",
+                    r.naam, volgnr + 1, eerder.naam
+                ),
+            ));
             continue;
         }
         ranks.insert(id, r);
@@ -359,7 +456,145 @@ pub fn parse_codm(xml: &str) -> Result<CodmOrgel, OdfError> {
         .filter_map(|p| Some((p.get_u32("InstallationPackageID")?, tekst(p, "Name"))))
         .collect();
 
-    Ok(CodmOrgel { naam, divisies, stops, stopranks, ranks, koppels, zwelkasten, tremulanten, pakketten })
+    let pakket_rollen = pakketrollen(xml, &ranks);
+    valideer(&divisies, &stops, &stopranks, &ranks, &koppels, &zwelkasten, &tremulanten, &mut meldingen);
+
+    Ok(CodmOrgel { naam, divisies, stops, stopranks, ranks, koppels, zwelkasten, tremulanten, pakketten, versie: kop.versie, pakket_rollen, meldingen })
+}
+
+/// Alle `<veld>123</veld>`-waarden met deze veldnaam (zonder 0).
+fn ids_van_veld(xml: &str, veld: &str) -> std::collections::BTreeSet<u32> {
+    let open = format!("<{veld}>");
+    let sluit = format!("</{veld}>");
+    let mut uit = std::collections::BTreeSet::new();
+    let mut pos = 0;
+    while let Some(a) = xml[pos..].find(&open).map(|a| pos + a + open.len()) {
+        let Some(b) = xml[a..].find(&sluit).map(|b| a + b) else { break };
+        if let Ok(id) = xml[a..b].trim().parse::<u32>() {
+            if id > 0 { uit.insert(id); }
+        }
+        pos = b + sluit.len();
+    }
+    uit
+}
+
+/// Rol(len) per pakket-ID: wie verwijst ernaar en waarvoor?
+fn pakketrollen(xml: &str, ranks: &BTreeMap<u32, CodmRank>) -> BTreeMap<u32, std::collections::BTreeSet<PakketRol>> {
+    let mut m: BTreeMap<u32, std::collections::BTreeSet<PakketRol>> = BTreeMap::new();
+    let mut voeg = |id: u32, rol: PakketRol| { if id > 0 { m.entry(id).or_default().insert(rol); } };
+    for r in ranks.values() {
+        voeg(r.pakket, PakketRol::Samples);
+        if !r.trem_map.is_empty() { voeg(r.trem_pakket, PakketRol::Tremulant); }
+    }
+    for veld in ["ImageFileInstallationPackageID", "BackgroundImageFileInstallationPackageID"] {
+        for id in ids_van_veld(xml, veld) { voeg(id, PakketRol::Beeld); }
+    }
+    for id in ids_van_veld(xml, "CustomOrganInfo_InstallationPackageID") { voeg(id, PakketRol::Info); }
+    m
+}
+
+/// Controleer sleutels en verwijzingen. Een verwijzing naar iets dat er niet
+/// is, wordt gemeld in plaats van stil overgeslagen.
+#[allow(clippy::too_many_arguments)]
+fn valideer(
+    divisies: &[CodmDivisie],
+    stops: &[CodmStop],
+    stopranks: &[CodmStopRank],
+    ranks: &BTreeMap<u32, CodmRank>,
+    koppels: &[CodmKoppel],
+    zwelkasten: &[(u32, String)],
+    tremulanten: &[CodmTremulant],
+    meldingen: &mut Vec<Melding>,
+) {
+    let mut dubbel = |soort: &str, codes: Vec<u32>| {
+        let mut gezien = HashSet::new();
+        for c in codes {
+            if !gezien.insert(c) {
+                meldingen.push(Melding::nieuw(
+                    Ernst::Waarschuwing,
+                    format!("{soort} {c}"),
+                    format!("{soort}-code {c} komt meer dan eens voor; alleen het eerste record is eenduidig"),
+                ));
+            }
+        }
+    };
+    dubbel("divisie", divisies.iter().map(|d| d.code).collect());
+    dubbel("stop", stops.iter().map(|s| s.code).collect());
+    dubbel("koppel", koppels.iter().map(|k| k.code).collect());
+    dubbel("tremulant", tremulanten.iter().map(|t| t.code).collect());
+
+    let stop_codes: HashSet<u32> = stops.iter().map(|s| s.code).collect();
+    let div_codes: HashSet<u32> = divisies.iter().map(|d| d.code).collect();
+    let encl_codes: HashSet<u32> = zwelkasten.iter().map(|(c, _)| *c).collect();
+    let trem_codes: HashSet<u32> = tremulanten.iter().map(|t| t.code).collect();
+
+    for sr in stopranks {
+        if !stop_codes.contains(&sr.stop) {
+            meldingen.push(Melding::nieuw(
+                Ernst::Fout,
+                format!("stop {}", sr.stop),
+                format!("een StopRank verwijst naar stop {} die niet bestaat", sr.stop),
+            ));
+        }
+        if !sr.extern_ {
+            match sr.rank {
+                Some(id) if ranks.contains_key(&id) => {}
+                Some(id) => meldingen.push(Melding::nieuw(
+                    Ernst::Fout,
+                    format!("stop {}", sr.stop),
+                    format!("StopRank verwijst naar rang {id} die niet bestaat"),
+                )),
+                None => meldingen.push(Melding::nieuw(
+                    Ernst::Fout,
+                    format!("stop {}", sr.stop),
+                    "StopRank heeft geen RankID",
+                )),
+            }
+        }
+    }
+    for s in stops {
+        if !div_codes.contains(&s.divisie) {
+            meldingen.push(Melding::nieuw(
+                Ernst::Fout,
+                format!("stop {}", s.code),
+                format!("stop '{}' hoort bij divisie {} die niet in de definitie staat", s.naam, s.divisie),
+            ));
+        }
+        if !stopranks.iter().any(|sr| sr.stop == s.code) {
+            meldingen.push(Melding::nieuw(
+                Ernst::Waarschuwing,
+                format!("stop {}", s.code),
+                format!("stop '{}' heeft geen StopRank en kan dus niet klinken", s.naam),
+            ));
+        }
+    }
+    for r in ranks.values() {
+        if let Some(e) = r.zwelkast.filter(|e| !encl_codes.contains(e)) {
+            meldingen.push(Melding::nieuw(
+                Ernst::Waarschuwing,
+                format!("rank {}", r.id),
+                format!("rang '{}' verwijst naar zwelkast {e} die niet bestaat", r.naam),
+            ));
+        }
+        if let Some(t) = r.tremulant.filter(|t| !trem_codes.contains(t)) {
+            meldingen.push(Melding::nieuw(
+                Ernst::Waarschuwing,
+                format!("rank {}", r.id),
+                format!("rang '{}' verwijst naar tremulant {t} die niet bestaat", r.naam),
+            ));
+        }
+    }
+    for k in koppels {
+        for d in [k.van_toetsen, k.klinkt] {
+            if !div_codes.contains(&d) {
+                meldingen.push(Melding::nieuw(
+                    Ernst::Waarschuwing,
+                    format!("koppel {}", k.code),
+                    format!("koppel '{}' verwijst naar divisie {d} die niet bestaat", k.naam),
+                ));
+            }
+        }
+    }
 }
 
 /// Als [`extract_objects`], maar hoofdletterongevoelig voor de objecttag.
@@ -446,11 +681,24 @@ impl SampleMap {
 struct SampleZoeker<'a> {
     pakketten: &'a HashMap<u32, PathBuf>,
     mappen: HashMap<(u32, String), SampleMap>,
+    /// Mapnamen die uit het pakket zouden ontsnappen en daarom geweigerd zijn.
+    geweigerd: std::collections::BTreeSet<(u32, String)>,
+}
+
+/// Blijft deze mapnaam binnen het pakket? Absolute paden, stationsletters en
+/// `..` zouden bestanden buiten de gekozen pakketroot kunnen openen.
+fn map_blijft_in_pakket(map: &str) -> bool {
+    let m = map.replace('\\', "/");
+    !(m.starts_with('/') || m.contains(':') || m.split('/').any(|d| d == ".."))
 }
 
 impl<'a> SampleZoeker<'a> {
     fn map(&mut self, pakket: u32, map: &str) -> Option<&SampleMap> {
         let dir = self.pakketten.get(&pakket)?;
+        if !map_blijft_in_pakket(map) {
+            self.geweigerd.insert((pakket, map.to_string()));
+            return None;
+        }
         let sleutel = (pakket, map.to_string());
         if !self.mappen.contains_key(&sleutel) {
             let pad = if map.is_empty() { dir.clone() } else { dir.join(map.replace('\\', "/")) };
@@ -516,11 +764,121 @@ fn bouw_pijp(z: &mut SampleZoeker, r: &CodmRank, pijp_noot: u32) -> Option<PipeD
 
 /// Laad een CODM-bestand: structuur lezen, samples in de pakketten zoeken.
 pub fn laad_codm(odf_path: &Path, xml: &str) -> Result<OrganDefinition, OdfError> {
-    let orgel = parse_codm(xml)?;
-    let root = crate::hauptwerk::find_package_root(odf_path);
+    laad_codm_met_verslag(odf_path, xml, None).0
+}
+
+/// Laad een CODM-bestand en lever daarbij een [`ImportReport`], ook als het laden mislukt.
+///
+/// `pakketroot` = een door de gebruiker gekozen map (die `OrganInstallationPackages`
+/// bevat); `None` = zoek vanaf de definitie omhoog.
+pub fn laad_codm_met_verslag(
+    odf_path: &Path,
+    xml: &str,
+    pakketroot: Option<&Path>,
+) -> (Result<OrganDefinition, OdfError>, ImportReport) {
+    let bron = odf_path.to_string_lossy().to_string();
+    let orgel = match parse_codm(xml) {
+        Ok(o) => o,
+        Err(e) => {
+            let mut v = ImportReport { formaat: "codm".into(), bron, niet_speelbaar: true, onvolledig: true, ..Default::default() };
+            v.melding(Ernst::Fout, "bestand", e.to_string());
+            return (Err(e), v);
+        }
+    };
+    let handmatig = pakketroot.is_some();
+    let root: Option<PathBuf> = match pakketroot {
+        Some(r) => Some(r.to_path_buf()),
+        None => crate::hauptwerk::find_package_root(odf_path),
+    };
     let pakketten = root.as_deref().map(crate::hauptwerk::scan_package_dirs).unwrap_or_default();
     let base = odf_path.parent().unwrap_or(Path::new(".")).to_path_buf();
-    codm_naar_definitie(&orgel, &pakketten, base)
+    let mut verslag = nieuw_verslag(&orgel, &pakketten, &bron);
+    verslag.pakketroot = root.as_ref().map(|r| r.to_string_lossy().to_string());
+    verslag.pakketroot_handmatig = handmatig;
+    if root.is_none() {
+        verslag.melding(
+            Ernst::Fout,
+            "OrganInstallationPackages",
+            "geen map OrganInstallationPackages gevonden naast of boven de definitie; kies de map handmatig",
+        );
+    }
+    let r = bouw_definitie(&orgel, &pakketten, base, &mut verslag);
+    if let Ok(def) = &r {
+        verslag.geladen.stops = def.stops.len();
+        verslag.geladen.divisies = def.manuals.len();
+        verslag.geladen.koppels = def.couplers.len();
+        verslag.geladen.tremulanten = def.tremulants.len();
+        verslag.geladen.pijpen = def.stops.iter().map(|s| {
+            s.pipes.iter().chain(s.layers.iter().flat_map(|l| l.pipes.iter()))
+                .filter(|p| matches!(p, PipeDef::Sample { .. })).count()
+        }).sum();
+        verslag.geladen.releases = def.stops.iter().map(|s| {
+            s.pipes.iter().chain(s.layers.iter().flat_map(|l| l.pipes.iter()))
+                .map(|p| match p { PipeDef::Sample { extra, .. } => extra.releases.len(), _ => 0 }).sum::<usize>()
+        }).sum();
+    }
+    if let Err(e) = &r {
+        verslag.melding(Ernst::Fout, "orgel", e.to_string());
+    }
+    verslag.bepaal_volledigheid();
+    (r, verslag)
+}
+
+/// Het verslag zoals het er zonder samples uitziet: wat de definitie belooft
+/// en welke pakketten daarvoor nodig zijn en gevonden zijn.
+fn nieuw_verslag(orgel: &CodmOrgel, pakketten: &HashMap<u32, PathBuf>, bron: &str) -> ImportReport {
+    let mut v = ImportReport {
+        formaat: "codm".into(),
+        versie: orgel.versie.clone(),
+        bron: bron.to_string(),
+        naam: orgel.naam.clone(),
+        ..Default::default()
+    };
+    v.verwacht = Tellingen {
+        divisies: orgel.divisies.len(),
+        stops: orgel.stops.len(),
+        stopranks: orgel.stopranks.len(),
+        ranks: orgel.ranks.len(),
+        koppels: orgel.koppels.len(),
+        tremulanten: orgel.tremulanten.len(),
+        zwelkasten: orgel.zwelkasten.len(),
+        ..Default::default()
+    };
+    // Alle pakketten die ergens naar verwijzen, ook als ze niet in de lijst
+    // RequiredInstallationPackage staan; rol per pakket.
+    let mut ids: std::collections::BTreeSet<u32> = orgel.pakket_rollen.keys().copied().collect();
+    ids.extend(orgel.pakketten.keys().copied());
+    for id in ids {
+        let rollen: Vec<PakketRol> = orgel.pakket_rollen.get(&id).map(|r| r.iter().copied().collect()).unwrap_or_default();
+        let rollen = if rollen.is_empty() { vec![PakketRol::Overig] } else { rollen };
+        let pad = pakketten.get(&id);
+        v.pakketten.push(PakketStatus {
+            id,
+            naam: orgel.pakketten.get(&id).cloned().unwrap_or_default(),
+            rollen,
+            gevonden: pad.is_some(),
+            pad: pad.map(|p| p.to_string_lossy().to_string()),
+        });
+    }
+    v.meldingen.extend(orgel.meldingen.iter().cloned());
+    for p in v.pakketten.clone() {
+        if p.gevonden { continue; }
+        let naam = if p.naam.is_empty() { p.id.to_string() } else { format!("{} ({})", p.id, p.naam) };
+        if p.rollen.contains(&PakketRol::Tremulant) && !p.klank_nodig() {
+            v.melding(
+                Ernst::Waarschuwing,
+                format!("pakket {}", p.id),
+                format!("tremulant-golfvormen in pakket {naam} ontbreken: verminderde klankdekking, de tremulant klinkt als eenvoudige modulatie"),
+            );
+        } else if p.rollen.iter().all(|r| matches!(r, PakketRol::Beeld | PakketRol::Info)) {
+            v.melding(
+                Ernst::Info,
+                format!("pakket {}", p.id),
+                format!("pakket {naam} bevat alleen afbeeldingen of documentatie; de klank wordt er niet door beïnvloed"),
+            );
+        }
+    }
+    v
 }
 
 /// Zet de CODM-structuur om naar een speelbare [`OrganDefinition`].
@@ -529,12 +887,22 @@ pub fn codm_naar_definitie(
     pakketten: &HashMap<u32, PathBuf>,
     base_path: PathBuf,
 ) -> Result<OrganDefinition, OdfError> {
+    let mut verslag = nieuw_verslag(orgel, pakketten, "");
+    bouw_definitie(orgel, pakketten, base_path, &mut verslag)
+}
+
+fn bouw_definitie(
+    orgel: &CodmOrgel,
+    pakketten: &HashMap<u32, PathBuf>,
+    base_path: PathBuf,
+    verslag: &mut ImportReport,
+) -> Result<OrganDefinition, OdfError> {
     let ontbrekend: Vec<u32> = orgel.sample_pakketten().into_iter().filter(|p| !pakketten.contains_key(p)).collect();
     if !ontbrekend.is_empty() {
         warn!("CODM '{}': samplepakket(ten) niet gevonden: {:?}", orgel.naam, ontbrekend);
     }
 
-    let mut z = SampleZoeker { pakketten, mappen: HashMap::new() };
+    let mut z = SampleZoeker { pakketten, mappen: HashMap::new(), geweigerd: Default::default() };
     let divisie_bekend: HashSet<u32> = orgel.divisies.iter().map(|d| d.code).collect();
 
     // Windladen: één per combinatie (zwelkast, tremulant) die een stop gebruikt.
@@ -557,6 +925,16 @@ pub fn codm_naar_definitie(
         for sr in &delen {
             if sr.extern_ || sr.actie_type != 1 || sr.actie_effect != 1 {
                 warn!("CODM stop '{}': StopRank met externe rang/actie {}/{} wordt nog niet ondersteund", stop.naam, sr.actie_type, sr.actie_effect);
+                verslag.melding(
+                    Ernst::Fout,
+                    format!("stop {}", stop.code),
+                    format!(
+                        "stop '{}': een StopRank met {} (actie {}/{}) wordt niet ondersteund en klinkt niet",
+                        stop.naam,
+                        if sr.extern_ { "externe rang" } else { "andere actiecode" },
+                        sr.actie_type, sr.actie_effect
+                    ),
+                );
                 continue;
             }
             let Some(r) = sr.rank.and_then(|id| orgel.ranks.get(&id)) else {
@@ -584,6 +962,26 @@ pub fn codm_naar_definitie(
         let Some((rang, sprong)) = eerste_rang else {
             overgeslagen += 1;
             warn!("CODM stop '{}' ({}): geen samples gevonden — overgeslagen", stop.naam, stop.code);
+            // Waarom? Eerst het ontbrekende pakket, dan beschermde samples, dan een lege map.
+            let mut reden = String::from("geen samples gevonden in de samplemap van de rang");
+            let ontbr: Vec<String> = delen.iter()
+                .filter_map(|sr| sr.rank.and_then(|id| orgel.ranks.get(&id)))
+                .map(|r| r.pakket)
+                .filter(|p| *p > 0 && !pakketten.contains_key(p))
+                .collect::<std::collections::BTreeSet<u32>>()
+                .into_iter()
+                .map(|p| match orgel.pakketten.get(&p) {
+                    Some(n) if !n.is_empty() => format!("{p} ({n})"),
+                    _ => p.to_string(),
+                })
+                .collect();
+            if !ontbr.is_empty() {
+                reden = format!("samplepakket {} ontbreekt", ontbr.join(", "));
+            } else if delen.iter().filter_map(|sr| sr.rank.and_then(|id| orgel.ranks.get(&id)))
+                .any(|r| z.map(r.pakket, &r.map).is_some_and(|m| m.beschermd > 0)) {
+                reden = "de samples staan in het beveiligde .hbw-formaat en zijn niet te lezen".into();
+            }
+            verslag.overgeslagen.push(OvergeslagenStop { id: stop.code, naam: stop.naam.clone(), reden });
             continue;
         };
         if lagen.len() > 16 {
@@ -632,6 +1030,14 @@ pub fn codm_naar_definitie(
         }));
     }
 
+    verslag.beschermd = beschermd;
+    for (pakket, map) in &z.geweigerd {
+        verslag.melding(
+            Ernst::Fout,
+            format!("pakket {pakket}"),
+            format!("samplemap '{map}' verwijst buiten het pakket en is niet gebruikt"),
+        );
+    }
     if stop_defs.is_empty() {
         let mut uitleg = String::from("deze Hauptwerk Custom Organ-definitie (CODM) is gelezen, maar er zijn geen samples gevonden");
         if !ontbrekend.is_empty() {
@@ -939,35 +1345,181 @@ mod tests {
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
-    /// Echte CODM-bestanden (testen/codm): structuur zoals in het
-    /// vervolgonderzoek geteld. `cargo test -p vpo-sampler codm_echte -- --ignored`.
+    // ---- Kopdetectie en wellgevormdheid (werkpakket B) ----
+
     #[test]
-    #[ignore]
-    fn codm_echte_bestanden() {
+    fn kop_ondanks_quotes_witruimte_en_volgorde() {
+        let varianten = [
+            "<?xml version=\"1.0\"?>\n<Hauptwerk FileFormat=\"CustomOrgan\" FileFormatVersion=\"3.00\">",
+            "\u{feff}  \n<Hauptwerk   FileFormatVersion='3.00'  FileFormat='CustomOrgan' >",
+            "<!-- commentaar met FileFormat=\"Organ\" -->\n<Hauptwerk Extra=\"x\" FileFormat = \"CustomOrgan\" FileFormatVersion=\"3.00\">",
+            "<?xml version=\"1.0\"?><!DOCTYPE x><hauptwerk fileformat=\"customorgan\" fileformatversion=\"3.00\">",
+        ];
+        for v in varianten {
+            assert!(is_codm(v), "{v}");
+            assert_eq!(lees_kop(v).unwrap().versie, "3.00", "{v}");
+        }
+    }
+
+    #[test]
+    fn kop_herkent_geen_andere_formaten() {
+        assert!(!is_codm("<Hauptwerk FileFormat=\"Organ\" FileFormatVersion=\"4.0\">"));
+        assert!(!is_codm("<Iets FileFormat=\"CustomOrgan\">"));
+        assert!(!is_codm("geen xml"));
+        // Een attribuut dat alleen in commentaar of verderop staat telt niet mee.
+        assert!(!is_codm("<Hauptwerk FileFormat=\"Organ\"><!-- FileFormat=\"CustomOrgan\" -->"));
+    }
+
+    #[test]
+    fn misvormde_xml_wordt_met_plaats_geweigerd() {
+        let kapot = VOORBEELD.replace("</Hauptwerk>", "");
+        let fout = parse_codm(&kapot).unwrap_err().to_string();
+        assert!(fout.contains("geen geldige XML") && fout.contains("regel"), "{fout}");
+        // Afgekapt midden in een object: ook geweigerd, geen half orgel.
+        let afgekapt = &VOORBEELD[..VOORBEELD.len() / 2];
+        assert!(parse_codm(afgekapt).is_err());
+    }
+
+    #[test]
+    fn andere_quotes_en_witruimte_geven_dezelfde_structuur() {
+        let basis = parse_codm(VOORBEELD).unwrap();
+        let anders = VOORBEELD
+            .replace("FileFormat=\"CustomOrgan\" FileFormatVersion=\"3.00\"", "FileFormatVersion='3.00'   FileFormat='CustomOrgan'")
+            .replace("\n", "\r\n");
+        let o = parse_codm(&anders).unwrap();
+        assert_eq!((o.divisies.len(), o.stops.len(), o.stopranks.len(), o.ranks.len(), o.koppels.len()),
+                   (basis.divisies.len(), basis.stops.len(), basis.stopranks.len(), basis.ranks.len(), basis.koppels.len()));
+    }
+
+    #[test]
+    fn onbekende_versie_wordt_gemeld() {
+        let v5 = VOORBEELD.replace("FileFormatVersion=\"3.00\"", "FileFormatVersion=\"5.00\"");
+        let o = parse_codm(&v5).unwrap();
+        assert_eq!(o.versie, "5.00");
+        assert!(o.meldingen.iter().any(|m| m.tekst.contains("niet getoetst")), "{:?}", o.meldingen);
+        // 3.00 geeft die melding niet.
+        assert!(!parse_codm(VOORBEELD).unwrap().meldingen.iter().any(|m| m.tekst.contains("niet getoetst")));
+    }
+
+    #[test]
+    fn dubbele_rankid_wordt_expliciet_gemeld() {
+        // Maak van rang 2 een tweede rang met RankID 1.
+        let dubbel = VOORBEELD.replacen("<RankID>2</RankID>", "<RankID>1</RankID>", 1);
+        let o = parse_codm(&dubbel).unwrap();
+        let m = o.meldingen.iter().find(|m| m.object == "rank 1");
+        assert!(m.is_some_and(|m| m.tekst.contains("de eerste") && m.tekst.contains("dubbel")), "{:?}", o.meldingen);
+    }
+
+    #[test]
+    fn verwijzing_naar_onbestaande_rang_is_een_fout() {
+        let stuk = VOORBEELD.replacen("<RankID>2</RankID>", "<RankID>77</RankID>", 1);
+        // Alleen de StopRank-verwijzing moet breken: zoek een StopRank met RankID 2.
+        if stuk != VOORBEELD {
+            let o = parse_codm(&stuk).unwrap();
+            assert!(o.meldingen.iter().any(|m| m.ernst == Ernst::Fout || m.ernst == Ernst::Waarschuwing));
+        }
+    }
+
+    // ---- Echte bestanden en verslag (werkpakket A) ----
+
+    fn fixtures() -> Option<PathBuf> {
         let map = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../testen/codm");
+        if map.join("Les-Pitea895-945.CustomOrgan_Hauptwerk_xml").is_file() {
+            Some(map)
+        } else {
+            // De vier oorspronkelijke CODM-definities staan niet in de repository.
+            eprintln!("OVERGESLAGEN: testen/codm ontbreekt (optionele corpusproef met de originele CODM-bestanden)");
+            None
+        }
+    }
+
+    /// Echte CODM-bestanden (testen/codm): structuur zoals in het vervolgonderzoek
+    /// geteld. Optioneel: zonder de map wordt de proef met reden overgeslagen.
+    #[test]
+    fn codm_echte_bestanden() {
+        let Some(map) = fixtures() else { return };
         let verwacht = [
             ("Les-Pitea895-945.CustomOrgan_Hauptwerk_xml", 4, 59, 79, 67, 25),
-            ("Les-Litomysl2.CustomOrgan_Hauptwerk_xml", 4, 56, 74, 65, 0),
-            ("Les-LitomyslWet2.CustomOrgan_Hauptwerk_xml", 4, 56, 74, 65, 0),
-            ("Les-LitomyslWet24_2.CustomOrgan_Hauptwerk_xml", 4, 56, 74, 65, 0),
+            ("Les-Litomysl2.CustomOrgan_Hauptwerk_xml", 4, 56, 74, 65, 19),
+            ("Les-LitomyslWet2.CustomOrgan_Hauptwerk_xml", 4, 56, 74, 65, 19),
+            ("Les-LitomyslWet24_2.CustomOrgan_Hauptwerk_xml", 4, 56, 74, 65, 19),
         ];
         for (f, div, stops, sr, ranks, koppels) in verwacht {
             let xml = std::fs::read_to_string(map.join(f)).unwrap();
             let o = parse_codm(&xml).unwrap();
             println!("{f}: {} divisies, {} stops, {} stopranks, {} ranks, {} koppels, pakketten {:?}",
                 o.divisies.len(), o.stops.len(), o.stopranks.len(), o.ranks.len(), o.koppels.len(), o.sample_pakketten());
-            assert_eq!((o.divisies.len(), o.stops.len(), o.stopranks.len(), o.ranks.len()), (div, stops, sr, ranks), "{f}");
-            if koppels > 0 { assert_eq!(o.koppels.len(), koppels, "{f}"); }
+            assert_eq!((o.divisies.len(), o.stops.len(), o.stopranks.len(), o.ranks.len(), o.koppels.len()), (div, stops, sr, ranks, koppels), "{f}");
+            assert_eq!(o.versie, "3.00", "{f}");
             // Elke StopRank verwijst naar een bestaande stop en rang.
             for s in &o.stopranks {
                 assert!(o.stops.iter().any(|x| x.code == s.stop), "{f}: stop {}", s.stop);
                 assert!(s.rank.is_some_and(|r| o.ranks.contains_key(&r)), "{f}: rang {:?}", s.rank);
             }
-            // Virtuele pijpen = som van NumberOfPipes.
-            let pijpen: u32 = o.ranks.values().map(|r| r.aantal_pijpen).sum();
-            println!("  virtuele pijpen: {pijpen}");
-            let fout = codm_naar_definitie(&o, &HashMap::new(), PathBuf::from(".")).unwrap_err().to_string();
-            println!("  zonder pakketten: {fout}");
+            let fouten: Vec<_> = o.meldingen.iter().filter(|m| m.ernst == Ernst::Fout).collect();
+            assert!(fouten.is_empty(), "{f}: {fouten:?}");
+            // Zonder pakketten: geen orgel, wél een verslag dat alles benoemt.
+            let (r, v) = laad_codm_met_verslag(&map.join(f), &xml, Some(&map.join("leeg-bestaat-niet")));
+            assert!(r.is_err(), "{f}");
+            assert_eq!(v.verwacht.stops, stops, "{f}");
+            assert_eq!(v.geladen.stops, 0, "{f}");
+            assert!(v.niet_speelbaar && v.onvolledig, "{f}");
+            let ontbr = v.ontbrekende_klankpakketten();
+            assert!(!ontbr.is_empty(), "{f}");
+            println!("  ontbrekende klankpakketten: {:?}", ontbr.iter().map(|p| p.id).collect::<Vec<_>>());
         }
+    }
+
+    /// Piteå met alleen pakket 537000 (één Chime-WAV): 59 verwacht, 1 speelbaar,
+    /// 758/759 ontbreken met naam, en het is nadrukkelijk "onvolledig".
+    #[test]
+    fn pitea_met_alleen_het_chime_pakket_is_onvolledig() {
+        let Some(map) = fixtures() else { return };
+        let mini = map.join("pitea-minimal");
+        let odf = mini.join("OrganDefinitions/Les-Pitea895-945.CustomOrgan_Hauptwerk_xml");
+        if !odf.is_file() {
+            eprintln!("OVERGESLAGEN: testen/codm/pitea-minimal ontbreekt");
+            return;
+        }
+        let xml = std::fs::read_to_string(&odf).unwrap();
+        let (r, v) = laad_codm_met_verslag(&odf, &xml, None);
+        let def = r.expect("Chimes moet laden");
+        assert_eq!(v.verwacht.stops, 59);
+        assert_eq!(v.geladen.stops, 1, "{:?}", v.overgeslagen.iter().map(|o| &o.naam).collect::<Vec<_>>());
+        assert_eq!(def.stops.len(), 1);
+        assert!(v.onvolledig && !v.niet_speelbaar);
+        let ontbr: Vec<u32> = v.ontbrekende_klankpakketten().iter().map(|p| p.id).collect();
+        assert!(ontbr.contains(&758) && ontbr.contains(&759), "{ontbr:?}");
+        assert!(!ontbr.contains(&537000));
+        let p758 = v.pakketten.iter().find(|p| p.id == 758).unwrap();
+        assert!(!p758.naam.is_empty(), "pakket 758 moet bij naam genoemd worden");
+        assert_eq!(v.overgeslagen.len(), 58);
+        assert!(v.overgeslagen.iter().any(|o| o.reden.contains("758")), "{:?}", v.overgeslagen.first());
+    }
+
+    #[test]
+    fn samplemap_mag_niet_uit_het_pakket_ontsnappen() {
+        assert!(map_blijft_in_pakket(r"Bourdon16\rel"));
+        assert!(map_blijft_in_pakket(""));
+        assert!(!map_blijft_in_pakket(r"..\..\buiten"));
+        assert!(!map_blijft_in_pakket("a/../../b"));
+        assert!(!map_blijft_in_pakket("/etc"));
+        assert!(!map_blijft_in_pakket(r"C:\Windows"));
+    }
+
+    #[test]
+    fn handmatige_pakketroot_wordt_gebruikt_en_gemeld() {
+        let Some(map) = fixtures() else { return };
+        let mini = map.join("pitea-minimal");
+        let odf = map.join("Les-Pitea895-945.CustomOrgan_Hauptwerk_xml"); // buiten de pakketstructuur
+        let xml = std::fs::read_to_string(&odf).unwrap();
+        // Zonder root: geen pakketten gevonden → duidelijke fout over de map.
+        let (_r, v) = laad_codm_met_verslag(&odf, &xml, None);
+        assert!(v.pakketroot.is_none() || !v.pakketroot_handmatig);
+        // Met gekozen root: 1 stop speelbaar en het verslag zegt dat de root handmatig was.
+        let (r, v) = laad_codm_met_verslag(&odf, &xml, Some(&mini));
+        assert!(r.is_ok());
+        assert!(v.pakketroot_handmatig);
+        assert_eq!(v.geladen.stops, 1);
     }
 }

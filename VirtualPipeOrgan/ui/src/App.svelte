@@ -8,6 +8,7 @@
   import StatusBar from './components/StatusBar.svelte';
   import PanelApp from './components/PanelApp.svelte';
   import NotationWindow from './components/NotationWindow.svelte';
+  import ImportVerslag from './components/ImportVerslag.svelte';
   import { t, tx } from './lib/i18n.js';
   import { loadAudioProfiles, profileMatchesOutput, deriveProfileFromOutput as deriveProfile, AUDIO_PROFILES_KEY } from './lib/audioProfiles.js';
   import { pickDevice } from './lib/audioDevices.js';
@@ -76,6 +77,98 @@
       const melding = await invoke('get_memory_warning');
       if (typeof melding === 'string' && melding.trim().length > 0) geheugenWaarschuwing = melding;
     } catch (e) { /* oudere backend of andere command — geen banner */ }
+  }
+
+  // ===== Importverslag (0.9.42) =====
+  // Vóór het laden van een Hauptwerk/CODM-orgel vraagt de app een verslag op.
+  // Ontbreekt een essentiële klankafhankelijkheid, dan blijft het huidige orgel
+  // actief en kiest de gebruiker: pakketmap aanwijzen, gedeeltelijk laden of
+  // annuleren. Een eenmaal bevestigde gedeeltelijke import wordt onthouden
+  // (per orgel en per set ontbrekende pakketten), zodat het orgel bij het
+  // opstarten niet telkens opnieuw om bevestiging vraagt.
+  let importDialoog = null;        // { path, verslag } — keuze vóór het laden
+  let importBekijken = null;       // verslag van de laatste import, alleen lezen
+  let importFout = '';
+  let importBezig = false;
+  let importBanner = null;         // { geladen, totaal } na een gedeeltelijke import
+  const IMPORT_OK_KEY = 'jm-orgue-import-gedeeltelijk';
+
+  function ontbrekendeKlank(verslag) {
+    return (verslag?.pakketten ?? [])
+      .filter((p) => !p.gevonden && (p.rollen ?? []).includes('samples'))
+      .map((p) => p.id).sort((a, b) => a - b).join(',');
+  }
+  function gedeeltelijkBevestigd(path, verslag) {
+    try {
+      const m = JSON.parse(localStorage.getItem(IMPORT_OK_KEY) || '{}');
+      return m[path] === `${ontbrekendeKlank(verslag)}|${verslag.verwacht.stops}|${verslag.geladen.stops}`;
+    } catch (e) { return false; }
+  }
+  function bevestigGedeeltelijk(path, verslag) {
+    try {
+      const m = JSON.parse(localStorage.getItem(IMPORT_OK_KEY) || '{}');
+      m[path] = `${ontbrekendeKlank(verslag)}|${verslag.verwacht.stops}|${verslag.geladen.stops}`;
+      localStorage.setItem(IMPORT_OK_KEY, JSON.stringify(m));
+    } catch (e) { /* opslag niet beschikbaar: dan vraagt de app de volgende keer opnieuw */ }
+  }
+  async function kiesPakketmap() {
+    if (!importDialoog) return;
+    importFout = '';
+    try {
+      const { open } = await import('@tauri-apps/plugin-dialog');
+      const dir = await open({ directory: true, title: tx('import_report.choose_folder_title') });
+      if (!dir) return;
+      importBezig = true;
+      const path = importDialoog.path;
+      const verslag = await invoke('set_import_pakketroot', { path, root: String(dir) });
+      importDialoog = { path, verslag };
+      if (!verslag.onvolledig) {
+        importDialoog = null;
+        await loadOrgan(path, { zonderControle: true });
+      }
+    } catch (e) {
+      importFout = vertaalFout(e);
+    } finally {
+      importBezig = false;
+    }
+  }
+  async function wisPakketmap() {
+    if (!importDialoog) return;
+    importFout = '';
+    try {
+      importBezig = true;
+      const path = importDialoog.path;
+      importDialoog = { path, verslag: await invoke('set_import_pakketroot', { path, root: null }) };
+    } catch (e) {
+      importFout = vertaalFout(e);
+    } finally {
+      importBezig = false;
+    }
+  }
+  async function laadGedeeltelijk() {
+    if (!importDialoog) return;
+    const { path, verslag } = importDialoog;
+    bevestigGedeeltelijk(path, verslag);
+    importDialoog = null;
+    importFout = '';
+    await loadOrgan(path, { zonderControle: true });
+  }
+  async function toonImportVerslag() {
+    try {
+      const v = await invoke('get_import_report');
+      if (v) importBekijken = v;
+    } catch (e) { /* geen verslag beschikbaar */ }
+  }
+  // Na een geslaagde load: bij een gedeeltelijk orgel een banner met een link
+  // naar het verslag (zodat "geladen" nooit stil "volledig" lijkt).
+  async function ververseImportBanner() {
+    importBanner = null;
+    try {
+      const v = await invoke('get_import_report');
+      if (v && v.onvolledig && !v.niet_speelbaar) {
+        importBanner = { geladen: v.geladen.stops, totaal: v.verwacht.stops };
+      }
+    } catch (e) { /* oudere backend */ }
   }
 
   // UI state
@@ -1373,11 +1466,27 @@
     } catch (e) { /* niet in Tauri of geen extra vensters */ }
   }
 
-  async function loadOrgan(path) {
+  async function loadOrgan(path, opties = {}) {
+    // Hauptwerk/CODM: eerst het verslag. Het huidige orgel (en zijn audio) wordt
+    // pas vervangen als het nieuwe volledig is of de gebruiker gedeeltelijk
+    // laden bevestigt.
+    if (!opties.zonderControle) {
+      try {
+        const verslag = await invoke('import_preflight', { path });
+        if (verslag && verslag.onvolledig && !gedeeltelijkBevestigd(path, verslag)) {
+          importFout = '';
+          importDialoog = { path, verslag };
+          return;
+        }
+      } catch (e) {
+        // Preflight mislukt: gewoon laden, de echte fout komt dan uit de load.
+      }
+    }
     loading = true;
     loadingProgress = 0;
     loadingMessage = tx('status.loading');
     error = null;
+    importBanner = null;
 
     try {
       // Bewaar laatste stand van het huidige orgel voordat we wisselen.
@@ -1395,6 +1504,7 @@
       // load tonen ("leeg") en leerde de gebruiker onnodig elke keer opnieuw in.
       try { await refreshMidiMappings(); } catch (e) {}
       saveSession({ lastOrgan: { kind: 'organ', path } });
+      await ververseImportBanner();
       await toonGeheugenWaarschuwing();
       // Extra registerschermen die bij dít orgel open stonden heropenen
       // (met hun eigen divisiekeuze en vensterpositie).
@@ -1823,6 +1933,28 @@
     </div>
   {/if}
 
+  {#if importBanner}
+    <div class="update-banner">
+      <span>{tx('import_report.banner_partial').replace('{loaded}', importBanner.geladen).replace('{total}', importBanner.totaal)}</span>
+      <button class="btn btn-ghost btn-sm" on:click={toonImportVerslag}>{$t('import_report.open_report')}</button>
+      <button class="btn btn-ghost btn-sm" on:click={() => { importBanner = null; }} title={$t('actions.close')} aria-label={$t('actions.close')}>✕</button>
+    </div>
+  {/if}
+  {#if importDialoog}
+    <ImportVerslag
+      voor={true}
+      verslag={importDialoog.verslag}
+      fout={importFout}
+      bezig={importBezig}
+      on:kiesmap={kiesPakketmap}
+      on:wismap={wisPakketmap}
+      on:gedeeltelijk={laadGedeeltelijk}
+      on:close={() => { importDialoog = null; importFout = ''; }}
+    />
+  {/if}
+  {#if importBekijken}
+    <ImportVerslag verslag={importBekijken} on:close={() => { importBekijken = null; }} />
+  {/if}
   {#if geheugenWaarschuwing}
     <!-- Geheugen krap na laden (0.9.13): toont wat de app automatisch heeft
          teruggeschakeld of hoe krap de keuze is. Wegklikken is genoeg; bij
