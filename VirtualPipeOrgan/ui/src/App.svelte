@@ -1521,6 +1521,7 @@
     loadingProgress = 0;
     loadingMessage = tx('status.scanning_folder');
     error = null;
+    importBanner = null;
 
     try {
       // Bewaar laatste stand van het huidige orgel voordat we wisselen.

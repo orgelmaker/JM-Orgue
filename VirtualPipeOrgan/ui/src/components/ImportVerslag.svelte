@@ -72,7 +72,7 @@
       <h4>{$t('import_report.packages')}</h4>
       <ul class="iv-lijst">
         {#each ontbrekend as p}
-          <li class="iv-ontbreekt">
+          <li class={(p.rollen ?? []).includes('samples') ? 'iv-ontbreekt' : 'iv-info'}>
             <strong>{pakketNaam(p)}</strong> — {$t('import_report.pkg_missing')}
             <span class="iv-rol">({rolTekst(p.rollen)})</span>
           </li>
@@ -158,10 +158,11 @@
   .iv-lijst { margin: 0; padding-left: 1.1rem; font-size: 0.85rem; }
   .iv-lijst li { margin: 0.1rem 0; }
   .iv-scroll { max-height: 11rem; overflow-y: auto; }
-  .iv-ontbreekt { color: #e0a060; }
-  .iv-fout { color: #e07070; }
-  .iv-waarschuwing { color: #e0c060; }
-  .iv-info { opacity: 0.75; }
+  /* Leesbaar op de lichte achtergrond van de app. */
+  .iv-ontbreekt { color: var(--error, #c44030); }
+  .iv-fout { color: var(--error, #c44030); }
+  .iv-waarschuwing { color: #8a5200; }
+  .iv-info { color: var(--text-secondary, #5c4030); }
   .iv-rol { opacity: 0.7; }
   .iv-klein { font-size: 0.8rem; opacity: 0.8; margin: 0.5rem 0 0; word-break: break-all; }
   .iv-badge { font-size: 0.7rem; text-transform: uppercase; opacity: 0.8; margin-right: 0.3rem; }

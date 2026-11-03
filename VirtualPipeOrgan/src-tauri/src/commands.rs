@@ -9532,6 +9532,12 @@ pub fn do_load_samples_from_directory_locked(state: &AppState, directory: &str) 
         schakelaars: None,
         acoustics: None,
     };
+    // Een eigen map kent geen pakketten: wat er staat is geladen. Zonder dit
+    // bleef het verslag van het vorige orgel staan.
+    *state.laatste_importverslag.write() = Some(vpo_sampler::ImportReport::uit_definitie(
+        "map", "", directory, &organ_info.name, stop_count, organ_info.divisions.len(),
+        organ_info.couplers.as_ref().map_or(0, |c| c.len()),
+    ));
 
     // Koppels zoals de sampleset ze levert onthouden: vertrekpunt voor het
     // bij- en afschakelen van extra koppels (0.7.47).
