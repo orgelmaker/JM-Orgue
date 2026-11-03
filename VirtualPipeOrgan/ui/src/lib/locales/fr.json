@@ -33,6 +33,8 @@
     "remove_from_library": "Retirer de la bibliothèque",
     "empty_title": "Aucun orgue dans la bibliothèque.",
     "empty_hint": "Utilisez les boutons en haut à droite pour charger un orgue.",
+    "scroll_up_title": "Faire défiler vers le haut",
+    "scroll_down_title": "Faire défiler vers le bas",
     "stops_count": "{count} jeux",
     "online_title": "Disponibles au téléchargement",
     "elders_title": "Autres jeux d'échantillons",
@@ -720,6 +722,7 @@
     "asio_restart_confirm": "JM-Orgue va se fermer et redémarrer pour rétablir le pilote ASIO. Vos réglages et votre registration sont d'abord enregistrés. Continuer ?"
   },
   "pistons": {
+    "title": "Pistons",
     "set": "SET — enregistrer la registration",
     "general_cancel": "Annulateur général — tout éteint (GC)",
     "preset_prev": "Préréglage −1",

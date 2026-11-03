@@ -33,6 +33,8 @@
     "remove_from_library": "Rimuovi dalla libreria",
     "empty_title": "Ancora nessun organo nella libreria.",
     "empty_hint": "Usa i pulsanti in alto a destra per caricare un organo.",
+    "scroll_up_title": "Scorri verso l'alto",
+    "scroll_down_title": "Scorri verso il basso",
     "stops_count": "{count} registri",
     "online_title": "Disponibili per il download",
     "elders_title": "Altri set di campioni",
@@ -720,6 +722,7 @@
     "asio_restart_confirm": "JM-Orgue si chiuderà e si riavvierà per ripristinare il driver ASIO. Impostazioni e registrazione vengono salvate prima. Continuare?"
   },
   "pistons": {
+    "title": "Pistoni",
     "set": "SET — salva la registrazione",
     "general_cancel": "Annullatore generale — tutto disinserito (GC)",
     "preset_prev": "Combinazione −1",

@@ -33,6 +33,8 @@
     "remove_from_library": "Usuń z biblioteki",
     "empty_title": "Brak organów w bibliotece.",
     "empty_hint": "Użyj przycisków w prawym górnym rogu, aby wczytać organy.",
+    "scroll_up_title": "Przewiń w górę",
+    "scroll_down_title": "Przewiń w dół",
     "stops_count": "{count} głosów",
     "online_title": "Dostępne do pobrania",
     "elders_title": "Więcej zestawów próbek",
@@ -720,6 +722,7 @@
     "asio_restart_confirm": "JM-Orgue zamknie się i uruchomi ponownie, aby przywrócić sterownik ASIO. Ustawienia i registracja zostaną najpierw zapisane. Kontynuować?"
   },
   "pistons": {
+    "title": "Pistony",
     "set": "SET — zapisz registrację",
     "general_cancel": "Kasownik — wszystko wyłącz (GC)",
     "preset_prev": "Kombinacja −1",

@@ -2659,6 +2659,55 @@
   // Balkgroepen: per klavier (in divisievolgorde) de zichtbare koppels,
   // unison eerst, dan super/sub, dan de rest.
   $: couplerBarGroups = buildCouplerGroups(displayOrgan, visibleCouplers, couplerPlacement, selectedDivisions);
+
+  // Pistonbalk-gegevens: pistons met huidige stand van hun doel. Een piston is
+  // in de UI een extra, meestal korter gelabelde knop die een bestaand
+  // register of koppel bedient (vasthouden of omschakelen volgens vasthouden-vlag).
+  // Verborgen wanneer een set geen pistons definieert.
+  $: pistonBarItems = buildPistonItems(displayOrgan);
+  function buildPistonItems(org) {
+    const lijst = org?.schakelaars?.pistons;
+    if (!Array.isArray(lijst) || lijst.length === 0) return [];
+    const stops = (org.divisions || []).flatMap(d => d.stops || []);
+    const koppels = org.couplers || [];
+    const tremInfo = (n) => {
+      for (const d of (org.divisions || [])) {
+        if (!d.tremulant) continue;
+        if (`${d.tremulant.id || d.tremulant.n || d.name}` === `${n}`) return d.tremulant;
+      }
+      return null;
+    };
+    return lijst.map(p => {
+      let aan = false, gevonden = false;
+      if (p.doel === 'stop') {
+        const s = stops.find(s => s.id === p.doel_id);
+        if (s) { aan = !!s.drawn; gevonden = true; }
+      } else if (p.doel === 'koppel') {
+        const c = koppels.find(c => c.id === p.doel_id);
+        if (c) { aan = !!c.active; gevonden = true; }
+      } else if (p.doel === 'tremulant') {
+        const tr = tremInfo(p.doel_id);
+        if (tr) { aan = !!(tr.enabled || tr.active); gevonden = true; }
+      }
+      const label = (p.label && p.label.trim()) || p.naam || `P${p.index + 1}`;
+      return { ...p, label, aan, gevonden };
+    }).filter(p => p.gevonden);
+  }
+
+  // Een piston indrukken/loslaten. Vasthoud-pistons krijgen pointerdown/up;
+  // omschakel-pistons krijgen een enkele druk bij pointerdown en worden
+  // bij pointerup niet geraakt (anders klapt een combinatie-piston tweemaal).
+  async function pistonAan(piston) {
+    try { await invoke('piston_druk', { index: piston.index, ingedrukt: true }); }
+    catch (e) { console.error('piston_druk aan:', e); }
+    dispatch('refreshOrgan');
+  }
+  async function pistonUit(piston) {
+    if (!piston.vasthouden) return;
+    try { await invoke('piston_druk', { index: piston.index, ingedrukt: false }); }
+    catch (e) { console.error('piston_druk uit:', e); }
+    dispatch('refreshOrgan');
+  }
   function buildCouplerGroups(org, vis, placement, schermvolgorde) {
     if (placement !== 'bar' || !org?.couplers?.length) return [];
     // De koppelbalk volgt de volgorde waarin de werken op het scherm staan;
@@ -4439,6 +4488,63 @@
   let libraryOrgans = [];
   let organImages = {}; // { [id]: base64_data_url }
 
+  // Scroll met pijlknoppen in het bibliotheekscherm. Een touch-scherm heeft
+  // geen muiswiel en een scrollbalk die je met de vinger pakt is smal; grote
+  // pijlknoppen zijn duidelijker. Ze verschijnen pas als er meer kaarten zijn
+  // dan er in het venster passen, en worden uitgeschakeld aan de rand.
+  let libraryGridEl = null;
+  let libraryOverflow = false;
+  let libraryAtTop = true;
+  let libraryAtBottom = false;
+
+  function updateLibraryScrollState() {
+    const el = libraryGridEl;
+    if (!el) { libraryOverflow = false; libraryAtTop = true; libraryAtBottom = false; return; }
+    // Rij-hoogte vast op (zichtbare hoogte − 2 × padding − 2 × gap) / 3, zodat
+    // er exact 3 rijen tegelijk op het scherm staan. gap en padding komen uit
+    // de echte stijl, dus een thema-wijziging werkt mee.
+    const stijl = getComputedStyle(el);
+    const gap = parseFloat(stijl.rowGap) || parseFloat(stijl.gap) || 16;
+    const padTop = parseFloat(stijl.paddingTop) || 0;
+    const padBot = parseFloat(stijl.paddingBottom) || 0;
+    const binnen = el.clientHeight - padTop - padBot;
+    if (binnen > 60) {
+      const rijH = Math.max(120, Math.floor((binnen - 2 * gap) / 3));
+      el.style.setProperty('--library-row-h', rijH + 'px');
+    }
+    const hoogte = el.clientHeight;
+    const totaal = el.scrollHeight;
+    const pos = el.scrollTop;
+    libraryOverflow = totaal > hoogte + 2; // kleine speling tegen afrondingsruis
+    libraryAtTop = pos <= 2;
+    libraryAtBottom = pos + hoogte >= totaal - 2;
+  }
+
+  // Herbereken row-height + knopstatus bij vensterwijziging: een smaller venster
+  // kiest de mobiele kolomregel en een korter venster heeft andere rij-hoogte.
+  let libraryResizeObs = null;
+  $: if (libraryGridEl && !libraryResizeObs) {
+    libraryResizeObs = new ResizeObserver(() => updateLibraryScrollState());
+    libraryResizeObs.observe(libraryGridEl);
+  }
+  onDestroy(() => { if (libraryResizeObs) libraryResizeObs.disconnect(); });
+
+  function scrollLibrary(richting) {
+    const el = libraryGridEl;
+    if (!el) return;
+    // ~80 % van de zichtbare hoogte per klik: ruim genoeg om echt vooruit te
+    // komen, en overlap van één kaart zodat je je plek niet kwijtraakt.
+    const stap = Math.max(120, Math.round(el.clientHeight * 0.8));
+    el.scrollBy({ top: richting * stap, behavior: 'smooth' });
+  }
+
+  $: if (libraryGridEl && libraryOrgans) {
+    // Na elke wijziging van de lijst de knoppen opnieuw beoordelen. tick()
+    // zou netter zijn, maar een microtaak is genoeg omdat het grid in
+    // dezelfde slag opnieuw wordt opgebouwd.
+    Promise.resolve().then(updateLibraryScrollState);
+  }
+
   // "bouwer · plaats" voor onder de naam op de kaart. Lege regel als er
   // niets zinnigs staat: een gescande sample-map heeft bouwer "Custom Samples"
   // en als plaats het mappad zelf.
@@ -5631,7 +5737,22 @@
         </div>
       </div>
 
-      <div class="organ-library-grid">
+      <div class="organ-library-wrap">
+        <!-- Touch-vriendelijke pijlknoppen voor het bibliotheekraster. Alleen
+             zichtbaar als er meer kaarten zijn dan er in het venster passen,
+             want anders staan ze alleen in de weg. Klik scrolt ongeveer 80 %
+             van de zichtbare hoogte. -->
+        {#if libraryOverflow}
+          <button class="library-scroll-btn library-scroll-up" on:click={() => scrollLibrary(-1)}
+                  disabled={libraryAtTop}
+                  title={$t('library.scroll_up_title')}
+                  aria-label={$t('library.scroll_up_title')}>▲</button>
+          <button class="library-scroll-btn library-scroll-down" on:click={() => scrollLibrary(1)}
+                  disabled={libraryAtBottom}
+                  title={$t('library.scroll_down_title')}
+                  aria-label={$t('library.scroll_down_title')}>▼</button>
+        {/if}
+      <div class="organ-library-grid" bind:this={libraryGridEl} on:scroll={updateLibraryScrollState}>
         {#each libraryOrgans as organ}
           <div
             class="library-card"
@@ -5744,6 +5865,7 @@
           </div>
         {/if}
       </div>
+      </div><!-- /.organ-library-wrap -->
 
       <!-- Online beschikbare samplesets (manifest in de repo); verdwijnen uit
            deze lijst zodra ze geïnstalleerd zijn. -->
@@ -6459,6 +6581,26 @@
                   >{couplerLabel(coupler)}</button>
                 {/each}
               </div>
+            {/each}
+          </div>
+        {/if}
+        <!-- Pistonbalk: snelle schakelaars (vaak op een echt orgel pedaalknoppen
+             of duimpistons) die een bestaand register, koppel of tremulant
+             omschakelen. De doel-knop zelf blijft werken; dit is een tweede
+             bediening met een eigen MIDI-koppeling en een eigen vasthoud-gedrag. -->
+        {#if pistonBarItems.length > 0}
+          <div class="piston-bar" role="group" aria-label={$t('pistons.title')}>
+            {#each pistonBarItems as p (p.index)}
+              <button
+                class="piston-bar-btn"
+                class:engaged={p.aan}
+                class:momentary={p.vasthouden}
+                on:pointerdown={() => pistonAan(p)}
+                on:pointerup={() => pistonUit(p)}
+                on:pointerleave={() => pistonUit(p)}
+                title={p.naam || p.label}
+                aria-pressed={p.aan}
+              >{p.label}</button>
             {/each}
           </div>
         {/if}

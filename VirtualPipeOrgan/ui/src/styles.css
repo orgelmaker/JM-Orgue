@@ -827,15 +827,72 @@ input[type="range"]::-webkit-slider-thumb:hover {
 }
 
 /* Library organ grid — maximaal schermoppervlak */
+.organ-library-wrap {
+  position: relative;
+  flex: 1;
+  display: flex;
+  min-height: 0; /* flex-child mag krimpen zodat de grid-overflow werkt */
+}
 .organ-library-grid {
   flex: 1;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  /* Vast raster: 8 kolommen breed, 3 rijen zichtbaar. Rij-hoogte komt uit
+     JS (--library-row-h) zodat precies 3 rijen in de wrapper passen; rest
+     scrolt. Op smaller schermen schakelen we terug naar auto-fill zodat
+     tegels niet piepklein worden. */
+  grid-template-columns: repeat(8, 1fr);
+  grid-auto-rows: var(--library-row-h, 180px);
   gap: 1rem;
   padding: 1rem;
   overflow-y: auto;
   align-content: start;
+  scroll-behavior: smooth;
 }
+@media (max-width: 1100px) {
+  .organ-library-grid {
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  }
+}
+
+/* Grote, touch-vriendelijke pijlknoppen rechts in de wrapper. 56 px is ruim
+   boven de 44 px die een vingertop nodig heeft. Halftransparante achtergrond
+   zodat kaarten eronder zichtbaar blijven; bij hover vol. */
+.library-scroll-btn {
+  position: absolute;
+  right: 1rem;
+  width: 56px;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.6rem;
+  line-height: 1;
+  color: var(--primary);
+  background: color-mix(in srgb, var(--bg-panel) 82%, transparent);
+  border: 1px solid var(--gold-border);
+  border-radius: 999px;
+  box-shadow: var(--shadow-lg);
+  cursor: pointer;
+  z-index: 5;
+  transition: background var(--transition-fast), transform var(--transition-fast), opacity var(--transition-fast);
+  /* Browser-defaults voor touch uitschakelen zodat een tik niet wordt vertaald
+     naar een dubbelklik-zoom. */
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+.library-scroll-btn:hover:not(:disabled) {
+  background: var(--bg-panel);
+  transform: scale(1.05);
+}
+.library-scroll-btn:active:not(:disabled) {
+  transform: scale(0.96);
+}
+.library-scroll-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.library-scroll-up { top: 1rem; }
+.library-scroll-down { bottom: 1rem; }
 
 .library-card {
   position: relative;
@@ -3481,6 +3538,50 @@ input[type="range"]::-webkit-slider-thumb:hover {
 }
 .coupler-bar-btn.has-midi {
   box-shadow: 0 2px 4px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.05), 0 0 0 1px var(--midi-indicator);
+}
+
+/* Pistonbalk: direct onder de koppelbalk, kleine ronde knoppen zoals duim-
+   pistons op een echt orgel. Vasthoud-pistons (momentary) krijgen een
+   iets andere indicatie zodat de organist weet dat ze alleen werken
+   zolang je drukt. */
+.piston-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem 0.5rem;
+  flex-shrink: 0;
+  padding: 0.35rem 0.75rem;
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--accent-soft-2);
+}
+.piston-bar-btn {
+  font-family: var(--stop-font-family);
+  font-weight: var(--stop-font-weight);
+  font-size: calc(var(--stop-font-size) - 0.02rem);
+  line-height: 1.1;
+  padding: 0.3rem 0.65rem;
+  min-width: 2.6rem;
+  border-radius: 999px; /* pistons zijn rond op een echt orgel */
+  border: 1px solid var(--stop-porcelain-border);
+  background: var(--stop-porcelain);
+  color: var(--text-on-stop);
+  cursor: pointer;
+  white-space: nowrap;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.05);
+  transition: background 0.12s, color 0.12s, transform 0.08s;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+.piston-bar-btn:hover:not(:disabled) { transform: translateY(-1px); }
+.piston-bar-btn.engaged {
+  background: var(--stop-active);
+  border-color: var(--stop-active-border);
+  color: var(--stop-active-text);
+}
+.piston-bar-btn.momentary {
+  /* Stippellijn geeft momentary aan zonder extra uitleg nodig te maken. */
+  border-style: dashed;
 }
 
 /* Afdrukken (0.7.75): de schermindeling klemt het document op één

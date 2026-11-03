@@ -33,6 +33,8 @@
     "remove_from_library": "Verwijder uit bibliotheek",
     "empty_title": "Nog geen orgels in de bibliotheek.",
     "empty_hint": "Gebruik de knoppen rechtsboven om een orgel te laden.",
+    "scroll_up_title": "Omhoog bladeren",
+    "scroll_down_title": "Omlaag bladeren",
     "stops_count": "{count} registers",
     "online_title": "Beschikbaar om te downloaden",
     "elders_title": "Meer samplesets",
@@ -720,6 +722,7 @@
     "asio_restart_confirm": "JM-Orgue sluit af en start opnieuw op om de ASIO-driver te herstellen. Je instellingen en registratie worden eerst bewaard. Doorgaan?"
   },
   "pistons": {
+    "title": "Pistons",
     "set": "SET — registratie opslaan",
     "general_cancel": "Afsteller — alles af (GC)",
     "preset_prev": "Preset −1",

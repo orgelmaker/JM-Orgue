@@ -33,6 +33,8 @@
     "remove_from_library": "Aus Bibliothek entfernen",
     "empty_title": "Noch keine Orgeln in der Bibliothek.",
     "empty_hint": "Verwenden Sie die Schaltflächen oben rechts, um eine Orgel zu laden.",
+    "scroll_up_title": "Nach oben blättern",
+    "scroll_down_title": "Nach unten blättern",
     "stops_count": "{count} Register",
     "online_title": "Zum Download verfügbar",
     "elders_title": "Weitere Samplesets",
@@ -720,6 +722,7 @@
     "asio_restart_confirm": "JM-Orgue wird beendet und neu gestartet, um den ASIO-Treiber wiederherzustellen. Einstellungen und Registrierung werden zuerst gespeichert. Fortfahren?"
   },
   "pistons": {
+    "title": "Pistons",
     "set": "SET — Registrierung speichern",
     "general_cancel": "Absteller — alles aus (GC)",
     "preset_prev": "Preset −1",
