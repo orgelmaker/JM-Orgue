@@ -36,7 +36,8 @@ use tracing::{info, warn};
 
 use crate::grandorgue::{
     CouplerDef, EnclosureDef, ManualDef, OdfError, OrganDefinition, OrganInfo, PipeDef,
-    PipeExtra, PipeLayer, ReleaseDef, StopDef, TremulantDef, WindchestDef,
+    PipeExtra, PipeLayer, PistonDef, PistonDoel, ReleaseDef, SchakelaarRegels, StopDef,
+    TremulantDef, WindchestDef,
 };
 use crate::import_report::{Ernst, ImportReport, Melding, OvergeslagenStop, PakketRol, PakketStatus, Tellingen};
 use crate::hauptwerk::{
@@ -122,6 +123,12 @@ pub struct CodmDivisie {
 pub struct CodmStop {
     pub code: u32,
     pub naam: String,
+    /// `StoreInGeneralCombinations` (afwezig = wel opnemen).
+    pub in_combinatie: bool,
+    /// `StoreInDivisionalCombinations` (JM kent geen aparte divisional-combinaties).
+    pub in_divisional: bool,
+    /// `DefaultToEngaged`.
+    pub standaard_aan: bool,
     /// DivisionCode waaruit de stop speelt (uit de StopCode of de override).
     pub divisie: u32,
 }
@@ -210,6 +217,9 @@ pub enum KoppelSoort {
 pub struct CodmKoppel {
     pub code: u32,
     pub naam: String,
+    pub in_combinatie: bool,
+    pub in_divisional: bool,
+    pub standaard_aan: bool,
     /// Divisie waarvan je de toetsen indrukt ("Swell to Great": Great).
     pub van_toetsen: u32,
     /// Divisie die meeklinkt ("Swell to Great": Swell).
@@ -222,9 +232,21 @@ pub struct CodmKoppel {
 pub struct CodmTremulant {
     pub code: u32,
     pub naam: String,
+    pub standaard_aan: bool,
     pub frequentie_hz: f32,
     /// Divisie uit de code (17D0); `None` = algemene tremulant (1690).
     pub divisie: Option<u32>,
+}
+
+/// Een `ShortcutPiston`: `ReferencedObjectTypeCode` 1 = stop, 2 = koppel, 3 = tremulant.
+#[derive(Debug, Clone)]
+pub struct CodmPiston {
+    pub naam: String,
+    pub label: String,
+    pub doel_soort: u32,
+    pub doel_code: u32,
+    /// `PistonActionTypeCode`: 1 = omschakelen, 2 = vasthouden.
+    pub actie: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -239,6 +261,7 @@ pub struct CodmOrgel {
     pub tremulanten: Vec<CodmTremulant>,
     /// RequiredInstallationPackage: id → naam.
     pub pakketten: BTreeMap<u32, String>,
+    pub pistons: Vec<CodmPiston>,
     /// `FileFormatVersion` uit het rootelement ("" = ontbreekt).
     pub versie: String,
     /// Rol(len) per pakket-ID, afgeleid uit de velden die ernaar verwijzen.
@@ -287,6 +310,15 @@ fn ontleed_koppelcode(code: u32) -> Option<(u32, u32, KoppelSoort, i32)> {
 
 fn tekst(m: &FieldMap, k: &str) -> String {
     m.get(k).map(|s| s.trim().to_string()).unwrap_or_default()
+}
+
+/// Y/N-veld met een standaardwaarde voor "afwezig of leeg".
+fn ja_of(m: &FieldMap, k: &str, standaard: bool) -> bool {
+    match m.get(k).map(|s| s.trim().to_ascii_uppercase()) {
+        Some(v) if v == "Y" => true,
+        Some(v) if v == "N" => false,
+        _ => standaard,
+    }
 }
 
 fn ja(m: &FieldMap, k: &str) -> bool {
@@ -374,7 +406,14 @@ pub fn parse_codm(xml: &str) -> Result<CodmOrgel, OdfError> {
         let code = s.get_u32("StopCode")?;
         let divisie = s.get_u32("OverrideSourceDivisionToSpecifiedDivisionCode")
             .or_else(|| divisie_van_stopcode(code))?;
-        Some(CodmStop { code, naam: tekst(s, "Name"), divisie })
+        Some(CodmStop {
+            code,
+            naam: tekst(s, "Name"),
+            in_combinatie: ja_of(s, "StoreInGeneralCombinations", true),
+            in_divisional: ja_of(s, "StoreInDivisionalCombinations", true),
+            standaard_aan: ja_of(s, "DefaultToEngaged", false),
+            divisie,
+        })
     }).collect();
 
     let stopranks: Vec<CodmStopRank> = lijst("stoprank", "StopRank").iter().filter_map(|r| {
@@ -458,6 +497,9 @@ pub fn parse_codm(xml: &str) -> Result<CodmOrgel, OdfError> {
         sprong += k.get_i32("CustomCoupler_MIDINoteNumIncrementFromSourceToDest").unwrap_or(0);
         Some(CodmKoppel {
             code,
+            in_combinatie: ja_of(k, "StoreInGeneralCombinations", true),
+            in_divisional: ja_of(k, "StoreInDivisionalCombinations", true),
+            standaard_aan: ja_of(k, "DefaultToEngaged", false),
             naam: zonder_voorvoegsel(&tekst(k, "Name")).to_string(),
             van_toetsen: van,
             klinkt,
@@ -475,6 +517,7 @@ pub fn parse_codm(xml: &str) -> Result<CodmOrgel, OdfError> {
         let divisie = (1700..=1769).contains(&code).then(|| (code - 1700) / 10 + 1);
         Some(CodmTremulant {
             code,
+            standaard_aan: ja_of(t, "DefaultToEngaged", false),
             naam: zonder_voorvoegsel(&tekst(t, "Name")).to_string(),
             frequentie_hz: t.get_f32("FrequencyHz").filter(|f| *f > 0.0).unwrap_or(5.0),
             divisie,
@@ -486,10 +529,26 @@ pub fn parse_codm(xml: &str) -> Result<CodmOrgel, OdfError> {
         .filter_map(|p| Some((p.get_u32("InstallationPackageID")?, tekst(p, "Name"))))
         .collect();
 
+    let pistons: Vec<CodmPiston> = lijst("shortcutpiston", "ShortcutPiston").iter().filter_map(|p| {
+        let soort = p.get_u32("ReferencedObjectTypeCode")?;
+        let code = match soort {
+            1 => p.get_u32("StopCode"),
+            2 => p.get_u32("CouplerCode"),
+            3 => p.get_u32("TremulantCode"),
+            _ => None,
+        }?;
+        Some(CodmPiston {
+            naam: tekst(p, "Name"),
+            label: tekst(p, "CustomDisplay1_Text"),
+            doel_soort: soort,
+            doel_code: code,
+            actie: p.get_u32("PistonActionTypeCode").unwrap_or(1),
+        })
+    }).collect();
     let pakket_rollen = pakketrollen(xml, &ranks);
     valideer(&divisies, &stops, &stopranks, &ranks, &koppels, &zwelkasten, &tremulanten, &mut meldingen);
 
-    Ok(CodmOrgel { naam, divisies, stops, stopranks, ranks, koppels, zwelkasten, tremulanten, pakketten, versie: kop.versie, pakket_rollen, meldingen })
+    Ok(CodmOrgel { naam, divisies, stops, stopranks, ranks, koppels, zwelkasten, tremulanten, pakketten, pistons, versie: kop.versie, pakket_rollen, meldingen })
 }
 
 /// Alle `<veld>123</veld>`-waarden met deze veldnaam (zonder 0).
@@ -1293,11 +1352,13 @@ fn bouw_definitie(
     let heeft_manual = |div: u32| met_stops.contains(&div);
 
     let mut couplers: Vec<CouplerDef> = Vec::new();
+    let mut koppel_nummer: HashMap<u32, u32> = HashMap::new();
     for k in &orgel.koppels {
         if !heeft_manual(k.van_toetsen) || !heeft_manual(k.klinkt) {
             continue;
         }
         let nummer = couplers.len() as u32 + 1;
+        koppel_nummer.insert(k.code, nummer);
         couplers.push(CouplerDef {
             number: nummer,
             // Niet door clean_stop_name: die haalt een divisie-afkorting
@@ -1381,6 +1442,60 @@ fn bouw_definitie(
         organ.church_name, stops.len(), overgeslagen, manuals.len(), couplers.len(), enclosures.len(), tremulants.len()
     );
 
+    // Schakelaargedrag: wat in een combinatie hoort, wat standaard aan staat, pistons.
+    let mut schakelaars = SchakelaarRegels::default();
+    let gebouwd: HashSet<u32> = stops.iter().map(|s| s.id).collect();
+    for s in orgel.stops.iter().filter(|s| gebouwd.contains(&s.code)) {
+        if !s.in_combinatie { schakelaars.stops_buiten_combinatie.push(s.code); }
+        if s.standaard_aan { schakelaars.stops_standaard_aan.push(s.code); }
+    }
+    for k in &orgel.koppels {
+        let Some(&n) = koppel_nummer.get(&k.code) else { continue };
+        if !k.in_combinatie { schakelaars.koppels_buiten_combinatie.push(n); }
+        if k.standaard_aan { schakelaars.koppels_standaard_aan.push(n); }
+    }
+    for p in &orgel.pistons {
+        let doel = match p.doel_soort {
+            1 => gebouwd.contains(&p.doel_code).then_some(PistonDoel::Stop(p.doel_code)),
+            2 => koppel_nummer.get(&p.doel_code).map(|n| PistonDoel::Koppel(*n)),
+            3 => trem_nummer.get(&p.doel_code).map(|n| PistonDoel::Tremulant(*n)),
+            _ => None,
+        };
+        match doel {
+            Some(doel) => schakelaars.pistons.push(PistonDef {
+                naam: p.naam.clone(),
+                label: p.label.clone(),
+                doel,
+                vasthouden: p.actie == 2,
+            }),
+            None => verslag.melding(
+                Ernst::Waarschuwing,
+                format!("piston '{}'", p.naam),
+                format!("shortcutpiston verwijst naar {} {} die niet geladen is; de piston doet niets", ["", "register", "koppel", "tremulant"].get(p.doel_soort as usize).copied().unwrap_or("object"), p.doel_code),
+            ),
+        }
+    }
+    let buiten_divisional = orgel.stops.iter().filter(|s| !s.in_divisional).count()
+        + orgel.koppels.iter().filter(|k| !k.in_divisional).count();
+    if buiten_divisional > 0 {
+        verslag.melding(
+            Ernst::Info,
+            "combinaties",
+            format!("{buiten_divisional} schakelaars horen niet in de divisional-combinaties; JM-Orgue kent alleen algemene combinaties (waarin ze wel horen)"),
+        );
+    }
+    let trem_aan = orgel.tremulanten.iter().filter(|t| t.standaard_aan).count();
+    if trem_aan > 0 {
+        verslag.melding(
+            Ernst::Info,
+            "tremulant",
+            format!("{trem_aan} tremulanten staan volgens de definitie standaard aan; niet toegepast (tremulanten worden per klavier bediend)"),
+        );
+    }
+    if schakelaars.pistons.iter().any(|p| matches!(p.doel, PistonDoel::Tremulant(_))) {
+        verslag.melding(Ernst::Info, "piston", "pistons voor een tremulant worden niet bediend (tremulanten worden per klavier bediend)");
+    }
+
     Ok(OrganDefinition {
         base_path,
         organ,
@@ -1394,6 +1509,7 @@ fn bouw_definitie(
         stop_action_clicks: HashMap::new(),
         keyboard_clicks: HashMap::new(),
         klavier_afkortingen,
+        schakelaars,
     })
 }
 
@@ -1853,6 +1969,117 @@ mod tests {
         assert!(v.meldingen.iter().any(|m| m.tekst.contains("reverb tail truncation") && m.tekst.contains("modus 3")), "{:?}", v.meldingen);
         let (_d, v) = bouw_mini(&mini_orgel("<ReverbTailTruncation_ModeCode>1</ReverbTailTruncation_ModeCode>"), &d);
         assert!(!v.meldingen.iter().any(|m| m.tekst.contains("reverb tail")), "modus 1 is geen truncatie");
+    }
+
+    // ---- Bediening, combinaties en pistons (werkpakket F) ----
+
+    /// Golden data: de koppelcode van elk echt koppel moet dezelfde richting,
+    /// voetmaat en soort geven als zijn naam ("Sw to Gt 4'": toetsen Great, klinkt
+    /// Swell, 4'). Zo vangt een fout in de code-ontleding meteen alle 25 Piteå- en
+    /// 19 Litomyšl-koppels.
+    #[test]
+    fn echte_koppelcodes_komen_overeen_met_hun_naam() {
+        let Some(map) = fixtures() else { return };
+        for f in [
+            "Les-Pitea895-945.CustomOrgan_Hauptwerk_xml",
+            "Les-Litomysl2.CustomOrgan_Hauptwerk_xml",
+            "Les-LitomyslWet24_2.CustomOrgan_Hauptwerk_xml",
+        ] {
+            let o = parse_codm(&std::fs::read_to_string(map.join(f)).unwrap()).unwrap();
+            let afk = |a: &str| -> Option<u32> {
+                let a = a.trim().to_lowercase();
+                o.divisies.iter().find(|d| {
+                    let k = d.korte_naam.to_lowercase();
+                    let naam = d.naam.to_lowercase();
+                    k == a || (a == "go" && k == "gt") || (a == "gt" && k == "go")
+                        || (a == "hw" && naam.starts_with("haupt"))
+                        || (a == "sw" && (naam.starts_with("schwel") || naam.starts_with("swell")))
+                        || naam.starts_with(&a)
+                }).map(|d| d.code)
+            };
+            let mut gecontroleerd = 0;
+            for k in &o.koppels {
+                let n = k.naam.replace('\'', " ");
+                let lager = n.to_lowercase();
+                if lager.contains("unison off") {
+                    assert_eq!(k.soort, KoppelSoort::UnisonOff, "{f}: {}", k.naam);
+                    assert_eq!(k.van_toetsen, k.klinkt, "{f}: {}", k.naam);
+                } else if lager.contains("suboctave") {
+                    assert_eq!((k.soort, k.sprong, k.van_toetsen == k.klinkt), (KoppelSoort::Zestien, -12, true), "{f}: {}", k.naam);
+                } else if lager.trim().ends_with(" octave") {
+                    assert_eq!((k.soort, k.sprong, k.van_toetsen == k.klinkt), (KoppelSoort::Vier, 12, true), "{f}: {}", k.naam);
+                } else if lager.contains("melody") {
+                    assert_eq!(k.soort, KoppelSoort::Melodie, "{f}: {}", k.naam);
+                } else if lager.trim() == "bass" {
+                    assert_eq!(k.soort, KoppelSoort::Bas, "{f}: {}", k.naam);
+                } else if let Some((bron, rest)) = n.split_once(" to ") {
+                    let mut delen = rest.split_whitespace();
+                    let doel = delen.next().unwrap_or("");
+                    let voet = delen.next().unwrap_or("");
+                    // "X to Y n'": X klinkt, Y krijgt de toetsen.
+                    assert_eq!(afk(bron), Some(k.klinkt), "{f}: bron van '{}'", k.naam);
+                    assert_eq!(afk(doel), Some(k.van_toetsen), "{f}: doel van '{}'", k.naam);
+                    let (soort, sprong) = match voet {
+                        "16" => (KoppelSoort::Zestien, -12),
+                        "8" => (KoppelSoort::Unisono, 0),
+                        "4" => (KoppelSoort::Vier, 12),
+                        v => panic!("{f}: onbekende voetmaat '{v}' in '{}'", k.naam),
+                    };
+                    // Een koppel op de eigen divisie heet Unisono-af, nooit 8'.
+                    assert_eq!((k.soort, k.sprong), (soort, sprong), "{f}: '{}'", k.naam);
+                } else {
+                    panic!("{f}: koppelnaam '{}' niet te duiden", k.naam);
+                }
+                gecontroleerd += 1;
+            }
+            assert_eq!(gecontroleerd, o.koppels.len(), "{f}");
+        }
+    }
+
+    #[test]
+    fn echte_bronnen_schakelaarvelden_en_pistons() {
+        let Some(map) = fixtures() else { return };
+        let o = parse_codm(&std::fs::read_to_string(map.join("Les-Pitea895-945.CustomOrgan_Hauptwerk_xml")).unwrap()).unwrap();
+        // 25 koppels, daarvan 16 buiten de divisional-combinaties, alle in de algemene.
+        assert_eq!(o.koppels.len(), 25);
+        assert_eq!(o.koppels.iter().filter(|k| !k.in_divisional).count(), 16);
+        assert!(o.koppels.iter().all(|k| k.in_combinatie));
+        assert!(o.stops.iter().all(|s| s.in_combinatie && !s.standaard_aan));
+        assert!(o.koppels.iter().all(|k| !k.standaard_aan));
+        // Twee reversibele pistons voor een koppel.
+        assert_eq!(o.pistons.len(), 2);
+        assert!(o.pistons.iter().all(|p| p.doel_soort == 2 && p.actie == 1));
+        assert_eq!(o.pistons[0].label, "G/P");
+        assert_eq!(o.pistons[0].doel_code, 1006);
+    }
+
+    fn mini_met_koppel_en_piston() -> String {
+        mini_orgel("")
+            .replace("<ObjectList ObjectType=\"rank\">",
+                     "<ObjectList ObjectType=\"coupler\"><Coupler><CouplerCode>1107</CouplerCode><Name>Coupler: Gt to Gt 4'</Name><DefaultToEngaged>Y</DefaultToEngaged><StoreInGeneralCombinations>N</StoreInGeneralCombinations><StoreInDivisionalCombinations>N</StoreInDivisionalCombinations></Coupler></ObjectList>\n<ObjectList ObjectType=\"rank\">")
+            .replace("</Hauptwerk>",
+                     "<ObjectList ObjectType=\"shortcutpiston\"><ShortcutPiston><Name>Rev: 4'</Name><ReferencedObjectTypeCode>2</ReferencedObjectTypeCode><CouplerCode>1107</CouplerCode><PistonActionTypeCode>2</PistonActionTypeCode><CustomDisplay1_Text>4'</CustomDisplay1_Text></ShortcutPiston><ShortcutPiston><Name>Kapot</Name><ReferencedObjectTypeCode>1</ReferencedObjectTypeCode><StopCode>9999</StopCode><PistonActionTypeCode>1</PistonActionTypeCode></ShortcutPiston></ObjectList>\n</Hauptwerk>")
+    }
+
+    #[test]
+    fn schakelaarregels_pistons_en_standaard_aan_komen_in_de_definitie() {
+        let d = tijdmap("schakel");
+        std::fs::create_dir_all(d.join("Main")).unwrap();
+        for n in [60, 61] { schrijf_wav(&d.join("Main").join(format!("{n:03}-x.wav")), 60000, &[(10000, 20000)], &[30000]); }
+        let (def, v) = bouw_mini(&mini_met_koppel_en_piston(), &d);
+        let r = &def.schakelaars;
+        assert_eq!(def.couplers.len(), 1);
+        assert_eq!(r.koppels_buiten_combinatie, vec![1]);
+        assert_eq!(r.koppels_standaard_aan, vec![1]);
+        assert!(r.stops_buiten_combinatie.is_empty() && r.stops_standaard_aan.is_empty());
+        // Gewone stop zonder velden: wel in de combinatie (afwezig = opnemen).
+        assert_eq!(r.pistons.len(), 1);
+        assert_eq!(r.pistons[0].doel, PistonDoel::Koppel(1));
+        assert!(r.pistons[0].vasthouden, "actie 2 = vasthouden");
+        assert_eq!(r.pistons[0].label, "4'");
+        // De piston naar een niet bestaand register wordt gemeld, maakt geen extra object.
+        assert!(v.meldingen.iter().any(|m| m.object.contains("Kapot") && m.tekst.contains("doet niets")), "{:?}", v.meldingen);
+        assert!(v.meldingen.iter().any(|m| m.tekst.contains("divisional-combinaties")), "{:?}", v.meldingen);
     }
 
     // ---- Tremulant, zwelkast en wind (werkpakket E) ----

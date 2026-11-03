@@ -6059,6 +6059,7 @@ mod crescendo_tests {
             background_sounds: Vec::new(),
             key_click_count: 0,
             stop_click_count: 0,
+            schakelaars: None,
             acoustics: None,
         }
     }

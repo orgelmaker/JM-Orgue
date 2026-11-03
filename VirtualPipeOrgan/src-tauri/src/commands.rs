@@ -79,6 +79,33 @@ pub struct CouplerDto {
     pub speciaal: bool,
 }
 
+/// Schakelaargedrag uit de definitie (CODM): wat niet in een combinatie hoort,
+/// wat na het laden aan staat en welke pistons een object bedienen. `None` bij
+/// orgels zonder zulke bepalingen (alle GrandOrgue- en gewone Hauptwerk-sets).
+#[derive(Debug, Clone, Serialize, Default)]
+pub struct SchakelaarsDto {
+    /// Stop-id's (DTO-id) die NIET in een combinatie (setzer) worden opgenomen.
+    pub stops_buiten_combinatie: Vec<String>,
+    pub koppels_buiten_combinatie: Vec<String>,
+    /// Registers/koppels die na het eerste laden van dit orgel aan staan.
+    pub stops_standaard_aan: Vec<String>,
+    pub koppels_standaard_aan: Vec<String>,
+    pub pistons: Vec<PistonDto>,
+}
+
+/// Een shortcutpiston: tweede bediening van een bestaand register of koppel.
+#[derive(Debug, Clone, Serialize)]
+pub struct PistonDto {
+    pub index: usize,
+    pub naam: String,
+    pub label: String,
+    /// "stop", "koppel" of "tremulant".
+    pub doel: String,
+    pub doel_id: String,
+    /// true = alleen aan zolang de piston ingedrukt is; false = omschakelen.
+    pub vasthouden: bool,
+}
+
 /// Organ info for frontend
 #[derive(Debug, Clone, Serialize)]
 pub struct OrganInfoDto {
@@ -128,6 +155,9 @@ pub struct OrganInfoDto {
     /// Akoestische configuratie (0.8.92); None = het orgel heeft er geen.
     #[serde(default)]
     pub acoustics: Option<crate::acoustics::AcousticsSummaryDto>,
+    /// Schakelaargedrag uit de definitie (0.9.42); None = geen bepalingen.
+    #[serde(default)]
+    pub schakelaars: Option<SchakelaarsDto>,
 }
 
 /// DTO voor één doorlopend achtergrondgeluid uit de sampleset (0.7.96).
@@ -4169,10 +4199,12 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
         .map(|s| (s.id, s.all_layers().map(|(_, _, p)| p.len()).collect()))
         .collect();
     let (acoustics_cfg, acoustics_dto) = crate::acoustics::laad_voor_odf(std::path::Path::new(path), &odf_stop_lagen);
+    let schakelaars = schakelaars_dto(&definition, &divisions, &couplers);
     let organ_info = OrganInfoDto {
         id: path.to_string(),
         name: display_name,
         acoustics: acoustics_dto,
+        schakelaars,
         builder: display_builder,
         location: display_location,
         year: if definition.organ.organ_build_date.is_empty() {
@@ -4341,11 +4373,118 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
 
     // current_organ_id is al vóór de DTO-publicatie gezet (auditbevinding 41).
     restore_organ_settings(state, path);
+    // Nieuw orgel (nog geen opgeslagen stand) met "standaard aan"-schakelaars uit
+    // de definitie: die zetten we aan. Een eerder gebruikte stand wint altijd.
+    if saved_settings_for(state, path).is_none() {
+        pas_standaard_aan_toe(state, &organ_info);
+    }
     apply_pending_registration(state, &organ_info);
     // Zwelstand terugzetten (RegisterStopDivisionMap zette de audio op open).
     apply_swell_positions(state);
 
     Ok(fill_live_registration_flags(state, organ_info))
+}
+
+/// Schakelaargedrag van een definitie vertalen naar DTO-id's. `None` als de
+/// definitie niets bijzonders bepaalt (zodat gewone orgels ongewijzigd blijven).
+fn schakelaars_dto(definition: &OrganDefinition, divisions: &[DivisionDto], couplers: &[CouplerDto]) -> Option<SchakelaarsDto> {
+    use vpo_sampler::PistonDoel;
+    let r = &definition.schakelaars;
+    if r.stops_buiten_combinatie.is_empty() && r.koppels_buiten_combinatie.is_empty()
+        && r.stops_standaard_aan.is_empty() && r.koppels_standaard_aan.is_empty() && r.pistons.is_empty() {
+        return None;
+    }
+    let stop_id = |code: u32| divisions.iter().flat_map(|d| d.stops.iter())
+        .find(|s| s.internal_stop_id == code).map(|s| s.id.clone());
+    let koppel_id = |n: u32| {
+        let id = format!("real_coupler_{n}");
+        couplers.iter().any(|c| c.id == id).then_some(id)
+    };
+    Some(SchakelaarsDto {
+        stops_buiten_combinatie: r.stops_buiten_combinatie.iter().filter_map(|c| stop_id(*c)).collect(),
+        koppels_buiten_combinatie: r.koppels_buiten_combinatie.iter().filter_map(|n| koppel_id(*n)).collect(),
+        stops_standaard_aan: r.stops_standaard_aan.iter().filter_map(|c| stop_id(*c)).collect(),
+        koppels_standaard_aan: r.koppels_standaard_aan.iter().filter_map(|n| koppel_id(*n)).collect(),
+        pistons: r.pistons.iter().enumerate().filter_map(|(index, p)| {
+            let (doel, doel_id) = match p.doel {
+                PistonDoel::Stop(c) => ("stop", stop_id(c)?),
+                PistonDoel::Koppel(n) => ("koppel", koppel_id(n)?),
+                PistonDoel::Tremulant(n) => ("tremulant", n.to_string()),
+            };
+            Some(PistonDto { index, naam: p.naam.clone(), label: p.label.clone(), doel: doel.into(), doel_id, vasthouden: p.vasthouden })
+        }).collect(),
+    })
+}
+
+/// "Standaard aan" volgens de definitie (DefaultToEngaged) toepassen op een
+/// zojuist geladen, nog ongebruikt orgel.
+fn pas_standaard_aan_toe(state: &AppState, organ_info: &OrganInfoDto) {
+    let Some(s) = &organ_info.schakelaars else { return };
+    if !s.stops_standaard_aan.is_empty() {
+        if let Err(e) = set_drawn_stops_inner(state, s.stops_standaard_aan.clone()) {
+            warn!("Standaard aan: registers zetten mislukt: {}", e);
+        }
+    }
+    if !s.koppels_standaard_aan.is_empty() {
+        if let Err(e) = set_active_couplers_inner(state, s.koppels_standaard_aan.clone()) {
+            warn!("Standaard aan: koppels zetten mislukt: {}", e);
+        }
+    }
+    info!("Standaard aan toegepast: {} registers, {} koppels", s.stops_standaard_aan.len(), s.koppels_standaard_aan.len());
+}
+
+/// Pistons die op dit moment door een vasthoud-piston zijn aangezet (zodat het
+/// loslaten alleen uitzet wat de piston zelf aanzette).
+static PISTONS_VAST_AAN: std::sync::Mutex<Vec<usize>> = std::sync::Mutex::new(Vec::new());
+
+/// Bedien een shortcutpiston. Omschakelen: een druk (`ingedrukt`) schakelt het
+/// doel om, loslaten doet niets. Vasthouden: indrukken zet het doel aan (als het
+/// uit stond), loslaten zet het weer uit. Geeft de nieuwe stand van het doel.
+pub fn piston_druk_inner(state: &AppState, index: usize, ingedrukt: bool) -> Result<bool, String> {
+    let piston = state.loaded_organ_info.read().as_ref()
+        .and_then(|o| o.schakelaars.as_ref())
+        .and_then(|s| s.pistons.get(index).cloned())
+        .ok_or_else(|| format!("Onbekende piston: {}", index))?;
+    let huidig = || -> Result<bool, String> {
+        let org = state.loaded_organ_info.read();
+        let o = org.as_ref().ok_or("Geen orgel geladen")?;
+        match piston.doel.as_str() {
+            "stop" => o.divisions.iter().flat_map(|d| d.stops.iter()).find(|s| s.id == piston.doel_id)
+                .map(|s| s.drawn).ok_or_else(|| format!("Register niet gevonden: {}", piston.doel_id)),
+            "koppel" => o.couplers.as_ref().and_then(|l| l.iter().find(|c| c.id == piston.doel_id))
+                .map(|c| c.active).ok_or_else(|| format!("Koppel niet gevonden: {}", piston.doel_id)),
+            _ => Err("Pistons voor een tremulant worden niet bediend".into()),
+        }
+    };
+    let schakel = |nu: bool| -> Result<bool, String> {
+        match piston.doel.as_str() {
+            "stop" => { let _ = nu; toggle_stop_inner(state, &piston.doel_id, false) }
+            _ => toggle_coupler_inner(state, &piston.doel_id),
+        }
+    };
+    let aan = huidig()?;
+    if !piston.vasthouden {
+        return if ingedrukt { schakel(aan) } else { Ok(aan) };
+    }
+    let mut vast = PISTONS_VAST_AAN.lock().map_err(|_| "piston-staat vergiftigd".to_string())?;
+    if ingedrukt {
+        if !aan {
+            let nieuw = schakel(aan)?;
+            vast.push(index);
+            return Ok(nieuw);
+        }
+        Ok(aan)
+    } else if let Some(pos) = vast.iter().position(|i| *i == index) {
+        vast.remove(pos);
+        if aan { schakel(aan) } else { Ok(aan) }
+    } else {
+        Ok(aan)
+    }
+}
+
+#[tauri::command]
+pub fn piston_druk(state: State<AppState>, index: usize, ingedrukt: bool) -> Result<bool, String> {
+    piston_druk_inner(&state, index, ingedrukt)
 }
 
 /// Vul de drawn/active-vlaggen van een zojuist gebouwde OrganInfoDto vanuit de
@@ -9389,6 +9528,7 @@ pub fn do_load_samples_from_directory_locked(state: &AppState, directory: &str) 
         background_sounds: Vec::new(),
         key_click_count: 0,
         stop_click_count: 0,
+        schakelaars: None,
         acoustics: None,
     };
 

@@ -525,6 +525,17 @@ fn route_test_only(
             state.codm_random_stemming.store(on, std::sync::atomic::Ordering::Relaxed);
             Ok(json!({"codm_random": on}))
         }
+        // Shortcutpistons (CODM): lijst en bediening.
+        (tiny_http::Method::Get, "/pistons") => {
+            let org = state.loaded_organ_info.read();
+            serde_json::to_value(org.as_ref().and_then(|o| o.schakelaars.clone())).map_err(|e| (500u16, e.to_string()))
+        }
+        (tiny_http::Method::Post, p) if p.starts_with("/pistons/") && p.ends_with("/druk") => {
+            let index: usize = p["/pistons/".len()..p.len() - "/druk".len()].parse().map_err(|_| (400u16, "ongeldige piston-index".to_string()))?;
+            let aan = !query.split('&').any(|kv| kv == "aan=0");
+            let nieuw = crate::commands::piston_druk_inner(state, index, aan).map_err(|e| (400u16, e))?;
+            Ok(json!({"doel_aan": nieuw}))
+        }
         (tiny_http::Method::Get, "/import/report") => {
             serde_json::to_value(state.laatste_importverslag.read().clone()).map_err(|e| (500u16, e.to_string()))
         }
@@ -2378,6 +2389,7 @@ mod tests {
             background_sounds: Vec::new(),
             key_click_count: 0,
             stop_click_count: 0,
+            schakelaars: None,
             acoustics: None,
         }
     }

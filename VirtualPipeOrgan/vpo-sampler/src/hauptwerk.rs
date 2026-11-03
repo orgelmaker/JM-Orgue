@@ -1082,6 +1082,7 @@ fn build_definition(
             &layers_of_pipe, &sample_of_layer, &ranks_xml,
         ),
         klavier_afkortingen,
+        schakelaars: Default::default(),
     })
 }
 

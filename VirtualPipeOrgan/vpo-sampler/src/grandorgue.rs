@@ -72,6 +72,46 @@ pub struct OrganDefinition {
     /// Keyboard een ShortName ("PO", "GO", "M1") met de divisie erbij. Prefix
     /// (hoofdletters) → divisienaam; leeg bij GrandOrgue-sets.
     pub klavier_afkortingen: std::collections::HashMap<String, String>,
+    /// Schakelaargedrag uit de definitie (0.9.42, CODM): wat in een combinatie
+    /// hoort, wat standaard aan staat en welke pistons een object bedienen.
+    /// Leeg bij GrandOrgue en gewone Hauptwerk-sets.
+    pub schakelaars: SchakelaarRegels,
+}
+
+/// Waarop een shortcutpiston werkt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PistonDoel {
+    /// Stop-id (StopCode).
+    Stop(u32),
+    /// Koppelnummer (`CouplerDef.number`).
+    Koppel(u32),
+    /// Tremulantnummer (`TremulantDef.number`).
+    Tremulant(u32),
+}
+
+/// Een shortcutpiston: bedient een bestaand register, koppel of tremulant. Het
+/// maakt geen eigen register; het is een tweede bediening van het doelobject.
+#[derive(Debug, Clone)]
+pub struct PistonDef {
+    pub naam: String,
+    /// Opschrift op de piston in de originele console ("G/P"); leeg als er geen is.
+    pub label: String,
+    pub doel: PistonDoel,
+    /// `false` = omschakelen (reversible); `true` = alleen aan zolang de piston ingedrukt is.
+    pub vasthouden: bool,
+}
+
+/// Schakelaargedrag volgens de definitie: `StoreInGeneralCombinations`,
+/// `DefaultToEngaged` en shortcutpistons.
+#[derive(Debug, Clone, Default)]
+pub struct SchakelaarRegels {
+    /// Registers/koppels die NIET in een combinatie (setzer-geheugen) worden opgenomen.
+    pub stops_buiten_combinatie: Vec<u32>,
+    pub koppels_buiten_combinatie: Vec<u32>,
+    /// Registers/koppels die na het laden van een nieuw orgel aan staan.
+    pub stops_standaard_aan: Vec<u32>,
+    pub koppels_standaard_aan: Vec<u32>,
+    pub pistons: Vec<PistonDef>,
 }
 
 /// Pad naar het aanslag- en loslaatgeluid van één toets (0.7.103).
@@ -917,6 +957,7 @@ impl OdfParser {
             stop_action_clicks: std::collections::HashMap::new(),
             keyboard_clicks: std::collections::HashMap::new(),
             klavier_afkortingen: std::collections::HashMap::new(),
+            schakelaars: Default::default(),
         })
     }
 
@@ -2322,6 +2363,7 @@ mod tests {
             stop_action_clicks: std::collections::HashMap::new(),
             keyboard_clicks: std::collections::HashMap::new(),
             klavier_afkortingen: std::collections::HashMap::new(),
+            schakelaars: Default::default(),
         };
         let m = def.klavier_prefix_mapping();
         assert_eq!(m.get("P"), Some(&"Pedal".to_string()));
@@ -2367,6 +2409,7 @@ mod tests {
             stop_action_clicks: std::collections::HashMap::new(),
             keyboard_clicks: std::collections::HashMap::new(),
             klavier_afkortingen: std::collections::HashMap::new(),
+            schakelaars: Default::default(),
         };
         assert!(def.klavier_prefix_mapping().is_empty(), "geen prefixen in deze stopnamen");
         assert_eq!(def.divisie_voor_prefix("P").as_deref(), Some("Pedal"));
@@ -2397,6 +2440,7 @@ mod tests {
             stop_action_clicks: std::collections::HashMap::new(),
             keyboard_clicks: std::collections::HashMap::new(),
             klavier_afkortingen: std::collections::HashMap::new(),
+            schakelaars: Default::default(),
         };
         // Romeinse cijfers: laatste woord van de divisienaam.
         assert_eq!(def.divisie_voor_prefix("I").as_deref(), Some("Manual I"));
@@ -2443,6 +2487,7 @@ mod tests {
             stop_action_clicks: std::collections::HashMap::new(),
             keyboard_clicks: std::collections::HashMap::new(),
             klavier_afkortingen: std::collections::HashMap::new(),
+            schakelaars: Default::default(),
         };
         def.verzamel_go_toetsmechaniek();
         assert_eq!(def.keyboard_clicks.len(), 2);
@@ -2490,6 +2535,7 @@ mod tests {
             stop_action_clicks: std::collections::HashMap::new(),
             keyboard_clicks: std::collections::HashMap::new(),
             klavier_afkortingen: std::collections::HashMap::new(),
+            schakelaars: Default::default(),
         };
         def.verzamel_go_registermechaniek();
         // Prestant moet attack én release hebben gekregen.

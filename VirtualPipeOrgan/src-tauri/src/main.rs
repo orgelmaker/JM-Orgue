@@ -458,6 +458,7 @@ fn main() {
             commands::import_preflight,
             commands::get_import_report,
             commands::set_import_pakketroot,
+            commands::piston_druk,
             commands::get_organ_info,
             commands::set_stop,
             commands::set_drawn_stops,

@@ -253,14 +253,20 @@
     return organInfo.couplers.filter(c => c.active).map(c => c.id);
   }
 
+  // Schakelaars die de orgeldefinitie buiten de combinaties houdt
+  // (StoreInGeneralCombinations=N): ze worden niet opgeslagen en een oproep laat
+  // hun huidige stand ongemoeid.
+  $: buitenStops = new Set(organInfo?.schakelaars?.stops_buiten_combinatie ?? []);
+  $: buitenKoppels = new Set(organInfo?.schakelaars?.koppels_buiten_combinatie ?? []);
+
   // Save current registration to a preset slot — MINUS wat de crescendotrede
   // bijgetrokken heeft (die registers/koppels zijn geen handregistratie).
   async function savePreset(num) {
     let claims = [];
     try { claims = await invoke('get_crescendo_claims'); } catch (e) { claims = []; }
     const claimed = new Set(Array.isArray(claims) ? claims : []);
-    const stopIds = getDrawnStopIds().filter(id => !claimed.has(id));
-    const couplerIds = getActiveCouplerIds().filter(id => !claimed.has(id));
+    const stopIds = getDrawnStopIds().filter(id => !claimed.has(id) && !buitenStops.has(id));
+    const couplerIds = getActiveCouplerIds().filter(id => !claimed.has(id) && !buitenKoppels.has(id));
     presets[num] = { stops: stopIds, couplers: couplerIds };
     presets = presets; // trigger reactivity
     savePresetsToStorage();
@@ -281,6 +287,9 @@
       stopIds = preset.stops || [];
       couplerIds = preset.couplers || [];
     }
+    // Buiten de combinaties gehouden schakelaars houden hun huidige stand.
+    if (buitenStops.size) stopIds = [...stopIds.filter(id => !buitenStops.has(id)), ...getDrawnStopIds().filter(id => buitenStops.has(id))];
+    if (buitenKoppels.size) couplerIds = [...couplerIds.filter(id => !buitenKoppels.has(id)), ...getActiveCouplerIds().filter(id => buitenKoppels.has(id))];
     try {
       await invoke('set_drawn_stops', { stopIds });
       await invoke('set_active_couplers', { couplerIds });
