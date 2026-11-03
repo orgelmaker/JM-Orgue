@@ -1259,6 +1259,7 @@
     "group_functions": "Funktionen",
     "group_tremulants": "Tremulanten",
     "group_stops": "Register",
+    "group_pistons": "Pistons",
     "trigger_type_title": "Auslösertyp",
     "channel_title": "MIDI-Kanal",
     "number_title": "Noten-/CC-/Programmnummer (0-127)",

@@ -1259,6 +1259,7 @@
     "group_functions": "Fonctions",
     "group_tremulants": "Tremblants",
     "group_stops": "Jeux",
+    "group_pistons": "Pistons",
     "trigger_type_title": "Type de déclencheur",
     "channel_title": "Canal MIDI",
     "number_title": "Numéro de note/CC/programme (0-127)",

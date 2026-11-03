@@ -1259,6 +1259,7 @@
     "group_functions": "Functies",
     "group_tremulants": "Tremulanten",
     "group_stops": "Registers",
+    "group_pistons": "Pistons",
     "trigger_type_title": "Triggertype",
     "channel_title": "MIDI-kanaal",
     "number_title": "Noot-/CC-/programmanummer (0-127)",

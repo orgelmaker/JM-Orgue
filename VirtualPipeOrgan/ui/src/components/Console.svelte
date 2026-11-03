@@ -4947,7 +4947,15 @@
         }
       }
     }
-    return { functies, trems, koppels, registers };
+    // Shortcutpistons (CODM): ze bedienen een bestaand register/koppel/tremulant,
+    // dus komen hier met hun eigen MIDI-code en een duidelijk label ("piston: ..").
+    const pistons = (displayOrgan?.schakelaars?.pistons || [])
+      .filter(p => p.midi_action_code)
+      .map(p => ({
+        code: p.midi_action_code,
+        label: `piston: ${p.label || p.naam} → ${p.naam}`.replace(/\n/g, ' '),
+      }));
+    return { functies, trems, koppels, registers, pistons };
   })();
 
   function bindingNumber(b) {
@@ -7956,6 +7964,11 @@
                   {#if bindingTargets.registers.length}
                     <optgroup label={$t('bindings.group_stops')}>
                       {#each bindingTargets.registers as tgt}<option value={tgt.code}>{tgt.label}</option>{/each}
+                    </optgroup>
+                  {/if}
+                  {#if bindingTargets.pistons.length}
+                    <optgroup label={$t('bindings.group_pistons')}>
+                      {#each bindingTargets.pistons as tgt}<option value={tgt.code}>{tgt.label}</option>{/each}
                     </optgroup>
                   {/if}
                 </select>

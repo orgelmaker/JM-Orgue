@@ -498,7 +498,7 @@
           }
         }
       }
-    } else if (actionCode >= 100) {
+    } else if (actionCode >= 100 && actionCode < 200) {
       // Coupler MIDI trigger - find matching coupler and toggle
       if (organInfo?.couplers) {
         const coupler = organInfo.couplers.find(c => c.midi_action_code === actionCode);
@@ -506,6 +506,14 @@
           invoke('toggle_coupler', { couplerId: coupler.id }).catch(console.error);
         }
       }
+    }
+    // Shortcutpiston (CODM, ≥ 200): bedient het doelobject precies als in de
+    // definitie. Een omschakelende piston doet toggle; een vasthoudende is in
+    // deze MIDI-route ook een toggle (note-off laten we los: anders zou één
+    // tik op een note-on + note-off hem meteen weer uitzetten).
+    const piston = organInfo?.schakelaars?.pistons?.find(p => p.midi_action_code === actionCode);
+    if (piston) {
+      invoke('piston_druk', { index: piston.index, ingedrukt: true }).catch(console.error);
     }
   }
 

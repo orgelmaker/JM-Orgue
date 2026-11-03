@@ -1259,6 +1259,7 @@
     "group_functions": "Funzioni",
     "group_tremulants": "Tremoli",
     "group_stops": "Registri",
+    "group_pistons": "Pistoni",
     "trigger_type_title": "Tipo di trigger",
     "channel_title": "Canale MIDI",
     "number_title": "Numero di nota/CC/programma (0-127)",

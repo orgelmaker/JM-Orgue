@@ -109,6 +109,9 @@ pub struct PistonDto {
     pub doel_id: String,
     /// true = alleen aan zolang de piston ingedrukt is; false = omschakelen.
     pub vasthouden: bool,
+    /// MIDI-actiecode zodat de piston inleerbaar is als eigen bediening naast de
+    /// register-/koppelknop. Geldig > 0; 0 = geen code toegekend.
+    pub midi_action_code: u8,
 }
 
 /// Organ info for frontend
@@ -4411,14 +4414,25 @@ fn schakelaars_dto(definition: &OrganDefinition, divisions: &[DivisionDto], coup
         koppels_buiten_combinatie: r.koppels_buiten_combinatie.iter().filter_map(|n| koppel_id(*n)).collect(),
         stops_standaard_aan: r.stops_standaard_aan.iter().filter_map(|c| stop_id(*c)).collect(),
         koppels_standaard_aan: r.koppels_standaard_aan.iter().filter_map(|n| koppel_id(*n)).collect(),
-        pistons: r.pistons.iter().enumerate().filter_map(|(index, p)| {
-            let (doel, doel_id) = match p.doel {
-                PistonDoel::Stop(c) => ("stop", stop_id(c)?),
-                PistonDoel::Koppel(n) => ("koppel", koppel_id(n)?),
-                PistonDoel::Tremulant(n) => ("tremulant", n.to_string()),
-            };
-            Some(PistonDto { index, naam: p.naam.clone(), label: p.label.clone(), doel: doel.into(), doel_id, vasthouden: p.vasthouden })
-        }).collect(),
+        pistons: {
+            // Codes starten net ná de hoogste register-code zodat de ranges
+            // (koppels 100..149, registers 150+, pistons daarna) niet botsen.
+            let mut code: u8 = divisions.iter()
+                .flat_map(|d| d.stops.iter())
+                .map(|s| s.midi_action_code)
+                .max().unwrap_or(199)
+                .saturating_add(1)
+                .max(200);
+            r.pistons.iter().enumerate().filter_map(|(index, p)| {
+                let (doel, doel_id) = match p.doel {
+                    PistonDoel::Stop(c) => ("stop", stop_id(c)?),
+                    PistonDoel::Koppel(n) => ("koppel", koppel_id(n)?),
+                    PistonDoel::Tremulant(n) => ("tremulant", n.to_string()),
+                };
+                let eigen_code = if code >= 200 { let c = code; code = code.saturating_add(1); c } else { 0 };
+                Some(PistonDto { index, naam: p.naam.clone(), label: p.label.clone(), doel: doel.into(), doel_id, vasthouden: p.vasthouden, midi_action_code: eigen_code })
+            }).collect()
+        },
     })
 }
 

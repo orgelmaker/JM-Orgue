@@ -1259,6 +1259,7 @@
     "group_functions": "Funkcje",
     "group_tremulants": "Tremulanty",
     "group_stops": "Głosy",
+    "group_pistons": "Pistony",
     "trigger_type_title": "Typ wyzwalacza",
     "channel_title": "Kanał MIDI",
     "number_title": "Numer nuty/CC/programu (0-127)",
