@@ -949,6 +949,7 @@ fn build_definition(
             unison_off: false,
             melodie_of_bas: false,
             melodie: false,
+            cascade_toegestaan: true,
         });
         manual_coupler_refs.entry(src_manual).or_default().push(coupler_num);
         coupler_num += 1;

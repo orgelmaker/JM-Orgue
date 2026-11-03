@@ -159,10 +159,10 @@ def koppels():
     geval('Swell Melody: hoogste Great-toets op Swell', ['Swell Melody'], [('Great', 60), ('Great', 64)], [('Gt', 60), ('Gt', 64), ('Sw', 64)])
     geval("Rand: Great 96 + Sw 4' (108 bestaat niet)", ["Sw to Gt 4'"], [('Great', 96)], [], stemmen=1)
     geval("Rand: Great 36 + Sw 16' (24 bestaat niet)", ["Sw to Gt 16'"], [('Great', 36)], [('Gt', 36)])
-    # Bewust vastgelegd gedrag: JM schakelt koppels doorkoppelend (GrandOrgue-gedrag). De CODM-gids
-    # beschrijft koppelen klavier -> toetsactie van het doel (dus geen keten). Open besluit.
-    geval("Keten Sw to Gt + Gt to Ped (huidig gedrag: doorkoppelend)", ["Sw to Gt 8'", "Gt to Ped 8'"], [('Pedal', 48)],
-          [('Gt', 48), ('Ped', 48), ('Sw', 48)])
+    # Vanaf 0.9.44: CODM-koppels doen niet aan de GO-stijl keten (gids: source keyboard -> destination
+    # key action). Op een pedaaltoets klinken Ped en Gt (via Gt->Ped), maar Sw niet - er zijn geen Sw-toetsen.
+    geval("Geen keten: Sw to Gt + Gt to Ped, pedaaltoets -> Sw klinkt NIET", ["Sw to Gt 8'", "Gt to Ped 8'"], [('Pedal', 48)],
+          [('Gt', 48), ('Ped', 48)])
 
     req('/panic', 'POST'); time.sleep(0.8)
     req('/stops/set', 'POST', {'ids': list(stops.values())}); req('/couplers/set', 'POST', {'ids': []})

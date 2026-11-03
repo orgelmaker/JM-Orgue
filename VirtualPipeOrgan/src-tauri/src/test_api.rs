@@ -2347,8 +2347,7 @@ mod tests {
             midi_action_code: 60,
             coupler_type: kind.to_string(),
             pitch_offset: 0,
-            speciaal: false,
-        };
+            speciaal: false, cascade_toegestaan: true,};
         OrganInfoDto {
             id: r"C:\Orgels\Test\organ.organ".to_string(),
             name: "Testorgel".to_string(),

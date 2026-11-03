@@ -77,6 +77,11 @@ pub struct CouplerDto {
     /// Unison Off zet het klavier stil).
     #[serde(skip_serializing)]
     pub speciaal: bool,
+    /// Mag dit koppel in een transitieve keten worden opgenomen? GrandOrgue
+    /// koppelt door (Sw→Gt + Gt→Ped ⇒ Sw klinkt mee op pedaal), Hauptwerk
+    /// Custom Organ (CODM) doet dat volgens de gids niet.
+    #[serde(skip_serializing)]
+    pub cascade_toegestaan: bool,
 }
 
 /// Schakelaargedrag uit de definitie (CODM): wat niet in een combinatie hoort,
@@ -8806,6 +8811,7 @@ fn build_couplers_from_definition(definition: &OrganDefinition) -> Vec<CouplerDt
                 coupler_type: coupler_type.into(),
                 pitch_offset: offset,
                 speciaal: cdef.unison_off || cdef.melodie_of_bas,
+                cascade_toegestaan: cdef.cascade_toegestaan,
             });
             action_code = action_code.saturating_add(1);
         }
@@ -8861,7 +8867,7 @@ fn generate_couplers(divisions: &[DivisionDto]) -> Vec<CouplerDto> {
                 coupler_type: "unison".into(),
                 pitch_offset: 0,
                 speciaal: false,
-            });
+            cascade_toegestaan: true,});
             action_code = action_code.saturating_add(1);
         }
     }
@@ -8886,7 +8892,7 @@ fn generate_couplers(divisions: &[DivisionDto]) -> Vec<CouplerDto> {
                 coupler_type: "unison".into(),
                 pitch_offset: 0,
                 speciaal: false,
-            });
+            cascade_toegestaan: true,});
             action_code = action_code.saturating_add(1);
         }
     }
@@ -8911,7 +8917,7 @@ fn generate_couplers(divisions: &[DivisionDto]) -> Vec<CouplerDto> {
                 coupler_type: "super".into(),
                 pitch_offset: 12,
                 speciaal: false,
-            });
+            cascade_toegestaan: true,});
             action_code = action_code.saturating_add(1);
         }
     }
@@ -8936,7 +8942,7 @@ fn generate_couplers(divisions: &[DivisionDto]) -> Vec<CouplerDto> {
                 coupler_type: "sub".into(),
                 pitch_offset: -12,
                 speciaal: false,
-            });
+            cascade_toegestaan: true,});
             action_code = action_code.saturating_add(1);
         }
     }
@@ -8957,7 +8963,7 @@ fn generate_couplers(divisions: &[DivisionDto]) -> Vec<CouplerDto> {
             coupler_type: "super".into(),
             pitch_offset: 12,
             speciaal: false,
-        });
+        cascade_toegestaan: true,});
         action_code = action_code.saturating_add(1);
         // Sub 16'
         couplers.push(CouplerDto {
@@ -8971,7 +8977,7 @@ fn generate_couplers(divisions: &[DivisionDto]) -> Vec<CouplerDto> {
             coupler_type: "sub".into(),
             pitch_offset: -12,
             speciaal: false,
-        });
+        cascade_toegestaan: true,});
         action_code = action_code.saturating_add(1);
     }
 
@@ -8989,7 +8995,7 @@ fn generate_couplers(divisions: &[DivisionDto]) -> Vec<CouplerDto> {
             coupler_type: "ta".into(),
             pitch_offset: 0,
             speciaal: false,
-        });
+        cascade_toegestaan: true,});
         action_code = action_code.saturating_add(1);
     }
 
@@ -9014,7 +9020,7 @@ fn generate_couplers(divisions: &[DivisionDto]) -> Vec<CouplerDto> {
                 coupler_type: "melody".into(),
                 pitch_offset: 0,
                 speciaal: false,
-            });
+            cascade_toegestaan: true,});
             action_code = action_code.saturating_add(1);
         }
     }
@@ -9036,7 +9042,7 @@ fn generate_couplers(divisions: &[DivisionDto]) -> Vec<CouplerDto> {
                 coupler_type: "bass".into(),
                 pitch_offset: 0,
                 speciaal: false,
-            });
+            cascade_toegestaan: true,});
             action_code = action_code.saturating_add(1);
         }
     }

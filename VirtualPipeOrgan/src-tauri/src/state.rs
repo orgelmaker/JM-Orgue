@@ -4950,8 +4950,12 @@ impl AppState {
                     continue;
                 }
                 // Doorkoppelen: koppels waarvan de bron gelijk is aan het doel
-                // van deze route koppelen verder (transitief).
+                // van deze route koppelen verder (transitief). CODM-koppels
+                // staan `cascade_toegestaan: false`: ze doen niet mee aan een
+                // keten, want de gids zegt "source keyboard → destination key
+                // action", niet "destination keyboard".
                 for c in &active_couplers {
+                    if !c.cascade_toegestaan { continue; }
                     if c.source_division == r.destination_division {
                         let c_self = c.source_division == c.destination_division;
                         // Zelf-koppels cascaderen niet op elkaar: één octaaf-
@@ -5768,6 +5772,7 @@ mod coupler_route_tests {
             coupler_type: ctype.to_string(),
             pitch_offset: offset,
             speciaal: false,
+            cascade_toegestaan: true,
         }
     }
 
@@ -6052,7 +6057,7 @@ mod crescendo_tests {
             couplers: Some(vec![CouplerDto {
                 id: "real_coupler_1".into(), name: "II/I".into(), source_division: "Hoofdwerk".into(),
                 destination_division: "Hoofdwerk".into(), active: false, display_in_division: "Hoofdwerk".into(),
-                midi_action_code: 0, coupler_type: "unison".into(), pitch_offset: 0, speciaal: false,
+                midi_action_code: 0, coupler_type: "unison".into(), pitch_offset: 0, speciaal: false, cascade_toegestaan: true,
             }]),
             retune_pipes: 0, retune_total: 0, perspectives: Vec::new(), layered_stops: 0,
             release_pipes: 0,
@@ -6120,7 +6125,7 @@ mod crescendo_tests {
         o.couplers = Some(vec![CouplerDto {
             id: "k".into(), name: "I/P".into(), source_division: "Pedaal".into(),
             destination_division: "Hoofdwerk".into(), active: false, display_in_division: "Pedaal".into(),
-            midi_action_code: 0, coupler_type: "unison".into(), pitch_offset: 0, speciaal: false,
+            midi_action_code: 0, coupler_type: "unison".into(), pitch_offset: 0, speciaal: false, cascade_toegestaan: true,
         }]);
         o
     }
@@ -6164,7 +6169,7 @@ mod crescendo_tests {
         o.couplers.as_mut().unwrap().push(CouplerDto {
             id: "ta1".into(), name: "T.A.".into(), source_division: "Hoofdwerk".into(),
             destination_division: "Hoofdwerk".into(), active: false, display_in_division: "Hoofdwerk".into(),
-            midi_action_code: 0, coupler_type: "ta".into(), pitch_offset: 0, speciaal: false,
+            midi_action_code: 0, coupler_type: "ta".into(), pitch_offset: 0, speciaal: false, cascade_toegestaan: true,
         });
         let (tx, rx) = bounded::<AudioCommand>(64);
         let mappings = vec![MidiChannelMapping { division: "Hoofdwerk".into(), channel: Some(1), ..Default::default() }];
@@ -6188,7 +6193,7 @@ mod crescendo_tests {
         o.couplers.as_mut().unwrap().push(CouplerDto {
             id: "uo".into(), name: "Unison Off".into(), source_division: "Hoofdwerk".into(),
             destination_division: "Hoofdwerk".into(), active: false, display_in_division: "Hoofdwerk".into(),
-            midi_action_code: 0, coupler_type: "unison_off".into(), pitch_offset: 0, speciaal: true,
+            midi_action_code: 0, coupler_type: "unison_off".into(), pitch_offset: 0, speciaal: true, cascade_toegestaan: true,
         });
         let cl = o.couplers.clone().unwrap();
         let zonder: Vec<String> = Vec::new();
@@ -6228,7 +6233,7 @@ mod crescendo_tests {
         o.couplers.as_mut().unwrap().push(CouplerDto {
             id: "ta1".into(), name: "T.A.".into(), source_division: "Hoofdwerk".into(),
             destination_division: "Hoofdwerk".into(), active: false, display_in_division: "Hoofdwerk".into(),
-            midi_action_code: 0, coupler_type: "ta".into(), pitch_offset: 0, speciaal: false,
+            midi_action_code: 0, coupler_type: "ta".into(), pitch_offset: 0, speciaal: false, cascade_toegestaan: true,
         });
         let (tx, rx) = bounded::<AudioCommand>(64);
         let mappings = vec![MidiChannelMapping { division: "Hoofdwerk".into(), channel: Some(1), ..Default::default() }];
@@ -6254,7 +6259,7 @@ mod crescendo_tests {
         o.couplers.as_mut().unwrap().push(CouplerDto {
             id: "ta1".into(), name: "T.A.".into(), source_division: "Hoofdwerk".into(),
             destination_division: "Hoofdwerk".into(), active: false, display_in_division: "Hoofdwerk".into(),
-            midi_action_code: 0, coupler_type: "ta".into(), pitch_offset: 0, speciaal: false,
+            midi_action_code: 0, coupler_type: "ta".into(), pitch_offset: 0, speciaal: false, cascade_toegestaan: true,
         });
         let (tx, rx) = bounded::<AudioCommand>(64);
         let mappings = vec![

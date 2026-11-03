@@ -865,6 +865,13 @@ pub struct CouplerDef {
     /// Bij `melodie_of_bas`: `true` = melodiekoppel (hoogste noot), `false` =
     /// baskoppel (laagste noot).
     pub melodie: bool,
+    /// Mag dit koppel in een keten worden gezet met andere actieve koppels? Bij
+    /// GrandOrgue-sets is dat de bekende transitieve routing (Sw→Gt + Gt→Ped
+    /// ⇒ Sw klinkt ook op pedaal). Hauptwerk Custom Organ (CODM) werkt anders:
+    /// de gids beschrijft dat een koppel alleen het bronklavier aan de
+    /// doelwindladen bindt, niet aan het doelklavier. Voor CODM-koppels staat
+    /// deze vlag daarom op `false`; bij GO blijft hij `true`.
+    pub cascade_toegestaan: bool,
 }
 
 /// Parser for GrandOrgue ODF files
@@ -1758,6 +1765,8 @@ impl OdfParser {
                             .unwrap_or(false),
                         melodie: section.get("CouplerType")
                             .is_some_and(|v| v.trim().eq_ignore_ascii_case("melody")),
+                        // GrandOrgue-koppels doen aan de bekende transitieve keten.
+                        cascade_toegestaan: true,
                     });
                 }
             }

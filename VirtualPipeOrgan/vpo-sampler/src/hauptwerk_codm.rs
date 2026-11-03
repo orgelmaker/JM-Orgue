@@ -1400,6 +1400,8 @@ fn bouw_definitie(
             unison_off: k.soort == KoppelSoort::UnisonOff,
             melodie_of_bas: matches!(k.soort, KoppelSoort::Bas | KoppelSoort::Melodie),
             melodie: k.soort == KoppelSoort::Melodie,
+            // CODM: geen keten (gids: source keyboard → destination key action).
+            cascade_toegestaan: false,
         });
         if let Some(m) = manuals.iter_mut().find(|m| m.number + 1 == k.van_toetsen) {
             m.coupler_ids.push(nummer);
