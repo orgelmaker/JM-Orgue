@@ -1547,6 +1547,10 @@ pub struct AppState {
     /// zoals Hauptwerk). Uit te zetten voor A/B-vergelijking; geldt bij het
     /// eerstvolgende laden van een orgel.
     pub codm_random_stemming: Arc<std::sync::atomic::AtomicBool>,
+    /// Door de UI gevraagde annulering van een lopende orgelload. De lader
+    /// kijkt tussen fasen of deze is gezet; na de eerste audio-wissel keert hij
+    /// terug naar false (annuleren is dan niet meer veilig).
+    pub load_annulering: Arc<std::sync::atomic::AtomicBool>,
     /// Currently loaded organ ID (for saving settings on close)
     pub current_organ_id: Arc<RwLock<Option<String>>>,
     /// Crescendo configuration: stages[i] = list of stop IDs that should be ON at stage i
@@ -2118,6 +2122,7 @@ impl AppState {
             organ_library,
             app_data_dir,
             laatste_importverslag: Arc::new(RwLock::new(None)),
+            load_annulering: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             codm_random_stemming: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             current_organ_id: Arc::new(RwLock::new(None)),
             crescendo_stages,

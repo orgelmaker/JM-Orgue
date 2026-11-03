@@ -477,6 +477,8 @@
     "cancel": "Annuler",
     "delete": "Supprimer",
     "close": "Fermer",
+    "cancel_load_title": "Arrêter le chargement et conserver l'orgue actuel",
+    "cancel_load": "Annuler",
     "ok": "OK",
     "yes": "Oui",
     "no": "Non",

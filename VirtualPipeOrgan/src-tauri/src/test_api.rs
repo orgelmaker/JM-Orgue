@@ -512,6 +512,11 @@ fn route_test_only(
             serde_json::to_value(dto).map_err(|e| (500u16, e.to_string()))
         }
         (tiny_http::Method::Post, "/load_organ") => handle_load_organ(state, body),
+        // Annulering van een lopende orgelload (CODM-plan A4).
+        (tiny_http::Method::Post, "/load_organ/cancel") => {
+            state.load_annulering.store(true, std::sync::atomic::Ordering::Relaxed);
+            Ok(json!({"cancelled": true}))
+        }
         // Importverslag (0.9.42): preflight zonder iets te laden of te vervangen,
         // en het verslag van de laatste load.
         (tiny_http::Method::Post, "/import/preflight") => {

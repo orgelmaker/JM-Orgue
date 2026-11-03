@@ -477,6 +477,8 @@
     "cancel": "Anuluj",
     "delete": "Usuń",
     "close": "Zamknij",
+    "cancel_load_title": "Przerwij ładowanie i zachowaj bieżące organy",
+    "cancel_load": "Anuluj",
     "ok": "OK",
     "yes": "Tak",
     "no": "Nie",

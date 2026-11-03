@@ -477,6 +477,8 @@
     "cancel": "Cancelar",
     "delete": "Eliminar",
     "close": "Cerrar",
+    "cancel_load_title": "Detener la carga y conservar el órgano actual",
+    "cancel_load": "Cancelar",
     "ok": "OK",
     "yes": "Sí",
     "no": "No",

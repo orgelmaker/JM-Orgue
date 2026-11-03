@@ -5570,6 +5570,10 @@
       <div class="loading-progress">
         <div class="loading-progress-bar" style="width: {loadingProgress}%"></div>
       </div>
+      <button class="btn btn-ghost btn-sm" on:click={() => dispatch('cancelLoad')}
+              style="margin-top: 1.2rem;" title={$t('actions.cancel_load_title')}>
+        {$t('actions.cancel_load')}
+      </button>
     </div>
 
   {:else if showOrganBrowser}

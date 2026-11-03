@@ -455,6 +455,7 @@ fn main() {
             commands::set_crescendo_binding_manual,
             commands::set_midi_mapping_range,
             commands::load_organ,
+            commands::cancel_load,
             commands::import_preflight,
             commands::get_import_report,
             commands::set_import_pakketroot,

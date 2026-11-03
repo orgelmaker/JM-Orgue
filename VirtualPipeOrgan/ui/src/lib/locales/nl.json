@@ -477,6 +477,8 @@
     "cancel": "Annuleren",
     "delete": "Verwijderen",
     "close": "Sluiten",
+    "cancel_load_title": "Stop met laden en behoud het huidige orgel",
+    "cancel_load": "Annuleren",
     "ok": "OK",
     "yes": "Ja",
     "no": "Nee",

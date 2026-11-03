@@ -477,6 +477,8 @@
     "cancel": "Annulla",
     "delete": "Elimina",
     "close": "Chiudi",
+    "cancel_load_title": "Interrompi il caricamento e mantieni l'organo attuale",
+    "cancel_load": "Annulla",
     "ok": "OK",
     "yes": "Sì",
     "no": "No",

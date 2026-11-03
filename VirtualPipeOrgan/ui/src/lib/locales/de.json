@@ -477,6 +477,8 @@
     "cancel": "Abbrechen",
     "delete": "Löschen",
     "close": "Schließen",
+    "cancel_load_title": "Laden abbrechen und die aktuelle Orgel behalten",
+    "cancel_load": "Abbrechen",
     "ok": "OK",
     "yes": "Ja",
     "no": "Nein",

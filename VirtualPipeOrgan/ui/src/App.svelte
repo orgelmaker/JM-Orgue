@@ -192,6 +192,10 @@
     if (codm) {
       return tx('errors.codm_packages').replace('{packages}', codm[1]);
     }
+    // Door de gebruiker gestopt: geen rode foutmelding, want het is geen fout.
+    if (s.includes('[geannuleerd]')) {
+      return '';
+    }
     return s;
   }
 
@@ -2032,6 +2036,7 @@
       on:setView={(e) => setView(e.detail)}
       on:loadOrgan={(e) => loadOrgan(e.detail)}
       on:scanFolder={(e) => loadFromFolder(e.detail)}
+      on:cancelLoad={() => { invoke('cancel_load').catch(() => {}); }}
       on:setTremulant={(e) => setTremulant(e.detail.division, e.detail.active)}
       on:setMidiMapping={(e) => setMidiMapping(e.detail.division, e.detail.channel, e.detail.transpose)}
       on:refreshMidiMappings={() => { refreshMidiMappings(); scheduleAutoSave(); }}

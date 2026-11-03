@@ -477,6 +477,8 @@
     "cancel": "Cancel",
     "delete": "Delete",
     "close": "Close",
+    "cancel_load_title": "Stop loading and keep the current organ",
+    "cancel_load": "Cancel",
     "ok": "OK",
     "yes": "Yes",
     "no": "No",

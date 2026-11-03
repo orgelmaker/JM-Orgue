@@ -2539,9 +2539,27 @@ pub fn set_midi_mapping_range(state: State<AppState>, division: String, first_mi
 #[tauri::command]
 pub async fn load_organ(state: State<'_, AppState>, path: String) -> Result<OrganInfoDto, String> {
     let st = state.inner().clone();
+    // Nieuwe load begint zonder annuleringsverzoek. Een eerdere stale `true`
+    // zou anders meteen weer afbreken.
+    st.load_annulering.store(false, std::sync::atomic::Ordering::Relaxed);
     tokio::task::spawn_blocking(move || do_load_organ(&st, &path))
         .await
         .map_err(|e| format!("orgel-laadtaak mislukt: {}", e))?
+}
+
+/// Signaleer de lopende orgelload om af te breken. Werkt alleen zolang de
+/// lader nog in zijn eigen voorbereiding zit (parse + pakketresolutie); zodra
+/// de audio-engine wordt omgezet (eerste `AllNotesOff`) kan er niet meer
+/// veilig teruggedraaid worden en wordt het verzoek genegeerd.
+#[tauri::command]
+pub fn cancel_load(state: State<AppState>) {
+    state.load_annulering.store(true, std::sync::atomic::Ordering::Relaxed);
+    info!("Annulering van orgelload gevraagd");
+}
+
+/// Standaardfout wanneer een load tussen fasen is afgebroken.
+pub(crate) fn melding_geannuleerd() -> String {
+    "[geannuleerd] Laden afgebroken op jouw verzoek".to_string()
 }
 
 /// Importverslag vooraf (geen orgel wordt vervangen): wat belooft de definitie,
@@ -3219,6 +3237,13 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
     // Hauptwerk sets (*.Organ_Hauptwerk_xml) use a different format; route them to
     // the Hauptwerk importer, which translates to the same OrganDefinition so the
     // streaming-load + DTO + noise-filter below are shared with GrandOrgue.
+    // Veilig annuleerpunt 1: direct bij het begin van de load. Dit dekt het
+    // scenario dat de gebruiker heel snel annuleert nadat ze op het verkeerde
+    // orgel klikten.
+    if state.load_annulering.load(std::sync::atomic::Ordering::Relaxed) {
+        info!("Orgelload geannuleerd vóór parse");
+        return Err(melding_geannuleerd());
+    }
     let mut definition = if vpo_sampler::is_hauptwerk_path(odf_path) {
         info!("Detected Hauptwerk organ definition");
         // Een door de gebruiker gekozen pakketmap (per orgel onthouden) gaat voor.
@@ -4277,6 +4302,15 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
     // Eerst de overloopbuffer legen (0.7.74): anders zendt de MIDI-lus
     // tussen het AllNotesOff en het legen nog oude NoteOns na die tegen de
     // preload-map van het nieuwe orgel pijpen starten zonder NoteOff.
+    //
+    // Veilig annuleerpunt 2: dit is het laatste moment waarop we zonder schade
+    // kunnen terugkeren — hierna wordt de audio-engine omgezet (AllNotesOff,
+    // drawn_stops gewist, nieuwe orgel-ID in state.current_organ_id) en kan het
+    // oude orgel niet meer goed teruggezet worden.
+    if state.load_annulering.load(std::sync::atomic::Ordering::Relaxed) {
+        info!("Orgelload geannuleerd vóór audio-wissel (parse was klaar)");
+        return Err(melding_geannuleerd());
+    }
     crate::state::rt_overloop_leeg();
     state.send_audio_command(AudioCommand::AllNotesOff);
     state.drawn_stops.write().clear();
@@ -9571,6 +9605,15 @@ pub fn do_load_samples_from_directory_locked(state: &AppState, directory: &str) 
     // Eerst de overloopbuffer legen (0.7.74): anders zendt de MIDI-lus
     // tussen het AllNotesOff en het legen nog oude NoteOns na die tegen de
     // preload-map van het nieuwe orgel pijpen starten zonder NoteOff.
+    //
+    // Veilig annuleerpunt 2: dit is het laatste moment waarop we zonder schade
+    // kunnen terugkeren — hierna wordt de audio-engine omgezet (AllNotesOff,
+    // drawn_stops gewist, nieuwe orgel-ID in state.current_organ_id) en kan het
+    // oude orgel niet meer goed teruggezet worden.
+    if state.load_annulering.load(std::sync::atomic::Ordering::Relaxed) {
+        info!("Orgelload geannuleerd vóór audio-wissel (parse was klaar)");
+        return Err(melding_geannuleerd());
+    }
     crate::state::rt_overloop_leeg();
     state.send_audio_command(AudioCommand::AllNotesOff);
     state.drawn_stops.write().clear();
