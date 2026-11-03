@@ -4948,13 +4948,29 @@
       }
     }
     // Shortcutpistons (CODM): ze bedienen een bestaand register/koppel/tremulant,
-    // dus komen hier met hun eigen MIDI-code en een duidelijk label ("piston: ..").
+    // dus komen hier met hun eigen MIDI-code en een label dat aangeeft WAAR de
+    // piston aan bindt: "piston <naam> → <doelnaam>". Het doel staat al in de
+    // lijst erboven; hier voegt de piston alleen een extra bediening toe.
+    const vindDoelNaam = (p) => {
+      if (p.doel === 'stop') {
+        for (const d of displayOrgan?.divisions || []) {
+          const s = (d.stops || []).find(s => s.id === p.doel_id);
+          if (s) return s.name;
+        }
+      } else if (p.doel === 'koppel') {
+        const c = (displayOrgan?.couplers || []).find(c => c.id === p.doel_id);
+        if (c) return c.name.replace(/\n/g, ' ');
+      }
+      return p.doel_id;
+    };
+    const pistonLabel = (p) => {
+      // Korte piston-benaming: label uit de set (bv. "G/P") of de naam.
+      const kort = (p.label || '').trim() || (p.naam || '').trim() || '?';
+      return `piston ${kort} → ${vindDoelNaam(p)}`.replace(/\n/g, ' ');
+    };
     const pistons = (displayOrgan?.schakelaars?.pistons || [])
       .filter(p => p.midi_action_code)
-      .map(p => ({
-        code: p.midi_action_code,
-        label: `piston: ${p.label || p.naam} → ${p.naam}`.replace(/\n/g, ' '),
-      }));
+      .map(p => ({ code: p.midi_action_code, label: pistonLabel(p) }));
     return { functies, trems, koppels, registers, pistons };
   })();
 
