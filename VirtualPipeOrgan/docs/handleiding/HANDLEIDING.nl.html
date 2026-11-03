@@ -66,6 +66,17 @@
 <p>Bij <b>online zoeken</b> toont het programma een paar vrij te gebruiken foto's van Wikimedia Commons, op basis van de naam, bouwer en plaats die in de set staan. Klik een foto aan om hem over te nemen; de bronvermelding en licentie komen onder de kaart. Staat er te weinig in de set om iets te vinden, dan typ je zelf een zoekterm (kerk, plaats of orgelnaam) in het veld bovenin het venster en kies je <b>Zoek</b>.</p>
 <figure><img src="afbeeldingen/nl/04_online_zoeken.jpg" alt="Online een foto zoeken"><figcaption>Het venster &ldquo;Online een foto zoeken&rdquo; met het zoekveld voor een eigen zoekterm en de gevonden foto's met hun bron en licentie.</figcaption></figure>
 
+<h3 id="codm">Hauptwerk Custom Organ (CODM) en het importverslag</h3>
+<p>Een Custom Organ-definitie (<code>.CustomOrgan_Hauptwerk_xml</code>) bevat alleen de opbouw van het orgel: klavieren, registers, koppels en tremulanten. De samples staan in aparte <b>samplepakketten</b> in de map <code>OrganInstallationPackages</code>, die naast of boven de definitie moet staan. JM-Orgue controleert dat v&oacute;&oacute;r het laden.</p>
+<ul>
+  <li>Ontbreekt een samplepakket, dan verschijnt het scherm <b>Orgel is niet volledig</b> met de ontbrekende pakketten (met naam) en het aantal registers dat zou klinken. Het orgel dat je nu hebt blijft actief tot je kiest.</li>
+  <li><b>Pakketmap kiezen&hellip;</b> laat je de map aanwijzen die <code>OrganInstallationPackages</code> bevat; de keuze wordt per orgel onthouden. Er worden geen bestanden gekopieerd of omgezet.</li>
+  <li><b>Gedeeltelijk laden</b> laadt alleen de registers waarvan de samples er zijn; een balk bovenin herinnert je eraan en opent het <b>Importverslag</b>. Is er niets speelbaar, dan kun je alleen annuleren.</li>
+  <li>Het <b>Importverslag</b> noemt wat er verwacht werd en wat geladen is, welke registers zijn overgeslagen en waarom, en waar JM-Orgue een benadering gebruikt (bijvoorbeeld: de tremulant klinkt als eenvoudige modulatie, omdat de golfvormen van Hauptwerk niet gelezen worden).</li>
+  <li>Samples in Hauptwerks beveiligde <code>.hbw</code>-formaat kan JM-Orgue niet lezen; een set die daarvan afhangt wordt als niet speelbaar gemeld.</li>
+</ul>
+<p>Een CODM-orgel met alle samples laadt zonder vraag. Of het precies zo klinkt als in Hauptwerk is niet gecontroleerd: dat vraagt een volledige originele set en een referentieopname.</p>
+
 <!-- ============================================================ -->
 <h2 id="bespelen">3. Een orgel laden en bespelen</h2>
 

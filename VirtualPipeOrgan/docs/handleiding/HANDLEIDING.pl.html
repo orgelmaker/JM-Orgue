@@ -64,6 +64,17 @@
 <p><b>Wyszukiwanie online</b> pokazuje kilka swobodnie dost&#281;pnych zdj&#281;&#263; z Wikimedia Commons, na podstawie nazwy, budowniczego i miejscowo&#347;ci zapisanych w zestawie. Kliknij zdj&#281;cie, aby je przej&#261;&#263;; &#378;r&#243;d&#322;o i licencja pojawiaj&#261; si&#281; pod kart&#261;. Je&#347;li zestaw zawiera zbyt ma&#322;o danych, aby co&#347; znale&#378;&#263;, wpisz sam fraz&#281; (ko&#347;ci&#243;&#322;, miejscowo&#347;&#263; lub nazw&#281; organ&oacute;w) w polu u g&oacute;ry okna i wybierz <b>Szukaj</b>.</p>
 <figure><img src="afbeeldingen/pl/04_online_zoeken.jpg" alt="Szukaj zdj&#281;cia online"><figcaption>Okno &bdquo;Szukaj zdj&#281;cia online&rdquo; z polem na w&#322;asn&#261; fraz&#281; i znalezionymi zdj&#281;ciami wraz z &#378;r&oacute;d&#322;em i licencj&#261;.</figcaption></figure>
 
+<h3 id="codm">Hauptwerk Custom Organ (CODM) i raport importu</h3>
+<p>Definicja Custom Organ (<code>.CustomOrgan_Hauptwerk_xml</code>) opisuje tylko budow&#281; organ&oacute;w: manua&#322;y, rejestry, po&#322;&#261;czenia i tremola. Pr&oacute;bki znajduj&#261; si&#281; w osobnych <b>pakietach pr&oacute;bek</b> w folderze <code>OrganInstallationPackages</code>, kt&oacute;ry musi le&#380;e&#263; obok definicji lub wy&#380;ej. JM-Orgue sprawdza to przed za&#322;adowaniem.</p>
+<ul>
+  <li>Je&#347;li brakuje pakietu pr&oacute;bek, ekran <b>Organy s&#261; niekompletne</b> pokazuje brakuj&#261;ce pakiety (z nazw&#261;) i liczb&#281; rejestr&oacute;w, kt&oacute;re by zabrzmia&#322;y. Obecne organy pozostaj&#261; aktywne, dop&oacute;ki nie wybierzesz.</li>
+  <li><b>Wybierz folder pakiet&oacute;w&hellip;</b> pozwala wskaza&#263; folder zawieraj&#261;cy <code>OrganInstallationPackages</code>; wyb&oacute;r jest pami&#281;tany dla ka&#380;dych organ&oacute;w. &#379;adne pliki nie s&#261; kopiowane ani konwertowane.</li>
+  <li><b>Za&#322;aduj cz&#281;&#347;ciowo</b> &#322;aduje tylko rejestry, kt&oacute;rych pr&oacute;bki s&#261;; pasek u g&oacute;ry przypomina o tym i otwiera <b>Raport importu</b>. Je&#347;li nic nie nadaje si&#281; do gry, mo&#380;na tylko anulowa&#263;.</li>
+  <li><b>Raport importu</b> podaje, co oczekiwano i co za&#322;adowano, kt&oacute;re rejestry pomini&#281;to i dlaczego oraz gdzie JM-Orgue stosuje przybli&#380;enie (na przyk&#322;ad: tremolo brzmi jak prosta modulacja, bo przebiegi Hauptwerk nie s&#261; odczytywane).</li>
+  <li>JM-Orgue nie odczyta pr&oacute;bek w chronionym formacie <code>.hbw</code> Hauptwerk; zestaw od nich zale&#380;ny jest zg&#322;aszany jako niegrywalny.</li>
+</ul>
+<p>Organy CODM ze wszystkimi pr&oacute;bkami &#322;aduj&#261; si&#281; bez pyta&#324;. Czy brzmi&#261; dok&#322;adnie jak w Hauptwerk, nie zosta&#322;o sprawdzone: potrzebny jest pe&#322;ny oryginalny zestaw i nagranie wzorcowe.</p>
+
 <!-- ============================================================ -->
 <h2 id="bespelen">3. &#321;adowanie organ&oacute;w i gra</h2>
 

@@ -112,13 +112,35 @@ Français, Deutsch, Polski, Italiano, Español):
 
 ## Samplesets
 
-JM-Orgue leest drie soorten:
+JM-Orgue leest vier soorten:
 
 - **Eigen mappen** — een map per register, opnamen genoemd naar de toets.
   Zo eenvoudig als het klinkt, en bedoeld voor wie zelf opneemt.
 - **GrandOrgue** (`.organ`) — rechtstreeks, zonder omzetstap.
 - **Hauptwerk** (`.Organ_Hauptwerk_xml`) — ook rechtstreeks, inclusief
   microfoonposities, zwelkasten, release-opnamen en tremulant-opnamen.
+- **Hauptwerk Custom Organ** (`.CustomOrgan_Hauptwerk_xml`, CODM) — de
+  opbouw (klavieren, registers, koppels, tremulanten) staat in de definitie;
+  de samples staan in aparte samplepakketten in de map
+  `OrganInstallationPackages` naast of boven de definitie. Ontbreekt een
+  pakket, dan laat JM-Orgue vóór het laden zien wat er mist (met een
+  importverslag), laadt desgewenst alleen wat er is en houdt tot die keuze het
+  vorige orgel actief. Je kunt de pakketmap per orgel zelf aanwijzen.
+
+  | Onderdeel | Stand |
+  |---|---|
+  | Opbouw, registers, koppels (ook Unison Off, bas, melodie) | werkt, gemeten |
+  | Toonhoogte van geleende of gedeelde opnamen (zoals een klokkenspel uit één opname) | werkt, gemeten |
+  | Korte/middellange/lange release en de release in het hoofdbestand | werkt, gemeten met eigen proefbestanden |
+  | Boventonen bijstellen (HarmonicShaping), willekeurige stemafwijking | werkt (de stemafwijking is een benadering) |
+  | Standaard aan, combinatie-uitsluitingen, shortcutpistons | werkt (geen aparte pistonknop) |
+  | Tremulant met golfvormen | niet gelezen: klinkt als eenvoudige modulatie (gemeld) |
+  | Reverb tail truncation, windflowvariatie | niet toegepast (gemeld) |
+  | Zwelkast of tremulant per rang binnen één register | volgt de eerste rang (gemeld) |
+  | Klank gelijk aan Hauptwerk | niet gevalideerd: daarvoor is een complete originele set en een referentieopname nodig |
+
+  Alleen formaatversie 3.00 is aan echte bestanden getoetst; een andere
+  versie geeft een melding in het importverslag.
 
 Gesloten formaten werken niet, zoals Hauptwerks eigen `.hbw`, `.pkg` en
 `.iwh`. Zo'n set wordt geweigerd met een melding, niet met een orgel zonder

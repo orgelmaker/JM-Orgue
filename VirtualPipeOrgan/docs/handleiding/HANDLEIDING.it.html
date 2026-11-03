@@ -64,6 +64,17 @@
 <p>La <b>ricerca online</b> mostra alcune foto liberamente utilizzabili di Wikimedia Commons, in base al nome, al costruttore e alla località registrati nel set. Fai clic su una foto per adottarla; fonte e licenza compaiono sotto la scheda. Se il set contiene troppo pochi dati per trovare qualcosa, scrivi tu stesso un termine (chiesa, località o nome dell'organo) nel campo in alto nella finestra e scegli <b>Cerca</b>.</p>
 <figure><img src="afbeeldingen/it/04_online_zoeken.jpg" alt="Cerca la foto online"><figcaption>La finestra &laquo;Cerca la foto online&raquo; con il campo per un termine personale e le foto trovate con fonte e licenza.</figcaption></figure>
 
+<h3 id="codm">Hauptwerk Custom Organ (CODM) e il rapporto di importazione</h3>
+<p>Una definizione Custom Organ (<code>.CustomOrgan_Hauptwerk_xml</code>) descrive solo la struttura dell&rsquo;organo: tastiere, registri, accoppiamenti e tremoli. I campioni si trovano in <b>pacchetti di campioni</b> separati nella cartella <code>OrganInstallationPackages</code>, che deve stare accanto alla definizione o sopra di essa. JM-Orgue lo controlla prima del caricamento.</p>
+<ul>
+  <li>Se manca un pacchetto di campioni, la schermata <b>L&rsquo;organo &egrave; incompleto</b> mostra i pacchetti mancanti (con il nome) e quanti registri suonerebbero. L&rsquo;organo attuale resta attivo finch&eacute; non scegli.</li>
+  <li><b>Scegli la cartella dei pacchetti&hellip;</b> permette di indicare la cartella che contiene <code>OrganInstallationPackages</code>; la scelta viene ricordata per ogni organo. Nessun file viene copiato o convertito.</li>
+  <li><b>Carica parzialmente</b> carica solo i registri di cui ci sono i campioni; una barra in alto lo ricorda e apre il <b>Rapporto di importazione</b>. Se nulla &egrave; suonabile, si pu&ograve; solo annullare.</li>
+  <li>Il <b>Rapporto di importazione</b> indica cosa era atteso e cosa &egrave; stato caricato, quali registri sono stati saltati e perch&eacute;, e dove JM-Orgue usa un&rsquo;approssimazione (ad esempio: il tremolo suona come una semplice modulazione, perch&eacute; le forme d&rsquo;onda di Hauptwerk non vengono lette).</li>
+  <li>JM-Orgue non pu&ograve; leggere i campioni nel formato protetto <code>.hbw</code> di Hauptwerk; un set che ne dipende viene segnalato come non suonabile.</li>
+</ul>
+<p>Un organo CODM con tutti i campioni si carica senza domande. Se suoni esattamente come in Hauptwerk non &egrave; stato verificato: servono un set originale completo e una registrazione di riferimento.</p>
+
 <!-- ============================================================ -->
 <h2 id="bespelen">3. Caricare e suonare un organo</h2>
 

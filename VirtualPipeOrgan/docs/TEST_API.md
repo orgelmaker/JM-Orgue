@@ -140,6 +140,11 @@ state.
 | POST | `/couplers/{id}/toggle` | één koppel aan/uit |
 | POST | `/action/{code}` | setzer- en speciale acties (0, 1-9, SET, GC, M1-8, Cresc …) |
 | POST | `/panic` | alle noten stil |
+| POST | `/import/preflight` | body `{"path":"..."}` — importverslag van een CODM-definitie zonder iets te laden of te vervangen |
+| GET  | `/import/report` | verslag van de laatste load (formaat, pakketten, verwacht/geladen, overgeslagen registers, meldingen) |
+| GET  | `/pistons` | schakelaargedrag uit de definitie: pistons, standaard-aan, buiten de combinaties (CODM) |
+| POST | `/pistons/{index}/druk?aan=1\|0` | shortcutpiston indrukken (`aan=1`) of loslaten (`aan=0`) |
+| POST | `/settings/codm_random?on=1\|0` | willekeurige stemafwijking per pijp (CODM) aan/uit, geldt bij het volgende laden |
 
 ### Noten en MIDI
 

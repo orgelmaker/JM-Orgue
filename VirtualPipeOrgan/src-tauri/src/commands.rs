@@ -2569,7 +2569,8 @@ pub fn preflight_verslag(state: &AppState, path: &str) -> vpo_sampler::ImportRep
         return vpo_sampler::ImportReport::uit_definitie("niet-gecontroleerd", "", &path, "", 0, 0, 0);
     }
     let root = crate::import_pakketroot::opgeslagen(&state.app_data_dir, &path);
-    vpo_sampler::load_hauptwerk_met_verslag(odf_path, root.as_deref()).1
+    // Snelle variant: zonder de markers van elk samplebestand te lezen.
+    vpo_sampler::voorcontrole_hauptwerk(odf_path, root.as_deref())
 }
 
 /// Het verslag van de laatste import (opnieuw te openen).

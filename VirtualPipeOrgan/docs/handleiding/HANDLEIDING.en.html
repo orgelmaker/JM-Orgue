@@ -64,6 +64,17 @@
 <p><b>Searching online</b> shows a few freely usable photos from Wikimedia Commons, based on the name, builder and place stored in the set. Click a photo to adopt it; the source and licence appear under the card. If the set holds too little to find anything, type a search term yourself (church, town or organ name) in the field at the top of the window and choose <b>Search</b>.</p>
 <figure><img src="afbeeldingen/en/04_online_zoeken.jpg" alt="Search a photo online"><figcaption>The &ldquo;Search a photo online&rdquo; window with the field for your own search term and the photos found, with their source and licence.</figcaption></figure>
 
+<h3 id="codm">Hauptwerk Custom Organ (CODM) and the import report</h3>
+<p>A Custom Organ definition (<code>.CustomOrgan_Hauptwerk_xml</code>) only describes the structure of the organ: keyboards, stops, couplers and tremulants. The samples live in separate <b>sample packages</b> in the <code>OrganInstallationPackages</code> folder, which must sit next to or above the definition. JM-Orgue checks this before loading.</p>
+<ul>
+  <li>If a sample package is missing, the <b>Organ is incomplete</b> screen shows the missing packages (by name) and how many stops would sound. The organ you have now stays active until you choose.</li>
+  <li><b>Choose package folder&hellip;</b> lets you point to the folder that contains <code>OrganInstallationPackages</code>; the choice is remembered per organ. No files are copied or converted.</li>
+  <li><b>Load partially</b> loads only the stops whose samples are present; a bar at the top reminds you and opens the <b>Import report</b>. If nothing is playable you can only cancel.</li>
+  <li>The <b>Import report</b> lists what was expected and what was loaded, which stops were skipped and why, and where JM-Orgue uses an approximation (for example: the tremulant sounds as a simple modulation because Hauptwerk&rsquo;s waveforms are not read).</li>
+  <li>JM-Orgue cannot read samples in Hauptwerk&rsquo;s protected <code>.hbw</code> format; a set that depends on them is reported as not playable.</li>
+</ul>
+<p>A CODM organ with all its samples loads without any question. Whether it sounds exactly as in Hauptwerk has not been verified: that needs a complete original set and a reference recording.</p>
+
 <!-- ============================================================ -->
 <h2 id="bespelen">3. Loading and playing an organ</h2>
 

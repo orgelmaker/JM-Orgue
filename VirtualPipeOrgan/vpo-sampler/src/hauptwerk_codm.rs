@@ -774,6 +774,8 @@ struct SampleZoeker<'a> {
     geweigerd: std::collections::BTreeSet<(u32, String)>,
     /// Markers (loops + cue) per hoofdbestand, eenmaal gelezen.
     markers: HashMap<PathBuf, Option<crate::loader::WavMarkers>>,
+    /// Markers werkelijk lezen (niet in de snelle voorcontrole).
+    markers_lezen: bool,
     /// Rangen met pijpen die geen release kunnen krijgen: rang-id → (naam, aantal).
     zonder_release: BTreeMap<u32, (String, usize)>,
 }
@@ -781,7 +783,7 @@ struct SampleZoeker<'a> {
 impl SampleZoeker<'_> {
     fn markers(&mut self, pad: &Path) -> Option<&crate::loader::WavMarkers> {
         // Alleen gewone WAV: een WavPack-bestand zou hiervoor volledig gedecodeerd worden.
-        if !pad.extension().is_some_and(|e| e.eq_ignore_ascii_case("wav")) {
+        if !self.markers_lezen || !pad.extension().is_some_and(|e| e.eq_ignore_ascii_case("wav")) {
             return None;
         }
         self.markers
@@ -948,6 +950,28 @@ pub fn laad_codm_met_verslag(
     xml: &str,
     pakketroot: Option<&Path>,
 ) -> (Result<OrganDefinition, OdfError>, ImportReport) {
+    laad_codm_intern(odf_path, xml, pakketroot, true)
+}
+
+/// Snelle voorcontrole: dezelfde parse, pakketten en samplekeuze, maar zonder de
+/// markers (loops/cue) van elk hoofdbestand te lezen. Bij een grote set scheelt dat
+/// duizenden bestandsopeningen; de release-bevindingen komen dan pas bij het echte
+/// laden in het verslag. Voor de beslissing "ontbreekt er iets" is niets van belang
+/// voor de markers.
+pub fn voorcontrole_codm(
+    odf_path: &Path,
+    xml: &str,
+    pakketroot: Option<&Path>,
+) -> (Result<OrganDefinition, OdfError>, ImportReport) {
+    laad_codm_intern(odf_path, xml, pakketroot, false)
+}
+
+fn laad_codm_intern(
+    odf_path: &Path,
+    xml: &str,
+    pakketroot: Option<&Path>,
+    diep: bool,
+) -> (Result<OrganDefinition, OdfError>, ImportReport) {
     let bron = odf_path.to_string_lossy().to_string();
     let orgel = match parse_codm(xml) {
         Ok(o) => o,
@@ -974,26 +998,31 @@ pub fn laad_codm_met_verslag(
             "geen map OrganInstallationPackages gevonden naast of boven de definitie; kies de map handmatig",
         );
     }
-    let r = bouw_definitie(&orgel, &pakketten, base, &mut verslag);
+    let r = bouw_definitie(&orgel, &pakketten, base, &mut verslag, diep);
     if let Ok(def) = &r {
-        verslag.geladen.stops = def.stops.len();
-        verslag.geladen.divisies = def.manuals.len();
-        verslag.geladen.koppels = def.couplers.len();
-        verslag.geladen.tremulanten = def.tremulants.len();
-        verslag.geladen.pijpen = def.stops.iter().map(|s| {
-            s.pipes.iter().chain(s.layers.iter().flat_map(|l| l.pipes.iter()))
-                .filter(|p| matches!(p, PipeDef::Sample { .. })).count()
-        }).sum();
-        verslag.geladen.releases = def.stops.iter().map(|s| {
-            s.pipes.iter().chain(s.layers.iter().flat_map(|l| l.pipes.iter()))
-                .map(|p| match p { PipeDef::Sample { extra, .. } => extra.releases.len(), _ => 0 }).sum::<usize>()
-        }).sum();
+        vul_geladen(&mut verslag, def);
     }
     if let Err(e) = &r {
         verslag.melding(Ernst::Fout, "orgel", e.to_string());
     }
     verslag.bepaal_volledigheid();
     (r, verslag)
+}
+
+/// Vul de "geladen"-tellingen van het verslag uit de gebouwde definitie.
+fn vul_geladen(verslag: &mut ImportReport, def: &OrganDefinition) {
+    verslag.geladen.stops = def.stops.len();
+    verslag.geladen.divisies = def.manuals.len();
+    verslag.geladen.koppels = def.couplers.len();
+    verslag.geladen.tremulanten = def.tremulants.len();
+    verslag.geladen.pijpen = def.stops.iter().map(|s| {
+        s.pipes.iter().chain(s.layers.iter().flat_map(|l| l.pipes.iter()))
+            .filter(|p| matches!(p, PipeDef::Sample { .. })).count()
+    }).sum();
+    verslag.geladen.releases = def.stops.iter().map(|s| {
+        s.pipes.iter().chain(s.layers.iter().flat_map(|l| l.pipes.iter()))
+            .map(|p| match p { PipeDef::Sample { extra, .. } => extra.releases.len(), _ => 0 }).sum::<usize>()
+    }).sum();
 }
 
 /// Het verslag zoals het er zonder samples uitziet: wat de definitie belooft
@@ -1119,7 +1148,7 @@ pub fn codm_naar_definitie(
     base_path: PathBuf,
 ) -> Result<OrganDefinition, OdfError> {
     let mut verslag = nieuw_verslag(orgel, pakketten, "");
-    bouw_definitie(orgel, pakketten, base_path, &mut verslag)
+    bouw_definitie(orgel, pakketten, base_path, &mut verslag, true)
 }
 
 fn bouw_definitie(
@@ -1127,13 +1156,14 @@ fn bouw_definitie(
     pakketten: &HashMap<u32, PathBuf>,
     base_path: PathBuf,
     verslag: &mut ImportReport,
+    diep: bool,
 ) -> Result<OrganDefinition, OdfError> {
     let ontbrekend: Vec<u32> = orgel.sample_pakketten().into_iter().filter(|p| !pakketten.contains_key(p)).collect();
     if !ontbrekend.is_empty() {
         warn!("CODM '{}': samplepakket(ten) niet gevonden: {:?}", orgel.naam, ontbrekend);
     }
 
-    let mut z = SampleZoeker { pakketten, mappen: HashMap::new(), geweigerd: Default::default(), markers: HashMap::new(), zonder_release: BTreeMap::new() };
+    let mut z = SampleZoeker { pakketten, mappen: HashMap::new(), geweigerd: Default::default(), markers: HashMap::new(), markers_lezen: diep, zonder_release: BTreeMap::new() };
     let divisie_bekend: HashSet<u32> = orgel.divisies.iter().map(|d| d.code).collect();
 
     // Windladen: één per combinatie (zwelkast, tremulant) die een stop gebruikt.
@@ -1873,7 +1903,9 @@ mod tests {
         let pakketten: HashMap<u32, PathBuf> = [(9u32, dir.to_path_buf())].into_iter().collect();
         let o = parse_codm(xml).unwrap();
         let mut v = nieuw_verslag(&o, &pakketten, "");
-        let def = bouw_definitie(&o, &pakketten, dir.to_path_buf(), &mut v).unwrap();
+        let def = bouw_definitie(&o, &pakketten, dir.to_path_buf(), &mut v, true).unwrap();
+        vul_geladen(&mut v, &def);
+        v.bepaal_volledigheid();
         (def, v)
     }
 
@@ -2080,6 +2112,90 @@ mod tests {
         // De piston naar een niet bestaand register wordt gemeld, maakt geen extra object.
         assert!(v.meldingen.iter().any(|m| m.object.contains("Kapot") && m.tekst.contains("doet niets")), "{:?}", v.meldingen);
         assert!(v.meldingen.iter().any(|m| m.tekst.contains("divisional-combinaties")), "{:?}", v.meldingen);
+    }
+
+    // ---- Integratie: XML -> verslag -> definitie -> preload -> offline stem -> release (werkpakket G) ----
+
+    /// Schrijf een mono 16-bit sinus-WAV met optionele loop en cue (voor de integratieproef).
+    fn schrijf_sinus(pad: &Path, freq: f32, secs: f32, loops: &[(u32, u32)], cues: &[u32]) {
+        let frames = (secs * 48000.0) as u32;
+        schrijf_wav(pad, frames, loops, cues);
+        // Vul de datachunk (laatste `frames * 2` bytes) met de sinus.
+        let mut b = std::fs::read(pad).unwrap();
+        let start = b.len() - frames as usize * 2;
+        for i in 0..frames as usize {
+            let v = (0.5 * (2.0 * std::f32::consts::PI * freq * i as f32 / 48000.0).sin() * 32767.0) as i16;
+            b[start + 2 * i..start + 2 * i + 2].copy_from_slice(&v.to_le_bytes());
+        }
+        std::fs::write(pad, b).unwrap();
+    }
+
+    /// Frequentie (Hz) uit de nuldoorgangen van een signaal bij 48 kHz.
+    fn nuldoorgangen_hz(x: &[f32], rate: f32) -> f32 {
+        let n = x.windows(2).filter(|w| w[0] <= 0.0 && w[1] > 0.0).count();
+        n as f32 / (x.len() as f32 / rate)
+    }
+
+    /// Eén deterministische proef door de hele importketen heen, zonder audio-apparaat:
+    /// definitie lezen, verslag, samplekeuze (geleende opname), preload van de
+    /// startbuffer, een offline stem met de toonhoogte-correctie van de pijp, en de
+    /// release-keuze op toetsduur met het laden van die release.
+    #[test]
+    fn pijplijn_van_xml_tot_gerenderde_toon_en_release() {
+        let d = tijdmap("pijplijn");
+        for m in ["Main", "Main/rel150", "Main/rel900"] { std::fs::create_dir_all(d.join(m)).unwrap(); }
+        // Alleen een opname voor noot 60; pijp 61 leent die.
+        schrijf_sinus(&d.join("Main/060-x.wav"), 220.0, 1.0, &[(4800, 43200)], &[]);
+        schrijf_sinus(&d.join("Main/rel150/060-x.wav"), 600.0, 0.15, &[], &[]);
+        schrijf_sinus(&d.join("Main/rel900/060-x.wav"), 1300.0, 0.9, &[], &[]);
+        let velden = r"<Samples_ShortNoteReleaseSampleFileFolderIfAny>Main\rel150</Samples_ShortNoteReleaseSampleFileFolderIfAny><Samples_MaxNoteTimeMsForShortNoteReleaseSamplesIfAny>150</Samples_MaxNoteTimeMsForShortNoteReleaseSamplesIfAny><Samples_RelSampleFileFolderIfRelSamplesStoredInSeparateFiles>Main\rel900</Samples_RelSampleFileFolderIfRelSamplesStoredInSeparateFiles>";
+        let (def, v) = bouw_mini(&mini_orgel(velden), &d);
+
+        // 1. verslag: één register verwacht, één geladen, niets ernstigs.
+        assert_eq!((v.verwacht.stops, v.geladen.stops), (1, 1));
+        assert!(!v.onvolledig && !v.niet_speelbaar);
+        assert!(v.meldingen.iter().all(|m| m.ernst != Ernst::Fout), "{:?}", v.meldingen);
+
+        // 2. samplekeuze: beide pijpen delen het bestand van noot 60; pijp 61 krijgt +100 ct.
+        let extra = |i: usize| match &def.stops[0].pipes[i] { PipeDef::Sample { path, extra } => (path.clone(), extra.clone()), _ => panic!() };
+        let (p60, e60) = extra(0);
+        let (p61, e61) = extra(1);
+        assert_eq!(p60, p61);
+        assert!(e60.pitch_tuning_cents.unwrap_or(0.0).abs() < 1e-3);
+        assert!((e61.pitch_tuning_cents.unwrap() - 100.0).abs() < 1e-3);
+
+        // 3. preload van de startbuffer en een offline stem op de juiste toonhoogte.
+        let pre = crate::loader::load_audio_preload_ms(&p61, 500).expect("preload");
+        assert_eq!(pre.sample_rate, 48000);
+        let ratio = 2f32.powf(e61.pitch_tuning_cents.unwrap() / 1200.0);
+        let uit: Vec<f32> = (0..(0.3 * 48000.0) as usize)
+            .map(|i| {
+                let pos = i as f32 * ratio;
+                let k = pos as usize;
+                if k + 1 >= pre.attack_data.len() { return 0.0; }
+                let fr = pos - k as f32;
+                pre.attack_data[k] * (1.0 - fr) + pre.attack_data[k + 1] * fr
+            })
+            .collect();
+        let f = nuldoorgangen_hz(&uit, 48000.0);
+        let verwacht = 220.0 * 2f32.powf(1.0 / 12.0);
+        assert!((f - verwacht).abs() / verwacht < 0.02, "gerenderde toon {f} Hz, verwacht {verwacht}");
+
+        // 4. NoteOff: de release volgt de toetsduur; elke gekozen release laadt en klinkt op zijn eigen toon.
+        let kies = |houd_ms: i32| e61.releases.iter()
+            .find(|r| r.max_key_press_time_ms.is_some_and(|m| m >= houd_ms))
+            .or_else(|| e61.releases.last())
+            .unwrap();
+        for (houd, verwacht_hz, bestand) in [(100, 600.0, "rel150"), (1000, 1300.0, "rel900")] {
+            let rel = kies(houd);
+            assert!(rel.path.to_string_lossy().contains(bestand), "houdtijd {houd} ms -> {:?}", rel.path);
+            let seg = crate::loader::load_wav_preload_segment_ms(
+                &rel.path, 80,
+                crate::loader::PreloadSegment::Release { cue_override: rel.cue_point, require_cue: false },
+            ).expect("release-preload");
+            let hz = nuldoorgangen_hz(&seg.attack_data, seg.sample_rate as f32);
+            assert!((hz - verwacht_hz).abs() / verwacht_hz < 0.03, "release bij {houd} ms: {hz} Hz, verwacht {verwacht_hz}");
+        }
     }
 
     // ---- Tremulant, zwelkast en wind (werkpakket E) ----

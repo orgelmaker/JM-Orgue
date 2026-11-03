@@ -64,6 +64,17 @@
 <p>La <b>recherche en ligne</b> affiche quelques photos librement utilisables de Wikimedia Commons, d&rsquo;apr&egrave;s le nom, le facteur et le lieu indiqu&eacute;s dans le jeu. Cliquez sur une photo pour la reprendre&nbsp;; la source et la licence s&rsquo;affichent sous la carte. Si le jeu contient trop peu d&rsquo;informations pour trouver quelque chose, saisissez vous-m&ecirc;me un terme de recherche (&eacute;glise, ville ou nom de l&rsquo;orgue) dans le champ en haut de la fen&ecirc;tre et choisissez <b>Rechercher</b>.</p>
 <figure><img src="afbeeldingen/fr/04_online_zoeken.jpg" alt="Chercher une photo en ligne"><figcaption>La fen&ecirc;tre &laquo;&nbsp;Chercher une photo en ligne&nbsp;&raquo; avec le champ pour un terme de recherche personnel et les photos trouv&eacute;es, avec leur source et leur licence.</figcaption></figure>
 
+<h3 id="codm">Hauptwerk Custom Organ (CODM) et le rapport d&rsquo;importation</h3>
+<p>Une d&eacute;finition Custom Organ (<code>.CustomOrgan_Hauptwerk_xml</code>) ne d&eacute;crit que la structure de l&rsquo;orgue : claviers, jeux, accouplements et tremblants. Les &eacute;chantillons se trouvent dans des <b>paquets d&rsquo;&eacute;chantillons</b> s&eacute;par&eacute;s, dans le dossier <code>OrganInstallationPackages</code>, qui doit se trouver &agrave; c&ocirc;t&eacute; de la d&eacute;finition ou au-dessus. JM-Orgue le v&eacute;rifie avant le chargement.</p>
+<ul>
+  <li>Si un paquet d&rsquo;&eacute;chantillons manque, l&rsquo;&eacute;cran <b>L&rsquo;orgue est incomplet</b> indique les paquets manquants (avec leur nom) et le nombre de jeux qui sonneraient. L&rsquo;orgue actuel reste actif jusqu&rsquo;&agrave; votre choix.</li>
+  <li><b>Choisir le dossier de paquets&hellip;</b> permet d&rsquo;indiquer le dossier qui contient <code>OrganInstallationPackages</code> ; le choix est m&eacute;moris&eacute; par orgue. Aucun fichier n&rsquo;est copi&eacute; ni converti.</li>
+  <li><b>Charger partiellement</b> ne charge que les jeux dont les &eacute;chantillons sont pr&eacute;sents ; une barre en haut vous le rappelle et ouvre le <b>Rapport d&rsquo;importation</b>. Si rien n&rsquo;est jouable, vous ne pouvez qu&rsquo;annuler.</li>
+  <li>Le <b>Rapport d&rsquo;importation</b> indique ce qui &eacute;tait attendu et ce qui est charg&eacute;, les jeux ignor&eacute;s et pourquoi, et o&ugrave; JM-Orgue utilise une approximation (par exemple : le tremblant sonne comme une simple modulation, car les formes d&rsquo;onde de Hauptwerk ne sont pas lues).</li>
+  <li>JM-Orgue ne peut pas lire les &eacute;chantillons au format prot&eacute;g&eacute; <code>.hbw</code> de Hauptwerk ; un jeu d&rsquo;&eacute;chantillons qui en d&eacute;pend est signal&eacute; comme injouable.</li>
+</ul>
+<p>Un orgue CODM avec tous ses &eacute;chantillons se charge sans question. Qu&rsquo;il sonne exactement comme dans Hauptwerk n&rsquo;a pas &eacute;t&eacute; v&eacute;rifi&eacute; : cela demande un jeu d&rsquo;&eacute;chantillons original complet et un enregistrement de r&eacute;f&eacute;rence.</p>
+
 <!-- ============================================================ -->
 <h2 id="bespelen">3. Charger et jouer un orgue</h2>
 

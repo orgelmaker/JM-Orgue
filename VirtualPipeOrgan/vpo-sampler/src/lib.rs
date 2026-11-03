@@ -27,7 +27,7 @@ pub use loader::{
 pub use cache::*;
 pub use pool::*;
 pub use grandorgue::*;
-pub use hauptwerk::{load_hauptwerk, load_hauptwerk_met_verslag, is_hauptwerk_path, clean_stop_name, strip_pitch_from_name, zonder_vastgeplakte_voetmaat,
+pub use hauptwerk::{load_hauptwerk, load_hauptwerk_met_verslag, voorcontrole_hauptwerk, is_hauptwerk_path, clean_stop_name, strip_pitch_from_name, zonder_vastgeplakte_voetmaat,
                    gedeeld_voorvoegsel, strip_voorvoegsel, clean_division_name, find_package_root};
 pub use streaming::*;
 pub use import_report::{ImportReport, Ernst, Melding, PakketRol, PakketStatus, Tellingen, OvergeslagenStop};

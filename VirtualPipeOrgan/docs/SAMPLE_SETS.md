@@ -1,6 +1,6 @@
 # Sample sets voor JM-Orgue
 
-JM-Orgue leest twee formaten rechtstreeks in: GrandOrgue (`.organ`) en Hauptwerk (`.Organ_Hauptwerk_xml`), zonder omzetstap. Hieronder een verzameling **gratis** en **niet-versleutelde** sample sets die met de app werken.
+JM-Orgue leest drie formaten rechtstreeks in: GrandOrgue (`.organ`), Hauptwerk (`.Organ_Hauptwerk_xml`) en Hauptwerk Custom Organ (`.CustomOrgan_Hauptwerk_xml`, CODM), zonder omzetstap. Een CODM-definitie bevat alleen de opbouw; de samples staan in aparte samplepakketten in de map `OrganInstallationPackages` naast of boven de definitie. Ontbreekt er een pakket, dan meldt JM-Orgue dat vóór het laden en toont een importverslag. Hieronder een verzameling **gratis** en **niet-versleutelde** sample sets die met de app werken.
 
 > **Let op:** alleen sample sets met losse `.wav` bestanden werken. Gesloten formaten zijn niet te gebruiken, zoals Hauptwerks eigen `.hbw`, `.pkg` en `.iwh`. JM-Orgue weigert zo'n set met een melding in plaats van een orgel zonder geluid te tonen.
 

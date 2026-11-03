@@ -99,6 +99,27 @@ pub fn load_hauptwerk_met_verslag(
     }
 }
 
+/// Snelle voorcontrole van een CODM-definitie (zonder de markers van alle samplebestanden
+/// te lezen). Geen CODM of onleesbaar: de gewone melding in het verslag.
+pub fn voorcontrole_hauptwerk(
+    odf_path: &Path,
+    pakketroot: Option<&Path>,
+) -> crate::import_report::ImportReport {
+    use crate::import_report::{Ernst, ImportReport};
+    let fout = |e: OdfError| {
+        let mut v = ImportReport { formaat: "hauptwerk".into(), bron: odf_path.to_string_lossy().to_string(), niet_speelbaar: true, onvolledig: true, ..Default::default() };
+        v.melding(Ernst::Fout, "bestand", e.to_string());
+        v
+    };
+    let bytes = match std::fs::read(odf_path) { Ok(b) => b, Err(e) => return fout(e.into()) };
+    let xml = match ensure_readable_xml(bytes) { Ok(x) => x, Err(e) => return fout(e) };
+    if crate::hauptwerk_codm::is_codm(&xml) {
+        crate::hauptwerk_codm::voorcontrole_codm(odf_path, &xml, pakketroot).1
+    } else {
+        ImportReport::uit_definitie("hauptwerk", "", &odf_path.to_string_lossy(), "", 0, 0, 0)
+    }
+}
+
 /// Foutmelding voor binaire/versleutelde Hauptwerk-bestanden.
 const ENCRYPTED_MSG: &str =
     "Deze Hauptwerk-set is versleuteld/niet-leesbaar; alleen onversleutelde sets worden ondersteund";

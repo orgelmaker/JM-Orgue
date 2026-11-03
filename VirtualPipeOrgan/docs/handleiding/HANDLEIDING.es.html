@@ -64,6 +64,17 @@
 <p>La <b>búsqueda en línea</b> muestra algunas fotos de libre uso de Wikimedia Commons, a partir del nombre, el constructor y la localidad registrados en el set. Haz clic en una foto para adoptarla; la fuente y la licencia aparecen bajo la tarjeta. Si el set contiene demasiado pocos datos para encontrar algo, escribe tú mismo un término (iglesia, localidad o nombre del órgano) en el campo de la parte superior de la ventana y elige <b>Buscar</b>.</p>
 <figure><img src="afbeeldingen/es/04_online_zoeken.jpg" alt="Buscar la foto en línea"><figcaption>La ventana «Buscar la foto en línea» con el campo para un término propio y las fotos encontradas con su fuente y licencia.</figcaption></figure>
 
+<h3 id="codm">Hauptwerk Custom Organ (CODM) y el informe de importaci&oacute;n</h3>
+<p>Una definici&oacute;n Custom Organ (<code>.CustomOrgan_Hauptwerk_xml</code>) solo describe la estructura del &oacute;rgano: teclados, registros, acoplamientos y tr&eacute;molos. Las muestras est&aacute;n en <b>paquetes de muestras</b> aparte, en la carpeta <code>OrganInstallationPackages</code>, que debe estar junto a la definici&oacute;n o por encima. JM-Orgue lo comprueba antes de cargar.</p>
+<ul>
+  <li>Si falta un paquete de muestras, la pantalla <b>El &oacute;rgano est&aacute; incompleto</b> muestra los paquetes que faltan (con su nombre) y cu&aacute;ntos registros sonar&iacute;an. El &oacute;rgano actual sigue activo hasta que elija.</li>
+  <li><b>Elegir carpeta de paquetes&hellip;</b> permite se&ntilde;alar la carpeta que contiene <code>OrganInstallationPackages</code>; la elecci&oacute;n se recuerda por &oacute;rgano. No se copia ni se convierte ning&uacute;n archivo.</li>
+  <li><b>Cargar parcialmente</b> carga solo los registros cuyas muestras est&aacute;n presentes; una barra arriba lo recuerda y abre el <b>Informe de importaci&oacute;n</b>. Si nada es tocable, solo se puede cancelar.</li>
+  <li>El <b>Informe de importaci&oacute;n</b> indica lo que se esperaba y lo que se carg&oacute;, qu&eacute; registros se omitieron y por qu&eacute;, y d&oacute;nde JM-Orgue usa una aproximaci&oacute;n (por ejemplo: el tr&eacute;molo suena como una modulaci&oacute;n simple porque no se leen las formas de onda de Hauptwerk).</li>
+  <li>JM-Orgue no puede leer muestras en el formato protegido <code>.hbw</code> de Hauptwerk; un juego que dependa de ellas se informa como no tocable.</li>
+</ul>
+<p>Un &oacute;rgano CODM con todas sus muestras se carga sin preguntas. No se ha comprobado que suene exactamente como en Hauptwerk: eso exige un juego original completo y una grabaci&oacute;n de referencia.</p>
+
 <!-- ============================================================ -->
 <h2 id="bespelen">3. Cargar y tocar un órgano</h2>
 

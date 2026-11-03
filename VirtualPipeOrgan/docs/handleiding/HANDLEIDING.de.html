@@ -64,6 +64,17 @@
 <p>Die <b>Online-Suche</b> zeigt einige frei verwendbare Fotos von Wikimedia Commons, anhand von Name, Erbauer und Ort aus dem Set. Klicken Sie auf ein Foto, um es zu &uuml;bernehmen; Quelle und Lizenz erscheinen unter der Karte. Enth&auml;lt das Set zu wenig, um etwas zu finden, geben Sie selbst einen Suchbegriff ein (Kirche, Ort oder Orgelname), und zwar im Feld oben im Fenster, und w&auml;hlen Sie <b>Suchen</b>.</p>
 <figure><img src="afbeeldingen/de/04_online_zoeken.jpg" alt="Online nach einem Foto suchen"><figcaption>Das Fenster &bdquo;Online nach einem Foto suchen&ldquo; mit dem Feld f&uuml;r einen eigenen Suchbegriff und den gefundenen Fotos samt Quelle und Lizenz.</figcaption></figure>
 
+<h3 id="codm">Hauptwerk Custom Organ (CODM) und der Importbericht</h3>
+<p>Eine Custom-Organ-Definition (<code>.CustomOrgan_Hauptwerk_xml</code>) beschreibt nur den Aufbau der Orgel: Manuale, Register, Koppeln und Tremulanten. Die Samples liegen in getrennten <b>Sample-Paketen</b> im Ordner <code>OrganInstallationPackages</code>, der neben oder oberhalb der Definition liegen muss. JM-Orgue pr&uuml;ft das vor dem Laden.</p>
+<ul>
+  <li>Fehlt ein Sample-Paket, zeigt der Bildschirm <b>Orgel ist unvollst&auml;ndig</b> die fehlenden Pakete (mit Namen) und wie viele Register klingen w&uuml;rden. Die aktuelle Orgel bleibt aktiv, bis Sie w&auml;hlen.</li>
+  <li>Mit <b>Paketordner w&auml;hlen&hellip;</b> zeigen Sie den Ordner, der <code>OrganInstallationPackages</code> enth&auml;lt; die Wahl wird pro Orgel gemerkt. Es werden keine Dateien kopiert oder umgewandelt.</li>
+  <li><b>Teilweise laden</b> l&auml;dt nur die Register, deren Samples vorhanden sind; eine Leiste oben erinnert daran und &ouml;ffnet den <b>Importbericht</b>. Ist nichts spielbar, k&ouml;nnen Sie nur abbrechen.</li>
+  <li>Der <b>Importbericht</b> nennt, was erwartet und was geladen wurde, welche Register &uuml;bersprungen wurden und warum, und wo JM-Orgue eine N&auml;herung verwendet (zum Beispiel: der Tremulant klingt als einfache Modulation, weil die Wellenformen von Hauptwerk nicht gelesen werden).</li>
+  <li>Samples im gesch&uuml;tzten <code>.hbw</code>-Format von Hauptwerk kann JM-Orgue nicht lesen; ein Set, das davon abh&auml;ngt, wird als nicht spielbar gemeldet.</li>
+</ul>
+<p>Eine CODM-Orgel mit allen Samples l&auml;dt ohne R&uuml;ckfrage. Ob sie genau wie in Hauptwerk klingt, wurde nicht &uuml;berpr&uuml;ft: Daf&uuml;r braucht es ein vollst&auml;ndiges Originalset und eine Referenzaufnahme.</p>
+
 <!-- ============================================================ -->
 <h2 id="bespelen">3. Eine Orgel laden und spielen</h2>
 
