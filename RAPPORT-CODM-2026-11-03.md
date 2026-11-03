@@ -1,7 +1,7 @@
 # Eindrapport CODM-ontwikkelplan (3 november 2026)
 
 **Basis:** JM-Orgue 0.9.41 (`1171585`). **Stand:** zes commits lokaal (`ab8a986` A+B, `07e4a19` C, `d68ba52` D,
-`88cfd25` E, `fb16096` F) plus het G-werk dat dit rapport meelevert. Niets is gepusht of uitgebracht.
+`88cfd25` E, `fb16096` F, `7f69260` G). Niets is gepusht of uitgebracht.
 Gedetailleerde veldstatus: `VELDMATRIX-CODM-2026-11-03.md`.
 
 ## 1. Wat gebouwd is
@@ -82,7 +82,7 @@ referentiespeler. Uitkomst voor elke CODM-set: nog niet klinkend gevalideerd.
 | Echte Piteå-/Litomyšl-samples | pakketten 758/759 en de commerciële samples ontbreken |
 | Cue-semantiek bij echte natte releases | alleen gids en eigen proefbestanden |
 
-## 7. Gewijzigde bestanden (sinds 0.9.41, voor de G-wijzigingen nog te committen)
+## 7. Gewijzigde bestanden (sinds 0.9.41, t/m F; G staat hieronder)
 - `VELDMATRIX-CODM-2026-11-03.md`
 - `VirtualPipeOrgan/Cargo.lock`
 - `VirtualPipeOrgan/src-tauri/src/commands.rs`
@@ -110,4 +110,4 @@ referentiespeler. Uitkomst voor elke CODM-set: nog niet klinkend gevalideerd.
 - `VirtualPipeOrgan/vpo-sampler/src/lib.rs`
 - `VirtualPipeOrgan/vpo-sampler/src/loader.rs`
 
-Nog te committen (G): `VirtualPipeOrgan/testscripts/codm_*.py`, `ab_vergelijk.py`, `docs/AB_KLANKPROTOCOL.md`, README, `SAMPLE_SETS.md`, `TEST_API.md`, de zeven handleidingen (HTML + PDF), de snelle voorcontrole en de pijplijntest.
+Het G-werk staat in `7f69260` (testscripts, A/B-protocol, documentatie, voorcontrole, pijplijntest).
