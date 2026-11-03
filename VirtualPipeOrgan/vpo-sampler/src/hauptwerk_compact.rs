@@ -863,6 +863,23 @@ fn id_verzameling(objs: &[FieldMap]) -> HashSet<u32> {
         .collect()
 }
 
+/// Rapport over hoe veilig de automatische veldafleiding van een compacte
+/// ODF is geslaagd. Niet elk niet-gevonden veld is even ernstig.
+#[derive(Debug, Clone, Default)]
+pub struct CompactVeldrapport {
+    /// Identiteitsvelden (stop, pijp, sample, laag enz.) die niet zijn afgeleid.
+    /// Zijn ze er niet, dan kan de importer de records niet verbinden; dat is
+    /// een importfout.
+    pub kritiek_ontbrekend: Vec<String>,
+    /// Niet-cruciale velden (stemming, release-grens, alternatieve rang) die
+    /// niet herkend zijn. Het orgel speelt wel, maar één of meer details uit de
+    /// definitie worden niet toegepast.
+    pub minder_belangrijk_ontbrekend: Vec<String>,
+    /// Letters die bij veel objecten voorkomen maar waarvan we de betekenis niet
+    /// konden afleiden. (objecttype, letter, aantal, totaal).
+    pub letters_zonder_naam: Vec<(String, String, usize, usize)>,
+}
+
 /// De vertaaltabel van één gecomprimeerde ODF.
 pub(crate) struct GecomprimeerdeOdf {
     /// objecttype → (letter → veldnaam)
@@ -1314,36 +1331,118 @@ impl GecomprimeerdeOdf {
     }
 
     fn log_samenvatting(&self, rauw: &HashMap<&str, Vec<FieldMap>>) {
-        let mut onvolledig: Vec<String> = Vec::new();
-        for (typ, verwacht) in [
-            ("Stop", &["StopID", "Name", "DivisionID"][..]),
-            ("StopRank", &["StopID", "RankID"][..]),
-            ("Pipe_SoundEngine01", &["PipeID", "RankID", "NormalMIDINoteNumber"][..]),
-            ("Pipe_SoundEngine01_Layer", &["LayerID", "PipeID"][..]),
-            ("Pipe_SoundEngine01_AttackSample", &["LayerID", "SampleID"][..]),
-            ("Sample", &["SampleID", "SampleFilename"][..]),
-        ] {
-            if rauw.get(typ).map(|v| v.is_empty()).unwrap_or(true) {
+        let r = self.bouw_rapport(rauw);
+        if r.kritiek_ontbrekend.is_empty() && r.minder_belangrijk_ontbrekend.is_empty() {
+            info!("Hauptwerk: gecomprimeerde orgeldefinitie, alle sleutelvelden herkend");
+        } else {
+            if !r.kritiek_ontbrekend.is_empty() {
+                warn!(
+                    "Hauptwerk: gecomprimeerde orgeldefinitie, deze IDENTITEITSVELDEN zijn niet herkend: {}",
+                    r.kritiek_ontbrekend.join(", ")
+                );
+            }
+            if !r.minder_belangrijk_ontbrekend.is_empty() {
+                info!(
+                    "Hauptwerk: gecomprimeerde orgeldefinitie, deze overige velden zijn niet herkend: {}",
+                    r.minder_belangrijk_ontbrekend.join(", ")
+                );
+            }
+        }
+    }
+
+    /// Bouw een rapport over de afgeleide veldmapping, zodat
+    /// `load_hauptwerk_met_verslag` het in het importverslag kan tonen.
+    /// Niet elk niet-herkend veld is even erg: velden die stop-, pijp-, koppel-
+    /// of sample-identiteit bepalen kunnen de import ongezien beschadigen; de
+    /// rest is hooguit een gemiste detailinstelling.
+    pub(crate) fn veldmapping_rapport(&self, xml: &str) -> CompactVeldrapport {
+        let rauw: HashMap<&str, Vec<FieldMap>> = OBJECTTYPEN
+            .iter()
+            .map(|t| (*t, rauwe_objecten(xml, t)))
+            .collect();
+        self.bouw_rapport(&rauw)
+    }
+
+    /// Kernvelden: zonder deze kan de importer de rij niet zinvol verwerken.
+    /// Onbekend hier = `Ernst::Fout` in het verslag.
+    fn kritieke_velden() -> &'static [(&'static str, &'static [&'static str])] {
+        &[
+            ("Stop", &["StopID", "Name", "DivisionID"]),
+            ("StopRank", &["StopID", "RankID"]),
+            ("Rank", &["RankID"]),
+            ("Pipe_SoundEngine01", &["PipeID", "RankID", "NormalMIDINoteNumber"]),
+            ("Pipe_SoundEngine01_Layer", &["LayerID", "PipeID"]),
+            ("Pipe_SoundEngine01_AttackSample", &["LayerID", "SampleID"]),
+            ("Pipe_SoundEngine01_ReleaseSample", &["LayerID", "SampleID"]),
+            ("Sample", &["SampleID", "SampleFilename"]),
+            ("Division", &["DivisionID"]),
+            ("Keyboard", &["Sys_ObjectID"]),
+            ("Enclosure", &["EnclosureID"]),
+            ("EnclosurePipe", &["EnclosureID", "PipeID"]),
+        ]
+    }
+
+    /// Minder cruciale velden: niet-herkend betekent dat een bijstelling of
+    /// bijzonder gedrag gemist wordt, maar het orgel speelt wel.
+    fn minder_belangrijke_velden() -> &'static [(&'static str, &'static [&'static str])] {
+        &[
+            ("Pipe_SoundEngine01", &["Pitch_Tempered_BaseTuningSchemeCode", "Pitch_Tempered_BaseTuningDeviation", "Pitch_OriginalOrgan_PitchHz"]),
+            ("Sample", &["Pitch_SpecificationMethodCode", "Pitch_ExactSamplePitch"]),
+            ("StopRank", &["ActionTypeCode", "ActionEffectCode", "AlternateRankID"]),
+        ]
+    }
+
+    fn bouw_rapport(&self, rauw: &HashMap<&str, Vec<FieldMap>>) -> CompactVeldrapport {
+        let mut kritiek = Vec::new();
+        for (typ, velden) in Self::kritieke_velden() {
+            if rauw.get(*typ).map(|v| v.is_empty()).unwrap_or(true) {
                 continue;
             }
-            let gevonden = self.tabel.get(typ);
-            for v in verwacht {
-                let ok = gevonden
-                    .map(|m| m.values().any(|n| n == v))
-                    .unwrap_or(false);
+            let gevonden = self.tabel.get(*typ);
+            for v in *velden {
+                let ok = gevonden.map(|m| m.values().any(|n| n == v)).unwrap_or(false);
                 if !ok {
-                    onvolledig.push(format!("{}.{}", typ, v));
+                    kritiek.push(format!("{typ}.{v}"));
                 }
             }
         }
-        if onvolledig.is_empty() {
-            info!("Hauptwerk: gecomprimeerde orgeldefinitie, alle sleutelvelden herkend");
-        } else {
-            warn!(
-                "Hauptwerk: gecomprimeerde orgeldefinitie, deze velden zijn niet herkend: {}",
-                onvolledig.join(", ")
-            );
+        let mut overig = Vec::new();
+        for (typ, velden) in Self::minder_belangrijke_velden() {
+            if rauw.get(*typ).map(|v| v.is_empty()).unwrap_or(true) {
+                continue;
+            }
+            let gevonden = self.tabel.get(*typ);
+            for v in *velden {
+                let ok = gevonden.map(|m| m.values().any(|n| n == v)).unwrap_or(false);
+                if !ok {
+                    overig.push(format!("{typ}.{v}"));
+                }
+            }
         }
+        let mut letters_zonder_naam = Vec::new();
+        for typ in OBJECTTYPEN {
+            let objs = match rauw.get(*typ) {
+                Some(v) if !v.is_empty() => v,
+                _ => continue,
+            };
+            let gevonden = self.tabel.get(*typ);
+            let mut per_letter: std::collections::BTreeMap<String, usize> = Default::default();
+            for o in objs {
+                for k in o.keys() {
+                    if gevonden.map(|m| m.contains_key(k)).unwrap_or(false) { continue; }
+                    *per_letter.entry(k.clone()).or_insert(0) += 1;
+                }
+            }
+            for (letter, aantal) in per_letter {
+                // Alleen letters die bij >= 10 % van de objecten voorkomen: zelden
+                // gebruikte velden zijn meestal onbelangrijk en sommige komen
+                // slechts één keer voor (uitzonderingen).
+                if aantal * 10 >= objs.len() {
+                    letters_zonder_naam.push((typ.to_string(), letter, aantal, objs.len()));
+                }
+            }
+        }
+        CompactVeldrapport { kritiek_ontbrekend: kritiek, minder_belangrijk_ontbrekend: overig, letters_zonder_naam }
     }
 
     /// Leest één objectlijst en vertaalt de letters naar de lange veldnamen.

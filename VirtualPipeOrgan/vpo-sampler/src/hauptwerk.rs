@@ -93,9 +93,59 @@ pub fn load_hauptwerk_met_verslag(
             );
             v.pakketroot = Some(root.to_string_lossy().to_string());
             v.pakketroot_handmatig = pakketroot.is_some();
+            voeg_compact_rapport_toe(&mut v, &xml);
             (Ok(def), v)
         }
         Err(e) => mislukt(e),
+    }
+}
+
+/// Voeg meldingen aan het verslag toe over de automatische veldafleiding van
+/// een compacte ODF: wat niet herkend is, met welke ernst.
+fn voeg_compact_rapport_toe(v: &mut crate::import_report::ImportReport, xml: &str) {
+    use crate::import_report::Ernst;
+    let Some(c) = crate::hauptwerk_compact::GecomprimeerdeOdf::detecteer(xml) else { return };
+    let r = c.veldmapping_rapport(xml);
+    if !r.kritiek_ontbrekend.is_empty() {
+        v.melding(
+            Ernst::Fout,
+            "compacte-definitie",
+            format!(
+                "gecomprimeerde Hauptwerk-definitie: {} identiteitsveld(en) niet automatisch herkend — delen van het orgel kunnen onvolledig of verkeerd geladen zijn ({})",
+                r.kritiek_ontbrekend.len(),
+                r.kritiek_ontbrekend.join(", ")
+            ),
+        );
+    }
+    if !r.minder_belangrijk_ontbrekend.is_empty() {
+        v.melding(
+            Ernst::Waarschuwing,
+            "compacte-definitie",
+            format!(
+                "gecomprimeerde Hauptwerk-definitie: {} niet-kritisch veld(en) niet herkend; die bijstelling uit de definitie wordt niet toegepast ({})",
+                r.minder_belangrijk_ontbrekend.len(),
+                r.minder_belangrijk_ontbrekend.join(", ")
+            ),
+        );
+    }
+    // Onbekende letters worden alleen samengevat (één melding per objecttype,
+    // met het aantal letters): elke letter apart tonen is onleesbaar en voor
+    // de meeste sets ongeïnteresseerd.
+    use std::collections::BTreeMap;
+    let mut per_type: BTreeMap<String, usize> = BTreeMap::new();
+    for (typ, _letter, _aantal, _totaal) in r.letters_zonder_naam {
+        *per_type.entry(typ).or_insert(0) += 1;
+    }
+    if !per_type.is_empty() {
+        let delen: Vec<String> = per_type.iter().map(|(t, n)| format!("{t}: {n}")).collect();
+        v.melding(
+            Ernst::Info,
+            "compacte-definitie",
+            format!(
+                "gecomprimeerde Hauptwerk-definitie: enkele veelvoorkomende letters konden niet automatisch aan een veldnaam gekoppeld worden ({})",
+                delen.join(", ")
+            ),
+        );
     }
 }
 
