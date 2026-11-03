@@ -3594,7 +3594,10 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
                                     &extra, key_midi, owner.harmonic_number, hierarchie_pc,
                                     zwevend, odf_measured, total_cents,
                                 ),
-                                extra.original_pitch_cents,
+                                // Terugval als de WAV geen smpl-pitch draagt:
+                                // de originele pijptoon (Hauptwerk), anders de
+                                // nominale toon van de gekozen opname (CODM).
+                                extra.original_pitch_cents.or(extra.keuze_sample_cents),
                             ));
                             // Tremulant-opname van deze pijp (0.8.87): een
                             // eigen hertemper-invoer onder de TREM-sleutel. De

@@ -158,6 +158,13 @@ pub struct CodmRank {
     pub sample_sprong: i32,
     /// Harmonische t.o.v. 64' (8 = 8').
     pub harmonische: u32,
+    /// `Samples_RankBasePitch64ftHarmNumIfAssumedTunedToConcertPitch`: de
+    /// harmonische waarop de opnamen als gestemd worden aangenomen (leeg = die
+    /// van de uitvoer).
+    pub sample_harmonische: Option<u32>,
+    /// `Samples_AssumeTunedToConcertPitchAndEqualTemp`: de opnamen staan op de
+    /// toon van hun bestandsnoot (anders beslist de metadata in de WAV).
+    pub samples_gestemd: bool,
     pub niveau_db_36: f32,
     pub niveau_db_96: f32,
     pub stemming_ct_36: f32,
@@ -389,6 +396,8 @@ pub fn parse_codm(xml: &str) -> Result<CodmOrgel, OdfError> {
             middel_release_ms: r.get_i32("Samples_MaxNoteTimeMsForMediumNoteReleaseSamplesIfAny"),
             sample_sprong: r.get_i32("Samples_MIDINoteNumIncrementFromPipesToSamples").unwrap_or(0),
             harmonische: r.get_u32("Pitch_RankBaseOutputPitch64ftHarmonicNum").filter(|h| *h > 0).unwrap_or(8),
+            sample_harmonische: r.get_u32("Samples_RankBasePitch64ftHarmNumIfAssumedTunedToConcertPitch").filter(|h| *h > 0),
+            samples_gestemd: ja(r, "Samples_AssumeTunedToConcertPitchAndEqualTemp"),
             niveau_db_36: f("Amp_PipeMIDINoteNum036_LevelAdjustDecibels"),
             niveau_db_96: f("Amp_PipeMIDINoteNum096_LevelAdjustDecibels"),
             stemming_ct_36: f("Pitch_PipeMIDINoteNum036_TuningAdjustPercentSemitones"),
@@ -712,6 +721,20 @@ fn lineair(a36: f32, a96: f32, noot: u32) -> f32 {
     a36 + (a96 - a36) * (noot as f32 - 36.0) / 60.0
 }
 
+/// Doeltoon (absoluut, cents; 6000 = c') van de pijp met noot `pijp_noot` in
+/// deze rang: de noot plus de oktaafverhouding van de uitvoerharmonische.
+pub fn doeltoon_cents(r: &CodmRank, pijp_noot: u32) -> f32 {
+    100.0 * pijp_noot as f32 + 1200.0 * (r.harmonische as f32 / 8.0).log2()
+}
+
+/// Nominale toon (absoluut, cents) van de opname met bestandsnoot `sample_noot`:
+/// de noot plus de oktaafverhouding van haar basisharmonische (leeg = die van
+/// de uitvoer, dus de opname staat dan op de toon van de pijp zelf).
+pub fn nominale_sample_cents(r: &CodmRank, sample_noot: u32) -> f32 {
+    let hs = r.sample_harmonische.filter(|_| r.samples_gestemd).unwrap_or(r.harmonische);
+    100.0 * sample_noot as f32 + 1200.0 * (hs as f32 / 8.0).log2()
+}
+
 /// De pijp `pijp_noot` van een rang: aanslagbestand + releases + inschaling.
 fn bouw_pijp(z: &mut SampleZoeker, r: &CodmRank, pijp_noot: u32) -> Option<PipeDef> {
     let sample_noot = (pijp_noot as i32 + r.sample_sprong).max(0) as u32;
@@ -726,7 +749,15 @@ fn bouw_pijp(z: &mut SampleZoeker, r: &CodmRank, pijp_noot: u32) -> Option<PipeD
     let db = lineair(r.niveau_db_36, r.niveau_db_96, pijp_noot);
     if db != 0.0 { extra.gain_db = Some(db); }
     let ct = lineair(r.stemming_ct_36, r.stemming_ct_96, pijp_noot);
-    if ct != 0.0 { extra.pitch_tuning_cents = Some(ct); }
+    // Samplekeuze-transpositie (los van de stemming): de gekozen opname klinkt
+    // op haar eigen nominale toon, de pijp hoort op de doeltoon. Ze valt samen
+    // bij een eigen opname per pijp, en is een halve toon of meer bij een
+    // geleende opname of een opname die vele pijpen bestrijkt (chimes).
+    let nominaal = nominale_sample_cents(r, gekozen_noot);
+    let transpositie = doeltoon_cents(r, pijp_noot) - nominaal;
+    extra.keuze_sample_cents = Some(nominaal);
+    let totaal = ct + if transpositie.abs() > 0.01 { transpositie } else { 0.0 };
+    if totaal != 0.0 { extra.pitch_tuning_cents = Some(totaal); }
     // HarmonicShaping: 3e+ boventonen bijstellen. De hoek ligt tussen de 2e en
     // 3e harmonische van de OPGENOMEN grondtoon (het filter werkt op de ruwe
     // opname, vóór hertemperen), dus relatief aan `gekozen_noot`.
@@ -1495,6 +1526,74 @@ mod tests {
         assert!(!p758.naam.is_empty(), "pakket 758 moet bij naam genoemd worden");
         assert_eq!(v.overgeslagen.len(), 58);
         assert!(v.overgeslagen.iter().any(|o| o.reden.contains("758")), "{:?}", v.overgeslagen.first());
+    }
+
+    // ---- Samplekeuze en toonhoogte (werkpakket C) ----
+
+    #[test]
+    fn nominale_toon_en_doeltoon() {
+        let mut r = parse_codm(VOORBEELD).unwrap().ranks[&1].clone();
+        // 8': doeltoon = noot, opname op haar eigen noot staat op die toon.
+        r.harmonische = 8;
+        r.sample_harmonische = None;
+        r.samples_gestemd = false;
+        assert_eq!(doeltoon_cents(&r, 60), 6000.0);
+        assert_eq!(nominale_sample_cents(&r, 60), 6000.0);
+        // Geleende opname (noot 61 voor pijp 60): transpositie -100 ct.
+        assert_eq!(doeltoon_cents(&r, 60) - nominale_sample_cents(&r, 61), -100.0);
+        // 16': doeltoon een octaaf lager; zonder aparte opnameharmonische staat de
+        // opname op de toon van de pijp zelf.
+        r.harmonische = 16;
+        assert!((doeltoon_cents(&r, 60) - 7200.0).abs() < 1e-3);
+        assert!((nominale_sample_cents(&r, 60) - 7200.0).abs() < 1e-3);
+        // Opnamen gestemd aangenomen op 8' terwijl de rang als 16' klinkt: een octaaf transpositie.
+        r.sample_harmonische = Some(8);
+        r.samples_gestemd = true;
+        assert!((doeltoon_cents(&r, 60) - nominale_sample_cents(&r, 60) - 1200.0).abs() < 1e-3);
+        // Zonder 'gestemd aangenomen' is de basisharmonische van de opname niet van belang.
+        r.samples_gestemd = false;
+        assert!((doeltoon_cents(&r, 60) - nominale_sample_cents(&r, 60)).abs() < 1e-3);
+    }
+
+    /// De 37 chimes-toetsen delen één WAV (noot 61) maar krijgen elk de juiste
+    /// halve-toonverschuiving, ook aan beide uiteinden (-13 en +23 halve tonen).
+    #[test]
+    fn chimes_een_wav_voor_37_toetsen_juiste_transpositie() {
+        let Some(map) = fixtures() else { return };
+        let mini = map.join("pitea-minimal");
+        let odf = mini.join("OrganDefinitions/Les-Pitea895-945.CustomOrgan_Hauptwerk_xml");
+        if !odf.is_file() {
+            eprintln!("OVERGESLAGEN: testen/codm/pitea-minimal ontbreekt");
+            return;
+        }
+        let xml = std::fs::read_to_string(&odf).unwrap();
+        let def = laad_codm(&odf, &xml).expect("Chimes moet laden");
+        let stop = &def.stops[0];
+        let mut pijpen: Vec<(u32, PathBuf, f32, f32)> = Vec::new();
+        for p in &stop.pipes {
+            if let PipeDef::Sample { path, extra } = p {
+                pijpen.push((extra.key_midi_note.unwrap(), path.clone(), extra.pitch_tuning_cents.unwrap_or(0.0), extra.keuze_sample_cents.unwrap()));
+            }
+        }
+        assert_eq!(pijpen.len(), 37, "37 virtuele pijpen");
+        // Eén gedeeld bestand, één nominale toon (noot 61 = 6100 ct, 8').
+        assert!(pijpen.iter().all(|p| p.1 == pijpen[0].1));
+        assert!(pijpen.iter().all(|p| (p.3 - 6100.0).abs() < 1e-3));
+        // Pijp n klinkt 100·(n-61) ct boven de opname; stemming van de rang is 0.
+        for (noot, _, tuning, _) in &pijpen {
+            assert!((tuning - 100.0 * (*noot as f32 - 61.0)).abs() < 1e-3, "noot {noot}: {tuning}");
+        }
+        let eerste = pijpen.iter().min_by_key(|p| p.0).unwrap();
+        let laatste = pijpen.iter().max_by_key(|p| p.0).unwrap();
+        assert_eq!((eerste.0, laatste.0), (48, 84));
+        assert!((eerste.2 + 1300.0).abs() < 1e-3 && (laatste.2 - 2300.0).abs() < 1e-3,
+                "uiteinden {} / {}", eerste.2, laatste.2);
+        // Opeenvolgende pijpen: precies een halve toon uit elkaar (frequentieverhouding 2^(1/12)).
+        let mut gesorteerd = pijpen.clone();
+        gesorteerd.sort_by_key(|p| p.0);
+        for w in gesorteerd.windows(2) {
+            assert!(((w[1].2 - w[0].2) - 100.0).abs() < 1e-3);
+        }
     }
 
     #[test]

@@ -667,6 +667,13 @@ pub struct PipeExtra {
     /// Hauptwerk: absolute samplepitch in cents (6900 = a' 440 Hz), uit
     /// Pitch_ExactSamplePitch of Pitch_NormalMIDINoteNumber.
     pub sample_pitch_cents: Option<f32>,
+    /// CODM (0.9.42): nominale toonhoogte (absoluut, cents) van de door de
+    /// samplekeuze gekozen opname, afgeleid van haar bestandsnoot en de
+    /// basisharmonische van de rang. Alleen een terugval voor het hertemperen
+    /// als de WAV zelf geen smpl-pitch draagt; het verschil met de doeltoon is
+    /// dan een bedoelde transpositie (een chime-opname die 37 pijpen bestrijkt)
+    /// en valt niet onder de plausibiliteitsgrens voor foute metadata.
+    pub keuze_sample_cents: Option<f32>,
     /// Hauptwerk: gemeten toonhoogte van de originele pijp in cents
     /// (Pitch_OriginalOrgan_PitchHz) — terugval als sample/smpl ontbreken.
     pub original_pitch_cents: Option<f32>,
@@ -1461,6 +1468,7 @@ impl OdfParser {
             harmonic_number: self.parse_u32(section, &format!("{}HarmonicNumber", key)),
             key_midi_note: None,
             sample_pitch_cents: None,
+            keuze_sample_cents: None,
             original_pitch_cents: None,
             // Een opgegeven PitchCorrection (op de pijp of op de rank/oude
             // stop-sectie, óók 0) is een stemmingsopdracht: bij hertemperen
