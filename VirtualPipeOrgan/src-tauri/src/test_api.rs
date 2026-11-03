@@ -519,6 +519,12 @@ fn route_test_only(
             let path = v.get("path").and_then(|x| x.as_str()).ok_or((400u16, "path ontbreekt".to_string()))?;
             serde_json::to_value(crate::commands::preflight_verslag(state, path)).map_err(|e| (500u16, e.to_string()))
         }
+        // CODM willekeurige stemafwijking per pijp aan/uit (geldt bij het volgende laden).
+        (tiny_http::Method::Post, "/settings/codm_random") => {
+            let on = !query.split('&').any(|kv| kv == "on=0");
+            state.codm_random_stemming.store(on, std::sync::atomic::Ordering::Relaxed);
+            Ok(json!({"codm_random": on}))
+        }
         (tiny_http::Method::Get, "/import/report") => {
             serde_json::to_value(state.laatste_importverslag.read().clone()).map_err(|e| (500u16, e.to_string()))
         }

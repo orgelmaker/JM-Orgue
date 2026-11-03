@@ -7,7 +7,8 @@ Resultaat: <doelmap>/OrganDefinitions/Mini.CustomOrgan_Hauptwerk_xml  (laden in 
 Twee registers, elk met twee pijpen (noot 60/61):
   Gt: Gescheiden  - aparte releases: kort (<=150 ms, 600 Hz), middel (<=300 ms, 900 Hz),
                     primair (1300 Hz, 0,9 s); hoofdbestand 220 Hz met loop.
-  Gt: MeerCues    - release in het hoofdbestand met TWEE cue-markers: de eerste (0,5 s)
+  Gt: MeerCues    - Pitch_MaxRandomTuningErrorHz=5 (willekeurige stemafwijking, voor de meting);
+                    release in het hoofdbestand met TWEE cue-markers: de eerste (0,5 s)
                     begint een 700 Hz-release, de tweede (0,8 s) een 1400 Hz-staart.
                     Hauptwerk/CODM: release start bij de EERSTE marker (700 Hz).
 """
@@ -67,7 +68,7 @@ def main(doel):
 <ObjectList ObjectType="division"><Division><DivisionCode>02</DivisionCode><Name>GREAT</Name><ShortName>Gt</ShortName><NumberOfKeys>61</NumberOfKeys><MIDINoteNumOfFirstKey>36</MIDINoteNumOfFirstKey></Division></ObjectList>
 <ObjectList ObjectType="rank">
 <Rank><RankID>1</RankID><Name>Gescheiden</Name><NumberOfPipes>2</NumberOfPipes><MIDINoteNumberOfFirstPipe>60</MIDINoteNumberOfFirstPipe><IsPercussive>N</IsPercussive><Samples_InstallationPackageID>9</Samples_InstallationPackageID><Samples_MainSampleFileFolder>Gesch</Samples_MainSampleFileFolder><Samples_MIDINoteNumIncrementFromPipesToSamples>0</Samples_MIDINoteNumIncrementFromPipesToSamples><Pitch_RankBaseOutputPitch64ftHarmonicNum>8</Pitch_RankBaseOutputPitch64ftHarmonicNum><Samples_ShortNoteReleaseSampleFileFolderIfAny>Gesch\\rel150</Samples_ShortNoteReleaseSampleFileFolderIfAny><Samples_MaxNoteTimeMsForShortNoteReleaseSamplesIfAny>150</Samples_MaxNoteTimeMsForShortNoteReleaseSamplesIfAny><Samples_MediumNoteReleaseSampleFileFolderIfAny>Gesch\\rel300</Samples_MediumNoteReleaseSampleFileFolderIfAny><Samples_MaxNoteTimeMsForMediumNoteReleaseSamplesIfAny>300</Samples_MaxNoteTimeMsForMediumNoteReleaseSamplesIfAny><Samples_RelSampleFileFolderIfRelSamplesStoredInSeparateFiles>Gesch\\rel900</Samples_RelSampleFileFolderIfRelSamplesStoredInSeparateFiles></Rank>
-<Rank><RankID>2</RankID><Name>MeerCues</Name><NumberOfPipes>2</NumberOfPipes><MIDINoteNumberOfFirstPipe>60</MIDINoteNumberOfFirstPipe><IsPercussive>N</IsPercussive><Samples_InstallationPackageID>9</Samples_InstallationPackageID><Samples_MainSampleFileFolder>Cues</Samples_MainSampleFileFolder><Samples_MIDINoteNumIncrementFromPipesToSamples>0</Samples_MIDINoteNumIncrementFromPipesToSamples><Pitch_RankBaseOutputPitch64ftHarmonicNum>8</Pitch_RankBaseOutputPitch64ftHarmonicNum></Rank>
+<Rank><RankID>2</RankID><Name>MeerCues</Name><NumberOfPipes>2</NumberOfPipes><MIDINoteNumberOfFirstPipe>60</MIDINoteNumberOfFirstPipe><IsPercussive>N</IsPercussive><Samples_InstallationPackageID>9</Samples_InstallationPackageID><Samples_MainSampleFileFolder>Cues</Samples_MainSampleFileFolder><Samples_MIDINoteNumIncrementFromPipesToSamples>0</Samples_MIDINoteNumIncrementFromPipesToSamples><Pitch_RankBaseOutputPitch64ftHarmonicNum>8</Pitch_RankBaseOutputPitch64ftHarmonicNum><Pitch_MaxRandomTuningErrorHz>5</Pitch_MaxRandomTuningErrorHz></Rank>
 </ObjectList>
 <ObjectList ObjectType="stop"><Stop><StopCode>2101</StopCode><Name>Gt: Gescheiden 8'</Name></Stop><Stop><StopCode>2102</StopCode><Name>Gt: MeerCues 8'</Name></Stop></ObjectList>
 <ObjectList ObjectType="stoprank">

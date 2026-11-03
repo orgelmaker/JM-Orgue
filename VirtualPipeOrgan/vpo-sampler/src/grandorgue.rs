@@ -674,6 +674,10 @@ pub struct PipeExtra {
     /// dan een bedoelde transpositie (een chime-opname die 37 pijpen bestrijkt)
     /// en valt niet onder de plausibiliteitsgrens voor foute metadata.
     pub keuze_sample_cents: Option<f32>,
+    /// CODM (0.9.42): vaste, willekeurige stemafwijking van deze pijp in cents
+    /// (`Pitch_MaxRandomTuningErrorHz`), per pijp stabiel. Wordt bij het laden
+    /// alleen opgeteld als de gebruiker dit effect aan heeft staan.
+    pub random_tuning_cents: Option<f32>,
     /// Hauptwerk: gemeten toonhoogte van de originele pijp in cents
     /// (Pitch_OriginalOrgan_PitchHz) — terugval als sample/smpl ontbreken.
     pub original_pitch_cents: Option<f32>,
@@ -1469,6 +1473,7 @@ impl OdfParser {
             key_midi_note: None,
             sample_pitch_cents: None,
             keuze_sample_cents: None,
+            random_tuning_cents: None,
             original_pitch_cents: None,
             // Een opgegeven PitchCorrection (op de pijp of op de rank/oude
             // stop-sectie, óók 0) is een stemmingsopdracht: bij hertemperen

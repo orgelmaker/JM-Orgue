@@ -177,6 +177,14 @@ pub struct CodmRank {
     pub tremulant: Option<u32>,
     /// `ReverbTailTruncation_ModeCode`: 1 = geen, 2 = halve sinus vanaf het begin
     /// van de release, 3 = vanaf de eerste marker in de release.
+    /// `Pitch_MaxRandomTuningErrorHz`: grootste willekeurige stemafwijking (Hz) per pijp.
+    pub willekeurig_hz: f32,
+    /// `WindSupply_MaxFlowRandomisationPct`: willekeurige variatie van de windstroom.
+    pub wind_flow_pct: f32,
+    /// Alleen een deel van de rang zit in de zwelkast / heeft de tremulant
+    /// (`Encl_…FirstEnclosedPipe…` / `Trem_…FirstTremmedPipe…` ingevuld en niet 0).
+    pub zwelkast_deel: bool,
+    pub trem_deel: bool,
     pub truncatie_modus: u32,
     /// Gevraagde uitsterflengte (ms) voor een middelste c op een 8'-register.
     pub truncatie_ms: f32,
@@ -411,6 +419,12 @@ pub fn parse_codm(xml: &str) -> Result<CodmOrgel, OdfError> {
             shaping_db_96: f("HarmonicShaping_PipeMIDINoteNum096_3rdAndUpperHarmLvlAdjDb"),
             zwelkast: r.get_u32("Encl_EnclosureCode").filter(|c| *c > 0),
             tremulant: r.get_u32("Trem_TremulantCode").filter(|c| *c > 0),
+            willekeurig_hz: f("Pitch_MaxRandomTuningErrorHz"),
+            wind_flow_pct: f("WindSupply_MaxFlowRandomisationPct"),
+            zwelkast_deel: r.get_u32("Encl_MIDINoteNumOfFirstEnclosedPipeIfWholeRankNotEnclosed").unwrap_or(0) > 0
+                || r.get_u32("Encl_MIDINoteNumOfLastEnclosedPipeIfWholeRankNotEnclosed").unwrap_or(0) > 0,
+            trem_deel: r.get_u32("Trem_MIDINoteNumOfFirstTremmedPipeIfWholeRankNotTremmed").unwrap_or(0) > 0
+                || r.get_u32("Trem_MIDINoteNumOfLastTremmedPipeIfWholeRankNotTremmed").unwrap_or(0) > 0,
             truncatie_modus: r.get_u32("ReverbTailTruncation_ModeCode").unwrap_or(1),
             truncatie_ms: f("ReverbTailTruncation_DecayLengthAsMsForMiddleCOn8FtStop"),
             trem_pakket: r.get_u32("Trem_SampleInstallationPackageID").unwrap_or(0),
@@ -745,6 +759,26 @@ fn lineair(a36: f32, a96: f32, noot: u32) -> f32 {
     a36 + (a96 - a36) * (noot as f32 - 36.0) / 60.0
 }
 
+/// Vaste, willekeurige stemafwijking (cents) van één pijp, begrensd door
+/// `max_hz` bij de doeltoon van de pijp. Hauptwerk past bij elke activering een
+/// willekeurige afwijking toe "gewogen naar zuivere stemming"; hier is die
+/// per pijp stabiel (afgeleid van rang en noot, niet van de laadvolgorde) en
+/// kleiner dan het maximum met kans ~ u² (gemiddeld een derde van het maximum).
+/// Benadering: de kansverdeling van Hauptwerk is niet gedocumenteerd.
+pub fn willekeurige_stemming_cents(rank_id: u32, pijp_noot: u32, max_hz: f32, doel_cents: f32) -> f32 {
+    // SplitMix64 over (rang, noot): geen afhankelijkheid van een RNG-crate.
+    let mut z = ((rank_id as u64) << 32 | pijp_noot as u64).wrapping_add(0x9E37_79B9_7F4A_7C15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^= z >> 31;
+    let u = ((z >> 11) as f64 / (1u64 << 53) as f64) as f32; // 0..1
+    let teken = if z & 1 == 0 { 1.0 } else { -1.0 };
+    let delta_hz = teken * max_hz * u * u;
+    let f = 440.0 * 2f32.powf((doel_cents - 6900.0) / 1200.0);
+    if f <= 0.0 { return 0.0; }
+    1200.0 * ((f + delta_hz).max(0.01) / f).log2()
+}
+
 /// Doeltoon (absoluut, cents; 6000 = c') van de pijp met noot `pijp_noot` in
 /// deze rang: de noot plus de oktaafverhouding van de uitvoerharmonische.
 pub fn doeltoon_cents(r: &CodmRank, pijp_noot: u32) -> f32 {
@@ -780,6 +814,9 @@ fn bouw_pijp(z: &mut SampleZoeker, r: &CodmRank, pijp_noot: u32) -> Option<PipeD
     let nominaal = nominale_sample_cents(r, gekozen_noot);
     let transpositie = doeltoon_cents(r, pijp_noot) - nominaal;
     extra.keuze_sample_cents = Some(nominaal);
+    if r.willekeurig_hz > 0.0 {
+        extra.random_tuning_cents = Some(willekeurige_stemming_cents(r.id, pijp_noot, r.willekeurig_hz, doeltoon_cents(r, pijp_noot)));
+    }
     let totaal = ct + if transpositie.abs() > 0.01 { transpositie } else { 0.0 };
     if totaal != 0.0 { extra.pitch_tuning_cents = Some(totaal); }
     // HarmonicShaping: 3e+ boventonen bijstellen. De hoek ligt tussen de 2e en
@@ -937,6 +974,52 @@ fn nieuw_verslag(orgel: &CodmOrgel, pakketten: &HashMap<u32, PathBuf>, bron: &st
         });
     }
     v.meldingen.extend(orgel.meldingen.iter().cloned());
+    // Golfvormtremulant: de golfvorm (`…TremulantPitchAndFundamentalAmplitudeWaveform.wav`)
+    // staat in een Hauptwerk-eigen formaat dat niet openbaar gedocumenteerd is en
+    // wordt niet gelezen. De tremulant klinkt als een eenvoudige LFO-modulatie.
+    let trem_rangen: Vec<&CodmRank> = orgel.ranks.values().filter(|r| !r.trem_map.is_empty() && r.tremulant.is_some()).collect();
+    if !trem_rangen.is_empty() {
+        v.melding(
+            Ernst::Waarschuwing,
+            "tremulant",
+            format!(
+                "{} rangen gebruiken golfvormtremulant (Hauptwerk-eigen formaat, niet openbaar gedocumenteerd): de golfvorm wordt niet gelezen en de tremulant klinkt als een eenvoudige modulatie (benadering, niet gevalideerd)",
+                trem_rangen.len()
+            ),
+        );
+    }
+    let deel_zwelkast = orgel.ranks.values().filter(|r| r.zwelkast_deel).count();
+    if deel_zwelkast > 0 {
+        v.melding(
+            Ernst::Waarschuwing,
+            "zwelkast",
+            format!("{deel_zwelkast} rangen hebben maar een deel van hun pijpen in de zwelkast; de hele rang wordt als ingesloten behandeld"),
+        );
+    }
+    let deel_trem = orgel.ranks.values().filter(|r| r.trem_deel).count();
+    if deel_trem > 0 {
+        v.melding(
+            Ernst::Waarschuwing,
+            "tremulant",
+            format!("{deel_trem} rangen hebben maar een deel van hun pijpen onder de tremulant; de hele rang wordt als tremulant-gevoelig behandeld"),
+        );
+    }
+    let wind_rangen = orgel.ranks.values().filter(|r| r.wind_flow_pct > 0.0).count();
+    if wind_rangen > 0 {
+        v.melding(
+            Ernst::Info,
+            "wind",
+            format!("{wind_rangen} rangen vragen willekeurige variatie van de windstroom (WindSupply_MaxFlowRandomisationPct); niet toegepast, het JM-windmodel heeft een eigen pijpverschil"),
+        );
+    }
+    let random_rangen = orgel.ranks.values().filter(|r| r.willekeurig_hz > 0.0).count();
+    if random_rangen > 0 {
+        v.melding(
+            Ernst::Info,
+            "stemming",
+            format!("{random_rangen} rangen krijgen een vaste willekeurige stemafwijking per pijp (Pitch_MaxRandomTuningErrorHz, benadering van de Hauptwerk-kansverdeling); uit te zetten voor A/B-vergelijking"),
+        );
+    }
     // Reverb tail truncation (modus 2/3) wordt nog niet toegepast: de natte
     // release klinkt dan met de volle nagalm. Vermeld dat per rang, in plaats van
     // het stil te laten vallen.
@@ -1089,6 +1172,23 @@ fn bouw_definitie(
             .collect();
 
         let windlade = (rang.zwelkast, rang.tremulant.filter(|t| trem_nummer.contains_key(t)));
+        {
+            let andere: std::collections::BTreeSet<(Option<u32>, Option<u32>)> = delen.iter()
+                .filter(|sr| !sr.extern_)
+                .filter_map(|sr| sr.rank.and_then(|id| orgel.ranks.get(&id)))
+                .map(|r| (r.zwelkast, r.tremulant.filter(|t| trem_nummer.contains_key(t))))
+                .collect();
+            if andere.len() > 1 {
+                verslag.melding(
+                    Ernst::Waarschuwing,
+                    format!("stop {}", stop.code),
+                    format!(
+                        "stop '{}' heeft rangen met verschillende zwelkast/tremulant; alleen die van de eerste rang (zwelkast {:?}, tremulant {:?}) geldt voor het hele register",
+                        stop.naam, windlade.0, windlade.1
+                    ),
+                );
+            }
+        }
         let windchest_group = if windlade == (None, None) {
             0
         } else {
@@ -1120,6 +1220,23 @@ fn bouw_definitie(
     }
 
     verslag.beschermd = beschermd;
+    // Golfvormbestanden van tremulantrangen: aanwezig in het pakket?
+    for r in orgel.ranks.values().filter(|r| !r.trem_map.is_empty() && r.tremulant.is_some()) {
+        let Some(dir) = pakketten.get(&r.trem_pakket) else { continue };
+        if !map_blijft_in_pakket(&r.trem_map) { continue; }
+        let pad = dir.join(r.trem_map.replace('\\', "/"));
+        let aantal = std::fs::read_dir(&pad).map(|rd| rd.flatten().filter(|e| {
+            let n = e.file_name().to_string_lossy().to_lowercase();
+            n.contains("tremulant") && (n.ends_with(".wav") || n.ends_with(".hbw") || n.ends_with(".wv"))
+        }).count()).unwrap_or(0);
+        if aantal == 0 {
+            verslag.melding(
+                Ernst::Waarschuwing,
+                format!("rank {}", r.id),
+                format!("rang '{}': geen tremulantgolfbestanden gevonden in '{}'", r.naam, r.trem_map),
+            );
+        }
+    }
     for (id, (naam, aantal)) in &z.zonder_release {
         verslag.melding(
             Ernst::Waarschuwing,
@@ -1736,6 +1853,77 @@ mod tests {
         assert!(v.meldingen.iter().any(|m| m.tekst.contains("reverb tail truncation") && m.tekst.contains("modus 3")), "{:?}", v.meldingen);
         let (_d, v) = bouw_mini(&mini_orgel("<ReverbTailTruncation_ModeCode>1</ReverbTailTruncation_ModeCode>"), &d);
         assert!(!v.meldingen.iter().any(|m| m.tekst.contains("reverb tail")), "modus 1 is geen truncatie");
+    }
+
+    // ---- Tremulant, zwelkast en wind (werkpakket E) ----
+
+    #[test]
+    fn willekeurige_stemming_is_stabiel_begrensd_en_verschilt_per_pijp() {
+        let doel = |n: u32| 100.0 * n as f32;
+        // Stabiel: zelfde invoer, zelfde uitkomst.
+        assert_eq!(willekeurige_stemming_cents(7, 60, 0.5, doel(60)), willekeurige_stemming_cents(7, 60, 0.5, doel(60)));
+        let mut waarden = Vec::new();
+        for n in 36..=96 {
+            let c = willekeurige_stemming_cents(7, n, 0.5, doel(n));
+            // Begrensd door het maximum in Hz bij de toonhoogte van de pijp.
+            let f = 440.0 * 2f32.powf((doel(n) - 6900.0) / 1200.0);
+            let max_cents = 1200.0 * ((f + 0.5) / f).log2().abs().max(1200.0 * ((f - 0.5).max(0.01) / f).log2().abs());
+            assert!(c.abs() <= max_cents + 1e-3, "noot {n}: {c} > {max_cents}");
+            waarden.push(c);
+        }
+        // Verschilt per pijp, beide tekens komen voor, gemiddeld klein (gewogen naar zuiver).
+        assert!(waarden.iter().any(|c| *c > 0.0) && waarden.iter().any(|c| *c < 0.0));
+        assert!(waarden.windows(2).any(|w| (w[0] - w[1]).abs() > 1e-4));
+        // Een andere rang geeft een andere reeks.
+        assert_ne!(willekeurige_stemming_cents(8, 60, 0.5, doel(60)), willekeurige_stemming_cents(7, 60, 0.5, doel(60)));
+        // Bij 0 Hz geen afwijking.
+        assert!(willekeurige_stemming_cents(7, 60, 0.0, doel(60)).abs() < 1e-4);
+    }
+
+    #[test]
+    fn pijpen_krijgen_de_willekeurige_stemming_alleen_als_de_rang_het_vraagt() {
+        let d = tijdmap("random");
+        std::fs::create_dir_all(d.join("Main")).unwrap();
+        for n in [60, 61] { schrijf_wav(&d.join("Main").join(format!("{n:03}-x.wav")), 60000, &[(10000, 20000)], &[30000]); }
+        let (def, v) = bouw_mini(&mini_orgel("<Pitch_MaxRandomTuningErrorHz>0.5</Pitch_MaxRandomTuningErrorHz>"), &d);
+        let a = match &def.stops[0].pipes[0] { PipeDef::Sample { extra, .. } => extra.random_tuning_cents, _ => None };
+        let b = match &def.stops[0].pipes[1] { PipeDef::Sample { extra, .. } => extra.random_tuning_cents, _ => None };
+        assert!(a.is_some() && b.is_some() && a != b, "{a:?} {b:?}");
+        assert!(v.meldingen.iter().any(|m| m.tekst.contains("willekeurige stemafwijking")), "{:?}", v.meldingen);
+        let (def, _) = bouw_mini(&mini_orgel("<Pitch_MaxRandomTuningErrorHz>0</Pitch_MaxRandomTuningErrorHz>"), &d);
+        assert_eq!(eerste_extra(&def).random_tuning_cents, None);
+    }
+
+    #[test]
+    fn golfvormtremulant_en_deelbereiken_worden_gemeld() {
+        let d = tijdmap("trem");
+        std::fs::create_dir_all(d.join("Main")).unwrap();
+        for n in [60, 61] { schrijf_wav(&d.join("Main").join(format!("{n:03}-x.wav")), 60000, &[(10000, 20000)], &[30000]); }
+        let xml = mini_orgel("<Trem_TremulantCode>1720</Trem_TremulantCode><Trem_SampleInstallationPackageID>9</Trem_SampleInstallationPackageID><Trem_WaveformSampleFileFolder>Trem</Trem_WaveformSampleFileFolder><Encl_MIDINoteNumOfFirstEnclosedPipeIfWholeRankNotEnclosed>60</Encl_MIDINoteNumOfFirstEnclosedPipeIfWholeRankNotEnclosed><WindSupply_MaxFlowRandomisationPct>5</WindSupply_MaxFlowRandomisationPct>")
+            .replace("</ObjectList>\n<ObjectList ObjectType=\"stop\">", "</ObjectList>\n<ObjectList ObjectType=\"tremulant\"><Tremulant><TremulantCode>1720</TremulantCode><Name>Tremulant: Gt</Name><FrequencyHz>5</FrequencyHz></Tremulant></ObjectList>\n<ObjectList ObjectType=\"stop\">");
+        let (_def, v) = bouw_mini(&xml, &d);
+        let tekst: Vec<&str> = v.meldingen.iter().map(|m| m.tekst.as_str()).collect();
+        assert!(tekst.iter().any(|t| t.contains("golfvormtremulant") && t.contains("eenvoudige modulatie")), "{tekst:?}");
+        assert!(tekst.iter().any(|t| t.contains("deel van hun pijpen in de zwelkast")), "{tekst:?}");
+        assert!(tekst.iter().any(|t| t.contains("windstroom")), "{tekst:?}");
+        // Het trembestandsmapje bestaat niet: dat wordt vermeld.
+        assert!(tekst.iter().any(|t| t.contains("geen tremulantgolfbestanden")), "{tekst:?}");
+    }
+
+    #[test]
+    fn stop_met_rangen_van_verschillende_zwelkast_wordt_gemeld() {
+        let d = tijdmap("gemengd");
+        for map in ["Main", "Main2"] { std::fs::create_dir_all(d.join(map)).unwrap(); }
+        for n in [60, 61] {
+            for map in ["Main", "Main2"] { schrijf_wav(&d.join(map).join(format!("{n:03}-x.wav")), 60000, &[(10000, 20000)], &[30000]); }
+        }
+        let xml = mini_orgel("<Encl_EnclosureCode>220</Encl_EnclosureCode>")
+            .replace("</ObjectList>\n<ObjectList ObjectType=\"stop\">",
+                     "<Rank><RankID>2</RankID><Name>Tweede</Name><NumberOfPipes>2</NumberOfPipes><MIDINoteNumberOfFirstPipe>60</MIDINoteNumberOfFirstPipe><IsPercussive>N</IsPercussive><Samples_InstallationPackageID>9</Samples_InstallationPackageID><Samples_MainSampleFileFolder>Main2</Samples_MainSampleFileFolder><Pitch_RankBaseOutputPitch64ftHarmonicNum>8</Pitch_RankBaseOutputPitch64ftHarmonicNum></Rank></ObjectList>\n<ObjectList ObjectType=\"enclosure\"><Enclosure><EnclosureCode>220</EnclosureCode><Name>SWELL</Name></Enclosure></ObjectList>\n<ObjectList ObjectType=\"stop\">")
+            .replace("</StopRank></ObjectList>",
+                     "</StopRank><StopRank><StopCode>2101</StopCode><RankTypeCode>1</RankTypeCode><RankID>2</RankID><MIDINoteNumIncrementFromDivisionToRank>0</MIDINoteNumIncrementFromDivisionToRank><MIDINoteNumOfFirstMappedDivisionKey>60</MIDINoteNumOfFirstMappedDivisionKey><NumberOfMappedDivisionKeys>2</NumberOfMappedDivisionKeys><ActionTypeCode>1</ActionTypeCode><ActionEffectCode>1</ActionEffectCode></StopRank></ObjectList>");
+        let (_def, v) = bouw_mini(&xml, &d);
+        assert!(v.meldingen.iter().any(|m| m.object == "stop 2101" && m.tekst.contains("verschillende zwelkast")), "{:?}", v.meldingen);
     }
 
     // ---- Samplekeuze en toonhoogte (werkpakket C) ----

@@ -3289,6 +3289,7 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
         // De release-/trem-sleutels leiden terug naar deze sleutel door
         // RELEASE_KEY_MASK weg te maskeren (zie de fan-out verderop).
         let mut harm_shelves: HashMap<(u32, u32), vpo_sampler::HarmShelf> = HashMap::new();
+        let codm_random_aan = state.codm_random_stemming.load(std::sync::atomic::Ordering::Relaxed);
         // Percussieve stops (one-shot: klok e.d.) en ODF-looppunten per bestand.
         // GrandOrgue-regel: zodra de ODF een loop opgeeft, winnen die van de
         // smpl-chunk in de WAV (override, geen fallback).
@@ -3559,9 +3560,12 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
                             }
                             _ => 0.0,
                         };
+                        // CODM: vaste willekeurige stemafwijking per pijp (alleen met het effect aan).
+                        let rnd_cents = if codm_random_aan { extra.random_tuning_cents.unwrap_or(0.0) } else { 0.0 };
                         let total_cents = organ_cents + wc_cents + stop_cents
                             + extra.pitch_tuning_cents.unwrap_or(0.0)
-                            + hw_origineel_delta;
+                            + hw_origineel_delta
+                            + rnd_cents;
                         if total_db.abs() > 0.01 || total_cents.abs() > 0.01 {
                             odf_voicings.insert((stop.id, pipe_num), (total_db, total_cents));
                         }
@@ -3586,7 +3590,8 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
                             }
                             let hierarchie_pc = definition.organ.pitch_correction_cents
                                 + owner_wc_pc
-                                + owner.pitch_correction;
+                                + owner.pitch_correction
+                                + rnd_cents;
                             retune_inputs.push((
                                 (stop.id, pipe_num),
                                 path.clone(),

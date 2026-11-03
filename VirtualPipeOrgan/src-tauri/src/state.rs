@@ -1543,6 +1543,10 @@ pub struct AppState {
     /// Verslag van de laatste import (ook van een mislukte of gedeeltelijke):
     /// de UI kan het opnieuw openen.
     pub laatste_importverslag: Arc<RwLock<Option<vpo_sampler::ImportReport>>>,
+    /// CODM: vaste willekeurige stemafwijking per pijp toepassen (standaard aan,
+    /// zoals Hauptwerk). Uit te zetten voor A/B-vergelijking; geldt bij het
+    /// eerstvolgende laden van een orgel.
+    pub codm_random_stemming: Arc<std::sync::atomic::AtomicBool>,
     /// Currently loaded organ ID (for saving settings on close)
     pub current_organ_id: Arc<RwLock<Option<String>>>,
     /// Crescendo configuration: stages[i] = list of stop IDs that should be ON at stage i
@@ -2114,6 +2118,7 @@ impl AppState {
             organ_library,
             app_data_dir,
             laatste_importverslag: Arc::new(RwLock::new(None)),
+            codm_random_stemming: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             current_organ_id: Arc::new(RwLock::new(None)),
             crescendo_stages,
             crescendo_stage,

@@ -108,3 +108,6 @@ Het externe plan noemde `5272a67`; die commit bestaat hier niet. Deze matrix is 
 | D1 | korte/middel/lang op de grenzen (≤ grens), aparte primaire release; gemeten 600/900/1300 Hz-releases | zie D-commit |
 | D2 | CODM-release in het hoofdbestand start bij de EERSTE cue (GO: hoogste cue blijft); losse release start op frame 0; geen marker/loop → waarschuwing | zie D-commit |
 | D3 | `ReverbTailTruncation_*` gelezen; in alle vier de bronnen modus 1 (geen truncatie) → geen effect; modus 2/3 wordt per rang als "niet beschikbaar" gemeld, niet toegepast | zie D-commit |
+| E1 | golfvormtremulant: bestandsformaat niet openbaar gedocumenteerd en geen trembestanden beschikbaar → ⛔ niet te implementeren/valideren; LFO-benadering expliciet gemeld in het verslag, ontbrekende trembestanden per rang gemeld | zie E-commit |
+| E2 | zwelkast/trem per hele rang werkt (bronnen: alle 38 ingesloten rangen identieke filterwaarden, nergens een deelbereik). Per-rang/per-pijp-routing binnen één stop NIET gebouwd: vraagt de per-pijp-kastenroute van JM-ACOUSTICS (UI-gekoppeld); nu gemeld als waarschuwing | zie E-commit |
+| E3 | `Pitch_MaxRandomTuningErrorHz` toegepast (vast per pijp, aan/uit via `/settings/codm_random`), gemeten −7,4 ct = verwacht; windflowvariatie en trem-dieptevariatie niet toegepast (gemeld) | zie E-commit |
