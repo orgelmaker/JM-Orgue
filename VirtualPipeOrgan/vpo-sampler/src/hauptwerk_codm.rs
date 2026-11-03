@@ -175,6 +175,11 @@ pub struct CodmRank {
     pub shaping_db_96: f32,
     pub zwelkast: Option<u32>,
     pub tremulant: Option<u32>,
+    /// `ReverbTailTruncation_ModeCode`: 1 = geen, 2 = halve sinus vanaf het begin
+    /// van de release, 3 = vanaf de eerste marker in de release.
+    pub truncatie_modus: u32,
+    /// Gevraagde uitsterflengte (ms) voor een middelste c op een 8'-register.
+    pub truncatie_ms: f32,
     /// Pakket en map met de tremulant-golfvormen van de rang (leeg = geen).
     pub trem_pakket: u32,
     pub trem_map: String,
@@ -406,6 +411,8 @@ pub fn parse_codm(xml: &str) -> Result<CodmOrgel, OdfError> {
             shaping_db_96: f("HarmonicShaping_PipeMIDINoteNum096_3rdAndUpperHarmLvlAdjDb"),
             zwelkast: r.get_u32("Encl_EnclosureCode").filter(|c| *c > 0),
             tremulant: r.get_u32("Trem_TremulantCode").filter(|c| *c > 0),
+            truncatie_modus: r.get_u32("ReverbTailTruncation_ModeCode").unwrap_or(1),
+            truncatie_ms: f("ReverbTailTruncation_DecayLengthAsMsForMiddleCOn8FtStop"),
             trem_pakket: r.get_u32("Trem_SampleInstallationPackageID").unwrap_or(0),
             trem_map: tekst(r, "Trem_WaveformSampleFileFolder"),
         }))
@@ -692,6 +699,23 @@ struct SampleZoeker<'a> {
     mappen: HashMap<(u32, String), SampleMap>,
     /// Mapnamen die uit het pakket zouden ontsnappen en daarom geweigerd zijn.
     geweigerd: std::collections::BTreeSet<(u32, String)>,
+    /// Markers (loops + cue) per hoofdbestand, eenmaal gelezen.
+    markers: HashMap<PathBuf, Option<crate::loader::WavMarkers>>,
+    /// Rangen met pijpen die geen release kunnen krijgen: rang-id → (naam, aantal).
+    zonder_release: BTreeMap<u32, (String, usize)>,
+}
+
+impl SampleZoeker<'_> {
+    fn markers(&mut self, pad: &Path) -> Option<&crate::loader::WavMarkers> {
+        // Alleen gewone WAV: een WavPack-bestand zou hiervoor volledig gedecodeerd worden.
+        if !pad.extension().is_some_and(|e| e.eq_ignore_ascii_case("wav")) {
+            return None;
+        }
+        self.markers
+            .entry(pad.to_path_buf())
+            .or_insert_with(|| crate::loader::read_wav_markers(pad))
+            .as_ref()
+    }
 }
 
 /// Blijft deze mapnaam binnen het pakket? Absolute paden, stationsletters en
@@ -779,10 +803,31 @@ fn bouw_pijp(z: &mut SampleZoeker, r: &CodmRank, pijp_noot: u32) -> Option<PipeD
                 extra.releases.push(ReleaseDef {
                     path: rp,
                     max_key_press_time_ms: max_ms.filter(|m| *m > 0),
-                    cue_point: None,
+                    // Een los release-bestand begint bij frame 0: een marker erin
+                    // (natte opname) geeft alleen het begin van het uitsterven aan
+                    // en is niet de start van de release.
+                    cue_point: Some(0),
                     release_end: None,
                     crossfade_ms: None,
                 });
+            }
+        }
+        // Geen aparte primaire release: die zit in het hoofdbestand, vanaf de
+        // EERSTE marker (Hauptwerk). Het GrandOrgue-gedrag (hoogste cue) zou bij
+        // een tweede marker voor het uitsterven de release te laat laten starten.
+        if r.release_map.is_empty() {
+            let mk = z.markers(&pad).cloned();
+            match mk {
+                Some(m) => {
+                    if let Some(eerste) = m.cue_frames.first() {
+                        extra.cue_point = Some(*eerste as u32);
+                    }
+                    if m.cue_frames.is_empty() || m.loops.is_empty() {
+                        let e = z.zonder_release.entry(r.id).or_insert_with(|| (r.naam.clone(), 0));
+                        e.1 += 1;
+                    }
+                }
+                None => {}
             }
         }
     }
@@ -892,6 +937,19 @@ fn nieuw_verslag(orgel: &CodmOrgel, pakketten: &HashMap<u32, PathBuf>, bron: &st
         });
     }
     v.meldingen.extend(orgel.meldingen.iter().cloned());
+    // Reverb tail truncation (modus 2/3) wordt nog niet toegepast: de natte
+    // release klinkt dan met de volle nagalm. Vermeld dat per rang, in plaats van
+    // het stil te laten vallen.
+    for r in orgel.ranks.values().filter(|r| !r.percussief && r.truncatie_modus >= 2) {
+        v.melding(
+            Ernst::Waarschuwing,
+            format!("rank {}", r.id),
+            format!(
+                "rang '{}' vraagt reverb tail truncation (modus {}, {} ms): niet beschikbaar, de release klinkt met de volle nagalm",
+                r.naam, r.truncatie_modus, r.truncatie_ms
+            ),
+        );
+    }
     for p in v.pakketten.clone() {
         if p.gevonden { continue; }
         let naam = if p.naam.is_empty() { p.id.to_string() } else { format!("{} ({})", p.id, p.naam) };
@@ -933,7 +991,7 @@ fn bouw_definitie(
         warn!("CODM '{}': samplepakket(ten) niet gevonden: {:?}", orgel.naam, ontbrekend);
     }
 
-    let mut z = SampleZoeker { pakketten, mappen: HashMap::new(), geweigerd: Default::default() };
+    let mut z = SampleZoeker { pakketten, mappen: HashMap::new(), geweigerd: Default::default(), markers: HashMap::new(), zonder_release: BTreeMap::new() };
     let divisie_bekend: HashSet<u32> = orgel.divisies.iter().map(|d| d.code).collect();
 
     // Windladen: één per combinatie (zwelkast, tremulant) die een stop gebruikt.
@@ -1062,6 +1120,15 @@ fn bouw_definitie(
     }
 
     verslag.beschermd = beschermd;
+    for (id, (naam, aantal)) in &z.zonder_release {
+        verslag.melding(
+            Ernst::Waarschuwing,
+            format!("rank {id}"),
+            format!(
+                "rang '{naam}': {aantal} pijpen hebben geen release-marker met loop in het hoofdbestand en geen aparte release; die noten klinken abrupt af"
+            ),
+        );
+    }
     for (pakket, map) in &z.geweigerd {
         verslag.melding(
             Ernst::Fout,
@@ -1526,6 +1593,149 @@ mod tests {
         assert!(!p758.naam.is_empty(), "pakket 758 moet bij naam genoemd worden");
         assert_eq!(v.overgeslagen.len(), 58);
         assert!(v.overgeslagen.iter().any(|o| o.reden.contains("758")), "{:?}", v.overgeslagen.first());
+    }
+
+    // ---- Releases en articulatie (werkpakket D) ----
+
+    /// Schrijf een stille 16-bit mono WAV met optionele loops (smpl) en cue-punten.
+    fn schrijf_wav(pad: &Path, frames: u32, loops: &[(u32, u32)], cues: &[u32]) {
+        let mut b: Vec<u8> = Vec::new();
+        let put32 = |b: &mut Vec<u8>, v: u32| b.extend_from_slice(&v.to_le_bytes());
+        let put16 = |b: &mut Vec<u8>, v: u16| b.extend_from_slice(&v.to_le_bytes());
+        b.extend_from_slice(b"RIFF"); put32(&mut b, 0); b.extend_from_slice(b"WAVE");
+        b.extend_from_slice(b"fmt "); put32(&mut b, 16);
+        put16(&mut b, 1); put16(&mut b, 1); put32(&mut b, 48000); put32(&mut b, 96000); put16(&mut b, 2); put16(&mut b, 16);
+        if !loops.is_empty() {
+            b.extend_from_slice(b"smpl"); put32(&mut b, 36 + 24 * loops.len() as u32);
+            for v in [0u32, 0, 20833, 60, 0, 0, 0, loops.len() as u32, 0] { put32(&mut b, v); }
+            for (i, (a, e)) in loops.iter().enumerate() {
+                for v in [i as u32, 0, *a, *e, 0, 0] { put32(&mut b, v); }
+            }
+        }
+        if !cues.is_empty() {
+            b.extend_from_slice(b"cue "); put32(&mut b, 4 + 24 * cues.len() as u32); put32(&mut b, cues.len() as u32);
+            for (i, c) in cues.iter().enumerate() {
+                put32(&mut b, i as u32 + 1); put32(&mut b, *c); b.extend_from_slice(b"data"); put32(&mut b, 0); put32(&mut b, 0); put32(&mut b, *c);
+            }
+        }
+        b.extend_from_slice(b"data"); put32(&mut b, frames * 2); b.extend(std::iter::repeat(0u8).take(frames as usize * 2));
+        let totaal = b.len() as u32 - 8;
+        b[4..8].copy_from_slice(&totaal.to_le_bytes());
+        std::fs::write(pad, b).unwrap();
+    }
+
+    /// Eén sustaining rang van 2 pijpen (noot 60/61) met de gegeven extra rangvelden.
+    fn mini_orgel(rank_velden: &str) -> String {
+        format!(r#"<?xml version="1.0"?>
+<Hauptwerk FileFormat="CustomOrgan" FileFormatVersion="3.00">
+<ObjectList ObjectType="_general"><_general><Name>Mini</Name></_general></ObjectList>
+<ObjectList ObjectType="division"><Division><DivisionCode>02</DivisionCode><Name>GREAT</Name><ShortName>Gt</ShortName><NumberOfKeys>61</NumberOfKeys><MIDINoteNumOfFirstKey>36</MIDINoteNumOfFirstKey></Division></ObjectList>
+<ObjectList ObjectType="rank"><Rank><RankID>1</RankID><Name>Test</Name><NumberOfPipes>2</NumberOfPipes><MIDINoteNumberOfFirstPipe>60</MIDINoteNumberOfFirstPipe><IsPercussive>N</IsPercussive><Samples_InstallationPackageID>9</Samples_InstallationPackageID><Samples_MainSampleFileFolder>Main</Samples_MainSampleFileFolder><Samples_MIDINoteNumIncrementFromPipesToSamples>0</Samples_MIDINoteNumIncrementFromPipesToSamples><Pitch_RankBaseOutputPitch64ftHarmonicNum>8</Pitch_RankBaseOutputPitch64ftHarmonicNum>{rank_velden}</Rank></ObjectList>
+<ObjectList ObjectType="stop"><Stop><StopCode>2101</StopCode><Name>Gt: Test 8'</Name></Stop></ObjectList>
+<ObjectList ObjectType="stoprank"><StopRank><StopCode>2101</StopCode><RankTypeCode>1</RankTypeCode><RankID>1</RankID><MIDINoteNumIncrementFromDivisionToRank>0</MIDINoteNumIncrementFromDivisionToRank><MIDINoteNumOfFirstMappedDivisionKey>60</MIDINoteNumOfFirstMappedDivisionKey><NumberOfMappedDivisionKeys>2</NumberOfMappedDivisionKeys><ActionTypeCode>1</ActionTypeCode><ActionEffectCode>1</ActionEffectCode></StopRank></ObjectList>
+</Hauptwerk>"#)
+    }
+
+    fn bouw_mini(xml: &str, dir: &Path) -> (OrganDefinition, ImportReport) {
+        let pakketten: HashMap<u32, PathBuf> = [(9u32, dir.to_path_buf())].into_iter().collect();
+        let o = parse_codm(xml).unwrap();
+        let mut v = nieuw_verslag(&o, &pakketten, "");
+        let def = bouw_definitie(&o, &pakketten, dir.to_path_buf(), &mut v).unwrap();
+        (def, v)
+    }
+
+    fn tijdmap(naam: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("vpo_codm_{}_{}", naam, std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    fn eerste_extra(def: &OrganDefinition) -> &PipeExtra {
+        match &def.stops[0].pipes[0] {
+            PipeDef::Sample { extra, .. } => extra,
+            _ => panic!("geen sample"),
+        }
+    }
+
+    /// Hauptwerk: de release in het hoofdbestand begint bij de EERSTE marker; een
+    /// tweede marker (begin van het uitsterven) mag de release niet te laat laten
+    /// starten. GrandOrgue-regel (hoogste cue) blijft in de loader ongemoeid.
+    #[test]
+    fn hoofdbestand_met_meer_cues_start_op_de_eerste_marker() {
+        let d = tijdmap("multicue");
+        std::fs::create_dir_all(d.join("Main")).unwrap();
+        for n in [60, 61] { schrijf_wav(&d.join("Main").join(format!("{n:03}-x.wav")), 60000, &[(10000, 20000)], &[30000, 50000]); }
+        let (def, v) = bouw_mini(&mini_orgel(""), &d);
+        assert_eq!(eerste_extra(&def).cue_point, Some(30000));
+        let m = crate::loader::read_wav_markers(&d.join("Main/060-x.wav")).unwrap();
+        assert_eq!(m.cue_frames, vec![30000, 50000]);
+        assert_eq!(m.cue_frame, Some(50000), "GrandOrgue-regel (hoogste cue) blijft");
+        assert!(!v.meldingen.iter().any(|m| m.tekst.contains("release-marker")), "{:?}", v.meldingen);
+    }
+
+    /// Zonder marker/loop en zonder aparte release bestaat er geen release: dat
+    /// staat in het verslag in plaats van stil te falen.
+    #[test]
+    fn hoofdbestand_zonder_markers_geeft_een_waarschuwing() {
+        let d = tijdmap("geenmarker");
+        std::fs::create_dir_all(d.join("Main")).unwrap();
+        for n in [60, 61] { schrijf_wav(&d.join("Main").join(format!("{n:03}-x.wav")), 60000, &[], &[]); }
+        let (def, v) = bouw_mini(&mini_orgel(""), &d);
+        assert_eq!(eerste_extra(&def).cue_point, None);
+        assert!(v.meldingen.iter().any(|m| m.object == "rank 1" && m.tekst.contains("2 pijpen") && m.tekst.contains("abrupt")), "{:?}", v.meldingen);
+    }
+
+    /// Korte en middellange release op de opgegeven grenzen plus de aparte
+    /// primaire release; een marker in zo'n los bestand (natte opname) zet het
+    /// begin van de release niet op die marker maar op frame 0.
+    #[test]
+    fn losse_releases_kort_middel_lang_beginnen_op_nul() {
+        let d = tijdmap("losserel");
+        for map in ["Main", "Main/rel150", "Main/rel300", "Main/rel900"] { std::fs::create_dir_all(d.join(map)).unwrap(); }
+        for n in [60, 61] {
+            schrijf_wav(&d.join("Main").join(format!("{n:03}-x.wav")), 60000, &[(10000, 20000)], &[]);
+            for map in ["Main/rel150", "Main/rel300", "Main/rel900"] {
+                schrijf_wav(&d.join(map).join(format!("{n:03}-x.wav")), 20000, &[], &[8000]);
+            }
+        }
+        let velden = r"<Samples_ShortNoteReleaseSampleFileFolderIfAny>Main\rel150</Samples_ShortNoteReleaseSampleFileFolderIfAny><Samples_MaxNoteTimeMsForShortNoteReleaseSamplesIfAny>150</Samples_MaxNoteTimeMsForShortNoteReleaseSamplesIfAny><Samples_MediumNoteReleaseSampleFileFolderIfAny>Main\rel300</Samples_MediumNoteReleaseSampleFileFolderIfAny><Samples_MaxNoteTimeMsForMediumNoteReleaseSamplesIfAny>300</Samples_MaxNoteTimeMsForMediumNoteReleaseSamplesIfAny><Samples_RelSampleFileFolderIfRelSamplesStoredInSeparateFiles>Main\rel900</Samples_RelSampleFileFolderIfRelSamplesStoredInSeparateFiles>";
+        let (def, v) = bouw_mini(&mini_orgel(velden), &d);
+        let rel = &eerste_extra(&def).releases;
+        assert_eq!(rel.iter().map(|r| r.max_key_press_time_ms).collect::<Vec<_>>(), vec![Some(150), Some(300), None]);
+        assert!(rel.iter().all(|r| r.cue_point == Some(0)), "{:?}", rel.iter().map(|r| r.cue_point).collect::<Vec<_>>());
+        assert!(rel[0].path.to_string_lossy().contains("rel150") && rel[2].path.to_string_lossy().contains("rel900"));
+        // Met aparte primaire release hoeft het hoofdbestand geen marker te hebben.
+        assert!(!v.meldingen.iter().any(|m| m.tekst.contains("abrupt")), "{:?}", v.meldingen);
+    }
+
+    /// Alleen korte/middellange releases (geen aparte primaire): de primaire
+    /// release zit dan in het hoofdbestand (marker + loop).
+    #[test]
+    fn alleen_getimede_releases_laten_de_primaire_in_het_hoofdbestand() {
+        let d = tijdmap("getimed");
+        for map in ["Main", "Main/rel150"] { std::fs::create_dir_all(d.join(map)).unwrap(); }
+        for n in [60, 61] {
+            schrijf_wav(&d.join("Main").join(format!("{n:03}-x.wav")), 60000, &[(10000, 20000)], &[40000]);
+            schrijf_wav(&d.join("Main/rel150").join(format!("{n:03}-x.wav")), 8000, &[], &[]);
+        }
+        let velden = r"<Samples_ShortNoteReleaseSampleFileFolderIfAny>Main\rel150</Samples_ShortNoteReleaseSampleFileFolderIfAny><Samples_MaxNoteTimeMsForShortNoteReleaseSamplesIfAny>150</Samples_MaxNoteTimeMsForShortNoteReleaseSamplesIfAny>";
+        let (def, _v) = bouw_mini(&mini_orgel(velden), &d);
+        let e = eerste_extra(&def);
+        assert_eq!(e.releases.len(), 1);
+        assert_eq!(e.releases[0].max_key_press_time_ms, Some(150));
+        assert_eq!(e.cue_point, Some(40000), "primaire release uit het hoofdbestand vanaf de marker");
+    }
+
+    #[test]
+    fn reverb_truncatie_wordt_gemeld_als_niet_beschikbaar() {
+        let d = tijdmap("trunc");
+        std::fs::create_dir_all(d.join("Main")).unwrap();
+        for n in [60, 61] { schrijf_wav(&d.join("Main").join(format!("{n:03}-x.wav")), 60000, &[(10000, 20000)], &[30000]); }
+        let (_d, v) = bouw_mini(&mini_orgel("<ReverbTailTruncation_ModeCode>3</ReverbTailTruncation_ModeCode><ReverbTailTruncation_DecayLengthAsMsForMiddleCOn8FtStop>150</ReverbTailTruncation_DecayLengthAsMsForMiddleCOn8FtStop>"), &d);
+        assert!(v.meldingen.iter().any(|m| m.tekst.contains("reverb tail truncation") && m.tekst.contains("modus 3")), "{:?}", v.meldingen);
+        let (_d, v) = bouw_mini(&mini_orgel("<ReverbTailTruncation_ModeCode>1</ReverbTailTruncation_ModeCode>"), &d);
+        assert!(!v.meldingen.iter().any(|m| m.tekst.contains("reverb tail")), "modus 1 is geen truncatie");
     }
 
     // ---- Samplekeuze en toonhoogte (werkpakket C) ----

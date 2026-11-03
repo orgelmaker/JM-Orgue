@@ -257,7 +257,12 @@ pub struct WavMarkers {
     /// Gevalideerde loops als (start, einde-exclusief), in frame-offsets.
     pub loops: Vec<(u64, u64)>,
     /// Release-marker: hoogste cue-punt uit de `cue `-chunk (frame-offset).
+    /// GrandOrgue-semantiek; Hauptwerk/CODM gebruikt de EERSTE, zie `cue_frames`.
     pub cue_frame: Option<u64>,
+    /// Alle cue-punten uit de `cue `-chunk, oplopend (frame-offsets). In een
+    /// Hauptwerk-bestand is de eerste de start van de release; een tweede
+    /// marker in een natte release geeft het punt waar het uitsterven begint.
+    pub cue_frames: Vec<u64>,
     /// Totaal aantal frames in de data-chunk (0 als fmt/data ontbreekt).
     pub frames: u64,
     /// smpl dwMIDIUnityNote (1..=127): MIDI-toets van de opgenomen toonhoogte.
@@ -352,6 +357,7 @@ pub fn read_wav_markers(path: &Path) -> Option<WavMarkers> {
                 // Cue-record: 24 bytes vanaf offset 4; dwSampleOffset op +20.
                 // GrandOrgue neemt het MAXIMUM over alle cue-punten.
                 let mut max_off: Option<u64> = None;
+                let mut alle: Vec<u64> = Vec::new();
                 for ci in 0..n {
                     let base = 4 + ci * 24;
                     if base + 24 > cue_data.len() { break; }
@@ -359,7 +365,10 @@ pub fn read_wav_markers(path: &Path) -> Option<WavMarkers> {
                         cue_data[base + 20], cue_data[base + 21], cue_data[base + 22], cue_data[base + 23]
                     ]) as u64;
                     max_off = Some(max_off.map_or(off, |m: u64| m.max(off)));
+                    alle.push(off);
                 }
+                alle.sort_unstable();
+                markers.cue_frames = alle;
                 markers.cue_frame = max_off;
             }
             _ => {
