@@ -12,7 +12,10 @@ on:
   release:
     types: [published]
   schedule:
-    - cron: '17 4 * * *'
+    # Elk uur, zodat de teller nooit meer dan ~uur achterloopt. GitHub-Actions
+    # cron kan tot een kwartier later draaien; de badge krijgt daarbovenop
+    # `cacheSeconds` mee, zodat shields.io vaak genoeg terugkomt.
+    - cron: '17 * * * *'
   workflow_dispatch:
 
 permissions:
@@ -50,7 +53,7 @@ jobs:
             echo "Nieuw totaal ($totaal) lager dan opgeslagen ($oud): niets bijwerken"; exit 0
           fi
           jq -n --argjson n "$totaal" \
-            '{schemaVersion: 1, label: "downloads", message: ($n|tostring), color: "d4af37"}' \
+            '{schemaVersion: 1, label: "downloads", message: ($n|tostring), color: "d4af37", cacheSeconds: 1800}' \
             > docs/downloads.json
           cat docs/downloads.json
 
@@ -60,8 +63,10 @@ jobs:
           if git diff --quiet -- docs/downloads.json; then
             echo "Ongewijzigd"; exit 0
           fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Committen als de repo-eigenaar, niet als bot: dan verschijnt er
+          # geen tweede naam onder "Contributors" op GitHub.
+          git config user.name "Martijn van der Kolk"
+          git config user.email "76158976+orgelmaker@users.noreply.github.com"
           git add docs/downloads.json
           git commit -m "Downloadteller bijgewerkt"
           # master kan intussen verder zijn: opnieuw proberen na rebase.

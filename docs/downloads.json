@@ -2,5 +2,6 @@
   "schemaVersion": 1,
   "label": "downloads",
   "message": "4921",
-  "color": "d4af37"
+  "color": "d4af37",
+  "cacheSeconds": 1800
 }
