@@ -1,4 +1,8 @@
 # Map alle commit-identiteiten op één persoon, zodat `git shortlog -s` en
 # GitHub's Contributors-overzicht alleen de repo-eigenaar laten zien in plaats
-# van ook de bot die de downloadteller bijwerkt.
+# van ook de bot die de downloadteller bijwerkt of een Co-Authored-By-trailer
+# die een AI-assistent toevoegt.
 Martijn van der Kolk <76158976+orgelmaker@users.noreply.github.com> github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>
+Martijn van der Kolk <76158976+orgelmaker@users.noreply.github.com> Claude <noreply@anthropic.com>
+Martijn van der Kolk <76158976+orgelmaker@users.noreply.github.com> Claude Opus 4.7 <noreply@anthropic.com>
+Martijn van der Kolk <76158976+orgelmaker@users.noreply.github.com> Martijn van der Kolk <orgelmaker@live.nl>
