@@ -11,10 +11,10 @@
 
 <header class="titel">
   <h1>JM-Orgue</h1>
-  <div class="onder">Handleiding voor versie 0.9.16 &middot; oktober 2026</div>
+  <div class="onder">Handleiding voor versie 0.9.49 &middot; november 2026</div>
 </header>
 
-<p>JM-Orgue is een virtueel pijporgel voor Windows, macOS en Linux. Het programma speelt Hauptwerk- en GrandOrgue-samplesets rechtstreeks af, ook grote surround-sets, en je bespeelt het met een MIDI-klavier, een orgelconsole of de muis. Deze handleiding loopt het programma door aan de hand van schermafbeeldingen van versie 0.9.16.</p>
+<p>JM-Orgue is een virtueel pijporgel voor Windows, macOS en Linux. Het programma speelt Hauptwerk- en GrandOrgue-samplesets rechtstreeks af, ook grote surround-sets en Hauptwerk Custom Organ-definities, en je bespeelt het met een MIDI-klavier, een orgelconsole of de muis. Wat je speelt kan het meteen noteren, in gewoon notenschrift of in klavar, en afdrukken als PDF. Deze handleiding loopt het programma door; de schermafbeeldingen komen uit versie 0.9.16 en latere versies, de tekst beschrijft versie 0.9.49.</p>
 
 <p class="klein">&copy; Martijn van der Kolk. De schermafbeeldingen zijn gemaakt met demo-orgels en eigen testsets; netwerkadressen, toegangstoken en gebruikersmappen zijn onleesbaar gemaakt.</p>
 
@@ -51,8 +51,11 @@
 
 <!-- ============================================================ -->
 <h2 id="bibliotheek">2. De bibliotheek</h2>
-<p>Na het starten zie je de orgelbibliotheek: een kaart per orgel met foto, naam, bouwer, plaats en het aantal registers. Klik op een kaart om het orgel te laden.</p>
+<p>Na het starten zie je de orgelbibliotheek: een kaart per orgel met foto, naam, bouwer, plaats en het aantal registers. Klik op een kaart om het orgel te laden. Het raster toont acht kaarten naast elkaar en drie rijen in beeld; passen er meer orgels in de bibliotheek, dan blader je met de twee ronde pijlknoppen rechts in beeld (<b>Omhoog bladeren</b>, <b>Omlaag bladeren</b>) of met het scrollwiel. De knoppen zijn groot genoeg voor een aanraakscherm en verdwijnen zodra alles in beeld past.</p>
 <figure><img src="afbeeldingen/nl/03_bibliotheek.jpg" alt="Orgelbibliotheek"><figcaption>De bibliotheek met demo-orgels. Rechtsboven staan de knoppen om orgels toe te voegen en naar de instellingen te gaan; linksboven de taalkeuze (NL, EN, FR, DE, PL, IT, ES).</figcaption></figure>
+
+<h3>Samplesets vinden</h3>
+<p>Onder de kaarten staat het blok <b>Meer samplesets</b> met knoppen naar makers die sets gratis aanbieden: Piotr Grabowski, Sonus Paradisi, Lars Palo en Augustine's Virtual Organs. Elke knop opent de downloadpagina van die maker in je browser; JM-Orgue leest hun Hauptwerk- en GrandOrgue-bestanden rechtstreeks in, zonder omzetting. Daarnaast staat de knop <b>Handleiding</b>, die deze handleiding als PDF in de taal van het programma opent. Is er internet, dan toont de bibliotheek bovendien onder <b>Beschikbaar om te downloaden</b> een kaart per set die het project zelf aanbiedt: klik erop, kies een map, en de set wordt gedownload, uitgepakt en aan de bibliotheek toegevoegd.</p>
 
 <h3>Een orgel toevoegen</h3>
 <ul>
@@ -63,7 +66,7 @@
 
 <h3>Kaartknoppen: foto, zoeken, verwijderen</h3>
 <p>Wijs je een kaart aan, dan verschijnen rechtsboven in de foto drie knoppen: <b>online een foto zoeken</b> (wereldbol), <b>zelf een foto kiezen</b> (camera) en <b>uit de bibliotheek verwijderen</b> (kruisje). Verwijderen haalt alleen de kaart uit de bibliotheek weg; de bestanden op je schijf blijven staan. Houd je een kaart 3 seconden ingedrukt, dan zoekt het programma de foto opnieuw.</p>
-<p>Bij <b>online zoeken</b> toont het programma een paar vrij te gebruiken foto's van Wikimedia Commons, op basis van de naam, bouwer en plaats die in de set staan. Klik een foto aan om hem over te nemen; de bronvermelding en licentie komen onder de kaart. Staat er te weinig in de set om iets te vinden, dan typ je zelf een zoekterm (kerk, plaats of orgelnaam) in het veld bovenin het venster en kies je <b>Zoek</b>.</p>
+<p>Bij <b>online zoeken</b> toont het programma een paar vrij te gebruiken foto's van Wikimedia Commons. Bovenin het venster staan de velden <b>Kerk</b>, <b>Plaats</b> en <b>Bouwer</b>, vooraf ingevuld uit de orgeldefinitie en de meegeleverde informatie; pas ze aan als ze niet kloppen en kies <b>Zoek</b>. Daaronder blijft een vrij zoekveld voor een eigen zoekterm. Klik een foto aan om hem over te nemen; de bronvermelding en licentie komen onder de kaart.</p>
 <figure><img src="afbeeldingen/nl/04_online_zoeken.jpg" alt="Online een foto zoeken"><figcaption>Het venster &ldquo;Online een foto zoeken&rdquo; met het zoekveld voor een eigen zoekterm en de gevonden foto's met hun bron en licentie.</figcaption></figure>
 
 <h3 id="codm">Hauptwerk Custom Organ (CODM) en het importverslag</h3>
@@ -74,14 +77,21 @@
   <li><b>Gedeeltelijk laden</b> laadt alleen de registers waarvan de samples er zijn; een balk bovenin herinnert je eraan en opent het <b>Importverslag</b>. Is er niets speelbaar, dan kun je alleen annuleren.</li>
   <li>Het <b>Importverslag</b> noemt wat er verwacht werd en wat geladen is, welke registers zijn overgeslagen en waarom, en waar JM-Orgue een benadering gebruikt (bijvoorbeeld: de tremulant klinkt als eenvoudige modulatie, omdat de golfvormen van Hauptwerk niet gelezen worden).</li>
   <li>Samples in Hauptwerks beveiligde <code>.hbw</code>-formaat kan JM-Orgue niet lezen; een set die daarvan afhangt wordt als niet speelbaar gemeld.</li>
+  <li>Een register met maar &eacute;&eacute;n pijp (cimbelster, vogelzang, een losse klokslag) komt niet op het klavier maar als klikbare knop in het werk <b>Effectregisters</b>, net als bij gewone Hauptwerk-sets. Registers met meer pijpen blijven op het klavier.</li>
+  <li>Shortcutpistons uit de definitie krijgen geen eigen knoppen: ze bedienen een register, koppel of tremulant dat al als knop bij zijn werk staat. Het verslag noemt per piston waar hij naar wijst.</li>
+  <li>Koppels gedragen zich zoals de Hauptwerk-gids voorschrijft: een koppel verbindt een klavier met de windladen van het doel en schakelt niet door naar een volgend koppel. GrandOrgue-sets blijven wel doorschakelen.</li>
+  <li>Is de definitie in de &ldquo;ingekorte&rdquo; vorm geschreven (velden heten dan alleen <code>a</code>, <code>b</code>, <code>c</code>), dan meldt het verslag of de betekenis van die velden veilig kon worden afgeleid.</li>
 </ul>
-<p>Een CODM-orgel met alle samples laadt zonder vraag. Of het precies zo klinkt als in Hauptwerk is niet gecontroleerd: dat vraagt een volledige originele set en een referentieopname.</p>
+<p>Een CODM-orgel met alle samples laadt zonder vraag. Geeft de definitie per register op dat de hogere boventonen sterker of zachter moeten klinken, dan past JM-Orgue dat bij het laden toe. Of het precies zo klinkt als in Hauptwerk is niet gecontroleerd: dat vraagt een volledige originele set en een referentieopname.</p>
+
+<h3>Samplesets met WavPack of FLAC</h3>
+<p>Veel GrandOrgue-sets zijn met WavPack verpakt; de bestanden heten dan vaak gewoon <code>.wav</code>. JM-Orgue leest die rechtstreeks, inclusief looppunten en releases, en laadt ze snel doordat alleen het begin van elke opname wordt uitgepakt. Alleen als een bestand echt niet te lezen is (bijvoorbeeld een FLAC-bestand of een meerkanaals WavPack-bestand), meldt een balk bovenin hoeveel bestanden zijn overgeslagen.</p>
 
 <!-- ============================================================ -->
 <h2 id="bespelen">3. Een orgel laden en bespelen</h2>
 
 <h3>Laden</h3>
-<p>Bij het laden leest JM-Orgue van elk pijpgeluid het begin in het geheugen; de rest laadt het tijdens het spelen. Een grote surround-set kan daarom even duren; de voortgangsbalk toont hoever het is.</p>
+<p>Bij het laden leest JM-Orgue van elk pijpgeluid het begin in het geheugen; de rest laadt het tijdens het spelen. Een grote surround-set kan daarom even duren; de voortgangsbalk toont hoever het is. Onder de indicator staat een knop <b>Annuleren</b>: druk je die terwijl de samples nog gelezen worden, dan keert het programma terug naar het orgel dat al klonk, zonder iets te veranderen. Handig als je per ongeluk de verkeerde kaart aanklikte. Is de audio-engine al aan het omschakelen, dan doet de knop niets meer.</p>
 <figure><img src="afbeeldingen/nl/05_laden.jpg" alt="Laadscherm"><figcaption>Het laadscherm met de voortgang van het inlezen van de samples.</figcaption></figure>
 
 <h3>De motor</h3>
@@ -89,7 +99,7 @@
 <figure><img src="afbeeldingen/nl/06_orgelscherm_motor_uit.jpg" alt="Orgelscherm met motor uit"><figcaption>Het orgelscherm direct na het laden: motor uit, alle registers ingedrukt.</figcaption></figure>
 
 <h3>Registers, koppels en tremulanten</h3>
-<p>Elk werk heeft een eigen vak met zijn registers. Klik op een registerknop om hem te trekken; getrokken registers kleuren geel. De kleur van de naam geeft de familie aan: tongwerken staan bijvoorbeeld in rood, mixturen en kwinten in blauw. In elk vak staan ook de <b>tremulant</b> en de <b>koppels</b> (bijvoorbeeld &ldquo;Hauptwerk + Schwellwerk&rdquo;). Een groen balkje rechts in de kop van een werk toont de stand van de zwelkast.</p>
+<p>Elk werk heeft een eigen vak met zijn registers. Klik op een registerknop om hem te trekken; getrokken registers kleuren geel. De kleur van de naam geeft de familie aan: tongwerken staan bijvoorbeeld in rood, mixturen en kwinten in blauw. Klopt de automatische indeling bij een enkel register niet, dan kies je de kleurgroep zelf onder Registersortering (hoofdstuk 7). In elk vak staan ook de <b>tremulant</b> en de <b>koppels</b> (bijvoorbeeld &ldquo;Hauptwerk + Schwellwerk&rdquo;); de koppels gebruiken dezelfde lettergrootte als de registers. Een groen balkje rechts in de kop van een werk toont de stand van de zwelkast. De werken staan in de volgorde van de klavieren van het orgel (I, II, III), niet in de volgorde van het bestand. Heeft de set effectregisters (cimbelster, nachtegaal en dergelijke), dan staan die als klikbare knoppen in een eigen werk <b>Effectregisters</b>.</p>
 <figure><img src="afbeeldingen/nl/07_orgelscherm_registers.jpg" alt="Orgelscherm met getrokken registers"><figcaption>Motor aan, een paar registers getrokken en het koppel Hauptwerk + Schwellwerk aan. Onderaan de setzerbalk.</figcaption></figure>
 
 <h3>De setzerbalk</h3>
@@ -100,6 +110,7 @@
   <tr><td><b>&minus;1 / +1</b>, <b>&minus;10 / +10</b></td><td>Stap naar de vorige of volgende registratie, of tien verder.</td></tr>
   <tr><td><b>G.C.</b></td><td>General Cancel: alle registers uit.</td></tr>
   <tr><td><b>M 1&ndash;8</b></td><td>Geheugenniveaus: acht aparte banken met registraties.</td></tr>
+  <tr><td>Kopieerknop</td><td><b>Combinatie kopi&euml;ren naar&hellip;</b>: roep een combinatie op, druk op de kopieerknop, kies met &minus;10 / +10 en een cijfer het doel, en de combinatie wordt daarheen gekopieerd, ook over een blokgrens heen (bijvoorbeeld van 9 naar 10). De registratie die nu klinkt verandert niet.</td></tr>
   <tr><td><b>Cresc</b></td><td>De generaal-crescendo (zie hoofdstuk 7). De balk toont de huidige trede.</td></tr>
   <tr><td>Volumeschuif</td><td>Hoofdvolume. Dubbelklikken zet het terug op de standaardwaarde; met het scrollwiel verander je het in stappen van 1 dB.</td></tr>
 </table>
@@ -119,7 +130,7 @@
   <tr><td><b>Nieuw scherm</b></td><td>Opent een extra venster met dezelfde registers, bijvoorbeeld voor een tweede monitor of een tweede klavier.</td></tr>
   <tr><td><b>MP3</b></td><td>Neemt op wat je hoort. De opname komt in Documenten\JM-Orgue-opnames. Klik op de rode teller om te stoppen; daarna meldt het programma waar het bestand staat.</td></tr>
   <tr><td><b>MIDI</b></td><td>Neemt op wat je speelt (alleen noten) als .mid-bestand. Klik op de blauwe teller om te stoppen en kies waar je het opslaat.</td></tr>
-  <tr><td><b>Noteren</b></td><td>Opent het notatievenster: noten verschijnen terwijl je speelt, met lagen, overdub en bewerken. Ook een bestaand MIDI-bestand is er te openen.</td></tr>
+  <tr><td><b>Noteren</b></td><td>Opent het notatievenster: noten verschijnen terwijl je speelt, in notenschrift of klavar, met balken, overdub en bewerken, en direct af te drukken als PDF (zie hieronder).</td></tr>
   <tr><td><b>Afsluiten</b></td><td>Sluit de software <i>én de computer</i> af, na een bevestiging; de laatste stand wordt eerst bewaard. Rechtermuisklik of 3 seconden ingedrukt houden koppelt de knop aan een knop op je console.</td></tr>
 </table>
 
@@ -135,11 +146,20 @@
 <p><b>Nieuw scherm</b> opent een eigen venster dat je naar een andere monitor kunt slepen, of in een klein formaat naast het hoofdvenster kunt laten staan. Het heeft eigen indelingsinstellingen: staan de knoppen te klein, kies dan <b>Indeling</b> en stel de knopbreedte en de knophoogte in, of kies werken onder of naast elkaar.</p>
 <figure><img src="afbeeldingen/nl/43_nieuw_scherm.jpg" alt="Tweede scherm"><figcaption>Een extra scherm met leesbare registers, hier in een venster van 1000 &times; 900 beeldpunten.</figcaption></figure>
 
+<h3 id="noteren">Het notatievenster: noten, klavar en PDF</h3>
+<p>Met <b>Noteren</b> opent een eigen venster waarin je spel wordt opgeschreven; er is geen tweede programma nodig om te componeren of een stuk uit te werken. Kies <b>Nieuw&hellip;</b> voor een nieuw stuk (titel, componist, maatsoort, toonsoort, tempo, aantal maten en balken) en druk op <b>Opname</b>: de opname begint bij de eerste noot die je speelt. Een stuk heeft meerdere <b>notenbalken</b>, bijvoorbeeld rechts, links en pedaal; elke balk heeft onder <b>Balken &amp; stemmen</b> een eigen <b>Kanaal</b> met een knop <b>Leer</b> (speel &eacute;&eacute;n toets op het klavier dat op die balk moet komen). Speel je rechts, links en pedaal op drie MIDI-kanalen, dan komen ze zo tegelijk op drie balken terecht. Een nieuwe take (overdub) komt bij wat er al staat.</p>
+<ul>
+  <li><b>Weergave</b>: <b>Notenschrift</b> toont gewone notenbalken; <b>Klavar</b> toont klavarskribo, waarin de lijnen de zwarte toetsen zijn en de tijd van boven naar beneden loopt. Per balk kies je de hand (rechts, links, pedaal of R+L met een splitspunt) en met <b>Bereik</b> of de balken rond de gespeelde noten of over het hele klavier lopen.</li>
+  <li><b>Afdrukken / PDF</b> drukt de partituur af of bewaart hem als PDF, in de gekozen weergave. Onder <b>Exporteren</b> staan verder <b>Opslaan als MIDI&hellip;</b>, <b>Opslaan als MusicXML</b> (voor andere notatieprogramma's) en voor klavar <b>Opslaan als SVG&hellip;</b>.</li>
+  <li><b>Opslaan</b> bewaart het stuk als JM-Orgue-partituur (<code>.jmscore</code>), <b>Openen&hellip;</b> haalt het terug; een bestaand MIDI-bestand is als extra take te importeren. Op de tabbladen <b>Invoer</b>, <b>Teksten &amp; tekens</b> en <b>Afspelen</b> voer je noten stap voor stap in, zet je teksten en tekens, en speel je het stuk door het orgel af.</li>
+</ul>
+<p class="klein">Sneltoetsen in het notatievenster: <kbd>Ctrl</kbd>+<kbd>N</kbd> nieuw stuk, <kbd>Ctrl</kbd>+<kbd>O</kbd> openen, <kbd>Ctrl</kbd>+<kbd>S</kbd> opslaan, <kbd>Ctrl</kbd>+<kbd>C</kbd> kopi&euml;ren.</p>
+
 <!-- ============================================================ -->
 <h2 id="posities">5. Meerdere luisterposities</h2>
 <p>Sommige samplesets zijn op meerdere plaatsen in de kerk opgenomen, bijvoorbeeld dichtbij, vooraan, halverwege en achterin. Zo'n set toont in de werkbalk de knoppen <b>Perspectief</b> met een knop per positie. Klik op een positie om hem in of uit te schakelen; je kunt er meer dan een tegelijk laten klinken. Rechts daarvan staat de <b>luisterpositie</b>: de schuif tussen &ldquo;bij orgel&rdquo; en &ldquo;achter in de kerk&rdquo; mengt vloeiend tussen de opgenomen posities.</p>
 <figure><img src="afbeeldingen/nl/50_nancy_orgelscherm.jpg" alt="Orgelscherm met perspectieven"><figcaption>Een set met vier opnameposities (Close, Front, Middle, Rear) en de luisterpositie-schuif.</figcaption></figure>
-<div class="tip"><b>Tip</b> Alle opnameposities worden standaard tegelijk geladen, zodat de luisterpositie-schuif ze meteen vloeiend mengt. Naast de perspectief-knoppen in de werkbalk staat een mixerknop: klik erop voor een kleine mixer met een schuif per positie (0&ndash;200&nbsp;%). Op een computer met weinig geheugen zet je in de Orgel-instellingen onder &ldquo;Perspectieven en gestapelde ranks&rdquo; posities uit die je niet gebruikt; die keuze werkt na het opnieuw laden van het orgel.</div>
+<div class="tip"><b>Tip</b> Naast de perspectief-knoppen in de werkbalk staat een mixerknop: klik erop voor een kleine mixer met een schuif per positie (0&ndash;200&nbsp;%). Welke posities geladen worden kies je in de Orgel-instellingen onder &ldquo;Perspectieven en gestapelde ranks&rdquo;; alleen de aangevinkte posities komen in het geheugen, en die keuze werkt na het opnieuw laden van het orgel. <b>Alle posities in het geheugen houden</b> staat standaard uit en wordt alleen uitgevoerd als alle posities samen ruim in het geheugen passen. Past een orgel niet in het geheugen, dan zet het programma na het laden alleen de dichtstbijzijnde positie aan en meldt dat bovenin.</div>
 
 <!-- ============================================================ -->
 <h2 id="wizard">6. De instelwizard voor een nieuw orgel</h2>
@@ -171,7 +191,7 @@
 <p>Het eerste blok heeft de master-instellingen:</p>
 <ul>
   <li><b>Volume</b>: het hoofdvolume van dit orgel.</li>
-  <li><b>Stemming</b>: &ldquo;Origineel&rdquo; speelt de pijpen zoals ze zijn opgenomen. Andere stemmingen (gelijkzwevend en historische temperaturen) stemmen de pijpen bij op basis van de gemeten toonhoogte van elke opname. Onder de keuze staat hoeveel pijpen een gemeten toonhoogte hebben. Bij <b>Eigen stemming</b> geef je zelf per noot de afwijking in cents. Met <b>Scala-bestand laden&hellip;</b> lees je een .scl-bestand (het wereldwijde formaat voor microtonale en historische stemmingen van de Huygens-Fokker-stichting); de ingelezen stemming verschijnt in de lijst en wordt bewaard voor volgende sessies.</li>
+  <li><b>Stemming</b>: &ldquo;Origineel&rdquo; speelt de pijpen zoals ze zijn opgenomen. Andere stemmingen (gelijkzwevend en historische temperaturen) stemmen de pijpen bij op basis van de gemeten toonhoogte van elke opname. Onder de keuze staat hoeveel pijpen een gemeten toonhoogte hebben. Wat de orgeldefinitie opgeeft gaat daarbij voor: een zwevend register met een opgegeven afwijking (Unda maris, Voix c&eacute;leste) klinkt op het temperament plus die afwijking, een opname waarvan de toonhoogte in de definitie staat wordt daarop bijgesteld, en een set die aangeeft niet op de originele orgeltoonhoogte te spelen speelt altijd op de doeltoon. Bij <b>Eigen stemming</b> geef je zelf per noot de afwijking in cents. Met <b>Scala-bestand laden&hellip;</b> lees je een .scl-bestand (het wereldwijde formaat voor microtonale en historische stemmingen van de Huygens-Fokker-stichting); de ingelezen stemming verschijnt in de lijst en wordt bewaard voor volgende sessies.</li>
   <li><b>Fijnstemming</b>: alles samen hoger of lager, in cents.</li>
 </ul>
 <p><b>Nagalm</b> regelt de galm. Heeft de set de akoestiek van de kerk al in de opnames, dan staat dat er (met een knop <b>Terug naar de opname</b> om de extra galm uit te zetten): extra galm is dan een kwestie van smaak. Je kiest tussen <b>Algoritmisch</b> (een berekende galm met RT60, vertraging, demping en ruimtegrootte, ook als preset) en <b>Convolutie</b> met een eigen impulsrespons (IR). Met <b>Mix</b> bepaal je hoeveel galm je hoort.</p>
@@ -194,15 +214,15 @@
 <figure><img src="afbeeldingen/nl/11_crescendo.jpg" alt="Tabblad Crescendo"><figcaption>De crescendo-matrix: registers in de rijen, treden in de kolommen.</figcaption></figure>
 
 <h3>Registersortering</h3>
-<p>Hier bepaal je de volgorde van de registers in elk werk. Sleep een register aan het handvat om hem te verplaatsen. Per register zie je de voetmaat en de familie (de kleur van de naam). Met de pijltjes verander je de volgorde stap voor stap, en <b>Reset</b> herstelt de volgorde van de set.</p>
+<p>Hier bepaal je de volgorde van de registers in elk werk. Sleep een register aan het handvat om hem te verplaatsen. Per register zie je de voetmaat en de familie (de kleur van de naam). Met de pijltjes verander je de volgorde stap voor stap, en <b>Origineel</b> herstelt de volgorde uit het orgelbestand. Kleurt de automatische herkenning een enkel register anders dan je wilt, dan kies je per register zelf de <b>kleurgroep</b>: <b>Grondstem</b>, <b>Vulstem</b> of <b>Tongwerk</b>. Dat is puur visueel en wordt per orgel bewaard.</p>
 <figure><img src="afbeeldingen/nl/12_registersortering.jpg" alt="Tabblad Registersortering"><figcaption>De registers per werk, in de volgorde waarin ze op het orgelscherm staan.</figcaption></figure>
 
 <h3>Routing</h3>
 <p>Dit tabblad koppelt je orgel aan je apparatuur. Bovenaan staat per klavier een blok:</p>
 <ul>
-  <li><b>Kanaal</b>: op welk MIDI-kanaal het klavier luistert (&ldquo;Alle&rdquo; = elk kanaal). <b>Leer</b> bepaalt kanaal en bereik door eerst de laagste en daarna de hoogste toets te spelen.</li>
+  <li><b>Kanaal</b>: op welk MIDI-kanaal het klavier luistert (&ldquo;Alle&rdquo; = elk kanaal). <b>Leer</b> bepaalt kanaal en bereik door eerst de laagste en daarna de hoogste toets te spelen; liggen die te dicht bij elkaar, dan waarschuwt het programma in plaats van een bereik van een paar toetsen in te stellen. Zenden al je klavieren op hetzelfde kanaal, geef dan elk apparaat een vast kanaal onder Algemene instellingen &rarr; MIDI (hoofdstuk 8).</li>
   <li><b>Transp</b>: transponeren in halve tonen. <b>Bereik</b>: laagste en hoogste toets. <b>Kort octaaf</b>: voor sets met een kort basoctaaf.</li>
-  <li><b>Zwelkast</b>: zet de zwelkast van dit klavier aan; er verschijnen dan knoppen om de trede in te leren, het minimale volume en de afsnijfrequentie bij een gesloten kast in te stellen. De trede valt ook rechtstreeks vanuit het orgelscherm in te leren: rechtsklik op de groene ledstrook naast de klaviernaam &mdash; of houd die 2 seconden vast op een aanraakscherm &mdash; en hetzelfde &ldquo;trede dicht / trede open&rdquo;-dialoog verschijnt.</li>
+  <li><b>Zwelkast</b>: zet de zwelkast van dit klavier aan; er verschijnen dan knoppen om de trede in te leren, het minimale volume en de afsnijfrequentie bij een gesloten kast in te stellen. Standaard is dat &minus;20&nbsp;dB en 1500&nbsp;Hz: de trede werkt dan in decibels gelijkmatig over de hele slag, zoals in Hauptwerk, en de klank wordt bij een dichte kast wat doffer. Lijkt de trede onderaan weinig te doen, kies dan een hogere afsnijfrequentie; wil je een dichte kast zachter, een lager minimaal volume (tot &minus;24&nbsp;dB). De trede valt ook rechtstreeks vanuit het orgelscherm in te leren: rechtsklik op de groene ledstrook naast de klaviernaam &mdash; of houd die 2 seconden vast op een aanraakscherm &mdash; en hetzelfde &ldquo;trede dicht / trede open&rdquo;-dialoog verschijnt.</li>
   <li><b>Windvoorziening</b>: tot welke windgroep het klavier hoort.</li>
   <li><b>Pan</b> en <b>Uitgangen</b>: de plaats in het stereobeeld en de uitgangskanalen van je audio-interface waarop dit klavier klinkt. Twee opeenvolgende uitgangen vormen een stereopaar; een los kanaal klinkt mono.</li>
   <li><b>C/Cis</b>: verdeelt de pijpen over twee kanten, zoals de C- en Cis-lade van een echt orgel; de globale sterkte en afval staan in het blok erboven.</li>
@@ -250,7 +270,7 @@
 <figure><img src="afbeeldingen/nl/31_samplefix.jpg" alt="Sample fix"><figcaption>Sample fix: aanloop-stilte en loops, elk met Scan en een knop om toe te passen.</figcaption></figure>
 
 <h3>MIDI</h3>
-<p><b>MIDI invoer</b> toont de aangesloten MIDI-apparaten (met <b>Vernieuw apparaten</b> zoek je opnieuw); onder <b>Bluetooth MIDI</b> zoek je met <b>Scan</b> naar draadloze apparaten. <b>Terugkoppeling (MIDI-uit)</b> laat je console meelichten met de registratie: kies het protocol (registerlampen via Note On/Off, een Hauptwerk-tekstdisplay of een Johannus-/Content-console), de MIDI-uitgang, het kanaal en de basisnoot. Elk register krijgt dan automatisch een nootnummer vanaf de basisnoot, of je leert per register de echte consoleknop in met <b>Per register inleren</b>.</p>
+<p><b>MIDI invoer</b> toont de aangesloten MIDI-apparaten (met <b>Vernieuw apparaten</b> zoek je opnieuw). Per apparaat kun je een vast kanaal kiezen: klavieren die allemaal op kanaal 1 zenden, bedienen zo toch verschillende werken, zonder dat je elke sessie kanalen hoeft te herstellen. Staat een apparaat op <b>Standaard</b>, dan verandert er niets. Onder <b>Bluetooth MIDI</b> zoek je met <b>Scan</b> naar draadloze apparaten; ook de inleerknoppen die op &eacute;&eacute;n toets reageren luisteren naar een Bluetooth-klavier. <b>Terugkoppeling (MIDI-uit)</b> laat je console meelichten met de registratie: kies het protocol (registerlampen via Note On/Off, een Hauptwerk-tekstdisplay of een Johannus-/Content-console), de MIDI-uitgang, het kanaal en de basisnoot. Elk register krijgt dan automatisch een nootnummer vanaf de basisnoot, of je leert per register de echte consoleknop in met <b>Per register inleren</b>.</p>
 <figure><img src="afbeeldingen/nl/32_midi.jpg" alt="MIDI"><figcaption>MIDI-invoer, Bluetooth MIDI en de terugkoppeling naar de console.</figcaption></figure>
 
 <h3>Knoppen inleren</h3>
@@ -290,6 +310,8 @@
   <tr><td>Rechtermuisklik of 3 s ingedrukt</td><td>Op een knop van de setzerbalk: die knop aan een console-knop koppelen (MIDI inleren).</td></tr>
   <tr><td>Dubbelklik op het volume</td><td>Hoofdvolume terug naar de standaardwaarde.</td></tr>
   <tr><td>Kaart 3 s ingedrukt</td><td>In de bibliotheek: de foto van die kaart opnieuw zoeken.</td></tr>
+  <tr><td><kbd>Z</kbd>&hellip;<kbd>M</kbd> en <kbd>Q</kbd>&hellip;<kbd>I</kbd></td><td>Computertoetsenbord als klavier: twee octaven. <kbd>Shift</kbd> verschuift een octaaf omhoog, <kbd>Alt</kbd> een octaaf omlaag, ook samen.</td></tr>
+  <tr><td><kbd>Ctrl</kbd>+<kbd>N</kbd> / <kbd>O</kbd> / <kbd>S</kbd></td><td>In het notatievenster: nieuw stuk, openen, opslaan.</td></tr>
 </table>
 <ul>
   <li>Alle instellingen worden bij elk orgel bewaard, ook als je het orgel sluit of het programma afsluit.</li>
@@ -307,6 +329,9 @@
   <tr><td>Kraken of haperen</td><td>Verlaag de polyfonie, trek minder registers, zet de galm uit of kies een grotere buffer. Een korte startbuffer vraagt een snelle schijf; kies anders een langere.</td></tr>
   <tr><td>Te weinig geheugen</td><td>Kies een kortere startbuffer, zet stereo-samples uit, of schakel luisterposities uit die je niet gebruikt.</td></tr>
   <tr><td>Bijgeluiden of effectregisters horen niet bij de juiste speaker</td><td>Kies onder Routing bij &ldquo;Audio-uitgang bijgeluiden&rdquo; dezelfde uitgangen als voor de klavieren.</td></tr>
+  <tr><td>Pijpen zwijgen en bovenin staat een melding over WavPack of FLAC</td><td>WavPack leest het programma zelf; blijft de melding staan, dan gaat het om bestanden die niet te lezen zijn (FLAC, hybride of meerkanaals WavPack). Zet de set om naar gewone WAV of vraag de maker om een onverpakte versie.</td></tr>
+  <tr><td>De zweltrede doet onderaan weinig en bovenaan veel</td><td>Verhoog onder Routing bij de zwelkast de afsnijfrequentie bij een dichte kast (standaard 1500&nbsp;Hz) of verlaag het minimale volume.</td></tr>
+  <tr><td>Een orgel laadt per ongeluk of te lang</td><td>Druk op <b>Annuleren</b> in het laadscherm; het vorige orgel blijft klinken.</td></tr>
 </table>
 <p><b>Feedback sturen</b> (Algemene instellingen &rarr; Update en feedback) maakt een bericht met je melding en de logbestanden van de laatste sessies, zodat de ontwikkelaar kan zien wat er gebeurde. Je kunt je melding ook op de projectpagina op GitHub plaatsen.</p>
 

@@ -11,10 +11,10 @@
 
 <header class="titel">
   <h1>JM-Orgue</h1>
-  <div class="onder">User guide for version 0.9.16 &middot; October 2026</div>
+  <div class="onder">User guide for version 0.9.49 &middot; November 2026</div>
 </header>
 
-<p>JM-Orgue is a virtual pipe organ for Windows, macOS and Linux. It plays Hauptwerk and GrandOrgue sample sets directly, including large surround sets, and you play it with a MIDI keyboard, an organ console or the mouse. This guide walks through the program using screenshots of version 0.9.16.</p>
+<p>JM-Orgue is a virtual pipe organ for Windows, macOS and Linux. It plays Hauptwerk and GrandOrgue sample sets directly, including large surround sets and Hauptwerk Custom Organ definitions, and you play it with a MIDI keyboard, an organ console or the mouse. It can write down what you play as you go, in staff notation or in klavar, and print it as a PDF. This guide walks through the program; the screenshots come from version 0.9.16 and later versions, the text describes version 0.9.49.</p>
 <p class="klein">&copy; Martijn van der Kolk. The screenshots were made with demo organs and own test sets; network addresses, access tokens and user folders have been made unreadable.</p>
 
 <nav class="inhoud">
@@ -49,8 +49,11 @@
 
 <!-- ============================================================ -->
 <h2 id="bibliotheek">2. The library</h2>
-<p>After starting you see the organ library: one card per organ with photo, name, builder, place and number of stops. Click a card to load the organ.</p>
+<p>After starting you see the organ library: one card per organ with photo, name, builder, place and number of stops. Click a card to load the organ. The grid shows eight cards side by side and three rows in view; if the library holds more organs, you scroll with the two round arrow buttons on the right (<b>Scroll up</b>, <b>Scroll down</b>) or with the scroll wheel. The buttons are large enough for a touch screen and disappear as soon as everything fits in view.</p>
 <figure><img src="afbeeldingen/en/03_bibliotheek.jpg" alt="Organ library"><figcaption>The library with demo organs. At the top right are the buttons to add organs and to go to the settings; at the top left the language choice (NL, EN, FR, DE, PL, IT, ES).</figcaption></figure>
+
+<h3>Finding sample sets</h3>
+<p>Below the cards is the block <b>More sample sets</b> with buttons to makers who offer sets free of charge: Piotr Grabowski, Sonus Paradisi, Lars Palo and Augustine's Virtual Organs. Each button opens that maker's download page in your browser; JM-Orgue reads their Hauptwerk and GrandOrgue files directly, without conversion. Next to them is the <b>Manual</b> button, which opens this guide as a PDF in the language of the program. With an internet connection the library also shows, under <b>Available to download</b>, a card for each set the project offers itself: click it, choose a folder, and the set is downloaded, unpacked and added to the library.</p>
 
 <h3>Adding an organ</h3>
 <ul>
@@ -61,7 +64,7 @@
 
 <h3>Card buttons: photo, search, remove</h3>
 <p>If you point at a card, three buttons appear at the top right of the photo: <b>search a photo online</b> (globe), <b>choose an image yourself</b> (camera) and <b>remove from library</b> (cross). Removing only takes the card out of the library; the files on your disk stay where they are. If you hold a card pressed for 3 seconds, the program searches the photo again.</p>
-<p><b>Searching online</b> shows a few freely usable photos from Wikimedia Commons, based on the name, builder and place stored in the set. Click a photo to adopt it; the source and licence appear under the card. If the set holds too little to find anything, type a search term yourself (church, town or organ name) in the field at the top of the window and choose <b>Search</b>.</p>
+<p><b>Searching online</b> shows a few freely usable photos from Wikimedia Commons. At the top of the window are the fields <b>Church</b>, <b>Place</b> and <b>Builder</b>, filled in beforehand from the organ definition and the information supplied with the set; correct them if they are wrong and choose <b>Search</b>. Below them a free search field remains for a term of your own. Click a photo to adopt it; the source and licence appear under the card.</p>
 <figure><img src="afbeeldingen/en/04_online_zoeken.jpg" alt="Search a photo online"><figcaption>The &ldquo;Search a photo online&rdquo; window with the field for your own search term and the photos found, with their source and licence.</figcaption></figure>
 
 <h3 id="codm">Hauptwerk Custom Organ (CODM) and the import report</h3>
@@ -72,14 +75,21 @@
   <li><b>Load partially</b> loads only the stops whose samples are present; a bar at the top reminds you and opens the <b>Import report</b>. If nothing is playable you can only cancel.</li>
   <li>The <b>Import report</b> lists what was expected and what was loaded, which stops were skipped and why, and where JM-Orgue uses an approximation (for example: the tremulant sounds as a simple modulation because Hauptwerk&rsquo;s waveforms are not read).</li>
   <li>JM-Orgue cannot read samples in Hauptwerk&rsquo;s protected <code>.hbw</code> format; a set that depends on them is reported as not playable.</li>
+  <li>A stop with only one pipe (cymbelstern, nightingale, a single bell stroke) does not go on the keyboard but becomes a clickable button in the <b>Effect registers</b> division, just as with regular Hauptwerk sets. Stops with more pipes stay on the keyboard.</li>
+  <li>Shortcut pistons from the definition get no buttons of their own: they operate a stop, coupler or tremulant that already has a button in its division. The report lists, per piston, what it points to.</li>
+  <li>Couplers behave as the Hauptwerk guide prescribes: a coupler connects a keyboard to the wind chests of its target and does not chain on to a further coupler. GrandOrgue sets do keep chaining.</li>
+  <li>If the definition is written in the &ldquo;abbreviated&rdquo; form (fields are then only called <code>a</code>, <code>b</code>, <code>c</code>), the report states whether the meaning of those fields could be derived safely.</li>
 </ul>
-<p>A CODM organ with all its samples loads without any question. Whether it sounds exactly as in Hauptwerk has not been verified: that needs a complete original set and a reference recording.</p>
+<p>A CODM organ with all its samples loads without any question. If the definition states per stop that the upper harmonics should sound stronger or softer, JM-Orgue applies that while loading. Whether it sounds exactly as in Hauptwerk has not been verified: that needs a complete original set and a reference recording.</p>
+
+<h3>Sample sets with WavPack or FLAC</h3>
+<p>Many GrandOrgue sets are packed with WavPack; the files are then often simply called <code>.wav</code>. JM-Orgue reads them directly, including loop points and releases, and loads them quickly because only the beginning of each recording is unpacked. Only if a file really cannot be read (for example a FLAC file or a multichannel WavPack file) does a bar at the top report how many files were skipped.</p>
 
 <!-- ============================================================ -->
 <h2 id="bespelen">3. Loading and playing an organ</h2>
 
 <h3>Loading</h3>
-<p>When loading, JM-Orgue reads the beginning of every pipe recording into memory; the rest is loaded while you play. A large surround set can therefore take a moment; the progress bar shows how far it is.</p>
+<p>When loading, JM-Orgue reads the beginning of every pipe recording into memory; the rest is loaded while you play. A large surround set can therefore take a moment; the progress bar shows how far it is. Below the indicator is a <b>Cancel</b> button: press it while the samples are still being read and the program returns to the organ that was already sounding, without changing anything. Handy if you clicked the wrong card by accident. Once the audio engine is already switching over, the button does nothing any more.</p>
 <figure><img src="afbeeldingen/en/05_laden.jpg" alt="Loading screen"><figcaption>The loading screen with the progress of reading the samples.</figcaption></figure>
 
 <h3>The blower</h3>
@@ -87,7 +97,7 @@
 <figure><img src="afbeeldingen/en/06_orgelscherm_motor_uit.jpg" alt="Organ screen with blower off"><figcaption>The organ screen right after loading: blower off, all stops pushed in.</figcaption></figure>
 
 <h3>Stops, couplers and tremulants</h3>
-<p>Every division has its own box with its stops. Click a stop knob to draw it; drawn stops turn yellow. The colour of the name shows the family: reeds, for instance, are red, mixtures and quints blue. Each box also holds the <b>tremulant</b> and the <b>couplers</b> (for example &ldquo;Hauptwerk + Schwellwerk&rdquo;). A green bar on the right in the header of a division shows the position of the swell box.</p>
+<p>Every division has its own box with its stops. Click a stop knob to draw it; drawn stops turn yellow. The colour of the name shows the family: reeds, for instance, are red, mixtures and quints blue. If the automatic classification is wrong for a single stop, you choose the colour group yourself under Stop order (chapter 7). Each box also holds the <b>tremulant</b> and the <b>couplers</b> (for example &ldquo;Hauptwerk + Schwellwerk&rdquo;); the couplers use the same font size as the stops. A green bar on the right in the header of a division shows the position of the swell box. The divisions appear in the order of the organ's keyboards (I, II, III), not in the order of the file. If the set has effect stops (cymbelstern, nightingale and the like), they appear as clickable buttons in a division of their own, <b>Effect registers</b>.</p>
 <figure><img src="afbeeldingen/en/07_orgelscherm_registers.jpg" alt="Organ screen with drawn stops"><figcaption>Blower on, a few stops drawn and the coupler Hauptwerk + Schwellwerk on. The setter bar at the bottom.</figcaption></figure>
 
 <h3>The setter bar</h3>
@@ -98,6 +108,7 @@
   <tr><td><b>&minus;1 / +1</b>, <b>&minus;10 / +10</b></td><td>Step to the previous or next registration, or ten further.</td></tr>
   <tr><td><b>G.C.</b></td><td>General Cancel: all stops off.</td></tr>
   <tr><td><b>M 1&ndash;8</b></td><td>Memory levels: eight separate banks of registrations.</td></tr>
+  <tr><td>Copy button</td><td><b>Copy combination to&hellip;</b>: recall a combination, press the copy button, choose the destination with &minus;10 / +10 and a digit, and the combination is copied there, also across a block boundary (for example from 9 to 10). The registration that is sounding now does not change.</td></tr>
   <tr><td><b>Cresc</b></td><td>The general crescendo (see chapter 7). The bar shows the current step.</td></tr>
   <tr><td>Volume slider</td><td>Master volume. Double-clicking resets it to the default; with the scroll wheel you change it in steps of 1 dB.</td></tr>
 </table>
@@ -117,7 +128,7 @@
   <tr><td><b>New screen</b></td><td>Opens an extra window with the same stops, for example for a second monitor or a second keyboard.</td></tr>
   <tr><td><b>MP3</b></td><td>Records what you hear. The recording goes to Documents\JM-Orgue-opnames. Click the red counter to stop; the program then tells you where the file is.</td></tr>
   <tr><td><b>MIDI</b></td><td>Records what you play (notes only) as a .mid file. Click the blue counter to stop and choose where to save it.</td></tr>
-  <tr><td><b>Notate</b></td><td>Opens the notation window: notes appear while you play, with layers, overdub and editing. An existing MIDI file can be opened there too.</td></tr>
+  <tr><td><b>Notate</b></td><td>Opens the notation window: notes appear while you play, in staff notation or klavar, with staves, overdub and editing, and can be printed straight to PDF (see below).</td></tr>
   <tr><td><b>Shut down PC</b></td><td>Closes the software <i>and the computer</i>, after a confirmation; the last state is saved first. Right-click or hold for 3 seconds links the button to a button on your console.</td></tr>
 </table>
 
@@ -133,11 +144,20 @@
 <p><b>New screen</b> opens a window of its own that you can drag to another monitor, or leave small beside the main window. It has its own layout settings: if the buttons are too small, choose <b>Layout</b> and set the button width and height, or choose divisions below or beside each other.</p>
 <figure><img src="afbeeldingen/en/43_nieuw_scherm.jpg" alt="Second screen"><figcaption>An extra screen with readable stops, here in a window of 1000 &times; 900 pixels.</figcaption></figure>
 
+<h3 id="noteren">The notation window: staff notation, klavar and PDF</h3>
+<p><b>Notate</b> opens a window of its own in which your playing is written down; no second program is needed to compose or to work out a piece. Choose <b>New&hellip;</b> for a new piece (title, composer, time signature, key, tempo, number of bars and staves) and press <b>Record</b>: recording starts at the first note you play. A piece has several <b>staves</b>, for example right hand, left hand and pedal; under <b>Staves &amp; voices</b> each staff has its own <b>Channel</b> with a <b>Learn</b> button (play one key on the keyboard that should go to that staff). If you play right hand, left hand and pedal on three MIDI channels, they land on three staves at the same time. A new take (overdub) is added to what is already there.</p>
+<ul>
+  <li><b>View</b>: <b>Staff notation</b> shows ordinary staves; <b>Klavar</b> shows klavarskribo, in which the lines are the black keys and time runs from top to bottom. Per staff you choose the hand (right, left, pedal, or R+L with a split point) and with <b>Range</b> whether the staves span the notes played or the whole keyboard.</li>
+  <li><b>Print / PDF</b> prints the score or saves it as a PDF, in the chosen view. Under <b>Export</b> you also find <b>Save as MIDI&hellip;</b>, <b>Save as MusicXML</b> (for other notation programs) and, for klavar, <b>Save as SVG&hellip;</b>.</li>
+  <li><b>Save</b> stores the piece as a JM-Orgue score (<code>.jmscore</code>), <b>Open&hellip;</b> brings it back; an existing MIDI file can be imported as an extra take. On the tabs <b>Input</b>, <b>Texts &amp; marks</b> and <b>Playback</b> you enter notes step by step, add texts and marks, and play the piece through the organ.</li>
+</ul>
+<p class="klein">Keyboard shortcuts in the notation window: <kbd>Ctrl</kbd>+<kbd>N</kbd> new piece, <kbd>Ctrl</kbd>+<kbd>O</kbd> open, <kbd>Ctrl</kbd>+<kbd>S</kbd> save, <kbd>Ctrl</kbd>+<kbd>C</kbd> copy.</p>
+
 <!-- ============================================================ -->
 <h2 id="posities">5. Several listening positions</h2>
 <p>Some sample sets were recorded at several places in the church, for example close, in front, halfway and at the back. Such a set shows the <b>Perspective</b> buttons in the toolbar, one for each position. Click a position to switch it on or off; you can let more than one sound at the same time. To the right of them is the <b>listening position</b>: the slider between &ldquo;at organ&rdquo; and &ldquo;in the back&rdquo; blends smoothly between the recorded positions.</p>
 <figure><img src="afbeeldingen/en/50_nancy_orgelscherm.jpg" alt="Organ screen with perspectives"><figcaption>A set with four recording positions (Close, Front, Middle, Rear) and the listening-position slider.</figcaption></figure>
-<div class="tip"><b>Tip</b> All recording positions are loaded together by default, so the listening-position slider blends between them smoothly from the first touch. Next to the Perspective buttons in the toolbar is a mixer button: click it for a small mixer with a slider per position (0&ndash;200&nbsp;%). On a computer with little memory you can switch unused positions off under Organ Settings &rarr; &ldquo;Perspectives and stacked ranks&rdquo;; that choice takes effect after the organ is reloaded.</div>
+<div class="tip"><b>Tip</b> Next to the Perspective buttons in the toolbar is a mixer button: click it for a small mixer with a slider per position (0&ndash;200&nbsp;%). Which positions are loaded you choose under Organ Settings &rarr; &ldquo;Perspectives and stacked ranks&rdquo;; only the ticked positions go into memory, and that choice takes effect after the organ is reloaded. <b>Keep all positions in memory</b> is off by default and is only carried out when all positions together fit comfortably in memory. If an organ does not fit in memory, the program switches on only the nearest position after loading and reports that at the top.</div>
 
 <!-- ============================================================ -->
 <h2 id="wizard">6. The setup wizard for a new organ</h2>
@@ -169,7 +189,7 @@
 <p>The first block holds the master settings:</p>
 <ul>
   <li><b>Volume</b>: the master volume of this organ.</li>
-  <li><b>Temperament</b>: &ldquo;Original&rdquo; plays the pipes as they were recorded. Other temperaments (equal and historical temperaments) retune the pipes based on the measured pitch of each recording. Below the choice you see how many pipes have a measured pitch. With <b>Custom temperament&hellip;</b> you set the deviation per note in cents yourself. <b>Load Scala file&hellip;</b> reads a .scl file (the worldwide format for microtonal and historical temperaments from the Huygens-Fokker Foundation); the loaded temperament appears in the list and is kept for later sessions.</li>
+  <li><b>Temperament</b>: &ldquo;Original&rdquo; plays the pipes as they were recorded. Other temperaments (equal and historical temperaments) retune the pipes based on the measured pitch of each recording. Below the choice you see how many pipes have a measured pitch. What the organ definition states takes precedence: a floating stop with a stated deviation (Unda maris, Voix c&eacute;leste) sounds at the temperament plus that deviation, a recording whose pitch is given in the definition is retuned to it, and a set that states it does not play at the original organ pitch always plays at the target pitch. With <b>Custom temperament&hellip;</b> you set the deviation per note in cents yourself. <b>Load Scala file&hellip;</b> reads a .scl file (the worldwide format for microtonal and historical temperaments from the Huygens-Fokker Foundation); the loaded temperament appears in the list and is kept for later sessions.</li>
   <li><b>Fine tuning</b>: everything together higher or lower, in cents.</li>
 </ul>
 <p><b>Reverb</b> controls the reverberation. If the set already has the church acoustics in its recordings, that is stated (with a button <b>Back to the recording (reverb off)</b> to switch the extra reverb off): extra reverb is then a matter of taste. You choose between <b>Algorithmic</b> (a calculated reverb with RT60, delay, damping and room size, also as a preset) and <b>Impulse Response</b> with an impulse response (IR) of your own. With <b>Mix</b> you determine how much reverb you hear.</p>
@@ -192,15 +212,15 @@
 <figure><img src="afbeeldingen/en/11_crescendo.jpg" alt="Crescendo tab"><figcaption>The crescendo matrix: stops in the rows, steps in the columns.</figcaption></figure>
 
 <h3>Stop order</h3>
-<p>Here you decide the order of the stops in each division. Drag a stop by its handle to move it. For each stop you see the pitch and the family (the colour of the name). With the arrows you change the order step by step, and <b>Reset</b> restores the order of the set.</p>
+<p>Here you decide the order of the stops in each division. Drag a stop by its handle to move it. For each stop you see the pitch and the family (the colour of the name). With the arrows you change the order step by step, and <b>Original</b> restores the order from the organ file. If the automatic classification colours a single stop differently from what you want, you choose the <b>colour group</b> per stop yourself: <b>Foundation</b>, <b>Mutation</b> or <b>Reed</b>. That is purely visual and is stored per organ.</p>
 <figure><img src="afbeeldingen/en/12_registersortering.jpg" alt="Stop order tab"><figcaption>The stops per division, in the order in which they appear on the organ screen.</figcaption></figure>
 
 <h3>Routing</h3>
 <p>This tab connects your organ to your equipment. At the top there is a block per keyboard:</p>
 <ul>
-  <li><b>Channel</b>: the MIDI channel the keyboard listens to (&ldquo;All&rdquo; = every channel). <b>Learn</b> determines channel and range by playing the lowest and then the highest key.</li>
+  <li><b>Channel</b>: the MIDI channel the keyboard listens to (&ldquo;All&rdquo; = every channel). <b>Learn</b> determines channel and range by playing the lowest and then the highest key; if those are too close together, the program warns you instead of setting a range of just a few keys. If all your keyboards send on the same channel, give each device a fixed channel under App Settings &rarr; MIDI (chapter 8).</li>
   <li><b>Transp</b>: transpose in semitones. <b>Range</b>: lowest and highest key. <b>Short octave</b>: for sets with a short bass octave.</li>
-  <li><b>Swell box</b>: switches on the swell box of this keyboard; buttons then appear to learn the pedal, to set the minimum volume and the cut-off frequency of a closed box. The pedal can also be learned straight from the organ screen: right-click the green LED strip next to the manual name &mdash; or hold it for 2 seconds on a touch screen &mdash; and the same &ldquo;pedal closed / pedal open&rdquo; dialog opens.</li>
+  <li><b>Swell box</b>: switches on the swell box of this keyboard; buttons then appear to learn the pedal, to set the minimum volume and the cut-off frequency of a closed box. The defaults are &minus;20&nbsp;dB and 1500&nbsp;Hz: the pedal then works evenly in decibels over its whole travel, as in Hauptwerk, and the sound becomes somewhat duller with the box closed. If the pedal seems to do little at the bottom, choose a higher cut-off frequency; if you want a closed box softer, a lower minimum volume (down to &minus;24&nbsp;dB). The pedal can also be learned straight from the organ screen: right-click the green LED strip next to the manual name &mdash; or hold it for 2 seconds on a touch screen &mdash; and the same &ldquo;pedal closed / pedal open&rdquo; dialog opens.</li>
   <li><b>Wind supply</b>: which wind group the keyboard belongs to.</li>
   <li><b>Pan</b> and <b>Outputs</b>: the place in the stereo image and the output channels of your audio interface the keyboard sounds on. Two consecutive outputs form a stereo pair; a single channel sounds mono.</li>
   <li><b>C/Cis</b>: spreads the pipes over two sides, like the C and C-sharp chests of a real organ; the global strength and fall-off are in the block above it.</li>
@@ -248,7 +268,7 @@
 <figure><img src="afbeeldingen/en/31_samplefix.jpg" alt="Sample fix"><figcaption>Sample fix: leading silence and loops, each with Scan and a button to apply.</figcaption></figure>
 
 <h3>MIDI</h3>
-<p><b>MIDI Input</b> shows the connected MIDI devices (with <b>Refresh devices</b> you search again); under <b>Bluetooth MIDI</b> you search for wireless devices with <b>Scan</b>. <b>Feedback (MIDI out)</b> makes your console light up with the registration: choose the protocol (stop lamps via Note On/Off, a Hauptwerk text display or a Johannus/Content console), the MIDI output, the channel and the base note. Each stop then automatically gets a note number from the base note, or you learn the real console button per stop with <b>Learn per stop&hellip;</b>.</p>
+<p><b>MIDI Input</b> shows the connected MIDI devices (with <b>Refresh devices</b> you search again). Per device you can choose a fixed channel: keyboards that all send on channel 1 then still operate different divisions, without you having to restore channels every session. If a device is set to <b>Default device</b>, nothing changes. Under <b>Bluetooth MIDI</b> you search for wireless devices with <b>Scan</b>; the learn buttons that react to a single key also listen to a Bluetooth keyboard. <b>Feedback (MIDI out)</b> makes your console light up with the registration: choose the protocol (stop lamps via Note On/Off, a Hauptwerk text display or a Johannus/Content console), the MIDI output, the channel and the base note. Each stop then automatically gets a note number from the base note, or you learn the real console button per stop with <b>Learn per stop&hellip;</b>.</p>
 <figure><img src="afbeeldingen/en/32_midi.jpg" alt="MIDI"><figcaption>MIDI input, Bluetooth MIDI and the feedback to the console.</figcaption></figure>
 
 <h3>Learn buttons</h3>
@@ -288,6 +308,8 @@
   <tr><td>Right-click or hold 3 s</td><td>On a button of the setter bar: link that button to a console button (MIDI learn).</td></tr>
   <tr><td>Double-click on the volume</td><td>Master volume back to the default value.</td></tr>
   <tr><td>Card held for 3 s</td><td>In the library: search the photo of that card again.</td></tr>
+  <tr><td><kbd>Z</kbd>&hellip;<kbd>M</kbd> and <kbd>Q</kbd>&hellip;<kbd>I</kbd></td><td>Computer keyboard as a manual: two octaves. <kbd>Shift</kbd> shifts an octave up, <kbd>Alt</kbd> an octave down, also combined.</td></tr>
+  <tr><td><kbd>Ctrl</kbd>+<kbd>N</kbd> / <kbd>O</kbd> / <kbd>S</kbd></td><td>In the notation window: new piece, open, save.</td></tr>
 </table>
 <ul>
   <li>All settings are stored with each organ, also when you close the organ or quit the program.</li>
@@ -305,6 +327,9 @@
   <tr><td>Crackling or stuttering</td><td>Lower the polyphony, draw fewer stops, switch the reverb off or choose a larger buffer. A short start buffer needs a fast drive; otherwise choose a longer one.</td></tr>
   <tr><td>Too little memory</td><td>Choose a shorter start buffer, switch stereo samples off, or switch off listening positions you do not use.</td></tr>
   <tr><td>Background sounds or effect stops are not heard on the right speaker</td><td>Under Routing, at &ldquo;Background sounds audio output&rdquo;, choose the same outputs as for the keyboards.</td></tr>
+  <tr><td>Pipes stay silent and a notice about WavPack or FLAC appears at the top</td><td>WavPack the program reads by itself; if the notice persists, it concerns files that cannot be read (FLAC, hybrid or multichannel WavPack). Convert the set to plain WAV or ask the maker for an unpacked version.</td></tr>
+  <tr><td>The swell pedal does little at the bottom and a lot at the top</td><td>Under Routing, at the swell box, raise the cut-off frequency for a closed box (default 1500&nbsp;Hz) or lower the minimum volume.</td></tr>
+  <tr><td>An organ loads by accident or takes too long</td><td>Press <b>Cancel</b> in the loading screen; the previous organ keeps sounding.</td></tr>
 </table>
 <p><b>Send feedback&hellip;</b> (App Settings &rarr; Update and feedback) creates a message with your report and the log files of the last sessions, so the developer can see what happened. You can also post your report on the project page on GitHub.</p>
 

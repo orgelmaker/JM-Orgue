@@ -4153,6 +4153,8 @@
   const SAMPLESET_BRONNEN = [
     { naam: 'Piotr Grabowski', url: 'https://piotrgrabowski.pl/instruments/', toon: 'piotrgrabowski.pl' },
     { naam: 'Sonus Paradisi', url: 'https://www.sonusparadisi.cz/en/blog/category/free-stuff/', toon: 'sonusparadisi.cz' },
+    { naam: 'Lars Palo', url: 'https://familjenpalo.se/vpo/download/', toon: 'familjenpalo.se' },
+    { naam: "Augustine's Virtual Organs", url: 'https://hauptwerk-augustine.info/Completely_free_samples.php', toon: 'hauptwerk-augustine.info' },
   ];
   // Handleiding (0.8.96): de PDF in de taal van het programma, rechtstreeks
   // uit de repository; onbekende taal → Engels.

@@ -4,6 +4,249 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [0.9.50] - 2026-11-07
+
+### Meer gratis samplesets vanuit de bibliotheek
+- Onder **Meer samplesets** staan nu vier makers die sets gratis aanbieden:
+  naast Piotr Grabowski en Sonus Paradisi ook Lars Palo (GrandOrgue-sets)
+  en Augustine's Virtual Organs (Hauptwerk-sets). Elke knop opent de
+  downloadpagina van de maker; JM-Orgue leest hun bestanden rechtstreeks in.
+
+### Handleiding bijgewerkt naar 0.9.49, in zeven talen
+- Alles wat sinds 0.9.16 is toegevoegd staat erin: het bibliotheekraster
+  met pijlknoppen, de bronknoppen en de knop Handleiding, foto zoeken met
+  Kerk/Plaats/Bouwer, de CODM-uitbreidingen (effectregisters, pistons,
+  koppels, ingekorte definities), WavPack/FLAC, de annuleerknop bij het
+  laden, de kopieerknop van de setzer, een nieuw stuk over het
+  notatievenster (notenschrift, klavar, afdrukken als PDF, MIDI/MusicXML/
+  SVG), opnameposities in het geheugen, de stemmingsregels, de kleurgroep
+  per register, de zwelkast-standaarden, MIDI per apparaat, nieuwe
+  sneltoetsen en extra rijen bij Problemen oplossen. De knopnamen volgen
+  per taal letterlijk de teksten van het programma. De PDF's zijn opnieuw
+  gemaakt; de knop Handleiding in de bibliotheek opent altijd de nieuwste.
+- De CHANGELOG is aangevuld met 0.9.33 tot en met 0.9.49.
+
+## [0.9.49] - 2026-11-07
+
+### CODM: pistonbalk weg, effectregisters naar de Effectregisters-divisie
+- De pistonbalk uit 0.9.48 is verwijderd. Shortcutpistons uit een Custom
+  Organ-definitie wijzen altijd naar een bestaand register, koppel of
+  tremulant, en die staan al als knop bij hun eigen werk; een eigen balk was
+  een duplicaat. Het importverslag meldt per piston wat ermee gebeurd is.
+- Een CODM-register met één pijp (cimbelster, vogelzang, een losse klokslag)
+  komt bij het laden in de divisie Effectregisters als klikbare knop en niet
+  meer op het klavier. Registers met meer pijpen blijven op het klavier, ook
+  als de definitie er een vasthoud-piston op zet.
+- Percussieve effectregisters spelen voorlopig als lus; een eenmalige
+  afspeelstand volgt later. Het verslag meldt dat.
+
+### Zwelkast gevoeliger onderaan
+- De standaard afsnijfrequentie bij een gesloten zwelkast gaat van 800 naar
+  1500 Hz. Bij 800 Hz deed het eerste stuk van de trede vooral iets met de
+  klankkleur en nauwelijks met het volume, waardoor het leek alsof de trede
+  onderaan niets deed en bovenaan ineens veel. De dB-schaal zelf (−20 dB bij
+  dicht) is ongewijzigd en komt overeen met wat Hauptwerk doet.
+- De ondergrens voor het minimale volume gaat van −30 naar −24 dB, zodat een
+  dichte kast nog hoorbaar fond houdt.
+
+## [0.9.48] - 2026-11-03
+
+### Bibliotheekscherm met vast raster en pijlknoppen
+- Het raster toont altijd acht tegels naast elkaar en drie rijen in beeld. Op
+  een breed scherm betekent dat grotere, rustiger ogende tegels. Passen er
+  meer orgels in dan in beeld, dan scrolt de lijst; rechts staan twee ronde
+  pijlknoppen (omhoog, omlaag) van 56 beeldpunten, zodat ze op een
+  aanraakscherm goed te raken zijn. Is er niets te scrollen, dan zijn de
+  knoppen weg. Op smalle vensters valt het raster terug op het bestaande
+  auto-fill, zodat tegels niet piepklein worden.
+
+### Pistonbalk in de UI (teruggedraaid in 0.9.49)
+- Shortcutpistons uit de set kregen een eigen rij ronde knoppen onder de
+  koppelbalk, met vasthoud- en omschakelgedrag. In 0.9.49 weer verwijderd:
+  de knoppen dupliceerden de bestaande register- en koppelknoppen.
+
+## [0.9.47] - 2026-11-03
+
+### Annuleerknop in het laadscherm
+- Terwijl een orgel geladen wordt staat onder de ronddraaiende indicator een
+  knop **Annuleren**. Druk je die vóór de audio-engine is omgezet, dan keert
+  JM-Orgue terug naar het orgel dat al klonk, zonder iets te veranderen.
+  Handig als je per ongeluk de verkeerde kaart aanklikte of als een grote set
+  niet klinkt op dit apparaat. Zodra de audio-engine al bezig is, negeert de
+  knop stilzwijgend: anders zou je tussen twee orgels blijven hangen.
+
+## [0.9.46] - 2026-11-03
+
+### Verslag over de veldafleiding van een compacte Hauptwerk-definitie
+- Sommige Hauptwerk-orgeldefinities zijn "ingekort" opgeschreven: velden
+  heten dan alleen `a`, `b`, `c` en hun betekenis moet uit het bestand zelf
+  afgeleid worden. JM-Orgue meldt nu per import of die afleiding veilig is
+  geweest. Een niet herkend identiteitsveld (bijvoorbeeld de ID van een
+  register of pijp) komt als fout in het importverslag, want dan kunnen delen
+  van het orgel stil of verkeerd geladen zijn. Een niet herkend bijstel-veld
+  (stemmingsschema, actiecodes, release-grens) komt als waarschuwing: het
+  orgel speelt wel, maar die bijstelling wordt niet toegepast. Gewone
+  definities krijgen geen van deze meldingen.
+
+## [0.9.45] - 2026-11-03
+
+### MIDI-leren voor consoleknoppen bij CODM-orgels
+- Consoleknoppen uit de definitie die een register, koppel of tremulant
+  bedienen (een reversibele piston met bijvoorbeeld opschrift G/P) konden
+  als eigen MIDI-doel in de lijst van MIDI-koppelingen worden gekozen. Sinds
+  0.9.49 worden zulke pistons niet meer als apart object aangemaakt; leer de
+  register- of koppelknop zelf in.
+
+## [0.9.44] - 2026-11-03
+
+### Koppels in Custom Organ-sets volgen de Hauptwerk-gids
+- Een koppel verbindt het bronklavier met de windladen van het doel, niet met
+  het klavier van het doel. Twee koppels achter elkaar (Zwelwerk→Hoofdwerk en
+  Hoofdwerk→Pedaal) schakelen dus niet door: speel je een pedaaltoets, dan
+  klinken Pedaal en Hoofdwerk, maar niet het Zwelwerk. GrandOrgue-sets
+  blijven doorschakelen zoals ze altijd deden.
+
+## [0.9.43] - 2026-11-03
+
+### Beter bijstemmen van Hauptwerk-sets
+- Sommige sets slaan de exacte toonhoogte van elke opname op in de
+  orgeldefinitie zelf (niet in de WAV). Is die definitie in de ingekorte vorm
+  geschreven, dan herkent JM-Orgue nu automatisch waar die toonhoogtes staan
+  en gebruikt ze. Een opname die een halve toon te hoog of te laag is
+  opgenomen wordt zo bij elke stemming correct bijgesteld, zonder dat je iets
+  hoeft in te stellen. Hoorbaar bij sets waarvan één of enkele pijpen
+  opvallend vals klonken, ook met "Pijpen automatisch bijstemmen" aan.
+
+## [0.9.42] - 2026-11-03
+
+### Hauptwerk Custom Organ-sets (CODM) veiliger laden
+- Vóór het laden controleert JM-Orgue of alle samplepakketten aanwezig zijn.
+  Ontbreekt er een, dan zie je welke (met naam) en hoeveel registers zouden
+  klinken, en blijft het huidige orgel actief tot je kiest: de pakketmap
+  zelf aanwijzen (wordt per orgel onthouden), gedeeltelijk laden of
+  annuleren. Een gedeeltelijk geladen orgel krijgt een melding bovenin.
+- **Importverslag**, per orgel opnieuw te openen: wat de definitie belooft en
+  wat er geladen is, welke registers zijn overgeslagen en waarom, en waar
+  JM-Orgue een benadering gebruikt. Een beschadigd bestand krijgt een
+  begrijpelijke melding met regel en kolom; het vorige orgel blijft staan.
+- **Juiste toonhoogte bij gedeelde opnamen:** registers die één opname voor
+  veel toetsen gebruiken (zoals een klokkenspel) of de opname van een
+  buurtoon lenen, klinken nu op de juiste toon.
+- **Releases:** de release in het hoofdbestand begint bij de eerste marker,
+  zoals in Hauptwerk; losse releasebestanden beginnen bij het begin. Korte,
+  middellange en lange releases volgen de toetsduur.
+- Kleine stemafwijking per pijp waar de definitie daarom vraagt, en
+  schakelaargedrag uit de definitie: registers en koppels die standaard aan
+  staan en schakelaars die niet in het setzergeheugen horen.
+- Handleiding (zeven talen) en README bijgewerkt. GrandOrgue- en gewone
+  Hauptwerk-sets laden en klinken ongewijzigd.
+
+## [0.9.41] - 2026-11-03
+
+### Boventonen bijstellen bij CODM-registers
+- Een orgel in het CODM-formaat kan per register opgeven dat de hogere
+  boventonen (vanaf de derde) een aantal decibel sterker of zachter moeten
+  klinken. JM-Orgue past dit nu toe: de bijstelling wordt één keer over de
+  opname gelegd op het moment van laden, niet tijdens het spelen, zodat de
+  weergave onbelast blijft. Registers zonder deze opgave en sets in andere
+  formaten blijven onveranderd.
+
+## [0.9.40] - 2026-11-02
+
+### Zwevende registers zuiver
+- Een register dat als zwevend wordt herkend (Vox coelestis, Voix céleste)
+  houdt voortaan alleen afwijkingen die bij een zweving passen (tot 50 cent).
+  Pijpen die de opname van een buurtoon gebruiken, worden nu naar hun juiste
+  toon gestemd; voorheen klonken zulke noten een halve tot hele toon ernaast.
+
+### Lange nagalm bij releases met tijdgrens
+- Heeft een sampleset alleen releases voor korte noten (bijvoorbeeld tot 150,
+  300 of 600 ms), dan krijgt een lang aangehouden noot nu de volle nagalm uit
+  de opname zelf, zoals in GrandOrgue.
+
+## [0.9.39] - 2026-11-02
+
+### Hauptwerk Custom Organ-definities (CODM) worden gelezen
+- Orgels die met de Custom Organ Design Module van Hauptwerk zijn
+  samengesteld (`*.CustomOrgan_Hauptwerk_xml`) worden nu geladen. Registers,
+  rangen, koppels, zwelkasten en tremulanten worden uit de definitie
+  opgebouwd; per rang klinkt elke pijp, ook wanneer pijpen dezelfde opname
+  delen. Releases voor korte, middellange en lange noten worden meegenomen.
+- Ontbrekende samplepakketten worden met naam gemeld, met de plek waar ze
+  horen te staan.
+- **Unison Off werkt:** zet het eigen klavier op gelijke toon uit, terwijl
+  octaafkoppels en koppels naar andere klavieren blijven werken. Geldt voor
+  CODM- en GrandOrgue-definities.
+- Melodie- en baskoppels uit de orgeldefinitie gedragen zich als echte
+  solokoppels (alleen de hoogste of laagste noot).
+
+## [0.9.38] - 2026-11-02
+
+### Online een foto zoeken: velden Kerk, Plaats en Bouwer
+- Het zoekvenster toont nu de velden **Kerk**, **Plaats** en **Bouwer**,
+  vooraf ingevuld uit de orgeldefinitie en de meegeleverde informatie. Pas ze
+  aan en druk op Zoek; het vrije zoekveld blijft eronder beschikbaar.
+- Betere zoekgegevens uit de set: opvulwaarden zoals "[Generated by …]",
+  "N/A" en "Unknown" worden genegeerd; toevoegingen als "demo", "extended",
+  "surround" en versienummers verdwijnen uit de zoekterm. Staat het
+  kerkgebouw in het locatieveld, dan wordt dat de kerk en komt de plaats uit
+  de naam. Een plaats die in de naam staat ("… of <stad>", "… de <stad>")
+  wordt herkend; een straatnaam wordt niet meer als plaats gebruikt.
+- Kerknaam uit de info-tekst: alleen nog een echte naam, geen beschrijvende
+  zin.
+
+## [0.9.37] - 2026-10-31
+
+### Voetmaten in registernamen
+- Een kale voetmaat achter de naam (bijv. "Fifteenth 2" of "Nasard 2 2/3")
+  en de Franse aanduiding "P." (pieds, bijv. "Bourdon 16 P.") komen nu als
+  voetmaat onder de knop en verdwijnen uit de naam. Mengwerken houden hun
+  aantal koren.
+- Klavecimbels: registers die alleen naar hun voetmaat heten ("4", "8-I",
+  "8-II") tonen de juiste voetmaat.
+- Tertsen met een samengestelde voetmaat tonen 3 1/5' in plaats van 3.2'.
+
+## [0.9.36] - 2026-10-31
+
+### WavPack-samplesets laden sneller
+- Bij het laden wordt alleen nog het begin van elke opname uitgepakt in
+  plaats van het hele bestand. Een set met ruim 4400 WavPack-bestanden laadt
+  in 6 in plaats van 16 seconden. De klank is ongewijzigd.
+
+## [0.9.35] - 2026-10-31
+
+### WavPack-samples worden gelezen
+- Veel GrandOrgue-samplesets gebruiken WavPack-compressie (de bestanden
+  heten vaak gewoon .wav). Die sets gaven tot nu toe geen geluid; ze laden en
+  klinken nu, inclusief looppunten en releases uit de originele opnames.
+- De melding over WavPack verschijnt alleen nog als een bestand echt niet te
+  lezen is (bijvoorbeeld een hybride of meerkanaals WavPack-bestand).
+
+## [0.9.34] - 2026-10-31
+
+### Opnameposities: alleen de aangevinkte posities laden
+- Orgels met meerdere opnameposities laden nu alleen de aangevinkte
+  posities. Voorheen werden bij de eerste keer laden na het opstarten toch
+  alle posities geladen, ook als je dat had uitgezet. Bij een grote
+  surround-set met alleen front: ongeveer 45 % minder geheugen en drie keer
+  sneller geladen.
+- "Alle posities in het geheugen houden" staat voortaan standaard uit, en
+  wordt alleen nog uitgevoerd als alle posities samen ruim in het geheugen
+  passen.
+- Registernamen: twee fouten uit 0.9.33 hersteld: een samengestelde voetmaat
+  midden in de naam (bijv. Ters 1 3/5' Bas) en een divisieletter die voor de
+  naam bleef staan.
+
+## [0.9.33] - 2026-10-31
+
+### Importerfixes na een test met tientallen gratis samplesets
+- Oud GrandOrgue-formaat (1.x) met opmerkingen achter de waarden gaf 0
+  registers; die orgels laden nu volledig.
+- Voetmaten als `16FT`, `feet` of midden in de naam komen nu juist onder de
+  registerknop (16') en verdwijnen uit de naam.
+- Registernamen die als bestandsnaam geschreven zijn (`1-P_Subbass16-1`,
+  `051 GT: Chimes`, underscores) worden netjes opgeschoond.
+
 ## [0.9.32] - 2026-10-31
 
 ### Mengen van de stemmen tot bijna twee keer zo licht — geen kraakpieken meer bij vol werk

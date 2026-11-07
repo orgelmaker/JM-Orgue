@@ -11,10 +11,10 @@
 
 <header class="titel">
   <h1>JM-Orgue</h1>
-  <div class="onder">Handbuch f&uuml;r Version 0.9.16 &middot; Oktober 2026</div>
+  <div class="onder">Handbuch f&uuml;r Version 0.9.49 &middot; November 2026</div>
 </header>
 
-<p>JM-Orgue ist eine virtuelle Pfeifenorgel f&uuml;r Windows, macOS und Linux. Das Programm spielt Hauptwerk- und GrandOrgue-Sample-Sets direkt ab, auch gro&szlig;e Surround-Sets, und wird mit einer MIDI-Tastatur, einem Orgelspieltisch oder der Maus gespielt. Dieses Handbuch f&uuml;hrt anhand von Bildschirmfotos der Version 0.9.16 durch das Programm.</p>
+<p>JM-Orgue ist eine virtuelle Pfeifenorgel f&uuml;r Windows, macOS und Linux. Das Programm spielt Hauptwerk- und GrandOrgue-Sample-Sets direkt ab, auch gro&szlig;e Surround-Sets und Hauptwerk-Custom-Organ-Definitionen, und wird mit einer MIDI-Tastatur, einem Orgelspieltisch oder der Maus gespielt. Was Sie spielen, kann es sofort notieren, in gew&ouml;hnlicher Notenschrift oder in Klavar, und als PDF drucken. Dieses Handbuch f&uuml;hrt durch das Programm; die Bildschirmfotos stammen aus Version 0.9.16 und sp&auml;teren Versionen, der Text beschreibt Version 0.9.49.</p>
 <p class="klein">&copy; Martijn van der Kolk. Die Bildschirmfotos wurden mit Demo-Orgeln und eigenen Testsets erstellt; Netzwerkadressen, Zugriffstoken und Benutzerordner sind unkenntlich gemacht.</p>
 
 <nav class="inhoud">
@@ -49,8 +49,11 @@
 
 <!-- ============================================================ -->
 <h2 id="bibliotheek">2. Die Bibliothek</h2>
-<p>Nach dem Start sehen Sie die Orgel-Bibliothek: eine Karte pro Orgel mit Foto, Name, Erbauer, Ort und Anzahl der Register. Klicken Sie auf eine Karte, um die Orgel zu laden.</p>
+<p>Nach dem Start sehen Sie die Orgel-Bibliothek: eine Karte pro Orgel mit Foto, Name, Erbauer, Ort und Anzahl der Register. Klicken Sie auf eine Karte, um die Orgel zu laden. Das Raster zeigt acht Karten nebeneinander und drei Reihen im Bild; passen mehr Orgeln in die Bibliothek, bl&auml;ttern Sie mit den beiden runden Pfeilschaltfl&auml;chen rechts im Bild (<b>Nach oben bl&auml;ttern</b>, <b>Nach unten bl&auml;ttern</b>) oder mit dem Mausrad. Die Schaltfl&auml;chen sind gro&szlig; genug f&uuml;r einen Touchscreen und verschwinden, sobald alles ins Bild passt.</p>
 <figure><img src="afbeeldingen/de/03_bibliotheek.jpg" alt="Orgel-Bibliothek"><figcaption>Die Bibliothek mit Demo-Orgeln. Oben rechts stehen die Schaltfl&auml;chen zum Hinzuf&uuml;gen von Orgeln und f&uuml;r die Einstellungen; oben links die Sprachauswahl (NL, EN, FR, DE, PL, IT, ES).</figcaption></figure>
+
+<h3>Sample-Sets finden</h3>
+<p>Unter den Karten steht der Block <b>Weitere Samplesets</b> mit Schaltfl&auml;chen zu Herstellern, die Sets kostenlos anbieten: Piotr Grabowski, Sonus Paradisi, Lars Palo und Augustine's Virtual Organs. Jede Schaltfl&auml;che &ouml;ffnet die Downloadseite des Herstellers in Ihrem Browser; JM-Orgue liest deren Hauptwerk- und GrandOrgue-Dateien direkt ein, ohne Umwandlung. Daneben steht die Schaltfl&auml;che <b>Handbuch</b>, die dieses Handbuch als PDF in der Sprache des Programms &ouml;ffnet. Besteht eine Internetverbindung, zeigt die Bibliothek au&szlig;erdem unter <b>Zum Download verf&uuml;gbar</b> eine Karte pro Set, das das Projekt selbst anbietet: Klicken Sie darauf, w&auml;hlen Sie einen Ordner, und das Set wird heruntergeladen, entpackt und der Bibliothek hinzugef&uuml;gt.</p>
 
 <h3>Eine Orgel hinzuf&uuml;gen</h3>
 <ul>
@@ -61,7 +64,7 @@
 
 <h3>Kartenschaltfl&auml;chen: Foto, Suche, Entfernen</h3>
 <p>Wenn Sie auf eine Karte zeigen, erscheinen oben rechts im Foto drei Schaltfl&auml;chen: <b>Online nach einem Foto suchen</b> (Globus), <b>Bild selbst w&auml;hlen</b> (Kamera) und <b>Aus Bibliothek entfernen</b> (Kreuz). Entfernen nimmt nur die Karte aus der Bibliothek; die Dateien auf Ihrer Festplatte bleiben erhalten. Wenn Sie eine Karte 3 Sekunden gedr&uuml;ckt halten, sucht das Programm das Foto erneut.</p>
-<p>Die <b>Online-Suche</b> zeigt einige frei verwendbare Fotos von Wikimedia Commons, anhand von Name, Erbauer und Ort aus dem Set. Klicken Sie auf ein Foto, um es zu &uuml;bernehmen; Quelle und Lizenz erscheinen unter der Karte. Enth&auml;lt das Set zu wenig, um etwas zu finden, geben Sie selbst einen Suchbegriff ein (Kirche, Ort oder Orgelname), und zwar im Feld oben im Fenster, und w&auml;hlen Sie <b>Suchen</b>.</p>
+<p>Die <b>Online-Suche</b> zeigt einige frei verwendbare Fotos von Wikimedia Commons. Oben im Fenster stehen die Felder <b>Kirche</b>, <b>Ort</b> und <b>Orgelbauer</b>, vorausgef&uuml;llt aus der Orgeldefinition und den mitgelieferten Informationen; passen Sie sie an, wenn sie nicht stimmen, und w&auml;hlen Sie <b>Suchen</b>. Darunter bleibt ein freies Suchfeld f&uuml;r einen eigenen Suchbegriff. Klicken Sie auf ein Foto, um es zu &uuml;bernehmen; Quelle und Lizenz erscheinen unter der Karte.</p>
 <figure><img src="afbeeldingen/de/04_online_zoeken.jpg" alt="Online nach einem Foto suchen"><figcaption>Das Fenster &bdquo;Online nach einem Foto suchen&ldquo; mit dem Feld f&uuml;r einen eigenen Suchbegriff und den gefundenen Fotos samt Quelle und Lizenz.</figcaption></figure>
 
 <h3 id="codm">Hauptwerk Custom Organ (CODM) und der Importbericht</h3>
@@ -72,14 +75,21 @@
   <li><b>Teilweise laden</b> l&auml;dt nur die Register, deren Samples vorhanden sind; eine Leiste oben erinnert daran und &ouml;ffnet den <b>Importbericht</b>. Ist nichts spielbar, k&ouml;nnen Sie nur abbrechen.</li>
   <li>Der <b>Importbericht</b> nennt, was erwartet und was geladen wurde, welche Register &uuml;bersprungen wurden und warum, und wo JM-Orgue eine N&auml;herung verwendet (zum Beispiel: der Tremulant klingt als einfache Modulation, weil die Wellenformen von Hauptwerk nicht gelesen werden).</li>
   <li>Samples im gesch&uuml;tzten <code>.hbw</code>-Format von Hauptwerk kann JM-Orgue nicht lesen; ein Set, das davon abh&auml;ngt, wird als nicht spielbar gemeldet.</li>
+  <li>Ein Register mit nur einer Pfeife (Zimbelstern, Vogelgesang, ein einzelner Glockenschlag) kommt nicht auf das Manual, sondern als anklickbare Schaltfl&auml;che in das Werk <b>Effektregister</b>, genau wie bei gew&ouml;hnlichen Hauptwerk-Sets. Register mit mehreren Pfeifen bleiben auf dem Manual.</li>
+  <li>Shortcut-Pistons aus der Definition erhalten keine eigenen Schaltfl&auml;chen: Sie bedienen ein Register, eine Koppel oder einen Tremulanten, die bereits als Schaltfl&auml;che bei ihrem Werk stehen. Der Bericht nennt pro Piston, worauf er zeigt.</li>
+  <li>Koppeln verhalten sich so, wie es der Hauptwerk-Leitfaden vorschreibt: Eine Koppel verbindet ein Manual mit den Windladen des Ziels und schaltet nicht zu einer weiteren Koppel durch. GrandOrgue-Sets schalten weiterhin durch.</li>
+  <li>Ist die Definition in der &bdquo;verk&uuml;rzten&ldquo; Form geschrieben (die Felder hei&szlig;en dann nur <code>a</code>, <code>b</code>, <code>c</code>), meldet der Bericht, ob die Bedeutung dieser Felder sicher abgeleitet werden konnte.</li>
 </ul>
-<p>Eine CODM-Orgel mit allen Samples l&auml;dt ohne R&uuml;ckfrage. Ob sie genau wie in Hauptwerk klingt, wurde nicht &uuml;berpr&uuml;ft: Daf&uuml;r braucht es ein vollst&auml;ndiges Originalset und eine Referenzaufnahme.</p>
+<p>Eine CODM-Orgel mit allen Samples l&auml;dt ohne R&uuml;ckfrage. Gibt die Definition pro Register an, dass die h&ouml;heren Obert&ouml;ne st&auml;rker oder schw&auml;cher klingen sollen, wendet JM-Orgue das beim Laden an. Ob sie genau wie in Hauptwerk klingt, wurde nicht &uuml;berpr&uuml;ft: Daf&uuml;r braucht es ein vollst&auml;ndiges Originalset und eine Referenzaufnahme.</p>
+
+<h3>Sample-Sets mit WavPack oder FLAC</h3>
+<p>Viele GrandOrgue-Sets sind mit WavPack gepackt; die Dateien hei&szlig;en dann oft einfach <code>.wav</code>. JM-Orgue liest sie direkt, einschlie&szlig;lich Schleifenpunkten und Releases, und l&auml;dt sie schnell, weil nur der Anfang jeder Aufnahme entpackt wird. Nur wenn eine Datei wirklich nicht lesbar ist (zum Beispiel eine FLAC-Datei oder eine mehrkanalige WavPack-Datei), meldet eine Leiste oben, wie viele Dateien &uuml;bersprungen wurden.</p>
 
 <!-- ============================================================ -->
 <h2 id="bespelen">3. Eine Orgel laden und spielen</h2>
 
 <h3>Laden</h3>
-<p>Beim Laden liest JM-Orgue von jeder Pfeifenaufnahme den Anfang in den Speicher; der Rest wird w&auml;hrend des Spielens nachgeladen. Ein gro&szlig;es Surround-Set kann daher einen Moment dauern; der Fortschrittsbalken zeigt, wie weit es ist.</p>
+<p>Beim Laden liest JM-Orgue von jeder Pfeifenaufnahme den Anfang in den Speicher; der Rest wird w&auml;hrend des Spielens nachgeladen. Ein gro&szlig;es Surround-Set kann daher einen Moment dauern; der Fortschrittsbalken zeigt, wie weit es ist. Unter der Anzeige steht eine Schaltfl&auml;che <b>Abbrechen</b>: Dr&uuml;cken Sie sie, w&auml;hrend die Samples noch gelesen werden, kehrt das Programm zur Orgel zur&uuml;ck, die schon klang, ohne etwas zu &auml;ndern. Praktisch, wenn Sie versehentlich die falsche Karte angeklickt haben. Schaltet die Audio-Engine bereits um, tut die Schaltfl&auml;che nichts mehr.</p>
 <figure><img src="afbeeldingen/de/05_laden.jpg" alt="Ladebildschirm"><figcaption>Der Ladebildschirm mit dem Fortschritt beim Einlesen der Samples.</figcaption></figure>
 
 <h3>Der Motor</h3>
@@ -87,7 +97,7 @@
 <figure><img src="afbeeldingen/de/06_orgelscherm_motor_uit.jpg" alt="Orgelbildschirm bei ausgeschaltetem Motor"><figcaption>Der Orgelbildschirm direkt nach dem Laden: Motor aus, alle Register eingeschoben.</figcaption></figure>
 
 <h3>Register, Koppeln und Tremulanten</h3>
-<p>Jedes Manual hat einen eigenen Kasten mit seinen Registern. Klicken Sie auf einen Registerknopf, um das Register zu ziehen; gezogene Register werden gelb. Die Farbe des Namens zeigt die Familie: Zungenstimmen sind zum Beispiel rot, Mixturen und Quinten blau. In jedem Kasten stehen auch der <b>Tremulant</b> und die <b>Koppeln</b> (zum Beispiel &bdquo;Hauptwerk + Schwellwerk&ldquo;). Ein gr&uuml;ner Balken rechts in der Kopfzeile eines Manuals zeigt die Stellung des Schwellkastens.</p>
+<p>Jedes Manual hat einen eigenen Kasten mit seinen Registern. Klicken Sie auf einen Registerknopf, um das Register zu ziehen; gezogene Register werden gelb. Die Farbe des Namens zeigt die Familie: Zungenstimmen sind zum Beispiel rot, Mixturen und Quinten blau. Stimmt die automatische Einteilung bei einem einzelnen Register nicht, w&auml;hlen Sie die Farbgruppe selbst unter Registerreihenfolge (Kapitel 7). In jedem Kasten stehen auch der <b>Tremulant</b> und die <b>Koppeln</b> (zum Beispiel &bdquo;Hauptwerk + Schwellwerk&ldquo;); die Koppeln verwenden dieselbe Schriftgr&ouml;&szlig;e wie die Register. Ein gr&uuml;ner Balken rechts in der Kopfzeile eines Manuals zeigt die Stellung des Schwellkastens. Die Werke stehen in der Reihenfolge der Manuale der Orgel (I, II, III), nicht in der Reihenfolge der Datei. Hat das Set Effektregister (Zimbelstern, Nachtigall und dergleichen), stehen diese als anklickbare Schaltfl&auml;chen in einem eigenen Werk <b>Effektregister</b>.</p>
 <figure><img src="afbeeldingen/de/07_orgelscherm_registers.jpg" alt="Orgelbildschirm mit gezogenen Registern"><figcaption>Motor ein, einige Register gezogen und die Koppel Hauptwerk + Schwellwerk an. Unten die Setzerleiste.</figcaption></figure>
 
 <h3>Die Setzerleiste</h3>
@@ -98,6 +108,7 @@
   <tr><td><b>&minus;1 / +1</b>, <b>&minus;10 / +10</b></td><td>Springt zur vorherigen oder n&auml;chsten Registrierung oder zehn weiter.</td></tr>
   <tr><td><b>G.C.</b></td><td>General Cancel: alle Register aus.</td></tr>
   <tr><td><b>M 1&ndash;8</b></td><td>Speicherebenen: acht getrennte B&auml;nke mit Registrierungen.</td></tr>
+  <tr><td>Kopiertaste</td><td><b>Kombination kopieren nach&hellip;</b>: Rufen Sie eine Kombination auf, dr&uuml;cken Sie die Kopiertaste, w&auml;hlen Sie mit &minus;10 / +10 und einer Ziffer das Ziel, und die Kombination wird dorthin kopiert, auch &uuml;ber eine Blockgrenze hinweg (zum Beispiel von 9 nach 10). Die gerade klingende Registrierung &auml;ndert sich nicht.</td></tr>
   <tr><td><b>Cresc</b></td><td>Das Generalcrescendo (siehe Kapitel 7). Der Balken zeigt die aktuelle Stufe.</td></tr>
   <tr><td>Lautst&auml;rkeregler</td><td>Gesamtlautst&auml;rke. Ein Doppelklick setzt sie auf den Standardwert zur&uuml;ck; mit dem Mausrad &auml;ndern Sie sie in Schritten von 1 dB.</td></tr>
 </table>
@@ -117,7 +128,7 @@
   <tr><td><b>Neuer Bildschirm</b></td><td>&Ouml;ffnet ein zus&auml;tzliches Fenster mit denselben Registern, zum Beispiel f&uuml;r einen zweiten Monitor oder eine zweite Tastatur.</td></tr>
   <tr><td><b>MP3</b></td><td>Nimmt auf, was Sie h&ouml;ren. Die Aufnahme landet in Dokumente\JM-Orgue-opnames. Klicken Sie auf den roten Z&auml;hler, um zu stoppen; danach meldet das Programm, wo die Datei liegt.</td></tr>
   <tr><td><b>MIDI</b></td><td>Nimmt auf, was Sie spielen (nur Noten), als .mid-Datei. Klicken Sie auf den blauen Z&auml;hler, um zu stoppen, und w&auml;hlen Sie den Speicherort.</td></tr>
-  <tr><td><b>Notieren</b></td><td>&Ouml;ffnet das Notationsfenster: Noten erscheinen, w&auml;hrend Sie spielen, mit Ebenen, Overdub und Bearbeitung. Auch eine vorhandene MIDI-Datei l&auml;sst sich dort &ouml;ffnen.</td></tr>
+  <tr><td><b>Notieren</b></td><td>&Ouml;ffnet das Notationsfenster: Noten erscheinen, w&auml;hrend Sie spielen, in Notenschrift oder Klavar, mit Notenzeilen, Overdub und Bearbeitung, und lassen sich direkt als PDF drucken (siehe unten).</td></tr>
   <tr><td><b>PC herunterfahren</b></td><td>Beendet die Software <i>und den Computer</i>, nach einer Best&auml;tigung; der letzte Zustand wird vorher gespeichert. Rechtsklick oder 3 Sekunden gedr&uuml;ckt halten verbindet die Schaltfl&auml;che mit einer Taste Ihres Spieltischs.</td></tr>
 </table>
 
@@ -133,11 +144,20 @@
 <p><b>Neuer Bildschirm</b> &ouml;ffnet ein eigenes Fenster, das Sie auf einen anderen Monitor ziehen oder klein neben dem Hauptfenster stehen lassen k&ouml;nnen. Es hat eigene Anordnungseinstellungen: Sind die Kn&ouml;pfe zu klein, w&auml;hlen Sie <b>Anordnung</b> und stellen Sie Knopfbreite und Knopfh&ouml;he ein, oder w&auml;hlen Sie Manuale untereinander oder nebeneinander.</p>
 <figure><img src="afbeeldingen/de/43_nieuw_scherm.jpg" alt="Zweiter Bildschirm"><figcaption>Ein zus&auml;tzlicher Bildschirm mit gut lesbaren Registern, hier in einem Fenster von 1000 &times; 900 Pixeln.</figcaption></figure>
 
+<h3 id="noteren">Das Notationsfenster: Noten, Klavar und PDF</h3>
+<p>Mit <b>Notieren</b> &ouml;ffnet sich ein eigenes Fenster, in dem Ihr Spiel aufgeschrieben wird; ein zweites Programm zum Komponieren oder Ausarbeiten eines St&uuml;cks ist nicht n&ouml;tig. W&auml;hlen Sie <b>Neu&hellip;</b> f&uuml;r ein neues St&uuml;ck (Titel, Komponist, Taktart, Tonart, Tempo, Anzahl der Takte und Notenzeilen) und dr&uuml;cken Sie <b>Aufnahme</b>: Die Aufnahme beginnt bei der ersten Note, die Sie spielen. Ein St&uuml;ck hat mehrere <b>Notenzeilen</b>, zum Beispiel rechts, links und Pedal; jede Zeile hat unter <b>Notenzeilen &amp; Stimmen</b> einen eigenen <b>Kanal</b> mit einer Schaltfl&auml;che <b>Lernen</b> (spielen Sie eine Taste auf dem Manual, das auf diese Zeile kommen soll). Spielen Sie rechts, links und Pedal auf drei MIDI-Kan&auml;len, landen sie so gleichzeitig auf drei Zeilen. Ein neuer Take (Overdub) kommt zu dem hinzu, was schon steht.</p>
+<ul>
+  <li><b>Ansicht</b>: <b>Notenschrift</b> zeigt gew&ouml;hnliche Notenzeilen; <b>Klavar</b> zeigt Klavarskribo, in dem die Linien die schwarzen Tasten sind und die Zeit von oben nach unten l&auml;uft. Pro Zeile w&auml;hlen Sie die Hand (rechts, links, Pedal oder R+L mit Teilungspunkt) und mit <b>Umfang</b>, ob die Zeilen um die gespielten Noten oder &uuml;ber das ganze Manual laufen.</li>
+  <li><b>Drucken / PDF</b> druckt die Partitur oder speichert sie als PDF, in der gew&auml;hlten Ansicht. Unter <b>Exportieren</b> stehen au&szlig;erdem <b>Als MIDI speichern&hellip;</b>, <b>Als MusicXML speichern</b> (f&uuml;r andere Notationsprogramme) und f&uuml;r Klavar <b>Als SVG speichern&hellip;</b>.</li>
+  <li><b>Speichern</b> sichert das St&uuml;ck als JM-Orgue-Partitur (<code>.jmscore</code>), <b>&Ouml;ffnen&hellip;</b> holt es zur&uuml;ck; eine vorhandene MIDI-Datei l&auml;sst sich als zus&auml;tzlicher Take importieren. Auf den Reitern <b>Eingabe</b>, <b>Texte &amp; Zeichen</b> und <b>Wiedergabe</b> geben Sie Noten Schritt f&uuml;r Schritt ein, setzen Texte und Zeichen und spielen das St&uuml;ck &uuml;ber die Orgel ab.</li>
+</ul>
+<p class="klein">Tastenk&uuml;rzel im Notationsfenster: <kbd>Strg</kbd>+<kbd>N</kbd> neues St&uuml;ck, <kbd>Strg</kbd>+<kbd>O</kbd> &ouml;ffnen, <kbd>Strg</kbd>+<kbd>S</kbd> speichern, <kbd>Strg</kbd>+<kbd>C</kbd> kopieren.</p>
+
 <!-- ============================================================ -->
 <h2 id="posities">5. Mehrere H&ouml;rpositionen</h2>
 <p>Manche Sample-Sets wurden an mehreren Stellen in der Kirche aufgenommen, zum Beispiel nah, vorn, in der Mitte und hinten. Ein solches Set zeigt in der Werkzeugleiste die Schaltfl&auml;chen <b>Perspektive</b>, eine pro Position. Klicken Sie auf eine Position, um sie ein- oder auszuschalten; es k&ouml;nnen mehrere gleichzeitig klingen. Rechts davon steht die <b>H&ouml;rposition</b>: Der Regler zwischen &bdquo;nah&ldquo; und &bdquo;hinten&ldquo; blendet stufenlos zwischen den aufgenommenen Positionen &uuml;ber.</p>
 <figure><img src="afbeeldingen/de/50_nancy_orgelscherm.jpg" alt="Orgelbildschirm mit Perspektiven"><figcaption>Ein Set mit vier Aufnahmepositionen (Close, Front, Middle, Rear) und dem H&ouml;rpositionsregler.</figcaption></figure>
-<div class="tip"><b>Tipp</b> Alle Aufnahmepositionen werden standardm&auml;&szlig;ig gleichzeitig geladen, sodass der H&ouml;rpositionsregler sie sofort weich mischen kann. Neben den Perspektiv-Schaltfl&auml;chen in der Werkzeugleiste gibt es eine Mischer-Schaltfl&auml;che: ein Klick zeigt einen kleinen Mischer mit einem Regler pro Position (0&ndash;200&nbsp;%). Auf einem Rechner mit wenig Speicher schalten Sie ungenutzte Positionen in den Orgel-Einstellungen unter &bdquo;Perspektiven und gestapelte Reihen&ldquo; aus; die Auswahl wirkt nach dem erneuten Laden der Orgel.</div>
+<div class="tip"><b>Tipp</b> Neben den Perspektiv-Schaltfl&auml;chen in der Werkzeugleiste gibt es eine Mischer-Schaltfl&auml;che: ein Klick zeigt einen kleinen Mischer mit einem Regler pro Position (0&ndash;200&nbsp;%). Welche Positionen geladen werden, w&auml;hlen Sie in den Orgel-Einstellungen unter &bdquo;Perspektiven und gestapelte Reihen&ldquo;; nur die angehakten Positionen kommen in den Speicher, und die Auswahl wirkt nach dem erneuten Laden der Orgel. <b>Alle Positionen im Speicher halten</b> ist standardm&auml;&szlig;ig aus und wird nur ausgef&uuml;hrt, wenn alle Positionen zusammen bequem in den Speicher passen. Passt eine Orgel nicht in den Speicher, schaltet das Programm nach dem Laden nur die n&auml;chstgelegene Position ein und meldet das oben.</div>
 
 <!-- ============================================================ -->
 <h2 id="wizard">6. Der Assistent f&uuml;r eine neue Orgel</h2>
@@ -169,7 +189,7 @@
 <p>Der erste Block enth&auml;lt die Haupteinstellungen:</p>
 <ul>
   <li><b>Lautst&auml;rke</b>: die Gesamtlautst&auml;rke dieser Orgel.</li>
-  <li><b>Stimmung</b>: &bdquo;Original&ldquo; spielt die Pfeifen, wie sie aufgenommen wurden. Andere Stimmungen (gleichschwebend und historische Temperaturen) stimmen die Pfeifen anhand der gemessenen Tonh&ouml;he jeder Aufnahme nach. Unter der Auswahl sehen Sie, wie viele Pfeifen eine gemessene Tonh&ouml;he haben. Mit <b>Eigene Stimmung&hellip;</b> stellen Sie die Abweichung pro Ton selbst in Cent ein. Mit <b>Scala-Datei laden&hellip;</b> lesen Sie eine .scl-Datei (das weltweite Format f&uuml;r mikrotonale und historische Stimmungen der Huygens-Fokker-Stiftung); die eingelesene Stimmung erscheint in der Liste und wird f&uuml;r sp&auml;tere Sitzungen gespeichert.</li>
+  <li><b>Stimmung</b>: &bdquo;Original&ldquo; spielt die Pfeifen, wie sie aufgenommen wurden. Andere Stimmungen (gleichschwebend und historische Temperaturen) stimmen die Pfeifen anhand der gemessenen Tonh&ouml;he jeder Aufnahme nach. Unter der Auswahl sehen Sie, wie viele Pfeifen eine gemessene Tonh&ouml;he haben. Was die Orgeldefinition vorgibt, hat dabei Vorrang: Ein schwebendes Register mit angegebener Abweichung (Unda maris, Voix c&eacute;leste) klingt auf der Temperatur plus dieser Abweichung, eine Aufnahme, deren Tonh&ouml;he in der Definition steht, wird darauf nachgestimmt, und ein Set, das angibt, nicht auf der originalen Orgeltonh&ouml;he zu spielen, spielt immer auf der Zieltonh&ouml;he. Mit <b>Eigene Stimmung&hellip;</b> stellen Sie die Abweichung pro Ton selbst in Cent ein. Mit <b>Scala-Datei laden&hellip;</b> lesen Sie eine .scl-Datei (das weltweite Format f&uuml;r mikrotonale und historische Stimmungen der Huygens-Fokker-Stiftung); die eingelesene Stimmung erscheint in der Liste und wird f&uuml;r sp&auml;tere Sitzungen gespeichert.</li>
   <li><b>Feinstimmung</b>: alles zusammen h&ouml;her oder tiefer, in Cent.</li>
 </ul>
 <p><b>Hall</b> regelt den Nachhall. Hat das Set die Kirchenakustik schon in den Aufnahmen, steht das dort (mit einer Schaltfl&auml;che <b>Zur&uuml;ck zur Aufnahme (Nachhall aus)</b>, um den zus&auml;tzlichen Nachhall auszuschalten): Zus&auml;tzlicher Hall ist dann Geschmackssache. Sie w&auml;hlen zwischen <b>Algorithmisch</b> (ein berechneter Hall mit RT60, Vorverz&ouml;gerung, D&auml;mpfung und Raumgr&ouml;&szlig;e, auch als Preset) und <b>Impulsantwort</b> mit einer eigenen Impulsantwort (IR). Mit <b>Mix</b> bestimmen Sie, wie viel Hall Sie h&ouml;ren.</p>
@@ -192,15 +212,15 @@
 <figure><img src="afbeeldingen/de/11_crescendo.jpg" alt="Reiter Crescendo"><figcaption>Die Crescendo-Matrix: Register in den Zeilen, Stufen in den Spalten.</figcaption></figure>
 
 <h3>Registerreihenfolge</h3>
-<p>Hier bestimmen Sie die Reihenfolge der Register in jedem Manual. Ziehen Sie ein Register am Griff, um es zu verschieben. Pro Register sehen Sie Fu&szlig;lage und Familie (die Farbe des Namens). Mit den Pfeilen &auml;ndern Sie die Reihenfolge Schritt f&uuml;r Schritt, und <b>Zur&uuml;cksetzen</b> stellt die Reihenfolge des Sets wieder her.</p>
+<p>Hier bestimmen Sie die Reihenfolge der Register in jedem Manual. Ziehen Sie ein Register am Griff, um es zu verschieben. Pro Register sehen Sie Fu&szlig;lage und Familie (die Farbe des Namens). Mit den Pfeilen &auml;ndern Sie die Reihenfolge Schritt f&uuml;r Schritt, und <b>Original</b> stellt die Reihenfolge aus der Orgeldatei wieder her. F&auml;rbt die automatische Erkennung ein einzelnes Register anders, als Sie m&ouml;chten, w&auml;hlen Sie pro Register selbst die <b>Farbgruppe</b>: <b>Grundstimme</b>, <b>Aliquote</b> oder <b>Zunge</b>. Das ist rein optisch und wird pro Orgel gespeichert.</p>
 <figure><img src="afbeeldingen/de/12_registersortering.jpg" alt="Reiter Registerreihenfolge"><figcaption>Die Register pro Manual, in der Reihenfolge, in der sie auf dem Orgelbildschirm stehen.</figcaption></figure>
 
 <h3>Routing</h3>
 <p>Dieser Reiter verbindet Ihre Orgel mit Ihrer Ausr&uuml;stung. Oben steht pro Manual ein Block:</p>
 <ul>
-  <li><b>Kanal</b>: der MIDI-Kanal, auf den das Manual h&ouml;rt (&bdquo;Alle&ldquo; = jeder Kanal). <b>Lernen</b> bestimmt Kanal und Bereich, indem Sie zuerst die tiefste und dann die h&ouml;chste Taste spielen.</li>
+  <li><b>Kanal</b>: der MIDI-Kanal, auf den das Manual h&ouml;rt (&bdquo;Alle&ldquo; = jeder Kanal). <b>Lernen</b> bestimmt Kanal und Bereich, indem Sie zuerst die tiefste und dann die h&ouml;chste Taste spielen; liegen diese zu dicht beieinander, warnt das Programm, statt einen Bereich von nur wenigen Tasten einzustellen. Senden alle Ihre Manuale auf demselben Kanal, geben Sie jedem Ger&auml;t einen festen Kanal unter Allgemeine Einstellungen &rarr; MIDI (Kapitel 8).</li>
   <li><b>Transp</b>: in Halbt&ouml;nen transponieren. <b>Bereich</b>: tiefste und h&ouml;chste Taste. <b>Kurze Oktave</b>: f&uuml;r Sets mit kurzer Bassoktave.</li>
-  <li><b>Schwellkasten</b>: schaltet den Schwellkasten dieses Manuals ein; es erscheinen dann Schaltfl&auml;chen, um den Tritt anzulernen, die Mindestlautst&auml;rke und die Grenzfrequenz eines geschlossenen Kastens einzustellen. Der Tritt l&auml;sst sich auch direkt vom Orgelbildschirm aus lernen: Rechtsklick auf die gr&uuml;ne LED-Leiste neben dem Manualnamen &mdash; oder 2 Sekunden lang auf einem Touchscreen halten &mdash; und derselbe &bdquo;Tritt geschlossen / Tritt offen&ldquo;-Dialog erscheint.</li>
+  <li><b>Schwellkasten</b>: schaltet den Schwellkasten dieses Manuals ein; es erscheinen dann Schaltfl&auml;chen, um den Tritt anzulernen, die Mindestlautst&auml;rke und die Grenzfrequenz eines geschlossenen Kastens einzustellen. Standard sind &minus;20&nbsp;dB und 1500&nbsp;Hz: Der Tritt wirkt dann in Dezibel gleichm&auml;&szlig;ig &uuml;ber den ganzen Weg, wie in Hauptwerk, und der Klang wird bei geschlossenem Kasten etwas dumpfer. Scheint der Tritt unten wenig zu bewirken, w&auml;hlen Sie eine h&ouml;here Grenzfrequenz; soll ein geschlossener Kasten leiser sein, eine niedrigere Mindestlautst&auml;rke (bis &minus;24&nbsp;dB). Der Tritt l&auml;sst sich auch direkt vom Orgelbildschirm aus lernen: Rechtsklick auf die gr&uuml;ne LED-Leiste neben dem Manualnamen &mdash; oder 2 Sekunden lang auf einem Touchscreen halten &mdash; und derselbe &bdquo;Tritt geschlossen / Tritt offen&ldquo;-Dialog erscheint.</li>
   <li><b>Windversorgung</b>: zu welcher Windgruppe das Manual geh&ouml;rt.</li>
   <li><b>Panorama</b> und <b>Ausg&auml;nge</b>: der Platz im Stereobild und die Ausgangskan&auml;le Ihres Audio-Interfaces, auf denen das Manual klingt. Zwei aufeinanderfolgende Ausg&auml;nge bilden ein Stereopaar; ein einzelner Kanal klingt mono.</li>
   <li><b>C/Cis</b>: verteilt die Pfeifen auf zwei Seiten, wie die C- und Cis-Laden einer echten Orgel; die globale St&auml;rke und der Abfall stehen im Block dar&uuml;ber.</li>
@@ -248,7 +268,7 @@
 <figure><img src="afbeeldingen/de/31_samplefix.jpg" alt="Sample-Fix"><figcaption>Sample-Fix: Anfangsstille und Loops, jeweils mit Scannen und einer Schaltfl&auml;che zum Anwenden.</figcaption></figure>
 
 <h3>MIDI</h3>
-<p><b>MIDI-Eingang</b> zeigt die angeschlossenen MIDI-Ger&auml;te (mit <b>Ger&auml;te aktualisieren</b> suchen Sie erneut); unter <b>Bluetooth MIDI</b> suchen Sie mit <b>Scannen</b> nach drahtlosen Ger&auml;ten. Die <b>R&uuml;ckmeldung (MIDI-Out)</b> l&auml;sst Ihren Spieltisch mit der Registrierung mitleuchten: W&auml;hlen Sie das Protokoll (Registerlampen &uuml;ber Note On/Off, ein Hauptwerk-Textdisplay oder einen Johannus-/Content-Spieltisch), den MIDI-Ausgang, den Kanal und die Basisnote. Jedes Register erh&auml;lt dann automatisch eine Notennummer ab der Basisnote, oder Sie lernen mit <b>Pro Register lernen&hellip;</b> die echte Spieltischtaste pro Register an.</p>
+<p><b>MIDI-Eingang</b> zeigt die angeschlossenen MIDI-Ger&auml;te (mit <b>Ger&auml;te aktualisieren</b> suchen Sie erneut). Pro Ger&auml;t k&ouml;nnen Sie einen festen Kanal w&auml;hlen: Manuale, die alle auf Kanal 1 senden, bedienen so trotzdem verschiedene Werke, ohne dass Sie in jeder Sitzung Kan&auml;le wiederherstellen m&uuml;ssen. Steht ein Ger&auml;t auf <b>Standardger&auml;t</b>, &auml;ndert sich nichts. Unter <b>Bluetooth MIDI</b> suchen Sie mit <b>Scannen</b> nach drahtlosen Ger&auml;ten; auch die Lernschaltfl&auml;chen, die auf eine einzelne Taste reagieren, h&ouml;ren auf ein Bluetooth-Manual. Die <b>R&uuml;ckmeldung (MIDI-Out)</b> l&auml;sst Ihren Spieltisch mit der Registrierung mitleuchten: W&auml;hlen Sie das Protokoll (Registerlampen &uuml;ber Note On/Off, ein Hauptwerk-Textdisplay oder einen Johannus-/Content-Spieltisch), den MIDI-Ausgang, den Kanal und die Basisnote. Jedes Register erh&auml;lt dann automatisch eine Notennummer ab der Basisnote, oder Sie lernen mit <b>Pro Register lernen&hellip;</b> die echte Spieltischtaste pro Register an.</p>
 <figure><img src="afbeeldingen/de/32_midi.jpg" alt="MIDI"><figcaption>MIDI-Eingang, Bluetooth MIDI und die R&uuml;ckmeldung an den Spieltisch.</figcaption></figure>
 
 <h3>Tasten anlernen</h3>
@@ -288,6 +308,8 @@
   <tr><td>Rechtsklick oder 3 s gedr&uuml;ckt halten</td><td>Auf einer Schaltfl&auml;che der Setzerleiste: diese Schaltfl&auml;che mit einer Spieltischtaste verbinden (MIDI anlernen).</td></tr>
   <tr><td>Doppelklick auf die Lautst&auml;rke</td><td>Gesamtlautst&auml;rke zur&uuml;ck auf den Standardwert.</td></tr>
   <tr><td>Karte 3 s gedr&uuml;ckt halten</td><td>In der Bibliothek: das Foto dieser Karte erneut suchen.</td></tr>
+  <tr><td><kbd>Y</kbd>&hellip;<kbd>M</kbd> und <kbd>Q</kbd>&hellip;<kbd>I</kbd></td><td>Computertastatur als Manual: zwei Oktaven (auf einer deutschen Tastatur die Tasten der Z/Y-Reihe). <kbd>Umschalt</kbd> verschiebt eine Oktave nach oben, <kbd>Alt</kbd> eine Oktave nach unten, auch zusammen.</td></tr>
+  <tr><td><kbd>Strg</kbd>+<kbd>N</kbd> / <kbd>O</kbd> / <kbd>S</kbd></td><td>Im Notationsfenster: neues St&uuml;ck, &ouml;ffnen, speichern.</td></tr>
 </table>
 <ul>
   <li>Alle Einstellungen werden bei jeder Orgel gespeichert, auch wenn Sie die Orgel schlie&szlig;en oder das Programm beenden.</li>
@@ -305,6 +327,9 @@
   <tr><td>Knacken oder Stottern</td><td>Verringern Sie die Polyphonie, ziehen Sie weniger Register, schalten Sie den Hall aus oder w&auml;hlen Sie einen gr&ouml;&szlig;eren Puffer. Ein kurzer Startpuffer braucht eine schnelle Festplatte; w&auml;hlen Sie sonst einen l&auml;ngeren.</td></tr>
   <tr><td>Zu wenig Speicher</td><td>W&auml;hlen Sie einen k&uuml;rzeren Startpuffer, schalten Sie Stereo-Samples aus oder H&ouml;rpositionen, die Sie nicht nutzen.</td></tr>
   <tr><td>Hintergrundger&auml;usche oder Effektregister sind nicht auf dem richtigen Lautsprecher zu h&ouml;ren</td><td>W&auml;hlen Sie unter Routing bei &bdquo;Audioausgabe Hintergrundger&auml;usche&ldquo; dieselben Ausg&auml;nge wie f&uuml;r die Manuale.</td></tr>
+  <tr><td>Pfeifen bleiben stumm und oben steht eine Meldung zu WavPack oder FLAC</td><td>WavPack liest das Programm selbst; bleibt die Meldung stehen, handelt es sich um Dateien, die nicht lesbar sind (FLAC, Hybrid- oder mehrkanaliges WavPack). Wandeln Sie das Set in gew&ouml;hnliches WAV um oder bitten Sie den Hersteller um eine unkomprimierte Version.</td></tr>
+  <tr><td>Der Schwelltritt bewirkt unten wenig und oben viel</td><td>Erh&ouml;hen Sie unter Routing beim Schwellkasten die Grenzfrequenz bei geschlossenem Kasten (Standard 1500&nbsp;Hz) oder senken Sie die Mindestlautst&auml;rke.</td></tr>
+  <tr><td>Eine Orgel l&auml;dt versehentlich oder zu lange</td><td>Dr&uuml;cken Sie <b>Abbrechen</b> im Ladebildschirm; die vorherige Orgel klingt weiter.</td></tr>
 </table>
 <p><b>Feedback senden&hellip;</b> (Allgemeine Einstellungen &rarr; Update und Feedback) erstellt eine Nachricht mit Ihrer Meldung und den Logdateien der letzten Sitzungen, damit der Entwickler sehen kann, was passiert ist. Sie k&ouml;nnen Ihre Meldung auch auf der Projektseite bei GitHub einstellen.</p>
 
