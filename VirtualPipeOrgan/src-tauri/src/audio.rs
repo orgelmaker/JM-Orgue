@@ -6520,7 +6520,13 @@ fn run_audio_thread(
                             if moved || swell_dirty[idx] {
                                 swell_dirty[idx] = false;
                                 let g = swell_g[idx];
-                                let (min_db, cutoff_closed) = swell_cfgs.get(idx).copied().unwrap_or((-20.0, 800.0));
+                                // 0.9.49: default `cutoff_closed` van 800 → 1500 Hz. Bij 800 Hz
+                                // deed het eerste stuk van de pedaalweg vooral filter (niet volume)
+                                // en liep volume+filter pas samen op in de bovenste helft, wat
+                                // voelt als "onderaan niets, bovenaan ineens veel". 1500 Hz houdt
+                                // de voorgaande dB-mapping intact en laat het volume-effect eerder
+                                // doorkomen; HW/GO-conventie is overwegend dB-sturing.
+                                let (min_db, cutoff_closed) = swell_cfgs.get(idx).copied().unwrap_or((-20.0, 1500.0));
                                 swell_vol[idx] = swell_dsp::volume(min_db, g);
                                 let bypass = g >= swell_dsp::BYPASS_ABOVE;
                                 swell_bypass[idx] = bypass;

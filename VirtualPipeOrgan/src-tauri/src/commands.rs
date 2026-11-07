@@ -8566,7 +8566,11 @@ pub fn set_swell_config(state: State<AppState>, division: String, min_db: f32, f
         if let Some(idx) = o.divisions.iter().position(|d| d.name == division)
             .or_else(|| crate::acoustics::enclosure_index_from_name(&division, o.acoustics.as_ref()).map(|i| i as usize))
         {
-            let mdb = min_db.clamp(-30.0, -5.0);
+            // 0.9.49: clamp-ondergrens −30 → −24 dB. −30 dB maakt een deel van
+            // de pedaalweg praktisch stil (tot ~g=0.5 blijft volume onder
+            // −12 dB), wat als "eerste stuk doet niets" voelt. −24 dB geeft
+            // onderaan nog hoorbaar fond zonder de forte-vol kop te breken.
+            let mdb = min_db.clamp(-24.0, -5.0);
             let cutoff = filter_cutoff.clamp(200.0, 5000.0);
             state.send_audio_command(AudioCommand::SetSwellConfig {
                 division_index: idx as u8,

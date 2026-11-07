@@ -1631,7 +1631,7 @@ fn handle_swell_get(state: &AppState) -> Value {
     let bindings = state.get_swell_bindings();
     let cfgs = state.division_swell_configs.read().clone();
     let list: Vec<Value> = names.iter().enumerate().map(|(i, name)| {
-        let (min_db, cutoff) = cfgs.get(name).copied().unwrap_or((-20.0, 800.0));
+        let (min_db, cutoff) = cfgs.get(name).copied().unwrap_or((-20.0, 1500.0));
         json!({
             "division": name,
             "index": i,

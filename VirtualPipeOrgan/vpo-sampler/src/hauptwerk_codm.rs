@@ -36,7 +36,7 @@ use tracing::{info, warn};
 
 use crate::grandorgue::{
     CouplerDef, EnclosureDef, ManualDef, OdfError, OrganDefinition, OrganInfo, PipeDef,
-    PipeExtra, PipeLayer, PistonDef, PistonDoel, ReleaseDef, SchakelaarRegels, StopDef,
+    PipeExtra, PipeLayer, ReleaseDef, SchakelaarRegels, StopDef,
     TremulantDef, WindchestDef,
 };
 use crate::import_report::{Ernst, ImportReport, Melding, OvergeslagenStop, PakketRol, PakketStatus, Tellingen};
@@ -1171,8 +1171,13 @@ fn bouw_definitie(
     let trem_nummer: HashMap<u32, u32> = orgel.tremulanten.iter().enumerate().map(|(i, t)| (t.code, i as u32 + 1)).collect();
 
     let mut stop_defs: Vec<(u32, StopDef)> = Vec::new();
+    let mut effect_bijgeluiden: Vec<crate::grandorgue::BackgroundSoundDef> = Vec::new();
     let mut overgeslagen = 0usize;
     let mut beschermd = 0usize;
+    // Effectregister-herkenning (0.9.49): een stop met één pijp (één WAV) is
+    // een percussief effect zoals Cymbelstern of Vogelzang; die hoort in de
+    // Effectregisters-divisie i.p.v. op het klavier. Grotere rangen blijven
+    // altijd op het klavier, ook als er een momentary-piston op zit.
     for stop in &orgel.stops {
         if !divisie_bekend.contains(&stop.divisie) {
             warn!("CODM stop '{}' ({}): divisie {} staat niet in de lijst — overgeslagen", stop.naam, stop.code, stop.divisie);
@@ -1286,6 +1291,37 @@ fn bouw_definitie(
                 None => { windladen.push(windlade); windladen.len() as u32 }
             }
         };
+
+        // Effectregister (0.9.49): een CODM-stop met één pijp (één WAV) is
+        // een percussief effect zoals Cymbelstern of Vogelzang; die komt als
+        // Toy in de Effectregisters-divisie en NIET op het klavier. Rangen
+        // met meerdere pijpen blijven altijd op het klavier.
+        if pipes.len() == 1 {
+            let wav: Option<PathBuf> = pipes.iter().find_map(|p| match p {
+                PipeDef::Sample { path, .. } => Some(path.clone()),
+                _ => None,
+            });
+            if let Some(path) = wav {
+                let loop_hint = if rang.percussief { " (percussief — speelt voorlopig nog als loop; one-shot volgt)" } else { "" };
+                verslag.melding(
+                    Ernst::Info,
+                    format!("stop {}", stop.code),
+                    format!(
+                        "stop '{}' is een effectregister (één pijp) en komt in de Effectregisters-divisie{loop_hint}",
+                        stop.naam
+                    ),
+                );
+                effect_bijgeluiden.push(crate::grandorgue::BackgroundSoundDef {
+                    kind: crate::grandorgue::BackgroundSoundKind::Toy,
+                    name: clean_stop_name(zonder_voorvoegsel(&stop.naam)),
+                    division: None,
+                    path,
+                });
+                continue;
+            }
+            // Geen Sample-pad gevonden: laat als gewone stop staan — beter een
+            // (misschien stille) klavierknop dan een onbereikbare Toy.
+        }
 
         stop_defs.push((stop.divisie, StopDef {
             id: stop.code,
@@ -1486,26 +1522,41 @@ fn bouw_definitie(
         if !k.in_combinatie { schakelaars.koppels_buiten_combinatie.push(n); }
         if k.standaard_aan { schakelaars.koppels_standaard_aan.push(n); }
     }
+    // Pistons krijgen GEEN eigen UI-balk: elk doel (register, koppel,
+    // tremulant) staat al bij zijn eigen divisie als knop, zo bedient de
+    // organist dezelfde schakelaar via dat knop i.p.v. een duplicaat-balk.
+    // Alleen in het verslag staat wat er met elke piston is gebeurd, zodat je
+    // kunt zien dat de sneltoets uit de ODF niet genegeerd is zonder reden.
+    let mut piston_gezien = 0usize;
     for p in &orgel.pistons {
-        let doel = match p.doel_soort {
-            1 => gebouwd.contains(&p.doel_code).then_some(PistonDoel::Stop(p.doel_code)),
-            2 => koppel_nummer.get(&p.doel_code).map(|n| PistonDoel::Koppel(*n)),
-            3 => trem_nummer.get(&p.doel_code).map(|n| PistonDoel::Tremulant(*n)),
-            _ => None,
+        let gevonden = match p.doel_soort {
+            1 => gebouwd.contains(&p.doel_code),
+            2 => koppel_nummer.contains_key(&p.doel_code),
+            3 => trem_nummer.contains_key(&p.doel_code),
+            _ => false,
         };
-        match doel {
-            Some(doel) => schakelaars.pistons.push(PistonDef {
-                naam: p.naam.clone(),
-                label: p.label.clone(),
-                doel,
-                vasthouden: p.actie == 2,
-            }),
-            None => verslag.melding(
+        if !gevonden {
+            verslag.melding(
                 Ernst::Waarschuwing,
                 format!("piston '{}'", p.naam),
-                format!("shortcutpiston verwijst naar {} {} die niet geladen is; de piston doet niets", ["", "register", "koppel", "tremulant"].get(p.doel_soort as usize).copied().unwrap_or("object"), p.doel_code),
-            ),
+                format!(
+                    "shortcutpiston verwijst naar {} {} die niet geladen is; de piston doet niets",
+                    ["", "register", "koppel", "tremulant"].get(p.doel_soort as usize).copied().unwrap_or("object"),
+                    p.doel_code,
+                ),
+            );
+        } else {
+            piston_gezien += 1;
         }
+    }
+    if piston_gezien > 0 {
+        verslag.melding(
+            Ernst::Info,
+            "pistons",
+            format!(
+                "{piston_gezien} shortcutpistons zijn ingelezen; hun doel staat al als knop bij de juiste divisie (register, koppel of tremulant), dus er komt geen aparte pistonbalk",
+            ),
+        );
     }
     let buiten_divisional = orgel.stops.iter().filter(|s| !s.in_divisional).count()
         + orgel.koppels.iter().filter(|k| !k.in_divisional).count();
@@ -1524,9 +1575,6 @@ fn bouw_definitie(
             format!("{trem_aan} tremulanten staan volgens de definitie standaard aan; niet toegepast (tremulanten worden per klavier bediend)"),
         );
     }
-    if schakelaars.pistons.iter().any(|p| matches!(p.doel, PistonDoel::Tremulant(_))) {
-        verslag.melding(Ernst::Info, "piston", "pistons voor een tremulant worden niet bediend (tremulanten worden per klavier bediend)");
-    }
 
     Ok(OrganDefinition {
         base_path,
@@ -1537,7 +1585,7 @@ fn bouw_definitie(
         enclosures,
         tremulants,
         couplers,
-        extra_bijgeluiden: Vec::new(),
+        extra_bijgeluiden: effect_bijgeluiden,
         stop_action_clicks: HashMap::new(),
         keyboard_clicks: HashMap::new(),
         klavier_afkortingen,
@@ -2087,6 +2135,40 @@ mod tests {
         assert_eq!(o.pistons[0].doel_code, 1006);
     }
 
+    /// Mini-orgel met één Zimbelstern-achtige stop (1 toets, 1 pijp) naast de
+    /// gewone 2-toets Test 8'-stop: de 1-pijp-stop moet in `extra_bijgeluiden`
+    /// belanden als Toy en NIET op het klavier verschijnen. De extra rank /
+    /// stop / stoprank worden in de bestaande ObjectList-blokken ingevoegd —
+    /// `extract_objects_als` leest alleen de eerste ObjectList per type.
+    fn mini_met_effect_stop() -> String {
+        mini_orgel("")
+            .replace("</Rank></ObjectList>\n<ObjectList ObjectType=\"stop\">",
+                     "</Rank><Rank><RankID>2</RankID><Name>Zimbelstern</Name><NumberOfPipes>1</NumberOfPipes><MIDINoteNumberOfFirstPipe>60</MIDINoteNumberOfFirstPipe><IsPercussive>Y</IsPercussive><Samples_InstallationPackageID>9</Samples_InstallationPackageID><Samples_MainSampleFileFolder>Main</Samples_MainSampleFileFolder><Samples_MIDINoteNumIncrementFromPipesToSamples>0</Samples_MIDINoteNumIncrementFromPipesToSamples><Pitch_RankBaseOutputPitch64ftHarmonicNum>8</Pitch_RankBaseOutputPitch64ftHarmonicNum></Rank></ObjectList>\n<ObjectList ObjectType=\"stop\">")
+            .replace("</Stop></ObjectList>\n<ObjectList ObjectType=\"stoprank\">",
+                     "</Stop><Stop><StopCode>2102</StopCode><Name>Gt: Zimbelstern</Name></Stop></ObjectList>\n<ObjectList ObjectType=\"stoprank\">")
+            .replace("</StopRank></ObjectList>\n</Hauptwerk>",
+                     "</StopRank><StopRank><StopCode>2102</StopCode><RankTypeCode>1</RankTypeCode><RankID>2</RankID><MIDINoteNumIncrementFromDivisionToRank>0</MIDINoteNumIncrementFromDivisionToRank><MIDINoteNumOfFirstMappedDivisionKey>60</MIDINoteNumOfFirstMappedDivisionKey><NumberOfMappedDivisionKeys>1</NumberOfMappedDivisionKeys><ActionTypeCode>1</ActionTypeCode><ActionEffectCode>1</ActionEffectCode></StopRank></ObjectList>\n</Hauptwerk>")
+    }
+
+    #[test]
+    fn eenpijp_stop_wordt_effectregister_in_bijgeluiden() {
+        let d = tijdmap("effect");
+        std::fs::create_dir_all(d.join("Main")).unwrap();
+        for n in [60, 61] { schrijf_wav(&d.join("Main").join(format!("{n:03}-x.wav")), 60000, &[(10000, 20000)], &[30000]); }
+        let (def, v) = bouw_mini(&mini_met_effect_stop(), &d);
+        // Alleen de 8' Test komt op het klavier; Zimbelstern is weggehaald.
+        assert_eq!(def.stops.len(), 1);
+        assert_eq!(def.stops[0].name, "Test 8'");
+        // Zimbelstern komt als Toy in de Effectregisters-divisie.
+        assert_eq!(def.extra_bijgeluiden.len(), 1);
+        assert_eq!(def.extra_bijgeluiden[0].kind, crate::grandorgue::BackgroundSoundKind::Toy);
+        assert_eq!(def.extra_bijgeluiden[0].name, "Zimbelstern");
+        // Verslag vermeldt dat de stop als effectregister is herkend, met reden.
+        assert!(v.meldingen.iter().any(|m|
+            m.object == "stop 2102" && m.tekst.contains("effectregister") && m.tekst.contains("één pijp")
+        ), "{:?}", v.meldingen);
+    }
+
     fn mini_met_koppel_en_piston() -> String {
         mini_orgel("")
             .replace("<ObjectList ObjectType=\"rank\">",
@@ -2106,12 +2188,13 @@ mod tests {
         assert_eq!(r.koppels_buiten_combinatie, vec![1]);
         assert_eq!(r.koppels_standaard_aan, vec![1]);
         assert!(r.stops_buiten_combinatie.is_empty() && r.stops_standaard_aan.is_empty());
-        // Gewone stop zonder velden: wel in de combinatie (afwezig = opnemen).
-        assert_eq!(r.pistons.len(), 1);
-        assert_eq!(r.pistons[0].doel, PistonDoel::Koppel(1));
-        assert!(r.pistons[0].vasthouden, "actie 2 = vasthouden");
-        assert_eq!(r.pistons[0].label, "4'");
-        // De piston naar een niet bestaand register wordt gemeld, maakt geen extra object.
+        // Pistons komen niet meer als eigen lijst binnen: koppel/trem/register
+        // uit de piston staat al bij de juiste divisie, dus een aparte pistonbalk
+        // zou een duplicaat zijn. De piston met geldig doel verschijnt als
+        // info-melding; de verwijzing naar een onbestaand register als
+        // waarschuwing.
+        assert!(r.pistons.is_empty());
+        assert!(v.meldingen.iter().any(|m| m.object == "pistons" && m.tekst.contains("al als knop bij de juiste divisie")), "{:?}", v.meldingen);
         assert!(v.meldingen.iter().any(|m| m.object.contains("Kapot") && m.tekst.contains("doet niets")), "{:?}", v.meldingen);
         assert!(v.meldingen.iter().any(|m| m.tekst.contains("divisional-combinaties")), "{:?}", v.meldingen);
     }

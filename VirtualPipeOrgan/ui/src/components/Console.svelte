@@ -2660,54 +2660,6 @@
   // unison eerst, dan super/sub, dan de rest.
   $: couplerBarGroups = buildCouplerGroups(displayOrgan, visibleCouplers, couplerPlacement, selectedDivisions);
 
-  // Pistonbalk-gegevens: pistons met huidige stand van hun doel. Een piston is
-  // in de UI een extra, meestal korter gelabelde knop die een bestaand
-  // register of koppel bedient (vasthouden of omschakelen volgens vasthouden-vlag).
-  // Verborgen wanneer een set geen pistons definieert.
-  $: pistonBarItems = buildPistonItems(displayOrgan);
-  function buildPistonItems(org) {
-    const lijst = org?.schakelaars?.pistons;
-    if (!Array.isArray(lijst) || lijst.length === 0) return [];
-    const stops = (org.divisions || []).flatMap(d => d.stops || []);
-    const koppels = org.couplers || [];
-    const tremInfo = (n) => {
-      for (const d of (org.divisions || [])) {
-        if (!d.tremulant) continue;
-        if (`${d.tremulant.id || d.tremulant.n || d.name}` === `${n}`) return d.tremulant;
-      }
-      return null;
-    };
-    return lijst.map(p => {
-      let aan = false, gevonden = false;
-      if (p.doel === 'stop') {
-        const s = stops.find(s => s.id === p.doel_id);
-        if (s) { aan = !!s.drawn; gevonden = true; }
-      } else if (p.doel === 'koppel') {
-        const c = koppels.find(c => c.id === p.doel_id);
-        if (c) { aan = !!c.active; gevonden = true; }
-      } else if (p.doel === 'tremulant') {
-        const tr = tremInfo(p.doel_id);
-        if (tr) { aan = !!(tr.enabled || tr.active); gevonden = true; }
-      }
-      const label = (p.label && p.label.trim()) || p.naam || `P${p.index + 1}`;
-      return { ...p, label, aan, gevonden };
-    }).filter(p => p.gevonden);
-  }
-
-  // Een piston indrukken/loslaten. Vasthoud-pistons krijgen pointerdown/up;
-  // omschakel-pistons krijgen een enkele druk bij pointerdown en worden
-  // bij pointerup niet geraakt (anders klapt een combinatie-piston tweemaal).
-  async function pistonAan(piston) {
-    try { await invoke('piston_druk', { index: piston.index, ingedrukt: true }); }
-    catch (e) { console.error('piston_druk aan:', e); }
-    dispatch('refreshOrgan');
-  }
-  async function pistonUit(piston) {
-    if (!piston.vasthouden) return;
-    try { await invoke('piston_druk', { index: piston.index, ingedrukt: false }); }
-    catch (e) { console.error('piston_druk uit:', e); }
-    dispatch('refreshOrgan');
-  }
   function buildCouplerGroups(org, vis, placement, schermvolgorde) {
     if (placement !== 'bar' || !org?.couplers?.length) return [];
     // De koppelbalk volgt de volgorde waarin de werken op het scherm staan;
@@ -6581,26 +6533,6 @@
                   >{couplerLabel(coupler)}</button>
                 {/each}
               </div>
-            {/each}
-          </div>
-        {/if}
-        <!-- Pistonbalk: snelle schakelaars (vaak op een echt orgel pedaalknoppen
-             of duimpistons) die een bestaand register, koppel of tremulant
-             omschakelen. De doel-knop zelf blijft werken; dit is een tweede
-             bediening met een eigen MIDI-koppeling en een eigen vasthoud-gedrag. -->
-        {#if pistonBarItems.length > 0}
-          <div class="piston-bar" role="group" aria-label={$t('pistons.title')}>
-            {#each pistonBarItems as p (p.index)}
-              <button
-                class="piston-bar-btn"
-                class:engaged={p.aan}
-                class:momentary={p.vasthouden}
-                on:pointerdown={() => pistonAan(p)}
-                on:pointerup={() => pistonUit(p)}
-                on:pointerleave={() => pistonUit(p)}
-                title={p.naam || p.label}
-                aria-pressed={p.aan}
-              >{p.label}</button>
             {/each}
           </div>
         {/if}

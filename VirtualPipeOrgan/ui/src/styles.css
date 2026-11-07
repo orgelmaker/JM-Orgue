@@ -3540,50 +3540,6 @@ input[type="range"]::-webkit-slider-thumb:hover {
   box-shadow: 0 2px 4px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.05), 0 0 0 1px var(--midi-indicator);
 }
 
-/* Pistonbalk: direct onder de koppelbalk, kleine ronde knoppen zoals duim-
-   pistons op een echt orgel. Vasthoud-pistons (momentary) krijgen een
-   iets andere indicatie zodat de organist weet dat ze alleen werken
-   zolang je drukt. */
-.piston-bar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.3rem 0.5rem;
-  flex-shrink: 0;
-  padding: 0.35rem 0.75rem;
-  background: var(--bg-elevated);
-  border-bottom: 1px solid var(--accent-soft-2);
-}
-.piston-bar-btn {
-  font-family: var(--stop-font-family);
-  font-weight: var(--stop-font-weight);
-  font-size: calc(var(--stop-font-size) - 0.02rem);
-  line-height: 1.1;
-  padding: 0.3rem 0.65rem;
-  min-width: 2.6rem;
-  border-radius: 999px; /* pistons zijn rond op een echt orgel */
-  border: 1px solid var(--stop-porcelain-border);
-  background: var(--stop-porcelain);
-  color: var(--text-on-stop);
-  cursor: pointer;
-  white-space: nowrap;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.05);
-  transition: background 0.12s, color 0.12s, transform 0.08s;
-  touch-action: manipulation;
-  -webkit-tap-highlight-color: transparent;
-  user-select: none;
-}
-.piston-bar-btn:hover:not(:disabled) { transform: translateY(-1px); }
-.piston-bar-btn.engaged {
-  background: var(--stop-active);
-  border-color: var(--stop-active-border);
-  color: var(--stop-active-text);
-}
-.piston-bar-btn.momentary {
-  /* Stippellijn geeft momentary aan zonder extra uitleg nodig te maken. */
-  border-style: dashed;
-}
-
 /* Afdrukken (0.7.75): de schermindeling klemt het document op één
    vensterhoogte (html/body overflow hidden, #app 100vh). Bij het afdrukken
    van een partituur die meer dan één pagina beslaat verdween daardoor alles
