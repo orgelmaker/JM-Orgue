@@ -6,6 +6,13 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### Foute tekens in de bron hersteld
+- In `library.rs` stond op twee plaatsen een los NUL-byte waar `\0` bedoeld
+  was, waardoor de twee zoekvarianten voor de infomap van een Hauptwerk-set
+  (`Images\Info\0` en `Images\OrganInfo\0`) nooit pasten en zoekprogramma's
+  het bestand als binair zagen. Hersteld; een test bewaakt dat er geen
+  NUL-byte meer in komt. De variant met schuine streep ving het tot nu toe op.
+
 ### Tests en padcontrole gelijk op elk platform
 - De padcontrole voor bestanden in een orgelmap (`veilig_pad`) werkt nu op
   elk platform hetzelfde: een backslash telt overal als scheidingsteken en

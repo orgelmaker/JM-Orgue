@@ -1031,14 +1031,14 @@ pub fn find_organ_image(source_path: &str, source_type: &str) -> Option<String> 
             let pkgs = hauptwerk_package_dirs(src);
             // Eerst de officiële infomap (0.8.73): pakket\Images\OrganInfo
             // of \Images\Info bevat de orgelfoto. Grabowski-sets gebruiken
-            // "Info" (één niveau diep: Info \Background.png). Die winnen
+            // "Info" (één niveau diep: Info\0\Background.png). Die winnen
             // van elke panel-achtergrond ("CrescendoProg\…").
             for pkg in &pkgs {
                 for sub in ["Images/OrganInfo", r"Images\OrganInfo",
                             "Images/Organ_Info", r"Images\Organ_Info",
                             "Images/Info", r"Images\Info",
-                            "Images/Info/0", r"Images\Info ",
-                            "Images/OrganInfo/0", r"Images\OrganInfo "] {
+                            "Images/Info/0", r"Images\Info\0",
+                            "Images/OrganInfo/0", r"Images\OrganInfo\0"] {
                     let d = pkg.join(sub);
                     if d.is_dir() {
                         if let Some(p) = best_in_dir(&d) {
@@ -1161,6 +1161,17 @@ mod library_tests {
             lib.settings.get("/home/orgel/Orgels/Batz").and_then(|s| s.master_volume_db),
             Some(-3.0),
             "settings van het overlevende pad blijven staan"
+        );
+    }
+
+    /// Een letterlijk NUL-byte waar `\0` bedoeld was maakte dit bestand voor
+    /// `grep` een binair bestand en liet de twee infomap-varianten met `\0`
+    /// nooit matchen. Deze test houdt de bron schoon.
+    #[test]
+    fn bronbestand_bevat_geen_nul_bytes() {
+        assert!(
+            !include_bytes!("library.rs").contains(&0u8),
+            "library.rs bevat een NUL-byte: schrijf `\\0` als tekst, niet als los byte"
         );
     }
 
