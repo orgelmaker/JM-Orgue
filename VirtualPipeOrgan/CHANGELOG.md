@@ -6,6 +6,24 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### Test-API: webpagina's op dezelfde pc kunnen de API niet meer aanroepen
+- Met `--test-api` luistert de server op 127.0.0.1 zonder token. Een webpagina
+  in een browser op dezelfde computer kon er daardoor verzoeken naartoe sturen
+  (bijvoorbeeld POST naar `/sampleset/trim` of `/remote/enable`), ook met
+  DNS-rebinding. Nu krijgt een verzoek met een `Origin`-header (elke browser
+  stuurt die bij cross-origin- en POST-verzoeken, ook de preflight) een 403, en
+  een `Host` buiten `127.0.0.1:<poort>` en `localhost:<poort>` ook. Een
+  ontbrekende `Host` (rauwe HTTP/1.0-client) blijft toegestaan: die kan geen
+  browser zijn.
+- Ongewijzigd: curl, Node's `fetch` (de MCP-server) en Python sturen geen
+  `Origin` en werken zoals eerst (gecontroleerd). De afstandsbediening (token,
+  0.0.0.0) wordt niet geraakt: haar eigen pagina stuurt wél een `Origin`.
+- Het logboek krijgt de eerste geweigerde poging en daarna elke honderdste,
+  zodat een pagina die blijft proberen het niet vol schrijft.
+- Drie unittests en een proef tegen de echte app: 200 voor gewone verzoeken,
+  403 voor `Origin`, rebinding-`Host`, preflight en `/remote/enable`, en de
+  instellingen van de afstandsbediening bleven ongewijzigd.
+
 ### Logboek schrijft niet meer op de audiothread
 - Het logbestand werd synchroon geschreven achter een mutex, en in de
   render-closure van de audio staan ruim dertig `info!`/`warn!`-aanroepen bij

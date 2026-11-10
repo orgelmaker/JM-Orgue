@@ -2,6 +2,9 @@
 //!
 //! Geactiveerd met `--test-api` of `--test-api=PORT` op de commandline.
 //! Standaard port: 8765. Bind aan 127.0.0.1.
+//! Herkomstcontrole (B4): een verzoek met een `Origin`-header krijgt 403 (een webpagina op dezelfde pc mag de
+//! API niet aanroepen), net als een `Host` buiten `127.0.0.1:<poort>` en `localhost:<poort>` (DNS-rebinding).
+//! curl, Node's `fetch` (jm-orgue-mcp) en Python sturen geen `Origin` en werken ongewijzigd.
 //!
 //! Endpoints (allemaal JSON):
 //!   GET  /status                  - audio_running, sample_rate, voice_count, peak L/R, organ_loaded
@@ -105,7 +108,7 @@ use serde_json::{json, Value};
 use vpo_midi::MidiMessage;
 use std::io::{Cursor, Read};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU16, Ordering};
+use std::sync::atomic::{AtomicU16, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;
 use tracing::{info, warn};
@@ -153,7 +156,7 @@ impl ApiServer {
         let name = if scope == ApiScope::Test { "test-api" } else { "remote-api" };
         let thread = thread::Builder::new()
             .name(name.into())
-            .spawn(move || serve_loop(srv, state, scope, token, log_path))
+            .spawn(move || serve_loop(srv, state, scope, token, log_path, port))
             .map_err(|e| e.to_string())?;
         Ok(ApiServer { server, thread: Some(thread), port, scope })
     }
@@ -188,8 +191,57 @@ pub fn start_test_api(state: AppState, port: u16, log_path: PathBuf) {
     }
 }
 
+/// Herkomstcontrole voor de test-API (taak B4). De test-API luistert op 127.0.0.1 zonder token; zonder deze
+/// controle kan elke webpagina in een browser op dezelfde pc er verzoeken naartoe sturen (bijvoorbeeld POST
+/// naar `/sampleset/trim` of `/remote/enable`), ook via DNS-rebinding. Twee regels, alleen voor scope Test:
+///
+/// * een verzoek MET `Origin`-header wordt geweigerd: browsers sturen die bij elk cross-origin- en bij elk
+///   POST-verzoek (ook de preflight `OPTIONS`); curl, Node's `fetch` (de MCP-server) en Python sturen hem niet;
+/// * `Host` moet `127.0.0.1:<poort>` of `localhost:<poort>` zijn. Dat vangt de rebinding-aanval, waarbij een
+///   pagina op `evil.example` naar 127.0.0.1 resolveert en een GET zonder `Origin` kan sturen. Een ontbrekende
+///   `Host` (rauwe HTTP/1.0-client) kan geen browser zijn en blijft toegestaan.
+///
+/// De afstandsbediening (scope Remote, 0.0.0.0, token) blijft ongemoeid: haar eigen pagina stuurt wél `Origin`.
+fn herkomst_toegestaan(scope: ApiScope, poort: u16, origin: Option<&str>, host: Option<&str>) -> Result<(), String> {
+    if scope != ApiScope::Test {
+        return Ok(());
+    }
+    if let Some(o) = origin {
+        return Err(format!(
+            "verzoeken met een Origin-header ('{}') worden geweigerd: de test-API is niet bedoeld voor webpagina's",
+            o.chars().take(80).collect::<String>()
+        ));
+    }
+    if let Some(h) = host {
+        let h = h.trim().to_ascii_lowercase();
+        if h != format!("127.0.0.1:{poort}") && h != format!("localhost:{poort}") {
+            return Err(format!(
+                "Host '{}' geweigerd: alleen 127.0.0.1:{poort} en localhost:{poort} zijn toegestaan",
+                h.chars().take(80).collect::<String>()
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// De waarde van een request-header (hoofdletteronafhankelijk), of `None` als hij ontbreekt.
+fn kopwaarde(request: &tiny_http::Request, naam: &'static str) -> Option<String> {
+    request.headers().iter().find(|h| h.field.equiv(naam)).map(|h| h.value.as_str().to_string())
+}
+
+/// Aantal geweigerde verzoeken sinds de start; het logboek krijgt de eerste en daarna elke honderdste, zodat een
+/// pagina die blijft proberen het logboek niet vol schrijft.
+static GEWEIGERD: AtomicU64 = AtomicU64::new(0);
+
 /// Request-lus van één ApiServer (eigen thread).
-fn serve_loop(server: Arc<tiny_http::Server>, state: AppState, scope: ApiScope, token: Option<String>, log_path: PathBuf) {
+fn serve_loop(
+    server: Arc<tiny_http::Server>,
+    state: AppState,
+    scope: ApiScope,
+    token: Option<String>,
+    log_path: PathBuf,
+    port: u16,
+) {
     for mut request in server.incoming_requests() {
         let url = request.url().to_string();
         let method = request.method().clone();
@@ -198,6 +250,15 @@ fn serve_loop(server: Arc<tiny_http::Server>, state: AppState, scope: ApiScope, 
             .iter()
             .find(|h| h.field.equiv("X-Remote-Token"))
             .map(|h| h.value.as_str().to_string());
+        let (origin, host) = (kopwaarde(&request, "Origin"), kopwaarde(&request, "Host"));
+        if let Err(reden) = herkomst_toegestaan(scope, port, origin.as_deref(), host.as_deref()) {
+            let n = GEWEIGERD.fetch_add(1, Ordering::Relaxed) + 1;
+            if n == 1 || n % 100 == 0 {
+                warn!("test-API: verzoek {} {} geweigerd ({}); geweigerd sinds start: {}", method, url, reden, n);
+            }
+            let _ = request.respond(json_response(403, json!({ "error": reden })));
+            continue;
+        }
         // Body alleen bij POST/PUT en begrensd (64 KiB): Content-Length groter
         // → lege body → 400 in de handler; de lezer zelf is óók begrensd (take),
         // zodat een body zonder/met foutieve Content-Length nooit meer dan
@@ -2287,6 +2348,51 @@ fn url_decode(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// B4: de herkomstcontrole van de test-API. Gewone clients (geen Origin, Host op het loopbackadres met de
+    /// juiste poort) mogen; een webpagina (Origin) en een rebinding-aanval (vreemde Host) niet.
+    #[test]
+    fn herkomst_test_api_laat_gewone_clients_toe() {
+        let t = ApiScope::Test;
+        // curl, Node's fetch, Python: geen Origin, Host zoals de URL.
+        assert!(herkomst_toegestaan(t, 8765, None, Some("127.0.0.1:8765")).is_ok());
+        assert!(herkomst_toegestaan(t, 8765, None, Some("localhost:8765")).is_ok());
+        assert!(herkomst_toegestaan(t, 8765, None, Some("LocalHost:8765")).is_ok(), "hoofdletters in de hostnaam");
+        assert!(herkomst_toegestaan(t, 8765, None, Some(" 127.0.0.1:8765 ")).is_ok(), "witruimte rond de waarde");
+        // Een rauwe HTTP/1.0-client zonder Host kan geen browser zijn.
+        assert!(herkomst_toegestaan(t, 8765, None, None).is_ok());
+        // Andere poort: de test-API kan op een andere poort draaien (--test-api=PORT).
+        assert!(herkomst_toegestaan(t, 9000, None, Some("127.0.0.1:9000")).is_ok());
+    }
+
+    #[test]
+    fn herkomst_test_api_weigert_webpaginas_en_vreemde_hosts() {
+        let t = ApiScope::Test;
+        // Een pagina op een andere site, of dezelfde machine: elke Origin is verdacht, ook een lege of 'null'.
+        for o in ["http://evil.example", "http://127.0.0.1:8765", "http://localhost:8765", "null", "", "tauri://localhost"] {
+            let r = herkomst_toegestaan(t, 8765, Some(o), Some("127.0.0.1:8765"));
+            assert!(r.is_err(), "Origin '{o}' hoort geweigerd te worden");
+        }
+        // DNS-rebinding: de pagina staat op evil.example, die naar 127.0.0.1 resolveert; een GET heeft geen Origin
+        // maar wel zijn eigen Host.
+        for h in ["evil.example:8765", "evil.example", "127.0.0.1", "localhost", "127.0.0.1:8766", "127.0.0.1.evil.example:8765",
+                  "localhost.evil.example:8765", "[::1]:8765", "0.0.0.0:8765", ""] {
+            let r = herkomst_toegestaan(t, 8765, None, Some(h));
+            assert!(r.is_err(), "Host '{h}' hoort geweigerd te worden");
+        }
+        // De reden noemt wat er misging, en kapt lange waarden af.
+        let lang = "x".repeat(500);
+        let fout = herkomst_toegestaan(t, 8765, Some(&lang), None).unwrap_err();
+        assert!(fout.contains("Origin") && fout.len() < 300, "foutmelding: {fout}");
+    }
+
+    /// De afstandsbediening (scope Remote) blijft ongemoeid: haar eigen pagina stuurt wel een Origin, en
+    /// ze wordt via een LAN-adres bereikt.
+    #[test]
+    fn herkomst_remote_scope_is_ongemoeid() {
+        assert!(herkomst_toegestaan(ApiScope::Remote, 8766, Some("http://192.168.1.20:8766"), Some("192.168.1.20:8766")).is_ok());
+        assert!(herkomst_toegestaan(ApiScope::Remote, 8766, None, Some("orgel.local:8766")).is_ok());
+    }
 
     #[test]
     fn token_eq_vergelijkt_exact() {
