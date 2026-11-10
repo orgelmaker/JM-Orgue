@@ -480,6 +480,9 @@ pub struct MixCoresDto {
     pub max: usize,
     /// Wat de app zelf zou kiezen.
     pub recommended: usize,
+    /// Realtime-prioriteit van de mengwerkers (D2): de instelling en wat het
+    /// besturingssysteem ervan terechtbracht.
+    pub realtime: crate::rt_prioriteit::RtStatus,
 }
 
 #[tauri::command]
@@ -489,7 +492,26 @@ pub fn get_mix_cores() -> MixCoresDto {
         physical: crate::mengpool::fysieke_kernen(),
         max: crate::audio::MAX_MENG_STUKKEN,
         recommended: crate::mengpool::aanbevolen_kernen(),
+        realtime: crate::rt_prioriteit::status(),
     }
+}
+
+/// Realtime-prioriteit voor de mengwerkers aan of uit (D2). Aan = de klasse
+/// van het platform (Windows MMCSS, Linux SCHED_FIFO, macOS time-constraint);
+/// uit = normale prioriteit. Elke werker zet dit bij zijn start, dus de pool
+/// wordt hier (buiten de audiothread) opnieuw gebouwd. Per pc bewaard.
+#[tauri::command]
+pub fn set_realtime_prioriteit(state: State<AppState>, on: bool) -> Result<MixCoresDto, String> {
+    crate::rt_prioriteit::zet_aan(on);
+    let mut prefs = crate::state::load_audio_prefs(&state.app_data_dir);
+    prefs.realtime_prioriteit = Some(on);
+    crate::state::save_audio_prefs(&state.app_data_dir, &prefs);
+    crate::audio::herbouw_mengpool();
+    info!("Realtime-prioriteit van de mengwerkers: {}", if on { "aan" } else { "uit" });
+    // De werkers hebben hun klasse hooguit een paar milliseconden na hun start
+    // gezet; even wachten zodat het antwoord de nieuwe stand toont.
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    Ok(get_mix_cores())
 }
 
 /// Luidspreker-testsignaal op één uitgangskanaal (0.7.47). `channel = None`

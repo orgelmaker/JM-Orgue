@@ -2009,6 +2009,20 @@
       refreshAudioStatus();
     } catch (e) { console.error('Rekenkernen zetten mislukt:', e); }
   }
+  // Realtime-prioriteit voor de mengwerkers (D2): aan/uit en wat het
+  // besturingssysteem ervan terechtbracht (mixCores.realtime).
+  const RT_KLASSE_NAMEN = {
+    mmcss_pro_audio: 'MMCSS Pro Audio',
+    tijdkritiek: 'TIME_CRITICAL',
+    sched_fifo: 'SCHED_FIFO',
+    time_constraint: 'time-constraint',
+  };
+  async function zetRealtime(on) {
+    try {
+      mixCores = await invoke('set_realtime_prioriteit', { on });
+      refreshAudioStatus();
+    } catch (e) { console.error('Realtime-prioriteit zetten mislukt:', e); }
+  }
   // Welk deel van de rendertijd is stemwerk? Dat is het deel dat over de
   // kernen verdeeld wordt; de rest (wind, tremulant, galm, EQ, limiter) blijft
   // op één kern en is in de praktijk een paar procent.
@@ -8336,6 +8350,23 @@
                   {' '}{$t('settings.mix_cores_share').replace('{p}', stemwerkAandeel)}
                 {/if}
               </p>
+
+              <!-- Realtime-prioriteit voor het mengen (D2) -->
+              <label class="swell-toggle" style="margin-top: 0.7rem; display: flex; align-items: center; gap: 0.4rem;" title={$t('settings.mix_rt_hint')}>
+                <input type="checkbox" checked={mixCores.realtime ? mixCores.realtime.ingesteld !== false : true} on:change={(e) => zetRealtime(e.target.checked)} />
+                <span>{$t('settings.mix_rt')}</span>
+              </label>
+              {#if mixCores.realtime && mixCores.realtime.ingesteld && mixCores.realtime.zonder > 0}
+                <p style="margin: 0.2rem 0 0; font-size: 0.68rem; color: var(--warning, #d9a441); line-height: 1.35;">
+                  {mixCores.realtime.reden === 'te_veel_werkers'
+                    ? $t('settings.mix_rt_te_veel')
+                    : $t('settings.mix_rt_geweigerd').replace('{n}', mixCores.realtime.os_fout)}
+                </p>
+              {:else if mixCores.realtime && mixCores.realtime.ingesteld && mixCores.realtime.gelukt > 0}
+                <p style="margin: 0.2rem 0 0; font-size: 0.68rem; color: var(--text-muted); line-height: 1.35;">
+                  {$t('settings.mix_rt_actief').replace('{n}', mixCores.realtime.gelukt).replace('{klasse}', RT_KLASSE_NAMEN[mixCores.realtime.klasse] || mixCores.realtime.klasse)}
+                </p>
+              {/if}
               {#if audioStatus && audioStatus.audio_running}
                 <p style="margin: 0.2rem 0 0; font-size: 0.68rem; color: var(--text-muted); line-height: 1.35;">
                   {$t('settings.polyphony_load').replace('{load}', Math.round((audioStatus.render_load || 0) * 100)).replace('{peak}', Math.round((audioStatus.render_peak || 0) * 100))}

@@ -143,6 +143,8 @@ impl MengPool {
             taken: (0..n_werkers).map(|_| std::cell::UnsafeCell::new(Taak::leeg())).collect(),
         });
         let mut werkers = Vec::with_capacity(n_werkers);
+        // De telling van de realtime-klasse hoort bij deze pool.
+        crate::rt_prioriteit::herstel_status();
         for idx in 0..n_werkers {
             let g = gedeeld.clone();
             let handle = std::thread::Builder::new()
@@ -280,15 +282,10 @@ fn werker_lus(idx: usize, gedeeld: Arc<Gedeeld>) {
         use std::arch::x86_64::{_mm_getcsr, _mm_setcsr};
         _mm_setcsr(_mm_getcsr() | 0x8040); // FTZ (bit 15) | DAZ (bit 6)
     }
-    // Dezelfde prioriteit als de audio-callback; een werker die verdrongen
-    // wordt, houdt de hele callback op.
-    #[cfg(windows)]
-    unsafe {
-        use windows_sys::Win32::System::Threading::{
-            GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_TIME_CRITICAL,
-        };
-        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
-    }
+    // Realtime-klasse van het platform (Windows MMCSS + TIME_CRITICAL, Linux
+    // SCHED_FIFO, macOS time-constraint); een werker die verdrongen wordt,
+    // houdt de hele callback op. Zie `rt_prioriteit.rs`.
+    crate::rt_prioriteit::voor_mengwerker(gedeeld.geparkeerd.len());
 
     let mut gezien = 0u64;
     loop {

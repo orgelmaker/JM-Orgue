@@ -408,6 +408,7 @@ fn route_shared(
             }
             let (me, mw, ge, gw, bl, gew) = crate::mengpool::neem_barriere_meting();
             json!({ "totaal": totaal, "segmenten": m, "stemmen": stemmen, "stemstarts": starts, "commandos": cmds, "locks_ms": lm,
+                    "rt": serde_json::to_value(crate::rt_prioriteit::status()).unwrap_or_default(),
                     "barriere": { "max_eigen_us": me, "max_wacht_us": mw, "gem_eigen_us": ge, "gem_wacht_us": gw, "blokken": bl, "gewekt": gew } })
         }),
         // Levensteken + beknopt JSON-overzicht voor dashboards, AI-agenten en
@@ -648,6 +649,16 @@ fn route_test_only(
             let on = v.get("on").and_then(|x| x.as_bool()).unwrap_or(true);
             vpo_sampler::set_niveaus_toepassen(on);
             Ok(json!({"niveaus_toepassen": vpo_sampler::niveaus_toepassen()}))
+        }
+        // Realtime-prioriteit van de mengwerkers (D2), body {"on": true|false};
+        // bouwt de pool opnieuw. Niet persistent (alleen voor proeven).
+        (tiny_http::Method::Post, "/rt_prioriteit") => {
+            let v: serde_json::Value = serde_json::from_str(body).unwrap_or_default();
+            let on = v.get("on").and_then(|x| x.as_bool()).unwrap_or(true);
+            crate::rt_prioriteit::zet_aan(on);
+            crate::audio::herbouw_mengpool();
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            Ok(serde_json::to_value(crate::rt_prioriteit::status()).unwrap_or_default())
         }
         // Startbuffer per opname (0.8.92), body {"ms": 200}; geldt bij de
         // volgende /load_organ. Niet persistent (alleen voor proeven).
@@ -917,6 +928,7 @@ fn handle_status(state: &AppState) -> Value {
         "rt_noteon_weggelaten": crate::state::rt_noteon_weggelaten(),
         "stereo_samples": vpo_sampler::stereo_loading(),
         "niveaus_toepassen": vpo_sampler::niveaus_toepassen(),
+        "realtime_prioriteit": serde_json::to_value(crate::rt_prioriteit::status()).unwrap_or_default(),
         // Achtergrondlader (0.8.92): startbuffer, tekorten en latenties.
         "loader": serde_json::to_value(crate::audio::loader_stats()).unwrap_or(serde_json::Value::Null),
         "load_stappen_ms": load_stappen_json(),

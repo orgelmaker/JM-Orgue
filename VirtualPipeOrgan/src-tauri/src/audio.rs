@@ -717,6 +717,17 @@ pub fn set_meng_stukken(n: usize) {
     if vorig == n && MENGPOOL.read().is_some() {
         return;
     }
+    bouw_mengpool(n);
+}
+
+/// Bouwt de pool opnieuw met de huidige instelling, ook als het aantal niet
+/// veranderde. Nodig als de realtime-prioriteit wisselt: die wordt door elke
+/// werker bij zijn start gezet.
+pub fn herbouw_mengpool() {
+    bouw_mengpool(meng_stukken());
+}
+
+fn bouw_mengpool(n: usize) {
     // Pool opnieuw bouwen met n-1 werkers. De audiothread valt in dat korte
     // venster terug op één kern (mengpool() geeft dan None of de oude pool).
     let nieuw = std::sync::Arc::new(crate::mengpool::MengPool::nieuw(n.saturating_sub(1)));

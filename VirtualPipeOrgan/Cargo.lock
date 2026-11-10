@@ -6162,6 +6162,8 @@ dependencies = [
  "crossbeam-channel",
  "dirs 5.0.1",
  "hound",
+ "libc",
+ "mach2",
  "midly",
  "mp3lame-encoder",
  "parking_lot",

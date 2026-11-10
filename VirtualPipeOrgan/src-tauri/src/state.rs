@@ -361,6 +361,10 @@ pub struct AudioPrefs {
     /// vergt herladen van het orgel.
     #[serde(default)]
     pub niveaus_toepassen: Option<bool>,
+    /// Realtime-prioriteit voor de mengwerkers (D2); None = aan. Uit = normale
+    /// prioriteit zoals vóór deze instelling op Linux en macOS.
+    #[serde(default)]
+    pub realtime_prioriteit: Option<bool>,
     /// Afstandsbediening in het netwerk (0.7.38): aan/uit; None = uit.
     #[serde(default)]
     pub remote_enabled: Option<bool>,
@@ -1925,6 +1929,7 @@ impl AppState {
                 aanbevolen
             }
         };
+        crate::rt_prioriteit::zet_aan(audio_prefs.realtime_prioriteit.unwrap_or(true));
         crate::audio::set_meng_stukken(mix_cores);
         // RAM-plafond voor volledig geladen samples afhankelijk van het
         // geheugen van deze pc (0.9.31; was vast 1,5 GB).

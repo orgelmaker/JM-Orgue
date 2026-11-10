@@ -12,6 +12,15 @@ tauri-build = { workspace = true, features = [] }
 # decode-pieken bij het loslaten/aanslaan van vol werk verdrongen de audio-thread).
 windows-sys = { version = "0.59", features = ["Win32_System_Threading", "Win32_Foundation", "Win32_System_SystemInformation"] }
 
+[target.'cfg(unix)'.dependencies]
+# Realtime-prioriteit van de mengwerkers (D2): SCHED_FIFO op Linux, het
+# thread_policy_t-type voor het Mach-beleid op macOS. Dezelfde versies als al
+# in de lock (via cpal).
+libc = "0.2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+mach2 = "0.4"
+
 [dependencies]
 vpo-core = { path = "../vpo-core" }
 vpo-audio = { path = "../vpo-audio" }

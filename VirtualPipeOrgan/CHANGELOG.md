@@ -6,6 +6,32 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### Realtime-prioriteit van de mengwerkers per platform, met melding (D2)
+- Nieuwe module `rt_prioriteit.rs`. De mengwerkers krijgen bij hun start de
+  prioriteitsklasse van het besturingssysteem: Windows `TIME_CRITICAL` (zoals
+  al het geval was), Linux `SCHED_FIFO` (prioriteit 20) en macOS het Mach
+  time-constraint-beleid. Op Linux en macOS deed de app hierover tot nu toe
+  niets. Dit verandert alleen wanneer een werker aan de beurt komt, niet wat
+  hij rekent: de klank blijft bit-identiek.
+- **MMCSS "Pro Audio" is bewust niet de standaard.** Gemeten op Windows (Rotterdam, ~1090 stemmen, 4 stukken, alle
+  16 logische kernen bezet door ander werk): alleen `TIME_CRITICAL` 275–395
+  overschrijdingen per 20 s, MMCSS + `TIME_CRITICAL` 1614–1730, geen klasse
+  930–1085; zonder druk 0 tegen 1–23. Op Windows blijft dus `TIME_CRITICAL`;
+  MMCSS is alleen te proberen met `JM_ORGUE_RT=mmcss`.
+- Weigert het systeem de klasse (op Linux zonder rtprio-limiet of
+  `CAP_SYS_NICE`), dan staat er één logregel met de foutcode en toont
+  Instellingen een melding met wat helpt. Op Linux wordt `SCHED_FIFO` ook
+  overgeslagen als er niet minder werkers dan kernen zijn, zodat spinnende
+  realtime-werkers de audiothread niet kunnen uithongeren. rtkit is niet
+  ingebouwd.
+- Instelbaar: vinkje "Realtime-prioriteit voor het mengen" in Instellingen
+  (standaard aan, per pc bewaard; bouwt de werkerpool opnieuw), test-API
+  `POST /rt_prioriteit` `{"on": false}` en de status in `/perf/slechtste` en
+  `/status` (`rt` / `realtime_prioriteit`). Vertaald in zeven talen.
+- Getest op Windows (tests, mutatiecontrole, meting hierboven). De Linux- en
+  macOS-code is voor die doelen gecompileerd (`cargo check --target`) maar niet
+  uitgevoerd.
+
 ### Frontend-afhankelijkheden: `npm audit fix` (zonder major-sprong)
 - `npm audit` meldde 13 kwetsbaarheden (6 hoog, 6 matig, 1 laag). Na
   `npm audit fix` zijn dat er 8 (1 hoog, 6 matig, 1 laag): de vijf hoge die

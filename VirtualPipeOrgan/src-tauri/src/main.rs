@@ -25,6 +25,7 @@ mod klavar;
 mod recorder;
 mod remote;
 mod retune;
+mod rt_prioriteit;
 mod sampleset_download;
 mod state;
 mod test_api;
@@ -365,6 +366,7 @@ fn main() {
             commands::set_output_test_signal,
             commands::set_mix_cores,
             commands::get_mix_cores,
+            commands::set_realtime_prioriteit,
             commands::get_wind_status,
             commands::set_short_octave,
             commands::set_load_all_perspectives,
