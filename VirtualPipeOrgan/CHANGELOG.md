@@ -6,6 +6,17 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### WAV-markers lezen is begrensd en loopt niet meer scheef
+- `read_wav_markers` las de `smpl`- en `cue `-chunk volledig in het geheugen
+  met een grootte uit de bestandskop. Een corrupt bestand kon daarmee tot 4 GB
+  laten reserveren. Nu geldt een bovengrens van 1 MiB (echte chunks zijn
+  enkele kilobytes); een grotere chunk wordt overgeslagen en de chunks
+  erna worden gewoon gelezen.
+- Bij een `smpl`- of `cue `-chunk met een oneven grootte werd de
+  padding-byte niet overgeslagen, waardoor de volgende chunkkop scheef werd
+  gelezen. Dat gebeurt nu wel. Drie nieuwe tests dekken een te grote chunk, een
+  corrupte grootte en oneven chunks.
+
 ### Sampleset-download loopt niet meer vast en is te annuleren
 - Het downloaden van een sampleset had geen time-out: viel de verbinding
   stil, dan bleef de voortgang eindeloos op hetzelfde percentage staan. Nu

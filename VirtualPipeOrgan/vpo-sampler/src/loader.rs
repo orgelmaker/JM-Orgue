@@ -273,6 +273,11 @@ pub struct WavMarkers {
     pub pitch_fraction_cents: Option<f32>,
 }
 
+/// Bovengrens voor een `smpl`- of `cue `-chunk die `read_wav_markers` in het
+/// geheugen leest. Echte chunks zijn hooguit enkele kilobytes; een grotere
+/// grootte in de kop is corrupt en de chunk wordt dan overgeslagen (A5).
+const MAX_MARKER_CHUNK: u64 = 1 << 20;
+
 /// Lees smpl-loops, cue-marker en framecount uit een WAV (chunk-walk zonder de
 /// audiodata te decoderen). Loops worden per GrandOrgue-regels gevalideerd:
 /// start<einde, binnen het bestand, einde>0 — ongeldige records vervallen stil.
@@ -317,9 +322,11 @@ pub fn read_wav_markers(path: &Path) -> Option<WavMarkers> {
                 data_bytes = chunk_size;
                 if file.seek(SeekFrom::Current(skip as i64)).is_err() { break; }
             }
-            b"smpl" if chunk_size >= 36 => {
+            b"smpl" if (36..=MAX_MARKER_CHUNK).contains(&chunk_size) => {
                 let mut smpl_data = vec![0u8; chunk_size as usize];
                 if file.read_exact(&mut smpl_data).is_err() { break; }
+                // Oneven chunk: de padding-byte hoort er niet bij maar staat wel in het bestand.
+                if skip > chunk_size && file.seek(SeekFrom::Current((skip - chunk_size) as i64)).is_err() { break; }
                 // Gemeten toonhoogte van de sample (GrandOrgue-semantiek voor
                 // hertemperen): dwMIDIUnityNote op +12, dwMIDIPitchFraction
                 // op +16 als 32-bit fractie van een halve toon (0x80000000 =
@@ -350,9 +357,10 @@ pub fn read_wav_markers(path: &Path) -> Option<WavMarkers> {
                     raw_loops.push((s, e));
                 }
             }
-            b"cue " if chunk_size >= 4 => {
+            b"cue " if (4..=MAX_MARKER_CHUNK).contains(&chunk_size) => {
                 let mut cue_data = vec![0u8; chunk_size as usize];
                 if file.read_exact(&mut cue_data).is_err() { break; }
+                if skip > chunk_size && file.seek(SeekFrom::Current((skip - chunk_size) as i64)).is_err() { break; }
                 let n = u32::from_le_bytes([cue_data[0], cue_data[1], cue_data[2], cue_data[3]]) as usize;
                 // Cue-record: 24 bytes vanaf offset 4; dwSampleOffset op +20.
                 // GrandOrgue neemt het MAXIMUM over alle cue-punten.
@@ -1842,6 +1850,112 @@ mod smpl_pitch_tests {
         let _ = std::fs::remove_file(&path0);
         assert_eq!(m0.unity_note, None);
         assert_eq!(m0.pitch_fraction_cents, None);
+    }
+
+    /// RIFF-chunk: id, grootte, inhoud en bij oneven grootte één padding-byte
+    /// (de grootte in de kop telt de padding niet mee).
+    fn chunk(id: &[u8; 4], body: &[u8]) -> Vec<u8> {
+        let mut v = Vec::new();
+        v.extend_from_slice(id);
+        v.extend_from_slice(&(body.len() as u32).to_le_bytes());
+        v.extend_from_slice(body);
+        if body.len() % 2 == 1 { v.push(0); }
+        v
+    }
+
+    /// smpl-inhoud: unity note + één geldige loop 0..=2.
+    fn smpl_body(unity: u32) -> Vec<u8> {
+        let mut b = vec![0u8; 36];
+        b[12..16].copy_from_slice(&unity.to_le_bytes());
+        b[28..32].copy_from_slice(&1u32.to_le_bytes());
+        let mut rec = [0u8; 24];
+        rec[12..16].copy_from_slice(&2u32.to_le_bytes());
+        b.extend_from_slice(&rec);
+        b
+    }
+
+    /// cue-inhoud: één cue-punt met het gegeven sample-offset.
+    fn cue_body(offset: u32) -> Vec<u8> {
+        let mut b = 1u32.to_le_bytes().to_vec();
+        let mut rec = [0u8; 24];
+        rec[20..24].copy_from_slice(&offset.to_le_bytes());
+        b.extend_from_slice(&rec);
+        b
+    }
+
+    /// Schrijf fmt + data (4 frames) gevolgd door de gegeven extra chunks.
+    fn schrijf_wav_met_chunks(name: &str, extra: &[u8]) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!("vpo_chunk_test_{}_{}.wav", name, std::process::id()));
+        let mut fmt = Vec::new();
+        fmt.extend_from_slice(&1u16.to_le_bytes());
+        fmt.extend_from_slice(&1u16.to_le_bytes());
+        fmt.extend_from_slice(&48000u32.to_le_bytes());
+        fmt.extend_from_slice(&96000u32.to_le_bytes());
+        fmt.extend_from_slice(&2u16.to_le_bytes());
+        fmt.extend_from_slice(&16u16.to_le_bytes());
+        let mut data = Vec::new();
+        for v in [1000i16, -1000, 1000, -1000] { data.extend_from_slice(&v.to_le_bytes()); }
+        let mut body = Vec::new();
+        body.extend_from_slice(&chunk(b"fmt ", &fmt));
+        body.extend_from_slice(&chunk(b"data", &data));
+        body.extend_from_slice(extra);
+        let mut out = Vec::new();
+        out.extend_from_slice(b"RIFF");
+        out.extend_from_slice(&((body.len() + 4) as u32).to_le_bytes());
+        out.extend_from_slice(b"WAVE");
+        out.extend_from_slice(&body);
+        std::fs::write(&path, out).expect("test-WAV schrijven");
+        path
+    }
+
+    /// A5: een smpl-chunk groter dan de bovengrens (1 MiB) wordt niet in het
+    /// geheugen gelezen maar overgeslagen; de chunk erna blijft leesbaar.
+    #[test]
+    fn read_wav_markers_slaat_te_grote_chunk_over() {
+        let mut groot = smpl_body(60);
+        groot.resize(2 << 20, 0);
+        let mut extra = chunk(b"smpl", &groot);
+        extra.extend_from_slice(&chunk(b"cue ", &cue_body(3)));
+        let path = schrijf_wav_met_chunks("te_groot", &extra);
+        let m = read_wav_markers(&path).expect("markers");
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(m.unity_note, None, "te grote smpl-chunk moet overgeslagen worden");
+        assert!(m.loops.is_empty());
+        assert_eq!(m.cue_frame, Some(3), "chunk na de overgeslagen chunk moet gelezen worden");
+        assert_eq!(m.frames, 4);
+    }
+
+    /// A5: een grootte in de kop die ver voorbij het bestand reikt (corrupt)
+    /// geeft geen reusachtige allocatie en geen paniek; wat ervoor staat blijft.
+    #[test]
+    fn read_wav_markers_corrupte_grootte_geeft_geen_paniek() {
+        let mut extra = Vec::new();
+        extra.extend_from_slice(b"smpl");
+        extra.extend_from_slice(&0xFFFF_FFF0u32.to_le_bytes());
+        let path = schrijf_wav_met_chunks("corrupt", &extra);
+        let m = read_wav_markers(&path).expect("markers");
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(m.unity_note, None);
+        assert_eq!(m.frames, 4);
+    }
+
+    /// A5: smpl- en cue-chunks met oneven grootte hebben een padding-byte;
+    /// die moet overgeslagen worden, anders wijst de volgende kop scheef.
+    #[test]
+    fn read_wav_markers_oneven_chunks_blijven_uitgelijnd() {
+        let mut cue_oneven = cue_body(1);
+        cue_oneven.push(0xBB); // 29 bytes
+        let mut smpl_oneven = smpl_body(60);
+        smpl_oneven.push(0xAA); // 61 bytes
+        let mut extra = chunk(b"cue ", &cue_oneven);
+        extra.extend_from_slice(&chunk(b"smpl", &smpl_oneven));
+        extra.extend_from_slice(&chunk(b"cue ", &cue_body(3)));
+        let path = schrijf_wav_met_chunks("oneven", &extra);
+        let m = read_wav_markers(&path).expect("markers");
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(m.unity_note, Some(60), "smpl na een oneven cue-chunk");
+        assert_eq!(m.loops.len(), 1);
+        assert_eq!(m.cue_frame, Some(3), "cue na een oneven smpl-chunk");
     }
 
     /// De preload-buffer draagt dezelfde smpl-metadata.
