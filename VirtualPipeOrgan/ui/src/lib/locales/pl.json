@@ -480,6 +480,8 @@
     "archiving": "Archiwum MIDI",
     "archiving_title": "Automatyczne archiwum MIDI zapisuje teraz twoją grę; plik zostanie zapisany po upływie czasu ciszy.",
     "peak": "szczyt",
+    "licht": "lekka interpolacja",
+    "licht_title": "Komputer był blisko swojej granicy: aplikacja tymczasowo używa interpolacji liniowej zamiast sześciennej (nieco mniej dokładnej, ponad dwa razy lżejszej na głos), aby uniknąć zacięć. Wyciągnij mniej rejestrów, wybierz więcej rdzeni do miksowania lub większy bufor, aby tego uniknąć.",
     "overload_title": "Przetwarzanie audio nie zmieściło się w wyznaczonym czasie: zwiększ rozmiar bufora (Ustawienia → Wyjście audio) albo zmniejsz polifonię."
   },
   "actions": {

@@ -46,6 +46,10 @@
             style={status.renderPeak > 1.0 ? 'color: var(--warning, #d9a441);' : ''}>
         {status.voiceCount}{status.polyphony ? `/${status.polyphony}` : ''} {$t('status_bar.voices')}{typeof status.renderLoad === 'number' ? ` · ${Math.round(status.renderLoad * 100)}%` : ''}{typeof status.renderPeak === 'number' ? ` (${$t('status_bar.peak')} ${Math.round(status.renderPeak * 100)}%)` : ''}
       </span>
+      <!-- Dynamische ontlasting (C4): lineaire i.p.v. kubische interpolatie. -->
+      {#if status.lichtInterp}
+        <span title={$t('status_bar.licht_title')} style="color: var(--warning, #d9a441);">· {$t('status_bar.licht')}</span>
+      {/if}
     </div>
   </div>
 

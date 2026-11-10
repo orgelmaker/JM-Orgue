@@ -324,6 +324,9 @@ pub struct StatusDto {
     /// buffertijd ging (cumulatief). Loopt deze op tijdens een crescendo-sweep,
     /// dan is de buffer te klein voor het werk per trapwissel.
     pub render_overloads: u64,
+    /// De dynamische ontlasting (0.9.30) schakelde in de laatste twee seconden
+    /// over op lichte (lineaire) interpolatie; voor de melding in de statusbalk.
+    pub licht_interp_actief: bool,
     /// Gedropte realtime audio-commando's (volle queue) — sluit een volle
     /// commandowachtrij uit als oorzaak van haperen/ontbrekende noten.
     pub rt_drops: u64,
@@ -8140,6 +8143,7 @@ pub fn get_status(state: State<AppState>) -> Result<StatusDto, String> {
         render_load: crate::audio::render_load().0,
         render_peak: crate::audio::render_load().1,
         render_overloads: crate::audio::render_overload_count(),
+        licht_interp_actief: crate::audio::licht_interp_actief(),
         rt_drops: crate::state::rt_drop_count(),
         stereo_samples: vpo_sampler::stereo_loading(),
         niveaus_toepassen: vpo_sampler::niveaus_toepassen(),

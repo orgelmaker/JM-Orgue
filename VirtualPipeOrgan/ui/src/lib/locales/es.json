@@ -480,6 +480,8 @@
     "archiving": "Archivo MIDI",
     "archiving_title": "El archivo MIDI automático está registrando lo que tocas; el archivo se guarda pasado el tiempo de silencio.",
     "peak": "pico",
+    "licht": "interpolación ligera",
+    "licht_title": "El ordenador estaba cerca de su límite: la aplicación usa temporalmente interpolación lineal en lugar de cúbica (algo menos fina, más de dos veces más ligera por voz) para evitar cortes. Saca menos registros, elige más núcleos de mezcla o un búfer mayor para evitarlo.",
     "overload_title": "Una llamada de audio ha superado su plazo: aumenta el tamaño del búfer (Ajustes → Salida de audio) o baja la polifonía."
   },
   "actions": {

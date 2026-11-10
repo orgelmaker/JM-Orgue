@@ -480,6 +480,8 @@
     "archiving": "MIDI-Archiv",
     "archiving_title": "Das automatische MIDI-Archiv zeichnet Ihr Spiel auf; die Datei wird nach der Stillezeit gespeichert.",
     "peak": "Spitze",
+    "licht": "leichte Interpolation",
+    "licht_title": "Der Rechner war nahe an der Grenze: die App rechnet vorübergehend mit linearer statt kubischer Interpolation (etwas weniger fein, mehr als doppelt so leicht pro Stimme), um Aussetzer zu vermeiden. Zieh weniger Register, wähle mehr Rechenkerne oder einen größeren Puffer, um das zu vermeiden.",
     "overload_title": "Ein Audio-Callback hat seine Frist überschritten: Puffergröße erhöhen (Einstellungen → Audioausgabe) oder Polyfonie senken."
   },
   "actions": {

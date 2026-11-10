@@ -110,6 +110,7 @@
         // altijd stil (gelijkgetrokken met App.refreshStatus).
         renderPeak: s.render_peak,
         renderOverloads: s.render_overloads,
+        lichtInterp: s.licht_interp_actief,
         rtDrops: s.rt_drops,
         peakLeft: s.peak_left,
         peakRight: s.peak_right,

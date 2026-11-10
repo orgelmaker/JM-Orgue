@@ -6,6 +6,20 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### Melding in de statusbalk als de interpolatie lichter wordt gemaakt (C4)
+- Schakelt de dynamische ontlasting (0.9.30) over op lineaire in plaats van
+  kubische interpolatie, dan toont de statusbalk nu "· lichte interpolatie"
+  (twee seconden na de laatste keer; tooltip in zeven talen legt uit wat te
+  doen). Ook in `get_status` en in de test-API (`licht_interp_actief`,
+  `callbacks_met_stemmen`). Alleen tellers en een tijdstempel in de callback:
+  de klank is niet veranderd.
+- Gemeten hoe vaak de terugval optreedt (Rotterdam, 20 s per situatie): bij
+  4 of meer mengkernen praktisch nooit (0 tot 0,05 % van de callbacks), bij 2
+  kernen 1,6 %, bij 1 kern en ~1100 stemmen altijd — en dan is de CPU nog
+  steeds vol. Meer mengkernen helpt veel meer dan lichtere interpolatie.
+- SIMD voor de interpolatielus is niet gedaan: de winst is hooguit ~15 % van de
+  menspas en de lus vraagt een aparte route voor het rechte stuk (D6).
+
 ### Realtime-prioriteit van de mengwerkers per platform, met melding (D2)
 - Nieuwe module `rt_prioriteit.rs`. De mengwerkers krijgen bij hun start de
   prioriteitsklasse van het besturingssysteem: Windows `TIME_CRITICAL` (zoals

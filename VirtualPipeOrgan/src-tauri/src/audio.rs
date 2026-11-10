@@ -889,6 +889,68 @@ pub fn licht_interp_callbacks() -> u64 {
     LICHT_INTERP_CALLBACKS.load(Ordering::Relaxed)
 }
 
+/// Aantal callbacks met minstens één klinkende stem (C4): de noemer bij
+/// `LICHT_INTERP_CALLBACKS`. Zonder stemmen schakelt de ontlasting nooit in,
+/// dus stille callbacks zouden het aandeel kunstmatig laag maken.
+static INTERP_CALLBACKS_MET_STEMMEN: AtomicU64 = AtomicU64::new(0);
+pub fn callbacks_met_stemmen() -> u64 {
+    INTERP_CALLBACKS_MET_STEMMEN.load(Ordering::Relaxed)
+}
+
+/// Tijdstip (ms sinds het eerste gebruik, plus 1; 0 = nooit) van de laatste
+/// callback op lichte interpolatie. Voor de melding in de statusbalk (C4): een
+/// momentopname per poll zou knipperen, dit blijft een paar seconden staan.
+static LICHT_LAATSTE_MS: AtomicU64 = AtomicU64::new(0);
+static LICHT_EPOCH: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+
+/// Milliseconden sinds het eerste gebruik, plus 1 zodat 0 "nooit" blijft.
+fn licht_ms_nu() -> u64 {
+    LICHT_EPOCH.get_or_init(std::time::Instant::now).elapsed().as_millis() as u64 + 1
+}
+
+/// Hoe lang de melding blijft staan na de laatste lichte callback.
+const LICHT_MELDING_MS: u64 = 2000;
+
+/// Was de lichte interpolatie in de laatste seconden nog actief? Zuiver, voor
+/// de test.
+fn licht_recent(laatste: u64, nu: u64) -> bool {
+    laatste != 0 && nu.saturating_sub(laatste) < LICHT_MELDING_MS
+}
+
+/// Heeft de dynamische ontlasting (0.9.30) in de laatste twee seconden
+/// ingegrepen? Dan klinkt het orgel tijdelijk met lineaire in plaats van
+/// kubische interpolatie.
+pub fn licht_interp_actief() -> bool {
+    licht_recent(LICHT_LAATSTE_MS.load(Ordering::Relaxed), licht_ms_nu())
+}
+
+#[cfg(test)]
+mod licht_melding_tests {
+    use super::{licht_recent, LICHT_MELDING_MS};
+
+    #[test]
+    fn nooit_actief_geweest_meldt_niets() {
+        assert!(!licht_recent(0, 0));
+        assert!(!licht_recent(0, 10 * LICHT_MELDING_MS));
+    }
+
+    #[test]
+    fn melding_blijft_even_staan_en_gaat_dan_uit() {
+        let laatste = 5_000;
+        assert!(licht_recent(laatste, laatste));
+        assert!(licht_recent(laatste, laatste + LICHT_MELDING_MS - 1));
+        assert!(!licht_recent(laatste, laatste + LICHT_MELDING_MS));
+        assert!(!licht_recent(laatste, laatste + 60_000));
+    }
+
+    #[test]
+    fn klok_die_even_terugloopt_geeft_geen_overloop() {
+        // nu < laatste kan alleen bij ongelukkige volgorde van lezen; mag niet
+        // paniekeren en telt als "net gebeurd".
+        assert!(licht_recent(5_000, 4_999));
+    }
+}
+
 /// Segmenttijden van de hele callback, in tienduizendsten van de buffertijd
 /// (10.000 = 100%). De passen in `RENDER_PASS_PM` dekken alleen de bloklus; een
 /// groot deel van de callback (stemstarts, laden, voorrekenen, opruimen) bleef
@@ -6374,7 +6436,13 @@ fn run_audio_thread(
                 let licht_interp = periode_ns > 0
                     && prev_mix_ns.saturating_mul(100) > periode_ns.saturating_mul(grens);
                 licht_vorig = licht_interp;
-                if licht_interp { LICHT_INTERP_CALLBACKS.fetch_add(1, Ordering::Relaxed); }
+                if !voices_lock.is_empty() {
+                    INTERP_CALLBACKS_MET_STEMMEN.fetch_add(1, Ordering::Relaxed);
+                }
+                if licht_interp {
+                    LICHT_INTERP_CALLBACKS.fetch_add(1, Ordering::Relaxed);
+                    LICHT_LAATSTE_MS.store(licht_ms_nu(), Ordering::Relaxed);
+                }
                 // Tijdmeting per pas (fase 1). Opgeteld over alle blokken van
                 // deze callback; aan het eind omgerekend naar promille van de
                 // buffertijd.

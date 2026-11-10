@@ -480,6 +480,8 @@
     "archiving": "Archivio MIDI",
     "archiving_title": "L'archivio MIDI automatico sta registrando la tua esecuzione; il file viene salvato dopo il tempo di silenzio.",
     "peak": "picco",
+    "licht": "interpolazione leggera",
+    "licht_title": "Il computer era vicino al limite: l'app usa temporaneamente l'interpolazione lineare invece di quella cubica (un po' meno fine, più di due volte più leggera per voce) per evitare interruzioni. Tira meno registri, scegli più core di missaggio o un buffer più grande per evitarlo.",
     "overload_title": "Un callback audio ha superato la sua scadenza: aumenta la dimensione del buffer (Impostazioni → Uscita audio) oppure riduci la polifonia."
   },
   "actions": {

@@ -480,6 +480,8 @@
     "archiving": "MIDI-archief",
     "archiving_title": "Het automatische MIDI-archief legt je spel nu vast; het bestand wordt na de stiltetijd opgeslagen.",
     "peak": "piek",
+    "licht": "lichte interpolatie",
+    "licht_title": "De computer zat bijna aan de grens: de app rekent tijdelijk met lineaire in plaats van kubische interpolatie (iets minder fijn, ruim twee keer lichter per stem) om haperen te voorkomen. Kies minder registers, meer rekenkernen of een grotere buffer om dit te vermijden.",
     "overload_title": "Een audio-callback ging over zijn deadline: vergroot de buffergrootte (Instellingen → Audio Uitvoer) of verlaag de polyfonie."
   },
   "actions": {

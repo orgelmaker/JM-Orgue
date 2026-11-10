@@ -958,6 +958,8 @@ fn handle_status(state: &AppState) -> Value {
         },
         "mix_chunks": crate::audio::meng_stukken(),
         "licht_interp_callbacks": crate::audio::licht_interp_callbacks(),
+        "licht_interp_actief": crate::audio::licht_interp_actief(),
+        "callbacks_met_stemmen": crate::audio::callbacks_met_stemmen(),
         "callback_segmenten": callback_segmenten_json(),
         "release_pipes": state.loaded_organ_info.read().as_ref().map(|o| o.release_pipes).unwrap_or(0),
     })

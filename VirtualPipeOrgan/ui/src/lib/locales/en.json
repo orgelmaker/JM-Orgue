@@ -480,6 +480,8 @@
     "archiving": "MIDI archive",
     "archiving_title": "The automatic MIDI archive is capturing your playing; the file is saved after the silence period.",
     "peak": "peak",
+    "licht": "light interpolation",
+    "licht_title": "The computer was close to its limit: the app is temporarily using linear instead of cubic interpolation (slightly less fine, more than twice as light per voice) to prevent stuttering. Draw fewer stops, choose more mixing cores or a larger buffer to avoid this.",
     "overload_title": "An audio callback exceeded its deadline: increase the buffer size (Settings → Audio Output) or lower the polyphony."
   },
   "actions": {

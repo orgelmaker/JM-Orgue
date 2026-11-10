@@ -480,6 +480,8 @@
     "archiving": "Archive MIDI",
     "archiving_title": "L'archive MIDI automatique enregistre votre jeu ; le fichier est sauvegardé après la période de silence.",
     "peak": "pointe",
+    "licht": "interpolation légère",
+    "licht_title": "L'ordinateur était proche de sa limite : l'application utilise temporairement une interpolation linéaire au lieu de cubique (un peu moins fine, plus de deux fois plus légère par voix) pour éviter les saccades. Tirez moins de jeux, choisissez plus de cœurs de mixage ou un tampon plus grand pour l'éviter.",
     "overload_title": "Un appel audio a dépassé son échéance : augmentez la taille du tampon (Réglages → Sortie audio) ou réduisez la polyphonie."
   },
   "actions": {
