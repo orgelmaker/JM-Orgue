@@ -6,6 +6,18 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### Hauptwerk: crossfade-duur van de release uit de definitie (D3)
+- De importer leest `ReleaseCrossfadeLengthMs` (1 tot 3000 ms) per release en
+  geeft die door aan de motor, voor de speellaag en voor de tremulantlaag. De
+  motor kon dat al (voor GrandOrgue-sets) en gebruikt de duur van de maker dan
+  in plaats van de automatische duur per noot. Op twee van de geteste sets gaat
+  het om 3000 tot 5000 release-keys. Alleen voor sets waarvan de definitie het
+  veld met naam geeft; bij gecomprimeerde definities blijft alles zoals het was.
+- Instelbaar: standaard aan; `JM_ORGUE_OVERGANGEN=uit` of de test-API
+  `POST /overgangen_toepassen` zet het uit (geldt bij het volgende laden).
+- Niet gedaan: de loop-crossfade van de maker (de motor gebruikt al de langst
+  mogelijke blend), de tremulant-golfvormen per pijp en het windstelsel.
+
 ### Geheugenplafond volgt het vrije geheugen, op Windows, Linux en macOS (F1)
 - Nieuwe module `geheugen.rs`: het totale en het beschikbare geheugen per
   platform (Windows `GlobalMemoryStatusEx`, Linux `/proc/meminfo`, macOS

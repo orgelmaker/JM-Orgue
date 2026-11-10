@@ -650,6 +650,14 @@ fn route_test_only(
             vpo_sampler::set_niveaus_toepassen(on);
             Ok(json!({"niveaus_toepassen": vpo_sampler::niveaus_toepassen()}))
         }
+        // Overgangslengtes van de set (D3), body {"on": true|false}; geldt bij
+        // de volgende /load_organ. Niet persistent (alleen voor proeven).
+        (tiny_http::Method::Post, "/overgangen_toepassen") => {
+            let v: serde_json::Value = serde_json::from_str(body).unwrap_or_default();
+            let on = v.get("on").and_then(|x| x.as_bool()).unwrap_or(true);
+            vpo_sampler::set_overgangen_toepassen(on);
+            Ok(json!({"overgangen_toepassen": vpo_sampler::overgangen_toepassen()}))
+        }
         // Plafond volgt het vrije geheugen (F1), body {"on": true|false};
         // rekent meteen opnieuw. Niet persistent (alleen voor proeven).
         (tiny_http::Method::Post, "/geheugen_volgt_vrij") => {

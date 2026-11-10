@@ -51,6 +51,27 @@ static NIVEAUS_TOEPASSEN: std::sync::atomic::AtomicBool = std::sync::atomic::Ato
 pub fn set_niveaus_toepassen(aan: bool) { NIVEAUS_TOEPASSEN.store(aan, std::sync::atomic::Ordering::Relaxed); }
 pub fn niveaus_toepassen() -> bool { NIVEAUS_TOEPASSEN.load(std::sync::atomic::Ordering::Relaxed) }
 
+/// Overgangslengtes van de maker (D3): de crossfade-duur tussen speelnoot en
+/// release (`ReleaseCrossfadeLengthMs`) toepassen in plaats van de automatische
+/// duur per noot. Proces-breed en standaard aan; de omgevingsvariabele
+/// `JM_ORGUE_OVERGANGEN=uit` zet hem uit. Geldt voor het volgende (her)laden.
+static OVERGANGEN_TOEPASSEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+pub fn set_overgangen_toepassen(aan: bool) { OVERGANGEN_TOEPASSEN.store(aan, std::sync::atomic::Ordering::Relaxed); }
+pub fn overgangen_toepassen() -> bool {
+    OVERGANGEN_TOEPASSEN.load(std::sync::atomic::Ordering::Relaxed)
+        && !std::env::var("JM_ORGUE_OVERGANGEN").map(|v| v.trim().eq_ignore_ascii_case("uit")).unwrap_or(false)
+}
+
+/// Geldige crossfade-duur uit de definitie (ms): 1 t/m 3000, zoals GrandOrgue
+/// het bereik van `ReleaseCrossfadeLength` noemt. 0 en alles daarbuiten telt
+/// als "niet opgegeven" (de automatische duur per noot blijft dan gelden).
+fn geldige_release_crossfade_ms(waarde: Option<f32>) -> Option<u32> {
+    let ms = waarde?;
+    if !ms.is_finite() { return None; }
+    let afgerond = ms.round();
+    if (1.0..=3000.0).contains(&afgerond) { Some(afgerond as u32) } else { None }
+}
+
 /// Grens voor een niveaucorrectie uit de definitie (dB). Echte sets liggen
 /// tussen -20 en +5; een waarde daarbuiten is een typefout in de definitie
 /// en mag de klank niet wegslaan of versterken tot clippen.
@@ -145,7 +166,8 @@ fn load_hauptwerk_intern(
 
     // De schakelaar één keer lezen: dezelfde stand voor de bouw en het verslag.
     let niveaus = niveaus_toepassen();
-    match build_definition_met(&xml, root.clone(), &pkg_dirs, niveaus) {
+    let overgangen = overgangen_toepassen();
+    match build_definition_met(&xml, root.clone(), &pkg_dirs, niveaus, overgangen) {
         Ok(def) => {
             let mut v = ImportReport::uit_definitie(
                 "hauptwerk", &versie, &bron, &def.organ.church_name,
@@ -444,7 +466,7 @@ fn build_definition(
     root: PathBuf,
     pkg_dirs: &HashMap<u32, PathBuf>,
 ) -> Result<OrganDefinition, OdfError> {
-    build_definition_met(xml, root, pkg_dirs, niveaus_toepassen())
+    build_definition_met(xml, root, pkg_dirs, niveaus_toepassen(), true)
 }
 
 /// Als [`build_definition`], met de stand van "niveaus van de set toepassen"
@@ -454,6 +476,7 @@ fn build_definition_met(
     root: PathBuf,
     pkg_dirs: &HashMap<u32, PathBuf>,
     niveaus: bool,
+    overgangen: bool,
 ) -> Result<OrganDefinition, OdfError> {
     // --- Parse the object lists we need ---
     // Een "compacted" ODF schrijft elk object als <o> met letter-aliassen; de
@@ -614,13 +637,20 @@ fn build_definition_met(
     // waarvoor deze release geldt (SJDL: R1=~360ms, R2=~575ms, R0=99999);
     // 99999 is Hauptwerks "geen limiet" → None (de default/langste release,
     // zelfde conventie als GrandOrgue MaxKeyPressTime=-1).
-    let mut releases_by_layer: HashMap<u32, Vec<(u32, Option<i32>)>> = HashMap::new();
+    // Het derde getal is de crossfade-duur van de maker (D3,
+    // `ReleaseCrossfadeLengthMs`), alleen als `overgangen` aan staat.
+    let mut releases_by_layer: HashMap<u32, Vec<(u32, Option<i32>, Option<u32>)>> = HashMap::new();
     for r in &release_samples {
         if let (Some(lid), Some(sid)) = (r.get_u32("LayerID"), r.get_u32("SampleID")) {
             let max_ms = r
                 .get_i32("ReleaseSelCriteria_LatestKeyReleaseTimeMs")
                 .filter(|v| (0..99999).contains(v));
-            releases_by_layer.entry(lid).or_default().push((sid, max_ms));
+            let xfade = if overgangen {
+                geldige_release_crossfade_ms(r.get_f32("ReleaseCrossfadeLengthMs"))
+            } else {
+                None
+            };
+            releases_by_layer.entry(lid).or_default().push((sid, max_ms, xfade));
         }
     }
     // sample_id -> (installation_package_id, relative filename)
@@ -729,7 +759,7 @@ fn build_definition_met(
         // dezelfde wav); zo'n "release" slaan we over — de engine valt dan
         // terug op zijn eigen release-envelope.
         if let Some(rels) = releases_by_layer.get(&main_layer) {
-            for (sid, max_ms) in rels {
+            for (sid, max_ms, xfade) in rels {
                 if let Some(rpath) = resolve_sample(*sid) {
                     if rpath != path {
                         extra.releases.push(ReleaseDef {
@@ -740,7 +770,7 @@ fn build_definition_met(
                             // laten we aan de WAV-markers over.
                             cue_point: None,
                             release_end: None,
-                            crossfade_ms: None,
+                            crossfade_ms: *xfade,
                         });
                     }
                 }
@@ -758,7 +788,7 @@ fn build_definition_met(
             if let Some(&trem_sid) = sample_of_layer.get(trem_layer) {
               if let Some(tp) = resolve_sample(trem_sid) {
                 if let Some(rels) = releases_by_layer.get(trem_layer) {
-                    for (sid, max_ms) in rels {
+                    for (sid, max_ms, xfade) in rels {
                         if let Some(rpath) = resolve_sample(*sid) {
                             // Zelfde filter als de hoofdlaag: een "release" die
                             // naar het attack-bestand zelf wijst is er geen.
@@ -768,7 +798,7 @@ fn build_definition_met(
                                     max_key_press_time_ms: *max_ms,
                                     cue_point: None,
                                     release_end: None,
-                                    crossfade_ms: None,
+                                    crossfade_ms: *xfade,
                                 });
                             }
                         }
@@ -2962,7 +2992,7 @@ mod tests {
     fn niveaus_van_de_set_komen_in_de_definitie() {
         let mut pkg = HashMap::new();
         pkg.insert(1u32, PathBuf::from("/pkg"));
-        let bouw = |xml: &str, aan: bool| build_definition_met(xml, PathBuf::from("/root"), &pkg, aan).expect("build");
+        let bouw = |xml: &str, aan: bool| build_definition_met(xml, PathBuf::from("/root"), &pkg, aan, true).expect("build");
 
         let def = bouw(&mini_xml_met_niveaus(), true);
         assert_eq!(def.organ.gain_db, -20.0);
@@ -2985,6 +3015,71 @@ mod tests {
         assert_eq!(gain_van_pijp(&kaal, "Bourdon 8", 0), None);
     }
 
+    /// D3: de crossfade-duur van de maker (`ReleaseCrossfadeLengthMs`) komt in
+    /// de release-definities, voor de hoofdlaag en voor de tremulantlaag.
+    #[test]
+    fn release_crossfade_van_de_maker_komt_in_de_definitie() {
+        let xml = mini_xml()
+            // R0 van Bourdon (hoofdlaag, 99999 = default)
+            .replace(
+                "<UniqueID>10</UniqueID><LayerID>111</LayerID><SampleID>5</SampleID>",
+                "<UniqueID>10</UniqueID><LayerID>111</LayerID><SampleID>5</SampleID><ReleaseCrossfadeLengthMs>120</ReleaseCrossfadeLengthMs>",
+            )
+            // R1 van Bourdon (750 ms), met een komma-getal
+            .replace(
+                "<UniqueID>11</UniqueID><LayerID>111</LayerID><SampleID>6</SampleID>",
+                "<UniqueID>11</UniqueID><LayerID>111</LayerID><SampleID>6</SampleID><ReleaseCrossfadeLengthMs>45.5</ReleaseCrossfadeLengthMs>",
+            )
+            // Release van de tremulantlaag van Bourdon (laag 511)
+            .replace(
+                "<UniqueID>13</UniqueID><LayerID>511</LayerID><SampleID>9</SampleID>",
+                "<UniqueID>13</UniqueID><LayerID>511</LayerID><SampleID>9</SampleID><ReleaseCrossfadeLengthMs>80</ReleaseCrossfadeLengthMs>",
+            );
+        assert!(xml.contains("<ReleaseCrossfadeLengthMs>120<"), "de proef-XML moet de velden bevatten");
+        let mut pkg = HashMap::new();
+        pkg.insert(1u32, PathBuf::from("/pkg"));
+        let bouw = |x: &str, overgangen: bool| {
+            build_definition_met(x, PathBuf::from("/root"), &pkg, true, overgangen).expect("build")
+        };
+        let bourdon_extra = |def: &OrganDefinition| {
+            let b = def.stops.iter().find(|s| s.name == "Bourdon 8").unwrap();
+            let PipeDef::Sample { extra, .. } = &b.pipes[0] else { panic!("sample") };
+            extra.clone()
+        };
+
+        let aan = bourdon_extra(&bouw(&xml, true));
+        // R1 (750 ms) staat vóór R0 (default).
+        assert_eq!(aan.releases[0].max_key_press_time_ms, Some(750));
+        assert_eq!(aan.releases[0].crossfade_ms, Some(46), "45,5 rondt af naar 46");
+        assert_eq!(aan.releases[1].crossfade_ms, Some(120));
+        assert_eq!(aan.tremulant_releases.len(), 1);
+        assert_eq!(aan.tremulant_releases[0].crossfade_ms, Some(80));
+
+        // Negatieve controle: schakelaar uit = overal de automatische duur.
+        let uit = bourdon_extra(&bouw(&xml, false));
+        assert!(uit.releases.iter().all(|r| r.crossfade_ms.is_none()));
+        assert!(uit.tremulant_releases.iter().all(|r| r.crossfade_ms.is_none()));
+
+        // Zonder de velden verandert er niets (bit-identiek aan vóór D3).
+        let kaal = bourdon_extra(&bouw(&mini_xml(), true));
+        assert!(kaal.releases.iter().all(|r| r.crossfade_ms.is_none()));
+        assert!(kaal.tremulant_releases.iter().all(|r| r.crossfade_ms.is_none()));
+    }
+
+    #[test]
+    fn onzinnige_release_crossfade_wordt_genegeerd() {
+        assert_eq!(geldige_release_crossfade_ms(None), None);
+        assert_eq!(geldige_release_crossfade_ms(Some(0.0)), None, "0 = niet opgegeven");
+        assert_eq!(geldige_release_crossfade_ms(Some(0.4)), None, "rondt af naar 0");
+        assert_eq!(geldige_release_crossfade_ms(Some(-20.0)), None);
+        assert_eq!(geldige_release_crossfade_ms(Some(3000.0)), Some(3000));
+        assert_eq!(geldige_release_crossfade_ms(Some(3001.0)), None);
+        assert_eq!(geldige_release_crossfade_ms(Some(f32::NAN)), None);
+        assert_eq!(geldige_release_crossfade_ms(Some(f32::INFINITY)), None);
+        assert_eq!(geldige_release_crossfade_ms(Some(999.0)), Some(999), "echte waarde uit een set");
+        assert_eq!(geldige_release_crossfade_ms(Some(26.0)), Some(26));
+    }
+
     /// Een waarde buiten alle redelijkheid (typefout in de definitie) wordt
     /// begrensd of genegeerd; ze mag de klank niet wegslaan.
     #[test]
@@ -2997,7 +3092,7 @@ mod tests {
                 &format!("<Identification_Name>Testorgel</Identification_Name><AudioOut_AmplitudeLevelAdjustDecibels>{waarde}</AudioOut_AmplitudeLevelAdjustDecibels>"),
             )
         };
-        let gain = |w: &str| build_definition_met(&met(w), PathBuf::from("/root"), &pkg, true).expect("build").organ.gain_db;
+        let gain = |w: &str| build_definition_met(&met(w), PathBuf::from("/root"), &pkg, true, true).expect("build").organ.gain_db;
         assert_eq!(gain("1e+3"), 40.0);
         assert_eq!(gain("-1e+3"), -40.0);
         assert_eq!(gain("NaN"), 0.0);
@@ -3013,7 +3108,7 @@ mod tests {
         pkg.insert(1u32, PathBuf::from("/pkg"));
         let xml = mini_xml_met_niveaus();
         let verslag = |aan: bool| {
-            let def = build_definition_met(&xml, PathBuf::from("/root"), &pkg, aan).expect("build");
+            let def = build_definition_met(&xml, PathBuf::from("/root"), &pkg, aan, true).expect("build");
             let mut v = crate::import_report::ImportReport::default();
             voeg_niveau_rapport_toe(&mut v, &def, &xml, aan);
             v.meldingen.iter().filter(|m| m.object == "niveau").map(|m| m.tekst.clone()).collect::<Vec<_>>()
@@ -3026,7 +3121,7 @@ mod tests {
         assert_eq!(uit.len(), 1, "{uit:?}");
         assert!(uit[0].contains("-20.0 dB") && uit[0].contains("niet toegepast"), "{uit:?}");
         // Een set zonder niveaus levert geen meldingen op.
-        let def = build_definition_met(&mini_xml(), PathBuf::from("/root"), &pkg, true).expect("build");
+        let def = build_definition_met(&mini_xml(), PathBuf::from("/root"), &pkg, true, true).expect("build");
         let mut v = crate::import_report::ImportReport::default();
         voeg_niveau_rapport_toe(&mut v, &def, &mini_xml(), true);
         assert!(v.meldingen.is_empty(), "{:?}", v.meldingen);
