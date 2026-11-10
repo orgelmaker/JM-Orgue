@@ -6,6 +6,29 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### Hulpmiddel: vaste referentieproef (`testscripts/referentieproef.py`, geen wijziging in de app)
+- Eén herhaalbare proef in plaats van losse noten: een vast MIDI-bestand
+  (`testscripts/testdata/referentieproef.mid`, zes aangehouden noten van MIDI 36
+  tot 96 en drie staccatonoten) wordt via de test-API per register afgespeeld
+  en opgenomen; `vergelijk` zet twee opnamen of mappen naast elkaar per noot en
+  per register: niveau, balans tussen de noten, toonhoogte in cent, aanzet en
+  uitsterven. Bouwt op `ab_vergelijk.py` en `docs/AB_KLANKPROTOCOL.md` (sectie 7
+  beschrijft de procedure, ook voor een referentieopname van GrandOrgue of
+  Hauptwerk).
+- Bedoeld als vangnet voor C1, C2 en C4: dezelfde set voor en na een wijziging.
+  Gemeten ruisvloer van de methode: twee identieke opnamen geven niveau
+  +0,0 dB, toonhoogte 0,0 ct, aanzet en uitsterven ×1,00 tot ×1,05. Dezelfde set
+  met de niveaus van de maker aan tegen uit geeft precies +20,0 dB op elke noot
+  en verder niets.
+- De herhaalbaarheidsproef bracht drie meetfouten aan het licht die zijn
+  hersteld: de grondtoon is de laagste sterke deeltoon (de sterkste piek
+  wisselde in de bas, 6 ct), uitsterven wordt vanaf −3 dB gemeten (de uitlijning
+  hing van het niveau af, ×1,24 schijnverschil), en op meerdere diepten omdat een
+  zachte opname −40 dB onder de ruisvloer laat. `referentieproef.py zelftest`
+  controleert het hulpmiddel op synthetische opnamen met bekende waarden.
+- Nog niet gedaan: een opname uit een referentiespeler (GrandOrgue staat niet
+  op de ontwikkelcomputer; het is een handmatige sessie per register).
+
 ### Tests: hobbelmeter voor het loslaten (geen wijziging in de klank)
 - Nieuwe testmodule `src-tauri/src/hobbelmeter_tests.rs`: een gesynthetiseerde
   pijptoon gaat over honderden verschillende loslaatmomenten (120 per noot, zes

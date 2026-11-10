@@ -20,6 +20,8 @@ ontwikkelsessies van 0.7.36–0.7.38 en documenteren hoe de functies zijn geveri
 | `test_jmrec_import.py` | Map-import met `.organ` (JM-Rec) vs. mapscan, bibliotheeknaam "Kerk - Bouwer - Plaats" en de gevonden orgelafbeelding. |
 | `maak_go_testtrem.py [map]` | Maakt `TestTrem.organ` + `TestTremWc.organ` (GrandOrgue-golfvormtremulant: trem-attack en trem-release met een eigen toonhoogte) in `%TEMP%\jm-orgue-testodf`. |
 | `test_tremulant_samples.py` | Tremulant-OPNAMEN: registervlaggen, `POST /tremulant`, attack en release per stand (FFT-piek), crossfade tijdens het klinken, regressie zonder trem-samples. |
+| `referentieproef.py` | **Vaste referentieproef (C3):** `midi` (vast MIDI-bestand `testdata/referentieproef.mid`), `opnemen` (laadt een orgel, trekt per register alleen dat register, speelt het bestand af en bewaart opname + `manifest.json`), `analyseer`, `vergelijk` (twee opnamen of mappen: JM-Orgue voor/na een wijziging, of tegen een referentie) en `zelftest` (controleert het hulpmiddel op synthetische opnamen met bekende waarden). Meet per noot toonhoogte (cent), niveau, aanzet- en uitsterftijd; richtwaarden uit `docs/AB_KLANKPROTOCOL.md`. Zie sectie 7 daarvan. |
+| `ab_vergelijk.py` | De handmatige variant voor één noot en twee WAV's (`docs/AB_KLANKPROTOCOL.md`). |
 | `check_i18n_keys.py` / `i18n_merge_check.py` | Sleutelsets nl/en/fr/de gelijk; dekking van `$t()`-sleutels in de code. |
 | `capture_window.ps1` / `click.ps1` | Screenshot (PrintWindow) en klik/scroll in het app-venster op venster-coördinaten. |
 
