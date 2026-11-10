@@ -258,6 +258,8 @@
     "polyphony_load": "Carico del thread audio: {load}% (picco {peak}%)",
     "stereo_samples": "Riproduci in stereo i campioni stereo",
     "stereo_samples_hint": "Attivo: le riprese stereo mantengono la loro immagine spaziale (più memoria). Disattivo: mix in mono come prima.",
+    "niveaus_toepassen": "Applica i livelli del set",
+    "niveaus_toepassen_hint": "Attivo: viene applicato il livello impostato dall'autore del set (per l'intero organo e per canna), così i set suonano più o meno alla stessa intensità. Disattivo: tutto a 0 dB come prima.",
     "preload_ms": "Buffer iniziale per registrazione",
     "preload_ms_hint": "Quanta parte di ogni registrazione di canna resta in memoria in anticipo. Più breve = molta meno memoria e caricamento più rapido; il resto viene caricato mentre suoni. Se negli accordi grandi senti una breve ripetizione dell'attacco, scegli un buffer più lungo.",
     "reload_hint": "Diventa attivo dopo aver ricaricato l'organo.",

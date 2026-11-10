@@ -258,6 +258,8 @@
     "polyphony_load": "Belasting audio-thread: {load}% (piek {peak}%)",
     "stereo_samples": "Stereo-samples in stereo afspelen",
     "stereo_samples_hint": "Aan: stereo-opnamen behouden hun ruimtebeeld (meer geheugen). Uit: mengen naar mono zoals vroeger.",
+    "niveaus_toepassen": "Niveaus van de set toepassen",
+    "niveaus_toepassen_hint": "Aan: het volumeniveau dat de maker van de set heeft ingesteld (voor het hele orgel en per pijp) wordt toegepast, zodat sets ongeveer even hard klinken. Uit: alles op 0 dB zoals vroeger.",
     "preload_ms": "Startbuffer per opname",
     "preload_ms_hint": "Hoeveel van elke pijpopname vooraf in het geheugen staat. Korter = veel minder geheugen en sneller laden; de rest wordt tijdens het spelen bijgeladen. Hoor je bij grote akkoorden een korte herhaling van de aanzet, kies dan een langere buffer.",
     "reload_hint": "Wordt actief na het opnieuw laden van het orgel.",

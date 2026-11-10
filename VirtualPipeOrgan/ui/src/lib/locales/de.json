@@ -258,6 +258,8 @@
     "polyphony_load": "Auslastung Audio-Thread: {load} % (Spitze {peak} %)",
     "stereo_samples": "Stereo-Samples in Stereo wiedergeben",
     "stereo_samples_hint": "An: Stereo-Aufnahmen behalten ihr Raumbild (mehr Speicher). Aus: Mono-Mischung wie bisher.",
+    "niveaus_toepassen": "Pegel des Sets übernehmen",
+    "niveaus_toepassen_hint": "An: der vom Ersteller des Sets eingestellte Pegel (für die ganze Orgel und pro Pfeife) wird angewendet, damit Sets etwa gleich laut klingen. Aus: alles bei 0 dB wie bisher.",
     "preload_ms": "Startpuffer je Aufnahme",
     "preload_ms_hint": "Wie viel jeder Pfeifenaufnahme vorab im Speicher liegt. Kürzer = deutlich weniger Speicher und schnelleres Laden; der Rest wird beim Spielen nachgeladen. Hören Sie bei großen Akkorden eine kurze Wiederholung des Ansatzes, wählen Sie einen längeren Puffer.",
     "reload_hint": "Wirkt nach dem Neuladen der Orgel.",

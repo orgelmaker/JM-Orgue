@@ -258,6 +258,8 @@
     "polyphony_load": "Obciążenie wątku audio: {load}% (szczyt {peak}%)",
     "stereo_samples": "Odtwarzaj sample stereo w stereo",
     "stereo_samples_hint": "Włączone: nagrania stereo zachowują obraz przestrzenny (więcej pamięci). Wyłączone: miksowanie do mono jak dawniej.",
+    "niveaus_toepassen": "Stosuj poziomy zestawu",
+    "niveaus_toepassen_hint": "Włączone: stosowany jest poziom ustawiony przez autora zestawu (dla całych organów i dla każdej piszczałki), dzięki czemu zestawy brzmią mniej więcej tak samo głośno. Wyłączone: wszystko na 0 dB jak dawniej.",
     "preload_ms": "Bufor startowy na nagranie",
     "preload_ms_hint": "Ile każdego nagrania piszczałki jest trzymane w pamięci z góry. Krócej = znacznie mniej pamięci i szybsze ładowanie; reszta dogrywa się podczas gry. Jeśli przy dużych akordach słychać krótkie powtórzenie ataku, wybierz dłuższy bufor.",
     "reload_hint": "Zadziała po ponownym wczytaniu organów.",

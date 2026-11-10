@@ -356,6 +356,11 @@ pub struct AudioPrefs {
     /// (halveert RAM bij stereo-sets). Wijziging vergt herladen van het orgel.
     #[serde(default)]
     pub stereo_samples: Option<bool>,
+    /// Niveaus van de set (orgel en pijplaag, uit de definitie van de maker)
+    /// toepassen; None = aan. Uit = alles op 0 dB zoals tot 0.9.50. Wijziging
+    /// vergt herladen van het orgel.
+    #[serde(default)]
+    pub niveaus_toepassen: Option<bool>,
     /// Afstandsbediening in het netwerk (0.7.38): aan/uit; None = uit.
     #[serde(default)]
     pub remote_enabled: Option<bool>,
@@ -1932,6 +1937,7 @@ impl AppState {
         tracing::info!("Sample-cache: plafond {} MB (fysiek geheugen {} MB)",
             cap / 1_000_000, ram.map(|r| r / 1_000_000).unwrap_or(0));
         vpo_sampler::set_stereo_loading(audio_prefs.stereo_samples.unwrap_or(true));
+        vpo_sampler::set_niveaus_toepassen(audio_prefs.niveaus_toepassen.unwrap_or(true));
         crate::audio::set_preload_ms(audio_prefs.preload_ms.unwrap_or(crate::audio::PRELOAD_MS_DEFAULT));
         let saved_cfg = AudioOutputConfig {
             host_name: audio_prefs.host.clone(),

@@ -370,6 +370,7 @@ fn main() {
             commands::set_continuous_keyboard,
             commands::get_continuous_keyboard,
             commands::set_stereo_samples,
+            commands::set_niveaus_toepassen,
             commands::get_preload_ms,
             commands::set_preload_ms,
             // Gestapelde ranks en microfoonperspectieven (0.7.38)

@@ -580,6 +580,14 @@ fn route_test_only(
             vpo_sampler::set_stereo_loading(on);
             Ok(json!({"stereo_samples": vpo_sampler::stereo_loading()}))
         }
+        // Niveaus van de set (E1), body {"on": true|false}; geldt bij de
+        // volgende /load_organ. Niet persistent (alleen voor proeven).
+        (tiny_http::Method::Post, "/niveaus_toepassen") => {
+            let v: serde_json::Value = serde_json::from_str(body).unwrap_or_default();
+            let on = v.get("on").and_then(|x| x.as_bool()).unwrap_or(true);
+            vpo_sampler::set_niveaus_toepassen(on);
+            Ok(json!({"niveaus_toepassen": vpo_sampler::niveaus_toepassen()}))
+        }
         // Startbuffer per opname (0.8.92), body {"ms": 200}; geldt bij de
         // volgende /load_organ. Niet persistent (alleen voor proeven).
         // Zwelstand zetten (0.8.92, alleen voor proeven): body {"index": 0, "gain": 0.0}.
@@ -847,6 +855,7 @@ fn handle_status(state: &AppState) -> Value {
         "rt_backlog_peak": crate::state::rt_backlog_piek(),
         "rt_noteon_weggelaten": crate::state::rt_noteon_weggelaten(),
         "stereo_samples": vpo_sampler::stereo_loading(),
+        "niveaus_toepassen": vpo_sampler::niveaus_toepassen(),
         // Achtergrondlader (0.8.92): startbuffer, tekorten en latenties.
         "loader": serde_json::to_value(crate::audio::loader_stats()).unwrap_or(serde_json::Value::Null),
         "load_stappen_ms": load_stappen_json(),

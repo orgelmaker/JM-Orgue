@@ -329,6 +329,8 @@ pub struct StatusDto {
     pub rt_drops: u64,
     /// Stereo-samples als twee kanalen laden (instelling).
     pub stereo_samples: bool,
+    /// Niveaus van de set (orgel en pijplaag) toepassen bij het laden (instelling).
+    pub niveaus_toepassen: bool,
     /// Automatisch MIDI-archief legt op dit moment een take vast.
     pub midi_archiving: bool,
     /// Uitgangscorrectie (0.7.78): aan voor de actieve profielsoort, en de
@@ -526,6 +528,19 @@ pub fn set_stereo_samples(state: State<AppState>, on: bool) -> Result<(), String
     prefs.stereo_samples = Some(on);
     crate::state::save_audio_prefs(&state.app_data_dir, &prefs);
     info!("Stereo-samples laden: {}", if on { "aan" } else { "uit (mono-mix)" });
+    Ok(())
+}
+
+/// Niveaus van de set toepassen (aan) of alles op 0 dB laten zoals tot 0.9.50
+/// (uit). Het niveau van het hele orgel en dat per pijplaag komen uit de
+/// definitie van de maker; geldt voor het volgende (her)laden van een orgel.
+#[tauri::command]
+pub fn set_niveaus_toepassen(state: State<AppState>, on: bool) -> Result<(), String> {
+    vpo_sampler::set_niveaus_toepassen(on);
+    let mut prefs = crate::state::load_audio_prefs(&state.app_data_dir);
+    prefs.niveaus_toepassen = Some(on);
+    crate::state::save_audio_prefs(&state.app_data_dir, &prefs);
+    info!("Niveaus van de set toepassen: {}", if on { "aan" } else { "uit" });
     Ok(())
 }
 
@@ -8121,6 +8136,7 @@ pub fn get_status(state: State<AppState>) -> Result<StatusDto, String> {
         render_overloads: crate::audio::render_overload_count(),
         rt_drops: crate::state::rt_drop_count(),
         stereo_samples: vpo_sampler::stereo_loading(),
+        niveaus_toepassen: vpo_sampler::niveaus_toepassen(),
         midi_archiving: state.midi_archive.archiving.load(std::sync::atomic::Ordering::Relaxed),
         output_eq_enabled: uit_eq_badge.0,
         output_eq_name: uit_eq_badge.1,

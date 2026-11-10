@@ -6,6 +6,26 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### Hauptwerk-import: de niveaus van de set worden toegepast
+- De importer las het volumeniveau van de maker niet en liet elke set op 0 dB
+  spelen. Nu wordt `AudioOut_AmplitudeLevelAdjustDecibels` (het niveau van het
+  hele orgel; ook in gecomprimeerde definities leesbaar) en, waar de definitie
+  leesbaar is, `AmpLvl_LevelAdjustDecibels` per pijplaag toegepast. Makers
+  stellen daarmee in dat sets ongeveer even hard klinken: de waarden in de
+  geteste sets lopen van +5 tot −20 dB, dus tussen sets zat tot 25 dB verschil.
+  Een tremulantlaag krijgt het niveau van de droge laag van dezelfde pijp.
+- In een gecomprimeerde definitie is het niveau per pijplaag een letter die per
+  set anders is en niet betrouwbaar aan dit veld te koppelen valt; daar geldt
+  alleen het niveau van het hele orgel. Het importverslag zegt dat.
+- Instelbaar: Instellingen → "Niveaus van de set toepassen" (standaard aan,
+  werkt na het opnieuw laden van het orgel). Uit = alles op 0 dB zoals tot en met
+  0.9.50. Een waarde buiten ±40 dB wordt begrensd, een onleesbare genegeerd.
+  Het importverslag meldt wat er is toegepast, of wat niet is toegepast als de
+  instelling uitstaat. CODM-definities hebben dit veld niet en blijven gelijk.
+- Wie het hoofdvolume per orgel had bijgesteld om een te harde of te zachte set
+  te compenseren, hoort dat orgel nu anders: de gewenste stand kan opnieuw
+  ingesteld worden.
+
 ### Importdiagnose: ongelezen velden en controlelijsten (achter een schakelaar)
 - Het importverslag van een Hauptwerk-definitie kan nu laten zien wat de
   importer **niet** las: per `Tabel.Veld` hoeveel rijen een waarde hebben

@@ -258,6 +258,8 @@
     "polyphony_load": "Carga del hilo de audio: {load}% (pico {peak}%)",
     "stereo_samples": "Reproducir en estéreo las muestras estéreo",
     "stereo_samples_hint": "Activado: las grabaciones estéreo conservan su imagen espacial (más memoria). Desactivado: se mezclan a mono como antes.",
+    "niveaus_toepassen": "Aplicar los niveles del set",
+    "niveaus_toepassen_hint": "Activado: se aplica el nivel que el autor del set ajustó (para todo el órgano y por tubo), de modo que los sets suenen con un volumen parecido. Desactivado: todo a 0 dB como antes.",
     "preload_ms": "Búfer inicial por grabación",
     "preload_ms_hint": "Cuánto de cada grabación de tubo se mantiene en memoria de antemano. Más corto = mucha menos memoria y carga más rápida; el resto se carga mientras toca. Si en acordes grandes oye una breve repetición del ataque, elija un búfer más largo.",
     "reload_hint": "Se aplica al volver a cargar el órgano.",

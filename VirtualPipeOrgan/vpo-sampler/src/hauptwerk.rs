@@ -42,6 +42,25 @@ use crate::grandorgue::{
 };
 use crate::hauptwerk_compact::GecomprimeerdeOdf;
 
+/// Niveaus van de set (E1): het niveau van het hele orgel
+/// (`AudioOut_AmplitudeLevelAdjustDecibels`) en dat per pijplaag
+/// (`AmpLvl_LevelAdjustDecibels`) toepassen zoals de maker ze heeft ingesteld.
+/// Proces-breed, gezet vanuit de instelling "Niveaus van de set toepassen";
+/// standaard aan. Geldt voor het volgende (her)laden van een orgel.
+static NIVEAUS_TOEPASSEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+pub fn set_niveaus_toepassen(aan: bool) { NIVEAUS_TOEPASSEN.store(aan, std::sync::atomic::Ordering::Relaxed); }
+pub fn niveaus_toepassen() -> bool { NIVEAUS_TOEPASSEN.load(std::sync::atomic::Ordering::Relaxed) }
+
+/// Grens voor een niveaucorrectie uit de definitie (dB). Echte sets liggen
+/// tussen -20 en +5; een waarde daarbuiten is een typefout in de definitie
+/// en mag de klank niet wegslaan of versterken tot clippen.
+const MAX_NIVEAU_DB: f32 = 40.0;
+
+/// Een dB-waarde uit de definitie: eindig, anders geen correctie, en begrensd.
+fn niveau_db(v: Option<f32>) -> Option<f32> {
+    v.filter(|d| d.is_finite()).map(|d| d.clamp(-MAX_NIVEAU_DB, MAX_NIVEAU_DB))
+}
+
 /// Load a Hauptwerk organ definition and translate it to an [`OrganDefinition`].
 pub fn load_hauptwerk(odf_path: &Path) -> Result<OrganDefinition, OdfError> {
     load_hauptwerk_met_verslag(odf_path, None).0
@@ -124,7 +143,9 @@ fn load_hauptwerk_intern(
     let pkg_dirs = scan_package_dirs(&root);
     let versie = crate::hauptwerk_codm::lees_kop(&xml).map(|k| k.versie).unwrap_or_default();
 
-    match build_definition(&xml, root.clone(), &pkg_dirs) {
+    // De schakelaar één keer lezen: dezelfde stand voor de bouw en het verslag.
+    let niveaus = niveaus_toepassen();
+    match build_definition_met(&xml, root.clone(), &pkg_dirs, niveaus) {
         Ok(def) => {
             let mut v = ImportReport::uit_definitie(
                 "hauptwerk", &versie, &bron, &def.organ.church_name,
@@ -133,6 +154,7 @@ fn load_hauptwerk_intern(
             v.pakketroot = Some(root.to_string_lossy().to_string());
             v.pakketroot_handmatig = pakketroot.is_some();
             voeg_compact_rapport_toe(&mut v, &xml);
+            voeg_niveau_rapport_toe(&mut v, &def, &xml, niveaus);
             (Ok(def), v)
         }
         Err(e) => mislukt(e),
@@ -184,6 +206,81 @@ fn voeg_compact_rapport_toe(v: &mut crate::import_report::ImportReport, xml: &st
                 "gecomprimeerde Hauptwerk-definitie: enkele veelvoorkomende letters konden niet automatisch aan een veldnaam gekoppeld worden ({})",
                 delen.join(", ")
             ),
+        );
+    }
+}
+
+/// Het niveau van het hele orgel zoals de definitie het opgeeft, los van de
+/// schakelaar (alleen voor het verslag als de niveaus uit staan).
+fn orgel_niveau_in_definitie(xml: &str) -> Option<f32> {
+    let general = extract_objects_ruw(xml, "_General");
+    niveau_db(
+        general
+            .first()
+            .and_then(|g| g.get("AudioOut_AmplitudeLevelAdjustDecibels"))
+            .and_then(|v| v.trim().parse().ok()),
+    )
+}
+
+/// Meld in het verslag wat er met de niveaus van de set is gebeurd: het niveau
+/// van het hele orgel, de bijgestelde pijplagen, en wat in een gecomprimeerde
+/// definitie niet te lezen is.
+fn voeg_niveau_rapport_toe(
+    v: &mut crate::import_report::ImportReport,
+    def: &OrganDefinition,
+    xml: &str,
+    niveaus: bool,
+) {
+    use crate::import_report::Ernst;
+    if !niveaus {
+        if let Some(db) = orgel_niveau_in_definitie(xml).filter(|d| d.abs() >= 0.005) {
+            v.melding(
+                Ernst::Info,
+                "niveau",
+                format!(
+                    "de set stelt het niveau van het orgel in op {db:+.1} dB; niet toegepast (de instelling \"Niveaus van de set toepassen\" staat uit)"
+                ),
+            );
+        }
+        return;
+    }
+    if def.organ.gain_db.abs() >= 0.005 {
+        v.melding(
+            Ernst::Info,
+            "niveau",
+            format!(
+                "niveau van het hele orgel uit de definitie toegepast: {:+.1} dB (AudioOut_AmplitudeLevelAdjustDecibels)",
+                def.organ.gain_db
+            ),
+        );
+    }
+    let (mut aantal, mut laagst, mut hoogst) = (0usize, f32::MAX, f32::MIN);
+    for stop in &def.stops {
+        for (_, _, pijpen) in stop.all_layers() {
+            for p in pijpen {
+                if let PipeDef::Sample { extra, .. } = p {
+                    if let Some(db) = extra.gain_db {
+                        aantal += 1;
+                        laagst = laagst.min(db);
+                        hoogst = hoogst.max(db);
+                    }
+                }
+            }
+        }
+    }
+    if aantal > 0 {
+        v.melding(
+            Ernst::Info,
+            "niveau",
+            format!(
+                "niveau per pijplaag uit de definitie toegepast op {aantal} pijpen ({laagst:+.1} tot {hoogst:+.1} dB, AmpLvl_LevelAdjustDecibels)"
+            ),
+        );
+    } else if GecomprimeerdeOdf::detecteer(xml).is_some() {
+        v.melding(
+            Ernst::Info,
+            "niveau",
+            "in een gecomprimeerde definitie zijn de niveaus per pijplaag niet te lezen; alleen het niveau van het hele orgel is toegepast".to_string(),
         );
     }
 }
@@ -346,6 +443,17 @@ fn build_definition(
     root: PathBuf,
     pkg_dirs: &HashMap<u32, PathBuf>,
 ) -> Result<OrganDefinition, OdfError> {
+    build_definition_met(xml, root, pkg_dirs, niveaus_toepassen())
+}
+
+/// Als [`build_definition`], met de stand van "niveaus van de set toepassen"
+/// als parameter (zo hoeven tests de proces-brede schakelaar niet om te zetten).
+fn build_definition_met(
+    xml: &str,
+    root: PathBuf,
+    pkg_dirs: &HashMap<u32, PathBuf>,
+    niveaus: bool,
+) -> Result<OrganDefinition, OdfError> {
     // --- Parse the object lists we need ---
     // Een "compacted" ODF schrijft elk object als <o> met letter-aliassen; de
     // vertaling daarvan naar de lange veldnamen zit in hauptwerk_compact.
@@ -476,6 +584,23 @@ fn build_definition(
         // Stabiele sort: bij gelijk laagnummer blijft documentvolgorde staan.
         v.sort_by_key(|(num, _)| *num);
     }
+    // layer_id -> niveaucorrectie van de maker in dB (AmpLvl_LevelAdjustDecibels).
+    // Alleen waar het veld bij zijn lange naam staat: in een gecomprimeerde
+    // definitie is het een letter die per set anders is en niet betrouwbaar aan
+    // dit veld te koppelen valt; die lagen blijven op 0 dB (zoals voorheen).
+    // Nul telt niet mee: dat is "geen correctie".
+    let mut niveau_van_laag: HashMap<u32, f32> = HashMap::new();
+    if niveaus {
+        for l in &layers {
+            let (Some(lid), Some(db)) = (
+                l.get_u32("LayerID"),
+                niveau_db(l.get_f32("AmpLvl_LevelAdjustDecibels")),
+            ) else { continue };
+            if db.abs() >= 0.005 {
+                niveau_van_laag.insert(lid, db);
+            }
+        }
+    }
     // layer_id -> sample_id (first attack sample)
     let mut sample_of_layer: HashMap<u32, u32> = HashMap::new();
     for a in &attack_samples {
@@ -594,6 +719,10 @@ fn build_definition(
             // alléén bij hertemperen meetelt.
             extra.pitch_correction_cents = pp.tuning_offset_cents;
         }
+        // Niveau van de hoofdlaag (zie `niveau_van_laag`); de engine telt dit
+        // bij het orgel-, kast- en registerniveau op. Een tremulantlaag die een
+        // ander niveau heeft dan de droge laag krijgt hier dat van de droge.
+        extra.gain_db = niveau_van_laag.get(&main_layer).copied();
         // Release-samples van de hoofdlaag. Sommige sets (Ledziny) laten de
         // release naar hetzelfde bestand als de attack wijzen (release zit in
         // dezelfde wav); zo'n "release" slaan we over — de engine valt dan
@@ -1113,8 +1242,17 @@ fn build_definition(
         number_of_tremulants: 0,
         number_of_windchest_groups: divisions.len() as u32,
         amplitude_level: 100.0,
-        // Hauptwerk kent geen orgel-brede Gain; neutraal (0 dB).
-        gain_db: 0.0,
+        // Het niveau van het hele orgel (`AudioOut_AmplitudeLevelAdjustDecibels`
+        // in `_General`, ook in gecomprimeerde definities in lange vorm). De
+        // makers stellen daarmee in dat sets op gelijk volume klinken: de
+        // waarden lopen van +5 tot -20 dB. Tot 0.9.50 stond hier vast 0 dB,
+        // waardoor sets onderling tot 25 dB verschilden. Het veld ontbreekt of
+        // is 0 = neutraal.
+        gain_db: if niveaus {
+            niveau_db(g.and_then(|m| m.get_f32("AudioOut_AmplitudeLevelAdjustDecibels"))).unwrap_or(0.0)
+        } else {
+            0.0
+        },
         pitch_tuning_cents: 0.0,
         pitch_correction_cents: 0.0,
         // AudioEngine_EnablePlayingAtOriginalOrganPitch = N: deze set levert
@@ -2782,6 +2920,115 @@ mod tests {
         assert!(bouw(&met("N")).organ.geen_originele_toonhoogte);
         // = Y → false.
         assert!(!bouw(&met("Y")).organ.geen_originele_toonhoogte);
+    }
+
+    /// Mini-XML met niveaus van de maker: het hele orgel op -20 dB (in
+    /// exponentnotatie, zoals Hauptwerk schrijft), Bourdon-pijp 36 op -2,2 dB,
+    /// een tremulantlaag van die pijp op +3 dB (telt niet mee: het niveau van de
+    /// hoofdlaag geldt), Montre expliciet op 0.
+    fn mini_xml_met_niveaus() -> String {
+        mini_xml()
+            .replace(
+                "<Identification_Name>Testorgel</Identification_Name>",
+                "<Identification_Name>Testorgel</Identification_Name><AudioOut_AmplitudeLevelAdjustDecibels>-2e+1</AudioOut_AmplitudeLevelAdjustDecibels>",
+            )
+            .replace(
+                "<LayerID>111</LayerID><PipeID>11</PipeID><PipeLayerNumber>1</PipeLayerNumber>",
+                "<LayerID>111</LayerID><PipeID>11</PipeID><PipeLayerNumber>1</PipeLayerNumber><AmpLvl_LevelAdjustDecibels>-2.2</AmpLvl_LevelAdjustDecibels>",
+            )
+            .replace(
+                "<LayerID>511</LayerID><PipeID>11</PipeID><PipeLayerNumber>2</PipeLayerNumber>",
+                "<LayerID>511</LayerID><PipeID>11</PipeID><PipeLayerNumber>2</PipeLayerNumber><AmpLvl_LevelAdjustDecibels>3</AmpLvl_LevelAdjustDecibels>",
+            )
+            .replace(
+                "<LayerID>121</LayerID><PipeID>21</PipeID><PipeLayerNumber>1</PipeLayerNumber>",
+                "<LayerID>121</LayerID><PipeID>21</PipeID><PipeLayerNumber>1</PipeLayerNumber><AmpLvl_LevelAdjustDecibels>0</AmpLvl_LevelAdjustDecibels>",
+            )
+    }
+
+    fn gain_van_pijp(def: &OrganDefinition, stop: &str, index: usize) -> Option<f32> {
+        let s = def.stops.iter().find(|s| s.name == stop).unwrap();
+        match &s.pipes[index] {
+            PipeDef::Sample { extra, .. } => extra.gain_db,
+            andere => panic!("verwachtte een sample, kreeg {andere:?}"),
+        }
+    }
+
+    /// E1: het niveau van het hele orgel en dat per pijplaag komen in de
+    /// definitie terecht; zonder die velden of met de schakelaar uit blijft alles
+    /// op 0 dB (de klank van vóór E1).
+    #[test]
+    fn niveaus_van_de_set_komen_in_de_definitie() {
+        let mut pkg = HashMap::new();
+        pkg.insert(1u32, PathBuf::from("/pkg"));
+        let bouw = |xml: &str, aan: bool| build_definition_met(xml, PathBuf::from("/root"), &pkg, aan).expect("build");
+
+        let def = bouw(&mini_xml_met_niveaus(), true);
+        assert_eq!(def.organ.gain_db, -20.0);
+        assert_eq!(gain_van_pijp(&def, "Bourdon 8", 0), Some(-2.2));
+        assert_eq!(gain_van_pijp(&def, "Bourdon 8", 1), None, "pijp zonder niveau blijft op 0");
+        assert_eq!(gain_van_pijp(&def, "Montre 8", 0), None, "expliciet 0 dB is geen correctie");
+        // De tremulantlaag (+3 dB) heeft een eigen niveau dat hier niet telt.
+        let b = def.stops.iter().find(|s| s.name == "Bourdon 8").unwrap();
+        let PipeDef::Sample { extra, .. } = &b.pipes[0] else { panic!("sample") };
+        assert!(extra.tremulant_attack.is_some(), "de proef gaat over een pijp mét tremulantlaag");
+
+        // Negatieve controle: schakelaar uit = niets toegepast.
+        let uit = bouw(&mini_xml_met_niveaus(), false);
+        assert_eq!(uit.organ.gain_db, 0.0);
+        assert_eq!(gain_van_pijp(&uit, "Bourdon 8", 0), None);
+
+        // Zonder de velden verandert er niets (bit-identiek aan vóór E1).
+        let kaal = bouw(&mini_xml(), true);
+        assert_eq!(kaal.organ.gain_db, 0.0);
+        assert_eq!(gain_van_pijp(&kaal, "Bourdon 8", 0), None);
+    }
+
+    /// Een waarde buiten alle redelijkheid (typefout in de definitie) wordt
+    /// begrensd of genegeerd; ze mag de klank niet wegslaan.
+    #[test]
+    fn onzinnige_niveaus_worden_begrensd_of_genegeerd() {
+        let mut pkg = HashMap::new();
+        pkg.insert(1u32, PathBuf::from("/pkg"));
+        let met = |waarde: &str| {
+            mini_xml().replace(
+                "<Identification_Name>Testorgel</Identification_Name>",
+                &format!("<Identification_Name>Testorgel</Identification_Name><AudioOut_AmplitudeLevelAdjustDecibels>{waarde}</AudioOut_AmplitudeLevelAdjustDecibels>"),
+            )
+        };
+        let gain = |w: &str| build_definition_met(&met(w), PathBuf::from("/root"), &pkg, true).expect("build").organ.gain_db;
+        assert_eq!(gain("1e+3"), 40.0);
+        assert_eq!(gain("-1e+3"), -40.0);
+        assert_eq!(gain("NaN"), 0.0);
+        assert_eq!(gain("inf"), 0.0);
+        assert_eq!(gain("geen getal"), 0.0);
+        assert_eq!(gain(""), 0.0);
+    }
+
+    /// Het verslag zegt wat er met de niveaus is gebeurd, ook als ze uit staan.
+    #[test]
+    fn verslag_meldt_de_niveaus_van_de_set() {
+        let mut pkg = HashMap::new();
+        pkg.insert(1u32, PathBuf::from("/pkg"));
+        let xml = mini_xml_met_niveaus();
+        let verslag = |aan: bool| {
+            let def = build_definition_met(&xml, PathBuf::from("/root"), &pkg, aan).expect("build");
+            let mut v = crate::import_report::ImportReport::default();
+            voeg_niveau_rapport_toe(&mut v, &def, &xml, aan);
+            v.meldingen.iter().filter(|m| m.object == "niveau").map(|m| m.tekst.clone()).collect::<Vec<_>>()
+        };
+        let aan = verslag(true);
+        assert_eq!(aan.len(), 2, "{aan:?}");
+        assert!(aan[0].contains("-20.0 dB"), "{aan:?}");
+        assert!(aan[1].contains("1 pijpen") && aan[1].contains("-2.2"), "{aan:?}");
+        let uit = verslag(false);
+        assert_eq!(uit.len(), 1, "{uit:?}");
+        assert!(uit[0].contains("-20.0 dB") && uit[0].contains("niet toegepast"), "{uit:?}");
+        // Een set zonder niveaus levert geen meldingen op.
+        let def = build_definition_met(&mini_xml(), PathBuf::from("/root"), &pkg, true).expect("build");
+        let mut v = crate::import_report::ImportReport::default();
+        voeg_niveau_rapport_toe(&mut v, &def, &mini_xml(), true);
+        assert!(v.meldingen.is_empty(), "{:?}", v.meldingen);
     }
 
     /// Hauptwerks eigen meegeleverde sets staan in het gesloten .hbw-formaat.

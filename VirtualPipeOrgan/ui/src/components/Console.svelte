@@ -2030,6 +2030,13 @@
     try { await invoke('set_stereo_samples', { on }); stereoReloadHint = true; } catch (e) { console.error(e); }
     refreshAudioStatus();
   }
+  // Niveaus van de set (E1): het volume-niveau dat de maker per orgel en per
+  // pijp instelde. Globale voorkeur; wordt actief bij het volgende laden.
+  let niveausReloadHint = false;
+  async function setNiveausToepassen(on) {
+    try { await invoke('set_niveaus_toepassen', { on }); niveausReloadHint = true; } catch (e) { console.error(e); }
+    refreshAudioStatus();
+  }
   // Startbuffer per opname (0.8.92): hoeveel ms van elke pijpopname vooraf in
   // het geheugen staat. Globale voorkeur; wordt actief bij de volgende load.
   let preloadMs = 2000;
@@ -8341,6 +8348,15 @@
                 <span>{$t('settings.stereo_samples')}</span>
               </label>
               {#if stereoReloadHint}
+                <p style="margin: 0.2rem 0 0; font-size: 0.68rem; color: var(--warning, #d9a441); line-height: 1.35;">{$t('settings.reload_hint')}</p>
+              {/if}
+
+              <!-- Niveaus van de set (E1) -->
+              <label class="swell-toggle" style="margin-top: 0.7rem; display: flex; align-items: center; gap: 0.4rem;" title={$t('settings.niveaus_toepassen_hint')}>
+                <input type="checkbox" checked={audioStatus ? audioStatus.niveaus_toepassen !== false : true} on:change={(e) => setNiveausToepassen(e.target.checked)} />
+                <span>{$t('settings.niveaus_toepassen')}</span>
+              </label>
+              {#if niveausReloadHint}
                 <p style="margin: 0.2rem 0 0; font-size: 0.68rem; color: var(--warning, #d9a441); line-height: 1.35;">{$t('settings.reload_hint')}</p>
               {/if}
 

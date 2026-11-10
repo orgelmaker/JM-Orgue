@@ -258,6 +258,8 @@
     "polyphony_load": "Audio thread load: {load}% (peak {peak}%)",
     "stereo_samples": "Play stereo samples in stereo",
     "stereo_samples_hint": "On: stereo recordings keep their spatial image (more memory). Off: mix down to mono as before.",
+    "niveaus_toepassen": "Apply the set's own levels",
+    "niveaus_toepassen_hint": "On: the level the set's maker configured (for the whole organ and per pipe) is applied, so sets sound about equally loud. Off: everything at 0 dB as before.",
     "preload_ms": "Start buffer per recording",
     "preload_ms_hint": "How much of each pipe recording is kept in memory up front. Shorter = far less memory and faster loading; the rest streams in while you play. If big chords show a brief repeat of the attack, choose a longer buffer.",
     "reload_hint": "Takes effect after reloading the organ.",

@@ -258,6 +258,8 @@
     "polyphony_load": "Charge du thread audio : {load} % (pic {peak} %)",
     "stereo_samples": "Lire les échantillons stéréo en stéréo",
     "stereo_samples_hint": "Activé : les enregistrements stéréo gardent leur image spatiale (plus de mémoire). Désactivé : mixage mono comme avant.",
+    "niveaus_toepassen": "Appliquer les niveaux du jeu",
+    "niveaus_toepassen_hint": "Activé : le niveau réglé par le créateur du jeu (pour l'orgue entier et par tuyau) est appliqué, pour que les jeux sonnent à peu près aussi fort. Désactivé : tout à 0 dB comme avant.",
     "preload_ms": "Tampon de départ par enregistrement",
     "preload_ms_hint": "Quelle part de chaque enregistrement de tuyau est gardée en mémoire au départ. Plus court = beaucoup moins de mémoire et chargement plus rapide ; le reste se charge pendant le jeu. Si les grands accords laissent entendre une brève répétition de l'attaque, choisissez un tampon plus long.",
     "reload_hint": "Prend effet après le rechargement de l'orgue.",
