@@ -3,6 +3,9 @@
 //! Main entry point for the desktop application.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+// De `json!`-macro van de test-API-status (`/status`) is zo groot geworden dat
+// de standaardlimiet van 128 niveaus niet meer volstaat.
+#![recursion_limit = "256"]
 
 mod acoustics;
 mod audio;
@@ -10,6 +13,7 @@ mod commands;
 mod crescendo_voorstel;
 mod background_sounds;
 mod feedback;
+mod geheugen;
 mod import_pakketroot;
 mod library;
 mod library_online;
@@ -367,6 +371,8 @@ fn main() {
             commands::set_mix_cores,
             commands::get_mix_cores,
             commands::set_realtime_prioriteit,
+            commands::get_geheugen,
+            commands::set_geheugen_volgt_vrij,
             commands::get_wind_status,
             commands::set_short_octave,
             commands::set_load_all_perspectives,

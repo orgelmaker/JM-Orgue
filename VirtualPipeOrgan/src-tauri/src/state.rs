@@ -365,6 +365,10 @@ pub struct AudioPrefs {
     /// prioriteit zoals vóór deze instelling op Linux en macOS.
     #[serde(default)]
     pub realtime_prioriteit: Option<bool>,
+    /// Het plafond voor volledig geladen samples volgt het vrije geheugen (F1);
+    /// None = aan. Uit = alleen het ingestelde plafond.
+    #[serde(default)]
+    pub geheugenplafond_volgt_vrij: Option<bool>,
     /// Afstandsbediening in het netwerk (0.7.38): aan/uit; None = uit.
     #[serde(default)]
     pub remote_enabled: Option<bool>,
@@ -1933,6 +1937,7 @@ impl AppState {
         crate::audio::set_meng_stukken(mix_cores);
         // RAM-plafond voor volledig geladen samples afhankelijk van het
         // geheugen van deze pc (0.9.31; was vast 1,5 GB).
+        crate::geheugen::zet_volgt_vrij(audio_prefs.geheugenplafond_volgt_vrij.unwrap_or(true));
         let ram = crate::commands::fysiek_geheugen_bytes();
         let cap = crate::audio::bepaal_sample_cap(ram);
         crate::audio::set_sample_cap_bytes(cap);

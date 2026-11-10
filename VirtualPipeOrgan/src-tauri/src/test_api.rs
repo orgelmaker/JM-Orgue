@@ -650,6 +650,15 @@ fn route_test_only(
             vpo_sampler::set_niveaus_toepassen(on);
             Ok(json!({"niveaus_toepassen": vpo_sampler::niveaus_toepassen()}))
         }
+        // Plafond volgt het vrije geheugen (F1), body {"on": true|false};
+        // rekent meteen opnieuw. Niet persistent (alleen voor proeven).
+        (tiny_http::Method::Post, "/geheugen_volgt_vrij") => {
+            let v: serde_json::Value = serde_json::from_str(body).unwrap_or_default();
+            let on = v.get("on").and_then(|x| x.as_bool()).unwrap_or(true);
+            crate::geheugen::zet_volgt_vrij(on);
+            crate::geheugen::herbereken();
+            Ok(serde_json::to_value(crate::geheugen::dto()).unwrap_or_default())
+        }
         // Realtime-prioriteit van de mengwerkers (D2), body {"on": true|false};
         // bouwt de pool opnieuw. Niet persistent (alleen voor proeven).
         (tiny_http::Method::Post, "/rt_prioriteit") => {
@@ -929,6 +938,7 @@ fn handle_status(state: &AppState) -> Value {
         "stereo_samples": vpo_sampler::stereo_loading(),
         "niveaus_toepassen": vpo_sampler::niveaus_toepassen(),
         "realtime_prioriteit": serde_json::to_value(crate::rt_prioriteit::status()).unwrap_or_default(),
+        "geheugen": serde_json::to_value(crate::geheugen::dto()).unwrap_or_default(),
         // Achtergrondlader (0.8.92): startbuffer, tekorten en latenties.
         "loader": serde_json::to_value(crate::audio::loader_stats()).unwrap_or(serde_json::Value::Null),
         "load_stappen_ms": load_stappen_json(),

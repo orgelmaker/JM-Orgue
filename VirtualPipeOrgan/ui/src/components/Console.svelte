@@ -2023,6 +2023,18 @@
       refreshAudioStatus();
     } catch (e) { console.error('Realtime-prioriteit zetten mislukt:', e); }
   }
+  // Geheugenplafond volgt het vrije geheugen (F1): stand en plafonds uit
+  // `get_geheugen`, vernieuwd bij het openen van de instellingen.
+  let geheugen = null;
+  async function haalGeheugen() {
+    try { geheugen = await invoke('get_geheugen'); } catch (e) {}
+  }
+  $: if (activeView === 'algemene-instellingen' && audioStatusKey) haalGeheugen();
+  async function zetGeheugenVolgtVrij(on) {
+    try {
+      geheugen = await invoke('set_geheugen_volgt_vrij', { on });
+    } catch (e) { console.error('Geheugenplafond zetten mislukt:', e); }
+  }
   // Welk deel van de rendertijd is stemwerk? Dat is het deel dat over de
   // kernen verdeeld wordt; de rest (wind, tremulant, galm, EQ, limiter) blijft
   // op één kern en is in de praktijk een paar procent.
@@ -8370,6 +8382,17 @@
               {#if audioStatus && audioStatus.audio_running}
                 <p style="margin: 0.2rem 0 0; font-size: 0.68rem; color: var(--text-muted); line-height: 1.35;">
                   {$t('settings.polyphony_load').replace('{load}', Math.round((audioStatus.render_load || 0) * 100)).replace('{peak}', Math.round((audioStatus.render_peak || 0) * 100))}
+                </p>
+              {/if}
+
+              <!-- Geheugenplafond volgt het vrije geheugen (F1) -->
+              <label class="swell-toggle" style="margin-top: 0.7rem; display: flex; align-items: center; gap: 0.4rem;" title={$t('settings.geheugen_volgt_vrij_hint')}>
+                <input type="checkbox" checked={geheugen ? geheugen.volgt_vrij !== false : true} on:change={(e) => zetGeheugenVolgtVrij(e.target.checked)} />
+                <span>{$t('settings.geheugen_volgt_vrij')}</span>
+              </label>
+              {#if geheugen && geheugen.totaal_mb}
+                <p style="margin: 0.2rem 0 0; font-size: 0.68rem; color: var(--text-muted); line-height: 1.35;">
+                  {$t('settings.geheugen_status').replace('{vrij}', geheugen.beschikbaar_mb).replace('{totaal}', geheugen.totaal_mb).replace('{plafond}', geheugen.plafond_mb).replace('{ingesteld}', geheugen.plafond_instelling_mb)}
                 </p>
               {/if}
 

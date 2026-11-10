@@ -696,20 +696,11 @@ where
     out
 }
 
-/// Fysiek geheugen van deze pc in bytes (Windows: GlobalMemoryStatusEx).
-/// None op andere platforms of bij een mislukte aanroep → geen RAM-rem.
-#[cfg(windows)]
+/// Fysiek geheugen van deze pc in bytes (Windows, Linux en macOS, zie
+/// `geheugen.rs`). None bij een mislukte aanroep → geen RAM-rem.
 pub(crate) fn fysiek_geheugen_bytes() -> Option<u64> {
-    use windows_sys::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
-    unsafe {
-        let mut st: MEMORYSTATUSEX = std::mem::zeroed();
-        st.dwLength = std::mem::size_of::<MEMORYSTATUSEX>() as u32;
-        if GlobalMemoryStatusEx(&mut st) == 0 { return None; }
-        Some(st.ullTotalPhys)
-    }
+    crate::geheugen::stand().map(|s| s.totaal)
 }
-#[cfg(not(windows))]
-pub(crate) fn fysiek_geheugen_bytes() -> Option<u64> { None }
 
 /// Preload per BUFFER (bytes): het geladen begin van één opname, gemeten op
 /// grote sets (0,79 MB per ingang; zie geheugenonderzoek). Een pijp heeft
@@ -724,23 +715,27 @@ fn preload_bytes_per_buffer() -> u64 {
     (PRELOAD_BYTES_PER_BUFFER_2000MS * crate::audio::preload_ms() as u64 / 2000).max(40_000)
 }
 
+/// Sleutel in `preload_buffers_per_label` voor lagen zonder perspectief-label:
+/// die worden altijd geladen en horen bij geen enkele positie.
+const GEEN_PERSPECTIEF: &str = "";
+
 /// Aantal preload-buffers per perspectief-label: per pijp 1 (attack) +
 /// releases + tremulantlaag (+ diens releases). Zelfde telling als de
 /// laadroute, zodat de RAM-schatting klopt met wat er straks in het geheugen
-/// komt.
+/// komt. Lagen zonder label staan onder `GEEN_PERSPECTIEF`.
 fn preload_buffers_per_label(definition: &OrganDefinition) -> HashMap<String, usize> {
     use vpo_sampler::PipeDef;
     let mut uit: HashMap<String, usize> = HashMap::new();
     for s in definition.stops.iter().filter(|s| !s.is_noise_or_mechanical()) {
         for (_idx, persp, pipes) in s.all_layers() {
-            let Some(label) = persp else { continue };
+            let label = persp.map(|l| l.to_string()).unwrap_or_else(|| GEEN_PERSPECTIEF.to_string());
             let n: usize = pipes.iter().map(|p| match p {
                 PipeDef::Sample { extra, .. } => 1 + extra.releases.len()
                     + extra.tremulant_attack.as_ref().map_or(0, |_| 1 + extra.tremulant_releases.len()),
                 PipeDef::Reference { .. } => 1,
                 PipeDef::Empty => 0,
             }).sum();
-            *uit.entry(label.to_string()).or_insert(0) += n;
+            *uit.entry(label).or_insert(0) += n;
         }
     }
     uit
@@ -750,7 +745,19 @@ fn preload_buffers_per_label(definition: &OrganDefinition) -> HashMap<String, us
 /// zouden kosten, in bytes (0.9.13). Gebruikt door `rem_op_geheugen` en door
 /// de nieuwe geheugen-waarschuwing in `bereken_geheugen_waarschuwing`.
 fn schatting_preload_bytes(plan: &[PerspectiveRuntime], buffers: &HashMap<String, usize>) -> u64 {
-    plan.iter().filter(|p| p.enabled)
+    schatting_preload_bytes_voor(plan, buffers, false)
+}
+
+/// Preload die bij geen enkele positie hoort: lagen zonder perspectief-label,
+/// die altijd geladen worden (F1). De bestaande schatting hierboven telt alleen
+/// posities; bij een set zonder labels was die dus 0.
+fn vaste_preload_bytes(buffers: &HashMap<String, usize>) -> u64 {
+    buffers.get(GEEN_PERSPECTIEF).copied().unwrap_or(0) as u64 * preload_bytes_per_buffer()
+}
+
+/// Idem, met `alle_posities` ook de uitgeschakelde posities ("alles laden").
+fn schatting_preload_bytes_voor(plan: &[PerspectiveRuntime], buffers: &HashMap<String, usize>, alle_posities: bool) -> u64 {
+    plan.iter().filter(|p| alle_posities || p.enabled)
         .map(|p| buffers.get(&p.name).copied().unwrap_or(p.pipe_count) as u64 * preload_bytes_per_buffer())
         .sum()
 }
@@ -786,6 +793,18 @@ fn bereken_geheugen_waarschuwing(plan: &[PerspectiveRuntime], buffers: &HashMap<
         )),
         _ => None,
     };
+    // Past het niet in wat er NU vrij is (F1)? Het totaal zegt niets als een
+    // ander programma al de helft heeft; dit is de melding die vóór het laden
+    // laat zien wat het orgel gaat kosten.
+    let melding = melding.or_else(|| {
+        let s = crate::geheugen::stand()?;
+        let totaal_schatting = schatting + vaste_preload_bytes(buffers);
+        if crate::geheugen::past_in_vrij(s, totaal_schatting) { return None; }
+        Some(format!(
+            "Dit orgel vraagt ongeveer {} MB geheugen voor het begin van de opnamen; er is nu {} MB vrij, waarvan {} MB als reserve voor het systeem wordt aangehouden. Sluit andere programma's of kies in de Orgel-instellingen een positie minder, anders kan het laden of spelen vastlopen of haperen.",
+            mb(totaal_schatting), mb(s.beschikbaar), mb(crate::geheugen::reserve_bytes(s.totaal)),
+        ))
+    });
     *LAATSTE_GEHEUGEN_WAARSCHUWING.write() = melding;
 }
 
@@ -794,6 +813,26 @@ fn bereken_geheugen_waarschuwing(plan: &[PerspectiveRuntime], buffers: &HashMap<
 #[tauri::command]
 pub fn get_memory_warning() -> Option<String> {
     LAATSTE_GEHEUGEN_WAARSCHUWING.write().take()
+}
+
+/// Geheugenstand en plafonds voor Instellingen (F1).
+#[tauri::command]
+pub fn get_geheugen() -> crate::geheugen::GeheugenDto {
+    crate::geheugen::dto()
+}
+
+/// Laat het plafond voor volledig geladen samples het vrije geheugen volgen
+/// (aan) of alleen de instelling gelden (uit). Werkt meteen en wordt per pc
+/// bewaard.
+#[tauri::command]
+pub fn set_geheugen_volgt_vrij(state: State<AppState>, on: bool) -> Result<crate::geheugen::GeheugenDto, String> {
+    crate::geheugen::zet_volgt_vrij(on);
+    crate::geheugen::herbereken();
+    let mut prefs = crate::state::load_audio_prefs(&state.app_data_dir);
+    prefs.geheugenplafond_volgt_vrij = Some(on);
+    crate::state::save_audio_prefs(&state.app_data_dir, &prefs);
+    info!("Geheugenplafond volgt het vrije geheugen: {}", if on { "aan" } else { "uit" });
+    Ok(crate::geheugen::dto())
 }
 
 /// RAM-rem (0.8.1) op "alles laden": past de schatting van álle ingeschakelde
@@ -3545,6 +3584,10 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
         if alles_laden_keuze && !alles_laden {
             warn!("Alle opnameposities laden: past niet in de helft van het RAM — alleen de ingeschakelde posities geladen");
         }
+        // Plafond voor volledig geladen samples afstemmen op wat er nu vrij is
+        // (F1), met de preload van precies de posities die nu geladen worden.
+        crate::geheugen::pas_plafond_toe(
+            schatting_preload_bytes_voor(&persp_plan, &buffer_map, alles_laden) + vaste_preload_bytes(&buffer_map));
         let enabled_labels: HashSet<String> = persp_plan.iter()
             .filter(|p| alles_laden || p.enabled)
             .map(|p| p.name.clone())
@@ -12500,6 +12543,32 @@ mod luisterpositie_tests {
             assert!(rem_op_geheugen(&mut plan4, false, &buffers));
             assert_eq!(plan4.iter().filter(|p| p.enabled).count(), 1);
         }
+    }
+
+    /// F1: lagen zonder perspectief-label tellen mee in de schatting voor het
+    /// vrije geheugen; de bestaande telling per positie blijft ongewijzigd.
+    #[test]
+    fn preload_schatting_telt_lagen_zonder_label_mee() {
+        let mk = |enabled: bool| PerspectiveRuntime {
+            name: "front".into(), enabled, gain_db: 0.0, loaded: false, slot: 1, pipe_count: 900,
+        };
+        let mut buffers = std::collections::HashMap::new();
+        buffers.insert("front".to_string(), 1000usize);
+        buffers.insert(GEEN_PERSPECTIEF.to_string(), 400usize);
+        let per_buffer = preload_bytes_per_buffer();
+        // De telling per positie ziet de lagen zonder label niet.
+        assert_eq!(schatting_preload_bytes(&[mk(true)], &buffers), 1000 * per_buffer);
+        assert_eq!(vaste_preload_bytes(&buffers), 400 * per_buffer);
+        // Een set zonder posities in het plan: alleen de vaste lagen tellen.
+        assert_eq!(schatting_preload_bytes(&[], &buffers), 0);
+        assert_eq!(
+            schatting_preload_bytes_voor(&[], &buffers, true) + vaste_preload_bytes(&buffers),
+            400 * per_buffer);
+        // Zonder die sleutel: niets.
+        assert_eq!(vaste_preload_bytes(&std::collections::HashMap::new()), 0);
+        // Een uitgeschakelde positie telt alleen mee bij "alles laden".
+        assert_eq!(schatting_preload_bytes_voor(&[mk(false)], &buffers, false), 0);
+        assert_eq!(schatting_preload_bytes_voor(&[mk(false)], &buffers, true), 1000 * per_buffer);
     }
 
     #[test]

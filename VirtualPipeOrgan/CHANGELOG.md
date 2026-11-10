@@ -6,6 +6,35 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### Geheugenplafond volgt het vrije geheugen, op Windows, Linux en macOS (F1)
+- Nieuwe module `geheugen.rs`: het totale en het beschikbare geheugen per
+  platform (Windows `GlobalMemoryStatusEx`, Linux `/proc/meminfo`, macOS
+  `sysctl` en `host_statistics64`). Tot nu toe kende de app alleen op Windows
+  het totaal, en nooit wat er vrij was.
+- Bij elk orgel dat geladen wordt, stemt de app het plafond voor volledig
+  geladen samples af op wat er dan vrij is, na een reserve voor het systeem
+  (het grootste van 256 MB en een twintigste van het geheugen) en na de
+  preload van het orgel zelf. Het ingestelde plafond blijft de bovengrens: het
+  afgeleide plafond kan alleen lager uitvallen, nooit lager dan 256 MB. Met
+  ruim vrij geheugen verandert er niets.
+- Instelbaar: vinkje "Geheugenplafond volgt het vrije geheugen" in
+  Instellingen (standaard aan, per pc bewaard) met een regel die vrij geheugen
+  en het geldende plafond toont; test-API `POST /geheugen_volgt_vrij` en
+  `geheugen` in `/status`. Zeven talen.
+- De waarschuwing vóór het laden meldt nu ook als de preload van het orgel niet
+  in het vrije geheugen past (met wat er vrij is en welke reserve), niet alleen
+  ten opzichte van het totaal. De preload-schatting telde alleen lagen met een
+  perspectief-label; bij sets zonder labels was die 0. Lagen zonder label
+  tellen nu mee in dit nieuwe plafond en in de nieuwe waarschuwing; de bestaande
+  rem op "alle posities laden" rekent ongewijzigd.
+- Op Linux en macOS werkt het totaal geheugen nu ook voor de bestaande RAM-rem
+  en het standaardplafond (30 % van het geheugen in plaats van vast 1,5 GB), net
+  als op Windows. Die code is daar alleen gecompileerd, niet uitgevoerd.
+- Nieuw script `testscripts/geheugen_herhaald_laden.py`: laadt een groot en een
+  klein orgel om en om en controleert dat het geheugen van de vorige lading
+  terugkomt en niet groeit (gemeten: 503 → 514 → 517 MB bij het grote orgel,
+  ~120 MB na het kleine).
+
 ### Melding in de statusbalk als de interpolatie lichter wordt gemaakt (C4)
 - Schakelt de dynamische ontlasting (0.9.30) over op lineaire in plaats van
   kubische interpolatie, dan toont de statusbalk nu "· lichte interpolatie"

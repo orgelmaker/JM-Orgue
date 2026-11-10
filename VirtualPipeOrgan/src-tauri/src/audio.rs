@@ -122,10 +122,37 @@ pub fn set_sample_cap_bytes(n: usize) {
     SAMPLE_CAP_BYTES.store(n.max(200_000_000), Ordering::Relaxed);
 }
 
-pub fn sample_cap_bytes() -> usize {
+/// Het plafond zoals ingesteld (of het standaardplafond): de bovengrens.
+pub fn sample_cap_instelling_bytes() -> usize {
     match SAMPLE_CAP_BYTES.load(Ordering::Relaxed) {
         0 => SAMPLE_CAP_MIN,
         n => n,
+    }
+}
+
+/// Lager plafond afgeleid van het vrije geheugen (F1, `geheugen.rs`); 0 =
+/// geen beperking. Wordt bij elke orgellading opnieuw bepaald.
+static SAMPLE_CAP_VRIJ_BYTES: AtomicUsize = AtomicUsize::new(0);
+
+pub fn set_sample_cap_vrij_bytes(n: usize) {
+    SAMPLE_CAP_VRIJ_BYTES.store(n, Ordering::Relaxed);
+}
+
+/// Wat de sample-cache nu aan volledig geladen samples in het geheugen heeft;
+/// de render-thread werkt dit bij tijdens het bewaken van het plafond.
+static SAMPLES_BYTES_RESIDENT: AtomicUsize = AtomicUsize::new(0);
+
+pub fn samples_resident_bytes() -> usize {
+    SAMPLES_BYTES_RESIDENT.load(Ordering::Relaxed)
+}
+
+/// Het plafond dat nu geldt: de instelling, of lager als het vrije geheugen
+/// dat vraagt.
+pub fn sample_cap_bytes() -> usize {
+    let instelling = sample_cap_instelling_bytes();
+    match SAMPLE_CAP_VRIJ_BYTES.load(Ordering::Relaxed) {
+        0 => instelling,
+        vrij => instelling.min(vrij),
     }
 }
 /// Deadline-markering voor een vers verzoek (nog geen stand uit de pre-pass).
@@ -4868,6 +4895,7 @@ fn run_audio_thread(
             // deallocatie naar het moment dat die stem eindigt — óók dan via de
             // janitor (zie `GcSink::dispose_voice`).
             let mut evicted = 0;
+            SAMPLES_BYTES_RESIDENT.store(samples_bytes, Ordering::Relaxed);
             let sample_cap = sample_cap_bytes();
             while samples_bytes > sample_cap && evicted < 4 {
                 let Some(old_key) = sample_fifo.pop_front() else { break; };
