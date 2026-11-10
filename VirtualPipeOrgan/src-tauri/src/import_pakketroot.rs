@@ -35,7 +35,7 @@ pub fn opgeslagen(app_data_dir: &Path, orgel: &str) -> Option<PathBuf> {
         .into_iter()
         .find(|(k, _)| crate::library::pad_sleutel(k) == sleutel)
         .map(|(_, v)| PathBuf::from(v))
-        .filter(|p| p.join("OrganInstallationPackages").is_dir())
+        .filter(|p| vpo_sampler::padzoek::pakketten_map(p).is_dir())
 }
 
 /// Bewaar (`Some`) of wis (`None`) de pakketroot van dit orgel.
@@ -65,7 +65,7 @@ pub fn normaliseer_keuze(gekozen: &Path) -> Result<PathBuf, String> {
     } else {
         gekozen.to_path_buf()
     };
-    let pakketten = root.join("OrganInstallationPackages");
+    let pakketten = vpo_sampler::padzoek::pakketten_map(&root);
     if !pakketten.is_dir() {
         return Err(format!(
             "in {} staat geen map OrganInstallationPackages; kies de map die OrganInstallationPackages bevat",

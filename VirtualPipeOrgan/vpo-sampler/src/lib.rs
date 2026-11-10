@@ -8,6 +8,7 @@ pub mod cache;
 pub mod pool;
 pub mod grandorgue;
 pub mod hauptwerk;
+pub mod padzoek;
 pub mod hauptwerk_codm;
 pub mod import_diagnose;
 pub mod import_report;

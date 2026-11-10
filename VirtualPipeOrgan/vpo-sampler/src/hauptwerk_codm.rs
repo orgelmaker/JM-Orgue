@@ -780,6 +780,8 @@ struct SampleZoeker<'a> {
     markers_lezen: bool,
     /// Rangen met pijpen die geen release kunnen krijgen: rang-id → (naam, aantal).
     zonder_release: BTreeMap<u32, (String, usize)>,
+    /// Lost mapnamen hoofdletterongevoelig op (buiten Windows, E7).
+    pad: crate::padzoek::PadZoeker,
 }
 
 impl SampleZoeker<'_> {
@@ -811,7 +813,7 @@ impl<'a> SampleZoeker<'a> {
         }
         let sleutel = (pakket, map.to_string());
         if !self.mappen.contains_key(&sleutel) {
-            let pad = if map.is_empty() { dir.clone() } else { dir.join(map.replace('\\', "/")) };
+            let pad = if map.is_empty() { dir.clone() } else { self.pad.los_op(dir, map) };
             self.mappen.insert(sleutel.clone(), SampleMap::lees(&pad));
         }
         self.mappen.get(&sleutel)
@@ -1162,7 +1164,7 @@ fn bouw_definitie(
         warn!("CODM '{}': samplepakket(ten) niet gevonden: {:?}", orgel.naam, ontbrekend);
     }
 
-    let mut z = SampleZoeker { pakketten, mappen: HashMap::new(), geweigerd: Default::default(), markers: HashMap::new(), markers_lezen: diep, zonder_release: BTreeMap::new() };
+    let mut z = SampleZoeker { pakketten, mappen: HashMap::new(), geweigerd: Default::default(), markers: HashMap::new(), markers_lezen: diep, zonder_release: BTreeMap::new(), pad: crate::padzoek::PadZoeker::nieuw() };
     let divisie_bekend: HashSet<u32> = orgel.divisies.iter().map(|d| d.code).collect();
 
     // Windladen: één per combinatie (zwelkast, tremulant) die een stop gebruikt.
@@ -1348,7 +1350,7 @@ fn bouw_definitie(
     for r in orgel.ranks.values().filter(|r| !r.trem_map.is_empty() && r.tremulant.is_some()) {
         let Some(dir) = pakketten.get(&r.trem_pakket) else { continue };
         if !map_blijft_in_pakket(&r.trem_map) { continue; }
-        let pad = dir.join(r.trem_map.replace('\\', "/"));
+        let pad = z.pad.los_op(dir, &r.trem_map);
         let aantal = std::fs::read_dir(&pad).map(|rd| rd.flatten().filter(|e| {
             let n = e.file_name().to_string_lossy().to_lowercase();
             n.contains("tremulant") && (n.ends_with(".wav") || n.ends_with(".hbw") || n.ends_with(".wv"))

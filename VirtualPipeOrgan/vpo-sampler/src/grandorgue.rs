@@ -878,6 +878,8 @@ pub struct CouplerDef {
 pub struct OdfParser {
     sections: HashMap<String, HashMap<String, String>>,
     base_path: PathBuf,
+    /// Lost samplepaden hoofdletterongevoelig op (buiten Windows, E7).
+    zoeker: crate::padzoek::PadZoeker,
 }
 
 impl OdfParser {
@@ -898,6 +900,7 @@ impl OdfParser {
         let mut parser = Self {
             sections: HashMap::new(),
             base_path,
+            zoeker: crate::padzoek::PadZoeker::nieuw(),
         };
 
         parser.parse_ini(&content)?;
@@ -1787,7 +1790,7 @@ impl OdfParser {
             .trim_start_matches(".\\")
             .to_string();
 
-        self.base_path.join(normalized)
+        self.zoeker.los_op(&self.base_path, &normalized)
     }
 
     /// Parse a u32 from section

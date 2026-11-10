@@ -898,7 +898,7 @@ fn hauptwerk_package_dirs(odf_path: &Path) -> Vec<PathBuf> {
         Some(r) => r,
         None => return Vec::new(),
     };
-    match std::fs::read_dir(root.join("OrganInstallationPackages")) {
+    match std::fs::read_dir(vpo_sampler::padzoek::pakketten_map(&root)) {
         Ok(rd) => rd.flatten().map(|e| e.path()).filter(|p| p.is_dir()).collect(),
         Err(_) => Vec::new(),
     }

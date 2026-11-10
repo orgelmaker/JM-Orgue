@@ -723,10 +723,12 @@ fn build_definition_met(
     }
 
     // Resolve een sample-id naar een absoluut pad via de packagemap.
+    // Hoofdletterongevoelig oplossen buiten Windows (E7, `padzoek.rs`).
+    let zoeker = crate::padzoek::PadZoeker::nieuw();
     let resolve_sample = |sample_id: u32| -> Option<PathBuf> {
         let (pkg, fname) = sample_file.get(&sample_id)?;
         let dir = pkg_dirs.get(pkg)?;
-        Some(dir.join(fname.replace('\\', "/")))
+        Some(zoeker.los_op(dir, fname))
     };
 
     // Resolve een pijp naar het hoofdsample-pad plus de extra's: release-samples
@@ -1545,10 +1547,12 @@ fn verzamel_hw_keyboard_clicks(
         if kop.is_empty() { continue; }
         rank_prefix.insert(rid, (kop.to_uppercase(), is_attack));
     }
+    // Hoofdletterongevoelig oplossen buiten Windows (E7, `padzoek.rs`).
+    let zoeker = crate::padzoek::PadZoeker::nieuw();
     let resolve_sample = |sample_id: u32| -> Option<std::path::PathBuf> {
         let (pkg, fname) = sample_file.get(&sample_id)?;
         let dir = pkg_dirs.get(pkg)?;
-        Some(dir.join(fname.replace('\\', "/")))
+        Some(zoeker.los_op(dir, fname))
     };
     use crate::grandorgue::KeyboardClickPaths;
     let mut uit: std::collections::HashMap<(String, u8), KeyboardClickPaths>
@@ -1594,10 +1598,12 @@ fn verzamel_hw_stop_action_clicks(
     rank_name: &std::collections::HashMap<u32, String>,
 ) -> std::collections::HashMap<u32, crate::grandorgue::StopActionClickDef> {
     use crate::grandorgue::StopActionClickDef;
+    // Hoofdletterongevoelig oplossen buiten Windows (E7, `padzoek.rs`).
+    let zoeker = crate::padzoek::PadZoeker::nieuw();
     let resolve_sample = |sample_id: u32| -> Option<std::path::PathBuf> {
         let (pkg, fname) = sample_file.get(&sample_id)?;
         let dir = pkg_dirs.get(pkg)?;
-        Some(dir.join(fname.replace('\\', "/")))
+        Some(zoeker.los_op(dir, fname))
     };
     // ControllingSwitchID → stop_id (voor de koppeling vanuit de pijp op de
     // registerschakelaar terug naar de stop die we gaan tonen).
@@ -1760,10 +1766,12 @@ fn verzamel_hw_bijgeluiden(
             let clickable = s.get("Clickable").map(|v| v == "Y").unwrap_or(false);
             Some((id, (name, default_on, clickable)))
         }).collect();
+    // Hoofdletterongevoelig oplossen buiten Windows (E7, `padzoek.rs`).
+    let zoeker = crate::padzoek::PadZoeker::nieuw();
     let resolve_sample = |sample_id: u32| -> Option<std::path::PathBuf> {
         let (pkg, fname) = sample_file.get(&sample_id)?;
         let dir = pkg_dirs.get(pkg)?;
-        Some(dir.join(fname.replace('\\', "/")))
+        Some(zoeker.los_op(dir, fname))
     };
     let mut uit = Vec::new();
     // Deduplicatie per (kind, switch_id): sets hebben vaak dezelfde pijp
@@ -2483,7 +2491,7 @@ pub fn clean_division_name(raw: &str) -> String {
 pub fn find_package_root(odf_path: &Path) -> Option<PathBuf> {
     let mut dir = odf_path.parent();
     while let Some(d) = dir {
-        if d.join("OrganInstallationPackages").is_dir() {
+        if crate::padzoek::pakketten_map(d).is_dir() {
             return Some(d.to_path_buf());
         }
         dir = d.parent();
@@ -2497,7 +2505,7 @@ pub fn find_package_root(odf_path: &Path) -> Option<PathBuf> {
 /// folders). Falls back to a sole subfolder.
 pub fn scan_package_dirs(root: &Path) -> HashMap<u32, PathBuf> {
     let mut map = HashMap::new();
-    let base = root.join("OrganInstallationPackages");
+    let base = crate::padzoek::pakketten_map(root);
     let entries: Vec<PathBuf> = match std::fs::read_dir(&base) {
         Ok(rd) => rd.flatten().map(|e| e.path()).filter(|p| p.is_dir()).collect(),
         Err(_) => return map,

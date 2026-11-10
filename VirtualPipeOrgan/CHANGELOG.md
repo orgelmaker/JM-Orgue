@@ -6,6 +6,23 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### Samplepaden hoofdletterongevoelig op Linux en macOS (E7)
+- Sets worden op Windows gemaakt, waar hoofdletters in map- en bestandsnamen
+  niet uitmaken. Staat een map op schijf als `bourdon` terwijl de definitie
+  `Bourdon` noemt, dan laadde zo'n set op Linux geen enkele sample. Nieuw: een
+  pad uit de definitie wordt onderdeel voor onderdeel opgelost tegen wat er
+  werkelijk op schijf staat (eerst een exacte treffer, anders het onderdeel dat
+  op hoofdletters na gelijk is). Van elke map wordt de inhoud eenmaal gelezen.
+  Geldt voor Hauptwerk-, Hauptwerk-Custom-Organ- en GrandOrgue-definities, en
+  ook voor het vinden van de map `OrganInstallationPackages` zelf (die stond
+  er op Linux alleen in precies die schrijfwijze).
+- Op Windows verandert er niets: daar blijft het dezelfde samenvoeging als
+  voorheen. Is er geen overeenkomst, dan blijft het pad zoals de definitie het
+  noemt, dus een ontbrekend bestand blijft ontbreken zoals voorheen.
+- Zeven tests voor het opzoeken zelf; de Linux- en macOS-bouw is gecompileerd
+  maar niet uitgevoerd, en er is nog geen echte set met afwijkende hoofdletters
+  op Linux geprobeerd.
+
 ### Hauptwerk: crossfade-duur van de release uit de definitie (D3)
 - De importer leest `ReleaseCrossfadeLengthMs` (1 tot 3000 ms) per release en
   geeft die door aan de motor, voor de speellaag en voor de tremulantlaag. De

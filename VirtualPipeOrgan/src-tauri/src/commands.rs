@@ -10896,7 +10896,7 @@ fn afbeeldingsbron_leesbaar(source_path: &str, source_type: &str) -> bool {
     }
     if is_organ_file && vpo_sampler::is_hauptwerk_path(src) {
         return match vpo_sampler::find_package_root(src) {
-            Some(root) => std::fs::read_dir(root.join("OrganInstallationPackages")).is_ok(),
+            Some(root) => std::fs::read_dir(vpo_sampler::padzoek::pakketten_map(&root)).is_ok(),
             None => false,
         };
     }
