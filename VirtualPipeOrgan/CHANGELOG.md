@@ -6,6 +6,24 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### Workflows: acties van derden vastgepind op een commit
+- `release-build.yml` geeft de updater-sleutel (`TAURI_SIGNING_PRIVATE_KEY`) aan
+  jobs waarin acties van derden draaien die op een verschuivende tag stonden
+  (`@v2`, `@stable`): wie die tag verlegt, draait code in een job met de
+  sleutel. Alle veertien verwijzingen (ook in `tests.yml` en
+  `platform-check.yml`) staan nu op de commit-SHA, met de versie als
+  commentaar: `softprops/action-gh-release` v2.6.2, `Swatinem/rust-cache`
+  v2.9.3 en `dtolnay/rust-toolchain` (tak `stable`).
+- Bij `dtolnay/rust-toolchain` komt het kanaal normaal uit de refnaam; bij een
+  SHA is dat weg. Daarom staat overal expliciet `toolchain: stable` (de
+  macOS-job houdt zijn `targets`). Elke SHA is via de GitHub-API gecontroleerd
+  tegen de officiële repository en de drie bestanden zijn als YAML ingelezen.
+- Niet gedaan: de acties van GitHub zelf (`actions/*`) blijven op hun tag, en
+  er is geen Dependabot-configuratie die de pins bijwerkt; zonder die
+  bijwerking moeten ze met de hand worden vernieuwd. Niet in CI gedraaid (dat
+  start een workflow); de eerstvolgende releasebuild laat zien of de pins
+  werken.
+
 ### Test-API: webpagina's op dezelfde pc kunnen de API niet meer aanroepen
 - Met `--test-api` luistert de server op 127.0.0.1 zonder token. Een webpagina
   in een browser op dezelfde computer kon er daardoor verzoeken naartoe sturen
