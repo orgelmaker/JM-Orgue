@@ -3,7 +3,7 @@
 //! A voice represents a single playing note, handling sample playback,
 //! looping, and envelope processing.
 
-use vpo_core::{MidiNote, Velocity, Sample, SampleRate};
+use vpo_core::{MidiNote, Velocity, SampleRate};
 use crate::buffer::StereoSample;
 
 /// State of a voice
@@ -174,7 +174,7 @@ impl Voice {
         &mut self,
         sample_data: &[f32],
         output: &mut [StereoSample],
-        sample_rate: SampleRate,
+        _sample_rate: SampleRate,
     ) {
         if self.state == VoiceState::Idle || self.state == VoiceState::Finished {
             return;
@@ -226,12 +226,11 @@ impl Voice {
             self.position += self.playback_rate;
 
             // Handle looping
-            if self.state == VoiceState::Sustain || self.state == VoiceState::Attack {
-                if self.position as u64 >= self.loop_end && self.loop_end > self.loop_start {
+            if (self.state == VoiceState::Sustain || self.state == VoiceState::Attack)
+                && self.position as u64 >= self.loop_end && self.loop_end > self.loop_start {
                     let loop_length = self.loop_end - self.loop_start;
                     self.position -= loop_length as f64;
                 }
-            }
 
             // Check for end of sample
             if self.position as u64 >= self.sample_end {

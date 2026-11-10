@@ -266,7 +266,7 @@ pub fn stel_voor(divisies: &[VoorstelDivisie], koppels: &[VoorstelKoppel], n: us
             if let Some(bestaand) = items.iter_mut().find(|it| it.divisie == di && it.groep == groep
                 && (it.voet - voet).abs() < 0.01
                 && it.ids.first().and_then(|id| d.registers.iter().find(|x| &x.id == id))
-                    .map_or(false, |x| zonder_helft(&x.naam) == sleutel)) {
+                    .is_some_and(|x| zonder_helft(&x.naam) == sleutel)) {
                 bestaand.ids.push(r.id.clone());
                 continue;
             }

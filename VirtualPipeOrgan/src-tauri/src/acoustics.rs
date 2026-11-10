@@ -304,7 +304,7 @@ pub fn veilig_pad(organ_dir: &Path, rel: &str) -> Result<PathBuf, String> {
     let schijfletter = b.len() >= 2 && b[0].is_ascii_alphabetic() && b[1] == b':';
     let p = Path::new(&genormaliseerd);
     if schijfletter || p.is_absolute() || genormaliseerd.starts_with('/')
-        || p.components().next().map_or(false, |c| matches!(c, std::path::Component::Prefix(_)))
+        || p.components().next().is_some_and(|c| matches!(c, std::path::Component::Prefix(_)))
     {
         return Err(format!("absoluut pad niet toegestaan: {}", rel));
     }
@@ -413,7 +413,7 @@ pub fn valideer(cfg: &AcousticsConfig, odf_stops: &HashMap<u32, Vec<usize>>) -> 
         let ok = match (sectie_nummer(&b.stop_section, "Stop"), pijp_nummer(b)) {
             (Some(s), Some(p)) if p >= 1 => odf_stops.get(&s)
                 .and_then(|lagen| lagen.get(b.layer_index as usize))
-                .map_or(false, |&n| (p as usize) <= n),
+                .is_some_and(|&n| (p as usize) <= n),
             _ => false,
         };
         if ok { v.bound_pipes += 1; } else { v.unbound_pipes += 1; }

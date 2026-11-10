@@ -145,7 +145,7 @@ impl RtOverloop {
                 *b.weggelaten.entry((stop_id, pipe_num, verschuiving)).or_insert(0) += 1;
                 let n = self.noteon_weggelaten.fetch_add(1, Relaxed) + 1;
                 RT_DROP_COUNT.fetch_add(1, Relaxed);
-                if n == 1 || n % 1000 == 0 {
+                if n == 1 || n.is_multiple_of(1000) {
                     tracing::warn!("Audio-overloopbuffer vol ({} commando's): NoteOn weggelaten (totaal {})", grens, n);
                 }
                 return;
@@ -237,7 +237,7 @@ fn rt_send_zwel(tx: &Sender<AudioCommand>, division_index: u8, gain: f32) {
         }
         Err(_) => {
             let n = RT_DROP_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-            if n % 50 == 0 {
+            if n.is_multiple_of(50) {
                 tracing::warn!("Realtime audio-commando's gedropt (queue vol of consumer weg): totaal {}", n);
             }
             let mut lijst = ZWEL_NAZENDING.lock();
@@ -280,7 +280,7 @@ pub fn rt_drop_count() -> u64 {
 /// zwijgt. Octaafkoppels op het eigen klavier en koppels van en naar andere
 /// klavieren blijven werken; de Unison Off-koppel maakt zelf geen route.
 pub(crate) fn unison_off_actief(coupler_list: Option<&Vec<CouplerDto>>, actief: &[String], divisie: &str) -> bool {
-    coupler_list.map_or(false, |cl| cl.iter().any(|c| {
+    coupler_list.is_some_and(|cl| cl.iter().any(|c| {
         c.coupler_type == "unison_off" && c.source_division == divisie && actief.contains(&c.id)
     }))
 }
@@ -621,10 +621,10 @@ impl PresetCcGate {
     ) -> bool {
         let vorige = self.standen.get(&sleutel).copied();
         // Zonder eerder bericht is het per definitie "lang stil".
-        let lang_stil = vorige.map_or(true, |v| {
+        let lang_stil = vorige.is_none_or(|v| {
             nu_ms.saturating_sub(v.laatste_ms) >= Self::PULSPAUZE_MS
         });
-        let mut scherp = vorige.map_or(true, |v| v.scherp);
+        let mut scherp = vorige.is_none_or(|v| v.scherp);
 
         // Ingeleerd op 0: de knop stuurt 0 bij indrukken. Vuren op de dalende
         // flank naar 0; herwapenen zodra de waarde ver genoeg van 0 af is
@@ -756,7 +756,7 @@ pub struct MiscCcBinding {
 /// uit `AppState.misc_cc_bindings` gevuld.
 static MISC_CC_BINDINGS_CELL: std::sync::OnceLock<parking_lot::RwLock<Vec<MiscCcBinding>>>
     = std::sync::OnceLock::new();
-pub fn MISC_CC_BINDINGS() -> &'static parking_lot::RwLock<Vec<MiscCcBinding>> {
+pub fn misc_cc_bindings() -> &'static parking_lot::RwLock<Vec<MiscCcBinding>> {
     MISC_CC_BINDINGS_CELL.get_or_init(|| parking_lot::RwLock::new(Vec::new()))
 }
 
@@ -764,7 +764,7 @@ pub fn MISC_CC_BINDINGS() -> &'static parking_lot::RwLock<Vec<MiscCcBinding>> {
 /// aan dit doel. None = niet leren.
 static MISC_CC_LEARNING_CELL: std::sync::OnceLock<parking_lot::RwLock<Option<MiscCcTarget>>>
     = std::sync::OnceLock::new();
-pub fn MISC_CC_LEARNING() -> &'static parking_lot::RwLock<Option<MiscCcTarget>> {
+pub fn misc_cc_learning() -> &'static parking_lot::RwLock<Option<MiscCcTarget>> {
     MISC_CC_LEARNING_CELL.get_or_init(|| parking_lot::RwLock::new(None))
 }
 
@@ -778,13 +778,13 @@ pub fn MISC_CC_LEARNING() -> &'static parking_lot::RwLock<Option<MiscCcTarget>> 
 /// bindt pas bij ≥ 16 eenheden beweging (0.8.1).
 static MISC_CC_LEARN_SEEN_CELL: std::sync::OnceLock<parking_lot::RwLock<std::collections::HashMap<(u8, u8), u8>>>
     = std::sync::OnceLock::new();
-pub fn MISC_CC_LEARN_SEEN() -> &'static parking_lot::RwLock<std::collections::HashMap<(u8, u8), u8>> {
+pub fn misc_cc_learn_seen() -> &'static parking_lot::RwLock<std::collections::HashMap<(u8, u8), u8>> {
     MISC_CC_LEARN_SEEN_CELL.get_or_init(|| parking_lot::RwLock::new(std::collections::HashMap::new()))
 }
 
 static MISC_CC_PENDING_CELL: std::sync::OnceLock<parking_lot::RwLock<std::collections::HashMap<MiscCcTarget, f32>>>
     = std::sync::OnceLock::new();
-pub fn MISC_CC_PENDING() -> &'static parking_lot::RwLock<std::collections::HashMap<MiscCcTarget, f32>> {
+pub fn misc_cc_pending() -> &'static parking_lot::RwLock<std::collections::HashMap<MiscCcTarget, f32>> {
     MISC_CC_PENDING_CELL.get_or_init(|| parking_lot::RwLock::new(std::collections::HashMap::new()))
 }
 
@@ -990,7 +990,7 @@ pub(crate) fn markeer_registerhelften(stops: &mut [crate::commands::StopDto], is
 /// maar één NoteOff voor die noot. Zo blijft de refcount per pijp in balans.
 pub(crate) fn bron_noten_voor_route(gate: &str, held: &[(u8, u8, u8)], src_mapping: Option<&MidiChannelMapping>) -> Vec<(u8, u8)> {
     let op_bron: Vec<(u8, u8)> = held.iter()
-        .filter(|&&(ch, n, _)| src_mapping.map_or(false, |m| m.accepts(ch, n)))
+        .filter(|&&(ch, n, _)| src_mapping.is_some_and(|m| m.accepts(ch, n)))
         .map(|&(_, n, v)| (n, v))
         .collect();
     match gate {
@@ -1182,7 +1182,7 @@ impl TredeKiezer {
     /// (`nu` = Some), of bij time-out ongeacht rust (`nu` = None); zonder
     /// enige beweging de laatst geziene stroom.
     pub(crate) fn noodkeuze(&self, nu: Option<std::time::Instant>) -> Option<(u8, u8, u8)> {
-        let rustig = |s: &&TredeStroom| nu.map_or(true, |n| n.duration_since(s.last_change) >= self.settle);
+        let rustig = |s: &&TredeStroom| nu.is_none_or(|n| n.duration_since(s.last_change) >= self.settle);
         self.stromen.iter()
             .filter(|s| Self::slag(s) >= 1)
             .filter(rustig)
@@ -1403,7 +1403,6 @@ pub enum MidiCommand {
     /// Lopende archief-take geforceerd afsluiten en synchroon wegschrijven
     /// (afsluiten app / test-API); antwoord = geschreven pad.
     ArchiveFlush(Sender<Option<std::path::PathBuf>>),
-    Shutdown,
 }
 
 /// Audio device info
@@ -1679,8 +1678,6 @@ pub struct AppState {
     pub ble_midi: Arc<RwLock<Option<vpo_midi::BleMidiManager>>>,
     /// BLE MIDI message channel: sender (passed to BleMidiManager) + receiver (read by MIDI thread)
     pub ble_message_tx: crossbeam_channel::Sender<vpo_midi::MidiMessage>,
-    /// BLE learn tap: receiver for learn handlers to read BLE CC messages while still routing to audio
-    pub ble_learn_rx: crossbeam_channel::Receiver<vpo_midi::MidiMessage>,
     /// BLE MIDI message counter (for UI activity indicator)
     pub ble_message_count: Arc<std::sync::atomic::AtomicU64>,
     /// Master volume (dB) van het huidige orgel — runtime-spiegel zodat het per orgel
@@ -2000,7 +1997,6 @@ impl AppState {
         let midi_player_arc: Arc<RwLock<Option<vpo_midi::MidiFilePlayer>>> = Arc::new(RwLock::new(Some(midi_file_player)));
         // Learn-mode tap: when active, BLE messages are also forwarded here for the learn handlers
         let (ble_learn_tx, ble_learn_rx) = bounded::<vpo_midi::MidiMessage>(256);
-        let ble_learn_rx_for_state = ble_learn_rx.clone();
         let ble_message_count = Arc::new(std::sync::atomic::AtomicU64::new(0));
         let ble_count_for_thread = ble_message_count.clone();
 
@@ -2175,7 +2171,6 @@ impl AppState {
             midi_player: midi_player_arc,
             ble_midi: Arc::new(RwLock::new(None)),
             ble_message_tx,
-            ble_learn_rx: ble_learn_rx_for_state,
             ble_message_count,
             master_volume_db: Arc::new(RwLock::new(None)),
             temperament_settings: Arc::new(RwLock::new(None)),
@@ -2720,7 +2715,6 @@ impl AppState {
                         // vlag); hier alleen de vlag wissen voor de volgende inleer.
                         learn_cancel.store(false, std::sync::atomic::Ordering::Relaxed);
                     }
-                    MidiCommand::Shutdown => break,
                 }
             }
 
@@ -3188,12 +3182,6 @@ impl AppState {
         }
     }
 
-    /// Wait for CC messages until the value settles (no change for 1.5s)
-    /// Returns (channel, controller, value) of the settled position
-    fn wait_for_cc_settled(rx: &Receiver<MidiMessage>, timeout: std::time::Duration) -> Option<(u8, u8, u8)> {
-        Self::wait_for_cc_settled_dual(Some(rx), &crossbeam_channel::never(), timeout)
-    }
-
     /// Pedaal-CC van de generaal crescendo: ruwe waarde → bereik/spiegel →
     /// trap (met Schmitt-hysterese, zie crescendo_next_stage) → apply. Alle
     /// registratie-mutatie zit in apply_crescendo_stage_inner (één
@@ -3594,70 +3582,6 @@ impl AppState {
         last_val
     }
 
-    fn wait_for_cc_settled_dual(
-        usb_rx: Option<&Receiver<MidiMessage>>,
-        ble_rx: &Receiver<MidiMessage>,
-        timeout: std::time::Duration,
-    ) -> Option<(u8, u8, u8)> {
-        let start = std::time::Instant::now();
-        let mut last_cc: Option<(u8, u8, u8)> = None;
-        let mut last_change = std::time::Instant::now();
-
-        while start.elapsed() < timeout {
-            match Self::recv_any_midi(usb_rx, ble_rx, std::time::Duration::from_millis(100)) {
-                Ok(MidiMessage::ControlChange { channel, controller, value }) => {
-                    last_cc = Some((channel, controller, value));
-                    last_change = std::time::Instant::now();
-                }
-                Ok(_) => continue,
-                Err(_) => {
-                    if last_cc.is_some() && last_change.elapsed() > std::time::Duration::from_millis(1500) {
-                        return last_cc;
-                    }
-                    continue;
-                }
-            }
-        }
-        last_cc
-    }
-
-    /// Wait for CC on a specific channel/controller until settled
-    /// Returns the settled value
-    fn wait_for_cc_on(rx: &Receiver<MidiMessage>, target_channel: u8, target_cc: u8, timeout: std::time::Duration) -> Option<u8> {
-        Self::wait_for_cc_on_dual(Some(rx), &crossbeam_channel::never(), target_channel, target_cc, timeout)
-    }
-
-    fn wait_for_cc_on_dual(
-        usb_rx: Option<&Receiver<MidiMessage>>,
-        ble_rx: &Receiver<MidiMessage>,
-        target_channel: u8,
-        target_cc: u8,
-        timeout: std::time::Duration,
-    ) -> Option<u8> {
-        let start = std::time::Instant::now();
-        let mut last_val: Option<u8> = None;
-        let mut last_change = std::time::Instant::now();
-
-        while start.elapsed() < timeout {
-            match Self::recv_any_midi(usb_rx, ble_rx, std::time::Duration::from_millis(100)) {
-                Ok(MidiMessage::ControlChange { channel, controller, value })
-                    if channel == target_channel && controller == target_cc =>
-                {
-                    last_val = Some(value);
-                    last_change = std::time::Instant::now();
-                }
-                Ok(_) => continue,
-                Err(_) => {
-                    if last_val.is_some() && last_change.elapsed() > std::time::Duration::from_millis(1500) {
-                        return last_val;
-                    }
-                    continue;
-                }
-            }
-        }
-        last_val
-    }
-
     /// Check if a MIDI message triggers a preset
     ///
     /// `cc_gate` houdt per CC-binding bij of de trigger scherp staat: een piston
@@ -3678,11 +3602,11 @@ impl AppState {
         for binding in bindings.iter() {
             let matches = match (&binding.trigger, msg) {
                 (MidiPresetTrigger::Note { channel: trigger_ch, note: trigger_note }, MidiMessage::NoteOn { channel, note, velocity }) => {
-                    trigger_ch.map_or(true, |c| c == *channel) && *note == *trigger_note && *velocity > 0
+                    trigger_ch.is_none_or(|c| c == *channel) && *note == *trigger_note && *velocity > 0
                 }
                 (MidiPresetTrigger::ControlChange { channel: trigger_ch, controller: trigger_cc, value: trigger_val },
                  MidiMessage::ControlChange { channel, controller, value }) => {
-                    if trigger_ch.map_or(true, |ch| ch == *channel) && *controller == *trigger_cc {
+                    if trigger_ch.is_none_or(|ch| ch == *channel) && *controller == *trigger_cc {
                         // Flankdetectie per binding: vuren bij de overgang naar
                         // op/boven de drempel (of naar 0 bij ingeleerde waarde 0),
                         // pas herwapenen als de waarde weer voorbij de
@@ -3699,7 +3623,7 @@ impl AppState {
                 }
                 (MidiPresetTrigger::ProgramChange { channel: trigger_ch, program: trigger_prog },
                  MidiMessage::ProgramChange { channel, program }) => {
-                    trigger_ch.map_or(true, |ch| ch == *channel) &&
+                    trigger_ch.is_none_or(|ch| ch == *channel) &&
                     *program == *trigger_prog
                 }
                 // System Exclusive: byte-voor-byte gelijk. Geen flankdetectie
@@ -3712,7 +3636,7 @@ impl AppState {
                 // hetzelfde bit niet blijven vuren.
                 (MidiPresetTrigger::ControlChangeBit { channel: trigger_ch, controller: trigger_cc, bit },
                  MidiMessage::ControlChange { channel, controller, value }) => {
-                    if trigger_ch.map_or(true, |ch| ch == *channel) && controller == trigger_cc {
+                    if trigger_ch.is_none_or(|ch| ch == *channel) && controller == trigger_cc {
                         let aan = (*value >> bit.min(&6)) & 1;
                         cc_gate.vuurt_op_flank(
                             (binding.preset_num, *trigger_ch, *trigger_cc, 128 + *bit),
@@ -3837,7 +3761,7 @@ impl AppState {
 
                 // For custom sample sets without ODF, definition may be None
                 // In that case, use default first_midi_note of 36 (C1)
-                let has_definition = definition.is_some();
+                let _has_definition = definition.is_some();
 
                 for division in &o.divisions {
                     // Check if this division accepts this MIDI channel
@@ -3942,7 +3866,7 @@ impl AppState {
                                 // Dezelfde noot op een ander kanaal van dit klavier telt
                                 // als uiterste: één pijp, één NoteOn.
                                 let anderen = held.iter()
-                                    .filter(|&&(ch, n, _)| !(ch == channel && n == note) && src_m.map_or(false, |m| m.accepts(ch, n)))
+                                    .filter(|&&(ch, n, _)| !(ch == channel && n == note) && src_m.is_some_and(|m| m.accepts(ch, n)))
                                     .map(|&(_, n, _)| n);
                                 let melodie = route.gate_type == "melody";
                                 let uiterste = if melodie { anderen.max() } else { anderen.min() };
@@ -4111,7 +4035,7 @@ impl AppState {
                                 let melodie = route.gate_type == "melody";
                                 let (loslaten, volgende) = if solo {
                                     let held = held_notes.read();
-                                    let op_bron = |ch: u8, n: u8| src_mapping.map_or(false, |m| m.accepts(ch, n));
+                                    let op_bron = |ch: u8, n: u8| src_mapping.is_some_and(|m| m.accepts(ch, n));
                                     let nog_uiterste = held.iter().any(|&(ch, n, _)|
                                         op_bron(ch, n) && if melodie { n >= note } else { n <= note });
                                     let volgende = if melodie {
@@ -4162,33 +4086,33 @@ impl AppState {
                 // bijgeluiden-master. Komt vóór zwel/crescendo omdat deze
                 // bindings zich specifiek binden (anders dan de generieke
                 // zwel-CC's) en hun eigen trede-filter niet nodig hebben.
-                if let Some(doel) = { *MISC_CC_LEARNING().read() } {
+                if let Some(doel) = { *misc_cc_learning().read() } {
                     // Jitterfilter (0.8.1): een zweltrede die in rust ±2
                     // wiebelt (zie 0.7.45) stuurt CC's zonder dat iemand
                     // iets aanraakt; die mogen de binding niet kapen. Pas
                     // binden als een CC ten minste 16 eenheden van zijn
                     // eerst geziene waarde is weggelopen, of een knopwaarde
                     // (0/127) stuurt.
-                    let eerst = *MISC_CC_LEARN_SEEN().write().entry((channel, controller)).or_insert(value);
+                    let eerst = *misc_cc_learn_seen().write().entry((channel, controller)).or_insert(value);
                     let beweging = (value as i16 - eerst as i16).unsigned_abs();
                     if beweging >= 16 || value == 0 || value == 127 {
-                        let mut lijst = MISC_CC_BINDINGS().write();
+                        let mut lijst = misc_cc_bindings().write();
                         lijst.retain(|b| b.target != doel);
                         lijst.push(MiscCcBinding { target: doel, channel, cc: controller });
-                        *MISC_CC_LEARNING().write() = None;
-                        MISC_CC_LEARN_SEEN().write().clear();
+                        *misc_cc_learning().write() = None;
+                        misc_cc_learn_seen().write().clear();
                         tracing::info!("MIDI-leren: {:?} gekoppeld aan kanaal {} CC{}",
                             doel, channel + 1, controller);
                     }
                 }
-                // Toepassen op binnenkomende CC's; de UI leest MISC_CC_PENDING
+                // Toepassen op binnenkomende CC's; de UI leest misc_cc_pending
                 // via periodieke poll en roept de echte setters aan, zodat de
                 // crossfade van de luisterpositie via dezelfde code loopt als
                 // bij een handmatige schuif.
-                for binding in MISC_CC_BINDINGS().read().iter() {
+                for binding in misc_cc_bindings().read().iter() {
                     if binding.channel == channel && binding.cc == controller {
                         let v = misc_cc_waarde_omzetten(binding.target, value);
-                        MISC_CC_PENDING().write().insert(binding.target, v);
+                        misc_cc_pending().write().insert(binding.target, v);
                     }
                 }
                 // Demping voor een CC die als zwelkast is ingeleerd (0.7.45).
@@ -4595,7 +4519,7 @@ impl AppState {
                             ..load_audio_prefs(&self.app_data_dir)
                         });
                     }
-                    return Ok(outcome(true, true, None, self));
+                    Ok(outcome(true, true, None, self))
                 }
                 Err(e) => {
                     // Doel is niet-ASIO maar er hangt nog een (idle) gecachte
@@ -4871,55 +4795,12 @@ impl AppState {
         self.held_notes.write().clear();
     }
 
-    /// Get voice count
-    pub fn voice_count(&self) -> usize {
-        self.audio_player.read()
-            .as_ref()
-            .map(|p| p.voice_count())
-            .unwrap_or(0)
-    }
-
     /// Get peak meters
     pub fn peak_meters(&self) -> (f32, f32) {
         self.audio_player.read()
             .as_ref()
             .map(|p| p.peak_meters())
             .unwrap_or((0.0, 0.0))
-    }
-
-    /// Check if a stop is drawn
-    pub fn is_stop_drawn(&self, stop_id: &str) -> bool {
-        self.drawn_stops.read().contains(&stop_id.to_string())
-    }
-
-    /// Check of een stop_id voorkomt in het huidige geladen orgel.
-    fn stop_id_exists(&self, stop_id: &str) -> bool {
-        let info = self.loaded_organ_info.read();
-        let info = match info.as_ref() {
-            Some(o) => o,
-            None => return false,
-        };
-        info.divisions.iter()
-            .any(|d| d.stops.iter().any(|s| s.id == stop_id))
-    }
-
-    /// Toggle a stop. Geeft `None` terug als de stop_id niet bestaat in het geladen orgel.
-    pub fn toggle_stop(&self, stop_id: &str) -> Option<bool> {
-        // Sta uitzetten van een al-gedraaide stop altijd toe (voor cleanup-situaties),
-        // maar weiger aanzetten van onbekende IDs.
-        let already_drawn = self.drawn_stops.read().contains(&stop_id.to_string());
-        if !already_drawn && !self.stop_id_exists(stop_id) {
-            tracing::warn!("toggle_stop geweigerd: onbekende stop_id '{}'", stop_id);
-            return None;
-        }
-        let mut drawn = self.drawn_stops.write();
-        if let Some(pos) = drawn.iter().position(|s| s == stop_id) {
-            drawn.remove(pos);
-            Some(false)
-        } else {
-            drawn.push(stop_id.to_string());
-            Some(true)
-        }
     }
 
     /// Vouw de actieve koppels uit tot effectieve routes, ínclusief doorkoppelen
@@ -5047,7 +4928,7 @@ impl AppState {
             // Register weggetrokken: alle klinkende pijpen in één commando
             // loslaten (een preset-wissel kan tientallen registers tegelijk
             // wegtrekken — per-pijp NoteOffs zouden de command-queue vol duwen).
-            rt_send(&tx, AudioCommand::ReleaseStop {
+            rt_send(tx, AudioCommand::ReleaseStop {
                 stop_id: stop.internal_stop_id,
             });
             return;
@@ -5060,7 +4941,7 @@ impl AppState {
         // regel alleen voor de directe route: een onder T.A. getrokken tongwerk
         // klonk via het pedaalkoppel tóch, en startte bij T.A.-uit nog eens
         // (refcount 2 → hanger).
-        let ta_active = o.couplers.as_ref().map_or(false, |cl| cl.iter().any(|c| {
+        let ta_active = o.couplers.as_ref().is_some_and(|cl| cl.iter().any(|c| {
             c.coupler_type == "ta" && ta_couplers.contains(&c.id) && c.source_division == div_name
         }));
         if ta_active && stop.is_reed { return; }
@@ -5068,7 +4949,7 @@ impl AppState {
         let send_note_on = |note: u8, vel: u8| {
             let t = note as u32;
             if let Some((pipe_num, verschuiving)) = pijp_voor_register(t, stop) {
-                rt_send(&tx, AudioCommand::NoteOn {
+                rt_send(tx, AudioCommand::NoteOn {
                     stop_id: stop.internal_stop_id,
                     pipe_num,
                     midi_note: note,
@@ -5083,7 +4964,7 @@ impl AppState {
         if !unison_off_actief(o.couplers.as_ref(), ta_couplers, div_name) {
             let mapping = mappings.iter().find(|m| m.division == div_name);
             for &(ch, note, vel) in held {
-                let accepts = mapping.map_or(false, |m| m.accepts(ch, note));
+                let accepts = mapping.is_some_and(|m| m.accepts(ch, note));
                 if !accepts { continue; }
                 let transpose = mapping.map_or(0, |m| m.transpose);
                 let transposed = mapping.map_or_else(|| (note as i16 + transpose as i16).clamp(0, 127) as u8, |m| m.speelnoot(note));
@@ -5151,7 +5032,7 @@ impl AppState {
                 let t = (src_note as i32 + route.pitch_offset).clamp(0, 127) as u32;
                 for stop in &dest_div.stops {
                     if let Some((pipe_num, verschuiving)) = pijp_voor_register(t, stop) {
-                        rt_send(&tx, AudioCommand::NoteOff {
+                        rt_send(tx, AudioCommand::NoteOff {
                             stop_id: stop.internal_stop_id,
                             pipe_num,
                             verschuiving,
@@ -5177,7 +5058,7 @@ impl AppState {
                 for stop in dest_div.stops.iter().filter(|s| s.drawn) {
                     if ta_active && stop.is_reed { continue; }
                     if let Some((pipe_num, verschuiving)) = pijp_voor_register(t, stop) {
-                        rt_send(&tx, AudioCommand::NoteOn {
+                        rt_send(tx, AudioCommand::NoteOn {
                             stop_id: stop.internal_stop_id,
                             pipe_num,
                             midi_note: t as u8,
@@ -5211,7 +5092,7 @@ impl AppState {
                 if was == wordt { continue; }
                 for stop in div.stops.iter().filter(|s| s.drawn && s.is_reed) {
                     if wordt {
-                        rt_send(&tx, AudioCommand::ReleaseStop { stop_id: stop.internal_stop_id });
+                        rt_send(tx, AudioCommand::ReleaseStop { stop_id: stop.internal_stop_id });
                     } else {
                         Self::sync_stop_voices_inner(o, tx, mappings, &onveranderd, new_couplers, held, &stop.id, true);
                     }
@@ -5242,18 +5123,16 @@ impl AppState {
                     if !stop.drawn || (ta_active && stop.is_reed) { continue; }
                     if wordt {
                         if let Some((pipe_num, verschuiving)) = pijp_voor_register(t, stop) {
-                            rt_send(&tx, AudioCommand::NoteOff { stop_id: stop.internal_stop_id, pipe_num, verschuiving });
+                            rt_send(tx, AudioCommand::NoteOff { stop_id: stop.internal_stop_id, pipe_num, verschuiving });
                         }
-                    } else {
-                        if let Some((pipe_num, verschuiving)) = pijp_voor_register(t, stop) {
-                            rt_send(&tx, AudioCommand::NoteOn {
-                                stop_id: stop.internal_stop_id,
-                                pipe_num,
-                                midi_note: t as u8,
-                                velocity: vel as f32 / 127.0,
-                                verschuiving,
-                            });
-                        }
+                    } else if let Some((pipe_num, verschuiving)) = pijp_voor_register(t, stop) {
+                        rt_send(tx, AudioCommand::NoteOn {
+                            stop_id: stop.internal_stop_id,
+                            pipe_num,
+                            midi_note: t as u8,
+                            velocity: vel as f32 / 127.0,
+                            verschuiving,
+                        });
                     }
                 }
             }
@@ -5405,12 +5284,6 @@ impl AppState {
         self.preset_bindings.read().clone()
     }
 
-    /// Set preset bindings
-    pub fn set_preset_bindings(&self, bindings: Vec<MidiPresetBinding>) {
-        *self.preset_bindings.write() = bindings.clone();
-        let _ = self.midi_tx.send(MidiCommand::SetPresetBindings(bindings));
-    }
-
     /// Learn MIDI binding for a preset (waits for next MIDI input)
     pub fn learn_preset_binding(&self, preset_num: u8) -> Result<Option<MidiPresetTrigger>, String> {
         let (tx, rx) = bounded(1);
@@ -5438,7 +5311,7 @@ impl AppState {
         if count >= 4 {
             return Err("Maximaal 4 MIDI-koppelingen per actie; verwijder er eerst één".to_string());
         }
-        if bindings.iter().any(|b| *b == binding) {
+        if bindings.contains(&binding) {
             return Err("Deze MIDI-koppeling bestaat al voor deze actie".to_string());
         }
         bindings.push(binding);
@@ -5468,7 +5341,7 @@ impl AppState {
     /// Vervang één specifieke koppeling in-place (bewerken in de UI).
     pub fn replace_preset_binding_at(&self, preset_num: u8, index: usize, new_binding: MidiPresetBinding) -> Result<(), String> {
         let mut bindings = self.preset_bindings.write();
-        if bindings.iter().any(|b| *b == new_binding) {
+        if bindings.contains(&new_binding) {
             return Err("Deze MIDI-koppeling bestaat al".to_string());
         }
         let pos = bindings.iter()

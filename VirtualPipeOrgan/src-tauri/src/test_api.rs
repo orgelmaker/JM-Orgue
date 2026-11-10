@@ -253,7 +253,7 @@ fn serve_loop(
         let (origin, host) = (kopwaarde(&request, "Origin"), kopwaarde(&request, "Host"));
         if let Err(reden) = herkomst_toegestaan(scope, port, origin.as_deref(), host.as_deref()) {
             let n = GEWEIGERD.fetch_add(1, Ordering::Relaxed) + 1;
-            if n == 1 || n % 100 == 0 {
+            if n == 1 || n.is_multiple_of(100) {
                 warn!("test-API: verzoek {} {} geweigerd ({}); geweigerd sinds start: {}", method, url, reden, n);
             }
             let _ = request.respond(json_response(403, json!({ "error": reden })));
@@ -310,7 +310,7 @@ fn token_eq(a: &str, b: &str) -> bool {
 /// als er niets achter het token staat; None als prefix/token niet klopt.
 fn strip_token_prefix(url: &str, token: &str) -> Option<String> {
     let rest = url.strip_prefix("/r/")?;
-    let seg_end = rest.find(|c| c == '/' || c == '?').unwrap_or(rest.len());
+    let seg_end = rest.find(['/', '?']).unwrap_or(rest.len());
     let segment = &rest[..seg_end];
     if segment.is_empty() || !token_eq(segment, token) {
         return None;

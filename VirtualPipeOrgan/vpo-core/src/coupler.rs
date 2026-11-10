@@ -82,7 +82,7 @@ impl Coupler {
         };
         
         let result = note as i16 + offset;
-        if result >= 0 && result <= 127 {
+        if (0..=127).contains(&result) {
             Some(result as MidiNote)
         } else {
             None

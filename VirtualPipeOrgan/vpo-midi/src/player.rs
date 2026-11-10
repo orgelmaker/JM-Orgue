@@ -171,6 +171,12 @@ pub struct MidiFilePlayer {
     file_loaded: Arc<RwLock<bool>>,
 }
 
+impl Default for MidiFilePlayer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MidiFilePlayer {
     pub fn new() -> Self {
         let (tx, rx) = bounded::<MidiMessage>(1024);

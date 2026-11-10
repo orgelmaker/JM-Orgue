@@ -1,12 +1,12 @@
 //! MIDI device management
 
-use midir::{MidiInput, MidiInputConnection, MidiInputPort, MidiOutput, MidiOutputConnection, MidiOutputPort};
+use midir::{MidiInput, MidiInputConnection, MidiInputPort, MidiOutput, MidiOutputConnection};
 use crossbeam_channel::{Sender, Receiver, bounded};
-use parking_lot::{Mutex, RwLock};
+use parking_lot::RwLock;
 use std::sync::Arc;
 use std::collections::HashMap;
 use thiserror::Error;
-use tracing::{info, warn, error, debug};
+use tracing::{info, warn};
 
 use crate::MidiMessage;
 

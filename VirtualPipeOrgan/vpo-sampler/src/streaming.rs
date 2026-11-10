@@ -7,15 +7,14 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::thread;
-use std::io::{Read, Seek, SeekFrom};
 use std::fs::File;
 
 use crossbeam_channel::{Sender, Receiver, bounded, TrySendError};
 use parking_lot::RwLock;
 use hound::WavReader;
-use tracing::{info, debug, warn, error};
+use tracing::{info, warn, error};
 
-use crate::{SampleData, SampleError};
+use crate::SampleError;
 
 /// Size of preload buffer in samples (at 48kHz, 4800 = 100ms)
 pub const PRELOAD_SAMPLES: usize = 4800;
@@ -287,7 +286,7 @@ impl StreamingEngine {
         info!("Streaming thread started");
 
         // File handle cache to avoid reopening files
-        let mut file_cache: HashMap<PathBuf, WavReader<std::io::BufReader<File>>> = HashMap::new();
+        let file_cache: HashMap<PathBuf, WavReader<std::io::BufReader<File>>> = HashMap::new();
 
         while let Ok(request) = request_rx.recv() {
             let samples_lock = samples.read();
@@ -295,8 +294,8 @@ impl StreamingEngine {
             if let Some(sample_info) = samples_lock.get(&request.key) {
                 let path = &sample_info.file_path;
                 let channels = sample_info.channels;
-                let bytes_per_sample = sample_info.bytes_per_sample;
-                let sample_rate = sample_info.sample_rate;
+                let _bytes_per_sample = sample_info.bytes_per_sample;
+                let _sample_rate = sample_info.sample_rate;
 
                 // Try to get cached reader or open new one
                 let reader_result = if file_cache.contains_key(path) {

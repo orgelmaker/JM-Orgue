@@ -174,7 +174,7 @@ impl ConvolutionReverb {
         let partition_size = partition_size.max(1);
         let fft_size = partition_size * 2;
         let bins = fft_size / 2 + 1;
-        let num_partitions = (impulse_response.len() + partition_size - 1) / partition_size;
+        let num_partitions = impulse_response.len().div_ceil(partition_size);
 
         let mut planner = RealFftPlanner::<f32>::new();
         let fft_forward = planner.plan_fft_forward(fft_size);
@@ -247,7 +247,7 @@ impl ConvolutionReverb {
     /// is er geen ruimte om te spreiden en gebeurt alles in die ene aanroep.
     fn bereken_macs_per_call(num_partitions: usize, partition_size: usize) -> usize {
         let slots = partition_size.saturating_sub(1).max(1);
-        (num_partitions + slots - 1) / slots
+        num_partitions.div_ceil(slots)
     }
 
     /// Latentie van het NATTE pad in samples: 2·partition_size.

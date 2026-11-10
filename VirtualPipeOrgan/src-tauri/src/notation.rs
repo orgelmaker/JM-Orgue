@@ -190,7 +190,7 @@ pub fn extract_notes(bytes: &[u8]) -> Result<Vec<RawNote>, String> {
         let mut tick: u64 = 0;
         for ev in track.iter() {
             tick += ev.delta.as_int() as u64;
-            events.push((tick, ev.kind.clone()));
+            events.push((tick, ev.kind));
         }
     }
     events.sort_by_key(|(t, _)| *t);
@@ -367,7 +367,7 @@ pub(crate) fn quantize_notes(notes: &[NoteEv], bpm: f64, q: u64, beat_unit: u64)
         for &(lvl, stap) in &roosters {
             let f = fout(&t.punten, stap);
             if !(f * 1.5 < e_bin && f <= 0.3 * stap as f64 * gewicht) { continue; }
-            let triool_afstand = |d: u64| (d == stap || d == 2 * stap) && d % FIJN != 0;
+            let triool_afstand = |d: u64| (d == stap || d == 2 * stap) && !d.is_multiple_of(FIJN);
             let mut inz: Vec<u64> = t.inzetten.iter().map(|&x| snap_op(x, stap)).collect();
             inz.sort_unstable();
             inz.dedup();
@@ -517,7 +517,7 @@ fn allowed_durations(q: u64) -> Vec<(u64, &'static str, bool)> {
     let mut out: Vec<(u64, &'static str, bool)> = Vec::new();
     // Op het fijne raster (q deelbaar door FIJN) alleen waarden op het
     // gebruikersraster; een grof q (oude aanroepen, tests) blijft als vanouds.
-    let fijn = q % FIJN == 0;
+    let fijn = q.is_multiple_of(FIJN);
     for (len, name) in base {
         if len == 0 || (fijn && len % FIJN != 0) { continue; }
         let dotted = len + len / 2;
@@ -574,7 +574,7 @@ fn pc_van_letter(step: char) -> Option<i16> {
 /// octaaf, naam van het voorteken voor `<accidental>` — alleen bij expliciet).
 /// Past deze spelling bij deze toon? (0.7.89)
 pub fn spelling_past(sp: Spelling, midi: u8) -> bool {
-    pc_van_letter(sp.step).map_or(false, |pc| (-2..=2).contains(&sp.alter) && (pc + sp.alter as i16).rem_euclid(12) == (midi % 12) as i16)
+    pc_van_letter(sp.step).is_some_and(|pc| (-2..=2).contains(&sp.alter) && (pc + sp.alter as i16).rem_euclid(12) == (midi % 12) as i16)
 }
 
 fn spel_noot(midi: u8, key_fifths: i8, spelling: Option<Spelling>, octaaf_shift: i8) -> (char, i8, i8, Option<&'static str>) {
@@ -701,7 +701,7 @@ pub const FIJN: u64 = 3;
 pub fn beam_tel(measure_len: u64, beats: u64, beat_unit: u64) -> u64 {
     let beats = beats.max(1);
     let tel = (measure_len / beats).max(1);
-    if beat_unit == 8 && beats % 3 == 0 { tel * 3 } else { tel }
+    if beat_unit == 8 && beats.is_multiple_of(3) { tel * 3 } else { tel }
 }
 
 /// Kwantiseer alle balken, ook lege (0.7.83: een leeg stuk toont lege
@@ -1244,7 +1244,7 @@ pub fn render_musicxml_met_notemap(qs: &QuantizedScore, opts: &NotationOptions, 
         .chain(qs.staves.iter().flat_map(|st| st.marks.iter().map(|mk| mk.pos + 1)))
         .max().unwrap_or(0);
     let min_measures = opts.min_measures.unwrap_or(0) as u64;
-    let num_measures = ((total + measure_len - 1) / measure_len).max(min_measures).max(1);
+    let num_measures = total.div_ceil(measure_len).max(min_measures).max(1);
 
     let schoon = |v: &Option<String>| v.as_deref().map(str::trim).filter(|t| !t.is_empty()).map(str::to_string);
     let title = schoon(&opts.title);
@@ -1621,12 +1621,10 @@ pub struct Layer {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct MetronomeCfg {
     pub click_on: bool,
     pub count_in_beats: u8,
-}
-impl Default for MetronomeCfg {
-    fn default() -> Self { Self { click_on: false, count_in_beats: 0 } }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1780,7 +1778,10 @@ impl Score {
             }
         }
     }
+    // Alleen de test van het bestandsformaat (notation_file.rs) gebruikt deze twee.
+    #[cfg(test)]
     pub fn undo_len(&self) -> usize { self.undo.len() }
+    #[cfg(test)]
     pub fn redo_len(&self) -> usize { self.redo.len() }
     pub fn new_event_id(&mut self) -> u64 { let id = self.next_event_id; self.next_event_id = self.next_event_id.saturating_add(1); id }
     pub fn new_text_id(&mut self) -> u64 { let id = self.next_text_id.max(1); self.next_text_id = id.saturating_add(1); id }
@@ -2087,7 +2088,7 @@ pub enum EditCommand {
     /// Wijzig het toongeslacht (majeur/mineur, 0.7.72).
     SetMode { old: bool, new: bool },
     /// Hand en splitspunt van een balk in klavar (0.7.70).
-    SetLayerHand { layer: u32, old: (Option<KlavarHand>, Option<u8>), new: (Option<KlavarHand>, Option<u8>) },
+    SetLayerHand { layer: u32, new: (Option<KlavarHand>, Option<u8>) },
     /// Hand per noot in klavar (0.7.70): (event-id, nieuwe hand); undo bewaart de oude.
     SetHands { items: Vec<(u64, Option<KlavarHand>)> },
     /// Stem per noot (0.7.86): (event-id, stem 1..=4); undo bewaart de oude.
@@ -2106,14 +2107,14 @@ pub enum EditCommand {
     AddSpan { span: Span },
     RemoveSpan { span: Span },
     /// Maatstrepen en volta van één maat (0.7.89); None = gewone maatstreep.
-    SetBar { measure: u32, old: Option<BarAttr>, new: Option<BarAttr> },
+    SetBar { measure: u32, new: Option<BarAttr> },
     /// Meerdere commando's als één stap (0.7.89): undo draait ze omgekeerd terug.
     Batch { cmds: Vec<EditCommand> },
     /// Voeg een take toe (met inverse: verwijder die take).
     /// Voor de undo bewaren we ID + laag; content is leeg bij add.
     AddTake { layer: u32, take_id: u32 },
     /// Verwijder een laag met alle takes (undo herstelt de complete laag).
-    RemoveLayer { snapshot: Layer, position: usize, texts: Vec<TextMark>, spans: Vec<Span> },
+    RemoveLayer { snapshot: Layer, position: usize },
     /// Undo-inverse van AddTake: verwijderde take terugzetten op dezelfde plek.
     RestoreTake { layer: u32, index: usize, take: Take },
     /// Undo-inverse van RemoveLayer: laag terugzetten op dezelfde plek.
@@ -2279,14 +2280,14 @@ impl EditCommand {
                 score.bump_gen();
                 Some(EditCommand::SetMode { old: new, new: old })
             }
-            EditCommand::SetLayerHand { layer, old: _, new } => {
+            EditCommand::SetLayerHand { layer, new } => {
                 let Some(l) = score.layers.iter_mut().find(|l| l.id == layer) else { return None };
                 let oud = (l.klavar_hand, l.klavar_split);
                 if oud == new { return None; }
                 l.klavar_hand = new.0;
                 l.klavar_split = new.1;
                 score.bump_gen();
-                Some(EditCommand::SetLayerHand { layer, old: new, new: oud })
+                Some(EditCommand::SetLayerHand { layer, new: oud })
             }
             EditCommand::SetHands { items } => {
                 let mut old: Vec<(u64, Option<KlavarHand>)> = Vec::new();
@@ -2358,7 +2359,7 @@ impl EditCommand {
                 score.bump_gen();
                 Some(EditCommand::AddSpan { span: weg })
             }
-            EditCommand::SetBar { measure, old: _, new } => {
+            EditCommand::SetBar { measure, new } => {
                 let huidig = score.bars.iter().find(|b| b.measure == measure).cloned();
                 let nieuw = new.filter(|b| b.left.is_some() || b.right.is_some() || b.ending.is_some()).map(|mut b| { b.measure = measure; b });
                 if huidig == nieuw { return None; }
@@ -2366,7 +2367,7 @@ impl EditCommand {
                 if let Some(b) = nieuw.clone() { score.bars.push(b); }
                 score.bars.sort_by_key(|b| b.measure);
                 score.bump_gen();
-                Some(EditCommand::SetBar { measure, old: nieuw, new: huidig })
+                Some(EditCommand::SetBar { measure, new: huidig })
             }
             EditCommand::Batch { cmds } => {
                 let mut inv: Vec<EditCommand> = Vec::new();
@@ -2436,7 +2437,7 @@ impl EditCommand {
                 }
                 None
             }
-            EditCommand::RemoveLayer { snapshot, position, texts: _, spans: _ } => {
+            EditCommand::RemoveLayer { snapshot, position } => {
                 let idx = score.layers.iter().position(|l| l.id == snapshot.id);
                 if let Some(i) = idx {
                     let removed = score.layers.remove(i);
@@ -2466,7 +2467,7 @@ impl EditCommand {
                 score.bump_gen();
                 // De inverse bevat een verse snapshot: bij redo verwijdert hij
                 // dezelfde laag (met haar teksten en bogen) opnieuw.
-                Some(EditCommand::RemoveLayer { snapshot: score.layers[idx].clone(), position: idx, texts: Vec::new(), spans: Vec::new() })
+                Some(EditCommand::RemoveLayer { snapshot: score.layers[idx].clone(), position: idx })
             }
         }
     }
@@ -2916,13 +2917,13 @@ mod tests {
     fn set_layer_hand_undo() {
         let mut sc = Score::new(1);
         let l = sc.add_layer("Hoofdwerk".into(), None);
-        let cmd = EditCommand::SetLayerHand { layer: l, old: (None, None), new: (Some(KlavarHand::Left), Some(60)) };
+        let cmd = EditCommand::SetLayerHand { layer: l, new: (Some(KlavarHand::Left), Some(60)) };
         let inv = cmd.apply(&mut sc).expect("inverse");
         assert_eq!((sc.layers[0].klavar_hand, sc.layers[0].klavar_split), (Some(KlavarHand::Left), Some(60)));
         inv.apply(&mut sc);
         assert_eq!((sc.layers[0].klavar_hand, sc.layers[0].klavar_split), (None, None));
         // Ongewijzigd = geen undo-stap.
-        let niets = EditCommand::SetLayerHand { layer: l, old: (None, None), new: (None, None) };
+        let niets = EditCommand::SetLayerHand { layer: l, new: (None, None) };
         assert!(niets.apply(&mut sc).is_none());
     }
 
@@ -3307,7 +3308,7 @@ mod tests {
         sc.texts.push(TextMark { id: ta, layer_id: a, start_us: 0, kind: TextKind::Tempo, text: "Adagio".into(), placement: Placement::Above });
         sc.texts.push(TextMark { id: tb, layer_id: b, start_us: 0, kind: TextKind::Free, text: "x".into(), placement: Placement::Above });
         let snapshot = sc.layers[0].clone();
-        let inv = EditCommand::RemoveLayer { snapshot, position: 0, texts: Vec::new(), spans: Vec::new() }.apply(&mut sc).unwrap();
+        let inv = EditCommand::RemoveLayer { snapshot, position: 0 }.apply(&mut sc).unwrap();
         assert_eq!(sc.texts.len(), 1);
         assert_eq!(sc.texts[0].id, tb);
         let redo = inv.apply(&mut sc).unwrap();
@@ -3477,7 +3478,7 @@ mod tests {
         let sid = sc.new_span_id();
         EditCommand::AddSpan { span: Span { id: sid, layer_id: l, kind: SpanKind::Slur, from_event: 1, to_event: 2 } }.apply(&mut sc);
         let snapshot = sc.layers[0].clone();
-        let inv = EditCommand::RemoveLayer { snapshot, position: 0, texts: Vec::new(), spans: Vec::new() }.apply(&mut sc).unwrap();
+        let inv = EditCommand::RemoveLayer { snapshot, position: 0 }.apply(&mut sc).unwrap();
         assert!(sc.spans.is_empty());
         inv.apply(&mut sc);
         assert_eq!(sc.spans.len(), 1);
@@ -3486,14 +3487,14 @@ mod tests {
     #[test]
     fn maatteken_undo_redo() {
         let mut sc = Score::new(1);
-        let inv = EditCommand::SetBar { measure: 2, old: None, new: Some(BarAttr { measure: 2, left: None, right: Some(BarStyle::Final), ending: None }) }.apply(&mut sc).unwrap();
+        let inv = EditCommand::SetBar { measure: 2, new: Some(BarAttr { measure: 2, left: None, right: Some(BarStyle::Final), ending: None }) }.apply(&mut sc).unwrap();
         assert_eq!(sc.bars.len(), 1);
         let redo = inv.apply(&mut sc).unwrap();
         assert!(sc.bars.is_empty());
         redo.apply(&mut sc);
         assert_eq!(sc.bars[0].right, Some(BarStyle::Final));
         // Alles leeg = regel weg.
-        assert!(EditCommand::SetBar { measure: 2, old: None, new: Some(BarAttr { measure: 2, left: None, right: None, ending: None }) }.apply(&mut sc).is_some());
+        assert!(EditCommand::SetBar { measure: 2, new: Some(BarAttr { measure: 2, left: None, right: None, ending: None }) }.apply(&mut sc).is_some());
         assert!(sc.bars.is_empty());
     }
 

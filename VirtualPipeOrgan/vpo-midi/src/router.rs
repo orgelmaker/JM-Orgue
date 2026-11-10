@@ -1,6 +1,6 @@
 //! MIDI routing - maps MIDI messages to organ actions
 
-use vpo_core::{MidiNote, Keyboard};
+use vpo_core::MidiNote;
 use crate::{MidiMessage, cc};
 use std::collections::HashMap;
 
@@ -130,7 +130,7 @@ impl MidiRouter {
                 
                 // Check custom note button mappings
                 for mapping in &self.mappings {
-                    if mapping.channel.map_or(true, |c| c == *channel) {
+                    if mapping.channel.is_none_or(|c| c == *channel) {
                         if let MidiTrigger::NoteButton { note: trigger_note } = &mapping.trigger {
                             if note == trigger_note {
                                 actions.push(mapping.action.clone());
@@ -165,7 +165,7 @@ impl MidiRouter {
                 
                 // Check custom CC mappings
                 for mapping in &self.mappings {
-                    if mapping.channel.map_or(true, |c| c == *channel) {
+                    if mapping.channel.is_none_or(|c| c == *channel) {
                         if let MidiTrigger::ControlChange { controller: trigger_cc } = &mapping.trigger {
                             if controller == trigger_cc && *value > 63 {
                                 actions.push(mapping.action.clone());
@@ -183,7 +183,7 @@ impl MidiRouter {
             MidiMessage::ProgramChange { channel, program } => {
                 // Map program changes to pistons
                 for mapping in &self.mappings {
-                    if mapping.channel.map_or(true, |c| c == *channel) {
+                    if mapping.channel.is_none_or(|c| c == *channel) {
                         if let MidiTrigger::ProgramChange { program: trigger_prog } = &mapping.trigger {
                             if program == trigger_prog {
                                 actions.push(mapping.action.clone());

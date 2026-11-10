@@ -212,7 +212,7 @@ impl BackgroundEngine {
     /// Vervang alle voices door de nieuwe set (orgelwissel of eerste load).
     /// Geeft de OUDE voices terug zodat de aanroeper ze buiten de audio-
     /// thread kan droppen (een blower-opname is tientallen MB; free() in de
-    /// callback is niet realtime-veilig — zelfde regel als LoadSamples).
+    /// callback is niet realtime-veilig — zelfde regel als RegisterPreloadBuffers).
     pub fn set_voices(&mut self, nieuw: Vec<BackgroundVoice>) -> Vec<ActiveVoice> {
         let oud = std::mem::take(&mut self.voices);
         self.voices = nieuw.into_iter().map(|v| ActiveVoice {
@@ -230,12 +230,6 @@ impl BackgroundEngine {
             pos: 0.0,
         }).collect();
         oud
-    }
-
-    /// Alle voices wissen (bv. bij orgel-ontladen).
-    pub fn clear(&mut self) {
-        self.voices.clear();
-        self.one_shots.clear();
     }
 
     /// Motor aan/uit zetten; blower-voices faden in of uit.
@@ -296,6 +290,7 @@ impl BackgroundEngine {
     /// Bijgeluiden lopen buiten de master-limiter om; de clamping-stap aan
     /// het eind van de callback (`frame.clamp(-1.0, 1.0)`) begrenst wat we
     /// hier bijtellen alsnog.
+    #[cfg(test)]
     pub fn mix_interleaved(&mut self, data: &mut [f32], start_frame: usize, frames: usize, channels: usize) {
         self.mix_interleaved_met_opname(data, start_frame, frames, channels, None);
     }
@@ -410,61 +405,10 @@ impl BackgroundEngine {
         BG_PIEK.fetch_max(piek.to_bits(), std::sync::atomic::Ordering::Relaxed);
     }
 
-    /// Genereer één (L, R)-paar en schuif de voices één stap op. Mixt de
-    /// doorlopende voices én de actieve one-shots samen.
-    fn volgende_sample(&mut self) -> (f32, f32) {
-        let gg = self.global_gain;
-        let mg = self.motor_gain;
-        let mut out_l = 0.0f32;
-        let mut out_r = 0.0f32;
-        // One-shots: eenmalig afspelen tot `pos >= len`. Opruiming daarvan
-        // gebeurt na elke buffer in `mix_interleaved`.
-        for v in &mut self.one_shots {
-            let len_l = v.voice.data_l.len();
-            if len_l == 0 { continue; }
-            let rate = v.voice.rate;
-            if v.pos < len_l as f64 {
-                let p = v.pos;
-                let p0 = p.floor() as usize;
-                if p0 >= len_l { v.pos = len_l as f64; continue; }
-                let p1 = (p0 + 1).min(len_l - 1);
-                let frac = (p - p.floor()) as f32;
-                let sl = v.voice.data_l[p0] * (1.0 - frac) + v.voice.data_l[p1] * frac;
-                let sr = match v.voice.data_r.as_ref() {
-                    Some(r) if r.len() > p1 => r[p0] * (1.0 - frac) + r[p1] * frac,
-                    _ => sl,
-                };
-                out_l += sl * v.current_gain;
-                out_r += sr * v.current_gain;
-                v.pos += rate;
-            }
-        }
-        for v in &mut self.voices {
-            let len_l = v.voice.data_l.len();
-            if len_l == 0 { continue; }
-            let vg = v.voice.voice_gain * gg * Self::soort_gain(mg, v.voice.kind);
-            let effectief_doel = v.target_gain * vg;
-            let fade_step = vg / FADE_FRAMES.max(1.0);
-            if (v.current_gain - effectief_doel).abs() < fade_step {
-                v.current_gain = effectief_doel;
-            } else if v.current_gain < effectief_doel {
-                v.current_gain += fade_step;
-            } else {
-                v.current_gain -= fade_step;
-            }
-            if v.current_gain > 0.0 || effectief_doel > 0.0 {
-                let (sl, sr) = v.lees();
-                out_l += sl * v.current_gain;
-                out_r += sr * v.current_gain;
-            }
-            v.stap();
-        }
-        (out_l, out_r)
-    }
-
     /// Meng de achtergrondgeluiden in een stereo-planair paar (L, R) van
     /// lengte `frames`. Loopt onvoorwaardelijk door; fade in/uit op basis
     /// van target_gain. Vooral voor tests.
+    #[cfg(test)]
     pub fn mix_stereo(&mut self, out_l: &mut [f32], out_r: &mut [f32]) {
         if !self.is_actief() { return; }
         debug_assert_eq!(out_l.len(), out_r.len());

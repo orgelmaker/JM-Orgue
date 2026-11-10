@@ -145,7 +145,7 @@ pub fn pipe_pitch_input(
     // definitie zelf (Hauptwerk-schemacode, ook koortoon) blijft ongemoeid.
     let zwevend = zwevende_naam && {
         let opname = extra.original_pitch_cents.or(measured_cents);
-        opname.map_or(true, |o| (o - target_cents(key_midi, harmonic)).abs() <= ZWEVING_MAX_CENTS)
+        opname.is_none_or(|o| (o - target_cents(key_midi, harmonic)).abs() <= ZWEVING_MAX_CENTS)
     };
     PipePitchInput {
         key_midi,

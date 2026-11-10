@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 
 #[derive(Error, Debug)]
 pub enum OdfError {
@@ -219,7 +219,7 @@ impl OrganDefinition {
         // Laatste woord van de divisienaam: "I" → "Manual I", "II" → "Manual II"
         // (sets die hun klavieren met Romeinse cijfers aanduiden, 0.8.4).
         if let Some(m) = self.manuals.iter().find(|m| {
-            m.name.split_whitespace().last().map_or(false, |w| w.eq_ignore_ascii_case(prefix))
+            m.name.split_whitespace().last().is_some_and(|w| w.eq_ignore_ascii_case(prefix))
         }) {
             return Some(m.name.clone());
         }
@@ -908,7 +908,7 @@ impl OdfParser {
     fn parse_ini(&mut self, content: &str) -> Result<(), OdfError> {
         let mut current_section = String::new();
 
-        for (line_num, line) in content.lines().enumerate() {
+        for (_line_num, line) in content.lines().enumerate() {
             let line = line.trim();
 
             // Skip empty lines and comments
@@ -920,7 +920,7 @@ impl OdfParser {
             if line.starts_with('[') && line.ends_with(']') {
                 current_section = line[1..line.len()-1].to_string();
                 self.sections.entry(current_section.clone())
-                    .or_insert_with(HashMap::new);
+                    .or_default();
                 continue;
             }
 
@@ -1393,7 +1393,7 @@ impl OdfParser {
                 continue; // ongeldig record
             }
             let e_excl = e.saturating_add(1);
-            if best_loop.map_or(true, |(bs, be)| e_excl - s > be - bs) {
+            if best_loop.is_none_or(|(bs, be)| e_excl - s > be - bs) {
                 best_loop = Some((s, e_excl));
             }
         }
@@ -1981,7 +1981,7 @@ impl OrganDefinition {
 // ============================================================================
 
 use std::sync::Arc;
-use crate::{SampleCache, SampleData, SampleError, SampleRef, load_wav};
+use crate::{SampleCache, SampleRef, load_wav};
 use vpo_core::SampleRate;
 
 /// Loaded organ with all samples ready to play
@@ -2049,7 +2049,7 @@ impl GrandOrgueLoader {
     pub fn load_with_progress(
         &self,
         odf_path: &Path,
-        progress: Option<LoadProgressFn>,
+        _progress: Option<LoadProgressFn>,
     ) -> Result<LoadedOrgan, OdfError> {
         // Parse the ODF
         info!("Parsing ODF: {:?}", odf_path);
@@ -2115,11 +2115,6 @@ impl GrandOrgueLoader {
             samples,
             sample_rate: self.sample_rate,
         })
-    }
-
-    /// Load a single sample, using cache
-    fn load_sample(&self, path: &Path) -> Result<SampleRef, OdfError> {
-        Self::load_sample_static(path, self.sample_rate)
     }
 
     /// Static version of load_sample for parallel loading

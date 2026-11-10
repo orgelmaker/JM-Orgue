@@ -363,7 +363,7 @@ pub fn klavar_model(qs: &QuantizedScore, handen: &[(KlavarHand, Option<u8>)], le
 
     let langste = manual.iter().chain(pedal.iter()).map(|n| n.end).max().unwrap_or(0);
     // Minstens het gevraagde aantal maten (0.7.83), net als het notenschrift.
-    let num_measures = if qs.measure_len == 0 { 1 } else { ((langste + qs.measure_len - 1) / qs.measure_len).max(min_measures).max(1) };
+    let num_measures = if qs.measure_len == 0 { 1 } else { langste.div_ceil(qs.measure_len).max(min_measures).max(1) };
 
     let heeft_pedaal = legend.iter().any(|l| l.hand == KlavarHand::Pedal) || !pedal.is_empty();
     let (mmin, mmax) = bereik_manuaal(&manual);

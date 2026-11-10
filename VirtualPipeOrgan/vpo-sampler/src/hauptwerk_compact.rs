@@ -350,7 +350,7 @@ fn kies_tekst(objs: &[FieldMap], uitsluiten: &[&str], voorkeur: &[&str]) -> Opti
         if uitsluiten.contains(&l.as_str()) {
             continue;
         }
-        let (goed, aanwezig) = dekking(objs, &l, |v| is_tekst(v));
+        let (goed, aanwezig) = dekking(objs, &l, is_tekst);
         if aanwezig * 2 < objs.len() || goed * 5 < aanwezig * 3 {
             continue;
         }
@@ -468,7 +468,7 @@ fn kies_actietype(objs: &[FieldMap], effect_letter: &str) -> Option<(String, Str
             }
             let x = waarden.into_iter().find(|v| *v != "1")?.to_string();
             let bij_effect = objs.iter().any(|o| {
-                o.get(effect_letter).map_or(false, |v| matches!(v.trim(), "2" | "3"))
+                o.get(effect_letter).is_some_and(|v| matches!(v.trim(), "2" | "3"))
                     && o.get(l.as_str()).map(|v| v.trim()) == Some(x.as_str())
             });
             bij_effect.then_some((l, x))
@@ -609,7 +609,7 @@ fn kies_alternatieve_rang(
             }
             treffers += 1;
         }
-        if goed && treffers > 0 && beste.as_ref().map_or(true, |(t, _)| treffers > *t) {
+        if goed && treffers > 0 && beste.as_ref().is_none_or(|(t, _)| treffers > *t) {
             beste = Some((treffers, l));
         }
     }
@@ -671,7 +671,7 @@ fn kies_releasegrens(
         // Een ruime meerderheid van de lagen moet kloppen; anders is het een
         // veld dat er toevallig een paar keer op lijkt.
         if score * 2 > meervoudig.len() as i64
-            && beste.as_ref().map_or(true, |(b, _)| score > *b)
+            && beste.as_ref().is_none_or(|(b, _)| score > *b)
         {
             beste = Some((score, l));
         }
@@ -1126,8 +1126,8 @@ impl GecomprimeerdeOdf {
         // heeft ook onzin in de toetsbereik-velden en telt daarvoor niet mee.
         let sr_actietype = sr_effect.as_deref().and_then(|el| kies_actietype(sr, el));
         let sr_gewoon: Vec<FieldMap> = sr.iter()
-            .filter(|o| sr_effect.as_ref().and_then(|l| o.get(l.as_str())).map_or(true, |v| v.trim() == "1"))
-            .filter(|o| sr_actietype.as_ref().map_or(true, |(l, x)| o.get(l.as_str()).map_or(true, |v| v.trim() != x)))
+            .filter(|o| sr_effect.as_ref().and_then(|l| o.get(l.as_str())).is_none_or(|v| v.trim() == "1"))
+            .filter(|o| sr_actietype.as_ref().is_none_or(|(l, x)| o.get(l.as_str()).is_none_or(|v| v.trim() != x)))
             .cloned()
             .collect();
         let (sr_eerste, sr_aantal, sr_inc) = match &sr_rank {

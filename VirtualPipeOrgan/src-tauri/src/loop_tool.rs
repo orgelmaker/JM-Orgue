@@ -14,7 +14,7 @@ use std::io::Cursor;
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
-use tracing::{info, warn};
+use tracing::info;
 
 /// Don't loop samples shorter than this (need attack + a usable sustain).
 const MIN_DURATION_S: f32 = 0.6;
@@ -249,7 +249,7 @@ fn bake_crossfade(inter: &mut [f32], channels: usize, ls: usize, le: usize, peri
 /// Build a `smpl` chunk (one forward loop) as raw bytes.
 pub(crate) fn build_smpl_chunk(sample_rate: u32, midi_note: u8, loop_start: u32, loop_end_incl: u32) -> Vec<u8> {
     let mut d = Vec::with_capacity(68);
-    let mut w32 = |v: u32, out: &mut Vec<u8>| out.extend_from_slice(&v.to_le_bytes());
+    let w32 = |v: u32, out: &mut Vec<u8>| out.extend_from_slice(&v.to_le_bytes());
     let sample_period = if sample_rate > 0 { 1_000_000_000u32 / sample_rate } else { 0 };
     let mut body = Vec::with_capacity(60);
     w32(0, &mut body);                 // manufacturer

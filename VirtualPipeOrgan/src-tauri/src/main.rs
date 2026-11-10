@@ -29,9 +29,8 @@ mod sampleset_download;
 mod state;
 mod test_api;
 
-use std::sync::Arc;
 use tauri::Manager;
-use tracing::{info, Level};
+use tracing::info;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 use crate::state::AppState;

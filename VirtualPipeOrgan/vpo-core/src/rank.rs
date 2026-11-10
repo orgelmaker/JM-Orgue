@@ -144,8 +144,10 @@ pub enum PipeType {
 
 /// Attack characteristics
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum AttackType {
     /// Natural attack from sample
+    #[default]
     Natural,
     
     /// Separate attack sample that crossfades to sustain
@@ -161,11 +163,6 @@ pub enum AttackType {
     },
 }
 
-impl Default for AttackType {
-    fn default() -> Self {
-        Self::Natural
-    }
-}
 
 /// Harmonic content description for a rank
 #[derive(Debug, Clone, Serialize, Deserialize)]

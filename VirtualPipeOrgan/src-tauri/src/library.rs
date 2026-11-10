@@ -84,7 +84,7 @@ pub fn sysex_naar_hex(data: &[u8]) -> String {
 /// weggelaten: de trigger vergelijkt alleen de inhoud.
 pub fn hex_naar_sysex(tekst: &str) -> Result<Vec<u8>, String> {
     let schoon: String = tekst.chars().filter(|c| c.is_ascii_hexdigit()).collect();
-    if schoon.len() % 2 != 0 {
+    if !schoon.len().is_multiple_of(2) {
         return Err("Oneven aantal hex-tekens".to_string());
     }
     let mut bytes = Vec::with_capacity(schoon.len() / 2);
@@ -544,6 +544,7 @@ pub struct OrganSettings {
 
 /// The entire library
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct OrganLibrary {
     pub organs: Vec<OrganLibraryEntry>,
     pub settings: HashMap<String, OrganSettings>,
@@ -554,15 +555,6 @@ pub struct OrganLibrary {
     pub online_image_search_enabled: bool,
 }
 
-impl Default for OrganLibrary {
-    fn default() -> Self {
-        Self {
-            organs: Vec::new(),
-            settings: HashMap::new(),
-            online_image_search_enabled: false,
-        }
-    }
-}
 
 /// Normaliseer pad-notaties en voeg duplicaten samen die door verschillende
 /// notaties zijn ontstaan (forward slashes via de test-API/scripts vs
@@ -963,7 +955,7 @@ fn scan_scored(roots: &[PathBuf]) -> Option<String> {
             let p = e.path();
             let is_dir = e.file_type().map(|t| t.is_dir()).unwrap_or(false);
             if is_dir {
-                if depth + 1 <= SCAN_MAX_DEPTH && seen.insert(p.to_string_lossy().to_lowercase()) {
+                if depth < SCAN_MAX_DEPTH && seen.insert(p.to_string_lossy().to_lowercase()) {
                     queue.push_back((p, depth + 1));
                 }
                 continue;

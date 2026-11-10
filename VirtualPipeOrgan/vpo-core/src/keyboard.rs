@@ -80,7 +80,7 @@ impl Keyboard {
     /// Map a MIDI note to the actual sounding note
     pub fn map_note(&self, midi_note: MidiNote) -> Option<MidiNote> {
         let transposed = midi_note as i16 + self.transpose as i16;
-        if transposed >= 0 && transposed <= 127 && self.note_range.contains(midi_note) {
+        if (0..=127).contains(&transposed) && self.note_range.contains(midi_note) {
             Some(transposed as MidiNote)
         } else {
             None

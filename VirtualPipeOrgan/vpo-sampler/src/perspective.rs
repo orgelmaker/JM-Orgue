@@ -63,7 +63,7 @@ fn canonical(token: &str) -> Option<String> {
         _ => {
             // Mic-nummers ("mic1", "Mic_2", "mic-3"): label = de naam zelf, lowercase.
             let rest = t.strip_prefix("mic")?;
-            let digits = rest.trim_start_matches(|c: char| c == '_' || c == ' ' || c == '-');
+            let digits = rest.trim_start_matches(['_', ' ', '-']);
             if !digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit()) {
                 return Some(t);
             }

@@ -2,8 +2,7 @@
 //!
 //! Mixes multiple audio sources with gain, panning, and effects.
 
-use crate::buffer::{AudioBuffer, StereoSample};
-use vpo_core::Sample;
+use crate::buffer::AudioBuffer;
 
 /// Channel strip with gain and effects
 pub struct ChannelStrip {

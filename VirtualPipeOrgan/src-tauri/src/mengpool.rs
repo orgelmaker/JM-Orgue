@@ -59,11 +59,10 @@ static GEWEKT: AtomicU64 = AtomicU64::new(0);
 /// (max eigen µs, max wacht µs, gem eigen µs, gem wacht µs, blokken, gewekte werkers) — en wissen.
 pub fn neem_barriere_meting() -> (u64, u64, f64, f64, u64, u64) {
     let b = BLOKKEN.swap(0, Ordering::Relaxed).max(1);
-    let r = (MAX_EIGEN_US.swap(0, Ordering::Relaxed), MAX_WACHT_US.swap(0, Ordering::Relaxed),
+    (MAX_EIGEN_US.swap(0, Ordering::Relaxed), MAX_WACHT_US.swap(0, Ordering::Relaxed),
              SOM_EIGEN_US.swap(0, Ordering::Relaxed) as f64 / b as f64,
              SOM_WACHT_US.swap(0, Ordering::Relaxed) as f64 / b as f64, b,
-             GEWEKT.swap(0, Ordering::Relaxed));
-    r
+             GEWEKT.swap(0, Ordering::Relaxed))
 }
 
 /// Eén opdracht voor één werker: welk stuk stemmen, waar het naartoe moet, en
@@ -195,9 +194,9 @@ impl MengPool {
         let mut eigen: Option<(*mut PlayingVoice, usize)> = None;
         let mut uitgedeeld = 0usize;
         {
-            let mut stukken_iter = stemmen.chunks_mut(per_stuk);
+            let stukken_iter = stemmen.chunks_mut(per_stuk);
             let mut idx = 0usize;
-            while let Some(deel) = stukken_iter.next() {
+            for deel in stukken_iter {
                 if idx == 0 {
                     eigen = Some((deel.as_mut_ptr(), deel.len()));
                 } else {

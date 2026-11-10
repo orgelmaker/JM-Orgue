@@ -1319,9 +1319,9 @@ pub fn misc_cc_learn(state: State<AppState>, doel: String) -> Result<(), String>
         _ => return Err(format!("Onbekend doel: {}", doel)),
     };
     // Eerst-gezien-waarden wissen: het jitterfilter in de MIDI-handler
-    // begint dan met een schone lei (zie MISC_CC_LEARN_SEEN).
-    crate::state::MISC_CC_LEARN_SEEN().write().clear();
-    *crate::state::MISC_CC_LEARNING().write() = Some(t);
+    // begint dan met een schone lei (zie misc_cc_learn_seen).
+    crate::state::misc_cc_learn_seen().write().clear();
+    *crate::state::misc_cc_learning().write() = Some(t);
     *state.misc_cc_learning.write() = Some(t);
     info!("MIDI-leren: wachten op CC voor {:?}", t);
     Ok(())
@@ -1330,7 +1330,7 @@ pub fn misc_cc_learn(state: State<AppState>, doel: String) -> Result<(), String>
 /// Stop met leren zonder iets te binden.
 #[tauri::command]
 pub fn misc_cc_learn_cancel(state: State<AppState>) -> Result<(), String> {
-    *crate::state::MISC_CC_LEARNING().write() = None;
+    *crate::state::misc_cc_learning().write() = None;
     *state.misc_cc_learning.write() = None;
     Ok(())
 }
@@ -1343,7 +1343,7 @@ pub fn misc_cc_clear(state: State<AppState>, doel: String) -> Result<(), String>
         "background_gain" => crate::state::MiscCcTarget::BackgroundGain,
         _ => return Err(format!("Onbekend doel: {}", doel)),
     };
-    crate::state::MISC_CC_BINDINGS().write().retain(|b| b.target != t);
+    crate::state::misc_cc_bindings().write().retain(|b| b.target != t);
     state.misc_cc_bindings.write().retain(|b| b.target != t);
     Ok(())
 }
@@ -1351,14 +1351,14 @@ pub fn misc_cc_clear(state: State<AppState>, doel: String) -> Result<(), String>
 /// Huidige bindingen voor de UI, als lijst `[{target, channel, cc}]`.
 #[tauri::command]
 pub fn misc_cc_get_bindings(_state: State<AppState>) -> Vec<crate::state::MiscCcBinding> {
-    crate::state::MISC_CC_BINDINGS().read().clone()
+    crate::state::misc_cc_bindings().read().clone()
 }
 
 /// Haal openstaande CC-wijzigingen op en wis ze; de UI roept dit elke paar
 /// honderd ms aan en past de corresponderende schuif aan.
 #[tauri::command]
 pub fn get_and_clear_misc_cc_pending() -> std::collections::HashMap<String, f32> {
-    let mut m = crate::state::MISC_CC_PENDING().write();
+    let mut m = crate::state::misc_cc_pending().write();
     let out = m.iter().map(|(k, v)| {
         let s = match k {
             crate::state::MiscCcTarget::ListeningPosition => "listening_position",
@@ -2036,7 +2036,7 @@ pub fn installatie_info() -> InstallatieInfo {
             // Windows-paden vergelijken zonder op hoofdletters te struikelen.
             pad.to_lowercase() == verwacht.to_lowercase()
         });
-        return InstallatieInfo { pad, installatie_pad, is_installatie };
+        InstallatieInfo { pad, installatie_pad, is_installatie }
     }
 
     #[cfg(not(target_os = "windows"))]
@@ -2678,24 +2678,6 @@ fn stop_first_midi(definition: &OrganDefinition, stop: &vpo_sampler::StopDef) ->
     manual_first + stop.first_accessible_pipe_logical_key.saturating_sub(1)
 }
 
-/// Kies de default/langste release van een pijp: MaxKeyPressTime `None` of `-1`
-/// betekent "geen limiet" (GrandOrgue-conventie) en wint; anders de langste
-/// tijd. Releases die naar het attack-bestand zelf wijzen worden hier
-/// overgeslagen — dat geval dekt de same-file-release-route (cue-marker).
-/// Toetsduur-afhankelijke selectie (R0/R1/R2) is een latere uitbreiding.
-fn pick_default_release<'a>(
-    releases: &'a [vpo_sampler::ReleaseDef],
-    attack_path: &Path,
-) -> Option<&'a vpo_sampler::ReleaseDef> {
-    releases
-        .iter()
-        .filter(|r| r.path != attack_path)
-        .max_by_key(|r| match r.max_key_press_time_ms {
-            None | Some(-1) => i64::MAX,
-            Some(t) => t as i64,
-        })
-}
-
 /// Manifest dat JM-Rec naast de `.organ` schrijft (`<stem>.jm-rec.json`) —
 /// alleen de velden die de bibliotheeknaam bepalen. Dit is de PRIMAIRE bron:
 /// het bevat precies wat de gebruiker in de wizard invoerde. De ODF-velden
@@ -2854,7 +2836,7 @@ fn registerweergave(schoon: &str, mengwerk: bool, harmonic: u32, manifest: Optio
         if let Some((naam, voetmaat)) = voetmaat_uit_naam(schoon).or_else(|| kale_voetmaat_achteraan(schoon)) {
             if let (Some(a), Some(b)) = (voet_waarde(&voetmaat), voet_waarde(&van_set)) {
                 let afstand_cent = (1200.0 * (a / b).log2()).abs();
-                if afstand_cent < 1.0 || afstand_cent > 250.0 {
+                if !(1.0..=250.0).contains(&afstand_cent) {
                     return (naam, voetmaat, None);
                 }
             }
@@ -3621,7 +3603,7 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
                         // Samplepitch volgens de gekozen methode: staat hij
                         // niet in de definitie, dan beslist de smpl-chunk van
                         // de WAV en volgt de correctie ná het laden.
-                        let odf_measured = crate::retune::odf_measured_cents(&extra);
+                        let odf_measured = crate::retune::odf_measured_cents(extra);
                         let hw_origineel_delta = match (extra.original_pitch_cents, odf_measured) {
                             (Some(orig), Some(sample)) => match crate::retune::origineel_delta(orig, sample) {
                                 Some(d) => {
@@ -3666,7 +3648,7 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
                             // PitchCorrection) gaat altijd voor.
                             let zwevend = crate::retune::is_zwevend_naam(&stop.name)
                                 || (layer_idx > 0 && stop.layers.get(layer_idx as usize - 1)
-                                    .map_or(false, |l| crate::retune::is_zwevend_naam(&l.name)));
+                                    .is_some_and(|l| crate::retune::is_zwevend_naam(&l.name)));
                             if zwevend && extra.retune_keep_pct.is_none() {
                                 zwevende_registers.insert(stop.name.clone());
                             }
@@ -3678,7 +3660,7 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
                                 (stop.id, pipe_num),
                                 path.clone(),
                                 crate::retune::pipe_pitch_input(
-                                    &extra, key_midi, owner.harmonic_number, hierarchie_pc,
+                                    extra, key_midi, owner.harmonic_number, hierarchie_pc,
                                     zwevend, odf_measured, total_cents,
                                 ),
                                 // Terugval als de WAV geen smpl-pitch draagt:
@@ -3705,7 +3687,7 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
                                         // samplepitch door (0.9.24). Is die er niet,
                                         // dan valt de lus hieronder terug op de
                                         // smpl-chunk van het trem-bestand zelf.
-                                        &extra, key_midi, owner.harmonic_number, hierarchie_pc,
+                                        extra, key_midi, owner.harmonic_number, hierarchie_pc,
                                         zwevend, trem.sample_pitch_cents, total_cents,
                                     ),
                                     extra.original_pitch_cents,
@@ -3799,7 +3781,7 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
             .filter_map(|entry| {
                 let (p, seg) = entry;
                 let n = progress_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-                if n % 100 == 0 || n == progress_total {
+                if n.is_multiple_of(100) || n == progress_total {
                     emit_load_progress(state, n, progress_total, "Samples laden");
                 }
                 let result = match seg {
@@ -3984,7 +3966,7 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
                 match harm_shelves.get(&basis) {
                     Some(shelf) => {
                         let mut pb = (**buf).clone();
-                        shelf.apply(&mut pb.attack_data, pb.attack_right.as_mut().map(|v| v.as_mut_slice()), pb.sample_rate);
+                        shelf.apply(&mut pb.attack_data, pb.attack_right.as_deref_mut(), pb.sample_rate);
                         pb.harm_shelf = Some(*shelf);
                         harm_geshaped += 1;
                         (*key, Arc::new(pb))
@@ -5952,8 +5934,8 @@ pub fn notation_start_recording(state: State<AppState>, score_id: u32) -> Result
 pub fn notation_stop_recording(state: State<AppState>) -> Result<(), String> {
     use tauri::Emitter;
     let handle = state.notation_app_handle.read().clone();
-    let start = state.notation_start_time.read().clone();
-    let armed = state.notation_armed_score.read().clone();
+    let start = *state.notation_start_time.read();
+    let armed = *state.notation_armed_score.read();
     if let (Some(handle), Some(start), Some(score_id)) = (handle, start, armed) {
         let end_us = std::time::Instant::now().saturating_duration_since(start).as_micros() as u64;
         // Alle openstaande NoteOns netjes afsluiten (voorkomt eeuwig-hangende
@@ -6150,8 +6132,7 @@ pub fn notation_set_key(state: State<AppState>, app: tauri::AppHandle, score_id:
 #[tauri::command]
 pub fn notation_set_layer_hand(state: State<AppState>, app: tauri::AppHandle, score_id: u32, layer_id: u32, hand: Option<crate::notation::KlavarHand>, split_midi: Option<u8>) -> Result<u64, String> {
     let gen = with_score_mut(&state, score_id, |sc| {
-        let oud = sc.layers.iter().find(|l| l.id == layer_id).map(|l| (l.klavar_hand, l.klavar_split)).unwrap_or((None, None));
-        let cmd = crate::notation::EditCommand::SetLayerHand { layer: layer_id, old: oud, new: (hand, split_midi) };
+        let cmd = crate::notation::EditCommand::SetLayerHand { layer: layer_id, new: (hand, split_midi) };
         if let Some(inv) = cmd.apply(sc) {
             sc.push_undo(inv);
         }
@@ -6410,7 +6391,7 @@ pub fn notation_remove_layer(state: State<AppState>, app: tauri::AppHandle, scor
         if sc.layers.len() <= 1 { return Err("Minstens één balk is nodig".to_string()); }
         let Some(pos) = sc.layers.iter().position(|l| l.id == layer_id) else { return Err("Balk niet gevonden".to_string()); };
         let snapshot = sc.layers[pos].clone();
-        let cmd = crate::notation::EditCommand::RemoveLayer { snapshot, position: pos, texts: Vec::new(), spans: Vec::new() };
+        let cmd = crate::notation::EditCommand::RemoveLayer { snapshot, position: pos };
         if let Some(inv) = cmd.apply(sc) { sc.push_undo(inv); }
         Ok(sc.generation)
     })??;
@@ -6784,7 +6765,7 @@ pub fn notation_toggle_bar(state: State<AppState>, app: tauri::AppHandle, score_
             "ending2" => b.ending = if b.ending == Some(2) { None } else { Some(2) },
             _ => return Err(format!("Onbekend maatteken: {}", wat)),
         }
-        let cmd = crate::notation::EditCommand::SetBar { measure, old: huidig, new: Some(b) };
+        let cmd = crate::notation::EditCommand::SetBar { measure, new: Some(b) };
         if let Some(inv) = cmd.apply(sc) { sc.push_undo(inv); }
         Ok(sc.generation)
     })??;
@@ -7103,7 +7084,7 @@ pub fn apply_saved_wind_groups(state: State<AppState>) -> Result<usize, String> 
         None => return Ok(0),
     };
     // Eerst aantal groepen restoren (indien opgeslagen, niet 0)
-    if saved_num >= 1 && saved_num <= 8 {
+    if (1..=8).contains(&saved_num) {
         *state.num_wind_groups.write() = saved_num;
     }
     let mut applied = 0;
@@ -7575,9 +7556,9 @@ pub(crate) fn set_eq_bands_inner(state: &AppState, enabled: bool, bands: Vec<EqB
     let mut specs = eq_bands_to_specs(&bands);
     schaal_specs(&mut specs, strength);
     let auto = preamp_auto.unwrap_or(false);
-    let eff = effectieve_preamp_db(&state, &specs, preamp_db, auto);
+    let eff = effectieve_preamp_db(state, &specs, preamp_db, auto);
     let auto_waarde = if auto { eff } else {
-        let (sr, kanalen) = audio_samplerate_en_kanalen(&state);
+        let (sr, kanalen) = audio_samplerate_en_kanalen(state);
         vpo_audio::auto_preamp_db(&specs, kanalen, sr)
     };
     state.send_audio_command(AudioCommand::SetEqBands {
@@ -7991,7 +7972,7 @@ pub fn set_temperament(state: State<AppState>, note_offsets: Vec<f32>, fine_tune
 
 /// Export current scanned directory as .organ definition file
 #[tauri::command]
-pub fn export_organ_file(state: State<AppState>, directory: String, output_path: String) -> Result<(), String> {
+pub fn export_organ_file(_state: State<AppState>, directory: String, output_path: String) -> Result<(), String> {
     let path = std::path::Path::new(&directory);
     if !path.exists() || !path.is_dir() {
         return Err(format!("Map niet gevonden: {}", directory));
@@ -8861,8 +8842,8 @@ fn build_couplers_from_definition(definition: &OrganDefinition) -> Vec<CouplerDt
             let raw = cdef.name.trim();
             let rl = raw.to_lowercase();
             let is_generic = raw.is_empty()
-                || rl.strip_prefix("coupler").map_or(false, |r| r.trim().chars().all(|c| c.is_ascii_digit()))
-                || rl.strip_prefix("koppel").map_or(false, |r| r.trim().chars().all(|c| c.is_ascii_digit()));
+                || rl.strip_prefix("coupler").is_some_and(|r| r.trim().chars().all(|c| c.is_ascii_digit()))
+                || rl.strip_prefix("koppel").is_some_and(|r| r.trim().chars().all(|c| c.is_ascii_digit()));
             let suffix = if offset >= 12 { " 4'" } else if offset <= -12 { " 16'" } else { "" };
             let name = if is_generic {
                 format!("{}{}\n+\n{}", src_name, suffix, dest_name)
@@ -9123,7 +9104,7 @@ fn generate_couplers(divisions: &[DivisionDto]) -> Vec<CouplerDto> {
 
 // ============ Custom Organ Commands ============
 
-use vpo_sampler::custom_organ::{CustomOrgan, CustomDivision, CustomStop, StopFamily, scan_samples_directory};
+use vpo_sampler::custom_organ::{CustomOrgan, scan_samples_directory};
 
 /// DTO for custom organ info
 #[derive(Debug, Clone, Serialize)]
@@ -9133,27 +9114,6 @@ pub struct CustomOrganDto {
     pub description: Option<String>,
     pub builder: String,
     pub stop_count: usize,
-    pub pipe_count: usize,
-}
-
-/// DTO for custom division
-#[derive(Debug, Clone, Serialize, serde::Deserialize)]
-pub struct CustomDivisionDto {
-    pub id: String,
-    pub name: String,
-    pub midi_channel: Option<u8>,
-    pub first_midi_note: u8,
-    pub last_midi_note: u8,
-    pub stops: Vec<CustomStopDto>,
-}
-
-/// DTO for custom stop
-#[derive(Debug, Clone, Serialize, serde::Deserialize)]
-pub struct CustomStopDto {
-    pub id: String,
-    pub name: String,
-    pub pitch_feet: f32,
-    pub family: String,
     pub pipe_count: usize,
 }
 
@@ -9517,7 +9477,7 @@ pub fn do_load_samples_from_directory_locked(state: &AppState, directory: &str) 
     let preload_results: Vec<_> = load_tasks.par_iter()
         .filter_map(|(key, path)| {
             let n = progress_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-            if n % 100 == 0 || n == progress_total {
+            if n.is_multiple_of(100) || n == progress_total {
                 emit_load_progress(state, n, progress_total, "Samples laden");
             }
             match load_audio_preload_ms(path, preload_ms) {
@@ -9834,7 +9794,7 @@ fn pedaalbindingen_voor_herstel(settings: &OrganSettings) -> (Vec<SwellBindingSa
     let crescendo = settings.crescendo_binding.clone();
     let swell: Vec<SwellBindingSaved> = settings.swell_bindings.iter().filter(|b| {
         let botst = crescendo.as_ref()
-            .map_or(false, |c| c.channel == b.channel && c.cc_num == b.cc_num);
+            .is_some_and(|c| c.channel == b.channel && c.cc_num == b.cc_num);
         if botst {
             warn!(
                 "Zwelbinding voor '{}' (kanaal {}, CC {}) weggelaten: dezelfde trede is als generaal crescendo gekoppeld",
@@ -9884,7 +9844,7 @@ fn nagebootste_tremulant_voor_herstel(
 }
 
 fn restore_organ_settings(state: &AppState, organ_id: &str) {
-    use crate::state::{MidiPresetBinding, MidiPresetTrigger, MidiChannelMapping, SwellBinding};
+    use crate::state::{MidiPresetBinding, MidiChannelMapping};
 
     // Bibliotheek (exact/case-ongevoelig, audit 49), anders .jm-settings.json
     // naast het orgel (wordt geïmporteerd, auditbevinding 17) — zie
@@ -9989,7 +9949,7 @@ fn restore_organ_settings(state: &AppState, organ_id: &str) {
 
     // Misc CC-bindingen (0.7.104): opgeslagen bindings naar beide spiegels.
     *state.misc_cc_bindings.write() = settings.misc_cc_bindings.clone();
-    *crate::state::MISC_CC_BINDINGS().write() = settings.misc_cc_bindings.clone();
+    *crate::state::misc_cc_bindings().write() = settings.misc_cc_bindings.clone();
 
     // Doorlopend klavier (per orgel).
     crate::state::DOORLOPEND_KLAVIER.store(
@@ -10405,11 +10365,6 @@ pub fn remove_from_library(state: State<AppState>, id: String) {
     state.save_library();
 }
 
-#[derive(Debug, Deserialize)]
-pub struct SaveSettingsDto {
-    pub presets: HashMap<String, PresetData>,
-}
-
 use std::collections::HashMap;
 
 /// Async + spawn_blocking: de autosave (elke registratiewijziging, 800 ms
@@ -10699,7 +10654,7 @@ pub fn do_save_organ_settings(state: &AppState, presets: HashMap<String, PresetD
         auto_retune: Some(*state.auto_retune.read()), // 0.8.85
         setup_wizard_done: Some(*state.setup_wizard_done.read()), // 0.8.90
         toetsmechaniek_aan: Some(*state.toetsmechaniek_aan.read()),
-        misc_cc_bindings: crate::state::MISC_CC_BINDINGS().read().clone(),
+        misc_cc_bindings: crate::state::misc_cc_bindings().read().clone(),
         extra_couplers: state.extra_coupler_ids.read().clone(),
         continuous_keyboard: crate::state::DOORLOPEND_KLAVIER.load(std::sync::atomic::Ordering::Relaxed),
         remote_layout,
@@ -11196,7 +11151,7 @@ pub fn get_saved_presets(state: State<AppState>) -> HashMap<String, PresetData> 
 
 #[tauri::command]
 pub fn restore_preset_bindings(state: State<AppState>, bindings: Vec<PresetBindingSaved>) {
-    use crate::state::{MidiPresetBinding, MidiPresetTrigger};
+    use crate::state::MidiPresetBinding;
 
     let midi_bindings: Vec<MidiPresetBinding> = bindings.into_iter().filter_map(|b| {
         saved_to_preset_binding(&b).ok()
@@ -11394,6 +11349,7 @@ pub fn get_recordings_dir() -> String {
 // ============ Autostart bij Windows + Computer afsluiten ============
 
 /// Naam waaronder we autostart registreren in HKCU\Software\Microsoft\Windows\CurrentVersion\Run.
+#[cfg(target_os = "windows")]
 const AUTOSTART_VALUE_NAME: &str = "JM-Orgue";
 
 /// Bepaal het pad naar de geïnstalleerde vpo-app.exe (huidige executable).
@@ -11401,6 +11357,7 @@ const AUTOSTART_VALUE_NAME: &str = "JM-Orgue";
 /// argument zelf correct op de Windows-commandline, zodat reg.exe het BARE pad
 /// (inclusief spaties) als registry-waarde opslaat. Zelf quotes toevoegen zou
 /// letterlijke aanhalingstekens in de waarde zetten en autostart laten falen.
+#[cfg(target_os = "windows")]
 fn current_exe_path() -> Result<String, String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     Ok(exe.to_string_lossy().to_string())

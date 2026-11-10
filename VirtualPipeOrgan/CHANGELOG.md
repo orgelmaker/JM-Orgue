@@ -6,6 +6,43 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### Opruiming: clippy en dode code (geen wijziging in de klank)
+- Waarschuwingen in de vijf crates en `jm-midimon`: **310 → 124** (gewone
+  build; met testcode en voorbeeldprogramma's erbij 160), en
+  `cargo clippy --all-targets` geeft geen fout meer.
+- Automatisch toegepast (`cargo clippy --fix`): ongebruikte imports,
+  `map_or(true/false, ..)` → `is_none_or`/`is_some_and`, `% n == 0` →
+  `is_multiple_of`, `div_ceil`, `derive(Default)`, samengevoegde `if`s, een
+  `while let` die een `for` werd. De gelijkheidstests van de mengkern en alle
+  andere tests bleven groen; de ingekorte `f32`-literal in `effects.rs` is
+  bit-identiek nagerekend.
+- Dode code verwijderd: de ongebruikte opdrachten `LoadSamples`,
+  `RegisterFullSample` en `ClearSamples` met hun handlers in de audiothread
+  (nergens aangemaakt), `SampleSource`, `AudioPlayer::load_samples`,
+  `pick_default_release`, drie ongebruikte DTO's in `commands.rs`, de
+  `MidiCommand::Shutdown`, het ongelezen `ble_learn_rx`-veld, negen
+  ongebruikte methoden van `AppState` (de `wait_for_cc_*`-helpers,
+  `voice_count`, `is_stop_drawn`, `stop_id_exists`, `toggle_stop`,
+  `set_preset_bindings`), de ongelezen velden van drie notatie-opdrachten
+  (`old`, `texts`, `spans`), `GrandOrgueLoader::load_sample` en
+  `BackgroundMixer::clear`/`volgende_sample`.
+- Alleen in tests gebruikt, dus `#[cfg(test)]`: `read_voice`,
+  `mix_stereo`, `mix_interleaved`, `undo_len`/`redo_len` en
+  `hauptwerk::build_definition` (sinds E1 alleen nog een tweeling voor tests).
+  `AUTOSTART_VALUE_NAME` en `current_exe_path` kregen `#[cfg(target_os =
+  "windows")]`, net als hun enige gebruiksplekken. Niet op Linux of macOS
+  gecompileerd (dat kan hier niet); de CI laat dat zien.
+- `MISC_CC_*`-functies hernoemd naar kleine letters (`non_snake_case`), twee
+  testopstellingen met `0.7071` kregen `FRAC_1_SQRT_2` (clippy-fout), en een
+  testbewering `!leeg || true` (altijd waar) is vervangen door een eerlijke
+  opmerking.
+- Bewust niet gedaan: de ~110 stijlwaarschuwingen die oordeel vragen
+  (`type_complexity`, `too_many_arguments`, `needless_range_loop`,
+  `manual_clamp`, doc-opmaak) en de ongebruikte velden in de nooit gebruikte
+  bibliotheekonderdelen van `vpo-audio` (de hele `engine`), `SamplePool`,
+  `GrandOrgueLoader` en `CustomOrganBuilder`: die verwijderen is een besluit
+  over de hele code, geen opruiming.
+
 ### Workflows: acties van derden vastgepind op een commit
 - `release-build.yml` geeft de updater-sleutel (`TAURI_SIGNING_PRIVATE_KEY`) aan
   jobs waarin acties van derden draaien die op een verschuivende tag stonden

@@ -3,11 +3,10 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use parking_lot::RwLock;
 use tracing::{info, warn, debug};
 
-use vpo_core::{Organ, Rank, Pipe, MidiNote, SampleRate};
-use crate::{SampleCache, SampleData, SampleError, SampleRef};
+use vpo_core::{Organ, Rank, MidiNote, SampleRate};
+use crate::{SampleCache, SampleError, SampleRef};
 
 /// Index into the sample pool
 pub type SampleIndex = usize;
@@ -134,11 +133,11 @@ impl OrganLoader {
         let mut pool = SamplePool::new(self.cache.clone(), self.sample_rate);
         
         // Collect all samples to load
-        let mut to_load: Vec<(String, PathBuf)> = Vec::new();
+        let to_load: Vec<(String, PathBuf)> = Vec::new();
         
         for division in &organ.divisions {
             for stop in &division.stops {
-                for rank_ref in &stop.ranks {
+                for _rank_ref in &stop.ranks {
                     // TODO: Get actual sample paths from organ definition
                     // This is placeholder logic
                 }

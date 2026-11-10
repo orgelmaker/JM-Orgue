@@ -14,9 +14,9 @@ use parking_lot::RwLock;
 use crossbeam_channel::{Sender, Receiver, bounded};
 use tracing::{info, error, warn};
 
-use vpo_sampler::{LoadedOrgan, SampleRef, SampleData, load_audio, resample, PreloadBuffer};
+use vpo_sampler::{SampleRef, SampleData, load_audio, resample, PreloadBuffer};
 use vpo_audio::{ConvolutionReverb, OnePoleFilter, WindModel, WindLade, WindInstelling, StopWindProfiel, PijpWind,
-    pijp_constanten, LADE_ONDERGRENS, LADE_BOVENGRENS, Tremulant, FdnReverb, ChannelEq, EqBandSpec, MasterLimiter};
+    pijp_constanten, LADE_BOVENGRENS, Tremulant, FdnReverb, ChannelEq, EqBandSpec, MasterLimiter};
 
 /// Preload buffer size in samples (~2s at 48kHz)
 /// Longer buffer = smoother loop while full sample loads in background
@@ -1066,23 +1066,6 @@ static RELEASE_PRELOAD_EDGE_HITS: AtomicU64 = AtomicU64::new(0);
 static TREMULANT_SWITCHES: AtomicU64 = AtomicU64::new(0);
 static TREMULANT_ACTIVE_STOPS: AtomicU64 = AtomicU64::new(0);
 
-/// Sample source with preload buffer for instant playback
-#[derive(Debug, Clone)]
-pub enum SampleSource {
-    /// Fully loaded sample (for small samples or after background load)
-    Loaded(SampleRef),
-    /// Preload buffer only - attack ready, full sample not yet loaded
-    Preloaded {
-        buffer: Arc<PreloadBuffer>,
-        target_rate: u32,
-    },
-    /// Both preload and full sample available
-    Ready {
-        preload: Arc<PreloadBuffer>,
-        full_sample: SampleRef,
-    },
-}
-
 /// Pre-geladen attack- en release-klikbuffers voor één register (0.7.99).
 /// Elk veld is None als die set die kant van de klik niet heeft.
 #[derive(Debug, Clone)]
@@ -1139,8 +1122,6 @@ pub enum AudioCommand {
     SetMasterExpression(f32),
     /// Set reverb mix (0.0-1.0)
     SetReverbMix(f32),
-    /// Load samples (fully preloaded - legacy)
-    LoadSamples(Arc<HashMap<(u32, u32), SampleRef>>),
     /// Register preload buffers (attack portions only - fast loading!)
     RegisterPreloadBuffers(Arc<HashMap<(u32, u32), Arc<PreloadBuffer>>>),
     /// Stop-ids met echte tremulant-OPNAMEN. De buffers zelf staan sinds 0.7.39
@@ -1152,8 +1133,6 @@ pub enum AudioCommand {
     /// (GrandOrgue `ReleaseCrossfadeLength`). Ontbreekt een key, dan geldt de
     /// automatische, toonhoogte-afhankelijke duur (`release_fade_ms`).
     RegisterReleaseCrossfade(Arc<HashMap<(u32, u32), u32>>),
-    /// Register a fully loaded sample (from background loading)
-    RegisterFullSample { key: (u32, u32), sample: SampleRef },
     /// Enable/disable tremulant for a set of stop IDs
     SetTremulant { stop_ids: Vec<u32>, active: bool },
     /// Set per-division gain (0.0-1.0) for swell box
@@ -1278,8 +1257,6 @@ pub enum AudioCommand {
     /// Deze stuurt `luisterpositie_toepassen` steeds mee: dichtbij → 0.2 ×
     /// user-mix, achter in de kerk → 1.0 × user-mix.
     SetReverbPositionFactor(f32),
-    /// Clear all samples
-    ClearSamples,
     /// Shutdown
     Shutdown,
 }
@@ -2792,6 +2769,7 @@ fn xfade_weights(fade: f32) -> (f32, f32) {
 }
 
 /// Mono-lezer: dunne wrapper om [`read_voice_lr`] (zelfde code, geen rechtervlak).
+#[cfg(test)]
 #[inline]
 fn read_voice(
     data: &[f32],
@@ -3270,7 +3248,7 @@ mod release_tests {
     /// resterende decay wordt herberekend en de staart dooft uit op tijd.
     #[test]
     fn upgrade_to_full_herberekent_de_resterende_decay() {
-        let sr = 48_000u32;
+        let _sr = 48_000u32;
         let mut rel = PlayingVoice::new_from_sample(
             vlakke_sample(480_000), 1, 100 | RELEASE_PIPE_FLAG, 48, 1.0,
         );
@@ -4029,17 +4007,6 @@ impl AudioPlayer {
         })
     }
 
-    /// Load samples from a LoadedOrgan
-    pub fn load_samples(&self, organ: &LoadedOrgan) {
-        let samples = Arc::new(organ.samples.clone());
-        // Bounded send with timeout: if the audio thread is stalled (e.g. its
-        // output device was lost), give up instead of blocking forever.
-        if let Err(e) = self.command_tx.send_timeout(AudioCommand::LoadSamples(samples), std::time::Duration::from_secs(3)) {
-            warn!("Failed to send load samples command: {}", e);
-        }
-        info!("Sent {} samples to audio thread", organ.samples.len());
-    }
-
     /// Send a command. Uses a timeout so a stalled audio thread can never freeze
     /// the caller (e.g. loading an organ from the UI).
     pub fn send_command(&self, cmd: AudioCommand) -> Result<(), String> {
@@ -4492,7 +4459,7 @@ fn run_audio_thread(
                                     // deze kopie is uniek voor deze geshapede pijp.
                                     if let Some(shelf) = harm_shelf {
                                         let rate = sample_data.sample_rate;
-                                        let rechts = sample_data.right.as_mut().map(|v| v.as_mut_slice());
+                                        let rechts = sample_data.right.as_deref_mut();
                                         shelf.apply(&mut sample_data.data, rechts, rate);
                                         let sample = Arc::new(sample_data);
                                         let _ = loaded_tx_clone.send((key, Some(sample), generation));
@@ -4713,7 +4680,7 @@ fn run_audio_thread(
     // zakt, zodat hij tijdens een zwaar stuk niet elke callback heen en weer
     // klapt (dat middelde het voordeel juist weg).
     let mut licht_vorig = false;
-    let mut render = move |data: &mut [f32]| {
+    let render = move |data: &mut [f32]| {
             // Flush-to-zero / denormals-are-zero op de audio-thread. De reverb-,
             // EQ- en filter-staarten dalen door denormale float-waarden (< ~1e-38),
             // die op x86 ~100x trager zijn en CPU-pieken geven → buffer-underruns →
@@ -5575,50 +5542,9 @@ fn run_audio_thread(
                     AudioCommand::SetReverbPositionFactor(f) => {
                         *reverb_pos_factor_clone.write() = f.clamp(0.0, 2.0);
                     }
-                    AudioCommand::LoadSamples(new_samples) => {
-                        {
-                            let mut samples_lock = samples_clone.write();
-                            // Oude map (kan GB's zijn na lang spelen) naar de
-                            // janitor-thread — droppen in de callback stalde de
-                            // audio-thread seconden lang.
-                            let old = std::mem::replace(&mut *samples_lock, lege_samplesmap());
-                            gc.send_boxed(old);
-                            samples_bytes = 0;
-                            sample_fifo.clear();
-                            for (k, v) in new_samples.iter() {
-                                samples_bytes += v.bytes();
-                                sample_fifo.push_back(*k);
-                                samples_lock.insert(*k, v.clone());
-                            }
-                        }
-                        {
-                            let mut preloads_lock = preloads_clone.write();
-                            let old = std::mem::take(&mut *preloads_lock);
-                            gc.send_boxed(old);
-                        }
-                        {
-                            let mut voices_lock = voices_clone.write();
-                            let old = std::mem::replace(&mut *voices_lock, lege_stemmenlijst());
-                            gc.send_boxed(old);
-                        }
-                        // Nieuwe laad-generatie: uitstaande achtergrond-loads van
-                        // het vorige orgel mogen hun (hergebruikte) keys niet vullen.
-                        load_generation += 1;
-                        inflight_loads.clear();
-                        pending_loads.clear();
-                        // Vooraf reserveren: insert tijdens het spelen (NoteOn →
-                        // inflight_loads, achtergrond-load → samples) mag in de
-                        // callback geen rehash-allocatie veroorzaken.
-                        inflight_loads.reserve(new_samples.len().min(8192));
-                        missing_sample_warned.clear();
-                        // Vers orgel = verse limiter-staat (geen ingehouden gain
-                        // van een luide passage op het vorige orgel).
-                        master_limiter.reset();
-                        info!("Loaded {} preloaded samples", new_samples.len());
-                    }
                     AudioCommand::RegisterPreloadBuffers(buffers) => {
                         // Clear previous and register new preload buffers.
-                        // Oude maps naar de janitor (zie LoadSamples): dit is
+                        // Oude maps naar de janitor: dit is
                         // het orgelwissel-pad — na uren spelen zaten hier GB's.
                         {
                             let mut samples_lock = samples_clone.write();
@@ -5644,11 +5570,12 @@ fn run_audio_thread(
                             let old = std::mem::replace(&mut *voices_lock, lege_stemmenlijst());
                             gc.send_boxed(old);
                         }
-                        // Nieuwe laad-generatie (zie LoadSamples).
+                        // Nieuwe laad-generatie: uitstaande achtergrond-loads van
+                        // het vorige orgel mogen hun (hergebruikte) keys niet vullen.
                         load_generation += 1;
                         inflight_loads.clear();
                         pending_loads.clear();
-                        // Zie LoadSamples: reserveren zodat de callback niet rehasht.
+                        // Vooraf reserveren zodat de callback niet rehasht.
                         inflight_loads.reserve(buffers.len().min(8192));
                         missing_sample_warned.clear();
                         // Vers orgel = verse limiter-staat (geen ingehouden gain
@@ -5667,18 +5594,6 @@ fn run_audio_thread(
                             info!("ReleaseCrossfadeLength uit de sampleset: {} release-keys", map.len());
                         }
                         release_xfade = map;
-                    }
-                    AudioCommand::RegisterFullSample { key, sample } => {
-                        let size = sample.bytes();
-                        if let Some(old) = samples_clone.write().insert(key, sample) {
-                            samples_bytes = samples_bytes
-                                .saturating_sub(old.bytes());
-                            // Vervangen sample niet inline droppen (janitor-check).
-                            gc.dispose_sample(old);
-                        } else {
-                            sample_fifo.push_back(key);
-                        }
-                        samples_bytes += size;
                     }
                     AudioCommand::SetTremulant { stop_ids, active } => {
                         // Crossfade: for currently playing voices on these stops,
@@ -6062,53 +5977,6 @@ fn run_audio_thread(
                         }
                         info!("Uitgangscorrectie: enabled={}, {} banden over {} kanalen, voorversterking {:.1} dB", enabled, bands.len(), channels, preamp_db);
                     }
-                    AudioCommand::ClearSamples => {
-                        // Grote maps naar de janitor-thread (zie LoadSamples).
-                        {
-                            let old = std::mem::replace(&mut *samples_clone.write(), lege_samplesmap());
-                            gc.send_boxed(old);
-                            samples_bytes = 0;
-                            sample_fifo.clear();
-                        }
-                        {
-                            let old = std::mem::take(&mut *preloads_clone.write());
-                            gc.send_boxed(old);
-                        }
-                        trem_active_clone.write().clear();
-                        stops_with_trem_clone.write().clear();
-                        percussive_stops_clone.write().clear();
-                        *odf_voicing_clone.write() = Arc::new(HashMap::new());
-                        *odf_retune_clone.write() = Arc::new(HashMap::new());
-                        *force_tempered_on_clone.write() = false;
-                        {
-                            let old = std::mem::replace(&mut *voices_clone.write(), lege_stemmenlijst());
-                            gc.send_boxed(old);
-                        }
-                        // Nieuwe laad-generatie (zie LoadSamples).
-                        load_generation += 1;
-                        inflight_loads.clear();
-                        pending_loads.clear();
-                        missing_sample_warned.clear();
-                        // Vers orgel = verse limiter-staat (geen ingehouden gain
-                        // van een luide passage op het vorige orgel).
-                        master_limiter.reset();
-                        stop_to_division_clone.write().clear();
-                        *division_gains_clone.write() = vec![1.0; 32];
-                        swell_g = [1.0; 32];
-                        swell_vol = [1.0; 32];
-                        swell_bypass = [true; 32];
-                        swell_dirty = [false; 32];
-                        for (fl, fr) in swell_filters_clone.write().iter_mut() {
-                            fl.set_cutoff(20000.0, sample_rate); fl.reset();
-                            fr.set_cutoff(20000.0, sample_rate); fr.reset();
-                        }
-                        *temperament_clone.write() = ([1.0; 12], false);
-                        // Reset ook de per-divisie tremulant-LFO active-vlaggen.
-                        {
-                            let mut lfos = trem_lfos_clone.write();
-                            for trem in lfos.iter_mut() { trem.active = false; }
-                        }
-                    }
                     AudioCommand::Shutdown => {
                         running_clone.store(false, Ordering::Relaxed);
                     }
@@ -6373,7 +6241,7 @@ fn run_audio_thread(
                     voice.c_voicing_gain *= persp_gain[(voice.persp_slot as usize) & (MAX_LAYERS - 1)];
 
                     let note_class = (voice.midi_note % 12) as usize;
-                    let temp = temp_ratios[note_class] as f64;
+                    let temp = temp_ratios[note_class];
                     let pitch_mul = if voicing_pitch.abs() > 0.01 {
                         2.0_f64.powf(voicing_pitch as f64 / 1200.0)
                     } else {
@@ -7024,7 +6892,7 @@ fn run_audio_thread(
                     // laadcallback (duizenden map-inserts, geen klank), geen
                     // speelbelasting. Het advies past bij de buffergrootte:
                     // onder 128 frames is dát de knop, daarboven niet meer.
-                    if stemmen > 0 && last_overload_warn.map_or(true, |t: std::time::Instant| t.elapsed().as_secs() >= 5) {
+                    if stemmen > 0 && last_overload_warn.is_none_or(|t: std::time::Instant| t.elapsed().as_secs() >= 5) {
                         // Uitsplitsing per pas (gemiddelde over 16 callbacks),
                         // in % van de buffertijd: zo is in het log te zien waar
                         // de tijd heen gaat — het mengen van de stemmen
@@ -7148,7 +7016,7 @@ fn run_audio_thread(
         build.map_err(|e| format!("Failed to build audio stream: {}", e))
     };
 
-    let mut stream = match build_stream(&device, &stream_config, sample_format, &render_shared, &cb_count, &stream_error) {
+    let mut _stream = match build_stream(&device, &stream_config, sample_format, &render_shared, &cb_count, &stream_error) {
         Ok(s) => s,
         Err(msg) => {
             let _ = ready_tx.send(Err(msg.clone()));
@@ -7156,7 +7024,7 @@ fn run_audio_thread(
         }
     };
 
-    if let Err(e) = stream.play() {
+    if let Err(e) = _stream.play() {
         let msg = format!("Failed to start audio: {}", e);
         let _ = ready_tx.send(Err(msg.clone()));
         return Err(msg);
@@ -7245,7 +7113,7 @@ fn run_audio_thread(
                 rebuild_pending = true;
                 rebuild_failures += 1;
                 warn!("Audio-watchdog: herbouwde stream blijft stil ({} mislukte pogingen)", rebuild_failures);
-                if rebuild_failures >= 5 && rebuild_failures % 5 == 0 && rebuild_failures <= 15 {
+                if rebuild_failures >= 5 && rebuild_failures.is_multiple_of(5) && rebuild_failures <= 15 {
                     warn!("Audio-watchdog: volledige audio-herstart aangevraagd");
                     restart_needed.store(true, Ordering::Relaxed);
                 }
@@ -7254,7 +7122,7 @@ fn run_audio_thread(
 
         // Herbouwpoging (elke ~2s zolang nodig): zelfde host, apparaat opnieuw
         // resolven (het oorspronkelijke apparaat kan weg zijn → default).
-        if rebuild_pending && ticks % 20 == 0 {
+        if rebuild_pending && ticks.is_multiple_of(20) {
             warn!("Audio-watchdog: stream herbouwen (apparaat weggevallen of callbacks gestopt)...");
             let mut attempt_ok = false;
             // ASIO: altijd via de driver-cache — een verse host-enumeratie zou
@@ -7289,7 +7157,7 @@ fn run_audio_thread(
                         match build_stream(&new_device, &new_config, new_supported.sample_format(), &render_shared, &cb_count, &stream_error) {
                             Ok(new_stream) => match new_stream.play() {
                                 Ok(()) => {
-                                    stream = new_stream;
+                                    _stream = new_stream;
                                     *device_out.write() = dev_name.clone();
                                     rebuild_pending = false;
                                     was_flowing = false;
@@ -7322,7 +7190,7 @@ fn run_audio_thread(
             // verificatievenster hierboven echte callbacks heeft gezien.
             if !attempt_ok {
                 rebuild_failures += 1;
-                if rebuild_failures >= 5 && rebuild_failures % 5 == 0 && rebuild_failures <= 15 {
+                if rebuild_failures >= 5 && rebuild_failures.is_multiple_of(5) && rebuild_failures <= 15 {
                     warn!("Audio-watchdog: {} herbouwpogingen mislukt — volledige audio-herstart aangevraagd", rebuild_failures);
                     restart_needed.store(true, Ordering::Relaxed);
                 }
@@ -7332,7 +7200,7 @@ fn run_audio_thread(
         // Laadlatentie-diagnose: hooguit 1x per 5 s, en alleen als er iets te
         // melden valt. De telling zelf gebeurt in de callback (één atomaire
         // optelling per afgekapte staart), het loggen hier.
-        if ticks % 50 == 0 {
+        if ticks.is_multiple_of(50) {
             let hits = RELEASE_PRELOAD_EDGE_HITS.load(Ordering::Relaxed);
             if hits > preload_edge_prev {
                 info!("Release-staarten afgekapt op de preload-rand (volledige sample nog niet geladen): +{} (totaal {})",
@@ -7357,7 +7225,7 @@ fn run_audio_thread(
             }
         }
 
-        let check = ticks == 30 || ticks == 60 || ticks % 300 == 0;
+        let check = ticks == 30 || ticks == 60 || ticks.is_multiple_of(300);
         if !check { continue; }
         let n = cb_count.load(Ordering::Relaxed);
         let delta = n - prev_count;
@@ -7816,8 +7684,8 @@ mod meng_verdeling_tests {
         let wind_dev = vec![[-0.01f32; 32]; bn];
         let trem_rate = vec![[1.0f64; 32]; bn];
         let trem_amp = vec![[1.0f32; 32]; bn];
-        let pan_cos = [0.7071f32; 32];
-        let pan_sin = [0.7071f32; 32];
+        let pan_cos = [std::f32::consts::FRAC_1_SQRT_2; 32];
+        let pan_sin = [std::f32::consts::FRAC_1_SQRT_2; 32];
         let pans = vec![0.0f32; 32];
         let ccis_en = vec![false; 32];
         let blok = blok_context(&wind_dev, &trem_rate, &trem_amp, &pan_cos, &pan_sin, &pans, &ccis_en, bn, false);

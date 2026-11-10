@@ -6,10 +6,9 @@ use std::sync::Arc;
 use vpo_core::{MidiNote, Velocity, SampleRate, Organ};
 
 use crate::{
-    buffer::AudioBuffer,
     device::AudioDeviceManager,
     mixer::Mixer,
-    voice::{Voice, VoicePool},
+    voice::VoicePool,
     effects::{Tremulant, WindModel},
     convolution::StereoConvolutionReverb,
     BLOCK_SIZE, MAX_POLYPHONY,
@@ -134,7 +133,7 @@ impl AudioEngine {
         let event_tx = self.event_tx.clone();
         let running = self.running.clone();
         let sample_rate = self.config.sample_rate;
-        let buffer_size = self.config.buffer_size;
+        let _buffer_size = self.config.buffer_size;
         
         running.store(true, std::sync::atomic::Ordering::SeqCst);
         
@@ -176,10 +175,10 @@ impl AudioEngine {
                                 reverb.set_mix(mix);
                             }
                         }
-                        AudioCommand::SetTremulantActive(div, active) => {
+                        AudioCommand::SetTremulantActive(_div, _active) => {
                             // TODO: Find tremulant by division
                         }
-                        AudioCommand::LoadOrgan(organ) => {
+                        AudioCommand::LoadOrgan(_organ) => {
                             // TODO: Load samples from organ
                         }
                         AudioCommand::Shutdown => {

@@ -253,7 +253,7 @@ pub const WIND_CENTS_PER_EENHEID: f32 = 80.0;
 /// Toonhoogtefactor per eenheid drukafwijking, eerste orde: 2^(cent/1200)
 /// ≈ 1 + cent·ln2/1200. Bij 12 cent is de fout 2,4e-5 — onhoorbaar, en het
 /// scheelt een powf per stem per frame.
-pub const WIND_RATE_PER_EENHEID: f32 = WIND_CENTS_PER_EENHEID * 0.000_577_622_65;
+pub const WIND_RATE_PER_EENHEID: f32 = WIND_CENTS_PER_EENHEID * 0.000_577_622_7;
 
 /// Alle instellingen van één windgroep, zoals de audiothread ze krijgt.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -1330,7 +1330,7 @@ pub struct ChannelEq {
 /// `EQ_MAX_BANDEN`.
 fn banden_voor_kanaal<'a>(bands: &'a [EqBandSpec], channel: u8) -> impl Iterator<Item = &'a EqBandSpec> + 'a {
     bands.iter()
-        .filter(move |b| b.enabled && b.channel.map_or(true, |c| c == channel))
+        .filter(move |b| b.enabled && b.channel.is_none_or(|c| c == channel))
         .take(EQ_MAX_BANDEN)
 }
 

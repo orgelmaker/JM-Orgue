@@ -3,10 +3,9 @@
 //! This module allows users to create their own sample sets by
 //! combining samples from various sources.
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
-use tracing::{info, warn, debug};
+use tracing::info;
 
 /// A custom organ definition that can be saved/loaded
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -92,7 +91,9 @@ pub struct CustomPerspective {
 
 /// Stop family for UI coloring
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Default)]
 pub enum StopFamily {
+    #[default]
     Principal,
     Flute,
     String,
@@ -102,11 +103,6 @@ pub enum StopFamily {
     Tremulant,
 }
 
-impl Default for StopFamily {
-    fn default() -> Self {
-        Self::Principal
-    }
-}
 
 /// A single pipe (sample) in a stop
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -156,7 +152,7 @@ impl CustomOrgan {
     /// Save to a file
     pub fn save(&self, path: &Path) -> Result<(), std::io::Error> {
         let json = serde_json::to_string_pretty(self)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+            .map_err(|e| std::io::Error::other(e))?;
         std::fs::write(path, json)
     }
 
@@ -164,7 +160,7 @@ impl CustomOrgan {
     pub fn load(path: &Path) -> Result<Self, std::io::Error> {
         let json = std::fs::read_to_string(path)?;
         serde_json::from_str(&json)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+            .map_err(|e| std::io::Error::other(e))
     }
 
     /// Get total number of stops

@@ -438,6 +438,7 @@ fn manual_numbers_from_keyboards(
 /// Vertaal de (leesbare) Hauptwerk-XML naar een [`OrganDefinition`]. Apart van
 /// [`load_hauptwerk`] zodat tests dit met een mini-XML-string en een nep-
 /// packagemap kunnen aanroepen zonder bestanden op schijf.
+#[cfg(test)]
 fn build_definition(
     xml: &str,
     root: PathBuf,
@@ -798,7 +799,7 @@ fn build_definition_met(
     let mut stopranks_by_stop: HashMap<u32, Vec<&FieldMap>> = HashMap::new();
     let mut effect_stopranks = 0usize;
     for sr in &stopranks {
-        if sr.get_u32("ActionEffectCode").map_or(false, |c| c != 1) {
+        if sr.get_u32("ActionEffectCode").is_some_and(|c| c != 1) {
             effect_stopranks += 1;
             continue;
         }
@@ -887,9 +888,9 @@ fn build_definition_met(
                 let div_note = first_div + k;
                 let rank_note = (div_note as i64 + inc as i64) as u32;
                 if let Some(pid) = rank_pipes.get(&rank_note) {
-                    if !own.contains_key(&div_note) {
+                    if let std::collections::hash_map::Entry::Vacant(e) = own.entry(div_note) {
                         if let Some((path, extra)) = resolve_pipe(*pid) {
-                            own.insert(div_note, (*pid, path, extra));
+                            e.insert((*pid, path, extra));
                         }
                     }
                 }
@@ -1314,7 +1315,7 @@ fn build_definition_met(
         tremulants: Vec::new(),
         couplers: coupler_defs,
         extra_bijgeluiden: verzamel_hw_bijgeluiden(
-            &pipes, &pipes_by_rank, &sample_file, &pkg_dirs,
+            &pipes, &pipes_by_rank, &sample_file, pkg_dirs,
             // `lees` i.p.v. extract_objects: bij een gecomprimeerde definitie
             // staan de switches in de korte <o>-vorm. (De compacte lezer kent
             // van Switch alleen het ID; naam en standaardstand ontbreken daar
@@ -1323,11 +1324,11 @@ fn build_definition_met(
             &trem_koppeling,
         ),
         stop_action_clicks: verzamel_hw_stop_action_clicks(
-            &pipes, &sample_file, &pkg_dirs,
+            &pipes, &sample_file, pkg_dirs,
             &layers_of_pipe, &sample_of_layer, &stops, &rank_name,
         ),
         keyboard_clicks: verzamel_hw_keyboard_clicks(
-            &pipes, &sample_file, &pkg_dirs,
+            &pipes, &sample_file, pkg_dirs,
             &layers_of_pipe, &sample_of_layer, &ranks_xml,
         ),
         klavier_afkortingen,
@@ -1655,7 +1656,7 @@ pub fn match_divisie(naam: &str, divisies: &[String]) -> Option<String> {
         // Alleen een onderscheidend laatste woord (Romeins cijfer of getal),
         // anders matcht "Noise" op een werk dat toevallig zo eindigt.
         let onderscheidend = laatste.chars().all(|c| matches!(c, 'i' | 'v' | 'x')) || laatste.chars().all(|c| c.is_ascii_digit());
-        if onderscheidend && woorden.iter().any(|w| *w == laatste) { return Some(d.clone()); }
+        if onderscheidend && woorden.contains(&laatste) { return Some(d.clone()); }
     }
     None
 }
@@ -1665,7 +1666,7 @@ fn nummer_in_naam(naam: &str) -> Option<u32> {
     naam.split(|c: char| !c.is_ascii_digit()).find(|s| !s.is_empty()).and_then(|s| s.parse().ok())
 }
 
-pub fn tremulant_divisies(
+pub(crate) fn tremulant_divisies(
     tremulants: &[FieldMap],
     divisions: &[FieldMap],
     manuals: &[ManualDef],
@@ -2202,7 +2203,7 @@ fn ruim_bestandsachtige_naam(raw: &str) -> String {
         // Klavecimbel "8-I", "8-II": een Romeins cijfer is nooit een
         // registernaam, dus het getal ervoor is de voetmaat → "I 8'".
         s = format!("{} {}'", na_streep, &s[..kop]);
-    } else if (1..=3).contains(&kop) && s[kop..].starts_with('-') && s[kop + 1..].chars().next().map_or(false, |c| c.is_alphabetic()) {
+    } else if (1..=3).contains(&kop) && s[kop..].starts_with('-') && s[kop + 1..].chars().next().is_some_and(|c| c.is_alphabetic()) {
         s = s[kop + 1..].to_string();
         let staart = s.chars().rev().take_while(|c| c.is_ascii_digit()).count();
         if staart > 0 && s[..s.len() - staart].ends_with('-') {
@@ -2221,7 +2222,7 @@ fn ruim_bestandsachtige_naam(raw: &str) -> String {
     if woorden.len() >= 2 {
         let mut nieuw: Vec<String> = Vec::with_capacity(woorden.len());
         for (i, w) in woorden.iter().enumerate() {
-            let volgt_perspectief = woorden.get(i + 1).map_or(false, |n| {
+            let volgt_perspectief = woorden.get(i + 1).is_some_and(|n| {
                 matches!(n.to_lowercase().as_str(), "rear" | "front" | "close" | "surround" | "dry" | "wet" | "diffuse")
             });
             if volgt_perspectief {

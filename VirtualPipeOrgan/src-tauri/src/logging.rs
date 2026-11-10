@@ -131,7 +131,7 @@ pub fn bestandsschrijver(bestand: std::fs::File) -> TellendeProducent {
 /// Aanroepen vlak voordat de app het proces beëindigt: Tauri doet dat zelf, `main()` komt niet aan zijn einde.
 pub fn laat_leeglopen(max: Duration) -> bool {
     let teller = TELLER.lock().unwrap_or_else(|e| e.into_inner()).clone();
-    teller.map_or(true, |t| t.wacht(max))
+    teller.is_none_or(|t| t.wacht(max))
 }
 
 /// Laat de wachtrij van het logbestand leeglopen (ten hoogste 1 s) en stop de schrijfthread. Daarna gaan

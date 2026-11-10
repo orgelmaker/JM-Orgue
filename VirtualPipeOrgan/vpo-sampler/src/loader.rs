@@ -1,11 +1,11 @@
 //! Sample loading from various formats (WAV, MP3)
 
-use hound::{WavReader, WavSpec};
+use hound::WavReader;
 use std::path::Path;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use thiserror::Error;
-use tracing::{info, warn, debug, trace};
+use tracing::{warn, debug};
 use vpo_core::SampleRate;
 
 use symphonia::core::audio::SampleBuffer;
@@ -1224,7 +1224,7 @@ fn load_wav_preload_segment_len(path: &Path, len: PreloadLen, segment: PreloadSe
             // Guard tegen misvormde fmt-chunks: minimaal 16 bytes nodig voor de
             // velden hieronder; een gigantische chunk_size mag geen giga-alloc
             // worden (auditbevinding 15).
-            if chunk_size < 16 || chunk_size > 65536 {
+            if !(16..=65536).contains(&chunk_size) {
                 return Err(SampleError::UnsupportedFormat(
                     format!("fmt-chunk met onbruikbare grootte {}", chunk_size)
                 ));
@@ -1363,7 +1363,7 @@ fn load_wav_preload_segment_len(path: &Path, len: PreloadLen, segment: PreloadSe
         // Onset = eerste frame waar L óf R boven de drempel komt (mono: alleen L).
         let onset_pos = (0..mono.len())
             .position(|i| mono[i].abs() > onset_threshold
-                || right.as_ref().map_or(false, |r| r[i].abs() > onset_threshold))
+                || right.as_ref().is_some_and(|r| r[i].abs() > onset_threshold))
             .unwrap_or(0);
         onset_pos.saturating_sub(pre_onset_keep)
     } else {

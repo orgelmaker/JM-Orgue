@@ -4,7 +4,6 @@
 //! the corresponding pipes when keys are pressed.
 
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
 use crate::MidiNote;
 
 /// A single stop (register)
@@ -91,7 +90,7 @@ impl Stop {
         };
         
         let sounding = note as i32 + semitone_offset;
-        if sounding >= 0 && sounding <= 127 {
+        if (0..=127).contains(&sounding) {
             Some(sounding as MidiNote)
         } else {
             None

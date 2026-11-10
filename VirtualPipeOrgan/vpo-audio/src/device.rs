@@ -5,9 +5,8 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, Host, SampleFormat, SampleRate, Stream, StreamConfig};
 use parking_lot::RwLock;
-use std::sync::Arc;
 use thiserror::Error;
-use tracing::{debug, error, info, warn};
+use tracing::{error, info};
 
 use vpo_core::SampleRate as VpoSampleRate;
 
@@ -217,7 +216,8 @@ mod tests {
         let manager = AudioDeviceManager::new();
         // This might fail in CI without audio devices
         if let Ok(devices) = manager.list_devices() {
-            assert!(!devices.is_empty() || true); // Allow empty in CI
+            // Een lege lijst is toegestaan (CI zonder audioapparaat); de proef is dat
+            // het opvragen niet paniekt. (`!leeg || true` was altijd waar: clippy-fout.)
             for device in &devices {
                 println!("Device: {} (default: {})", device.name, device.is_default);
             }

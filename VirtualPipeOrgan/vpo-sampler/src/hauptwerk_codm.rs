@@ -917,17 +917,14 @@ fn bouw_pijp(z: &mut SampleZoeker, r: &CodmRank, pijp_noot: u32) -> Option<PipeD
         // een tweede marker voor het uitsterven de release te laat laten starten.
         if r.release_map.is_empty() {
             let mk = z.markers(&pad).cloned();
-            match mk {
-                Some(m) => {
-                    if let Some(eerste) = m.cue_frames.first() {
-                        extra.cue_point = Some(*eerste as u32);
-                    }
-                    if m.cue_frames.is_empty() || m.loops.is_empty() {
-                        let e = z.zonder_release.entry(r.id).or_insert_with(|| (r.naam.clone(), 0));
-                        e.1 += 1;
-                    }
+            if let Some(m) = mk {
+                if let Some(eerste) = m.cue_frames.first() {
+                    extra.cue_point = Some(*eerste as u32);
                 }
-                None => {}
+                if m.cue_frames.is_empty() || m.loops.is_empty() {
+                    let e = z.zonder_release.entry(r.id).or_insert_with(|| (r.naam.clone(), 0));
+                    e.1 += 1;
+                }
             }
         }
     }

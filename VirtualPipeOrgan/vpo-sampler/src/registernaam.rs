@@ -124,7 +124,7 @@ fn voetmaat_achteraan(woorden: &[&str]) -> Option<(usize, String)> {
     let getal_of_breuk = |w: &str| {
         !w.is_empty()
             && w.chars().all(|c| c.is_ascii_digit() || c == '/' || ('\u{00BC}'..='\u{215E}').contains(&c))
-            && w.chars().next().map_or(false, |c| c.is_ascii_digit())
+            && w.chars().next().is_some_and(|c| c.is_ascii_digit())
     };
     let n = woorden.len();
     if n == 0 {
@@ -160,7 +160,7 @@ pub fn voetwoord_los(naam: &str) -> String {
             for woord in ["feet", "fuss", "fuß", "ft"] {
                 if let Some(getal) = l.strip_suffix(woord) {
                     let echt = !getal.is_empty()
-                        && getal.chars().next().map_or(false, |c| c.is_ascii_digit())
+                        && getal.chars().next().is_some_and(|c| c.is_ascii_digit())
                         && getal.chars().all(|c| c.is_ascii_digit() || c == '/');
                     if echt {
                         return format!("{}'", getal);
@@ -188,7 +188,7 @@ pub fn voetmaat_uit_naam(naam: &str) -> Option<(String, String)> {
     let i = woorden.iter().position(|w| {
         let k = w.trim_end_matches(voetteken);
         k.len() < w.len() && !k.is_empty() && k.chars().all(|c| c.is_ascii_digit() || c == '/')
-            && k.chars().next().map_or(false, |c| c.is_ascii_digit())
+            && k.chars().next().is_some_and(|c| c.is_ascii_digit())
     })?;
     // Zelfde lezing als achteraan, zodat "Ters 1 3/5' Bas" de hele
     // samengestelde voetmaat (1 3/5') pakt en niet alleen de breuk.
@@ -311,7 +311,7 @@ pub fn splits_koren(naam: &str, mengwerk: bool) -> KorenSplitsing {
     };
     let nieuwe_naam = rest.join(" ");
     // Er moet een naam overblijven, en die moet met een letter beginnen.
-    if !nieuwe_naam.chars().next().map_or(false, |c| c.is_alphabetic()) {
+    if !nieuwe_naam.chars().next().is_some_and(|c| c.is_alphabetic()) {
         return ongewijzigd();
     }
     KorenSplitsing { naam: nieuwe_naam, koren: Some(koren), voetmaat }

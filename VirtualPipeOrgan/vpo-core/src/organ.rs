@@ -4,7 +4,6 @@
 //! each containing stops, which reference ranks of pipes.
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::path::PathBuf;
 
 use crate::{Keyboard, Stop, Coupler, Temperament, SampleRate, Frequency};

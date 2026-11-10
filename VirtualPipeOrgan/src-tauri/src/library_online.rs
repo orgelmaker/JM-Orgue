@@ -251,7 +251,7 @@ fn kerk_uit_tekst(teksten: &[String]) -> Option<String> {
         .chars().next().is_some_and(|c| c.is_uppercase());
     let mut beste: Option<String> = None;
     for t in teksten {
-        for regel in t.split(|c| matches!(c, '\n' | ';' | '|' | '!' | '?' | ',' | ':' | '(' | ')')) {
+        for regel in t.split(['\n', ';', '|', '!', '?', ',', ':', '(', ')']) {
             let woorden: Vec<&str> = regel.split_whitespace().collect();
             let mut i = 0;
             while i < woorden.len() {
@@ -275,7 +275,7 @@ fn kerk_uit_tekst(teksten: &[String]) -> Option<String> {
                 let kandidaat = woorden[i..j].join(" ");
                 let k = kandidaat.trim_matches(|c: char| !c.is_alphanumeric() && c != '\'' && c != ')');
                 if k.len() >= 6 && k.len() <= 70 && bevat_kerkwoord(k)
-                    && beste.as_ref().map_or(true, |b| k.len() < b.len())
+                    && beste.as_ref().is_none_or(|b| k.len() < b.len())
                 {
                     beste = Some(k.to_string());
                 }
@@ -520,7 +520,7 @@ pub fn teksten_uit_map(dir: Option<&Path>, extra: Option<&Path>) -> Vec<String> 
         let mut buf = Vec::new();
         f.take(MAX_BYTES).read_to_end(&mut buf).ok()?;
         let s = String::from_utf8_lossy(&buf);
-        let platt = if p.extension().map_or(false, |e| {
+        let platt = if p.extension().is_some_and(|e| {
             let e = e.to_string_lossy().to_lowercase();
             e == "html" || e == "htm"
         }) { strip_html(&s) } else { s.split_whitespace().collect::<Vec<_>>().join(" ") };
@@ -542,7 +542,7 @@ pub fn teksten_uit_map(dir: Option<&Path>, extra: Option<&Path>) -> Vec<String> 
     }).collect();
     kandidaten.sort();
     for p in kandidaten.into_iter().take(6) {
-        if extra.map_or(false, |e| e == p) { continue; }
+        if extra.is_some_and(|e| e == p) { continue; }
         if let Some(t) = lees(&p) { uit.push(t); }
     }
     uit

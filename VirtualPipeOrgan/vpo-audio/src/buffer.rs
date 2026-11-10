@@ -1,7 +1,6 @@
 //! Audio buffer types
 
 use bytemuck::{Pod, Zeroable};
-use std::ops::{Index, IndexMut};
 
 use crate::{BLOCK_SIZE, MAX_CHANNELS};
 

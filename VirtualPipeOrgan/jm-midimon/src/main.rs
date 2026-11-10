@@ -123,12 +123,11 @@ impl StapAnalyse {
         }
         // NRPN: CC 99/98 (parameter) plus CC 6 (data entry) op dezelfde poort/kanaal.
         for s in &sleutels {
-            if s.cc == 99 || s.cc == 98 {
-                if a.stromen.contains_key(&Stroom { poort: s.poort, kanaal: s.kanaal, cc: 6 })
+            if (s.cc == 99 || s.cc == 98)
+                && a.stromen.contains_key(&Stroom { poort: s.poort, kanaal: s.kanaal, cc: 6 })
                     && !a.nrpn.contains(&(s.poort, s.kanaal)) {
                     a.nrpn.push((s.poort, s.kanaal));
                 }
-            }
         }
         a
     }
