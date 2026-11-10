@@ -1648,3 +1648,18 @@ Notes on the example:
 - `Stop001=1` in `[Manual001]` is a *section number*: it points at `[Stop001]`.
 - The stop uses the internal-rank shorthand (`NumberOfRanks` absent = 0), so the rank keys (`WindchestGroup`, `NumberOfLogicalPipes`, `Pipe%03d`) sit directly in the stop section, and `FirstMidiNoteNumber` defaults to 36 here (manual's first logical-key MIDI note 36 + 1 − 1).
 - Each `Pipe%03d` may carry the full per-pipe key set of Parts 3–4 (`Pipe001Gain=…`, `Pipe001LoopCount=…`, `Pipe001Release001=…`, etc.).
+
+## D. JM-Orgue status for keys an importer may miss
+
+Added 2026-11-11 (task F7). This lists keys of this specification that JM-Orgue 0.9.50 does **not** read, what that costs, and how often they occur in four GrandOrgue sample sets that were at hand (so it is a sample, not a survey). The counts come from counting `key=value` lines in the `.organ` files.
+
+| Key(s) | JM-Orgue | Occurrence in the four sets |
+|---|---|---|
+| `AttackVelocity`, `MaxTimeSinceLastRelease` | Not read. JM-Orgue plays the first attack of a layer. (This is the GrandOrgue counterpart of the Hauptwerk attack-selection fields; in all measured Hauptwerk sets those criteria are at their defaults, so the first attack is also what Hauptwerk selects.) | `AttackVelocity` in one set, two keys (86 and 90); `MaxTimeSinceLastRelease` in none. Low priority. |
+| `LoopCrossfadeLength` | Not read. The engine always blends the longest feasible stretch (`min(loop/2, loop start, 24 000 frames)`). | One set, ~1170 keys; the others none. |
+| `ReleaseCrossfadeLength` | Read (`ReleaseDef.crossfade_ms`) and used instead of the automatic length per note. | |
+| `NumberOfSwitches`, `Function` (and/or/not) | Not read: the set's own switch network belongs to the drawn console of the set, which JM-Orgue replaces with its own console. | Present in all four (4–9 switches, 63–196 `Function` lines). |
+| `ReversiblePiston`, `DivisionalCoupler`, `NumberOfGenerals`, `NumberOfDivisionals` | Not read, for the same reason: JM-Orgue has its own setzer and pistons. | Present in all four. |
+| `CoupleToSubsequentUnisonIntermanualCouplers`, `…UpwardIntermanualCouplers`, `…DownwardIntermanualCouplers`, `…UpwardIntramanualCouplers`, `…DownwardIntramanualCouplers` | **Not read.** JM-Orgue sets `cascade_toegestaan = true` for every GrandOrgue coupler, so couplers always chain (Sw→Gt plus Gt→Ped makes Sw sound on the pedal). | In three of the four sets (four files) every coupler has all five keys at `N`, i.e. the set says **no** chaining. In the fourth set most are `N` with some `Y` (14 of 33 for the unison inter-manual key, 6 and 3 of 33 for the upward and downward inter-manual keys; none for the intra-manual keys). |
+
+The last row is a behavioural difference, not only a missing feature. Reading the five keys would let JM-Orgue chain couplers only where the set allows it. `cascade_toegestaan` is one flag per coupler while the keys are five categories, so a faithful mapping needs either a per-category flag or an approximation (for example: chain if any key is `Y`). This is the open "coupler chain" decision; it has not been changed.
