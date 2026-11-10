@@ -18,6 +18,7 @@
 //!   POST /load_organ              - body: {"path":"..."} laad een .organ bestand
 //!   POST /import/preflight        - body: {"path":"..."} importverslag zonder te laden
 //!   GET  /import/report           - verslag van de laatste load
+//!   POST /settings/import_diagnose?on=1|0 - diagnose bij het laden (ongelezen velden, controlelijsten) in het verslag
 //!   POST /load_directory          - body: {"path":"..."} scan + laad sample map
 //!   GET  /library                 - bekende orgels uit de library
 //!   GET  /version                 - JM-Orgue versie
@@ -529,6 +530,14 @@ fn route_test_only(
             let on = !query.split('&').any(|kv| kv == "on=0");
             state.codm_random_stemming.store(on, std::sync::atomic::Ordering::Relaxed);
             Ok(json!({"codm_random": on}))
+        }
+        // Importdiagnose (E8) aan/uit voor de volgende Hauptwerk-laadactie: het
+        // verslag (GET /import/report) bevat dan het veld `diagnose` met de
+        // ongelezen velden, onbekende tabellen en controlelijsten.
+        (tiny_http::Method::Post, "/settings/import_diagnose") => {
+            let on = !query.split('&').any(|kv| kv == "on=0");
+            vpo_sampler::import_diagnose::zet_aan(on);
+            Ok(json!({"import_diagnose": on}))
         }
         // Shortcutpistons (CODM): lijst en bediening.
         (tiny_http::Method::Get, "/pistons") => {

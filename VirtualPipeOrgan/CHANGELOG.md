@@ -6,6 +6,32 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### Importdiagnose: ongelezen velden en controlelijsten (achter een schakelaar)
+- Het importverslag van een Hauptwerk-definitie kan nu laten zien wat de
+  importer **niet** las: per `Tabel.Veld` hoeveel rijen een waarde hebben
+  waar niets naar heeft gekeken (met aantal verschillende waarden en een paar
+  voorbeelden), en welke tabellen in het bestand helemaal niet gelezen zijn.
+  De getekende console-tabellen (beeldsets, schermpagina's) blijven bewust
+  buiten die lijst. Onbekende tabellen geven een melding, nooit een fout.
+- Daarnaast zeven controlelijsten, elk apart: verwijzingen naar ontbrekende
+  ID's, registers zonder rangen, registers zonder pijpen, ontbrekende
+  samplebestanden, zwelkasten zonder pijpen, tremulanten met diepte nul en
+  toonhoogtes buiten bereik. Elke lijst meldt ook hoeveel rijen of bestanden
+  ze bekeken heeft, zodat "geen bevindingen" te onderscheiden is van "niets te
+  beoordelen". De tremulantdiepte komt uit `TremulantWaveformPipe`; waar die
+  velden niet herkenbaar zijn (gecomprimeerde definities) staat de tremulant in
+  een eigen lijst "niet te controleren" in plaats van als goed.
+- Standaard uit: de diagnose kost laadtijd en geheugen en verandert niets aan
+  het geladen orgel (bewaakt met een test). Aanzetten kan met de
+  omgevingsvariabele `JM_ORGUE_DIAGNOSE=1` of in de test-API met
+  `POST /settings/import_diagnose?on=1`; het resultaat staat dan in het veld
+  `diagnose` van `GET /import/report`. Het voorbeeldprogramma
+  `cargo run --release -p vpo-sampler --example import_diagnose -- <map>`
+  doorloopt een hele map met sets en maakt een samenvatting over alle sets.
+- Technisch: `FieldMap` is nu een eigen type dat opgevraagde, niet-lege
+  velden meldt aan de diagnose; zonder lopende diagnose kost dat één
+  vergelijking per rij. Niets hiervan zit in de audio-callback.
+
 ### WAV-markers lezen is begrensd en loopt niet meer scheef
 - `read_wav_markers` las de `smpl`- en `cue `-chunk volledig in het geheugen
   met een grootte uit de bestandskop. Een corrupt bestand kon daarmee tot 4 GB

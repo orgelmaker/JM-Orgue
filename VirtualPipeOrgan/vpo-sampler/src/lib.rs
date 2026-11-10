@@ -9,6 +9,7 @@ pub mod pool;
 pub mod grandorgue;
 pub mod hauptwerk;
 pub mod hauptwerk_codm;
+pub mod import_diagnose;
 pub mod import_report;
 pub(crate) mod hauptwerk_compact;
 pub mod streaming;

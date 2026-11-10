@@ -41,8 +41,8 @@ use crate::grandorgue::{
 };
 use crate::import_report::{Ernst, ImportReport, Melding, OvergeslagenStop, PakketRol, PakketStatus, Tellingen};
 use crate::hauptwerk::{
-    clean_division_name, clean_stop_name, extract_objects, klinkende_harmonische, FieldMap,
-    FieldMapExt,
+    clean_division_name, clean_stop_name, extract_objects, extract_objects_ruw, klinkende_harmonische,
+    FieldMap, FieldMapExt,
 };
 
 /// Wat de starttag van het rootelement over het bestand zegt.
@@ -690,7 +690,7 @@ fn valideer(
 /// CODM-bestanden zijn daarin niet consequent: `<ObjectList ObjectType="stop">`
 /// met `<Stop>`, `"division"` met `<division>`, en in één rangenlijst
 /// `<Rank>` naast `<rank>`.
-fn extract_objects_als(xml: &str, lijstnaam: &str, object: &str) -> Vec<FieldMap> {
+pub(crate) fn extract_objects_als(xml: &str, lijstnaam: &str, object: &str) -> Vec<FieldMap> {
     let open = format!("<ObjectList ObjectType=\"{}\">", lijstnaam);
     let Some(i) = xml.find(&open) else { return Vec::new() };
     let start = i + open.len();
@@ -709,10 +709,12 @@ fn extract_objects_als(xml: &str, lijstnaam: &str, object: &str) -> Vec<FieldMap
         let Some(e) = body[b + 1..].find(&sluit).map(|e| b + 1 + e) else { break };
         // Hergebruik de gewone lezer op één object met een vaste kop.
         let stuk = format!("<ObjectList ObjectType=\"{object}\"><{object}>{}</{object}></ObjectList>", &body[b + 1..e]);
-        uit.extend(extract_objects(&stuk, object));
+        uit.extend(extract_objects_ruw(&stuk, object));
         pos = e + sluit.len();
     }
-    uit
+    // Eén keer aanmelden voor de diagnose, niet per object: anders zou elke
+    // rij als een eigen "tweede extractie" van dezelfde tabel tellen.
+    FieldMap::rijen_van_tabel(object, uit)
 }
 
 // ============================================================================

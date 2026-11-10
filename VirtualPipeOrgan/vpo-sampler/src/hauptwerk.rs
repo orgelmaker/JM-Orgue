@@ -54,6 +54,45 @@ pub fn load_hauptwerk_met_verslag(
     odf_path: &Path,
     pakketroot: Option<&Path>,
 ) -> (Result<OrganDefinition, OdfError>, crate::import_report::ImportReport) {
+    // Diagnose (E8): standaard uit, dan is dit gewoon het laadpad.
+    if !crate::import_diagnose::schakelaar_aan() {
+        return load_hauptwerk_intern(odf_path, pakketroot);
+    }
+    crate::import_diagnose::start();
+    let (r, mut v) = load_hauptwerk_intern(odf_path, pakketroot);
+    let xml = std::fs::read(odf_path).ok().and_then(|b| ensure_readable_xml(b).ok());
+    match xml {
+        Some(xml) => {
+            let d = crate::import_diagnose::rond_af(&xml, r.as_ref().ok());
+            // Onbekende tabellen: één samenvattende waarschuwing, nooit een fout.
+            if !d.onbekende_tabellen.is_empty() {
+                let namen: Vec<String> = d.onbekende_tabellen.iter().take(8)
+                    .map(|t| format!("{} ({})", t.tabel, t.rijen)).collect();
+                let meer = d.onbekende_tabellen.len().saturating_sub(8);
+                v.melding(
+                    crate::import_report::Ernst::Waarschuwing,
+                    "diagnose",
+                    format!(
+                        "{} tabel(len) in de definitie worden niet gelezen: {}{}",
+                        d.onbekende_tabellen.len(),
+                        namen.join(", "),
+                        if meer > 0 { format!(" en {meer} andere") } else { String::new() }
+                    ),
+                );
+            }
+            v.diagnose = Some(d);
+        }
+        None => {
+            let _ = crate::import_diagnose::stop();
+        }
+    }
+    (r, v)
+}
+
+fn load_hauptwerk_intern(
+    odf_path: &Path,
+    pakketroot: Option<&Path>,
+) -> (Result<OrganDefinition, OdfError>, crate::import_report::ImportReport) {
     use crate::import_report::{Ernst, ImportReport};
     let bron = odf_path.to_string_lossy().to_string();
     let mislukt = |e: OdfError| {
@@ -313,7 +352,7 @@ fn build_definition(
     // `_General` blijft in beide vormen leesbaar.
     let compact = GecomprimeerdeOdf::detecteer(xml);
     let lees = |t: &str| match &compact {
-        Some(c) => c.objecten(xml, t),
+        Some(c) => FieldMap::rijen_van_tabel(t, c.objecten(xml, t)),
         None => extract_objects(xml, t),
     };
     let general = extract_objects(xml, "_General");
@@ -1680,7 +1719,82 @@ pub fn is_hauptwerk_path(path: &Path) -> bool {
 // XML scanning (dependency-free; the format is flat typed object lists)
 // ============================================================================
 
-pub(crate) type FieldMap = HashMap<String, String>;
+/// Eén object (rij) uit een Hauptwerk-tabel als platte veldnaam → waarde.
+///
+/// Gedraagt zich als een `HashMap<String, String>` (via `Deref`), met één
+/// verschil: [`FieldMap::get`] en [`FieldMap::contains_key`] melden een
+/// opgevraagde, niet-lege waarde aan de diagnose ([`crate::import_diagnose`]),
+/// zodat achteraf zichtbaar is welke velden de importer nooit las. Staat de
+/// diagnose uit, dan is `volg` leeg en kost dat één vergelijking.
+#[derive(Debug, Default)]
+pub(crate) struct FieldMap {
+    velden: HashMap<String, String>,
+    /// (tabelnummer, rijnummer) bij de diagnose; `None` als die uit staat of
+    /// voor een rij die de importer zelf samenstelt.
+    volg: Option<(u32, u32)>,
+}
+
+impl Clone for FieldMap {
+    /// Een kopie is een eigen, samengestelde rij: geen registratie, anders
+    /// telt dezelfde rij dubbel.
+    fn clone(&self) -> Self {
+        FieldMap { velden: self.velden.clone(), volg: None }
+    }
+}
+
+impl FieldMap {
+    pub(crate) fn new() -> Self {
+        FieldMap::default()
+    }
+
+    /// Waarde van een veld; een niet-lege waarde telt voor de diagnose als gelezen.
+    pub(crate) fn get(&self, sleutel: &str) -> Option<&String> {
+        let w = self.velden.get(sleutel);
+        if let (Some((tabel, rij)), Some(w)) = (self.volg, w) {
+            if !w.trim().is_empty() {
+                crate::import_diagnose::gelezen(tabel, rij, sleutel);
+            }
+        }
+        w
+    }
+
+    /// Een aanwezigheidscontrole is ook een leesactie. Nog niet gebruikt, maar
+    /// zonder deze methode zou `contains_key` via `Deref` ongemerkt langs de
+    /// registratie lopen.
+    #[allow(dead_code)]
+    pub(crate) fn contains_key(&self, sleutel: &str) -> bool {
+        self.get(sleutel).is_some()
+    }
+
+    /// Rijen van één tabel in volgorde, met registratie als de diagnose actief is.
+    pub(crate) fn rijen_van_tabel(tabel: &str, rijen: Vec<HashMap<String, String>>) -> Vec<FieldMap> {
+        let id = crate::import_diagnose::registreer(tabel, &rijen);
+        rijen
+            .into_iter()
+            .enumerate()
+            .map(|(i, velden)| FieldMap { velden, volg: id.map(|t| (t, i as u32)) })
+            .collect()
+    }
+}
+
+impl std::ops::Deref for FieldMap {
+    type Target = HashMap<String, String>;
+    fn deref(&self) -> &Self::Target {
+        &self.velden
+    }
+}
+
+impl std::ops::DerefMut for FieldMap {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.velden
+    }
+}
+
+impl FromIterator<(String, String)> for FieldMap {
+    fn from_iter<I: IntoIterator<Item = (String, String)>>(iter: I) -> Self {
+        FieldMap { velden: iter.into_iter().collect(), volg: None }
+    }
+}
 
 pub(crate) trait FieldMapExt {
     fn get_u32(&self, key: &str) -> Option<u32>;
@@ -1726,6 +1840,11 @@ struct HwPipePitch {
 /// as a flat field map. Object lists are not nested and each object body holds
 /// only flat `<field>value</field>` pairs.
 pub(crate) fn extract_objects(xml: &str, object_type: &str) -> Vec<FieldMap> {
+    FieldMap::rijen_van_tabel(object_type, extract_objects_ruw(xml, object_type))
+}
+
+/// Als [`extract_objects`], maar zonder diagnose-registratie: de rijen als kale kaarten.
+pub(crate) fn extract_objects_ruw(xml: &str, object_type: &str) -> Vec<HashMap<String, String>> {
     let mut out = Vec::new();
     let list_open = format!("<ObjectList ObjectType=\"{}\">", object_type);
     let list_start = match xml.find(&list_open) {
@@ -1755,8 +1874,8 @@ pub(crate) fn extract_objects(xml: &str, object_type: &str) -> Vec<FieldMap> {
 
 /// Parse a flat object body (`<a>x</a><b>y</b>...`) into a field map, decoding
 /// XML/HTML entities in the values.
-fn parse_fields(obj_body: &str) -> FieldMap {
-    let mut map = FieldMap::new();
+fn parse_fields(obj_body: &str) -> HashMap<String, String> {
+    let mut map = HashMap::new();
     let mut rest = obj_body;
     while let Some(lt) = rest.find('<') {
         let after = &rest[lt + 1..];
@@ -2488,6 +2607,158 @@ mod tests {
         let mut pkg_dirs = HashMap::new();
         pkg_dirs.insert(1u32, PathBuf::from("/pkg"));
         build_definition(&mini_xml(), PathBuf::from("/root"), &pkg_dirs).expect("build")
+    }
+
+    /// Diagnose (E8): een veld dat de importer niet kent komt als ongelezen in
+    /// de opbrengst; velden die hij wel opvraagt niet.
+    #[test]
+    fn diagnose_meldt_een_onbekend_veld_en_geen_gelezen_veld() {
+        let xml = mini_xml().replace(
+            "<Stop><StopID>1</StopID>",
+            "<Stop><OnbekendVeld>zeg</OnbekendVeld><StopID>1</StopID>",
+        );
+        let mut pkg_dirs = HashMap::new();
+        pkg_dirs.insert(1u32, PathBuf::from("/pkg"));
+        crate::import_diagnose::start();
+        build_definition(&xml, PathBuf::from("/root"), &pkg_dirs).expect("build");
+        let o = crate::import_diagnose::stop();
+        let onbekend = o.ongelezen_velden.iter().find(|v| v.tabel == "Stop" && v.veld == "OnbekendVeld")
+            .expect("OnbekendVeld hoort ongelezen te zijn");
+        assert_eq!((onbekend.rijen, onbekend.ongelezen), (1, 1));
+        assert_eq!(onbekend.voorbeelden, vec!["zeg".to_string()]);
+        // Negatieve controle: wat de importer wel leest, mag er niet staan.
+        for (tabel, veld) in [("Stop", "StopID"), ("Stop", "Name"), ("StopRank", "RankID"), ("Pipe_SoundEngine01", "NormalMIDINoteNumber")] {
+            assert!(
+                !o.ongelezen_velden.iter().any(|v| v.tabel == tabel && v.veld == veld && v.ongelezen > 0),
+                "{tabel}.{veld} wordt gelezen en hoort niet ongelezen te zijn"
+            );
+        }
+        assert!(o.gelezen_tabellen.contains("stoprank"));
+    }
+
+    /// De diagnose registreert alleen; het geladen orgel verandert niet.
+    #[test]
+    fn diagnose_laat_het_geladen_orgel_ongemoeid() {
+        let mut pkg_dirs = HashMap::new();
+        pkg_dirs.insert(1u32, PathBuf::from("/pkg"));
+        let zonder = build_definition(&mini_xml(), PathBuf::from("/root"), &pkg_dirs).expect("build");
+        crate::import_diagnose::start();
+        let met = build_definition(&mini_xml(), PathBuf::from("/root"), &pkg_dirs).expect("build");
+        let _ = crate::import_diagnose::stop();
+        assert_eq!(zonder.stops.len(), met.stops.len());
+        for (a, b) in zonder.stops.iter().zip(met.stops.iter()) {
+            assert_eq!(format!("{a:?}"), format!("{b:?}"), "stop {} verschilt", a.name);
+        }
+        assert_eq!(format!("{:?}", zonder.enclosures), format!("{:?}", met.enclosures));
+        assert_eq!(zonder.windchests.len(), met.windchests.len());
+    }
+
+    /// De controlelijsten vinden elk een geplante fout; de lijsten van een
+    /// gaaf orgel zijn leeg.
+    #[test]
+    fn diagnose_controlelijsten_vinden_geplante_fouten() {
+        use crate::import_diagnose::controles;
+        let lijst = |l: &[crate::import_report::DiagnoseLijst], soort: &str| -> Vec<String> {
+            l.iter().find(|x| x.soort == soort).unwrap_or_else(|| panic!("lijst {soort} ontbreekt")).items.clone()
+        };
+        // Een gaaf orgel: zonder definitie (bestanden niet gecontroleerd) alles leeg.
+        let gaaf = controles(&mini_xml(), None);
+        for l in &gaaf {
+            assert_eq!(l.totaal, 0, "{}: {:?}", l.soort, l.items);
+        }
+        // "Leeg" is alleen een resultaat als de controle ook echt iets bekeken heeft.
+        let bekeken = |l: &[crate::import_report::DiagnoseLijst], s: &str| l.iter().find(|x| x.soort == s).unwrap().gecontroleerd;
+        for soort in ["verwijzing-ontbreekt", "register-zonder-rangen", "zwelkast-zonder-pijpen", "toonhoogte-buiten-bereik"] {
+            assert!(bekeken(&gaaf, soort) > 0, "{soort} heeft niets gecontroleerd");
+        }
+        // Een tremulant zonder herkenbaar dieptveld is niet te beoordelen: eigen lijst, geen bevinding.
+        let zonder_diepte = mini_xml().replace(
+            "</Hauptwerk>",
+            r#"<ObjectList ObjectType="Tremulant"><Tremulant><TremulantID>1</TremulantID><Name>T</Name></Tremulant></ObjectList></Hauptwerk>"#,
+        );
+        let l2 = controles(&zonder_diepte, None);
+        assert_eq!(lijst(&l2, "tremulant-diepte-nul").len(), 0);
+        assert_eq!(lijst(&l2, "tremulant-diepte-niet-te-controleren").len(), 1);
+        // Geplante fouten.
+        let xml = mini_xml()
+            // Verwijzing naar een rang die niet bestaat.
+            .replacen("<StopRank><StopID>1</StopID><RankID>1</RankID>", "<StopRank><StopID>1</StopID><RankID>99</RankID>", 1)
+            // Register zonder StopRank.
+            .replace(
+                "<Name>Montre 8</Name><DivisionID>1</DivisionID></Stop>",
+                "<Name>Montre 8</Name><DivisionID>1</DivisionID></Stop><Stop><StopID>3</StopID><Name>Leeg 8</Name><DivisionID>1</DivisionID></Stop>",
+            )
+            // Zwelkast waar niets aan hangt.
+            .replace(
+                "<Name>Enclosure Grand Orgue</Name></Enclosure>",
+                "<Name>Enclosure Grand Orgue</Name></Enclosure><Enclosure><EnclosureID>8</EnclosureID><Name>Leeg</Name></Enclosure>",
+            )
+            // Pijp op toets 200 met een toon van 3 Hz.
+            .replace(
+                r#"<ObjectList ObjectType="Pipe_SoundEngine01">"#,
+                r#"<ObjectList ObjectType="Pipe_SoundEngine01"><Pipe_SoundEngine01><PipeID>99</PipeID><RankID>1</RankID><NormalMIDINoteNumber>200</NormalMIDINoteNumber><Pitch_OriginalOrgan_PitchHz>3</Pitch_OriginalOrgan_PitchHz></Pipe_SoundEngine01>"#,
+            )
+            // Tremulant 1: geen toonhoogtemodulatie en amplitude 100 dB gedempt (diepte nul);
+            // tremulant 2: gewone diepte (2,3 % en -18 dB).
+            .replace(
+                "</Hauptwerk>",
+                r#"<ObjectList ObjectType="Tremulant"><Tremulant><TremulantID>1</TremulantID><Name>Tremulant I</Name></Tremulant><Tremulant><TremulantID>2</TremulantID><Name>Tremulant II</Name></Tremulant></ObjectList>
+<ObjectList ObjectType="TremulantWaveform"><TremulantWaveform><TremulantWaveformID>1</TremulantWaveformID><TremulantID>1</TremulantID></TremulantWaveform><TremulantWaveform><TremulantWaveformID>2</TremulantWaveformID><TremulantID>2</TremulantID></TremulantWaveform></ObjectList>
+<ObjectList ObjectType="TremulantWaveformPipe"><TremulantWaveformPipe><PipeID>11</PipeID><TremulantWaveformID>1</TremulantWaveformID><AmplitudeModDepthAdjustDecibels>-100</AmplitudeModDepthAdjustDecibels><PitchModDepthAdjustPercent>0</PitchModDepthAdjustPercent></TremulantWaveformPipe><TremulantWaveformPipe><PipeID>12</PipeID><TremulantWaveformID>2</TremulantWaveformID><AmplitudeModDepthAdjustDecibels>-18</AmplitudeModDepthAdjustDecibels><PitchModDepthAdjustPercent>2.3</PitchModDepthAdjustPercent></TremulantWaveformPipe></ObjectList></Hauptwerk>"#,
+            );
+        let l = controles(&xml, None);
+        assert!(lijst(&l, "verwijzing-ontbreekt").iter().any(|r| r.contains("StopRank.RankID = 99")), "{:?}", lijst(&l, "verwijzing-ontbreekt"));
+        assert!(lijst(&l, "register-zonder-rangen").iter().any(|r| r.contains("Leeg 8")));
+        assert_eq!(lijst(&l, "register-zonder-rangen").len(), 1, "alleen het geplante register");
+        assert!(lijst(&l, "zwelkast-zonder-pijpen").iter().any(|r| r.contains("Enclosure 8")));
+        assert_eq!(lijst(&l, "zwelkast-zonder-pijpen").len(), 1);
+        let toon = lijst(&l, "toonhoogte-buiten-bereik");
+        assert!(toon.iter().any(|r| r.contains("NormalMIDINoteNumber = 200")), "{toon:?}");
+        assert!(toon.iter().any(|r| r.contains("Pitch_OriginalOrgan_PitchHz") && r.contains("pijp 99")), "{toon:?}");
+        let trem = lijst(&l, "tremulant-diepte-nul");
+        assert_eq!(trem.len(), 1, "{trem:?}");
+        assert!(trem[0].contains("Tremulant 1"));
+    }
+
+    /// Ontbrekende samplebestanden: zonder de bestanden meldt de lijst elk
+    /// register, mét de bestanden is ze leeg.
+    #[test]
+    fn diagnose_ontbrekende_samplebestanden_en_negatieve_controle() {
+        use crate::import_diagnose::controles;
+        let dir = std::env::temp_dir().join(format!("vpo_diagnose_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut pkg_dirs = HashMap::new();
+        pkg_dirs.insert(1u32, dir.clone());
+        let def = build_definition(&mini_xml(), PathBuf::from("/root"), &pkg_dirs).expect("build");
+        let soort = |l: &[crate::import_report::DiagnoseLijst], s: &str| l.iter().find(|x| x.soort == s).map(|x| x.totaal).unwrap();
+
+        // Nog geen enkel bestand aangemaakt: alle registers hebben iets dat ontbreekt.
+        let l = controles(&mini_xml(), Some(&def));
+        assert_eq!(soort(&l, "samplebestand-ontbreekt"), def.stops.len());
+        assert_eq!(soort(&l, "register-zonder-pijpen"), 0);
+
+        // Maak elk bestand aan dat de definitie noemt: dan is er niets meer weg.
+        let mut paden: Vec<PathBuf> = Vec::new();
+        for s in &def.stops {
+            for p in s.pipes.iter().chain(s.layers.iter().flat_map(|l| l.pipes.iter())) {
+                if let PipeDef::Sample { path, extra } = p {
+                    paden.push(path.clone());
+                    paden.extend(extra.releases.iter().map(|r| r.path.clone()));
+                    paden.extend(extra.tremulant_attack.iter().map(|a| a.path.clone()));
+                    paden.extend(extra.tremulant_releases.iter().map(|r| r.path.clone()));
+                    paden.extend(extra.dry_attack.iter().map(|a| a.path.clone()));
+                }
+            }
+        }
+        assert!(!paden.is_empty());
+        for p in &paden {
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, b"x").unwrap();
+        }
+        let l = controles(&mini_xml(), Some(&def));
+        assert_eq!(soort(&l, "samplebestand-ontbreekt"), 0, "{:?}", l.iter().find(|x| x.soort == "samplebestand-ontbreekt").map(|x| x.items.clone()));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// AudioEngine_EnablePlayingAtOriginalOrganPitch = N (0.9.23): de set heeft

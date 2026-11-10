@@ -97,6 +97,72 @@ pub struct OvergeslagenStop {
     pub reden: String,
 }
 
+/// Een veld (`Tabel.Veld`) waarvan rijen een waarde hebben die de importer
+/// niet gelezen heeft. Zo wordt zichtbaar wat een importer op echte sets mist.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct OngelezenVeld {
+    pub tabel: String,
+    pub veld: String,
+    /// Aantal rijen van de tabel waar dit veld een niet-lege waarde heeft.
+    pub rijen: usize,
+    /// Daarvan rijen waarin niets de waarde opvroeg.
+    pub ongelezen: usize,
+    /// Aantal verschillende waarden (afgekapt op [`MAX_VERSCHILLEND`]).
+    pub verschillend: usize,
+    /// Een paar verschillende voorbeeldwaarden.
+    pub voorbeelden: Vec<String>,
+}
+
+/// Tabel in de definitie die de importer helemaal niet gelezen heeft.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct OnbekendeTabel {
+    pub tabel: String,
+    pub rijen: usize,
+}
+
+/// Bovengrens voor het bijhouden van verschillende waarden per veld.
+pub const MAX_VERSCHILLEND: usize = 64;
+
+/// Eén controlelijst van de diagnose (bijvoorbeeld "register zonder rangen").
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct DiagnoseLijst {
+    /// Korte vaste naam van de controle ("verwijzing-ontbreekt", "register-zonder-rangen", …).
+    pub soort: String,
+    /// Totaal aantal bevindingen; `items` kan korter zijn.
+    pub totaal: usize,
+    /// Aantal rijen of bestanden dat de controle werkelijk bekeken heeft. Nul
+    /// bevindingen bij nul gecontroleerd betekent "niet te beoordelen", niet "in orde".
+    #[serde(default)]
+    pub gecontroleerd: usize,
+    /// De eerste bevindingen als leesbare regels (afgekapt op [`MAX_ITEMS`]).
+    pub items: Vec<String>,
+}
+
+/// Bovengrens voor het aantal regels per controlelijst.
+pub const MAX_ITEMS: usize = 50;
+
+impl DiagnoseLijst {
+    pub fn nieuw(soort: impl Into<String>) -> Self {
+        DiagnoseLijst { soort: soort.into(), ..Default::default() }
+    }
+
+    pub fn voeg_toe(&mut self, regel: impl Into<String>) {
+        self.totaal += 1;
+        if self.items.len() < MAX_ITEMS {
+            self.items.push(regel.into());
+        }
+    }
+}
+
+/// Uitgebreide diagnose bij het laden. Alleen gevuld als de schakelaar
+/// ([`crate::import_diagnose`]) aanstaat: dat kost laadtijd en geheugen.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct Diagnose {
+    pub ongelezen_velden: Vec<OngelezenVeld>,
+    pub onbekende_tabellen: Vec<OnbekendeTabel>,
+    pub lijsten: Vec<DiagnoseLijst>,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ImportReport {
     /// "codm" | "hauptwerk" | "grandorgue" | "map"
@@ -118,6 +184,10 @@ pub struct ImportReport {
     pub onvolledig: bool,
     /// Geen enkele stop is speelbaar.
     pub niet_speelbaar: bool,
+    /// Ongelezen velden, onbekende tabellen en controlelijsten; alleen met de
+    /// diagnoseschakelaar aan (`JM_ORGUE_DIAGNOSE=1`).
+    #[serde(default)]
+    pub diagnose: Option<Diagnose>,
 }
 
 impl ImportReport {
