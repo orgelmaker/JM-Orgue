@@ -6,6 +6,28 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### Tests: hobbelmeter voor het loslaten (geen wijziging in de klank)
+- Nieuwe testmodule `src-tauri/src/hobbelmeter_tests.rs`: een gesynthetiseerde
+  pijptoon gaat over honderden verschillende loslaatmomenten (120 per noot, zes
+  noten van MIDI 36 tot 96) over in zijn release-sample, met de echte stemmen,
+  `crossfade_in`, `ReleaseAlignTable` en `release_fade_ms`. De meter geeft de
+  grootste zakking en bult van het niveau ten opzichte van het coherente
+  verloop. Gemeten basislijn met uitlijning: mediaan 0,01–0,04 dB, grootste dip
+  tot 3,2 dB (de tabel heeft 16 × 16 vakjes); zonder uitlijning mediaan 3,6–4,4 dB
+  en tot 7,1 dB. Een instant-start van de release geeft een bult van 5,7 dB en
+  wordt gevangen.
+- Aparte tests voor het startpunt van de release (aansluiting op de klinkende
+  golf), de geschaalde release na loslaten tijdens de aanzet (gain 0,2–1,0), de
+  staart die na een staccatonoot uitfadet zonder bult, en de uitlijntabel bij
+  te korte of stille data.
+- "Oneffenheid" is in JM-Orgue het verschil per pijp van het windmodel: met
+  verschil 0 klinken twee pijpen met verschillende identiteit bit-identiek;
+  zonder windgevoeligheid verandert de winddruk de uitvoer niet (beide met een
+  negatieve controle).
+- Elke test is met een tijdelijke mutatie van de engine gecontroleerd (instant-
+  start, verschil negeren, andere aanzet-gain, grovere tabel) en faalt daarbij
+  op de juiste plek; de mutaties zijn teruggedraaid.
+
 ### Hauptwerk-import: de niveaus van de set worden toegepast
 - De importer las het volumeniveau van de maker niet en liet elke set op 0 dB
   spelen. Nu wordt `AudioOut_AmplitudeLevelAdjustDecibels` (het niveau van het

@@ -3291,6 +3291,12 @@ mod release_tests {
     }
 }
 
+/// Hobbelmeter voor het loslaten (F4): gesynthetiseerde toon, honderden
+/// loslaatmomenten, negatieve controle zonder fase-uitlijning.
+#[cfg(test)]
+#[path = "hobbelmeter_tests.rs"]
+mod hobbelmeter_tests;
+
 /// Janitor per stem (0.7.40): een eindigende stem die de LAATSTE houder van
 /// zijn sample is (de map heeft hem boven de RAM-kap al geëvict) mag die Arc
 /// niet in de verwijderstap van de callback laten vallen — de deallocatie van
