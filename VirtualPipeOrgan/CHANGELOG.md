@@ -6,6 +6,18 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### Tests zonder samplebibliotheek: fixtures voor de import (E11)
+- Zeven nieuwe tests met verzonnen Hauptwerk-definities (`hauptwerk_fixtures_tests.rs`),
+  zonder dat er een sampleset op schijf staat: meerdere attacks per laag (de
+  eerste regel van het bestand wint), een schakelnetwerk met een lus (eindigt,
+  zelfde uitkomst), met een spiegel (geen dubbele telling, onafhankelijk van de
+  volgorde van de regels), een netwerk dat dieper is dan acht stappen, en de
+  beginstand van een register.
+- Twee van de tests leggen bewust het huidige gedrag vast waar nog niets
+  gebouwd is (de selectiecriteria van een attack en de beginstand worden niet
+  ingelezen); ze zijn als zodanig benoemd en horen te worden aangepast als dat
+  verandert. Zonder codewijziging.
+
 ### Samplepaden hoofdletterongevoelig op Linux en macOS (E7)
 - Sets worden op Windows gemaakt, waar hoofdletters in map- en bestandsnamen
   niet uitmaken. Staat een map op schijf als `bourdon` terwijl de definitie

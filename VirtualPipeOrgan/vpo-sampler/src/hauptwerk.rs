@@ -3685,3 +3685,9 @@ mod tests {
         }
     }
 }
+
+/// Fixtures zonder samplebibliotheek (E11): verzonnen definities voor meerdere
+/// attacks, het schakelnetwerk met lus en spiegel, en de beginstand.
+#[cfg(test)]
+#[path = "hauptwerk_fixtures_tests.rs"]
+mod fixtures_tests;
