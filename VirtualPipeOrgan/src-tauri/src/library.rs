@@ -1104,10 +1104,13 @@ mod library_tests {
         }
     }
 
+    #[cfg(windows)]
     #[test]
     fn test_normalize_library_dedupliceert_padnotaties() {
         // Duplicaten door forward vs backslash-notatie moeten samenvouwen;
         // de backslash-variant (UI-origineel) wint, incl. zijn settings.
+        // Alleen op Windows: daar zijn beide notaties hetzelfde pad. Het
+        // gedrag op Linux en macOS staat in de test hieronder.
         let mut lib = OrganLibrary::default();
         lib.organs.push(entry("C:/Orgels/Batz"));
         lib.organs.push(entry(r"C:\Orgels\Batz"));
@@ -1129,6 +1132,35 @@ mod library_tests {
             lib.settings.get(r"C:\Orgels\Batz").and_then(|s| s.master_volume_db),
             Some(-3.0),
             "settings van de UI-variant winnen"
+        );
+    }
+
+    /// Linux en macOS: de backslash is een gewoon teken in een bestandsnaam,
+    /// dus `C:/Orgels/Batz` en `C:\Orgels\Batz` zijn daar twee verschillende
+    /// paden en blijven twee entries. Alleen een echt identiek pad is een
+    /// duplicaat; de instellingen van de overlevende blijven staan.
+    #[cfg(not(windows))]
+    #[test]
+    fn test_normalize_library_vouwt_op_unix_alleen_identieke_paden_samen() {
+        let mut lib = OrganLibrary::default();
+        lib.organs.push(entry("/home/orgel/Orgels/Batz"));
+        lib.organs.push(entry("/home/orgel/Orgels/Batz"));
+        lib.organs.push(entry("C:/Orgels/Batz"));
+        lib.organs.push(entry(r"C:\Orgels\Batz"));
+        lib.organs.push(entry("/home/orgel/Orgels/Uniek"));
+        lib.settings.insert("/home/orgel/Orgels/Batz".into(), OrganSettings { master_volume_db: Some(-3.0), ..Default::default() });
+
+        normalize_library(&mut lib);
+
+        let ids: Vec<&str> = lib.organs.iter().map(|o| o.id.as_str()).collect();
+        assert_eq!(lib.organs.len(), 4, "alleen het identieke pad is samengevoegd: {:?}", ids);
+        assert_eq!(ids.iter().filter(|i| **i == "/home/orgel/Orgels/Batz").count(), 1);
+        assert!(ids.contains(&"C:/Orgels/Batz"), "forward-slash-variant blijft: {:?}", ids);
+        assert!(ids.contains(&r"C:\Orgels\Batz"), "backslash-variant blijft ongemoeid: {:?}", ids);
+        assert_eq!(
+            lib.settings.get("/home/orgel/Orgels/Batz").and_then(|s| s.master_volume_db),
+            Some(-3.0),
+            "settings van het overlevende pad blijven staan"
         );
     }
 

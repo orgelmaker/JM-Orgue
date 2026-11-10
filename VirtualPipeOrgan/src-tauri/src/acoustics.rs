@@ -291,10 +291,19 @@ pub fn pijp_nummer(b: &PipeBinding) -> Option<u32> {
 
 /// Relatief pad binnen de orgelmap: geen absolute paden, geen `..`, en na
 /// het oplossen van symlinks nog steeds binnen de map (plan §2).
+///
+/// Een orgelconfiguratie moet overdraagbaar zijn tussen platformen, dus de
+/// controle is op elk platform gelijk: een backslash telt overal als
+/// scheidingsteken (anders glipt `..\x.wav` op Linux en macOS door als één
+/// gewone bestandsnaam) en een Windows-schijfletter (`C:`) wordt overal
+/// geweigerd, ook waar het daar een geldige bestandsnaam zou zijn.
 pub fn veilig_pad(organ_dir: &Path, rel: &str) -> Result<PathBuf, String> {
     if rel.trim().is_empty() { return Err("leeg pad".into()); }
-    let p = Path::new(rel);
-    if p.is_absolute() || rel.starts_with('/') || rel.starts_with('\\')
+    let genormaliseerd = rel.replace('\\', "/");
+    let b = genormaliseerd.as_bytes();
+    let schijfletter = b.len() >= 2 && b[0].is_ascii_alphabetic() && b[1] == b':';
+    let p = Path::new(&genormaliseerd);
+    if schijfletter || p.is_absolute() || genormaliseerd.starts_with('/')
         || p.components().next().map_or(false, |c| matches!(c, std::path::Component::Prefix(_)))
     {
         return Err(format!("absoluut pad niet toegestaan: {}", rel));
@@ -692,6 +701,19 @@ mod tests {
         assert!(veilig_pad(&dir, "C:\\x.wav").is_err());
         assert!(veilig_pad(&dir, "/x.wav").is_err());
         assert!(veilig_pad(&dir, "").is_err());
+    }
+
+    /// Dezelfde uitkomst op elk platform: backslashes en schijfletters mogen
+    /// ook op Linux en macOS niet langs de controle glippen.
+    #[test]
+    fn paden_met_backslash_en_schijfletter_gedragen_zich_overal_gelijk() {
+        let dir = std::env::temp_dir();
+        let verwacht = dir.join("IR").join("Original").join("x.wav");
+        assert_eq!(veilig_pad(&dir, "IR\\Original\\x.wav").unwrap(), verwacht);
+        assert_eq!(veilig_pad(&dir, "IR/Original/x.wav").unwrap(), verwacht);
+        for fout in ["..\\x.wav", "IR\\..\\..\\x.wav", "C:/x.wav", "c:x.wav", "\\x.wav", "\\\\server\\deel\\x.wav"] {
+            assert!(veilig_pad(&dir, fout).is_err(), "hoort geweigerd te worden: {}", fout);
+        }
     }
 
     #[test]

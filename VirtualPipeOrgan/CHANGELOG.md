@@ -4,6 +4,18 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [Onuitgebracht]
+
+### Tests en padcontrole gelijk op elk platform
+- De padcontrole voor bestanden in een orgelmap (`veilig_pad`) werkt nu op
+  elk platform hetzelfde: een backslash telt overal als scheidingsteken en
+  een Windows-schijfletter (`C:`) wordt overal geweigerd. Op Linux en macOS
+  glipte `..\x.wav` eerder door als gewone bestandsnaam.
+- De bibliotheektest voor dubbele padnotaties is gesplitst: op Windows blijft
+  hij gelijk, op Linux en macOS legt een eigen test vast dat alleen een
+  identiek pad een duplicaat is. Beide tests falen daarmee niet meer op
+  Linux en macOS.
+
 ## [0.9.50] - 2026-11-07
 
 ### Meer gratis samplesets vanuit de bibliotheek
