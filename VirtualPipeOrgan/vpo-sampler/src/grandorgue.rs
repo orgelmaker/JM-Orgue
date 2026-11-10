@@ -2943,23 +2943,31 @@ FirstMidiNoteNumber=48
 PitchTuning=15
 PitchCorrection=15
 NumberOfLogicalPipes=1
-Pipe001=samples\048-c.wav
+Pipe001=samples\\048-c.wav
 [Rank002]
 Name=Voix celeste 8'
 FirstMidiNoteNumber=48
 PitchCorrection=0
 NumberOfLogicalPipes=1
-Pipe001=samples\048-c.wav
+Pipe001=samples\\048-c.wav
 [Rank003]
 Name=Vox coelestis 8'
 FirstMidiNoteNumber=48
 NumberOfLogicalPipes=1
-Pipe001=samples\048-c.wav
+Pipe001=samples\\048-c.wav
 ");
         let extra = |id: u32| {
             let PipeDef::Sample { extra, .. } = &organ.get_stop(id).expect("stop").pipes[0] else { panic!("sample") };
             extra.clone()
         };
+        // Bewaking: een kapotte escape in de fixture (`\0` = NUL) liet deze test
+        // vroeger stil slagen, omdat het bestand toch niet werd geopend.
+        for id in 1..=3 {
+            let PipeDef::Sample { path, .. } = &organ.get_stop(id).expect("stop").pipes[0] else { panic!("sample") };
+            let p = path.to_string_lossy();
+            assert!(!p.contains('\0'), "NUL in pad van register {id}: {p:?}");
+            assert!(p.ends_with("048-c.wav"), "pad van register {id} is {p:?}");
+        }
         let e1 = extra(1);
         assert_eq!(e1.retune_keep_pct, Some(0.0));
         assert!((e1.pitch_correction_cents.unwrap() - 15.0).abs() < 1e-6);

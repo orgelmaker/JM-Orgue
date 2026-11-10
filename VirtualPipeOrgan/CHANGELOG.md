@@ -12,6 +12,11 @@ versies volgen [Semantic Versioning](https://semver.org/).
   (`Images\Info\0` en `Images\OrganInfo\0`) nooit pasten en zoekprogramma's
   het bestand als binair zagen. Hersteld; een test bewaakt dat er geen
   NUL-byte meer in komt. De variant met schuine streep ving het tot nu toe op.
+- In een test van de GrandOrgue-lezer stond in drie bestandsnamen
+  `samples\048-c.wav` in een gewone tekst, waardoor `\0` een NUL-teken werd en
+  de naam `48-c.wav` overbleef. De test slaagde toch, omdat het bestand nooit
+  wordt geopend. Nu `samples\\048-c.wav`, en de test controleert voortaan het
+  pad zelf.
 
 ### Tests en padcontrole gelijk op elk platform
 - De padcontrole voor bestanden in een orgelmap (`veilig_pad`) werkt nu op
