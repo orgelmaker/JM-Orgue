@@ -1551,6 +1551,10 @@ pub struct AppState {
     /// kijkt tussen fasen of deze is gezet; na de eerste audio-wissel keert hij
     /// terug naar false (annuleren is dan niet meer veilig).
     pub load_annulering: Arc<std::sync::atomic::AtomicBool>,
+    /// Door de UI gevraagde annulering van lopende sampleset-downloads, per
+    /// download-id. De download kijkt na elk gelezen blok; hij ruimt zijn eigen
+    /// id aan het begin en het einde op.
+    pub sampleset_download_annulering: Arc<RwLock<std::collections::HashSet<String>>>,
     /// Currently loaded organ ID (for saving settings on close)
     pub current_organ_id: Arc<RwLock<Option<String>>>,
     /// Crescendo configuration: stages[i] = list of stop IDs that should be ON at stage i
@@ -2123,6 +2127,7 @@ impl AppState {
             app_data_dir,
             laatste_importverslag: Arc::new(RwLock::new(None)),
             load_annulering: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            sampleset_download_annulering: Arc::new(RwLock::new(std::collections::HashSet::new())),
             codm_random_stemming: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             current_organ_id: Arc::new(RwLock::new(None)),
             crescendo_stages,

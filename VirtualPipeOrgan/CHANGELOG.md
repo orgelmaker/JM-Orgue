@@ -6,6 +6,23 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### Sampleset-download loopt niet meer vast en is te annuleren
+- Het downloaden van een sampleset had geen time-out: viel de verbinding
+  stil, dan bleef de voortgang eindeloos op hetzelfde percentage staan. Nu
+  geldt 20 seconden voor het opzetten van de verbinding en 45 seconden zonder
+  ontvangen gegevens; er is bewust geen totale tijdsgrens, want een grote set
+  mag lang duren zolang er data binnenkomt. Bij een time-out volgt een heldere
+  melding.
+- Na het downloaden wordt gecontroleerd dat het aantal ontvangen bytes gelijk
+  is aan wat de server meldde (`Content-Length`); een afgebroken of
+  onvolledige download geeft een duidelijke foutmelding in plaats van een
+  onleesbare zip.
+- Een lopende download is nu te annuleren, ook tijdens het uitpakken, met een
+  knop Annuleren op de kaart van de set (zeven talen). De halve download
+  wordt opgeruimd en er verschijnt geen foutmelding. De logica staat in de
+  nieuwe module `sampleset_download.rs`, met tests tegen een kleine
+  lokale server (volledig, afgebroken, stilgevallen, annuleren).
+
 ### Foute tekens in de bron hersteld
 - In `library.rs` stond op twee plaatsen een los NUL-byte waar `\0` bedoeld
   was, waardoor de twee zoekvarianten voor de infomap van een Hauptwerk-set

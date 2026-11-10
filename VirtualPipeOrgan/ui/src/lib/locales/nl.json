@@ -44,6 +44,7 @@
     "download_size": "Downloaden (± {mb} MB)",
     "download_where": "Kies de map waarin de sampleset komt te staan",
     "download_failed": "Download mislukt",
+    "download_cancel": "Annuleren",
     "choose_image": "Afbeelding kiezen…",
     "choose_image_title": "Kies een foto van het orgel",
     "image_auto": "Afbeelding automatisch zoeken",

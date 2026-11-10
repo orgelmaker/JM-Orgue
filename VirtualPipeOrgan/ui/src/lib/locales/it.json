@@ -44,6 +44,7 @@
     "download_size": "Scarica (± {mb} MB)",
     "download_where": "Scegli la cartella in cui salvare il set di campioni",
     "download_failed": "Download non riuscito",
+    "download_cancel": "Annulla",
     "choose_image": "Scegli immagine…",
     "choose_image_title": "Scegli una foto dell'organo",
     "image_auto": "Cerca immagine automaticamente",

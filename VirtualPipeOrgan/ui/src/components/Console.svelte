@@ -4275,12 +4275,18 @@
       // Zelfde route als "Scan map": laadt het orgel en zet het in de bibliotheek.
       dispatch('scanFolder', pad);
     } catch (e) {
-      alert(`${tx('library.download_failed')}: ${e}`);
+      // Door de gebruiker afgebroken: geen foutmelding, het is geen fout.
+      if (!String(e).includes('[geannuleerd]')) {
+        alert(`${tx('library.download_failed')}: ${e}`);
+      }
     } finally {
       if (un) un();
       onlineBusy = null;
       refreshOnlineSets();
     }
+  }
+  function annuleerDownload(s) {
+    invoke('cancel_sampleset_download', { id: s.id }).catch(() => {});
   }
 
   // (De losse "Extern"-knop is vervallen: hij deed hetzelfde als "Map
@@ -5847,6 +5853,7 @@
                 <div class="library-card-meta">
                   {#if onlineBusy === s.id}
                     {onlineFase === 'uitpakken' ? $t('library.unpacking') : $t('library.downloading')} {onlinePct}%
+                    <button class="library-card-cancel" on:click|stopPropagation={() => annuleerDownload(s)}>{$t('library.download_cancel')}</button>
                   {:else}
                     {$t('library.download_size').replace('{mb}', s.zip_mb || '?')}
                   {/if}

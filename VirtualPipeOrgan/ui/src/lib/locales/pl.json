@@ -44,6 +44,7 @@
     "download_size": "Pobierz (± {mb} MB)",
     "download_where": "Wybierz folder, w którym zostanie zapisany zestaw sampli",
     "download_failed": "Pobieranie nie powiodło się",
+    "download_cancel": "Anuluj",
     "choose_image": "Wybierz zdjęcie…",
     "choose_image_title": "Wybierz zdjęcie organów",
     "image_auto": "Znajdź zdjęcie automatycznie",

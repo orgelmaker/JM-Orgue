@@ -44,6 +44,7 @@
     "download_size": "Télécharger (± {mb} Mo)",
     "download_where": "Choisissez le dossier où placer le jeu d'échantillons",
     "download_failed": "Échec du téléchargement",
+    "download_cancel": "Annuler",
     "choose_image": "Choisir une image…",
     "choose_image_title": "Choisissez une photo de l’orgue",
     "image_auto": "Rechercher l’image automatiquement",

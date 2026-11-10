@@ -24,6 +24,7 @@ mod klavar;
 mod recorder;
 mod remote;
 mod retune;
+mod sampleset_download;
 mod state;
 mod test_api;
 
@@ -410,6 +411,7 @@ fn main() {
             commands::misc_cc_get_bindings,
             commands::get_and_clear_misc_cc_pending,
             commands::download_sampleset,
+            commands::cancel_sampleset_download,
             commands::get_audio_devices,
             commands::list_audio_hosts,
             commands::list_output_devices,

@@ -44,6 +44,7 @@
     "download_size": "Descargar (± {mb} MB)",
     "download_where": "Elige la carpeta donde se guardará el juego de muestras",
     "download_failed": "Descarga fallida",
+    "download_cancel": "Cancelar",
     "choose_image": "Elegir imagen…",
     "choose_image_title": "Elige una foto del órgano",
     "image_auto": "Buscar la imagen automáticamente",

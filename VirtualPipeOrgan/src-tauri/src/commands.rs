@@ -11426,9 +11426,11 @@ pub fn get_log_tail(max_kb: Option<u32>) -> Result<String, String> {
 /// samplesets.json-manifest) en pak hem uit in `doel_map`. De map wordt
 /// aangemaakt en moet nieuw of leeg zijn. Voortgang via het event
 /// "jm-orgue:sampleset-download" ({id, fase: "download"|"uitpakken", pct}).
-/// Bij een fout wordt de (door ons aangemaakte) doelmap weer opgeruimd.
+/// Bij een fout (ook bij annuleren) wordt de (door ons aangemaakte) doelmap
+/// weer opgeruimd. Time-outs: 20 s verbinden, 45 s zonder data tijdens het
+/// lezen; geen totale tijdsgrens. Zie `sampleset_download.rs`.
 #[tauri::command]
-pub async fn download_sampleset(app: tauri::AppHandle, id: String, url: String, doel_map: String) -> Result<String, String> {
+pub async fn download_sampleset(app: tauri::AppHandle, state: State<'_, AppState>, id: String, url: String, doel_map: String) -> Result<String, String> {
     use tauri::Emitter;
     // Alleen onze eigen distributieroute: GitHub (release-assets redirecten
     // naar objects.githubusercontent.com — dat volgt ureq zelf).
@@ -11448,40 +11450,34 @@ pub async fn download_sampleset(app: tauri::AppHandle, id: String, url: String, 
             }));
         }
     };
+    // Een nieuw verzoek begint zonder oud annuleringsverzoek voor dit id.
+    let annulering = state.sampleset_download_annulering.clone();
+    annulering.write().remove(&id);
+    let geannuleerd = {
+        let annulering = annulering.clone();
+        let id = id.clone();
+        move || annulering.read().contains(&id)
+    };
     let result = tokio::task::spawn_blocking(move || -> Result<String, String> {
         std::fs::create_dir_all(&doel).map_err(|e| format!("Doelmap aanmaken mislukt: {}", e))?;
         let zip_pad = doel.join(".download.zip");
-        // ---- Downloaden (streaming, met voortgang op content-length) ----
-        let resp = ureq::get(&url).call().map_err(|e| format!("Download mislukt: {}", e))?;
-        let totaal: u64 = resp.header("Content-Length")
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(0);
-        {
-            let mut reader = resp.into_reader();
-            let mut file = std::fs::File::create(&zip_pad)
-                .map_err(|e| format!("Zip wegschrijven mislukt: {}", e))?;
-            let mut buf = [0u8; 65536];
-            let mut gelezen: u64 = 0;
-            let mut laatst_pct = 0u32;
-            loop {
-                let n = std::io::Read::read(&mut reader, &mut buf)
-                    .map_err(|e| format!("Download afgebroken: {}", e))?;
-                if n == 0 { break; }
-                std::io::Write::write_all(&mut file, &buf[..n])
-                    .map_err(|e| format!("Zip wegschrijven mislukt: {}", e))?;
-                gelezen += n as u64;
-                if totaal > 0 {
-                    let pct = ((gelezen * 100) / totaal) as u32;
-                    if pct > laatst_pct { laatst_pct = pct; emit("download", pct); }
-                }
-            }
-        }
+        // ---- Downloaden (streaming, met voortgang op content-length, lees-timeout,
+        // volledigheidscontrole en annulering) ----
+        crate::sampleset_download::download_naar_bestand(
+            &crate::sampleset_download::standaard_agent(),
+            &url,
+            &zip_pad,
+            crate::sampleset_download::LEES_TIMEOUT,
+            &geannuleerd,
+            &mut |pct| emit("download", pct),
+        )?;
         // ---- Uitpakken (zip-slip-veilig via enclosed_name) ----
         emit("uitpakken", 0);
         let file = std::fs::File::open(&zip_pad).map_err(|e| e.to_string())?;
         let mut archief = zip::ZipArchive::new(file).map_err(|e| format!("Zip onleesbaar: {}", e))?;
         let n_entries = archief.len().max(1);
         for i in 0..archief.len() {
+            if geannuleerd() { return Err(crate::sampleset_download::melding_geannuleerd()); }
             let mut entry = archief.by_index(i).map_err(|e| e.to_string())?;
             let Some(rel) = entry.enclosed_name() else { continue; };
             let uit = doel.join(rel);
@@ -11499,12 +11495,23 @@ pub async fn download_sampleset(app: tauri::AppHandle, id: String, url: String, 
         let _ = std::fs::remove_file(&zip_pad);
         info!("Sampleset gedownload en uitgepakt naar {:?}", doel);
         Ok(doel.to_string_lossy().to_string())
-    }).await.map_err(|e| format!("Downloadtaak crashte: {}", e))?;
+    }).await;
+    annulering.write().remove(&id);
+    let result = result.map_err(|e| format!("Downloadtaak crashte: {}", e))?;
     if result.is_err() {
         // Halve download niet laten slingeren; de map was van ons.
         let _ = std::fs::remove_dir_all(std::path::Path::new(&doel_map));
     }
     result
+}
+
+/// Vraag een lopende sampleset-download (id uit het manifest) af te breken.
+/// De download stopt na het eerstvolgende gelezen blok of uitgepakte bestand,
+/// ruimt de doelmap op en geeft een `[geannuleerd]`-melding terug.
+#[tauri::command]
+pub fn cancel_sampleset_download(state: State<AppState>, id: String) {
+    state.sampleset_download_annulering.write().insert(id.clone());
+    info!("Annulering van sampleset-download gevraagd: {}", id);
 }
 
 /// Lees of JM-Orgue ingesteld staat om automatisch te starten bij Windows-aanmelding.

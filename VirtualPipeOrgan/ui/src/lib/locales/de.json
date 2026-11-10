@@ -44,6 +44,7 @@
     "download_size": "Herunterladen (± {mb} MB)",
     "download_where": "Ordner wählen, in dem das Sample-Set gespeichert wird",
     "download_failed": "Download fehlgeschlagen",
+    "download_cancel": "Abbrechen",
     "choose_image": "Bild wählen…",
     "choose_image_title": "Wählen Sie ein Foto der Orgel",
     "image_auto": "Bild automatisch suchen",

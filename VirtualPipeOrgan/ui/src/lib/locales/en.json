@@ -44,6 +44,7 @@
     "download_size": "Download (± {mb} MB)",
     "download_where": "Choose the folder where the sample set will be stored",
     "download_failed": "Download failed",
+    "download_cancel": "Cancel",
     "choose_image": "Choose image…",
     "choose_image_title": "Choose a photo of the organ",
     "image_auto": "Find image automatically",
