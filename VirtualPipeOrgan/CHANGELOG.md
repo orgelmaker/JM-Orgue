@@ -6,6 +6,20 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### Frontend-afhankelijkheden: `npm audit fix` (zonder major-sprong)
+- `npm audit` meldde 13 kwetsbaarheden (6 hoog, 6 matig, 1 laag). Na
+  `npm audit fix` zijn dat er 8 (1 hoog, 6 matig, 1 laag): de vijf hoge die
+  binnen dezelfde hoofdversie op te lossen waren zijn weg (`nanoid`, `postcss`,
+  `rollup` 4.57 → 4.68, `source-map-js`, `undici`). Alleen `package-lock.json`
+  veranderde; `package.json` niet.
+- De rest (`vite` 5, `esbuild`, `svelte` 4 en hun plug-ins) heeft geen fix
+  zonder overstap naar Vite 6+ of Svelte 5; dat is een apart project. Het gaat
+  om bouwgereedschap en ontwikkelserver: `npm audit --omit=dev` (wat er
+  daadwerkelijk wordt meegeleverd) geeft 0 meldingen.
+- Gecontroleerd: de frontend bouwt en de uitgeleverde bundel is identiek aan
+  die van vóór de update (dezelfde bestandsnamen met dezelfde inhoudshash,
+  10 bestanden, 3333 KB), dus er is niets in de app dat anders kan werken.
+
 ### Opruiming: clippy en dode code (geen wijziging in de klank)
 - Waarschuwingen in de vijf crates en `jm-midimon`: **310 → 124** (gewone
   build; met testcode en voorbeeldprogramma's erbij 160), en
