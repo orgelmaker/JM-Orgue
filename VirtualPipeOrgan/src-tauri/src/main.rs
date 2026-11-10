@@ -13,6 +13,7 @@ mod feedback;
 mod import_pakketroot;
 mod library;
 mod library_online;
+mod logging;
 mod silence;
 mod loop_tool;
 mod mengpool;
@@ -116,7 +117,11 @@ fn main() {
     // terwijl de audio doorspeelt (twee keer gezien op 2026-09-12; eerder al
     // de stderr-pipe-les van 2026-07-13). De file-layer staat nu binnenin,
     // zodat het logbestand bij een toekomstige blokkade wél de laatste regel
-    // krijgt.
+    // krijgt. Sinds B2 schrijft die bestandslaag niet-blokkerend (module
+    // `logging`): een logregel op de audiothread kost nog alleen het
+    // formatteren, geen WriteFile onder een mutex meer. De laag blijft BINNENIN
+    // (vóór stderr); met een niet-blokkerende schrijver geldt dat nog steeds,
+    // zie de tests in logging.rs.
     use std::io::IsTerminal;
     let on_tty = std::io::stderr().is_terminal();
 
@@ -127,7 +132,7 @@ fn main() {
 
     if let Some(f) = file {
         let file_layer = fmt::layer()
-            .with_writer(std::sync::Mutex::new(f))
+            .with_writer(logging::bestandsschrijver(f))
             .with_ansi(false)
             .with_target(true);
         // Option<Layer> is zelf een Layer (None = niets loggen naar stderr).
@@ -688,8 +693,22 @@ fn main() {
                 std::thread::spawn(|| {
                     std::thread::sleep(std::time::Duration::from_secs(5));
                     tracing::warn!("Afsluiten duurde >5 s (audio-teardown hangt?); proces wordt geforceerd beëindigd");
+                    // process::exit draait geen Drops: de wachtrij van het
+                    // logbestand moet eerst leeg, anders mist juist deze regel.
+                    logging::sluit_af();
                     std::process::exit(0);
                 });
+                // Tauri beëindigt het proces hierna zelf (main() komt niet aan
+                // zijn einde): wat nu in de wachtrij van het logbestand staat
+                // moet er eerst uit. De schrijfthread blijft doorlopen, dus de
+                // waakhond hierboven kan nog loggen.
+                logging::laat_leeglopen(std::time::Duration::from_millis(300));
             }
         });
+    // Komt de event-loop hier terug, dan sluit het logbestand netjes af. Op
+    // plekken waar Tauri het proces zelf beëindigt gebeurt dit niet; het
+    // bestand is dan op de laatste milliseconden na bij (de schrijfthread
+    // schrijft elke regel meteen weg).
+    info!("=== JM-Orgue afgesloten ===");
+    logging::sluit_af();
 }

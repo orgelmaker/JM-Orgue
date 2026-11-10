@@ -1943,6 +1943,9 @@ pub async fn prepare_for_update(state: State<'_, AppState>) -> Result<(), String
         }
         drop(guard);
         info!("Klaar voor de update-installer: audio-thread gestopt, apparaat vrij");
+        // De updater beëindigt het proces hierna met exit(0): de wachtrij van het
+        // logbestand moet dan leeg zijn, anders mist juist deze laatste regel.
+        crate::logging::laat_leeglopen(std::time::Duration::from_millis(300));
     })
     .await
     .map_err(|e| format!("Task join error: {}", e))

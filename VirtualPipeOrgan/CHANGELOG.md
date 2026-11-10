@@ -6,6 +6,37 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### Logboek schrijft niet meer op de audiothread
+- Het logbestand werd synchroon geschreven achter een mutex, en in de
+  render-closure van de audio staan ruim dertig `info!`/`warn!`-aanroepen bij
+  configuratiecommando's (en de belastingswaarschuwing). Zo'n regel deed dus een
+  schijfschrijfactie op de audiothread: een trage schijf of een virusscanner
+  was genoeg voor een hapering. De bestandslaag gaat nu via `tracing-appender`
+  (niet-blokkerend): de aanroeper formatteert en legt de regel in een kanaal,
+  een eigen thread schrijft. Zit het kanaal vol (128.000 regels) dan valt een
+  regel weg in plaats van dat de audio wacht.
+- De bestandslaag blijft vóór de stderr-laag, zodat het logbestand de laatste
+  regel ook krijgt als een starter de stderr-pipe nooit leegt.
+- `main()` komt nooit aan zijn einde (Tauri beëindigt het proces zelf), dus een
+  guard in `main` zou nooit worden gedropt. Bij het afsluiten, en aan het eind
+  van `prepare_for_update` (de updater doet daarna `exit(0)`), wacht de app
+  daarom kort tot de wachtrij leeg is (`laat_leeglopen`, hoogstens 300 ms, via
+  een teller van verzonden en weggeschreven regels; de schrijfthread blijft
+  doorlopen). Vlak vóór het geforceerde einde van de afsluit-waakhond wordt het
+  bestand wel definitief gesloten.
+- Nieuw: `src-tauri/src/logging.rs` met negen tests, onder meer dat een
+  stilstaande schijf de aanroeper niet ophoudt, dat de laatste regels bij het
+  afsluiten er nog in komen, en negatieve controles die laten zien dat de oude
+  opzet de aanroeper wél ophield en dat een omgekeerde laagvolgorde de laatste
+  regel kost. Nieuwe afhankelijkheden: `tracing-appender` en het kleine
+  `symlink`.
+- Gemeten in de app (150 commando's, daarna direct afsluiten, oud en nieuw
+  afgewisseld): alle 150 logregels van de API-kant en van de audiothread staan
+  in het bestand, bij beide. Op deze computer is er geen meetbaar verschil in
+  snelheid of afsluitduur; het voordeel zit bij een trage of stilstaande schijf.
+- Niet opgelost: de logaanroepen in de callback formatteren nog (een
+  allocatie). Dat hoort bij D1.
+
 ### Hulpmiddel: vaste referentieproef (`testscripts/referentieproef.py`, geen wijziging in de app)
 - Eén herhaalbare proef in plaats van losse noten: een vast MIDI-bestand
   (`testscripts/testdata/referentieproef.mid`, zes aangehouden noten van MIDI 36
