@@ -136,6 +136,28 @@ de ASIO-wissel uit (het orgel wordt daarbij opnieuw geladen). In het log:
 - zet het apparaat online in het ASIO4ALL-configuratiescherm;
 - of gebruik een audio-interface met eigen ASIO-driver (betrouwbaarste route).
 
+## Webview-beveiliging en ontwikkelaarstools
+
+**Content-Security-Policy.** `src-tauri/tauri.conf.json` (`app.security.csp`) laat de
+webview alleen laden van de app zelf, plus: afbeeldingen van `upload.wikimedia.org`
+(zoeken naar orgelfoto's) en uit het asset-protocol, en netwerkverbindingen naar
+`api.github.com` (controle op een nieuwe versie), `raw.githubusercontent.com`
+(de lijst met samplesets) en `formspree.io` (het feedbackformulier). Scripts
+alleen uit de app, geen `eval`. Voegt de UI een nieuwe externe bron toe, dan moet
+die host hier bij, anders blokkeert de webview hem stil; de console meldt dan
+"Refused to … because it violates the following Content Security Policy directive".
+De dev-server (`devUrl`) krijgt geen CSP.
+
+**Ontwikkelaarstools (rechtsklik → Inspecteren, F12)** zitten niet in een gewone
+releasebouw. Een debugbouw heeft ze altijd. Voor een ondersteuningsbouw waarin een
+gebruiker ze nodig heeft:
+
+```
+cargo build --release -p vpo-app --features devtools
+```
+
+(te combineren met `asio`: `--features asio,devtools`).
+
 ## Release + automatische update (0.7.40)
 
 ### Routine voor een nieuwe versie

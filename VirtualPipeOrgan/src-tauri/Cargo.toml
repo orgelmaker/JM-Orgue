@@ -27,7 +27,7 @@ vpo-audio = { path = "../vpo-audio" }
 vpo-midi = { path = "../vpo-midi" }
 vpo-sampler = { path = "../vpo-sampler" }
 
-tauri = { workspace = true, features = ["devtools"] }
+tauri = { workspace = true }
 tauri-plugin-dialog = "2"
 # Automatische update (0.7.40): de updater haalt latest.json op bij de
 # GitHub-release, controleert de minisign-handtekening en start de installer.
@@ -72,6 +72,11 @@ asio-sys = { version = "0.2.6", optional = true }
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
+# Webview-ontwikkelaarstools (rechtsklik → Inspecteren, F12) in een releasebouw.
+# Standaard UIT: zonder deze feature heeft een gewone release ze niet (in een
+# debugbouw staan ze altijd aan). Alleen voor een ondersteuningsbouw:
+#   cargo build --release -p vpo-app --features devtools
+devtools = ["tauri/devtools"]
 # Optional low-latency ASIO output backend (Windows).
 # Off by default: enabling it compiles cpal's ASIO backend, which requires a
 # one-time local setup (LLVM/libclang; the Steinberg ASIO SDK is downloaded

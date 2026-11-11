@@ -23,7 +23,7 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self' ipc: http://ipc.localhost; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: asset: http://asset.localhost https://upload.wikimedia.org; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost https://api.github.com https://raw.githubusercontent.com https://formspree.io; object-src 'none'; base-uri 'none'; frame-src 'none'"
     }
   },
   "bundle": {

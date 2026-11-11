@@ -6,6 +6,33 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### Beveiliging van de webview: CSP en ontwikkelaarstools (B3)
+- De webview had geen Content-Security-Policy (`csp: null`). Nu laat hij alleen laden
+  van de app zelf, plus precies wat de UI nodig heeft: afbeeldingen van
+  `upload.wikimedia.org` (zoeken naar orgelfoto's) en uit het asset-protocol, en
+  verbindingen naar `api.github.com` (nieuwe versie), `raw.githubusercontent.com`
+  (lijst met samplesets) en `formspree.io` (feedbackformulier). Scripts alleen uit de
+  app en geen `eval`; stijlen mogen inline (Svelte en de notatieweergave zetten ze).
+  Geen frames, geen `object`. De ontwikkelserver krijgt geen CSP.
+- De ontwikkelaarstools (rechtsklik → Inspecteren, F12) zaten in elke releasebouw.
+  Dat is nu een aparte cargo-feature: een gewone release heeft ze niet, een
+  ondersteuningsbouw met `cargo build --release -p vpo-app --features devtools` wel
+  (te combineren met `asio`). Een debugbouw heeft ze altijd. Beschreven in
+  `BUILDING.md`.
+- Getest in de echte app (Windows, release): hoofdvenster met alle tabbladen en
+  subtabbladen van Orgel-Instellingen en Algemene Instellingen, een paneelvenster
+  (registers schakelen) en het notatievenster (notenschrift en klavar) laden en
+  werken zonder één overtreding. Een negatieve controle bewijst dat de CSP werkt: een
+  afbeelding of `fetch` naar een niet-toegestane host en `eval` worden geblokkeerd, en
+  GitHub, de samplesets-lijst, Wikimedia en de IPC-aanroepen niet.
+- Niet getest: het feedbackformulier zelf (er is geen bericht verzonden; alleen is
+  gecontroleerd dat de host bereikbaar is), de bouw op macOS en Linux (daar zijn de
+  schema's `ipc:` en `asset:` zonder `http://…localhost` ook toegestaan, maar het is
+  niet uitgeprobeerd), en het kiezen van een achtergrondtextuur via het
+  asset-protocol (dat protocol is in de app niet ingeschakeld, dus dat was al zo).
+  Voegt een latere wijziging een nieuwe externe bron toe, dan moet die host in de
+  CSP; de webview blokkeert hem anders stil.
+
 ### README en website: eigen sterke punten vooraan, met luidsprekercorrectie (C7)
 - In de vergelijkingstabel staan nu de dingen die JM-Orgue alleen heeft vooraan
   (afstandsbediening, live notatie, hoofdtelefooncorrectie, nieuw: luidsprekercorrectie,
