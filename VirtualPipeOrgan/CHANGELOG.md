@@ -6,6 +6,19 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### README en website: eigen sterke punten vooraan, met luidsprekercorrectie (C7)
+- In de vergelijkingstabel staan nu de dingen die JM-Orgue alleen heeft vooraan
+  (afstandsbediening, live notatie, hoofdtelefooncorrectie, nieuw: luidsprekercorrectie,
+  GrandOrgue-samplesets), en de punten waarop de drie gelijk zijn onderaan.
+  De inhoud van de bestaande rijen is niet veranderd, alleen hun volgorde.
+- Nieuwe rij "Luidsprekercorrectie (1000+ gemeten modellen)", naast de
+  hoofdtelefooncorrectie. De catalogus telt 1095 modellen.
+- De kaart "Hoofdtelefoon-EQ" heet nu "Hoofdtelefoon en luidsprekers" en zegt eerlijk
+  dat de curve van een luidspreker bij het kiezen online wordt opgehaald (een eenmaal
+  gekozen correctie blijft bewaard). Op de website vertaald in de zeven talen.
+- Zoals besloten: geen Masterpiece-kolom, geen datum of bronnenlijst erbij, en geen
+  Sweelinq-prijzen.
+
 ### Stemroof bij een volle kap nagelopen en vastgelegd (D7, eerste deel)
 - De volgorde waarin stemmen wijken als de polyfonie-kap bereikt is, is nagelopen
   en komt overeen met wat bedoeld is: eerst uitfadende release-staarten (stilste

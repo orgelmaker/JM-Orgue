@@ -38,13 +38,14 @@ aan een echte speeltafel.
 | **Doorgeven aan vrienden** | **mag** | nee | nee |
 | **Windows · macOS · Linux** | **✅ alle drie** | Windows · macOS | Windows · macOS |
 | **Taal van de speeltafel** | **7 talen** | 1 taal | 1 taal |
-| **Hauptwerk-samplesets** | **✅** | ✅ | ❌ |
-| **GrandOrgue-samplesets** | **✅** | ❌ | ❌ |
-| **Sampleset-bibliotheek** | **✅** | ❌ | ✅ |
-| **Convolutie-galm, windmodel, perspectieven** | ✅ | ✅ | ✅ |
 | **Afstandsbediening op telefoon of tablet** | **✅** | — | — |
 | **Live-notatie: speel en zie de noten** | **✅** | — | — |
 | **Hoofdtelefooncorrectie (522 modellen)** | **✅ AutoEq** | — | — |
+| **Luidsprekercorrectie (1000+ gemeten modellen)** | **✅** | — | — |
+| **GrandOrgue-samplesets** | **✅** | ❌ | ❌ |
+| **Hauptwerk-samplesets** | **✅** | ✅ | ❌ |
+| **Sampleset-bibliotheek** | **✅** | ❌ | ✅ |
+| **Convolutie-galm, windmodel, perspectieven** | ✅ | ✅ | ✅ |
 
 <sub>Vergelijking op basis van <a href="https://www.hauptwerk.com/pricing/">hauptwerk.com/pricing</a> en openbare Sweelinq-aankondigingen. JM-Orgue blijft gratis en zonder dongle.</sub>
 
@@ -212,9 +213,10 @@ als tweede registreerscherm, zonder iets te installeren.
 </td>
 <td valign="top">
 
-### Hoofdtelefoon-EQ
-Automatische correctie voor 522 koptelefoonmodellen (AutoEq-presets),
-plus een eigen EQ per uitgang.
+### Hoofdtelefoon en luidsprekers
+Correctie voor 522 koptelefoonmodellen (AutoEq-presets) en ruim duizend
+gemeten luidsprekers (die curve haalt de app op bij het kiezen), plus een
+eigen EQ per uitgang.
 
 </td>
 <td valign="top">
