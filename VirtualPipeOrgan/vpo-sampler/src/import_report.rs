@@ -163,6 +163,25 @@ pub struct Diagnose {
     pub lijsten: Vec<DiagnoseLijst>,
 }
 
+/// Een opgenomen tremulant-golfvorm van de set (C5, stap 1): alleen wat de definitie zegt.
+/// JM-Orgue past dit nog niet toe; het geeft de tremulant een eenvoudige modulatie.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct TremulantGolfvorm {
+    pub tremulant_id: u32,
+    pub tremulant_naam: String,
+    /// Bestand met de golfvorm voor toonhoogte en grondtoon (één periode van de modulatie).
+    pub grondtoon_bestand: String,
+    /// Bestand met de golfvorm voor de derde harmonische.
+    pub harmonische_bestand: String,
+    /// Aantal pijpen met gegevens voor deze golfvorm.
+    pub pijpen: usize,
+    /// Mediaan over die pijpen: amplitudediepte (dB), toonhoogtediepte (procent) en de filterdiepte
+    /// bij de derde harmonische (dB). `None` als geen enkele pijp de waarde noemt.
+    pub amplitude_db: Option<f32>,
+    pub toonhoogte_procent: Option<f32>,
+    pub harmonisch_filter_db: Option<f32>,
+}
+
 /// Eén trap van de crescendo die de set zelf meebrengt (E4).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct SetTrap {
@@ -187,6 +206,10 @@ pub struct SetCrescendo {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ImportReport {
+    /// De opgenomen tremulant-golfvormen van de set (C5, stap 1); leeg als de set er geen heeft of ze
+    /// niet te lezen zijn.
+    #[serde(default)]
+    pub tremulant_golfvormen: Vec<TremulantGolfvorm>,
     /// De crescendo van de set, als de definitie er een heeft en we hem kunnen lezen.
     #[serde(default)]
     pub set_crescendo: Option<SetCrescendo>,

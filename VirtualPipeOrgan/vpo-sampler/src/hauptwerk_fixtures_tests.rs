@@ -590,3 +590,74 @@ fn het_verslag_meldt_de_crescendo_van_de_set() {
     assert!(m.tekst.contains("3 trappen van 1 tot 3 registers"), "{}", m.tekst);
     assert!(m.tekst.contains("1 koppels of tremulanten"), "{}", m.tekst);
 }
+
+// ---------------------------------------------------------------------------
+// C5 (stap 1): de opgenomen tremulant-golfvormen lezen en tonen
+// ---------------------------------------------------------------------------
+
+fn golfvorm_xml() -> String {
+    r#"<Hauptwerk>
+<ObjectList ObjectType="Tremulant"><Tremulant><TremulantID>3</TremulantID><Name>Tremulant 3Man</Name></Tremulant><Tremulant><TremulantID>2</TremulantID><Name>Tremulant 2Man</Name></Tremulant></ObjectList>
+<ObjectList ObjectType="Sample"><Sample><SampleID>400001</SampleID><SampleFilename>Tremulant/3Man/grond.wav</SampleFilename></Sample><Sample><SampleID>400002</SampleID><SampleFilename>Tremulant/3Man/derde.wav</SampleFilename></Sample></ObjectList>
+<ObjectList ObjectType="TremulantWaveform"><TremulantWaveform><TremulantWaveformID>1</TremulantWaveformID><TremulantID>3</TremulantID><PitchAndFundamentalWaveformSampleID>400001</PitchAndFundamentalWaveformSampleID><ThirdHarmonicWaveformSampleID>400002</ThirdHarmonicWaveformSampleID></TremulantWaveform><TremulantWaveform><TremulantWaveformID>2</TremulantWaveformID><TremulantID>2</TremulantID><PitchAndFundamentalWaveformSampleID>999999</PitchAndFundamentalWaveformSampleID></TremulantWaveform></ObjectList>
+<ObjectList ObjectType="TremulantWaveformPipe">
+<TremulantWaveformPipe><PipeID>1</PipeID><TremulantWaveformID>1</TremulantWaveformID><AmplitudeModDepthAdjustDecibels>-3</AmplitudeModDepthAdjustDecibels><PitchModDepthAdjustPercent>30</PitchModDepthAdjustPercent><HarmonicShapingFilterModDepthAdjustDecibelsAtThirdHarmonic>-16</HarmonicShapingFilterModDepthAdjustDecibelsAtThirdHarmonic></TremulantWaveformPipe>
+<TremulantWaveformPipe><PipeID>2</PipeID><TremulantWaveformID>1</TremulantWaveformID><AmplitudeModDepthAdjustDecibels>-5</AmplitudeModDepthAdjustDecibels><PitchModDepthAdjustPercent>40</PitchModDepthAdjustPercent><HarmonicShapingFilterModDepthAdjustDecibelsAtThirdHarmonic>-16</HarmonicShapingFilterModDepthAdjustDecibelsAtThirdHarmonic></TremulantWaveformPipe>
+<TremulantWaveformPipe><PipeID>3</PipeID><TremulantWaveformID>1</TremulantWaveformID><AmplitudeModDepthAdjustDecibels>-4</AmplitudeModDepthAdjustDecibels></TremulantWaveformPipe>
+</ObjectList>
+</Hauptwerk>"#.to_string()
+}
+
+fn golfvormen_uit(xml: &str) -> Vec<crate::import_report::TremulantGolfvorm> {
+    tremulant_golfvormen_uit_tabellen(
+        &extract_objects(xml, "TremulantWaveform"),
+        &extract_objects(xml, "TremulantWaveformPipe"),
+        &extract_objects(xml, "Tremulant"),
+        &extract_objects(xml, "Sample"),
+    )
+}
+
+#[test]
+fn tremulant_golfvormen_worden_per_tremulant_gelezen_met_mediaan_per_waarde() {
+    let l = golfvormen_uit(&golfvorm_xml());
+    assert_eq!(l.len(), 2);
+    // Gesorteerd op tremulant-id: eerst de tweede.
+    assert_eq!(l[0].tremulant_id, 2);
+    assert_eq!(l[0].tremulant_naam, "Tremulant 2Man");
+    assert_eq!(l[1].tremulant_id, 3);
+    assert_eq!(l[1].grondtoon_bestand, "Tremulant/3Man/grond.wav");
+    assert_eq!(l[1].harmonische_bestand, "Tremulant/3Man/derde.wav");
+    assert_eq!(l[1].pijpen, 3);
+    // Mediaan van -3, -5, -4 = -4; van 30 en 40 (de derde pijp noemt het niet) = 35; filter altijd -16.
+    assert_eq!(l[1].amplitude_db, Some(-4.0));
+    assert_eq!(l[1].toonhoogte_procent, Some(35.0));
+    assert_eq!(l[1].harmonisch_filter_db, Some(-16.0));
+}
+
+#[test]
+fn een_golfvorm_zonder_pijpen_of_bestanden_blijft_staan_met_lege_waarden() {
+    let l = golfvormen_uit(&golfvorm_xml());
+    let tweede = &l[0];
+    assert_eq!(tweede.pijpen, 0);
+    assert_eq!(tweede.amplitude_db, None);
+    assert_eq!(tweede.toonhoogte_procent, None);
+    assert_eq!(tweede.grondtoon_bestand, "", "sample 999999 bestaat niet");
+    assert_eq!(tweede.harmonische_bestand, "", "geen tweede golfvormbestand opgegeven");
+}
+
+#[test]
+fn zonder_golfvormen_geen_melding_en_het_verslag_bevat_de_gegevens_en_een_melding() {
+    let mut v = crate::import_report::ImportReport::uit_definitie("hauptwerk", "4.0", "proef", "Fixture", 3, 1, 0);
+    voeg_tremulant_golfvormen_toe(&mut v, &xml_met_attacks(&aanval(1, 1, "")));
+    assert!(v.tremulant_golfvormen.is_empty());
+    assert!(v.meldingen.iter().all(|m| m.object != "tremulantgolfvorm"));
+    voeg_tremulant_golfvormen_toe(&mut v, &golfvorm_xml());
+    assert_eq!(v.tremulant_golfvormen.len(), 2);
+    let m = v.meldingen.iter().find(|m| m.object == "tremulantgolfvorm" && m.tekst.contains("Tremulant 3Man")).expect("melding");
+    assert!(m.tekst.contains("voor 3 pijpen"), "{}", m.tekst);
+    assert!(m.tekst.contains("-4.0 dB"), "{}", m.tekst);
+    assert!(m.tekst.contains("35.0 %"), "{}", m.tekst);
+    assert!(m.tekst.contains("JM-Orgue gebruikt dit nog niet"), "{}", m.tekst);
+    let leeg = v.meldingen.iter().find(|m| m.object == "tremulantgolfvorm" && m.tekst.contains("Tremulant 2Man")).expect("melding 2");
+    assert!(leeg.tekst.contains("niet opgegeven") && leeg.tekst.contains("bestand onbekend"), "{}", leeg.tekst);
+}

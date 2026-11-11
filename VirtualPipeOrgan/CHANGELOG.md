@@ -6,6 +6,17 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### Opgenomen tremulant-golfvormen van de set lezen en tonen (C5, stap 1)
+- Veel Hauptwerk-sets beschrijven hun tremulant met opgenomen golfvormen: per tremulant twee bestanden (de golfvorm voor toonhoogte en
+  grondtoon, en die voor de derde harmonische) en per pijp een diepte-aanpassing (amplitude in dB, toonhoogte in procent, en een filter
+  bij de derde harmonische). Die gegevens worden nu ingelezen en per tremulant in het importverslag getoond: de twee bestanden, het aantal
+  pijpen en de mediaan van de drie waarden. Bij een gecomprimeerde definitie, waarvan de velden niet te lezen zijn, meldt het verslag
+  alleen het aantal golfvormen.
+- Alleen informatie: **de klank is niet veranderd**. JM-Orgue past de golfvormen nog niet toe en geeft de tremulant zijn eenvoudige
+  modulatie; het toepassen vraagt een luistertest en volgt als stap 2. Vier leesbare sets zijn getest (twee tot drie golfvormen en
+  1257 tot 1716 pijpen per set); drie grote gecomprimeerde sets hebben er 268 tot 1315.
+- Drie nieuwe tests en het voorbeeld `vpo-sampler/examples/golfvormen_tonen.rs`.
+
 ### Geheugen per keuze van de startbuffer tonen (F2, deel 3)
 - Onder Algemene instellingen → Audio uitvoer staat achter elke keuze van de **Startbuffer per opname** nu het geheugen dat het geladen
   orgel dan vooraf vraagt, bijvoorbeeld "500 ms · 2,8 GB", met een regel uitleg eronder. Het getal komt uit dezelfde telling als de

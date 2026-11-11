@@ -180,6 +180,7 @@ fn load_hauptwerk_intern(
             voeg_niveau_rapport_toe(&mut v, &def, &xml, niveaus);
             voeg_zwelkast_rapport_toe(&mut v, &def);
             voeg_crescendo_toe(&mut v, &xml);
+            voeg_tremulant_golfvormen_toe(&mut v, &xml);
             (Ok(def), v)
         }
         Err(e) => mislukt(e),
@@ -314,6 +315,109 @@ pub(crate) fn voeg_crescendo_toe(v: &mut crate::import_report::ImportReport, xml
         );
     }
     v.set_crescendo = c;
+}
+
+/// De opgenomen tremulant-golfvormen uit de tabellen (C5, stap 1): per tremulant twee golfvormbestanden
+/// (toonhoogte met grondtoon, en de derde harmonische) en per pijp een diepte-aanpassing. Alleen lezen en
+/// tonen; JM-Orgue past ze nog niet toe. Een golfvorm zonder naam van het tremulant of van een bestand
+/// krijgt een lege naam in plaats van te verdwijnen.
+pub(crate) fn tremulant_golfvormen_uit_tabellen(
+    golven: &[FieldMap],
+    pijpen: &[FieldMap],
+    tremulanten: &[FieldMap],
+    samples: &[FieldMap],
+) -> Vec<crate::import_report::TremulantGolfvorm> {
+    use crate::import_report::TremulantGolfvorm;
+    let bestand_van: HashMap<u32, String> = samples
+        .iter()
+        .filter_map(|s| Some((s.get_u32("SampleID")?, s.get("SampleFilename")?.trim().to_string())))
+        .collect();
+    let naam_van: HashMap<u32, String> = tremulanten
+        .iter()
+        .filter_map(|t| Some((t.get_u32("TremulantID")?, t.get("Name")?.trim().to_string())))
+        .collect();
+    let mut per_golf: HashMap<u32, Vec<&FieldMap>> = HashMap::new();
+    for p in pijpen {
+        if let Some(id) = p.get_u32("TremulantWaveformID") {
+            per_golf.entry(id).or_default().push(p);
+        }
+    }
+    let mut uit = Vec::new();
+    for g in golven {
+        let Some(id) = g.get_u32("TremulantWaveformID") else { continue };
+        let tremulant_id = g.get_u32("TremulantID").unwrap_or(0);
+        let waarden = |veld: &str| -> Option<f32> {
+            let v: Vec<f32> = per_golf
+                .get(&id)
+                .map(|ps| ps.iter().filter_map(|p| p.get_f32(veld)).collect())
+                .unwrap_or_default();
+            crate::grandorgue::mediaan_f32(&v)
+        };
+        let bestand = |veld: &str| g.get_u32(veld).and_then(|s| bestand_van.get(&s).cloned()).unwrap_or_default();
+        uit.push(TremulantGolfvorm {
+            tremulant_id,
+            tremulant_naam: naam_van.get(&tremulant_id).cloned().unwrap_or_default(),
+            grondtoon_bestand: bestand("PitchAndFundamentalWaveformSampleID"),
+            harmonische_bestand: bestand("ThirdHarmonicWaveformSampleID"),
+            pijpen: per_golf.get(&id).map(|p| p.len()).unwrap_or(0),
+            amplitude_db: waarden("AmplitudeModDepthAdjustDecibels"),
+            toonhoogte_procent: waarden("PitchModDepthAdjustPercent"),
+            harmonisch_filter_db: waarden("HarmonicShapingFilterModDepthAdjustDecibelsAtThirdHarmonic"),
+        });
+    }
+    uit.sort_by_key(|g| g.tremulant_id);
+    uit
+}
+
+/// Zet de opgenomen tremulant-golfvormen in het verslag (C5, stap 1). Bij een gecomprimeerde definitie waarvan
+/// de veldnamen niet te lezen zijn, volgt alleen een telling.
+pub(crate) fn voeg_tremulant_golfvormen_toe(v: &mut crate::import_report::ImportReport, xml: &str) {
+    use crate::import_report::Ernst;
+    let compact = GecomprimeerdeOdf::detecteer(xml);
+    let lees = |tabel: &str| -> Vec<FieldMap> {
+        match &compact {
+            Some(c) => FieldMap::rijen_van_tabel(tabel, c.objecten(xml, tabel)),
+            None => extract_objects(xml, tabel),
+        }
+    };
+    let golven = lees("TremulantWaveform");
+    if golven.is_empty() {
+        return;
+    }
+    let lijst = tremulant_golfvormen_uit_tabellen(&golven, &lees("TremulantWaveformPipe"), &lees("Tremulant"), &lees("Sample"));
+    if lijst.is_empty() {
+        v.melding(
+            Ernst::Info,
+            "tremulantgolfvorm",
+            format!(
+                "De set heeft {} opgenomen tremulant-golfvormen, maar in dit bestandsformaat zijn hun velden niet te lezen. JM-Orgue gebruikt een eenvoudige modulatie.",
+                golven.len()
+            ),
+        );
+        return;
+    }
+    let getal = |x: Option<f32>, eenheid: &str| x.map(|x| format!("{x:.1} {eenheid}")).unwrap_or_else(|| "niet opgegeven".to_string());
+    for g in lijst.iter().take(12) {
+        let naam = if g.tremulant_naam.is_empty() { format!("nummer {}", g.tremulant_id) } else { format!("'{}'", g.tremulant_naam) };
+        v.melding(
+            Ernst::Info,
+            "tremulantgolfvorm",
+            format!(
+                "Tremulant {}: de set heeft een opgenomen golfvorm ({}; derde harmonische {}) voor {} pijpen, met als mediaan amplitudediepte {}, toonhoogtediepte {} en filter {} bij de derde harmonische. JM-Orgue gebruikt dit nog niet: het geeft de tremulant een eenvoudige modulatie.",
+                naam,
+                if g.grondtoon_bestand.is_empty() { "bestand onbekend" } else { g.grondtoon_bestand.as_str() },
+                if g.harmonische_bestand.is_empty() { "bestand onbekend" } else { g.harmonische_bestand.as_str() },
+                g.pijpen,
+                getal(g.amplitude_db, "dB"),
+                getal(g.toonhoogte_procent, "%"),
+                getal(g.harmonisch_filter_db, "dB"),
+            ),
+        );
+    }
+    if lijst.len() > 12 {
+        v.melding(Ernst::Info, "tremulantgolfvorm", format!("Nog {} opgenomen tremulant-golfvormen, niet apart getoond.", lijst.len() - 12));
+    }
+    v.tremulant_golfvormen = lijst;
 }
 
 /// De filterwaarden van een zwelkast uit de `EnclosurePipe`-rijen (E5). Per pijp
