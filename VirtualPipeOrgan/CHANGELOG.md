@@ -6,6 +6,19 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### Basmanagement, eerste stap: het rekenhart (F6)
+- Nieuw in `vpo-audio` (`basmanagement.rs`): de lage tonen van de hoofdkanalen naar één subwooferkanaal. De hoofdkanalen
+  krijgen een hoogdoorlaat, de sub de laagdoorlaat van de som van de hoofdkanalen; beide zijn vierde-orde Linkwitz-Riley
+  (twee gelijke Butterworth-secties), gerekend in f64 omdat f32 bij een kruisfrequentie van enkele tientallen Hz te onnauwkeurig is.
+  Kruisfrequentie 30 tot 250 Hz (standaard 80), niveau van de sub −24 tot +12 dB, kanalen vrij te kiezen; kanalen die geen
+  hoofdkanaal of sub zijn blijven ongemoeid. Een ongeldige instelling (sub buiten het apparaat, geen hoofdkanaal) zet de optie uit.
+- Vaste regel van de uitgangstrap, vastgelegd in een test: **uit = bit-identiek** (ook na een ongeldige instelling), en de aanroeper
+  kan de trap helemaal overslaan (`is_identiteit`). Verder getest: laag- en hoogdoorlaat zakken bij de kruisfrequentie 6,02 dB en
+  geven samen een vlakke som (binnen 0,05 dB van 20 Hz tot 4 kHz), een helling van ruim 22 dB per octaaf, de sub krijgt de som van het
+  laag, hoge tonen blijven in de hoofdkanalen, onzinnige kruisfrequenties geven nooit een paniek of oneindige uitvoer.
+- **Nog niet aangesloten**: deze stap verandert niets aan de klank of de app. De aansluiting op de uitgang (na de zwelkast, voor de
+  limiter), de instelling en het scherm volgen in de volgende stap.
+
 ### Downloadbare sets: niet meer aanbieden wat al geïnstalleerd is, en als tegel in het raster
 - Fout: een set kon onder "Beschikbaar om te downloaden" blijven staan terwijl hij al geïnstalleerd was. Twee oorzaken:
   - De vergelijking met de bibliotheek keek alleen naar de exacte naam of de laatste map (hoofdletters daargelaten). Een Mac
