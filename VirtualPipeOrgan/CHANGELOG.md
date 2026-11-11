@@ -6,6 +6,11 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### Dependabot voor de GitHub-acties
+- Nieuw `.github/dependabot.yml`: elke week een controle op nieuwe versies van de
+  vastgepinde acties (B5). Dependabot stelt een kleine pull request voor met de
+  nieuwe commit-SHA en versie; er wordt niets automatisch samengevoegd.
+
 ### Vergelijkingstabel op de README en de website
 - Hauptwerk-samplesets: bij Sweelinq nu "nee" (was een vinkje).
 - Nieuwe regel "Sampleset-bibliotheek": JM-Orgue en Sweelinq een vinkje,

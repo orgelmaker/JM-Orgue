@@ -1,0 +1,13 @@
+# Dependabot houdt de vastgepinde GitHub-acties actueel (B5). De acties in
+# .github/workflows staan op een commit-SHA met de versie als commentaar;
+# Dependabot vervangt beide en stelt dat voor als een kleine pull request.
+# Niets wordt automatisch samengevoegd: jij keurt elke wijziging goed.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "Acties"
