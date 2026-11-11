@@ -6,6 +6,8 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+## [0.9.51] - 2026-11-11
+
 ### RAR-pakketten (ook meerdelig) rechtstreeks openen (C6, stap 2)
 - Bij "Orgel openen" kun je nu ook een `.rar`-archief kiezen. Het gaat zoals bij `.orgue`: eenmalig uitgepakt in de map `pakketten` van de
   app (tijdelijke map die bij succes hernoemd wordt, voortgang in de laadbalk, daarna hergebruikt), en de ondiepste orgeldefinitie wordt
@@ -151,12 +153,12 @@ versies volgen [Semantic Versioning](https://semver.org/).
   Die waarden worden nu ingelezen (mediaan over de pijpen van de kast) en per zwelkast in het importverslag getoond:
   "de set geeft 7,0 dB demping bij dicht, filter 509 tot 3560 Hz bij dicht en 2033 tot 5086 Hz bij open". Alleen informatie:
   **de klank is niet veranderd**, JM-Orgue gebruikt de waarden nog niet.
-- Drie bronnen: de volledige veldnamen van een leesbare definitie (Cracow, Friesach, Landau, Nancy), de letters van een
-  gecomprimeerde definitie (MALPAGA, Vildervank; afgeleid, zeker voor één formaatversie) en de namen in een Custom Organ
+- Drie bronnen: de volledige veldnamen van een leesbare definitie (vier sets), de letters van een
+  gecomprimeerde definitie (twee sets; afgeleid, zeker voor één formaatversie) en de namen in een Custom Organ
   Design (alleen met een eenheidstest gedekt). Van elk frequentiepaar telt de kleinste waarde als minimum, want in sommige
   sets staan de twee omgedraaid. Alleen een geloofwaardige uitkomst telt (minstens 90 % van de pijpen heeft alle zes de
   waarden, demping 0 tot 60 dB, frequenties 1 Hz tot 40 kHz).
-- Geen waarden voor Kolonics, Rotterdam en Utrecht: hun gecomprimeerde bestanden laten velden weg (de standaardwaarde is
+- Geen waarden voor drie grote sets: hun gecomprimeerde bestanden laten velden weg (de standaardwaarde is
   onbekend), dus er is geen betrouwbare mediaan. Liever niets dan een gok.
 - Zes nieuwe tests, voorbeeldprogramma `vpo-sampler/examples/zwelkast_tonen.rs` om de regels voor een set te zien.
   Het vinkje "Zwelkast van de set gebruiken" (standaard uit) volgt als stap 3.
@@ -164,11 +166,11 @@ versies volgen [Semantic Versioning](https://semver.org/).
 ### Twee telprogramma's voor de planning (C1, F2)
 - `vpo-sampler/examples/loops_tellen.rs`: telt per set hoeveel opnames meer dan één geldige loop hebben,
   met dezelfde validatie als de engine, op een gelijkmatige steekproef per set (standaard 300 bestanden).
-  Uitkomst: 7,4 % van de gelezen bestanden heeft er meer dan één; in vijf sets (MALPAGA, Utrecht, Rotterdam,
-  Wildervank, Kolonics) is dat 20 à 47 % van alle bestanden, in dertien andere sets nul.
+  Uitkomst: 7,4 % van de gelezen bestanden heeft er meer dan één; in vijf sets
+  is dat 20 à 47 % van alle bestanden, in dertien andere sets nul.
 - `vpo-sampler/examples/buffers_tellen.rs`: zet de geheugenschatting van de app (buffers per pijp) naast het aantal
   unieke (bestand, segment)-paren. Het laden dedupliceert al correct (één bestand is één buffer), maar de schatting
-  vooraf telt per pijp en is bij sets met gedeelde bestanden te hoog, tot ×2,4 (Kolonics) en ×3,4 (MALPAGA).
+  vooraf telt per pijp en is bij sets met gedeelde bestanden te hoog, tot ×2,4 en ×3,4 bij twee grote sets.
 - Alleen meetgereedschap in `examples/`; de app en de klank zijn niet veranderd. De uitkomsten staan in
   `Optimalisatie Nov 2026\C1-uitkomst.md`, `F2-uitkomst.md`, `C5-uitkomst.md` en `D4-uitkomst.md`.
 
@@ -431,7 +433,7 @@ versies volgen [Semantic Versioning](https://semver.org/).
   doen). Ook in `get_status` en in de test-API (`licht_interp_actief`,
   `callbacks_met_stemmen`). Alleen tellers en een tijdstempel in de callback:
   de klank is niet veranderd.
-- Gemeten hoe vaak de terugval optreedt (Rotterdam, 20 s per situatie): bij
+- Gemeten hoe vaak de terugval optreedt (grote surround-set, 20 s per situatie): bij
   4 of meer mengkernen praktisch nooit (0 tot 0,05 % van de callbacks), bij 2
   kernen 1,6 %, bij 1 kern en ~1100 stemmen altijd — en dan is de CPU nog
   steeds vol. Meer mengkernen helpt veel meer dan lichtere interpolatie.
@@ -445,7 +447,7 @@ versies volgen [Semantic Versioning](https://semver.org/).
   time-constraint-beleid. Op Linux en macOS deed de app hierover tot nu toe
   niets. Dit verandert alleen wanneer een werker aan de beurt komt, niet wat
   hij rekent: de klank blijft bit-identiek.
-- **MMCSS "Pro Audio" is bewust niet de standaard.** Gemeten op Windows (Rotterdam, ~1090 stemmen, 4 stukken, alle
+- **MMCSS "Pro Audio" is bewust niet de standaard.** Gemeten op Windows (grote surround-set, ~1090 stemmen, 4 stukken, alle
   16 logische kernen bezet door ander werk): alleen `TIME_CRITICAL` 275–395
   overschrijdingen per 20 s, MMCSS + `TIME_CRITICAL` 1614–1730, geen klasse
   930–1085; zonder druk 0 tegen 1–23. Op Windows blijft dus `TIME_CRITICAL`;
