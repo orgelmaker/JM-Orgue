@@ -364,3 +364,127 @@ fn zonder_vereistentabel_heten_de_pakketten_naar_hun_nummer() {
     assert_eq!(v.pakketten[0].naam, "pakket 1");
     assert!(v.onvolledig);
 }
+
+// ---------------------------------------------------------------------------
+// E5: filterwaarden van de zwelkast uit de letters van een compacte definitie
+// ---------------------------------------------------------------------------
+
+/// Eén `EnclosurePipe`-rij zoals de compacte lezer die oplevert: de letters
+/// `c` t/m `h` blijven staan zoals ze in het bestand staan.
+fn kastpijp(c: &str, d: &str, e: &str, f: &str, g: &str, h: &str) -> FieldMap {
+    let rij: HashMap<String, String> = [("EnclosureID", "7"), ("c", c), ("d", d), ("e", e), ("f", f), ("g", g), ("h", h)]
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+    FieldMap::rijen_van_tabel("EnclosurePipe", vec![rij]).pop().unwrap()
+}
+
+/// Drie pijpen met de waarden van de formaatversie waarvoor de letters zijn
+/// vastgelegd (`c` overall, `d` dicht-max, `e` dicht-min, `f` extra, `g` open-max, `h` open-min).
+fn drie_kastpijpen() -> Vec<FieldMap> {
+    vec![
+        kastpijp("6.240", "59.959", "29.979", "3.9445", "269.076", "16.817"),
+        kastpijp("6.324", "131.78", "47.69", "4.0", "374.72", "25.71"),
+        kastpijp("6.408415", "203.60", "65.39", "4.083", "480.37", "34.61"),
+    ]
+}
+
+#[test]
+fn zwelkast_filter_uit_compacte_pijpen_geeft_de_mediaan() {
+    let pijpen = drie_kastpijpen();
+    let rijen: Vec<&FieldMap> = pijpen.iter().collect();
+    let f = zwelkast_filter_uit_pijpen(&rijen).expect("filter");
+    assert_eq!(f.dicht_demping_db, 6.324);
+    assert_eq!(f.dicht_extra_db, Some(4.0));
+    assert_eq!((f.dicht_min_hz, f.dicht_max_hz), (47.69, 131.78));
+    assert_eq!((f.open_min_hz, f.open_max_hz), (25.71, 374.72));
+    assert_eq!((f.bron, f.aantal), ("compact", 3));
+    assert_eq!(f.diepte_db(), -6.324);
+    assert!((f.kantelpunt_hz() - (47.69f32 * 131.78).sqrt()).abs() < 1e-3, "kantelpunt = meetkundig gemiddelde");
+}
+
+/// In een andere formaatversie staan de twee frequenties van een paar omgedraaid
+/// (`d` = minimum, `e` = maximum): de uitkomst moet hetzelfde zijn.
+#[test]
+fn zwelkast_filter_met_omgedraaide_frequentiepaar_geeft_dezelfde_uitkomst() {
+    let normaal = drie_kastpijpen();
+    let omgedraaid = vec![
+        kastpijp("6.240", "29.979", "59.959", "3.9445", "16.817", "269.076"),
+        kastpijp("6.324", "47.69", "131.78", "4.0", "25.71", "374.72"),
+        kastpijp("6.408415", "65.39", "203.60", "4.083", "34.61", "480.37"),
+    ];
+    let a = zwelkast_filter_uit_pijpen(&normaal.iter().collect::<Vec<_>>()).unwrap();
+    let b = zwelkast_filter_uit_pijpen(&omgedraaid.iter().collect::<Vec<_>>()).unwrap();
+    assert_eq!(a, b);
+}
+
+#[test]
+fn zwelkast_filter_vraagt_negentig_procent_volledige_pijpen() {
+    // Twaalf pijpen, één mist een letter: 11 van 12 is 91,7 %, dus goed.
+    let mut pijpen: Vec<FieldMap> = (0..11).map(|_| kastpijp("6.3", "130", "47", "4.0", "370", "25")).collect();
+    pijpen.push(kastpijp("6.3", "130", "47", "4.0", "370", ""));
+    assert!(zwelkast_filter_uit_pijpen(&pijpen.iter().collect::<Vec<_>>()).is_some());
+    // Twee van de twaalf mist er een: 83 %, dus niet.
+    pijpen.pop();
+    pijpen.pop();
+    pijpen.push(kastpijp("6.3", "130", "47", "4.0", "370", ""));
+    pijpen.push(kastpijp("6.3", "130", "47", "4.0", "370", "n.v.t."));
+    assert!(zwelkast_filter_uit_pijpen(&pijpen.iter().collect::<Vec<_>>()).is_none());
+    // Een leesbare definitie heeft de letters helemaal niet.
+    let leeg: Vec<HashMap<String, String>> = vec![[("EnclosureID".to_string(), "7".to_string())].into_iter().collect()];
+    let leesbaar = FieldMap::rijen_van_tabel("EnclosurePipe", leeg);
+    assert!(zwelkast_filter_uit_pijpen(&leesbaar.iter().collect::<Vec<_>>()).is_none());
+    assert!(zwelkast_filter_uit_pijpen(&[]).is_none());
+}
+
+#[test]
+fn zwelkast_filter_wijst_ongeloofwaardige_waarden_af() {
+    let kies = |c: &str, d: &str, e: &str, g: &str, h: &str| {
+        let p = vec![kastpijp(c, d, e, "4.0", g, h)];
+        zwelkast_filter_uit_pijpen(&p.iter().collect::<Vec<_>>())
+    };
+    assert!(kies("6.3", "130", "47", "370", "25").is_some(), "basis klopt");
+    assert!(kies("70", "130", "47", "370", "25").is_none(), "meer dan 60 dB demping");
+    assert!(kies("-1", "130", "47", "370", "25").is_none(), "negatieve demping");
+    assert!(kies("6.3", "130", "130", "370", "25").is_none(), "minimum gelijk aan maximum (dicht)");
+    assert!(kies("6.3", "130", "47", "370", "370").is_none(), "minimum gelijk aan maximum (open)");
+    assert!(kies("6.3", "0", "47", "370", "25").is_none(), "frequentie onder 1 Hz");
+    assert!(kies("6.3", "130", "47", "370", "NaN").is_none(), "geen getal");
+}
+
+/// Een leesbare definitie noemt de waarden bij hun naam (zo staan ze in een van de
+/// echte sets); de "Max" is daar de laagste frequentie. De uitkomst is dezelfde
+/// soort filter, met de bron "definitie".
+#[test]
+fn zwelkast_filter_uit_leesbare_veldnamen() {
+    let rij = |c: &str, max_d: &str, min_d: &str, extra: &str, max_o: &str, min_o: &str| -> FieldMap {
+        let r: HashMap<String, String> = [
+            ("EnclosureID", "1"),
+            ("FiltParamWhenClsd_OverallAttnDb", c),
+            ("FiltParamWhenClsd_MaxFreqHz", max_d),
+            ("FiltParamWhenClsd_MinFreqHz", min_d),
+            ("FiltParamWhenClsd_ExtraAttnAtMinDb", extra),
+            ("FiltParamWhenOpen_MaxFreqHz", max_o),
+            ("FiltParamWhenOpen_MinFreqHz", min_o),
+        ]
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+        FieldMap::rijen_van_tabel("EnclosurePipe", vec![r]).pop().unwrap()
+    };
+    let pijpen = vec![
+        rij("7", "65.4064", "457.845", "6", "260.626", "654.064"),
+        rij("7", "65.4064", "457.845", "6", "260.626", "654.064"),
+        rij("8", "130.8128", "915.69", "6", "521.252", "1308.128"),
+    ];
+    let f = zwelkast_filter_uit_pijpen(&pijpen.iter().collect::<Vec<_>>()).expect("filter");
+    assert_eq!(f.bron, "definitie");
+    assert_eq!(f.dicht_demping_db, 7.0);
+    assert_eq!(f.dicht_extra_db, Some(6.0));
+    assert_eq!((f.dicht_min_hz, f.dicht_max_hz), (65.4064, 457.845), "het kleinste van het paar is het minimum");
+    assert_eq!((f.open_min_hz, f.open_max_hz), (260.626, 654.064));
+    // Ontbreekt een veld in de meeste rijen, dan geen filter.
+    let kale = HashMap::from([("EnclosureID".to_string(), "1".to_string()), ("FiltParamWhenClsd_OverallAttnDb".to_string(), "7".to_string())]);
+    let kaal = FieldMap::rijen_van_tabel("EnclosurePipe", vec![kale]).pop().unwrap();
+    assert!(zwelkast_filter_uit_pijpen(&[&kaal]).is_none());
+}

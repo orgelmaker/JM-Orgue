@@ -6,6 +6,21 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### Zwelkast van de set: de waarden inlezen en tonen (E5, stap 1 en 2)
+- Een Hauptwerk-set geeft per zwelkast op hoeveel die dempt als hij dicht is en tussen welke frequenties het filter dan werkt.
+  Die waarden worden nu ingelezen (mediaan over de pijpen van de kast) en per zwelkast in het importverslag getoond:
+  "de set geeft 7,0 dB demping bij dicht, filter 509 tot 3560 Hz bij dicht en 2033 tot 5086 Hz bij open". Alleen informatie:
+  **de klank is niet veranderd**, JM-Orgue gebruikt de waarden nog niet.
+- Drie bronnen: de volledige veldnamen van een leesbare definitie (Cracow, Friesach, Landau, Nancy), de letters van een
+  gecomprimeerde definitie (MALPAGA, Vildervank; afgeleid, zeker voor één formaatversie) en de namen in een Custom Organ
+  Design (alleen met een eenheidstest gedekt). Van elk frequentiepaar telt de kleinste waarde als minimum, want in sommige
+  sets staan de twee omgedraaid. Alleen een geloofwaardige uitkomst telt (minstens 90 % van de pijpen heeft alle zes de
+  waarden, demping 0 tot 60 dB, frequenties 1 Hz tot 40 kHz).
+- Geen waarden voor Kolonics, Rotterdam en Utrecht: hun gecomprimeerde bestanden laten velden weg (de standaardwaarde is
+  onbekend), dus er is geen betrouwbare mediaan. Liever niets dan een gok.
+- Zes nieuwe tests, voorbeeldprogramma `vpo-sampler/examples/zwelkast_tonen.rs` om de regels voor een set te zien.
+  Het vinkje "Zwelkast van de set gebruiken" (standaard uit) volgt als stap 3.
+
 ### Twee telprogramma's voor de planning (C1, F2)
 - `vpo-sampler/examples/loops_tellen.rs`: telt per set hoeveel opnames meer dan één geldige loop hebben,
   met dezelfde validatie als de engine, op een gelijkmatige steekproef per set (standaard 300 bestanden).

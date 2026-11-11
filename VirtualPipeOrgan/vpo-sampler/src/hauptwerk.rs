@@ -178,9 +178,98 @@ fn load_hauptwerk_intern(
             voeg_pakketten_toe(&mut v, &xml, &pkg_dirs);
             voeg_compact_rapport_toe(&mut v, &xml);
             voeg_niveau_rapport_toe(&mut v, &def, &xml, niveaus);
+            voeg_zwelkast_rapport_toe(&mut v, &def);
             (Ok(def), v)
         }
         Err(e) => mislukt(e),
+    }
+}
+
+/// De filterwaarden van een zwelkast uit de `EnclosurePipe`-rijen (E5). Per pijp
+/// staan zes getallen: totale demping bij dicht (dB), extra demping bij de
+/// laagste filterfrequentie (dB), de twee filterfrequenties bij dicht en die bij
+/// open (Hz). Een leesbare definitie noemt ze `FiltParamWhenClsd_OverallAttnDb`,
+/// `…_ExtraAttnAtMinDb`, `…_MaxFreqHz`, `…_MinFreqHz` en `FiltParamWhenOpen_…`.
+/// Een gecomprimeerde definitie heeft er de letters `c` t/m `h` voor (`c` overall,
+/// `f` extra, `d`/`e` dicht, `g`/`h` open), vastgesteld door vergelijking met de
+/// getallen in een Custom Organ Design; zeker voor één formaatversie. In een
+/// andere versie staan `d`/`e` en `g`/`h` omgedraaid, en ook in leesbare sets
+/// heet de "Max" soms de laagste frequentie: daarom telt van elk paar de kleinste
+/// waarde als minimum.
+///
+/// Alleen een geloofwaardige uitkomst telt: minstens 90 % van de pijpen heeft alle
+/// zes de getallen. Laat een gecomprimeerd bestand velden weg (de standaardwaarde,
+/// die we niet kennen), dan is er geen uitkomst; dat gebeurt bij sommige sets.
+pub(crate) fn zwelkast_filter_uit_pijpen(rijen: &[&FieldMap]) -> Option<crate::grandorgue::EnclosureFilter> {
+    use crate::grandorgue::{mediaan_f32, EnclosureFilter};
+    if rijen.is_empty() {
+        return None;
+    }
+    let genoemd = rijen.iter().any(|r| r.contains_key("FiltParamWhenClsd_OverallAttnDb"));
+    let letters: [&str; 6] = if genoemd {
+        [
+            "FiltParamWhenClsd_OverallAttnDb",
+            "FiltParamWhenClsd_MaxFreqHz",
+            "FiltParamWhenClsd_MinFreqHz",
+            "FiltParamWhenClsd_ExtraAttnAtMinDb",
+            "FiltParamWhenOpen_MaxFreqHz",
+            "FiltParamWhenOpen_MinFreqHz",
+        ]
+    } else {
+        ["c", "d", "e", "f", "g", "h"]
+    };
+    let mut kolommen: [Vec<f32>; 6] = Default::default();
+    let mut volledig = 0usize;
+    for r in rijen {
+        let w: Vec<Option<f32>> = letters
+            .iter()
+            .map(|l| r.get(l).and_then(|v| v.trim().parse::<f32>().ok()).filter(|x| x.is_finite()))
+            .collect();
+        if w.iter().all(|x| x.is_some()) {
+            volledig += 1;
+            for (k, x) in w.iter().enumerate() {
+                kolommen[k].push(x.unwrap_or(0.0));
+            }
+        }
+    }
+    if volledig * 10 < rijen.len() * 9 {
+        return None;
+    }
+    let m = |k: usize| mediaan_f32(&kolommen[k]);
+    EnclosureFilter::uit_waarden(
+        m(0)?, Some(m(3)?), (m(1)?, m(2)?), (m(4)?, m(5)?),
+        if genoemd { "definitie" } else { "compact" },
+        rijen.len(),
+    )
+}
+
+/// Zet per zwelkast met filterwaarden een regel in het verslag (E5): alleen
+/// informatie, JM-Orgue gebruikt ze nog niet tenzij het orgel dat aanzet.
+pub(crate) fn voeg_zwelkast_rapport_toe(v: &mut crate::import_report::ImportReport, def: &OrganDefinition) {
+    use crate::import_report::Ernst;
+    let met: Vec<&EnclosureDef> = def.enclosures.iter().filter(|e| e.filter.is_some()).collect();
+    if met.is_empty() {
+        return;
+    }
+    for e in met.iter().take(12) {
+        let Some(f) = &e.filter else { continue };
+        let herkomst = if f.bron == "compact" {
+            "afgeleid uit de letters van het compacte bestand, zeker voor één formaatversie"
+        } else {
+            "uit de veldnamen van de definitie"
+        };
+        let extra = f.dicht_extra_db.map(|x| format!(" (extra {x:.1} dB bij de laagste frequentie)")).unwrap_or_default();
+        v.melding(
+            Ernst::Info,
+            "zwelkast",
+            format!(
+                "Zwelkast '{}': de set geeft {:.1} dB demping bij dicht{}, filter {:.0} tot {:.0} Hz bij dicht en {:.0} tot {:.0} Hz bij open (mediaan over {} pijpen of rangen; {}).",
+                e.name, f.dicht_demping_db, extra, f.dicht_min_hz, f.dicht_max_hz, f.open_min_hz, f.open_max_hz, f.aantal, herkomst
+            ),
+        );
+    }
+    if met.len() > 12 {
+        v.melding(Ernst::Info, "zwelkast", format!("Nog {} zwelkasten met filterwaarden van de set, niet apart getoond.", met.len() - 12));
     }
 }
 
@@ -1305,11 +1394,14 @@ fn build_definition_met(
             .map(|_| raw[10..].trim())
             .unwrap_or(raw)
             .to_string();
+        let pijpen_van_kast: Vec<&FieldMap> =
+            enclosure_pipes.iter().filter(|p| p.get_u32("EnclosureID") == Some(eid)).collect();
         enclosure_defs.push(EnclosureDef {
             number: eid,
             name: name.clone(),
             amp_minimum_level: 0.0,
             midi_input_number: 0,
+            filter: zwelkast_filter_uit_pijpen(&pijpen_van_kast),
         });
         windchest_defs.push(WindchestDef {
             number: eid,

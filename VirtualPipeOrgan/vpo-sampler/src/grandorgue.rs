@@ -829,6 +829,94 @@ pub struct EnclosureDef {
     pub name: String,
     pub amp_minimum_level: f32,
     pub midi_input_number: u32,
+    /// Filterwaarden van de maker (E5). Alleen Hauptwerk-definities hebben ze;
+    /// JM-Orgue toont ze in het importverslag en gebruikt ze alleen als het
+    /// orgel "Zwelkast van de set gebruiken" aan heeft.
+    pub filter: Option<EnclosureFilter>,
+}
+
+/// De filterwaarden die een Hauptwerk-set per zwelkast opgeeft (E5): hoeveel
+/// de kast dempt als hij dicht is en tussen welke frequenties het filter dan
+/// werkt, plus het bereik als hij open is. Per pijp opgegeven in de set; hier
+/// de mediaan over de pijpen (of rangen) van de kast.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EnclosureFilter {
+    /// Totale demping bij een dichte kast in dB (positief = zachter).
+    pub dicht_demping_db: f32,
+    /// Extra demping bij de laagste filterfrequentie in dB, als de bron die kent.
+    pub dicht_extra_db: Option<f32>,
+    /// Laagste en hoogste filterfrequentie (Hz) bij een dichte kast.
+    pub dicht_min_hz: f32,
+    pub dicht_max_hz: f32,
+    /// Idem bij een open kast.
+    pub open_min_hz: f32,
+    pub open_max_hz: f32,
+    /// Waar de waarden vandaan komen: "definitie" (veldnamen in een leesbare
+    /// definitie), "compact" (letters in een gecomprimeerde definitie, afgeleid) of
+    /// "codm" (veldnamen in een Custom Organ Design).
+    pub bron: &'static str,
+    /// Aantal pijpen of rangen waaruit de mediaan genomen is.
+    pub aantal: usize,
+}
+
+impl EnclosureFilter {
+    /// Bouwt een filter uit zes waarden, of `None` als ze niet geloofwaardig
+    /// zijn. Van elk frequentiepaar is de kleinste waarde het minimum: in
+    /// sommige formaatversies staan minimum en maximum omgedraaid.
+    pub fn uit_waarden(
+        dicht_demping_db: f32,
+        dicht_extra_db: Option<f32>,
+        dicht: (f32, f32),
+        open: (f32, f32),
+        bron: &'static str,
+        aantal: usize,
+    ) -> Option<Self> {
+        let paar = |(a, b): (f32, f32)| if a <= b { (a, b) } else { (b, a) };
+        let (dmin, dmax) = paar(dicht);
+        let (omin, omax) = paar(open);
+        let hz_ok = |x: f32| x.is_finite() && (1.0..=40_000.0).contains(&x);
+        let db_ok = |x: f32| x.is_finite() && (0.0..=60.0).contains(&x);
+        if !db_ok(dicht_demping_db) || !dicht_extra_db.is_none_or(db_ok) {
+            return None;
+        }
+        if ![dmin, dmax, omin, omax].iter().all(|x| hz_ok(*x)) || dmin >= dmax || omin >= omax {
+            return None;
+        }
+        Some(Self {
+            dicht_demping_db,
+            dicht_extra_db,
+            dicht_min_hz: dmin,
+            dicht_max_hz: dmax,
+            open_min_hz: omin,
+            open_max_hz: omax,
+            bron,
+            aantal,
+        })
+    }
+
+    /// De diepte van de zwelkast (dB, negatief) zoals JM-Orgue die gebruikt:
+    /// de demping bij dicht.
+    pub fn diepte_db(&self) -> f32 {
+        -self.dicht_demping_db
+    }
+
+    /// Het kantelpunt (Hz) van het filter bij dicht: het meetkundig gemiddelde
+    /// van de laagste en de hoogste filterfrequentie.
+    pub fn kantelpunt_hz(&self) -> f32 {
+        (self.dicht_min_hz * self.dicht_max_hz).sqrt()
+    }
+}
+
+/// Mediaan van een rij getallen (leeg = `None`). Even aantal: het gemiddelde van
+/// de twee middelste.
+pub fn mediaan_f32(waarden: &[f32]) -> Option<f32> {
+    let mut v: Vec<f32> = waarden.iter().copied().filter(|x| x.is_finite()).collect();
+    if v.is_empty() {
+        return None;
+    }
+    v.sort_by(|a, b| a.total_cmp(b));
+    let n = v.len();
+    Some(if n % 2 == 1 { v[n / 2] } else { (v[n / 2 - 1] + v[n / 2]) / 2.0 })
 }
 
 /// Tremulant definition
@@ -1754,6 +1842,7 @@ impl OdfParser {
                     name: section.get("Name").cloned().unwrap_or_default(),
                     amp_minimum_level: self.parse_f32(section, "AmpMinimumLevel").unwrap_or(0.0),
                     midi_input_number: self.parse_u32(section, "MIDIInputNumber").unwrap_or(0),
+                    filter: None,
                 });
             }
         }

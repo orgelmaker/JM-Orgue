@@ -181,6 +181,11 @@ pub struct CodmRank {
     pub shaping_db_36: f32,
     pub shaping_db_96: f32,
     pub zwelkast: Option<u32>,
+    /// Filterwaarden van de zwelkast voor deze rang (E5), gemiddeld van pijpnoot
+    /// 36 en 96: [totale demping dicht, extra demping dicht, minimum en maximum
+    /// frequentie dicht, minimum en maximum frequentie open]. None als de velden
+    /// ontbreken.
+    pub zwelkast_filter: Option<[f32; 6]>,
     pub tremulant: Option<u32>,
     /// `ReverbTailTruncation_ModeCode`: 1 = geen, 2 = halve sinus vanaf het begin
     /// van de release, 3 = vanaf de eerste marker in de release.
@@ -457,6 +462,23 @@ pub fn parse_codm(xml: &str) -> Result<CodmOrgel, OdfError> {
             shaping_db_36: f("HarmonicShaping_PipeMIDINoteNum036_3rdAndUpperHarmLvlAdjDb"),
             shaping_db_96: f("HarmonicShaping_PipeMIDINoteNum096_3rdAndUpperHarmLvlAdjDb"),
             zwelkast: r.get_u32("Encl_EnclosureCode").filter(|c| *c > 0),
+            zwelkast_filter: (|| -> Option<[f32; 6]> {
+                let waarde = |dicht: bool, noot: &str, veld: &str| {
+                    r.get_f32(&format!(
+                        "Encl_FiltParamWhen{}ForPipeMIDINoteNum{}_{}",
+                        if dicht { "Clsd" } else { "Open" }, noot, veld
+                    ))
+                };
+                let gem = |dicht: bool, veld: &str| Some((waarde(dicht, "036", veld)? + waarde(dicht, "096", veld)?) / 2.0);
+                Some([
+                    gem(true, "OverallAttnDb")?,
+                    gem(true, "ExtraAttnAtMinDb")?,
+                    gem(true, "MinFreqHz")?,
+                    gem(true, "MaxFreqHz")?,
+                    gem(false, "MinFreqHz")?,
+                    gem(false, "MaxFreqHz")?,
+                ])
+            })(),
             tremulant: r.get_u32("Trem_TremulantCode").filter(|c| *c > 0),
             willekeurig_hz: f("Pitch_MaxRandomTuningErrorHz"),
             wind_flow_pct: f("WindSupply_MaxFlowRandomisationPct"),
@@ -942,6 +964,18 @@ pub fn laad_codm(odf_path: &Path, xml: &str) -> Result<OrganDefinition, OdfError
     laad_codm_met_verslag(odf_path, xml, None).0
 }
 
+/// De filterwaarden van een zwelkast uit de waarden van haar rangen (E5): per
+/// onderdeel de mediaan. Elke rang levert [totale demping dicht, extra demping dicht,
+/// minimum en maximum frequentie dicht, minimum en maximum frequentie open].
+pub(crate) fn zwelkast_filter_uit_rangen(rangen: &[[f32; 6]]) -> Option<crate::grandorgue::EnclosureFilter> {
+    use crate::grandorgue::{mediaan_f32, EnclosureFilter};
+    if rangen.is_empty() {
+        return None;
+    }
+    let m = |k: usize| mediaan_f32(&rangen.iter().map(|r| r[k]).collect::<Vec<f32>>());
+    EnclosureFilter::uit_waarden(m(0)?, Some(m(1)?), (m(2)?, m(3)?), (m(4)?, m(5)?), "codm", rangen.len())
+}
+
 /// Laad een CODM-bestand en lever daarbij een [`ImportReport`], ook als het laden mislukt.
 ///
 /// `pakketroot` = een door de gebruiker gekozen map (die `OrganInstallationPackages`
@@ -1002,6 +1036,7 @@ fn laad_codm_intern(
     let r = bouw_definitie(&orgel, &pakketten, base, &mut verslag, diep);
     if let Ok(def) = &r {
         vul_geladen(&mut verslag, def);
+        crate::hauptwerk::voeg_zwelkast_rapport_toe(&mut verslag, def);
     }
     if let Err(e) = &r {
         verslag.melding(Ernst::Fout, "orgel", e.to_string());
@@ -1467,6 +1502,9 @@ fn bouw_definitie(
         name: naam.clone(),
         amp_minimum_level: 0.0,
         midi_input_number: 0,
+        filter: zwelkast_filter_uit_rangen(
+            &orgel.ranks.values().filter(|r| r.zwelkast == Some(*code)).filter_map(|r| r.zwelkast_filter).collect::<Vec<_>>(),
+        ),
     }).collect();
     let windchests: Vec<WindchestDef> = windladen.iter().enumerate().map(|(i, (kast, trem))| WindchestDef {
         number: i as u32 + 1,
@@ -2447,5 +2485,46 @@ mod tests {
         assert!(r.is_ok());
         assert!(v.pakketroot_handmatig);
         assert_eq!(v.geladen.stops, 1);
+    }
+
+    /// E5: de filterwaarden van de zwelkast staan per rang onder hun naam; het
+    /// gemiddelde van pijpnoot 36 en 96 is de waarde van de rang, de mediaan over
+    /// de rangen die van de kast.
+    #[test]
+    fn zwelkast_filter_uit_codm_rangen() {
+        let mut velden = String::new();
+        let waarden: [(&str, &str, &str, f32, f32); 6] = [
+            ("Clsd", "036", "OverallAttnDb", 6.0, 2.0),
+            ("Clsd", "036", "ExtraAttnAtMinDb", 4.0, 2.0),
+            ("Clsd", "036", "MinFreqHz", 30.0, 90.0),
+            ("Clsd", "036", "MaxFreqHz", 60.0, 180.0),
+            ("Open", "036", "MinFreqHz", 17.0, 20.0),
+            ("Open", "036", "MaxFreqHz", 269.0, 500.0),
+        ];
+        for (stand, _, veld, a, b) in waarden {
+            for (noot, w) in [("036", a), ("096", b)] {
+                velden.push_str(&format!(
+                    "<Encl_FiltParamWhen{stand}ForPipeMIDINoteNum{noot}_{veld}>{w}</Encl_FiltParamWhen{stand}ForPipeMIDINoteNum{noot}_{veld}>"
+                ));
+            }
+        }
+        let xml = VOORBEELD.replacen(
+            "<Encl_EnclosureCode>220</Encl_EnclosureCode>",
+            &format!("<Encl_EnclosureCode>220</Encl_EnclosureCode>{velden}"),
+            1,
+        );
+        let o = parse_codm(&xml).unwrap();
+        let rang = o.ranks.values().find(|r| r.zwelkast_filter.is_some()).expect("een rang met filterwaarden");
+        assert_eq!(rang.zwelkast_filter, Some([4.0, 3.0, 60.0, 120.0, 18.5, 384.5]));
+        // Rangen zonder de velden (de rest van het voorbeeld) hebben geen filter.
+        assert!(o.ranks.values().filter(|r| r.zwelkast_filter.is_none()).count() >= 1);
+        // De mediaan over twee gelijke rangen is die rang, en past in een filter.
+        let w = rang.zwelkast_filter.unwrap();
+        let f = zwelkast_filter_uit_rangen(&[w, w]).unwrap();
+        assert_eq!((f.dicht_demping_db, f.dicht_extra_db), (4.0, Some(3.0)));
+        assert_eq!((f.dicht_min_hz, f.dicht_max_hz, f.open_min_hz, f.open_max_hz), (60.0, 120.0, 18.5, 384.5));
+        assert_eq!((f.bron, f.aantal), ("codm", 2));
+        assert!((f.kantelpunt_hz() - (60.0f32 * 120.0).sqrt()).abs() < 1e-3);
+        assert!(zwelkast_filter_uit_rangen(&[]).is_none());
     }
 }
