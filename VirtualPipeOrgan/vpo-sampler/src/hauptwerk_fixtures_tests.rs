@@ -274,3 +274,93 @@ fn beginstand_van_een_gewoon_register_wordt_nu_niet_ingelezen() {
     assert_eq!(namen(&aan), namen(&uit));
     assert!(namen(&aan).iter().any(|(n, _)| n == "Bourdon 8"), "het register blijft gewoon een register");
 }
+
+// ---------------------------------------------------------------------------
+// E7: een set waarvan de mappen op schijf anders gespeld zijn dan de definitie
+// ---------------------------------------------------------------------------
+
+/// Een set die op Windows is gemaakt: de definitie noemt `Bourdon/eerste.wav`,
+/// maar op schijf staat `bourdon/EERSTE.wav`, in een map `organinstallationpackages`
+/// (kleine letters) met een pakketmarkering in nog een andere spelling. Op Windows
+/// en macOS (hoofdletterongevoelig) slaagt dit altijd; op Linux bewijst het de
+/// padzoeker (E7) over de hele importroute: pakketroot vinden, pakketmap vinden
+/// en het samplepad oplossen.
+#[test]
+fn set_met_andere_hoofdletters_op_schijf_vindt_pakket_en_sample() {
+    let root = std::env::temp_dir().join(format!("jm_e7_integratie_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let pakket = root.join("organinstallationpackages").join("000001");
+    std::fs::create_dir_all(pakket.join("bourdon")).unwrap();
+    std::fs::write(pakket.join("PackageID000001.INSTALLATIONPACKAGEDEFINITION_Hauptwerk_xml"), b"x").unwrap();
+    std::fs::write(pakket.join("bourdon").join("EERSTE.wav"), b"x").unwrap();
+    std::fs::create_dir_all(root.join("OrganDefinitions")).unwrap();
+
+    // 1. De pakketroot wordt gevonden vanaf de plek van de definitie.
+    let odf = root.join("OrganDefinitions").join("Set.Organ_Hauptwerk_xml");
+    let gevonden_root = find_package_root(&odf).expect("pakketroot niet gevonden");
+    assert_eq!(gevonden_root, root);
+
+    // 2. De pakketmap wordt gevonden en het pakket herkend aan zijn markering.
+    let pkgs = scan_package_dirs(&gevonden_root);
+    assert!(pkgs.contains_key(&1), "pakket 1 niet herkend: {pkgs:?}");
+
+    // 3. Het samplepad uit de definitie wijst naar het echte bestand.
+    let xml = xml_met_attacks(&aanval(1, 1, ""));
+    let def = build_definition_met(&xml, root.clone(), &pkgs, true, true).expect("build");
+    let stop = def.stops.iter().find(|s| s.name == "Bourdon 8").expect("register");
+    let PipeDef::Sample { path, .. } = &stop.pipes[0] else { panic!("sample") };
+    assert!(path.exists(), "samplepad bestaat niet op schijf: {path:?}");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+// ---------------------------------------------------------------------------
+// E10: ontbrekende pakketten bij een volledige definitie
+// ---------------------------------------------------------------------------
+
+fn verslag_voor_pakkettest() -> crate::import_report::ImportReport {
+    crate::import_report::ImportReport::uit_definitie("hauptwerk", "4.0", "proef", "Fixture", 1, 1, 0)
+}
+
+/// De fixture met een tabel `RequiredInstallationPackage`: pakket 1 (door het
+/// sample gebruikt) en pakket 7 (alleen genoemd, bijvoorbeeld beeld of documentatie).
+fn xml_met_vereiste_pakketten() -> String {
+    xml_met_attacks(&aanval(1, 1, "")).replace(
+        "</Hauptwerk>",
+        "<ObjectList ObjectType=\"RequiredInstallationPackage\">         <RequiredInstallationPackage><InstallationPackageID>1</InstallationPackageID><Name>Testpakket</Name></RequiredInstallationPackage>         <RequiredInstallationPackage><InstallationPackageID>7</InstallationPackageID><Name>Beeldpakket</Name></RequiredInstallationPackage>         </ObjectList></Hauptwerk>",
+    )
+}
+
+#[test]
+fn aanwezig_samplepakket_geeft_geen_melding() {
+    let mut pkg = HashMap::new();
+    pkg.insert(1u32, PathBuf::from("/pkg"));
+    pkg.insert(7u32, PathBuf::from("/beeld"));
+    let mut v = verslag_voor_pakkettest();
+    voeg_pakketten_toe(&mut v, &xml_met_vereiste_pakketten(), &pkg);
+    assert_eq!(v.pakketten.len(), 2);
+    assert!(v.pakketten.iter().all(|p| p.gevonden));
+    assert_eq!(v.pakketten.iter().find(|p| p.id == 1).unwrap().naam, "Testpakket");
+    assert!(!v.onvolledig && !v.niet_speelbaar);
+    assert!(v.meldingen.iter().all(|m| m.object != "pakketten"), "{:?}", v.meldingen);
+}
+
+#[test]
+fn ontbrekend_samplepakket_maakt_het_verslag_onvolledig_en_noemt_het_met_naam() {
+    let mut v = verslag_voor_pakkettest();
+    voeg_pakketten_toe(&mut v, &xml_met_vereiste_pakketten(), &HashMap::new());
+    let ontbrekend: Vec<u32> = v.ontbrekende_klankpakketten().iter().map(|p| p.id).collect();
+    assert_eq!(ontbrekend, vec![1], "alleen het samplepakket is nodig voor de klank");
+    assert!(v.onvolledig);
+    let melding = v.meldingen.iter().find(|m| m.object == "pakketten").expect("melding over pakketten");
+    assert!(melding.tekst.contains("Testpakket (nr. 1)"), "{}", melding.tekst);
+    assert!(!melding.tekst.contains("Beeldpakket"), "een ontbrekend beeldpakket telt niet mee: {}", melding.tekst);
+}
+
+#[test]
+fn zonder_vereistentabel_heten_de_pakketten_naar_hun_nummer() {
+    let mut v = verslag_voor_pakkettest();
+    voeg_pakketten_toe(&mut v, &xml_met_attacks(&aanval(1, 1, "")), &HashMap::new());
+    assert_eq!(v.pakketten.len(), 1);
+    assert_eq!(v.pakketten[0].naam, "pakket 1");
+    assert!(v.onvolledig);
+}

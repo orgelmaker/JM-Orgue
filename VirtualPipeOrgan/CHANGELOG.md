@@ -6,6 +6,18 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### Hauptwerk: ontbrekende samplepakketten worden gemeld (E10)
+- Een volledige Hauptwerk-definitie die samples uit een pakket nodig heeft dat niet
+  op schijf staat, liet die pijpen er stil uit vallen. Nu staat in het
+  importverslag welke pakketten de definitie nodig heeft (met hun naam uit de tabel
+  `RequiredInstallationPackage`, anders "pakket N"), of ze gevonden zijn en waar,
+  en een waarschuwing "Ontbrekende samplepakketten: ... Zet die in de map
+  OrganInstallationPackages". Een ontbrekend samplepakket maakt het orgel
+  "onvolledig"; een ontbrekend beeld- of documentatiepakket telt niet mee.
+  Dit gebruikt dezelfde pakketstatus als de CODM-import al had.
+- Geen verandering in het laden zelf of in de klank. Drie tests met verzonnen
+  definities (alles aanwezig, samplepakket weg, geen vereistentabel).
+
 ### Instellingenbestanden en bovenbalk: twee kleine controles (F8)
 - Een instellingenbestand dat de app inleest mag niet groter zijn dan 8 MB (echte
   bestanden zijn tientallen kilobytes). Dat geldt voor het importeren van
@@ -76,6 +88,11 @@ versies volgen [Semantic Versioning](https://semver.org/).
 - Zeven tests voor het opzoeken zelf; de Linux- en macOS-bouw is gecompileerd
   maar niet uitgevoerd, en er is nog geen echte set met afwijkende hoofdletters
   op Linux geprobeerd.
+- Nieuwe integratietest `set_met_andere_hoofdletters_op_schijf_vindt_pakket_en_sample`:
+  een set waarvan de mappen op schijf in andere hoofdletters staan dan in de
+  definitie, helemaal door de importer heen. Op Windows en macOS (niet
+  hoofdlettergevoelig) draait die ook, maar bewijst daar niets; het echte bewijs
+  levert de testrun op Linux in GitHub Actions.
 
 ### Hauptwerk: crossfade-duur van de release uit de definitie (D3)
 - De importer leest `ReleaseCrossfadeLengthMs` (1 tot 3000 ms) per release en

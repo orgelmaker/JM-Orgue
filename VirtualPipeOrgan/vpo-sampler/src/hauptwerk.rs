@@ -175,12 +175,83 @@ fn load_hauptwerk_intern(
             );
             v.pakketroot = Some(root.to_string_lossy().to_string());
             v.pakketroot_handmatig = pakketroot.is_some();
+            voeg_pakketten_toe(&mut v, &xml, &pkg_dirs);
             voeg_compact_rapport_toe(&mut v, &xml);
             voeg_niveau_rapport_toe(&mut v, &def, &xml, niveaus);
             (Ok(def), v)
         }
         Err(e) => mislukt(e),
     }
+}
+
+/// Welke installatiepakketten heeft deze definitie nodig, en staan ze op schijf? (E10)
+///
+/// Elk pakket dat een `Sample` noemt is een samplepakket; de tabel
+/// `RequiredInstallationPackage` geeft hun naam en kan er meer noemen (beeld,
+/// documentatie). Een ontbrekend samplepakket liet de pijpen er tot nu toe stil
+/// uit vallen. Bij een gecomprimeerde definitie is die tabel niet vertaald; dan
+/// heten de pakketten naar hun nummer.
+pub(crate) fn pakketten_uit_definitie(
+    xml: &str,
+    pkg_dirs: &HashMap<u32, PathBuf>,
+) -> Vec<crate::import_report::PakketStatus> {
+    use crate::import_report::{PakketRol, PakketStatus};
+    use std::collections::{BTreeMap, BTreeSet};
+    let compact = GecomprimeerdeOdf::detecteer(xml);
+    let samples = match &compact {
+        Some(c) => FieldMap::rijen_van_tabel("Sample", c.objecten(xml, "Sample")),
+        None => extract_objects(xml, "Sample"),
+    };
+    let gebruikt: BTreeSet<u32> = samples
+        .iter()
+        .filter_map(|s| s.get_u32("InstallationPackageID"))
+        .filter(|id| *id > 0)
+        .collect();
+    let namen: BTreeMap<u32, String> = if compact.is_none() {
+        extract_objects(xml, "RequiredInstallationPackage")
+            .iter()
+            .filter_map(|p| Some((p.get_u32("InstallationPackageID")?, p.get("Name")?.trim().to_string())))
+            .collect()
+    } else {
+        BTreeMap::new()
+    };
+    let mut alle = gebruikt.clone();
+    alle.extend(namen.keys().copied().filter(|id| *id > 0));
+    alle.into_iter()
+        .map(|id| PakketStatus {
+            id,
+            naam: namen.get(&id).filter(|n| !n.is_empty()).cloned().unwrap_or_else(|| format!("pakket {id}")),
+            rollen: vec![if gebruikt.contains(&id) { PakketRol::Samples } else { PakketRol::Overig }],
+            gevonden: pkg_dirs.contains_key(&id),
+            pad: pkg_dirs.get(&id).map(|p| p.to_string_lossy().to_string()),
+        })
+        .collect()
+}
+
+/// Zet de pakketten in het verslag en meldt ontbrekende samplepakketten (E10).
+pub(crate) fn voeg_pakketten_toe(
+    v: &mut crate::import_report::ImportReport,
+    xml: &str,
+    pkg_dirs: &HashMap<u32, PathBuf>,
+) {
+    use crate::import_report::Ernst;
+    v.pakketten = pakketten_uit_definitie(xml, pkg_dirs);
+    let ontbrekend: Vec<String> = v
+        .ontbrekende_klankpakketten()
+        .iter()
+        .map(|p| format!("{} (nr. {})", p.naam, p.id))
+        .collect();
+    if !ontbrekend.is_empty() {
+        v.melding(
+            Ernst::Waarschuwing,
+            "pakketten",
+            format!(
+                "Ontbrekende samplepakketten: {}. Zet die in de map OrganInstallationPackages naast (of boven) deze definitie; de pijpen ervan klinken nu niet.",
+                ontbrekend.join(", ")
+            ),
+        );
+    }
+    v.bepaal_volledigheid();
 }
 
 /// Voeg meldingen aan het verslag toe over de automatische veldafleiding van
