@@ -17,6 +17,8 @@
 ### Linux
 - Rust + Node.js
 - `sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev libasound2-dev libdbus-1-dev pkg-config libssl-dev`
+- Een C++-compiler (`build-essential`): de RAR-ondersteuning (cargo-feature `rar`, standaard aan) bouwt de UnRAR-code mee.
+  Op Windows en macOS zit die al in de hulpmiddelen hierboven. Zonder RAR bouwen: `--no-default-features --features custom-protocol`.
 
 ## Workspace structuur
 

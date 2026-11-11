@@ -6,6 +6,28 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### RAR-pakketten (ook meerdelig) rechtstreeks openen (C6, stap 2)
+- Bij "Orgel openen" kun je nu ook een `.rar`-archief kiezen. Het gaat zoals bij `.orgue`: eenmalig uitgepakt in de map `pakketten` van de
+  app (tijdelijke map die bij succes hernoemd wordt, voortgang in de laadbalk, daarna hergebruikt), en de ondiepste orgeldefinitie wordt
+  geladen (`.organ`, anders `.Organ_Hauptwerk_xml`). Een meerdelig archief (`naam.part1.rar`, `naam.part2.rar`, ...) wordt vanaf het
+  eerste deel uitgepakt, ook als je een ander deel kiest; alle delen moeten in dezelfde map staan, anders volgt een duidelijke melding.
+  Paden met `..`, een absoluut pad of een schijfletter in het archief worden overgeslagen. Een met wachtwoord beveiligd archief wordt
+  met een eigen melding geweigerd (wachtwoorden worden niet ondersteund).
+- Licentie: het uitpakken gebruikt de UnRAR-code van RARLAB via de Rust-bibliotheek `unrar` 0.5.8 (MIT of Apache-2.0). De UnRAR-licentie
+  staat het gebruik in elke software toe om RAR-archieven te lezen, mits de licentietekst meegeleverd wordt en er geen RAR-archiver mee
+  gemaakt wordt; wij pakken alleen uit. De tekst staat in `docs/LICENTIES_DERDEN.md`.
+- Technisch: cargo-feature `rar` (standaard aan; zonder bouwt de app met een melding dat RAR ontbreekt). De bibliotheek bouwt C++ mee
+  (zie BUILDING.md). Alle gebruik van de bibliotheek loopt achter één slot: de C++-code is niet veilig voor gelijktijdig gebruik in één
+  proces (parallelle uitpakkingen lieten de testbinary af en toe crashen).
+- Getest: eenheidstests met een zelfgeschreven RAR-schrijver (opslagmethode, vaste gegevens, niets van derden): uitpakken met mappen,
+  hergebruik, een ontbrekend deel, paden buiten de uitpakmap, een kapot bestand. Handmatig op gecomprimeerde archieven (RAR5, solid,
+  unicode, herstelgegevens), op een echt meerdelig archief van een sampleset met vijf delen (7 GB, vier deelgrenzen; in 47 seconden
+  uitgepakt, 5063 bestanden allemaal even groot als een eerdere uitpakking, de CRC van elk bestand door UnRAR gecontroleerd) en in de
+  echte app met een enkel en een tweedelig archief van een kleine testset (alle 37 bestanden byte voor byte gelijk). Eén eigen test met
+  een zelfgemaakt tweedelig archief staat op `ignore`: de bibliotheek crasht daar in ongeveer 1 op 5 runs op onze nagemaakte delen,
+  terwijl het echte archief 60 van 60 keer zonder fout doorliep. Een archief dat de bibliotheek laat crashen, laat dus de hele app
+  crashen; bij echte archieven is dat niet gezien. Alleen op Windows gebouwd en geprobeerd; macOS en Linux volgen in de CI.
+
 ### GrandOrgue-pakketten (.orgue) rechtstreeks openen (C6, stap 1)
 - Bij "Orgel openen" kun je nu een `.orgue`-pakket kiezen (een zip met de orgeldefinitie en de samples). De app pakt het eenmalig uit in de
   map `pakketten` in de gegevensmap van de app en laadt het daarna als gewone set; de laadbalk toont tijdens het uitpakken de voortgang.

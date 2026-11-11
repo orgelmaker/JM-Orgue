@@ -4261,7 +4261,7 @@
           name: tx('dialogs.organ_definition_filter'),
           // Hauptwerk-sets gebruiken *.Organ_Hauptwerk_xml; de backend routeert
           // beide via do_load_organ (is_organ_file_id).
-          extensions: ['organ', 'orgue', 'Organ_Hauptwerk_xml', 'CustomOrgan_Hauptwerk_xml']
+          extensions: ['organ', 'orgue', 'rar', 'Organ_Hauptwerk_xml', 'CustomOrgan_Hauptwerk_xml']
         }]
       });
       if (selected) {

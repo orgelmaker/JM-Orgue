@@ -1471,7 +1471,8 @@
     } catch (e) { /* niet in Tauri of geen extra vensters */ }
   }
 
-  // Een GrandOrgue-pakket (.orgue) eerst uitpakken (C6); daarna gaat het als gewone .organ verder.
+  // Een GrandOrgue-pakket (.orgue) of RAR-archief (.rar, ook meerdelig) eerst uitpakken (C6); daarna gaat het
+  // als gewone .organ verder.
   // Geeft het pad van de orgeldefinitie terug, of null bij een fout (die staat dan in `error`).
   async function pakPakketUit(pad) {
     loading = true;
@@ -1495,7 +1496,8 @@
   }
 
   async function loadOrgan(path, opties = {}) {
-    if (typeof path === 'string' && path.toLowerCase().endsWith('.orgue')) {
+    const pakketPad = typeof path === 'string' ? path.toLowerCase() : '';
+    if (pakketPad.endsWith('.orgue') || pakketPad.endsWith('.rar')) {
       const uitgepakt = await pakPakketUit(path);
       if (!uitgepakt) return;
       path = uitgepakt;

@@ -61,6 +61,11 @@ qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 # Sampleset-downloads uit de bibliotheek: HTTP-client (rustls, klein) + zip-uitpakker.
 ureq = "2"
 zip = { version = "2", default-features = false, features = ["deflate"] }
+# RAR-pakketten (ook meerdelig) uitpakken (C6). De Rust-laag is MIT of Apache-2.0; ze bevat de
+# UnRAR-broncode van RARLAB onder diens eigen licentie (alleen uitpakken, geen RAR-compatibele
+# archiver; de licentietekst staat in docs/LICENTIES_DERDEN.md). Bouwt C++ mee; optioneel, zodat een
+# platform waar dat tegenzit de feature `rar` kan missen.
+unrar = { version = "0.5.8", optional = true }
 # MusicXML lezen (0.7.90): kleine DOM-parser, pure Rust.
 roxmltree = "0.20"
 # Alleen voor het driver-loos oplijsten van ASIO-drivernamen (registry-scan):
@@ -70,8 +75,10 @@ roxmltree = "0.20"
 asio-sys = { version = "0.2.6", optional = true }
 
 [features]
-default = ["custom-protocol"]
+default = ["custom-protocol", "rar"]
 custom-protocol = ["tauri/custom-protocol"]
+# RAR-pakketten openen (C6); zie de afhankelijkheid `unrar` hierboven.
+rar = ["dep:unrar"]
 # Webview-ontwikkelaarstools (rechtsklik → Inspecteren, F12) in een releasebouw.
 # Standaard UIT: zonder deze feature heeft een gewone release ze niet (in een
 # debugbouw staan ze altijd aan). Alleen voor een ondersteuningsbouw:
