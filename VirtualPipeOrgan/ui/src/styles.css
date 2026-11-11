@@ -910,6 +910,16 @@ input[type="range"]::-webkit-slider-thumb:hover {
   border-color: var(--gold-border);
 }
 
+/* Een set die nog te downloaden is: een tegel zoals een orgel, met stippelrand. */
+.library-card-online {
+  border-style: dashed;
+  border-color: var(--gold-border);
+  background: transparent;
+}
+.library-card-online:hover {
+  background: var(--bg-panel);
+}
+
 /* Knoppenrij rechtsboven op een bibliotheekkaart: automatisch zoeken,
    foto kiezen, verwijderen. Alleen zichtbaar bij hover (mobiel: altijd). */
 .library-card-actions {

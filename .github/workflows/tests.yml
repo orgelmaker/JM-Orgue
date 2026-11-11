@@ -88,6 +88,9 @@ jobs:
       - name: Klavar-geometrie controleren
         run: node testscripts/klavar_layout_test.mjs
 
+      - name: Aanbod in de bibliotheek (al geïnstalleerd?) controleren
+        run: node testscripts/aanbod_test.mjs
+
       - name: EQ-import en hoofdtelefoonpresets controleren
         run: |
           node testscripts/eq_import_test.mjs

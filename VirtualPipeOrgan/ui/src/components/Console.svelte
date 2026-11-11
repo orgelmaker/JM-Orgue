@@ -1,5 +1,6 @@
 <script>
   import { createEventDispatcher, onMount, onDestroy, tick } from 'svelte';
+  import { nogTeDownloaden } from '../lib/aanbod.js';
   import { open } from '@tauri-apps/plugin-dialog';
   import LayoutSettings from './LayoutSettings.svelte';
   import VoicingPanel from './VoicingPanel.svelte';
@@ -4274,8 +4275,20 @@
   async function openExterneLink(url) {
     try { await invoke('open_external_url', { url }); } catch (e) { console.error(e); }
   }
-  let onlineSets = [];
+  // Het hele manifest (ook de sets die al geïnstalleerd zijn: hun waarschuwing blijft zichtbaar).
   let alleOnlineSets = [];
+  // Is het manifest binnengehaald? Zonder internet geen downloadtegels.
+  let manifestGelukt = false;
+  // Sets die de app zelf heeft gedownload: manifest-id → map. Bewaard, zodat de tegel ook
+  // bij een afwijkende orgelnaam of mapnaam verdwijnt zodra het orgel in de bibliotheek staat.
+  let gedownload = {};
+  try { gedownload = JSON.parse(localStorage.getItem('jm-orgue-gedownloade-sets') || '{}') || {}; } catch (e) { gedownload = {}; }
+  // Wat nog te downloaden valt, AFGELEID van manifest, bibliotheek en gedownloade sets: zo
+  // klopt de lijst op elk moment. Tot 0.9.50 werd hij op één moment uitgerekend (direct na de
+  // download, vóór het orgel in de bibliotheek stond) en bleef een net geïnstalleerde set
+  // aangeboden. De vergelijking (lib/aanbod.js) is ongevoelig voor schrijfwijze van letters.
+  let onlineSets = [];
+  $: onlineSets = manifestGelukt ? nogTeDownloaden(alleOnlineSets, libraryOrgans, gedownload) : [];
 
   // Tekst uit het samplesets-manifest (samplesets.json op GitHub) in de
   // gekozen taal. De Nederlandse tekst staat in het veld zelf — oudere
@@ -4346,24 +4359,16 @@
   async function refreshOnlineSets() {
     try {
       const res = await fetch(SAMPLESETS_MANIFEST, { cache: 'no-cache' });
-      if (!res.ok) { onlineSets = []; return; }
+      if (!res.ok) { manifestGelukt = false; return; }
       const mf = await res.json();
-      const geinstalleerd = new Set();
-      for (const o of (libraryOrgans || [])) {
-        if (o?.name) geinstalleerd.add(String(o.name).toLowerCase());
-        const map = setFolderKey(o);
-        if (map) geinstalleerd.add(map);
-      }
-      // Het hele manifest bewaren: een set die al geïnstalleerd is valt uit
-      // `onlineSets`, maar zijn waarschuwing hoort ook dán zichtbaar te zijn.
       alleOnlineSets = mf.samplesets || [];
-      onlineSets = (mf.samplesets || []).filter(s =>
-        s.naam && s.zip_url
-        && !geinstalleerd.has(String(s.naam).toLowerCase())
-        && !geinstalleerd.has(String(s.map_naam || s.naam).toLowerCase())
-      );
-    } catch (e) { onlineSets = []; }
-    finally { meldOnlineSetsKlaar(); }
+      manifestGelukt = true;
+    } catch (e) { manifestGelukt = false; }
+    finally {
+      // Eerst laten uitrekenen wat te tonen is, dan pas de opstart-splash vrijgeven.
+      await tick();
+      meldOnlineSetsKlaar();
+    }
   }
   async function downloadOnlineSet(s) {
     if (onlineBusy) return;
@@ -4379,6 +4384,10 @@
       const pad = await invoke('download_sampleset', {
         id: s.id, url: s.zip_url, doelMap: `${basis}/${s.map_naam || s.naam}`,
       });
+      // Onthouden waar deze set staat: zodra het orgel in de bibliotheek staat is hij
+      // geïnstalleerd, hoe het orgel of de map ook heet.
+      gedownload = { ...gedownload, [s.id]: pad };
+      try { localStorage.setItem('jm-orgue-gedownloade-sets', JSON.stringify(gedownload)); } catch (e) { /* geen opslag: de naamvergelijking blijft */ }
       // Zelfde route als "Scan map": laadt het orgel en zet het in de bibliotheek.
       dispatch('scanFolder', pad);
     } catch (e) {
@@ -4389,7 +4398,6 @@
     } finally {
       if (un) un();
       onlineBusy = null;
-      refreshOnlineSets();
     }
   }
   function annuleerDownload(s) {
@@ -5919,6 +5927,45 @@
           </div>
         {/each}
 
+        <!-- Sets die nog te downloaden zijn: tegels in hetzelfde raster als de orgels
+             (stippelrand en downloadpijl); ze verdwijnen zodra ze geïnstalleerd zijn. -->
+        {#each onlineSets as s (s.id)}
+          <div
+            class="library-card library-card-online"
+            class:library-card-busy={onlineBusy === s.id}
+            title={$t('library.online_title')}
+            on:click={() => downloadOnlineSet(s)}
+            on:keypress={(e) => e.key === 'Enter' && e.target === e.currentTarget && downloadOnlineSet(s)}
+            role="button"
+            tabindex="0"
+          >
+            <div class="library-card-image">
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.55">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="7 10 12 15 17 10"/>
+                <line x1="12" y1="15" x2="12" y2="3"/>
+              </svg>
+            </div>
+            <div class="library-card-info">
+              <div class="library-card-name">{s.naam}</div>
+              <div class="library-card-meta">
+                {#if onlineBusy === s.id}
+                  {onlineFase === 'uitpakken' ? $t('library.unpacking') : $t('library.downloading')} {onlinePct}%
+                  <button class="library-card-cancel" on:click|stopPropagation={() => annuleerDownload(s)}>{$t('library.download_cancel')}</button>
+                {:else}
+                  {$t('library.download_size').replace('{mb}', s.zip_mb || '?')}
+                {/if}
+              </div>
+              {#if s.beschrijving}
+                <div class="library-card-meta">{manifestTekst(s, 'beschrijving', $locale)}</div>
+              {/if}
+              {#if s.let_op}
+                <div class="library-card-warn">{manifestTekst(s, 'let_op', $locale)}</div>
+              {/if}
+            </div>
+          </div>
+        {/each}
+
         {#if libraryOrgans.length === 0}
           <div class="library-empty">
             <svg width="48" height="48" viewBox="0 0 36 36" fill="none">
@@ -5933,49 +5980,6 @@
         {/if}
       </div>
       </div><!-- /.organ-library-wrap -->
-
-      <!-- Online beschikbare samplesets (manifest in de repo); verdwijnen uit
-           deze lijst zodra ze geïnstalleerd zijn. -->
-      {#if onlineSets.length > 0}
-        <h2 class="organ-browser-subtitle">{$t('library.online_title')}</h2>
-        <div class="organ-library-grid">
-          {#each onlineSets as s (s.id)}
-            <div
-              class="library-card"
-              class:library-card-busy={onlineBusy === s.id}
-              on:click={() => downloadOnlineSet(s)}
-              on:keypress={(e) => e.key === 'Enter' && e.target === e.currentTarget && downloadOnlineSet(s)}
-              role="button"
-              tabindex="0"
-            >
-              <div class="library-card-image">
-                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.55">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                  <polyline points="7 10 12 15 17 10"/>
-                  <line x1="12" y1="15" x2="12" y2="3"/>
-                </svg>
-              </div>
-              <div class="library-card-info">
-                <div class="library-card-name">{s.naam}</div>
-                <div class="library-card-meta">
-                  {#if onlineBusy === s.id}
-                    {onlineFase === 'uitpakken' ? $t('library.unpacking') : $t('library.downloading')} {onlinePct}%
-                    <button class="library-card-cancel" on:click|stopPropagation={() => annuleerDownload(s)}>{$t('library.download_cancel')}</button>
-                  {:else}
-                    {$t('library.download_size').replace('{mb}', s.zip_mb || '?')}
-                  {/if}
-                </div>
-                {#if s.beschrijving}
-                  <div class="library-card-meta">{manifestTekst(s, 'beschrijving', $locale)}</div>
-                {/if}
-                {#if s.let_op}
-                  <div class="library-card-warn">{manifestTekst(s, 'let_op', $locale)}</div>
-                {/if}
-              </div>
-            </div>
-          {/each}
-        </div>
-      {/if}
 
       <!-- Waar je meer samplesets vindt. Bewust twee vaste adressen: beide
            bieden vrij te gebruiken sets die JM-Orgue rechtstreeks inleest. -->

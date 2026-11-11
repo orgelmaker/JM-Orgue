@@ -6,6 +6,23 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### Downloadbare sets: niet meer aanbieden wat al geïnstalleerd is, en als tegel in het raster
+- Fout: een set kon onder "Beschikbaar om te downloaden" blijven staan terwijl hij al geïnstalleerd was. Twee oorzaken:
+  - De vergelijking met de bibliotheek keek alleen naar de exacte naam of de laatste map (hoofdletters daargelaten). Een Mac
+    schrijft een letter als "ä" in een mapnaam als twee tekens (a + trema), het manifest als één, dus de namen leken
+    ongelijk (met de oude bouw nagebootst: de kop en de set verschijnen terwijl het orgel er staat). Ook een Hauptwerk-set
+    (de definitie staat in `<set>/OrganDefinitions/…`) of een orgel dat anders heet dan de map werd niet herkend.
+  - De lijst werd op één moment uitgerekend, direct na de download en vóór het orgel in de bibliotheek stond. Nu wordt hij
+    afgeleid van het manifest, de bibliotheek en de sets die de app zelf heeft gedownload, dus hij klopt op elk moment.
+- Nieuwe vergelijking (`ui/src/lib/aanbod.js`): ongevoelig voor accenten, hoofdletters, spaties en koppeltekens; een set telt als
+  geïnstalleerd als een orgel zijn naam heeft, ergens in zijn pad een map met die naam heeft, of staat op of onder de plek waar de
+  app de set zelf neerzette (die plek wordt onthouden).
+- De downloadbare sets zijn nu tegels in hetzelfde raster als de orgels (de laatste tegels, met stippelrand en een downloadpijl)
+  in plaats van een aparte kop met een eigen raster eronder. Ze verdwijnen zodra de set in de bibliotheek staat.
+- Nieuwe test `testscripts/aanbod_test.mjs` (ook in de GitHub-testrun): 20 controles, met de gevallen die de oude regel miste.
+  Gedaan in de echte app: bij de huidige bibliotheek geen tegel; met de set tijdelijk uit de bibliotheek één tegel in het raster;
+  met de naam en het pad in Mac-schrijfwijze geen tegel (de oude bouw toonde de set dan wél). Jouw bibliotheek is na afloop
+  teruggezet. Niet getest: een echte download en de weergave op een Mac.
 ### Zwelkast van de set gebruiken, per orgel (E5, stap 3)
 - Nieuw vinkje onder Instellingen → Klank, "Zwelkast van de set gebruiken", in het blok "Gedrag van de set (dit orgel)". Aan:
   een divisie waarvoor je zelf nog niets instelde begint met de waarden die de set opgeeft. **Anders dan de andere vlaggen staat
