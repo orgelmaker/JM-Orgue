@@ -6,6 +6,14 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### Geheugen per keuze van de startbuffer tonen (F2, deel 3)
+- Onder Algemene instellingen → Audio uitvoer staat achter elke keuze van de **Startbuffer per opname** nu het geheugen dat het geladen
+  orgel dan vooraf vraagt, bijvoorbeeld "500 ms · 2,8 GB", met een regel uitleg eronder. Het getal komt uit dezelfde telling als de
+  geheugenwaarschuwing en het plafond (unieke bestanden, alle aangezette opnameposities, ook lagen zonder positie); de grootte per
+  buffer schaalt lineair met de tijd, met de bestaande ondergrens. Voor een samplemap of zonder geladen orgel wordt niets getoond.
+- Alleen weergave: de startbuffer zelf, het laden en de klank zijn niet veranderd. Gemeten in de app: bij de ingestelde 500 ms is het
+  getal gelijk aan de schatting in het logboek (2784 MB voor een demo-orgel).
+
 ## [0.9.51] - 2026-11-11
 
 ### RAR-pakketten (ook meerdelig) rechtstreeks openen (C6, stap 2)

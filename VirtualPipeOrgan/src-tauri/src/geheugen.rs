@@ -87,6 +87,19 @@ pub fn past_in_vrij(stand: GeheugenStand, preload_geschat: u64) -> bool {
 /// Preload-schatting van de laatste orgellading in bytes (voor de weergave).
 static LAATSTE_PRELOAD: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
+/// Aantal preload-buffers van de laatste orgellading, los van de lengte van de startbuffer: daaruit volgt
+/// het geheugen bij elke keuze van de startbuffer (F2). 0 = onbekend (nog geen orgel, of een samplemap
+/// waarvoor de schatting niet gemaakt wordt).
+static LAATSTE_BUFFERS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+pub fn zet_laatste_buffers(n: u64) {
+    LAATSTE_BUFFERS.store(n, Ordering::Relaxed);
+}
+
+pub fn laatste_buffers() -> u64 {
+    LAATSTE_BUFFERS.load(Ordering::Relaxed)
+}
+
 /// Stelt het plafond voor volledig geladen samples in op wat er nu vrij is.
 /// Aanroepen bij elke orgellading, buiten de audiothread, zodra de preload-
 /// schatting van het orgel bekend is. Staat het volgen uit of is de stand niet

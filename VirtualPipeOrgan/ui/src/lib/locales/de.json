@@ -290,6 +290,7 @@
     "zwelkast_van_set_lijst": "Werte des Sets: {lijst}",
     "preload_ms": "Startpuffer je Aufnahme",
     "preload_ms_hint": "Wie viel jeder Pfeifenaufnahme vorab im Speicher liegt. Kürzer = deutlich weniger Speicher und schnelleres Laden; der Rest wird beim Spielen nachgeladen. Hören Sie bei großen Akkorden eine kurze Wiederholung des Ansatzes, wählen Sie einen längeren Puffer.",
+    "preload_ms_geheugen": "Hinter jeder Auswahl steht der Speicher, den die geladene Orgel dann vorab braucht: eine Schätzung für alle aktivierten Aufnahmepositionen.",
     "reload_hint": "Wirkt nach dem Neuladen der Orgel.",
     "channels_per_division": "Ausgänge",
     "channels_per_division_hint": "Wählen Sie, welche Ausgänge des gerade geöffneten Audioausgangs ({host}) dieses Werk nutzt — von 1 bis alle. Zwei aufeinanderfolgende Ausgänge bilden ein Stereopaar; ein einzelner Ausgang klingt mono. Die Anzahl folgt dem Gerät: ASIO liefert alle Ausgänge des Treibers, WASAPI die in Windows für dieses Gerät eingestellte Anzahl.",

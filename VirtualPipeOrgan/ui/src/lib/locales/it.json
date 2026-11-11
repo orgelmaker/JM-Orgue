@@ -290,6 +290,7 @@
     "zwelkast_van_set_lijst": "Valori del set: {lijst}",
     "preload_ms": "Buffer iniziale per registrazione",
     "preload_ms_hint": "Quanta parte di ogni registrazione di canna resta in memoria in anticipo. Più breve = molta meno memoria e caricamento più rapido; il resto viene caricato mentre suoni. Se negli accordi grandi senti una breve ripetizione dell'attacco, scegli un buffer più lungo.",
+    "preload_ms_geheugen": "Accanto a ogni scelta c'è la memoria che l'organo caricato richiede in anticipo: una stima per tutte le posizioni di registrazione attivate.",
     "reload_hint": "Diventa attivo dopo aver ricaricato l'organo.",
     "channels_per_division": "Uscite",
     "channels_per_division_hint": "Scegli quali uscite dell'uscita audio ora aperta ({host}) usa questo manuale — da 1 fino a tutte. Due uscite consecutive formano una coppia stereo; una singola uscita suona in mono. Il numero segue il dispositivo: ASIO offre tutte le uscite del driver, WASAPI il numero che Windows ha configurato per questo dispositivo.",

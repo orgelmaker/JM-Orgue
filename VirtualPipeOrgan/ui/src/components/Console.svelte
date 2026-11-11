@@ -2094,6 +2094,7 @@
     haalOrgelVlaggen();
     haalZwelkastVoorstel();
     haalSetCrescendo();
+    haalPreloadGeheugen();
   }
   async function zetOrgelVlag(naam, aan) {
     try {
@@ -2170,6 +2171,17 @@
   let preloadReloadHint = false;
   const PRELOAD_KEUZES = [200, 300, 500, 1000, 2000];
   invoke('get_preload_ms').then(v => { preloadMs = Number(v) || 2000; }).catch(() => {});
+  // Geheugen dat het geladen orgel bij elke keuze vraagt (F2); leeg als er geen schatting is.
+  let preloadGeheugen = [];
+  async function haalPreloadGeheugen() {
+    try { preloadGeheugen = await invoke('get_preload_geheugen', { keuzes: PRELOAD_KEUZES }); } catch (e) { preloadGeheugen = []; }
+  }
+  function formatGeheugen(bytes) {
+    if (!bytes) return '';
+    const gb = bytes / 1e9;
+    if (gb >= 1) return gb.toLocaleString(undefined, { maximumFractionDigits: 1 }) + ' GB';
+    return Math.round(bytes / 1e6).toLocaleString() + ' MB';
+  }
   async function setPreloadMs(v) {
     try { preloadMs = await invoke('set_preload_ms', { ms: Number(v) }); preloadReloadHint = true; } catch (e) { console.error(e); }
   }
@@ -8597,12 +8609,15 @@
               <div class="audio-select-row" style="margin-top: 0.7rem;" title={$t('settings.preload_ms_hint')}>
                 <label class="audio-select-label" for="preload-ms">{$t('settings.preload_ms')}</label>
                 <select id="preload-ms" class="temperament-select" on:change={(e) => setPreloadMs(e.target.value)}>
-                  {#each PRELOAD_KEUZES as ms}
-                    <option value={ms} selected={preloadMs === ms}>{ms >= 1000 ? (ms / 1000) + ' s' : ms + ' ms'}</option>
+                  {#each PRELOAD_KEUZES as ms, i}
+                    <option value={ms} selected={preloadMs === ms}>{ms >= 1000 ? (ms / 1000) + ' s' : ms + ' ms'}{preloadGeheugen[i] ? ' · ' + formatGeheugen(preloadGeheugen[i]) : ''}</option>
                   {/each}
                 </select>
               </div>
               <p class="settings-hint" style="margin: 0.2rem 0 0;">{$t('settings.preload_ms_hint')}</p>
+              {#if preloadGeheugen.length}
+                <p class="settings-hint" style="margin: 0.2rem 0 0;">{$t('settings.preload_ms_geheugen')}</p>
+              {/if}
               {#if preloadReloadHint}
                 <p style="margin: 0.2rem 0 0; font-size: 0.68rem; color: var(--warning, #d9a441); line-height: 1.35;">{$t('settings.reload_hint')}</p>
               {/if}

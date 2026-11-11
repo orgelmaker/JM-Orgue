@@ -619,6 +619,21 @@ pub fn set_staart_drempel(state: State<AppState>, db: f32) -> f32 {
 #[tauri::command]
 pub fn get_preload_ms() -> u32 { crate::audio::preload_ms() }
 
+/// Geheugen (bytes) dat het geladen orgel voor het begin van de opnamen vraagt bij elk van de gegeven
+/// startbuffers in ms (F2), met dezelfde telling als het laden en de geheugenwaarschuwing. Leeg als er
+/// geen schatting is (nog geen orgel geladen, of een samplemap).
+#[tauri::command]
+pub fn get_preload_geheugen(keuzes: Vec<u32>) -> Vec<u64> {
+    preload_geheugen_voor(&keuzes, crate::geheugen::laatste_buffers())
+}
+
+fn preload_geheugen_voor(keuzes: &[u32], buffers: u64) -> Vec<u64> {
+    if buffers == 0 {
+        return Vec::new();
+    }
+    keuzes.iter().map(|ms| buffers * preload_bytes_per_buffer_bij(*ms)).collect()
+}
+
 #[tauri::command]
 pub fn set_preload_ms(state: State<AppState>, ms: u32) -> Result<u32, String> {
     crate::audio::set_preload_ms(ms);
@@ -807,10 +822,15 @@ pub(crate) fn fysiek_geheugen_bytes() -> Option<u64> {
 /// vier keer het aantal pijpen. De rem rekent daarom in buffers.
 const PRELOAD_BYTES_PER_BUFFER_2000MS: u64 = 790_000;
 
-/// Idem, geschaald naar de ingestelde startbuffer (0.8.92), met een vaste
+/// Idem, geschaald naar een startbuffer van `ms` milliseconden (0.8.92), met een vaste
 /// ondergrens voor header en boekhouding per buffer.
+fn preload_bytes_per_buffer_bij(ms: u32) -> u64 {
+    (PRELOAD_BYTES_PER_BUFFER_2000MS * ms as u64 / 2000).max(40_000)
+}
+
+/// Idem, voor de ingestelde startbuffer.
 fn preload_bytes_per_buffer() -> u64 {
-    (PRELOAD_BYTES_PER_BUFFER_2000MS * crate::audio::preload_ms() as u64 / 2000).max(40_000)
+    preload_bytes_per_buffer_bij(crate::audio::preload_ms())
 }
 
 /// Sleutel in `preload_buffers_per_label` voor lagen zonder perspectief-label:
@@ -879,11 +899,17 @@ fn vaste_preload_bytes(buffers: &HashMap<String, usize>) -> u64 {
     buffers.get(GEEN_PERSPECTIEF).copied().unwrap_or(0) as u64 * preload_bytes_per_buffer()
 }
 
-/// Idem, met `alle_posities` ook de uitgeschakelde posities ("alles laden").
-fn schatting_preload_bytes_voor(plan: &[PerspectiveRuntime], buffers: &HashMap<String, usize>, alle_posities: bool) -> u64 {
+/// Aantal preload-buffers van de posities in dit plan, met `alle_posities` ook de uitgeschakelde
+/// ("alles laden"). De bytes hieronder zijn dit aantal maal de grootte per buffer.
+fn schatting_preload_buffers_voor(plan: &[PerspectiveRuntime], buffers: &HashMap<String, usize>, alle_posities: bool) -> u64 {
     plan.iter().filter(|p| alle_posities || p.enabled)
-        .map(|p| buffers.get(&p.name).copied().unwrap_or(p.pipe_count) as u64 * preload_bytes_per_buffer())
+        .map(|p| buffers.get(&p.name).copied().unwrap_or(p.pipe_count) as u64)
         .sum()
+}
+
+/// Idem, in bytes voor de ingestelde startbuffer.
+fn schatting_preload_bytes_voor(plan: &[PerspectiveRuntime], buffers: &HashMap<String, usize>, alle_posities: bool) -> u64 {
+    schatting_preload_buffers_voor(plan, buffers, alle_posities) * preload_bytes_per_buffer()
 }
 
 /// Laatste geheugen-waarschuwing van een orgellaadbeurt (0.9.13). De UI
@@ -3568,6 +3594,9 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
         }
         // Plafond voor volledig geladen samples afstemmen op wat er nu vrij is
         // (F1), met de preload van precies de posities die nu geladen worden.
+        crate::geheugen::zet_laatste_buffers(
+            schatting_preload_buffers_voor(&persp_plan, &buffer_map, alles_laden)
+                + buffer_map.get(GEEN_PERSPECTIEF).copied().unwrap_or(0) as u64);
         crate::geheugen::pas_plafond_toe(
             schatting_preload_bytes_voor(&persp_plan, &buffer_map, alles_laden) + vaste_preload_bytes(&buffer_map));
         let enabled_labels: HashSet<String> = persp_plan.iter()
@@ -9366,6 +9395,8 @@ pub fn do_load_samples_from_directory_locked(state: &AppState, directory: &str) 
     let directory = &crate::library::pad_notatie(directory);
     // Ook een samplemap bepaalt zijn eigen vlaggen; anders blijven die van het vorige orgel staan.
     zet_orgelvlaggen_voor(state, directory);
+    // Voor een samplemap wordt geen schatting gemaakt: niets tonen in plaats van het getal van het vorige orgel.
+    crate::geheugen::zet_laatste_buffers(0);
     use std::collections::HashMap;
     use std::sync::Arc;
     use rayon::prelude::*;

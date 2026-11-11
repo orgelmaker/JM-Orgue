@@ -394,6 +394,7 @@ fn main() {
             commands::get_orgel_vlaggen,
             commands::set_orgel_vlag,
             commands::get_preload_ms,
+            commands::get_preload_geheugen,
             commands::set_preload_ms,
             // Gestapelde ranks en microfoonperspectieven (0.7.38)
             commands::get_perspectives,

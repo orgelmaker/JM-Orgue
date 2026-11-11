@@ -226,3 +226,34 @@ fn preload_schatting_telt_unieke_bestanden_en_geen_pijpen() {
     voeg_pijp_buffers_toe(&PipeDef::Empty, &mut unieke, &mut referenties);
     assert_eq!(referenties, 1);
 }
+
+/// F2: het geheugen per keuze van de startbuffer volgt dezelfde formule als de schatting zelf: het aantal
+/// buffers maal de grootte per buffer bij die startbuffer, met de vaste ondergrens bij korte buffers.
+#[test]
+fn preload_geheugen_per_keuze_volgt_de_schatting() {
+    let mk = |enabled: bool| PerspectiveRuntime {
+        name: "front".into(), enabled, gain_db: 0.0, loaded: false, slot: 1, pipe_count: 900,
+    };
+    let mut buffers = std::collections::HashMap::new();
+    buffers.insert("front".to_string(), 1000usize);
+    buffers.insert(GEEN_PERSPECTIEF.to_string(), 400usize);
+    let n = schatting_preload_buffers_voor(&[mk(true)], &buffers, false) + 400;
+    assert_eq!(n, 1400);
+    // Bij de ingestelde startbuffer is het precies de bytes-schatting.
+    assert_eq!(
+        n * preload_bytes_per_buffer(),
+        schatting_preload_bytes_voor(&[mk(true)], &buffers, false) + vaste_preload_bytes(&buffers));
+    // Per keuze: lineair in de tijd, met een ondergrens van 40 000 bytes per buffer.
+    let uit = preload_geheugen_voor(&[200, 500, 2000, 10], n);
+    assert_eq!(uit.len(), 4);
+    assert_eq!(uit[2], n * 790_000, "2 s is de ijkwaarde");
+    assert_eq!(uit[1], n * 197_500);
+    assert_eq!(uit[0], n * 79_000);
+    assert_eq!(uit[3], n * 40_000, "ondergrens bij een heel korte buffer");
+    assert!(uit[0] < uit[1] && uit[1] < uit[2]);
+    // Een uitgeschakelde positie telt niet mee, "alles laden" wel.
+    assert_eq!(schatting_preload_buffers_voor(&[mk(false)], &buffers, false), 0);
+    assert_eq!(schatting_preload_buffers_voor(&[mk(false)], &buffers, true), 1000);
+    // Zonder schatting (geen orgel of een samplemap): niets.
+    assert!(preload_geheugen_voor(&[500, 2000], 0).is_empty());
+}

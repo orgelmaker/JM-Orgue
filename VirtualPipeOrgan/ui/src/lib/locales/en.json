@@ -290,6 +290,7 @@
     "zwelkast_van_set_lijst": "Values from the set: {lijst}",
     "preload_ms": "Start buffer per recording",
     "preload_ms_hint": "How much of each pipe recording is kept in memory up front. Shorter = far less memory and faster loading; the rest streams in while you play. If big chords show a brief repeat of the attack, choose a longer buffer.",
+    "preload_ms_geheugen": "Behind each choice is the memory the loaded organ then needs up front: an estimate for all enabled recording positions.",
     "reload_hint": "Takes effect after reloading the organ.",
     "channels_per_division": "Outputs",
     "channels_per_division_hint": "Choose which outputs of the currently open audio output ({host}) this division uses — from 1 up to all. Two consecutive outputs form a stereo pair; a single output plays mono. The count follows the device: ASIO exposes all driver outputs, WASAPI the number Windows has configured for this device.",

@@ -290,6 +290,7 @@
     "zwelkast_van_set_lijst": "Wartości zestawu: {lijst}",
     "preload_ms": "Bufor startowy na nagranie",
     "preload_ms_hint": "Ile każdego nagrania piszczałki jest trzymane w pamięci z góry. Krócej = znacznie mniej pamięci i szybsze ładowanie; reszta dogrywa się podczas gry. Jeśli przy dużych akordach słychać krótkie powtórzenie ataku, wybierz dłuższy bufor.",
+    "preload_ms_geheugen": "Przy każdej opcji podano pamięć, której załadowane organy potrzebują z góry: szacunek dla wszystkich włączonych pozycji nagrania.",
     "reload_hint": "Zadziała po ponownym wczytaniu organów.",
     "channels_per_division": "Wyjścia",
     "channels_per_division_hint": "Wybierz, z których wyjść aktualnie otwartego wyjścia audio ({host}) korzysta ten manuał — od jednego po wszystkie. Dwa kolejne wyjścia tworzą parę stereo; pojedyncze wyjście gra mono. Liczba zależy od urządzenia: ASIO udostępnia wszystkie wyjścia sterownika, WASAPI tyle, ile Windows ustawił dla tego urządzenia.",

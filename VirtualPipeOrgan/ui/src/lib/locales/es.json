@@ -290,6 +290,7 @@
     "zwelkast_van_set_lijst": "Valores del set: {lijst}",
     "preload_ms": "Búfer inicial por grabación",
     "preload_ms_hint": "Cuánto de cada grabación de tubo se mantiene en memoria de antemano. Más corto = mucha menos memoria y carga más rápida; el resto se carga mientras toca. Si en acordes grandes oye una breve repetición del ataque, elija un búfer más largo.",
+    "preload_ms_geheugen": "Detrás de cada opción figura la memoria que el órgano cargado necesita de antemano: una estimación para todas las posiciones de grabación activadas.",
     "reload_hint": "Se aplica al volver a cargar el órgano.",
     "channels_per_division": "Salidas",
     "channels_per_division_hint": "Elige qué salidas de la salida de audio abierta ({host}) usa este teclado — desde 1 hasta todas. Dos salidas consecutivas forman un par estéreo; una salida suelta suena en mono. La cantidad depende del dispositivo: ASIO ofrece todas las salidas del controlador y WASAPI las que Windows tenga configuradas para este dispositivo.",
