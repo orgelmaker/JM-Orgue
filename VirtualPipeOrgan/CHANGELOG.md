@@ -8,9 +8,10 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ### Bouwwerkstroom: de apt-stap van de Linux-bouw kan niet meer eindeloos hangen
 - In `release-build.yml` hing de stap "Systeempakketten" van de Linux-bouw drie keer achter elkaar tot hij handmatig werd afgebroken
-  (normaal een minuut). Elke poging heeft nu een eigen tijdgrens (bijwerken 4 minuten, installeren 10 minuten), apt probeert
-  downloads drie keer en neemt een kortere netwerktime-out, er zijn drie pogingen, en de hele stap heeft een grens van 25 minuten.
-  Dezelfde pakketlijst; alleen de Linux-bouw is geraakt, niets in de app.
+  (normaal een minuut): de Ubuntu-spiegel `azure.archive.ubuntu.com` antwoordde niet meer. Elke poging heeft nu een eigen tijdgrens
+  (bijwerken 2,5 minuut, installeren 10 minuten), apt probeert downloads drie keer met een kortere netwerktime-out, de tweede en
+  derde poging schakelen over op `archive.ubuntu.com`, en de hele stap heeft een grens van 25 minuten. Dezelfde pakketlijst; alleen
+  de Linux-bouw is geraakt, niets in de app. De stappen van `platform-check.yml` en de updater-publicatie zijn niet aangepast.
 
 ### Crescendo van de set als extra voorstel (E4)
 - Een leesbare Hauptwerk-set (met veldnamen in de definitie) kan zelf een crescendo meebrengen: een regelaar met trappen die elk een

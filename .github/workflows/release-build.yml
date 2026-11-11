@@ -294,15 +294,19 @@ jobs:
       # Dezelfde lijst als platform-check.yml, min xvfb (er start hier geen
       # venster) en min de geluidsomleiding (er klinkt hier niets).
       #
-      # Een hangende apt-spiegel liet deze stap uren draaien (11-11-2026, drie keer achter
-      # elkaar, terwijl dezelfde stap normaal een minuut kost). Daarom heeft elke poging een
-      # eigen tijdgrens, zijn er drie pogingen en staat er een grens op de hele stap.
+      # De spiegel azure.archive.ubuntu.com hing op 11-11-2026 urenlang (de Microsoft-opslagplaats
+      # antwoordde wel), waardoor deze stap tot een handmatige afbreking bleef draaien; normaal kost
+      # hij een minuut. Daarom heeft elke poging een eigen tijdgrens, schakelt de tweede poging over
+      # op de hoofdspiegel archive.ubuntu.com en staat er een grens op de hele stap.
       - name: Systeempakketten
         timeout-minutes: 25
         run: |
           APT="-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30"
           for poging in 1 2 3; do
-            if sudo timeout 240 apt-get $APT update \
+            if [ "$poging" -gt 1 ]; then
+              echo "http://archive.ubuntu.com/ubuntu/ priority:1" | sudo tee /etc/apt/apt-mirrors.txt > /dev/null
+            fi
+            if sudo timeout 150 apt-get $APT update \
               && sudo timeout 600 env DEBIAN_FRONTEND=noninteractive apt-get $APT install -y \
                 libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf \
                 libasound2-dev libgtk-3-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev; then
