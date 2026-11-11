@@ -38,8 +38,9 @@ aan een echte speeltafel.
 | **Doorgeven aan vrienden** | **mag** | nee | nee |
 | **Windows · macOS · Linux** | **✅ alle drie** | Windows · macOS | Windows · macOS |
 | **Taal van de speeltafel** | **7 talen** | 1 taal | 1 taal |
-| **Hauptwerk-samplesets** | **✅** | ✅ | ✅ |
+| **Hauptwerk-samplesets** | **✅** | ✅ | ❌ |
 | **GrandOrgue-samplesets** | **✅** | ❌ | ❌ |
+| **Sampleset-bibliotheek** | **✅** | ❌ | ✅ |
 | **Convolutie-galm, windmodel, perspectieven** | ✅ | ✅ | ✅ |
 | **Afstandsbediening op telefoon of tablet** | **✅** | — | — |
 | **Live-notatie: speel en zie de noten** | **✅** | — | — |

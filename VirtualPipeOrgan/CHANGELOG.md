@@ -6,6 +6,11 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### Vergelijkingstabel op de README en de website
+- Hauptwerk-samplesets: bij Sweelinq nu een kruisje (was een vinkje).
+- Nieuwe regel "Sampleset-bibliotheek": JM-Orgue en Sweelinq een vinkje,
+  Hauptwerk Advanced een kruisje. Vertaald in de zeven talen van de website.
+
 ### Tests zonder samplebibliotheek: fixtures voor de import (E11)
 - Zeven nieuwe tests met verzonnen Hauptwerk-definities (`hauptwerk_fixtures_tests.rs`),
   zonder dat er een sampleset op schijf staat: meerdere attacks per laag (de
