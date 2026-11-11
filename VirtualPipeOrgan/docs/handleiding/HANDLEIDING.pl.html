@@ -11,10 +11,10 @@
 
 <header class="titel">
   <h1>JM-Orgue</h1>
-  <div class="onder">Instrukcja do wersji 0.9.49 &middot; listopad 2026</div>
+  <div class="onder">Instrukcja do wersji 0.9.51 &middot; listopad 2026</div>
 </header>
 
-<p>JM-Orgue to wirtualne organy piszcza&#322;kowe dla system&oacute;w Windows, macOS i Linux. Program odtwarza bezpo&#347;rednio zestawy sampli Hauptwerk i GrandOrgue, tak&#380;e du&#380;e zestawy surround i definicje Hauptwerk Custom Organ, a gra si&#281; na nim za pomoc&#261; klawiatury MIDI, sto&#322;u gry lub myszy. To, co grasz, program potrafi od razu zapisa&#263; nutami &mdash; w zwyk&#322;ej notacji albo w klavar &mdash; i wydrukowa&#263; jako PDF. Ta instrukcja przeprowadza przez program; zrzuty ekranu pochodz&#261; z wersji 0.9.16 i p&oacute;&#378;niejszych, tekst opisuje wersj&#281; 0.9.49.</p>
+<p>JM-Orgue to wirtualne organy piszcza&#322;kowe dla system&oacute;w Windows, macOS i Linux. Program odtwarza bezpo&#347;rednio zestawy sampli Hauptwerk i GrandOrgue, tak&#380;e du&#380;e zestawy surround i definicje Hauptwerk Custom Organ, a gra si&#281; na nim za pomoc&#261; klawiatury MIDI, sto&#322;u gry lub myszy. To, co grasz, program potrafi od razu zapisa&#263; nutami &mdash; w zwyk&#322;ej notacji albo w klavar &mdash; i wydrukowa&#263; jako PDF. Ta instrukcja przeprowadza przez program; zrzuty ekranu pochodz&#261; z wersji 0.9.16 i p&oacute;&#378;niejszych, tekst opisuje wersj&#281; 0.9.51.</p>
 <p class="klein">&copy; Martijn van der Kolk. Zrzuty ekranu wykonano na organach demonstracyjnych i w&#322;asnych zestawach testowych; adresy sieciowe, tokeny dost&#281;pu i foldery u&#380;ytkownika zosta&#322;y zas&#322;oni&#281;te.</p>
 
 <nav class="inhoud">
@@ -58,6 +58,7 @@
 <h3>Dodawanie organ&oacute;w</h3>
 <ul>
   <li><b>.organ</b>: wybierz definicj&#281; organ&oacute;w (GrandOrgue <code>.organ</code> lub definicja Hauptwerk). Wybierasz plik definicji, a nie sam folder z samplami: tylko definicja zna rejestry, sprz&#281;g&#322;a, tremulanty i ewentualne dodatkowe pozycje nagrania.</li>
+  <li><b>.orgue</b> i <b>.rar</b>: wybierz pakiet GrandOrgue (<code>.orgue</code>) lub archiwum RAR (<code>.rar</code>), także wieloczęściowe: wybierz jedną z części i trzymaj wszystkie części w tym samym folderze. JM-Orgue rozpakowuje je raz do własnego folderu <code>pakketten</code>, pokazuje postęp na pasku ładowania i ładuje organy; ponowne otwarcie nic nie kosztuje. Jeśli brakuje części, archiwum jest chronione hasłem lub uszkodzone, pojawi się wyraźny komunikat. Rozpakowany folder zajmuje miejsce na dysku: możesz usunąć folder <code>pakketten</code> w folderze danych programu, aby je zwolnić.</li>
   <li><b>JM-Rec import</b>: importuje zestaw sampli utworzony w JM-Rec.</li>
   <li><b>Eksportuj</b>: tworzy z folderu sampli definicj&#281; organ&oacute;w (<code>.organ</code>), kt&oacute;r&#261; potem za&#322;adujesz przyciskiem <b>.organ</b>.</li>
 </ul>
@@ -66,6 +67,9 @@
 <p>Gdy wska&#380;esz kart&#281;, w prawym g&oacute;rnym rogu zdj&#281;cia pojawiaj&#261; si&#281; trzy przyciski: <b>szukaj zdj&#281;cia online</b> (kula), <b>wybierz zdj&#281;cie samodzielnie</b> (aparat) i <b>usu&#324; z biblioteki</b> (krzy&#380;yk). Usuni&#281;cie tylko zdejmuje kart&#281; z biblioteki; pliki na dysku pozostaj&#261;. Je&#347;li przytrzymasz kart&#281; przez 3 sekundy, program wyszuka zdj&#281;cie ponownie.</p>
 <p><b>Wyszukiwanie online</b> pokazuje kilka swobodnie dost&#281;pnych zdj&#281;&#263; z Wikimedia Commons. U g&oacute;ry okna s&#261; pola <b>Ko&#347;ci&oacute;&#322;</b>, <b>Miejscowo&#347;&#263;</b> i <b>Budowniczy</b>, wype&#322;nione wst&#281;pnie z definicji organ&oacute;w i do&#322;&#261;czonych informacji; popraw je, je&#347;li si&#281; nie zgadzaj&#261;, i wybierz <b>Szukaj</b>. Poni&#380;ej pozostaje wolne pole na w&#322;asn&#261; fraz&#281;. Kliknij zdj&#281;cie, aby je przej&#261;&#263;; &#378;r&#243;d&#322;o i licencja pojawiaj&#261; si&#281; pod kart&#261;.</p>
 <figure><img src="afbeeldingen/pl/04_online_zoeken.jpg" alt="Szukaj zdj&#281;cia online"><figcaption>Okno &bdquo;Szukaj zdj&#281;cia online&rdquo; z polem na w&#322;asn&#261; fraz&#281; i znalezionymi zdj&#281;ciami wraz z &#378;r&oacute;d&#322;em i licencj&#261;.</figcaption></figure>
+
+<h3>Zestawy do pobrania</h3>
+<p>Zestawy, które możesz pobrać przyciskiem pobierania w programie, pojawiają się jako kafelek z przerywaną ramką w tej samej siatce co twoje organy. Zestaw, który już zainstalowałeś, nie jest już proponowany.</p>
 
 <h3 id="codm">Hauptwerk Custom Organ (CODM) i raport importu</h3>
 <p>Definicja Custom Organ (<code>.CustomOrgan_Hauptwerk_xml</code>) opisuje tylko budow&#281; organ&oacute;w: manua&#322;y, rejestry, po&#322;&#261;czenia i tremola. Pr&oacute;bki znajduj&#261; si&#281; w osobnych <b>pakietach pr&oacute;bek</b> w folderze <code>OrganInstallationPackages</code>, kt&oacute;ry musi le&#380;e&#263; obok definicji lub wy&#380;ej. JM-Orgue sprawdza to przed za&#322;adowaniem.</p>
@@ -81,6 +85,8 @@
   <li>Je&#347;li definicja jest zapisana w formie &bdquo;skr&oacute;conej&rdquo; (pola nazywaj&#261; si&#281; wtedy tylko <code>a</code>, <code>b</code>, <code>c</code>), raport informuje, czy znaczenie tych p&oacute;l uda&#322;o si&#281; bezpiecznie wywnioskowa&#263;.</li>
 </ul>
 <p>Organy CODM ze wszystkimi pr&oacute;bkami &#322;aduj&#261; si&#281; bez pyta&#324;. Je&#347;li definicja podaje dla rejestru, &#380;e wy&#380;sze sk&#322;adowe harmoniczne maj&#261; brzmie&#263; mocniej lub s&#322;abiej, JM-Orgue stosuje to przy &#322;adowaniu. Czy brzmi&#261; dok&#322;adnie jak w Hauptwerk, nie zosta&#322;o sprawdzone: potrzebny jest pe&#322;ny oryginalny zestaw i nagranie wzorcowe.</p>
+
+<p>Raport importu pokazuje też, wyłącznie informacyjnie, co zestaw sam zawiera: wartości szaf ekspresyjnych, ewentualne crescendo i nagrane przebiegi tremolo (te ostatnie od wersji 0.9.52). JM-Orgue jeszcze nie używa przebiegów: tremolo brzmi jak prosta modulacja.</p>
 
 <h3>Zestawy sampli w formacie WavPack lub FLAC</h3>
 <p>Wiele zestaw&oacute;w GrandOrgue jest spakowanych w WavPack; pliki nazywaj&#261; si&#281; wtedy cz&#281;sto po prostu <code>.wav</code>. JM-Orgue czyta je bezpo&#347;rednio, &#322;&#261;cznie z punktami p&#281;tli i wybrzmieniami, i &#322;aduje szybko, bo rozpakowuje tylko pocz&#261;tek ka&#380;dego nagrania. Dopiero gdy pliku naprawd&#281; nie da si&#281; odczyta&#263; (na przyk&#322;ad plik FLAC albo wielokana&#322;owy plik WavPack), pasek u g&oacute;ry podaje, ile plik&oacute;w pomini&#281;to.</p>
@@ -201,6 +207,10 @@
 <p>Na dole jest <b>intonacja piszcza&#322;ek</b>: wybierz po lewej rejestr i dostosuj g&#322;o&#347;no&#347;&#263; i str&oacute;j ka&#380;dej piszcza&#322;ki z osobna. Aby przesun&#261;&#263; ca&#322;y rejestr za jednym razem, ustaw suwaki na &#380;&#261;danej warto&#347;ci i naci&#347;nij <b>Zastosuj do wszystkich piszcza&#322;ek</b> &mdash; ka&#380;da piszcza&#322;ka tego rejestru otrzyma wtedy to samo ustawienie g&#322;o&#347;no&#347;ci i stroju.</p>
 <figure><img src="afbeeldingen/pl/10_klank_4.jpg" alt="Karta Brzmienie, intonacja piszcza&#322;ek"><figcaption>Brzmienie, na dole: intonacja piszcza&#322;ek. Wybierz po lewej rejestr, aby zaintonowa&#263; jego piszcza&#322;ki.</figcaption></figure>
 
+<h3>Zachowanie zestawu i niewczytywanie głosów</h3>
+<p>W zakładce <b>Brzmienie</b> jest blok <b>Zachowanie zestawu (te organy)</b> z polami wyboru, które decydują, czy JM-Orgue podąża za danymi samego zestawu: <b>Stosuj poziomy zestawu</b>, <b>Przejście przy zwolnieniu klawisza ustawione przez twórcę zestawu</b>, <b>Łączniki podążają za zestawem</b> i <b>Obcinaj ciche ogony</b> (z progiem w dB). Obowiązują dla każdych organów osobno: organy, których już używałeś, pozostają takie jak były, nowo zainstalowane organy podążają za zestawem. <b>Użyj wartości szafy ekspresyjnej z zestawu</b> jest zawsze domyślnie wyłączona; włączona oznacza, że szafa ekspresyjna zaczyna od tłumienia i filtra podanych przez sam zestaw, dla manuałów, których sam nie ustawiłeś. Po zmianie pola wyboru załaduj organy ponownie.</p>
+<p>Blok <b>Nie ładuj wybranych głosów</b> (od wersji 0.9.52) pomija przy ładowaniu głosy, których nie używasz, dla każdych organów osobno: oszczędza to pamięć i czas ładowania. Otwórz listę, odznacz głosy, których nie potrzebujesz (przy każdym głosie jest pamięć, jakiej potrzebuje z góry) i wybierz <b>Zastosuj i załaduj ponownie</b>. <b>Załaduj wszystko</b> zaznacza wszystko z powrotem. Wybór jest zapisywany razem z organami; organy bez wyboru ładują wszystko.</p>
+
 <h3>Crescendo</h3>
 <p><b>Crescendo generalne</b> wyci&#261;ga krok po kroku coraz wi&#281;cej rejestr&oacute;w, gdy poruszasz peda&#322;em crescenda. Sam decydujesz, kt&oacute;re rejestry wchodz&#261; w kt&oacute;ry stopie&#324;:</p>
 <ul>
@@ -210,6 +220,8 @@
   <li><b>Nauka pedalu</b> wi&#261;&#380;e twoje peda&#322; crescenda; na dole mo&#380;esz te&#380; r&#281;cznie wpisa&#263; kana&#322; i numer CC.</li>
 </ul>
 <figure><img src="afbeeldingen/pl/11_crescendo.jpg" alt="Karta Crescendo"><figcaption>Macierz crescenda: rejestry w wierszach, stopnie w kolumnach.</figcaption></figure>
+
+<p>Jeśli zestaw sam zawiera crescendo, obok <b>Auto-wypełnienie</b> pojawia się przycisk <b>Z zestawu</b>: kroki zestawu, ograniczone do głosów tych organów i rozłożone na wybraną liczbę kroków. Nic się nie zmienia, dopóki nie naciśniesz przycisku, a <b>Cofnij</b> przywraca kroki.</p>
 
 <h3>Kolejno&#347;&#263; rejestr&oacute;w</h3>
 <p>Tu okre&#347;lasz kolejno&#347;&#263; rejestr&oacute;w w ka&#380;dej klawiaturze. Przeci&#261;gnij rejestr za uchwyt, aby go przesun&#261;&#263;. Przy ka&#380;dym rejestrze widzisz stopaż i rodzin&#281; (kolor nazwy). Strza&#322;kami zmieniasz kolejno&#347;&#263; krok po kroku, a <b>Oryginalna</b> przywraca kolejno&#347;&#263; z pliku organ&oacute;w. Je&#347;li automatyczne rozpoznawanie koloruje pojedynczy rejestr inaczej, ni&#380; chcesz, wybierz dla niego sam <b>grup&#281; kolor&oacute;w</b>: <b>Pryncypa&#322;y</b>, <b>Alikwoty</b> lub <b>J&#281;zyczkowy</b>. To zmiana czysto wizualna, zapami&#281;tywana dla ka&#380;dych organ&oacute;w.</p>
@@ -254,6 +266,14 @@
 </ul>
 <div class="tip"><b>Wskaz&oacute;wka</b> Je&#347;li w du&#380;ych akordach s&#322;yszysz kr&oacute;tkie powt&oacute;rzenie ataku piszcza&#322;ki, wybierz d&#322;u&#380;szy bufor startowy. Je&#347;li tego nie s&#322;ycha&#263;, a masz ma&#322;o pami&#281;ci, dobrym wyborem jest 500 ms lub 1 s. Szybki dysk (SSD) umo&#380;liwia kr&oacute;tkie bufory.</div>
 <figure><img src="afbeeldingen/pl/30_audio_1.jpg" alt="Wyj&#347;cie audio, g&oacute;ra"><figcaption>Wyj&#347;cie audio, u g&oacute;ry: sterownik, urz&#261;dzenie, sygna&#322; testowy, polifonia, rdzenie obliczeniowe, sample stereo, bufor startowy i rozmiar bufora.</figcaption></figure>
+
+<h3>Więcej w Wyjście audio</h3>
+<ul>
+  <li><b>Niskie tony do subwoofera (zarządzanie basem)</b>: odbiera niskie częstotliwości z kanałów głównych i wysyła je zsumowane na jedno wyjście subwoofera (filtr Linkwitza-Rileya czwartego rzędu). Wybierasz <b>Wyjście subwoofera</b>, <b>Częstotliwość podziału (Hz)</b> (od 30 do 250 Hz) i <b>Poziom subwoofera (dB)</b>. Domyślnie wyłączone; wyłączone nic nie kosztuje.</li>
+  <li><b>Limit pamięci podąża za wolną pamięcią</b>: pułap dla w pełni załadowanych próbek podąża za pamięcią wolną przy ładowaniu organów.</li>
+  <li><b>Priorytet czasu rzeczywistego dla miksowania</b>: nadaje wysoki priorytet wątkom miksowania, aby dźwięk nie przerywał, gdy działa wiele innych rzeczy. Pod polem wyboru widać, co jest aktywne.</li>
+  <li>Przy każdej opcji <b>Bufor startowy na nagranie</b> od wersji 0.9.52 podana jest pamięć, jakiej załadowane organy potrzebują z góry, na przykład „500 ms &middot; 2,8 GB”.</li>
+</ul>
 <p><b>Profile wyj&#347;cia</b> zapami&#281;tuj&#261; dwa kompletne ustawienia wyj&#347;cia, na przyk&#322;ad g&#322;o&#347;niki przez ASIO i s&#322;uchawki przez WASAPI, wraz z wyborem kana&#322;&oacute;w dla ka&#380;dej klawiatury. Wybierz &#380;&#261;dane wyj&#347;cie, kliknij <b>Zapisz bie&#380;&#261;cy wyb&oacute;r</b> przy G&#322;o&#347;nikach lub S&#322;uchawkach, a potem prze&#322;&#261;czaj przyciskiem <b>G&#322;o&#347;niki</b> w prawym g&oacute;rnym rogu lub nauczonym przyciskiem MIDI. Aktywny profil jest zaznaczony.</p>
 <p><b>Korekcja dla s&#322;uchawek lub g&#322;o&#347;nik&oacute;w</b> stosuje korekcj&#281; barwy do samego wyj&#347;cia (a nie do organ&oacute;w): wybierz, dla kt&oacute;rego profilu obowi&#261;zuje, w&#322;&#261;cz j&#261; i wybierz preset z listy AutoEq albo zaimportuj lub wyeksportuj w&#322;asn&#261; korekcj&#281;.</p>
 <p>Ni&#380;ej s&#261; opcje automatycznego uruchamiania programu z Windows, automatycznego &#322;adowania ostatnio otwartych organ&oacute;w, zamykania ca&#322;ego oprogramowania krzy&#380;ykiem na dodatkowym ekranie oraz przywracania ostatniej rejestracji. <b>Automatyczne archiwum MIDI</b> zapisuje w tle wszystko, co grasz, jako plik .mid na sesj&#281;: zaczyna od pierwszej nuty i ko&#324;czy po ciszy.</p>

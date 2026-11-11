@@ -11,10 +11,10 @@
 
 <header class="titel">
   <h1>JM-Orgue</h1>
-  <div class="onder">Manuel de la version 0.9.49 &middot; novembre 2026</div>
+  <div class="onder">Manuel de la version 0.9.51 &middot; novembre 2026</div>
 </header>
 
-<p>JM-Orgue est un orgue &agrave; tuyaux virtuel pour Windows, macOS et Linux. Le programme joue directement les jeux d&rsquo;&eacute;chantillons Hauptwerk et GrandOrgue, y compris les grands jeux surround et les d&eacute;finitions Hauptwerk Custom Organ, et se joue avec un clavier MIDI, une console d&rsquo;orgue ou la souris. Il peut noter aussit&ocirc;t ce que vous jouez, en notation classique ou en klavar, et l&rsquo;imprimer en PDF. Ce manuel parcourt le programme&nbsp;; les captures d&rsquo;&eacute;cran proviennent de la version 0.9.16 et de versions ult&eacute;rieures, le texte d&eacute;crit la version 0.9.49.</p>
+<p>JM-Orgue est un orgue &agrave; tuyaux virtuel pour Windows, macOS et Linux. Le programme joue directement les jeux d&rsquo;&eacute;chantillons Hauptwerk et GrandOrgue, y compris les grands jeux surround et les d&eacute;finitions Hauptwerk Custom Organ, et se joue avec un clavier MIDI, une console d&rsquo;orgue ou la souris. Il peut noter aussit&ocirc;t ce que vous jouez, en notation classique ou en klavar, et l&rsquo;imprimer en PDF. Ce manuel parcourt le programme&nbsp;; les captures d&rsquo;&eacute;cran proviennent de la version 0.9.16 et de versions ult&eacute;rieures, le texte d&eacute;crit la version 0.9.51.</p>
 <p class="klein">&copy; Martijn van der Kolk. Les captures d&rsquo;&eacute;cran ont &eacute;t&eacute; r&eacute;alis&eacute;es avec des orgues de d&eacute;monstration et des jeux de test personnels&nbsp;; les adresses r&eacute;seau, les jetons d&rsquo;acc&egrave;s et les dossiers d&rsquo;utilisateur ont &eacute;t&eacute; rendus illisibles.</p>
 
 <nav class="inhoud">
@@ -58,6 +58,7 @@
 <h3>Ajouter un orgue</h3>
 <ul>
   <li><b>.organ</b>&nbsp;: choisissez une d&eacute;finition d&rsquo;orgue (GrandOrgue <code>.organ</code> ou d&eacute;finition Hauptwerk). Vous choisissez le fichier de d&eacute;finition, et non le dossier d&rsquo;&eacute;chantillons&nbsp;: seule la d&eacute;finition conna&icirc;t les jeux, accouplements, tr&eacute;mulants et &eacute;ventuelles positions d&rsquo;enregistrement suppl&eacute;mentaires.</li>
+  <li><b>.orgue</b> et <b>.rar</b> : choisissez un paquet GrandOrgue (<code>.orgue</code>) ou une archive RAR (<code>.rar</code>), y compris une archive en plusieurs parties : choisissez l'une des parties et gardez toutes les parties dans le même dossier. JM-Orgue la décompresse une seule fois dans son propre dossier <code>pakketten</code>, affiche la progression dans la barre de chargement et charge l'orgue ; l'ouvrir une deuxième fois ne coûte rien. Si une partie manque, si l'archive est protégée par un mot de passe ou endommagée, un message clair s'affiche. Le dossier décompressé occupe de l'espace disque : vous pouvez supprimer le dossier <code>pakketten</code> dans le dossier de données du programme pour en libérer.</li>
   <li><b>JM-Rec import</b>&nbsp;: importe un jeu d&rsquo;&eacute;chantillons cr&eacute;&eacute; avec JM-Rec.</li>
   <li><b>Exporter</b>&nbsp;: transforme un dossier d&rsquo;&eacute;chantillons en d&eacute;finition d&rsquo;orgue (<code>.organ</code>), que vous pouvez ensuite charger avec le bouton <b>.organ</b>.</li>
 </ul>
@@ -66,6 +67,9 @@
 <p>Lorsque vous pointez une carte, trois boutons apparaissent en haut &agrave; droite de la photo&nbsp;: <b>chercher une photo en ligne</b> (globe), <b>choisir soi-m&ecirc;me une image</b> (appareil photo) et <b>retirer de la biblioth&egrave;que</b> (croix). Retirer ne fait que supprimer la carte de la biblioth&egrave;que&nbsp;; les fichiers restent sur votre disque. Si vous maintenez une carte enfonc&eacute;e 3 secondes, le programme cherche de nouveau la photo.</p>
 <p>La <b>recherche en ligne</b> affiche quelques photos librement utilisables de Wikimedia Commons. En haut de la fen&ecirc;tre se trouvent les champs <b>&Eacute;glise</b>, <b>Lieu</b> et <b>Facteur</b>, pr&eacute;remplis d&rsquo;apr&egrave;s la d&eacute;finition d&rsquo;orgue et les informations fournies&nbsp;; corrigez-les s&rsquo;ils ne conviennent pas et choisissez <b>Rechercher</b>. En dessous reste un champ libre pour un terme de recherche personnel. Cliquez sur une photo pour la reprendre&nbsp;; la source et la licence s&rsquo;affichent sous la carte.</p>
 <figure><img src="afbeeldingen/fr/04_online_zoeken.jpg" alt="Chercher une photo en ligne"><figcaption>La fen&ecirc;tre &laquo;&nbsp;Chercher une photo en ligne&nbsp;&raquo; avec le champ pour un terme de recherche personnel et les photos trouv&eacute;es, avec leur source et leur licence.</figcaption></figure>
+
+<h3>Sets téléchargeables</h3>
+<p>Les sets que vous pouvez récupérer avec le bouton de téléchargement du programme apparaissent sous forme de tuile à bordure pointillée dans la même grille que vos orgues. Un set déjà installé n'est plus proposé.</p>
 
 <h3 id="codm">Hauptwerk Custom Organ (CODM) et le rapport d&rsquo;importation</h3>
 <p>Une d&eacute;finition Custom Organ (<code>.CustomOrgan_Hauptwerk_xml</code>) ne d&eacute;crit que la structure de l&rsquo;orgue : claviers, jeux, accouplements et tremblants. Les &eacute;chantillons se trouvent dans des <b>paquets d&rsquo;&eacute;chantillons</b> s&eacute;par&eacute;s, dans le dossier <code>OrganInstallationPackages</code>, qui doit se trouver &agrave; c&ocirc;t&eacute; de la d&eacute;finition ou au-dessus. JM-Orgue le v&eacute;rifie avant le chargement.</p>
@@ -81,6 +85,8 @@
   <li>Si la d&eacute;finition est &eacute;crite sous forme &laquo;&nbsp;abr&eacute;g&eacute;e&nbsp;&raquo; (les champs s&rsquo;appellent alors seulement <code>a</code>, <code>b</code>, <code>c</code>), le rapport indique si la signification de ces champs a pu &ecirc;tre d&eacute;duite en toute s&eacute;curit&eacute;.</li>
 </ul>
 <p>Un orgue CODM avec tous ses &eacute;chantillons se charge sans question. Si la d&eacute;finition indique, pour un jeu, que les harmoniques sup&eacute;rieures doivent sonner plus fort ou plus doucement, JM-Orgue l&rsquo;applique au chargement. Qu&rsquo;il sonne exactement comme dans Hauptwerk n&rsquo;a pas &eacute;t&eacute; v&eacute;rifi&eacute; : cela demande un jeu d&rsquo;&eacute;chantillons original complet et un enregistrement de r&eacute;f&eacute;rence.</p>
+
+<p>Le rapport d'importation montre aussi, à titre d'information seulement, ce que le set apporte lui-même : les valeurs des boîtes expressives, un éventuel crescendo et les formes d'onde de trémolo enregistrées (ces dernières à partir de la version 0.9.52). JM-Orgue n'utilise pas encore les formes d'onde : le trémolo sonne comme une modulation simple.</p>
 
 <h3>Jeux d&rsquo;&eacute;chantillons en WavPack ou FLAC</h3>
 <p>Beaucoup de jeux GrandOrgue sont compress&eacute;s en WavPack&nbsp;; les fichiers s&rsquo;appellent alors souvent simplement <code>.wav</code>. JM-Orgue les lit directement, points de boucle et releases compris, et les charge vite puisque seul le d&eacute;but de chaque enregistrement est d&eacute;compress&eacute;. Ce n&rsquo;est que lorsqu&rsquo;un fichier est vraiment illisible (par exemple un fichier FLAC ou un WavPack multicanal) qu&rsquo;une barre en haut indique combien de fichiers ont &eacute;t&eacute; ignor&eacute;s.</p>
@@ -201,6 +207,10 @@
 <p>En bas se trouve l&rsquo;<b>harmonisation des tuyaux</b>&nbsp;: choisissez un jeu &agrave; gauche et r&eacute;glez le volume et l&rsquo;accord de chaque tuyau individuellement. Pour d&eacute;caler le jeu entier d&rsquo;un seul coup, mettez les curseurs sur la valeur souhait&eacute;e et appuyez sur <b>Appliquer &agrave; tous les tuyaux</b> &mdash; chaque tuyau du jeu re&ccedil;oit alors le m&ecirc;me r&eacute;glage de volume et d&rsquo;accord.</p>
 <figure><img src="afbeeldingen/fr/10_klank_4.jpg" alt="Onglet Son, harmonisation des tuyaux"><figcaption>Son, en bas&nbsp;: l&rsquo;harmonisation des tuyaux. Choisissez un jeu &agrave; gauche pour harmoniser ses tuyaux.</figcaption></figure>
 
+<h3>Comportement du set et jeux non chargés</h3>
+<p>Sous <b>Son</b> se trouve le bloc <b>Comportement du set (cet orgue)</b> avec des cases qui déterminent si JM-Orgue suit les données du set lui-même : <b>Appliquer les niveaux du jeu</b>, <b>Fondu de relâchement du créateur du set</b>, <b>Les accouplements suivent le set</b> et <b>Couper les queues silencieuses</b> (avec un seuil en dB). Elles valent par orgue : un orgue que vous utilisiez déjà reste comme il était, un orgue nouvellement installé suit le set. <b>Utiliser les valeurs de boîte expressive du set</b> est toujours désactivé par défaut ; activé, la boîte expressive commence avec l'atténuation et le filtre que le set indique lui-même, pour les claviers que vous n'avez pas réglés vous-même. Après avoir changé une case, rechargez l'orgue.</p>
+<p>Le bloc <b>Ne pas charger certains jeux</b> (à partir de la version 0.9.52) laisse de côté au chargement les jeux que vous n'utilisez pas, par orgue : cela économise de la mémoire et du temps de chargement. Ouvrez la liste, décochez les jeux dont vous n'avez pas besoin (chaque jeu indique la mémoire qu'il demande au départ) et choisissez <b>Appliquer et recharger</b>. <b>Tout charger</b> recoche tout. Le choix est enregistré avec l'orgue ; un orgue sans choix charge tout.</p>
+
 <h3>Crescendo</h3>
 <p>Le <b>crescendo g&eacute;n&eacute;ral</b> tire pas &agrave; pas davantage de jeux lorsque vous d&eacute;placez une p&eacute;dale de crescendo. Vous d&eacute;cidez vous-m&ecirc;me quels jeux entrent dans quel cran&nbsp;:</p>
 <ul>
@@ -210,6 +220,8 @@
   <li><b>Apprendre p&eacute;dale</b> associe votre p&eacute;dale de crescendo&nbsp;; en bas, vous pouvez aussi saisir &agrave; la main le canal et le num&eacute;ro de CC.</li>
 </ul>
 <figure><img src="afbeeldingen/fr/11_crescendo.jpg" alt="Onglet Crescendo"><figcaption>La matrice du crescendo&nbsp;: les jeux en lignes, les crans en colonnes.</figcaption></figure>
+
+<p>Si le set apporte lui-même un crescendo, le bouton <b>Du set</b> apparaît à côté de <b>Remplissage auto</b> : les crans du set, limités aux jeux de cet orgue et répartis sur le nombre de crans choisi. Rien ne change tant que vous n'appuyez pas sur le bouton, et <b>Annuler</b> rétablit les crans.</p>
 
 <h3>Ordre des jeux</h3>
 <p>Vous d&eacute;terminez ici l&rsquo;ordre des jeux dans chaque clavier. Faites glisser un jeu par sa poign&eacute;e pour le d&eacute;placer. Pour chaque jeu, vous voyez la hauteur et la famille (la couleur du nom). Avec les fl&egrave;ches, vous modifiez l&rsquo;ordre pas &agrave; pas, et <b>Origine</b> r&eacute;tablit l&rsquo;ordre du fichier d&rsquo;orgue. Si le classement automatique colore un jeu autrement que vous ne le souhaitez, choisissez vous-m&ecirc;me son <b>groupe de couleur</b>&nbsp;: <b>Fond</b>, <b>Mutation</b> ou <b>Anche</b>. C&rsquo;est purement visuel et m&eacute;moris&eacute; par orgue.</p>
@@ -254,6 +266,14 @@
 </ul>
 <div class="tip"><b>Conseil</b> Si vous entendez une courte r&eacute;p&eacute;tition de l&rsquo;attaque d&rsquo;un tuyau dans les grands accords, choisissez un tampon de d&eacute;part plus long. Si ce n&rsquo;est pas le cas mais que vous manquez de m&eacute;moire, 500 ms ou 1 s est un bon choix. Un disque rapide (SSD) permet des tampons courts.</div>
 <figure><img src="afbeeldingen/fr/30_audio_1.jpg" alt="Sortie audio, haut"><figcaption>Sortie audio, en haut&nbsp;: pilote, appareil, signal de test, polyphonie, c&oelig;urs de calcul, &eacute;chantillons st&eacute;r&eacute;o, tampon de d&eacute;part et taille de buffer.</figcaption></figure>
+
+<h3>Plus sous Sortie Audio</h3>
+<ul>
+  <li><b>Graves vers un caisson de basses (gestion des basses)</b> : retire les graves des canaux principaux et les envoie, additionnés, vers une sortie de caisson de basses (un filtre Linkwitz-Riley du quatrième ordre). Vous choisissez la <b>Sortie du caisson de basses</b>, la <b>Fréquence de coupure (Hz)</b> (de 30 à 250 Hz) et le <b>Niveau du caisson (dB)</b>. Désactivé par défaut ; désactivé ne coûte rien.</li>
+  <li><b>La limite de mémoire suit la mémoire libre</b> : le plafond des échantillons entièrement chargés suit la mémoire libre au moment du chargement d'un orgue.</li>
+  <li><b>Priorité temps réel pour le mixage</b> : donne une priorité élevée aux travailleurs de mixage afin que l'audio ne saccade pas quand beaucoup d'autres choses tournent. Sous la case figure ce qui est actif.</li>
+  <li>Derrière chaque choix de <b>Tampon de départ par enregistrement</b> figure, à partir de la version 0.9.52, la mémoire que l'orgue chargé demande alors au départ, par exemple « 500 ms &middot; 2,8 Go ».</li>
+</ul>
 <p>Les <b>profils de sortie</b> m&eacute;morisent deux r&eacute;glages de sortie complets, par exemple des enceintes via ASIO et un casque via WASAPI, y compris le choix des canaux par clavier. Choisissez la sortie voulue, cliquez sur <b>Enregistrer la s&eacute;lection actuelle</b> pour Enceintes ou Casque, puis basculez avec le bouton <b>Enceintes</b> en haut &agrave; droite ou avec un bouton MIDI appris. Le profil actif est marqu&eacute;.</p>
 <p>La <b>correction pour casque ou enceintes</b> applique une correction de timbre &agrave; la sortie elle-m&ecirc;me (et non &agrave; l&rsquo;orgue)&nbsp;: choisissez pour quel profil elle vaut, activez-la et choisissez un pr&eacute;r&eacute;glage dans la liste AutoEq, ou importez ou exportez une correction personnelle.</p>
 <p>En dessous se trouvent les options pour d&eacute;marrer automatiquement le programme avec Windows, charger automatiquement le dernier orgue ouvert, laisser la croix d&rsquo;un &eacute;cran suppl&eacute;mentaire fermer tout le logiciel et restaurer la derni&egrave;re registration. L&rsquo;<b>archive MIDI automatique</b> enregistre en arri&egrave;re-plan tout ce que vous jouez, sous forme d&rsquo;un fichier .mid par session&nbsp;: elle d&eacute;marre &agrave; la premi&egrave;re note et s&rsquo;arr&ecirc;te apr&egrave;s un silence.</p>

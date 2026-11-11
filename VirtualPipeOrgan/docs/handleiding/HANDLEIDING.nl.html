@@ -11,10 +11,10 @@
 
 <header class="titel">
   <h1>JM-Orgue</h1>
-  <div class="onder">Handleiding voor versie 0.9.49 &middot; november 2026</div>
+  <div class="onder">Handleiding voor versie 0.9.51 &middot; november 2026</div>
 </header>
 
-<p>JM-Orgue is een virtueel pijporgel voor Windows, macOS en Linux. Het programma speelt Hauptwerk- en GrandOrgue-samplesets rechtstreeks af, ook grote surround-sets en Hauptwerk Custom Organ-definities, en je bespeelt het met een MIDI-klavier, een orgelconsole of de muis. Wat je speelt kan het meteen noteren, in gewoon notenschrift of in klavar, en afdrukken als PDF. Deze handleiding loopt het programma door; de schermafbeeldingen komen uit versie 0.9.16 en latere versies, de tekst beschrijft versie 0.9.49.</p>
+<p>JM-Orgue is een virtueel pijporgel voor Windows, macOS en Linux. Het programma speelt Hauptwerk- en GrandOrgue-samplesets rechtstreeks af, ook grote surround-sets en Hauptwerk Custom Organ-definities, en je bespeelt het met een MIDI-klavier, een orgelconsole of de muis. Wat je speelt kan het meteen noteren, in gewoon notenschrift of in klavar, en afdrukken als PDF. Deze handleiding loopt het programma door; de schermafbeeldingen komen uit versie 0.9.16 en latere versies, de tekst beschrijft versie 0.9.51.</p>
 
 <p class="klein">&copy; Martijn van der Kolk. De schermafbeeldingen zijn gemaakt met demo-orgels en eigen testsets; netwerkadressen, toegangstoken en gebruikersmappen zijn onleesbaar gemaakt.</p>
 
@@ -60,6 +60,7 @@
 <h3>Een orgel toevoegen</h3>
 <ul>
   <li><b>.organ</b>: kies een orgeldefinitie (GrandOrgue <code>.organ</code> of Hauptwerk-definitie). Je kiest het definitiebestand, niet de losse map met samples: alleen de definitie kent registers, koppels, tremulanten en eventuele extra opnameposities.</li>
+  <li><b>.orgue</b> en <b>.rar</b>: kies een GrandOrgue-pakket (<code>.orgue</code>) of een RAR-archief (<code>.rar</code>), ook een meerdelig archief: kies een van de delen en zet alle delen in dezelfde map. JM-Orgue pakt het één keer uit in zijn eigen map <code>pakketten</code>, toont de voortgang in de laadbalk en laadt het orgel; een tweede keer openen kost niets. Ontbreekt een deel, is het archief met een wachtwoord beveiligd of is het kapot, dan volgt een duidelijke melding. De uitgepakte map neemt schijfruimte in: je kunt de map <code>pakketten</code> in de gegevensmap van het programma verwijderen om ruimte vrij te maken.</li>
   <li><b>JM-Rec import</b>: neem een sampleset in die met JM-Rec is gemaakt.</li>
   <li><b>Exporteer</b>: maakt van een map met samples een orgeldefinitie (<code>.organ</code>), die je daarna met de knop <b>.organ</b> kunt inladen.</li>
 </ul>
@@ -68,6 +69,9 @@
 <p>Wijs je een kaart aan, dan verschijnen rechtsboven in de foto drie knoppen: <b>online een foto zoeken</b> (wereldbol), <b>zelf een foto kiezen</b> (camera) en <b>uit de bibliotheek verwijderen</b> (kruisje). Verwijderen haalt alleen de kaart uit de bibliotheek weg; de bestanden op je schijf blijven staan. Houd je een kaart 3 seconden ingedrukt, dan zoekt het programma de foto opnieuw.</p>
 <p>Bij <b>online zoeken</b> toont het programma een paar vrij te gebruiken foto's van Wikimedia Commons. Bovenin het venster staan de velden <b>Kerk</b>, <b>Plaats</b> en <b>Bouwer</b>, vooraf ingevuld uit de orgeldefinitie en de meegeleverde informatie; pas ze aan als ze niet kloppen en kies <b>Zoek</b>. Daaronder blijft een vrij zoekveld voor een eigen zoekterm. Klik een foto aan om hem over te nemen; de bronvermelding en licentie komen onder de kaart.</p>
 <figure><img src="afbeeldingen/nl/04_online_zoeken.jpg" alt="Online een foto zoeken"><figcaption>Het venster &ldquo;Online een foto zoeken&rdquo; met het zoekveld voor een eigen zoekterm en de gevonden foto's met hun bron en licentie.</figcaption></figure>
+
+<h3>Downloadbare sets</h3>
+<p>Sets die je met de downloadknop in het programma kunt ophalen staan als tegel met een gestippelde rand in hetzelfde raster als je orgels. Een set die je al hebt geïnstalleerd, wordt niet meer aangeboden.</p>
 
 <h3 id="codm">Hauptwerk Custom Organ (CODM) en het importverslag</h3>
 <p>Een Custom Organ-definitie (<code>.CustomOrgan_Hauptwerk_xml</code>) bevat alleen de opbouw van het orgel: klavieren, registers, koppels en tremulanten. De samples staan in aparte <b>samplepakketten</b> in de map <code>OrganInstallationPackages</code>, die naast of boven de definitie moet staan. JM-Orgue controleert dat v&oacute;&oacute;r het laden.</p>
@@ -83,6 +87,8 @@
   <li>Is de definitie in de &ldquo;ingekorte&rdquo; vorm geschreven (velden heten dan alleen <code>a</code>, <code>b</code>, <code>c</code>), dan meldt het verslag of de betekenis van die velden veilig kon worden afgeleid.</li>
 </ul>
 <p>Een CODM-orgel met alle samples laadt zonder vraag. Geeft de definitie per register op dat de hogere boventonen sterker of zachter moeten klinken, dan past JM-Orgue dat bij het laden toe. Of het precies zo klinkt als in Hauptwerk is niet gecontroleerd: dat vraagt een volledige originele set en een referentieopname.</p>
+
+<p>Het importverslag toont ook, alleen als informatie, wat de set zelf meebrengt: de waarden van de zwelkasten, een eventuele crescendo en de opgenomen tremulant-golfvormen (die laatste vanaf versie 0.9.52). JM-Orgue gebruikt de golfvormen nog niet: de tremulant klinkt als eenvoudige modulatie.</p>
 
 <h3>Samplesets met WavPack of FLAC</h3>
 <p>Veel GrandOrgue-sets zijn met WavPack verpakt; de bestanden heten dan vaak gewoon <code>.wav</code>. JM-Orgue leest die rechtstreeks, inclusief looppunten en releases, en laadt ze snel doordat alleen het begin van elke opname wordt uitgepakt. Alleen als een bestand echt niet te lezen is (bijvoorbeeld een FLAC-bestand of een meerkanaals WavPack-bestand), meldt een balk bovenin hoeveel bestanden zijn overgeslagen.</p>
@@ -203,6 +209,10 @@
 <p>Onderaan staat de <b>pijp-voicing</b>: kies links een register en pas het volume en de stemming van elke afzonderlijke pijp aan. Wil je het hele register in &eacute;&eacute;n keer schuiven? Zet dan de schuiven op de gewenste waarde en druk op <b>Pas toe op alle pijpen</b> &mdash; iedere pijp van dat register krijgt dan dezelfde volume- en stemmingsaanpassing.</p>
 <figure><img src="afbeeldingen/nl/10_klank_4.jpg" alt="Tabblad Klank, pijp-voicing"><figcaption>Klank, onderaan: de pijp-voicing. Kies links een register om zijn pijpen te voicen.</figcaption></figure>
 
+<h3>Gedrag van de set en registers niet laden</h3>
+<p>Onder <b>Klank</b> staat het blok <b>Gedrag van de set (dit orgel)</b> met vinkjes die bepalen of JM-Orgue de gegevens van de set zelf volgt: <b>Niveaus van de set toepassen</b>, <b>Overgangen van de maker bij het loslaten</b>, <b>Koppels volgen de set</b> en <b>Stille staarten afkappen</b> (met een drempel in dB). Ze gelden per orgel: een orgel dat je al gebruikte blijft zoals het was, een nieuw geïnstalleerd orgel volgt de set. <b>Zwelkast van de set gebruiken</b> staat altijd standaard uit; aan betekent dat de zwelkast begint met de demping en het filter die de set zelf opgeeft, voor werken waarvoor je zelf niets instelde. Na het wisselen van een vinkje laad je het orgel opnieuw.</p>
+<p>Het blok <b>Registers niet laden</b> (vanaf versie 0.9.52) laat registers die je niet gebruikt bij het laden weg, per orgel: dat scheelt geheugen en laadtijd. Open de lijst, haal het vinkje weg bij de registers die je niet nodig hebt (per register staat het geheugen dat het vooraf vraagt) en kies <b>Toepassen en herladen</b>. <b>Alles laden</b> zet alle vinkjes terug. De keuze wordt bij het orgel bewaard; een orgel zonder keuze laadt alles.</p>
+
 <h3>Crescendo</h3>
 <p>De <b>generaal-crescendo</b> trekt bij het bewegen van een crescendotrede stap voor stap meer registers. Je bepaalt zelf welke registers in welke trede komen:</p>
 <ul>
@@ -212,6 +222,8 @@
   <li><b>Leer pedaal</b> koppelt je crescendotrede; onderaan kun je kanaal en CC-nummer ook met de hand invullen.</li>
 </ul>
 <figure><img src="afbeeldingen/nl/11_crescendo.jpg" alt="Tabblad Crescendo"><figcaption>De crescendo-matrix: registers in de rijen, treden in de kolommen.</figcaption></figure>
+
+<p>Brengt de set zelf een crescendo mee, dan staat naast <b>Auto-fill</b> de knop <b>Van de set</b>: de trappen van de set, beperkt tot de registers die dit orgel heeft en verdeeld over het gekozen aantal stappen. Er verandert niets zonder dat je op de knop drukt, en <b>Ongedaan maken</b> zet de stappen terug.</p>
 
 <h3>Registersortering</h3>
 <p>Hier bepaal je de volgorde van de registers in elk werk. Sleep een register aan het handvat om hem te verplaatsen. Per register zie je de voetmaat en de familie (de kleur van de naam). Met de pijltjes verander je de volgorde stap voor stap, en <b>Origineel</b> herstelt de volgorde uit het orgelbestand. Kleurt de automatische herkenning een enkel register anders dan je wilt, dan kies je per register zelf de <b>kleurgroep</b>: <b>Grondstem</b>, <b>Vulstem</b> of <b>Tongwerk</b>. Dat is puur visueel en wordt per orgel bewaard.</p>
@@ -256,6 +268,14 @@
 </ul>
 <div class="tip"><b>Tip</b> Hoor je bij grote akkoorden een korte herhaling van de aanzet van een pijp, kies dan een langere startbuffer. Hoor je dat niet, maar heb je weinig geheugen, dan is 500 ms of 1 s een goede keuze. Een snelle schijf (SSD) maakt korte buffers mogelijk.</div>
 <figure><img src="afbeeldingen/nl/30_audio_1.jpg" alt="Audio uitvoer, bovenaan"><figcaption>Audio uitvoer, bovenaan: driver, apparaat, testsignaal, polyfonie, rekenkernen, stereo-samples, startbuffer en buffergrootte.</figcaption></figure>
+
+<h3>Meer onder Audio Uitvoer</h3>
+<ul>
+  <li><b>Laag naar een subwoofer (basmanagement)</b>: haalt het laag uit de hoofdkanalen en stuurt het, opgeteld, naar één subwooferuitgang (een vierde-orde Linkwitz-Riley-filter). Je kiest de <b>Subwoofer-uitgang</b>, de <b>Kruisfrequentie (Hz)</b> (30 tot 250 Hz) en het <b>Niveau van de sub (dB)</b>. Standaard uit; uit kost niets.</li>
+  <li><b>Geheugenplafond volgt het vrije geheugen</b>: het plafond voor volledig geladen samples volgt wat er bij het laden van een orgel vrij is in het geheugen.</li>
+  <li><b>Realtime-prioriteit voor het mengen</b>: geeft de mengwerkers een hoge prioriteit, zodat de audio niet hapert als er veel anders draait. Onder het vinkje staat wat er actief is.</li>
+  <li>Achter elke keuze van <b>Startbuffer per opname</b> staat vanaf versie 0.9.52 het geheugen dat het geladen orgel dan vooraf vraagt, bijvoorbeeld &ldquo;500 ms &middot; 2,8 GB&rdquo;.</li>
+</ul>
 <p><b>Uitvoerprofielen</b> bewaren twee complete uitvoer-instellingen, bijvoorbeeld luidsprekers via ASIO en een hoofdtelefoon via WASAPI, inclusief de kanaalkeuze per klavier. Kies de gewenste uitgang, klik <b>Huidige selectie opslaan</b> bij Speakers of Hoofdtelefoon, en wissel daarna met de knop <b>Speakers</b> rechtsboven of met een ingeleerde MIDI-knop. Het profiel dat nu actief is, is gemarkeerd.</p>
 <p><b>Correctie voor hoofdtelefoon of luidsprekers</b> past een toonregeling toe op de uitgang zelf (niet op het orgel): kies voor welk profiel hij geldt, schakel hem in en kies een preset uit de AutoEq-lijst, of importeer of exporteer een eigen correctie.</p>
 <p>Daaronder staan de opties om het programma automatisch met Windows te starten, het laatst geopende orgel automatisch te laden, het kruisje op een extra scherm de hele software te laten afsluiten en de laatste registratie te herstellen. Het <b>automatische MIDI-archief</b> legt op de achtergrond alles vast wat je speelt, als .mid-bestand per sessie: het start bij de eerste noot en stopt na een stilte.</p>

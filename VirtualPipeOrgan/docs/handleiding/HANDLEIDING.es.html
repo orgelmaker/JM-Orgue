@@ -11,10 +11,10 @@
 
 <header class="titel">
   <h1>JM-Orgue</h1>
-  <div class="onder">Manual para la versión 0.9.49 &middot; noviembre de 2026</div>
+  <div class="onder">Manual para la versión 0.9.51 &middot; noviembre de 2026</div>
 </header>
 
-<p>JM-Orgue es un órgano de tubos virtual para Windows, macOS y Linux. Reproduce directamente los sets de muestras de Hauptwerk y GrandOrgue, incluidos los grandes sets surround y las definiciones Hauptwerk Custom Organ, y se toca con un teclado MIDI, una consola o el ratón. Lo que tocas puede anotarlo al instante, en notación de pentagrama o en klavar, e imprimirlo como PDF. Este manual recorre el programa; las capturas de pantalla proceden de la versión 0.9.16 y posteriores, el texto describe la versión 0.9.49.</p>
+<p>JM-Orgue es un órgano de tubos virtual para Windows, macOS y Linux. Reproduce directamente los sets de muestras de Hauptwerk y GrandOrgue, incluidos los grandes sets surround y las definiciones Hauptwerk Custom Organ, y se toca con un teclado MIDI, una consola o el ratón. Lo que tocas puede anotarlo al instante, en notación de pentagrama o en klavar, e imprimirlo como PDF. Este manual recorre el programa; las capturas de pantalla proceden de la versión 0.9.16 y posteriores, el texto describe la versión 0.9.51.</p>
 <p class="klein">&copy; Martijn van der Kolk. Las capturas se han hecho con órganos de demostración y sets de prueba propios; las direcciones de red, los tokens de acceso y las carpetas de usuario se han vuelto ilegibles.</p>
 
 <nav class="inhoud">
@@ -58,6 +58,7 @@
 <h3>Añadir órganos</h3>
 <ul>
   <li><b>.organ</b>: elige la definición del órgano (GrandOrgue <code>.organ</code> o definición de Hauptwerk). Se elige el archivo de definición, no solo la carpeta de muestras: solo la definición conoce los registros, los acoplamientos, los trémolos y las posibles posiciones de grabación adicionales.</li>
+  <li><b>.orgue</b> y <b>.rar</b>: elige un paquete de GrandOrgue (<code>.orgue</code>) o un archivo RAR (<code>.rar</code>), también uno de varias partes: elige una de las partes y mantén todas las partes en la misma carpeta. JM-Orgue lo descomprime una sola vez en su propia carpeta <code>pakketten</code>, muestra el avance en la barra de carga y carga el órgano; abrirlo una segunda vez no cuesta nada. Si falta una parte, el archivo tiene contraseña o está dañado, aparece un mensaje claro. La carpeta descomprimida ocupa espacio en disco: puedes borrar la carpeta <code>pakketten</code> en la carpeta de datos del programa para liberarlo.</li>
   <li><b>JM-Rec import</b>: importa un set de muestras creado con JM-Rec.</li>
   <li><b>Exportar</b>: crea a partir de una carpeta de muestras una definición de órgano (<code>.organ</code>), que después cargas con el botón <b>.organ</b>.</li>
 </ul>
@@ -66,6 +67,9 @@
 <p>Al pasar el ratón por una tarjeta aparecen tres botones en la esquina superior derecha de la foto: <b>buscar la foto en línea</b> (globo), <b>elegir la foto tú mismo</b> (cámara) y <b>quitar de la biblioteca</b> (cruz). Quitar solo retira la tarjeta de la biblioteca; los archivos del disco permanecen. Si mantienes pulsada una tarjeta durante 3 segundos, el programa vuelve a buscar la foto.</p>
 <p>La <b>búsqueda en línea</b> muestra algunas fotos de libre uso de Wikimedia Commons. En la parte superior de la ventana están los campos <b>Iglesia</b>, <b>Lugar</b> y <b>Organero</b>, rellenados de antemano con la definición del órgano y la información que la acompaña; corrígelos si no son exactos y elige <b>Buscar</b>. Debajo queda un campo libre para un término propio. Haz clic en una foto para adoptarla; la fuente y la licencia aparecen bajo la tarjeta.</p>
 <figure><img src="afbeeldingen/es/04_online_zoeken.jpg" alt="Buscar la foto en línea"><figcaption>La ventana «Buscar la foto en línea» con el campo para un término propio y las fotos encontradas con su fuente y licencia.</figcaption></figure>
+
+<h3>Sets descargables</h3>
+<p>Los sets que puedes obtener con el botón de descarga del programa aparecen como una baldosa con borde punteado en la misma cuadrícula que tus órganos. Un set que ya has instalado deja de ofrecerse.</p>
 
 <h3 id="codm">Hauptwerk Custom Organ (CODM) y el informe de importaci&oacute;n</h3>
 <p>Una definici&oacute;n Custom Organ (<code>.CustomOrgan_Hauptwerk_xml</code>) solo describe la estructura del &oacute;rgano: teclados, registros, acoplamientos y tr&eacute;molos. Las muestras est&aacute;n en <b>paquetes de muestras</b> aparte, en la carpeta <code>OrganInstallationPackages</code>, que debe estar junto a la definici&oacute;n o por encima. JM-Orgue lo comprueba antes de cargar.</p>
@@ -81,6 +85,8 @@
   <li>Si la definici&oacute;n est&aacute; escrita en la forma &laquo;abreviada&raquo; (los campos se llaman solo <code>a</code>, <code>b</code>, <code>c</code>), el informe indica si el significado de esos campos pudo deducirse con seguridad.</li>
 </ul>
 <p>Un &oacute;rgano CODM con todas sus muestras se carga sin preguntas. Si la definici&oacute;n indica para un registro que los arm&oacute;nicos superiores deben sonar m&aacute;s fuertes o m&aacute;s suaves, JM-Orgue lo aplica al cargar. No se ha comprobado que suene exactamente como en Hauptwerk: eso exige un juego original completo y una grabaci&oacute;n de referencia.</p>
+
+<p>El informe de importación muestra también, solo como información, lo que el set aporta por sí mismo: los valores de las cajas expresivas, un posible crescendo y las formas de onda grabadas del trémolo (estas últimas desde la versión 0.9.52). JM-Orgue todavía no usa las formas de onda: el trémolo suena como una modulación simple.</p>
 
 <h3>Sets de muestras con WavPack o FLAC</h3>
 <p>Muchos sets de GrandOrgue est&aacute;n comprimidos con WavPack; los archivos suelen llamarse simplemente <code>.wav</code>. JM-Orgue los lee directamente, con sus puntos de bucle y sus releases, y los carga r&aacute;pido porque solo descomprime el comienzo de cada grabaci&oacute;n. Solo cuando un archivo realmente no puede leerse (por ejemplo un archivo FLAC o un WavPack multicanal), una barra en la parte superior indica cu&aacute;ntos archivos se han omitido.</p>
@@ -201,6 +207,10 @@
 <p>Al final está la <b>entonación de los tubos</b>: elige a la izquierda un registro y ajusta el volumen y la afinación de cada tubo por separado. Para desplazar todo el registro de una sola vez, pon los deslizadores en el valor deseado y pulsa <b>Aplicar a todos los caños</b> — cada tubo de ese registro recibe entonces el mismo ajuste de volumen y afinación.</p>
 <figure><img src="afbeeldingen/es/10_klank_4.jpg" alt="Pestaña Sonido, entonación de los tubos"><figcaption>Sonido, al final: entonación de los tubos. Elige a la izquierda un registro para entonar sus tubos.</figcaption></figure>
 
+<h3>Comportamiento del set y registros que no se cargan</h3>
+<p>En <b>Sonido</b> está el bloque <b>Comportamiento del set (este órgano)</b> con casillas que deciden si JM-Orgue sigue los datos del propio set: <b>Aplicar los niveles del set</b>, <b>Fundido de liberación del creador del set</b>, <b>Los acoplamientos siguen el set</b> y <b>Cortar las colas silenciosas</b> (con un umbral en dB). Valen por órgano: un órgano que ya usabas queda como estaba, un órgano recién instalado sigue el set. <b>Usar los valores de la caja expresiva del set</b> está siempre desactivada por defecto; activada significa que la caja expresiva empieza con la atenuación y el filtro que indica el propio set, para las divisiones que no has ajustado tú. Después de cambiar una casilla, vuelve a cargar el órgano.</p>
+<p>El bloque <b>No cargar algunos registros</b> (desde la versión 0.9.52) omite al cargar los registros que no usas, por órgano: ahorra memoria y tiempo de carga. Abre la lista, quita la marca de los registros que no necesitas (cada registro indica la memoria que necesita de antemano) y elige <b>Aplicar y recargar</b>. <b>Cargar todo</b> vuelve a marcar todo. La elección se guarda con el órgano; un órgano sin elección carga todo.</p>
+
 <h3>Crescendo</h3>
 <p>El <b>crescendo general</b> saca paso a paso cada vez más registros cuando mueves el pedal de crescendo. Tú decides qué registros entran en qué escalón:</p>
 <ul>
@@ -210,6 +220,8 @@
   <li><b>Aprender pedal</b> vincula tu pedal de crescendo; abajo también puedes introducir a mano el canal y el número CC.</li>
 </ul>
 <figure><img src="afbeeldingen/es/11_crescendo.jpg" alt="Pestaña Crescendo"><figcaption>La matriz del crescendo: registros en las filas, escalones en las columnas.</figcaption></figure>
+
+<p>Si el set aporta un crescendo propio, junto a <b>Autorrelleno</b> aparece el botón <b>Del set</b>: los pasos del set, limitados a los registros de este órgano y repartidos entre el número de pasos elegido. No cambia nada hasta que pulses el botón, y <b>Deshacer</b> restablece los pasos.</p>
 
 <h3>Orden de registros</h3>
 <p>Aquí decides el orden de los registros en cada teclado. Arrastra un registro por el asa para moverlo. Junto a cada registro ves la longitud en pies y la familia (color del nombre). Con las flechas cambias el orden paso a paso y <b>Original</b> devuelve el orden del archivo del órgano. Si la clasificación automática colorea algún registro de otro modo del que quieres, eliges tú mismo para ese registro el <b>grupo de color</b>: <b>Fundamento</b>, <b>Mutación</b> o <b>Lengüeta</b>. Es puramente visual y se guarda para cada órgano.</p>
@@ -254,6 +266,14 @@
 </ul>
 <div class="tip"><b>Consejo</b> Si en acordes grandes oyes una breve repetición del ataque de un tubo, elige un búfer inicial más largo. Si no lo oyes y tienes poca memoria, 500 ms o 1 s son una buena elección. Un disco rápido (SSD) permite búferes cortos.</div>
 <figure><img src="afbeeldingen/es/30_audio_1.jpg" alt="Salida de audio, parte superior"><figcaption>Salida de audio, arriba: controlador, dispositivo, señal de prueba, polifonía, núcleos de cálculo, muestras estéreo, búfer inicial y tamaño del búfer.</figcaption></figure>
+
+<h3>Más en Salida de audio</h3>
+<ul>
+  <li><b>Graves a un subwoofer (gestión de graves)</b>: quita los graves de los canales principales y los envía, sumados, a una salida de subwoofer (un filtro Linkwitz-Riley de cuarto orden). Eliges la <b>Salida del subwoofer</b>, la <b>Frecuencia de cruce (Hz)</b> (de 30 a 250 Hz) y el <b>Nivel del subwoofer (dB)</b>. Desactivado por defecto; desactivado no cuesta nada.</li>
+  <li><b>El límite de memoria sigue la memoria libre</b>: el techo para las muestras cargadas por completo sigue la memoria libre al cargar un órgano.</li>
+  <li><b>Prioridad de tiempo real para la mezcla</b>: da una prioridad alta a los trabajadores de mezcla para que el audio no se entrecorte cuando hay mucho más en marcha. Debajo de la casilla se indica lo que está activo.</li>
+  <li>Junto a cada opción de <b>Búfer inicial por grabación</b> figura, desde la versión 0.9.52, la memoria que el órgano cargado necesita de antemano, por ejemplo «500 ms &middot; 2,8 GB».</li>
+</ul>
 <p>Los <b>perfiles de salida</b> guardan dos configuraciones completas de salida, por ejemplo altavoces por ASIO y auriculares por WASAPI, con la elección de canales de cada teclado. Elige la salida deseada, haz clic en <b>Guardar la elección actual</b> junto a Altavoces o Auriculares y luego cambia entre ambos con el botón <b>Altavoces</b> de arriba a la derecha o con un botón MIDI aprendido. El perfil activo aparece resaltado.</p>
 <p>La <b>corrección para auriculares o altavoces</b> aplica una corrección de timbre solo a la salida (no al órgano): elige para qué perfil vale, actívala y elige un preset de la lista AutoEq, o importa o exporta una corrección propia.</p>
 <p>Más abajo están las opciones para iniciar el programa automáticamente con Windows, cargar automáticamente el último órgano abierto, cerrar todo el software con la cruz de la pantalla adicional y restablecer la última registración. El <b>archivo MIDI automático</b> guarda en segundo plano todo lo que tocas como archivo .mid por sesión: empieza con la primera nota y termina tras un silencio.</p>

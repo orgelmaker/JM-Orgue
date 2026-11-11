@@ -11,10 +11,10 @@
 
 <header class="titel">
   <h1>JM-Orgue</h1>
-  <div class="onder">Handbuch f&uuml;r Version 0.9.49 &middot; November 2026</div>
+  <div class="onder">Handbuch f&uuml;r Version 0.9.51 &middot; November 2026</div>
 </header>
 
-<p>JM-Orgue ist eine virtuelle Pfeifenorgel f&uuml;r Windows, macOS und Linux. Das Programm spielt Hauptwerk- und GrandOrgue-Sample-Sets direkt ab, auch gro&szlig;e Surround-Sets und Hauptwerk-Custom-Organ-Definitionen, und wird mit einer MIDI-Tastatur, einem Orgelspieltisch oder der Maus gespielt. Was Sie spielen, kann es sofort notieren, in gew&ouml;hnlicher Notenschrift oder in Klavar, und als PDF drucken. Dieses Handbuch f&uuml;hrt durch das Programm; die Bildschirmfotos stammen aus Version 0.9.16 und sp&auml;teren Versionen, der Text beschreibt Version 0.9.49.</p>
+<p>JM-Orgue ist eine virtuelle Pfeifenorgel f&uuml;r Windows, macOS und Linux. Das Programm spielt Hauptwerk- und GrandOrgue-Sample-Sets direkt ab, auch gro&szlig;e Surround-Sets und Hauptwerk-Custom-Organ-Definitionen, und wird mit einer MIDI-Tastatur, einem Orgelspieltisch oder der Maus gespielt. Was Sie spielen, kann es sofort notieren, in gew&ouml;hnlicher Notenschrift oder in Klavar, und als PDF drucken. Dieses Handbuch f&uuml;hrt durch das Programm; die Bildschirmfotos stammen aus Version 0.9.16 und sp&auml;teren Versionen, der Text beschreibt Version 0.9.51.</p>
 <p class="klein">&copy; Martijn van der Kolk. Die Bildschirmfotos wurden mit Demo-Orgeln und eigenen Testsets erstellt; Netzwerkadressen, Zugriffstoken und Benutzerordner sind unkenntlich gemacht.</p>
 
 <nav class="inhoud">
@@ -58,6 +58,7 @@
 <h3>Eine Orgel hinzuf&uuml;gen</h3>
 <ul>
   <li><b>.organ</b>: W&auml;hlen Sie eine Orgeldefinition (GrandOrgue <code>.organ</code> oder eine Hauptwerk-Definition). Sie w&auml;hlen die Definitionsdatei, nicht den losen Sample-Ordner: Nur die Definition kennt Register, Koppeln, Tremulanten und eventuelle zus&auml;tzliche Aufnahmepositionen.</li>
+  <li><b>.orgue</b> und <b>.rar</b>: Wähle ein GrandOrgue-Paket (<code>.orgue</code>) oder ein RAR-Archiv (<code>.rar</code>), auch ein mehrteiliges Archiv: Wähle einen der Teile und lege alle Teile in denselben Ordner. JM-Orgue entpackt es einmal in seinen eigenen Ordner <code>pakketten</code>, zeigt den Fortschritt im Ladebalken und lädt die Orgel; ein zweites Öffnen kostet nichts. Fehlt ein Teil, ist das Archiv passwortgeschützt oder beschädigt, folgt eine deutliche Meldung. Der entpackte Ordner belegt Speicherplatz: Du kannst den Ordner <code>pakketten</code> im Datenordner des Programms löschen, um Platz freizugeben.</li>
   <li><b>JM-Rec import</b>: importiert ein mit JM-Rec erstelltes Sample-Set.</li>
   <li><b>Exportieren</b>: macht aus einem Ordner mit Samples eine Orgeldefinition (<code>.organ</code>), die Sie danach mit der Schaltfl&auml;che <b>.organ</b> laden k&ouml;nnen.</li>
 </ul>
@@ -66,6 +67,9 @@
 <p>Wenn Sie auf eine Karte zeigen, erscheinen oben rechts im Foto drei Schaltfl&auml;chen: <b>Online nach einem Foto suchen</b> (Globus), <b>Bild selbst w&auml;hlen</b> (Kamera) und <b>Aus Bibliothek entfernen</b> (Kreuz). Entfernen nimmt nur die Karte aus der Bibliothek; die Dateien auf Ihrer Festplatte bleiben erhalten. Wenn Sie eine Karte 3 Sekunden gedr&uuml;ckt halten, sucht das Programm das Foto erneut.</p>
 <p>Die <b>Online-Suche</b> zeigt einige frei verwendbare Fotos von Wikimedia Commons. Oben im Fenster stehen die Felder <b>Kirche</b>, <b>Ort</b> und <b>Orgelbauer</b>, vorausgef&uuml;llt aus der Orgeldefinition und den mitgelieferten Informationen; passen Sie sie an, wenn sie nicht stimmen, und w&auml;hlen Sie <b>Suchen</b>. Darunter bleibt ein freies Suchfeld f&uuml;r einen eigenen Suchbegriff. Klicken Sie auf ein Foto, um es zu &uuml;bernehmen; Quelle und Lizenz erscheinen unter der Karte.</p>
 <figure><img src="afbeeldingen/de/04_online_zoeken.jpg" alt="Online nach einem Foto suchen"><figcaption>Das Fenster &bdquo;Online nach einem Foto suchen&ldquo; mit dem Feld f&uuml;r einen eigenen Suchbegriff und den gefundenen Fotos samt Quelle und Lizenz.</figcaption></figure>
+
+<h3>Herunterladbare Sets</h3>
+<p>Sets, die du mit der Download-Schaltfläche im Programm holen kannst, erscheinen als Kachel mit gepunktetem Rand im selben Raster wie deine Orgeln. Ein Set, das du schon installiert hast, wird nicht mehr angeboten.</p>
 
 <h3 id="codm">Hauptwerk Custom Organ (CODM) und der Importbericht</h3>
 <p>Eine Custom-Organ-Definition (<code>.CustomOrgan_Hauptwerk_xml</code>) beschreibt nur den Aufbau der Orgel: Manuale, Register, Koppeln und Tremulanten. Die Samples liegen in getrennten <b>Sample-Paketen</b> im Ordner <code>OrganInstallationPackages</code>, der neben oder oberhalb der Definition liegen muss. JM-Orgue pr&uuml;ft das vor dem Laden.</p>
@@ -81,6 +85,8 @@
   <li>Ist die Definition in der &bdquo;verk&uuml;rzten&ldquo; Form geschrieben (die Felder hei&szlig;en dann nur <code>a</code>, <code>b</code>, <code>c</code>), meldet der Bericht, ob die Bedeutung dieser Felder sicher abgeleitet werden konnte.</li>
 </ul>
 <p>Eine CODM-Orgel mit allen Samples l&auml;dt ohne R&uuml;ckfrage. Gibt die Definition pro Register an, dass die h&ouml;heren Obert&ouml;ne st&auml;rker oder schw&auml;cher klingen sollen, wendet JM-Orgue das beim Laden an. Ob sie genau wie in Hauptwerk klingt, wurde nicht &uuml;berpr&uuml;ft: Daf&uuml;r braucht es ein vollst&auml;ndiges Originalset und eine Referenzaufnahme.</p>
+
+<p>Der Importbericht zeigt auch, nur zur Information, was das Set selbst mitbringt: die Werte der Schwellkästen, ein eventuelles Crescendo und die aufgenommenen Tremulant-Wellenformen (Letztere ab Version 0.9.52). JM-Orgue nutzt die Wellenformen noch nicht: Der Tremulant klingt wie eine einfache Modulation.</p>
 
 <h3>Sample-Sets mit WavPack oder FLAC</h3>
 <p>Viele GrandOrgue-Sets sind mit WavPack gepackt; die Dateien hei&szlig;en dann oft einfach <code>.wav</code>. JM-Orgue liest sie direkt, einschlie&szlig;lich Schleifenpunkten und Releases, und l&auml;dt sie schnell, weil nur der Anfang jeder Aufnahme entpackt wird. Nur wenn eine Datei wirklich nicht lesbar ist (zum Beispiel eine FLAC-Datei oder eine mehrkanalige WavPack-Datei), meldet eine Leiste oben, wie viele Dateien &uuml;bersprungen wurden.</p>
@@ -201,6 +207,10 @@
 <p>Unten steht die <b>Pfeifen-Intonation</b>: W&auml;hlen Sie links ein Register und passen Sie Lautst&auml;rke und Stimmung jeder einzelnen Pfeife an. Wollen Sie das ganze Register auf einmal verschieben? Stellen Sie dann die Schieberegler auf den gew&uuml;nschten Wert und dr&uuml;cken Sie <b>Auf alle Pfeifen anwenden</b> &mdash; jede Pfeife des Registers erh&auml;lt dann dieselbe Lautst&auml;rke- und Stimmungsanpassung.</p>
 <figure><img src="afbeeldingen/de/10_klank_4.jpg" alt="Reiter Klang, Pfeifen-Intonation"><figcaption>Klang, unten: die Pfeifen-Intonation. W&auml;hlen Sie links ein Register, um seine Pfeifen zu intonieren.</figcaption></figure>
 
+<h3>Verhalten des Sets und Register nicht laden</h3>
+<p>Unter <b>Klang</b> steht der Block <b>Verhalten des Sets (dieses Instrument)</b> mit Kontrollkästchen, die bestimmen, ob JM-Orgue den Daten des Sets selbst folgt: <b>Pegel des Sets übernehmen</b>, <b>Überblendung des Set-Erstellers beim Loslassen</b>, <b>Koppeln folgen dem Set</b> und <b>Stille Ausklänge abschneiden</b> (mit einer Schwelle in dB). Sie gelten pro Orgel: Eine Orgel, die du schon benutzt hast, bleibt wie sie war, eine neu installierte Orgel folgt dem Set. <b>Schwellkasten-Werte des Sets verwenden</b> ist standardmäßig immer aus; an bedeutet, dass der Schwellkasten mit der Dämpfung und dem Filter beginnt, die das Set selbst angibt, für Werke, bei denen du selbst nichts eingestellt hast. Nach dem Ändern eines Kontrollkästchens lädst du die Orgel neu.</p>
+<p>Der Block <b>Register nicht laden</b> (ab Version 0.9.52) lässt Register, die du nicht benutzt, beim Laden weg, pro Orgel: Das spart Speicher und Ladezeit. Öffne die Liste, entferne das Häkchen bei den Registern, die du nicht brauchst (bei jedem Register steht der Speicher, den es vorab braucht), und wähle <b>Anwenden und neu laden</b>. <b>Alles laden</b> setzt alle Häkchen zurück. Die Auswahl wird bei der Orgel gespeichert; eine Orgel ohne Auswahl lädt alles.</p>
+
 <h3>Crescendo</h3>
 <p>Das <b>Generalcrescendo</b> zieht beim Bewegen eines Crescendotritts Schritt f&uuml;r Schritt mehr Register. Sie bestimmen selbst, welche Register in welche Stufe kommen:</p>
 <ul>
@@ -210,6 +220,8 @@
   <li><b>Pedal lernen</b> verbindet Ihren Crescendotritt; unten k&ouml;nnen Sie Kanal und CC-Nummer auch von Hand eintragen.</li>
 </ul>
 <figure><img src="afbeeldingen/de/11_crescendo.jpg" alt="Reiter Crescendo"><figcaption>Die Crescendo-Matrix: Register in den Zeilen, Stufen in den Spalten.</figcaption></figure>
+
+<p>Bringt das Set selbst ein Crescendo mit, steht neben <b>Auto-Füllen</b> die Schaltfläche <b>Vom Set</b>: die Stufen des Sets, beschränkt auf die Register dieser Orgel und verteilt auf die gewählte Anzahl Stufen. Nichts ändert sich, bevor du die Schaltfläche drückst, und <b>Rückgängig</b> stellt die Stufen wieder her.</p>
 
 <h3>Registerreihenfolge</h3>
 <p>Hier bestimmen Sie die Reihenfolge der Register in jedem Manual. Ziehen Sie ein Register am Griff, um es zu verschieben. Pro Register sehen Sie Fu&szlig;lage und Familie (die Farbe des Namens). Mit den Pfeilen &auml;ndern Sie die Reihenfolge Schritt f&uuml;r Schritt, und <b>Original</b> stellt die Reihenfolge aus der Orgeldatei wieder her. F&auml;rbt die automatische Erkennung ein einzelnes Register anders, als Sie m&ouml;chten, w&auml;hlen Sie pro Register selbst die <b>Farbgruppe</b>: <b>Grundstimme</b>, <b>Aliquote</b> oder <b>Zunge</b>. Das ist rein optisch und wird pro Orgel gespeichert.</p>
@@ -254,6 +266,14 @@
 </ul>
 <div class="tip"><b>Tipp</b> H&ouml;ren Sie bei gro&szlig;en Akkorden eine kurze Wiederholung des Ansatzes einer Pfeife, w&auml;hlen Sie einen l&auml;ngeren Startpuffer. H&ouml;ren Sie das nicht, haben aber wenig Speicher, sind 500 ms oder 1 s eine gute Wahl. Eine schnelle Festplatte (SSD) macht kurze Puffer m&ouml;glich.</div>
 <figure><img src="afbeeldingen/de/30_audio_1.jpg" alt="Audioausgabe, oben"><figcaption>Audioausgabe, oben: Treiber, Ger&auml;t, Testsignal, Polyphonie, Rechenkerne, Stereo-Samples, Startpuffer und Puffergr&ouml;&szlig;e.</figcaption></figure>
+
+<h3>Mehr unter Audio-Ausgabe</h3>
+<ul>
+  <li><b>Bass an einen Subwoofer (Bassmanagement)</b>: nimmt die tiefen Frequenzen aus den Hauptkanälen und schickt sie summiert an einen Subwoofer-Ausgang (ein Linkwitz-Riley-Filter vierter Ordnung). Du wählst den <b>Subwoofer-Ausgang</b>, die <b>Trennfrequenz (Hz)</b> (30 bis 250 Hz) und den <b>Pegel des Subwoofers (dB)</b>. Standardmäßig aus; aus kostet nichts.</li>
+  <li><b>Speicherlimit folgt dem freien Speicher</b>: Die Obergrenze für vollständig geladene Samples folgt dem Speicher, der beim Laden einer Orgel frei ist.</li>
+  <li><b>Echtzeit-Priorität für das Mischen</b>: gibt den Misch-Arbeitern hohe Priorität, damit das Audio nicht stockt, wenn viel anderes läuft. Unter dem Kontrollkästchen steht, was aktiv ist.</li>
+  <li>Hinter jeder Auswahl von <b>Startpuffer je Aufnahme</b> steht ab Version 0.9.52 der Speicher, den die geladene Orgel dann vorab braucht, zum Beispiel „500 ms &middot; 2,8 GB“.</li>
+</ul>
 <p><b>Ausgabeprofile</b> speichern zwei vollst&auml;ndige Ausgabeeinstellungen, zum Beispiel Lautsprecher &uuml;ber ASIO und Kopfh&ouml;rer &uuml;ber WASAPI, einschlie&szlig;lich der Kanalwahl pro Manual. W&auml;hlen Sie den gew&uuml;nschten Ausgang, klicken Sie bei Lautsprecher oder Kopfh&ouml;rer auf <b>Aktuelle Auswahl speichern</b>, und wechseln Sie danach mit der Schaltfl&auml;che <b>Lautsprecher</b> oben rechts oder mit einer angelernten MIDI-Taste. Das aktive Profil ist markiert.</p>
 <p>Die <b>Korrektur f&uuml;r Kopfh&ouml;rer oder Lautsprecher</b> wendet eine Klangkorrektur auf den Ausgang selbst an (nicht auf die Orgel): W&auml;hlen Sie, f&uuml;r welches Profil sie gilt, schalten Sie sie ein und w&auml;hlen Sie ein Preset aus der AutoEq-Liste, oder importieren bzw. exportieren Sie eine eigene Korrektur.</p>
 <p>Darunter stehen die Optionen, das Programm automatisch mit Windows zu starten, die zuletzt ge&ouml;ffnete Orgel automatisch zu laden, das Kreuz auf einem zus&auml;tzlichen Bildschirm die ganze Software beenden zu lassen und die letzte Registrierung wiederherzustellen. Das <b>Automatische MIDI-Archiv</b> zeichnet im Hintergrund alles auf, was Sie spielen, als .mid-Datei pro Sitzung: Es startet bei der ersten Note und stoppt nach einer Stille.</p>

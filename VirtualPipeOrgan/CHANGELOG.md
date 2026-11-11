@@ -6,6 +6,16 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### Handleiding bijgewerkt naar 0.9.51, in zeven talen
+- De handleiding beschrijft nu ook wat sinds 0.9.49 is toegevoegd: pakketten en RAR-archieven openen (ook meerdelig), de tegels voor
+  downloadbare sets, wat het importverslag over de set meldt, het blok "Gedrag van de set (dit orgel)" met de vinkjes per orgel en de
+  zwelkast van de set, de knop "Van de set" bij de crescendo, en bij Audio uitvoer het basmanagement, het geheugenplafond dat het vrije
+  geheugen volgt en de realtime-prioriteit. Wat pas na 0.9.51 komt (registers niet laden, het geheugen per keuze van de startbuffer en de
+  tremulant-golfvormen in het verslag) staat erin met "vanaf versie 0.9.52".
+- De namen van knoppen en tabbladen zijn per taal rechtstreeks uit de taalbestanden van het programma gehaald, dus ze kloppen letterlijk met
+  het scherm. Er zijn geen nieuwe schermafdrukken gemaakt; de bestaande afbeeldingen zijn ongewijzigd. De zeven PDF's zijn opnieuw
+  gemaakt (Chrome, headless). Bij de volgende versie hoort het versienummer op de titelpagina mee te gaan.
+
 ### Registers niet laden, per orgel (F2, deel 1)
 - Onder Orgel-instellingen → Klank staat een nieuw blok **Registers niet laden**: een lijst van alle registers van het orgel, per divisie,
   met het geheugen dat elk register vooraf vraagt en bovenaan "Nu geladen / met deze keuze / alle registers". Vink af wat je niet gebruikt,

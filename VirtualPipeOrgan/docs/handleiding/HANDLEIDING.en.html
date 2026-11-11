@@ -11,10 +11,10 @@
 
 <header class="titel">
   <h1>JM-Orgue</h1>
-  <div class="onder">User guide for version 0.9.49 &middot; November 2026</div>
+  <div class="onder">User guide for version 0.9.51 &middot; November 2026</div>
 </header>
 
-<p>JM-Orgue is a virtual pipe organ for Windows, macOS and Linux. It plays Hauptwerk and GrandOrgue sample sets directly, including large surround sets and Hauptwerk Custom Organ definitions, and you play it with a MIDI keyboard, an organ console or the mouse. It can write down what you play as you go, in staff notation or in klavar, and print it as a PDF. This guide walks through the program; the screenshots come from version 0.9.16 and later versions, the text describes version 0.9.49.</p>
+<p>JM-Orgue is a virtual pipe organ for Windows, macOS and Linux. It plays Hauptwerk and GrandOrgue sample sets directly, including large surround sets and Hauptwerk Custom Organ definitions, and you play it with a MIDI keyboard, an organ console or the mouse. It can write down what you play as you go, in staff notation or in klavar, and print it as a PDF. This guide walks through the program; the screenshots come from version 0.9.16 and later versions, the text describes version 0.9.51.</p>
 <p class="klein">&copy; Martijn van der Kolk. The screenshots were made with demo organs and own test sets; network addresses, access tokens and user folders have been made unreadable.</p>
 
 <nav class="inhoud">
@@ -58,6 +58,7 @@
 <h3>Adding an organ</h3>
 <ul>
   <li><b>.organ</b>: choose an organ definition (GrandOrgue <code>.organ</code> or a Hauptwerk definition). You choose the definition file, not the loose folder of samples: only the definition knows the stops, couplers, tremulants and any extra recording positions.</li>
+  <li><b>.orgue</b> and <b>.rar</b>: choose a GrandOrgue package (<code>.orgue</code>) or a RAR archive (<code>.rar</code>), including a multi-part archive: choose one of the parts and keep all parts in the same folder. JM-Orgue unpacks it once into its own <code>pakketten</code> folder, shows the progress in the loading bar and loads the organ; opening it a second time costs nothing. If a part is missing, the archive is password-protected or damaged, a clear message follows. The unpacked folder takes disk space: you can delete the <code>pakketten</code> folder in the program's data folder to free it.</li>
   <li><b>JM-Rec import</b>: import a sample set made with JM-Rec.</li>
   <li><b>Export</b>: turns a folder of samples into an organ definition (<code>.organ</code>), which you can then load with the <b>.organ</b> button.</li>
 </ul>
@@ -66,6 +67,9 @@
 <p>If you point at a card, three buttons appear at the top right of the photo: <b>search a photo online</b> (globe), <b>choose an image yourself</b> (camera) and <b>remove from library</b> (cross). Removing only takes the card out of the library; the files on your disk stay where they are. If you hold a card pressed for 3 seconds, the program searches the photo again.</p>
 <p><b>Searching online</b> shows a few freely usable photos from Wikimedia Commons. At the top of the window are the fields <b>Church</b>, <b>Place</b> and <b>Builder</b>, filled in beforehand from the organ definition and the information supplied with the set; correct them if they are wrong and choose <b>Search</b>. Below them a free search field remains for a term of your own. Click a photo to adopt it; the source and licence appear under the card.</p>
 <figure><img src="afbeeldingen/en/04_online_zoeken.jpg" alt="Search a photo online"><figcaption>The &ldquo;Search a photo online&rdquo; window with the field for your own search term and the photos found, with their source and licence.</figcaption></figure>
+
+<h3>Downloadable sets</h3>
+<p>Sets you can fetch with the download button in the program appear as a tile with a dotted border in the same grid as your organs. A set you have already installed is no longer offered.</p>
 
 <h3 id="codm">Hauptwerk Custom Organ (CODM) and the import report</h3>
 <p>A Custom Organ definition (<code>.CustomOrgan_Hauptwerk_xml</code>) only describes the structure of the organ: keyboards, stops, couplers and tremulants. The samples live in separate <b>sample packages</b> in the <code>OrganInstallationPackages</code> folder, which must sit next to or above the definition. JM-Orgue checks this before loading.</p>
@@ -81,6 +85,8 @@
   <li>If the definition is written in the &ldquo;abbreviated&rdquo; form (fields are then only called <code>a</code>, <code>b</code>, <code>c</code>), the report states whether the meaning of those fields could be derived safely.</li>
 </ul>
 <p>A CODM organ with all its samples loads without any question. If the definition states per stop that the upper harmonics should sound stronger or softer, JM-Orgue applies that while loading. Whether it sounds exactly as in Hauptwerk has not been verified: that needs a complete original set and a reference recording.</p>
+
+<p>The import report also shows, as information only, what the set itself provides: the swell box values, any crescendo and the recorded tremulant waveforms (the last from version 0.9.52). JM-Orgue does not use the waveforms yet: the tremulant sounds as a simple modulation.</p>
 
 <h3>Sample sets with WavPack or FLAC</h3>
 <p>Many GrandOrgue sets are packed with WavPack; the files are then often simply called <code>.wav</code>. JM-Orgue reads them directly, including loop points and releases, and loads them quickly because only the beginning of each recording is unpacked. Only if a file really cannot be read (for example a FLAC file or a multichannel WavPack file) does a bar at the top report how many files were skipped.</p>
@@ -201,6 +207,10 @@
 <p>At the bottom is the <b>pipe voicing</b>: choose a stop on the left and adjust the volume and tuning of each individual pipe. To shift the whole stop in one go, set the sliders to the desired value and press <b>Apply to all pipes</b> &mdash; every pipe of that stop then receives the same volume and tuning adjustment.</p>
 <figure><img src="afbeeldingen/en/10_klank_4.jpg" alt="Sound tab, pipe voicing"><figcaption>Sound, at the bottom: the pipe voicing. Choose a stop on the left to voice its pipes.</figcaption></figure>
 
+<h3>Behaviour of the set and not loading stops</h3>
+<p>Under <b>Sound</b> there is the block <b>Behaviour of the set (this organ)</b> with check boxes that decide whether JM-Orgue follows the data of the set itself: <b>Apply the set's own levels</b>, <b>Release crossfade of the set's maker</b>, <b>Couplers follow the set</b> and <b>Cut off silent tails</b> (with a threshold in dB). They apply per organ: an organ you already used stays as it was, a newly installed organ follows the set. <b>Use the set's swell box values</b> is always off by default; on means the swell box starts with the attenuation and filter the set itself specifies, for divisions you have not set yourself. After changing a check box, reload the organ.</p>
+<p>The block <b>Do not load these stops</b> (from version 0.9.52) leaves out stops you do not use when loading, per organ: this saves memory and load time. Open the list, clear the check box of the stops you do not need (each stop shows the memory it needs up front) and choose <b>Apply and reload</b>. <b>Load everything</b> restores all check boxes. The choice is saved with the organ; an organ without a choice loads everything.</p>
+
 <h3>Crescendo</h3>
 <p>The <b>general crescendo</b> draws more stops step by step as you move a crescendo pedal. You decide yourself which stops go in which step:</p>
 <ul>
@@ -210,6 +220,8 @@
   <li><b>Learn pedal</b> links your crescendo pedal; at the bottom you can also enter channel and CC number by hand.</li>
 </ul>
 <figure><img src="afbeeldingen/en/11_crescendo.jpg" alt="Crescendo tab"><figcaption>The crescendo matrix: stops in the rows, steps in the columns.</figcaption></figure>
+
+<p>If the set provides a crescendo itself, the button <b>From the set</b> appears next to <b>Auto-fill</b>: the steps of the set, limited to the stops this organ has and spread over the chosen number of steps. Nothing changes until you press the button, and <b>Undo</b> restores the steps.</p>
 
 <h3>Stop order</h3>
 <p>Here you decide the order of the stops in each division. Drag a stop by its handle to move it. For each stop you see the pitch and the family (the colour of the name). With the arrows you change the order step by step, and <b>Original</b> restores the order from the organ file. If the automatic classification colours a single stop differently from what you want, you choose the <b>colour group</b> per stop yourself: <b>Foundation</b>, <b>Mutation</b> or <b>Reed</b>. That is purely visual and is stored per organ.</p>
@@ -254,6 +266,14 @@
 </ul>
 <div class="tip"><b>Tip</b> If you hear a short repeat of the attack of a pipe in big chords, choose a longer start buffer. If you do not hear that but have little memory, 500 ms or 1 s is a good choice. A fast drive (SSD) makes short buffers possible.</div>
 <figure><img src="afbeeldingen/en/30_audio_1.jpg" alt="Audio output, top"><figcaption>Audio output, at the top: driver, device, test signal, polyphony, calculation cores, stereo samples, start buffer and buffer size.</figcaption></figure>
+
+<h3>More under Audio Output</h3>
+<ul>
+  <li><b>Low frequencies to a subwoofer (bass management)</b>: takes the low frequencies out of the main channels and sends them, summed, to one subwoofer output (a fourth-order Linkwitz-Riley filter). You choose the <b>Subwoofer output</b>, the <b>Crossover frequency (Hz)</b> (30 to 250 Hz) and the <b>Subwoofer level (dB)</b>. Off by default; off costs nothing.</li>
+  <li><b>Memory limit follows free memory</b>: the ceiling for fully loaded samples follows the memory that is free when an organ is loaded.</li>
+  <li><b>Real-time priority for mixing</b>: gives the mixing workers a high priority so the audio does not stutter when much else is running. Below the check box it shows what is active.</li>
+  <li>Behind each choice of <b>Start buffer per recording</b>, from version 0.9.52, is the memory the loaded organ then needs up front, for example &ldquo;500 ms &middot; 2.8 GB&rdquo;.</li>
+</ul>
 <p><b>Output profiles</b> store two complete output settings, for example loudspeakers via ASIO and headphones via WASAPI, including the channel choice per keyboard. Choose the output you want, click <b>Save current selection</b> at Speakers or Headphones, and then switch with the <b>Speakers</b> button at the top right or with a learned MIDI button. The profile that is active now is marked.</p>
 <p><b>Correction for headphones or speakers</b> applies a tone correction to the output itself (not to the organ): choose which profile it applies to, switch it on and choose a preset from the AutoEq list, or import or export a correction of your own.</p>
 <p>Below that are the options to start the program automatically with Windows, to load the last opened organ automatically, to let the cross on an extra screen close the whole software and to restore the last registration. The <b>Automatic MIDI archive</b> records in the background everything you play, as a .mid file per session: it starts at the first note and stops after a silence.</p>
