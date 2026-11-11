@@ -6,6 +6,25 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### Gedrag van de set, per orgel; koppelketen volgt de set (F7)
+- Drie dingen die de set zelf bepaalt, gelden nu per orgel: de niveaus van de
+  maker (E1), de crossfade van de maker bij het loslaten (D3) en nieuw: of
+  GrandOrgue-koppels doorketenen zoals de set wil (F7). **Orgels die al
+  opgeslagen instellingen hebben houden het oude gedrag, nieuw geïnstalleerde
+  orgels krijgen het standaard aan.** Elke keuze heeft een vinkje onder
+  Instellingen → Klank, "Gedrag van de set (dit orgel)"; een eigen keuze wordt
+  bewaard en wint daarna altijd. Een wijziging werkt na het opnieuw laden.
+- Koppelketen: de vijf `CoupleToSubsequent…`-sleutels van een GrandOrgue-koppel
+  bepalen of het koppel doorwerkt via andere koppels (Zwelwerk→Hoofdwerk plus
+  Hoofdwerk→Pedaal ⇒ Zwelwerk ook op het pedaal). JM-Orgue las ze niet en liet
+  alle koppels ketenen, terwijl ze in de geteste sets vrijwel overal op "nee"
+  staan. Nu: bij "alle vijf nee" ketent het koppel niet, bij minstens één "ja"
+  wel (een benadering, want wij hebben één vlag per koppel); zonder sleutels en
+  voor speciale koppels (unison-off, melodie, bas) verandert niets.
+- Het globale vinkje voor de niveaus (nog niet uitgebracht) is hiermee vervangen
+  door dit per-orgel-vinkje; de test-API kent nu `POST /orgel_vlaggen` met het
+  orgelpad.
+
 ### Dependabot voor de GitHub-acties
 - Nieuw `.github/dependabot.yml`: elke week een controle op nieuwe versies van de
   vastgepinde acties (B5). Dependabot stelt een kleine pull request voor met de
@@ -53,8 +72,9 @@ versies volgen [Semantic Versioning](https://semver.org/).
   in plaats van de automatische duur per noot. Op twee van de geteste sets gaat
   het om 3000 tot 5000 release-keys. Alleen voor sets waarvan de definitie het
   veld met naam geeft; bij gecomprimeerde definities blijft alles zoals het was.
-- Instelbaar: standaard aan; `JM_ORGUE_OVERGANGEN=uit` of de test-API
-  `POST /overgangen_toepassen` zet het uit (geldt bij het volgende laden).
+- Instelbaar per orgel (zie "Gedrag van de set, per orgel"): Instellingen →
+  "Overgangen van de maker bij het loslaten"; `JM_ORGUE_OVERGANGEN=uit` zet het
+  voor alle orgels uit.
 - Niet gedaan: de loop-crossfade van de maker (de motor gebruikt al de langst
   mogelijke blend), de tremulant-golfvormen per pijp en het windstelsel.
 
@@ -301,14 +321,14 @@ versies volgen [Semantic Versioning](https://semver.org/).
 - In een gecomprimeerde definitie is het niveau per pijplaag een letter die per
   set anders is en niet betrouwbaar aan dit veld te koppelen valt; daar geldt
   alleen het niveau van het hele orgel. Het importverslag zegt dat.
-- Instelbaar: Instellingen → "Niveaus van de set toepassen" (standaard aan,
-  werkt na het opnieuw laden van het orgel). Uit = alles op 0 dB zoals tot en met
-  0.9.50. Een waarde buiten ±40 dB wordt begrensd, een onleesbare genegeerd.
+- Instelbaar per orgel (zie "Gedrag van de set, per orgel"): Instellingen →
+  "Niveaus van de set toepassen"; werkt na het opnieuw laden van het orgel. Uit =
+  alles op 0 dB zoals tot en met 0.9.50. Een waarde buiten ±40 dB wordt begrensd, een onleesbare genegeerd.
   Het importverslag meldt wat er is toegepast, of wat niet is toegepast als de
   instelling uitstaat. CODM-definities hebben dit veld niet en blijven gelijk.
-- Wie het hoofdvolume per orgel had bijgesteld om een te harde of te zachte set
-  te compenseren, hoort dat orgel nu anders: de gewenste stand kan opnieuw
-  ingesteld worden.
+- Orgels die al instellingen hadden houden het oude gedrag (uit), dus wie het
+  hoofdvolume per orgel had bijgesteld hoort niets anders; nieuw geïnstalleerde
+  orgels krijgen de niveaus van de set standaard.
 
 ### Importdiagnose: ongelezen velden en controlelijsten (achter een schakelaar)
 - Het importverslag van een Hauptwerk-definitie kan nu laten zien wat de

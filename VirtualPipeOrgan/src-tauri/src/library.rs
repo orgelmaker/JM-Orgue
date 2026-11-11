@@ -480,6 +480,16 @@ pub struct OrganSettings {
     /// Standaard uit sinds 0.9.34: alleen de aangevinkte posities laden.
     #[serde(default)]
     pub load_all_perspectives: bool,
+    /// Gedrag van de set per orgel (E1, D3, F7), zie `orgelvlaggen.rs`. None =
+    /// nog niet vastgelegd: een orgel dat al instellingen had houdt het oude
+    /// gedrag (uit), een nieuw orgel krijgt het standaard aan. Bij het opslaan
+    /// worden ze altijd expliciet geschreven.
+    #[serde(default)]
+    pub niveaus_van_set: Option<bool>,
+    #[serde(default)]
+    pub overgangen_van_set: Option<bool>,
+    #[serde(default)]
+    pub koppels_volgen_set: Option<bool>,
     /// Luisterpositie-schuif (0.7.95): 0..1 lineair over de as van geladen
     /// posities (dry → close → front → rear → diffuse). Bewaard per orgel
     /// zodat de volgende sessie met dezelfde balans begint. Ontbrekend in

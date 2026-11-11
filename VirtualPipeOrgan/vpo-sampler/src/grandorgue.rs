@@ -874,17 +874,53 @@ pub struct CouplerDef {
     pub cascade_toegestaan: bool,
 }
 
+/// Koppels volgen de set (F7): de vijf `CoupleToSubsequent…`-sleutels van een
+/// GrandOrgue-koppel bepalen of het koppel doorwerkt via andere koppels
+/// (Zwelwerk→Hoofdwerk plus Hoofdwerk→Pedaal ⇒ Zwelwerk ook op het pedaal).
+/// Staat dit aan, dan wordt `CouplerDef::cascade_toegestaan` uit die sleutels
+/// afgeleid; uit = alle koppels ketenen, zoals tot nu toe. Proces-breed en per
+/// orgel gezet vóór het laden (zie `commands::do_load_organ_locked`).
+static KOPPELS_VOLGEN_SET: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+pub fn set_koppels_volgen_set(aan: bool) { KOPPELS_VOLGEN_SET.store(aan, std::sync::atomic::Ordering::Relaxed); }
+pub fn koppels_volgen_set() -> bool { KOPPELS_VOLGEN_SET.load(std::sync::atomic::Ordering::Relaxed) }
+
+/// De vijf sleutels die bepalen of een koppel in een keten mag.
+const KOPPEL_KETEN_SLEUTELS: [&str; 5] = [
+    "CoupleToSubsequentUnisonIntermanualCouplers",
+    "CoupleToSubsequentUpwardIntermanualCouplers",
+    "CoupleToSubsequentDownwardIntermanualCouplers",
+    "CoupleToSubsequentUpwardIntramanualCouplers",
+    "CoupleToSubsequentDownwardIntramanualCouplers",
+];
+
+/// Mag een koppel in een keten, gegeven de vijf vlaggen van de set? Wij hebben
+/// één vlag per koppel en de set vijf categorieën: is er niets opgegeven, dan
+/// blijft het zoals het was (ja); anders ja als minstens één categorie Y is, dus
+/// "alle vijf N" ketent niet. Voor gemengde koppels is dit een benadering.
+pub(crate) fn cascade_uit_sleutels(vlaggen: [Option<bool>; 5]) -> bool {
+    let bekend: Vec<bool> = vlaggen.iter().flatten().copied().collect();
+    bekend.is_empty() || bekend.iter().any(|&b| b)
+}
+
 /// Parser for GrandOrgue ODF files
 pub struct OdfParser {
     sections: HashMap<String, HashMap<String, String>>,
     base_path: PathBuf,
     /// Lost samplepaden hoofdletterongevoelig op (buiten Windows, E7).
     zoeker: crate::padzoek::PadZoeker,
+    /// Koppelketen uit de sleutels van de set afleiden (F7).
+    koppels_volgen: bool,
 }
 
 impl OdfParser {
     /// Parse an ODF file
     pub fn parse(path: &Path) -> Result<OrganDefinition, OdfError> {
+        Self::parse_met(path, koppels_volgen_set())
+    }
+
+    /// Als [`OdfParser::parse`], met de stand van "koppels volgen de set" als
+    /// parameter (zo hoeven tests de proces-brede schakelaar niet om te zetten).
+    pub fn parse_met(path: &Path, koppels_volgen: bool) -> Result<OrganDefinition, OdfError> {
         // Read file as bytes first, then try to decode
         let bytes = fs::read(path)?;
 
@@ -901,6 +937,7 @@ impl OdfParser {
             sections: HashMap::new(),
             base_path,
             zoeker: crate::padzoek::PadZoeker::nieuw(),
+            koppels_volgen,
         };
 
         parser.parse_ini(&content)?;
@@ -1768,8 +1805,21 @@ impl OdfParser {
                             .unwrap_or(false),
                         melodie: section.get("CouplerType")
                             .is_some_and(|v| v.trim().eq_ignore_ascii_case("melody")),
-                        // GrandOrgue-koppels doen aan de bekende transitieve keten.
-                        cascade_toegestaan: true,
+                        // Standaard doen GrandOrgue-koppels aan de transitieve keten;
+                        // met "koppels volgen de set" (F7) beslist de set. Speciale
+                        // koppels (unison-off, melodie, bas) hebben die sleutels niet.
+                        cascade_toegestaan: if self.koppels_volgen
+                            && !section.get("UnisonOff").map(|v| v == "Y").unwrap_or(false)
+                            && !section.get("CouplerType")
+                                .map(|v| matches!(v.trim().to_lowercase().as_str(), "melody" | "bass"))
+                                .unwrap_or(false)
+                        {
+                            cascade_uit_sleutels(KOPPEL_KETEN_SLEUTELS.map(|k| {
+                                section.get(k).map(|v| zonder_commentaar(v).trim().eq_ignore_ascii_case("y"))
+                            }))
+                        } else {
+                            true
+                        },
                     });
                 }
             }
@@ -2571,6 +2621,115 @@ mod tests {
         let result = OdfParser::parse(&path);
         let _ = fs::remove_file(&path);
         result.expect("test-ODF moet parsen")
+    }
+
+    /// Parse ODF-tekst met een expliciete stand van "koppels volgen de set" (F7),
+    /// zodat de test niet van de proces-brede schakelaar afhangt.
+    fn parse_odf_met_koppels(name: &str, content: &str, volgen: bool) -> OrganDefinition {
+        let path = std::env::temp_dir().join(format!(
+            "vpo_go_test_{}_{}.organ",
+            name,
+            std::process::id()
+        ));
+        fs::write(&path, content).expect("kan test-ODF niet schrijven");
+        let result = OdfParser::parse_met(&path, volgen);
+        let _ = fs::remove_file(&path);
+        result.expect("test-ODF moet parsen")
+    }
+
+    /// Eén koppel met de vijf sleutels op de gegeven waarden (None = sleutel weg).
+    fn odf_met_koppels(koppels: &[(&str, [Option<&str>; 5])]) -> String {
+        let namen = [
+            "CoupleToSubsequentUnisonIntermanualCouplers",
+            "CoupleToSubsequentUpwardIntermanualCouplers",
+            "CoupleToSubsequentDownwardIntermanualCouplers",
+            "CoupleToSubsequentUpwardIntramanualCouplers",
+            "CoupleToSubsequentDownwardIntramanualCouplers",
+        ];
+        let mut s = String::from("[Organ]
+ChurchName=Testkerk
+NumberOfManuals=1
+[Manual001]
+Name=Manuaal
+NumberOfStops=1
+Stop001=001
+[Stop001]
+Name=Prestant 8'
+NumberOfLogicalPipes=1
+Pipe001=samples\\036-c.wav
+");
+        for (i, (naam, waarden)) in koppels.iter().enumerate() {
+            s.push_str(&format!("[Coupler{:03}]
+Name={}
+DestinationManual=1
+", i + 1, naam));
+            for (k, w) in namen.iter().zip(waarden.iter()) {
+                if let Some(w) = w {
+                    s.push_str(&format!("{}={}
+", k, w));
+                }
+            }
+        }
+        s
+    }
+
+    fn cascade_van(def: &OrganDefinition, naam: &str) -> bool {
+        def.couplers.iter().find(|c| c.name == naam).unwrap_or_else(|| panic!("koppel {naam}")).cascade_toegestaan
+    }
+
+    /// F7: de vijf `CoupleToSubsequent…`-sleutels bepalen of een koppel ketent,
+    /// maar alleen als "koppels volgen de set" aan staat.
+    #[test]
+    fn koppelketen_volgt_de_sleutels_van_de_set_alleen_als_dat_aan_staat() {
+        let n = Some("N");
+        let y = Some("Y");
+        let odf = odf_met_koppels(&[
+            ("AlleenN", [n, n, n, n, n]),
+            ("Gemengd", [y, n, n, n, n]),
+            ("GeenSleutels", [None, None, None, None, None]),
+            ("KleineLetter", [Some("n"), Some("n"), Some("n"), Some("n"), Some("n")]),
+        ]);
+        // Aan: alle vijf N ketent niet; één Y wel; zonder sleutels blijft het ja.
+        let aan = parse_odf_met_koppels("ketenaan", &odf, true);
+        assert!(!cascade_van(&aan, "AlleenN"));
+        assert!(cascade_van(&aan, "Gemengd"));
+        assert!(cascade_van(&aan, "GeenSleutels"));
+        assert!(!cascade_van(&aan, "KleineLetter"), "n of N maakt niet uit");
+        // Negatieve controle: uit = alle koppels ketenen, zoals tot nu toe.
+        let uit = parse_odf_met_koppels("ketenuit", &odf, false);
+        assert!(["AlleenN", "Gemengd", "GeenSleutels", "KleineLetter"].iter().all(|k| cascade_van(&uit, k)));
+    }
+
+    /// Speciale koppels (unison-off, melodie, bas) hebben de sleutels niet en
+    /// blijven ketenen, ook als "koppels volgen de set" aan staat.
+    #[test]
+    fn speciale_koppels_blijven_ketenen_bij_volgen_van_de_set() {
+        let mut odf = odf_met_koppels(&[("Normaal", [Some("N"); 5])]);
+        odf.push_str("[Coupler002]
+Name=Melodie
+DestinationManual=1
+CouplerType=Melody
+CoupleToSubsequentUnisonIntermanualCouplers=N
+");
+        odf.push_str("[Coupler003]
+Name=UnisonUit
+DestinationManual=1
+UnisonOff=Y
+CoupleToSubsequentUnisonIntermanualCouplers=N
+");
+        let def = parse_odf_met_koppels("ketenspeciaal", &odf, true);
+        assert!(!cascade_van(&def, "Normaal"));
+        assert!(cascade_van(&def, "Melodie"));
+        assert!(cascade_van(&def, "UnisonUit"));
+    }
+
+    #[test]
+    fn cascade_uit_de_vijf_vlaggen() {
+        assert!(cascade_uit_sleutels([None; 5]), "niets opgegeven: zoals het was");
+        assert!(!cascade_uit_sleutels([Some(false); 5]));
+        assert!(cascade_uit_sleutels([Some(true), Some(false), Some(false), Some(false), Some(false)]));
+        assert!(cascade_uit_sleutels([None, None, None, None, Some(true)]));
+        assert!(!cascade_uit_sleutels([Some(false), None, None, None, None]));
     }
 
     #[test]

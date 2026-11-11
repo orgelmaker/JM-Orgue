@@ -642,21 +642,29 @@ fn route_test_only(
             vpo_sampler::set_stereo_loading(on);
             Ok(json!({"stereo_samples": vpo_sampler::stereo_loading()}))
         }
-        // Niveaus van de set (E1), body {"on": true|false}; geldt bij de
-        // volgende /load_organ. Niet persistent (alleen voor proeven).
-        (tiny_http::Method::Post, "/niveaus_toepassen") => {
+        // Gedrag van de set per orgel (E1 niveaus, D3 overgangen, F7 koppelketen),
+        // body {"path": "...", "niveaus_van_set": bool, "overgangen_van_set": bool,
+        // "koppels_volgen_set": bool} (weggelaten vlag = uit) of {"path": "...",
+        // "wis": true}. Geldt bij de volgende /load_organ van dat orgel en wint
+        // dan van de opgeslagen instellingen. Niet persistent (alleen voor proeven).
+        (tiny_http::Method::Post, "/orgel_vlaggen") => {
             let v: serde_json::Value = serde_json::from_str(body).unwrap_or_default();
-            let on = v.get("on").and_then(|x| x.as_bool()).unwrap_or(true);
-            vpo_sampler::set_niveaus_toepassen(on);
-            Ok(json!({"niveaus_toepassen": vpo_sampler::niveaus_toepassen()}))
-        }
-        // Overgangslengtes van de set (D3), body {"on": true|false}; geldt bij
-        // de volgende /load_organ. Niet persistent (alleen voor proeven).
-        (tiny_http::Method::Post, "/overgangen_toepassen") => {
-            let v: serde_json::Value = serde_json::from_str(body).unwrap_or_default();
-            let on = v.get("on").and_then(|x| x.as_bool()).unwrap_or(true);
-            vpo_sampler::set_overgangen_toepassen(on);
-            Ok(json!({"overgangen_toepassen": vpo_sampler::overgangen_toepassen()}))
+            let Some(pad) = v.get("path").and_then(|x| x.as_str()) else {
+                return Err((400, "body mist \"path\"".to_string()));
+            };
+            let sleutel = crate::library::pad_sleutel(&crate::library::pad_notatie(pad));
+            if v.get("wis").and_then(|x| x.as_bool()).unwrap_or(false) {
+                state.vlag_overrides.write().remove(&sleutel);
+                return Ok(json!({"wis": true}));
+            }
+            let vlag = |naam: &str| v.get(naam).and_then(|x| x.as_bool()).unwrap_or(false);
+            let vlaggen = crate::orgelvlaggen::OrgelVlaggen {
+                niveaus_van_set: vlag("niveaus_van_set"),
+                overgangen_van_set: vlag("overgangen_van_set"),
+                koppels_volgen_set: vlag("koppels_volgen_set"),
+            };
+            state.vlag_overrides.write().insert(sleutel, vlaggen);
+            Ok(serde_json::to_value(vlaggen).unwrap_or_default())
         }
         // Plafond volgt het vrije geheugen (F1), body {"on": true|false};
         // rekent meteen opnieuw. Niet persistent (alleen voor proeven).
@@ -927,6 +935,16 @@ fn handle_status(state: &AppState) -> Value {
     let drawn = state.drawn_stops.read();
     let uit_eq_badge = state.output_eq_badge.read().clone();
 
+    // Het veld `cascade_toegestaan` gaat niet naar de interface; hier tellen we het.
+    let koppels_ketenend = {
+        let o = state.loaded_organ_info.read();
+        let (totaal, ketenend) = o.as_ref()
+            .and_then(|o| o.couplers.as_ref())
+            .map(|c| (c.len(), c.iter().filter(|x| x.cascade_toegestaan).count()))
+            .unwrap_or((0, 0));
+        json!({ "totaal": totaal, "ketenend": ketenend })
+    };
+
     json!({
         "audio_running": audio.is_some(),
         "sample_rate": sample_rate,
@@ -944,7 +962,9 @@ fn handle_status(state: &AppState) -> Value {
         "rt_backlog_peak": crate::state::rt_backlog_piek(),
         "rt_noteon_weggelaten": crate::state::rt_noteon_weggelaten(),
         "stereo_samples": vpo_sampler::stereo_loading(),
-        "niveaus_toepassen": vpo_sampler::niveaus_toepassen(),
+        "orgel_vlaggen": serde_json::to_value(*state.orgel_vlaggen.read()).unwrap_or_default(),
+        // Hoeveel van de koppels van het geladen orgel mogen doorketenen (F7).
+        "koppels_ketenend": koppels_ketenend,
         "realtime_prioriteit": serde_json::to_value(crate::rt_prioriteit::status()).unwrap_or_default(),
         "geheugen": serde_json::to_value(crate::geheugen::dto()).unwrap_or_default(),
         // Achtergrondlader (0.8.92): startbuffer, tekorten en latenties.

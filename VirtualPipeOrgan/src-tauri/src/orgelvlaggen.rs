@@ -1,0 +1,212 @@
+//! Gedrag van de set, per orgel (E1, D3, F7).
+//!
+//! Drie dingen die de set zelf bepaalt, kunnen de klank of werking van een
+//! orgel veranderen: de niveaus van de maker (E1), de crossfade van de maker bij
+//! het loslaten (D3) en of koppels doorketenen zoals de set wil (F7). Daarom
+//! geldt de regel die de gebruiker koos:
+//!
+//! - **Een orgel dat al opgeslagen instellingen heeft, houdt het oude gedrag**
+//!   (alles uit), zodat niemand na een update iets anders hoort.
+//! - **Een nieuw orgel (nog geen opgeslagen instellingen) krijgt alles
+//!   standaard aan.**
+//! - Per orgel is elke vlag met een vinkje om te zetten; wat de gebruiker koos
+//!   wordt bewaard en wint daarna altijd.
+//!
+//! "Nieuw" is dezelfde grens als waar de app de instelwizard aanbiedt: geen
+//! opgeslagen instellingen voor dit orgel. De vlaggen worden bij het eerste
+//! opslaan meteen mee bewaard, zodat een nieuw orgel de volgende keer niet
+//! alsnog als bestaand telt.
+
+use crate::library::OrganSettings;
+use serde::Serialize;
+
+/// De drie vlaggen voor één orgel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct OrgelVlaggen {
+    /// Niveau van het orgel en per pijplaag uit de definitie (E1).
+    pub niveaus_van_set: bool,
+    /// Crossfade-duur van de maker bij het loslaten (D3).
+    pub overgangen_van_set: bool,
+    /// Koppels ketenen zoals de set wil (F7).
+    pub koppels_volgen_set: bool,
+}
+
+impl OrgelVlaggen {
+    /// Het gedrag van vóór deze instellingen: alles uit.
+    pub const OUD: OrgelVlaggen = OrgelVlaggen {
+        niveaus_van_set: false,
+        overgangen_van_set: false,
+        koppels_volgen_set: false,
+    };
+
+    /// De standaard voor een nieuw orgel: alles aan.
+    pub const NIEUW: OrgelVlaggen = OrgelVlaggen {
+        niveaus_van_set: true,
+        overgangen_van_set: true,
+        koppels_volgen_set: true,
+    };
+
+    /// De vlaggen voor een orgel dat nu geladen wordt.
+    ///
+    /// - `forceer`: een expliciete keuze van buiten (de test-API voor proeven);
+    ///   wint van alles.
+    /// - Geen opgeslagen instellingen: nieuw orgel, alles aan.
+    /// - Wel opgeslagen instellingen: per vlag wat er staat; een vlag die er nog
+    ///   niet in staat (opgeslagen vóór deze instelling bestond) is uit.
+    pub fn bepaal(opgeslagen: Option<&OrganSettings>, forceer: Option<OrgelVlaggen>) -> OrgelVlaggen {
+        if let Some(f) = forceer {
+            return f;
+        }
+        match opgeslagen {
+            None => OrgelVlaggen::NIEUW,
+            Some(s) => OrgelVlaggen {
+                niveaus_van_set: s.niveaus_van_set.unwrap_or(false),
+                overgangen_van_set: s.overgangen_van_set.unwrap_or(false),
+                koppels_volgen_set: s.koppels_volgen_set.unwrap_or(false),
+            },
+        }
+    }
+
+    /// Zet de proces-brede schakelaars van de importers vóór het parsen van dit
+    /// orgel. De importers lezen ze bij het begin van elke import.
+    pub fn zet_importers(&self) {
+        vpo_sampler::set_niveaus_toepassen(self.niveaus_van_set);
+        vpo_sampler::set_overgangen_toepassen(self.overgangen_van_set);
+        vpo_sampler::set_koppels_volgen_set(self.koppels_volgen_set);
+    }
+
+    /// Zet één vlag op naam; onbekende naam geeft None.
+    pub fn met(&self, naam: &str, aan: bool) -> Option<OrgelVlaggen> {
+        let mut v = *self;
+        match naam {
+            "niveaus_van_set" => v.niveaus_van_set = aan,
+            "overgangen_van_set" => v.overgangen_van_set = aan,
+            "koppels_volgen_set" => v.koppels_volgen_set = aan,
+            _ => return None,
+        }
+        Some(v)
+    }
+
+    /// Wat er bij het opslaan in de instellingen van het orgel komt, per vlag.
+    ///
+    /// Normaal de huidige vlaggen. Is de keuze door een proef geforceerd
+    /// (`geforceerd`), dan blijven de opgeslagen vlaggen zoals ze waren: een
+    /// geforceerde keuze mag nooit in iemands bibliotheek terechtkomen.
+    pub fn te_bewaren(
+        geforceerd: bool,
+        huidig: OrgelVlaggen,
+        opgeslagen: Option<&OrganSettings>,
+    ) -> (Option<bool>, Option<bool>, Option<bool>) {
+        if geforceerd {
+            match opgeslagen {
+                Some(s) => (s.niveaus_van_set, s.overgangen_van_set, s.koppels_volgen_set),
+                None => (None, None, None),
+            }
+        } else {
+            (Some(huidig.niveaus_van_set), Some(huidig.overgangen_van_set), Some(huidig.koppels_volgen_set))
+        }
+    }
+
+    /// Schrijft de vlaggen in opgeslagen instellingen (elke vlag expliciet, zodat
+    /// ze daarna niet meer van de "bestaand of nieuw"-regel afhangen).
+    pub fn schrijf_in(&self, s: &mut OrganSettings) {
+        s.niveaus_van_set = Some(self.niveaus_van_set);
+        s.overgangen_van_set = Some(self.overgangen_van_set);
+        s.koppels_volgen_set = Some(self.koppels_volgen_set);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn instellingen(n: Option<bool>, o: Option<bool>, k: Option<bool>) -> OrganSettings {
+        OrganSettings {
+            niveaus_van_set: n,
+            overgangen_van_set: o,
+            koppels_volgen_set: k,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn nieuw_orgel_krijgt_alles_standaard_aan() {
+        assert_eq!(OrgelVlaggen::bepaal(None, None), OrgelVlaggen::NIEUW);
+        assert!(OrgelVlaggen::NIEUW.niveaus_van_set && OrgelVlaggen::NIEUW.overgangen_van_set && OrgelVlaggen::NIEUW.koppels_volgen_set);
+    }
+
+    #[test]
+    fn bestaand_orgel_zonder_vlaggen_houdt_het_oude_gedrag() {
+        // Opgeslagen vóór deze instellingen bestonden: alle drie ontbreken.
+        let s = instellingen(None, None, None);
+        assert_eq!(OrgelVlaggen::bepaal(Some(&s), None), OrgelVlaggen::OUD);
+        // Ook een volledig lege (Default) opgeslagen instelling telt als bestaand.
+        assert_eq!(OrgelVlaggen::bepaal(Some(&OrganSettings::default()), None), OrgelVlaggen::OUD);
+    }
+
+    #[test]
+    fn eigen_keuze_wint_altijd_per_vlag() {
+        let s = instellingen(Some(true), Some(false), None);
+        let v = OrgelVlaggen::bepaal(Some(&s), None);
+        assert!(v.niveaus_van_set);
+        assert!(!v.overgangen_van_set);
+        assert!(!v.koppels_volgen_set, "ontbrekende vlag bij een bestaand orgel = uit");
+        // Expliciet uit blijft uit, ook al is het orgel nieuw geweest toen het begon.
+        let alles_uit = instellingen(Some(false), Some(false), Some(false));
+        assert_eq!(OrgelVlaggen::bepaal(Some(&alles_uit), None), OrgelVlaggen::OUD);
+    }
+
+    #[test]
+    fn een_forcering_van_buiten_wint_van_alles() {
+        let s = instellingen(Some(true), Some(true), Some(true));
+        let f = OrgelVlaggen { niveaus_van_set: false, overgangen_van_set: true, koppels_volgen_set: false };
+        assert_eq!(OrgelVlaggen::bepaal(Some(&s), Some(f)), f);
+        assert_eq!(OrgelVlaggen::bepaal(None, Some(f)), f);
+    }
+
+    /// De regel die de gebruiker koos, als doorlopend verhaal: een nieuw orgel
+    /// wordt bewaard met de vlaggen erin en blijft daarna ook zo.
+    #[test]
+    fn nieuw_orgel_wordt_na_opslaan_niet_alsnog_bestaand() {
+        let eerste = OrgelVlaggen::bepaal(None, None);
+        assert_eq!(eerste, OrgelVlaggen::NIEUW);
+        let mut opgeslagen = OrganSettings::default();
+        eerste.schrijf_in(&mut opgeslagen);
+        // Volgende keer: er zijn instellingen, maar de vlaggen staan er expliciet in.
+        assert_eq!(OrgelVlaggen::bepaal(Some(&opgeslagen), None), OrgelVlaggen::NIEUW);
+    }
+
+    #[test]
+    fn geforceerde_vlaggen_worden_nooit_bewaard() {
+        let huidig = OrgelVlaggen::NIEUW;
+        // Normaal: de huidige stand, expliciet.
+        assert_eq!(OrgelVlaggen::te_bewaren(false, huidig, None), (Some(true), Some(true), Some(true)));
+        // Geforceerd, orgel zonder opgeslagen instellingen: niets vastleggen.
+        assert_eq!(OrgelVlaggen::te_bewaren(true, huidig, None), (None, None, None));
+        // Geforceerd, met opgeslagen instellingen: die blijven zoals ze waren.
+        let s = instellingen(Some(false), None, Some(false));
+        assert_eq!(OrgelVlaggen::te_bewaren(true, huidig, Some(&s)), (Some(false), None, Some(false)));
+        // Zonder forcering wint de huidige stand over wat er stond (de gebruiker koos).
+        assert_eq!(OrgelVlaggen::te_bewaren(false, huidig, Some(&s)), (Some(true), Some(true), Some(true)));
+    }
+
+    #[test]
+    fn een_vlag_zetten_op_naam() {
+        let v = OrgelVlaggen::OUD;
+        assert!(v.met("niveaus_van_set", true).unwrap().niveaus_van_set);
+        assert!(v.met("overgangen_van_set", true).unwrap().overgangen_van_set);
+        assert!(v.met("koppels_volgen_set", true).unwrap().koppels_volgen_set);
+        // De andere twee blijven zoals ze waren.
+        let w = v.met("niveaus_van_set", true).unwrap();
+        assert!(!w.overgangen_van_set && !w.koppels_volgen_set);
+        assert_eq!(v.met("bestaat_niet", true), None);
+    }
+
+    #[test]
+    fn json_van_de_interface_heeft_de_verwachte_velden() {
+        let v = serde_json::to_value(OrgelVlaggen::NIEUW).unwrap();
+        assert_eq!(v["niveaus_van_set"], true);
+        assert_eq!(v["overgangen_van_set"], true);
+        assert_eq!(v["koppels_volgen_set"], true);
+    }
+}

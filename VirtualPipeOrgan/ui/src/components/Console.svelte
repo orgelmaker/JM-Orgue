@@ -2056,12 +2056,25 @@
     try { await invoke('set_stereo_samples', { on }); stereoReloadHint = true; } catch (e) { console.error(e); }
     refreshAudioStatus();
   }
-  // Niveaus van de set (E1): het volume-niveau dat de maker per orgel en per
-  // pijp instelde. Globale voorkeur; wordt actief bij het volgende laden.
-  let niveausReloadHint = false;
-  async function setNiveausToepassen(on) {
-    try { await invoke('set_niveaus_toepassen', { on }); niveausReloadHint = true; } catch (e) { console.error(e); }
-    refreshAudioStatus();
+  // Gedrag van de set per orgel (E1 niveaus, D3 overgangen, F7 koppelketen):
+  // orgels die al instellingen hadden houden het oude gedrag, nieuwe orgels
+  // hebben het standaard aan. De importers lezen het bij het laden.
+  let orgelVlaggen = null;
+  let vlaggenOrgelId = null;
+  let vlaggenHerladen = false;
+  async function haalOrgelVlaggen() {
+    try { orgelVlaggen = await invoke('get_orgel_vlaggen'); } catch (e) { orgelVlaggen = null; }
+  }
+  $: if (organInfo?.id && organInfo.id !== vlaggenOrgelId) {
+    vlaggenOrgelId = organInfo.id;
+    vlaggenHerladen = false;
+    haalOrgelVlaggen();
+  }
+  async function zetOrgelVlag(naam, aan) {
+    try {
+      orgelVlaggen = await invoke('set_orgel_vlag', { naam, aan });
+      vlaggenHerladen = true;
+    } catch (e) { console.error('Vlag zetten mislukt:', e); }
   }
   // Startbuffer per opname (0.8.92): hoeveel ms van elke pijpopname vooraf in
   // het geheugen staat. Globale voorkeur; wordt actief bij de volgende load.
@@ -7047,6 +7060,29 @@
               {/each}
             </div>
 
+            <!-- Gedrag van de set per orgel (E1, D3, F7) -->
+            {#if !secondary && orgelVlaggen}
+            <div class="settings-block" class:inst-verborgen={instTabOrgel !== 'klank' && instTabOrgel !== 'alles'}>
+              <h3 class="settings-block-title">{$t('settings.vlaggen_titel')}</h3>
+              <p class="settings-hint" style="margin: 0 0 0.4rem;">{$t('settings.vlaggen_uitleg')}</p>
+              <label class="swell-toggle" style="margin-bottom:0.4rem;" title={$t('settings.niveaus_toepassen_hint')}>
+                <input type="checkbox" checked={orgelVlaggen.niveaus_van_set} on:change={(e) => zetOrgelVlag('niveaus_van_set', e.target.checked)} />
+                <span class="swell-toggle-label">{$t('settings.niveaus_toepassen')}</span>
+              </label>
+              <label class="swell-toggle" style="margin-bottom:0.4rem;" title={$t('settings.overgangen_toepassen_hint')}>
+                <input type="checkbox" checked={orgelVlaggen.overgangen_van_set} on:change={(e) => zetOrgelVlag('overgangen_van_set', e.target.checked)} />
+                <span class="swell-toggle-label">{$t('settings.overgangen_toepassen')}</span>
+              </label>
+              <label class="swell-toggle" style="margin-bottom:0.4rem;" title={$t('settings.koppels_volgen_set_hint')}>
+                <input type="checkbox" checked={orgelVlaggen.koppels_volgen_set} on:change={(e) => zetOrgelVlag('koppels_volgen_set', e.target.checked)} />
+                <span class="swell-toggle-label">{$t('settings.koppels_volgen_set')}</span>
+              </label>
+              {#if vlaggenHerladen}
+                <p style="margin: 0.2rem 0 0; font-size: 0.68rem; color: var(--warning, #d9a441); line-height: 1.35;">{$t('settings.reload_hint')}</p>
+              {/if}
+            </div>
+            {/if}
+
             <!-- Perspectieven en gestapelde ranks (0.7.38) -->
             {#if !secondary && ((organInfo?.perspectives?.length || 0) > 0 || (organInfo?.layered_stops || 0) > 0)}
             <div class="settings-block" class:inst-verborgen={instTabOrgel !== 'klank' && instTabOrgel !== 'alles'}>
@@ -8402,15 +8438,6 @@
                 <span>{$t('settings.stereo_samples')}</span>
               </label>
               {#if stereoReloadHint}
-                <p style="margin: 0.2rem 0 0; font-size: 0.68rem; color: var(--warning, #d9a441); line-height: 1.35;">{$t('settings.reload_hint')}</p>
-              {/if}
-
-              <!-- Niveaus van de set (E1) -->
-              <label class="swell-toggle" style="margin-top: 0.7rem; display: flex; align-items: center; gap: 0.4rem;" title={$t('settings.niveaus_toepassen_hint')}>
-                <input type="checkbox" checked={audioStatus ? audioStatus.niveaus_toepassen !== false : true} on:change={(e) => setNiveausToepassen(e.target.checked)} />
-                <span>{$t('settings.niveaus_toepassen')}</span>
-              </label>
-              {#if niveausReloadHint}
                 <p style="margin: 0.2rem 0 0; font-size: 0.68rem; color: var(--warning, #d9a441); line-height: 1.35;">{$t('settings.reload_hint')}</p>
               {/if}
 

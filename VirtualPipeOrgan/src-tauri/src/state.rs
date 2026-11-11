@@ -356,11 +356,6 @@ pub struct AudioPrefs {
     /// (halveert RAM bij stereo-sets). Wijziging vergt herladen van het orgel.
     #[serde(default)]
     pub stereo_samples: Option<bool>,
-    /// Niveaus van de set (orgel en pijplaag, uit de definitie van de maker)
-    /// toepassen; None = aan. Uit = alles op 0 dB zoals tot 0.9.50. Wijziging
-    /// vergt herladen van het orgel.
-    #[serde(default)]
-    pub niveaus_toepassen: Option<bool>,
     /// Realtime-prioriteit voor de mengwerkers (D2); None = aan. Uit = normale
     /// prioriteit zoals vóór deze instelling op Linux en macOS.
     #[serde(default)]
@@ -1761,6 +1756,11 @@ pub struct AppState {
     /// (0.7.47), zodat wisselen ogenblikkelijk is in plaats van een herlaad.
     /// Per orgel bewaard; geldt vanaf de volgende (her)load.
     pub load_all_perspectives: Arc<RwLock<bool>>,
+    /// Gedrag van de set voor het geladen orgel (E1/D3/F7), zie `orgelvlaggen.rs`.
+    pub orgel_vlaggen: Arc<RwLock<crate::orgelvlaggen::OrgelVlaggen>>,
+    /// Expliciete keuzes van buiten (de test-API, voor proeven) per orgel
+    /// (sleutel = `library::pad_sleutel`). Wint bij het laden; niet bewaard.
+    pub vlag_overrides: Arc<RwLock<std::collections::HashMap<String, crate::orgelvlaggen::OrgelVlaggen>>>,
     /// Luisterpositie-schuif (0.7.95): een getal 0..1 dat tussen de geladen
     /// opnameposities (dry → close → front → rear → diffuse, in die vaste
     /// volgorde) overblendt. 0.0 = volledig op de eerste positie (dichtbij),
@@ -1944,7 +1944,6 @@ impl AppState {
         tracing::info!("Sample-cache: plafond {} MB (fysiek geheugen {} MB)",
             cap / 1_000_000, ram.map(|r| r / 1_000_000).unwrap_or(0));
         vpo_sampler::set_stereo_loading(audio_prefs.stereo_samples.unwrap_or(true));
-        vpo_sampler::set_niveaus_toepassen(audio_prefs.niveaus_toepassen.unwrap_or(true));
         crate::audio::set_preload_ms(audio_prefs.preload_ms.unwrap_or(crate::audio::PRELOAD_MS_DEFAULT));
         let saved_cfg = AudioOutputConfig {
             host_name: audio_prefs.host.clone(),
@@ -2203,6 +2202,8 @@ impl AppState {
             base_couplers: Arc::new(RwLock::new(Vec::new())),
             extra_coupler_ids: Arc::new(RwLock::new(Vec::new())),
             load_all_perspectives: Arc::new(RwLock::new(false)),
+            orgel_vlaggen: Arc::new(RwLock::new(crate::orgelvlaggen::OrgelVlaggen::OUD)),
+            vlag_overrides: Arc::new(RwLock::new(std::collections::HashMap::new())),
             listening_position: Arc::new(RwLock::new(0.0)),
             background_gain: Arc::new(RwLock::new(1.0)),
             mechanics_gains: Arc::new(RwLock::new([1.0; 3])),

@@ -332,8 +332,6 @@ pub struct StatusDto {
     pub rt_drops: u64,
     /// Stereo-samples als twee kanalen laden (instelling).
     pub stereo_samples: bool,
-    /// Niveaus van de set (orgel en pijplaag) toepassen bij het laden (instelling).
-    pub niveaus_toepassen: bool,
     /// Automatisch MIDI-archief legt op dit moment een take vast.
     pub midi_archiving: bool,
     /// Uitgangscorrectie (0.7.78): aan voor de actieve profielsoort, en de
@@ -556,17 +554,39 @@ pub fn set_stereo_samples(state: State<AppState>, on: bool) -> Result<(), String
     Ok(())
 }
 
-/// Niveaus van de set toepassen (aan) of alles op 0 dB laten zoals tot 0.9.50
-/// (uit). Het niveau van het hele orgel en dat per pijplaag komen uit de
-/// definitie van de maker; geldt voor het volgende (her)laden van een orgel.
+/// Gedrag van de set voor het geladen orgel (E1 niveaus, D3 overgangen, F7
+/// koppelketen): bestaande orgels houden het oude gedrag, nieuwe orgels hebben
+/// het standaard aan, en wat de gebruiker koos wordt per orgel bewaard.
 #[tauri::command]
-pub fn set_niveaus_toepassen(state: State<AppState>, on: bool) -> Result<(), String> {
-    vpo_sampler::set_niveaus_toepassen(on);
-    let mut prefs = crate::state::load_audio_prefs(&state.app_data_dir);
-    prefs.niveaus_toepassen = Some(on);
-    crate::state::save_audio_prefs(&state.app_data_dir, &prefs);
-    info!("Niveaus van de set toepassen: {}", if on { "aan" } else { "uit" });
-    Ok(())
+pub fn get_orgel_vlaggen(state: State<AppState>) -> crate::orgelvlaggen::OrgelVlaggen {
+    *state.orgel_vlaggen.read()
+}
+
+/// Zet één vlag (`niveaus_van_set`, `overgangen_van_set` of `koppels_volgen_set`)
+/// voor het geladen orgel. De importers lezen ze bij het laden, dus de wijziging
+/// werkt na een herlaad. Wordt meteen in de opgeslagen instellingen van het orgel
+/// gezet als die al bestaan; een orgel zonder opgeslagen instellingen bewaart ze
+/// bij de eerstvolgende gewone opslag (we maken hier geen instellingen aan: dat
+/// zou het orgel ten onrechte als "bestaand" laten tellen).
+#[tauri::command]
+pub fn set_orgel_vlag(state: State<AppState>, naam: String, aan: bool) -> Result<crate::orgelvlaggen::OrgelVlaggen, String> {
+    let huidig = *state.orgel_vlaggen.read();
+    let nieuw = huidig.met(&naam, aan).ok_or_else(|| format!("Onbekende vlag: {}", naam))?;
+    *state.orgel_vlaggen.write() = nieuw;
+    if let Some(id) = state.current_organ_id.read().clone() {
+        let bewaard = {
+            let mut lib = state.organ_library.write();
+            match lib.settings.get_mut(&id) {
+                Some(s) => { nieuw.schrijf_in(s); true }
+                None => false,
+            }
+        };
+        if bewaard {
+            state.save_library();
+        }
+    }
+    info!("Gedrag van de set ({}): {}", naam, if aan { "aan" } else { "uit" });
+    Ok(nieuw)
 }
 
 /// Startbuffer per opname in ms (0.8.92); actief bij de volgende orgel-load.
@@ -3296,6 +3316,23 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
     // en maakt omzetten van het pad een naam die niet bestaat.
     let path = &crate::library::pad_notatie(path);
     info!("Loading organ from: {}", path);
+
+    // Gedrag van de set voor DIT orgel (E1/D3/F7), vóór het parsen: een orgel met
+    // opgeslagen instellingen houdt het oude gedrag, een nieuw orgel krijgt het
+    // standaard aan, en een eigen keuze wint (zie `orgelvlaggen.rs`).
+    {
+        let forceer = state.vlag_overrides.read().get(&crate::library::pad_sleutel(path)).copied();
+        let vlaggen = crate::orgelvlaggen::OrgelVlaggen::bepaal(saved_settings_for(state, path).as_ref(), forceer);
+        vlaggen.zet_importers();
+        *state.orgel_vlaggen.write() = vlaggen;
+        info!(
+            "Gedrag van de set voor dit orgel: niveaus {}, overgangen {}, koppels volgen de set {}{}",
+            if vlaggen.niveaus_van_set { "aan" } else { "uit" },
+            if vlaggen.overgangen_van_set { "aan" } else { "uit" },
+            if vlaggen.koppels_volgen_set { "aan" } else { "uit" },
+            if forceer.is_some() { " (geforceerd)" } else { "" },
+        );
+    }
 
     let odf_path = Path::new(path);
     // Hauptwerk sets (*.Organ_Hauptwerk_xml) use a different format; route them to
@@ -8189,7 +8226,6 @@ pub fn get_status(state: State<AppState>) -> Result<StatusDto, String> {
         licht_interp_actief: crate::audio::licht_interp_actief(),
         rt_drops: crate::state::rt_drop_count(),
         stereo_samples: vpo_sampler::stereo_loading(),
-        niveaus_toepassen: vpo_sampler::niveaus_toepassen(),
         midi_archiving: state.midi_archive.archiving.load(std::sync::atomic::Ordering::Relaxed),
         output_eq_enabled: uit_eq_badge.0,
         output_eq_name: uit_eq_badge.1,
@@ -10686,6 +10722,14 @@ pub fn do_save_organ_settings(state: &AppState, presets: HashMap<String, PresetD
     // gepubliceerd heeft mag de bewaarde indeling niet wissen).
     let remote_layout = state.remote_layout.read().clone().or(existing_remote_layout);
 
+    // Gedrag van de set (E1/D3/F7): wat nu staat, tenzij een proef via de test-API
+    // het geforceerd heeft; zo'n geforceerde keuze wordt nooit bewaard.
+    let (vlag_niveaus, vlag_overgangen, vlag_koppels) = {
+        let geforceerd = state.vlag_overrides.read().contains_key(&crate::library::pad_sleutel(&organ_id));
+        let lib = state.organ_library.read();
+        crate::orgelvlaggen::OrgelVlaggen::te_bewaren(
+            geforceerd, *state.orgel_vlaggen.read(), lib.settings.get(&organ_id))
+    };
     let settings = OrganSettings {
         presets,
         preset_bindings,
@@ -10713,6 +10757,9 @@ pub fn do_save_organ_settings(state: &AppState, presets: HashMap<String, PresetD
         wind_group_configs,
         perspectives,
         load_all_perspectives: *state.load_all_perspectives.read(),
+        niveaus_van_set: vlag_niveaus,
+        overgangen_van_set: vlag_overgangen,
+        koppels_volgen_set: vlag_koppels,
         listening_position: Some(*state.listening_position.read()),
         background_gain: Some(*state.background_gain.read()),
         mechanics_gains: Some(*state.mechanics_gains.read()),

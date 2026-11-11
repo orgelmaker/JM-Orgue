@@ -192,7 +192,7 @@ def cmd_opnemen(a):
         'datum': datetime.datetime.now().isoformat(timespec='seconds'),
         'app_versie': versie.get('version') if isinstance(versie, dict) else versie,
         'orgel': org.get('name'), 'orgel_pad': a.orgel,
-        'niveaus_toepassen': status.get('niveaus_toepassen'), 'sample_rate': status.get('sample_rate'),
+        'orgel_vlaggen': status.get('orgel_vlaggen'), 'sample_rate': status.get('sample_rate'),
         'tuning': api('GET', '/tuning'), 'galm_uit': not a.galm_aan, 'voor_opdrachten': a.voor or [],
         'tijdlijn': {'gap_s': a.gap, 'items': items, 'totaal_s': totaal},
         'machine': {'os': platform.platform(), 'python': platform.python_version()},
@@ -668,7 +668,7 @@ def main():
     p.add_argument('--registers', nargs='*', help='delen van registernamen; zonder: de eerste --max registers')
     p.add_argument('--max', type=int, default=3)
     p.add_argument('--gap', type=float, default=4.0, help='seconden stilte na elke noot (natte sets: 6-8)')
-    p.add_argument('--voor', action='append', help='API-opdracht vóór het laden, bv. "POST /niveaus_toepassen {\\"on\\":false}"')
+    p.add_argument('--voor', action='append', help='API-opdracht vóór het laden, bv. "POST /orgel_vlaggen {\\"path\\": \\"<orgelpad>\\", \\"niveaus_van_set\\": false}"')
     p.add_argument('--galm-aan', action='store_true', help='galm van JM-Orgue laten staan (standaard droog: mix 0)')
     p.set_defaults(f=cmd_opnemen)
     p = sub.add_parser('analyseer')

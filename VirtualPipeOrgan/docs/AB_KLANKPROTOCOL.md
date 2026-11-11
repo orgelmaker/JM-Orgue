@@ -130,7 +130,7 @@ opgenomen; de engine is hierbij deterministisch): niveau +0,0 dB, balans 0,0 dB,
 uitsterven ×1,00 tot ×1,05, nul vlaggen. De richtwaarden liggen daar ruim boven.
 
 **Controle dat de proef een echte wijziging ziet:** dezelfde set met de niveaus van de maker aan tegen uit
-(E1, `POST /niveaus_toepassen`). Uitkomst: niveau +20,0 dB op elke noot (de set stelt −20 dB in), balans 0,0 dB,
+(E1, `POST /orgel_vlaggen` met `niveaus_van_set` aan of uit, per orgelpad). Uitkomst: niveau +20,0 dB op elke noot (de set stelt −20 dB in), balans 0,0 dB,
 toonhoogte 0,0 ct, aanzet ×1,00–1,02, uitsterven ×1,00–1,10; de enige vlag is het niveau.
 
 ### 7.3 Tegen een referentiespeler (GrandOrgue, Hauptwerk)

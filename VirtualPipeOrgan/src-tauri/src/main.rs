@@ -16,6 +16,7 @@ mod feedback;
 mod geheugen;
 mod import_pakketroot;
 mod library;
+mod orgelvlaggen;
 mod library_online;
 mod logging;
 mod silence;
@@ -382,7 +383,8 @@ fn main() {
             commands::set_continuous_keyboard,
             commands::get_continuous_keyboard,
             commands::set_stereo_samples,
-            commands::set_niveaus_toepassen,
+            commands::get_orgel_vlaggen,
+            commands::set_orgel_vlag,
             commands::get_preload_ms,
             commands::set_preload_ms,
             // Gestapelde ranks en microfoonperspectieven (0.7.38)
