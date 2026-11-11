@@ -6,6 +6,20 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### Testmodules uit de grote bronbestanden (B8)
+- De 34 testmodules uit `audio.rs` (12), `commands.rs` (12) en `state.rs` (10) staan nu
+  elk in een eigen bestand in `src-tauri/src/audio_tests/`, `commands_tests/` en
+  `state_tests/`. De bestanden zelf zijn daardoor zo'n 4.200 regels korter
+  (`audio.rs` 7.931 → 6.382, `commands.rs` 12.714 → 11.580, `state.rs` 7.180 → 5.699).
+- Alleen verplaatst: elke module blijft een kind van hetzelfde bestand (dezelfde
+  modulepaden, dezelfde toegang tot privé-items, dezelfde testnamen). Bewezen met
+  een vergelijking met de vorige versie: de productiecode is regel voor regel
+  gelijk, de testcode is gelijk op de inspringing na (regels in meerregelige
+  strings zijn niet aangeraakt), en de lijst van 499 testnamen is identiek.
+  Geen codewijziging, geen klankverandering.
+- De losse hulpfuncties voor tests die midden in het productiebestand staan
+  (`#[cfg(test)] fn ...`) blijven waar ze staan.
+
 ### Uitgangstrap: vaste regel "uit kost niets" vastgelegd (F6)
 - Nieuwe test `uitgangsopties_die_uit_staan_laten_de_uitvoer_bit_identiek`: voor de
   twee EQ-trappen in de uitvoer (orgel-EQ en uitgangscorrectie) geldt elke vorm
