@@ -6,6 +6,39 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### Stille staart van release-opnames afkappen (D7, tweede deel)
+- Een release-opname (de kerkakoestiek na het loslaten van een toets) eindigt vaak in
+  een stuk dat zo zacht is dat niemand het hoort, maar dat toch tot het einde van het
+  bestand wordt meegemengd en een stemplaats bezet. Nieuw: dat stille slot wordt bij het
+  laden weggelaten, alleen voor release-opnames, alleen als het orgel dat aan heeft.
+  Gemeten op twee echte sets: bij −90 dBFS is gemiddeld 8,5 % en 15,0 % van alle
+  release-frames zulke stille staart; bij −70 dBFS 28 % en 33 %.
+- Per orgel een vinkje onder Instellingen → Klank, "Stille staarten afkappen" (vierde
+  vlak in "Gedrag van de set"), met dezelfde regel als de andere drie: **orgels die al
+  opgeslagen instellingen hebben houden het oude gedrag (uit), nieuw geïnstalleerde
+  orgels krijgen het standaard aan**. Daarnaast een algemene drempel in dB
+  (−120 tot −60, standaard −90). Een wijziging werkt na het opnieuw laden van het orgel.
+- Wat er precies gebeurt: alles tot en met het laatste venster van 10 ms waarin de piek
+  (over beide kanalen) de drempel haalt blijft **bit voor bit** gelijk; alleen wat daarna
+  komt valt weg, en er blijft altijd minstens één venster. Samples met looppunten
+  (aangehouden klank, of een release uit hetzelfde bestand als de aanslag) worden nooit
+  geknipt. Een afgekapte kopie krijgt een eigen plek in de laadcache, zodat hij nooit met
+  een aanslag uit hetzelfde bestand wordt gedeeld. Het knippen gebeurt op de laadthread;
+  de audio-callback is niet veranderd.
+- Gemeten in de echte app (GrandOrgue-set, 22 registers, tien noten, loslaten): met de
+  afkap aan werden 204 release-samples afgekapt (4,05 miljoen frames), daalden de
+  stem-seconden na het loslaten met 6,6 % (861 → 804) en was het stil 0,5 s eerder
+  (13,0 → 12,5 s). Met de afkap uit: nul afgekapt. Nieuwe tellers in `/status` onder
+  `loader` (`staart_afgekapt_samples`, `staart_afgekapt_frames`).
+- Tests: negen eenheidstests (bit-gelijkheid van het behouden deel, drempel in de goede
+  richting, precies op de drempel, looppunten, stereo, lege en stille samples) en een
+  per-orgel-test voor de nieuwe vlag.
+- Niet gedaan: een A/B-opname van de klank (het behouden deel is per test bit-gelijk, de
+  weggelaten staart is zachter dan de drempel), het nieuw-orgel-pad in de echte app (een
+  nog nooit geopend orgel laden zou de instelwizard voor jou overslaan; alleen met
+  eenheidstests gedekt), en macOS en Linux (alleen via de platformcontrole in de CI).
+  Uit D7 bewust niet: loops filteren en release-uitlijning.
+
 ### Beveiliging van de webview: CSP en ontwikkelaarstools (B3)
 - De webview had geen Content-Security-Policy (`csp: null`). Nu laat hij alleen laden
   van de app zelf, plus precies wat de UI nodig heeft: afbeeldingen van

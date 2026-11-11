@@ -18,6 +18,7 @@ pub mod custom_organ;
 pub mod perspective;
 pub mod registernaam;
 pub mod wavpack;
+pub mod stille_staart;
 
 pub use loader::{
     SampleData, SampleError, PreloadBuffer, PreloadSegment, WavMarkers, ReleaseAlignTable,
@@ -25,6 +26,11 @@ pub use loader::{
     load_mp3, load_audio, load_audio_preload, optimize_loop_end, optimize_loop_end_lr, optimize_loop_points,
     split_channels, set_stereo_loading, stereo_loading,
     resample, normalize, apply_fades, read_wav_loop_points, read_wav_markers, HarmShelf
+};
+pub use stille_staart::{
+    knip_stille_staart, set_staart_afkap_aan, staart_afkap_aan, set_staart_drempel, staart_drempel,
+    staart_afkap, geldige_staart_drempel,
+    STAART_AFKAP_STANDAARD_DB, STAART_AFKAP_MIN_DB, STAART_AFKAP_MAX_DB,
 };
 pub use cache::*;
 pub use pool::*;

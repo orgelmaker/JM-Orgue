@@ -562,7 +562,8 @@ pub fn get_orgel_vlaggen(state: State<AppState>) -> crate::orgelvlaggen::OrgelVl
     *state.orgel_vlaggen.read()
 }
 
-/// Zet één vlag (`niveaus_van_set`, `overgangen_van_set` of `koppels_volgen_set`)
+/// Zet één vlag (`niveaus_van_set`, `overgangen_van_set`, `koppels_volgen_set`
+/// of `staart_afkap`)
 /// voor het geladen orgel. De importers lezen ze bij het laden, dus de wijziging
 /// werkt na een herlaad. Wordt meteen in de opgeslagen instellingen van het orgel
 /// gezet als die al bestaan; een orgel zonder opgeslagen instellingen bewaart ze
@@ -587,6 +588,24 @@ pub fn set_orgel_vlag(state: State<AppState>, naam: String, aan: bool) -> Result
     }
     info!("Gedrag van de set ({}): {}", naam, if aan { "aan" } else { "uit" });
     Ok(nieuw)
+}
+
+/// Drempel in dBFS waaronder de staart van een release-sample wordt afgekapt
+/// (D7), voor orgels waarvoor dat aan staat. Standaard −90.
+#[tauri::command]
+pub fn get_staart_drempel() -> f32 { vpo_sampler::staart_drempel() }
+
+/// Zet die drempel (geklemd op −120…−60 dBFS) en bewaar hem. Werkt bij het
+/// opnieuw laden van het orgel, net als de vlag zelf.
+#[tauri::command]
+pub fn set_staart_drempel(state: State<AppState>, db: f32) -> f32 {
+    vpo_sampler::set_staart_drempel(db);
+    let gekozen = vpo_sampler::staart_drempel();
+    let mut prefs = crate::state::load_audio_prefs(&state.app_data_dir);
+    prefs.staart_drempel_db = Some(gekozen);
+    crate::state::save_audio_prefs(&state.app_data_dir, &prefs);
+    info!("Drempel voor het afkappen van stille staarten: {} dBFS", gekozen);
+    gekozen
 }
 
 /// Startbuffer per opname in ms (0.8.92); actief bij de volgende orgel-load.
@@ -3194,10 +3213,11 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
         vlaggen.zet_importers();
         *state.orgel_vlaggen.write() = vlaggen;
         info!(
-            "Gedrag van de set voor dit orgel: niveaus {}, overgangen {}, koppels volgen de set {}{}",
+            "Gedrag van de set voor dit orgel: niveaus {}, overgangen {}, koppels volgen de set {}, stille staart afkappen {}{}",
             if vlaggen.niveaus_van_set { "aan" } else { "uit" },
             if vlaggen.overgangen_van_set { "aan" } else { "uit" },
             if vlaggen.koppels_volgen_set { "aan" } else { "uit" },
+            if vlaggen.staart_afkap { "aan" } else { "uit" },
             if forceer.is_some() { " (geforceerd)" } else { "" },
         );
     }
@@ -10592,7 +10612,7 @@ pub fn do_save_organ_settings(state: &AppState, presets: HashMap<String, PresetD
 
     // Gedrag van de set (E1/D3/F7): wat nu staat, tenzij een proef via de test-API
     // het geforceerd heeft; zo'n geforceerde keuze wordt nooit bewaard.
-    let (vlag_niveaus, vlag_overgangen, vlag_koppels) = {
+    let (vlag_niveaus, vlag_overgangen, vlag_koppels, vlag_staart) = {
         let geforceerd = state.vlag_overrides.read().contains_key(&crate::library::pad_sleutel(&organ_id));
         let lib = state.organ_library.read();
         crate::orgelvlaggen::OrgelVlaggen::te_bewaren(
@@ -10628,6 +10648,7 @@ pub fn do_save_organ_settings(state: &AppState, presets: HashMap<String, PresetD
         niveaus_van_set: vlag_niveaus,
         overgangen_van_set: vlag_overgangen,
         koppels_volgen_set: vlag_koppels,
+        staart_afkap: vlag_staart,
         listening_position: Some(*state.listening_position.read()),
         background_gain: Some(*state.background_gain.read()),
         mechanics_gains: Some(*state.mechanics_gains.read()),

@@ -1,9 +1,9 @@
-//! Gedrag van de set, per orgel (E1, D3, F7).
+//! Gedrag van de set, per orgel (E1, D3, F7, D7).
 //!
-//! Drie dingen die de set zelf bepaalt, kunnen de klank of werking van een
-//! orgel veranderen: de niveaus van de maker (E1), de crossfade van de maker bij
-//! het loslaten (D3) en of koppels doorketenen zoals de set wil (F7). Daarom
-//! geldt de regel die de gebruiker koos:
+//! Vier dingen kunnen de klank of werking van een orgel veranderen: de niveaus
+//! van de maker (E1), de crossfade van de maker bij het loslaten (D3), of
+//! koppels doorketenen zoals de set wil (F7) en het afkappen van de stille
+//! staart van release-samples (D7). Daarom geldt de regel die de gebruiker koos:
 //!
 //! - **Een orgel dat al opgeslagen instellingen heeft, houdt het oude gedrag**
 //!   (alles uit), zodat niemand na een update iets anders hoort.
@@ -20,7 +20,7 @@
 use crate::library::OrganSettings;
 use serde::Serialize;
 
-/// De drie vlaggen voor één orgel.
+/// De vier vlaggen voor één orgel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct OrgelVlaggen {
     /// Niveau van het orgel en per pijplaag uit de definitie (E1).
@@ -29,6 +29,9 @@ pub struct OrgelVlaggen {
     pub overgangen_van_set: bool,
     /// Koppels ketenen zoals de set wil (F7).
     pub koppels_volgen_set: bool,
+    /// Stille staart van release-samples afkappen (D7). De drempel is een
+    /// algemene instelling (standaard −90 dBFS).
+    pub staart_afkap: bool,
 }
 
 impl OrgelVlaggen {
@@ -37,6 +40,7 @@ impl OrgelVlaggen {
         niveaus_van_set: false,
         overgangen_van_set: false,
         koppels_volgen_set: false,
+        staart_afkap: false,
     };
 
     /// De standaard voor een nieuw orgel: alles aan.
@@ -44,6 +48,7 @@ impl OrgelVlaggen {
         niveaus_van_set: true,
         overgangen_van_set: true,
         koppels_volgen_set: true,
+        staart_afkap: true,
     };
 
     /// De vlaggen voor een orgel dat nu geladen wordt.
@@ -63,6 +68,7 @@ impl OrgelVlaggen {
                 niveaus_van_set: s.niveaus_van_set.unwrap_or(false),
                 overgangen_van_set: s.overgangen_van_set.unwrap_or(false),
                 koppels_volgen_set: s.koppels_volgen_set.unwrap_or(false),
+                staart_afkap: s.staart_afkap.unwrap_or(false),
             },
         }
     }
@@ -73,6 +79,7 @@ impl OrgelVlaggen {
         vpo_sampler::set_niveaus_toepassen(self.niveaus_van_set);
         vpo_sampler::set_overgangen_toepassen(self.overgangen_van_set);
         vpo_sampler::set_koppels_volgen_set(self.koppels_volgen_set);
+        vpo_sampler::set_staart_afkap_aan(self.staart_afkap);
     }
 
     /// Zet één vlag op naam; onbekende naam geeft None.
@@ -82,6 +89,7 @@ impl OrgelVlaggen {
             "niveaus_van_set" => v.niveaus_van_set = aan,
             "overgangen_van_set" => v.overgangen_van_set = aan,
             "koppels_volgen_set" => v.koppels_volgen_set = aan,
+            "staart_afkap" => v.staart_afkap = aan,
             _ => return None,
         }
         Some(v)
@@ -96,14 +104,19 @@ impl OrgelVlaggen {
         geforceerd: bool,
         huidig: OrgelVlaggen,
         opgeslagen: Option<&OrganSettings>,
-    ) -> (Option<bool>, Option<bool>, Option<bool>) {
+    ) -> (Option<bool>, Option<bool>, Option<bool>, Option<bool>) {
         if geforceerd {
             match opgeslagen {
-                Some(s) => (s.niveaus_van_set, s.overgangen_van_set, s.koppels_volgen_set),
-                None => (None, None, None),
+                Some(s) => (s.niveaus_van_set, s.overgangen_van_set, s.koppels_volgen_set, s.staart_afkap),
+                None => (None, None, None, None),
             }
         } else {
-            (Some(huidig.niveaus_van_set), Some(huidig.overgangen_van_set), Some(huidig.koppels_volgen_set))
+            (
+                Some(huidig.niveaus_van_set),
+                Some(huidig.overgangen_van_set),
+                Some(huidig.koppels_volgen_set),
+                Some(huidig.staart_afkap),
+            )
         }
     }
 
@@ -113,6 +126,7 @@ impl OrgelVlaggen {
         s.niveaus_van_set = Some(self.niveaus_van_set);
         s.overgangen_van_set = Some(self.overgangen_van_set);
         s.koppels_volgen_set = Some(self.koppels_volgen_set);
+        s.staart_afkap = Some(self.staart_afkap);
     }
 }
 
@@ -129,10 +143,16 @@ mod tests {
         }
     }
 
+    fn instellingen4(n: Option<bool>, o: Option<bool>, k: Option<bool>, a: Option<bool>) -> OrganSettings {
+        OrganSettings { staart_afkap: a, ..instellingen(n, o, k) }
+    }
+
     #[test]
     fn nieuw_orgel_krijgt_alles_standaard_aan() {
         assert_eq!(OrgelVlaggen::bepaal(None, None), OrgelVlaggen::NIEUW);
         assert!(OrgelVlaggen::NIEUW.niveaus_van_set && OrgelVlaggen::NIEUW.overgangen_van_set && OrgelVlaggen::NIEUW.koppels_volgen_set);
+        assert!(OrgelVlaggen::NIEUW.staart_afkap, "ook de staartafkap staat voor een nieuw orgel aan");
+        assert!(!OrgelVlaggen::OUD.staart_afkap, "en voor een bestaand orgel uit");
     }
 
     #[test]
@@ -159,7 +179,7 @@ mod tests {
     #[test]
     fn een_forcering_van_buiten_wint_van_alles() {
         let s = instellingen(Some(true), Some(true), Some(true));
-        let f = OrgelVlaggen { niveaus_van_set: false, overgangen_van_set: true, koppels_volgen_set: false };
+        let f = OrgelVlaggen { niveaus_van_set: false, overgangen_van_set: true, koppels_volgen_set: false, staart_afkap: true };
         assert_eq!(OrgelVlaggen::bepaal(Some(&s), Some(f)), f);
         assert_eq!(OrgelVlaggen::bepaal(None, Some(f)), f);
     }
@@ -180,14 +200,14 @@ mod tests {
     fn geforceerde_vlaggen_worden_nooit_bewaard() {
         let huidig = OrgelVlaggen::NIEUW;
         // Normaal: de huidige stand, expliciet.
-        assert_eq!(OrgelVlaggen::te_bewaren(false, huidig, None), (Some(true), Some(true), Some(true)));
+        assert_eq!(OrgelVlaggen::te_bewaren(false, huidig, None), (Some(true), Some(true), Some(true), Some(true)));
         // Geforceerd, orgel zonder opgeslagen instellingen: niets vastleggen.
-        assert_eq!(OrgelVlaggen::te_bewaren(true, huidig, None), (None, None, None));
+        assert_eq!(OrgelVlaggen::te_bewaren(true, huidig, None), (None, None, None, None));
         // Geforceerd, met opgeslagen instellingen: die blijven zoals ze waren.
-        let s = instellingen(Some(false), None, Some(false));
-        assert_eq!(OrgelVlaggen::te_bewaren(true, huidig, Some(&s)), (Some(false), None, Some(false)));
+        let s = instellingen4(Some(false), None, Some(false), Some(false));
+        assert_eq!(OrgelVlaggen::te_bewaren(true, huidig, Some(&s)), (Some(false), None, Some(false), Some(false)));
         // Zonder forcering wint de huidige stand over wat er stond (de gebruiker koos).
-        assert_eq!(OrgelVlaggen::te_bewaren(false, huidig, Some(&s)), (Some(true), Some(true), Some(true)));
+        assert_eq!(OrgelVlaggen::te_bewaren(false, huidig, Some(&s)), (Some(true), Some(true), Some(true), Some(true)));
     }
 
     #[test]
@@ -196,9 +216,10 @@ mod tests {
         assert!(v.met("niveaus_van_set", true).unwrap().niveaus_van_set);
         assert!(v.met("overgangen_van_set", true).unwrap().overgangen_van_set);
         assert!(v.met("koppels_volgen_set", true).unwrap().koppels_volgen_set);
-        // De andere twee blijven zoals ze waren.
+        assert!(v.met("staart_afkap", true).unwrap().staart_afkap);
+        // De andere blijven zoals ze waren.
         let w = v.met("niveaus_van_set", true).unwrap();
-        assert!(!w.overgangen_van_set && !w.koppels_volgen_set);
+        assert!(!w.overgangen_van_set && !w.koppels_volgen_set && !w.staart_afkap);
         assert_eq!(v.met("bestaat_niet", true), None);
     }
 
@@ -208,5 +229,18 @@ mod tests {
         assert_eq!(v["niveaus_van_set"], true);
         assert_eq!(v["overgangen_van_set"], true);
         assert_eq!(v["koppels_volgen_set"], true);
+        assert_eq!(v["staart_afkap"], true);
+    }
+
+    /// Een orgel dat vóór deze instelling is opgeslagen (de andere drie staan er
+    /// wel, de staartafkap niet) houdt het oude gedrag: staart ongemoeid.
+    #[test]
+    fn bestaand_orgel_zonder_staartvlag_laat_de_staart_staan() {
+        let s = instellingen4(Some(true), Some(true), Some(true), None);
+        let v = OrgelVlaggen::bepaal(Some(&s), None);
+        assert!(v.niveaus_van_set && v.overgangen_van_set && v.koppels_volgen_set);
+        assert!(!v.staart_afkap);
+        let aan = instellingen4(None, None, None, Some(true));
+        assert!(OrgelVlaggen::bepaal(Some(&aan), None).staart_afkap, "een eigen keuze wint");
     }
 }

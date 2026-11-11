@@ -54,6 +54,10 @@ static LOAD_T_RESAMPLE_US: AtomicU64 = AtomicU64::new(0);
 static LOAD_T_CACHE_US: AtomicU64 = AtomicU64::new(0);
 static LOAD_BYTES: AtomicU64 = AtomicU64::new(0);
 static LOAD_RESAMPLED: AtomicU64 = AtomicU64::new(0);
+/// Release-samples waarvan de stille staart is afgekapt (D7) en het totaal aantal
+/// afgekapte frames; alleen de laadthreads tellen mee.
+static STAART_AFGEKAPT_SAMPLES: AtomicU64 = AtomicU64::new(0);
+static STAART_AFGEKAPT_FRAMES: AtomicU64 = AtomicU64::new(0);
 
 /// (decode, loop, resample, cache) gemiddeld in ms per load, MB per load, aantal geresampled.
 pub fn load_stappen() -> (f64, f64, f64, f64, f64, u64) {
@@ -76,6 +80,8 @@ pub struct LoaderStats {
     pub retries: u64,
     pub latency_avg_ms: f64,
     pub latency_max_ms: f64,
+    pub staart_afgekapt_samples: u64,
+    pub staart_afgekapt_frames: u64,
 }
 
 pub fn loader_stats() -> LoaderStats {
@@ -93,6 +99,8 @@ pub fn loader_stats() -> LoaderStats {
         retries: LOAD_RETRIES.load(Ordering::Relaxed),
         latency_avg_ms: if done > 0 { sum as f64 / done as f64 / 1000.0 } else { 0.0 },
         latency_max_ms: LOAD_LATENCY_MAX_US.load(Ordering::Relaxed) as f64 / 1000.0,
+        staart_afgekapt_samples: STAART_AFGEKAPT_SAMPLES.load(Ordering::Relaxed),
+        staart_afgekapt_frames: STAART_AFGEKAPT_FRAMES.load(Ordering::Relaxed),
     }
 }
 
@@ -3481,7 +3489,10 @@ fn run_audio_thread(
     //   geresampled. Weak: dedupliceert zolang de engine de sample vasthoudt,
     //   maar houdt zelf geen geheugen in leven (RAM-cap blijft leidend).
     // - max_generation: verzoeken van vóór een orgelwissel overslaan.
-    let decode_cache: Arc<parking_lot::Mutex<HashMap<PathBuf, (u64, std::sync::Weak<SampleData>)>>> =
+    //   De sleutel is (pad, afgekapt): een release-sample waarvan de stille staart is
+    //   afgeknipt (D7) krijgt een eigen plek, zodat hij nooit gedeeld wordt met een
+    //   aanslag of loop-sample uit hetzelfde bestand.
+    let decode_cache: Arc<parking_lot::Mutex<HashMap<(PathBuf, bool), (u64, std::sync::Weak<SampleData>)>>> =
         Arc::new(parking_lot::Mutex::new(HashMap::new()));
     let max_generation = Arc::new(AtomicU64::new(0));
     info!("Achtergrondlader: {} werkers, startbuffer {} ms", n_workers, preload_ms());
@@ -3505,7 +3516,7 @@ fn run_audio_thread(
                     };
                     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
                 }
-                while running_bg.load(Ordering::Relaxed) {
+                'verzoek: while running_bg.load(Ordering::Relaxed) {
                     match load_rx.recv_timeout(std::time::Duration::from_millis(100)) {
                         Ok((key, path, target_rate, generation, odf_loop, harm_shelf, requested_at)) => {
                             let seen = max_generation.fetch_max(generation, Ordering::Relaxed).max(generation);
@@ -3516,14 +3527,23 @@ fn run_audio_thread(
                             // EIGEN gefilterde kopie. De decode-cache deelt op pad; dat
                             // zou de gefilterde en ongefilterde klank door elkaar halen,
                             // dus geshaped laadt buiten de cache om (lezen én schrijven).
+                            // Stille staart afkappen (D7): alleen voor release-samples en
+                            // alleen als het orgel dat aan heeft (drempel gezet).
+                            let afkap_db = if key.1 & RELEASE_PIPE_FLAG != 0 { vpo_sampler::staart_afkap() } else { None };
                             if harm_shelf.is_none() {
                                 let cache = decode_cache.lock();
-                                if let Some((g, weak)) = cache.get(&path) {
-                                    if *g == generation {
-                                        if let Some(cached) = weak.upgrade() {
-                                            let _ = loaded_tx_clone.send((key, Some(cached), generation));
-                                            noteer_laadlatentie(requested_at);
-                                            continue;
+                                // Eerst een al afgekapte kopie (alleen bij een actieve afkap),
+                                // dan de gewone; die laatste is bijvoorbeeld de gedeelde
+                                // decodering van een release uit hetzelfde bestand als de aanslag.
+                                let volgorde: &[bool] = if afkap_db.is_some() { &[true, false] } else { &[false] };
+                                for &afgekapt in volgorde {
+                                    if let Some((g, weak)) = cache.get(&(path.clone(), afgekapt)) {
+                                        if *g == generation {
+                                            if let Some(cached) = weak.upgrade() {
+                                                let _ = loaded_tx_clone.send((key, Some(cached), generation));
+                                                noteer_laadlatentie(requested_at);
+                                                continue 'verzoek;
+                                            }
                                         }
                                     }
                                 }
@@ -3575,13 +3595,26 @@ fn run_audio_thread(
                                         noteer_laadlatentie(requested_at);
                                         continue;
                                     }
+                                    // Stille staart eraf (D7). Een sample met looppunten blijft
+                                    // heel (de functie weigert), en komt dan onder (pad, false).
+                                    let afgekapt = match afkap_db {
+                                        Some(db) => {
+                                            let weg = vpo_sampler::knip_stille_staart(&mut sample_data, db);
+                                            if weg > 0 {
+                                                STAART_AFGEKAPT_SAMPLES.fetch_add(1, Ordering::Relaxed);
+                                                STAART_AFGEKAPT_FRAMES.fetch_add(weg as u64, Ordering::Relaxed);
+                                            }
+                                            weg > 0
+                                        }
+                                        None => false,
+                                    };
                                     let sample = Arc::new(sample_data);
                                     let t_c = std::time::Instant::now();
                                     {
                                         // Verlopen generaties en dode verwijzingen opruimen.
                                         let mut cache = decode_cache.lock();
                                         cache.retain(|_, (g, w)| *g == generation && w.strong_count() > 0);
-                                        cache.insert(path.clone(), (generation, Arc::downgrade(&sample)));
+                                        cache.insert((path.clone(), afgekapt), (generation, Arc::downgrade(&sample)));
                                     }
                                     LOAD_T_CACHE_US.fetch_add(t_c.elapsed().as_micros() as u64, Ordering::Relaxed);
                                     let _ = loaded_tx_clone.send((key, Some(sample), generation));

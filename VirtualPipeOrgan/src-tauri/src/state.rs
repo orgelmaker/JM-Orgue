@@ -352,6 +352,10 @@ pub struct AudioPrefs {
     /// de app bij de eerste start zelf wat deze pc aankan.
     #[serde(default)]
     pub mix_cores: Option<u32>,
+    /// Drempel (dBFS) voor het afkappen van de stille staart van release-samples
+    /// (D7); None = standaard (−90). Of het gebeurt, bepaalt de vlag per orgel.
+    #[serde(default)]
+    pub staart_drempel_db: Option<f32>,
     /// Stereo-samples als twee kanalen laden; None = aan. Uit = oude mono-mix
     /// (halveert RAM bij stereo-sets). Wijziging vergt herladen van het orgel.
     #[serde(default)]
@@ -1944,6 +1948,7 @@ impl AppState {
         tracing::info!("Sample-cache: plafond {} MB (fysiek geheugen {} MB)",
             cap / 1_000_000, ram.map(|r| r / 1_000_000).unwrap_or(0));
         vpo_sampler::set_stereo_loading(audio_prefs.stereo_samples.unwrap_or(true));
+        vpo_sampler::set_staart_drempel(audio_prefs.staart_drempel_db.unwrap_or(vpo_sampler::STAART_AFKAP_STANDAARD_DB));
         crate::audio::set_preload_ms(audio_prefs.preload_ms.unwrap_or(crate::audio::PRELOAD_MS_DEFAULT));
         let saved_cfg = AudioOutputConfig {
             host_name: audio_prefs.host.clone(),

@@ -642,9 +642,10 @@ fn route_test_only(
             vpo_sampler::set_stereo_loading(on);
             Ok(json!({"stereo_samples": vpo_sampler::stereo_loading()}))
         }
-        // Gedrag van de set per orgel (E1 niveaus, D3 overgangen, F7 koppelketen),
-        // body {"path": "...", "niveaus_van_set": bool, "overgangen_van_set": bool,
-        // "koppels_volgen_set": bool} (weggelaten vlag = uit) of {"path": "...",
+        // Gedrag van de set per orgel (E1 niveaus, D3 overgangen, F7 koppelketen,
+        // D7 staartafkap), body {"path": "...", "niveaus_van_set": bool,
+        // "overgangen_van_set": bool, "koppels_volgen_set": bool,
+        // "staart_afkap": bool} (weggelaten vlag = uit) of {"path": "...",
         // "wis": true}. Geldt bij de volgende /load_organ van dat orgel en wint
         // dan van de opgeslagen instellingen. Niet persistent (alleen voor proeven).
         (tiny_http::Method::Post, "/orgel_vlaggen") => {
@@ -662,6 +663,7 @@ fn route_test_only(
                 niveaus_van_set: vlag("niveaus_van_set"),
                 overgangen_van_set: vlag("overgangen_van_set"),
                 koppels_volgen_set: vlag("koppels_volgen_set"),
+                staart_afkap: vlag("staart_afkap"),
             };
             state.vlag_overrides.write().insert(sleutel, vlaggen);
             Ok(serde_json::to_value(vlaggen).unwrap_or_default())

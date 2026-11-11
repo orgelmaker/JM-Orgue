@@ -2076,6 +2076,18 @@
       vlaggenHerladen = true;
     } catch (e) { console.error('Vlag zetten mislukt:', e); }
   }
+  // Drempel (dBFS) waaronder de staart van een release-opname wordt afgekapt
+  // (D7). Algemeen, niet per orgel; werkt bij het opnieuw laden van het orgel.
+  let staartDrempel = -90;
+  invoke('get_staart_drempel').then(v => { staartDrempel = Math.round(Number(v)) || -90; }).catch(() => {});
+  async function zetStaartDrempel(waarde) {
+    const n = Number(waarde);
+    if (!Number.isFinite(n)) return;
+    try {
+      staartDrempel = Math.round(await invoke('set_staart_drempel', { db: n }));
+      vlaggenHerladen = true;
+    } catch (e) { console.error('Drempel zetten mislukt:', e); }
+  }
   // Startbuffer per opname (0.8.92): hoeveel ms van elke pijpopname vooraf in
   // het geheugen staat. Globale voorkeur; wordt actief bij de volgende load.
   let preloadMs = 2000;
@@ -7076,6 +7088,14 @@
               <label class="swell-toggle" style="margin-bottom:0.4rem;" title={$t('settings.koppels_volgen_set_hint')}>
                 <input type="checkbox" checked={orgelVlaggen.koppels_volgen_set} on:change={(e) => zetOrgelVlag('koppels_volgen_set', e.target.checked)} />
                 <span class="swell-toggle-label">{$t('settings.koppels_volgen_set')}</span>
+              </label>
+              <label class="swell-toggle" style="margin-bottom:0.4rem;" title={$t('settings.staart_afkap_hint')}>
+                <input type="checkbox" checked={orgelVlaggen.staart_afkap} on:change={(e) => zetOrgelVlag('staart_afkap', e.target.checked)} />
+                <span class="swell-toggle-label">{$t('settings.staart_afkap')}</span>
+              </label>
+              <label class="swell-toggle" style="margin: 0 0 0.4rem 1.4rem; opacity: {orgelVlaggen.staart_afkap ? 1 : 0.5};" title={$t('settings.staart_drempel_hint')}>
+                <span class="swell-toggle-label">{$t('settings.staart_drempel')}</span>
+                <input type="number" min="-120" max="-60" step="1" style="width: 4.5rem; margin-left: 0.4rem;" value={staartDrempel} disabled={!orgelVlaggen.staart_afkap} on:change={(e) => zetStaartDrempel(e.target.value)} />
               </label>
               {#if vlaggenHerladen}
                 <p style="margin: 0.2rem 0 0; font-size: 0.68rem; color: var(--warning, #d9a441); line-height: 1.35;">{$t('settings.reload_hint')}</p>

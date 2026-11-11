@@ -490,6 +490,10 @@ pub struct OrganSettings {
     pub overgangen_van_set: Option<bool>,
     #[serde(default)]
     pub koppels_volgen_set: Option<bool>,
+    /// Stille staart van release-samples afkappen (D7), zelfde regel als de
+    /// drie hierboven.
+    #[serde(default)]
+    pub staart_afkap: Option<bool>,
     /// Luisterpositie-schuif (0.7.95): 0..1 lineair over de as van geladen
     /// posities (dry → close → front → rear → diffuse). Bewaard per orgel
     /// zodat de volgende sessie met dezelfde balans begint. Ontbrekend in
