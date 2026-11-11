@@ -12,7 +12,7 @@ fn buffer(zaad: u32, lengte: usize) -> Arc<PreloadBuffer> {
         .map(|i| ((i as f32 * 0.01 + zaad as f32) .sin()) * 0.5)
         .collect();
     Arc::new(PreloadBuffer {
-        attack_data: data,
+        attack_data: data.into(),
         attack_right: None,
         sample_rate: 48000,
         total_samples: lengte,
@@ -105,8 +105,8 @@ fn meng(n_stemmen: usize, stukken: usize, bn: usize, ccis: bool)
 
 fn volledig(len: usize, stereo: bool, lus: Option<(u64, u64)>, zaad: f32) -> SampleRef {
     Arc::new(vpo_sampler::SampleData {
-        data: (0..len).map(|i| ((i as f32) * 0.017 + zaad).sin() * 0.6).collect(),
-        right: if stereo { Some((0..len).map(|i| ((i as f32) * 0.021 + zaad).cos() * 0.5).collect()) } else { None },
+        data: (0..len).map(|i| ((i as f32) * 0.017 + zaad).sin() * 0.6).collect::<Vec<f32>>().into(),
+        right: if stereo { Some((0..len).map(|i| ((i as f32) * 0.021 + zaad).cos() * 0.5).collect::<Vec<f32>>().into()) } else { None },
         sample_rate: 48000,
         channels: if stereo { 2 } else { 1 },
         loop_start: lus.map(|l| l.0),
@@ -116,8 +116,8 @@ fn volledig(len: usize, stereo: bool, lus: Option<(u64, u64)>, zaad: f32) -> Sam
 
 fn preload(len: usize, totaal: usize, stereo: bool, lus: (Option<u64>, Option<u64>), zaad: f32) -> Arc<PreloadBuffer> {
     Arc::new(PreloadBuffer {
-        attack_data: (0..len).map(|i| ((i as f32) * 0.019 + zaad).sin() * 0.6).collect(),
-        attack_right: if stereo { Some((0..len).map(|i| ((i as f32) * 0.023 + zaad).cos() * 0.5).collect()) } else { None },
+        attack_data: (0..len).map(|i| ((i as f32) * 0.019 + zaad).sin() * 0.6).collect::<Vec<f32>>().into(),
+        attack_right: if stereo { Some((0..len).map(|i| ((i as f32) * 0.023 + zaad).cos() * 0.5).collect::<Vec<f32>>().into()) } else { None },
         sample_rate: 48000, total_samples: totaal, loop_start: lus.0, loop_end: lus.1,
         source_path: std::path::PathBuf::from("eq.wav"), channels: if stereo { 2 } else { 1 },
         bits_per_sample: 24, data_offset: 44, align_table: None, trim_start: 0,
@@ -263,7 +263,7 @@ fn bench_mengkern() {
         let l: Vec<f32> = (0..len).map(|i| ((i as f32 * 0.013 + zaad as f32).sin()) * 0.5).collect();
         let r: Vec<f32> = (0..len).map(|i| ((i as f32 * 0.011 + zaad as f32).cos()) * 0.5).collect();
         Arc::new(PreloadBuffer {
-            attack_data: l, attack_right: Some(r), sample_rate: 48000, total_samples: len,
+            attack_data: l.into(), attack_right: Some(r.into()), sample_rate: 48000, total_samples: len,
             loop_start: Some(12_000), loop_end: Some(44_000),
             source_path: std::path::PathBuf::from("bench.wav"), channels: 2, bits_per_sample: 24,
             data_offset: 44, align_table: None, trim_start: 0, smpl_unity_note: None,
@@ -316,12 +316,13 @@ fn bench_mengkern() {
     let t = std::time::Instant::now();
     for _ in 0..rondes {
         for (i, b) in bufs.iter().enumerate() {
-            let r = b.attack_right.as_ref().unwrap();
+            let l = b.attack_data.als_f32().unwrap();
+            let r = b.attack_right.as_ref().unwrap().als_f32().unwrap();
             let mut p = pos[i];
             for _ in 0..bn {
                 let k = p as usize;
                 let fr = (p - k as f64) as f32;
-                som += hermite4(&b.attack_data, k, fr) + hermite4(r, k, fr);
+                som += hermite4(l, k, fr) + hermite4(r, k, fr);
                 p += 1.0013;
                 if p >= 44_000.0 { p -= 32_000.0; }
             }
@@ -425,4 +426,111 @@ fn geen_enkele_stem_valt_bij_een_stukgrens_weg() {
     assert!(d > niveau * 1e-4,
         "199 en 200 stemmen geven bijna hetzelfde ({} op niveau {}) — er valt er een weg",
         d, niveau);
+}
+
+/// Zet de bron van een stem om naar waarden die exact in `bits` passen (zoals een WAV-lezer ze aflevert) en maak de
+/// opslag desgewenst compact (C2).
+fn kwantiseer(v: &mut PlayingVoice, bits: u32, compact: bool) {
+    let schaal = (1i64 << (bits - 1)) as f32;
+    let (min, max) = (-schaal, schaal - 1.0);
+    let q = |m: &vpo_sampler::Monsters| -> vpo_sampler::Monsters {
+        m.naar_f32().iter().map(|&x| ((x * schaal).round().clamp(min, max) as i32) as f32 / schaal).collect::<Vec<f32>>().into()
+    };
+    let soort = if bits == 16 { vpo_sampler::monsters::Soort::I16 } else { vpo_sampler::monsters::Soort::I24 };
+    match &mut v.source {
+        VoiceSampleSource::Full(s) => {
+            let mut n = (**s).clone();
+            n.data = q(&n.data);
+            n.right = n.right.as_ref().map(q);
+            if compact {
+                let r = n.right.as_mut();
+                assert_eq!(vpo_sampler::Monsters::compacteer_paar(&mut n.data, r), soort);
+            }
+            *s = Arc::new(n);
+        }
+        VoiceSampleSource::PreloadOnly { preload, .. } => {
+            let mut n = (**preload).clone();
+            n.attack_data = q(&n.attack_data);
+            n.attack_right = n.attack_right.as_ref().map(q);
+            if compact {
+                let r = n.attack_right.as_mut();
+                assert_eq!(vpo_sampler::Monsters::compacteer_paar(&mut n.attack_data, r), soort);
+            }
+            *preload = Arc::new(n);
+        }
+    }
+}
+
+/// C2: een stem met 16- of 24-bit-waarden klinkt bit voor bit hetzelfde of de waarden nu als f32 of compact zijn
+/// opgeslagen, via de snelle leesroute (blok) en via de oude route (per sample), cubisch en lineair.
+#[test]
+fn compacte_opslag_speelt_bit_identiek() {
+    for bits in [16u32, 24] {
+        for nr in 0..8 {
+            for licht in [false, true] {
+                let mut f32_blok = scenario(nr);
+                kwantiseer(&mut f32_blok, bits, false);
+                let mut compact_blok = scenario(nr);
+                kwantiseer(&mut compact_blok, bits, true);
+                let mut compact_oud = scenario(nr);
+                kwantiseer(&mut compact_oud, bits, true);
+                let geom = f32_blok.lees_geom().expect("snelle route");
+                let geom_c = compact_blok.lees_geom().expect("snelle route");
+                let bn = 256usize;
+                for blok in 0..3 {
+                    let rates: Vec<f64> = (0..bn).map(|f| 1.0 + 0.013 * (((blok * bn + f) as f64) * 0.07).sin()).collect();
+                    let (mut al, mut ar) = (vec![0.0f32; bn], vec![0.0f32; bn]);
+                    let (mut bl, mut br) = (vec![0.0f32; bn], vec![0.0f32; bn]);
+                    f32_blok.lees_blok(&geom, &rates, &mut al, &mut ar, licht);
+                    compact_blok.lees_blok(&geom_c, &rates, &mut bl, &mut br, licht);
+                    for f in 0..bn {
+                        assert_eq!((al[f].to_bits(), ar[f].to_bits()), (bl[f].to_bits(), br[f].to_bits()),
+                            "{bits}-bit scenario {nr} licht {licht} blok {blok} frame {f}");
+                        let basis = compact_oud.rate;
+                        compact_oud.rate = rates[f];
+                        let (a, b) = compact_oud.next_sample(licht);
+                        compact_oud.rate = basis;
+                        assert_eq!((a.to_bits(), b.to_bits()), (al[f].to_bits(), ar[f].to_bits()),
+                            "oude route, {bits}-bit scenario {nr} licht {licht} blok {blok} frame {f}");
+                    }
+                }
+                assert_eq!(f32_blok.position.to_bits(), compact_blok.position.to_bits());
+                assert_eq!(f32_blok.envelope.to_bits(), compact_blok.envelope.to_bits());
+            }
+        }
+    }
+}
+
+/// Kosten van de mengkern per soort opslag (C2): dezelfde stemmen als f32, compact 16-bit en compact 24-bit door de
+/// snelle leesroute. Handmatig, in releasemodus:
+/// `cargo test --release -p vpo-app kosten_per_soort -- --ignored --nocapture`.
+#[test]
+#[ignore]
+fn kosten_per_soort_opslag() {
+    let bn = 256usize;
+    let blokken = 400usize;
+    let rates: Vec<f64> = (0..bn).map(|f| 1.0 + 0.013 * ((f as f64) * 0.07).sin()).collect();
+    for (naam, bits, compact) in [("f32 (16-bit-waarden)", 16u32, false), ("compact 16-bit", 16, true), ("f32 (24-bit-waarden)", 24, false), ("compact 24-bit", 24, true)] {
+        let mut stemmen: Vec<PlayingVoice> = Vec::new();
+        for k in 0..24 {
+            for nr in 0..8 {
+                let mut v = scenario(nr);
+                kwantiseer(&mut v, bits, compact);
+                v.position += k as f64 * 3.0;
+                stemmen.push(v);
+            }
+        }
+        let geoms: Vec<_> = stemmen.iter().map(|v| v.lees_geom().expect("snelle route")).collect();
+        let (mut ul, mut ur) = (vec![0.0f32; bn], vec![0.0f32; bn]);
+        let t = std::time::Instant::now();
+        let mut som = 0.0f32;
+        for _ in 0..blokken {
+            for (v, g) in stemmen.iter_mut().zip(&geoms) {
+                v.lees_blok(g, &rates, &mut ul, &mut ur, false);
+                som += ul[bn - 1] + ur[bn - 1];
+            }
+        }
+        let s = t.elapsed().as_secs_f64();
+        println!("{naam:24}: {:.1} ns per stem per frame (controle {som})", s / (stemmen.len() * blokken * bn) as f64 * 1e9);
+    }
 }

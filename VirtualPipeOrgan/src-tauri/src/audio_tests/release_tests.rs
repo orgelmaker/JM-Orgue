@@ -4,7 +4,7 @@ use super::*;
 /// een test het NIVEAUVERLOOP meet en niet de golfvorm.
 fn vlakke_sample(frames: usize) -> SampleRef {
     std::sync::Arc::new(SampleData {
-        data: vec![1.0; frames],
+        data: vec![1.0; frames].into(),
         right: None,
         sample_rate: 48_000,
         channels: 1,

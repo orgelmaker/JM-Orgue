@@ -4,7 +4,7 @@ use std::sync::Weak;
 /// Sample zoals de laadpijplijn hem aflevert (1 s mono op uitgangsrate).
 fn sample() -> SampleRef {
     Arc::new(SampleData {
-        data: vec![0.5; 48_000],
+        data: vec![0.5; 48_000].into(),
         right: None,
         sample_rate: 48_000,
         channels: 1,
@@ -166,7 +166,7 @@ fn vol_kanaal_parkeert_in_de_wachtrij_en_dropt_niets_inline() {
 #[test]
 fn preload_bron_volgt_dezelfde_regel() {
     let pb = Arc::new(PreloadBuffer {
-        attack_data: vec![0.25; 4_800],
+        attack_data: vec![0.25; 4_800].into(),
         attack_right: None,
         sample_rate: 48_000,
         total_samples: 4_800,

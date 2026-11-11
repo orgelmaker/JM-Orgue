@@ -2298,7 +2298,7 @@ mod tests {
                 let k = pos as usize;
                 if k + 1 >= pre.attack_data.len() { return 0.0; }
                 let fr = pos - k as f32;
-                pre.attack_data[k] * (1.0 - fr) + pre.attack_data[k + 1] * fr
+                pre.attack_data.at(k) * (1.0 - fr) + pre.attack_data.at(k + 1) * fr
             })
             .collect();
         let f = nuldoorgangen_hz(&uit, 48000.0);
@@ -2317,7 +2317,7 @@ mod tests {
                 &rel.path, 80,
                 crate::loader::PreloadSegment::Release { cue_override: rel.cue_point, require_cue: false },
             ).expect("release-preload");
-            let hz = nuldoorgangen_hz(&seg.attack_data, seg.sample_rate as f32);
+            let hz = nuldoorgangen_hz(&seg.attack_data.naar_f32(), seg.sample_rate as f32);
             assert!((hz - verwacht_hz).abs() / verwacht_hz < 0.03, "release bij {houd} ms: {hz} Hz, verwacht {verwacht_hz}");
         }
     }

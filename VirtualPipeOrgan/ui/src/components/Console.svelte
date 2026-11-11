@@ -2171,6 +2171,13 @@
   let preloadReloadHint = false;
   const PRELOAD_KEUZES = [200, 300, 500, 1000, 2000];
   invoke('get_preload_ms').then(v => { preloadMs = Number(v) || 2000; }).catch(() => {});
+  // Samples in het geheugen (C2): 0 = 32-bit zoals vroeger, 1 = 16-bit compact (standaard), 2 = ook 24-bit.
+  let sampleOpslag = 1;
+  let sampleOpslagHint = false;
+  invoke('get_sample_opslag').then(v => { sampleOpslag = Number(v); }).catch(() => {});
+  async function zetSampleOpslag(v) {
+    try { sampleOpslag = await invoke('set_sample_opslag', { opslag: Number(v) }); sampleOpslagHint = true; } catch (e) { console.error(e); }
+  }
   // Geheugen dat het geladen orgel bij elke keuze vraagt (F2); leeg als er geen schatting is.
   let preloadGeheugen = [];
   async function haalPreloadGeheugen() {
@@ -8690,6 +8697,20 @@
               <p class="settings-hint" style="margin: 0.2rem 0 0;">{$t('settings.preload_ms_hint')}</p>
               {#if preloadGeheugen.length}
                 <p class="settings-hint" style="margin: 0.2rem 0 0;">{$t('settings.preload_ms_geheugen')}</p>
+              {/if}
+
+              <!-- Samples in het geheugen (C2) -->
+              <div class="audio-select-row" style="margin-top: 0.7rem;" title={$t('settings.sample_opslag_hint')}>
+                <label class="audio-select-label" for="sample-opslag">{$t('settings.sample_opslag')}</label>
+                <select id="sample-opslag" class="temperament-select" on:change={(e) => zetSampleOpslag(e.target.value)}>
+                  <option value={0} selected={sampleOpslag === 0}>{$t('settings.sample_opslag_f32')}</option>
+                  <option value={1} selected={sampleOpslag === 1}>{$t('settings.sample_opslag_16')}</option>
+                  <option value={2} selected={sampleOpslag === 2}>{$t('settings.sample_opslag_24')}</option>
+                </select>
+              </div>
+              <p class="settings-hint" style="margin: 0.2rem 0 0;">{$t('settings.sample_opslag_hint')}</p>
+              {#if sampleOpslagHint}
+                <p style="margin: 0.2rem 0 0; font-size: 0.68rem; color: var(--warning, #d9a441); line-height: 1.35;">{$t('settings.reload_hint')}</p>
               {/if}
               {#if preloadReloadHint}
                 <p style="margin: 0.2rem 0 0; font-size: 0.68rem; color: var(--warning, #d9a441); line-height: 1.35;">{$t('settings.reload_hint')}</p>

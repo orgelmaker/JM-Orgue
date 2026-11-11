@@ -6,6 +6,17 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### Samples in de bitdiepte van de bron, sneller laden (C2, fase 0 en 1)
+- Samples die exact in 16 bit passen worden nu als 16 bit in het geheugen bewaard in plaats van als 32-bit getallen: half zoveel geheugen
+  voor die sets. Bij het afspelen worden precies dezelfde waarden teruggelezen; de klank is bit voor bit gelijk (met test bewezen, via
+  beide leesroutes, cubisch en lineair).
+- Nieuwe keuze onder Instellingen → Audio uitvoer → **Opslag van samples**: 32-bit (zoals vroeger), 16-bit waar exact (standaard) of
+  16- en 24-bit waar exact. 24-bit bespaart een kwart geheugen, maar kost merkbaar meer rekenwerk bij het mengen (gemeten ruim 60% per
+  stem); daarom staat het niet standaard aan. Een wijziging geldt na het opnieuw laden van het orgel.
+- Het programma gebruikt een andere geheugenbeheerder (mimalloc, MIT-licentie). Het laden van een groot orgel is daardoor veel sneller:
+  gemeten 6,7 → 1,0 s voor een GO-set en 6,5–19 → 2,1 s voor een grote HW-set (bestanden in de systeemcache). Vrijgegeven geheugen gaat
+  direct terug naar het systeem, ook na een orgelwissel.
+
 ### Handleiding bijgewerkt naar 0.9.51, in zeven talen
 - De handleiding beschrijft nu ook wat sinds 0.9.49 is toegevoegd: pakketten en RAR-archieven openen (ook meerdelig), de tegels voor
   downloadbare sets, wat het importverslag over de set meldt, het blok "Gedrag van de set (dit orgel)" met de vinkjes per orgel en de

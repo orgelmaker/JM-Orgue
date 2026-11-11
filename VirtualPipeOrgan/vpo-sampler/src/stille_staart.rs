@@ -102,9 +102,9 @@ pub fn knip_stille_staart(sample: &mut SampleData, drempel_db: f32) -> usize {
     }
     let venster = (sample.sample_rate as usize / 100).max(1);
     let drempel = 10f32.powf(drempel_db / 20.0);
-    let rechts = sample.right.as_deref();
+    let rechts = sample.right.as_ref();
     let laatste_luide = (0..n).rev().find(|&i| {
-        sample.data[i].abs() >= drempel || rechts.is_some_and(|r| r[i].abs() >= drempel)
+        sample.data.at(i).abs() >= drempel || rechts.is_some_and(|r| r.at(i).abs() >= drempel)
     });
     let behoud = match laatste_luide {
         Some(i) => ((i / venster) + 1).saturating_mul(venster).min(n),
@@ -131,7 +131,7 @@ mod tests {
 
     fn sample(data: Vec<f32>, right: Option<Vec<f32>>) -> SampleData {
         let channels = if right.is_some() { 2 } else { 1 };
-        SampleData { data, right, sample_rate: SR, channels, loop_start: None, loop_end: None }
+        SampleData { data: data.into(), right: right.map(Into::into), sample_rate: SR, channels, loop_start: None, loop_end: None }
     }
 
     /// 1 s luid (0,5) gevolgd door een staart van `staart_s` seconden op `niveau`
@@ -154,7 +154,7 @@ mod tests {
         assert!(weg > 0, "er hoort iets af te vallen");
         assert_eq!(s.data.len() + weg, origineel.len());
         // Alles wat blijft is exact gelijk aan het begin van het origineel.
-        assert!(s.data.iter().zip(&origineel).all(|(a, b)| a.to_bits() == b.to_bits()));
+        assert!(s.data.naar_f32().iter().zip(&origineel).all(|(a, b)| a.to_bits() == b.to_bits()));
         // De afkap valt kort na het luide deel (binnen één venster van 10 ms).
         let luid = (1.0 * SR as f32) as usize;
         assert!(s.data.len() >= luid && s.data.len() <= luid + SR as usize / 100 + 1, "lengte {}", s.data.len());
@@ -212,7 +212,7 @@ mod tests {
         // Rechts heeft een luide klik halverwege de staart.
         let mut rechts = vec![0.0f32; n];
         rechts[2 * SR as usize] = 0.3;
-        let mut s = SampleData { data: links.clone(), right: Some(rechts), sample_rate: SR, channels: 2, loop_start: None, loop_end: None };
+        let mut s = SampleData { data: links.clone().into(), right: Some(rechts.into()), sample_rate: SR, channels: 2, loop_start: None, loop_end: None };
         let weg = knip_stille_staart(&mut s, -90.0);
         let venster = SR as usize / 100;
         assert_eq!(s.data.len(), (2 * SR as usize / venster + 1) * venster, "rechts bepaalt het einde");
@@ -241,7 +241,7 @@ mod tests {
         assert_eq!(knip_stille_staart(&mut s, f32::NAN), 0);
         assert_eq!(knip_stille_staart(&mut s, f32::NEG_INFINITY), 0);
         assert_eq!(s.data.len(), lengte);
-        let mut scheef = SampleData { data: vec![0.0; 1000], right: Some(vec![0.0; 900]), sample_rate: SR, channels: 2, loop_start: None, loop_end: None };
+        let mut scheef = SampleData { data: vec![0.0; 1000].into(), right: Some(vec![0.0; 900].into()), sample_rate: SR, channels: 2, loop_start: None, loop_end: None };
         assert_eq!(knip_stille_staart(&mut scheef, -90.0), 0);
         assert_eq!(scheef.data.len(), 1000);
     }

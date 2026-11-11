@@ -32,6 +32,11 @@ mod remote;
 mod retune;
 mod rt_prioriteit;
 mod zwelkast_set;
+
+/// Geheugenbeheerder voor de hele app (C2): zie de toelichting bij `mimalloc` in Cargo.toml. De audiothread vraagt geen
+/// geheugen aan (regel uit CLAUDE.md), dus dit raakt de mengkern niet.
+#[global_allocator]
+static GEHEUGEN: mimalloc::MiMalloc = mimalloc::MiMalloc;
 mod set_crescendo;
 mod pakket_uitpakken;
 mod register_filter;
@@ -68,7 +73,25 @@ fn parse_test_api_port() -> Option<u16> {
     None
 }
 
+/// mimalloc-opties: vrijgegeven geheugen meteen (niet na 10 ms in kleine stappen) en echt (decommit) aan het systeem
+/// teruggeven. Zonder dit bleef na een orgelwissel het geheugen van het vorige orgel in het proces staan. Daarnaast
+/// pagina's pas vastleggen als ze gebruikt worden: met veel laadthreads en startbuffers van wisselende lengte stonden er
+/// anders honderden MB half gevulde pagina's vast (gemeten: 300 MB bij een set met 5500 startbuffers). Nummers uit
+/// `mimalloc.h` van v3 (`mi_option_purge_decommits` = 5, `mi_option_purge_delay` = 15,
+/// `mi_option_page_commit_on_demand` = 40); de crate exporteert ze niet.
+fn geheugen_teruggeven_instellen() {
+    const PURGE_DECOMMITS: libmimalloc_sys::mi_option_t = 5;
+    const PURGE_DELAY: libmimalloc_sys::mi_option_t = 15;
+    const PAGE_COMMIT_ON_DEMAND: libmimalloc_sys::mi_option_t = 40;
+    unsafe {
+        libmimalloc_sys::mi_option_set(PURGE_DECOMMITS, 1);
+        libmimalloc_sys::mi_option_set(PURGE_DELAY, 0);
+        libmimalloc_sys::mi_option_set(PAGE_COMMIT_ON_DEMAND, 1);
+    }
+}
+
 fn main() {
+    geheugen_teruggeven_instellen();
     // Set up logging to a file in %APPDATA%\nl.jm-orgue.app\jm-orgue.log
     // This works even without a visible console (windows_subsystem = "windows")
     let log_dir = dirs::data_dir()
@@ -396,6 +419,8 @@ fn main() {
             commands::set_orgel_vlag,
             commands::get_preload_ms,
             commands::get_preload_geheugen,
+            commands::get_sample_opslag,
+            commands::set_sample_opslag,
             commands::get_register_geheugen,
             commands::set_niet_geladen_registers,
             commands::set_preload_ms,

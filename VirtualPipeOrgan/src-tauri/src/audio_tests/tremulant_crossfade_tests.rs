@@ -4,7 +4,7 @@ use super::*;
 /// niet de golfvorm.
 fn preload(frames: usize, rate: u32, trim: usize, lp: Option<(u64, u64)>) -> Arc<PreloadBuffer> {
     Arc::new(PreloadBuffer {
-        attack_data: vec![0.25; frames],
+        attack_data: vec![0.25; frames].into(),
         attack_right: None,
         sample_rate: rate,
         total_samples: frames + trim,
@@ -35,7 +35,7 @@ fn stem_op_preload(pos: f64, frames: usize, rate: u32, trim: usize, out_rate: u3
 /// (rate = 1,0) en is NIET getrimd — positie = frames sinds bestandsbegin.
 fn stem_op_volledige_sample(pos: f64, frames: usize, out_rate: u32) -> PlayingVoice {
     let sample: SampleRef = Arc::new(SampleData {
-        data: vec![0.25; frames],
+        data: vec![0.25; frames].into(),
         right: None,
         sample_rate: out_rate,
         channels: 1,

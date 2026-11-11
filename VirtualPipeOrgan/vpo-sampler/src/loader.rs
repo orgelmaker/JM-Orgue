@@ -89,11 +89,11 @@ pub struct SampleData {
     /// Sample data (genormaliseerd -1.0..1.0): mono, óf het LINKERkanaal wanneer
     /// `right` gevuld is. Planair i.p.v. interleaved zodat alle lengte-/positie-
     /// berekeningen in frames blijven en het mono-pad bit-exact ongewijzigd is.
-    pub data: Vec<f32>,
+    pub data: crate::Monsters,
     /// Rechterkanaal (zelfde lengte als `data`) bij stereo-samples; None = mono.
     /// Vóór 0.7.36 werd stereo altijd naar mono gemengd — de ruimte-informatie
     /// van stereo-opnamen ging verloren (feedback sampleset-maker).
-    pub right: Option<Vec<f32>>,
+    pub right: Option<crate::Monsters>,
     /// Original sample rate
     pub sample_rate: SampleRate,
     /// Number of channels in original file
@@ -111,7 +111,7 @@ impl SampleData {
     pub fn frames(&self) -> usize { self.data.len() }
     /// Geheugengebruik van de sampledata in bytes (beide vlakken).
     pub fn bytes(&self) -> usize {
-        (self.data.len() + self.right.as_ref().map_or(0, |r| r.len())) * std::mem::size_of::<f32>()
+        self.data.bytes() + self.right.as_ref().map_or(0, |r| r.bytes())
     }
     /// Get the duration in seconds
     pub fn duration(&self) -> f32 {
@@ -140,7 +140,9 @@ impl SampleData {
 pub fn optimize_loop_points(sample: &mut SampleData) {
     if let (Some(a), Some(b)) = (sample.loop_start, sample.loop_end) {
         if b > a {
-            if let Some(e) = optimize_loop_end_lr(&sample.data, sample.right.as_deref(), a as usize, b as usize) {
+            let l = sample.data.naar_f32();
+            let r = sample.right.as_ref().map(|r| r.naar_f32());
+            if let Some(e) = optimize_loop_end_lr(&l, r.as_deref(), a as usize, b as usize) {
                 sample.loop_end = Some(e as u64);
             }
         }
@@ -522,9 +524,9 @@ mod detect_container_tests {
 
             let nieuw = super::load_wav_snel(&p).expect("snelle route moet dit formaat lezen");
             assert_eq!(nieuw.data.len(), ol.len(), "{:?}", p);
-            assert!(nieuw.data.iter().zip(&ol).all(|(a, b)| a.to_bits() == b.to_bits()), "links verschilt: {:?}", p);
+            assert!(nieuw.data.naar_f32().iter().zip(&ol).all(|(a, b)| a.to_bits() == b.to_bits()), "links verschilt: {:?}", p);
             match (&nieuw.right, &or) {
-                (Some(a), Some(b)) => assert!(a.iter().zip(b).all(|(x, y)| x.to_bits() == y.to_bits()), "rechts verschilt: {:?}", p),
+                (Some(a), Some(b)) => assert!(a.naar_f32().iter().zip(b.iter()).all(|(x, y)| x.to_bits() == y.to_bits()), "rechts verschilt: {:?}", p),
                 (None, None) => {}
                 _ => panic!("kanalen verschillen: {:?}", p),
             }
@@ -684,8 +686,8 @@ fn load_wav_snel(path: &Path) -> Option<SampleData> {
         }
     }
     Some(SampleData {
-        data: links,
-        right: if stereo { Some(rechts) } else { None },
+        data: links.into(),
+        right: if stereo { Some(rechts.into()) } else { None },
         sample_rate: rate,
         channels,
         loop_start: None,
@@ -816,8 +818,8 @@ pub fn load_wav(path: &Path) -> Result<SampleData, SampleError> {
     };
 
     let mut sd = SampleData {
-        data: left,
-        right,
+        data: left.into(),
+        right: right.map(Into::into),
         sample_rate: spec.sample_rate,
         channels: spec.channels,
         loop_start,
@@ -840,9 +842,11 @@ pub fn resample(sample: &SampleData, target_rate: SampleRate) -> Result<SampleDa
 
     // Eén of twee vlakken (L/R) door dezelfde resampler: identieke delay-
     // compensatie per kanaal, dus L en R blijven sample-exact uitgelijnd.
-    let planes: Vec<&[f32]> = match &sample.right {
-        Some(r) => vec![&sample.data[..], &r[..]],
-        None => vec![&sample.data[..]],
+    let links_f32 = sample.data.naar_f32();
+    let rechts_f32 = sample.right.as_ref().map(|r| r.naar_f32());
+    let planes: Vec<&[f32]> = match &rechts_f32 {
+        Some(r) => vec![&links_f32[..], &r[..]],
+        None => vec![&links_f32[..]],
     };
     let mut resampler = FftFixedIn::<f32>::new(
         sample.sample_rate as usize,
@@ -907,8 +911,8 @@ pub fn resample(sample: &SampleData, target_rate: SampleRate) -> Result<SampleDa
     let loop_end = sample.loop_end.map(|l| (l as f64 * ratio) as u64);
 
     let mut sd = SampleData {
-        data: aligned,
-        right: aligned_right,
+        data: aligned.into(),
+        right: aligned_right.map(Into::into),
         sample_rate: target_rate,
         channels: sample.channels,
         loop_start,
@@ -920,22 +924,22 @@ pub fn resample(sample: &SampleData, target_rate: SampleRate) -> Result<SampleDa
 
 /// Normalize sample to peak level
 pub fn normalize(sample: &mut SampleData, target_db: f32) {
-    let peak = sample.data.iter()
+    let peak = sample.data.f32_mut().iter()
         .map(|s| s.abs())
         .fold(0.0_f32, |a, b| a.max(b));
     
-    let peak = sample.right.as_ref()
-        .map(|r| r.iter().map(|s| s.abs()).fold(peak, |a, b| a.max(b)))
+    let peak = sample.right.as_mut()
+        .map(|r| r.f32_mut().iter().map(|s| s.abs()).fold(peak, |a, b| a.max(b)))
         .unwrap_or(peak);
     if peak > 0.0 {
         let target_linear = 10.0_f32.powf(target_db / 20.0);
         let gain = target_linear / peak;
 
-        for s in &mut sample.data {
+        for s in sample.data.f32_mut().iter_mut() {
             *s *= gain;
         }
         if let Some(r) = sample.right.as_mut() {
-            for s in r.iter_mut() {
+            for s in r.f32_mut().iter_mut() {
                 *s *= gain;
             }
         }
@@ -948,9 +952,9 @@ pub fn apply_fades(sample: &mut SampleData, fade_in_ms: f32, fade_out_ms: f32) {
     let fade_in_samples = (fade_in_ms / 1000.0 * sr) as usize;
     let fade_out_samples = (fade_out_ms / 1000.0 * sr) as usize;
 
-    let mut planes: Vec<&mut Vec<f32>> = vec![&mut sample.data];
+    let mut planes: Vec<&mut Vec<f32>> = vec![sample.data.f32_mut()];
     if let Some(r) = sample.right.as_mut() {
-        planes.push(r);
+        planes.push(r.f32_mut());
     }
     for plane in planes {
         // Fade in
@@ -1068,9 +1072,9 @@ impl ReleaseAlignTable {
 #[derive(Debug, Clone)]
 pub struct PreloadBuffer {
     /// Attack portion of the sample (first ~100-200ms): mono, óf links bij stereo.
-    pub attack_data: Vec<f32>,
+    pub attack_data: crate::Monsters,
     /// Rechterkanaal van de attack (zelfde lengte als `attack_data`); None = mono.
-    pub attack_right: Option<Vec<f32>>,
+    pub attack_right: Option<crate::Monsters>,
     /// Original sample rate
     pub sample_rate: SampleRate,
     /// Total sample length (for reference)
@@ -1112,7 +1116,7 @@ impl PreloadBuffer {
     pub fn is_stereo(&self) -> bool { self.attack_right.is_some() }
     /// Geheugengebruik van de attack-data in bytes (beide vlakken).
     pub fn bytes(&self) -> usize {
-        (self.attack_data.len() + self.attack_right.as_ref().map_or(0, |r| r.len())) * std::mem::size_of::<f32>()
+        self.attack_data.bytes() + self.attack_right.as_ref().map_or(0, |r| r.bytes())
     }
 }
 
@@ -1425,8 +1429,8 @@ fn load_wav_preload_segment_len(path: &Path, len: PreloadLen, segment: PreloadSe
     };
 
     Ok(PreloadBuffer {
-        attack_data: aligned_data,
-        attack_right: aligned_right,
+        attack_data: aligned_data.into(),
+        attack_right: aligned_right.map(Into::into),
         sample_rate,
         total_samples: total_frames.saturating_sub(trim_start),
         loop_start: adj_loop_start,
@@ -1603,8 +1607,8 @@ pub fn load_wav_manual(path: &Path) -> Result<SampleData, SampleError> {
     let (left, right) = split_channels(samples, channels);
 
     Ok(SampleData {
-        data: left,
-        right,
+        data: left.into(),
+        right: right.map(Into::into),
         sample_rate,
         channels,
         loop_start: None,
@@ -1689,8 +1693,8 @@ pub fn load_via_symphonia(path: &Path, extension_hint: &str) -> Result<SampleDat
     let (left, right) = split_channels(all_samples, channels);
 
     Ok(SampleData {
-        data: left,
-        right,
+        data: left.into(),
+        right: right.map(Into::into),
         sample_rate,
         channels,
         loop_start: None, // MP3 doesn't support loop points
@@ -1736,8 +1740,8 @@ fn load_audio_preload_len(path: &Path, len: PreloadLen) -> Result<PreloadBuffer,
             // (MP3 doesn't support random access like WAV)
             let full_sample = load_mp3(path)?;
             let attack_len = len.frames(full_sample.sample_rate as u32).min(full_sample.data.len());
-            let raw_attack = full_sample.data[..attack_len].to_vec();
-            let raw_right = full_sample.right.as_ref().map(|r| r[..attack_len].to_vec());
+            let raw_attack = full_sample.data.naar_f32()[..attack_len].to_vec();
+            let raw_right = full_sample.right.as_ref().map(|r| r.naar_f32()[..attack_len].to_vec());
 
             // Attack alignment: trim leading silence
             let onset_threshold = 0.002;
@@ -1752,8 +1756,8 @@ fn load_audio_preload_len(path: &Path, len: PreloadLen) -> Result<PreloadBuffer,
             let attack_right = raw_right.map(|r| if trim_start > 0 { r[trim_start..].to_vec() } else { r });
 
             Ok(PreloadBuffer {
-                attack_data,
-                attack_right,
+                attack_data: attack_data.into(),
+                attack_right: attack_right.map(Into::into),
                 sample_rate: full_sample.sample_rate,
                 total_samples: full_sample.data.len().saturating_sub(trim_start),
                 loop_start: None,
@@ -2013,20 +2017,20 @@ mod stereo_tests {
         let (p, q) = (10_000usize, 20_000usize);
         l[p] = 1.0;
         r[q] = 1.0;
-        let sd = SampleData { data: l, right: Some(r), sample_rate: sr_in, channels: 2, loop_start: None, loop_end: None };
+        let sd = SampleData { data: l.into(), right: Some(r.into()), sample_rate: sr_in, channels: 2, loop_start: None, loop_end: None };
         let out = resample(&sd, sr_out).expect("resample");
         let ratio = sr_out as f64 / sr_in as f64;
         let argmax = |v: &[f32]| v.iter().enumerate().fold((0usize, 0.0f32), |a, (i, &x)| if x.abs() > a.1 { (i, x.abs()) } else { a }).0;
-        let rd = out.right.as_ref().expect("rechtervlak");
+        let rd = out.right.as_ref().expect("rechtervlak").naar_f32();
         assert_eq!(out.data.len(), rd.len());
-        assert!((argmax(&out.data) as f64 - p as f64 * ratio).abs() <= 2.0);
-        assert!((argmax(rd) as f64 - q as f64 * ratio).abs() <= 2.0);
+        assert!((argmax(&out.data.naar_f32()) as f64 - p as f64 * ratio).abs() <= 2.0);
+        assert!((argmax(&rd) as f64 - q as f64 * ratio).abs() <= 2.0);
     }
 
     /// bytes() telt beide vlakken.
     #[test]
     fn bytes_counts_both_planes() {
-        let sd = SampleData { data: vec![0.0; 10], right: Some(vec![0.0; 10]), sample_rate: 48000, channels: 2, loop_start: None, loop_end: None };
+        let sd = SampleData { data: vec![0.0; 10].into(), right: Some(vec![0.0; 10].into()), sample_rate: 48000, channels: 2, loop_start: None, loop_end: None };
         assert_eq!(sd.bytes(), 20 * 4);
         assert_eq!(sd.frames(), 10);
     }
@@ -2042,7 +2046,7 @@ mod loop_opt_tests {
         let win = 128;
         let mut ssd = 0.0f32;
         for k in 0..win {
-            let d = sd.data[ls + k] - sd.data[le + k];
+            let d = sd.data.at(ls + k) - sd.data.at(le + k);
             ssd += d * d;
         }
         ssd
@@ -2060,12 +2064,12 @@ mod loop_opt_tests {
         let mut data = vec![0.0f32; n];
         let impulse_pos = 10_000usize;
         data[impulse_pos] = 1.0;
-        let sd = SampleData { data, right: None, sample_rate: sr_in, channels: 1, loop_start: None, loop_end: None };
+        let sd = SampleData { data: data.into(), right: None, sample_rate: sr_in, channels: 1, loop_start: None, loop_end: None };
         let out = resample(&sd, sr_out).expect("resample");
 
         let ratio = sr_out as f64 / sr_in as f64;
         let expected = (impulse_pos as f64 * ratio) as i64;
-        let peak_pos = out.data.iter().enumerate()
+        let peak_pos = out.data.naar_f32().iter().enumerate()
             .max_by(|a, b| a.1.abs().partial_cmp(&b.1.abs()).unwrap())
             .map(|(i, _)| i as i64)
             .unwrap();
@@ -2089,7 +2093,7 @@ mod loop_opt_tests {
         let ls = 1000usize;
         let le_authored = 5000 + 90; // 90 samples ≈ 0.45 period off a true match at 5000
         let mut sd = SampleData {
-            data,
+            data: data.into(),
             right: None,
             sample_rate: 48000,
             channels: 1,

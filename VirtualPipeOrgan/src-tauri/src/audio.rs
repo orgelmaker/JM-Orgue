@@ -29,6 +29,56 @@ pub const PRELOAD_MS_DEFAULT: u32 = 2000;
 pub const PRELOAD_MS_MIN: u32 = 100;
 pub const PRELOAD_MS_MAX: u32 = 4000;
 static PRELOAD_MS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(PRELOAD_MS_DEFAULT);
+use vpo_sampler::Bron;
+
+/// Kies één keer de soort opslag van links en rechts (C2) en roep `$f` aan met concrete typen, zodat de mengkern
+/// per soort apart wordt vertaald en er per monster geen keuze nodig is. Twaalf combinaties: links f32, 16- of
+/// 24-bit, rechts geen, f32, 16- of 24-bit (in de praktijk zijn beide kanalen dezelfde soort).
+macro_rules! met_bronnen {
+    ($l:expr, $r:expr, $f:expr, ($($arg:expr),*)) => {{
+        use vpo_sampler::BronRef as BR;
+        match ($l.bron(), $r.map(|x: &vpo_sampler::Monsters| x.bron())) {
+            (BR::F32(a), None) => $f(a, None::<&[f32]>, $($arg),*),
+            (BR::F32(a), Some(BR::F32(b))) => $f(a, Some(b), $($arg),*),
+            (BR::F32(a), Some(BR::I16(b))) => $f(a, Some(&b), $($arg),*),
+            (BR::F32(a), Some(BR::I24(b))) => $f(a, Some(&b), $($arg),*),
+            (BR::I16(a), None) => $f(&a, None::<&[f32]>, $($arg),*),
+            (BR::I16(a), Some(BR::F32(b))) => $f(&a, Some(b), $($arg),*),
+            (BR::I16(a), Some(BR::I16(b))) => $f(&a, Some(&b), $($arg),*),
+            (BR::I16(a), Some(BR::I24(b))) => $f(&a, Some(&b), $($arg),*),
+            (BR::I24(a), None) => $f(&a, None::<&[f32]>, $($arg),*),
+            (BR::I24(a), Some(BR::F32(b))) => $f(&a, Some(b), $($arg),*),
+            (BR::I24(a), Some(BR::I16(b))) => $f(&a, Some(&b), $($arg),*),
+            (BR::I24(a), Some(BR::I24(b))) => $f(&a, Some(&b), $($arg),*),
+        }
+    }};
+}
+
+/// Hoe samples in het geheugen staan (C2): 0 = f32 zoals vroeger, 1 = 16-bit compact waar dat exact kan (standaard),
+/// 2 = ook 24-bit compact. De klank is in alle drie gelijk; compact kost iets meer rekenwerk in de mengkern
+/// (gemeten 16-bit +15 %, 24-bit +62 % per stem) voor de helft of driekwart van het geheugen.
+static SAMPLE_OPSLAG: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(1);
+
+pub fn sample_opslag() -> u8 {
+    SAMPLE_OPSLAG.load(Ordering::Relaxed)
+}
+
+pub fn set_sample_opslag(v: u8) {
+    SAMPLE_OPSLAG.store(v.min(2), Ordering::Relaxed);
+}
+
+/// De hoogste compacte soort die de instelling toestaat.
+pub fn sample_opslag_max() -> vpo_sampler::monsters::Soort {
+    match sample_opslag() {
+        0 => vpo_sampler::monsters::Soort::F32,
+        1 => vpo_sampler::monsters::Soort::I16,
+        _ => vpo_sampler::monsters::Soort::I24,
+    }
+}
+
+/// Aantal volledige opnamen dat na het laden in de bitdiepte van de bron is opgeslagen (C2), voor de test-API.
+pub(crate) static SAMPLES_COMPACT: AtomicU64 = AtomicU64::new(0);
+
 pub fn preload_ms() -> u32 { PRELOAD_MS.load(Ordering::Relaxed) }
 pub fn set_preload_ms(ms: u32) {
     PRELOAD_MS.store(ms.clamp(PRELOAD_MS_MIN, PRELOAD_MS_MAX), Ordering::Relaxed);
@@ -81,6 +131,8 @@ pub struct LoaderStats {
     pub latency_avg_ms: f64,
     pub latency_max_ms: f64,
     pub staart_afgekapt_samples: u64,
+    /// Volledige opnamen die compact (16- of 24-bit) zijn opgeslagen (C2).
+    pub compact_opgeslagen: u64,
     pub staart_afgekapt_frames: u64,
 }
 
@@ -100,6 +152,7 @@ pub fn loader_stats() -> LoaderStats {
         latency_avg_ms: if done > 0 { sum as f64 / done as f64 / 1000.0 } else { 0.0 },
         latency_max_ms: LOAD_LATENCY_MAX_US.load(Ordering::Relaxed) as f64 / 1000.0,
         staart_afgekapt_samples: STAART_AFGEKAPT_SAMPLES.load(Ordering::Relaxed),
+        compact_opgeslagen: SAMPLES_COMPACT.load(Ordering::Relaxed),
         staart_afgekapt_frames: STAART_AFGEKAPT_FRAMES.load(Ordering::Relaxed),
     }
 }
@@ -1780,7 +1833,7 @@ impl PlayingVoice {
                     _ => (len / 4, len),
                 };
                 let xfade = loop_xfade(le.saturating_sub(ls), ls);
-                read_voice_lr(&sample.data, sample.right.as_deref(), ls, le, xfade, &mut self.position, no_loop, &mut self.envelope, licht)
+                met_bronnen!(&sample.data, sample.right.as_ref(), read_voice_lr, (ls, le, xfade, &mut self.position, no_loop, &mut self.envelope, licht))
             }
             VoiceSampleSource::PreloadOnly { preload, .. } => {
                 // The preload holds only the attack chunk. Gebruik de ECHTE
@@ -1806,7 +1859,7 @@ impl PlayingVoice {
                     PRELOAD_UNDERRUNS.fetch_add(1, Ordering::Relaxed);
                 }
                 let xfade = loop_xfade(le.saturating_sub(ls), ls);
-                read_voice_lr(&preload.attack_data, preload.attack_right.as_deref(), ls, le, xfade, &mut self.position, no_loop, &mut self.envelope, licht)
+                met_bronnen!(&preload.attack_data, preload.attack_right.as_ref(), read_voice_lr, (ls, le, xfade, &mut self.position, no_loop, &mut self.envelope, licht))
             }
         };
 
@@ -1887,11 +1940,17 @@ impl PlayingVoice {
     /// basis-`rate` van de stem blijft ongemoeid. Bewezen gelijk aan de oude
     /// route in `snelle_leesroute_is_bitidentiek`.
     fn lees_blok(&mut self, g: &LeesGeom, rates: &[f64], uit_l: &mut [f32], uit_r: &mut [f32], licht: bool) {
-        let (data, right): (&[f32], Option<&[f32]>) = match &self.source {
-            VoiceSampleSource::Full(s) => (&s.data, s.right.as_deref()),
-            VoiceSampleSource::PreloadOnly { preload, .. } => (&preload.attack_data, preload.attack_right.as_deref()),
+        let (links, rechts): (&vpo_sampler::Monsters, Option<&vpo_sampler::Monsters>) = match &self.source {
+            VoiceSampleSource::Full(s) => (&s.data, s.right.as_ref()),
+            VoiceSampleSource::PreloadOnly { preload, .. } => (&preload.attack_data, preload.attack_right.as_ref()),
         };
         let len = g.len;
+        // De lus hieronder wordt per soort opslag (C2) apart uitgeschreven: `data` en `right` hebben in elke tak een
+        // vast type, dus er is per monster geen keuze. Voor f32 is de berekening dezelfde als vroeger.
+        macro_rules! lus {
+            ($data:expr, $right:expr) => {{
+                let data = $data;
+                let right = $right;
         for (f, &rate) in rates.iter().enumerate() {
             // Envelope (zelfde stappen als next_sample).
             if self.envelope < self.target_envelope {
@@ -1961,6 +2020,23 @@ impl PlayingVoice {
             self.age_samples += 1;
             uit_l[f] = vl * self.envelope;
             uit_r[f] = vr * self.envelope;
+        }
+            }};
+        }
+        use vpo_sampler::BronRef as BR;
+        match (links.bron(), rechts.map(|x| x.bron())) {
+            (BR::F32(a), None) => lus!(a, None::<&[f32]>),
+            (BR::F32(a), Some(BR::F32(b))) => lus!(a, Some(b)),
+            (BR::F32(a), Some(BR::I16(b))) => lus!(a, Some(&b)),
+            (BR::F32(a), Some(BR::I24(b))) => lus!(a, Some(&b)),
+            (BR::I16(a), None) => lus!(&a, None::<&[f32]>),
+            (BR::I16(a), Some(BR::F32(b))) => lus!(&a, Some(b)),
+            (BR::I16(a), Some(BR::I16(b))) => lus!(&a, Some(&b)),
+            (BR::I16(a), Some(BR::I24(b))) => lus!(&a, Some(&b)),
+            (BR::I24(a), None) => lus!(&a, None::<&[f32]>),
+            (BR::I24(a), Some(BR::F32(b))) => lus!(&a, Some(b)),
+            (BR::I24(a), Some(BR::I16(b))) => lus!(&a, Some(&b)),
+            (BR::I24(a), Some(BR::I24(b))) => lus!(&a, Some(&b)),
         }
     }
 }
@@ -2534,15 +2610,15 @@ mod wet_weights_tests;
 /// registers; Hermite onderdrukt dat sterk voor ~5 extra mul/adds per sample.
 /// Bij frac==0 (rate exact 1.0) is de uitkomst bit-exact data[i].
 #[inline]
-fn hermite4(data: &[f32], i: usize, frac: f32) -> f32 {
+fn hermite4<B: Bron + ?Sized>(data: &B, i: usize, frac: f32) -> f32 {
     if frac == 0.0 {
-        return data[i];
+        return data.at(i);
     }
-    let n = data.len();
-    let xm1 = data[i.saturating_sub(1)];
-    let x0 = data[i];
-    let x1 = data[(i + 1).min(n - 1)];
-    let x2 = data[(i + 2).min(n - 1)];
+    let n = data.n();
+    let xm1 = data.at(i.saturating_sub(1));
+    let x0 = data.at(i);
+    let x1 = data.at((i + 1).min(n - 1));
+    let x2 = data.at((i + 2).min(n - 1));
     let c = (x1 - xm1) * 0.5;
     let v = x0 - x1;
     let w = c + v;
@@ -2555,18 +2631,18 @@ fn hermite4(data: &[f32], i: usize, frac: f32) -> f32 {
 /// piekbelasting (zie `MengBlok::licht`, 0.9.30). Twee array-lezingen en één
 /// FMA i.p.v. vier lezingen en een cubische Horner-evaluatie.
 #[inline]
-fn linear2(data: &[f32], i: usize, frac: f32) -> f32 {
+fn linear2<B: Bron + ?Sized>(data: &B, i: usize, frac: f32) -> f32 {
     if frac == 0.0 {
-        return data[i];
+        return data.at(i);
     }
-    let x0 = data[i];
-    let x1 = data[(i + 1).min(data.len() - 1)];
+    let x0 = data.at(i);
+    let x1 = data.at((i + 1).min(data.n() - 1));
     x0 + (x1 - x0) * frac
 }
 
 /// Interpoleer op positie `i`+`frac`: cubisch (standaard) of lineair (licht).
 #[inline]
-fn interp(data: &[f32], i: usize, frac: f32, licht: bool) -> f32 {
+fn interp<B: Bron + ?Sized>(data: &B, i: usize, frac: f32, licht: bool) -> f32 {
     if licht { linear2(data, i, frac) } else { hermite4(data, i, frac) }
 }
 
@@ -2624,7 +2700,7 @@ fn read_voice(
     envelope: &mut f32,
     licht: bool,
 ) -> f32 {
-    read_voice_lr(data, None, ls, le, xfade, position, releasing, envelope, licht).0
+    read_voice_lr(data, None::<&[f32]>, ls, le, xfade, position, releasing, envelope, licht).0
 }
 
 /// Read one interpolated sample from `data`, advancing/wrapping `position` within
@@ -2634,9 +2710,9 @@ fn read_voice(
 /// gewichten één keer; met een rechtervlak wordt alleen een tweede hermite4 op
 /// dezelfde index gedaan. Mono geeft (v, v).
 #[inline]
-fn read_voice_lr(
-    data: &[f32],
-    right: Option<&[f32]>,
+fn read_voice_lr<L: Bron + ?Sized, R: Bron + ?Sized>(
+    data: &L,
+    right: Option<&R>,
     ls: usize,
     le: usize,
     xfade: usize,
@@ -2645,7 +2721,7 @@ fn read_voice_lr(
     envelope: &mut f32,
     licht: bool,
 ) -> (f32, f32) {
-    let len = data.len();
+    let len = data.n();
     if len < 2 {
         *envelope = 0.0;
         return (0.0, 0.0);
@@ -3591,8 +3667,8 @@ fn run_audio_thread(
                                     // deze kopie is uniek voor deze geshapede pijp.
                                     if let Some(shelf) = harm_shelf {
                                         let rate = sample_data.sample_rate;
-                                        let rechts = sample_data.right.as_deref_mut();
-                                        shelf.apply(&mut sample_data.data, rechts, rate);
+                                        let rechts = sample_data.right.as_mut().map(|r| r.f32_mut().as_mut_slice());
+                                        shelf.apply(sample_data.data.f32_mut(), rechts, rate);
                                         let sample = Arc::new(sample_data);
                                         let _ = loaded_tx_clone.send((key, Some(sample), generation));
                                         noteer_laadlatentie(requested_at);
@@ -3611,6 +3687,12 @@ fn run_audio_thread(
                                         }
                                         None => false,
                                     };
+                                    // C2: in de bitdiepte van de bron bewaren als dat exact kan; anders blijft
+                                    // het f32. Het afspelen leest dezelfde waarden terug (bit-identiek).
+                                    let rechts = sample_data.right.as_mut();
+                                    if vpo_sampler::Monsters::compacteer_paar_tot(&mut sample_data.data, rechts, sample_opslag_max()) != vpo_sampler::monsters::Soort::F32 {
+                                        SAMPLES_COMPACT.fetch_add(1, Ordering::Relaxed);
+                                    }
                                     let sample = Arc::new(sample_data);
                                     let t_c = std::time::Instant::now();
                                     {

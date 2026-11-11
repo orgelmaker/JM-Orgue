@@ -19,6 +19,8 @@ pub mod perspective;
 pub mod registernaam;
 pub mod wavpack;
 pub mod stille_staart;
+pub mod monsters;
+pub use monsters::{Bron, BronRef, I16Bron, I24Bron, Monsters};
 
 pub use loader::{
     SampleData, SampleError, PreloadBuffer, PreloadSegment, WavMarkers, ReleaseAlignTable,

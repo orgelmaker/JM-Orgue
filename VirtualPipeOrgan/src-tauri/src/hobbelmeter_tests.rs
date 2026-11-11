@@ -47,7 +47,7 @@ fn toon(f0: f64, frame: f64) -> f32 {
 
 fn sample_van(data: Vec<f32>) -> SampleRef {
     Arc::new(SampleData {
-        data,
+        data: data.into(),
         right: None,
         sample_rate: SR,
         channels: 1,
@@ -115,9 +115,9 @@ fn meet_overgang(note: u8, uitlijnen: bool, momenten: usize) -> Meting {
     let frames = ((fade_ms.max(1.0) * 0.001 * SR as f32).max(8.0)) as usize;
     let aangehouden = aangehouden(f0, 5 * SR as usize);
     let release = uitklinkend(f0, 8 * SR as usize);
-    let tabel = ReleaseAlignTable::compute(&release.data, SR).expect("de tabel hoort zich te laten bouwen");
-    let s_aangehouden = rms(&aangehouden.data[..SR as usize]);
-    let piek = aangehouden.data.iter().fold(0.0f32, |m, v| m.max(v.abs())) as f64;
+    let tabel = ReleaseAlignTable::compute(&release.data.naar_f32(), SR).expect("de tabel hoort zich te laten bouwen");
+    let s_aangehouden = rms(&aangehouden.data.naar_f32()[..SR as usize]);
+    let piek = aangehouden.data.naar_f32().iter().fold(0.0f32, |m, v| m.max(v.abs())) as f64;
 
     let mut reeks = Reeks(0x2545_F491_4F6C_DD1D ^ note as u64);
     let mut m = Meting {
@@ -142,7 +142,7 @@ fn meet_overgang(note: u8, uitlijnen: bool, momenten: usize) -> Meting {
         };
 
         let volgende = toon(f0, (n + 2) as f64);
-        m.sprong = m.sprong.max(((release.data[start as usize] - volgende).abs() as f64) / piek);
+        m.sprong = m.sprong.max(((release.data.at(start as usize) - volgende).abs() as f64) / piek);
 
         let mut rel = PlayingVoice::new_from_sample(release.clone(), 1, 1 | RELEASE_PIPE_FLAG, note, 1.0);
         rel.position = start as f64;
@@ -346,8 +346,8 @@ fn staart_na_een_staccatonoot_dooft_uit_zonder_bult() {
         let aangehouden = aangehouden(f0, 5 * SR as usize);
         let release = uitklinkend(f0, 8 * SR as usize);
         let rel_secs = release.data.len() as f32 / SR as f32;
-        let tabel = ReleaseAlignTable::compute(&release.data, SR).unwrap();
-        let s = rms(&aangehouden.data[..SR as usize]);
+        let tabel = ReleaseAlignTable::compute(&release.data.naar_f32(), SR).unwrap();
+        let s = rms(&aangehouden.data.naar_f32()[..SR as usize]);
 
         for &note_ms in &[10.0f32, 40.0, 100.0, 200.0, 340.0] {
             let (gain, decay) = scaled_release_params(note_ms, note, rel_secs);

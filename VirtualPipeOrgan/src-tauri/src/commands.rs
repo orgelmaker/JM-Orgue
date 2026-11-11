@@ -619,6 +619,21 @@ pub fn set_staart_drempel(state: State<AppState>, db: f32) -> f32 {
 #[tauri::command]
 pub fn get_preload_ms() -> u32 { crate::audio::preload_ms() }
 
+/// Hoe samples in het geheugen staan (C2): 0 = f32 zoals vroeger, 1 = 16-bit compact (standaard), 2 = ook 24-bit.
+#[tauri::command]
+pub fn get_sample_opslag() -> u8 { crate::audio::sample_opslag() }
+
+/// Zet de opslag van samples (C2); geldt bij het volgende laden van een orgel. Wordt bewaard in de audio-voorkeuren.
+#[tauri::command]
+pub fn set_sample_opslag(state: State<AppState>, opslag: u8) -> u8 {
+    crate::audio::set_sample_opslag(opslag);
+    let mut prefs = crate::state::load_audio_prefs(&state.app_data_dir);
+    prefs.sample_opslag = Some(crate::audio::sample_opslag());
+    crate::state::save_audio_prefs(&state.app_data_dir, &prefs);
+    info!("Samples in het geheugen: stand {} (actief na herladen van het orgel)", crate::audio::sample_opslag());
+    crate::audio::sample_opslag()
+}
+
 /// Geheugen (bytes) dat het geladen orgel voor het begin van de opnamen vraagt bij elk van de gegeven
 /// startbuffers in ms (F2), met dezelfde telling als het laden en de geheugenwaarschuwing. Leeg als er
 /// geen schatting is (nog geen orgel geladen, of een samplemap).
@@ -1487,10 +1502,10 @@ fn laad_en_stuur_toetsmechaniek(
                 let rate = (sd.sample_rate as f64 / output_sr as f64).max(0.01);
                 let max_frames = (MAX_KLIK_SECONDEN * sd.sample_rate as f32) as usize;
                 let l = if sd.data.len() > max_frames {
-                    let mut v = sd.data; v.truncate(max_frames); v
-                } else { sd.data };
+                    let mut v = sd.data.into_f32(); v.truncate(max_frames); v
+                } else { sd.data.into_f32() };
                 let r = sd.right.map(|r| {
-                    let mut rv = r;
+                    let mut rv = r.into_f32();
                     if rv.len() > max_frames { rv.truncate(max_frames); }
                     Arc::new(rv)
                 });
@@ -1638,8 +1653,8 @@ fn laad_en_stuur_register_mechaniek(
             Some(p) => match vpo_sampler::loader::load_wav(p) {
                 Ok(sd) => {
                     let rate = (sd.sample_rate as f64 / output_sr as f64).max(0.01);
-                    (Some(std::sync::Arc::new(sd.data)),
-                     sd.right.map(std::sync::Arc::new), rate)
+                    (Some(std::sync::Arc::new(sd.data.into_f32())),
+                     sd.right.map(|r| std::sync::Arc::new(r.into_f32())), rate)
                 }
                 Err(e) => {
                     warn!("Register-klik (attack) niet geladen voor stop {}: {} ({:?})", stop_id, e, p);
@@ -1652,8 +1667,8 @@ fn laad_en_stuur_register_mechaniek(
             Some(p) => match vpo_sampler::loader::load_wav(p) {
                 Ok(sd) => {
                     let rate = (sd.sample_rate as f64 / output_sr as f64).max(0.01);
-                    (Some(std::sync::Arc::new(sd.data)),
-                     sd.right.map(std::sync::Arc::new), rate)
+                    (Some(std::sync::Arc::new(sd.data.into_f32())),
+                     sd.right.map(|r| std::sync::Arc::new(r.into_f32())), rate)
                 }
                 Err(e) => {
                     warn!("Register-klik (release) niet geladen voor stop {}: {} ({:?})", stop_id, e, p);
@@ -1679,8 +1694,8 @@ fn laad_en_stuur_bijgeluiden(state: &AppState, defs: &[vpo_sampler::grandorgue::
     for d in defs {
         match vpo_sampler::loader::load_wav(&d.path) {
             Ok(sd) => {
-                let data_l = std::sync::Arc::new(sd.data);
-                let data_r = sd.right.map(std::sync::Arc::new);
+                let data_l = std::sync::Arc::new(sd.data.into_f32());
+                let data_r = sd.right.map(|r| std::sync::Arc::new(r.into_f32()));
                 let bron_sr = sd.sample_rate as f64;
                 let rate = (bron_sr / output_sr as f64).max(0.01);
                 voices.push(crate::background_sounds::BackgroundVoice {
@@ -3889,6 +3904,7 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
         // de gebruiker zag niet dat het aan het bestandsformaat lag.
         let container_counts: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, (usize, PathBuf)>>> =
             std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
+        let compact_preloads = std::sync::atomic::AtomicUsize::new(0);
         let mut path_buffers: HashMap<(PathBuf, SegKey), Arc<PreloadBuffer>> = unique_loads
             .par_iter()
             .filter_map(|entry| {
@@ -3906,7 +3922,16 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
                     ),
                 };
                 match result {
-                    Ok(buf) => Some((entry.clone(), Arc::new(buf))),
+                    Ok(mut buf) => {
+                        // C2: direct na het decoderen in de bitdiepte van de bron bewaren als dat exact kan
+                        // (bit-identiek); de waarden zitten dan nog in de cache en het werk is over de kernen
+                        // verdeeld. Wat later nog bewerkt wordt (harmonische plank) zet zichzelf terug naar f32.
+                        let rechts = buf.attack_right.as_mut();
+                        if vpo_sampler::Monsters::compacteer_paar_tot(&mut buf.attack_data, rechts, crate::audio::sample_opslag_max()) != vpo_sampler::monsters::Soort::F32 {
+                            compact_preloads.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        }
+                        Some((entry.clone(), Arc::new(buf)))
+                    }
                     Err(e) => {
                         // Same-file release zonder cue/loop is geen fout: dat
                         // bestand heeft simpelweg geen release-segment.
@@ -3969,8 +3994,10 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
                         // Zelfde fase-uitlijning als het smpl-pad: de eerste
                         // ~2 s van elke noot loopt op deze buffer.
                         if (e as usize) <= b.attack_data.len() {
+                            let l = b.attack_data.naar_f32();
+                            let r = b.attack_right.as_ref().map(|r| r.naar_f32());
                             if let Some(better) = vpo_sampler::optimize_loop_end_lr(
-                                &b.attack_data, b.attack_right.as_deref(), a as usize, e as usize,
+                                &l, r.as_deref(), a as usize, e as usize,
                             ) {
                                 e = better as u64;
                             }
@@ -3986,9 +4013,10 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
             info!("ODF-looppunten toegepast op {} bestanden (override op smpl)", odf_loops_applied);
         }
         info!(
-            "Loaded {} unieke preload-buffers in {:.2}s",
+            "Loaded {} unieke preload-buffers in {:.2}s ({} compact opgeslagen)",
             path_buffers.len(),
-            start_time.elapsed().as_secs_f32()
+            start_time.elapsed().as_secs_f32(),
+            compact_preloads.load(std::sync::atomic::Ordering::Relaxed)
         );
 
         // Hertemper-tabel: per pijp de correctie in cents die in hertemper-
@@ -4079,7 +4107,8 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
                 match harm_shelves.get(&basis) {
                     Some(shelf) => {
                         let mut pb = (**buf).clone();
-                        shelf.apply(&mut pb.attack_data, pb.attack_right.as_deref_mut(), pb.sample_rate);
+                        let rechts = pb.attack_right.as_mut().map(|r| r.f32_mut().as_mut_slice());
+                        shelf.apply(pb.attack_data.f32_mut(), rechts, pb.sample_rate);
                         pb.harm_shelf = Some(*shelf);
                         harm_geshaped += 1;
                         (*key, Arc::new(pb))
