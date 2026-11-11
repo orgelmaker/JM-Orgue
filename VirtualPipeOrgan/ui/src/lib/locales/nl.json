@@ -525,6 +525,7 @@
   "status": {
     "loading": "Laden van orgeldefinitie...",
     "loading_samples": "Laden van samples... Dit kan even duren.",
+    "unpacking_package": "Pakket uitpakken…",
     "scanning_folder": "Scannen van sample map...",
     "audio_running": "Audio actief",
     "audio_stopped": "Audio gestopt",

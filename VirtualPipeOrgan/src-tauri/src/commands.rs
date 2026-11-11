@@ -11577,6 +11577,35 @@ pub fn get_log_tail(max_kb: Option<u32>) -> Result<String, String> {
     Ok(out)
 }
 
+/// Pak een GrandOrgue-pakket (`.orgue`) uit, of hergebruik een eerdere uitpakking, en geef het pad
+/// van de orgeldefinitie terug (C6). De uitpakking staat in de map `pakketten` van de app. Voortgang
+/// via het event "jm-orgue:pakket-uitpakken" ({pct}). Zie `pakket_uitpakken.rs`.
+#[tauri::command]
+pub async fn pak_pakket_uit(app: tauri::AppHandle, state: State<'_, AppState>, pad: String) -> Result<String, String> {
+    use tauri::Emitter;
+    let pakket = std::path::PathBuf::from(&pad);
+    if !crate::pakket_uitpakken::is_orgue(&pakket) {
+        return Err("Dit is geen .orgue-pakket".to_string());
+    }
+    let basis = state.app_data_dir.join("pakketten");
+    let uitkomst = tokio::task::spawn_blocking(move || {
+        crate::pakket_uitpakken::pak_orgue_uit(
+            &pakket,
+            &basis,
+            &mut |pct| { let _ = app.emit("jm-orgue:pakket-uitpakken", serde_json::json!({ "pct": pct })); },
+            &|| false,
+        )
+    })
+    .await
+    .map_err(|e| format!("Uitpaktaak crashte: {}", e))??;
+    info!(
+        "Pakket {}: {:?}",
+        if uitkomst.hergebruikt { "hergebruikt" } else { "uitgepakt" },
+        uitkomst.map
+    );
+    Ok(uitkomst.organ.to_string_lossy().to_string())
+}
+
 /// Download een sampleset-zip (GitHub-release-asset uit ons eigen
 /// samplesets.json-manifest) en pak hem uit in `doel_map`. De map wordt
 /// aangemaakt en moet nieuw of leeg zijn. Voortgang via het event

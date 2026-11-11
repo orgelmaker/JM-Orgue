@@ -525,6 +525,7 @@
   "status": {
     "loading": "Chargement de la définition d'orgue...",
     "loading_samples": "Chargement des échantillons...",
+    "unpacking_package": "Décompression du paquet…",
     "scanning_folder": "Scan du dossier d'échantillons...",
     "audio_running": "Audio actif",
     "audio_stopped": "Audio arrêté",

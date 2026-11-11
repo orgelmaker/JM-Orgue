@@ -1471,7 +1471,35 @@
     } catch (e) { /* niet in Tauri of geen extra vensters */ }
   }
 
+  // Een GrandOrgue-pakket (.orgue) eerst uitpakken (C6); daarna gaat het als gewone .organ verder.
+  // Geeft het pad van de orgeldefinitie terug, of null bij een fout (die staat dan in `error`).
+  async function pakPakketUit(pad) {
+    loading = true;
+    loadingProgress = 0;
+    loadingMessage = tx('status.unpacking_package');
+    error = null;
+    let stop = null;
+    try {
+      const { listen } = await import('@tauri-apps/api/event');
+      stop = await listen('jm-orgue:pakket-uitpakken', (e) => {
+        loadingProgress = Math.max(0, Math.min(100, Number(e.payload && e.payload.pct) || 0));
+      });
+      return await invoke('pak_pakket_uit', { pad });
+    } catch (e) {
+      error = vertaalFout(e);
+      return null;
+    } finally {
+      if (stop) stop();
+      loading = false;
+    }
+  }
+
   async function loadOrgan(path, opties = {}) {
+    if (typeof path === 'string' && path.toLowerCase().endsWith('.orgue')) {
+      const uitgepakt = await pakPakketUit(path);
+      if (!uitgepakt) return;
+      path = uitgepakt;
+    }
     // Hauptwerk/CODM: eerst het verslag. Het huidige orgel (en zijn audio) wordt
     // pas vervangen als het nieuwe volledig is of de gebruiker gedeeltelijk
     // laden bevestigt.

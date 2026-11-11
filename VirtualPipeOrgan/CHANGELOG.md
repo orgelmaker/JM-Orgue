@@ -6,6 +6,17 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### GrandOrgue-pakketten (.orgue) rechtstreeks openen (C6, stap 1)
+- Bij "Orgel openen" kun je nu een `.orgue`-pakket kiezen (een zip met de orgeldefinitie en de samples). De app pakt het eenmalig uit in de
+  map `pakketten` in de gegevensmap van de app en laadt het daarna als gewone set; de laadbalk toont tijdens het uitpakken de voortgang.
+  Een tweede keer openen kost niets: de uitgepakte map wordt hergebruikt zolang het pakket niet verandert (naam, pad, grootte en
+  wijzigingstijd bepalen de mapnaam).
+- Uitpakken gebeurt in een tijdelijke map die pas bij succes hernoemd wordt: een mislukte poging laat niets halfs achter en het orgel dat al
+  geladen was blijft staan. Namen met `..` of een absoluut pad in het archief worden overgeslagen (zip-slip). Bevat het pakket meer dan
+  een `.organ`, dan wordt de ondiepste genomen (bij gelijke diepte de eerste op naam); zonder `.organ` volgt een duidelijke melding.
+- Het pakket zelf blijft ongemoeid. De uitgepakte map neemt schijfruimte in; opruimen kan door de map `pakketten` te verwijderen (een
+  opruimknop is er nog niet). RAR-pakketten volgen in een volgende stap, na een controle van de licentie van de uitpakbibliotheek.
+
 ### Geheugenschatting vooraf telt unieke bestanden (F2)
 - De schatting van het geheugen dat het begin van de opnamen vraagt (`preload_buffers_per_label`) telde per pijp: een attack, de releases en
   de tremulantlaag, ook als pijpen of registers hetzelfde bestand delen. De laadroute laadt elk uniek (bestand, segment) maar één keer. De

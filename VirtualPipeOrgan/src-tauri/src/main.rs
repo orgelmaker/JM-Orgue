@@ -33,6 +33,7 @@ mod retune;
 mod rt_prioriteit;
 mod zwelkast_set;
 mod set_crescendo;
+mod pakket_uitpakken;
 mod sampleset_download;
 mod state;
 mod test_api;
@@ -433,6 +434,7 @@ fn main() {
             commands::misc_cc_get_bindings,
             commands::get_and_clear_misc_cc_pending,
             commands::download_sampleset,
+            commands::pak_pakket_uit,
             commands::cancel_sampleset_download,
             commands::get_audio_devices,
             commands::list_audio_hosts,

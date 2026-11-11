@@ -525,6 +525,7 @@
   "status": {
     "loading": "Lade Orgel-Definition...",
     "loading_samples": "Lade Samples... Dies kann einen Moment dauern.",
+    "unpacking_package": "Paket wird entpackt …",
     "scanning_folder": "Sample-Ordner wird gescannt...",
     "audio_running": "Audio läuft",
     "audio_stopped": "Audio gestoppt",

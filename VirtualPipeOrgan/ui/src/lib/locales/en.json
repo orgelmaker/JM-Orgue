@@ -525,6 +525,7 @@
   "status": {
     "loading": "Loading organ definition...",
     "loading_samples": "Loading samples... This may take a moment.",
+    "unpacking_package": "Unpacking package…",
     "scanning_folder": "Scanning sample folder...",
     "audio_running": "Audio running",
     "audio_stopped": "Audio stopped",

@@ -525,6 +525,7 @@
   "status": {
     "loading": "Cargando la definición del órgano...",
     "loading_samples": "Cargando las muestras... Puede tardar un momento.",
+    "unpacking_package": "Descomprimiendo el paquete…",
     "scanning_folder": "Explorando la carpeta de muestras...",
     "audio_running": "Audio activo",
     "audio_stopped": "Audio detenido",

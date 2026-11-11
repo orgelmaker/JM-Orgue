@@ -525,6 +525,7 @@
   "status": {
     "loading": "Wczytywanie definicji organów...",
     "loading_samples": "Wczytywanie sampli... Może to chwilę potrwać.",
+    "unpacking_package": "Rozpakowywanie pakietu…",
     "scanning_folder": "Skanowanie folderu sampli...",
     "audio_running": "Audio działa",
     "audio_stopped": "Audio zatrzymane",
