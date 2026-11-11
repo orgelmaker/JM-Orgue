@@ -137,7 +137,7 @@ jobs:
 
       - name: Upload artifacts (manual run)
         if: github.event_name == 'workflow_dispatch'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: installers
           path: |
@@ -236,7 +236,7 @@ jobs:
 
       - name: Upload artifacts (manual run)
         if: github.event_name == 'workflow_dispatch'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: installers-macos
           path: |
@@ -357,7 +357,7 @@ jobs:
 
       - name: Upload artifacts (manual run)
         if: github.event_name == 'workflow_dispatch'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: installers-linux
           path: |
