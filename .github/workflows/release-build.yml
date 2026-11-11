@@ -35,7 +35,7 @@ jobs:
       run:
         working-directory: VirtualPipeOrgan
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # De updater vergelijkt de versie in latest.json (afgeleid van de tag) met
       # de versie in de draaiende app. Lopen die uiteen, dan blijft een update
@@ -153,7 +153,7 @@ jobs:
       run:
         working-directory: VirtualPipeOrgan
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Zelfde poort als in build-windows: ook de dmg en het macOS-updatebestand
       # dragen de versie uit tauri.conf.json, en latest.json (afgeleid van de
@@ -276,7 +276,7 @@ jobs:
       run:
         working-directory: VirtualPipeOrgan
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Controleer tag tegen versie in de app
         if: github.event_name == 'release'
@@ -392,7 +392,7 @@ jobs:
     if: ${{ !cancelled() && github.event_name == 'release' && needs.build-windows.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Het script controleert elke handtekening met `minisign -V` tegen de
       # publieke sleutel uit tauri.conf.json (op de tag) vóórdat latest.json
