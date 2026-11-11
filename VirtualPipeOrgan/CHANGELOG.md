@@ -6,6 +6,16 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### Uitgangstrap: vaste regel "uit kost niets" vastgelegd (F6)
+- Nieuwe test `uitgangsopties_die_uit_staan_laten_de_uitvoer_bit_identiek`: voor de
+  twee EQ-trappen in de uitvoer (orgel-EQ en uitgangscorrectie) geldt elke vorm
+  van "uit" (geen banden, band uitgeschakeld, band voor een ander kanaal, 0 dB
+  voorversterking) als identiteit en verandert de keten geen enkele bit, ook niet
+  bij nul, negatieve nul en subnormale waarden. Een negatieve controle met een
+  echte band bewijst dat de vergelijking gevoelig is.
+- Alleen een test, geen codewijziging. Basmanagement (een subwooferkanaal) is nog
+  niet gebouwd; zodra het er is, krijgt het in dezelfde test een eigen regel.
+
 ### Hauptwerk: ontbrekende samplepakketten worden gemeld (E10)
 - Een volledige Hauptwerk-definitie die samples uit een pakket nodig heeft dat niet
   op schijf staat, liet die pijpen er stil uit vallen. Nu staat in het

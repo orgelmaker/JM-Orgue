@@ -1499,6 +1499,46 @@ mod eq_tests {
         20.0 * (rms * std::f32::consts::SQRT_2).max(1e-9).log10()
     }
 
+    /// Vaste regel van de uitgangstrap (F6): een optie die uit staat kost niets en
+    /// laat de uitvoer bit-identiek. Voor de twee EQ-trappen betekent "uit": geen
+    /// banden, alle banden uitgeschakeld, of banden voor een ander kanaal, en
+    /// voorversterking 0 dB. De callback slaat zo'n keten over (`is_identity`);
+    /// dit legt vast dat elke vorm van "uit" ook echt als identiteit geldt, en
+    /// dat de keten zelf, mocht hij toch worden aangeroepen, geen bit verandert.
+    /// Elke nieuwe optie in de uitgangstrap (basmanagement) krijgt hier een
+    /// eigen regel bij.
+    #[test]
+    fn uitgangsopties_die_uit_staan_laten_de_uitvoer_bit_identiek() {
+        let sr = 48_000;
+        let uit_band = EqBandSpec { enabled: false, ..band(EqBandType::Peak, 1000.0, 6.0, 1.0, None) };
+        let ander_kanaal = EqBandSpec { channel: Some(3), ..band(EqBandType::LowShelf, 200.0, 4.0, 1.0, Some(0.7)) };
+        let gevallen: Vec<(&str, Vec<EqBandSpec>)> = vec![
+            ("geen banden", vec![]),
+            ("band uitgeschakeld", vec![uit_band]),
+            ("band voor een ander kanaal", vec![ander_kanaal]),
+        ];
+        // Waarden die een naïeve doorgave zouden kunnen raken: nul, negatieve nul,
+        // heel klein (subnormaal), klein, groot, en een rij uit een sinus.
+        let mut monsters: Vec<f32> = vec![0.0, -0.0, 1.0e-40, -1.0e-40, 1.0e-20, 0.1, -0.7, 0.999_999, -1.0];
+        monsters.extend((0..512).map(|i| (2.0 * PI * 440.0 * i as f32 / sr as f32).sin() * 0.8));
+        for (naam, banden) in &gevallen {
+            let mut keten = ChannelEq::build(banden, 0, sr, 0.0);
+            assert!(keten.is_identity(), "{naam}: hoort als identiteit te gelden");
+            for &x in &monsters {
+                assert_eq!(keten.process(x).to_bits(), x.to_bits(), "{naam}: {x:e} is veranderd");
+            }
+        }
+        // Negatieve controle: met een echte band is het geen identiteit en
+        // verandert de uitvoer wel; anders bewijst de test hierboven niets.
+        let mut actief = ChannelEq::build(&[band(EqBandType::Peak, 1000.0, 6.0, 1.0, None)], 0, sr, 0.0);
+        assert!(!actief.is_identity());
+        let veranderd = monsters.iter().any(|&x| actief.process(x).to_bits() != x.to_bits());
+        assert!(veranderd, "een actieve band hoort de uitvoer te veranderen");
+        // Een voorversterking van 0 dB is identiteit, een andere waarde niet.
+        assert!(ChannelEq::build(&[], 0, sr, 0.0).is_identity());
+        assert!(!ChannelEq::build(&[], 0, sr, -3.0).is_identity());
+    }
+
     #[test]
     fn oude_banden_bit_identiek() {
         // Zonder Q moet from_band_spec exact de 0.7.75-coëfficiënten geven:
