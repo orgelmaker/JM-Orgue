@@ -627,6 +627,26 @@ pub fn get_preload_geheugen(keuzes: Vec<u32>) -> Vec<u64> {
     preload_geheugen_voor(&keuzes, crate::geheugen::laatste_buffers())
 }
 
+/// Alle echte registers van het geladen orgel met het geheugen dat elk vooraf vraagt (F2), ook de registers die
+/// bij de laatste lading zijn weggelaten, zodat ze weer aangezet kunnen worden. Het geheugen telt de opnameposities
+/// die nu aan staan, bij de ingestelde startbuffer, en komt uit dezelfde telling als de schatting van het laden.
+#[tauri::command]
+pub fn get_register_geheugen(state: State<AppState>) -> Vec<crate::register_filter::RegisterGeheugenDto> {
+    let posities: Vec<(String, bool)> = state.perspectives.read().iter().map(|p| (p.name.clone(), p.enabled)).collect();
+    let label_telt = |label: &str| posities.is_empty() || posities.iter().any(|(n, aan)| *aan && n == label);
+    crate::register_filter::voor_interface(&state.register_geheugen.read(), &label_telt, preload_bytes_per_buffer())
+}
+
+/// Bewaar de keuze van registers die bij het volgende laden worden overgeslagen (F2). De keuze wordt met de
+/// andere instellingen van dit orgel opgeslagen en geldt na het herladen van het orgel.
+#[tauri::command]
+pub fn set_niet_geladen_registers(state: State<AppState>, ids: Vec<String>) -> Vec<String> {
+    let schoon = crate::register_filter::schoon(ids);
+    info!("Registers niet laden bij het volgende laden: {} gekozen", schoon.len());
+    *state.niet_geladen_registers.write() = schoon.clone();
+    schoon
+}
+
 fn preload_geheugen_voor(keuzes: &[u32], buffers: u64) -> Vec<u64> {
     if buffers == 0 {
         return Vec::new();
@@ -835,17 +855,17 @@ fn preload_bytes_per_buffer() -> u64 {
 
 /// Sleutel in `preload_buffers_per_label` voor lagen zonder perspectief-label:
 /// die worden altijd geladen en horen bij geen enkele positie.
-const GEEN_PERSPECTIEF: &str = "";
+pub(crate) const GEEN_PERSPECTIEF: &str = "";
 
 /// Sleutel van één voorgeladen buffer: (bestand, cue-punt, is release). Dezelfde sleutel als
 /// de laadroute gebruikt ("GrandOrgue-stops delen vaak één rank"): wat dezelfde sleutel heeft,
 /// wordt één keer geladen en gedeeld.
-type BufferSleutel = (std::path::PathBuf, Option<u32>, bool);
+pub(crate) type BufferSleutel = (std::path::PathBuf, Option<u32>, bool);
 
 /// Voeg de buffers van één pijp toe aan de unieke sleutels van een label (F2). Een `Reference`
 /// kan niet worden opgelost zonder de pijp waarnaar ze verwijst; die telt als één buffer extra
 /// (voorzichtig: nooit te weinig).
-fn voeg_pijp_buffers_toe(p: &vpo_sampler::PipeDef, unieke: &mut std::collections::HashSet<BufferSleutel>, referenties: &mut usize) {
+pub(crate) fn voeg_pijp_buffers_toe(p: &vpo_sampler::PipeDef, unieke: &mut std::collections::HashSet<BufferSleutel>, referenties: &mut usize) {
     use vpo_sampler::PipeDef;
     match p {
         PipeDef::Sample { path, extra } => {
@@ -3324,6 +3344,20 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
     // everything downstream consistent. (Hauptwerk names are already clean → no-op.)
     for manual in &mut definition.manuals {
         manual.name = clean_division_name(&manual.name);
+    }
+
+    // Registers die de gebruiker voor dit orgel niet wil laden (F2): eerst uit de definitie halen, voordat er iets
+    // van gemaakt wordt, zodat de schatting van het geheugen, de laadroute en de knoppen een kleiner orgel zien.
+    // Een orgel zonder bewaarde keuze laadt alles.
+    {
+        let gekozen = crate::register_filter::schoon(
+            saved_settings_for(state, path).map(|s| s.niet_geladen_registers).unwrap_or_default());
+        let (tabel, weggelaten) = crate::register_filter::pas_toe(&mut definition, &gekozen);
+        if weggelaten > 0 {
+            info!("Registers niet geladen op verzoek: {} van de {}", weggelaten, tabel.len());
+        }
+        *state.niet_geladen_registers.write() = gekozen;
+        *state.register_geheugen.write() = tabel;
     }
 
     // GrandOrgue registermechaniek (0.7.101): "Stop attack noise {naam}" en
@@ -9397,6 +9431,9 @@ pub fn do_load_samples_from_directory_locked(state: &AppState, directory: &str) 
     zet_orgelvlaggen_voor(state, directory);
     // Voor een samplemap wordt geen schatting gemaakt: niets tonen in plaats van het getal van het vorige orgel.
     crate::geheugen::zet_laatste_buffers(0);
+    // Een samplemap kent geen lijst van registers om weg te laten: niets van het vorige orgel laten staan.
+    state.niet_geladen_registers.write().clear();
+    state.register_geheugen.write().clear();
     use std::collections::HashMap;
     use std::sync::Arc;
     use rayon::prelude::*;
@@ -10855,6 +10892,7 @@ pub fn do_save_organ_settings(state: &AppState, presets: HashMap<String, PresetD
         koppels_volgen_set: vlag_koppels,
         staart_afkap: vlag_staart,
         zwelkast_van_set: vlag_zwelkast,
+        niet_geladen_registers: state.niet_geladen_registers.read().clone(),
         listening_position: Some(*state.listening_position.read()),
         background_gain: Some(*state.background_gain.read()),
         mechanics_gains: Some(*state.mechanics_gains.read()),

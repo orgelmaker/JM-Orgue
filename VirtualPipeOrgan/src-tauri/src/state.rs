@@ -1723,6 +1723,10 @@ pub struct AppState {
     /// Voorstel voor de zwelkast uit de waarden van de set, per divisie (E5). Hoort bij
     /// het geladen orgel; leeg bij een orgel zonder bruikbare waarden.
     pub zwelkast_voorstel: Arc<RwLock<Vec<crate::zwelkast_set::ZwelkastVoorstel>>>,
+    /// Registers die dit orgel bij de laatste lading heeft weggelaten, en de keuze die wordt bewaard (F2).
+    pub niet_geladen_registers: Arc<RwLock<Vec<String>>>,
+    /// Alle echte registers van het laatst geladen orgel met hun geheugen, ook de weggelaten (F2).
+    pub register_geheugen: Arc<RwLock<Vec<crate::register_filter::RegisterGeheugen>>>,
     /// (enabled, rate, amp_depth, pitch_depth) per divisie.
     pub division_tremulants: Arc<RwLock<std::collections::HashMap<String, (bool, f32, f32, f32)>>>,
     /// Wind-groep-config (enabled, reservoir, damping, max_sag) per groep-index (0..31).
@@ -2207,6 +2211,8 @@ impl AppState {
             division_pans: Arc::new(RwLock::new(std::collections::HashMap::new())),
             division_swell_configs: Arc::new(RwLock::new(std::collections::HashMap::new())),
             zwelkast_voorstel: Arc::new(RwLock::new(Vec::new())),
+            niet_geladen_registers: Arc::new(RwLock::new(Vec::new())),
+            register_geheugen: Arc::new(RwLock::new(Vec::new())),
             division_tremulants: Arc::new(RwLock::new(std::collections::HashMap::new())),
             wind_group_configs: Arc::new(RwLock::new(std::collections::HashMap::new())),
             feedback: Arc::new(parking_lot::Mutex::new(crate::feedback::FeedbackManager::new())),

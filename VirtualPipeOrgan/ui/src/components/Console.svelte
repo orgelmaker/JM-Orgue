@@ -2485,6 +2485,51 @@
     clearTimeout(perspGainTimer);
     perspGainTimer = setTimeout(() => dispatch('refreshMidiMappings'), 400);
   }
+  // Registers niet laden (F2): per orgel registers overslaan bij het laden. De lijst komt uit de backend (alle
+  // echte registers met hun geheugen, ook de weggelaten); `registerUit` is de keuze in het scherm, `registerUitBewaard`
+  // wat er nu echt is weggelaten. Pas na "Toepassen en herladen" gaat de keuze in.
+  let registerLijst = [];
+  let registerUit = new Set();
+  let registerUitBewaard = new Set();
+  let registerSig = '';
+  async function haalRegisterLijst() {
+    let l = [];
+    try { l = await invoke('get_register_geheugen'); } catch (e) { l = []; }
+    if (!Array.isArray(l)) l = [];
+    const nu = new Set(l.filter(r => r.uitgesloten).map(r => r.id));
+    const sig = [...nu].sort().join(',') + '|' + l.length;
+    registerLijst = l;
+    // Een nieuwe lading met een andere weglating zet de keuze terug; anders blijft wat je nu aan het kiezen bent.
+    if (sig !== registerSig) { registerSig = sig; registerUit = new Set(nu); }
+    registerUitBewaard = nu;
+  }
+  function zetRegisterUit(id, uit) {
+    const n = new Set(registerUit);
+    if (uit) n.add(id); else n.delete(id);
+    registerUit = n;
+  }
+  async function pasRegisterKeuzeToe() {
+    try {
+      await invoke('set_niet_geladen_registers', { ids: [...registerUit] });
+      reloadCurrentOrgan();
+    } catch (e) { console.error('Registerkeuze toepassen mislukt:', e); }
+  }
+  $: registerGewijzigd = registerUit.size !== registerUitBewaard.size || [...registerUit].some(i => !registerUitBewaard.has(i));
+  $: registerGroepen = (() => {
+    const g = new Map();
+    for (const r of registerLijst) { if (!g.has(r.divisie)) g.set(r.divisie, []); g.get(r.divisie).push(r); }
+    return [...g.entries()];
+  })();
+  $: registerTotaalAlles = registerLijst.reduce((s, r) => s + r.bytes, 0);
+  $: registerTotaalKeuze = registerLijst.filter(r => !registerUit.has(r.id)).reduce((s, r) => s + r.bytes, 0);
+  $: registerTotaalNu = registerLijst.filter(r => !registerUitBewaard.has(r.id)).reduce((s, r) => s + r.bytes, 0);
+  // De lijst opnieuw ophalen bij een andere lading (orgel, aantal registers of aangezette opnameposities).
+  $: registerStempel = organInfo?.id
+    ? organInfo.id + ':' + (organInfo.divisions || []).reduce((s, d) => s + (d.stops?.length || 0), 0) + ':' + (organInfo.perspectives || []).map(p => (p.enabled ? 1 : 0)).join('')
+    : '';
+  let laatsteRegisterStempel = '';
+  $: if (registerStempel && registerStempel !== laatsteRegisterStempel) { laatsteRegisterStempel = registerStempel; haalRegisterLijst(); }
+
   function reloadCurrentOrgan() {
     const id = organInfo?.id;
     if (!id) return;
@@ -7260,6 +7305,34 @@
                 <p style="margin: 0.2rem 0 0; font-size: 0.68rem; color: var(--warning, #d9a441); line-height: 1.35;">{$t('perspectives.reload_hint')}</p>
                 <button class="btn btn-sm" style="margin-top: 0.3rem;" on:click={reloadCurrentOrgan}>{$t('perspectives.reload_now')}</button>
               {/if}
+            </div>
+            {/if}
+
+            <!-- Registers niet laden (F2) -->
+            {#if !secondary && registerLijst.length > 0}
+            <div class="settings-block" class:inst-verborgen={instTabOrgel !== 'klank' && instTabOrgel !== 'alles'}>
+              <h3 class="settings-block-title" id="sec-register-laden-title">{$t('settings.register_laden_title')}</h3>
+              <p class="settings-hint" style="margin: 0 0 0.4rem;">{$t('settings.register_laden_desc')}</p>
+              <p class="settings-hint" style="margin: 0 0 0.4rem;">{$t('settings.register_laden_totaal').replace('{nu}', formatGeheugen(registerTotaalNu) || '0 MB').replace('{keuze}', formatGeheugen(registerTotaalKeuze) || '0 MB').replace('{alles}', formatGeheugen(registerTotaalAlles) || '0 MB')}</p>
+              <details>
+                <summary style="cursor: pointer; font-size: 0.8rem;">{$t('settings.register_laden_kiezen').replace('{n}', registerLijst.length)}</summary>
+                {#each registerGroepen as [divisie, regs] (divisie)}
+                  <div style="margin-top: 0.5rem;">
+                    <strong style="font-size: 0.78rem;">{divisie}</strong>
+                    {#each regs as r (r.id)}
+                      <label class="swell-toggle" style="display:flex; align-items:center; gap:0.4rem; font-size: 0.78rem;">
+                        <input type="checkbox" checked={!registerUit.has(r.id)} on:change={(e) => zetRegisterUit(r.id, !e.target.checked)} />
+                        <span>{r.naam}</span>
+                        <span class="slider-value" style="margin-left:auto;">{formatGeheugen(r.bytes)}</span>
+                      </label>
+                    {/each}
+                  </div>
+                {/each}
+              </details>
+              <div style="display:flex; gap:0.4rem; margin-top: 0.5rem;">
+                <button class="btn btn-sm" disabled={!registerGewijzigd} on:click={pasRegisterKeuzeToe}>{$t('settings.register_laden_toepassen')}</button>
+                <button class="btn btn-ghost btn-sm" disabled={registerUit.size === 0} on:click={() => { registerUit = new Set(); }}>{$t('settings.register_laden_alles')}</button>
+              </div>
             </div>
             {/if}
 

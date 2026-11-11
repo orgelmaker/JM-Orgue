@@ -34,6 +34,7 @@ mod rt_prioriteit;
 mod zwelkast_set;
 mod set_crescendo;
 mod pakket_uitpakken;
+mod register_filter;
 mod sampleset_download;
 mod state;
 mod test_api;
@@ -395,6 +396,8 @@ fn main() {
             commands::set_orgel_vlag,
             commands::get_preload_ms,
             commands::get_preload_geheugen,
+            commands::get_register_geheugen,
+            commands::set_niet_geladen_registers,
             commands::set_preload_ms,
             // Gestapelde ranks en microfoonperspectieven (0.7.38)
             commands::get_perspectives,

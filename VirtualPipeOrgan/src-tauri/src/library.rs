@@ -498,6 +498,10 @@ pub struct OrganSettings {
     /// ook voor een nieuw orgel standaard uit.
     #[serde(default)]
     pub zwelkast_van_set: Option<bool>,
+    /// Registers die bij het laden van dit orgel worden overgeslagen (F2), als `"{manuaal}_{register}"`.
+    /// Leeg = alles laden. Bestaande orgels hebben dit veld niet en laden dus alles.
+    #[serde(default)]
+    pub niet_geladen_registers: Vec<String>,
     /// Luisterpositie-schuif (0.7.95): 0..1 lineair over de as van geladen
     /// posities (dry → close → front → rear → diffuse). Bewaard per orgel
     /// zodat de volgende sessie met dezelfde balans begint. Ontbrekend in

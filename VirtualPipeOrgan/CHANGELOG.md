@@ -6,6 +6,22 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### Registers niet laden, per orgel (F2, deel 1)
+- Onder Orgel-instellingen → Klank staat een nieuw blok **Registers niet laden**: een lijst van alle registers van het orgel, per divisie,
+  met het geheugen dat elk register vooraf vraagt en bovenaan "Nu geladen / met deze keuze / alle registers". Vink af wat je niet gebruikt,
+  kies **Toepassen en herladen**, en die registers worden bij het laden overgeslagen: dat scheelt geheugen en laadtijd. **Alles laden**
+  zet alle vinkjes terug. De keuze wordt per orgel bewaard in de instellingen van dat orgel; een orgel zonder keuze laadt alles, dus
+  bestaande orgels veranderen niet.
+- De weggelaten registers worden uit de definitie gehaald voordat er iets van gemaakt wordt: de schatting van het geheugen, de laadroute, de
+  knoppen en de rest zien gewoon een kleiner orgel. Het geheugen per register komt uit dezelfde telling als de schatting vooraf (unieke
+  bestanden en segmenten, voor de aangezette opnameposities, bij de ingestelde startbuffer). Registers die bestanden delen tellen in de
+  lijst elk mee, dus het totaal van de lijst is eerder te hoog dan te laag. Mechaniek en ruis staan niet in de lijst. Een samplemap kent
+  geen lijst en laadt alles.
+- Gemeten in de app op een demo-orgel: drie registers uitgezet gaf 16 knoppen worden 13, de schatting daalde van 2784 naar 2554 MB (precies
+  de 229 MB die die drie samen kostten), en alles terugzetten gaf weer 16 registers en 2784 MB. Zes eenheidstests (`register_filter.rs`).
+- Niet gedaan: rangen binnen één register weglaten, en registers die in opgeslagen registraties, crescendo-trappen of setzer-combinaties
+  voorkomen krijgen geen waarschuwing. In de proef (twee aangetrokken registers die daarna werden weggelaten) gaf dat geen fouten in het logboek.
+
 ### Opgenomen tremulant-golfvormen van de set lezen en tonen (C5, stap 1)
 - Veel Hauptwerk-sets beschrijven hun tremulant met opgenomen golfvormen: per tremulant twee bestanden (de golfvorm voor toonhoogte en
   grondtoon, en die voor de derde harmonische) en per pijp een diepte-aanpassing (amplitude in dB, toonhoogte in procent, en een filter
