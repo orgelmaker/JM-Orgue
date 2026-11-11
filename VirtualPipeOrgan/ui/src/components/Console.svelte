@@ -2178,6 +2178,18 @@
   async function zetSampleOpslag(v) {
     try { sampleOpslag = await invoke('set_sample_opslag', { opslag: Number(v) }); sampleOpslagHint = true; } catch (e) { console.error(e); }
   }
+  // Schijfcache van gedecodeerde samples (C2 fase 2): aan/uit, maximum, grootte en Cache legen.
+  let schijfcache = { aan: true, max_gb: 20, bytes: 0, bestanden: 0, map: '' };
+  const SCHIJFCACHE_MAX_KEUZES = [5, 10, 20, 50, 100];
+  function laadSchijfcache() { invoke('get_schijfcache').then(v => { schijfcache = v; }).catch(() => {}); }
+  laadSchijfcache();
+  async function zetSchijfcache(aan, max_gb) {
+    try { schijfcache = await invoke('set_schijfcache', { aan, maxGb: Number(max_gb) }); } catch (e) { console.error(e); }
+  }
+  async function legeSchijfcache() {
+    try { schijfcache = await invoke('schijfcache_legen'); } catch (e) { console.error(e); }
+  }
+  $: schijfcacheGb = (schijfcache.bytes / 1073741824).toFixed(1);
   // Geheugen dat het geladen orgel bij elke keuze vraagt (F2); leeg als er geen schatting is.
   let preloadGeheugen = [];
   async function haalPreloadGeheugen() {
@@ -8712,6 +8724,26 @@
               {#if sampleOpslagHint}
                 <p style="margin: 0.2rem 0 0; font-size: 0.68rem; color: var(--warning, #d9a441); line-height: 1.35;">{$t('settings.reload_hint')}</p>
               {/if}
+
+              <!-- Schijfcache van gedecodeerde samples (C2 fase 2) -->
+              <label class="swell-toggle" style="margin-top: 0.7rem; display: flex; align-items: center; gap: 0.4rem;" title={$t('settings.schijfcache_hint')}>
+                <input type="checkbox" checked={schijfcache.aan} on:change={(e) => zetSchijfcache(e.target.checked, schijfcache.max_gb)} />
+                <span>{$t('settings.schijfcache')}</span>
+              </label>
+              <div class="audio-select-row" style="margin-top: 0.3rem;">
+                <label class="audio-select-label" for="schijfcache-max">{$t('settings.schijfcache_max')}</label>
+                <select id="schijfcache-max" class="temperament-select" disabled={!schijfcache.aan} on:change={(e) => zetSchijfcache(schijfcache.aan, e.target.value)}>
+                  {#each SCHIJFCACHE_MAX_KEUZES as gb}
+                    <option value={gb} selected={schijfcache.max_gb === gb}>{gb} GB</option>
+                  {/each}
+                </select>
+              </div>
+              <div style="margin-top: 0.3rem; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+                <span class="settings-hint" style="margin: 0;" title={schijfcache.map}>{$t('settings.schijfcache_in_gebruik').replace('{gb}', schijfcacheGb).replace('{n}', schijfcache.bestanden)}</span>
+                <button class="midi-learn-btn" on:click={legeSchijfcache} disabled={schijfcache.bestanden === 0}>{$t('settings.schijfcache_legen')}</button>
+                <button class="midi-learn-btn" on:click={laadSchijfcache}>↻</button>
+              </div>
+              <p class="settings-hint" style="margin: 0.2rem 0 0;">{$t('settings.schijfcache_hint')}</p>
               {#if preloadReloadHint}
                 <p style="margin: 0.2rem 0 0; font-size: 0.68rem; color: var(--warning, #d9a441); line-height: 1.35;">{$t('settings.reload_hint')}</p>
               {/if}

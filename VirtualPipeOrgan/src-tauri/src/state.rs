@@ -401,6 +401,12 @@ pub struct AudioPrefs {
     /// Hoe samples in het geheugen staan (C2): 0 = f32, 1 = 16-bit compact, 2 = ook 24-bit. None = 1.
     #[serde(default)]
     pub sample_opslag: Option<u8>,
+    /// Schijfcache van gedecodeerde opnamen (C2 fase 2). None = aan.
+    #[serde(default)]
+    pub schijfcache: Option<bool>,
+    /// Maximum van de schijfcache in GB. None = 20.
+    #[serde(default)]
+    pub schijfcache_max_gb: Option<u32>,
     /// Per MIDI-invoerapparaat een vast kanaal (0.9.26): apparaatnaam → kanaal
     /// 0-15. Zo bedienen klavieren die fysiek op hetzelfde kanaal zenden toch
     /// verschillende werken. Globale hardware-opstelling, niet per orgel. Leeg =
@@ -1969,6 +1975,7 @@ impl AppState {
             cap / 1_000_000, ram.map(|r| r / 1_000_000).unwrap_or(0));
         vpo_sampler::set_stereo_loading(audio_prefs.stereo_samples.unwrap_or(true));
         crate::audio::set_sample_opslag(audio_prefs.sample_opslag.unwrap_or(1));
+        crate::commands::pas_schijfcache_toe(&app_data_dir, &audio_prefs);
         vpo_sampler::set_staart_drempel(audio_prefs.staart_drempel_db.unwrap_or(vpo_sampler::STAART_AFKAP_STANDAARD_DB));
         crate::audio::set_preload_ms(audio_prefs.preload_ms.unwrap_or(crate::audio::PRELOAD_MS_DEFAULT));
         let saved_cfg = AudioOutputConfig {

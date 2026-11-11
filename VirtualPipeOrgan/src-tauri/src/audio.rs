@@ -134,6 +134,9 @@ pub struct LoaderStats {
     /// Volledige opnamen die compact (16- of 24-bit) zijn opgeslagen (C2).
     pub compact_opgeslagen: u64,
     pub staart_afgekapt_frames: u64,
+    /// Volledige opnamen gelezen uit, en geschreven naar, de schijfcache (C2 fase 2).
+    pub schijfcache_treffers: u64,
+    pub schijfcache_geschreven: u64,
 }
 
 pub fn loader_stats() -> LoaderStats {
@@ -154,6 +157,8 @@ pub fn loader_stats() -> LoaderStats {
         staart_afgekapt_samples: STAART_AFGEKAPT_SAMPLES.load(Ordering::Relaxed),
         compact_opgeslagen: SAMPLES_COMPACT.load(Ordering::Relaxed),
         staart_afgekapt_frames: STAART_AFGEKAPT_FRAMES.load(Ordering::Relaxed),
+        schijfcache_treffers: vpo_sampler::schijfcache::TREFFERS.load(Ordering::Relaxed),
+        schijfcache_geschreven: vpo_sampler::schijfcache::GESCHREVEN.load(Ordering::Relaxed),
     }
 }
 
@@ -3628,39 +3633,56 @@ fn run_audio_thread(
                                 }
                             }
                             let t_dec = std::time::Instant::now();
-                            let geladen = load_audio(&path);
+                            // C2 fase 2: eerst de schijfcache (al gedecodeerd, looppunten gezet en geresampled).
+                            let uit_schijfcache = vpo_sampler::schijfcache::lees(&path, target_rate, odf_loop);
+                            let komt_uit_schijfcache = uit_schijfcache.is_some();
+                            let geladen = match uit_schijfcache {
+                                Some(sd) => Ok(sd),
+                                None => load_audio(&path),
+                            };
                             LOAD_T_DECODE_US.fetch_add(t_dec.elapsed().as_micros() as u64, Ordering::Relaxed);
                             match geladen {
                                 Ok(mut sample_data) => {
                                     LOAD_BYTES.fetch_add(sample_data.bytes() as u64, Ordering::Relaxed);
-                                    // GO-regel: ODF-looppunten winnen van de smpl-chunk —
-                                    // zelfde override als het preload-pad, anders verspringt
-                                    // de loop op het preload→full-upgrademoment.
-                                    let t_loop = std::time::Instant::now();
-                                    if let Some((ls, le)) = odf_loop {
-                                        if le > ls {
-                                            sample_data.loop_start = Some(ls as u64);
-                                            sample_data.loop_end = Some(le as u64);
-                                            vpo_sampler::optimize_loop_points(&mut sample_data);
-                                        }
-                                    }
-                                    LOAD_T_LOOP_US.fetch_add(t_loop.elapsed().as_micros() as u64, Ordering::Relaxed);
-                                    // Resample if needed
-                                    let t_rs = std::time::Instant::now();
-                                    if sample_data.sample_rate != target_rate {
-                                        LOAD_RESAMPLED.fetch_add(1, Ordering::Relaxed);
-                                        match resample(&sample_data, target_rate) {
-                                            Ok(resampled) => sample_data = resampled,
-                                            Err(e) => {
-                                                warn!("Failed to resample {:?}: {}", path, e);
-                                                // Faal-marker: render-thread ruimt
-                                                // zijn in-flight-administratie op.
-                                                let _ = loaded_tx_clone.send((key, None, generation));
-                                                continue;
+                                    let mut bewaar_op_schijf = false;
+                                    if !komt_uit_schijfcache {
+                                        let mut geresampled = false;
+                                        // GO-regel: ODF-looppunten winnen van de smpl-chunk —
+                                        // zelfde override als het preload-pad, anders verspringt
+                                        // de loop op het preload→full-upgrademoment.
+                                        let t_loop = std::time::Instant::now();
+                                        if let Some((ls, le)) = odf_loop {
+                                            if le > ls {
+                                                sample_data.loop_start = Some(ls as u64);
+                                                sample_data.loop_end = Some(le as u64);
+                                                vpo_sampler::optimize_loop_points(&mut sample_data);
                                             }
                                         }
+                                        LOAD_T_LOOP_US.fetch_add(t_loop.elapsed().as_micros() as u64, Ordering::Relaxed);
+                                        // Resample if needed
+                                        let t_rs = std::time::Instant::now();
+                                        if sample_data.sample_rate != target_rate {
+                                            LOAD_RESAMPLED.fetch_add(1, Ordering::Relaxed);
+                                            match resample(&sample_data, target_rate) {
+                                                Ok(resampled) => {
+                                                    sample_data = resampled;
+                                                    geresampled = true;
+                                                }
+                                                Err(e) => {
+                                                    warn!("Failed to resample {:?}: {}", path, e);
+                                                    // Faal-marker: render-thread ruimt
+                                                    // zijn in-flight-administratie op.
+                                                    let _ = loaded_tx_clone.send((key, None, generation));
+                                                    continue;
+                                                }
+                                            }
+                                        }
+                                        LOAD_T_RESAMPLE_US.fetch_add(t_rs.elapsed().as_micros() as u64, Ordering::Relaxed);
+                                        // Duur om te maken (geresampled of WavPack)? Dan straks op schijf bewaren
+                                        // voor de volgende keer.
+                                        bewaar_op_schijf = vpo_sampler::schijfcache::aan()
+                                            && (geresampled || vpo_sampler::schijfcache::is_wavpack(&path));
                                     }
-                                    LOAD_T_RESAMPLE_US.fetch_add(t_rs.elapsed().as_micros() as u64, Ordering::Relaxed);
                                     // HarmonicShaping op de volledige opname — zelfde
                                     // filter (hoek in Hz) als op de startbuffer, zodat de
                                     // klank op het upgrademoment gelijk is. Niet cachen:
@@ -3694,6 +3716,12 @@ fn run_audio_thread(
                                         SAMPLES_COMPACT.fetch_add(1, Ordering::Relaxed);
                                     }
                                     let sample = Arc::new(sample_data);
+                                    // Schijfcache (C2 fase 2): op een eigen thread, zodat de lader niet op de schijf
+                                    // wacht. Niet na een staartafkap (dan ontbreekt een stuk); de compacte opslag
+                                    // verandert geen waarde. Een geshapede pijp kwam hier niet (eigen kopie, hierboven).
+                                    if bewaar_op_schijf && !afgekapt {
+                                        vpo_sampler::schijfcache::bewaar_later(path.clone(), target_rate, odf_loop, sample.clone());
+                                    }
                                     let t_c = std::time::Instant::now();
                                     {
                                         // Verlopen generaties en dode verwijzingen opruimen.

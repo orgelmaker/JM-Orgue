@@ -619,6 +619,68 @@ pub fn set_staart_drempel(state: State<AppState>, db: f32) -> f32 {
 #[tauri::command]
 pub fn get_preload_ms() -> u32 { crate::audio::preload_ms() }
 
+/// Map van de schijfcache (C2 fase 2): de cachemap van het systeem (Windows: AppData\Local), niet de zwervende
+/// gegevensmap, want de cache kan groot worden.
+pub fn schijfcache_map(app_data_dir: &std::path::Path) -> std::path::PathBuf {
+    dirs::cache_dir()
+        .map(|d| d.join("nl.jm-orgue.app"))
+        .unwrap_or_else(|| app_data_dir.to_path_buf())
+        .join("samplecache")
+}
+
+/// Standaard: aan, maximum 20 GB (besluit 11-11-2026).
+pub fn pas_schijfcache_toe(app_data_dir: &std::path::Path, prefs: &crate::state::AudioPrefs) {
+    let max_gb = prefs.schijfcache_max_gb.unwrap_or(20).clamp(1, 1000) as u64;
+    vpo_sampler::schijfcache::stel_in(schijfcache_map(app_data_dir), prefs.schijfcache.unwrap_or(true), max_gb << 30);
+}
+
+#[derive(serde::Serialize)]
+pub struct SchijfcacheInfo {
+    pub aan: bool,
+    pub max_gb: u32,
+    pub bytes: u64,
+    pub bestanden: usize,
+    pub map: String,
+}
+
+fn schijfcache_info_van(app_data_dir: &std::path::Path) -> SchijfcacheInfo {
+    let prefs = crate::state::load_audio_prefs(app_data_dir);
+    let (bytes, bestanden) = vpo_sampler::schijfcache::tel();
+    SchijfcacheInfo {
+        aan: prefs.schijfcache.unwrap_or(true),
+        max_gb: prefs.schijfcache_max_gb.unwrap_or(20),
+        bytes,
+        bestanden,
+        map: schijfcache_map(app_data_dir).display().to_string(),
+    }
+}
+
+/// Stand en grootte van de schijfcache, voor Instellingen.
+#[tauri::command]
+pub fn get_schijfcache(state: State<AppState>) -> SchijfcacheInfo {
+    schijfcache_info_van(&state.app_data_dir)
+}
+
+/// Schijfcache aan/uit en het maximum zetten; wordt bewaard in de audio-voorkeuren.
+#[tauri::command]
+pub fn set_schijfcache(state: State<AppState>, aan: bool, max_gb: u32) -> SchijfcacheInfo {
+    let mut prefs = crate::state::load_audio_prefs(&state.app_data_dir);
+    prefs.schijfcache = Some(aan);
+    prefs.schijfcache_max_gb = Some(max_gb.clamp(1, 1000));
+    crate::state::save_audio_prefs(&state.app_data_dir, &prefs);
+    pas_schijfcache_toe(&state.app_data_dir, &prefs);
+    info!("Schijfcache: {}, maximum {} GB", if aan { "aan" } else { "uit" }, max_gb);
+    schijfcache_info_van(&state.app_data_dir)
+}
+
+/// Knop Cache legen.
+#[tauri::command]
+pub fn schijfcache_legen(state: State<AppState>) -> SchijfcacheInfo {
+    let weg = vpo_sampler::schijfcache::legen();
+    info!("Schijfcache geleegd: {} bestanden", weg);
+    schijfcache_info_van(&state.app_data_dir)
+}
+
 /// Hoe samples in het geheugen staan (C2): 0 = f32 zoals vroeger, 1 = 16-bit compact (standaard), 2 = ook 24-bit.
 #[tauri::command]
 pub fn get_sample_opslag() -> u8 { crate::audio::sample_opslag() }

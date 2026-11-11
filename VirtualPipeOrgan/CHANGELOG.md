@@ -6,6 +6,17 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### Schijfcache van gedecodeerde samples (C2, fase 2)
+- Opnamen die duur zijn om te maken (WavPack uitpakken, of omrekenen naar de samplerate van de uitgang, zoals bij 44,1 kHz-sets op een
+  48 kHz-uitgang) worden na de eerste keer op schijf bewaard en daarna veel sneller geladen: gemeten gemiddeld ~9 ms in plaats van
+  ~35 ms per volledige opname. Het schrijven gebeurt op een eigen thread; de lader wacht niet op de schijf. Gewone WAV-bestanden in de
+  juiste samplerate worden niet gecachet.
+- De klank is bit-identiek: het bestand bevat precies de gedecodeerde waarden (16- of 24-bit waar dat exact kan, anders 32-bit), met
+  een controlesom; een beschadigd of verouderd bestand (andere bron, samplerate, looppunten of stereo-instelling) wordt genegeerd.
+- Instellingen → Audio uitvoer: **Schijfcache van gedecodeerde samples** (standaard aan), **Maximum** (standaard 20 GB; daarboven gaan
+  de langst niet gebruikte bestanden eerst weg), de grootte in gebruik en de knop **Cache legen**. De cache staat in de cachemap van het
+  systeem (Windows: AppData\Local\nl.jm-orgue.app\samplecache).
+
 ### Samples in de bitdiepte van de bron, sneller laden (C2, fase 0 en 1)
 - Samples die exact in 16 bit passen worden nu als 16 bit in het geheugen bewaard in plaats van als 32-bit getallen: half zoveel geheugen
   voor die sets. Bij het afspelen worden precies dezelfde waarden teruggelezen; de klank is bit voor bit gelijk (met test bewezen, via

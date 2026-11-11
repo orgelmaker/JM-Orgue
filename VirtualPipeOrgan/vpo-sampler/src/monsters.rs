@@ -16,9 +16,9 @@
 //! exact en gelijk aan de deling `x as f32 / max_val` die de lezers gebruiken (`max_val = 2^(bits-1)`).
 
 /// Schaal van 16-bit naar `f32`: 2^-15.
-const SCHAAL_16: f32 = 1.0 / 32768.0;
+pub(crate) const SCHAAL_16: f32 = 1.0 / 32768.0;
 /// Schaal van 24-bit naar `f32`: 2^-23.
-const SCHAAL_24: f32 = 1.0 / 8388608.0;
+pub(crate) const SCHAAL_24: f32 = 1.0 / 8388608.0;
 
 /// Leesbare reeks samplewaarden voor de mengkern: lengte en de waarde op een positie. De mengkern is generiek
 /// over dit kenmerk, zodat er per monster geen keuze tussen soorten nodig is.
@@ -261,7 +261,7 @@ impl Monsters {
 
     /// Past de hele reeks exact in 16-bit? Alleen controleren, zonder geheugen te vragen; zonder takken per monster
     /// (vectoriseerbaar), in blokken zodat een reeks die niet past snel wordt opgegeven.
-    fn past_16(v: &[f32]) -> bool {
+    pub(crate) fn past_16(v: &[f32]) -> bool {
         v.chunks(4096).all(|blok| {
             blok.iter().fold(true, |ok, &x| {
                 let q = (x * 32768.0) as i32;
@@ -271,7 +271,7 @@ impl Monsters {
     }
 
     /// Idem voor 24-bit.
-    fn past_24(v: &[f32]) -> bool {
+    pub(crate) fn past_24(v: &[f32]) -> bool {
         v.chunks(4096).all(|blok| {
             blok.iter().fold(true, |ok, &x| {
                 let q = (x * 8388608.0) as i32;
