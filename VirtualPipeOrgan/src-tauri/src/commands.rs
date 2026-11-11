@@ -612,6 +612,33 @@ use crate::library::PerspectiveSaved;
 /// slash-ongevoelig — zelfde orgel, andere pad-notatie, audit 49), anders de
 /// `.jm-settings.json` naast het orgel; die wordt dan in de bibliotheek
 /// geïmporteerd zodat álle herstel-paden hem daarna zien (auditbevinding 17).
+/// Grootste instellingenbestand dat de app inleest. Echte bestanden zijn tientallen
+/// kilobytes; een `.jm-settings.json` kan uit een gedownloade set komen en een
+/// geïmporteerd bestand van overal, dus zonder grens kon een gigantisch bestand
+/// het geheugen vullen. Het formaat zelf is al getypeerd (serde), en er staan geen
+/// bestandspaden in de instellingen.
+const MAX_INSTELLINGEN_BYTES: u64 = 8 * 1024 * 1024;
+
+/// Leest een instellingenbestand, mits het een gewoon bestand is en niet groter
+/// dan `MAX_INSTELLINGEN_BYTES`.
+fn lees_instellingenbestand(pad: &Path) -> Result<String, String> {
+    lees_beperkt(pad, MAX_INSTELLINGEN_BYTES)
+}
+
+fn lees_beperkt(pad: &Path, max: u64) -> Result<String, String> {
+    let meta = std::fs::metadata(pad).map_err(|e| format!("Kan niet lezen: {}", e))?;
+    if !meta.is_file() {
+        return Err("Dit is geen bestand".to_string());
+    }
+    if meta.len() > max {
+        return Err(format!(
+            "Instellingenbestand is te groot ({} MB, het maximum is {} MB)",
+            meta.len() / 1_000_000, max / 1_000_000
+        ));
+    }
+    std::fs::read_to_string(pad).map_err(|e| format!("Kan niet lezen: {}", e))
+}
+
 fn saved_settings_for(state: &AppState, organ_id: &str) -> Option<OrganSettings> {
     let from_lib = {
         let lib = state.organ_library.read();
@@ -628,7 +655,7 @@ fn saved_settings_for(state: &AppState, organ_id: &str) -> Option<OrganSettings>
     let from_file = organ_settings_dir(organ_id)
         .map(|d| d.join(".jm-settings.json"))
         .filter(|p| p.exists())
-        .and_then(|p| std::fs::read_to_string(&p).ok())
+        .and_then(|p| lees_instellingenbestand(&p).ok())
         .and_then(|j| serde_json::from_str::<OrganSettings>(&j).ok())?;
     info!("Instellingen geïmporteerd uit .jm-settings.json naast het orgel (geen bibliotheek-entry)");
     // 0.8.91: een orgel dat (opnieuw) in de bibliotheek komt met alleen een
@@ -10829,7 +10856,7 @@ fn lees_opgeslagen_instellingen(state: &AppState, organ_id: &str) -> Option<Orga
     // Fallback: try .jm-settings.json in organ directory
     if let Some(dir) = organ_settings_dir(organ_id) {
         let settings_path = dir.join(".jm-settings.json");
-        if let Ok(json) = std::fs::read_to_string(&settings_path) {
+        if let Ok(json) = lees_instellingenbestand(&settings_path) {
             if let Ok(settings) = serde_json::from_str::<OrganSettings>(&json) {
                 info!("Loaded organ settings from {:?}", settings_path);
                 return Some(settings);
@@ -10875,8 +10902,7 @@ pub fn export_settings(state: State<AppState>, path: String) -> Result<(), Strin
 /// Import settings from a JSON file
 #[tauri::command]
 pub fn import_settings(state: State<AppState>, path: String) -> Result<OrganSettings, String> {
-    let json = std::fs::read_to_string(&path)
-        .map_err(|e| format!("Kan niet lezen: {}", e))?;
+    let json = lees_instellingenbestand(Path::new(&path))?;
     let settings: OrganSettings = serde_json::from_str(&json)
         .map_err(|e| format!("Ongeldig formaat: {}", e))?;
 
@@ -12650,3 +12676,39 @@ mod motor_start_tests {
     }
 }
 
+#[cfg(test)]
+mod instellingenbestand_tests {
+    use super::lees_beperkt;
+    use std::path::PathBuf;
+
+    fn tijdelijk(naam: &str, inhoud: &[u8]) -> PathBuf {
+        let p = std::env::temp_dir().join(format!("jm_instellingen_{}_{}.json", naam, std::process::id()));
+        std::fs::write(&p, inhoud).unwrap();
+        p
+    }
+
+    #[test]
+    fn een_gewoon_klein_bestand_wordt_gelezen() {
+        let p = tijdelijk("klein", b"{\"a\": 1}");
+        assert_eq!(lees_beperkt(&p, 1000).unwrap(), "{\"a\": 1}");
+        let _ = std::fs::remove_file(&p);
+    }
+
+    #[test]
+    fn een_te_groot_bestand_wordt_geweigerd_zonder_het_te_lezen() {
+        let p = tijdelijk("groot", &vec![b' '; 2_000_000]);
+        let fout = lees_beperkt(&p, 1_000_000).unwrap_err();
+        assert!(fout.contains("te groot"), "{fout}");
+        // Precies op de grens mag nog.
+        assert!(lees_beperkt(&p, 2_000_000).is_ok());
+        let _ = std::fs::remove_file(&p);
+    }
+
+    #[test]
+    fn een_map_of_ontbrekend_bestand_geeft_een_nette_fout() {
+        let map = std::env::temp_dir();
+        assert!(lees_beperkt(&map, 1000).unwrap_err().contains("geen bestand"));
+        let weg = map.join("jm_instellingen_bestaat_niet_xyz.json");
+        assert!(lees_beperkt(&weg, 1000).unwrap_err().contains("Kan niet lezen"));
+    }
+}

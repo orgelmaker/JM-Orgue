@@ -6,6 +6,18 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### Instellingenbestanden en bovenbalk: twee kleine controles (F8)
+- Een instellingenbestand dat de app inleest mag niet groter zijn dan 8 MB (echte
+  bestanden zijn tientallen kilobytes). Dat geldt voor het importeren van
+  instellingen en voor de `.jm-settings.json` die naast een orgel kan staan, ook
+  als die uit een gedownloade set komt. Er staan geen bestandspaden in de
+  instellingen, en het hoofdvolume wordt bij het toepassen al begrensd, dus een
+  pad-controle was niet nodig.
+- Nieuw script `testscripts/check_bovenbalk_lengte.py`, ook in de GitHub-testrun:
+  het telt per taal de tekens van de bovenbalk-labels en faalt bij een te lange
+  vertaling. Het meet geen pixels (dat vraagt een echt venster), het is een
+  vangnet.
+
 ### Gedrag van de set, per orgel; koppelketen volgt de set (F7)
 - Drie dingen die de set zelf bepaalt, gelden nu per orgel: de niveaus van de
   maker (E1), de crossfade van de maker bij het loslaten (D3) en nieuw: of

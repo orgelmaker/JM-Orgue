@@ -82,6 +82,9 @@ jobs:
       - name: Vertaalsleutels controleren (nl is de bron)
         run: python testscripts/check_i18n_keys.py
 
+      - name: Bovenbalk-labels per taal (lengtebewaking)
+        run: python testscripts/check_bovenbalk_lengte.py
+
       - name: Klavar-geometrie controleren
         run: node testscripts/klavar_layout_test.mjs
 
