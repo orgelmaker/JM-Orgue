@@ -165,6 +165,7 @@ pub fn stand() -> Option<GeheugenStand> {
 /// Leest `MemTotal` en `MemAvailable` (kB) uit de tekst van `/proc/meminfo`.
 /// Zuiver, zodat het op elk platform te testen is. Oude kernels zonder
 /// `MemAvailable` geven None: dan is er geen eerlijke schatting.
+#[cfg(any(target_os = "linux", test))]
 pub fn parse_meminfo(tekst: &str) -> Option<GeheugenStand> {
     let kb = |sleutel: &str| -> Option<u64> {
         tekst.lines()

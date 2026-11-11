@@ -171,6 +171,7 @@ pub fn modus_uit_tekst(waarde: Option<&str>) -> Modus {
 /// komen? Realtime-werkers spinnen tot 2 ms; als ze alle kernen bezetten kan
 /// de audiothread (normale prioriteit) niet meer draaien. Er moet dus minstens
 /// één kern overblijven.
+#[cfg(any(target_os = "linux", test))]
 pub fn fifo_veilig(n_werkers: usize, kernen: usize) -> bool {
     n_werkers < kernen
 }
