@@ -980,6 +980,28 @@
     saveCrescendo();
   }
 
+  // Crescendo van de set (E4): de trappen die een leesbare set zelf meebrengt, als extra
+  // voorstel naast Auto-fill. Alleen registers (koppels en tremulanten van de set worden niet
+  // overgenomen). Niets verandert zonder dat je erom vraagt; Ongedaan maken werkt ook hier.
+  let setCrescendoInfo = null;
+  async function haalSetCrescendo() {
+    try { setCrescendoInfo = await invoke('get_set_crescendo'); } catch (e) { setCrescendoInfo = null; }
+  }
+  async function autoFillCrescendoVanSet() {
+    if (!displayOrgan) return;
+    const heeftInhoud = crescendoStages.some(trap => Array.isArray(trap) && trap.length > 0);
+    if (heeftInhoud && !(await window.confirm($t('crescendo.autofill_confirm')))) return;
+    try {
+      const voorstel = await invoke('set_crescendo_voorstel', { numStages: crescendoNumStages });
+      if (!Array.isArray(voorstel)) return;
+      crescVorige = crescendoStages.map(trap => Array.isArray(trap) ? [...trap] : []);
+      crescendoStages = voorstel;
+      saveCrescendo();
+    } catch (e) {
+      console.error('Crescendo van de set mislukt:', e);
+    }
+  }
+
   // Crescendo wordt PER ORGEL bewaard — sinds 0.7.38 in de backend (OrganSettings,
   // .jm-settings.json), niet meer in localStorage. De oude per-orgel-sleutel
   // (hash van het orgel-id) wordt eenmalig gemigreerd en daarna verwijderd.
@@ -2071,6 +2093,7 @@
     vlaggenHerladen = false;
     haalOrgelVlaggen();
     haalZwelkastVoorstel();
+    haalSetCrescendo();
   }
   async function zetOrgelVlag(naam, aan) {
     try {
@@ -7347,6 +7370,12 @@
                     <button class="btn btn-secondary btn-sm" style="flex:1;" on:click={autoFillCrescendo} title={$t('crescendo.autofill_title')}>
                       {$t('crescendo.autofill')}
                     </button>
+                    {#if setCrescendoInfo}
+                      <button class="btn btn-secondary btn-sm" style="flex:1;" on:click={autoFillCrescendoVanSet}
+                        title={$t('crescendo.van_set_title').replace('{trappen}', setCrescendoInfo.trappen_voor_orgel).replace('{registers}', setCrescendoInfo.registers_volste_trap)}>
+                        {$t('crescendo.van_set')}
+                      </button>
+                    {/if}
                     {#if crescVorige}
                       <button class="btn btn-ghost btn-sm" on:click={crescOngedaan} title={$t('crescendo.undo_title')}>
                         {$t('crescendo.undo')}

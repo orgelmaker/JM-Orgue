@@ -1332,6 +1332,8 @@
     "autofill": "Auto-fill",
     "autofill_title": "Fill the steps automatically: from soft (softest 8' per manual, a soft 16' in the pedal) through principals, 2' and mixtures to the reeds, with couplers",
     "autofill_confirm": "The steps already contain stops. Replace them with a new proposal? (You can undo this afterwards.)",
+    "van_set": "From the set",
+    "van_set_title": "Use the crescendo the set itself provides: {trappen} steps, the fullest with {registers} stops. The set's couplers and tremulants are not taken over.",
     "undo": "Undo",
     "undo_title": "Restore the steps as they were before Auto-fill",
     "opt_couplers": "Include couplers",

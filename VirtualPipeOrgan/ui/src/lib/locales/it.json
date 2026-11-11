@@ -1332,6 +1332,8 @@
     "autofill": "Riempi auto",
     "autofill_title": "Riempire i passi automaticamente: dal piano (l'8' più dolce per tastiera, un 16' dolce al pedale) ai principali, 2' e ripieno, fino alle ance, con le unioni",
     "autofill_confirm": "I passi contengono già dei registri. Sostituirli con una nuova proposta? (Dopo si può annullare.)",
+    "van_set": "Dal set",
+    "van_set_title": "Usa il crescendo che il set stesso offre: {trappen} passi, il più pieno con {registers} registri. Gli accoppiamenti e i tremoli del set non vengono ripresi.",
     "undo": "Annulla",
     "undo_title": "Ripristina i passi come erano prima di Auto-fill",
     "opt_couplers": "Includi le unioni",

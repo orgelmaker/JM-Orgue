@@ -179,10 +179,141 @@ fn load_hauptwerk_intern(
             voeg_compact_rapport_toe(&mut v, &xml);
             voeg_niveau_rapport_toe(&mut v, &def, &xml, niveaus);
             voeg_zwelkast_rapport_toe(&mut v, &def);
+            voeg_crescendo_toe(&mut v, &xml);
             (Ok(def), v)
         }
         Err(e) => mislukt(e),
     }
+}
+
+/// De crescendo van de set uit de tabellen van een LEESBARE definitie (E4).
+///
+/// In een Hauptwerk-set is de crescendo een traploze regelaar waarvan elke trap een
+/// schakelaar heeft (`ContinuousControlStageSwitch`); die schakelaar zet een combinatie van het
+/// soort "crescendotrap" aan (`Combination`, type 4), en die combinatie noemt per schakelaar
+/// of hij dan aan staat (`CombinationElement`). Een register is zo'n schakelaar niet zelf: het
+/// netwerk (`SwitchLinkage`) verbindt de schakelaar uit de combinatie met de schakelaar van het
+/// register (`Stop.ControllingSwitchID`), soms via een tussenstap.
+///
+/// Wat hier bewust niet geraden wordt: een element met de omkeervlag aan (het veld ernaast, de
+/// beginstand, is makkelijk te verwisselen) en een combinatie die niet allebei aan- en uitzetten
+/// mag; dan geeft deze functie niets terug. Schakelaars die niet bij een register uitkomen
+/// (koppels, tremulanten) tellen mee in `niet_gelezen`. Een gecomprimeerde definitie heeft de
+/// veldnamen niet; die geeft `None`.
+pub(crate) fn crescendo_uit_tabellen(
+    combinaties: &[FieldMap],
+    elementen: &[FieldMap],
+    trapschakelaars: &[FieldMap],
+    stops: &[FieldMap],
+    koppelingen: &[FieldMap],
+    regelaars: &[FieldMap],
+) -> Option<crate::import_report::SetCrescendo> {
+    use crate::import_report::{SetCrescendo, SetTrap};
+    use std::collections::{BTreeSet, HashSet};
+    const CRESCENDOTRAP: u32 = 4;
+    // schakelaar die een crescendotrap-combinatie aanzet → (combinatie, naam)
+    let mut trap_van_schakelaar: HashMap<u32, (u32, String)> = HashMap::new();
+    for c in combinaties {
+        if c.get_u32("CombinationTypeCode") != Some(CRESCENDOTRAP) { continue; }
+        // Een combinatie die niet allebei mag aan- en uitzetten, werkt niet als absolute stand.
+        let mag = |veld: &str| c.get(veld).map(|v| v.trim() != "N").unwrap_or(true);
+        if !mag("CanEngageControlledSwitches") || !mag("CanDisengageControlledSwitches") { return None; }
+        if let (Some(id), Some(sw)) = (c.get_u32("CombinationID"), c.get_u32("ActivatingSwitchID")) {
+            trap_van_schakelaar.insert(sw, (id, c.get("Name").map(|n| n.trim().to_string()).unwrap_or_default()));
+        }
+    }
+    if trap_van_schakelaar.is_empty() { return None; }
+    // Per regelaar de trappen: (waarde, combinatie, naam).
+    let mut per_regelaar: HashMap<u32, Vec<(u32, u32, String)>> = HashMap::new();
+    for t in trapschakelaars {
+        let (Some(sw), Some(ctl), Some(waarde)) =
+            (t.get_u32("ControlledSwitchID"), t.get_u32("ContinuousControlID"), t.get_u32("ContinuousControlValue"))
+        else { continue };
+        if let Some((cid, naam)) = trap_van_schakelaar.get(&sw) {
+            per_regelaar.entry(ctl).or_default().push((waarde, *cid, naam.clone()));
+        }
+    }
+    // De crescendo is de regelaar met de meeste trappen.
+    let (regelaar, mut trappen) = per_regelaar.into_iter().max_by_key(|(id, t)| (t.len(), std::cmp::Reverse(*id)))?;
+    trappen.sort_by_key(|(waarde, cid, _)| (*waarde, *cid));
+    trappen.dedup_by_key(|(_, cid, _)| *cid);
+    if trappen.len() < 2 { return None; }
+    // register-schakelaar → stop-id, en het netwerk van bron naar doel
+    let stop_van_schakelaar: HashMap<u32, u32> = stops.iter()
+        .filter_map(|s| Some((s.get_u32("ControllingSwitchID")?, s.get_u32("StopID")?)))
+        .collect();
+    let mut van_bron: HashMap<u32, Vec<u32>> = HashMap::new();
+    for l in koppelingen {
+        if let (Some(b), Some(d)) = (l.get_u32("SourceSwitchID"), l.get_u32("DestSwitchID")) {
+            van_bron.entry(b).or_default().push(d);
+        }
+    }
+    // De registers die een schakelaar bedient: vooruit door het netwerk, hoogstens zes stappen, en
+    // doorlopen stopt bij een register-schakelaar.
+    let bereik = |start: u32| -> BTreeSet<u32> {
+        let mut uit = BTreeSet::new();
+        let mut gezien: HashSet<u32> = HashSet::new();
+        let mut wachtrij = vec![(start, 0usize)];
+        while let Some((s, diepte)) = wachtrij.pop() {
+            if !gezien.insert(s) { continue; }
+            if let Some(stop) = stop_van_schakelaar.get(&s) { uit.insert(*stop); continue; }
+            if diepte >= 6 { continue; }
+            for d in van_bron.get(&s).into_iter().flatten() { wachtrij.push((*d, diepte + 1)); }
+        }
+        uit
+    };
+    let mut elementen_per_combinatie: HashMap<u32, Vec<&FieldMap>> = HashMap::new();
+    for e in elementen {
+        if let Some(cid) = e.get_u32("CombinationID") { elementen_per_combinatie.entry(cid).or_default().push(e); }
+    }
+    let ja = |e: &FieldMap, veld: &str| e.get(veld).map(|v| v.trim() == "Y").unwrap_or(false);
+    let mut niet_gelezen: HashSet<u32> = HashSet::new();
+    let mut uit_trappen = Vec::with_capacity(trappen.len());
+    for (waarde, cid, naam) in &trappen {
+        let mut aan: BTreeSet<u32> = BTreeSet::new();
+        for e in elementen_per_combinatie.get(cid).map(|v| v.as_slice()).unwrap_or(&[]) {
+            let Some(sw) = e.get_u32("ControlledSwitchID") else { continue };
+            if ja(e, "InvertStoredStateWhenActivating") { niet_gelezen.insert(sw); continue; }
+            if !ja(e, "InitialStoredStateIsEngaged") { continue; }
+            let stops_aan = bereik(sw);
+            if stops_aan.is_empty() { niet_gelezen.insert(sw); } else { aan.extend(stops_aan); }
+        }
+        uit_trappen.push(SetTrap { naam: naam.clone(), waarde: *waarde, stops: aan.into_iter().collect() });
+    }
+    let naam = regelaars.iter()
+        .find(|r| r.get_u32("ControlID") == Some(regelaar))
+        .and_then(|r| r.get("Name").map(|n| n.trim().to_string()))
+        .unwrap_or_else(|| "Crescendo".to_string());
+    Some(SetCrescendo { naam, trappen: uit_trappen, niet_gelezen: niet_gelezen.len() })
+}
+
+/// Zet de crescendo van de set in het verslag (E4), als de definitie leesbaar is en er een heeft.
+pub(crate) fn voeg_crescendo_toe(v: &mut crate::import_report::ImportReport, xml: &str) {
+    use crate::import_report::Ernst;
+    if GecomprimeerdeOdf::detecteer(xml).is_some() { return; }
+    let c = crescendo_uit_tabellen(
+        &extract_objects(xml, "Combination"),
+        &extract_objects(xml, "CombinationElement"),
+        &extract_objects(xml, "ContinuousControlStageSwitch"),
+        &extract_objects(xml, "Stop"),
+        &extract_objects(xml, "SwitchLinkage"),
+        &extract_objects(xml, "ContinuousControl"),
+    );
+    if let Some(c) = &c {
+        let laatste = c.trappen.last().map(|t| t.stops.len()).unwrap_or(0);
+        v.melding(
+            Ernst::Info,
+            "crescendo",
+            format!(
+                "De set heeft een crescendo: {} trappen van {} tot {} registers{}. Te kiezen bij het crescendo van dit orgel.",
+                c.trappen.len(),
+                c.trappen.first().map(|t| t.stops.len()).unwrap_or(0),
+                laatste,
+                if c.niet_gelezen > 0 { format!("; {} koppels of tremulanten in de trappen worden niet overgenomen", c.niet_gelezen) } else { String::new() }
+            ),
+        );
+    }
+    v.set_crescendo = c;
 }
 
 /// De filterwaarden van een zwelkast uit de `EnclosurePipe`-rijen (E5). Per pijp

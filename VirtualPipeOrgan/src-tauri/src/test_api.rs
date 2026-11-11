@@ -746,6 +746,7 @@ fn route_test_only(
         (tiny_http::Method::Post, "/crescendo/binding") => handle_crescendo_binding(state, body),
         (tiny_http::Method::Post, "/crescendo/stage") => handle_crescendo_stage(state, query),
         (tiny_http::Method::Post, "/crescendo/voorstel") => handle_crescendo_voorstel(state, query, body),
+        (tiny_http::Method::Post, "/crescendo/set_voorstel") => handle_crescendo_set_voorstel(state, query),
         (tiny_http::Method::Get, "/swell") => Ok(handle_swell_get(state)),
         (tiny_http::Method::Post, "/swell/binding") => handle_swell_binding(state, body),
         // Luidspreker-testsignaal (0.7.47): ?channel=<n>&kind=0|1, zonder
@@ -1730,6 +1731,23 @@ fn handle_crescendo_binding(state: &AppState, body: &str) -> Result<Value, (u16,
         obj.insert("displaced".into(), serde_json::to_value(&verdrongen).unwrap_or(json!([])));
     }
     Ok(out)
+}
+
+/// POST /crescendo/set_voorstel?stages=N — droog (E4): de crescendo van de set, verdeeld over N
+/// trappen, met leesbare namen. Zonder toe te passen of te bewaren.
+fn handle_crescendo_set_voorstel(state: &AppState, query: &str) -> Result<Value, (u16, String)> {
+    let n: usize = parse_query(query, "stages").unwrap_or(15);
+    let info = crate::commands::set_crescendo_info_inner(state);
+    let trappen = crate::commands::set_crescendo_voorstel_inner(state, n).map_err(|e| (409u16, e))?;
+    let mut namen = serde_json::Map::new();
+    if let Some(o) = state.loaded_organ_info.read().as_ref() {
+        for d in &o.divisions {
+            for s in &d.stops {
+                namen.insert(s.id.clone(), json!(format!("{}: {} {}", d.name, s.name, s.pitch).trim().to_string()));
+            }
+        }
+    }
+    Ok(json!({ "info": info, "stages": trappen, "namen": namen }))
 }
 
 /// POST /crescendo/stage?stage=N — trap zetten zoals een UI-klik.

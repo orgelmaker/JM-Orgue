@@ -488,3 +488,105 @@ fn zwelkast_filter_uit_leesbare_veldnamen() {
     let kaal = FieldMap::rijen_van_tabel("EnclosurePipe", vec![kale]).pop().unwrap();
     assert!(zwelkast_filter_uit_pijpen(&[&kaal]).is_none());
 }
+
+// ---------------------------------------------------------------------------
+// E4: de crescendo van de set uit de tabellen van een leesbare definitie
+// ---------------------------------------------------------------------------
+
+/// Een kleine leesbare definitie: drie registers (schakelaars 1801 tot 1803; register 3 via een
+/// tussenschakelaar 500), een koppelschakelaar (51) zonder register, een crescendo (regelaar 2) met
+/// drie trappen in verkeerde volgorde, een zwelregelaar (regelaar 1) met trapschakelaars die niets
+/// met een combinatie te maken hebben, en een gewone piston (type 1).
+fn crescendo_xml(extra_element: &str, kan_uitzetten: &str) -> String {
+    let combinatie = |id: u32, naam: &str, sw: u32| format!(
+        "<Combination><CombinationID>{id}</CombinationID><Name>{naam}</Name><CombinationTypeCode>4</CombinationTypeCode>\
+         <ActivatingSwitchID>{sw}</ActivatingSwitchID><CanEngageControlledSwitches>Y</CanEngageControlledSwitches>\
+         <CanDisengageControlledSwitches>{kan_uitzetten}</CanDisengageControlledSwitches></Combination>"
+    );
+    let element = |comb: u32, sw: u32, aan: &str| format!(
+        "<CombinationElement><CombinationID>{comb}</CombinationID><ControlledSwitchID>{sw}</ControlledSwitchID>\
+         <InitialStoredStateIsEngaged>{aan}</InitialStoredStateIsEngaged><InvertStoredStateWhenActivating>N</InvertStoredStateWhenActivating></CombinationElement>"
+    );
+    let trap = |waarde: u32, sw: u32| format!(
+        "<ContinuousControlStageSwitch><ContinuousControlID>2</ContinuousControlID><ContinuousControlValue>{waarde}</ContinuousControlValue><ControlledSwitchID>{sw}</ControlledSwitchID></ContinuousControlStageSwitch>"
+    );
+    format!(
+        r#"<Hauptwerk>
+<ObjectList ObjectType="Stop"><Stop><StopID>1</StopID><ControllingSwitchID>1801</ControllingSwitchID></Stop><Stop><StopID>2</StopID><ControllingSwitchID>1802</ControllingSwitchID></Stop><Stop><StopID>3</StopID><ControllingSwitchID>1803</ControllingSwitchID></Stop></ObjectList>
+<ObjectList ObjectType="SwitchLinkage"><SwitchLinkage><SourceSwitchID>11</SourceSwitchID><DestSwitchID>1801</DestSwitchID></SwitchLinkage><SwitchLinkage><SourceSwitchID>12</SourceSwitchID><DestSwitchID>1802</DestSwitchID></SwitchLinkage><SwitchLinkage><SourceSwitchID>13</SourceSwitchID><DestSwitchID>500</DestSwitchID></SwitchLinkage><SwitchLinkage><SourceSwitchID>500</SourceSwitchID><DestSwitchID>1803</DestSwitchID></SwitchLinkage></ObjectList>
+<ObjectList ObjectType="ContinuousControl"><ContinuousControl><ControlID>1</ControlID><Name>Zwel</Name></ContinuousControl><ContinuousControl><ControlID>2</ControlID><Name>Walze</Name></ContinuousControl></ObjectList>
+<ObjectList ObjectType="Combination">{c1}{c2}{c3}<Combination><CombinationID>201</CombinationID><Name>Tutti</Name><CombinationTypeCode>1</CombinationTypeCode><ActivatingSwitchID>68</ActivatingSwitchID></Combination></ObjectList>
+<ObjectList ObjectType="CombinationElement">{e1}{e2}{e2b}{e2c}{e3a}{e3b}{e3c}{e3d}{extra}</ObjectList>
+<ObjectList ObjectType="ContinuousControlStageSwitch">{t3}{t1}{t2}<ContinuousControlStageSwitch><ContinuousControlID>1</ContinuousControlID><ContinuousControlValue>10</ContinuousControlValue><ControlledSwitchID>90</ControlledSwitchID></ContinuousControlStageSwitch></ObjectList>
+</Hauptwerk>"#,
+        c1 = combinatie(101, "Trap 1", 2001), c2 = combinatie(102, "Trap 2", 2002), c3 = combinatie(103, "Trap 3", 2003),
+        e1 = element(101, 11, "Y"), e2 = element(102, 11, "Y"), e2b = element(102, 12, "Y"), e2c = element(102, 51, "Y"),
+        e3a = element(103, 11, "Y"), e3b = element(103, 12, "Y"), e3c = element(103, 13, "Y"), e3d = element(103, 51, "Y"),
+        extra = extra_element,
+        t1 = trap(0, 2001), t2 = trap(40, 2002), t3 = trap(90, 2003),
+    )
+}
+
+fn crescendo_uit(xml: &str) -> Option<crate::import_report::SetCrescendo> {
+    crescendo_uit_tabellen(
+        &extract_objects(xml, "Combination"),
+        &extract_objects(xml, "CombinationElement"),
+        &extract_objects(xml, "ContinuousControlStageSwitch"),
+        &extract_objects(xml, "Stop"),
+        &extract_objects(xml, "SwitchLinkage"),
+        &extract_objects(xml, "ContinuousControl"),
+    )
+}
+
+#[test]
+fn crescendo_van_de_set_staat_op_volgorde_van_de_regelaar_met_absolute_registers() {
+    let c = crescendo_uit(&crescendo_xml("", "Y")).expect("een crescendo");
+    assert_eq!(c.naam, "Walze", "de naam van de regelaar met de trappen");
+    // Ook al staan de trapschakelaars in het bestand in verkeerde volgorde.
+    assert_eq!(c.trappen.iter().map(|t| t.waarde).collect::<Vec<_>>(), vec![0, 40, 90]);
+    assert_eq!(c.trappen.iter().map(|t| t.naam.as_str()).collect::<Vec<_>>(), vec!["Trap 1", "Trap 2", "Trap 3"]);
+    // Register 3 hangt via de tussenschakelaar 500 aan schakelaar 13.
+    assert_eq!(c.trappen[0].stops, vec![1]);
+    assert_eq!(c.trappen[1].stops, vec![1, 2]);
+    assert_eq!(c.trappen[2].stops, vec![1, 2, 3]);
+    // Schakelaar 51 is een koppel: niet overgenomen, één keer geteld ondanks twee trappen.
+    assert_eq!(c.niet_gelezen, 1);
+}
+
+#[test]
+fn een_element_met_omgekeerde_beginstand_wordt_niet_geraden() {
+    let omgekeerd = "<CombinationElement><CombinationID>101</CombinationID><ControlledSwitchID>12</ControlledSwitchID>\
+        <InitialStoredStateIsEngaged>Y</InitialStoredStateIsEngaged><InvertStoredStateWhenActivating>Y</InvertStoredStateWhenActivating></CombinationElement>";
+    let c = crescendo_uit(&crescendo_xml(omgekeerd, "Y")).unwrap();
+    assert_eq!(c.trappen[0].stops, vec![1], "register 2 komt niet in trap 1 door het omgekeerde element");
+    assert_eq!(c.niet_gelezen, 2, "het omgekeerde element telt mee als niet gelezen (schakelaar 12), naast het koppel");
+}
+
+#[test]
+fn een_combinatie_die_niet_mag_uitzetten_geeft_geen_crescendo() {
+    assert!(crescendo_uit(&crescendo_xml("", "N")).is_none());
+}
+
+#[test]
+fn zonder_crescendotrappen_of_met_maar_een_trap_geen_crescendo() {
+    // Geen combinatie van het trapsoort: gewoon pistons.
+    let zonder = crescendo_xml("", "Y").replace("<CombinationTypeCode>4</CombinationTypeCode>", "<CombinationTypeCode>1</CombinationTypeCode>");
+    assert!(crescendo_uit(&zonder).is_none());
+    // Maar één trap is geen crescendo.
+    let een = crescendo_xml("", "Y")
+        .replace("<ControlledSwitchID>2002</ControlledSwitchID>", "<ControlledSwitchID>7</ControlledSwitchID>")
+        .replace("<ControlledSwitchID>2003</ControlledSwitchID>", "<ControlledSwitchID>8</ControlledSwitchID>");
+    assert!(crescendo_uit(&een).is_none());
+    assert!(crescendo_uit(&xml_met_attacks(&aanval(1, 1, ""))).is_none(), "een definitie zonder deze tabellen");
+}
+
+#[test]
+fn het_verslag_meldt_de_crescendo_van_de_set() {
+    let mut v = crate::import_report::ImportReport::uit_definitie("hauptwerk", "4.0", "proef", "Fixture", 3, 1, 0);
+    voeg_crescendo_toe(&mut v, &crescendo_xml("", "Y"));
+    let c = v.set_crescendo.as_ref().expect("crescendo in het verslag");
+    assert_eq!(c.trappen.len(), 3);
+    let m = v.meldingen.iter().find(|m| m.object == "crescendo").expect("melding");
+    assert!(m.tekst.contains("3 trappen van 1 tot 3 registers"), "{}", m.tekst);
+    assert!(m.tekst.contains("1 koppels of tremulanten"), "{}", m.tekst);
+}

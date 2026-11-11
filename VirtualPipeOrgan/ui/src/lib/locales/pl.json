@@ -1332,6 +1332,8 @@
     "autofill": "Auto-wypełnienie",
     "autofill_title": "Wypełnij kroki automatycznie: od cichych (najcichszy 8' na każdym manuale, cichy 16' w pedale) przez pryncypały, 2' i mikstury do głosów językowych, ze sprzęgłami",
     "autofill_confirm": "Kroki zawierają już głosy. Zastąpić je nową propozycją? (Potem można cofnąć.)",
+    "van_set": "Z zestawu",
+    "van_set_title": "Przejmij crescendo, które zestaw sam zawiera: {trappen} kroków, najpełniejszy z {registers} głosami. Połączenia i tremolo zestawu nie są przejmowane.",
     "undo": "Cofnij",
     "undo_title": "Przywróć kroki sprzed Auto-fill",
     "opt_couplers": "Uwzględnij sprzęgła",

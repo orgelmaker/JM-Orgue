@@ -1332,6 +1332,8 @@
     "autofill": "Auto-Füllen",
     "autofill_title": "Stufen automatisch füllen: von leise (leisestes 8' je Manual, ein leises 16' im Pedal) über Prinzipale, 2' und Mixturen bis zu den Zungen, mit Koppeln",
     "autofill_confirm": "Die Stufen enthalten bereits Register. Durch einen neuen Vorschlag ersetzen? (Rückgängig machen ist danach möglich.)",
+    "van_set": "Vom Set",
+    "van_set_title": "Das Crescendo übernehmen, das das Set selbst mitbringt: {trappen} Stufen, die vollste mit {registers} Registern. Koppeln und Tremulanten des Sets werden nicht übernommen.",
     "undo": "Rückgängig",
     "undo_title": "Stufen wiederherstellen wie vor Auto-fill",
     "opt_couplers": "Koppeln einbeziehen",

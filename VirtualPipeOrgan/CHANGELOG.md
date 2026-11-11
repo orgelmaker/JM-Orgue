@@ -6,6 +6,24 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### Crescendo van de set als extra voorstel (E4)
+- Een leesbare Hauptwerk-set (met veldnamen in de definitie) kan zelf een crescendo meebrengen: een regelaar met trappen die elk een
+  combinatie van het soort "crescendotrap" aanzetten. De importer leest die nu: per trap de registers die dan aan staan, via het
+  schakelnetwerk van de set (soms met een tussenschakelaar). Het importverslag meldt het aantal trappen en van hoeveel tot hoeveel
+  registers de crescendo loopt. Wat niet geraden wordt: een element met de omkeervlag aan (de beginstand en de omkeervlag zijn
+  makkelijk te verwisselen), en een combinatie die niet allebei aan- en uitzetten mag; dan blijft de set zonder crescendo. Koppels en
+  tremulanten van een trap worden niet overgenomen en in het verslag geteld. Gecomprimeerde definities (veldnamen als letters) hebben
+  dit nog niet; die geven geen crescendo.
+- In het crescendoscherm komt naast Auto-fill een knop "Van de set" (alleen zichtbaar als de set een crescendo heeft waarvan minstens
+  één register in dit orgel staat). De trappen van de set worden beperkt tot de registers die dit orgel heeft (een demo laadt maar een
+  deel), zonder lege of dubbele trappen, en gelijkmatig verdeeld over het gekozen aantal stappen; de eerste en de volste trap blijven.
+  Er verandert niets zonder dat je op de knop drukt; vraagt bevestiging als de stappen al registers hebben, en Ongedaan maken werkt ook
+  hier. Het eigen voorstel van JM-Orgue en alle bestaande crescendo-instellingen blijven ongewijzigd; het geluid ook.
+- De vaste combinaties (pistons) van de set zijn bewust nog niet overgenomen: in de leesbare sets zijn bijna alle rijen in de tabel
+  de crescendotrappen zelf.
+- Test-API: `POST /crescendo/set_voorstel?stages=N` toont het voorstel droog, met leesbare namen. Voorbeeld `crescendo_tonen`
+  (`cargo run --release -p vpo-sampler --example crescendo_tonen -- <definitie>`).
+
 ### Basmanagement: aangesloten op de uitgang, met een instelscherm (F6, stap 2)
 - Het basmanagement uit de vorige stap werkt nu in de uitgang: ná de uitgangscorrectie en vóór de limiter haalt het het laag uit de
   hoofdkanalen en stuurt het, opgeteld, naar één subwooferuitgang (vierde-orde Linkwitz-Riley). De hoofdkanalen zijn alle uitgangen

@@ -1332,6 +1332,8 @@
     "autofill": "Remplissage auto",
     "autofill_title": "Remplir les crans automatiquement : du plus doux (le 8' le plus doux par clavier, un 16' doux à la pédale) aux principaux, 2' et fournitures, puis aux anches, avec les accouplements",
     "autofill_confirm": "Les crans contiennent déjà des jeux. Les remplacer par une nouvelle proposition ? (Vous pourrez annuler ensuite.)",
+    "van_set": "Du set",
+    "van_set_title": "Reprendre le crescendo que le set apporte lui-même : {trappen} crans, le plus plein avec {registers} jeux. Les accouplements et trémolos du set ne sont pas repris.",
     "undo": "Annuler",
     "undo_title": "Rétablir les crans tels qu'ils étaient avant Auto-fill",
     "opt_couplers": "Inclure les accouplements",

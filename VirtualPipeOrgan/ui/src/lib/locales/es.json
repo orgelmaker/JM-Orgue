@@ -1332,6 +1332,8 @@
     "autofill": "Autorrelleno",
     "autofill_title": "Rellenar los pasos automáticamente: de suave (el 8' más suave de cada teclado, un 16' suave en el pedal) a los principales, 2' y lleno, y luego las lengüetas, con enganches",
     "autofill_confirm": "Los pasos ya contienen registros. ¿Reemplazarlos por una nueva propuesta? (Después se puede deshacer.)",
+    "van_set": "Del set",
+    "van_set_title": "Usar el crescendo que trae el propio set: {trappen} pasos, el más lleno con {registers} registros. Los acoplamientos y trémolos del set no se incorporan.",
     "undo": "Deshacer",
     "undo_title": "Restaurar los pasos como estaban antes de Auto-fill",
     "opt_couplers": "Incluir enganches",

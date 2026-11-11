@@ -163,8 +163,33 @@ pub struct Diagnose {
     pub lijsten: Vec<DiagnoseLijst>,
 }
 
+/// Eén trap van de crescendo die de set zelf meebrengt (E4).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct SetTrap {
+    pub naam: String,
+    /// Stand van de regelaar (0 tot 127) waarbij deze trap begint.
+    pub waarde: u32,
+    /// De registers (stop-id's van de definitie) die op deze trap aan staan, oplopend.
+    pub stops: Vec<u32>,
+}
+
+/// De crescendo die de set zelf meebrengt (E4): trappen van zacht naar vol. Alleen
+/// registers; koppels en tremulanten van een trap worden niet overgenomen en geteld
+/// in `niet_gelezen`.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct SetCrescendo {
+    pub naam: String,
+    pub trappen: Vec<SetTrap>,
+    /// Aantal verschillende schakelaars in de trappen die niet naar een register leiden
+    /// (koppels, tremulanten, ...) of waarvan de beginstand omgekeerd is opgegeven.
+    pub niet_gelezen: usize,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ImportReport {
+    /// De crescendo van de set, als de definitie er een heeft en we hem kunnen lezen.
+    #[serde(default)]
+    pub set_crescendo: Option<SetCrescendo>,
     /// "codm" | "hauptwerk" | "grandorgue" | "map"
     pub formaat: String,
     pub versie: String,

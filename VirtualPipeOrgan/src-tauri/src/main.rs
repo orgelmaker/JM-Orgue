@@ -32,6 +32,7 @@ mod remote;
 mod retune;
 mod rt_prioriteit;
 mod zwelkast_set;
+mod set_crescendo;
 mod sampleset_download;
 mod state;
 mod test_api;
@@ -514,6 +515,8 @@ fn main() {
             commands::cancel_pedal_learn,
             commands::get_crescendo_state,
             commands::crescendo_voorstel,
+            commands::get_set_crescendo,
+            commands::set_crescendo_voorstel,
             commands::learn_crescendo_pedal,
             commands::clear_crescendo_binding,
             commands::set_crescendo_invert,

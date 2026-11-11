@@ -1332,6 +1332,8 @@
     "autofill": "Auto-fill",
     "autofill_title": "Stel de stappen automatisch op: van zacht (zachtste 8' per klavier, zachte 16' in het pedaal) via principalen, 2' en mixturen naar de tongwerken, met koppels",
     "autofill_confirm": "De stappen bevatten al registers. Vervangen door een nieuw voorstel? (Ongedaan maken kan daarna.)",
+    "van_set": "Van de set",
+    "van_set_title": "Neem de crescendo over die de set zelf meebrengt: {trappen} trappen, de volste met {registers} registers. Koppels en tremulanten van de set worden niet overgenomen.",
     "undo": "Ongedaan maken",
     "undo_title": "Zet de stappen terug zoals ze waren vóór Auto-fill",
     "opt_couplers": "Koppels meenemen",

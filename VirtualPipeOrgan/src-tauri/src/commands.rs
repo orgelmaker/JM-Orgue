@@ -5212,6 +5212,45 @@ pub fn crescendo_voorstel_inner(
     Ok(crate::crescendo_voorstel::stel_voor(&divisies, &koppels, num_stages.clamp(1, 255), &opties))
 }
 
+/// De crescendo die de set zelf meebrengt (E4), samengevat voor dit orgel. `None` als het
+/// orgel geen leesbare crescendo van de set heeft of er voor dit orgel niets van overblijft.
+#[tauri::command]
+pub fn get_set_crescendo(state: State<AppState>) -> Option<crate::set_crescendo::SetCrescendoInfo> {
+    set_crescendo_info_inner(&state)
+}
+
+pub fn set_crescendo_info_inner(state: &AppState) -> Option<crate::set_crescendo::SetCrescendoInfo> {
+    let verslag = state.laatste_importverslag.read();
+    let c = verslag.as_ref()?.set_crescendo.as_ref()?;
+    let info = state.loaded_organ_info.read();
+    let info = info.as_ref()?;
+    let kaart = crate::set_crescendo::id_kaart(info.divisions.iter().flat_map(|d| d.stops.iter().map(|s| s.id.as_str())));
+    let samenvatting = crate::set_crescendo::info_voor(c, &kaart);
+    if samenvatting.trappen_voor_orgel == 0 { None } else { Some(samenvatting) }
+}
+
+/// De crescendo van de set als voorstel voor `num_stages` trappen (E4): de trappen van de set
+/// voor de registers die dit orgel heeft, gelijkmatig verdeeld. Puur een voorstel; de
+/// frontend vraagt bevestiging en bewaart het via set_crescendo_config.
+#[tauri::command]
+pub fn set_crescendo_voorstel(state: State<AppState>, num_stages: usize) -> Result<Vec<Vec<String>>, String> {
+    set_crescendo_voorstel_inner(&state, num_stages)
+}
+
+pub fn set_crescendo_voorstel_inner(state: &AppState, num_stages: usize) -> Result<Vec<Vec<String>>, String> {
+    let verslag = state.laatste_importverslag.read();
+    let c = verslag.as_ref().and_then(|v| v.set_crescendo.as_ref())
+        .ok_or_else(|| "Deze set heeft geen leesbare crescendo".to_string())?;
+    let info = state.loaded_organ_info.read();
+    let info = info.as_ref().ok_or_else(|| "Geen orgel geladen".to_string())?;
+    let kaart = crate::set_crescendo::id_kaart(info.divisions.iter().flat_map(|d| d.stops.iter().map(|s| s.id.as_str())));
+    let trappen = crate::set_crescendo::trappen_voor_orgel(c, &kaart);
+    if trappen.is_empty() {
+        return Err("Van de crescendo van de set staat geen register in dit orgel".to_string());
+    }
+    Ok(crate::set_crescendo::verdeel_over(&trappen, num_stages.clamp(1, 255)))
+}
+
 /// Get current crescendo config
 #[tauri::command]
 pub fn get_crescendo_config(state: State<AppState>) -> CrescendoConfigDto {
