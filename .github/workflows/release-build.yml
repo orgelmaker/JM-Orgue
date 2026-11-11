@@ -304,7 +304,7 @@ jobs:
           APT="-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30"
           for poging in 1 2 3; do
             if [ "$poging" -gt 1 ]; then
-              echo "http://archive.ubuntu.com/ubuntu/ priority:1" | sudo tee /etc/apt/apt-mirrors.txt > /dev/null
+              echo "http://archive.ubuntu.com/ubuntu/" | sudo tee /etc/apt/apt-mirrors.txt > /dev/null
             fi
             if sudo timeout 150 apt-get $APT update \
               && sudo timeout 600 env DEBIAN_FRONTEND=noninteractive apt-get $APT install -y \
