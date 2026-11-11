@@ -352,6 +352,16 @@ pub struct AudioPrefs {
     /// de app bij de eerste start zelf wat deze pc aankan.
     #[serde(default)]
     pub mix_cores: Option<u32>,
+    /// Basmanagement (F6): het laag van de hoofdkanalen naar een subwoofer. None = uit.
+    /// De sub staat 1-gebaseerd (uitgang 3 = het derde uitgangskanaal).
+    #[serde(default)]
+    pub bas_aan: Option<bool>,
+    #[serde(default)]
+    pub bas_kruis_hz: Option<f32>,
+    #[serde(default)]
+    pub bas_sub_uitgang: Option<u32>,
+    #[serde(default)]
+    pub bas_sub_niveau_db: Option<f32>,
     /// Drempel (dBFS) voor het afkappen van de stille staart van release-samples
     /// (D7); None = standaard (−90). Of het gebeurt, bepaalt de vlag per orgel.
     #[serde(default)]

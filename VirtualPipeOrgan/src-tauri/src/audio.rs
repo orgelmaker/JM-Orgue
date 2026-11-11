@@ -1148,6 +1148,9 @@ pub enum AudioCommand {
     /// keten ná de orgel-EQ en vóór de limiter. Hoort bij de uitgang, niet
     /// bij het orgel.
     SetOutputEq { enabled: bool, preamp_db: f32, bands: Vec<EqBandSpec> },
+    /// Basmanagement (F6): het laag van de hoofdkanalen naar een subwoofer, ná de
+    /// uitgangscorrectie en vóór de limiter. Uit = overgeslagen (bit-identiek).
+    SetBasManagement(vpo_audio::BasInstelling),
     /// Route a division naar een willekeurige set fysieke output-kanalen.
     /// Lege lijst = standaard (voorste paar 0/1). Opeenvolgende kanalen worden als
     /// stereo-paren (L,R) gevuld; een los laatste kanaal krijgt mono.
@@ -3755,6 +3758,8 @@ fn run_audio_thread(
     // tragere release (plus de 300 ms-hold in de limiter zelf) volgt de gain
     // het natuurlijke uitsterven in plaats van er tegenin te pompen.
     let mut master_limiter = MasterLimiter::new(0.97, 0.0015, 1.2, sample_rate);
+    // Basmanagement (F6): eigendom van de render-closure, dus zonder lock.
+    let mut bas = vpo_audio::BasManagement::nieuw(sample_rate);
     // Generator voor het luidspreker-testsignaal (zie set_test_signal).
     let mut testsignaal = Testsignaal::nieuw();
     // Voor de galm-bypass: bij de overgang naar mix 0 één keer de staart
@@ -5120,6 +5125,14 @@ fn run_audio_thread(
                         }
                         info!("Uitgangscorrectie: enabled={}, {} banden over {} kanalen, voorversterking {:.1} dB", enabled, bands.len(), channels, preamp_db);
                     }
+                    AudioCommand::SetBasManagement(instelling) => {
+                        bas.stel_in(&instelling, channels);
+                        info!(
+                            "Basmanagement: {} (sub op uitgang {}, kruisfrequentie {:.0} Hz, niveau {:.1} dB, {} uitgangen)",
+                            if bas.is_identiteit() { "uit" } else { "aan" },
+                            instelling.sub_kanaal + 1, instelling.kruisfrequentie_hz, instelling.sub_niveau_db, channels
+                        );
+                    }
                     AudioCommand::Shutdown => {
                         running_clone.store(false, Ordering::Relaxed);
                     }
@@ -5875,6 +5888,11 @@ fn run_audio_thread(
                                     }
                                 }
                             }
+                        }
+                        // Basmanagement (F6): het laag van de hoofdkanalen naar de sub. Staat het
+                        // uit, dan wordt dit overgeslagen en blijft de uitvoer bit-identiek.
+                        if !bas.is_identiteit() {
+                            bas.verwerk_frame(&mut frame[..]);
                         }
 
                         // Master-limiter + peak-meters (voorste paar). Dit verving de

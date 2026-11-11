@@ -7661,8 +7661,83 @@ fn output_eq_naar_dto(state: &AppState, cfg: &crate::state::OutputEqSaved, activ
 /// (of een lege, uitgeschakelde keten als er geen soort actief is). Bij de
 /// start, na elke audio-herbouw (SwitchOutcome met player_rebuilt) en na elke
 /// wijziging. Rust is de eigenaar: werkt ook zonder frontend.
+/// Het basmanagement (F6) zoals het in de audio-voorkeuren staat.
+pub(crate) fn bas_instelling_uit(prefs: &crate::state::AudioPrefs) -> vpo_audio::BasInstelling {
+    vpo_audio::BasInstelling {
+        aan: prefs.bas_aan.unwrap_or(false),
+        kruisfrequentie_hz: prefs.bas_kruis_hz.unwrap_or(vpo_audio::KRUIS_STANDAARD_HZ),
+        sub_kanaal: prefs.bas_sub_uitgang.unwrap_or(3).max(1) as usize - 1,
+        sub_niveau_db: prefs.bas_sub_niveau_db.unwrap_or(0.0),
+        hoofdkanalen: Vec::new(), // alle uitgangen behalve de sub
+    }
+}
+
+/// Stuurt het basmanagement naar de audio-thread. Gebeurt op dezelfde momenten als de
+/// uitgangscorrectie (start, nieuw apparaat, herstel van de audio), omdat beide bij de
+/// uitgang horen en niet bij het orgel.
+pub(crate) fn bas_toepassen(state: &AppState, prefs: &crate::state::AudioPrefs) {
+    state.send_audio_command(AudioCommand::SetBasManagement(bas_instelling_uit(prefs)));
+}
+
+/// Wat de interface van het basmanagement nodig heeft.
+#[derive(serde::Serialize)]
+pub struct BasDto {
+    pub aan: bool,
+    pub kruis_hz: f32,
+    /// 1-gebaseerd.
+    pub sub_uitgang: u32,
+    pub sub_niveau_db: f32,
+    pub kruis_min_hz: f32,
+    pub kruis_max_hz: f32,
+}
+
+fn bas_dto(prefs: &crate::state::AudioPrefs) -> BasDto {
+    BasDto {
+        aan: prefs.bas_aan.unwrap_or(false),
+        kruis_hz: prefs.bas_kruis_hz.unwrap_or(vpo_audio::KRUIS_STANDAARD_HZ),
+        sub_uitgang: prefs.bas_sub_uitgang.unwrap_or(3).max(1),
+        sub_niveau_db: prefs.bas_sub_niveau_db.unwrap_or(0.0),
+        kruis_min_hz: vpo_audio::KRUIS_MIN_HZ,
+        kruis_max_hz: vpo_audio::KRUIS_MAX_HZ,
+    }
+}
+
+#[tauri::command]
+pub fn get_basmanagement(state: State<AppState>) -> BasDto {
+    bas_dto(&crate::state::load_audio_prefs(&state.app_data_dir))
+}
+
+/// Zet het basmanagement. De waarden worden begrensd (kruisfrequentie 30 tot 250 Hz, niveau
+/// −24 tot +12 dB, uitgang minstens 1); `persist` bewaart ze in de audio-voorkeuren.
+pub(crate) fn set_basmanagement_inner(
+    state: &AppState, aan: bool, kruis_hz: f32, sub_uitgang: u32, sub_niveau_db: f32, persist: bool,
+) -> BasDto {
+    let mut prefs = crate::state::load_audio_prefs(&state.app_data_dir);
+    prefs.bas_aan = Some(aan);
+    prefs.bas_kruis_hz = Some(if kruis_hz.is_finite() { kruis_hz } else { vpo_audio::KRUIS_STANDAARD_HZ }
+        .clamp(vpo_audio::KRUIS_MIN_HZ, vpo_audio::KRUIS_MAX_HZ));
+    prefs.bas_sub_uitgang = Some(sub_uitgang.clamp(1, 1024));
+    prefs.bas_sub_niveau_db = Some(if sub_niveau_db.is_finite() { sub_niveau_db } else { 0.0 }.clamp(-24.0, 12.0));
+    if persist {
+        crate::state::save_audio_prefs(&state.app_data_dir, &prefs);
+    }
+    bas_toepassen(state, &prefs);
+    info!(
+        "Basmanagement ingesteld: {}, kruisfrequentie {:.0} Hz, sub op uitgang {}, niveau {:.1} dB{}",
+        if aan { "aan" } else { "uit" }, prefs.bas_kruis_hz.unwrap_or(0.0), prefs.bas_sub_uitgang.unwrap_or(0),
+        prefs.bas_sub_niveau_db.unwrap_or(0.0), if persist { "" } else { " (niet bewaard)" }
+    );
+    bas_dto(&prefs)
+}
+
+#[tauri::command]
+pub fn set_basmanagement(state: State<AppState>, aan: bool, kruis_hz: f32, sub_uitgang: u32, sub_niveau_db: f32) -> BasDto {
+    set_basmanagement_inner(&state, aan, kruis_hz, sub_uitgang, sub_niveau_db, true)
+}
+
 pub(crate) fn eq_uitgang_toepassen(state: &AppState) {
     let prefs = crate::state::load_audio_prefs(&state.app_data_dir);
+    bas_toepassen(state, &prefs);
     let cfg = prefs.active_output_profile.as_ref().and_then(|k| prefs.output_eq.get(k)).cloned();
     match cfg {
         Some(c) => {

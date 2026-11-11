@@ -669,6 +669,20 @@ fn route_test_only(
             state.vlag_overrides.write().insert(sleutel, vlaggen);
             Ok(serde_json::to_value(vlaggen).unwrap_or_default())
         }
+        // Basmanagement (F6), body {"aan": bool, "kruis_hz": 80, "sub_uitgang": 3, "sub_niveau_db": 0}.
+        // Niet persistent (alleen voor proeven).
+        (tiny_http::Method::Post, "/basmanagement") => {
+            let v: serde_json::Value = serde_json::from_str(body).unwrap_or_default();
+            let dto = crate::commands::set_basmanagement_inner(
+                state,
+                v.get("aan").and_then(|x| x.as_bool()).unwrap_or(true),
+                v.get("kruis_hz").and_then(|x| x.as_f64()).unwrap_or(80.0) as f32,
+                v.get("sub_uitgang").and_then(|x| x.as_u64()).unwrap_or(3) as u32,
+                v.get("sub_niveau_db").and_then(|x| x.as_f64()).unwrap_or(0.0) as f32,
+                false,
+            );
+            Ok(serde_json::to_value(dto).unwrap_or_default())
+        }
         // Plafond volgt het vrije geheugen (F1), body {"on": true|false};
         // rekent meteen opnieuw. Niet persistent (alleen voor proeven).
         (tiny_http::Method::Post, "/geheugen_volgt_vrij") => {

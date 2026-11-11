@@ -6,6 +6,25 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### Basmanagement: aangesloten op de uitgang, met een instelscherm (F6, stap 2)
+- Het basmanagement uit de vorige stap werkt nu in de uitgang: ná de uitgangscorrectie en vóór de limiter haalt het het laag uit de
+  hoofdkanalen en stuurt het, opgeteld, naar één subwooferuitgang (vierde-orde Linkwitz-Riley). De hoofdkanalen zijn alle uitgangen
+  behalve de sub. Staat het uit (standaard), dan wordt het overgeslagen en is de uitvoer bit-identiek; de audio-callback krijgt
+  daarvoor geen lock of allocatie erbij (de toestand is van de render-closure zelf).
+- Instelling onder Algemene Instellingen → Audio uitvoer: "Laag naar een subwoofer (basmanagement)" met de uitgang van de sub, de
+  kruisfrequentie (30 tot 250 Hz, standaard 80) en het niveau van de sub (−24 tot +12 dB). Algemeen bij de uitgang, niet per orgel,
+  en bewaard in de audio-voorkeuren; het wordt opnieuw toegepast bij het starten, een ander apparaat en het herstel van de audio,
+  net als de uitgangscorrectie. Een gekozen sub-uitgang die op het huidige apparaat niet bestaat zet het uit, met een melding.
+  In de zeven talen.
+- Gemeten in de echte callback met het testsignaal (sinus door de EQ, uitgang 1 hoofdkanaal, uitgang 2 sub, −12 dB):
+  bij 30 Hz verdwijnt het laag uit het hoofdkanaal (−12 → −46 dB) en staat het in de sub (−12,4 dB); bij de kruisfrequentie 80 Hz
+  staan beide op −18 dB (−6 dB elk, een vlakke som); bij 400 Hz blijft het hoofdkanaal ongewijzigd en hoort de sub niets (−68 dB).
+  Uit: ongewijzigd. Instelscherm in de echte app geprobeerd (aan, uitgang, kruisfrequentie, niveau, begrenzing, uit).
+- Test-API: `POST /basmanagement` (niet bewaard). Een test meer: een lege lijst hoofdkanalen betekent alle kanalen behalve de sub.
+- **Niet gehoord en niet getest met echte luidsprekers en een echte subwoofer**; de meting is op de meters. Alleen met een apparaat
+  met meer dan twee uitgangen is de indeling links, rechts en sub echt te gebruiken; bij twee uitgangen is er geen plek voor een
+  aparte sub. Niet getest op macOS en Linux.
+
 ### Basmanagement, eerste stap: het rekenhart (F6)
 - Nieuw in `vpo-audio` (`basmanagement.rs`): de lage tonen van de hoofdkanalen naar één subwooferkanaal. De hoofdkanalen
   krijgen een hoogdoorlaat, de sub de laagdoorlaat van de som van de hoofdkanalen; beide zijn vierde-orde Linkwitz-Riley

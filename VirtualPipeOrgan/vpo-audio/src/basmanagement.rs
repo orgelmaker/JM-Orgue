@@ -109,6 +109,7 @@ pub struct BasInstelling {
     /// Niveau van de sub ten opzichte van de hoofdkanalen in dB.
     pub sub_niveau_db: f32,
     /// Welke kanalen hoofdluidsprekers zijn; kanalen daarbuiten (behalve de sub) blijven ongemoeid.
+    /// Een lege lijst betekent: alle kanalen behalve de sub.
     pub hoofdkanalen: Vec<usize>,
 }
 
@@ -147,7 +148,11 @@ impl BasManagement {
     /// (sub buiten het apparaat, geen hoofdkanaal, sub ook als hoofdkanaal genoemd) zet de
     /// optie uit. De kruisfrequentie wordt begrensd op [`KRUIS_MIN_HZ`]…[`KRUIS_MAX_HZ`].
     pub fn stel_in(&mut self, i: &BasInstelling, kanalen: usize) {
-        let hoofd: Vec<usize> = i.hoofdkanalen.iter().copied().filter(|c| *c < kanalen && *c != i.sub_kanaal).collect();
+        let hoofd: Vec<usize> = if i.hoofdkanalen.is_empty() {
+            (0..kanalen).filter(|c| *c != i.sub_kanaal).collect()
+        } else {
+            i.hoofdkanalen.iter().copied().filter(|c| *c < kanalen && *c != i.sub_kanaal).collect()
+        };
         self.aan = i.aan && i.sub_kanaal < kanalen && !hoofd.is_empty();
         if !self.aan {
             self.rollen.clear();
@@ -359,6 +364,29 @@ mod tests {
             }
             assert!(frame.iter().all(|x| x.is_finite()), "niet eindig bij fc {fc}");
         }
+    }
+
+    #[test]
+    fn een_lege_lijst_hoofdkanalen_betekent_alle_kanalen_behalve_de_sub() {
+        let mut b = BasManagement::nieuw(SR);
+        b.stel_in(&BasInstelling { aan: true, sub_kanaal: 2, hoofdkanalen: Vec::new(), ..BasInstelling::default() }, 4);
+        assert!(!b.is_identiteit());
+        // Kanaal 3 is dan ook een hoofdkanaal: een laag signaal erop wordt weggehaald.
+        let n = (SR as f64 * 1.0) as usize;
+        let mut piek = 0.0f32;
+        for i in 0..n {
+            let x = (2.0 * PI * 30.0 * i as f64 / SR as f64).sin() as f32;
+            let mut frame = [0.0, 0.0, 0.0, x];
+            b.verwerk_frame(&mut frame);
+            if i > n / 2 {
+                piek = piek.max(frame[3].abs());
+            }
+        }
+        assert!(piek < 0.15, "kanaal 3 hoort het laag niet meer te houden: {piek}");
+        // Met alleen een sub (en verder niets) blijft er geen hoofdkanaal over: uit.
+        let mut een = BasManagement::nieuw(SR);
+        een.stel_in(&BasInstelling { aan: true, sub_kanaal: 0, hoofdkanalen: Vec::new(), ..BasInstelling::default() }, 1);
+        assert!(een.is_identiteit());
     }
 
     #[test]

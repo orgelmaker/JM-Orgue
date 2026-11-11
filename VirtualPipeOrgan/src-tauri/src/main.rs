@@ -385,6 +385,8 @@ fn main() {
             commands::get_continuous_keyboard,
             commands::set_stereo_samples,
             commands::get_zwelkast_voorstel,
+            commands::get_basmanagement,
+            commands::set_basmanagement,
             commands::get_staart_drempel,
             commands::set_staart_drempel,
             commands::get_orgel_vlaggen,

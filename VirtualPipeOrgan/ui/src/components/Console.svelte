@@ -2078,6 +2078,19 @@
       vlaggenHerladen = true;
     } catch (e) { console.error('Vlag zetten mislukt:', e); }
   }
+  // Basmanagement (F6): het laag van de hoofdkanalen naar een subwoofer. Hoort bij de
+  // uitgang (algemeen, niet per orgel). De hoofdkanalen zijn alle uitgangen behalve de sub.
+  let bas = { aan: false, kruis_hz: 80, sub_uitgang: 3, sub_niveau_db: 0, kruis_min_hz: 30, kruis_max_hz: 250 };
+  invoke('get_basmanagement').then(v => { bas = v; }).catch(() => {});
+  async function zetBas(wijziging) {
+    const n = { ...bas, ...wijziging };
+    try {
+      bas = await invoke('set_basmanagement', {
+        aan: !!n.aan, kruisHz: Number(n.kruis_hz), subUitgang: Math.round(Number(n.sub_uitgang)), subNiveauDb: Number(n.sub_niveau_db),
+      });
+    } catch (e) { console.error('Basmanagement zetten mislukt:', e); }
+  }
+  $: basKanalen = Math.max(2, Number(audioStatus?.channels || audioChannelCount || 2));
   // Zwelkast van de set (E5): wat de set per divisie opgeeft, vertaald naar onze
   // instelling (diepte = demping bij dicht, kantelpunt = midden van het filterbereik).
   // Het vinkje past die waarden toe op divisies waarvoor je zelf niets instelde; eigen
@@ -8510,6 +8523,36 @@
                 <p style="margin: 0.2rem 0 0; font-size: 0.68rem; color: var(--text-muted); line-height: 1.35;">
                   {$t('settings.geheugen_status').replace('{vrij}', geheugen.beschikbaar_mb).replace('{totaal}', geheugen.totaal_mb).replace('{plafond}', geheugen.plafond_mb).replace('{ingesteld}', geheugen.plafond_instelling_mb)}
                 </p>
+              {/if}
+
+              <!-- Basmanagement (F6) -->
+              <label class="swell-toggle" style="margin-top: 0.7rem; display: flex; align-items: center; gap: 0.4rem;" title={$t('settings.bas_hint')}>
+                <input type="checkbox" checked={bas.aan} on:change={(e) => zetBas({ aan: e.target.checked })} />
+                <span>{$t('settings.bas_aan')}</span>
+              </label>
+              <p class="settings-hint" style="margin: 0.2rem 0 0;">{$t('settings.bas_hint')}</p>
+              {#if bas.aan}
+                <div class="audio-select-row" style="margin-top: 0.4rem;">
+                  <label class="audio-select-label" for="bas-sub">{$t('settings.bas_sub')}</label>
+                  <select id="bas-sub" class="temperament-select" on:change={(e) => zetBas({ sub_uitgang: Number(e.target.value) })}>
+                    {#each Array.from({ length: basKanalen }, (_, i) => i + 1) as n}
+                      <option value={n} selected={bas.sub_uitgang === n}>{n}</option>
+                    {/each}
+                  </select>
+                </div>
+                <div class="audio-select-row" style="margin-top: 0.4rem;">
+                  <label class="audio-select-label" for="bas-kruis">{$t('settings.bas_kruis')}</label>
+                  <input id="bas-kruis" type="number" min={bas.kruis_min_hz} max={bas.kruis_max_hz} step="5" style="flex: 0 0 5rem; width: 5rem;"
+                    value={Math.round(bas.kruis_hz)} on:change={(e) => zetBas({ kruis_hz: Number(e.target.value) })} />
+                </div>
+                <div class="audio-select-row" style="margin-top: 0.4rem;">
+                  <label class="audio-select-label" for="bas-niveau">{$t('settings.bas_niveau')}</label>
+                  <input id="bas-niveau" type="number" min="-24" max="12" step="1" style="flex: 0 0 5rem; width: 5rem;"
+                    value={Math.round(bas.sub_niveau_db)} on:change={(e) => zetBas({ sub_niveau_db: Number(e.target.value) })} />
+                </div>
+                {#if bas.sub_uitgang > basKanalen}
+                  <p style="margin: 0.2rem 0 0; font-size: 0.68rem; color: var(--warning, #d9a441); line-height: 1.35;">{$t('settings.bas_ongeldig')}</p>
+                {/if}
               {/if}
 
               <!-- Stereo-samples -->
