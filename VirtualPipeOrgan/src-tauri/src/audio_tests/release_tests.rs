@@ -245,3 +245,101 @@ fn upgrade_to_full_herberekent_de_resterende_decay() {
     assert!((rel.envelope_speed - verwacht).abs() < verwacht * 0.05,
             "fadesnelheid niet hersteld: {} (verwacht ~{})", rel.envelope_speed, verwacht);
 }
+
+// ---------------------------------------------------------------------------
+// Stemroof bij een volle kap (D7): de volgorde van `pick_victim` vastgelegd.
+// ---------------------------------------------------------------------------
+
+/// Klinkende of uitklinkende (losgelaten) pijp, geen staart.
+fn pijp_voor_stemroof(pipe: u32, age_samples: u64, releasing: bool, envelope: f32) -> PlayingVoice {
+    let mut v = PlayingVoice::new_from_sample(vlakke_sample(48_000), 1, pipe, 60, 1.0);
+    v.age_samples = age_samples;
+    v.releasing = releasing;
+    v.envelope = envelope;
+    v.target_envelope = if releasing { 0.0 } else { 1.0 };
+    v
+}
+
+/// Staart (one-shot) in een gekozen toestand.
+fn staart_voor_stemroof(pipe: u32, age_samples: u64, releasing: bool, envelope: f32) -> PlayingVoice {
+    let mut v = staart(age_samples);
+    v.pipe_num = pipe | RELEASE_PIPE_FLAG;
+    v.releasing = releasing;
+    v.envelope = envelope;
+    v.target_envelope = if releasing { 0.0 } else { 1.0 };
+    v
+}
+
+/// De slachtoffers komen in oplopende hoorbaarheid: (a) uitfadende staarten,
+/// stilste eerst; (b) overige staarten, oudste eerst; (c) uitklinkende pijpen,
+/// stilste eerst; (d) klinkende pijpen, oudste eerst. Door telkens het
+/// slachtoffer te verwijderen en opnieuw te kiezen volgt de hele rij.
+#[test]
+fn stemroof_volgorde_staarten_dan_uitklinkende_pijpen_dan_oudste_klinkende() {
+    let oud = 96_000u64;
+    let mut voices = vec![
+        pijp_voor_stemroof(1, oud * 3, false, 1.0),            // d: oudste klinkende
+        pijp_voor_stemroof(2, oud, false, 1.0),                // d: jongere klinkende
+        pijp_voor_stemroof(3, oud * 2, true, 0.50),            // c: uitklinkend, luider
+        pijp_voor_stemroof(4, oud * 2, true, 0.20),            // c: uitklinkend, stiller
+        staart_voor_stemroof(5, oud, false, 1.0),              // b: staart, jonger
+        staart_voor_stemroof(6, oud * 2, false, 1.0),          // b: staart, ouder
+        staart_voor_stemroof(7, oud, true, 0.60),              // a: uitfadend, luider
+        staart_voor_stemroof(8, oud, true, 0.05),              // a: uitfadend, stilste
+    ];
+    let min_age = 48_000u64 / 50;
+    let verwacht = [
+        (8u32 | RELEASE_PIPE_FLAG), (7 | RELEASE_PIPE_FLAG),   // a
+        (6 | RELEASE_PIPE_FLAG), (5 | RELEASE_PIPE_FLAG),      // b
+        4, 3,                                                  // c
+        1, 2,                                                  // d
+    ];
+    for (stap, want) in verwacht.iter().enumerate() {
+        let i = pick_victim(&voices, min_age).expect("er is nog een slachtoffer");
+        assert_eq!(voices[i].pipe_num, *want, "stap {stap}: verkeerd slachtoffer");
+        voices.swap_remove(i);
+    }
+    assert!(pick_victim(&voices, min_age).is_none());
+}
+
+/// Een net gestarte stem (< 20 ms) is nooit slachtoffer, ook niet als hij een
+/// staart is die verder vooraan in de volgorde staat. Zijn álle stemmen zo
+/// jong, dan kiest de aanroeper (`push_voice_capped`) met leeftijd 0 alsnog,
+/// omdat de kap hard blijft.
+#[test]
+fn stemroof_spaart_net_gestarte_stemmen_tenzij_alles_jong_is() {
+    let min_age = 48_000u64 / 50; // 960 samples = 20 ms
+    let voices = vec![
+        staart_voor_stemroof(1, min_age - 1, false, 1.0),  // verse staart: klasse b maar te jong
+        pijp_voor_stemroof(2, 48_000, false, 1.0),         // oude klinkende pijp: klasse d
+    ];
+    let i = pick_victim(&voices, min_age).unwrap();
+    assert_eq!(voices[i].pipe_num, 2, "de verse staart mocht niet gekozen worden");
+
+    let alleen_jong = vec![
+        pijp_voor_stemroof(3, 10, false, 1.0),
+        pijp_voor_stemroof(4, 500, false, 1.0),
+    ];
+    assert!(pick_victim(&alleen_jong, min_age).is_none(), "met de jongerengrens is niemand te stelen");
+    let i = pick_victim(&alleen_jong, 0).unwrap();
+    assert_eq!(alleen_jong[i].pipe_num, 4, "zonder grens de oudste");
+}
+
+/// Bij een volle kap krijgt een hoorbaar slachtoffer een korte fade (20 ms voor
+/// een pijp, 30 ms voor een staart) in plaats van een harde knip, en de nieuwe
+/// stem komt er gewoon bij.
+#[test]
+fn stemroof_bij_volle_kap_fadet_het_slachtoffer_en_voegt_de_nieuwe_toe() {
+    let cap = MIN_LIVE_VOICES;
+    let mut voices: Vec<PlayingVoice> = (0..cap)
+        .map(|i| pijp_voor_stemroof(10 + i as u32, 48_000 + i as u64, false, 1.0))
+        .collect();
+    let (tx, _rx) = bounded::<GcItem>(8);
+    let mut gc = GcSink::new(tx);
+    let nieuw = pijp_voor_stemroof(9_999, 0, false, 0.0);
+    push_voice_capped(&mut voices, nieuw, 48_000, cap, &mut gc);
+    assert_eq!(voices.len(), cap + 1, "de nieuwe stem hoort erbij te komen");
+    let fadend: Vec<u32> = voices.iter().filter(|v| v.releasing).map(|v| v.pipe_num).collect();
+    assert_eq!(fadend, vec![10 + (cap as u32 - 1)], "alleen de oudste klinkende pijp fadet weg");
+    assert!(voices.iter().any(|v| v.pipe_num == 9_999 && !v.releasing), "de nieuwe stem mag niet zelf weg");
+}

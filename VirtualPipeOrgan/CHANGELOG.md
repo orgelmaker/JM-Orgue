@@ -6,6 +6,31 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### Stemroof bij een volle kap nagelopen en vastgelegd (D7, eerste deel)
+- De volgorde waarin stemmen wijken als de polyfonie-kap bereikt is, is nagelopen
+  en komt overeen met wat bedoeld is: eerst uitfadende release-staarten (stilste
+  eerst), dan overige staarten (oudste eerst), dan losgelaten pijpen (stilste
+  eerst), en pas daarna de oudste klinkende pijp. Een stem van minder dan 20 ms
+  oud wordt overgeslagen; zijn alle stemmen zo jong, dan kiest de kap alsnog (die
+  blijft hard). Een hoorbaar slachtoffer krijgt een fade van 20 ms (pijp) of
+  30 ms (staart) in plaats van een harde knip.
+- Nieuw: drie tests die die volgorde vastleggen (`stemroof_…` in
+  `audio_tests/release_tests.rs`), met een negatieve controle (twee klassen
+  verwisseld laat de test falen). Tot nu toe was `pick_victim` niet rechtstreeks
+  getest. **Geen codewijziging, de klank is ongewijzigd.**
+- Bewust niet veranderd, met reden: bij de klinkende pijpen telt alleen de
+  leeftijd. "Oudste én zachtste" zou een hoorbaarheidsmaat per stem vragen, en die
+  bestaat niet: de omhulling van een aangehouden pijp is altijd 1,0 en het niveau
+  van de sample is niet per stem bekend. Of het nodig is hangt af van hoe vaak
+  klinkende pijpen bij de kap (standaard 1024) echt wegvallen; dat is niet
+  gemeten. Een teller voor gestolen klinkende pijpen in een volle tutti zou dat
+  antwoord geven. De staartafkap (tweede deel van D7) maakt stemmen vrij vóórdat
+  het zover komt.
+- Waargenomen en zo bedoeld: bij meer dan 64 nieuwe stemmen boven de kap in één
+  callback wordt het slachtoffer direct weggehaald in plaats van uitgefaded (de
+  noodgrens). De commandoafvoer begrenst het aantal nieuwe stemmen per callback
+  (`drain_mag_door`), dus dat gebeurt alleen bij een extreme akkoordaanslag.
+
 ### Testmodules uit de grote bronbestanden (B8)
 - De 34 testmodules uit `audio.rs` (12), `commands.rs` (12) en `state.rs` (10) staan nu
   elk in een eigen bestand in `src-tauri/src/audio_tests/`, `commands_tests/` en
