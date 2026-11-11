@@ -422,6 +422,7 @@ fn main() {
             commands::get_sample_opslag,
             commands::set_sample_opslag,
             commands::get_schijfcache,
+            commands::get_startbuffer_advies,
             commands::set_schijfcache,
             commands::schijfcache_legen,
             commands::get_register_geheugen,

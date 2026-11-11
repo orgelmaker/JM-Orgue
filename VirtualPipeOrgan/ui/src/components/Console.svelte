@@ -2195,6 +2195,14 @@
   async function haalPreloadGeheugen() {
     try { preloadGeheugen = await invoke('get_preload_geheugen', { keuzes: PRELOAD_KEUZES }); } catch (e) { preloadGeheugen = []; }
   }
+  // Advies voor de startbuffer uit de gemeten laadtijden (C2 fase 3); elke 15 s bijgewerkt, alleen een voorstel.
+  let startbufferAdvies = null;
+  async function haalStartbufferAdvies() {
+    try { startbufferAdvies = await invoke('get_startbuffer_advies', { keuzes: PRELOAD_KEUZES }); } catch (e) { startbufferAdvies = null; }
+  }
+  haalStartbufferAdvies();
+  setInterval(haalStartbufferAdvies, 15000);
+  const msTekst = (ms) => ms >= 1000 ? (ms / 1000) + ' s' : ms + ' ms';
   function formatGeheugen(bytes) {
     if (!bytes) return '';
     const gb = bytes / 1e9;
@@ -8709,6 +8717,15 @@
               <p class="settings-hint" style="margin: 0.2rem 0 0;">{$t('settings.preload_ms_hint')}</p>
               {#if preloadGeheugen.length}
                 <p class="settings-hint" style="margin: 0.2rem 0 0;">{$t('settings.preload_ms_geheugen')}</p>
+              {/if}
+              {#if startbufferAdvies}
+                <p class="settings-hint" style="margin: 0.2rem 0 0;">
+                  {$t('settings.preload_advies').replace('{advies}', msTekst(startbufferAdvies.advies_ms)).replace('{p98}', startbufferAdvies.p98_ms >= 3000 ? '> 1,5 s' : startbufferAdvies.p98_ms + ' ms').replace('{n}', startbufferAdvies.opnamen)}
+                  {#if startbufferAdvies.tekorten > 0}{' '}{$t('settings.preload_advies_tekort').replace('{n}', startbufferAdvies.tekorten)}{/if}
+                  {#if startbufferAdvies.advies_ms !== preloadMs}
+                    <button class="midi-learn-btn" style="margin-left: 0.3rem;" on:click={() => setPreloadMs(startbufferAdvies.advies_ms)}>{$t('settings.preload_advies_neem')}</button>
+                  {/if}
+                </p>
               {/if}
 
               <!-- Samples in het geheugen (C2) -->

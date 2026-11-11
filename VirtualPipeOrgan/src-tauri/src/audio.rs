@@ -137,6 +137,8 @@ pub struct LoaderStats {
     /// Volledige opnamen gelezen uit, en geschreven naar, de schijfcache (C2 fase 2).
     pub schijfcache_treffers: u64,
     pub schijfcache_geschreven: u64,
+    /// Advies voor de startbuffer met de keuzes uit Instellingen (C2 fase 3).
+    pub startbuffer_advies: Option<StartbufferAdvies>,
 }
 
 pub fn loader_stats() -> LoaderStats {
@@ -159,6 +161,7 @@ pub fn loader_stats() -> LoaderStats {
         staart_afgekapt_frames: STAART_AFGEKAPT_FRAMES.load(Ordering::Relaxed),
         schijfcache_treffers: vpo_sampler::schijfcache::TREFFERS.load(Ordering::Relaxed),
         schijfcache_geschreven: vpo_sampler::schijfcache::GESCHREVEN.load(Ordering::Relaxed),
+        startbuffer_advies: startbuffer_advies(&[200, 300, 500, 1000, 2000]),
     }
 }
 
@@ -255,6 +258,98 @@ fn noteer_laadlatentie(requested_at: std::time::Instant) {
     LOAD_DONE.fetch_add(1, Ordering::Relaxed);
     LOAD_LATENCY_SUM_US.fetch_add(us, Ordering::Relaxed);
     LOAD_LATENCY_MAX_US.fetch_max(us, Ordering::Relaxed);
+    let emmer = LAADTIJD_GRENZEN_MS.iter().position(|&g| us <= g * 1000).unwrap_or(LAADTIJD_GRENZEN_MS.len());
+    LAADTIJD_EMMERS[emmer].fetch_add(1, Ordering::Relaxed);
+}
+
+/// Verdeling van de tijd tussen het aanvragen en het binnenkomen van een volledige opname (C2 fase 3), in emmers met
+/// deze bovengrenzen in ms; de laatste emmer is "langer". Dat is precies de tijd die de startbuffer moet overbruggen:
+/// schijf, decoderen en de wachtrij samen, gemeten op deze pc met dit orgel.
+const LAADTIJD_GRENZEN_MS: [u64; 8] = [25, 50, 100, 150, 250, 400, 700, 1500];
+static LAADTIJD_EMMERS: [AtomicU64; 9] = [const { AtomicU64::new(0) }; 9];
+
+/// Advies voor de startbuffer (C2 fase 3). Alleen een voorstel; de keuze blijft bij de gebruiker.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize)]
+pub struct StartbufferAdvies {
+    /// Voorgestelde startbuffer in ms (een van de keuzes).
+    pub advies_ms: u32,
+    /// 98% van de volledige opnamen was binnen deze tijd geladen (bovengrens van de emmer).
+    pub p98_ms: u32,
+    /// Aantal gemeten opnamen.
+    pub opnamen: u64,
+    /// Hoe vaak een startbuffer op was voordat de volledige opname er was.
+    pub tekorten: u64,
+}
+
+/// Minimaal aantal gemeten opnamen voor een advies.
+const ADVIES_MIN_OPNAMEN: u64 = 200;
+
+/// Het advies uit een verdeling: de kleinste keuze van minstens twee keer de tijd waarbinnen 98% van de opnamen
+/// binnen was (marge voor drukke momenten). Waren er tekorten, dan minstens één stap boven de huidige stand.
+pub(crate) fn advies_uit(emmers: &[u64; 9], tekorten: u64, huidig_ms: u32, keuzes: &[u32]) -> Option<StartbufferAdvies> {
+    let opnamen: u64 = emmers.iter().sum();
+    if opnamen < ADVIES_MIN_OPNAMEN || keuzes.is_empty() {
+        return None;
+    }
+    let mut keuzes = keuzes.to_vec();
+    keuzes.sort_unstable();
+    let drempel = opnamen.saturating_mul(98).div_ceil(100);
+    let mut som = 0;
+    let mut p98_ms = 3000u32;
+    for (i, &n) in emmers.iter().enumerate() {
+        som += n;
+        if som >= drempel {
+            p98_ms = LAADTIJD_GRENZEN_MS.get(i).map_or(3000, |&g| g as u32);
+            break;
+        }
+    }
+    let mut advies = *keuzes.iter().find(|&&k| k >= 2 * p98_ms).unwrap_or(keuzes.last().unwrap());
+    if tekorten > 0 {
+        if let Some(&hoger) = keuzes.iter().find(|&&k| k > huidig_ms) {
+            advies = advies.max(hoger);
+        }
+    }
+    Some(StartbufferAdvies { advies_ms: advies, p98_ms, opnamen, tekorten })
+}
+
+/// Advies op basis van wat deze sessie gemeten heeft (zie [`advies_uit`]).
+pub fn startbuffer_advies(keuzes: &[u32]) -> Option<StartbufferAdvies> {
+    let emmers: [u64; 9] = std::array::from_fn(|i| LAADTIJD_EMMERS[i].load(Ordering::Relaxed));
+    advies_uit(&emmers, PRELOAD_UNDERRUNS.load(Ordering::Relaxed), preload_ms(), keuzes)
+}
+
+#[cfg(test)]
+mod startbuffer_advies_tests {
+    use super::advies_uit;
+    const KEUZES: [u32; 5] = [200, 300, 500, 1000, 2000];
+
+    #[test]
+    fn te_weinig_metingen_geeft_geen_advies() {
+        assert_eq!(advies_uit(&[100, 0, 0, 0, 0, 0, 0, 0, 0], 0, 2000, &KEUZES), None);
+    }
+
+    #[test]
+    fn snelle_schijf_krijgt_de_kleinste_buffer() {
+        // Alles binnen 50 ms: 2 x 50 = 100 -> 200 ms.
+        let a = advies_uit(&[900, 100, 0, 0, 0, 0, 0, 0, 0], 0, 2000, &KEUZES).unwrap();
+        assert_eq!((a.advies_ms, a.p98_ms, a.opnamen), (200, 50, 1000));
+    }
+
+    #[test]
+    fn trage_schijf_krijgt_een_langere_buffer() {
+        // 98% binnen 250 ms: 2 x 250 = 500 ms.
+        let a = advies_uit(&[100, 200, 300, 200, 185, 15, 0, 0, 0], 0, 200, &KEUZES).unwrap();
+        assert_eq!((a.advies_ms, a.p98_ms), (500, 250));
+        // Meer dan 2% boven 1500 ms: het maximum.
+        let a = advies_uit(&[500, 0, 0, 0, 0, 0, 0, 0, 30], 0, 200, &KEUZES).unwrap();
+        assert_eq!((a.advies_ms, a.p98_ms), (2000, 3000));
+    }
+
+    #[test]
+    fn tekorten_geven_minstens_een_stap_hoger() {
+        let a = advies_uit(&[1000, 0, 0, 0, 0, 0, 0, 0, 0], 3, 300, &KEUZES).unwrap();
+        assert_eq!(a.advies_ms, 500);
+    }
 }
 
 /// Bit-vlag op `pipe_num` die een key markeert als RELEASE-sample van die pijp

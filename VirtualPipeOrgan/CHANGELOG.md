@@ -6,6 +6,13 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### Advies voor de startbuffer (C2, fase 3)
+- Het programma houdt bij hoe lang het duurt voordat een volledige opname binnen is nadat een toets is aangeslagen (schijf, decoderen
+  en wachtrij samen). Dat is precies de tijd die de startbuffer moet overbruggen. Na genoeg metingen (200 opnamen) staat onder de
+  startbuffer in Instellingen → Audio uitvoer een advies: de kleinste keuze van minstens twee keer de tijd waarbinnen 98% van de
+  opnamen binnen was, en een stap hoger als een startbuffer ooit op was. Met de knop **Overnemen** neem je het advies over; er wordt
+  niets vanzelf veranderd. Gemeten op een snelle pc met een grote HW-set: 98% binnen 150 ms, advies 300 ms (standaard staat 2 s).
+
 ### Schijfcache van gedecodeerde samples (C2, fase 2)
 - Opnamen die duur zijn om te maken (WavPack uitpakken, of omrekenen naar de samplerate van de uitgang, zoals bij 44,1 kHz-sets op een
   48 kHz-uitgang) worden na de eerste keer op schijf bewaard en daarna veel sneller geladen: gemeten gemiddeld ~9 ms in plaats van

@@ -699,6 +699,13 @@ pub fn set_sample_opslag(state: State<AppState>, opslag: u8) -> u8 {
 /// Geheugen (bytes) dat het geladen orgel voor het begin van de opnamen vraagt bij elk van de gegeven
 /// startbuffers in ms (F2), met dezelfde telling als het laden en de geheugenwaarschuwing. Leeg als er
 /// geen schatting is (nog geen orgel geladen, of een samplemap).
+/// Advies voor de startbuffer uit de gemeten laadtijden van volledige opnamen (C2 fase 3); None zolang er te weinig
+/// gemeten is.
+#[tauri::command]
+pub fn get_startbuffer_advies(keuzes: Vec<u32>) -> Option<crate::audio::StartbufferAdvies> {
+    crate::audio::startbuffer_advies(&keuzes)
+}
+
 #[tauri::command]
 pub fn get_preload_geheugen(keuzes: Vec<u32>) -> Vec<u64> {
     preload_geheugen_voor(&keuzes, crate::geheugen::laatste_buffers())
