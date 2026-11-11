@@ -4,9 +4,10 @@
 //!
 //! De app laadt elke unieke (bestand, segment) één keer en deelt de buffer over alle
 //! pijp-sleutels (zie `commands.rs`, "GrandOrgue-stops delen vaak één rank"). De
-//! schatting vooraf (`preload_buffers_per_label`) telt daarentegen per pijp: een
-//! `Reference` telt als 1 buffer, ook al deelt zij het bestand van de pijp waarnaar
-//! ze verwijst. Dit programma zet beide naast elkaar.
+//! schatting vooraf (`preload_buffers_per_label`) telde vroeger per pijp en telt sinds
+//! F2 de unieke (bestand, segment)-paren, zoals de laadroute. Dit programma zet de OUDE
+//! telling per pijp naast de unieke paren, zodat te zien is hoeveel de schatting is
+//! gezakt (de kolom "te hoog geschat" is de factor waarmee de oude schatting te hoog lag).
 //!
 //! Gebruik:
 //!
@@ -96,7 +97,7 @@ fn main() {
         std::process::exit(2);
     }
     let mut rapport = String::new();
-    let _ = writeln!(rapport, "| definitie | telling in de app (buffers) | waarvan Reference | unieke bestanden | unieke (bestand, segment) | te hoog geschat |");
+    let _ = writeln!(rapport, "| definitie | oude telling per pijp (buffers) | waarvan Reference | unieke bestanden | unieke (bestand, segment) | te hoog geschat |");
     let _ = writeln!(rapport, "|---|---:|---:|---:|---:|---:|");
     for p in &paden {
         let naam = p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();

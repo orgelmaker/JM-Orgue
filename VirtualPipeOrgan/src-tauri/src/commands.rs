@@ -817,26 +817,52 @@ fn preload_bytes_per_buffer() -> u64 {
 /// die worden altijd geladen en horen bij geen enkele positie.
 const GEEN_PERSPECTIEF: &str = "";
 
-/// Aantal preload-buffers per perspectief-label: per pijp 1 (attack) +
-/// releases + tremulantlaag (+ diens releases). Zelfde telling als de
-/// laadroute, zodat de RAM-schatting klopt met wat er straks in het geheugen
-/// komt. Lagen zonder label staan onder `GEEN_PERSPECTIEF`.
-fn preload_buffers_per_label(definition: &OrganDefinition) -> HashMap<String, usize> {
+/// Sleutel van één voorgeladen buffer: (bestand, cue-punt, is release). Dezelfde sleutel als
+/// de laadroute gebruikt ("GrandOrgue-stops delen vaak één rank"): wat dezelfde sleutel heeft,
+/// wordt één keer geladen en gedeeld.
+type BufferSleutel = (std::path::PathBuf, Option<u32>, bool);
+
+/// Voeg de buffers van één pijp toe aan de unieke sleutels van een label (F2). Een `Reference`
+/// kan niet worden opgelost zonder de pijp waarnaar ze verwijst; die telt als één buffer extra
+/// (voorzichtig: nooit te weinig).
+fn voeg_pijp_buffers_toe(p: &vpo_sampler::PipeDef, unieke: &mut std::collections::HashSet<BufferSleutel>, referenties: &mut usize) {
     use vpo_sampler::PipeDef;
-    let mut uit: HashMap<String, usize> = HashMap::new();
+    match p {
+        PipeDef::Sample { path, extra } => {
+            unieke.insert((path.clone(), None, false));
+            for r in &extra.releases {
+                unieke.insert((r.path.clone(), r.cue_point, true));
+            }
+            if let Some(t) = &extra.tremulant_attack {
+                unieke.insert((t.path.clone(), None, false));
+                for r in &extra.tremulant_releases {
+                    unieke.insert((r.path.clone(), r.cue_point, true));
+                }
+            }
+        }
+        PipeDef::Reference { .. } => *referenties += 1,
+        PipeDef::Empty => {}
+    }
+}
+
+/// Aantal preload-buffers per perspectief-label: de UNIEKE (bestand, segment)-paren van de
+/// attacks, releases en tremulantlaag. De laadroute laadt elk uniek paar één keer en deelt de
+/// buffer over alle pijpen die het gebruiken; de schatting telt dus ook zo. Vroeger telde ze per
+/// pijp en schatte ze sets waarin pijpen of registers bestanden delen te hoog (tot ×2,4 en ×3,4).
+/// Lagen zonder label staan onder `GEEN_PERSPECTIEF`.
+fn preload_buffers_per_label(definition: &OrganDefinition) -> HashMap<String, usize> {
+    use std::collections::HashSet;
+    let mut per_label: HashMap<String, (HashSet<BufferSleutel>, usize)> = HashMap::new();
     for s in definition.stops.iter().filter(|s| !s.is_noise_or_mechanical()) {
         for (_idx, persp, pipes) in s.all_layers() {
             let label = persp.map(|l| l.to_string()).unwrap_or_else(|| GEEN_PERSPECTIEF.to_string());
-            let n: usize = pipes.iter().map(|p| match p {
-                PipeDef::Sample { extra, .. } => 1 + extra.releases.len()
-                    + extra.tremulant_attack.as_ref().map_or(0, |_| 1 + extra.tremulant_releases.len()),
-                PipeDef::Reference { .. } => 1,
-                PipeDef::Empty => 0,
-            }).sum();
-            *uit.entry(label).or_insert(0) += n;
+            let (unieke, referenties) = per_label.entry(label).or_default();
+            for p in pipes {
+                voeg_pijp_buffers_toe(p, unieke, referenties);
+            }
         }
     }
-    uit
+    per_label.into_iter().map(|(label, (unieke, referenties))| (label, unieke.len() + referenties)).collect()
 }
 
 /// Schatting van wat alle ingeschakelde posities in dit plan aan preload-RAM

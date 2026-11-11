@@ -6,6 +6,17 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### Geheugenschatting vooraf telt unieke bestanden (F2)
+- De schatting van het geheugen dat het begin van de opnamen vraagt (`preload_buffers_per_label`) telde per pijp: een attack, de releases en
+  de tremulantlaag, ook als pijpen of registers hetzelfde bestand delen. De laadroute laadt elk uniek (bestand, segment) maar één keer. De
+  schatting telt nu ook de unieke paren, met dezelfde sleutel als de laadroute; een verwijzing naar een andere pijp blijft als één buffer
+  tellen (voorzichtig). Daardoor lag de schatting vroeger tot ×2,4 (drie surround-uitvoeringen van één set) en ×3,4 (één andere set)
+  te hoog; in andere sets was het verschil klein of nul.
+- Gevolg: de geheugenrem, de waarschuwing "past niet in het vrije geheugen" en het plafond voor volledig geladen samples (F1) grijpen
+  alleen nog in als het orgel echt zoveel vraagt. Voor een orgel met opgeslagen opnameposities verandert er niets (de rem werkt alleen
+  op een nieuw orgel zonder opgeslagen keuze). Geen klankwijziging en geen wijziging in wat er geladen wordt. Gemeten in de app: een
+  demo-orgel gaat van ~4088 naar ~2784 MB geschat, precies de factor van de telling (×1,47).
+
 ### Bouwwerkstroom: de apt-stap van de Linux-bouw kan niet meer eindeloos hangen
 - In `release-build.yml` hing de stap "Systeempakketten" van de Linux-bouw drie keer achter elkaar tot hij handmatig werd afgebroken
   (normaal een minuut): de Ubuntu-spiegel `azure.archive.ubuntu.com` antwoordde niet meer. Elke poging heeft nu een eigen tijdgrens

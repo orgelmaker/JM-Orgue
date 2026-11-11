@@ -186,3 +186,43 @@ fn mic_posities_sorteren_op_nummer() {
     let namen: Vec<&str> = idx.iter().map(|&i| v[i].name.as_str()).collect();
     assert_eq!(namen, vec!["mic1", "mic2", "mic10"]);
 }
+
+/// F2: de schatting telt unieke (bestand, segment)-paren, zoals de laadroute ze één keer laadt;
+/// pijpen die een bestand delen tellen niet dubbel, releases met een ander cue-punt wel.
+#[test]
+fn preload_schatting_telt_unieke_bestanden_en_geen_pijpen() {
+    use std::collections::HashSet;
+    use vpo_sampler::grandorgue::{PipeExtra, ReleaseDef};
+    use vpo_sampler::PipeDef;
+    let release = |pad: &str, cue: Option<u32>| ReleaseDef {
+        path: pad.into(), max_key_press_time_ms: None, cue_point: cue, release_end: None, crossfade_ms: None,
+    };
+    let pijp = |pad: &str, releases: Vec<ReleaseDef>| PipeDef::Sample {
+        path: pad.into(),
+        extra: PipeExtra { releases, ..Default::default() },
+    };
+    let mut unieke = HashSet::new();
+    let mut referenties = 0usize;
+    // Drie pijpen delen hetzelfde attack-bestand en dezelfde release (twee registers op één rank).
+    for _ in 0..3 {
+        voeg_pijp_buffers_toe(&pijp("a.wav", vec![release("r.wav", None)]), &mut unieke, &mut referenties);
+    }
+    assert_eq!(unieke.len(), 2, "attack + release, niet 3 x 2");
+    // Dezelfde release met een ander cue-punt is een ander segment.
+    voeg_pijp_buffers_toe(&pijp("a.wav", vec![release("r.wav", Some(7))]), &mut unieke, &mut referenties);
+    assert_eq!(unieke.len(), 3);
+    // Een tremulantlaag telt mee, ook met gedeelde bestanden maar één keer.
+    let mut trem = pijp("b.wav", vec![]);
+    if let PipeDef::Sample { extra, .. } = &mut trem {
+        extra.tremulant_attack = Some(Default::default());
+        if let Some(t) = &mut extra.tremulant_attack { t.path = "t.wav".into(); }
+        extra.tremulant_releases = vec![release("tr.wav", None)];
+    }
+    voeg_pijp_buffers_toe(&trem, &mut unieke, &mut referenties);
+    voeg_pijp_buffers_toe(&trem, &mut unieke, &mut referenties);
+    assert_eq!(unieke.len(), 3 + 3, "b.wav, t.wav, tr.wav erbij, de tweede keer niets");
+    // Een verwijzing blijft één buffer, een lege pijp niets.
+    voeg_pijp_buffers_toe(&PipeDef::Reference { manual: 1, stop: 1, pipe: 1 }, &mut unieke, &mut referenties);
+    voeg_pijp_buffers_toe(&PipeDef::Empty, &mut unieke, &mut referenties);
+    assert_eq!(referenties, 1);
+}
