@@ -6,6 +6,17 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### Twee telprogramma's voor de planning (C1, F2)
+- `vpo-sampler/examples/loops_tellen.rs`: telt per set hoeveel opnames meer dan één geldige loop hebben,
+  met dezelfde validatie als de engine, op een gelijkmatige steekproef per set (standaard 300 bestanden).
+  Uitkomst: 7,4 % van de gelezen bestanden heeft er meer dan één; in vijf sets (MALPAGA, Utrecht, Rotterdam,
+  Wildervank, Kolonics) is dat 20 à 47 % van alle bestanden, in dertien andere sets nul.
+- `vpo-sampler/examples/buffers_tellen.rs`: zet de geheugenschatting van de app (buffers per pijp) naast het aantal
+  unieke (bestand, segment)-paren. Het laden dedupliceert al correct (één bestand is één buffer), maar de schatting
+  vooraf telt per pijp en is bij sets met gedeelde bestanden te hoog, tot ×2,4 (Kolonics) en ×3,4 (MALPAGA).
+- Alleen meetgereedschap in `examples/`; de app en de klank zijn niet veranderd. De uitkomsten staan in
+  `Optimalisatie Nov 2026\C1-uitkomst.md`, `F2-uitkomst.md`, `C5-uitkomst.md` en `D4-uitkomst.md`.
+
 ### Stille staart van release-opnames afkappen (D7, tweede deel)
 - Een release-opname (de kerkakoestiek na het loslaten van een toets) eindigt vaak in
   een stuk dat zo zacht is dat niemand het hoort, maar dat toch tot het einde van het
