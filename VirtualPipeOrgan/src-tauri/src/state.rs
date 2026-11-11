@@ -1710,6 +1710,9 @@ pub struct AppState {
     pub division_pans: Arc<RwLock<std::collections::HashMap<String, f32>>>,
     /// (min_db, filter_cutoff) per divisie.
     pub division_swell_configs: Arc<RwLock<std::collections::HashMap<String, (f32, f32)>>>,
+    /// Voorstel voor de zwelkast uit de waarden van de set, per divisie (E5). Hoort bij
+    /// het geladen orgel; leeg bij een orgel zonder bruikbare waarden.
+    pub zwelkast_voorstel: Arc<RwLock<Vec<crate::zwelkast_set::ZwelkastVoorstel>>>,
     /// (enabled, rate, amp_depth, pitch_depth) per divisie.
     pub division_tremulants: Arc<RwLock<std::collections::HashMap<String, (bool, f32, f32, f32)>>>,
     /// Wind-groep-config (enabled, reservoir, damping, max_sag) per groep-index (0..31).
@@ -2193,6 +2196,7 @@ impl AppState {
             output_eq_badge: Arc::new(RwLock::new((false, None))),
             division_pans: Arc::new(RwLock::new(std::collections::HashMap::new())),
             division_swell_configs: Arc::new(RwLock::new(std::collections::HashMap::new())),
+            zwelkast_voorstel: Arc::new(RwLock::new(Vec::new())),
             division_tremulants: Arc::new(RwLock::new(std::collections::HashMap::new())),
             wind_group_configs: Arc::new(RwLock::new(std::collections::HashMap::new())),
             feedback: Arc::new(parking_lot::Mutex::new(crate::feedback::FeedbackManager::new())),
@@ -5433,6 +5437,7 @@ impl AppState {
         // Per-divisie DSP-spiegels wissen zodat het nieuwe orgel niets erft van het vorige.
         self.division_pans.write().clear();
         self.division_swell_configs.write().clear();
+        self.zwelkast_voorstel.write().clear();
         self.division_tremulants.write().clear();
         self.wind_group_configs.write().clear();
         // Live tremulantstand (spiegel voor de afstandsbediening) hoort bij het vorige orgel.

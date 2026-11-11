@@ -2069,12 +2069,51 @@
     vlaggenOrgelId = organInfo.id;
     vlaggenHerladen = false;
     haalOrgelVlaggen();
+    haalZwelkastVoorstel();
   }
   async function zetOrgelVlag(naam, aan) {
     try {
       orgelVlaggen = await invoke('set_orgel_vlag', { naam, aan });
       vlaggenHerladen = true;
     } catch (e) { console.error('Vlag zetten mislukt:', e); }
+  }
+  // Zwelkast van de set (E5): wat de set per divisie opgeeft, vertaald naar onze
+  // instelling (diepte = demping bij dicht, kantelpunt = midden van het filterbereik).
+  // Het vinkje past die waarden toe op divisies waarvoor je zelf niets instelde; eigen
+  // waarden winnen altijd. Standaard uit, ook voor een nieuw orgel.
+  let zwelkastVoorstel = [];
+  async function haalZwelkastVoorstel() {
+    try { zwelkastVoorstel = await invoke('get_zwelkast_voorstel'); } catch (e) { zwelkastVoorstel = []; }
+  }
+  // Een divisie "heeft zelf niets ingesteld" als haar waarden nog de vertrouwde
+  // beginwaarden zijn (−20 dB, 800 Hz) of ontbreken.
+  function zwelkastIsStandaard(div) {
+    return (swellMinDb[div] ?? -20) === -20 && (swellFilterCutoff[div] ?? 800) === 800;
+  }
+  async function pasZwelkastVanSetToe() {
+    for (const v of zwelkastVoorstel) {
+      if (!zwelkastIsStandaard(v.division)) continue;
+      swellMinDb[v.division] = v.min_db;
+      swellFilterCutoff[v.division] = v.filter_cutoff;
+      await updateSwellConfig(v.division);
+    }
+    swellMinDb = swellMinDb; swellFilterCutoff = swellFilterCutoff;
+  }
+  async function zetZwelkastVanSet(aan) {
+    await zetOrgelVlag('zwelkast_van_set', aan);
+    if (aan) {
+      await pasZwelkastVanSetToe();
+    } else {
+      // Terug naar de vertrouwde beginwaarden voor divisies die nog precies de waarden van de set hebben.
+      for (const v of zwelkastVoorstel) {
+        if (swellMinDb[v.division] === v.min_db && swellFilterCutoff[v.division] === v.filter_cutoff) {
+          swellMinDb[v.division] = -20;
+          swellFilterCutoff[v.division] = 800;
+          await updateSwellConfig(v.division);
+        }
+      }
+      swellMinDb = swellMinDb; swellFilterCutoff = swellFilterCutoff;
+    }
   }
   // Drempel (dBFS) waaronder de staart van een release-opname wordt afgekapt
   // (D7). Algemeen, niet per orgel; werkt bij het opnieuw laden van het orgel.
@@ -3361,6 +3400,16 @@
         if (pushToBackend) invoke('set_swell_config', { division: sc.division, minDb: sc.min_db, filterCutoff: sc.filter_cutoff }).catch(() => {});
       }
       swellMinDb = swellMinDb; swellFilterCutoff = swellFilterCutoff;
+      // Zwelkast van de set (E5): alleen als dit orgel het aan heeft; divisies met eigen waarden blijven.
+      if (pushToBackend) {
+        try {
+          const vl = await invoke('get_orgel_vlaggen');
+          if (vl && vl.zwelkast_van_set) {
+            zwelkastVoorstel = await invoke('get_zwelkast_voorstel');
+            await pasZwelkastVanSetToe();
+          }
+        } catch (e) { /* geen voorstel: niets te doen */ }
+      }
 
       // Tremulant: alleen de UI-maps herstellen (beschikbaar + parameters). De audio-params
       // worden bij het live activeren toegepast. Daarna vullen de has_tremulant-defaults aan.
@@ -7093,6 +7142,13 @@
                 <input type="checkbox" checked={orgelVlaggen.staart_afkap} on:change={(e) => zetOrgelVlag('staart_afkap', e.target.checked)} />
                 <span class="swell-toggle-label">{$t('settings.staart_afkap')}</span>
               </label>
+              <label class="swell-toggle" style="margin-bottom:0.4rem; opacity: {zwelkastVoorstel.length || orgelVlaggen.zwelkast_van_set ? 1 : 0.5};" title={$t(zwelkastVoorstel.length ? 'settings.zwelkast_van_set_hint' : 'settings.zwelkast_van_set_geen')}>
+                <input type="checkbox" checked={orgelVlaggen.zwelkast_van_set} disabled={!zwelkastVoorstel.length && !orgelVlaggen.zwelkast_van_set} on:change={(e) => zetZwelkastVanSet(e.target.checked)} />
+                <span class="swell-toggle-label">{$t('settings.zwelkast_van_set')}</span>
+              </label>
+              {#if zwelkastVoorstel.length}
+                <p class="settings-hint" style="margin: -0.2rem 0 0.4rem 1.4rem; font-size: 0.68rem;">{$t('settings.zwelkast_van_set_lijst').replace('{lijst}', zwelkastVoorstel.map(v => `${v.division}: ${v.set_demping_db.toFixed(1)} dB, ${Math.round(v.set_kantelpunt_hz)} Hz`).join(' · '))}</p>
+              {/if}
               <label class="swell-toggle" style="margin: 0 0 0.4rem 1.4rem; opacity: {orgelVlaggen.staart_afkap ? 1 : 0.5};" title={$t('settings.staart_drempel_hint')}>
                 <span class="swell-toggle-label">{$t('settings.staart_drempel')}</span>
                 <input type="number" min="-120" max="-60" step="1" style="width: 4.5rem; margin-left: 0.4rem;" value={staartDrempel} disabled={!orgelVlaggen.staart_afkap} on:change={(e) => zetStaartDrempel(e.target.value)} />

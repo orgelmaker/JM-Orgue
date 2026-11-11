@@ -1,4 +1,4 @@
-//! Gedrag van de set, per orgel (E1, D3, F7, D7).
+//! Gedrag van de set, per orgel (E1, D3, F7, D7, E5).
 //!
 //! Vier dingen kunnen de klank of werking van een orgel veranderen: de niveaus
 //! van de maker (E1), de crossfade van de maker bij het loslaten (D3), of
@@ -9,6 +9,9 @@
 //!   (alles uit), zodat niemand na een update iets anders hoort.
 //! - **Een nieuw orgel (nog geen opgeslagen instellingen) krijgt alles
 //!   standaard aan.**
+//! - **Uitzondering: de zwelkast van de set (E5) staat ook voor een nieuw orgel
+//!   standaard uit**, omdat de setwaarden het zwelpedaal minder diep maken dan de
+//!   vertrouwde instelling en dat een keuze met de oren is.
 //! - Per orgel is elke vlag met een vinkje om te zetten; wat de gebruiker koos
 //!   wordt bewaard en wint daarna altijd.
 //!
@@ -20,7 +23,7 @@
 use crate::library::OrganSettings;
 use serde::Serialize;
 
-/// De vier vlaggen voor één orgel.
+/// De vijf vlaggen voor één orgel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct OrgelVlaggen {
     /// Niveau van het orgel en per pijplaag uit de definitie (E1).
@@ -32,6 +35,8 @@ pub struct OrgelVlaggen {
     /// Stille staart van release-samples afkappen (D7). De drempel is een
     /// algemene instelling (standaard −90 dBFS).
     pub staart_afkap: bool,
+    /// De zwelkastwaarden van de set gebruiken als beginwaarde (E5).
+    pub zwelkast_van_set: bool,
 }
 
 impl OrgelVlaggen {
@@ -41,6 +46,7 @@ impl OrgelVlaggen {
         overgangen_van_set: false,
         koppels_volgen_set: false,
         staart_afkap: false,
+        zwelkast_van_set: false,
     };
 
     /// De standaard voor een nieuw orgel: alles aan.
@@ -49,6 +55,8 @@ impl OrgelVlaggen {
         overgangen_van_set: true,
         koppels_volgen_set: true,
         staart_afkap: true,
+        // Uitzondering: ook voor een nieuw orgel uit (E5).
+        zwelkast_van_set: false,
     };
 
     /// De vlaggen voor een orgel dat nu geladen wordt.
@@ -69,6 +77,7 @@ impl OrgelVlaggen {
                 overgangen_van_set: s.overgangen_van_set.unwrap_or(false),
                 koppels_volgen_set: s.koppels_volgen_set.unwrap_or(false),
                 staart_afkap: s.staart_afkap.unwrap_or(false),
+                zwelkast_van_set: s.zwelkast_van_set.unwrap_or(false),
             },
         }
     }
@@ -90,6 +99,7 @@ impl OrgelVlaggen {
             "overgangen_van_set" => v.overgangen_van_set = aan,
             "koppels_volgen_set" => v.koppels_volgen_set = aan,
             "staart_afkap" => v.staart_afkap = aan,
+            "zwelkast_van_set" => v.zwelkast_van_set = aan,
             _ => return None,
         }
         Some(v)
@@ -104,11 +114,11 @@ impl OrgelVlaggen {
         geforceerd: bool,
         huidig: OrgelVlaggen,
         opgeslagen: Option<&OrganSettings>,
-    ) -> (Option<bool>, Option<bool>, Option<bool>, Option<bool>) {
+    ) -> (Option<bool>, Option<bool>, Option<bool>, Option<bool>, Option<bool>) {
         if geforceerd {
             match opgeslagen {
-                Some(s) => (s.niveaus_van_set, s.overgangen_van_set, s.koppels_volgen_set, s.staart_afkap),
-                None => (None, None, None, None),
+                Some(s) => (s.niveaus_van_set, s.overgangen_van_set, s.koppels_volgen_set, s.staart_afkap, s.zwelkast_van_set),
+                None => (None, None, None, None, None),
             }
         } else {
             (
@@ -116,6 +126,7 @@ impl OrgelVlaggen {
                 Some(huidig.overgangen_van_set),
                 Some(huidig.koppels_volgen_set),
                 Some(huidig.staart_afkap),
+                Some(huidig.zwelkast_van_set),
             )
         }
     }
@@ -127,6 +138,7 @@ impl OrgelVlaggen {
         s.overgangen_van_set = Some(self.overgangen_van_set);
         s.koppels_volgen_set = Some(self.koppels_volgen_set);
         s.staart_afkap = Some(self.staart_afkap);
+        s.zwelkast_van_set = Some(self.zwelkast_van_set);
     }
 }
 
@@ -152,6 +164,7 @@ mod tests {
         assert_eq!(OrgelVlaggen::bepaal(None, None), OrgelVlaggen::NIEUW);
         assert!(OrgelVlaggen::NIEUW.niveaus_van_set && OrgelVlaggen::NIEUW.overgangen_van_set && OrgelVlaggen::NIEUW.koppels_volgen_set);
         assert!(OrgelVlaggen::NIEUW.staart_afkap, "ook de staartafkap staat voor een nieuw orgel aan");
+        assert!(!OrgelVlaggen::NIEUW.zwelkast_van_set, "de zwelkast van de set is de uitzondering: ook voor een nieuw orgel uit");
         assert!(!OrgelVlaggen::OUD.staart_afkap, "en voor een bestaand orgel uit");
     }
 
@@ -179,7 +192,7 @@ mod tests {
     #[test]
     fn een_forcering_van_buiten_wint_van_alles() {
         let s = instellingen(Some(true), Some(true), Some(true));
-        let f = OrgelVlaggen { niveaus_van_set: false, overgangen_van_set: true, koppels_volgen_set: false, staart_afkap: true };
+        let f = OrgelVlaggen { niveaus_van_set: false, overgangen_van_set: true, koppels_volgen_set: false, staart_afkap: true, zwelkast_van_set: true };
         assert_eq!(OrgelVlaggen::bepaal(Some(&s), Some(f)), f);
         assert_eq!(OrgelVlaggen::bepaal(None, Some(f)), f);
     }
@@ -200,14 +213,14 @@ mod tests {
     fn geforceerde_vlaggen_worden_nooit_bewaard() {
         let huidig = OrgelVlaggen::NIEUW;
         // Normaal: de huidige stand, expliciet.
-        assert_eq!(OrgelVlaggen::te_bewaren(false, huidig, None), (Some(true), Some(true), Some(true), Some(true)));
+        assert_eq!(OrgelVlaggen::te_bewaren(false, huidig, None), (Some(true), Some(true), Some(true), Some(true), Some(false)));
         // Geforceerd, orgel zonder opgeslagen instellingen: niets vastleggen.
-        assert_eq!(OrgelVlaggen::te_bewaren(true, huidig, None), (None, None, None, None));
+        assert_eq!(OrgelVlaggen::te_bewaren(true, huidig, None), (None, None, None, None, None));
         // Geforceerd, met opgeslagen instellingen: die blijven zoals ze waren.
         let s = instellingen4(Some(false), None, Some(false), Some(false));
-        assert_eq!(OrgelVlaggen::te_bewaren(true, huidig, Some(&s)), (Some(false), None, Some(false), Some(false)));
+        assert_eq!(OrgelVlaggen::te_bewaren(true, huidig, Some(&s)), (Some(false), None, Some(false), Some(false), None));
         // Zonder forcering wint de huidige stand over wat er stond (de gebruiker koos).
-        assert_eq!(OrgelVlaggen::te_bewaren(false, huidig, Some(&s)), (Some(true), Some(true), Some(true), Some(true)));
+        assert_eq!(OrgelVlaggen::te_bewaren(false, huidig, Some(&s)), (Some(true), Some(true), Some(true), Some(true), Some(false)));
     }
 
     #[test]
@@ -217,9 +230,10 @@ mod tests {
         assert!(v.met("overgangen_van_set", true).unwrap().overgangen_van_set);
         assert!(v.met("koppels_volgen_set", true).unwrap().koppels_volgen_set);
         assert!(v.met("staart_afkap", true).unwrap().staart_afkap);
+        assert!(v.met("zwelkast_van_set", true).unwrap().zwelkast_van_set);
         // De andere blijven zoals ze waren.
         let w = v.met("niveaus_van_set", true).unwrap();
-        assert!(!w.overgangen_van_set && !w.koppels_volgen_set && !w.staart_afkap);
+        assert!(!w.overgangen_van_set && !w.koppels_volgen_set && !w.staart_afkap && !w.zwelkast_van_set);
         assert_eq!(v.met("bestaat_niet", true), None);
     }
 
@@ -230,6 +244,21 @@ mod tests {
         assert_eq!(v["overgangen_van_set"], true);
         assert_eq!(v["koppels_volgen_set"], true);
         assert_eq!(v["staart_afkap"], true);
+        assert_eq!(v["zwelkast_van_set"], false, "nieuw orgel: de zwelkast van de set staat uit");
+    }
+
+    /// Het orgel dat al opgeslagen is met de vier eerdere vlaggen heeft de zwelkastvlag niet:
+    /// uit. Een eigen keuze (aan) wint daarna.
+    #[test]
+    fn zwelkast_van_set_staat_uit_tenzij_de_gebruiker_het_aanzette() {
+        let s = instellingen4(Some(true), Some(true), Some(true), Some(true));
+        assert!(!OrgelVlaggen::bepaal(Some(&s), None).zwelkast_van_set);
+        let aan = OrganSettings { zwelkast_van_set: Some(true), ..instellingen4(None, None, None, None) };
+        assert!(OrgelVlaggen::bepaal(Some(&aan), None).zwelkast_van_set);
+        // Een nieuw orgel dat wordt opgeslagen blijft uit.
+        let mut opgeslagen = OrganSettings::default();
+        OrgelVlaggen::bepaal(None, None).schrijf_in(&mut opgeslagen);
+        assert_eq!(opgeslagen.zwelkast_van_set, Some(false));
     }
 
     /// Een orgel dat vóór deze instelling is opgeslagen (de andere drie staan er

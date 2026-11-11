@@ -562,8 +562,15 @@ pub fn get_orgel_vlaggen(state: State<AppState>) -> crate::orgelvlaggen::OrgelVl
     *state.orgel_vlaggen.read()
 }
 
-/// Zet één vlag (`niveaus_van_set`, `overgangen_van_set`, `koppels_volgen_set`
-/// of `staart_afkap`)
+/// Het voorstel voor de zwelkast uit de waarden van de set, per divisie (E5). Leeg als
+/// de set geen bruikbare waarden geeft.
+#[tauri::command]
+pub fn get_zwelkast_voorstel(state: State<AppState>) -> Vec<crate::zwelkast_set::ZwelkastVoorstel> {
+    state.zwelkast_voorstel.read().clone()
+}
+
+/// Zet één vlag (`niveaus_van_set`, `overgangen_van_set`, `koppels_volgen_set`,
+/// `staart_afkap` of `zwelkast_van_set`)
 /// voor het geladen orgel. De importers lezen ze bij het laden, dus de wijziging
 /// werkt na een herlaad. Wordt meteen in de opgeslagen instellingen van het orgel
 /// gezet als die al bestaan; een orgel zonder opgeslagen instellingen bewaart ze
@@ -631,6 +638,31 @@ use crate::library::PerspectiveSaved;
 /// slash-ongevoelig — zelfde orgel, andere pad-notatie, audit 49), anders de
 /// `.jm-settings.json` naast het orgel; die wordt dan in de bibliotheek
 /// geïmporteerd zodat álle herstel-paden hem daarna zien (auditbevinding 17).
+/// Bepaalt het gedrag van de set voor het orgel dat nu geladen wordt (E1, D3, F7,
+/// D7, E5): een orgel met opgeslagen instellingen houdt het oude gedrag, een nieuw
+/// orgel krijgt het standaard aan (behalve de zwelkast van de set), en een eigen keuze
+/// wint (zie `orgelvlaggen.rs`). Zet de proces-brede schakelaars van de importers en
+/// de laadthreads en bewaart de vlaggen in de staat voor dit orgel.
+///
+/// Dit moet bij ÉLKE orgellading gebeuren, ook bij een samplemap: anders houdt de staat
+/// de vlaggen van het vorige orgel en komen die bij het opslaan in de instellingen van
+/// het nieuwe terecht.
+fn zet_orgelvlaggen_voor(state: &AppState, path: &str) {
+    let forceer = state.vlag_overrides.read().get(&crate::library::pad_sleutel(path)).copied();
+    let vlaggen = crate::orgelvlaggen::OrgelVlaggen::bepaal(saved_settings_for(state, path).as_ref(), forceer);
+    vlaggen.zet_importers();
+    *state.orgel_vlaggen.write() = vlaggen;
+    info!(
+        "Gedrag van de set voor dit orgel: niveaus {}, overgangen {}, koppels volgen de set {}, stille staart afkappen {}, zwelkast van de set {}{}",
+        if vlaggen.niveaus_van_set { "aan" } else { "uit" },
+        if vlaggen.overgangen_van_set { "aan" } else { "uit" },
+        if vlaggen.koppels_volgen_set { "aan" } else { "uit" },
+        if vlaggen.staart_afkap { "aan" } else { "uit" },
+        if vlaggen.zwelkast_van_set { "aan" } else { "uit" },
+        if forceer.is_some() { " (geforceerd)" } else { "" },
+    );
+}
+
 /// Grootste instellingenbestand dat de app inleest. Echte bestanden zijn tientallen
 /// kilobytes; een `.jm-settings.json` kan uit een gedownloade set komen en een
 /// geïmporteerd bestand van overal, dus zonder grens kon een gigantisch bestand
@@ -3204,23 +3236,8 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
     let path = &crate::library::pad_notatie(path);
     info!("Loading organ from: {}", path);
 
-    // Gedrag van de set voor DIT orgel (E1/D3/F7), vóór het parsen: een orgel met
-    // opgeslagen instellingen houdt het oude gedrag, een nieuw orgel krijgt het
-    // standaard aan, en een eigen keuze wint (zie `orgelvlaggen.rs`).
-    {
-        let forceer = state.vlag_overrides.read().get(&crate::library::pad_sleutel(path)).copied();
-        let vlaggen = crate::orgelvlaggen::OrgelVlaggen::bepaal(saved_settings_for(state, path).as_ref(), forceer);
-        vlaggen.zet_importers();
-        *state.orgel_vlaggen.write() = vlaggen;
-        info!(
-            "Gedrag van de set voor dit orgel: niveaus {}, overgangen {}, koppels volgen de set {}, stille staart afkappen {}{}",
-            if vlaggen.niveaus_van_set { "aan" } else { "uit" },
-            if vlaggen.overgangen_van_set { "aan" } else { "uit" },
-            if vlaggen.koppels_volgen_set { "aan" } else { "uit" },
-            if vlaggen.staart_afkap { "aan" } else { "uit" },
-            if forceer.is_some() { " (geforceerd)" } else { "" },
-        );
-    }
+    // Gedrag van de set voor DIT orgel (E1/D3/F7/D7/E5), vóór het parsen.
+    zet_orgelvlaggen_voor(state, path);
 
     let odf_path = Path::new(path);
     // Hauptwerk sets (*.Organ_Hauptwerk_xml) use a different format; route them to
@@ -3291,6 +3308,20 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
     if !enclosed_divs.is_empty() {
         info!("Swell-enclosed divisions: {:?}", enclosed_divs);
     }
+    // Voorstel voor de zwelkast uit de waarden van de set (E5); alleen gebruikt
+    // als het orgel "Zwelkast van de set gebruiken" aan heeft. Pas na
+    // `reset_division_settings` in de staat gezet: die wist de oude orgelgebonden
+    // gegevens.
+    let zwelkast_voorstel = {
+        let voorstel = crate::zwelkast_set::voorstel_uit_definitie(&definition);
+        if !voorstel.is_empty() {
+            info!(
+                "Zwelkastwaarden van de set: {}",
+                voorstel.iter().map(|v| format!("{} {:.1} dB / {:.0} Hz", v.division, v.min_db, v.filter_cutoff)).collect::<Vec<_>>().join(", ")
+            );
+        }
+        voorstel
+    };
 
     // Load samples via het preload + achtergrond-stream-mechanisme (zelfde route
     // als de custom sample-mappen, do_load_samples_from_directory). We laden NIET
@@ -4342,6 +4373,7 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
     state.send_audio_command(AudioCommand::RegisterStopWindProfiles(std::sync::Arc::new(wind_profielen), wind_pleno));
     state.reset_division_gains(organ_info.divisions.len());
     state.reset_division_settings(organ_info.divisions.len());
+    *state.zwelkast_voorstel.write() = zwelkast_voorstel;
 
     // ODF-tremulantparameters als default voor de per-divisie LFO: rate uit
     // Period (ms), diepte uit AmpModDepth (%). Eventueel per orgel opgeslagen
@@ -9192,6 +9224,8 @@ pub fn do_load_samples_from_directory_locked(state: &AppState, directory: &str) 
     // Normaliseer de pad-notatie (zie do_load_organ) — voorkomt dubbele
     // bibliotheek-entries en gesplitste per-orgel-settings. Alleen op Windows.
     let directory = &crate::library::pad_notatie(directory);
+    // Ook een samplemap bepaalt zijn eigen vlaggen; anders blijven die van het vorige orgel staan.
+    zet_orgelvlaggen_voor(state, directory);
     use std::collections::HashMap;
     use std::sync::Arc;
     use rayon::prelude::*;
@@ -10612,7 +10646,7 @@ pub fn do_save_organ_settings(state: &AppState, presets: HashMap<String, PresetD
 
     // Gedrag van de set (E1/D3/F7): wat nu staat, tenzij een proef via de test-API
     // het geforceerd heeft; zo'n geforceerde keuze wordt nooit bewaard.
-    let (vlag_niveaus, vlag_overgangen, vlag_koppels, vlag_staart) = {
+    let (vlag_niveaus, vlag_overgangen, vlag_koppels, vlag_staart, vlag_zwelkast) = {
         let geforceerd = state.vlag_overrides.read().contains_key(&crate::library::pad_sleutel(&organ_id));
         let lib = state.organ_library.read();
         crate::orgelvlaggen::OrgelVlaggen::te_bewaren(
@@ -10649,6 +10683,7 @@ pub fn do_save_organ_settings(state: &AppState, presets: HashMap<String, PresetD
         overgangen_van_set: vlag_overgangen,
         koppels_volgen_set: vlag_koppels,
         staart_afkap: vlag_staart,
+        zwelkast_van_set: vlag_zwelkast,
         listening_position: Some(*state.listening_position.read()),
         background_gain: Some(*state.background_gain.read()),
         mechanics_gains: Some(*state.mechanics_gains.read()),

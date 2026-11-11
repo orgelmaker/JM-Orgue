@@ -6,6 +6,28 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### Zwelkast van de set gebruiken, per orgel (E5, stap 3)
+- Nieuw vinkje onder Instellingen → Klank, "Zwelkast van de set gebruiken", in het blok "Gedrag van de set (dit orgel)". Aan:
+  een divisie waarvoor je zelf nog niets instelde begint met de waarden die de set opgeeft. **Anders dan de andere vlaggen staat
+  dit ook voor een nieuw orgel standaard uit**, omdat het zwelpedaal er minder diep door kan worden en dat een keuze met de oren is.
+- De vertaling: diepte = de demping die de set bij een dichte kast opgeeft (als negatieve dB), kantelpunt = het meetkundig
+  gemiddelde van de laagste en hoogste filterfrequentie bij dicht. Begrensd zoals de instelling zelf (diepte −24 tot −5 dB,
+  kantelpunt 200 tot 5000 Hz); een set die 3,7 dB opgeeft krijgt dus −5 dB. De kast van een divisie is die waarin de meeste van haar
+  registers zitten. Bij een divisie die je zelf instelde (dus niet meer op −20 dB en 800 Hz staat) verandert er niets; uitvinken zet
+  divisies die nog precies de waarden van de set hebben terug op de vertrouwde beginwaarden. Onder het vinkje staat wat de set opgeeft.
+- Gedaan in de echte app op een Hauptwerk-set met drie zwelkasten: aanvinken zette de twee divisies met een kast op −8 dB en 1744 en
+  2328 Hz, uitvinken zette ze terug op −20 dB en 800 Hz, en na wisselen van orgel en terug werden de setwaarden bij het laden toegepast.
+  **Niet gehoord**: of dit goed klinkt moet je met je oren beoordelen. Niet getest op macOS en Linux.
+- Zes nieuwe tests voor het voorstel (`zwelkast_set.rs`) en een nieuwe test voor de vijfde vlag, de bestaande vlaggentests zijn uitgebreid.
+
+### Fout verholpen: bij een samplemap bleven de vlaggen van het vorige orgel staan
+- Het gedrag van de set per orgel (niveaus, overgangen, koppelketen, staartafkap, zwelkast) werd alleen bepaald bij het laden van
+  een definitie, niet bij het laden van een samplemap. Daardoor bleven de vlaggen van het vorige orgel in de staat staan en kwamen ze
+  bij het opslaan in de instellingen van de map terecht (gezien bij een eigen samplemap: de zwelkastvlag van het eerder geopende orgel).
+  Voor een samplemap heeft dat geen invloed op de klank (er zijn geen definitie en geen losse release-opnamen), maar de opgeslagen
+  keuze klopte niet. Nu bepaalt ook een samplemap haar eigen vlaggen. Met een geforceerde vlag op het ene orgel gecontroleerd dat de
+  samplemap erna haar eigen vlaggen krijgt.
+
 ### Zwelkast van de set: de waarden inlezen en tonen (E5, stap 1 en 2)
 - Een Hauptwerk-set geeft per zwelkast op hoeveel die dempt als hij dicht is en tussen welke frequenties het filter dan werkt.
   Die waarden worden nu ingelezen (mediaan over de pijpen van de kast) en per zwelkast in het importverslag getoond:

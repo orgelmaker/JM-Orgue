@@ -494,6 +494,10 @@ pub struct OrganSettings {
     /// drie hierboven.
     #[serde(default)]
     pub staart_afkap: Option<bool>,
+    /// Zwelkast van de set gebruiken (E5). Anders dan de andere vlaggen staat deze
+    /// ook voor een nieuw orgel standaard uit.
+    #[serde(default)]
+    pub zwelkast_van_set: Option<bool>,
     /// Luisterpositie-schuif (0.7.95): 0..1 lineair over de as van geladen
     /// posities (dry → close → front → rear → diffuse). Bewaard per orgel
     /// zodat de volgende sessie met dezelfde balans begint. Ontbrekend in
