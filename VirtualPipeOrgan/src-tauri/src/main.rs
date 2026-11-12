@@ -16,6 +16,7 @@ mod feedback;
 mod geheugen;
 mod import_pakketroot;
 mod library;
+mod orgelbundel;
 mod orgelvlaggen;
 mod library_online;
 mod logging;
@@ -31,12 +32,18 @@ mod recorder;
 mod remote;
 mod retune;
 mod rt_prioriteit;
+mod rt_toezicht;
 mod zwelkast_set;
 
 /// Geheugenbeheerder voor de hele app (C2): zie de toelichting bij `mimalloc` in Cargo.toml. De audiothread vraagt geen
 /// geheugen aan (regel uit CLAUDE.md), dus dit raakt de mengkern niet.
+#[cfg(not(feature = "rt-toezicht"))]
 #[global_allocator]
 static GEHEUGEN: mimalloc::MiMalloc = mimalloc::MiMalloc;
+/// Testbouw met `--features rt-toezicht` (D1): mimalloc met een teller voor aanvragen in de audio-callback.
+#[cfg(feature = "rt-toezicht")]
+#[global_allocator]
+static GEHEUGEN: rt_toezicht::Toezicht = rt_toezicht::Toezicht;
 mod set_crescendo;
 mod pakket_uitpakken;
 mod register_filter;

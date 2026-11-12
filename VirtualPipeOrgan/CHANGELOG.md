@@ -6,6 +6,16 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### Orgelwissel in één keer (D1/F3, fase 0 en 1)
+- Bij het wisselen van orgel gaat alles voor de klankmachine (opnamen, registerkaarten, tremulanten, intonatie, kasten, wind en
+  de standaardwaarden) als één pakket naar de audio-thread, die het in één keer verwerkt. Een noot ziet daardoor het hele oude of
+  het hele nieuwe orgel; tot nu toe kon een noot tijdens het laden de opnamen van het nieuwe orgel al met de registratie van het oude
+  starten. Wordt het laden afgebroken, dan merkt de klankmachine niets en blijft het vorige orgel speelbaar.
+- De lijst met beginstukken van de opnamen wordt bij de wissel niet meer stuk voor stuk overgenomen in de audio-thread, maar in één
+  keer omgezet.
+- Voor testbouw: met de feature `rt-toezicht` telt het programma de geheugenaanvragen in de audio-callback (`/perf/slechtste`,
+  veld `allocaties`). Een gewone bouw verandert niet.
+
 ### Advies voor de startbuffer (C2, fase 3)
 - Het programma houdt bij hoe lang het duurt voordat een volledige opname binnen is nadat een toets is aangeslagen (schijf, decoderen
   en wachtrij samen). Dat is precies de tijd die de startbuffer moet overbruggen. Na genoeg metingen (200 opnamen) staat onder de

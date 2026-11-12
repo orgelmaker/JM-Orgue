@@ -4817,6 +4817,8 @@ impl AppState {
 
     /// Send audio command
     pub fn send_audio_command(&self, cmd: AudioCommand) {
+        // Tijdens een orgelwissel op deze thread: verzamelen in plaats van versturen (F3, `orgelbundel.rs`).
+        let Some(cmd) = crate::orgelbundel::verzamel_of_geef_terug(cmd) else { return };
         if let Some(ref player) = *self.audio_player.read() {
             if let Err(e) = player.send_command(cmd) {
                 tracing::warn!("Failed to send audio command: {}", e);

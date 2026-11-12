@@ -407,7 +407,10 @@ fn route_shared(
                 lm.insert(naam.to_string(), json!(locks[i] as f64 / 1e6)); // ms
             }
             let (me, mw, ge, gw, bl, gew) = crate::mengpool::neem_barriere_meting();
-            json!({ "totaal": totaal, "segmenten": m, "stemmen": stemmen, "stemstarts": starts, "commandos": cmds, "locks_ms": lm,
+            // D1: geheugenaanvragen in de callback sinds de vorige uitlezing (null = bouw zonder `rt-toezicht`).
+            let allocaties = crate::rt_toezicht::stand(true)
+                .map(|(totaal, max, callbacks)| json!({ "totaal": totaal, "max_per_callback": max, "callbacks_met": callbacks }));
+            json!({ "allocaties": allocaties, "totaal": totaal, "segmenten": m, "stemmen": stemmen, "stemstarts": starts, "commandos": cmds, "locks_ms": lm,
                     "rt": serde_json::to_value(crate::rt_prioriteit::status()).unwrap_or_default(),
                     "barriere": { "max_eigen_us": me, "max_wacht_us": mw, "gem_eigen_us": ge, "gem_wacht_us": gw, "blokken": bl, "gewekt": gew } })
         }),

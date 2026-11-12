@@ -3514,6 +3514,9 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
     // "tremmed"-laag): vult StopDto.has_tremulant en de engine-set die de
     // synth-LFO voor die registers uitschakelt.
     let mut stops_with_trem: std::collections::HashSet<u32> = std::collections::HashSet::new();
+    // F3: vanaf hier gaat alles voor de audio-engine in één bundel, die pas aan het eind verstuurd wordt (zie
+    // `orgelbundel.rs`). Annuleren of een fout onderweg: de engine houdt het vorige orgel, heel.
+    let orgel_bundel = crate::orgelbundel::OrgelBundel::begin();
     {
         use std::collections::{HashMap, HashSet};
         use std::path::PathBuf;
@@ -4200,11 +4203,11 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
         {
             let player_lock = state.audio_player.read();
             if let Some(ref player) = *player_lock {
-                player
-                    .send_command(crate::audio::AudioCommand::RegisterPreloadBuffers(Arc::new(preload_buffers)))
+                crate::orgelbundel::stuur(
+                    player, crate::audio::AudioCommand::RegisterPreloadBuffers(Arc::new(preload_buffers)))
                     .map_err(|e| format!("Failed to register preload buffers: {}", e))?;
                 // Altijd sturen (ook leeg): vervangt de sets van het vorige orgel.
-                let _ = player.send_command(crate::audio::AudioCommand::RegisterPercussiveStops(percussive_stops));
+                let _ = crate::orgelbundel::stuur(player, crate::audio::AudioCommand::RegisterPercussiveStops(percussive_stops));
                 if trem_pipe_count > 0 {
                     info!(
                         "Tremulant-samplelaag: {} pijpen in {} registers (echte trem-opnamen)",
@@ -4212,40 +4215,40 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
                     );
                 }
                 // Altijd sturen (ook leeg): vervangt de set van het vorige orgel.
-                let _ = player.send_command(crate::audio::AudioCommand::RegisterTremStops(stops_with_trem.clone()));
+                let _ = crate::orgelbundel::stuur(player, crate::audio::AudioCommand::RegisterTremStops(stops_with_trem.clone()));
                 if !release_xfade.is_empty() {
                     info!("ReleaseCrossfadeLength: {} releases met eigen crossfade-duur", release_xfade.len());
                 }
-                let _ = player.send_command(crate::audio::AudioCommand::RegisterReleaseCrossfade(Arc::new(release_xfade)));
+                let _ = crate::orgelbundel::stuur(player, crate::audio::AudioCommand::RegisterReleaseCrossfade(Arc::new(release_xfade)));
                 if !odf_voicings.is_empty() {
                     info!("ODF-intonatie: {} pijpen met gain/pitch uit de sampleset", odf_voicings.len());
                 }
-                let _ = player.send_command(crate::audio::AudioCommand::RegisterOdfVoicings(Arc::new(odf_voicings)));
+                let _ = crate::orgelbundel::stuur(player, crate::audio::AudioCommand::RegisterOdfVoicings(Arc::new(odf_voicings)));
                 // Altijd sturen (ook leeg): vervangt de hertemper-tabel van het
                 // vorige orgel (botsende (stop_id, pipe_num)-keys!).
-                let _ = player.send_command(crate::audio::AudioCommand::RegisterOdfRetune(Arc::new(odf_retune)));
+                let _ = crate::orgelbundel::stuur(player, crate::audio::AudioCommand::RegisterOdfRetune(Arc::new(odf_retune)));
                 // Set zonder originele orgeltoonhoogte (0.9.23, Hauptwerk
                 // EnablePlayingAtOriginalOrganPitch = N): dwing effectief
                 // hertemperen af, ook in "Origineel + bijstemmen uit". Zonder dit
                 // speelt een geleende opname (Cracow: f-klein leent de e-klein-
                 // opname) op de ruwe bestandstoon en klinken e en f identiek.
                 *state.geen_originele_toonhoogte.write() = definition.organ.geen_originele_toonhoogte;
-                let _ = player.send_command(crate::audio::AudioCommand::SetForceTempered(definition.organ.geen_originele_toonhoogte));
+                let _ = crate::orgelbundel::stuur(player, crate::audio::AudioCommand::SetForceTempered(definition.organ.geen_originele_toonhoogte));
                 // Ook de ODF-looppunten registreren: de achtergrond-full-sample-
                 // load gebruikt dan dezelfde loop als de preload (geen versprong
                 // op het upgrademoment bij WAVs zonder/met afwijkende smpl-chunk).
-                let _ = player.send_command(crate::audio::AudioCommand::RegisterOdfLoops(Arc::new(odf_loops.clone())));
+                let _ = crate::orgelbundel::stuur(player, crate::audio::AudioCommand::RegisterOdfLoops(Arc::new(odf_loops.clone())));
                 // Toetsduur-releases (altijd sturen, ook leeg — vervangt de map
                 // van het vorige orgel): NoteOff kiest hiermee de R0/R1-variant
                 // die bij de gespeelde duur hoort (MaxKeyPressTime, 0.7.26).
                 if !release_meta.is_empty() {
                     info!("Toetsduur-releases: {} pijpen met meerdere release-varianten", release_meta.len());
                 }
-                let _ = player.send_command(crate::audio::AudioCommand::RegisterReleaseMeta(
+                let _ = crate::orgelbundel::stuur(player, crate::audio::AudioCommand::RegisterReleaseMeta(
                     release_meta.iter().cloned().collect()));
                 // Laadplan per stop (altijd sturen, ook leeg — vervangt de map
                 // van het vorige orgel) + live gains per perspectief-slot.
-                let _ = player.send_command(crate::audio::AudioCommand::RegisterRankLayout(Arc::new(rank_layout)));
+                let _ = crate::orgelbundel::stuur(player, crate::audio::AudioCommand::RegisterRankLayout(Arc::new(rank_layout)));
             }
         }
         for p in persp_plan.iter_mut() {
@@ -4593,6 +4596,11 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
                 }
             }
         }
+    }
+
+    // F3: het nieuwe orgel in één keer naar de engine (preloads, kaarten, resets en de standaardwaarden hierboven).
+    if let Some(bundel) = orgel_bundel.sluit() {
+        state.send_audio_command(bundel);
     }
 
     // current_organ_id EERST zetten, dan pas de DTO publiceren: de 300ms-poll
@@ -9831,30 +9839,32 @@ pub fn do_load_samples_from_directory_locked(state: &AppState, directory: &str) 
 
     // Register preload buffers with audio player
     info!("Registering preload buffers for instant playback");
+    // F3: alles voor de engine in één bundel (zie do_load_organ_locked en `orgelbundel.rs`).
+    let orgel_bundel = crate::orgelbundel::OrgelBundel::begin();
     {
         let player_lock = state.audio_player.read();
         if let Some(ref player) = *player_lock {
-            player.send_command(crate::audio::AudioCommand::RegisterPreloadBuffers(Arc::new(preload_buffers)))
+            crate::orgelbundel::stuur(player, crate::audio::AudioCommand::RegisterPreloadBuffers(Arc::new(preload_buffers)))
                 .map_err(|e| format!("Failed to register preload buffers: {}", e))?;
             // Custom sample-mappen kennen geen percussieve stops of ODF-intonatie/loops:
             // wis de sets van een eventueel vorig (GrandOrgue/Hauptwerk-)orgel.
-            let _ = player.send_command(crate::audio::AudioCommand::RegisterPercussiveStops(Default::default()));
-            let _ = player.send_command(crate::audio::AudioCommand::RegisterOdfVoicings(Arc::new(Default::default())));
+            let _ = crate::orgelbundel::stuur(player, crate::audio::AudioCommand::RegisterPercussiveStops(Default::default()));
+            let _ = crate::orgelbundel::stuur(player, crate::audio::AudioCommand::RegisterOdfVoicings(Arc::new(Default::default())));
             // Ook de hertemper-tabel wissen: (stop_id, pipe_num)-keys van een
             // vorig GO-orgel zouden anders op deze set doorwerken.
-            let _ = player.send_command(crate::audio::AudioCommand::RegisterOdfRetune(Arc::new(Default::default())));
-            let _ = player.send_command(crate::audio::AudioCommand::RegisterOdfLoops(Arc::new(Default::default())));
+            let _ = crate::orgelbundel::stuur(player, crate::audio::AudioCommand::RegisterOdfRetune(Arc::new(Default::default())));
+            let _ = crate::orgelbundel::stuur(player, crate::audio::AudioCommand::RegisterOdfLoops(Arc::new(Default::default())));
             // Ook de tremulantregisters opnieuw zetten: had het vórige orgel
             // echte trem-opnamen en dit orgel niet, dan bleef die set staan en
             // zweeg de synth-LFO voor de verkeerde registers (auditbevinding 38).
             if !stops_with_trem.is_empty() {
                 info!("Tremulant-samplelaag: {} registers met een _trem-map", stops_with_trem.len());
             }
-            let _ = player.send_command(crate::audio::AudioCommand::RegisterTremStops(stops_with_trem.clone()));
+            let _ = crate::orgelbundel::stuur(player, crate::audio::AudioCommand::RegisterTremStops(stops_with_trem.clone()));
             // Custom sample-mappen kennen geen toetsduur-releases of
             // ReleaseCrossfadeLength: wis de tabellen van een vorig ODF-orgel.
-            let _ = player.send_command(crate::audio::AudioCommand::RegisterReleaseMeta(Default::default()));
-            let _ = player.send_command(crate::audio::AudioCommand::RegisterReleaseCrossfade(Arc::new(Default::default())));
+            let _ = crate::orgelbundel::stuur(player, crate::audio::AudioCommand::RegisterReleaseMeta(Default::default()));
+            let _ = crate::orgelbundel::stuur(player, crate::audio::AudioCommand::RegisterReleaseCrossfade(Arc::new(Default::default())));
         }
     }
 
@@ -9961,6 +9971,11 @@ pub fn do_load_samples_from_directory_locked(state: &AppState, directory: &str) 
     state.send_audio_command(AudioCommand::RegisterStopWindProfiles(std::sync::Arc::new(wind_profielen), wind_pleno));
     state.reset_division_gains(organ_info.divisions.len());
     state.reset_division_settings(organ_info.divisions.len());
+
+    // F3: het nieuwe orgel in één keer naar de engine.
+    if let Some(bundel) = orgel_bundel.sluit() {
+        state.send_audio_command(bundel);
+    }
 
     // current_organ_id EERST (zie do_load_organ / auditbevinding 41).
     {

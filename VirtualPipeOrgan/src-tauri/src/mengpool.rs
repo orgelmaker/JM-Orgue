@@ -325,6 +325,7 @@ fn werker_lus(idx: usize, gedeeld: Arc<Gedeeld>) {
         // zichtbaar. Deze werker is de enige die zijn eigen taakvakje leest.
         let taak = unsafe { *gedeeld.taken[idx].get() };
         if !taak.is_leeg() {
+            let _rt_bewaker = crate::rt_toezicht::binnen();
             // SAFETY: zie de moduletoelichting — disjuncte stukken, eigen
             // doeltabel, en de audiothread wacht tot we klaar melden.
             unsafe {
