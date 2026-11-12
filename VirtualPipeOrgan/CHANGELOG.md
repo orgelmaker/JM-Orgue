@@ -6,6 +6,8 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+## [0.9.53] - 2026-11-12
+
 ### Tremulant volgt de opgenomen golfvorm van de set (C5, stap 2)
 - Nieuw vinkje per orgel "Tremulant volgt de golfvorm van de set" (Instellingen → Klank). Bij een Hauptwerk-set met
   opgenomen tremulant-golfvormen krijgt de tremulant van een werk de vorm van die golfvorm (een gemeten cyclus van
