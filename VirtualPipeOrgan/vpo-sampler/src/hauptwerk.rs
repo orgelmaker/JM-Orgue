@@ -201,11 +201,15 @@ fn load_hauptwerk_intern(
 /// balg de divisies waarvan pijpen eraan hangen. Verandert niets aan de klank.
 pub(crate) fn voeg_windwerk_toe(v: &mut crate::import_report::ImportReport, def: &OrganDefinition, xml: &str) {
     use crate::import_report::Ernst;
-    if GecomprimeerdeOdf::detecteer(xml).is_some() { return; }
-    let w = crate::windwerk::WindwerkDef::uit_tabellen(
-        &extract_objects(xml, "WindCompartment"),
-        &extract_objects(xml, "WindCompartmentLinkage"),
-    );
+    // Een gecomprimeerde definitie via de lettertabel (D4, fase 3); kent die het windwerk niet, dan blijft het leeg.
+    let compact = GecomprimeerdeOdf::detecteer(xml);
+    let lees = |tabel: &str| -> Vec<FieldMap> {
+        match &compact {
+            Some(c) => FieldMap::rijen_van_tabel(tabel, c.objecten(xml, tabel)),
+            None => extract_objects(xml, tabel),
+        }
+    };
+    let w = crate::windwerk::WindwerkDef::uit_tabellen(&lees("WindCompartment"), &lees("WindCompartmentLinkage"));
     if w.is_leeg() { return; }
     let mut met_verbruik = 0usize;
     let mut per_balg: HashMap<u32, Vec<String>> = HashMap::new();

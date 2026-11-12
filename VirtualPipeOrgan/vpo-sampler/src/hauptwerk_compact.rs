@@ -856,6 +856,103 @@ pub(crate) fn hele_rang(noten: &HashSet<u32>, eerste: i64, inc: i64) -> i64 {
 
 /// De ID's uit de eerste kolom van een lijst (`a` is altijd het eerste veld
 /// van de sleutel).
+/// De letters van het windwerk in een gecomprimeerde definitie (D4, fase 3).
+///
+/// Geteld in alle 14 gecomprimeerde sets met windwerk (formaatversies 4.00, 4.20014 en 5.00300): de letters zijn
+/// overal dezelfde, anders dan bij `EnclosurePipe` (zie `D4-fase3-telling.md`). Daarom een vaste tabel, met een
+/// controle per bestand op vorm en verwijzingen; past één ding niet, dan geen windwerk (liever niets dan een gok).
+///
+/// - Lade: a = ID, b = naam, c = oneindig volume (Y), d = volume, e = druk (inch), g = heeft balg (Y), h/i = breedte en
+///   lengte van de balg, j = slag, n = massa die de druk geeft, r = demping.
+/// - Verbinding: a/b = eerste/tweede lade, c = naam, d = klepcode (1–3), h = doorstroming (kg/s), i = referentiedruk.
+/// - Pijp: r = lade waar de wind vandaan komt, s = lade waar hij heen gaat (gecontroleerd, niet gelezen: het windmodel
+///   gebruikt hem niet, en in sommige sets geeft de bestaande lezer `s` al de betekenis pallet-schakelaar), t = verbruik
+///   (kg/s), u = referentiedruk. Leeg als geen enkele pijp een lade heeft (dan blijven de pijpvelden ongelezen).
+fn windwerk_letters(
+    laden: &[FieldMap],
+    verbindingen: &[FieldMap],
+    pijpen: &[FieldMap],
+) -> Option<[Vec<(Option<String>, &'static str)>; 3]> {
+    if laden.is_empty() {
+        return None;
+    }
+    let getal = |o: &FieldMap, l: &str| o.get(l).and_then(|v| v.trim().parse::<f64>().ok());
+    let jn = |o: &FieldMap, l: &str| o.get(l).is_none_or(|v| matches!(v.trim(), "Y" | "N"));
+    // Elke lade een uniek geheel ID en een naam; Y/N waar Y/N hoort.
+    let mut ids = HashSet::new();
+    for o in laden {
+        let id = o.get("a").and_then(|v| v.trim().parse::<u32>().ok())?;
+        if !ids.insert(id) || !o.contains_key("b") || !jn(o, "c") || !jn(o, "g") {
+            return None;
+        }
+        for l in ["d", "e", "j", "r"] {
+            if o.contains_key(l) && getal(o, l).is_none_or(|v| v < 0.0) {
+                return None;
+            }
+        }
+        // Een balg heeft een oppervlak en een gewicht.
+        if o.get("g").is_some_and(|v| v.trim() == "Y")
+            && ["h", "i", "n"].iter().any(|l| getal(o, l).is_none_or(|v| v <= 0.0))
+        {
+            return None;
+        }
+    }
+    let lade = |o: &FieldMap, l: &str| o.get(l).and_then(|v| v.trim().parse::<u32>().ok()).is_some_and(|i| ids.contains(&i));
+    for o in verbindingen {
+        if !lade(o, "a") || !lade(o, "b") {
+            return None;
+        }
+        if o.get("d").is_some_and(|v| !matches!(v.trim(), "1" | "2" | "3")) {
+            return None;
+        }
+        if getal(o, "h").is_none_or(|v| v < 0.0) || o.contains_key("i") && getal(o, "i").is_none_or(|v| v <= 0.0) {
+            return None;
+        }
+    }
+    let s = |l: &str| Some(l.to_string());
+    let laden_paren = vec![
+        (s("a"), "WindCompartmentID"),
+        (s("b"), "Name"),
+        (s("c"), "InfiniteVolume"),
+        (s("d"), "StandardVolumeMetresCubed"),
+        (s("e"), "DefaultAirPressureInches"),
+        (s("g"), "Bellows_HasBellows"),
+        (s("h"), "Bellows_FrameBaseWidthMetres"),
+        (s("i"), "Bellows_FrameBaseLengthMetres"),
+        (s("j"), "Bellows_MaximumExtensionMetres"),
+        (s("n"), "Bellows_MassOfMovingBoardActedOnByGravityKg"),
+        (s("r"), "Bellows_PositiveDampingCoefficient"),
+    ];
+    let verb_paren = vec![
+        (s("a"), "FirstWindCompartmentID"),
+        (s("b"), "SecondWindCompartmentID"),
+        (s("c"), "Name"),
+        (s("d"), "ValveControlTypeCode"),
+        (s("h"), "MassFlowRateKilogramsPerSecAtReferencePressureDiff"),
+        (s("i"), "ReferencePressureDifferenceInches"),
+    ];
+    // Pijpen: de lade-letter moet bij elke pijp die hem heeft naar een lade wijzen, het verbruik een klein positief
+    // getal zijn (kg/s), de referentiedruk positief.
+    let met_lade = pijpen.iter().filter(|p| p.contains_key("r")).count();
+    let pijp_ok = met_lade > 0
+        && pijpen.iter().all(|p| {
+            (!p.contains_key("r") || lade(p, "r"))
+                && (!p.contains_key("s") || lade(p, "s"))
+                && (!p.contains_key("t") || getal(p, "t").is_some_and(|v| v > 0.0 && v < 1.0))
+                && (!p.contains_key("u") || getal(p, "u").is_some_and(|v| v > 0.0))
+        });
+    let pijp_paren = if pijp_ok {
+        vec![
+            (s("r"), "WindSupply_SourceWindCompartmentID"),
+            (s("t"), "WindSupply_MassFlowRateKilogramsPerSecAtReferencePressureDiff"),
+            (s("u"), "WindSupply_ReferencePressureDifferenceInches"),
+        ]
+    } else {
+        Vec::new()
+    };
+    Some([laden_paren, verb_paren, pijp_paren])
+}
+
 fn id_verzameling(objs: &[FieldMap]) -> HashSet<u32> {
     objs.iter()
         .filter_map(|o| o.get("a"))
@@ -1324,6 +1421,30 @@ impl GecomprimeerdeOdf {
                 (ka_transpositie, "MIDINoteNumberIncrement"),
             ],
         );
+
+        // ── Windwerk (D4, fase 3): laden, verbindingen en de windvelden van de pijp ──
+        if let Some([laden, verbindingen, pijpwind]) = windwerk_letters(
+            &rauwe_objecten(xml, "WindCompartment"),
+            &rauwe_objecten(xml, "WindCompartmentLinkage"),
+            lijst("Pipe_SoundEngine01"),
+        ) {
+            zet("WindCompartment", laden);
+            zet("WindCompartmentLinkage", verbindingen);
+            if !pijpwind.is_empty() {
+                let mut paren: Vec<(Option<String>, &'static str)> = vec![
+                    (Some("a".into()), "PipeID"),
+                    (pp_rank.clone(), "RankID"),
+                    (pp_noot.clone(), "NormalMIDINoteNumber"),
+                    (pp_voet.clone(), "Pitch_Tempered_RankBasePitch64ftHarmonicNum"),
+                    (pp_pallet.clone(), "ControllingPalletSwitchID"),
+                ];
+                let bezet: Vec<String> = paren.iter().filter_map(|(l, _)| l.clone()).collect();
+                // Een letter die hierboven al een betekenis kreeg, houdt die (het gedrag blijft gelijk); alleen dat
+                // windveld vervalt dan.
+                paren.extend(pijpwind.into_iter().filter(|(l, _)| l.as_ref().is_some_and(|l| !bezet.contains(l))));
+                zet("Pipe_SoundEngine01", paren);
+            }
+        }
 
         let odf = GecomprimeerdeOdf { tabel, noten_per_rang, standaarden };
         odf.log_samenvatting(&rauw);
@@ -1954,5 +2075,90 @@ mod samplepitch_tests {
         let (m, hz) = kies_samplepitch(&objs, &["a", "c"]);
         assert_eq!(m.as_deref(), Some("d"));
         assert_eq!(hz.as_deref(), Some("g"));
+    }
+}
+
+#[cfg(test)]
+mod windwerk_tests {
+    use super::*;
+
+    fn o(paren: &[(&str, &str)]) -> FieldMap {
+        paren.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+    }
+
+    /// Zoals in de gecomprimeerde sets met windwerk: buitenlucht, ventilator, magazijn met balg, lade.
+    fn laden() -> Vec<FieldMap> {
+        vec![
+            o(&[("a", "1"), ("b", "Open air"), ("c", "Y")]),
+            o(&[("a", "2"), ("b", "Blower"), ("c", "Y"), ("e", "8")]),
+            o(&[("a", "5"), ("b", "Div1 reservoir"), ("d", "8.1e-1"), ("g", "Y"), ("h", "1.73"), ("i", "1.73"),
+                ("j", "5.88e-1"), ("k", "1"), ("l", "1"), ("n", "4.57e+2"), ("p", "4.57e+2"), ("r", "1e+1")]),
+            o(&[("a", "6"), ("b", "Div1 wind-chest"), ("d", "5.67e-1")]),
+        ]
+    }
+
+    fn verbindingen() -> Vec<FieldMap> {
+        vec![
+            o(&[("a", "2"), ("b", "5"), ("c", "Div1 reservoir inlet"), ("d", "3"), ("g", "521"), ("h", "1.53"), ("i", "6")]),
+            o(&[("a", "5"), ("b", "6"), ("c", "Div1 wind-chest inlet"), ("h", "4.5e-3"), ("i", "1.2e-1")]),
+            o(&[("a", "6"), ("b", "1"), ("c", "Div1 wind-chest leak"), ("h", "4.5e-4")]),
+        ]
+    }
+
+    fn pijpen() -> Vec<FieldMap> {
+        vec![
+            o(&[("a", "548"), ("b", "1"), ("d", "36"), ("r", "6"), ("s", "1"), ("t", "7.4e-5"), ("u", "6")]),
+            o(&[("a", "549"), ("b", "1"), ("d", "37"), ("r", "6"), ("s", "1"), ("t", "3.29e-3"), ("u", "6")]),
+        ]
+    }
+
+    fn namen(paren: &[(Option<String>, &'static str)]) -> HashMap<String, &'static str> {
+        paren.iter().filter_map(|(l, n)| l.clone().map(|l| (l, *n))).collect()
+    }
+
+    #[test]
+    fn vaste_letters_bij_een_kloppend_bestand() {
+        let [l, v, p] = windwerk_letters(&laden(), &verbindingen(), &pijpen()).expect("windwerk");
+        let (l, v, p) = (namen(&l), namen(&v), namen(&p));
+        assert_eq!(l["g"], "Bellows_HasBellows");
+        assert_eq!(l["n"], "Bellows_MassOfMovingBoardActedOnByGravityKg");
+        assert_eq!(v["d"], "ValveControlTypeCode");
+        assert_eq!(v["h"], "MassFlowRateKilogramsPerSecAtReferencePressureDiff");
+        assert_eq!(p["r"], "WindSupply_SourceWindCompartmentID");
+        assert_eq!(p["t"], "WindSupply_MassFlowRateKilogramsPerSecAtReferencePressureDiff");
+        assert!(!p.contains_key("s"), "de uitgaande lade wordt niet gelezen");
+    }
+
+    #[test]
+    fn verbinding_naar_een_onbekende_lade_geeft_niets() {
+        let mut v = verbindingen();
+        v[1].insert("b".into(), "99".into());
+        assert!(windwerk_letters(&laden(), &v, &pijpen()).is_none());
+    }
+
+    #[test]
+    fn balg_zonder_gewicht_geeft_niets() {
+        let mut l = laden();
+        l[2].remove("n");
+        assert!(windwerk_letters(&l, &verbindingen(), &pijpen()).is_none());
+    }
+
+    #[test]
+    fn pijp_die_niet_naar_een_lade_wijst_laat_alleen_de_pijpvelden_weg() {
+        let mut p = pijpen();
+        p[0].insert("r".into(), "77".into());
+        let [l, v, pp] = windwerk_letters(&laden(), &verbindingen(), &p).expect("laden en verbindingen blijven");
+        assert!(!l.is_empty() && !v.is_empty());
+        assert!(pp.is_empty());
+        // Geen enkele pijp met een lade: idem.
+        let zonder: Vec<FieldMap> = pijpen().into_iter().map(|mut x| { x.remove("r"); x }).collect();
+        assert!(windwerk_letters(&laden(), &verbindingen(), &zonder).expect("windwerk")[2].is_empty());
+    }
+
+    #[test]
+    fn verbruik_moet_een_klein_positief_getal_zijn() {
+        let mut p = pijpen();
+        p[1].insert("t".into(), "12".into());
+        assert!(windwerk_letters(&laden(), &verbindingen(), &p).expect("windwerk")[2].is_empty());
     }
 }

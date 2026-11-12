@@ -6,6 +6,12 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### Windwerk ook bij gecomprimeerde Hauptwerk-sets (D4, fase 3)
+- Het windwerk (balgen, laden, kanalen, verbruik per pijp) wordt nu ook gelezen uit gecomprimeerde Hauptwerk-definities,
+  de meeste commerciële sets. Per bestand wordt gecontroleerd of de gegevens kloppen (verwijzingen naar bestaande laden,
+  balgen met oppervlak en gewicht, aannemelijk verbruik); klopt iets niet, dan wordt er niets gelezen. Daarmee werkt het
+  vinkje "Windwerk van de set" ook bij deze sets. Met het vinkje uit verandert er niets.
+
 ### Windmodel volgt het windwerk van de set (D4, fase 1)
 - Nieuw vinkje per orgel "Windwerk van de set" (onder Klank): bij een leesbare Hauptwerk-set die haar windwerk beschrijft,
   wordt elke balg van de set één windgroep (een set met één magazijn voor het hele orgel krijgt dus één groep), komt het
