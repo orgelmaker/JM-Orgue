@@ -280,6 +280,8 @@
     "overgangen_toepassen_hint": "Aan: de duur van de overgang tussen het klinkende geluid en de release die de maker in de set heeft ingesteld wordt gebruikt, in plaats van een automatische duur per noot. Alleen voor sets die dit opgeven. Uit: automatische duur zoals vroeger.",
     "koppels_volgen_set": "Koppels volgen de set",
     "koppels_volgen_set_hint": "Aan: een koppel werkt alleen door via andere koppels als de set dat toestaat (GrandOrgue-sets). Uit: koppels ketenen altijd door, zoals vroeger.",
+    "koppels_klavier": "Koppels van de set volledig inlezen",
+    "koppels_klavier_hint": "Aan: ook koppels van een Hauptwerk-set die naar een ander klavier wijzen (ook octaafkoppels en koppels binnen één klavier), en koppels waarvan de set alleen in het schakelnetwerk zegt welk werk een klavier bespeelt, worden ingelezen. Uit: die koppels vallen weg en zijn er geen andere, dan maakt JM-Orgue algemene koppels, zoals vroeger. Werkt na herladen.",
     "staart_afkap": "Stille staarten afkappen",
     "staart_afkap_hint": "Aan: het stille slot van een loslaat-opname (zachter dan de drempel hieronder, standaard −90 dB) wordt weggelaten. Dat maakt stemmen en geheugen vrij en is bij de standaard niet te horen. Uit: de opname speelt tot het einde. Werkt na het opnieuw laden van het orgel.",
     "staart_drempel": "Drempel (dB)",

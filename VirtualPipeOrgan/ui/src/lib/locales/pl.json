@@ -280,6 +280,8 @@
     "overgangen_toepassen_hint": "Włączone: używany jest czas przejścia między brzmiącym dźwiękiem a zwolnieniem ustawiony przez twórcę zestawu, zamiast automatycznego czasu dla każdego dźwięku. Tylko dla zestawów, które go podają. Wyłączone: czas automatyczny jak dawniej.",
     "koppels_volgen_set": "Łączniki podążają za zestawem",
     "koppels_volgen_set_hint": "Włączone: łącznik działa przez inne łączniki tylko wtedy, gdy zestaw na to pozwala (zestawy GrandOrgue). Wyłączone: łączniki zawsze się łańcuchowo łączą, jak dawniej.",
+    "koppels_klavier": "Wczytaj wszystkie połączenia z zestawu",
+    "koppels_klavier_hint": "Włączone: wczytywane są także połączenia zestawu Hauptwerk wskazujące na inną klawiaturę (także oktawowe i w obrębie jednej klawiatury) oraz te, dla których zestaw podaje tylko w sieci przełączników, którą sekcję gra klawiatura. Wyłączone: te połączenia są pomijane, a jeśli nie ma innych, JM-Orgue tworzy połączenia ogólne, jak dotąd. Działa po ponownym wczytaniu.",
     "staart_afkap": "Obcinaj ciche ogony",
     "staart_afkap_hint": "Włączone: cichy koniec nagrania zwolnienia (cichszy niż próg poniżej, domyślnie −90 dB) jest pomijany. Zwalnia głosy i pamięć, a przy ustawieniu domyślnym jest niesłyszalny. Wyłączone: nagranie gra do końca. Działa po ponownym wczytaniu organów.",
     "staart_drempel": "Próg (dB)",

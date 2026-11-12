@@ -1,4 +1,4 @@
-//! Gedrag van de set, per orgel (E1, D3, F7, D7, E5).
+//! Gedrag van de set, per orgel (E1, D3, F7, D7, E5, E3).
 //!
 //! Vier dingen kunnen de klank of werking van een orgel veranderen: de niveaus
 //! van de maker (E1), de crossfade van de maker bij het loslaten (D3), of
@@ -23,7 +23,7 @@
 use crate::library::OrganSettings;
 use serde::Serialize;
 
-/// De vijf vlaggen voor één orgel.
+/// De zes vlaggen voor één orgel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct OrgelVlaggen {
     /// Niveau van het orgel en per pijplaag uit de definitie (E1).
@@ -37,6 +37,9 @@ pub struct OrgelVlaggen {
     pub staart_afkap: bool,
     /// De zwelkastwaarden van de set gebruiken als beginwaarde (E5).
     pub zwelkast_van_set: bool,
+    /// Klavier-naar-klavierkoppels van een Hauptwerk-set inlezen (E3) in plaats van ze over te slaan (en dan
+    /// algemene koppels op naam te maken).
+    pub koppels_klavier: bool,
 }
 
 impl OrgelVlaggen {
@@ -47,6 +50,7 @@ impl OrgelVlaggen {
         koppels_volgen_set: false,
         staart_afkap: false,
         zwelkast_van_set: false,
+        koppels_klavier: false,
     };
 
     /// De standaard voor een nieuw orgel: alles aan.
@@ -57,6 +61,7 @@ impl OrgelVlaggen {
         staart_afkap: true,
         // Uitzondering: ook voor een nieuw orgel uit (E5).
         zwelkast_van_set: false,
+        koppels_klavier: true,
     };
 
     /// De vlaggen voor een orgel dat nu geladen wordt.
@@ -78,6 +83,7 @@ impl OrgelVlaggen {
                 koppels_volgen_set: s.koppels_volgen_set.unwrap_or(false),
                 staart_afkap: s.staart_afkap.unwrap_or(false),
                 zwelkast_van_set: s.zwelkast_van_set.unwrap_or(false),
+                koppels_klavier: s.koppels_klavier.unwrap_or(false),
             },
         }
     }
@@ -89,6 +95,7 @@ impl OrgelVlaggen {
         vpo_sampler::set_overgangen_toepassen(self.overgangen_van_set);
         vpo_sampler::set_koppels_volgen_set(self.koppels_volgen_set);
         vpo_sampler::set_staart_afkap_aan(self.staart_afkap);
+        vpo_sampler::set_koppels_klavier(self.koppels_klavier);
     }
 
     /// Zet één vlag op naam; onbekende naam geeft None.
@@ -100,6 +107,7 @@ impl OrgelVlaggen {
             "koppels_volgen_set" => v.koppels_volgen_set = aan,
             "staart_afkap" => v.staart_afkap = aan,
             "zwelkast_van_set" => v.zwelkast_van_set = aan,
+            "koppels_klavier" => v.koppels_klavier = aan,
             _ => return None,
         }
         Some(v)
@@ -114,11 +122,11 @@ impl OrgelVlaggen {
         geforceerd: bool,
         huidig: OrgelVlaggen,
         opgeslagen: Option<&OrganSettings>,
-    ) -> (Option<bool>, Option<bool>, Option<bool>, Option<bool>, Option<bool>) {
+    ) -> (Option<bool>, Option<bool>, Option<bool>, Option<bool>, Option<bool>, Option<bool>) {
         if geforceerd {
             match opgeslagen {
-                Some(s) => (s.niveaus_van_set, s.overgangen_van_set, s.koppels_volgen_set, s.staart_afkap, s.zwelkast_van_set),
-                None => (None, None, None, None, None),
+                Some(s) => (s.niveaus_van_set, s.overgangen_van_set, s.koppels_volgen_set, s.staart_afkap, s.zwelkast_van_set, s.koppels_klavier),
+                None => (None, None, None, None, None, None),
             }
         } else {
             (
@@ -127,6 +135,7 @@ impl OrgelVlaggen {
                 Some(huidig.koppels_volgen_set),
                 Some(huidig.staart_afkap),
                 Some(huidig.zwelkast_van_set),
+                Some(huidig.koppels_klavier),
             )
         }
     }
@@ -139,6 +148,7 @@ impl OrgelVlaggen {
         s.koppels_volgen_set = Some(self.koppels_volgen_set);
         s.staart_afkap = Some(self.staart_afkap);
         s.zwelkast_van_set = Some(self.zwelkast_van_set);
+        s.koppels_klavier = Some(self.koppels_klavier);
     }
 }
 
@@ -192,7 +202,7 @@ mod tests {
     #[test]
     fn een_forcering_van_buiten_wint_van_alles() {
         let s = instellingen(Some(true), Some(true), Some(true));
-        let f = OrgelVlaggen { niveaus_van_set: false, overgangen_van_set: true, koppels_volgen_set: false, staart_afkap: true, zwelkast_van_set: true };
+        let f = OrgelVlaggen { niveaus_van_set: false, overgangen_van_set: true, koppels_volgen_set: false, staart_afkap: true, zwelkast_van_set: true, koppels_klavier: false };
         assert_eq!(OrgelVlaggen::bepaal(Some(&s), Some(f)), f);
         assert_eq!(OrgelVlaggen::bepaal(None, Some(f)), f);
     }
@@ -213,14 +223,14 @@ mod tests {
     fn geforceerde_vlaggen_worden_nooit_bewaard() {
         let huidig = OrgelVlaggen::NIEUW;
         // Normaal: de huidige stand, expliciet.
-        assert_eq!(OrgelVlaggen::te_bewaren(false, huidig, None), (Some(true), Some(true), Some(true), Some(true), Some(false)));
+        assert_eq!(OrgelVlaggen::te_bewaren(false, huidig, None), (Some(true), Some(true), Some(true), Some(true), Some(false), Some(true)));
         // Geforceerd, orgel zonder opgeslagen instellingen: niets vastleggen.
-        assert_eq!(OrgelVlaggen::te_bewaren(true, huidig, None), (None, None, None, None, None));
+        assert_eq!(OrgelVlaggen::te_bewaren(true, huidig, None), (None, None, None, None, None, None));
         // Geforceerd, met opgeslagen instellingen: die blijven zoals ze waren.
         let s = instellingen4(Some(false), None, Some(false), Some(false));
-        assert_eq!(OrgelVlaggen::te_bewaren(true, huidig, Some(&s)), (Some(false), None, Some(false), Some(false), None));
+        assert_eq!(OrgelVlaggen::te_bewaren(true, huidig, Some(&s)), (Some(false), None, Some(false), Some(false), None, None));
         // Zonder forcering wint de huidige stand over wat er stond (de gebruiker koos).
-        assert_eq!(OrgelVlaggen::te_bewaren(false, huidig, Some(&s)), (Some(true), Some(true), Some(true), Some(true), Some(false)));
+        assert_eq!(OrgelVlaggen::te_bewaren(false, huidig, Some(&s)), (Some(true), Some(true), Some(true), Some(true), Some(false), Some(true)));
     }
 
     #[test]
@@ -231,9 +241,10 @@ mod tests {
         assert!(v.met("koppels_volgen_set", true).unwrap().koppels_volgen_set);
         assert!(v.met("staart_afkap", true).unwrap().staart_afkap);
         assert!(v.met("zwelkast_van_set", true).unwrap().zwelkast_van_set);
+        assert!(v.met("koppels_klavier", true).unwrap().koppels_klavier);
         // De andere blijven zoals ze waren.
         let w = v.met("niveaus_van_set", true).unwrap();
-        assert!(!w.overgangen_van_set && !w.koppels_volgen_set && !w.staart_afkap && !w.zwelkast_van_set);
+        assert!(!w.overgangen_van_set && !w.koppels_volgen_set && !w.staart_afkap && !w.zwelkast_van_set && !w.koppels_klavier);
         assert_eq!(v.met("bestaat_niet", true), None);
     }
 
@@ -245,6 +256,7 @@ mod tests {
         assert_eq!(v["koppels_volgen_set"], true);
         assert_eq!(v["staart_afkap"], true);
         assert_eq!(v["zwelkast_van_set"], false, "nieuw orgel: de zwelkast van de set staat uit");
+        assert_eq!(v["koppels_klavier"], true);
     }
 
     /// Het orgel dat al opgeslagen is met de vier eerdere vlaggen heeft de zwelkastvlag niet:
@@ -271,5 +283,17 @@ mod tests {
         assert!(!v.staart_afkap);
         let aan = instellingen4(None, None, None, Some(true));
         assert!(OrgelVlaggen::bepaal(Some(&aan), None).staart_afkap, "een eigen keuze wint");
+    }
+
+    /// E3: een orgel dat al instellingen heeft (zonder deze vlag) houdt de koppels zoals ze waren (uit); een nieuw orgel
+    /// leest de klavier-naar-klavierkoppels van de set; een eigen keuze wint.
+    #[test]
+    fn klavierkoppels_bestaand_uit_nieuw_aan() {
+        let bestaand = instellingen4(Some(true), Some(true), Some(true), Some(true));
+        assert!(!OrgelVlaggen::bepaal(Some(&bestaand), None).koppels_klavier);
+        assert!(OrgelVlaggen::bepaal(None, None).koppels_klavier);
+        let aan = OrganSettings { koppels_klavier: Some(true), ..instellingen4(None, None, None, None) };
+        assert!(OrgelVlaggen::bepaal(Some(&aan), None).koppels_klavier);
+        assert!(!OrgelVlaggen::OUD.koppels_klavier);
     }
 }

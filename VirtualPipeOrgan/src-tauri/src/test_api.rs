@@ -652,7 +652,7 @@ fn route_test_only(
         // Gedrag van de set per orgel (E1 niveaus, D3 overgangen, F7 koppelketen,
         // D7 staartafkap, E5 zwelkast van de set), body {"path": "...", "niveaus_van_set": bool,
         // "overgangen_van_set": bool, "koppels_volgen_set": bool,
-        // "staart_afkap": bool, "zwelkast_van_set": bool} (weggelaten vlag = uit) of {"path": "...",
+        // "staart_afkap": bool, "zwelkast_van_set": bool, "koppels_klavier": bool} (weggelaten vlag = uit) of {"path": "...",
         // "wis": true}. Geldt bij de volgende /load_organ van dat orgel en wint
         // dan van de opgeslagen instellingen. Niet persistent (alleen voor proeven).
         (tiny_http::Method::Post, "/orgel_vlaggen") => {
@@ -672,6 +672,7 @@ fn route_test_only(
                 koppels_volgen_set: vlag("koppels_volgen_set"),
                 staart_afkap: vlag("staart_afkap"),
                 zwelkast_van_set: vlag("zwelkast_van_set"),
+                koppels_klavier: vlag("koppels_klavier"),
             };
             state.vlag_overrides.write().insert(sleutel, vlaggen);
             Ok(serde_json::to_value(vlaggen).unwrap_or_default())

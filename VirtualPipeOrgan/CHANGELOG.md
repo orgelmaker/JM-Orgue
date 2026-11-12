@@ -6,6 +6,17 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### Koppels van Hauptwerk-sets volledig inlezen (E3)
+- Bij een aantal Hauptwerk-sets toonde JM-Orgue geraden koppels (elk manuaal aan elk ander en aan het pedaal) in plaats van
+  de koppels van de set. Twee oorzaken: koppels die naar een ander *klavier* wijzen werden overgeslagen, en als de set
+  niet met een vaste route zei welk werk een klavier bespeelt, vielen alle koppels van dat klavier weg. Nu leest JM-Orgue
+  ook die koppels, met octaafkoppels en koppels binnen één klavier; welk werk een klavier bespeelt haalt hij uit het
+  schakelnetwerk van de set. Gemeten op vijf leesbare sets: in plaats van 19 tot 69 geraden koppels de 3 tot 17 van de set.
+- Per orgel (vinkje "Koppels van de set volledig inlezen" onder Instellingen → Klank): een orgel dat al instellingen heeft
+  houdt de koppels zoals ze waren; een nieuw orgel krijgt die van de set.
+- Telprogramma `schakelnet_tellen`: geen knop van de speeltafel bedient in deze sets meer dan één register of koppel, dus
+  een volledige simulatie van het schakelnetwerk is niet nodig.
+
 ### Audio-thread zonder locks (D1, fase 4)
 - De audio-thread neemt geen locks meer: zijn eigen instellingen zijn gewone waarden, de piekmeters zijn atomair, en bij
   een opname of een wissel van audioapparaat wacht hij nooit (in het zeldzame geval dat iets bezet is, geeft dat ene blok

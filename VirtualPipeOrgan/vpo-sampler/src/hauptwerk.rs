@@ -51,6 +51,15 @@ static NIVEAUS_TOEPASSEN: std::sync::atomic::AtomicBool = std::sync::atomic::Ato
 pub fn set_niveaus_toepassen(aan: bool) { NIVEAUS_TOEPASSEN.store(aan, std::sync::atomic::Ordering::Relaxed); }
 pub fn niveaus_toepassen() -> bool { NIVEAUS_TOEPASSEN.load(std::sync::atomic::Ordering::Relaxed) }
 
+/// Koppels van de set volledig inlezen (E3): een `KeyAction` met een doel-*klavier* in plaats van een doel-divisie
+/// (`DestIsKeyboardNotDivision = Y`, of een lege `DestDivisionID` met een `DestKeyboardID`), en klavieren zonder
+/// basisroute via het schakelnetwerk (zie `vul_klavier_divisies`). Uit = zoals vroeger: die koppels vallen weg en
+/// zonder andere koppels maakt de app algemene koppels op naam. Proces-breed en per
+/// orgel gezet vóór het laden (zie `commands::zet_orgelvlaggen_voor`); standaard uit.
+static KOPPELS_KLAVIER: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+pub fn set_koppels_klavier(aan: bool) { KOPPELS_KLAVIER.store(aan, std::sync::atomic::Ordering::Relaxed); }
+pub fn koppels_klavier() -> bool { KOPPELS_KLAVIER.load(std::sync::atomic::Ordering::Relaxed) }
+
 /// Overgangslengtes van de maker (D3): de crossfade-duur tussen speelnoot en
 /// release (`ReleaseCrossfadeLengthMs`) toepassen in plaats van de automatische
 /// duur per noot. Proces-breed en standaard aan; de omgevingsvariabele
@@ -167,7 +176,7 @@ fn load_hauptwerk_intern(
     // De schakelaar één keer lezen: dezelfde stand voor de bouw en het verslag.
     let niveaus = niveaus_toepassen();
     let overgangen = overgangen_toepassen();
-    match build_definition_met(&xml, root.clone(), &pkg_dirs, niveaus, overgangen) {
+    match build_definition_volledig(&xml, root.clone(), &pkg_dirs, niveaus, overgangen, koppels_klavier()) {
         Ok(def) => {
             let mut v = ImportReport::uit_definitie(
                 "hauptwerk", &versie, &bron, &def.organ.church_name,
@@ -253,7 +262,7 @@ pub(crate) fn crescendo_uit_tabellen(
     // doorlopen stopt bij een register-schakelaar.
     let bereik = |start: u32| -> BTreeSet<u32> {
         let mut uit = BTreeSet::new();
-        let mut gezien: HashSet<u32> = HashSet::new();
+        let mut gezien: std::collections::HashSet<u32> = std::collections::HashSet::new();
         let mut wachtrij = vec![(start, 0usize)];
         while let Some((s, diepte)) = wachtrij.pop() {
             if !gezien.insert(s) { continue; }
@@ -872,6 +881,18 @@ fn build_definition_met(
     pkg_dirs: &HashMap<u32, PathBuf>,
     niveaus: bool,
     overgangen: bool,
+) -> Result<OrganDefinition, OdfError> {
+    build_definition_volledig(xml, root, pkg_dirs, niveaus, overgangen, false)
+}
+
+/// Als [`build_definition_met`], plus de keuze voor klavier-naar-klavierkoppels (E3).
+fn build_definition_volledig(
+    xml: &str,
+    root: PathBuf,
+    pkg_dirs: &HashMap<u32, PathBuf>,
+    niveaus: bool,
+    overgangen: bool,
+    koppels_klavier: bool,
 ) -> Result<OrganDefinition, OdfError> {
     // --- Parse the object lists we need ---
     // Een "compacted" ODF schrijft elk object als <o> met letter-aliassen; de
@@ -1570,22 +1591,42 @@ fn build_definition_met(
             }
         }
     }
+    // E3: zonder basisroute weet de importer niet welke divisie een klavier bespeelt, en vallen de koppels van dat
+    // klavier weg. Met de keuze van E3 vult de set dat zelf aan: eerst via het schakelnetwerk, daarna op gelijke naam.
+    if koppels_klavier {
+        vul_klavier_divisies(&mut kbd_to_div, &lees("Keyboard"), &divisions, &lees("KeyboardKey"), &lees("DivisionInput"), &lees("SwitchLinkage"));
+    }
     let mut coupler_defs: Vec<CouplerDef> = Vec::new();
     let mut coupler_num = 1u32;
     let mut manual_coupler_refs: HashMap<u32, Vec<u32>> = HashMap::new();
     for ka in &key_actions {
         let cond = ka.get("ConditionSwitchID").map(|s| s.trim()).unwrap_or("");
         let dest_is_kbd = ka.get("DestIsKeyboardNotDivision").map(|s| s == "Y").unwrap_or(false);
-        if cond.is_empty() || dest_is_kbd {
-            continue; // base routing or keyboard-to-keyboard, not a user coupler
+        if cond.is_empty() {
+            continue; // base routing, not a user coupler
+        }
+        // Doel is een klavier (E3): expliciet, of geen doel-divisie maar wel een doel-klavier. Dan geldt de divisie
+        // die dat klavier bespeelt (ook als dat het eigen klavier is: een octaafkoppel binnen één klavier).
+        let doel_klavier = if dest_is_kbd || ka.get_u32("DestDivisionID").is_none() { ka.get_u32("DestKeyboardID") } else { None };
+        if (dest_is_kbd || doel_klavier.is_some()) && !koppels_klavier {
+            continue; // keyboard-to-keyboard: alleen met de keuze van E3
         }
         let src_kbd = match ka.get_u32("SourceKeyboardID") { Some(v) => v, None => continue };
-        let dest_div = match ka.get_u32("DestDivisionID") { Some(v) => v, None => continue };
+        let dest_div = match doel_klavier {
+            Some(k) => match kbd_to_div.get(&k) { Some(v) => *v, None => continue },
+            None => match ka.get_u32("DestDivisionID") { Some(v) => v, None => continue },
+        };
         let src_div = match kbd_to_div.get(&src_kbd) { Some(v) => *v, None => continue };
         let src_manual = match div_to_manual_number.get(&src_div) { Some(v) => *v, None => continue };
         let dest_manual = match div_to_manual_number.get(&dest_div) { Some(v) => *v, None => continue };
         let offset = ka.get_i32("MIDINoteNumberIncrement").unwrap_or(0);
-        let name = clean_stop_name(ka.get("Name").map(|s| s.as_str()).unwrap_or(""));
+        let ruw = ka.get("Name").map(|s| s.as_str()).unwrap_or("");
+        let mut name = clean_stop_name(ruw);
+        // E3: een koppelnaam als "GO / P" verloor bij het opschonen zijn voorvoegsel ("/ P"), waardoor twee koppels
+        // dezelfde naam kregen. Begint de opgeschoonde naam met een schuine streep of is hij leeg, dan de eigen naam.
+        if koppels_klavier && (name.trim_start().starts_with('/') || name.trim().is_empty()) && !ruw.trim().is_empty() {
+            name = ruw.trim().to_string();
+        }
         coupler_defs.push(CouplerDef {
             number: coupler_num,
             name,
@@ -2093,6 +2134,75 @@ pub fn match_divisie(naam: &str, divisies: &[String]) -> Option<String> {
         if onderscheidend && woorden.contains(&laatste) { return Some(d.clone()); }
     }
     None
+}
+
+/// Welke divisie bespeelt een klavier (E3), voor klavieren zonder basisroute (een `KeyAction` zonder voorwaarde).
+///
+/// 1. Het schakelnetwerk van de set: vanaf de toetsschakelaars van het klavier (`KeyboardKey`) langs verbindingen
+///    zonder voorwaarde naar de ingangen van een divisie (`DivisionInput`); de divisie die de meeste toetsen bereiken.
+/// 2. Anders een divisie met precies dezelfde naam als het klavier.
+///
+/// Bestaande routes blijven staan.
+pub(crate) fn vul_klavier_divisies(
+    kbd_to_div: &mut HashMap<u32, u32>,
+    klavieren: &[FieldMap],
+    divisies: &[FieldMap],
+    toetsen: &[FieldMap],
+    ingangen: &[FieldMap],
+    verbindingen: &[FieldMap],
+) {
+    let toets_klavier: HashMap<u32, u32> = toetsen.iter()
+        .filter_map(|k| Some((k.get_u32("SwitchID")?, k.get_u32("KeyboardID")?)))
+        .collect();
+    let ingang_divisie: HashMap<u32, u32> = ingangen.iter()
+        .filter_map(|d| Some((d.get_u32("SwitchID")?, d.get_u32("DivisionID")?)))
+        .collect();
+    let mut naar: HashMap<u32, Vec<u32>> = HashMap::new();
+    for l in verbindingen {
+        if l.get("ConditionSwitchID").is_some_and(|c| !c.trim().is_empty()) {
+            continue;
+        }
+        if let (Some(a), Some(b)) = (l.get_u32("SourceSwitchID"), l.get_u32("DestSwitchID")) {
+            naar.entry(a).or_default().push(b);
+        }
+    }
+    let mut stemmen: HashMap<u32, HashMap<u32, usize>> = HashMap::new();
+    for (&sw, &kbd) in &toets_klavier {
+        if kbd_to_div.contains_key(&kbd) {
+            continue;
+        }
+        let mut gezien: std::collections::HashSet<u32> = std::collections::HashSet::new();
+        let mut stapel = vec![sw];
+        while let Some(x) = stapel.pop() {
+            if !gezien.insert(x) {
+                continue;
+            }
+            if let Some(&d) = ingang_divisie.get(&x) {
+                *stemmen.entry(kbd).or_default().entry(d).or_default() += 1;
+            }
+            if let Some(v) = naar.get(&x) {
+                stapel.extend(v.iter().copied());
+            }
+        }
+    }
+    for (kbd, per_div) in stemmen {
+        // Meeste toetsen; bij gelijkspel de laagste divisie-ID (vaste uitkomst).
+        if let Some((&d, _)) = per_div.iter().max_by(|a, b| a.1.cmp(b.1).then(b.0.cmp(a.0))) {
+            kbd_to_div.entry(kbd).or_insert(d);
+        }
+    }
+    let div_op_naam: HashMap<String, u32> = divisies.iter()
+        .filter_map(|d| Some((d.get("Name")?.trim().to_lowercase(), d.get_u32("DivisionID")?)))
+        .collect();
+    for k in klavieren {
+        let (Some(kbd), Some(naam)) = (k.get_u32("KeyboardID"), k.get("Name")) else { continue };
+        if kbd_to_div.contains_key(&kbd) {
+            continue;
+        }
+        if let Some(&d) = div_op_naam.get(&naam.trim().to_lowercase()) {
+            kbd_to_div.insert(kbd, d);
+        }
+    }
 }
 
 /// Eerste getal in een schakelaarnaam ("Tremulant 1 Noise" → 1).
@@ -3176,6 +3286,62 @@ mod tests {
 <ObjectList ObjectType="Enclosure"><Enclosure><EnclosureID>7</EnclosureID><Name>Enclosure Grand Orgue</Name></Enclosure></ObjectList>
 <ObjectList ObjectType="EnclosurePipe"><EnclosurePipe><PipeID>11</PipeID><EnclosureID>7</EnclosureID></EnclosurePipe><EnclosurePipe><PipeID>12</PipeID><EnclosureID>7</EnclosureID></EnclosurePipe></ObjectList>
 </Hauptwerk>"#.to_string()
+    }
+
+    /// E3: klavier-naar-klavierkoppels. Twee divisies (GO op klavier 1, Pedal op klavier 2), basisroutes, en twee
+    /// koppels met een doel-klavier: Pedal → GO (expliciet `DestIsKeyboardNotDivision`), en een sub binnen GO zonder dat
+    /// veld (lege `DestDivisionID`, zoals sommige sets het schrijven).
+    #[test]
+    fn klavier_naar_klavierkoppels_alleen_met_de_keuze() {
+        let xml = mini_xml()
+            .replace("<Division><DivisionID>1</DivisionID><Name>Grand Orgue</Name></Division>",
+                     "<Division><DivisionID>1</DivisionID><Name>Grand Orgue</Name></Division><Division><DivisionID>2</DivisionID><Name>Pedal</Name></Division>")
+            .replace("<Stop><StopID>2</StopID><Name>Montre 8</Name><DivisionID>1</DivisionID></Stop>",
+                     "<Stop><StopID>2</StopID><Name>Montre 8</Name><DivisionID>2</DivisionID></Stop>")
+            .replace("</Hauptwerk>", r#"<ObjectList ObjectType="KeyAction">
+<KeyAction><SourceKeyboardID>1</SourceKeyboardID><DestDivisionID>1</DestDivisionID><DestIsKeyboardNotDivision>N</DestIsKeyboardNotDivision></KeyAction>
+<KeyAction><SourceKeyboardID>2</SourceKeyboardID><DestDivisionID>2</DestDivisionID><DestIsKeyboardNotDivision>N</DestIsKeyboardNotDivision></KeyAction>
+<KeyAction><SourceKeyboardID>2</SourceKeyboardID><DestKeyboardID>1</DestKeyboardID><DestIsKeyboardNotDivision>Y</DestIsKeyboardNotDivision><Name>GO / P</Name><ConditionSwitchID>31</ConditionSwitchID></KeyAction>
+<KeyAction><SourceKeyboardID>1</SourceKeyboardID><DestKeyboardID>1</DestKeyboardID><DestDivisionID></DestDivisionID><Name>b GO</Name><ConditionSwitchID>32</ConditionSwitchID><MIDINoteNumberIncrement>-12</MIDINoteNumberIncrement></KeyAction>
+</ObjectList>
+</Hauptwerk>"#);
+        let mut pkg = HashMap::new();
+        pkg.insert(1u32, PathBuf::from("/pkg"));
+        let uit = build_definition_volledig(&xml, PathBuf::from("/root"), &pkg, true, true, false).expect("build");
+        assert!(uit.couplers.is_empty(), "zonder de keuze: zoals vroeger geen koppels uit deze KeyActions");
+        let aan = build_definition_volledig(&xml, PathBuf::from("/root"), &pkg, true, true, true).expect("build");
+        assert_eq!(aan.couplers.len(), 2, "{:?}", aan.couplers);
+        let man = |naam: &str| aan.manuals.iter().find(|m| m.name.contains(naam)).map(|m| m.number).expect("manuaal");
+        let (go, ped) = (man("Grand"), man("Pedal"));
+        let mut paren: Vec<(u32, u32, i32)> = aan.couplers.iter().map(|c| (c.source_manual, c.destination_manual, c.destination_keyshift)).collect();
+        paren.sort();
+        let mut verwacht = vec![(ped, go, 0), (go, go, -12)];
+        verwacht.sort();
+        assert_eq!(paren, verwacht, "Pedal → GO op 8', en GO → GO een octaaf lager");
+    }
+
+    /// E3: klavier → divisie zonder basisroute: via het netwerk (zonder voorwaarde), anders op gelijke naam; een
+    /// verbinding met voorwaarde telt niet, en een bestaande route blijft staan.
+    #[test]
+    fn klavier_divisies_uit_netwerk_en_naam() {
+        let fm = |kv: &[(&str, &str)]| -> FieldMap { kv.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect() };
+        let klavieren = vec![fm(&[("KeyboardID", "1"), ("Name", "Pedal")]), fm(&[("KeyboardID", "2"), ("Name", "Manual I")]), fm(&[("KeyboardID", "3"), ("Name", "Manual II")]), fm(&[("KeyboardID", "4"), ("Name", "Vast")])];
+        let divisies = vec![fm(&[("DivisionID", "11"), ("Name", "Pedal")]), fm(&[("DivisionID", "12"), ("Name", "Manual I")]), fm(&[("DivisionID", "13"), ("Name", "manual ii ")]), fm(&[("DivisionID", "14"), ("Name", "Vast")])];
+        let toetsen = vec![fm(&[("KeyboardID", "1"), ("SwitchID", "100")]), fm(&[("KeyboardID", "2"), ("SwitchID", "200")]), fm(&[("KeyboardID", "3"), ("SwitchID", "300")])];
+        let ingangen = vec![fm(&[("DivisionID", "11"), ("SwitchID", "101")]), fm(&[("DivisionID", "12"), ("SwitchID", "201")]), fm(&[("DivisionID", "11"), ("SwitchID", "301")])];
+        let verbindingen = vec![
+            fm(&[("SourceSwitchID", "100"), ("DestSwitchID", "150")]),
+            fm(&[("SourceSwitchID", "150"), ("DestSwitchID", "101")]),
+            fm(&[("SourceSwitchID", "200"), ("DestSwitchID", "201")]),
+            // Klavier 3 bereikt het pedaal alleen via een koppel (met voorwaarde): telt niet.
+            fm(&[("SourceSwitchID", "300"), ("DestSwitchID", "301"), ("ConditionSwitchID", "9")]),
+        ];
+        let mut k2d: HashMap<u32, u32> = HashMap::from([(4, 99)]);
+        vul_klavier_divisies(&mut k2d, &klavieren, &divisies, &toetsen, &ingangen, &verbindingen);
+        assert_eq!(k2d.get(&1), Some(&11), "via twee verbindingen");
+        assert_eq!(k2d.get(&2), Some(&12));
+        assert_eq!(k2d.get(&3), Some(&13), "niet via de koppel met voorwaarde, wel op naam (hoofdletters/spaties)");
+        assert_eq!(k2d.get(&4), Some(&99), "bestaande route blijft");
     }
 
     fn mini_definition() -> OrganDefinition {

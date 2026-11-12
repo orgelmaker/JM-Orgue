@@ -280,6 +280,8 @@
     "overgangen_toepassen_hint": "On: the crossfade duration between the sounding note and the release that the set's maker configured is used, instead of an automatic duration per note. Only for sets that specify it. Off: automatic duration as before.",
     "koppels_volgen_set": "Couplers follow the set",
     "koppels_volgen_set_hint": "On: a coupler only works through other couplers when the set allows it (GrandOrgue sets). Off: couplers always chain, as before.",
+    "koppels_klavier": "Read all couplers from the set",
+    "koppels_klavier_hint": "On: couplers of a Hauptwerk set that point to another keyboard (including octave couplers and couplers within one keyboard), and couplers for which the set only states in its switch network which division a keyboard plays, are read. Off: those couplers are skipped, and if there are no others JM-Orgue makes generic couplers, as before. Takes effect after reloading.",
     "staart_afkap": "Cut off silent tails",
     "staart_afkap_hint": "On: the silent end of a release recording (quieter than the threshold below, −90 dB by default) is left out. This frees voices and memory and is inaudible at the default. Off: the recording plays to its end. Takes effect after reloading the organ.",
     "staart_drempel": "Threshold (dB)",

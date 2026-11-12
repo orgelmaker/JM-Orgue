@@ -280,6 +280,8 @@
     "overgangen_toepassen_hint": "Attivo: si usa la durata della dissolvenza tra la nota che suona e il rilascio impostata dal creatore del set, invece di una durata automatica per nota. Solo per i set che la indicano. Disattivo: durata automatica come prima.",
     "koppels_volgen_set": "Gli accoppiamenti seguono il set",
     "koppels_volgen_set_hint": "Attivo: un accoppiamento prosegue attraverso altri accoppiamenti solo se il set lo permette (set GrandOrgue). Disattivo: gli accoppiamenti si concatenano sempre, come prima.",
+    "koppels_klavier": "Leggi tutte le unioni del set",
+    "koppels_klavier_hint": "Attivo: vengono lette anche le unioni di un set Hauptwerk che puntano a un'altra tastiera (anche all'ottava e all'interno della stessa tastiera) e quelle per cui il set indica solo nella rete di interruttori quale corpo suona una tastiera. Disattivo: queste unioni vengono ignorate e, se non ce ne sono altre, JM-Orgue crea unioni generiche, come prima. Ha effetto dopo il ricaricamento.",
     "staart_afkap": "Taglia le code silenziose",
     "staart_afkap_hint": "Attivo: la parte finale silenziosa di una registrazione di rilascio (più debole della soglia qui sotto, di default −90 dB) viene omessa. Libera voci e memoria ed è inudibile con l'impostazione predefinita. Disattivo: la registrazione suona fino alla fine. Ha effetto dopo aver ricaricato l'organo.",
     "staart_drempel": "Soglia (dB)",

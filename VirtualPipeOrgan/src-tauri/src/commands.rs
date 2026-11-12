@@ -570,7 +570,7 @@ pub fn get_zwelkast_voorstel(state: State<AppState>) -> Vec<crate::zwelkast_set:
 }
 
 /// Zet één vlag (`niveaus_van_set`, `overgangen_van_set`, `koppels_volgen_set`,
-/// `staart_afkap` of `zwelkast_van_set`)
+/// `staart_afkap`, `zwelkast_van_set` of `koppels_klavier`)
 /// voor het geladen orgel. De importers lezen ze bij het laden, dus de wijziging
 /// werkt na een herlaad. Wordt meteen in de opgeslagen instellingen van het orgel
 /// gezet als die al bestaan; een orgel zonder opgeslagen instellingen bewaart ze
@@ -772,12 +772,13 @@ fn zet_orgelvlaggen_voor(state: &AppState, path: &str) {
     vlaggen.zet_importers();
     *state.orgel_vlaggen.write() = vlaggen;
     info!(
-        "Gedrag van de set voor dit orgel: niveaus {}, overgangen {}, koppels volgen de set {}, stille staart afkappen {}, zwelkast van de set {}{}",
+        "Gedrag van de set voor dit orgel: niveaus {}, overgangen {}, koppels volgen de set {}, stille staart afkappen {}, zwelkast van de set {}, klavierkoppels van de set {}{}",
         if vlaggen.niveaus_van_set { "aan" } else { "uit" },
         if vlaggen.overgangen_van_set { "aan" } else { "uit" },
         if vlaggen.koppels_volgen_set { "aan" } else { "uit" },
         if vlaggen.staart_afkap { "aan" } else { "uit" },
         if vlaggen.zwelkast_van_set { "aan" } else { "uit" },
+        if vlaggen.koppels_klavier { "aan" } else { "uit" },
         if forceer.is_some() { " (geforceerd)" } else { "" },
     );
 }
@@ -10971,7 +10972,7 @@ pub fn do_save_organ_settings(state: &AppState, presets: HashMap<String, PresetD
 
     // Gedrag van de set (E1/D3/F7): wat nu staat, tenzij een proef via de test-API
     // het geforceerd heeft; zo'n geforceerde keuze wordt nooit bewaard.
-    let (vlag_niveaus, vlag_overgangen, vlag_koppels, vlag_staart, vlag_zwelkast) = {
+    let (vlag_niveaus, vlag_overgangen, vlag_koppels, vlag_staart, vlag_zwelkast, vlag_klavier) = {
         let geforceerd = state.vlag_overrides.read().contains_key(&crate::library::pad_sleutel(&organ_id));
         let lib = state.organ_library.read();
         crate::orgelvlaggen::OrgelVlaggen::te_bewaren(
@@ -11009,6 +11010,7 @@ pub fn do_save_organ_settings(state: &AppState, presets: HashMap<String, PresetD
         koppels_volgen_set: vlag_koppels,
         staart_afkap: vlag_staart,
         zwelkast_van_set: vlag_zwelkast,
+        koppels_klavier: vlag_klavier,
         niet_geladen_registers: state.niet_geladen_registers.read().clone(),
         listening_position: Some(*state.listening_position.read()),
         background_gain: Some(*state.background_gain.read()),

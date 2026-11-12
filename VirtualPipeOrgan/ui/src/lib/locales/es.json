@@ -280,6 +280,8 @@
     "overgangen_toepassen_hint": "Activado: se usa la duración del fundido entre la nota sonando y la liberación que fijó el creador del set, en lugar de una duración automática por nota. Solo para sets que la indican. Desactivado: duración automática como antes.",
     "koppels_volgen_set": "Los acoplamientos siguen el set",
     "koppels_volgen_set_hint": "Activado: un acoplamiento solo continúa a través de otros acoplamientos si el set lo permite (sets GrandOrgue). Desactivado: los acoplamientos siempre se encadenan, como antes.",
+    "koppels_klavier": "Leer todos los enganches del set",
+    "koppels_klavier_hint": "Activado: se leen también los enganches de un set Hauptwerk que apuntan a otro teclado (también a la octava y dentro de un mismo teclado) y aquellos en los que el set solo indica en su red de interruptores qué cuerpo toca un teclado. Desactivado: esos enganches se omiten y, si no hay otros, JM-Orgue crea enganches genéricos, como antes. Tiene efecto tras recargar.",
     "staart_afkap": "Cortar las colas silenciosas",
     "staart_afkap_hint": "Activado: el final silencioso de una grabación de liberación (más bajo que el umbral de abajo, −90 dB por defecto) se omite. Libera voces y memoria y es inaudible con el valor por defecto. Desactivado: la grabación suena hasta el final. Surte efecto al volver a cargar el órgano.",
     "staart_drempel": "Umbral (dB)",

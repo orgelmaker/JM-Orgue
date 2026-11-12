@@ -280,6 +280,8 @@
     "overgangen_toepassen_hint": "An: die Dauer der Überblendung zwischen dem klingenden Ton und dem Release, die der Ersteller des Sets eingestellt hat, wird verwendet statt einer automatischen Dauer pro Ton. Nur für Sets, die sie angeben. Aus: automatische Dauer wie bisher.",
     "koppels_volgen_set": "Koppeln folgen dem Set",
     "koppels_volgen_set_hint": "An: eine Koppel wirkt nur dann über andere Koppeln weiter, wenn das Set es erlaubt (GrandOrgue-Sets). Aus: Koppeln verketten sich immer, wie bisher.",
+    "koppels_klavier": "Koppeln des Sets vollständig einlesen",
+    "koppels_klavier_hint": "An: auch Koppeln eines Hauptwerk-Sets, die auf ein anderes Manual zeigen (auch Oktavkoppeln und Koppeln innerhalb eines Manuals), und Koppeln, bei denen das Set nur im Schaltnetz angibt, welches Werk ein Manual spielt, werden eingelesen. Aus: diese Koppeln entfallen, und gibt es keine anderen, erzeugt JM-Orgue allgemeine Koppeln, wie bisher. Wirkt nach dem Neuladen.",
     "staart_afkap": "Stille Ausklänge abschneiden",
     "staart_afkap_hint": "An: das stille Ende einer Release-Aufnahme (leiser als die Schwelle unten, standardmäßig −90 dB) wird weggelassen. Das gibt Stimmen und Speicher frei und ist bei der Standardeinstellung nicht zu hören. Aus: die Aufnahme spielt bis zum Ende. Wirkt nach dem erneuten Laden der Orgel.",
     "staart_drempel": "Schwelle (dB)",
