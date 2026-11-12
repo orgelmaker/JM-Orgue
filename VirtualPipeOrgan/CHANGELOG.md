@@ -6,6 +6,8 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+## [0.9.54] - 2026-11-12
+
 ### Tremulant-golfvormen ook uit gecomprimeerde Hauptwerk-sets (C5)
 - De opgenomen tremulant-golfvormen worden nu ook gelezen uit gecomprimeerde Hauptwerk-definities, de meeste commerciële
   sets. Per bestand wordt gecontroleerd of de verwijzingen kloppen (tremulant, sample, pijp); klopt iets niet, dan blijft
