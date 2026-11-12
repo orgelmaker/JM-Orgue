@@ -409,8 +409,11 @@ fn route_shared(
             let (me, mw, ge, gw, bl, gew) = crate::mengpool::neem_barriere_meting();
             // D1: geheugenaanvragen in de callback sinds de vorige uitlezing (null = bouw zonder `rt-toezicht`).
             let allocaties = crate::rt_toezicht::stand(true)
-                .map(|(totaal, max, callbacks)| json!({ "totaal": totaal, "max_per_callback": max, "callbacks_met": callbacks }));
-            json!({ "allocaties": allocaties, "totaal": totaal, "segmenten": m, "stemmen": stemmen, "stemstarts": starts, "commandos": cmds, "locks_ms": lm,
+                .map(|(totaal, max, callbacks, aanvragen, aanvragen_max)| json!({ "totaal": totaal, "max_per_callback": max,
+                    "callbacks_met": callbacks, "aanvragen": aanvragen, "aanvragen_max_per_callback": aanvragen_max }));
+            let per_plek: serde_json::Map<String, Value> = crate::rt_toezicht::per_plek(true)
+                .into_iter().map(|(p, n)| (p.to_string(), json!(n))).collect();
+            json!({ "allocaties": allocaties, "aanvragen_per_plek": per_plek, "meldingen_gemist": crate::rt_melding::gemist(), "totaal": totaal, "segmenten": m, "stemmen": stemmen, "stemstarts": starts, "commandos": cmds, "locks_ms": lm,
                     "rt": serde_json::to_value(crate::rt_prioriteit::status()).unwrap_or_default(),
                     "barriere": { "max_eigen_us": me, "max_wacht_us": mw, "gem_eigen_us": ge, "gem_wacht_us": gw, "blokken": bl, "gewekt": gew } })
         }),

@@ -6,6 +6,14 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### Audio-thread zonder geheugenaanvragen en logregels (D1, fase 2 en 3)
+- Tijdens het spelen, bij een registerwissel, een tremulantwissel en een lopende opname vraagt de audio-thread geen geheugen meer
+  aan en schrijft hij geen logregels (gemeten met de teller: van tot 76 aanvragen per callback naar 0). Bij een orgelwissel ging
+  het van ruim 1600 in één callback naar 1. Wat de audio-thread opgaf (oude kaarten, opnamebuffers), gaat naar een
+  opruimthread.
+- De regels in het logbestand blijven, maar komen nu van de kant die het commando verstuurt; meldingen tijdens het spelen
+  ("geen opname voor deze pijp", "zwaar belast") schrijft een eigen thread.
+
 ### Orgelwissel in één keer (D1/F3, fase 0 en 1)
 - Bij het wisselen van orgel gaat alles voor de klankmachine (opnamen, registerkaarten, tremulanten, intonatie, kasten, wind en
   de standaardwaarden) als één pakket naar de audio-thread, die het in één keer verwerkt. Een noot ziet daardoor het hele oude of

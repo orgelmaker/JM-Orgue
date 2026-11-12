@@ -1829,7 +1829,7 @@ fn laad_en_stuur_bijgeluiden(state: &AppState, defs: &[vpo_sampler::grandorgue::
     }
     // Altijd sturen, ook leeg — anders blijven de bijgeluiden van een
     // vorig orgel doorlopen bij een wissel.
-    state.send_audio_command(AudioCommand::SetBackgroundVoices(voices));
+    state.send_audio_command(AudioCommand::SetBackgroundVoices(Box::new(crate::background_sounds::actief_maken(voices))));
 }
 
 /// Startstand van de motor bij het laden: een herlaad van hetzelfde orgel
@@ -4203,6 +4203,8 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
         {
             let player_lock = state.audio_player.read();
             if let Some(ref player) = *player_lock {
+                // D1: lege opslag voor het nieuwe orgel hier maken, niet in de audio-callback.
+                let _ = crate::orgelbundel::stuur(player, crate::audio::AudioCommand::VerseOpslag(crate::audio::VerseOpslag::nieuw(preload_buffers.len())));
                 crate::orgelbundel::stuur(
                     player, crate::audio::AudioCommand::RegisterPreloadBuffers(Arc::new(preload_buffers)))
                     .map_err(|e| format!("Failed to register preload buffers: {}", e))?;
@@ -9844,6 +9846,8 @@ pub fn do_load_samples_from_directory_locked(state: &AppState, directory: &str) 
     {
         let player_lock = state.audio_player.read();
         if let Some(ref player) = *player_lock {
+            // D1: lege opslag voor het nieuwe orgel hier maken, niet in de audio-callback.
+            let _ = crate::orgelbundel::stuur(player, crate::audio::AudioCommand::VerseOpslag(crate::audio::VerseOpslag::nieuw(preload_buffers.len())));
             crate::orgelbundel::stuur(player, crate::audio::AudioCommand::RegisterPreloadBuffers(Arc::new(preload_buffers)))
                 .map_err(|e| format!("Failed to register preload buffers: {}", e))?;
             // Custom sample-mappen kennen geen percussieve stops of ODF-intonatie/loops:

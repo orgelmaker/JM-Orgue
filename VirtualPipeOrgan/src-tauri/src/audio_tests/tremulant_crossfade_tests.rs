@@ -10,7 +10,7 @@ fn preload(frames: usize, rate: u32, trim: usize, lp: Option<(u64, u64)>) -> Arc
         total_samples: frames + trim,
         loop_start: lp.map(|(a, _)| a),
         loop_end: lp.map(|(_, b)| b),
-        source_path: std::path::PathBuf::from("trem.wav"),
+        source_path: std::sync::Arc::from(std::path::Path::new("trem.wav")),
         channels: 1,
         bits_per_sample: 16,
         data_offset: 0,

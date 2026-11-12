@@ -9,6 +9,7 @@
 
 mod acoustics;
 mod audio;
+mod commando_log;
 mod commands;
 mod crescendo_voorstel;
 mod background_sounds;
@@ -31,6 +32,7 @@ mod klavar;
 mod recorder;
 mod remote;
 mod retune;
+mod rt_melding;
 mod rt_prioriteit;
 mod rt_toezicht;
 mod zwelkast_set;

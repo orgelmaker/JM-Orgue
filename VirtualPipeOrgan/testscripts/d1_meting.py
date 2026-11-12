@@ -77,6 +77,7 @@ def slechtste():
     s = api('GET', '/perf/slechtste')
     return {
         'allocaties': s.get('allocaties'),
+        'aanvragen_per_plek': s.get('aanvragen_per_plek'),
         'totaal': s.get('totaal'),
         'segmenten': s.get('segmenten'),
         'stemmen': s.get('stemmen'),
@@ -215,11 +216,11 @@ def main():
             api('GET', '/perf/slechtste')
             fn()
             uitkomst['scenarios'][naam] = slechtste()
-            print(naam, json.dumps(uitkomst['scenarios'][naam]['allocaties']), 'totaal', uitkomst['scenarios'][naam]['totaal'])
+            print(naam, json.dumps(uitkomst['scenarios'][naam]['allocaties']), 'plek', uitkomst['scenarios'][naam]['aanvragen_per_plek'], 'totaal', uitkomst['scenarios'][naam]['totaal'])
         api('GET', '/perf/slechtste')
         extra = scenario_wissel(a.b)
         uitkomst['scenarios']['wissel'] = dict(slechtste(), **extra)
-        print('wissel', json.dumps(uitkomst['scenarios']['wissel']['allocaties']), extra)
+        print('wissel', json.dumps(uitkomst['scenarios']['wissel']['allocaties']), 'plek', uitkomst['scenarios']['wissel']['aanvragen_per_plek'], extra)
         with open(a.uit, 'w', encoding='utf-8') as f:
             json.dump(uitkomst, f, indent=2, ensure_ascii=False)
     finally:

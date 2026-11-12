@@ -23,6 +23,9 @@ use crossbeam_channel::{bounded, Receiver, Sender, TryRecvError, TrySendError};
 
 /// Eén chunk = ~10ms bij 48 kHz stereo. We bufferen 200 chunks (~2 sec) voor pieken.
 const CHANNEL_CAPACITY: usize = 200;
+/// Grootte van één vooraf gemaakte opnamebuffer (D1): 8192 stereoframes, ruim boven elke gangbare callback. De
+/// audio-thread vult alleen buffers uit deze pool; de encoder geeft ze leeg terug.
+pub const OPNAMEBUFFER: usize = 8192 * 2;
 
 /// Live status van de recorder — pollbaar vanuit de UI.
 #[derive(Debug, Clone, Default, serde::Serialize)]
@@ -36,7 +39,8 @@ pub struct RecorderStatus {
 }
 
 pub struct Recorder {
-    sender: RwLock<Option<Sender<Vec<f32>>>>,
+    /// Volle buffers naar de encoder, en de pool met lege buffers terug (D1: de audio-thread maakt zelf geen buffers).
+    sender: RwLock<Option<(Sender<Vec<f32>>, Receiver<Vec<f32>>)>>,
     /// Handle van de encoder-thread; bij stop joinen we erop zodat het bestand
     /// volledig geflusht + gesloten is voordat stop() terugkeert.
     join_handle: RwLock<Option<thread::JoinHandle<()>>>,
@@ -72,14 +76,22 @@ impl Recorder {
     #[inline]
     pub fn push_stereo(&self, frame: &[f32]) {
         let sender_guard = self.sender.read();
-        let Some(sender) = sender_guard.as_ref() else { return; };
-        match sender.try_send(frame.to_vec()) {
+        let Some((sender, leeg)) = sender_guard.as_ref() else { return; };
+        // Een lege buffer uit de pool; is die op (de encoder loopt achter), dan gaat dit blok verloren en telt het mee.
+        let Ok(mut buf) = leeg.try_recv() else {
+            self.frames_dropped.fetch_add((frame.len() / 2) as u64, Ordering::Relaxed);
+            return;
+        };
+        buf.clear();
+        buf.extend_from_slice(frame);
+        match sender.try_send(buf) {
             Ok(_) => {}
             Err(TrySendError::Full(v)) => {
                 // Drop het frame — audio-thread mag niet blokkeren. Tel hoeveel frames
                 // we missen zodat de gebruiker een waarschuwing krijgt.
                 let dropped = v.len() / 2;
                 self.frames_dropped.fetch_add(dropped as u64, Ordering::Relaxed);
+                // Hoort niet te gebeuren (de pool is even groot als het kanaal); de buffer valt dan weg.
             }
             Err(TrySendError::Disconnected(_)) => {
                 // Thread is gestopt — niets doen, sender wordt zo geleegd.
@@ -110,7 +122,11 @@ impl Recorder {
         }
 
         let (tx, rx) = bounded::<Vec<f32>>(CHANNEL_CAPACITY);
-        *self.sender.write() = Some(tx);
+        let (leeg_tx, leeg_rx) = bounded::<Vec<f32>>(CHANNEL_CAPACITY);
+        for _ in 0..CHANNEL_CAPACITY {
+            let _ = leeg_tx.try_send(Vec::with_capacity(OPNAMEBUFFER));
+        }
+        *self.sender.write() = Some((tx, leeg_rx));
         *self.path.write() = Some(path.clone());
 
         let stop_flag = self.stop_flag.clone();
@@ -119,7 +135,7 @@ impl Recorder {
 
         // Background encoder-thread; fouten landen in self.last_error (zichtbaar via status()).
         let handle = thread::spawn(move || {
-            if let Err(e) = encoder_loop(&path, sample_rate, rx, stop_flag, frames_written) {
+            if let Err(e) = encoder_loop(&path, sample_rate, rx, leeg_tx, stop_flag, frames_written) {
                 error!("Recorder thread failed: {}", e);
                 *err_for_thread.write() = Some(e);
             }
@@ -178,6 +194,7 @@ fn encoder_loop(
     path: &std::path::Path,
     sample_rate: u32,
     rx: Receiver<Vec<f32>>,
+    leeg_tx: Sender<Vec<f32>>,
     stop_flag: Arc<AtomicBool>,
     frames_written: Arc<AtomicU64>,
 ) -> Result<(), String> {
@@ -203,7 +220,7 @@ fn encoder_loop(
         match rx.try_recv() {
             Ok(chunk) => {
                 let per_channel = chunk.len() / 2;
-                if per_channel == 0 { continue; }
+                if per_channel == 0 { let _ = leeg_tx.try_send(chunk); continue; }
                 // f32 [-1,1] → i16 PCM (interleaved L/R).
                 let pcm: Vec<i16> = chunk.iter()
                     .map(|&s| (s.clamp(-1.0, 1.0) * 32767.0) as i16)
@@ -214,6 +231,8 @@ fn encoder_loop(
                 unsafe { buf.set_len(written); }
                 file.write_all(&buf).map_err(|e| format!("Schrijven: {}", e))?;
                 frames_written.fetch_add(per_channel as u64, Ordering::Relaxed);
+                // Buffer terug naar de pool van de audio-thread.
+                let _ = leeg_tx.try_send(chunk);
             }
             Err(TryRecvError::Empty) => {
                 if stop_flag.load(Ordering::Relaxed) { break; }

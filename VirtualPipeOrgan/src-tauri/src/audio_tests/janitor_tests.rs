@@ -172,7 +172,7 @@ fn preload_bron_volgt_dezelfde_regel() {
         total_samples: 4_800,
         loop_start: None,
         loop_end: None,
-        source_path: std::path::PathBuf::from("pijp.wav"),
+        source_path: std::sync::Arc::from(std::path::Path::new("pijp.wav")),
         channels: 1,
         bits_per_sample: 16,
         data_offset: 0,

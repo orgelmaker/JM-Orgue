@@ -1083,8 +1083,9 @@ pub struct PreloadBuffer {
     pub loop_start: Option<u64>,
     /// Loop end point (if any)
     pub loop_end: Option<u64>,
-    /// Path to full sample file for streaming
-    pub source_path: std::path::PathBuf,
+    /// Path to full sample file for streaming. Een `Arc` (D1): de audio-thread geeft het pad mee in een laadverzoek
+    /// en mag daarvoor niet alloceren; een `Arc` klonen telt alleen op.
+    pub source_path: std::sync::Arc<std::path::Path>,
     /// Number of channels in original file
     pub channels: u16,
     /// Bits per sample
@@ -1435,7 +1436,7 @@ fn load_wav_preload_segment_len(path: &Path, len: PreloadLen, segment: PreloadSe
         total_samples: total_frames.saturating_sub(trim_start),
         loop_start: adj_loop_start,
         loop_end: adj_loop_end,
-        source_path: path.to_path_buf(),
+        source_path: std::sync::Arc::from(path),
         channels,
         bits_per_sample,
         data_offset,
@@ -1762,7 +1763,7 @@ fn load_audio_preload_len(path: &Path, len: PreloadLen) -> Result<PreloadBuffer,
                 total_samples: full_sample.data.len().saturating_sub(trim_start),
                 loop_start: None,
                 loop_end: None,
-                source_path: path.to_path_buf(),
+                source_path: std::sync::Arc::from(path),
                 channels: full_sample.channels,
                 bits_per_sample: 16, // MP3 is typically decoded to 16-bit equivalent
                 data_offset: 0,

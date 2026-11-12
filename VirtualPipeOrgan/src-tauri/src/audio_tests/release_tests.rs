@@ -110,7 +110,7 @@ fn tremulantburst_gaat_langs_het_staartbudget_en_telt_het_werk() {
 
     // Vier nieuwe crossfade-stemmen zoals SetTremulant ze maakt (klinkende
     // pijpen, dus géén one-shot staarten).
-    let nieuw: Vec<PlayingVoice> = (0..4)
+    let mut nieuw: Vec<PlayingVoice> = (0..4)
         .map(|_| {
             let mut v = PlayingVoice::new_from_sample(vlakke_sample(48_000), 1, 100, 60, 1.0);
             v.envelope = 1.0;
@@ -121,7 +121,7 @@ fn tremulantburst_gaat_langs_het_staartbudget_en_telt_het_werk() {
 
     let (gc_tx, _gc_rx) = bounded::<GcItem>(8);
     let mut gc = GcSink::new(gc_tx);
-    let gespawnd = push_voices_budgeted(&mut voices, nieuw, 48_000, cap, &mut gc);
+    let gespawnd = push_voices_budgeted(&mut voices, &mut nieuw, 48_000, cap, &mut gc);
 
     assert_eq!(gespawnd, 4, "werkeenheden niet teruggegeven");
     assert_eq!(voices.len(), budget + 4, "stemmen niet toegevoegd");

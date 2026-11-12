@@ -326,6 +326,7 @@ fn werker_lus(idx: usize, gedeeld: Arc<Gedeeld>) {
         let taak = unsafe { *gedeeld.taken[idx].get() };
         if !taak.is_leeg() {
             let _rt_bewaker = crate::rt_toezicht::binnen();
+            crate::rt_toezicht::plek(7);
             // SAFETY: zie de moduletoelichting — disjuncte stukken, eigen
             // doeltabel, en de audiothread wacht tot we klaar melden.
             unsafe {

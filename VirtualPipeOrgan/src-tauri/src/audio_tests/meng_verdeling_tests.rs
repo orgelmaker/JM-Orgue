@@ -18,7 +18,7 @@ fn buffer(zaad: u32, lengte: usize) -> Arc<PreloadBuffer> {
         total_samples: lengte,
         loop_start: Some(0),
         loop_end: Some(lengte as u64 - 1),
-        source_path: std::path::PathBuf::from("test.wav"),
+        source_path: std::sync::Arc::from(std::path::Path::new("test.wav")),
         channels: 1,
         bits_per_sample: 16,
         data_offset: 44,
@@ -119,7 +119,7 @@ fn preload(len: usize, totaal: usize, stereo: bool, lus: (Option<u64>, Option<u6
         attack_data: (0..len).map(|i| ((i as f32) * 0.019 + zaad).sin() * 0.6).collect::<Vec<f32>>().into(),
         attack_right: if stereo { Some((0..len).map(|i| ((i as f32) * 0.023 + zaad).cos() * 0.5).collect::<Vec<f32>>().into()) } else { None },
         sample_rate: 48000, total_samples: totaal, loop_start: lus.0, loop_end: lus.1,
-        source_path: std::path::PathBuf::from("eq.wav"), channels: if stereo { 2 } else { 1 },
+        source_path: std::sync::Arc::from(std::path::Path::new("eq.wav")), channels: if stereo { 2 } else { 1 },
         bits_per_sample: 24, data_offset: 44, align_table: None, trim_start: 0,
         smpl_unity_note: None, smpl_pitch_fraction_cents: None, harm_shelf: None,
     })
@@ -265,7 +265,7 @@ fn bench_mengkern() {
         Arc::new(PreloadBuffer {
             attack_data: l.into(), attack_right: Some(r.into()), sample_rate: 48000, total_samples: len,
             loop_start: Some(12_000), loop_end: Some(44_000),
-            source_path: std::path::PathBuf::from("bench.wav"), channels: 2, bits_per_sample: 24,
+            source_path: std::sync::Arc::from(std::path::Path::new("bench.wav")), channels: 2, bits_per_sample: 24,
             data_offset: 44, align_table: None, trim_start: 0, smpl_unity_note: None,
             smpl_pitch_fraction_cents: None,                harm_shelf: None,
         })

@@ -60,7 +60,8 @@ pub struct BackgroundVoice {
 
 /// Een BackgroundVoice klaar om af te spelen in de audio-thread, met de
 /// loop-staat die alleen op de audio-thread leeft.
-pub(crate) struct ActiveVoice {
+#[derive(Debug, Clone)]
+pub struct ActiveVoice {
     pub voice: BackgroundVoice,
     /// Positie in bron-samples (float, voor lineaire interpolatie).
     pub pos: f64,
@@ -172,7 +173,8 @@ impl BackgroundEngine {
     pub fn new() -> Self {
         Self {
             voices: Vec::new(),
-            one_shots: Vec::new(),
+            // Vooraf de maximale 32 (+1) plaatsen (D1): een klik toevoegen vraagt in de callback niets aan.
+            one_shots: Vec::with_capacity(33),
             // 0.8.98: standaard 100 % (was 0.3 = -10 dB); gebruikers hoorden de
             // bijgeluiden anders amper, en de UI toont nu een percentage.
             global_gain: 1.0,
@@ -214,22 +216,23 @@ impl BackgroundEngine {
     /// thread kan droppen (een blower-opname is tientallen MB; free() in de
     /// callback is niet realtime-veilig — zelfde regel als RegisterPreloadBuffers).
     pub fn set_voices(&mut self, nieuw: Vec<BackgroundVoice>) -> Vec<ActiveVoice> {
-        let oud = std::mem::take(&mut self.voices);
-        self.voices = nieuw.into_iter().map(|v| ActiveVoice {
-            target_gain: match v.kind {
-                // Blower start uit als de motorknop uit staat.
-                BackgroundSoundKind::Blower if !self.blower_active => 0.0,
-                // Speelgoedregisters staan standaard uit: de organist drukt
-                // ze zelf aan via een knop in de werkbalk (0.7.98). Tremulant-
-                // ruis (0.8.4) volgt de tremulantknop en start dus ook uit.
-                BackgroundSoundKind::Toy | BackgroundSoundKind::TremulantNoise => 0.0,
-                _ => 1.0,
-            },
-            current_gain: 0.0, // begin stil, fade in
-            voice: v,
-            pos: 0.0,
-        }).collect();
-        oud
+        let mut v = actief_maken(nieuw);
+        self.wissel_voices(&mut v);
+        v
+    }
+
+    /// Vervangt de voices door de inhoud van `nieuw` (gemaakt met [`actief_maken`]) en laat de oude voices in
+    /// `nieuw` achter (D1): de audio-thread maakt zo geen nieuwe lijst en geeft de oude in dezelfde doos aan de
+    /// janitor. De motorstand wordt hier toegepast, zodat het gedrag gelijk is aan `set_voices`.
+    pub fn wissel_voices(&mut self, nieuw: &mut Vec<ActiveVoice>) {
+        if !self.blower_active {
+            for v in nieuw.iter_mut() {
+                if matches!(v.voice.kind, BackgroundSoundKind::Blower) {
+                    v.target_gain = 0.0;
+                }
+            }
+        }
+        std::mem::swap(&mut self.voices, nieuw);
     }
 
     /// Motor aan/uit zetten; blower-voices faden in of uit.
@@ -261,10 +264,12 @@ impl BackgroundEngine {
     /// Speelgoedregister aan of uit (0.7.98). Match op naam (case-insensitief);
     /// zonder match verandert er niets.
     pub fn set_toy(&mut self, name: &str, active: bool) {
-        let want = name.to_lowercase();
+        // Teken voor teken in kleine letters vergelijken, zonder kopieën (D1: dit draait in de audio-callback).
+        // Zelfde uitkomst als `to_lowercase() == to_lowercase()`.
+        let gelijk = |a: &str| a.chars().flat_map(char::to_lowercase).eq(name.chars().flat_map(char::to_lowercase));
         for v in &mut self.voices {
             if matches!(v.voice.kind, BackgroundSoundKind::Toy | BackgroundSoundKind::TremulantNoise)
-                && v.voice.name.to_lowercase() == want
+                && gelijk(&v.voice.name)
             {
                 v.target_gain = if active { 1.0 } else { 0.0 };
             }
@@ -441,6 +446,23 @@ impl BackgroundEngine {
             }
         }
     }
+}
+
+/// Maakt van de bijgeluiden de lijst die de audio-thread afspeelt (D1: op de laadthread, niet in de callback).
+/// Motorgeluid staat hier op 1; [`BackgroundEngine::wissel_voices`] zet het op 0 als de motor uit staat.
+pub fn actief_maken(nieuw: Vec<BackgroundVoice>) -> Vec<ActiveVoice> {
+    nieuw.into_iter().map(|v| ActiveVoice {
+        target_gain: match v.kind {
+            // Speelgoedregisters staan standaard uit: de organist drukt
+            // ze zelf aan via een knop in de werkbalk (0.7.98). Tremulant-
+            // ruis (0.8.4) volgt de tremulantknop en start dus ook uit.
+            BackgroundSoundKind::Toy | BackgroundSoundKind::TremulantNoise => 0.0,
+            _ => 1.0,
+        },
+        current_gain: 0.0, // begin stil, fade in
+        voice: v,
+        pos: 0.0,
+    }).collect()
 }
 
 #[cfg(test)]
@@ -691,5 +713,33 @@ mod tests {
         e.mix_stereo(&mut l, &mut r);
         assert!(l[19_999] > 0.9);
         assert!(r[19_999] < -0.9, "rechts moet negatief zijn: {}", r[19_999]);
+    }
+
+    #[test]
+    fn wissel_voices_geeft_hetzelfde_als_set_voices() {
+        // D1: de laadthread maakt de lijst, de callback wisselt alleen. Met de motor uit moet de motor stil starten.
+        for motor in [true, false] {
+            let mut a = BackgroundEngine::new();
+            let mut b = BackgroundEngine::new();
+            a.set_blower(motor);
+            b.set_blower(motor);
+            let stemmen = vec![maak_mono(10, 0.5), maak_toy(10, 0.5, "Cymbelstern")];
+            a.set_voices(stemmen.clone());
+            let mut doos = actief_maken(stemmen);
+            b.wissel_voices(&mut doos);
+            assert!(doos.is_empty(), "de doos bevat nu de oude (lege) lijst");
+            let gains = |e: &BackgroundEngine| e.voices.iter().map(|v| (v.target_gain, v.current_gain)).collect::<Vec<_>>();
+            assert_eq!(gains(&a), gains(&b), "motor {}", motor);
+        }
+    }
+
+    #[test]
+    fn set_toy_negeert_hoofdletters_ook_buiten_ascii() {
+        let mut e = BackgroundEngine::new();
+        e.set_voices(vec![maak_toy(10, 1.0, "Vogelgesang ÄÖ")]);
+        e.set_toy("vogelgesang äö", true);
+        assert_eq!(e.voices[0].target_gain, 1.0);
+        e.set_toy("Vogelgesang", false); // andere naam: niets
+        assert_eq!(e.voices[0].target_gain, 1.0);
     }
 }
