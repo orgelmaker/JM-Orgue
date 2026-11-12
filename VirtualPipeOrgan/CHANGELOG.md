@@ -6,6 +6,11 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### Handleiding bijgewerkt naar 0.9.52, in zeven talen
+- Nieuw beschreven: de vinkjes "Windwerk van de set" en "Koppels van de set volledig inlezen", het windwerk in het importverslag,
+  "Samples in het geheugen", de schijfcache en het advies voor de startbuffer met de knop Overnemen. De vermeldingen
+  "vanaf versie 0.9.52" zijn weg. Knopnamen uit de taalbestanden; zeven PDF's opnieuw gemaakt, geen nieuwe schermafdrukken.
+
 ## [0.9.52] - 2026-11-12
 
 ### Motorgeluid en mechaniekgeluiden bij Hauptwerk-sets met eigen pallet-schakelaars

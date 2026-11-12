@@ -11,10 +11,10 @@
 
 <header class="titel">
   <h1>JM-Orgue</h1>
-  <div class="onder">User guide for version 0.9.51 &middot; November 2026</div>
+  <div class="onder">User guide for version 0.9.52 &middot; November 2026</div>
 </header>
 
-<p>JM-Orgue is a virtual pipe organ for Windows, macOS and Linux. It plays Hauptwerk and GrandOrgue sample sets directly, including large surround sets and Hauptwerk Custom Organ definitions, and you play it with a MIDI keyboard, an organ console or the mouse. It can write down what you play as you go, in staff notation or in klavar, and print it as a PDF. This guide walks through the program; the screenshots come from version 0.9.16 and later versions, the text describes version 0.9.51.</p>
+<p>JM-Orgue is a virtual pipe organ for Windows, macOS and Linux. It plays Hauptwerk and GrandOrgue sample sets directly, including large surround sets and Hauptwerk Custom Organ definitions, and you play it with a MIDI keyboard, an organ console or the mouse. It can write down what you play as you go, in staff notation or in klavar, and print it as a PDF. This guide walks through the program; the screenshots come from version 0.9.16 and later versions, the text describes version 0.9.52.</p>
 <p class="klein">&copy; Martijn van der Kolk. The screenshots were made with demo organs and own test sets; network addresses, access tokens and user folders have been made unreadable.</p>
 
 <nav class="inhoud">
@@ -86,7 +86,7 @@
 </ul>
 <p>A CODM organ with all its samples loads without any question. If the definition states per stop that the upper harmonics should sound stronger or softer, JM-Orgue applies that while loading. Whether it sounds exactly as in Hauptwerk has not been verified: that needs a complete original set and a reference recording.</p>
 
-<p>The import report also shows, as information only, what the set itself provides: the swell box values, any crescendo and the recorded tremulant waveforms (the last from version 0.9.52). JM-Orgue does not use the waveforms yet: the tremulant sounds as a simple modulation.</p>
+<p>The import report also shows, as information only, what the set itself provides: the swell box values, any crescendo, the recorded tremulant waveforms and the wind system (the bellows with their natural frequency and pressure, and which divisions are attached to them). JM-Orgue does not use the waveforms yet: the tremulant sounds as a simple modulation. The wind model can follow the wind system, though (see chapter 7, Behaviour of the set).</p>
 
 <h3>Sample sets with WavPack or FLAC</h3>
 <p>Many GrandOrgue sets are packed with WavPack; the files are then often simply called <code>.wav</code>. JM-Orgue reads them directly, including loop points and releases, and loads them quickly because only the beginning of each recording is unpacked. Only if a file really cannot be read (for example a FLAC file or a multichannel WavPack file) does a bar at the top report how many files were skipped.</p>
@@ -208,8 +208,9 @@
 <figure><img src="afbeeldingen/en/10_klank_4.jpg" alt="Sound tab, pipe voicing"><figcaption>Sound, at the bottom: the pipe voicing. Choose a stop on the left to voice its pipes.</figcaption></figure>
 
 <h3>Behaviour of the set and not loading stops</h3>
-<p>Under <b>Sound</b> there is the block <b>Behaviour of the set (this organ)</b> with check boxes that decide whether JM-Orgue follows the data of the set itself: <b>Apply the set's own levels</b>, <b>Release crossfade of the set's maker</b>, <b>Couplers follow the set</b> and <b>Cut off silent tails</b> (with a threshold in dB). They apply per organ: an organ you already used stays as it was, a newly installed organ follows the set. <b>Use the set's swell box values</b> is always off by default; on means the swell box starts with the attenuation and filter the set itself specifies, for divisions you have not set yourself. After changing a check box, reload the organ.</p>
-<p>The block <b>Do not load these stops</b> (from version 0.9.52) leaves out stops you do not use when loading, per organ: this saves memory and load time. Open the list, clear the check box of the stops you do not need (each stop shows the memory it needs up front) and choose <b>Apply and reload</b>. <b>Load everything</b> restores all check boxes. The choice is saved with the organ; an organ without a choice loads everything.</p>
+<p>Under <b>Sound</b> there is the block <b>Behaviour of the set (this organ)</b> with check boxes that decide whether JM-Orgue follows the data of the set itself: <b>Apply the set's own levels</b>, <b>Release crossfade of the set's maker</b>, <b>Couplers follow the set</b>, <b>Read all couplers from the set</b>, <b>Wind system of the set</b> and <b>Cut off silent tails</b> (with a threshold in dB). They apply per organ: an organ you already used stays as it was, a newly installed organ follows the set. <b>Use the set's swell box values</b> is always off by default; on means the swell box starts with the attenuation and filter the set itself specifies, for divisions you have not set yourself. After changing a check box, reload the organ.</p>
+<p><b>Read all couplers from the set</b> also reads, for a Hauptwerk set, the couplers that point to another keyboard (including octave couplers and couplers within one keyboard) instead of guessing them. With <b>Wind system of the set</b> the wind model follows the wind system that a Hauptwerk set describes: each bellows of the set becomes a wind group of its own, the air consumption per pipe comes from the set, and the middle position of bellows size and maximum drop is that bellows' value. So with a full division, for example, the pedal bellows sags on its own. The controls of the wind model keep working and scale those values; the wind model itself must be on.</p>
+<p>The block <b>Do not load these stops</b> leaves out stops you do not use when loading, per organ: this saves memory and load time. Open the list, clear the check box of the stops you do not need (each stop shows the memory it needs up front) and choose <b>Apply and reload</b>. <b>Load everything</b> restores all check boxes. The choice is saved with the organ; an organ without a choice loads everything.</p>
 
 <h3>Crescendo</h3>
 <p>The <b>general crescendo</b> draws more stops step by step as you move a crescendo pedal. You decide yourself which stops go in which step:</p>
@@ -261,7 +262,7 @@
   <li><b>Test signal</b>: click a channel number to send sound to exactly that output, so you hear which plug belongs to which loudspeaker.</li>
   <li><b>Polyphony</b> and <b>Calculation cores for mixing</b>: the maximum number of sounding pipes and the number of processor cores the mixing work is spread over. The default choice fits your computer; the load meter shows the effect.</li>
   <li><b>Play stereo samples in stereo</b>: keeps the stereo image of stereo recordings. Off means a mono mix and halves the memory use of such sets.</li>
-  <li><b>Start buffer per recording</b> (new in this version): how much of each pipe recording is in memory straight away: 200 ms, 300 ms, 500 ms, 1 s or 2 s (default). A shorter buffer saves a lot of memory and loading time; the rest is loaded while you play. The choice takes effect after the organ is reloaded.</li>
+  <li><b>Start buffer per recording</b>: how much of each pipe recording is in memory straight away: 200 ms, 300 ms, 500 ms, 1 s or 2 s (default). A shorter buffer saves a lot of memory and loading time; the rest is loaded while you play. The choice takes effect after the organ is reloaded. Once enough recordings have loaded, a <b>suggestion</b> for this PC appears below it, based on the measured loading times; <b>Apply</b> adopts it. Nothing changes by itself.</li>
   <li><b>Buffer size</b>: smaller means less latency but is harder on your computer. <b>Apply</b> activates the choice.</li>
 </ul>
 <div class="tip"><b>Tip</b> If you hear a short repeat of the attack of a pipe in big chords, choose a longer start buffer. If you do not hear that but have little memory, 500 ms or 1 s is a good choice. A fast drive (SSD) makes short buffers possible.</div>
@@ -272,7 +273,9 @@
   <li><b>Low frequencies to a subwoofer (bass management)</b>: takes the low frequencies out of the main channels and sends them, summed, to one subwoofer output (a fourth-order Linkwitz-Riley filter). You choose the <b>Subwoofer output</b>, the <b>Crossover frequency (Hz)</b> (30 to 250 Hz) and the <b>Subwoofer level (dB)</b>. Off by default; off costs nothing.</li>
   <li><b>Memory limit follows free memory</b>: the ceiling for fully loaded samples follows the memory that is free when an organ is loaded.</li>
   <li><b>Real-time priority for mixing</b>: gives the mixing workers a high priority so the audio does not stutter when much else is running. Below the check box it shows what is active.</li>
-  <li>Behind each choice of <b>Start buffer per recording</b>, from version 0.9.52, is the memory the loaded organ then needs up front, for example &ldquo;500 ms &middot; 2.8 GB&rdquo;.</li>
+  <li>Behind each choice of <b>Start buffer per recording</b> is the memory the loaded organ then needs up front, for example &ldquo;500 ms &middot; 2.8 GB&rdquo;.</li>
+  <li><b>Samples in memory</b>: <b>16-bit compact (default)</b> also keeps samples that fit exactly in 16 bits as 16 bits, with no difference in sound: half the memory for those sets. <b>16- and 24-bit compact</b> also saves a quarter on 24-bit sets, but costs noticeably more processing; <b>32-bit (as before)</b> turns it off. Takes effect after the organ is reloaded.</li>
+  <li><b>Disk cache of decoded samples</b> (on by default): recordings that are expensive to produce, such as WavPack or recordings converted to the sample rate of the output, are kept on disk after the first time and then load much faster. They sound exactly the same. With <b>Maximum</b> you set the size, below it is shown how much is in use, and <b>Clear cache</b> empties it.</li>
 </ul>
 <p><b>Output profiles</b> store two complete output settings, for example loudspeakers via ASIO and headphones via WASAPI, including the channel choice per keyboard. Choose the output you want, click <b>Save current selection</b> at Speakers or Headphones, and then switch with the <b>Speakers</b> button at the top right or with a learned MIDI button. The profile that is active now is marked.</p>
 <p><b>Correction for headphones or speakers</b> applies a tone correction to the output itself (not to the organ): choose which profile it applies to, switch it on and choose a preset from the AutoEq list, or import or export a correction of your own.</p>
