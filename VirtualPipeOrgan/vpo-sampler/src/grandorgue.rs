@@ -730,6 +730,12 @@ pub struct PipeExtra {
     /// HarmonicShaping (0.9.41): high-shelf op de 3e+ boventonen, bij het laden
     /// op de sampledata gelegd. None = geen shaping voor deze pijp.
     pub harm_shelf: Option<crate::loader::HarmShelf>,
+    /// Windwerk van de set (D4): de lade waar de pijp haar wind uit haalt (`WindSupply_SourceWindCompartmentID`;
+    /// `Output…` is waar de lucht heen gaat, meestal de buitenlucht), haar verbruik in
+    /// kg/s bij de referentiedruk, en die referentiedruk in inch water. Alleen Hauptwerk; anders None.
+    pub wind_lade: Option<u32>,
+    pub wind_verbruik_kg_s: Option<f32>,
+    pub wind_ref_inch: Option<f32>,
 }
 
 /// Eén release-sample van een pijp. `max_key_press_time_ms = None` of `-1`
@@ -1662,6 +1668,10 @@ impl OdfParser {
             retune_keep_pct: pc_declared.then_some(0.0),
             // GrandOrgue kent geen HarmonicShaping; alleen CODM vult dit.
             harm_shelf: None,
+            // Geen windwerk in een GrandOrgue-definitie (D4).
+            wind_lade: None,
+            wind_verbruik_kg_s: None,
+            wind_ref_inch: None,
         }
     }
 

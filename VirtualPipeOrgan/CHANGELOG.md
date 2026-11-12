@@ -6,6 +6,12 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### Windwerk van de set in het importverslag (D4, fase 0)
+- Bij leesbare Hauptwerk-sets leest JM-Orgue nu het windwerk van de set: de balgen (afmetingen, massa, demping), de laden
+  en kanalen ertussen, en per pijp de lade en het luchtverbruik. Het importverslag meldt per balg de eigenfrequentie, de
+  druk en welke werken eraan hangen. De klank verandert hier nog niet; dit is de basis om het windmodel straks met de
+  gegevens van de set te sturen.
+
 ### Koppels van Hauptwerk-sets volledig inlezen (E3)
 - Bij een aantal Hauptwerk-sets toonde JM-Orgue geraden koppels (elk manuaal aan elk ander en aan het pedaal) in plaats van
   de koppels van de set. Twee oorzaken: koppels die naar een ander *klavier* wijzen werden overgeslagen, en als de set

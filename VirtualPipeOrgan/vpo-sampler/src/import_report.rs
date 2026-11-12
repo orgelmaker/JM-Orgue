@@ -213,6 +213,9 @@ pub struct ImportReport {
     /// De crescendo van de set, als de definitie er een heeft en we hem kunnen lezen.
     #[serde(default)]
     pub set_crescendo: Option<SetCrescendo>,
+    /// Het windwerk van de set (D4), als de definitie leesbaar is en er een heeft.
+    #[serde(default)]
+    pub windwerk: Option<crate::windwerk::WindwerkDef>,
     /// "codm" | "hauptwerk" | "grandorgue" | "map"
     pub formaat: String,
     pub versie: String,

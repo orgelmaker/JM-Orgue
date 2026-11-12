@@ -190,10 +190,40 @@ fn load_hauptwerk_intern(
             voeg_zwelkast_rapport_toe(&mut v, &def);
             voeg_crescendo_toe(&mut v, &xml);
             voeg_tremulant_golfvormen_toe(&mut v, &xml);
+            voeg_windwerk_toe(&mut v, &def, &xml);
             (Ok(def), v)
         }
         Err(e) => mislukt(e),
     }
+}
+
+/// Het windwerk van de set in het verslag (D4, fase 0): laden, balgen en verbindingen uit een leesbare definitie, en per
+/// balg de divisies waarvan pijpen eraan hangen. Verandert niets aan de klank.
+pub(crate) fn voeg_windwerk_toe(v: &mut crate::import_report::ImportReport, def: &OrganDefinition, xml: &str) {
+    use crate::import_report::Ernst;
+    if GecomprimeerdeOdf::detecteer(xml).is_some() { return; }
+    let w = crate::windwerk::WindwerkDef::uit_tabellen(
+        &extract_objects(xml, "WindCompartment"),
+        &extract_objects(xml, "WindCompartmentLinkage"),
+    );
+    if w.is_leeg() { return; }
+    let mut met_verbruik = 0usize;
+    let mut per_balg: HashMap<u32, Vec<String>> = HashMap::new();
+    for m in &def.manuals {
+        for sid in &m.stop_ids {
+            let Some(s) = def.stops.iter().find(|s| s.id == *sid) else { continue };
+            for p in &s.pipes {
+                let PipeDef::Sample { extra, .. } = p else { continue };
+                if extra.wind_verbruik_kg_s.is_some() { met_verbruik += 1; }
+                if let Some(b) = extra.wind_lade.and_then(|l| w.balg_van_lade(l)) {
+                    let d = per_balg.entry(b).or_default();
+                    if !d.contains(&m.name) { d.push(m.name.clone()); }
+                }
+            }
+        }
+    }
+    v.melding(Ernst::Info, "windwerk", w.samenvatting(met_verbruik, &per_balg));
+    v.windwerk = Some(w);
 }
 
 /// De crescendo van de set uit de tabellen van een LEESBARE definitie (E4).
@@ -909,6 +939,17 @@ fn build_definition_volledig(
     let mut stopranks = lees("StopRank");
     let ranks_xml = lees("Rank");
     let pipes = lees("Pipe_SoundEngine01");
+    // Windwerk per pijp (D4): lade, verbruik en referentiedruk.
+    let pijp_wind: HashMap<u32, (Option<u32>, Option<f32>, Option<f32>)> = pipes.iter()
+        .filter_map(|p| {
+            let getal = |v: &str| p.get(v).and_then(|s| s.trim().replace(',', ".").parse::<f32>().ok());
+            Some((p.get_u32("PipeID")?, (
+                p.get_u32("WindSupply_SourceWindCompartmentID"),
+                getal("WindSupply_MassFlowRateKilogramsPerSecAtReferencePressureDiff").filter(|v| *v > 0.0),
+                getal("WindSupply_ReferencePressureDifferenceInches").filter(|v| *v > 0.0),
+            )))
+        })
+        .collect();
     let layers = lees("Pipe_SoundEngine01_Layer");
     let attack_samples = lees("Pipe_SoundEngine01_AttackSample");
     let release_samples = lees("Pipe_SoundEngine01_ReleaseSample");
@@ -1156,6 +1197,11 @@ fn build_definition_volledig(
         let path = resolve_sample(sample_id)?;
 
         let mut extra = PipeExtra::default();
+        if let Some(&(lade, verbruik, refd)) = pijp_wind.get(&pipe_id) {
+            extra.wind_lade = lade;
+            extra.wind_verbruik_kg_s = verbruik;
+            extra.wind_ref_inch = refd;
+        }
         // Toonhoogte-metadata voor hertemperen (sample-veld > smpl-chunk >
         // originele pijptoon; de keuze valt in de retune-opbouw).
         extra.sample_pitch_cents = sample_pitch_cents.get(&sample_id).copied();
