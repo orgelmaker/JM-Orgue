@@ -6,6 +6,8 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+## [0.9.52] - 2026-11-12
+
 ### Motorgeluid en mechaniekgeluiden bij Hauptwerk-sets met eigen pallet-schakelaars
 - Bij gecomprimeerde Hauptwerk-sets herkende de importer soms een veld met overal dezelfde waarde als pallet-schakelaar
   van de pijp. Daardoor werd in twee sets het motorgeluid niet gevonden. Zo'n veld telt nu niet meer mee (de windvelden
