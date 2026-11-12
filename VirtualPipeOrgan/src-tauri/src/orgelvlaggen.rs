@@ -43,6 +43,8 @@ pub struct OrgelVlaggen {
     /// Het windmodel sturen met het windwerk van de set (D4): windgroepen per balg, verbruik per pijp, en de
     /// middenstand van balggrootte en maximale daling uit de balg.
     pub windwerk_van_set: bool,
+    /// De tremulant volgt de opgenomen golfvorm van de set (C5, stap 2): vorm en snelheid per divisie, diepte per pijp.
+    pub tremulant_golf_van_set: bool,
 }
 
 impl OrgelVlaggen {
@@ -55,6 +57,7 @@ impl OrgelVlaggen {
         zwelkast_van_set: false,
         koppels_klavier: false,
         windwerk_van_set: false,
+        tremulant_golf_van_set: false,
     };
 
     /// De standaard voor een nieuw orgel: alles aan.
@@ -67,6 +70,7 @@ impl OrgelVlaggen {
         zwelkast_van_set: false,
         koppels_klavier: true,
         windwerk_van_set: true,
+        tremulant_golf_van_set: true,
     };
 
     /// De vlaggen voor een orgel dat nu geladen wordt.
@@ -90,6 +94,7 @@ impl OrgelVlaggen {
                 zwelkast_van_set: s.zwelkast_van_set.unwrap_or(false),
                 koppels_klavier: s.koppels_klavier.unwrap_or(false),
                 windwerk_van_set: s.windwerk_van_set.unwrap_or(false),
+                tremulant_golf_van_set: s.tremulant_golf_van_set.unwrap_or(false),
             },
         }
     }
@@ -115,6 +120,7 @@ impl OrgelVlaggen {
             "zwelkast_van_set" => v.zwelkast_van_set = aan,
             "koppels_klavier" => v.koppels_klavier = aan,
             "windwerk_van_set" => v.windwerk_van_set = aan,
+            "tremulant_golf_van_set" => v.tremulant_golf_van_set = aan,
             _ => return None,
         }
         Some(v)
@@ -129,11 +135,11 @@ impl OrgelVlaggen {
         geforceerd: bool,
         huidig: OrgelVlaggen,
         opgeslagen: Option<&OrganSettings>,
-    ) -> [Option<bool>; 7] {
+    ) -> [Option<bool>; 8] {
         if geforceerd {
             match opgeslagen {
-                Some(s) => [s.niveaus_van_set, s.overgangen_van_set, s.koppels_volgen_set, s.staart_afkap, s.zwelkast_van_set, s.koppels_klavier, s.windwerk_van_set],
-                None => [None; 7],
+                Some(s) => [s.niveaus_van_set, s.overgangen_van_set, s.koppels_volgen_set, s.staart_afkap, s.zwelkast_van_set, s.koppels_klavier, s.windwerk_van_set, s.tremulant_golf_van_set],
+                None => [None; 8],
             }
         } else {
             [
@@ -144,6 +150,7 @@ impl OrgelVlaggen {
                 Some(huidig.zwelkast_van_set),
                 Some(huidig.koppels_klavier),
                 Some(huidig.windwerk_van_set),
+                Some(huidig.tremulant_golf_van_set),
             ]
         }
     }
@@ -158,6 +165,7 @@ impl OrgelVlaggen {
         s.zwelkast_van_set = Some(self.zwelkast_van_set);
         s.koppels_klavier = Some(self.koppels_klavier);
         s.windwerk_van_set = Some(self.windwerk_van_set);
+        s.tremulant_golf_van_set = Some(self.tremulant_golf_van_set);
     }
 }
 
@@ -211,7 +219,7 @@ mod tests {
     #[test]
     fn een_forcering_van_buiten_wint_van_alles() {
         let s = instellingen(Some(true), Some(true), Some(true));
-        let f = OrgelVlaggen { niveaus_van_set: false, overgangen_van_set: true, koppels_volgen_set: false, staart_afkap: true, zwelkast_van_set: true, koppels_klavier: false, windwerk_van_set: true };
+        let f = OrgelVlaggen { niveaus_van_set: false, overgangen_van_set: true, koppels_volgen_set: false, staart_afkap: true, zwelkast_van_set: true, koppels_klavier: false, windwerk_van_set: true, tremulant_golf_van_set: false };
         assert_eq!(OrgelVlaggen::bepaal(Some(&s), Some(f)), f);
         assert_eq!(OrgelVlaggen::bepaal(None, Some(f)), f);
     }
@@ -232,14 +240,14 @@ mod tests {
     fn geforceerde_vlaggen_worden_nooit_bewaard() {
         let huidig = OrgelVlaggen::NIEUW;
         // Normaal: de huidige stand, expliciet.
-        assert_eq!(OrgelVlaggen::te_bewaren(false, huidig, None), [Some(true), Some(true), Some(true), Some(true), Some(false), Some(true), Some(true)]);
+        assert_eq!(OrgelVlaggen::te_bewaren(false, huidig, None), [Some(true), Some(true), Some(true), Some(true), Some(false), Some(true), Some(true), Some(true)]);
         // Geforceerd, orgel zonder opgeslagen instellingen: niets vastleggen.
-        assert_eq!(OrgelVlaggen::te_bewaren(true, huidig, None), [None; 7]);
+        assert_eq!(OrgelVlaggen::te_bewaren(true, huidig, None), [None; 8]);
         // Geforceerd, met opgeslagen instellingen: die blijven zoals ze waren.
         let s = instellingen4(Some(false), None, Some(false), Some(false));
-        assert_eq!(OrgelVlaggen::te_bewaren(true, huidig, Some(&s)), [Some(false), None, Some(false), Some(false), None, None, None]);
+        assert_eq!(OrgelVlaggen::te_bewaren(true, huidig, Some(&s)), [Some(false), None, Some(false), Some(false), None, None, None, None]);
         // Zonder forcering wint de huidige stand over wat er stond (de gebruiker koos).
-        assert_eq!(OrgelVlaggen::te_bewaren(false, huidig, Some(&s)), [Some(true), Some(true), Some(true), Some(true), Some(false), Some(true), Some(true)]);
+        assert_eq!(OrgelVlaggen::te_bewaren(false, huidig, Some(&s)), [Some(true), Some(true), Some(true), Some(true), Some(false), Some(true), Some(true), Some(true)]);
     }
 
     #[test]
@@ -310,6 +318,16 @@ mod tests {
 
     /// D4: een bestaand orgel (zonder deze vlag) houdt het gewone windmodel; een nieuw orgel krijgt het windwerk van
     /// de set; een eigen keuze wint.
+    #[test]
+    fn tremulant_golf_van_set_bestaand_uit_nieuw_aan() {
+        let bestaand = instellingen4(None, None, None, None);
+        assert!(!OrgelVlaggen::bepaal(Some(&bestaand), None).tremulant_golf_van_set);
+        assert!(OrgelVlaggen::bepaal(None, None).tremulant_golf_van_set);
+        let aan = OrganSettings { tremulant_golf_van_set: Some(true), ..instellingen4(None, None, None, None) };
+        assert!(OrgelVlaggen::bepaal(Some(&aan), None).tremulant_golf_van_set);
+        assert!(OrgelVlaggen::OUD.met("tremulant_golf_van_set", true).unwrap().tremulant_golf_van_set);
+    }
+
     #[test]
     fn windwerk_van_set_bestaand_uit_nieuw_aan() {
         let bestaand = instellingen4(Some(true), Some(true), Some(true), Some(true));

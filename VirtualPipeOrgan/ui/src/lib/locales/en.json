@@ -284,6 +284,8 @@
     "koppels_klavier_hint": "On: couplers of a Hauptwerk set that point to another keyboard (including octave couplers and couplers within one keyboard), and couplers for which the set only states in its switch network which division a keyboard plays, are read. Off: those couplers are skipped, and if there are no others JM-Orgue makes generic couplers, as before. Takes effect after reloading.",
     "windwerk_van_set": "Wind system of the set",
     "windwerk_van_set_hint": "On: for a Hauptwerk set that describes its wind system, the wind model follows the set: each bellows is a wind group, the air consumption per pipe comes from the set, and the middle position of bellows size and maximum drop is that bellows' value (the controls scale it). Off: the usual wind model, as before. Takes effect after reloading.",
+    "tremulant_golf_van_set": "Tremulant follows the set's waveform",
+    "tremulant_golf_van_set_hint": "On: for a Hauptwerk set with recorded tremulant waveforms, the tremulant follows that waveform: the shape of the modulation and the speed from the set, and per pipe the depth the set specifies. The tremulant's speed and depth controls do not apply then. Off: the usual sine, as before. Takes effect after reloading.",
     "staart_afkap": "Cut off silent tails",
     "staart_afkap_hint": "On: the silent end of a release recording (quieter than the threshold below, −90 dB by default) is left out. This frees voices and memory and is inaudible at the default. Off: the recording plays to its end. Takes effect after reloading the organ.",
     "staart_drempel": "Threshold (dB)",

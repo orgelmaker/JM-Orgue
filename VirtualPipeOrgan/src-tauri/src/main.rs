@@ -37,6 +37,7 @@ mod rt_prioriteit;
 mod rt_toezicht;
 mod zwelkast_set;
 mod windwerk_set;
+mod tremulant_golf_set;
 
 /// Geheugenbeheerder voor de hele app (C2): zie de toelichting bij `mimalloc` in Cargo.toml. De audiothread vraagt geen
 /// geheugen aan (regel uit CLAUDE.md), dus dit raakt de mengkern niet.

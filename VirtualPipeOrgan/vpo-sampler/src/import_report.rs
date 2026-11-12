@@ -168,6 +168,15 @@ pub struct Diagnose {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct TremulantGolfvorm {
     pub tremulant_id: u32,
+    /// `TremulantWaveformID` (C5, stap 2): waar de pijpen naar verwijzen (`PipeExtra::trem_golf`).
+    #[serde(default)]
+    pub golfvorm_id: u32,
+    /// `FrequencyWhenEngagedHz` van het tremulant.
+    #[serde(default)]
+    pub frequentie_hz: Option<f32>,
+    /// Het golfvormbestand voor toonhoogte en grondtoon op schijf, als het pakket gevonden is.
+    #[serde(default)]
+    pub grondtoon_pad: Option<std::path::PathBuf>,
     pub tremulant_naam: String,
     /// Bestand met de golfvorm voor toonhoogte en grondtoon (één periode van de modulatie).
     pub grondtoon_bestand: String,

@@ -652,7 +652,7 @@ fn route_test_only(
         // Gedrag van de set per orgel (E1 niveaus, D3 overgangen, F7 koppelketen,
         // D7 staartafkap, E5 zwelkast van de set), body {"path": "...", "niveaus_van_set": bool,
         // "overgangen_van_set": bool, "koppels_volgen_set": bool,
-        // "staart_afkap": bool, "zwelkast_van_set": bool, "koppels_klavier": bool, "windwerk_van_set": bool} (weggelaten vlag = uit) of {"path": "...",
+        // "staart_afkap": bool, "zwelkast_van_set": bool, "koppels_klavier": bool, "windwerk_van_set": bool, "tremulant_golf_van_set": bool} (weggelaten vlag = uit) of {"path": "...",
         // "wis": true}. Geldt bij de volgende /load_organ van dat orgel en wint
         // dan van de opgeslagen instellingen. Niet persistent (alleen voor proeven).
         (tiny_http::Method::Post, "/orgel_vlaggen") => {
@@ -674,6 +674,7 @@ fn route_test_only(
                 zwelkast_van_set: vlag("zwelkast_van_set"),
                 koppels_klavier: vlag("koppels_klavier"),
                 windwerk_van_set: vlag("windwerk_van_set"),
+                tremulant_golf_van_set: vlag("tremulant_golf_van_set"),
             };
             state.vlag_overrides.write().insert(sleutel, vlaggen);
             Ok(serde_json::to_value(vlaggen).unwrap_or_default())
@@ -2331,7 +2332,7 @@ fn handle_set_trem(state: &AppState, query: &str) -> Result<Value, (u16, String)
     Ok(json!({ "ok": true, "division": division, "rate": rate, "enabled": enabled }))
 }
 
-/// POST /tremulant?division=<naam>&active=0|1 — tremulant van een divisie live
+/// POST /tremulant?division=<naam>&active=0|1[&lfo=1] — tremulant van een divisie live
 /// aan/uit via dezelfde kern als het Tauri-commando `set_tremulant`.
 fn handle_tremulant(state: &AppState, query: &str) -> Result<Value, (u16, String)> {
     let division: String = parse_query(query, "division")
@@ -2339,7 +2340,19 @@ fn handle_tremulant(state: &AppState, query: &str) -> Result<Value, (u16, String
     let active = parse_bool_query(query, "active").unwrap_or(true);
     let stops = crate::commands::do_set_tremulant(state, &division, active)
         .map_err(|e| (404u16, e))?;
-    Ok(json!({ "ok": true, "division": division, "active": active, "stops": stops }))
+    // `lfo=1`: ook de LFO-tremulant, zoals de knop in het orgelscherm dat doet (standaardwaarden van de UI:
+    // 6 Hz, 10 % sterkte, 15 cent). Met de golfvorm van de set (C5) gelden snelheid en diepte van de set.
+    let mut lfo = false;
+    if parse_bool_query(query, "lfo") == Some(true) {
+        let idx = state.loaded_organ_info.read().as_ref().and_then(|o| o.divisions.iter().position(|d| d.name == division));
+        if let Some(idx) = idx {
+            state.send_audio_command(crate::audio::AudioCommand::SetTremulantLFO {
+                division_index: idx as u8, active, rate: 6.0, amp_depth: 0.10, pitch_depth: 15.0,
+            });
+            lfo = true;
+        }
+    }
+    Ok(json!({ "ok": true, "division": division, "active": active, "stops": stops, "lfo": lfo }))
 }
 
 /// Booleaanse queryparameter: 1/true/on/yes/aan = waar, 0/false/off/no/uit =

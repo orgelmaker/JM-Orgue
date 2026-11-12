@@ -203,6 +203,20 @@ impl Lfo {
 #[derive(Debug, Clone, Copy)]
 pub enum LfoWaveform { Sine, Triangle, Square, Sawtooth }
 
+/// De opgenomen golfvorm van de set als vorm van de tremulant (C5, stap 2): één cyclus als tabel (toonhoogte als
+/// fractie van de frequentie, sterkte als fractie), de snelheid van de set, en de diepten van een gemiddelde pijp van
+/// de divisie (`ka` op de sterkte, `kp` op de toonhoogte). Pijpen met eigen diepten schalen daarop in de mengkern.
+#[derive(Clone, Debug)]
+pub struct TremGolf {
+    pub tabel: std::sync::Arc<Vec<[f32; 2]>>,
+    pub hz: f32,
+    pub ka: f32,
+    pub kp: f32,
+}
+
+/// Cent per eenheid relatieve frequentieafwijking (1200 / ln 2), eerste orde.
+const CENT_PER_FRACTIE: f32 = 1731.234;
+
 /// Tremulant effect
 pub struct Tremulant {
     pub active: bool,
@@ -212,6 +226,10 @@ pub struct Tremulant {
     pub pitch_depth: f32,
     ramp: f32,
     ramp_rate: f32,
+    /// Golfvorm van de set (C5, stap 2). None = de gewone sinus, exact zoals vroeger.
+    golf: Option<TremGolf>,
+    golf_fase: f32,
+    golf_stap: f32,
 }
 
 impl Tremulant {
@@ -224,7 +242,23 @@ impl Tremulant {
             pitch_depth: 10.0,
             ramp: 0.0,
             ramp_rate: 1.0 / (sample_rate as f32 * 0.5),
+            golf: None,
+            golf_fase: 0.0,
+            golf_stap: 0.0,
         }
+    }
+
+    /// De golfvorm van de set zetten of weghalen. Geeft de vorige terug, zodat de aanroeper die buiten de
+    /// audio-thread kan opruimen. Snelheid en diepte van de sinus (`set_speed`, `amp_depth`, `pitch_depth`) gelden
+    /// alleen zonder golfvorm.
+    pub fn zet_golf(&mut self, golf: Option<TremGolf>, sample_rate: SampleRate) -> Option<TremGolf> {
+        self.golf_stap = golf.as_ref().map(|g| g.hz / sample_rate as f32).unwrap_or(0.0);
+        self.golf_fase = 0.0;
+        std::mem::replace(&mut self.golf, golf)
+    }
+
+    pub fn heeft_golf(&self) -> bool {
+        self.golf.is_some()
     }
 
     pub fn set_speed(&mut self, frequency: f32, sample_rate: SampleRate) {
@@ -236,6 +270,20 @@ impl Tremulant {
         if self.active { self.ramp = (self.ramp + self.ramp_rate).min(1.0); }
         else { self.ramp = (self.ramp - self.ramp_rate).max(0.0); }
         if self.ramp <= 0.0 { return (1.0, 0.0); }
+        if let Some(g) = &self.golf {
+            let n = g.tabel.len();
+            if n > 0 {
+                let x = self.golf_fase * n as f32;
+                let i0 = (x as usize).min(n - 1);
+                let t = x - i0 as f32;
+                let (a, b) = (g.tabel[i0], g.tabel[(i0 + 1) % n]);
+                let toon = a[0] + (b[0] - a[0]) * t;
+                let sterkte = a[1] + (b[1] - a[1]) * t;
+                self.golf_fase += self.golf_stap;
+                if self.golf_fase >= 1.0 { self.golf_fase -= 1.0; }
+                return (1.0 + sterkte * g.ka * self.ramp, toon * g.kp * CENT_PER_FRACTIE * self.ramp);
+            }
+        }
         let amp_mod = 1.0 + self.amp_lfo.next() * self.amp_depth * self.ramp;
         let pitch_mod = self.pitch_lfo.next() * self.pitch_depth * self.ramp;
         (amp_mod, pitch_mod)
@@ -2294,5 +2342,43 @@ mod pijpprofiel_tests {
         assert_eq!(x, y, "dezelfde pijp hoort altijd dezelfde constanten te krijgen");
         assert_ne!(x.kp, z.kp, "twee pijpen horen nét te verschillen");
         assert!((x.kp / z.kp - 1.0).abs() < 0.5);
+    }
+}
+
+#[cfg(test)]
+mod trem_golf_tests {
+    use super::*;
+
+    fn aan(t: &mut Tremulant) {
+        t.active = true;
+        for _ in 0..48_000 { t.process(); } // ramp vol
+    }
+
+    #[test]
+    fn golfvorm_volgt_de_tabel_met_de_diepten() {
+        let mut t = Tremulant::new(6.0, 48_000);
+        let tabel = std::sync::Arc::new(vec![[0.01, 0.05], [-0.01, -0.05]]);
+        assert!(t.zet_golf(Some(TremGolf { tabel, hz: 0.0, ka: 0.5, kp: 0.3 }), 48_000).is_none());
+        aan(&mut t);
+        // hz 0: de fase blijft op het eerste punt.
+        let (a, p) = t.process();
+        assert!((a - (1.0 + 0.05 * 0.5)).abs() < 1e-5, "{}", a);
+        assert!((p - 0.01 * 0.3 * CENT_PER_FRACTIE).abs() < 1e-3, "{}", p);
+    }
+
+    #[test]
+    fn zonder_golfvorm_de_oude_sinus_en_weghalen_geeft_hem_terug() {
+        let mut a = Tremulant::new(6.0, 48_000);
+        let mut b = Tremulant::new(6.0, 48_000);
+        let g = TremGolf { tabel: std::sync::Arc::new(vec![[0.0, 0.0]; 4]), hz: 5.0, ka: 1.0, kp: 1.0 };
+        b.zet_golf(Some(g), 48_000);
+        assert!(b.zet_golf(None, 48_000).is_some());
+        aan(&mut a);
+        aan(&mut b);
+        for _ in 0..1000 {
+            let (x, y) = (a.process(), b.process());
+            assert_eq!(x.0.to_bits(), y.0.to_bits());
+            assert_eq!(x.1.to_bits(), y.1.to_bits());
+        }
     }
 }

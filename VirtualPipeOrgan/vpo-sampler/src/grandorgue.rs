@@ -736,6 +736,11 @@ pub struct PipeExtra {
     pub wind_lade: Option<u32>,
     pub wind_verbruik_kg_s: Option<f32>,
     pub wind_ref_inch: Option<f32>,
+    /// Tremulant-golfvorm van de set (C5, stap 2): de `TremulantWaveformID` van deze pijp, en de diepte van de
+    /// sterkte (dB) en van de toonhoogte (procent) ten opzichte van de golfvorm. Alleen Hauptwerk; anders None.
+    pub trem_golf: Option<u32>,
+    pub trem_amp_db: Option<f32>,
+    pub trem_toon_pct: Option<f32>,
 }
 
 /// Eén release-sample van een pijp. `max_key_press_time_ms = None` of `-1`
@@ -1672,6 +1677,9 @@ impl OdfParser {
             wind_lade: None,
             wind_verbruik_kg_s: None,
             wind_ref_inch: None,
+            trem_golf: None,
+            trem_amp_db: None,
+            trem_toon_pct: None,
         }
     }
 

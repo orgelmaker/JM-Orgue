@@ -22,6 +22,7 @@ pub mod stille_staart;
 pub mod monsters;
 pub mod schijfcache;
 pub mod windwerk;
+pub mod tremulant_golf;
 pub use monsters::{Bron, BronRef, I16Bron, I24Bron, Monsters};
 
 pub use loader::{

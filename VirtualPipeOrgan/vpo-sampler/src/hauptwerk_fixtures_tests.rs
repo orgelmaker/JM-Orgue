@@ -614,6 +614,7 @@ fn golfvormen_uit(xml: &str) -> Vec<crate::import_report::TremulantGolfvorm> {
         &extract_objects(xml, "TremulantWaveformPipe"),
         &extract_objects(xml, "Tremulant"),
         &extract_objects(xml, "Sample"),
+        &HashMap::new(),
     )
 }
 
@@ -648,10 +649,10 @@ fn een_golfvorm_zonder_pijpen_of_bestanden_blijft_staan_met_lege_waarden() {
 #[test]
 fn zonder_golfvormen_geen_melding_en_het_verslag_bevat_de_gegevens_en_een_melding() {
     let mut v = crate::import_report::ImportReport::uit_definitie("hauptwerk", "4.0", "proef", "Fixture", 3, 1, 0);
-    voeg_tremulant_golfvormen_toe(&mut v, &xml_met_attacks(&aanval(1, 1, "")));
+    voeg_tremulant_golfvormen_toe(&mut v, &xml_met_attacks(&aanval(1, 1, "")), &HashMap::new());
     assert!(v.tremulant_golfvormen.is_empty());
     assert!(v.meldingen.iter().all(|m| m.object != "tremulantgolfvorm"));
-    voeg_tremulant_golfvormen_toe(&mut v, &golfvorm_xml());
+    voeg_tremulant_golfvormen_toe(&mut v, &golfvorm_xml(), &HashMap::new());
     assert_eq!(v.tremulant_golfvormen.len(), 2);
     let m = v.meldingen.iter().find(|m| m.object == "tremulantgolfvorm" && m.tekst.contains("Tremulant 3Man")).expect("melding");
     assert!(m.tekst.contains("voor 3 pijpen"), "{}", m.tekst);

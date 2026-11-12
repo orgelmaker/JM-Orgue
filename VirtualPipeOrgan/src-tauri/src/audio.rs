@@ -512,6 +512,7 @@ pub(crate) fn meng_stemmen_blok(
             let base_rate = voice.rate;
             let pitch_mul = voice.c_pitch_mul;
             let use_lfo = voice.c_use_lfo_trem;
+            let (trem_eigen, tka, tkp) = (voice.c_trem_eigen, voice.c_trem_ka, voice.c_trem_kp as f64);
             let vgain = voice.c_voicing_gain;
             let kp = voice.c_kp;
             let kg = voice.c_kg;
@@ -551,11 +552,19 @@ pub(crate) fn meng_stemmen_blok(
                         g *= (1.0 + kg * dev_cur).max(0.25);
                     }
                     if use_lfo {
-                        eff_rate *= blok.trem_rate[f][div_idx];
+                        if trem_eigen {
+                            eff_rate *= 1.0 + (blok.trem_rate[f][div_idx] - 1.0) * tkp;
+                        } else {
+                            eff_rate *= blok.trem_rate[f][div_idx];
+                        }
                     }
                 }
                 if in_range && use_lfo {
-                    g *= blok.trem_amp[f][div_idx];
+                    if trem_eigen {
+                        g *= 1.0 + (blok.trem_amp[f][div_idx] - 1.0) * tka;
+                    } else {
+                        g *= blok.trem_amp[f][div_idx];
+                    }
                 }
                 rates[k] = eff_rate;
                 gains[k] = g;
@@ -664,6 +673,7 @@ pub(crate) fn meng_stemmen_blok_oud(
         let base_rate = voice.rate;
         let pitch_mul = voice.c_pitch_mul;
         let use_lfo = voice.c_use_lfo_trem;
+        let (trem_eigen, tka, tkp) = (voice.c_trem_eigen, voice.c_trem_ka, voice.c_trem_kp as f64);
         let vgain = voice.c_voicing_gain;
         // Wind per stem (0.7.51): de stem volgt de drukafwijking van zijn
         // divisie met zijn eigen traagheid en reageert met zijn eigen
@@ -714,7 +724,11 @@ pub(crate) fn meng_stemmen_blok_oud(
                     g *= (1.0 + kg * dev_cur).max(0.25);
                 }
                 if use_lfo {
-                    eff_rate *= blok.trem_rate[f][div_idx];
+                    if trem_eigen {
+                        eff_rate *= 1.0 + (blok.trem_rate[f][div_idx] - 1.0) * tkp;
+                    } else {
+                        eff_rate *= blok.trem_rate[f][div_idx];
+                    }
                 }
             }
             voice.rate = eff_rate;
@@ -723,7 +737,11 @@ pub(crate) fn meng_stemmen_blok_oud(
 
             // Volume = gecachte voicing-gain × wind × per-sample trem-amplitude.
             if in_range && use_lfo {
-                g *= blok.trem_amp[f][div_idx];
+                if trem_eigen {
+                    g *= 1.0 + (blok.trem_amp[f][div_idx] - 1.0) * tka;
+                } else {
+                    g *= blok.trem_amp[f][div_idx];
+                }
             }
             // Mono: sl == sr → exact het oude pad. Stereo: L en R
             // gescheiden, met dezelfde pan-gewichten (pan werkt dan als
@@ -1306,6 +1324,10 @@ pub enum AudioCommand {
     /// 8'-C-eenheden in plaats van de schatting, en per windgroep de factor op de knoppen balggrootte en maximale
     /// daling (de middenstand van de knop wordt de waarde van de set). Niet gestuurd = leeg en 1,0 (zoals voorheen).
     RegisterWindwerkSet { verbruik: Arc<HashMap<(u32, u32), f32>>, balg: [f32; 32], daling: [f32; 32] },
+    /// Tremulant-golfvorm van de set (C5, stap 2), na RegisterStopWindProfiles: per divisie de golfvorm voor de
+    /// tremulant-LFO (None = de gewone sinus), en per pijp (stop, kale pijp) de diepte van sterkte en toonhoogte
+    /// ten opzichte van die van de divisie. Niet gestuurd = geen golfvormen (zoals voorheen).
+    RegisterTremGolf { golven: Arc<Vec<Option<vpo_audio::TremGolf>>>, diepte: Arc<HashMap<(u32, u32), (f32, f32)>> },
     /// Set temperament: 12 cent offsets [C,C#,D,...,B] + global fine-tuning in cents.
     /// `retune` = hertemperen per pijp vanaf de gemeten toonhoogte (de
     /// RegisterOdfRetune-tabel vervangt dan de ODF-PitchTuning); false =
@@ -1472,6 +1494,11 @@ pub(crate) struct PlayingVoice {
     c_pitch_mul: f64,
     /// Of de LFO-tremulant op deze voice moet werken (stops zonder trem-samples).
     c_use_lfo_trem: bool,
+    /// Tremulant-golfvorm van de set (C5, stap 2): deze pijp heeft een eigen diepte (sterkte, toonhoogte) ten
+    /// opzichte van die van haar divisie. Uit = exact het oude pad.
+    c_trem_eigen: bool,
+    c_trem_ka: f32,
+    c_trem_kp: f32,
     /// Windconstanten van deze pijp (0.7.51), bij het starten bepaald uit
     /// het stopprofiel: verbruik (8'-C-eenheden; 0 voor release-staarten),
     /// toonhoogte- en sterktegevoeligheid, en de traagheid waarmee de pijp
@@ -1543,6 +1570,9 @@ impl PlayingVoice {
             c_voicing_gain: 1.0,
             c_pitch_mul: 1.0,
             c_use_lfo_trem: true,
+            c_trem_eigen: false,
+            c_trem_ka: 1.0,
+            c_trem_kp: 1.0,
             c_wind_flow: 0.0,
             c_kp: 0.0,
             c_kg: 0.0,
@@ -1584,6 +1614,9 @@ impl PlayingVoice {
             c_voicing_gain: 1.0,
             c_pitch_mul: 1.0,
             c_use_lfo_trem: true,
+            c_trem_eigen: false,
+            c_trem_ka: 1.0,
+            c_trem_kp: 1.0,
             c_wind_flow: 0.0,
             c_kp: 0.0,
             c_kg: 0.0,
@@ -1663,6 +1696,9 @@ impl PlayingVoice {
             c_voicing_gain: 1.0,
             c_pitch_mul: 1.0,
             c_use_lfo_trem: true,
+            c_trem_eigen: false,
+            c_trem_ka: 1.0,
+            c_trem_kp: 1.0,
             c_wind_flow: 0.0,
             c_kp: 0.0,
             c_kg: 0.0,
@@ -1778,6 +1814,15 @@ impl PlayingVoice {
     /// gemeten bij 4 van de 5 loslatingen).
     /// Windconstanten uit het pijpprofiel zetten bij het starten van een
     /// speelstem. Een onhoorbaar perspectief (op -120 dB) trekt geen wind.
+    /// Eigen tremulantdiepte van deze pijp (C5, stap 2), als de set er een geeft.
+    fn zet_trem(&mut self, eigen: Option<(f32, f32)>) {
+        if let Some((ka, kp)) = eigen {
+            self.c_trem_eigen = true;
+            self.c_trem_ka = ka;
+            self.c_trem_kp = kp;
+        }
+    }
+
     fn zet_wind(&mut self, pw: &PijpWind, div: usize, hoorbaar: bool) {
         self.c_wind_flow = if hoorbaar { pw.verbruik } else { 0.0 };
         self.c_kp = pw.kp;
@@ -1802,6 +1847,9 @@ impl PlayingVoice {
         self.c_dev_cur = van.c_dev_cur;
         self.c_div = van.c_div;
         self.c_bus = van.c_bus;
+        self.c_trem_eigen = van.c_trem_eigen;
+        self.c_trem_ka = van.c_trem_ka;
+        self.c_trem_kp = van.c_trem_kp;
     }
 
     fn release_ms(&mut self, ms: f32, sample_rate: u32) {
@@ -4079,6 +4127,9 @@ fn run_audio_thread(
     // Windwerk van de set (D4): leeg en 1,0 = het gewone model, bit-identiek.
     let lege_set_verbruik: Arc<HashMap<(u32, u32), f32>> = Arc::new(HashMap::new());
     let mut wind_set_verbruik: Arc<HashMap<(u32, u32), f32>> = lege_set_verbruik.clone();
+    // Tremulant-golfvorm van de set (C5, stap 2): leeg = geen eigen diepten.
+    let lege_trem_diepte: Arc<HashMap<(u32, u32), (f32, f32)>> = Arc::new(HashMap::new());
+    let mut trem_set_diepte: Arc<HashMap<(u32, u32), (f32, f32)>> = lege_trem_diepte.clone();
     let mut wind_set_balg = [1.0f32; 32];
     let mut wind_set_daling = [1.0f32; 32];
     let mut wind_flt: Vec<(OnePoleFilter, OnePoleFilter)> = (0..32)
@@ -4351,6 +4402,12 @@ fn run_audio_thread(
                             }
                         }
                         pw.verbruik /= n_hoorbaar;
+                        // Tremulant-golfvorm van de set (C5): de eigen diepte van deze pijp, als die er is.
+                        let trem_eigen = if trem_set_diepte.is_empty() {
+                            None
+                        } else {
+                            trem_set_diepte.get(&(stop_id, base_pipe(pipe_num))).copied()
+                        };
                         let mut stoot_nieuw = 0.0f32;
                         for &(layer, slot) in layout {
                         // Perspectief op "uit" (gain exact 0, zie
@@ -4415,6 +4472,7 @@ fn run_audio_thread(
                             voice.persp_slot = slot;
                             let hoorbaar = persp_gain[(slot as usize) & (MAX_LAYERS - 1)] > 0.01;
                             voice.zet_wind(&pw, wind_div, hoorbaar);
+                            voice.zet_trem(trem_eigen);
                             if hoorbaar { stoot_nieuw += pw.verbruik; }
                             spawned_any = true;
                             {
@@ -4439,6 +4497,7 @@ fn run_audio_thread(
                                 voice.persp_slot = slot;
                                 let hoorbaar = persp_gain[(slot as usize) & (MAX_LAYERS - 1)] > 0.01;
                                 voice.zet_wind(&pw, wind_div, hoorbaar);
+                                voice.zet_trem(trem_eigen);
                                 if hoorbaar { stoot_nieuw += pw.verbruik; }
                                 spawned_any = true;
 
@@ -5290,6 +5349,19 @@ fn run_audio_thread(
                         }
                         wind_set_balg = [1.0; 32];
                         wind_set_daling = [1.0; 32];
+                        // Tremulant-golfvormen van het vorige orgel weg (C5); het nieuwe stuurt de zijne hierna.
+                        if !trem_set_diepte.is_empty() {
+                            let oud = std::mem::replace(&mut trem_set_diepte, lege_trem_diepte.clone());
+                            gc.send_arc(oud);
+                        }
+                        {
+                            let lfos = trem_lfos_clone.write();
+                            for trem in lfos.iter_mut() {
+                                if let Some(oud) = trem.zet_golf(None, sample_rate) {
+                                    gc.send_arc(oud.tabel);
+                                }
+                            }
+                        }
                         // Nieuw orgel: alle windstaat van het vórige orgel weg,
                         // net als de tremulanten in RegisterStopDivisionMap.
                         // De UI stuurt daarna de opgeslagen groepen opnieuw;
@@ -5308,6 +5380,20 @@ fn run_audio_thread(
                             wg.resize(32, 0);
                             for (i, g) in wg.iter_mut().enumerate() { *g = i as u8; }
                         }
+                    }
+                    AudioCommand::RegisterTremGolf { golven, diepte } => {
+                        let oud = std::mem::replace(&mut trem_set_diepte, diepte);
+                        gc.send_arc(oud);
+                        {
+                            let lfos = trem_lfos_clone.write();
+                            for (d, trem) in lfos.iter_mut().enumerate() {
+                                let nieuw = golven.get(d).cloned().flatten();
+                                if let Some(oud) = trem.zet_golf(nieuw, sample_rate) {
+                                    gc.send_arc(oud.tabel);
+                                }
+                            }
+                        }
+                        gc.send_arc(golven);
                     }
                     AudioCommand::RegisterWindwerkSet { verbruik, balg, daling } => {
                         let oud = std::mem::replace(&mut wind_set_verbruik, verbruik);

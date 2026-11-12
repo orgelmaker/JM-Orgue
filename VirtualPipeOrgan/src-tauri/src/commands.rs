@@ -570,7 +570,7 @@ pub fn get_zwelkast_voorstel(state: State<AppState>) -> Vec<crate::zwelkast_set:
 }
 
 /// Zet één vlag (`niveaus_van_set`, `overgangen_van_set`, `koppels_volgen_set`,
-/// `staart_afkap`, `zwelkast_van_set`, `koppels_klavier` of `windwerk_van_set`)
+/// `staart_afkap`, `zwelkast_van_set`, `koppels_klavier`, `windwerk_van_set` of `tremulant_golf_van_set`)
 /// voor het geladen orgel. De importers lezen ze bij het laden, dus de wijziging
 /// werkt na een herlaad. Wordt meteen in de opgeslagen instellingen van het orgel
 /// gezet als die al bestaan; een orgel zonder opgeslagen instellingen bewaart ze
@@ -772,7 +772,7 @@ fn zet_orgelvlaggen_voor(state: &AppState, path: &str) {
     vlaggen.zet_importers();
     *state.orgel_vlaggen.write() = vlaggen;
     info!(
-        "Gedrag van de set voor dit orgel: niveaus {}, overgangen {}, koppels volgen de set {}, stille staart afkappen {}, zwelkast van de set {}, klavierkoppels van de set {}, windwerk van de set {}{}",
+        "Gedrag van de set voor dit orgel: niveaus {}, overgangen {}, koppels volgen de set {}, stille staart afkappen {}, zwelkast van de set {}, klavierkoppels van de set {}, windwerk van de set {}, tremulant-golfvorm van de set {}{}",
         if vlaggen.niveaus_van_set { "aan" } else { "uit" },
         if vlaggen.overgangen_van_set { "aan" } else { "uit" },
         if vlaggen.koppels_volgen_set { "aan" } else { "uit" },
@@ -780,6 +780,7 @@ fn zet_orgelvlaggen_voor(state: &AppState, path: &str) {
         if vlaggen.zwelkast_van_set { "aan" } else { "uit" },
         if vlaggen.koppels_klavier { "aan" } else { "uit" },
         if vlaggen.windwerk_van_set { "aan" } else { "uit" },
+        if vlaggen.tremulant_golf_van_set { "aan" } else { "uit" },
         if forceer.is_some() { " (geforceerd)" } else { "" },
     );
 }
@@ -4577,6 +4578,15 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
     if let Some(a) = &windwerk_afleiding {
         let namen: Vec<String> = organ_info.divisions.iter().map(|d| d.name.clone()).collect();
         crate::windwerk_set::toepassen(state, a, &namen);
+    }
+    // Tremulant-golfvorm van de set (C5, stap 2): alleen met de vlag aan en een bruikbare golfvorm; anders niets.
+    if state.orgel_vlaggen.read().tremulant_golf_van_set {
+        let golfvormen = state.laatste_importverslag.read().as_ref().map(|v| v.tremulant_golfvormen.clone()).unwrap_or_default();
+        if let Some(set) = crate::tremulant_golf_set::afleiden(
+            &definition, &organ_info.divisions, &golfvormen, &vpo_sampler::tremulant_golf::lees_golftabel,
+        ) {
+            crate::tremulant_golf_set::toepassen(state, set);
+        }
     }
     *state.zwelkast_voorstel.write() = zwelkast_voorstel;
 
@@ -11001,7 +11011,7 @@ pub fn do_save_organ_settings(state: &AppState, presets: HashMap<String, PresetD
 
     // Gedrag van de set (E1/D3/F7): wat nu staat, tenzij een proef via de test-API
     // het geforceerd heeft; zo'n geforceerde keuze wordt nooit bewaard.
-    let [vlag_niveaus, vlag_overgangen, vlag_koppels, vlag_staart, vlag_zwelkast, vlag_klavier, vlag_windwerk] = {
+    let [vlag_niveaus, vlag_overgangen, vlag_koppels, vlag_staart, vlag_zwelkast, vlag_klavier, vlag_windwerk, vlag_trem_golf] = {
         let geforceerd = state.vlag_overrides.read().contains_key(&crate::library::pad_sleutel(&organ_id));
         let lib = state.organ_library.read();
         crate::orgelvlaggen::OrgelVlaggen::te_bewaren(
@@ -11041,6 +11051,7 @@ pub fn do_save_organ_settings(state: &AppState, presets: HashMap<String, PresetD
         zwelkast_van_set: vlag_zwelkast,
         koppels_klavier: vlag_klavier,
         windwerk_van_set: vlag_windwerk,
+        tremulant_golf_van_set: vlag_trem_golf,
         niet_geladen_registers: state.niet_geladen_registers.read().clone(),
         listening_position: Some(*state.listening_position.read()),
         background_gain: Some(*state.background_gain.read()),

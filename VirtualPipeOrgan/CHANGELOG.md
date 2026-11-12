@@ -6,6 +6,17 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### Tremulant volgt de opgenomen golfvorm van de set (C5, stap 2)
+- Nieuw vinkje per orgel "Tremulant volgt de golfvorm van de set" (Instellingen → Klank). Bij een Hauptwerk-set met
+  opgenomen tremulant-golfvormen krijgt de tremulant van een werk de vorm van die golfvorm (een gemeten cyclus van
+  toonhoogte en sterkte) en de snelheid van de set, en elke pijp de diepte die de set voor haar opgeeft. De snelheid en
+  diepte van de tremulantknoppen gelden dan niet. Registers met echte tremulant-opnamen veranderen niet.
+- Standaard: bestaande orgels uit (geen verandering), nieuwe orgels aan. Uit = de gewone sinus, ongewijzigd.
+- Gemeten in de app (leesbare set, één register, noot a''): met het vinkje 6,38 Hz, 5,3 cent en 3,4 % sterkte, zoals de
+  set voorschrijft (6,4 Hz, ongeveer 5 cent, 3,5 %); zonder 5,98 Hz, 15 cent en 10,4 %, zoals voorheen.
+- Alleen leesbare Hauptwerk-definities; de derde-harmonische-golfvorm (klankkleur) wordt nog niet gebruikt.
+- Test-API: `/tremulant?…&lfo=1` zet ook de LFO-tremulant, zoals de knop in het orgelscherm.
+
 ### Handleiding bijgewerkt naar 0.9.52, in zeven talen
 - Nieuw beschreven: de vinkjes "Windwerk van de set" en "Koppels van de set volledig inlezen", het windwerk in het importverslag,
   "Samples in het geheugen", de schijfcache en het advies voor de startbuffer met de knop Overnemen. De vermeldingen

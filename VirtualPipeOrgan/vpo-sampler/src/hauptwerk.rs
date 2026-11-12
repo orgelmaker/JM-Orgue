@@ -189,7 +189,7 @@ fn load_hauptwerk_intern(
             voeg_niveau_rapport_toe(&mut v, &def, &xml, niveaus);
             voeg_zwelkast_rapport_toe(&mut v, &def);
             voeg_crescendo_toe(&mut v, &xml);
-            voeg_tremulant_golfvormen_toe(&mut v, &xml);
+            voeg_tremulant_golfvormen_toe(&mut v, &xml, &pkg_dirs);
             voeg_windwerk_toe(&mut v, &def, &xml);
             (Ok(def), v)
         }
@@ -369,11 +369,24 @@ pub(crate) fn tremulant_golfvormen_uit_tabellen(
     pijpen: &[FieldMap],
     tremulanten: &[FieldMap],
     samples: &[FieldMap],
+    pkg_dirs: &HashMap<u32, PathBuf>,
 ) -> Vec<crate::import_report::TremulantGolfvorm> {
     use crate::import_report::TremulantGolfvorm;
     let bestand_van: HashMap<u32, String> = samples
         .iter()
         .filter_map(|s| Some((s.get_u32("SampleID")?, s.get("SampleFilename")?.trim().to_string())))
+        .collect();
+    let zoeker = crate::padzoek::PadZoeker::nieuw();
+    let pad_van: HashMap<u32, PathBuf> = samples
+        .iter()
+        .filter_map(|s| {
+            let dir = pkg_dirs.get(&s.get_u32("InstallationPackageID").unwrap_or(0))?;
+            Some((s.get_u32("SampleID")?, zoeker.los_op(dir, s.get("SampleFilename")?.trim())))
+        })
+        .collect();
+    let freq_van: HashMap<u32, f32> = tremulanten
+        .iter()
+        .filter_map(|t| Some((t.get_u32("TremulantID")?, t.get_f32("FrequencyWhenEngagedHz")?)))
         .collect();
     let naam_van: HashMap<u32, String> = tremulanten
         .iter()
@@ -399,6 +412,9 @@ pub(crate) fn tremulant_golfvormen_uit_tabellen(
         let bestand = |veld: &str| g.get_u32(veld).and_then(|s| bestand_van.get(&s).cloned()).unwrap_or_default();
         uit.push(TremulantGolfvorm {
             tremulant_id,
+            golfvorm_id: id,
+            frequentie_hz: freq_van.get(&tremulant_id).copied(),
+            grondtoon_pad: g.get_u32("PitchAndFundamentalWaveformSampleID").and_then(|s| pad_van.get(&s).cloned()),
             tremulant_naam: naam_van.get(&tremulant_id).cloned().unwrap_or_default(),
             grondtoon_bestand: bestand("PitchAndFundamentalWaveformSampleID"),
             harmonische_bestand: bestand("ThirdHarmonicWaveformSampleID"),
@@ -414,7 +430,7 @@ pub(crate) fn tremulant_golfvormen_uit_tabellen(
 
 /// Zet de opgenomen tremulant-golfvormen in het verslag (C5, stap 1). Bij een gecomprimeerde definitie waarvan
 /// de veldnamen niet te lezen zijn, volgt alleen een telling.
-pub(crate) fn voeg_tremulant_golfvormen_toe(v: &mut crate::import_report::ImportReport, xml: &str) {
+pub(crate) fn voeg_tremulant_golfvormen_toe(v: &mut crate::import_report::ImportReport, xml: &str, pkg_dirs: &HashMap<u32, PathBuf>) {
     use crate::import_report::Ernst;
     let compact = GecomprimeerdeOdf::detecteer(xml);
     let lees = |tabel: &str| -> Vec<FieldMap> {
@@ -427,7 +443,7 @@ pub(crate) fn voeg_tremulant_golfvormen_toe(v: &mut crate::import_report::Import
     if golven.is_empty() {
         return;
     }
-    let lijst = tremulant_golfvormen_uit_tabellen(&golven, &lees("TremulantWaveformPipe"), &lees("Tremulant"), &lees("Sample"));
+    let lijst = tremulant_golfvormen_uit_tabellen(&golven, &lees("TremulantWaveformPipe"), &lees("Tremulant"), &lees("Sample"), pkg_dirs);
     if lijst.is_empty() {
         v.melding(
             Ernst::Info,
@@ -954,6 +970,14 @@ fn build_definition_volledig(
             )))
         })
         .collect();
+    // Tremulant-golfvorm per pijp (C5, stap 2): welke golfvorm en hoe diep.
+    let pijp_trem: HashMap<u32, (u32, Option<f32>, Option<f32>)> = lees("TremulantWaveformPipe").iter()
+        .filter_map(|p| Some((p.get_u32("PipeID")?, (
+            p.get_u32("TremulantWaveformID")?,
+            p.get_f32("AmplitudeModDepthAdjustDecibels"),
+            p.get_f32("PitchModDepthAdjustPercent"),
+        ))))
+        .collect();
     let layers = lees("Pipe_SoundEngine01_Layer");
     let attack_samples = lees("Pipe_SoundEngine01_AttackSample");
     let release_samples = lees("Pipe_SoundEngine01_ReleaseSample");
@@ -1205,6 +1229,11 @@ fn build_definition_volledig(
             extra.wind_lade = lade;
             extra.wind_verbruik_kg_s = verbruik;
             extra.wind_ref_inch = refd;
+        }
+        if let Some(&(golf, amp, toon)) = pijp_trem.get(&pipe_id) {
+            extra.trem_golf = Some(golf);
+            extra.trem_amp_db = amp;
+            extra.trem_toon_pct = toon;
         }
         // Toonhoogte-metadata voor hertemperen (sample-veld > smpl-chunk >
         // originele pijptoon; de keuze valt in de retune-opbouw).
