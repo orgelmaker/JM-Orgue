@@ -282,6 +282,8 @@
     "koppels_volgen_set_hint": "Activé : un accouplement ne se prolonge à travers d'autres accouplements que si le set l'autorise (sets GrandOrgue). Désactivé : les accouplements s'enchaînent toujours, comme avant.",
     "koppels_klavier": "Lire tous les accouplements du set",
     "koppels_klavier_hint": "Activé : les accouplements d'un set Hauptwerk qui pointent vers un autre clavier (y compris à l'octave et au sein d'un même clavier), ainsi que ceux pour lesquels le set n'indique que dans son réseau de commutateurs quel plan joue un clavier, sont lus. Désactivé : ces accouplements sont ignorés et, s'il n'y en a pas d'autres, JM-Orgue crée des accouplements génériques, comme auparavant. Prend effet après rechargement.",
+    "windwerk_van_set": "Alimentation en vent du set",
+    "windwerk_van_set_hint": "Activé : pour un set Hauptwerk qui décrit son alimentation en vent, le modèle de vent suit le set : chaque soufflet est un groupe de vent, la consommation d'air par tuyau vient du set, et la position médiane de la taille du soufflet et de la baisse maximale est la valeur de ce soufflet (les réglages la mettent à l'échelle). Désactivé : le modèle de vent habituel, comme avant. Prend effet après rechargement.",
     "staart_afkap": "Couper les queues silencieuses",
     "staart_afkap_hint": "Activé : la fin silencieuse d'un enregistrement de relâchement (plus faible que le seuil ci-dessous, −90 dB par défaut) est omise. Cela libère des voix et de la mémoire et reste inaudible avec le réglage par défaut. Désactivé : l'enregistrement joue jusqu'au bout. Prend effet après le rechargement de l'orgue.",
     "staart_drempel": "Seuil (dB)",

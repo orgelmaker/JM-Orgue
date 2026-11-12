@@ -6,6 +6,14 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### Windmodel volgt het windwerk van de set (D4, fase 1)
+- Nieuw vinkje per orgel "Windwerk van de set" (onder Klank): bij een leesbare Hauptwerk-set die haar windwerk beschrijft,
+  wordt elke balg van de set één windgroep (een set met één magazijn voor het hele orgel krijgt dus één groep), komt het
+  luchtverbruik per pijp uit de set (per groep geschaald, zodat de diepte bij de knoppen blijft), en is de middenstand van
+  balggrootte en maximale daling de waarde van die balg; de knoppen schalen die. Een balg met onaannemelijke gegevens houdt
+  de standaard. Met het vinkje aan blijft de eigen opgeslagen indeling van de windgroepen bewaard voor als het weer uit gaat.
+- Standaard: bestaande orgels uit (geen verandering), nieuwe orgels aan. Uit = het gewone windmodel, ongewijzigd.
+
 ### Windwerk van de set in het importverslag (D4, fase 0)
 - Bij leesbare Hauptwerk-sets leest JM-Orgue nu het windwerk van de set: de balgen (afmetingen, massa, demping), de laden
   en kanalen ertussen, en per pijp de lade en het luchtverbruik. Het importverslag meldt per balg de eigenfrequentie, de

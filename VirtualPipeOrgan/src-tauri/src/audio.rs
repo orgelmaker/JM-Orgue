@@ -1302,6 +1302,10 @@ pub enum AudioCommand {
     /// Windprofiel per stop (familie, voetmaat) plus per divisie het
     /// verbruik van haar pleno, de referentie voor "vol werk" (0.7.51).
     RegisterStopWindProfiles(Arc<HashMap<u32, StopWindProfiel>>, [f32; 32]),
+    /// Windwerk van de set (D4, fase 1), na RegisterStopWindProfiles: per pijp (stop, kale pijp) het verbruik in
+    /// 8'-C-eenheden in plaats van de schatting, en per windgroep de factor op de knoppen balggrootte en maximale
+    /// daling (de middenstand van de knop wordt de waarde van de set). Niet gestuurd = leeg en 1,0 (zoals voorheen).
+    RegisterWindwerkSet { verbruik: Arc<HashMap<(u32, u32), f32>>, balg: [f32; 32], daling: [f32; 32] },
     /// Set temperament: 12 cent offsets [C,C#,D,...,B] + global fine-tuning in cents.
     /// `retune` = hertemperen per pijp vanaf de gemeten toonhoogte (de
     /// RegisterOdfRetune-tabel vervangt dan de ODF-PitchTuning); false =
@@ -4072,6 +4076,11 @@ fn run_audio_thread(
     let mut stoot_acc = [0.0f32; 32];
     let mut wind_profielen: Arc<HashMap<u32, StopWindProfiel>> = Arc::new(HashMap::new());
     let mut wind_pleno = [0.0f32; 32];
+    // Windwerk van de set (D4): leeg en 1,0 = het gewone model, bit-identiek.
+    let lege_set_verbruik: Arc<HashMap<(u32, u32), f32>> = Arc::new(HashMap::new());
+    let mut wind_set_verbruik: Arc<HashMap<(u32, u32), f32>> = lege_set_verbruik.clone();
+    let mut wind_set_balg = [1.0f32; 32];
+    let mut wind_set_daling = [1.0f32; 32];
     let mut wind_flt: Vec<(OnePoleFilter, OnePoleFilter)> = (0..32)
         .map(|_| (OnePoleFilter::new(1500.0, sample_rate), OnePoleFilter::new(1500.0, sample_rate)))
         .collect();
@@ -4335,6 +4344,12 @@ fn run_audio_thread(
                         let mut pw = wind_profielen.get(&stop_id)
                             .map(|p| pijp_constanten(p, midi_note, stop_id, pipe_num, sample_rate, wi.verschil, wi.tongwerk_apart))
                             .unwrap_or_default();
+                        // Windwerk van de set (D4): het verbruik van deze pijp uit de set, als die er een geeft.
+                        if !wind_set_verbruik.is_empty() {
+                            if let Some(&v) = wind_set_verbruik.get(&(stop_id, base_pipe(pipe_num))) {
+                                pw.verbruik = v;
+                            }
+                        }
                         pw.verbruik /= n_hoorbaar;
                         let mut stoot_nieuw = 0.0f32;
                         for &(layer, slot) in layout {
@@ -5215,7 +5230,9 @@ fn run_audio_thread(
                             let wm = wind_models_clone.write();
                             if let Some(model) = wm.get_mut(g) {
                                 model.enabled = instelling.enabled;
-                                model.configure(instelling.reservoir_size, instelling.damping, instelling.max_sag, sample_rate);
+                                // Windwerk van de set (D4): de knop schaalt de waarde van de set (factor 1 = gewoon).
+                                model.configure(instelling.reservoir_size * wind_set_balg[g], instelling.damping,
+                                                instelling.max_sag * wind_set_daling[g], sample_rate);
                             }
                         }
                         {
@@ -5266,6 +5283,13 @@ fn run_audio_thread(
                         // Eén Arc-swap; de oude tabel is klein en mag hier vallen.
                         wind_profielen = map;
                         wind_pleno = pleno;
+                        // Windwerk van de set van het vorige orgel weg (D4); het nieuwe stuurt het zijne hierna.
+                        if !wind_set_verbruik.is_empty() {
+                            let oud = std::mem::replace(&mut wind_set_verbruik, lege_set_verbruik.clone());
+                            gc.send_arc(oud);
+                        }
+                        wind_set_balg = [1.0; 32];
+                        wind_set_daling = [1.0; 32];
                         // Nieuw orgel: alle windstaat van het vórige orgel weg,
                         // net als de tremulanten in RegisterStopDivisionMap.
                         // De UI stuurt daarna de opgeslagen groepen opnieuw;
@@ -5283,6 +5307,18 @@ fn run_audio_thread(
                             let wg = wind_groups_clone.write();
                             wg.resize(32, 0);
                             for (i, g) in wg.iter_mut().enumerate() { *g = i as u8; }
+                        }
+                    }
+                    AudioCommand::RegisterWindwerkSet { verbruik, balg, daling } => {
+                        let oud = std::mem::replace(&mut wind_set_verbruik, verbruik);
+                        gc.send_arc(oud);
+                        wind_set_balg = balg;
+                        wind_set_daling = daling;
+                        // Balgen die al ingesteld zijn opnieuw, met de factoren van de set.
+                        let wm = wind_models_clone.write();
+                        for (g, model) in wm.iter_mut().enumerate().take(32) {
+                            let wi = wind_instel[g];
+                            model.configure(wi.reservoir_size * wind_set_balg[g], wi.damping, wi.max_sag * wind_set_daling[g], sample_rate);
                         }
                     }
                     AudioCommand::RegisterStopDivisionMap(map) => {

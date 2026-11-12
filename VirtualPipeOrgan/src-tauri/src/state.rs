@@ -1698,6 +1698,9 @@ pub struct AppState {
     pub division_wind_groups: Arc<RwLock<Vec<u8>>>,
     /// Aantal actieve wind-groepen (1..8). Beperkt de keuze in de UI; audio thread blijft 32 supporten.
     pub num_wind_groups: Arc<RwLock<u8>>,
+    /// Indeling divisie → windgroep uit het windwerk van de set (D4), als de vlag aan staat en de set er een geeft.
+    /// Gaat dan voor de opgeslagen indeling.
+    pub windwerk_set_groepen: Arc<RwLock<Option<Vec<u8>>>>,
     /// MIDI file player (afspelen van .mid bestanden)
     pub midi_player: Arc<RwLock<Option<vpo_midi::MidiFilePlayer>>>,
     /// Bluetooth LE MIDI manager (lazy init on first scan)
@@ -2210,6 +2213,7 @@ impl AppState {
             division_wind_groups: Arc::new(RwLock::new((0..32u8).collect())),
             // Default: 8 groepen actief — gebruiker beperkt zelf naar wens
             num_wind_groups: Arc::new(RwLock::new(8u8)),
+            windwerk_set_groepen: Arc::new(RwLock::new(None)),
             midi_player: midi_player_arc,
             ble_midi: Arc::new(RwLock::new(None)),
             ble_message_tx,
@@ -5463,6 +5467,7 @@ impl AppState {
         *self.division_output_channels.write() = vec![Vec::new(); n];
         *self.division_ccis_enabled.write() = vec![false; n];
         *self.division_wind_groups.write() = (0..n as u8).collect();
+        *self.windwerk_set_groepen.write() = None;
         // Per-divisie DSP-spiegels wissen zodat het nieuwe orgel niets erft van het vorige.
         self.division_pans.write().clear();
         self.division_swell_configs.write().clear();

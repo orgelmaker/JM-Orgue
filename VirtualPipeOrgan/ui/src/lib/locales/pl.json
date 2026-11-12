@@ -282,6 +282,8 @@
     "koppels_volgen_set_hint": "Włączone: łącznik działa przez inne łączniki tylko wtedy, gdy zestaw na to pozwala (zestawy GrandOrgue). Wyłączone: łączniki zawsze się łańcuchowo łączą, jak dawniej.",
     "koppels_klavier": "Wczytaj wszystkie połączenia z zestawu",
     "koppels_klavier_hint": "Włączone: wczytywane są także połączenia zestawu Hauptwerk wskazujące na inną klawiaturę (także oktawowe i w obrębie jednej klawiatury) oraz te, dla których zestaw podaje tylko w sieci przełączników, którą sekcję gra klawiatura. Wyłączone: te połączenia są pomijane, a jeśli nie ma innych, JM-Orgue tworzy połączenia ogólne, jak dotąd. Działa po ponownym wczytaniu.",
+    "windwerk_van_set": "System powietrza z zestawu",
+    "windwerk_van_set_hint": "Wł.: w zestawie Hauptwerk, który opisuje swój system powietrza, model wiatru podąża za zestawem: każdy miech to grupa wiatrowa, zużycie powietrza na piszczałkę pochodzi z zestawu, a środkowe położenie wielkości miecha i maksymalnego spadku to wartość tego miecha (regulatory ją skalują). Wył.: zwykły model wiatru, jak dotąd. Działa po ponownym wczytaniu.",
     "staart_afkap": "Obcinaj ciche ogony",
     "staart_afkap_hint": "Włączone: cichy koniec nagrania zwolnienia (cichszy niż próg poniżej, domyślnie −90 dB) jest pomijany. Zwalnia głosy i pamięć, a przy ustawieniu domyślnym jest niesłyszalny. Wyłączone: nagranie gra do końca. Działa po ponownym wczytaniu organów.",
     "staart_drempel": "Próg (dB)",

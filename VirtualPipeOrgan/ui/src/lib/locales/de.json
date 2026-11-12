@@ -282,6 +282,8 @@
     "koppels_volgen_set_hint": "An: eine Koppel wirkt nur dann über andere Koppeln weiter, wenn das Set es erlaubt (GrandOrgue-Sets). Aus: Koppeln verketten sich immer, wie bisher.",
     "koppels_klavier": "Koppeln des Sets vollständig einlesen",
     "koppels_klavier_hint": "An: auch Koppeln eines Hauptwerk-Sets, die auf ein anderes Manual zeigen (auch Oktavkoppeln und Koppeln innerhalb eines Manuals), und Koppeln, bei denen das Set nur im Schaltnetz angibt, welches Werk ein Manual spielt, werden eingelesen. Aus: diese Koppeln entfallen, und gibt es keine anderen, erzeugt JM-Orgue allgemeine Koppeln, wie bisher. Wirkt nach dem Neuladen.",
+    "windwerk_van_set": "Windsystem des Sets",
+    "windwerk_van_set_hint": "Ein: Bei einem Hauptwerk-Set, das sein Windsystem beschreibt, folgt das Windmodell dem Set: jeder Balg ist eine Windgruppe, der Luftverbrauch pro Pfeife kommt aus dem Set, und die Mittelstellung von Balggröße und maximalem Abfall ist der Wert dieses Balgs (die Regler skalieren ihn). Aus: das übliche Windmodell, wie bisher. Wirkt nach dem Neuladen.",
     "staart_afkap": "Stille Ausklänge abschneiden",
     "staart_afkap_hint": "An: das stille Ende einer Release-Aufnahme (leiser als die Schwelle unten, standardmäßig −90 dB) wird weggelassen. Das gibt Stimmen und Speicher frei und ist bei der Standardeinstellung nicht zu hören. Aus: die Aufnahme spielt bis zum Ende. Wirkt nach dem erneuten Laden der Orgel.",
     "staart_drempel": "Schwelle (dB)",

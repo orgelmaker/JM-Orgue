@@ -501,6 +501,9 @@ pub struct OrganSettings {
     /// Klavier-naar-klavierkoppels van de set inlezen (E3), zelfde regel als de eerste vier (bestaand uit, nieuw aan).
     #[serde(default)]
     pub koppels_klavier: Option<bool>,
+    /// Het windmodel sturen met het windwerk van de set (D4), zelfde regel (bestaand uit, nieuw aan).
+    #[serde(default)]
+    pub windwerk_van_set: Option<bool>,
     /// Registers die bij het laden van dit orgel worden overgeslagen (F2), als `"{manuaal}_{register}"`.
     /// Leeg = alles laden. Bestaande orgels hebben dit veld niet en laden dus alles.
     #[serde(default)]

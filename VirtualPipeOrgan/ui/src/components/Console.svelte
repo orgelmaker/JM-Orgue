@@ -7266,6 +7266,10 @@
                 <input type="checkbox" checked={orgelVlaggen.koppels_klavier} on:change={(e) => zetOrgelVlag('koppels_klavier', e.target.checked)} />
                 <span class="swell-toggle-label">{$t('settings.koppels_klavier')}</span>
               </label>
+              <label class="swell-toggle" style="margin-bottom:0.4rem;" title={$t('settings.windwerk_van_set_hint')}>
+                <input type="checkbox" checked={orgelVlaggen.windwerk_van_set} on:change={(e) => zetOrgelVlag('windwerk_van_set', e.target.checked)} />
+                <span class="swell-toggle-label">{$t('settings.windwerk_van_set')}</span>
+              </label>
               <label class="swell-toggle" style="margin-bottom:0.4rem;" title={$t('settings.staart_afkap_hint')}>
                 <input type="checkbox" checked={orgelVlaggen.staart_afkap} on:change={(e) => zetOrgelVlag('staart_afkap', e.target.checked)} />
                 <span class="swell-toggle-label">{$t('settings.staart_afkap')}</span>

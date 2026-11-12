@@ -570,7 +570,7 @@ pub fn get_zwelkast_voorstel(state: State<AppState>) -> Vec<crate::zwelkast_set:
 }
 
 /// Zet één vlag (`niveaus_van_set`, `overgangen_van_set`, `koppels_volgen_set`,
-/// `staart_afkap`, `zwelkast_van_set` of `koppels_klavier`)
+/// `staart_afkap`, `zwelkast_van_set`, `koppels_klavier` of `windwerk_van_set`)
 /// voor het geladen orgel. De importers lezen ze bij het laden, dus de wijziging
 /// werkt na een herlaad. Wordt meteen in de opgeslagen instellingen van het orgel
 /// gezet als die al bestaan; een orgel zonder opgeslagen instellingen bewaart ze
@@ -772,13 +772,14 @@ fn zet_orgelvlaggen_voor(state: &AppState, path: &str) {
     vlaggen.zet_importers();
     *state.orgel_vlaggen.write() = vlaggen;
     info!(
-        "Gedrag van de set voor dit orgel: niveaus {}, overgangen {}, koppels volgen de set {}, stille staart afkappen {}, zwelkast van de set {}, klavierkoppels van de set {}{}",
+        "Gedrag van de set voor dit orgel: niveaus {}, overgangen {}, koppels volgen de set {}, stille staart afkappen {}, zwelkast van de set {}, klavierkoppels van de set {}, windwerk van de set {}{}",
         if vlaggen.niveaus_van_set { "aan" } else { "uit" },
         if vlaggen.overgangen_van_set { "aan" } else { "uit" },
         if vlaggen.koppels_volgen_set { "aan" } else { "uit" },
         if vlaggen.staart_afkap { "aan" } else { "uit" },
         if vlaggen.zwelkast_van_set { "aan" } else { "uit" },
         if vlaggen.koppels_klavier { "aan" } else { "uit" },
+        if vlaggen.windwerk_van_set { "aan" } else { "uit" },
         if forceer.is_some() { " (geforceerd)" } else { "" },
     );
 }
@@ -4563,9 +4564,20 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
         state.send_audio_command(AudioCommand::RegisterPipeEnclosures { kaart: std::sync::Arc::new(k.pipe_slots), ouder: k.parent_division });
     }
     let (wind_profielen, wind_pleno) = build_stop_wind_profiles(&organ_info.divisions);
+    // Windwerk van de set (D4, fase 1): alleen met de vlag aan en een bruikbaar windwerk; anders niets.
+    let windwerk_afleiding = if state.orgel_vlaggen.read().windwerk_van_set {
+        let w = state.laatste_importverslag.read().as_ref().and_then(|v| v.windwerk.clone());
+        w.and_then(|w| crate::windwerk_set::afleiden(&definition, &organ_info.divisions, &wind_profielen, &w))
+    } else {
+        None
+    };
     state.send_audio_command(AudioCommand::RegisterStopWindProfiles(std::sync::Arc::new(wind_profielen), wind_pleno));
     state.reset_division_gains(organ_info.divisions.len());
     state.reset_division_settings(organ_info.divisions.len());
+    if let Some(a) = &windwerk_afleiding {
+        let namen: Vec<String> = organ_info.divisions.iter().map(|d| d.name.clone()).collect();
+        crate::windwerk_set::toepassen(state, a, &namen);
+    }
     *state.zwelkast_voorstel.write() = zwelkast_voorstel;
 
     // ODF-tremulantparameters als default voor de per-divisie LFO: rate uit
@@ -7348,6 +7360,12 @@ pub fn apply_saved_wind_groups(state: State<AppState>) -> Result<usize, String> 
     // Eerst aantal groepen restoren (indien opgeslagen, niet 0)
     if (1..=8).contains(&saved_num) {
         *state.num_wind_groups.write() = saved_num;
+    }
+    // Windwerk van de set (D4): de balgen van de set bepalen de indeling, niet de opgeslagen keuze.
+    let set_groepen = state.windwerk_set_groepen.read().clone();
+    if let Some(g) = set_groepen {
+        crate::windwerk_set::zet_groepen(&state, &g);
+        return Ok(g.len());
     }
     let mut applied = 0;
     for entry in &saved_groups {
@@ -10926,6 +10944,17 @@ pub fn do_save_organ_settings(state: &AppState, presets: HashMap<String, PresetD
     };
 
     let num_wind_groups = *state.num_wind_groups.read();
+    // Windwerk van de set (D4): dan komt de indeling van de balgen van de set, niet van de gebruiker. De eigen
+    // opgeslagen indeling blijft staan, zodat het vinkje uit weer precies de eigen keuze geeft.
+    let (division_wind_groups, num_wind_groups) = if state.windwerk_set_groepen.read().is_some() {
+        let lib = state.organ_library.read();
+        match lib.settings.get(&organ_id) {
+            Some(s) => (s.division_wind_groups.clone(), s.num_wind_groups),
+            None => (Vec::new(), 0),
+        }
+    } else {
+        (division_wind_groups, num_wind_groups)
+    };
 
     // Alle audio-DSP-instellingen worden uit de runtime-mirrors verzameld (gezet door de
     // set_*/persist_*-commands); de reeds opgeslagen waarde dient als fallback wanneer
@@ -10972,7 +11001,7 @@ pub fn do_save_organ_settings(state: &AppState, presets: HashMap<String, PresetD
 
     // Gedrag van de set (E1/D3/F7): wat nu staat, tenzij een proef via de test-API
     // het geforceerd heeft; zo'n geforceerde keuze wordt nooit bewaard.
-    let (vlag_niveaus, vlag_overgangen, vlag_koppels, vlag_staart, vlag_zwelkast, vlag_klavier) = {
+    let [vlag_niveaus, vlag_overgangen, vlag_koppels, vlag_staart, vlag_zwelkast, vlag_klavier, vlag_windwerk] = {
         let geforceerd = state.vlag_overrides.read().contains_key(&crate::library::pad_sleutel(&organ_id));
         let lib = state.organ_library.read();
         crate::orgelvlaggen::OrgelVlaggen::te_bewaren(
@@ -11011,6 +11040,7 @@ pub fn do_save_organ_settings(state: &AppState, presets: HashMap<String, PresetD
         staart_afkap: vlag_staart,
         zwelkast_van_set: vlag_zwelkast,
         koppels_klavier: vlag_klavier,
+        windwerk_van_set: vlag_windwerk,
         niet_geladen_registers: state.niet_geladen_registers.read().clone(),
         listening_position: Some(*state.listening_position.read()),
         background_gain: Some(*state.background_gain.read()),

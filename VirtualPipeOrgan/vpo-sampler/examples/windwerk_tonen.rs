@@ -11,6 +11,7 @@ use std::path::Path;
 
 use vpo_sampler::grandorgue::PipeDef;
 use vpo_sampler::hauptwerk::load_hauptwerk_met_verslag;
+use vpo_sampler::windwerk::PijpWindIn;
 
 fn main() {
     let paden: Vec<String> = std::env::args().skip(1).collect();
@@ -48,6 +49,28 @@ fn main() {
                 for (b, q) in per_balg {
                     let naam = w.lade(b).map(|l| l.naam.trim().to_string()).unwrap_or_default();
                     println!("  · balg \"{}\": alle pijpen samen {:.3} kg/s, toevoer {:.3} kg/s", naam, q, w.toevoer_kg_s(b));
+                }
+                // Fase 1: afgeleide groepen en factoren (divisie = manuaal hier; de schatting doet voor de groepen en
+                // factoren niet ter zake en staat op 1).
+                let mut pijpen = Vec::new();
+                for (d, m) in def.manuals.iter().enumerate() {
+                    for sid in &m.stop_ids {
+                        let Some(s) = def.stops.iter().find(|s| s.id == *sid) else { continue };
+                        for (i, pd) in s.pipes.iter().enumerate() {
+                            let Some(PipeDef::Sample { extra, .. }) = def.resolve_reference(pd) else { continue };
+                            pijpen.push(PijpWindIn {
+                                sleutel: (s.id, i as u32 + 1), divisie: d, lade: extra.wind_lade,
+                                kg_s: extra.wind_verbruik_kg_s, schatting: 1.0,
+                            });
+                        }
+                    }
+                }
+                let namen: Vec<String> = def.manuals.iter().map(|m| m.name.clone()).collect();
+                match w.afleiden(&pijpen, def.manuals.len()) {
+                    None => println!("  · fase 1: gewone indeling (geen pijpen aan een balg, of te veel groepen)"),
+                    Some(a) => for r in a.regels(&namen) {
+                        println!("  · fase 1: {}", r);
+                    },
                 }
             }
         }

@@ -1,4 +1,4 @@
-//! Gedrag van de set, per orgel (E1, D3, F7, D7, E5, E3).
+//! Gedrag van de set, per orgel (E1, D3, F7, D7, E5, E3, D4).
 //!
 //! Vier dingen kunnen de klank of werking van een orgel veranderen: de niveaus
 //! van de maker (E1), de crossfade van de maker bij het loslaten (D3), of
@@ -23,7 +23,7 @@
 use crate::library::OrganSettings;
 use serde::Serialize;
 
-/// De zes vlaggen voor één orgel.
+/// De zeven vlaggen voor één orgel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct OrgelVlaggen {
     /// Niveau van het orgel en per pijplaag uit de definitie (E1).
@@ -40,6 +40,9 @@ pub struct OrgelVlaggen {
     /// Klavier-naar-klavierkoppels van een Hauptwerk-set inlezen (E3) in plaats van ze over te slaan (en dan
     /// algemene koppels op naam te maken).
     pub koppels_klavier: bool,
+    /// Het windmodel sturen met het windwerk van de set (D4): windgroepen per balg, verbruik per pijp, en de
+    /// middenstand van balggrootte en maximale daling uit de balg.
+    pub windwerk_van_set: bool,
 }
 
 impl OrgelVlaggen {
@@ -51,6 +54,7 @@ impl OrgelVlaggen {
         staart_afkap: false,
         zwelkast_van_set: false,
         koppels_klavier: false,
+        windwerk_van_set: false,
     };
 
     /// De standaard voor een nieuw orgel: alles aan.
@@ -62,6 +66,7 @@ impl OrgelVlaggen {
         // Uitzondering: ook voor een nieuw orgel uit (E5).
         zwelkast_van_set: false,
         koppels_klavier: true,
+        windwerk_van_set: true,
     };
 
     /// De vlaggen voor een orgel dat nu geladen wordt.
@@ -84,6 +89,7 @@ impl OrgelVlaggen {
                 staart_afkap: s.staart_afkap.unwrap_or(false),
                 zwelkast_van_set: s.zwelkast_van_set.unwrap_or(false),
                 koppels_klavier: s.koppels_klavier.unwrap_or(false),
+                windwerk_van_set: s.windwerk_van_set.unwrap_or(false),
             },
         }
     }
@@ -108,6 +114,7 @@ impl OrgelVlaggen {
             "staart_afkap" => v.staart_afkap = aan,
             "zwelkast_van_set" => v.zwelkast_van_set = aan,
             "koppels_klavier" => v.koppels_klavier = aan,
+            "windwerk_van_set" => v.windwerk_van_set = aan,
             _ => return None,
         }
         Some(v)
@@ -122,21 +129,22 @@ impl OrgelVlaggen {
         geforceerd: bool,
         huidig: OrgelVlaggen,
         opgeslagen: Option<&OrganSettings>,
-    ) -> (Option<bool>, Option<bool>, Option<bool>, Option<bool>, Option<bool>, Option<bool>) {
+    ) -> [Option<bool>; 7] {
         if geforceerd {
             match opgeslagen {
-                Some(s) => (s.niveaus_van_set, s.overgangen_van_set, s.koppels_volgen_set, s.staart_afkap, s.zwelkast_van_set, s.koppels_klavier),
-                None => (None, None, None, None, None, None),
+                Some(s) => [s.niveaus_van_set, s.overgangen_van_set, s.koppels_volgen_set, s.staart_afkap, s.zwelkast_van_set, s.koppels_klavier, s.windwerk_van_set],
+                None => [None; 7],
             }
         } else {
-            (
+            [
                 Some(huidig.niveaus_van_set),
                 Some(huidig.overgangen_van_set),
                 Some(huidig.koppels_volgen_set),
                 Some(huidig.staart_afkap),
                 Some(huidig.zwelkast_van_set),
                 Some(huidig.koppels_klavier),
-            )
+                Some(huidig.windwerk_van_set),
+            ]
         }
     }
 
@@ -149,6 +157,7 @@ impl OrgelVlaggen {
         s.staart_afkap = Some(self.staart_afkap);
         s.zwelkast_van_set = Some(self.zwelkast_van_set);
         s.koppels_klavier = Some(self.koppels_klavier);
+        s.windwerk_van_set = Some(self.windwerk_van_set);
     }
 }
 
@@ -202,7 +211,7 @@ mod tests {
     #[test]
     fn een_forcering_van_buiten_wint_van_alles() {
         let s = instellingen(Some(true), Some(true), Some(true));
-        let f = OrgelVlaggen { niveaus_van_set: false, overgangen_van_set: true, koppels_volgen_set: false, staart_afkap: true, zwelkast_van_set: true, koppels_klavier: false };
+        let f = OrgelVlaggen { niveaus_van_set: false, overgangen_van_set: true, koppels_volgen_set: false, staart_afkap: true, zwelkast_van_set: true, koppels_klavier: false, windwerk_van_set: true };
         assert_eq!(OrgelVlaggen::bepaal(Some(&s), Some(f)), f);
         assert_eq!(OrgelVlaggen::bepaal(None, Some(f)), f);
     }
@@ -223,14 +232,14 @@ mod tests {
     fn geforceerde_vlaggen_worden_nooit_bewaard() {
         let huidig = OrgelVlaggen::NIEUW;
         // Normaal: de huidige stand, expliciet.
-        assert_eq!(OrgelVlaggen::te_bewaren(false, huidig, None), (Some(true), Some(true), Some(true), Some(true), Some(false), Some(true)));
+        assert_eq!(OrgelVlaggen::te_bewaren(false, huidig, None), [Some(true), Some(true), Some(true), Some(true), Some(false), Some(true), Some(true)]);
         // Geforceerd, orgel zonder opgeslagen instellingen: niets vastleggen.
-        assert_eq!(OrgelVlaggen::te_bewaren(true, huidig, None), (None, None, None, None, None, None));
+        assert_eq!(OrgelVlaggen::te_bewaren(true, huidig, None), [None; 7]);
         // Geforceerd, met opgeslagen instellingen: die blijven zoals ze waren.
         let s = instellingen4(Some(false), None, Some(false), Some(false));
-        assert_eq!(OrgelVlaggen::te_bewaren(true, huidig, Some(&s)), (Some(false), None, Some(false), Some(false), None, None));
+        assert_eq!(OrgelVlaggen::te_bewaren(true, huidig, Some(&s)), [Some(false), None, Some(false), Some(false), None, None, None]);
         // Zonder forcering wint de huidige stand over wat er stond (de gebruiker koos).
-        assert_eq!(OrgelVlaggen::te_bewaren(false, huidig, Some(&s)), (Some(true), Some(true), Some(true), Some(true), Some(false), Some(true)));
+        assert_eq!(OrgelVlaggen::te_bewaren(false, huidig, Some(&s)), [Some(true), Some(true), Some(true), Some(true), Some(false), Some(true), Some(true)]);
     }
 
     #[test]
@@ -242,9 +251,10 @@ mod tests {
         assert!(v.met("staart_afkap", true).unwrap().staart_afkap);
         assert!(v.met("zwelkast_van_set", true).unwrap().zwelkast_van_set);
         assert!(v.met("koppels_klavier", true).unwrap().koppels_klavier);
+        assert!(v.met("windwerk_van_set", true).unwrap().windwerk_van_set);
         // De andere blijven zoals ze waren.
         let w = v.met("niveaus_van_set", true).unwrap();
-        assert!(!w.overgangen_van_set && !w.koppels_volgen_set && !w.staart_afkap && !w.zwelkast_van_set && !w.koppels_klavier);
+        assert!(!w.overgangen_van_set && !w.koppels_volgen_set && !w.staart_afkap && !w.zwelkast_van_set && !w.koppels_klavier && !w.windwerk_van_set);
         assert_eq!(v.met("bestaat_niet", true), None);
     }
 
@@ -257,6 +267,7 @@ mod tests {
         assert_eq!(v["staart_afkap"], true);
         assert_eq!(v["zwelkast_van_set"], false, "nieuw orgel: de zwelkast van de set staat uit");
         assert_eq!(v["koppels_klavier"], true);
+        assert_eq!(v["windwerk_van_set"], true);
     }
 
     /// Het orgel dat al opgeslagen is met de vier eerdere vlaggen heeft de zwelkastvlag niet:
@@ -295,5 +306,17 @@ mod tests {
         let aan = OrganSettings { koppels_klavier: Some(true), ..instellingen4(None, None, None, None) };
         assert!(OrgelVlaggen::bepaal(Some(&aan), None).koppels_klavier);
         assert!(!OrgelVlaggen::OUD.koppels_klavier);
+    }
+
+    /// D4: een bestaand orgel (zonder deze vlag) houdt het gewone windmodel; een nieuw orgel krijgt het windwerk van
+    /// de set; een eigen keuze wint.
+    #[test]
+    fn windwerk_van_set_bestaand_uit_nieuw_aan() {
+        let bestaand = instellingen4(Some(true), Some(true), Some(true), Some(true));
+        assert!(!OrgelVlaggen::bepaal(Some(&bestaand), None).windwerk_van_set);
+        assert!(OrgelVlaggen::bepaal(None, None).windwerk_van_set);
+        let aan = OrganSettings { windwerk_van_set: Some(true), ..instellingen4(None, None, None, None) };
+        assert!(OrgelVlaggen::bepaal(Some(&aan), None).windwerk_van_set);
+        assert!(!OrgelVlaggen::OUD.windwerk_van_set);
     }
 }

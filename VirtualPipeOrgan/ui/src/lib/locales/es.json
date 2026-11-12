@@ -282,6 +282,8 @@
     "koppels_volgen_set_hint": "Activado: un acoplamiento solo continúa a través de otros acoplamientos si el set lo permite (sets GrandOrgue). Desactivado: los acoplamientos siempre se encadenan, como antes.",
     "koppels_klavier": "Leer todos los enganches del set",
     "koppels_klavier_hint": "Activado: se leen también los enganches de un set Hauptwerk que apuntan a otro teclado (también a la octava y dentro de un mismo teclado) y aquellos en los que el set solo indica en su red de interruptores qué cuerpo toca un teclado. Desactivado: esos enganches se omiten y, si no hay otros, JM-Orgue crea enganches genéricos, como antes. Tiene efecto tras recargar.",
+    "windwerk_van_set": "Sistema de viento del set",
+    "windwerk_van_set_hint": "Activado: en un set de Hauptwerk que describe su sistema de viento, el modelo de viento sigue al set: cada fuelle es un grupo de viento, el consumo de aire por tubo viene del set, y la posición central del tamaño del fuelle y de la caída máxima es el valor de ese fuelle (los controles lo escalan). Desactivado: el modelo de viento habitual, como antes. Se aplica al recargar.",
     "staart_afkap": "Cortar las colas silenciosas",
     "staart_afkap_hint": "Activado: el final silencioso de una grabación de liberación (más bajo que el umbral de abajo, −90 dB por defecto) se omite. Libera voces y memoria y es inaudible con el valor por defecto. Desactivado: la grabación suena hasta el final. Surte efecto al volver a cargar el órgano.",
     "staart_drempel": "Umbral (dB)",
