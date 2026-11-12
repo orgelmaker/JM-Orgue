@@ -401,10 +401,11 @@ fn route_shared(
             for (i, naam) in crate::audio::SEG_NAMEN.iter().enumerate() {
                 m.insert(naam.to_string(), json!(seg[i]));
             }
-            let locks = crate::audio::neem_slechtste_locks();
+            // Deelsegmenten van het voorrekenen (D1 fase 4: geen locks meer in de callback).
+            let deel = crate::audio::neem_slechtste_deelsegmenten();
             let mut lm = serde_json::Map::new();
-            for (i, naam) in crate::audio::LOCK_NAMEN.iter().enumerate() {
-                lm.insert(naam.to_string(), json!(locks[i] as f64 / 1e6)); // ms
+            for (i, naam) in crate::audio::DEELSEG_NAMEN.iter().enumerate() {
+                lm.insert(naam.to_string(), json!(deel[i] as f64 / 1e6)); // ms
             }
             let (me, mw, ge, gw, bl, gew) = crate::mengpool::neem_barriere_meting();
             // D1: geheugenaanvragen in de callback sinds de vorige uitlezing (null = bouw zonder `rt-toezicht`).
@@ -413,7 +414,7 @@ fn route_shared(
                     "callbacks_met": callbacks, "aanvragen": aanvragen, "aanvragen_max_per_callback": aanvragen_max }));
             let per_plek: serde_json::Map<String, Value> = crate::rt_toezicht::per_plek(true)
                 .into_iter().map(|(p, n)| (p.to_string(), json!(n))).collect();
-            json!({ "allocaties": allocaties, "aanvragen_per_plek": per_plek, "meldingen_gemist": crate::rt_melding::gemist(), "totaal": totaal, "segmenten": m, "stemmen": stemmen, "stemstarts": starts, "commandos": cmds, "locks_ms": lm,
+            json!({ "allocaties": allocaties, "aanvragen_per_plek": per_plek, "meldingen_gemist": crate::rt_melding::gemist(), "totaal": totaal, "segmenten": m, "stemmen": stemmen, "stemstarts": starts, "commandos": cmds, "deelsegmenten_ms": lm,
                     "rt": serde_json::to_value(crate::rt_prioriteit::status()).unwrap_or_default(),
                     "barriere": { "max_eigen_us": me, "max_wacht_us": mw, "gem_eigen_us": ge, "gem_wacht_us": gw, "blokken": bl, "gewekt": gew } })
         }),
@@ -1401,7 +1402,7 @@ fn handle_record_start(state: &AppState, body: &str) -> Result<Value, (u16, Stri
         None => std::env::temp_dir().join("jm_rec_apitest.mp3"),
     };
     let sr = state.audio_player.read().as_ref().map(|p| *p.sample_rate.read()).unwrap_or(48000);
-    *crate::audio::RECORDER.write() = Some(state.recorder.clone());
+    let _ = crate::audio::RECORDER.set(state.recorder.clone());
     state.recorder.start(out.clone(), sr).map_err(|e| (500u16, e))?;
     Ok(json!({"recording": true, "path": out.to_string_lossy(), "sample_rate": sr}))
 }

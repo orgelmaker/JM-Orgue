@@ -11671,7 +11671,7 @@ pub fn start_recording(state: State<AppState>, path: Option<String>) -> Result<S
     };
 
     // Koppel de recorder aan de audio-thread (globaal static, één opname tegelijk).
-    *crate::audio::RECORDER.write() = Some(state.recorder.clone());
+    let _ = crate::audio::RECORDER.set(state.recorder.clone());
 
     state.recorder.start(out_path.clone(), sr)?;
     Ok(out_path.to_string_lossy().to_string())

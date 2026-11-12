@@ -1051,34 +1051,20 @@ static SLECHTSTE_STEMMEN: AtomicU32 = AtomicU32::new(0);
 static SLECHTSTE_STARTS: AtomicU32 = AtomicU32::new(0);
 static SLECHTSTE_CMDS: AtomicU32 = AtomicU32::new(0);
 
-/// Wachttijd per lock (en restposten) in het voorreken-segment van de
-/// zwaarste callback, in nanoseconden. Zo is te zien of de audio-thread op een
-/// lock staat te wachten die een andere thread vasthoudt.
-pub const LOCK_NAMEN: [&str; 35] = [
-    "master_gain", "division_gains", "division_pans", "output_channels", "ccis_enabled",
-    "ccis_params", "wind_groups", "swell_configs", "stop_to_division", "temperament",
-    "auto_retune", "voices", "swell_filters", "voicing", "odf_voicing", "odf_retune",
-    "wind_models", "trem_lfos", "stops_with_trem", "reverb_instelling", "fdn_reverb",
-    "conv_reverb", "eq_kanalen", "uit_eq", "voorrekenlus", "voor_locks",
+/// Deelsegmenten van het voorreken-segment van de zwaarste callback, in
+/// nanoseconden (`ld_aantal` is een aantal). Tot D1 fase 4 stonden hier ook de
+/// wachttijden per lock; de callback neemt geen locks meer.
+pub const DEELSEG_NAMEN: [&str; 11] = [
+    "voorrekenlus", "voor_locks",
     "galm_overgang", "laadverzoeken", "stemmenlus", "wind_na", "rest_na",
     "ld_filter", "ld_sort", "ld_verstuur", "ld_aantal",
 ];
-static SLECHTSTE_LOCK: [AtomicU64; 35] = [const { AtomicU64::new(0) }; 35];
-
-/// Tijdt één expressie (typisch een lock-acquisitie) in `$arr[$slot]` (ns).
-macro_rules! getimed {
-    ($arr:ident, $slot:expr, $e:expr) => {{
-        let __t = std::time::Instant::now();
-        let __r = $e;
-        $arr[$slot] = __t.elapsed().as_nanos() as u64;
-        __r
-    }};
-}
+static SLECHTSTE_LOCK: [AtomicU64; 11] = [const { AtomicU64::new(0) }; 11];
 
 /// Lock-wachttijden (ns) van de zwaarste callback sinds de vorige uitlezing.
-pub fn neem_slechtste_locks() -> [u64; 35] {
-    let mut uit = [0u64; 35];
-    for i in 0..35 { uit[i] = SLECHTSTE_LOCK[i].swap(0, Ordering::Relaxed); }
+pub fn neem_slechtste_deelsegmenten() -> [u64; 11] {
+    let mut uit = [0u64; 11];
+    for i in 0..11 { uit[i] = SLECHTSTE_LOCK[i].swap(0, Ordering::Relaxed); }
     uit
 }
 
@@ -2282,6 +2268,29 @@ enum GcItem {
     Preload(Arc<PreloadBuffer>),
 }
 
+/// Waarde die alleen de audio-callback gebruikt (D1, fase 4). Vervangt een `Arc<RwLock<T>>` waar geen andere thread
+/// bij kon: dezelfde methodenamen (`read`/`write`), maar zonder lock — gewoon `&T` en `&mut T`, gecontroleerd door de
+/// compiler. `uit` pakt de bestaande `Arc<RwLock<T>>` één keer uit, buiten de callback.
+pub(crate) struct Eigen<T>(T);
+
+impl<T> Eigen<T> {
+    /// Pakt een lock uit waar niemand anders meer een verwijzing naar heeft (anders is het een programmeerfout).
+    fn uit(a: Arc<RwLock<T>>) -> Self {
+        match Arc::try_unwrap(a) {
+            Ok(l) => Eigen(l.into_inner()),
+            Err(_) => panic!("Eigen::uit: de waarde wordt nog door een andere thread gedeeld"),
+        }
+    }
+    #[inline(always)]
+    fn read(&self) -> &T {
+        &self.0
+    }
+    #[inline(always)]
+    fn write(&mut self) -> &mut T {
+        &mut self.0
+    }
+}
+
 /// Afvoerluik van de audio-callback naar de janitor-thread: de zender plus de
 /// wachtrij voor wat de janitor even niet aankon (kanaal vol). Dat wordt
 /// vastgehouden en de volgende callback opnieuw aangeboden — NOOIT inline
@@ -3191,13 +3200,14 @@ pub fn resolve_host(name: Option<&str>) -> cpal::Host {
 /// Globaal: de actieve recorder waar de audio-render-loop f32 stereo-frames naar pushed.
 /// Wordt gezet bij het starten van een opname (commands/test_api); de Recorder zelf
 /// checkt `is_recording()` om te bepalen of er gepushed mag worden.
-pub static RECORDER: parking_lot::RwLock<Option<std::sync::Arc<crate::recorder::Recorder>>> = parking_lot::RwLock::new(None);
+pub static RECORDER: std::sync::OnceLock<std::sync::Arc<crate::recorder::Recorder>> = std::sync::OnceLock::new();
 
 pub struct AudioPlayer {
     command_tx: Sender<AudioCommand>,
     voice_count: Arc<AtomicUsize>,
-    peak_left: Arc<RwLock<f32>>,
-    peak_right: Arc<RwLock<f32>>,
+    /// Piekmeters als f32-bits (D1 fase 4: de callback schrijft ze zonder lock, de interface leest ze).
+    peak_left: Arc<AtomicU32>,
+    peak_right: Arc<AtomicU32>,
     running: Arc<AtomicBool>,
     pub sample_rate: Arc<RwLock<u32>>,
     /// Actual host name in use (resolved by the audio thread)
@@ -3245,8 +3255,8 @@ impl AudioPlayer {
         // Crossfade-tabel nu opbouwen: de audio-thread mag niet alloceren.
         let _ = xfade_lut();
         let voice_count = Arc::new(AtomicUsize::new(0));
-        let peak_left = Arc::new(RwLock::new(0.0f32));
-        let peak_right = Arc::new(RwLock::new(0.0f32));
+        let peak_left = Arc::new(AtomicU32::new(0.0f32.to_bits()));
+        let peak_right = Arc::new(AtomicU32::new(0.0f32.to_bits()));
         let running = Arc::new(AtomicBool::new(true));
         let sample_rate_shared = Arc::new(RwLock::new(48000u32));
         let current_host = Arc::new(RwLock::new(String::new()));
@@ -3378,7 +3388,7 @@ impl AudioPlayer {
 
     /// Get peak meters
     pub fn peak_meters(&self) -> (f32, f32) {
-        (*self.peak_left.read(), *self.peak_right.read())
+        (f32::from_bits(self.peak_left.load(Ordering::Relaxed)), f32::from_bits(self.peak_right.load(Ordering::Relaxed)))
     }
 
     /// Stop playback
@@ -3427,8 +3437,9 @@ type LoadRequest = ((u32, u32), Arc<std::path::Path>, u32, u64, Option<(u32, u32
 fn run_audio_thread(
     command_rx: Receiver<AudioCommand>,
     voice_count: Arc<AtomicUsize>,
-    peak_left: Arc<RwLock<f32>>,
-    peak_right: Arc<RwLock<f32>>,
+    // Piekmeters als f32-bits (D1 fase 4: de callback schrijft ze zonder lock, de interface leest ze).
+    peak_left: Arc<AtomicU32>,
+    peak_right: Arc<AtomicU32>,
     running: Arc<AtomicBool>,
     sample_rate_out: Arc<RwLock<u32>>,
     cfg: AudioOutputConfig,
@@ -3901,41 +3912,41 @@ fn run_audio_thread(
             .expect("sample-loader thread spawn");
     }
 
-    let samples_clone = samples.clone();
-    let preloads_clone = preloads.clone();
-    let trem_active_clone = trem_active.clone();
-    let voices_clone = voices.clone();
-    let master_gain_clone = master_gain.clone();
-    let pitch_offset_mul_clone = pitch_offset_mul.clone();
-    let auto_retune_on_clone = auto_retune_on.clone();
-    let force_tempered_on_clone = force_tempered_on.clone();
-    let master_expression_clone = master_expression.clone();
-    let percussive_stops_clone = percussive_stops.clone();
-    let division_gains_clone = division_gains.clone();
-    let trem_lfos_clone = trem_lfos.clone();
-    let stops_with_trem_clone = stops_with_trem_samples.clone();
-    let wind_models_clone = wind_models.clone();
-    let division_pans_clone = division_pans.clone();
-    let swell_configs_clone = swell_configs.clone();
-    let swell_filters_clone = swell_filters.clone();
-    let stop_to_division_clone = stop_to_division.clone();
-    let temperament_clone = temperament_ratios.clone();
-    let reverb_clone = reverb.clone();
-    let reverb_mix_clone = reverb_mix.clone();
-    let reverb_pos_factor_clone = reverb_pos_factor.clone();
-    let fdn_reverb_clone = fdn_reverb.clone();
-    let use_algo_reverb_clone = use_algorithmic_reverb.clone();
-    let eq_enabled_clone = eq_enabled.clone();
-    let eq_channels_clone = eq_channels.clone();
-    let uit_eq_aan_clone = uit_eq_aan.clone();
-    let uit_eq_ketens_clone = uit_eq_ketens.clone();
-    let voicing_clone = pipe_voicing.clone();
-    let odf_voicing_clone = odf_voicing.clone();
-    let odf_retune_clone = odf_retune.clone();
-    let output_channels_clone = division_output_channels.clone();
-    let ccis_enabled_clone = ccis_enabled.clone();
-    let ccis_params_clone = ccis_params.clone();
-    let wind_groups_clone = division_wind_groups.clone();
+    let mut samples_clone = Eigen::uit(samples);
+    let mut preloads_clone = Eigen::uit(preloads);
+    let mut trem_active_clone = Eigen::uit(trem_active);
+    let mut voices_clone = Eigen::uit(voices);
+    let mut master_gain_clone = Eigen::uit(master_gain);
+    let mut pitch_offset_mul_clone = Eigen::uit(pitch_offset_mul);
+    let mut auto_retune_on_clone = Eigen::uit(auto_retune_on);
+    let mut force_tempered_on_clone = Eigen::uit(force_tempered_on);
+    let mut master_expression_clone = Eigen::uit(master_expression);
+    let mut percussive_stops_clone = Eigen::uit(percussive_stops);
+    let mut division_gains_clone = Eigen::uit(division_gains);
+    let mut trem_lfos_clone = Eigen::uit(trem_lfos);
+    let mut stops_with_trem_clone = Eigen::uit(stops_with_trem_samples);
+    let mut wind_models_clone = Eigen::uit(wind_models);
+    let mut division_pans_clone = Eigen::uit(division_pans);
+    let mut swell_configs_clone = Eigen::uit(swell_configs);
+    let mut swell_filters_clone = Eigen::uit(swell_filters);
+    let mut stop_to_division_clone = Eigen::uit(stop_to_division);
+    let mut temperament_clone = Eigen::uit(temperament_ratios);
+    let mut reverb_clone = Eigen::uit(reverb);
+    let mut reverb_mix_clone = Eigen::uit(reverb_mix);
+    let mut reverb_pos_factor_clone = Eigen::uit(reverb_pos_factor);
+    let mut fdn_reverb_clone = Eigen::uit(fdn_reverb);
+    let mut use_algo_reverb_clone = Eigen::uit(use_algorithmic_reverb);
+    let mut eq_enabled_clone = Eigen::uit(eq_enabled);
+    let mut eq_channels_clone = Eigen::uit(eq_channels);
+    let mut uit_eq_aan_clone = Eigen::uit(uit_eq_aan);
+    let mut uit_eq_ketens_clone = Eigen::uit(uit_eq_ketens);
+    let mut voicing_clone = Eigen::uit(pipe_voicing);
+    let mut odf_voicing_clone = Eigen::uit(odf_voicing);
+    let mut odf_retune_clone = Eigen::uit(odf_retune);
+    let mut output_channels_clone = Eigen::uit(division_output_channels);
+    let mut ccis_enabled_clone = Eigen::uit(ccis_enabled);
+    let mut ccis_params_clone = Eigen::uit(ccis_params);
+    let mut wind_groups_clone = Eigen::uit(division_wind_groups);
     let voice_count_clone = voice_count.clone();
     let peak_left_clone = peak_left.clone();
     let peak_right_clone = peak_right.clone();
@@ -3945,7 +3956,7 @@ fn run_audio_thread(
     // ODF-looppunt-overrides per bestandspad (RegisterOdfLoops); alleen de
     // render-closure gebruikt dit — lookup bij het versturen van een
     // achtergrond-laadverzoek zodat de full sample dezelfde loop krijgt.
-    let odf_loops_clone: Arc<RwLock<Arc<HashMap<PathBuf, (u32, u32)>>>> = Arc::new(RwLock::new(Arc::new(HashMap::new())));
+    let mut odf_loops_clone: Eigen<Arc<HashMap<PathBuf, (u32, u32)>>> = Eigen(Arc::new(HashMap::new()));
 
     let channels = stream_config.channels as usize;
 
@@ -4105,6 +4116,9 @@ fn run_audio_thread(
     let mut licht_vorig = false;
     // Meldingen uit de callback (D1): de thread die er tekst van maakt.
     crate::rt_melding::start();
+    // Stand van de piekmeters (D1 fase 4: in de closure in plaats van achter een lock).
+    let mut piek_l_staat: f32 = 0.0;
+    let mut piek_r_staat: f32 = 0.0;
     let render = move |data: &mut [f32]| {
             // Toezicht (D1, alleen met de feature `rt-toezicht`): de aanvragen van de vorige callback (incl. de
             // mengwerkers) afsluiten en vanaf hier tellen. De bewaker leeft tot het einde van de closure.
@@ -4131,7 +4145,7 @@ fn run_audio_thread(
             // Segmentgrenzen voor de callback-meting (zie SEG_NAMEN), en de
             // wachttijd per lock in het voorreken-segment (zie LOCK_NAMEN).
             let mut seg_t = [render_t0; 6];
-            let mut lw = [0u64; 35];
+            let mut lw = [0u64; 11];
 
             // Paniek (0.7.74): alle stemmen los; de notencommando's die nog in
             // de wachtrij staan worden hieronder weggegooid (de toetsen gelden
@@ -4357,7 +4371,7 @@ fn run_audio_thread(
                         // één bron loslaten de pijp stilzette terwijl een andere
                         // nog vasthield (pedaal-koppel + zelfde noot op HW).
                         {
-                            let mut voices_lock = voices_clone.write();
+                            let voices_lock = voices_clone.write();
                             if let Some(v) = voices_lock.iter_mut().find(|v|
                                 v.stop_id == stop_id && v.pipe_num == key.1
                                     && v.verschuiving == verschuiving
@@ -4984,7 +4998,7 @@ fn run_audio_thread(
                         // bijvoorbeeld een los commando uit een test) worden ze hier gemaakt.
                         let mut vers = verse_opslag.take();
                         {
-                            let mut samples_lock = samples_clone.write();
+                            let samples_lock = samples_clone.write();
                             match vers.as_mut() {
                                 Some(v) => std::mem::swap(&mut *samples_lock, &mut v.samples),
                                 None => {
@@ -5006,7 +5020,7 @@ fn run_audio_thread(
                             gc.send_arc(old);
                         }
                         {
-                            let mut voices_lock = voices_clone.write();
+                            let voices_lock = voices_clone.write();
                             match vers.as_mut() {
                                 Some(v) => std::mem::swap(&mut *voices_lock, &mut v.stemmen),
                                 None => {
@@ -5134,7 +5148,7 @@ fn run_audio_thread(
                         // eigen blok: hij mag NIET openstaan tijdens het loggen
                         // (zie hieronder) — elke NoteOn leest deze map.
                         {
-                            let mut trem = trem_active_clone.write();
+                            let trem = trem_active_clone.write();
                             for id in stop_ids {
                                 if active {
                                     trem.insert(id);
@@ -5168,14 +5182,14 @@ fn run_audio_thread(
                         let division_index = bus_index_voor(division_index, enclosure_bus_base, n_enclosure_buses).map_or(255u8, |i| i as u8);
                         // Alleen de DOELstand; de render-lus loopt er per blok
                         // gesmootheerd naartoe en leidt volume + cutoff daaruit af.
-                        let mut gains = division_gains_clone.write();
+                        let gains = division_gains_clone.write();
                         if (division_index as usize) < gains.len() {
                             gains[division_index as usize] = gain.clamp(0.0, 1.0);
                         }
                     }
                     AudioCommand::SetSwellConfig { division_index, min_db, filter_cutoff_closed } => {
                         let division_index = bus_index_voor(division_index, enclosure_bus_base, n_enclosure_buses).map_or(255u8, |i| i as u8);
-                        let mut configs = swell_configs_clone.write();
+                        let configs = swell_configs_clone.write();
                         if (division_index as usize) < configs.len() {
                             configs[division_index as usize] = (min_db, filter_cutoff_closed);
                             // Volume + cutoff bij de huidige stand herberekenen.
@@ -5183,7 +5197,7 @@ fn run_audio_thread(
                         }
                     }
                     AudioCommand::SetTremulantLFO { division_index, active, rate, amp_depth, pitch_depth } => {
-                        let mut lfos = trem_lfos_clone.write();
+                        let lfos = trem_lfos_clone.write();
                         if let Some(trem) = lfos.get_mut(division_index as usize) {
                             trem.active = active;
                             trem.set_speed(rate, sample_rate);
@@ -5198,7 +5212,7 @@ fn run_audio_thread(
                         let g = (division_index as usize).min(31);
                         wind_instel[g] = instelling;
                         {
-                            let mut wm = wind_models_clone.write();
+                            let wm = wind_models_clone.write();
                             if let Some(model) = wm.get_mut(g) {
                                 model.enabled = instelling.enabled;
                                 model.configure(instelling.reservoir_size, instelling.damping, instelling.max_sag, sample_rate);
@@ -5219,7 +5233,7 @@ fn run_audio_thread(
                         // fase, dus de stemmenlock is hier op zijn plaats.
                         {
                             let wg = wind_groups_clone.read();
-                            let mut vl = voices_clone.write();
+                            let vl = voices_clone.write();
                             for v in vl.iter_mut() {
                                 if v.one_shot { continue; }
                                 let d = v.c_div.min(31);
@@ -5236,7 +5250,7 @@ fn run_audio_thread(
                     AudioCommand::SetDivisionWindGroup { division_index, group } => {
                         let d = division_index as usize;
                         {
-                            let mut wg = wind_groups_clone.write();
+                            let wg = wind_groups_clone.write();
                             if d < wg.len() {
                                 wg[d] = group.min(31);
                             }
@@ -5266,7 +5280,7 @@ fn run_audio_thread(
                         wind_tilt = [0.0; 32];
                         {
                             // Op hun plek terugzetten (D1): geen nieuwe Vec in de callback.
-                            let mut wg = wind_groups_clone.write();
+                            let wg = wind_groups_clone.write();
                             wg.resize(32, 0);
                             for (i, g) in wg.iter_mut().enumerate() { *g = i as u8; }
                         }
@@ -5285,7 +5299,7 @@ fn run_audio_thread(
                         // op de cutoff van het vórige orgel staan: doffe divisie).
                         // Op hun plek terugzetten in plaats van nieuwe Vec's (D1).
                         {
-                            let mut g = division_gains_clone.write();
+                            let g = division_gains_clone.write();
                             g.clear();
                             g.resize(32, 1.0);
                         }
@@ -5301,7 +5315,7 @@ fn run_audio_thread(
                         // tremulant die op het vórige orgel aanstond doormoduleren op
                         // dezelfde divisie-index van het nieuwe orgel (stale state).
                         {
-                            let mut lfos = trem_lfos_clone.write();
+                            let lfos = trem_lfos_clone.write();
                             for trem in lfos.iter_mut() { trem.active = false; }
                         }
                         trem_active_clone.write().clear();
@@ -5310,10 +5324,10 @@ fn run_audio_thread(
                         // van het vorige orgel erft. De frontend past hierna de opgeslagen
                         // routing van dít orgel opnieuw toe.
                         {
-                            let mut oc = output_channels_clone.write();
+                            let oc = output_channels_clone.write();
                             for k in oc.iter_mut() { k.clear(); }
                             oc.resize_with(32, Vec::new);
-                            let mut cc = ccis_enabled_clone.write();
+                            let cc = ccis_enabled_clone.write();
                             cc.clear();
                             cc.resize(32, false);
                         }
@@ -5349,7 +5363,7 @@ fn run_audio_thread(
                         // Mix centraal bijhouden: de render-lus vermenigvuldigt het
                         // wet-signaal met reverb_mix, voor FDN én convolutie gelijk.
                         *reverb_mix_clone.write() = mix.clamp(0.0, 1.0);
-                        let mut fdn = fdn_reverb_clone.write();
+                        let fdn = fdn_reverb_clone.write();
                         if let Some(p) = preset {
                             fdn.apply_preset(p, mix);
                         } else {
@@ -5360,7 +5374,7 @@ fn run_audio_thread(
                         *use_algo_reverb_clone.write() = algorithmic;
                     }
                     AudioCommand::SetPipeVoicing { stop_id, pipe_num, volume_db, pitch_cents } => {
-                        let mut v = voicing_clone.write();
+                        let v = voicing_clone.write();
                         if volume_db.abs() < 0.01 && pitch_cents.abs() < 0.01 {
                             v.remove(&(stop_id, pipe_num));
                         } else {
@@ -5368,13 +5382,13 @@ fn run_audio_thread(
                         }
                     }
                     AudioCommand::SetDivisionPan { division_index, pan } => {
-                        let mut pans = division_pans_clone.write();
+                        let pans = division_pans_clone.write();
                         if (division_index as usize) < pans.len() {
                             pans[division_index as usize] = pan.clamp(-1.0, 1.0);
                         }
                     }
                     AudioCommand::SetDivisionOutputChannels { division_index, channels } => {
-                        let mut chans = output_channels_clone.write();
+                        let chans = output_channels_clone.write();
                         if (division_index as usize) < chans.len() {
                             chans[division_index as usize] = channels;
                         }
@@ -5383,7 +5397,7 @@ fn run_audio_thread(
                         *ccis_params_clone.write() = (strength.clamp(0.0, 1.0), falloff.clamp(0.0, 1.0), swap);
                     }
                     AudioCommand::SetDivisionCcis { division_index, enabled } => {
-                        let mut en = ccis_enabled_clone.write();
+                        let en = ccis_enabled_clone.write();
                         if (division_index as usize) < en.len() {
                             en[division_index as usize] = enabled;
                         }
@@ -5393,7 +5407,7 @@ fn run_audio_thread(
                         // Per fysiek uitgangskanaal de keten bijwerken (0.7.76):
                         // zelfde structuur → alleen coëfficiënten, filterstaat
                         // blijft (geen tik bij schuiven); anders opnieuw bouwen.
-                        let mut chains = eq_channels_clone.write();
+                        let chains = eq_channels_clone.write();
                         if chains.len() == channels {
                             for (ci, chain) in chains.iter_mut().enumerate() {
                                 chain.update(&bands, ci as u8, sample_rate, preamp_db);
@@ -5406,7 +5420,7 @@ fn run_audio_thread(
                     }
                     AudioCommand::SetOutputEq { enabled, preamp_db, bands } => {
                         *uit_eq_aan_clone.write() = enabled;
-                        let mut chains = uit_eq_ketens_clone.write();
+                        let chains = uit_eq_ketens_clone.write();
                         if chains.len() == channels {
                             for (ci, chain) in chains.iter_mut().enumerate() {
                                 chain.update(&bands, ci as u8, sample_rate, preamp_db);
@@ -5435,10 +5449,8 @@ fn run_audio_thread(
 
             // Recorder-tap: bouw alleen een interleaved stereo-buffer als er een
             // actieve opname loopt. Het checken is goedkoop (Arc::clone + atomic bool).
-            let rec_active = {
-                let r = RECORDER.read();
-                r.as_ref().map(|rc| rc.clone()).filter(|rc| rc.is_recording())
-            };
+            // D1 fase 4: eenmalig gezet (`OnceLock`), lezen is zonder lock; `is_recording` is een atomaire vlag.
+            let rec_active = RECORDER.get().filter(|rc| rc.is_recording());
             // Vaste buffer van de closure (D1): alleen leegmaken, niet nieuw maken.
             let rec_buf = &mut rec_buf_vast;
             rec_buf.clear();
@@ -5451,17 +5463,17 @@ fn run_audio_thread(
             // routing). Dat scheelt zes heap-allocaties per callback; op ASIO4ALL
             // (zeer hoge callback-frequentie) is dat merkbaar minder allocatie-
             // jitter op de audio-thread — precies wat gekraak veroorzaakt.
-            lw[25] = seg_t[2].elapsed().as_nanos() as u64;
-            let gain_doel = getimed!(lw, 0, *master_gain_clone.read() * *master_expression_clone.read());
+            lw[1] = seg_t[2].elapsed().as_nanos() as u64;
+            let gain_doel = *master_gain_clone.read() * *master_expression_clone.read();
             if master_gain_nu < 0.0 { master_gain_nu = gain_doel; }
-            let div_gains = getimed!(lw, 1, division_gains_clone.read());
-            let div_pans = getimed!(lw, 2, division_pans_clone.read());
-            let out_chans_lock = getimed!(lw, 3, output_channels_clone.read());
-            let ccis_en_lock = getimed!(lw, 4, ccis_enabled_clone.read());
-            let (ccis_strength, ccis_falloff, ccis_swap) = getimed!(lw, 5, *ccis_params_clone.read());
-            let wind_group_assignment = getimed!(lw, 6, wind_groups_clone.read());
-            let swell_cfgs = getimed!(lw, 7, swell_configs_clone.read());
-            let stop_div_map = getimed!(lw, 8, stop_to_division_clone.read());
+            let div_gains = division_gains_clone.read();
+            let div_pans = division_pans_clone.read();
+            let out_chans_lock = output_channels_clone.read();
+            let ccis_en_lock = ccis_enabled_clone.read();
+            let (ccis_strength, ccis_falloff, ccis_swap) = *ccis_params_clone.read();
+            let wind_group_assignment = wind_groups_clone.read();
+            let swell_cfgs = swell_configs_clone.read();
+            let stop_div_map = stop_to_division_clone.read();
             // Galm-gewichten per kanaal: de galm moet over DEZELFDE kanalen
             // lopen als het droge signaal (testorgel-feedback: op het
             // hoofdtelefoonprofiel [0,1] klonk de galm door op de speaker-
@@ -5470,26 +5482,26 @@ fn run_audio_thread(
             // vaste arrays, dus geen allocatie op de audio-thread.
             let n_real_divs = stop_div_map.values().map(|&d| d as usize + 1).max().unwrap_or(0);
             let (wet_w_l, wet_w_r, wet_ch) = wet_channel_weights(&out_chans_lock, n_real_divs, channels);
-            let (temp_ratios, retune_from_temp) = getimed!(lw, 9, *temperament_clone.read());
+            let (temp_ratios, retune_from_temp) = *temperament_clone.read();
             // Auto-retune (0.8.85): standaard aan. Alleen uit als expliciet
             // gezet door de gebruiker. OR-combinatie met de temperament-vlag:
             // Origineel-stemming + auto-retune uit = helemaal geen retune.
             // 0.9.23: een set zonder originele orgeltoonhoogte (Hauptwerk
             // EnablePlayingAtOriginalOrganPitch = N) heeft geen opnametoon om op
             // terug te vallen en speelt altijd op de getempereerde doeltoon.
-            let retune_on = getimed!(lw, 10, retune_from_temp || *auto_retune_on_clone.read() || *force_tempered_on_clone.read());
+            let retune_on = retune_from_temp || *auto_retune_on_clone.read() || *force_tempered_on_clone.read();
             let mut peak_l = 0.0f32;
             let mut peak_r = 0.0f32;
 
             {
-                let mut voices_lock = getimed!(lw, 11, voices_clone.write());
-                let mut swell_flt = getimed!(lw, 12, swell_filters_clone.write());
-                let pipe_voicing_map = getimed!(lw, 13, voicing_clone.read());
-                let odf_voicing_map = getimed!(lw, 14, odf_voicing_clone.read());
-                let odf_retune_map = getimed!(lw, 15, odf_retune_clone.read());
-                let mut wm = getimed!(lw, 16, wind_models_clone.write());
-                let mut trem_lfo = getimed!(lw, 17, trem_lfos_clone.write());
-                let stops_with_trem = getimed!(lw, 18, stops_with_trem_clone.read());
+                let mut voices_lock = voices_clone.write();
+                let swell_flt = swell_filters_clone.write();
+                let pipe_voicing_map = voicing_clone.read();
+                let odf_voicing_map = odf_voicing_clone.read();
+                let odf_retune_map = odf_retune_clone.read();
+                let wm = wind_models_clone.write();
+                let trem_lfo = trem_lfos_clone.write();
+                let stops_with_trem = stops_with_trem_clone.read();
 
                 // De telling van het windverbruik zit sinds 0.7.51 in de
                 // pre-pass hieronder (één iteratie over de stemmen i.p.v. twee,
@@ -5502,17 +5514,17 @@ fn run_audio_thread(
                 let ccis_on = ccis_strength > 1e-4;
 
                 // Galm + EQ: locks één keer per callback nemen (niet per sample).
-                let (use_algo, reverb_mix_now) = getimed!(lw, 19, (*use_algo_reverb_clone.read(),
-                    *reverb_mix_clone.read() * *reverb_pos_factor_clone.read()));
-                let mut fdn_lock = getimed!(lw, 20, fdn_reverb_clone.write());
-                let mut conv_lock = getimed!(lw, 21, reverb_clone.write());
+                let (use_algo, reverb_mix_now) = (*use_algo_reverb_clone.read(),
+                    *reverb_mix_clone.read() * *reverb_pos_factor_clone.read());
+                let fdn_lock = fdn_reverb_clone.write();
+                let conv_lock = reverb_clone.write();
                 let eq_on = *eq_enabled_clone.read();
                 // Testsignaal dóór de EQ (soort 2): één keer per callback lezen.
                 let testsig_door_eq = test_signal().filter(|t| t.1 == 2);
                 let testsig_freq = test_signal_freq();
-                let mut eq_chains = getimed!(lw, 22, eq_channels_clone.write());
+                let eq_chains = eq_channels_clone.write();
                 let uit_eq_on = *uit_eq_aan_clone.read();
-                let mut uit_eq_ketens = getimed!(lw, 23, uit_eq_ketens_clone.write());
+                let uit_eq_ketens = uit_eq_ketens_clone.write();
                 let t_na_locks = std::time::Instant::now();
 
                 // Galm-bypass-overgang: zodra de mix naar 0 gaat wordt het
@@ -5529,7 +5541,7 @@ fn run_audio_thread(
                 }
                 reverb_was_audible = reverb_audible;
                 let t_g1 = std::time::Instant::now();
-                lw[26] = t_g1.saturating_duration_since(t_na_locks).as_nanos() as u64;
+                lw[2] = t_g1.saturating_duration_since(t_na_locks).as_nanos() as u64;
 
                 // ── Voorrekenen per voice (één keer per callback, niet per sample) ──
                 // De divisie-index, de gestapelde voicing (gebruiker + ODF-intonatie)
@@ -5554,8 +5566,8 @@ fn run_audio_thread(
                         None => { inflight_loads.remove(&req.0); false }
                     });
                     let t_ld1 = std::time::Instant::now();
-                    lw[31] = t_ld1.saturating_duration_since(t_g1).as_nanos() as u64;
-                    lw[34] = pending_loads.len() as u64;
+                    lw[7] = t_ld1.saturating_duration_since(t_g1).as_nanos() as u64;
+                    lw[10] = pending_loads.len() as u64;
                     // Alleen de k meest urgente verzoeken naar voren halen, met
                     // k = de vrije plaatsen in het kanaal naar de laders
                     // (0.9.31). Tot 0.9.30 werd de HELE wachtrij elke callback
@@ -5581,7 +5593,7 @@ fn run_audio_thread(
                         rij[..k].sort_unstable_by(urgentie);
                     }
                     let t_ld2 = std::time::Instant::now();
-                    lw[32] = t_ld2.saturating_duration_since(t_ld1).as_nanos() as u64;
+                    lw[8] = t_ld2.saturating_duration_since(t_ld1).as_nanos() as u64;
                     for _ in 0..k {
                         let Some((dl, req)) = pending_loads.pop_front() else { break };
                         if let Err(e) = load_tx_clone.try_send(req) {
@@ -5589,10 +5601,10 @@ fn run_audio_thread(
                             break;
                         }
                     }
-                    lw[33] = t_ld2.elapsed().as_nanos() as u64;
+                    lw[9] = t_ld2.elapsed().as_nanos() as u64;
                 }
                 let t_g2 = std::time::Instant::now();
-                lw[27] = t_g2.saturating_duration_since(t_g1).as_nanos() as u64;
+                lw[3] = t_g2.saturating_duration_since(t_g1).as_nanos() as u64;
                 gewenst.clear();
                 let mut herhaal_budget = 8usize;
                 for voice in voices_lock.iter_mut() {
@@ -5705,7 +5717,7 @@ fn run_audio_thread(
                 // (het pleno van haar divisies × balggrootte), en de stoten die
                 // de commando's van deze callback opleverden.
                 let t_g3 = std::time::Instant::now();
-                lw[28] = t_g3.saturating_duration_since(t_g2).as_nanos() as u64;
+                lw[4] = t_g3.saturating_duration_since(t_g2).as_nanos() as u64;
                 let mut q_grp = [0.0f32; 32];
                 let mut q_ref = [0.0f32; 32];
                 let mut n_grp = [0u32; 32];
@@ -5759,7 +5771,7 @@ fn run_audio_thread(
                 // C/Cis-spreiding voor een divisie aanstaat wijkt de pan per noot af
                 // en rekenen we cos/sin daar in de lus opnieuw uit.
                 let t_g4 = std::time::Instant::now();
-                lw[29] = t_g4.saturating_duration_since(t_g3).as_nanos() as u64;
+                lw[5] = t_g4.saturating_duration_since(t_g3).as_nanos() as u64;
                 let mut div_pan_cos = [0.0f32; 32];
                 let mut div_pan_sin = [0.0f32; 32];
                 for d in 0..32 {
@@ -5817,8 +5829,8 @@ fn run_audio_thread(
                 // buffertijd.
                 seg_t[3] = std::time::Instant::now();
             crate::rt_toezicht::plek(4);
-                lw[24] = seg_t[3].saturating_duration_since(t_na_locks).as_nanos() as u64;
-                lw[30] = seg_t[3].saturating_duration_since(t_g4).as_nanos() as u64;
+                lw[0] = seg_t[3].saturating_duration_since(t_na_locks).as_nanos() as u64;
+                lw[6] = seg_t[3].saturating_duration_since(t_g4).as_nanos() as u64;
                 let mut ns_pass = [0u128; 4];
                 let mut fi = 0usize;
                 while fi < n_frames {
@@ -6290,14 +6302,11 @@ fn run_audio_thread(
             }
 
             // Update peak meters with decay
-            {
-                let mut pl = peak_left_clone.write();
-                *pl = *pl * 0.95 + peak_l * 0.05;
-            }
-            {
-                let mut pr = peak_right_clone.write();
-                *pr = *pr * 0.95 + peak_r * 0.05;
-            }
+            // Zelfde rekenwerk als vroeger; de stand leeft in de closure, de meter krijgt een kopie (geen lock).
+            piek_l_staat = piek_l_staat * 0.95 + peak_l * 0.05;
+            piek_r_staat = piek_r_staat * 0.95 + peak_r * 0.05;
+            peak_left_clone.store(piek_l_staat.to_bits(), Ordering::Relaxed);
+            peak_right_clone.store(piek_r_staat.to_bits(), Ordering::Relaxed);
 
             // Mengtijd van deze callback als voorspeller voor de afvoer van de
             // volgende (zonder stemmen is hij 0: dan mag de afvoer vol gas).
@@ -6330,7 +6339,7 @@ fn run_audio_thread(
                     SLECHTSTE_STEMMEN.store(voice_count_clone.load(Ordering::Relaxed) as u32, Ordering::Relaxed);
                     SLECHTSTE_STARTS.store(spawns_done as u32, Ordering::Relaxed);
                     SLECHTSTE_CMDS.store(cmds_done, Ordering::Relaxed);
-                    for i in 0..35 { SLECHTSTE_LOCK[i].store(lw[i], Ordering::Relaxed); }
+                    for i in 0..11 { SLECHTSTE_LOCK[i].store(lw[i], Ordering::Relaxed); }
                 }
                 let prev = RENDER_LOAD_PM.load(Ordering::Relaxed);
                 // EMA met alpha 1/16: het venster is 16 CALLBACKS, niet een vaste
@@ -6419,7 +6428,8 @@ fn run_audio_thread(
                     stream_config,
                     move |d: &mut [f32], _: &cpal::OutputCallbackInfo| {
                         c.fetch_add(1, Ordering::Relaxed);
-                        (r.lock())(d);
+                        // D1: nooit wachten op de closure (alleen bij een apparaatwissel kan hij bezet zijn): dan één blok stilte.
+                        if let Some(mut f) = r.try_lock() { f(d) } else { d.fill(0.0) }
                     },
                     err_cb,
                     None,
@@ -6434,7 +6444,8 @@ fn run_audio_thread(
                     move |d: &mut [i32], _: &cpal::OutputCallbackInfo| {
                         c.fetch_add(1, Ordering::Relaxed);
                         if scratch.len() != d.len() { scratch.resize(d.len(), 0.0); }
-                        (r.lock())(&mut scratch);
+                        // D1: nooit wachten op de closure (alleen bij een apparaatwissel kan hij bezet zijn): dan één blok stilte.
+                        if let Some(mut f) = r.try_lock() { f(&mut scratch) } else { scratch.fill(0.0) }
                         for (o, s) in d.iter_mut().zip(scratch.iter()) {
                             *o = ((*s).clamp(-1.0, 1.0) * 2_147_483_647.0) as i32;
                         }
@@ -6452,7 +6463,8 @@ fn run_audio_thread(
                     move |d: &mut [i16], _: &cpal::OutputCallbackInfo| {
                         c.fetch_add(1, Ordering::Relaxed);
                         if scratch.len() != d.len() { scratch.resize(d.len(), 0.0); }
-                        (r.lock())(&mut scratch);
+                        // D1: nooit wachten op de closure (alleen bij een apparaatwissel kan hij bezet zijn): dan één blok stilte.
+                        if let Some(mut f) = r.try_lock() { f(&mut scratch) } else { scratch.fill(0.0) }
                         for (o, s) in d.iter_mut().zip(scratch.iter()) {
                             *o = ((*s).clamp(-1.0, 1.0) * 32_767.0) as i16;
                         }

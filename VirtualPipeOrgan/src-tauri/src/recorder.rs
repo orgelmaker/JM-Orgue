@@ -45,6 +45,8 @@ pub struct Recorder {
     /// volledig geflusht + gesloten is voordat stop() terugkeert.
     join_handle: RwLock<Option<thread::JoinHandle<()>>>,
     stop_flag: Arc<AtomicBool>,
+    /// Loopt er een opname? (D1 fase 4: de audio-callback leest deze vlag, niet de lock om `sender`.)
+    actief: AtomicBool,
     frames_written: Arc<AtomicU64>,
     frames_dropped: Arc<AtomicU64>,
     sample_rate: Arc<AtomicU64>,
@@ -58,6 +60,7 @@ impl Recorder {
             sender: RwLock::new(None),
             join_handle: RwLock::new(None),
             stop_flag: Arc::new(AtomicBool::new(false)),
+            actief: AtomicBool::new(false),
             frames_written: Arc::new(AtomicU64::new(0)),
             frames_dropped: Arc::new(AtomicU64::new(0)),
             sample_rate: Arc::new(AtomicU64::new(48000)),
@@ -67,7 +70,7 @@ impl Recorder {
     }
 
     pub fn is_recording(&self) -> bool {
-        self.sender.read().is_some()
+        self.actief.load(Ordering::Acquire)
     }
 
     /// Door de audio-render-callback aangeroepen. Mag NOOIT blokkeren.
@@ -75,7 +78,11 @@ impl Recorder {
     /// het frame gedropt en geteld zodat de UI dat kan tonen.
     #[inline]
     pub fn push_stereo(&self, frame: &[f32]) {
-        let sender_guard = self.sender.read();
+        // `try_read`: wordt de opname net gestart of gestopt, dan wacht de callback niet maar telt dit blok als gemist.
+        let Some(sender_guard) = self.sender.try_read() else {
+            self.frames_dropped.fetch_add((frame.len() / 2) as u64, Ordering::Relaxed);
+            return;
+        };
         let Some((sender, leeg)) = sender_guard.as_ref() else { return; };
         // Een lege buffer uit de pool; is die op (de encoder loopt achter), dan gaat dit blok verloren en telt het mee.
         let Ok(mut buf) = leeg.try_recv() else {
@@ -127,6 +134,7 @@ impl Recorder {
             let _ = leeg_tx.try_send(Vec::with_capacity(OPNAMEBUFFER));
         }
         *self.sender.write() = Some((tx, leeg_rx));
+        self.actief.store(true, Ordering::Release);
         *self.path.write() = Some(path.clone());
 
         let stop_flag = self.stop_flag.clone();
@@ -152,6 +160,7 @@ impl Recorder {
         }
         self.stop_flag.store(true, Ordering::Relaxed);
         // Sluit de sender → encoder-loop leegt rx en stopt.
+        self.actief.store(false, Ordering::Release);
         *self.sender.write() = None;
         // Wacht tot de encoder-thread klaar is (flush + bestand sluiten), zodat het
         // MP3-bestand compleet is wanneer stop() terugkeert. Dekt ook app-afsluiten:

@@ -215,6 +215,7 @@ impl BackgroundEngine {
     /// Geeft de OUDE voices terug zodat de aanroeper ze buiten de audio-
     /// thread kan droppen (een blower-opname is tientallen MB; free() in de
     /// callback is niet realtime-veilig — zelfde regel als RegisterPreloadBuffers).
+    #[cfg(test)]
     pub fn set_voices(&mut self, nieuw: Vec<BackgroundVoice>) -> Vec<ActiveVoice> {
         let mut v = actief_maken(nieuw);
         self.wissel_voices(&mut v);

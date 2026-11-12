@@ -6,6 +6,12 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### Audio-thread zonder locks (D1, fase 4)
+- De audio-thread neemt geen locks meer: zijn eigen instellingen zijn gewone waarden, de piekmeters zijn atomair, en bij
+  een opname of een wissel van audioapparaat wacht hij nooit (in het zeldzame geval dat iets bezet is, geeft dat ene blok
+  stilte). Klank ongewijzigd (referentieproef binnen de meetruis).
+- `/perf/slechtste`: `locks_ms` heet nu `deelsegmenten_ms` (alleen nog de deeltijden van het voorrekenen).
+
 ### Audio-thread zonder geheugenaanvragen en logregels (D1, fase 2 en 3)
 - Tijdens het spelen, bij een registerwissel, een tremulantwissel en een lopende opname vraagt de audio-thread geen geheugen meer
   aan en schrijft hij geen logregels (gemeten met de teller: van tot 76 aanvragen per callback naar 0). Bij een orgelwissel ging
