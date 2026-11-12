@@ -6,6 +6,14 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### Tremulant-golfvormen ook uit gecomprimeerde Hauptwerk-sets (C5)
+- De opgenomen tremulant-golfvormen worden nu ook gelezen uit gecomprimeerde Hauptwerk-definities, de meeste commerciële
+  sets. Per bestand wordt gecontroleerd of de verwijzingen kloppen (tremulant, sample, pijp); klopt iets niet, dan blijft
+  de gewone sinus. Daarmee werkt het vinkje "Tremulant volgt de golfvorm van de set" ook bij deze sets.
+- Geeft de set geen snelheid voor het aanstaande tremulant of geen diepte per pijp, dan geldt de snelheid bij uitgaan
+  en de diepte van de golfvorm zelf. Heeft een werk verschillende golfvormen per pijpgroep, dan volgt het de meest
+  gebruikte. Met het vinkje uit verandert er niets.
+
 ### Handleiding bijgewerkt naar 0.9.53, in zeven talen
 - Het vinkje "Tremulant volgt de golfvorm van de set" staat in het blok Gedrag van de set, met uitleg; het importverslag
   zegt niet meer dat de golfvormen niet gebruikt worden. Zeven PDF's opnieuw gemaakt.

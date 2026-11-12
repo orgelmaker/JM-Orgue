@@ -1662,6 +1662,85 @@ impl GecomprimeerdeOdf {
         }
     }
 
+    /// De tremulant-golfvormen (C5, stap 2), alleen voor `voeg_tremulant_golfvormen_toe` en de diepten per pijp.
+    /// Bewust buiten de algemene tabel: de koppeling van de tremulantruis leest `Tremulant` ook en mag bij een
+    /// gecomprimeerde set niet van gedrag veranderen. Geteld in alle gecomprimeerde sets met golfvormen (zie
+    /// `C5-golfvormen-onderzoek.md`):
+    ///
+    /// - `Tremulant`: a = ID, b = naam, d = frequentie aan, e = frequentie bij uitgaan. Ontbreekt d (de
+    ///   standaardwaarde, die we niet kennen), dan geldt e.
+    /// - `TremulantWaveform`: a = ID, c = tremulant, d = golfvorm toonhoogte en grondtoon, e = derde harmonische.
+    /// - `TremulantWaveformPipe`: a = pijp, b = golfvorm, c = sterkte (dB), d = toonhoogte (procent), e = filter (dB).
+    ///
+    /// Elke verwijzing moet raak zijn (tremulant, sample, pijp, golfvorm) en de getallen getallen; anders een lege lijst.
+    pub(crate) fn golfvorm_objecten(&self, xml: &str, object_type: &str) -> Vec<FieldMap> {
+        let trem = rauwe_objecten(xml, "Tremulant");
+        let golf = rauwe_objecten(xml, "TremulantWaveform");
+        let trem_ids = id_verzameling(&trem);
+        let golf_ids = id_verzameling(&golf);
+        let raak = |objs: &[FieldMap], l: &str, doel: &HashSet<u32>| {
+            objs.iter().all(|o| o.get(l).is_some_and(|v| v.trim().parse::<u32>().is_ok_and(|n| doel.contains(&n))))
+        };
+        let getal = |objs: &[FieldMap], l: &str| {
+            objs.iter().all(|o| o.get(l).is_none_or(|v| v.trim().parse::<f64>().is_ok_and(f64::is_finite)))
+        };
+        let hernoem = |objs: Vec<FieldMap>, paren: &[(&str, &str)]| -> Vec<FieldMap> {
+            objs.into_iter()
+                .map(|o| {
+                    o.into_iter()
+                        .filter_map(|(k, v)| paren.iter().find(|(l, _)| *l == k).map(|(_, n)| (n.to_string(), v)))
+                        .collect()
+                })
+                .collect()
+        };
+        match object_type {
+            "Tremulant" => {
+                if trem.is_empty() || !getal(&trem, "d") || !getal(&trem, "e") {
+                    return Vec::new();
+                }
+                let mut uit = hernoem(trem, &[("a", "TremulantID"), ("b", "Name"), ("d", "FrequencyWhenEngagedHz"), ("e", "FrequencyWhenDisengagedHz")]);
+                for o in uit.iter_mut() {
+                    if !o.contains_key("FrequencyWhenEngagedHz") {
+                        if let Some(v) = o.get("FrequencyWhenDisengagedHz").cloned() {
+                            o.insert("FrequencyWhenEngagedHz".to_string(), v);
+                        }
+                    }
+                }
+                uit
+            }
+            "TremulantWaveform" => {
+                let sample_ids = id_verzameling(&rauwe_objecten(xml, "Sample"));
+                let derde_ok = golf.iter().all(|o| o.get("e").is_none_or(|v| v.trim().parse::<u32>().is_ok_and(|n| sample_ids.contains(&n))));
+                if golf.is_empty() || !raak(&golf, "c", &trem_ids) || !raak(&golf, "d", &sample_ids) || !derde_ok {
+                    return Vec::new();
+                }
+                hernoem(golf, &[
+                    ("a", "TremulantWaveformID"),
+                    ("c", "TremulantID"),
+                    ("d", "PitchAndFundamentalWaveformSampleID"),
+                    ("e", "ThirdHarmonicWaveformSampleID"),
+                ])
+            }
+            "TremulantWaveformPipe" => {
+                let pijpen = rauwe_objecten(xml, "TremulantWaveformPipe");
+                let pijp_ids = id_verzameling(&rauwe_objecten(xml, "Pipe_SoundEngine01"));
+                if pijpen.is_empty() || !raak(&pijpen, "a", &pijp_ids) || !raak(&pijpen, "b", &golf_ids)
+                    || !getal(&pijpen, "c") || !getal(&pijpen, "d") || !getal(&pijpen, "e")
+                {
+                    return Vec::new();
+                }
+                hernoem(pijpen, &[
+                    ("a", "PipeID"),
+                    ("b", "TremulantWaveformID"),
+                    ("c", "AmplitudeModDepthAdjustDecibels"),
+                    ("d", "PitchModDepthAdjustPercent"),
+                    ("e", "HarmonicShapingFilterModDepthAdjustDecibelsAtThirdHarmonic"),
+                ])
+            }
+            _ => Vec::new(),
+        }
+    }
+
     /// Leest één objectlijst en vertaalt de letters naar de lange veldnamen.
     /// Letters zonder betekenis blijven staan (ze doen geen kwaad en helpen
     /// bij het uitzoeken van een nieuwe formaatversie).

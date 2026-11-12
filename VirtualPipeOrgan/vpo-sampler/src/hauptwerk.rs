@@ -439,11 +439,20 @@ pub(crate) fn voeg_tremulant_golfvormen_toe(v: &mut crate::import_report::Import
             None => extract_objects(xml, tabel),
         }
     };
+    // De golfvormtabellen zelf: bij een gecomprimeerde definitie via een eigen, gecontroleerde vertaling (C5, stap 2).
+    let lees_golf = |tabel: &str| -> Vec<FieldMap> {
+        match &compact {
+            Some(c) => FieldMap::rijen_van_tabel(tabel, c.golfvorm_objecten(xml, tabel)),
+            None => extract_objects(xml, tabel),
+        }
+    };
     let golven = lees("TremulantWaveform");
     if golven.is_empty() {
         return;
     }
-    let lijst = tremulant_golfvormen_uit_tabellen(&golven, &lees("TremulantWaveformPipe"), &lees("Tremulant"), &lees("Sample"), pkg_dirs);
+    let lijst = tremulant_golfvormen_uit_tabellen(
+        &lees_golf("TremulantWaveform"), &lees_golf("TremulantWaveformPipe"), &lees_golf("Tremulant"), &lees("Sample"), pkg_dirs,
+    );
     if lijst.is_empty() {
         v.melding(
             Ernst::Info,
@@ -971,7 +980,11 @@ fn build_definition_volledig(
         })
         .collect();
     // Tremulant-golfvorm per pijp (C5, stap 2): welke golfvorm en hoe diep.
-    let pijp_trem: HashMap<u32, (u32, Option<f32>, Option<f32>)> = lees("TremulantWaveformPipe").iter()
+    let pijp_trem_rijen = match &compact {
+        Some(c) => FieldMap::rijen_van_tabel("TremulantWaveformPipe", c.golfvorm_objecten(xml, "TremulantWaveformPipe")),
+        None => lees("TremulantWaveformPipe"),
+    };
+    let pijp_trem: HashMap<u32, (u32, Option<f32>, Option<f32>)> = pijp_trem_rijen.iter()
         .filter_map(|p| Some((p.get_u32("PipeID")?, (
             p.get_u32("TremulantWaveformID")?,
             p.get_f32("AmplitudeModDepthAdjustDecibels"),
