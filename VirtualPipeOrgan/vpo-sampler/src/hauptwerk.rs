@@ -1826,6 +1826,41 @@ fn build_definition_volledig(
     // meeloopt met de tremulant van zijn eigen werk.
     let trem_koppeling = tremulant_divisies(&lees("Tremulant"), &divisions, &manuals, &stop_defs);
 
+    // Toets- en registermechaniek via eigen pallet-schakelaars (sets die de klik per toets of register als pijp
+    // achter een schakelaar zetten). Het schakelnetwerk van een gecomprimeerde definitie via een aparte vertaling,
+    // zodat de rest van de importer ongewijzigd blijft.
+    let lees_netwerk = |t: &str| match &compact {
+        Some(c) => FieldMap::rijen_van_tabel(t, c.netwerk_objecten(xml, t)),
+        None => extract_objects(xml, t),
+    };
+    let (mech_toetsen, mech_registers) = {
+        let zoeker = crate::padzoek::PadZoeker::nieuw();
+        let pijp_pad = |pid: u32| -> Option<PathBuf> {
+            let (_, lid) = *layers_of_pipe.get(&pid)?.first()?;
+            let (pkg, fname) = sample_file.get(sample_of_layer.get(&lid)?)?;
+            Some(zoeker.los_op(pkg_dirs.get(pkg)?, fname))
+        };
+        verzamel_hw_pallet_mechaniek(
+            &pipes, &rank_name, &lees_netwerk("SwitchLinkage"), &lees_netwerk("DivisionInput"), &divisions,
+            &lees("Keyboard").iter().filter_map(|k| k.get_u32("Hint_PrimaryAssociatedDivisionID")).collect(),
+            &lees_netwerk("Stop"), &pijp_pad,
+        )
+    };
+    let mut stop_action_clicks = verzamel_hw_stop_action_clicks(
+        &pipes, &sample_file, pkg_dirs,
+        &layers_of_pipe, &sample_of_layer, &stops, &rank_name,
+    );
+    for (k, v) in mech_registers {
+        stop_action_clicks.entry(k).or_insert(v);
+    }
+    let mut keyboard_clicks = verzamel_hw_keyboard_clicks(
+        &pipes, &sample_file, pkg_dirs,
+        &layers_of_pipe, &sample_of_layer, &ranks_xml,
+    );
+    for (k, v) in mech_toetsen {
+        keyboard_clicks.entry(k).or_insert(v);
+    }
+
     Ok(OrganDefinition {
         base_path: root,
         organ,
@@ -1844,14 +1879,8 @@ fn build_definition_volledig(
             &layers_of_pipe, &sample_of_layer, &lees("Switch"), &lees("SwitchLinkage"), &rank_name,
             &trem_koppeling,
         ),
-        stop_action_clicks: verzamel_hw_stop_action_clicks(
-            &pipes, &sample_file, pkg_dirs,
-            &layers_of_pipe, &sample_of_layer, &stops, &rank_name,
-        ),
-        keyboard_clicks: verzamel_hw_keyboard_clicks(
-            &pipes, &sample_file, pkg_dirs,
-            &layers_of_pipe, &sample_of_layer, &ranks_xml,
-        ),
+        stop_action_clicks,
+        keyboard_clicks,
         klavier_afkortingen,
         schakelaars: Default::default(),
     })
@@ -2071,6 +2100,117 @@ fn verzamel_hw_keyboard_clicks(
               uit.len(), a, r, prefixen);
     }
     uit
+}
+
+/// Wat een rangnaam zegt over mechaniekgeluid dat via een eigen pallet-schakelaar speelt: `Some((toets, aanslag))`,
+/// met `toets` = toetsmechaniek (anders registermechaniek) en `aanslag` = aan (anders los/af). Rangnamen zoals
+/// "Special: DrawStop-On noise" en "Special: TrackerMan_1 Key-Off noise".
+fn pallet_mechaniek_soort(rangnaam: &str) -> Option<(bool, bool)> {
+    let n = rangnaam.to_lowercase();
+    if n.contains("drawstop-on noise") {
+        Some((false, true))
+    } else if n.contains("drawstop-off noise") {
+        Some((false, false))
+    } else if n.contains("key-on noise") {
+        Some((true, true))
+    } else if n.contains("key-off noise") {
+        Some((true, false))
+    } else {
+        None
+    }
+}
+
+/// Toets- en registermechaniek via het schakelnetwerk: elke klik is een pijp met een eigen pallet-schakelaar, die
+/// aangestuurd wordt door de toetsschakelaar ("Manual 1 key 072-c") of de registerschakelaar ("DrawStop 4 Praestant
+/// 4"). Van de pallet terug naar de bron, dan stroomafwaarts (hoogstens vier stappen) naar een `DivisionInput` (klavier
+/// en noot) of naar de `ControllingSwitchID` van een register. Vult alleen aan wat de rangnaam-herkenning
+/// (`verzamel_hw_keyboard_clicks`, `verzamel_hw_stop_action_clicks`) niet vond.
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+fn verzamel_hw_pallet_mechaniek(
+    pipes: &[FieldMap],
+    rank_name: &HashMap<u32, String>,
+    linkages: &[FieldMap],
+    division_inputs: &[FieldMap],
+    divisions: &[FieldMap],
+    hoofddivisies: &std::collections::HashSet<u32>,
+    stops: &[FieldMap],
+    pijp_pad: &dyn Fn(u32) -> Option<PathBuf>,
+) -> (
+    HashMap<(String, u8), crate::grandorgue::KeyboardClickPaths>,
+    HashMap<u32, crate::grandorgue::StopActionClickDef>,
+) {
+    use crate::grandorgue::{KeyboardClickPaths, StopActionClickDef};
+    let mut toetsen: HashMap<(String, u8), KeyboardClickPaths> = HashMap::new();
+    let mut registers: HashMap<u32, StopActionClickDef> = HashMap::new();
+    let mut bron_van: HashMap<u32, Vec<u32>> = HashMap::new();
+    let mut doel_van: HashMap<u32, Vec<u32>> = HashMap::new();
+    for l in linkages {
+        if let (Some(a), Some(b)) = (l.get_u32("SourceSwitchID"), l.get_u32("DestSwitchID")) {
+            bron_van.entry(b).or_default().push(a);
+            doel_van.entry(a).or_default().push(b);
+        }
+    }
+    let div_naam: HashMap<u32, String> = divisions.iter()
+        .filter_map(|d| Some((d.get_u32("DivisionID")?, d.get("Name")?.trim().to_string())))
+        .collect();
+    let toets_van: HashMap<u32, (u32, Option<u32>)> = division_inputs.iter()
+        .filter_map(|d| Some((d.get_u32("SwitchID")?, (d.get_u32("DivisionID")?, d.get_u32("NormalMIDINoteNumber")))))
+        .collect();
+    let register_van: HashMap<u32, u32> = stops.iter()
+        .filter_map(|s| Some((s.get_u32("ControllingSwitchID")?, s.get_u32("StopID")?)))
+        .collect();
+    // Breedte-eerst stroomafwaarts vanaf de bronnen van de pallet: alle treffers op de kleinste diepte.
+    let zoek = |pallet: u32, treffer: &dyn Fn(u32) -> bool| -> Vec<u32> {
+        let mut gezien = std::collections::HashSet::new();
+        let mut rij: std::collections::VecDeque<(u32, usize)> =
+            bron_van.get(&pallet).into_iter().flatten().map(|b| (*b, 0)).collect();
+        let mut hits: Vec<u32> = Vec::new();
+        let mut diepte = usize::MAX;
+        while let Some((s, d)) = rij.pop_front() {
+            if d > diepte { break; }
+            if !gezien.insert(s) { continue; }
+            if treffer(s) {
+                diepte = d;
+                hits.push(s);
+                continue;
+            }
+            if d < 4 {
+                for n in doel_van.get(&s).into_iter().flatten() {
+                    if *n != pallet { rij.push_back((*n, d + 1)); }
+                }
+            }
+        }
+        hits.sort_unstable();
+        hits
+    };
+    for p in pipes {
+        let Some(soort) = p.get_u32("RankID").and_then(|r| rank_name.get(&r)).and_then(|n| pallet_mechaniek_soort(n)) else { continue };
+        let (Some(pid), Some(pallet)) = (p.get_u32("PipeID"), p.get_u32("ControllingPalletSwitchID")) else { continue };
+        let (toets, aanslag) = soort;
+        if toets {
+            // Speelt de toets meer divisies (een klavier met een zwevend werk erbij), dan de hoofddivisie van een
+            // klavier, anders het laagste divisienummer.
+            let Some((div, noot)) = zoek(pallet, &|s| toets_van.contains_key(&s)).iter()
+                .map(|sw| toets_van[sw])
+                .min_by_key(|(d, _)| (!hoofddivisies.contains(d), *d)) else { continue };
+            let Some(noot) = noot.or_else(|| p.get_u32("NormalMIDINoteNumber")).filter(|n| *n < 128) else { continue };
+            let Some(naam) = div_naam.get(&div) else { continue };
+            let e = toetsen.entry((naam.to_uppercase(), noot as u8)).or_default();
+            let plek = if aanslag { &mut e.attack } else { &mut e.release };
+            if plek.is_none() { *plek = pijp_pad(pid); }
+        } else {
+            let Some(sw) = zoek(pallet, &|s| register_van.contains_key(&s)).first().copied() else { continue };
+            let e = registers.entry(register_van[&sw]).or_insert(StopActionClickDef { attack: None, release: None });
+            let plek = if aanslag { &mut e.attack } else { &mut e.release };
+            if plek.is_none() { *plek = pijp_pad(pid); }
+        }
+    }
+    toetsen.retain(|_, v| v.attack.is_some() || v.release.is_some());
+    registers.retain(|_, v| v.attack.is_some() || v.release.is_some());
+    if !toetsen.is_empty() || !registers.is_empty() {
+        info!("Hauptwerk-mechaniek via pallets: {} toetsen, {} registers", toetsen.len(), registers.len());
+    }
+    (toetsen, registers)
 }
 
 /// Register-klikgeluiden uit een HW-definitie (0.7.99). Nitra heeft de ranks
@@ -4305,3 +4445,66 @@ mod tests {
 #[cfg(test)]
 #[path = "hauptwerk_fixtures_tests.rs"]
 mod fixtures_tests;
+
+#[cfg(test)]
+mod pallet_mechaniek_tests {
+    use super::*;
+
+    fn fm(kv: &[(&str, &str)]) -> FieldMap {
+        kv.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+    }
+
+    /// Zoals in de sets met mechaniek achter eigen pallets: toets 72 van klavier 3 speelt het Bovenwerk (hoofddivisie)
+    /// en een zwevende Chamade; register 2 heeft een schuif 19002 die door de registerknop 13002 bediend wordt.
+    #[test]
+    fn klikken_volgen_het_schakelnetwerk() {
+        let rangen: HashMap<u32, String> = [
+            (960, "Special: DrawStop-On noise"), (970, "Special: DrawStop-Off noise"),
+            (983, "Special: TrackerMan_3 Key-On noise"), (984, "Special: TrackerMan_3 Key-Off noise"),
+            (10, "Gedekt 8"),
+        ].into_iter().map(|(k, v)| (k, v.to_string())).collect();
+        let pijpen = vec![
+            fm(&[("PipeID", "1"), ("RankID", "960"), ("NormalMIDINoteNumber", "2"), ("ControllingPalletSwitchID", "960020")]),
+            fm(&[("PipeID", "2"), ("RankID", "970"), ("NormalMIDINoteNumber", "2"), ("ControllingPalletSwitchID", "970020")]),
+            fm(&[("PipeID", "3"), ("RankID", "983"), ("NormalMIDINoteNumber", "72"), ("ControllingPalletSwitchID", "983720")]),
+            fm(&[("PipeID", "4"), ("RankID", "984"), ("NormalMIDINoteNumber", "72"), ("ControllingPalletSwitchID", "984720")]),
+            // Een gewone pijp met een pallet doet niet mee.
+            fm(&[("PipeID", "5"), ("RankID", "10"), ("NormalMIDINoteNumber", "72"), ("ControllingPalletSwitchID", "983720")]),
+        ];
+        let l = |a: &str, b: &str| fm(&[("SourceSwitchID", a), ("DestSwitchID", b)]);
+        let koppelingen = vec![
+            l("13002", "960020"), l("13002", "970020"), l("13002", "19002"),
+            l("4072", "983720"), l("4072", "984720"), l("4072", "36072"), l("4072", "46072"),
+        ];
+        let invoer = vec![
+            fm(&[("DivisionID", "6"), ("SwitchID", "36072"), ("NormalMIDINoteNumber", "72")]),
+            fm(&[("DivisionID", "4"), ("SwitchID", "46072"), ("NormalMIDINoteNumber", "72")]),
+        ];
+        let divisies = vec![
+            fm(&[("DivisionID", "4"), ("Name", "Bovenwerk")]),
+            fm(&[("DivisionID", "6"), ("Name", "Chamade")]),
+        ];
+        let registers = vec![fm(&[("StopID", "2"), ("Name", "Praestant 4"), ("ControllingSwitchID", "19002")])];
+        let pad = |pid: u32| Some(PathBuf::from(format!("p{}.wav", pid)));
+        let hoofd: std::collections::HashSet<u32> = [4].into_iter().collect();
+        let (toetsen, regs) = verzamel_hw_pallet_mechaniek(&pijpen, &rangen, &koppelingen, &invoer, &divisies, &hoofd, &registers, &pad);
+        let t = toetsen.get(&("BOVENWERK".to_string(), 72)).expect("toets 72 op het Bovenwerk");
+        assert_eq!(t.attack.as_deref(), Some(Path::new("p3.wav")));
+        assert_eq!(t.release.as_deref(), Some(Path::new("p4.wav")));
+        assert_eq!(toetsen.len(), 1, "niet ook op de Chamade");
+        let r = regs.get(&2).expect("register 2");
+        assert_eq!(r.attack.as_deref(), Some(Path::new("p1.wav")));
+        assert_eq!(r.release.as_deref(), Some(Path::new("p2.wav")));
+        // Zonder hoofddivisie: het laagste divisienummer.
+        let (toetsen, _) = verzamel_hw_pallet_mechaniek(&pijpen, &rangen, &koppelingen, &invoer, &divisies, &Default::default(), &registers, &pad);
+        assert!(toetsen.contains_key(&("BOVENWERK".to_string(), 72)));
+    }
+
+    #[test]
+    fn alleen_de_eigen_rangnamen() {
+        assert_eq!(pallet_mechaniek_soort("Special: DrawStop-On noise"), Some((false, true)));
+        assert_eq!(pallet_mechaniek_soort("Special: TrackerPed_0 Key-Off noise"), Some((true, false)));
+        assert_eq!(pallet_mechaniek_soort("Special: BlowerNoise"), None);
+        assert_eq!(pallet_mechaniek_soort("HW Key action noises Attack"), None);
+    }
+}

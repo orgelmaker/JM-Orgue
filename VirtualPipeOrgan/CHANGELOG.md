@@ -6,6 +6,16 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### Motorgeluid en mechaniekgeluiden bij Hauptwerk-sets met eigen pallet-schakelaars
+- Bij gecomprimeerde Hauptwerk-sets herkende de importer soms een veld met overal dezelfde waarde als pallet-schakelaar
+  van de pijp. Daardoor werd in twee sets het motorgeluid niet gevonden. Zo'n veld telt nu niet meer mee (de windvelden
+  van de pijp evenmin).
+- Nieuw: toets- en registermechaniek van sets die elke klik als eigen pijp achter een schakelaar zetten (rangen als
+  "DrawStop-On noise" en "Key-Off noise"). De klik wordt via het schakelnetwerk aan het register of aan de toets en het
+  klavier gekoppeld; speelt een toets twee werken, dan hoort de klik bij de hoofddivisie van het klavier. Werkt met de
+  bestaande instellingen voor registermechaniek en toetsmechaniek.
+- Registers, pijpen en koppels van alle geteste sets blijven gelijk.
+
 ### Windwerk ook bij gecomprimeerde Hauptwerk-sets (D4, fase 3)
 - Het windwerk (balgen, laden, kanalen, verbruik per pijp) wordt nu ook gelezen uit gecomprimeerde Hauptwerk-definities,
   de meeste commerciële sets. Per bestand wordt gecontroleerd of de gegevens kloppen (verwijzingen naar bestaande laden,

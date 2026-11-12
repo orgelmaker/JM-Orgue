@@ -238,6 +238,26 @@ fn kies_verwijzing(
     beste.map(|(l, _, _)| l)
 }
 
+/// Letters die bij minstens `min` objecten voorkomen en daar overal dezelfde
+/// waarde hebben.
+fn constante_letters(objs: &[FieldMap], min: usize) -> Vec<String> {
+    letters(objs)
+        .into_iter()
+        .filter(|l| {
+            let mut waarden = objs.iter().filter_map(|o| o.get(l));
+            let Some(eerste) = waarden.next() else { return false };
+            let mut n = 1usize;
+            for w in waarden {
+                if w != eerste {
+                    return false;
+                }
+                n += 1;
+            }
+            n >= min
+        })
+        .collect()
+}
+
 /// Ziet deze waarde eruit als vrije tekst (een naam)?
 /// Dezelfde regel als `kies_verwijzing`, maar zonder minimumdekking: voor
 /// velden die maar bij een handvol objecten voorkomen (zoals
@@ -1156,9 +1176,27 @@ impl GecomprimeerdeOdf {
         // die SwitchID in het schema vlak na RankID. Weinig pijpen hebben
         // hem — gewone orgelpijpen worden via StopRank aangestuurd — dus
         // de helper die zonder minimumdekking werkt.
+        // Een letter met bij alle pijpen dezelfde waarde is geen pallet: elke
+        // pallet bedient zijn eigen pijp. In twee sets van formaat 5 en 4.2
+        // stond de uitgaande windlade (overal 1) bij elke pijp en won die het
+        // van de echte pallet-letter, omdat schakelaar 1 toevallig bestaat (de
+        // setzerknop); het motorgeluid werd daardoor niet gevonden.
+        // Evenmin de windvelden van de pijp (D4, fase 3; vaste letters, al
+        // gecontroleerd): een windlade-nummer kan toevallig ook een schakelaar
+        // zijn.
+        let constant = constante_letters(pp, 20);
+        let windwerk = windwerk_letters(
+            &rauwe_objecten(xml, "WindCompartment"),
+            &rauwe_objecten(xml, "WindCompartmentLinkage"),
+            pp,
+        );
         let pp_pallet = {
             let mut uit: Vec<&str> = pp_uit.clone();
             if let Some(l) = &pp_voet { uit.push(l.as_str()); }
+            uit.extend(constant.iter().map(|l| l.as_str()));
+            if let Some([_, _, pijpwind]) = &windwerk {
+                uit.extend(pijpwind.iter().filter_map(|(l, _)| l.as_deref()));
+            }
             kies_schaarse_verwijzing(pp, &switch_ids, &uit, &["c", "d"])
         };
         zet(
@@ -1423,11 +1461,7 @@ impl GecomprimeerdeOdf {
         );
 
         // ── Windwerk (D4, fase 3): laden, verbindingen en de windvelden van de pijp ──
-        if let Some([laden, verbindingen, pijpwind]) = windwerk_letters(
-            &rauwe_objecten(xml, "WindCompartment"),
-            &rauwe_objecten(xml, "WindCompartmentLinkage"),
-            lijst("Pipe_SoundEngine01"),
-        ) {
+        if let Some([laden, verbindingen, pijpwind]) = windwerk {
             zet("WindCompartment", laden);
             zet("WindCompartmentLinkage", verbindingen);
             if !pijpwind.is_empty() {
@@ -1439,8 +1473,7 @@ impl GecomprimeerdeOdf {
                     (pp_pallet.clone(), "ControllingPalletSwitchID"),
                 ];
                 let bezet: Vec<String> = paren.iter().filter_map(|(l, _)| l.clone()).collect();
-                // Een letter die hierboven al een betekenis kreeg, houdt die (het gedrag blijft gelijk); alleen dat
-                // windveld vervalt dan.
+                // Vangnet: een letter die hierboven toch al een betekenis kreeg, houdt die; alleen dat windveld vervalt.
                 paren.extend(pijpwind.into_iter().filter(|(l, _)| l.as_ref().is_some_and(|l| !bezet.contains(l))));
                 zet("Pipe_SoundEngine01", paren);
             }
@@ -1564,6 +1597,69 @@ impl GecomprimeerdeOdf {
             }
         }
         CompactVeldrapport { kritiek_ontbrekend: kritiek, minder_belangrijk_ontbrekend: overig, letters_zonder_naam }
+    }
+
+    /// Het schakelnetwerk, alleen voor de mechaniekgeluiden die via een eigen
+    /// pallet-schakelaar spelen (`verzamel_hw_pallet_mechaniek`). Bewust buiten
+    /// de algemene vertaaltabel: andere onderdelen van de importer lezen deze
+    /// tabellen ook en mogen bij een gecomprimeerde set niet van gedrag
+    /// veranderen.
+    ///
+    /// - `SwitchLinkage`: a = bron, b = doel, c = voorwaarde (in alle 17
+    ///   gecomprimeerde sets zo geteld); a en b moeten schakelaars zijn.
+    /// - `DivisionInput`: a = divisie, b = schakelaar, c = MIDI-noot.
+    /// - `Stop`: de gewone vertaling plus `ControllingSwitchID`, de letter die
+    ///   naar de schakelaars verwijst.
+    ///
+    /// Klopt de controle niet, dan een lege lijst.
+    pub(crate) fn netwerk_objecten(&self, xml: &str, object_type: &str) -> Vec<FieldMap> {
+        let switch_ids = id_verzameling(&rauwe_objecten(xml, "Switch"));
+        let raak = |objs: &[FieldMap], l: &str, doel: &HashSet<u32>| {
+            objs.iter().all(|o| o.get(l).is_none_or(|v| v.trim().parse::<u32>().is_ok_and(|n| doel.contains(&n))))
+        };
+        let hernoem = |objs: Vec<FieldMap>, paren: &[(&str, &str)]| -> Vec<FieldMap> {
+            objs.into_iter()
+                .map(|o| {
+                    o.into_iter()
+                        .filter_map(|(k, v)| paren.iter().find(|(l, _)| *l == k).map(|(_, n)| (n.to_string(), v)))
+                        .collect()
+                })
+                .collect()
+        };
+        match object_type {
+            "SwitchLinkage" => {
+                let rauw = rauwe_objecten(xml, object_type);
+                let volledig = rauw.iter().all(|o| o.contains_key("a") && o.contains_key("b"));
+                if !volledig || !raak(&rauw, "a", &switch_ids) || !raak(&rauw, "b", &switch_ids) || !raak(&rauw, "c", &switch_ids) {
+                    return Vec::new();
+                }
+                hernoem(rauw, &[("a", "SourceSwitchID"), ("b", "DestSwitchID"), ("c", "ConditionSwitchID")])
+            }
+            "DivisionInput" => {
+                let rauw = rauwe_objecten(xml, object_type);
+                let div_ids = id_verzameling(&rauwe_objecten(xml, "Division"));
+                let noot_ok = rauw.iter().all(|o| o.get("c").is_none_or(|v| v.trim().parse::<u32>().is_ok_and(|n| n < 128)));
+                let volledig = rauw.iter().all(|o| o.contains_key("a") && o.contains_key("b"));
+                if !volledig || !noot_ok || !raak(&rauw, "a", &div_ids) || !raak(&rauw, "b", &switch_ids) {
+                    return Vec::new();
+                }
+                hernoem(rauw, &[("a", "DivisionID"), ("b", "SwitchID"), ("c", "NormalMIDINoteNumber")])
+            }
+            "Stop" => {
+                let rauw = rauwe_objecten(xml, "Stop");
+                let bekend: Vec<String> = self.tabel.get("Stop").map(|m| m.keys().cloned().collect()).unwrap_or_default();
+                let uit: Vec<&str> = bekend.iter().map(|s| s.as_str()).collect();
+                let Some(sw) = kies_verwijzing(&rauw, &switch_ids, &uit, &["d"]) else { return Vec::new() };
+                let mut stops = self.objecten(xml, "Stop");
+                for (o, r) in stops.iter_mut().zip(&rauw) {
+                    if let Some(v) = r.get(&sw) {
+                        o.insert("ControllingSwitchID".to_string(), v.clone());
+                    }
+                }
+                stops
+            }
+            _ => Vec::new(),
+        }
     }
 
     /// Leest één objectlijst en vertaalt de letters naar de lange veldnamen.
@@ -2160,5 +2256,12 @@ mod windwerk_tests {
         let mut p = pijpen();
         p[1].insert("t".into(), "12".into());
         assert!(windwerk_letters(&laden(), &verbindingen(), &p).expect("windwerk")[2].is_empty());
+    }
+
+    #[test]
+    fn constante_letter_is_geen_pallet() {
+        let pijpen: Vec<FieldMap> = (0..30).map(|i| o(&[("a", &i.to_string()), ("s", "1")])).collect();
+        assert_eq!(constante_letters(&pijpen, 20), vec!["s".to_string()]);
+        assert!(constante_letters(&pijpen[..10], 20).is_empty(), "te weinig pijpen om iets te zeggen");
     }
 }
