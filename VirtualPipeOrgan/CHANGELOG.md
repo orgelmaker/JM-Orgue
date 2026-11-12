@@ -6,6 +6,10 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### Handleiding bijgewerkt naar 0.9.53, in zeven talen
+- Het vinkje "Tremulant volgt de golfvorm van de set" staat in het blok Gedrag van de set, met uitleg; het importverslag
+  zegt niet meer dat de golfvormen niet gebruikt worden. Zeven PDF's opnieuw gemaakt.
+
 ## [0.9.53] - 2026-11-12
 
 ### Tremulant volgt de opgenomen golfvorm van de set (C5, stap 2)
