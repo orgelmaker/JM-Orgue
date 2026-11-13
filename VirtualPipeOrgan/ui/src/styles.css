@@ -3590,6 +3590,23 @@ input[type="range"]::-webkit-slider-thumb:hover {
 .indeling-menu .panel-layout-btn { width: 100%; justify-content: flex-start; }
 .indeling-menu .stop-size-control { justify-content: flex-start; padding: 0.15rem 0.3rem; }
 
+/* MIDI-knop met menu en afspeelknop in de werkbalk (0.9.56) */
+.midi-knop-groep { position: relative; display: inline-flex; align-items: center; }
+.midi-knop-groep .midi-record-btn { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.midi-menu-knop { align-self: stretch; padding: 0 0.3rem; margin-left: -1px; border-top-left-radius: 0; border-bottom-left-radius: 0; }
+.midi-menu-knop.aan { background: var(--accent-soft); }
+.midi-menu {
+  position: absolute; right: 0; top: calc(100% + 4px); z-index: 60;
+  display: flex; flex-direction: column; gap: 0.25rem; min-width: 13rem;
+  padding: 0.45rem; background: var(--bg-elevated, var(--bg-darkest));
+  border: 1px solid var(--accent-soft); border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+}
+.midi-menu.links { right: auto; left: 0; }
+.midi-menu .btn { width: 100%; display: inline-flex; align-items: center; justify-content: flex-start; gap: 0.4rem; }
+.midi-speel-knop { display: inline-flex; align-items: center; gap: 0.35rem; }
+.midi-speel-knop.aan { color: #3b82f6; border-color: #3b82f6; }
+
 /* Onderwerpnavigatie in de instellingen (0.8.90) */
 .instellingen-nav {
   position: sticky; top: -1.25rem; z-index: 5;

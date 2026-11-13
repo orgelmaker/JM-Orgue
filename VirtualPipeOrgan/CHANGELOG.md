@@ -6,6 +6,15 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### MIDI-bestanden openen en afspelen vanuit de werkbalk
+- Naast de MIDI-knop in de werkbalk staat een pijltje met een menu: **MIDI-bestand openen…** en **Opname starten/stoppen**.
+  De MIDI-knop zelf neemt nog steeds op met één klik, zoals je gewend bent.
+- Na het openen van een bestand (of na een opname) verschijnt een afspeelknop met de bestandsnaam in de tooltip. De knop wordt
+  Stop zolang het bestand speelt en springt aan het eind zelf terug. Het bestand start pas als je op de knop drukt; trek zelf de
+  registers, want een MIDI-bestand bevat alleen noten. Speelt er iets anders in de speler onder Routing, dan stopt de knop dat eerst.
+- Tijdens het opnemen is Openen uitgeschakeld en staat er geen afspeelknop. Escape sluit het menu zonder naar de bibliotheek
+  te springen; met een gesloten menu blijft Escape naar de bibliotheek gaan.
+
 ### Logboek legt uit waarom een set nog te downloaden lijkt
 - Blijft een set uit het aanbod "Beschikbaar om te downloaden" staan, dan schrijft het programma één regel in het logboek:
   de namen waarmee de set is vergeleken, het aantal orgels in de bibliotheek, de plek van een eerdere download en de

@@ -1,6 +1,7 @@
 <script>
   import { createEventDispatcher, onMount, onDestroy, tick } from 'svelte';
   import { nogTeDownloaden, waaromNiet } from '../lib/aanbod.js';
+  import { bestandsNaam, speeltNu, afspeelStappen } from '../lib/midiSpeler.js';
   import { open } from '@tauri-apps/plugin-dialog';
   import LayoutSettings from './LayoutSettings.svelte';
   import VoicingPanel from './VoicingPanel.svelte';
@@ -642,7 +643,42 @@
   // Aparte keten van de MP3-opname: dit legt vast wát je speelde (noten/CC), niet de audio.
   let midiRec = { recording: false, event_count: 0, seconds: 0 };
   let midiRecPoll = null;
-  let lastMidiPath = null; // pad van de laatst opgeslagen MIDI-opname (voor "in speler laden")
+  let lastMidiPath = null; // MIDI-bestand van de werkbalk-speler: geopend via het menu naast de MIDI-knop, of net opgenomen
+  // Menu naast de MIDI-knop en de status van de speler (0.9.56). De speler is dezelfde als die onder Routing; de knop
+  // weet zelf welk bestand hij gestart heeft, zodat hij een ander bestand uit die speler niet voor het zijne aanziet.
+  let midiMenuOpen = false;
+  let midiMenuLinks = false;
+  let midiSpeler = { state: 'stopped', position_ms: 0, duration_ms: 0, loaded: false };
+  let midiSpelerPoll = null;
+  let midiGestartPad = null;
+  $: midiSpeeltNu = speeltNu(midiSpeler, midiGestartPad, lastMidiPath);
+  $: midiBestandNaam = bestandsNaam(lastMidiPath);
+
+  async function pollMidiSpeler() {
+    try { midiSpeler = await invoke('midi_player_status'); } catch (e) {}
+  }
+  function startMidiSpelerPoll() {
+    if (!midiSpelerPoll) midiSpelerPoll = setInterval(pollMidiSpeler, 400);
+    pollMidiSpeler();
+  }
+
+  // MIDI-bestand kiezen en in de werkbalk klaarzetten; afspelen doet de knop die daarna verschijnt.
+  async function openMidiBestand() {
+    midiMenuOpen = false;
+    if (midiRec.recording) return;
+    try {
+      const gekozen = await open({
+        multiple: false,
+        title: tx('midi_player.file_dialog_title'),
+        filters: [{ name: tx('recording.midi_file_filter'), extensions: ['mid', 'midi', 'smf'] }],
+      });
+      if (!gekozen) return;
+      lastMidiPath = gekozen;
+      startMidiSpelerPoll();
+    } catch (e) {
+      alert(tx('recording.play_failed').replace('{error}', String(e)));
+    }
+  }
 
   async function pollMidiRec() {
     try { midiRec = await invoke('midi_recording_status'); } catch (e) {}
@@ -670,6 +706,7 @@
         if (path) {
           await invoke('save_midi_recording', { path });
           lastMidiPath = path;
+          startMidiSpelerPoll();
           alert(tx('recording.midi_saved').replace('{path}', path).replace('{n}', String(count)));
         } else {
           // Geannuleerd → opname verwerpen zodat de status schoon is.
@@ -688,12 +725,23 @@
     }
   }
 
-  // Zojuist opgenomen take direct in de MIDI-speler laden en afspelen.
-  // Let op: trek zelf de registers, anders blijft het orgel stil (opname = alleen noten).
+  // Het MIDI-bestand van de werkbalk afspelen, of stoppen als het speelt (of verder na een pauze onder Routing).
+  // Let op: trek zelf de registers, anders blijft het orgel stil (een bestand bevat alleen noten).
   async function playLastMidi() {
     if (!lastMidiPath) return;
     try {
-      await invoke('midi_play_file', { path: lastMidiPath });
+      await pollMidiSpeler();
+      // De stappen komen uit lib/midiSpeler.js (met tests). Speelt er iets anders (bijvoorbeeld een bestand uit de
+      // speler onder Routing), dan staat daar eerst een 'stop' voor.
+      for (const stap of afspeelStappen(midiSpeler, midiGestartPad, lastMidiPath)) {
+        if (stap === 'stop') await invoke('midi_stop_playback');
+        else if (stap === 'hervat') await invoke('midi_resume_playback');
+        else if (stap === 'speel') {
+          await invoke('midi_play_file', { path: lastMidiPath });
+          midiGestartPad = lastMidiPath;
+        }
+      }
+      await pollMidiSpeler();
     } catch (e) {
       alert(tx('recording.play_failed').replace('{error}', String(e)));
     }
@@ -3924,6 +3972,7 @@
     if (swellPollInterval) clearInterval(swellPollInterval);
     if (recorderPoll) clearInterval(recorderPoll);
     if (midiRecPoll) clearInterval(midiRecPoll);
+    if (midiSpelerPoll) { clearInterval(midiSpelerPoll); midiSpelerPoll = null; }
     if (archivePoll) clearInterval(archivePoll);
     if (crescLivePoll) clearInterval(crescLivePoll);
     if (sharedPrefsInterval) clearInterval(sharedPrefsInterval);
@@ -5907,7 +5956,7 @@
   }
 </script>
 
-<svelte:window bind:innerWidth={vensterBreedte} on:click={() => { indelingOpen = false; }} />
+<svelte:window bind:innerWidth={vensterBreedte} on:click={() => { indelingOpen = false; midiMenuOpen = false; }} />
 
 <main class="console">
   {#if loading}
@@ -6609,31 +6658,72 @@
                 MP3
               {/if}
             </button>
-            <button
-              class="btn btn-ghost btn-sm record-btn midi-record-btn"
-              class:recording={midiRec.recording}
-              on:click={toggleMidiRecording}
-              title={midiRec.recording
-                ? $t('toolbar.rec_midi_running').replace('{n}', midiRec.event_count).replace('{t}', formatSeconds(midiRec.seconds))
-                : $t('toolbar.rec_midi_start')}
-            >
-              <span class="record-dot" class:on={midiRec.recording}></span>
-              {#if midiRec.recording}
-                {midiRec.event_count} · {formatSeconds(midiRec.seconds)}
-              {:else}
-                MIDI
+            <!-- MIDI-knop met menu (0.9.56): de knop zelf neemt op zoals altijd; het pijltje ernaast opent een menu
+                 om een MIDI-bestand te openen. Is er een bestand (geopend of net opgenomen), dan staat er een
+                 afspeelknop naast. Klik buiten het menu of Escape sluit het; die Escape mag niet doorlopen naar de
+                 algemene Escape van App.svelte (terug naar de bibliotheek), maar alleen als het menu open is. -->
+            <div class="midi-knop-groep" role="group" on:click|stopPropagation on:keydown={(e) => { if (e.key === 'Escape' && midiMenuOpen) { midiMenuOpen = false; e.stopPropagation(); } }}>
+              <button
+                class="btn btn-ghost btn-sm record-btn midi-record-btn"
+                class:recording={midiRec.recording}
+                on:click={() => { midiMenuOpen = false; toggleMidiRecording(); }}
+                title={midiRec.recording
+                  ? $t('toolbar.rec_midi_running').replace('{n}', midiRec.event_count).replace('{t}', formatSeconds(midiRec.seconds))
+                  : $t('toolbar.rec_midi_start')}
+              >
+                <span class="record-dot" class:on={midiRec.recording}></span>
+                {#if midiRec.recording}
+                  {midiRec.event_count} · {formatSeconds(midiRec.seconds)}
+                {:else}
+                  MIDI
+                {/if}
+              </button>
+              <button
+                class="btn btn-ghost btn-sm midi-menu-knop"
+                class:aan={midiMenuOpen}
+                on:click={(e) => { midiMenuLinks = e.currentTarget.getBoundingClientRect().left < 260; indelingOpen = false; midiMenuOpen = !midiMenuOpen; }}
+                title={$t('toolbar.midi_menu_title')}
+                aria-label={$t('toolbar.midi_menu_title')}
+                aria-expanded={midiMenuOpen}
+                aria-haspopup="menu"
+              >
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="6 9 12 15 18 9"/>
+                </svg>
+              </button>
+              {#if midiMenuOpen}
+                <div class="midi-menu" class:links={midiMenuLinks} role="menu">
+                  <button class="btn btn-ghost btn-sm" role="menuitem" disabled={midiRec.recording} on:click={openMidiBestand}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+                    </svg>
+                    {$t('toolbar.midi_open')}
+                  </button>
+                  <button class="btn btn-ghost btn-sm" role="menuitem" on:click={() => { midiMenuOpen = false; toggleMidiRecording(); }}>
+                    <span class="record-dot" class:on={midiRec.recording}></span>
+                    {midiRec.recording ? $t('toolbar.midi_menu_stop_rec') : $t('toolbar.midi_menu_rec')}
+                  </button>
+                </div>
               {/if}
-            </button>
+            </div>
             {#if lastMidiPath && !midiRec.recording}
               <button
-                class="btn btn-ghost btn-sm"
+                class="btn btn-ghost btn-sm midi-speel-knop"
+                class:aan={midiSpeeltNu}
                 on:click={playLastMidi}
-                title={$t('toolbar.play_recording_title')}
+                title={(midiSpeeltNu ? $t('toolbar.midi_stop_title') : $t('toolbar.midi_play_title')).replace('{naam}', midiBestandNaam)}
               >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
-                  <polygon points="6,4 20,12 6,20"/>
-                </svg>
-                {$t('toolbar.play_recording')}
+                {#if midiSpeeltNu}
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+                    <rect x="6" y="6" width="12" height="12" rx="1"/>
+                  </svg>
+                  {$t('toolbar.midi_stop')}
+                {:else}
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+                    <polygon points="6,4 20,12 6,20"/>
+                  </svg>
+                  {$t('toolbar.midi_play')}
+                {/if}
               </button>
             {/if}
             {#if !midiRec.recording}
