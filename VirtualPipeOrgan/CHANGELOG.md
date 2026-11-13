@@ -6,6 +6,12 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### Handleiding bijgewerkt voor het tabblad Laden en de oude instellingen, in zeven talen
+- Beschreven: het nieuwe tabblad Laden in de orgelinstellingen, een eigen instellingenbestand per orgeldefinitie, de vraag bij
+  een ouder instellingenbestand zonder bekende eigenaar (met Annuleren om later te beslissen) en het later overnemen
+  via de orgelinstellingen. Knopnamen uit de taalbestanden; zeven PDF's opnieuw gemaakt. Het versienummer in de handleiding
+  gaat mee bij de volgende release.
+
 ### Instellingen veiliger opgeslagen
 - De bibliotheek met alle orgelinstellingen (`organ_library.json`) en de instellingenbestanden naast een orgel worden nu
   via een uniek tijdelijk bestand geschreven. Dit verkleint de kans op een afgekapt bestand bij een onderbroken opslag.
