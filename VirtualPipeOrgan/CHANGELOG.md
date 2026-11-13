@@ -6,6 +6,12 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+## [0.9.56] - 2026-11-13
+
+### Handleiding bijgewerkt voor het MIDI-menu, in zeven talen
+- Het pijltje naast de MIDI-knop, het openen van een MIDI-bestand en de afspeelknop staan in de werkbalktabel, met een verwijzing
+  naar de speler onder Routing voor pauze, positie en tempo. Knopnamen uit de taalbestanden; zeven PDF's opnieuw gemaakt.
+
 ### MIDI-bestanden openen en afspelen vanuit de werkbalk
 - Naast de MIDI-knop in de werkbalk staat een pijltje met een menu: **MIDI-bestand openen…** en **Opname starten/stoppen**.
   De MIDI-knop zelf neemt nog steeds op met één klik, zoals je gewend bent.
