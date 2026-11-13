@@ -1,6 +1,6 @@
 // Test van de vergelijking "al geïnstalleerd?" voor het blok "Beschikbaar om te
 // downloaden" (ui/src/lib/aanbod.js), zonder DOM. Draait met `node` en in CI.
-import { normNaam, normPad, isGeinstalleerd, nogTeDownloaden } from '../ui/src/lib/aanbod.js';
+import { normNaam, normPad, isGeinstalleerd, nogTeDownloaden, waaromNiet } from '../ui/src/lib/aanbod.js';
 
 let fouten = 0;
 function check(cond, naam) {
@@ -53,6 +53,20 @@ check(!isGeinstalleerd(set, [orgel(NFC + ' (kopie)', 'D:\\Sets\\' + NFC + ' (kop
   const lijst = nogTeDownloaden([set, ander, zonderZip, null], [orgel(NFD, 'D:/Sets/' + NFD)], {});
   check(lijst.length === 1 && lijst[0].id === 'iets', 'alleen wat nog te downloaden is, met een zip-adres');
   check(nogTeDownloaden(undefined, [], {}).length === 0, 'geen manifest');
+}
+
+// ---- de uitleg voor het logboek ----
+{
+  const bijna = orgel('Batz Witte Puttershoek (kopie)', 'D:\\Sets\\Andere map');
+  const uitleg = waaromNiet(set, [bijna, orgel('Rotterdam', 'D:\\Sets\\Rotterdam')], { [set.id]: 'E:\\Download\\Batz' });
+  check(uitleg.includes("'batz-witte-puttershoek'") && uitleg.includes('batzwitteputtershoek'), 'de uitleg noemt de set en de namen waarmee vergeleken is');
+  check(uitleg.includes('2 orgels in de bibliotheek'), 'de uitleg telt de orgels');
+  check(uitleg.includes('E:\\Download\\Batz'), 'de uitleg noemt de plek van een eerdere download');
+  check(uitleg.includes("'Batz Witte Puttershoek (kopie)'") && !uitleg.includes("'Rotterdam' in"), 'de uitleg noemt alleen orgels die erop lijken');
+  // Een map in een Windows-pad telt ook als de naam van het orgel zelf anders is (beide soorten streep).
+  const viaMap = waaromNiet(set, [orgel('Iets anders', 'D:\\Sets\\Batz-Witte Puttershoek 2\\OrganDefinitions\\a.xml')], {});
+  check(viaMap.includes("'Iets anders'"), 'de uitleg vindt een orgel via een map in het pad');
+  check(waaromNiet(set, [], {}).includes('dichtstbijzijnde orgels: geen') && waaromNiet(set, null, null).includes('0 orgels'), 'lege of ontbrekende bibliotheek geeft geen fout');
 }
 
 if (fouten) { console.log('\n' + fouten + ' fout(en)'); process.exit(1); }

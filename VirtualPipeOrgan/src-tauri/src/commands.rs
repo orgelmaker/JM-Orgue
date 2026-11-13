@@ -11158,6 +11158,25 @@ pub fn get_organ_library(state: State<AppState>) -> Vec<OrganLibraryEntry> {
     state.organ_library.read().organs.clone()
 }
 
+/// Eén regel van het scherm naar het logboek, voor diagnose van wat alleen het scherm weet (bijvoorbeeld waarom een
+/// set als downloadbaar wordt aangeboden). Begrensd en zonder regeleinden, zodat één aanroep één logregel is.
+#[tauri::command]
+pub fn log_scherm(tekst: String) {
+    let regel: String = tekst.chars().map(|c| if c.is_control() { ' ' } else { c }).take(800).collect();
+    info!("Scherm: {}", regel);
+}
+
+#[cfg(test)]
+mod log_scherm_tests {
+    #[test]
+    fn regeleinden_en_lengte_worden_begrensd() {
+        let lang = format!("a\nb\r\nc{}", "x".repeat(2000));
+        let regel: String = lang.chars().map(|c| if c.is_control() { ' ' } else { c }).take(800).collect();
+        assert!(!regel.contains('\n') && !regel.contains('\r'));
+        assert_eq!(regel.chars().count(), 800);
+    }
+}
+
 #[tauri::command]
 pub fn remove_from_library(state: State<AppState>, id: String) {
     info!("Removing organ from library: {}", id);

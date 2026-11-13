@@ -627,6 +627,7 @@ fn main() {
             commands::set_active_couplers,
             commands::set_division_volume,
             commands::get_organ_settings,
+            commands::log_scherm,
             commands::inspect_legacy_settings,
             commands::defer_legacy_settings,
             commands::import_legacy_settings,

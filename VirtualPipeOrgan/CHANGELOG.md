@@ -6,6 +6,12 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### Logboek legt uit waarom een set nog te downloaden lijkt
+- Blijft een set uit het aanbod "Beschikbaar om te downloaden" staan, dan schrijft het programma één regel in het logboek:
+  de namen waarmee de set is vergeleken, het aantal orgels in de bibliotheek, de plek van een eerdere download en de
+  orgels die er het meest op lijken. Zo is te zien waarom het filter de set niet herkent, ook op een andere pc.
+  De regel verschijnt pas als de bibliotheek geladen is en één keer per situatie. Er verandert niets aan het scherm.
+
 ## [0.9.55] - 2026-11-13
 
 ### Handleiding bijgewerkt voor het tabblad Laden en de oude instellingen, in zeven talen

@@ -1,6 +1,6 @@
 <script>
   import { createEventDispatcher, onMount, onDestroy, tick } from 'svelte';
-  import { nogTeDownloaden } from '../lib/aanbod.js';
+  import { nogTeDownloaden, waaromNiet } from '../lib/aanbod.js';
   import { open } from '@tauri-apps/plugin-dialog';
   import LayoutSettings from './LayoutSettings.svelte';
   import VoicingPanel from './VoicingPanel.svelte';
@@ -4438,6 +4438,21 @@
   let onlineSets = [];
   $: onlineSets = manifestGelukt ? nogTeDownloaden(alleOnlineSets, libraryOrgans, gedownload) : [];
 
+  // Diagnose (0.9.56): blijft een set aangeboden terwijl je hem denkt te hebben, dan staat in het logboek waarom het
+  // filter hem niet herkent. Pas loggen als de bibliotheek echt geladen is (anders staat er bij het opstarten even
+  // een misleidende regel), en één keer per situatie (set, aantal orgels, plek van de download).
+  let bibliotheekGeladen = false;
+  const aanbodGelogd = new Set();
+  function logAanbodNietHerkend(sets, organen, gedl) {
+    for (const s of sets) {
+      const sleutel = `${s.id}|${organen.length}|${gedl?.[s.id] || ''}`;
+      if (aanbodGelogd.has(sleutel)) continue;
+      aanbodGelogd.add(sleutel);
+      invoke('log_scherm', { tekst: 'Aanbod: ' + waaromNiet(s, organen, gedl) }).catch(() => {});
+    }
+  }
+  $: if (manifestGelukt && bibliotheekGeladen) logAanbodNietHerkend(onlineSets, libraryOrgans, gedownload);
+
   // Tekst uit het samplesets-manifest (samplesets.json op GitHub) in de
   // gekozen taal. De Nederlandse tekst staat in het veld zelf — oudere
   // app-versies lezen alleen dat — en vertalingen onder `vertalingen.<taal>`.
@@ -4787,6 +4802,7 @@
       }
       await libraryUpdatedListener;
       libraryOrgans = await invoke('get_organ_library');
+      bibliotheekGeladen = true;
       laadOnlineInstelling();
       // Afbeelding per orgel; de backend gebruikt de opgeslagen afbeelding en
       // zoekt alleen als er nog nooit (met deze zoekversie) gezocht is.

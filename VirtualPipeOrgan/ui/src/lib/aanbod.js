@@ -24,6 +24,13 @@ export function normPad(x) {
     .toLowerCase();
 }
 
+/** De genormaliseerde namen waaronder een set uit het manifest in de bibliotheek kan staan. */
+function setNamen(s) {
+  const namen = new Set([normNaam(s?.naam), normNaam(s?.map_naam || s?.naam), normNaam(s?.id)]);
+  namen.delete('');
+  return namen;
+}
+
 /**
  * Staat deze set uit het manifest al in de bibliotheek?
  *
@@ -38,8 +45,7 @@ export function normPad(x) {
  * @param {Record<string,string>} gedownload  manifest-id → pad waar de app de set neerzette
  */
 export function isGeinstalleerd(s, organen, gedownload) {
-  const namen = new Set([normNaam(s?.naam), normNaam(s?.map_naam || s?.naam), normNaam(s?.id)]);
-  namen.delete('');
+  const namen = setNamen(s);
   const plek = s?.id && gedownload ? normPad(gedownload[s.id]) : '';
   for (const o of organen || []) {
     if (namen.has(normNaam(o?.name))) return true;
@@ -53,4 +59,30 @@ export function isGeinstalleerd(s, organen, gedownload) {
 /** De sets die nog te downloaden zijn. */
 export function nogTeDownloaden(manifestSets, organen, gedownload) {
   return (manifestSets || []).filter((s) => s && s.naam && s.zip_url && !isGeinstalleerd(s, organen, gedownload));
+}
+
+/**
+ * Waarom wordt deze set als "nog te downloaden" aangeboden? Eén regel voor het logboek, zodat een set die
+ * onterecht blijft staan (andere schrijfwijze, andere map) te herleiden is: de namen waarmee vergeleken is,
+ * de plek van een eerdere download, en de orgels in de bibliotheek die er het dichtst bij komen.
+ */
+export function waaromNiet(s, organen, gedownload) {
+  const namen = [...setNamen(s)];
+  const lijst = organen || [];
+  const dicht = [];
+  for (const o of lijst) {
+    const kandidaten = [normNaam(o?.name), ...String(o?.source_path ?? '').split(/[\\/]/).map(normNaam)].filter((x) => x.length >= 4);
+    const raak = kandidaten.some((k) => namen.some((n) => {
+      if (k.includes(n) || n.includes(k)) return true;
+      let i = 0;
+      while (i < k.length && i < n.length && k[i] === n[i]) i++;
+      return i >= 6;
+    }));
+    if (raak) dicht.push(`'${o?.name ?? ''}' in '${o?.source_path ?? ''}'`);
+  }
+  const plek = s?.id && gedownload ? gedownload[s.id] : '';
+  return `set '${s?.naam ?? ''}' (id '${s?.id ?? ''}', map '${s?.map_naam ?? ''}') niet herkend als geïnstalleerd; ` +
+    `vergeleken met de namen [${namen.join(', ')}]; ${lijst.length} orgels in de bibliotheek; ` +
+    `plek van een eerdere download: ${plek ? `'${plek}'` : 'geen'}; ` +
+    `dichtstbijzijnde orgels: ${dicht.length ? dicht.slice(0, 3).join('; ') : 'geen'}`;
 }
