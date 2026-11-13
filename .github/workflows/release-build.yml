@@ -123,7 +123,7 @@ jobs:
       # stilzwijgend doorglippen en pas in publish-updater-json opvallen.
       - name: Upload installers to release
         if: github.event_name == 'release'
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
         with:
           fail_on_unmatched_files: true
           files: |
@@ -218,7 +218,7 @@ jobs:
 
       - name: Upload dmg to release
         if: github.event_name == 'release'
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
         with:
           fail_on_unmatched_files: true
           files: |
@@ -227,7 +227,7 @@ jobs:
 
       - name: Upload macOS-updatebestanden to release
         if: github.event_name == 'release'
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
         with:
           fail_on_unmatched_files: true
           files: |
@@ -361,7 +361,7 @@ jobs:
 
       - name: Upload Linux-installers to release
         if: github.event_name == 'release'
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
         with:
           fail_on_unmatched_files: true
           files: |
