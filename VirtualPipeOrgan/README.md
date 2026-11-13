@@ -73,7 +73,7 @@ JM-Orgue is een professionele virtuele pijporgel-applicatie die het opneemt tege
 - **Apart register-paneel venster** voor multi-monitor setups
 - **Orgel bibliotheek** met persistente instellingen per orgel
 - **Meertalige UI** (NL/EN/FR/DE), realtime wisselbaar
-- **Per-orgel instellingen-persistentie** — mastervolume, temperament, reverb, EQ, zwelkast, tremulant, pan, wind-groepen en UI-voorkeuren reizen mee met het orgel (`.jm-settings.json`)
+- **Per-orgel instellingen-persistentie** — mastervolume, temperament, reverb, EQ, zwelkast, tremulant, pan, wind-groepen en een deel van de UI-voorkeuren reizen mee in een eigen instellingenbestand naast de orgeldefinitie. Oudere `.jm-settings.json`-bestanden blijven bewaard en kunnen na bevestiging worden geïmporteerd.
 
 ### 📁 Bestandsformaten
 - **`.organ` definitiebestanden** (lezen + schrijven)

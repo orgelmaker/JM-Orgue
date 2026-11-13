@@ -65,6 +65,14 @@
     "refresh_hold_hint": "Kliknij, aby wczytać organy. Przytrzymaj 3 sekundy, aby wyszukać nową fotografię."
   },
   "settings": {
+    "legacy_import_button": "Importuj stare ustawienia organów…",
+    "legacy_load_failed": "Zaimportowane ustawienia zapisano, ale nie udało się załadować organów. Zmiany nie będą zapisywane automatycznie, dopóki organy nie zostaną poprawnie załadowane.",
+    "legacy_inspect_failed": "Nie udało się sprawdzić starego pliku ustawień; organy zostaną załadowane bez niego.",
+    "legacy_defer_failed": "Nie udało się zapisać decyzji o odłożeniu wyboru. Spróbuj ponownie.",
+    "legacy_sidecar_warning": "Ustawienia zapisano w bibliotece, ale nie udało się zapisać osobnego pliku obok organów.",
+    "legacy_not_found": "Nie znaleziono starego pliku ustawień obok tych organów.",
+    "legacy_prompt": "Znaleziono stary plik ustawień:\n{file}\n\nPlik nie wskazuje, do których organów należy. Czy na pewno należy do:\n{organ}\n\nWybierz OK, aby go zaimportować, lub Anuluj, aby zdecydować później. Wybór zostanie zapamiętany dla tych organów; plik nadal można zaimportować w ustawieniach organów. Stary plik zostanie zachowany.",
+    "legacy_replace_confirm": "Te organy mają już ustawienia. Zastąpić je starymi ustawieniami? Najpierw zostanie zapisana kopia obecnych ustawień.",
     "audio_output": "Wyjście audio",
     "audio_host": "Sterownik audio",
     "audio_buffer": "Rozmiar bufora (ramki)",
@@ -393,6 +401,7 @@
     "auto_retune_title": "Doprowadza każdą piłę do celu równomiernego poprzez tabelę strojenia. Domyślnie włączone. Wyłączone = wysokość pliku (niektóre samplesety bez wyraźnych informacji o wysokości w definicji organów będą brzmiały fałszywie).",
     "nav_label": "Tematy",
     "nav_klank": "Brzmienie",
+    "nav_laden": "Ładowanie",
     "nav_wind": "Wiatr",
     "nav_perspectief": "Perspektywa",
     "nav_bijgeluiden": "Dźwięki tła",

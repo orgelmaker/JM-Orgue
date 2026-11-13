@@ -1,4 +1,6 @@
-"""Vaste meting voor D1/F3 (mengkern zonder allocaties, orgelwissel als één generatie).
+"""TIJDELIJK UITGESCHAKELD: deze meting moet eerst veilig geïsoleerd worden.
+
+Vaste meting voor D1/F3 (mengkern zonder allocaties, orgelwissel als één generatie).
 
 Vraagt een testbouw met `--features rt-toezicht` (anders is `allocaties` in /perf/slechtste null). Per scenario wordt
 /perf/slechtste vooraf gewist en achteraf gelezen: allocaties in de callback, slechtste callback met segmenten.
@@ -187,6 +189,11 @@ def scenario_wissel(orgel_b):
 
 
 def main():
+    raise SystemExit(
+        'Deze meting is tijdelijk uitgeschakeld: de bestaande reservekopie mist de '
+        'nieuwe orgelbestanden en kan instellingen achterlaten of verliezen. '
+        'Werk het script eerst bij voor een volledig geïsoleerde testomgeving.'
+    )
     a = argparse.ArgumentParser()
     a.add_argument('--exe', required=True)
     a.add_argument('--a', required=True)

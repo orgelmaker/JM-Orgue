@@ -1,8 +1,8 @@
-//! Gedrag van de set, per orgel (E1, D3, F7, D7, E5, E3, D4).
+//! Gedrag van de set, per orgel (E1, D3, F7, D7, E5, E3, D4, C5).
 //!
-//! Vier dingen kunnen de klank of werking van een orgel veranderen: de niveaus
-//! van de maker (E1), de crossfade van de maker bij het loslaten (D3), of
-//! koppels doorketenen zoals de set wil (F7) en het afkappen van de stille
+//! Elke vlag hier kan de klank of werking van een orgel veranderen, bijvoorbeeld
+//! de niveaus van de maker (E1), de crossfade van de maker bij het loslaten (D3),
+//! koppels doorketenen zoals de set wil (F7) of het afkappen van de stille
 //! staart van release-samples (D7). Daarom geldt de regel die de gebruiker koos:
 //!
 //! - **Een orgel dat al opgeslagen instellingen heeft, houdt het oude gedrag**
@@ -19,65 +19,110 @@
 //! opgeslagen instellingen voor dit orgel. De vlaggen worden bij het eerste
 //! opslaan meteen mee bewaard, zodat een nieuw orgel de volgende keer niet
 //! alsnog als bestaand telt.
+//!
+//! # Een vlag toevoegen
+//!
+//! 1. Een regel in de `orgelvlaggen!`-lijst hieronder (naam, standaard voor een
+//!    nieuw orgel, korte naam voor het logboek).
+//! 2. Een veld `pub <naam>: Option<bool>` met `#[serde(default)]` in
+//!    `library::OrganSettings` (de naam in het instellingenbestand).
+//! 3. `<naam>: None` in de `OrganSettings { .. }` van `do_save_organ_settings`;
+//!    de compiler wijst die plek aan. De waarde komt van `bewaar_in`.
+//!
+//! Bepalen, zetten op naam, bewaren, loggen en de test-API volgen dan vanzelf.
 
 use crate::library::OrganSettings;
 use serde::Serialize;
 
-/// De zeven vlaggen voor één orgel.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub struct OrgelVlaggen {
+/// Maakt `OrgelVlaggen` en alles wat per vlag hetzelfde is uit één lijst, zodat
+/// een vlag op één plek staat in plaats van in elke functie apart.
+macro_rules! orgelvlaggen {
+    ($( $(#[$doc:meta])* $naam:ident: nieuw = $nieuw:expr, log = $log:expr; )+) => {
+        /// De vlaggen voor één orgel.
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+        pub struct OrgelVlaggen {
+            $( $(#[$doc])* pub $naam: bool, )+
+        }
+
+        impl OrgelVlaggen {
+            /// De namen van alle vlaggen, zoals in het instellingenbestand en de interface.
+            pub const NAMEN: &'static [&'static str] = &[ $( stringify!($naam), )+ ];
+
+            /// Het gedrag van vóór deze instellingen: alles uit.
+            pub const OUD: OrgelVlaggen = OrgelVlaggen { $( $naam: false, )+ };
+
+            /// De standaard voor een nieuw orgel.
+            pub const NIEUW: OrgelVlaggen = OrgelVlaggen { $( $naam: $nieuw, )+ };
+
+            /// Vlaggen uit een functie die per naam aan of uit geeft.
+            pub fn uit(waarde: impl Fn(&str) -> bool) -> OrgelVlaggen {
+                OrgelVlaggen { $( $naam: waarde(stringify!($naam)), )+ }
+            }
+
+            /// Wat er in opgeslagen instellingen staat; een vlag die er nog niet in
+            /// staat (opgeslagen vóór die vlag bestond) is uit.
+            fn uit_opgeslagen(s: &OrganSettings) -> OrgelVlaggen {
+                OrgelVlaggen { $( $naam: s.$naam.unwrap_or(false), )+ }
+            }
+
+            /// Zet één vlag op naam; onbekende naam geeft None.
+            pub fn met(&self, naam: &str, aan: bool) -> Option<OrgelVlaggen> {
+                let mut v = *self;
+                match naam {
+                    $( stringify!($naam) => v.$naam = aan, )+
+                    _ => return None,
+                }
+                Some(v)
+            }
+
+            /// Schrijft de vlaggen in opgeslagen instellingen (elke vlag expliciet, zodat
+            /// ze daarna niet meer van de "bestaand of nieuw"-regel afhangen).
+            pub fn schrijf_in(&self, s: &mut OrganSettings) {
+                $( s.$naam = Some(self.$naam); )+
+            }
+
+            /// Neemt de vlaggen over zoals ze in `bron` staan, ook een ontbrekende (None).
+            fn kopieer_opgeslagen(bron: Option<&OrganSettings>, doel: &mut OrganSettings) {
+                $( doel.$naam = bron.and_then(|s| s.$naam); )+
+            }
+
+            /// Eén regel voor het logboek: "niveaus aan, overgangen uit, ...".
+            pub fn logregel(&self) -> String {
+                [ $( format!("{} {}", $log, if self.$naam { "aan" } else { "uit" }), )+ ].join(", ")
+            }
+        }
+    };
+}
+
+orgelvlaggen! {
     /// Niveau van het orgel en per pijplaag uit de definitie (E1).
-    pub niveaus_van_set: bool,
+    niveaus_van_set: nieuw = true, log = "niveaus";
     /// Crossfade-duur van de maker bij het loslaten (D3).
-    pub overgangen_van_set: bool,
+    overgangen_van_set: nieuw = true, log = "overgangen";
     /// Koppels ketenen zoals de set wil (F7).
-    pub koppels_volgen_set: bool,
+    koppels_volgen_set: nieuw = true, log = "koppels volgen de set";
     /// Stille staart van release-samples afkappen (D7). De drempel is een
     /// algemene instelling (standaard −90 dBFS).
-    pub staart_afkap: bool,
-    /// De zwelkastwaarden van de set gebruiken als beginwaarde (E5).
-    pub zwelkast_van_set: bool,
+    staart_afkap: nieuw = true, log = "stille staart afkappen";
+    /// De zwelkastwaarden van de set gebruiken als beginwaarde (E5). De uitzondering:
+    /// ook voor een nieuw orgel uit.
+    zwelkast_van_set: nieuw = false, log = "zwelkast van de set";
     /// Klavier-naar-klavierkoppels van een Hauptwerk-set inlezen (E3) in plaats van ze over te slaan (en dan
     /// algemene koppels op naam te maken).
-    pub koppels_klavier: bool,
+    koppels_klavier: nieuw = true, log = "klavierkoppels van de set";
     /// Het windmodel sturen met het windwerk van de set (D4): windgroepen per balg, verbruik per pijp, en de
     /// middenstand van balggrootte en maximale daling uit de balg.
-    pub windwerk_van_set: bool,
+    windwerk_van_set: nieuw = true, log = "windwerk van de set";
     /// De tremulant volgt de opgenomen golfvorm van de set (C5, stap 2): vorm en snelheid per divisie, diepte per pijp.
-    pub tremulant_golf_van_set: bool,
+    tremulant_golf_van_set: nieuw = true, log = "tremulant-golfvorm van de set";
 }
 
 impl OrgelVlaggen {
-    /// Het gedrag van vóór deze instellingen: alles uit.
-    pub const OUD: OrgelVlaggen = OrgelVlaggen {
-        niveaus_van_set: false,
-        overgangen_van_set: false,
-        koppels_volgen_set: false,
-        staart_afkap: false,
-        zwelkast_van_set: false,
-        koppels_klavier: false,
-        windwerk_van_set: false,
-        tremulant_golf_van_set: false,
-    };
-
-    /// De standaard voor een nieuw orgel: alles aan.
-    pub const NIEUW: OrgelVlaggen = OrgelVlaggen {
-        niveaus_van_set: true,
-        overgangen_van_set: true,
-        koppels_volgen_set: true,
-        staart_afkap: true,
-        // Uitzondering: ook voor een nieuw orgel uit (E5).
-        zwelkast_van_set: false,
-        koppels_klavier: true,
-        windwerk_van_set: true,
-        tremulant_golf_van_set: true,
-    };
-
     /// De vlaggen voor een orgel dat nu geladen wordt.
     ///
     /// - `forceer`: een expliciete keuze van buiten (de test-API voor proeven);
     ///   wint van alles.
-    /// - Geen opgeslagen instellingen: nieuw orgel, alles aan.
+    /// - Geen opgeslagen instellingen: nieuw orgel, de standaard voor nieuw.
     /// - Wel opgeslagen instellingen: per vlag wat er staat; een vlag die er nog
     ///   niet in staat (opgeslagen vóór deze instelling bestond) is uit.
     pub fn bepaal(opgeslagen: Option<&OrganSettings>, forceer: Option<OrgelVlaggen>) -> OrgelVlaggen {
@@ -86,21 +131,13 @@ impl OrgelVlaggen {
         }
         match opgeslagen {
             None => OrgelVlaggen::NIEUW,
-            Some(s) => OrgelVlaggen {
-                niveaus_van_set: s.niveaus_van_set.unwrap_or(false),
-                overgangen_van_set: s.overgangen_van_set.unwrap_or(false),
-                koppels_volgen_set: s.koppels_volgen_set.unwrap_or(false),
-                staart_afkap: s.staart_afkap.unwrap_or(false),
-                zwelkast_van_set: s.zwelkast_van_set.unwrap_or(false),
-                koppels_klavier: s.koppels_klavier.unwrap_or(false),
-                windwerk_van_set: s.windwerk_van_set.unwrap_or(false),
-                tremulant_golf_van_set: s.tremulant_golf_van_set.unwrap_or(false),
-            },
+            Some(s) => OrgelVlaggen::uit_opgeslagen(s),
         }
     }
 
     /// Zet de proces-brede schakelaars van de importers vóór het parsen van dit
-    /// orgel. De importers lezen ze bij het begin van elke import.
+    /// orgel. De importers lezen ze bij het begin van elke import. Alleen de
+    /// vlaggen die het inlezen zelf sturen; de andere werken na het laden.
     pub fn zet_importers(&self) {
         vpo_sampler::set_niveaus_toepassen(self.niveaus_van_set);
         vpo_sampler::set_overgangen_toepassen(self.overgangen_van_set);
@@ -109,63 +146,23 @@ impl OrgelVlaggen {
         vpo_sampler::set_koppels_klavier(self.koppels_klavier);
     }
 
-    /// Zet één vlag op naam; onbekende naam geeft None.
-    pub fn met(&self, naam: &str, aan: bool) -> Option<OrgelVlaggen> {
-        let mut v = *self;
-        match naam {
-            "niveaus_van_set" => v.niveaus_van_set = aan,
-            "overgangen_van_set" => v.overgangen_van_set = aan,
-            "koppels_volgen_set" => v.koppels_volgen_set = aan,
-            "staart_afkap" => v.staart_afkap = aan,
-            "zwelkast_van_set" => v.zwelkast_van_set = aan,
-            "koppels_klavier" => v.koppels_klavier = aan,
-            "windwerk_van_set" => v.windwerk_van_set = aan,
-            "tremulant_golf_van_set" => v.tremulant_golf_van_set = aan,
-            _ => return None,
-        }
-        Some(v)
-    }
-
-    /// Wat er bij het opslaan in de instellingen van het orgel komt, per vlag.
+    /// Zet in `doel` wat er bij het opslaan in de instellingen van het orgel komt.
     ///
-    /// Normaal de huidige vlaggen. Is de keuze door een proef geforceerd
-    /// (`geforceerd`), dan blijven de opgeslagen vlaggen zoals ze waren: een
-    /// geforceerde keuze mag nooit in iemands bibliotheek terechtkomen.
-    pub fn te_bewaren(
+    /// Normaal de huidige vlaggen, elk expliciet. Is de keuze door een proef
+    /// geforceerd (`geforceerd`), dan blijven de opgeslagen vlaggen zoals ze waren
+    /// (ook een ontbrekende): een geforceerde keuze mag nooit in iemands
+    /// bibliotheek terechtkomen.
+    pub fn bewaar_in(
+        doel: &mut OrganSettings,
         geforceerd: bool,
         huidig: OrgelVlaggen,
         opgeslagen: Option<&OrganSettings>,
-    ) -> [Option<bool>; 8] {
+    ) {
         if geforceerd {
-            match opgeslagen {
-                Some(s) => [s.niveaus_van_set, s.overgangen_van_set, s.koppels_volgen_set, s.staart_afkap, s.zwelkast_van_set, s.koppels_klavier, s.windwerk_van_set, s.tremulant_golf_van_set],
-                None => [None; 8],
-            }
+            OrgelVlaggen::kopieer_opgeslagen(opgeslagen, doel);
         } else {
-            [
-                Some(huidig.niveaus_van_set),
-                Some(huidig.overgangen_van_set),
-                Some(huidig.koppels_volgen_set),
-                Some(huidig.staart_afkap),
-                Some(huidig.zwelkast_van_set),
-                Some(huidig.koppels_klavier),
-                Some(huidig.windwerk_van_set),
-                Some(huidig.tremulant_golf_van_set),
-            ]
+            huidig.schrijf_in(doel);
         }
-    }
-
-    /// Schrijft de vlaggen in opgeslagen instellingen (elke vlag expliciet, zodat
-    /// ze daarna niet meer van de "bestaand of nieuw"-regel afhangen).
-    pub fn schrijf_in(&self, s: &mut OrganSettings) {
-        s.niveaus_van_set = Some(self.niveaus_van_set);
-        s.overgangen_van_set = Some(self.overgangen_van_set);
-        s.koppels_volgen_set = Some(self.koppels_volgen_set);
-        s.staart_afkap = Some(self.staart_afkap);
-        s.zwelkast_van_set = Some(self.zwelkast_van_set);
-        s.koppels_klavier = Some(self.koppels_klavier);
-        s.windwerk_van_set = Some(self.windwerk_van_set);
-        s.tremulant_golf_van_set = Some(self.tremulant_golf_van_set);
     }
 }
 
@@ -239,15 +236,48 @@ mod tests {
     #[test]
     fn geforceerde_vlaggen_worden_nooit_bewaard() {
         let huidig = OrgelVlaggen::NIEUW;
+        // De acht vlaggen zoals ze in de instellingen terechtkomen, in de volgorde van de lijst.
+        fn te_bewaren(geforceerd: bool, huidig: OrgelVlaggen, opgeslagen: Option<&OrganSettings>) -> [Option<bool>; 8] {
+            // Begin met onzin in het doel: bewaar_in moet elke vlag zelf zetten.
+            let mut doel = OrganSettings::default();
+            OrgelVlaggen::OUD.schrijf_in(&mut doel);
+            OrgelVlaggen::bewaar_in(&mut doel, geforceerd, huidig, opgeslagen);
+            [doel.niveaus_van_set, doel.overgangen_van_set, doel.koppels_volgen_set, doel.staart_afkap, doel.zwelkast_van_set, doel.koppels_klavier, doel.windwerk_van_set, doel.tremulant_golf_van_set]
+        }
         // Normaal: de huidige stand, expliciet.
-        assert_eq!(OrgelVlaggen::te_bewaren(false, huidig, None), [Some(true), Some(true), Some(true), Some(true), Some(false), Some(true), Some(true), Some(true)]);
+        assert_eq!(te_bewaren(false, huidig, None), [Some(true), Some(true), Some(true), Some(true), Some(false), Some(true), Some(true), Some(true)]);
         // Geforceerd, orgel zonder opgeslagen instellingen: niets vastleggen.
-        assert_eq!(OrgelVlaggen::te_bewaren(true, huidig, None), [None; 8]);
+        assert_eq!(te_bewaren(true, huidig, None), [None; 8]);
         // Geforceerd, met opgeslagen instellingen: die blijven zoals ze waren.
         let s = instellingen4(Some(false), None, Some(false), Some(false));
-        assert_eq!(OrgelVlaggen::te_bewaren(true, huidig, Some(&s)), [Some(false), None, Some(false), Some(false), None, None, None, None]);
+        assert_eq!(te_bewaren(true, huidig, Some(&s)), [Some(false), None, Some(false), Some(false), None, None, None, None]);
         // Zonder forcering wint de huidige stand over wat er stond (de gebruiker koos).
-        assert_eq!(OrgelVlaggen::te_bewaren(false, huidig, Some(&s)), [Some(true), Some(true), Some(true), Some(true), Some(false), Some(true), Some(true), Some(true)]);
+        assert_eq!(te_bewaren(false, huidig, Some(&s)), [Some(true), Some(true), Some(true), Some(true), Some(false), Some(true), Some(true), Some(true)]);
+    }
+
+    /// De lijst is de enige bron: namen, standaarden en het zetten op naam horen bij elkaar.
+    #[test]
+    fn de_lijst_is_de_enige_bron() {
+        assert_eq!(OrgelVlaggen::NAMEN.len(), 8);
+        // De namen zijn de veldnamen in het instellingenbestand; die mogen niet verschuiven.
+        assert_eq!(OrgelVlaggen::NAMEN, ["niveaus_van_set", "overgangen_van_set", "koppels_volgen_set", "staart_afkap",
+            "zwelkast_van_set", "koppels_klavier", "windwerk_van_set", "tremulant_golf_van_set"]);
+        let json_oud = serde_json::to_value(OrgelVlaggen::OUD).unwrap();
+        for naam in OrgelVlaggen::NAMEN {
+            // Elke naam is op naam te zetten en staat onder die naam in de JSON voor de interface.
+            let aan = OrgelVlaggen::OUD.met(naam, true).expect("bekende naam");
+            assert_eq!(serde_json::to_value(aan).unwrap()[naam], true, "{naam}");
+            assert_eq!(json_oud[naam], false, "{naam}");
+            // En in het instellingenbestand staat hij onder dezelfde naam.
+            let mut s = OrganSettings::default();
+            aan.schrijf_in(&mut s);
+            assert_eq!(serde_json::to_value(&s).unwrap()[naam], true, "{naam}");
+        }
+        // `uit` bouwt dezelfde vlaggen op uit een functie per naam (de test-API).
+        assert_eq!(OrgelVlaggen::uit(|_| true).met("zwelkast_van_set", false).unwrap(), OrgelVlaggen::NIEUW);
+        assert_eq!(OrgelVlaggen::uit(|_| false), OrgelVlaggen::OUD);
+        assert_eq!(OrgelVlaggen::NIEUW.logregel(),
+            "niveaus aan, overgangen aan, koppels volgen de set aan, stille staart afkappen aan, zwelkast van de set uit, klavierkoppels van de set aan, windwerk van de set aan, tremulant-golfvorm van de set aan");
     }
 
     #[test]

@@ -666,16 +666,7 @@ fn route_test_only(
                 return Ok(json!({"wis": true}));
             }
             let vlag = |naam: &str| v.get(naam).and_then(|x| x.as_bool()).unwrap_or(false);
-            let vlaggen = crate::orgelvlaggen::OrgelVlaggen {
-                niveaus_van_set: vlag("niveaus_van_set"),
-                overgangen_van_set: vlag("overgangen_van_set"),
-                koppels_volgen_set: vlag("koppels_volgen_set"),
-                staart_afkap: vlag("staart_afkap"),
-                zwelkast_van_set: vlag("zwelkast_van_set"),
-                koppels_klavier: vlag("koppels_klavier"),
-                windwerk_van_set: vlag("windwerk_van_set"),
-                tremulant_golf_van_set: vlag("tremulant_golf_van_set"),
-            };
+            let vlaggen = crate::orgelvlaggen::OrgelVlaggen::uit(vlag);
             state.vlag_overrides.write().insert(sleutel, vlaggen);
             Ok(serde_json::to_value(vlaggen).unwrap_or_default())
         }

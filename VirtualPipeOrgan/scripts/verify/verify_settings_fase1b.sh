@@ -2,6 +2,8 @@
 # E2E-verificatie Fase 1 + 1b: master + temperament + EQ + reverb per orgel.
 # Test op orgels die de live webview NIET toont (die staat op zijn sessie-orgel A=GreenPositiv
 # en raakt B/C nooit aan), zodat de webview-startup-push de test niet racet.
+echo 'Deze verificatie is uitgeschakeld: het script verwijdert oude instellingenbestanden. Werk het eerst bij voor een geïsoleerde testomgeving.' >&2
+exit 1
 set -u
 API="http://127.0.0.1:8765"
 CURL="curl -s --max-time 25"

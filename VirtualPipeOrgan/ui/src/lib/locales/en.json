@@ -65,6 +65,14 @@
     "refresh_hold_hint": "Click to load the organ. Press and hold for 3 seconds to search for a new photo."
   },
   "settings": {
+    "legacy_import_button": "Import old organ settings…",
+    "legacy_load_failed": "The imported settings were saved, but the organ could not be loaded. Changes will not be saved automatically until an organ loads successfully.",
+    "legacy_inspect_failed": "The old settings file could not be checked; the organ will load without it.",
+    "legacy_defer_failed": "Your choice to decide later could not be saved. Please try again.",
+    "legacy_sidecar_warning": "The settings were saved in the library, but the separate file beside the organ could not be written.",
+    "legacy_not_found": "No old settings file was found next to this organ.",
+    "legacy_prompt": "An old settings file was found:\n{file}\n\nThe file does not say which organ it belongs to. Are you sure it belongs to:\n{organ}\n\nChoose OK to import it, or Cancel to decide later. Your choice is remembered for this organ; you can still import it later through the organ settings. The old file will be preserved.",
+    "legacy_replace_confirm": "This organ already has settings. Replace them with the old settings? A backup of the current settings will be made first.",
     "audio_output": "Audio Output",
     "audio_host": "Audio driver",
     "audio_buffer": "Buffer size (frames)",
@@ -393,6 +401,7 @@
     "auto_retune_title": "Brings each pipe to its equal-tempered target via the retune table. On by default. Off = file pitch (some samplesets without clear pitch info in the organ definition will then sound out of tune).",
     "nav_label": "Topics",
     "nav_klank": "Sound",
+    "nav_laden": "Loading",
     "nav_wind": "Wind",
     "nav_perspectief": "Perspective",
     "nav_bijgeluiden": "Background sounds",

@@ -65,6 +65,14 @@
     "refresh_hold_hint": "Fare clic per caricare l’organo. Tenere premuto per 3 secondi per cercare una nuova foto."
   },
   "settings": {
+    "legacy_import_button": "Importa le vecchie impostazioni dell’organo…",
+    "legacy_load_failed": "Le impostazioni importate sono state salvate, ma non è stato possibile caricare l’organo. Le modifiche non saranno salvate automaticamente finché un organo non sarà caricato correttamente.",
+    "legacy_inspect_failed": "Non è stato possibile controllare il vecchio file di impostazioni; l’organo sarà caricato senza di esso.",
+    "legacy_defer_failed": "Non è stato possibile salvare la scelta di decidere più tardi. Riprova.",
+    "legacy_sidecar_warning": "Le impostazioni sono state salvate nella libreria, ma non è stato possibile scrivere il file separato accanto all’organo.",
+    "legacy_not_found": "Nessun vecchio file di impostazioni trovato accanto a questo organo.",
+    "legacy_prompt": "È stato trovato un vecchio file di impostazioni:\n{file}\n\nIl file non indica a quale organo appartiene. Sei sicuro che appartenga a:\n{organ}\n\nScegli OK per importarlo o Annulla per decidere più tardi. La scelta sarà ricordata per questo organo; potrai comunque importarlo dalle impostazioni dell’organo. Il vecchio file sarà conservato.",
+    "legacy_replace_confirm": "Questo organo ha già delle impostazioni. Sostituirle con quelle vecchie? Prima sarà salvata una copia delle impostazioni attuali.",
     "audio_output": "Uscita audio",
     "audio_host": "Driver audio",
     "audio_buffer": "Dimensione del buffer (frame)",
@@ -393,6 +401,7 @@
     "auto_retune_title": "Porta ogni canna al suo target equabile tramite la tabella di riaccordatura. Attivo per impostazione predefinita. Spento = altezza del file (alcuni samplesets senza info di altezza chiara nella definizione suoneranno stonati).",
     "nav_label": "Argomenti",
     "nav_klank": "Suono",
+    "nav_laden": "Caricamento",
     "nav_wind": "Vento",
     "nav_perspectief": "Prospettiva",
     "nav_bijgeluiden": "Rumori",

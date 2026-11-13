@@ -772,15 +772,8 @@ fn zet_orgelvlaggen_voor(state: &AppState, path: &str) {
     vlaggen.zet_importers();
     *state.orgel_vlaggen.write() = vlaggen;
     info!(
-        "Gedrag van de set voor dit orgel: niveaus {}, overgangen {}, koppels volgen de set {}, stille staart afkappen {}, zwelkast van de set {}, klavierkoppels van de set {}, windwerk van de set {}, tremulant-golfvorm van de set {}{}",
-        if vlaggen.niveaus_van_set { "aan" } else { "uit" },
-        if vlaggen.overgangen_van_set { "aan" } else { "uit" },
-        if vlaggen.koppels_volgen_set { "aan" } else { "uit" },
-        if vlaggen.staart_afkap { "aan" } else { "uit" },
-        if vlaggen.zwelkast_van_set { "aan" } else { "uit" },
-        if vlaggen.koppels_klavier { "aan" } else { "uit" },
-        if vlaggen.windwerk_van_set { "aan" } else { "uit" },
-        if vlaggen.tremulant_golf_van_set { "aan" } else { "uit" },
+        "Gedrag van de set voor dit orgel: {}{}",
+        vlaggen.logregel(),
         if forceer.is_some() { " (geforceerd)" } else { "" },
     );
 }
@@ -812,8 +805,7 @@ fn lees_beperkt(pad: &Path, max: u64) -> Result<String, String> {
     std::fs::read_to_string(pad).map_err(|e| format!("Kan niet lezen: {}", e))
 }
 
-fn saved_settings_for(state: &AppState, organ_id: &str) -> Option<OrganSettings> {
-    let from_lib = {
+fn instellingen_uit_bibliotheek(state: &AppState, organ_id: &str) -> Option<OrganSettings> {
         let lib = state.organ_library.read();
         lib.settings.get(organ_id).cloned().or_else(|| {
             let want = crate::library::pad_sleutel(organ_id);
@@ -821,16 +813,15 @@ fn saved_settings_for(state: &AppState, organ_id: &str) -> Option<OrganSettings>
                 .find(|(k, _)| crate::library::pad_sleutel(k) == want)
                 .map(|(_, v)| v.clone())
         })
-    };
+}
+
+fn saved_settings_for(state: &AppState, organ_id: &str) -> Option<OrganSettings> {
+    let from_lib = instellingen_uit_bibliotheek(state, organ_id);
     if from_lib.is_some() {
         return from_lib;
     }
-    let from_file = organ_settings_dir(organ_id)
-        .map(|d| d.join(".jm-settings.json"))
-        .filter(|p| p.exists())
-        .and_then(|p| lees_instellingenbestand(&p).ok())
-        .and_then(|j| serde_json::from_str::<OrganSettings>(&j).ok())?;
-    info!("Instellingen geïmporteerd uit .jm-settings.json naast het orgel (geen bibliotheek-entry)");
+    let from_file = lees_eigen_zijbestand(organ_id).ok()??;
+    info!("Instellingen geïmporteerd uit het eigen zijbestand (geen bibliotheek-entry)");
     // 0.8.91: een orgel dat (opnieuw) in de bibliotheek komt met alleen een
     // zijbestand zonder wizard-vlag geldt als nieuw → de instelwizard
     // aanbieden, met de geïmporteerde waarden al ingevuld. Zonder dit bleef
@@ -848,7 +839,7 @@ fn saved_settings_for(state: &AppState, organ_id: &str) -> Option<OrganSettings>
 /// vinkje geklikt; de 800 ms-autosave kan later komen dan de "Orgel opnieuw
 /// laden"-klik → geen save/reload-race), anders de opgeslagen instellingen.
 fn perspective_prefs_for(state: &AppState, organ_id: &str) -> Vec<PerspectiveSaved> {
-    let same = state.current_organ_id.read().as_deref() == Some(organ_id);
+    let same = state.current_organ_id.read().as_deref() == Some(organ_id) && !migratie_wacht_op_laden(organ_id);
     if same {
         let rt = state.perspectives.read();
         if !rt.is_empty() {
@@ -1544,7 +1535,7 @@ fn laad_en_stuur_toetsmechaniek(
     // orgel. Tot 0.8.3 keek dit alleen naar de runtime-stand, die pas ná de
     // load uit de instellingen werd hersteld — na een herstart van de app
     // bleef het klikkende klavier daardoor stil tot een handmatig herladen.
-    let zelfde = state.current_organ_id.read().as_deref() == Some(organ_id);
+    let zelfde = state.current_organ_id.read().as_deref() == Some(organ_id) && !migratie_wacht_op_laden(organ_id);
     let aan = if zelfde {
         *state.toetsmechaniek_aan.read()
     } else {
@@ -2002,6 +1993,41 @@ pub fn get_audio_devices(state: State<AppState>) -> Result<Vec<AudioDeviceDto>, 
         sample_rates: d.sample_rates,
         channels: d.channels,
     }).collect())
+}
+
+/// De opgeslagen keuze voor de audio-uitgang, zoals de app hem bij de start gebruikt.
+#[derive(Debug, Serialize, PartialEq)]
+pub struct AudioOutputPrefsDto {
+    pub host: Option<String>,
+    /// Welke driver de audio-engine bij een lege host kiest.
+    pub default_host: String,
+    pub device: Option<String>,
+    /// None = de standaard van de driver.
+    pub buffer_frames: Option<u32>,
+    /// None = de standaard van het apparaat.
+    pub sample_rate: Option<u32>,
+}
+
+impl AudioOutputPrefsDto {
+    fn uit(prefs: &crate::state::AudioPrefs) -> Self {
+        Self {
+            host: prefs.host.clone().filter(|h| !h.is_empty()),
+            default_host: cpal::default_host().id().name().to_string(),
+            device: prefs.device.clone().filter(|d| !d.is_empty()),
+            buffer_frames: prefs.buffer_frames.filter(|&b| b > 0),
+            sample_rate: prefs.sample_rate.filter(|&r| r > 0),
+        }
+    }
+}
+
+/// De opgeslagen audio-uitgang uit `audio_config.json`: de enige bron voor wat het
+/// instellingenscherm als gekozen uitgang toont. Dit is niet hetzelfde als de status
+/// (`get_status`): vlak na de start draait een ASIO-keuze nog even op de standaarduitgang.
+/// Tot nu toe hield de interface een eigen kopie bij in localStorage, die kon afwijken
+/// van wat de app werkelijk start.
+#[tauri::command]
+pub fn get_audio_output_prefs(state: State<AppState>) -> AudioOutputPrefsDto {
+    AudioOutputPrefsDto::uit(&crate::state::load_audio_prefs(&state.app_data_dir))
 }
 
 /// List available audio hosts/drivers (e.g. "WASAPI"; "ASIO" when built with the asio feature).
@@ -3292,10 +3318,410 @@ pub fn is_organ_file_id(id: &str) -> bool {
 /// Hauptwerk-bestand — en elk `.Organ`-bestand — als map, waardoor instellingen
 /// naast zulke orgels nooit werden weggeschreven of teruggelezen.
 fn organ_settings_dir(organ_id: &str) -> Option<std::path::PathBuf> {
-    if is_organ_file_id(organ_id) {
+    if is_organ_file_id(organ_id) && !Path::new(organ_id).is_dir() {
         std::path::Path::new(organ_id).parent().map(|p| p.to_path_buf())
     } else {
         Some(std::path::PathBuf::from(organ_id))
+    }
+}
+
+/// Het zijbestand heeft een identiteit die met de map mee kan verhuizen.
+/// Een oude `.jm-settings.json` bevat deze identiteit niet en wordt daarom
+/// uitsluitend na een expliciete keuze van de gebruiker geïmporteerd.
+#[derive(Serialize, Deserialize)]
+struct EigenOrgelinstellingen {
+    versie: u8,
+    soort: String,
+    naam: String,
+    instellingen: OrganSettings,
+}
+
+fn zijbestand_identiteit(organ_id: &str) -> Option<(PathBuf, String, String)> {
+    let dir = organ_settings_dir(organ_id)?;
+    if is_organ_file_id(organ_id) && !Path::new(organ_id).is_dir() {
+        let naam = Path::new(organ_id).file_name()?.to_str()?.to_string();
+        // Gebruik overal de exacte naam op schijf. Zo reist de identiteit mee
+        // tussen Windows en Linux, waar twee namen in hoofdletters kunnen verschillen.
+        let sleutel = if cfg!(windows) {
+            std::fs::read_dir(&dir).ok()?.filter_map(Result::ok)
+                .find_map(|entry| {
+                    let gevonden = entry.file_name().to_str()?.to_string();
+                    if gevonden.to_lowercase() == naam.to_lowercase() { Some(gevonden) } else { None }
+                })?
+        } else { naam };
+        let mut hash = 0xcbf2_9ce4_8422_2325u64;
+        for byte in sleutel.as_bytes() {
+            hash ^= *byte as u64;
+            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+        Some((dir.join(format!(".jm-settings-organ-{hash:016x}.json")), "bestand".into(), sleutel))
+    } else {
+        Some((dir.join(".jm-settings-samplemap.json"), "samplemap".into(), String::new()))
+    }
+}
+
+fn lees_eigen_zijbestand(organ_id: &str) -> Result<Option<OrganSettings>, String> {
+    let (pad, soort, naam) = zijbestand_identiteit(organ_id).ok_or("Geen geldig orgelpad")?;
+    if !pad.try_exists().map_err(|e| e.to_string())? { return Ok(None); }
+    let tekst = lees_instellingenbestand(&pad)?;
+    let bestand: EigenOrgelinstellingen = serde_json::from_str(&tekst)
+        .map_err(|e| format!("Ongeldig zijbestand {:?}: {}", pad, e))?;
+    if bestand.versie != 1 || bestand.soort != soort || bestand.naam != naam {
+        return Err(format!("Zijbestand {:?} hoort niet bij dit orgel", pad));
+    }
+    Ok(Some(bestand.instellingen))
+}
+
+static ZIJBESTAND_SCHRIJVER: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+static MIGRATIES_IN_AF_WACHTING: std::sync::OnceLock<parking_lot::Mutex<std::collections::HashSet<String>>> = std::sync::OnceLock::new();
+
+fn migraties_in_afwachting() -> &'static parking_lot::Mutex<std::collections::HashSet<String>> {
+    MIGRATIES_IN_AF_WACHTING.get_or_init(|| parking_lot::Mutex::new(std::collections::HashSet::new()))
+}
+
+fn migratie_wacht_op_laden(organ_id: &str) -> bool {
+    migraties_in_afwachting().lock().contains(&library::pad_sleutel(organ_id))
+}
+
+fn schrijf_eigen_zijbestand(organ_id: &str, settings: &OrganSettings) -> Result<(), String> {
+    let _guard = ZIJBESTAND_SCHRIJVER.lock();
+    schrijf_eigen_zijbestand_vergrendeld(organ_id, settings)
+}
+
+fn schrijf_eigen_zijbestand_vergrendeld(organ_id: &str, settings: &OrganSettings) -> Result<(), String> {
+    let (pad, soort, naam) = zijbestand_identiteit(organ_id).ok_or("Geen geldig orgelpad")?;
+    // Een beschadigd bestand of een hashbotsing nooit stil overschrijven.
+    let _ = lees_eigen_zijbestand(organ_id)?;
+    let inhoud = serde_json::to_string_pretty(&EigenOrgelinstellingen {
+        versie: 1, soort, naam, instellingen: settings.clone(),
+    }).map_err(|e| e.to_string())?;
+    crate::library::schrijf_atomair(&pad, &inhoud).map_err(|e| format!("Kan {:?} niet schrijven: {}", pad, e))
+}
+
+/// Reserveer een nieuwe bestandsnaam zonder ooit een eerdere kopie aan te raken.
+fn bewaar_migratie_reserve(pad: &Path, bytes: &[u8]) -> Result<PathBuf, String> {
+    use std::io::Write;
+    for volgnummer in 0..10000 {
+        let mut naam = pad.as_os_str().to_owned();
+        naam.push(format!(".voor-migratie-{volgnummer}.bak"));
+        let doel = PathBuf::from(naam);
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(&doel) {
+            Ok(mut bestand) => {
+                if let Err(e) = bestand.write_all(bytes).and_then(|_| bestand.sync_all()) {
+                    drop(bestand);
+                    let _ = std::fs::remove_file(&doel);
+                    return Err(format!("Reservekopie maken mislukt: {}", e));
+                }
+                return Ok(doel);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(format!("Reservekopie maken mislukt: {}", e)),
+        }
+    }
+    Err("Geen vrije naam voor reservekopie".into())
+}
+
+/// De mapkiezer en de migratiecontrole moeten precies hetzelfde orgel kiezen.
+fn organ_bestand_in_map(path: &Path) -> Option<(PathBuf, usize)> {
+    let mut bestanden: Vec<PathBuf> = std::fs::read_dir(path).ok()?
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.is_file() && p.extension().map(|x| x.eq_ignore_ascii_case("organ")).unwrap_or(false))
+        .collect();
+    let aantal = bestanden.len();
+    let mapnaam = path.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
+    bestanden.sort_by_key(|p| {
+        let naam = p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+        let gelijk = p.file_stem().map(|s| s.to_string_lossy().to_lowercase() == mapnaam).unwrap_or(false);
+        (!gelijk, naam.len(), naam)
+    });
+    bestanden.into_iter().next().map(|p| (p, aantal))
+}
+
+#[derive(Serialize)]
+pub struct OudeOrgelinstellingenKandidaat {
+    organ_id: String,
+    legacy_path: String,
+    has_settings: bool,
+    deferred: bool,
+}
+
+#[tauri::command]
+pub fn inspect_legacy_settings(state: State<AppState>, path: String, directory: bool) -> Result<Option<OudeOrgelinstellingenKandidaat>, String> {
+    let doel = if directory {
+        organ_bestand_in_map(Path::new(&path)).map(|(p, _)| p.to_string_lossy().to_string()).unwrap_or(path)
+    } else { path };
+    let doel = crate::library::pad_notatie(&doel);
+    let oud = organ_settings_dir(&doel).ok_or("Geen orgelmap")?.join(".jm-settings.json");
+    if !oud.try_exists().map_err(|e| e.to_string())? { return Ok(None); }
+    let eigen = zijbestand_identiteit(&doel).ok_or("Geen geldig orgelpad")?.0;
+    let has_settings = instellingen_uit_bibliotheek(&state, &doel).is_some()
+        || eigen.try_exists().map_err(|e| e.to_string())?;
+    let deferred = state.organ_library.read().legacy_settings_is_deferred(&doel);
+    // Een defect oud bestand mag bestaande instellingen niet blokkeren.
+    // Na uitstellen controleert pas de expliciete import de oude inhoud: een
+    // later beschadigd bestand mag geen terugkerende automatische melding geven.
+    let controle = if deferred { Ok(()) } else { lees_instellingenbestand(&oud).and_then(|tekst| {
+        serde_json::from_str::<OrganSettings>(&tekst).map(|_| ())
+            .map_err(|e| format!("Oude instellingen onleesbaar: {}", e))
+    }) };
+    if let Err(e) = controle {
+        if has_settings {
+            warn!("Oud zijbestand genegeerd: {}", e);
+            return Ok(None);
+        }
+        return Err(e);
+    }
+    Ok(Some(OudeOrgelinstellingenKandidaat {
+        organ_id: doel, legacy_path: oud.to_string_lossy().to_string(), has_settings, deferred,
+    }))
+}
+
+/// Bewaar 'Later beslissen' apart van de instellingen van het orgel. Een
+/// mislukte opslag mag de beslissing niet alleen in het geheugen onthouden.
+#[tauri::command]
+pub fn defer_legacy_settings(state: State<AppState>, organ_id: String) -> Result<(), String> {
+    let mut lib = state.organ_library.write();
+    bewaar_migratie_uitstel(&state.app_data_dir, &mut lib, &organ_id)
+}
+
+fn bewaar_migratie_uitstel(app_data_dir: &Path, lib: &mut library::OrganLibrary, organ_id: &str) -> Result<(), String> {
+    if lib.legacy_settings_is_deferred(organ_id) { return Ok(()); }
+    let mut bijgewerkt = lib.clone();
+    bijgewerkt.legacy_settings_deferred.insert(library::pad_sleutel(organ_id));
+    library::probeer_bibliotheek_op_te_slaan(app_data_dir, &bijgewerkt)?;
+    *lib = bijgewerkt;
+    Ok(())
+}
+
+/// Wordt uitsluitend na expliciete bevestiging vóór het laden aangeroepen.
+#[tauri::command]
+pub fn import_legacy_settings(state: State<AppState>, organ_id: String) -> Result<Option<String>, String> {
+    let organ_id = crate::library::pad_notatie(&organ_id);
+    let _load_gate = state.load_switch_gate.lock();
+    let _guard = ZIJBESTAND_SCHRIJVER.lock();
+    let oud = organ_settings_dir(&organ_id).ok_or("Geen orgelmap")?.join(".jm-settings.json");
+    let settings: OrganSettings = serde_json::from_str(&lees_instellingenbestand(&oud)?)
+        .map_err(|e| format!("Oude instellingen onleesbaar: {}", e))?;
+    // Eerst een volledige lokale reservekopie, vervolgens de gewijzigde
+    // bibliotheek werkelijk naar schijf. Bij een fout blijft de state onveranderd.
+    {
+        let mut lib = state.organ_library.write();
+        bewaar_migratie_in_bibliotheek(&state.app_data_dir, &mut lib, &organ_id, &settings)?;
+    }
+    migraties_in_afwachting().lock().insert(library::pad_sleutel(&organ_id));
+    // De sampleset kan alleen-lezen zijn. De bibliotheek is dan veilig
+    // gemigreerd, en het ongewijzigde zijbestand blijft beschikbaar.
+    match bewaar_gemigreerd_zijbestand(&organ_id, &settings, &state.app_data_dir) {
+        Ok(()) => Ok(None),
+        Err(e) => {
+            warn!("Migratie opgeslagen in bibliotheek; zijbestand niet bijgewerkt: {}", e);
+            Ok(Some(e))
+        }
+    }
+}
+
+fn bewaar_migratie_in_bibliotheek(app_data_dir: &Path, lib: &mut library::OrganLibrary, organ_id: &str, settings: &OrganSettings) -> Result<(), String> {
+    let bytes = serde_json::to_vec_pretty(&lib).map_err(|e| e.to_string())?;
+    bewaar_migratie_reserve(&app_data_dir.join("organ_library.json"), &bytes)?;
+    let mut bijgewerkt = lib.clone();
+    let sleutel = library::pad_sleutel(organ_id);
+    bijgewerkt.settings.retain(|id, _| library::pad_sleutel(id) != sleutel);
+    bijgewerkt.settings.insert(organ_id.to_owned(), settings.clone());
+    bijgewerkt.legacy_settings_deferred.retain(|id| library::pad_sleutel(id) != sleutel);
+    library::probeer_bibliotheek_op_te_slaan(app_data_dir, &bijgewerkt)?;
+    *lib = bijgewerkt;
+    Ok(())
+}
+
+fn bewaar_gemigreerd_zijbestand(organ_id: &str, settings: &OrganSettings, backup_dir: &Path) -> Result<(), String> {
+    let (eigen, _, _) = zijbestand_identiteit(organ_id).ok_or("Geen geldig orgelpad")?;
+    // Controleer identiteit vóór we een bestaand zijbestand mogen vervangen.
+    let _ = lees_eigen_zijbestand(organ_id)?;
+    if eigen.try_exists().map_err(|e| e.to_string())? {
+        let bytes = std::fs::read(&eigen).map_err(|e| e.to_string())?;
+        let naam = eigen.file_name().ok_or("Geen zijbestandsnaam")?;
+        bewaar_migratie_reserve(&backup_dir.join(naam), &bytes)?;
+    }
+    schrijf_eigen_zijbestand_vergrendeld(organ_id, settings)
+}
+
+#[cfg(test)]
+mod zijbestand_tests {
+    use super::*;
+
+    fn map(naam: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("jm_zijbestand_{}_{}", naam, std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    fn met_volume(volume: f32) -> OrganSettings {
+        OrganSettings { master_volume_db: Some(volume), ..Default::default() }
+    }
+
+    #[test]
+    fn migratie_uitstellen_blijft_na_herstart_per_orgel_bewaard() {
+        let d = map("uitstel_herstart");
+        let a = d.join("A.organ").to_string_lossy().to_string();
+        let b = d.join("B.organ").to_string_lossy().to_string();
+        let mut lib = library::OrganLibrary::default();
+        bewaar_migratie_uitstel(&d, &mut lib, &a).unwrap();
+        assert!(lib.settings.is_empty(), "uitstellen maakt geen orgelinstellingen aan");
+
+        let mut herstart = library::load_library(&d);
+        assert!(herstart.legacy_settings_is_deferred(&a));
+        assert!(!herstart.legacy_settings_is_deferred(&b), "tweede definitie blijft een eigen keuze");
+        bewaar_migratie_uitstel(&d, &mut herstart, &b).unwrap();
+        // Een latere expliciete import blijft mogelijk en wist alleen het uitstel
+        // voor dat orgel. De andere beslissing en de instellingen blijven intact.
+        bewaar_migratie_in_bibliotheek(&d, &mut herstart, &a, &met_volume(-13.0)).unwrap();
+        let na_import = library::load_library(&d);
+        assert!(!na_import.legacy_settings_is_deferred(&a));
+        assert!(na_import.legacy_settings_is_deferred(&b));
+        assert_eq!(na_import.settings[&a].master_volume_db, Some(-13.0));
+        let _ = std::fs::remove_dir_all(d);
+    }
+
+    #[test]
+    fn mislukte_opslag_van_uitstel_laat_bibliotheek_ongewijzigd() {
+        let d = map("uitstel_fout");
+        std::fs::create_dir(d.join("organ_library.json")).unwrap();
+        let mut lib = library::OrganLibrary::default();
+        lib.settings.insert("B.organ".into(), met_volume(-4.0));
+        let voor = serde_json::to_value(&lib).unwrap();
+        assert!(bewaar_migratie_uitstel(&d, &mut lib, "A.organ").is_err());
+        assert_eq!(serde_json::to_value(&lib).unwrap(), voor);
+        let _ = std::fs::remove_dir_all(d);
+    }
+
+    #[test]
+    fn migratie_uitstel_verdraagt_oude_bibliotheken_en_padnotaties() {
+        let oud: library::OrganLibrary = serde_json::from_str(r#"{"organs":[],"settings":{}}"#).unwrap();
+        assert!(oud.legacy_settings_deferred.is_empty());
+        let d = map("uitstel_paden");
+        let mut lib = oud;
+        bewaar_migratie_uitstel(&d, &mut lib, "C:/Orgels/A.organ").unwrap();
+        let herstart = library::load_library(&d);
+        assert!(herstart.legacy_settings_is_deferred("C:/Orgels/A.organ"));
+        if cfg!(windows) {
+            assert!(herstart.legacy_settings_is_deferred(r"c:\orgels\a.ORGAN"));
+            bewaar_migratie_uitstel(&d, &mut lib, r"c:\orgels\a.ORGAN").unwrap();
+            assert_eq!(lib.legacy_settings_deferred.len(), 1);
+        } else {
+            assert!(!herstart.legacy_settings_is_deferred("C:/Orgels/a.organ"));
+        }
+        let _ = std::fs::remove_dir_all(d);
+    }
+
+    #[test]
+    fn bestanden_en_samplemap_in_een_map_blijven_gescheiden_en_verhuizen_mee() {
+        let d = map("gescheiden");
+        let a = d.join("A.organ"); let b = d.join("B.organ");
+        std::fs::write(&a, "a").unwrap(); std::fs::write(&b, "b").unwrap();
+        let a = a.to_str().unwrap(); let b = b.to_str().unwrap(); let map_id = d.to_str().unwrap();
+        schrijf_eigen_zijbestand(a, &met_volume(1.0)).unwrap();
+        schrijf_eigen_zijbestand(b, &met_volume(2.0)).unwrap();
+        schrijf_eigen_zijbestand(map_id, &met_volume(3.0)).unwrap();
+        assert_eq!(lees_eigen_zijbestand(a).unwrap().unwrap().master_volume_db, Some(1.0));
+        assert_eq!(lees_eigen_zijbestand(b).unwrap().unwrap().master_volume_db, Some(2.0));
+        assert_eq!(lees_eigen_zijbestand(map_id).unwrap().unwrap().master_volume_db, Some(3.0));
+        let ander = map("verhuisd");
+        std::fs::write(ander.join("A.organ"), "a").unwrap();
+        std::fs::copy(zijbestand_identiteit(a).unwrap().0, ander.join(zijbestand_identiteit(a).unwrap().0.file_name().unwrap())).unwrap();
+        assert_eq!(lees_eigen_zijbestand(ander.join("A.organ").to_str().unwrap()).unwrap().unwrap().master_volume_db, Some(1.0));
+        let _ = std::fs::remove_dir_all(d); let _ = std::fs::remove_dir_all(ander);
+    }
+
+    #[test]
+    fn anoniem_bestand_alleen_explicit_migreren_met_reservekopie() {
+        let d = map("migratie"); let p = d.join("A.organ"); std::fs::write(&p, "a").unwrap();
+        let id = p.to_str().unwrap();
+        let oud = d.join(".jm-settings.json");
+        let oude_inhoud = serde_json::to_string(&met_volume(-5.0)).unwrap();
+        std::fs::write(&oud, &oude_inhoud).unwrap();
+        assert!(lees_eigen_zijbestand(id).unwrap().is_none());
+        schrijf_eigen_zijbestand(id, &met_volume(-2.0)).unwrap();
+        let vorig = met_volume(-3.0);
+        let _guard = ZIJBESTAND_SCHRIJVER.lock();
+        let mut lib = library::OrganLibrary::default();
+        lib.settings.insert(id.into(), vorig);
+        let settings: OrganSettings = serde_json::from_str(&oude_inhoud).unwrap();
+        bewaar_migratie_in_bibliotheek(&d, &mut lib, id, &settings).unwrap();
+        bewaar_gemigreerd_zijbestand(id, &settings, &d).unwrap();
+        assert_eq!(std::fs::read_to_string(&oud).unwrap(), oude_inhoud);
+        let eigen = zijbestand_identiteit(id).unwrap().0;
+        let backups: Vec<_> = std::fs::read_dir(&d).unwrap().filter_map(Result::ok).map(|e| e.path()).filter(|p| p.to_string_lossy().contains("voor-migratie")).collect();
+        assert_eq!(backups.len(), 2);
+        assert!(backups.iter().any(|p| std::fs::read_to_string(p).unwrap().contains("-3.0")));
+        assert_eq!(lees_eigen_zijbestand(id).unwrap().unwrap().master_volume_db, Some(-5.0));
+        assert!(eigen.exists());
+        let _ = std::fs::remove_dir_all(d);
+    }
+
+    #[test]
+    fn mislukte_bibliotheekmigratie_bewaart_oude_instellingen() {
+        let d = map("bibliotheekfout");
+        std::fs::write(d.join("organ_library.json"), "kapot").unwrap();
+        let mut lib = library::OrganLibrary::default();
+        lib.settings.insert("orgel".into(), met_volume(-3.0));
+        assert!(bewaar_migratie_in_bibliotheek(&d, &mut lib, "orgel", &met_volume(-5.0)).is_err());
+        assert_eq!(lib.settings["orgel"].master_volume_db, Some(-3.0));
+        assert_eq!(std::fs::read_to_string(d.join("organ_library.json")).unwrap(), "kapot");
+        let _ = std::fs::remove_dir_all(d);
+    }
+
+    #[test]
+    fn migratie_vervangt_gelijkwaardige_padnotaties() {
+        let d = map("padnotatie");
+        let mut lib = library::OrganLibrary::default();
+        #[cfg(windows)]
+        let (oud, nieuw) = ("C:/Orgels/A.organ", "c:\\orgels\\a.organ");
+        #[cfg(not(windows))]
+        let (oud, nieuw) = ("/Orgels/A.organ", "/Orgels/A.organ");
+        lib.settings.insert(oud.into(), met_volume(-3.0));
+        bewaar_migratie_in_bibliotheek(&d, &mut lib, nieuw, &met_volume(-5.0)).unwrap();
+        assert_eq!(lib.settings.len(), 1);
+        assert_eq!(lib.settings[nieuw].master_volume_db, Some(-5.0));
+        let herlezen = library::load_library(&d);
+        assert_eq!(herlezen.settings.len(), 1);
+        assert_eq!(herlezen.settings[nieuw].master_volume_db, Some(-5.0));
+        let _ = std::fs::remove_dir_all(d);
+    }
+
+    #[test]
+    fn migratie_blijft_beschermd_tot_een_geslaagde_herlaad() {
+        let id = "speciaal-testorgel-voor-migratie.organ";
+        migraties_in_afwachting().lock().insert(library::pad_sleutel(id));
+        assert!(migratie_wacht_op_laden(id));
+        // Een mislukte load wist de vlag niet; enkel het succespad doet dat.
+        assert!(migratie_wacht_op_laden(id));
+        migraties_in_afwachting().lock().remove(&library::pad_sleutel(id));
+        assert!(!migratie_wacht_op_laden(id));
+    }
+
+    #[test]
+    fn beschadigd_of_vreemd_eigen_bestand_blijft_behouden() {
+        let d = map("beschadigd"); let p = d.join("A.organ"); std::fs::write(&p, "a").unwrap();
+        let id = p.to_str().unwrap(); let eigen = zijbestand_identiteit(id).unwrap().0;
+        std::fs::write(&eigen, "kapot").unwrap();
+        assert!(schrijf_eigen_zijbestand(id, &met_volume(1.0)).is_err());
+        assert_eq!(std::fs::read_to_string(&eigen).unwrap(), "kapot");
+        let vreemd = EigenOrgelinstellingen { versie: 1, soort: "bestand".into(), naam: "andere.organ".into(), instellingen: met_volume(4.0) };
+        let tekst = serde_json::to_string(&vreemd).unwrap(); std::fs::write(&eigen, &tekst).unwrap();
+        assert!(lees_eigen_zijbestand(id).is_err());
+        assert!(schrijf_eigen_zijbestand(id, &met_volume(1.0)).is_err());
+        assert_eq!(std::fs::read_to_string(&eigen).unwrap(), tekst);
+        let _ = std::fs::remove_dir_all(d);
+    }
+
+    #[test]
+    fn mapkeuze_is_gedeeld_en_deterministisch() {
+        let d = map("keuze");
+        std::fs::write(d.join("bb.organ"), "").unwrap(); std::fs::write(d.join("aa.organ"), "").unwrap();
+        let (best, aantal) = organ_bestand_in_map(&d).unwrap();
+        assert_eq!(best.file_name().unwrap(), "aa.organ"); assert_eq!(aantal, 2);
+        let _ = std::fs::remove_dir_all(d);
     }
 }
 
@@ -4670,6 +5096,7 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
     // Zwelstand terugzetten (RegisterStopDivisionMap zette de audio op open).
     apply_swell_positions(state);
 
+    migraties_in_afwachting().lock().remove(&library::pad_sleutel(path));
     Ok(fill_live_registration_flags(state, organ_info))
 }
 
@@ -4950,6 +5377,7 @@ fn apply_pending_registration(state: &AppState, organ_info: &OrganInfoDto) {
     // Trap altijd verbruiken (ook bij een vroege return: een ander orgel of
     // geen snapshot betekent dat er niets te herstellen valt).
     let trap = state.pending_crescendo_stage.swap(0, std::sync::atomic::Ordering::Relaxed);
+    if migratie_wacht_op_laden(&organ_info.id) { return; }
     let Some((snap_organ, stops, couplers)) = pending else { return; };
     if snap_organ.is_none() || snap_organ != *state.current_organ_id.read() {
         return;
@@ -9591,25 +10019,15 @@ pub fn do_load_samples_from_directory_locked(state: &AppState, directory: &str) 
     // precies één .organ in de map zelf; anders blijft het gedrag ongewijzigd
     // (Puttershoek-stijl mappen zonder definitie).
     if let Ok(entries) = std::fs::read_dir(path) {
-        let organ_files: Vec<std::path::PathBuf> = entries
-            .filter_map(|e| e.ok().map(|e| e.path()))
-            .filter(|p| p.is_file()
-                && p.extension().map(|x| x.eq_ignore_ascii_case("organ")).unwrap_or(false))
-            .collect();
-        if !organ_files.is_empty() {
+        drop(entries);
+        if let Some((chosen, aantal)) = organ_bestand_in_map(path) {
             // Bij meerdere definities (GrandOrgue-sets leveren vaak varianten
             // zoals "Naam FullImageResolution.organ"): eerst de definitie
             // waarvan de bestandsnaam gelijk is aan de mapnaam, anders de
             // kortste bestandsnaam — varianten voegen een achtervoegsel toe.
-            let folder_stem = path.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
-            let chosen = organ_files.iter()
-                .find(|p| p.file_stem().map(|s| s.to_string_lossy().to_lowercase() == folder_stem).unwrap_or(false))
-                .or_else(|| organ_files.iter().min_by_key(|p| p.file_name().map(|n| n.len()).unwrap_or(usize::MAX)))
-                .cloned()
-                .unwrap_or_else(|| organ_files[0].clone());
             let organ_path = chosen.to_string_lossy().to_string();
-            if organ_files.len() > 1 {
-                warn!("Map bevat {} .organ-bestanden; gekozen: {} (kies anders het gewenste bestand via de .organ-knop)", organ_files.len(), organ_path);
+            if aantal > 1 {
+                warn!("Map bevat {} .organ-bestanden; gekozen: {} (kies anders het gewenste bestand via de .organ-knop)", aantal, organ_path);
             } else {
                 info!("Map bevat een .organ-definitie (JM-Rec-export): laden via {}", organ_path);
             }
@@ -10031,6 +10449,7 @@ pub fn do_load_samples_from_directory_locked(state: &AppState, directory: &str) 
     // Zwelstand terugzetten (RegisterStopDivisionMap zette de audio op open).
     apply_swell_positions(state);
 
+    migraties_in_afwachting().lock().remove(&library::pad_sleutel(directory));
     Ok(fill_live_registration_flags(state, organ_info))
 }
 
@@ -10224,36 +10643,16 @@ fn nagebootste_tremulant_voor_herstel(
     (lijst, uitgezet)
 }
 
-fn restore_organ_settings(state: &AppState, organ_id: &str) {
-    use crate::state::{MidiPresetBinding, MidiChannelMapping};
-
-    // Bibliotheek (exact/case-ongevoelig, audit 49), anders .jm-settings.json
-    // naast het orgel (wordt geïmporteerd, auditbevinding 17) — zie
-    // saved_settings_for; dezelfde bron gebruikt de perspectieven-planning
-    // vóór de load. Perspectief-gains zijn daar al toegepast (SetPerspectiveGain
-    // bij de load), dus hier niets extra's voor perspectieven.
-    let settings = match saved_settings_for(state, organ_id) {
-        Some(s) => s,
-        None => {
-            // Nieuw orgel (0.8.90): de instelwizard aanbieden.
-            info!("Nieuw orgel zonder instellingen: instelwizard aangeboden");
-            *state.setup_wizard_pending.write() = true;
-            *state.setup_wizard_done.write() = false;
-            // Alleen de aangevinkte posities (0.9.34), niet de stand van het vorige orgel.
-            *state.load_all_perspectives.write() = false;
-            // Eigen volumes neutraal (0.8.95): niet die van het vorige orgel.
-            *state.mechanics_gains.write() = [1.0; 3];
-            state.send_audio_command(AudioCommand::SetMechanicsGains { motor: 1.0, keys: 1.0, stops: 1.0 });
-            return;
-        }
-    };
-
-    info!("Restoring settings for organ: {}", organ_id);
-    // Vlag laten staan als de zijbestand-import hem net gezet heeft (0.8.91).
-    let geimporteerd_zonder_vlag = *state.setup_wizard_pending.read() && settings.setup_wizard_done != Some(true);
-    *state.setup_wizard_pending.write() = geimporteerd_zonder_vlag;
-    *state.setup_wizard_done.write() = settings.setup_wizard_done.unwrap_or(!geimporteerd_zonder_vlag);
-
+/// Zet de per-orgel waarden die niet door `reset_organ_scoped_state` of
+/// `reset_division_settings` gewist worden (luisterpositie, bijgeluiden, toonhoogte,
+/// bijstemmen, toetsmechaniek, CC-bindingen, doorlopend klavier) op die van `settings`,
+/// in de state en in de audio-engine.
+///
+/// Dit is de ENIGE plek waar deze waarden bij een orgellading gezet worden. Een nieuw
+/// orgel (geen opgeslagen instellingen) komt hier langs met `OrganSettings::default()`,
+/// zodat het niets erft van het vorige orgel. Een nieuwe per-orgel waarde hoort dus
+/// hier, niet los in `restore_organ_settings`.
+fn herstel_orgelwaarden(state: &AppState, settings: &OrganSettings) {
     // Alle opnameposities in het geheugen houden (per orgel).
     *state.load_all_perspectives.write() = settings.load_all_perspectives;
 
@@ -10335,6 +10734,41 @@ fn restore_organ_settings(state: &AppState, organ_id: &str) {
     // Doorlopend klavier (per orgel).
     crate::state::DOORLOPEND_KLAVIER.store(
         settings.continuous_keyboard, std::sync::atomic::Ordering::Relaxed);
+}
+
+fn restore_organ_settings(state: &AppState, organ_id: &str) {
+    use crate::state::{MidiPresetBinding, MidiChannelMapping};
+
+    // Bibliotheek (exact/case-ongevoelig, audit 49), anders .jm-settings.json
+    // naast het orgel (wordt geïmporteerd, auditbevinding 17) — zie
+    // saved_settings_for; dezelfde bron gebruikt de perspectieven-planning
+    // vóór de load. Perspectief-gains zijn daar al toegepast (SetPerspectiveGain
+    // bij de load), dus hier niets extra's voor perspectieven.
+    let settings = match saved_settings_for(state, organ_id) {
+        Some(s) => s,
+        None => {
+            // Nieuw orgel (0.8.90): de instelwizard aanbieden.
+            info!("Nieuw orgel zonder instellingen: instelwizard aangeboden");
+            *state.setup_wizard_pending.write() = true;
+            *state.setup_wizard_done.write() = false;
+            // Alles wat per orgel is op de standaard, niet op de stand van het vorige
+            // orgel: alleen de aangevinkte posities (0.9.34), eigen volumes neutraal
+            // (0.8.95), en ook luisterpositie, bijgeluiden, toonhoogtecorrectie,
+            // bijstemmen, toetsmechaniek, CC-bindingen en doorlopend klavier.
+            herstel_orgelwaarden(state, &OrganSettings::default());
+            luisterpositie_toepassen(state);
+            return;
+        }
+    };
+
+    info!("Restoring settings for organ: {}", organ_id);
+    // Vlag laten staan als de zijbestand-import hem net gezet heeft (0.8.91).
+    let geimporteerd_zonder_vlag = *state.setup_wizard_pending.read() && settings.setup_wizard_done != Some(true);
+    *state.setup_wizard_pending.write() = geimporteerd_zonder_vlag;
+    *state.setup_wizard_done.write() = settings.setup_wizard_done.unwrap_or(!geimporteerd_zonder_vlag);
+
+    // Per-orgel waarden (ook voor een nieuw orgel, zie herstel_orgelwaarden).
+    herstel_orgelwaarden(state, &settings);
 
     // Extra koppels (per orgel): meteen in de koppellijst zetten.
     if !settings.extra_couplers.is_empty() {
@@ -10381,7 +10815,7 @@ fn restore_organ_settings(state: &AppState, organ_id: &str) {
     if !swell_saved.is_empty() {
         let mut bindings = swell_bindings_from_saved(state, &swell_saved);
         if let Some((prev_id, stash)) = state.swell_last_stash.write().take() {
-            if prev_id.eq_ignore_ascii_case(organ_id) {
+            if !migratie_wacht_op_laden(organ_id) && library::pad_sleutel(&prev_id) == library::pad_sleutel(organ_id) {
                 for b in bindings.iter_mut() {
                     if let Some((_, v)) = stash.iter().find(|(d, _)| *d == b.division_name) {
                         b.last_value = Some(*v);
@@ -10796,6 +11230,13 @@ pub fn do_save_organ_settings(state: &AppState, presets: HashMap<String, PresetD
         }
     };
 
+    // Een geïmporteerde bibliotheekentry mag niet door de nog oude runtime
+    // overschreven worden; pas een geslaagde herlaad maakt opslaan weer vrij.
+    if migratie_wacht_op_laden(&organ_id) {
+        warn!("Instellingen nog niet opgeslagen: geïmporteerd orgel wacht op herladen");
+        return;
+    }
+
     info!("Saving settings for organ: {}", organ_id);
 
     // Gather current MIDI mappings
@@ -11011,13 +11452,8 @@ pub fn do_save_organ_settings(state: &AppState, presets: HashMap<String, PresetD
 
     // Gedrag van de set (E1/D3/F7): wat nu staat, tenzij een proef via de test-API
     // het geforceerd heeft; zo'n geforceerde keuze wordt nooit bewaard.
-    let [vlag_niveaus, vlag_overgangen, vlag_koppels, vlag_staart, vlag_zwelkast, vlag_klavier, vlag_windwerk, vlag_trem_golf] = {
-        let geforceerd = state.vlag_overrides.read().contains_key(&crate::library::pad_sleutel(&organ_id));
-        let lib = state.organ_library.read();
-        crate::orgelvlaggen::OrgelVlaggen::te_bewaren(
-            geforceerd, *state.orgel_vlaggen.read(), lib.settings.get(&organ_id))
-    };
-    let settings = OrganSettings {
+    // De vlagvelden hieronder beginnen op None; `bewaar_in` zet ze na de opbouw.
+    let mut settings = OrganSettings {
         presets,
         preset_bindings,
         swell_bindings,
@@ -11044,14 +11480,14 @@ pub fn do_save_organ_settings(state: &AppState, presets: HashMap<String, PresetD
         wind_group_configs,
         perspectives,
         load_all_perspectives: *state.load_all_perspectives.read(),
-        niveaus_van_set: vlag_niveaus,
-        overgangen_van_set: vlag_overgangen,
-        koppels_volgen_set: vlag_koppels,
-        staart_afkap: vlag_staart,
-        zwelkast_van_set: vlag_zwelkast,
-        koppels_klavier: vlag_klavier,
-        windwerk_van_set: vlag_windwerk,
-        tremulant_golf_van_set: vlag_trem_golf,
+        niveaus_van_set: None,
+        overgangen_van_set: None,
+        koppels_volgen_set: None,
+        staart_afkap: None,
+        zwelkast_van_set: None,
+        koppels_klavier: None,
+        windwerk_van_set: None,
+        tremulant_golf_van_set: None,
         niet_geladen_registers: state.niet_geladen_registers.read().clone(),
         listening_position: Some(*state.listening_position.read()),
         background_gain: Some(*state.background_gain.read()),
@@ -11068,20 +11504,23 @@ pub fn do_save_organ_settings(state: &AppState, presets: HashMap<String, PresetD
         continuous_keyboard: crate::state::DOORLOPEND_KLAVIER.load(std::sync::atomic::Ordering::Relaxed),
         remote_layout,
     };
+    {
+        let geforceerd = state.vlag_overrides.read().contains_key(&crate::library::pad_sleutel(&organ_id));
+        let lib = state.organ_library.read();
+        crate::orgelvlaggen::OrgelVlaggen::bewaar_in(
+            &mut settings, geforceerd, *state.orgel_vlaggen.read(), lib.settings.get(&organ_id));
+    }
 
-    // Save to organ directory as well (.jm-settings.json next to the organ)
-    if let Some(dir) = organ_settings_dir(&organ_id) {
-        let settings_path = dir.join(".jm-settings.json");
-        match serde_json::to_string_pretty(&settings) {
-            Ok(json) => {
-                if let Err(e) = std::fs::write(&settings_path, json) {
-                    warn!("Failed to write organ settings to {:?}: {}", settings_path, e);
-                } else {
-                    info!("Saved organ settings to {:?}", settings_path);
-                }
-            }
-            Err(e) => warn!("Failed to serialize organ settings: {}", e),
-        }
+    // Houd dezelfde lock als de migratie tot ook de bibliotheek is opgeslagen.
+    // Een autosave kan na een timeout op de laad-gate toch al onderweg zijn.
+    let _zijbestand_guard = ZIJBESTAND_SCHRIJVER.lock();
+    if migratie_wacht_op_laden(&organ_id) {
+        warn!("Instellingen niet opgeslagen: migratie wacht op herladen");
+        return;
+    }
+    // Eigen zijbestand per definitie of samplemap; de anonieme oude versie blijft intact.
+    if let Err(e) = schrijf_eigen_zijbestand_vergrendeld(&organ_id, &settings) {
+        warn!("Orgelinstellingen niet als zijbestand bewaard: {}", e);
     }
 
     {
@@ -11111,26 +11550,8 @@ pub fn get_organ_settings(state: State<AppState>) -> Option<OrganSettings> {
 /// .jm-settings.json naast het orgel. Geen afstemming op het geladen orgel —
 /// dat doet instellingen_voor_frontend.
 fn lees_opgeslagen_instellingen(state: &AppState, organ_id: &str) -> Option<OrganSettings> {
-    // First try library (AppData)
-    {
-        let lib = state.organ_library.read();
-        if let Some(settings) = lib.settings.get(organ_id) {
-            return Some(settings.clone());
-        }
-    }
-
-    // Fallback: try .jm-settings.json in organ directory
-    if let Some(dir) = organ_settings_dir(organ_id) {
-        let settings_path = dir.join(".jm-settings.json");
-        if let Ok(json) = lees_instellingenbestand(&settings_path) {
-            if let Ok(settings) = serde_json::from_str::<OrganSettings>(&json) {
-                info!("Loaded organ settings from {:?}", settings_path);
-                return Some(settings);
-            }
-        }
-    }
-
-    None
+    instellingen_uit_bibliotheek(state, organ_id)
+        .or_else(|| lees_eigen_zijbestand(organ_id).ok().flatten())
 }
 
 /// Opgeslagen instellingen zoals de frontend ze mag TOEPASSEN: de nagebootste
@@ -11159,7 +11580,7 @@ pub fn export_settings(state: State<AppState>, path: String) -> Result<(), Strin
         .ok_or("Geen instellingen gevonden")?;
     let json = serde_json::to_string_pretty(settings)
         .map_err(|e| format!("Serialisatie fout: {}", e))?;
-    std::fs::write(&path, json)
+    crate::library::schrijf_atomair(Path::new(&path), &json)
         .map_err(|e| format!("Kan niet schrijven naar {}: {}", path, e))?;
     info!("Exported settings to {}", path);
     Ok(())

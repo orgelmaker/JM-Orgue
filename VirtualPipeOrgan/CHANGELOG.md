@@ -6,6 +6,49 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### Instellingen veiliger opgeslagen
+- De bibliotheek met alle orgelinstellingen (`organ_library.json`) en de instellingenbestanden naast een orgel worden nu
+  via een uniek tijdelijk bestand geschreven. Dit verkleint de kans op een afgekapt bestand bij een onderbroken opslag.
+- Bij elke start maakt het programma een kopie van de goed gelezen bibliotheek (`organ_library.json.bak`). Is de bibliotheek
+  toch onleesbaar, dan wordt hij bewaard als `organ_library.json.kapot` en gaat het programma verder met die kopie. Voorheen
+  begon het dan met een lege bibliotheek en overschreef de eerste wijziging alle instellingen.
+- De reservekopie wordt bij herstel direct teruggeschreven; het beschadigde bestand blijft bewaard.
+
+### Instellingen voor orgels in dezelfde map
+- Iedere orgeldefinitie krijgt een eigen instellingenbestand. Een samplemap krijgt ook een afzonderlijk bestand, zodat
+  varianten in dezelfde map elkaars instellingen niet meer overschrijven of automatisch overnemen.
+- Een ouder `.jm-settings.json` vermeldt niet bij welk orgel het hoort. Het bestand blijft bewaard en is na een
+  expliciete keuze te importeren. De instellingen die al in de lokale bibliotheek staan blijven leidend.
+- De keuze om later te beslissen wordt per orgel op deze pc onthouden, ook na een mislukte lading of herstart.
+  Overnemen blijft beschikbaar via de knop in de orgelinstellingen.
+- Na het overnemen voor het al geladen orgel ververst ook het instellingenscherm. Automatisch opslaan wacht totdat
+  de nieuwe waarden in het scherm zijn hersteld; oude asynchrone antwoorden mogen een nieuwe lading niet terugdraaien.
+
+### Nieuw orgel begint schoon
+- Een orgel dat voor het eerst geladen wordt, nam de luisterpositie, het volume van de bijgeluiden, de toonhoogtecorrectie,
+  automatisch bijstemmen, de toetsmechaniek, de uitgangen van de bijgeluiden, de MIDI-koppelingen voor luisterpositie en
+  bijgeluiden en het doorlopend klavier over van het orgel dat ervoor geladen was. Nu krijgt het de standaardwaarden.
+  Orgels die al instellingen hebben, veranderen niet.
+
+### Instellingenscherm toont de audio-uitgang die werkelijk is opgeslagen
+- Het instellingenscherm hield een eigen kopie bij van de gekozen driver, het apparaat, de buffer en de samplerate. Die kon
+  afwijken van wat het programma bij de start gebruikt. Het scherm leest de keuze nu uit dezelfde plek als het programma
+  zelf. Er verandert niets aan de uitgang waarop het orgel klinkt.
+
+### Registervolgorde gaat mee met het orgel
+- Een eigen registervolgorde stond al in de instellingen van het orgel, maar werd alleen door de afstandsbediening gelezen.
+  Laad je een orgel dat op deze pc nog geen eigen volgorde heeft (een set met zijn instellingenbestand van een andere pc),
+  dan wordt de volgorde uit die instellingen overgenomen. Een volgorde die je op deze pc hebt gemaakt, blijft zoals hij is.
+  Ook een expliciet gekozen oorspronkelijke volgorde wordt bewaard. Oudere bestanden bevatten dit onderscheid nog niet.
+
+### Tabblad Laden in de orgelinstellingen
+- De blokken Opnameposities en Registers niet laden staan nu op een eigen tabblad Laden in plaats van onder Klank. Ze gaan
+  over wat er van de set in het geheugen komt. Onder Alles staat alles nog bij elkaar.
+
+### Intern
+- De vlaggen voor het gedrag van de set staan in één lijst (`orgelvlaggen.rs`); een vlag toevoegen raakt nog drie plekken
+  in plaats van elf, en de compiler wijst ze aan. Namen en standaardwaarden zijn gelijk gebleven.
+
 ## [0.9.54] - 2026-11-12
 
 ### Tremulant-golfvormen ook uit gecomprimeerde Hauptwerk-sets (C5)

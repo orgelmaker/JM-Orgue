@@ -65,6 +65,14 @@
     "refresh_hold_hint": "Zum Laden klicken. 3 Sekunden gedrückt halten, um ein neues Foto zu suchen."
   },
   "settings": {
+    "legacy_import_button": "Alte Orgeleinstellungen übernehmen…",
+    "legacy_load_failed": "Die importierten Einstellungen wurden gespeichert, aber die Orgel konnte nicht geladen werden. Änderungen werden erst wieder automatisch gespeichert, wenn eine Orgel erfolgreich geladen wurde.",
+    "legacy_inspect_failed": "Die alte Einstellungsdatei konnte nicht geprüft werden; die Orgel wird ohne sie geladen.",
+    "legacy_defer_failed": "Deine Entscheidung, später zu entscheiden, konnte nicht gespeichert werden. Bitte versuche es erneut.",
+    "legacy_sidecar_warning": "Die Einstellungen wurden in der Bibliothek gespeichert; die separate Datei neben der Orgel konnte nicht geschrieben werden.",
+    "legacy_not_found": "Neben dieser Orgel wurde keine alte Einstellungsdatei gefunden.",
+    "legacy_prompt": "Eine alte Einstellungsdatei wurde gefunden:\n{file}\n\nDie Datei nennt ihre Orgel nicht. Bist du sicher, dass sie zu dieser Orgel gehört?\n{organ}\n\nMit OK übernehmen, mit Abbrechen später entscheiden. Deine Wahl wird für diese Orgel gespeichert; die Übernahme bleibt später in den Orgeleinstellungen möglich. Die alte Datei bleibt erhalten.",
+    "legacy_replace_confirm": "Diese Orgel hat bereits Einstellungen. Sollen sie durch die alten Einstellungen ersetzt werden? Die aktuellen Einstellungen werden zuvor gesichert.",
     "audio_output": "Audio-Ausgabe",
     "audio_host": "Audio-Treiber",
     "audio_buffer": "Puffergröße (Frames)",
@@ -393,6 +401,7 @@
     "auto_retune_title": "Bringt jede Pfeife über die Retune-Tabelle auf ihr gleichstufiges Ziel. Standardmäßig an. Aus = Dateistimmung (manche Samplesets ohne klare Tonhöheninfo in der Orgeldefinition klingen dann verstimmt).",
     "nav_label": "Themen",
     "nav_klank": "Klang",
+    "nav_laden": "Laden",
     "nav_wind": "Wind",
     "nav_perspectief": "Perspektive",
     "nav_bijgeluiden": "Nebengeräusche",

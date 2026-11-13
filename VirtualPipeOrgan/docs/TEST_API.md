@@ -28,6 +28,17 @@ set JM_ORGUE_TEST_API=1
 vpo-app.exe
 ```
 
+Voor een rooktest met een eigen bibliotheek, logboek en webview-opslag:
+
+```bat
+vpo-app.exe --test-api=18765 --test-data-dir "C:\testdata\jm-orgue-migratie"
+```
+
+Het mappad moet absoluut zijn en deze optie werkt alleen samen met `--test-api`.
+Het hoofdvenster vermeldt `[testprofiel]`. Gebruik voor een test samplesets in
+een eigen testmap: instellingen naast een geladen orgel worden daar nog steeds
+opgeslagen. Extra vensters gebruiken eveneens een afzonderlijke testidentiteit.
+
 ### B. Over het netwerk, met token (afstandsbediening)
 
 Luistert op `0.0.0.0:<poort>`, bereikbaar vanaf elke machine in hetzelfde

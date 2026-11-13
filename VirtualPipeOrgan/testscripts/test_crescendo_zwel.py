@@ -98,9 +98,8 @@ ROUTES_NODIG = {
     "GET /held_notes (optioneel)":
         '{"held":[[ch,note,vel]..]} — debug voor hangers na trapwissels.',
 }
-# Fallback zonder routes: .jm-settings.json naast een VERSE ODF-bestandsnaam (bibliotheek heeft dan nog
-# geen entry → restore_organ_settings importeert het bestand): swell_bindings, crescendo_binding,
-# midi_mappings, division_swell_configs zijn zo te seeden. crescendo stages NIET (alleen localStorage).
+# De oude fallback zonder routes schreef het gedeelde .jm-settings.json. Die is
+# onveilig en niet meer bruikbaar; deze test vereist de crescendo- en zwelroutes.
 
 # ---------------------------------------------------------------------------
 # Drempels (dB tenzij anders vermeld)
@@ -339,18 +338,12 @@ def make_test_odf(name):
     return odf, ranges
 
 def seed_settings_file(odf_dir, swell_div, swell_idx, sw, cr):
-    """Fallback zonder routes: .jm-settings.json naast de ODF (alleen geïmporteerd bij een orgel-id
-    ZONDER bibliotheek-entry → gebruik een verse ODF-naam)."""
-    s = {"presets": {}, "preset_bindings": [],
-         "swell_bindings": [{"division_name": swell_div, "division_index": swell_idx, "channel": sw["ch"],
-                             "cc_num": sw["cc"], "min_val": sw.get("min", 0), "max_val": sw.get("max", 127),
-                             "invert": sw.get("invert", False)}],
-         "midi_mappings": [{"division": "Hoofdwerk", "channel": 0, "transpose": 0, "first_midi_note": None, "last_midi_note": None},
-                           {"division": "Nevenwerk", "channel": 1, "transpose": 0, "first_midi_note": None, "last_midi_note": None}],
-         "crescendo_binding": {"channel": cr["ch"], "cc_num": cr["cc"], "min_val": cr.get("min", 0),
-                               "max_val": cr.get("max", 127), "invert": cr.get("invert", False)},
-         "division_swell_configs": [{"division": swell_div, "min_db": -20.0, "filter_cutoff": 800.0}]}
-    open(os.path.join(odf_dir, ".jm-settings.json"), "w", encoding="utf-8").write(json.dumps(s, indent=2))
+    """De gedeelde legacy-sidecar wordt niet meer overschreven door deze test."""
+    raise RuntimeError(
+        'De oude fallback is uitgeschakeld: hij overschrijft het anonieme '
+        'instellingenbestand en werkt niet met de nieuwe orgelbestanden. '
+        'Gebruik de test-API met crescendo- en zwelroutes.'
+    )
 
 # ---------------------------------------------------------------------------
 # Minimale SMF-schrijver (fallback voor zwel via /midi/player/play; 1 tick = 1 ms)
@@ -373,13 +366,15 @@ def setup():
     c = Ctx()
     c.routes = {"cresc": has_route("/crescendo"), "swell": has_route("/swell")}
     c.have_routes = c.routes["cresc"] and c.routes["swell"]
+    if not c.have_routes:
+        raise RuntimeError(
+            'De test-API mist crescendo- of zwelroutes. De oude fallback via '
+            '.jm-settings.json is uitgeschakeld om bestaande instellingen te beschermen.'
+        )
     c.sw = {"ch": 1, "cc": 11}       # zweltrede Nevenwerk: kanaal 2 (0-based 1), CC 11
     c.cr = {"ch": 0, "cc": 20}       # crescendotrede: kanaal 1 (0-based 0), CC 20
     name = "TestCresc.organ" if c.have_routes else time.strftime("TestCresc_%H%M%S.organ")
     c.odf, c.ranges = make_test_odf(name)
-    if not c.have_routes:
-        seed_settings_file(ODF_DIR, "Nevenwerk", 1, c.sw, c.cr)
-        info("geen /crescendo of /swell-route: seeding via .jm-settings.json + verse ODF-naam " + name)
     # MIDI-archief uit (geïnjecteerde noten zouden anders takes schrijven)
     c.archive_was = try_get("/midi/archive/status").get("enabled")
     if c.archive_was: try_post("/midi/archive/config?enabled=0")

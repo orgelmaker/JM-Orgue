@@ -99,6 +99,9 @@ jobs:
           node testscripts/notemap_test.mjs
           node testscripts/update_klaar_test.mjs
           node testscripts/sheet_time_test.mjs
+          node testscripts/audio_uitgang_test.mjs
+          node testscripts/register_volgorde_test.mjs
+          node testscripts/legacy_settings_test.mjs
 
       - name: Rust-tests (zonder ASIO)
         run: cargo test -p vpo-app -p vpo-sampler -p vpo-audio -p vpo-core -p jm-midimon

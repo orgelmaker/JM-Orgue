@@ -5,8 +5,10 @@ elke toets van 36 tot 96 op de kanalen 0 tot en met 4 kort aan (zodat de volledi
 meet daarna opnieuw. Het orgel wordt twee keer geladen in hetzelfde proces: de tweede keer is "warm" (de
 bestanden staan dan in de bestandscache van het systeem).
 
-LET OP: de test-API deelt de gegevensmap van de gebruiker. Maak vooraf een reservekopie van
-`organ_library.json`, `audio_config.json` en de `.jm-settings.json` naast het orgel, en zet ze daarna terug.
+LET OP: de test-API deelt de gegevensmap van de gebruiker. Maak vooraf handmatig een reservekopie van de
+volledige app-gegevensmap en van de instellingenbestanden naast het orgel, en zet ze daarna zelf terug.
+Dit omvat `.jm-settings.json`, `.jm-settings-organ-*.json` en `.jm-settings-samplemap.json`.
+Het script maakt geen reservekopie en herstelt die bestanden niet automatisch.
 
 Gebruik:
     python c2_meting.py --exe <pad naar vpo-app.exe> --orgel <definitie> --uit <resultaat.json>
