@@ -65,6 +65,14 @@
     "refresh_hold_hint": "Haga clic para cargar el órgano. Mantenga pulsado 3 segundos para buscar una nueva foto."
   },
   "settings": {
+    "legacy_import_button": "Importar ajustes antiguos del órgano…",
+    "legacy_load_failed": "Se guardaron los ajustes importados, pero no se pudo cargar el órgano. Los cambios no se guardarán automáticamente hasta que se cargue un órgano correctamente.",
+    "legacy_inspect_failed": "No se pudo comprobar el archivo de ajustes antiguo; el órgano se cargará sin él.",
+    "legacy_defer_failed": "No se pudo guardar su decisión de decidir más tarde. Inténtelo de nuevo.",
+    "legacy_sidecar_warning": "Los ajustes se guardaron en la biblioteca, pero no se pudo escribir el archivo separado junto al órgano.",
+    "legacy_not_found": "No se encontró un archivo de ajustes antiguo junto a este órgano.",
+    "legacy_prompt": "Se encontró un archivo de ajustes antiguo:\n{file}\n\nEl archivo no indica a qué órgano pertenece. ¿Está seguro de que pertenece a:\n{organ}\n\nElija Aceptar para importarlo o Cancelar para decidir más tarde. La elección se recordará para este órgano; podrá importarlo más adelante desde los ajustes del órgano. El archivo antiguo se conservará.",
+    "legacy_replace_confirm": "Este órgano ya tiene ajustes. ¿Sustituirlos por los antiguos? Primero se guardará una copia de los ajustes actuales.",
     "audio_output": "Salida de audio",
     "audio_host": "Controlador de audio",
     "audio_buffer": "Tamaño del búfer (frames)",
@@ -393,6 +401,7 @@
     "auto_retune_title": "Lleva cada tubo a su objetivo de temperamento igual mediante la tabla de reafinación. Activado por defecto. Desactivado = tono del archivo (algunos samplesets sin información de afinación clara en la definición sonarán desafinados).",
     "nav_label": "Temas",
     "nav_klank": "Sonido",
+    "nav_laden": "Carga",
     "nav_wind": "Viento",
     "nav_perspectief": "Perspectiva",
     "nav_bijgeluiden": "Ruidos",

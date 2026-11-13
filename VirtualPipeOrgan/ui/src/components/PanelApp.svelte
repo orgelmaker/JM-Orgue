@@ -18,7 +18,7 @@
   import { leesVensterstand, pasVensterstandToe, zetVolledigScherm } from '../lib/vensterStand.js';
   import { isTekstveld } from '../lib/toetsen.js';
   import { loadAudioProfiles, deriveProfileFromOutput } from '../lib/audioProfiles.js';
-  import { pickDevice } from '../lib/audioDevices.js';
+  import { pickDevice, opgeslagenUitgang } from '../lib/audioDevices.js';
 
   // Schermnummer uit de URL-hash (#panel&n=2): bepaalt de panel-state-sleutel.
   const panelNumber = (() => {
@@ -55,8 +55,14 @@
   let midiDevices = [];
   let selectedAudioHost = null;
   let selectedAudioDevice = null;
+  let opgeslagenApparaat = null;
   let selectedBufferFrames = null;
+  let selectedSampleRate = null;
   let selectedMidiDevice = null;
+  const audioPaneelId = `${Date.now()}-${Math.random()}`;
+  // Een wijziging in een ander venster mag een nog niet toegepaste keuze in dit
+  // venster niet wissen. Bij opnieuw openen wordt de opgeslagen keuze geladen.
+  let audioKeuzeGewijzigd = false;
 
   // Profielen: inhoud uit localStorage (1s-poll), wissel-status via het
   // profile-switch-state-event van het hoofdvenster, en het actieve profiel
@@ -149,14 +155,17 @@
   async function refreshDevices() {
     try {
       audioHosts = await invoke('list_audio_hosts');
-      selectedAudioHost = selectedAudioHost
-        || localStorage.getItem('jm-orgue-audio-host')
+      // Opgeslagen uitgang uit de backend (zie lib/audioDevices.js).
+      const opgeslagen = opgeslagenUitgang(await invoke('get_audio_output_prefs'));
+      opgeslagenApparaat = opgeslagen.device;
+      selectedAudioHost = opgeslagen.host
         || audioHosts.find(h => /wasapi/i.test(h)) || audioHosts[0] || null;
       await refreshDevicesForHost();
-      const savedBuffer = Number(localStorage.getItem('jm-orgue-audio-buffer'));
-      if (selectedBufferFrames == null) selectedBufferFrames = savedBuffer > 0 ? savedBuffer : null;
+      selectedBufferFrames = opgeslagen.buffer;
+      selectedSampleRate = opgeslagen.rate;
+      audioKeuzeGewijzigd = false;
       midiDevices = await invoke('get_midi_devices');
-    } catch (e) { /* instellingen-lijsten zijn niet kritiek voor het paneel */ }
+    } catch (e) { error = String(e); }
   }
 
   async function refreshDevicesForHost() {
@@ -165,7 +174,7 @@
     } catch (e) {
       audioDevices = [];
     }
-    selectedAudioDevice = pickDevice(audioDevices, localStorage.getItem('jm-orgue-audio-device'));
+    selectedAudioDevice = pickDevice(audioDevices, opgeslagenApparaat);
   }
 
   // ---- Hoofdbalk-toggle (per scherm × orgel onthouden) ----
@@ -469,6 +478,10 @@
           audioProfiles = audioProfiles;
         }
       }));
+      panelUnlisteners.push(await listen('jm-orgue:audio-output-changed', (e) => {
+        if (activeView === 'algemene-instellingen' &&
+            (!audioKeuzeGewijzigd || e?.payload?.origin === audioPaneelId)) refreshDevices();
+      }));
     } catch (e) {}
   });
 
@@ -534,6 +547,7 @@
       {audioHosts}
       {selectedAudioHost}
       {selectedBufferFrames}
+      {selectedSampleRate}
       {midiDevices}
       {selectedAudioDevice}
       {selectedMidiDevice}
@@ -563,10 +577,11 @@
       on:refreshMidiMappings={() => { refreshMidiMappings(); emitToMain('jm-orgue:settings-changed', { scope: 'midi' }); }}
       on:learnMidiChannel={(e) => learnMidiChannel(e.detail)}
       on:learnKeyboardRange={(e) => learnKeyboardRange(e.detail.division, e.detail.firstSampleNote)}
-      on:selectAudioDevice={(e) => selectedAudioDevice = e.detail}
-      on:selectAudioHost={async (e) => { selectedAudioHost = e.detail; await refreshDevicesForHost(); }}
-      on:selectBuffer={(e) => selectedBufferFrames = e.detail}
-      on:applyAudioOutput={() => emitToMain('jm-orgue:apply-audio-output', { host: selectedAudioHost, device: selectedAudioDevice, bufferFrames: selectedBufferFrames || null })}
+      on:selectAudioDevice={(e) => { selectedAudioDevice = e.detail; audioKeuzeGewijzigd = true; }}
+      on:selectAudioHost={async (e) => { selectedAudioHost = e.detail; audioKeuzeGewijzigd = true; await refreshDevicesForHost(); }}
+      on:selectBuffer={(e) => { selectedBufferFrames = e.detail; audioKeuzeGewijzigd = true; }}
+      on:selectSampleRate={(e) => { selectedSampleRate = e.detail; audioKeuzeGewijzigd = true; }}
+      on:applyAudioOutput={() => emitToMain('jm-orgue:apply-audio-output', { host: selectedAudioHost, device: selectedAudioDevice, bufferFrames: selectedBufferFrames || null, sampleRate: selectedSampleRate || null, audioOrigin: audioPaneelId })}
       on:saveAudioProfile={(e) => emitToMain('jm-orgue:save-audio-profile', { kind: e.detail, host: selectedAudioHost, device: selectedAudioDevice, bufferFrames: selectedBufferFrames || null })}
       on:clearAudioProfile={(e) => emitToMain('jm-orgue:clear-audio-profile', { kind: e.detail })}
       on:switchAudioProfile={(e) => emitToMain('jm-orgue:switch-profile', { kind: e.detail ?? null })}

@@ -65,6 +65,14 @@
     "refresh_hold_hint": "Klik om het orgel te laden. Houd 3 seconden ingedrukt om de foto opnieuw te laten zoeken."
   },
   "settings": {
+    "legacy_import_button": "Oude orgelinstellingen overnemen…",
+    "legacy_load_failed": "De geïmporteerde instellingen zijn bewaard, maar het orgel kon niet worden geladen. Wijzigingen worden niet automatisch opgeslagen totdat een orgel succesvol is geladen.",
+    "legacy_inspect_failed": "Het oude instellingenbestand kon niet worden gecontroleerd; het orgel wordt zonder dat bestand geladen.",
+    "legacy_defer_failed": "De keuze om later te beslissen kon niet worden bewaard. Probeer het opnieuw.",
+    "legacy_sidecar_warning": "De instellingen zijn in de bibliotheek bewaard, maar het aparte bestand bij het orgel kon niet worden geschreven.",
+    "legacy_not_found": "Er is geen oud instellingenbestand naast dit orgel gevonden.",
+    "legacy_prompt": "Er is een oud instellingenbestand gevonden:\n{file}\n\nHet bestand vermeldt niet bij welk orgel het hoort. Weet je zeker dat het hoort bij:\n{organ}\n\nKies OK om het over te nemen, of Annuleren om dit later te beslissen. Die keuze wordt voor dit orgel onthouden; je kunt later nog overnemen via de orgelinstellingen. Het oude bestand blijft bewaard.",
+    "legacy_replace_confirm": "Dit orgel heeft al eigen instellingen. Wil je deze vervangen door de oude instellingen? Van de huidige instellingen wordt eerst een reservekopie gemaakt.",
     "audio_output": "Audio Uitvoer",
     "audio_host": "Audio driver",
     "audio_buffer": "Buffergrootte (frames)",
@@ -393,6 +401,7 @@
     "auto_retune_title": "Brengt elke pijp op zijn gelijkzwevende target via de retune-tabel. Standaard aan. Uit = bestandstoon (sommige samplesets zonder duidelijke pitch-info in de orgeldefinitie klinken dan vals).",
     "nav_label": "Onderwerpen",
     "nav_klank": "Klank",
+    "nav_laden": "Laden",
     "nav_wind": "Wind",
     "nav_perspectief": "Perspectief",
     "nav_bijgeluiden": "Bijgeluiden",

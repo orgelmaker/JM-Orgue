@@ -65,6 +65,14 @@
     "refresh_hold_hint": "Cliquez pour charger l’orgue. Maintenez 3 secondes pour rechercher une nouvelle photo."
   },
   "settings": {
+    "legacy_import_button": "Importer les anciens réglages de l’orgue…",
+    "legacy_load_failed": "Les réglages importés sont enregistrés, mais l’orgue n’a pas pu être chargé. Les modifications ne seront enregistrées automatiquement qu’après le chargement réussi d’un orgue.",
+    "legacy_inspect_failed": "L’ancien fichier de réglages n’a pas pu être vérifié ; l’orgue sera chargé sans lui.",
+    "legacy_defer_failed": "Votre choix de décider plus tard n’a pas pu être enregistré. Veuillez réessayer.",
+    "legacy_sidecar_warning": "Les réglages sont enregistrés dans la bibliothèque, mais le fichier séparé à côté de l’orgue n’a pas pu être écrit.",
+    "legacy_not_found": "Aucun ancien fichier de réglages trouvé à côté de cet orgue.",
+    "legacy_prompt": "Un ancien fichier de réglages a été trouvé :\n{file}\n\nLe fichier n’indique pas son orgue. Êtes-vous sûr qu’il appartient à :\n{organ}\n\nChoisissez OK pour l’importer ou Annuler pour décider plus tard. Votre choix est mémorisé pour cet orgue ; vous pourrez toujours l’importer depuis les réglages de l’orgue. L’ancien fichier sera conservé.",
+    "legacy_replace_confirm": "Cet orgue possède déjà des réglages. Les remplacer par les anciens ? Une copie des réglages actuels sera d’abord conservée.",
     "audio_output": "Sortie Audio",
     "audio_host": "Pilote audio",
     "audio_buffer": "Taille de buffer (frames)",
@@ -393,6 +401,7 @@
     "auto_retune_title": "Amène chaque tuyau à sa cible tempérée égale via la table de réaccord. Activé par défaut. Désactivé = hauteur fichier (certains samplesets sans info de hauteur dans la définition sonneront alors faux).",
     "nav_label": "Sujets",
     "nav_klank": "Son",
+    "nav_laden": "Chargement",
     "nav_wind": "Vent",
     "nav_perspectief": "Perspective",
     "nav_bijgeluiden": "Bruits",

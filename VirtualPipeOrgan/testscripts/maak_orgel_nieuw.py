@@ -1,7 +1,13 @@
+# TIJDELIJK UITGESCHAKELD tot de rooktest veilig geïsoleerd is.
 # Maakt een orgel "nieuw" voor een wizard-rooktest: verwijdert de opgeslagen
 # instellingen uit organ_library.json en hernoemt de .jm-settings.json naast
 # het orgel (reservekopieën met achtervoegsel .bak-wizardtest). Alleen
 # uitvoeren met gesloten app. Gebruik: python maak_orgel_nieuw.py <deel-van-id>
+raise SystemExit(
+    'Deze rooktest is tijdelijk uitgeschakeld: het script kent de nieuwe '
+    'orgelbestanden niet en kan bestaande instellingen onbedoeld wijzigen. '
+    'Werk het eerst bij voor een volledig geïsoleerde testomgeving.'
+)
 import json, os, shutil, sys
 lib = r"C:\Users\orgel\AppData\Roaming\nl.jm-orgue.app\organ_library.json"
 deel = sys.argv[1].lower()

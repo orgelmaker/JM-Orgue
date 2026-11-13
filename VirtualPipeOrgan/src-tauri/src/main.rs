@@ -84,6 +84,53 @@ fn parse_test_api_port() -> Option<u16> {
     None
 }
 
+/// Een expliciet testprofiel voorkomt dat rooktests de gewone bibliotheek,
+/// het logboek of de webview-opslag wijzigen. Alleen bruikbaar met --test-api.
+fn parse_test_data_dir(args: &[String], test_api: bool) -> Result<Option<std::path::PathBuf>, String> {
+    let mut gekozen = None;
+    let mut iter = args.iter().skip(1);
+    while let Some(arg) = iter.next() {
+        let waarde = if arg == "--test-data-dir" {
+            Some(iter.next().ok_or("--test-data-dir vraagt een absoluut mappad")?.as_str())
+        } else {
+            arg.strip_prefix("--test-data-dir=")
+        };
+        if let Some(waarde) = waarde {
+            if !test_api {
+                return Err("--test-data-dir is alleen toegestaan met --test-api".into());
+            }
+            if gekozen.is_some() {
+                return Err("Geef --test-data-dir maar één keer op".into());
+            }
+            let pad = std::path::PathBuf::from(waarde);
+            if !pad.is_absolute() || pad.file_name().is_none() {
+                return Err("--test-data-dir vraagt een absoluut mappad, geen schijfwortel".into());
+            }
+            gekozen = Some(pad);
+        }
+    }
+    Ok(gekozen)
+}
+
+#[cfg(test)]
+mod testprofiel_tests {
+    use super::parse_test_data_dir;
+
+    fn args(waarden: &[&str]) -> Vec<String> {
+        std::iter::once("vpo-app").chain(waarden.iter().copied()).map(str::to_owned).collect()
+    }
+
+    #[test]
+    fn testprofiel_is_expliciet_en_verandert_de_normale_start_niet() {
+        assert_eq!(parse_test_data_dir(&args(&[]), false).unwrap(), None);
+        let pad = std::env::temp_dir().join("jm-orgue-geisoleerd").to_string_lossy().to_string();
+        assert_eq!(parse_test_data_dir(&args(&["--test-data-dir", &pad]), true).unwrap(), Some(pad.into()));
+        assert!(parse_test_data_dir(&args(&["--test-data-dir", "relatief"]), true).is_err());
+        assert!(parse_test_data_dir(&args(&["--test-data-dir"]), true).is_err());
+        assert!(parse_test_data_dir(&args(&["--test-data-dir", "relatief"]), false).is_err());
+    }
+}
+
 /// mimalloc-opties: vrijgegeven geheugen meteen (niet na 10 ms in kleine stappen) en echt (decommit) aan het systeem
 /// teruggeven. Zonder dit bleef na een orgelwissel het geheugen van het vorige orgel in het proces staan. Daarnaast
 /// pagina's pas vastleggen als ze gebruikt worden: met veel laadthreads en startbuffers van wisselende lengte stonden er
@@ -103,11 +150,17 @@ fn geheugen_teruggeven_instellen() {
 
 fn main() {
     geheugen_teruggeven_instellen();
+    let test_api_port = parse_test_api_port();
+    let args: Vec<String> = std::env::args().collect();
+    let test_data_dir = parse_test_data_dir(&args, test_api_port.is_some()).unwrap_or_else(|e| {
+        eprintln!("{}", e);
+        std::process::exit(2);
+    });
     // Set up logging to a file in %APPDATA%\nl.jm-orgue.app\jm-orgue.log
     // This works even without a visible console (windows_subsystem = "windows")
-    let log_dir = dirs::data_dir()
+    let log_dir = test_data_dir.clone().unwrap_or_else(|| dirs::data_dir()
         .map(|d| d.join("nl.jm-orgue.app"))
-        .unwrap_or_else(|| std::path::PathBuf::from("."));
+        .unwrap_or_else(|| std::path::PathBuf::from(".")));
     std::fs::create_dir_all(&log_dir).ok();
     let log_path = log_dir.join("jm-orgue.log");
 
@@ -189,8 +242,25 @@ fn main() {
     info!("=== JM-Orgue starting ===");
     info!("Log file: {:?}", log_path);
 
-    let test_api_port = parse_test_api_port();
     let log_path_for_api = log_path.clone();
+    let mut context = tauri::generate_context!();
+    let mut test_windows = Vec::new();
+    if let Some(dir) = &test_data_dir {
+        // Ook een eventueel extra venster mag nooit het productieprofiel gebruiken.
+        context.config_mut().identifier = "nl.jm-orgue.test".into();
+        for window in &mut context.config_mut().app.windows {
+            window.title = format!("{} [testprofiel]", window.title);
+            // Tauri 2.11 accepteert hier geen absoluut configuratiepad. Maak
+            // deze vensters met de expliciete buildermethode vóór een webview
+            // met de standaardopslag kan worden geopend.
+            if window.create {
+                let mut config = window.clone();
+                config.data_directory = None;
+                test_windows.push((config, dir.join("webview").join(&window.label)));
+                window.create = false;
+            }
+        }
+    }
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -207,8 +277,8 @@ fn main() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(move |app| {
-            let app_data_dir = app.path().app_data_dir()
-                .expect("Failed to get app data directory");
+            let app_data_dir = test_data_dir.clone().unwrap_or_else(|| app.path().app_data_dir()
+                .expect("Failed to get app data directory"));
             std::fs::create_dir_all(&app_data_dir).ok();
             info!("App data directory: {:?}", app_data_dir);
 
@@ -387,6 +457,11 @@ fn main() {
             }
 
             app.manage(state);
+            for (config, data_directory) in &test_windows {
+                tauri::WebviewWindowBuilder::from_config(app, config)?
+                    .data_directory(data_directory.clone())
+                    .build()?;
+            }
             info!("Application initialized");
             Ok(())
         })
@@ -482,6 +557,7 @@ fn main() {
             commands::cancel_sampleset_download,
             commands::get_audio_devices,
             commands::list_audio_hosts,
+            commands::get_audio_output_prefs,
             commands::list_output_devices,
             commands::set_audio_output,
             commands::scan_sampleset_silence,
@@ -551,6 +627,9 @@ fn main() {
             commands::set_active_couplers,
             commands::set_division_volume,
             commands::get_organ_settings,
+            commands::inspect_legacy_settings,
+            commands::defer_legacy_settings,
+            commands::import_legacy_settings,
             commands::export_settings,
             commands::import_settings,
             commands::set_crescendo_config,
@@ -734,7 +813,7 @@ fn main() {
             commands::restore_swell_bindings,
             commands::get_saved_presets,
         ])
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("Error running application")
         .run(|app, event| {
             // Afsluit-waakhond: de audio-teardown (m.n. een ASIO-driver die in

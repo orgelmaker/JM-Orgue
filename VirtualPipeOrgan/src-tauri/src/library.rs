@@ -374,6 +374,10 @@ pub struct RemoteLayoutSaved {
     /// orgelscherm); onbekende registers komen achteraan.
     #[serde(default)]
     pub stop_order: HashMap<String, Vec<String>>,
+    /// Alleen expliciete lokale keuzes. None betekent een ouder bestand dat
+    /// enkel de volledige schermvolgorde bevat; Some({}) is een bewuste reset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub custom_stop_order: Option<HashMap<String, Vec<String>>>,
     /// "rect" of "round" (vorm van de registerknoppen).
     #[serde(default)]
     pub knob_shape: String,
@@ -396,6 +400,7 @@ impl Default for RemoteLayoutSaved {
             visible_couplers: Vec::new(),
             coupler_placement: String::new(),
             stop_order: HashMap::new(),
+            custom_stop_order: None,
             knob_shape: String::new(),
             show_couplers: true,
             show_tremulant: true,
@@ -403,6 +408,25 @@ impl Default for RemoteLayoutSaved {
             show_volume: true,
             show_panic: true,
         }
+    }
+}
+
+#[cfg(test)]
+mod remote_layout_opslag_tests {
+    use super::RemoteLayoutSaved;
+    use std::collections::HashMap;
+
+    #[test]
+    fn expliciete_registervolgorde_blijft_onderscheidbaar_van_oud_formaat() {
+        let oud: RemoteLayoutSaved = serde_json::from_str(r#"{"stop_order":{"Werk":["a","b"]}}"#).unwrap();
+        assert!(oud.custom_stop_order.is_none());
+        let mut nieuw = oud;
+        nieuw.custom_stop_order = Some(HashMap::from([("Werk".to_string(), vec!["a".to_string(), "b".to_string()])]));
+        let terug: RemoteLayoutSaved = serde_json::from_str(&serde_json::to_string(&nieuw).unwrap()).unwrap();
+        assert_eq!(terug.custom_stop_order.unwrap()["Werk"], ["a", "b"]);
+        nieuw.custom_stop_order = Some(HashMap::new());
+        let leeg: RemoteLayoutSaved = serde_json::from_str(&serde_json::to_string(&nieuw).unwrap()).unwrap();
+        assert_eq!(leeg.custom_stop_order, Some(HashMap::new()));
     }
 }
 
@@ -518,7 +542,8 @@ pub struct OrganSettings {
     /// aan het gedrag van vóór 0.7.95.
     #[serde(default)]
     pub listening_position: Option<f32>,
-    /// Bijgeluiden-master (0.7.97): lineaire gain 0..4, standaard 0.3.
+    /// Bijgeluiden-master (0.7.97): lineaire gain 0..4. Ontbreekt de waarde (bestand
+    /// van vóór 0.7.97, of een nieuw orgel), dan geldt 1.0; zie `herstel_orgelwaarden`.
     #[serde(default)]
     pub background_gain: Option<f32>,
     /// Eigen volumes (0.8.94), lineair en relatief t.o.v. `background_gain`:
@@ -579,11 +604,22 @@ pub struct OrganSettings {
 pub struct OrganLibrary {
     pub organs: Vec<OrganLibraryEntry>,
     pub settings: HashMap<String, OrganSettings>,
+    /// Lokale keuze om de migratievraag voor een orgel uit te stellen. Dit is
+    /// geen orgelinstelling en reist daarom niet mee in een zijbestand.
+    #[serde(default)]
+    pub legacy_settings_deferred: std::collections::HashSet<String>,
     /// Opt-in: online zoeken naar orgelfoto's (0.8.74). Standaard uit.
     /// Zet aan in Instellingen; pas dan wordt bij een handmatige
     /// zoekactie Wikimedia Commons/Wikipedia bevraagd.
     #[serde(default)]
     pub online_image_search_enabled: bool,
+}
+
+impl OrganLibrary {
+    pub fn legacy_settings_is_deferred(&self, organ_id: &str) -> bool {
+        let sleutel = pad_sleutel(organ_id);
+        self.legacy_settings_deferred.iter().any(|id| pad_sleutel(id) == sleutel)
+    }
 }
 
 
@@ -593,6 +629,8 @@ pub struct OrganLibrary {
 /// een botsing; settings onder een forward-slash-key verhuizen alleen mee als
 /// er onder de genormaliseerde key nog niets staat.
 fn normalize_library(lib: &mut OrganLibrary) {
+    lib.legacy_settings_deferred = std::mem::take(&mut lib.legacy_settings_deferred)
+        .into_iter().map(|id| pad_sleutel(&id)).collect();
     // Bibliotheken die op Linux of macOS met een oudere versie zijn
     // weggeschreven staan vol backslashes: die versie zette élk pad om, ook
     // waar dat niet mocht. Zulke entries wijzen nergens naar. Eén keer
@@ -637,38 +675,117 @@ fn normalize_library(lib: &mut OrganLibrary) {
     // bijbehorende bibliotheek-entry (dat is wat current_organ_id wordt bij
     // laden via de bibliotheek) — anders splitsen instellingen zich per
     // pad-notatie (auditbevinding 49).
-    let by_lower: std::collections::HashMap<String, String> = lib.organs.iter()
-        .map(|o| (o.id.to_lowercase(), o.id.clone()))
+    let by_key: std::collections::HashMap<String, String> = lib.organs.iter()
+        .map(|o| (key(&o.id), o.id.clone()))
         .collect();
     let settings = std::mem::take(&mut lib.settings);
     let (orig, conv): (Vec<_>, Vec<_>) =
         settings.into_iter().partition(|(k, _)| !k.contains('/'));
     for (k, v) in orig.into_iter().chain(conv) {
         let nk = norm(&k);
-        let canon = by_lower.get(&nk.to_lowercase()).cloned().unwrap_or(nk);
+        let canon = by_key.get(&key(&nk)).cloned().unwrap_or(nk);
         lib.settings.entry(canon).or_insert(v);
     }
 }
 
-/// Load library from JSON file, or create empty if not found
+/// Schrijft via een exclusief aangemaakt tijdelijk bestand in dezelfde map.
+/// Schrijvers binnen dit proces wachten op elkaar; een bestaand bestand met een
+/// tijdelijke naam wordt nooit afgekapt of verwijderd.
+pub fn schrijf_atomair(pad: &Path, inhoud: &str) -> std::io::Result<()> {
+    schrijf_atomair_bytes(pad, inhoud.as_bytes())
+}
+
+fn schrijf_atomair_bytes(pad: &Path, inhoud: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SCHRIJVER: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+    static VOLGNUMMER: AtomicU64 = AtomicU64::new(0);
+    let _een_tegelijk = SCHRIJVER.lock();
+    let (tmp, mut f) = loop {
+        let mut naam = pad.as_os_str().to_owned();
+        naam.push(format!(".tmp-{}-{}", std::process::id(), VOLGNUMMER.fetch_add(1, Ordering::Relaxed)));
+        let tmp = PathBuf::from(naam);
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(&tmp) {
+            Ok(f) => break (tmp, f),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e),
+        }
+    };
+    let uitkomst = (|| {
+        f.write_all(inhoud)?;
+        f.sync_all()?;
+        drop(f);
+        std::fs::rename(&tmp, pad)
+    })();
+    if uitkomst.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    uitkomst
+}
+
+const BIBLIOTHEEK_BESTAND: &str = "organ_library.json";
+/// Kopie van de laatste bibliotheek die goed gelezen is (bij elke start ververst).
+const BIBLIOTHEEK_RESERVE: &str = "organ_library.json.bak";
+/// Kopie van een onleesbare bibliotheek.
+const BIBLIOTHEEK_KAPOT: &str = "organ_library.json.kapot";
+
+fn lees_bibliotheekbestand(pad: &Path) -> Result<OrganLibrary, String> {
+    let json = std::fs::read_to_string(pad).map_err(|e| format!("lezen: {}", e))?;
+    serde_json::from_str::<OrganLibrary>(&json).map_err(|e| format!("ontleden: {}", e))
+}
+
+/// Load library from JSON file, or create empty if not found.
+///
+/// Alle instellingen van alle orgels staan in dit ene bestand. Daarom:
+/// - een goed gelezen bibliotheek wordt gekopieerd naar `organ_library.json.bak`;
+/// - een onleesbare bibliotheek wordt gekopieerd als `organ_library.json.kapot`;
+///   een leesbare reservekopie wordt onmiddellijk teruggeschreven. Mislukt dat,
+///   dan kan de volgende start het herstel opnieuw proberen.
 pub fn load_library(app_data_dir: &Path) -> OrganLibrary {
-    let path = app_data_dir.join("organ_library.json");
+    let path = app_data_dir.join(BIBLIOTHEEK_BESTAND);
+    let reserve = app_data_dir.join(BIBLIOTHEEK_RESERVE);
     if path.exists() {
-        match std::fs::read_to_string(&path) {
-            Ok(json) => {
-                match serde_json::from_str::<OrganLibrary>(&json) {
+        match lees_bibliotheekbestand(&path) {
+            Ok(mut lib) => {
+                info!("Loaded organ library from {:?}", path);
+                // Reservekopie van het bestand zoals het op schijf stond (vóór normaliseren).
+                if let Err(e) = std::fs::read(&path).and_then(|bytes| schrijf_atomair_bytes(&reserve, &bytes)) {
+                    warn!("Reservekopie van de bibliotheek maken mislukt: {}", e);
+                }
+                normalize_library(&mut lib);
+                return lib;
+            }
+            Err(e) => {
+                warn!("Bibliotheek onleesbaar ({}): {:?}", e, path);
+                let kapot = app_data_dir.join(BIBLIOTHEEK_KAPOT);
+                // Eerst kopiëren: bij een onderbreking bestaat het onleesbare
+                // hoofdbestand nog en wordt herstel bij de volgende start herhaald.
+                let bewaard = std::fs::read(&path).and_then(|bytes| schrijf_atomair_bytes(&kapot, &bytes));
+                match &bewaard {
+                    Ok(()) => warn!("Onleesbare bibliotheek bewaard als {:?}", kapot),
+                    Err(e) => warn!("Onleesbare bibliotheek bewaren mislukt: {}", e),
+                }
+                match lees_bibliotheekbestand(&reserve) {
                     Ok(mut lib) => {
-                        info!("Loaded organ library from {:?}", path);
+                        if bewaard.is_ok() {
+                            match std::fs::read(&reserve).and_then(|bytes| schrijf_atomair_bytes(&path, &bytes)) {
+                                Ok(()) => warn!("Bibliotheek hersteld uit de reservekopie {:?}", reserve),
+                                Err(e) => warn!("Reservekopie terugschrijven mislukt; herstel wordt bij de volgende start opnieuw geprobeerd: {}", e),
+                            }
+                        }
                         normalize_library(&mut lib);
                         return lib;
                     }
                     Err(e) => {
-                        warn!("Failed to parse organ library: {}", e);
+                        warn!("Geen bruikbare reservekopie van de bibliotheek ({})", e);
+                        // Met een bewaarde kopie kan een nieuwe bibliotheek worden opgeslagen.
+                        if bewaard.is_ok() {
+                            if let Err(e) = std::fs::remove_file(&path) {
+                                warn!("Onleesbare bibliotheek opzij zetten mislukt: {}", e);
+                            }
+                        }
                     }
                 }
-            }
-            Err(e) => {
-                warn!("Failed to read organ library: {}", e);
             }
         }
     }
@@ -676,21 +793,28 @@ pub fn load_library(app_data_dir: &Path) -> OrganLibrary {
     OrganLibrary::default()
 }
 
-/// Save library to JSON file
+/// Save library to JSON file (atomair, en één schrijver tegelijk: de autosave
+/// en andere commando's kunnen dit gelijktijdig aanroepen).
 pub fn save_library(app_data_dir: &Path, library: &OrganLibrary) {
-    let path = app_data_dir.join("organ_library.json");
-    match serde_json::to_string_pretty(library) {
-        Ok(json) => {
-            if let Err(e) = std::fs::write(&path, json) {
-                warn!("Failed to write organ library: {}", e);
-            } else {
-                info!("Saved organ library to {:?}", path);
-            }
-        }
-        Err(e) => {
-            warn!("Failed to serialize organ library: {}", e);
-        }
+    if let Err(e) = probeer_bibliotheek_op_te_slaan(app_data_dir, library) {
+        warn!("Failed to write organ library: {}", e);
     }
+}
+
+/// Variant voor migraties die alleen mogen slagen wanneer de opslag echt gelukt is.
+pub fn probeer_bibliotheek_op_te_slaan(app_data_dir: &Path, library: &OrganLibrary) -> Result<(), String> {
+    static SCHRIJVER: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+    let path = app_data_dir.join(BIBLIOTHEEK_BESTAND);
+    let json = serde_json::to_string_pretty(library).map_err(|e| e.to_string())?;
+    let _een_tegelijk = SCHRIJVER.lock();
+            // Kon bij het laden geen veilige kopie van een onleesbaar bestand
+            // worden gemaakt, dan mag een autosave het niet alsnog overschrijven.
+            if path.exists() && lees_bibliotheekbestand(&path).is_err() {
+                return Err(format!("Onleesbare bibliotheek niet overschreven: {:?}", path));
+            }
+    schrijf_atomair(&path, &json).map_err(|e| e.to_string())?;
+    info!("Saved organ library to {:?}", path);
+    Ok(())
 }
 
 /// Bestandsextensies die we als afbeelding accepteren (ook in de
@@ -1352,5 +1476,121 @@ mod sysex_hex_tests {
         assert!(hex_naar_sysex("7D 0").is_err());   // oneven
         assert!(hex_naar_sysex("").is_err());        // leeg
         assert!(hex_naar_sysex("F0 F7").is_err());   // geen inhoud
+    }
+}
+
+#[cfg(test)]
+mod bibliotheek_opslag_tests {
+    use super::*;
+
+    fn bibliotheek_map(naam: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("jm_bibliotheek_{}_{}", naam, std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    fn bibliotheek_met(orgel: &str, master_db: f32) -> OrganLibrary {
+        let mut lib = OrganLibrary::default();
+        lib.settings.insert(orgel.to_string(), OrganSettings { master_volume_db: Some(master_db), ..Default::default() });
+        lib
+    }
+
+    #[test]
+    fn atomair_schrijven_vervangt_het_doel_en_laat_geen_tmp_achter() {
+        let d = bibliotheek_map("atomair");
+        let p = d.join("x.json");
+        std::fs::write(d.join("x.json.tmp"), "bestand van de gebruiker").unwrap();
+        schrijf_atomair(&p, "een").unwrap();
+        schrijf_atomair(&p, "twee").unwrap();
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), "twee");
+        assert_eq!(std::fs::read_to_string(d.join("x.json.tmp")).unwrap(), "bestand van de gebruiker");
+        assert_eq!(std::fs::read_dir(&d).unwrap().count(), 2, "geen eigen tijdelijke bestanden achtergelaten");
+        // Mislukt het (doelmap bestaat niet), dan is er een fout en geen half bestand.
+        assert!(schrijf_atomair(&d.join("bestaat_niet").join("y.json"), "z").is_err());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn opslaan_en_laden_gaat_rond_en_maakt_een_reservekopie() {
+        let d = bibliotheek_map("rond");
+        save_library(&d, &bibliotheek_met("C:\\orgels\\a.organ", -3.5));
+        assert!(!d.join("organ_library.json.bak").exists(), "de reservekopie ontstaat pas bij het laden");
+        let lib = load_library(&d);
+        assert_eq!(lib.settings["C:\\orgels\\a.organ"].master_volume_db, Some(-3.5));
+        assert!(d.join("organ_library.json.bak").exists());
+        assert!(!d.join("organ_library.json.tmp").exists());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Het risico waar dit om gaat: een afgekapt bestand mag niet leiden tot een
+    /// lege bibliotheek die bij de eerste autosave alle instellingen overschrijft.
+    #[test]
+    fn onleesbare_bibliotheek_wordt_bewaard_en_de_reservekopie_gebruikt() {
+        let d = bibliotheek_map("kapot");
+        save_library(&d, &bibliotheek_met("C:\\orgels\\a.organ", -6.0));
+        let _ = load_library(&d); // maakt de reservekopie
+        std::fs::write(d.join("organ_library.json"), "{\"organs\": [ {\"id\": \"afgek").unwrap();
+
+        let lib = load_library(&d);
+        assert_eq!(lib.settings["C:\\orgels\\a.organ"].master_volume_db, Some(-6.0), "hersteld uit de reservekopie");
+        assert!(d.join("organ_library.json").exists(), "de reservekopie is direct teruggeschreven");
+        assert!(std::fs::read_to_string(d.join("organ_library.json.kapot")).unwrap().contains("afgek"));
+
+        // Een nieuwe start vóór enige save gebruikt de herstelde bibliotheek.
+        assert_eq!(load_library(&d).settings["C:\\orgels\\a.organ"].master_volume_db, Some(-6.0));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn mislukt_bewaren_van_kapot_bestand_laat_het_ook_bij_autosave_heel() {
+        let d = bibliotheek_map("bewaren_mislukt");
+        save_library(&d, &bibliotheek_met("a", -6.0));
+        let _ = load_library(&d);
+        std::fs::write(d.join(BIBLIOTHEEK_BESTAND), "afgekapt").unwrap();
+        std::fs::create_dir(d.join(BIBLIOTHEEK_KAPOT)).unwrap();
+        let lib = load_library(&d);
+        assert_eq!(lib.settings["a"].master_volume_db, Some(-6.0));
+        save_library(&d, &lib);
+        assert_eq!(std::fs::read_to_string(d.join(BIBLIOTHEEK_BESTAND)).unwrap(), "afgekapt");
+        assert_eq!(load_library(&d).settings["a"].master_volume_db, Some(-6.0));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn gelijktijdige_schrijvers_laten_een_volledig_bestand_achter() {
+        let d = bibliotheek_map("gelijktijdig");
+        let p = d.join("export.json");
+        let waarden: Vec<_> = (0..8).map(|i| format!("{i}:{}", i.to_string().repeat(10000))).collect();
+        std::thread::scope(|s| {
+            for waarde in &waarden {
+                let p = &p;
+                s.spawn(move || schrijf_atomair(p, waarde).unwrap());
+            }
+        });
+        assert!(waarden.contains(&std::fs::read_to_string(&p).unwrap()));
+        assert_eq!(std::fs::read_dir(&d).unwrap().count(), 1);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn onleesbaar_zonder_reservekopie_geeft_een_lege_bibliotheek_maar_bewaart_het_bestand() {
+        let d = bibliotheek_map("kapot_zonder");
+        std::fs::write(d.join("organ_library.json"), "geen json").unwrap();
+        let lib = load_library(&d);
+        assert!(lib.organs.is_empty() && lib.settings.is_empty());
+        assert_eq!(std::fs::read_to_string(d.join("organ_library.json.kapot")).unwrap(), "geen json");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn geen_bibliotheek_is_een_lege_bibliotheek_ook_als_er_een_reservekopie_ligt() {
+        // Wie de bibliotheek bewust weggooit om schoon te beginnen, krijgt hem niet ongevraagd terug.
+        let d = bibliotheek_map("leeg");
+        save_library(&d, &bibliotheek_met("C:\\orgels\\a.organ", -1.0));
+        let _ = load_library(&d);
+        std::fs::remove_file(d.join("organ_library.json")).unwrap();
+        assert!(load_library(&d).settings.is_empty());
+        let _ = std::fs::remove_dir_all(&d);
     }
 }

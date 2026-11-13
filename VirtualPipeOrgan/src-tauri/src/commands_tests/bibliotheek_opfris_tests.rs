@@ -183,6 +183,7 @@ fn opfris_werkt_kaartnamen_bij_en_slaat_alleen_bij_wijziging_op() {
         organs: vec![entry(&p, "PuttBatz"), entry(&weg, "Oude naam")],
         settings: Default::default(),
         online_image_search_enabled: false,
+        ..Default::default()
     });
     assert_eq!(ververs_bibliotheek_namen(&lib, &data), 1);
     {

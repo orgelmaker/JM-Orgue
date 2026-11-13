@@ -16,6 +16,8 @@
   import { loadPanelState, savePanelState } from '../lib/panelState.js';
   import { pasVensterstandToe } from '../lib/vensterStand.js';
   import { registerRegel, korenTekst } from '../lib/registerRegel.js';
+  import { volgordeUitOrgelbestand } from '../lib/registerVolgorde.js';
+  import { bewaakOrgelHerstel } from '../lib/legacySettings.js';
   import { midiLearn } from '../lib/midiLearn.js';
   import { pasSfeerToeAlsGewijzigd } from '../lib/sfeer.js';
   import { invoke } from '@tauri-apps/api/core';
@@ -145,6 +147,7 @@
   // opnieuw op de verse audio-thread toegepast worden, ook al is het orgel-id
   // gelijk gebleven (auditbevinding 20).
   export let audioEpoch = 0;
+  export let organLoadEpoch = 0;
   // Actuele stream (uit de 100-ms status-poll in App/PanelApp): kanaalaantal,
   // host, apparaat, buffer. Eén bron voor chips, EQ-kanaalkeuze en uitgangspaar
   // — vóór 0.7.37 werd het kanaalaantal één keer bij het aanmaken opgevraagd en
@@ -1071,9 +1074,10 @@
   // Laad de crescendo-config voor het huidige orgel uit de backend. Staat daar
   // nog niets (orgel van vóór 0.7.38), dan eenmalig de oude localStorage-config
   // migreren (alleen het hoofdvenster pusht) en de oude sleutels verwijderen.
-  async function loadCrescendoForOrgan() {
+  async function loadCrescendoForOrgan(isCurrent = () => true) {
     let cfg = null;
     try { cfg = await invoke('get_crescendo_config'); } catch (e) { cfg = null; }
+    if (!isCurrent()) return;
     const backendLeeg = !cfg || (!Array.isArray(cfg.stages) || cfg.stages.length === 0) && !cfg.enabled;
     if (backendLeeg && !secondary) {
       let legacy = null;
@@ -1092,6 +1096,7 @@
           crescendoNumStages = legacy.numStages || 15;
           try {
             await invoke('set_crescendo_config', { stages: crescendoStages, enabled: crescendoEnabled, numStages: crescendoNumStages });
+            if (!isCurrent()) return;
             dispatch('refreshMidiMappings');
             gepusht = true;
           } catch (e) { console.error('Crescendo-migratie mislukt:', e); }
@@ -1911,14 +1916,8 @@
 
   // Pas de opgeslagen divisie→wind-groep toewijzing toe vanuit de backend (per orgel).
   // De groep-config + UI-waarden worden in loadAudioSettingsForOrgan() geladen en toegepast.
-  let windAppliedFor = '';
-  $: if (!secondary && organInfo?.id && `${organInfo.id}::${audioEpoch}` !== windAppliedFor) {
-    // Alleen bij een echte orgel-load of audio-herbouw: dit vuurde voorheen bij
-    // ELKE organInfo-wijziging (elke registerklik) en draaide een net gekozen
-    // windgroep terug vóór de gebruiker kon opslaan (auditbevinding 19).
-    windAppliedFor = `${organInfo.id}::${audioEpoch}`;
-    invoke('apply_saved_wind_groups').catch(() => {});
-  }
+  // De windtoewijzing wordt samen met de overige instellingen hersteld, zodat
+  // App ook op deze stap kan wachten voordat automatisch opslaan weer mag.
 
   // ============ Multi-channel surround + C/Cis-lade spreiding ============
   // Per divisie een vrije set fysieke output-kanalen (1 t/m alle). Leeg = standaard voorste paar.
@@ -2323,12 +2322,15 @@
   let indelingLinks = false;
   // Instellingen als tabbladen (0.8.90): per scherm één onderwerp zichtbaar,
   // "Alles" toont de oude volledige lijst. Keuze per scherm onthouden.
-  const INST_TABS_ORGEL = ['klank', 'crescendo', 'weergave', 'midi', 'alles'];
+  // "laden" (wat er van de set in het geheugen komt: opnameposities en registers) stond tot en met
+  // 0.9.54 onder Klank. Extra schermen tonen die blokken niet en vallen daarom terug op Klank.
+  const INST_TABS_ORGEL = ['klank', 'laden', 'crescendo', 'weergave', 'midi', 'alles'];
   const INST_TABS_ALG = ['audio', 'sampleset', 'midi', 'pistons', 'weergave', 'over', 'alles'];
   let instTabOrgel = INST_TABS_ORGEL.includes(localStorage.getItem('jm-orgue-inst-tab-orgel')) ? localStorage.getItem('jm-orgue-inst-tab-orgel') : 'klank';
   let instTabAlg = INST_TABS_ALG.includes(localStorage.getItem('jm-orgue-inst-tab-alg')) ? localStorage.getItem('jm-orgue-inst-tab-alg') : 'audio';
   function zetInstTabOrgel(tab) { instTabOrgel = tab; localStorage.setItem('jm-orgue-inst-tab-orgel', tab); }
   function zetInstTabAlg(tab) { instTabAlg = tab; localStorage.setItem('jm-orgue-inst-tab-alg', tab); }
+  $: if (secondary && instTabOrgel === 'laden') instTabOrgel = 'klank';
 
   // Instelwizard (0.8.90): bij een orgel zonder opgeslagen instellingen
   // (eerste laad) loopt de organist in vijf stappen door MIDI-kanaal per
@@ -3347,9 +3349,16 @@
     // functie nog lopen; zonder guard pushte die instellingen van orgel A in
     // de mirrors/audio van orgel B (auditbevinding 47).
     const myOrgan = organInfo?.id;
+    const myLoadEpoch = organLoadEpoch;
+    const myAudioEpoch = audioEpoch;
+    const isCurrent = () => organInfo?.id === myOrgan
+      && organLoadEpoch === myLoadEpoch && audioEpoch === myAudioEpoch;
+    const doeHerstel = bewaakOrgelHerstel(isCurrent);
+    const invokeVoorHerstel = (...args) => doeHerstel(() => invoke(...args));
     try {
-      const s = await invoke('get_organ_settings');
-      if (organInfo?.id !== myOrgan) return;
+      if (pushToBackend) await invokeVoorHerstel('apply_saved_wind_groups');
+      const s = await invokeVoorHerstel('get_organ_settings');
+      if (!isCurrent()) return;
       // Indeling van de afstandsbediening (0.7.39): welke onderdelen en welke
       // divisies het externe scherm toont. De rest van de indeling (zichtbare
       // koppels, koppelplaatsing, registervolgorde, knopvorm) komt uit de
@@ -3370,6 +3379,22 @@
         if (!Object.values(remoteDivisions).some(Boolean)) remoteDivisions = {};
       }
       lastRemoteLayoutJson = '';
+      // Registervolgorde uit het orgelbestand overnemen als dit orgel op deze pc
+      // nog geen eigen volgorde heeft (set met .jm-settings.json van een andere
+      // pc, of webview-gegevens kwijt). Een lokale volgorde wint altijd, ook een
+      // bewust leeggemaakte: dan bestaat de sleutel. Zie lib/registerVolgorde.js.
+      try {
+        const sleutel = `jm-orgue-stop-order-${organInfo.id || 'default'}`;
+        if (rl && localStorage.getItem(sleutel) === null) {
+          const expliciet = rl.custom_stop_order;
+          const overgenomen = volgordeUitOrgelbestand(rl.stop_order, organInfo.divisions, expliciet);
+          if ((expliciet && typeof expliciet === 'object' && !Array.isArray(expliciet)) || Object.keys(overgenomen).length > 0) {
+            // Ook in localStorage: refreshSharedPrefs leest de volgorde daar elke seconde.
+            localStorage.setItem(sleutel, JSON.stringify(overgenomen));
+            stopOrder = overgenomen;
+          }
+        }
+      } catch (e) { console.warn('registervolgorde overnemen:', e); }
       // Master volume: opgeslagen waarde, anders de ECHTE default (-6 dB) — niet de
       // sliderwaarde van het vorige orgel, anders lekt diens volume dit orgel in
       // én wordt het bij de eerste autosave als instelling van dít orgel bewaard.
@@ -3399,17 +3424,17 @@
         }
         if (idx >= 0) {
           selectedTemperament = idx;
-          if (pushToBackend) await invoke('set_temperament', { noteOffsets: temperaments[idx].cents, fineTune, name: temperaments[idx].name, retune: !temperaments[idx].original });
+          if (pushToBackend) await invokeVoorHerstel('set_temperament', { noteOffsets: temperaments[idx].cents, fineTune, name: temperaments[idx].name, retune: !temperaments[idx].original });
         } else if (Array.isArray(t.custom_cents)) {
           customCents = [...t.custom_cents];
-          if (pushToBackend) await invoke('set_temperament', { noteOffsets: t.custom_cents, fineTune, name: t.name || 'Aangepast', retune: true });
+          if (pushToBackend) await invokeVoorHerstel('set_temperament', { noteOffsets: t.custom_cents, fineTune, name: t.name || 'Aangepast', retune: true });
         }
       } else {
         // Geen opgeslagen stemming → default (Origineel, zoals opgenomen) toepassen i.p.v. die van het vorige orgel.
         selectedTemperament = 0;
         fineTune = 0;
         const t0 = temperaments[0];
-        if (pushToBackend) await invoke('set_temperament', { noteOffsets: t0.cents, fineTune: 0, name: t0.name, retune: false });
+        if (pushToBackend) await invokeVoorHerstel('set_temperament', { noteOffsets: t0.cents, fineTune: 0, name: t0.name, retune: false });
       }
 
       // EQ: nieuw banden-formaat, of migratie vanuit het oude 3-band formaat.
@@ -3452,7 +3477,7 @@
         eqPreampAutoWaarde = 0;
         eqStrength = 100;
       }
-      if (pushToBackend) await updateEq();
+      if (pushToBackend) await doeHerstel(updateEq);
 
       // Reverb: opgeslagen volledige configuratie of default. applyReverbToBackend() past
       // het toe met de afgestemde logica (geen galmstaart wissen tijdens poll).
@@ -3502,14 +3527,14 @@
         reverb = (organInfo?.release_pipes || 0) > 0 ? 0 : 30;
         reverbIrPath = null; reverbIrLoaded = false; reverbIrName = '';
       }
-      if (pushToBackend) await applyReverbToBackend();
+      if (pushToBackend) await doeHerstel(applyReverbToBackend);
 
       // ===== Per-divisie DSP (pan, zwel-config, tremulant, wind-groep) per orgel uit backend =====
       // Pan: backend slaat -1..1 op; UI gebruikt -100..100. Push past de audio toe.
       divisionPans = {};
       for (const p of (s?.division_pans || [])) {
         divisionPans[p.division] = Math.round(p.pan * 100);
-        if (pushToBackend) invoke('set_division_pan', { division: p.division, pan: p.pan }).catch(() => {});
+        if (pushToBackend) invokeVoorHerstel('set_division_pan', { division: p.division, pan: p.pan }).catch(() => {});
       }
       divisionPans = divisionPans;
 
@@ -3518,19 +3543,20 @@
       for (const sc of (s?.division_swell_configs || [])) {
         swellMinDb[sc.division] = sc.min_db;
         swellFilterCutoff[sc.division] = sc.filter_cutoff;
-        if (pushToBackend) invoke('set_swell_config', { division: sc.division, minDb: sc.min_db, filterCutoff: sc.filter_cutoff }).catch(() => {});
+        if (pushToBackend) invokeVoorHerstel('set_swell_config', { division: sc.division, minDb: sc.min_db, filterCutoff: sc.filter_cutoff }).catch(() => {});
       }
       swellMinDb = swellMinDb; swellFilterCutoff = swellFilterCutoff;
       // Zwelkast van de set (E5): alleen als dit orgel het aan heeft; divisies met eigen waarden blijven.
       if (pushToBackend) {
         try {
-          const vl = await invoke('get_orgel_vlaggen');
+          const vl = await invokeVoorHerstel('get_orgel_vlaggen');
           if (vl && vl.zwelkast_van_set) {
-            zwelkastVoorstel = await invoke('get_zwelkast_voorstel');
-            await pasZwelkastVanSetToe();
+            zwelkastVoorstel = await invokeVoorHerstel('get_zwelkast_voorstel');
+            await doeHerstel(pasZwelkastVanSetToe);
           }
         } catch (e) { /* geen voorstel: niets te doen */ }
       }
+      if (!isCurrent()) return;
 
       // Tremulant: alleen de UI-maps herstellen (beschikbaar + parameters). De audio-params
       // worden bij het live activeren toegepast. Daarna vullen de has_tremulant-defaults aan.
@@ -3559,8 +3585,8 @@
 
       // Wind-groep toewijzing (UI) uit backend + aantal groepen + per-groep config.
       try {
-        const wg = await invoke('get_division_wind_groups');
-        const n = await invoke('get_num_wind_groups');
+        const wg = await invokeVoorHerstel('get_division_wind_groups');
+        const n = await invokeVoorHerstel('get_num_wind_groups');
         if (typeof n === 'number' && n >= 1 && n <= 8) numWindGroups = n;
         divisionWindGroups = {};
         if (Array.isArray(wg) && organInfo?.divisions) {
@@ -3582,11 +3608,11 @@
       }
 
       // Output-kanalen + C/Cis: apply_saved past de backend-audio toe; lees daarna voor de UI.
-      if (pushToBackend) { try { await invoke('apply_saved_output_channels'); } catch (e) {} }
+      if (pushToBackend) { try { await invokeVoorHerstel('apply_saved_output_channels'); } catch (e) {} }
       try {
-        const chans = await invoke('get_division_output_channels');
-        const ccisArr = await invoke('get_division_ccis');
-        const spread = await invoke('get_ccis_spread');
+        const chans = await invokeVoorHerstel('get_division_output_channels');
+        const ccisArr = await invokeVoorHerstel('get_division_ccis');
+        const spread = await invokeVoorHerstel('get_ccis_spread');
         divisionOutputChannels = {}; divisionCcis = {};
         if (organInfo?.divisions) {
           organInfo.divisions.forEach((d, i) => {
@@ -3603,14 +3629,15 @@
       } catch (e) {}
     } catch (e) {
       console.error('loadAudioSettingsForOrgan failed:', e);
+      throw e;
     }
     // Pas NU (na get_organ_settings) de indeling van de afstandsbediening
     // publiceren: eerder zou de opgeslagen indeling van dit orgel met de
     // defaults overschreven worden. Alleen het hoofdvenster (pushToBackend)
     // en alleen als dit nog de actuele orgel-load is (stale-guard).
-    if (pushToBackend && organInfo?.id === myOrgan) {
+    if (pushToBackend && isCurrent()) {
       remoteLayoutReady = true;
-      publishRemoteLayout();
+      await publishRemoteLayout();
     }
   }
 
@@ -3818,6 +3845,7 @@
       visible_couplers: (displayOrgan?.couplers || []).filter(c => isCouplerVisible(c.id)).map(c => c.id),
       coupler_placement: couplerPlacement,
       stop_order,
+      custom_stop_order: stopOrder,
       knob_shape: knobShape,
       show_couplers: remoteParts.couplers !== false,
       show_tremulant: remoteParts.tremulant !== false,
@@ -5710,28 +5738,30 @@
     }
   }
 
-  // Bij een ECHTE orgelwissel (id verandert): reset de live tremulant-stand en laad de
-  // crescendo-config van dít orgel. We keyen op organInfo.id (niet op divisie-namen),
-  // want twee verschillende orgels kunnen identieke divisie-namen hebben — dan zou een
-  // tremulant die op het vorige orgel aanstond ten onrechte "actief" blijven.
+  // Een herlaad met hetzelfde id krijgt ook een nieuwe generatie. App wacht op
+  // deze herstelactie voordat de migratiebewaking automatisch opslaan vrijgeeft.
   let crescLoadedFor = '';
-  $: if (organInfo && organInfo.id && `${organInfo.id}::${audioEpoch}` !== crescLoadedFor) {
-    crescLoadedFor = `${organInfo.id}::${audioEpoch}`;
+  let organSettingsPromise = Promise.resolve();
+  export function wachtOpOrgelinstellingen() { return organSettingsPromise; }
+  $: if (organInfo && organInfo.id && `${organInfo.id}::${audioEpoch}::${organLoadEpoch}` !== crescLoadedFor) {
+    crescLoadedFor = `${organInfo.id}::${audioEpoch}::${organLoadEpoch}`;
+    const sleutel = crescLoadedFor;
+    const isCurrent = () => `${organInfo?.id}::${audioEpoch}::${organLoadEpoch}` === sleutel;
+    const doeHerstel = bewaakOrgelHerstel(isCurrent);
     tremActive = {};
-    loadCrescendoForOrgan();
-    // Niets publiceren naar de afstandsbediening tot de opgeslagen indeling van
-    // DIT orgel geladen is (loadAudioSettingsForOrgan zet de vlag weer aan).
     remoteLayoutReady = false;
-    // Secundaire vensters laden alleen de UI-state (geen backend-pushes).
-    loadAudioSettingsForOrgan(!secondary);
-    // NIET hier synchroon: Svelte draait de $:-blokken één keer per ronde, in
-    // een volgorde die het bij het compileren bepaalt. Wat een functie hier
-    // toewijst (knobShape, stopHeight, …) ziet het daarbij niet, dus blokken
-    // die eerder in de ronde al liepen (knopHoogteStijl, bandRijen) bleven op
-    // de oude waarde staan terwijl de markup de nieuwe al kreeg. Gevolg bij
-    // elke start met ronde knoppen: ronde vorm + vaste rechthoek-hoogte = ovaal.
-    // Na de huidige ronde laden = alles rekent netjes opnieuw.
-    tick().then(loadUiPrefsForOrgan);
+    organSettingsPromise = (async () => {
+      await doeHerstel(() => loadCrescendoForOrgan(isCurrent));
+      await doeHerstel(() => loadAudioSettingsForOrgan(!secondary));
+      // Na de huidige Svelte-ronde laden, zodat ook afgeleide knopmaten en
+      // stijlen opnieuw worden berekend.
+      await doeHerstel(tick);
+      loadUiPrefsForOrgan();
+    })();
+    // Ook bij een niet door App gestarte refresh (secundair venster/audio-
+    // herbouw) blijft een mislukking afgehandeld. App kan dezelfde afwijzing
+    // nog steeds opvangen via wachtOpOrgelinstellingen().
+    organSettingsPromise.catch(e => console.error('Orgelinstellingen herstellen mislukt:', e));
   }
 
   // Bibliotheek laden zodra het startscherm getoond wordt. Alleen in het
@@ -6795,6 +6825,7 @@
       <div class="instellingen-view">
         <nav class="instellingen-nav" aria-label={$t('settings.nav_label')}>
           <button class="instellingen-nav-knop" class:actief={instTabOrgel === 'klank'} on:click={() => zetInstTabOrgel('klank')}>{$t('settings.nav_klank')}</button>
+          {#if !secondary}<button class="instellingen-nav-knop" class:actief={instTabOrgel === 'laden'} on:click={() => zetInstTabOrgel('laden')}>{$t('settings.nav_laden')}</button>{/if}
           <button class="instellingen-nav-knop" class:actief={instTabOrgel === 'crescendo'} on:click={() => zetInstTabOrgel('crescendo')}>{$t('settings.nav_crescendo')}</button>
           <button class="instellingen-nav-knop" class:actief={instTabOrgel === 'weergave'} on:click={() => zetInstTabOrgel('weergave')}>{$t('settings.nav_registersortering')}</button>
           <button class="instellingen-nav-knop" class:actief={instTabOrgel === 'midi'} on:click={() => zetInstTabOrgel('midi')}>{$t('settings.nav_routing')}</button>
@@ -7297,7 +7328,7 @@
 
             <!-- Perspectieven en gestapelde ranks (0.7.38) -->
             {#if !secondary && ((organInfo?.perspectives?.length || 0) > 0 || (organInfo?.layered_stops || 0) > 0)}
-            <div class="settings-block" class:inst-verborgen={instTabOrgel !== 'klank' && instTabOrgel !== 'alles'}>
+            <div class="settings-block" class:inst-verborgen={instTabOrgel !== 'laden' && instTabOrgel !== 'alles'}>
               <h3 class="settings-block-title" id="sec-perspectives-title">{$t('perspectives.title')}</h3>
               {#if (organInfo?.layered_stops || 0) > 0}
                 <p class="settings-hint" style="margin: 0 0 0.4rem;">{$t('perspectives.stacked_note').replace('{n}', organInfo.layered_stops)}</p>
@@ -7349,7 +7380,7 @@
 
             <!-- Registers niet laden (F2) -->
             {#if !secondary && registerLijst.length > 0}
-            <div class="settings-block" class:inst-verborgen={instTabOrgel !== 'klank' && instTabOrgel !== 'alles'}>
+            <div class="settings-block" class:inst-verborgen={instTabOrgel !== 'laden' && instTabOrgel !== 'alles'}>
               <h3 class="settings-block-title" id="sec-register-laden-title">{$t('settings.register_laden_title')}</h3>
               <p class="settings-hint" style="margin: 0 0 0.4rem;">{$t('settings.register_laden_desc')}</p>
               <p class="settings-hint" style="margin: 0 0 0.4rem;">{$t('settings.register_laden_totaal').replace('{nu}', formatGeheugen(registerTotaalNu) || '0 MB').replace('{keuze}', formatGeheugen(registerTotaalKeuze) || '0 MB').replace('{alles}', formatGeheugen(registerTotaalAlles) || '0 MB')}</p>
@@ -7750,6 +7781,11 @@
                 <button class="btn btn-secondary btn-sm" on:click={importSettings}>
                   {$t('settings.import_settings')}
                 </button>
+                {#if !secondary}
+                  <button class="btn btn-secondary btn-sm" on:click={() => dispatch('restoreLegacySettings')}>
+                    {$t('settings.legacy_import_button')}
+                  </button>
+                {/if}
               </div>
               <p style="font-size: 0.7rem; color: var(--text-secondary); margin-top: 0.4rem;">
                 {$t('settings.autosave_hint')}

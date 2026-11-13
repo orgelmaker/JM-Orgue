@@ -11,8 +11,9 @@
   import ImportVerslag from './components/ImportVerslag.svelte';
   import { t, tx } from './lib/i18n.js';
   import { loadAudioProfiles, profileMatchesOutput, deriveProfileFromOutput as deriveProfile, AUDIO_PROFILES_KEY } from './lib/audioProfiles.js';
-  import { pickDevice } from './lib/audioDevices.js';
+  import { pickDevice, opgeslagenUitgang } from './lib/audioDevices.js';
   import { isTekstveld } from './lib/toetsen.js';
+  import { kiesOudeInstellingen, maakMigratieBewaking, voltooiOrgelHerstel } from './lib/legacySettings.js';
   import { pasSfeerToeAlsGewijzigd } from './lib/sfeer.js';
 
   // Venstertype uit de URL-hash: extra registerscherm (#panel&n=N) of
@@ -49,6 +50,9 @@
   let selectedSampleRate = null;
   let midiDevices = [];
   let selectedAudioDevice = null;
+  // Het apparaat uit de opgeslagen uitgang (backend); voorkeur bij het kiezen
+  // van een apparaat uit de lijst van een host.
+  let opgeslagenApparaat = null;
   let selectedMidiDevice = null;
   let organInfo = null;
   let status = {
@@ -744,7 +748,8 @@
           if (p.host) { selectedAudioHost = p.host; await refreshDevicesForHost(); }
           if (p.device) selectedAudioDevice = p.device;
           selectedBufferFrames = p.bufferFrames || null;
-          await applyAudioOutput();
+          if ('sampleRate' in p) selectedSampleRate = p.sampleRate || null;
+          await applyAudioOutput(p.audioOrigin);
         } catch (err) { /* fout staat al in `error` */ }
       }));
       panelUnlisteners.push(await listen('jm-orgue:save-audio-profile', (e) => {
@@ -830,18 +835,25 @@
   // op een eventuele pending save (gebruikt door de close-handler).
   let autoSaveTimer = null;
   let autoSavePromise = null;
+  // Tijdens een orgelwissel mag een achtergebleven UI-event de zojuist
+  // geïmporteerde instellingen niet met de oude runtime overschrijven.
+  let orgelwisselBezig = false;
+  // Als een lading na een import mislukt, mag de nog getoonde oude runtime de
+  // geïmporteerde bibliotheekentry niet bij een latere autosave overschrijven.
+  const migratieBewaking = maakMigratieBewaking();
   function scheduleAutoSave() {
+    if (!migratieBewaking.kanOpslaan(orgelwisselBezig)) return;
     if (autoSaveTimer) clearTimeout(autoSaveTimer);
     autoSaveTimer = setTimeout(() => {
       autoSaveTimer = null;
       autoSavePromise = persistOrganSettings().catch(() => {}).finally(() => { autoSavePromise = null; });
     }, 800);
   }
-  async function flushAutoSave() {
+  async function flushAutoSave(force = false) {
     if (autoSaveTimer) {
       clearTimeout(autoSaveTimer);
       autoSaveTimer = null;
-      autoSavePromise = persistOrganSettings().catch(() => {});
+      autoSavePromise = persistOrganSettings(force).catch(() => {});
     }
     if (autoSavePromise) await autoSavePromise;
   }
@@ -944,14 +956,16 @@
   async function refreshDevices() {
     try {
       audioHosts = await invoke('list_audio_hosts');
-      selectedAudioHost = localStorage.getItem('jm-orgue-audio-host')
+      // De opgeslagen uitgang komt uit de backend (audio_config.json), niet meer
+      // uit een eigen kopie in localStorage; zie lib/audioDevices.js.
+      const opgeslagen = opgeslagenUitgang(await invoke('get_audio_output_prefs'));
+      opgeslagenApparaat = opgeslagen.device;
+      selectedAudioHost = opgeslagen.host
         || audioHosts.find(h => /wasapi/i.test(h)) || audioHosts[0] || null;
       await refreshDevicesForHost();
 
-      const savedBuffer = Number(localStorage.getItem('jm-orgue-audio-buffer'));
-      selectedBufferFrames = savedBuffer > 0 ? savedBuffer : null;
-    const savedRate = parseInt(localStorage.getItem('jm-orgue-audio-rate') || '0', 10);
-    selectedSampleRate = savedRate > 0 ? savedRate : null;
+      selectedBufferFrames = opgeslagen.buffer;
+      selectedSampleRate = opgeslagen.rate;
 
       midiDevices = await invoke('get_midi_devices');
     } catch (e) {
@@ -966,7 +980,7 @@
     } catch (e) {
       audioDevices = [];
     }
-    selectedAudioDevice = pickDevice(audioDevices, localStorage.getItem('jm-orgue-audio-device'));
+    selectedAudioDevice = pickDevice(audioDevices, opgeslagenApparaat);
   }
 
   async function handleSelectAudioHost(host) {
@@ -994,6 +1008,8 @@
   // Telt op bij elke geslaagde audio-herbouw; Console herlaadt dan de per-orgel
   // DSP op de verse audio-thread (auditbevinding 20).
   let audioEpoch = 0;
+  // Iedere backend-lading, ook een herlaad met hetzelfde orgel-id, vraagt verse UI-waarden.
+  let organLoadEpoch = 0;
   // Uitgangscorrectie (0.7.77): Rust volgt het actieve uitvoerprofiel. Elke
   // verandering van `audioProfiles.active` (start, migratie, wissel, wissen)
   // gaat één keer naar set_active_output_profile; Rust past de bijbehorende
@@ -1239,7 +1255,7 @@
   // draait echt), `player_rebuilt` (nieuwe audio-thread → orgel herladen, ook
   // wanneer de wissel zelf mislukte maar de vorige uitgang is herbouwd) en
   // `message` (Nederlandse uitleg bij falen).
-  async function applyAudioOutput() {
+  async function applyAudioOutput(origin = null) {
     try {
       const res = await invoke('set_audio_output', {
         host: selectedAudioHost,
@@ -1266,12 +1282,13 @@
         return 'busy';
       }
       if (res.switched) {
-        if (selectedAudioHost) localStorage.setItem('jm-orgue-audio-host', selectedAudioHost);
-        if (selectedAudioDevice) localStorage.setItem('jm-orgue-audio-device', selectedAudioDevice);
-        if (selectedSampleRate) localStorage.setItem('jm-orgue-audio-rate', String(selectedSampleRate));
-        else localStorage.removeItem('jm-orgue-audio-rate');
-        if (selectedBufferFrames) localStorage.setItem('jm-orgue-audio-buffer', String(selectedBufferFrames));
-        else localStorage.removeItem('jm-orgue-audio-buffer');
+        // De backend heeft de keuze in audio_config.json gezet; hier alleen
+        // onthouden welk apparaat bij een hostwissel de voorkeur heeft.
+        opgeslagenApparaat = selectedAudioDevice;
+        try {
+          const { emit } = await import('@tauri-apps/api/event');
+          await emit('jm-orgue:audio-output-changed', { origin: typeof origin === 'string' ? origin : null });
+        } catch (e) { /* geen andere vensters bereikbaar */ }
         return 'ok';
       }
       error = res.message || tx('audio.switch_failed');
@@ -1495,6 +1512,51 @@
     }
   }
 
+  // Een oud zijbestand identificeert zijn eigenaar niet. De gebruiker bepaalt
+  // vóór de lading of het bij dit orgel hoort, zodat ook laadkeuzes en vlaggen
+  // uit de gekozen instellingen kunnen worden toegepast.
+  async function vraagOudeInstellingen(path, directory, handmatig = false) {
+    return kiesOudeInstellingen({
+      handmatig,
+      inspecteer: () => invoke('inspect_legacy_settings', { path, directory }),
+      meldOntbrekend: () => window.alert(tx('settings.legacy_not_found')),
+      waarschuw: (e) => { error = `${tx('settings.legacy_inspect_failed')} ${vertaalFout(e)}`; },
+      bevestig: (kandidaat, vervangen) => window.confirm(vervangen
+        ? tx('settings.legacy_replace_confirm')
+        : tx('settings.legacy_prompt').replace('{organ}', kandidaat.organ_id).replace('{file}', kandidaat.legacy_path)),
+      stelUit: async (kandidaat) => {
+        try {
+          await invoke('defer_legacy_settings', { organId: kandidaat.organ_id });
+        } catch (e) {
+          throw new Error(`${tx('settings.legacy_defer_failed')} ${vertaalFout(e)}`);
+        }
+      },
+      importeer: async (kandidaat) => {
+        const waarschuwing = await invoke('import_legacy_settings', { organId: kandidaat.organ_id });
+        migratieBewaking.importGeslaagd();
+        if (waarschuwing) error = `${tx('settings.legacy_sidecar_warning')} ${waarschuwing}`;
+      },
+    });
+  }
+
+  function herstelOudeInstellingen() {
+    if (!organInfo?.id || loading) return;
+    const pad = organInfo.id;
+    if (/\.(organ|organ_hauptwerk_xml|customorgan_hauptwerk_xml)$/i.test(pad)) {
+      loadOrgan(pad, { legacyHandmatig: true });
+    } else {
+      loadFromFolder(pad, { legacyHandmatig: true });
+    }
+  }
+
+  async function herstelUiNaOrgelLading() {
+    organLoadEpoch += 1;
+    await voltooiOrgelHerstel(async () => {
+      await tick(); // laat Console de nieuwe generatie ontvangen en zijn herstel starten
+      await consoleComponent.wachtOpOrgelinstellingen();
+    }, migratieBewaking);
+  }
+
   async function loadOrgan(path, opties = {}) {
     const pakketPad = typeof path === 'string' ? path.toLowerCase() : '';
     if (pakketPad.endsWith('.orgue') || pakketPad.endsWith('.rar')) {
@@ -1522,13 +1584,16 @@
     loadingMessage = tx('status.loading');
     error = null;
     importBanner = null;
+    orgelwisselBezig = true;
 
     try {
       // Bewaar laatste stand van het huidige orgel voordat we wisselen.
-      if (organInfo) { try { await flushAutoSave(); await persistOrganSettings(); } catch(e) {} }
+      if (organInfo && !migratieBewaking.openstaand) { try { await flushAutoSave(true); await persistOrganSettings(true); } catch(e) {} }
+      if (!(await vraagOudeInstellingen(path, false, !!opties.legacyHandmatig))) return;
       await closeExtraPanels();
       loadingMessage = tx('status.loading_samples');
       organInfo = await invoke('load_organ', { path });
+      await herstelUiNaOrgelLading();
       lastOrganInfoJson = null;
       showOrganBrowser = false;
       await restorePresetsToLocalStorage();
@@ -1545,25 +1610,29 @@
       // (met hun eigen divisiekeuze en vensterpositie).
       try { await tick(); await consoleComponent?.restorePanels?.(); } catch (e) {}
     } catch (e) {
-      error = vertaalFout(e);
+      error = migratieBewaking.openstaand ? `${tx('settings.legacy_load_failed')} ${vertaalFout(e)}` : vertaalFout(e);
     } finally {
+      orgelwisselBezig = false;
       loading = false;
     }
   }
 
-  async function loadFromFolder(directory) {
+  async function loadFromFolder(directory, opties = {}) {
     loading = true;
     loadingProgress = 0;
     loadingMessage = tx('status.scanning_folder');
     error = null;
     importBanner = null;
+    orgelwisselBezig = true;
 
     try {
       // Bewaar laatste stand van het huidige orgel voordat we wisselen.
-      if (organInfo) { try { await flushAutoSave(); await persistOrganSettings(); } catch(e) {} }
+      if (organInfo && !migratieBewaking.openstaand) { try { await flushAutoSave(true); await persistOrganSettings(true); } catch(e) {} }
+      if (!(await vraagOudeInstellingen(directory, true, !!opties.legacyHandmatig))) return;
       await closeExtraPanels();
       loadingMessage = tx('status.loading_samples');
       organInfo = await invoke('load_samples_from_directory', { directory });
+      await herstelUiNaOrgelLading();
       lastOrganInfoJson = null;
       showOrganBrowser = false;
       await restorePresetsToLocalStorage();
@@ -1576,8 +1645,9 @@
       // Extra registerschermen die bij dít orgel open stonden heropenen.
       try { await tick(); await consoleComponent?.restorePanels?.(); } catch (e) {}
     } catch (e) {
-      error = vertaalFout(e);
+      error = migratieBewaking.openstaand ? `${tx('settings.legacy_load_failed')} ${vertaalFout(e)}` : vertaalFout(e);
     } finally {
+      orgelwisselBezig = false;
       loading = false;
     }
   }
@@ -1757,8 +1827,8 @@
     catch (e) { console.error('Shutdown MIDI-leren mislukt:', e); }
   }
 
-  async function persistOrganSettings() {
-    if (!organInfo) return;
+  async function persistOrganSettings(force = false) {
+    if (!organInfo || !migratieBewaking.kanOpslaan(orgelwisselBezig, force)) return;
     try {
       const hash = hashCode(organInfo.id);
       // Zelfde sleutel als SetzerBar (geheugenniveau 1 = standaard): de oude
@@ -2067,6 +2137,7 @@
       on:setView={(e) => setView(e.detail)}
       on:loadOrgan={(e) => loadOrgan(e.detail)}
       on:scanFolder={(e) => loadFromFolder(e.detail)}
+      on:restoreLegacySettings={herstelOudeInstellingen}
       on:cancelLoad={() => { invoke('cancel_load').catch(() => {}); }}
       on:setTremulant={(e) => setTremulant(e.detail.division, e.detail.active)}
       on:setMidiMapping={(e) => setMidiMapping(e.detail.division, e.detail.channel, e.detail.transpose)}
@@ -2086,6 +2157,7 @@
       {selectedSampleRate}
       {audioProfiles}
       {audioEpoch}
+      {organLoadEpoch}
       on:saveAudioProfile={(e) => saveAudioProfile(e.detail)}
       on:clearAudioProfile={(e) => clearAudioProfile(e.detail)}
       on:switchAudioProfile={(e) => switchAudioProfile(e.detail)}
@@ -2098,7 +2170,7 @@
       on:setRestoreRegistration={(e) => setRestoreRegistration(e.detail)}
       on:setAutoLoadLastOrgan={(e) => setAutoLoadLastOrgan(e.detail)}
       on:setPanelCloseQuits={(e) => setPanelCloseQuits(e.detail)}
-      on:persistSettings={persistOrganSettings}
+      on:persistSettings={() => persistOrganSettings()}
     />
   </div>
 

@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Definitieve Fase 2-diagnostiek: isoleert restore (mirror-endpoint) van save/webview.
 # Gebruikt een correct ge-encode echte divisienaam.
+echo 'Deze verificatie is uitgeschakeld: het script verwijdert oude instellingenbestanden. Werk het eerst bij voor een geïsoleerde testomgeving.' >&2
+exit 1
 set -u
 API="http://127.0.0.1:8765"
 CURL="curl -s --max-time 90"
