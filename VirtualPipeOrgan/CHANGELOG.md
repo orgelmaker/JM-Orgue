@@ -6,6 +6,8 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+## [0.9.55] - 2026-11-13
+
 ### Handleiding bijgewerkt voor het tabblad Laden en de oude instellingen, in zeven talen
 - Beschreven: het nieuwe tabblad Laden in de orgelinstellingen, een eigen instellingenbestand per orgeldefinitie, de vraag bij
   een ouder instellingenbestand zonder bekende eigenaar (met Annuleren om later te beslissen) en het later overnemen
