@@ -1627,7 +1627,7 @@ fn handle_midi_inject(state: &AppState, query: &str) -> Result<Value, (u16, Stri
 }
 
 /// Body {"division": "...", "channel": int|null, "first"?: int, "last"?: int,
-/// "transpose"?: int} — vervangt de MIDI-klavier-mapping van die divisie
+/// "transpose"?: int, "short_octave"?: bool} — vervangt de MIDI-klavier-mapping van die divisie
 /// (geïnjecteerde noten vereisen een mapping om in held_notes te komen).
 fn handle_midi_mapping(state: &AppState, body: &str) -> Result<Value, (u16, String)> {
     use crate::state::MidiChannelMapping;
@@ -1638,12 +1638,14 @@ fn handle_midi_mapping(state: &AppState, body: &str) -> Result<Value, (u16, Stri
     let first = v.get("first").and_then(|x| x.as_u64()).map(|n| (n as u8).min(127));
     let last = v.get("last").and_then(|x| x.as_u64()).map(|n| (n as u8).min(127));
     let transpose = v.get("transpose").and_then(|x| x.as_i64()).unwrap_or(0).clamp(-48, 48) as i8;
+    // "short_octave"?: bool — het korte octaaf van dit klavier (weggelaten = uit).
+    let short_octave = v.get("short_octave").and_then(|x| x.as_bool()).unwrap_or(false);
     let mut mappings = state.get_midi_mappings();
     mappings.retain(|m| m.division != division);
     mappings.push(MidiChannelMapping {
         division: division.clone(), channel, transpose,
         first_midi_note: first, last_midi_note: last,
-        short_octave: false,
+        short_octave,
     });
     let n = mappings.len();
     state.set_midi_mappings(mappings);

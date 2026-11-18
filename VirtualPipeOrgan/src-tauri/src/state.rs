@@ -454,20 +454,15 @@ pub struct MidiChannelMapping {
     pub first_midi_note: Option<u8>,
     /// Last MIDI note of the keyboard (learned)
     pub last_midi_note: Option<u8>,
-    /// Kort octaaf (C/E) op dit klavier (0.7.47). Bij historische orgels is de
-    /// onderste octaaf niet volledig: de toets die eruitziet als E klinkt als
-    /// C, Fis klinkt als D en Gis als E, en Cis/Dis ontbreken. Een moderne
-    /// MIDI-klaviatuur stuurt gewoon de fysieke toets; deze vlag zet die om,
-    /// zodat oude muziek met de linkerhand op de "verkeerde" toetsen klopt.
+    /// Kort octaaf (C/E) op dit klavier (0.7.47, hersteld in 0.9.57). Bij
+    /// historische orgels is de onderste octaaf niet volledig: de E-toets
+    /// klinkt als C, Fis als D en Gis als E; F, G, A, Bes en B klinken gewoon,
+    /// en C, Cis, D en Dis bestaan daar niet. Een MIDI-klavier stuurt de
+    /// fysieke toets; deze vlag zet die om, zodat oude muziek met de linkerhand
+    /// op de toetsen van het echte instrument klopt. Alles vanaf de c erboven
+    /// blijft zoals het is.
     pub short_octave: bool,
 }
-
-/// Klinkende halve toon per toets van de onderste octaaf, geteld vanaf de
-/// laagste toets van het klavier. De laagste toets ziet eruit als E maar klinkt
-/// als C; daarna F→F, Fis→D, G→G, Gis→E, A→A, Bes→Bes, B→B. Vanaf de negende
-/// toets (de C erboven) loopt alles weer gelijk, vier halve tonen hoger dan de
-/// toets suggereert.
-const KORT_OCTAAF: [u8; 8] = [0, 5, 2, 7, 4, 9, 10, 11];
 
 impl MidiChannelMapping {
     /// Accepteert dit klavier dit kanaal + deze (fysieke) noot?
@@ -485,7 +480,29 @@ impl MidiChannelMapping {
         if let Some(l) = self.last_midi_note {
             if note > l { return false; }
         }
+        // Kort octaaf: C, Cis, D en Dis van de onderste octaaf bestaan op het
+        // echte klavier niet en doen niets. Hier geweigerd, zodat de directe
+        // aanslag, de koppels en het loslaten ze alle drie overslaan.
+        if self.kort_octaaf_stil(note) { return false; }
         true
+    }
+
+    /// De E-toets van het korte octaaf: de eerste E vanaf de laagste ingeleerde
+    /// toets. Een gewoon klavier dat op C begint heeft hem vier toetsen hoger,
+    /// een echt kort-octaafklavier begint erop. None = vlag uit, of geen
+    /// ingeleerde laagste toets (dan weten we niet waar de onderste octaaf
+    /// begint en doet de vlag niets: beter niets dan de verkeerde noot).
+    fn kort_octaaf_e(&self) -> Option<u8> {
+        if !self.short_octave { return None; }
+        let laagste = self.first_midi_note?;
+        let e = laagste as u16 + ((4 + 12 - (laagste as u16 % 12)) % 12);
+        (e <= 127).then_some(e as u8)
+    }
+
+    /// Is dit een toets die op een kort-octaafklavier niet bestaat (C, Cis, D
+    /// of Dis onder de E-toets)?
+    pub fn kort_octaaf_stil(&self, note: u8) -> bool {
+        self.kort_octaaf_e().is_some_and(|e| note < e && note + 4 >= e)
     }
 
     /// Fysieke toets → klinkende noot: eerst het korte octaaf, dan het
@@ -497,20 +514,13 @@ impl MidiChannelMapping {
         (n as i16 + self.transpose as i16).clamp(0, 127) as u8
     }
 
-    /// Alleen de octaafomzetting (zonder transponeren). Zonder ingeleerde
-    /// laagste toets weten we niet waar de onderste octaaf begint en doet de
-    /// vlag niets — beter niets dan de verkeerde noot.
+    /// Alleen de octaafomzetting (zonder transponeren): E→C, Fis→D en Gis→E
+    /// in de onderste octaaf; elke andere toets blijft wat hij is.
     fn kort_octaaf(&self, note: u8) -> u8 {
-        if !self.short_octave { return note; }
-        let Some(laagste) = self.first_midi_note else { return note; };
-        if note < laagste { return note; }
-        let offset = (note - laagste) as usize;
-        let klinkend = match KORT_OCTAAF.get(offset) {
-            Some(&v) => v as u16,
-            // Vanaf de C boven het korte octaaf loopt het klavier weer gelijk.
-            None => offset as u16 + 4,
-        };
-        (laagste as u16 + klinkend).min(127) as u8
+        match self.kort_octaaf_e() {
+            Some(e) if note == e || note == e.saturating_add(2) || note == e.saturating_add(4) => note.saturating_sub(4),
+            _ => note,
+        }
     }
 }
 

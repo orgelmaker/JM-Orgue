@@ -353,7 +353,7 @@
     "continuous_keyboard": "Durchgehende Klaviatur",
     "continuous_keyboard_title": "Tasten außerhalb des aufgenommenen Umfangs eines Registers spielen die nächstgelegene Pfeife, auf die richtige Tonhöhe verschoben, statt zu schweigen. So spielt eine 61-Tasten-Klaviatur auf einem 56-Töne-Sampleset weiter — bis zwei Oktaven über den Umfang hinaus. Bass- und Diskanthälften eines geteilten Registers laufen nicht über ihren Teilungspunkt hinaus; der Diskant oben und der Bass unten schon.",
     "short_octave": "Kurze Oktave",
-    "short_octave_title": "Historische Klaviatur mit unvollständiger unterster Oktave: Die Taste, die wie E aussieht, klingt als C, Fis als D und Gis als E. Cis und Dis fehlen dort.",
+    "short_octave_title": "Kurze Oktave (C/E) wie an historischen Orgeln: In der untersten Oktave klingt die E-Taste als C, Fis als D und Gis als E. C, Cis, D und Dis tun dort nichts; der Rest der Klaviatur bleibt unverändert.",
     "short_octave_needs_range": "Lernen Sie zuerst den Tastenumfang ein (oder tragen Sie die tiefste Note ein): ohne tiefste Taste weiß die App nicht, wo die unterste Oktave beginnt.",
     "midi_key_range": "Bereich",
     "midi_key_range_title": "Manueller Tastenbereich: tiefste und höchste MIDI-Note (Alternative zu „Lernen“). Leer = keine Begrenzung.",

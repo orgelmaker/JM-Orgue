@@ -6,6 +6,19 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### Kort octaaf hersteld
+- Het vinkje **Kort octaaf** (per klavier, bij de MIDI-koppeling) deed niet wat het beloofde: het verschoof het hele klavier
+  boven de onderste octaaf een grote terts, en de E-toets klonk bij geen enkele instelling als C. Nu werkt het zoals op een
+  historisch orgel: in de onderste octaaf klinkt de E-toets als C, Fis als D en Gis als E; F, G, A, Bes en B klinken gewoon,
+  en alles vanaf de c erboven blijft zoals het is.
+- C, Cis, D en Dis van de onderste octaaf bestaan op het echte klavier niet en doen met het vinkje aan niets.
+- De onderste octaaf begint bij de eerste E vanaf de laagste ingeleerde toets. Dat werkt voor een gewoon klavier dat op C
+  begint en voor een echt kort-octaafklavier dat op de E-toets begint. Zonder ingeleerd toetsbereik doet het vinkje niets.
+- Wie het vinkje aan had staan, krijgt het nieuwe gedrag; het oude was bij geen enkele instelling bruikbaar.
+- Gemeten in de app op een set met een volledig onderste octaaf: E, Fis en Gis geven de pijpen van C, D en E, de overige
+  toetsen hun eigen pijp, en de vier stille toetsen starten geen stem. De tooltip is in zeven talen bijgewerkt.
+- Test-API: `/midi/mapping` kent het veld `short_octave`.
+
 ## [0.9.56] - 2026-11-13
 
 ### Handleiding bijgewerkt voor het MIDI-menu, in zeven talen
