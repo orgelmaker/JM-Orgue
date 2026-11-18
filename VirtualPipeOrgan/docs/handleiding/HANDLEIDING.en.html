@@ -11,10 +11,10 @@
 
 <header class="titel">
   <h1>JM-Orgue</h1>
-  <div class="onder">User guide for version 0.9.56 &middot; November 2026</div>
+  <div class="onder">User guide for version 0.9.57 &middot; November 2026</div>
 </header>
 
-<p>JM-Orgue is a virtual pipe organ for Windows, macOS and Linux. It plays Hauptwerk and GrandOrgue sample sets directly, including large surround sets and Hauptwerk Custom Organ definitions, and you play it with a MIDI keyboard, an organ console or the mouse. It can write down what you play as you go, in staff notation or in klavar, and print it as a PDF. This guide walks through the program; the screenshots come from version 0.9.16 and later versions, the text describes version 0.9.56.</p>
+<p>JM-Orgue is a virtual pipe organ for Windows, macOS and Linux. It plays Hauptwerk and GrandOrgue sample sets directly, including large surround sets and Hauptwerk Custom Organ definitions, and you play it with a MIDI keyboard, an organ console or the mouse. It can write down what you play as you go, in staff notation or in klavar, and print it as a PDF. This guide walks through the program; the screenshots come from version 0.9.16 and later versions, the text describes version 0.9.57.</p>
 <p class="klein">&copy; Martijn van der Kolk. The screenshots were made with demo organs and own test sets; network addresses, access tokens and user folders have been made unreadable.</p>
 
 <nav class="inhoud">
@@ -233,7 +233,7 @@
 <p>This tab connects your organ to your equipment. At the top there is a block per keyboard:</p>
 <ul>
   <li><b>Channel</b>: the MIDI channel the keyboard listens to (&ldquo;All&rdquo; = every channel). <b>Learn</b> determines channel and range by playing the lowest and then the highest key; if those are too close together, the program warns you instead of setting a range of just a few keys. If all your keyboards send on the same channel, give each device a fixed channel under App Settings &rarr; MIDI (chapter 8).</li>
-  <li><b>Transp</b>: transpose in semitones. <b>Range</b>: lowest and highest key. <b>Short octave</b>: for sets with a short bass octave.</li>
+  <li><b>Transp</b>: transpose in semitones. <b>Range</b>: lowest and highest key. <b>Short octave</b>: in the bottom octave the E key sounds C, F# sounds D and G# sounds E, as on a historic organ; C, C#, D and D# do nothing there and the rest of the keyboard is unchanged. Learn the key range first: the bottom octave starts at the first E from the lowest key.</li>
   <li><b>Swell box</b>: switches on the swell box of this keyboard; buttons then appear to learn the pedal, to set the minimum volume and the cut-off frequency of a closed box. The defaults are &minus;20&nbsp;dB and 1500&nbsp;Hz: the pedal then works evenly in decibels over its whole travel, as in Hauptwerk, and the sound becomes somewhat duller with the box closed. If the pedal seems to do little at the bottom, choose a higher cut-off frequency; if you want a closed box softer, a lower minimum volume (down to &minus;24&nbsp;dB). The pedal can also be learned straight from the organ screen: right-click the green LED strip next to the manual name &mdash; or hold it for 2 seconds on a touch screen &mdash; and the same &ldquo;pedal closed / pedal open&rdquo; dialog opens.</li>
   <li><b>Wind supply</b>: which wind group the keyboard belongs to.</li>
   <li><b>Pan</b> and <b>Outputs</b>: the place in the stereo image and the output channels of your audio interface the keyboard sounds on. Two consecutive outputs form a stereo pair; a single channel sounds mono.</li>

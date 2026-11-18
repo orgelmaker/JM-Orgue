@@ -6,6 +6,12 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+## [0.9.57] - 2026-11-18
+
+### Handleiding bijgewerkt voor het korte octaaf, in zeven talen
+- De regel over het korte octaaf beschrijft nu wat het doet: E, Fis en Gis klinken in de onderste octaaf als C, D en E,
+  C, Cis, D en Dis doen daar niets, en het toetsbereik moet eerst zijn ingeleerd. Zeven PDF's opnieuw gemaakt.
+
 ### Pedaal krijgt de naam uit de set
 - Het pedaal heette op het scherm altijd "Pedaal", wat de set ook opgaf. Nu staat er de naam uit de set (bijvoorbeeld
   "Pedal" of "Pédale"), net als bij de manualen; alleen een set zonder naam voor het pedaal houdt "Pedaal".
