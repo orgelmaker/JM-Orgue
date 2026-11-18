@@ -6,6 +6,12 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### Pedaal krijgt de naam uit de set
+- Het pedaal heette op het scherm altijd "Pedaal", wat de set ook opgaf. Nu staat er de naam uit de set (bijvoorbeeld
+  "Pedal" of "Pédale"), net als bij de manualen; alleen een set zonder naam voor het pedaal houdt "Pedaal".
+- Alleen de naam op het scherm verandert. De interne naam waaronder instellingen, MIDI-koppelingen en registraties zijn
+  bewaard blijft gelijk, dus er gaat niets verloren.
+
 ### Kort octaaf hersteld
 - Het vinkje **Kort octaaf** (per klavier, bij de MIDI-koppeling) deed niet wat het beloofde: het verschoof het hele klavier
   boven de onderste octaaf een grote terts, en de E-toets klonk bij geen enkele instelling als C. Nu werkt het zoals op een

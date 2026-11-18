@@ -4808,7 +4808,7 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
         }
 
         let display_name = if manual.number == 0 {
-            "Pedaal".to_string()
+            pedaal_schermnaam(&manual.name)
         } else {
             format!("{} ({})", manual.name, roman_numeral(manual.number as usize))
         };
@@ -10234,7 +10234,7 @@ pub fn do_load_samples_from_directory_locked(state: &AppState, directory: &str) 
 
         let display_name = if division.name.to_lowercase().contains("pedaal") ||
                              division.name.to_lowercase().contains("pedal") {
-            "Pedaal".to_string()
+            pedaal_schermnaam(&division.name)
         } else {
             format!("{} (I)", division.name)
         };
@@ -11156,6 +11156,33 @@ fn ververs_bibliotheek_namen_eenmalig(state: &AppState) {
 pub fn get_organ_library(state: State<AppState>) -> Vec<OrganLibraryEntry> {
     ververs_bibliotheek_namen_eenmalig(state.inner());
     state.organ_library.read().organs.clone()
+}
+
+/// De naam van het pedaal op het scherm: de naam uit de set ("Pedal", "Pédale", "PEDALE"), en alleen als de set er
+/// geen geeft "Pedaal". Tot 0.9.56 stond er altijd "Pedaal", wat de set ook zei. Alleen de schermnaam: de interne
+/// naam waaronder instellingen worden bewaard (`DivisionDto::name`) verandert niet.
+pub(crate) fn pedaal_schermnaam(naam_uit_set: &str) -> String {
+    let naam = naam_uit_set.trim();
+    if naam.is_empty() { "Pedaal".to_string() } else { naam.to_string() }
+}
+
+#[cfg(test)]
+mod pedaal_schermnaam_tests {
+    use super::pedaal_schermnaam;
+
+    #[test]
+    fn de_naam_uit_de_set_gaat_voor() {
+        assert_eq!(pedaal_schermnaam("Pedal"), "Pedal");
+        assert_eq!(pedaal_schermnaam("  Pédale "), "Pédale");
+        assert_eq!(pedaal_schermnaam("PEDALE"), "PEDALE");
+        assert_eq!(pedaal_schermnaam("Pedaal"), "Pedaal");
+    }
+
+    #[test]
+    fn zonder_naam_blijft_het_pedaal() {
+        assert_eq!(pedaal_schermnaam(""), "Pedaal");
+        assert_eq!(pedaal_schermnaam("   "), "Pedaal");
+    }
 }
 
 /// Eén regel van het scherm naar het logboek, voor diagnose van wat alleen het scherm weet (bijvoorbeeld waarom een
