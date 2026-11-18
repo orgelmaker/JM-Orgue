@@ -22,7 +22,7 @@ jobs:
   publish-updater-json:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Zelfde controle als in release-build: het script verifieert elke
       # handtekening met `minisign -V` tegen de publieke sleutel uit

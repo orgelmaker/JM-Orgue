@@ -33,7 +33,7 @@ jobs:
       run:
         working-directory: VirtualPipeOrgan
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Tauri op Linux draait op webkit2gtk; zonder deze pakketten compileert de
       # tauri-crate niet. Xvfb + een geluidsserver zijn voor de rookproef.
