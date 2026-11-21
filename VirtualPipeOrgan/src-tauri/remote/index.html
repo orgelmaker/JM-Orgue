@@ -285,7 +285,7 @@
         var vrow = el('div', 'volume');
         vrow.appendChild(el('label', null, T.volume));
         volEl = document.createElement('input');
-        volEl.type = 'range'; volEl.min = '-40'; volEl.max = '6'; volEl.step = '1'; volEl.value = '-6';
+        volEl.type = 'range'; volEl.min = '-40'; volEl.max = '20'; volEl.step = '1'; volEl.value = '-6';
         volVal = el('span', 'val', '-6 dB');
         volEl.addEventListener('pointerdown', function () { dragging = true; });
         volEl.addEventListener('touchstart', function () { dragging = true; }, { passive: true });

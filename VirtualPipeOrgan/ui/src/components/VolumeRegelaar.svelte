@@ -1,7 +1,7 @@
 <script>
   // Hoofdvolume in de setzerbalk (0.7.65). Bedient hetzelfde volume als de
   // schuif in Orgel-instellingen > Master en die op de afstandsbediening
-  // (master_volume_db, per orgel, -40..+6 dB). De ouder (Console) stuurt het
+  // (master_volume_db, per orgel, -40..+20 dB). De ouder (Console) stuurt het
   // naar de backend; die meldt het aan alle vensters.
   //
   // compact: past de volle schuif niet in de balk (smal scherm, aanraakscherm,
@@ -15,7 +15,7 @@
 
   const dispatch = createEventDispatcher();
   const MIN = -40;
-  const MAX = 6;
+  const MAX = 20;
   const STANDAARD = -6;
 
   let waarde = volume;

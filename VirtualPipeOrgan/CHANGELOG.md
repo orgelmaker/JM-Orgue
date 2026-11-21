@@ -6,6 +6,13 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### Hoofdvolume kan harder: tot +20 dB
+- Het hoofdvolume liep tot +6 dB. Sommige sets geven zelf een laag niveau op en bleven daarmee te zacht. Het maximum is
+  nu +20 dB: op de volumeknop, op de schuif onder Klank en op de afstandsbediening.
+- Het volume wordt per orgel bewaard; een zachte set harder zetten verandert een andere set niet. Bestaande standen
+  blijven zoals ze zijn. De begrenzer aan de uitgang voorkomt vervorming bij volle registraties.
+- Gemeten in de app: van +6 naar +20 dB is de klank precies 14 dB sterker; een gevraagde waarde boven +20 wordt +20.
+
 ## [0.9.57] - 2026-11-18
 
 ### Handleiding bijgewerkt voor het korte octaaf, in zeven talen

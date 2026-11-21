@@ -5712,14 +5712,50 @@ pub fn stop_note_all_stops(state: State<AppState>, note: u8, only_division: Opti
     Ok(())
 }
 
+/// Bereik van het hoofdvolume in dB. De bovengrens was tot 0.9.57 +6 dB; sets die zelf een laag niveau opgeven
+/// (tot -20 dB) bleven daarmee te zacht. +20 dB compenseert dat volledig. De master-limiter erachter voorkomt
+/// clippen; het volume wordt per orgel bewaard, dus een zachte set harder zetten raakt een andere set niet.
+/// Dezelfde grenzen staan in `VolumeRegelaar.svelte`, de schuif onder Klank en `remote/index.html`.
+pub const HOOFDVOLUME_MIN_DB: f32 = -40.0;
+pub const HOOFDVOLUME_MAX_DB: f32 = 20.0;
+
+/// Een gevraagd hoofdvolume binnen het bereik; geen getal (NaN, oneindig) geeft de standaard van -6 dB.
+pub fn begrens_hoofdvolume(db: f32) -> f32 {
+    if db.is_finite() { db.clamp(HOOFDVOLUME_MIN_DB, HOOFDVOLUME_MAX_DB) } else { -6.0 }
+}
+
+#[cfg(test)]
+mod hoofdvolume_tests {
+    use super::*;
+
+    #[test]
+    fn bereik_loopt_van_min_40_tot_plus_20() {
+        assert_eq!(begrens_hoofdvolume(-6.0), -6.0);
+        assert_eq!(begrens_hoofdvolume(6.0), 6.0, "het oude maximum blijft een gewone waarde");
+        assert_eq!(begrens_hoofdvolume(12.5), 12.5);
+        assert_eq!(begrens_hoofdvolume(20.0), 20.0);
+        assert_eq!(begrens_hoofdvolume(21.0), 20.0);
+        assert_eq!(begrens_hoofdvolume(999.0), 20.0);
+        assert_eq!(begrens_hoofdvolume(-40.0), -40.0);
+        assert_eq!(begrens_hoofdvolume(-41.0), -40.0);
+    }
+
+    #[test]
+    fn geen_getal_geeft_de_standaard() {
+        assert_eq!(begrens_hoofdvolume(f32::NAN), -6.0);
+        assert_eq!(begrens_hoofdvolume(f32::INFINITY), -6.0);
+        assert_eq!(begrens_hoofdvolume(f32::NEG_INFINITY), -6.0);
+    }
+}
+
 /// Hoofdvolume zetten: de enige kern voor de schuiven in de app (instellingen
 /// en setzerbalk, in elk venster), de afstandsbediening en de test-API.
-/// Begrenst op het schuifbereik (-40..+6 dB) en meldt de nieuwe waarde aan
+/// Begrenst op het schuifbereik (`begrens_hoofdvolume`) en meldt de nieuwe waarde aan
 /// ALLE vensters (`jm-orgue:master-volume` {db, bron}), zodat elke schuif
 /// meeloopt. `bron` is het venster-label (of "remote"/"test"); het venster dat
 /// de wijziging zelf deed, negeert het event.
 pub fn set_master_volume_inner(state: &AppState, db: f32, bron: &str) -> f32 {
-    let db = if db.is_finite() { db.clamp(-40.0, 6.0) } else { -6.0 };
+    let db = begrens_hoofdvolume(db);
     state.send_audio_command(AudioCommand::SetMasterGain(db));
     // Onthoud voor per-orgel opslag (save_current_organ_settings leest dit veld).
     *state.master_volume_db.write() = Some(db);

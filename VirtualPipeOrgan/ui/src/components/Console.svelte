@@ -6989,7 +6989,7 @@
                 <input
                   type="range"
                   min="-40"
-                  max="6"
+                  max="20"
                   step="1"
                   bind:value={volume}
                   on:input={onVolumeChange}

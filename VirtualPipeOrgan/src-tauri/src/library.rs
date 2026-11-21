@@ -446,7 +446,7 @@ pub struct OrganSettings {
     /// Aantal actieve wind-groepen (1..8). 0 = niet opgeslagen / default.
     #[serde(default)]
     pub num_wind_groups: u8,
-    /// Hoofdvolume in dB (0 dB = volle sterkte, negatief = zachter; -40..+6)
+    /// Hoofdvolume in dB (0 dB = volle sterkte, negatief = zachter; -40..+20)
     #[serde(default)]
     pub master_volume_db: Option<f32>,
     /// Reverb instellingen (algoritmisch of IR)
