@@ -6,6 +6,8 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+## [0.9.58] - 2026-11-21
+
 ### Hoofdvolume kan harder: tot +20 dB
 - Het hoofdvolume liep tot +6 dB. Sommige sets geven zelf een laag niveau op en bleven daarmee te zacht. Het maximum is
   nu +20 dB: op de volumeknop, op de schuif onder Klank en op de afstandsbediening.
