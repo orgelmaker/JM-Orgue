@@ -56,9 +56,36 @@ export function isGeinstalleerd(s, organen, gedownload) {
   return false;
 }
 
-/** De sets die nog te downloaden zijn. */
+/** De sets die nog te downloaden zijn (nog niet geïnstalleerd). */
 export function nogTeDownloaden(manifestSets, organen, gedownload) {
   return (manifestSets || []).filter((s) => s && s.naam && s.zip_url && !isGeinstalleerd(s, organen, gedownload));
+}
+
+/**
+ * Welke geïnstalleerde sets hebben in het manifest een nieuwer versienummer dan wat er staat?
+ *
+ * Alleen sets die de app zélf heeft neergezet tellen mee: alleen dan weten we met welke
+ * manifest-versie ze binnenkwamen (`versies[id]`, bewaard bij de download). Een set die enkel
+ * op naam herkend wordt, heeft geen bekende versie en wordt niet als bij te werken gemeld.
+ * De set moet ook nog echt in de bibliotheek staan — is hij verwijderd, dan hoort hij weer bij
+ * `nogTeDownloaden`, niet hier.
+ *
+ * @param {Array} manifestSets  sets uit het manifest (met `versie`)
+ * @param {Array<{name?: string, source_path?: string}>} organen  de bibliotheek
+ * @param {Record<string,string>} gedownload  manifest-id → pad waar de app de set neerzette
+ * @param {Record<string,number>} versies      manifest-id → geïnstalleerde manifest-versie
+ * @returns {Array} de bij te werken sets, elk met extra veld `_geinstalleerde_versie`
+ */
+export function teUpdaten(manifestSets, organen, gedownload, versies) {
+  return (manifestSets || [])
+    .filter((s) => {
+      if (!s || !s.naam || !s.zip_url || s.id == null) return false;
+      const geinstalleerd = versies ? Number(versies[s.id]) : NaN;
+      if (!Number.isFinite(geinstalleerd)) return false;   // niet door ons gedownload → versie onbekend
+      if (!(Number(s.versie) > geinstalleerd)) return false; // manifest niet nieuwer
+      return isGeinstalleerd(s, organen, gedownload);        // moet nog in de bibliotheek staan
+    })
+    .map((s) => ({ ...s, _geinstalleerde_versie: Number(versies[s.id]) }));
 }
 
 /**

@@ -6,6 +6,14 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### Bibliotheek: een geïnstalleerde set die bijgewerkt kan worden
+- Tot nu toe verdween een gedownloade set helemaal uit het aanbod zodra hij geïnstalleerd was, ook als er later een
+  betere versie van kwam. Nu onthoudt de app met welke versie een set binnenkwam en vergelijkt die met het manifest:
+  staat daar een hoger versienummer, dan verschijnt de set bovenaan het aanbod als groene tegel "Update beschikbaar".
+- Bijwerken vervangt de set op dezelfde plek. De nieuwe versie wordt eerst náást de oude uitgepakt en pas daarna
+  omgewisseld, zodat een mislukte of afgebroken download de oude set nooit beschadigt. De set die op dat moment geladen
+  is wordt niet bijgewerkt (je kiest eerst een ander orgel). Teksten in zeven talen.
+
 ### Externe MIDI-bestanden: kanalen zelf toewijzen bij het afspelen
 - Een gedownload MIDI-bestand gebruikt de kanaalindeling van zijn maker, die zelden klopt met hoe jouw orgel is
   ingeleerd. Daardoor kwamen de partijen op het verkeerde klavier of klonken ze niet. In het MIDI-menu staat nu, zodra

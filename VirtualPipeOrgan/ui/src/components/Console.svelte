@@ -1,6 +1,6 @@
 <script>
   import { createEventDispatcher, onMount, onDestroy, tick } from 'svelte';
-  import { nogTeDownloaden, waaromNiet } from '../lib/aanbod.js';
+  import { nogTeDownloaden, teUpdaten, waaromNiet, normPad } from '../lib/aanbod.js';
   import { bestandsNaam, speeltNu, afspeelStappen } from '../lib/midiSpeler.js';
   import { open } from '@tauri-apps/plugin-dialog';
   import LayoutSettings from './LayoutSettings.svelte';
@@ -4522,12 +4522,28 @@
   // bij een afwijkende orgelnaam of mapnaam verdwijnt zodra het orgel in de bibliotheek staat.
   let gedownload = {};
   try { gedownload = JSON.parse(localStorage.getItem('jm-orgue-gedownloade-sets') || '{}') || {}; } catch (e) { gedownload = {}; }
+  // Met welke manifest-versie elke zelf gedownloade set binnenkwam: manifest-id → versie (getal).
+  // Nodig om een geïnstalleerde set als "bij te werken" te tonen zodra het manifest een hoger
+  // versienummer draagt (0.9.59). Sets die vóór deze functie binnenkwamen hebben nog geen versie;
+  // die krijgen versie 1 (het manifest begon op 1), zodat ook zij een update zien.
+  let gedownloadeVersies = {};
+  try { gedownloadeVersies = JSON.parse(localStorage.getItem('jm-orgue-gedownloade-set-versies') || '{}') || {}; } catch (e) { gedownloadeVersies = {}; }
+  {
+    let gewijzigd = false;
+    for (const id of Object.keys(gedownload)) {
+      if (!Number.isFinite(Number(gedownloadeVersies[id]))) { gedownloadeVersies[id] = 1; gewijzigd = true; }
+    }
+    if (gewijzigd) { try { localStorage.setItem('jm-orgue-gedownloade-set-versies', JSON.stringify(gedownloadeVersies)); } catch (e) { /* geen opslag */ } }
+  }
   // Wat nog te downloaden valt, AFGELEID van manifest, bibliotheek en gedownloade sets: zo
   // klopt de lijst op elk moment. Tot 0.9.50 werd hij op één moment uitgerekend (direct na de
   // download, vóór het orgel in de bibliotheek stond) en bleef een net geïnstalleerde set
   // aangeboden. De vergelijking (lib/aanbod.js) is ongevoelig voor schrijfwijze van letters.
   let onlineSets = [];
   $: onlineSets = manifestGelukt ? nogTeDownloaden(alleOnlineSets, libraryOrgans, gedownload) : [];
+  // Geïnstalleerde sets waarvan het manifest een nieuwere versie heeft: als "update" in het aanbod.
+  let updateSets = [];
+  $: updateSets = manifestGelukt ? teUpdaten(alleOnlineSets, libraryOrgans, gedownload, gedownloadeVersies) : [];
 
   // Diagnose (0.9.56): blijft een set aangeboden terwijl je hem denkt te hebben, dan staat in het logboek waarom het
   // filter hem niet herkent. Pas loggen als de bibliotheek echt geladen is (anders staat er bij het opstarten even
@@ -4642,6 +4658,9 @@
       // geïnstalleerd, hoe het orgel of de map ook heet.
       gedownload = { ...gedownload, [s.id]: pad };
       try { localStorage.setItem('jm-orgue-gedownloade-sets', JSON.stringify(gedownload)); } catch (e) { /* geen opslag: de naamvergelijking blijft */ }
+      // Onthoud met welke manifest-versie de set binnenkwam, zodat een latere hogere versie als update verschijnt.
+      gedownloadeVersies = { ...gedownloadeVersies, [s.id]: Number(s.versie) || 1 };
+      try { localStorage.setItem('jm-orgue-gedownloade-set-versies', JSON.stringify(gedownloadeVersies)); } catch (e) { /* geen opslag */ }
       // Zelfde route als "Scan map": laadt het orgel en zet het in de bibliotheek.
       dispatch('scanFolder', pad);
     } catch (e) {
@@ -4656,6 +4675,44 @@
   }
   function annuleerDownload(s) {
     invoke('cancel_sampleset_download', { id: s.id }).catch(() => {});
+  }
+
+  // Een geïnstalleerde set bijwerken naar de nieuwste versie: op dezelfde plek vervangen.
+  // De nieuwe versie wordt eerst naast de oude uitgepakt (tijdelijke map) en pas daarna
+  // omgewisseld, zodat een mislukte download de oude set niet beschadigt. De set die nú
+  // geladen is wordt niet bijgewerkt — zijn bestanden zijn in gebruik.
+  async function werkSetBij(s) {
+    if (onlineBusy) return;
+    const oudPad = gedownload?.[s.id];
+    if (!oudPad) { return downloadOnlineSet(s); }   // vangnet: plek onbekend → gewone download
+    const geladen = normPad(organInfo?.location || organInfo?.id || '');
+    const doelN = normPad(oudPad);
+    if (geladen && (geladen === doelN || geladen.startsWith(doelN + '/'))) {
+      alert(tx('library.update_loaded'));
+      return;
+    }
+    if (!(await confirm(tx('library.update_confirm').replace('{naam}', s.naam)))) return;
+    let un = null;
+    try {
+      onlineBusy = s.id; onlinePct = 0; onlineFase = 'download';
+      const { listen } = await import('@tauri-apps/api/event');
+      un = await listen('jm-orgue:sampleset-download', (e) => {
+        if (e.payload?.id === s.id) { onlinePct = e.payload.pct || 0; onlineFase = e.payload.fase || 'download'; }
+      });
+      const pad = await invoke('update_sampleset', { id: s.id, url: s.zip_url, doelMap: oudPad });
+      gedownload = { ...gedownload, [s.id]: pad };
+      try { localStorage.setItem('jm-orgue-gedownloade-sets', JSON.stringify(gedownload)); } catch (e) { /* geen opslag */ }
+      gedownloadeVersies = { ...gedownloadeVersies, [s.id]: Number(s.versie) || 1 };
+      try { localStorage.setItem('jm-orgue-gedownloade-set-versies', JSON.stringify(gedownloadeVersies)); } catch (e) { /* geen opslag */ }
+      dispatch('scanFolder', pad);
+    } catch (e) {
+      if (!String(e).includes('[geannuleerd]')) {
+        alert(`${tx('library.update_failed')}: ${e}`);
+      }
+    } finally {
+      if (un) un();
+      onlineBusy = null;
+    }
   }
 
   // (De losse "Extern"-knop is vervallen: hij deed hetzelfde als "Map
@@ -6179,6 +6236,42 @@
                     · {organ.image_credit.license}
                   {/if}
                 </div>
+              {/if}
+            </div>
+          </div>
+        {/each}
+
+        <!-- Geïnstalleerde sets met een nieuwere versie in het manifest: als "update" bovenaan het
+             aanbod. Zelfde downloadroute; na afloop is de nieuwe versie onthouden en verdwijnt de tegel. -->
+        {#each updateSets as s (s.id)}
+          <div
+            class="library-card library-card-online library-card-update"
+            class:library-card-busy={onlineBusy === s.id}
+            title={$t('library.update_title')}
+            on:click={() => werkSetBij(s)}
+            on:keypress={(e) => e.key === 'Enter' && e.target === e.currentTarget && werkSetBij(s)}
+            role="button"
+            tabindex="0"
+          >
+            <div class="library-card-image">
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.7">
+                <path d="M21 12a9 9 0 1 1-2.64-6.36"/>
+                <polyline points="21 3 21 9 15 9"/>
+              </svg>
+            </div>
+            <div class="library-card-info">
+              <div class="library-card-name">{s.naam}</div>
+              <div class="library-card-meta">
+                {#if onlineBusy === s.id}
+                  {onlineFase === 'uitpakken' ? $t('library.unpacking') : $t('library.downloading')} {onlinePct}%
+                  <button class="library-card-cancel" on:click|stopPropagation={() => annuleerDownload(s)}>{$t('library.download_cancel')}</button>
+                {:else}
+                  <span class="library-card-badge">{$t('library.update_available')}</span>
+                  {$t('library.download_size').replace('{mb}', s.zip_mb || '?')}
+                {/if}
+              </div>
+              {#if s.beschrijving}
+                <div class="library-card-meta">{manifestTekst(s, 'beschrijving', $locale)}</div>
               {/if}
             </div>
           </div>

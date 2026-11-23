@@ -12408,6 +12408,58 @@ pub async fn pak_pakket_uit(app: tauri::AppHandle, state: State<'_, AppState>, p
     Ok(uitkomst.organ.to_string_lossy().to_string())
 }
 
+/// Download de sampleset-zip van `url` en pak hem uit in `doel` (leeg/nieuw). Gedeeld door
+/// `download_sampleset` (nieuwe set) en `update_sampleset` (bestaande set bijwerken). Voortgang
+/// via `emit(fase, pct)`, afbreekbaar via `geannuleerd`. Uitpakken is zip-slip-veilig (`enclosed_name`).
+fn haal_en_pak_sampleset_uit<A, E>(
+    doel: &std::path::Path,
+    url: &str,
+    geannuleerd: &A,
+    emit: &E,
+) -> Result<(), String>
+where
+    A: Fn() -> bool,
+    E: Fn(&str, u32),
+{
+    std::fs::create_dir_all(doel).map_err(|e| format!("Doelmap aanmaken mislukt: {}", e))?;
+    let zip_pad = doel.join(".download.zip");
+    // ---- Downloaden (streaming, met voortgang op content-length, lees-timeout,
+    // volledigheidscontrole en annulering) ----
+    crate::sampleset_download::download_naar_bestand(
+        &crate::sampleset_download::standaard_agent(),
+        url,
+        &zip_pad,
+        crate::sampleset_download::LEES_TIMEOUT,
+        geannuleerd,
+        &mut |pct| emit("download", pct),
+    )?;
+    // ---- Uitpakken (zip-slip-veilig via enclosed_name) ----
+    emit("uitpakken", 0);
+    let file = std::fs::File::open(&zip_pad).map_err(|e| e.to_string())?;
+    let mut archief = zip::ZipArchive::new(file).map_err(|e| format!("Zip onleesbaar: {}", e))?;
+    let n_entries = archief.len().max(1);
+    for i in 0..archief.len() {
+        if geannuleerd() {
+            return Err(crate::sampleset_download::melding_geannuleerd());
+        }
+        let mut entry = archief.by_index(i).map_err(|e| e.to_string())?;
+        let Some(rel) = entry.enclosed_name() else { continue; };
+        let uit = doel.join(rel);
+        if entry.is_dir() {
+            std::fs::create_dir_all(&uit).map_err(|e| e.to_string())?;
+        } else {
+            if let Some(parent) = uit.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+            }
+            let mut f = std::fs::File::create(&uit).map_err(|e| e.to_string())?;
+            std::io::copy(&mut entry, &mut f).map_err(|e| format!("Uitpakken mislukt: {}", e))?;
+        }
+        emit("uitpakken", ((i + 1) * 100 / n_entries) as u32);
+    }
+    let _ = std::fs::remove_file(&zip_pad);
+    Ok(())
+}
+
 /// Download een sampleset-zip (GitHub-release-asset uit ons eigen
 /// samplesets.json-manifest) en pak hem uit in `doel_map`. De map wordt
 /// aangemaakt en moet nieuw of leeg zijn. Voortgang via het event
@@ -12445,40 +12497,7 @@ pub async fn download_sampleset(app: tauri::AppHandle, state: State<'_, AppState
         move || annulering.read().contains(&id)
     };
     let result = tokio::task::spawn_blocking(move || -> Result<String, String> {
-        std::fs::create_dir_all(&doel).map_err(|e| format!("Doelmap aanmaken mislukt: {}", e))?;
-        let zip_pad = doel.join(".download.zip");
-        // ---- Downloaden (streaming, met voortgang op content-length, lees-timeout,
-        // volledigheidscontrole en annulering) ----
-        crate::sampleset_download::download_naar_bestand(
-            &crate::sampleset_download::standaard_agent(),
-            &url,
-            &zip_pad,
-            crate::sampleset_download::LEES_TIMEOUT,
-            &geannuleerd,
-            &mut |pct| emit("download", pct),
-        )?;
-        // ---- Uitpakken (zip-slip-veilig via enclosed_name) ----
-        emit("uitpakken", 0);
-        let file = std::fs::File::open(&zip_pad).map_err(|e| e.to_string())?;
-        let mut archief = zip::ZipArchive::new(file).map_err(|e| format!("Zip onleesbaar: {}", e))?;
-        let n_entries = archief.len().max(1);
-        for i in 0..archief.len() {
-            if geannuleerd() { return Err(crate::sampleset_download::melding_geannuleerd()); }
-            let mut entry = archief.by_index(i).map_err(|e| e.to_string())?;
-            let Some(rel) = entry.enclosed_name() else { continue; };
-            let uit = doel.join(rel);
-            if entry.is_dir() {
-                std::fs::create_dir_all(&uit).map_err(|e| e.to_string())?;
-            } else {
-                if let Some(parent) = uit.parent() {
-                    std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-                }
-                let mut f = std::fs::File::create(&uit).map_err(|e| e.to_string())?;
-                std::io::copy(&mut entry, &mut f).map_err(|e| format!("Uitpakken mislukt: {}", e))?;
-            }
-            emit("uitpakken", ((i + 1) * 100 / n_entries) as u32);
-        }
-        let _ = std::fs::remove_file(&zip_pad);
+        haal_en_pak_sampleset_uit(&doel, &url, &geannuleerd, &emit)?;
         info!("Sampleset gedownload en uitgepakt naar {:?}", doel);
         Ok(doel.to_string_lossy().to_string())
     }).await;
@@ -12498,6 +12517,79 @@ pub async fn download_sampleset(app: tauri::AppHandle, state: State<'_, AppState
 pub fn cancel_sampleset_download(state: State<AppState>, id: String) {
     state.sampleset_download_annulering.write().insert(id.clone());
     info!("Annulering van sampleset-download gevraagd: {}", id);
+}
+
+/// Wissel een net uitgepakte set (`temp`) om met de bestaande set (`doel`): oud opzij, nieuw erin,
+/// oud weg. `opzij` is een tijdelijke naam náást `doel`. Niets gaat verloren tot de nieuwe set op
+/// zijn plek staat: mislukt het plaatsen van de nieuwe, dan wordt de oude teruggezet. Lukt het opzij
+/// zetten van de oude niet (de set is nog geladen, bestanden in gebruik), dan blijft alles zoals het was.
+fn wissel_setmap_om(doel: &std::path::Path, temp: &std::path::Path, opzij: &std::path::Path) -> Result<(), String> {
+    std::fs::rename(doel, opzij).map_err(|e| format!("De oude set kon niet opzij worden gezet (is hij nog geladen?): {}", e))?;
+    if let Err(e) = std::fs::rename(temp, doel) {
+        let _ = std::fs::rename(opzij, doel); // terugdraaien: oude set weer op zijn plek
+        return Err(format!("De bijgewerkte set op zijn plek zetten mislukt: {}", e));
+    }
+    let _ = std::fs::remove_dir_all(opzij);
+    Ok(())
+}
+
+/// Werk een al geïnstalleerde sampleset bij: download de nieuwe zip en vervang de bestaande
+/// setmap `doel_map` op dezelfde plek. De nieuwe versie wordt eerst in een tijdelijke map náást
+/// de oude uitgepakt; pas als dat lukt wordt omgewisseld (oud opzij, nieuw erin, oud weg), zodat
+/// een mislukte of afgebroken download de oude set nooit beschadigt. Lukt het opzij zetten van de
+/// oude map niet (de set is nog geladen, bestanden in gebruik), dan blijft alles zoals het was.
+/// Zelfde voortgang (`jm-orgue:sampleset-download`) en annulering als `download_sampleset`.
+#[tauri::command]
+pub async fn update_sampleset(app: tauri::AppHandle, state: State<'_, AppState>, id: String, url: String, doel_map: String) -> Result<String, String> {
+    use tauri::Emitter;
+    if !url.starts_with("https://github.com/") {
+        return Err("Alleen GitHub-URL's uit het sampleset-manifest zijn toegestaan".to_string());
+    }
+    let doel = std::path::PathBuf::from(&doel_map);
+    if !doel.is_dir() {
+        return Err(format!("De te vervangen setmap bestaat niet: {}", doel_map));
+    }
+    let naam = doel.file_name().map(|s| s.to_string_lossy().to_string()).ok_or_else(|| "Ongeldige setmap".to_string())?;
+    let temp = doel.with_file_name(format!("{}.jm-update", naam));
+    let opzij = doel.with_file_name(format!("{}.jm-oud", naam));
+    let emit = {
+        let app = app.clone();
+        let id = id.clone();
+        move |fase: &str, pct: u32| {
+            let _ = app.emit("jm-orgue:sampleset-download", serde_json::json!({
+                "id": id, "fase": fase, "pct": pct.min(100),
+            }));
+        }
+    };
+    let annulering = state.sampleset_download_annulering.clone();
+    annulering.write().remove(&id);
+    let geannuleerd = {
+        let annulering = annulering.clone();
+        let id = id.clone();
+        move || annulering.read().contains(&id)
+    };
+    let temp2 = temp.clone();
+    let opzij2 = opzij.clone();
+    let doel2 = doel.clone();
+    let result = tokio::task::spawn_blocking(move || -> Result<String, String> {
+        // Restanten van een eerdere mislukte poging opruimen.
+        if temp2.exists() { let _ = std::fs::remove_dir_all(&temp2); }
+        if opzij2.exists() { let _ = std::fs::remove_dir_all(&opzij2); }
+        // Nieuwe versie naast de oude uitpakken (de oude blijft intact tot dit lukt).
+        haal_en_pak_sampleset_uit(&temp2, &url, &geannuleerd, &emit)?;
+        // Omwisselen: oud opzij, nieuw op zijn plek, oud weg.
+        wissel_setmap_om(&doel2, &temp2, &opzij2)?;
+        info!("Sampleset bijgewerkt op {:?}", doel2);
+        Ok(doel2.to_string_lossy().to_string())
+    }).await;
+    annulering.write().remove(&id);
+    let result = result.map_err(|e| format!("Bijwerktaak crashte: {}", e))?;
+    if result.is_err() {
+        // De oude set staat er nog (of is teruggezet); alleen de tijdelijke mappen opruimen.
+        let _ = std::fs::remove_dir_all(&temp);
+        let _ = std::fs::remove_dir_all(&opzij);
+    }
+    result
 }
 
 /// Lees of JM-Orgue ingesteld staat om automatisch te starten bij Windows-aanmelding.
@@ -12605,3 +12697,7 @@ mod motor_start_tests;
 #[cfg(test)]
 #[path = "commands_tests/instellingenbestand_tests.rs"]
 mod instellingenbestand_tests;
+
+#[cfg(test)]
+#[path = "commands_tests/setmap_vervangen_tests.rs"]
+mod setmap_vervangen_tests;

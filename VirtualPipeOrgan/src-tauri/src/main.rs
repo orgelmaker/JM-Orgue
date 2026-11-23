@@ -555,6 +555,7 @@ fn main() {
             commands::download_sampleset,
             commands::pak_pakket_uit,
             commands::cancel_sampleset_download,
+            commands::update_sampleset,
             commands::get_audio_devices,
             commands::list_audio_hosts,
             commands::get_audio_output_prefs,

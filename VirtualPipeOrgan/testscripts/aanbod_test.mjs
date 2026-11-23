@@ -1,6 +1,6 @@
 // Test van de vergelijking "al geïnstalleerd?" voor het blok "Beschikbaar om te
 // downloaden" (ui/src/lib/aanbod.js), zonder DOM. Draait met `node` en in CI.
-import { normNaam, normPad, isGeinstalleerd, nogTeDownloaden, waaromNiet } from '../ui/src/lib/aanbod.js';
+import { normNaam, normPad, isGeinstalleerd, nogTeDownloaden, teUpdaten, waaromNiet } from '../ui/src/lib/aanbod.js';
 
 let fouten = 0;
 function check(cond, naam) {
@@ -53,6 +53,27 @@ check(!isGeinstalleerd(set, [orgel(NFC + ' (kopie)', 'D:\\Sets\\' + NFC + ' (kop
   const lijst = nogTeDownloaden([set, ander, zonderZip, null], [orgel(NFD, 'D:/Sets/' + NFD)], {});
   check(lijst.length === 1 && lijst[0].id === 'iets', 'alleen wat nog te downloaden is, met een zip-adres');
   check(nogTeDownloaden(undefined, [], {}).length === 0, 'geen manifest');
+}
+
+// ---- bij te werken sets (nieuwer in het manifest dan geïnstalleerd) ----
+{
+  const v1 = { id: 'batz-witte-puttershoek', naam: NFC, map_naam: NFC, zip_url: 'https://github.com/x/y.zip', versie: 1 };
+  const v2 = { ...v1, versie: 2 };
+  const bib = [orgel(NFD, 'D:/Sets/' + NFD)];
+  const gedl = { [v1.id]: 'D:\\Sets\\' + NFC };
+  // geïnstalleerd als v1, manifest op v2 → bij te werken
+  const lijst = teUpdaten([v2], bib, gedl, { [v1.id]: 1 });
+  check(lijst.length === 1 && lijst[0].id === v1.id && lijst[0]._geinstalleerde_versie === 1, 'nieuwere manifest-versie → set staat op bij te werken');
+  // zelfde versie → niets bij te werken
+  check(teUpdaten([v1], bib, gedl, { [v1.id]: 1 }).length === 0, 'zelfde versie → niet bij te werken');
+  // we kennen de geïnstalleerde versie niet (alleen op naam herkend) → niet bij te werken
+  check(teUpdaten([v2], bib, gedl, {}).length === 0, 'onbekende geïnstalleerde versie → niet bij te werken');
+  // wel een nieuwere versie, maar de set staat niet (meer) in de bibliotheek → hoort bij nogTeDownloaden, niet hier
+  check(teUpdaten([v2], [], {}, { [v1.id]: 1 }).length === 0, 'niet meer geïnstalleerd → niet bij te werken');
+  // een bij te werken set zit NIET ook in nogTeDownloaden (die telt alleen niet-geïnstalleerde)
+  check(nogTeDownloaden([v2], bib, gedl).length === 0, 'een geïnstalleerde set staat niet bij "nog te downloaden"');
+  // geen versies-tabel of geen manifest geeft geen fout
+  check(teUpdaten([v2], bib, gedl, null).length === 0 && teUpdaten(undefined, bib, gedl, { [v1.id]: 1 }).length === 0, 'ontbrekende versies of manifest geeft geen fout');
 }
 
 // ---- de uitleg voor het logboek ----

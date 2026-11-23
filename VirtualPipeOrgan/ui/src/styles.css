@@ -919,6 +919,25 @@ input[type="range"]::-webkit-slider-thumb:hover {
 .library-card-online:hover {
   background: var(--bg-panel);
 }
+/* Een geïnstalleerde set met een nieuwere versie: zelfde kaart, maar een hele (niet
+   gestippelde) rand in de statuskleur en een klein label, zodat het als update opvalt. */
+.library-card-update {
+  border-style: solid;
+  border-color: var(--success);
+}
+.library-card-update:hover {
+  background: var(--accent-soft-hover);
+}
+.library-card-badge {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 1px 7px;
+  border-radius: 9px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #fff;
+  background: var(--success);
+}
 
 /* Knoppenrij rechtsboven op een bibliotheekkaart: automatisch zoeken,
    foto kiezen, verwijderen. Alleen zichtbaar bij hover (mobiel: altijd). */
