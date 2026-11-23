@@ -4,7 +4,7 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
-## [Onuitgebracht]
+## [0.9.59] - 2026-11-23
 
 ### Bibliotheek: een geïnstalleerde set die bijgewerkt kan worden
 - Tot nu toe verdween een gedownloade set helemaal uit het aanbod zodra hij geïnstalleerd was, ook als er later een
