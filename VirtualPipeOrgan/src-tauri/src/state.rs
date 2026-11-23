@@ -1559,6 +1559,12 @@ pub struct AppState {
     pub drawn_stops: Arc<RwLock<Vec<String>>>,
     /// MIDI channel mappings per division
     pub midi_mappings: Arc<RwLock<Vec<MidiChannelMapping>>>,
+    /// Routering voor het afspelen van een MIDI-bestand (keuzemenu bij de
+    /// afspeelknop): per kanaal van het bestand een eigen `MidiChannelMapping`
+    /// (divisie + octaaf-transpose, geen bereikgrens), los van de console-inleer
+    /// in `midi_mappings`. Leeg = gewoon de console-mappings gebruiken (zoals
+    /// live spel). Geldt alléén voor de noten uit de speler.
+    pub player_routing: Arc<RwLock<Vec<MidiChannelMapping>>>,
     /// Spiegel van de per-apparaat kanaaltoewijzing (0.9.26) voor UI en opslag.
     /// De audio/MIDI-thread houdt zijn eigen (gedeelde) kopie in de manager.
     pub midi_device_channels: Arc<RwLock<std::collections::HashMap<String, u8>>>,
@@ -2062,6 +2068,8 @@ impl AppState {
         let loaded_organ_info = Arc::new(RwLock::new(None));
         let drawn_stops = Arc::new(RwLock::new(Vec::new()));
         let midi_mappings = Arc::new(RwLock::new(Vec::new()));
+        let player_routing: Arc<RwLock<Vec<MidiChannelMapping>>> = Arc::new(RwLock::new(Vec::new()));
+        let player_routing_for_midi = player_routing.clone();
         let midi_device_channels = Arc::new(RwLock::new(audio_prefs.midi_device_channels.clone()));
         let preset_bindings = Arc::new(RwLock::new(Vec::new()));
         let active_couplers = Arc::new(RwLock::new(Vec::new()));
@@ -2144,6 +2152,7 @@ impl AppState {
                 cresc_active_for_midi,
                 learn_cancel_for_midi,
                 player_rx,
+                player_routing_for_midi,
                 recording_for_midi,
                 archive_for_midi,
                 notation_scores_for_midi,
@@ -2172,6 +2181,7 @@ impl AppState {
             loaded_organ_info,
             drawn_stops,
             midi_mappings,
+            player_routing,
             midi_device_channels,
             preset_bindings,
             preset_trigger_tx,
@@ -2309,6 +2319,7 @@ impl AppState {
         crescendo_active_stops: Arc<RwLock<Vec<String>>>,
         learn_cancel: Arc<std::sync::atomic::AtomicBool>,
         player_rx: Receiver<MidiMessage>,
+        player_routing: Arc<RwLock<Vec<MidiChannelMapping>>>,
         midi_recording: Arc<RwLock<Option<MidiRecording>>>,
         midi_archive: Arc<crate::midi_archive::MidiArchiveShared>,
         notation_scores: Arc<RwLock<std::collections::HashMap<u32, crate::notation::Score>>>,
@@ -2919,6 +2930,11 @@ impl AppState {
             }
             let player_last_cresc_idx = player_batch.iter()
                 .rposition(|m| Self::cc_claimed_by_crescendo(m, &crescendo_binding));
+            // Keuzemenu bij het afspelen: staat er een eigen routering klaar, dan
+            // bepaalt die waar de NOTEN van het bestand klinken (los van de
+            // console-inleer). Leeg = gewoon de console-mappings, net als live.
+            // De CC-routering (zwel/crescendo) blijft altijd op de console-mappings.
+            let player_maps = if player_routing.read().is_empty() { &midi_mappings } else { &player_routing };
             for (i, msg) in player_batch.into_iter().enumerate() {
                 // Ook bij afspelen: een opgenomen crescendo-CC mag het volume
                 // niet dempen via de expressie-fallback.
@@ -2938,7 +2954,7 @@ impl AppState {
                     &organ_definition,
                     &loaded_organ_info,
                     &drawn_stops,
-                    &midi_mappings,
+                    player_maps,
                     &active_couplers,
                     &swell_bindings,
                     &division_gains,

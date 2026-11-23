@@ -8979,6 +8979,76 @@ pub fn midi_play_file(state: State<AppState>, path: String) -> Result<(), String
     Ok(())
 }
 
+/// Eén kanaal met noten in een MIDI-bestand, voor het keuzemenu bij de
+/// afspeelknop: het kanaal (1-16 voor de gebruiker), het notental en het bereik.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct MidiFileChannelDto {
+    /// MIDI-kanaal zoals de gebruiker het ziet (1-16).
+    pub channel: u8,
+    pub note_count: u32,
+    pub low: u8,
+    pub high: u8,
+}
+
+/// Welke kanalen heeft dit MIDI-bestand (met notental en bereik)? Voert het
+/// keuzemenu bij het afspelen: de UI zet per kanaal een klavier + octaaf.
+#[tauri::command]
+pub fn midi_player_scan_channels(path: String) -> Result<Vec<MidiFileChannelDto>, String> {
+    let ks = vpo_midi::scan_channels(std::path::Path::new(&path))?;
+    Ok(ks.into_iter().map(|k| MidiFileChannelDto {
+        channel: k.channel + 1,
+        note_count: k.note_count,
+        low: k.low,
+        high: k.high,
+    }).collect())
+}
+
+/// Eén regel van het afspeel-keuzemenu: een kanaal van het bestand (1-16), het
+/// doelklavier (leeg = niet laten klinken) en een octaafverschuiving (-2..+2).
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct PlayerRouteDto {
+    pub channel: u8,
+    #[serde(default)]
+    pub division: Option<String>,
+    #[serde(default)]
+    pub octave: i8,
+}
+
+/// Zet de routering voor het afspelen van een MIDI-bestand (keuzemenu bij de
+/// afspeelknop). Per kanaal van het bestand een klavier + octaaf, los van de
+/// console-inleer. Een lege lijst (of alle kanalen zonder klavier) zet de
+/// routering uit: dan geldt gewoon de console-inleer, net als bij live spel.
+/// Bouwt uit de keuzes van het afspeel-keuzemenu de routeringstabel: per regel met een divisie één
+/// `MidiChannelMapping` (kanaal 1-16 → 0-15, octaaf → transpose in halve tonen, geen bereikgrens). Regels
+/// zonder divisie ("niet laten klinken") vallen weg. Pure functie, zodat ze zonder app te testen is.
+pub fn bouw_speler_routering(routes: &[PlayerRouteDto]) -> Vec<crate::state::MidiChannelMapping> {
+    routes.iter().filter_map(|r| {
+        let division = r.division.clone().filter(|d| !d.is_empty())?;
+        let channel = r.channel.saturating_sub(1).min(15);
+        let transpose = (r.octave as i16 * 12).clamp(-120, 120) as i8;
+        Some(crate::state::MidiChannelMapping {
+            division,
+            channel: Some(channel),
+            transpose,
+            first_midi_note: None, // geen bereikgrens: het octaaf brengt noten in bereik, de set heeft zelf geen pijp buiten bereik
+            last_midi_note: None,
+            short_octave: false,
+        })
+    }).collect()
+}
+
+#[tauri::command]
+pub fn set_midi_player_routing(state: State<AppState>, routes: Vec<PlayerRouteDto>) -> Result<(), String> {
+    let mappings = bouw_speler_routering(&routes);
+    info!("Afspeel-routering: {} kanaal(en) toegewezen", mappings.len());
+    *state.player_routing.write() = mappings;
+    // Hangers voorkomen als de routering tijdens het spelen verandert: een
+    // NoteOn die via de oude routering klonk, krijgt anders zijn NoteOff via de
+    // nieuwe. paniek() stopt alles en wist held_notes.
+    state.paniek();
+    Ok(())
+}
+
 #[tauri::command]
 pub fn midi_stop_playback(state: State<AppState>) -> Result<(), String> {
     if let Some(p) = state.midi_player.read().as_ref() {

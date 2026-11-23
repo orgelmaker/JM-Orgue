@@ -764,6 +764,8 @@ fn route_test_only(
         (tiny_http::Method::Get, "/midi/archive/list") => Ok(handle_midi_archive_list(state)),
         // MIDI-speler (afspelen van .mid-bestanden, o.a. archiefbestanden)
         (tiny_http::Method::Post, "/midi/player/play") => handle_midi_player_play(state, body),
+        (tiny_http::Method::Get, "/midi/player/channels") => handle_midi_player_channels(query),
+        (tiny_http::Method::Post, "/midi/player/routing") => handle_midi_player_routing(state, body),
         (tiny_http::Method::Post, "/midi/player/stop") => Ok(handle_midi_player_stop(state)),
         (tiny_http::Method::Get, "/midi/player/status") => Ok(handle_midi_player_status(state)),
         // Per-orgel instellingen (self-testing van de persistentie-migratie, Onderdeel 1).
@@ -1927,6 +1929,36 @@ fn handle_midi_player_play(state: &AppState, body: &str) -> Result<Value, (u16, 
     let p = player.as_ref().ok_or((500u16, "MIDI player niet beschikbaar".to_string()))?;
     p.load_and_play(std::path::Path::new(path)).map_err(|e| (400u16, e))?;
     Ok(json!({ "ok": true, "path": path }))
+}
+
+/// Kanalen van een MIDI-bestand (notental + bereik), voor het afspeel-keuzemenu.
+fn handle_midi_player_channels(query: &str) -> Result<Value, (u16, String)> {
+    let path: String = parse_query(query, "path").ok_or((400u16, "Parameter 'path' ontbreekt".to_string()))?;
+    let ks = vpo_midi::scan_channels(std::path::Path::new(&path)).map_err(|e| (400u16, e))?;
+    Ok(json!({ "channels": ks.iter().map(|k| json!({
+        "channel": k.channel + 1, "note_count": k.note_count, "low": k.low, "high": k.high
+    })).collect::<Vec<_>>() }))
+}
+
+/// Afspeel-routering zetten: body {"routes":[{"channel":1,"division":"Hauptwerk","octave":0}, ...]}.
+/// Lege lijst of alle kanalen zonder divisie = routering uit (console-inleer geldt).
+fn handle_midi_player_routing(state: &AppState, body: &str) -> Result<Value, (u16, String)> {
+    let v: Value = serde_json::from_str(body).map_err(|e| (400u16, format!("Ongeldige JSON: {}", e)))?;
+    let routes = v.get("routes").and_then(|r| r.as_array()).cloned().unwrap_or_default();
+    let mappings: Vec<crate::state::MidiChannelMapping> = routes.iter().filter_map(|r| {
+        let division = r.get("division").and_then(|d| d.as_str()).filter(|d| !d.is_empty())?.to_string();
+        let channel = (r.get("channel").and_then(|c| c.as_u64()).unwrap_or(1) as i64 - 1).clamp(0, 15) as u8;
+        let octave = r.get("octave").and_then(|o| o.as_i64()).unwrap_or(0);
+        let transpose = (octave * 12).clamp(-120, 120) as i8;
+        Some(crate::state::MidiChannelMapping {
+            division, channel: Some(channel), transpose,
+            first_midi_note: None, last_midi_note: None, short_octave: false,
+        })
+    }).collect();
+    let n = mappings.len();
+    *state.player_routing.write() = mappings;
+    state.paniek();
+    Ok(json!({ "ok": true, "assigned": n }))
 }
 
 /// Zoals commands::midi_stop_playback: stop + AllNotesOff + held_notes wissen.

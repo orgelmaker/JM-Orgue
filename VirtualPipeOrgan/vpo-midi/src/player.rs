@@ -150,6 +150,39 @@ fn decode_smf(bytes: &[u8]) -> Result<(Vec<AbsoluteEvent>, u64), String> {
     Ok((output, total_micros))
 }
 
+/// Eén kanaal met noten in een MIDI-bestand: het kanaal (0-15) plus hoeveel
+/// noten en de laagste/hoogste. Voor het keuzemenu bij het afspelen, zodat de
+/// gebruiker per kanaal een klavier (en octaaf) kan kiezen.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MidiFileChannel {
+    pub channel: u8,
+    pub note_count: u32,
+    pub low: u8,
+    pub high: u8,
+}
+
+/// Welke kanalen heeft dit MIDI-bestand, met notental en bereik per kanaal?
+/// Gesorteerd op kanaalnummer. Alleen kanalen met minstens één echte NoteOn
+/// (velocity > 0) tellen mee.
+pub fn scan_channels(path: &Path) -> Result<Vec<MidiFileChannel>, String> {
+    let bytes = std::fs::read(path).map_err(|e| format!("Kan bestand niet lezen: {}", e))?;
+    let (events, _) = decode_smf(&bytes)?;
+    let mut per: std::collections::BTreeMap<u8, (u32, u8, u8)> = std::collections::BTreeMap::new();
+    for ev in &events {
+        if let MidiMessage::NoteOn { channel, note, velocity } = ev.msg {
+            if velocity > 0 {
+                let e = per.entry(channel).or_insert((0, 127, 0));
+                e.0 += 1;
+                e.1 = e.1.min(note);
+                e.2 = e.2.max(note);
+            }
+        }
+    }
+    Ok(per.into_iter()
+        .map(|(channel, (note_count, low, high))| MidiFileChannel { channel, note_count, low, high })
+        .collect())
+}
+
 /// MIDI-bestand player. Spawn een thread die events doorgeeft via een
 /// crossbeam channel. De caller leest het channel en routeert messages
 /// naar de gebruikelijke MIDI-handler (zelfde pad als live MIDI).

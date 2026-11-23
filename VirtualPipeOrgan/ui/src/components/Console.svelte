@@ -654,6 +654,48 @@
   $: midiSpeeltNu = speeltNu(midiSpeler, midiGestartPad, lastMidiPath);
   $: midiBestandNaam = bestandsNaam(lastMidiPath);
 
+  // Keuzemenu bij het afspelen (externe MIDI-bestanden niet in het juiste bereik): een gedownload bestand gebruikt
+  // de kanaalindeling van zijn maker, die zelden klopt met hoe dit orgel is ingeleerd. Hier kiest de gebruiker per
+  // kanaal van het bestand een klavier en eventueel een octaaf; dat overschrijft de routering alléén tijdens het
+  // afspelen (backend: set_midi_player_routing). Standaard uit = gewoon de console-inleer, net als live spel.
+  let midiRouteAan = false;
+  let midiKanalen = [];   // [{channel, note_count, low, high}] uit het bestand
+  let midiRoutes = [];    // [{channel, division, octave}] de keuze per kanaal
+  let midiRoutePad = null; // waarvoor midiKanalen/midiRoutes gelden
+  $: midiDivisies = (organInfo?.divisions || []).map(d => ({ naam: d.name, toon: d.display_name || d.name }));
+
+  // Bij een nieuw (of geen) bestand: keuze terugzetten en de routering uitzetten.
+  $: if (lastMidiPath !== midiRoutePad) {
+    midiRoutePad = lastMidiPath;
+    midiRouteAan = false;
+    midiKanalen = [];
+    midiRoutes = [];
+    invoke('set_midi_player_routing', { routes: [] }).catch(() => {});
+    if (lastMidiPath) scanMidiKanalen(lastMidiPath);
+  }
+
+  async function scanMidiKanalen(pad) {
+    try {
+      const ks = await invoke('midi_player_scan_channels', { path: pad });
+      if (pad !== lastMidiPath) return;
+      midiKanalen = ks;
+      // Standaardkeuze: kanalen in volgorde → klavieren in volgorde, geen octaafverschuiving.
+      midiRoutes = ks.map((k, i) => ({ channel: k.channel, division: midiDivisies[i]?.naam || '', octave: 0 }));
+    } catch (e) { midiKanalen = []; midiRoutes = []; }
+  }
+
+  async function pasMidiRouteToe() {
+    try {
+      await invoke('set_midi_player_routing', { routes: midiRouteAan ? midiRoutes : [] });
+    } catch (e) {}
+  }
+
+  async function zetMidiRouteAan(aan) {
+    midiRouteAan = aan;
+    if (aan && midiKanalen.length === 0 && lastMidiPath) await scanMidiKanalen(lastMidiPath);
+    await pasMidiRouteToe();
+  }
+
   async function pollMidiSpeler() {
     try { midiSpeler = await invoke('midi_player_status'); } catch (e) {}
   }
@@ -6703,6 +6745,29 @@
                     <span class="record-dot" class:on={midiRec.recording}></span>
                     {midiRec.recording ? $t('toolbar.midi_menu_stop_rec') : $t('toolbar.midi_menu_rec')}
                   </button>
+                  {#if lastMidiPath && midiKanalen.length}
+                    <div class="midi-route">
+                      <label class="midi-route-aan">
+                        <input type="checkbox" checked={midiRouteAan} on:change={(e) => zetMidiRouteAan(e.currentTarget.checked)} />
+                        {$t('toolbar.midi_route_toggle')}
+                      </label>
+                      {#if midiRouteAan}
+                        <div class="midi-route-hint">{$t('toolbar.midi_route_hint')}</div>
+                        {#each midiRoutes as r (r.channel)}
+                          <div class="midi-route-rij">
+                            <span class="midi-route-kan">{$t('toolbar.midi_route_channel').replace('{n}', r.channel).replace('{c}', (midiKanalen.find(k => k.channel === r.channel)?.note_count ?? 0))}</span>
+                            <select bind:value={r.division} on:change={pasMidiRouteToe}>
+                              <option value="">{$t('toolbar.midi_route_none')}</option>
+                              {#each midiDivisies as d}<option value={d.naam}>{d.toon}</option>{/each}
+                            </select>
+                            <select class="midi-route-oct" bind:value={r.octave} on:change={pasMidiRouteToe} title={$t('toolbar.midi_route_octave_title').replace('{n}', r.channel)}>
+                              {#each [-2, -1, 0, 1, 2] as o}<option value={o}>{o > 0 ? '+' : ''}{o}</option>{/each}
+                            </select>
+                          </div>
+                        {/each}
+                      {/if}
+                    </div>
+                  {/if}
                 </div>
               {/if}
             </div>

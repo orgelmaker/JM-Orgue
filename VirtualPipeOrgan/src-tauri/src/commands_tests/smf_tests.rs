@@ -77,3 +77,54 @@ fn program_change_omits_second_data_byte() {
     // Na de PC (1 databyte) volgt de end-of-track delta (0x00) + 0xFF 0x2F 0x00.
     assert_eq!(&track[pc_pos + 2..pc_pos + 6], &[0x00, 0xFF, 0x2F, 0x00]);
 }
+
+/// Het afspeel-keuzemenu leunt op vpo_midi::scan_channels: welke kanalen zitten
+/// er in het bestand, met notental en bereik. Twee kanalen, elk een eigen noot.
+#[test]
+fn scan_channels_vindt_kanalen_en_bereik() {
+    let events = vec![
+        (0u64, 0x90u8, 60u8, 100u8, 0u8),   // kanaal 0 (gebruiker: 1), noot 60
+        (0u64, 0x90u8, 72u8, 90u8, 0u8),    // kanaal 0, noot 72 → bereik 60..72
+        (0u64, 0x92u8, 36u8, 80u8, 0u8),    // kanaal 2 (gebruiker: 3), noot 36
+        (240u64, 0x80u8, 60u8, 0u8, 0u8),
+        (240u64, 0x80u8, 72u8, 0u8, 0u8),
+        (240u64, 0x82u8, 36u8, 0u8, 0u8),
+    ];
+    let data = super::encode_smf(&events);
+    let dir = std::env::temp_dir().join(format!("jm_scan_{}.mid", std::process::id()));
+    std::fs::write(&dir, &data).unwrap();
+    let ks = vpo_midi::scan_channels(&dir).unwrap();
+    std::fs::remove_file(&dir).ok();
+    assert_eq!(ks.len(), 2, "twee kanalen met noten");
+    assert_eq!((ks[0].channel, ks[0].note_count, ks[0].low, ks[0].high), (0, 2, 60, 72));
+    assert_eq!((ks[1].channel, ks[1].note_count, ks[1].low, ks[1].high), (2, 1, 36, 36));
+}
+
+/// Het afspeel-keuzemenu bouwt per kanaal een routeringsregel. Kanaal 1-16 → 0-15,
+/// octaaf → transpose (×12), een regel zonder divisie valt weg, en de regel routeert
+/// de noot naar het gekozen klavier met de octaafverschuiving.
+#[test]
+fn bouw_speler_routering_zet_kanaal_octaaf_en_klavier() {
+    use super::{bouw_speler_routering, PlayerRouteDto};
+    let routes = vec![
+        PlayerRouteDto { channel: 1, division: Some("Hauptwerk".into()), octave: 1 },
+        PlayerRouteDto { channel: 2, division: Some(String::new()), octave: 0 }, // niet laten klinken
+        PlayerRouteDto { channel: 3, division: Some("Pedal".into()), octave: -1 },
+        PlayerRouteDto { channel: 4, division: None, octave: 0 },                 // ook weg
+    ];
+    let m = bouw_speler_routering(&routes);
+    assert_eq!(m.len(), 2, "alleen regels met een klavier");
+
+    assert_eq!(m[0].division, "Hauptwerk");
+    assert_eq!(m[0].channel, Some(0));      // kanaal 1 → intern 0
+    assert_eq!(m[0].transpose, 12);         // +1 octaaf
+    assert!(m[0].accepts(0, 60));           // kanaal klopt
+    assert!(!m[0].accepts(1, 60));          // ander kanaal niet
+    assert!(m[0].accepts(0, 20));           // geen bereikgrens: elke noot
+    assert_eq!(m[0].speelnoot(60), 72);     // een octaaf hoger
+
+    assert_eq!(m[1].division, "Pedal");
+    assert_eq!(m[1].channel, Some(2));      // kanaal 3 → intern 2
+    assert_eq!(m[1].transpose, -12);
+    assert_eq!(m[1].speelnoot(48), 36);
+}

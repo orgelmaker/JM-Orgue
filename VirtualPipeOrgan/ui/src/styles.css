@@ -3604,6 +3604,14 @@ input[type="range"]::-webkit-slider-thumb:hover {
 }
 .midi-menu.links { right: auto; left: 0; }
 .midi-menu .btn { width: 100%; display: inline-flex; align-items: center; justify-content: flex-start; gap: 0.4rem; }
+/* Keuzemenu bij het afspelen: per kanaal van het bestand een klavier + octaaf. */
+.midi-route { margin-top: 0.3rem; padding-top: 0.4rem; border-top: 1px solid var(--accent-soft); display: flex; flex-direction: column; gap: 0.3rem; }
+.midi-route-aan { display: flex; align-items: center; gap: 0.4rem; font-size: 0.82rem; cursor: pointer; }
+.midi-route-hint { font-size: 0.72rem; opacity: 0.7; line-height: 1.25; }
+.midi-route-rij { display: flex; align-items: center; gap: 0.3rem; }
+.midi-route-kan { flex: 0 0 auto; font-size: 0.72rem; opacity: 0.85; min-width: 5.5rem; }
+.midi-route-rij select { flex: 1 1 auto; min-width: 0; font-size: 0.78rem; padding: 0.12rem 0.2rem; background: var(--bg-darkest); color: inherit; border: 1px solid var(--accent-soft); border-radius: 4px; }
+.midi-route-rij select.midi-route-oct { flex: 0 0 3rem; }
 .midi-speel-knop { display: inline-flex; align-items: center; gap: 0.35rem; }
 .midi-speel-knop.aan { color: #3b82f6; border-color: #3b82f6; }
 

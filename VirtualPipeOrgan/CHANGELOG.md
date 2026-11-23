@@ -6,6 +6,14 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### Externe MIDI-bestanden: kanalen zelf toewijzen bij het afspelen
+- Een gedownload MIDI-bestand gebruikt de kanaalindeling van zijn maker, die zelden klopt met hoe jouw orgel is
+  ingeleerd. Daardoor kwamen de partijen op het verkeerde klavier of klonken ze niet. In het MIDI-menu staat nu, zodra
+  er een bestand klaarstaat, het vinkje "Kanalen zelf toewijzen": per kanaal van het bestand kies je een klavier (of
+  "niet laten klinken") en eventueel een octaafverschuiving (−2 tot +2).
+- Dit geldt alléén tijdens het afspelen en laat je eigen console-inleer en je live spel ongemoeid. Standaard staat het
+  uit: dan speelt een bestand zoals voorheen, volgens je inleer. Teksten in zeven talen.
+
 ### Aangehouden toon zwol regelmatig aan (lusnaad)
 - Bij een aangehouden toon zwol de sterkte elke paar seconden hoorbaar aan en terug, bij alle orgels. Oorzaak: aan de
   naad van de klanklus mengde het programma altijd en lang (tot een halve seconde), met gewichten die bij nette

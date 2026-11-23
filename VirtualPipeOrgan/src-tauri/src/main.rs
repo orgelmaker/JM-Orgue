@@ -566,6 +566,8 @@ fn main() {
             commands::apply_sampleset_loops,
             commands::query_supported_sample_rates,
             commands::midi_play_file,
+            commands::midi_player_scan_channels,
+            commands::set_midi_player_routing,
             commands::midi_stop_playback,
             commands::midi_pause_playback,
             commands::midi_resume_playback,
