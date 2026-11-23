@@ -6,6 +6,13 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### Aangehouden toon zwol regelmatig aan (lusnaad)
+- Bij een aangehouden toon zwol de sterkte elke paar seconden hoorbaar aan en terug, bij alle orgels. Oorzaak: aan de
+  naad van de klanklus mengde het programma altijd en lang (tot een halve seconde), met gewichten die bij nette
+  luspunten optelden tot meer dan 1 — een bult van ongeveer +3 dB bij elke lusomloop.
+- De menging is nu kort (10 ms) en de gewichten tellen samen op tot 1. Gemeten: de bult verdwijnt (van +3 naar +0,3 dB)
+  en er komt geen tik bij. De klank is verder gelijk; de audio-kern doet aan de naad minder werk.
+
 ## [0.9.58] - 2026-11-21
 
 ### Hoofdvolume kan harder: tot +20 dB

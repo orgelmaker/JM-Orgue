@@ -1,4 +1,4 @@
-use super::{read_voice, read_voice_lr, xfade_weights, interp, linear2, hermite4};
+use super::{read_voice, read_voice_lr, xfade_weights, interp, linear2, hermite4, loop_xfade, LUS_MENG_MAX};
 
 /// Lichte interpolatie (0.9.30): lineair tussen de buren, gelijk aan cubisch
 /// op een geheel punt, en `interp` kiest de juiste tak.
@@ -33,16 +33,44 @@ fn read_voice_licht_en_cubisch_gelijk_op_geheel_punt() {
     assert!((a - b).abs() < 1e-6, "cubisch {a} vs licht {b} op geheel punt");
 }
 
-/// Sinustabel ≈ sin/cos en blijft equal-power over de hele fade.
+/// De naadgewichten zijn samen altijd 1 en lopen van (1, 0) aan het begin van de menging naar (0, 1) op de naad.
 #[test]
-fn xfade_lut_matches_sin_cos() {
+fn naadgewichten_zijn_samen_een() {
     for k in 0..=2000 {
         let fade = k as f32 / 2000.0;
         let (wp, wb) = xfade_weights(fade);
-        let theta = fade * std::f32::consts::FRAC_PI_2;
-        assert!((wp - theta.sin()).abs() < 2e-6, "sin bij {}", fade);
-        assert!((wb - theta.cos()).abs() < 2e-6, "cos bij {}", fade);
-        assert!((wp * wp + wb * wb - 1.0).abs() < 5e-6, "power bij {}", fade);
+        assert!((wp + wb - 1.0).abs() < 1e-6, "som bij {}", fade);
+        assert!((0.0..=1.0).contains(&wp) && (0.0..=1.0).contains(&wb));
+    }
+    assert_eq!(xfade_weights(1.0), (1.0, 0.0));
+    assert_eq!(xfade_weights(0.0), (0.0, 1.0));
+}
+
+/// De melding bij 0.9.58: een aangehouden toon zwol bij elke lusomloop aan. Een lus waarvan het einde en het stuk
+/// vóór het begin in fase liggen (hele aantallen perioden) moet over de naad even sterk blijven: geen bult, geen dip.
+#[test]
+fn lus_in_fase_houdt_de_sterkte_over_de_naad() {
+    let periode = 100usize;
+    let n = 40_000usize;
+    let data: Vec<f32> = (0..n).map(|i| (i as f32 * std::f32::consts::TAU / periode as f32).sin()).collect();
+    let (ls, le) = (10_000usize, 30_000usize); // luslengte = 200 perioden
+    let xfade = loop_xfade(le - ls, ls);
+    assert_eq!(xfade, LUS_MENG_MAX, "korte menging, niet langer");
+    let mut pos = (le - 2 * xfade) as f64;
+    let mut env = 1.0f32;
+    let mut hoogste = 0.0f32;
+    let mut uit = Vec::new();
+    for _ in 0..(4 * xfade) {
+        let v = read_voice(&data, ls, le, xfade, &mut pos, false, &mut env, false);
+        hoogste = hoogste.max(v.abs());
+        uit.push(v);
+        pos += 1.0;
+    }
+    assert!(hoogste < 1.01, "bult over de naad: top {hoogste} (gelijke energie gaf 1,41)");
+    // per periode moet de top ook niet inzakken
+    for blok in uit.chunks(periode).filter(|b| b.len() == periode) {
+        let top = blok.iter().fold(0.0f32, |m, v| m.max(v.abs()));
+        assert!(top > 0.99, "dip over de naad: top {top}");
     }
 }
 

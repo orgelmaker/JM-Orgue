@@ -2669,16 +2669,22 @@ fn push_voices_budgeted(
     n
 }
 
-/// Crossfade length for a loop of `loop_len` samples whose start is at index `ls`.
-/// Long crossfades (Hauptwerk-style, up to ~500 ms) mask imperfect loop points;
-/// bounded by half the loop and by the available pre-loop data (`ls`).
+/// Langste menging aan de lusnaad, in monsters van de opname: 10 ms bij 48 kHz, 5 ms bij 96 kHz.
+/// Tot 0.9.58 was dit een halve seconde (24 000). Over zo'n lang venster loopt de fase tussen het lus-einde en
+/// het stuk vóór het lus-begin bij een deel van de pijpen weg; vlak bij de naad liggen ze vrijwel altijd in fase
+/// (gemeten in drie sets: gelijkenis over de laatste 10 ms 1,00). Kort mengen blijft dus binnen het stuk waar de
+/// twee op elkaar lijken.
+const LUS_MENG_MAX: usize = 480;
+
+/// Crossfade length for a loop of `loop_len` samples whose start is at index `ls`:
+/// kort (`LUS_MENG_MAX`), bounded by half the loop and by the available pre-loop data (`ls`).
 /// GEEN ondergrens meer: de oude .clamp(256, …) kon bij weinig pre-loop-data
 /// (ls < 256) een xfade GROTER dan ls opleveren, waarna read_voice de blend
 /// helemaal oversloeg (guard `ls >= xfade`) — een harde naad die elke
 /// loop-omloop tikte. Een korte blend is altijd beter dan géén.
 #[inline]
 fn loop_xfade(loop_len: usize, ls: usize) -> usize {
-    (loop_len / 2).min(ls).min(24_000)
+    (loop_len / 2).min(ls).min(LUS_MENG_MAX)
 }
 
 /// Maximaal aantal fysieke uitgangskanalen waarvoor galm-gewichten worden
@@ -2864,39 +2870,19 @@ fn interp<B: Bron + ?Sized>(data: &B, i: usize, frac: f32, licht: bool) -> f32 {
 /// `envelope` is forced to 0 when playback finishes.
 ///
 /// The crossfade blends the loop tail `[le-xfade, le)` into the pre-loop region
-/// `[ls-xfade, ls)` so the output lands exactly on `data[ls]` at the seam — making
-/// Equal-power crossfade-gewichten uit een sinustabel (0..π/2, 1024 stappen,
-/// lineair geïnterpoleerd) i.p.v. sin()+cos() per sample in de loop-naad. Bij
-/// lange Hauptwerk-achtige crossfades (tot 0,5 s per loop-omloop) zat een
-/// flink deel van alle voice-samples in de naadzone — twee transcendenten per
-/// sample per stem waren daar de grootste kostenpost. Fout < 1e-6.
-static XFADE_LUT: std::sync::OnceLock<Vec<f32>> = std::sync::OnceLock::new();
-const XFADE_LUT_N: usize = 1024;
-/// Tabel opbouwen (één keer; wordt bij AudioPlayer::new aangeroepen zodat de
-/// audio-thread nooit hoeft te alloceren).
-pub fn xfade_lut() -> &'static [f32] {
-    XFADE_LUT.get_or_init(|| {
-        (0..=XFADE_LUT_N)
-            .map(|i| (i as f32 / XFADE_LUT_N as f32 * std::f32::consts::FRAC_PI_2).sin())
-            .collect()
-    })
-}
-#[inline]
-fn lut_sin_quarter(lut: &[f32], x: f32) -> f32 {
-    // x in 0..=1 ↔ θ in 0..=π/2
-    let xs = x.clamp(0.0, 1.0) * XFADE_LUT_N as f32;
-    let i = xs as usize;
-    if i >= XFADE_LUT_N {
-        return lut[XFADE_LUT_N];
-    }
-    let t = xs - i as f32;
-    lut[i] + (lut[i + 1] - lut[i]) * t
-}
-/// (w_primary, w_blended) = (sin θ, cos θ) met θ = fade·π/2; primary²+blended² ≈ 1.
+/// `[ls-xfade, ls)` so the output lands exactly on `data[ls]` at the seam.
+///
+/// Gewichten aan de lusnaad: (w_primary, w_blended) = (fade, 1 - fade), samen altijd 1.
+///
+/// Tot 0.9.58 waren dit gelijke-energie-gewichten (sin/cos, kwadraten samen 1). Die houden de sterkte gelijk als
+/// het lus-einde en het stuk vóór het lus-begin NIET op elkaar lijken. Bij luspunten die in fase liggen lijken ze
+/// juist wel op elkaar, en dan telden de twee halverwege op tot 1,41: een bult van +3 dB bij elke lusomloop,
+/// hoorbaar als een regelmatig aanzwellen van een aangehouden toon. Met gewichten die samen 1 zijn blijft de
+/// sterkte dan gelijk.
 #[inline]
 fn xfade_weights(fade: f32) -> (f32, f32) {
-    let lut = xfade_lut();
-    (lut_sin_quarter(lut, fade), lut_sin_quarter(lut, 1.0 - fade))
+    let f = fade.clamp(0.0, 1.0);
+    (f, 1.0 - f)
 }
 
 /// Mono-lezer: dunne wrapper om [`read_voice_lr`] (zelfde code, geen rechtervlak).
@@ -2982,11 +2968,8 @@ fn read_voice_lr<L: Bron + ?Sized, R: Bron + ?Sized>(
         let dist = le as f64 - p; // samples until the seam
         if dist > 0.0 && dist < xfade as f64 {
             let fade = (dist / xfade as f64) as f32; // 1.0 at xfade start → 0.0 at seam
-            // Equal-power (constant-energy) crossfade: weights are sin/cos so
-            // primary²+blended² == 1 throughout. The loop tail and the pre-loop
-            // region are not phase-aligned, so a linear/smoothstep fade would dip
-            // ~3 dB at the midpoint every loop → a rhythmic amplitude "tick".
-            // sin/cos keeps the level flat across the seam.
+            // Gewichten die samen 1 zijn (zie `xfade_weights`): vlak bij de naad liggen het
+            // lus-einde en het stuk vóór het lus-begin in fase, dus de sterkte blijft gelijk.
             let (w_primary, w_blended) = xfade_weights(fade); // 1.0 at xfade start / 1.0 at the seam
             let pre = ls as f64 - dist; // walks [ls - xfade, ls)
             let j = pre as usize;
@@ -3304,8 +3287,6 @@ impl AudioPlayer {
         // thread (UI/MIDI/test-API) tot 3 s per commando — dat voelde als een
         // bevroren app. AudioCommand is klein; 4096 kost vrijwel niets.
         let (command_tx, command_rx) = bounded::<AudioCommand>(4096);
-        // Crossfade-tabel nu opbouwen: de audio-thread mag niet alloceren.
-        let _ = xfade_lut();
         let voice_count = Arc::new(AtomicUsize::new(0));
         let peak_left = Arc::new(AtomicU32::new(0.0f32.to_bits()));
         let peak_right = Arc::new(AtomicU32::new(0.0f32.to_bits()));
