@@ -4,7 +4,7 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
-## [Onuitgebracht]
+## [0.9.60] - 2026-11-24
 
 ### MIDI afspelen: twee kanalen naar hetzelfde klavier
 - Wees je in het afspeel-keuzemenu twee kanalen van het bestand aan hetzelfde klavier toe, dan bleef het ene kanaal
