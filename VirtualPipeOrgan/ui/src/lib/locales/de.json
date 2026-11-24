@@ -680,6 +680,7 @@
     "midi_menu_rec": "Aufnahme starten",
     "midi_menu_stop_rec": "Aufnahme stoppen",
     "midi_play": "Abspielen",
+    "midi_seek_title": "Ziehen zum Vor- oder Zurückspulen",
     "midi_stop": "Stopp",
     "midi_play_title": "{naam} abspielen (Register selbst ziehen)",
     "midi_stop_title": "Wiedergabe von {naam} stoppen",
@@ -830,6 +831,7 @@
   },
   "recording": {
     "audio_saved": "Aufnahme gespeichert:\n{path}\n({time})",
+    "open_folder": "Zum Speicherort gehen?",
     "audio_error": "Aufnahmefehler: {error}",
     "midi_no_notes": "Keine Noten aufgenommen — spielen Sie während der Aufnahme auf dem Manual (über MIDI).",
     "midi_file_filter": "MIDI-Datei",

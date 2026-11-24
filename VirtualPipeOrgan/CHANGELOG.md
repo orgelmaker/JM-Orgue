@@ -4,6 +4,17 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [Onuitgebracht]
+
+### MIDI afspelen: positiebalk om vooruit en terug te spoelen
+- Bij een MIDI-bestand in de werkbalk verschijnt tijdens het spelen (en in pauze) een positiebalk naast de afspeelknop,
+  met de speeltijd ernaast. Sleep de balk om vooruit of terug te spoelen; de speler zet op dat moment eerst alles stil,
+  zodat er geen tonen blijven hangen bij het verspringen.
+
+### Opname: naar de opslaglocatie gaan
+- Na een MP3- of MIDI-opname vraagt het programma of je naar de opslaglocatie wilt. Bij "ja" opent de map met het
+  opgeslagen bestand in de bestandsbeheerder, zodat je de opname meteen terugvindt.
+
 ## [0.9.59] - 2026-11-23
 
 ### Bibliotheek: een geïnstalleerde set die bijgewerkt kan worden

@@ -680,6 +680,7 @@
     "midi_menu_rec": "Iniciar grabación",
     "midi_menu_stop_rec": "Detener grabación",
     "midi_play": "Reproducir",
+    "midi_seek_title": "Arrastra para avanzar o retroceder",
     "midi_stop": "Parar",
     "midi_play_title": "Reproducir {naam} (saca tú mismo los registros)",
     "midi_stop_title": "Detener la reproducción de {naam}",
@@ -830,6 +831,7 @@
   },
   "recording": {
     "audio_saved": "Grabación guardada:\n{path}\n({time})",
+    "open_folder": "¿Ir a la ubicación de almacenamiento?",
     "audio_error": "Error de grabación: {error}",
     "midi_no_notes": "No se ha grabado ninguna nota — toca en el teclado (por MIDI) durante la grabación.",
     "midi_file_filter": "Archivo MIDI",

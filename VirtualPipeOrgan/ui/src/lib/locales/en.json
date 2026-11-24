@@ -680,6 +680,7 @@
     "midi_menu_rec": "Start recording",
     "midi_menu_stop_rec": "Stop recording",
     "midi_play": "Play",
+    "midi_seek_title": "Drag to seek forward or back",
     "midi_stop": "Stop",
     "midi_play_title": "Play {naam} (draw the stops yourself)",
     "midi_stop_title": "Stop playing {naam}",
@@ -830,6 +831,7 @@
   },
   "recording": {
     "audio_saved": "Recording saved:\n{path}\n({time})",
+    "open_folder": "Go to the storage location?",
     "audio_error": "Recording error: {error}",
     "midi_no_notes": "No notes recorded — play on the keyboard (via MIDI) during the recording.",
     "midi_file_filter": "MIDI file",

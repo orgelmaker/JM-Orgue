@@ -680,6 +680,7 @@
     "midi_menu_rec": "Avvia registrazione",
     "midi_menu_stop_rec": "Ferma registrazione",
     "midi_play": "Riproduci",
+    "midi_seek_title": "Trascina per avanzare o tornare indietro",
     "midi_stop": "Stop",
     "midi_play_title": "Riproduci {naam} (inserisci tu i registri)",
     "midi_stop_title": "Ferma la riproduzione di {naam}",
@@ -830,6 +831,7 @@
   },
   "recording": {
     "audio_saved": "Registrazione salvata:\n{path}\n({time})",
+    "open_folder": "Andare alla posizione di salvataggio?",
     "audio_error": "Errore di registrazione: {error}",
     "midi_no_notes": "Nessuna nota registrata — suona sul manuale (via MIDI) durante la registrazione.",
     "midi_file_filter": "File MIDI",

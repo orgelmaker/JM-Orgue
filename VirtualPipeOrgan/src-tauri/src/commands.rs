@@ -6345,6 +6345,22 @@ pub fn midi_archive_open_dir(state: State<AppState>) -> Result<(), String> {
     Ok(())
 }
 
+/// Open de map waarin `path` staat in de bestandsbeheerder (na een opname: "naar de
+/// opslaglocatie gaan"). Opent de bovenliggende map, per platform de eigen beheerder.
+#[tauri::command]
+pub fn onthul_bestand(path: String) -> Result<(), String> {
+    let p = std::path::Path::new(&path);
+    let map = p.parent().filter(|d| !d.as_os_str().is_empty()).unwrap_or(p);
+    #[cfg(target_os = "windows")]
+    let mut cmd = { let mut c = std::process::Command::new("explorer"); c.arg(map.as_os_str()); c };
+    #[cfg(target_os = "macos")]
+    let mut cmd = { let mut c = std::process::Command::new("open"); c.arg(map); c };
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let mut cmd = { let mut c = std::process::Command::new("xdg-open"); c.arg(map); c };
+    cmd.spawn().map_err(|e| format!("Map openen mislukt: {}", e))?;
+    Ok(())
+}
+
 /// Lopende take nu afsluiten en wegschrijven (afsluiten app); antwoord = pad of null.
 /// Async + spawn_blocking (patroon set_audio_output): het wachten op de
 /// MIDI-thread (tot 1,5 s, bv. midden in een leermodus) mag de UI-thread

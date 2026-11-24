@@ -680,6 +680,7 @@
     "midi_menu_rec": "Démarrer l’enregistrement",
     "midi_menu_stop_rec": "Arrêter l’enregistrement",
     "midi_play": "Lire",
+    "midi_seek_title": "Glissez pour avancer ou reculer",
     "midi_stop": "Arrêt",
     "midi_play_title": "Lire {naam} (tirez vous-même les jeux)",
     "midi_stop_title": "Arrêter la lecture de {naam}",
@@ -830,6 +831,7 @@
   },
   "recording": {
     "audio_saved": "Enregistrement sauvegardé :\n{path}\n({time})",
+    "open_folder": "Aller à l'emplacement de stockage ?",
     "audio_error": "Erreur d'enregistrement : {error}",
     "midi_no_notes": "Aucune note enregistrée — jouez sur le clavier (via MIDI) pendant l'enregistrement.",
     "midi_file_filter": "Fichier MIDI",

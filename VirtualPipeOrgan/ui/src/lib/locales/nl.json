@@ -680,6 +680,7 @@
     "midi_menu_rec": "Opname starten",
     "midi_menu_stop_rec": "Opname stoppen",
     "midi_play": "Afspelen",
+    "midi_seek_title": "Sleep om vooruit of terug te spoelen",
     "midi_stop": "Stop",
     "midi_play_title": "{naam} afspelen (trek zelf de registers)",
     "midi_stop_title": "Het afspelen van {naam} stoppen",
@@ -830,6 +831,7 @@
   },
   "recording": {
     "audio_saved": "Opname opgeslagen:\n{path}\n({time})",
+    "open_folder": "Naar de opslaglocatie gaan?",
     "audio_error": "Opname-fout: {error}",
     "midi_no_notes": "Geen noten opgenomen — speel op het klavier (via MIDI) tijdens de opname.",
     "midi_file_filter": "MIDI-bestand",

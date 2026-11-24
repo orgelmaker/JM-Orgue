@@ -3634,6 +3634,11 @@ input[type="range"]::-webkit-slider-thumb:hover {
 .midi-speel-knop { display: inline-flex; align-items: center; gap: 0.35rem; }
 .midi-speel-knop.aan { color: #3b82f6; border-color: #3b82f6; }
 
+/* Positiebalk naast de afspeelknop: sleepbaar vooruit/terug (0.9.60). */
+.midi-positie { display: inline-flex; align-items: center; gap: 0.4rem; min-width: 7rem; }
+.midi-positie-balk { flex: 1 1 auto; min-width: 5rem; max-width: 12rem; height: 4px; cursor: pointer; accent-color: #3b82f6; }
+.midi-positie-tijd { flex: 0 0 auto; font-size: 0.72rem; opacity: 0.8; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
 /* Onderwerpnavigatie in de instellingen (0.8.90) */
 .instellingen-nav {
   position: sticky; top: -1.25rem; z-index: 5;

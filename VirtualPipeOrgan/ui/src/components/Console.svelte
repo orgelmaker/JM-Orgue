@@ -628,7 +628,10 @@
         const final = await invoke('stop_recording');
         recorderStatus = final;
         if (final && final.path) {
-          alert(tx('recording.audio_saved').replace('{path}', final.path).replace('{time}', formatSeconds(final.seconds)));
+          const melding = tx('recording.audio_saved').replace('{path}', final.path).replace('{time}', formatSeconds(final.seconds));
+          if (await confirm(melding + '\n\n' + tx('recording.open_folder'))) {
+            try { await invoke('onthul_bestand', { path: final.path }); } catch (e) { /* map openen mislukt */ }
+          }
         }
       } else {
         const path = await invoke('start_recording', { path: null });
@@ -703,6 +706,21 @@
     if (!midiSpelerPoll) midiSpelerPoll = setInterval(pollMidiSpeler, 400);
     pollMidiSpeler();
   }
+  // Positiebalk: terwijl je sleept toont de balk je eigen positie (midiSleepWaarde), niet de poll;
+  // bij loslaten springt de speler naar die plek (midi_seek stuurt intern alles stil, geen hangers).
+  let midiSleepWaarde = null;
+  $: midiBalkMax = Math.max(1, midiSpeler.duration_ms || 0);
+  $: midiBalkWaarde = midiSleepWaarde ?? Math.min(midiSpeler.position_ms || 0, midiBalkMax);
+  async function seekMidi(ms) {
+    try { await invoke('midi_seek', { positionMs: Math.round(Math.max(0, ms)) }); } catch (e) {}
+  }
+  function midiBalkInput(e) { midiSleepWaarde = +e.target.value; }
+  async function midiBalkChange(e) {
+    const doel = +e.target.value;
+    midiSleepWaarde = null;
+    await seekMidi(doel);
+    pollMidiSpeler();
+  }
 
   // MIDI-bestand kiezen en in de werkbalk klaarzetten; afspelen doet de knop die daarna verschijnt.
   async function openMidiBestand() {
@@ -749,7 +767,10 @@
           await invoke('save_midi_recording', { path });
           lastMidiPath = path;
           startMidiSpelerPoll();
-          alert(tx('recording.midi_saved').replace('{path}', path).replace('{n}', String(count)));
+          const melding = tx('recording.midi_saved').replace('{path}', path).replace('{n}', String(count));
+          if (await confirm(melding + '\n\n' + tx('recording.open_folder'))) {
+            try { await invoke('onthul_bestand', { path }); } catch (e) { /* map openen mislukt */ }
+          }
         } else {
           // Geannuleerd → opname verwerpen zodat de status schoon is.
           await invoke('clear_midi_recording');
@@ -6883,6 +6904,21 @@
                   {$t('toolbar.midi_play')}
                 {/if}
               </button>
+              {#if midiSpeler.duration_ms > 0 && (midiSpeeltNu || midiSpeler.state === 'paused')}
+                <div class="midi-positie" title={$t('toolbar.midi_seek_title')}>
+                  <input
+                    class="midi-positie-balk"
+                    type="range"
+                    min="0"
+                    max={midiBalkMax}
+                    value={midiBalkWaarde}
+                    on:input={midiBalkInput}
+                    on:change={midiBalkChange}
+                    aria-label={$t('toolbar.midi_seek_title')}
+                  />
+                  <span class="midi-positie-tijd">{formatSeconds(midiBalkWaarde / 1000)} / {formatSeconds(midiSpeler.duration_ms / 1000)}</span>
+                </div>
+              {/if}
             {/if}
             {#if !midiRec.recording}
               <button

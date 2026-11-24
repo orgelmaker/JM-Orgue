@@ -680,6 +680,7 @@
     "midi_menu_rec": "Rozpocznij nagrywanie",
     "midi_menu_stop_rec": "Zakończ nagrywanie",
     "midi_play": "Odtwarzaj",
+    "midi_seek_title": "Przeciągnij, aby przewinąć do przodu lub do tyłu",
     "midi_stop": "Stop",
     "midi_play_title": "Odtwórz {naam} (rejestry wyciągnij sam)",
     "midi_stop_title": "Zatrzymaj odtwarzanie {naam}",
@@ -830,6 +831,7 @@
   },
   "recording": {
     "audio_saved": "Nagranie zapisane:\n{path}\n({time})",
+    "open_folder": "Przejść do lokalizacji zapisu?",
     "audio_error": "Błąd nagrywania: {error}",
     "midi_no_notes": "Nie nagrano nut — graj na klawiaturze (przez MIDI) podczas nagrywania.",
     "midi_file_filter": "Plik MIDI",

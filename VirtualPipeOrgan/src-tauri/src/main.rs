@@ -680,6 +680,7 @@ fn main() {
             commands::midi_archive_list,
             commands::midi_archive_delete,
             commands::midi_archive_open_dir,
+            commands::onthul_bestand,
             commands::midi_archive_flush,
             commands::convert_midi_to_musicxml,
             commands::convert_midi_to_klavar_model,
