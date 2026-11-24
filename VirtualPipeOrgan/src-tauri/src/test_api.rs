@@ -625,6 +625,9 @@ fn route_test_only(
         (tiny_http::Method::Post, "/load_directory") => handle_load_directory(state, body),
         (tiny_http::Method::Post, "/audio_output") => handle_audio_output(state, body),
         (tiny_http::Method::Post, "/reverb") => handle_reverb(state, body),
+        // Alleen voor self-testing: pas de opgeslagen DSP (incl. set-galm met relatief IR-pad)
+        // van het geladen orgel toe, zoals de frontend dat bij het laden doet.
+        (tiny_http::Method::Post, "/dsp/reapply") => { crate::commands::apply_dsp_after_backend_reload(state); Ok(json!({"ok": true})) }
         (tiny_http::Method::Post, "/sampleset/scan") => handle_sampleset_scan(body),
         (tiny_http::Method::Post, "/sampleset/trim") => handle_sampleset_trim(body),
         (tiny_http::Method::Post, "/sampleset/loop_scan") => handle_sampleset_loop_scan(body),

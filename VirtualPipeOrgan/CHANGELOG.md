@@ -4,6 +4,20 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [Onuitgebracht]
+
+### Galm: een met de set meegeleverde impulsrespons (IR)
+- Een sampleset kan nu een eigen galm-IR meeleveren met een pad relatief t.o.v. de setmap. De app lost dat pad op
+  tegen de map van de set, zodat de meegeleverde galm op elke computer werkt — ongeacht waar de set is geïnstalleerd.
+  Voorheen werd het IR-pad altijd als absoluut pad gelezen, waardoor een meegeleverde IR niet werd gevonden. In het
+  logboek staat nu of de set-IR geladen is of niet gevonden werd.
+
+### Bibliotheek: update ook zichtbaar bij een handmatig geïnstalleerde set
+- De "Update beschikbaar"-tegel verscheen alleen voor sets die de app zelf had gedownload (met bekende versie). Een set
+  die met "map scannen" of handmatig was geïnstalleerd, kreeg geen tegel. Nu geldt: een geïnstalleerde set met een
+  onbekende versie wordt als de oudste versie behandeld, zodat de update verschijnt zodra het manifest een hoger nummer
+  heeft.
+
 ## [0.9.60] - 2026-11-24
 
 ### MIDI afspelen: twee kanalen naar hetzelfde klavier

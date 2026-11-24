@@ -66,14 +66,16 @@ check(!isGeinstalleerd(set, [orgel(NFC + ' (kopie)', 'D:\\Sets\\' + NFC + ' (kop
   check(lijst.length === 1 && lijst[0].id === v1.id && lijst[0]._geinstalleerde_versie === 1, 'nieuwere manifest-versie → set staat op bij te werken');
   // zelfde versie → niets bij te werken
   check(teUpdaten([v1], bib, gedl, { [v1.id]: 1 }).length === 0, 'zelfde versie → niet bij te werken');
-  // we kennen de geïnstalleerde versie niet (alleen op naam herkend) → niet bij te werken
-  check(teUpdaten([v2], bib, gedl, {}).length === 0, 'onbekende geïnstalleerde versie → niet bij te werken');
+  // onbekende geïnstalleerde versie (handmatig/map-scan) → als v1 behandeld, dus update bij manifest > 1
+  const onbekend = teUpdaten([v2], bib, gedl, {});
+  check(onbekend.length === 1 && onbekend[0]._geinstalleerde_versie === 1, 'onbekende versie telt als v1 → update verschijnt');
+  check(teUpdaten([v1], bib, gedl, {}).length === 0, 'onbekende versie maar manifest ook 1 → geen update');
   // wel een nieuwere versie, maar de set staat niet (meer) in de bibliotheek → hoort bij nogTeDownloaden, niet hier
   check(teUpdaten([v2], [], {}, { [v1.id]: 1 }).length === 0, 'niet meer geïnstalleerd → niet bij te werken');
   // een bij te werken set zit NIET ook in nogTeDownloaden (die telt alleen niet-geïnstalleerde)
   check(nogTeDownloaden([v2], bib, gedl).length === 0, 'een geïnstalleerde set staat niet bij "nog te downloaden"');
-  // geen versies-tabel of geen manifest geeft geen fout
-  check(teUpdaten([v2], bib, gedl, null).length === 0 && teUpdaten(undefined, bib, gedl, { [v1.id]: 1 }).length === 0, 'ontbrekende versies of manifest geeft geen fout');
+  // geen versies-tabel = onbekende versie = telt als v1 (dus update bij manifest > 1); geen manifest = lege lijst
+  check(teUpdaten([v2], bib, gedl, null).length === 1 && teUpdaten(undefined, bib, gedl, { [v1.id]: 1 }).length === 0, 'ontbrekende versies telt als v1, ontbrekend manifest geeft geen fout');
 }
 
 // ---- de uitleg voor het logboek ----

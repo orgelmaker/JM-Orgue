@@ -80,12 +80,18 @@ export function teUpdaten(manifestSets, organen, gedownload, versies) {
   return (manifestSets || [])
     .filter((s) => {
       if (!s || !s.naam || !s.zip_url || s.id == null) return false;
-      const geinstalleerd = versies ? Number(versies[s.id]) : NaN;
-      if (!Number.isFinite(geinstalleerd)) return false;   // niet door ons gedownload → versie onbekend
-      if (!(Number(s.versie) > geinstalleerd)) return false; // manifest niet nieuwer
-      return isGeinstalleerd(s, organen, gedownload);        // moet nog in de bibliotheek staan
+      if (!isGeinstalleerd(s, organen, gedownload)) return false; // moet in de bibliotheek staan
+      // Kennen we de geïnstalleerde versie niet (de app heeft hem niet zelf gedownload, of hij komt
+      // van vóór deze functie), dan nemen we de oudste aan (1). Zo verschijnt de update ook bij een
+      // set die handmatig of met "map scannen" is geïnstalleerd, zodra het manifest een hoger nummer heeft.
+      const geinstalleerd = Number(versies ? versies[s.id] : NaN);
+      const basis = Number.isFinite(geinstalleerd) ? geinstalleerd : 1;
+      return Number(s.versie) > basis;
     })
-    .map((s) => ({ ...s, _geinstalleerde_versie: Number(versies[s.id]) }));
+    .map((s) => {
+      const g = Number(versies ? versies[s.id] : NaN);
+      return { ...s, _geinstalleerde_versie: Number.isFinite(g) ? g : 1 };
+    });
 }
 
 /**

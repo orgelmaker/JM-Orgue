@@ -5289,13 +5289,30 @@ pub fn apply_dsp_after_backend_reload(state: &AppState) {
         let algorithmic = r.reverb_type != "convolution";
         if !algorithmic {
             if let Some(ref irp) = r.ir_path {
-                let path = std::path::PathBuf::from(irp);
+                // Een IR die met de set wordt meegeleverd, staat op elke computer op een ander
+                // absoluut pad; daarom wordt een RELATIEF ir_path opgelost t.o.v. de setmap
+                // (organ_settings_dir). Een absoluut pad (zelf gekozen IR) blijft ongemoeid.
+                let rel = std::path::PathBuf::from(irp);
+                let path = if rel.is_absolute() {
+                    rel
+                } else {
+                    state.loaded_organ_info.read().as_ref()
+                        .and_then(|o| organ_settings_dir(&o.id))
+                        .map(|dir| dir.join(irp))
+                        .unwrap_or(rel)
+                };
                 if path.exists() {
                     let target_rate = state.audio_player.read().as_ref()
                         .map(|p| *p.sample_rate.read()).filter(|&x| x > 0).unwrap_or(44100);
-                    if let Ok(rev) = vpo_audio::ConvolutionReverb::from_wav(&path, vpo_audio::ConvolutionReverb::aanbevolen_partitie(), target_rate) {
-                        state.send_audio_command(AudioCommand::LoadImpulseResponse(Box::new(rev)));
+                    match vpo_audio::ConvolutionReverb::from_wav(&path, vpo_audio::ConvolutionReverb::aanbevolen_partitie(), target_rate) {
+                        Ok(rev) => {
+                            state.send_audio_command(AudioCommand::LoadImpulseResponse(Box::new(rev)));
+                            info!("Set-galm: impulsrespons geladen van {:?} ({} Hz)", path, target_rate);
+                        }
+                        Err(e) => warn!("Set-galm: impulsrespons {:?} niet te laden: {}", path, e),
                     }
+                } else {
+                    warn!("Set-galm: impulsrespons niet gevonden op {:?} (ir_path={:?})", path, irp);
                 }
             }
         }
@@ -8838,7 +8855,18 @@ pub fn export_organ_file(_state: State<AppState>, directory: String, output_path
 /// Load an impulse response WAV file for convolution reverb
 #[tauri::command]
 pub fn load_impulse_response(state: State<AppState>, path: String) -> Result<(), String> {
-    let ir_path = std::path::PathBuf::from(&path);
+    // Een met de set meegeleverde IR heeft een RELATIEF pad (bv. "IR_ph.wav"); dat wordt opgelost
+    // t.o.v. de setmap, zodat het op elke computer werkt. Een zelf gekozen IR is een absoluut pad.
+    let rel = std::path::PathBuf::from(&path);
+    let ir_path = if rel.is_absolute() {
+        rel
+    } else {
+        state.loaded_organ_info.read().as_ref()
+            .and_then(|o| organ_settings_dir(&o.id))
+            .map(|dir| dir.join(&path))
+            .filter(|p| p.exists())
+            .unwrap_or(rel)
+    };
     if !ir_path.exists() {
         return Err(format!("IR file not found: {}", path));
     }
