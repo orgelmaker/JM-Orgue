@@ -4,7 +4,7 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
-## [Onuitgebracht]
+## [0.9.61] - 2026-11-24
 
 ### Galm: een met de set meegeleverde impulsrespons (IR)
 - Een sampleset kan nu een eigen galm-IR meeleveren met een pad relatief t.o.v. de setmap. De app lost dat pad op
