@@ -4,7 +4,7 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
-## [Onuitgebracht]
+## [0.9.62] - 2026-11-24
 
 ### Hangers bij registreren tijdens het afspelen van een MIDI-bestand
 - Werkte je met het afspeel-keuzemenu (kanalen zelf aan klavieren toewijzen) en wisselde je tijdens het afspelen van
