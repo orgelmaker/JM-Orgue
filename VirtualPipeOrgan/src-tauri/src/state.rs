@@ -4962,10 +4962,28 @@ impl AppState {
         let organ = self.loaded_organ_info.read();
         let Some(ref o) = *organ else { return; };
         let Some(tx) = self.audio_player.read().as_ref().map(|p| p.command_sender()) else { return; };
-        let mappings = self.midi_mappings.read();
+        let player_r = self.player_routing.read();
+        let console = self.midi_mappings.read();
+        let mappings: &[MidiChannelMapping] = self.routering_voor_gehouden_noten(&player_r, &console);
         let couplers = self.active_couplers.read();
         let held = self.held_notes.read();
-        Self::sync_stop_voices_inner(o, &tx, &mappings, &couplers, &couplers, &held, stop_id, drawn);
+        Self::sync_stop_voices_inner(o, &tx, mappings, &couplers, &couplers, &held, stop_id, drawn);
+    }
+
+    /// De routering die de NU vastgehouden noten heeft geplaatst. Speelt er een MIDI-bestand af met
+    /// een eigen kanaaltoewijzing (afspeel-keuzemenu), dan zijn de klinkende noten die van de speler,
+    /// gerouteerd via `player_routing`; anders geldt de console-inleer. Een register- of koppelwissel
+    /// tijdens het afspelen moet die noten met DEZELFDE routering synchroniseren, anders plaatst hij ze
+    /// op de verkeerde toon/divisie en krijgen ze bij het loslaten geen NoteOff → hanger.
+    fn routering_voor_gehouden_noten<'a>(
+        &self,
+        player_r: &'a [MidiChannelMapping],
+        console: &'a [MidiChannelMapping],
+    ) -> &'a [MidiChannelMapping] {
+        let speler_speelt = self.midi_player.read().as_ref()
+            .map(|p| !matches!(p.state(), vpo_midi::PlayerState::Stopped))
+            .unwrap_or(false);
+        if !player_r.is_empty() && speler_speelt { player_r } else { console }
     }
 
     /// Kern van sync_stop_voices, ook aanroepbaar vanaf de MIDI-thread
@@ -5218,9 +5236,11 @@ impl AppState {
         let organ = self.loaded_organ_info.read();
         let Some(ref o) = *organ else { return; };
         let Some(tx) = self.audio_player.read().as_ref().map(|p| p.command_sender()) else { return; };
-        let mappings = self.midi_mappings.read();
+        let player_r = self.player_routing.read();
+        let console = self.midi_mappings.read();
+        let mappings: &[MidiChannelMapping] = self.routering_voor_gehouden_noten(&player_r, &console);
         let held = self.held_notes.read();
-        Self::sync_coupler_voices_inner(o, &tx, &mappings, &held, old_couplers, new_couplers);
+        Self::sync_coupler_voices_inner(o, &tx, mappings, &held, old_couplers, new_couplers);
     }
 
     /// Set a stop drawn state

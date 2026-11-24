@@ -4,6 +4,16 @@ Alle belangrijke wijzigingen van JM-Orgue worden hier bijgehouden.
 Format gebaseerd op [Keep a Changelog](https://keepachangelog.com/),
 versies volgen [Semantic Versioning](https://semver.org/).
 
+## [Onuitgebracht]
+
+### Hangers bij registreren tijdens het afspelen van een MIDI-bestand
+- Werkte je met het afspeel-keuzemenu (kanalen zelf aan klavieren toewijzen) en wisselde je tijdens het afspelen van
+  registratie (register of koppel), dan kon een toon blijven hangen. Oorzaak: bij zo'n wissel plaatste de app de op dat
+  moment klinkende noten opnieuw volgens de console-inleer, terwijl het afspelende bestand de afspeel-routering gebruikt.
+  Door dat verschil kwam een noot op de verkeerde toon te staan en kreeg hij geen eindsignaal meer.
+- Nu gebruikt de app bij een register- of koppelwissel dezelfde routering als waarmee de klinkende noten zijn geplaatst:
+  de afspeel-routering zolang er een bestand speelt, anders de console-inleer. Daarmee blijft er niets meer hangen.
+
 ## [0.9.61] - 2026-11-24
 
 ### Galm: een met de set meegeleverde impulsrespons (IR)
