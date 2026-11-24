@@ -6,6 +6,12 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Onuitgebracht]
 
+### MIDI afspelen: twee kanalen naar hetzelfde klavier
+- Wees je in het afspeel-keuzemenu twee kanalen van het bestand aan hetzelfde klavier toe, dan bleef het ene kanaal
+  stil (de routering pakte per klavier alleen de eerste toewijzing). Nu kiest de routering per noot de toewijzing die
+  bij het binnenkomende kanaal hoort, zodat beide kanalen op dat klavier klinken. Dit lost meteen op dat een noot die
+  via zo'n kanaal startte geen eindsignaal kreeg en bleef hangen.
+
 ### MIDI afspelen: positiebalk om vooruit en terug te spoelen
 - Bij een MIDI-bestand in de werkbalk verschijnt tijdens het spelen (en in pauze) een positiebalk naast de afspeelknop,
   met de speeltijd ernaast. Sleep de balk om vooruit of terug te spoelen; de speler zet op dat moment eerst alles stil,

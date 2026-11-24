@@ -3841,19 +3841,15 @@ impl AppState {
                 let _has_definition = definition.is_some();
 
                 for division in &o.divisions {
-                    // Check if this division accepts this MIDI channel
-                    let mapping = mappings.iter().find(|m| m.division == division.name);
-                    let accepts_channel = match mapping {
-                        Some(m) => m.accepts(channel, note),
-                        // Geen inleer = geen respons: piston-/setzerknoppen die
-                        // noten sturen mogen niet als orgelnoten klinken. Een
-                        // koppeling met kanaal "alle" blijft mogelijk; het
-                        // ingeleerde toetsbereik filtert pistons op hetzelfde
-                        // kanaal er ook uit.
-                        None => false,
-                    };
-
-                    if !accepts_channel {
+                    // Kies de mapping die DIT kanaal accepteert. Bij de afspeel-routering kunnen
+                    // meerdere mappings dezelfde divisie hebben (twee kanalen → één klavier); dan
+                    // mag het niet bij de eerste blijven, anders bleef het andere kanaal stil (en
+                    // kreeg een noot via dat kanaal ook geen NoteOff → hanger). Geen passende
+                    // mapping = geen respons: piston-/setzerknoppen die noten sturen mogen niet als
+                    // orgelnoten klinken; het ingeleerde toetsbereik filtert pistons op hetzelfde
+                    // kanaal er ook uit.
+                    let mapping = mappings.iter().find(|m| m.division == division.name && m.accepts(channel, note));
+                    if mapping.is_none() {
                         continue;
                     }
 
@@ -4031,13 +4027,11 @@ impl AppState {
                 // A stop may have been un-drawn while a note was held,
                 // so we must always send NoteOff to release any active voices.
                 for division in &o.divisions {
-                    let mapping = mappings.iter().find(|m| m.division == division.name);
-                    let accepts_channel = match mapping {
-                        Some(m) => m.accepts(channel, note),
-                        None => false, // geen inleer = geen respons (zie NoteOn)
-                    };
-
-                    if !accepts_channel {
+                    // Zelfde keuze als bij NoteOn: de mapping die dit kanaal accepteert, zodat een
+                    // noot die via het ene kanaal startte ook via datzelfde kanaal zijn NoteOff
+                    // krijgt (geen hanger bij twee kanalen → één klavier). Geen mapping = geen respons.
+                    let mapping = mappings.iter().find(|m| m.division == division.name && m.accepts(channel, note));
+                    if mapping.is_none() {
                         continue;
                     }
 
@@ -5041,13 +5035,13 @@ impl AppState {
         // 1) Directe route: ingedrukte toetsen op het eigen klavier van het register
         //    (niet bij Unison Off; zelfde stand als T.A.: de nieuwe lijst).
         if !unison_off_actief(o.couplers.as_ref(), ta_couplers, div_name) {
-            let mapping = mappings.iter().find(|m| m.division == div_name);
             for &(ch, note, vel) in held {
-                let accepts = mapping.is_some_and(|m| m.accepts(ch, note));
-                if !accepts { continue; }
-                let transpose = mapping.map_or(0, |m| m.transpose);
-                let transposed = mapping.map_or_else(|| (note as i16 + transpose as i16).clamp(0, 127) as u8, |m| m.speelnoot(note));
-                send_note_on(transposed, vel);
+                // Per noot de mapping die dit kanaal accepteert: bij de afspeel-routering kunnen
+                // meerdere mappings dezelfde divisie hebben (twee kanalen → één klavier), en een
+                // bijgetrokken register moet de vastgehouden noten van álle bijbehorende kanalen
+                // laten klinken, niet alleen die van de eerste mapping.
+                let Some(m) = mappings.iter().find(|m| m.division == div_name && m.accepts(ch, note)) else { continue; };
+                send_note_on(m.speelnoot(note), vel);
             }
         }
 

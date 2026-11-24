@@ -128,3 +128,31 @@ fn bouw_speler_routering_zet_kanaal_octaaf_en_klavier() {
     assert_eq!(m[1].transpose, -12);
     assert_eq!(m[1].speelnoot(48), 36);
 }
+
+/// Twee kanalen naar HETZELFDE klavier (afspeel-routering): elk kanaal moet zijn eigen mapping
+/// kiezen. De routering in handle_midi_message kiest de mapping die het binnenkomende kanaal
+/// accepteert (`division == d && accepts(ch, note)`) — niet zomaar de eerste met die divisie,
+/// anders bleef het tweede kanaal stil en kreeg een noot via dat kanaal geen NoteOff (hanger).
+#[test]
+fn twee_kanalen_naar_zelfde_klavier_kiezen_elk_hun_eigen_mapping() {
+    use super::{bouw_speler_routering, PlayerRouteDto};
+    let routes = vec![
+        PlayerRouteDto { channel: 1, division: Some("Hoofdwerk".into()), octave: 0 },
+        PlayerRouteDto { channel: 2, division: Some("Hoofdwerk".into()), octave: 1 },
+    ];
+    let m = bouw_speler_routering(&routes);
+    assert_eq!(m.len(), 2, "beide regels worden een mapping, ook met dezelfde divisie");
+
+    // Zelfde keuze als in handle_midi_message/sync_stop_voices.
+    let kies = |ch: u8, note: u8| m.iter().find(|x| x.division == "Hoofdwerk" && x.accepts(ch, note));
+    let v1 = kies(0, 60).expect("kanaal 1 (intern 0) heeft een eigen mapping");
+    let v2 = kies(1, 60).expect("kanaal 2 (intern 1) heeft een eigen mapping");
+    assert_eq!(v1.channel, Some(0));
+    assert_eq!(v2.channel, Some(1));
+    assert_eq!(v1.transpose, 0, "kanaal 1 zonder octaafverschuiving");
+    assert_eq!(v2.transpose, 12, "kanaal 2 een octaaf omhoog");
+    // De oude 'find(division)' zou voor beide kanalen dezelfde (eerste) mapping teruggeven:
+    assert_ne!(v1.channel, v2.channel, "elk kanaal kiest zijn eigen mapping, geen shadowing");
+    // Een noot op kanaal 2 wordt met het octaaf van kanaal 2 gespeeld (niet dat van kanaal 1).
+    assert_eq!(v2.speelnoot(60), 72);
+}
