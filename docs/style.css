@@ -281,7 +281,9 @@ video::cue { background: rgba(20, 14, 8, 0.82); color: #fff; font-family: 'Inter
 .yt-lite:hover .yt-play, .yt-lite:focus-visible .yt-play { background: var(--gold); }
 .yt-lite:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
 .demo-card + .demo-card { margin-top: 1.5rem; }
-.ig-lite { position: relative; display: block; width: 100%; height: 120px; background: linear-gradient(135deg, #2a1d10, #5a3d1c); }
+.ig-lite { position: relative; display: block; width: 100%; aspect-ratio: 16 / 9; background: #000; overflow: hidden; }
+.ig-lite img { display: block; width: 100%; height: 100%; object-fit: cover; }
+@media (min-width: 641px) { .demo-portret { display: grid; grid-template-columns: 240px 1fr; align-items: center; } .demo-portret .ig-lite { aspect-ratio: 9 / 16; } }
 .ig-lite:hover .yt-play, .ig-lite:focus-visible .yt-play { background: var(--gold); }
 .ig-lite:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
 .demo-card iframe { display: block; width: 100%; aspect-ratio: 16 / 9; border: 0; }
