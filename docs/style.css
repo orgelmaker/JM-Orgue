@@ -280,6 +280,10 @@ video::cue { background: rgba(20, 14, 8, 0.82); color: #fff; font-family: 'Inter
 .yt-play::after { content: ""; position: absolute; left: 31px; top: 15px; border-style: solid; border-width: 12px 0 12px 20px; border-color: transparent transparent transparent #fff; }
 .yt-lite:hover .yt-play, .yt-lite:focus-visible .yt-play { background: var(--gold); }
 .yt-lite:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
+.demo-card + .demo-card { margin-top: 1.5rem; }
+.ig-lite { position: relative; display: block; width: 100%; height: 120px; background: linear-gradient(135deg, #2a1d10, #5a3d1c); }
+.ig-lite:hover .yt-play, .ig-lite:focus-visible .yt-play { background: var(--gold); }
+.ig-lite:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
 .demo-card iframe { display: block; width: 100%; aspect-ratio: 16 / 9; border: 0; }
 .demo-info { display: grid; grid-template-columns: max-content 1fr; gap: 0.25rem 0.9rem; margin: 0.8rem 0 0; font-size: 0.92rem; }
 .demo-info dt { color: var(--gold); }
