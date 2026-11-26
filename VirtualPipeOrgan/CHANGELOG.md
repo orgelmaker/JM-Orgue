@@ -6,6 +6,11 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Nog niet uitgebracht]
 
+### Handleidingen, vertalingen en projectpaden
+- De handleiding in alle zeven talen beschrijft nu de Consolebouwer (F4) en de Orgelbouwer (F5) met bronwind; de PDF's zijn opnieuw gemaakt.
+- De Consolebouwer-teksten in de app waren in het Duits, Frans, Italiaans, Spaans en Pools nog Engels; ze zijn vertaald (111 teksten per taal) met dezelfde termen als de tabbladen.
+- Orgelbouwer: bij het opslaan van een `.jmorgan`-project blijven bronpaden relatief (en dus verhuisbaar) ook wanneer de projectmap als 8.3-kortenaam, symlink of subst-pad is opgegeven. Dit liet een test op de Windows-CI mislukken.
+
 ### Orgelbouwer — eerste versie
 - Een project combineert nu **één tot 64 samplesets**. Begin met één bronkaart en voeg bronnen toe met **Bron toevoegen…**. Elke bron behoudt een eigen pakketmap, stemming en opnamepositie. Bronletters lopen na Z door als AA, AB, enzovoort; vanaf vijf bronnen gebruikt de registerkeuze een keuzelijst.
 - Het projectformaat blijft versie 1. Bestaande projecten met twee bronnen openen zonder omzetting; hun bron-UUID's, registerdoelen en instellingen blijven behouden. De gezamenlijke grenzen blijven 2.048 registers, 16 gebruikte rankzwelkasten, 256 actieve windcompartimenten en 4.096 windcontrollers; meer bronnen vermenigvuldigen deze budgetten niet.

@@ -210,18 +210,22 @@ fn canonical_file(path: &Path) -> Result<PathBuf, String> {
     if !p.is_file() {
         return Err(format!("Geen bronbestand: {}", p.display()));
     }
-    // Keep ordinary Windows paths in UI/JSON rather than Win32 verbatim syntax.
+    Ok(plain_path(p))
+}
+
+/// Houdt gewone Windows-paden in UI/JSON in plaats van de Win32-verbatim-notatie.
+fn plain_path(p: PathBuf) -> PathBuf {
     #[cfg(windows)]
     {
         let s = text_path(&p);
         if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
-            return Ok(PathBuf::from(format!(r"\\{rest}")));
+            return PathBuf::from(format!(r"\\{rest}"));
         }
         if let Some(rest) = s.strip_prefix(r"\\?\") {
-            return Ok(PathBuf::from(rest));
+            return PathBuf::from(rest);
         }
     }
-    Ok(p)
+    p
 }
 
 fn project_parent(path: &str) -> Result<PathBuf, String> {
@@ -1451,19 +1455,29 @@ pub fn save_project(path: &str, mut project: OrganProject) -> Result<OrganProjec
     }
     fs::create_dir_all(&parent).map_err(|e| format!("Projectmap niet schrijfbaar: {e}"))?;
     let mut stored = project.clone();
+    // Bronpaden zijn gecanonicaliseerd (lange naam, zonder \\?\). De projectmap kan als
+    // 8.3-kortenaam, symlink of subst-pad zijn opgegeven; vergelijk daarom met beide vormen,
+    // anders worden die paden onnodig absoluut (en dus niet verhuisbaar) opgeslagen.
+    let parent_real = fs::canonicalize(&parent)
+        .map(plain_path)
+        .unwrap_or_else(|_| parent.clone());
+    let relative = |p: &Path| -> Option<String> {
+        p.strip_prefix(&parent)
+            .or_else(|_| p.strip_prefix(&parent_real))
+            .ok()
+            .map(text_path)
+    };
     for source in &mut stored.sources {
-        if let Ok(rel) = Path::new(&source.path).strip_prefix(&parent) {
-            source.path = text_path(rel);
+        if let Some(rel) = relative(Path::new(&source.path)) {
+            source.path = rel;
         }
-        source.package_root = source.package_root.take().map(|root| {
-            Path::new(&root)
-                .strip_prefix(&parent)
-                .map(text_path)
-                .unwrap_or(root)
-        });
+        source.package_root = source
+            .package_root
+            .take()
+            .map(|root| relative(Path::new(&root)).unwrap_or(root));
         for stamp in &mut source.resources {
-            if let Ok(rel) = Path::new(&stamp.path).strip_prefix(&parent) {
-                stamp.path = text_path(rel);
+            if let Some(rel) = relative(Path::new(&stamp.path)) {
+                stamp.path = rel;
             }
         }
     }

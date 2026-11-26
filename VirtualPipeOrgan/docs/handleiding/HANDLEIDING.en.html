@@ -11,10 +11,10 @@
 
 <header class="titel">
   <h1>JM-Orgue</h1>
-  <div class="onder">User guide for version 0.9.57 &middot; November 2026</div>
+  <div class="onder">User guide for the development version with Console designer &middot; November 2026</div>
 </header>
 
-<p>JM-Orgue is a virtual pipe organ for Windows, macOS and Linux. It plays Hauptwerk and GrandOrgue sample sets directly, including large surround sets and Hauptwerk Custom Organ definitions, and you play it with a MIDI keyboard, an organ console or the mouse. It can write down what you play as you go, in staff notation or in klavar, and print it as a PDF. This guide walks through the program; the screenshots come from version 0.9.16 and later versions, the text describes version 0.9.57.</p>
+<p>JM-Orgue is a virtual pipe organ for Windows, macOS and Linux. It plays Hauptwerk and GrandOrgue sample sets directly, including large surround sets and Hauptwerk Custom Organ definitions, and you play it with a MIDI keyboard, an organ console or the mouse. It can write down what you play as you go, in staff notation or in klavar, and print it as a PDF. This guide walks through the program; the screenshots come from version 0.9.16 and later versions. The text also covers the new Console designer.</p>
 <p class="klein">&copy; Martijn van der Kolk. The screenshots were made with demo organs and own test sets; network addresses, access tokens and user folders have been made unreadable.</p>
 
 <nav class="inhoud">
@@ -22,7 +22,7 @@
   <ol>
     <li><a href="#start">Getting started</a></li>
     <li><a href="#bibliotheek">The library</a></li>
-    <li><a href="#bespelen">Loading and playing an organ</a></li>
+    <li><a href="#bespelen">Loading and playing an organ</a> &middot; <a href="#consolebouwer">Console designer</a> &middot; <a href="#orgelbouwer">Organ builder</a></li>
     <li><a href="#werkbalk">The toolbar</a></li>
     <li><a href="#posities">Several listening positions</a></li>
     <li><a href="#wizard">The setup wizard for a new organ</a></li>
@@ -41,11 +41,8 @@
 <p>Download the installer of the latest release from the project's release page (for Windows <code>JM-Orgue_&lt;version&gt;_x64-setup.exe</code>) and run it. The installation is per user and needs no administrator rights. There is also an MSI package for Windows, a DMG for macOS and an AppImage or deb for Linux.</p>
 <p>The program itself is free to use. The sample sets are not included: you get those from their makers. The start page of the library lists a few makers who offer sets free of charge.</p>
 
-<h3>Updating</h3>
-<p>JM-Orgue checks by itself whether a new version is available. If there is one, a notice appears at the top. Choose <b>Update now</b>: the program downloads the update, checks its signature, installs it and restarts. If you only want to download first, choose <b>Download</b>. You can also check by hand via App Settings &rarr; Update and feedback &rarr; <b>Check for updates</b>.</p>
-
-<h3>The three main screens</h3>
-<p>At the top are three tabs: <b>Organ</b> (playing), <b>Organ Settings</b> (everything that belongs to the loaded organ) and <b>App Settings</b> (everything that applies to the whole program). <kbd>F1</kbd>, <kbd>F2</kbd> and <kbd>F3</kbd> switch between them directly. The cross next to the organ name closes the organ and takes you back to the library.</p>
+<h3>The main screens</h3>
+<p>At the top are the tabs <b>Organ</b> (playing), <b>Console designer</b> (designing the visual console), <b>Organ Settings</b> (everything that belongs to the loaded organ) and <b>App Settings</b> (everything that applies to the whole program). <kbd>F1</kbd>, <kbd>F2</kbd> and <kbd>F3</kbd> switch to Organ, Organ Settings and App Settings. <kbd>F4</kbd> opens the Console designer in the main window. The cross next to the organ name closes the organ and takes you back to the library.</p>
 
 <!-- ============================================================ -->
 <h2 id="bibliotheek">2. The library</h2>
@@ -121,6 +118,34 @@
 <p class="klein">Every button of the setter bar can be linked to a button on your own console: right-click (or hold for 3 seconds) and then press the button on your console.</p>
 <h3>Learn the MIDI channel of a manual</h3>
 <p>You do not have to visit Organ Settings first: right-click the name of a division above the stops &mdash; or hold it for 2 seconds on a touch screen &mdash; and the program asks for the lowest and highest key of that manual. The channel is set without leaving the console.</p>
+
+<h3 id="consolebouwer">Console designer: design your own console</h3>
+<p>Load an organ and open <b>Console designer</b>, or press <kbd>F4</kbd> in the main window. You design the controls of this organ: stops, couplers and your own texts. The available controls come from the loaded organ. The design changes the layout and appearance; sound settings and MIDI assignments stay attached to the same stops and couplers.</p>
+<ol>
+  <li>Choose a <b>Finish</b>: <b>Warm walnut</b>, <b>Light ivory</b> or <b>Dark studio</b>. Under <b>Control style</b> you choose from eight shapes: <b>Rocker tab</b>, <b>Porcelain rocker tab</b>, <b>Wooden rocker tab</b>, <b>Drawknob</b>, <b>Ivory drawknob</b>, <b>Brass-rimmed piston</b>, <b>Curved theatre tab</b> or <b>Flat button</b>. You can set the shape per control or use one for all controls at once.</li>
+  <li>Add a stop, coupler or text on the left. Select the control on the design surface and drag it to the desired place. The resize handles change the dimensions directly on the canvas. On the right you can also enter the custom text, position and size as numbers. The arrow keys move the selected control on the grid.</li>
+  <li>Create extra <b>Pages</b> if needed and give them a recognisable name. <b>Preview</b> shows the result; clicking a stop in this preview does not operate the organ.</li>
+  <li>Switch on <b>Use custom console</b> and choose <b>Apply</b>. The design is saved for this organ and appears on the <b>Organ</b> tab, where the buttons operate the real stops and couplers.</li>
+</ol>
+<p><b>Snap to guides</b> helps you line controls up. While dragging, guides appear at matching edges and centres. Hold <kbd>Alt</kbd> to move freely without snapping. <b>Wide canvas</b> gives the design more room; <b>Show side panels</b> brings back the control list and properties.</p>
+<p>With <b>Texture</b> you choose, independently of the finish, fine wood grain, oak, burl walnut, ebony, linen, brushed metal or plain. <b>Texture strength</b> sets how clearly the pattern shows and <b>Texture size</b> how large it is drawn. With <b>Choose custom texture…</b> you use your own PNG, JPG or WebP image of up to 2 MB and 8192 &times; 8192 pixels. The image is stored inside the design and travels with the organ settings, so the original file does not have to stay where it was.</p>
+<p><b>Undo</b> restores the previous edit. <b>Discard changes</b> returns to the last applied design. If you leave the designer with unsaved changes, the app asks whether to discard them or keep editing. To go back to the standard console, switch <b>Use custom console</b> off and choose <b>Apply</b>.</p>
+<p>Every organ definition file gets its own design, even when two definitions sit in the same folder. The local library is saved safely first, then the settings file next to the definition. If the sample set folder is not writable, the design stays stored locally and the app reports that the copy next to the definition could not be updated.</p>
+<p>If stops or couplers have disappeared after a sample set update, the Console designer reports the missing references. Remove or replace those controls before you activate the custom console again. You can still save the design with <b>Use custom console</b> switched off, to restore it later. An unreadable design is never overwritten automatically; the normal console stays available.</p>
+
+<h3 id="orgelbouwer">Organ builder: combine stops from several sample sets</h3>
+<p>Open <b>Organ builder</b> or press <kbd>F5</kbd>, even without a loaded organ. You can use from one to <b>64 source definitions</b>. Start on the first source card with <b>Choose definition…</b>, then use <b>Add source…</b> or the next empty card. Select the stops you want to use. Each stop stays complete with its pipes, sound layers, releases and supported tremulant recordings. Distribute the selection over your own manuals and pedal and set the MIDI channels and key ranges.</p>
+<p>Each source card has its own <b>Package folder…</b>, tuning and optional recording position. Source letters continue after Z with AA, AB and so on. Up to four sources, you choose the source organ for the stop list with buttons; from five sources on, use the <b>Source organ</b> drop-down list.</p>
+<p>For each source you choose <b>Keep original</b> or <b>Normalise concert pitch</b>. When normalising, enter the actually recorded A reference, for example 415 Hz; the source is then shifted to the shared project reference. This reference is not measured automatically. The internal temperament and deliberate celeste beating are kept. An extra cent correction fine-tunes the source tuning. The global temperament choice is replaced by these source settings in projects.</p>
+<p><b>Save and load</b> stores a <code>.jmorgan</code> project and loads the combined organ. <b>Arrange console</b> then opens the visual Console designer. Stop IDs are kept when you reorder them or move them to another manual. The project refers to the original definitions and samples; these are neither changed nor copied. When moving the project, also keep its own <code>.jm-settings-project-…json</code> file with console, MIDI, combinations and voicing.</p>
+<p>The project format stays version 1: existing projects with two sources open without conversion and keep their UUID and stop targets. The shared project limits remain <b>2,048 stops</b>, 512 custom couplers, 64 console pages, 16 used rank swell boxes, 256 active wind compartments and 4,096 wind controllers. These numbers apply to all sources together. With many console pages you choose the page from a drop-down list. Recorded reverb remains audible; dry or direct recordings usually combine best. Changed or missing sources block loading until you check them again.</p>
+<p><b>Rank swell boxes</b> from JM-ACOUSTICS are preserved. Boxes from different sources work independently, even on the same target manual. At most 16 rank boxes that are actually used can be active. Learn the swell pedals in the organ settings; on reload each assignment is connected to the same source box again.</p>
+<p><b>Separate source wind networks</b> keep their own compartments, bellows, connections and pipe consumption. The JM-Orgue model calculates their pressure separately per source pipe. Use <b>Wind system of the set</b> and reload the project to switch these source models on or off; the ordinary wind groups control stops without a source network. Together there are at most 256 active source compartments, 4,096 connections and 4,096 wind controllers.</p>
+<p><b>Source wind valves</b> in the Organ builder show the supported switches and continuous controls of the loaded project. Their initial positions and any inverted switching come from the source definition. Stop valves follow their linked project stops: if at least one linked stop is on, the source switch is on. You operate stand-alone valves with a switch or slider; <b>Initial position</b> restores the source value. Every change is saved with this project before the audio state changes. If local saving fails, the previous state stays in place; if only the copy next to the project cannot be updated, a message appears. Take the own settings file with you when moving.</p>
+<p><b>Automatic source controls</b> follow their complete control chain: bellows extension, pressure and flow can drive the valves back. Direct transfers, Willis delays, inertia, conditions and threshold switches are included. The bellows moves between its physical limits and responds to pressure and consumption. Automatic controls and explicitly hidden source constants are read-only; for manually operated inputs the switch and slider remain available. Source identities keep equal IDs from different sample sets apart.</p>
+<p>This remains the <b>JM model</b>, with no claim of identical Hauptwerk behaviour. Continuous transfers use values 0..127: first any inversion, then offset and factor, a power function and limiting. Willis is approximated with an exponential time constant; inertia with a damped spring. Manually operated valves use a 10 ms transition. Below 60% of the nominal source low pressure the sound fades away gradually. Missing controller data, unknown logic, purely direct continuous loops, double continuous transfers, bellows springs and forced bellows positions block loading before the active organ is replaced. The source warnings give the reason.</p>
+<p>A selected stop whose source switch is also operated by automatic source logic cannot yet be linked to the project registration. The project is then refused before loading; the registration is not silently changed.</p>
+<p>Separate recorded tremulant waveform control stays outside this version. Ordinary GO windchest swell boxes and different tremulant groups still require separate target manuals; independent JM-ACOUSTICS rank boxes do not have this limitation.</p>
 
 <!-- ============================================================ -->
 <h2 id="werkbalk">4. The toolbar</h2>
@@ -327,6 +352,8 @@
 <table>
   <tr><th style="width:22%">Key</th><th>Function</th></tr>
   <tr><td><kbd>F1</kbd> <kbd>F2</kbd> <kbd>F3</kbd></td><td>Organ, Organ Settings and App Settings.</td></tr>
+  <tr><td><kbd>F4</kbd></td><td>Open the Console designer (main window).</td></tr>
+  <tr><td><kbd>F5</kbd></td><td>Open the Organ builder: combine stops from one to 64 sample sets.</td></tr>
   <tr><td><kbd>F11</kbd></td><td>Full screen (console mode) on or off.</td></tr>
   <tr><td><kbd>Esc</kbd></td><td>Full screen off.</td></tr>
   <tr><td>Right-click or hold 3 s</td><td>On a button of the setter bar: link that button to a console button (MIDI learn).</td></tr>
