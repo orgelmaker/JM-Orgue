@@ -4,11 +4,26 @@ fn cc(kanaal: u8, controller: u8, waarde: u8) -> MidiMessage {
     MidiMessage::ControlChange { channel: kanaal, controller, value: waarde }
 }
 
-fn binding_cc(preset: u8, kanaal: Option<u8>, controller: u8, drempel: u8) -> MidiPresetBinding {
+fn binding_cc(preset: u32, kanaal: Option<u8>, controller: u8, drempel: u8) -> MidiPresetBinding {
     MidiPresetBinding {
         preset_num: preset,
         trigger: MidiPresetTrigger::ControlChange { channel: kanaal, controller, value: drempel },
     }
+}
+
+#[test]
+fn brede_project_acties_gaan_zonder_truncatie_door_midi_trigger_en_cc_gate() {
+    let first = crate::commands::project_stop_action(1);
+    let last = crate::commands::project_stop_action(2048);
+    let mut p = Proef::new(vec![binding_cc(first, Some(0), 20, 127), binding_cc(last, Some(0), 21, 127)]);
+    p.stuur(cc(0, 20, 127), 5);
+    p.stuur(cc(0, 21, 127), 5);
+    assert_eq!(p.gevuurd(), vec![first, last]);
+    // Separate wide action keys keep their own re-arm state.
+    p.stuur(cc(0, 20, 0), 5);
+    p.stuur(cc(0, 20, 127), 5);
+    p.stuur(cc(0, 21, 127), 5);
+    assert_eq!(p.gevuurd(), vec![first]);
 }
 
 /// Tussenpoos van opeenvolgende berichten in een pedaalsweep (ms). Ruim
@@ -20,14 +35,14 @@ const SWEEP_STAP_MS: u64 = 5;
 struct Proef {
     bindings: Arc<RwLock<Vec<MidiPresetBinding>>>,
     gate: PresetCcGate,
-    tx: Sender<u8>,
-    rx: Receiver<u8>,
+    tx: Sender<u32>,
+    rx: Receiver<u32>,
     klok_ms: u64,
 }
 
 impl Proef {
     fn new(bindings: Vec<MidiPresetBinding>) -> Self {
-        let (tx, rx) = bounded::<u8>(64);
+        let (tx, rx) = bounded::<u32>(64);
         Self {
             bindings: Arc::new(RwLock::new(bindings)),
             gate: PresetCcGate::default(),
@@ -45,7 +60,7 @@ impl Proef {
 
     /// Stuurt CC-waarden `tussenpoos_ms` uit elkaar en geeft terug welke
     /// presets daarbij gevuurd hebben.
-    fn reeks(&mut self, kanaal: u8, controller: u8, waarden: &[u8], tussenpoos_ms: u64) -> Vec<u8> {
+    fn reeks(&mut self, kanaal: u8, controller: u8, waarden: &[u8], tussenpoos_ms: u64) -> Vec<u32> {
         for w in waarden {
             self.stuur(cc(kanaal, controller, *w), tussenpoos_ms);
         }
@@ -53,16 +68,16 @@ impl Proef {
     }
 
     /// Pedaalsweep: waarden om de paar ms.
-    fn sweep(&mut self, kanaal: u8, controller: u8, waarden: &[u8]) -> Vec<u8> {
+    fn sweep(&mut self, kanaal: u8, controller: u8, waarden: &[u8]) -> Vec<u32> {
         self.reeks(kanaal, controller, waarden, SWEEP_STAP_MS)
     }
 
     /// Losse knoppulsen: waarden minstens een pulspauze uit elkaar.
-    fn pulsen(&mut self, kanaal: u8, controller: u8, waarden: &[u8]) -> Vec<u8> {
+    fn pulsen(&mut self, kanaal: u8, controller: u8, waarden: &[u8]) -> Vec<u32> {
         self.reeks(kanaal, controller, waarden, 2 * PresetCcGate::PULSPAUZE_MS)
     }
 
-    fn gevuurd(&mut self) -> Vec<u8> {
+    fn gevuurd(&mut self) -> Vec<u32> {
         self.rx.try_iter().collect()
     }
 }
@@ -167,7 +182,7 @@ fn puls_zonder_loslaatbericht_vuurt_bij_elke_druk() {
     assert_eq!(p.reeks(0, 22, &[127], PresetCcGate::PULSPAUZE_MS), vec![3]);
 
     // Contactdender: dezelfde druk nog eens binnen enkele ms is géén nieuwe druk.
-    assert_eq!(p.reeks(0, 22, &[127, 127], 3), Vec::<u8>::new(),
+    assert_eq!(p.reeks(0, 22, &[127, 127], 3), Vec::<u32>::new(),
         "herhaling vlak na de druk is dender, geen tweede druk");
     assert_eq!(p.pulsen(0, 22, &[127]), vec![3], "de volgende echte druk vuurt weer");
 }
@@ -202,18 +217,18 @@ fn nul_bij_indrukken_vuurt_op_de_nul_niet_op_de_127() {
     p.stuur(cc(0, 30, 0), 500);      // indrukken
     assert_eq!(p.gevuurd(), vec![4], "vuurt op het indrukken (0)");
     p.stuur(cc(0, 30, 127), 80);     // loslaten
-    assert_eq!(p.gevuurd(), Vec::<u8>::new(), "loslaten (127) vuurt niet");
+    assert_eq!(p.gevuurd(), Vec::<u32>::new(), "loslaten (127) vuurt niet");
     p.stuur(cc(0, 30, 0), 300);      // opnieuw indrukken
     assert_eq!(p.gevuurd(), vec![4]);
     p.stuur(cc(0, 30, 127), 80);
-    assert_eq!(p.gevuurd(), Vec::<u8>::new());
+    assert_eq!(p.gevuurd(), Vec::<u32>::new());
 
     // Knop die alléén 0-pulsen stuurt: vuurt bij elke druk dankzij de pauze.
     let mut q = Proef::new(vec![binding_cc(5, Some(0), 31, 0)]);
     assert_eq!(q.pulsen(0, 31, &[0, 0, 0]), vec![5, 5, 5]);
 
     // Ruis 0↔1 om de paar ms (gespiegelde hysterese): niet blijven vuren.
-    assert_eq!(q.sweep(0, 31, &[1, 0, 1, 0, 1, 0]), Vec::<u8>::new());
+    assert_eq!(q.sweep(0, 31, &[1, 0, 1, 0, 1, 0]), Vec::<u32>::new());
     // Pas als de waarde ver genoeg van 0 af is geweest, is de volgende 0 weer een druk.
     assert_eq!(q.sweep(0, 31, &[8, 0]), vec![5]);
 }
@@ -229,7 +244,7 @@ fn ruis_120_127_om_de_paar_ms_vuurt_niet_herhaald() {
 
     // Een waarde onder de drempel na een lange stilte vuurt óók niet: de
     // tijdregel geldt alleen voor berichten op/boven de drempel.
-    assert_eq!(p.reeks(0, 11, &[120], 2_000), Vec::<u8>::new());
+    assert_eq!(p.reeks(0, 11, &[120], 2_000), Vec::<u32>::new());
 
     // Een echte nieuwe druk na een pauze vuurt wel.
     assert_eq!(p.reeks(0, 11, &[127], 2_000), vec![6]);

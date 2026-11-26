@@ -41,7 +41,7 @@ fn melodiekoppels_gaan_naar_een_ander_klavier() {
     assert!(bas.iter().all(|c| c.destination_division == "Pedaal"));
     assert_eq!(k.iter().filter(|c| c.coupler_type == "ta").count(), 3);
     // Actiecodes uniek.
-    let mut codes: Vec<u8> = k.iter().map(|c| c.midi_action_code).collect();
+    let mut codes: Vec<u32> = k.iter().map(|c| c.midi_action_code).collect();
     codes.sort(); codes.dedup();
     assert_eq!(codes.len(), k.len());
 }

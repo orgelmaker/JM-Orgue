@@ -11,10 +11,10 @@
 
 <header class="titel">
   <h1>JM-Orgue</h1>
-  <div class="onder">Manual para la versión 0.9.57 &middot; noviembre de 2026</div>
+  <div class="onder">Manual de la versión de desarrollo con el Diseñador de consola &middot; noviembre de 2026</div>
 </header>
 
-<p>JM-Orgue es un órgano de tubos virtual para Windows, macOS y Linux. Reproduce directamente los sets de muestras de Hauptwerk y GrandOrgue, incluidos los grandes sets surround y las definiciones Hauptwerk Custom Organ, y se toca con un teclado MIDI, una consola o el ratón. Lo que tocas puede anotarlo al instante, en notación de pentagrama o en klavar, e imprimirlo como PDF. Este manual recorre el programa; las capturas de pantalla proceden de la versión 0.9.16 y posteriores, el texto describe la versión 0.9.57.</p>
+<p>JM-Orgue es un órgano de tubos virtual para Windows, macOS y Linux. Reproduce directamente los sets de muestras de Hauptwerk y GrandOrgue, incluidos los grandes sets surround y las definiciones Hauptwerk Custom Organ, y se toca con un teclado MIDI, una consola o el ratón. Lo que tocas puede anotarlo al instante, en notación de pentagrama o en klavar, e imprimirlo como PDF. Este manual recorre el programa; las capturas de pantalla proceden de la versión 0.9.16 y posteriores. El texto abarca también el nuevo Diseñador de consola.</p>
 <p class="klein">&copy; Martijn van der Kolk. Las capturas se han hecho con órganos de demostración y sets de prueba propios; las direcciones de red, los tokens de acceso y las carpetas de usuario se han vuelto ilegibles.</p>
 
 <nav class="inhoud">
@@ -22,7 +22,7 @@
   <ol>
     <li><a href="#start">Primeros pasos</a></li>
     <li><a href="#bibliotheek">La biblioteca</a></li>
-    <li><a href="#bespelen">Cargar y tocar un órgano</a></li>
+    <li><a href="#bespelen">Cargar y tocar un órgano</a> &middot; <a href="#consolebouwer">Diseñador de consola</a> &middot; <a href="#orgelbouwer">Constructor de órganos</a></li>
     <li><a href="#werkbalk">La barra de herramientas</a></li>
     <li><a href="#posities">Varias posiciones de escucha</a></li>
     <li><a href="#wizard">El asistente para un órgano nuevo</a></li>
@@ -41,11 +41,8 @@
 <p>Descarga el instalador de la última versión desde la página de versiones del proyecto (para Windows <code>JM-Orgue_&lt;versión&gt;_x64-setup.exe</code>) y ejecútalo. La instalación es para un solo usuario y no requiere derechos de administrador. Para Windows también hay un paquete MSI, para macOS un DMG y para Linux un AppImage o un deb.</p>
 <p>El programa se puede usar libremente. Los sets de muestras no se incluyen: los obtienes de sus autores. En la página de inicio de la biblioteca se mencionan algunos autores que ofrecen sets gratuitos.</p>
 
-<h3>Actualización</h3>
-<p>JM-Orgue comprueba por sí mismo si hay una versión nueva. Si la hay, aparece un aviso en la parte superior. Elige <b>Actualizar ahora</b>: el programa descarga la actualización, comprueba su firma, la instala y se reinicia. Si primero solo quieres descargar, elige <b>Descargar</b>. También puedes comprobarlo a mano en Ajustes generales &rarr; Actualización y comentarios &rarr; <b>Buscar actualizaciones</b>.</p>
-
-<h3>Las tres pantallas principales</h3>
-<p>Arriba hay tres pestañas: <b>Órgano</b> (se toca), <b>Ajustes del órgano</b> (todo lo relativo al órgano cargado) y <b>Ajustes generales</b> (todo lo relativo al programa en conjunto). Las teclas <kbd>F1</kbd>, <kbd>F2</kbd> y <kbd>F3</kbd> pasan directamente de una a otra. La flecha junto al nombre del órgano cierra el órgano y vuelve a la biblioteca.</p>
+<h3>Las pantallas principales</h3>
+<p>Arriba están las pestañas <b>Órgano</b> (se toca), <b>Diseñador de consola</b> (diseñar la consola visual), <b>Ajustes del órgano</b> (todo lo relativo al órgano cargado) y <b>Ajustes generales</b> (todo lo relativo al programa en conjunto). Las teclas <kbd>F1</kbd>, <kbd>F2</kbd> y <kbd>F3</kbd> abren Órgano, Ajustes del órgano y Ajustes generales. <kbd>F4</kbd> abre el Diseñador de consola en la ventana principal. La flecha junto al nombre del órgano cierra el órgano y vuelve a la biblioteca.</p>
 
 <!-- ============================================================ -->
 <h2 id="bibliotheek">2. La biblioteca</h2>
@@ -121,6 +118,34 @@
 <p class="klein">Cada botón de la barra del combinador se puede vincular a un botón de tu consola: haz clic con el botón derecho (o mantén pulsado 3 segundos) y luego pulsa el botón en la consola.</p>
 <h3>Aprender el canal MIDI de un teclado</h3>
 <p>No hace falta pasar primero por los Ajustes del órgano: haz clic derecho sobre el nombre de una división encima de los registros &mdash; o manténlo pulsado 2 segundos en una pantalla táctil &mdash; y el programa pide la nota más grave y la más aguda de ese teclado. El canal queda ajustado sin salir de la consola.</p>
+
+<h3 id="consolebouwer">Diseñador de consola: diseñar su propia consola</h3>
+<p>Cargue un órgano y abra el <b>Diseñador de consola</b>, o pulse <kbd>F4</kbd> en la ventana principal. Usted diseña los mandos de este órgano: registros, acoplamientos y textos propios. Los mandos disponibles proceden del órgano cargado. El diseño cambia la disposición y el aspecto; los ajustes de sonido y las asignaciones MIDI siguen ligados a los mismos registros y acoplamientos.</p>
+<ol>
+  <li>Elija un <b>Acabado</b>: <b>Nogal cálido</b>, <b>Marfil claro</b> o <b>Estudio oscuro</b>. En <b>Estilo de los mandos</b> elige entre ocho formas: <b>Balancín</b>, <b>Balancín de porcelana</b>, <b>Balancín de madera</b>, <b>Tirador</b>, <b>Tirador de marfil</b>, <b>Pistón con borde de latón</b>, <b>Balancín de teatro curvo</b> o <b>Botón plano</b>. Puede elegir la forma para cada mando o usarla para todos los mandos a la vez.</li>
+  <li>Añada a la izquierda un registro, un acoplamiento o un texto. Seleccione el mando en la superficie de diseño y arrástrelo al lugar deseado. Con los tiradores de tamaño cambia las dimensiones directamente en el lienzo. A la derecha también ajusta el texto, la posición y las dimensiones con números. Las teclas de flecha mueven el mando seleccionado sobre la cuadrícula.</li>
+  <li>Si hace falta, cree <b>Páginas</b> adicionales y dótelas de un nombre reconocible. <b>Vista previa</b> muestra el resultado; hacer clic en un registro en esta vista previa no maneja el órgano.</li>
+  <li>Active <b>Usar consola personalizada</b> y elija <b>Aplicar</b>. El diseño se guarda para este órgano y aparece en la pestaña <b>Órgano</b>, donde los botones manejan los registros y acoplamientos reales.</li>
+</ol>
+<p><b>La alineación magnética</b> ayuda a alinear los mandos. Al arrastrar aparecen guías en los bordes y centros que coinciden. Mantenga pulsada <kbd>Alt</kbd> para mover libremente, sin alinear. <b>Lienzo amplio</b> da más espacio al diseño; <b>Mostrar paneles laterales</b> recupera la lista de mandos y las propiedades.</p>
+<p>Con <b>Textura</b> elige, con independencia del acabado, veta fina de madera, roble, raíz de nogal, ébano, lino, metal cepillado o liso. <b>Intensidad de la textura</b> determina lo visible que es el dibujo y <b>Tamaño de la textura</b> lo grande que se muestra. Con <b>Elegir textura personalizada…</b> usa una imagen PNG, JPG o WebP propia de como máximo 2 MB y 8192 × 8192 píxeles. La imagen se incorpora al diseño y viaja con los ajustes del órgano; el archivo original no tiene por qué seguir en el mismo sitio.</p>
+<p><b>Deshacer</b> restablece la edición anterior. <b>Descartar cambios</b> vuelve al último diseño aplicado. Si sale del diseñador con cambios sin guardar, la aplicación pregunta si desea descartarlos o seguir editando. Para volver a la consola estándar, desactive <b>Usar consola personalizada</b> y elija <b>Aplicar</b>.</p>
+<p>Cada archivo de definición de órgano tiene su propio diseño, incluso cuando dos definiciones están en la misma carpeta. Primero se guarda con seguridad la biblioteca local y después el archivo de ajustes junto a la definición. Si la carpeta del juego de muestras no admite escritura, el diseño sigue guardado localmente y la aplicación avisa de que no se pudo actualizar la copia junto a la definición.</p>
+<p>Si tras una actualización del juego de muestras han desaparecido registros o acoplamientos, el Diseñador de consola avisa de las referencias que faltan. Elimine o sustituya esos mandos antes de volver a activar la consola personalizada. Aun así, puede guardar el diseño con <b>Usar consola personalizada</b> desactivado, para restaurarlo más tarde. Un diseño ilegible no se sobrescribe nunca automáticamente; la consola normal sigue disponible.</p>
+
+<h3 id="orgelbouwer">Constructor de órganos: combinar registros de varios juegos de muestras</h3>
+<p>Abra el <b>Constructor de órganos</b> o pulse <kbd>F5</kbd>, incluso sin órgano cargado. Puede usar de una a <b>64 definiciones de origen</b>. Empiece en la primera ficha de origen con <b>Elegir definición…</b> y luego use <b>Añadir origen…</b> o la siguiente ficha vacía. Seleccione los registros que quiera usar. Cada registro sigue completo, con sus tubos, capas de sonido, liberaciones y grabaciones de trémolo admitidas. Reparta la selección entre teclados y pedalier propios y ajuste los canales MIDI y los rangos de teclas.</p>
+<p>Cada ficha de origen tiene su propia <b>Carpeta del paquete…</b>, su afinación y, en su caso, su posición de grabación. Las letras de los orígenes continúan tras la Z con AA, AB, etc. Hasta cuatro orígenes se elige el órgano de origen de la lista de registros con botones; desde cinco orígenes se usa la lista desplegable <b>Órgano de origen</b>.</p>
+<p>Para cada origen elija <b>Conservar el original</b> o <b>Igualar el diapasón de concierto</b>. Al igualar, indique el la de referencia realmente grabado, por ejemplo 415 Hz; el origen se desplaza entonces a la referencia común del proyecto. Esta referencia no se mide automáticamente. El temperamento interno y el batido de celeste deliberado se conservan. Con una corrección adicional en cents afina la afinación del origen. En los proyectos, la elección global de temperamento se sustituye por estos ajustes de origen.</p>
+<p><b>Guardar y cargar</b> almacena un proyecto <code>.jmorgan</code> y carga el órgano combinado. Después, <b>Organizar la consola</b> abre el Diseñador de consola visual. Los ID de registro se conservan al reordenar o mover a otro teclado. El proyecto remite a las definiciones y muestras originales; no se modifican ni se copian. Al mudarse, lleve también el archivo propio <code>.jm-settings-project-…json</code> con consola, MIDI, combinaciones y entonación.</p>
+<p>El formato de proyecto sigue en la versión 1: los proyectos existentes con dos orígenes se abren sin conversión y conservan su UUID y los destinos de los registros. Los límites comunes del proyecto siguen siendo <b>2.048 registros</b>, 512 acoplamientos propios, 64 páginas de consola, 16 cajas expresivas de rango usadas, 256 compartimentos de viento activos y 4.096 controladores de viento. Estas cifras valen para todos los orígenes juntos. Con muchas páginas de consola, elija la página en una lista desplegable. La reverberación grabada sigue siendo audible; las grabaciones secas o directas suelen combinar mejor. Los orígenes modificados o ausentes bloquean la carga hasta que los vuelva a comprobar.</p>
+<p>Las <b>cajas expresivas de rango</b> de JM-ACOUSTICS se conservan. Las cajas de orígenes distintos funcionan de forma independiente, incluso sobre el mismo teclado de destino. Como máximo pueden estar activas 16 cajas de rango realmente usadas. Aprenda los pedales de expresión en los ajustes del órgano; al recargar, cada asignación se vuelve a conectar a la misma caja de origen.</p>
+<p>Las <b>redes de viento de origen separadas</b> conservan sus propios compartimentos, fuelles, conexiones y consumo de tubos. El modelo de JM-Orgue calcula su presión por separado para cada tubo de origen. Use <b>Sistema de viento del juego</b> y recargue el proyecto para activar o desactivar estos modelos de origen; los grupos de viento normales regulan los registros sin red de origen. En total hay como máximo 256 compartimentos de origen activos, 4.096 conexiones y 4.096 controladores de viento.</p>
+<p>Las <b>válvulas de viento de origen</b> del Constructor de órganos muestran los interruptores y reguladores continuos admitidos del proyecto cargado. Sus posiciones iniciales y una posible conmutación invertida proceden de la definición de origen. Las válvulas de registro siguen los registros del proyecto a los que están vinculadas: si al menos un registro vinculado está activado, el interruptor de origen está activado. Las válvulas autónomas se manejan con un interruptor o un deslizador; <b>Posición inicial</b> restablece el valor del origen. Cada cambio se guarda con este proyecto antes de que cambie el estado del audio. Si falla el guardado local, se mantiene el estado anterior; si solo no se puede actualizar la copia junto al proyecto, aparece un aviso. Al mudarse, lleve el archivo de ajustes propio.</p>
+<p>Las <b>regulaciones de origen automáticas</b> siguen toda su cadena de control: la extensión del fuelle, la presión y el caudal pueden volver a cerrar las válvulas. Se tienen en cuenta las transferencias directas, los retardos de Willis, la inercia, las condiciones y los interruptores de umbral. El fuelle se mueve entre sus límites físicos y reacciona a la presión y al consumo. Los mandos automáticos y las constantes de origen explícitamente ocultas son de solo lectura; en las entradas manuales siguen disponibles el interruptor y el deslizador. Las identidades de origen mantienen separados ID iguales procedentes de juegos de muestras distintos.</p>
+<p>Sigue siendo el <b>modelo JM</b>, sin pretensión de un funcionamiento idéntico al de Hauptwerk. Las transferencias continuas usan valores 0..127: primero una posible inversión, luego desplazamiento y factor, una función de potencia y una limitación. Willis se aproxima con una constante de tiempo exponencial; la inercia con un muelle amortiguado. Las válvulas manuales usan una transición de 10 ms. Por debajo del 60 % de la baja presión nominal del origen, el sonido se va apagando gradualmente. La falta de datos del controlador, la lógica desconocida, los bucles continuos puramente directos, las transferencias continuas dobles, los muelles de fuelle y las posiciones de fuelle forzadas bloquean la carga antes de sustituir el órgano activo. Los avisos de origen indican el motivo.</p>
+<p>Un registro seleccionado cuyo mismo interruptor de origen también maneja la lógica de origen automática aún no puede vincularse a la registración del proyecto. En ese caso el proyecto se rechaza antes de cargar; la registración no cambia en silencio.</p>
+<p>Un control aparte de la forma de onda del trémolo grabado queda fuera de esta versión. Las cajas expresivas de secreto GO normales y los distintos grupos de trémolo aún requieren teclados de destino separados; las cajas de rango independientes de JM-ACOUSTICS no tienen esta limitación.</p>
 
 <!-- ============================================================ -->
 <h2 id="werkbalk">4. La barra de herramientas</h2>
@@ -327,6 +352,8 @@
 <table>
   <tr><th style="width:22%">Tecla</th><th>Función</th></tr>
   <tr><td><kbd>F1</kbd> <kbd>F2</kbd> <kbd>F3</kbd></td><td>Órgano, Ajustes del órgano y Ajustes generales.</td></tr>
+  <tr><td><kbd>F4</kbd></td><td>Abrir el Diseñador de consola (ventana principal).</td></tr>
+  <tr><td><kbd>F5</kbd></td><td>Abrir el Constructor de órganos: combinar registros de uno a 64 juegos de muestras.</td></tr>
   <tr><td><kbd>F11</kbd></td><td>Pantalla completa (modo consola) activada o desactivada.</td></tr>
   <tr><td><kbd>Esc</kbd></td><td>Salir de la pantalla completa.</td></tr>
   <tr><td>Botón derecho o 3 s de pulsación</td><td>En un botón de la barra del combinador: vincula ese botón a un botón de la consola (aprendizaje MIDI).</td></tr>

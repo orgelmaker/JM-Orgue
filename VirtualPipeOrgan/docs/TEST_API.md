@@ -39,6 +39,51 @@ Het hoofdvenster vermeldt `[testprofiel]`. Gebruik voor een test samplesets in
 een eigen testmap: instellingen naast een geladen orgel worden daar nog steeds
 opgeslagen. Extra vensters gebruiken eveneens een afzonderlijke testidentiteit.
 
+Voor een achtergrondtest zonder appvensters of webviews:
+
+```bat
+vpo-app.exe --test-api=18768 --test-data-dir "C:\testdata\jm-orgue-achtergrond" --test-headless
+```
+
+`--test-headless` vereist de test-API en een expliciet absoluut testprofiel.
+De gewone appstart blijft ongewijzigd. Gebruik een afzonderlijke kopie van de
+testorgels: ook in deze modus worden zijbestanden naast een geladen definitie
+bewaard. De lokale test-API, orgellader en instellingenopslag werken normaal.
+
+Consolebouwer heeft de volgende **uitsluitend lokale test-endpoints**:
+
+- `GET /test/profile` geeft `{app_data_dir, process_id}` om een geïsoleerd testprofiel te controleren.
+- `GET /settings/console_layout?organ_id=URLENCODED_PAD` geeft `{layout}` voor precies het geladen orgel.
+- `POST /settings/console_layout` met `{organ_id, layout}` past een gevalideerd ontwerp toe; `layout: null` wist het ontwerp. Het antwoord is `{ok: true, warning: null}`. Een melding in `warning` betekent dat de lokale bibliotheek veilig is opgeslagen, maar de kopie bij de sampleset niet kon worden geschreven.
+
+Een ander orgel-ID, onbekende versie, ongeldige afmetingen of actieve ontwerpen
+met verwijzingen naar ontbrekende registers worden afgewezen voordat de opslag wijzigt. De endpoints
+zijn niet beschikbaar via de afstandsbediening. De runtimetest
+`testscripts/console_builder_live_test.mjs` vereist de eigen gemarkeerde fixturemap
+en controleert het profiel vóórdat hij instellingen schrijft:
+
+```powershell
+node testscripts/console_builder_live_test.mjs --base http://127.0.0.1:18766 --fixture-dir "C:\Bronbestanden\Prive\JM-Orgue-consolebouwer\testen\consolebouwer-2026-11-26\orgels"
+```
+
+Na herstart kan dezelfde opdracht met `--verify-existing` de twee opgeslagen
+ontwerpen teruglezen zonder nieuwe ontwerpen toe te passen.
+
+`--verify-texture` controleert na een GUI-import de gekozen eigen PNG en wijst
+ongeldige textuurgegevens af zonder het geldige ontwerp te wijzigen. Voor een
+volledige proef zonder vensters gebruikt
+`testscripts/console_texture_background_test.py` uitsluitend eigen subprocessen
+en een afzonderlijke kopie van de gemarkeerde fixtures:
+
+```powershell
+py testscripts/console_texture_background_test.py --exe "C:\Bronbestanden\Prive\JM-Orgue\VirtualPipeOrgan\target\debug\vpo-app.exe" --source-dir "C:\Bronbestanden\Prive\JM-Orgue-consolebouwer\testen\consolebouwer-2026-11-26" --work-dir "C:\Bronbestanden\Prive\JM-Orgue-consolebouwer\testen\consolebouwer-2026-11-26\achtergrond"
+```
+
+De bron moet twee reeds opgeslagen ontwerpen bevatten, waarvan A de gekozen
+fixturetextuur gebruikt. De achtergrondproef kopieert alleen orgeldefinities en
+WAV-bestanden, controleert A → B → A, herstart de app en vergelijkt de afbeelding,
+bibliotheek en afzonderlijke zijbestanden opnieuw. Het bronprofiel blijft intact.
+
 ### B. Over het netwerk, met token (afstandsbediening)
 
 Luistert op `0.0.0.0:<poort>`, bereikbaar vanaf elke machine in hetzelfde
@@ -215,6 +260,109 @@ state.
 | POST | `/stereo_samples?on=1` | stereo-opnamen laden |
 
 ## Antwoorden
+
+### Orgelbouwer (alleen lokale test-API)
+
+- `POST /project/source` met `{ "path": "C:/sets/bron.organ", "package_root": null }`: broncatalogus en vingerafdruk, zonder het actieve orgel te vervangen.
+- `POST /project/read` met `{ "path": "C:/projecten/mijn.jmorgan" }`: project met opgeloste bronpaden.
+- `POST /project/save` met `{ "path": "C:/projecten/mijn.jmorgan", "project": { ... } }`: eerst bronnen en alle geselecteerde audio valideren, dan veilig opslaan. Manifesten mogen op deze route tot 16 MiB beslaan.
+- `POST /load_organ` met een absoluut `.jmorgan`-pad gebruikt dezelfde projectcompiler en publiceert één orgelbundel. Projectregisters hebben stabiele DTO-ID's `project_<id>`.
+
+`project.sources` bevat één tot 64 bronnen met ieder een eigen UUID, bronpad,
+pakketmap, stemming en eventuele opnamepositie. Het schema blijft versie 1;
+bestaande projecten met twee bronnen vereisen geen migratie. De gezamenlijke
+budgetten blijven 2.048 registers, 16 gebruikte rankzwelkasten, 256 actieve
+windcompartimenten, 4.096 windverbindingen en 4.096 windcontrollers. Een 65e bron
+wordt bij projectvalidatie geweigerd; de bronlimiet verruimt de andere grenzen niet.
+
+De test `testscripts/organ_project_background_test.py` start eigen headless processen
+met een apart profiel en synthetische bronorgels. Hij gebruikt geen vensters of
+productie-instellingen. Frequentiemetingen lopen via echte audio-opnamen.
+
+Uitgebreide achtergrondproeven:
+
+- `organ_project_advanced_background_test.py`: twee rankzwelkasten op hetzelfde manuaal, onafhankelijke audiometing, herstart, 2.048 registers en een volledige console.
+- `organ_project_wind_background_test.py`: twee bronwindnetwerken met overlappende bron-ID's, drukverbruik en herstel, herstart en wissen bij een normaal orgel.
+- `organ_project_valve_background_test.py`: dynamische schakel- en regelkleppen, omkering en beginstanden, bronisolatie, registerkoppeling, veilige opslag en herladen in eigen headless processen.
+- `organ_project_feedback_background_test.py`: mechanische balgextensie en drukfeedback, een Willis/inertia-keten, drempelschakelaar, bronisolatie en herstart.
+- `organ_project_multisource_background_test.py`: reproduceerbare proef met drie en daarna vier bronnen in dezelfde map, eigen pakketmappen, overlappende native ID's, afzonderlijke audiostemming en windverbruik, bronvolgorde wijzigen, bron vervangen, herstart en afwijzing van 65 bronnen. Deze procedure start eigen headless appprocessen en gebruikt een eigen profiel.
+- `organ_project_multisource_ui_test.mjs`: reproduceerbare componentproef met de echte Svelte-interface en gesimuleerde IPC. Controleert het begin met één lege bronkaart, toevoegen van bronnen, afzonderlijke pakketmap/stemming, keuzelijst vanaf vijf bronnen, labels na Z, 64/65-grens en compacte weergave. De componentproef valideert geen native audio; daarvoor dient de achtergrondproef.
+- `GET /project/wind`: actieve bronplanmetadata (`nodes`, `links`, `controls`, `pipe_count`, `warnings`) en audiometingen: `pressure_ratios` per knooppunt, `control_values` per controller, `valve_openings` en `link_flows` per verbinding. De arrays volgen de volgorde van het plan. `control_values` en `valve_openings` meten de actuele overgang; `link_flows` is de massastroom in kg/s. Per knooppunt zijn ook `bellows_extensions` (slagfractie 0..1), `bellows_positions` (meter) en `bellows_velocities` (m/s) beschikbaar. `control_tick_count` en `model_time_seconds` geven de voortgang van de audiomodeltijd; `source_model_requested` geeft de ingestelde bronwindvlag aan.
+- `GET /project/wind/controls`: controllerdefinities en waarden in `values`, met de stabiele controller-ID als sleutel. Zelfstandige ingangen geven hun ingestelde doel; gekoppelde schakelaars zijn aan zolang minstens één `project_stop_ids`-register getrokken is. Controllers met `automatic: true` tonen de actuele berekende waarde uit de audiokern en zijn alleen uitleesbaar.
+- `POST /settings/import` met `{ "path": "C:/testprofiel/export.json", "organ_id": "C:/projecten/mijn.jmorgan" }`: roept dezelfde instellingenimport aan als de desktopinterface. Zelfstandige klepstanden worden gevalideerd en meteen in de audiokern hersteld; onbekende, automatische of registergekoppelde opgeslagen klepwaarden worden verwijderd. Dit is uitsluitend een lokaal test-endpoint, buiten de netwerkwhitelist.
+- `POST /project/wind/control` met `{ "organ_id": "C:/projecten/mijn.jmorgan", "control_id": "<bron-UUID>:continuous:9", "value": 0.5 }`: zelfstandige klepstand onmiddellijk per project bewaren en daarna naar audio sturen. `organ_id` is optioneel in de lokale test-API; weglaten gebruikt het geladen orgel. `value` moet eindig zijn en binnen 0..1 liggen. Een schakelaar gebruikt de grens 0.5; een continue regelaar behoudt de waarde. Onbekende controllers, verkeerde orgelidentiteiten, ongeldige waarden en handmatig bedienen van een automatische of registergekoppelde controller geven HTTP 400. Een mislukte lokale opslag laat de vorige stand behouden; een mislukte kopie naast het project geeft bij succes een `warning`.
+- `POST /project/wind/enabled` met `{ "enabled": false }`: tijdelijke testschakelaar voor bronwind, zonder projectinstellingen te bewaren.
+- `GET`/`POST /test/preset_bindings` met `{ "bindings": [...] }` en `GET /test/preset_triggers`: controle van brede MIDI-acties in het eigen testproces. Bedoeld voor achtergrondtests; deze routes staan niet op de afstandsbediening.
+
+Controller-ID's hebben de vorm `<bron-UUID>:switch:<bron-ID>` of
+`<bron-UUID>:continuous:<bron-ID>`; gelijke numerieke ID's uit twee bronnen of
+controllertypen blijven onafhankelijk. Beginstand en schakelomkering komen uit
+de Hauptwerk-definitie. De importer bewaart de volledige afhankelijke keten,
+inclusief voorwaarden, verborgen bronconstanten en fysieke uitgangen. Ontbrekende
+beginstanden mogen alleen van een bekende producent worden afgeleid; ontbrekende
+vrije ingangen worden geweigerd. Verborgen bronconstanten met expliciet
+`AccessibleForInput=N` en `Clickable=N` blijven alleen uitleesbaar.
+
+De expliciete JM-benadering, zonder claim van identieke Hauptwerk-semantiek:
+
+- Continue overdracht: `u = 127 * bronwaarde`; bij inversie `u = 127 - u`;
+  daarna `doel = clamp((max(u + increment, 0) * coefficient)^index, 0, 127)`.
+  De coëfficiënt is niet negatief en de macht is positief. Het eindresultaat
+  wordt weer genormaliseerd naar 0..1.
+- Willis (linktype 2): `dx/dt = (doel - x) / tau`, met `tau` in seconden gelijk
+  aan `WillisTypeIncSpeedInMillisecondsPerStepWithOneStepDiff / 1000`.
+  Binnen een halve ruwe controllerstap wordt het eindpunt exact bereikt.
+- Inertia (linktype 3): `x'' = acceleration * (doel - x) - damping * x'`, met
+  tijd in seconden. Zowel `InertiaModelType...` als `InertialModelType...`
+  veldnamen worden gelezen; tegenstrijdige waarden worden geweigerd.
+- Directe continue ketens volgen een vooraf bepaalde volgorde; voorwaarden en
+  schakellussen lezen de vorige rekentik. Drempelschakelaars vergelijken de op
+  hele 0..127-stappen afgeronde waarde en letten op de bewegingsrichting.
+  Schakelacties 1/2 betekenen aan/uit; code 7 houdt in dit JM-model de stand vast.
+- Sensorwaarden zijn de begrensde balgslagfractie, druk gedeeld door nominale
+  druk, of doorstroming gedeeld door de opgegeven maximale stroom. Balgen
+  gebruiken een mechanische positie en snelheid met begrensde slag. Bij
+  vormcode 2 en bewegingscode 1 gebruikt de JM-wigbenadering de helft van het
+  grondoppervlak als volume-oppervlak en de opgegeven zwaartepuntafstand als
+  hefboom. Ontbrekende vormcodes gebruiken de rechthoekige JM-benadering.
+
+Handbediende kleppen hebben een overgang van 10 ms; de klank valt onder 60%
+van de nominale bronlagedruk geleidelijk weg. `ContinuousControlDoubleLinkage`,
+balgveren, gedwongen balgstanden, onbekende geometrie/actiecodes en zuiver
+directe continue lussen zijn niet ondersteund. Die en onvolledige gegevens
+blokkeren laden vóór vervanging van het actieve orgel. Broninspectie vermeldt
+de reden in `warnings` en waar van toepassing `valve_controls[].issues`.
+Bij uitgeschakeld **Windwerk van de set** blijven de klepinstellingen beschikbaar,
+maar vraagt activeren een herlaad.
+
+Een geselecteerd register met een bronschakelaar die tevens door een
+automatiseringsproducent wordt aangestuurd, wordt vóór laden geweigerd. Die
+combinatie heeft nog geen ondersteunde koppeling met projectregistratie; de
+compiler laat de registerbinding niet stilzwijgend weg.
+
+De meerbronnenproeven zijn vanuit `VirtualPipeOrgan` als volgt te herhalen.
+Vervang `C:/werk/JM-Orgue` door de checkout, geef de te testen appbinary op en
+gebruik een nieuwe werkmap onder `testen/orgelbouwer-meerbronnen-2026-11-26`:
+
+```powershell
+py testscripts/organ_project_multisource_background_test.py --exe "C:/werk/JM-Orgue/VirtualPipeOrgan/target/debug/vpo-app.exe" --work-dir "C:/werk/JM-Orgue/testen/orgelbouwer-meerbronnen-2026-11-26/run-1"
+```
+
+Met `--prepare-only` maakt die proef alleen de bronfixtures. Voor de
+componentproef moeten de UI-afhankelijkheden, Chrome en een Playwright-module
+beschikbaar zijn. Vervang ook het modulepad in dit voorbeeld:
+
+```powershell
+node testscripts/organ_project_multisource_ui_test.mjs --playwright "C:/tools/playwright/index.mjs" --chrome "C:/Program Files/Google/Chrome/Application/chrome.exe" --output "C:/werk/JM-Orgue/testen/orgelbouwer-meerbronnen-2026-11-26/ui"
+```
+
+De achtergrondproef schrijft `multisource-result.json` en proceslogboeken; de
+componentproef schrijft `result.json` en de beelden `multisource-wide.png` en
+`multisource-narrow.png`.
+
+Consoleontwerpen mogen 64 pagina's en in totaal 4.096 onderdelen bevatten. De
+lokale `/settings/console_layout`-route accepteert daarom maximaal 8 MiB; de
+afstandsbediening behoudt haar bestaande verzoeklimiet.
 
 Alle antwoorden zijn JSON. Fouten komen met een HTTP-status (400 slechte
 invoer, 404 pad onbekend, 409 geen orgel geladen, 500 onverwacht) en een

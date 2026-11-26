@@ -1,0 +1,123 @@
+JM-ORGUE — REGISTERS UIT MEERDERE SAMPLESETS
+26 november 2026
+
+Werkmap: C:\Bronbestanden\Prive\JM-Orgue-consolebouwer
+Branch: codex/consolebouwer. Niet gecommit of gepusht.
+Nieuwe testbuild:
+C:\Bronbestanden\Prive\JM-Orgue\VirtualPipeOrgan\target\debug\vpo-app.exe
+
+RESULTAAT
+
+De Orgelbouwer ondersteunt nu 1 tot en met 64 bronorgels per project. De vaste
+grens van twee bronnen is uit backend, frontendvalidatie en schermindeling
+verwijderd. Projectschema 1 blijft behouden; bestaande projecten hoeven niet
+te worden gemigreerd.
+
+Gebruik 'Bron toevoegen…' om een volgende sampleset te kiezen. Naast de
+gekozen bronnen blijft één lege kaart beschikbaar, tot de grens van 64.
+Iedere bron heeft een eigen stemming, centcorrectie, opnamepositie en pakketmap.
+Labels lopen door van A t/m Z naar AA t/m BL. Vanaf vijf bronnen gebruikt de
+registerkeuze een keuzelijst; kleinere projecten houden snelle bronknoppen.
+
+Bron-UUID's en projectregister-ID's blijven de identiteit bepalen. De letter
+op het scherm volgt alleen de volgorde. Verwijderen van een bron behoudt de
+ID's van overblijvende registers; een nieuwe bron krijgt nieuwe doelen.
+Bij verwijderen/vervangen worden ook de oude catalogus en bronfout opgeruimd,
+zodat een verwijderde onleesbare bron opslaan niet kan blijven blokkeren.
+De pakketmap voor een nog toe te voegen bron staat los van de gekozen bronnen.
+
+Een onverwacht project met 65 bronnen wordt in de interface vóór inspectie
+of vervanging van het bestaande ontwerp geweigerd. De backend weigert dezelfde
+grens bij lezen, opslaan en laden. Er worden geen bronnen stil afgekapt.
+
+De gezamenlijke limieten blijven: 2.048 registers, 512 eigen koppels,
+16 actieve rankzwelkasten, 256 actieve windcompartimenten, 4.096 windverbindingen
+en 4.096 broncontrollers. Het aantal bronnen vergroot deze andere budgetten
+niet. De benodigde geheugencapaciteit blijft afhankelijk van de gekozen samples.
+
+VERIFICATIE
+
+1. Volledige Rustset: 1.039 geslaagd, 0 gefaald, 17 standaard genegeerd.
+   jm-midimon 5; app 680; audio 61; core 3; sampler 267; pitch-integratie 23.
+   De nieuwe backendproeven compileren drie onafhankelijke bronnen met eigen
+   audio/stemming en controleren opslaan/herladen/herschikken. De grensproef
+   compileert 64 echte synthetische brondefinities, bewaart en herlaadt ze,
+   en weigert 0/65 bronnen zonder een bestaand manifest te vervangen.
+
+2. JavaScript: 32 controles geslaagd. Nieuw: 1..64 bronnen, afwijzen van 65,
+   registeridentiteit na herschikken/verwijderen/toevoegen en labels Z/AA/BL.
+   Frontendbuild en definitieve executablebuild slagen.
+
+3. Nieuwe headless interfacetest: 9 controles geslaagd; geen browserfouten.
+   De echte Svelte-component draait met expliciete Tauri-mocks in eigen Chrome.
+   Getest: één bron bewaren, drie/vier bronnen kiezen en stemmen, verwijderen
+   uit het midden en toevoegen zonder ID-hergebruik, herschikken, opruimen van
+   een bronfout, alle 27/64 bronnen inspecteren en bewaren, registerkeuzelijst,
+   afwijzen van 65 vóór mutatie en leesbare weergave tot 420 px breedte.
+   De schermbeelden zijn ook visueel bekeken.
+   Bestaande Orgelbouwer-interfacetest: 10 geslaagd. Windbediening: 11 geslaagd.
+
+4. Nieuwe native achtergrondproef: alle 10 controles geslaagd op de nieuwe
+   executable, zonder appvensters of webviews, in eigen testprofielen.
+   Vijf synthetische HW-definities en aparte klankpakketten zijn voorbereid;
+   vier bronnen worden tegelijk in het project gebruikt. De interne bron-ID's
+   en PackageID's overlappen bewust.
+
+   Bewijs uit de audiokern:
+   - 10 echte MP3-opnamen gedecodeerd en gemeten, zonder verloren frames.
+   - Eerste vier gemeten tonen: A 439,999991 Hz; B 466,163682 Hz;
+     C 493,883419 Hz; D 523,251004 Hz.
+   - Maximale afwijking van de verwachte testtoon over de opnamen: 0,000442 cent.
+   - De vier bronnen klinken afzonderlijk én tegelijk met vier samplerstemmen.
+   - Windverbruik beïnvloedt uitsluitend het eigen bronnetwerk.
+
+   Getest zijn verder: drie bronnen opslaan/laden en een vierde toevoegen,
+   behoud van console- en UUID-instellingen, bron- en registervolgorde wijzigen,
+   bron B verwijderen en bron E toevoegen. Register-ID 102 wordt niet hergebruikt;
+   de nieuwe bron gebruikt 105. Een oud consoledoel kan die nieuwe bron niet
+   onbedoeld bedienen. Hetzelfde project onder een andere bestandsnaam en na
+   volledige procesherstart behoudt instellingen en vier afzonderlijke tonen.
+
+   Opslaan en laden van 65 bronnen worden geweigerd; actueel orgel,
+   instellingen en projectbestand blijven ongewijzigd. Alle 15 oorspronkelijke
+   definitie-, pakketmarker- en samplebestanden behouden hun SHA256.
+   Eigen processen 26800 en 30952 zijn gestopt en de testlock is verwijderd.
+
+5. Op dezelfde nieuwe executable zijn bestaande achtergrondproeven herhaald:
+   - 19 controles voor tweebronprojecten, bronstemming, MIDI, console-identiteit,
+     veilige opslag, bronwijzigingen en herstart;
+   - 15 controles voor automatische balg-/drukfeedback, Willis-/inertiaketens,
+     bronisolatie, instellingenimport, foutieve bronnen en herstart.
+   Alle controles slagen; beide scripts stoppen hun eigen processen.
+
+BEWIJSBESTANDEN
+
+testen\orgelbouwer-meerbronnen-2026-11-26\multi-2\multisource-result.json
+  Native resultaten, opnamemetingen, bronhashes en eigen processen.
+testen\orgelbouwer-meerbronnen-2026-11-26\multi-2\recordings\
+  De gemeten testtoonopnamen.
+testen\orgelbouwer-meerbronnen-2026-11-26\ui\result.json
+testen\orgelbouwer-meerbronnen-2026-11-26\ui\multisource-wide.png
+testen\orgelbouwer-meerbronnen-2026-11-26\ui\multisource-narrow.png
+testen\orgelbouwer-meerbronnen-2026-11-26\builder-ui\result.json
+testen\orgelbouwer-meerbronnen-2026-11-26\wind-ui\result.json
+testen\orgelbouwer-2026-11-26\run-meerbronnen\background-result.json
+testen\orgelbouwer-feedback-2026-11-26\feedback-meerbronnen\feedback-result.json
+testen\multisource-rust-2026-11-26.log
+testen\multisource-js-2026-11-26.log
+testen\multisource-frontend-2026-11-26.log
+testen\multisource-build-2026-11-26.log
+
+Belangrijkste gewijzigde/nieuwe code in VirtualPipeOrgan:
+- src-tauri/src/organ_project.rs;
+- ui/src/lib/organProject.js;
+- ui/src/components/OrganBuilder.svelte;
+- testscripts/organ_project_test.mjs;
+- testscripts/organ_project_multisource_ui_test.mjs;
+- testscripts/organ_project_multisource_background_test.py.
+
+Documentatie is aangepast. Historische verslagen behouden hun eerdere
+testresultaten; dit verslag vervangt hun beperking tot twee bronorgels.
+git diff --check slaagt, met alleen bestaande Git-waarschuwingen over
+LF/CRLF-normalisatie van de gegenereerde Tauri-schema's. Gebruikersvensters,
+invoerapparaten en productieprofielen zijn voor deze uitbreiding niet bediend.

@@ -11,6 +11,9 @@ mod acoustics;
 mod audio;
 mod commando_log;
 mod commands;
+mod console_layout;
+mod organ_project;
+mod project_wind_controls;
 mod crescendo_voorstel;
 mod background_sounds;
 mod feedback;
@@ -112,9 +115,39 @@ fn parse_test_data_dir(args: &[String], test_api: bool) -> Result<Option<std::pa
     Ok(gekozen)
 }
 
+/// Alleen voor achtergrondproeven met een eigen profiel. Deze modus maakt
+/// geen appvensters of webviews; alleen de expliciete lokale test-API draait.
+fn parse_test_headless(
+    args: &[String],
+    test_api: bool,
+    test_data_dir: Option<&std::path::Path>,
+) -> Result<bool, String> {
+    let mut gekozen = false;
+    for arg in args.iter().skip(1) {
+        if arg == "--test-headless" {
+            if gekozen {
+                return Err("Geef --test-headless maar één keer op".into());
+            }
+            gekozen = true;
+        } else if arg.starts_with("--test-headless=") {
+            return Err("--test-headless is een vlag zonder waarde".into());
+        }
+    }
+    if gekozen {
+        if !test_api {
+            return Err("--test-headless is alleen toegestaan met --test-api".into());
+        }
+        let dir = test_data_dir.ok_or("--test-headless vereist een expliciet --test-data-dir")?;
+        if !dir.is_absolute() || dir.file_name().is_none() {
+            return Err("--test-headless vereist een absoluut testprofiel, geen schijfwortel".into());
+        }
+    }
+    Ok(gekozen)
+}
+
 #[cfg(test)]
 mod testprofiel_tests {
-    use super::parse_test_data_dir;
+    use super::{parse_test_data_dir, parse_test_headless};
 
     fn args(waarden: &[&str]) -> Vec<String> {
         std::iter::once("vpo-app").chain(waarden.iter().copied()).map(str::to_owned).collect()
@@ -128,6 +161,29 @@ mod testprofiel_tests {
         assert!(parse_test_data_dir(&args(&["--test-data-dir", "relatief"]), true).is_err());
         assert!(parse_test_data_dir(&args(&["--test-data-dir"]), true).is_err());
         assert!(parse_test_data_dir(&args(&["--test-data-dir", "relatief"]), false).is_err());
+    }
+
+    #[test]
+    fn achtergrondtest_verandert_de_normale_start_niet() {
+        assert!(!parse_test_headless(&args(&[]), false, None).unwrap());
+        assert!(!parse_test_headless(&args(&["--test-api"]), true, None).unwrap());
+        let dir = std::env::temp_dir().join("jm-orgue-headless-profiel");
+        assert!(!parse_test_headless(&args(&["--test-api"]), true, Some(&dir)).unwrap());
+        assert!(parse_test_headless(&args(&["--test-headless"]), true, Some(&dir)).unwrap());
+    }
+
+    #[test]
+    fn achtergrondtest_vereist_api_en_een_afzonderlijk_absoluut_profiel() {
+        let requested = args(&["--test-headless"]);
+        let dir = std::env::temp_dir().join("jm-orgue-headless-profiel");
+        assert!(parse_test_headless(&requested, false, Some(&dir)).is_err());
+        assert!(parse_test_headless(&requested, true, None).is_err());
+        assert!(parse_test_headless(&requested, true, Some(std::path::Path::new("relatief"))).is_err());
+        let root = dir.ancestors().last().unwrap();
+        assert!(parse_test_headless(&requested, true, Some(root)).is_err());
+        assert!(parse_test_headless(&args(&["--test-headless", "--test-headless"]), true, Some(&dir)).is_err());
+        assert!(parse_test_headless(&args(&["--test-headless=true"]), true, Some(&dir)).is_err());
+        assert!(parse_test_headless(&args(&["--test-headless=false"]), true, Some(&dir)).is_err());
     }
 }
 
@@ -156,6 +212,11 @@ fn main() {
         eprintln!("{}", e);
         std::process::exit(2);
     });
+    let test_headless = parse_test_headless(&args, test_api_port.is_some(), test_data_dir.as_deref())
+        .unwrap_or_else(|e| {
+            eprintln!("{}", e);
+            std::process::exit(2);
+        });
     // Set up logging to a file in %APPDATA%\nl.jm-orgue.app\jm-orgue.log
     // This works even without a visible console (windows_subsystem = "windows")
     let log_dir = test_data_dir.clone().unwrap_or_else(|| dirs::data_dir()
@@ -254,9 +315,11 @@ fn main() {
             // deze vensters met de expliciete buildermethode vóór een webview
             // met de standaardopslag kan worden geopend.
             if window.create {
-                let mut config = window.clone();
-                config.data_directory = None;
-                test_windows.push((config, dir.join("webview").join(&window.label)));
+                if !test_headless {
+                    let mut config = window.clone();
+                    config.data_directory = None;
+                    test_windows.push((config, dir.join("webview").join(&window.label)));
+                }
                 window.create = false;
             }
         }
@@ -462,6 +525,9 @@ fn main() {
                     .data_directory(data_directory.clone())
                     .build()?;
             }
+            if test_headless {
+                info!("Achtergrondtest gestart zonder appvensters of webviews");
+            }
             info!("Application initialized");
             Ok(())
         })
@@ -604,6 +670,11 @@ fn main() {
             commands::set_crescendo_binding_manual,
             commands::set_midi_mapping_range,
             commands::load_organ,
+            commands::inspect_organ_project_source,
+            commands::read_organ_project,
+            commands::save_organ_project,
+            commands::get_project_wind_controls,
+            commands::set_project_wind_control,
             commands::cancel_load,
             commands::import_preflight,
             commands::get_import_report,
@@ -630,6 +701,8 @@ fn main() {
             commands::set_active_couplers,
             commands::set_division_volume,
             commands::get_organ_settings,
+            commands::get_console_layout,
+            commands::set_console_layout,
             commands::log_scherm,
             commands::inspect_legacy_settings,
             commands::defer_legacy_settings,
@@ -820,7 +893,18 @@ fn main() {
         ])
         .build(context)
         .expect("Error running application")
-        .run(|app, event| {
+        .run(move |app, event| {
+            // Een achtergrondproef heeft bewust geen venster dat de event-loop
+            // in leven houdt. Alleen een automatische exit zonder code remmen;
+            // een expliciet app.exit(code) en procesbeëindiging blijven werken.
+            if test_headless {
+                if let tauri::RunEvent::ExitRequested { code: None, api, .. } = &event {
+                    api.prevent_exit();
+                    // This is a keep-alive event, not a shutdown request. Do
+                    // not start the normal five-second shutdown watchdog.
+                    return;
+                }
+            }
             // Afsluit-waakhond: de audio-teardown (m.n. een ASIO-driver die in
             // een kernel-call blijft hangen) kon het proces bij het sluiten
             // laten "zombiën" — venster weg, proces onkillbaar, poort 8765

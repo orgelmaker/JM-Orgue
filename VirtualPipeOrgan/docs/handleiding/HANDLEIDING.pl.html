@@ -11,10 +11,10 @@
 
 <header class="titel">
   <h1>JM-Orgue</h1>
-  <div class="onder">Instrukcja do wersji 0.9.57 &middot; listopad 2026</div>
+  <div class="onder">Instrukcja do wersji rozwojowej z Projektantem kontuaru &middot; listopad 2026</div>
 </header>
 
-<p>JM-Orgue to wirtualne organy piszcza&#322;kowe dla system&oacute;w Windows, macOS i Linux. Program odtwarza bezpo&#347;rednio zestawy sampli Hauptwerk i GrandOrgue, tak&#380;e du&#380;e zestawy surround i definicje Hauptwerk Custom Organ, a gra si&#281; na nim za pomoc&#261; klawiatury MIDI, sto&#322;u gry lub myszy. To, co grasz, program potrafi od razu zapisa&#263; nutami &mdash; w zwyk&#322;ej notacji albo w klavar &mdash; i wydrukowa&#263; jako PDF. Ta instrukcja przeprowadza przez program; zrzuty ekranu pochodz&#261; z wersji 0.9.16 i p&oacute;&#378;niejszych, tekst opisuje wersj&#281; 0.9.57.</p>
+<p>JM-Orgue to wirtualne organy piszcza&#322;kowe dla system&oacute;w Windows, macOS i Linux. Program odtwarza bezpo&#347;rednio zestawy sampli Hauptwerk i GrandOrgue, tak&#380;e du&#380;e zestawy surround i definicje Hauptwerk Custom Organ, a gra si&#281; na nim za pomoc&#261; klawiatury MIDI, sto&#322;u gry lub myszy. To, co grasz, program potrafi od razu zapisa&#263; nutami &mdash; w zwyk&#322;ej notacji albo w klavar &mdash; i wydrukowa&#263; jako PDF. Ta instrukcja przeprowadza przez program; zrzuty ekranu pochodz&#261; z wersji 0.9.16 i p&oacute;&#378;niejszych. Tekst obejmuje także nowego Projektanta kontuaru.</p>
 <p class="klein">&copy; Martijn van der Kolk. Zrzuty ekranu wykonano na organach demonstracyjnych i w&#322;asnych zestawach testowych; adresy sieciowe, tokeny dost&#281;pu i foldery u&#380;ytkownika zosta&#322;y zas&#322;oni&#281;te.</p>
 
 <nav class="inhoud">
@@ -22,7 +22,7 @@
   <ol>
     <li><a href="#start">Pierwsze kroki</a></li>
     <li><a href="#bibliotheek">Biblioteka</a></li>
-    <li><a href="#bespelen">&#321;adowanie organ&oacute;w i gra</a></li>
+    <li><a href="#bespelen">&#321;adowanie organ&oacute;w i gra</a> &middot; <a href="#consolebouwer">Projektant kontuaru</a> &middot; <a href="#orgelbouwer">Kreator organów</a></li>
     <li><a href="#werkbalk">Pasek narz&#281;dzi</a></li>
     <li><a href="#posities">Kilka pozycji s&#322;uchania</a></li>
     <li><a href="#wizard">Kreator dla nowych organ&oacute;w</a></li>
@@ -41,11 +41,8 @@
 <p>Pobierz instalator najnowszej wersji ze strony wyda&#324; projektu (dla Windows <code>JM-Orgue_&lt;wersja&gt;_x64-setup.exe</code>) i uruchom go. Instalacja jest wykonywana dla jednego u&#380;ytkownika i nie wymaga uprawnie&#324; administratora. Dla Windows istnieje te&#380; pakiet MSI, dla macOS DMG, a dla Linuksa AppImage lub deb.</p>
 <p>Sam program mo&#380;na swobodnie u&#380;ywa&#263;. Zestawy sampli nie s&#261; do&#322;&#261;czone: otrzymasz je od ich autor&oacute;w. Na stronie startowej biblioteki wymieniono kilku autor&oacute;w, kt&oacute;rzy udost&#281;pniaj&#261; zestawy za darmo.</p>
 
-<h3>Aktualizacja</h3>
-<p>JM-Orgue samodzielnie sprawdza, czy jest nowa wersja. Je&#347;li tak, u g&oacute;ry pojawia si&#281; komunikat. Wybierz <b>Aktualizuj teraz</b>: program pobierze aktualizacj&#281;, sprawdzi podpis, zainstaluje j&#261; i uruchomi si&#281; ponownie. Je&#347;li chcesz najpierw tylko pobra&#263;, wybierz <b>Pobierz</b>. Mo&#380;esz te&#380; sprawdzi&#263; r&#281;cznie w Ustawieniach og&oacute;lnych &rarr; Aktualizacja i opinie &rarr; <b>Sprawd&#378; aktualizacje</b>.</p>
-
-<h3>Trzy g&#322;&oacute;wne ekrany</h3>
-<p>U g&oacute;ry znajduj&#261; si&#281; trzy karty: <b>Organy</b> (gra), <b>Ustawienia organ&oacute;w</b> (wszystko, co dotyczy za&#322;adowanych organ&oacute;w) i <b>Ustawienia og&oacute;lne</b> (wszystko, co dotyczy ca&#322;ego programu). Klawisze <kbd>F1</kbd>, <kbd>F2</kbd> i <kbd>F3</kbd> prze&#322;&#261;czaj&#261; mi&#281;dzy nimi bezpo&#347;rednio. K&#322;ypa obok nazwy organ&oacute;w zamyka organy i wraca do biblioteki.</p>
+<h3>Główne ekrany</h3>
+<p>U góry znajdują się karty <b>Organy</b> (gra), <b>Projektant kontuaru</b> (projektowanie wizualnej konsoli), <b>Ustawienia organów</b> (wszystko, co dotyczy załadowanych organów) i <b>Ustawienia ogólne</b> (wszystko, co dotyczy całego programu). Klawisze <kbd>F1</kbd>, <kbd>F2</kbd> i <kbd>F3</kbd> otwierają Organy, Ustawienia organów i Ustawienia ogólne. <kbd>F4</kbd> otwiera Projektanta kontuaru w oknie głównym. Kłypa obok nazwy organów zamyka organy i wraca do biblioteki.</p>
 
 <!-- ============================================================ -->
 <h2 id="bibliotheek">2. Biblioteka</h2>
@@ -121,6 +118,34 @@
 <p class="klein">Ka&#380;dy przycisk paska setzera mo&#380;na powi&#261;za&#263; z przyciskiem na w&#322;asnym stole gry: kliknij prawym przyciskiem (lub przytrzymaj 3 sekundy), a potem naci&#347;nij przycisk na stole gry.</p>
 <h3>Nauka kana&#322;u MIDI dla klawiatury</h3>
 <p>Nie trzeba najpierw wchodzi&#263; do Ustawie&#324; organ&oacute;w: kliknij prawym przyciskiem myszy na nazwie sekcji nad rejestrami &mdash; lub przytrzymaj j&#261; 2 sekundy na ekranie dotykowym &mdash; a program poprosi o najni&#380;sz&#261; i najwy&#380;sz&#261; nut&#281; tej klawiatury. Kana&#322; jest ustawiany bez opuszczania sto&#322;u gry.</p>
+
+<h3 id="consolebouwer">Projektant kontuaru: zaprojektuj własny stół gry</h3>
+<p>Załaduj organy i otwórz <b>Projektanta kontuaru</b> lub naciśnij <kbd>F4</kbd> w oknie głównym. Projektujesz elementy sterujące tych organów: głosy, połączenia (kopule) i własne napisy. Dostępne elementy pochodzą z załadowanych organów. Projekt zmienia układ i wygląd; ustawienia brzmienia i przypisania MIDI pozostają związane z tymi samymi głosami i połączeniami.</p>
+<ol>
+  <li>Wybierz <b>Wykończenie</b>: <b>Ciepły orzech</b>, <b>Jasna kość słoniowa</b> lub <b>Ciemne studio</b>. W sekcji <b>Styl elementów</b> wybierasz spośród ośmiu kształtów: <b>Przechylany klawisz</b>, <b>Porcelanowy klawisz</b>, <b>Drewniany klawisz</b>, <b>Wyciągany rejestr</b>, <b>Rejestr z kości słoniowej</b>, <b>Piston z mosiężną obwódką</b>, <b>Zakrzywiony klawisz teatralny</b> lub <b>Płaski przycisk</b>. Kształt możesz wybrać dla każdego elementu osobno albo dla wszystkich naraz.</li>
+  <li>Dodaj po lewej głos, połączenie lub napis. Zaznacz element na powierzchni projektu i przeciągnij go w odpowiednie miejsce. Uchwytami rozmiaru zmieniasz wymiary bezpośrednio na obszarze roboczym. Po prawej ustawisz własny tekst, położenie i wymiary także liczbami. Klawisze strzałek przesuwają zaznaczony element po siatce.</li>
+  <li>W razie potrzeby utwórz dodatkowe <b>Strony</b> i nadaj im rozpoznawalną nazwę. <b>Podgląd</b> pokazuje wynik; kliknięcie głosu w tym podglądzie nie steruje organami.</li>
+  <li>Włącz <b>Użyj własnej konsoli</b> i wybierz <b>Zastosuj</b>. Projekt zostanie zapisany dla tych organów i pojawi się na karcie <b>Organy</b>, gdzie przyciski sterują prawdziwymi głosami i połączeniami.</li>
+</ol>
+<p><b>Magnetyczne wyrównywanie</b> pomaga ustawić elementy w jednej linii. Podczas przeciągania pojawiają się linie pomocnicze przy pasujących krawędziach i środkach. Przytrzymaj <kbd>Alt</kbd>, aby przesuwać swobodnie, bez wyrównywania. <b>Szeroki obszar roboczy</b> daje projektowi więcej miejsca; <b>Pokaż panele boczne</b> przywraca listę elementów i właściwości.</p>
+<p>Przez <b>Teksturę</b> wybierasz niezależnie od wykończenia drobny rysunek drewna, dąb, korzeń orzecha, heban, len, szczotkowany metal lub jednolity. <b>Siła tekstury</b> określa, jak wyraźny jest wzór, a <b>Rozmiar tekstury</b> – jak duży. Przez <b>Wybierz własną teksturę…</b> używasz własnego obrazu PNG, JPG lub WebP o rozmiarze do 2 MB i 8192 × 8192 pikseli. Obraz zostaje zapisany w projekcie i wędruje razem z ustawieniami organów, więc oryginalny plik nie musi zostać w tym samym miejscu.</p>
+<p><b>Cofnij</b> przywraca poprzednią edycję. <b>Odrzuć zmiany</b> wraca do ostatnio zastosowanego projektu. Jeśli opuścisz projektanta z niezapisanymi zmianami, aplikacja zapyta, czy je odrzucić, czy kontynuować edycję. Aby wrócić do konsoli standardowej, wyłącz <b>Użyj własnej konsoli</b> i wybierz <b>Zastosuj</b>.</p>
+<p>Każdy plik definicji organów ma własny projekt, nawet gdy dwie definicje leżą w tym samym folderze. Najpierw bezpiecznie zapisywana jest biblioteka lokalna, potem plik ustawień obok definicji. Jeśli folder zestawu sampli nie jest zapisywalny, projekt pozostaje zapisany lokalnie, a aplikacja zgłasza, że nie udało się zaktualizować kopii obok definicji.</p>
+<p>Jeśli po aktualizacji zestawu sampli zniknęły głosy lub połączenia, Projektant kontuaru zgłasza brakujące odwołania. Usuń lub zastąp te elementy, zanim ponownie włączysz własną konsolę. Projekt możesz mimo to zapisać z wyłączonym <b>Użyj własnej konsoli</b>, aby przywrócić go później. Nieczytelny projekt nigdy nie jest nadpisywany automatycznie; zwykła konsola pozostaje dostępna.</p>
+
+<h3 id="orgelbouwer">Kreator organów: łączenie głosów z kilku zestawów sampli</h3>
+<p>Otwórz <b>Kreatora organów</b> lub naciśnij <kbd>F5</kbd>, także bez załadowanych organów. Możesz użyć od jednej do <b>64 definicji źródłowych</b>. Zacznij na pierwszej karcie źródła od <b>Wybierz definicję…</b>, potem użyj <b>Dodaj źródło…</b> lub następnej pustej karty. Wybierz głosy, które chcesz wykorzystać. Każdy głos pozostaje kompletny, z piszczałkami, warstwami brzmienia, wybrzmieniami i obsługiwanymi nagraniami tremolo. Rozdziel wybór na własne manuały i pedał oraz ustaw kanały MIDI i zakresy klawiszy.</p>
+<p>Każda karta źródła ma własny <b>Folder pakietu…</b>, strój i ewentualną pozycję nagrania. Litery źródeł po Z biegną dalej jako AA, AB itd. Do czterech źródeł organy źródłowe dla listy głosów wybierasz przyciskami; od pięciu źródeł używasz listy rozwijanej <b>Organy źródłowe</b>.</p>
+<p>Dla każdego źródła wybierz <b>Zachowaj oryginał</b> albo <b>Wyrównaj strój koncertowy</b>. Przy wyrównywaniu podaj faktycznie nagrany dźwięk odniesienia A, na przykład 415 Hz; źródło zostanie wtedy przesunięte do wspólnego odniesienia projektu. Odniesienie to nie jest mierzone automatycznie. Wewnętrzny temperowany strój i celowe dudnienie celeste zostają zachowane. Dodatkowa korekta w centach pozwala dopracować strój źródła. W projektach ogólny wybór temperacji zastępują te ustawienia źródeł.</p>
+<p><b>Zapisz i załaduj</b> zapisuje projekt <code>.jmorgan</code> i ładuje złożone organy. Potem <b>Rozmieść konsolę</b> otwiera wizualnego Projektanta kontuaru. Identyfikatory głosów są zachowywane przy zmianie kolejności i przenoszeniu na inny manuał. Projekt odwołuje się do oryginalnych definicji i sampli; nie są one zmieniane ani kopiowane. Przy przenosinach zabierz także własny plik <code>.jm-settings-project-…json</code> z konsolą, MIDI, kombinacjami i intonacją.</p>
+<p>Format projektu pozostaje w wersji 1: istniejące projekty z dwoma źródłami otwierają się bez konwersji i zachowują swój UUID oraz cele głosów. Wspólne limity projektu to nadal <b>2 048 głosów</b>, 512 własnych połączeń, 64 strony konsoli, 16 używanych szafek ekspresji rzędów, 256 aktywnych komór powietrza i 4 096 sterowników wiatru. Liczby te dotyczą wszystkich źródeł razem. Przy wielu stronach konsoli stronę wybierasz z listy rozwijanej. Nagrany pogłos pozostaje słyszalny; nagrania suche lub bezpośrednie zwykle łączą się najlepiej. Zmienione lub brakujące źródła blokują ładowanie, dopóki ich ponownie nie sprawdzisz.</p>
+<p><b>Szafki ekspresji rzędów</b> z JM-ACOUSTICS są zachowane. Szafki z różnych źródeł działają niezależnie, także na tym samym manuale docelowym. Aktywnych może być najwyżej 16 faktycznie używanych szafek rzędów. Naucz pedały ekspresji w ustawieniach organów; przy ponownym załadowaniu każde przypisanie jest znów łączone z tą samą szafką źródła.</p>
+<p><b>Oddzielne sieci wiatru źródeł</b> zachowują własne komory, miechy, połączenia i zużycie powietrza przez piszczałki. Model JM-Orgue oblicza ich ciśnienie osobno dla każdej piszczałki źródła. Użyj <b>Układ wiatru zestawu</b> i załaduj projekt ponownie, aby włączyć lub wyłączyć te modele źródeł; zwykłe grupy wiatru sterują głosami bez sieci źródła. Łącznie jest najwyżej 256 aktywnych komór źródeł, 4 096 połączeń i 4 096 sterowników wiatru.</p>
+<p><b>Zawory wiatru źródeł</b> w Kreatorze organów pokazują obsługiwane przełączniki i ciągłe regulatory załadowanego projektu. Ich stany początkowe i ewentualne odwrócone przełączanie pochodzą z definicji źródła. Zawory głosów podążają za powiązanymi głosami projektu: jeśli włączony jest co najmniej jeden powiązany głos, przełącznik źródła jest włączony. Zawory samodzielne obsługujesz przełącznikiem lub suwakiem; <b>Stan początkowy</b> przywraca wartość ze źródła. Każda zmiana jest zapisywana w tym projekcie, zanim zmieni się stan audio. Jeśli zapis lokalny się nie powiedzie, zostaje poprzedni stan; jeśli nie da się zaktualizować tylko kopii obok projektu, pojawia się komunikat. Przy przenosinach zabierz własny plik ustawień.</p>
+<p><b>Automatyczne regulacje źródeł</b> podążają za całym łańcuchem sterowania: rozciągnięcie miecha, ciśnienie i przepływ mogą cofać zawory. Uwzględniane są przeniesienia bezpośrednie, opóźnienia Willisa, bezwładność, warunki i przełączniki progowe. Miech porusza się między swoimi granicami fizycznymi i reaguje na ciśnienie oraz zużycie. Elementy automatyczne i wyraźnie ukryte stałe źródeł są tylko do odczytu; przy wejściach obsługiwanych ręcznie przełącznik i suwak pozostają dostępne. Tożsamości źródeł oddzielają takie same identyfikatory pochodzące z różnych zestawów sampli.</p>
+<p>To nadal <b>model JM</b>, bez deklaracji identycznego działania jak Hauptwerk. Przeniesienia ciągłe używają wartości 0..127: najpierw ewentualne odwrócenie, potem przesunięcie i współczynnik, funkcja potęgowa i ograniczenie. Willis jest przybliżany wykładniczą stałą czasową, bezwładność – tłumioną sprężyną. Zawory obsługiwane ręcznie używają przejścia 10 ms. Poniżej 60% nominalnego niskiego ciśnienia źródła dźwięk stopniowo zanika. Brakujące dane sterownika, nieznana logika, czysto bezpośrednie pętle ciągłe, podwójne przeniesienia ciągłe, sprężyny miecha i wymuszone pozycje miecha blokują ładowanie, zanim aktywne organy zostaną zastąpione. Ostrzeżenia źródeł podają powód.</p>
+<p>Wybranego głosu, którego ten sam przełącznik źródła jest sterowany także przez automatyczną logikę źródła, nie można jeszcze powiązać z rejestracją projektu. Projekt jest wtedy odrzucany przed załadowaniem; rejestracja nie zmienia się po cichu.</p>
+<p>Osobne sterowanie nagranym przebiegiem tremolo pozostaje poza tą wersją. Zwykłe szafki ekspresji wiatrownic GO i różne grupy tremolo wymagają jeszcze osobnych manuałów docelowych; niezależne szafki rzędów JM-ACOUSTICS nie mają tego ograniczenia.</p>
 
 <!-- ============================================================ -->
 <h2 id="werkbalk">4. Pasek narz&#281;dzi</h2>
@@ -327,6 +352,8 @@
 <table>
   <tr><th style="width:22%">Klawisz</th><th>Funkcja</th></tr>
   <tr><td><kbd>F1</kbd> <kbd>F2</kbd> <kbd>F3</kbd></td><td>Organy, Ustawienia organ&oacute;w i Ustawienia og&oacute;lne.</td></tr>
+  <tr><td><kbd>F4</kbd></td><td>Otwórz Projektanta kontuaru (okno główne).</td></tr>
+  <tr><td><kbd>F5</kbd></td><td>Otwórz Kreatora organów: łącz głosy z jednego do 64 zestawów sampli.</td></tr>
   <tr><td><kbd>F11</kbd></td><td>Pe&#322;ny ekran (tryb sto&#322;u gry) w&#322;&#261;czony lub wy&#322;&#261;czony.</td></tr>
   <tr><td><kbd>Esc</kbd></td><td>Wyj&#347;cie z pe&#322;nego ekranu.</td></tr>
   <tr><td>Prawy przycisk lub 3 s przytrzymania</td><td>Na przycisku paska setzera: powi&#261;zanie tego przycisku z przyciskiem sto&#322;u gry (nauka MIDI).</td></tr>

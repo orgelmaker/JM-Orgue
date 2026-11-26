@@ -533,11 +533,11 @@ pub struct LearnedKeyboardRange {
     pub transpose: i8,
 }
 
-/// MIDI binding for a preset button
+/// MIDI message binding for an application action (setzer, stop, coupler, etc.).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MidiPresetBinding {
-    /// Preset number (1-8)
-    pub preset_num: u8,
+    /// Application action ID, independent of the 7-bit MIDI message values.
+    pub preset_num: u32,
     /// MIDI message type that triggers this preset
     pub trigger: MidiPresetTrigger,
 }
@@ -594,7 +594,7 @@ pub struct PresetCcGate {
     /// Per binding (preset, kanaal, controller, drempel) de laatst bekende
     /// stand. Ontbrekende sleutel = scherp en "lang stil", zodat de eerste
     /// flank altijd vuurt.
-    standen: std::collections::HashMap<(u8, Option<u8>, u8, u8), PresetCcStand>,
+    standen: std::collections::HashMap<(u32, Option<u8>, u8, u8), PresetCcStand>,
     /// Nulpunt van de gate-klok; alleen verschillen tussen berichten tellen.
     epoch: std::time::Instant,
 }
@@ -650,7 +650,7 @@ impl PresetCcGate {
     /// op de gate-klok (zie [`PresetCcGate::klok_ms`]).
     fn vuurt_op_flank(
         &mut self,
-        sleutel: (u8, Option<u8>, u8, u8),
+        sleutel: (u32, Option<u8>, u8, u8),
         drempel: u8,
         waarde: u8,
         nu_ms: u64,
@@ -1417,7 +1417,7 @@ pub enum MidiCommand {
     /// Returns the learned channel, first note, last note, and calculated transpose
     LearnKeyboardRange(String, u8, Sender<Option<LearnedKeyboardRange>>), // division name, first sample note (e.g. 36 for C)
     SetPresetBindings(Vec<MidiPresetBinding>),
-    LearnPresetBinding(u8, Sender<Option<MidiPresetTrigger>>), // preset number, returns learned trigger
+    LearnPresetBinding(u32, Sender<Option<MidiPresetTrigger>>), // application action ID, returns learned trigger
     /// Learn swell pedal binding: division name, division index, response
     LearnSwellPedal(String, u8, Sender<Option<SwellBinding>>),
     /// Clear swell pedal binding for a division
@@ -1571,9 +1571,9 @@ pub struct AppState {
     /// MIDI bindings for presets
     pub preset_bindings: Arc<RwLock<Vec<MidiPresetBinding>>>,
     /// Channel to notify frontend of preset triggers
-    pub preset_trigger_tx: Sender<u8>,
+    pub preset_trigger_tx: Sender<u32>,
     /// Receiver for preset triggers (frontend polls this)
-    pub preset_trigger_rx: Receiver<u8>,
+    pub preset_trigger_rx: Receiver<u32>,
     /// Currently active couplers
     pub active_couplers: Arc<RwLock<Vec<String>>>,
     /// Per-division gain for swell boxes (0.0-1.0, indexed by division order)
@@ -1603,6 +1603,15 @@ pub struct AppState {
     pub sampleset_download_annulering: Arc<RwLock<std::collections::HashSet<String>>>,
     /// Currently loaded organ ID (for saving settings on close)
     pub current_organ_id: Arc<RwLock<Option<String>>>,
+    /// Projectmodel dat werkelijk bij de geladen MIDI-routering hoort. De
+    /// projectfile kan al door de bouwer gewijzigd zijn vóór de autosave die
+    /// aan een herlaad voorafgaat; die nieuwe file is hier geen veilige bron.
+    pub project_midi_divisions: Arc<RwLock<Option<Vec<crate::organ_project::ProjectDivision>>>>,
+    /// Validated source wind graphs for diagnostics; the audio callback owns a
+    /// separately prepared runtime and never locks this metadata.
+    pub project_wind_plan: Arc<RwLock<Option<crate::windwerk_set::ProjectWindPlan>>>,
+    /// Standalone valve targets, isolated by source UUID and source control ID.
+    pub project_wind_controls: Arc<RwLock<std::collections::HashMap<String, f32>>>,
     /// Crescendo configuration: stages[i] = list of stop IDs that should be ON at stage i
     pub crescendo_stages: Arc<RwLock<Vec<Vec<String>>>>,
     /// Current crescendo stage (0 = off)
@@ -2047,7 +2056,7 @@ impl AppState {
         let (midi_tx, midi_rx) = bounded::<MidiCommand>(64);
 
         // Create channel for preset triggers (from MIDI thread to frontend)
-        let (preset_trigger_tx, preset_trigger_rx) = bounded::<u8>(16);
+        let (preset_trigger_tx, preset_trigger_rx) = bounded::<u32>(16);
 
         // BLE MIDI message channel: BLE thread → MIDI thread
         let (ble_message_tx, ble_message_rx) = bounded::<vpo_midi::MidiMessage>(1024);
@@ -2197,6 +2206,9 @@ impl AppState {
             sampleset_download_annulering: Arc::new(RwLock::new(std::collections::HashSet::new())),
             codm_random_stemming: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             current_organ_id: Arc::new(RwLock::new(None)),
+            project_midi_divisions: Arc::new(RwLock::new(None)),
+            project_wind_plan: Arc::new(RwLock::new(None)),
+            project_wind_controls: Arc::new(RwLock::new(std::collections::HashMap::new())),
             crescendo_stages,
             crescendo_stage,
             crescendo_enabled,
@@ -2303,7 +2315,7 @@ impl AppState {
         drawn_stops: Arc<RwLock<Vec<String>>>,
         midi_mappings: Arc<RwLock<Vec<MidiChannelMapping>>>,
         preset_bindings: Arc<RwLock<Vec<MidiPresetBinding>>>,
-        preset_trigger_tx: Sender<u8>,
+        preset_trigger_tx: Sender<u32>,
         active_couplers: Arc<RwLock<Vec<String>>>,
         division_gains: Arc<RwLock<Vec<f32>>>,
         swell_bindings: Arc<RwLock<Vec<SwellBinding>>>,
@@ -3670,7 +3682,7 @@ impl AppState {
     fn check_preset_trigger(
         msg: &MidiMessage,
         preset_bindings: &Arc<RwLock<Vec<MidiPresetBinding>>>,
-        preset_trigger_tx: &Sender<u8>,
+        preset_trigger_tx: &Sender<u32>,
         cc_gate: &mut PresetCcGate,
         nu_ms: u64,
     ) {
@@ -5008,6 +5020,10 @@ impl AppState {
             d.stops.iter().find(|s| s.id == stop_id).map(|s| (d.name.as_str(), s))
         }) else { return; };
 
+        // Also runs for MIDI crescendo and preset recall, even with no held key.
+        if o.id.to_ascii_lowercase().ends_with(".jmorgan") {
+            rt_send(tx, AudioCommand::SetProjectWindStop { stop_id: stop.internal_stop_id, drawn });
+        }
         let first = stop.first_midi_note as u32;
         let last = stop.last_midi_note as u32;
         if last < first { return; }
@@ -5253,6 +5269,10 @@ impl AppState {
         } else if !drawn && exists {
             stops.retain(|s| s != stop_id);
         }
+        drop(stops);
+        if let Some(id) = stop_id.strip_prefix("project_").and_then(|id| id.parse::<u32>().ok()) {
+            self.send_audio_command(AudioCommand::SetProjectWindStop { stop_id: id, drawn });
+        }
     }
 
     /// Automatisch MIDI-archief: lopende take geforceerd afsluiten en synchroon
@@ -5378,7 +5398,7 @@ impl AppState {
     }
 
     /// Learn MIDI binding for a preset (waits for next MIDI input)
-    pub fn learn_preset_binding(&self, preset_num: u8) -> Result<Option<MidiPresetTrigger>, String> {
+    pub fn learn_preset_binding(&self, preset_num: u32) -> Result<Option<MidiPresetTrigger>, String> {
         let (tx, rx) = bounded(1);
         self.midi_tx.send(MidiCommand::LearnPresetBinding(preset_num, tx))
             .map_err(|e| e.to_string())?;
@@ -5387,7 +5407,7 @@ impl AppState {
     }
 
     /// Clear all MIDI bindings for a specific action/preset number
-    pub fn clear_preset_bindings_for(&self, preset_num: u8) {
+    pub fn clear_preset_bindings_for(&self, preset_num: u32) {
         let mut bindings = self.preset_bindings.write();
         bindings.retain(|b| b.preset_num != preset_num);
         let updated = bindings.clone();
@@ -5416,7 +5436,7 @@ impl AppState {
 
     /// Verwijder één specifieke koppeling: de `index`-de binding (0-based)
     /// binnen de bindingen van deze actiecode.
-    pub fn remove_preset_binding_at(&self, preset_num: u8, index: usize) -> Result<(), String> {
+    pub fn remove_preset_binding_at(&self, preset_num: u32, index: usize) -> Result<(), String> {
         let mut bindings = self.preset_bindings.write();
         let pos = bindings.iter()
             .enumerate()
@@ -5432,7 +5452,7 @@ impl AppState {
     }
 
     /// Vervang één specifieke koppeling in-place (bewerken in de UI).
-    pub fn replace_preset_binding_at(&self, preset_num: u8, index: usize, new_binding: MidiPresetBinding) -> Result<(), String> {
+    pub fn replace_preset_binding_at(&self, preset_num: u32, index: usize, new_binding: MidiPresetBinding) -> Result<(), String> {
         let mut bindings = self.preset_bindings.write();
         if bindings.contains(&new_binding) {
             return Err("Deze MIDI-koppeling bestaat al".to_string());
@@ -5451,7 +5471,7 @@ impl AppState {
     }
 
     /// Poll for triggered presets (non-blocking)
-    pub fn poll_preset_trigger(&self) -> Option<u8> {
+    pub fn poll_preset_trigger(&self) -> Option<u32> {
         self.preset_trigger_rx.try_recv().ok()
     }
 

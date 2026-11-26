@@ -58,7 +58,7 @@ pub struct PresetData {
 /// Saved MIDI preset binding
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PresetBindingSaved {
-    pub preset_num: u8,
+    pub preset_num: u32,
     pub trigger_type: String, // "note", "cc", "program", "sysex", "ccbit"
     pub note: Option<u8>,
     pub channel: Option<u8>,
@@ -435,6 +435,19 @@ mod remote_layout_opslag_tests {
 pub struct OrganSettings {
     pub presets: HashMap<String, PresetData>,
     pub preset_bindings: Vec<PresetBindingSaved>,
+    /// Orgelprojecten: blijvend doel-ID -> runtime MIDI-actiecode bij opslaan.
+    /// Codes volgen de speelplanvolgorde; de doel-ID voorkomt dat een gewijzigde
+    /// dispositie een ingeleerde bediening aan een ander register/koppel bindt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_midi_actions: Option<HashMap<String, u32>>,
+    /// Geladen projectmodel ten tijde van de MIDI-opslag. Een bewust ingeleerde
+    /// override blijft alleen gelden zolang dezelfde blijvende divisie en haar
+    /// modelinstellingen ongewijzigd zijn.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_midi_divisions: Option<Vec<crate::organ_project::ProjectDivision>>,
+    /// Standalone source valve values; linked switches follow the registration.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub project_wind_controls: HashMap<String, f32>,
     pub swell_bindings: Vec<SwellBindingSaved>,
     pub midi_mappings: Vec<MidiMappingSaved>,
     #[serde(default)]
@@ -596,6 +609,12 @@ pub struct OrganSettings {
     /// de afstandsbediening gebruikt dezelfde defaults als het orgelscherm.
     #[serde(default)]
     pub remote_layout: Option<RemoteLayoutSaved>,
+    /// Portable visual console, scoped to the full organ definition ID.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    // Keep this opaque on disk: a newer or damaged console design must not
+    // prevent loading other settings, nor lose unknown fields during autosave.
+    // Only Consolebouwer's explicit Apply command validates/replaces the value.
+    pub console_layout: Option<serde_json::Value>,
 }
 
 /// The entire library

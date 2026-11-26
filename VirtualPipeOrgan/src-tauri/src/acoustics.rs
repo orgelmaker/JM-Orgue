@@ -523,6 +523,46 @@ pub fn enclosure_index_from_name(name: &str, summary: Option<&AcousticsSummaryDt
     s.enclosures.iter().find(|e| e.id == id).map(|e| ENCLOSURE_INDEX_BASE.saturating_add(e.slot))
 }
 
+/// Summarise an already compiled model without reading another source file.
+/// User organ projects share the source reader's validation and display rules.
+pub fn samenvatting(cfg: &AcousticsConfig, odf_stops: &HashMap<u32, Vec<usize>>) -> AcousticsSummaryDto {
+    let mut dto = AcousticsSummaryDto::default();
+    dto.format = cfg.format.clone();
+    dto.schema_version = cfg.schema_version;
+    if !cfg.activation.mode.is_empty() { dto.activation_mode = cfg.activation.mode.clone(); }
+    let v = valideer(&cfg, odf_stops);
+    dto.warnings = v.warnings.clone();
+    dto.ranks = cfg.ranks.len();
+    dto.ranks_in_enclosure = cfg.ranks.iter().filter(|x| x.enclosure_id.is_some()).count();
+    dto.pipe_bindings = cfg.pipe_bindings.len();
+    dto.bound_pipes = v.bound_pipes;
+    dto.audio_groups = cfg.audio_groups.len();
+    dto.mix_groups = cfg.mix_groups.len();
+    dto.outputs = cfg.outputs.len();
+    dto.effect_registers = cfg.sound_switches.iter().filter(|s| s.kind == "effect_register").count();
+    dto.unresolved_references = cfg.unresolved_references.len();
+    dto.impulse_responses = cfg.impulse_responses.iter().map(|ir| {
+        let vol = veilig_pad(&cfg.organ_dir, &ir.path).unwrap_or_default();
+        ImpulseResponseDto {
+            id: ir.id.clone(), name: ir.name.clone(),
+            path: vol.to_string_lossy().into_owned(),
+            channels: ir.wav.channels, sample_rate_hz: ir.wav.sample_rate_hz,
+            seconds: if ir.wav.sample_rate_hz > 0 { ir.wav.frames as f32 / ir.wav.sample_rate_hz as f32 } else { 0.0 },
+            exists: vol.is_file(),
+        }
+    }).collect();
+    let rank_slots: HashMap<&str, &str> = cfg.ranks.iter().filter_map(|x| x.enclosure_id.as_deref().map(|e| (x.id.as_str(), e))).collect();
+    dto.enclosures = cfg.enclosures.iter().take(MAX_ENCLOSURES).enumerate().map(|(i, e)| EnclosureDto {
+        id: e.id.clone(), name: e.name.clone(), slot: i as u8,
+        swell_name: format!("{}{}", ENCLOSURE_NAME_PREFIX, e.id),
+        ranks: rank_slots.values().filter(|k| **k == e.id).count(),
+        pipes: cfg.pipe_bindings.iter().filter(|b| rank_slots.get(b.source_rank_id.as_str()) == Some(&e.id.as_str())).count(),
+    }).collect();
+    if !v.errors.is_empty() { dto.error = Some(v.errors.join("; ")); }
+    else { dto.valid = true; }
+    dto
+}
+
 /// Laad en valideer de configuratie bij een orgeldefinitie. Geeft het model
 /// (alleen wanneer geldig) en altijd een samenvatting voor de UI; None, None
 /// wanneer het orgel geen `[JMOrgueAcoustics]`-sectie heeft.
@@ -548,44 +588,11 @@ pub fn laad_voor_odf(odf_path: &Path, odf_stops: &HashMap<u32, Vec<usize>>) -> (
         Err(e) => { dto.error = Some(format!("{} onleesbaar: {}", r.configuration_file, e)); warn!("Akoestische configuratie: {}", dto.error.as_deref().unwrap_or("")); return (None, Some(dto)); }
     };
     cfg.organ_dir = organ_dir.clone();
-    dto.format = cfg.format.clone();
-    dto.schema_version = cfg.schema_version;
-    if !cfg.activation.mode.is_empty() { dto.activation_mode = cfg.activation.mode.clone(); }
-    let v = valideer(&cfg, odf_stops);
-    dto.warnings = v.warnings.clone();
-    dto.ranks = cfg.ranks.len();
-    dto.ranks_in_enclosure = cfg.ranks.iter().filter(|x| x.enclosure_id.is_some()).count();
-    dto.pipe_bindings = cfg.pipe_bindings.len();
-    dto.bound_pipes = v.bound_pipes;
-    dto.audio_groups = cfg.audio_groups.len();
-    dto.mix_groups = cfg.mix_groups.len();
-    dto.outputs = cfg.outputs.len();
-    dto.effect_registers = cfg.sound_switches.iter().filter(|s| s.kind == "effect_register").count();
-    dto.unresolved_references = cfg.unresolved_references.len();
-    dto.impulse_responses = cfg.impulse_responses.iter().map(|ir| {
-        let vol = veilig_pad(&organ_dir, &ir.path).unwrap_or_default();
-        ImpulseResponseDto {
-            id: ir.id.clone(), name: ir.name.clone(),
-            path: vol.to_string_lossy().into_owned(),
-            channels: ir.wav.channels, sample_rate_hz: ir.wav.sample_rate_hz,
-            seconds: if ir.wav.sample_rate_hz > 0 { ir.wav.frames as f32 / ir.wav.sample_rate_hz as f32 } else { 0.0 },
-            exists: vol.is_file(),
-        }
-    }).collect();
-    let rank_slots: HashMap<&str, &str> = cfg.ranks.iter().filter_map(|x| x.enclosure_id.as_deref().map(|e| (x.id.as_str(), e))).collect();
-    dto.enclosures = cfg.enclosures.iter().take(MAX_ENCLOSURES).enumerate().map(|(i, e)| EnclosureDto {
-        id: e.id.clone(), name: e.name.clone(), slot: i as u8,
-        swell_name: format!("{}{}", ENCLOSURE_NAME_PREFIX, e.id),
-        ranks: rank_slots.values().filter(|k| **k == e.id).count(),
-        pipes: cfg.pipe_bindings.iter().filter(|b| rank_slots.get(b.source_rank_id.as_str()) == Some(&e.id.as_str())).count(),
-    }).collect();
-    if !v.errors.is_empty() {
-        dto.valid = false;
-        dto.error = Some(v.errors.join("; "));
+    let dto = samenvatting(&cfg, odf_stops);
+    if !dto.valid {
         warn!("Akoestische configuratie geweigerd ({}): {}", r.configuration_file, dto.error.as_deref().unwrap_or(""));
         return (None, Some(dto));
     }
-    dto.valid = true;
     info!(
         "Akoestische configuratie geladen: {} (schema {}, {}): {} zwelkasten, {} ranks ({} in een kast), {} van {} pijpbindingen passend, {} impulsresponsen, {} mengroutes, {} uitgangen, {} effectregisters; {} opmerkingen",
         cfg.format, cfg.schema_version, dto.activation_mode, dto.enclosures.len(), dto.ranks, dto.ranks_in_enclosure,

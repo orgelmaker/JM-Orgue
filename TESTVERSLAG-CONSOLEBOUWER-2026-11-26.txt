@@ -1,0 +1,127 @@
+JM-Orgue - visuele Consolebouwer
+26 november 2026
+
+Werkmap: C:\Bronbestanden\Prive\JM-Orgue-consolebouwer
+Branch: codex/consolebouwer
+Basis: 041dc854bbdc220b35b62fe1db523337399353bc (actuele master, versie 0.9.62)
+
+GEBOUWD
+- Consolebouwer-tab in het hoofdvenster, met F4.
+- Tijdelijke ontwerpversie met raster, slepen, toetsenbordplaatsing, positie,
+  formaat, tekst, kopieren, verwijderen, ongedaan maken en annuleren.
+- Registers, koppels en tekst; meerdere ontwerppagina's.
+- Acht knopvormen: klassieke, ivoorkleurige en houten registerwippers,
+  donkere en ivoorkleurige trekregisters, messing piston, theatertab en vlak.
+- Afwerkingen: notenhout, ivoor en donkere studio.
+- Acht textuurkeuzes, instelbare sterkte en schaal en eigen PNG/JPG/WebP.
+  De eigen afbeelding wordt ingebed opgeslagen, zonder afhankelijk bronpad.
+- Magnetische snaplijnen op randen en middelpunten, Alt voor vrije plaatsing,
+  een directe formaatgreep en een ruim werkvlak zonder zijpanelen.
+- Gedeelde renderer voor ontwerpen, voorbeeld en spelen.
+- Bestaande register- en koppelacties en MIDI-inleren in de speelweergave.
+- Zwelbediening, tremulanten en effectregisters blijven apart bereikbaar.
+- Veilige opslag per volledige orgeldefinitie: atomische lokale bibliotheek,
+  daarna een eigen zijbestand. Een mislukte zijbestandkopie wordt gemeld.
+- Bewaking van orgelwissels, autosave en vertraagde lees-/schrijfresultaten.
+- Beschadigde of toekomstige ontwerpen blijven bewaard; de standaardconsole
+  blijft bruikbaar. Het ontwerp kan bewust worden vervangen of uitgeschakeld.
+
+AUTOMATISCHE CONTROLES
+- Frontend: npm run build geslaagd. Bestaande toegankelijkheids- en
+  bundelgroottewaarschuwingen; nieuwe editorcomponenten compileren schoon.
+- Rust: cargo test -p vpo-app -p vpo-sampler -p vpo-audio -p vpo-core
+  -p jm-midimon -- --test-threads=1
+  Resultaat na de textuuruitbreiding: 941 geslaagd, 0 mislukt,
+  15 bestaande tests overgeslagen.
+- Elf gerichte Rusttests voor consoleformaat, texturen, ongeldige verwijzingen,
+  twee definities in een map, herstart, opslagfouten en behoud bij autosave.
+- Tien console_layout_test.mjs-tests geslaagd: stabiele bron-ID's,
+  onafhankelijke ontwerpen, schemavalidatie, verdwenen verwijzingen,
+  begrensde geometrie, meerdere pagina's, knopvormen en eigen rasterafbeeldingen.
+- Zes console_snap_test.mjs-tests geslaagd voor magneten, schaalafhankelijke
+  tolerantie, Alt, formaat wijzigen, begrenzing en onafhankelijke gegevens.
+- Drie aanvullende startoptie-/profieltests geslaagd, waaronder twee nieuwe
+  tests voor de uitsluitend met expliciet testprofiel toegestane achtergrondmodus.
+- audio_uitgang_test, register_volgorde_test en legacy_settings_test geslaagd.
+- Vertaalsleutelcontrole en bovenbalklengtecontrole voor zeven talen geslaagd.
+- De nieuwe functie is volledig vertaald in NL/EN. De overige vijf talen
+  gebruiken hiervoor voorlopig de Engelse teksten.
+
+DRAAIENDE APP - GEISOLEERD PROFIEL
+Testbuild:
+C:\Bronbestanden\Prive\JM-Orgue-consolebouwer\testen\consolebouwer-2026-11-26\app\vpo-app.exe
+Startopties:
+--test-api=18766 --test-data-dir C:\Bronbestanden\Prive\JM-Orgue-consolebouwer\testen\consolebouwer-2026-11-26\profile
+
+Fixtures: Console A.organ en Console B.organ in dezelfde orgels-map.
+Beide zijn kleine, zelf gegenereerde testinstrumenten met 12 registers,
+twee klavieren en een koppel, met een synthetisch C-sample.
+
+- Het live-testscript controleert eerst het echte appprofiel en testmarkers.
+- Ontwerp A opgeslagen zonder registratie, volume, MIDI of klank te wijzigen.
+- Verkeerde versie, buiten-pagina-posities, onbekend register, dubbele ID
+  en schrijven voor het verkeerde geladen orgel worden geweigerd.
+- Autosave behoudt een toegepast ontwerp en respecteert bewust wissen.
+- A en B behouden verschillende ontwerpen en afzonderlijke zijbestanden.
+- Na procesherstart: beide ontwerpen teruggelezen; A -> B -> A blijft apart.
+
+VISUELE CONTROLE IN HET ECHTE WINDOWS-VENSTER
+- F4 opent de echte Consolebouwer-tab.
+- Wipper A klik: de fysieke wipperstand en indicatie veranderen; API bevestigt
+  dat register 1_1 is geactiveerd.
+- Opnieuw indelen maakt een ontwerp met alle 12 registers en het koppel.
+- Slepen verplaatst Prestant naar X=968, Y=80; pijltjestoets rechts geeft X=976.
+- Tijdens het ontwerpen blijft de eerder opgeslagen versie met een bediening
+  bestaan, en de registratie blijft ongewijzigd.
+- Trekregisterstijl gekozen: ronde trekknop wordt zichtbaar.
+- Toepassen vanuit de editor schrijft 16 onderdelen (12 registers, 1 koppel,
+  3 titels) en de trekknop met X=976, Y=80 naar de backend.
+- F1 toont dit toegepaste ontwerp in de speelweergave.
+- Via de echte Windows-bestandskiezer is eigen-testtextuur.png gekozen.
+- Eigen afbeelding en bestandsnaam verschijnen in de editor; het paneel
+  toont de gekozen textuur. Toepassen meldt 'Opgeslagen voor dit orgel'.
+- De tekstuur is daarna zichtbaar op de speelweergave. De lokale test-API
+  bevestigt exact dezelfde PNG-bytes en de duurzame bibliotheekkopie.
+- Tien runtimecontroles slagen, inclusief afwijzen van SVG, foutieve
+  bestandssignatuur/base64, te grote afbeeldingen en ongeldige schaal/dekking,
+  steeds met behoud van beide geldige ontwerpen en de registratie.
+
+ACHTERGRONDTEST NA DE GUI-IMPORT
+Op verzoek zijn de verdere herstart- en orgelwisselcontroles zonder vensters,
+muis- of toetsenbordbediening uitgevoerd. Hiervoor is --test-headless toegevoegd;
+deze vlag vereist een actieve test-API en een expliciet absoluut testprofiel.
+
+Harness: VirtualPipeOrgan/testscripts/console_texture_background_test.py
+Werkmap: testen/consolebouwer-2026-11-26/achtergrond
+Resultaten in die werkmap: background-result.json en background-summary.txt.
+
+- Acht controles geslaagd, geen mislukkingen.
+- De via de GUI opgeslagen ontwerpen A/B komen overeen met hun afzonderlijke
+  oorspronkelijke zijbestanden.
+- Alleen de synthetische .organ- en .wav-bestanden worden naar een nieuwe
+  orgels-map gekopieerd. Er staat GEEN PNG in deze nieuwe map.
+- Eerste appproces PID 3008: A -> B -> A behoudt beide ontwerpen en de
+  ingebedde textuur exact. Het proces blijft ook na zes seconden beschikbaar.
+- Schrijven voor het verkeerde orgel en een ongeldige SVG worden geweigerd;
+  de hashes van bibliotheek en beide zijbestanden veranderen niet.
+- Eerste proces volledig beeindigd; tweede appproces PID 21196 gestart met
+  hetzelfde afzonderlijke profiel. A -> B -> A behoudt opnieuw exact dezelfde
+  ontwerpen en PNG-bytes; beide afzonderlijke zijbestanden blijven correct.
+- SHA256 ingebedde PNG:
+  45445992b585954048303c20cef8487f8dfd874e72d3c6202ddaac4c03296dce
+- Beide eigen achtergrondprocessen zijn na de test gestopt. De oorspronkelijke
+  GUI-ontwerpen en de originele PNG zijn niet gewijzigd door de achtergrondtest.
+- Dit bewijst opslag, herladen, procesherstart en scheiding van twee definities
+  in dezelfde map. De herstart is via de echte app/test-API gecontroleerd;
+  er is bij die laatste stap geen visuele vensterinspectie gedaan.
+
+OPENBARE INSPIRATIE
+Officiele Hauptwerk 10-preview: https://www.youtube.com/watch?v=gQMOCOcUYb0
+Werkelijke storyboardbeelden bekeken: registerbanken/wippers rond 13-18 s;
+houten panelen met ronde trekregisters rond 24-25 s. Eigen CSS en componenten;
+geen externe productafbeeldingen of code overgenomen.
+
+GRENZEN
+Deze eerste versie ontwerpt de bediening van een geladen orgel. Samplesets
+samenvoegen tot een nieuw instrument is een afzonderlijke vervolgfase.
+De wijzigingen zijn lokaal in de aparte werkmap; er is niets gepusht.

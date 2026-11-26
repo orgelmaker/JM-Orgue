@@ -209,8 +209,22 @@ pub(crate) fn voeg_windwerk_toe(v: &mut crate::import_report::ImportReport, def:
             None => extract_objects(xml, tabel),
         }
     };
-    let w = crate::windwerk::WindwerkDef::uit_tabellen(&lees("WindCompartment"), &lees("WindCompartmentLinkage"));
+    let laden = lees("WindCompartment");
+    let verbindingen = lees("WindCompartmentLinkage");
+    let mut w = crate::windwerk::WindwerkDef::uit_tabellen(&laden, &verbindingen);
     if w.is_leeg() { return; }
+    let switch_links = lees("SwitchLinkage");
+    let continuous_links = lees("ContinuousControlLinkage");
+    let double_links = lees("ContinuousControlDoubleLinkage");
+    let stage_switches = lees("ContinuousControlStageSwitch");
+    w.voeg_besturing_toe(&lees("Switch"), &lees("ContinuousControl"), &lees("Stop"), &[
+        ("SwitchLinkage", &switch_links),
+        ("ContinuousControlLinkage", &continuous_links),
+        ("ContinuousControlDoubleLinkage", &double_links),
+        ("ContinuousControlStageSwitch", &stage_switches),
+        ("WindCompartment", &laden),
+        ("WindCompartmentLinkage", &verbindingen),
+    ]);
     let mut met_verbruik = 0usize;
     let mut per_balg: HashMap<u32, Vec<String>> = HashMap::new();
     for m in &def.manuals {
@@ -227,6 +241,12 @@ pub(crate) fn voeg_windwerk_toe(v: &mut crate::import_report::ImportReport, def:
         }
     }
     v.melding(Ernst::Info, "windwerk", w.samenvatting(met_verbruik, &per_balg));
+    if !w.automation.cc_links.is_empty() || !w.automation.switch_links.is_empty() || !w.automation.outputs.is_empty() || !w.automation.stages.is_empty() {
+        v.melding(Ernst::Info, "windwerk", "Bronregeling wordt met het JM-model benaderd: continue overdracht in het bereik 0..127 (inversie, offset/factor, macht, begrenzing), exponentiële Willis-regeling en gedempte inertie. Fysieke terugkoppeling gebruikt een begrensde rekentik; schakelactie 7 behoudt de stand. Dit is geen claim van identieke Hauptwerk-modelwerking.");
+    }
+    for issue in &w.automation.issues {
+        v.melding(Ernst::Waarschuwing, "windwerk", issue.clone());
+    }
     v.windwerk = Some(w);
 }
 
@@ -3321,6 +3341,27 @@ mod tests {
         assert_eq!(stops.len(), 2);
         assert_eq!(stops[0].get_u32("StopID"), Some(1));
         assert_eq!(stops[1].get("Name").map(|s| s.as_str()), Some("B"));
+    }
+
+    #[test]
+    fn wind_report_keeps_authored_valves_when_compartments_are_missing() {
+        let def = mini_definition();
+        let xml = r#"<Hauptwerk>
+<ObjectList ObjectType="WindCompartmentLinkage"><WindCompartmentLinkage><FirstWindCompartmentID>1</FirstWindCompartmentID><SecondWindCompartmentID>2</SecondWindCompartmentID><ValveControlTypeCode>3</ValveControlTypeCode><ValveControllingContinuousControlID>9</ValveControllingContinuousControlID></WindCompartmentLinkage></ObjectList>
+<ObjectList ObjectType="ContinuousControl"><ContinuousControl><ControlID>8</ControlID><DefaultValue>127</DefaultValue></ContinuousControl><ContinuousControl><ControlID>9</ControlID></ContinuousControl></ObjectList>
+<ObjectList ObjectType="ContinuousControlLinkage"><ContinuousControlLinkage><SourceControlID>8</SourceControlID><DestControlID>9</DestControlID><LinkTypeCode>1</LinkTypeCode></ContinuousControlLinkage></ObjectList>
+</Hauptwerk>"#;
+        let mut report = crate::import_report::ImportReport::default();
+        voeg_windwerk_toe(&mut report, &def, xml);
+        let wind = report.windwerk.expect("authored linkage must survive absent compartments");
+        assert!(!wind.is_leeg());
+        assert!(wind.laden.is_empty());
+        assert_eq!(wind.verbindingen.len(), 1);
+        assert_eq!(wind.controls.len(), 2);
+        assert_eq!(wind.automation.cc_links.len(), 1);
+        let mut absent = crate::import_report::ImportReport::default();
+        voeg_windwerk_toe(&mut absent, &def, "<Hauptwerk/>");
+        assert!(absent.windwerk.is_none(), "ordinary definitions without authored wind stay unaffected");
     }
 
     #[test]

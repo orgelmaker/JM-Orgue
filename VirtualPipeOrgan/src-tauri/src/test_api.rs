@@ -264,18 +264,30 @@ fn serve_loop(
         // zodat een body zonder/met foutieve Content-Length nooit meer dan
         // 64 KiB in het geheugen trekt. Precies op de grens (64 KiB gelezen,
         // mogelijk afgekapt) → 413.
-        const BODY_MAX: u64 = 65_536;
+        // A saved project can contain a manifest for thousands of selected
+        // samples. Only this loopback test route gets the bounded larger body;
+        // the remote control whitelist keeps its existing limit.
+        let body_path = url.split('?').next().unwrap_or("");
+        let body_max: u64 = if scope == ApiScope::Test && matches!(body_path, "/project/save" | "/api/project/save") {
+            16 * 1024 * 1024
+        } else if scope == ApiScope::Test && matches!(body_path, "/settings/console_layout" | "/api/settings/console_layout") {
+            8 * 1024 * 1024
+        } else { 65_536 };
+        if request.body_length().is_some_and(|length| length as u64 >= body_max) {
+            let _ = request.respond(json_response(413, json!({ "error": format!("body te groot (max {} KiB)", body_max / 1024) })));
+            continue;
+        }
         let body = if matches!(method, tiny_http::Method::Post | tiny_http::Method::Put)
-            && request.body_length().unwrap_or(0) <= BODY_MAX as usize
+            && request.body_length().unwrap_or(0) <= body_max as usize
         {
             let mut s = String::new();
-            std::io::Read::take(request.as_reader(), BODY_MAX).read_to_string(&mut s).ok();
+            std::io::Read::take(request.as_reader(), body_max).read_to_string(&mut s).ok();
             s
         } else {
             String::new()
         };
-        if body.len() as u64 >= BODY_MAX {
-            let _ = request.respond(json_response(413, json!({ "error": "body te groot (max 64 KiB)" })));
+        if body.len() as u64 >= body_max {
+            let _ = request.respond(json_response(413, json!({ "error": format!("body te groot (max {} KiB)", body_max / 1024) })));
             continue;
         }
         // Bij scope Remote nooit de ruwe url loggen: die bevat het token.
@@ -530,6 +542,11 @@ fn route_test_only(
 ) -> Result<Value, (u16, String)> {
     let method_name = method_str(&method);
     match (method, path) {
+        // Read-only proof for fixture scripts; never exposed by Remote scope.
+        (tiny_http::Method::Get, "/test/profile") => Ok(json!({
+            "app_data_dir": state.app_data_dir.to_string_lossy(),
+            "process_id": std::process::id(),
+        })),
         (tiny_http::Method::Get, "/stops/drawn") => Ok(handle_drawn_stops(state)),
         // Setzer-oproep / General Cancel: hele registratie in één keer zetten
         // (zelfde kern als het Tauri-commando set_drawn_stops). Body {"ids":[..]}.
@@ -582,6 +599,90 @@ fn route_test_only(
             serde_json::to_value(dto).map_err(|e| (500u16, e.to_string()))
         }
         (tiny_http::Method::Post, "/load_organ") => handle_load_organ(state, body),
+        (tiny_http::Method::Post, "/project/source") => {
+            #[derive(serde::Deserialize)]
+            struct Source { path: String, #[serde(default)] package_root: Option<String> }
+            let request: Source = serde_json::from_str(body).map_err(|e| (400u16, e.to_string()))?;
+            crate::commands::inspect_organ_project_source_inner(state, &request.path, request.package_root.as_deref())
+                .and_then(|value| serde_json::to_value(value).map_err(|e| e.to_string())).map_err(|e| (400u16, e))
+        }
+        (tiny_http::Method::Post, "/project/read") => {
+            #[derive(serde::Deserialize)] struct Read { path: String }
+            let request: Read = serde_json::from_str(body).map_err(|e| (400u16, e.to_string()))?;
+            crate::organ_project::load_project(&request.path)
+                .and_then(|value| serde_json::to_value(value).map_err(|e| e.to_string())).map_err(|e| (400u16, e))
+        }
+        (tiny_http::Method::Post, "/project/save") => {
+            #[derive(serde::Deserialize)] struct Save { path: String, project: crate::organ_project::OrganProject }
+            let request: Save = serde_json::from_str(body).map_err(|e| (400u16, e.to_string()))?;
+            crate::commands::save_organ_project_inner(state, &request.path, request.project)
+                .and_then(|value| serde_json::to_value(value).map_err(|e| e.to_string())).map_err(|e| (400u16, e))
+        }
+        (tiny_http::Method::Get, "/project/wind") => {
+            let plan = state.project_wind_plan.read();
+            Ok(match plan.as_ref() {
+                Some(plan) => json!({"nodes": plan.nodes, "links": plan.links, "pipe_count": plan.pipes.len(),
+                    "controls": plan.controls, "control_values": crate::audio::project_wind_control_values(),
+                    "valve_openings": crate::audio::project_wind_valve_openings(), "link_flows": crate::audio::project_wind_link_flows(),
+                    "bellows_extensions": crate::audio::project_wind_bellows_extensions(),
+                    "bellows_positions": crate::audio::project_wind_bellows_positions(),
+                    "bellows_velocities": crate::audio::project_wind_bellows_velocities(),
+                    "model_time_seconds": crate::audio::project_wind_model_time_seconds(),
+                    "control_tick_count": crate::audio::project_wind_control_tick_count(),
+                    "warnings": plan.warnings, "source_model_requested": state.orgel_vlaggen.read().windwerk_van_set,
+                    "pressure_ratios": crate::audio::project_wind_pressure_ratios()}),
+                None => json!({"nodes": [], "links": [], "controls": [], "control_values": [], "valve_openings": [], "link_flows": [],
+                    "bellows_extensions": [], "bellows_positions": [], "bellows_velocities": [],
+                    "model_time_seconds": crate::audio::project_wind_model_time_seconds(),
+                    "control_tick_count": crate::audio::project_wind_control_tick_count(),
+                    "pipe_count": 0, "warnings": [], "pressure_ratios": crate::audio::project_wind_pressure_ratios()}),
+            })
+        }
+        (tiny_http::Method::Get, "/project/wind/controls") => {
+            let id = state.current_organ_id.read().clone().ok_or((409u16, "Geen orgel geladen".to_string()))?;
+            crate::commands::get_project_wind_controls_inner(state, &id).map_err(|error| (400u16, error))
+        }
+        (tiny_http::Method::Post, "/project/wind/control") => {
+            #[derive(serde::Deserialize)] struct Control { organ_id: Option<String>, control_id: String, value: f32 }
+            let request: Control = serde_json::from_str(body).map_err(|error| (400u16, error.to_string()))?;
+            let id = request.organ_id.or_else(|| state.current_organ_id.read().clone())
+                .ok_or((409u16, "Geen orgel geladen".to_string()))?;
+            crate::commands::set_project_wind_control_inner(state, &id, &request.control_id, request.value)
+                .and_then(|result| serde_json::to_value(result).map_err(|error| error.to_string()))
+                .map_err(|error| (400u16, error))
+        }
+        (tiny_http::Method::Post, "/settings/import") => {
+            #[derive(serde::Deserialize)] struct Import { path: String, organ_id: String }
+            let request: Import = serde_json::from_str(body).map_err(|error| (400u16, error.to_string()))?;
+            crate::commands::import_settings_inner(state, &request.path, &request.organ_id)
+                .and_then(|settings| serde_json::to_value(settings).map_err(|error| error.to_string()))
+                .map_err(|error| (400u16, error))
+        }
+        (tiny_http::Method::Post, "/project/wind/enabled") => {
+            #[derive(serde::Deserialize)] struct Toggle { enabled: bool }
+            let request: Toggle = serde_json::from_str(body).map_err(|e| (400u16, e.to_string()))?;
+            state.send_audio_command(crate::audio::AudioCommand::SetProjectWindEnabled(request.enabled));
+            Ok(json!({"enabled": request.enabled, "temporary": true}))
+        }
+        (tiny_http::Method::Get, "/test/preset_bindings") => Ok(json!({"bindings": state.get_preset_bindings().iter()
+            .map(crate::commands::preset_binding_to_saved).collect::<Vec<_>>()})),
+        (tiny_http::Method::Post, "/test/preset_bindings") => {
+            #[derive(serde::Deserialize)] struct Bindings { bindings: Vec<crate::library::PresetBindingSaved> }
+            let request: Bindings = serde_json::from_str(body).map_err(|e| (400u16, e.to_string()))?;
+            let current = state.loaded_organ_info.read();
+            let organ = current.as_ref().ok_or((409u16, "Geen orgel geladen".to_string()))?;
+            let targets: std::collections::HashSet<u32> = organ.divisions.iter().flat_map(|d| d.stops.iter().map(|s| s.midi_action_code))
+                .chain(organ.couplers.iter().flatten().map(|c| c.midi_action_code)).collect();
+            if request.bindings.iter().any(|binding| binding.preset_num >= 100 && !targets.contains(&binding.preset_num)) {
+                return Err((400u16, "MIDI-doel bestaat niet in dit orgel".to_string()));
+            }
+            let bindings = request.bindings.iter().map(crate::commands::saved_to_preset_binding)
+                .collect::<Result<Vec<_>, _>>().map_err(|error| (400u16, error))?;
+            drop(current);
+            state.set_preset_bindings_replace(bindings);
+            Ok(json!({"ok": true}))
+        }
+        (tiny_http::Method::Get, "/test/preset_triggers") => Ok(json!({"triggers": state.preset_trigger_rx.try_iter().collect::<Vec<_>>()})),
         // Annulering van een lopende orgelload (CODM-plan A4).
         (tiny_http::Method::Post, "/load_organ/cancel") => {
             state.load_annulering.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -743,6 +844,10 @@ fn route_test_only(
         (tiny_http::Method::Post, "/midi/record/save") => handle_midi_record_save(state, body),
         (tiny_http::Method::Post, "/midi/inject") => handle_midi_inject(state, query),
         (tiny_http::Method::Post, "/midi/mapping") => handle_midi_mapping(state, body),
+        (tiny_http::Method::Get, "/midi/mapping") => Ok(json!({"mappings": state.get_midi_mappings().iter().map(|m| json!({
+            "division": m.division, "channel": m.channel, "transpose": m.transpose,
+            "first_midi_note": m.first_midi_note, "last_midi_note": m.last_midi_note, "short_octave": m.short_octave,
+        })).collect::<Vec<_>>()})),
         (tiny_http::Method::Get, "/held_notes") => Ok(handle_held_notes(state)),
         // Generaal crescendo + zwelkast (meetplan zwel/crescendo)
         (tiny_http::Method::Get, "/crescendo") => Ok(handle_crescendo_get(state)),
@@ -806,6 +911,18 @@ fn route_test_only(
         (tiny_http::Method::Post, "/tremulant") => handle_tremulant(state, query),
         (tiny_http::Method::Post, "/settings/save") => Ok(handle_settings_save(state)),
         (tiny_http::Method::Get, "/settings/organ") => Ok(handle_settings_organ(state)),
+        (tiny_http::Method::Get, "/settings/console_layout") => {
+            let id: String = parse_query(query, "organ_id").ok_or((400u16, "organ_id ontbreekt".to_string()))?;
+            crate::commands::get_console_layout_inner(state, &id)
+                .map(|layout| json!({ "layout": layout })).map_err(|e| (400u16, e))
+        }
+        (tiny_http::Method::Post, "/settings/console_layout") => {
+            #[derive(serde::Deserialize)]
+            struct ApplyLayout { organ_id: String, layout: Option<crate::console_layout::ConsoleLayout> }
+            let request: ApplyLayout = serde_json::from_str(body).map_err(|e| (400u16, e.to_string()))?;
+            crate::commands::set_console_layout_inner(state, &request.organ_id, request.layout)
+                .map(|result| json!({ "ok": true, "warning": result.warning })).map_err(|e| (400u16, e))
+        }
         (tiny_http::Method::Get, "/settings/mirror") => Ok(handle_settings_mirror(state)),
         // Gestapelde ranks en microfoonperspectieven (0.7.38)
         (tiny_http::Method::Get, "/perspectives") => Ok(handle_perspectives(state)),
@@ -827,7 +944,7 @@ fn route_test_only(
 /// 0-9 cijfers, 10 SET, 11 GC, 12 −1, 13 +1, 14 −10, 15 +10, 16-23 M1-M8,
 /// 24+i tremulant van divisie i (alleen bestaande divisies), 40 EQ aan/uit,
 /// 41 crescendo aan/uit, 43 profielwissel. 42 (computer afsluiten) en ≥44 nooit.
-fn allowed_action_code(code: u8, n_divisions: usize) -> bool {
+fn allowed_action_code(code: u32, n_divisions: usize) -> bool {
     match code {
         0..=23 => true,
         24..=39 => ((code - 24) as usize) < n_divisions,
@@ -839,7 +956,7 @@ fn allowed_action_code(code: u8, n_divisions: usize) -> bool {
 /// POST /action/{code}: als een MIDI-piston via het preset-trigger-kanaal
 /// (SetzerBar leegt het elke 100 ms in het hoofdvenster).
 fn handle_action(state: &AppState, code_str: &str) -> Result<Value, (u16, String)> {
-    let code: u8 = code_str.parse().map_err(|_| (400u16, format!("Ongeldige actiecode: {}", code_str)))?;
+    let code: u32 = code_str.parse().map_err(|_| (400u16, format!("Ongeldige actiecode: {}", code_str)))?;
     let n_div = state.loaded_organ_info.read().as_ref().map(|o| o.divisions.len()).unwrap_or(0);
     if !allowed_action_code(code, n_div) {
         return Err((403u16, "actie niet toegestaan via de afstandsbediening".to_string()));
@@ -2398,7 +2515,7 @@ fn handle_settings_save(state: &AppState) -> Value {
     // Behoud bestaande presets (do_save_organ_settings overschrijft het preset-veld).
     let organ_id = state.current_organ_id.read().clone();
     let presets = organ_id.as_ref()
-        .and_then(|id| state.organ_library.read().settings.get(id).map(|s| s.presets.clone()))
+        .and_then(|id| crate::commands::instellingen_uit_bibliotheek(state, id).map(|s| s.presets))
         .unwrap_or_default();
     crate::commands::do_save_organ_settings(state, presets);
     json!({ "ok": true })
@@ -2409,8 +2526,7 @@ fn handle_settings_organ(state: &AppState) -> Value {
         Some(id) => id,
         None => return json!({ "loaded": false }),
     };
-    let lib = state.organ_library.read();
-    match lib.settings.get(&organ_id) {
+    match crate::commands::instellingen_uit_bibliotheek(state, &organ_id) {
         Some(s) => serde_json::to_value(s).unwrap_or_else(|_| json!({})),
         None => json!({ "loaded": true, "settings": null }),
     }
@@ -2554,7 +2670,7 @@ mod tests {
 
     #[test]
     fn allowed_action_codes() {
-        for c in 0..=23u8 {
+        for c in 0..=23u32 {
             assert!(allowed_action_code(c, 0), "code {} moet altijd mogen", c);
         }
         assert!(allowed_action_code(24, 1));

@@ -1,0 +1,198 @@
+JM-ORGUE — UITBREIDING ORGELBOUWER
+26 november 2026
+
+Werkmap: C:\Bronbestanden\Prive\JM-Orgue-consolebouwer
+Branch: codex/consolebouwer
+Executable: C:\Bronbestanden\Prive\JM-Orgue\VirtualPipeOrgan\target\debug\vpo-app.exe
+
+UITBREIDING
+
+De Orgelbouwer ondersteunt nu maximaal 2.048 registers en 512 eigen koppels.
+De console kan 64 pagina's bevatten, met maximaal 4.096 onderdelen in totaal.
+Bij meer dan acht pagina's staat een paginakeuzelijst in de console. Automatisch
+indelen behoudt ook register 2.048 en koppel 512; er worden geen doelen afgekapt.
+
+De gekozen registerlimiet ligt boven de 852 sprekende registerbedieningen en
+1.235 totale stoptoetsen die HORC opgeeft voor het Midmer-Losh-orgel in Boardwalk
+Hall. Pijpregisters, ranks en bedieningen zijn verschillende tellingen; 2.048 is
+een softwarecapaciteit met marge, geen bewering dat dat orgel 2.048 ranks heeft.
+Primaire bron: https://www.boardwalkorgans.org/midmerlosh
+
+Interne MIDI-acties gebruiken nu u32. Ruwe MIDI-noten, controllers, kanalen en
+berichten blijven gewone MIDI-bytes. Projectregisters en koppels hebben gescheiden
+adresruimten; SetzerBar en Console zoeken op de exacte doelcode. Oude opgeslagen
+projectbindingen worden via hun blijvende register-/koppel-ID herleid. De bestaande
+functiecodes blijven behouden. Leenpijpen en register-/koppelbronnummers boven 999
+worden ook in GrandOrgue-definities ingelezen.
+
+RANKZWELKASTEN
+
+JM-ACOUSTICS-kasten krijgen een brongebonden naamruimte. Twee bronnen met dezelfde
+kast- en rank-ID blijven onafhankelijk, ook op hetzelfde doelmanuaal. Iedere
+uiteindelijke projectpijp/laag behoudt haar kastbinding, inclusief een geleende
+donorpijp en het promoveren van een gekozen opnamepositie naar de primaire laag.
+
+Alleen werkelijk gebruikte kasten worden meegenomen. De bestaande audiokern kan
+16 rankkasten actief verwerken; een project dat meer nodig heeft wordt vóór de
+orgelwissel duidelijk geweigerd. Instellingen en ingeleerde kastpedalen worden op
+de blijvende kastnaam herleid, zodat een verschoven numeriek slot geen andere
+kast bedient. De namen in het scherm vermelden ook het bronorgel.
+
+Gewone GO-windchestzwelkasten en tremulantgroepen houden hun eerdere groepslogica.
+Verschillende zulke groepen vragen nog aparte doelmanualen. Deze uitbreiding
+voegt geen model voor meerdere geneste kasten per pijp toe.
+
+BRONWINDNETWERKEN
+
+De broncompartimenten, balggegevens, verbindingen en pijpverbruiken worden als
+afzonderlijke bronnetwerken gecompileerd. Gelijke compartimentnummers uit twee
+bronnen worden niet samengevoegd. De audiokern gebruikt de druk van de eigen
+bronpijp in plaats van alle bronregisters op één doelmanual aan één windgroep
+toe te wijzen. Release-opnamen erven de klankafwijking, maar trekken geen nieuwe
+wind. Oude bronmodellen worden bij een orgelwissel gewist.
+
+Dit is een JM-Orgue-benadering met de ingelezen bronparameters. De berekening
+gebruikt nominale druk, compartimentvolume, balgoppervlak/massa/slag/demping,
+verbindingstroming en de drukreferentie van het pijpverbruik. Een begrenzing van
+massatransport voorkomt numerieke overshoot voorbij gelijke druk.
+
+De huidige importer geeft regelkleppen niet met hun dynamische besturings-ID door.
+Zulke verbindingen worden statisch open gesimuleerd. Dit staat in het bronoverzicht
+en het importverslag; er wordt geen identieke Hauptwerk-windsimulatie beloofd.
+Ontbrekende pijpreferentiedruk gebruikt de nominale bronlagedruk met een melding.
+Er kunnen maximaal 256 compartimenten en 4.096 verbindingen in een project staan.
+
+Gebruik 'Windwerk van de set' en herlaad het project voor de bronwindmodellen.
+De gewone windgroepsinstellingen regelen registers zonder bronnetwerk. De frontend
+herkent .jmorgan ook bij herladen en wisselen van audio-uitgang als projectbestand.
+Aparte opgenomen tremulant-golfvormbesturing blijft buiten deze uitbreiding.
+
+VEILIGE OPSLAG
+
+Het bestaande .jmorgan-projectformaat, de project-UUID, bronvingerafdrukken,
+audiomanifesten en UUID-instellingen blijven behouden. Bronnen worden niet
+gewijzigd of naar het project gekopieerd. Bronanalyse en alle nieuwe kast-/wind-
+plannen worden gevalideerd voordat de audiobundel wordt gepubliceerd. DSP-kaarten
+en opslag worden buiten de realtime callback voorbereid.
+
+VERIFICATIE
+
+De laatste volledige Rustronde heeft 1.003 geslaagde tests, nul mislukkingen en
+15 bestaande genegeerde tests/benchmarks. De frontendbuild en de applicatiebuild
+slagen. Bestaande waarschuwingen over ongebruikte code en grote frontendchunks
+blijven aanwezig.
+
+JavaScript: 9 Orgelbouwer-, 11 Consolelayout-, 6 snaplijn- en 3 MIDI-actietests
+geslaagd. De automatische layout bevat alle 2.048 registers plus 512 koppels.
+Vertaalsleutels en bovenbalk-labelgrenzen zijn in alle zeven talen gecontroleerd.
+
+Headless browser: 10 herhaalde Orgelbouwer-/headercontroles en 5 MIDI-/console-
+controles slagen, zonder page errors. De laatste omvat werkelijk klikken op
+register 2.048 en koppel 512 op hun juiste consolepagina, en het afhandelen van
+hun hoge MIDI-acties via SetzerBar. Deze interfaceproeven gebruiken gemockte IPC;
+de echte backend en audio worden afzonderlijk in de app getest.
+
+De exacte resultaten van de laatste app-proeven en metingen staan hieronder.
+
+Rankkasten en grote dispositie — 11 controles geslaagd
+
+Twee synthetische bronnen met dezelfde rank-/kast-ID stonden in dezelfde map.
+Hun registers stonden op hetzelfde doelmanuaal. Zes echte app-opnamen tonen:
+    A open:              RMS 0,00077603
+    A dicht:             RMS 0,00005539 (circa 7,1% van open)
+    B open:              RMS 0,00090021
+    B met A dicht:       RMS 0,00090021 (ongewijzigd)
+    B dicht:             RMS 0,00006529 (circa 7,3% van open)
+    A met B dicht:       RMS 0,00077187 (circa 0,54% verschil met open)
+Er waren nul gemelde verloren opnameframes. Beide kastpedalen en het ontwerp
+werden afzonderlijk opgeslagen en na een volledige procesherstart hersteld.
+
+Twee andere synthetische brondefinities bevatten ieder 1.024 registerdefinities.
+Alle 2.048 registers verschenen in één geladen project, met 2.048 unieke doelen
+en 2.048 unieke MIDI-acties (65.537 tot en met 67.584). Het eerste en laatste
+register startten werkelijk samplervoices. De volledige console met 2.048
+bedieningen, verdeeld over 43 pagina's, werd toegepast, opgeslagen en na een
+herstart exact herladen. Via de echte MIDI-injectielus werden de opgeslagen
+bindingen voor het eerste en laatste register gecontroleerd, ook na herstart.
+Alle brondefinities, samples en akoestische JSON bleven byte-identiek.
+
+Deze schaalproef gebruikt gedeelde synthetische audiobestanden. Hij bewijst de
+register-, opslag-, console- en MIDI-capaciteit; hij is geen prestatiemeting met
+alle unieke samples en het volle werk van het fysieke Boardwalk Hall-orgel.
+
+Bronwindnetwerken — 10 controles geslaagd
+
+Twee leesbare Hauptwerk-testdefinities hadden dezelfde broncompartimentnummers
+en pakket-ID's, maar afzonderlijke pakketroots. Beide registers stonden op
+hetzelfde doelmanuaal. Drukverhoudingen uit de actieve audiokern:
+    alleen A belast:       A 0,961542, B 1,000000
+    alleen B belast:       A 1,000000, B 0,961542
+    beide losgelaten:      A 1,000000, B 1,000000
+De belastingmetingen liggen binnen 0,00001 van het analytische evenwicht 1/1,04.
+Herstel, live uit-/inschakelen, onafhankelijke bronidentiteit en een volledige
+procesherstart slagen. Laden van een gewoon GO-orgel wist het bronwindplan en
+de drukdiagnostiek volledig. De beperking voor dynamische regelkleppen is zowel
+in de broninspectie als de geladen winddiagnostiek gecontroleerd. Bronbestanden,
+pakketmarkers en samples zijn ongewijzigd gebleven.
+
+Bestaande Orgelbouwer — 19 controles opnieuw geslaagd
+
+Opslaan, herladen, twee definities in dezelfde map, bronstemming, celestezweving,
+de kanaalwijziging versus late autosave, consolekoppelingen bij herschikken,
+afwijzen van gewijzigde/ontbrekende bronnen en reset naar een gewoon orgel
+slagen opnieuw. De zeven referentietoonopnamen bevatten audio en behouden de
+verwachte toonhoogte. Beide eigen app-processen zijn na afloop gestopt.
+
+Geïnstalleerde bronnen — 5 controles geslaagd
+
+Het voorheen uitgesloten 'Bw: Baarpijp 8' uit Kam 1859/Grote Kerk Dordrecht is
+compleet met 54 pijpbindingen en zijn actieve Bovenwerk-rankzwelkast samen geladen
+met 'Prestant 8' uit de Amsterdam Oude Kerk-proefconversie (51 toetsen).
+De kast verschijnt met de bronnaam, één rank en 54 pijpen in de geldige
+akoestische samenvatting. MIDI-kanalen en volledige toetsbereiken kloppen.
+Definities en alle bestaande .jm-settings*-bestanden bij beide bronsets zijn
+voor/na op hash vergeleken en ongewijzigd. In deze bronleesproef zijn geen noten
+gespeeld; de bronnen blijven in oorspronkelijke stemming.
+
+Voorbeeldproject met een echte rankzwelkast:
+C:\Bronbestanden\Prive\JM-Orgue-consolebouwer\testen\orgelbouwer-2026-11-26\installed-3-rank\Geinstalleerde bronnen.jmorgan
+
+De definitieve proefprocessen zijn allemaal gestopt:
+- rankkasten/schaal: 21240 en 8388;
+- bronwind: 42104 en 32128;
+- bestaande functionaliteit: 34596 en 17892;
+- geïnstalleerde bronsets: 15952.
+
+Bewijsbestanden:
+- rust-tests.txt en rust-build.txt: laatste volledige Rustronde en executable.
+- frontend-build.txt: frontendbuild.
+- midi-ui/result.json en builder-ui/result.json: headless interfacecontroles.
+- advanced-2/advanced-result.json: rankkastopnamen, 2.048-registerproef en herstart.
+- wind-4/wind-result.json: onafhankelijke winddruk, herstel en herstart.
+- ../orgelbouwer-2026-11-26/run-3/background-result.json: 19 regressiecontroles.
+- ../orgelbouwer-2026-11-26/installed-3-rank/installed-result.json: echte bronnen.
+
+git diff --check slaagt; Git meldt alleen bestaande LF/CRLF-normalisatie van
+gegenereerde Tauri-schema's. Er zijn geen productieprofielen of gebruikersvensters
+gewijzigd. Alle app-processen zijn via hun eigen procesobject beheerd en gestopt.
+De proeven gebruiken gemarkeerde synthetische fixtures, afzonderlijke profielen en
+eigen headless processen. De browserproeven gebruiken headless Chrome met gemockte
+IPC. Er worden geen gebruikersvensters, invoerapparaten of productieprofielen bediend.
+
+Artefacten staan onder:
+C:\Bronbestanden\Prive\JM-Orgue-consolebouwer\testen\orgelbouwer-uitbreiding-2026-11-26
+
+Belangrijkste code:
+- VirtualPipeOrgan/src-tauri/src/organ_project.rs
+- VirtualPipeOrgan/src-tauri/src/acoustics.rs
+- VirtualPipeOrgan/src-tauri/src/windwerk_set/project.rs
+- VirtualPipeOrgan/src-tauri/src/audio.rs
+- VirtualPipeOrgan/src-tauri/src/commands.rs
+- VirtualPipeOrgan/src-tauri/src/state.rs en library.rs
+- VirtualPipeOrgan/vpo-sampler/src/grandorgue.rs
+- VirtualPipeOrgan/ui/src/lib/midiActions.js en consoleLayout.js
+- VirtualPipeOrgan/ui/src/components/ConsoleSurface.svelte en SetzerBar.svelte
+
+De eerdere TESTVERSLAG-ORGELBOUWER-2026-11-26.txt beschrijft de eerste versie met
+106 registers en uitgesloten rankkasten. Bovenstaande uitbreiding vervangt die
+oude capaciteits- en rankkastbeperkingen.

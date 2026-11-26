@@ -1194,7 +1194,8 @@ impl OdfParser {
         let mut stops = Vec::new();
 
         for (section_name, section) in &self.sections {
-            if section_name.starts_with("Stop") && section_name.len() == 7 {
+            if section_name.starts_with("Stop") && section_name.len() >= 7
+                && section_name[4..].bytes().all(|byte| byte.is_ascii_digit()) {
                 if let Ok(id) = section_name[4..].parse::<u32>() {
                     // Modern GrandOrgue: a stop references one or more [RankNNN]
                     // sections that hold the pipes. Older/simple ODFs list the pipes
@@ -1898,7 +1899,8 @@ impl OdfParser {
         let mut couplers = Vec::new();
 
         for (section_name, section) in &self.sections {
-            if section_name.starts_with("Coupler") && section_name.len() == 10 {
+            if section_name.starts_with("Coupler") && section_name.len() >= 10
+                && section_name[7..].bytes().all(|byte| byte.is_ascii_digit()) {
                 if let Ok(id) = section_name[7..].parse::<u32>() {
                     couplers.push(CouplerDef {
                         number: id,
@@ -2362,6 +2364,27 @@ pub fn panel_image_path(odf_path: &Path) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn large_stop_and_coupler_numbers_are_preserved_in_the_disposition() {
+        let mut parser = OdfParser { sections: HashMap::new(), base_path: PathBuf::from("."),
+            zoeker: crate::padzoek::PadZoeker::nieuw(), koppels_volgen: true };
+        let mut ini = String::from("[Organ]\nChurchName=Large\nNumberOfManuals=1\nHasPedals=N\n[Manual001]\nName=Great\nNumberOfLogicalKeys=1\nNumberOfAccessibleKeys=1\nFirstAccessibleKeyMIDINoteNumber=69\nNumberOfStops=3\nStop001=999\nStop002=1000\nStop003=1024\nNumberOfCouplers=1\nCoupler001=1000\n");
+        for id in [999, 1000, 1024] {
+            ini.push_str(&format!("[Stop{id:03}]\nName=Register {id}\nNumberOfLogicalPipes=1\nPipe001=tone.wav\n"));
+        }
+        ini.push_str("[Coupler1000]\nName=Octave\nDestinationManual=1\nDestinationKeyshift=12\n[Stop1000metadata]\nName=Ignore\n[Coupler1000metadata]\nName=Ignore\n");
+        parser.parse_ini(&ini).unwrap();
+        let definition = parser.build_organ_definition().unwrap();
+        let mut ids = definition.stops.iter().map(|stop| stop.id).collect::<Vec<_>>(); ids.sort_unstable();
+        assert_eq!(ids, vec![999, 1000, 1024]);
+        assert_eq!(definition.manuals[0].stop_ids, vec![999, 1000, 1024]);
+        assert_eq!(definition.couplers.len(), 1);
+        assert_eq!(definition.couplers[0].number, 1000);
+        // GrandOrgue records the source through the manual's references;
+        // source_manual is only populated directly by the Hauptwerk importer.
+        assert_eq!(definition.manuals[0].coupler_ids, vec![1000]);
+    }
 
     #[test]
     fn oud_formaat_met_inline_commentaar_geeft_registers() {

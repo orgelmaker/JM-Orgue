@@ -66,6 +66,16 @@ JM-Orgue is een professionele virtuele pijporgel-applicatie die het opneemt tege
 - **Baskoppel** (alleen laagste noot)
 
 ### 🎨 UI/UX
+- **Visuele Consolebouwer** — eigen pagina's met versleepbare registers, koppels en tekst; magnetische uitlijnhulpen, direct formaat aanpassen, ongedaan maken en een voorbeeldweergave
+- **Acht bedieningsvormen** — registerwippers in drie uitvoeringen, donkere of ivoren trekregisters, messing pistons, gebogen theatertabs en vlakke knoppen
+- **Materialen en eigen texturen** — hout, linnen, geborsteld metaal of een eigen afbeelding; stel de textuursterkte en grootte in. Een eigen afbeelding wordt met het ontwerp bewaard
+- **Consoleontwerp veilig per orgel** — wijzigingen pas bewaren met Toepassen; afzonderlijke opslag voor definities in dezelfde map en de bestaande standaardconsole als alternatief
+- **Orgelbouwer (F5)** — tot 2.048 registers uit één tot 64 ondersteunde samplesets in een eigen `.jmorgan`-project, met eigen manualen/pedaal, stemming en pakketmap per bron en een console via Consolebouwer. Begin met één bronkaart en voeg bronnen toe; bij meer dan vier bronnen kies je het bronorgel voor registers via een keuzelijst. Bronletters lopen na Z door met AA, AB, enzovoort. Bestaande projecten met twee bronnen blijven formaatversie 1 gebruiken. Onafhankelijke rankzwelkasten en bronwindnetwerken blijven behouden binnen de gezamenlijke projectgrenzen: 16 gebruikte rankkasten, 256 actieve windcompartimenten en 4.096 windcontrollers. Bronnen blijven onaangeraakt; oorspronkelijke opnamegalm blijft hoorbaar.
+- **Bronwindkleppen** — binaire en traploze kleppen, automatische balg- en drukfeedback en ketens met Willis-vertraging, inertia en drempelschakelaars. Registerkleppen volgen de gekoppelde projectregisters; zelfstandige ingangen bedien en bewaar je direct per project in de Orgelbouwer. Bron-UUID's houden gelijke ID's uit elkaar. Dit is de gedocumenteerde JM-benadering; handbediende kleppen bewegen in 10 ms en de klank valt onder 60% bronlagedruk weg. Niet ondersteunde logica, dubbele continue overdrachten en balgveren worden vóór orgelvervanging geweigerd.
+
+  Een geselecteerd register waarvan de bronschakelaar ook automatisch wordt
+  aangestuurd, kan nog niet met projectregistratie worden gecombineerd en wordt
+  vóór laden geweigerd.
 - **Sfeer & Layout** — vrij instelbaar kleuren/lettertype-systeem met presets en eigen op te slaan sferen
 - **Touchscreen-vriendelijk** (44px+ touch targets)
 - **Keyboard shortcuts** — F1/F2 navigatie, Esc voor orgel-selectie

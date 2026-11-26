@@ -54,6 +54,7 @@ fn blok_context<'a>(
     ccis_en: &'a [bool], bn: usize, ccis: bool,
 ) -> MengBlok<'a> {
     MengBlok {
+        project_wind_dev: None,
         bn, wind_dev, trem_rate, trem_amp,
         pan_cos, pan_sin, div_pans: pans, ccis_on: ccis, ccis_en,
         ccis_strength: 0.7, ccis_falloff: 0.6, ccis_swap: false,
