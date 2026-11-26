@@ -51,7 +51,7 @@
           class="header-tab"
           class:active={activeView === 'orgel'}
           on:click={() => dispatch('setView', 'orgel')}
-          on:keydown={(e) => { if (e.key === 'ArrowRight') dispatch('setView', organLoaded ? 'orgel-instellingen' : 'algemene-instellingen'); }}
+          on:keydown={(e) => { if (e.key === 'ArrowRight') dispatch('setView', organLoaded ? 'orgel-instellingen' : (secondary ? 'algemene-instellingen' : 'orgelbouwer')); }}
           role="tab"
           aria-selected={activeView === 'orgel'}
           tabindex={activeView === 'orgel' ? 0 : -1}
@@ -66,7 +66,7 @@
             on:click={() => dispatch('setView', 'orgel-instellingen')}
             on:keydown={(e) => {
               if (e.key === 'ArrowLeft') dispatch('setView', 'orgel');
-              if (e.key === 'ArrowRight') dispatch('setView', 'algemene-instellingen');
+              if (e.key === 'ArrowRight') dispatch('setView', secondary ? 'algemene-instellingen' : 'consolebouwer');
             }}
             role="tab"
             aria-selected={activeView === 'orgel-instellingen'}
@@ -74,11 +74,36 @@
             title="F2"
           >{$t('nav.orgel_instellingen')}</button>
         {/if}
+        {#if organLoaded && !secondary}
+          <button
+            class="header-tab"
+            class:active={activeView === 'consolebouwer'}
+            on:click={() => dispatch('setView', 'consolebouwer')}
+            on:keydown={(e) => {
+              if (e.key === 'ArrowLeft') dispatch('setView', 'orgel-instellingen');
+              if (e.key === 'ArrowRight') dispatch('setView', 'orgelbouwer');
+            }}
+            role="tab"
+            aria-selected={activeView === 'consolebouwer'}
+            tabindex={activeView === 'consolebouwer' ? 0 : -1}
+            title="F4"
+          >{$t('nav.console_builder')}</button>
+        {/if}
+        {#if !secondary}
+          <button class="header-tab" class:active={activeView === 'orgelbouwer'}
+            on:click={() => dispatch('setView', 'orgelbouwer')}
+            on:keydown={(e) => {
+              if (e.key === 'ArrowLeft') dispatch('setView', organLoaded ? 'consolebouwer' : 'orgel');
+              if (e.key === 'ArrowRight') dispatch('setView', 'algemene-instellingen');
+            }}
+            role="tab" aria-selected={activeView === 'orgelbouwer'} tabindex={activeView === 'orgelbouwer' ? 0 : -1} title="F5"
+          >{$t('nav.organ_builder')}</button>
+        {/if}
         <button
           class="header-tab"
           class:active={activeView === 'algemene-instellingen'}
           on:click={() => dispatch('setView', 'algemene-instellingen')}
-          on:keydown={(e) => { if (e.key === 'ArrowLeft') dispatch('setView', organLoaded ? 'orgel-instellingen' : 'orgel'); }}
+          on:keydown={(e) => { if (e.key === 'ArrowLeft') dispatch('setView', secondary ? (organLoaded ? 'orgel-instellingen' : 'orgel') : 'orgelbouwer'); }}
           role="tab"
           aria-selected={activeView === 'algemene-instellingen'}
           tabindex={activeView === 'algemene-instellingen' ? 0 : -1}

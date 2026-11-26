@@ -103,6 +103,10 @@ jobs:
           node testscripts/register_volgorde_test.mjs
           node testscripts/legacy_settings_test.mjs
           node testscripts/midi_speler_test.mjs
+          node testscripts/console_layout_test.mjs
+          node testscripts/console_snap_test.mjs
+          node testscripts/organ_project_test.mjs
+          node testscripts/midi_actions_test.mjs
 
       - name: Rust-tests (zonder ASIO)
         run: cargo test -p vpo-app -p vpo-sampler -p vpo-audio -p vpo-core -p jm-midimon

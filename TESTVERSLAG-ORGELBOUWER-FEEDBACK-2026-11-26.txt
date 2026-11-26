@@ -1,0 +1,184 @@
+JM-ORGUE — BALGFEEDBACK EN WILLIS-/INERTIEKETENS
+26 november 2026
+
+Werkmap: C:\Bronbestanden\Prive\JM-Orgue-consolebouwer
+Branch: codex/consolebouwer. Wijzigingen nog niet gecommit of gepusht.
+Definitieve testbuild:
+C:\Bronbestanden\Prive\JM-Orgue\VirtualPipeOrgan\target\debug\vpo-app.exe
+De executable is uit de genoemde werkmap gebouwd. De oorspronkelijke
+broncodewerkmap is voor deze uitbreiding niet aangepast.
+
+RESULTAAT
+
+Automatische balg- en drukfeedback, directe continue overdrachten,
+Willis-vertragingen en inertieketens zijn toegevoegd aan de bronwindnetwerken
+van de Orgelbouwer. Het model houdt invoer, sensoren, regelaars, voorwaarden en
+drempelschakelaars uit de afhankelijke bronketen bij. Bron-UUID, controllertype
+en intern bronnummer houden twee samplesets met gelijke nummers gescheiden.
+
+Balgen hebben nu een positie, snelheid, begrensde slag, luchtvolume, massa en
+demping. Een expliciete terugkoppeling vervangt voor die balg de oude impliciete
+inlaatregeling; de twee regelingen worden niet over elkaar heen gebruikt.
+De Orgelbouwer toont berekende regelaars als een uitlezing. Handmatig wijzigen
+of terugzetten van die afgeleide waarden wordt geweigerd.
+
+Alleen zelfstandige invoerstanden worden onder de bestaande project-UUID
+bewaard. Berekende standen en snelheden worden na herladen of herstart opnieuw
+opgebouwd. Import verwijdert opgeslagen sensor-, keten-, drempel- en verdwenen
+controller-ID's. Ongeldige waarden worden vóór een instellingenwijziging geweigerd.
+Brondefinities en opnamen worden niet herschreven.
+
+GEDEFINIEERDE JM-BENADERING
+
+Dit is een expliciet JM-model, geen claim van identieke Hauptwerk-semantiek,
+winddruk, klank of gebeurtenisvolgorde. De volledige native ontwikkelaarsgids is
+niet publiek beschikbaar; de officiële release-informatie beschrijft toegang
+op verzoek voor Advanced Edition-licentiehouders:
+https://downloadhauptwerk.com/documents/hw9/HauptwerkReleaseNotice.pdf
+
+De gebruikte overdracht en timing staan ook in VirtualPipeOrgan/docs/TEST_API.md:
+- Werk in ruwe 0..127-controllerstappen. Inversie gebruikt eerst 127 - x.
+  Vervolgens: clamp((max(x + offset, 0) * coefficient)^index, 0, 127).
+- Willis: dx/dt = (doel - x) / tau; tau = bronmilliseconden / 1000.
+  Binnen een halve ruwe stap wordt het doel exact bereikt.
+- Inertia: x'' = acceleration * (doel - x) - damping * x'. De overgangsmatrix
+  wordt vooraf berekend, ook voor onder-, kritisch en overgedempte modellen.
+- De besturingsstap duurt circa 1 ms en volgt de echte audiosamplerate.
+  Directe ketens volgen een vooraf berekende volgorde. Getimede schakels,
+  voorwaarden en relaislussen gebruiken de vorige rekentik. Fysieke sensoren
+  lezen de vorige fysicastap. Drempels gebruiken afgeronde 0..127-stappen.
+- Schakelacties 1/2 betekenen aan/uit; code 7 houdt in het JM-model de stand vast.
+  Een voorwaarde met reevaluate=N wacht bij activering op een nieuw bronevent.
+- Slagsensor = slag / maximale slag; druksensor = druk / nominale druk;
+  stroomsensor = doorstroming / opgegeven maximum. Uitgangen zijn begrensd 0..1.
+- Bij de ondersteunde wigbalg (vorm 2, beweging 1) gebruikt het model de helft
+  van het grondoppervlak voor volumeverandering en de opgegeven hefboom voor
+  gewicht en effectieve inertie. Zonder expliciete beginhoogte start de balg
+  op halve slag. Een opgegeven nominale druk gaat vóór de gewichtsafleiding.
+
+Handbediende invoer behoudt de bestaande overgang van 10 ms. Afgeleide
+regelaars krijgen geen extra handmatige ramp over hun eigen tijdmodel heen.
+De klankfade onder 60% nominale bronlagedruk blijft een JM-benadering.
+Buffers, routes en responscoëfficiënten worden vóór de audiocallback voorbereid;
+in de nieuwe rekentik zijn geen allocaties aangetroffen bij de codecontrole.
+
+GECORRIGEERDE IMPORTGEVALLEN
+
+Nitra bevat twee losstaande windladen zonder bruikbare drukreferentie die niet
+door verbindingen, geselecteerde pijpen of sensoren worden gebruikt. Die worden
+weggelaten. Gebruikte laden blijven vereist; hun ontbrekende druk wordt niet
+verzonnen. Alle verbindingen behouden hun volgorde, zodat stroomsensoren naar
+het juiste bronnummer blijven wijzen. De limiet geldt voor 256 actieve
+compartimenten; de tests controleren ook dat 257 actieve compartimenten falen.
+
+Een automatische bronschakelaar die óók rechtstreeks bij een gekozen
+projectregister hoort, heeft nog geen ondersteund gecombineerd bedieningsbeleid.
+Die bronselectie wordt vóór laden afgewezen; een registerbinding verdwijnt niet
+stilzwijgend en er wordt geen verborgen override toegepast.
+
+Een bron met expliciete klepverbindingen maar zonder WindCompartment-tabel
+behoudt nu zijn windrapport. De compiler wijst de ontbrekende eindpunten af,
+in plaats van het hele windmodel te laten verdwijnen. Normale bronnen zonder
+een opgegeven windmodel blijven ongewijzigd.
+
+DEFINITIEVE TESTRESULTATEN
+
+1. Volledige Rustronde: 1.037 geslaagd, 0 gefaald, 17 standaard genegeerd.
+   jm-midimon 5; vpo-app 678; vpo-audio 61; vpo-core 3; vpo-sampler 267;
+   pitch-integratie 23. Daarnaast beide optionele Nitra-tests expliciet gestart
+   en geslaagd. Frontendbuild en definitieve executablebuild zijn geslaagd.
+
+2. JavaScript: alle 29 bestaande model-, console-, uitlijn- en MIDI-tests slagen.
+   Headless browser: 11 windbedieningscontroles, 10 Orgelbouwer-controles en
+   5 MIDI/console-controles slagen, zonder browserfouten. Dit zijn echte Svelte-
+   componenten met expliciete Tauri-mocks; de native proeven hieronder testen
+   de backend en audiokern afzonderlijk.
+
+3. Definitieve feedbackproef: 15 controles geslaagd met twee echte headless
+   app-processen en eigen testprofielen. De twee HW-definities staan in dezelfde
+   map en gebruiken dezelfde interne wind-, controller- en schakelaarnummers.
+   Elke bron heeft een eigen pakketwortel met PackageID 1.
+
+   Gemeten in modelseconden, niet alleen met de HTTP-wandklok:
+   - Willis binnen 2% van eindstand: 1,00 s bij tau 250 ms.
+   - Inertieketen binnen 2%: 1,87 s bij acceleration 16, damping 8.
+   - Eindstandschakelaar 127 ingeschakeld na 2,37 s.
+   - Maximale afwijking van de testcurves: 0,003625 Willis / 0,001066 inertia.
+   - Geen overshoot in deze kritisch gedempte testketen.
+   - Drukkring voorspeld 0,966357836; gemeten 0,966357827.
+   - Balg onder verbruik: slag minimum 0,368346, eindwaarde 0,368887.
+   - Balgdruk minimum 0,690678; eindwaarde 0,987798 ten opzichte van nominaal.
+   - Na loslaten herstel binnen slagband 0,025 na 1,23 s; geen slagovershoot.
+
+   De tijdelijke drukdip van circa 31% blijft zichtbaar in de meetgegevens;
+   deze test bewijst het beschreven model, geen gemeten orgelkalibratie.
+   De tweede bron blijft onafhankelijk. Getest zijn verder terugregelen,
+   bronisolatie in beide richtingen, geen handmatige writes naar berekende
+   waarden, instellingenimport, herstart en reset bij een gewoon orgel.
+
+   Bij de bron zonder windladen worden opslaan en laden specifiek afgewezen.
+   Het bestaande projectbestand, de actuele orgel-DTO, controllerdefinities,
+   zelfstandige doelen, instellingen en bibliotheeksettingsmap blijven gelijk.
+   Alle acht bron-/pakket-/samplebestanden behouden hun SHA256.
+   Definitieve processen 25376 en 32260 zijn gestopt; testlock verwijderd.
+
+4. Op dezelfde definitieve executable: alle 18 bestaande dynamische-klepproeven
+   en alle 10 bronwindregressies slagen. Inclusief echte MIDI-crescendo,
+   aangehouden-toonopnamen, nul luchttransport bij gesloten klep, schrijffout,
+   import, herladen en herstart. Processen 32344/1756 en 28548/4012 zijn gestopt.
+   Eerder in deze uitbreiding slaagden ook 11 rankkast/2.048-registerproeven en
+   19 stemming/project/MIDI/console-regressies met eigen native app-processen.
+
+5. Echte Nitra-definitie, uitsluitend gelezen:
+   - Parser bewaart 18 controllers, 10 continue links, 5 schakelverbindingen,
+     4 drempels en 2 balguitgangen in de relevante besturingsketen.
+   - Native windmodel draait 10,000 modelseconden met 10 actieve knooppunten,
+     18 controllers, 12 windverbindingen en twee mechanische balgen.
+   - Ventilatorregelaar en beide Willis-uitgangen bereiken 1, schakelaar 109
+     schakelt aan en balgstanden blijven binnen hun slag. Eindfracties zijn
+     ongeveer 0,784697 en 0,786627.
+   - Deze proef heeft nul bronpijpen en claimt geen volledige Nitra-orgelimport,
+     opgenomen tremulantondersteuning of vergelijking met Hauptwerk-audio.
+   - SHA256 van de oorspronkelijke Nitra-definitie is vóór/na identiek.
+
+RESTERENDE GRENZEN
+
+Niet ondersteund: ContinuousControlDoubleLinkage, balgveren, gedwongen
+balgstanden, onbekende geometrie/actiecodes, zuiver directe continue lussen,
+conflicterende continue schrijvers en de genoemde gemengde registerbesturing.
+Onvolledige gegevens worden vóór vervanging van het actieve orgel geweigerd.
+Gebeurtenissen van meerdere schakelaars volgen de vaste JM-volgorde; er is
+geen algemene claim dat alle mogelijke schakelconflicten vooraf worden opgelost.
+Opgenomen galm en overige eerdere Orgelbouwer-beperkingen blijven van toepassing.
+
+BEWIJSBESTANDEN
+
+testen\orgelbouwer-feedback-2026-11-26\feedback-3\feedback-result.json
+  Definitieve 15 controles, modeltijdtraces, meetwaarden en bronhashes.
+testen\orgelbouwer-feedback-2026-11-26\ui\result.json en screenshots
+testen\orgelbouwer-feedback-2026-11-26\builder-ui\result.json
+testen\orgelbouwer-feedback-2026-11-26\midi-ui\result.json
+testen\orgelbouwer-kleppen-2026-11-26\valves-feedback-definitief\valve-result.json
+testen\orgelbouwer-uitbreiding-2026-11-26\wind-feedback-definitief\wind-result.json
+testen\orgelbouwer-uitbreiding-2026-11-26\advanced-feedback\advanced-result.json
+testen\orgelbouwer-2026-11-26\run-feedback\background-result.json
+testen\feedback-rust-final-2026-11-26.log
+testen\feedback-nitra-final-2026-11-26.log
+testen\feedback-build-final-2026-11-26.log
+testen\feedback-frontend-2026-11-26.log en feedback-js-2026-11-26.log
+testen\feedback-nitra-source-before-2026-11-26.json en -after-2026-11-26.json
+
+Belangrijkste implementatie in VirtualPipeOrgan:
+- vpo-sampler/src/windwerk.rs, hauptwerk.rs en hauptwerk_fixtures_tests.rs;
+- src-tauri/src/windwerk_set/project.rs en nieuw project_automation.rs;
+- src-tauri/src/audio.rs, organ_project.rs, project_wind_controls.rs,
+  commands.rs en test_api.rs;
+- ui/src/components/ProjectWindControls.svelte;
+- testscripts/organ_project_feedback_background_test.py en
+  project_wind_controls_ui_test.mjs.
+
+git diff --check slaagt. Alleen Git-normalisatiewaarschuwingen voor de
+gegenereerde Tauri-schema's blijven staan. Er zijn geen gebruikersvensters,
+invoerapparaten of productieprofielen bediend. Dit verslag vervangt de eerdere
+beperking dat automatische balgfeedback en Willis-/inertiaketens altijd worden
+afgewezen; bovenstaande concrete grenzen blijven gelden.

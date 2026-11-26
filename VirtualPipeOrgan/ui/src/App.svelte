@@ -701,6 +701,7 @@
         // expliciet met destroy(). Een harde timeout van 2,5s zorgt dat het kruisje
         // ALTIJD sluit, ook als opslaan ergens blijft hangen.
         event.preventDefault();
+        if (!(await consoleComponent?.magConsoleVerlaten?.() ?? true)) return;
         // Zelfde opslagronde als vóór een update-installatie (bewaarVoorAfsluiten).
         await bewaarVoorAfsluiten();
         // destroy() sluit zonder opnieuw close-requested te triggeren (geen lus).
@@ -865,8 +866,9 @@
   // Algemene Instellingen mag wél zonder orgel, maar moet de bibliotheek dan
   // expliciet verlaten: in de Console wint de bibliotheek-tak van de
   // instellingen-tak. Zo kun je nooit meer stranden in de instellingen.
-  function setView(view) {
-    if (!organInfo && !loading && view !== 'algemene-instellingen') {
+  async function setView(view) {
+    if (view !== activeView && !(await consoleComponent?.magConsoleVerlaten?.() ?? true)) return;
+    if (!organInfo && !loading && view !== 'algemene-instellingen' && view !== 'orgelbouwer') {
       activeView = 'orgel';
       showOrganBrowser = true;
       return;
@@ -883,6 +885,8 @@
     if (event.key === 'F1') { event.preventDefault(); setView('orgel'); return; }
     if (event.key === 'F2') { event.preventDefault(); setView('orgel-instellingen'); return; }
     if (event.key === 'F3') { event.preventDefault(); setView('algemene-instellingen'); return; }
+    if (event.key === 'F4') { event.preventDefault(); setView('consolebouwer'); return; }
+    if (event.key === 'F5') { event.preventDefault(); setView('orgelbouwer'); return; }
     // F11: volledig scherm aan/uit, zoals in elke browser.
     if (event.key === 'F11') { event.preventDefault(); wisselSpeeltafelModus(); return; }
     // Escape gaat altijd naar de bibliotheek, óók zonder geladen orgel: dat is
@@ -900,10 +904,12 @@
     }
     if (event.key === 'Escape') {
       event.preventDefault();
-      if (!organInfo) activeView = 'orgel';
-      showOrganBrowser = true;
+      openOrganBrowser();
       return;
     }
+
+    // Editing text, positioning controls and undo must never play notes.
+    if (activeView === 'consolebouwer' || activeView === 'orgelbouwer') return;
 
     // Ignore repeated keydown events
     if (event.repeat) return;
@@ -1268,7 +1274,7 @@
         // Orgel-definitiebestanden (GrandOrgue .organ én Hauptwerk
         // .Organ_Hauptwerk_xml) via loadOrgan; anders is het een sample-map.
         const idLower = res.organ_id.toLowerCase();
-        if (idLower.endsWith('.organ') || idLower.endsWith('_hauptwerk_xml')) {
+        if (idLower.endsWith('.jmorgan') || idLower.endsWith('.organ') || idLower.endsWith('_hauptwerk_xml')) {
           await loadOrgan(res.organ_id);
         } else {
           await loadFromFolder(res.organ_id);
@@ -1557,7 +1563,14 @@
     }, migratieBewaking);
   }
 
+  async function openOrganBrowser() {
+    if (!(await consoleComponent?.magConsoleVerlaten?.() ?? true)) return;
+    if (!organInfo) activeView = 'orgel';
+    showOrganBrowser = true;
+  }
+
   async function loadOrgan(path, opties = {}) {
+    if (!(await consoleComponent?.magConsoleVerlaten?.() ?? true)) return;
     const pakketPad = typeof path === 'string' ? path.toLowerCase() : '';
     if (pakketPad.endsWith('.orgue') || pakketPad.endsWith('.rar')) {
       const uitgepakt = await pakPakketUit(path);
@@ -1618,6 +1631,7 @@
   }
 
   async function loadFromFolder(directory, opties = {}) {
+    if (!(await consoleComponent?.magConsoleVerlaten?.() ?? true)) return;
     loading = true;
     loadingProgress = 0;
     loadingMessage = tx('status.scanning_folder');
@@ -1714,6 +1728,7 @@
   }
 
   async function closeOrgan() {
+    if (!(await consoleComponent?.magConsoleVerlaten?.() ?? true)) return;
     // Save current organ settings before closing
     await flushAutoSave();
     await persistOrganSettings();

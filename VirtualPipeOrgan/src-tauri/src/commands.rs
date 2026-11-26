@@ -12,6 +12,32 @@ use vpo_sampler::{OrganDefinition, clean_stop_name, strip_pitch_from_name, voetm
                   gedeeld_voorvoegsel, strip_voorvoegsel, clean_division_name,
                   splits_koren, Koren};
 
+// App action IDs are not MIDI bytes. Separate namespaces let large projects
+// retain their stable register IDs without colliding with setzer/functions,
+// couplers, or shortcut pistons. Legacy small-organ values remain unchanged.
+const PROJECT_STOP_ACTION_BASE: u32 = 65_536;
+const EXTENDED_COUPLER_ACTION_BASE: u32 = 262_144;
+
+pub(crate) fn project_stop_action(stop_id: u32) -> u32 {
+    PROJECT_STOP_ACTION_BASE + stop_id
+}
+
+pub(crate) fn assign_project_coupler_actions(couplers: &mut [CouplerDto]) {
+    for (index, coupler) in couplers.iter_mut().enumerate() {
+        coupler.midi_action_code = EXTENDED_COUPLER_ACTION_BASE + index as u32;
+    }
+}
+
+fn coupler_action(ordinal: u32) -> u32 {
+    if ordinal < 50 { 100 + ordinal } else { EXTENDED_COUPLER_ACTION_BASE + ordinal }
+}
+
+fn next_coupler_action(previous: u32) -> u32 {
+    if previous < 149 || previous >= EXTENDED_COUPLER_ACTION_BASE {
+        previous.saturating_add(1)
+    } else { EXTENDED_COUPLER_ACTION_BASE }
+}
+
 /// Audio device info for frontend
 #[derive(Debug, Serialize)]
 pub struct AudioDeviceDto {
@@ -66,7 +92,7 @@ pub struct CouplerDto {
     pub destination_division: String,
     pub active: bool,
     pub display_in_division: String,
-    pub midi_action_code: u8,
+    pub midi_action_code: u32,
     /// "unison", "super", "sub", "ta" (tongwerken af)
     pub coupler_type: String,
     /// Pitch offset in semitones: 0=unison, +12=super, -12=sub
@@ -111,7 +137,7 @@ pub struct PistonDto {
     pub vasthouden: bool,
     /// MIDI-actiecode zodat de piston inleerbaar is als eigen bediening naast de
     /// register-/koppelknop. Geldig > 0; 0 = geen code toegekend.
-    pub midi_action_code: u8,
+    pub midi_action_code: u32,
 }
 
 /// Organ info for frontend
@@ -236,7 +262,7 @@ pub struct StopDto {
     /// Whether this stop has tremulant samples available
     pub has_tremulant: bool,
     /// MIDI action code for this stop (for MIDI learn, 150+)
-    pub midi_action_code: u8,
+    pub midi_action_code: u32,
     /// Internal stop ID (numeric) for audio lookup
     pub internal_stop_id: u32,
     /// First MIDI note this stop responds to
@@ -584,7 +610,7 @@ pub fn set_orgel_vlag(state: State<AppState>, naam: String, aan: bool) -> Result
     if let Some(id) = state.current_organ_id.read().clone() {
         let bewaard = {
             let mut lib = state.organ_library.write();
-            match lib.settings.get_mut(&id) {
+            match settings_library_key(&id).and_then(|key| lib.settings.get_mut(&key)) {
                 Some(s) => { nieuw.schrijf_in(s); true }
                 None => false,
             }
@@ -805,14 +831,36 @@ fn lees_beperkt(pad: &Path, max: u64) -> Result<String, String> {
     std::fs::read_to_string(pad).map_err(|e| format!("Kan niet lezen: {}", e))
 }
 
-fn instellingen_uit_bibliotheek(state: &AppState, organ_id: &str) -> Option<OrganSettings> {
-        let lib = state.organ_library.read();
-        lib.settings.get(organ_id).cloned().or_else(|| {
-            let want = crate::library::pad_sleutel(organ_id);
-            lib.settings.iter()
-                .find(|(k, _)| crate::library::pad_sleutel(k) == want)
-                .map(|(_, v)| v.clone())
-        })
+/// A project's settings belong to its validated UUID, never its current path.
+/// This deliberately does not fall back to old path-keyed project settings:
+/// another project at the same filename must not inherit those settings.
+fn project_settings_key(organ_id: &str) -> Option<String> {
+    if !organ_id.to_lowercase().ends_with(".jmorgan") { return None; }
+    let project = crate::organ_project::load_project(organ_id).ok()?;
+    Some(format!("jm-project:{}", project.id.to_ascii_lowercase()))
+}
+
+fn settings_library_key(organ_id: &str) -> Option<String> {
+    if organ_id.to_lowercase().ends_with(".jmorgan") {
+        project_settings_key(organ_id)
+    } else {
+        Some(organ_id.to_owned())
+    }
+}
+
+fn instellingen_in_bibliotheek<'a>(lib: &'a library::OrganLibrary, organ_id: &str) -> Option<&'a OrganSettings> {
+    let key = settings_library_key(organ_id)?;
+    lib.settings.get(&key).or_else(|| {
+        if organ_id.to_lowercase().ends_with(".jmorgan") { return None; }
+        let want = crate::library::pad_sleutel(organ_id);
+        lib.settings.iter()
+            .find(|(k, _)| crate::library::pad_sleutel(k) == want)
+            .map(|(_, v)| v)
+    })
+}
+
+pub(crate) fn instellingen_uit_bibliotheek(state: &AppState, organ_id: &str) -> Option<OrganSettings> {
+    instellingen_in_bibliotheek(&state.organ_library.read(), organ_id).cloned()
 }
 
 fn saved_settings_for(state: &AppState, organ_id: &str) -> Option<OrganSettings> {
@@ -829,7 +877,8 @@ fn saved_settings_for(state: &AppState, organ_id: &str) -> Option<OrganSettings>
     if from_file.setup_wizard_done != Some(true) {
         *state.setup_wizard_pending.write() = true;
     }
-    state.organ_library.write().settings.insert(organ_id.to_string(), from_file.clone());
+    let key = settings_library_key(organ_id)?;
+    state.organ_library.write().settings.insert(key, from_file.clone());
     state.save_library();
     Some(from_file)
 }
@@ -1227,11 +1276,11 @@ fn koppellijst_herbouwen(state: &AppState) {
         None => return,
     };
     let mut lijst = basis.clone();
-    let mut code = lijst.iter().map(|c| c.midi_action_code).max().unwrap_or(100).saturating_add(1);
+    let mut code = next_coupler_action(lijst.iter().map(|c| c.midi_action_code).max().unwrap_or(100));
     for mut k in ontbrekende_koppels(&basis, &divisions) {
         if !gewenst.contains(&k.id) { continue; }
         k.midi_action_code = code;
-        code = code.saturating_add(1);
+        code = next_coupler_action(code);
         lijst.push(k);
     }
     // Koppels die zijn weggehaald mogen niet actief blijven staan.
@@ -2656,7 +2705,7 @@ pub fn apply_learned_keyboard_range(state: State<AppState>, division: String, ch
 /// Preset binding info for frontend
 #[derive(Debug, Clone, Serialize, serde::Deserialize)]
 pub struct PresetBindingDto {
-    pub preset_num: u8,
+    pub preset_num: u32,
     pub trigger_type: String,  // "note", "cc", "program"
     pub trigger_value: String, // human readable description
 }
@@ -2696,20 +2745,20 @@ pub fn get_preset_bindings(state: State<AppState>) -> Vec<PresetBindingDto> {
 }
 
 #[tauri::command]
-pub fn learn_preset_binding(state: State<AppState>, preset_num: u8) -> Result<Option<String>, String> {
+pub fn learn_preset_binding(state: State<AppState>, preset_num: u32) -> Result<Option<String>, String> {
     info!("Learning MIDI binding for preset: {}", preset_num);
     let result = state.learn_preset_binding(preset_num)?;
     Ok(result.map(|_| "Learned".to_string()))
 }
 
 #[tauri::command]
-pub fn clear_preset_binding(state: State<AppState>, preset_num: u8) {
+pub fn clear_preset_binding(state: State<AppState>, preset_num: u32) {
     info!("Clearing all MIDI bindings for action: {}", preset_num);
     state.clear_preset_bindings_for(preset_num);
 }
 
 #[tauri::command]
-pub fn poll_preset_trigger(state: State<AppState>) -> Option<u8> {
+pub fn poll_preset_trigger(state: State<AppState>) -> Option<u32> {
     // Heartbeat voor de afstandsbediening: zolang SetzerBar (Orgel-tabblad)
     // gemount is komt deze poll elke 100 ms; /action weigert anders met 409.
     *state.preset_poll_seen.write() = Some(std::time::Instant::now());
@@ -2728,7 +2777,7 @@ pub fn report_setzer_state(state: State<AppState>, level: u8, preset: i32, set_m
 // bewerken-UI zijn de structurele velden nodig. PresetBindingSaved (het
 // opslagformaat) is daarvoor het natuurlijke DTO.
 
-fn preset_binding_to_saved(b: &crate::state::MidiPresetBinding) -> PresetBindingSaved {
+pub(crate) fn preset_binding_to_saved(b: &crate::state::MidiPresetBinding) -> PresetBindingSaved {
     use crate::state::MidiPresetTrigger;
     match b.trigger {
         MidiPresetTrigger::Note { channel, note } => PresetBindingSaved {
@@ -2789,7 +2838,7 @@ fn preset_binding_to_saved(b: &crate::state::MidiPresetBinding) -> PresetBinding
     }
 }
 
-fn saved_to_preset_binding(b: &PresetBindingSaved) -> Result<crate::state::MidiPresetBinding, String> {
+pub(crate) fn saved_to_preset_binding(b: &PresetBindingSaved) -> Result<crate::state::MidiPresetBinding, String> {
     use crate::state::{MidiPresetBinding, MidiPresetTrigger};
     let trigger = match b.trigger_type.as_str() {
         "note" => MidiPresetTrigger::Note {
@@ -2837,7 +2886,7 @@ pub fn add_preset_binding_manual(state: State<AppState>, binding: PresetBindingS
 
 /// Verwijder één koppeling: de `index`-de (0-based) binding van deze actiecode.
 #[tauri::command]
-pub fn remove_preset_binding(state: State<AppState>, preset_num: u8, index: usize) -> Result<Vec<PresetBindingSaved>, String> {
+pub fn remove_preset_binding(state: State<AppState>, preset_num: u32, index: usize) -> Result<Vec<PresetBindingSaved>, String> {
     info!("MIDI-koppeling #{} voor actie {} verwijderen", index + 1, preset_num);
     state.remove_preset_binding_at(preset_num, index)?;
     Ok(state.get_preset_bindings().iter().map(preset_binding_to_saved).collect())
@@ -2845,7 +2894,7 @@ pub fn remove_preset_binding(state: State<AppState>, preset_num: u8, index: usiz
 
 /// Vervang één koppeling in-place (bewerken in de UI).
 #[tauri::command]
-pub fn update_preset_binding(state: State<AppState>, preset_num: u8, index: usize, binding: PresetBindingSaved) -> Result<Vec<PresetBindingSaved>, String> {
+pub fn update_preset_binding(state: State<AppState>, preset_num: u32, index: usize, binding: PresetBindingSaved) -> Result<Vec<PresetBindingSaved>, String> {
     let b = saved_to_preset_binding(&binding)?;
     info!("MIDI-koppeling #{} voor actie {} bijwerken naar {:?}", index + 1, preset_num, b.trigger);
     state.replace_preset_binding_at(preset_num, index, b)?;
@@ -2910,6 +2959,46 @@ pub async fn load_organ(state: State<'_, AppState>, path: String) -> Result<Orga
     tokio::task::spawn_blocking(move || do_load_organ(&st, &path))
         .await
         .map_err(|e| format!("orgel-laadtaak mislukt: {}", e))?
+}
+
+/// Source inspection uses the same deterministic importer options as project
+/// compilation, while restoring the running organ's process-wide parser flags.
+fn project_import<T>(state: &AppState, work: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+    struct Restore(crate::orgelvlaggen::OrgelVlaggen);
+    impl Drop for Restore { fn drop(&mut self) { self.0.zet_importers(); } }
+    let _restore = Restore(*state.orgel_vlaggen.read());
+    crate::orgelvlaggen::OrgelVlaggen::NIEUW.zet_importers();
+    work()
+}
+
+pub fn inspect_organ_project_source_inner(state: &AppState, path: &str, package_root: Option<&str>) -> Result<crate::organ_project::SourceCatalog, String> {
+    let _gate = state.load_switch_gate.lock();
+    project_import(state, || crate::organ_project::inspect_source(path, package_root))
+}
+
+#[tauri::command]
+pub async fn inspect_organ_project_source(state: State<'_, AppState>, path: String, package_root: Option<String>) -> Result<crate::organ_project::SourceCatalog, String> {
+    let st = state.inner().clone();
+    tokio::task::spawn_blocking(move || inspect_organ_project_source_inner(&st, &path, package_root.as_deref()))
+        .await.map_err(|e| format!("Brononderzoek mislukt: {e}"))?
+}
+
+#[tauri::command]
+pub async fn read_organ_project(path: String) -> Result<crate::organ_project::OrganProject, String> {
+    tokio::task::spawn_blocking(move || crate::organ_project::load_project(&path))
+        .await.map_err(|e| format!("Project openen mislukt: {e}"))?
+}
+
+pub fn save_organ_project_inner(state: &AppState, path: &str, project: crate::organ_project::OrganProject) -> Result<crate::organ_project::OrganProject, String> {
+    let _gate = state.load_switch_gate.lock();
+    project_import(state, || crate::organ_project::save_project(path, project))
+}
+
+#[tauri::command]
+pub async fn save_organ_project(state: State<'_, AppState>, path: String, project: crate::organ_project::OrganProject) -> Result<crate::organ_project::OrganProject, String> {
+    let st = state.inner().clone();
+    tokio::task::spawn_blocking(move || save_organ_project_inner(&st, &path, project))
+        .await.map_err(|e| format!("Project opslaan mislukt: {e}"))?
 }
 
 /// Signaleer de lopende orgelload om af te breken. Werkt alleen zolang de
@@ -3309,7 +3398,7 @@ pub fn display_identity(odf_path: &Path, organ: &vpo_sampler::OrganInfo) -> (Str
 /// do_load_samples_from_directory)? Gebruikt door alle herlaad-routes.
 pub fn is_organ_file_id(id: &str) -> bool {
     let l = id.to_lowercase();
-    l.ends_with(".organ") || l.ends_with(".organ_hauptwerk_xml") || l.ends_with(".customorgan_hauptwerk_xml")
+    l.ends_with(".jmorgan") || l.ends_with(".organ") || l.ends_with(".organ_hauptwerk_xml") || l.ends_with(".customorgan_hauptwerk_xml")
 }
 
 /// Map waarin de per-orgel `.jm-settings.json` hoort: naast het orgelbestand
@@ -3338,6 +3427,11 @@ struct EigenOrgelinstellingen {
 
 fn zijbestand_identiteit(organ_id: &str) -> Option<(PathBuf, String, String)> {
     let dir = organ_settings_dir(organ_id)?;
+    if organ_id.to_lowercase().ends_with(".jmorgan") {
+        let project = crate::organ_project::load_project(organ_id).ok()?;
+        let id = project.id.to_ascii_lowercase();
+        return Some((dir.join(format!(".jm-settings-project-{id}.json")), "project".into(), id));
+    }
     if is_organ_file_id(organ_id) && !Path::new(organ_id).is_dir() {
         let naam = Path::new(organ_id).file_name()?.to_str()?.to_string();
         // Gebruik overal de exacte naam op schijf. Zo reist de identiteit mee
@@ -3447,6 +3541,8 @@ pub struct OudeOrgelinstellingenKandidaat {
 
 #[tauri::command]
 pub fn inspect_legacy_settings(state: State<AppState>, path: String, directory: bool) -> Result<Option<OudeOrgelinstellingenKandidaat>, String> {
+    // A project has its own UUID and never inherits legacy source-folder settings.
+    if !directory && path.to_lowercase().ends_with(".jmorgan") { return Ok(None); }
     let doel = if directory {
         organ_bestand_in_map(Path::new(&path)).map(|(p, _)| p.to_string_lossy().to_string()).unwrap_or(path)
     } else { path };
@@ -3497,6 +3593,9 @@ fn bewaar_migratie_uitstel(app_data_dir: &Path, lib: &mut library::OrganLibrary,
 #[tauri::command]
 pub fn import_legacy_settings(state: State<AppState>, organ_id: String) -> Result<Option<String>, String> {
     let organ_id = crate::library::pad_notatie(&organ_id);
+    if organ_id.to_lowercase().ends_with(".jmorgan") {
+        return Err("Een orgelproject gebruikt eigen instellingen en neemt geen oude mapinstellingen over".into());
+    }
     let _load_gate = state.load_switch_gate.lock();
     let _guard = ZIJBESTAND_SCHRIJVER.lock();
     let oud = organ_settings_dir(&organ_id).ok_or("Geen orgelmap")?.join(".jm-settings.json");
@@ -3821,6 +3920,32 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
     let path = &crate::library::pad_notatie(path);
     info!("Loading organ from: {}", path);
 
+    // Compile and validate every source before changing the running organ's
+    // state. Project files reference sources; they never write to those sources.
+    let is_project = path.to_lowercase().ends_with(".jmorgan");
+    let (mut compiled_project, project_divisions) = if is_project {
+        let (compiled, divisions) = project_import(state, || {
+            let project = crate::organ_project::load_project(path)?;
+            let compiled = crate::organ_project::compile_project(path, &project)?;
+            Ok((compiled, project.divisions))
+        })?;
+        (Some(compiled), divisions)
+    } else { (None, Vec::new()) };
+    let project_acoustics = compiled_project.as_mut().and_then(|project| project.acoustics.take());
+    let project_wind_plan = compiled_project.as_mut().and_then(|project| project.wind.take());
+    let project_wind_runtime = {
+        let sample_rate = state.audio_player.read().as_ref().map(|player| *player.sample_rate.read()).unwrap_or(48_000);
+        project_wind_plan.as_ref().map(|plan| crate::windwerk_set::ProjectWindRuntime::new(plan, sample_rate))
+            .transpose()?.map(Box::new)
+    };
+    let project_tuning: std::collections::HashMap<u32, crate::audio::ProjectSourcePitch> = compiled_project.as_ref()
+        .map(|p| p.per_stop_tuning.iter().map(|(&stop, pitch)| {
+            crate::audio::ProjectSourcePitch::new(
+                matches!(pitch.policy, crate::organ_project::TuningPolicy::Normalize),
+                pitch.reference_a4_hz, pitch.target_a4_hz, pitch.cents, false,
+            ).map(|value| (stop, value))
+        }).collect::<Result<_, String>>()).transpose()?.unwrap_or_default();
+
     // Gedrag van de set voor DIT orgel (E1/D3/F7/D7/E5), vóór het parsen.
     zet_orgelvlaggen_voor(state, path);
 
@@ -3835,7 +3960,10 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
         info!("Orgelload geannuleerd vóór parse");
         return Err(melding_geannuleerd());
     }
-    let mut definition = if vpo_sampler::is_hauptwerk_path(odf_path) {
+    let mut definition = if let Some(project) = compiled_project {
+        *state.laatste_importverslag.write() = Some(project.import_report);
+        project.definition
+    } else if vpo_sampler::is_hauptwerk_path(odf_path) {
         info!("Detected Hauptwerk organ definition");
         // Een door de gebruiker gekozen pakketmap (per orgel onthouden) gaat voor.
         let root = crate::import_pakketroot::opgeslagen(&state.app_data_dir, path);
@@ -3855,8 +3983,10 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
     // Tidy division/manual names (strip "N. " ordinals like "2. Hauptwerk"). The
     // name is the routing key for divisions AND couplers, so cleaning it here keeps
     // everything downstream consistent. (Hauptwerk names are already clean → no-op.)
-    for manual in &mut definition.manuals {
-        manual.name = clean_division_name(&manual.name);
+    if !is_project {
+        for manual in &mut definition.manuals {
+            manual.name = clean_division_name(&manual.name);
+        }
     }
 
     // Registers die de gebruiker voor dit orgel niet wil laden (F2): eerst uit de definitie halen, voordat er iets
@@ -4261,6 +4391,25 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
                             + rnd_cents;
                         if total_db.abs() > 0.01 || total_cents.abs() > 0.01 {
                             odf_voicings.insert((stop.id, pipe_num), (total_db, total_cents));
+                        }
+                        // A project preserves original tuning per source. A
+                        // separately recorded tremulant may need its OWN
+                        // original-pipe minus sample-pitch correction.
+                        if is_project {
+                            if let Some(trem) = &extra.tremulant_attack {
+                                let key = (stop.id, pipe_num | crate::audio::TREM_FLAG);
+                                let delta = match (extra.original_pitch_cents, trem.sample_pitch_cents) {
+                                    (Some(original), Some(sample)) => crate::retune::origineel_delta(original, sample).unwrap_or(0.0),
+                                    (Some(original), None) => {
+                                        origineel_na_wav.push((key, trem.path.clone(), original, total_db));
+                                        0.0
+                                    }
+                                    _ => 0.0,
+                                };
+                                // Keep a zero entry too: it must shadow a
+                                // nonzero dry-sample correction for this pipe.
+                                odf_voicings.insert(key, (total_db, total_cents - hw_origineel_delta + delta));
+                            }
                         }
                         // Hertemper-invoer met EIGENAAR-semantiek: bij een REF
                         // (Octaaf 4' → Prestant 8') gelden toets, HarmonicNumber,
@@ -4717,7 +4866,7 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
 
     // Build organ info for UI
     let mut divisions: Vec<DivisionDto> = Vec::new();
-    let mut stop_action_code: u8 = 150; // Stops use action codes 150-255
+    let mut stop_action_code: u32 = 150; // App action codes; u32 is independent of MIDI message bytes
     let mut skipped_noise = 0usize;
     let mut rank_summary: Vec<RankSummary> = Vec::new();
 
@@ -4747,7 +4896,7 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
                     skipped_noise += 1;
                     continue;
                 }
-                rank_summary.push(rank_summary_of(stop, format!("{}_{}", manual.number, stop.id)));
+                rank_summary.push(rank_summary_of(stop, if is_project { format!("project_{}", stop.id) } else { format!("{}_{}", manual.number, stop.id) }));
 
                 // Naam en de regel eronder. De divisieaanduiding staat al boven
                 // de kolom en de voetmaat al onder de knop: allebei niet nog een
@@ -4780,7 +4929,9 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
                 let (groep, familie) = groep_en_familie(&name, &pitch, wind_voet, mengwerk, koren.as_ref(),
                     is_reed_stop(&stop.name), stop.percussive, manual.number == 0);
                 stops.push(StopDto {
-                    id: format!("{}_{}", manual.number, stop.id),
+                    // Moving a project register to another manual must keep
+                    // its console, preset and MIDI identity intact.
+                    id: if is_project { format!("project_{}", stop.id) } else { format!("{}_{}", manual.number, stop.id) },
                     name,
                     pitch,
                     koren,
@@ -4795,7 +4946,7 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
                     // set_tremulant nooit een SetTremulant en was ook het
                     // Hauptwerk-"tremmed"-pad in de praktijk dood.
                     has_tremulant: stops_with_trem.contains(&stop.id),
-                    midi_action_code: stop_action_code,
+                    midi_action_code: if is_project { project_stop_action(stop.id) } else { stop_action_code },
                     internal_stop_id: stop.id,
                     first_midi_note: first_midi,
                     last_midi_note: last_midi,
@@ -4860,8 +5011,9 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
     }
     // Prefer the organ's real couplers (from the ODF/Hauptwerk file); only fall
     // back to generic ones when the source defines none.
-    let real_couplers = build_couplers_from_definition(&definition);
-    let couplers = if real_couplers.is_empty() {
+    let mut real_couplers = build_couplers_from_definition(&definition);
+    if is_project { assign_project_coupler_actions(&mut real_couplers); }
+    let couplers = if real_couplers.is_empty() && !is_project {
         generate_couplers(&divisions)
     } else {
         info!("Using {} real couplers from the organ definition", real_couplers.len());
@@ -4877,7 +5029,12 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
     let odf_stop_lagen: std::collections::HashMap<u32, Vec<usize>> = definition.stops.iter()
         .map(|s| (s.id, s.all_layers().map(|(_, _, p)| p.len()).collect()))
         .collect();
-    let (acoustics_cfg, acoustics_dto) = crate::acoustics::laad_voor_odf(std::path::Path::new(path), &odf_stop_lagen);
+    let (acoustics_cfg, acoustics_dto) = if is_project {
+        let summary = project_acoustics.as_ref().map(|config| crate::acoustics::samenvatting(config, &odf_stop_lagen));
+        (project_acoustics, summary)
+    } else {
+        crate::acoustics::laad_voor_odf(std::path::Path::new(path), &odf_stop_lagen)
+    };
     let schakelaars = schakelaars_dto(&definition, &divisions, &couplers);
     let organ_info = OrganInfoDto {
         id: path.to_string(),
@@ -4970,6 +5127,7 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
     crate::state::trede_filter_leeg();
     state.set_active_couplers(Vec::new());
     reset_organ_scoped_state(state);
+    state.send_audio_command(AudioCommand::RegisterProjectTuning(std::sync::Arc::new(project_tuning)));
     // Perspectieven + lagen-samenvatting van dít orgel (altijd zetten, ook
     // leeg — vervangt die van het vorige orgel).
     *state.perspectives.write() = persp;
@@ -4992,7 +5150,7 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
     }
     let (wind_profielen, wind_pleno) = build_stop_wind_profiles(&organ_info.divisions);
     // Windwerk van de set (D4, fase 1): alleen met de vlag aan en een bruikbaar windwerk; anders niets.
-    let windwerk_afleiding = if state.orgel_vlaggen.read().windwerk_van_set {
+    let windwerk_afleiding = if !is_project && state.orgel_vlaggen.read().windwerk_van_set {
         let w = state.laatste_importverslag.read().as_ref().and_then(|v| v.windwerk.clone());
         w.and_then(|w| crate::windwerk_set::afleiden(&definition, &organ_info.divisions, &wind_profielen, &w))
     } else {
@@ -5049,6 +5207,12 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
         }
     }
 
+    // Source graphs are already prepared outside the callback. Register after
+    // profiles and division resets, which intentionally clear previous graphs.
+    let source_wind_on = state.orgel_vlaggen.read().windwerk_van_set;
+    state.send_audio_command(AudioCommand::RegisterProjectWind(if source_wind_on { project_wind_runtime } else { None }));
+    *state.project_wind_plan.write() = project_wind_plan;
+
     // F3: het nieuwe orgel in één keer naar de engine (preloads, kaarten, resets en de standaardwaarden hierboven).
     if let Some(bundel) = orgel_bundel.sluit() {
         state.send_audio_command(bundel);
@@ -5087,12 +5251,16 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
 
     // current_organ_id is al vóór de DTO-publicatie gezet (auditbevinding 41).
     restore_organ_settings(state, path);
+    if is_project {
+        apply_project_midi_mappings(state, path, &project_divisions);
+    }
     // Nieuw orgel (nog geen opgeslagen stand) met "standaard aan"-schakelaars uit
     // de definitie: die zetten we aan. Een eerder gebruikte stand wint altijd.
     if saved_settings_for(state, path).is_none() {
         pas_standaard_aan_toe(state, &organ_info);
     }
     apply_pending_registration(state, &organ_info);
+    restore_project_wind_controls(state, path);
     // Zwelstand terugzetten (RegisterStopDivisionMap zette de audio op open).
     apply_swell_positions(state);
 
@@ -5123,12 +5291,16 @@ fn schakelaars_dto(definition: &OrganDefinition, divisions: &[DivisionDto], coup
         pistons: {
             // Codes starten net ná de hoogste register-code zodat de ranges
             // (koppels 100..149, registers 150+, pistons daarna) niet botsen.
-            let mut code: u8 = divisions.iter()
+            let mut code: u32 = divisions.iter()
                 .flat_map(|d| d.stops.iter())
                 .map(|s| s.midi_action_code)
+                .chain(couplers.iter().map(|c| c.midi_action_code))
                 .max().unwrap_or(199)
                 .saturating_add(1)
                 .max(200);
+            // Leave the extended coupler namespace room for later extra
+            // couplers. Small legacy organs keep their original piston IDs.
+            if code >= EXTENDED_COUPLER_ACTION_BASE { code = code.max(1_048_576); }
             r.pistons.iter().enumerate().filter_map(|(index, p)| {
                 let (doel, doel_id) = match p.doel {
                     PistonDoel::Stop(c) => ("stop", stop_id(c)?),
@@ -5350,7 +5522,14 @@ pub fn apply_dsp_after_backend_reload(state: &AppState) {
 /// de zwelpedaal stuurde dan bv. via een geërfde division_index het verkeerde
 /// klavier aan (audit 2026-07-18, bevindingen 1, 2 en 23).
 fn reset_organ_scoped_state(state: &AppState) {
+    *state.project_wind_plan.write() = None;
+    state.project_wind_controls.write().clear();
+    state.send_audio_command(AudioCommand::RegisterProjectWind(None));
+    // A subsequent ordinary organ/sample-folder must never inherit a project's
+    // source pitch policy. The project loader replaces this in the same bundle.
+    state.send_audio_command(AudioCommand::RegisterProjectTuning(std::sync::Arc::new(std::collections::HashMap::new())));
     state.set_midi_mappings(Vec::new());
+    *state.project_midi_divisions.write() = None;
     state.set_preset_bindings_replace(Vec::new());
     // Laatste zwelstanden van het VORIGE orgel (loaded_organ_info is hier nog
     // het oude) bewaren voor een herlaad/wissel van hetzelfde orgel.
@@ -7854,7 +8033,7 @@ pub fn apply_saved_wind_groups(state: State<AppState>) -> Result<usize, String> 
     };
     let (saved_groups, saved_num) = {
         let lib = state.organ_library.read();
-        match lib.settings.get(&organ_id) {
+        match instellingen_in_bibliotheek(&lib, &organ_id) {
             Some(s) => (s.division_wind_groups.clone(), s.num_wind_groups),
             None => (Vec::new(), 0),
         }
@@ -7919,7 +8098,7 @@ pub fn apply_saved_output_channels_inner(state: &AppState) -> usize {
     };
     let (saved_routing, saved_ccis, saved_spread) = {
         let lib = state.organ_library.read();
-        match lib.settings.get(&organ_id) {
+        match instellingen_in_bibliotheek(&lib, &organ_id) {
             Some(s) => (s.division_output_pairs.clone(), s.division_ccis.clone(), s.ccis_spread.clone()),
             None => (Vec::new(), Vec::new(), None),
         }
@@ -7997,7 +8176,7 @@ pub fn apply_saved_voicings(state: State<AppState>) -> Result<usize, String> {
 
     let saved = {
         let lib = state.organ_library.read();
-        lib.settings.get(&organ_id)
+        instellingen_in_bibliotheek(&lib, &organ_id)
             .map(|s| s.pipe_voicings.clone())
             .unwrap_or_default()
     };
@@ -8146,7 +8325,7 @@ pub fn set_profile_channel_override(state: State<AppState>, channels: Option<Vec
             let saved_routing = {
                 let organ_id = state.current_organ_id.read().clone();
                 let lib = state.organ_library.read();
-                organ_id.and_then(|id| lib.settings.get(&id).map(|s| s.division_output_pairs.clone()))
+                organ_id.and_then(|id| instellingen_in_bibliotheek(&lib, &id).map(|s| s.division_output_pairs.clone()))
                     .unwrap_or_default()
             };
             for (idx, d) in o.divisions.iter().enumerate() {
@@ -9745,6 +9924,8 @@ fn roman_numeral(n: usize) -> &'static str {
         4 => "IV",
         5 => "V",
         6 => "VI",
+        7 => "VII",
+        8 => "VIII",
         _ => "",
     }
 }
@@ -9756,7 +9937,7 @@ fn roman_numeral(n: usize) -> &'static str {
 /// couplers — the caller then falls back to the generic `generate_couplers`.
 fn build_couplers_from_definition(definition: &OrganDefinition) -> Vec<CouplerDto> {
     let mut couplers = Vec::new();
-    let mut action_code: u8 = 100;
+    let mut action_code: u32 = 100;
     for manual in &definition.manuals {
         let src_name = manual.name.clone();
         for cid in &manual.coupler_ids {
@@ -9802,7 +9983,7 @@ fn build_couplers_from_definition(definition: &OrganDefinition) -> Vec<CouplerDt
                 destination_division: dest_name,
                 active: false,
                 display_in_division: src_name.clone(),
-                midi_action_code: action_code,
+                midi_action_code: coupler_action(action_code - 100),
                 coupler_type: coupler_type.into(),
                 pitch_offset: offset,
                 speciaal: cdef.unison_off || cdef.melodie_of_bas,
@@ -9830,7 +10011,7 @@ fn zonder_unison_voetmaat(naam: &str) -> String {
 /// Generate couplers based on division structure
 fn generate_couplers(divisions: &[DivisionDto]) -> Vec<CouplerDto> {
     let mut couplers = Vec::new();
-    let mut action_code: u8 = 100;
+    let mut action_code: u32 = 100;
 
     // Het pedaal: het veld is_pedal, en anders (oude DTO's) de naam.
     let pedal_idx = divisions.iter().position(|d| d.is_pedal).or_else(|| divisions.iter().position(|d| {
@@ -9858,7 +10039,7 @@ fn generate_couplers(divisions: &[DivisionDto]) -> Vec<CouplerDto> {
                 destination_division: man_name.clone(),
                 active: false,
                 display_in_division: ped_name.clone(),
-                midi_action_code: action_code,
+                midi_action_code: coupler_action(action_code - 100),
                 coupler_type: "unison".into(),
                 pitch_offset: 0,
                 speciaal: false,
@@ -9883,7 +10064,7 @@ fn generate_couplers(divisions: &[DivisionDto]) -> Vec<CouplerDto> {
                 destination_division: dest_name.clone(),
                 active: false,
                 display_in_division: src_name.clone(),
-                midi_action_code: action_code,
+                midi_action_code: coupler_action(action_code - 100),
                 coupler_type: "unison".into(),
                 pitch_offset: 0,
                 speciaal: false,
@@ -9908,7 +10089,7 @@ fn generate_couplers(divisions: &[DivisionDto]) -> Vec<CouplerDto> {
                 destination_division: dest_name.clone(),
                 active: false,
                 display_in_division: src_name.clone(),
-                midi_action_code: action_code,
+                midi_action_code: coupler_action(action_code - 100),
                 coupler_type: "super".into(),
                 pitch_offset: 12,
                 speciaal: false,
@@ -9933,7 +10114,7 @@ fn generate_couplers(divisions: &[DivisionDto]) -> Vec<CouplerDto> {
                 destination_division: dest_name.clone(),
                 active: false,
                 display_in_division: src_name.clone(),
-                midi_action_code: action_code,
+                midi_action_code: coupler_action(action_code - 100),
                 coupler_type: "sub".into(),
                 pitch_offset: -12,
                 speciaal: false,
@@ -9954,7 +10135,7 @@ fn generate_couplers(divisions: &[DivisionDto]) -> Vec<CouplerDto> {
             destination_division: name.clone(),
             active: false,
             display_in_division: name.clone(),
-            midi_action_code: action_code,
+            midi_action_code: coupler_action(action_code - 100),
             coupler_type: "super".into(),
             pitch_offset: 12,
             speciaal: false,
@@ -9968,7 +10149,7 @@ fn generate_couplers(divisions: &[DivisionDto]) -> Vec<CouplerDto> {
             destination_division: name.clone(),
             active: false,
             display_in_division: name.clone(),
-            midi_action_code: action_code,
+            midi_action_code: coupler_action(action_code - 100),
             coupler_type: "sub".into(),
             pitch_offset: -12,
             speciaal: false,
@@ -9986,7 +10167,7 @@ fn generate_couplers(divisions: &[DivisionDto]) -> Vec<CouplerDto> {
             destination_division: div.name.clone(),
             active: false,
             display_in_division: div.name.clone(),
-            midi_action_code: action_code,
+            midi_action_code: coupler_action(action_code - 100),
             coupler_type: "ta".into(),
             pitch_offset: 0,
             speciaal: false,
@@ -10011,7 +10192,7 @@ fn generate_couplers(divisions: &[DivisionDto]) -> Vec<CouplerDto> {
                 destination_division: dest_name.clone(),
                 active: false,
                 display_in_division: src_name.clone(),
-                midi_action_code: action_code,
+                midi_action_code: coupler_action(action_code - 100),
                 coupler_type: "melody".into(),
                 pitch_offset: 0,
                 speciaal: false,
@@ -10033,7 +10214,7 @@ fn generate_couplers(divisions: &[DivisionDto]) -> Vec<CouplerDto> {
                 destination_division: ped_name.clone(),
                 active: false,
                 display_in_division: man_name.clone(),
-                midi_action_code: action_code,
+                midi_action_code: coupler_action(action_code - 100),
                 coupler_type: "bass".into(),
                 pitch_offset: 0,
                 speciaal: false,
@@ -10233,7 +10414,7 @@ pub fn do_load_samples_from_directory_locked(state: &AppState, directory: &str) 
     // Registers met een `_trem`-map (echte tremulant-opnamen).
     let mut stops_with_trem: std::collections::HashSet<u32> = std::collections::HashSet::new();
     let mut stop_id_counter = 1u32;
-    let mut stop_action_code: u8 = 150; // Stops use action codes 150-255
+    let mut stop_action_code: u32 = 150; // App action codes; u32 is independent of MIDI message bytes
 
     // Build organ info for UI
     let mut divisions: Vec<DivisionDto> = Vec::new();
@@ -10886,6 +11067,120 @@ fn herstel_orgelwaarden(state: &AppState, settings: &OrganSettings) {
         settings.continuous_keyboard, std::sync::atomic::Ordering::Relaxed);
 }
 
+/// Snapshot of project targets, independent of their current numeric MIDI code.
+/// Stop/coupler IDs are the same stable IDs used by the console and presets.
+/// Division tremulants have no DTO ID: a renamed division deliberately loses
+/// that old binding instead of silently operating another division by index.
+fn project_midi_actions(organ: &OrganInfoDto) -> HashMap<String, u32> {
+    let mut actions = HashMap::new();
+    for (index, division) in organ.divisions.iter().enumerate() {
+        if index < 16 {
+            actions.insert(format!("division_trem:{}", division.name), 24 + index as u32);
+        }
+        for stop in &division.stops {
+            if stop.midi_action_code >= 150 {
+                actions.insert(stop.id.clone(), stop.midi_action_code);
+            }
+        }
+    }
+    for coupler in organ.couplers.iter().flatten() {
+        if coupler.midi_action_code >= 100 {
+            actions.insert(coupler.id.clone(), coupler.midi_action_code);
+        }
+    }
+    actions
+}
+
+fn project_scoped_midi_action(code: u32) -> bool {
+    code >= 100 || (24..40).contains(&code)
+}
+
+fn unchanged_project_division(
+    previous: &crate::organ_project::ProjectDivision,
+    current: &crate::organ_project::ProjectDivision,
+) -> bool {
+    previous.id == current.id && previous.name == current.name &&
+        previous.midi_channel == current.midi_channel &&
+        previous.first_midi_note == current.first_midi_note &&
+        previous.key_count == current.key_count && previous.pedal == current.pedal
+}
+
+/// The builder is authoritative after any model edit. A deliberately learned
+/// F2 override survives only for the exact same stable, unchanged division.
+fn project_mappings_for_restore(
+    divisions: &[crate::organ_project::ProjectDivision],
+    previous: Option<&[crate::organ_project::ProjectDivision]>,
+    saved: &[MidiMappingSaved],
+) -> Vec<MidiMappingSaved> {
+    divisions.iter().map(|division| {
+        let same_model = previous.is_some_and(|previous| {
+            let mut matching = previous.iter().filter(|old| old.id == division.id);
+            matching.next().is_some_and(|old| unchanged_project_division(old, division)) && matching.next().is_none()
+        });
+        if same_model {
+            let mut matching = saved.iter().filter(|mapping| mapping.division == division.name.trim());
+            if let Some(mapping) = matching.next() {
+                let valid_channel = mapping.channel.is_none_or(|channel| channel < 16);
+                let valid_range = mapping.first_midi_note.is_none_or(|note| note < 128) &&
+                    mapping.last_midi_note.is_none_or(|note| note < 128) &&
+                    match (mapping.first_midi_note, mapping.last_midi_note) { (Some(first), Some(last)) => first <= last, _ => true };
+                if matching.next().is_none() && valid_channel && valid_range { return mapping.clone(); }
+            }
+        }
+        MidiMappingSaved {
+            division: division.name.trim().to_string(), channel: Some(division.midi_channel - 1),
+            transpose: 0, first_midi_note: Some(division.first_midi_note),
+            last_midi_note: Some((u32::from(division.first_midi_note) + division.key_count - 1) as u8),
+            short_octave: false,
+        }
+    }).collect()
+}
+
+/// Called with the validated model captured before the organ swap; no project
+/// file is reparsed after the engine has already changed instruments.
+pub(crate) fn apply_project_midi_mappings(
+    state: &AppState,
+    path: &str,
+    divisions: &[crate::organ_project::ProjectDivision],
+) {
+    let settings = saved_settings_for(state, path);
+    let mappings = project_mappings_for_restore(divisions,
+        settings.as_ref().and_then(|settings| settings.project_midi_divisions.as_deref()),
+        settings.as_ref().map(|settings| settings.midi_mappings.as_slice()).unwrap_or_default());
+    state.set_midi_mappings(mappings.into_iter().map(|mapping| crate::state::MidiChannelMapping {
+        division: mapping.division, channel: mapping.channel, transpose: mapping.transpose,
+        first_midi_note: mapping.first_midi_note, last_midi_note: mapping.last_midi_note,
+        short_octave: mapping.short_octave,
+    }).collect());
+    *state.project_midi_divisions.write() = Some(divisions.to_vec());
+}
+
+/// Saved numeric bindings are meaningful only together with their saved target
+/// map. Missing/duplicate/removed targets are discarded, never guessed by their
+/// old number. Non-project organs retain the established numeric behavior.
+fn project_bindings_for_restore(
+    is_project: bool,
+    bindings: &[PresetBindingSaved],
+    previous: Option<&HashMap<String, u32>>,
+    current: &HashMap<String, u32>,
+) -> Vec<PresetBindingSaved> {
+    if !is_project { return bindings.to_vec(); }
+    bindings.iter().filter_map(|binding| {
+        if !project_scoped_midi_action(binding.preset_num) { return Some(binding.clone()); }
+        let previous = previous?;
+        let mut targets = previous.iter().filter(|(_, code)| **code == binding.preset_num);
+        let (target, _) = targets.next()?;
+        if targets.next().is_some() { return None; }
+        let new_code = *current.get(target)?;
+        if !project_scoped_midi_action(new_code) || current.values().filter(|code| **code == new_code).count() != 1 {
+            return None;
+        }
+        let mut restored = binding.clone();
+        restored.preset_num = new_code;
+        Some(restored)
+    }).collect()
+}
+
 fn restore_organ_settings(state: &AppState, organ_id: &str) {
     use crate::state::{MidiPresetBinding, MidiChannelMapping};
 
@@ -10945,7 +11240,14 @@ fn restore_organ_settings(state: &AppState, organ_id: &str) {
 
     // Restore preset bindings
     if !settings.preset_bindings.is_empty() {
-        let bindings: Vec<MidiPresetBinding> = settings.preset_bindings.iter().filter_map(|b| {
+        let current_actions = state.loaded_organ_info.read().as_ref().map(project_midi_actions).unwrap_or_default();
+        let restored = project_bindings_for_restore(
+            crate::organ_project::is_project_path(Path::new(organ_id)), &settings.preset_bindings,
+            settings.project_midi_actions.as_ref(), &current_actions);
+        if restored.len() < settings.preset_bindings.len() {
+            warn!("{} project-MIDI-koppelingen niet hersteld: doel ontbreekt of is niet eenduidig", settings.preset_bindings.len() - restored.len());
+        }
+        let bindings: Vec<MidiPresetBinding> = restored.iter().filter_map(|b| {
             // Eén omzetting voor alle triggersoorten (ook sysex en ccbit).
             saved_to_preset_binding(b).ok()
         }).collect();
@@ -11357,6 +11659,7 @@ mod log_scherm_tests {
 #[tauri::command]
 pub fn remove_from_library(state: State<AppState>, id: String) {
     info!("Removing organ from library: {}", id);
+    let settings_key = settings_library_key(&id);
     let mut lib = state.organ_library.write();
     // Een handmatig gekozen afbeelding staat als KOPIE in de app-datamap; die
     // hoort met de entry mee te verdwijnen.
@@ -11365,7 +11668,12 @@ pub fn remove_from_library(state: State<AppState>, id: String) {
         .filter_map(|o| o.image_path.clone())
         .collect();
     lib.organs.retain(|o| o.id != id);
-    lib.settings.remove(&id);
+    if let Some(key) = settings_key {
+        // A second filename can still refer to this same project UUID.
+        let shared_project = id.to_lowercase().ends_with(".jmorgan")
+            && lib.organs.iter().any(|o| settings_library_key(&o.source_path).as_ref() == Some(&key));
+        if !shared_project { lib.settings.remove(&key); }
+    }
     drop(lib);
     let map = organ_images_dir(&state);
     for k in kopie {
@@ -11433,6 +11741,11 @@ pub fn do_save_organ_settings(state: &AppState, presets: HashMap<String, PresetD
         return;
     }
 
+    let Some(settings_key) = settings_library_key(&organ_id) else {
+        warn!("Instellingen niet opgeslagen: projectidentiteit is niet meer geldig");
+        return;
+    };
+
     info!("Saving settings for organ: {}", organ_id);
 
     // Gather current MIDI mappings
@@ -11479,6 +11792,18 @@ pub fn do_save_organ_settings(state: &AppState, presets: HashMap<String, PresetD
         }
     }).collect();
 
+    // Store numeric project actions together with the exact targets currently
+    // loaded. The project file may already contain an edited division order;
+    // therefore derive this from the live DTO, not by reparsing the new file.
+    let project_midi_actions = if crate::organ_project::is_project_path(Path::new(&organ_id)) {
+        state.loaded_organ_info.read().as_ref()
+            .filter(|organ| library::pad_sleutel(&organ.id) == library::pad_sleutel(&organ_id))
+            .map(project_midi_actions)
+    } else { None };
+    let project_midi_divisions = if crate::organ_project::is_project_path(Path::new(&organ_id)) {
+        state.project_midi_divisions.read().clone()
+    } else { None };
+
     // Gather current swell bindings
     let swell_bindings: Vec<SwellBindingSaved> = state.get_swell_bindings().into_iter().map(|b| {
         SwellBindingSaved {
@@ -11507,7 +11832,7 @@ pub fn do_save_organ_settings(state: &AppState, presets: HashMap<String, PresetD
     // overschrijven; bewaar dan de bestaande opgeslagen routing.
     let division_output_pairs: Vec<library::DivisionOutputPairSaved> = if state.profile_channel_override.read().is_some() {
         let lib = state.organ_library.read();
-        lib.settings.get(&organ_id)
+        lib.settings.get(&settings_key)
             .map(|s| s.division_output_pairs.clone())
             .unwrap_or_default()
     } else {
@@ -11595,7 +11920,7 @@ pub fn do_save_organ_settings(state: &AppState, presets: HashMap<String, PresetD
     // opgeslagen indeling blijft staan, zodat het vinkje uit weer precies de eigen keuze geeft.
     let (division_wind_groups, num_wind_groups) = if state.windwerk_set_groepen.read().is_some() {
         let lib = state.organ_library.read();
-        match lib.settings.get(&organ_id) {
+        match lib.settings.get(&settings_key) {
             Some(s) => (s.division_wind_groups.clone(), s.num_wind_groups),
             None => (Vec::new(), 0),
         }
@@ -11608,7 +11933,7 @@ pub fn do_save_organ_settings(state: &AppState, presets: HashMap<String, PresetD
     // deze sessie nog niets gezet heeft (.or(existing_*)).
     let (existing_master, existing_reverb, existing_eq, existing_temperament, existing_remote_layout) = {
         let lib = state.organ_library.read();
-        match lib.settings.get(&organ_id) {
+        match lib.settings.get(&settings_key) {
             Some(s) => (s.master_volume_db, s.reverb.clone(), s.eq.clone(), s.temperament.clone(), s.remote_layout.clone()),
             None => (None, None, None, None, None),
         }
@@ -11652,6 +11977,9 @@ pub fn do_save_organ_settings(state: &AppState, presets: HashMap<String, PresetD
     let mut settings = OrganSettings {
         presets,
         preset_bindings,
+        project_midi_actions,
+        project_midi_divisions,
+        project_wind_controls: HashMap::new(), // copied under the writer lock below
         swell_bindings,
         midi_mappings,
         pipe_voicings,
@@ -11699,12 +12027,13 @@ pub fn do_save_organ_settings(state: &AppState, presets: HashMap<String, PresetD
         extra_couplers: state.extra_coupler_ids.read().clone(),
         continuous_keyboard: crate::state::DOORLOPEND_KLAVIER.load(std::sync::atomic::Ordering::Relaxed),
         remote_layout,
+        console_layout: None, // copied under the writer lock below, not from a stale snapshot
     };
     {
         let geforceerd = state.vlag_overrides.read().contains_key(&crate::library::pad_sleutel(&organ_id));
         let lib = state.organ_library.read();
         crate::orgelvlaggen::OrgelVlaggen::bewaar_in(
-            &mut settings, geforceerd, *state.orgel_vlaggen.read(), lib.settings.get(&organ_id));
+            &mut settings, geforceerd, *state.orgel_vlaggen.read(), lib.settings.get(&settings_key));
     }
 
     // Houd dezelfde lock als de migratie tot ook de bibliotheek is opgeslagen.
@@ -11714,6 +12043,14 @@ pub fn do_save_organ_settings(state: &AppState, presets: HashMap<String, PresetD
         warn!("Instellingen niet opgeslagen: migratie wacht op herladen");
         return;
     }
+    // Consolebouwer writes directly to the library. Read its latest committed
+    // value only after acquiring the same writer lock: an autosave that started
+    // before Apply must not erase the newly applied design (or resurrect reset).
+    neem_console_layout_over(&mut settings, &state.organ_library.read(), &organ_id);
+    // Valve changes commit directly, like the console layout. Read the latest
+    // durable values here so a late autosave cannot undo a completed change.
+    settings.project_wind_controls = instellingen_in_bibliotheek(&state.organ_library.read(), &organ_id)
+        .map(|settings| settings.project_wind_controls.clone()).unwrap_or_default();
     // Eigen zijbestand per definitie of samplemap; de anonieme oude versie blijft intact.
     if let Err(e) = schrijf_eigen_zijbestand_vergrendeld(&organ_id, &settings) {
         warn!("Orgelinstellingen niet als zijbestand bewaard: {}", e);
@@ -11721,7 +12058,7 @@ pub fn do_save_organ_settings(state: &AppState, presets: HashMap<String, PresetD
 
     {
         let mut lib = state.organ_library.write();
-        lib.settings.insert(organ_id, settings);
+        lib.settings.insert(settings_key, settings);
     }
     state.save_library();
 }
@@ -11740,6 +12077,361 @@ pub fn get_organ_settings(state: State<AppState>) -> Option<OrganSettings> {
         settings.master_volume_db = Some(db);
     }
     Some(instellingen_voor_frontend(&state, settings))
+}
+
+#[derive(Debug, Serialize)]
+pub struct ConsoleLayoutSaveResult {
+    pub warning: Option<String>,
+}
+
+fn restore_project_wind_controls(state: &AppState, organ_id: &str) {
+    let saved = saved_settings_for(state, organ_id).unwrap_or_default().project_wind_controls;
+    let plan = state.project_wind_plan.read();
+    let Some(plan) = plan.as_ref() else { state.project_wind_controls.write().clear(); return; };
+    let restored = crate::project_wind_controls::restore(plan, &saved);
+    for (index, control) in plan.controls.iter().enumerate() {
+        if let Some(value) = restored.get(&control.id) {
+            state.send_audio_command(AudioCommand::SetProjectWindControl { index, value: *value });
+        }
+    }
+    *state.project_wind_controls.write() = restored;
+    let drawn = state.drawn_stops.read();
+    for id in plan.controls.iter().flat_map(|control| control.project_stop_ids.iter()) {
+        state.send_audio_command(AudioCommand::SetProjectWindStop { stop_id: *id, drawn: drawn.contains(&format!("project_{id}")) });
+    }
+}
+
+#[tauri::command]
+pub fn get_project_wind_controls(state: State<AppState>, organ_id: String) -> Result<serde_json::Value, String> {
+    get_project_wind_controls_inner(&state, &organ_id)
+}
+
+pub fn get_project_wind_controls_inner(state: &AppState, organ_id: &str) -> Result<serde_json::Value, String> {
+    let _gate = state.load_switch_gate.try_lock_for(std::time::Duration::from_secs(2))
+        .ok_or("Het orgel wordt geladen. Probeer daarna opnieuw")?;
+    let current = state.current_organ_id.read();
+    if current.as_deref().map(library::pad_sleutel) != Some(library::pad_sleutel(organ_id)) {
+        return Err("Het geladen orgel is gewijzigd. Vernieuw de klepbediening".into());
+    }
+    let plan = state.project_wind_plan.read();
+    let saved = state.project_wind_controls.read();
+    let drawn = state.drawn_stops.read();
+    Ok(match plan.as_ref() {
+        Some(plan) => {
+            let live = crate::audio::project_wind_control_values();
+            let values: HashMap<String, f32> = plan.controls.iter().enumerate().map(|(index, control)| {
+                let value = if control.automatic { live.get(index).copied().unwrap_or(control.default_value) }
+                    else if control.project_stop_ids.is_empty() { saved.get(&control.id).copied().unwrap_or(control.default_value) }
+                    else if control.project_stop_ids.iter().any(|id| drawn.contains(&format!("project_{id}"))) { 1.0 } else { 0.0 };
+                (control.id.clone(), value)
+            }).collect();
+            serde_json::json!({"controls": plan.controls, "values": values,
+                "source_model_requested": state.orgel_vlaggen.read().windwerk_van_set})
+        }
+        None => serde_json::json!({"controls": [], "values": {}, "source_model_requested": false}),
+    })
+}
+
+#[tauri::command]
+pub fn set_project_wind_control(state: State<AppState>, organ_id: String, control_id: String, value: f32) -> Result<ConsoleLayoutSaveResult, String> {
+    set_project_wind_control_inner(&state, &organ_id, &control_id, value)
+}
+
+/// Persist first, then publish the target to audio. A delayed slider response
+/// cannot change a different organ, and a failed durable write changes no state.
+pub fn set_project_wind_control_inner(state: &AppState, organ_id: &str, control_id: &str, value: f32) -> Result<ConsoleLayoutSaveResult, String> {
+    let _gate = state.load_switch_gate.try_lock_for(std::time::Duration::from_secs(2))
+        .ok_or("Het orgel wordt geladen. Probeer daarna opnieuw")?;
+    let current = state.current_organ_id.read();
+    let id = current.as_deref().ok_or("Geen orgel geladen")?;
+    if library::pad_sleutel(id) != library::pad_sleutel(organ_id) {
+        return Err("Het geladen orgel is gewijzigd. Vernieuw de klepbediening".into());
+    }
+    let plan = state.project_wind_plan.read();
+    let plan = plan.as_ref().ok_or("Dit orgel heeft geen bronwindnetwerk")?;
+    let (index, control) = plan.controls.iter().enumerate().find(|(_, control)| control.id == control_id)
+        .ok_or("Deze klepbesturing bestaat niet in het geladen orgel")?;
+    if control.automatic { return Err("Deze regelaar volgt automatisch de bronbalg of besturingsketen".into()); }
+    if !control.project_stop_ids.is_empty() { return Err("Deze klep volgt de projectregisters. Bedien het gekoppelde register".into()); }
+    let value = crate::project_wind_controls::normalise(control.kind, value)?;
+    let mut values = state.project_wind_controls.read().clone();
+    values.insert(control_id.to_owned(), value);
+    let _writer = ZIJBESTAND_SCHRIJVER.lock();
+    let settings = {
+        let mut lib = state.organ_library.write();
+        let mut updated = lib.clone();
+        let fallback = if instellingen_in_bibliotheek(&lib, id).is_none() { lees_eigen_zijbestand(id)? } else { None };
+        let mut settings = instellingen_in_bibliotheek(&lib, id).cloned().or(fallback).unwrap_or_default();
+        settings.project_wind_controls = values.clone();
+        let key = settings_library_key(id).ok_or("Geen geldige projectidentiteit voor de instellingen")?;
+        updated.settings.retain(|old, _| library::pad_sleutel(old) != library::pad_sleutel(&key));
+        updated.settings.insert(key, settings.clone());
+        library::probeer_bibliotheek_op_te_slaan(&state.app_data_dir, &updated)
+            .map_err(|error| format!("Klepstand niet opgeslagen; de vorige stand is behouden. {error}"))?;
+        *lib = updated;
+        settings
+    };
+    let warning = schrijf_eigen_zijbestand_vergrendeld(id, &settings).err()
+        .map(|error| format!("Klepstand lokaal opgeslagen. De kopie bij het project kon niet worden bijgewerkt: {error}"));
+    *state.project_wind_controls.write() = values;
+    state.send_audio_command(AudioCommand::SetProjectWindControl { index, value });
+    Ok(ConsoleLayoutSaveResult { warning })
+}
+
+/// Read only the requested loaded organ. Passing the expected ID prevents a
+/// delayed frontend response from restoring the previous organ's design.
+#[tauri::command]
+pub fn get_console_layout(state: State<AppState>, organ_id: String) -> Result<Option<serde_json::Value>, String> {
+    get_console_layout_inner(&state, &organ_id)
+}
+
+pub fn get_console_layout_inner(state: &AppState, organ_id: &str) -> Result<Option<serde_json::Value>, String> {
+    let current = state.current_organ_id.read();
+    let id = current.as_deref().ok_or("Geen orgel geladen")?;
+    controleer_console_orgel(id, organ_id)?;
+    Ok(lees_opgeslagen_instellingen(state, id).and_then(|s| s.console_layout))
+}
+
+fn controleer_console_orgel(current: &str, expected: &str) -> Result<(), String> {
+    if library::pad_sleutel(current) != library::pad_sleutel(expected) {
+        return Err("Het geladen orgel is gewijzigd. Open Consolebouwer opnieuw voordat u opslaat".into());
+    }
+    Ok(())
+}
+
+fn neem_console_layout_over(settings: &mut OrganSettings, lib: &library::OrganLibrary, organ_id: &str) {
+    settings.console_layout = instellingen_in_bibliotheek(lib, organ_id)
+        .and_then(|s| s.console_layout.clone());
+}
+
+fn valideer_console_voor_orgel(layout: &crate::console_layout::ConsoleLayout, organ: &OrganInfoDto) -> Result<(), String> {
+    layout.validate()?;
+    let stops = organ.divisions.iter().flat_map(|d| &d.stops).map(|s| s.id.as_str()).collect();
+    let couplers = organ.couplers.as_deref().unwrap_or_default().iter().map(|c| c.id.as_str()).collect();
+    layout.validate_targets(&stops, &couplers)
+}
+
+/// Transactional library update: a failed durable write leaves the in-memory
+/// library and all unrelated organ settings untouched.
+fn bewaar_console_layout_in_bibliotheek(
+    app_data_dir: &Path,
+    lib: &mut library::OrganLibrary,
+    organ_id: &str,
+    fallback: Option<OrganSettings>,
+    layout: Option<crate::console_layout::ConsoleLayout>,
+) -> Result<OrganSettings, String> {
+    let storage_key = settings_library_key(organ_id).ok_or("Geen geldige projectidentiteit voor de instellingen")?;
+    let key = library::pad_sleutel(&storage_key);
+    let mut updated = lib.clone();
+    let mut settings = instellingen_in_bibliotheek(lib, organ_id).cloned().or(fallback).unwrap_or_default();
+    settings.console_layout = layout.map(serde_json::to_value).transpose().map_err(|e| e.to_string())?;
+    updated.settings.retain(|id, _| library::pad_sleutel(id) != key);
+    updated.settings.insert(storage_key, settings.clone());
+    library::probeer_bibliotheek_op_te_slaan(app_data_dir, &updated)
+        .map_err(|e| format!("Consoleontwerp niet opgeslagen; het vorige ontwerp is behouden. {}", e))?;
+    *lib = updated;
+    Ok(settings)
+}
+
+#[tauri::command]
+pub fn set_console_layout(state: State<AppState>, organ_id: String, layout: Option<crate::console_layout::ConsoleLayout>) -> Result<ConsoleLayoutSaveResult, String> {
+    set_console_layout_inner(&state, &organ_id, layout)
+}
+
+pub fn set_console_layout_inner(state: &AppState, organ_id: &str, layout: Option<crate::console_layout::ConsoleLayout>) -> Result<ConsoleLayoutSaveResult, String> {
+    // Same lock order as loading and autosave. An Apply belongs to exactly one
+    // loaded definition, even when its sibling definition uses the same folder.
+    let _gate = state.load_switch_gate.try_lock_for(std::time::Duration::from_secs(2))
+        .ok_or("Het orgel wordt geladen of de audio-uitgang wisselt. Probeer daarna opnieuw")?;
+    let current = state.current_organ_id.read();
+    let id = current.as_deref().ok_or("Geen orgel geladen")?;
+    controleer_console_orgel(id, organ_id)?;
+    {
+        let loaded = state.loaded_organ_info.read();
+        let organ = loaded.as_ref().ok_or("Geen orgel geladen")?;
+        controleer_console_orgel(&organ.id, id)?;
+        if let Some(ref layout) = layout { valideer_console_voor_orgel(layout, organ)?; }
+    }
+    let _writer = ZIJBESTAND_SCHRIJVER.lock();
+    if migratie_wacht_op_laden(id) { return Err("Laad eerst het orgel opnieuw om de instellingenmigratie af te ronden".into()); }
+    let settings = {
+        let mut lib = state.organ_library.write();
+        let fallback = if instellingen_in_bibliotheek(&lib, id).is_some() {
+            None
+        } else { lees_eigen_zijbestand(id)? };
+        bewaar_console_layout_in_bibliotheek(&state.app_data_dir, &mut lib, id, fallback, layout)?
+    };
+    let warning = schrijf_eigen_zijbestand_vergrendeld(id, &settings).err().map(|error| {
+        warn!("Consoleontwerp lokaal opgeslagen, zijbestand niet bijgewerkt: {}", error);
+        format!("Het consoleontwerp is lokaal opgeslagen. De kopie bij de sampleset kon niet worden bijgewerkt: {}", error)
+    });
+    Ok(ConsoleLayoutSaveResult { warning })
+}
+
+#[cfg(test)]
+mod console_layout_opslag_tests {
+    use super::*;
+
+    fn map(name: &str) -> PathBuf {
+        static NUMBER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let unique = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let dir = std::env::temp_dir().join(format!("jm-console-{name}-{}-{unique}-{}", std::process::id(), NUMBER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn console_ontwerpen_van_twee_definities_in_een_map_blijven_apart_na_herstart() {
+        let dir = map("twee-definities");
+        let data = dir.join("profile"); std::fs::create_dir(&data).unwrap();
+        let a = dir.join("A.organ"); let b = dir.join("B.organ");
+        std::fs::write(&a, "[Organ]\nChurchName=A").unwrap();
+        std::fs::write(&b, "[Organ]\nChurchName=B").unwrap();
+        let aid = a.to_string_lossy().to_string(); let bid = b.to_string_lossy().to_string();
+        let mut lib = library::OrganLibrary::default();
+        lib.settings.insert(aid.clone(), OrganSettings { master_volume_db: Some(-3.0), ..Default::default() });
+        lib.settings.insert(bid.clone(), OrganSettings { master_volume_db: Some(-9.0), ..Default::default() });
+        let la = crate::console_layout::tests::layout();
+        let mut lb = la.clone(); lb.name = "Console B".into(); lb.theme = "ivory".into();
+        {
+            let _guard = ZIJBESTAND_SCHRIJVER.lock();
+            let sa = bewaar_console_layout_in_bibliotheek(&data, &mut lib, &aid, None, Some(la.clone())).unwrap();
+            let sb = bewaar_console_layout_in_bibliotheek(&data, &mut lib, &bid, None, Some(lb.clone())).unwrap();
+            schrijf_eigen_zijbestand_vergrendeld(&aid, &sa).unwrap();
+            schrijf_eigen_zijbestand_vergrendeld(&bid, &sb).unwrap();
+        }
+        assert_ne!(zijbestand_identiteit(&aid).unwrap().0, zijbestand_identiteit(&bid).unwrap().0);
+        let reopened = library::load_library(&data);
+        assert_eq!(reopened.settings[&aid].console_layout, Some(serde_json::to_value(&la).unwrap()));
+        assert_eq!(reopened.settings[&bid].console_layout, Some(serde_json::to_value(&lb).unwrap()));
+        assert_eq!(reopened.settings[&aid].master_volume_db, Some(-3.0));
+        assert_eq!(reopened.settings[&bid].master_volume_db, Some(-9.0));
+        assert_eq!(lees_eigen_zijbestand(&aid).unwrap().unwrap().console_layout, Some(serde_json::to_value(&la).unwrap()));
+        assert_eq!(lees_eigen_zijbestand(&bid).unwrap().unwrap().console_layout, Some(serde_json::to_value(&lb).unwrap()));
+        assert!(controleer_console_orgel(&aid, &bid).is_err());
+    }
+
+    #[test]
+    fn mislukte_duurzame_opslag_verandert_geen_instellingen() {
+        let dir = map("opslagfout");
+        let blocked = dir.join("geen-map"); std::fs::write(&blocked, "bestand").unwrap();
+        let mut lib = library::OrganLibrary::default();
+        lib.settings.insert("A.organ".into(), OrganSettings { master_volume_db: Some(-6.0), ..Default::default() });
+        let before = serde_json::to_value(&lib).unwrap();
+        assert!(bewaar_console_layout_in_bibliotheek(&blocked, &mut lib, "A.organ", None, Some(crate::console_layout::tests::layout())).is_err());
+        assert_eq!(serde_json::to_value(&lib).unwrap(), before);
+        std::fs::write(dir.join("organ_library.json"), "beschadigd").unwrap();
+        assert!(bewaar_console_layout_in_bibliotheek(&dir, &mut lib, "A.organ", None, Some(crate::console_layout::tests::layout())).is_err());
+        assert_eq!(serde_json::to_value(&lib).unwrap(), before);
+        assert_eq!(std::fs::read_to_string(dir.join("organ_library.json")).unwrap(), "beschadigd");
+    }
+
+    #[test]
+    fn autosave_neemt_laatste_ontwerp_en_bewuste_reset_over() {
+        let dir = map("autosave");
+        let mut lib = library::OrganLibrary::default();
+        // Represents an autosave whose runtime snapshot predates Apply.
+        let mut snapshot = OrganSettings::default();
+        let design = crate::console_layout::tests::layout();
+        bewaar_console_layout_in_bibliotheek(&dir, &mut lib, "A.organ", None, Some(design.clone())).unwrap();
+        neem_console_layout_over(&mut snapshot, &lib, "A.organ");
+        assert_eq!(snapshot.console_layout, Some(serde_json::to_value(&design).unwrap()));
+        // A later reset must not be undone by the same old snapshot.
+        bewaar_console_layout_in_bibliotheek(&dir, &mut lib, "A.organ", None, None).unwrap();
+        neem_console_layout_over(&mut snapshot, &lib, "A.organ");
+        assert!(snapshot.console_layout.is_none());
+        assert!(library::load_library(&dir).settings["A.organ"].console_layout.is_none());
+    }
+
+    #[test]
+    fn bestaande_instellingen_zonder_ontwerp_blijven_leesbaar() {
+        let original = OrganSettings { master_volume_db: Some(-4.0), ..Default::default() };
+        let json = serde_json::to_string(&original).unwrap();
+        assert!(!json.contains("console_layout"));
+        let old: OrganSettings = serde_json::from_str(&json).unwrap();
+        assert!(old.console_layout.is_none());
+        assert_eq!(old.master_volume_db, Some(-4.0));
+    }
+
+    #[test]
+    fn onbekend_of_beschadigd_consoleontwerp_beschadigt_geen_andere_instellingen() {
+        for design in [serde_json::json!({"version": 99, "future": {"special": [1, 2, 3]}}), serde_json::json!(["ongeldig", 42])] {
+            let mut settings = serde_json::to_value(OrganSettings { master_volume_db: Some(-4.0), ..Default::default() }).unwrap();
+            settings["console_layout"] = design.clone();
+            let read: OrganSettings = serde_json::from_value(settings).unwrap();
+            assert_eq!(read.master_volume_db, Some(-4.0));
+            assert_eq!(read.console_layout, Some(design.clone()));
+            let serialized = serde_json::to_value(read).unwrap();
+            assert_eq!(serialized["console_layout"], design);
+        }
+    }
+
+    fn projectbestand(dir: &Path, filename: &str, uuid: &str) -> String {
+        let source = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+        let project = serde_json::json!({
+            "schema_version": 1, "id": uuid, "name": "Eigen orgel", "target_a4_hz": 440.0,
+            "next_stop_id": 2, "next_division_id": 2,
+            "sources": [{"id": source, "path": "Bron.organ", "fingerprint": "test-fixture"}],
+            "divisions": [{"id": 1, "name": "Hoofdwerk", "midi_channel": 2, "first_midi_note": 36, "key_count": 61}],
+            "stops": [{"id": 1, "source_id": source, "source_stop_id": 1, "division_id": 1}]
+        });
+        let path = dir.join(filename);
+        std::fs::write(&path, serde_json::to_vec(&project).unwrap()).unwrap();
+        path.to_string_lossy().into_owned()
+    }
+
+    #[test]
+    fn project_save_as_uses_one_uuid_settings_entry_for_both_filenames() {
+        let dir = map("project-save-as");
+        let data = dir.join("profile"); std::fs::create_dir(&data).unwrap();
+        let uuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+        let first = projectbestand(&dir, "Eigen.jmorgan", uuid);
+        let copy = projectbestand(&dir, "Andere naam.jmorgan", uuid);
+        let mut lib = library::OrganLibrary::default();
+        let key = settings_library_key(&first).unwrap();
+        assert_eq!(key, format!("jm-project:{uuid}"));
+        assert_eq!(settings_library_key(&copy), Some(key.clone()));
+        lib.settings.insert(key.clone(), OrganSettings { master_volume_db: Some(-7.0), ..Default::default() });
+        let layout = crate::console_layout::tests::layout();
+        let saved = bewaar_console_layout_in_bibliotheek(&data, &mut lib, &copy, None, Some(layout.clone())).unwrap();
+        schrijf_eigen_zijbestand(&copy, &saved).unwrap();
+        assert_eq!(instellingen_in_bibliotheek(&lib, &first).unwrap().console_layout, Some(serde_json::to_value(&layout).unwrap()));
+        assert_eq!(instellingen_in_bibliotheek(&lib, &copy).unwrap().master_volume_db, Some(-7.0));
+        assert_eq!(lib.settings.len(), 1);
+        let reopened = library::load_library(&data);
+        assert_eq!(instellingen_in_bibliotheek(&reopened, &first).unwrap().master_volume_db, Some(-7.0));
+        assert_eq!(zijbestand_identiteit(&first).unwrap().0, zijbestand_identiteit(&copy).unwrap().0);
+        assert!(!lib.settings.contains_key(&first));
+        assert!(!lib.settings.contains_key(&copy));
+    }
+
+    #[test]
+    fn replacing_project_at_same_path_does_not_inherit_the_previous_uuid_settings() {
+        let dir = map("project-replaced");
+        let data = dir.join("profile"); std::fs::create_dir(&data).unwrap();
+        let old_uuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+        let new_uuid = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+        let path = projectbestand(&dir, "Eigen.jmorgan", old_uuid);
+        let old_key = settings_library_key(&path).unwrap();
+        let old_sidecar = zijbestand_identiteit(&path).unwrap().0;
+        let mut lib = library::OrganLibrary::default();
+        let old = OrganSettings { master_volume_db: Some(-11.0), ..Default::default() };
+        lib.settings.insert(old_key.clone(), old.clone());
+        // Old versions might also have left a path-keyed project entry. It
+        // must not be a fallback once the UUID at that path changes.
+        lib.settings.insert(path.clone(), old.clone());
+        schrijf_eigen_zijbestand(&path, &old).unwrap();
+        projectbestand(&dir, "Eigen.jmorgan", new_uuid);
+        assert!(instellingen_in_bibliotheek(&lib, &path).is_none());
+        assert!(lees_eigen_zijbestand(&path).unwrap().is_none());
+        assert_ne!(zijbestand_identiteit(&path).unwrap().0, old_sidecar);
+        let layout = crate::console_layout::tests::layout();
+        let saved = bewaar_console_layout_in_bibliotheek(&data, &mut lib, &path, None, Some(layout)).unwrap();
+        assert_eq!(saved.master_volume_db, None);
+        assert_eq!(lib.settings[&old_key].master_volume_db, Some(-11.0));
+        assert!(lib.settings.contains_key(&format!("jm-project:{new_uuid}")));
+        assert!(old_sidecar.is_file());
+    }
 }
 
 /// Ruwe opgeslagen instellingen: bibliotheek (AppData), anders de
@@ -11762,6 +12454,19 @@ fn instellingen_voor_frontend(state: &AppState, mut settings: OrganSettings) -> 
     if let Some(o) = organ.as_ref() {
         let (trems, _) = nagebootste_tremulant_voor_herstel(&settings.division_tremulants, &o.divisions);
         settings.division_tremulants = trems;
+        if crate::organ_project::is_project_path(Path::new(&o.id)) {
+            let actions = project_midi_actions(o);
+            settings.preset_bindings = project_bindings_for_restore(
+                true, &settings.preset_bindings, settings.project_midi_actions.as_ref(), &actions);
+            settings.project_midi_actions = Some(actions);
+            settings.midi_mappings = state.get_midi_mappings().into_iter().map(|mapping| MidiMappingSaved {
+                division: mapping.division, channel: mapping.channel, transpose: mapping.transpose,
+                first_midi_note: mapping.first_midi_note, last_midi_note: mapping.last_midi_note,
+                short_octave: mapping.short_octave,
+            }).collect();
+            settings.project_midi_divisions = state.project_midi_divisions.read().clone();
+            settings.project_wind_controls = state.project_wind_controls.read().clone();
+        }
     }
     settings
 }
@@ -11772,7 +12477,7 @@ pub fn export_settings(state: State<AppState>, path: String) -> Result<(), Strin
     let organ_id = state.current_organ_id.read().clone()
         .ok_or("Geen orgel geladen")?;
     let lib = state.organ_library.read();
-    let settings = lib.settings.get(&organ_id)
+    let settings = instellingen_in_bibliotheek(&lib, &organ_id)
         .ok_or("Geen instellingen gevonden")?;
     let json = serde_json::to_string_pretty(settings)
         .map_err(|e| format!("Serialisatie fout: {}", e))?;
@@ -11784,19 +12489,52 @@ pub fn export_settings(state: State<AppState>, path: String) -> Result<(), Strin
 
 /// Import settings from a JSON file
 #[tauri::command]
-pub fn import_settings(state: State<AppState>, path: String) -> Result<OrganSettings, String> {
+pub fn import_settings(state: State<AppState>, path: String, organ_id: String) -> Result<OrganSettings, String> {
+    import_settings_inner(&state, &path, &organ_id)
+}
+
+pub fn import_settings_inner(state: &AppState, path: &str, organ_id: &str) -> Result<OrganSettings, String> {
     let json = lees_instellingenbestand(Path::new(&path))?;
-    let settings: OrganSettings = serde_json::from_str(&json)
+    let mut settings: OrganSettings = serde_json::from_str(&json)
         .map_err(|e| format!("Ongeldig formaat: {}", e))?;
 
-    // Save to library
-    let organ_id = state.current_organ_id.read().clone()
-        .ok_or("Geen orgel geladen")?;
+    // A portable console is validated against this organ before any settings
+    // change. Keep the load gate until the checked library write completes.
+    let _gate = state.load_switch_gate.lock();
+    let current = state.current_organ_id.read();
+    let loaded_id = current.as_deref().ok_or("Geen orgel geladen")?;
+    controleer_console_orgel(loaded_id, &organ_id)?;
+    {
+        let plan = state.project_wind_plan.read();
+        settings.project_wind_controls = match plan.as_ref() {
+            Some(plan) => {
+                for control in &plan.controls {
+                    if let Some(value) = settings.project_wind_controls.get(&control.id) {
+                        crate::project_wind_controls::normalise(control.kind, *value)?;
+                    }
+                }
+                crate::project_wind_controls::restore(plan, &settings.project_wind_controls)
+            }
+            None => HashMap::new(),
+        };
+    }
+    if let Some(ref raw_layout) = settings.console_layout {
+        let layout: crate::console_layout::ConsoleLayout = serde_json::from_value(raw_layout.clone())
+            .map_err(|e| format!("Ongeldig consoleontwerp in instellingen: {}", e))?;
+        let loaded = state.loaded_organ_info.read();
+        valideer_console_voor_orgel(&layout, loaded.as_ref().ok_or("Geen orgel geladen")?)?;
+    }
+    let _writer = ZIJBESTAND_SCHRIJVER.lock();
+    let settings_key = settings_library_key(loaded_id).ok_or("Geen geldige projectidentiteit voor de instellingen")?;
     {
         let mut lib = state.organ_library.write();
-        lib.settings.insert(organ_id, settings.clone());
+        let mut updated = lib.clone();
+        updated.settings.retain(|id, _| library::pad_sleutel(id) != library::pad_sleutel(&settings_key));
+        updated.settings.insert(settings_key, settings.clone());
+        library::probeer_bibliotheek_op_te_slaan(&state.app_data_dir, &updated)?;
+        *lib = updated;
     }
-    state.save_library();
+    restore_project_wind_controls(state, loaded_id);
     info!("Imported settings from {}", path);
     Ok(settings)
 }
@@ -12171,13 +12909,22 @@ pub fn get_saved_presets(state: State<AppState>) -> HashMap<String, PresetData> 
         None => return HashMap::new(),
     };
     let lib = state.organ_library.read();
-    lib.settings.get(&organ_id).map(|s| s.presets.clone()).unwrap_or_default()
+    instellingen_in_bibliotheek(&lib, &organ_id).map(|s| s.presets.clone()).unwrap_or_default()
 }
 
 #[tauri::command]
-pub fn restore_preset_bindings(state: State<AppState>, bindings: Vec<PresetBindingSaved>) {
+pub fn restore_preset_bindings(
+    state: State<AppState>,
+    bindings: Vec<PresetBindingSaved>,
+    project_midi_actions: Option<HashMap<String, u32>>,
+) {
     use crate::state::MidiPresetBinding;
 
+    let organ = state.loaded_organ_info.read();
+    let is_project = organ.as_ref().is_some_and(|organ| crate::organ_project::is_project_path(Path::new(&organ.id)));
+    let current = organ.as_ref().map(self::project_midi_actions).unwrap_or_default();
+    let bindings = project_bindings_for_restore(is_project, &bindings, project_midi_actions.as_ref(), &current);
+    drop(organ);
     let midi_bindings: Vec<MidiPresetBinding> = bindings.into_iter().filter_map(|b| {
         saved_to_preset_binding(&b).ok()
     }).collect();
@@ -12745,3 +13492,7 @@ mod instellingenbestand_tests;
 #[cfg(test)]
 #[path = "commands_tests/setmap_vervangen_tests.rs"]
 mod setmap_vervangen_tests;
+
+#[cfg(test)]
+#[path = "commands_tests/project_midi_bindings_tests.rs"]
+mod project_midi_bindings_tests;

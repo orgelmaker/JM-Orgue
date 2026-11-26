@@ -1,0 +1,376 @@
+JM-ORGUE — TECHNISCH ONDERZOEK ORGELBOUWER, FASE 2
+Datum: 26 november 2026
+Status: haalbaarheid onderzocht; de samengestelde Orgelbouwer is nog niet ingebouwd.
+
+Onderzoeksvraag
+Kan een gebruiker uit bestaande samplesets een eigen orgel samenstellen, en wat
+betekenen verschillen in galm, opnamepositie, stemming en bestandsformaat daarvoor?
+
+1. OORDEEL
+
+Ja. De bestaande sampler biedt een bruikbare basis. De aanbevolen eerste versie
+neemt complete registers uit twee of meer ondersteunde, leesbare brondefinities
+over in een zelfstandig orgelproject. Het project krijgt eigen manualen, pedaal,
+koppels, instellingen en een console via de bestaande visuele Consolebouwer.
+
+Het resultaat kan technisch correct spelen zonder dat het automatisch klinkt
+alsof alle pijpen in dezelfde kerk zijn opgenomen. Dat onderscheid moet zichtbaar
+blijven. Vooral droge/directe opnamen zijn geschikt voor een gezamenlijke ruimte.
+Verschillende natte opnamen kunnen als hybride instrument worden gecombineerd,
+maar hun oorspronkelijke ruimtes verdwijnen niet door één extra galm te kiezen.
+
+Advies: doorgaan met projectmodel, bronanalyse en compilatie van complete registers.
+Voeg bronafhankelijke stemming en galmsends toe voordat de app een algemene
+akoestisch samenhangende combinatie van droge en natte sets belooft.
+
+Dit onderzoek omvat code-inspectie, primaire documentatie en gerichte bestaande
+tests. Er is nog geen samengesteld orgel met twee echte samplesets gebouwd of
+beluisterd. De uitgevoerde tests onderbouwen de bouwstenen, niet die eindfunctie.
+
+2. ONDERZOCHTE VERSIE
+
+Werkmap: C:\Bronbestanden\Prive\JM-Orgue-consolebouwer
+Branch: codex/consolebouwer
+Basiscommit: 041dc854bbdc220b35b62fe1db523337399353bc (JM-Orgue 0.9.62).
+De GitHub-vergelijking met master leverde tijdens dit onderzoek geen verschil
+met deze basiscommit op. De lokale Consolebouwer-aanpassingen zijn meegenomen.
+Er zijn voor dit onderzoek geen wijzigingen aan de audio-engine, oorspronkelijke
+samplesets of gebruikersinstellingen uitgevoerd en geen vensters bediend.
+
+Alle onderstaande codepaden zijn relatief aan VirtualPipeOrgan in deze werkmap.
+Regelnummers verwijzen naar de onderzochte werkversie.
+
+3. WAT KAN AL, EN WAT ONTBREEKT?
+
+Onderwerp                  Bestaande basis / benodigde uitbreiding
+-------------------------  ----------------------------------------------------
+Gelijktijdig afspelen       Kan binnen één geladen speelplan. Twee bestaande
+                           laadopdrachten achter elkaar vervangen elkaar.
+44,1 en 48 kHz              Kan. Voorgeladen stemmen compenseren de bronrate;
+                           volledig geladen samples worden geresampled.
+Mono en stereo             Kan, mits stereo-laden ingeschakeld. Anders mixt de
+                           procesbrede instelling de bron naar mono.
+Meerkanaals WAV             De loader gebruikt de eerste twee kanalen. Een
+                           surroundbestand wordt niet volledig weergegeven.
+Releases en tremulanten     Veel metadata wordt al ingelezen en afgespeeld;
+                           die moet bij samenstellen volledig behouden blijven.
+Pijpstemming               Uitgebreide bestaande correcties per pijp. Het beleid
+                           en doeltemperament zijn nu echter grotendeels globaal.
+Toegevoegde galm            Eén gezamenlijke galmbus. Geen vrije send per bron.
+Convolution                Actieve IR-route is mono-wet, gedupliceerd naar L/R.
+                           Een aanwezige stereoklasse bewijst geen actieve
+                           stereoweergave in de app-callback.
+EQ en timing               Uitgangs-EQ en onset-trim bestaan. Algemene bron-EQ
+                           en instelbare uitlijning per bron ontbreken.
+Opnameposities              Er zijn perspectieflagen, maar gelijke labels worden
+                           nu globaal samengevoegd. Bronidentiteit toevoegen.
+Veilige projectopslag       Nieuw projecttype en stabiele identiteit nodig;
+                           de bronorgels mogen geen gedeelde projectopslag zijn.
+
+4. GALM EN OPNAMEN
+
+A. Droog/direct + droog/direct
+Dit is de beste uitgangspositie. De bronnen kunnen naar één gemeenschappelijke
+ruimte worden gestuurd, met bronvolume en intonatie om de balans af te werken.
+Ook dan kunnen microfoonafstand, richtingskarakter, ruis, aanspraak en klankkleur
+verschillen. Het label 'dry' alleen bewijst niet dat twee opnamen gelijksoortig zijn.
+
+B. Droog + nat
+Speelbaar, maar de droge bron heeft meestal meer toegevoegde ruimte nodig dan de
+natte. De huidige gezamenlijke galmbus geeft beide dezelfde behandeling. Voor
+goede regeling is een send per bron nodig: bijvoorbeeld droog naar de gedeelde
+galm en nat met send nul of lager. Dat maakt de oorspronkelijke natte ruimte niet
+gelijk aan de nieuwe ruimte; de uiteindelijke combinatie blijft te beoordelen.
+
+C. Nat + nat uit verschillende kerken
+Kan muzikaal bruikbaar zijn, vooral als een hybride klank het doel is. Er is geen
+betrouwbare algemene omzetting naar 'één echte kerk'. Extra convolution voegt
+een ruimte toe aan reeds aanwezige ruimtes. Galm uitzetten verwijdert alleen de
+toegevoegde galm, niet de ruimte in de bronopname.
+
+D. Galmstaarten verkorten
+Kan een latere, optionele techniek zijn om verschillen te verminderen. Het mag
+niet worden verkocht als het volledig droog maken van een opname. Aanspraak en
+aangehouden toon bevatten eveneens de invloed van de ruimte. De oorspronkelijke
+release-aanzet, frequentieafhankelijk verval en crossfade moeten behouden blijven.
+De Hauptwerk CODM-handleiding beschrijft zowel deze techniek als deze beperking [1].
+
+E. Opnameposities en timing
+Front, Rear of Dry zijn labels, geen akoestische meting. Twee bronnen met 'Front'
+mogen geen gezamenlijke regelaar krijgen doordat hun namen toevallig gelijk zijn.
+Behoud de samenhang van stereohelften, lagen en tremulantvarianten. Meng meerdere
+microfoonposities van één set alleen als de bestaande bronlogica behouden blijft.
+
+De loader verwijdert al beginnende stilte van attacks en compenseert resample-
+vertraging. Dat is geen gekalibreerde uitlijning tussen verschillende opnamen.
+Een latere delayregeling hoort expliciet en optioneel te zijn; automatisch alle
+aanspraken gelijkzetten kan juist het muzikale en ruimtelijke karakter aantasten.
+
+Voor de eerste versie: één expliciet gekozen opnamepositie per bron. Classificeer
+akoestiek als droog/direct, nat of onbekend, met herkomst van die beoordeling.
+Geen stellige classificatie uitsluitend uit een naam of de lengte van één release.
+
+5. TOONHOOGTE, TEMPERAMENT EN BEWUSTE ZWEVING
+
+Concerttoonhoogte en temperament zijn verschillende instellingen. A=440 zegt iets
+over de referentie; bijvoorbeeld middentoon of gelijkzwevend bepaalt daarnaast
+de intervallen. Hauptwerk behandelt deze eveneens afzonderlijk [2].
+
+De correctie voor een concerttoonhoogte is:
+    cents = 1200 × log2(doelfrequentie / bronfrequentie)
+
+Naberekende voorbeelden voor A=440:
+    bron 415 Hz    +101,27062 cent
+    bron 436,5 Hz   +13,82624 cent
+    bron 440 Hz      +0,00000 cent
+    bron 442 Hz      -7,85142 cent
+
+Eén globale fijnstemming kan de bronnen 415 en 442 Hz dus niet tegelijk corrigeren.
+De Orgelbouwer moet drie expliciete beleidskeuzes aanbieden:
+
+1) Oorspronkelijke stemming behouden.
+   Behoudt de bestaande bronlogica; bronnen kunnen onderling sterk verschillen.
+2) Alleen concerttoonhoogte gelijkmaken.
+   Eén correctie per bron, met behoud van intern temperament en bewuste zweving.
+   Vereist een betrouwbare referentie voor die bron.
+3) Gezamenlijk temperament.
+   Per pijp naar het doeltemperament, met behoud van bedoelde afwijkingen zoals
+   celestes. Hiervoor zijn betrouwbare pijpgegevens of metingen nodig.
+
+Belangrijk bij celestes: het huidige '100% oorspronkelijk behouden' kan zowel de
+bronreferentie als de bedoelde zweving omvatten. Eerst de algemene bronverschuiving
+scheiden van de muzikale afwijking. Een celeste op +10 cent hoort na normalisatie
+nog steeds +10 cent boven zijn partner te liggen. Niet alles naar exact dezelfde
+toon dwingen. Naamherkenning is alleen een terugvalmechanisme.
+
+Behoud ook de juiste harmonische verhouding van 16', 4', aliquoten en mixtures,
+evenals de semantiek van geleende/vervangen pijpen. Een toetsnummer of de sterkste
+FFT-piek van een volledig mengsel is daarvoor onvoldoende.
+
+De huidige correctie verandert de afspeelsnelheid. Daardoor veranderen ook de
+klankkleur en duur van opgenomen aanspraken en galm. Bij 415 naar 440 Hz wordt
+de duur circa 94,318% van de oorspronkelijke duur. Kleine correcties zijn goed
+bruikbaar; een forse transpositie heeft hoorbare gevolgen en herstelt geen galm.
+
+De analyser moet de betrouwbaarheid per pijp vastleggen: expliciete definitie,
+WAV-metadata, betrouwbare meting, of aangenomen/onbekend. Het huidige aantal
+retune-pijpen is geen bewijs dat al die pijpen werkelijk gemeten pitchdata hebben.
+
+Specifieke aanpassingen:
+- Bronafhankelijk retunebeleid; een verplichte getempereerde bron mag een andere
+  bron met oorspronkelijk stembeleid niet wereldwijd omschakelen.
+- Gezamenlijke doelreferentie omrekenen naar werkelijke cents in de engine.
+  Het huidige a4_hz in set_temperament is op zichzelf alleen opgeslagen metadata.
+- Correcties, ook voor tremulantsamples en releases, aan de juiste bron koppelen.
+
+6. BRONMODEL EN VEILIGE SAMENSTELLING
+
+Niet via het bestaande CustomOrgan/CustomPipe-model samenvoegen. CustomPipe bevat
+samplepad, noot, loop, volume en gehele cents, maar geen volledige release- en
+bronlogica. Zo'n export kan een rijk sampleset ongemerkt vereenvoudigen.
+
+OrganDefinition is de betere basis, maar is alleen ook niet voldoende. Windwerk,
+opgenomen tremulantgolven, bronvlaggen en akoestische kastmapping komen deels uit
+andere importgegevens. Bewaar per bron een volledige bundel:
+
+    ParsedSource {
+      definition, import_report, source_flags, roots, acoustics
+    }
+
+Een compiler moet geselecteerde registers met hun volledige afhankelijkheden
+verzamelen: ranks, pijpen, leenpijpen, attack/loop, korte en lange releases,
+tremulantlagen, perspectieven, schakelaars, wind en zwelkasten.
+
+Los referenties eerst binnen de oorspronkelijke bron op. Nummer 1 uit bron A is
+niet hetzelfde als nummer 1 uit bron B; dat geldt ook voor PackageID en kast-ID.
+Remap daarna alle objecten en correctietabellen naar één gecombineerd speelplan.
+Match nooit uitsluitend op de zichtbare register- of perspectiefnaam.
+
+De bestaande laadroute vervangt één instrument. Twee keer laden is geen samenvoegen.
+Bereid en valideer daarom het volledige project vóór de orgelwissel. De integratie
+moet voorkomen dat een fout halverwege het laden het werkende orgel of zijn
+instellingen al overschrijft. Publiceer één consistente OrgelBundel aan de engine.
+
+Bronwindnetwerken en zwelkasten blijven afzonderlijk. Oude bronkoppels en crescendo-
+acties worden bij een andere divisie-indeling niet automatisch actief: de gebruiker
+kiest de doelmanualen en maakt eenvoudige eigen koppels.
+
+7. PROJECTOPSLAG EN CONSOLE
+
+Voorgesteld nieuw, versieerbaar OrganProject met:
+- een blijvende project-UUID;
+- blijvende bron-, divisie-, register- en koppel-UUID's;
+- brondefinitie, formaat, pakketroot, fingerprint en importerversie;
+- geselecteerde registers en opnamepositie per bron;
+- bronstembeleid, referentie, gains en akoestische classificatie;
+- doelmanualen, pedaal, koppels, temperament en concerttoonhoogte;
+- een eigen instellingenruimte voor intonatie, MIDI, combinaties en consolelayout.
+
+Runtime-ID's mogen opnieuw worden berekend, maar gebruikerskoppelingen gebruiken
+de blijvende project-ID's. Bronnen anders ordenen mag de console en combinaties
+niet aan andere registers koppelen.
+
+Het project verwijst naar oorspronkelijke definities en samples; die bestanden en
+hun gebruikersinstellingen worden niet aangepast. Bestaande orgelinstellingen
+mogen alleen door een bewuste import als kopie in het project worden opgenomen.
+Voor ontbrekende/verplaatste bronnen komt herlinken. Gewijzigde fingerprints of
+verdwenen registers worden gemeld; geen stille vervanging door een gelijknamig
+register. Een fingerprint van de definitie alleen bewijst niet dat alle WAV's
+ongewijzigd zijn: neem voor geselecteerde bronnen ook een resource-manifest op.
+
+De huidige extensieherkenning kent geen projecttype. Zonder wijziging zou een
+nieuw projectbestand als samplemap worden behandeld en gedeelde instellingen
+kunnen krijgen. Projectidentiteit moet dus expliciet worden ondersteund; hergebruik
+de oude mapmigratie niet voor de bronsets van een project.
+
+Opslaan gebeurt via tijdelijk bestand en vervanging na geslaagde validatie, met
+herstelmogelijkheid. Heropenen moet hetzelfde project en dezelfde console opleveren,
+ook met twee brondefinities in dezelfde map. Ingebedde eigen consoletexturen blijven
+onder de projectinstellingen vallen.
+
+Toon compatibiliteit in een vast projectoverzicht. Herhaal ongewijzigde adviezen
+niet als popup bij iedere laadbeurt. Alleen fouten die laden onmogelijk maken
+vereisen een blokkade; onbekende akoestiek is een zichtbare onzekerheid.
+
+8. AANBEVOLEN BOUWVOLGORDE
+
+2A — Project en bronanalyse
+Maak het projecttype, veilige opslag, stabiele ID's en de bronbundel. Analyseer
+leesbaarheid, ontbrekende bestanden, registerafhankelijkheden, pitchmetadata,
+perspectieven en RAM/streamingbehoefte. Nog geen samples veranderen.
+
+2B — Speelbare eerste Orgelbouwer
+Selecteer complete registers uit twee leesbare sets, kies doelmanualen/pedaal en
+één opnamepositie per bron. Compileer één speelplan, voeg bronafhankelijke stemming
+toe en koppel de bestaande Consolebouwer aan blijvende projectregisters. Begin
+akoestisch met geschikte droge/directe bronnen of een expliciet aanvaarde hybride.
+
+2C — Akoestische afwerking
+Voeg afzonderlijke bronsends naar een gedeelde ruimte toe, met behoud van stereo.
+Daarna optionele bron-EQ en delay. Bereid DSP en geheugen buiten de realtime callback
+voor. Meerdere onafhankelijke lange IR-processors pas na prestatiemeting.
+
+Niet in de eerste versie: automatische galmverwijdering, automatische reconstructie
+van mixtures, verzonnen ontbrekende pijpen, algemene surroundrouting of het omzeilen
+van onleesbare/versleutelde samplesets. Ondersteuning blijft beperkt tot wat de
+bestaande importers werkelijk kunnen lezen, inclusief de nodige klankpakketten.
+
+9. BELANGRIJKE CODEBEWIJZEN
+
+vpo-sampler/src/grandorgue.rs:32        OrganDefinition
+vpo-sampler/src/grandorgue.rs:660       PipeExtra
+vpo-sampler/src/grandorgue.rs:749       ReleaseDef
+vpo-sampler/src/grandorgue.rs:807       PipeLayer
+vpo-sampler/src/grandorgue.rs:1999      Semantiek van geleende pijpen
+vpo-sampler/src/custom_organ.rs:109     Beperkt CustomPipe-model
+vpo-sampler/src/import_report.rs:217   Extra importgegevens
+vpo-sampler/src/hauptwerk.rs:1076       Stembeleidsgegevens uit Hauptwerk
+vpo-sampler/src/loader.rs:164           Stereo / eerste twee WAV-kanalen
+vpo-sampler/src/loader.rs:843           Stereo-resampling
+vpo-sampler/src/loader.rs:1362          Onset-trim
+src-tauri/src/commands.rs:870          Globaal samenvoegen perspectieflabels;
+                                      boven vijftien labels worden overgeslagen
+src-tauri/src/commands.rs:938          Schatting unieke samplebuffers
+src-tauri/src/commands.rs:3310         Herkenning definitie versus samplemap
+src-tauri/src/commands.rs:3784         Huidige enkelvoudige laadroute
+src-tauri/src/commands.rs:4662         Globale force_tempered-keuze
+src-tauri/src/commands.rs:4880         Bronafhankelijke akoestische mapping
+src-tauri/src/commands.rs:4943         Vervangen huidig instrument/state
+src-tauri/src/commands.rs:4995         Lezen van één globaal importverslag
+src-tauri/src/commands.rs:5052         OrgelBundel
+src-tauri/src/commands.rs:8811         set_temperament / a4_hz versus cents
+src-tauri/src/retune.rs:174            Berekening toonhoogtecorrectie
+src-tauri/src/audio.rs:1591            Bronrate bij preload-stemmen
+src-tauri/src/audio.rs:5595            Globale retune-keuze
+src-tauri/src/audio.rs:5800            Globale stemming/fijnstemming
+src-tauri/src/audio.rs:6221            Gedeelde actieve galmverwerking
+src-tauri/src/audio.rs:6272            EQ op uiteindelijke uitgangsmix
+src-tauri/src/acoustics.rs:1           Ruimtelijke routes nog niet DSP-actief
+vpo-audio/src/convolution.rs:253        Wet-latentie: tweemaal partitiegrootte
+vpo-audio/src/convolution.rs:316        IR-loader maakt mono
+
+Let op: aanwezige datastructuren in vpo-core of een alternatieve engine zijn geen
+bewijs dat de actieve src-tauri-audiolus die functies gebruikt. Met name ruimtelijke
+JSON-routes en de stereoconvolutionklasse zijn daarom afzonderlijk gecontroleerd.
+
+10. UITGEVOERDE CONTROLES
+
+Alle onderstaande tests zijn op 26 november 2026 op de achtergrond uitgevoerd,
+zonder muis/toetsenbord of bediening van het draaiende gebruikersvenster.
+
+Commando (vanuit VirtualPipeOrgan)                          Geslaagd  Genegeerd
+--------------------------------------------------------  --------  ---------
+cargo test -p vpo-app retune::tests                              15          0
+cargo test -p vpo-sampler resample_                               3          0
+cargo test -p vpo-sampler pitch                                  18          0
+cargo test -p vpo-sampler stemmingscodes_                          1          0
+cargo test -p vpo-sampler perspective::tests                       6          0
+cargo test -p vpo-sampler perspective::stereo_helften               3          0
+cargo test -p vpo-app audio::release_tests                        11          0
+cargo test -p vpo-app audio::wet_weights_tests                     8          0
+cargo test -p vpo-audio convolution::tests                         7          1
+TOTAAL                                                          72          1
+
+Geen mislukte tests. De genegeerde test is de bestaande convolutionbenchmark.
+Gefilterde overige tests zijn niet meegeteld. De eerste pakketnaamselectie en
+twee aanvankelijke modulefilters waren onjuist; die zijn gecorrigeerd. Alleen
+daadwerkelijk uitgevoerde tests staan hierboven.
+
+Bewijsfunctie: pijpstemming/celestes/leenpijpen, import van pitchmetadata (ook voor
+een tremulantattack), 44,1→48 kHz kanaaluitlijning en delaycompensatie,
+perspectiefherkenning, release-envelopes en staartbudget, huidige gezamenlijke
+galmdistributie en convolutionreferentie/latentie.
+
+Apart zijn de centcorrecties en afspeelduurverhoudingen uit paragraaf 5 berekend
+met Python. Dat is een rekencontrole, geen luistertest of proef met echte samplesets.
+
+Ruwe logs van de aanvullende suites:
+C:\Bronbestanden\Prive\JM-Orgue-consolebouwer\testen\fase2-2026-11-26
+
+11. ACCEPTATIE VOORDAT FASE 2 KLAAR KAN HETEN
+
+- Twee synthetische brondefinities met dezelfde numerieke object-ID's, bij voorkeur
+  ook in dezelfde map: geen verkeerde samples, stemmen, kasten of instellingen.
+- Bron A 415 Hz en bron B 440 Hz: oorspronkelijke modus behoudt beide; normalisatie
+  levert afzonderlijk gemeten 440 Hz. Celeste +10 cent behoudt zijn zweving.
+- 16', 4', aliquoot, mixture en leenpijp blijven correct per pijp/rank en toetsbereik.
+- Droge, tremulant- en releasevariant volgen hetzelfde bronbeleid zonder sprong.
+- Een verplichte getempereerde bron verandert het stembeleid van een andere niet.
+- Mono/stereo en 44,1/48 kHz behouden toonhoogte, lus en kanaaluitlijning.
+- Gelijke perspectiefnamen blijven per bron onafhankelijk; linker/rechterhelften
+  van dezelfde positie blijven juist samen. Een slotlimiet geeft een expliciete
+  validatiefout of keuze, nooit stilzwijgend verdwenen ranks.
+- Korte/lange releases, opgenomen tremulanten en afzonderlijke wind/kastnetwerken
+  blijven behouden. Afhankelijkheden mogen niet uit het speelplan verdwijnen.
+- Bij bronsends: B met send nul levert geen bijdrage aan de toegevoegde galm;
+  eventuele opgenomen galm blijft behouden. Test B afzonderlijk en als verschil
+  naast A, waarvan de toegevoegde galm hoorbaar mag blijven. Controleer stereo,
+  processorreset, orgelwissel, piekbelasting en langdurige polyfonie.
+- Project opslaan/heropenen, app herstarten, bronnen anders ordenen en een bronmap
+  herlinken: dezelfde console, MIDI, combinaties en intonatie blijven gekoppeld.
+- Ontbrekende/gewijzigde bron en afgebroken laden: begrijpelijke melding, originele
+  sets onaangeraakt, bestaand project en speelbaar orgel niet half vervangen.
+- Vervolgens minimaal twee werkelijk ondersteunde sets samen beluisteren: losse
+  stemmen, aangehouden akkoorden, korte noten, pedaal, celestes en volwerk. Beoordeel
+  niveau, aanspraak, stereobeeld en release-overgangen naast de technische metingen.
+
+12. PRIMAIRE EXTERNE BRONNEN
+
+[1] Milan Digital Audio, Hauptwerk 9 Custom Organ Design Module User Guide,
+    pagina 16, 'Wet and dry samples and the reverb tail truncation functionality'.
+    Onderbouwt het belang van droge bronnen en de grenzen van release-inkorting.
+    https://downloadhauptwerk.com/documents/hw9/HauptwerkCustomOrganDesignModuleUserGuide.pdf
+
+[2] Milan Digital Audio, Hauptwerk 9 Installation and User Guide, pagina 108,
+    'Base pitch'. Onderscheid tussen concerttoonhoogte en temperament.
+    https://downloadhauptwerk.com/documents/hw9/HauptwerkInstallationAndUserGuide.pdf
+
+[3] Sonus Paradisi, Prague Baroque, opnamebeschrijving en dry/wet-versies.
+    Producentvoorbeeld van verschillende opnamevarianten. Geen garantie dat een
+    willekeurig ander als 'dry' gelabeld sampleset dezelfde opnamekenmerken heeft.
+    https://www.sonusparadisi.cz/en/organs/czech/prague-baroque-v-2.html
+
+De technische beperkingen van JM-Orgue hierboven komen uit de lokale actieve code;
+de voorgestelde architectuur, compatibiliteitsindeling en bouwvolgorde zijn het
+ontwerpvoorstel uit dit onderzoek. Er is geen onbevestigde Hauptwerk 10-preview-
+functie als reeds beschikbare JM-Orgue-functionaliteit aangenomen.

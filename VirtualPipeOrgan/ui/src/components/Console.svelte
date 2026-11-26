@@ -2,7 +2,11 @@
   import { createEventDispatcher, onMount, onDestroy, tick } from 'svelte';
   import { nogTeDownloaden, teUpdaten, waaromNiet, normPad } from '../lib/aanbod.js';
   import { bestandsNaam, speeltNu, afspeelStappen } from '../lib/midiSpeler.js';
-  import { open } from '@tauri-apps/plugin-dialog';
+  import { open, confirm } from '@tauri-apps/plugin-dialog';
+  import ConsoleBuilder from './ConsoleBuilder.svelte';
+  import OrganBuilder from './OrganBuilder.svelte';
+  import ConsoleSurface from './ConsoleSurface.svelte';
+  import { normalizeConsoleLayout, missingConsoleTargets } from '../lib/consoleLayout.js';
   import LayoutSettings from './LayoutSettings.svelte';
   import VoicingPanel from './VoicingPanel.svelte';
   import MidiPlayer from './MidiPlayer.svelte';
@@ -20,15 +24,132 @@
   import { volgordeUitOrgelbestand } from '../lib/registerVolgorde.js';
   import { bewaakOrgelHerstel } from '../lib/legacySettings.js';
   import { midiLearn } from '../lib/midiLearn.js';
+  import { midiActionTargets } from '../lib/midiActions.js';
   import { pasSfeerToeAlsGewijzigd } from '../lib/sfeer.js';
   import { invoke } from '@tauri-apps/api/core';
-  import { listen } from '@tauri-apps/api/event';
+  import { listen, emit } from '@tauri-apps/api/event';
 
   export let organInfo = null;
   export let loading = false;
   export let loadingProgress = 0;
   export let loadingMessage = '';
   export let showOrganBrowser = true;
+
+  // The portable design belongs to the full organ definition ID. Window/page
+  // selection remains local to each screen; drafts never enter autosave.
+  let savedConsoleLayout = null;
+  let rawConsoleLayout = null;
+  let consoleLayoutLoaded = false;
+  let consoleLayoutError = '';
+  let consoleStorageWarning = '';
+  let consoleLayoutKey = '';
+  let consoleLayoutRead = 0;
+  let consoleLayoutRevision = 0;
+  let consolePageId = null;
+  let consoleDraftDirty = false;
+  let consoleSaving = false;
+  let consoleBuilder;
+  let organBuilder;
+  let organDraftDirty = false;
+  let organProjectSaving = false;
+  const consoleEventSource = Math.random().toString(36).slice(2);
+  $: missingConsoleControls = savedConsoleLayout ? missingConsoleTargets(savedConsoleLayout, organInfo) : [];
+  $: customConsoleActive = !!savedConsoleLayout?.enabled && !consoleLayoutError && missingConsoleControls.length === 0;
+
+  async function readConsoleLayout(id, epoch, background = false) {
+    const request = ++consoleLayoutRead;
+    try {
+      const raw = await invoke('get_console_layout', { organId: id });
+      if (organInfo?.id !== id || organLoadEpoch !== epoch || request !== consoleLayoutRead) return;
+      if (background && (consoleDraftDirty || consoleSaving)) return;
+      rawConsoleLayout = raw;
+      savedConsoleLayout = normalizeConsoleLayout(raw);
+      consoleLayoutError = raw != null && !savedConsoleLayout ? tx('console_builder.load_failed') : '';
+      const page = secondary ? loadPanelState(id, panelNumber)?.consolePageId : consolePageId;
+      consolePageId = savedConsoleLayout?.pages.some(p => p.id === page) ? page : savedConsoleLayout?.pages[0]?.id ?? null;
+      consoleLayoutRevision += 1;
+    } catch (e) {
+      if (organInfo?.id !== id || organLoadEpoch !== epoch || request !== consoleLayoutRead) return;
+      consoleLayoutError = `${tx('console_builder.load_failed')} ${String(e)}`;
+      savedConsoleLayout = null;
+      rawConsoleLayout = null;
+    } finally {
+      if (organInfo?.id === id && organLoadEpoch === epoch && request === consoleLayoutRead) consoleLayoutLoaded = true;
+    }
+  }
+
+  $: if (`${organInfo?.id || ''}::${organLoadEpoch}` !== consoleLayoutKey) {
+    consoleLayoutKey = `${organInfo?.id || ''}::${organLoadEpoch}`;
+    consoleLayoutRead += 1;
+    savedConsoleLayout = null;
+    rawConsoleLayout = null;
+    consoleLayoutLoaded = false;
+    consoleLayoutError = '';
+    consoleStorageWarning = '';
+    consoleDraftDirty = false;
+    consoleSaving = false;
+    consolePageId = null;
+    if (organInfo?.id) readConsoleLayout(organInfo.id, organLoadEpoch);
+  }
+
+  function selectConsolePage(e) {
+    consolePageId = e.detail.pageId;
+    if (secondary) savePanelState(organInfo?.id, panelNumber, { consolePageId });
+  }
+  async function consoleLayoutSaved(e) {
+    if (e.detail.organId !== organInfo?.id) return;
+    consoleLayoutRead += 1;
+    savedConsoleLayout = normalizeConsoleLayout(e.detail.layout);
+    rawConsoleLayout = e.detail.layout;
+    consoleLayoutError = '';
+    consoleDraftDirty = false;
+    if (!savedConsoleLayout?.pages.some(p => p.id === consolePageId)) consolePageId = savedConsoleLayout?.pages[0]?.id ?? null;
+    await emit('console-layout-changed', { organId: organInfo.id, source: consoleEventSource });
+  }
+  async function resetSavedConsoleLayout() {
+    const id = organInfo?.id, epoch = organLoadEpoch;
+    if (!id || !(await confirm(tx('console_builder.confirm_reset_saved'), { title: tx('console_builder.reset_saved_layout'), kind: 'warning' }))) return;
+    if (organInfo?.id !== id || organLoadEpoch !== epoch) return;
+    try {
+      const result = await invoke('set_console_layout', { organId: id, layout: null });
+      if (organInfo?.id !== id || organLoadEpoch !== epoch) return;
+      consoleStorageWarning = result?.warning || '';
+      await readConsoleLayout(id, epoch);
+      await emit('console-layout-changed', { organId: id, source: consoleEventSource });
+    } catch (e) {
+      if (organInfo?.id === id && organLoadEpoch === epoch) consoleLayoutError = String(e);
+    }
+  }
+  export async function magConsoleVerlaten() {
+    if (organProjectSaving) return false;
+    if (organDraftDirty) {
+      const discard = await confirm('Niet-opgeslagen wijzigingen in de Orgelbouwer verwerpen?', {
+        title: 'Orgelproject bewaren', kind: 'warning', okLabel: 'Verwerpen', cancelLabel: 'Terug',
+      });
+      if (!discard) return false;
+      organBuilder?.resetDraft();
+      organDraftDirty = false;
+    }
+    if (consoleSaving) return false;
+    if (!consoleDraftDirty) return true;
+    const id = organInfo?.id, epoch = organLoadEpoch;
+    const ok = await confirm(tx('console_builder.discard_question'), {
+      title: tx('console_builder.discard_title'), kind: 'warning',
+      okLabel: tx('console_builder.discard_confirm'), cancelLabel: tx('console_builder.discard_cancel'),
+    });
+    if (ok && id === organInfo?.id && epoch === organLoadEpoch) {
+      consoleBuilder?.resetDraft();
+      consoleDraftDirty = false;
+    }
+    return ok;
+  }
+  onMount(() => {
+    let disposed = false, unlisten;
+    listen('console-layout-changed', e => {
+      if (e.payload?.source !== consoleEventSource && e.payload?.organId === organInfo?.id && !consoleDraftDirty && !consoleSaving) readConsoleLayout(organInfo.id, organLoadEpoch, true);
+    }).then(fn => { if (disposed) fn(); else unlisten = fn; });
+    return () => { disposed = true; unlisten?.(); };
+  });
   export let midiMappings = [];
   export let midiConnected = false;
   export let sampleRate = 0;
@@ -2675,7 +2796,7 @@
     if (!id) return;
     perspReloadHint = false;
     const l = id.toLowerCase();
-    if (l.endsWith('.organ') || l.endsWith('_hauptwerk_xml')) dispatch('loadOrgan', id);
+    if (l.endsWith('.jmorgan') || l.endsWith('.organ') || l.endsWith('_hauptwerk_xml')) dispatch('loadOrgan', id);
     else dispatch('scanFolder', id);
   }
   function isChannelSelected(div, ch) { return getDivisionChannels(div).includes(ch); }
@@ -3768,6 +3889,7 @@
   }
 
   async function importSettings() {
+    const id = organInfo?.id, epoch = organLoadEpoch;
     try {
       const { open } = await import('@tauri-apps/plugin-dialog');
       const path = await open({
@@ -3775,7 +3897,12 @@
         multiple: false,
       });
       if (path) {
-        await invoke('import_settings', { path });
+        if (!id || organInfo?.id !== id || organLoadEpoch !== epoch) return;
+        await invoke('import_settings', { path, organId: id });
+        if (organInfo?.id === id && organLoadEpoch === epoch) {
+          await readConsoleLayout(id, epoch);
+          await emit('console-layout-changed', { organId: id, source: consoleEventSource });
+        }
         // Refresh organ info to apply imported settings
         dispatch('refresh');
       }
@@ -5303,6 +5430,8 @@
     }
   }
 
+  $: midiActions = midiActionTargets(displayOrgan);
+
   // Load coupler MIDI binding counts
   async function loadCouplerMidiCounts() {
     try {
@@ -5310,9 +5439,9 @@
       couplerMidiBindings = {};
       stopMidiBindings = {};
       for (const b of bindings) {
-        if (b.preset_num >= 150) {
+        if (midiActions.get(b.preset_num)?.kind === 'stop') {
           stopMidiBindings[b.preset_num] = (stopMidiBindings[b.preset_num] || 0) + 1;
-        } else if (b.preset_num >= 100) {
+        } else if (midiActions.get(b.preset_num)?.kind === 'coupler') {
           couplerMidiBindings[b.preset_num] = (couplerMidiBindings[b.preset_num] || 0) + 1;
         }
       }
@@ -5387,10 +5516,10 @@
   function recountBindingCounters() {
     const stops = {}, couplers = {}, trems = {}, globs = {};
     for (const b of midiBindingsFull) {
-      if (b.preset_num >= 150) stops[b.preset_num] = (stops[b.preset_num] || 0) + 1;
-      else if (b.preset_num >= 100) couplers[b.preset_num] = (couplers[b.preset_num] || 0) + 1;
+      if (midiActions.get(b.preset_num)?.kind === 'stop') stops[b.preset_num] = (stops[b.preset_num] || 0) + 1;
+      else if (midiActions.get(b.preset_num)?.kind === 'coupler') couplers[b.preset_num] = (couplers[b.preset_num] || 0) + 1;
       else if (b.preset_num >= ACTION_TREM_LFO_BASE && b.preset_num < ACTION_TREM_LFO_BASE + 16) trems[b.preset_num] = (trems[b.preset_num] || 0) + 1;
-      else if (b.preset_num >= 40) globs[b.preset_num] = (globs[b.preset_num] || 0) + 1;
+      else if (b.preset_num >= 40 && b.preset_num < 100) globs[b.preset_num] = (globs[b.preset_num] || 0) + 1;
     }
     stopMidiBindings = stops;
     couplerMidiBindings = couplers;
@@ -5411,17 +5540,13 @@
   })();
 
   function midiActionLabel(code, _t = $t) {
-    if (code >= 150) {
-      for (const d of displayOrgan?.divisions || []) {
-        const s = (d.stops || []).find(s => s.midi_action_code === code);
-        if (s) return _t('bindings.stop_label').replace('{name}', `${s.name}${metRegel(s)}`).replace('{division}', d.display_name || d.name);
-      }
-      return _t('bindings.stop_code').replace('{code}', String(code));
+    const target = midiActions.get(code);
+    if (target?.kind === 'stop') {
+      const { item: stop, division } = target;
+      return _t('bindings.stop_label').replace('{name}', `${stop.name}${metRegel(stop)}`).replace('{division}', division.display_name || division.name);
     }
-    if (code >= 100) {
-      const c = (displayOrgan?.couplers || []).find(c => c.midi_action_code === code);
-      return c ? _t('bindings.coupler_label').replace('{name}', c.name.replace(/\n/g, ' ')) : _t('bindings.coupler_code').replace('{code}', String(code));
-    }
+    if (target?.kind === 'coupler') return _t('bindings.coupler_label').replace('{name}', target.item.name.replace(/\n/g, ' '));
+    if (target?.kind === 'piston') return `piston ${target.item.label || target.item.naam || target.item.index}`;
     if (code >= ACTION_TREM_LFO_BASE && code < ACTION_TREM_LFO_BASE + 16) {
       const d = displayOrgan?.divisions?.[code - ACTION_TREM_LFO_BASE];
       const divName = d ? (d.display_name || d.name) : _t('bindings.division_n').replace('{n}', String(code - ACTION_TREM_LFO_BASE + 1));
@@ -6425,6 +6550,13 @@
       </div>
     {/if}
 
+  {:else if activeView === 'orgelbouwer' && !secondary}
+    <OrganBuilder bind:this={organBuilder} {organInfo}
+      on:dirty={(e) => organDraftDirty = e.detail}
+      on:saving={(e) => organProjectSaving = e.detail}
+      on:load={(e) => dispatch('loadOrgan', e.detail.path)}
+      on:console={() => dispatch('setView', 'consolebouwer')} />
+
   {:else if displayOrgan}
 
     <!-- ========== ORGEL VIEW ========== -->
@@ -6962,6 +7094,57 @@
             <button class="btn btn-sm motor-uit-knop" on:click={() => zetMotor(true)}>{$t('toolbar.motor_turn_on')}</button>
           </div>
         {/if}
+        {#if consoleStorageWarning}<div class="console-layout-notice" role="status">{consoleStorageWarning}</div>{/if}
+        {#if consoleLayoutError || (savedConsoleLayout?.enabled && missingConsoleControls.length)}
+          <div class="console-layout-notice" role="status">
+            <span>{consoleLayoutError || $t('console_builder.missing_controls')} {$t('console_builder.fallback_layout')}</span>
+            {#if !secondary}<button class="btn btn-secondary btn-sm" on:click={() => dispatch('setView', 'consolebouwer')}>{$t('console_builder.open_builder')}</button>{/if}
+          </div>
+        {/if}
+        {#if customConsoleActive}
+          <ConsoleSurface
+            layout={savedConsoleLayout} organInfo={displayOrgan} pageId={consolePageId}
+            on:pageChange={selectConsolePage}
+            on:toggle={(e) => dispatch(e.detail.kind === 'coupler' ? 'toggleCoupler' : 'toggleStop', e.detail.targetId)}
+            on:learn={(e) => {
+              if (e.detail.kind === 'coupler') {
+                const c = displayOrgan.couplers?.find(c => c.id === e.detail.targetId);
+                if (c) showCouplerContextMenuAt(c.midi_action_code);
+              } else {
+                const s = displayOrgan.divisions.flatMap(d => d.stops).find(s => s.id === e.detail.targetId);
+                if (s) showStopContextMenuAt(s.midi_action_code);
+              }
+            }}
+          />
+          <div class="console-auxiliary">
+            {#each displayOrgan.divisions.filter(d => !d.__toy_division) as division}
+              {@const tremDivIdx = displayOrgan.divisions.findIndex(d => d.name === division.name)}
+              {#if isSwellEnabled(division.name) || division.stops.some(s => s.has_tremulant) || tremLfoEnabled[division.name]}
+                <div class="console-auxiliary-group">
+                  <span>{division.display_name || division.name}</span>
+                  {#if isSwellEnabled(division.name)}
+                    <label use:midiLearn={{ onTrigger: () => learnSwellPedal(division.name) }}>
+                      {$t('a11y.swell_pedal')}
+                      <input type="range" min="0" max="100" value={Math.round((divisionVolumes[division.name] ?? 1) * 100)}
+                        on:input={(e) => setSwellLevel(division.name, Number(e.currentTarget.value) / 100)} />
+                    </label>
+                  {/if}
+                  {#if division.stops.some(s => s.has_tremulant) || tremLfoEnabled[division.name]}
+                    <button class="btn btn-secondary btn-sm" class:active={tremActive[division.name] === true}
+                      on:click={() => setTremActive(division, tremActive[division.name] !== true)}
+                      use:midiLearn={{ onTrigger: () => { if (tremDivIdx >= 0) learnTremulantLfo(tremDivIdx); } }}
+                      aria-pressed={tremActive[division.name] === true}>{$t('stops.tremulant')}</button>
+                  {/if}
+                </div>
+              {/if}
+            {/each}
+            {#each displayOrgan.divisions.filter(d => d.__toy_division) as division}
+              <div class="console-auxiliary-group"><span>{division.display_name}</span>
+                {#each division.stops as stop}<button class="btn btn-secondary btn-sm" aria-pressed={stop.drawn} on:click={() => zetToy(stop.__toy_name, !toysAan[stop.__toy_name])}>{stop.name}</button>{/each}
+              </div>
+            {/each}
+          </div>
+        {:else}
         <div class="divisions-container" bind:this={divisionsEl} bind:clientHeight={divisionsH} class:divisions-vertical={mainLayout === 'vertical'} style="--stop-min-width: {stopSize}px; --stop-size-n: {stopSize}; --stop-h: {stopHeight}px">
           {#each selectedDivisions.map(name => displayOrgan.divisions.find(d => d.name === name)).filter(Boolean) as division}
             {@const tremDivIdx = displayOrgan.divisions.findIndex(d => d.name === division.name)}
@@ -7106,6 +7289,7 @@
             {/each}
           </div>
         {/if}
+        {/if}
         <!-- In secundaire vensters consumeert de SetzerBar GEEN MIDI-triggers:
              alleen het hoofdvenster leest het (consumerende) trigger-kanaal,
              anders worden presets/acties dubbel toegepast. -->
@@ -7119,6 +7303,22 @@
           on:presetsChanged={() => dispatch('refreshMidiMappings')}
         />
       </div>
+
+    {:else if activeView === 'consolebouwer' && organInfo && !secondary}
+      {#if !consoleLayoutLoaded}
+        <div class="loading-container" role="status"><div class="spinner"></div>{$t('console_builder.loading')}</div>
+      {:else if consoleLayoutError && !rawConsoleLayout}
+        <div class="console-layout-notice" role="alert">
+          <span>{consoleLayoutError}</span>
+          <button class="btn btn-secondary" on:click={() => readConsoleLayout(organInfo.id, organLoadEpoch)}>{$t('console_builder.retry_load')}</button>
+          <button class="btn btn-secondary" on:click={resetSavedConsoleLayout}>{$t('console_builder.reset_saved_layout')}</button>
+        </div>
+      {:else}
+        {#key `${organInfo.id}::${organLoadEpoch}::${consoleLayoutRevision}`}
+          <ConsoleBuilder bind:this={consoleBuilder} {organInfo} initialLayout={rawConsoleLayout} {organLoadEpoch}
+            on:saved={consoleLayoutSaved} on:dirty={(e) => consoleDraftDirty = e.detail} on:saving={(e) => consoleSaving = e.detail} />
+        {/key}
+      {/if}
 
     <!-- ========== INSTELLINGEN VIEW ========== -->
     {:else if activeView === 'orgel-instellingen' && displayOrgan}
@@ -7189,6 +7389,10 @@
                   on:input={onVolumeChange}
                 />
               </div>
+              {#if organInfo?.id?.toLowerCase().endsWith('.jmorgan')}
+                <p class="settings-hint">De stemming van dit project volgt de broninstellingen in de Orgelbouwer. Het oorspronkelijke temperament en bewuste zwevingen blijven behouden.</p>
+                <button class="btn btn-secondary btn-sm" on:click={() => dispatch('setView', 'orgelbouwer')}>Stemming per bron aanpassen</button>
+              {:else}
               <div class="slider-control">
                 <div class="slider-header">
                   <span class="slider-label">{$t('settings.temperament')}</span>
@@ -7259,6 +7463,7 @@
                     {$t('tuning.save_as_preset')}
                   </button>
                 </div>
+              {/if}
               {/if}
             </div>
 
@@ -7601,6 +7806,9 @@
                 <input type="checkbox" checked={orgelVlaggen.windwerk_van_set} on:change={(e) => zetOrgelVlag('windwerk_van_set', e.target.checked)} />
                 <span class="swell-toggle-label">{$t('settings.windwerk_van_set')}</span>
               </label>
+              {#if organInfo?.id?.toLowerCase().endsWith('.jmorgan')}
+                <p class="settings-hint">Registers met een eigen bronwindnetwerk volgen ‘Windwerk van de set’ na herladen. De gewone windgroepen regelen registers zonder bronwindnetwerk.</p>
+              {/if}
               <label class="swell-toggle" style="margin-bottom:0.4rem;" title={$t('settings.tremulant_golf_van_set_hint')}>
                 <input type="checkbox" checked={orgelVlaggen.tremulant_golf_van_set} on:change={(e) => zetOrgelVlag('tremulant_golf_van_set', e.target.checked)} />
                 <span class="swell-toggle-label">{$t('settings.tremulant_golf_van_set')}</span>

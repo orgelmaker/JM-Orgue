@@ -11,10 +11,10 @@
 
 <header class="titel">
   <h1>JM-Orgue</h1>
-  <div class="onder">Handleiding voor versie 0.9.57 &middot; november 2026</div>
+  <div class="onder">Handleiding voor de ontwikkelversie met Consolebouwer &middot; november 2026</div>
 </header>
 
-<p>JM-Orgue is een virtueel pijporgel voor Windows, macOS en Linux. Het programma speelt Hauptwerk- en GrandOrgue-samplesets rechtstreeks af, ook grote surround-sets en Hauptwerk Custom Organ-definities, en je bespeelt het met een MIDI-klavier, een orgelconsole of de muis. Wat je speelt kan het meteen noteren, in gewoon notenschrift of in klavar, en afdrukken als PDF. Deze handleiding loopt het programma door; de schermafbeeldingen komen uit versie 0.9.16 en latere versies, de tekst beschrijft versie 0.9.57.</p>
+<p>JM-Orgue is een virtueel pijporgel voor Windows, macOS en Linux. Het programma speelt Hauptwerk- en GrandOrgue-samplesets rechtstreeks af, ook grote surround-sets en Hauptwerk Custom Organ-definities, en je bespeelt het met een MIDI-klavier, een orgelconsole of de muis. Wat je speelt kan het meteen noteren, in gewoon notenschrift of in klavar, en afdrukken als PDF. Deze handleiding loopt het programma door; de schermafbeeldingen komen uit versie 0.9.16 en latere versies. De tekst omvat ook de nieuwe Consolebouwer.</p>
 
 <p class="klein">&copy; Martijn van der Kolk. De schermafbeeldingen zijn gemaakt met demo-orgels en eigen testsets; netwerkadressen, toegangstoken en gebruikersmappen zijn onleesbaar gemaakt.</p>
 
@@ -23,7 +23,7 @@
   <ol>
     <li><a href="#start">Aan de slag</a></li>
     <li><a href="#bibliotheek">De bibliotheek</a></li>
-    <li><a href="#bespelen">Een orgel laden en bespelen</a></li>
+    <li><a href="#bespelen">Een orgel laden en bespelen</a> &middot; <a href="#consolebouwer">Consolebouwer</a> &middot; <a href="#orgelbouwer">Orgelbouwer</a></li>
     <li><a href="#werkbalk">De werkbalk</a></li>
     <li><a href="#posities">Meerdere luisterposities</a></li>
     <li><a href="#wizard">De instelwizard voor een nieuw orgel</a></li>
@@ -46,8 +46,8 @@
 <p>JM-Orgue controleert zelf of er een nieuwe versie is. Is die er, dan verschijnt bovenaan een melding. Kies <b>Nu bijwerken</b>: het programma downloadt de update, controleert de handtekening, installeert en start zichzelf opnieuw. Wil je eerst alleen downloaden, kies dan <b>Downloaden</b>. Handmatig zoeken kan via Algemene instellingen &rarr; Update en feedback &rarr; <b>Controleer op updates</b>.</p>
 <figure><img src="afbeeldingen/nl/01_update_melding.jpg" alt="Melding nieuwe versie"><figcaption>De melding bovenaan het scherm zodra er een nieuwe versie beschikbaar is.</figcaption></figure>
 
-<h3>De drie hoofdschermen</h3>
-<p>Bovenin staan drie tabbladen: <b>Orgel</b> (spelen), <b>Orgel-Instellingen</b> (alles wat bij het geladen orgel hoort) en <b>Algemene Instellingen</b> (alles wat voor het hele programma geldt). Met <kbd>F1</kbd>, <kbd>F2</kbd> en <kbd>F3</kbd> schakel je er direct tussen. Het kruisje naast de orgelnaam sluit het orgel en brengt je terug naar de bibliotheek.</p>
+<h3>De hoofdschermen</h3>
+<p>Bovenin staan de tabbladen <b>Orgel</b> (spelen), <b>Consolebouwer</b> (de visuele speeltafel ontwerpen), <b>Orgel-Instellingen</b> (alles wat bij het geladen orgel hoort) en <b>Algemene Instellingen</b> (alles wat voor het hele programma geldt). Met <kbd>F1</kbd>, <kbd>F2</kbd> en <kbd>F3</kbd> schakel je naar Orgel, Orgel-Instellingen en Algemene Instellingen. <kbd>F4</kbd> opent Consolebouwer in het hoofdvenster. Het kruisje naast de orgelnaam sluit het orgel en brengt je terug naar de bibliotheek.</p>
 
 <!-- ============================================================ -->
 <h2 id="bibliotheek">2. De bibliotheek</h2>
@@ -123,6 +123,34 @@
 <p class="klein">Elke knop van de setzerbalk kun je aan een knop op je eigen console koppelen: klik met de rechtermuisknop (of houd 3 seconden ingedrukt) en druk daarna op de knop op je console.</p>
 <h3>MIDI-kanaal per klavier leren</h3>
 <p>Hoef je niet eerst naar de Orgel-instellingen: rechtsklik op de naam van een werk boven de registers &mdash; of raak die 2 seconden aan op een aanraakscherm &mdash; en het programma vraagt om de laagste en de hoogste toets van dat klavier. Zo stel je het kanaal in zonder de speeltafel te verlaten.</p>
+
+<h3 id="consolebouwer">Consolebouwer: je eigen speeltafel ontwerpen</h3>
+<p>Laad een orgel en open <b>Consolebouwer</b> of druk in het hoofdvenster op <kbd>F4</kbd>. Je ontwerpt de bediening van dit orgel: registers, koppels en eigen teksten. De beschikbare bediening komt uit het geladen orgel. Het ontwerp verandert de indeling en het uiterlijk; klankinstellingen en MIDI-toewijzingen blijven bij dezelfde registers en koppels horen.</p>
+<ol>
+  <li>Kies een <b>Afwerking</b>: <b>Warm notenhout</b>, <b>Licht ivoor</b> of <b>Donkere studio</b>. Onder <b>Bediening</b> kies je uit acht vormen: <b>Registerwipper</b>, <b>Porseleinen registerwipper</b>, <b>Houten registerwipper</b>, <b>Trekregister</b>, <b>Ivoren trekregister</b>, <b>Piston met messingrand</b>, <b>Gebogen theatertab</b> of <b>Vlakke knop</b>. Je kunt de vorm per bediening kiezen of voor alle bedieningen tegelijk gebruiken.</li>
+  <li>Voeg links een register, koppel of tekst toe. Selecteer de bediening op het ontwerpvlak en sleep haar naar de gewenste plaats. Met de formaatgrepen verander je de afmetingen direct op het werkvlak. Rechts stel je de eigen tekst, positie en afmetingen ook met getallen in. De pijltjestoetsen verplaatsen de geselecteerde bediening op het raster.</li>
+  <li>Maak zo nodig extra <b>Pagina</b>'s en geef ze een herkenbare naam. Met <b>Voorbeeld</b> bekijk je het resultaat; klikken op een register in dit voorbeeld bedient het orgel niet.</li>
+  <li>Zet <b>Eigen console gebruiken</b> aan en kies <b>Toepassen</b>. Het ontwerp wordt voor dit orgel bewaard en verschijnt op het tabblad <b>Orgel</b>. Daar bedienen de knoppen de echte registers en koppels.</li>
+</ol>
+<p><b>Magnetisch uitlijnen</b> helpt bedieningen op dezelfde lijn te zetten. Tijdens het slepen verschijnen hulplijnen bij passende randen en middelpunten. Houd <kbd>Alt</kbd> ingedrukt om zonder deze uitlijning vrij te verplaatsen. Met <b>Ruim werkvlak</b> maak je meer ruimte voor het ontwerp; <b>Zijpanelen tonen</b> haalt de bedieningslijst en eigenschappen terug.</p>
+<p>Met <b>Textuur</b> kies je los van de afwerking voor fijne houtnerf, eikenhout, wortelnotenhout, ebbenhout, linnen, geborsteld metaal of effen. <b>Textuursterkte</b> bepaalt hoe duidelijk het patroon zichtbaar is en <b>Textuurgrootte</b> hoe groot het patroon wordt weergegeven. Via <b>Eigen textuur kiezen…</b> gebruik je een eigen PNG-, JPG- of WebP-afbeelding van maximaal 2 MB en 8192 &times; 8192 pixels. De afbeelding wordt in het ontwerp opgenomen en reist mee met de orgelinstellingen; de oorspronkelijke afbeelding hoeft dus niet op dezelfde plek te blijven staan.</p>
+<p><b>Ongedaan maken</b> herstelt de vorige bewerking. Met <b>Wijzigingen annuleren</b> ga je terug naar het laatst toegepaste ontwerp. Verlaat je de ontwerper met niet-opgeslagen wijzigingen, dan vraagt de app of je ze wilt verwerpen of verder wilt ontwerpen. Om weer de bestaande standaardconsole te gebruiken, zet je <b>Eigen console gebruiken</b> uit en kies je <b>Toepassen</b>.</p>
+<p>Elk orgeldefinitiebestand krijgt zijn eigen ontwerp, ook wanneer twee definities in dezelfde map staan. De lokale bibliotheek wordt eerst veilig opgeslagen, daarna het instellingenbestand naast de definitie. Is de setmap niet beschrijfbaar, dan blijft het ontwerp lokaal bewaard en meldt de app dat de kopie naast de definitie niet kon worden bijgewerkt.</p>
+<p>Zijn na een samplesetupdate registers of koppels verdwenen, dan meldt Consolebouwer de ontbrekende verwijzingen. Verwijder of vervang die bedieningen voordat je de eigen console weer activeert. Je kunt het ontwerp wel met <b>Eigen console gebruiken</b> uit bewaren, om het later te herstellen. Een onleesbaar ontwerp wordt niet vanzelf overschreven; de gewone console blijft beschikbaar.</p>
+
+<h3 id="orgelbouwer">Orgelbouwer: registers uit meerdere samplesets combineren</h3>
+<p>Open <b>Orgelbouwer</b> of druk op <kbd>F5</kbd>, ook zonder geladen orgel. Je kunt één tot <b>64 brondefinities</b> gebruiken. Begin op de eerste bronkaart met <b>Kies definitie…</b> en gebruik daarna <b>Bron toevoegen…</b> of de volgende lege kaart. Selecteer de registers die je wilt gebruiken. Elk register blijft compleet met zijn pijpen, klanklagen, releases en ondersteunde tremulantopnamen. Verdeel de selectie over eigen manualen en pedaal en stel de MIDI-kanalen en toetsbereiken in.</p>
+<p>Elke bronkaart heeft een eigen <b>Pakketmap…</b>, stemming en eventuele opnamepositie. Bronletters lopen na Z door met AA, AB, enzovoort. Tot en met vier bronnen kies je het bronorgel voor de registerlijst met knoppen; vanaf vijf bronnen gebruik je de keuzelijst <b>Bronorgel</b>.</p>
+<p>Bij iedere bron kies je <b>Oorspronkelijk behouden</b> of <b>Concerttoonhoogte gelijkmaken</b>. Bij gelijkmaken vul je de werkelijk opgenomen A-referentie in, bijvoorbeeld 415 Hz; de bron verschuift dan naar de gezamenlijke projectreferentie. Deze referentie wordt niet automatisch gemeten. Het interne temperament en bewuste celestezweving blijven behouden. Met een extra centcorrectie werk je de bronstemming af. De algemene temperamentkeuze is bij projecten vervangen door deze broninstellingen.</p>
+<p><b>Opslaan en laden</b> bewaart een <code>.jmorgan</code>-project en laadt het samengestelde orgel. Daarna opent <b>Console indelen</b> de visuele Consolebouwer. Register-ID's blijven behouden bij herschikken en verplaatsen naar een ander manuaal. Het project verwijst naar de originele definities en samples; die worden niet gewijzigd of meegekopieerd. Bewaar bij verhuizen ook het eigen <code>.jm-settings-project-…json</code>-bestand met console, MIDI, combinaties en intonatie.</p>
+<p>Het projectformaat blijft versie 1: bestaande projecten met twee bronnen openen zonder omzetting en behouden hun UUID en registerdoelen. De gezamenlijke projectgrenzen blijven <b>2.048 registers</b>, 512 eigen koppels, 64 consolepagina's, 16 gebruikte rankzwelkasten, 256 actieve windcompartimenten en 4.096 windcontrollers. Die aantallen gelden voor alle bronnen samen. Bij veel consolepagina's kies je de pagina via een keuzelijst. Opgenomen galm blijft hoorbaar; droge/directe opnamen passen doorgaans het beste bij elkaar. Gewijzigde of ontbrekende bronnen blokkeren laden totdat je ze opnieuw controleert.</p>
+<p><b>Rankzwelkasten</b> uit JM-ACOUSTICS blijven behouden. Kasten uit verschillende bronnen werken onafhankelijk, ook op hetzelfde doelmanuaal. Er kunnen maximaal 16 daadwerkelijk gebruikte rankkasten actief zijn. Leer de kastpedalen in via de orgelinstellingen; bij herladen wordt iedere koppeling weer aan dezelfde bronkast verbonden.</p>
+<p><b>Aparte bronwindnetwerken</b> houden hun eigen compartimenten, balgen, verbindingen en pijpverbruik. Het JM-Orgue-model berekent hun druk afzonderlijk per bronpijp. Gebruik <b>Windwerk van de set</b> en herlaad het project om deze bronmodellen aan of uit te zetten; de gewone windgroepen regelen registers zonder bronnetwerk. Er zijn gezamenlijk maximaal 256 actieve broncompartimenten, 4.096 verbindingen en 4.096 windcontrollers.</p>
+<p><b>Bronwindkleppen</b> in de Orgelbouwer tonen de ondersteunde schakelaars en traploze regelaars van het geladen project. Hun beginstanden en eventuele omgekeerde schakelwerking komen uit de brondefinitie. Registerkleppen volgen hun gekoppelde projectregisters: staat minstens één gekoppeld register aan, dan is de bronschakelaar ingeschakeld. Zelfstandige kleppen bedien je met een schakelaar of schuif; <b>Beginstand</b> herstelt de bronwaarde. Iedere wijziging wordt direct bij dit project bewaard voordat de audiostand verandert. Een mislukte lokale opslag laat de vorige stand staan; kan alleen de kopie naast het project niet worden bijgewerkt, dan verschijnt een melding. Neem het eigen instellingenbestand mee bij verhuizen.</p>
+<p><b>Automatische bronregelingen</b> volgen hun complete besturingsketen: balgextensie, druk en doorstroming kunnen de kleppen terugregelen. Directe overdrachten, Willis-vertragingen, inertia, voorwaarden en drempelschakelaars worden meegenomen. De balg beweegt tussen zijn fysieke grenzen en reageert op druk en verbruik. Automatische bedieningen en expliciet verborgen bronconstanten zijn alleen uitleesbaar; bij handbediende ingangen blijven de schakelaar en schuif beschikbaar. Bronidentiteiten houden gelijke ID's uit verschillende samplesets gescheiden.</p>
+<p>Dit blijft het <b>JM-model</b>, zonder claim van identieke Hauptwerk-werking. Continue overdrachten gebruiken waarden 0..127: eerst eventuele inversie, daarna offset en factor, een machtsfunctie en begrenzing. Willis wordt benaderd met een exponentiële tijdconstante; inertia met een gedempte veer. Handbediende kleppen gebruiken een overgang van 10 ms. Onder 60% van de nominale bronlagedruk valt de klank geleidelijk weg. Ontbrekende controllergegevens, onbekende logica, zuiver directe continue lussen, dubbele continue overdrachten, balgveren en gedwongen balgstanden blokkeren laden vóór het actieve orgel wordt vervangen. De bronwaarschuwingen geven de reden.</p>
+<p>Een geselecteerd register waarvan dezelfde bronschakelaar ook door automatische bronlogica wordt bediend, kan nog niet aan de projectregistratie worden gekoppeld. Het project wordt in dat geval vóór laden geweigerd; de registratie verandert daarvoor niet stilzwijgend.</p>
+<p>Aparte opgenomen tremulant-golfvormbesturing blijft buiten deze versie. Gewone GO-windchestzwelkasten en verschillende tremulantgroepen vragen nog afzonderlijke doelmanualen; onafhankelijke JM-ACOUSTICS-rankkasten hebben die beperking niet.</p>
 
 <!-- ============================================================ -->
 <h2 id="werkbalk">4. De werkbalk</h2>
@@ -329,6 +357,8 @@
 <table>
   <tr><th style="width:22%">Toets</th><th>Functie</th></tr>
   <tr><td><kbd>F1</kbd> <kbd>F2</kbd> <kbd>F3</kbd></td><td>Orgel, Orgel-Instellingen en Algemene Instellingen.</td></tr>
+  <tr><td><kbd>F4</kbd></td><td>Consolebouwer openen (hoofdvenster).</td></tr>
+  <tr><td><kbd>F5</kbd></td><td>Orgelbouwer openen: registers uit één tot 64 samplesets samenstellen.</td></tr>
   <tr><td><kbd>F11</kbd></td><td>Volledig scherm (speeltafelmodus) aan of uit.</td></tr>
   <tr><td><kbd>Esc</kbd></td><td>Volledig scherm uit.</td></tr>
   <tr><td>Rechtermuisklik of 3 s ingedrukt</td><td>Op een knop van de setzerbalk: die knop aan een console-knop koppelen (MIDI inleren).</td></tr>

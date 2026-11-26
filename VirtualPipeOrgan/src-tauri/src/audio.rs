@@ -17,6 +17,81 @@ use tracing::{info, error, warn};
 use vpo_sampler::{SampleRef, SampleData, load_audio, resample, PreloadBuffer};
 use vpo_audio::{ConvolutionReverb, OnePoleFilter, WindModel, WindLade, WindInstelling, StopWindProfiel, PijpWind,
     pijp_constanten, LADE_BOVENGRENS, Tremulant, FdnReverb, ChannelEq, EqBandSpec, MasterLimiter};
+use crate::windwerk_set::{ProjectWindRuntime, MAX_PROJECT_WIND_NODES, MAX_PROJECT_WIND_CONTROLS, MAX_PROJECT_WIND_LINKS};
+
+static PROJECT_WIND_NODE_COUNT: AtomicUsize = AtomicUsize::new(0);
+static PROJECT_WIND_PRESSURES: [AtomicU32; MAX_PROJECT_WIND_NODES] =
+    [const { AtomicU32::new(1.0f32.to_bits()) }; MAX_PROJECT_WIND_NODES];
+static PROJECT_WIND_CONTROL_COUNT: AtomicUsize = AtomicUsize::new(0);
+static PROJECT_WIND_LINK_COUNT: AtomicUsize = AtomicUsize::new(0);
+static PROJECT_WIND_CONTROL_VALUES: [AtomicU32; MAX_PROJECT_WIND_CONTROLS] =
+    [const { AtomicU32::new(0) }; MAX_PROJECT_WIND_CONTROLS];
+static PROJECT_WIND_VALVE_OPENINGS: [AtomicU32; MAX_PROJECT_WIND_LINKS] =
+    [const { AtomicU32::new(0) }; MAX_PROJECT_WIND_LINKS];
+static PROJECT_WIND_LINK_FLOWS: [AtomicU32; MAX_PROJECT_WIND_LINKS] =
+    [const { AtomicU32::new(0) }; MAX_PROJECT_WIND_LINKS];
+static PROJECT_WIND_BELLOWS_EXTENSIONS: [AtomicU32; MAX_PROJECT_WIND_NODES] =
+    [const { AtomicU32::new(0) }; MAX_PROJECT_WIND_NODES];
+static PROJECT_WIND_BELLOWS_POSITIONS: [AtomicU32; MAX_PROJECT_WIND_NODES] =
+    [const { AtomicU32::new(0) }; MAX_PROJECT_WIND_NODES];
+static PROJECT_WIND_BELLOWS_VELOCITIES: [AtomicU32; MAX_PROJECT_WIND_NODES] =
+    [const { AtomicU32::new(0) }; MAX_PROJECT_WIND_NODES];
+static PROJECT_WIND_MODEL_TIME: AtomicU64 = AtomicU64::new(0);
+static PROJECT_WIND_CONTROL_TICKS: AtomicU64 = AtomicU64::new(0);
+
+/// Read-only test/diagnostic snapshot in the validated plan's node order.
+pub fn project_wind_pressure_ratios() -> Vec<f32> {
+    let count = PROJECT_WIND_NODE_COUNT.load(Ordering::Acquire).min(MAX_PROJECT_WIND_NODES);
+    PROJECT_WIND_PRESSURES[..count].iter().map(|p| f32::from_bits(p.load(Ordering::Relaxed))).collect()
+}
+pub fn project_wind_control_values() -> Vec<f32> {
+    let count = PROJECT_WIND_CONTROL_COUNT.load(Ordering::Acquire).min(MAX_PROJECT_WIND_CONTROLS);
+    PROJECT_WIND_CONTROL_VALUES[..count].iter().map(|p| f32::from_bits(p.load(Ordering::Relaxed))).collect()
+}
+pub fn project_wind_valve_openings() -> Vec<f32> {
+    let count = PROJECT_WIND_LINK_COUNT.load(Ordering::Acquire).min(MAX_PROJECT_WIND_LINKS);
+    PROJECT_WIND_VALVE_OPENINGS[..count].iter().map(|p| f32::from_bits(p.load(Ordering::Relaxed))).collect()
+}
+pub fn project_wind_link_flows() -> Vec<f32> {
+    let count = PROJECT_WIND_LINK_COUNT.load(Ordering::Acquire).min(MAX_PROJECT_WIND_LINKS);
+    PROJECT_WIND_LINK_FLOWS[..count].iter().map(|p| f32::from_bits(p.load(Ordering::Relaxed))).collect()
+}
+fn project_wind_node_snapshot(values: &[AtomicU32; MAX_PROJECT_WIND_NODES]) -> Vec<f32> {
+    let count = PROJECT_WIND_NODE_COUNT.load(Ordering::Acquire).min(MAX_PROJECT_WIND_NODES);
+    values[..count].iter().map(|p| f32::from_bits(p.load(Ordering::Relaxed))).collect()
+}
+pub fn project_wind_bellows_extensions() -> Vec<f32> { project_wind_node_snapshot(&PROJECT_WIND_BELLOWS_EXTENSIONS) }
+pub fn project_wind_bellows_positions() -> Vec<f32> { project_wind_node_snapshot(&PROJECT_WIND_BELLOWS_POSITIONS) }
+pub fn project_wind_bellows_velocities() -> Vec<f32> { project_wind_node_snapshot(&PROJECT_WIND_BELLOWS_VELOCITIES) }
+pub fn project_wind_model_time_seconds() -> f64 { f64::from_bits(PROJECT_WIND_MODEL_TIME.load(Ordering::Acquire)) }
+pub fn project_wind_control_tick_count() -> u64 { PROJECT_WIND_CONTROL_TICKS.load(Ordering::Acquire) }
+fn clear_project_wind_diagnostics() {
+    PROJECT_WIND_NODE_COUNT.store(0, Ordering::Release);
+    PROJECT_WIND_CONTROL_COUNT.store(0, Ordering::Release);
+    PROJECT_WIND_LINK_COUNT.store(0, Ordering::Release);
+    PROJECT_WIND_MODEL_TIME.store(0, Ordering::Release);
+    PROJECT_WIND_CONTROL_TICKS.store(0, Ordering::Release);
+}
+fn publish_project_wind_diagnostics(model: &ProjectWindRuntime) {
+    for (i, pressure) in PROJECT_WIND_PRESSURES.iter().enumerate().take(model.plan.nodes.len()) {
+        pressure.store(model.pressure_ratio(i).to_bits(), Ordering::Relaxed);
+        PROJECT_WIND_BELLOWS_EXTENSIONS[i].store(model.bellows_extension(i).to_bits(), Ordering::Relaxed);
+        PROJECT_WIND_BELLOWS_POSITIONS[i].store(model.bellows_position(i).to_bits(), Ordering::Relaxed);
+        PROJECT_WIND_BELLOWS_VELOCITIES[i].store(model.bellows_velocity(i).to_bits(), Ordering::Relaxed);
+    }
+    for (i, value) in PROJECT_WIND_CONTROL_VALUES.iter().enumerate().take(model.plan.controls.len()) {
+        value.store(model.control_value(i).to_bits(), Ordering::Relaxed);
+    }
+    for i in 0..model.plan.links.len() {
+        PROJECT_WIND_VALVE_OPENINGS[i].store(model.valve_opening(i).to_bits(), Ordering::Relaxed);
+        PROJECT_WIND_LINK_FLOWS[i].store(model.link_flow_kg_s(i).to_bits(), Ordering::Relaxed);
+    }
+    PROJECT_WIND_NODE_COUNT.store(model.plan.nodes.len(), Ordering::Release);
+    PROJECT_WIND_CONTROL_COUNT.store(model.plan.controls.len(), Ordering::Release);
+    PROJECT_WIND_LINK_COUNT.store(model.plan.links.len(), Ordering::Release);
+    PROJECT_WIND_MODEL_TIME.store(model.model_time_seconds().to_bits(), Ordering::Release);
+    PROJECT_WIND_CONTROL_TICKS.store(model.control_tick_count(), Ordering::Release);
+}
 
 /// Preload buffer size in samples (~2s at 48kHz)
 /// Longer buffer = smoother loop while full sample loads in background
@@ -451,6 +526,8 @@ pub(crate) struct MengBlok<'a> {
     /// Per frame, per divisie: de drukafwijking van de wind (p - 1) uit
     /// pas 1, en de tremulantmodulatie.
     pub wind_dev: &'a [[f32; 32]],
+    /// Independent source wind-compartment pressures; None for ordinary organs.
+    pub project_wind_dev: Option<&'a [[f32; MAX_PROJECT_WIND_NODES]]>,
     pub trem_rate: &'a [[f64; 32]],
     pub trem_amp: &'a [[f32; 32]],
     /// Constant-power pan per divisie, één keer per callback voorgerekend.
@@ -473,6 +550,33 @@ pub(crate) struct MengBlok<'a> {
     /// minuscuul en treedt alleen op tijdens die pieken (waar anders gekraak
     /// zou klinken); normaal spelen blijft volledig cubisch.
     pub licht: bool,
+}
+
+#[inline]
+fn voice_wind_deviation(node: Option<usize>, block: &MengBlok<'_>, frame: usize, division: usize) -> f32 {
+    match (node, block.project_wind_dev) {
+        (Some(node), Some(pressures)) if node < MAX_PROJECT_WIND_NODES => pressures[frame][node],
+        _ => block.wind_dev[frame][division],
+    }
+}
+
+#[inline]
+fn source_wind_voice(node: Option<usize>, block: &MengBlok<'_>) -> bool {
+    node.is_some_and(|node| node < MAX_PROJECT_WIND_NODES) && block.project_wind_dev.is_some()
+}
+
+#[inline]
+fn voice_wind_gain(deviation: f32, sensitivity: f32, source_wind: bool) -> f32 {
+    // Existing voicing coefficients describe small pressure variations. Keep
+    // their range bounded, while a genuinely drained source chest must stop
+    // sounding. JM's low-pressure fade starts below 60% nominal pressure;
+    // it is not a model of the source pipe's undisclosed speech threshold.
+    if source_wind {
+        (1.0 + sensitivity * deviation.max(-0.4)).max(0.25)
+            * ((1.0 + deviation) / 0.6).clamp(0.0, 1.0)
+    } else {
+        (1.0 + sensitivity * deviation).max(0.25)
+    }
 }
 
 /// De stemmenlus van één blok: elke stem leest zijn hele blok en telt op bij
@@ -518,7 +622,8 @@ pub(crate) fn meng_stemmen_blok(
             let kg = voice.c_kg;
             let dev_a = voice.c_dev_a;
             let mut dev_cur = voice.c_dev_cur;
-            let wind_aan = in_range && (kp != 0.0 || kg != 0.0);
+            let source_wind = source_wind_voice(voice.c_project_wind_node, blok);
+            let wind_aan = in_range && (source_wind || kp != 0.0 || kg != 0.0);
             let (pan_cos, pan_sin) = if in_range && blok.ccis_on
                 && blok.ccis_en.get(div_idx).copied().unwrap_or(false)
             {
@@ -547,9 +652,10 @@ pub(crate) fn meng_stemmen_blok(
                 let mut g = vgain;
                 if in_range {
                     if wind_aan {
-                        dev_cur += dev_a * (blok.wind_dev[f][div_idx] - dev_cur);
-                        eff_rate *= (1.0 + kp * dev_cur) as f64;
-                        g *= (1.0 + kg * dev_cur).max(0.25);
+                        dev_cur += dev_a * (voice_wind_deviation(voice.c_project_wind_node, blok, f, div_idx) - dev_cur);
+                        let pitch_dev = if source_wind { dev_cur.max(-0.4) } else { dev_cur };
+                        eff_rate *= (1.0 + kp * pitch_dev) as f64;
+                        g *= voice_wind_gain(dev_cur, kg, source_wind);
                     }
                     if use_lfo {
                         if trem_eigen {
@@ -684,7 +790,8 @@ pub(crate) fn meng_stemmen_blok_oud(
         let kg = voice.c_kg;
         let dev_a = voice.c_dev_a;
         let mut dev_cur = voice.c_dev_cur;
-        let wind_aan = in_range && (kp != 0.0 || kg != 0.0);
+        let source_wind = source_wind_voice(voice.c_project_wind_node, blok);
+        let wind_aan = in_range && (source_wind || kp != 0.0 || kg != 0.0);
         // Panning: per stem één keer per blok. Standaard de per-callback
         // voorgerekende constant-power cos/sin van de divisie; met C/Cis-
         // lade-spreiding wijkt de pan per noot af (even MIDI-noten naar
@@ -719,9 +826,10 @@ pub(crate) fn meng_stemmen_blok_oud(
                     // de druk met tau ~ 8 perioden (bas traag, discant
                     // snel). Toonhoogte en sterkte eerste-orde in de
                     // afwijking: twee FMA's, geen powf per stem per frame.
-                    dev_cur += dev_a * (blok.wind_dev[f][div_idx] - dev_cur);
-                    eff_rate *= (1.0 + kp * dev_cur) as f64;
-                    g *= (1.0 + kg * dev_cur).max(0.25);
+                    dev_cur += dev_a * (voice_wind_deviation(voice.c_project_wind_node, blok, f, div_idx) - dev_cur);
+                    let pitch_dev = if source_wind { dev_cur.max(-0.4) } else { dev_cur };
+                    eff_rate *= (1.0 + kp * pitch_dev) as f64;
+                    g *= voice_wind_gain(dev_cur, kg, source_wind);
                 }
                 if use_lfo {
                     if trem_eigen {
@@ -1250,6 +1358,91 @@ pub struct KeyboardClickBuffer {
     pub release_rate: f64,
 }
 
+/// Voorbereide bronstemming voor een samengesteld orgel. De logaritme en
+/// validatie gebeuren op de laadthread, nooit in de realtime callback.
+#[derive(Debug, Clone, Copy)]
+pub struct ProjectSourcePitch {
+    ratio: f64,
+    force_tempered: bool,
+}
+
+impl ProjectSourcePitch {
+    pub fn new(
+        normalize: bool,
+        reference_a4_hz: f64,
+        target_a4_hz: f64,
+        cents: f32,
+        force_tempered: bool,
+    ) -> Result<Self, String> {
+        if !reference_a4_hz.is_finite() || reference_a4_hz <= 0.0
+            || !target_a4_hz.is_finite() || target_a4_hz <= 0.0
+            || !cents.is_finite() || cents.abs() > 2400.0
+        {
+            return Err("Ongeldige bronstemming in orgelproject".into());
+        }
+        // Een bron zonder originele orgeltoon speelt volgens de bestaande
+        // importregels via de hertemper-tabel op de A440-referentie.
+        let baseline = if force_tempered { 440.0 } else { reference_a4_hz };
+        let ratio = (if normalize { target_a4_hz / baseline } else { 1.0 })
+            * 2.0_f64.powf(cents as f64 / 1200.0);
+        if !ratio.is_finite() || !(0.125..=8.0).contains(&ratio) {
+            return Err("Bronstemming valt buiten het ondersteunde bereik".into());
+        }
+        Ok(Self { ratio, force_tempered })
+    }
+}
+
+/// Hetzelfde pad voor attack-, tremulant- en releasevoices. Een projectbron
+/// bewaart zijn interne temperament en zweving: globale auto-retune en de
+/// twaalf globale temperamentoffsets mogen die niet alsnog overschrijven.
+/// Gebruikersintonatie en de afzonderlijke globale pitch-offset blijven werken.
+fn voice_pitch_ratio(
+    project: Option<&ProjectSourcePitch>,
+    global_retune: bool,
+    odf_pitch: f32,
+    retuned_pitch: Option<f32>,
+    user_pitch: f32,
+    temperament_ratio: f64,
+    transpose_ratio: f64,
+) -> f64 {
+    let use_retune = project.map_or(global_retune, |p| p.force_tempered);
+    let odf = if use_retune { retuned_pitch.unwrap_or(odf_pitch) } else { odf_pitch };
+    let cents = user_pitch + odf;
+    let voicing = if cents.abs() > 0.01 { 2.0_f64.powf(cents as f64 / 1200.0) } else { 1.0 };
+    let tuning = project.map_or(temperament_ratio, |p| p.ratio);
+    tuning * voicing * transpose_ratio
+}
+
+/// Releases gebruiken de stemming van hun attack; tremulantopnamen zoeken
+/// eerst hun eigen samplecorrectie, daarna de droge laag.
+fn retune_pitch_for_voice(
+    stop_id: u32,
+    pipe_num: u32,
+    map: &HashMap<(u32, u32), f32>,
+) -> Option<f32> {
+    let key = (stop_id, pipe_num & !RELEASE_KEY_MASK);
+    let trem = (key.0, key.1 | (pipe_num & TREM_FLAG));
+    map.get(&trem).or_else(|| map.get(&key)).copied()
+}
+
+/// Projecten kunnen ook in oorspronkelijke stemming een andere samplepitch
+/// hebben voor de tremulantopname. Releases erven dezelfde correctie. Voor
+/// gewone orgels blijft de bestaande droge ODF-lookup ongewijzigd.
+fn odf_voicing_for_voice(
+    stop_id: u32,
+    pipe_num: u32,
+    project: bool,
+    map: &HashMap<(u32, u32), (f32, f32)>,
+) -> (f32, f32) {
+    let key = (stop_id, pipe_num & !RELEASE_KEY_MASK);
+    if project && pipe_num & TREM_FLAG != 0 {
+        if let Some(&value) = map.get(&(key.0, key.1 | TREM_FLAG)) {
+            return value;
+        }
+    }
+    map.get(&key).copied().unwrap_or((0.0, 0.0))
+}
+
 /// Audio command sent to the audio thread
 #[derive(Debug, Clone)]
 pub enum AudioCommand {
@@ -1324,6 +1517,12 @@ pub enum AudioCommand {
     /// 8'-C-eenheden in plaats van de schatting, en per windgroep de factor op de knoppen balggrootte en maximale
     /// daling (de middenstand van de knop wordt de waarde van de set). Niet gestuurd = leeg en 1,0 (zoals voorheen).
     RegisterWindwerkSet { verbruik: Arc<HashMap<(u32, u32), f32>>, balg: [f32; 32], daling: [f32; 32] },
+    /// Fully prepared, independent source-compartment graphs. Register after
+    /// RegisterStopWindProfiles in the same organ bundle. None clears old state.
+    RegisterProjectWind(Option<Box<ProjectWindRuntime>>),
+    SetProjectWindEnabled(bool),
+    SetProjectWindControl { index: usize, value: f32 },
+    SetProjectWindStop { stop_id: u32, drawn: bool },
     /// Tremulant-golfvorm van de set (C5, stap 2), na RegisterStopWindProfiles: per divisie de golfvorm voor de
     /// tremulant-LFO (None = de gewone sinus), en per pijp (stop, kale pijp) de diepte van sterkte en toonhoogte
     /// ten opzichte van die van de divisie. Niet gestuurd = geen golfvormen (zoals voorheen).
@@ -1375,6 +1574,9 @@ pub enum AudioCommand {
     /// VERVANGEN — (doeltoon − gemeten samplepitch) + PitchCorrection. Bevat
     /// alleen pijpen met een plausibele meting; de rest blijft op PitchTuning.
     RegisterOdfRetune(Arc<HashMap<(u32, u32), f32>>),
+    /// Voorbereid stembeleid per projectregister. Altijd vervangen bij laden,
+    /// ook door een lege kaart bij gewone orgels. Onderdeel van de orgelbundel.
+    RegisterProjectTuning(Arc<HashMap<u32, ProjectSourcePitch>>),
     /// ODF-looppunten per bestand (GrandOrgue-regel: ODF wint van smpl-chunk).
     /// Nodig zodat óók de achtergrond-full-sample-load dezelfde loop gebruikt
     /// als de preload — anders verspringt de loop op het upgrademoment.
@@ -1505,6 +1707,7 @@ pub(crate) struct PlayingVoice {
     /// de drukafwijking volgt. Plus de gevolgde afwijking zelf: slew-staat
     /// die ín de stem hoort (elke stem is eigendom van één werker-stuk).
     c_wind_flow: f32,
+    c_project_wind_node: Option<usize>,
     c_kp: f32,
     c_kg: f32,
     c_dev_a: f32,
@@ -1574,6 +1777,7 @@ impl PlayingVoice {
             c_trem_ka: 1.0,
             c_trem_kp: 1.0,
             c_wind_flow: 0.0,
+            c_project_wind_node: None,
             c_kp: 0.0,
             c_kg: 0.0,
             c_dev_a: 0.0,
@@ -1618,6 +1822,7 @@ impl PlayingVoice {
             c_trem_ka: 1.0,
             c_trem_kp: 1.0,
             c_wind_flow: 0.0,
+            c_project_wind_node: None,
             c_kp: 0.0,
             c_kg: 0.0,
             c_dev_a: 0.0,
@@ -1700,6 +1905,7 @@ impl PlayingVoice {
             c_trem_ka: 1.0,
             c_trem_kp: 1.0,
             c_wind_flow: 0.0,
+            c_project_wind_node: None,
             c_kp: 0.0,
             c_kg: 0.0,
             c_dev_a: 0.0,
@@ -1841,6 +2047,7 @@ impl PlayingVoice {
     /// laatste liet in 0.7.51 de staarten nog met de loslaatopstoot meegaan.
     fn erf_wind(&mut self, van: &PlayingVoice, staart: bool) {
         self.c_wind_flow = if staart { 0.0 } else { van.c_wind_flow };
+        self.c_project_wind_node = van.c_project_wind_node;
         self.c_kp = van.c_kp;
         self.c_kg = van.c_kg;
         self.c_dev_a = if staart { 0.0 } else { van.c_dev_a };
@@ -2996,6 +3203,14 @@ mod loop_seam_tests;
 #[path = "audio_tests/release_tests.rs"]
 mod release_tests;
 
+#[cfg(test)]
+#[path = "audio_tests/project_tuning_tests.rs"]
+mod project_tuning_tests;
+
+#[cfg(test)]
+#[path = "audio_tests/project_wind_tests.rs"]
+mod project_wind_tests;
+
 /// Hobbelmeter voor het loslaten (F4): gesynthetiseerde toon, honderden
 /// loslaatmomenten, negatieve controle zonder fase-uitlijning.
 #[cfg(test)]
@@ -3681,6 +3896,9 @@ fn run_audio_thread(
     // Hertemper-tabel (zelfde Arc-swap-patroon): (stop_id, pipe_num) → cents die
     // in hertemper-modus de ODF-PitchTuning van die pijp vervangen.
     let odf_retune: Arc<RwLock<Arc<HashMap<(u32, u32), f32>>>> = Arc::new(RwLock::new(Arc::new(HashMap::new())));
+    // Leeg bij gewone orgels; de bronpolicies zijn al op de laadthread naar
+    // ratio's omgerekend. Geen HashMap-opbouw of pow/log per bron in callback.
+    let project_tuning: Arc<RwLock<Arc<HashMap<u32, ProjectSourcePitch>>>> = Arc::new(RwLock::new(Arc::new(HashMap::new())));
     // Per-division wind models
     let wind_models: Arc<RwLock<Vec<WindModel>>> = Arc::new(RwLock::new(
         (0..32).map(|_| WindModel::new(sample_rate)).collect()
@@ -3976,6 +4194,7 @@ fn run_audio_thread(
     let mut voicing_clone = Eigen::uit(pipe_voicing);
     let mut odf_voicing_clone = Eigen::uit(odf_voicing);
     let mut odf_retune_clone = Eigen::uit(odf_retune);
+    let mut project_tuning_clone = Eigen::uit(project_tuning);
     let mut output_channels_clone = Eigen::uit(division_output_channels);
     let mut ccis_enabled_clone = Eigen::uit(ccis_enabled);
     let mut ccis_params_clone = Eigen::uit(ccis_params);
@@ -4113,6 +4332,7 @@ fn run_audio_thread(
     let mut trem_set_diepte: Arc<HashMap<(u32, u32), (f32, f32)>> = lege_trem_diepte.clone();
     let mut wind_set_balg = [1.0f32; 32];
     let mut wind_set_daling = [1.0f32; 32];
+    let mut project_wind: Option<Box<ProjectWindRuntime>> = None;
     let mut wind_flt: Vec<(OnePoleFilter, OnePoleFilter)> = (0..32)
         .map(|_| (OnePoleFilter::new(1500.0, sample_rate), OnePoleFilter::new(1500.0, sample_rate)))
         .collect();
@@ -4143,6 +4363,7 @@ fn run_audio_thread(
     let mut blk_part_r: Vec<Vec<[f32; 32]>> =
         (1..MAX_MENG_STUKKEN).map(|_| vec![[0.0f32; 32]; MIX_BLOCK]).collect();
     let mut blk_wind_dev: Vec<[f32; 32]> = vec![[0.0; 32]; MIX_BLOCK];
+    let mut blk_project_wind_dev: Vec<[f32; MAX_PROJECT_WIND_NODES]> = vec![[0.0; MAX_PROJECT_WIND_NODES]; MIX_BLOCK];
     let mut blk_trem_rate: Vec<[f64; 32]> = vec![[1.0; 32]; MIX_BLOCK];
     let mut blk_trem_amp: Vec<[f32; 32]> = vec![[1.0; 32]; MIX_BLOCK];
     let mut overload_callbacks: u64 = 0;
@@ -5012,6 +5233,10 @@ fn run_audio_thread(
                     AudioCommand::RegisterOdfRetune(map) => {
                         *odf_retune_clone.write() = map;
                     }
+                    AudioCommand::RegisterProjectTuning(map) => {
+                        let oud = std::mem::replace(&mut *project_tuning_clone.write(), map);
+                        gc.send_arc(oud);
+                    }
                     AudioCommand::RegisterOdfLoops(map) => {
                         // Oude kaart (een pad per sleutel) naar de janitor, niet hier vrijgeven (D1).
                         let oud = std::mem::replace(&mut *odf_loops_clone.write(), map);
@@ -5323,6 +5548,8 @@ fn run_audio_thread(
                         // Eén Arc-swap; de oude tabel is klein en mag hier vallen.
                         wind_profielen = map;
                         wind_pleno = pleno;
+                        if let Some(old) = project_wind.take() { gc.send_box(old); }
+                        clear_project_wind_diagnostics();
                         // Windwerk van de set van het vorige orgel weg (D4); het nieuwe stuurt het zijne hierna.
                         if !wind_set_verbruik.is_empty() {
                             let oud = std::mem::replace(&mut wind_set_verbruik, lege_set_verbruik.clone());
@@ -5387,6 +5614,22 @@ fn run_audio_thread(
                             let wi = wind_instel[g];
                             model.configure(wi.reservoir_size * wind_set_balg[g], wi.damping, wi.max_sag * wind_set_daling[g], sample_rate);
                         }
+                    }
+                    AudioCommand::RegisterProjectWind(prepared) => {
+                        if let Some(old) = std::mem::replace(&mut project_wind, prepared) { gc.send_box(old); }
+                        clear_project_wind_diagnostics();
+                        if let Some(model) = &project_wind {
+                            publish_project_wind_diagnostics(model);
+                        }
+                    }
+                    AudioCommand::SetProjectWindEnabled(enabled) => {
+                        if let Some(model) = &mut project_wind { model.set_enabled(enabled); }
+                    }
+                    AudioCommand::SetProjectWindControl { index, value } => {
+                        if let Some(model) = &mut project_wind { model.set_control(index, value); }
+                    }
+                    AudioCommand::SetProjectWindStop { stop_id, drawn } => {
+                        if let Some(model) = &mut project_wind { model.set_stop_drawn(stop_id, drawn); }
                     }
                     AudioCommand::RegisterStopDivisionMap(map) => {
                         *stop_to_division_clone.write() = map;
@@ -5602,6 +5845,7 @@ fn run_audio_thread(
                 let pipe_voicing_map = voicing_clone.read();
                 let odf_voicing_map = odf_voicing_clone.read();
                 let odf_retune_map = odf_retune_clone.read();
+                let project_tuning_map = project_tuning_clone.read();
                 let wm = wind_models_clone.write();
                 let trem_lfo = trem_lfos_clone.write();
                 let stops_with_trem = stops_with_trem_clone.read();
@@ -5611,6 +5855,7 @@ fn run_audio_thread(
                 // en dus één HashMap-lookup per stem per callback minder).
                 let mut q_div = [0.0f32; 32];
                 let mut n_div = [0u32; 32];
+                let mut q_project = [0.0f64; MAX_PROJECT_WIND_NODES];
 
                 // C/Cis-spreiding is globaal actief zodra de sterkte > 0; per-divisie
                 // aan/uit wordt per voice gecheckt.
@@ -5716,6 +5961,8 @@ fn run_audio_thread(
                         if rest < *e { *e = rest; }
                     }
                     voice.c_div = stop_div_map.get(&voice.stop_id).copied().unwrap_or(0) as usize;
+                    let source_wind = project_wind.as_ref().and_then(|model| model.pipe(voice.stop_id, voice.pipe_num & !RELEASE_KEY_MASK));
+                    voice.c_project_wind_node = source_wind.map(|pipe| pipe.node);
                     // Mengbus (0.8.92): kastbus wanneer de pijp (ook haar
                     // release- en tremulantlaag: release-bits gestript) in
                     // een zwelkast uit de akoestische configuratie zit.
@@ -5756,8 +6003,16 @@ fn run_audio_thread(
                     // tot 0.7.50 mee, zodat de balg op een natte set seconden
                     // ingezakt bleef ná het loslaten en nooit terugveerde.
                     if !voice.releasing && !voice.one_shot && voice.c_div < 32 {
-                        q_div[voice.c_div] += voice.c_wind_flow;
-                        n_div[voice.c_div] += 1;
+                        if let Some(pipe) = source_wind {
+                            // Imported kg/s is authoritative; it must not
+                            // depend on the legacy family/foot-size estimate.
+                            if persp_gain[(voice.persp_slot as usize) & (MAX_LAYERS - 1)] > 0.01 {
+                                q_project[pipe.node] += f64::from(pipe.kg_s);
+                            }
+                        } else {
+                            q_div[voice.c_div] += voice.c_wind_flow;
+                            n_div[voice.c_div] += 1;
+                        }
                     }
 
                     // Gebruikers-voicing (VoicingPanel) keyt op de KALE pijp en
@@ -5765,9 +6020,11 @@ fn run_audio_thread(
                     // hertemper-tabel staan per laag (laagsleutel zonder
                     // release-bits).
                     let ukey = (voice.stop_id, base_pipe(voice.pipe_num));
-                    let okey = (voice.stop_id, voice.pipe_num & !RELEASE_KEY_MASK);
                     let (user_vol, user_pitch) = pipe_voicing_map.get(&ukey).copied().unwrap_or((0.0, 0.0));
-                    let (odf_vol, odf_pitch) = odf_voicing_map.get(&okey).copied().unwrap_or((0.0, 0.0));
+                    let project_pitch = project_tuning_map.get(&voice.stop_id);
+                    let (odf_vol, odf_pitch) = odf_voicing_for_voice(
+                        voice.stop_id, voice.pipe_num, project_pitch.is_some(), &odf_voicing_map,
+                    );
                     // Hertemper-modus: de gemeten-toonhoogte-correctie van deze
                     // pijp VERVANGT de ODF-PitchTuning; zonder meting blijft
                     // PitchTuning staan. Eén HashMap-lookup per voice per
@@ -5778,17 +6035,11 @@ fn run_audio_thread(
                     // de TREM-sleutel (eigen opname, eigen stemming); pas als
                     // die ontbreekt de correctie van de droge pijp. Voor een
                     // droge voice is tkey == okey, dus geen extra lookup.
-                    let tkey = (okey.0, okey.1 | (voice.pipe_num & TREM_FLAG));
-                    let odf_pitch_eff = if retune_on {
-                        odf_retune_map.get(&tkey)
-                            .or_else(|| odf_retune_map.get(&okey))
-                            .copied()
-                            .unwrap_or(odf_pitch)
-                    } else {
-                        odf_pitch
-                    };
+                    let use_retune = project_pitch.map_or(retune_on, |p| p.force_tempered);
+                    let retuned_pitch = if use_retune {
+                        retune_pitch_for_voice(voice.stop_id, voice.pipe_num, &odf_retune_map)
+                    } else { None };
                     let voicing_vol = user_vol + odf_vol;
-                    let voicing_pitch = user_pitch + odf_pitch_eff;
                     voice.c_voicing_gain = if voicing_vol.abs() > 1e-6 {
                         10.0_f32.powf(voicing_vol / 20.0)
                     } else {
@@ -5799,11 +6050,6 @@ fn run_audio_thread(
 
                     let note_class = (voice.midi_note % 12) as usize;
                     let temp = temp_ratios[note_class];
-                    let pitch_mul = if voicing_pitch.abs() > 0.01 {
-                        2.0_f64.powf(voicing_pitch as f64 / 1200.0)
-                    } else {
-                        1.0
-                    };
                     // Doorlopend klavier (0.8.4): de dichtstbijzijnde pijp
                     // verschoven naar de gespeelde toon.
                     let schuif = if voice.verschuiving != 0 {
@@ -5811,7 +6057,10 @@ fn run_audio_thread(
                     } else {
                         1.0
                     };
-                    voice.c_pitch_mul = temp * pitch_mul * schuif;
+                    voice.c_pitch_mul = voice_pitch_ratio(
+                        project_pitch, retune_on, odf_pitch, retuned_pitch,
+                        user_pitch, temp, schuif,
+                    );
 
                     voice.c_use_lfo_trem = !stops_with_trem.contains(&voice.stop_id);
                 }
@@ -5822,6 +6071,10 @@ fn run_audio_thread(
                 let t_g3 = std::time::Instant::now();
                 lw[4] = t_g3.saturating_duration_since(t_g2).as_nanos() as u64;
                 let mut q_grp = [0.0f32; 32];
+                if let Some(model) = &mut project_wind {
+                    model.set_demands(&q_project);
+                    publish_project_wind_diagnostics(model);
+                }
                 let mut q_ref = [0.0f32; 32];
                 let mut n_grp = [0u32; 32];
                 for d in 0..32 {
@@ -5985,6 +6238,7 @@ fn run_audio_thread(
                     // en 32 tremulanten per frame.
                     let nd = n_real_divs.min(32);
                     for f in 0..bn {
+                        if let Some(model) = &mut project_wind { model.process_frame(&mut blk_project_wind_dev[f]); }
                         let mut group_pressures = [1.0f32; 32];
                         for (i, model) in wm.iter_mut().enumerate() {
                             if model.actief() {
@@ -6039,7 +6293,9 @@ fn run_audio_thread(
                     // divisie uit de druk aan het begin van het blok, zacht
                     // meelopend zodat een stoot geen trapje in de klankkleur geeft.
                     for d in 0..32 {
-                        let k = if d < nd {
+                        // Project pressure is per pipe, so a legacy division
+                        // filter may not recolour another source on that bus.
+                        let k = if d < nd && project_wind.is_none() {
                             let grp = wind_group_assignment.get(d).copied().unwrap_or(d as u8) as usize;
                             let g = 6.0 * wind_instel[grp.min(31)].doffer;
                             (-blk_wind_dev[0][d] * g).clamp(0.0, 0.6)
@@ -6070,6 +6326,7 @@ fn run_audio_thread(
                     let blok = MengBlok {
                         bn,
                         wind_dev: &blk_wind_dev,
+                        project_wind_dev: project_wind.as_ref().map(|_| blk_project_wind_dev.as_slice()),
                         trem_rate: &blk_trem_rate,
                         trem_amp: &blk_trem_amp,
                         pan_cos: &div_pan_cos,

@@ -2,6 +2,7 @@
   import { onMount, onDestroy, createEventDispatcher, tick } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
   import { midiLearn } from '../lib/midiLearn.js';
+  import { midiActionTargets } from '../lib/midiActions.js';
   import { t, tx, locale } from '../lib/i18n.js';
   import VolumeRegelaar from './VolumeRegelaar.svelte';
 
@@ -63,6 +64,7 @@
   // Memory level direct-keuze knoppen M1..M8 → action codes 16..23
   const ACTION_M_BASE = 16;
 
+  $: midiActions = midiActionTargets(organInfo);
   $: organId = organInfo?.id || '';
   $: storageKey = organId ? `jm-orgue-presets-${hashCode(organId)}-m${memoryLevel}` : '';
   $: currentBank = currentPreset >= 0 ? Math.floor(currentPreset / 10) : 0;
@@ -487,33 +489,15 @@
     } else if (actionCode >= 24 && actionCode < 100) {
       // Tremulant LFO (24..39) + algemene toggles (40..99) — laat parent (Console) het afhandelen
       dispatch('externalAction', { actionCode });
-    } else if (actionCode >= 150) {
-      // Stop MIDI trigger - find matching stop and toggle
-      if (organInfo?.divisions) {
-        for (const div of organInfo.divisions) {
-          const stop = div.stops.find(s => s.midi_action_code === actionCode);
-          if (stop) {
-            invoke('toggle_stop', { stopId: stop.id }).catch(console.error);
-            break;
-          }
-        }
+    } else {
+      const target = midiActions.get(actionCode);
+      if (target?.kind === 'stop') {
+        invoke('toggle_stop', { stopId: target.item.id }).catch(console.error);
+      } else if (target?.kind === 'coupler') {
+        invoke('toggle_coupler', { couplerId: target.item.id }).catch(console.error);
+      } else if (target?.kind === 'piston') {
+        invoke('piston_druk', { index: target.item.index, ingedrukt: true }).catch(console.error);
       }
-    } else if (actionCode >= 100 && actionCode < 200) {
-      // Coupler MIDI trigger - find matching coupler and toggle
-      if (organInfo?.couplers) {
-        const coupler = organInfo.couplers.find(c => c.midi_action_code === actionCode);
-        if (coupler) {
-          invoke('toggle_coupler', { couplerId: coupler.id }).catch(console.error);
-        }
-      }
-    }
-    // Shortcutpiston (CODM, ≥ 200): bedient het doelobject precies als in de
-    // definitie. Een omschakelende piston doet toggle; een vasthoudende is in
-    // deze MIDI-route ook een toggle (note-off laten we los: anders zou één
-    // tik op een note-on + note-off hem meteen weer uitzetten).
-    const piston = organInfo?.schakelaars?.pistons?.find(p => p.midi_action_code === actionCode);
-    if (piston) {
-      invoke('piston_druk', { index: piston.index, ingedrukt: true }).catch(console.error);
     }
   }
 

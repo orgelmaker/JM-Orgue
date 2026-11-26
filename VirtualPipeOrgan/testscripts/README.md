@@ -43,3 +43,75 @@ Let op bij het beoordelen van metingen (lessen uit 0.7.39):
 - Een FFT-piek is de sterkste partiaal, niet de grondtoon. Kies testtoonhoogtes die geen
   octaaf of boventoon van elkaar zijn.
 Paden naar samplesets staan bovenin de scripts.
+
+## Orgelbouwer: achtergrondproeven
+
+Deze scripts starten eigen headless appprocessen, gebruiken een afzonderlijk
+profiel en maken synthetische bronnen. Geef `--exe` en `--work-dir` als absolute
+paden op. De wind- en klepproef gebruiken een werkmap binnen
+`testen/orgelbouwer-uitbreiding-2026-11-26` van de checkout; de feedbackproef
+gebruikt `testen/orgelbouwer-feedback-2026-11-26`. Gebruik voor een gewijzigde
+fixture een nieuwe submap. De scripts bedienen geen gebruikersvenster.
+De meerbronnenproef gebruikt `testen/orgelbouwer-meerbronnen-2026-11-26`.
+
+| Script | Wat het controleert |
+|---|---|
+| `organ_project_wind_background_test.py` | Twee bronwindnetwerken met gelijke compartiment-ID's, een geldige dynamische schakelklep met beginstand aan, onafhankelijke druk, herstel, uitschakelen, herstart en opruimen bij een gewoon orgel. |
+| `organ_project_valve_background_test.py` | Schakel- en continue kleppen, bronbeginstanden, inversie, gelijke controller-ID's in twee bronnen, gekoppelde registers, zelfstandige bediening, directe veilige opslag en herstart. |
+| `organ_project_feedback_background_test.py` | Mechanische balgfeedback en een aparte druklus, directe continue overdrachten, Willis/inertia en drempelschakelaar in twee onafhankelijke bronnen. Gebruikt een eigen submap onder `testen/orgelbouwer-feedback-2026-11-26`. |
+| `organ_project_multisource_background_test.py` | Procedure met drie en daarna vier bronnen in dezelfde map, eigen pakketmappen en overlappende native ID's. Meet afzonderlijke stemming en windverbruik en controleert bronvolgorde, bron vervangen, stabiele console-/registerdoelen, 65-bronnenafwijzing en herstart. |
+| `organ_project_multisource_ui_test.mjs` | Componentprocedure met echte Svelte en IPC-mocks: één beginvak, bronnen toevoegen, stemming/pakketmap per bron, keuzelijst vanaf vijf bronnen, labels na Z, grens 64/65 en compacte vensterbreedte. Native audio loopt via de achtergrondproef. |
+
+Projecten gebruiken nog schema 1 en kunnen één tot 64 bronnen bevatten.
+Bestaande projecten met twee bronnen blijven geldig. De globale grenzen blijven
+2.048 registers, 16 gebruikte rankkasten, 256 actieve windcompartimenten en
+4.096 windcontrollers; die worden niet per bron vermenigvuldigd. De interface
+begint met één bronkaart, biedt **Bron toevoegen…** en vervolgt de bronletters
+na Z met AA, AB, enzovoort.
+
+Reproduceer de meerbronnenproeven vanuit `VirtualPipeOrgan`. Vervang in deze
+voorbeelden de checkout en het Playwright-modulepad door de lokale absolute
+paden en kies een nieuwe werkmap:
+
+```powershell
+py testscripts/organ_project_multisource_background_test.py --exe "C:/werk/JM-Orgue/VirtualPipeOrgan/target/debug/vpo-app.exe" --work-dir "C:/werk/JM-Orgue/testen/orgelbouwer-meerbronnen-2026-11-26/run-1"
+node testscripts/organ_project_multisource_ui_test.mjs --playwright "C:/tools/playwright/index.mjs" --chrome "C:/Program Files/Google/Chrome/Application/chrome.exe" --output "C:/werk/JM-Orgue/testen/orgelbouwer-meerbronnen-2026-11-26/ui"
+```
+
+De achtergrondproef ondersteunt `--prepare-only` voor alleen het aanmaken van
+fixtures en bewaart `multisource-result.json` met proceslogboeken. De
+componentproef vereist de UI-afhankelijkheden, Chrome en Playwright en bewaart
+`result.json`, `multisource-wide.png` en `multisource-narrow.png`.
+
+De broncontroller-ID's zijn gescheiden per bron-UUID en type. Een gekoppelde
+schakelaar volgt de OR van zijn projectregisters; zelfstandige waarden worden
+direct per project bewaard. De lokale API biedt `GET /project/wind` voor
+drukken, actuele controllerstanden, klepopeningen en massastromen;
+`GET /project/wind/controls` geeft doelwaarden en
+`POST /project/wind/control` bedient alleen zelfstandige controllers met een
+eindige waarde binnen 0..1. Automatische controllers en verborgen bronconstanten
+zijn alleen uitleesbaar. De feedbackproef gebruikt daarnaast balgpositie,
+snelheid en slagfractie, en modeltijd uit de audiokern in plaats van alleen
+kloktijd. Zie [TEST_API.md](../docs/TEST_API.md) voor de meetvelden en formules.
+
+De tests vergelijken de eigen JM-simulatie, inclusief een handbediende
+klepovergang van 10 ms en klankfade onder 60% bronlagedruk. Ze bewijzen geen
+gelijkheid aan de Hauptwerk-windsolver. De JM-formules omvatten continue
+inversie/offset/factor/macht, exponentiële Willis-regeling en een gedempte
+inertievergelijking. Niet ondersteunde dubbele continue overdrachten,
+balgveren en onbekende codes moeten vóór orgelvervanging worden geweigerd.
+
+Een geselecteerd register met een tevens automatisch aangestuurde
+bronschakelaar moet eveneens vóór laden worden geweigerd. Een bronproducent
+mag een bestaande projectregisterbinding niet stilzwijgend vervangen.
+
+De genegeerde Rust-proef
+`installed_nitra_readable_definition_retains_complete_blower_and_bellows_closure`
+kan aanvullend tegen een lokaal geïnstalleerde Nitra-demo draaien. Stel daarvoor
+`JM_NITRA_DEFINITION` op het absolute pad van de leesbare ODF. De gewone
+testsuite heeft die commerciële/demo-installatie niet nodig.
+De eveneens genegeerde app-proef
+`installed_nitra_automatic_wind_closure_runs_ten_seconds` laat de ingelezen
+wind- en besturingsketen tien seconden draaien. Dit is een windproef zonder
+geladen bronpijpen; het bewijst geen volledige orgelcompatibiliteit of
+klankgelijkheid aan Hauptwerk.

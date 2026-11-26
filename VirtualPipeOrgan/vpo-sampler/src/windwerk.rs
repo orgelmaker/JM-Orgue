@@ -10,7 +10,7 @@
 //! - **Pijp**: haalt haar wind uit een lade (`WindSupply_SourceWindCompartmentID`) en verbruikt zoveel kg/s bij een
 //!   referentiedruk.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 
 use serde::{Deserialize, Serialize};
 
@@ -30,6 +30,14 @@ pub struct BalgDef {
     pub slag_m: f32,
     pub massa_kg: f32,
     pub demping: f32,
+    #[serde(default)]
+    pub moving_inertia_mass_kg: Option<f32>,
+    #[serde(default)]
+    pub shape_code: Option<u32>,
+    #[serde(default)]
+    pub movement_direction_code: Option<u32>,
+    #[serde(default)]
+    pub gravity_center_distance_m: Option<f32>,
 }
 
 impl BalgDef {
@@ -66,6 +74,140 @@ pub struct WindLadeDef {
     pub balg: Option<BalgDef>,
 }
 
+/// Source-local Hauptwerk controller identity. Switch and continuous IDs have
+/// separate namespaces, even when their numeric values happen to be equal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ValveControlKind {
+    Switch,
+    Continuous,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ValveControlRef {
+    Switch { control_id: u32, open_if_engaged: bool },
+    Continuous { control_id: u32 },
+    Unsupported { type_code: u32, reason: String },
+}
+
+/// Exact source automation fields are retained for diagnosis. They are not
+/// silently replaced by an always-open valve when their semantics are unknown.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ValveControlLinkDef {
+    pub object_type: String,
+    pub fields: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ValveControlDef {
+    pub id: u32,
+    pub kind: ValveControlKind,
+    pub name: String,
+    /// Explicit source initial value normalized from Hauptwerk's 0..127 range.
+    /// If no valid initial value exists, issues explains why loading is refused.
+    pub default_value: f32,
+    /// Driven by source automation/physical feedback; not a manual target.
+    #[serde(default)]
+    pub automatic: bool,
+    #[serde(default)]
+    pub source_stop_ids: Vec<u32>,
+    #[serde(default)]
+    pub linkages: Vec<ValveControlLinkDef>,
+    #[serde(default)]
+    pub issues: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WindControlConditionDef {
+    pub switch_id: u32,
+    pub engaged: bool,
+    pub reevaluate: bool,
+}
+
+/// These are source parameters interpreted by the documented JM control
+/// model; no assertion of identical Hauptwerk timing or operation ordering.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum WindContinuousLinkModel {
+    Direct,
+    Willis { milliseconds_per_step: f32 },
+    Inertia { acceleration: f32, damping: f32 },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WindContinuousLinkDef {
+    pub source: u32,
+    pub dest: u32,
+    pub name: String,
+    pub condition: Option<WindControlConditionDef>,
+    pub invert: bool,
+    /// Increment and power apply to the source's raw 0..127 value.
+    pub increment: f32,
+    pub coefficient: f32,
+    pub index: f32,
+    pub model: WindContinuousLinkModel,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WindSwitchAction {
+    Engage,
+    Disengage,
+    /// Source code 7 uses JM's explicit latch/no-release-action interpretation.
+    NoAction,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WindSwitchLinkDef {
+    pub source: u32,
+    pub dest: u32,
+    pub condition: Option<WindControlConditionDef>,
+    pub source_engaged: bool,
+    pub engage_action: WindSwitchAction,
+    pub disengage_action: WindSwitchAction,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WindStageSwitchDef {
+    pub control: u32,
+    pub switch_id: u32,
+    /// Normalized source threshold, 0..1.
+    pub threshold: f32,
+    pub engage_increasing: bool,
+    pub engage_decreasing: bool,
+    pub disengage_increasing: bool,
+    pub disengage_decreasing: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum WindControlOutputKind {
+    BellowsExtension { compartment_id: u32 },
+    Pressure { compartment_id: u32 },
+    Flow { link_index: usize, max_flow_kg_s: f32 },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WindControlOutputDef {
+    pub control_id: u32,
+    pub kind: WindControlOutputKind,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct WindAutomationDef {
+    #[serde(default)]
+    pub cc_links: Vec<WindContinuousLinkDef>,
+    #[serde(default)]
+    pub switch_links: Vec<WindSwitchLinkDef>,
+    #[serde(default)]
+    pub stages: Vec<WindStageSwitchDef>,
+    #[serde(default)]
+    pub outputs: Vec<WindControlOutputDef>,
+    #[serde(default)]
+    pub issues: Vec<String>,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct WindVerbindingDef {
     pub van: u32,
@@ -75,13 +217,22 @@ pub struct WindVerbindingDef {
     pub ref_inch: f32,
     /// Heeft een klep die een schakelaar of regelaar bedient (motor, balg leeg laten lopen).
     pub klep: bool,
+    #[serde(default)]
+    pub valve_control_type_code: Option<u32>,
+    #[serde(default)]
+    pub valve_control: Option<ValveControlRef>,
 }
 
-/// Het windwerk van een set. Leeg (`laden` leeg) als de set niets geeft of niet leesbaar is.
+/// Het windwerk van een set. Explicit links without compartments remain present
+/// so project preflight can reject their missing endpoints instead of losing valves.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct WindwerkDef {
     pub laden: Vec<WindLadeDef>,
     pub verbindingen: Vec<WindVerbindingDef>,
+    #[serde(default)]
+    pub controls: Vec<ValveControlDef>,
+    #[serde(default)]
+    pub automation: WindAutomationDef,
 }
 
 fn getal(o: &FieldMap, veld: &str) -> Option<f32> {
@@ -90,6 +241,76 @@ fn getal(o: &FieldMap, veld: &str) -> Option<f32> {
 
 fn ja(o: &FieldMap, veld: &str) -> bool {
     o.get(veld).is_some_and(|v| v.trim().eq_ignore_ascii_case("Y"))
+}
+
+fn control_id(row: &FieldMap, field: &str) -> Result<u32, String> {
+    row.get_u32(field).filter(|id| *id > 0).ok_or_else(|| format!("{field} mist een geldig positief ID"))
+}
+
+fn control_bool(row: &FieldMap, field: &str, default: bool) -> Result<bool, String> {
+    match row.get(field).map(|value| value.trim()).filter(|value| !value.is_empty()) {
+        None => Ok(default), Some("Y") => Ok(true), Some("N") => Ok(false),
+        _ => Err(format!("{field} moet Y of N zijn")),
+    }
+}
+
+fn control_number(row: &FieldMap, field: &str, default: f32) -> Result<f32, String> {
+    if row.get(field).is_none_or(|value| value.trim().is_empty()) { return Ok(default); }
+    getal(row, field).filter(|value| value.is_finite())
+        .ok_or_else(|| format!("{field} moet een eindig getal zijn"))
+}
+
+fn control_condition(row: &FieldMap) -> Result<Option<WindControlConditionDef>, String> {
+    if row.get("ConditionSwitchID").is_none_or(|value| value.trim().is_empty() || value.trim() == "0") {
+        return Ok(None);
+    }
+    Ok(Some(WindControlConditionDef {
+        switch_id: control_id(row, "ConditionSwitchID")?,
+        engaged: control_bool(row, "ConditionSwitchLinkIfEngaged", true)?,
+        reevaluate: control_bool(row, "ReevaluateIfCondSwitchChangesState", true)?,
+    }))
+}
+
+fn control_action(row: &FieldMap, field: &str) -> Result<WindSwitchAction, String> {
+    match row.get_u32(field) {
+        Some(1) => Ok(WindSwitchAction::Engage),
+        Some(2) => Ok(WindSwitchAction::Disengage),
+        Some(7) => Ok(WindSwitchAction::NoAction),
+        _ => Err(format!("{field} gebruikt een niet ondersteunde actiecode")),
+    }
+}
+
+struct ControlProducer<'a> {
+    kind: ValveControlKind,
+    id: u32,
+    object_type: &'a str,
+    output_field: &'a str,
+    row: &'a FieldMap,
+    row_index: usize,
+}
+
+impl ControlProducer<'_> {
+    fn dependencies(&self) -> Vec<(ValveControlKind, u32)> {
+        use ValveControlKind::{Continuous, Switch};
+        if self.object_type == "WindCompartmentLinkage" {
+            let field = match self.row.get_u32("ValveControlTypeCode") {
+                Some(2) => Some((Switch, "ValveControllingSwitchID")),
+                Some(3) => Some((Continuous, "ValveControllingContinuousControlID")),
+                _ => None,
+            };
+            return field.and_then(|(kind, field)| self.row.get_u32(field).filter(|id| *id > 0).map(|id| (kind, id)))
+                .into_iter().collect();
+        }
+        let fields: &[(ValveControlKind, &str)] = match self.object_type {
+            "ContinuousControlLinkage" => &[(Continuous, "SourceControlID"), (Switch, "ConditionSwitchID")],
+            "ContinuousControlDoubleLinkage" => &[(Continuous, "FirstSourceControl_ID"), (Continuous, "SecondSourceControl_ID")],
+            "SwitchLinkage" => &[(Switch, "SourceSwitchID"), (Switch, "ConditionSwitchID")],
+            "ContinuousControlStageSwitch" => &[(Continuous, "ContinuousControlID")],
+            "WindCompartment" => &[(Continuous, "Bellows_ExtensionSettingContinuousControlID")],
+            _ => &[],
+        };
+        fields.iter().filter_map(|(kind, field)| self.row.get_u32(field).filter(|id| *id > 0).map(|id| (*kind, id))).collect()
+    }
 }
 
 impl WindwerkDef {
@@ -103,6 +324,10 @@ impl WindwerkDef {
                 slag_m: getal(o, "Bellows_MaximumExtensionMetres").unwrap_or(0.0),
                 massa_kg: getal(o, "Bellows_MassOfMovingBoardActedOnByGravityKg").unwrap_or(0.0),
                 demping: getal(o, "Bellows_PositiveDampingCoefficient").unwrap_or(0.0),
+                moving_inertia_mass_kg: getal(o, "Bellows_MassOfMovingBoardGivingRiseToInertiaKg"),
+                shape_code: o.get_u32("Bellows_ShapeCode"),
+                movement_direction_code: o.get_u32("Bellows_MovementDirectionCode"),
+                gravity_center_distance_m: getal(o, "Bellows_DistOfCenOfMassOfMvgBrdFromAxisIfDiagTypMetres"),
             });
             Some(WindLadeDef {
                 id,
@@ -114,21 +339,272 @@ impl WindwerkDef {
             })
         }).collect();
         let verbindingen = verbindingen.iter().filter_map(|o| {
+            let type_code = o.get_u32("ValveControlTypeCode");
+            let unsupported = |reason: &str| Some(ValveControlRef::Unsupported {
+                type_code: type_code.unwrap_or(0), reason: reason.into(),
+            });
+            let valve_control = match type_code {
+                None if o.get("ValveControlTypeCode").is_some_and(|v| !v.trim().is_empty()) =>
+                    unsupported("ValveControlTypeCode is ongeldig"),
+                None | Some(1) => None,
+                Some(2) => match (o.get_u32("ValveControllingSwitchID").filter(|id| *id > 0),
+                    o.get("ValveOpenIfControllingSwitchEngaged").map(|v| v.trim())) {
+                    (Some(control_id), Some(polarity)) if matches!(polarity, "Y" | "N") =>
+                        Some(ValveControlRef::Switch { control_id, open_if_engaged: polarity == "Y" }),
+                    _ => unsupported("Schakelklep mist een geldige ValveControllingSwitchID of ValveOpenIfControllingSwitchEngaged"),
+                },
+                Some(3) => match o.get_u32("ValveControllingContinuousControlID").filter(|id| *id > 0) {
+                    Some(control_id) => Some(ValveControlRef::Continuous { control_id }),
+                    None => unsupported("Regelklep mist een geldige ValveControllingContinuousControlID"),
+                },
+                Some(_) => unsupported("Dit ValveControlTypeCode wordt niet ondersteund"),
+            };
             Some(WindVerbindingDef {
-                van: o.get_u32("FirstWindCompartmentID")?,
-                naar: o.get_u32("SecondWindCompartmentID")?,
+                // Retain malformed links for preflight rejection instead of
+                // silently dropping their valves or shifting flow-output IDs.
+                van: o.get_u32("FirstWindCompartmentID").unwrap_or(0),
+                naar: o.get_u32("SecondWindCompartmentID").unwrap_or(0),
                 naam: o.get("Name").cloned().unwrap_or_default(),
                 stroom_kg_s: getal(o, "MassFlowRateKilogramsPerSecAtReferencePressureDiff").unwrap_or(0.0),
                 ref_inch: getal(o, "ReferencePressureDifferenceInches").unwrap_or(1.0),
                 // Code 1 = altijd open; 2 = schakelaar; 3 = regelaar.
-                klep: o.get("ValveControlTypeCode").is_some_and(|c| matches!(c.trim(), "2" | "3")),
+                klep: valve_control.is_some(),
+                valve_control_type_code: type_code,
+                valve_control,
             })
         }).collect();
-        WindwerkDef { laden, verbindingen }
+        WindwerkDef { laden, verbindingen, controls: Vec::new(), automation: WindAutomationDef::default() }
+    }
+
+    /// Keep the complete backwards dependency closure of every wind valve.
+    /// Unrelated organ relay/audio logic is deliberately outside this graph.
+    pub(crate) fn voeg_besturing_toe(
+        &mut self,
+        switches: &[FieldMap],
+        continuous: &[FieldMap],
+        stops: &[FieldMap],
+        automation: &[(&str, &[FieldMap])],
+    ) {
+        self.automation = WindAutomationDef::default();
+        let mut identities: std::collections::BTreeSet<_> = self.verbindingen.iter()
+            .filter_map(|link| match &link.valve_control {
+                Some(ValveControlRef::Switch { control_id, .. }) => Some((ValveControlKind::Switch, *control_id)),
+                Some(ValveControlRef::Continuous { control_id }) => Some((ValveControlKind::Continuous, *control_id)),
+                _ => None,
+            }).collect();
+        let mut producers = Vec::new();
+        for (object_type, rows) in automation {
+            for (row_index, row) in rows.iter().enumerate() {
+                let outputs: &[(ValveControlKind, &str)] = match *object_type {
+                    "SwitchLinkage" => &[(ValveControlKind::Switch, "DestSwitchID")],
+                    "ContinuousControlStageSwitch" => &[(ValveControlKind::Switch, "ControlledSwitchID")],
+                    "ContinuousControlLinkage" => &[(ValveControlKind::Continuous, "DestControlID")],
+                    "ContinuousControlDoubleLinkage" => &[(ValveControlKind::Continuous, "DestControl_ID")],
+                    "WindCompartment" => &[(ValveControlKind::Continuous, "Bellows_ExtensionOutputContinuousControlID"),
+                        (ValveControlKind::Continuous, "PressureOutputContinuousControlID")],
+                    "WindCompartmentLinkage" => &[(ValveControlKind::Continuous, "FlowRateOutputCtsCtrl_ContinuousControlID")],
+                    _ => &[],
+                };
+                for (kind, output_field) in outputs {
+                    if let Some(id) = row.get_u32(output_field).filter(|id| *id > 0) {
+                        producers.push(ControlProducer { kind: *kind, id, object_type, output_field, row, row_index });
+                    }
+                }
+            }
+        }
+        loop {
+            let old_len = identities.len();
+            for producer in &producers {
+                if identities.contains(&(producer.kind, producer.id)) {
+                    identities.extend(producer.dependencies());
+                }
+            }
+            if identities.len() > 4096 {
+                self.automation.issues.push("Het bronwindnetwerk gebruikt meer dan 4.096 controllers".into());
+                self.controls.clear();
+                return;
+            }
+            if identities.len() == old_len { break; }
+        }
+        let relevant: Vec<_> = producers.iter().filter(|producer| identities.contains(&(producer.kind, producer.id))).collect();
+        if relevant.len() > 4096 {
+            self.automation.issues.push("Het bronwindnetwerk gebruikt meer dan 4.096 besturingsverbindingen".into());
+            self.controls.clear();
+            return;
+        }
+        self.controls = identities.into_iter().map(|(kind, id)| {
+            let (rows, id_field) = match kind {
+                ValveControlKind::Switch => (switches, "SwitchID"),
+                ValveControlKind::Continuous => (continuous, "ControlID"),
+            };
+            let matches: Vec<_> = rows.iter().filter(|row| row.get_u32(id_field) == Some(id)).collect();
+            let row = matches.first().copied();
+            let mut issues = Vec::new();
+            if matches.len() != 1 {
+                issues.push(format!("{kind:?} {id}: verwacht één broncontroller, gevonden {}", matches.len()));
+            }
+            let initial = row.and_then(|row| match kind {
+                ValveControlKind::Switch => row.get("DefaultToEngaged").and_then(|v| match v.trim() {
+                    "Y" => Some(1.0), "N" => Some(0.0), _ => None,
+                }),
+                ValveControlKind::Continuous => getal(row, "DefaultValue")
+                    .filter(|value| value.is_finite() && (0.0..=127.0).contains(value))
+                    .map(|value| value / 127.0),
+            });
+            let driven = relevant.iter().any(|producer| (producer.kind, producer.id) == (kind, id));
+            let mut source_stop_ids: Vec<_> = if kind == ValveControlKind::Switch {
+                stops.iter().filter(|stop| stop.get_u32("ControllingSwitchID") == Some(id))
+                    .filter_map(|stop| stop.get_u32("StopID")).collect()
+            } else { Vec::new() };
+            source_stop_ids.sort_unstable();
+            source_stop_ids.dedup();
+            let hidden_constant = source_stop_ids.is_empty() && row.is_some_and(|row|
+                row.get("AccessibleForInput").is_some_and(|value| value.trim() == "N")
+                    && row.get("Clickable").is_some_and(|value| value.trim() == "N"));
+            let automatic = driven || hidden_constant;
+            let default_field = if kind == ValveControlKind::Switch { "DefaultToEngaged" } else { "DefaultValue" };
+            let has_explicit_default = row.and_then(|row| row.get(default_field)).is_some_and(|value| !value.trim().is_empty());
+            if initial.is_none() && (has_explicit_default || !driven) {
+                issues.push(format!("{kind:?} {id}: expliciete geldige beginstand ontbreekt (DefaultToEngaged/DefaultValue)"));
+            }
+            let linkages = relevant.iter().filter(|producer| (producer.kind, producer.id) == (kind, id))
+                .map(|producer| ValveControlLinkDef { object_type: producer.object_type.into(),
+                    fields: producer.row.iter().map(|(key, value)| (key.clone(), value.clone())).collect() }).collect();
+            ValveControlDef {
+                id, kind,
+                name: row.and_then(|row| row.get("Name")).cloned().unwrap_or_else(|| format!("{kind:?} {id}")),
+                default_value: initial.unwrap_or(0.0),
+                automatic,
+                source_stop_ids,
+                linkages, issues,
+            }
+        }).collect();
+        for producer in relevant {
+            if let Err(error) = self.parse_control_producer(producer) {
+                self.automation.issues.push(format!("{} → {:?} {}: {error}", producer.object_type, producer.kind, producer.id));
+            }
+        }
+    }
+
+    fn parse_control_producer(&mut self, producer: &ControlProducer<'_>) -> Result<(), String> {
+        let row = producer.row;
+        let known_fields: &[&str] = match producer.object_type {
+            "ContinuousControlLinkage" => &["Name", "SourceControlID", "DestControlID", "LinkTypeCode",
+                "WillisTypeIncSpeedInMillisecondsPerStepWithOneStepDiff", "InertiaModelTypePositiveAcceleratingCoeff",
+                "InertiaModelTypePositiveDampingCoeff", "InertialModelTypePositiveAcceleratingCoeff",
+                "InertialModelTypePositiveDampingCoeff", "ConditionSwitchID", "ConditionSwitchLinkIfEngaged",
+                "ReevaluateIfCondSwitchChangesState", "InvertSourceControlValue", "SourceControlValueIncrement",
+                "SourceControlValueCoefficient", "SourceControlValueIndex"],
+            "SwitchLinkage" => &["Name", "SourceSwitchID", "DestSwitchID", "ConditionSwitchID",
+                "ConditionSwitchLinkIfEngaged", "SourceSwitchLinkIfEngaged", "ReevaluateIfCondSwitchChangesState",
+                "EngageLinkActionCode", "DisengageLinkActionCode"],
+            "ContinuousControlStageSwitch" => &["Name", "ContinuousControlID", "ContinuousControlValue", "ControlledSwitchID",
+                "EngageWhenValueIncreasing", "EngageWhenValueDecreasing", "DisengageWhenValueIncreasing", "DisengageWhenValueDecreasing"],
+            _ => &[],
+        };
+        if !known_fields.is_empty() {
+            let unknown: Vec<_> = row.iter().filter(|(key, value)| !value.trim().is_empty() && !known_fields.contains(&key.as_str()))
+                .map(|(key, _)| key.as_str()).collect();
+            if !unknown.is_empty() { return Err(format!("Onbekende besturingsvelden: {}", unknown.join(", "))); }
+        }
+        match producer.object_type {
+            "ContinuousControlLinkage" => {
+                let model = match row.get_u32("LinkTypeCode") {
+                    Some(1) => WindContinuousLinkModel::Direct,
+                    Some(2) => {
+                        let ms = control_number(row, "WillisTypeIncSpeedInMillisecondsPerStepWithOneStepDiff", f32::NAN)?;
+                        if !(0.0..=3_600_000.0).contains(&ms) || ms == 0.0 { return Err("Ongeldige Willis-tijdconstante".into()); }
+                        WindContinuousLinkModel::Willis { milliseconds_per_step: ms }
+                    }
+                    Some(3) => {
+                        let alias = |field: &str, alternate: &str| -> Result<f32, String> {
+                            let value = control_number(row, field, f32::NAN)?;
+                            let other = control_number(row, alternate, f32::NAN)?;
+                            if value.is_finite() && other.is_finite() && value != other { return Err(format!("Tegenstrijdige {field}/{alternate}")); }
+                            Ok(if value.is_finite() { value } else { other })
+                        };
+                        let acceleration = alias("InertiaModelTypePositiveAcceleratingCoeff", "InertialModelTypePositiveAcceleratingCoeff")?;
+                        let damping = alias("InertiaModelTypePositiveDampingCoeff", "InertialModelTypePositiveDampingCoeff")?;
+                        if !acceleration.is_finite() || !(0.0..=1e9).contains(&acceleration) || acceleration == 0.0
+                            || !damping.is_finite() || !(0.0..=1e9).contains(&damping) { return Err("Ongeldige inertiecoëfficiënten".into()); }
+                        WindContinuousLinkModel::Inertia { acceleration, damping }
+                    }
+                    _ => return Err("LinkTypeCode wordt niet ondersteund".into()),
+                };
+                let increment = control_number(row, "SourceControlValueIncrement", 0.0)?;
+                let coefficient = control_number(row, "SourceControlValueCoefficient", 1.0)?;
+                let index = control_number(row, "SourceControlValueIndex", 1.0)?;
+                if increment.abs() > 1e6 || coefficient.abs() > 1e6 || !(0.0..=16.0).contains(&index) || index == 0.0 {
+                    return Err("Onbegrensde continue overdracht".into());
+                }
+                self.automation.cc_links.push(WindContinuousLinkDef {
+                    source: control_id(row, "SourceControlID")?, dest: producer.id,
+                    name: row.get("Name").cloned().unwrap_or_default(), condition: control_condition(row)?,
+                    invert: control_bool(row, "InvertSourceControlValue", false)?, increment, coefficient, index, model,
+                });
+            }
+            "SwitchLinkage" => self.automation.switch_links.push(WindSwitchLinkDef {
+                source: control_id(row, "SourceSwitchID")?, dest: producer.id,
+                condition: control_condition(row)?, source_engaged: control_bool(row, "SourceSwitchLinkIfEngaged", true)?,
+                engage_action: control_action(row, "EngageLinkActionCode")?,
+                disengage_action: control_action(row, "DisengageLinkActionCode")?,
+            }),
+            "ContinuousControlStageSwitch" => {
+                let threshold = control_number(row, "ContinuousControlValue", f32::NAN)?;
+                if !threshold.is_finite() || !(0.0..=127.0).contains(&threshold) { return Err("Ongeldige trappenwaarde".into()); }
+                self.automation.stages.push(WindStageSwitchDef {
+                    control: control_id(row, "ContinuousControlID")?, switch_id: producer.id, threshold: threshold / 127.0,
+                    engage_increasing: control_bool(row, "EngageWhenValueIncreasing", false)?,
+                    engage_decreasing: control_bool(row, "EngageWhenValueDecreasing", false)?,
+                    disengage_increasing: control_bool(row, "DisengageWhenValueIncreasing", false)?,
+                    disengage_decreasing: control_bool(row, "DisengageWhenValueDecreasing", false)?,
+                });
+            }
+            "WindCompartment" => {
+                if row.get_u32("Bellows_ExtensionSettingContinuousControlID").is_some_and(|id| id > 0) {
+                    return Err("Gedwongen balgstand via Bellows_ExtensionSettingContinuousControlID wordt niet ondersteund".into());
+                }
+                if control_bool(row, "Bellows_OpeningSprings_HasOpeningSprings", false)?
+                    || control_bool(row, "Bellows_ClosingSprings_HasClosingSprings", false)? {
+                    return Err("Balgveren worden niet ondersteund door dit JM-model".into());
+                }
+                if ja(row, "Bellows_HasBellows") {
+                    for (field, allowed) in [("Bellows_ShapeCode", &[1, 2][..]), ("Bellows_MovementDirectionCode", &[1][..])] {
+                        if row.get(field).is_some_and(|value| !value.trim().is_empty())
+                            && !row.get_u32(field).is_some_and(|code| allowed.contains(&code)) {
+                            return Err(format!("{field} wordt niet ondersteund door dit JM-model"));
+                        }
+                    }
+                    if row.get_u32("Bellows_ShapeCode") == Some(2) {
+                        let length = getal(row, "Bellows_FrameBaseLengthMetres").unwrap_or(0.0);
+                        let center = getal(row, "Bellows_DistOfCenOfMassOfMvgBrdFromAxisIfDiagTypMetres").unwrap_or(0.0);
+                        if !length.is_finite() || !center.is_finite() || length <= 0.0 || center <= 0.0 || center > length {
+                            return Err("Diagonale balg mist een geldig zwaartepuntafstand/lengte".into());
+                        }
+                    }
+                }
+                let compartment_id = control_id(row, "WindCompartmentID")?;
+                let kind = if producer.output_field == "Bellows_ExtensionOutputContinuousControlID" {
+                    if !ja(row, "Bellows_HasBellows") { return Err("Balgextensie-uitgang verwijst naar een compartiment zonder balg".into()); }
+                    WindControlOutputKind::BellowsExtension { compartment_id }
+                } else { WindControlOutputKind::Pressure { compartment_id } };
+                self.automation.outputs.push(WindControlOutputDef { control_id: producer.id, kind });
+            }
+            "WindCompartmentLinkage" => {
+                let max_flow_kg_s = control_number(row, "FlowRateOutputCtsCtrl_MaxMassFlowRateKilogramsPerSec", f32::NAN)?;
+                if !max_flow_kg_s.is_finite() || max_flow_kg_s <= 0.0 || producer.row_index >= self.verbindingen.len() {
+                    return Err("Doorstroomuitgang mist een geldige referentiestroom/verbinding".into());
+                }
+                self.automation.outputs.push(WindControlOutputDef { control_id: producer.id,
+                    kind: WindControlOutputKind::Flow { link_index: producer.row_index, max_flow_kg_s } });
+            }
+            _ => return Err("Deze bronautomatisering wordt nog niet ondersteund".into()),
+        }
+        Ok(())
     }
 
     pub fn is_leeg(&self) -> bool {
-        self.laden.is_empty()
+        self.laden.is_empty() && self.verbindingen.is_empty()
     }
 
     pub fn lade(&self, id: u32) -> Option<&WindLadeDef> {
@@ -367,6 +843,202 @@ mod tests {
 
     fn fm(kv: &[(&str, &str)]) -> FieldMap {
         kv.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+    }
+
+    fn controlled_links() -> WindwerkDef {
+        WindwerkDef::uit_tabellen(&[], &[
+            fm(&[("FirstWindCompartmentID", "1"), ("SecondWindCompartmentID", "2"),
+                ("ValveControlTypeCode", "2"), ("ValveControllingSwitchID", "7"),
+                ("ValveOpenIfControllingSwitchEngaged", "N")]),
+            fm(&[("FirstWindCompartmentID", "2"), ("SecondWindCompartmentID", "3"),
+                ("ValveControlTypeCode", "3"), ("ValveControllingContinuousControlID", "7")]),
+        ])
+    }
+
+    #[test]
+    fn reads_actual_hauptwerk_valve_ids_polarity_and_separate_control_kinds() {
+        let mut wind = controlled_links();
+        wind.voeg_besturing_toe(
+            &[fm(&[("SwitchID", "7"), ("Name", "Windmotor"), ("DefaultToEngaged", "Y")])],
+            &[fm(&[("ControlID", "7"), ("Name", "Windregelaar"), ("DefaultValue", "63.5")])],
+            &[fm(&[("StopID", "42"), ("ControllingSwitchID", "7")])], &[],
+        );
+        assert_eq!(wind.verbindingen[0].valve_control_type_code, Some(2));
+        assert_eq!(wind.verbindingen[0].valve_control,
+            Some(ValveControlRef::Switch { control_id: 7, open_if_engaged: false }));
+        assert_eq!(wind.verbindingen[1].valve_control,
+            Some(ValveControlRef::Continuous { control_id: 7 }));
+        assert_eq!(wind.controls.len(), 2);
+        assert_eq!(wind.controls[0].kind, ValveControlKind::Switch);
+        assert_eq!(wind.controls[0].default_value, 1.0);
+        assert_eq!(wind.controls[0].source_stop_ids, vec![42]);
+        assert_eq!(wind.controls[1].kind, ValveControlKind::Continuous);
+        assert_eq!(wind.controls[1].default_value, 0.5);
+        assert!(wind.controls.iter().all(|control| control.issues.is_empty()));
+    }
+
+    #[test]
+    fn preserves_incoming_transfer_inversion_scale_and_timing_without_guessing() {
+        let mut wind = controlled_links();
+        let links = [fm(&[("SourceControlID", "300"), ("DestControlID", "7"),
+            ("LinkTypeCode", "1"), ("InvertSourceControlValue", "Y"),
+            ("SourceControlValueIncrement", "-27"), ("SourceControlValueCoefficient", "2.54")])];
+        wind.voeg_besturing_toe(
+            &[fm(&[("SwitchID", "7"), ("DefaultToEngaged", "N")])],
+            &[fm(&[("ControlID", "7"), ("DefaultValue", "127")]), fm(&[("ControlID", "300"), ("DefaultValue", "0")])], &[],
+            &[("ContinuousControlLinkage", &links)],
+        );
+        let control = &wind.controls[1];
+        assert!(control.automatic);
+        assert!(control.issues.is_empty());
+        assert!(wind.automation.issues.is_empty());
+        assert_eq!(wind.automation.cc_links.len(), 1);
+        assert_eq!(wind.automation.cc_links[0].source, 300);
+        assert!(wind.automation.cc_links[0].invert);
+        assert_eq!(wind.automation.cc_links[0].increment, -27.0);
+        assert_eq!(wind.automation.cc_links[0].coefficient, 2.54);
+        assert_eq!(control.linkages[0].fields["InvertSourceControlValue"], "Y");
+        assert_eq!(control.linkages[0].fields["SourceControlValueIncrement"], "-27");
+        assert_eq!(control.linkages[0].fields["SourceControlValueCoefficient"], "2.54");
+    }
+
+    #[test]
+    fn full_backward_closure_includes_conditional_inertia_and_stage_switches() {
+        let mut wind = controlled_links();
+        let cc = [fm(&[("ControlID", "7")]), fm(&[("ControlID", "21"), ("DefaultValue", "127")]),
+            fm(&[("ControlID", "24"), ("DefaultValue", "0")])];
+        let links = [fm(&[("SourceControlID", "21"), ("DestControlID", "24"), ("LinkTypeCode", "3"),
+            ("InertialModelTypePositiveAcceleratingCoeff", "1000"), ("InertialModelTypePositiveDampingCoeff", "1")]),
+            fm(&[("SourceControlID", "24"), ("DestControlID", "7"), ("LinkTypeCode", "2"),
+                ("WillisTypeIncSpeedInMillisecondsPerStepWithOneStepDiff", "1000"), ("ConditionSwitchID", "100"),
+                ("ConditionSwitchLinkIfEngaged", "Y")])];
+        let stages = [fm(&[("ContinuousControlID", "24"), ("ContinuousControlValue", "127"),
+            ("ControlledSwitchID", "100"), ("EngageWhenValueIncreasing", "Y")])];
+        wind.voeg_besturing_toe(&[fm(&[("SwitchID", "7"), ("DefaultToEngaged", "N")]),
+            fm(&[("SwitchID", "100"), ("DefaultToEngaged", "N")])], &cc, &[],
+            &[("ContinuousControlLinkage", &links), ("ContinuousControlStageSwitch", &stages)]);
+        assert!(wind.controls.iter().all(|control| control.issues.is_empty()));
+        assert!(wind.automation.issues.is_empty(), "{:?}", wind.automation.issues);
+        assert_eq!(wind.controls.len(), 5);
+        assert_eq!(wind.automation.cc_links.len(), 2);
+        assert_eq!(wind.automation.stages.len(), 1);
+        assert!(matches!(wind.automation.cc_links[0].model, WindContinuousLinkModel::Inertia { acceleration: 1000.0, damping: 1.0 }));
+        let target = wind.controls.iter().find(|control| control.kind == ValveControlKind::Continuous && control.id == 7).unwrap();
+        assert!(target.automatic);
+        assert_eq!(target.default_value, 0.0, "only a produced controller may derive its missing initial value");
+    }
+
+    #[test]
+    fn physical_outputs_bring_their_source_parameters_and_feedback_chain() {
+        let compartments = [fm(&[("WindCompartmentID", "1"), ("Bellows_HasBellows", "Y"),
+            ("Bellows_FrameBaseWidthMetres", "2"), ("Bellows_FrameBaseLengthMetres", "5"),
+            ("Bellows_MaximumExtensionMetres", "0.4"), ("Bellows_MassOfMovingBoardActedOnByGravityKg", "117"),
+            ("Bellows_MassOfMovingBoardGivingRiseToInertiaKg", "118"), ("Bellows_ShapeCode", "2"),
+            ("Bellows_MovementDirectionCode", "1"), ("Bellows_DistOfCenOfMassOfMvgBrdFromAxisIfDiagTypMetres", "2.4"),
+            ("Bellows_ExtensionOutputContinuousControlID", "300")])];
+        let mut wind = WindwerkDef::uit_tabellen(&compartments, &[
+            fm(&[("FirstWindCompartmentID", "1"), ("SecondWindCompartmentID", "2"),
+                ("ValveControlTypeCode", "3"), ("ValveControllingContinuousControlID", "301")])]);
+        let links = [fm(&[("SourceControlID", "300"), ("DestControlID", "301"), ("LinkTypeCode", "1"),
+            ("InvertSourceControlValue", "Y"), ("SourceControlValueIncrement", "-27"), ("SourceControlValueCoefficient", "2.54")])];
+        wind.voeg_besturing_toe(&[], &[fm(&[("ControlID", "300"), ("DefaultValue", "0")]),
+            fm(&[("ControlID", "301"), ("DefaultValue", "127")])], &[],
+            &[("ContinuousControlLinkage", &links), ("WindCompartment", &compartments)]);
+        assert!(wind.automation.issues.is_empty());
+        assert_eq!(wind.automation.outputs[0].kind, WindControlOutputKind::BellowsExtension { compartment_id: 1 });
+        assert!(wind.controls.iter().all(|control| control.automatic));
+        let bellows = wind.laden[0].balg.as_ref().unwrap();
+        assert_eq!(bellows.moving_inertia_mass_kg, Some(118.0));
+        assert_eq!(bellows.shape_code, Some(2));
+        assert_eq!(bellows.movement_direction_code, Some(1));
+        assert_eq!(bellows.gravity_center_distance_m, Some(2.4));
+    }
+
+    #[test]
+    fn unknown_automation_fields_codes_and_missing_inputs_are_not_silently_dropped() {
+        for fields in [vec![("LinkTypeCode", "99")], vec![("LinkTypeCode", "1"), ("UnimplementedOperation", "1")]] {
+            let mut wind = controlled_links();
+            let mut values = vec![("SourceControlID", "300"), ("DestControlID", "7")];
+            values.extend(fields);
+            wind.voeg_besturing_toe(&[fm(&[("SwitchID", "7"), ("DefaultToEngaged", "N")])],
+                &[fm(&[("ControlID", "7"), ("DefaultValue", "127")])], &[], &[("ContinuousControlLinkage", &[fm(&values)])]);
+            assert!(!wind.automation.issues.is_empty());
+            assert!(wind.controls.iter().any(|control| control.id == 300 && !control.issues.is_empty()));
+        }
+    }
+
+    #[test]
+    fn unsupported_feedback_springs_and_geometry_are_rejected_explicitly() {
+        for (field, value) in [("Bellows_OpeningSprings_HasOpeningSprings", "Y"),
+            ("Bellows_ClosingSprings_HasClosingSprings", "Y"), ("Bellows_ShapeCode", "99"),
+            ("Bellows_MovementDirectionCode", "2"), ("Bellows_ShapeCode", "unknown")] {
+            let mut values = vec![("WindCompartmentID", "1"), ("Bellows_HasBellows", "Y"),
+                ("Bellows_ExtensionOutputContinuousControlID", "7")];
+            values.push((field, value));
+            let compartments = [fm(&values)];
+            let mut wind = controlled_links();
+            wind.voeg_besturing_toe(&[fm(&[("SwitchID", "7"), ("DefaultToEngaged", "N")])],
+                &[fm(&[("ControlID", "7"), ("DefaultValue", "127")])], &[], &[("WindCompartment", &compartments)]);
+            assert!(!wind.automation.issues.is_empty(), "{field}={value} was not diagnosed");
+        }
+    }
+
+    #[test]
+    #[ignore = "requires the optional locally installed Nitra demo definition"]
+    fn installed_nitra_readable_definition_retains_complete_blower_and_bellows_closure() {
+        let path = std::env::var_os("JM_NITRA_DEFINITION").map(std::path::PathBuf::from)
+            .expect("Set JM_NITRA_DEFINITION to the optional readable Nitra demo definition before running this ignored test");
+        let xml = std::fs::read_to_string(path).expect("optional Nitra demo definition");
+        let tables: Vec<_> = ["WindCompartment", "WindCompartmentLinkage", "SwitchLinkage", "ContinuousControlLinkage",
+            "ContinuousControlDoubleLinkage", "ContinuousControlStageSwitch"].into_iter()
+            .map(|table| (table, crate::hauptwerk::extract_objects(&xml, table))).collect();
+        let mut wind = WindwerkDef::uit_tabellen(&tables[0].1, &tables[1].1);
+        let automation: Vec<_> = tables.iter().map(|(name, rows)| (*name, rows.as_slice())).collect();
+        wind.voeg_besturing_toe(&crate::hauptwerk::extract_objects(&xml, "Switch"),
+            &crate::hauptwerk::extract_objects(&xml, "ContinuousControl"),
+            &crate::hauptwerk::extract_objects(&xml, "Stop"), &automation);
+        assert_eq!(wind.controls.len(), 18);
+        assert_eq!(wind.automation.cc_links.len(), 10);
+        assert_eq!(wind.automation.switch_links.len(), 5);
+        assert_eq!(wind.automation.stages.len(), 4);
+        assert_eq!(wind.automation.outputs.len(), 2);
+        assert!(wind.automation.issues.is_empty(), "{:?}", wind.automation.issues);
+        assert!(wind.controls.iter().all(|control| control.issues.is_empty()));
+    }
+
+    #[test]
+    fn malformed_valves_and_missing_controller_defaults_are_explicit() {
+        let mut wind = controlled_links();
+        wind.voeg_besturing_toe(&[], &[fm(&[("ControlID", "7"), ("DefaultValue", "NaN")])], &[], &[]);
+        assert!(wind.controls.iter().all(|control| !control.issues.is_empty()));
+        for code in ["2", "3", "4", "unknown"] {
+            let invalid = WindwerkDef::uit_tabellen(&[], &[
+                fm(&[("FirstWindCompartmentID", "1"), ("SecondWindCompartmentID", "2"), ("ValveControlTypeCode", code)])
+            ]);
+            assert!(matches!(invalid.verbindingen[0].valve_control, Some(ValveControlRef::Unsupported { .. })));
+            assert!(invalid.verbindingen[0].klep);
+        }
+    }
+
+    #[test]
+    fn explicit_hidden_constants_are_read_only_but_unmarked_inputs_remain_manual() {
+        let mut wind = controlled_links();
+        wind.voeg_besturing_toe(&[fm(&[("SwitchID", "7"), ("DefaultToEngaged", "N")])],
+            &[fm(&[("ControlID", "7"), ("DefaultValue", "127"), ("AccessibleForInput", "N"), ("Clickable", "N")])], &[], &[]);
+        assert!(!wind.controls[0].automatic);
+        assert!(wind.controls[1].automatic);
+        assert!(wind.controls.iter().all(|control| control.issues.is_empty()));
+        let mut uninitialized = controlled_links();
+        uninitialized.voeg_besturing_toe(&[], &[fm(&[("ControlID", "7"), ("AccessibleForInput", "N"), ("Clickable", "N")])], &[], &[]);
+        assert!(uninitialized.controls.iter().all(|control| !control.issues.is_empty()), "hidden is not a producer");
+    }
+
+    #[test]
+    fn older_wind_metadata_deserializes_and_retains_legacy_controlled_flag() {
+        let wind: WindwerkDef = serde_json::from_str(r#"{"laden":[],"verbindingen":[{"van":1,"naar":2,"naam":"legacy","stroom_kg_s":1.0,"ref_inch":1.0,"klep":true}]}"#).unwrap();
+        assert!(wind.controls.is_empty());
+        assert!(wind.verbindingen[0].klep);
+        assert!(wind.verbindingen[0].valve_control.is_none());
     }
 
     fn voorbeeld() -> WindwerkDef {

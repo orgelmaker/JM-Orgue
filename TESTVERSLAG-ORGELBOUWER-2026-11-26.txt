@@ -1,0 +1,179 @@
+JM-ORGUE — EERSTE ORGELBOUWER
+26 november 2026
+
+Werkmap: C:\Bronbestanden\Prive\JM-Orgue-consolebouwer
+Branch: codex/consolebouwer
+Build: C:\Bronbestanden\Prive\JM-Orgue\VirtualPipeOrgan\target\debug\vpo-app.exe
+
+GEBOUWDE FUNCTIES
+
+Het nieuwe tabblad Orgelbouwer is bereikbaar met F5, ook zonder geladen orgel.
+Kies twee leesbare brondefinities, selecteer registers en wijs ze toe aan eigen
+manualen/pedaal met MIDI-kanaal en toetsbereik. De eerste versie heeft maximaal
+106 registers. Geselecteerde registers behouden hun ondersteunde klanklagen,
+leenpijpen, releases en tremulantopnamen in de gekozen opnamepositie.
+
+Per bron zijn beschikbaar:
+- oorspronkelijke stemming behouden;
+- concerttoonhoogte gelijkmaken naar de gezamenlijke A-referentie;
+- een aanvullende centcorrectie.
+
+De bronreferentie wordt door de gebruiker opgegeven, niet automatisch gemeten.
+Normaliseren behoudt het interne temperament en bedoelde zwevingen. Een gezamenlijk
+nieuw historisch temperament over alle bronnen valt buiten deze eerste versie.
+
+Opslaan en laden gebruikt een versieerbaar .jmorgan-project met eigen UUID.
+De oorspronkelijke definities, samples en hun instellingen worden niet gewijzigd.
+Het project verwijst naar de bronbestanden. Alle geselecteerde audiobestanden worden
+gevalideerd voordat het actieve instrument wordt vervangen. Een ontbrekende of
+gewijzigde bron leidt tot een fout; er wordt niet stil een gelijknamig register
+gekozen. De bronvingerafdruk omvat ook eventueel aanwezige akoestische JSON.
+Het audiomanifest gebruikt bestandsgrootte en wijzigingstijd als veranderingscontrole;
+dit is geen cryptografische authenticatie van alle sample-inhoud.
+
+Opslag schrijft eerst een tijdelijk bestand, synchroniseert dit en vervangt pas
+daarna het projectbestand. Bij een update wordt een .bak gemaakt. Een andere UUID
+mag een bestaand project niet overschrijven. Verwijderde register-ID's worden niet
+opnieuw voor andere doelen gebruikt; blijvende tellers worden mee opgeslagen.
+
+De Consolebouwer gebruikt blijvende projectregister-ID's, ook na herschikken of
+verplaatsen naar een ander manuaal. Console, intonatie, combinaties en MIDI horen
+bij de project-UUID in de lokale bibliotheek en het eigen zijbestand:
+    .jm-settings-project-<uuid>.json
+Twee projectbestandsnamen met dezelfde UUID delen hun lokale instellingen; een
+andere UUID op hetzelfde pad erft geen oude instellingen. Bewaar bij verhuizen
+ook het UUID-zijbestand en houd de verwezen bronsets beschikbaar.
+
+Standaard unisonkoppels worden opgebouwd uit de eigen projectdivisies. Hun ID blijft
+gelijk bij hernoemen/herschikken van een divisie. Bronkoppels/crescendo en doorlopende
+achtergrondgeluiden worden niet automatisch uit de oorspronkelijke orgels overgenomen.
+
+MIDI-actiecodes worden met blijvende doelen opgeslagen en bij herladen herleid.
+Een verwijderd of dubbelzinnig doel wordt niet aan een ander register toegewezen.
+Tremulant-inleer volgt de divisienaam; bij hernoemen vervalt die oude binding veilig.
+Projectkanalen en toetsbereiken komen daadwerkelijk in de runtime-routering terecht.
+Bewust ingeleerde kanaalafwijkingen blijven bij ongewijzigd project behouden. Een
+gewijzigd projectmodel krijgt voorrang op een late autosave van de oude speelstand;
+de actieve modelsnapshot wordt daarom in geheugen bijgehouden.
+
+AFBAKENING
+
+Er is één gezamenlijke extra galmregeling. Opgenomen galm wordt niet verwijderd.
+De nieuwe bronstemming is geen akoestische of klankmatige egalisatie van kerken.
+
+Aparte Hauptwerk-windnetwerken en opgenomen golfvormbesturing, bronnen zonder
+ondersteunde oorspronkelijke toonhoogte en onleesbare/beschermde importen worden
+in deze versie geweigerd. Gewone tremulantopnamen blijven wel ondersteund.
+
+Bij JM-ACOUSTICS worden alleen registers met werkelijk actieve rankzwelkast-
+bindings uitgesloten, ook wanneer ze via een leenpijp zo'n rank gebruiken. Open
+registers uit dezelfde bron blijven kiesbaar. Een ontbrekende/ongeldige configuratie
+wordt niet genegeerd. De interface vermeldt de uitsluiting in het bronoverzicht.
+Verschillende bronzwel- of tremulantgroepen moeten op aparte doelmanualen staan.
+
+Stereo-opnamen worden behouden wanneer stereo-laden ingeschakeld is. Meer dan twee
+kanalen in één audiobestand, uitgebreide ruimtelijke routing en meerdere onafhankelijke
+galmruimtes vallen buiten de eerste Orgelbouwer.
+
+VERIFICATIE
+
+De definitieve Rustronde: 987 tests geslaagd, 15 bestaande tests/benchmarks genegeerd,
+geen mislukkingen. Gebouwd met cargo build -p vpo-app; exitcode 0. De frontend is
+met npm run build gebouwd; exitcode 0. Er blijven bestaande buildwaarschuwingen.
+
+JavaScript: 9 Orgelbouwer-helpertests, 10 Consolelayout-tests en 6 snaplijn-tests
+geslaagd. Vertaalsleutels en de labelgrenzen in alle zeven talen zijn gecontroleerd.
+
+De headless interfaceproef heeft 10 controles zonder page errors doorlopen:
+twee bronnen kiezen, registerkeuze, verplaatsen, onafhankelijke bronstemming,
+bewaren/openen, annuleren van een gewijzigd concept, de laad-/opslagguard,
+Consolebouwer-event en opnieuw openen van de tab bij een geladen project.
+Vijf headertabs en de knoppen blijven op 1280 en 1024 pixels binnen beeld zonder
+overlap; het editorpaneel heeft op 1024 x 768 geen horizontale overloop.
+
+Alle app-proeven gebruiken eigen,
+gecontroleerde headless processen en afzonderlijke testprofielen. De UI-proef
+gebruikt een verborgen Chrome met gemockte Tauri-IPC; de echte backend en audio
+worden afzonderlijk in de app getest. Er worden geen gebruikersvensters bediend.
+
+APP- EN AUDIOMETINGEN
+
+De definitieve app-proef heeft 19 controles doorlopen, met twee eigen processen
+(PID 17236 en 41864) en aparte profielen. Beide processen zijn na afloop gestopt.
+De twee synthetische brondefinities stonden in dezelfde map en gebruikten dezelfde
+bronregister-ID's. Bron A was stereo op 44,1 kHz, bron B mono op 48 kHz.
+
+Zeven echte MP3-opnamen uit de app zijn gedecodeerd en op frequentie gecontroleerd:
+    proef                                  verwacht Hz   gemeten Hz, afgerond
+    A415 normaliseren                      440,000       440,000
+    B440 normaliseren                      440,000       440,000
+    celeste behoudt +10 cent                442,549       442,549
+    A oorspronkelijke stemming             415,000       415,000
+    B oorspronkelijke stemming             440,000       440,000
+    gewoon orgel na project, zelfde IDs     415,000       415,000
+    project na volledige procesherstart    440,000       440,000
+Alle opnamen bevatten geluid en hadden nul gemelde verloren opnameframes.
+Dit zijn metingen van synthetische referentietonen, geen luisterbeoordeling van
+de artistieke samenhang van twee echte orgels.
+
+Daarnaast geslaagd:
+- MIDI-kanaal/toetsbereik uit het project wordt bij eerste load actief.
+- Een bewust ingeleerde kanaalafwijking blijft bij ongewijzigd model behouden.
+- Modelwijziging, gevolgd door late opslag van de oude runtime en herladen,
+  activeert het nieuwe projectkanaal. Terugzetten werkt onder dezelfde volgorde.
+- Bron-/registervolgorde veranderen en een register naar een ander manuaal
+  verplaatsen behoudt exact dezelfde Consolebouwer-doelen en het ontwerp.
+- Twee projecten in dezelfde map houden onafhankelijke ontwerpen/UUID-zijbestanden.
+- Ongeldige opslag en een andere UUID laten het oude projectbestand intact.
+- Gewijzigde definitie en ontbrekende WAV vervangen het actieve orgel niet.
+- Een gewoon orgel met botsende interne ID's erft geen projectbronstemming.
+- Projecten en hun exacte afzonderlijke consoleontwerpen herladen na herstart.
+- Alle synthetische brondefinities en samples zijn byte voor byte ongewijzigd.
+
+PROEF MET GEÏNSTALLEERDE BRONNEN
+
+In een afzonderlijk headless proces (PID 21224, na afloop gestopt) zijn twee
+bestaande lokale bronnen onderzocht en samen geladen:
+- Kam 1859, Grote Kerk Dordrecht: Man: Prestant 16', compleet, 54 toetsen.
+- Amsterdam Oude Kerk, Prestant 8-proefconversie: Prestant 8', compleet, 51 toetsen.
+
+Vijf controles geslaagd: beide bronnen analyseren, een eigen project opslaan,
+beide registers gelijktijdig op aparte manualen laden, projectkanalen/volledige
+toetsbereiken controleren en definitie-/instellingenhashes vóór en na vergelijken.
+De brondefinities en alle .jm-settings*-bestanden in hun bronmappen bleven gelijk.
+Er zijn in deze proef geen noten gespeeld; beide bronnen staan in oorspronkelijke
+stemming. De A-referenties in dit voorbeeld zijn ongemeten placeholders en worden
+door het gekozen oorspronkelijke beleid niet voor normalisatie gebruikt.
+
+Van Dordrecht zijn 39 registers beschikbaar. De 12 Bovenwerk-registers met actieve
+rankzwelkastmapping worden expliciet uitgesloten, ook bij leenpijpen. Aanwezigheid
+van andere akoestische metadata blokkeert de overige registers niet.
+
+Het bewaarde voorbeeldproject:
+C:\Bronbestanden\Prive\JM-Orgue-consolebouwer\testen\orgelbouwer-2026-11-26\installed-2\Geinstalleerde bronnen.jmorgan
+Open dit via Orgelbouwer > Open project in de nieuwe build. Dit voorbeeld verwijst
+naar de bestaande lokale bronlocaties; het bevat geen gekopieerde samples.
+
+RESULTAATBESTANDEN
+
+Onder C:\Bronbestanden\Prive\JM-Orgue-consolebouwer\testen\orgelbouwer-2026-11-26:
+- rust-tests.txt en rust-build.txt: definitieve Rustcontrole en build.
+- ui/build-log.txt, ui/result.json en de PNG's: frontendbuild en interfaceproef.
+- run-2/background-result.json: 19 app-controles en de zeven audiometingen.
+- run-2/opnamen: de bijbehorende testopnamen.
+- installed-2/installed-result.json: de praktijkproef en bronhashes.
+
+git diff --check slaagt. Er zijn geen gebruikersvensters, productieprofielen of
+oorspronkelijke samplesets bediend of gewijzigd. De bronnen zijn uitsluitend
+gelezen; alle project- en profielmutaties staan in de eigen testmappen.
+
+Code-ingangen:
+- src-tauri/src/organ_project.rs: projectmodel, bronanalyse, compilatie en opslag.
+- src-tauri/src/commands.rs: laden, UUID-instellingen, MIDI-herstel en Consolekoppeling.
+- src-tauri/src/audio.rs: stembeleid per projectregister, ook tremulant/releases.
+- ui/src/components/OrganBuilder.svelte en ui/src/lib/organProject.js: editor.
+- testscripts/organ_project_background_test.py: app/audio/herstart en bronveiligheid.
+- testscripts/organ_project_installed_test.py: echte geïnstalleerde bronnen, alleen lezen.
+- testscripts/organ_project_ui_test.mjs: headless interfaceproef.
+
+Alle codepaden hierboven staan onder VirtualPipeOrgan in de genoemde werkmap.

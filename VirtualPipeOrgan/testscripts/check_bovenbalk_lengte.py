@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
 """Bewaakt dat de bovenbalk in elke taal op één rij past (lengtebewaking).
 
-De bovenbalk (ui/src/components/Header.svelte) toont drie tabs en de knop om
+De bovenbalk (ui/src/components/Header.svelte) toont vijf tabs en de knop om
 tussen luidsprekers en hoofdtelefoon te wisselen. Dit script telt per taal de
 tekens van die labels en faalt als een vertaling zoveel langer is dat de rij
 waarschijnlijk niet meer past. Het meet GEEN pixels: dat vraagt een echt venster.
 Het is een vangnet tegen een te lange vertaling, niet een bewijs van de indeling.
 
-De grenzen zijn de huidige langste taal (Duits: 60 tekens in totaal) met ongeveer
-10 % marge; een label dat zelf langer is dan MAX_LABEL valt ook op.
+De tabgroep mag bij kleine vensters naar een tweede rij ombreken. De grens
+bewaakt de vijf labels samen; een label langer dan MAX_LABEL valt ook op.
 
 Gebruik: python testscripts/check_bovenbalk_lengte.py   (afsluitcode 1 bij een fout)
 """
@@ -23,9 +23,9 @@ if hasattr(sys.stdout, "reconfigure"):
 TALEN = ["nl", "en", "fr", "de", "pl", "it", "es"]
 # Labels die altijd zichtbaar in de bovenbalk staan (de organisatienaam en het
 # merkteken zijn taalonafhankelijk). De profielknop toont één van de twee.
-TABS = ["nav.orgel", "nav.orgel_instellingen", "nav.algemene_instellingen"]
+TABS = ["nav.orgel", "nav.orgel_instellingen", "nav.console_builder", "nav.organ_builder", "nav.algemene_instellingen"]
 PROFIELKNOP = ["settings.audio_profile_headphones", "settings.audio_profile_speakers"]
-MAX_TOTAAL = 66   # tekens, alle labels samen
+MAX_TOTAAL = 104  # vijf tabs en profielknop; tabgroep mag op kleine breedte ombreken
 MAX_LABEL = 28    # tekens, één label
 
 BASIS = os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir,

@@ -1,0 +1,164 @@
+JM-ORGUE — DYNAMISCHE BRONWINDKLEPPEN
+26 november 2026
+
+Werkmap: C:\Bronbestanden\Prive\JM-Orgue-consolebouwer
+Branch: codex/consolebouwer; wijzigingen nog niet gecommit of gepusht.
+Testbuild: C:\Bronbestanden\Prive\JM-Orgue\VirtualPipeOrgan\target\debug\vpo-app.exe
+Deze executable is uit bovenstaande werkmap gebouwd; de oorspronkelijke
+broncodewerkmap is voor deze uitbreiding niet aangepast.
+
+RESULTAAT EN REIKWIJDTE
+
+Schakelkleppen en direct bediende continue kleppen zijn dynamisch ondersteund
+in de afzonderlijke bronwindnetwerken van een orgelproject. Het is geen volledige
+nabootsing van alle Hauptwerk-besturingsketens. Bronfeedback en vertraagde
+automatisering blijven een expliciete beperking, hieronder beschreven.
+
+De parser bewaart ValveControlTypeCode, ValveControllingSwitchID,
+ValveOpenIfControllingSwitchEngaged en ValveControllingContinuousControlID.
+Switch.DefaultToEngaged en ContinuousControl.DefaultValue leveren de beginstand;
+de continue 0..127-bronwaarde wordt naar 0..1 omgerekend.
+
+Bron-UUID, controllertype en bronnummer vormen samen een blijvende identiteit.
+Twee bronnen met dezelfde interne nummers blijven gescheiden. Een schakelaar
+die bij gekozen bronregisters hoort, volgt de stabiele projectregister-ID's.
+Bij meerdere registers op dezelfde schakelaar volstaat één getrokken register.
+Dit werkt via gewone registerbediening, registratiewissels en MIDI-crescendo.
+
+De Orgelbouwer toont bij een geladen project een vak 'Bronwindkleppen'. Daar
+staan bron- en registernamen, onafhankelijke schakelaars en schuifregelaars,
+de bronbeginstand en de toestand van registergekoppelde kleppen. Zelfstandige
+standen worden onmiddellijk bij dit project bewaard. Een klep met omgekeerde
+bronwerking behoudt die werking. 'Windwerk van de set' moet actief zijn om het
+windmodel te horen; wijzigen van die vlag vraagt een herlaad.
+
+Gesloten kleppen transporteren exact nul lucht. Een eindige windlade bevat nog
+lucht en loopt onder verbruik geleidelijk leeg. Bij nul druk wordt de betrokken
+projectstem stil; na heropening kan dezelfde aangehouden stem weer klinken.
+Andere bronnen en de gewone orgelroute blijven onafhankelijk.
+
+VEILIGE OPSLAG EN HERSTEL
+
+Zelfstandige waarden staan in OrganSettings.project_wind_controls onder de
+bestaande project-UUID-identiteit en het eigen .jm-settings-project-UUID.json.
+De bibliotheek wordt eerst atomair opgeslagen, daarna de kopie naast het project.
+Pas na succesvolle lokale opslag gaan de nieuwe doelwaarden naar de audiokern.
+Bij een mislukte lokale schrijfopdracht blijven stand en instellingen behouden.
+Een mislukte kopie naast het project geeft een melding met lokaal bewaarde stand.
+
+Verkeerde orgelidentiteiten, onbekende controllers, niet-eindige waarden en
+waarden buiten 0..1 worden geweigerd. Gekoppelde registers krijgen hun klepstand
+via de registratie. Achtergebleven opgeslagen controller-ID's worden verwijderd.
+Import van instellingen past geldige klepstanden onmiddellijk in de audio toe.
+Een late autosave neemt onder de gezamenlijke writerlock de laatst opgeslagen
+klepstanden over en kan een nieuwe stand niet met een oud snapshot overschrijven.
+
+Bij laden van een gewoon orgel verdwijnen projectregelaars, netwerken en
+diagnostiek. Bronvalidatie en voorbereiding gebeuren vóór vervanging van het
+actieve orgel. Afgewezen bronautomatisering laat het vorige orgel actief.
+
+UITGEVOERDE TESTS
+
+1. Rust: volledige set 1.020 geslaagd, 0 gefaald, 15 genegeerd.
+   Cargo test voor vpo-app, vpo-sampler, vpo-audio, vpo-core en jm-midimon.
+   Na toevoegen van de importtest-ingang opnieuw alle app-tests: 667 geslaagd,
+   0 gefaald, 8 genegeerd. Frontend- en executablebuild geslaagd.
+
+2. JavaScript: 29 bestaande tests geslaagd voor projectmodel, consoleindeling,
+   uitlijnen en MIDI-doelen.
+
+3. Nieuwe interface: 10 controles geslaagd met de echte Svelte-component en
+   expliciete Tauri-mocks in eigen headless Chrome. Getest zijn bronisolatie,
+   menselijke namen, schakelaars, schuifregelaars, beginstanden, gekoppelde
+   registertoestanden, mislukt opslaan, verouderde antwoorden na orgelwissel en
+   320/360/600px-weergave zonder horizontale overloop. Geen browserfouten.
+   De gevonden checkbox-rollbackfout is opgelost en strikt opnieuw getest.
+   Bestaande Orgelbouwer-interface: 10 controles geslaagd; MIDI/console: 5.
+
+4. Nieuwe echte app-proef: 18 controles geslaagd, zonder appvensters/webviews.
+   Twee HW-brondefinities staan in dezelfde map, met aparte pakkettenwortels
+   die beide PackageID 1 bevatten. Beide bronnen gebruiken SwitchID 7 en
+   ContinuousControlID 9; ze voeden hetzelfde doelmanuaal via eigen netwerken.
+   Bron A heeft een omgekeerde schakelklep, bron B een normale schakelklep.
+
+   Gecontroleerd: beginstanden, bronisolatie, echte projectregisterbediening,
+   gedeeltelijk/open/gesloten regelkleppen, druk en luchtstroom, heropening
+   tijdens dezelfde aangehouden noot en een echte MIDI-CC-crescendowissel.
+   Verder: ongeldige opdrachten, veilig weigeren van inertia-automatisering,
+   geforceerd mislukte bibliotheekopslag, instellingenimport, save/herladen,
+   complete procesherstart en reset bij een gewoon orgel.
+
+   Drie gedecodeerde MP3-opnamen van dezelfde aangehouden toon:
+   open       RMS 0,000864855177
+   dicht      RMS 0
+   heropend   RMS 0,000864597725
+   Alle drie: 0 verloren opnameframes.
+
+   De schrijffoutproef blokkeerde uitsluitend organ_library.json in het eigen
+   testprofiel. De exacte bibliotheekbytes zijn daarna hersteld. Doelwaarden,
+   live klepopeningen en zijbestandbytes bleven bij de fout ongewijzigd.
+   Ongeldige importwaarden 2/NaN werden eveneens zonder wijziging afgewezen.
+   Een geldige import werkte direct door in druk/audio en bleef na save/herladen.
+
+5. Bestaande native achtergrondproeven opnieuw geslaagd:
+   - 19 controles: stemming, bronbestanden, MIDI-projectmodel, UUID-opslag,
+     console-ID's, afwijzen gewijzigde/ontbrekende bronnen en herstart;
+   - 11 controles: rankzwelkasten, geluidsopnamen, 2.048 registers, hoge MIDI-
+     actienummers, consoleopslag en herstart;
+   - 10 controles: bronwinddruk, stabiel drukherstel, uit/aan, bronisolatie en
+     reset/herstart. Deze laatste proef is ook op de definitieve build herhaald.
+
+Brondefinities, pakketmarkeringen en samples in de proeven zijn voor/na op hash
+vergeleken en ongewijzigd. Er zijn alleen eigen testprofielen gebruikt. De
+definitieve klepproefprocessen 12916 en 31172 zijn gestopt. De laatste windproef
+gebruikte 39460 en 27856, ook gestopt. Geen gebruikersvensters zijn bediend.
+
+MODEL EN RESTERENDE BEPERKINGEN
+
+De windberekening blijft een begrensde JM-Orgue-benadering. Klepstanden lopen
+in 10 ms naar hun doel; dit is geen uit de bron afgeleide mechanische looptijd.
+De extra klankfade onder 60% nominale druk is eveneens een JM-benadering.
+
+Een verkennende proef met twee kamers van 0,04 m3 bereikte de conservatieve
+equalising-flow-begrenzing: drukverhouding 0,917963 tegenover 0,925926 volgens
+het onbegrensde analytische model. De definitieve analytische proef gebruikt
+0,08 m3, waar die begrenzing het evenwicht niet bepaalt. De solver is hiervoor
+niet aangepast; de eerdere afwijking staat ook expliciet in valve-result.json.
+
+Niet ondersteund: kleppen met balgextensie-/drukfeedback, Willis-/inertialinks,
+DoubleLinkage of andere nog niet nagebouwde bronautomatisering. De concrete
+velden en afhankelijkheden worden bewaard en vóór laden geweigerd, in plaats
+van een ontbrekende besturing als een altijd geopende klep te behandelen.
+De lokaal gelezen Nitra-demo bevat zulke terugkoppelingen en is daarmee nog
+geen volledig ondersteund bronwindmodel. Er wordt geen volledige Hauptwerk-
+compatibiliteit of identieke pneumatische solver geclaimd.
+
+BEWIJSBESTANDEN
+
+Onder testen\orgelbouwer-kleppen-2026-11-26:
+- valves-4\valve-result.json en recordings\A-*.mp3: definitieve app-proef;
+- valves-4\child-1.log en child-2.log: eigen app-processen;
+- ui-final\result.json en project-wind-controls-*.png: definitieve interface;
+- builder-ui\result.json en midi-ui\result.json: interface-regressies.
+
+Onder testen:
+- kleppen-rust-2026-11-26.log: volledige Rustset;
+- kleppen-app-final-2026-11-26.log: herhaalde app-tests;
+- kleppen-js-2026-11-26.log, kleppen-frontend-2026-11-26.log,
+  kleppen-build-2026-11-26.log: JavaScript, frontend en executable;
+- orgelbouwer-2026-11-26\run-kleppen\background-result.json;
+- orgelbouwer-uitbreiding-2026-11-26\advanced-kleppen\advanced-result.json;
+- orgelbouwer-uitbreiding-2026-11-26\wind-kleppen-final\wind-result.json.
+
+Belangrijkste nieuwe/aangepaste code in VirtualPipeOrgan:
+- vpo-sampler/src/windwerk.rs en hauptwerk.rs;
+- src-tauri/src/organ_project.rs, windwerk_set/project.rs en audio.rs;
+- src-tauri/src/project_wind_controls.rs, commands.rs, state.rs en library.rs;
+- src-tauri/src/test_api.rs en main.rs;
+- ui/src/components/ProjectWindControls.svelte en OrganBuilder.svelte;
+- testscripts/organ_project_valve_background_test.py;
+- testscripts/project_wind_controls_ui_test.mjs.
+
+git diff --check slaagt. Git meldt bestaande LF/CRLF-normalisatie voor de
+gegenereerde Tauri-schema's. De eerdere verslagen blijven historische proeven;
+dit verslag vervangt hun beperking dat bronkleppen steeds statisch open staan.

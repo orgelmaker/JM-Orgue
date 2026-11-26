@@ -20,6 +20,11 @@ use crate::audio::AudioCommand;
 use crate::commands::DivisionDto;
 use crate::state::AppState;
 
+#[path = "windwerk_set/project.rs"]
+mod project;
+pub use project::{compile_project_wind, ProjectWindControl, ProjectWindPipe, ProjectWindPlan, ProjectWindRuntime,
+    ProjectWindSource, MAX_PROJECT_WIND_NODES, MAX_PROJECT_WIND_CONTROLS, MAX_PROJECT_WIND_LINKS};
+
 /// De pijpen van het geladen orgel voor de afleiding.
 pub fn pijpen(
     definition: &OrganDefinition,

@@ -410,6 +410,7 @@ fn meng_een_stem(pw: PijpWind, stop: u32, pipe: u32) -> (Vec<f32>, Vec<f32>) {
     let div_pans = vec![0.0f32; 32];
     let ccis_en = vec![false; 32];
     let blok = MengBlok {
+        project_wind_dev: None,
         bn: BN, wind_dev: &wind_dev, trem_rate: &trem_rate, trem_amp: &trem_amp,
         pan_cos: &pan, pan_sin: &pan, div_pans: &div_pans,
         ccis_on: false, ccis_en: &ccis_en, ccis_strength: 0.7, ccis_falloff: 0.6, ccis_swap: false,
