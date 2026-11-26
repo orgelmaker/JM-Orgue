@@ -6,6 +6,8 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Nog niet uitgebracht]
 
+## [0.9.63] - 2026-11-26
+
 ### Handleidingen, vertalingen en projectpaden
 - De handleiding in alle zeven talen beschrijft nu de Consolebouwer (F4) en de Orgelbouwer (F5) met bronwind; de PDF's zijn opnieuw gemaakt.
 - De Consolebouwer-teksten in de app waren in het Duits, Frans, Italiaans, Spaans en Pools nog Engels; ze zijn vertaald (111 teksten per taal) met dezelfde termen als de tabbladen.
