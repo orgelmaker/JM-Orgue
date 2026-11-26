@@ -146,12 +146,14 @@
   .console-viewport{position:relative;width:100%;min-width:0;overflow:hidden;border-radius:8px;box-shadow:0 4px 16px #0004}
   .console-board{position:relative;transform-origin:top left;background-color:var(--console-wood);background-image:linear-gradient(90deg,#0002,transparent 18%,#fff1 45%,#0001 80%);box-shadow:inset 0 0 0 8px var(--console-edge),inset 0 0 0 10px #ffffff13,inset 0 0 20px 12px #0004;border-radius:8px;isolation:isolate}
   .board-texture{position:absolute;inset:10px;z-index:0;pointer-events:none;border-radius:3px;background-repeat:repeat}
-  .texture-grain{background-image:repeating-linear-gradient(91deg,transparent 0 calc(9px * var(--texture-unit)),var(--console-grain) calc(10px * var(--texture-unit)),transparent calc(12px * var(--texture-unit)) calc(18px * var(--texture-unit))),repeating-linear-gradient(88deg,transparent 0 calc(49px * var(--texture-unit)),#150b052b calc(50px * var(--texture-unit)),transparent calc(54px * var(--texture-unit)) calc(81px * var(--texture-unit)))}
-  .texture-oak{background-image:repeating-linear-gradient(89deg,#4c260522 0 calc(2px * var(--texture-unit)),transparent calc(3px * var(--texture-unit)) calc(9px * var(--texture-unit)),#ffe2a422 calc(11px * var(--texture-unit)),transparent calc(12px * var(--texture-unit)) calc(24px * var(--texture-unit))),radial-gradient(ellipse at 70% 35%,#2410014a 0,transparent 12%,#ffe1ac18 19%,transparent 24%);background-size:auto,calc(220px * var(--texture-unit)) calc(650px * var(--texture-unit))}
-  .texture-burl{background-image:repeating-radial-gradient(ellipse at 23% 62%,#e8a65a26 0 calc(3px * var(--texture-unit)),#2e100b3d calc(5px * var(--texture-unit)),transparent calc(8px * var(--texture-unit)) calc(15px * var(--texture-unit))),radial-gradient(ellipse at 78% 22%,#fff0c326,transparent 40%);background-size:calc(230px * var(--texture-unit)) calc(170px * var(--texture-unit)),calc(390px * var(--texture-unit)) calc(240px * var(--texture-unit))}
-  .texture-ebony{background-color:#100e0ed9;background-image:repeating-linear-gradient(91deg,#e8d5b518 0 calc(1px * var(--texture-unit)),transparent calc(2px * var(--texture-unit)) calc(10px * var(--texture-unit)),#0505066b calc(12px * var(--texture-unit)),transparent calc(14px * var(--texture-unit)) calc(25px * var(--texture-unit)))}
-  .texture-linen{background-image:repeating-linear-gradient(0deg,#fff5dc26 0 calc(1px * var(--texture-unit)),#281a2029 calc(1px * var(--texture-unit)) calc(2px * var(--texture-unit)),transparent calc(2px * var(--texture-unit)) calc(5px * var(--texture-unit))),repeating-linear-gradient(90deg,#fff5dc26 0 calc(1px * var(--texture-unit)),#281a2029 calc(1px * var(--texture-unit)) calc(2px * var(--texture-unit)),transparent calc(2px * var(--texture-unit)) calc(5px * var(--texture-unit)))}
-  .texture-brushed{background-color:#a5abb529;background-image:repeating-linear-gradient(0deg,#ffffff36 0 calc(.7px * var(--texture-unit)),#111b202b calc(.8px * var(--texture-unit)) calc(1.4px * var(--texture-unit)),transparent calc(1.5px * var(--texture-unit)) calc(4px * var(--texture-unit))),linear-gradient(110deg,transparent,#ffffff2b 40%,#00000019 65%,transparent)}
+  /* Ingebouwde texturen: grijswaarde-afbeeldingen die met overlay over de themakleur liggen (grain/oak/ebony: CC0-houtfoto's, zie assets/textures/LICENTIE.txt) */
+  .texture-grain,.texture-oak,.texture-burl,.texture-ebony,.texture-linen,.texture-brushed{mix-blend-mode:overlay;background-size:calc(300px * var(--texture-unit)) auto}
+  .texture-grain{background-image:url('../assets/textures/grain.jpg')}
+  .texture-oak{background-image:url('../assets/textures/oak.jpg')}
+  .texture-burl{background-image:url('../assets/textures/burl.jpg')}
+  .texture-ebony{background-image:url('../assets/textures/ebony.jpg')}
+  .texture-linen{background-image:url('../assets/textures/linen.jpg')}
+  .texture-brushed{background-image:url('../assets/textures/brushed.jpg')}
   .texture-plain{background-image:none}
   .texture-custom{background-size:calc(260px * var(--texture-unit)) auto}
   .board-trim{position:absolute;inset:17px;z-index:1;border:1px solid #ffffff16;border-radius:3px;pointer-events:none}

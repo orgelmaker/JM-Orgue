@@ -1,0 +1,3 @@
+grain.jpg, oak.jpg en ebony.jpg zijn grijswaarde-bewerkingen van houttexturen van ambientCG.com
+(Wood027, Wood058, Wood051), licentie CC0 1.0 (publiek domein): https://docs.ambientcg.com/license/
+burl.jpg, linen.jpg en brushed.jpg zijn procedureel gemaakt met scripts/maak_consoletexturen.py.
