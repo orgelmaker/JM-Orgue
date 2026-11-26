@@ -6,6 +6,8 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Nog niet uitgebracht]
 
+## [0.9.64] - 2026-11-26
+
 ### Consolebouwer: echte ingebouwde texturen
 - De zes ingebouwde texturen (fijne houtnerf, eikenhout, wortelnotenhout, ebbenhout, linnen, geborsteld metaal) bestaan niet meer uit streeppatronen maar uit echte, tegelbare structuren. Ze liggen als overlay over de themakleur, zodat notenhout, ivoor en donkere studio hun kleur houden. Houtnerf, eikenhout en ebbenhout zijn bewerkingen van CC0-houtfoto's (ambientCG); wortelnoot, linnen en geborsteld metaal zijn zelf gemaakt. Een eigen textuur blijft ongewijzigd.
 - Bestaande ontwerpen behouden hun gekozen textuur, sterkte en grootte; alleen het uiterlijk van de ingebouwde texturen is rijker. De afbeeldingen (samen circa 420 KB) zitten in de app; `scripts/maak_consoletexturen.py` maakt ze opnieuw.
