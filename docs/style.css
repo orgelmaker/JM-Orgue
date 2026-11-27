@@ -292,3 +292,11 @@ video::cue { background: rgba(20, 14, 8, 0.82); color: #fff; font-family: 'Inter
 .demo-info dd { margin: 0; color: var(--ink-dim); }
 .demo-card .demo-yt { margin-top: 0.8rem; font-size: 0.85rem; color: var(--ink-mut); }
 @media (max-width: 520px) { .demo-info { grid-template-columns: 1fr; } .demo-info dd { margin-bottom: 0.4rem; } }
+
+/* Sectie 'Bouw je eigen speeltafel' */
+.console-uitleg { max-width: 1000px; margin: 0 auto 1.5rem; }
+.stijl-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); gap: 0.9rem; max-width: 1000px; margin: 0 auto; }
+.stijl-grid figure { margin: 0; background: var(--card); border: 1px solid var(--panel-border); border-radius: 8px; overflow: hidden; box-shadow: var(--shadow-soft); }
+.stijl-grid img { display: block; width: 100%; height: auto; }
+.stijl-grid figcaption { padding: 0.5rem 0.75rem 0.65rem; font-size: 0.88rem; color: var(--ink-dim); }
+.stijl-noot { max-width: 1000px; margin: 0.9rem auto 0; font-size: 0.85rem; color: var(--ink-mut); }
