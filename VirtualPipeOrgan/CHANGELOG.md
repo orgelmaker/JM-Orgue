@@ -6,6 +6,8 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Nog niet uitgebracht]
 
+## [0.9.65] - 2026-11-27
+
 ### Handleiding en website bijgewerkt
 - De handleiding in zeven talen beschrijft nu ook de wijzigingen van 0.9.58 t/m 0.9.64: het hoofdvolume tot +20 dB, bijwerken van geïnstalleerde sets, galm die met een set meekomt, de positiebalk en het zelf toewijzen van kanalen bij MIDI afspelen, naar de opslaglocatie gaan na een opname, en voorbeelden van de Consolebouwer-stijlen. De PDF's zijn opnieuw gemaakt.
 - De website (GitHub Pages) heeft een nieuwe sectie "Bouw je eigen speeltafel" met acht bedieningsvormen in verschillende afwerkingen en texturen, en vier nieuwe functiekaarten (Consolebouwer, Orgelbouwer, MIDI afspelen, sets bijwerken), in zeven talen.
