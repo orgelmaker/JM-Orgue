@@ -7,9 +7,10 @@ use std::collections::HashSet;
 /// Moet gelijk blijven aan CONSOLE_THEMES in ui/src/lib/consoleLayout.js.
 const CONSOLE_THEMES: [&str; 7] = ["walnut", "ivory", "slate", "burgundy", "cream", "green", "blue"];
 /// Moet gelijk blijven aan CONSOLE_APPEARANCES in ui/src/lib/consoleLayout.js.
-const CONSOLE_APPEARANCES: [&str; 14] = [
+const CONSOLE_APPEARANCES: [&str; 17] = [
     "rocker", "rocker-ivory", "rocker-wood", "drawknob", "drawknob-ivory", "piston", "tablet", "flat",
     "drawknob-ebony", "drawknob-rosewood", "oval-porcelain", "stopkey", "lit", "square-wood",
+    "spoon-brass", "spoon-iron", "spoon-wood",
 ];
 
 pub const MAX_CUSTOM_TEXTURE_BYTES: usize = 2 * 1024 * 1024;

@@ -186,3 +186,25 @@ test('the screen switcher is optional and off by default', () => {
   assert.equal(consoleLayoutError({ ...layout, screen_switcher: true }), null);
   assert.equal(consoleLayoutError({ ...layout, screen_switcher: 'yes' }), 'format');
 });
+
+test('spoons are valid control styles and couplers can be laid out as spoons along the bottom', async () => {
+  const { couplersAsSpoons, spoonConsoleAppearance } = await import('../ui/src/lib/consoleLayout.js');
+  for (const appearance of ['spoon-brass', 'spoon-iron', 'spoon-wood']) {
+    assert(CONSOLE_APPEARANCES.includes(appearance)); assert(spoonConsoleAppearance(appearance)); assert(!roundConsoleAppearance(appearance));
+  }
+  assert(!spoonConsoleAppearance('rocker'));
+  const page = { id: 'p', name: 'P', width: 1200, height: 760, elements: [
+    { id: 's1', kind: 'stop', target_id: 'a', label: '', x: 40, y: 40, width: 120, height: 92, appearance: 'rocker' },
+    ...Array.from({ length: 13 }, (_, i) => ({ id: 'c' + i, kind: 'coupler', target_id: 'k' + i, label: '', x: 40 + i * 10, y: 200, width: 120, height: 92, appearance: 'rocker' })) ] };
+  const out = couplersAsSpoons(page, 'spoon-iron');
+  assert.deepEqual(out[0], page.elements[0]);                       // registers blijven staan
+  const spoons = out.filter(e => e.kind === 'coupler');
+  assert(spoons.every(e => e.appearance === 'spoon-iron' && e.width === 92 && e.height === 132));
+  assert(spoons.every(e => e.x >= 0 && e.x + e.width <= page.width && e.y + e.height <= page.height));
+  const rows = [...new Set(spoons.map(e => e.y))].sort((a, b) => a - b);
+  assert.equal(rows.length, 2);                                      // 13 lepels passen niet op één rij
+  assert.equal(rows[1] + 132, page.height - 24);                     // onderste rij staat onderaan
+  const bottom = spoons.filter(e => e.y === rows[1]).sort((a, b) => a.x - b.x);
+  assert.equal(bottom[0].x, page.width - (bottom[bottom.length - 1].x + 92));   // gecentreerd
+  assert.equal(consoleLayoutError({ ...defaultConsoleLayout(organ), pages: [{ ...page, elements: out }] }), null);
+});

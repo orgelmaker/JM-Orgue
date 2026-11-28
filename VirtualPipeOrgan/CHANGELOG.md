@@ -6,6 +6,17 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Nog niet uitgebracht]
 
+## [0.9.67] - 2026-11-28
+
+### Consolebouwer: lepels
+- **Lepels als bediening**, zoals de voettreden (cuillères) van een Cavaillé-Coll-orgel: een porseleinen naamplaatje met een lepel eronder, in messing, zwart ijzer en hout. Aan is omlaag en opzij gehaakt. Samen nu zeventien vormen.
+- **Koppels als lepels onderin.** Eén knop zet alle koppels van een scherm als lepels in gecentreerde rijen onderaan. Is een lepel geselecteerd, dan geldt die uitvoering; anders messing. Registers blijven staan.
+
+### Orgelbouwer
+- **Hauptwerk-definitie als bron.** Een bron waarvan het eigen windnetwerk niet (volledig) wordt ondersteund, liet het hele project weigeren; daardoor waren veel Hauptwerk-sets niet over te nemen. Nu laadt zo'n bron gewoon: zijn registers spelen met het gewone windmodel van JM-Orgue en het importverslag meldt waarom het bronwindnetwerk niet is gebruikt. Bronnen met een ondersteund netwerk houden dat. Sets in Hauptwerks gesloten opnameformaat blijven onleesbaar.
+- **Meerdere registers tegelijk aan- of uitvinken:** naast "Kies zichtbare" staat "Wis zichtbare", en met Shift + klik zet je een hele reeks in één keer aan of uit.
+- **Zwelkast gecontroleerd:** in een samengesteld orgel volgt de zwelstand de trede en verandert de klank mee, ook met een eigen console.
+
 ## [0.9.66] - 2026-11-28
 
 ### Consolebouwer: formaat voor alles, rijen uitlijnen, schermen, meer vormen en kleuren

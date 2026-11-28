@@ -6,7 +6,7 @@
   import { alignConsoleArray, consoleArray } from '../lib/consoleSnap.js';
   import { boundedConsoleElement, cloneConsoleLayout, consoleTargets, consoleLayoutError,
     defaultConsoleLayout, missingConsoleTargets, nextConsoleId, normalizeConsoleLayout,
-    CONSOLE_APPEARANCES, CONSOLE_THEMES, CONSOLE_TEXTURES, CONSOLE_TEXTURE_MAX_BYTES, CONSOLE_MAX_PAGES, consoleCustomTextureError, roundConsoleAppearance } from '../lib/consoleLayout.js';
+    CONSOLE_APPEARANCES, CONSOLE_THEMES, CONSOLE_TEXTURES, CONSOLE_TEXTURE_MAX_BYTES, CONSOLE_MAX_PAGES, consoleCustomTextureError, roundConsoleAppearance, spoonConsoleAppearance, couplersAsSpoons } from '../lib/consoleLayout.js';
 
   export let organInfo = null;
   export let initialLayout = null;
@@ -203,6 +203,11 @@
       p.elements = p.elements.map(e => patches[e.id] ? boundedConsoleElement(e, p, patches[e.id]) : e);
     });
   }
+  // Koppels als lepels onderaan het scherm (Cavaillé-Coll). De gekozen lepelvariant geldt; anders messing.
+  function couplersToSpoons() {
+    const appearance = spoonConsoleAppearance(selected?.appearance) ? selected.appearance : 'spoon-brass';
+    mutate(layout => layout.pages.forEach(p => { p.elements = couplersAsSpoons(p, appearance).map(e => boundedConsoleElement(e, p)); }));
+  }
   function removeSelected() {
     if (!selected) return;
     const id = selected.id;
@@ -267,6 +272,7 @@
       <label>{$t('console_builder.name')}<input value={draft.name} maxlength="120" disabled={saving || preview} on:change={e => mutate(layout => { layout.name = e.target.value; })}></label>
       <label>{$t('console_builder.theme')}<select value={draft.theme} disabled={saving} on:change={e => mutate(layout => { layout.theme = e.target.value; })}>{#each CONSOLE_THEMES as theme}<option value={theme}>{$t(`console_builder.${theme}`)}</option>{/each}</select></label>
       <button type="button" class="btn btn-secondary btn-sm" disabled={saving || preview} title={$t('console_builder.reset_hint')} on:click={arrangeAgain}>{$t('console_builder.reset')}</button>
+      <button type="button" class="btn btn-secondary btn-sm" disabled={saving || preview} title={$t('console_builder.couplers_spoons_hint')} on:click={couplersToSpoons}>{$t('console_builder.couplers_spoons')}</button>
     </div>
 
     <div class="builder-materials">

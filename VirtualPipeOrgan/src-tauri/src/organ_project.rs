@@ -572,16 +572,16 @@ pub fn inspect_source(path: &str, package_root: Option<&str>) -> Result<SourceCa
             }
         }
         for issue in &wind.automation.issues {
-            warnings.push(format!("Bronwindbesturing: {issue}. Dit project wordt vóór laden geweigerd."));
+            warnings.push(format!("Bronwindbesturing: {issue}. Het eigen windnetwerk van deze bron wordt dan niet gebruikt; de registers spelen met het gewone windmodel."));
         }
         for control in &wind.controls {
             for issue in &control.issues {
-                warnings.push(format!("Klepbediening {}: {issue}. Het project kan pas laden wanneer deze bronlogica wordt ondersteund.", control.name));
+                warnings.push(format!("Klepbediening {}: {issue}. Het eigen windnetwerk van deze bron wordt dan niet gebruikt; de registers spelen met het gewone windmodel.", control.name));
             }
         }
         for link in &wind.verbindingen {
             if let Some(vpo_sampler::windwerk::ValveControlRef::Unsupported { reason, .. }) = &link.valve_control {
-                warnings.push(format!("Windverbinding {}: {reason}. Deze bron kan niet veilig als project laden.", link.naam));
+                warnings.push(format!("Windverbinding {}: {reason}. Het eigen windnetwerk van deze bron wordt dan niet gebruikt; de registers spelen met het gewone windmodel.", link.naam));
             }
         }
     }
@@ -1003,6 +1003,8 @@ pub fn compile_project(path: &str, project: &OrganProject) -> Result<CompiledPro
         })
         .collect();
     let mut wind_pipes = Vec::new();
+    // Bronnen waarvan het eigen windnetwerk niet (volledig) ondersteund wordt: bron-ID -> reden.
+    let mut wind_rejected: BTreeMap<String, String> = BTreeMap::new();
     let mut resource_paths: HashMap<String, BTreeSet<PathBuf>> = HashMap::new();
     let mut mixed_divisions: BTreeSet<u32> = BTreeSet::new();
     let mut division_groups: HashMap<
@@ -1135,28 +1137,22 @@ pub fn compile_project(path: &str, project: &OrganProject) -> Result<CompiledPro
                     continue;
                 };
                 let key = (stop.id, crate::audio::layer_key(idx as u32 + 1, new_layer));
-                if has_source_wind {
-                    let lade = extra.wind_lade.ok_or_else(|| {
-                        format!(
-                            "Register '{}' mist de bronwindlade voor pijp {}",
-                            stop.name,
-                            idx + 1
-                        )
-                    })?;
-                    let kg_s = extra.wind_verbruik_kg_s.ok_or_else(|| {
-                        format!(
-                            "Register '{}' mist het bronwindverbruik voor pijp {}",
-                            stop.name,
-                            idx + 1
-                        )
-                    })?;
-                    wind_pipes.push(crate::windwerk_set::ProjectWindPipe {
-                        key,
-                        source_id: source.id.clone(),
-                        lade,
-                        kg_s,
-                        ref_inch: extra.wind_ref_inch,
-                    });
+                if has_source_wind && !wind_rejected.contains_key(&source.id) {
+                    // Ontbreekt windlade of verbruik van een pijp, dan kan het bronwindnetwerk
+                    // van deze bron niet kloppen: de bron speelt dan met het gewone windmodel.
+                    match (extra.wind_lade, extra.wind_verbruik_kg_s) {
+                        (Some(lade), Some(kg_s)) => wind_pipes.push(crate::windwerk_set::ProjectWindPipe {
+                            key,
+                            source_id: source.id.clone(),
+                            lade,
+                            kg_s,
+                            ref_inch: extra.wind_ref_inch,
+                        }),
+                        (None, _) => { wind_rejected.insert(source.id.clone(), format!(
+                            "register '{}' mist de bronwindlade voor pijp {}", stop.name, idx + 1)); }
+                        (_, None) => { wind_rejected.insert(source.id.clone(), format!(
+                            "register '{}' mist het bronwindverbruik voor pijp {}", stop.name, idx + 1)); }
+                    }
                 }
                 let Some(bindings) = rank_bindings.get(&source.id) else {
                     continue;
@@ -1412,11 +1408,26 @@ pub fn compile_project(path: &str, project: &OrganProject) -> Result<CompiledPro
         }
         Some(cfg)
     };
-    let wind = if wind_sources.is_empty() {
+    // Een bron met een niet-ondersteund windnetwerk (onbekende klepbesturing, ontbrekende
+    // controllergegevens, ...) weigerde tot 0.9.66 het hele project. Nu valt alleen die
+    // bron terug op het gewone windmodel van JM-Orgue; de andere bronnen houden hun netwerk.
+    let mut wind_kept = Vec::new();
+    for source in wind_sources {
+        if wind_rejected.contains_key(&source.source_id) {
+            continue;
+        }
+        let own: Vec<_> = wind_pipes.iter().filter(|pipe| pipe.source_id == source.source_id).cloned().collect();
+        match crate::windwerk_set::compile_project_wind(std::slice::from_ref(&source), &own) {
+            Ok(_) => wind_kept.push(source),
+            Err(reason) => { wind_rejected.insert(source.source_id.clone(), reason); }
+        }
+    }
+    wind_pipes.retain(|pipe| !wind_rejected.contains_key(&pipe.source_id));
+    let wind = if wind_kept.is_empty() {
         None
     } else {
         Some(crate::windwerk_set::compile_project_wind(
-            &wind_sources,
+            &wind_kept,
             &wind_pipes,
         )?)
     };
@@ -1430,6 +1441,12 @@ pub fn compile_project(path: &str, project: &OrganProject) -> Result<CompiledPro
         definition.couplers.len(),
     );
     import_report.melding(vpo_sampler::Ernst::Info, "Orgelbouwer", "Complete geselecteerde registers; bronkoppels, broncrescendo en doorlopende bijgeluiden worden niet geïmporteerd. Opgenomen galm blijft behouden.");
+    for (source_id, reason) in &wind_rejected {
+        let name = parsed.get(source_id).map(|value| value.definition.organ.church_name.clone()).unwrap_or_default();
+        tracing::warn!("Orgelproject: bronwindnetwerk van '{name}' niet gebruikt: {reason}");
+        import_report.melding(vpo_sampler::Ernst::Waarschuwing, "Bronwindnetwerk", format!(
+            "Het eigen windnetwerk van '{name}' wordt niet gebruikt ({reason}). De registers van deze bron spelen met het gewone windmodel van JM-Orgue."));
+    }
     if let Some(plan) = &wind {
         for warning in &plan.warnings {
             import_report.melding(vpo_sampler::Ernst::Waarschuwing, "Bronwindnetwerk", warning.clone());
@@ -1741,7 +1758,7 @@ mod tests {
     }
 
     #[test]
-    fn authored_wind_links_without_compartments_fail_preflight_and_preserve_project_file() {
+    fn bron_met_niet_ondersteund_windnetwerk_laadt_met_het_gewone_windmodel() {
         let fixture = Fixture::new();
         let mut project = save_project(&fixture.path(), fixture.project()).unwrap();
         let previous = fs::read(fixture.path()).unwrap();
@@ -1772,10 +1789,18 @@ mod tests {
         source.path = catalog.path;
         source.fingerprint = catalog.fingerprint;
         source.resources.clear();
-        let error = compile_project(&fixture.path(), &project).err().expect("invalid wind cannot enter the load path");
-        assert!(error.contains("ontbrekende of gelijke begin-/eindlade"), "{error}");
-        assert!(save_project(&fixture.path(), project).is_err());
-        assert_eq!(fs::read(fixture.path()).unwrap(), previous);
+        // Tot 0.9.66 weigerde zo'n bron het hele project. Nu laadt het: zonder het eigen
+        // windnetwerk van de bron, met een waarschuwing in het importverslag.
+        let _ = previous;
+        let compiled = compile_project(&fixture.path(), &project)
+            .expect("een bron met een niet-ondersteund windnetwerk moet zonder bronwind laden");
+        assert!(compiled.wind.is_none(), "het ongeldige bronwindnetwerk mag niet in de audio-engine komen");
+        assert_eq!(compiled.definition.stops.len(), 1);
+        let verslag = format!("{:?}", compiled.import_report);
+        assert!(verslag.contains("gewone windmodel"), "{verslag}");
+        assert!(verslag.contains("ontbrekende of gelijke begin-/eindlade"), "de reden hoort in het verslag: {verslag}");
+        let saved = save_project(&fixture.path(), project).expect("opslaan mag niet meer geweigerd worden");
+        compile_project(&fixture.path(), &saved).unwrap();
     }
 
     #[test]

@@ -128,6 +128,17 @@
   .drawknob-ebony.reed .control-name,.drawknob-rosewood.reed .control-name,.oval-porcelain.reed .control-name,.stopkey.reed .control-name,.square-wood.reed .control-name{color:#812319}
   .lit.reed .control-name{color:#ffb9a9}
   .lit.reed.active .control-name{color:#7a1f12}
+  /* Lepels (cuillères, Cavaillé-Coll): porseleinen naamplaatje met eronder een voettrede. Aan = omlaag en opzij gehaakt. */
+  .spoon-brass,.spoon-iron,.spoon-wood{padding:0;border:none;background:transparent;box-shadow:none;--spoon-a:#f1dc9c;--spoon-b:#a57c2e;--spoon-c:#5b3f12}
+  .spoon-iron{--spoon-a:#8d9499;--spoon-b:#3a3f44;--spoon-c:#121416}
+  .spoon-wood{--spoon-a:#c08a55;--spoon-b:#7a4826;--spoon-c:#3a1d0c}
+  .spoon-brass .control-face,.spoon-iron .control-face,.spoon-wood .control-face{inset:0 3% auto 3%;height:40%;border-radius:4px;border:1px solid #b8b29a;background:linear-gradient(170deg,#fffffb,#f0ecdd 60%,#d9d2ba);color:#23241f;box-shadow:inset 0 1px 2px #fff,inset 0 -2px 3px #8a7d5a44,0 2px 3px #0009;text-shadow:0 1px #fff9;padding:2px 3px;font-family:Georgia,serif}
+  .spoon-brass .control-mount,.spoon-iron .control-mount,.spoon-wood .control-mount{position:absolute;left:50%;bottom:3%;width:46%;height:30%;border-radius:50%;background:radial-gradient(ellipse at 38% 28%,var(--spoon-a),var(--spoon-b) 62%,var(--spoon-c));box-shadow:0 5px 6px #000a,inset 0 2px 2px #ffffff55,inset 0 -3px 4px #0007;transform:translateX(-50%);transition:transform 140ms,box-shadow 140ms}
+  .spoon-brass .control-mount::before,.spoon-iron .control-mount::before,.spoon-wood .control-mount::before{content:"";position:absolute;left:39%;width:22%;bottom:78%;height:78%;border-radius:3px;background:linear-gradient(90deg,var(--spoon-c),var(--spoon-a) 45%,var(--spoon-b));box-shadow:0 2px 3px #0008}
+  .spoon-brass.active .control-mount,.spoon-iron.active .control-mount,.spoon-wood.active .control-mount{transform:translate(-22%,14%) rotate(9deg);box-shadow:0 2px 3px #000b,inset 0 2px 2px #ffffff55,inset 0 -3px 4px #0007}
+  .spoon-brass.active .control-face,.spoon-iron.active .control-face,.spoon-wood.active .control-face{border-color:var(--console-light,#ffd36b);box-shadow:inset 0 1px 2px #fff,0 0 0 2px var(--console-light,#ffd36b),0 0 9px var(--console-light,#ffd36b)}
+  .spoon-brass .control-light,.spoon-iron .control-light,.spoon-wood .control-light{display:none}
+  .spoon-brass.reed .control-name,.spoon-iron.reed .control-name,.spoon-wood.reed .control-name{color:#812319}
   .coupler .control-name{font-size:clamp(calc(11px / var(--console-scale,1)),.9em,calc(15px / var(--console-scale,1)))}
   .console-control.missing{opacity:.58;filter:saturate(.15)}
   .console-control:disabled{cursor:default}

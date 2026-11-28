@@ -5,7 +5,26 @@ export const CONSOLE_MAX_PAGES = 64;
 // De laatste vier zijn effen orgelkleuren (geschilderde kasten): wijnrood, roomwit, groen en grijsblauw.
 export const CONSOLE_THEMES = ['walnut', 'ivory', 'slate', 'burgundy', 'cream', 'green', 'blue'];
 export const CONSOLE_APPEARANCES = ['rocker', 'rocker-ivory', 'rocker-wood', 'drawknob', 'drawknob-ivory', 'piston', 'tablet', 'flat',
-  'drawknob-ebony', 'drawknob-rosewood', 'oval-porcelain', 'stopkey', 'lit', 'square-wood'];
+  'drawknob-ebony', 'drawknob-rosewood', 'oval-porcelain', 'stopkey', 'lit', 'square-wood',
+  'spoon-brass', 'spoon-iron', 'spoon-wood'];
+// Lepels (cuillères, zoals bij Cavaillé-Coll): voettreden met een naamplaatje erboven.
+export const spoonConsoleAppearance = appearance => typeof appearance === 'string' && appearance.startsWith('spoon-');
+
+// Zet alle koppels van een scherm als lepels in rijen onderaan, gecentreerd en met gelijke tussenruimte.
+export function couplersAsSpoons(page, appearance = 'spoon-brass', { width = 92, height = 132, gap = 16, margin = 24 } = {}) {
+  const couplers = page.elements.filter(e => e.kind === 'coupler');
+  if (!couplers.length) return page.elements;
+  const perRow = Math.max(1, Math.floor((page.width - 2 * margin + gap) / (width + gap)));
+  const rows = Math.ceil(couplers.length / perRow), placed = new Map();
+  couplers.forEach((e, i) => {
+    const row = Math.floor(i / perRow), inRow = Math.min(perRow, couplers.length - row * perRow), col = i - row * perRow;
+    const span = inRow * width + (inRow - 1) * gap;
+    placed.set(e.id, { ...e, appearance, width, height,
+      x: Math.round((page.width - span) / 2 + col * (width + gap)),
+      y: Math.max(0, page.height - margin - (rows - row) * height - (rows - 1 - row) * gap) });
+  });
+  return page.elements.map(e => placed.get(e.id) || e);
+}
 export const CONSOLE_TEXTURES = ['grain', 'oak', 'burl', 'ebony', 'linen', 'brushed', 'plain', 'custom'];
 export const CONSOLE_TEXTURE_MAX_BYTES = 2 * 1024 * 1024;
 const MAX_TEXTURE_BASE64 = Math.ceil(CONSOLE_TEXTURE_MAX_BYTES / 3) * 4;

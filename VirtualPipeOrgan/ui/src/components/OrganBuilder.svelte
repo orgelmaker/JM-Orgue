@@ -220,14 +220,24 @@
       error = ''; message = '';
     } catch (e) { error = describeError(e); }
   }
-  function selectVisible() {
+  // Meerdere registers tegelijk aan- of uitvinken: alle zichtbare, of een reeks met Shift.
+  function setStops(stops, checked) {
     if (!currentSource) return;
     try {
       let next = project;
-      for (const stop of visibleStops) next = chooseProjectStop(next, currentSource.id, stop.id, true,
+      for (const stop of stops) next = chooseProjectStop(next, currentSource.id, stop.id, checked,
         project.divisions.find(division => division.pedal === /pedal|pedaal/i.test(stop.manual_name))?.id);
       project = next; error = ''; message = '';
     } catch (e) { error = describeError(e); }
+  }
+  function selectVisible() { setStops(visibleStops, true); }
+  function clearVisible() { setStops(visibleStops, false); }
+  let lastStopId = null, shiftDown = false;
+  function toggleRow(stop, checked) {
+    const from = visibleStops.findIndex(item => item.id === lastStopId), to = visibleStops.findIndex(item => item.id === stop.id);
+    if (shiftDown && from >= 0 && to >= 0 && from !== to) setStops(visibleStops.slice(Math.min(from, to), Math.max(from, to) + 1), checked);
+    else toggle(currentSource.id, stop, checked);
+    lastStopId = stop.id;
   }
   function removeSource(source) {
     pendingAction = { action: () => {
@@ -314,11 +324,11 @@
         {:else}
           <label class="source-picker">Bronorgel<select aria-label="Bron voor registerkeuze" value={currentSource?.id || ''} disabled={locked} on:change={e => { activeSource = e.target.value; query = ''; }}>{#each project.sources as source, index}<option value={source.id}>{organProjectSourceLabel(index)} · {sourceName(source.id)} · {countSourceStops(source.id)} gekozen</option>{/each}</select></label>
         {/if}
-        <div class="register-tools"><label class="search"><span class="sr-only">Zoek register</span><input type="search" placeholder="Zoek register of bronklavier…" bind:value={query}></label><label class="check-label"><input type="checkbox" bind:checked={showSelected}> Alleen gekozen</label><button type="button" class="btn btn-ghost btn-sm" disabled={locked || !visibleStops.length} on:click={selectVisible}>Kies zichtbare</button></div>
+        <div class="register-tools"><label class="search"><span class="sr-only">Zoek register</span><input type="search" placeholder="Zoek register of bronklavier…" bind:value={query}></label><label class="check-label"><input type="checkbox" bind:checked={showSelected}> Alleen gekozen</label><button type="button" class="btn btn-ghost btn-sm" disabled={locked || !visibleStops.length} on:click={selectVisible}>Kies zichtbare</button><button type="button" class="btn btn-ghost btn-sm" disabled={locked || !visibleStops.length} on:click={clearVisible}>Wis zichtbare</button><span class="field-hint">Shift + klik: reeks aan of uit</span></div>
         <div class="register-scroll"><table><thead><tr><th class="check-column"><span class="sr-only">Kiezen</span></th><th>Bronregister</th><th>Doelklavier</th></tr></thead><tbody>
           {#each visibleStops as stop (stop.id)}
             {@const selected = selectedStop(currentSource.id, stop.id)}
-            <tr class:selected={!!selected}><td><input type="checkbox" aria-label={`${stop.name} kiezen`} checked={!!selected} disabled={locked} on:change={e => toggle(currentSource.id, stop, e.target.checked)}></td><td><strong>{stop.name}</strong><small>{stop.manual_name} · MIDI {stop.first_midi_note}–{Math.min(127, stop.first_midi_note + stop.key_count - 1)}</small></td><td><select aria-label={`Doelklavier voor ${stop.name}`} value={selected?.division_id || ''} disabled={locked || !selected} on:change={e => editStop(selected.id, { division_id: Number(e.target.value) })}><option value="" disabled>Kies eerst</option>{#each project.divisions as division}<option value={division.id}>{division.name}</option>{/each}</select></td></tr>
+            <tr class:selected={!!selected}><td><input type="checkbox" aria-label={`${stop.name} kiezen`} checked={!!selected} disabled={locked} on:click={e => { shiftDown = e.shiftKey; }} on:change={e => toggleRow(stop, e.target.checked)}></td><td><strong>{stop.name}</strong><small>{stop.manual_name} · MIDI {stop.first_midi_note}–{Math.min(127, stop.first_midi_note + stop.key_count - 1)}</small></td><td><select aria-label={`Doelklavier voor ${stop.name}`} value={selected?.division_id || ''} disabled={locked || !selected} on:change={e => editStop(selected.id, { division_id: Number(e.target.value) })}><option value="" disabled>Kies eerst</option>{#each project.divisions as division}<option value={division.id}>{division.name}</option>{/each}</select></td></tr>
           {:else}<tr><td colspan="3" class="empty-table">{currentCatalog ? 'Geen registers voor deze zoekopdracht.' : 'Deze bron kon nog niet worden geanalyseerd.'}</td></tr>{/each}
         </tbody></table></div>
       {:else}<div class="workspace-empty"><span aria-hidden="true">♫</span><h3>Begin met een sampleset</h3><p>Voeg daarna zoveel bronnen toe als je nodig hebt en kies hier hun registers, met opnamen en releases.</p></div>{/if}
