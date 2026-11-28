@@ -6,6 +6,8 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Nog niet uitgebracht]
 
+## [0.9.68] - 2026-11-28
+
 ### Consolebouwer: treden in plaats van lepels
 - De drie "lepels" uit 0.9.67 zijn vervangen door vier **treden**: een voettrede in de vorm van een pianopedaal die uit een sleuf steekt, met een naamplaatje erboven. Aan is ingetrapt en opzij in de inkeping gehaakt. Uitvoeringen: gesmeed ijzer, gepolijst messing (ovaal plaatje), ijzer met houten tredevlak en breed vernikkeld (messing naamplaatje). Samen nu achttien vormen.
 - De knop heet nu "Koppels als treden onderin" en zet alle koppels van een scherm als treden in gecentreerde rijen onderaan. Een geselecteerde trede bepaalt de uitvoering; anders gesmeed ijzer.
