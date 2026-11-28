@@ -91,6 +91,18 @@ export function consoleTargets(organInfo) {
       active: !!stop.drawn, source: stop,
     });
   }
+  // Tremulant per divisie (kind 'tremulant', doel = divisienaam). `real` = de set heeft er zelf een;
+  // de eigen speeltafel kan er per divisie ook een aanzetten (LFO), dus elke divisie is een geldig doel.
+  for (const division of organInfo?.divisions || []) {
+    if (division.__toy_division) continue;
+    result.push({
+      kind: 'tremulant', id: division.name, name: organInfo?.tremulant_label || 'Tremulant', pitch: '',
+      division: division.display_name || division.name, divisionName: division.name, group: 'tremulant',
+      active: organInfo?.tremulant_active?.[division.name] === true, source: division,
+      real: !!division.has_tremulant || (division.stops || []).some(stop => stop.has_tremulant) ||
+        (organInfo?.tremulant_extra || []).includes(division.name),
+    });
+  }
   for (const coupler of organInfo?.couplers || []) result.push({
     kind: 'coupler', id: coupler.id, name: (coupler.name || '').replace(/\n/g, ' '),
     pitch: '', division: coupler.display_in_division || coupler.destination_division || '',
@@ -132,7 +144,7 @@ export function consoleLayoutError(layout) {
       !num(page.width, 640, 2400) || !num(page.height, 400, 1600) || !Array.isArray(page.elements) || page.elements.length > 512) return 'page';
     pageIds.add(page.id);
     for (const e of page.elements) {
-      if (!text(e.id, 1, 128) || elementIds.has(e.id) || !['stop', 'coupler', 'label'].includes(e.kind) ||
+      if (!text(e.id, 1, 128) || elementIds.has(e.id) || !['stop', 'coupler', 'tremulant', 'label'].includes(e.kind) ||
         !CONSOLE_APPEARANCES.includes(e.appearance) || !text(e.label, 0, 160) ||
         !num(e.x, 0, page.width) || !num(e.y, 0, page.height) ||
         !num(e.width, e.kind === 'label' ? 16 : 48, page.width) ||
@@ -179,7 +191,8 @@ export function defaultConsoleLayout(organInfo, { name = organInfo?.name || 'Con
   const groups = [];
   for (const division of organInfo?.divisions || []) {
     const stops = targets.filter(t => t.kind === 'stop' && t.divisionName === division.name);
-    if (stops.length) groups.push({ name: division.display_name || division.name, targets: stops });
+    const tremulant = targets.filter(t => t.kind === 'tremulant' && t.divisionName === division.name && t.real);
+    if (stops.length) groups.push({ name: division.display_name || division.name, targets: [...stops, ...tremulant] });
   }
   const couplers = targets.filter(t => t.kind === 'coupler');
   if (couplers.length) groups.push({ name: couplersName, targets: couplers });

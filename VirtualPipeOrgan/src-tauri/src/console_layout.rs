@@ -198,7 +198,7 @@ impl ConsoleLayout {
                 {
                     return Err("Ongeldig of dubbel consoleonderdeel".into());
                 }
-                if !["stop", "coupler", "label"].contains(&element.kind.as_str())
+                if !["stop", "coupler", "tremulant", "label"].contains(&element.kind.as_str())
                     || !CONSOLE_APPEARANCES
                     .contains(&element.appearance.as_str())
                 {

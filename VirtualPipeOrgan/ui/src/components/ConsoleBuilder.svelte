@@ -299,7 +299,7 @@
             {#each visibleTargets as target (`${target.kind}:${target.id}`)}
               {@const isPlaced = placed.has(`${target.kind}:${target.id}`)}
               <button type="button" class="palette-control" class:placed={isPlaced} disabled={saving || isPlaced || page.elements.length >= 512} on:click={() => addTarget(target)} title={isPlaced ? $t('console_builder.placed') : $t('console_builder.add')}>
-                <span class="palette-symbol" aria-hidden="true">{target.kind === 'coupler' ? '↔' : '＋'}</span><span><strong>{target.name} {target.pitch}</strong><small>{target.division}</small></span><span class="placed-check" aria-hidden="true">{isPlaced ? '✓' : ''}</span>
+                <span class="palette-symbol" aria-hidden="true">{target.kind === 'coupler' ? '↔' : target.kind === 'tremulant' ? '≈' : '＋'}</span><span><strong>{target.name} {target.pitch}</strong><small>{target.division}</small></span><span class="placed-check" aria-hidden="true">{isPlaced ? '✓' : ''}</span>
               </button>
             {/each}
           </div>

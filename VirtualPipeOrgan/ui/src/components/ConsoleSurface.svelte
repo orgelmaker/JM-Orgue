@@ -11,6 +11,8 @@
   export let selectedId = null;
   // De ontwerper toont de schermkiezer altijd; op het orgelscherm alleen als het ontwerp dat vraagt.
   export let switcher = false;
+  // Orgelscherm: kleur en textuur van het ontwerp vullen het hele vlak, niet alleen het bord.
+  export let fill = false;
   export let inert = false;
   export let grid = 8;
   export let snapGuides = true;
@@ -96,7 +98,8 @@
 
 <svelte:window on:pointermove={move} on:pointerup={finish} on:pointercancel={cancel} on:blur={cancel} />
 
-<div class="console-surface theme-{layout?.theme || 'walnut'}" class:editing style="--console-scale:{scale};max-width:{page?.width || 1200}px;margin-inline:auto">
+<div class="console-surface theme-{layout?.theme || 'walnut'}" class:editing class:fill style="--console-scale:{scale};{fill ? '' : `max-width:${page?.width || 1200}px;margin-inline:auto`}">
+  {#if fill}<div class="surface-texture texture-{texture}" style="opacity:{textureOpacity};--texture-unit:{textureUnit};{textureImage ? `background-image:${textureImage}` : ''}" aria-hidden="true"></div>{/if}
   {#if pages.length > 1 && (switcher || layout?.screen_switcher)}
     <nav class="console-pages" aria-label={$t('console_builder.page')}>
       {#if pages.length > 8}
@@ -111,7 +114,7 @@
       {/if}
     </nav>
   {/if}
-  <div class="console-viewport" bind:this={viewport} style:height={page ? `${page.height * scale}px` : '80px'}>
+  <div class="console-viewport" bind:this={viewport} style:height={page ? `${page.height * scale}px` : '80px'} style:max-width={fill ? `${page?.width || 1200}px` : null}>
     {#if page}
       <div class="console-board" class:grid={editing} style="width:{page.width}px;height:{page.height}px;transform:scale({scale});--console-grid:{grid}px" role="group" aria-label={page.name}>
         <div class="board-texture texture-{texture}" style="opacity:{textureOpacity};--texture-unit:{textureUnit};{textureImage ? `background-image:${textureImage}` : ''}" aria-hidden="true"></div>
@@ -133,6 +136,7 @@
       </div>
     {/if}
   </div>
+  {#if $$slots.default}<div class="console-extra"><slot /></div>{/if}
 </div>
 
 <style>
@@ -144,6 +148,13 @@
   .theme-cream{--console-case:#c9bea3;--console-case-edge:#8f8368;--console-face:#f4eedd;--console-face-top:#fffdf6;--console-face-border:#c2b79c;--console-ink:#2b2a26;--console-label:#4a3d2a;--console-wood:#efe6d0;--console-edge:#b3a585;--console-grain:#fff7dd30;--console-select:#855511;--console-draw-face:#e8dfc9;--console-draw-highlight:#fffaf0;--console-draw-ink:#332b22;--console-draw-edge:#9a835d;--console-draw-reed:#8f2c1f}
   .theme-green{--console-case:#13231a;--console-case-edge:#09130d;--console-label:#f1e6c4;--console-wood:#2f5a40;--console-edge:#14291c;--console-grain:#c8f0d010}
   .theme-blue{--console-case:#17222d;--console-case-edge:#0c141b;--console-label:#eef3f6;--console-wood:#4a6680;--console-edge:#1d2c3a;--console-grain:#d0e6ff10}
+  .console-surface.fill{position:relative;box-sizing:border-box;min-height:calc(100vh - 205px);padding:14px 14px 18px;background-color:var(--console-wood);background-image:linear-gradient(90deg,#0002,transparent 18%,#fff1 45%,#0001 80%);border-radius:8px;overflow:hidden;isolation:isolate}
+  .surface-texture{position:absolute;inset:0;z-index:0;pointer-events:none;background-repeat:repeat}
+  .fill .console-viewport{position:relative;z-index:1;margin-inline:auto;box-shadow:none;border-radius:0;overflow:visible}
+  .fill .console-board{background:none;box-shadow:none}
+  .fill .console-board > .board-texture,.fill .console-board > .board-trim{display:none}
+  .fill .console-pages{position:relative;z-index:1}
+  .console-extra{position:relative;z-index:1;color:var(--console-label)}
   .console-pages{display:flex;gap:6px;flex-wrap:wrap;padding:0 0 10px}
   .console-pages label{display:flex;gap:8px;align-items:center}
   .console-pages select{max-width:260px;font:inherit;padding:6px 10px;background:var(--bg-elevated);color:var(--text);border:1px solid var(--border-color,var(--stop-porcelain-border));border-radius:5px}

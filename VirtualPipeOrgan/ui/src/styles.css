@@ -3762,3 +3762,8 @@ input[type="range"]::-webkit-slider-thumb:hover {
    dat je rechtsklik of lang indrukken kunt gebruiken. */
 .division-header-compact { cursor: context-menu; }
 .division-header-compact.learning { outline: 2px solid var(--primary); outline-offset: 2px; }
+
+/* Eigen console actief: geen werkenkeuze en geen Indeling; wel de schermkeuze. Onderdelen onder het bord volgen het thema. */
+.panel-toolbar.eigen-console .panel-div-btn:not(.scherm-knop), .panel-toolbar.eigen-console .panel-div-reset, .panel-toolbar.eigen-console .indeling-wrap { display: none; }
+.console-surface .console-auxiliary { justify-content: center; }
+.console-surface .console-auxiliary-group { background: rgba(0, 0, 0, 0.24); color: var(--console-label); }

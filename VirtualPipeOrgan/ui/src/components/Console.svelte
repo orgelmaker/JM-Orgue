@@ -55,6 +55,11 @@
   const consoleEventSource = Math.random().toString(36).slice(2);
   $: missingConsoleControls = savedConsoleLayout ? missingConsoleTargets(savedConsoleLayout, organInfo) : [];
   $: customConsoleActive = !!savedConsoleLayout?.enabled && !consoleLayoutError && missingConsoleControls.length === 0;
+  // Tremulanten die als knop op de eigen console staan, hoeven niet nog eens los eronder.
+  $: placedTremulants = new Set((savedConsoleLayout?.pages || []).flatMap(p => p.elements || []).filter(e => e.kind === 'tremulant').map(e => e.target_id));
+  // Het orgel zoals de console het ziet: met de live tremulantstand per divisie.
+  $: consoleOrgan = displayOrgan ? { ...displayOrgan, tremulant_label: $t('stops.tremulant'), tremulant_active: tremActive,
+    tremulant_extra: Object.keys(tremLfoEnabled || {}).filter(name => tremLfoEnabled[name]) } : displayOrgan;
 
   async function readConsoleLayout(id, epoch, background = false) {
     const request = ++consoleLayoutRead;
@@ -6624,11 +6629,19 @@
         {/if}
         <!-- Toolbar. In de speeltafelmodus weg tot "Balken" wordt gedrukt; dan
              ligt hij als laag over de registers (styles.css). -->
-        <div class="panel-toolbar"
+        <div class="panel-toolbar" class:eigen-console={customConsoleActive}
              class:speeltafel-verborgen={speeltafelModus && !balkenZichtbaar}>
           <!-- Werken in schermvolgorde; slepen wisselt ze om, klikken zet ze
                aan of uit. -->
           <div class="panel-config" class:div-dragging={!!(divDrag && divDrag.active)}>
+            <!-- Eigen console: geen werkenkeuze en geen Indeling (het ontwerp bepaalt dat); wel kiezen welk scherm je ziet. -->
+            {#if customConsoleActive && (savedConsoleLayout?.pages?.length || 0) > 1}
+              {#each savedConsoleLayout.pages as scherm (scherm.id)}
+                <button class="panel-div-btn scherm-knop" class:selected={scherm.id === consolePageId}
+                  aria-pressed={scherm.id === consolePageId}
+                  on:click={() => selectConsolePage({ detail: { pageId: scherm.id } })}>{scherm.name}</button>
+              {/each}
+            {/if}
             {#each divisieKnoppen as naam, divIdx (naam)}
               <button
                 class="panel-div-btn"
@@ -7103,12 +7116,20 @@
           </div>
         {/if}
         {#if customConsoleActive}
-          <ConsoleSurface
-            layout={savedConsoleLayout} organInfo={displayOrgan} pageId={consolePageId}
+          <ConsoleSurface fill
+            layout={savedConsoleLayout} organInfo={consoleOrgan} pageId={consolePageId}
             on:pageChange={selectConsolePage}
-            on:toggle={(e) => dispatch(e.detail.kind === 'coupler' ? 'toggleCoupler' : 'toggleStop', e.detail.targetId)}
+            on:toggle={(e) => {
+              if (e.detail.kind === 'tremulant') {
+                const d = displayOrgan.divisions.find(d => d.name === e.detail.targetId);
+                if (d) setTremActive(d, tremActive[d.name] !== true);
+              } else dispatch(e.detail.kind === 'coupler' ? 'toggleCoupler' : 'toggleStop', e.detail.targetId);
+            }}
             on:learn={(e) => {
-              if (e.detail.kind === 'coupler') {
+              if (e.detail.kind === 'tremulant') {
+                const i = displayOrgan.divisions.findIndex(d => d.name === e.detail.targetId);
+                if (i >= 0) learnTremulantLfo(i);
+              } else if (e.detail.kind === 'coupler') {
                 const c = displayOrgan.couplers?.find(c => c.id === e.detail.targetId);
                 if (c) showCouplerContextMenuAt(c.midi_action_code);
               } else {
@@ -7116,11 +7137,12 @@
                 if (s) showStopContextMenuAt(s.midi_action_code);
               }
             }}
-          />
+          >
           <div class="console-auxiliary">
             {#each displayOrgan.divisions.filter(d => !d.__toy_division) as division}
               {@const tremDivIdx = displayOrgan.divisions.findIndex(d => d.name === division.name)}
-              {#if isSwellEnabled(division.name) || division.stops.some(s => s.has_tremulant) || tremLfoEnabled[division.name]}
+              {@const tremLos = (division.stops.some(s => s.has_tremulant) || tremLfoEnabled[division.name]) && !placedTremulants.has(division.name)}
+              {#if isSwellEnabled(division.name) || tremLos}
                 <div class="console-auxiliary-group">
                   <span>{division.display_name || division.name}</span>
                   {#if isSwellEnabled(division.name)}
@@ -7130,7 +7152,7 @@
                         on:input={(e) => setSwellLevel(division.name, Number(e.currentTarget.value) / 100)} />
                     </label>
                   {/if}
-                  {#if division.stops.some(s => s.has_tremulant) || tremLfoEnabled[division.name]}
+                  {#if tremLos}
                     <button class="btn btn-secondary btn-sm" class:active={tremActive[division.name] === true}
                       on:click={() => setTremActive(division, tremActive[division.name] !== true)}
                       use:midiLearn={{ onTrigger: () => { if (tremDivIdx >= 0) learnTremulantLfo(tremDivIdx); } }}
@@ -7145,6 +7167,7 @@
               </div>
             {/each}
           </div>
+          </ConsoleSurface>
         {:else}
         <div class="divisions-container" bind:this={divisionsEl} bind:clientHeight={divisionsH} class:divisions-vertical={mainLayout === 'vertical'} style="--stop-min-width: {stopSize}px; --stop-size-n: {stopSize}; --stop-h: {stopHeight}px">
           {#each selectedDivisions.map(name => displayOrgan.divisions.find(d => d.name === name)).filter(Boolean) as division}

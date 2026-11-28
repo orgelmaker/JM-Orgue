@@ -211,3 +211,21 @@ test('foot levers (treden) are valid control styles and couplers can be laid out
   assert(Math.abs(bottom[0].x - (page.width - (bottom[bottom.length - 1].x + 96))) <= 1);
   assert.equal(consoleLayoutError({ ...defaultConsoleLayout(organ), pages: [{ ...page, elements: out }] }), null);
 });
+
+test('tremulants are console controls: one target per division, placed by default only where the set has one', async () => {
+  const { consoleTargets } = await import('../ui/src/lib/consoleLayout.js');
+  const withTrem = { id: 'x.organ', name: 'X', divisions: [
+    { name: 'Zwelwerk', display_name: 'Zwelwerk (II)', has_tremulant: true, stops: [{ id: 's1', name: 'Viola', pitch: "8'" }] },
+    { name: 'Pedaal', stops: [{ id: 's2', name: 'Subbas', pitch: "16'" }] } ], couplers: [],
+    tremulant_active: { Zwelwerk: true } };
+  const trem = consoleTargets(withTrem).filter(t => t.kind === 'tremulant');
+  assert.deepEqual(trem.map(t => [t.id, t.real, t.active]), [['Zwelwerk', true, true], ['Pedaal', false, false]]);
+  const layout = defaultConsoleLayout(withTrem);
+  const placed = layout.pages.flatMap(p => p.elements).filter(e => e.kind === 'tremulant');
+  assert.deepEqual(placed.map(e => e.target_id), ['Zwelwerk']);
+  assert.equal(consoleLayoutError(layout), null);
+  assert.deepEqual(missingConsoleTargets(layout, withTrem), []);
+  // Een tremulant op een divisie die niet meer bestaat, telt als ontbrekend.
+  const gone = cloneConsoleLayout(layout); gone.pages[0].elements.find(e => e.kind === 'tremulant').target_id = 'Bovenwerk';
+  assert.equal(missingConsoleTargets(gone, withTrem).length, 1);
+});
