@@ -104,6 +104,10 @@ try {
   await page.locator('.project-settings').getByRole('spinbutton').fill('442');
   const sourceA = page.getByTestId('organ-project-source-1');
   const sourceB = page.getByTestId('organ-project-source-2');
+  // Nieuwe bronnen staan standaard op automatisch gelijkstemmen; de bronreferentie hoort bij 'normalize'.
+  assert.equal(await sourceA.getByLabel('Stemming', { exact: true }).inputValue(), 'auto');
+  assert(await sourceA.getByLabel('Opgenomen A (Hz)').isDisabled());
+  await sourceA.getByLabel('Stemming', { exact: true }).selectOption('normalize');
   await sourceA.getByLabel('Opgenomen A (Hz)').fill('415');
   await sourceB.getByLabel('Stemming', { exact: true }).selectOption('original');
   await sourceB.getByLabel('Extra (cent)').fill('10');

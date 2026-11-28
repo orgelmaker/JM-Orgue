@@ -6,6 +6,18 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Nog niet uitgebracht]
 
+### Consolebouwer: formaat voor alles, rijen uitlijnen, schermen, meer vormen en kleuren
+- **Formaat voor alle bedieningen.** Naast "Alle bedieningen deze vorm" staat nu "Alle bedieningen dit formaat": de breedte en hoogte van de geselecteerde bediening gelden dan voor alle registers en koppels op alle schermen. Ronde vormen blijven rond.
+- **Rijen en kolommen worden herkend.** Bedieningen die naast of onder elkaar staan vormen een rij of kolom. Sleep je een bediening ernaast, dan klikt die vast op dezelfde tussenruimte als de buren. Met "Rij uitlijnen" en "Kolom uitlijnen" zet je de herkende rij of kolom op één lijn met gelijke tussenruimte; het getal op de knop toont hoeveel bedieningen meedoen. Alt blijft vrij verplaatsen.
+- **Schermen in plaats van pagina's.** Een ontwerp bestaat uit schermen. Elk extra venster ("Nieuw scherm") toont standaard zijn eigen scherm: het tweede venster het tweede scherm, enzovoort. De keuze per venster blijft bewaard; bestaande ontwerpen met pagina's blijven werken, hun pagina's heten nu schermen.
+- **Zes nieuwe knopvormen:** ebbenhouten en palissander trekregister met ivoren inleg, ovale porseleinen plaat (harmonium en kabinetorgel), tongvormige registertoets, verlichte druktoets en vierkante houten trekker (barok). Samen nu veertien vormen.
+- **Vier effen orgelkleuren** als afwerking: wijnrood, roomwit, orgelgroen en grijsblauw, naast notenhout, ivoor en donkere studio. Combineer ze met de textuur "Effen" voor een geschilderde kast, of met een textuur voor structuur.
+
+### Orgelbouwer: gelijke toonhoogte en gemengde divisies
+- **Automatisch gelijkstemmen** is het nieuwe standaardbeleid voor een bron. Elke pijp wordt op zijn gemeten toonhoogte bijgestemd naar de gezamenlijke concerttoonhoogte, zoals "Pijpen automatisch bijstemmen" bij een gewoon orgel; bewust zwevende stemmen houden hun zweving. Voorheen stond een nieuwe bron op "Concerttoonhoogte gelijkmaken" met 440 Hz als opgenomen A: zolang je de echte waarde niet invulde, veranderde er niets en klonken sets met een andere stemming onderling vals. De andere twee keuzes blijven bestaan en bestaande projecten houden hun instelling; zet een bron daar zo nodig zelf op "Automatisch gelijkstemmen".
+- **Registers uit verschillende sets op één divisie.** Een project weigerde te laden zodra registers met een verschillende bronzwelkast of -tremulant op hetzelfde doelklavier stonden. Dat mag nu: de divisie heeft één zwelkast en één tremulant, en die gelden voor alle registers erop. Rankzwelkasten blijven per bron onafhankelijk.
+- Een project met "Automatisch gelijkstemmen" opent niet in 0.9.65 of ouder.
+
 ## [0.9.65] - 2026-11-27
 
 ### Handleiding en website bijgewerkt

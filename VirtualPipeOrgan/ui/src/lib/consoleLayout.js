@@ -2,8 +2,10 @@
 // changes sounding controls; only the parent commits a draft to the backend.
 export const CONSOLE_LAYOUT_VERSION = 1;
 export const CONSOLE_MAX_PAGES = 64;
-export const CONSOLE_THEMES = ['walnut', 'ivory', 'slate'];
-export const CONSOLE_APPEARANCES = ['rocker', 'rocker-ivory', 'rocker-wood', 'drawknob', 'drawknob-ivory', 'piston', 'tablet', 'flat'];
+// De laatste vier zijn effen orgelkleuren (geschilderde kasten): wijnrood, roomwit, groen en grijsblauw.
+export const CONSOLE_THEMES = ['walnut', 'ivory', 'slate', 'burgundy', 'cream', 'green', 'blue'];
+export const CONSOLE_APPEARANCES = ['rocker', 'rocker-ivory', 'rocker-wood', 'drawknob', 'drawknob-ivory', 'piston', 'tablet', 'flat',
+  'drawknob-ebony', 'drawknob-rosewood', 'oval-porcelain', 'stopkey', 'lit', 'square-wood'];
 export const CONSOLE_TEXTURES = ['grain', 'oak', 'burl', 'ebony', 'linen', 'brushed', 'plain', 'custom'];
 export const CONSOLE_TEXTURE_MAX_BYTES = 2 * 1024 * 1024;
 const MAX_TEXTURE_BASE64 = Math.ceil(CONSOLE_TEXTURE_MAX_BYTES / 3) * 4;
@@ -56,7 +58,7 @@ function textureDataError(dataUrl) {
   return valid ? null : 'texture-data';
 }
 
-export const roundConsoleAppearance = appearance => ['drawknob', 'drawknob-ivory', 'piston'].includes(appearance);
+export const roundConsoleAppearance = appearance => ['drawknob', 'drawknob-ivory', 'piston', 'drawknob-ebony', 'drawknob-rosewood'].includes(appearance);
 
 export function consoleTargets(organInfo) {
   const result = [];

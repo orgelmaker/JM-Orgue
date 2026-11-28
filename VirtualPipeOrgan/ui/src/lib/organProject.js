@@ -77,7 +77,7 @@ export function organProjectError(project, catalogs = null) {
     if (!project.stops.some(stop => stop.source_id === source.id)) return 'Kies ten minste één register uit iedere bron.';
     if (!Number.isFinite(source.reference_a4_hz) || source.reference_a4_hz < 300 || source.reference_a4_hz > 550) return 'Controleer de referentietoonhoogte van iedere bron (300–550 Hz).';
     if (!Number.isFinite(source.tuning_cents) || source.tuning_cents < -1200 || source.tuning_cents > 1200) return 'Controleer de broncorrecties (−1200 tot +1200 cent).';
-    if (!['original', 'normalize'].includes(source.tuning_policy)) return 'Kies een stembeleid per bron.';
+    if (!['original', 'normalize', 'auto'].includes(source.tuning_policy)) return 'Kies een stembeleid per bron.';
     if (catalogs) {
       const catalog = catalogs[source.id];
       if (!catalog) return 'Analyseer alle brondefinities voordat je opslaat of laadt.';

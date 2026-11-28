@@ -41,6 +41,22 @@ export function snapConsoleElement(input, page, others = [], {
         if (!winner || Math.abs(delta) < winner.distance) winner = { axis, position, reference, value, distance: Math.abs(delta) };
       }
     }
+    // Gelijke tussenruimte: een bediening die je naast een rij (of onder een kolom)
+    // sleept, klikt vast op dezelfde afstand als de buren onderling al hebben.
+    if (enabled && !altKey && mode === 'move') {
+      const row = consoleArray(candidate, peers, axis).filter(e => e.id !== candidate.id);
+      const gaps = new Set();
+      for (let i = 0; i + 1 < row.length; i++) {
+        const gap = row[i + 1][axis] - (row[i][axis] + row[i][dimension]);
+        if (gap >= 0) gaps.add(Math.round(gap));
+      }
+      for (const gap of gaps) for (const peer of row) for (const value of [peer[axis] + peer[dimension] + gap, peer[axis] - gap - candidate[dimension]]) {
+        const distance = Math.abs(value - candidate[axis]);
+        if (distance > tolerance || value < 0 || value + candidate[dimension] > extent) continue;
+        if (row.some(e => value < e[axis] + e[dimension] && value + candidate[dimension] > e[axis])) continue;
+        if (!winner || distance <= winner.distance) winner = { axis, position: value, reference: peer, value, distance, spacing: true };
+      }
+    }
     if (winner) {
       result[mode === 'resize' ? dimension : axis] = winner.value;
       winners.push(winner);
@@ -62,4 +78,47 @@ export function snapConsoleElement(input, page, others = [], {
     };
   });
   return { element: result, guides };
+}
+
+// Een "array" is een rij (axis 'x') of kolom (axis 'y') gelijksoortige bedieningen
+// waarvan de middens op de dwarsas dicht bij elkaar liggen. Gesorteerd langs de as.
+export function consoleArray(element, elements, axis = 'x') {
+  const cross = axis === 'x' ? 'y' : 'x', crossDimension = axis === 'x' ? 'height' : 'width';
+  const label = element.kind === 'label';
+  const centre = element[cross] + element[crossDimension] / 2;
+  const members = elements.filter(e => e.id !== element.id && (e.kind === 'label') === label &&
+    [e.x, e.y, e.width, e.height].every(Number.isFinite) &&
+    Math.abs(e[cross] + e[crossDimension] / 2 - centre) <= Math.min(e[crossDimension], element[crossDimension]) / 2);
+  return [...members, element].sort((a, b) => a[axis] - b[axis] || String(a.id).localeCompare(String(b.id)));
+}
+
+// Lijnt de herkende rij of kolom uit op het geselecteerde element en verdeelt de
+// tussenruimte gelijk tussen de buitenste twee. Geeft per id de nieuwe x en y,
+// of null wanneer er geen rij/kolom van minstens twee bedieningen is.
+export function alignConsoleArray(element, elements, page, axis = 'x') {
+  const members = consoleArray(element, elements, axis);
+  if (members.length < 2) return null;
+  const cross = axis === 'x' ? 'y' : 'x';
+  const dimension = axis === 'x' ? 'width' : 'height', crossDimension = axis === 'x' ? 'height' : 'width';
+  const extent = axis === 'x' ? page.width : page.height, crossExtent = axis === 'x' ? page.height : page.width;
+  const centre = element[cross] + element[crossDimension] / 2;
+  const total = members.reduce((sum, e) => sum + e[dimension], 0);
+  const first = members[0], last = members[members.length - 1];
+  let start = first[axis];
+  let gap = (last[axis] + last[dimension] - start - total) / (members.length - 1);
+  if (gap < 0) gap = 8;                                    // overlappend: naast elkaar zetten
+  // Hele pixels, zodat alle tussenruimtes precies gelijk zijn (de laatste schuift hooguit een paar pixels).
+  gap = Math.round(gap);
+  if (total + gap * (members.length - 1) > extent) gap = Math.max(0, Math.floor((extent - total) / (members.length - 1)));
+  start = Math.max(0, Math.min(extent - (total + gap * (members.length - 1)), start));
+  const result = {};
+  let position = start;
+  for (const e of members) {
+    result[e.id] = {
+      [axis]: Math.round(position),
+      [cross]: Math.max(0, Math.min(crossExtent - e[crossDimension], Math.round(centre - e[crossDimension] / 2))),
+    };
+    position += e[dimension] + gap;
+  }
+  return result;
 }

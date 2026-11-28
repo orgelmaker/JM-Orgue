@@ -60,3 +60,33 @@ test('clamping, no peers and no matching magnets never mutate inputs', () => {
   const tiny = snapConsoleElement({ ...box('a', 0, 0, 1, 1), kind: 'label' }, page, [], { mode: 'resize', altKey: true });
   assert.equal(tiny.element.width, 16); assert.equal(tiny.element.height, 16);
 });
+
+test('a row is recognised as an array and a dragged control snaps to its spacing', async () => {
+  const { consoleArray, alignConsoleArray } = await import('../ui/src/lib/consoleSnap.js');
+  const row = [box('a', 40, 100), box('b', 180, 100), box('c', 320, 100)];
+  const other = box('d', 40, 300), title = { ...box('t', 40, 96, 400, 30), kind: 'label' };
+  const dragged = box('n', 463, 103);
+  assert.deepEqual(consoleArray(dragged, [...row, other, title], 'x').map(e => e.id), ['a', 'b', 'c', 'n']);
+  assert.deepEqual(consoleArray(row[0], [...row, other], 'y').map(e => e.id), ['a', 'd']);
+  // 20 px between the neighbours, so the fourth control lands at 320 + 120 + 20.
+  const snapped = snapConsoleElement(dragged, page, [...row, other, title], { grid: 1 });
+  assert.equal(snapped.element.x, 460); assert.equal(snapped.element.y, 100);
+  const left = snapConsoleElement(box('n', 57, 100, 100), page, [box('b', 180, 100), box('c', 320, 100)], { grid: 1 });
+  assert.equal(left.element.x, 60);
+  // Alt keeps free movement; too far away does not snap to the spacing.
+  assert.equal(snapConsoleElement(dragged, page, row, { grid: 1, altKey: true }).element.x, 463);
+  assert.equal(snapConsoleElement(box('n', 480, 100), page, row, { grid: 1 }).element.x, 480);
+  // Aligning puts the row on the selected control's line with equal gaps and keeps the outer two.
+  const messy = [box('a', 40, 100), box('b', 185, 108), box('c', 290, 95), box('e', 480, 102)];
+  const patches = alignConsoleArray(messy[1], messy, page, 'x');
+  assert.deepEqual(Object.keys(patches).sort(), ['a', 'b', 'c', 'e']);
+  assert.equal(patches.a.x, 40); assert(Math.abs(patches.e.x - 480) <= 2);
+  assert.equal(patches.b.x - (patches.a.x + 120), patches.c.x - (patches.b.x + 120));
+  assert.equal(patches.c.x - (patches.b.x + 120), patches.e.x - (patches.c.x + 120));
+  for (const id of ['a', 'b', 'c', 'e']) assert.equal(patches[id].y, 108);
+  assert.equal(alignConsoleArray(other, [other, title], page, 'x'), null);
+  // Overlapping controls are put side by side and never leave the page.
+  const stacked = [box('a', 1000, 100), box('b', 1010, 100), box('c', 1020, 100)];
+  const fixed = alignConsoleArray(stacked[0], stacked, page, 'x');
+  assert(fixed.c.x + 120 <= page.width); assert(fixed.b.x >= fixed.a.x + 120);
+});

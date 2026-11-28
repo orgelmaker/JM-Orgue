@@ -3941,8 +3941,11 @@ pub fn do_load_organ_locked(state: &AppState, path: &str) -> Result<OrganInfoDto
     let project_tuning: std::collections::HashMap<u32, crate::audio::ProjectSourcePitch> = compiled_project.as_ref()
         .map(|p| p.per_stop_tuning.iter().map(|(&stop, pitch)| {
             crate::audio::ProjectSourcePitch::new(
-                matches!(pitch.policy, crate::organ_project::TuningPolicy::Normalize),
-                pitch.reference_a4_hz, pitch.target_a4_hz, pitch.cents, false,
+                !matches!(pitch.policy, crate::organ_project::TuningPolicy::Original),
+                pitch.reference_a4_hz, pitch.target_a4_hz, pitch.cents,
+                // Automatisch gelijkstemmen: per pijp via de hertemper-tabel (A440),
+                // daarna naar de projectreferentie.
+                matches!(pitch.policy, crate::organ_project::TuningPolicy::Auto),
             ).map(|value| (stop, value))
         }).collect::<Result<_, String>>()).transpose()?.unwrap_or_default();
 

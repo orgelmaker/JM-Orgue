@@ -167,3 +167,15 @@ test('all appearances validate and round control changes become square within bo
   }
   assert.equal(original.width, 120);
 });
+
+test('painted organ colours and the extra control styles are valid, round knobs stay round', async () => {
+  const { CONSOLE_THEMES } = await import('../ui/src/lib/consoleLayout.js');
+  for (const theme of ['burgundy', 'cream', 'green', 'blue']) assert(CONSOLE_THEMES.includes(theme));
+  for (const appearance of ['drawknob-ebony', 'drawknob-rosewood', 'oval-porcelain', 'stopkey', 'lit', 'square-wood'])
+    assert(CONSOLE_APPEARANCES.includes(appearance));
+  assert(roundConsoleAppearance('drawknob-ebony')); assert(roundConsoleAppearance('drawknob-rosewood'));
+  assert(!roundConsoleAppearance('oval-porcelain')); assert(!roundConsoleAppearance('stopkey'));
+  const layout = defaultConsoleLayout(organ);
+  for (const theme of CONSOLE_THEMES) assert.equal(consoleLayoutError({ ...layout, theme }), null);
+  assert.equal(consoleLayoutError({ ...layout, theme: 'purple' }), 'format');
+});

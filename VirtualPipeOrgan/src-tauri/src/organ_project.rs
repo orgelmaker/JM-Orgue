@@ -43,6 +43,10 @@ pub enum TuningPolicy {
     #[default]
     Original,
     Normalize,
+    /// Per pijp bijstemmen op de gemeten toonhoogte (zoals "Pijpen automatisch
+    /// bijstemmen" bij een gewoon orgel), daarna naar de projectreferentie.
+    /// Bewust zwevende stemmen houden hun zweving.
+    Auto,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1000,6 +1004,7 @@ pub fn compile_project(path: &str, project: &OrganProject) -> Result<CompiledPro
         .collect();
     let mut wind_pipes = Vec::new();
     let mut resource_paths: HashMap<String, BTreeSet<PathBuf>> = HashMap::new();
+    let mut mixed_divisions: BTreeSet<u32> = BTreeSet::new();
     let mut division_groups: HashMap<
         u32,
         (Option<(String, Vec<u32>)>, Option<(String, Vec<u32>)>),
@@ -1051,12 +1056,15 @@ pub fn compile_project(path: &str, project: &OrganProject) -> Result<CompiledPro
                 Some((source.id.clone(), enclosures))
             },
         );
-        if let Some(existing) = division_groups.get(&selected.division_id) {
-            if existing != &groups {
-                return Err("Registers met verschillende bronzwelkasten of tremulantgroepen kunnen in deze versie niet op hetzelfde doelmanual. Kies aparte doeldivisies".into());
-            }
-        } else {
-            division_groups.insert(selected.division_id, groups);
+        // Registers uit verschillende bronnen (of met verschillende bronkasten en
+        // -tremulanten) mogen op dezelfde doeldivisie staan. De eigen speeltafel
+        // kent per divisie één zwelkast en één tremulant; die gelden dan voor
+        // alle registers van die divisie. Rankzwelkasten (JM-ACOUSTICS) blijven
+        // per bron onafhankelijk. We tellen alleen hoeveel divisies gemengd zijn.
+        match division_groups.get(&selected.division_id) {
+            Some(existing) if existing != &groups => { mixed_divisions.insert(selected.division_id); }
+            Some(_) => {}
+            None => { division_groups.insert(selected.division_id, groups); }
         }
         let mut stop = source_stop.clone();
         stop.id = selected.id;
@@ -1345,6 +1353,12 @@ pub fn compile_project(path: &str, project: &OrganProject) -> Result<CompiledPro
     definition.organ.has_pedals = project.divisions.iter().any(|d| d.pedal);
     definition.organ.number_of_enclosures = definition.enclosures.len() as u32;
     definition.organ.number_of_tremulants = definition.tremulants.len() as u32;
+    if !mixed_divisions.is_empty() {
+        tracing::info!(
+            "Orgelproject: {} doeldivisie(s) combineren registers met verschillende bronkasten of -tremulanten; zwelkast en tremulant gelden per doeldivisie",
+            mixed_divisions.len()
+        );
+    }
     definition.organ.number_of_windchest_groups = definition.windchests.len() as u32;
     if project_enclosures.len() > crate::acoustics::MAX_ENCLOSURES {
         return Err(format!("Het project gebruikt {} rankzwelkasten; maximaal {} onafhankelijke kasten passen in de audio-engine. Kies minder kasten of andere registers", project_enclosures.len(), crate::acoustics::MAX_ENCLOSURES));
@@ -2109,6 +2123,66 @@ mod tests {
         assert_eq!(cfg.pipe_bindings[0].stop_section, "Stop103");
         assert_eq!(cfg.pipe_bindings[0].layer_index, 0);
         assert_eq!(cfg.pipe_bindings[0].logical_pipe, 1);
+    }
+
+    #[test]
+    fn registers_uit_bronnen_met_verschillende_kast_en_tremulant_delen_een_divisie() {
+        // Bron A krijgt een zwelkast en een tremulant, bron B heeft geen van beide.
+        // Tot 0.9.65 weigerde het project dit; nu staan ze samen op één doeldivisie.
+        let fixture = Fixture::new();
+        let a = fs::read_to_string(fixture.dir.join("A.organ")).unwrap()
+            .replace(
+                "NumberOfWindchestGroups=1\nNumberOfEnclosures=0\nNumberOfTremulants=0\nPitchCorrection=2",
+                "NumberOfWindchestGroups=1\nNumberOfEnclosures=1\nNumberOfTremulants=1\nPitchCorrection=2",
+            )
+            .replace(
+                "[WindchestGroup001]\nName=Open\nNumberOfEnclosures=0\nNumberOfTremulants=0",
+                "[Enclosure001]\nName=Zwelkast\nAmpMinimumLevel=20\n[Tremulant001]\nName=Tremulant\nPeriod=160\nStartRate=8\nStopRate=8\nAmpModDepth=18\n[WindchestGroup001]\nName=Kast\nNumberOfEnclosures=1\nEnclosure001=001\nNumberOfTremulants=1\nTremulant001=001",
+            );
+        assert!(a.contains("Enclosure001=001") && a.contains("Tremulant001=001"));
+        fs::write(fixture.dir.join("A.organ"), a).unwrap();
+        let project = fixture.project();
+        let division = project.divisions[0].id;
+        let bronnen: BTreeSet<_> = project.stops.iter()
+            .filter(|stop| stop.division_id == division)
+            .map(|stop| stop.source_id.clone())
+            .collect();
+        assert_eq!(bronnen.len(), 2, "de fixture zet registers van beide bronnen op dezelfde divisie");
+        let compiled = compile_project(&fixture.path(), &project)
+            .expect("registers uit verschillende sets op één divisie moeten laden");
+        let manual = compiled.definition.manuals.iter()
+            .find(|manual| manual.stop_ids.len() == project.stops.len())
+            .expect("alle registers op de ene doeldivisie");
+        assert_eq!(manual.tremulant_ids.len(), 1, "de divisie krijgt de tremulant van bron A");
+        let met_kast = compiled.definition.stops.iter().filter(|stop| {
+            compiled.definition.windchests.iter()
+                .find(|wc| wc.number == stop.windchest_group)
+                .is_some_and(|wc| !wc.enclosure_ids.is_empty())
+        }).count();
+        assert!(met_kast >= 1 && met_kast < compiled.definition.stops.len(),
+            "alleen de registers van bron A hangen aan de bronkast ({met_kast})");
+        // Opslaan en opnieuw openen blijft werken.
+        let saved = save_project(&fixture.path(), project).unwrap();
+        compile_project(&fixture.path(), &saved).unwrap();
+    }
+
+    #[test]
+    fn automatisch_gelijkstemmen_wordt_bewaard_en_per_register_doorgegeven() {
+        let fixture = Fixture::new();
+        let mut project = fixture.project();
+        project.sources[0].tuning_policy = TuningPolicy::Auto;
+        let saved = save_project(&fixture.path(), project).unwrap();
+        let stored: serde_json::Value =
+            serde_json::from_slice(&fs::read(fixture.path()).unwrap()).unwrap();
+        assert_eq!(stored["sources"][0]["tuning_policy"], "auto");
+        let reopened = load_project(&fixture.path()).unwrap();
+        assert_eq!(reopened.sources[0].tuning_policy, TuningPolicy::Auto);
+        let compiled = compile_project(&fixture.path(), &saved).unwrap();
+        let auto_bron = &saved.sources[0].id;
+        for stop in &saved.stops {
+            let verwacht = if &stop.source_id == auto_bron { TuningPolicy::Auto } else { TuningPolicy::Normalize };
+            assert_eq!(compiled.per_stop_tuning[&stop.id].policy, verwacht);
+        }
     }
 
     #[test]

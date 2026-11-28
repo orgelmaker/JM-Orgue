@@ -3,9 +3,10 @@
   import { invoke } from '@tauri-apps/api/core';
   import { t, tx } from '../lib/i18n.js';
   import ConsoleSurface from './ConsoleSurface.svelte';
+  import { alignConsoleArray, consoleArray } from '../lib/consoleSnap.js';
   import { boundedConsoleElement, cloneConsoleLayout, consoleTargets, consoleLayoutError,
     defaultConsoleLayout, missingConsoleTargets, nextConsoleId, normalizeConsoleLayout,
-    CONSOLE_APPEARANCES, CONSOLE_TEXTURES, CONSOLE_TEXTURE_MAX_BYTES, CONSOLE_MAX_PAGES, consoleCustomTextureError, roundConsoleAppearance } from '../lib/consoleLayout.js';
+    CONSOLE_APPEARANCES, CONSOLE_THEMES, CONSOLE_TEXTURES, CONSOLE_TEXTURE_MAX_BYTES, CONSOLE_MAX_PAGES, consoleCustomTextureError, roundConsoleAppearance } from '../lib/consoleLayout.js';
 
   export let organInfo = null;
   export let initialLayout = null;
@@ -179,6 +180,29 @@
     const bounded = Math.max(min, Math.min(max, Number.isFinite(n) ? n : page[key]));
     mutate(layout => { const p = layout.pages.find(p => p.id === page.id); p[key] = bounded; p.elements = p.elements.map(e => boundedConsoleElement(e, p)); });
   }
+  // Formaat van de geselecteerde bediening voor alle bedieningen (alle schermen).
+  // Ronde vormen blijven rond: zij krijgen de kleinste van breedte en hoogte.
+  function applySizeToAll() {
+    if (!selected || selected.kind === 'label') return;
+    const { width, height } = selected, round = Math.min(width, height);
+    mutate(layout => layout.pages.forEach(p => {
+      p.elements = p.elements.map(e => e.kind === 'label' ? e :
+        boundedConsoleElement(e, p, roundConsoleAppearance(e.appearance) ? { width: round, height: round } : { width, height }));
+    }));
+  }
+  // Rij of kolom rond de selectie: op één lijn en met gelijke tussenruimte.
+  $: rowSize = selected ? consoleArray(selected, page.elements, 'x').length : 0;
+  $: columnSize = selected ? consoleArray(selected, page.elements, 'y').length : 0;
+  function alignArray(axis) {
+    if (!selected) return;
+    const patches = alignConsoleArray(selected, page.elements, page, axis);
+    if (!patches) return;
+    const currentPage = page.id;
+    mutate(layout => {
+      const p = layout.pages.find(p => p.id === currentPage);
+      p.elements = p.elements.map(e => patches[e.id] ? boundedConsoleElement(e, p, patches[e.id]) : e);
+    });
+  }
   function removeSelected() {
     if (!selected) return;
     const id = selected.id;
@@ -241,7 +265,7 @@
     <div class="builder-settings">
       <label class="console-enabled"><input type="checkbox" checked={draft.enabled} disabled={saving} on:change={e => mutate(layout => { layout.enabled = e.target.checked; })}><span>{$t('console_builder.enabled')}</span></label>
       <label>{$t('console_builder.name')}<input value={draft.name} maxlength="120" disabled={saving || preview} on:change={e => mutate(layout => { layout.name = e.target.value; })}></label>
-      <label>{$t('console_builder.theme')}<select value={draft.theme} disabled={saving} on:change={e => mutate(layout => { layout.theme = e.target.value; })}><option value="walnut">{$t('console_builder.walnut')}</option><option value="ivory">{$t('console_builder.ivory')}</option><option value="slate">{$t('console_builder.slate')}</option></select></label>
+      <label>{$t('console_builder.theme')}<select value={draft.theme} disabled={saving} on:change={e => mutate(layout => { layout.theme = e.target.value; })}>{#each CONSOLE_THEMES as theme}<option value={theme}>{$t(`console_builder.${theme}`)}</option>{/each}</select></label>
       <button type="button" class="btn btn-secondary btn-sm" disabled={saving || preview} title={$t('console_builder.reset_hint')} on:click={arrangeAgain}>{$t('console_builder.reset')}</button>
     </div>
 
@@ -285,7 +309,7 @@
           on:pageChange={e => { pageId = e.detail.pageId; selectedId = null; }}
           on:select={e => { selectedId = e.detail.elementId; }}
           on:move={e => moveElement(e.detail)} on:resize={e => resizeElement(e.detail)} />
-        {#if !preview}<p class="editor-hint">{$t('console_builder.editor_hint')}</p>{/if}
+        {#if !preview}<p class="editor-hint">{$t('console_builder.editor_hint')} {$t('console_builder.screens_hint')}</p>{/if}
         <div class="page-controls">
           <label>{$t('console_builder.page_name')}<input value={page.name} maxlength="120" disabled={preview || saving} on:change={e => mutate(layout => { layout.pages.find(p => p.id === page.id).name = e.target.value; })}></label>
           {#if !preview}<button type="button" class="btn btn-secondary btn-sm" disabled={saving || draft.pages.length >= CONSOLE_MAX_PAGES} on:click={addPage}>＋ {$t('console_builder.add_page')}</button><button type="button" class="btn btn-ghost btn-sm" disabled={saving || page.elements.length > 0 || draft.pages.length <= 1} on:click={removePage}>{$t('console_builder.remove_page')}</button>{/if}
@@ -307,6 +331,11 @@
               <label>{$t('console_builder.y')}<input type="number" min="0" max={page.height - selected.height} step={grid} value={selected.y} disabled={saving} on:change={e => editSelected({ y: Number(e.target.value) })}></label>
               <label>{$t('console_builder.width')}<input type="number" min={selected.kind === 'label' ? 16 : 48} max={page.width} value={selected.width} disabled={saving} on:change={e => editSelected({ width: Number(e.target.value) })}></label>
               <label>{$t('console_builder.height')}<input type="number" min={selected.kind === 'label' ? 16 : 40} max={page.height} value={selected.height} disabled={saving} on:change={e => editSelected({ height: Number(e.target.value) })}></label>
+            </div>
+            {#if selected.kind !== 'label'}<button type="button" class="btn btn-secondary btn-sm" disabled={saving} on:click={applySizeToAll}>{$t('console_builder.apply_size')}</button>{/if}
+            <div class="array-tools">
+              <button type="button" class="btn btn-secondary btn-sm" disabled={saving || rowSize < 2} title={$t('console_builder.align_hint')} on:click={() => alignArray('x')}>{$t('console_builder.align_row').replace('{n}', rowSize)}</button>
+              <button type="button" class="btn btn-secondary btn-sm" disabled={saving || columnSize < 2} title={$t('console_builder.align_hint')} on:click={() => alignArray('y')}>{$t('console_builder.align_column').replace('{n}', columnSize)}</button>
             </div>
             <button type="button" class="btn btn-secondary btn-sm" disabled={saving || page.elements.length >= 512} on:click={duplicate}>{$t('console_builder.duplicate')}</button>
             <button type="button" class="btn btn-ghost btn-sm remove-control" disabled={saving} on:click={removeSelected}>{$t('console_builder.remove')}</button>

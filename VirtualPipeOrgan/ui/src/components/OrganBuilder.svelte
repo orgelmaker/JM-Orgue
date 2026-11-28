@@ -103,7 +103,7 @@
         }
         const source = same ? { ...existing, path: catalog.path, package_root: packageRoot, resources: [] } : {
           id: globalThis.crypto.randomUUID(), path: catalog.path, fingerprint: catalog.fingerprint,
-          package_root: packageRoot, reference_a4_hz: 440, tuning_policy: 'normalize', tuning_cents: 0,
+          package_root: packageRoot, reference_a4_hz: 440, tuning_policy: 'auto', tuning_cents: 0,
           perspective: null, resources: [],
         };
         const nextSources = [...project.sources];
@@ -286,11 +286,11 @@
         {#if !source && pendingRoot}<p class="field-hint source-path">Pakketmap: {pendingRoot}</p>{/if}
         {#if source}
           <div class="source-tuning">
-            <label>Stemming<select aria-label="Stemming" value={source.tuning_policy} disabled={locked} on:change={e => editSource(source.id, { tuning_policy: e.target.value })}><option value="normalize">Concerttoonhoogte gelijkmaken</option><option value="original">Oorspronkelijk behouden</option></select></label>
-            <label>Opgenomen A (Hz)<input type="number" min="300" max="550" step="0.1" value={source.reference_a4_hz} disabled={locked || source.tuning_policy === 'original'} on:input={e => editSource(source.id, { reference_a4_hz: Number(e.target.value) })}></label>
+            <label>Stemming<select aria-label="Stemming" value={source.tuning_policy} disabled={locked} on:change={e => editSource(source.id, { tuning_policy: e.target.value })}><option value="auto">Automatisch gelijkstemmen</option><option value="normalize">Concerttoonhoogte gelijkmaken</option><option value="original">Oorspronkelijk behouden</option></select></label>
+            <label>Opgenomen A (Hz)<input type="number" min="300" max="550" step="0.1" value={source.reference_a4_hz} disabled={locked || source.tuning_policy !== 'normalize'} on:input={e => editSource(source.id, { reference_a4_hz: Number(e.target.value) })}></label>
             <label>Extra (cent)<input type="number" min="-1200" max="1200" step="0.1" value={source.tuning_cents} disabled={locked} on:input={e => editSource(source.id, { tuning_cents: Number(e.target.value) })}></label>
           </div>
-          <p class="field-hint tuning-hint">{source.tuning_policy === 'normalize' ? 'De algemene toonhoogte verschuift; het karakter van de stemming en celestezweving blijven behouden. Vul de echte bronreferentie in.' : 'De oorspronkelijke toonhoogte en stemming blijven behouden. Verschillende bronnen kunnen daardoor onderling zweven.'}</p>
+          <p class="field-hint tuning-hint">{source.tuning_policy === 'auto' ? 'Elke pijp wordt op zijn gemeten toonhoogte bijgestemd naar de gezamenlijke concerttoonhoogte, zodat bronnen onderling zuiver zijn. Bewust zwevende stemmen houden hun zweving.' : source.tuning_policy === 'normalize' ? 'De algemene toonhoogte verschuift; het karakter van de stemming en celestezweving blijven behouden. Vul de echte bronreferentie in: zonder de juiste waarde blijven bronnen onderling verschillen.' : 'De oorspronkelijke toonhoogte en stemming blijven behouden. Verschillende bronnen kunnen daardoor onderling zweven.'}</p>
           {#if perspectives(catalog).length}<label class="perspective">Opnamepositie<select value={source.perspective || ''} disabled={locked} on:change={e => editSource(source.id, { perspective: e.target.value || null })}><option value="">Standaardpositie per register</option>{#each perspectives(catalog) as perspective}<option value={perspective}>{perspective}</option>{/each}</select></label>{/if}
           {#if sourceErrors[source.id]}<div class="source-error" role="alert">{sourceErrors[source.id]}</div>{/if}
           {#if catalog?.warnings?.length}<details class="source-warnings"><summary>{catalog.warnings.length} aandachtspunt{catalog.warnings.length === 1 ? '' : 'en'} bij deze bron</summary><ul>{#each catalog.warnings as warning}<li>{warning}</li>{/each}</ul></details>{/if}

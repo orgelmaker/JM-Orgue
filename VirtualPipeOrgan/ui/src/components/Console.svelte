@@ -65,7 +65,8 @@
       rawConsoleLayout = raw;
       savedConsoleLayout = normalizeConsoleLayout(raw);
       consoleLayoutError = raw != null && !savedConsoleLayout ? tx('console_builder.load_failed') : '';
-      const page = secondary ? loadPanelState(id, panelNumber)?.consolePageId : consolePageId;
+      // Een extra venster toont standaard zijn eigen scherm: venster 2 het tweede scherm, enz.
+      const page = secondary ? (loadPanelState(id, panelNumber)?.consolePageId ?? savedConsoleLayout?.pages[panelNumber - 1]?.id) : consolePageId;
       consolePageId = savedConsoleLayout?.pages.some(p => p.id === page) ? page : savedConsoleLayout?.pages[0]?.id ?? null;
       consoleLayoutRevision += 1;
     } catch (e) {

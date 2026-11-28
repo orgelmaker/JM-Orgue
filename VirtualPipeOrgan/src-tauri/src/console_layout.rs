@@ -4,6 +4,14 @@ use base64::Engine;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
+/// Moet gelijk blijven aan CONSOLE_THEMES in ui/src/lib/consoleLayout.js.
+const CONSOLE_THEMES: [&str; 7] = ["walnut", "ivory", "slate", "burgundy", "cream", "green", "blue"];
+/// Moet gelijk blijven aan CONSOLE_APPEARANCES in ui/src/lib/consoleLayout.js.
+const CONSOLE_APPEARANCES: [&str; 14] = [
+    "rocker", "rocker-ivory", "rocker-wood", "drawknob", "drawknob-ivory", "piston", "tablet", "flat",
+    "drawknob-ebony", "drawknob-rosewood", "oval-porcelain", "stopkey", "lit", "square-wood",
+];
+
 pub const MAX_CUSTOM_TEXTURE_BYTES: usize = 2 * 1024 * 1024;
 const MAX_CUSTOM_TEXTURE_BASE64: usize = ((MAX_CUSTOM_TEXTURE_BYTES + 2) / 3) * 4;
 
@@ -134,7 +142,7 @@ impl ConsoleLayout {
             return Err("Deze versie van het consoleontwerp wordt niet ondersteund".into());
         }
         if !text_ok(&self.name, 120, true)
-            || !["walnut", "ivory", "slate"].contains(&self.theme.as_str())
+            || !CONSOLE_THEMES.contains(&self.theme.as_str())
         {
             return Err("Ongeldige naam of stijl van het consoleontwerp".into());
         }
@@ -185,16 +193,7 @@ impl ConsoleLayout {
                     return Err("Ongeldig of dubbel consoleonderdeel".into());
                 }
                 if !["stop", "coupler", "label"].contains(&element.kind.as_str())
-                    || ![
-                        "rocker",
-                        "rocker-ivory",
-                        "rocker-wood",
-                        "drawknob",
-                        "drawknob-ivory",
-                        "piston",
-                        "tablet",
-                        "flat",
-                    ]
+                    || !CONSOLE_APPEARANCES
                     .contains(&element.appearance.as_str())
                 {
                     return Err("Onbekend type consolebediening".into());
@@ -399,16 +398,7 @@ pub mod tests {
                 design
             );
         }
-        for appearance in [
-            "rocker",
-            "rocker-ivory",
-            "rocker-wood",
-            "drawknob",
-            "drawknob-ivory",
-            "piston",
-            "tablet",
-            "flat",
-        ] {
+        for appearance in CONSOLE_APPEARANCES {
             let mut design = layout();
             design.pages[0].elements[0].appearance = appearance.into();
             assert!(design.validate().is_ok());

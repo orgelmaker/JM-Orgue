@@ -94,11 +94,40 @@
   .flat{border-radius:7px;background:var(--console-case)}
   .flat .control-face{inset:3px 3px 5px;border-radius:5px;border-width:1px;box-shadow:inset 0 1px #fff6,0 2px 2px #0006;gap:2px}
   .flat.active .control-face{transform:translateY(2px);box-shadow:inset 0 0 0 2px var(--console-light,#ffd36b)}
+  /* Extra vormen (0.9.66): ebben- en palissander trekregister met ivoren inleg, ovale porseleinen plaat
+     (harmonium/kabinetorgel), tongvormige registertoets, verlichte druktoets en vierkante houten trekker. */
+  .drawknob-ebony,.drawknob-rosewood,.oval-porcelain{padding:0;border:none;background:transparent;box-shadow:none;border-radius:50%}
+  .drawknob-ebony .control-mount,.drawknob-rosewood .control-mount{position:absolute;inset:3%;border-radius:50%;background:radial-gradient(ellipse at 35% 24%,#544b44,#191512 55%,#060505 100%);box-shadow:0 4px 7px #000b,inset 0 2px 2px #ffffff30,inset 0 -3px 4px #000c;transition:transform 120ms,box-shadow 120ms}
+  .drawknob-rosewood .control-mount{background:repeating-conic-gradient(from 20deg,#ffcfa010 0 4deg,#2a0d0518 5deg 9deg),radial-gradient(ellipse at 35% 24%,#b06a42,#6a2f1a 55%,#2d1009 100%)}
+  .drawknob-ebony .control-face,.drawknob-rosewood .control-face{inset:13%;border-radius:50%;border:1px solid #8d8468;background:radial-gradient(ellipse at 38% 26%,#fffef6,#ece6d0 65%,#cdc3a6);color:#26251f;box-shadow:inset 0 1px 2px #fff,inset 0 -2px 3px #7c6d4d60,0 0 0 2px #0a0908;text-shadow:0 1px #fff9;padding:2px;transform:translateY(2px)}
+  .drawknob-ebony.active .control-mount,.drawknob-rosewood.active .control-mount{transform:translateY(-6px);box-shadow:0 11px 7px #000b,inset 0 2px 2px #ffffff30,inset 0 -3px 4px #000c}
+  .drawknob-ebony.active .control-face,.drawknob-rosewood.active .control-face{transform:translateY(-4px);box-shadow:inset 0 1px 2px #fff,inset 0 -2px 3px #7c6d4d60,0 0 0 2px var(--console-light,#ffd36b)}
+  .drawknob-ebony .control-name,.drawknob-rosewood .control-name{font-size:clamp(calc(10px / var(--console-scale,1)),.86em,calc(15px / var(--console-scale,1)))}
+  .drawknob-ebony .control-light,.drawknob-rosewood .control-light{bottom:0;height:4px;width:16px;left:calc(50% - 8px)}
+  .oval-porcelain .control-mount{position:absolute;inset:5% 1%;border-radius:50%;background:linear-gradient(160deg,#e3c98a,#8a6a2e 55%,#5c431a);box-shadow:0 3px 6px #000a,inset 0 1px 1px #fff7}
+  .oval-porcelain .control-face{inset:10% 4%;border-radius:50%;border:1px solid #b8b29a;background:radial-gradient(ellipse at 40% 24%,#fffffb,#f2efe2 60%,#d8d2bd);color:#23241f;box-shadow:inset 0 2px 3px #fff,inset 0 -3px 4px #8a7d5a55,0 2px 2px #0008;text-shadow:0 1px #fff9;font-family:Georgia,serif}
+  .oval-porcelain.active .control-face{transform:translateY(2px);border-color:#d8b15e;background:radial-gradient(ellipse at 40% 24%,#fffdf0,#f5ecd0 60%,#dccb9d);box-shadow:inset 0 3px 5px #6e5a2a55,0 0 0 2px var(--console-light,#ffd36b)}
+  .oval-porcelain .control-light{bottom:0}
+  .stopkey{border-radius:6px;background:linear-gradient(#17130f,#3b3129);border-color:#0f0d0b}
+  .stopkey .control-mount{position:absolute;left:7%;right:7%;top:3px;height:7px;border-radius:3px;background:#090807;box-shadow:inset 0 1px 2px #000,0 1px #ffffff18}
+  .stopkey .control-face{inset:7px 10% 6px;border-radius:5px 5px 46% 46%/5px 5px 28% 28%;border-color:#c9c5b6;background:linear-gradient(175deg,#ffffff,#f3f1e8 55%,#dedacb);color:#22231f;box-shadow:inset 0 2px 2px #fff,inset 0 -4px 5px #8f886f55,0 5px 4px #000a;transform:perspective(240px) rotateX(-9deg);transform-origin:50% 0;text-shadow:0 1px #fff9;padding:3px 4px 10%}
+  .stopkey.active .control-face{transform:perspective(240px) rotateX(11deg) translateY(1px);background:linear-gradient(175deg,#fffaf0,#f2e8cd 55%,#d9c9a0);border-color:#d3ac5c;box-shadow:inset 0 3px 5px #6e5a2a55,0 1px 2px #0008}
+  .lit{border-radius:9px;background:linear-gradient(#2a2d30,#0f1113);border-color:#07090a}
+  .lit .control-face{inset:4px 4px 5px;border-radius:6px;border:1px solid #5d6468;background:linear-gradient(#585d60,#30353a);color:#eceff1;text-shadow:0 -1px #000a;box-shadow:inset 0 1px 1px #ffffff40,inset 0 -3px 5px #0008,0 2px 2px #000a}
+  .lit.active .control-face{transform:translateY(1px);background:radial-gradient(ellipse at 50% 38%,#fff8d6,var(--console-light,#ffd36b) 55%,#d49a2e);color:#2a1c05;text-shadow:0 1px #fff8;border-color:#ffe9a8;box-shadow:inset 0 1px 2px #fff,0 0 14px var(--console-light,#ffd36b),0 0 3px #fff8}
+  .lit .control-light{display:none}
+  .square-wood{border-radius:4px;background:linear-gradient(135deg,#6b4526,#3a2211);border-color:#1e1108;box-shadow:0 4px 7px #000a,inset 0 1px 1px #ffd9a040}
+  .square-wood .control-mount{position:absolute;inset:3px;border-radius:3px;background:repeating-linear-gradient(92deg,#f0c08a14 0 1px,#2a130522 2px 4px,transparent 5px 9px),linear-gradient(135deg,#8c5c34,#573318);box-shadow:inset 0 2px 2px #ffdcaa55,inset 0 -3px 4px #1c0c0399}
+  .square-wood .control-face{inset:17% 9%;border-radius:2px;border:1px solid #9a8a63;background:linear-gradient(#f4e9cb,#e1d2a6);color:#2b2112;box-shadow:inset 0 0 6px #7a633055,0 1px 1px #0006;font-family:Georgia,serif;transform:translateY(1px)}
+  .square-wood.active .control-face{transform:translateY(-3px);border-color:var(--console-light,#ffd36b);box-shadow:inset 0 0 6px #7a633055,0 6px 4px #0009,0 0 0 2px var(--console-light,#ffd36b)}
   .reed .control-name{color:var(--console-reed,#812319)}
   .drawknob.reed .control-name{color:var(--console-draw-reed,#ffb2a2)}
   .rocker-ivory.reed .control-name,.drawknob-ivory.reed .control-name,.tablet.reed .control-name{color:#812319}
   .rocker-wood.reed .control-name,.piston.reed .control-name{color:#ffcdc0}
   .piston.reed.active .control-name{color:#6f2117}
+  .drawknob-ebony.reed .control-name,.drawknob-rosewood.reed .control-name,.oval-porcelain.reed .control-name,.stopkey.reed .control-name,.square-wood.reed .control-name{color:#812319}
+  .lit.reed .control-name{color:#ffb9a9}
+  .lit.reed.active .control-name{color:#7a1f12}
   .coupler .control-name{font-size:clamp(calc(11px / var(--console-scale,1)),.9em,calc(15px / var(--console-scale,1)))}
   .console-control.missing{opacity:.58;filter:saturate(.15)}
   .console-control:disabled{cursor:default}

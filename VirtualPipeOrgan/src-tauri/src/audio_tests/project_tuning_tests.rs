@@ -110,3 +110,23 @@ fn oorspronkelijke_tremulantpitch_en_release_kiezen_eigen_odf_correctie() {
     assert_eq!(odf_voicing_for_voice(1, 60 | TREM_FLAG, true, &dry_only), (-3.0, 7.0));
     assert_eq!(odf_voicing_for_voice(2, 60 | TREM_FLAG, true, &map), (0.0, 0.0));
 }
+
+#[test]
+fn automatisch_gelijkstemmen_gebruikt_de_gemeten_pijpcorrectie_en_de_projectreferentie() {
+    // Twee bronnen: de ene pijp is 20 cent te laag opgenomen, de andere 35 cent te hoog.
+    // De hertemper-tabel levert per pijp de correctie; beide komen op dezelfde toon uit.
+    let p = ProjectSourcePitch::new(true, 415.0, 442.0, 0.0, true).unwrap();
+    let laag = 440.0 * 2.0_f64.powf(-20.0 / 1200.0) * voice_pitch_ratio(Some(&p), false, 0.0, Some(20.0), 0.0, 1.04, 1.0);
+    let hoog = 440.0 * 2.0_f64.powf(35.0 / 1200.0) * voice_pitch_ratio(Some(&p), false, 0.0, Some(-35.0), 0.0, 1.04, 1.0);
+    assert!((laag - 442.0).abs() < 1e-9, "{laag}");
+    assert!((hoog - 442.0).abs() < 1e-9, "{hoog}");
+}
+
+#[test]
+fn automatisch_gelijkstemmen_negeert_de_ingevulde_bronreferentie_en_stapelt_extra_cent() {
+    for reference in [415.0, 440.0, 466.0] {
+        let p = ProjectSourcePitch::new(true, reference, 440.0, 10.0, true).unwrap();
+        let ratio = voice_pitch_ratio(Some(&p), true, -7.0, Some(0.0), 0.0, 1.0, 1.0);
+        assert!((ratio - 2.0_f64.powf(10.0 / 1200.0)).abs() < 1e-12);
+    }
+}
