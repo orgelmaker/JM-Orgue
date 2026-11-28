@@ -300,3 +300,6 @@ video::cue { background: rgba(20, 14, 8, 0.82); color: #fff; font-family: 'Inter
 .stijl-grid img { display: block; width: 100%; height: auto; }
 .stijl-grid figcaption { padding: 0.5rem 0.75rem 0.65rem; font-size: 0.88rem; color: var(--ink-dim); }
 .stijl-noot { max-width: 1000px; margin: 0.9rem auto 0; font-size: 0.85rem; color: var(--ink-mut); }
+.console-scherm { max-width: 1000px; margin: 0 auto 1.5rem; background: var(--card); border: 1px solid var(--panel-border); border-radius: 8px; overflow: hidden; box-shadow: var(--shadow-soft); }
+.console-scherm img { display: block; width: 100%; height: auto; }
+.console-scherm figcaption { padding: 0.6rem 0.9rem 0.75rem; font-size: 0.9rem; color: var(--ink-dim); }

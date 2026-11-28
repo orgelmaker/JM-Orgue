@@ -6,6 +6,8 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Nog niet uitgebracht]
 
+## [0.9.69] - 2026-11-28
+
 ### Eigen console op het orgelscherm
 - **Het thema vult het hele scherm.** Kleur en textuur van je ontwerp lopen nu over het hele speelvlak door, niet alleen over het bord in het midden. De zwelschuif en overige onderdelen onder het bord volgen het thema.
 - **Tremulanten zijn knoppen.** Een tremulant is nu een bediening in de Consolebouwer, in dezelfde vormen als registers en koppels, met MIDI-inleren. De automatische indeling zet hem bij de divisie waar de set een tremulant heeft; in "Beschikbare bediening" staat er een voor elke divisie. Een tremulant die niet op het ontwerp staat, blijft als losse knop onder het bord.
