@@ -9,6 +9,8 @@
   export let pageId = null;
   export let editing = false;
   export let selectedId = null;
+  // De ontwerper toont de schermkiezer altijd; op het orgelscherm alleen als het ontwerp dat vraagt.
+  export let switcher = false;
   export let inert = false;
   export let grid = 8;
   export let snapGuides = true;
@@ -95,7 +97,7 @@
 <svelte:window on:pointermove={move} on:pointerup={finish} on:pointercancel={cancel} on:blur={cancel} />
 
 <div class="console-surface theme-{layout?.theme || 'walnut'}" class:editing style="--console-scale:{scale};max-width:{page?.width || 1200}px;margin-inline:auto">
-  {#if pages.length > 1}
+  {#if pages.length > 1 && (switcher || layout?.screen_switcher)}
     <nav class="console-pages" aria-label={$t('console_builder.page')}>
       {#if pages.length > 8}
         <label>{$t('console_builder.page')}

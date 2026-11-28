@@ -91,6 +91,7 @@ export function missingConsoleTargets(layout, organInfo) {
 export function consoleLayoutError(layout) {
   if (!layout || layout.version !== CONSOLE_LAYOUT_VERSION) return 'version';
   if (typeof layout.enabled !== 'boolean' || !CONSOLE_THEMES.includes(layout.theme)) return 'format';
+  if (layout.screen_switcher !== undefined && typeof layout.screen_switcher !== 'boolean') return 'format';
   const text = consoleText;
   const num = (n, min, max) => Number.isFinite(n) && n >= min && n <= max;
   if (!text(layout.name, 0, 120) || !Array.isArray(layout.pages) || !num(layout.pages.length, 1, CONSOLE_MAX_PAGES)) return 'format';

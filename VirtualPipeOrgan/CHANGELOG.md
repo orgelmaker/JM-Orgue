@@ -6,10 +6,12 @@ versies volgen [Semantic Versioning](https://semver.org/).
 
 ## [Nog niet uitgebracht]
 
+## [0.9.66] - 2026-11-28
+
 ### Consolebouwer: formaat voor alles, rijen uitlijnen, schermen, meer vormen en kleuren
 - **Formaat voor alle bedieningen.** Naast "Alle bedieningen deze vorm" staat nu "Alle bedieningen dit formaat": de breedte en hoogte van de geselecteerde bediening gelden dan voor alle registers en koppels op alle schermen. Ronde vormen blijven rond.
 - **Rijen en kolommen worden herkend.** Bedieningen die naast of onder elkaar staan vormen een rij of kolom. Sleep je een bediening ernaast, dan klikt die vast op dezelfde tussenruimte als de buren. Met "Rij uitlijnen" en "Kolom uitlijnen" zet je de herkende rij of kolom op één lijn met gelijke tussenruimte; het getal op de knop toont hoeveel bedieningen meedoen. Alt blijft vrij verplaatsen.
-- **Schermen in plaats van pagina's.** Een ontwerp bestaat uit schermen. Elk extra venster ("Nieuw scherm") toont standaard zijn eigen scherm: het tweede venster het tweede scherm, enzovoort. De keuze per venster blijft bewaard; bestaande ontwerpen met pagina's blijven werken, hun pagina's heten nu schermen.
+- **Schermen in plaats van pagina's.** Een ontwerp bestaat uit schermen. Elk extra venster ("Nieuw scherm") toont standaard zijn eigen scherm: het tweede venster het tweede scherm, enzovoort. De keuze per venster blijft bewaard; bestaande ontwerpen met pagina's blijven werken, hun pagina's heten nu schermen. De schermkiezer boven de speeltafel staat standaard uit en neemt dan geen ruimte in; met het vinkje "Schermkiezer tonen op het orgelscherm" zet je hem aan om binnen één venster te wisselen.
 - **Zes nieuwe knopvormen:** ebbenhouten en palissander trekregister met ivoren inleg, ovale porseleinen plaat (harmonium en kabinetorgel), tongvormige registertoets, verlichte druktoets en vierkante houten trekker (barok). Samen nu veertien vormen.
 - **Vier effen orgelkleuren** als afwerking: wijnrood, roomwit, orgelgroen en grijsblauw, naast notenhout, ivoor en donkere studio. Combineer ze met de textuur "Effen" voor een geschilderde kast, of met een textuur voor structuur.
 

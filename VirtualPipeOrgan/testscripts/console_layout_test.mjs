@@ -179,3 +179,10 @@ test('painted organ colours and the extra control styles are valid, round knobs 
   for (const theme of CONSOLE_THEMES) assert.equal(consoleLayoutError({ ...layout, theme }), null);
   assert.equal(consoleLayoutError({ ...layout, theme: 'purple' }), 'format');
 });
+
+test('the screen switcher is optional and off by default', () => {
+  const layout = defaultConsoleLayout(organ);
+  assert.equal(layout.screen_switcher, undefined);
+  assert.equal(consoleLayoutError({ ...layout, screen_switcher: true }), null);
+  assert.equal(consoleLayoutError({ ...layout, screen_switcher: 'yes' }), 'format');
+});

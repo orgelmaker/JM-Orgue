@@ -54,6 +54,10 @@ pub struct ConsoleLayout {
     pub texture_scale: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub custom_texture: Option<ConsoleCustomTexture>,
+    /// Schermkiezer boven de speeltafel tonen. Standaard uit: elk venster toont
+    /// zijn eigen scherm en de kiezer neemt geen ruimte in.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub screen_switcher: bool,
     pub pages: Vec<ConsolePage>,
 }
 
@@ -280,6 +284,7 @@ pub mod tests {
             texture_opacity: default_opacity(),
             texture_scale: default_scale(),
             custom_texture: None,
+            screen_switcher: false,
             pages: vec![ConsolePage {
                 id: "main".into(),
                 name: "Hoofdscherm".into(),

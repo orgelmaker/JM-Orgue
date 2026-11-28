@@ -305,12 +305,13 @@
       <div class="builder-stage">
         <div class="stage-heading"><span>{preview ? $t('console_builder.preview_mode') : $t('console_builder.design_mode')}</span><span>{page.width} × {page.height}</span></div>
         {#if !preview}<div class="canvas-tools"><label><input type="checkbox" bind:checked={snapGuides}>{$t('console_builder.snap_guides')}</label><span>{$t('console_builder.snap_hint')}</span><button type="button" class="btn btn-ghost btn-sm" on:click={() => wideCanvas = !wideCanvas}>{$t(wideCanvas ? 'console_builder.normal_canvas' : 'console_builder.wide_canvas')}</button></div>{/if}
-        <ConsoleSurface layout={draft} {organInfo} {pageId} editing={!preview && !saving && !readingTexture} inert={preview || saving || readingTexture} {selectedId} {grid} {snapGuides}
+        <ConsoleSurface layout={draft} {organInfo} {pageId} switcher editing={!preview && !saving && !readingTexture} inert={preview || saving || readingTexture} {selectedId} {grid} {snapGuides}
           on:pageChange={e => { pageId = e.detail.pageId; selectedId = null; }}
           on:select={e => { selectedId = e.detail.elementId; }}
           on:move={e => moveElement(e.detail)} on:resize={e => resizeElement(e.detail)} />
         {#if !preview}<p class="editor-hint">{$t('console_builder.editor_hint')} {$t('console_builder.screens_hint')}</p>{/if}
         <div class="page-controls">
+          <label class="console-enabled"><input type="checkbox" checked={!!draft.screen_switcher} disabled={saving} on:change={e => mutate(layout => { if (e.target.checked) layout.screen_switcher = true; else delete layout.screen_switcher; })}><span>{$t('console_builder.screen_switcher')}</span></label>
           <label>{$t('console_builder.page_name')}<input value={page.name} maxlength="120" disabled={preview || saving} on:change={e => mutate(layout => { layout.pages.find(p => p.id === page.id).name = e.target.value; })}></label>
           {#if !preview}<button type="button" class="btn btn-secondary btn-sm" disabled={saving || draft.pages.length >= CONSOLE_MAX_PAGES} on:click={addPage}>＋ {$t('console_builder.add_page')}</button><button type="button" class="btn btn-ghost btn-sm" disabled={saving || page.elements.length > 0 || draft.pages.length <= 1} on:click={removePage}>{$t('console_builder.remove_page')}</button>{/if}
         </div>
