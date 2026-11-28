@@ -9,6 +9,12 @@
   export let selected = false;
   export let inert = false;
   const dispatch = createEventDispatcher();
+  // Treden: de vorm is een SVG (pianopedaal). Elk exemplaar heeft eigen verloop-ID's nodig.
+  $: trede = /^(trede|spoon)-/.test(element.appearance || '');
+  $: tredeHout = /-wood$/.test(element.appearance || '');
+  $: tw = element.appearance === 'trede-nickel' ? 1.35 : 1;
+  $: tredePad = `M${-7 * tw},0 L${7 * tw},0 L${8 * tw},70 C${9 * tw},92 ${24 * tw},104 ${24 * tw},128 C${24 * tw},150 ${12 * tw},162 0,162 C${-12 * tw},162 ${-24 * tw},150 ${-24 * tw},128 C${-24 * tw},104 ${-9 * tw},92 ${-8 * tw},70 Z`;
+  $: uid = String(element.id || '').replace(/[^A-Za-z0-9_-]/g, '_');
   $: missing = element.kind !== 'label' && !target;
   $: active = !editing && !!target?.active;
   $: label = element.label || target?.name || $t('console_builder.missing_control');
@@ -39,7 +45,7 @@
     <div class="console-label">{element.label}</div>
   {/if}
 {:else}
-  <button type="button" class="console-control {element.appearance}" class:active class:editing class:selected class:missing
+  <button type="button" class="console-control {element.appearance}" class:trede class:active class:editing class:selected class:missing
     class:reed={target?.group === 'tong'} class:coupler={element.kind === 'coupler'}
     disabled={!editing && (missing || inert)} aria-label={description} aria-pressed={editing ? selected : active}
     use:playLearn={!editing && !inert && !missing}
@@ -47,6 +53,25 @@
     on:click={() => dispatch('activate')} on:pointerdown={(event) => dispatch('pointerdown', event)}
     on:keydown={(event) => dispatch('keydown', event)}>
     <span class="control-mount" aria-hidden="true"></span>
+    {#if trede}
+      <svg class="trede-svg" viewBox="-50 -8 100 184" preserveAspectRatio="xMidYMin meet" aria-hidden="true">
+        <defs>
+          <linearGradient id="tm-{uid}" x1="0" x2="1"><stop offset="0" style="stop-color:var(--t-c)"/><stop offset=".32" style="stop-color:var(--t-a)"/><stop offset=".62" style="stop-color:var(--t-b)"/><stop offset="1" style="stop-color:var(--t-c)"/></linearGradient>
+          <linearGradient id="th-{uid}" x1="0" x2="1"><stop offset="0" stop-color="#3a1e0c"/><stop offset=".35" stop-color="#b9834f"/><stop offset="1" stop-color="#6f4222"/></linearGradient>
+          <filter id="ts-{uid}" x="-60%" y="-20%" width="220%" height="150%"><feGaussianBlur stdDeviation="5"/></filter>
+        </defs>
+        <path d="M{-11 * tw},-6 h{22 * tw} v40 h20 v16 h{-20 - 22 * tw} Z" fill="#0b0705" stroke="#00000088"/>
+        <path class="trede-schaduw" d={tredePad} fill="#000" filter="url(#ts-{uid})"/>
+        <g class="trede-arm">
+          <path d={tredePad} fill="url(#tm-{uid})" stroke="#0008"/>
+          <path d="M{-3 * tw},6 L{-3.5 * tw},70 C{-4 * tw},92 {-17 * tw},106 {-17 * tw},128" fill="none" stroke="#fff" stroke-opacity=".5" stroke-width="2.2" stroke-linecap="round"/>
+          {#if tredeHout}
+            <path d="M-20,112 C-20,100 -12,96 0,96 C12,96 20,100 20,112 L20,132 C20,150 11,157 0,157 C-11,157 -20,150 -20,132 Z" fill="url(#th-{uid})" stroke="#2a1408"/>
+            <path d="M-13,108 v34 M-5,103 v50 M4,103 v50 M12,108 v34" stroke="#2a140855"/>
+          {/if}
+        </g>
+      </svg>
+    {/if}
     <span class="control-face"><span class="control-name">{label}</span>{#if pitch}<span class="control-pitch">{pitch}</span>{/if}</span>
     <span class="control-light" aria-hidden="true"></span>
     {#if missing}<span class="missing-mark" aria-hidden="true">!</span>{/if}
@@ -128,17 +153,24 @@
   .drawknob-ebony.reed .control-name,.drawknob-rosewood.reed .control-name,.oval-porcelain.reed .control-name,.stopkey.reed .control-name,.square-wood.reed .control-name{color:#812319}
   .lit.reed .control-name{color:#ffb9a9}
   .lit.reed.active .control-name{color:#7a1f12}
-  /* Lepels (cuillères, Cavaillé-Coll): porseleinen naamplaatje met eronder een voettrede. Aan = omlaag en opzij gehaakt. */
-  .spoon-brass,.spoon-iron,.spoon-wood{padding:0;border:none;background:transparent;box-shadow:none;--spoon-a:#f1dc9c;--spoon-b:#a57c2e;--spoon-c:#5b3f12}
-  .spoon-iron{--spoon-a:#8d9499;--spoon-b:#3a3f44;--spoon-c:#121416}
-  .spoon-wood{--spoon-a:#c08a55;--spoon-b:#7a4826;--spoon-c:#3a1d0c}
-  .spoon-brass .control-face,.spoon-iron .control-face,.spoon-wood .control-face{inset:0 3% auto 3%;height:40%;border-radius:4px;border:1px solid #b8b29a;background:linear-gradient(170deg,#fffffb,#f0ecdd 60%,#d9d2ba);color:#23241f;box-shadow:inset 0 1px 2px #fff,inset 0 -2px 3px #8a7d5a44,0 2px 3px #0009;text-shadow:0 1px #fff9;padding:2px 3px;font-family:Georgia,serif}
-  .spoon-brass .control-mount,.spoon-iron .control-mount,.spoon-wood .control-mount{position:absolute;left:50%;bottom:3%;width:46%;height:30%;border-radius:50%;background:radial-gradient(ellipse at 38% 28%,var(--spoon-a),var(--spoon-b) 62%,var(--spoon-c));box-shadow:0 5px 6px #000a,inset 0 2px 2px #ffffff55,inset 0 -3px 4px #0007;transform:translateX(-50%);transition:transform 140ms,box-shadow 140ms}
-  .spoon-brass .control-mount::before,.spoon-iron .control-mount::before,.spoon-wood .control-mount::before{content:"";position:absolute;left:39%;width:22%;bottom:78%;height:78%;border-radius:3px;background:linear-gradient(90deg,var(--spoon-c),var(--spoon-a) 45%,var(--spoon-b));box-shadow:0 2px 3px #0008}
-  .spoon-brass.active .control-mount,.spoon-iron.active .control-mount,.spoon-wood.active .control-mount{transform:translate(-22%,14%) rotate(9deg);box-shadow:0 2px 3px #000b,inset 0 2px 2px #ffffff55,inset 0 -3px 4px #0007}
-  .spoon-brass.active .control-face,.spoon-iron.active .control-face,.spoon-wood.active .control-face{border-color:var(--console-light,#ffd36b);box-shadow:inset 0 1px 2px #fff,0 0 0 2px var(--console-light,#ffd36b),0 0 9px var(--console-light,#ffd36b)}
-  .spoon-brass .control-light,.spoon-iron .control-light,.spoon-wood .control-light{display:none}
-  .spoon-brass.reed .control-name,.spoon-iron.reed .control-name,.spoon-wood.reed .control-name{color:#812319}
+  /* Treden (pianopedaalvorm, Cavaillé-Coll): naamplaatje boven, trede uit een sleuf. Aan = ingetrapt en opzij gehaakt.
+     spoon-* is de eerste versie uit 0.9.67 en tekent nu als de overeenkomstige trede. */
+  .trede{padding:0;border:none;background:transparent;box-shadow:none;--t-a:#8f959b;--t-b:#4a4f55;--t-c:#15171a}
+  .trede-brass,.spoon-brass{--t-a:#fff0b8;--t-b:#c79a3c;--t-c:#5d4010}
+  .trede-nickel{--t-a:#f4f6f7;--t-b:#a9b0b6;--t-c:#4d5459}
+  .trede .control-mount{display:none}
+  .trede .control-face{inset:0 2% auto 2%;height:29%;border-radius:4px;border:1px solid #a9a28a;background:linear-gradient(#fffffb,#ddd6bf);color:#23241f;box-shadow:inset 0 1px 2px #fff,0 2px 3px #0009;text-shadow:0 1px #fff9;padding:1px 3px;font-family:Georgia,serif;gap:0}
+  .trede-brass .control-face,.spoon-brass .control-face{border-radius:50%;border:3px solid #b8902f}
+  .trede-nickel .control-face{border-color:#6d5215;background:linear-gradient(135deg,#f6e2a0,#c79a3c 50%,#f0d68c);color:#2b1f06;text-shadow:0 1px #fff5}
+  .trede .control-name{font-size:clamp(calc(10px / var(--console-scale,1)),.8em,calc(14px / var(--console-scale,1)));font-weight:700}
+  .trede-svg{position:absolute;left:0;right:0;top:35%;width:100%;height:65%;overflow:visible;pointer-events:none}
+  .trede-arm,.trede-schaduw{transition:transform 140ms,opacity 140ms}
+  .trede.active .trede-arm{transform:translate(15px,24px)}
+  .trede-schaduw{opacity:.55;transform:translate(9px,13px)}
+  .trede.active .trede-schaduw{opacity:.6;transform:translate(19px,30px)}
+  .trede .control-light{top:30.5%;bottom:auto;left:calc(50% - 4px);width:8px;height:8px;border-radius:50%}
+  .trede.active .control-face{border-color:var(--console-light,#ffd36b)}
+  .trede.reed .control-name{color:#812319}
   .coupler .control-name{font-size:clamp(calc(11px / var(--console-scale,1)),.9em,calc(15px / var(--console-scale,1)))}
   .console-control.missing{opacity:.58;filter:saturate(.15)}
   .console-control:disabled{cursor:default}

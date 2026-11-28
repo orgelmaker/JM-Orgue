@@ -6,7 +6,7 @@
   import { alignConsoleArray, consoleArray } from '../lib/consoleSnap.js';
   import { boundedConsoleElement, cloneConsoleLayout, consoleTargets, consoleLayoutError,
     defaultConsoleLayout, missingConsoleTargets, nextConsoleId, normalizeConsoleLayout,
-    CONSOLE_APPEARANCES, CONSOLE_THEMES, CONSOLE_TEXTURES, CONSOLE_TEXTURE_MAX_BYTES, CONSOLE_MAX_PAGES, consoleCustomTextureError, roundConsoleAppearance, spoonConsoleAppearance, couplersAsSpoons } from '../lib/consoleLayout.js';
+    CONSOLE_APPEARANCES, CONSOLE_THEMES, CONSOLE_TEXTURES, CONSOLE_TEXTURE_MAX_BYTES, CONSOLE_MAX_PAGES, consoleCustomTextureError, roundConsoleAppearance, tredeConsoleAppearance, legacyConsoleAppearance, couplersAsTreden } from '../lib/consoleLayout.js';
 
   export let organInfo = null;
   export let initialLayout = null;
@@ -203,10 +203,10 @@
       p.elements = p.elements.map(e => patches[e.id] ? boundedConsoleElement(e, p, patches[e.id]) : e);
     });
   }
-  // Koppels als lepels onderaan het scherm (Cavaillé-Coll). De gekozen lepelvariant geldt; anders messing.
-  function couplersToSpoons() {
-    const appearance = spoonConsoleAppearance(selected?.appearance) ? selected.appearance : 'spoon-brass';
-    mutate(layout => layout.pages.forEach(p => { p.elements = couplersAsSpoons(p, appearance).map(e => boundedConsoleElement(e, p)); }));
+  // Koppels als treden onderaan het scherm (Cavaillé-Coll). Een geselecteerde trede bepaalt de uitvoering; anders gesmeed ijzer.
+  function couplersToTreden() {
+    const appearance = tredeConsoleAppearance(selected?.appearance) && !legacyConsoleAppearance(selected.appearance) ? selected.appearance : 'trede-iron';
+    mutate(layout => layout.pages.forEach(p => { p.elements = couplersAsTreden(p, appearance).map(e => boundedConsoleElement(e, p)); }));
   }
   function removeSelected() {
     if (!selected) return;
@@ -272,7 +272,7 @@
       <label>{$t('console_builder.name')}<input value={draft.name} maxlength="120" disabled={saving || preview} on:change={e => mutate(layout => { layout.name = e.target.value; })}></label>
       <label>{$t('console_builder.theme')}<select value={draft.theme} disabled={saving} on:change={e => mutate(layout => { layout.theme = e.target.value; })}>{#each CONSOLE_THEMES as theme}<option value={theme}>{$t(`console_builder.${theme}`)}</option>{/each}</select></label>
       <button type="button" class="btn btn-secondary btn-sm" disabled={saving || preview} title={$t('console_builder.reset_hint')} on:click={arrangeAgain}>{$t('console_builder.reset')}</button>
-      <button type="button" class="btn btn-secondary btn-sm" disabled={saving || preview} title={$t('console_builder.couplers_spoons_hint')} on:click={couplersToSpoons}>{$t('console_builder.couplers_spoons')}</button>
+      <button type="button" class="btn btn-secondary btn-sm" disabled={saving || preview} title={$t('console_builder.couplers_treden_hint')} on:click={couplersToTreden}>{$t('console_builder.couplers_treden')}</button>
     </div>
 
     <div class="builder-materials">
@@ -330,7 +330,7 @@
             <div class="selection-name"><span>{selected.kind === 'label' ? $t('console_builder.label_element') : (selectedTarget?.division || $t('console_builder.missing_control'))}</span><strong>{selected.label || selectedTarget?.name || selected.target_id}</strong></div>
             <label>{$t('console_builder.label')}<input value={selected.label} maxlength="160" placeholder={$t('console_builder.original_label')} disabled={saving} on:change={e => editSelected({ label: e.target.value })}></label>
             {#if selected.kind !== 'label'}
-              <label>{$t('console_builder.appearance')}<select value={selected.appearance} disabled={saving} on:change={e => editSelected(appearancePatch(selected, e.target.value))}>{#each CONSOLE_APPEARANCES as appearance}<option value={appearance}>{$t(`console_builder.${appearance.replaceAll('-', '_')}`)}</option>{/each}</select></label>
+              <label>{$t('console_builder.appearance')}<select value={selected.appearance} disabled={saving} on:change={e => editSelected(appearancePatch(selected, e.target.value))}>{#each CONSOLE_APPEARANCES.filter(a => !legacyConsoleAppearance(a) || a === selected.appearance) as appearance}<option value={appearance}>{$t(`console_builder.${appearance.replaceAll('-', '_')}`)}</option>{/each}</select></label>
               <button type="button" class="btn btn-secondary btn-sm" disabled={saving} on:click={() => { const appearance = selected.appearance; mutate(layout => layout.pages.forEach(p => { p.elements = p.elements.map(e => e.kind === 'label' ? e : boundedConsoleElement(e, p, appearancePatch(e, appearance))); })); }}>{$t('console_builder.apply_style')}</button>
             {/if}
             <div class="geometry-fields">
